@@ -211,6 +211,17 @@ show_module_menu() {
     echo ""
 }
 
+ensure_network_exists() {
+    local network_name="orkestra-network"
+    if ! docker network inspect "$network_name" > /dev/null 2>&1; then
+        echo -e "${YELLOW}  ⟳ Creating Docker network: $network_name${NC}"
+        docker network create "$network_name"
+        echo -e "${GREEN}  ✓ Network created${NC}"
+    else
+        echo -e "${GREEN}  ✓ Network $network_name exists${NC}"
+    fi
+}
+
 # ============================================
 # Operation: Deploy
 # ============================================
@@ -296,6 +307,9 @@ execute_deploy() {
         exit 1
     fi
     echo -e "${GREEN}  ✓ Docker is running${NC}"
+
+    # Ensure Docker network exists
+    ensure_network_exists
 
     if [ "$ENV" = "production" ]; then
         if [ "$EUID" -eq 0 ]; then
