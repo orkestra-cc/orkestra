@@ -157,7 +157,7 @@ const runMigration = async (direction = 'up') => {
 
   // Get MongoDB connection URL from environment or default
   const mongoUrl = process.env.MONGODB_URL || 'mongodb://localhost:27017';
-  const dbName = process.env.MONGODB_DATABASE || 'erp';
+  const dbName = process.env.MONGODB_DATABASE || 'orkestra';
 
   const client = new MongoClient(mongoUrl);
 

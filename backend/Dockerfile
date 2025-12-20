@@ -7,8 +7,8 @@
 # - production: Optimized binary (used by docker-compose.prod.yml and staging)
 #
 # Build commands:
-#   Development: docker build --target development -t erp-backend:dev .
-#   Production:  docker build --target production -t erp-backend:prod .
+#   Development: docker build --target development -t orkestra-backend:dev .
+#   Production:  docker build --target production -t orkestra-backend:prod .
 #
 # ============================================
 

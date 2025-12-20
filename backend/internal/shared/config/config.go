@@ -127,8 +127,8 @@ func Load() (*Config, error) {
 	}
 
 	config.Database = DatabaseConfig{
-		MongoURI:        getEnv("MONGO_URI", "mongodb://localhost:27017/erp"),
-		DatabaseName:    getEnv("MONGO_DATABASE", "erp"),
+		MongoURI:        getEnv("MONGO_URI", "mongodb://localhost:27017/orkestra"),
+		DatabaseName:    getEnv("MONGO_DATABASE", "orkestra"),
 		MaxPoolSize:     getEnvAsUint64("MONGO_MAX_POOL_SIZE", 100),
 		MinPoolSize:     getEnvAsUint64("MONGO_MIN_POOL_SIZE", 10),
 		MaxConnIdleTime: getEnvAsDuration("MONGO_MAX_CONN_IDLE_TIME", "5m"),
@@ -161,7 +161,7 @@ func Load() (*Config, error) {
 		JWT: jwtConfig,
 		Cookie: CookieConfig{
 			Secret:   getEnv("COOKIE_SECRET", "default-cookie-secret"),
-			Name:     getEnv("COOKIE_NAME", "erp_cookie"),
+			Name:     getEnv("COOKIE_NAME", "orkestra_cookie"),
 			Domain:   getEnv("COOKIE_DOMAIN", ""),
 			HttpOnly: getEnvAsBool("COOKIE_HTTP_ONLY", true),
 			Secure:   getEnvAsBool("COOKIE_SECURE", false), // Default false for development

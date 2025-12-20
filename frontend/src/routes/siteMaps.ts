@@ -1234,7 +1234,7 @@ export const developmentRoutes: RouteGroup = {
   ]
 };
 
-// Route ERP di Produzione - organizzate per livello di accesso del ruolo utente
+// Route Orkestra di Produzione - organizzate per livello di accesso del ruolo utente
 export const operatorRoutes: RouteGroup = {
   label: 'Operatori',
   roles: ['operator'], // Tutti gli utenti autenticati ed autorizzati

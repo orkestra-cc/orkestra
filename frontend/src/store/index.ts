@@ -44,7 +44,7 @@ export const store = configureStore({
     return middleware;
   },
   devTools: process.env.NODE_ENV === 'development' && {
-    name: 'ERP Redux Store',
+    name: 'Orkestra Redux Store',
     maxAge: 50,
     serialize: {
       options: {

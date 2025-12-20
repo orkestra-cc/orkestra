@@ -1,5 +1,5 @@
 /**
- * React ERP Hooks
+ * React Orkestra Hooks
  *
  * Redux + RTK Query hooks for data fetching and state management.
  * All server state managed through RTK Query, client state through Redux.

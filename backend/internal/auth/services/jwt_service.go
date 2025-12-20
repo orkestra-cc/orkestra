@@ -56,8 +56,8 @@ func NewJWTService(privateKey *rsa.PrivateKey, publicKey *rsa.PublicKey) JWTServ
 		publicKey:     publicKey,
 		accessExpiry:  15 * time.Minute,    // Short-lived access tokens
 		refreshExpiry: 30 * 24 * time.Hour, // Long-lived refresh tokens
-		issuer:        "erp",
-		audience:      "erp-api",
+		issuer:        "orkestra",
+		audience:      "orkestra-api",
 	}
 }
 

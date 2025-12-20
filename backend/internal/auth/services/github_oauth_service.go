@@ -149,7 +149,7 @@ func (s *githubOAuthService) GetUserInfo(ctx context.Context, accessToken string
 
 	req.Header.Set("Authorization", "Bearer "+accessToken)
 	req.Header.Set("Accept", "application/vnd.github.v3+json")
-	req.Header.Set("User-Agent", "ERP-Backend/1.0")
+	req.Header.Set("User-Agent", "Orkestra-Backend/1.0")
 
 	resp, err := s.httpClient.Do(req)
 	if err != nil {
@@ -214,7 +214,7 @@ func (s *githubOAuthService) getPrimaryEmail(ctx context.Context, accessToken st
 
 	req.Header.Set("Authorization", "Bearer "+accessToken)
 	req.Header.Set("Accept", "application/vnd.github.v3+json")
-	req.Header.Set("User-Agent", "ERP-Backend/1.0")
+	req.Header.Set("User-Agent", "Orkestra-Backend/1.0")
 
 	resp, err := s.httpClient.Do(req)
 	if err != nil {
@@ -280,7 +280,7 @@ func (s *githubOAuthService) RevokeToken(ctx context.Context, token string) erro
 	req.SetBasicAuth(s.config.ClientID, s.config.ClientSecret)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/vnd.github.v3+json")
-	req.Header.Set("User-Agent", "ERP-Backend/1.0")
+	req.Header.Set("User-Agent", "Orkestra-Backend/1.0")
 
 	resp, err := s.httpClient.Do(req)
 	if err != nil {

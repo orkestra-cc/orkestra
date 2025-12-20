@@ -1,6 +1,6 @@
 {
   "status": "healthy",
-  "service": "erp-frontend",
+  "service": "orkestra-frontend",
   "timestamp": "2025-09-22T15:37:00.000Z",
   "version": "0.3.0"
 }

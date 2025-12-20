@@ -8,7 +8,7 @@
 
 ## Module Purpose
 
-The scripts module contains **automation scripts, development tools, and utilities** for managing the ERP monorepo lifecycle and development workflows.
+The scripts module contains **automation scripts, development tools, and utilities** for managing the Orkestra monorepo lifecycle and development workflows.
 
 - **Primary Role**: Development environment automation and CI/CD pipeline support
 - **System Integration**: Orchestrates build, test, and deployment processes across all modules
@@ -26,7 +26,7 @@ The scripts module contains **automation scripts, development tools, and utiliti
 
 ## Overview
 
-This module contains automation scripts, development tools, and utilities for managing the ERP monorepo. All scripts should be idempotent and include proper error handling.
+This module contains automation scripts, development tools, and utilities for managing the Orkestra monorepo. All scripts should be idempotent and include proper error handling.
 
 ## 🚫 CRITICAL: Development Workflow Change
 
@@ -73,7 +73,7 @@ See [docker/CLAUDE.md](../docker/CLAUDE.md) for Docker configuration details.
 #!/bin/bash
 set -e
 
-echo "Setting up erp development environment..."
+echo "Setting up orkestra development environment..."
 
 # Check prerequisites
 command -v docker >/dev/null 2>&1 || { echo "Docker is required but not installed. Aborting." >&2; exit 1; }
@@ -198,18 +198,18 @@ set -e
 
 VERSION=${1:-latest}
 
-echo "Building erp services (version: $VERSION)..."
+echo "Building orkestra services (version: $VERSION)..."
 
 # Build backend services
 for service in backend/*/; do
     service_name=$(basename "$service")
     echo "Building $service_name..."
-    docker build -t erp/$service_name:$VERSION -f $service/Dockerfile $service
+    docker build -t orkestra/$service_name:$VERSION -f $service/Dockerfile $service
 done
 
 # Build frontend
 echo "Building frontend..."
-docker build -t erp/frontend:$VERSION -f frontend/Dockerfile frontend
+docker build -t orkestra/frontend:$VERSION -f frontend/Dockerfile frontend
 
 echo "Build complete!"
 ```
@@ -243,7 +243,7 @@ fi
 #!/bin/bash
 set -e
 
-MONGO_URI=${MONGO_URI:-"mongodb://localhost:27017/erp"}
+MONGO_URI=${MONGO_URI:-"mongodb://localhost:27017/orkestra"}
 
 echo "Running database migrations..."
 
@@ -251,7 +251,7 @@ echo "Running database migrations..."
 for migration in migrations/mongo/*.js; do
     if [ -f "$migration" ]; then
         echo "Applying migration: $(basename $migration)"
-        docker exec erp-mongo mongosh $MONGO_URI < $migration
+        docker exec orkestra-mongo mongosh $MONGO_URI < $migration
     fi
 done
 
@@ -259,7 +259,7 @@ done
 for migration in migrations/timescale/*.sql; do
     if [ -f "$migration" ]; then
         echo "Applying migration: $(basename $migration)"
-        docker exec erp-timescale psql -U postgres -d erp_metrics -f $migration
+        docker exec orkestra-timescale psql -U postgres -d orkestra_metrics -f $migration
     fi
 done
 
@@ -271,21 +271,21 @@ echo "Migrations complete!"
 #!/bin/bash
 set -e
 
-MONGO_URI=${MONGO_URI:-"mongodb://localhost:27017/erp"}
+MONGO_URI=${MONGO_URI:-"mongodb://localhost:27017/orkestra"}
 
 echo "Seeding database with test data..."
 
 # Seed users
-docker exec erp-mongo mongosh $MONGO_URI --eval '
+docker exec orkestra-mongo mongosh $MONGO_URI --eval '
 db.users.insertMany([
     {
-        email: "admin@erp.com",
+        email: "admin@orkestra.com",
         name: "Admin User",
         roles: ["admin"],
         created_at: new Date()
     },
     {
-        email: "operator@erp.com",
+        email: "operator@orkestra.com",
         name: "Test Operator",
         roles: ["operator"],
         created_at: new Date()
@@ -294,7 +294,7 @@ db.users.insertMany([
 '
 
 # Seed vehicles
-docker exec erp-mongo mongosh $MONGO_URI --eval '
+docker exec orkestra-mongo mongosh $MONGO_URI --eval '
 db.vehicles.insertMany([
     {
         registration_number: "ABC123",
@@ -344,9 +344,9 @@ export VERSION=$VERSION
 # Push Docker images
 echo "Pushing Docker images..."
 for service in auth user operator tracking task reporting; do
-    docker push erp/$service:$VERSION
+    docker push orkestra/$service:$VERSION
 done
-docker push erp/frontend:$VERSION
+docker push orkestra/frontend:$VERSION
 
 # Deploy using docker-compose
 echo "Deploying with Docker Compose to $ENVIRONMENT..."
@@ -628,16 +628,16 @@ echo "Creating backup at $BACKUP_DIR..."
 mkdir -p $BACKUP_DIR
 
 # Backup MongoDB
-docker exec erp-mongo mongodump \
+docker exec orkestra-mongo mongodump \
     --archive=$BACKUP_DIR/mongo.archive \
     --gzip
 
 # Backup Redis
-docker exec erp-redis redis-cli --rdb $BACKUP_DIR/redis.rdb
+docker exec orkestra-redis redis-cli --rdb $BACKUP_DIR/redis.rdb
 
 # Backup TimescaleDB
-docker exec erp-timescale pg_dump \
-    -U postgres -d erp_metrics \
+docker exec orkestra-timescale pg_dump \
+    -U postgres -d orkestra_metrics \
     | gzip > $BACKUP_DIR/timescale.sql.gz
 
 # Upload to S3 (if configured)
@@ -656,21 +656,21 @@ echo "Backup complete!"
 echo "Waiting for services to be ready..."
 
 # Wait for MongoDB
-until docker exec erp-mongo mongosh --eval "db.adminCommand('ping')" &>/dev/null; do
+until docker exec orkestra-mongo mongosh --eval "db.adminCommand('ping')" &>/dev/null; do
     echo "Waiting for MongoDB..."
     sleep 2
 done
 echo "MongoDB is ready!"
 
 # Wait for Redis
-until docker exec erp-redis redis-cli ping &>/dev/null; do
+until docker exec orkestra-redis redis-cli ping &>/dev/null; do
     echo "Waiting for Redis..."
     sleep 2
 done
 echo "Redis is ready!"
 
 # Wait for TimescaleDB
-until docker exec erp-timescale pg_isready -U postgres &>/dev/null; do
+until docker exec orkestra-timescale pg_isready -U postgres &>/dev/null; do
     echo "Waiting for TimescaleDB..."
     sleep 2
 done

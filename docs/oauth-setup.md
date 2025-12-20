@@ -6,7 +6,7 @@ This guide will walk you through setting up OAuth 2.0 authentication using Googl
 
 - Access to Google Cloud Console
 - Apple Developer account (for Apple Sign In)
-- ERP backend running on your domain
+- Orkestra backend running on your domain
 
 ## Google OAuth Setup
 
@@ -28,7 +28,7 @@ This guide will walk you through setting up OAuth 2.0 authentication using Googl
 1. Go to **APIs & Services** → **OAuth consent screen**
 2. Choose **External** user type (unless for internal organization)
 3. Fill in the required information:
-   - **App name**: erp
+   - **App name**: Orkestra
    - **User support email**: Your support email
    - **App logo**: Upload your logo (optional)
    - **Application home page**: `https://yourdomain.com`
@@ -46,7 +46,7 @@ This guide will walk you through setting up OAuth 2.0 authentication using Googl
 2. Click **Create Credentials** → **OAuth client ID**
 3. Select **Web application** as the application type
 4. Configure:
-   - **Name**: erp Web Client
+   - **Name**: Orkestra Web Client
    - **Authorized JavaScript origins**:
      - `https://yourdomain.com`
      - `http://localhost:8080` (for development)
@@ -82,8 +82,8 @@ This guide will walk you through setting up OAuth 2.0 authentication using Googl
 3. Select **App IDs** and click **Continue**
 4. Select **App** and click **Continue**
 5. Fill in:
-   - **Description**: erp
-   - **Bundle ID**: Choose **Explicit** and enter `com.yourdomain.erp`
+   - **Description**: Orkestra
+   - **Bundle ID**: Choose **Explicit** and enter `com.yourdomain.orkestra`
 6. Under **Capabilities**, enable:
    - **Sign In with Apple**
 7. Click **Continue** and **Register**
@@ -93,8 +93,8 @@ This guide will walk you through setting up OAuth 2.0 authentication using Googl
 1. In **Identifiers**, click **+** button
 2. Select **Services IDs** and click **Continue**
 3. Fill in:
-   - **Description**: erp Web Service
-   - **Identifier**: `com.yourdomain.erp.web`
+   - **Description**: Orkestra Web Service
+   - **Identifier**: `com.yourdomain.orkestra.web`
 4. Click **Continue** and **Register**
 5. Click on the created Service ID to configure
 6. Enable **Sign In with Apple**
@@ -111,7 +111,7 @@ This guide will walk you through setting up OAuth 2.0 authentication using Googl
 ### Step 4: Create Private Key
 
 1. Navigate to **Keys** → **+** button
-2. Enter a **Key Name**: erp Auth Key
+2. Enter a **Key Name**: Orkestra Auth Key
 3. Enable **Sign In with Apple**
 4. Click **Continue** and **Register**
 5. **Download the private key** (`.p8` file)
@@ -123,7 +123,7 @@ This guide will walk you through setting up OAuth 2.0 authentication using Googl
 You'll need:
 
 - **Team ID**: Found in your Apple Developer account (top right corner)
-- **Service ID**: The identifier created in Step 3 (e.g., `com.yourdomain.erp.web`)
+- **Service ID**: The identifier created in Step 3 (e.g., `com.yourdomain.orkestra.web`)
 - **Key ID**: From Step 4
 - **Private Key**: The `.p8` file downloaded in Step 4
 
@@ -141,7 +141,7 @@ GOOGLE_REDIRECT_URI=https://yourdomain.com/auth/google/callback
 
 # Apple Sign In
 APPLE_TEAM_ID=your-team-id
-APPLE_SERVICE_ID=com.yourdomain.erp.web
+APPLE_SERVICE_ID=com.yourdomain.orkestra.web
 APPLE_KEY_ID=your-key-id
 APPLE_PRIVATE_KEY_PATH=/path/to/AuthKey_XXXXXX.p8
 APPLE_REDIRECT_URI=https://yourdomain.com/auth/apple/callback
@@ -159,12 +159,12 @@ Update your frontend environment variables:
 # .env.production
 VITE_API_URL=https://yourdomain.com
 VITE_GOOGLE_CLIENT_ID=your-google-client-id
-VITE_APPLE_CLIENT_ID=com.yourdomain.erp.web
+VITE_APPLE_CLIENT_ID=com.yourdomain.orkestra.web
 
 # .env.development
 VITE_API_URL=http://localhost:3000
 VITE_GOOGLE_CLIENT_ID=your-google-client-id
-VITE_APPLE_CLIENT_ID=com.yourdomain.erp.web
+VITE_APPLE_CLIENT_ID=com.yourdomain.orkestra.web
 ```
 
 ### Mobile Configuration
@@ -258,7 +258,7 @@ For additional help:
 
 - Google OAuth: [Google Identity Platform Documentation](https://developers.google.com/identity)
 - Apple Sign In: [Sign in with Apple Documentation](https://developer.apple.com/sign-in-with-apple/)
-- erp Issues: Contact your system administrator or development team
+- Orkestra Issues: Contact your system administrator or development team
 
 ## Checklist
 

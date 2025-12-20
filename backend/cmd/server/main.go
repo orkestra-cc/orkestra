@@ -266,7 +266,7 @@ func main() {
 	router.Use(middleware.Recoverer)
 	router.Use(middleware.Timeout(60 * time.Second))
 
-	apiConfig := huma.DefaultConfig("ERP API", "1.0.0")
+	apiConfig := huma.DefaultConfig("Orkestra API", "1.0.0")
 	apiConfig.DocsPath = ""
 	apiConfig.Components.SecuritySchemes = map[string]*huma.SecurityScheme{
 		"bearerAuth": {
@@ -439,7 +439,7 @@ func main() {
 		w.Write([]byte(`<!doctype html>
 <html>
 <head>
-    <title>ERP API Documentation</title>
+    <title>Orkestra API Documentation</title>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <style>

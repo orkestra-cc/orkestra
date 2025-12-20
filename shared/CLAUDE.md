@@ -8,7 +8,7 @@
 
 ## Module Purpose
 
-The shared module contains **unified data models, types, and interfaces** used across all ERP services and applications to ensure consistency and type safety.
+The shared module contains **unified data models, types, and interfaces** used across all Orkestra services and applications to ensure consistency and type safety.
 
 - **Primary Role**: Single source of truth for data structures and business rules
 - **System Integration**: Provides type definitions for backend, frontend, and mobile applications
@@ -26,7 +26,7 @@ The shared module contains **unified data models, types, and interfaces** used a
 
 ## Overview
 
-This module contains shared data models, types, and interfaces used across all ERP services and applications. All models must be kept in sync across backend (Go), frontend (TypeScript), and mobile (Dart).
+This module contains shared data models, types, and interfaces used across all Orkestra services and applications. All models must be kept in sync across backend (Go), frontend (TypeScript), and mobile (Dart).
 
 ## Core Data Models
 

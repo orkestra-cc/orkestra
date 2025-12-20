@@ -1,6 +1,6 @@
 # Role-Based Navigation System
 
-This document describes the implementation of role-based visibility for sitemap and routes in the ERP frontend application.
+This document describes the implementation of role-based visibility for sitemap and routes in the Orkestra frontend application.
 
 ## Overview
 
@@ -185,7 +185,7 @@ The system integrates with existing authentication:
 
 ### Development vs Production
 - Development: Shows all route groups including development tools
-- Production: Only shows production ERP route groups
+- Production: Only shows production Orkestra route groups
 - Test components only render in development mode
 
 ### Feature Flags

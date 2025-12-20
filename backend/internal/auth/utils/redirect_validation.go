@@ -23,14 +23,14 @@ func DefaultRedirectURIConfig() *RedirectURIConfig {
 			"http://localhost:3000/auth/oauth/github/callback",
 			"http://localhost:8080/auth/callback", // Frontend dev server
 			// Mobile app deep links
-			"com.erp://oauth/callback",
-			"com.erp.app://oauth/callback",
+			"com.orkestra://oauth/callback",
+			"com.orkestra.app://oauth/callback",
 		},
 		AllowedSchemes: []string{
 			"http",
 			"https",
-			"com.erp",     // Mobile app scheme
-			"com.erp.app", // Alternative mobile app scheme
+			"com.orkestra",     // Mobile app scheme
+			"com.orkestra.app", // Alternative mobile app scheme
 		},
 		AllowLocalhost: true, // Allow localhost for development
 	}

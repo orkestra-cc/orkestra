@@ -1,4 +1,4 @@
-# ERP Project Management
+# Orkestra Project Management
 .PHONY: help infra-up infra-down infra-restart infra-logs infra-status clean volumes-clean
 .PHONY: backend-run backend-dev backend-build backend-test backend-clean backend-deps
 .PHONY: frontend-run frontend-dev frontend-build frontend-test frontend-clean frontend-deps frontend-preview frontend-type-check
@@ -6,7 +6,7 @@
 
 # Default target
 help:
-	@echo "ERP Project Management Commands:"
+	@echo "Orkestra Project Management Commands:"
 	@echo ""
 	@echo "Quick Start:"
 	@echo "  make dev              - Start everything in development mode (infra + backend)"
@@ -52,17 +52,17 @@ help:
 
 # Infrastructure management
 infra-up:
-	@echo "Starting ERP infrastructure..."
+	@echo "Starting Orkestra infrastructure..."
 	docker compose -f docker/docker-compose.yml up -d
 	@echo "Infrastructure is starting. Run 'make infra-status' to check status."
 
 infra-down:
-	@echo "Stopping ERP infrastructure..."
+	@echo "Stopping Orkestra infrastructure..."
 	docker compose -f docker/docker-compose.yml down
 	@echo "Infrastructure stopped."
 
 infra-restart:
-	@echo "Restarting ERP infrastructure..."
+	@echo "Restarting Orkestra infrastructure..."
 	docker compose -f docker/docker-compose.yml restart
 	@echo "Infrastructure restarted."
 
@@ -70,45 +70,45 @@ infra-logs:
 	docker compose -f docker/docker-compose.yml logs -f
 
 infra-status:
-	@echo "ERP Infrastructure Status:"
+	@echo "Orkestra Infrastructure Status:"
 	@echo "================================"
 	@docker compose -f docker/docker-compose.yml ps
 
 # Development profile (includes mailpit)
 infra-dev:
-	@echo "Starting ERP infrastructure with development tools..."
+	@echo "Starting Orkestra infrastructure with development tools..."
 	docker-compose -f docker/docker-compose.yml --profile development up -d
 	@echo "Development infrastructure is starting."
 	@echo "Mailpit UI: http://localhost:8025"
 
 # Monitoring profile (includes SigNoz)
 infra-monitoring:
-	@echo "Starting ERP infrastructure with monitoring..."
+	@echo "Starting Orkestra infrastructure with monitoring..."
 	docker compose -f docker/docker-compose.yml --profile monitoring up -d
 	@echo "Infrastructure with monitoring is starting."
 
 # Database access
 mongo-shell:
 	@echo "Connecting to MongoDB..."
-	docker exec -it erp-mongodb mongosh -u $${MONGO_ROOT_USER:-admin} -p $${MONGO_ROOT_PASSWORD:-erp_mongo_admin_2024} --authenticationDatabase admin
+	docker exec -it orkestra-mongodb mongosh -u $${MONGO_ROOT_USER:-admin} -p $${MONGO_ROOT_PASSWORD:-orkestra_mongo_admin_2024} --authenticationDatabase admin
 
 redis-cli:
 	@echo "Connecting to Redis..."
-	docker exec -it erp-redis redis-cli -a $${REDIS_PASSWORD:-erp_redis_secure_2024}
+	docker exec -it orkestra-redis redis-cli -a $${REDIS_PASSWORD:-orkestra_redis_secure_2024}
 
 # RabbitMQ Management
 rabbitmq-ui:
 	@echo "Opening RabbitMQ Management UI..."
 	@echo "URL: http://localhost:15672"
-	@echo "Username: $${RABBITMQ_USER:-erp}"
-	@echo "Password: $${RABBITMQ_PASSWORD:-erp_rmq_secure_2024}"
+	@echo "Username: $${RABBITMQ_USER:-orkestra}"
+	@echo "Password: $${RABBITMQ_PASSWORD:-orkestra_rmq_secure_2024}"
 
 # MinIO Console
 minio-ui:
 	@echo "Opening MinIO Console..."
 	@echo "URL: http://localhost:9001"
-	@echo "Username: $${MINIO_ROOT_USER:-erp_admin}"
-	@echo "Password: $${MINIO_ROOT_PASSWORD:-erp_minio_secure_2024}"
+	@echo "Username: $${MINIO_ROOT_USER:-orkestra_admin}"
+	@echo "Password: $${MINIO_ROOT_PASSWORD:-orkestra_minio_secure_2024}"
 
 # Backend Management
 backend-run:
@@ -269,9 +269,9 @@ volumes-clean:
 # Health checks
 health-check:
 	@echo "Checking infrastructure health..."
-	@docker exec erp-mongodb echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet && echo "✓ MongoDB is healthy" || echo "✗ MongoDB is not responding"
-	@docker exec erp-redis redis-cli ping > /dev/null 2>&1 && echo "✓ Redis is healthy" || echo "✗ Redis is not responding"
-	@docker exec erp-rabbitmq rabbitmq-diagnostics -q ping > /dev/null 2>&1 && echo "✓ RabbitMQ is healthy" || echo "✗ RabbitMQ is not responding"
+	@docker exec orkestra-mongodb echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet && echo "✓ MongoDB is healthy" || echo "✗ MongoDB is not responding"
+	@docker exec orkestra-redis redis-cli ping > /dev/null 2>&1 && echo "✓ Redis is healthy" || echo "✗ Redis is not responding"
+	@docker exec orkestra-rabbitmq rabbitmq-diagnostics -q ping > /dev/null 2>&1 && echo "✓ RabbitMQ is healthy" || echo "✗ RabbitMQ is not responding"
 
 # Quick start for development
 quick-start: dev
@@ -310,9 +310,9 @@ logs:
 # Docker utilities
 docker-build-backend:
 	@echo "Building backend Docker image..."
-	@cd backend && docker build -t erp-backend:latest .
-	@echo "Backend image built: erp-backend:latest"
+	@cd backend && docker build -t orkestra-backend:latest .
+	@echo "Backend image built: orkestra-backend:latest"
 
 docker-run-backend:
 	@echo "Running backend in Docker..."
-	@docker run -p 3000:3000 --env-file backend/.env --network erp-network erp-backend:latest
+	@docker run -p 3000:3000 --env-file backend/.env --network orkestra-network orkestra-backend:latest

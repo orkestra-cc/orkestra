@@ -2,7 +2,7 @@
 // Description: Adds the new 'sviluppatore' role as the highest privilege role in the system
 // Date: 2024-12-29
 
-db = db.getSiblingDB('erp');
+db = db.getSiblingDB('orkestra');
 
 // Migration configuration
 const migration = {

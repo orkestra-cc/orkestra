@@ -1,5 +1,5 @@
 # Modular Monolith Enhancement Plan
-**ORKESTRA ERP System - Microservices-Ready Architecture**
+**ORKESTRA System - Microservices-Ready Architecture**
 
 ---
 
@@ -58,8 +58,8 @@ package clients
 
 import (
 	"context"
-	"github.com/erp/backend/internal/user/models"
-	"github.com/erp/backend/internal/user/services"
+	"github.com/orkestra/backend/internal/user/models"
+	"github.com/orkestra/backend/internal/user/services"
 )
 
 // UserServiceClient defines the interface for user operations
@@ -114,8 +114,8 @@ package clients
 
 import (
 	"context"
-	"github.com/erp/backend/internal/reporting/models"
-	"github.com/erp/backend/internal/reporting/services"
+	"github.com/orkestra/backend/internal/reporting/models"
+	"github.com/orkestra/backend/internal/reporting/services"
 )
 
 // ReportingServiceClient defines the interface for reporting operations
@@ -145,9 +145,9 @@ package clients
 
 import (
 	"fmt"
-	"github.com/erp/backend/internal/shared/config"
-	"github.com/erp/backend/internal/user/services"
-	reportingServices "github.com/erp/backend/internal/reporting/services"
+	"github.com/orkestra/backend/internal/shared/config"
+	"github.com/orkestra/backend/internal/user/services"
+	reportingServices "github.com/orkestra/backend/internal/reporting/services"
 )
 
 // ServiceMode defines how services communicate
@@ -268,7 +268,7 @@ type Config struct {
 ```go
 import (
 	// ... existing imports ...
-	"github.com/erp/backend/internal/clients"
+	"github.com/orkestra/backend/internal/clients"
 )
 
 func main() {
@@ -329,13 +329,13 @@ Add Kafka infrastructure and event publishing capability without requiring consu
 ```yaml
   zookeeper:
     image: confluentinc/cp-zookeeper:7.6.0
-    container_name: erp-zookeeper
+    container_name: orkestra-zookeeper
     restart: unless-stopped
     environment:
       ZOOKEEPER_CLIENT_PORT: 2181
       ZOOKEEPER_TICK_TIME: 2000
     networks:
-      - erp-network
+      - orkestra-network
     healthcheck:
       test: ["CMD", "nc", "-z", "localhost", "2181"]
       interval: 10s
@@ -344,7 +344,7 @@ Add Kafka infrastructure and event publishing capability without requiring consu
 
   kafka:
     image: confluentinc/cp-kafka:7.6.0
-    container_name: erp-kafka
+    container_name: orkestra-kafka
     restart: unless-stopped
     depends_on:
       zookeeper:
@@ -361,7 +361,7 @@ Add Kafka infrastructure and event publishing capability without requiring consu
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true'
     networks:
-      - erp-network
+      - orkestra-network
     healthcheck:
       test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
       interval: 10s
@@ -370,7 +370,7 @@ Add Kafka infrastructure and event publishing capability without requiring consu
 
   kafka-ui:
     image: provectuslabs/kafka-ui:latest
-    container_name: erp-kafka-ui
+    container_name: orkestra-kafka-ui
     restart: unless-stopped
     depends_on:
       - kafka
@@ -381,7 +381,7 @@ Add Kafka infrastructure and event publishing capability without requiring consu
       KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
       KAFKA_CLUSTERS_0_ZOOKEEPER: zookeeper:2181
     networks:
-      - erp-network
+      - orkestra-network
 ```
 
 **Update `.env`**:
@@ -753,7 +753,7 @@ Add distributed tracing infrastructure to support future microservices debugging
 ```yaml
   jaeger:
     image: jaegertracing/all-in-one:1.52
-    container_name: erp-jaeger
+    container_name: orkestra-jaeger
     restart: unless-stopped
     ports:
       - "${JAEGER_UI_PORT:-16686}:16686"      # UI
@@ -762,7 +762,7 @@ Add distributed tracing infrastructure to support future microservices debugging
     environment:
       COLLECTOR_OTLP_ENABLED: 'true'
     networks:
-      - erp-network
+      - orkestra-network
 ```
 
 **Update `.env`**:
@@ -914,7 +914,7 @@ func (s *userService) GetUser(ctx context.Context, id string) (*models.UserManag
 ### 3.4 Update main.go with Tracing
 
 ```go
-import "github.com/erp/backend/internal/observability"
+import "github.com/orkestra/backend/internal/observability"
 
 func main() {
 	// ... existing initialization ...
@@ -995,7 +995,7 @@ syntax = "proto3";
 
 package user.v1;
 
-option go_package = "github.com/erp/backend/proto/user/v1;userv1";
+option go_package = "github.com/orkestra/backend/proto/user/v1;userv1";
 
 // UserService defines user operations
 service UserService {

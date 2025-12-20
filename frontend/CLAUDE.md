@@ -8,7 +8,7 @@
 
 ## Module Purpose
 
-The frontend serves as the **React-based web application** providing comprehensive admin dashboards and management interfaces for the ERP system.
+The frontend serves as the **React-based web application** providing comprehensive admin dashboards and management interfaces for the Orkestra system.
 
 - **Primary Role**: Web-based user interface for administrators and managers
 - **System Integration**: Consumes backend APIs and WebSocket events for real-time updates

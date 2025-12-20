@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ============================================
-# ERP System - Unified Interactive Deployment Script
+# Orkestra System - Unified Interactive Deployment Script
 # ============================================
 #
 # Purpose: Interactive deployment management for all environments
@@ -35,7 +35,7 @@ DOCKER_DIR="$PROJECT_ROOT/docker"
 show_env_menu() {
     clear
     echo -e "${BLUE}╔════════════════════════════════════════════════════╗${NC}"
-    echo -e "${BLUE}║           ERP Deployment Manager                  ║${NC}"
+    echo -e "${BLUE}║       Orkestra Deployment Manager                  ║${NC}"
     echo -e "${BLUE}╚════════════════════════════════════════════════════╝${NC}"
     echo ""
 
@@ -62,9 +62,9 @@ show_env_menu() {
     echo -e "${CYAN}║  Select Environment:                               ║${NC}"
     echo -e "${CYAN}╠════════════════════════════════════════════════════╣${NC}"
     echo -e "${CYAN}║                                                    ║${NC}"
-    echo -e "${CYAN}║  1) Development  ${DEV_STATUS}                                ${CYAN}║${NC}"
-    echo -e "${CYAN}║  2) Staging      ${STAGING_STATUS}                                ${CYAN}║${NC}"
-    echo -e "${CYAN}║  3) Production   ${PROD_STATUS}                                ${CYAN}║${NC}"
+    echo -e "${CYAN}║  1) Development  ${DEV_STATUS}                                 ${CYAN}║${NC}"
+    echo -e "${CYAN}║  2) Staging      ${STAGING_STATUS}                                 ${CYAN}║${NC}"
+    echo -e "${CYAN}║  3) Production   ${PROD_STATUS}                                 ${CYAN}║${NC}"
     echo -e "${CYAN}║  4) Exit                                           ║${NC}"
     echo -e "${CYAN}║                                                    ║${NC}"
     echo -e "${CYAN}╚════════════════════════════════════════════════════╝${NC}"
@@ -100,7 +100,7 @@ set_env_config() {
             ENV_ICON="🟢"
             BRANCH="any"
             COMPOSE_FILE="$DOCKER_DIR/docker-compose.dev.yml"
-            DB_NAME="erp_dev"
+            DB_NAME="orkestra_dev"
             FRONTEND_URL="http://localhost:8080"
             BACKEND_URL="http://localhost:3000"
             ;;
@@ -109,7 +109,7 @@ set_env_config() {
             ENV_ICON="🟡"
             BRANCH="dev"
             COMPOSE_FILE="$DOCKER_DIR/docker-compose.staging.yml"
-            DB_NAME="erp_staging"
+            DB_NAME="orkestra_staging"
             FRONTEND_URL="https://stage.sidereco.com"
             BACKEND_URL="https://stage.sidereco.com/api"
             ;;
@@ -118,7 +118,7 @@ set_env_config() {
             ENV_ICON="🔴"
             BRANCH="main"
             COMPOSE_FILE="$DOCKER_DIR/docker-compose.prod.yml"
-            DB_NAME="erp"
+            DB_NAME="orkestra"
             FRONTEND_URL="https://gestionale.sidereco.com"
             BACKEND_URL="https://api.sidereco.com"
             ;;
@@ -132,7 +132,7 @@ set_env_config() {
 show_header() {
     clear
     echo -e "${BLUE}╔════════════════════════════════════════════════════╗${NC}"
-    echo -e "${BLUE}║           ERP Deployment Manager                  ║${NC}"
+    echo -e "${BLUE}║       Orkestra Deployment Manager                 ║${NC}"
     echo -e "${BLUE}╚════════════════════════════════════════════════════╝${NC}"
     echo -e "${ENV_COLOR}Environment: $(echo $ENV | tr '[:lower:]' '[:upper:]') $ENV_ICON${NC}"
     echo ""
@@ -596,13 +596,13 @@ execute_deploy() {
 
     # Tag images
     if [ "$ENV" = "production" ]; then
-        docker tag erp-backend:production erp-backend:$DEPLOYMENT_ID
-        docker tag erp-backend:production erp-backend:latest
-        docker tag erp-frontend:production erp-frontend:$DEPLOYMENT_ID
-        docker tag erp-frontend:production erp-frontend:latest
+        docker tag orkestra-backend:production orkestra-backend:$DEPLOYMENT_ID
+        docker tag orkestra-backend:production orkestra-backend:latest
+        docker tag orkestra-frontend:production orkestra-frontend:$DEPLOYMENT_ID
+        docker tag orkestra-frontend:production orkestra-frontend:latest
     else
-        docker tag erp-backend:$ENV erp-backend:$DEPLOYMENT_ID 2>/dev/null || true
-        docker tag erp-frontend:$ENV erp-frontend:$DEPLOYMENT_ID 2>/dev/null || true
+        docker tag orkestra-backend:$ENV orkestra-backend:$DEPLOYMENT_ID 2>/dev/null || true
+        docker tag orkestra-frontend:$ENV orkestra-frontend:$DEPLOYMENT_ID 2>/dev/null || true
     fi
     echo -e "${GREEN}  ✓ Images tagged${NC}"
 

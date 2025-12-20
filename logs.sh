@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# ERP Docker Service Logs Viewer
+# Orkestra Docker Service Logs Viewer
 # View logs for specific Docker services across all compose files
 
 set -euo pipefail
@@ -18,7 +18,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$SCRIPT_DIR"
 DOCKER_DIR="$PROJECT_ROOT/docker"
 
-echo -e "${BLUE}ERP Service Logs Viewer${NC}"
+echo -e "${BLUE}Orkestra Service Logs Viewer${NC}"
 echo "=================================="
 
 # Function to display usage

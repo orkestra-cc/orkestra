@@ -1,6 +1,6 @@
 # Database Migrations
 
-This directory contains database migration scripts for the ERP system.
+This directory contains database migration scripts for the Orkestra system.
 
 ## Role Migration - 20241229_update_user_roles.js
 
@@ -32,7 +32,7 @@ This migration updates the user role hierarchy from English-based roles to Itali
 - Node.js environment with MongoDB driver
 - Environment variables configured:
   - `MONGODB_URL` (default: `mongodb://localhost:27017`)
-  - `MONGODB_DATABASE` (default: `erp`)
+  - `MONGODB_DATABASE` (default: `orkestra`)
 
 #### Execute Migration
 ```bash

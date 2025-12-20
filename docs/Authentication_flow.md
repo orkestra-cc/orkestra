@@ -142,7 +142,7 @@ Mobile applications use a different flow optimized for native apps, leveraging p
 
 ## Secure Token Delivery Endpoint 🔐
 
-The ERP system implements a dedicated endpoint for secure token delivery after OAuth authentication, eliminating security vulnerabilities associated with URL-based token transmission.
+The Orkestra system implements a dedicated endpoint for secure token delivery after OAuth authentication, eliminating security vulnerabilities associated with URL-based token transmission.
 
 ### `/auth/session` Endpoint
 
@@ -164,7 +164,7 @@ The ERP system implements a dedicated endpoint for secure token delivery after O
 ```http
 GET /api/v1/auth/session HTTP/1.1
 Host: your-backend.com
-Cookie: erp_refresh_token=eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9...
+Cookie: orkestra_refresh_token=eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9...
 ```
 
 **Successful Response:**
@@ -362,7 +362,7 @@ Mobile apps handle token refresh differently due to background execution limits:
 
 ## JWT Security Implementation 🔐
 
-The ERP system implements industry-standard JWT security using RS256 asymmetric signing to ensure token integrity and prevent forgery.
+The Orkestra system implements industry-standard JWT security using RS256 asymmetric signing to ensure token integrity and prevent forgery.
 
 ### RS256 Algorithm Benefits
 
@@ -412,8 +412,8 @@ JWT_REFRESH_TOKEN_EXPIRY=7d
   "type": "access",
   "exp": 1234567890,
   "iat": 1234567800,
-  "iss": "erp",
-  "aud": "erp-api",
+  "iss": "orkestra",
+  "aud": "orkestra-api",
   "sid": "session-id",
   "did": "device-id",
   "ip": "client-ip",
@@ -432,7 +432,7 @@ JWT_REFRESH_TOKEN_EXPIRY=7d
 1. **Signature Verification:** Token signature validated using public key
 2. **Algorithm Check:** Ensures token uses RS256 (rejects HS256 and other algorithms)
 3. **Expiration Check:** Verifies token hasn't expired
-4. **Issuer Validation:** Confirms token issued by ERP system
+4. **Issuer Validation:** Confirms token issued by Orkestra system
 5. **Type Validation:** Ensures access/refresh token type matches expected usage
 6. **Claims Extraction:** Safely extracts user information and permissions
 
@@ -461,7 +461,7 @@ JWT_REFRESH_TOKEN_EXPIRY=7d
 
 ## Role-Based Access Control (RBAC) 🛡️
 
-The ERP system implements a 5-role hierarchy for managing user permissions across different system areas.
+The Orkestra system implements a 5-role hierarchy for managing user permissions across different system areas.
 
 ### Role Hierarchy
 
@@ -646,8 +646,8 @@ The frontend receives the user's role in the JWT token and authentication respon
   "type": "access",         // Token type (access/refresh)
   "exp": 1234567890,        // Expiration timestamp
   "iat": 1234567800,        // Issued at timestamp
-  "iss": "erp",             // Issuer
-  "aud": "erp-api",         // Audience
+  "iss": "orkestra",             // Issuer
+  "aud": "orkestra-api",         // Audience
   "sid": "session-id",      // Session ID
   "did": "device-id"        // Device ID
 }
@@ -699,7 +699,7 @@ The system returns appropriate HTTP status codes for authorization failures:
 
 ## Enhanced Security Architecture 🔒
 
-**LATEST SECURITY UPDATE:** The ERP system has implemented a dual authentication architecture that combines maximum security with maximum flexibility.
+**LATEST SECURITY UPDATE:** The Orkestra system has implemented a dual authentication architecture that combines maximum security with maximum flexibility.
 
 ### Security Evolution
 
@@ -803,7 +803,7 @@ interface AuthState {
 
 ## Dual Authentication Pattern 🔄
 
-The ERP system implements a sophisticated dual authentication pattern that provides both maximum security and maximum flexibility.
+The Orkestra system implements a sophisticated dual authentication pattern that provides both maximum security and maximum flexibility.
 
 ### Authentication Methods Supported
 
@@ -938,4 +938,4 @@ This implementation provides industry-leading security through:
 - **Progressive Enhancement**: Supports both legacy and modern authentication patterns
 - **Mobile-First**: Dedicated secure flows for native applications
 
-The ERP system now offers maximum security with maximum flexibility, supporting all client types while maintaining the highest security standards.
+The Orkestra system now offers maximum security with maximum flexibility, supporting all client types while maintaining the highest security standards.
