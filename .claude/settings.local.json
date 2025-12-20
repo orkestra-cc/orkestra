@@ -1,7 +1,13 @@
 {
+  "includeCoAuthoredBy": false,
   "permissions": {
     "allow": [
-      "Bash(docker exec:*)"
+      "Bash(docker exec:*)",
+      "Bash(go build:*)"
     ]
-  }
+  },
+  "enabledMcpjsonServers": [
+    "dart",
+    "chrome-devtools"
+  ]
 }
