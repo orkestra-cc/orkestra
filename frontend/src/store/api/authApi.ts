@@ -100,7 +100,8 @@ export const authApi = baseApi.injectEndpoints({
         method: 'POST',
         body: credentials,
       }),
-      invalidatesTags: ['Auth', 'User'],
+      // Invalidate navigation to fetch role-filtered menu for new user
+      invalidatesTags: ['Auth', 'User', 'Navigation'],
     }),
 
     // User logout
@@ -109,7 +110,8 @@ export const authApi = baseApi.injectEndpoints({
         url: 'api/v1/auth/logout',
         method: 'POST',
       }),
-      invalidatesTags: ['Auth', 'User'],
+      // Clear navigation cache on logout
+      invalidatesTags: ['Auth', 'User', 'Navigation'],
       onQueryStarted: async (_, { dispatch, queryFulfilled }) => {
         try {
           // Clear access token immediately
@@ -145,7 +147,8 @@ export const authApi = baseApi.injectEndpoints({
         method: 'POST',
         body: { code, state },
       }),
-      invalidatesTags: ['Auth', 'User'],
+      // Invalidate navigation to fetch role-filtered menu for new user
+      invalidatesTags: ['Auth', 'User', 'Navigation'],
     }),
 
     // Get session after OAuth callback - retrieves access token using refresh token from cookie

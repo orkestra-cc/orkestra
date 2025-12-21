@@ -93,6 +93,7 @@ export const baseApi = createApi({
   tagTypes: [
     'User',
     'Auth',
+    'Navigation',
     'Dashboard',
     'Analytics',
     'Sales',
@@ -126,7 +127,7 @@ export const {
 } = baseApi;
 
 // Helper function to invalidate multiple tags
-export const invalidateApiTags = (tags: Array<"User" | "Auth" | "Dashboard" | "Analytics" | "Sales" | "Orders" | "Projects" | "Tasks" | "Events" | "Chat" | "Email" | "Kanban" | "SupportTicket" | "Weather" | "Storage" | "Vehicle" | "Reports" | "Tachograph" | "Crane">) => {
+export const invalidateApiTags = (tags: Array<"User" | "Auth" | "Navigation" | "Dashboard" | "Analytics" | "Sales" | "Orders" | "Projects" | "Tasks" | "Events" | "Chat" | "Email" | "Kanban" | "SupportTicket" | "Weather" | "Storage" | "Vehicle" | "Reports" | "Tachograph" | "Crane">) => {
   return baseApi.util.invalidateTags(tags);
 };
 

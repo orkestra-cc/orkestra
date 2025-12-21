@@ -1,227 +1,121 @@
 /**
- * Custom hook for filtering navigation based on user roles and permissions
+ * Custom hook for getting role-filtered navigation from backend API
+ *
+ * Navigation items are pre-filtered on the backend for security.
+ * This hook fetches the filtered navigation and provides loading/error states.
  */
 
 import { useMemo } from 'react';
-import { useAuth } from './redux/useAuth';
-import { NavItem, RouteGroup } from '../routes/siteMaps';
-import {
-  hasAnyRole,
-  extractUserRole,
-  UserRole
-} from '../utils/roleUtils';
+import { useGetNavigationQuery } from '../store/api/navigationApi';
+import { useAuth } from './auth/useAuthRTK';
+import type { RouteGroup, NavItem } from '../store/api/navigationApi';
 
-interface UseRoleBasedNavigationOptions {
-  /**
-   * Whether to show empty groups (groups with no visible children)
-   * @default false
-   */
-  showEmptyGroups?: boolean;
+// Re-export types for convenience
+export type { RouteGroup, NavItem };
 
-  /**
-   * Whether to check permissions in addition to roles
-   * @default true
-   */
-  checkPermissions?: boolean;
+interface UseRoleBasedNavigationResult {
+  /** Filtered navigation groups from backend */
+  filteredNavigation: RouteGroup[];
+  /** Current user's role */
+  userRole: string | null;
+  /** Whether user is authenticated */
+  isAuthenticated: boolean;
+  /** Whether navigation is loading */
+  isLoading: boolean;
+  /** Whether there was an error loading navigation */
+  isError: boolean;
+  /** Error details if any */
+  error: unknown;
+  /** Function to manually refetch navigation */
+  refetch: () => void;
 }
 
 /**
- * Hook to filter navigation items based on user's role and permissions
+ * Hook to get role-filtered navigation from backend API
+ *
+ * Navigation items are pre-filtered on the backend based on user's role.
+ * This approach is more secure as role requirements are never exposed to the frontend.
+ *
+ * @example
+ * ```tsx
+ * const { filteredNavigation, isLoading, isError } = useRoleBasedNavigation();
+ *
+ * if (isLoading) return <LoadingSpinner />;
+ * if (isError) return <ErrorMessage />;
+ *
+ * return <Navigation groups={filteredNavigation} />;
+ * ```
  */
-export const useRoleBasedNavigation = (
-  routeGroups: RouteGroup[],
-  options: UseRoleBasedNavigationOptions = {}
-) => {
+export const useRoleBasedNavigation = (): UseRoleBasedNavigationResult => {
+  const { isAuthenticated } = useAuth();
+
+  // Fetch navigation from backend (skip if not authenticated)
   const {
-    showEmptyGroups = false,
-    checkPermissions = true
-  } = options;
+    data: navigationData,
+    isLoading,
+    isError,
+    error,
+    refetch,
+  } = useGetNavigationQuery(undefined, {
+    skip: !isAuthenticated,
+  });
 
-  const { user, isAuthenticated, hasPermission, hasAnyPermission } = useAuth();
-
-  // Memoized filtered navigation based on user role and permissions
-  const filteredNavigation = useMemo(() => {
-    // If user is not authenticated, return empty navigation
-    if (!isAuthenticated || !user) {
-      console.log('🔐 Navigation: Not authenticated or no user', { isAuthenticated, user });
-      return [];
+  const result = useMemo((): UseRoleBasedNavigationResult => {
+    if (!isAuthenticated || !navigationData) {
+      return {
+        filteredNavigation: [],
+        userRole: null,
+        isAuthenticated,
+        isLoading,
+        isError,
+        error,
+        refetch,
+      };
     }
 
-    const userRole = extractUserRole(user);
-
-    // Debug log in development
-    if (process.env.NODE_ENV === 'development') {
-      console.log('🔐 Navigation: User role extraction', {
-        originalRole: user?.role,
-        normalizedRole: userRole,
-        isAuthenticated
-      });
-    }
-
-    // If no valid role found, return empty navigation
-    if (!userRole) {
-      console.warn('🔐 Navigation: No valid role found, returning empty navigation');
-      return [];
-    }
-
-    /**
-     * Check if user can access a navigation item
-     */
-    const canAccessNavItem = (navItem: NavItem): boolean => {
-      // Check role-based access
-      if (navItem.roles && navItem.roles.length > 0) {
-        const hasRequiredRole = hasAnyRole(userRole, navItem.roles as UserRole[]);
-        if (!hasRequiredRole) {
-          return false;
-        }
-      }
-
-      // Check permission-based access
-      if (checkPermissions && navItem.permissions && navItem.permissions.length > 0) {
-        const hasRequiredPermissions = navItem.permissions.every(permission =>
-          hasPermission(permission)
-        );
-        if (!hasRequiredPermissions) {
-          return false;
-        }
-      }
-
-      return true;
+    return {
+      filteredNavigation: navigationData.groups,
+      userRole: navigationData.userRole,
+      isAuthenticated,
+      isLoading,
+      isError,
+      error,
+      refetch,
     };
+  }, [isAuthenticated, navigationData, isLoading, isError, error, refetch]);
 
-    /**
-     * Recursively filter navigation items
-     */
-    const filterNavItems = (navItems: NavItem[]): NavItem[] => {
-      return navItems
-        .filter(canAccessNavItem)
-        .map(navItem => {
-          // If item has children, recursively filter them
-          if (navItem.children && navItem.children.length > 0) {
-            const filteredChildren = filterNavItems(navItem.children);
-
-            // Return item with filtered children
-            return {
-              ...navItem,
-              children: filteredChildren
-            };
-          }
-
-          return navItem;
-        })
-        .filter(navItem => {
-          // Remove items with children if all children were filtered out
-          if (navItem.children) {
-            return navItem.children.length > 0;
-          }
-          return true;
-        });
-    };
-
-    /**
-     * Filter route groups
-     */
-    const filteredGroups = routeGroups
-      .map(group => {
-        // Check if user can access the entire group
-        let canAccessGroup = true;
-
-        if (group.roles && group.roles.length > 0) {
-          canAccessGroup = hasAnyRole(userRole, group.roles as UserRole[]);
-        }
-
-        if (checkPermissions && canAccessGroup && group.permissions && group.permissions.length > 0) {
-          canAccessGroup = group.permissions.every(permission =>
-            hasPermission(permission)
-          );
-        }
-
-        if (!canAccessGroup) {
-          return null;
-        }
-
-        // Filter children of the group
-        const filteredChildren = filterNavItems(group.children);
-
-        return {
-          ...group,
-          children: filteredChildren
-        };
-      })
-      .filter(group => {
-        if (!group) return false;
-
-        // Remove empty groups if specified
-        if (!showEmptyGroups && group.children.length === 0) {
-          return false;
-        }
-
-        return true;
-      }) as RouteGroup[];
-
-    // Debug log filtered results
-    if (process.env.NODE_ENV === 'development') {
-      console.log('🔐 Navigation: Filtered groups', {
-        totalGroups: routeGroups.length,
-        filteredGroupsCount: filteredGroups.length,
-        groupLabels: filteredGroups.map(g => g.label)
-      });
-    }
-
-    return filteredGroups;
-  }, [
-    routeGroups,
-    user,
-    isAuthenticated,
-    hasPermission,
-    hasAnyPermission,
-    showEmptyGroups,
-    checkPermissions
-  ]);
-
-  return {
-    filteredNavigation,
-    userRole: extractUserRole(user),
-    isAuthenticated
-  };
+  return result;
 };
 
 /**
- * Hook to check if user can access a specific route
+ * Hook to check if current user can access a specific route path
+ *
+ * Note: This checks against the pre-filtered navigation from the backend.
+ * For security, the definitive access check should always be on the backend.
+ *
+ * @param path - The route path to check access for
+ * @returns Whether the path is accessible based on filtered navigation
  */
-export const useCanAccessRoute = (navItem: NavItem): boolean => {
-  const { user, isAuthenticated, hasPermission } = useAuth();
+export const useCanAccessRoute = (path: string): boolean => {
+  const { filteredNavigation, isLoading } = useRoleBasedNavigation();
 
   return useMemo(() => {
-    if (!isAuthenticated || !user) {
-      return false;
-    }
+    if (isLoading) return false;
 
-    const userRole = extractUserRole(user);
-    if (!userRole) {
-      return false;
-    }
-
-    // Check role-based access
-    if (navItem.roles && navItem.roles.length > 0) {
-      const hasRequiredRole = hasAnyRole(userRole, navItem.roles as UserRole[]);
-      if (!hasRequiredRole) {
-        return false;
+    const checkPath = (items: NavItem[]): boolean => {
+      for (const item of items) {
+        if (item.to === path) return true;
+        if (item.children && checkPath(item.children)) return true;
       }
+      return false;
+    };
+
+    for (const group of filteredNavigation) {
+      if (checkPath(group.children)) return true;
     }
 
-    // Check permission-based access
-    if (navItem.permissions && navItem.permissions.length > 0) {
-      const hasRequiredPermissions = navItem.permissions.every(permission =>
-        hasPermission(permission)
-      );
-      if (!hasRequiredPermissions) {
-        return false;
-      }
-    }
-
-    return true;
-  }, [user, isAuthenticated, navItem]);
+    return false;
+  }, [filteredNavigation, path, isLoading]);
 };
 
 export default useRoleBasedNavigation;

@@ -32,6 +32,9 @@ import (
 	userHandlers "github.com/orkestra/backend/internal/user/handlers"
 	userRepository "github.com/orkestra/backend/internal/user/repository"
 	userServices "github.com/orkestra/backend/internal/user/services"
+	navigationConfig "github.com/orkestra/backend/internal/navigation/config"
+	navigationHandlers "github.com/orkestra/backend/internal/navigation/handlers"
+	navigationServices "github.com/orkestra/backend/internal/navigation/services"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -187,6 +190,11 @@ func main() {
 	reportingService := reportingServices.NewDeadlineService(reportingRepo)
 	reportingHandler := reportingHandlers.NewDeadlineHandler(reportingService)
 
+	// Initialize navigation module
+	menuConfig := navigationConfig.NewMenuConfig()
+	navigationService := navigationServices.NewNavigationService(menuConfig)
+	navigationHandler := navigationHandlers.NewNavigationHandler(navigationService)
+
 	// Initialize auth service with all repositories
 	authService, err := services.NewAuthService(&services.AuthConfig{
 		AuthRepo:          authRepo,
@@ -310,6 +318,11 @@ func main() {
 		// Register reporting routes (protected with role restrictions)
 		registerReportRoutes(reportingAPI, reportingHandler)
 	})
+
+	// Navigation routes - accessible to all authenticated users
+	// Role filtering happens inside the service based on user's role
+	navigationAPI := humachi.New(protectedRouter, apiConfig)
+	registerNavigationRoutes(navigationAPI, navigationHandler)
 
 	// Mount the protected routes
 	router.Mount("/", protectedRouter)
@@ -667,4 +680,17 @@ func registerReportRoutes(api huma.API, deadlineHandler *reportingHandlers.Deadl
 		Tags:        []string{"Reports"},
 		Security:    []map[string][]string{{"bearerAuth": {}}},
 	}, deadlineHandler.GetDeadlines)
+}
+
+// registerNavigationRoutes registers the navigation menu route
+func registerNavigationRoutes(api huma.API, navigationHandler *navigationHandlers.NavigationHandler) {
+	huma.Register(api, huma.Operation{
+		OperationID: "get-navigation",
+		Method:      http.MethodGet,
+		Path:        "/api/v1/navigation",
+		Summary:     "Get navigation menu",
+		Description: "Returns role-filtered navigation menu for the current authenticated user",
+		Tags:        []string{"Navigation"},
+		Security:    []map[string][]string{{"bearerAuth": {}}},
+	}, navigationHandler.GetNavigation)
 }
