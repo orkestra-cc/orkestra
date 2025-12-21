@@ -38,31 +38,31 @@ const Error401: React.FC<Error401Props> = ({
 
   const getRoleDisplayName = (role?: string) => {
     const roleMap: Record<string, string> = {
-      'developer': 'Sviluppatore',
+      'developer': 'Developer',
       'ceo': 'CEO',
-      'administrator': 'Amministratore',
+      'administrator': 'Administrator',
       'manager': 'Manager',
-      'operator': 'Operatore',
-      'guest': 'Ospite'
+      'operator': 'Operator',
+      'guest': 'Guest'
     };
-    return role ? roleMap[role] || role : 'Sconosciuto';
+    return role ? roleMap[role] || role : 'Unknown';
   };
 
   const getErrorMessage = () => {
     if (message) return message;
     if (accessDeniedReason === 'insufficient_permissions') {
-      return 'Permessi Insufficienti';
+      return 'Insufficient Permissions';
     }
-    return 'Accesso Negato';
+    return 'Access Denied';
   };
 
   const getDetailedMessage = () => {
     const currentUserRole = userRole || user?.role;
 
-    let details = 'Non hai i permessi necessari per accedere a questa pagina.';
+    let details = 'You do not have the necessary permissions to access this page.';
 
     if (currentUserRole) {
-      details += `\n\nIl tuo ruolo attuale: ${getRoleDisplayName(currentUserRole)}`;
+      details += `\n\nYour current role: ${getRoleDisplayName(currentUserRole)}`;
     }
 
     if (requiredPermissions && requiredPermissions.length > 0) {
@@ -74,15 +74,15 @@ const Error401: React.FC<Error401Props> = ({
         .map(getRoleDisplayName)
         .join(', ');
 
-      details += `\n\nRuoli richiesti: ${requiredRoleNames}`;
+      details += `\n\nRequired roles: ${requiredRoleNames}`;
     }
 
     if (requiredRole) {
-      details += `\n\nRuolo richiesto: ${getRoleDisplayName(requiredRole)}`;
+      details += `\n\nRequired role: ${getRoleDisplayName(requiredRole)}`;
     }
 
     if (from?.pathname) {
-      details += `\n\nPagina richiesta: ${from.pathname}`;
+      details += `\n\nRequested page: ${from.pathname}`;
     }
 
     return details;
@@ -112,11 +112,11 @@ const Error401: React.FC<Error401Props> = ({
             onClick={handleGoBack}
           >
             <FontAwesomeIcon icon={faArrowLeft} className="me-2" />
-            Torna Indietro
+            Go Back
           </Button>
           <Link className="btn btn-primary btn-sm me-2" to="/">
             <FontAwesomeIcon icon={faHome} className="me-2" />
-            Vai alla Home
+            Go to Home
           </Link>
           <Button
             variant="outline-danger"
@@ -129,7 +129,7 @@ const Error401: React.FC<Error401Props> = ({
         </div>
         <div className="mt-4 pt-3 border-top">
           <small className="text-500">
-            Se pensi che questo sia un errore, contatta l'amministratore di sistema.
+            If you think this is an error, please contact the system administrator.
           </small>
         </div>
       </Card.Body>

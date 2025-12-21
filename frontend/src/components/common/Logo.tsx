@@ -1,7 +1,7 @@
 
 import classNames from 'classnames';
 import { Link, LinkProps } from 'react-router';
-import logo from 'assets/img/orkestra/logo_orkestra.png';
+import logo from 'assets/img/logos/orkestra.png';
 
 type LogoLocation = 'auth' | 'navbar-vertical' | 'navbar-top';
 

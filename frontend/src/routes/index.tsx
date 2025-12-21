@@ -5,7 +5,7 @@ import { Navigate, createBrowserRouter, RouteObject } from 'react-router';
 
 import MainLayout from '../layouts/MainLayout';
 import ErrorLayout from '../layouts/ErrorLayout';
-import Landing from 'pages/landing/Landing';
+import Landing from 'reference/pages/landing/Landing';
 import ProtectedRoute from 'components/authentication/ProtectedRoute';
 const Accordion = lazy(() => import('reference/components/ui/Accordion'));
 const Alerts = lazy(() => import('reference/components/ui/Alerts'));
@@ -78,7 +78,7 @@ const DarkMode = lazy(() => import('reference/documentation/DarkMode'));
 const Plugins = lazy(() => import('reference/documentation/Plugins'));
 const Styling = lazy(() => import('reference/documentation/Styling'));
 const DesignFile = lazy(() => import('reference/documentation/DesignFile'));
-const Starter = lazy(() => import('pages/Starter'));
+const Starter = lazy(() => import('reference/pages/Starter'));
 const AnimatedIcons = lazy(() => import('reference/components/icons/AnimatedIcons'));
 const DatePicker = lazy(() => import('reference/components/forms/DatePicker'));
 const FontAwesome = lazy(() => import('reference/components/icons/FontAwesome'));
@@ -87,42 +87,42 @@ const Analytics = lazy(() => import('reference/dashboards/AnalyticsDashboard'));
 const Crm = lazy(() => import('reference/dashboards/CrmDashboard'));
 const Saas = lazy(() => import('reference/dashboards/SaasDashboard'));
 const Profile = lazy(() => import('pages/operator/profile/OperatorProfile'));
-const Associations = lazy(() => import('pages/asscociations/Associations'));
-const Followers = lazy(() => import('features/social/followers/Followers'));
+const Associations = lazy(() => import('reference/pages/asscociations/Associations'));
+const Followers = lazy(() => import('reference/app-examples/social/followers/Followers'));
 const Notifications = lazy(
-  () => import('features/social/notifications/Notifications')
+  () => import('reference/app-examples/social/notifications/Notifications')
 );
 const ActivityLog = lazy(
-  () => import('features/social/activity-log/ActivityLog')
+  () => import('reference/app-examples/social/activity-log/ActivityLog')
 );
 const Settings = lazy(() => import('pages/user/settings/Settings'));
-const Feed = lazy(() => import('features/social/feed/Feed'));
+const Feed = lazy(() => import('reference/app-examples/social/feed/Feed'));
 const Placeholder = lazy(() => import('reference/components/ui/Placeholder'));
 const Lightbox = lazy(() => import('reference/components/media/Lightbox'));
 const AdvanceTableExamples = lazy(
   () => import('reference/components/tables/AdvanceTableExamples')
 );
-const Calendar = lazy(() => import('features/calendar/Calendar'));
-import FaqAlt from 'pages/faq/faq-alt/FaqAlt';
-import FaqBasic from 'pages/faq/faq-basic/FaqBasic';
-import FaqAccordion from 'pages/faq/faq-accordion/FaqAccordion';
-import PrivacyPolicy from 'pages/miscellaneous/privacy-policy/PrivacyPolicy';
-import InvitePeople from 'pages/miscellaneous/invite-people/InvitePeople';
+const Calendar = lazy(() => import('reference/app-examples/calendar/Calendar'));
+import FaqAlt from 'reference/pages/faq/faq-alt/FaqAlt';
+import FaqBasic from 'reference/pages/faq/faq-basic/FaqBasic';
+import FaqAccordion from 'reference/pages/faq/faq-accordion/FaqAccordion';
+import PrivacyPolicy from 'reference/pages/miscellaneous/privacy-policy/PrivacyPolicy';
+import InvitePeople from 'reference/pages/miscellaneous/invite-people/InvitePeople';
 import AuthTestPage from 'reference/test/AuthTestPage';
 import RoleNavigationTester from 'reference/test/RoleNavigationTester';
-import PricingDefault from 'pages/pricing/pricing-default/PricingDefault';
-import PricingAlt from 'pages/pricing/pricing-alt/PricingAlt';
-import CreateEvent from 'features/events/create-an-event/CreateEvent';
-import EventList from 'features/events/event-list/EventList';
-import EventDetail from 'features/events/event-detail/EventDetail';
-import EmailDetail from 'features/email/email-detail/EmailDetail';
-import Compose from 'features/email/compose/Compose';
-import Inbox from 'features/email/inbox/Inbox';
+import PricingDefault from 'reference/pages/pricing/pricing-default/PricingDefault';
+import PricingAlt from 'reference/pages/pricing/pricing-alt/PricingAlt';
+import CreateEvent from 'reference/app-examples/events/create-an-event/CreateEvent';
+import EventList from 'reference/app-examples/events/event-list/EventList';
+import EventDetail from 'reference/app-examples/events/event-detail/EventDetail';
+import EmailDetail from 'reference/app-examples/email/email-detail/EmailDetail';
+import Compose from 'reference/app-examples/email/compose/Compose';
+import Inbox from 'reference/app-examples/email/inbox/Inbox';
 import Rating from 'reference/components/forms/Rating';
 import AdvanceSelect from 'reference/components/forms/AdvanceSelect';
 import Editor from 'reference/components/forms/Editor';
-import Chat from 'features/chat/Chat';
-const Kanban = lazy(() => import('features/kanban/Kanban'));
+import Chat from 'reference/app-examples/chat/Chat';
+const Kanban = lazy(() => import('reference/app-examples/kanban/Kanban'));
 import DraggableExample from 'reference/components/misc/DraggableExample';
 const LineCharts = lazy(
   () => import('reference/charts/echarts/line-charts')
@@ -206,13 +206,13 @@ const TachographManagement = lazy(
 const TachographProfile = lazy(
   () => import('pages/fleet/tachograph-profile/TachographProfile')
 );
-import TableView from 'features/support-desk/tickets-layout/TableView';
-import CardView from 'features/support-desk/tickets-layout/CardView';
-import Contacts from 'features/support-desk/contacts/Contacts';
-import ContactDetails from 'features/support-desk/contact-details/ContactDetails';
-import TicketsPreview from 'features/support-desk/tickets-preview/TicketsPreview';
-import QuickLinks from 'features/support-desk/quick-links/QuickLinks';
-import Reports from 'features/support-desk/reports/Reports';
+import TableView from 'reference/app-examples/support-desk/tickets-layout/TableView';
+import CardView from 'reference/app-examples/support-desk/tickets-layout/CardView';
+import Contacts from 'reference/app-examples/support-desk/contacts/Contacts';
+import ContactDetails from 'reference/app-examples/support-desk/contact-details/ContactDetails';
+import TicketsPreview from 'reference/app-examples/support-desk/tickets-preview/TicketsPreview';
+import QuickLinks from 'reference/app-examples/support-desk/quick-links/QuickLinks';
+import Reports from 'reference/app-examples/support-desk/reports/Reports';
 import InputMaskExample from 'reference/components/forms/InputMaskExample';
 import RangeSlider from 'reference/components/forms/RangeSlider';
 import VerticalNavLayout from 'layouts/VerticalNavLayout';

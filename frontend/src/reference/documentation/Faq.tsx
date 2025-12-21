@@ -2,7 +2,7 @@ import { useState } from 'react';
 import PageHeader from 'components/common/PageHeader';
 import { Accordion, Card } from 'react-bootstrap';
 import { faqDoc } from 'data/faqs';
-import FaqAccordionItem from 'pages/faq/faq-accordion/FaqAccordionItem';
+import FaqAccordionItem from 'reference/pages/faq/faq-accordion/FaqAccordionItem';
 
 const Faq = () => {
   const [faqs] = useState(faqDoc);

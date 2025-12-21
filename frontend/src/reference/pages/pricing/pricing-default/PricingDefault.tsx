@@ -6,7 +6,7 @@ import PricingDefaultHeader from './PricingDefaultHeader';
 import PricingDefaultCard from './PricingDefaultCard';
 import useFakeFetch from 'hooks/ui/useFakeFetch';
 import { pricingData } from 'data/pricing';
-import FaqBasicCard from 'pages/faq/faq-basic/FaqBasicCard';
+import FaqBasicCard from 'reference/pages/faq/faq-basic/FaqBasicCard';
 import { faqs as faqsData } from 'data/faqs';
 
 // Type definitions for Pricing page

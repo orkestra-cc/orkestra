@@ -21,12 +21,12 @@ const DeadlineReportsHeader: React.FC<DeadlineReportsHeaderProps> = ({
     <div className="d-lg-flex justify-content-between">
       <Row className="flex-between-center gy-2 px-x1">
         <Col xs="auto" className="pe-0">
-          <h6 className="mb-0">Report Scadenze</h6>
+          <h6 className="mb-0">Deadline Reports</h6>
         </Col>
         <Col xs="auto">
           <AdvanceTableSearchBox
             className="input-search-width"
-            placeholder="Cerca per nome"
+            placeholder="Search by name"
           />
         </Col>
       </Row>
@@ -35,28 +35,28 @@ const DeadlineReportsHeader: React.FC<DeadlineReportsHeaderProps> = ({
         {/* Entity Type Filter */}
         <Form.Select
           size="sm"
-          aria-label="Filtra per tipo"
+          aria-label="Filter by type"
           value={entityTypeFilter}
           onChange={(e) => onFilterChange('entityType', e.target.value)}
           style={{ width: 'auto', minWidth: '150px' }}
         >
-          <option value="">Tutti i tipi</option>
-          <option value="vehicle">Veicoli</option>
-          <option value="user">Utenti</option>
-          <option value="medical">Visite Mediche</option>
+          <option value="">All types</option>
+          <option value="vehicle">Vehicles</option>
+          <option value="user">Users</option>
+          <option value="medical">Medical Visits</option>
         </Form.Select>
 
         {/* Status Filter */}
         <Form.Select
           size="sm"
-          aria-label="Filtra per stato"
+          aria-label="Filter by status"
           value={statusFilter}
           onChange={(e) => onFilterChange('status', e.target.value)}
           style={{ width: 'auto', minWidth: '150px' }}
         >
-          <option value="">Tutti gli stati</option>
-          <option value="expired">Scaduti</option>
-          <option value="warning">In Scadenza</option>
+          <option value="">All statuses</option>
+          <option value="expired">Expired</option>
+          <option value="warning">Expiring</option>
           <option value="ok">OK</option>
         </Form.Select>
 
@@ -67,9 +67,9 @@ const DeadlineReportsHeader: React.FC<DeadlineReportsHeaderProps> = ({
 
         {getSelectedRowModel().rows.length > 0 ? (
           <div className="d-flex">
-            <Form.Select size="sm" aria-label="Azioni multiple">
-              <option>Azioni multiple</option>
-              <option value="export">Esporta selezionati</option>
+            <Form.Select size="sm" aria-label="Bulk actions">
+              <option>Bulk actions</option>
+              <option value="export">Export selected</option>
             </Form.Select>
             <Button
               type="button"
@@ -77,7 +77,7 @@ const DeadlineReportsHeader: React.FC<DeadlineReportsHeaderProps> = ({
               size="sm"
               className="ms-2"
             >
-              Applica
+              Apply
             </Button>
           </div>
         ) : (
@@ -90,7 +90,7 @@ const DeadlineReportsHeader: React.FC<DeadlineReportsHeaderProps> = ({
               iconAlign="middle"
             >
               <span className="d-none d-sm-inline-block ms-1">
-                Esporta
+                Export
               </span>
             </IconButton>
           </div>

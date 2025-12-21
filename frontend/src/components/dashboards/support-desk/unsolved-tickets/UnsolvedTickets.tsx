@@ -5,7 +5,7 @@ import UnsolvedTicketsHeader from './UnsolvedTicketsHeader';
 import AdvanceTable from 'components/common/advance-table/AdvanceTable';
 import AdvanceTableFooter from 'components/common/advance-table/AdvanceTableFooter';
 import useSupportDeskTable from 'hooks/ui/useSupportDeskTable';
-import CardLayout from 'features/support-desk/tickets-layout/CardLayout';
+import CardLayout from 'reference/app-examples/support-desk/tickets-layout/CardLayout';
 
 const UnsolvedTickets = () => {
   const [layout, setLayout] = useState('tableView');

@@ -6,14 +6,14 @@ const Error500 = () => (
     <Card.Body className="p-5">
       <div className="display-1 text-300 fs-error">500</div>
       <p className="lead mt-4 text-800 font-sans-serif fw-semibold">
-        Ops, qualcosa è andato storto!
+        Whoops, something went wrong!
       </p>
       <hr />
       <p>
-        Prova ad aggiornare la pagina, o torna indietro e riprova l'azione.
-        Se il problema persiste,
+        Try refreshing the page, or go back and attempt the action again.
+        If the problem persists,
         <a href="mailto:info@exmaple.com" className="ms-1">
-          contattaci
+          contact us
         </a>
         .
       </p>

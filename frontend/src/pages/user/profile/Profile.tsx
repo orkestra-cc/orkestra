@@ -3,7 +3,7 @@ import ProfileBanner from './Banner';
 import ProfileIntro from './ProfileIntro';
 import { Col, Row } from 'react-bootstrap';
 import associations from 'data/associations';
-import Associations from 'pages/asscociations/Associations';
+import Associations from 'reference/pages/asscociations/Associations';
 import people from 'data/people';
 import activities from 'data/activities';
 import Followers from './Followers';

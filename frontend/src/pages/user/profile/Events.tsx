@@ -3,7 +3,7 @@
 import FalconCardHeader from 'components/common/FalconCardHeader';
 import { Card } from 'react-bootstrap';
 import FalconCardFooterLink from 'components/common/FalconCardFooterLink';
-import Event from 'features/events/event-list/Event';
+import Event from 'reference/app-examples/events/event-list/Event';
 import paths from 'routes/paths';
 
 interface EventsProps {

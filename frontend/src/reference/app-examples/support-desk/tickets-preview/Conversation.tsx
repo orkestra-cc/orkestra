@@ -14,7 +14,7 @@ import {
 } from 'react-bootstrap';
 import { Link } from 'react-router';
 import { useState } from 'react';
-import Compose from 'features/email/compose/Compose';
+import Compose from 'reference/app-examples/email/compose/Compose';
 import paths from 'routes/paths';
 
 interface FileProps {

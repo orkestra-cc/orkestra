@@ -13,10 +13,10 @@ function TachographGreetings() {
           <FontAwesomeIcon icon="gauge-high" className="text-white fs-5" />
         </div>
         <div className="ms-3">
-          <h6 className="mb-1 text-info">Benvenuto su</h6>
+          <h6 className="mb-1 text-info">Welcome to</h6>
           <h4 className="mb-0 text-info fw-bold">
-            Gestione
-            <span className="text-primary fw-medium"> Tachografi</span>
+            Tachograph
+            <span className="text-primary fw-medium"> Management</span>
           </h4>
         </div>
       </Card.Header>

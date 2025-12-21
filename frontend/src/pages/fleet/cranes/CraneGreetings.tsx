@@ -13,10 +13,10 @@ function CraneGreetings() {
           <GiCrane className="text-dark" size={32} />
         </div>
         <div className="ms-3">
-          <h6 className="mb-1 text-warning">Benvenuto su</h6>
+          <h6 className="mb-1 text-warning">Welcome to</h6>
           <h4 className="mb-0 text-warning fw-bold">
-            Gestione
-            <span className="text-info fw-medium"> Gru</span>
+            Crane
+            <span className="text-info fw-medium"> Management</span>
           </h4>
         </div>
       </Card.Header>

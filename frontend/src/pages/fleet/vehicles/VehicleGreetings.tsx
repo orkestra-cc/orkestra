@@ -13,10 +13,10 @@ function VehicleGreetings() {
           <FaTruck className="text-white" size={32} />
         </div>
         <div className="ms-3">
-          <h6 className="mb-1 text-primary">Benvenuto su</h6>
+          <h6 className="mb-1 text-primary">Welcome to</h6>
           <h4 className="mb-0 text-primary fw-bold">
-            Gestione
-            <span className="text-info fw-medium"> Flotta</span>
+            Fleet
+            <span className="text-info fw-medium"> Management</span>
           </h4>
         </div>
       </Card.Header>

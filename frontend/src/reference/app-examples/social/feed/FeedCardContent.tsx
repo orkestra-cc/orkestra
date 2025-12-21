@@ -4,7 +4,7 @@ import createMarkup from 'helpers/createMarkup';
 import FeedEvent from './FeedEvent';
 import classNames from 'classnames';
 import FeedUrl from './FeedUrl';
-import FeedGallery from 'features/social/feed/FeedGallery';
+import FeedGallery from 'reference/app-examples/social/feed/FeedGallery';
 import FalconLightBox from 'components/common/FalconLightBox';
 
 interface FeedCardContentProps {

@@ -1,7 +1,7 @@
 import ExperienceForm from 'pages/user/settings/ExperienceForm';
-import CreatePost from 'features/social/feed/CreatePost';
-import Compose from 'features/email/compose/Compose';
-import EventUpload from 'features/events/create-an-event/EventUpload';
+import CreatePost from 'reference/app-examples/social/feed/CreatePost';
+import Compose from 'reference/app-examples/email/compose/Compose';
+import EventUpload from 'reference/app-examples/events/create-an-event/EventUpload';
 import { useState } from 'react';
 import { Card, Col, Row } from 'react-bootstrap';
 import WidgetSectionTitle from './WidgetSectionTitle';

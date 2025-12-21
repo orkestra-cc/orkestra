@@ -49,17 +49,17 @@ const ProfileDropdown = () => {
             <span>Go Pro</span>
           </Dropdown.Item> */}
 
-          <Dropdown.Item href="/login">Accesso</Dropdown.Item>
+          <Dropdown.Item href="/login">Login</Dropdown.Item>
           <Dropdown.Divider />
           <Dropdown.Item as={Link} to={paths.userProfile}>
-            Profilo &amp; utente
+            Profile &amp; account
           </Dropdown.Item>
 
           <Dropdown.Item as={Link} to={paths.userSettings}>
-            Impostazioni
+            Settings
           </Dropdown.Item>
           <Dropdown.Divider />
-          <Dropdown.Item onClick={handleLogout}>Disconnessione</Dropdown.Item>
+          <Dropdown.Item onClick={handleLogout}>Logout</Dropdown.Item>
         </div>
       </Dropdown.Menu>
     </Dropdown>

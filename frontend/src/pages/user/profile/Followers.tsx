@@ -2,7 +2,7 @@
 import { Card, Col, Row } from 'react-bootstrap';
 import Flex from 'components/common/Flex';
 import { Link } from 'react-router';
-import Follower from 'features/social/followers/Follower';
+import Follower from 'reference/app-examples/social/followers/Follower';
 import paths from 'routes/paths';
 
 interface FollowersProps {

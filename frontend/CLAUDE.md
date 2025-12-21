@@ -56,26 +56,32 @@ src/
 │   ├── wizard/         # Form wizard components
 │   ├── errors/         # Error page components
 │   └── notification/   # Notification components
-├── features/           # 🚀 Complete Application Modules
-│   ├── chat/          # Full chat application
-│   ├── email/         # Complete email client
-│   ├── kanban/        # Kanban board system
-│   ├── events/        # Event management system
-│   ├── social/        # Social media features
-│   ├── support-desk/  # Help desk application
-│   └── calendar/      # Calendar application
-├── demos/             # 🚀 Complete Dashboard Demos
-│   └── dashboards/    # Full dashboard layout examples
-│       ├── DefaultDashboard.jsx
-│       ├── AnalyticsDashboard.jsx
-│       ├── CrmDashboard.jsx
-│       └── [others...]
-├── pages/             # 📄 Page-Level Components
-│   ├── faq/          # FAQ pages
-│   ├── pricing/      # Pricing pages
-│   ├── user/         # User profile pages
-│   ├── landing/      # Landing pages
-│   └── miscellaneous/ # Other page components
+├── reference/          # 📚 Developer/AI Reference Materials
+│   ├── app-examples/   # Full-featured application module examples
+│   │   ├── calendar/   # Calendar application
+│   │   ├── chat/       # Real-time messaging system
+│   │   ├── email/      # Full email client
+│   │   ├── events/     # Event management system
+│   │   ├── kanban/     # Project management boards
+│   │   ├── social/     # Social media features
+│   │   └── support-desk/ # Help desk application
+│   ├── charts/         # Chart library examples (Chart.js, D3, ECharts)
+│   ├── components/     # UI component library showcase
+│   ├── dashboards/     # Complete dashboard layout examples
+│   ├── documentation/  # Developer guides and migration docs
+│   ├── pages/          # Example/demo page templates
+│   │   ├── asscociations/ # Associations list example
+│   │   ├── faq/        # FAQ page layouts
+│   │   ├── landing/    # Landing page template
+│   │   ├── miscellaneous/ # Static pages (invite, privacy)
+│   │   └── pricing/    # Pricing page templates
+│   ├── test/           # Testing utilities
+│   └── utilities/      # Bootstrap utility examples
+├── pages/             # 📄 Production Page Components
+│   ├── admin/         # Admin management (reports, users)
+│   ├── fleet/         # Fleet management (vehicles, cranes, tachographs)
+│   ├── operator/      # Operator profile
+│   └── user/          # User settings and profile
 ├── docs/              # 📚 Documentation & Examples
 │   ├── components/   # Component documentation & examples
 │   ├── documentation/ # Development guides & docs
@@ -106,33 +112,33 @@ The project now maintains crystal clear boundaries between different types of co
 - **`errors/`** - Error page components (404, 500)
 - **`notification/`** - Notification system components
 
-#### 🚀 Complete Application Features (`src/features/`)
-**Full-featured application modules with their own state and business logic:**
+#### 📚 Developer/AI Reference Materials (`src/reference/`)
+**Comprehensive reference implementations and examples for developers and AI:**
+
+**App Examples (`app-examples/`)** - Full-featured application module examples:
+- **`calendar/`** - Calendar application with scheduling
 - **`chat/`** - Complete real-time messaging system
 - **`email/`** - Full email client (inbox, compose, detail views)
-- **`kanban/`** - Project management boards with drag & drop
 - **`events/`** - Event management system (create, list, detail)
-- **`social/`** - Social media features (feed, followers, activity log)  
+- **`kanban/`** - Project management boards with drag & drop
+- **`social/`** - Social media features (feed, followers, activity log)
 - **`support-desk/`** - Help desk system (tickets, contacts, reports)
-- **`calendar/`** - Calendar application with scheduling
 
-#### 🚀 Dashboard Demos (`src/demos/dashboards/`)
-**Complete dashboard layouts showing how to compose components:**
-- **`DefaultDashboard.jsx`** - General business metrics layout
-- **`AnalyticsDashboard.jsx`** - Web analytics dashboard
-- **`CrmDashboard.jsx`** - CRM and sales dashboard
-- **`ProjectManagementDashboard.jsx`** - Team collaboration dashboard
-- **`SaasDashboard.jsx`** - SaaS metrics dashboard
-- **`SupportDeskDashboard.jsx`** - Support desk dashboard
+**Other Reference Materials:**
+- **`charts/`** - Chart library examples (Chart.js, D3.js, ECharts with 63+ variations)
+- **`components/`** - UI component library showcase (forms, icons, tables, navigation)
+- **`dashboards/`** - Complete dashboard layout examples (11 different layouts)
+- **`documentation/`** - Developer guides, migration docs, changelogs
+- **`pages/`** - Example page templates (FAQ, pricing, landing, associations)
+- **`test/`** - Testing utilities (AuthTestPage, RoleNavigationTester)
+- **`utilities/`** - Bootstrap utility class examples (background, borders, flex, grid)
 
-#### 📄 Page Components (`src/pages/`)
-**Page-level components for routing:**
-- **`admin/`** - Administrative pages (SettingsAdmin, SchedulerAdmin)
-- **`faq/`** - FAQ pages (basic, accordion, alt layouts)
-- **`pricing/`** - Pricing pages (default, alternative layouts)
+#### 📄 Production Pages (`src/pages/`)
+**Backend-connected production pages:**
+- **`admin/`** - Admin management (reports, user profiles, user table)
+- **`fleet/`** - Fleet management (vehicles, cranes, tachographs with profiles)
+- **`operator/`** - Operator profile pages
 - **`user/`** - User profile and settings pages
-- **`landing/`** - Marketing and landing pages
-- **`miscellaneous/`** - Other standalone pages
 
 #### 📚 Documentation (`src/docs/`)
 **Documentation, examples, and guides separate from application code:**

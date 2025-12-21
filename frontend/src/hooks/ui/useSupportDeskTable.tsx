@@ -6,8 +6,8 @@ import Avatar from 'components/common/Avatar';
 import Flex from 'components/common/Flex';
 import SubtleBadge from 'components/common/SubtleBadge';
 import { tickets } from 'data/dashboard/support-desk';
-import Priority from 'features/support-desk/tickets-layout/Priority';
-import AgentSelect from 'features/support-desk/tickets-layout/AgentSelect';
+import Priority from 'reference/app-examples/support-desk/tickets-layout/Priority';
+import AgentSelect from 'reference/app-examples/support-desk/tickets-layout/AgentSelect';
 
 const columns = [
   {
