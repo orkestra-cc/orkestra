@@ -1,4 +1,4 @@
-import Association from 'reference/pages/asscociations/Association';
+import Association from 'reference/pages/associations/Association';
 
 import { Card, Col, Row } from 'react-bootstrap';
 import associationsData from 'data/associations';

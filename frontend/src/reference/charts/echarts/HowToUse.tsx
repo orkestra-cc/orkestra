@@ -4,7 +4,7 @@ import PageHeader from 'components/common/PageHeader';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import FalconComponentCard from 'components/common/FalconComponentCard';
 import FalconEditor from 'components/common/FalconEditor';
-import BasicBarChart from 'docs/components/charts-example/echarts/bar-charts/BasicBarChart';
+import BasicBarChart from 'reference/charts/echarts/bar-charts/BasicBarChart';
 
 const structureCode = `// import the core library.
 

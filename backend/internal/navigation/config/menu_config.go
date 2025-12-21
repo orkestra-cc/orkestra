@@ -108,7 +108,7 @@ func buildAdminRoutes() models.RouteGroup {
 			},
 			{
 				Name:   "Deadlines",
-				To:     "/reports/deadlines",
+				To:     "/admin/reports/deadlines",
 				Icon:   "calendar-check",
 				Active: true,
 				Roles:  []string{"manager"},

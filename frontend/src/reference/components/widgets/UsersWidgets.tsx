@@ -11,7 +11,7 @@ import FeedProvider from 'providers/FeedProvider';
 import FalconCardFooterLink from 'components/common/FalconCardFooterLink';
 import ProfileBanner from 'pages/user/profile/Banner';
 import EventBanner from 'reference/app-examples/events/create-an-event/EventBanner';
-import Associations from 'reference/pages/asscociations/Associations';
+import Associations from 'reference/pages/associations/Associations';
 import InvitePeople from 'reference/pages/miscellaneous/invite-people/InvitePeople';
 import people from 'data/people';
 import Followers from 'pages/user/profile/Followers';

@@ -87,7 +87,7 @@ const Analytics = lazy(() => import('reference/dashboards/AnalyticsDashboard'));
 const Crm = lazy(() => import('reference/dashboards/CrmDashboard'));
 const Saas = lazy(() => import('reference/dashboards/SaasDashboard'));
 const Profile = lazy(() => import('pages/operator/profile/OperatorProfile'));
-const Associations = lazy(() => import('reference/pages/asscociations/Associations'));
+const Associations = lazy(() => import('reference/pages/associations/Associations'));
 const Followers = lazy(() => import('reference/app-examples/social/followers/Followers'));
 const Notifications = lazy(
   () => import('reference/app-examples/social/notifications/Notifications')
@@ -176,9 +176,7 @@ import SocialAuthCallback from 'components/authentication/SocialAuthCallback';
 const Dashboard = lazy(() => import('reference/dashboards/DefaultDashboard'));
 import Faq from 'reference/documentation/Faq';
 const SupportDesk = lazy(() => import('reference/dashboards/SupportDeskDashboard'));
-const UserManagement = lazy(
-  () => import('reference/dashboards/UserManagementDashboard')
-);
+const UserManagement = lazy(() => import('pages/admin/users'));
 const AdminUserProfile = lazy(
   () => import('pages/admin/user-profile/AdminUserProfile')
 );
@@ -1285,6 +1283,364 @@ const routes: RouteObject[] = [
           {
             path: paths.migration,
             element: <Migration />
+          },
+          // Reference Routes (developer-only)
+          {
+            path: rootPaths.referenceRoot,
+            children: [
+              // Reference Dashboards
+              {
+                path: 'dashboards',
+                children: [
+                  {
+                    path: 'default',
+                    element: (
+                      <Suspense key="ref-dashboard-default" fallback={<FalconLoader />}>
+                        <Dashboard />
+                      </Suspense>
+                    )
+                  },
+                  {
+                    path: 'analytics',
+                    element: (
+                      <Suspense key="ref-dashboard-analytics" fallback={<FalconLoader />}>
+                        <Analytics />
+                      </Suspense>
+                    )
+                  },
+                  {
+                    path: 'crm',
+                    element: (
+                      <Suspense key="ref-dashboard-crm" fallback={<FalconLoader />}>
+                        <Crm />
+                      </Suspense>
+                    )
+                  },
+                  {
+                    path: 'saas',
+                    element: (
+                      <Suspense key="ref-dashboard-saas" fallback={<FalconLoader />}>
+                        <Saas />
+                      </Suspense>
+                    )
+                  },
+                  {
+                    path: 'project-management',
+                    element: (
+                      <Suspense key="ref-dashboard-pm" fallback={<FalconLoader />}>
+                        <ProjectManagement />
+                      </Suspense>
+                    )
+                  },
+                  {
+                    path: 'support-desk',
+                    element: (
+                      <Suspense key="ref-dashboard-supportdesk" fallback={<FalconLoader />}>
+                        <SupportDesk />
+                      </Suspense>
+                    )
+                  }
+                ]
+              },
+              // Reference App Examples
+              {
+                path: 'app-examples',
+                children: [
+                  {
+                    path: 'calendar',
+                    element: (
+                      <Suspense key="ref-app-calendar" fallback={<FalconLoader />}>
+                        <Calendar />
+                      </Suspense>
+                    )
+                  },
+                  { path: 'chat', element: <Chat /> },
+                  {
+                    path: 'kanban',
+                    element: (
+                      <Suspense key="ref-app-kanban" fallback={<FalconLoader />}>
+                        <Kanban />
+                      </Suspense>
+                    )
+                  },
+                  {
+                    path: 'email',
+                    children: [
+                      { path: 'inbox', element: <Inbox /> },
+                      { path: 'compose', element: <Compose /> },
+                      { path: 'detail', element: <EmailDetail /> }
+                    ]
+                  },
+                  {
+                    path: 'events',
+                    children: [
+                      { path: 'create', element: <CreateEvent /> },
+                      { path: 'list', element: <EventList /> },
+                      { path: 'detail', element: <EventDetail /> }
+                    ]
+                  },
+                  {
+                    path: 'social',
+                    children: [
+                      { path: 'feed', element: <Feed /> },
+                      { path: 'activity-log', element: <ActivityLog /> },
+                      { path: 'notifications', element: <Notifications /> },
+                      { path: 'followers', element: <Followers /> }
+                    ]
+                  },
+                  {
+                    path: 'support-desk',
+                    children: [
+                      { path: 'table-view', element: <TableView /> },
+                      { path: 'card-view', element: <CardView /> },
+                      { path: 'contacts', element: <Contacts /> },
+                      { path: 'contact-details', element: <ContactDetails /> },
+                      { path: 'tickets-preview', element: <TicketsPreview /> },
+                      { path: 'quick-links', element: <QuickLinks /> },
+                      { path: 'reports', element: <Reports /> }
+                    ]
+                  }
+                ]
+              },
+              // Reference Components
+              {
+                path: 'components',
+                children: [
+                  { path: 'alerts', element: <Suspense key="ref-comp-alerts" fallback={<FalconLoader />}><Alerts /></Suspense> },
+                  { path: 'accordion', element: <Suspense key="ref-comp-accordion" fallback={<FalconLoader />}><Accordion /></Suspense> },
+                  { path: 'animated-icons', element: <AnimatedIcons /> },
+                  { path: 'backgrounds', element: <Backgrounds /> },
+                  { path: 'badges', element: <Suspense key="ref-comp-badges" fallback={<FalconLoader />}><Badges /></Suspense> },
+                  { path: 'breadcrumbs', element: <Suspense key="ref-comp-breadcrumbs" fallback={<FalconLoader />}><Breadcrumbs /></Suspense> },
+                  { path: 'buttons', element: <Suspense key="ref-comp-buttons" fallback={<FalconLoader />}><Buttons /></Suspense> },
+                  { path: 'calendar', element: <Suspense key="ref-comp-calendar" fallback={<FalconLoader />}><CalendarExample /></Suspense> },
+                  { path: 'cards', element: <Cards /> },
+                  {
+                    path: 'carousel',
+                    children: [
+                      { path: 'bootstrap', element: <BootstrapCarousel /> },
+                      { path: 'slick', element: <SlickCarousel /> }
+                    ]
+                  },
+                  { path: 'collapse', element: <Collapse /> },
+                  { path: 'cookie-notice', element: <CookieNoticeExample /> },
+                  { path: 'countup', element: <CountUp /> },
+                  { path: 'draggable', element: <DraggableExample /> },
+                  { path: 'dropdowns', element: <Dropdowns /> },
+                  { path: 'list-group', element: <ListGroups /> },
+                  { path: 'modals', element: <Modals /> },
+                  { path: 'offcanvas', element: <Offcanvas /> },
+                  {
+                    path: 'navs-and-tabs',
+                    children: [
+                      { path: 'navs', element: <Navs /> },
+                      { path: 'navbar', element: <Navbars /> },
+                      { path: 'vertical-navbar', element: <VerticalNavbar /> },
+                      { path: 'top-navbar', element: <NavBarTop /> },
+                      { path: 'double-top-navbar', element: <NavbarDoubleTop /> },
+                      { path: 'combo-navbar', element: <ComboNavbar /> },
+                      { path: 'tabs', element: <Tabs /> }
+                    ]
+                  },
+                  {
+                    path: 'pictures',
+                    children: [
+                      { path: 'avatar', element: <Avatar /> },
+                      { path: 'images', element: <Image /> },
+                      { path: 'figures', element: <Figures /> },
+                      { path: 'hoverbox', element: <Hoverbox /> },
+                      { path: 'lightbox', element: <Lightbox /> }
+                    ]
+                  },
+                  { path: 'progress-bar', element: <BasicProgressBar /> },
+                  { path: 'pagination', element: <Pagination /> },
+                  { path: 'placeholder', element: <Placeholder /> },
+                  { path: 'popovers', element: <Popovers /> },
+                  { path: 'scrollspy', element: <Scrollspy /> },
+                  { path: 'search', element: <Search /> },
+                  { path: 'spinners', element: <Spinners /> },
+                  { path: 'timeline', element: <Timeline /> },
+                  { path: 'toasts', element: <Toasts /> },
+                  { path: 'tooltips', element: <Tooltips /> },
+                  { path: 'treeview', element: <TreeviewExample /> },
+                  { path: 'typed-text', element: <TypedText /> },
+                  {
+                    path: 'videos',
+                    children: [
+                      { path: 'embed', element: <Embed /> },
+                      { path: 'react-player', element: <ReactPlayerExample /> }
+                    ]
+                  }
+                ]
+              },
+              // Reference Forms
+              {
+                path: 'forms',
+                children: [
+                  {
+                    path: 'basic',
+                    children: [
+                      { path: 'form-control', element: <FormControl /> },
+                      { path: 'input-group', element: <InputGroup /> },
+                      { path: 'select', element: <Select /> },
+                      { path: 'checks', element: <Checks /> },
+                      { path: 'range', element: <Range /> },
+                      { path: 'layout', element: <FormLayout /> }
+                    ]
+                  },
+                  {
+                    path: 'advance',
+                    children: [
+                      { path: 'advance-select', element: <AdvanceSelect /> },
+                      { path: 'date-picker', element: <DatePicker /> },
+                      { path: 'editor', element: <Editor /> },
+                      { path: 'emoji-button', element: <EmojiPickerExample /> },
+                      { path: 'file-uploader', element: <FileUploader /> },
+                      { path: 'input-mask', element: <InputMaskExample /> },
+                      { path: 'range-slider', element: <RangeSlider /> },
+                      { path: 'rating', element: <Rating /> }
+                    ]
+                  },
+                  { path: 'floating-labels', element: <FloatingLabels /> },
+                  { path: 'wizard', element: <WizardForms /> },
+                  { path: 'validation', element: <FormValidation /> }
+                ]
+              },
+              // Reference Tables
+              {
+                path: 'tables',
+                children: [
+                  { path: 'basic', element: <Suspense key="ref-tables-basic" fallback={<FalconLoader />}><Tables /></Suspense> },
+                  { path: 'advance', element: <Suspense key="ref-tables-advance" fallback={<FalconLoader />}><AdvanceTableExamples /></Suspense> }
+                ]
+              },
+              // Reference Icons
+              {
+                path: 'icons',
+                children: [
+                  { path: 'font-awesome', element: <FontAwesome /> },
+                  { path: 'react-icons', element: <ReactIcons /> }
+                ]
+              },
+              // Reference Maps
+              {
+                path: 'maps',
+                children: [
+                  { path: 'google', element: <Suspense key="ref-maps-google" fallback={<FalconLoader />}><GoogleMapExample /></Suspense> },
+                  { path: 'leaflet', element: <LeafletMapExample /> }
+                ]
+              },
+              // Reference Widgets
+              { path: 'widgets', element: <Suspense key="ref-widgets" fallback={<FalconLoader />}><Widgets /></Suspense> },
+              // Reference Charts
+              {
+                path: 'charts',
+                children: [
+                  { path: 'chartjs', element: <Suspense key="ref-charts-chartjs" fallback={<FalconLoader />}><Chartjs /></Suspense> },
+                  { path: 'd3js', element: <Suspense key="ref-charts-d3js" fallback={<FalconLoader />}><D3js /></Suspense> },
+                  {
+                    path: 'echarts',
+                    children: [
+                      { path: 'how-to-use', element: <HowToUse /> },
+                      { path: 'line-charts', element: <Suspense key="ref-echarts-line" fallback={<FalconLoader />}><LineCharts /></Suspense> },
+                      { path: 'bar-charts', element: <Suspense key="ref-echarts-bar" fallback={<FalconLoader />}><BarCharts /></Suspense> },
+                      { path: 'candlestick-charts', element: <Suspense key="ref-echarts-candlestick" fallback={<FalconLoader />}><CandlestickCharts /></Suspense> },
+                      { path: 'geo-map', element: <Suspense key="ref-echarts-geo" fallback={<FalconLoader />}><GeoMaps /></Suspense> },
+                      { path: 'scatter-charts', element: <Suspense key="ref-echarts-scatter" fallback={<FalconLoader />}><ScatterCharts /></Suspense> },
+                      { path: 'pie-charts', element: <Suspense key="ref-echarts-pie" fallback={<FalconLoader />}><PieCharts /></Suspense> },
+                      { path: 'radar-charts', element: <Suspense key="ref-echarts-radar" fallback={<FalconLoader />}><RadarCharts /></Suspense> },
+                      { path: 'heatmap-charts', element: <Suspense key="ref-echarts-heatmap" fallback={<FalconLoader />}><HeatmapCharts /></Suspense> }
+                    ]
+                  }
+                ]
+              },
+              // Reference Utilities
+              {
+                path: 'utilities',
+                children: [
+                  { path: 'background', element: <Background /> },
+                  { path: 'borders', element: <Borders /> },
+                  { path: 'colors', element: <Colors /> },
+                  { path: 'colored-links', element: <ColoredLinks /> },
+                  { path: 'display', element: <Display /> },
+                  { path: 'visibility', element: <Visibility /> },
+                  { path: 'stretched-link', element: <StretchedLink /> },
+                  { path: 'float', element: <Float /> },
+                  { path: 'position', element: <Position /> },
+                  { path: 'spacing', element: <Spacing /> },
+                  { path: 'sizing', element: <Sizing /> },
+                  { path: 'text-truncation', element: <TextTruncation /> },
+                  { path: 'typography', element: <Typography /> },
+                  { path: 'vertical-align', element: <VerticalAlign /> },
+                  { path: 'flex', element: <Flex /> },
+                  { path: 'grid', element: <Grid /> },
+                  { path: 'scroll-bar', element: <Scrollbar /> }
+                ]
+              },
+              // Reference Pages
+              {
+                path: 'pages',
+                children: [
+                  { path: 'landing', element: <Landing /> },
+                  { path: 'starter', element: <Starter /> },
+                  {
+                    path: 'pricing',
+                    children: [
+                      { path: 'default', element: <PricingDefault /> },
+                      { path: 'alt', element: <PricingAlt /> }
+                    ]
+                  },
+                  {
+                    path: 'faq',
+                    children: [
+                      { path: 'basic', element: <FaqBasic /> },
+                      { path: 'alt', element: <FaqAlt /> },
+                      { path: 'accordion', element: <FaqAccordion /> }
+                    ]
+                  },
+                  {
+                    path: 'miscellaneous',
+                    children: [
+                      { path: 'associations', element: <Associations /> },
+                      { path: 'invite-people', element: <InvitePeople /> },
+                      { path: 'privacy-policy', element: <PrivacyPolicy /> }
+                    ]
+                  },
+                  {
+                    path: 'layouts',
+                    children: [
+                      { path: 'vertical-nav', element: <Suspense key="ref-layout-vertical" fallback={<FalconLoader />}><Dashboard /></Suspense> },
+                      { path: 'top-nav', element: <Suspense key="ref-layout-top" fallback={<FalconLoader />}><Dashboard /></Suspense> },
+                      { path: 'double-top', element: <Suspense key="ref-layout-doubletop" fallback={<FalconLoader />}><Dashboard /></Suspense> },
+                      { path: 'combo-nav', element: <Suspense key="ref-layout-combo" fallback={<FalconLoader />}><Dashboard /></Suspense> }
+                    ]
+                  }
+                ]
+              },
+              // Reference Documentation
+              {
+                path: 'documentation',
+                children: [
+                  { path: 'getting-started', element: <GettingStarted /> },
+                  { path: 'configuration', element: <Configuration /> },
+                  { path: 'styling', element: <Styling /> },
+                  { path: 'dark-mode', element: <DarkMode /> },
+                  { path: 'plugins', element: <Plugins /> },
+                  { path: 'faq', element: <Faq /> },
+                  { path: 'design-file', element: <DesignFile /> },
+                  { path: 'changelog', element: <Changelog /> },
+                  { path: 'migration', element: <Migration /> }
+                ]
+              },
+              // Reference Test
+              {
+                path: 'test',
+                children: [
+                  { path: 'auth-test', element: <AuthTestPage /> },
+                  { path: 'role-navigation', element: <RoleNavigationTester /> }
+                ]
+              }
+            ]
           }
         ]
       },

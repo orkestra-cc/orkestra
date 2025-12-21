@@ -70,7 +70,7 @@ src/
 │   ├── dashboards/     # Complete dashboard layout examples
 │   ├── documentation/  # Developer guides and migration docs
 │   ├── pages/          # Example/demo page templates
-│   │   ├── asscociations/ # Associations list example
+│   │   ├── associations/ # Associations list example
 │   │   ├── faq/        # FAQ page layouts
 │   │   ├── landing/    # Landing page template
 │   │   ├── miscellaneous/ # Static pages (invite, privacy)

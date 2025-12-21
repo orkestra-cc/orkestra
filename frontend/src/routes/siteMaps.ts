@@ -1142,9 +1142,352 @@ export const documentationRoutes: RouteGroup = {
   ]
 };
 
+// Reference Library Routes - consolidated developer/AI reference materials
+export const referenceRoutes: RouteGroup = {
+  label: 'Reference Library',
+  roles: ['developer'],
+  children: [
+    {
+      name: 'Dashboards',
+      active: true,
+      icon: 'chart-pie',
+      roles: ['developer'],
+      children: [
+        { name: 'Default', to: paths.refDashboardsDefault, active: true },
+        { name: 'Analytics', to: paths.refDashboardsAnalytics, active: true },
+        { name: 'CRM', to: paths.refDashboardsCrm, active: true },
+        { name: 'SaaS', to: paths.refDashboardsSaas, active: true },
+        { name: 'Project Management', to: paths.refDashboardsProjectManagement, active: true },
+        { name: 'Support Desk', to: paths.refDashboardsSupportDesk, active: true }
+      ]
+    },
+    {
+      name: 'App Examples',
+      active: true,
+      icon: 'rocket',
+      roles: ['developer'],
+      children: [
+        { name: 'Calendar', to: paths.refAppCalendar, active: true },
+        { name: 'Chat', to: paths.refAppChat, active: true },
+        { name: 'Kanban', to: paths.refAppKanban, active: true },
+        {
+          name: 'Email',
+          active: true,
+          children: [
+            { name: 'Inbox', to: paths.refAppEmailInbox, active: true },
+            { name: 'Compose', to: paths.refAppEmailCompose, active: true },
+            { name: 'Detail', to: paths.refAppEmailDetail, active: true }
+          ]
+        },
+        {
+          name: 'Events',
+          active: true,
+          children: [
+            { name: 'Create', to: paths.refAppEventsCreate, active: true },
+            { name: 'List', to: paths.refAppEventsList, active: true },
+            { name: 'Detail', to: paths.refAppEventsDetail, active: true }
+          ]
+        },
+        {
+          name: 'Social',
+          active: true,
+          children: [
+            { name: 'Feed', to: paths.refAppSocialFeed, active: true },
+            { name: 'Activity Log', to: paths.refAppSocialActivityLog, active: true },
+            { name: 'Notifications', to: paths.refAppSocialNotifications, active: true },
+            { name: 'Followers', to: paths.refAppSocialFollowers, active: true }
+          ]
+        },
+        {
+          name: 'Support Desk',
+          active: true,
+          children: [
+            { name: 'Table View', to: paths.refAppSupportDeskTableView, active: true },
+            { name: 'Card View', to: paths.refAppSupportDeskCardView, active: true },
+            { name: 'Contacts', to: paths.refAppSupportDeskContacts, active: true },
+            { name: 'Contact Details', to: paths.refAppSupportDeskContactDetails, active: true },
+            { name: 'Tickets Preview', to: paths.refAppSupportDeskTicketsPreview, active: true },
+            { name: 'Quick Links', to: paths.refAppSupportDeskQuickLinks, active: true },
+            { name: 'Reports', to: paths.refAppSupportDeskReports, active: true }
+          ]
+        }
+      ]
+    },
+    {
+      name: 'Components',
+      active: true,
+      icon: 'puzzle-piece',
+      roles: ['developer'],
+      children: [
+        { name: 'Alerts', to: paths.refComponentsAlerts, active: true },
+        { name: 'Accordion', to: paths.refComponentsAccordion, active: true },
+        { name: 'Animated Icons', to: paths.refComponentsAnimatedIcons, active: true },
+        { name: 'Backgrounds', to: paths.refComponentsBackgrounds, active: true },
+        { name: 'Badges', to: paths.refComponentsBadges, active: true },
+        { name: 'Breadcrumbs', to: paths.refComponentsBreadcrumbs, active: true },
+        { name: 'Buttons', to: paths.refComponentsButtons, active: true },
+        { name: 'Calendar', to: paths.refComponentsCalendar, active: true },
+        { name: 'Cards', to: paths.refComponentsCards, active: true },
+        {
+          name: 'Carousel',
+          active: true,
+          children: [
+            { name: 'Bootstrap', to: paths.refComponentsCarouselBootstrap, active: true },
+            { name: 'Slick', to: paths.refComponentsCarouselSlick, active: true }
+          ]
+        },
+        { name: 'Collapse', to: paths.refComponentsCollapse, active: true },
+        { name: 'Cookie Notice', to: paths.refComponentsCookieNotice, active: true },
+        { name: 'Countup', to: paths.refComponentsCountup, active: true },
+        { name: 'Draggable', to: paths.refComponentsDraggable, active: true },
+        { name: 'Dropdowns', to: paths.refComponentsDropdowns, active: true },
+        { name: 'List Group', to: paths.refComponentsListGroup, active: true },
+        { name: 'Modals', to: paths.refComponentsModals, active: true },
+        { name: 'Offcanvas', to: paths.refComponentsOffcanvas, active: true },
+        {
+          name: 'Navs & Tabs',
+          active: true,
+          children: [
+            { name: 'Navs', to: paths.refComponentsNavs, active: true },
+            { name: 'Navbar', to: paths.refComponentsNavbar, active: true },
+            { name: 'Vertical Navbar', to: paths.refComponentsVerticalNavbar, active: true },
+            { name: 'Top Navbar', to: paths.refComponentsTopNavbar, active: true },
+            { name: 'Double Top Navbar', to: paths.refComponentsDoubleTopNavbar, active: true },
+            { name: 'Combo Navbar', to: paths.refComponentsComboNavbar, active: true },
+            { name: 'Tabs', to: paths.refComponentsTabs, active: true }
+          ]
+        },
+        {
+          name: 'Pictures',
+          active: true,
+          children: [
+            { name: 'Avatar', to: paths.refComponentsAvatar, active: true },
+            { name: 'Images', to: paths.refComponentsImages, active: true },
+            { name: 'Figures', to: paths.refComponentsFigures, active: true },
+            { name: 'Hoverbox', to: paths.refComponentsHoverbox, active: true },
+            { name: 'Lightbox', to: paths.refComponentsLightbox, active: true }
+          ]
+        },
+        { name: 'Progress Bar', to: paths.refComponentsProgressBar, active: true },
+        { name: 'Pagination', to: paths.refComponentsPagination, active: true },
+        { name: 'Placeholder', to: paths.refComponentsPlaceholder, active: true },
+        { name: 'Popovers', to: paths.refComponentsPopovers, active: true },
+        { name: 'Scrollspy', to: paths.refComponentsScrollspy, active: true },
+        { name: 'Search', to: paths.refComponentsSearch, active: true },
+        { name: 'Spinners', to: paths.refComponentsSpinners, active: true },
+        { name: 'Timeline', to: paths.refComponentsTimeline, active: true },
+        { name: 'Toasts', to: paths.refComponentsToasts, active: true },
+        { name: 'Tooltips', to: paths.refComponentsTooltips, active: true },
+        { name: 'Treeview', to: paths.refComponentsTreeview, active: true },
+        { name: 'Typed Text', to: paths.refComponentsTypedText, active: true },
+        {
+          name: 'Videos',
+          active: true,
+          children: [
+            { name: 'Embed', to: paths.refComponentsVideoEmbed, active: true },
+            { name: 'React Player', to: paths.refComponentsVideoReactPlayer, active: true }
+          ]
+        }
+      ]
+    },
+    {
+      name: 'Forms',
+      active: true,
+      icon: 'edit',
+      roles: ['developer'],
+      children: [
+        {
+          name: 'Basic',
+          active: true,
+          children: [
+            { name: 'Form Control', to: paths.refFormsFormControl, active: true },
+            { name: 'Input Group', to: paths.refFormsInputGroup, active: true },
+            { name: 'Select', to: paths.refFormsSelect, active: true },
+            { name: 'Checks', to: paths.refFormsChecks, active: true },
+            { name: 'Range', to: paths.refFormsRange, active: true },
+            { name: 'Layout', to: paths.refFormsLayout, active: true }
+          ]
+        },
+        {
+          name: 'Advance',
+          active: true,
+          children: [
+            { name: 'Advance Select', to: paths.refFormsAdvanceSelect, active: true },
+            { name: 'Date Picker', to: paths.refFormsDatePicker, active: true },
+            { name: 'Editor', to: paths.refFormsEditor, active: true },
+            { name: 'Emoji Button', to: paths.refFormsEmojiButton, active: true },
+            { name: 'File Uploader', to: paths.refFormsFileUploader, active: true },
+            { name: 'Input Mask', to: paths.refFormsInputMask, active: true },
+            { name: 'Range Slider', to: paths.refFormsRangeSlider, active: true },
+            { name: 'Rating', to: paths.refFormsRating, active: true }
+          ]
+        },
+        { name: 'Floating Labels', to: paths.refFormsFloatingLabels, active: true },
+        { name: 'Wizard', to: paths.refFormsWizard, active: true },
+        { name: 'Validation', to: paths.refFormsValidation, active: true }
+      ]
+    },
+    {
+      name: 'Tables',
+      active: true,
+      icon: 'table',
+      roles: ['developer'],
+      children: [
+        { name: 'Basic', to: paths.refTablesBasic, active: true },
+        { name: 'Advance', to: paths.refTablesAdvance, active: true }
+      ]
+    },
+    {
+      name: 'Icons',
+      active: true,
+      icon: 'icons',
+      roles: ['developer'],
+      children: [
+        { name: 'Font Awesome', to: paths.refIconsFontAwesome, active: true },
+        { name: 'React Icons', to: paths.refIconsReactIcons, active: true }
+      ]
+    },
+    {
+      name: 'Maps',
+      active: true,
+      icon: 'map',
+      roles: ['developer'],
+      children: [
+        { name: 'Google', to: paths.refMapsGoogle, active: true },
+        { name: 'Leaflet', to: paths.refMapsLeaflet, active: true }
+      ]
+    },
+    { name: 'Widgets', to: paths.refWidgets, active: true, icon: 'th', roles: ['developer'] },
+    {
+      name: 'Charts',
+      active: true,
+      icon: 'chart-line',
+      roles: ['developer'],
+      children: [
+        { name: 'Chart.js', to: paths.refChartsChartjs, active: true },
+        { name: 'D3.js', to: paths.refChartsD3js, active: true },
+        {
+          name: 'ECharts',
+          active: true,
+          children: [
+            { name: 'How to Use', to: paths.refChartsEchartsHowToUse, active: true },
+            { name: 'Line Charts', to: paths.refChartsEchartsLine, active: true },
+            { name: 'Bar Charts', to: paths.refChartsEchartsBar, active: true },
+            { name: 'Candlestick', to: paths.refChartsEchartsCandlestick, active: true },
+            { name: 'Geo Map', to: paths.refChartsEchartsGeoMap, active: true },
+            { name: 'Scatter Charts', to: paths.refChartsEchartsScatter, active: true },
+            { name: 'Pie Charts', to: paths.refChartsEchartsPie, active: true },
+            { name: 'Radar Charts', to: paths.refChartsEchartsRadar, active: true },
+            { name: 'Heatmap', to: paths.refChartsEchartsHeatmap, active: true }
+          ]
+        }
+      ]
+    },
+    {
+      name: 'Utilities',
+      active: true,
+      icon: 'fire',
+      roles: ['developer'],
+      children: [
+        { name: 'Background', to: paths.refUtilitiesBackground, active: true },
+        { name: 'Borders', to: paths.refUtilitiesBorders, active: true },
+        { name: 'Colors', to: paths.refUtilitiesColors, active: true },
+        { name: 'Colored Links', to: paths.refUtilitiesColoredLinks, active: true },
+        { name: 'Display', to: paths.refUtilitiesDisplay, active: true },
+        { name: 'Visibility', to: paths.refUtilitiesVisibility, active: true },
+        { name: 'Stretched Link', to: paths.refUtilitiesStretchedLink, active: true },
+        { name: 'Float', to: paths.refUtilitiesFloat, active: true },
+        { name: 'Position', to: paths.refUtilitiesPosition, active: true },
+        { name: 'Spacing', to: paths.refUtilitiesSpacing, active: true },
+        { name: 'Sizing', to: paths.refUtilitiesSizing, active: true },
+        { name: 'Text Truncation', to: paths.refUtilitiesTextTruncation, active: true },
+        { name: 'Typography', to: paths.refUtilitiesTypography, active: true },
+        { name: 'Vertical Align', to: paths.refUtilitiesVerticalAlign, active: true },
+        { name: 'Flex', to: paths.refUtilitiesFlex, active: true },
+        { name: 'Grid', to: paths.refUtilitiesGrid, active: true },
+        { name: 'Scroll Bar', to: paths.refUtilitiesScrollBar, active: true }
+      ]
+    },
+    {
+      name: 'Pages',
+      active: true,
+      icon: 'file-alt',
+      roles: ['developer'],
+      children: [
+        { name: 'Landing', to: paths.refPagesLanding, active: true },
+        { name: 'Starter', to: paths.refPagesStarter, active: true },
+        {
+          name: 'Pricing',
+          active: true,
+          children: [
+            { name: 'Default', to: paths.refPagesPricingDefault, active: true },
+            { name: 'Alt', to: paths.refPagesPricingAlt, active: true }
+          ]
+        },
+        {
+          name: 'FAQ',
+          active: true,
+          children: [
+            { name: 'Basic', to: paths.refPagesFaqBasic, active: true },
+            { name: 'Alt', to: paths.refPagesFaqAlt, active: true },
+            { name: 'Accordion', to: paths.refPagesFaqAccordion, active: true }
+          ]
+        },
+        {
+          name: 'Miscellaneous',
+          active: true,
+          children: [
+            { name: 'Associations', to: paths.refPagesMiscAssociations, active: true },
+            { name: 'Invite People', to: paths.refPagesMiscInvitePeople, active: true },
+            { name: 'Privacy Policy', to: paths.refPagesMiscPrivacyPolicy, active: true }
+          ]
+        },
+        {
+          name: 'Layouts',
+          active: true,
+          children: [
+            { name: 'Vertical Nav', to: paths.refPagesLayoutVerticalNav, active: true },
+            { name: 'Top Nav', to: paths.refPagesLayoutTopNav, active: true },
+            { name: 'Double Top', to: paths.refPagesLayoutDoubleTop, active: true },
+            { name: 'Combo Nav', to: paths.refPagesLayoutComboNav, active: true }
+          ]
+        }
+      ]
+    },
+    {
+      name: 'Documentation',
+      active: true,
+      icon: 'book',
+      roles: ['developer'],
+      children: [
+        { name: 'Getting Started', to: paths.refDocGettingStarted, active: true },
+        { name: 'Configuration', to: paths.refDocConfiguration, active: true },
+        { name: 'Styling', to: paths.refDocStyling, active: true },
+        { name: 'Dark Mode', to: paths.refDocDarkMode, active: true },
+        { name: 'Plugins', to: paths.refDocPlugins, active: true },
+        { name: 'FAQ', to: paths.refDocFaq, active: true },
+        { name: 'Design File', to: paths.refDocDesignFile, active: true },
+        { name: 'Changelog', to: paths.refDocChangelog, active: true },
+        { name: 'Migration', to: paths.refDocMigration, active: true }
+      ]
+    },
+    {
+      name: 'Test',
+      active: true,
+      icon: 'flask',
+      roles: ['developer'],
+      children: [
+        { name: 'Auth Test', to: paths.refTestAuth, active: true },
+        { name: 'Role Navigation', to: paths.refTestRoleNavigation, active: true }
+      ]
+    }
+  ]
+};
+
+// Developer Tools Routes - system utilities for development
 export const developmentRoutes: RouteGroup = {
   label: 'Development',
-  roles: ['developer'], // Only CEO can access development routes
+  roles: ['developer'],
   children: [
     {
       name: 'Developer Tools',
@@ -1188,48 +1531,6 @@ export const developmentRoutes: RouteGroup = {
           roles: ['developer']
         }
       ]
-    },
-    {
-      name: 'Dashboard',
-      active: true,
-      icon: 'chart-pie',
-      roles: ['developer'], // Dashboard accessible to all
-      children: dashboardRoutes.children[0].children
-    },
-    {
-      name: 'App',
-      active: true,
-      icon: 'rocket',
-      roles: ['developer'], // App functionality accessible to all
-      children: appRoutes.children
-    },
-    {
-      name: 'Pages',
-      active: true,
-      icon: 'file-alt',
-      roles: ['developer'], // Page management for managers+
-      children: pagesRoutes.children
-    },
-    {
-      name: 'Modules',
-      active: true,
-      icon: 'puzzle-piece',
-      roles: ['developer'], // Modules for administrators+
-      children: modulesRoutes.children
-    },
-    {
-      name: 'Test',
-      active: true,
-      icon: 'shield-alt',
-      roles: ['developer'], // Test routes for developers only
-      children: testRoutes.children
-    },
-    {
-      name: 'Documentation',
-      active: true,
-      icon: 'book',
-      roles: ['developer'], // Documentation for administrators+
-      children: documentationRoutes.children
     }
   ]
 };
@@ -1411,6 +1712,7 @@ const routeGroups: RouteGroup[] = [
   superAdminRoutes,
   adminRoutes,
   operatorRoutes,
+  referenceRoutes,
   developmentRoutes
 ];
 

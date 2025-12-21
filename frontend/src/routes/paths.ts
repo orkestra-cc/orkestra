@@ -246,12 +246,167 @@ export interface AppPaths {
   featureFlags: string;
 
   // Reference routes (developer-only)
-  refDashboards: string;
-  refComponents: string;
-  refCharts: string;
-  refUtilities: string;
-  refDocumentation: string;
-  refTest: string;
+  // Reference Dashboards
+  refDashboardsDefault: string;
+  refDashboardsAnalytics: string;
+  refDashboardsCrm: string;
+  refDashboardsSaas: string;
+  refDashboardsProjectManagement: string;
+  refDashboardsSupportDesk: string;
+  // Reference App Examples
+  refAppCalendar: string;
+  refAppChat: string;
+  refAppKanban: string;
+  refAppEmailInbox: string;
+  refAppEmailCompose: string;
+  refAppEmailDetail: string;
+  refAppEventsCreate: string;
+  refAppEventsList: string;
+  refAppEventsDetail: string;
+  refAppSocialFeed: string;
+  refAppSocialActivityLog: string;
+  refAppSocialNotifications: string;
+  refAppSocialFollowers: string;
+  refAppSupportDeskTableView: string;
+  refAppSupportDeskCardView: string;
+  refAppSupportDeskContacts: string;
+  refAppSupportDeskContactDetails: string;
+  refAppSupportDeskTicketsPreview: string;
+  refAppSupportDeskQuickLinks: string;
+  refAppSupportDeskReports: string;
+  // Reference Components - UI
+  refComponentsAlerts: string;
+  refComponentsAccordion: string;
+  refComponentsAnimatedIcons: string;
+  refComponentsBackgrounds: string;
+  refComponentsBadges: string;
+  refComponentsBreadcrumbs: string;
+  refComponentsButtons: string;
+  refComponentsCalendar: string;
+  refComponentsCards: string;
+  refComponentsCarouselBootstrap: string;
+  refComponentsCarouselSlick: string;
+  refComponentsCollapse: string;
+  refComponentsCookieNotice: string;
+  refComponentsCountup: string;
+  refComponentsDraggable: string;
+  refComponentsDropdowns: string;
+  refComponentsListGroup: string;
+  refComponentsModals: string;
+  refComponentsOffcanvas: string;
+  refComponentsNavs: string;
+  refComponentsNavbar: string;
+  refComponentsVerticalNavbar: string;
+  refComponentsTopNavbar: string;
+  refComponentsDoubleTopNavbar: string;
+  refComponentsComboNavbar: string;
+  refComponentsTabs: string;
+  refComponentsAvatar: string;
+  refComponentsImages: string;
+  refComponentsFigures: string;
+  refComponentsHoverbox: string;
+  refComponentsLightbox: string;
+  refComponentsProgressBar: string;
+  refComponentsPagination: string;
+  refComponentsPlaceholder: string;
+  refComponentsPopovers: string;
+  refComponentsScrollspy: string;
+  refComponentsSearch: string;
+  refComponentsSpinners: string;
+  refComponentsTimeline: string;
+  refComponentsToasts: string;
+  refComponentsTooltips: string;
+  refComponentsTreeview: string;
+  refComponentsTypedText: string;
+  refComponentsVideoEmbed: string;
+  refComponentsVideoReactPlayer: string;
+  // Reference Components - Forms
+  refFormsFormControl: string;
+  refFormsInputGroup: string;
+  refFormsSelect: string;
+  refFormsChecks: string;
+  refFormsRange: string;
+  refFormsLayout: string;
+  refFormsAdvanceSelect: string;
+  refFormsDatePicker: string;
+  refFormsEditor: string;
+  refFormsEmojiButton: string;
+  refFormsFileUploader: string;
+  refFormsInputMask: string;
+  refFormsRangeSlider: string;
+  refFormsRating: string;
+  refFormsFloatingLabels: string;
+  refFormsWizard: string;
+  refFormsValidation: string;
+  // Reference Components - Tables
+  refTablesBasic: string;
+  refTablesAdvance: string;
+  // Reference Components - Icons
+  refIconsFontAwesome: string;
+  refIconsReactIcons: string;
+  // Reference Components - Maps
+  refMapsGoogle: string;
+  refMapsLeaflet: string;
+  // Reference Components - Widgets
+  refWidgets: string;
+  // Reference Charts
+  refChartsChartjs: string;
+  refChartsD3js: string;
+  refChartsEchartsHowToUse: string;
+  refChartsEchartsLine: string;
+  refChartsEchartsBar: string;
+  refChartsEchartsCandlestick: string;
+  refChartsEchartsGeoMap: string;
+  refChartsEchartsScatter: string;
+  refChartsEchartsPie: string;
+  refChartsEchartsRadar: string;
+  refChartsEchartsHeatmap: string;
+  // Reference Utilities
+  refUtilitiesBackground: string;
+  refUtilitiesBorders: string;
+  refUtilitiesColors: string;
+  refUtilitiesColoredLinks: string;
+  refUtilitiesDisplay: string;
+  refUtilitiesVisibility: string;
+  refUtilitiesStretchedLink: string;
+  refUtilitiesFloat: string;
+  refUtilitiesPosition: string;
+  refUtilitiesSpacing: string;
+  refUtilitiesSizing: string;
+  refUtilitiesTextTruncation: string;
+  refUtilitiesTypography: string;
+  refUtilitiesVerticalAlign: string;
+  refUtilitiesFlex: string;
+  refUtilitiesGrid: string;
+  refUtilitiesScrollBar: string;
+  // Reference Pages
+  refPagesLanding: string;
+  refPagesStarter: string;
+  refPagesPricingDefault: string;
+  refPagesPricingAlt: string;
+  refPagesFaqBasic: string;
+  refPagesFaqAlt: string;
+  refPagesFaqAccordion: string;
+  refPagesMiscAssociations: string;
+  refPagesMiscInvitePeople: string;
+  refPagesMiscPrivacyPolicy: string;
+  refPagesLayoutVerticalNav: string;
+  refPagesLayoutTopNav: string;
+  refPagesLayoutDoubleTop: string;
+  refPagesLayoutComboNav: string;
+  // Reference Documentation
+  refDocGettingStarted: string;
+  refDocConfiguration: string;
+  refDocStyling: string;
+  refDocDarkMode: string;
+  refDocPlugins: string;
+  refDocFaq: string;
+  refDocDesignFile: string;
+  refDocChangelog: string;
+  refDocMigration: string;
+  // Reference Test
+  refTestAuth: string;
+  refTestRoleNavigation: string;
 }
 
 const paths: AppPaths = {
@@ -429,12 +584,167 @@ const paths: AppPaths = {
   featureFlags: `/${rootPaths.developerRoot}/feature-flags`,
 
   // Reference routes (developer-only)
-  refDashboards: `/${rootPaths.referenceRoot}/dashboards`,
-  refComponents: `/${rootPaths.referenceRoot}/components`,
-  refCharts: `/${rootPaths.referenceRoot}/charts`,
-  refUtilities: `/${rootPaths.referenceRoot}/utilities`,
-  refDocumentation: `/${rootPaths.referenceRoot}/documentation`,
-  refTest: `/${rootPaths.referenceRoot}/test`
+  // Reference Dashboards
+  refDashboardsDefault: `/${rootPaths.referenceRoot}/dashboards/default`,
+  refDashboardsAnalytics: `/${rootPaths.referenceRoot}/dashboards/analytics`,
+  refDashboardsCrm: `/${rootPaths.referenceRoot}/dashboards/crm`,
+  refDashboardsSaas: `/${rootPaths.referenceRoot}/dashboards/saas`,
+  refDashboardsProjectManagement: `/${rootPaths.referenceRoot}/dashboards/project-management`,
+  refDashboardsSupportDesk: `/${rootPaths.referenceRoot}/dashboards/support-desk`,
+  // Reference App Examples
+  refAppCalendar: `/${rootPaths.referenceRoot}/app-examples/calendar`,
+  refAppChat: `/${rootPaths.referenceRoot}/app-examples/chat`,
+  refAppKanban: `/${rootPaths.referenceRoot}/app-examples/kanban`,
+  refAppEmailInbox: `/${rootPaths.referenceRoot}/app-examples/email/inbox`,
+  refAppEmailCompose: `/${rootPaths.referenceRoot}/app-examples/email/compose`,
+  refAppEmailDetail: `/${rootPaths.referenceRoot}/app-examples/email/detail`,
+  refAppEventsCreate: `/${rootPaths.referenceRoot}/app-examples/events/create`,
+  refAppEventsList: `/${rootPaths.referenceRoot}/app-examples/events/list`,
+  refAppEventsDetail: `/${rootPaths.referenceRoot}/app-examples/events/detail`,
+  refAppSocialFeed: `/${rootPaths.referenceRoot}/app-examples/social/feed`,
+  refAppSocialActivityLog: `/${rootPaths.referenceRoot}/app-examples/social/activity-log`,
+  refAppSocialNotifications: `/${rootPaths.referenceRoot}/app-examples/social/notifications`,
+  refAppSocialFollowers: `/${rootPaths.referenceRoot}/app-examples/social/followers`,
+  refAppSupportDeskTableView: `/${rootPaths.referenceRoot}/app-examples/support-desk/table-view`,
+  refAppSupportDeskCardView: `/${rootPaths.referenceRoot}/app-examples/support-desk/card-view`,
+  refAppSupportDeskContacts: `/${rootPaths.referenceRoot}/app-examples/support-desk/contacts`,
+  refAppSupportDeskContactDetails: `/${rootPaths.referenceRoot}/app-examples/support-desk/contact-details`,
+  refAppSupportDeskTicketsPreview: `/${rootPaths.referenceRoot}/app-examples/support-desk/tickets-preview`,
+  refAppSupportDeskQuickLinks: `/${rootPaths.referenceRoot}/app-examples/support-desk/quick-links`,
+  refAppSupportDeskReports: `/${rootPaths.referenceRoot}/app-examples/support-desk/reports`,
+  // Reference Components - UI
+  refComponentsAlerts: `/${rootPaths.referenceRoot}/components/alerts`,
+  refComponentsAccordion: `/${rootPaths.referenceRoot}/components/accordion`,
+  refComponentsAnimatedIcons: `/${rootPaths.referenceRoot}/components/animated-icons`,
+  refComponentsBackgrounds: `/${rootPaths.referenceRoot}/components/backgrounds`,
+  refComponentsBadges: `/${rootPaths.referenceRoot}/components/badges`,
+  refComponentsBreadcrumbs: `/${rootPaths.referenceRoot}/components/breadcrumbs`,
+  refComponentsButtons: `/${rootPaths.referenceRoot}/components/buttons`,
+  refComponentsCalendar: `/${rootPaths.referenceRoot}/components/calendar`,
+  refComponentsCards: `/${rootPaths.referenceRoot}/components/cards`,
+  refComponentsCarouselBootstrap: `/${rootPaths.referenceRoot}/components/carousel/bootstrap`,
+  refComponentsCarouselSlick: `/${rootPaths.referenceRoot}/components/carousel/slick`,
+  refComponentsCollapse: `/${rootPaths.referenceRoot}/components/collapse`,
+  refComponentsCookieNotice: `/${rootPaths.referenceRoot}/components/cookie-notice`,
+  refComponentsCountup: `/${rootPaths.referenceRoot}/components/countup`,
+  refComponentsDraggable: `/${rootPaths.referenceRoot}/components/draggable`,
+  refComponentsDropdowns: `/${rootPaths.referenceRoot}/components/dropdowns`,
+  refComponentsListGroup: `/${rootPaths.referenceRoot}/components/list-group`,
+  refComponentsModals: `/${rootPaths.referenceRoot}/components/modals`,
+  refComponentsOffcanvas: `/${rootPaths.referenceRoot}/components/offcanvas`,
+  refComponentsNavs: `/${rootPaths.referenceRoot}/components/navs-and-tabs/navs`,
+  refComponentsNavbar: `/${rootPaths.referenceRoot}/components/navs-and-tabs/navbar`,
+  refComponentsVerticalNavbar: `/${rootPaths.referenceRoot}/components/navs-and-tabs/vertical-navbar`,
+  refComponentsTopNavbar: `/${rootPaths.referenceRoot}/components/navs-and-tabs/top-navbar`,
+  refComponentsDoubleTopNavbar: `/${rootPaths.referenceRoot}/components/navs-and-tabs/double-top-navbar`,
+  refComponentsComboNavbar: `/${rootPaths.referenceRoot}/components/navs-and-tabs/combo-navbar`,
+  refComponentsTabs: `/${rootPaths.referenceRoot}/components/navs-and-tabs/tabs`,
+  refComponentsAvatar: `/${rootPaths.referenceRoot}/components/pictures/avatar`,
+  refComponentsImages: `/${rootPaths.referenceRoot}/components/pictures/images`,
+  refComponentsFigures: `/${rootPaths.referenceRoot}/components/pictures/figures`,
+  refComponentsHoverbox: `/${rootPaths.referenceRoot}/components/pictures/hoverbox`,
+  refComponentsLightbox: `/${rootPaths.referenceRoot}/components/pictures/lightbox`,
+  refComponentsProgressBar: `/${rootPaths.referenceRoot}/components/progress-bar`,
+  refComponentsPagination: `/${rootPaths.referenceRoot}/components/pagination`,
+  refComponentsPlaceholder: `/${rootPaths.referenceRoot}/components/placeholder`,
+  refComponentsPopovers: `/${rootPaths.referenceRoot}/components/popovers`,
+  refComponentsScrollspy: `/${rootPaths.referenceRoot}/components/scrollspy`,
+  refComponentsSearch: `/${rootPaths.referenceRoot}/components/search`,
+  refComponentsSpinners: `/${rootPaths.referenceRoot}/components/spinners`,
+  refComponentsTimeline: `/${rootPaths.referenceRoot}/components/timeline`,
+  refComponentsToasts: `/${rootPaths.referenceRoot}/components/toasts`,
+  refComponentsTooltips: `/${rootPaths.referenceRoot}/components/tooltips`,
+  refComponentsTreeview: `/${rootPaths.referenceRoot}/components/treeview`,
+  refComponentsTypedText: `/${rootPaths.referenceRoot}/components/typed-text`,
+  refComponentsVideoEmbed: `/${rootPaths.referenceRoot}/components/videos/embed`,
+  refComponentsVideoReactPlayer: `/${rootPaths.referenceRoot}/components/videos/react-player`,
+  // Reference Components - Forms
+  refFormsFormControl: `/${rootPaths.referenceRoot}/forms/basic/form-control`,
+  refFormsInputGroup: `/${rootPaths.referenceRoot}/forms/basic/input-group`,
+  refFormsSelect: `/${rootPaths.referenceRoot}/forms/basic/select`,
+  refFormsChecks: `/${rootPaths.referenceRoot}/forms/basic/checks`,
+  refFormsRange: `/${rootPaths.referenceRoot}/forms/basic/range`,
+  refFormsLayout: `/${rootPaths.referenceRoot}/forms/basic/layout`,
+  refFormsAdvanceSelect: `/${rootPaths.referenceRoot}/forms/advance/advance-select`,
+  refFormsDatePicker: `/${rootPaths.referenceRoot}/forms/advance/date-picker`,
+  refFormsEditor: `/${rootPaths.referenceRoot}/forms/advance/editor`,
+  refFormsEmojiButton: `/${rootPaths.referenceRoot}/forms/advance/emoji-button`,
+  refFormsFileUploader: `/${rootPaths.referenceRoot}/forms/advance/file-uploader`,
+  refFormsInputMask: `/${rootPaths.referenceRoot}/forms/advance/input-mask`,
+  refFormsRangeSlider: `/${rootPaths.referenceRoot}/forms/advance/range-slider`,
+  refFormsRating: `/${rootPaths.referenceRoot}/forms/advance/rating`,
+  refFormsFloatingLabels: `/${rootPaths.referenceRoot}/forms/floating-labels`,
+  refFormsWizard: `/${rootPaths.referenceRoot}/forms/wizard`,
+  refFormsValidation: `/${rootPaths.referenceRoot}/forms/validation`,
+  // Reference Components - Tables
+  refTablesBasic: `/${rootPaths.referenceRoot}/tables/basic`,
+  refTablesAdvance: `/${rootPaths.referenceRoot}/tables/advance`,
+  // Reference Components - Icons
+  refIconsFontAwesome: `/${rootPaths.referenceRoot}/icons/font-awesome`,
+  refIconsReactIcons: `/${rootPaths.referenceRoot}/icons/react-icons`,
+  // Reference Components - Maps
+  refMapsGoogle: `/${rootPaths.referenceRoot}/maps/google`,
+  refMapsLeaflet: `/${rootPaths.referenceRoot}/maps/leaflet`,
+  // Reference Components - Widgets
+  refWidgets: `/${rootPaths.referenceRoot}/widgets`,
+  // Reference Charts
+  refChartsChartjs: `/${rootPaths.referenceRoot}/charts/chartjs`,
+  refChartsD3js: `/${rootPaths.referenceRoot}/charts/d3js`,
+  refChartsEchartsHowToUse: `/${rootPaths.referenceRoot}/charts/echarts/how-to-use`,
+  refChartsEchartsLine: `/${rootPaths.referenceRoot}/charts/echarts/line-charts`,
+  refChartsEchartsBar: `/${rootPaths.referenceRoot}/charts/echarts/bar-charts`,
+  refChartsEchartsCandlestick: `/${rootPaths.referenceRoot}/charts/echarts/candlestick-charts`,
+  refChartsEchartsGeoMap: `/${rootPaths.referenceRoot}/charts/echarts/geo-map`,
+  refChartsEchartsScatter: `/${rootPaths.referenceRoot}/charts/echarts/scatter-charts`,
+  refChartsEchartsPie: `/${rootPaths.referenceRoot}/charts/echarts/pie-charts`,
+  refChartsEchartsRadar: `/${rootPaths.referenceRoot}/charts/echarts/radar-charts`,
+  refChartsEchartsHeatmap: `/${rootPaths.referenceRoot}/charts/echarts/heatmap-charts`,
+  // Reference Utilities
+  refUtilitiesBackground: `/${rootPaths.referenceRoot}/utilities/background`,
+  refUtilitiesBorders: `/${rootPaths.referenceRoot}/utilities/borders`,
+  refUtilitiesColors: `/${rootPaths.referenceRoot}/utilities/colors`,
+  refUtilitiesColoredLinks: `/${rootPaths.referenceRoot}/utilities/colored-links`,
+  refUtilitiesDisplay: `/${rootPaths.referenceRoot}/utilities/display`,
+  refUtilitiesVisibility: `/${rootPaths.referenceRoot}/utilities/visibility`,
+  refUtilitiesStretchedLink: `/${rootPaths.referenceRoot}/utilities/stretched-link`,
+  refUtilitiesFloat: `/${rootPaths.referenceRoot}/utilities/float`,
+  refUtilitiesPosition: `/${rootPaths.referenceRoot}/utilities/position`,
+  refUtilitiesSpacing: `/${rootPaths.referenceRoot}/utilities/spacing`,
+  refUtilitiesSizing: `/${rootPaths.referenceRoot}/utilities/sizing`,
+  refUtilitiesTextTruncation: `/${rootPaths.referenceRoot}/utilities/text-truncation`,
+  refUtilitiesTypography: `/${rootPaths.referenceRoot}/utilities/typography`,
+  refUtilitiesVerticalAlign: `/${rootPaths.referenceRoot}/utilities/vertical-align`,
+  refUtilitiesFlex: `/${rootPaths.referenceRoot}/utilities/flex`,
+  refUtilitiesGrid: `/${rootPaths.referenceRoot}/utilities/grid`,
+  refUtilitiesScrollBar: `/${rootPaths.referenceRoot}/utilities/scroll-bar`,
+  // Reference Pages
+  refPagesLanding: `/${rootPaths.referenceRoot}/pages/landing`,
+  refPagesStarter: `/${rootPaths.referenceRoot}/pages/starter`,
+  refPagesPricingDefault: `/${rootPaths.referenceRoot}/pages/pricing/default`,
+  refPagesPricingAlt: `/${rootPaths.referenceRoot}/pages/pricing/alt`,
+  refPagesFaqBasic: `/${rootPaths.referenceRoot}/pages/faq/basic`,
+  refPagesFaqAlt: `/${rootPaths.referenceRoot}/pages/faq/alt`,
+  refPagesFaqAccordion: `/${rootPaths.referenceRoot}/pages/faq/accordion`,
+  refPagesMiscAssociations: `/${rootPaths.referenceRoot}/pages/miscellaneous/associations`,
+  refPagesMiscInvitePeople: `/${rootPaths.referenceRoot}/pages/miscellaneous/invite-people`,
+  refPagesMiscPrivacyPolicy: `/${rootPaths.referenceRoot}/pages/miscellaneous/privacy-policy`,
+  refPagesLayoutVerticalNav: `/${rootPaths.referenceRoot}/pages/layouts/vertical-nav`,
+  refPagesLayoutTopNav: `/${rootPaths.referenceRoot}/pages/layouts/top-nav`,
+  refPagesLayoutDoubleTop: `/${rootPaths.referenceRoot}/pages/layouts/double-top`,
+  refPagesLayoutComboNav: `/${rootPaths.referenceRoot}/pages/layouts/combo-nav`,
+  // Reference Documentation
+  refDocGettingStarted: `/${rootPaths.referenceRoot}/documentation/getting-started`,
+  refDocConfiguration: `/${rootPaths.referenceRoot}/documentation/configuration`,
+  refDocStyling: `/${rootPaths.referenceRoot}/documentation/styling`,
+  refDocDarkMode: `/${rootPaths.referenceRoot}/documentation/dark-mode`,
+  refDocPlugins: `/${rootPaths.referenceRoot}/documentation/plugins`,
+  refDocFaq: `/${rootPaths.referenceRoot}/documentation/faq`,
+  refDocDesignFile: `/${rootPaths.referenceRoot}/documentation/design-file`,
+  refDocChangelog: `/${rootPaths.referenceRoot}/documentation/changelog`,
+  refDocMigration: `/${rootPaths.referenceRoot}/documentation/migration`,
+  // Reference Test
+  refTestAuth: `/${rootPaths.referenceRoot}/test/auth-test`,
+  refTestRoleNavigation: `/${rootPaths.referenceRoot}/test/role-navigation`
 };
 
 export default paths;
