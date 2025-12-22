@@ -11,7 +11,7 @@ import { useFeedContext } from 'providers/FeedProvider';
 
 interface FeedCardFooterProps {
   id: string | number;
-  countLCS?: { like: number; comment?: number; share?: number };
+  countLCS?: { like?: number; comment?: number; share?: number };
   reactions?: {
     like?: boolean;
     comment?: boolean;

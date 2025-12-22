@@ -1,5 +1,5 @@
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import coverSrc from 'assets/img/orkestra/orkestra_azienda_e_servizi_8.jpg';
+import coverSrc from 'assets/img/generic/bg-1.jpg';
 import Flex from 'components/common/Flex';
 
 import { Col, Row, Badge } from 'react-bootstrap';

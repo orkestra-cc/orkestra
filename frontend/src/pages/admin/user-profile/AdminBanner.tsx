@@ -1,5 +1,5 @@
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import coverSrc from 'assets/img/orkestra/orkestra-tubes.jpg';
+import coverSrc from 'assets/img/generic/bg-1.jpg';
 import defaultAvatar from 'assets/img/team/2.jpg';
 import Flex from 'components/common/Flex';
 import VerifiedBadge from 'components/common/VerifiedBadge';

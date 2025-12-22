@@ -11,11 +11,11 @@ import { IconName } from '@fortawesome/fontawesome-svg-core';
 interface FeedCardHeaderProps {
   status?: string;
   avatarSrc: string;
-  time: string;
+  time?: string;
   name: string;
   share?: string;
-  location: string;
-  privacy: string;
+  location?: string;
+  privacy?: string;
 }
 
 const FeedCardHeader = ({
