@@ -21,7 +21,9 @@
       "mcp__chrome-devtools__click",
       "mcp__chrome-devtools__get_console_message",
       "mcp__chrome-devtools__evaluate_script",
-      "mcp__chrome-devtools__press_key"
+      "mcp__chrome-devtools__press_key",
+      "Bash(npm run build:*)",
+      "Bash(npm install:*)"
     ]
   },
   "enabledMcpjsonServers": [
