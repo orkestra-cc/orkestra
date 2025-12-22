@@ -152,8 +152,7 @@ export interface AppPaths {
   floatingLabels: string;
   wizard: string;
   validation: string;
-  basicTables: string;
-  advanceTables: string;
+  tables: string;
   chartjs: string;
   d3js: string;
   echartsHowToUse: string;
@@ -339,8 +338,7 @@ export interface AppPaths {
   refFormsWizard: string;
   refFormsValidation: string;
   // Reference Components - Tables
-  refTablesBasic: string;
-  refTablesAdvance: string;
+  refTables: string;
   // Reference Components - Icons
   refIconsFontAwesome: string;
   refIconsReactIcons: string;
@@ -489,8 +487,7 @@ const paths: AppPaths = {
   floatingLabels: `/${rootPaths.formsRoot}/floating-labels`,
   wizard: `/${rootPaths.formsRoot}/wizard`,
   validation: `/${rootPaths.formsRoot}/validation`,
-  basicTables: `/${rootPaths.tableRoot}/basic-tables`,
-  advanceTables: `/${rootPaths.tableRoot}/advance-tables`,
+  tables: `/${rootPaths.tableRoot}`,
   chartjs: `/${rootPaths.chartsRoot}/chartjs`,
   d3js: `/${rootPaths.chartsRoot}/d3js`,
   echartsHowToUse: `/${rootPaths.chartsRoot}/${rootPaths.echartsRoot}/how-to-use`,
@@ -677,8 +674,7 @@ const paths: AppPaths = {
   refFormsWizard: `/${rootPaths.referenceRoot}/forms/wizard`,
   refFormsValidation: `/${rootPaths.referenceRoot}/forms/validation`,
   // Reference Components - Tables
-  refTablesBasic: `/${rootPaths.referenceRoot}/tables/basic`,
-  refTablesAdvance: `/${rootPaths.referenceRoot}/tables/advance`,
+  refTables: `/${rootPaths.referenceRoot}/tables`,
   // Reference Components - Icons
   refIconsFontAwesome: `/${rootPaths.referenceRoot}/icons/font-awesome`,
   refIconsReactIcons: `/${rootPaths.referenceRoot}/icons/react-icons`,

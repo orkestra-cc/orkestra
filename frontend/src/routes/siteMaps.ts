@@ -488,18 +488,7 @@ export const modulesRoutes: RouteGroup = {
       name: 'Tables',
       icon: 'table',
       active: true,
-      children: [
-        {
-          name: 'Basic tables',
-          to: paths.basicTables,
-          active: true
-        },
-        {
-          name: 'Advance tables',
-          to: paths.advanceTables,
-          active: true
-        }
-      ]
+      to: paths.tables
     },
     {
       name: 'Charts',
@@ -1332,10 +1321,7 @@ export const referenceRoutes: RouteGroup = {
       active: true,
       icon: 'table',
       roles: ['developer'],
-      children: [
-        { name: 'Basic', to: paths.refTablesBasic, active: true },
-        { name: 'Advance', to: paths.refTablesAdvance, active: true }
-      ]
+      to: paths.refTables
     },
     {
       name: 'Icons',
@@ -1489,6 +1475,13 @@ export const developmentRoutes: RouteGroup = {
   label: 'Development',
   roles: ['developer'],
   children: [
+    {
+      name: 'Tables Reference',
+      active: true,
+      icon: 'table',
+      to: paths.refTables,
+      roles: ['developer']
+    },
     {
       name: 'Developer Tools',
       active: true,

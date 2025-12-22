@@ -99,9 +99,6 @@ const Settings = lazy(() => import('pages/user/settings/Settings'));
 const Feed = lazy(() => import('reference/app-examples/social/feed/Feed'));
 const Placeholder = lazy(() => import('reference/components/ui/Placeholder'));
 const Lightbox = lazy(() => import('reference/components/media/Lightbox'));
-const AdvanceTableExamples = lazy(
-  () => import('reference/components/tables/AdvanceTableExamples')
-);
 const Calendar = lazy(() => import('reference/app-examples/calendar/Calendar'));
 import FaqAlt from 'reference/pages/faq/faq-alt/FaqAlt';
 import FaqBasic from 'reference/pages/faq/faq-basic/FaqBasic';
@@ -758,24 +755,11 @@ const routes: RouteObject[] = [
           },
           {
             path: rootPaths.tableRoot,
-            children: [
-              {
-                path: paths.basicTables,
-                element: (
-                  <Suspense key="tables" fallback={<FalconLoader />}>
-                    <Tables />
-                  </Suspense>
-                )
-              },
-              {
-                path: paths.advanceTables,
-                element: (
-                  <Suspense key="advanceTables" fallback={<FalconLoader />}>
-                    <AdvanceTableExamples />
-                  </Suspense>
-                )
-              }
-            ]
+            element: (
+              <Suspense key="tables" fallback={<FalconLoader />}>
+                <Tables />
+              </Suspense>
+            )
           },
           {
             path: rootPaths.chartsRoot,
@@ -1509,10 +1493,7 @@ const routes: RouteObject[] = [
               // Reference Tables
               {
                 path: 'tables',
-                children: [
-                  { path: 'basic', element: <Suspense key="ref-tables-basic" fallback={<FalconLoader />}><Tables /></Suspense> },
-                  { path: 'advance', element: <Suspense key="ref-tables-advance" fallback={<FalconLoader />}><AdvanceTableExamples /></Suspense> }
-                ]
+                element: <Suspense key="ref-tables" fallback={<FalconLoader />}><Tables /></Suspense>
               },
               // Reference Icons
               {
