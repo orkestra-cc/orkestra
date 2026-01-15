@@ -23,7 +23,7 @@ func NewDeadlineHandler(deadlineService services.DeadlineService) *DeadlineHandl
 // GetDeadlinesRequest represents the request to get deadlines
 type GetDeadlinesRequest struct {
 	// Query parameters for filtering
-	EntityType string `query:"entityType" enum:"vehicle,user,medical" doc:"Filter by entity type"`
+	EntityType string `query:"entityType" enum:"user,medical" doc:"Filter by entity type"`
 	Status     string `query:"status" enum:"expired,warning,ok" doc:"Filter by status"`
 	Search     string `query:"search" doc:"Search by entity name"`
 

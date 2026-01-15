@@ -41,7 +41,6 @@ const DeadlineReportsHeader: React.FC<DeadlineReportsHeaderProps> = ({
           style={{ width: 'auto', minWidth: '150px' }}
         >
           <option value="">All types</option>
-          <option value="vehicle">Vehicles</option>
           <option value="user">Users</option>
           <option value="medical">Medical Visits</option>
         </Form.Select>

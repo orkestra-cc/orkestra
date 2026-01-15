@@ -364,33 +364,6 @@ const AdminLicenses: React.FC<AdminLicensesProps> = ({ user }) => {
             )}
           </Col>
         </Row>
-        <Row>
-          <Col md={6}></Col>
-
-          <Col md={6}>
-            <small className="text-700 d-block mb-1">
-              Tachograph Expiry
-            </small>
-            {isEditing ? (
-              <Form.Control
-                type="date"
-                name="tachigrafExpiry"
-                value={formData.tachigrafExpiry}
-                onChange={handleChange}
-                size="sm"
-              />
-            ) : (
-              <div className="fw-semi-bold">
-                <FontAwesomeIcon
-                  icon={'gauge-high' as IconProp}
-                  className="me-2 text-muted"
-                />
-                {formatDate(user.tachigrafExpiry)}
-                {user.tachigrafExpiry && getExpiryBadge(user.tachigrafExpiry)}
-              </div>
-            )}
-          </Col>
-        </Row>
       </Card.Body>
     </Card>
   );

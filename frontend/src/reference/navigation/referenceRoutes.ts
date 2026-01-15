@@ -1803,32 +1803,6 @@ export const adminRoutes: RouteGroup = {
   roles: ['administrator'], // Administrator and above
   children: [
     {
-      name: 'Fleet Management',
-      active: true,
-      icon: 'truck',
-      roles: ['administrator'],
-      children: [
-        {
-          name: 'Vehicles',
-          to: '/fleet/vehicles',
-          active: true,
-          roles: ['administrator']
-        },
-        {
-          name: 'Cranes',
-          to: '/fleet/cranes',
-          active: true,
-          roles: ['administrator']
-        },
-        {
-          name: 'Tachographs',
-          to: '/fleet/tachographs',
-          active: true,
-          roles: ['administrator']
-        }
-      ]
-    },
-    {
       name: 'Deadlines',
       to: paths.deadlineReports,
       active: true,

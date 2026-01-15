@@ -8,7 +8,6 @@ import (
 type EntityType string
 
 const (
-	EntityTypeVehicle EntityType = "vehicle"
 	EntityTypeUser    EntityType = "user"
 	EntityTypeMedical EntityType = "medical"
 )
@@ -17,18 +16,11 @@ const (
 type DeadlineType string
 
 const (
-	// Vehicle deadline types
-	DeadlineTypeRevision          DeadlineType = "revision"
-	DeadlineTypeScheduledRevision DeadlineType = "scheduled_revision"
-	DeadlineTypeInsurance         DeadlineType = "insurance"
-	DeadlineTypeCarTax            DeadlineType = "car_tax"
-
 	// User certification deadline types
 	DeadlineTypeLicense      DeadlineType = "license"
 	DeadlineTypeDriverCard   DeadlineType = "driver_card"
 	DeadlineTypeCQC          DeadlineType = "cqc"
 	DeadlineTypeADR          DeadlineType = "adr"
-	DeadlineTypeTachograph   DeadlineType = "tachograph"
 	DeadlineTypeMedicalCheck DeadlineType = "medical_check"
 )
 

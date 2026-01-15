@@ -107,10 +107,7 @@ export const baseApi = createApi({
     'SupportTicket',
     'Weather',
     'Storage',
-    'Vehicle',
     'Reports',
-    'Tachograph',
-    'Crane',
     // Billing module tags
     'Customer',
     'Supplier',
@@ -133,7 +130,7 @@ export const {
 } = baseApi;
 
 // Helper function to invalidate multiple tags
-export const invalidateApiTags = (tags: Array<"User" | "Auth" | "Navigation" | "Dashboard" | "Analytics" | "Sales" | "Orders" | "Projects" | "Tasks" | "Events" | "Chat" | "Email" | "Kanban" | "SupportTicket" | "Weather" | "Storage" | "Vehicle" | "Reports" | "Tachograph" | "Crane" | "Customer" | "Supplier" | "Invoice" | "Notification" | "BillingStats">) => {
+export const invalidateApiTags = (tags: Array<"User" | "Auth" | "Navigation" | "Dashboard" | "Analytics" | "Sales" | "Orders" | "Projects" | "Tasks" | "Events" | "Chat" | "Email" | "Kanban" | "SupportTicket" | "Weather" | "Storage" | "Reports" | "Customer" | "Supplier" | "Invoice" | "Notification" | "BillingStats">) => {
   return baseApi.util.invalidateTags(tags);
 };
 

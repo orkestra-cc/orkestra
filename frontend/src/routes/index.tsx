@@ -192,24 +192,6 @@ const UserCalendar = lazy(
 const OperatorProfile = lazy(
   () => import('pages/operator/profile/OperatorProfile')
 );
-const VehicleManagement = lazy(
-  () => import('reference/dashboards/VehicleManagementDashboard')
-);
-const VehicleProfile = lazy(
-  () => import('pages/fleet/vehicle-profile/VehicleProfile')
-);
-const CraneManagement = lazy(
-  () => import('reference/dashboards/CraneManagementDashboard')
-);
-const CraneProfile = lazy(
-  () => import('pages/fleet/crane-profile/CraneProfile')
-);
-const TachographManagement = lazy(
-  () => import('reference/dashboards/TachographManagementDashboard')
-);
-const TachographProfile = lazy(
-  () => import('pages/fleet/tachograph-profile/TachographProfile')
-);
 
 // Billing pages
 const BillingDashboard = lazy(
@@ -639,105 +621,6 @@ const routes: RouteObject[] = [
                 )
               }
             ]
-          },
-          {
-            path: 'fleet/vehicles',
-            element: (
-              <ProtectedRoute
-                requiredPermissions={[
-                  ['developer', 'ceo', 'administrator']
-                ]}
-              >
-                <Suspense
-                  key="fleet-vehicleManagement"
-                  fallback={<FalconLoader />}
-                >
-                  <VehicleManagement />
-                </Suspense>
-              </ProtectedRoute>
-            )
-          },
-          {
-            path: 'fleet/vehicle/:vehicleId',
-            element: (
-              <ProtectedRoute
-                requiredPermissions={[
-                  ['developer', 'ceo', 'administrator']
-                ]}
-              >
-                <Suspense
-                  key="fleet-vehicleProfile"
-                  fallback={<FalconLoader />}
-                >
-                  <VehicleProfile />
-                </Suspense>
-              </ProtectedRoute>
-            )
-          },
-          {
-            path: 'fleet/cranes',
-            element: (
-              <ProtectedRoute
-                requiredPermissions={[
-                  ['developer', 'ceo', 'administrator']
-                ]}
-              >
-                <Suspense
-                  key="fleet-craneManagement"
-                  fallback={<FalconLoader />}
-                >
-                  <CraneManagement />
-                </Suspense>
-              </ProtectedRoute>
-            )
-          },
-          {
-            path: 'fleet/crane/:craneId',
-            element: (
-              <ProtectedRoute
-                requiredPermissions={[
-                  ['developer', 'ceo', 'administrator']
-                ]}
-              >
-                <Suspense key="fleet-craneProfile" fallback={<FalconLoader />}>
-                  <CraneProfile />
-                </Suspense>
-              </ProtectedRoute>
-            )
-          },
-          {
-            path: 'fleet/tachographs',
-            element: (
-              <ProtectedRoute
-                requiredPermissions={[
-                  ['developer', 'ceo', 'administrator']
-                ]}
-              >
-                <Suspense
-                  key="fleet-tachographManagement"
-                  fallback={<FalconLoader />}
-                >
-                  <TachographManagement />
-                </Suspense>
-              </ProtectedRoute>
-            )
-          },
-          {
-            path: 'fleet/tachograph/:tachographId',
-            element: (
-              <ProtectedRoute
-                requiredPermissions={[
-                  ['developer', 'ceo', 'administrator']
-                ]}
-              >
-                <Suspense
-                  key="fleet-tachographProfile"
-                  fallback={<FalconLoader />}
-                >
-                  <TachographProfile />
-                </Suspense>
-              </ProtectedRoute>
-            )
           },
           // Billing routes
           {

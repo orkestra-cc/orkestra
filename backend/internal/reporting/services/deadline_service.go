@@ -41,20 +41,11 @@ func (s *deadlineService) GetAllDeadlines(ctx context.Context, filters models.De
 		pagination.PageSize = 20
 	}
 
-	// Recupera tutte le scadenze dai veicoli
-	vehicleDeadlines, err := s.deadlineRepo.GetVehicleDeadlines(ctx)
-	if err != nil {
-		return nil, err
-	}
-
 	// Recupera tutte le scadenze dagli utenti
-	userDeadlines, err := s.deadlineRepo.GetUserDeadlines(ctx)
+	allDeadlines, err := s.deadlineRepo.GetUserDeadlines(ctx)
 	if err != nil {
 		return nil, err
 	}
-
-	// Combina tutte le scadenze
-	allDeadlines := append(vehicleDeadlines, userDeadlines...)
 
 	// Applica i filtri
 	filteredDeadlines := s.applyFilters(allDeadlines, filters)

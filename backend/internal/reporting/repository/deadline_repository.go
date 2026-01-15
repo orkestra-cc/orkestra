@@ -6,119 +6,24 @@ import (
 
 	"github.com/orkestra/backend/internal/reporting/models"
 	userModels "github.com/orkestra/backend/internal/user/models"
-	vehicleModels "github.com/orkestra/backend/internal/vehicle/models"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 )
 
 // DeadlineRepository gestisce l'accesso ai dati per le scadenze
 type DeadlineRepository interface {
-	GetVehicleDeadlines(ctx context.Context) ([]models.DeadlineItem, error)
 	GetUserDeadlines(ctx context.Context) ([]models.DeadlineItem, error)
 }
 
 type deadlineRepository struct {
-	vehicleCollection *mongo.Collection
-	userCollection    *mongo.Collection
+	userCollection *mongo.Collection
 }
 
 // NewDeadlineRepository crea una nuova istanza di DeadlineRepository
 func NewDeadlineRepository(db *mongo.Database) DeadlineRepository {
 	return &deadlineRepository{
-		vehicleCollection: db.Collection("vehicles"),
-		userCollection:    db.Collection("users"),
+		userCollection: db.Collection("users"),
 	}
-}
-
-// GetVehicleDeadlines recupera tutte le scadenze dei veicoli
-func (r *deadlineRepository) GetVehicleDeadlines(ctx context.Context) ([]models.DeadlineItem, error) {
-	filter := bson.M{
-		"isActive":  true,
-		"deletedAt": nil,
-		"$or": []bson.M{
-			{"scadenzaRevisione": bson.M{"$ne": nil}},
-			{"revisioneProgrammata": bson.M{"$ne": nil}},
-			{"insuranceExpiry": bson.M{"$ne": nil}},
-			{"carTaxExpiry": bson.M{"$ne": nil}},
-		},
-	}
-
-	cursor, err := r.vehicleCollection.Find(ctx, filter)
-	if err != nil {
-		return nil, err
-	}
-	defer cursor.Close(ctx)
-
-	var vehicles []vehicleModels.Vehicle
-	if err := cursor.All(ctx, &vehicles); err != nil {
-		return nil, err
-	}
-
-	var deadlines []models.DeadlineItem
-
-	for _, vehicle := range vehicles {
-		// Scadenza revisione
-		if vehicle.ScadenzaRevisione != nil {
-			deadlines = append(deadlines, createDeadlineItem(
-				vehicle.UUID,
-				models.EntityTypeVehicle,
-				vehicle.UUID,
-				vehicle.Nome+" ("+vehicle.Targa+")",
-				models.DeadlineTypeRevision,
-				*vehicle.ScadenzaRevisione,
-				"",
-				"",
-				"",
-			))
-		}
-
-		// Revisione programmata
-		if vehicle.RevisioneProgrammata != nil {
-			deadlines = append(deadlines, createDeadlineItem(
-				vehicle.UUID,
-				models.EntityTypeVehicle,
-				vehicle.UUID,
-				vehicle.Nome+" ("+vehicle.Targa+")",
-				models.DeadlineTypeScheduledRevision,
-				*vehicle.RevisioneProgrammata,
-				"",
-				"",
-				"",
-			))
-		}
-
-		// Scadenza assicurazione
-		if vehicle.InsuranceExpiry != nil {
-			deadlines = append(deadlines, createDeadlineItem(
-				vehicle.UUID,
-				models.EntityTypeVehicle,
-				vehicle.UUID,
-				vehicle.Nome+" ("+vehicle.Targa+")",
-				models.DeadlineTypeInsurance,
-				*vehicle.InsuranceExpiry,
-				"",
-				"",
-				"",
-			))
-		}
-
-		// Scadenza bollo
-		if vehicle.CarTaxExpiry != nil {
-			deadlines = append(deadlines, createDeadlineItem(
-				vehicle.UUID,
-				models.EntityTypeVehicle,
-				vehicle.UUID,
-				vehicle.Nome+" ("+vehicle.Targa+")",
-				models.DeadlineTypeCarTax,
-				*vehicle.CarTaxExpiry,
-				"",
-				"",
-				"",
-			))
-		}
-	}
-
-	return deadlines, nil
 }
 
 // GetUserDeadlines recupera tutte le scadenze degli utenti (certificazioni e visite mediche)
@@ -131,7 +36,6 @@ func (r *deadlineRepository) GetUserDeadlines(ctx context.Context) ([]models.Dea
 			{"driverCardExpiry": bson.M{"$ne": nil}},
 			{"cqcExpiry": bson.M{"$ne": nil}},
 			{"adrExpiry": bson.M{"$ne": nil}},
-			{"tachigrafExpiry": bson.M{"$ne": nil}},
 			{"medicalChecks": bson.M{"$exists": true, "$ne": []interface{}{}}},
 		},
 	}
@@ -204,21 +108,6 @@ func (r *deadlineRepository) GetUserDeadlines(ctx context.Context) ([]models.Dea
 				user.FullName,
 				models.DeadlineTypeADR,
 				*user.ADRExpiry,
-				"",
-				"",
-				"",
-			))
-		}
-
-		// Tachigrafo
-		if user.TachigrafExpiry != nil {
-			deadlines = append(deadlines, createDeadlineItem(
-				user.UUID+"_tachograph",
-				models.EntityTypeUser,
-				user.UUID,
-				user.FullName,
-				models.DeadlineTypeTachograph,
-				*user.TachigrafExpiry,
 				"",
 				"",
 				"",

@@ -83,14 +83,9 @@ const AdminUserMetrics: React.FC<AdminUserMetricsProps> = ({ userId }) => {
       color: 'primary'
     },
     {
-      feature: 'Fleet Management',
-      usage: metricsData.systemUsage.fleetManagement,
-      color: 'success'
-    },
-    {
       feature: 'Reports',
       usage: metricsData.systemUsage.reports,
-      color: 'info'
+      color: 'success'
     },
     {
       feature: 'Settings',

@@ -220,7 +220,6 @@ export const ROUTE_ROLE_CONFIG = {
   USER_MANAGEMENT: ['administrator'] as UserRole[],
   SYSTEM_SETTINGS: ['administrator'] as UserRole[],
   AUDIT_LOGS: ['administrator'] as UserRole[],
-  FLEET_MANAGEMENT: ['administrator'] as UserRole[],
   ADVANCED_ANALYTICS: ['administrator'] as UserRole[],
   BUSINESS_REPORTS: ['administrator'] as UserRole[],
 

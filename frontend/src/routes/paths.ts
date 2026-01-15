@@ -125,12 +125,6 @@ export interface AppPaths {
   adminUserProfile: string;
   deadlineReports: string;
   operatorProfile: string;
-  fleetVehicles: string;
-  fleetVehicleProfile: string;
-  fleetCranes: string;
-  fleetCraneProfile: string;
-  fleetTachographs: string;
-  fleetTachographProfile: string;
   verticalNavLayout: string;
   topNavLayout: string;
   doubleTopNavLayout: string;
@@ -460,12 +454,6 @@ const paths: AppPaths = {
   adminUserProfile: `/${rootPaths.adminRoot}/user/profile/:userId`,
   deadlineReports: `/${rootPaths.adminRoot}/reports/deadlines`,
   operatorProfile: `/${rootPaths.adminRoot}/operator/profile/:operatorId`,
-  fleetVehicles: '/fleet/vehicles',
-  fleetVehicleProfile: '/fleet/vehicle/:vehicleId',
-  fleetCranes: '/fleet/cranes',
-  fleetCraneProfile: '/fleet/crane/:craneId',
-  fleetTachographs: '/fleet/tachographs',
-  fleetTachographProfile: '/fleet/tachograph/:tachographId',
   verticalNavLayout: `/${rootPaths.layoutRoot}/vertical-nav-layout`,
   topNavLayout: `/${rootPaths.layoutRoot}/top-nav-layout`,
   doubleTopNavLayout: `/${rootPaths.layoutRoot}/double-top-nav-layout`,

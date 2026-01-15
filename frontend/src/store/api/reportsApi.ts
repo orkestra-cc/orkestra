@@ -1,18 +1,13 @@
 import { baseApi } from './baseApi';
 
 // Deadline report types based on backend OpenAPI
-export type EntityType = 'vehicle' | 'user' | 'medical';
+export type EntityType = 'user' | 'medical';
 export type DeadlineStatus = 'expired' | 'warning' | 'ok';
 export type DeadlineType =
-  | 'revision'
-  | 'scheduled_revision'
-  | 'insurance'
-  | 'car_tax'
   | 'license'
   | 'driver_card'
   | 'cqc'
   | 'adr'
-  | 'tachograph'
   | 'medical_check';
 
 export interface DeadlineItem {

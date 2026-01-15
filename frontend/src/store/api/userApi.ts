@@ -120,7 +120,6 @@ export interface UserMetrics {
   teamCollaboration: number;
   systemUsage: {
     dashboard: number;
-    fleetManagement: number;
     reports: number;
     settings: number;
     helpDesk: number;

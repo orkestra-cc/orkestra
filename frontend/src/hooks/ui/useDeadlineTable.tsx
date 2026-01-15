@@ -6,21 +6,15 @@ import dayjs from 'dayjs';
 
 // Map deadline types to readable labels
 const deadlineTypeLabels: Record<DeadlineType, string> = {
-  revision: 'Inspection',
-  scheduled_revision: 'Scheduled Inspection',
-  insurance: 'Insurance',
-  car_tax: 'Vehicle Tax',
   license: 'License',
   driver_card: 'Driver Card',
   cqc: 'CQC',
   adr: 'ADR',
-  tachograph: 'Tachograph',
   medical_check: 'Medical Check',
 };
 
 // Map entity types to readable labels
 const entityTypeLabels: Record<EntityType, string> = {
-  vehicle: 'Vehicle',
   user: 'User',
   medical: 'Medical Check',
 };

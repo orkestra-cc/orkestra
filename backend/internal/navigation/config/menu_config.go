@@ -81,32 +81,6 @@ func buildAdminRoutes() models.RouteGroup {
 		Roles: []string{"administrator"},
 		Children: []models.NavItem{
 			{
-				Name:   "Fleet Management",
-				Icon:   "truck",
-				Active: true,
-				Roles:  []string{"administrator"},
-				Children: []models.NavItem{
-					{
-						Name:   "Vehicles",
-						To:     "/fleet/vehicles",
-						Active: true,
-						Roles:  []string{"administrator"},
-					},
-					{
-						Name:   "Cranes",
-						To:     "/fleet/cranes",
-						Active: true,
-						Roles:  []string{"administrator"},
-					},
-					{
-						Name:   "Tachographs",
-						To:     "/fleet/tachographs",
-						Active: true,
-						Roles:  []string{"administrator"},
-					},
-				},
-			},
-			{
 				Name:   "Fatturazione",
 				Icon:   "file-invoice-dollar",
 				Active: true,
@@ -207,9 +181,6 @@ func buildDevelopmentRoutes() models.RouteGroup {
 					{Name: "Project Management", To: "/reference/dashboards/project-management", Active: true, Roles: []string{"developer"}},
 					{Name: "Support Desk", To: "/reference/dashboards/support-desk", Active: true, Roles: []string{"developer"}},
 					{Name: "User Management", To: "/reference/dashboards/user-management", Active: true, Roles: []string{"developer"}},
-					{Name: "Vehicle Management", To: "/reference/dashboards/vehicle-management", Active: true, Roles: []string{"developer"}},
-					{Name: "Crane Management", To: "/reference/dashboards/crane-management", Active: true, Roles: []string{"developer"}},
-					{Name: "Tachograph Management", To: "/reference/dashboards/tachograph-management", Active: true, Roles: []string{"developer"}},
 				},
 			},
 			// Components
