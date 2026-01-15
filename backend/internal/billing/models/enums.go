@@ -64,6 +64,7 @@ const (
 	DocTypeCessioneBeniAmmortizz    DocumentType = "TD26" // Cessione di beni ammortizzabili e per passaggi interni
 	DocTypeFatturaAutoconsumoOmaggi DocumentType = "TD27" // Fattura per autoconsumo o per cessioni gratuite senza rivalsa
 	DocTypeAcquistoSanMarino        DocumentType = "TD28" // Acquisti da San Marino con IVA (art. 7 c.1 ter DL 75/2023)
+	DocTypeComunicazioneOmessa      DocumentType = "TD29" // Comunicazione omessa o irregolare fatturazione (v1.9 - April 2025)
 )
 
 // RegimeFiscale represents the fiscal regime as per FatturaPA specification
@@ -88,6 +89,7 @@ const (
 	RegimeIVAPerCassaGenerale        RegimeFiscale = "RF17" // IVA per cassa (art. 32-bis, DL 83/2012)
 	RegimeAltro                      RegimeFiscale = "RF18" // Altro
 	RegimeForfettario                RegimeFiscale = "RF19" // Regime forfettario (art.1, c.54-89, L. 190/2014)
+	RegimeFranchigiaIVA              RegimeFiscale = "RF20" // Regime transfrontaliero di Franchigia IVA (Direttiva UE 2020/285 - v1.9 Jan 2025)
 )
 
 // PaymentMethod represents the modalità di pagamento as per FatturaPA specification

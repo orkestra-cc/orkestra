@@ -214,9 +214,15 @@ if cfg.OpenAPI.BearerToken != "" {
 ### FatturaPA XML Format
 
 The `xml_builder.go` generates XML compliant with:
-- FatturaPA v1.2.2 schema
+- FatturaPA v1.2.3 schema (Specifiche Tecniche v1.9 - effective April 2025)
 - Agenzia delle Entrate specifications
 - Required fields for B2B and B2G invoices
+
+**See [FATTURAPA_SPEC.md](FATTURAPA_SPEC.md)** for complete bilingual field reference including:
+- Complete XML element hierarchy with cardinality
+- All enumerations (TD01-TD29, RF01-RF20, N1-N7.x, MP01-MP23)
+- SDI validation rules and error codes
+- v1.9 updates (TD29, RF20)
 
 ### Error Handling
 
@@ -255,6 +261,7 @@ Ensure these indexes exist for performance:
 
 ### Related Guides
 
+- [FatturaPA XML Specification](FATTURAPA_SPEC.md) - Complete bilingual XML field reference (IT/EN)
 - [Backend Module](../../CLAUDE.md) - Backend architecture and development workflow
 - [Project Overview](../../../../CLAUDE.md) - System architecture
 - [OpenAPI SDI Documentation](https://www.openapi.it/documentazione-sdi/) - External API docs
