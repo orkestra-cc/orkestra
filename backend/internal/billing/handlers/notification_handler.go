@@ -40,7 +40,7 @@ type GetNotificationResponse struct {
 type ListNotificationsRequest struct {
 	InvoiceUUID      string `query:"invoiceId" doc:"Filter by invoice UUID"`
 	NotificationType string `query:"type" enum:"RC,NS,MC,NE,DT,AT" doc:"Filter by notification type"`
-	Processed        *bool  `query:"processed" doc:"Filter by processed status"`
+	Processed        string `query:"processed" enum:"true,false" doc:"Filter by processed status"`
 	FromDate         string `query:"fromDate" doc:"Filter notifications from this date (YYYY-MM-DD)"`
 	ToDate           string `query:"toDate" doc:"Filter notifications to this date (YYYY-MM-DD)"`
 	Page             int    `query:"page" default:"1" minimum:"1" doc:"Page number"`
@@ -96,7 +96,12 @@ func (h *NotificationHandler) GetNotification(ctx context.Context, req *GetNotif
 func (h *NotificationHandler) ListNotifications(ctx context.Context, req *ListNotificationsRequest) (*ListNotificationsResponse, error) {
 	filters := &models.NotificationFilters{
 		InvoiceUUID: req.InvoiceUUID,
-		Processed:   req.Processed,
+	}
+
+	// Parse processed filter
+	if req.Processed != "" {
+		processed := req.Processed == "true"
+		filters.Processed = &processed
 	}
 
 	// Parse notification type

@@ -89,6 +89,26 @@ func RegisterRoutes(
 		Security:    []map[string][]string{{"bearerAuth": {}}},
 	}, invoiceHandler.GetInvoiceXML)
 
+	huma.Register(api, huma.Operation{
+		OperationID: "get-invoice-html",
+		Method:      http.MethodGet,
+		Path:        "/api/v1/billing/invoices/{id}/html",
+		Summary:     "Get invoice HTML view",
+		Description: "Returns the HTML representation of the invoice (only available for sent invoices). Per OpenAPI SDI spec.",
+		Tags:        []string{"Billing - Invoices"},
+		Security:    []map[string][]string{{"bearerAuth": {}}},
+	}, invoiceHandler.GetInvoiceHTML)
+
+	huma.Register(api, huma.Operation{
+		OperationID: "import-invoice",
+		Method:      http.MethodPost,
+		Path:        "/api/v1/billing/invoices/import",
+		Summary:     "Import supplier invoice",
+		Description: "Imports a supplier invoice via base64-encoded FatturaPA XML. Per OpenAPI SDI spec.",
+		Tags:        []string{"Billing - Invoices"},
+		Security:    []map[string][]string{{"bearerAuth": {}}},
+	}, invoiceHandler.ImportInvoice)
+
 	// ========================================
 	// Received Invoice Routes (Fatture Passive)
 	// ========================================
@@ -293,4 +313,17 @@ func RegisterRoutes(
 		Tags:        []string{"Billing - Statistics"},
 		Security:    []map[string][]string{{"bearerAuth": {}}},
 	}, invoiceHandler.GetStats)
+
+	// ========================================
+	// Preserved Documents Routes (Legal Storage)
+	// ========================================
+	huma.Register(api, huma.Operation{
+		OperationID: "get-preserved-document",
+		Method:      http.MethodGet,
+		Path:        "/api/v1/billing/preserved-documents/{id}",
+		Summary:     "Get preserved document status",
+		Description: "Returns the legal storage/preservation status of a document. Per OpenAPI SDI spec.",
+		Tags:        []string{"Billing - Preserved Documents"},
+		Security:    []map[string][]string{{"bearerAuth": {}}},
+	}, invoiceHandler.GetPreservedDocument)
 }

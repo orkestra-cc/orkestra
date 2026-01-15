@@ -37,12 +37,17 @@ type OpenAPIClient interface {
 	GetInvoiceStatus(ctx context.Context, uuid string) (*InvoiceStatusResponse, error)
 	DownloadInvoicePDF(ctx context.Context, uuid string) ([]byte, error)
 	DownloadInvoiceXML(ctx context.Context, uuid string) ([]byte, error)
+	DownloadInvoiceHTML(ctx context.Context, uuid string) ([]byte, error)
 
 	// Received invoices (fatture passive)
 	GetSupplierInvoices(ctx context.Context, fromDate time.Time, page, pageSize int) (*SupplierInvoicesResponse, error)
+	ImportInvoice(ctx context.Context, input *ImportInvoiceInput) (*ImportInvoiceResponse, error)
 
 	// Notifications
 	GetNotifications(ctx context.Context, fromDate time.Time) ([]OpenAPINotification, error)
+
+	// Legal storage / preserved documents
+	GetPreservedDocument(ctx context.Context, uuid string) (*PreservedDocumentResponse, error)
 
 	// Statistics
 	GetInvoiceStats(ctx context.Context) (*InvoiceStatsResponse, error)
@@ -118,6 +123,33 @@ type InvoiceStatsResponse struct {
 	TotalRejected  int     `json:"total_rejected"`
 	TotalReceived  int     `json:"total_received"`
 	TotalAmount    float64 `json:"total_amount"`
+}
+
+// ImportInvoiceInput represents the input for importing supplier invoices
+// Per OpenAPI SDI spec: POST /invoices/import
+type ImportInvoiceInput struct {
+	Invoice         string                 `json:"invoice"`           // Base64-encoded FatturaPA XML
+	InvoiceFileName string                 `json:"invoice_file_name,omitempty"`
+	SDIID           string                 `json:"sdi_id,omitempty"`
+	Metadata        map[string]interface{} `json:"metadata,omitempty"`
+}
+
+// ImportInvoiceResponse represents the response from importing invoices
+type ImportInvoiceResponse struct {
+	UUIDs   []string `json:"uuids"`
+	Count   int      `json:"count"`
+	Message string   `json:"message,omitempty"`
+}
+
+// PreservedDocumentResponse represents the status of a preserved document
+// Per OpenAPI SDI spec: GET /preserved_documents/{uuid}
+type PreservedDocumentResponse struct {
+	UUID             string     `json:"uuid"`
+	Status           string     `json:"status"` // to_be_stored, sent, stored, error
+	ReceiptTimestamp *time.Time `json:"receipt_timestamp,omitempty"`
+	Weight           int        `json:"weight,omitempty"`
+	ObjectID         string     `json:"object_id,omitempty"`
+	ObjectType       string     `json:"object_type,omitempty"`
 }
 
 // openAPIClient implements the OpenAPIClient interface
@@ -379,6 +411,96 @@ func (c *openAPIClient) DownloadInvoiceXML(ctx context.Context, uuid string) ([]
 	}
 
 	return respBody, nil
+}
+
+// DownloadInvoiceHTML downloads the HTML view of an invoice from OpenAPI SDI
+// Per OpenAPI SDI spec: GET /invoices/{uuid}/html
+func (c *openAPIClient) DownloadInvoiceHTML(ctx context.Context, uuid string) ([]byte, error) {
+	path := fmt.Sprintf("/invoices/%s/html", uuid)
+
+	respBody, statusCode, err := c.doRequestWithRetry(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	if statusCode == http.StatusNotFound {
+		return nil, ErrOpenAPINotFound
+	}
+
+	if statusCode != http.StatusOK {
+		return nil, fmt.Errorf("%w: status %d", ErrOpenAPIRequestFailed, statusCode)
+	}
+
+	return respBody, nil
+}
+
+// ImportInvoice imports a supplier invoice via base64-encoded XML
+// Per OpenAPI SDI spec: POST /invoices/import
+func (c *openAPIClient) ImportInvoice(ctx context.Context, input *ImportInvoiceInput) (*ImportInvoiceResponse, error) {
+	body := map[string]interface{}{
+		"invoice": input.Invoice,
+	}
+
+	if input.InvoiceFileName != "" {
+		body["invoice_file_name"] = input.InvoiceFileName
+	}
+	if input.SDIID != "" {
+		body["sdi_id"] = input.SDIID
+	}
+	if input.Metadata != nil {
+		body["metadata"] = input.Metadata
+	}
+
+	respBody, statusCode, err := c.doRequestWithRetry(ctx, http.MethodPost, "/invoices/import", body)
+	if err != nil {
+		return nil, err
+	}
+
+	if statusCode != http.StatusOK && statusCode != http.StatusCreated && statusCode != http.StatusAccepted {
+		c.logger.Error("invoice import failed",
+			"statusCode", statusCode,
+			"response", string(respBody),
+		)
+		return nil, fmt.Errorf("%w: status %d, response: %s", ErrOpenAPIRequestFailed, statusCode, string(respBody))
+	}
+
+	var result ImportInvoiceResponse
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return nil, fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	c.logger.Info("invoice imported successfully",
+		"uuids", result.UUIDs,
+		"count", result.Count,
+	)
+
+	return &result, nil
+}
+
+// GetPreservedDocument retrieves the preservation status of a document
+// Per OpenAPI SDI spec: GET /preserved_documents/{uuid}
+func (c *openAPIClient) GetPreservedDocument(ctx context.Context, uuid string) (*PreservedDocumentResponse, error) {
+	path := fmt.Sprintf("/preserved_documents/%s", uuid)
+
+	respBody, statusCode, err := c.doRequestWithRetry(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	if statusCode == http.StatusNotFound {
+		return nil, ErrOpenAPINotFound
+	}
+
+	if statusCode != http.StatusOK {
+		return nil, fmt.Errorf("%w: status %d", ErrOpenAPIRequestFailed, statusCode)
+	}
+
+	var result PreservedDocumentResponse
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return nil, fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	return &result, nil
 }
 
 func (c *openAPIClient) GetSupplierInvoices(ctx context.Context, fromDate time.Time, page, pageSize int) (*SupplierInvoicesResponse, error) {

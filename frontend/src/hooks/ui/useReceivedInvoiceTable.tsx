@@ -320,8 +320,6 @@ const useReceivedInvoiceTable = ({
   const table = useAdvanceTable({
     columns,
     data: data?.invoices || [],
-    isLoading,
-    error,
     selection,
     sortable,
     pagination,
@@ -331,6 +329,8 @@ const useReceivedInvoiceTable = ({
 
   return {
     ...table,
+    isLoading,
+    error,
     AcceptModal,
     RejectModal,
   };

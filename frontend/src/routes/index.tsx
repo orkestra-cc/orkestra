@@ -210,6 +210,30 @@ const TachographManagement = lazy(
 const TachographProfile = lazy(
   () => import('pages/fleet/tachograph-profile/TachographProfile')
 );
+
+// Billing pages
+const BillingDashboard = lazy(
+  () => import('pages/billing/dashboard')
+);
+const CustomerManagement = lazy(
+  () => import('pages/billing/customers')
+);
+const SupplierManagement = lazy(
+  () => import('pages/billing/suppliers')
+);
+const IssuedInvoices = lazy(
+  () => import('pages/billing/invoices/issued')
+);
+const ReceivedInvoices = lazy(
+  () => import('pages/billing/invoices/received')
+);
+const SDINotifications = lazy(
+  () => import('pages/billing/notifications')
+);
+const NewIssuedInvoice = lazy(
+  () => import('pages/billing/invoices/issued/NewIssuedInvoice')
+);
+
 import TableView from 'reference/app-examples/support-desk/tickets-layout/TableView';
 import CardView from 'reference/app-examples/support-desk/tickets-layout/CardView';
 import Contacts from 'reference/app-examples/support-desk/contacts/Contacts';
@@ -708,6 +732,126 @@ const routes: RouteObject[] = [
                   fallback={<FalconLoader />}
                 >
                   <TachographProfile />
+                </Suspense>
+              </ProtectedRoute>
+            )
+          },
+          // Billing routes
+          {
+            path: 'billing/dashboard',
+            element: (
+              <ProtectedRoute
+                requiredPermissions={[
+                  ['developer', 'ceo', 'administrator']
+                ]}
+              >
+                <Suspense
+                  key="billing-dashboard"
+                  fallback={<FalconLoader />}
+                >
+                  <BillingDashboard />
+                </Suspense>
+              </ProtectedRoute>
+            )
+          },
+          {
+            path: 'billing/customers',
+            element: (
+              <ProtectedRoute
+                requiredPermissions={[
+                  ['developer', 'ceo', 'administrator']
+                ]}
+              >
+                <Suspense
+                  key="billing-customers"
+                  fallback={<FalconLoader />}
+                >
+                  <CustomerManagement />
+                </Suspense>
+              </ProtectedRoute>
+            )
+          },
+          {
+            path: 'billing/suppliers',
+            element: (
+              <ProtectedRoute
+                requiredPermissions={[
+                  ['developer', 'ceo', 'administrator']
+                ]}
+              >
+                <Suspense
+                  key="billing-suppliers"
+                  fallback={<FalconLoader />}
+                >
+                  <SupplierManagement />
+                </Suspense>
+              </ProtectedRoute>
+            )
+          },
+          {
+            path: 'billing/invoices/issued/new',
+            element: (
+              <ProtectedRoute
+                requiredPermissions={[
+                  ['developer', 'ceo', 'administrator']
+                ]}
+              >
+                <Suspense
+                  key="billing-invoices-issued-new"
+                  fallback={<FalconLoader />}
+                >
+                  <NewIssuedInvoice />
+                </Suspense>
+              </ProtectedRoute>
+            )
+          },
+          {
+            path: 'billing/invoices/issued',
+            element: (
+              <ProtectedRoute
+                requiredPermissions={[
+                  ['developer', 'ceo', 'administrator']
+                ]}
+              >
+                <Suspense
+                  key="billing-invoices-issued"
+                  fallback={<FalconLoader />}
+                >
+                  <IssuedInvoices />
+                </Suspense>
+              </ProtectedRoute>
+            )
+          },
+          {
+            path: 'billing/invoices/received',
+            element: (
+              <ProtectedRoute
+                requiredPermissions={[
+                  ['developer', 'ceo', 'administrator']
+                ]}
+              >
+                <Suspense
+                  key="billing-invoices-received"
+                  fallback={<FalconLoader />}
+                >
+                  <ReceivedInvoices />
+                </Suspense>
+              </ProtectedRoute>
+            )
+          },
+          {
+            path: 'billing/notifications',
+            element: (
+              <ProtectedRoute
+                requiredPermissions={[
+                  ['developer', 'ceo', 'administrator']
+                ]}
+              >
+                <Suspense
+                  key="billing-notifications"
+                  fallback={<FalconLoader />}
+                >
+                  <SDINotifications />
                 </Suspense>
               </ProtectedRoute>
             )

@@ -19,6 +19,38 @@ The billing module handles **Italian electronic invoicing** (Fatturazione Elettr
 
 **IMPORTANT**: This module is disabled by default. Configure the OpenAPI SDI credentials to enable billing functionality.
 
+## API Compliance - MANDATORY
+
+**All billing endpoints MUST align with the OpenAPI SDI specification:**
+
+- **Spec URL**: `https://console.openapi.com/oas/it/sdi.openapi.json`
+- **Provider**: OpenAPI.it SDI (Sistema di Interscambio)
+- **Documentation**: [OpenAPI SDI Documentation](https://www.openapi.it/documentazione-sdi/)
+
+### Compliance Requirements
+
+When modifying or adding billing endpoints:
+
+1. **Verify alignment** with the OpenAPI SDI spec before implementation
+2. **Match request/response schemas** to the official specification
+3. **Use correct endpoint variants** for signature and legal storage options
+4. **Follow FatturaPA XML schema** v1.2.2 for invoice structure
+
+### Implementation Notes
+
+1. **Notification Strategy**: This module uses **polling** instead of webhooks
+   - Simpler deployment (no public callback URL required)
+   - Configurable interval via `OPENAPI_POLLING_INTERVAL`
+   - Both approaches are valid per the spec
+
+2. **Invoice Submission Variants** (per OpenAPI SDI spec):
+   - `/invoices` - Basic submission
+   - `/invoices_signature` - With digital signature
+   - `/invoices_legal_storage` - With legal storage
+   - `/invoices_signature_legal_storage` - Both signature and storage
+
+3. **Required Registration**: Users must register recipient code `JKKZDGR` with Agenzia delle Entrate before receiving supplier invoices.
+
 ## Module Structure
 
 ```
@@ -68,6 +100,8 @@ billing/
 | DELETE | `/api/v1/billing/invoices/{id}` | Delete draft invoice |
 | POST | `/api/v1/billing/invoices/{id}/send` | Send invoice to SDI |
 | GET | `/api/v1/billing/invoices/{id}/xml` | Get FatturaPA XML |
+| GET | `/api/v1/billing/invoices/{id}/html` | Get HTML view of invoice |
+| POST | `/api/v1/billing/invoices/import` | Import supplier invoice (base64 XML) |
 
 ### Received Invoices (Fatture Passive)
 
@@ -94,6 +128,12 @@ billing/
 | POST | `/api/v1/billing/notifications/{id}/process` | Mark as processed |
 | GET | `/api/v1/billing/notifications/summary` | Notification summary |
 | GET | `/api/v1/billing/stats` | Billing statistics |
+
+### Preserved Documents (Legal Storage)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/v1/billing/preserved-documents/{id}` | Get preservation status |
 
 ## OpenAPI SDI Integration
 

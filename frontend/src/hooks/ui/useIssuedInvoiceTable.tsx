@@ -306,8 +306,6 @@ const useIssuedInvoiceTable = ({
   const table = useAdvanceTable({
     columns,
     data: data?.invoices || [],
-    isLoading,
-    error,
     selection,
     sortable,
     pagination,
@@ -317,6 +315,8 @@ const useIssuedInvoiceTable = ({
 
   return {
     ...table,
+    isLoading,
+    error,
     DeleteModal,
     SendModal,
   };

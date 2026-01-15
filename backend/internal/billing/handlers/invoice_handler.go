@@ -154,6 +154,38 @@ type GetStatsResponse struct {
 	Body models.BillingStats `json:"stats" doc:"Billing statistics"`
 }
 
+// GetInvoiceHTMLRequest represents the request to get invoice HTML view
+type GetInvoiceHTMLRequest struct {
+	ID string `path:"id" doc:"Invoice UUID"`
+}
+
+// GetInvoiceHTMLResponse represents the response with invoice HTML
+type GetInvoiceHTMLResponse struct {
+	Body struct {
+		HTML string `json:"html" doc:"Invoice HTML content"`
+	}
+}
+
+// ImportInvoiceRequest represents the request to import a supplier invoice
+type ImportInvoiceRequest struct {
+	Body models.ImportInvoiceInput `json:"input" doc:"Import invoice data"`
+}
+
+// ImportInvoiceResponse represents the response after importing an invoice
+type ImportInvoiceResponse struct {
+	Body models.ImportInvoiceResponse `json:"result" doc:"Import result"`
+}
+
+// GetPreservedDocumentRequest represents the request to get preserved document status
+type GetPreservedDocumentRequest struct {
+	ID string `path:"id" doc:"Document UUID"`
+}
+
+// GetPreservedDocumentResponse represents the response with preserved document status
+type GetPreservedDocumentResponse struct {
+	Body models.PreservedDocument `json:"document" doc:"Preserved document status"`
+}
+
 // ========================================
 // Handler Methods
 // ========================================
@@ -386,6 +418,41 @@ func (h *InvoiceHandler) GetStats(ctx context.Context, req *GetStatsRequest) (*G
 	}
 
 	return &GetStatsResponse{Body: *stats}, nil
+}
+
+// GetInvoiceHTML returns the HTML representation of an invoice
+func (h *InvoiceHandler) GetInvoiceHTML(ctx context.Context, req *GetInvoiceHTMLRequest) (*GetInvoiceHTMLResponse, error) {
+	htmlBytes, err := h.invoiceService.GetInvoiceHTML(ctx, req.ID)
+	if err != nil {
+		if err == services.ErrInvoiceNotFound {
+			return nil, huma.Error404NotFound("Invoice not found", err)
+		}
+		return nil, huma.Error500InternalServerError("Failed to get invoice HTML", err)
+	}
+
+	resp := &GetInvoiceHTMLResponse{}
+	resp.Body.HTML = string(htmlBytes)
+	return resp, nil
+}
+
+// ImportInvoice imports a supplier invoice via base64-encoded XML
+func (h *InvoiceHandler) ImportInvoice(ctx context.Context, req *ImportInvoiceRequest) (*ImportInvoiceResponse, error) {
+	result, err := h.invoiceService.ImportInvoice(ctx, &req.Body)
+	if err != nil {
+		return nil, huma.Error500InternalServerError("Failed to import invoice", err)
+	}
+
+	return &ImportInvoiceResponse{Body: *result}, nil
+}
+
+// GetPreservedDocument returns the preservation status of a document
+func (h *InvoiceHandler) GetPreservedDocument(ctx context.Context, req *GetPreservedDocumentRequest) (*GetPreservedDocumentResponse, error) {
+	document, err := h.invoiceService.GetPreservedDocument(ctx, req.ID)
+	if err != nil {
+		return nil, huma.Error500InternalServerError("Failed to get preserved document", err)
+	}
+
+	return &GetPreservedDocumentResponse{Body: *document}, nil
 }
 
 // Helper function to get user ID from context

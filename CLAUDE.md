@@ -47,7 +47,7 @@ ORKESTRA is a modern professional management system designed for professional-bu
 
 The system operates as a single deployable Go application with the following characteristics:
 
-- **Strict Module Boundaries**: Each business domain (auth, user, reporting) is isolated in separate packages
+- **Strict Module Boundaries**: Each business domain (auth, user, reporting, billing) is isolated in separate packages
 - **Interface-Based Communication**: Modules interact through well-defined Go interfaces, not direct function calls
 - **Independent Data Access**: Each module manages its own repository layer and data access patterns
 - **Event Publishing Ready**: Infrastructure in place to publish domain events for async communication
@@ -82,9 +82,10 @@ The architecture supports optional extraction of modules into independent micros
 
 - **[`/backend/`](backend/CLAUDE.md)** - Go Monolithic Server
 
-  - Handles: Authentication, APIs, WebSockets, business logic
+  - Handles: Authentication, APIs, WebSockets, business logic, billing (Italian electronic invoicing)
   - Stack: Go 1.25.1+, Huma v2, MongoDB, Redis, goroutines
   - Port: 3000
+  - **Billing Module**: See [billing CLAUDE.md](backend/internal/billing/CLAUDE.md) for FatturaPA/SDI integration
 
 - **[`/frontend/`](frontend/CLAUDE.md)** - React Web Application
 

@@ -297,3 +297,38 @@ func DefaultPagination() PaginationParams {
 		PageSize: 20,
 	}
 }
+
+// ========================================
+// Import Invoice DTOs
+// ========================================
+
+// ImportInvoiceInput represents the input for importing a supplier invoice
+// Per OpenAPI SDI spec: POST /invoices/import
+type ImportInvoiceInput struct {
+	Invoice         string                 `json:"invoice" validate:"required" doc:"Base64-encoded FatturaPA XML content"`
+	InvoiceFileName string                 `json:"invoice_file_name,omitempty" doc:"Optional filename for the invoice"`
+	SDIID           string                 `json:"sdi_id,omitempty" doc:"Optional SDI identifier if already known"`
+	Metadata        map[string]interface{} `json:"metadata,omitempty" doc:"Optional metadata for internal tracking"`
+}
+
+// ImportInvoiceResponse represents the response after importing an invoice
+type ImportInvoiceResponse struct {
+	UUIDs   []string `json:"uuids" doc:"List of imported invoice UUIDs"`
+	Count   int      `json:"count" doc:"Number of invoices imported"`
+	Message string   `json:"message" doc:"Status message"`
+}
+
+// ========================================
+// Preserved Documents DTOs
+// ========================================
+
+// PreservedDocument represents the status of a preserved document in legal storage
+// Per OpenAPI SDI spec: GET /preserved_documents/{uuid}
+type PreservedDocument struct {
+	UUID             string     `json:"uuid" doc:"Document UUID"`
+	Status           string     `json:"status" doc:"Preservation status: to_be_stored, sent, stored, error"`
+	ReceiptTimestamp *time.Time `json:"receipt_timestamp,omitempty" doc:"Timestamp when receipt was received"`
+	Weight           int        `json:"weight,omitempty" doc:"Document weight in bytes"`
+	ObjectID         string     `json:"object_id,omitempty" doc:"Storage object identifier"`
+	ObjectType       string     `json:"object_type,omitempty" doc:"Type of stored object"`
+}

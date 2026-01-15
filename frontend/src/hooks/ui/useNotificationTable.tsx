@@ -267,8 +267,6 @@ const useNotificationTable = ({
   const table = useAdvanceTable({
     columns,
     data: data?.notifications || [],
-    isLoading,
-    error,
     selection,
     sortable,
     pagination,
@@ -278,6 +276,8 @@ const useNotificationTable = ({
 
   return {
     ...table,
+    isLoading,
+    error,
     MarkProcessedModal,
   };
 };

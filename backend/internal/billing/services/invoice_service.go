@@ -34,11 +34,16 @@ type InvoiceService interface {
 	SendInvoice(ctx context.Context, uuid string, sentBy string) (*models.SendInvoiceResponse, error)
 	GetInvoicePDF(ctx context.Context, uuid string) ([]byte, error)
 	GetInvoiceXML(ctx context.Context, uuid string) (string, error)
+	GetInvoiceHTML(ctx context.Context, uuid string) ([]byte, error)
 
 	// Received invoices (fatture passive)
 	ListReceivedInvoices(ctx context.Context, filters *models.InvoiceFilters, pagination models.PaginationParams) (*models.InvoiceListResponse, error)
 	AcceptReceivedInvoice(ctx context.Context, uuid string, acceptedBy string) error
 	RejectReceivedInvoice(ctx context.Context, uuid string, reason string, rejectedBy string) error
+	ImportInvoice(ctx context.Context, input *models.ImportInvoiceInput) (*models.ImportInvoiceResponse, error)
+
+	// Legal storage / preserved documents
+	GetPreservedDocument(ctx context.Context, uuid string) (*models.PreservedDocument, error)
 
 	// Statistics
 	GetStats(ctx context.Context, fromDate, toDate time.Time) (*models.BillingStats, error)
@@ -474,6 +479,77 @@ func (s *invoiceService) RejectReceivedInvoice(ctx context.Context, uuid string,
 
 func (s *invoiceService) GetStats(ctx context.Context, fromDate, toDate time.Time) (*models.BillingStats, error) {
 	return s.invoiceRepo.GetStats(ctx, fromDate, toDate)
+}
+
+// GetInvoiceHTML returns the HTML representation of an invoice from OpenAPI SDI
+// Per OpenAPI SDI spec: GET /invoices/{uuid}/html
+func (s *invoiceService) GetInvoiceHTML(ctx context.Context, uuid string) ([]byte, error) {
+	invoice, err := s.invoiceRepo.GetByUUID(ctx, uuid)
+	if err != nil {
+		if errors.Is(err, repository.ErrInvoiceNotFound) {
+			return nil, ErrInvoiceNotFound
+		}
+		return nil, err
+	}
+
+	// HTML is only available for invoices that have been sent to SDI
+	if invoice.OpenAPIUUID == "" {
+		return nil, errors.New("HTML view not available for draft invoices")
+	}
+
+	return s.openAPIClient.DownloadInvoiceHTML(ctx, invoice.OpenAPIUUID)
+}
+
+// ImportInvoice imports a supplier invoice via base64-encoded XML
+// Per OpenAPI SDI spec: POST /invoices/import
+func (s *invoiceService) ImportInvoice(ctx context.Context, input *models.ImportInvoiceInput) (*models.ImportInvoiceResponse, error) {
+	// Call OpenAPI SDI to import the invoice
+	openAPIInput := &ImportInvoiceInput{
+		Invoice:         input.Invoice,
+		InvoiceFileName: input.InvoiceFileName,
+		SDIID:           input.SDIID,
+		Metadata:        input.Metadata,
+	}
+
+	result, err := s.openAPIClient.ImportInvoice(ctx, openAPIInput)
+	if err != nil {
+		s.logger.Error("failed to import invoice",
+			"error", err,
+		)
+		return nil, err
+	}
+
+	s.logger.Info("invoice imported successfully",
+		"uuids", result.UUIDs,
+		"count", result.Count,
+	)
+
+	return &models.ImportInvoiceResponse{
+		UUIDs:   result.UUIDs,
+		Count:   result.Count,
+		Message: "Invoice(s) imported successfully",
+	}, nil
+}
+
+// GetPreservedDocument retrieves the preservation status of a document
+// Per OpenAPI SDI spec: GET /preserved_documents/{uuid}
+func (s *invoiceService) GetPreservedDocument(ctx context.Context, uuid string) (*models.PreservedDocument, error) {
+	result, err := s.openAPIClient.GetPreservedDocument(ctx, uuid)
+	if err != nil {
+		if errors.Is(err, ErrOpenAPINotFound) {
+			return nil, errors.New("preserved document not found")
+		}
+		return nil, err
+	}
+
+	return &models.PreservedDocument{
+		UUID:             result.UUID,
+		Status:           result.Status,
+		ReceiptTimestamp: result.ReceiptTimestamp,
+		Weight:           result.Weight,
+		ObjectID:         result.ObjectID,
+		ObjectType:       result.ObjectType,
+	}, nil
 }
 
 func (s *invoiceService) validateCreateInput(input *models.CreateInvoiceInput) error {
