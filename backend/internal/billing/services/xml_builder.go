@@ -128,6 +128,16 @@ func (b *xmlBuilder) buildDatiTrasmissione(invoice *models.Invoice, format model
 		dt.PECDestinatario = pecDestinatario
 	}
 
+	// Add transmitter contacts for communication channel (recommended per FatturaPA spec)
+	if invoice.CedentePrestatore != nil {
+		if invoice.CedentePrestatore.Email != "" || invoice.CedentePrestatore.Phone != "" {
+			dt.ContattiTrasmit = &models.ContattiTrasmit{
+				Email:    invoice.CedentePrestatore.Email,
+				Telefono: NormalizePhone(invoice.CedentePrestatore.Phone),
+			}
+		}
+	}
+
 	return dt
 }
 
@@ -298,13 +308,22 @@ func (b *xmlBuilder) buildDatiGenerali(invoice *models.Invoice) models.DatiGener
 		break // XSD only allows one DatiRitenuta in v1.2.3 (but our model supports multiple for future)
 	}
 
-	// Add DatiBollo (stamp duty) if present
+	// Add DatiBollo (stamp duty) - either explicitly set or auto-detected per DPR 642/1972
 	if invoice.DatiBollo != nil {
+		// Explicitly set stamp duty
 		dg.DatiGeneraliDocumento.DatiBollo = &models.DatiBollo{
 			BolloVirtuale: "SI", // Always "SI" for virtual stamp duty
 		}
 		if invoice.DatiBollo.ImportoBollo > 0 {
 			dg.DatiGeneraliDocumento.DatiBollo.ImportoBollo = formatAmount(invoice.DatiBollo.ImportoBollo)
+		} else {
+			dg.DatiGeneraliDocumento.DatiBollo.ImportoBollo = "2.00" // Default €2.00
+		}
+	} else if shouldApplyStampDuty(invoice) {
+		// Auto-detect stamp duty requirement per Italian law
+		dg.DatiGeneraliDocumento.DatiBollo = &models.DatiBollo{
+			BolloVirtuale: "SI",
+			ImportoBollo:  "2.00", // Standard €2.00 stamp duty
 		}
 	}
 
@@ -453,6 +472,23 @@ func (b *xmlBuilder) buildDatiBeniServizi(invoice *models.Invoice) models.DatiBe
 				sm.Importo = formatAmount(discount.Amount)
 			}
 			dl.ScontoMaggiorazione = append(dl.ScontoMaggiorazione, sm)
+		}
+
+		// Add AltriDatiGestionali (additional management data) if present
+		for _, adg := range line.AltriDatiGestionali {
+			altriDati := models.AltriDati{
+				TipoDato: adg.TipoDato,
+			}
+			if adg.RiferimentoTesto != "" {
+				altriDati.RiferimentoTesto = adg.RiferimentoTesto
+			}
+			if adg.RiferimentoNumero != 0 {
+				altriDati.RiferimentoNumero = formatAmount(adg.RiferimentoNumero)
+			}
+			if adg.RiferimentoData != nil {
+				altriDati.RiferimentoData = adg.RiferimentoData.Format("2006-01-02")
+			}
+			dl.AltriDatiGestionali = append(dl.AltriDatiGestionali, altriDati)
 		}
 
 		dbs.DettaglioLinee = append(dbs.DettaglioLinee, dl)
@@ -617,6 +653,42 @@ func isAlpha(s string) bool {
 // Keeping for backward compatibility but internally uses NormalizeNazione
 func ensureIdPaese(s string) string {
 	return NormalizeNazione(s)
+}
+
+// shouldApplyStampDuty determines if stamp duty (bollo) should be applied per DPR 642/1972
+// Stamp duty of €2.00 applies when:
+// 1. Invoice total exceeds €77.47
+// 2. Invoice contains exempt/non-taxable amounts (VAT nature codes N1-N7.x)
+func shouldApplyStampDuty(invoice *models.Invoice) bool {
+	const stampDutyThreshold = 77.47
+
+	// Check total amount threshold
+	if invoice.TotalAmount <= stampDutyThreshold {
+		return false
+	}
+
+	// Check if any VAT summary has exempt/non-taxable nature (N1-N7.x)
+	for _, vs := range invoice.VATSummary {
+		if vs.VATRate == 0 && vs.VATNature != "" {
+			natura := string(vs.VATNature)
+			// N1-N7 nature codes indicate exempt/non-taxable operations
+			if len(natura) >= 2 && natura[0] == 'N' && natura[1] >= '1' && natura[1] <= '7' {
+				return true
+			}
+		}
+	}
+
+	// Also check line items for natura codes
+	for _, line := range invoice.Lines {
+		if line.VATRate == 0 && line.VATNature != "" {
+			natura := string(line.VATNature)
+			if len(natura) >= 2 && natura[0] == 'N' && natura[1] >= '1' && natura[1] <= '7' {
+				return true
+			}
+		}
+	}
+
+	return false
 }
 
 // getDefaultNormativeRef returns a default normative reference based on VAT Nature code

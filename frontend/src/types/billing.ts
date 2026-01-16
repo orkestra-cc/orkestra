@@ -537,6 +537,14 @@ export interface LineDiscount {
   amount?: number;
 }
 
+// Additional management data for invoice lines (AltriDatiGestionali)
+export interface AltriDatiGestionali {
+  tipoDato: string; // Required, max 10 chars - data type identifier
+  riferimentoTesto?: string; // Optional, max 60 chars - text reference
+  riferimentoNumero?: number; // Optional - numeric reference
+  riferimentoData?: string; // Optional - date reference (ISO format)
+}
+
 export interface InvoiceLine {
   lineNumber: number;
   description: string;
@@ -554,6 +562,7 @@ export interface InvoiceLine {
   ritenuta?: boolean; // Whether withholding tax applies to this line
   startDate?: string;
   endDate?: string;
+  altriDatiGestionali?: AltriDatiGestionali[]; // Additional management data
 }
 
 export interface VATSummaryLine {
@@ -670,6 +679,7 @@ export interface CreateInvoiceLineInput {
   ritenuta?: boolean; // Whether withholding tax applies
   startDate?: string;
   endDate?: string;
+  altriDatiGestionali?: AltriDatiGestionali[]; // Additional management data per line
 }
 
 export interface CreatePaymentTermsInput {

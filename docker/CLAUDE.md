@@ -30,6 +30,27 @@ The docker module provides **containerized infrastructure and deployment configu
 - **Developers**: Local development environment setup
 - **Production**: Deployment and scaling configurations
 
+## AI Assistant Critical Rules
+
+**🚨 ALWAYS use `--env-file` when running Docker Compose commands:**
+
+```bash
+# ✅ CORRECT - Always specify the env file
+docker compose -f docker-compose.dev.yml --env-file .env.development up -d
+docker compose -f docker-compose.dev.yml --env-file .env.development restart backend
+docker compose -f docker-compose.dev.yml --env-file .env.development logs backend
+
+# ❌ WRONG - Missing env file causes missing variable warnings
+docker compose -f docker-compose.dev.yml up -d
+```
+
+**Environment file mapping:**
+- `docker-compose.dev.yml` → `--env-file .env.development`
+- `docker-compose.staging.yml` → `--env-file .env.staging`
+- `docker-compose.prod.yml` → `--env-file .env.production`
+
+---
+
 ## Three-Stage Environment Workflow
 
 ORKESTRA uses a three-stage DevOps workflow: **Development**, **Staging**, and **Production**.

@@ -124,6 +124,9 @@ type InvoiceLine struct {
 	CodiciArticolo    []ProductCode `bson:"codiciArticolo,omitempty" json:"codiciArticolo,omitempty"`       // Multiple product codes (XSD unbounded)
 	StartDate         *time.Time    `bson:"startDate,omitempty" json:"startDate,omitempty"`                 // Data inizio periodo
 	EndDate           *time.Time    `bson:"endDate,omitempty" json:"endDate,omitempty"`                     // Data fine periodo
+
+	// Additional management data (AltriDatiGestionali per FatturaPA)
+	AltriDatiGestionali []AltriDatiInput `bson:"altriDatiGestionali,omitempty" json:"altriDatiGestionali,omitempty"`
 }
 
 // LineDiscount represents a discount applied to an invoice line
@@ -131,6 +134,15 @@ type LineDiscount struct {
 	Type       string  `bson:"type" json:"type" validate:"required,oneof=SC MG"` // SC=sconto, MG=maggiorazione
 	Percentage float64 `bson:"percentage,omitempty" json:"percentage,omitempty"` // Percentuale sconto
 	Amount     float64 `bson:"amount,omitempty" json:"amount,omitempty"`         // Importo fisso sconto
+}
+
+// AltriDatiInput represents additional management data for a line item (AltriDatiGestionali)
+// Used for automation, commercial data, and marketing purposes in FatturaPA
+type AltriDatiInput struct {
+	TipoDato          string     `bson:"tipoDato" json:"tipoDato" validate:"required,max=10"`                       // Data type identifier (max 10 chars)
+	RiferimentoTesto  string     `bson:"riferimentoTesto,omitempty" json:"riferimentoTesto,omitempty" validate:"max=60"` // Text reference (max 60 chars)
+	RiferimentoNumero float64    `bson:"riferimentoNumero,omitempty" json:"riferimentoNumero,omitempty"`             // Numeric reference
+	RiferimentoData   *time.Time `bson:"riferimentoData,omitempty" json:"riferimentoData,omitempty"`                 // Date reference
 }
 
 // VATSummaryLine represents a VAT summary line (riepilogo IVA)

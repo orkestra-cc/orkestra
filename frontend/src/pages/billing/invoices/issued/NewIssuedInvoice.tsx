@@ -41,6 +41,7 @@ import type {
   DatiCassa,
   TipoRitenuta,
   TipoCassa,
+  AltriDatiGestionali,
 } from 'types/billing';
 import PageHeader from 'components/common/PageHeader';
 import FalconCardHeader from 'components/common/FalconCardHeader';
@@ -57,6 +58,15 @@ const createEmptyLine = (): CreateInvoiceLineInput => ({
   productCode: '',
   startDate: undefined,
   endDate: undefined,
+  altriDatiGestionali: [],
+});
+
+// Create empty AltriDatiGestionali entry
+const createEmptyAltriDati = (): AltriDatiGestionali => ({
+  tipoDato: '',
+  riferimentoTesto: '',
+  riferimentoNumero: undefined,
+  riferimentoData: undefined,
 });
 
 // Document type options
@@ -265,6 +275,43 @@ const NewIssuedInvoice: React.FC = () => {
     const newCausale = [...causale];
     newCausale[index] = value;
     setCausale(newCausale);
+  };
+
+  // AltriDatiGestionali handlers
+  const handleAddAltriDati = (lineIndex: number) => {
+    const newLines = [...lines];
+    const currentAltriDati = newLines[lineIndex].altriDatiGestionali || [];
+    newLines[lineIndex] = {
+      ...newLines[lineIndex],
+      altriDatiGestionali: [...currentAltriDati, createEmptyAltriDati()],
+    };
+    setLines(newLines);
+  };
+
+  const handleRemoveAltriDati = (lineIndex: number, adgIndex: number) => {
+    const newLines = [...lines];
+    const currentAltriDati = newLines[lineIndex].altriDatiGestionali || [];
+    newLines[lineIndex] = {
+      ...newLines[lineIndex],
+      altriDatiGestionali: currentAltriDati.filter((_, i) => i !== adgIndex),
+    };
+    setLines(newLines);
+  };
+
+  const handleAltriDatiChange = (
+    lineIndex: number,
+    adgIndex: number,
+    field: keyof AltriDatiGestionali,
+    value: string | number | undefined
+  ) => {
+    const newLines = [...lines];
+    const currentAltriDati = [...(newLines[lineIndex].altriDatiGestionali || [])];
+    currentAltriDati[adgIndex] = { ...currentAltriDati[adgIndex], [field]: value };
+    newLines[lineIndex] = {
+      ...newLines[lineIndex],
+      altriDatiGestionali: currentAltriDati,
+    };
+    setLines(newLines);
   };
 
   // Validation
@@ -604,13 +651,14 @@ const NewIssuedInvoice: React.FC = () => {
                   <Table bordered hover size="sm">
                     <thead className="bg-body-tertiary">
                       <tr>
-                        <th style={{ width: '30%' }}>Descrizione *</th>
-                        <th style={{ width: '8%' }}>Qtà *</th>
-                        <th style={{ width: '10%' }}>U.M.</th>
-                        <th style={{ width: '12%' }}>Prezzo Unit.</th>
-                        <th style={{ width: '8%' }}>IVA %</th>
-                        <th style={{ width: '15%' }}>Natura</th>
-                        <th style={{ width: '12%' }}>Totale</th>
+                        <th style={{ width: '25%' }}>Descrizione *</th>
+                        <th style={{ width: '10%' }}>Codice</th>
+                        <th style={{ width: '7%' }}>Qtà *</th>
+                        <th style={{ width: '8%' }}>U.M.</th>
+                        <th style={{ width: '10%' }}>Prezzo Unit.</th>
+                        <th style={{ width: '7%' }}>IVA %</th>
+                        <th style={{ width: '13%' }}>Natura</th>
+                        <th style={{ width: '10%' }}>Totale</th>
                         <th style={{ width: '5%' }}></th>
                       </tr>
                     </thead>
@@ -618,7 +666,8 @@ const NewIssuedInvoice: React.FC = () => {
                       {lines.map((line, index) => {
                         const { totalPrice } = calculateLineTotals(line);
                         return (
-                          <tr key={index}>
+                          <React.Fragment key={index}>
+                          <tr>
                             <td>
                               <Form.Control
                                 size="sm"
@@ -628,6 +677,18 @@ const NewIssuedInvoice: React.FC = () => {
                                   handleLineChange(index, 'description', e.target.value)
                                 }
                                 placeholder="Descrizione"
+                              />
+                            </td>
+                            <td>
+                              <Form.Control
+                                size="sm"
+                                type="text"
+                                maxLength={35}
+                                value={line.productCode || ''}
+                                onChange={(e) =>
+                                  handleLineChange(index, 'productCode', e.target.value)
+                                }
+                                placeholder="Codice"
                               />
                             </td>
                             <td>
@@ -724,12 +785,97 @@ const NewIssuedInvoice: React.FC = () => {
                               </Button>
                             </td>
                           </tr>
+                          {/* AltriDatiGestionali row */}
+                          <tr>
+                            <td colSpan={10} className="bg-light p-2">
+                              <div className="d-flex align-items-center gap-2 mb-2">
+                                <small className="text-muted fw-bold">Altri Dati Gestionali</small>
+                                <Button
+                                  variant="outline-primary"
+                                  size="sm"
+                                  onClick={() => handleAddAltriDati(index)}
+                                >
+                                  <FontAwesomeIcon icon={faPlus} className="me-1" />
+                                  Aggiungi
+                                </Button>
+                              </div>
+                              {(line.altriDatiGestionali || []).length > 0 && (
+                                <div className="ps-2">
+                                  {(line.altriDatiGestionali || []).map((adg, adgIndex) => (
+                                    <Row key={adgIndex} className="mb-2 align-items-center g-2">
+                                      <Col xs={2}>
+                                        <Form.Control
+                                          size="sm"
+                                          type="text"
+                                          maxLength={10}
+                                          placeholder="Tipo Dato*"
+                                          value={adg.tipoDato || ''}
+                                          onChange={(e) =>
+                                            handleAltriDatiChange(index, adgIndex, 'tipoDato', e.target.value)
+                                          }
+                                        />
+                                      </Col>
+                                      <Col xs={4}>
+                                        <Form.Control
+                                          size="sm"
+                                          type="text"
+                                          maxLength={60}
+                                          placeholder="Rif. Testo"
+                                          value={adg.riferimentoTesto || ''}
+                                          onChange={(e) =>
+                                            handleAltriDatiChange(index, adgIndex, 'riferimentoTesto', e.target.value)
+                                          }
+                                        />
+                                      </Col>
+                                      <Col xs={2}>
+                                        <Form.Control
+                                          size="sm"
+                                          type="number"
+                                          step="0.01"
+                                          placeholder="Rif. Numero"
+                                          value={adg.riferimentoNumero ?? ''}
+                                          onChange={(e) =>
+                                            handleAltriDatiChange(
+                                              index,
+                                              adgIndex,
+                                              'riferimentoNumero',
+                                              e.target.value ? parseFloat(e.target.value) : undefined
+                                            )
+                                          }
+                                        />
+                                      </Col>
+                                      <Col xs={2}>
+                                        <Form.Control
+                                          size="sm"
+                                          type="date"
+                                          value={adg.riferimentoData || ''}
+                                          onChange={(e) =>
+                                            handleAltriDatiChange(index, adgIndex, 'riferimentoData', e.target.value || undefined)
+                                          }
+                                        />
+                                      </Col>
+                                      <Col xs={2}>
+                                        <Button
+                                          variant="outline-danger"
+                                          size="sm"
+                                          onClick={() => handleRemoveAltriDati(index, adgIndex)}
+                                        >
+                                          <FontAwesomeIcon icon={faTrash} />
+                                        </Button>
+                                      </Col>
+                                    </Row>
+                                  ))}
+                                </div>
+                              )}
+                            </td>
+                          </tr>
+                          </React.Fragment>
                         );
                       })}
                     </tbody>
                     <tfoot>
                       <tr>
-                        <td colSpan={8}>
+                        <td colSpan={9}>
                           <Button variant="falcon-primary" size="sm" onClick={handleAddLine}>
                             <FontAwesomeIcon icon={faPlus} className="me-1" />
                             Aggiungi Riga

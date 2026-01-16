@@ -27,9 +27,9 @@
       "Bash(docker logs:*)"
     ]
   },
+  "enableAllProjectMcpServers": true,
   "enabledMcpjsonServers": [
     "dart",
     "chrome-devtools"
-  ],
-  "enableAllProjectMcpServers": true
+  ]
 }

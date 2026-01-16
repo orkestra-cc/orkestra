@@ -23,6 +23,7 @@ import {
   faEdit,
   faEye,
   faFileCode,
+  faDownload,
 } from '@fortawesome/free-solid-svg-icons';
 import {
   useGetInvoiceQuery,
@@ -45,6 +46,7 @@ import type {
   DatiCassa,
   TipoRitenuta,
   TipoCassa,
+  AltriDatiGestionali,
 } from 'types/billing';
 import {
   DOCUMENT_TYPE_LABELS,
@@ -152,6 +154,15 @@ const createEmptyLine = (): CreateInvoiceLineInput => ({
   productCode: '',
   startDate: undefined,
   endDate: undefined,
+  altriDatiGestionali: [],
+});
+
+// Create empty AltriDatiGestionali entry
+const createEmptyAltriDati = (): AltriDatiGestionali => ({
+  tipoDato: '',
+  riferimentoTesto: '',
+  riferimentoNumero: undefined,
+  riferimentoData: undefined,
 });
 
 const IssuedInvoiceDetail: React.FC = () => {
@@ -335,6 +346,43 @@ const IssuedInvoiceDetail: React.FC = () => {
     setCausale(newCausale);
   };
 
+  // AltriDatiGestionali handlers
+  const handleAddAltriDati = (lineIndex: number) => {
+    const newLines = [...lines];
+    const currentAltriDati = newLines[lineIndex].altriDatiGestionali || [];
+    newLines[lineIndex] = {
+      ...newLines[lineIndex],
+      altriDatiGestionali: [...currentAltriDati, createEmptyAltriDati()],
+    };
+    setLines(newLines);
+  };
+
+  const handleRemoveAltriDati = (lineIndex: number, adgIndex: number) => {
+    const newLines = [...lines];
+    const currentAltriDati = newLines[lineIndex].altriDatiGestionali || [];
+    newLines[lineIndex] = {
+      ...newLines[lineIndex],
+      altriDatiGestionali: currentAltriDati.filter((_, i) => i !== adgIndex),
+    };
+    setLines(newLines);
+  };
+
+  const handleAltriDatiChange = (
+    lineIndex: number,
+    adgIndex: number,
+    field: keyof AltriDatiGestionali,
+    value: string | number | undefined
+  ) => {
+    const newLines = [...lines];
+    const currentAltriDati = [...(newLines[lineIndex].altriDatiGestionali || [])];
+    currentAltriDati[adgIndex] = { ...currentAltriDati[adgIndex], [field]: value };
+    newLines[lineIndex] = {
+      ...newLines[lineIndex],
+      altriDatiGestionali: currentAltriDati,
+    };
+    setLines(newLines);
+  };
+
   // Validation
   const validate = (): boolean => {
     if (!number.trim()) {
@@ -474,11 +522,55 @@ const IssuedInvoiceDetail: React.FC = () => {
   const handleViewXml = async () => {
     try {
       const result = await getInvoiceXml(invoiceId!).unwrap();
-      const blob = new Blob([result], { type: 'application/xml' });
+      // Use TextEncoder to ensure proper UTF-8 encoding
+      const encoder = new TextEncoder();
+      const utf8Bytes = encoder.encode(result);
+      const blob = new Blob([utf8Bytes], { type: 'application/xml; charset=utf-8' });
       const url = window.URL.createObjectURL(blob);
       window.open(url, '_blank');
     } catch {
       setError('Errore durante il caricamento del file XML');
+    }
+  };
+
+  // Download XML file
+  // Generate FatturaPA compliant filename: {CountryCode}{CodiceFiscale}_{ProgressivoInvio}.xml
+  const generateFatturaFilename = () => {
+    const cedente = invoice?.cedentePrestatore;
+    if (!cedente) {
+      return `fattura_${invoiceId}.xml`;
+    }
+    // Use codiceFiscale if available, otherwise use fiscalIdCode (VAT number)
+    const fiscalCode = cedente.codiceFiscale || cedente.fiscalIdCode;
+    if (!fiscalCode) {
+      return `fattura_${invoiceId}.xml`;
+    }
+    const countryCode = cedente.fiscalIdCountry || 'IT';
+    // Progressive: use progressivoInvio, or last 5 chars of invoiceId, or generate from invoice number
+    const progressive = invoice.progressivoInvio ||
+      invoiceId?.slice(-5) ||
+      String(invoice.number).replace(/\D/g, '').slice(-5).padStart(5, '0') ||
+      '00001';
+    return `${countryCode}${fiscalCode}_${progressive}.xml`;
+  };
+
+  const handleDownloadXml = async () => {
+    try {
+      const result = await getInvoiceXml(invoiceId!).unwrap();
+      // Use TextEncoder to ensure proper UTF-8 encoding
+      const encoder = new TextEncoder();
+      const utf8Bytes = encoder.encode(result);
+      const blob = new Blob([utf8Bytes], { type: 'application/xml; charset=utf-8' });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = generateFatturaFilename();
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    } catch {
+      setError('Errore durante il download del file XML');
     }
   };
 
@@ -625,10 +717,20 @@ const IssuedInvoiceDetail: React.FC = () => {
               size="sm"
               className="me-2"
               onClick={handleViewXml}
-              title="XML"
+              title="Visualizza XML"
             >
               <FontAwesomeIcon icon={faFileCode} className="me-1" />
               XML
+            </Button>
+            <Button
+              variant="falcon-default"
+              size="sm"
+              className="me-2"
+              onClick={handleDownloadXml}
+              title="Scarica XML"
+            >
+              <FontAwesomeIcon icon={faDownload} className="me-1" />
+              Scarica
             </Button>
             {canEdit && (
               <Button
@@ -847,13 +949,14 @@ const IssuedInvoiceDetail: React.FC = () => {
                     <Table bordered hover size="sm">
                       <thead className="bg-body-tertiary">
                         <tr>
-                          <th style={{ width: '30%' }}>Descrizione *</th>
-                          <th style={{ width: '8%' }}>Qtà *</th>
-                          <th style={{ width: '10%' }}>U.M.</th>
-                          <th style={{ width: '12%' }}>Prezzo Unit.</th>
-                          <th style={{ width: '8%' }}>IVA %</th>
-                          <th style={{ width: '15%' }}>Natura</th>
-                          <th style={{ width: '12%' }}>Totale</th>
+                          <th style={{ width: '25%' }}>Descrizione *</th>
+                          <th style={{ width: '10%' }}>Codice</th>
+                          <th style={{ width: '7%' }}>Qtà *</th>
+                          <th style={{ width: '8%' }}>U.M.</th>
+                          <th style={{ width: '10%' }}>Prezzo Unit.</th>
+                          <th style={{ width: '7%' }}>IVA %</th>
+                          <th style={{ width: '13%' }}>Natura</th>
+                          <th style={{ width: '10%' }}>Totale</th>
                           <th style={{ width: '5%' }}></th>
                         </tr>
                       </thead>
@@ -861,7 +964,8 @@ const IssuedInvoiceDetail: React.FC = () => {
                         {lines.map((line, index) => {
                           const { totalPrice } = calculateLineTotals(line);
                           return (
-                            <tr key={index}>
+                            <React.Fragment key={index}>
+                            <tr>
                               <td>
                                 <Form.Control
                                   size="sm"
@@ -871,6 +975,18 @@ const IssuedInvoiceDetail: React.FC = () => {
                                     handleLineChange(index, 'description', e.target.value)
                                   }
                                   placeholder="Descrizione"
+                                />
+                              </td>
+                              <td>
+                                <Form.Control
+                                  size="sm"
+                                  type="text"
+                                  maxLength={35}
+                                  value={line.productCode || ''}
+                                  onChange={(e) =>
+                                    handleLineChange(index, 'productCode', e.target.value)
+                                  }
+                                  placeholder="Codice"
                                 />
                               </td>
                               <td>
@@ -966,12 +1082,97 @@ const IssuedInvoiceDetail: React.FC = () => {
                                 </Button>
                               </td>
                             </tr>
+                            {/* AltriDatiGestionali row */}
+                            <tr>
+                              <td colSpan={10} className="bg-light p-2">
+                                <div className="d-flex align-items-center gap-2 mb-2">
+                                  <small className="text-muted fw-bold">Altri Dati Gestionali</small>
+                                  <Button
+                                    variant="outline-primary"
+                                    size="sm"
+                                    onClick={() => handleAddAltriDati(index)}
+                                  >
+                                    <FontAwesomeIcon icon={faPlus} className="me-1" />
+                                    Aggiungi
+                                  </Button>
+                                </div>
+                                {(line.altriDatiGestionali || []).length > 0 && (
+                                  <div className="ps-2">
+                                    {(line.altriDatiGestionali || []).map((adg, adgIndex) => (
+                                      <Row key={adgIndex} className="mb-2 align-items-center g-2">
+                                        <Col xs={2}>
+                                          <Form.Control
+                                            size="sm"
+                                            type="text"
+                                            maxLength={10}
+                                            placeholder="Tipo Dato*"
+                                            value={adg.tipoDato || ''}
+                                            onChange={(e) =>
+                                              handleAltriDatiChange(index, adgIndex, 'tipoDato', e.target.value)
+                                            }
+                                          />
+                                        </Col>
+                                        <Col xs={4}>
+                                          <Form.Control
+                                            size="sm"
+                                            type="text"
+                                            maxLength={60}
+                                            placeholder="Rif. Testo"
+                                            value={adg.riferimentoTesto || ''}
+                                            onChange={(e) =>
+                                              handleAltriDatiChange(index, adgIndex, 'riferimentoTesto', e.target.value)
+                                            }
+                                          />
+                                        </Col>
+                                        <Col xs={2}>
+                                          <Form.Control
+                                            size="sm"
+                                            type="number"
+                                            step="0.01"
+                                            placeholder="Rif. Numero"
+                                            value={adg.riferimentoNumero ?? ''}
+                                            onChange={(e) =>
+                                              handleAltriDatiChange(
+                                                index,
+                                                adgIndex,
+                                                'riferimentoNumero',
+                                                e.target.value ? parseFloat(e.target.value) : undefined
+                                              )
+                                            }
+                                          />
+                                        </Col>
+                                        <Col xs={2}>
+                                          <Form.Control
+                                            size="sm"
+                                            type="date"
+                                            value={adg.riferimentoData || ''}
+                                            onChange={(e) =>
+                                              handleAltriDatiChange(index, adgIndex, 'riferimentoData', e.target.value || undefined)
+                                            }
+                                          />
+                                        </Col>
+                                        <Col xs={2}>
+                                          <Button
+                                            variant="outline-danger"
+                                            size="sm"
+                                            onClick={() => handleRemoveAltriDati(index, adgIndex)}
+                                          >
+                                            <FontAwesomeIcon icon={faTrash} />
+                                          </Button>
+                                        </Col>
+                                      </Row>
+                                    ))}
+                                  </div>
+                                )}
+                              </td>
+                            </tr>
+                            </React.Fragment>
                           );
                         })}
                       </tbody>
                       <tfoot>
                         <tr>
-                          <td colSpan={8}>
+                          <td colSpan={9}>
                             <Button variant="falcon-primary" size="sm" onClick={handleAddLine}>
                               <FontAwesomeIcon icon={faPlus} className="me-1" />
                               Aggiungi Riga

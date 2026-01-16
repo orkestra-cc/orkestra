@@ -382,6 +382,37 @@ func createTestInvoice() *models.Invoice {
 	}
 }
 
+func TestBuildXMLProlog(t *testing.T) {
+	cfg := &config.OpenAPIConfig{
+		FiscalID:      "IT12345678901",
+		RecipientCode: "JKKZDGR",
+	}
+	builder := NewXMLBuilder(cfg)
+
+	invoice := createTestInvoice()
+
+	xml, err := builder.Build(invoice)
+	if err != nil {
+		t.Fatalf("Build failed: %v", err)
+	}
+
+	// Verify XML prolog is at byte 0 with correct format
+	expectedProlog := `<?xml version="1.0" encoding="UTF-8"?>`
+	if !strings.HasPrefix(xml, expectedProlog) {
+		// Show first 100 bytes for debugging
+		preview := xml
+		if len(preview) > 100 {
+			preview = preview[:100]
+		}
+		t.Errorf("XML should start with prolog %q, but starts with: %q", expectedProlog, preview)
+	}
+
+	// Verify no BOM or whitespace before prolog
+	if len(xml) > 0 && xml[0] != '<' {
+		t.Errorf("XML should start with '<', but first byte is %q (0x%X)", string(xml[0]), xml[0])
+	}
+}
+
 func TestBuildMinimalB2BInvoice(t *testing.T) {
 	cfg := &config.OpenAPIConfig{
 		FiscalID:      "IT12345678901",

@@ -467,12 +467,22 @@ func (s *invoiceService) GetInvoiceXML(ctx context.Context, uuid string) (string
 		return "", err
 	}
 
-	// If XML is already stored, ensure it has XML declaration and return it
+	// For draft/pending invoices, always regenerate XML to include latest fixes
+	// For sent/delivered invoices, use cached XML (it's what was actually sent)
+	if invoice.Status == models.StatusDraft || invoice.Status == models.StatusPending {
+		xmlContent, err := s.xmlBuilder.Build(invoice)
+		if err != nil {
+			return "", err
+		}
+		return ensureXMLDeclaration(xmlContent), nil
+	}
+
+	// For sent invoices, return cached XML if available
 	if invoice.XMLContent != "" {
 		return ensureXMLDeclaration(invoice.XMLContent), nil
 	}
 
-	// Generate XML on the fly
+	// Fallback: generate XML on the fly
 	xmlContent, err := s.xmlBuilder.Build(invoice)
 	if err != nil {
 		return "", err
@@ -484,16 +494,23 @@ func (s *invoiceService) GetInvoiceXML(ctx context.Context, uuid string) (string
 
 // ensureXMLDeclaration ensures the XML has the proper declaration prolog
 // FatturaPA requires: <?xml version="1.0" encoding="UTF-8"?>
+// The prolog MUST be at byte 0 with no leading whitespace or BOM
 func ensureXMLDeclaration(xmlContent string) string {
 	const xmlDeclaration = `<?xml version="1.0" encoding="UTF-8"?>`
 
-	trimmed := strings.TrimSpace(xmlContent)
+	// Remove any BOM (Byte Order Mark) that might be present
+	// UTF-8 BOM is EF BB BF (239, 187, 191)
+	content := strings.TrimPrefix(xmlContent, "\xef\xbb\xbf")
+
+	// Trim all leading/trailing whitespace - prolog must be at byte 0
+	trimmed := strings.TrimSpace(content)
 
 	// Check if already has declaration
 	if strings.HasPrefix(trimmed, "<?xml") {
 		// Verify it has the correct format, replace if not
 		if strings.HasPrefix(trimmed, xmlDeclaration) {
-			return xmlContent
+			// Return trimmed to ensure no leading whitespace
+			return trimmed
 		}
 		// Has a declaration but might be malformed, find the end and replace
 		endIdx := strings.Index(trimmed, "?>")
