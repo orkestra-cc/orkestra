@@ -226,6 +226,9 @@ const NewIssuedInvoice = lazy(
 const IssuedInvoiceDetail = lazy(
   () => import('pages/billing/invoices/issued/IssuedInvoiceDetail')
 );
+const ReceivedInvoiceDetail = lazy(
+  () => import('pages/billing/invoices/received/ReceivedInvoiceDetail')
+);
 
 import TableView from 'reference/app-examples/support-desk/tickets-layout/TableView';
 import CardView from 'reference/app-examples/support-desk/tickets-layout/CardView';
@@ -780,6 +783,23 @@ const routes: RouteObject[] = [
                   fallback={<FalconLoader />}
                 >
                   <ReceivedInvoices />
+                </Suspense>
+              </ProtectedRoute>
+            )
+          },
+          {
+            path: 'billing/invoices/received/:invoiceId',
+            element: (
+              <ProtectedRoute
+                requiredPermissions={[
+                  ['developer', 'ceo', 'administrator']
+                ]}
+              >
+                <Suspense
+                  key="billing-invoices-received-detail"
+                  fallback={<FalconLoader />}
+                >
+                  <ReceivedInvoiceDetail />
                 </Suspense>
               </ProtectedRoute>
             )
