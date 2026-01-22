@@ -74,6 +74,18 @@ services:
       # Observability
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT}
       OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-orkestra-backend-staging}
+
+      # Billing - OpenAPI SDI (sandbox mode for staging)
+      OPENAPI_BASE_URL: ${OPENAPI_BASE_URL:-https://test.sdi.openapi.it}
+      OPENAPI_BEARER_TOKEN: ${OPENAPI_BEARER_TOKEN:-}
+      OPENAPI_FISCAL_ID: ${OPENAPI_FISCAL_ID:-}
+      OPENAPI_RECIPIENT_CODE: ${OPENAPI_RECIPIENT_CODE:-JKKZDGR}
+      OPENAPI_APPLY_SIGNATURE: ${OPENAPI_APPLY_SIGNATURE:-true}
+      OPENAPI_APPLY_STORAGE: ${OPENAPI_APPLY_STORAGE:-true}
+      OPENAPI_TIMEOUT: ${OPENAPI_TIMEOUT:-30s}
+      OPENAPI_RETRY_ATTEMPTS: ${OPENAPI_RETRY_ATTEMPTS:-3}
+      OPENAPI_POLLING_INTERVAL: ${OPENAPI_POLLING_INTERVAL:-5m}
+      OPENAPI_SANDBOX_MODE: ${OPENAPI_SANDBOX_MODE:-true}
     volumes:
       - ./keys:/app/keys:ro
       - orkestra-backend-logs-staging:/app/logs

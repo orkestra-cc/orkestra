@@ -63,8 +63,8 @@ services:
       BACKEND_URL: ${BACKEND_URL:-http://localhost:3000}
 
       # Security (relaxed for dev)
-      RATE_LIMIT_MAX: ${RATE_LIMIT_MAX:-1000}
-      RATE_LIMIT_WINDOW: ${RATE_LIMIT_WINDOW:-1m}
+      RATE_LIMIT_REQUESTS_PER_MINUTE: ${RATE_LIMIT_REQUESTS_PER_MINUTE:-1000}
+      RATE_LIMIT_BURST: ${RATE_LIMIT_BURST:-100}
 
       # Development specific
       DEBUG: "true"
