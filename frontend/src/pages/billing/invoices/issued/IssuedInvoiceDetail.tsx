@@ -240,7 +240,7 @@ const IssuedInvoiceDetail: React.FC = () => {
       setNumber(invoice.number);
       setDate(fromRFC3339(invoice.date));
       setLines(
-        invoice.lines.map((line) => ({
+        (invoice.lines || []).map((line) => ({
           description: line.description,
           quantity: line.quantity,
           unitOfMeasure: line.unitOfMeasure,
@@ -625,7 +625,7 @@ const IssuedInvoiceDetail: React.FC = () => {
       setNumber(invoice.number);
       setDate(fromRFC3339(invoice.date));
       setLines(
-        invoice.lines.map((line) => ({
+        (invoice.lines || []).map((line) => ({
           description: line.description,
           quantity: line.quantity,
           unitOfMeasure: line.unitOfMeasure,
@@ -708,6 +708,14 @@ const IssuedInvoiceDetail: React.FC = () => {
         Fattura non trovata.
       </Alert>
     );
+  }
+
+  // Debug: Check invoice structure - can be removed after fixing
+  if (process.env.NODE_ENV === 'development') {
+    console.log('Invoice data:', invoice);
+    if (!invoice.lines) {
+      console.error('Invoice lines is null/undefined:', invoice);
+    }
   }
 
   // Get customer display name
@@ -1618,7 +1626,7 @@ const IssuedInvoiceDetail: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {invoice.lines.map((line) => (
+                  {(invoice.lines || []).map((line) => (
                     <tr key={line.lineNumber}>
                       <td>{line.lineNumber}</td>
                       <td>{line.description}</td>

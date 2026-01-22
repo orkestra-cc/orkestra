@@ -264,6 +264,18 @@ export const billingApi = baseApi.injectEndpoints({
 
     getInvoice: builder.query<Invoice, string>({
       query: (id) => `/api/v1/billing/invoices/${id}`,
+      transformResponse: (response: { invoice: Invoice } | Invoice) => {
+        // Handle both wrapped and unwrapped response formats
+        const invoice = 'invoice' in response ? response.invoice : response;
+        // Ensure arrays are never null
+        if (invoice) {
+          invoice.lines = invoice.lines || [];
+          invoice.causale = invoice.causale || [];
+          invoice.datiRitenuta = invoice.datiRitenuta || [];
+          invoice.datiCassaPrevidenziale = invoice.datiCassaPrevidenziale || [];
+        }
+        return invoice;
+      },
       providesTags: (_result, _error, id) => [{ type: 'Invoice', id }],
     }),
 
