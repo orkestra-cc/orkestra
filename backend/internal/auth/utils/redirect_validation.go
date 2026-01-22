@@ -49,10 +49,20 @@ func ValidateRedirectURI(redirectURI string, config *RedirectURIConfig) error {
 		return nil // Empty redirect URI is allowed (uses default)
 	}
 
+	// Security checks before parsing
+	if err := validateRedirectURISecurity(redirectURI); err != nil {
+		return err
+	}
+
 	// Parse the URL
 	parsedURL, err := url.Parse(redirectURI)
 	if err != nil {
 		return fmt.Errorf("invalid redirect URI format: %w", err)
+	}
+
+	// Check for path traversal attacks
+	if containsPathTraversal(parsedURL.Path) {
+		return fmt.Errorf("redirect URI contains path traversal attempt")
 	}
 
 	// Check if scheme is allowed
@@ -63,6 +73,11 @@ func ValidateRedirectURI(redirectURI string, config *RedirectURIConfig) error {
 	// Special handling for localhost in development
 	if config.AllowLocalhost && isLocalhost(parsedURL.Host) {
 		return validateLocalhostURI(parsedURL)
+	}
+
+	// If localhost is not allowed, reject any localhost URLs explicitly
+	if !config.AllowLocalhost && isLocalhost(parsedURL.Host) {
+		return fmt.Errorf("localhost redirect URIs are not allowed in this environment")
 	}
 
 	// Check against exact whitelist
@@ -76,6 +91,62 @@ func ValidateRedirectURI(redirectURI string, config *RedirectURIConfig) error {
 	}
 
 	return fmt.Errorf("redirect URI '%s' is not in the allowed list", redirectURI)
+}
+
+// validateRedirectURISecurity performs pre-parsing security checks
+func validateRedirectURISecurity(redirectURI string) error {
+	// Limit maximum URL length to prevent DoS
+	if len(redirectURI) > 2048 {
+		return fmt.Errorf("redirect URI exceeds maximum length")
+	}
+
+	// Check for double encoding attacks (%%2f, etc.)
+	if strings.Contains(redirectURI, "%25") {
+		return fmt.Errorf("redirect URI contains double encoding")
+	}
+
+	// Check for null bytes
+	if strings.Contains(redirectURI, "%00") || strings.Contains(redirectURI, "\x00") {
+		return fmt.Errorf("redirect URI contains null bytes")
+	}
+
+	// Check for CRLF injection
+	if strings.ContainsAny(redirectURI, "\r\n") || strings.Contains(redirectURI, "%0d") || strings.Contains(redirectURI, "%0a") {
+		return fmt.Errorf("redirect URI contains CRLF characters")
+	}
+
+	// Block javascript: and data: schemes in any form (case insensitive)
+	lowerURI := strings.ToLower(redirectURI)
+	if strings.HasPrefix(lowerURI, "javascript:") || strings.HasPrefix(lowerURI, "data:") ||
+		strings.HasPrefix(lowerURI, "vbscript:") {
+		return fmt.Errorf("redirect URI uses forbidden scheme")
+	}
+
+	return nil
+}
+
+// containsPathTraversal checks for path traversal attempts
+func containsPathTraversal(path string) bool {
+	// Check for various forms of path traversal
+	dangerousPatterns := []string{
+		"..",
+		"%2e%2e",
+		"%252e%252e",
+		"..%2f",
+		"%2f..",
+		"..\\",
+		"..%5c",
+		"%5c..",
+	}
+
+	lowerPath := strings.ToLower(path)
+	for _, pattern := range dangerousPatterns {
+		if strings.Contains(lowerPath, pattern) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // isSchemeAllowed checks if the URL scheme is in the allowed list

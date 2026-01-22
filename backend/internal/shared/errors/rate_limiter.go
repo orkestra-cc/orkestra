@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -349,19 +350,89 @@ type RateLimitCheck struct {
 }
 
 // getClientIP extracts the client IP address from the request
+// It properly handles X-Forwarded-For by extracting only the first (leftmost) IP
+// which is the original client IP when proxies append their IPs to the right
 func getClientIP(r *http.Request) string {
 	// Check X-Forwarded-For header first
+	// X-Forwarded-For format: "client, proxy1, proxy2" - we want the leftmost IP
 	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		return xff
+		// Extract the first IP (original client)
+		ip := extractFirstIP(xff)
+		if ip != "" && isValidIP(ip) {
+			return ip
+		}
 	}
 
-	// Check X-Real-IP header
+	// Check X-Real-IP header (single IP, set by nginx)
 	if xri := r.Header.Get("X-Real-IP"); xri != "" {
-		return xri
+		ip := strings.TrimSpace(xri)
+		if isValidIP(ip) {
+			return ip
+		}
 	}
 
-	// Fall back to RemoteAddr
-	return r.RemoteAddr
+	// Fall back to RemoteAddr (may include port)
+	return cleanRemoteAddr(r.RemoteAddr)
+}
+
+// extractFirstIP gets the first IP from a comma-separated list
+func extractFirstIP(xff string) string {
+	// Split by comma and get the first entry
+	parts := strings.Split(xff, ",")
+	if len(parts) > 0 {
+		return strings.TrimSpace(parts[0])
+	}
+	return ""
+}
+
+// isValidIP performs basic IP address validation
+func isValidIP(ip string) bool {
+	// Basic validation: must not be empty, must not contain suspicious characters
+	if ip == "" {
+		return false
+	}
+
+	// Block common injection attempts
+	if strings.ContainsAny(ip, ";\n\r\t<>\"'") {
+		return false
+	}
+
+	// Check for reasonable length (max IPv6 with zone: ~45 chars)
+	if len(ip) > 50 {
+		return false
+	}
+
+	// Allow IPv4 and IPv6 patterns (basic check, not full validation)
+	// IPv4: digits and dots
+	// IPv6: hex digits, colons, and optional dots for mapped addresses
+	for _, c := range ip {
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F') ||
+			c == '.' || c == ':' || c == '%') {
+			return false
+		}
+	}
+
+	return true
+}
+
+// cleanRemoteAddr removes port from RemoteAddr if present
+func cleanRemoteAddr(addr string) string {
+	// RemoteAddr format is typically "IP:port" for IPv4 or "[IP]:port" for IPv6
+	if idx := strings.LastIndex(addr, ":"); idx != -1 {
+		// Check if this is IPv6 without port (contains multiple colons but no brackets)
+		if strings.Count(addr, ":") > 1 && !strings.Contains(addr, "[") {
+			return addr // IPv6 without port
+		}
+		// Strip port for IPv4 or bracketed IPv6
+		if strings.HasPrefix(addr, "[") {
+			// IPv6 with brackets: [::1]:8080 -> ::1
+			if bracketEnd := strings.Index(addr, "]"); bracketEnd != -1 {
+				return addr[1:bracketEnd]
+			}
+		}
+		return addr[:idx]
+	}
+	return addr
 }
 
 // min returns the minimum of two float64 values

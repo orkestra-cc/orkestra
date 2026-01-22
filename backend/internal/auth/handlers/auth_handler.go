@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"time"
@@ -66,8 +67,8 @@ type OAuthLoginResponse struct {
 
 // InitiateOAuthLogin handles the OAuth login initiation
 func (h *AuthHandler) InitiateOAuthLogin(ctx context.Context, req *OAuthLoginRequest) (*OAuthLoginResponse, error) {
-	fmt.Printf("[AUTH_DEBUG] ==> InitiateOAuthLogin called\n")
-	fmt.Printf("[AUTH_DEBUG] Provider: %s\n", req.Body.Provider)
+	logger := slog.Default()
+	logger.Debug("InitiateOAuthLogin called", slog.String("provider", string(req.Body.Provider)))
 
 	// Backend always determines frontend redirect URL automatically
 	var frontendRedirectURL string
@@ -75,16 +76,13 @@ func (h *AuthHandler) InitiateOAuthLogin(ctx context.Context, req *OAuthLoginReq
 		origin := rawRequest.Header.Get("Origin")
 		if origin != "" {
 			frontendRedirectURL = origin + "/auth/callback"
-			fmt.Printf("[AUTH_DEBUG] Using origin-based redirect URL: %s\n", frontendRedirectURL)
 		} else {
 			// Fallback to configured frontend URL
 			frontendRedirectURL = h.config.Server.FrontendURL + "/auth/callback"
-			fmt.Printf("[AUTH_DEBUG] Using configured frontend URL: %s\n", frontendRedirectURL)
 		}
 	} else {
 		// Fallback to configured frontend URL
 		frontendRedirectURL = h.config.Server.FrontendURL + "/auth/callback"
-		fmt.Printf("[AUTH_DEBUG] Using configured frontend URL (no request context): %s\n", frontendRedirectURL)
 	}
 
 	// Extract device info from context (set by device middleware)
@@ -99,14 +97,10 @@ func (h *AuthHandler) InitiateOAuthLogin(ctx context.Context, req *OAuthLoginReq
 				UserAgent:   d.UserAgent,
 				Fingerprint: d.Fingerprint,
 			}
-			fmt.Printf("[AUTH_DEBUG] Device info extracted - DeviceID: %s, Platform: %s\n", deviceInfo.DeviceID, deviceInfo.Platform)
 		}
-	} else {
-		fmt.Printf("[AUTH_DEBUG] No device info found in context\n")
 	}
 
 	// Create OAuth state
-	fmt.Printf("[AUTH_DEBUG] Creating OAuth state for provider: %s\n", req.Body.Provider)
 	stateRequest := &services.StoreOAuthStateRequest{
 		Provider:       req.Body.Provider,
 		RedirectURI:    frontendRedirectURL,
@@ -116,19 +110,16 @@ func (h *AuthHandler) InitiateOAuthLogin(ctx context.Context, req *OAuthLoginReq
 
 	stateInfo, err := h.oauthStateService.StoreOAuthState(ctx, stateRequest)
 	if err != nil {
-		fmt.Printf("[AUTH_DEBUG] ERROR: Failed to create OAuth state: %v\n", err)
+		logger.Error("Failed to create OAuth state", slog.String("error", err.Error()))
 		return nil, huma.Error400BadRequest("Failed to create OAuth state", err)
 	}
-	fmt.Printf("[AUTH_DEBUG] OAuth state created successfully - State: %s\n", stateInfo.State)
 
 	// Create OAuth provider
-	fmt.Printf("[AUTH_DEBUG] Creating OAuth provider for: %s\n", req.Body.Provider)
 	provider, err := h.oauthFactory.CreateProvider(req.Body.Provider, nil)
 	if err != nil {
-		fmt.Printf("[AUTH_DEBUG] ERROR: Failed to create OAuth provider: %v\n", err)
+		logger.Error("Failed to create OAuth provider", slog.String("error", err.Error()))
 		return nil, huma.Error400BadRequest("Invalid OAuth provider", err)
 	}
-	fmt.Printf("[AUTH_DEBUG] OAuth provider created successfully\n")
 
 	// Get auth URL - use configured callback URL for OAuth provider
 	var backendCallbackURL string
@@ -144,11 +135,8 @@ func (h *AuthHandler) InitiateOAuthLogin(ctx context.Context, req *OAuthLoginReq
 	default:
 		return nil, huma.Error400BadRequest("Unsupported OAuth provider", nil)
 	}
-	fmt.Printf("[AUTH_DEBUG] Backend callback URL: %s\n", backendCallbackURL)
 
 	authURL := provider.GetAuthURL(stateInfo.State, "", backendCallbackURL)
-	fmt.Printf("[AUTH_DEBUG] Generated auth URL: %s\n", authURL)
-	fmt.Printf("[AUTH_DEBUG] <== InitiateOAuthLogin completed successfully\n")
 
 	return &OAuthLoginResponse{
 		Body: struct {
@@ -248,68 +236,57 @@ type TokenResponse struct {
 
 // HandleGoogleCallbackHTTP handles Google OAuth callback with proper HTTP redirect
 func (h *AuthHandler) HandleGoogleCallbackHTTP(w http.ResponseWriter, r *http.Request) {
-	fmt.Printf("[AUTH_DEBUG] ==> HandleGoogleCallbackHTTP called\n")
-	fmt.Printf("[AUTH_DEBUG] Full callback URL: %s\n", r.URL.String())
+	logger := slog.Default()
 	ctx := r.Context()
 
 	// Extract query parameters
 	state := r.URL.Query().Get("state")
 	code := r.URL.Query().Get("code")
-	fmt.Printf("[AUTH_DEBUG] Extracted state: %s\n", state)
-	fmt.Printf("[AUTH_DEBUG] Extracted code: %s (length: %d)\n", code[:min(len(code), 20)]+"...", len(code))
 
 	if state == "" || code == "" {
-		fmt.Printf("[AUTH_DEBUG] ERROR: Missing state or code parameter - state empty: %v, code empty: %v\n", state == "", code == "")
+		logger.Warn("Missing state or code parameter in OAuth callback")
 		http.Error(w, "Missing state or code parameter", http.StatusBadRequest)
 		return
 	}
 
 	// Validate state
-	fmt.Printf("[AUTH_DEBUG] Validating OAuth state: %s\n", state)
 	stateInfo, err := h.oauthStateService.ValidateOAuthState(ctx, state)
 	if err != nil {
-		fmt.Printf("[AUTH_DEBUG] ERROR: Invalid OAuth state: %v\n", err)
+		logger.Warn("Invalid OAuth state", slog.String("error", err.Error()))
 		http.Error(w, "Invalid OAuth state", http.StatusBadRequest)
 		return
 	}
-	fmt.Printf("[AUTH_DEBUG] OAuth state validated successfully - Provider: %s, RedirectURI: %s\n", stateInfo.Provider, stateInfo.RedirectURI)
 
 	// Create Google OAuth provider
-	fmt.Printf("[AUTH_DEBUG] Creating Google OAuth provider\n")
 	provider, err := h.oauthFactory.CreateProvider(models.OAuthProviderGoogle, nil)
 	if err != nil {
-		fmt.Printf("[AUTH_DEBUG] ERROR: Failed to create OAuth provider: %v\n", err)
+		logger.Error("Failed to create OAuth provider", slog.String("error", err.Error()))
 		http.Error(w, "Failed to get OAuth provider", http.StatusInternalServerError)
 		return
 	}
 
 	// Exchange code for tokens
 	backendCallbackURL := h.config.Auth.Google.RedirectURL
-	fmt.Printf("[AUTH_DEBUG] Exchanging code for tokens with callback URL: %s\n", backendCallbackURL)
 
 	tokenResp, err := provider.ExchangeCodeForToken(ctx, &services.CodeExchangeRequest{
 		Code:        code,
 		RedirectURI: backendCallbackURL,
 	})
 	if err != nil {
-		fmt.Printf("[AUTH_DEBUG] ERROR: Failed to exchange code for tokens: %v\n", err)
+		logger.Error("Failed to exchange code for tokens", slog.String("error", err.Error()))
 		http.Error(w, "Failed to exchange code", http.StatusBadRequest)
 		return
 	}
-	fmt.Printf("[AUTH_DEBUG] Successfully exchanged code for tokens - Token type: %s\n", tokenResp.TokenType)
 
 	// Get user info from provider
-	fmt.Printf("[AUTH_DEBUG] Getting user info from provider\n")
 	userInfo, err := provider.GetUserInfo(ctx, tokenResp.AccessToken)
 	if err != nil {
-		fmt.Printf("[AUTH_DEBUG] ERROR: Failed to get user info: %v\n", err)
+		logger.Error("Failed to get user info", slog.String("error", err.Error()))
 		http.Error(w, "Failed to get user info", http.StatusInternalServerError)
 		return
 	}
-	fmt.Printf("[AUTH_DEBUG] Successfully retrieved user info - Email: %s, Name: %s\n", userInfo.Email, userInfo.Name)
 
 	// Convert userInfo to map for enhanced auth service
-	fmt.Printf("[AUTH_DEBUG] Converting user info to map for database operations\n")
 	userInfoMap := map[string]interface{}{
 		"email":          userInfo.Email,
 		"name":           userInfo.Name,
@@ -317,7 +294,6 @@ func (h *AuthHandler) HandleGoogleCallbackHTTP(w http.ResponseWriter, r *http.Re
 		"provider_id":    userInfo.ProviderID,
 		"email_verified": userInfo.EmailVerified,
 	}
-	fmt.Printf("[AUTH_DEBUG] User info map created - Email: %s, Provider ID: %s\n", userInfo.Email, userInfo.ProviderID)
 
 	// Prepare OAuth provider tokens for storage
 	oauthTokens := &models.OAuthProviderTokens{
@@ -328,14 +304,11 @@ func (h *AuthHandler) HandleGoogleCallbackHTTP(w http.ResponseWriter, r *http.Re
 		Scopes:       tokenResp.Scope,
 		IDToken:      tokenResp.IDToken,
 	}
-	fmt.Printf("[AUTH_DEBUG] OAuth tokens prepared - Access token present: %v, Refresh token present: %v\n",
-		tokenResp.AccessToken != "", tokenResp.RefreshToken != "")
 
 	// Use enhanced auth service for proper user creation and token management
-	fmt.Printf("[AUTH_DEBUG] Calling HandleOAuthCallbackWithLinking to find/create user and generate tokens\n")
 	tokenResponse, err := h.authService.HandleOAuthCallbackWithLinking(ctx, models.OAuthProviderGoogle, userInfoMap, oauthTokens, stateInfo.SecurityContext, stateInfo.DeviceInfo)
 	if err != nil {
-		fmt.Printf("[AUTH_DEBUG] ERROR: Failed to process OAuth callback: %v\n", err)
+		logger.Error("Failed to process OAuth callback", slog.String("error", err.Error()))
 		http.Error(w, "Failed to process OAuth callback", http.StatusInternalServerError)
 		return
 	}
@@ -821,6 +794,8 @@ type RefreshTokensResponse struct {
 
 // RefreshTokens handles token refresh
 func (h *AuthHandler) RefreshTokens(ctx context.Context, req *RefreshTokenRequest) (*RefreshTokensResponse, error) {
+	logger := slog.Default()
+
 	// Extract device info and IP address from request context
 	deviceInfo := middleware.GetDeviceInfo(ctx)
 	var ipAddress string
@@ -836,54 +811,33 @@ func (h *AuthHandler) RefreshTokens(ctx context.Context, req *RefreshTokenReques
 		Timestamp: time.Now(),
 	}
 
-	fmt.Printf("[AUTH_DEBUG] RefreshTokens called - IP: %s\n", ipAddress)
-
 	var refreshToken string
-	var tokenSource string
 
 	// First, try to get refresh token from cookie if available (Huma context doesn't have direct HTTP request access)
 	// Check if we have access to the raw HTTP request from context
 	if rawRequest, ok := ctx.Value("http_request").(*http.Request); ok {
-		fmt.Printf("[AUTH_DEBUG] HTTP request found in context\n")
 		cookieName := h.config.Auth.Cookie.Name
 		if cookieToken, err := utils.GetRefreshTokenFromCookieByName(rawRequest, cookieName); err == nil {
 			refreshToken = cookieToken
-			tokenSource = "cookie"
-			fmt.Printf("[AUTH_DEBUG] Refresh token found in cookie '%s'\n", cookieName)
-		} else {
-			fmt.Printf("[AUTH_DEBUG] Failed to get refresh token from cookie '%s': %v\n", cookieName, err)
 		}
-	} else {
-		fmt.Printf("[AUTH_DEBUG] No HTTP request found in context\n")
 	}
 
 	// If no token from cookie, use token from request body
-	fmt.Printf("[AUTH_DEBUG] Request body refresh token: '%s' (length: %d)\n", req.RefreshToken, len(req.RefreshToken))
 	if refreshToken == "" && req.RefreshToken != "" {
 		refreshToken = req.RefreshToken
-		tokenSource = "request_body"
-		fmt.Printf("[AUTH_DEBUG] Refresh token found in request body\n")
 	}
 
 	// If no token found in either place
 	if refreshToken == "" {
-		fmt.Printf("[AUTH_DEBUG] ERROR: No refresh token found in cookie or request body\n")
 		return nil, huma.Error401Unauthorized("No refresh token provided", nil)
 	}
-
-	fmt.Printf("[AUTH_DEBUG] Received refresh token (length: %d): %s...\n", len(refreshToken), refreshToken[:min(len(refreshToken), 20)])
-	fmt.Printf("[AUTH_DEBUG] Using refresh token from %s\n", tokenSource)
 
 	// Validate and refresh tokens with risk assessment
 	tokenResponse, err := h.authService.RefreshTokensWithRiskAssessment(ctx, refreshToken, securityCtx)
 	if err != nil {
-		fmt.Printf("[AUTH_DEBUG] ERROR: Token refresh failed: %v\n", err)
+		logger.Warn("Token refresh failed", slog.String("error", err.Error()))
 		return nil, huma.Error401Unauthorized("Invalid refresh token", err)
 	}
-
-	fmt.Printf("[AUTH_DEBUG] Token refresh successful\n")
-
-	// Note: Using raw HTTP handler for proper header support instead of Huma response
 
 	return &RefreshTokensResponse{
 		Headers: struct {
@@ -905,12 +859,11 @@ func (h *AuthHandler) RefreshTokens(ctx context.Context, req *RefreshTokenReques
 
 // RefreshTokensWithHeaderHTTP handles token refresh with access token in X-New-Access-Token header
 func (h *AuthHandler) RefreshTokensWithHeaderHTTP(w http.ResponseWriter, r *http.Request) {
-	fmt.Printf("[AUTH_DEBUG] ==> RefreshTokensWithHeaderHTTP called\n")
+	logger := slog.Default()
 	ctx := r.Context()
 
 	// Extract device info and IP address from request
 	ipAddress := utils.GetClientIP(r)
-	fmt.Printf("[AUTH_DEBUG] Client IP: %s\n", ipAddress)
 
 	// Extract security context from request
 	securityCtx := &models.SecurityContext{
@@ -927,51 +880,40 @@ func (h *AuthHandler) RefreshTokensWithHeaderHTTP(w http.ResponseWriter, r *http
 	if cookieToken, err := utils.GetRefreshTokenFromCookieByName(r, cookieName); err == nil {
 		refreshToken = cookieToken
 		tokenSource = "cookie"
-		fmt.Printf("[AUTH_DEBUG] Refresh token found in cookie '%s'\n", cookieName)
 	} else {
-		fmt.Printf("[AUTH_DEBUG] Failed to get refresh token from cookie '%s': %v\n", cookieName, err)
-
 		// If no token from cookie, try parsing request body
 		var req RefreshTokenRequest
 		if r.Header.Get("Content-Type") == "application/json" {
 			if err := json.NewDecoder(r.Body).Decode(&req); err == nil && req.RefreshToken != "" {
 				refreshToken = req.RefreshToken
 				tokenSource = "request_body"
-				fmt.Printf("[AUTH_DEBUG] Refresh token found in request body\n")
 			}
 		}
 	}
 
 	// If no token found in either place
 	if refreshToken == "" {
-		fmt.Printf("[AUTH_DEBUG] ERROR: No refresh token found in cookie or request body\n")
 		http.Error(w, "No refresh token provided", http.StatusUnauthorized)
 		return
 	}
 
-	fmt.Printf("[AUTH_DEBUG] Using refresh token from %s\n", tokenSource)
-
 	// Validate and refresh tokens with risk assessment
 	tokenResponse, err := h.authService.RefreshTokensWithRiskAssessment(ctx, refreshToken, securityCtx)
 	if err != nil {
-		fmt.Printf("[AUTH_DEBUG] ERROR: Token refresh failed: %v\n", err)
+		logger.Warn("Token refresh failed", slog.String("error", err.Error()))
 		http.Error(w, "Invalid refresh token", http.StatusUnauthorized)
 		return
 	}
-
-	fmt.Printf("[AUTH_DEBUG] Token refresh successful\n")
 
 	// Set new refresh token as cookie if we got the original from a cookie
 	if tokenSource == "cookie" {
 		cookieDomain := h.config.Auth.Cookie.Domain
 		isSecure := h.config.Auth.Cookie.Secure
 		utils.SetRefreshTokenCookie(w, cookieName, tokenResponse.RefreshToken, 7*24*3600, cookieDomain, isSecure) // 7 days
-		fmt.Printf("[AUTH_DEBUG] New refresh token set in cookie\n")
 	}
 
 	// Set the access token in the X-New-Access-Token header
 	w.Header().Set("X-New-Access-Token", tokenResponse.AccessToken)
-	fmt.Printf("[AUTH_DEBUG] Access token set in X-New-Access-Token header\n")
 
 	// Return minimal JSON response
 	w.Header().Set("Content-Type", "application/json")
@@ -986,23 +928,20 @@ func (h *AuthHandler) RefreshTokensWithHeaderHTTP(w http.ResponseWriter, r *http
 	}
 
 	if err := json.NewEncoder(w).Encode(response); err != nil {
-		fmt.Printf("[AUTH_DEBUG] ERROR: Failed to encode response: %v\n", err)
+		logger.Error("Failed to encode response", slog.String("error", err.Error()))
 		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
 		return
 	}
-
-	fmt.Printf("[AUTH_DEBUG] <== RefreshTokensWithHeaderHTTP completed successfully\n")
 }
 
 // GetSessionHTTP handles session initialization for web clients after OAuth callback
 // It uses the refresh token from cookie to generate a fresh access token
 func (h *AuthHandler) GetSessionHTTP(w http.ResponseWriter, r *http.Request) {
-	fmt.Printf("[AUTH_DEBUG] ==> GetSessionHTTP called\n")
+	logger := slog.Default()
 	ctx := r.Context()
 
 	// Extract device info and IP address from request
 	ipAddress := utils.GetClientIP(r)
-	fmt.Printf("[AUTH_DEBUG] Client IP: %s\n", ipAddress)
 
 	// Extract security context from request
 	securityCtx := &models.SecurityContext{
@@ -1014,28 +953,22 @@ func (h *AuthHandler) GetSessionHTTP(w http.ResponseWriter, r *http.Request) {
 	cookieName := h.config.Auth.Cookie.Name
 	refreshToken, err := utils.GetRefreshTokenFromCookieByName(r, cookieName)
 	if err != nil {
-		fmt.Printf("[AUTH_DEBUG] ERROR: Failed to get refresh token from cookie '%s': %v\n", cookieName, err)
 		http.Error(w, "No refresh token found in cookie", http.StatusUnauthorized)
 		return
 	}
 
-	fmt.Printf("[AUTH_DEBUG] Refresh token found in cookie '%s'\n", cookieName)
-
 	// Validate and refresh tokens with risk assessment
 	tokenResponse, err := h.authService.RefreshTokensWithRiskAssessment(ctx, refreshToken, securityCtx)
 	if err != nil {
-		fmt.Printf("[AUTH_DEBUG] ERROR: Token refresh failed: %v\n", err)
+		logger.Warn("Token refresh failed", slog.String("error", err.Error()))
 		http.Error(w, "Invalid refresh token", http.StatusUnauthorized)
 		return
 	}
-
-	fmt.Printf("[AUTH_DEBUG] Token refresh successful\n")
 
 	// Set new refresh token as cookie
 	cookieDomain := h.config.Auth.Cookie.Domain
 	isSecure := h.config.Auth.Cookie.Secure
 	utils.SetRefreshTokenCookie(w, cookieName, tokenResponse.RefreshToken, 7*24*3600, cookieDomain, isSecure) // 7 days
-	fmt.Printf("[AUTH_DEBUG] New refresh token set in cookie\n")
 
 	// Return the access token and user info in the response body for Redux storage
 	w.Header().Set("Content-Type", "application/json")
@@ -1056,12 +989,10 @@ func (h *AuthHandler) GetSessionHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := json.NewEncoder(w).Encode(response); err != nil {
-		fmt.Printf("[AUTH_DEBUG] ERROR: Failed to encode response: %v\n", err)
+		logger.Error("Failed to encode response", slog.String("error", err.Error()))
 		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
 		return
 	}
-
-	fmt.Printf("[AUTH_DEBUG] <== GetSessionHTTP completed successfully\n")
 }
 
 // MobileGoogleAuthRequest represents the request from mobile app with Google tokens
@@ -1091,18 +1022,7 @@ type MobileGoogleAuthResponse struct {
 
 // HandleMobileGoogleAuth handles Google authentication from mobile apps
 func (h *AuthHandler) HandleMobileGoogleAuth(ctx context.Context, req *MobileGoogleAuthRequest) (*MobileGoogleAuthResponse, error) {
-	fmt.Printf("[MOBILE_AUTH_DEBUG] ==> HandleMobileGoogleAuth called\n")
-	fmt.Printf("[MOBILE_AUTH_DEBUG] Raw request pointer: %p\n", req)
-	if req != nil {
-		fmt.Printf("[MOBILE_AUTH_DEBUG] Request struct: %+v\n", *req)
-		fmt.Printf("[MOBILE_AUTH_DEBUG] Request body: %+v\n", req.Body)
-		fmt.Printf("[MOBILE_AUTH_DEBUG] ID Token length: %d\n", len(req.Body.IDToken))
-		fmt.Printf("[MOBILE_AUTH_DEBUG] Access Token length: %d\n", len(req.Body.AccessToken))
-		fmt.Printf("[MOBILE_AUTH_DEBUG] ID Token value: '%s'\n", req.Body.IDToken)
-		fmt.Printf("[MOBILE_AUTH_DEBUG] Access Token value: '%s'\n", req.Body.AccessToken)
-	} else {
-		fmt.Printf("[MOBILE_AUTH_DEBUG] Request is nil!\n")
-	}
+	logger := slog.Default()
 
 	// Extract device info from context
 	var deviceInfo *models.DeviceInfo
@@ -1117,25 +1037,21 @@ func (h *AuthHandler) HandleMobileGoogleAuth(ctx context.Context, req *MobileGoo
 				Fingerprint: d.Fingerprint,
 			}
 			ipAddress = d.IP // Get IP from types.DeviceInfo
-			fmt.Printf("[MOBILE_AUTH_DEBUG] Device info - ID: %s, Platform: %s, IP: %s\n", deviceInfo.DeviceID, deviceInfo.Platform, ipAddress)
 		}
 	}
 	securityCtx := &models.SecurityContext{
 		IPAddress: ipAddress,
 		Timestamp: time.Now(),
-		// Note: DeviceInfo is not part of SecurityContext, it's tracked separately
 	}
 
 	// Get Google OAuth provider
 	provider, err := h.oauthFactory.CreateProvider(models.OAuthProviderGoogle, nil)
 	if err != nil {
-		fmt.Printf("[MOBILE_AUTH_DEBUG] ERROR: Failed to create Google OAuth provider: %v\n", err)
+		logger.Error("Failed to create Google OAuth provider", slog.String("error", err.Error()))
 		return nil, huma.Error500InternalServerError("Failed to initialize authentication provider", err)
 	}
 
 	// Validate ID token and get user info
-	fmt.Printf("[MOBILE_AUTH_DEBUG] Backend expects audience: '%s'\n", h.config.Auth.Google.AndroidClientID)
-
 	validationRequest := &services.IDTokenValidationRequest{
 		IDToken:     req.Body.IDToken,
 		AccessToken: req.Body.AccessToken,
@@ -1144,11 +1060,9 @@ func (h *AuthHandler) HandleMobileGoogleAuth(ctx context.Context, req *MobileGoo
 
 	userInfo, err := provider.ValidateIDToken(ctx, validationRequest)
 	if err != nil {
-		fmt.Printf("[MOBILE_AUTH_DEBUG] ERROR: ID token validation failed: %v\n", err)
+		logger.Warn("ID token validation failed", slog.String("error", err.Error()))
 		return nil, huma.Error401Unauthorized("Invalid Google ID token", err)
 	}
-
-	fmt.Printf("[MOBILE_AUTH_DEBUG] User info extracted - Email: %s, Name: %s\n", userInfo.Email, userInfo.Name)
 
 	// Convert userInfo to map for auth service
 	userInfoMap := map[string]interface{}{
@@ -1180,11 +1094,9 @@ func (h *AuthHandler) HandleMobileGoogleAuth(ctx context.Context, req *MobileGoo
 		deviceInfo,
 	)
 	if err != nil {
-		fmt.Printf("[MOBILE_AUTH_DEBUG] ERROR: Failed to process OAuth callback: %v\n", err)
+		logger.Error("Failed to process OAuth callback", slog.String("error", err.Error()))
 		return nil, huma.Error500InternalServerError("Failed to process authentication", err)
 	}
-
-	fmt.Printf("[MOBILE_AUTH_DEBUG] Authentication successful - User ID: %s\n", tokenResponse.User.ID)
 
 	// Prepare response
 	response := &MobileGoogleAuthResponse{}
@@ -1198,7 +1110,6 @@ func (h *AuthHandler) HandleMobileGoogleAuth(ctx context.Context, req *MobileGoo
 	response.Body.User.Avatar = tokenResponse.User.Avatar
 	response.Body.User.EmailVerified = tokenResponse.User.EmailVerified
 
-	fmt.Printf("[MOBILE_AUTH_DEBUG] <== HandleMobileGoogleAuth completed successfully\n")
 	return response, nil
 }
 
@@ -1216,18 +1127,7 @@ type MobileAppleAuthResponse = MobileGoogleAuthResponse
 
 // HandleMobileAppleAuth handles Apple authentication from mobile apps
 func (h *AuthHandler) HandleMobileAppleAuth(ctx context.Context, req *MobileAppleAuthRequest) (*MobileAppleAuthResponse, error) {
-	fmt.Printf("[MOBILE_AUTH_DEBUG] ==> HandleMobileAppleAuth called\n")
-	fmt.Printf("[MOBILE_AUTH_DEBUG] Raw request pointer: %p\n", req)
-	if req != nil {
-		fmt.Printf("[MOBILE_AUTH_DEBUG] Request struct: %+v\n", *req)
-		fmt.Printf("[MOBILE_AUTH_DEBUG] Request body: %+v\n", req.Body)
-		fmt.Printf("[MOBILE_AUTH_DEBUG] ID Token length: %d\n", len(req.Body.IDToken))
-		fmt.Printf("[MOBILE_AUTH_DEBUG] Access Token length: %d\n", len(req.Body.AccessToken))
-		fmt.Printf("[MOBILE_AUTH_DEBUG] ID Token value: '%s'\n", req.Body.IDToken)
-		fmt.Printf("[MOBILE_AUTH_DEBUG] Access Token value: '%s'\n", req.Body.AccessToken)
-	} else {
-		fmt.Printf("[MOBILE_AUTH_DEBUG] Request is nil!\n")
-	}
+	logger := slog.Default()
 
 	// Extract device info from context
 	var deviceInfo *models.DeviceInfo
@@ -1242,7 +1142,6 @@ func (h *AuthHandler) HandleMobileAppleAuth(ctx context.Context, req *MobileAppl
 				Fingerprint: d.Fingerprint,
 			}
 			ipAddress = d.IP // Get IP from types.DeviceInfo
-			fmt.Printf("[MOBILE_AUTH_DEBUG] Device info - ID: %s, Platform: %s, IP: %s\n", deviceInfo.DeviceID, deviceInfo.Platform, ipAddress)
 		}
 	}
 	securityCtx := &models.SecurityContext{
@@ -1253,7 +1152,7 @@ func (h *AuthHandler) HandleMobileAppleAuth(ctx context.Context, req *MobileAppl
 	// Get Apple OAuth provider
 	provider, err := h.oauthFactory.CreateProvider(models.OAuthProviderApple, nil)
 	if err != nil {
-		fmt.Printf("[MOBILE_AUTH_DEBUG] ERROR: Failed to create Apple OAuth provider: %v\n", err)
+		logger.Error("Failed to create Apple OAuth provider", slog.String("error", err.Error()))
 		return nil, huma.Error500InternalServerError("Failed to initialize authentication provider", err)
 	}
 
@@ -1261,14 +1160,11 @@ func (h *AuthHandler) HandleMobileAppleAuth(ctx context.Context, req *MobileAppl
 	var audience string
 	if deviceInfo != nil && deviceInfo.Platform == "ios" {
 		audience = h.config.Auth.Apple.IOSClientID
-		fmt.Printf("[MOBILE_AUTH_DEBUG] Using iOS client ID as audience: '%s'\n", audience)
 	} else if deviceInfo != nil && deviceInfo.Platform == "android" {
 		audience = h.config.Auth.Apple.AndroidClientID
-		fmt.Printf("[MOBILE_AUTH_DEBUG] Using Android client ID as audience: '%s'\n", audience)
 	} else {
 		// Fallback to general client ID if platform is not specified
 		audience = h.config.Auth.Apple.ClientID
-		fmt.Printf("[MOBILE_AUTH_DEBUG] Using default client ID as audience: '%s'\n", audience)
 	}
 
 	// Validate ID token and get user info
@@ -1280,11 +1176,9 @@ func (h *AuthHandler) HandleMobileAppleAuth(ctx context.Context, req *MobileAppl
 
 	userInfo, err := provider.ValidateIDToken(ctx, validationRequest)
 	if err != nil {
-		fmt.Printf("[MOBILE_AUTH_DEBUG] ERROR: ID token validation failed: %v\n", err)
+		logger.Warn("ID token validation failed", slog.String("error", err.Error()))
 		return nil, huma.Error401Unauthorized("Invalid Apple ID token", err)
 	}
-
-	fmt.Printf("[MOBILE_AUTH_DEBUG] User info extracted - Email: %s, Name: %s\n", userInfo.Email, userInfo.Name)
 
 	// Convert userInfo to map for auth service
 	userInfoMap := map[string]interface{}{
@@ -1316,11 +1210,9 @@ func (h *AuthHandler) HandleMobileAppleAuth(ctx context.Context, req *MobileAppl
 		deviceInfo,
 	)
 	if err != nil {
-		fmt.Printf("[MOBILE_AUTH_DEBUG] ERROR: Failed to process OAuth callback: %v\n", err)
+		logger.Error("Failed to process OAuth callback", slog.String("error", err.Error()))
 		return nil, huma.Error500InternalServerError("Failed to process authentication", err)
 	}
-
-	fmt.Printf("[MOBILE_AUTH_DEBUG] Authentication successful - User ID: %s\n", tokenResponse.User.ID)
 
 	// Prepare response
 	response := &MobileAppleAuthResponse{}
@@ -1334,18 +1226,16 @@ func (h *AuthHandler) HandleMobileAppleAuth(ctx context.Context, req *MobileAppl
 	response.Body.User.Avatar = tokenResponse.User.Avatar
 	response.Body.User.EmailVerified = tokenResponse.User.EmailVerified
 
-	fmt.Printf("[MOBILE_AUTH_DEBUG] <== HandleMobileAppleAuth completed successfully\n")
 	return response, nil
 }
 
 // RefreshTokensHTTP handles token refresh with cookie support (raw HTTP handler)
 func (h *AuthHandler) RefreshTokensHTTP(w http.ResponseWriter, r *http.Request) {
-	fmt.Printf("[AUTH_DEBUG] ==> RefreshTokensHTTP called\n")
+	logger := slog.Default()
 	ctx := r.Context()
 
 	// Extract device info and IP address from request
 	ipAddress := utils.GetClientIP(r)
-	fmt.Printf("[AUTH_DEBUG] Client IP: %s\n", ipAddress)
 
 	// Extract security context from request
 	securityCtx := &models.SecurityContext{
@@ -1362,57 +1252,45 @@ func (h *AuthHandler) RefreshTokensHTTP(w http.ResponseWriter, r *http.Request) 
 	if cookieToken, err := utils.GetRefreshTokenFromCookieByName(r, cookieName); err == nil {
 		refreshToken = cookieToken
 		tokenSource = "cookie"
-		fmt.Printf("[AUTH_DEBUG] Refresh token found in cookie '%s'\n", cookieName)
 	} else {
-		fmt.Printf("[AUTH_DEBUG] Failed to get refresh token from cookie '%s': %v\n", cookieName, err)
-
 		// If no token from cookie, try parsing request body
 		var req RefreshTokenRequest
 		if r.Header.Get("Content-Type") == "application/json" {
 			if err := json.NewDecoder(r.Body).Decode(&req); err == nil && req.RefreshToken != "" {
 				refreshToken = req.RefreshToken
 				tokenSource = "request_body"
-				fmt.Printf("[AUTH_DEBUG] Refresh token found in request body\n")
 			}
 		}
 	}
 
 	// If no token found in either place
 	if refreshToken == "" {
-		fmt.Printf("[AUTH_DEBUG] ERROR: No refresh token found in cookie or request body\n")
 		http.Error(w, "No refresh token provided", http.StatusUnauthorized)
 		return
 	}
 
-	fmt.Printf("[AUTH_DEBUG] Using refresh token from %s\n", tokenSource)
-
 	// Validate and refresh tokens with risk assessment
 	tokenResponse, err := h.authService.RefreshTokensWithRiskAssessment(ctx, refreshToken, securityCtx)
 	if err != nil {
-		fmt.Printf("[AUTH_DEBUG] ERROR: Token refresh failed: %v\n", err)
+		logger.Warn("Token refresh failed", slog.String("error", err.Error()))
 		http.Error(w, "Invalid refresh token", http.StatusUnauthorized)
 		return
 	}
-
-	fmt.Printf("[AUTH_DEBUG] Token refresh successful\n")
 
 	// Set new refresh token as cookie if we got the original from a cookie
 	if tokenSource == "cookie" {
 		cookieDomain := h.config.Auth.Cookie.Domain
 		isSecure := h.config.Auth.Cookie.Secure
 		utils.SetRefreshTokenCookie(w, cookieName, tokenResponse.RefreshToken, 7*24*3600, cookieDomain, isSecure) // 7 days
-		fmt.Printf("[AUTH_DEBUG] New refresh token set in cookie\n")
 	}
 
 	// Return JSON response
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(tokenResponse); err != nil {
-		fmt.Printf("[AUTH_DEBUG] ERROR: Failed to encode response: %v\n", err)
+		logger.Error("Failed to encode response", slog.String("error", err.Error()))
 		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
 		return
 	}
-
-	fmt.Printf("[AUTH_DEBUG] <== RefreshTokensHTTP completed successfully\n")
 }
 
 // Logout Request
@@ -1431,7 +1309,7 @@ type LogoutResponse struct {
 
 // LogoutHTTP handles user logout with proper cookie clearing (raw HTTP handler)
 func (h *AuthHandler) LogoutHTTP(w http.ResponseWriter, r *http.Request) {
-	fmt.Printf("[AUTH_DEBUG] ==> LogoutHTTP called\n")
+	logger := slog.Default()
 	ctx := r.Context()
 
 	// Try to get user UUID from context first (if authenticated via middleware)
@@ -1446,11 +1324,9 @@ func (h *AuthHandler) LogoutHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// If no user context (likely because auth middleware failed), try to extract from refresh token
 	if userUUIDVal == nil {
-		fmt.Printf("[AUTH_DEBUG] No user context found, attempting to extract from refresh token cookie\n")
 		cookieName := h.config.Auth.Cookie.Name
 		refreshToken, err := utils.GetRefreshTokenFromCookieByName(r, cookieName)
 		if err != nil || refreshToken == "" {
-			fmt.Printf("[AUTH_DEBUG] ERROR: No refresh token cookie found\n")
 			// Still clear the cookie even if we can't find it
 			cookieDomain := h.config.Auth.Cookie.Domain
 			isSecure := h.config.Auth.Cookie.Secure
@@ -1472,7 +1348,6 @@ func (h *AuthHandler) LogoutHTTP(w http.ResponseWriter, r *http.Request) {
 		// Parse refresh token to get user UUID
 		refreshClaims, err := h.jwtService.ParseUnverifiedClaims(refreshToken)
 		if err != nil || refreshClaims.UserUUID == "" {
-			fmt.Printf("[AUTH_DEBUG] ERROR: Failed to parse refresh token or no UserUUID: %v\n", err)
 			// Still clear the cookie
 			cookieDomain := h.config.Auth.Cookie.Domain
 			isSecure := h.config.Auth.Cookie.Secure
@@ -1492,25 +1367,18 @@ func (h *AuthHandler) LogoutHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 
 		userUUID = refreshClaims.UserUUID
-		fmt.Printf("[AUTH_DEBUG] Extracted user UUID from refresh token: %s\n", userUUID)
 	} else {
 		userUUID, ok = userUUIDVal.(string)
 		if !ok {
-			fmt.Printf("[AUTH_DEBUG] ERROR: Invalid user UUID in context\n")
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
 		}
 	}
 
-	fmt.Printf("[AUTH_DEBUG] Logout request for user: %s\n", userUUID)
-
 	// Parse request body for logout options
 	var req LogoutRequest
 	if r.Header.Get("Content-Type") == "application/json" {
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			fmt.Printf("[AUTH_DEBUG] Failed to parse logout request body: %v\n", err)
-			// Continue with default logout (current device only)
-		}
+		json.NewDecoder(r.Body).Decode(&req) // Ignore errors, use defaults
 	}
 
 	// Get refresh token from cookie to terminate specific session
@@ -1519,10 +1387,9 @@ func (h *AuthHandler) LogoutHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Terminate sessions based on request
 	if req.AllDevices {
-		fmt.Printf("[AUTH_DEBUG] Terminating all sessions for user %s\n", userUUID)
 		err := h.authService.TerminateAllSessionsByUUID(ctx, userUUID)
 		if err != nil {
-			fmt.Printf("[AUTH_DEBUG] ERROR: Failed to terminate all sessions: %v\n", err)
+			logger.Error("Failed to terminate all sessions", slog.String("error", err.Error()))
 			http.Error(w, "Failed to logout", http.StatusInternalServerError)
 			return
 		}
@@ -1532,22 +1399,13 @@ func (h *AuthHandler) LogoutHTTP(w http.ResponseWriter, r *http.Request) {
 			// Parse refresh token to get device ID
 			refreshClaims, err := h.jwtService.ParseUnverifiedClaims(refreshToken)
 			if err == nil && refreshClaims.DeviceID != "" {
-				fmt.Printf("[AUTH_DEBUG] Terminating session for device %s\n", refreshClaims.DeviceID)
-				err = h.authService.TerminateSessionByUUID(ctx, userUUID, refreshClaims.DeviceID)
-				if err != nil {
-					fmt.Printf("[AUTH_DEBUG] WARNING: Failed to terminate session: %v\n", err)
-					// Continue anyway - still clear the cookie
-				}
+				h.authService.TerminateSessionByUUID(ctx, userUUID, refreshClaims.DeviceID)
 			}
 		} else if req.RefreshToken != "" {
 			// Use refresh token from request body if provided
 			refreshClaims, err := h.jwtService.ParseUnverifiedClaims(req.RefreshToken)
 			if err == nil && refreshClaims.DeviceID != "" {
-				fmt.Printf("[AUTH_DEBUG] Terminating session for device %s\n", refreshClaims.DeviceID)
-				err = h.authService.TerminateSessionByUUID(ctx, userUUID, refreshClaims.DeviceID)
-				if err != nil {
-					fmt.Printf("[AUTH_DEBUG] WARNING: Failed to terminate session: %v\n", err)
-				}
+				h.authService.TerminateSessionByUUID(ctx, userUUID, refreshClaims.DeviceID)
 			}
 		}
 	}
@@ -1555,9 +1413,7 @@ func (h *AuthHandler) LogoutHTTP(w http.ResponseWriter, r *http.Request) {
 	// Clear the refresh token cookie
 	cookieDomain := h.config.Auth.Cookie.Domain
 	isSecure := h.config.Auth.Cookie.Secure
-	fmt.Printf("[AUTH_DEBUG] Clearing cookie with - Name: '%s', Domain: '%s', Secure: %v\n", cookieName, cookieDomain, isSecure)
 	utils.ClearRefreshTokenCookie(w, cookieName, cookieDomain, isSecure)
-	fmt.Printf("[AUTH_DEBUG] Refresh token cookie cleared - cookie should now be expired\n")
 
 	// Return success response
 	w.Header().Set("Content-Type", "application/json")
@@ -1570,12 +1426,10 @@ func (h *AuthHandler) LogoutHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := json.NewEncoder(w).Encode(response); err != nil {
-		fmt.Printf("[AUTH_DEBUG] ERROR: Failed to encode response: %v\n", err)
+		logger.Error("Failed to encode response", slog.String("error", err.Error()))
 		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
 		return
 	}
-
-	fmt.Printf("[AUTH_DEBUG] <== LogoutHTTP completed successfully\n")
 }
 
 // Logout handles user logout (Huma handler - deprecated, use LogoutHTTP instead)
@@ -1641,8 +1495,7 @@ func (h *AuthHandler) GetCurrentUser(ctx context.Context, _ *struct{}) (*GetCurr
 	// Fetch OAuth provider information
 	oauthProviders, err := h.oauthProviderRepo.GetByUserUUID(ctx, userUUID)
 	if err != nil {
-		// Log the error but don't fail the request - OAuth providers are optional data
-		fmt.Printf("[AUTH_DEBUG] Warning: Failed to fetch OAuth providers for user %s: %v\n", userUUID, err)
+		// OAuth providers are optional data - continue without them
 		oauthProviders = []*models.OAuthProviderDoc{}
 	}
 

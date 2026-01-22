@@ -56,10 +56,12 @@ type PDFMargins struct {
 }
 
 type ServerConfig struct {
-	Port        string
-	Environment string
-	LogLevel    string
-	FrontendURL string
+	Port            string
+	Environment     string
+	LogLevel        string
+	FrontendURL     string
+	CORSOrigins     []string // Allowed CORS origins
+	MaxBodySize     int64    // Maximum request body size in bytes (default 10MB)
 }
 
 type DatabaseConfig struct {
@@ -154,11 +156,17 @@ func Load() (*Config, error) {
 
 	config := &Config{}
 
+	// Default CORS origins for development
+	defaultCORSOrigins := []string{"http://localhost:8080", "http://localhost:5173"}
+	corsOrigins := getEnvAsSlice("CORS_ORIGINS", defaultCORSOrigins)
+
 	config.Server = ServerConfig{
-		Port:        getEnv("PORT", "3000"),
-		Environment: getEnv("ENV", "development"),
-		LogLevel:    getEnv("LOG_LEVEL", "info"),
-		FrontendURL: getEnv("FRONTEND_URL", "http://localhost:8080"),
+		Port:            getEnv("PORT", "3000"),
+		Environment:     getEnv("ENV", "development"),
+		LogLevel:        getEnv("LOG_LEVEL", "info"),
+		FrontendURL:     getEnv("FRONTEND_URL", "http://localhost:8080"),
+		CORSOrigins:     corsOrigins,
+		MaxBodySize:     getEnvAsInt64("MAX_BODY_SIZE", 10*1024*1024), // Default 10MB
 	}
 
 	config.Database = DatabaseConfig{
@@ -365,6 +373,14 @@ func getEnvAsBool(key string, defaultValue bool) bool {
 func getEnvAsUint64(key string, defaultValue uint64) uint64 {
 	valueStr := getEnv(key, "")
 	if value, err := strconv.ParseUint(valueStr, 10, 64); err == nil {
+		return value
+	}
+	return defaultValue
+}
+
+func getEnvAsInt64(key string, defaultValue int64) int64 {
+	valueStr := getEnv(key, "")
+	if value, err := strconv.ParseInt(valueStr, 10, 64); err == nil {
 		return value
 	}
 	return defaultValue

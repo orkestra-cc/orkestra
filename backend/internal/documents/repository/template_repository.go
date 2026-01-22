@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"regexp"
 	"time"
 
 	"github.com/google/uuid"
@@ -214,9 +215,11 @@ func (r *templateRepository) List(ctx context.Context, filters *models.TemplateF
 			filter["isActive"] = *filters.IsActive
 		}
 		if filters.Search != nil && *filters.Search != "" {
+			// Escape special regex characters to prevent ReDoS attacks
+			escapedSearch := regexp.QuoteMeta(*filters.Search)
 			filter["$or"] = []bson.M{
-				{"name": bson.M{"$regex": *filters.Search, "$options": "i"}},
-				{"description": bson.M{"$regex": *filters.Search, "$options": "i"}},
+				{"name": bson.M{"$regex": escapedSearch, "$options": "i"}},
+				{"description": bson.M{"$regex": escapedSearch, "$options": "i"}},
 			}
 		}
 	}

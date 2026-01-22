@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"regexp"
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
@@ -227,10 +228,12 @@ func (r *invoiceRepository) List(ctx context.Context, filters *models.InvoiceFil
 			filter["date"] = dateFilter
 		}
 		if filters.Search != "" {
+			// Escape special regex characters to prevent ReDoS attacks
+			escapedSearch := regexp.QuoteMeta(filters.Search)
 			filter["$or"] = []bson.M{
-				{"number": bson.M{"$regex": filters.Search, "$options": "i"}},
-				{"cedentePrestatore.denomination": bson.M{"$regex": filters.Search, "$options": "i"}},
-				{"cessionarioCommittente.denomination": bson.M{"$regex": filters.Search, "$options": "i"}},
+				{"number": bson.M{"$regex": escapedSearch, "$options": "i"}},
+				{"cedentePrestatore.denomination": bson.M{"$regex": escapedSearch, "$options": "i"}},
+				{"cessionarioCommittente.denomination": bson.M{"$regex": escapedSearch, "$options": "i"}},
 			}
 		}
 	}

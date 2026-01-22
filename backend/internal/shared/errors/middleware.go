@@ -33,6 +33,34 @@ type ErrorContext struct {
 	RemoteIP    string
 }
 
+// sanitizeUserAgent cleans the user agent string to prevent injection and limit size
+// In production logs, we truncate and sanitize to reduce fingerprinting and prevent log injection
+func sanitizeUserAgent(ua string) string {
+	// Truncate to reasonable length (256 chars is enough for most user agents)
+	const maxLen = 256
+	if len(ua) > maxLen {
+		ua = ua[:maxLen] + "..."
+	}
+
+	// Remove potentially dangerous characters that could cause log injection
+	// Remove newlines, carriage returns, and tabs
+	ua = strings.ReplaceAll(ua, "\n", "")
+	ua = strings.ReplaceAll(ua, "\r", "")
+	ua = strings.ReplaceAll(ua, "\t", " ")
+
+	// Remove control characters
+	var sanitized strings.Builder
+	sanitized.Grow(len(ua))
+	for _, r := range ua {
+		// Keep printable ASCII and common UTF-8 characters
+		if r >= 32 && r < 127 || r >= 160 {
+			sanitized.WriteRune(r)
+		}
+	}
+
+	return sanitized.String()
+}
+
 // ErrorHandler handles application errors and converts them to HTTP responses
 type ErrorHandler struct {
 	logger        *slog.Logger
@@ -68,7 +96,7 @@ func (h *ErrorHandler) Middleware() func(http.Handler) http.Handler {
 			errorCtx := &ErrorContext{
 				RequestPath: r.URL.Path,
 				Method:      r.Method,
-				UserAgent:   r.Header.Get("User-Agent"),
+				UserAgent:   sanitizeUserAgent(r.Header.Get("User-Agent")),
 				RemoteIP:    getRemoteIP(r),
 			}
 

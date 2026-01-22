@@ -352,12 +352,42 @@ func main() {
 
 	router := chi.NewRouter()
 
+	// Security headers middleware
+	router.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Security headers to prevent common attacks
+			w.Header().Set("X-Content-Type-Options", "nosniff")
+			w.Header().Set("X-Frame-Options", "DENY")
+			w.Header().Set("X-XSS-Protection", "1; mode=block")
+			w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
+
+			// HSTS header for production (force HTTPS)
+			if cfg.IsProductionLike() {
+				w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+			}
+
+			next.ServeHTTP(w, r)
+		})
+	})
+
+	// Request body size limit middleware
+	router.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.ContentLength > cfg.Server.MaxBodySize {
+				http.Error(w, "Request body too large", http.StatusRequestEntityTooLarge)
+				return
+			}
+			r.Body = http.MaxBytesReader(w, r.Body, cfg.Server.MaxBodySize)
+			next.ServeHTTP(w, r)
+		})
+	})
+
 	// CORS middleware - must be before other middleware
 	router.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   []string{"http://localhost:8080", "http://localhost:8087", "http://192.168.88.53:8080", "http://localhost:5173"},
+		AllowedOrigins:   cfg.Server.CORSOrigins,
 		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token", "X-Request-ID"},
-		ExposedHeaders:   []string{"Link", "X-Total-Count", "X-Ratelimit-Limit", "X-Ratelimit-Remaining"},
+		ExposedHeaders:   []string{"Link", "X-Total-Count", "X-Ratelimit-Limit", "X-Ratelimit-Remaining", "X-New-Access-Token", "X-Token-Refreshed"},
 		AllowCredentials: true,
 		MaxAge:           300, // 5 minutes
 	}))
@@ -646,11 +676,12 @@ func main() {
 	})
 
 	srv := &http.Server{
-		Addr:         fmt.Sprintf(":%s", cfg.Server.Port),
-		Handler:      router,
-		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 15 * time.Second,
-		IdleTimeout:  60 * time.Second,
+		Addr:           fmt.Sprintf(":%s", cfg.Server.Port),
+		Handler:        router,
+		ReadTimeout:    15 * time.Second,
+		WriteTimeout:   15 * time.Second,
+		IdleTimeout:    60 * time.Second,
+		MaxHeaderBytes: 1 << 20, // 1MB max header size
 	}
 
 	// Start billing polling job if enabled
@@ -662,6 +693,11 @@ func main() {
 			logger.Info("Starting SDI notification polling job")
 			billingPollingJob.Start(pollingCtx)
 		}()
+	}
+
+	// Log development mode warning
+	if !cfg.IsProduction() {
+		printDevelopmentWarning(cfg.Server.Environment)
 	}
 
 	go func() {
@@ -881,4 +917,35 @@ func registerNavigationRoutes(api huma.API, navigationHandler *navigationHandler
 		Tags:        []string{"Navigation"},
 		Security:    []map[string][]string{{"bearerAuth": {}}},
 	}, navigationHandler.GetNavigation)
+}
+
+// printDevelopmentWarning prints a prominent warning when running in development mode
+// This helps ensure developers are aware of relaxed security settings
+func printDevelopmentWarning(environment string) {
+	warning := `
+╔═══════════════════════════════════════════════════════════════════════════════╗
+║                                                                               ║
+║   ██████╗ ███████╗██╗   ██╗    ███╗   ███╗ ██████╗ ██████╗ ███████╗          ║
+║   ██╔══██╗██╔════╝██║   ██║    ████╗ ████║██╔═══██╗██╔══██╗██╔════╝          ║
+║   ██║  ██║█████╗  ██║   ██║    ██╔████╔██║██║   ██║██║  ██║█████╗            ║
+║   ██║  ██║██╔══╝  ╚██╗ ██╔╝    ██║╚██╔╝██║██║   ██║██║  ██║██╔══╝            ║
+║   ██████╔╝███████╗ ╚████╔╝     ██║ ╚═╝ ██║╚██████╔╝██████╔╝███████╗          ║
+║   ╚═════╝ ╚══════╝  ╚═══╝      ╚═╝     ╚═╝ ╚═════╝ ╚═════╝ ╚══════╝          ║
+║                                                                               ║
+║   RUNNING IN DEVELOPMENT MODE - NOT FOR PRODUCTION USE                        ║
+║                                                                               ║
+║   Environment: %-12s                                                       ║
+║                                                                               ║
+║   The following security features are RELAXED:                                ║
+║   • Dev token endpoints are enabled (/dev/token)                              ║
+║   • Verbose error messages are shown                                          ║
+║   • Localhost OAuth redirects are allowed                                     ║
+║   • HSTS header is disabled                                                   ║
+║                                                                               ║
+║   DO NOT deploy to production with these settings!                            ║
+║   Set APP_ENV=production for production deployments.                          ║
+║                                                                               ║
+╚═══════════════════════════════════════════════════════════════════════════════╝
+`
+	fmt.Printf(warning, environment)
 }

@@ -3,7 +3,6 @@ package middleware
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -78,21 +77,10 @@ func (m *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 		}
 
 		// No valid Bearer token, try auto-refresh with cookie (but not for logout or OAuth callback endpoints)
-		if isLogoutRequest(r) {
-			fmt.Printf("[AUTH_MIDDLEWARE] Skipping auto-refresh for logout request\n")
-		}
-
-		// Skip auto-refresh for OAuth callback endpoints to prevent multiple token generation
-		if isOAuthCallbackRequest(r) {
-			fmt.Printf("[AUTH_MIDDLEWARE] Skipping auto-refresh for OAuth callback request\n")
-		}
-
 		if m.authService != nil && m.config != nil && !isLogoutRequest(r) && !isOAuthCallbackRequest(r) {
 			// Check if we have a refresh token in cookie
 			refreshToken := m.extractRefreshTokenFromCookie(r)
 			if refreshToken != "" {
-				fmt.Printf("[AUTH_MIDDLEWARE] Attempting auto-refresh with refresh token from cookie\n")
-
 				// Prepare security context
 				securityCtx := &models.SecurityContext{
 					IPAddress: utils.GetClientIP(r),
@@ -102,8 +90,6 @@ func (m *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 				// Try to refresh the tokens
 				tokenResponse, err := m.authService.RefreshTokensWithRiskAssessment(r.Context(), refreshToken, securityCtx)
 				if err == nil {
-					fmt.Printf("[AUTH_MIDDLEWARE] Auto-refresh successful, setting new tokens\n")
-
 					// Set new refresh token in cookie
 					cookieDomain := m.config.Auth.Cookie.Domain
 					isSecure := m.config.Auth.Cookie.Secure
@@ -120,7 +106,6 @@ func (m *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 						return
 					}
 				}
-				fmt.Printf("[AUTH_MIDDLEWARE] Auto-refresh failed: %v\n", err)
 			}
 		}
 

@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"regexp"
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
@@ -162,12 +163,14 @@ func (r *supplierRepository) List(ctx context.Context, search string, pagination
 	}
 
 	if search != "" {
+		// Escape special regex characters to prevent ReDoS attacks
+		escapedSearch := regexp.QuoteMeta(search)
 		filter["$or"] = []bson.M{
-			{"denomination": bson.M{"$regex": search, "$options": "i"}},
-			{"name": bson.M{"$regex": search, "$options": "i"}},
-			{"surname": bson.M{"$regex": search, "$options": "i"}},
-			{"fiscalIdCode": bson.M{"$regex": search, "$options": "i"}},
-			{"email": bson.M{"$regex": search, "$options": "i"}},
+			{"denomination": bson.M{"$regex": escapedSearch, "$options": "i"}},
+			{"name": bson.M{"$regex": escapedSearch, "$options": "i"}},
+			{"surname": bson.M{"$regex": escapedSearch, "$options": "i"}},
+			{"fiscalIdCode": bson.M{"$regex": escapedSearch, "$options": "i"}},
+			{"email": bson.M{"$regex": escapedSearch, "$options": "i"}},
 		}
 	}
 

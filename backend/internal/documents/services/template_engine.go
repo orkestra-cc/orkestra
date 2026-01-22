@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"html/template"
+	"regexp"
 	"strings"
 	"time"
 
@@ -20,6 +21,78 @@ var (
 	ErrTemplateRenderError = errors.New("failed to render template")
 	ErrInvalidTemplate     = errors.New("invalid template content")
 )
+
+// Regex patterns for HTML sanitization (compiled once for performance)
+var (
+	// Remove script tags and their content
+	scriptTagRegex = regexp.MustCompile(`(?i)<script[^>]*>[\s\S]*?</script>`)
+	// Remove style tags with javascript: protocol
+	styleJSRegex = regexp.MustCompile(`(?i)url\s*\(\s*["']?\s*javascript:`)
+	// Remove iframe tags
+	iframeTagRegex = regexp.MustCompile(`(?i)<iframe[^>]*>[\s\S]*?</iframe>`)
+	// Remove object tags
+	objectTagRegex = regexp.MustCompile(`(?i)<object[^>]*>[\s\S]*?</object>`)
+	// Remove embed tags
+	embedTagRegex = regexp.MustCompile(`(?i)<embed[^>]*>`)
+	// Remove form tags
+	formTagRegex = regexp.MustCompile(`(?i)<form[^>]*>[\s\S]*?</form>`)
+	// Remove event handlers (onclick, onerror, onload, etc.)
+	eventHandlerRegex = regexp.MustCompile(`(?i)\s+on\w+\s*=\s*["'][^"']*["']`)
+	// Remove javascript: protocol in href/src attributes
+	javascriptProtocolRegex = regexp.MustCompile(`(?i)(href|src|action)\s*=\s*["']\s*javascript:[^"']*["']`)
+	// Remove data: protocol (can embed scripts)
+	dataProtocolRegex = regexp.MustCompile(`(?i)(href|src)\s*=\s*["']\s*data:[^"']*["']`)
+	// Remove base tags (can redirect all links)
+	baseTagRegex = regexp.MustCompile(`(?i)<base[^>]*>`)
+	// Remove meta refresh (can redirect)
+	metaRefreshRegex = regexp.MustCompile(`(?i)<meta[^>]*http-equiv\s*=\s*["']refresh["'][^>]*>`)
+	// Remove link tags with javascript
+	linkJSRegex = regexp.MustCompile(`(?i)<link[^>]*href\s*=\s*["']\s*javascript:[^"']*["'][^>]*>`)
+)
+
+// sanitizeHTML removes potentially dangerous HTML elements and attributes
+// This is designed for PDF generation where we want to allow formatting but prevent injection
+func sanitizeHTML(html string) string {
+	result := html
+
+	// Remove script tags and content
+	result = scriptTagRegex.ReplaceAllString(result, "")
+
+	// Remove iframe tags
+	result = iframeTagRegex.ReplaceAllString(result, "")
+
+	// Remove object tags
+	result = objectTagRegex.ReplaceAllString(result, "")
+
+	// Remove embed tags
+	result = embedTagRegex.ReplaceAllString(result, "")
+
+	// Remove form tags and content
+	result = formTagRegex.ReplaceAllString(result, "")
+
+	// Remove base tags
+	result = baseTagRegex.ReplaceAllString(result, "")
+
+	// Remove meta refresh
+	result = metaRefreshRegex.ReplaceAllString(result, "")
+
+	// Remove event handlers
+	result = eventHandlerRegex.ReplaceAllString(result, "")
+
+	// Remove javascript: protocol
+	result = javascriptProtocolRegex.ReplaceAllString(result, "")
+
+	// Remove data: protocol in href/src (but keep data: in img src for embedded images)
+	// Only remove if not in img tag context - for now, skip this to allow base64 images
+
+	// Remove javascript in style urls
+	result = styleJSRegex.ReplaceAllString(result, "url(")
+
+	// Remove link tags with javascript
+	result = linkJSRegex.ReplaceAllString(result, "")
+
+	return result
+}
 
 // TemplateEngine defines the interface for template rendering
 type TemplateEngine interface {
@@ -251,7 +324,11 @@ func (e *templateEngine) RenderString(ctx context.Context, htmlContent string, c
 		return "", fmt.Errorf("%w: %s", ErrTemplateRenderError, err.Error())
 	}
 
-	return buf.String(), nil
+	// Sanitize the rendered HTML to remove potentially dangerous elements
+	// This prevents injection attacks through template data
+	sanitized := sanitizeHTML(buf.String())
+
+	return sanitized, nil
 }
 
 // Validate validates a template's HTML content
