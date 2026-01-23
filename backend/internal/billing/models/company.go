@@ -72,9 +72,10 @@ type Company struct {
 // ToPartyData converts Company to PartyData for invoice embedding
 // This creates a snapshot of company data at invoice creation time
 func (c *Company) ToPartyData() *PartyData {
-	// Build IscrizioneREA if REA data exists
+	// Build IscrizioneREA only if ALL required fields are present
+	// Per Article 2250 Civil Code, companies must provide complete REA data or omit entirely
 	var iscrizioneREA *IscrizioneREAInput
-	if c.REAOffice != "" || c.REANumber != "" {
+	if c.REAOffice != "" && c.REANumber != "" && c.StatoLiquidazione != "" {
 		var capitaleSociale float64
 		if c.CapitaleSociale != nil {
 			capitaleSociale = *c.CapitaleSociale

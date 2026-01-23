@@ -1019,8 +1019,12 @@ func (s *invoiceService) mapCedenteToPartyData(cedente *models.CedentePrestatore
 		party.Phone = cedente.Contatti.Telefono
 	}
 
-	// REA registration
-	if cedente.IscrizioneREA != nil {
+	// REA registration - only if ALL required fields are present
+	// Per Article 2250 Civil Code, incomplete REA data should be omitted entirely
+	if cedente.IscrizioneREA != nil &&
+		cedente.IscrizioneREA.Ufficio != "" &&
+		cedente.IscrizioneREA.NumeroREA != "" &&
+		cedente.IscrizioneREA.StatoLiquidazione != "" {
 		party.IscrizioneREA = &models.IscrizioneREAInput{
 			Ufficio:           cedente.IscrizioneREA.Ufficio,
 			NumeroREA:         cedente.IscrizioneREA.NumeroREA,

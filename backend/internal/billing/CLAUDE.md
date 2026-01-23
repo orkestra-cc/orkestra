@@ -270,6 +270,7 @@ SDI errors are mapped to appropriate HTTP responses:
 | 802 | Parsing error: malformed XML | XML format issue | Verify XML is sent with `Content-Type: application/xml` (not base64 JSON) |
 | 00471 | CedentePrestatore = CessionarioCommittente | Self-invoicing not allowed for this document type | Use autofatture document types (TD16-TD20) for self-invoicing |
 | 422 | unexpected property | Frontend sending field not in backend DTO | Add missing field to DTO in `models/dto.go` |
+| Warning | Non sono stati specificati i valori nei discendenti di `<IscrizioneREA>` | Company has partial REA data (e.g., only StatoLiquidazione but missing Ufficio/NumeroREA) | Update company with ALL REA fields (Ufficio, NumeroREA, StatoLiquidazione) or remove all REA data. Per Article 2250 Civil Code, companies must provide complete REA data or omit entirely. |
 
 **Debugging Tips**:
 - XML files are written to `/tmp/invoice_<number>.xml` inside the container for debugging

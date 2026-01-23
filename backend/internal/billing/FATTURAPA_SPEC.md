@@ -570,8 +570,15 @@ FatturaElettronica
 | Anagrafica for company | Denominazione | Cannot use Nome/Cognome |
 | Anagrafica for individual | Nome + Cognome | Cannot use Denominazione |
 | TipoDocumento = "TD29" | CedentePrestatore.IdPaese | Must be "IT" |
-| IscrizioneREA present | Ufficio, NumeroREA, StatoLiquidazione | All required |
+| IscrizioneREA present | Ufficio, NumeroREA, StatoLiquidazione | All required (see note below) |
 | DatiPagamento present | CondizioniPagamento + DettaglioPagamento | Both required |
+
+**IscrizioneREA All-or-Nothing Rule:**
+Per Article 2250 of the Italian Civil Code, companies registered in the Business Registry (Registro delle Imprese) must provide complete REA data. The XML builder enforces an all-or-nothing policy:
+- If ALL required fields (Ufficio, NumeroREA, StatoLiquidazione) are present → include `<IscrizioneREA>` element
+- If ANY required field is missing → omit `<IscrizioneREA>` element entirely
+
+This prevents the SDI warning: "Non sono stati specificati i valori nei discendenti di `<IscrizioneREA>`"
 
 ### 6.4 Cross-Element Validations
 

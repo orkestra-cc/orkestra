@@ -777,3 +777,80 @@ func TestValidateInvoiceForXML(t *testing.T) {
 		}
 	})
 }
+
+func TestBuildInvoiceWithIncompleteREA(t *testing.T) {
+	cfg := &config.OpenAPIConfig{
+		FiscalID:      "IT12345678901",
+		RecipientCode: "JKKZDGR",
+	}
+	builder := NewXMLBuilder(cfg)
+
+	// Test 1: IscrizioneREA is nil - should NOT generate element
+	t.Run("nil IscrizioneREA", func(t *testing.T) {
+		invoice := createTestInvoice()
+		invoice.CedentePrestatore.IscrizioneREA = nil
+
+		xml, err := builder.Build(invoice)
+		if err != nil {
+			t.Fatalf("Build failed: %v", err)
+		}
+
+		if strings.Contains(xml, "<IscrizioneREA>") {
+			t.Error("XML should NOT contain IscrizioneREA when nil")
+		}
+	})
+
+	// Test 2: IscrizioneREA with only StatoLiquidazione - should NOT generate element
+	t.Run("only StatoLiquidazione", func(t *testing.T) {
+		invoice := createTestInvoice()
+		invoice.CedentePrestatore.IscrizioneREA = &models.IscrizioneREAInput{
+			StatoLiquidazione: "LN",
+		}
+
+		xml, err := builder.Build(invoice)
+		if err != nil {
+			t.Fatalf("Build failed: %v", err)
+		}
+
+		if strings.Contains(xml, "<IscrizioneREA>") {
+			t.Error("XML should NOT contain IscrizioneREA when Ufficio/NumeroREA are empty")
+		}
+	})
+
+	// Test 3: IscrizioneREA with empty StatoLiquidazione - should NOT generate element
+	t.Run("missing StatoLiquidazione", func(t *testing.T) {
+		invoice := createTestInvoice()
+		invoice.CedentePrestatore.IscrizioneREA = &models.IscrizioneREAInput{
+			Ufficio:   "RM",
+			NumeroREA: "123456",
+		}
+
+		xml, err := builder.Build(invoice)
+		if err != nil {
+			t.Fatalf("Build failed: %v", err)
+		}
+
+		if strings.Contains(xml, "<IscrizioneREA>") {
+			t.Error("XML should NOT contain IscrizioneREA when StatoLiquidazione is empty")
+		}
+	})
+
+	// Test 4: Complete IscrizioneREA - SHOULD generate element
+	t.Run("complete IscrizioneREA", func(t *testing.T) {
+		invoice := createTestInvoice()
+		invoice.CedentePrestatore.IscrizioneREA = &models.IscrizioneREAInput{
+			Ufficio:           "RM",
+			NumeroREA:         "123456",
+			StatoLiquidazione: "LN",
+		}
+
+		xml, err := builder.Build(invoice)
+		if err != nil {
+			t.Fatalf("Build failed: %v", err)
+		}
+
+		if !strings.Contains(xml, "<IscrizioneREA>") {
+			t.Error("XML should contain IscrizioneREA when all required fields present")
+		}
+	})
+}

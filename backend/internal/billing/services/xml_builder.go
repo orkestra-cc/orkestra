@@ -168,13 +168,21 @@ func (b *xmlBuilder) buildCedentePrestatore(party *models.PartyData) models.Cede
 	cap := NormalizeCAP(party.PostalCode)
 	provincia := NormalizeProvincia(party.Province)
 
+	// For Italian companies, CodiceFiscale defaults to FiscalIDCode (P.IVA)
+	// This is valid because for Italian companies, the Codice Fiscale is often
+	// identical to the P.IVA (11 digits) per D.P.R. 605-1973
+	codiceFiscale := party.CodiceFiscale
+	if codiceFiscale == "" && idPaese == "IT" {
+		codiceFiscale = party.FiscalIDCode
+	}
+
 	cp := models.CedentePrestatore{
 		DatiAnagrafici: models.DatiAnagraficiCedente{
 			IdFiscaleIVA: models.IdFiscale{
 				IdPaese:  idPaese,
 				IdCodice: party.FiscalIDCode,
 			},
-			CodiceFiscale: party.CodiceFiscale,
+			CodiceFiscale: codiceFiscale,
 			Anagrafica:    anagrafica,
 			RegimeFiscale: regimeFiscale,
 		},
@@ -188,8 +196,12 @@ func (b *xmlBuilder) buildCedentePrestatore(party *models.PartyData) models.Cede
 		},
 	}
 
-	// Add IscrizioneREA if available (for Italian companies)
-	if party.IscrizioneREA != nil {
+	// Add IscrizioneREA only if ALL required fields are present (per Article 2250 Civil Code)
+	// If any required field is empty, omit the entire element to avoid SDI validation errors
+	if party.IscrizioneREA != nil &&
+		party.IscrizioneREA.Ufficio != "" &&
+		party.IscrizioneREA.NumeroREA != "" &&
+		party.IscrizioneREA.StatoLiquidazione != "" {
 		cp.IscrizioneREA = &models.IscrizioneREA{
 			Ufficio:           NormalizeProvincia(party.IscrizioneREA.Ufficio),
 			NumeroREA:         party.IscrizioneREA.NumeroREA,
