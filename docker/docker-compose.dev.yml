@@ -98,6 +98,9 @@ services:
       - ./keys:/app/keys
     networks:
       - orkestra-network
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
     command: ["sh", "-c", "go mod download && go install github.com/air-verse/air@latest && air"]
 
   orkestra-frontend:
