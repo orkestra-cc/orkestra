@@ -88,10 +88,18 @@ func (c *Company) ToPartyData() *PartyData {
 		}
 	}
 
+	// For Italian companies, CodiceFiscale defaults to FiscalIDCode (P.IVA)
+	// This is valid because for Italian companies, the Codice Fiscale is often
+	// identical to the P.IVA (11 digits) per D.P.R. 605-1973
+	codiceFiscale := c.CodiceFiscale
+	if codiceFiscale == "" && c.FiscalIDCountry == "IT" {
+		codiceFiscale = c.FiscalIDCode
+	}
+
 	return &PartyData{
 		FiscalIDCountry: c.FiscalIDCountry,
 		FiscalIDCode:    c.FiscalIDCode,
-		CodiceFiscale:   c.CodiceFiscale,
+		CodiceFiscale:   codiceFiscale,
 		IsCompany:       true,
 		Denomination:    c.Denomination,
 		RegimeFiscale:   c.RegimeFiscale,
