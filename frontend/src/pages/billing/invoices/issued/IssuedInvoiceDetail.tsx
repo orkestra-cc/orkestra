@@ -741,16 +741,18 @@ const IssuedInvoiceDetail: React.FC = () => {
         </Button>
         {!isEditMode && (
           <>
-            <Button
-              variant="falcon-default"
-              size="sm"
-              className="me-2"
-              onClick={handleViewHtml}
-              title="Anteprima"
-            >
-              <FontAwesomeIcon icon={faEye} className="me-1" />
-              Anteprima
-            </Button>
+            {invoice?.status && !['draft', 'pending', 'cancelled'].includes(invoice.status) && (
+              <Button
+                variant="falcon-default"
+                size="sm"
+                className="me-2"
+                onClick={handleViewHtml}
+                title="Anteprima"
+              >
+                <FontAwesomeIcon icon={faEye} className="me-1" />
+                Anteprima
+              </Button>
+            )}
             <Button
               variant="falcon-default"
               size="sm"
