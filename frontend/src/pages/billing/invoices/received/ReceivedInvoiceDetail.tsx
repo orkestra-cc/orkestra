@@ -119,20 +119,26 @@ const ReceivedInvoiceDetail: React.FC = () => {
   };
 
   // Download XML file
+  // FatturaPA filename format: {CountryCode}{IdCodice}_{ProgressivoInvio}.xml
+  // IdCodice = P.IVA (fiscalIdCode), per FatturaPA specifications
   const generateFatturaFilename = () => {
     const cedente = invoice?.cedentePrestatore;
     if (!cedente) {
       return `fattura_${invoiceId}.xml`;
     }
-    const fiscalCode = cedente.codiceFiscale || cedente.fiscalIdCode;
+    // Always use fiscalIdCode (P.IVA) for filename - FatturaPA spec requirement
+    const fiscalCode = cedente.fiscalIdCode;
     if (!fiscalCode) {
       return `fattura_${invoiceId}.xml`;
     }
     const countryCode = cedente.fiscalIdCountry || 'IT';
-    const progressive = invoice.progressivoInvio ||
+    // Progressive: use last 5 chars of progressivoInvio (filename limit is 5, XML allows 10)
+    const rawProgressive = invoice.progressivoInvio ||
       invoiceId?.slice(-5) ||
       String(invoice.number).replace(/\D/g, '').slice(-5).padStart(5, '0') ||
       '00001';
+    // FatturaPA filename spec: progressive max 5 alphanumeric chars
+    const progressive = rawProgressive.slice(-5);
     return `${countryCode}${fiscalCode}_${progressive}.xml`;
   };
 
