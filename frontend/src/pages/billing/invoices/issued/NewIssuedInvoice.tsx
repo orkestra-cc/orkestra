@@ -10,7 +10,7 @@ import {
   Row,
   Col,
   Table,
-  InputGroup,
+  InputGroup
 } from 'react-bootstrap';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
@@ -18,14 +18,14 @@ import {
   faTrash,
   faSave,
   faPaperPlane,
-  faArrowLeft,
+  faArrowLeft
 } from '@fortawesome/free-solid-svg-icons';
 import {
   useCreateInvoiceMutation,
   useSendInvoiceMutation,
   useGetCustomersQuery,
   useGetCompaniesQuery,
-  useGetDefaultCompanyQuery,
+  useGetDefaultCompanyQuery
 } from 'store/api/billingApi';
 import type {
   CreateInvoiceInput,
@@ -41,7 +41,7 @@ import type {
   DatiCassa,
   TipoRitenuta,
   TipoCassa,
-  AltriDatiGestionali,
+  AltriDatiGestionali
 } from 'types/billing';
 import PageHeader from 'components/common/PageHeader';
 import FalconCardHeader from 'components/common/FalconCardHeader';
@@ -58,7 +58,7 @@ const createEmptyLine = (): CreateInvoiceLineInput => ({
   productCode: '',
   startDate: undefined,
   endDate: undefined,
-  altriDatiGestionali: [],
+  altriDatiGestionali: []
 });
 
 // Create empty AltriDatiGestionali entry
@@ -66,7 +66,7 @@ const createEmptyAltriDati = (): AltriDatiGestionali => ({
   tipoDato: '',
   riferimentoTesto: '',
   riferimentoNumero: undefined,
-  riferimentoData: undefined,
+  riferimentoData: undefined
 });
 
 // Document type options
@@ -95,7 +95,7 @@ const DOCUMENT_TYPES: { value: DocumentType; label: string }[] = [
   // Altri tipi
   { value: 'TD26', label: 'TD26 - Cessione beni ammortizzabili' },
   { value: 'TD27', label: 'TD27 - Autoconsumo/cessioni gratuite' },
-  { value: 'TD28', label: 'TD28 - Acquisti da San Marino con IVA' },
+  { value: 'TD28', label: 'TD28 - Acquisti da San Marino con IVA' }
 ];
 
 // Payment method options
@@ -106,14 +106,14 @@ const PAYMENT_METHODS: { value: PaymentMethod; label: string }[] = [
   { value: 'MP08', label: 'MP08 - Carta di pagamento' },
   { value: 'MP12', label: 'MP12 - RIBA' },
   { value: 'MP19', label: 'MP19 - SEPA Direct Debit' },
-  { value: 'MP23', label: 'MP23 - PagoPA' },
+  { value: 'MP23', label: 'MP23 - PagoPA' }
 ];
 
 // Payment condition options
 const PAYMENT_CONDITIONS: { value: PaymentCondition; label: string }[] = [
   { value: 'TP01', label: 'TP01 - Pagamento a rate' },
   { value: 'TP02', label: 'TP02 - Pagamento completo' },
-  { value: 'TP03', label: 'TP03 - Anticipo' },
+  { value: 'TP03', label: 'TP03 - Anticipo' }
 ];
 
 // Unit of measure options
@@ -125,7 +125,7 @@ const UNITS_OF_MEASURE: { value: UnitOfMeasure; label: string }[] = [
   { value: 'MQ', label: 'MQ - Metro quadrato' },
   { value: 'H', label: 'H - Ora' },
   { value: 'GG', label: 'GG - Giorno' },
-  { value: 'MESE', label: 'MESE - Mese' },
+  { value: 'MESE', label: 'MESE - Mese' }
 ];
 
 // VAT rates
@@ -142,7 +142,7 @@ const VAT_NATURES: { value: VATNature; label: string }[] = [
   { value: 'N4', label: 'N4 - Esenti' },
   { value: 'N5', label: 'N5 - Regime del margine' },
   { value: 'N6.1', label: 'N6.1 - Reverse charge (rottami)' },
-  { value: 'N6.9', label: 'N6.9 - Reverse charge (altri casi)' },
+  { value: 'N6.9', label: 'N6.9 - Reverse charge (altri casi)' }
 ];
 
 // Withholding tax types (Ritenuta d'acconto)
@@ -152,7 +152,7 @@ const TIPO_RITENUTA_OPTIONS: { value: TipoRitenuta; label: string }[] = [
   { value: 'RT03', label: 'RT03 - Contributo INPS' },
   { value: 'RT04', label: 'RT04 - Contributo ENASARCO' },
   { value: 'RT05', label: 'RT05 - Contributo ENPAM' },
-  { value: 'RT06', label: 'RT06 - Altro contributo previdenziale' },
+  { value: 'RT06', label: 'RT06 - Altro contributo previdenziale' }
 ];
 
 // Social security fund types (Cassa previdenziale)
@@ -167,7 +167,7 @@ const TIPO_CASSA_OPTIONS: { value: TipoCassa; label: string }[] = [
   { value: 'TC08', label: 'TC08 - ENPACL' },
   { value: 'TC09', label: 'TC09 - ENPAM' },
   { value: 'TC10', label: 'TC10 - ENPAF' },
-  { value: 'TC22', label: 'TC22 - INPS' },
+  { value: 'TC22', label: 'TC22 - INPS' }
 ];
 
 const NewIssuedInvoice: React.FC = () => {
@@ -188,14 +188,17 @@ const NewIssuedInvoice: React.FC = () => {
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const [companyId, setCompanyId] = useState('');
   const [customerId, setCustomerId] = useState('');
-  const [lines, setLines] = useState<CreateInvoiceLineInput[]>([createEmptyLine()]);
+  const [lines, setLines] = useState<CreateInvoiceLineInput[]>([
+    createEmptyLine()
+  ]);
   const [causale, setCausale] = useState<string[]>(['']);
   const [internalNotes, setInternalNotes] = useState('');
   const [legalStorageEnabled, setLegalStorageEnabled] = useState(true);
   const [signatureEnabled, setSignatureEnabled] = useState(true);
 
   // Payment terms
-  const [paymentCondition, setPaymentCondition] = useState<PaymentCondition>('TP02');
+  const [paymentCondition, setPaymentCondition] =
+    useState<PaymentCondition>('TP02');
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('MP05');
   const [paymentBeneficiario, setPaymentBeneficiario] = useState('');
   const [paymentIstituto, setPaymentIstituto] = useState('');
@@ -211,13 +214,13 @@ const NewIssuedInvoice: React.FC = () => {
     tipoRitenuta: 'RT01',
     importoRitenuta: 0,
     aliquotaRitenuta: 20,
-    causalePagamento: 'A',
+    causalePagamento: 'A'
   });
 
   // Stamp duty (Bollo virtuale)
   const [enableBollo, setEnableBollo] = useState(false);
   const [datiBollo, setDatiBollo] = useState<DatiBollo>({
-    importoBollo: 2.0,
+    importoBollo: 2.0
   });
 
   // Social security fund (Cassa previdenziale)
@@ -226,7 +229,7 @@ const NewIssuedInvoice: React.FC = () => {
     tipoCassa: 'TC22',
     alCassa: 4,
     importoContributoCassa: 0,
-    aliquotaIVA: 22,
+    aliquotaIVA: 22
   });
 
   const isLoading = isCreating || isSending;
@@ -251,7 +254,7 @@ const NewIssuedInvoice: React.FC = () => {
       return {
         taxable: acc.taxable + totalPrice,
         vat: acc.vat + vatAmount,
-        total: acc.total + totalPrice + vatAmount,
+        total: acc.total + totalPrice + vatAmount
       };
     },
     { taxable: 0, vat: 0, total: 0 }
@@ -301,7 +304,7 @@ const NewIssuedInvoice: React.FC = () => {
     const currentAltriDati = newLines[lineIndex].altriDatiGestionali || [];
     newLines[lineIndex] = {
       ...newLines[lineIndex],
-      altriDatiGestionali: [...currentAltriDati, createEmptyAltriDati()],
+      altriDatiGestionali: [...currentAltriDati, createEmptyAltriDati()]
     };
     setLines(newLines);
   };
@@ -311,7 +314,7 @@ const NewIssuedInvoice: React.FC = () => {
     const currentAltriDati = newLines[lineIndex].altriDatiGestionali || [];
     newLines[lineIndex] = {
       ...newLines[lineIndex],
-      altriDatiGestionali: currentAltriDati.filter((_, i) => i !== adgIndex),
+      altriDatiGestionali: currentAltriDati.filter((_, i) => i !== adgIndex)
     };
     setLines(newLines);
   };
@@ -323,11 +326,16 @@ const NewIssuedInvoice: React.FC = () => {
     value: string | number | undefined
   ) => {
     const newLines = [...lines];
-    const currentAltriDati = [...(newLines[lineIndex].altriDatiGestionali || [])];
-    currentAltriDati[adgIndex] = { ...currentAltriDati[adgIndex], [field]: value };
+    const currentAltriDati = [
+      ...(newLines[lineIndex].altriDatiGestionali || [])
+    ];
+    currentAltriDati[adgIndex] = {
+      ...currentAltriDati[adgIndex],
+      [field]: value
+    };
     newLines[lineIndex] = {
       ...newLines[lineIndex],
-      altriDatiGestionali: currentAltriDati,
+      altriDatiGestionali: currentAltriDati
     };
     setLines(newLines);
   };
@@ -335,7 +343,7 @@ const NewIssuedInvoice: React.FC = () => {
   // Validation
   const validate = (): boolean => {
     if (!companyId) {
-      setError('Selezionare un\'azienda emittente');
+      setError("Selezionare un'azienda emittente");
       setActiveTab('document');
       return false;
     }
@@ -387,20 +395,19 @@ const NewIssuedInvoice: React.FC = () => {
 
   // Build invoice input
   const buildInvoiceInput = (): CreateInvoiceInput => {
-    const paymentTerms: CreatePaymentTermsInput | undefined =
-      paymentMethod
-        ? {
-            condition: paymentCondition,
-            paymentMethod: paymentMethod,
-            beneficiario: paymentBeneficiario || undefined,
-            istitutoFinanziario: paymentIstituto || undefined,
-            iban: paymentIban || undefined,
-            abi: paymentAbi || undefined,
-            cab: paymentCab || undefined,
-            bic: paymentBic || undefined,
-            dueDate: paymentDueDate ? toRFC3339(paymentDueDate) : undefined,
-          }
-        : undefined;
+    const paymentTerms: CreatePaymentTermsInput | undefined = paymentMethod
+      ? {
+          condition: paymentCondition,
+          paymentMethod: paymentMethod,
+          beneficiario: paymentBeneficiario || undefined,
+          istitutoFinanziario: paymentIstituto || undefined,
+          iban: paymentIban || undefined,
+          abi: paymentAbi || undefined,
+          cab: paymentCab || undefined,
+          bic: paymentBic || undefined,
+          dueDate: paymentDueDate ? toRFC3339(paymentDueDate) : undefined
+        }
+      : undefined;
 
     return {
       documentType,
@@ -413,15 +420,15 @@ const NewIssuedInvoice: React.FC = () => {
       datiRitenuta: enableRitenuta ? [datiRitenuta] : undefined,
       datiBollo: enableBollo ? datiBollo : undefined,
       datiCassaPrevidenziale: enableCassa ? [datiCassa] : undefined,
-      lines: lines.map((line) => ({
+      lines: lines.map(line => ({
         ...line,
-        vatNature: line.vatRate === 0 ? line.vatNature : undefined,
+        vatNature: line.vatRate === 0 ? line.vatNature : undefined
       })),
       paymentTerms,
-      causale: causale.filter((c) => c.trim()),
+      causale: causale.filter(c => c.trim()),
       internalNotes: internalNotes || undefined,
       legalStorageEnabled,
-      signatureEnabled,
+      signatureEnabled
     };
   };
 
@@ -438,9 +445,10 @@ const NewIssuedInvoice: React.FC = () => {
       setSuccess('Fattura salvata come bozza');
       setTimeout(() => navigate('/billing/invoices/issued'), 1500);
     } catch (err: unknown) {
-      const errorMessage = err && typeof err === 'object' && 'data' in err
-        ? (err as { data?: { message?: string } }).data?.message
-        : undefined;
+      const errorMessage =
+        err && typeof err === 'object' && 'data' in err
+          ? (err as { data?: { message?: string } }).data?.message
+          : undefined;
       setError(errorMessage || 'Errore durante il salvataggio della fattura');
     }
   };
@@ -461,14 +469,19 @@ const NewIssuedInvoice: React.FC = () => {
       setSuccess('Fattura creata e inviata al SDI');
       setTimeout(() => navigate('/billing/invoices/issued'), 1500);
     } catch (err: unknown) {
-      const errorMessage = err && typeof err === 'object' && 'data' in err
-        ? (err as { data?: { message?: string } }).data?.message
-        : undefined;
-      setError(errorMessage || 'Errore durante la creazione/invio della fattura');
+      const errorMessage =
+        err && typeof err === 'object' && 'data' in err
+          ? (err as { data?: { message?: string } }).data?.message
+          : undefined;
+      setError(
+        errorMessage || 'Errore durante la creazione/invio della fattura'
+      );
     }
   };
 
-  const selectedCustomer = customersData?.customers?.find((c) => c.id === customerId);
+  const selectedCustomer = customersData?.customers?.find(
+    c => c.id === customerId
+  );
 
   return (
     <>
@@ -503,7 +516,10 @@ const NewIssuedInvoice: React.FC = () => {
       <Card className="mb-3">
         <FalconCardHeader title="Dati Fattura" light={false} />
         <Card.Body>
-          <Tab.Container activeKey={activeTab} onSelect={(k) => setActiveTab(k || 'document')}>
+          <Tab.Container
+            activeKey={activeTab}
+            onSelect={k => setActiveTab(k || 'document')}
+          >
             <Nav variant="tabs" className="mb-3">
               <Nav.Item>
                 <Nav.Link eventKey="document">Documento</Nav.Link>
@@ -534,18 +550,22 @@ const NewIssuedInvoice: React.FC = () => {
                       </Form.Label>
                       <Form.Select
                         value={companyId}
-                        onChange={(e) => setCompanyId(e.target.value)}
+                        onChange={e => setCompanyId(e.target.value)}
                       >
                         <option value="">Seleziona azienda...</option>
-                        {companiesData?.companies?.filter(c => c.isActive).map((company) => (
-                          <option key={company.id} value={company.id}>
-                            {company.denomination} - P.IVA {company.fiscalIdCode}
-                            {company.isDefault && ' (Default)'}
-                          </option>
-                        ))}
+                        {companiesData?.companies
+                          ?.filter(c => c.isActive)
+                          .map(company => (
+                            <option key={company.id} value={company.id}>
+                              {company.denomination} - P.IVA{' '}
+                              {company.fiscalIdCode}
+                              {company.isDefault && ' (Default)'}
+                            </option>
+                          ))}
                       </Form.Select>
                       <Form.Text className="text-muted">
-                        L'azienda selezionata verrà utilizzata come cedente/prestatore nella fattura
+                        L'azienda selezionata verrà utilizzata come
+                        cedente/prestatore nella fattura
                       </Form.Text>
                     </Form.Group>
                   </Col>
@@ -561,9 +581,11 @@ const NewIssuedInvoice: React.FC = () => {
                       </Form.Label>
                       <Form.Select
                         value={documentType}
-                        onChange={(e) => setDocumentType(e.target.value as DocumentType)}
+                        onChange={e =>
+                          setDocumentType(e.target.value as DocumentType)
+                        }
                       >
-                        {DOCUMENT_TYPES.map((dt) => (
+                        {DOCUMENT_TYPES.map(dt => (
                           <option key={dt.value} value={dt.value}>
                             {dt.label}
                           </option>
@@ -579,7 +601,7 @@ const NewIssuedInvoice: React.FC = () => {
                       <Form.Control
                         type="text"
                         value={number}
-                        onChange={(e) => setNumber(e.target.value)}
+                        onChange={e => setNumber(e.target.value)}
                         placeholder="es. 2026/001"
                       />
                     </Form.Group>
@@ -592,7 +614,7 @@ const NewIssuedInvoice: React.FC = () => {
                       <Form.Control
                         type="date"
                         value={date}
-                        onChange={(e) => setDate(e.target.value)}
+                        onChange={e => setDate(e.target.value)}
                       />
                     </Form.Group>
                   </Col>
@@ -606,10 +628,10 @@ const NewIssuedInvoice: React.FC = () => {
                       </Form.Label>
                       <Form.Select
                         value={customerId}
-                        onChange={(e) => setCustomerId(e.target.value)}
+                        onChange={e => setCustomerId(e.target.value)}
                       >
                         <option value="">Seleziona cliente...</option>
-                        {customersData?.customers?.map((customer) => (
+                        {customersData?.customers?.map(customer => (
                           <option key={customer.id} value={customer.id}>
                             {customer.isCompany
                               ? customer.denomination
@@ -625,10 +647,13 @@ const NewIssuedInvoice: React.FC = () => {
                       <div className="mt-4 text-muted small">
                         <div>
                           <strong>SDI:</strong>{' '}
-                          {selectedCustomer.codiceDestinatario || selectedCustomer.pecDestinatario || 'N/A'}
+                          {selectedCustomer.codiceDestinatario ||
+                            selectedCustomer.pecDestinatario ||
+                            'N/A'}
                         </div>
                         <div>
-                          <strong>P.IVA:</strong> {selectedCustomer.fiscalIdCode}
+                          <strong>P.IVA:</strong>{' '}
+                          {selectedCustomer.fiscalIdCode}
                         </div>
                       </div>
                     )}
@@ -642,7 +667,9 @@ const NewIssuedInvoice: React.FC = () => {
                       <Form.Control
                         type="text"
                         value={c}
-                        onChange={(e) => handleCausaleChange(index, e.target.value)}
+                        onChange={e =>
+                          handleCausaleChange(index, e.target.value)
+                        }
                         placeholder="es. Consulenza informatica mese di gennaio 2026"
                         maxLength={200}
                       />
@@ -685,208 +712,272 @@ const NewIssuedInvoice: React.FC = () => {
                         const { totalPrice } = calculateLineTotals(line);
                         return (
                           <React.Fragment key={index}>
-                          <tr>
-                            <td>
-                              <Form.Control
-                                size="sm"
-                                type="text"
-                                value={line.description}
-                                onChange={(e) =>
-                                  handleLineChange(index, 'description', e.target.value)
-                                }
-                                placeholder="Descrizione"
-                              />
-                            </td>
-                            <td>
-                              <Form.Control
-                                size="sm"
-                                type="text"
-                                maxLength={35}
-                                value={line.productCode || ''}
-                                onChange={(e) =>
-                                  handleLineChange(index, 'productCode', e.target.value)
-                                }
-                                placeholder="Codice"
-                              />
-                            </td>
-                            <td>
-                              <Form.Control
-                                size="sm"
-                                type="number"
-                                min="0"
-                                step="0.01"
-                                value={line.quantity}
-                                onChange={(e) =>
-                                  handleLineChange(index, 'quantity', parseFloat(e.target.value) || 0)
-                                }
-                              />
-                            </td>
-                            <td>
-                              <Form.Select
-                                size="sm"
-                                value={line.unitOfMeasure || ''}
-                                onChange={(e) =>
-                                  handleLineChange(index, 'unitOfMeasure', e.target.value as UnitOfMeasure)
-                                }
-                              >
-                                <option value="">-</option>
-                                {UNITS_OF_MEASURE.map((um) => (
-                                  <option key={um.value} value={um.value}>
-                                    {um.value}
-                                  </option>
-                                ))}
-                              </Form.Select>
-                            </td>
-                            <td>
-                              <Form.Control
-                                size="sm"
-                                type="number"
-                                min="0"
-                                step="0.01"
-                                value={line.unitPrice}
-                                onChange={(e) =>
-                                  handleLineChange(index, 'unitPrice', parseFloat(e.target.value) || 0)
-                                }
-                              />
-                            </td>
-                            <td>
-                              <Form.Select
-                                size="sm"
-                                value={line.vatRate}
-                                onChange={(e) =>
-                                  handleLineChange(index, 'vatRate', parseFloat(e.target.value))
-                                }
-                              >
-                                {VAT_RATES.map((rate) => (
-                                  <option key={rate} value={rate}>
-                                    {rate}%
-                                  </option>
-                                ))}
-                              </Form.Select>
-                            </td>
-                            <td>
-                              {line.vatRate === 0 ? (
+                            <tr>
+                              <td>
+                                <Form.Control
+                                  size="sm"
+                                  type="text"
+                                  value={line.description}
+                                  onChange={e =>
+                                    handleLineChange(
+                                      index,
+                                      'description',
+                                      e.target.value
+                                    )
+                                  }
+                                  placeholder="Descrizione"
+                                />
+                              </td>
+                              <td>
+                                <Form.Control
+                                  size="sm"
+                                  type="text"
+                                  maxLength={35}
+                                  value={line.productCode || ''}
+                                  onChange={e =>
+                                    handleLineChange(
+                                      index,
+                                      'productCode',
+                                      e.target.value
+                                    )
+                                  }
+                                  placeholder="Codice"
+                                />
+                              </td>
+                              <td>
+                                <Form.Control
+                                  size="sm"
+                                  type="number"
+                                  min="0"
+                                  step="0.01"
+                                  value={line.quantity}
+                                  onChange={e =>
+                                    handleLineChange(
+                                      index,
+                                      'quantity',
+                                      parseFloat(e.target.value) || 0
+                                    )
+                                  }
+                                />
+                              </td>
+                              <td>
                                 <Form.Select
                                   size="sm"
-                                  value={line.vatNature || ''}
-                                  onChange={(e) =>
-                                    handleLineChange(index, 'vatNature', e.target.value as VATNature || undefined)
+                                  value={line.unitOfMeasure || ''}
+                                  onChange={e =>
+                                    handleLineChange(
+                                      index,
+                                      'unitOfMeasure',
+                                      e.target.value as UnitOfMeasure
+                                    )
                                   }
                                 >
-                                  <option value="">Seleziona...</option>
-                                  {VAT_NATURES.map((n) => (
-                                    <option key={n.value} value={n.value}>
-                                      {n.value}
+                                  <option value="">-</option>
+                                  {UNITS_OF_MEASURE.map(um => (
+                                    <option key={um.value} value={um.value}>
+                                      {um.value}
                                     </option>
                                   ))}
                                 </Form.Select>
-                              ) : (
-                                <span className="text-muted">-</span>
-                              )}
-                            </td>
-                            <td className="text-end">
-                              <strong>
-                                {totalPrice.toLocaleString('it-IT', {
-                                  style: 'currency',
-                                  currency: 'EUR',
-                                })}
-                              </strong>
-                            </td>
-                            <td>
-                              <Button
-                                variant="outline-danger"
-                                size="sm"
-                                onClick={() => handleRemoveLine(index)}
-                                disabled={lines.length === 1}
-                              >
-                                <FontAwesomeIcon icon={faTrash} />
-                              </Button>
-                            </td>
-                          </tr>
-                          {/* AltriDatiGestionali row */}
-                          <tr>
-                            <td colSpan={10} className="bg-light p-2">
-                              <div className="d-flex align-items-center gap-2 mb-2">
-                                <small className="text-muted fw-bold">Altri Dati Gestionali</small>
-                                <Button
-                                  variant="outline-primary"
+                              </td>
+                              <td>
+                                <Form.Control
                                   size="sm"
-                                  onClick={() => handleAddAltriDati(index)}
+                                  type="number"
+                                  min="0"
+                                  step="0.01"
+                                  value={line.unitPrice}
+                                  onChange={e =>
+                                    handleLineChange(
+                                      index,
+                                      'unitPrice',
+                                      parseFloat(e.target.value) || 0
+                                    )
+                                  }
+                                />
+                              </td>
+                              <td>
+                                <Form.Select
+                                  size="sm"
+                                  value={line.vatRate}
+                                  onChange={e =>
+                                    handleLineChange(
+                                      index,
+                                      'vatRate',
+                                      parseFloat(e.target.value)
+                                    )
+                                  }
                                 >
-                                  <FontAwesomeIcon icon={faPlus} className="me-1" />
-                                  Aggiungi
-                                </Button>
-                              </div>
-                              {(line.altriDatiGestionali || []).length > 0 && (
-                                <div className="ps-2">
-                                  {(line.altriDatiGestionali || []).map((adg, adgIndex) => (
-                                    <Row key={adgIndex} className="mb-2 align-items-center g-2">
-                                      <Col xs={2}>
-                                        <Form.Control
-                                          size="sm"
-                                          type="text"
-                                          maxLength={10}
-                                          placeholder="Tipo Dato*"
-                                          value={adg.tipoDato || ''}
-                                          onChange={(e) =>
-                                            handleAltriDatiChange(index, adgIndex, 'tipoDato', e.target.value)
-                                          }
-                                        />
-                                      </Col>
-                                      <Col xs={4}>
-                                        <Form.Control
-                                          size="sm"
-                                          type="text"
-                                          maxLength={60}
-                                          placeholder="Rif. Testo"
-                                          value={adg.riferimentoTesto || ''}
-                                          onChange={(e) =>
-                                            handleAltriDatiChange(index, adgIndex, 'riferimentoTesto', e.target.value)
-                                          }
-                                        />
-                                      </Col>
-                                      <Col xs={2}>
-                                        <Form.Control
-                                          size="sm"
-                                          type="number"
-                                          step="0.01"
-                                          placeholder="Rif. Numero"
-                                          value={adg.riferimentoNumero ?? ''}
-                                          onChange={(e) =>
-                                            handleAltriDatiChange(
-                                              index,
-                                              adgIndex,
-                                              'riferimentoNumero',
-                                              e.target.value ? parseFloat(e.target.value) : undefined
-                                            )
-                                          }
-                                        />
-                                      </Col>
-                                      <Col xs={2}>
-                                        <Form.Control
-                                          size="sm"
-                                          type="date"
-                                          value={adg.riferimentoData || ''}
-                                          onChange={(e) =>
-                                            handleAltriDatiChange(index, adgIndex, 'riferimentoData', e.target.value || undefined)
-                                          }
-                                        />
-                                      </Col>
-                                      <Col xs={2}>
-                                        <Button
-                                          variant="outline-danger"
-                                          size="sm"
-                                          onClick={() => handleRemoveAltriDati(index, adgIndex)}
-                                        >
-                                          <FontAwesomeIcon icon={faTrash} />
-                                        </Button>
-                                      </Col>
-                                    </Row>
+                                  {VAT_RATES.map(rate => (
+                                    <option key={rate} value={rate}>
+                                      {rate}%
+                                    </option>
                                   ))}
+                                </Form.Select>
+                              </td>
+                              <td>
+                                {line.vatRate === 0 ? (
+                                  <Form.Select
+                                    size="sm"
+                                    value={line.vatNature || ''}
+                                    onChange={e =>
+                                      handleLineChange(
+                                        index,
+                                        'vatNature',
+                                        (e.target.value as VATNature) ||
+                                          undefined
+                                      )
+                                    }
+                                  >
+                                    <option value="">Seleziona...</option>
+                                    {VAT_NATURES.map(n => (
+                                      <option key={n.value} value={n.value}>
+                                        {n.value}
+                                      </option>
+                                    ))}
+                                  </Form.Select>
+                                ) : (
+                                  <span className="text-muted">-</span>
+                                )}
+                              </td>
+                              <td className="text-end">
+                                <strong>
+                                  {totalPrice.toLocaleString('it-IT', {
+                                    style: 'currency',
+                                    currency: 'EUR'
+                                  })}
+                                </strong>
+                              </td>
+                              <td>
+                                <Button
+                                  variant="outline-danger"
+                                  size="sm"
+                                  onClick={() => handleRemoveLine(index)}
+                                  disabled={lines.length === 1}
+                                >
+                                  <FontAwesomeIcon icon={faTrash} />
+                                </Button>
+                              </td>
+                            </tr>
+                            {/* AltriDatiGestionali row */}
+                            <tr>
+                              <td colSpan={9} className="bg-body-tertiary p-2">
+                                <div className="d-flex align-items-center gap-2 mb-2">
+                                  <small className="text-muted fw-bold ms-2">
+                                    Altri Dati Gestionali
+                                  </small>
+                                  <Button
+                                    variant="outline-primary"
+                                    size="sm"
+                                    onClick={() => handleAddAltriDati(index)}
+                                  >
+                                    <FontAwesomeIcon
+                                      icon={faPlus}
+                                      className="me-1"
+                                    />
+                                    Aggiungi
+                                  </Button>
                                 </div>
-                              )}
-                            </td>
-                          </tr>
+                                {(line.altriDatiGestionali || []).length >
+                                  0 && (
+                                  <div className="ps-2 ms-1">
+                                    {(line.altriDatiGestionali || []).map(
+                                      (adg, adgIndex) => (
+                                        <Row
+                                          key={adgIndex}
+                                          className="mb-2 align-items-center g-2"
+                                        >
+                                          <Col xs={2}>
+                                            <Form.Control
+                                              size="sm"
+                                              type="text"
+                                              maxLength={10}
+                                              placeholder="Tipo Dato*"
+                                              value={adg.tipoDato || ''}
+                                              onChange={e =>
+                                                handleAltriDatiChange(
+                                                  index,
+                                                  adgIndex,
+                                                  'tipoDato',
+                                                  e.target.value
+                                                )
+                                              }
+                                            />
+                                          </Col>
+                                          <Col xs={4}>
+                                            <Form.Control
+                                              size="sm"
+                                              type="text"
+                                              maxLength={60}
+                                              placeholder="Rif. Testo"
+                                              value={adg.riferimentoTesto || ''}
+                                              onChange={e =>
+                                                handleAltriDatiChange(
+                                                  index,
+                                                  adgIndex,
+                                                  'riferimentoTesto',
+                                                  e.target.value
+                                                )
+                                              }
+                                            />
+                                          </Col>
+                                          <Col xs={2}>
+                                            <Form.Control
+                                              size="sm"
+                                              type="number"
+                                              step="0.01"
+                                              placeholder="Rif. Numero"
+                                              value={
+                                                adg.riferimentoNumero ?? ''
+                                              }
+                                              onChange={e =>
+                                                handleAltriDatiChange(
+                                                  index,
+                                                  adgIndex,
+                                                  'riferimentoNumero',
+                                                  e.target.value
+                                                    ? parseFloat(e.target.value)
+                                                    : undefined
+                                                )
+                                              }
+                                            />
+                                          </Col>
+                                          <Col xs={2}>
+                                            <Form.Control
+                                              size="sm"
+                                              type="date"
+                                              value={adg.riferimentoData || ''}
+                                              onChange={e =>
+                                                handleAltriDatiChange(
+                                                  index,
+                                                  adgIndex,
+                                                  'riferimentoData',
+                                                  e.target.value || undefined
+                                                )
+                                              }
+                                            />
+                                          </Col>
+                                          <Col xs={2}>
+                                            <Button
+                                              variant="outline-danger"
+                                              size="sm"
+                                              onClick={() =>
+                                                handleRemoveAltriDati(
+                                                  index,
+                                                  adgIndex
+                                                )
+                                              }
+                                            >
+                                              <FontAwesomeIcon icon={faTrash} />
+                                            </Button>
+                                          </Col>
+                                        </Row>
+                                      )
+                                    )}
+                                  </div>
+                                )}
+                              </td>
+                            </tr>
                           </React.Fragment>
                         );
                       })}
@@ -894,7 +985,11 @@ const NewIssuedInvoice: React.FC = () => {
                     <tfoot>
                       <tr>
                         <td colSpan={9}>
-                          <Button variant="falcon-primary" size="sm" onClick={handleAddLine}>
+                          <Button
+                            variant="falcon-primary"
+                            size="sm"
+                            onClick={handleAddLine}
+                          >
                             <FontAwesomeIcon icon={faPlus} className="me-1" />
                             Aggiungi Riga
                           </Button>
@@ -914,7 +1009,7 @@ const NewIssuedInvoice: React.FC = () => {
                           <td className="text-end">
                             {totals.taxable.toLocaleString('it-IT', {
                               style: 'currency',
-                              currency: 'EUR',
+                              currency: 'EUR'
                             })}
                           </td>
                         </tr>
@@ -923,7 +1018,7 @@ const NewIssuedInvoice: React.FC = () => {
                           <td className="text-end">
                             {totals.vat.toLocaleString('it-IT', {
                               style: 'currency',
-                              currency: 'EUR',
+                              currency: 'EUR'
                             })}
                           </td>
                         </tr>
@@ -932,7 +1027,7 @@ const NewIssuedInvoice: React.FC = () => {
                           <td className="text-end">
                             {totals.total.toLocaleString('it-IT', {
                               style: 'currency',
-                              currency: 'EUR',
+                              currency: 'EUR'
                             })}
                           </td>
                         </tr>
@@ -952,7 +1047,7 @@ const NewIssuedInvoice: React.FC = () => {
                       id="enableRitenuta"
                       label={<strong>Ritenuta d'Acconto</strong>}
                       checked={enableRitenuta}
-                      onChange={(e) => setEnableRitenuta(e.target.checked)}
+                      onChange={e => setEnableRitenuta(e.target.checked)}
                     />
                   </Card.Header>
                   {enableRitenuta && (
@@ -963,11 +1058,14 @@ const NewIssuedInvoice: React.FC = () => {
                             <Form.Label>Tipo Ritenuta</Form.Label>
                             <Form.Select
                               value={datiRitenuta.tipoRitenuta}
-                              onChange={(e) =>
-                                setDatiRitenuta({ ...datiRitenuta, tipoRitenuta: e.target.value as TipoRitenuta })
+                              onChange={e =>
+                                setDatiRitenuta({
+                                  ...datiRitenuta,
+                                  tipoRitenuta: e.target.value as TipoRitenuta
+                                })
                               }
                             >
-                              {TIPO_RITENUTA_OPTIONS.map((tr) => (
+                              {TIPO_RITENUTA_OPTIONS.map(tr => (
                                 <option key={tr.value} value={tr.value}>
                                   {tr.label}
                                 </option>
@@ -984,8 +1082,12 @@ const NewIssuedInvoice: React.FC = () => {
                               max="100"
                               step="0.01"
                               value={datiRitenuta.aliquotaRitenuta}
-                              onChange={(e) =>
-                                setDatiRitenuta({ ...datiRitenuta, aliquotaRitenuta: parseFloat(e.target.value) || 0 })
+                              onChange={e =>
+                                setDatiRitenuta({
+                                  ...datiRitenuta,
+                                  aliquotaRitenuta:
+                                    parseFloat(e.target.value) || 0
+                                })
                               }
                             />
                           </Form.Group>
@@ -998,8 +1100,12 @@ const NewIssuedInvoice: React.FC = () => {
                               min="0"
                               step="0.01"
                               value={datiRitenuta.importoRitenuta}
-                              onChange={(e) =>
-                                setDatiRitenuta({ ...datiRitenuta, importoRitenuta: parseFloat(e.target.value) || 0 })
+                              onChange={e =>
+                                setDatiRitenuta({
+                                  ...datiRitenuta,
+                                  importoRitenuta:
+                                    parseFloat(e.target.value) || 0
+                                })
                               }
                             />
                           </Form.Group>
@@ -1011,8 +1117,11 @@ const NewIssuedInvoice: React.FC = () => {
                               type="text"
                               maxLength={2}
                               value={datiRitenuta.causalePagamento || ''}
-                              onChange={(e) =>
-                                setDatiRitenuta({ ...datiRitenuta, causalePagamento: e.target.value.toUpperCase() })
+                              onChange={e =>
+                                setDatiRitenuta({
+                                  ...datiRitenuta,
+                                  causalePagamento: e.target.value.toUpperCase()
+                                })
                               }
                               placeholder="A"
                             />
@@ -1031,10 +1140,11 @@ const NewIssuedInvoice: React.FC = () => {
                       id="enableBollo"
                       label={<strong>Bollo Virtuale</strong>}
                       checked={enableBollo}
-                      onChange={(e) => setEnableBollo(e.target.checked)}
+                      onChange={e => setEnableBollo(e.target.checked)}
                     />
                     <Form.Text className="text-muted d-block mt-1">
-                      Obbligatorio per fatture esenti/escluse IVA superiori a €77,47
+                      Obbligatorio per fatture esenti/escluse IVA superiori a
+                      €77,47
                     </Form.Text>
                   </Card.Header>
                   {enableBollo && (
@@ -1048,8 +1158,11 @@ const NewIssuedInvoice: React.FC = () => {
                               min="0"
                               step="0.01"
                               value={datiBollo.importoBollo}
-                              onChange={(e) =>
-                                setDatiBollo({ importoBollo: parseFloat(e.target.value) || 2.0 })
+                              onChange={e =>
+                                setDatiBollo({
+                                  importoBollo:
+                                    parseFloat(e.target.value) || 2.0
+                                })
                               }
                             />
                           </Form.Group>
@@ -1067,7 +1180,7 @@ const NewIssuedInvoice: React.FC = () => {
                       id="enableCassa"
                       label={<strong>Cassa Previdenziale</strong>}
                       checked={enableCassa}
-                      onChange={(e) => setEnableCassa(e.target.checked)}
+                      onChange={e => setEnableCassa(e.target.checked)}
                     />
                     <Form.Text className="text-muted d-block mt-1">
                       Contributo cassa previdenza per professionisti
@@ -1081,11 +1194,14 @@ const NewIssuedInvoice: React.FC = () => {
                             <Form.Label>Tipo Cassa</Form.Label>
                             <Form.Select
                               value={datiCassa.tipoCassa}
-                              onChange={(e) =>
-                                setDatiCassa({ ...datiCassa, tipoCassa: e.target.value as TipoCassa })
+                              onChange={e =>
+                                setDatiCassa({
+                                  ...datiCassa,
+                                  tipoCassa: e.target.value as TipoCassa
+                                })
                               }
                             >
-                              {TIPO_CASSA_OPTIONS.map((tc) => (
+                              {TIPO_CASSA_OPTIONS.map(tc => (
                                 <option key={tc.value} value={tc.value}>
                                   {tc.label}
                                 </option>
@@ -1102,8 +1218,11 @@ const NewIssuedInvoice: React.FC = () => {
                               max="100"
                               step="0.01"
                               value={datiCassa.alCassa}
-                              onChange={(e) =>
-                                setDatiCassa({ ...datiCassa, alCassa: parseFloat(e.target.value) || 0 })
+                              onChange={e =>
+                                setDatiCassa({
+                                  ...datiCassa,
+                                  alCassa: parseFloat(e.target.value) || 0
+                                })
                               }
                             />
                           </Form.Group>
@@ -1116,8 +1235,12 @@ const NewIssuedInvoice: React.FC = () => {
                               min="0"
                               step="0.01"
                               value={datiCassa.importoContributoCassa}
-                              onChange={(e) =>
-                                setDatiCassa({ ...datiCassa, importoContributoCassa: parseFloat(e.target.value) || 0 })
+                              onChange={e =>
+                                setDatiCassa({
+                                  ...datiCassa,
+                                  importoContributoCassa:
+                                    parseFloat(e.target.value) || 0
+                                })
                               }
                             />
                           </Form.Group>
@@ -1127,11 +1250,14 @@ const NewIssuedInvoice: React.FC = () => {
                             <Form.Label>Aliquota IVA %</Form.Label>
                             <Form.Select
                               value={datiCassa.aliquotaIVA}
-                              onChange={(e) =>
-                                setDatiCassa({ ...datiCassa, aliquotaIVA: parseFloat(e.target.value) })
+                              onChange={e =>
+                                setDatiCassa({
+                                  ...datiCassa,
+                                  aliquotaIVA: parseFloat(e.target.value)
+                                })
                               }
                             >
-                              {VAT_RATES.map((rate) => (
+                              {VAT_RATES.map(rate => (
                                 <option key={rate} value={rate}>
                                   {rate}%
                                 </option>
@@ -1153,9 +1279,13 @@ const NewIssuedInvoice: React.FC = () => {
                       <Form.Label>Condizione di Pagamento</Form.Label>
                       <Form.Select
                         value={paymentCondition}
-                        onChange={(e) => setPaymentCondition(e.target.value as PaymentCondition)}
+                        onChange={e =>
+                          setPaymentCondition(
+                            e.target.value as PaymentCondition
+                          )
+                        }
                       >
-                        {PAYMENT_CONDITIONS.map((pc) => (
+                        {PAYMENT_CONDITIONS.map(pc => (
                           <option key={pc.value} value={pc.value}>
                             {pc.label}
                           </option>
@@ -1168,9 +1298,11 @@ const NewIssuedInvoice: React.FC = () => {
                       <Form.Label>Metodo di Pagamento</Form.Label>
                       <Form.Select
                         value={paymentMethod}
-                        onChange={(e) => setPaymentMethod(e.target.value as PaymentMethod)}
+                        onChange={e =>
+                          setPaymentMethod(e.target.value as PaymentMethod)
+                        }
                       >
-                        {PAYMENT_METHODS.map((pm) => (
+                        {PAYMENT_METHODS.map(pm => (
                           <option key={pm.value} value={pm.value}>
                             {pm.label}
                           </option>
@@ -1187,7 +1319,7 @@ const NewIssuedInvoice: React.FC = () => {
                       <Form.Control
                         type="text"
                         value={paymentBeneficiario}
-                        onChange={(e) => setPaymentBeneficiario(e.target.value)}
+                        onChange={e => setPaymentBeneficiario(e.target.value)}
                         placeholder="Nome del beneficiario del pagamento"
                       />
                     </Form.Group>
@@ -1198,7 +1330,7 @@ const NewIssuedInvoice: React.FC = () => {
                       <Form.Control
                         type="text"
                         value={paymentIstituto}
-                        onChange={(e) => setPaymentIstituto(e.target.value)}
+                        onChange={e => setPaymentIstituto(e.target.value)}
                         placeholder="Nome della banca"
                       />
                     </Form.Group>
@@ -1212,7 +1344,9 @@ const NewIssuedInvoice: React.FC = () => {
                       <Form.Control
                         type="text"
                         value={paymentIban}
-                        onChange={(e) => setPaymentIban(e.target.value.toUpperCase())}
+                        onChange={e =>
+                          setPaymentIban(e.target.value.toUpperCase())
+                        }
                         placeholder="es. IT60X0542811101000000123456"
                         maxLength={34}
                       />
@@ -1224,7 +1358,9 @@ const NewIssuedInvoice: React.FC = () => {
                       <Form.Control
                         type="text"
                         value={paymentBic}
-                        onChange={(e) => setPaymentBic(e.target.value.toUpperCase())}
+                        onChange={e =>
+                          setPaymentBic(e.target.value.toUpperCase())
+                        }
                         placeholder="es. UNCRITM1XXX"
                         maxLength={11}
                       />
@@ -1239,11 +1375,17 @@ const NewIssuedInvoice: React.FC = () => {
                       <Form.Control
                         type="text"
                         value={paymentAbi}
-                        onChange={(e) => setPaymentAbi(e.target.value.replace(/\D/g, '').slice(0, 5))}
+                        onChange={e =>
+                          setPaymentAbi(
+                            e.target.value.replace(/\D/g, '').slice(0, 5)
+                          )
+                        }
                         placeholder="12345"
                         maxLength={5}
                       />
-                      <Form.Text className="text-muted">Codice banca (5 cifre)</Form.Text>
+                      <Form.Text className="text-muted">
+                        Codice banca (5 cifre)
+                      </Form.Text>
                     </Form.Group>
                   </Col>
                   <Col md={3}>
@@ -1252,11 +1394,17 @@ const NewIssuedInvoice: React.FC = () => {
                       <Form.Control
                         type="text"
                         value={paymentCab}
-                        onChange={(e) => setPaymentCab(e.target.value.replace(/\D/g, '').slice(0, 5))}
+                        onChange={e =>
+                          setPaymentCab(
+                            e.target.value.replace(/\D/g, '').slice(0, 5)
+                          )
+                        }
                         placeholder="67890"
                         maxLength={5}
                       />
-                      <Form.Text className="text-muted">Codice filiale (5 cifre)</Form.Text>
+                      <Form.Text className="text-muted">
+                        Codice filiale (5 cifre)
+                      </Form.Text>
                     </Form.Group>
                   </Col>
                   <Col md={6}>
@@ -1265,7 +1413,7 @@ const NewIssuedInvoice: React.FC = () => {
                       <Form.Control
                         type="date"
                         value={paymentDueDate}
-                        onChange={(e) => setPaymentDueDate(e.target.value)}
+                        onChange={e => setPaymentDueDate(e.target.value)}
                       />
                     </Form.Group>
                   </Col>
@@ -1280,10 +1428,11 @@ const NewIssuedInvoice: React.FC = () => {
                     id="signatureEnabled"
                     label="Applica Firma Digitale"
                     checked={signatureEnabled}
-                    onChange={(e) => setSignatureEnabled(e.target.checked)}
+                    onChange={e => setSignatureEnabled(e.target.checked)}
                   />
                   <Form.Text className="text-muted">
-                    La fattura verrà firmata digitalmente prima dell'invio al SDI
+                    La fattura verrà firmata digitalmente prima dell'invio al
+                    SDI
                   </Form.Text>
                 </Form.Group>
 
@@ -1293,7 +1442,7 @@ const NewIssuedInvoice: React.FC = () => {
                     id="legalStorageEnabled"
                     label="Conservazione Sostitutiva"
                     checked={legalStorageEnabled}
-                    onChange={(e) => setLegalStorageEnabled(e.target.checked)}
+                    onChange={e => setLegalStorageEnabled(e.target.checked)}
                   />
                   <Form.Text className="text-muted">
                     La fattura verrà conservata a norma di legge per 10 anni
@@ -1306,7 +1455,7 @@ const NewIssuedInvoice: React.FC = () => {
                     as="textarea"
                     rows={3}
                     value={internalNotes}
-                    onChange={(e) => setInternalNotes(e.target.value)}
+                    onChange={e => setInternalNotes(e.target.value)}
                     placeholder="Note visibili solo internamente (non inviate al SDI)"
                   />
                 </Form.Group>
