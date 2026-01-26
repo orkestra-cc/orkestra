@@ -17,6 +17,7 @@ func RegisterRoutes(
 	companyHandler *handlers.CompanyHandler,
 	notificationHandler *handlers.NotificationHandler,
 	businessRegistryHandler *handlers.BusinessRegistryHandler,
+	syncHandler *handlers.SyncHandler,
 ) {
 	// ========================================
 	// Invoice Routes (Issued - Fatture Attive)
@@ -444,4 +445,29 @@ func RegisterRoutes(
 		Tags:        []string{"Billing - Business Registry"},
 		Security:    []map[string][]string{{"bearerAuth": {}}},
 	}, businessRegistryHandler.Configure)
+
+	// ========================================
+	// Manual Sync Routes
+	// ========================================
+	if syncHandler != nil {
+		huma.Register(api, huma.Operation{
+			OperationID: "sync-all",
+			Method:      http.MethodPost,
+			Path:        "/v1/billing/sync",
+			Summary:     "Sync all SDI data",
+			Description: "Manually triggers a full sync with OpenAPI SDI (invoices + notifications). Use this instead of automatic polling to control API usage.",
+			Tags:        []string{"Billing - Sync"},
+			Security:    []map[string][]string{{"bearerAuth": {}}},
+		}, syncHandler.SyncAll)
+
+		huma.Register(api, huma.Operation{
+			OperationID: "sync-invoices",
+			Method:      http.MethodPost,
+			Path:        "/v1/billing/sync/invoices",
+			Summary:     "Sync invoices only",
+			Description: "Manually triggers invoice sync with OpenAPI SDI. Imports issued and received invoices from the last 30 days.",
+			Tags:        []string{"Billing - Sync"},
+			Security:    []map[string][]string{{"bearerAuth": {}}},
+		}, syncHandler.SyncInvoices)
+	}
 }

@@ -488,6 +488,11 @@ func validateParty(party *models.PartyData, prefix string) error {
 	errs.Add(ValidateProvincia(party.Province))
 	errs.Add(ValidateNazione(party.Country))
 
+	// Validate fiscal ID country (IdPaese) - SDI error 00300 if invalid
+	if err := ValidateNazione(party.FiscalIDCountry); err != nil {
+		errs.Add(fmt.Errorf("fiscal ID country (IdPaese): %w", err))
+	}
+
 	// Validate codice fiscale
 	errs.Add(ValidateCodiceFiscale(party.CodiceFiscale))
 

@@ -36,6 +36,7 @@ type BillingConfig struct {
 	Timeout              time.Duration // HTTP client timeout
 	RetryAttempts        int           // Number of retry attempts for failed requests
 	PollingInterval      time.Duration // Interval between polling for notifications
+	PollingEnabled       bool          // Enable automatic SDI polling (default: false to stay under API limits)
 	SandboxMode          bool          // Use sandbox environment
 }
 
@@ -265,7 +266,8 @@ func Load() (*Config, error) {
 		ApplyStorage:         getEnvAsBool("OPENAPI_APPLY_STORAGE", true),
 		Timeout:              getEnvAsDuration("OPENAPI_TIMEOUT", "30s"),
 		RetryAttempts:        getEnvAsInt("OPENAPI_RETRY_ATTEMPTS", 3),
-		PollingInterval:      getEnvAsDuration("OPENAPI_POLLING_INTERVAL", "5m"),
+		PollingInterval:      getEnvAsDuration("OPENAPI_POLLING_INTERVAL", "12h"),
+		PollingEnabled:       getEnvAsBool("OPENAPI_POLLING_ENABLED", true),
 		SandboxMode:          sandboxMode,
 	}
 

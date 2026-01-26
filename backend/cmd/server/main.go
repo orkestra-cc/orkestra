@@ -263,6 +263,7 @@ func main() {
 	var billingCompanyHandler *billingHandlers.CompanyHandler
 	var billingNotificationHandler *billingHandlers.NotificationHandler
 	var billingBusinessRegistryHandler *billingHandlers.BusinessRegistryHandler
+	var billingSyncHandler *billingHandlers.SyncHandler
 	billingEnabled := cfg.Billing.OpenAPIBearerToken != ""
 
 	if billingEnabled {
@@ -286,8 +287,8 @@ func main() {
 		companyRepo := billingRepo.NewCompanyRepository(db)
 		notificationRepo := billingRepo.NewNotificationRepository(db)
 
-		// Create OpenAPI client and XML builder
-		openAPIClient := billingSvc.NewOpenAPIClient(openAPIConfig, logger)
+		// Create OpenAPI client with Redis caching and XML builder
+		openAPIClient := billingSvc.NewOpenAPIClientWithCache(openAPIConfig, logger, redisClientAdapter)
 		xmlBuilder := billingSvc.NewXMLBuilder(openAPIConfig)
 
 		// Create services (pdfSvc can be nil if documents module is disabled, xmlParser nil uses default)
@@ -313,6 +314,9 @@ func main() {
 			logger,
 			cfg.Billing.PollingInterval,
 		)
+
+		// Create sync handler for manual sync endpoints
+		billingSyncHandler = billingHandlers.NewSyncHandler(billingPollingJob)
 
 		logger.Info("Billing module initialized",
 			slog.String("baseURL", cfg.Billing.OpenAPIBaseURL),
@@ -507,6 +511,7 @@ func main() {
 				billingCompanyHandler,
 				billingNotificationHandler,
 				billingBusinessRegistryHandler,
+				billingSyncHandler,
 			)
 		})
 	}
@@ -684,15 +689,19 @@ func main() {
 		MaxHeaderBytes: 1 << 20, // 1MB max header size
 	}
 
-	// Start billing polling job if enabled
-	if billingEnabled && billingPollingJob != nil {
+	// Start billing polling job if enabled and polling is configured
+	if billingEnabled && billingPollingJob != nil && cfg.Billing.PollingEnabled {
 		pollingCtx, pollingCancel := context.WithCancel(context.Background())
 		defer pollingCancel()
 
 		go func() {
-			logger.Info("Starting SDI notification polling job")
+			logger.Info("Starting SDI notification polling job",
+				slog.Duration("interval", cfg.Billing.PollingInterval),
+			)
 			billingPollingJob.Start(pollingCtx)
 		}()
+	} else if billingEnabled && !cfg.Billing.PollingEnabled {
+		logger.Info("SDI polling job disabled - use manual sync endpoints instead (POST /v1/billing/sync)")
 	}
 
 	// Log development mode warning
@@ -919,9 +928,19 @@ func registerNavigationRoutes(api huma.API, navigationHandler *navigationHandler
 	}, navigationHandler.GetNavigation)
 }
 
-// printDevelopmentWarning prints a prominent warning when running in development mode
+// printDevelopmentWarning prints a prominent warning when running in non-production mode
 // This helps ensure developers are aware of relaxed security settings
 func printDevelopmentWarning(environment string) {
+	// Staging has production-like security (HSTS enabled), but still has dev features
+	isStaging := environment == "staging"
+
+	var hstsLine string
+	if isStaging {
+		hstsLine = "║   • HSTS header is ENABLED (production-like security)                        ║"
+	} else {
+		hstsLine = "║   • HSTS header is disabled                                                   ║"
+	}
+
 	warning := `
 ╔═══════════════════════════════════════════════════════════════════════════════╗
 ║                                                                               ║
@@ -940,12 +959,12 @@ func printDevelopmentWarning(environment string) {
 ║   • Dev token endpoints are enabled (/dev/token)                              ║
 ║   • Verbose error messages are shown                                          ║
 ║   • Localhost OAuth redirects are allowed                                     ║
-║   • HSTS header is disabled                                                   ║
+%s
 ║                                                                               ║
 ║   DO NOT deploy to production with these settings!                            ║
 ║   Set APP_ENV=production for production deployments.                          ║
 ║                                                                               ║
 ╚═══════════════════════════════════════════════════════════════════════════════╝
 `
-	fmt.Printf(warning, environment)
+	fmt.Printf(warning, environment, hstsLine)
 }

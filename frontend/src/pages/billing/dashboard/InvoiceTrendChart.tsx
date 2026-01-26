@@ -1,5 +1,6 @@
+import { useMemo } from 'react';
 import { Card, Spinner } from 'react-bootstrap';
-import { LineChart } from 'echarts/charts';
+import { BarChart } from 'echarts/charts';
 import {
   GridComponent,
   LegendComponent,
@@ -12,18 +13,86 @@ import ReactEchart from 'components/common/ReactEchart';
 import { useGetBillingStatsQuery } from 'store/api/billingApi';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faExclamationTriangle } from '@fortawesome/free-solid-svg-icons';
-import { formatCurrency } from 'types/billing';
+import { formatCurrency, WeeklyInvoiceData } from 'types/billing';
 
 echarts.use([
   TooltipComponent,
   GridComponent,
-  LineChart,
+  BarChart,
   CanvasRenderer,
   LegendComponent,
 ]);
 
+// Month names in Italian
+const MONTH_NAMES = ['Gen', 'Feb', 'Mar', 'Apr', 'Mag', 'Giu', 'Lug', 'Ago', 'Set', 'Ott', 'Nov', 'Dic'];
+
+// Get the month for a given ISO week number (approximate)
+// ISO week 1 starts around Jan 4, each month is roughly 4-5 weeks
+const getMonthForWeek = (week: number): number => {
+  // Approximate: week 1-4 = Jan, 5-8 = Feb, etc.
+  // More accurate mapping based on typical ISO week distribution
+  if (week <= 4) return 0;  // Jan
+  if (week <= 8) return 1;  // Feb
+  if (week <= 13) return 2; // Mar
+  if (week <= 17) return 3; // Apr
+  if (week <= 22) return 4; // May
+  if (week <= 26) return 5; // Jun
+  if (week <= 30) return 6; // Jul
+  if (week <= 35) return 7; // Aug
+  if (week <= 39) return 8; // Sep
+  if (week <= 43) return 9; // Oct
+  if (week <= 48) return 10; // Nov
+  return 11; // Dec
+};
+
+// Build 53-week arrays from weekly data, filling missing weeks with zeros
+const buildWeeklyArrays = (weeklyData: WeeklyInvoiceData[] | undefined, year: number) => {
+  const issuedAmounts = new Array(53).fill(0);
+  const receivedAmounts = new Array(53).fill(0);
+
+  if (weeklyData) {
+    for (const data of weeklyData) {
+      if (data.year === year && data.week >= 1 && data.week <= 53) {
+        issuedAmounts[data.week - 1] = Math.round(data.issuedAmount);
+        receivedAmounts[data.week - 1] = Math.round(data.receivedAmount);
+      }
+    }
+  }
+
+  return { issuedAmounts, receivedAmounts };
+};
+
+// Generate week labels with month indicators
+const generateWeekLabels = (): string[] => {
+  const labels: string[] = [];
+  let lastMonth = -1;
+
+  for (let week = 1; week <= 53; week++) {
+    const month = getMonthForWeek(week);
+    if (month !== lastMonth) {
+      labels.push(MONTH_NAMES[month]);
+      lastMonth = month;
+    } else {
+      labels.push('');
+    }
+  }
+
+  return labels;
+};
+
 const InvoiceTrendChart = () => {
-  const { data: stats, isLoading, error } = useGetBillingStatsQuery({});
+  const currentYear = new Date().getFullYear();
+  const fromDate = `${currentYear}-01-01`;
+  const toDate = `${currentYear}-12-31`;
+
+  const { data: stats, isLoading, error } = useGetBillingStatsQuery({ fromDate, toDate });
+
+  const { issuedAmounts, receivedAmounts } = useMemo(
+    () => buildWeeklyArrays(stats?.weeklyData, currentYear),
+    [stats?.weeklyData, currentYear]
+  );
+
+  const weekLabels = useMemo(() => generateWeekLabels(), []);
 
   const getChartOptions = () => {
     if (!stats) return {};
@@ -32,19 +101,25 @@ const InvoiceTrendChart = () => {
       tooltip: {
         trigger: 'axis',
         axisPointer: {
-          type: 'cross',
-          label: {
-            backgroundColor: '#6a7985',
-          },
+          type: 'shadow',
         },
         formatter: (params: any) => {
-          let result = `<div class="fw-medium mb-1">${params[0].axisValue}</div>`;
+          const weekIndex = params[0].dataIndex;
+          const weekNum = weekIndex + 1;
+          const month = MONTH_NAMES[getMonthForWeek(weekNum)];
+          let result = `<div class="fw-medium mb-1">Settimana ${weekNum} (${month})</div>`;
           params.forEach((param: any) => {
-            result += `<div class="d-flex align-items-center">
-              <span class="badge rounded-circle p-1 me-2" style="background-color: ${param.color}"></span>
-              <span>${param.seriesName}: ${formatCurrency(param.value)}</span>
-            </div>`;
+            if (param.value > 0) {
+              result += `<div class="d-flex align-items-center">
+                <span class="badge rounded-circle p-1 me-2" style="background-color: ${param.color}"></span>
+                <span>${param.seriesName}: ${formatCurrency(param.value)}</span>
+              </div>`;
+            }
           });
+          // Show message if no data
+          if (params.every((p: any) => p.value === 0)) {
+            result += '<div class="text-muted">Nessuna fattura</div>';
+          }
           return result;
         },
       },
@@ -64,8 +139,7 @@ const InvoiceTrendChart = () => {
       },
       xAxis: {
         type: 'category',
-        boundaryGap: false,
-        data: ['Gen', 'Feb', 'Mar', 'Apr', 'Mag', 'Giu', 'Lug', 'Ago', 'Set', 'Ott', 'Nov', 'Dic'],
+        data: weekLabels,
         axisLine: {
           lineStyle: {
             color: '#e6e6e6',
@@ -73,6 +147,11 @@ const InvoiceTrendChart = () => {
         },
         axisLabel: {
           color: '#8991a7',
+          interval: 0,
+          rotate: 0,
+        },
+        axisTick: {
+          show: false,
         },
       },
       yAxis: {
@@ -95,87 +174,29 @@ const InvoiceTrendChart = () => {
       series: [
         {
           name: 'Fatture Emesse',
-          type: 'line',
-          smooth: true,
-          lineStyle: {
-            width: 2,
-          },
-          areaStyle: {
-            color: {
-              type: 'linear',
-              x: 0,
-              y: 0,
-              x2: 0,
-              y2: 1,
-              colorStops: [
-                { offset: 0, color: 'rgba(59, 130, 246, 0.3)' },
-                { offset: 1, color: 'rgba(59, 130, 246, 0.05)' },
-              ],
-            },
-          },
-          emphasis: {
-            focus: 'series',
-          },
-          itemStyle: {
-            color: '#3b82f6',
-          },
-          // Sample data - in real app this would come from API
-          data: [
-            stats.issuedAmount * 0.7,
-            stats.issuedAmount * 0.8,
-            stats.issuedAmount * 0.9,
-            stats.issuedAmount * 0.75,
-            stats.issuedAmount * 0.85,
-            stats.issuedAmount * 0.95,
-            stats.issuedAmount * 0.88,
-            stats.issuedAmount * 0.6,
-            stats.issuedAmount * 0.92,
-            stats.issuedAmount * 0.98,
-            stats.issuedAmount * 1.05,
-            stats.issuedAmount,
-          ].map((v) => Math.round(v)),
-        },
-        {
-          name: 'Fatture Ricevute',
-          type: 'line',
-          smooth: true,
-          lineStyle: {
-            width: 2,
-          },
-          areaStyle: {
-            color: {
-              type: 'linear',
-              x: 0,
-              y: 0,
-              x2: 0,
-              y2: 1,
-              colorStops: [
-                { offset: 0, color: 'rgba(16, 185, 129, 0.3)' },
-                { offset: 1, color: 'rgba(16, 185, 129, 0.05)' },
-              ],
-            },
-          },
+          type: 'bar',
+          barGap: '0%',
+          barCategoryGap: '40%',
           emphasis: {
             focus: 'series',
           },
           itemStyle: {
             color: '#10b981',
+            borderRadius: [2, 2, 0, 0],
           },
-          // Sample data - in real app this would come from API
-          data: [
-            stats.receivedAmount * 0.65,
-            stats.receivedAmount * 0.7,
-            stats.receivedAmount * 0.82,
-            stats.receivedAmount * 0.68,
-            stats.receivedAmount * 0.78,
-            stats.receivedAmount * 0.88,
-            stats.receivedAmount * 0.75,
-            stats.receivedAmount * 0.5,
-            stats.receivedAmount * 0.85,
-            stats.receivedAmount * 0.92,
-            stats.receivedAmount * 0.98,
-            stats.receivedAmount,
-          ].map((v) => Math.round(v)),
+          data: issuedAmounts,
+        },
+        {
+          name: 'Fatture Ricevute',
+          type: 'bar',
+          emphasis: {
+            focus: 'series',
+          },
+          itemStyle: {
+            color: '#3b82f6',
+            borderRadius: [2, 2, 0, 0],
+          },
+          data: receivedAmounts,
         },
       ],
     };
@@ -216,11 +237,11 @@ const InvoiceTrendChart = () => {
           <div className="d-flex gap-3 fs-10">
             <div>
               <span className="text-body-tertiary">Emesse: </span>
-              <span className="fw-medium text-primary">{formatCurrency(stats.issuedAmount)}</span>
+              <span className="fw-medium text-success">{formatCurrency(stats.issuedAmount)}</span>
             </div>
             <div>
               <span className="text-body-tertiary">Ricevute: </span>
-              <span className="fw-medium text-success">{formatCurrency(stats.receivedAmount)}</span>
+              <span className="fw-medium text-primary">{formatCurrency(stats.receivedAmount)}</span>
             </div>
           </div>
         }

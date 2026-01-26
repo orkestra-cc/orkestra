@@ -362,6 +362,16 @@ type SendInvoiceResponse struct {
 // Statistics DTOs
 // ========================================
 
+// WeeklyInvoiceData represents invoice data for a specific ISO week
+type WeeklyInvoiceData struct {
+	Year           int     `json:"year"`
+	Week           int     `json:"week"` // ISO week number (1-53)
+	IssuedCount    int64   `json:"issuedCount"`
+	IssuedAmount   float64 `json:"issuedAmount"`
+	ReceivedCount  int64   `json:"receivedCount"`
+	ReceivedAmount float64 `json:"receivedAmount"`
+}
+
 // BillingStats represents billing statistics
 type BillingStats struct {
 	// Issued invoices
@@ -382,6 +392,9 @@ type BillingStats struct {
 	// Notifications
 	UnprocessedNotifications int64 `json:"unprocessedNotifications"`
 	PendingActions           int64 `json:"pendingActions"`
+
+	// Weekly breakdown
+	WeeklyData []WeeklyInvoiceData `json:"weeklyData"`
 
 	// Period
 	PeriodStart time.Time `json:"periodStart"`

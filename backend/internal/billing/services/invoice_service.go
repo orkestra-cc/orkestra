@@ -1391,11 +1391,17 @@ func (s *invoiceService) invoiceToTemplateData(invoice *models.Invoice) map[stri
 		data["netPayable"] = invoice.TotalAmount
 	}
 
-	// Stamp duty (Bollo)
+	// Stamp duty (Bollo) - either explicitly set or auto-detected per DPR 642/1972
 	if invoice.DatiBollo != nil {
 		data["bollo"] = map[string]interface{}{
 			"virtual": true,
 			"amount":  invoice.DatiBollo.ImportoBollo,
+		}
+	} else if shouldApplyStampDuty(invoice) {
+		// Auto-detect stamp duty requirement per Italian law (same logic as XML builder)
+		data["bollo"] = map[string]interface{}{
+			"virtual": true,
+			"amount":  2.00, // Standard €2.00 stamp duty
 		}
 	}
 

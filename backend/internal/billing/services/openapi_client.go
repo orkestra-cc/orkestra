@@ -28,6 +28,19 @@ var (
 	ErrInvoiceSendFailed     = errors.New("failed to send invoice to SDI")
 )
 
+// Cache configuration constants
+const (
+	invoiceStatusCachePrefix = "billing:invoice:status:"
+	invoiceStatusCacheTTL    = 15 * time.Minute
+)
+
+// RedisClient defines the interface for Redis operations used by the billing module
+type RedisClient interface {
+	Set(ctx context.Context, key string, value interface{}, expiration time.Duration) error
+	Get(ctx context.Context, key string) (string, error)
+	Del(ctx context.Context, keys ...string) error
+}
+
 // OpenAPIClient defines the interface for OpenAPI SDI operations
 type OpenAPIClient interface {
 	// Configuration
@@ -59,6 +72,9 @@ type OpenAPIClient interface {
 
 	// Health check
 	Ping(ctx context.Context) error
+
+	// Cache management
+	InvalidateInvoiceStatusCache(ctx context.Context, uuid string) error
 }
 
 // BusinessRegistryConfig represents the configuration for a business registry
@@ -178,10 +194,16 @@ type openAPIClient struct {
 	config         *config.OpenAPIConfig
 	circuitBreaker *circuitBreaker
 	logger         *slog.Logger
+	redisClient    RedisClient // Optional Redis client for caching
 }
 
 // NewOpenAPIClient creates a new OpenAPI client
 func NewOpenAPIClient(cfg *config.OpenAPIConfig, logger *slog.Logger) OpenAPIClient {
+	return NewOpenAPIClientWithCache(cfg, logger, nil)
+}
+
+// NewOpenAPIClientWithCache creates a new OpenAPI client with optional Redis caching
+func NewOpenAPIClientWithCache(cfg *config.OpenAPIConfig, logger *slog.Logger, redisClient RedisClient) OpenAPIClient {
 	return &openAPIClient{
 		httpClient: &http.Client{
 			Timeout: cfg.Timeout,
@@ -189,6 +211,7 @@ func NewOpenAPIClient(cfg *config.OpenAPIConfig, logger *slog.Logger) OpenAPICli
 		config:         cfg,
 		circuitBreaker: newCircuitBreaker(5, 30*time.Second), // 5 failures, 30s reset
 		logger:         logger,
+		redisClient:    redisClient,
 	}
 }
 
@@ -506,6 +529,18 @@ func (c *openAPIClient) SendInvoice(ctx context.Context, invoice *models.Invoice
 }
 
 func (c *openAPIClient) GetInvoiceStatus(ctx context.Context, uuid string) (*InvoiceStatusResponse, error) {
+	// Check cache first if Redis is available
+	if c.redisClient != nil {
+		cacheKey := invoiceStatusCachePrefix + uuid
+		if cached, err := c.redisClient.Get(ctx, cacheKey); err == nil && cached != "" {
+			var result InvoiceStatusResponse
+			if err := json.Unmarshal([]byte(cached), &result); err == nil {
+				c.logger.Debug("invoice status cache hit", "uuid", uuid)
+				return &result, nil
+			}
+		}
+	}
+
 	path := fmt.Sprintf("/invoices/%s", uuid)
 
 	respBody, statusCode, err := c.doRequestWithRetry(ctx, http.MethodGet, path, nil)
@@ -524,6 +559,18 @@ func (c *openAPIClient) GetInvoiceStatus(ctx context.Context, uuid string) (*Inv
 	var result InvoiceStatusResponse
 	if err := json.Unmarshal(respBody, &result); err != nil {
 		return nil, fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	// Cache the result if Redis is available
+	if c.redisClient != nil {
+		cacheKey := invoiceStatusCachePrefix + uuid
+		if cacheData, err := json.Marshal(result); err == nil {
+			if err := c.redisClient.Set(ctx, cacheKey, string(cacheData), invoiceStatusCacheTTL); err != nil {
+				c.logger.Warn("failed to cache invoice status", "uuid", uuid, "error", err)
+			} else {
+				c.logger.Debug("invoice status cached", "uuid", uuid, "ttl", invoiceStatusCacheTTL)
+			}
+		}
 	}
 
 	return &result, nil
@@ -812,6 +859,22 @@ func (c *openAPIClient) Ping(ctx context.Context) error {
 		return fmt.Errorf("health check failed: status %d", statusCode)
 	}
 
+	return nil
+}
+
+// InvalidateInvoiceStatusCache removes the cached invoice status for a given UUID
+func (c *openAPIClient) InvalidateInvoiceStatusCache(ctx context.Context, uuid string) error {
+	if c.redisClient == nil {
+		return nil // No-op if Redis is not configured
+	}
+
+	cacheKey := invoiceStatusCachePrefix + uuid
+	if err := c.redisClient.Del(ctx, cacheKey); err != nil {
+		c.logger.Warn("failed to invalidate invoice status cache", "uuid", uuid, "error", err)
+		return err
+	}
+
+	c.logger.Debug("invoice status cache invalidated", "uuid", uuid)
 	return nil
 }
 

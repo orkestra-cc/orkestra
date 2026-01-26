@@ -537,23 +537,26 @@ const IssuedInvoiceDetail: React.FC = () => {
   };
 
   // Download XML file
-  // Generate FatturaPA compliant filename: {CountryCode}{CodiceFiscale}_{ProgressivoInvio}.xml
+  // Generate FatturaPA compliant filename: {CountryCode}{IdCodice}_{ProgressivoInvio}.xml
+  // IdCodice = P.IVA (fiscalIdCode), per FatturaPA specifications
   const generateFatturaFilename = () => {
     const cedente = invoice?.cedentePrestatore;
     if (!cedente) {
       return `fattura_${invoiceId}.xml`;
     }
-    // Use codiceFiscale if available, otherwise use fiscalIdCode (VAT number)
-    const fiscalCode = cedente.codiceFiscale || cedente.fiscalIdCode;
+    // Always use fiscalIdCode (P.IVA) for filename - FatturaPA spec requirement
+    const fiscalCode = cedente.fiscalIdCode;
     if (!fiscalCode) {
       return `fattura_${invoiceId}.xml`;
     }
     const countryCode = cedente.fiscalIdCountry || 'IT';
-    // Progressive: use progressivoInvio, or last 5 chars of invoiceId, or generate from invoice number
-    const progressive = invoice.progressivoInvio ||
+    // Progressive: use last 5 chars of progressivoInvio (filename limit is 5, XML allows 10)
+    const rawProgressive = invoice.progressivoInvio ||
       invoiceId?.slice(-5) ||
       String(invoice.number).replace(/\D/g, '').slice(-5).padStart(5, '0') ||
       '00001';
+    // FatturaPA filename spec: progressive max 5 alphanumeric chars
+    const progressive = rawProgressive.slice(-5);
     return `${countryCode}${fiscalCode}_${progressive}.xml`;
   };
 
@@ -741,16 +744,18 @@ const IssuedInvoiceDetail: React.FC = () => {
         </Button>
         {!isEditMode && (
           <>
-            <Button
-              variant="falcon-default"
-              size="sm"
-              className="me-2"
-              onClick={handleViewHtml}
-              title="Anteprima"
-            >
-              <FontAwesomeIcon icon={faEye} className="me-1" />
-              Anteprima
-            </Button>
+            {invoice?.status && !['draft', 'pending', 'cancelled'].includes(invoice.status) && (
+              <Button
+                variant="falcon-default"
+                size="sm"
+                className="me-2"
+                onClick={handleViewHtml}
+                title="Anteprima"
+              >
+                <FontAwesomeIcon icon={faEye} className="me-1" />
+                Anteprima
+              </Button>
+            )}
             <Button
               variant="falcon-default"
               size="sm"

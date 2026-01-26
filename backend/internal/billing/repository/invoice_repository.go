@@ -3,7 +3,9 @@ package repository
 import (
 	"context"
 	"errors"
+	"fmt"
 	"regexp"
+	"sort"
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
@@ -19,6 +21,54 @@ var (
 	ErrInvoiceNotFound     = errors.New("invoice not found")
 	ErrInvoiceAlreadyExists = errors.New("invoice with this number already exists")
 )
+
+// Helper functions for MongoDB type conversion
+func toInt(v interface{}) int {
+	switch n := v.(type) {
+	case int:
+		return n
+	case int32:
+		return int(n)
+	case int64:
+		return int(n)
+	case float64:
+		return int(n)
+	default:
+		return 0
+	}
+}
+
+func toInt64(v interface{}) int64 {
+	switch n := v.(type) {
+	case int:
+		return int64(n)
+	case int32:
+		return int64(n)
+	case int64:
+		return n
+	case float64:
+		return int64(n)
+	default:
+		return 0
+	}
+}
+
+func toFloat64(v interface{}) float64 {
+	switch n := v.(type) {
+	case float64:
+		return n
+	case float32:
+		return float64(n)
+	case int:
+		return float64(n)
+	case int32:
+		return float64(n)
+	case int64:
+		return float64(n)
+	default:
+		return 0
+	}
+}
 
 // InvoiceRepository defines the interface for invoice data access
 type InvoiceRepository interface {
@@ -397,6 +447,7 @@ func (r *invoiceRepository) GetStats(ctx context.Context, fromDate, toDate time.
 	stats := &models.BillingStats{
 		PeriodStart: fromDate,
 		PeriodEnd:   toDate,
+		WeeklyData:  []models.WeeklyInvoiceData{},
 	}
 
 	dateFilter := bson.M{
@@ -495,6 +546,75 @@ func (r *invoiceRepository) GetStats(ctx context.Context, fromDate, toDate time.
 			if total, ok := results[0]["total"].(float64); ok {
 				stats.ReceivedAmount = total
 			}
+		}
+	}
+
+	// Weekly breakdown aggregation using ISO week
+	weeklyPipeline := mongo.Pipeline{
+		{{Key: "$match", Value: dateFilter}},
+		{{Key: "$group", Value: bson.M{
+			"_id": bson.M{
+				"year":      bson.M{"$isoWeekYear": "$date"},
+				"week":      bson.M{"$isoWeek": "$date"},
+				"direction": "$direction",
+			},
+			"count":  bson.M{"$sum": 1},
+			"amount": bson.M{"$sum": "$totalAmount"},
+		}}},
+		{{Key: "$sort", Value: bson.D{
+			{Key: "_id.year", Value: 1},
+			{Key: "_id.week", Value: 1},
+		}}},
+	}
+
+	cursor, err = r.collection.Aggregate(ctx, weeklyPipeline)
+	if err == nil {
+		var results []bson.M
+		if cursor.All(ctx, &results) == nil {
+			// Build a map to consolidate issued and received data per week
+			weeklyMap := make(map[string]*models.WeeklyInvoiceData)
+
+			for _, result := range results {
+				idDoc, ok := result["_id"].(bson.M)
+				if !ok {
+					continue
+				}
+
+				year := toInt(idDoc["year"])
+				week := toInt(idDoc["week"])
+				direction, _ := idDoc["direction"].(string)
+				count := toInt64(result["count"])
+				amount := toFloat64(result["amount"])
+
+				key := fmt.Sprintf("%d-W%02d", year, week)
+				if _, exists := weeklyMap[key]; !exists {
+					weeklyMap[key] = &models.WeeklyInvoiceData{
+						Year: year,
+						Week: week,
+					}
+				}
+
+				if direction == string(models.DirectionIssued) {
+					weeklyMap[key].IssuedCount = count
+					weeklyMap[key].IssuedAmount = amount
+				} else if direction == string(models.DirectionReceived) {
+					weeklyMap[key].ReceivedCount = count
+					weeklyMap[key].ReceivedAmount = amount
+				}
+			}
+
+			// Convert map to sorted slice
+			for _, data := range weeklyMap {
+				stats.WeeklyData = append(stats.WeeklyData, *data)
+			}
+
+			// Sort by year and week
+			sort.Slice(stats.WeeklyData, func(i, j int) bool {
+				if stats.WeeklyData[i].Year != stats.WeeklyData[j].Year {
+					return stats.WeeklyData[i].Year < stats.WeeklyData[j].Year
+				}
+				return stats.WeeklyData[i].Week < stats.WeeklyData[j].Week
+			})
 		}
 	}
 

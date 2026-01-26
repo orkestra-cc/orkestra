@@ -513,6 +513,9 @@ func getDefaultInvoiceHTML() string {
         <span class="label">Bollo Virtuale:</span>
         <span class="value">{{formatMoneyEUR .bollo.amount}}</span>
       </div>
+      <div class="bollo-note">
+        Imposta di bollo importo 2 euro assolta in modo virtuale ai sensi dell'art.15 del D.P.R. 642/1972 e del DM 17/06/2014 e ss.mm
+      </div>
       {{end}}
       {{if gt .rounding 0}}
       <div class="totals-row">
@@ -830,6 +833,15 @@ body {
 .totals-row.bollo {
   font-size: 8pt;
   background: #fff8e1;
+}
+
+.bollo-note {
+  font-size: 7pt;
+  color: #666;
+  font-style: italic;
+  margin-top: 4px;
+  margin-bottom: 8px;
+  padding-left: 4px;
 }
 
 .totals-row.ritenuta {

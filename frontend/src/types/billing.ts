@@ -845,6 +845,15 @@ export interface NotificationListParams {
 // Statistics Types
 // ========================================
 
+export interface WeeklyInvoiceData {
+  year: number;
+  week: number; // ISO week number (1-53)
+  issuedCount: number;
+  issuedAmount: number;
+  receivedCount: number;
+  receivedAmount: number;
+}
+
 export interface BillingStats {
   issuedTotal: number;
   issuedDraft: number;
@@ -859,6 +868,7 @@ export interface BillingStats {
   receivedAmount: number;
   unprocessedNotifications: number;
   pendingActions: number;
+  weeklyData: WeeklyInvoiceData[];
   periodStart: string;
   periodEnd: string;
 }

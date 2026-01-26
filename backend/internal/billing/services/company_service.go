@@ -308,8 +308,12 @@ func (s *companyService) SetDefaultCompany(ctx context.Context, uuid string) (*m
 }
 
 func (s *companyService) validateCreateInput(input *models.CreateCompanyInput) error {
-	if input.FiscalIDCountry == "" || len(input.FiscalIDCountry) != 2 {
-		return errors.New("fiscal ID country must be 2 characters")
+	// Validate FiscalIDCountry is a valid 2-letter country code (ISO 3166-1 alpha-2)
+	if input.FiscalIDCountry == "" {
+		return errors.New("fiscal ID country is required")
+	}
+	if err := ValidateNazione(input.FiscalIDCountry); err != nil {
+		return errors.New("fiscal ID country must be a valid 2-letter country code (e.g., IT)")
 	}
 	if input.FiscalIDCode == "" {
 		return errors.New("fiscal ID code (P.IVA) is required")

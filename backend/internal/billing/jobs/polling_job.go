@@ -390,6 +390,15 @@ func (j *PollingJob) poll(ctx context.Context) error {
 }
 
 func (j *PollingJob) processNotification(ctx context.Context, n *services.OpenAPINotification) error {
+	// Invalidate the invoice status cache before processing
+	// This ensures any subsequent status queries fetch fresh data from SDI
+	if err := j.openAPIClient.InvalidateInvoiceStatusCache(ctx, n.InvoiceUUID); err != nil {
+		j.logger.Warn("failed to invalidate invoice status cache",
+			"invoiceUUID", n.InvoiceUUID,
+			"error", err,
+		)
+	}
+
 	// Find the associated invoice
 	invoice, err := j.invoiceRepo.GetByOpenAPIUUID(ctx, n.InvoiceUUID)
 	if err != nil {

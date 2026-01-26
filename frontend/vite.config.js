@@ -125,9 +125,13 @@ export default ({ mode }) => {
         'orkestra.cc',
         'staging.orkestra.cc'
       ],
-      hmr: {
-        clientPort: 8087
-      },
+      hmr: process.env.VITE_HMR_HOST
+        ? {
+            host: process.env.VITE_HMR_HOST,
+            protocol: 'wss',
+            clientPort: 443
+          }
+        : true,
       watch: {
         usePolling: false,
         interval: 100

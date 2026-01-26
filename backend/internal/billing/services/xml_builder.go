@@ -82,19 +82,21 @@ func (b *xmlBuilder) buildDatiTrasmissione(invoice *models.Invoice, format model
 
 	// First try to get from invoice's CedentePrestatore (company data)
 	if invoice.CedentePrestatore != nil && invoice.CedentePrestatore.FiscalIDCode != "" {
-		idPaese = strings.ToUpper(invoice.CedentePrestatore.FiscalIDCountry)
-		if idPaese == "" {
-			idPaese = "IT"
+		idPaese = NormalizeNazione(invoice.CedentePrestatore.FiscalIDCountry)
+		// IdTrasmittente requires CodiceFiscale, with fallback to P.IVA for Italian companies
+		idCodice = strings.TrimSpace(invoice.CedentePrestatore.CodiceFiscale)
+		if idCodice == "" && idPaese == "IT" {
+			idCodice = strings.TrimSpace(invoice.CedentePrestatore.FiscalIDCode)
 		}
-		idCodice = invoice.CedentePrestatore.FiscalIDCode
 	} else if b.config.FiscalID != "" {
 		// Fallback to config (for backwards compatibility)
-		idCodice = b.config.FiscalID
-		if len(b.config.FiscalID) >= 2 {
-			// Check if first 2 chars are letters (country code)
-			if isAlpha(b.config.FiscalID[:2]) {
-				idPaese = strings.ToUpper(b.config.FiscalID[:2])
-				idCodice = b.config.FiscalID[2:]
+		fiscalID := strings.TrimSpace(b.config.FiscalID)
+		idCodice = fiscalID
+		if len(fiscalID) >= 2 {
+			// Check if first 2 chars are letters (country code prefix like "IT")
+			if isAlpha(fiscalID[:2]) {
+				idPaese = strings.ToUpper(fiscalID[:2])
+				idCodice = strings.TrimSpace(fiscalID[2:])
 			}
 		}
 	}

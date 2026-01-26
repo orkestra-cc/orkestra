@@ -122,6 +122,7 @@ services:
       VITE_API_URL: ${VITE_API_URL:-http://localhost:3000}
       VITE_BACKEND_URL: ${VITE_BACKEND_URL:-http://localhost:3000}
       VITE_WS_URL: ${VITE_WS_URL:-ws://localhost:3000}
+      VITE_HMR_HOST: staging.orkestra.cc
       NODE_OPTIONS: "--max-old-space-size=4096"
       npm_config_cache: /app/.npm-cache
     volumes:
