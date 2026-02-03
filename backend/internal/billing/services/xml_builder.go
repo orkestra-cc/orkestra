@@ -284,8 +284,8 @@ func (b *xmlBuilder) buildBody(invoice *models.Invoice) models.FatturaElettronic
 		DatiBeniServizi: b.buildDatiBeniServizi(invoice),
 	}
 
-	// Add payment data if present
-	if invoice.PaymentTerms != nil {
+	// Add payment data if present (skip for credit notes TD04)
+	if invoice.PaymentTerms != nil && invoice.DocumentType != models.DocTypeNotaCredito {
 		body.DatiPagamento = b.buildDatiPagamento(invoice)
 	}
 
@@ -524,6 +524,15 @@ func (b *xmlBuilder) buildDatiBeniServizi(invoice *models.Invoice) models.DatiBe
 		// Add esigibilità if present
 		if vs.VATExigibility != "" {
 			dr.EsigibilitaIVA = vs.VATExigibility
+		}
+
+		// Add riferimento normativo
+		// Priority: explicit NormativeRef > automatic for RF19 Forfettario
+		if vs.NormativeRef != "" {
+			dr.RiferimentoNormativo = vs.NormativeRef
+		} else if invoice.CedentePrestatore != nil &&
+			invoice.CedentePrestatore.RegimeFiscale == models.RegimeForfettario {
+			dr.RiferimentoNormativo = "Non soggetta art. 1/54-89 L. 190/2014 e succ. modifiche/integrazioni"
 		}
 
 		dbs.DatiRiepilogo = append(dbs.DatiRiepilogo, dr)
