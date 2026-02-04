@@ -1,17 +1,30 @@
 import { Button, Col, Dropdown, Form, Row } from 'react-bootstrap';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { faSync } from '@fortawesome/free-solid-svg-icons';
 import { useAdvanceTableContext } from 'providers/AdvanceTableProvider';
 import IconButton from 'components/common/IconButton';
 import AdvanceTableSearchBox from 'components/common/advance-table/AdvanceTableSearchBox';
 import { useState } from 'react';
 import { Link } from 'react-router';
+import { toast } from 'react-toastify';
 import { arrayToCSV, downloadCSV, formatDateForCSV, generateTimestampedFilename } from 'utils/csvExport';
 import type { InvoiceSummary, InvoiceStatus } from 'types/billing';
 import { INVOICE_STATUS_LABELS, DOCUMENT_TYPE_LABELS, formatCurrency } from 'types/billing';
+import { useSyncInvoicesMutation } from 'store/api/billingApi';
 
 const IssuedInvoiceTableHeader = () => {
   const { getSelectedRowModel, setColumnFilters, getFilteredRowModel } = useAdvanceTableContext();
   const [selectedStatus, setSelectedStatus] = useState<string>('Tutti');
+  const [syncInvoices, { isLoading: isSyncing }] = useSyncInvoicesMutation();
+
+  const handleSync = async () => {
+    try {
+      await syncInvoices().unwrap();
+      toast.success('Sincronizzazione completata');
+    } catch {
+      toast.error('Errore durante la sincronizzazione');
+    }
+  };
 
   const statusFilters: { label: string; value: InvoiceStatus | 'all' }[] = [
     { label: 'Tutti', value: 'all' },
@@ -169,6 +182,14 @@ const IssuedInvoiceTableHeader = () => {
                   </Dropdown.Item>
                   <Dropdown.Item>Esporta XML</Dropdown.Item>
                   <Dropdown.Item>Importa da XML</Dropdown.Item>
+                  <Dropdown.Divider />
+                  <Dropdown.Item onClick={handleSync} disabled={isSyncing}>
+                    <FontAwesomeIcon
+                      icon={faSync}
+                      className={`me-2 ${isSyncing ? 'fa-spin' : ''}`}
+                    />
+                    Sincronizza con SDI
+                  </Dropdown.Item>
                   <Dropdown.Divider />
                   <Dropdown.Item className="text-danger">Elimina Selezionate</Dropdown.Item>
                 </div>

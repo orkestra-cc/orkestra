@@ -415,6 +415,18 @@ export const billingApi = baseApi.injectEndpoints({
       ],
     }),
 
+    // Sync invoices from SDI
+    syncInvoices: builder.mutation<{ success: boolean; message: string }, void>({
+      query: () => ({
+        url: '/v1/billing/sync/invoices',
+        method: 'POST',
+      }),
+      invalidatesTags: [
+        { type: 'Invoice', id: 'LIST' },
+        { type: 'BillingStats', id: 'STATS' },
+      ],
+    }),
+
     // ========================================
     // Received Invoice Endpoints (Fatture Passive)
     // ========================================
@@ -610,6 +622,7 @@ export const {
   useLazyGetInvoicePdfQuery,
   useImportInvoiceMutation,
   useImportXMLInvoiceMutation,
+  useSyncInvoicesMutation,
   // Received Invoice hooks
   useGetReceivedInvoicesQuery,
   useGetReceivedInvoiceQuery,
