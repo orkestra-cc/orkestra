@@ -35,6 +35,7 @@ import {
   useLazyGetInvoiceXmlQuery,
   useLazyGetInvoiceHtmlQuery,
   useLazyGetInvoicePdfQuery,
+  useGetCompaniesQuery,
 } from 'store/api/billingApi';
 import type {
   CreateInvoiceLineInput,
@@ -185,6 +186,7 @@ const IssuedInvoiceDetail: React.FC = () => {
   const [getInvoiceXml] = useLazyGetInvoiceXmlQuery();
   const [getInvoiceHtml] = useLazyGetInvoiceHtmlQuery();
   const [getInvoicePdf] = useLazyGetInvoicePdfQuery();
+  const { data: companiesData } = useGetCompaniesQuery({ pageSize: 100 });
 
   // UI state
   const [isEditMode, setIsEditMode] = useState(false);
@@ -209,6 +211,7 @@ const IssuedInvoiceDetail: React.FC = () => {
   const [paymentBic, setPaymentBic] = useState('');
   const [paymentAbi, setPaymentAbi] = useState('');
   const [paymentCab, setPaymentCab] = useState('');
+  const [selectedPaymentCompanyId, setSelectedPaymentCompanyId] = useState('');
 
   // FatturaPA additional fields
   const [enableRitenuta, setEnableRitenuta] = useState(false);
@@ -385,6 +388,23 @@ const IssuedInvoiceDetail: React.FC = () => {
       altriDatiGestionali: currentAltriDati,
     };
     setLines(newLines);
+  };
+
+  // Payment company auto-fill handler
+  const handlePaymentCompanySelect = (companyId: string) => {
+    setSelectedPaymentCompanyId(companyId);
+    if (!companyId) return;
+
+    const company = companiesData?.companies?.find(c => c.id === companyId);
+    if (!company) return;
+
+    // Auto-populate payment fields (beneficiario uses denomination as fallback)
+    setPaymentBeneficiario(company.beneficiario || company.denomination);
+    if (company.istitutoFinanziario) setPaymentIstituto(company.istitutoFinanziario);
+    if (company.iban) setPaymentIban(company.iban.toUpperCase());
+    if (company.bic) setPaymentBic(company.bic.toUpperCase());
+    if (company.abi) setPaymentAbi(company.abi);
+    if (company.cab) setPaymentCab(company.cab);
   };
 
   // Validation
@@ -1479,6 +1499,37 @@ const IssuedInvoiceDetail: React.FC = () => {
 
                 {/* Payment Tab */}
                 <Tab.Pane eventKey="payment">
+                  {/* Company payment data auto-fill */}
+                  <Card className="mb-3 border-info">
+                    <Card.Header className="bg-body-tertiary">
+                      <strong>Precompila dati bancari</strong>
+                    </Card.Header>
+                    <Card.Body>
+                      <Form.Group>
+                        <Form.Label>Seleziona azienda per precompilare</Form.Label>
+                        <Form.Select
+                          value={selectedPaymentCompanyId}
+                          onChange={(e) => handlePaymentCompanySelect(e.target.value)}
+                        >
+                          <option value="">-- Seleziona per precompilare i dati --</option>
+                          {companiesData?.companies
+                            ?.filter(c => c.isActive)
+                            .map(company => (
+                              <option key={company.id} value={company.id}>
+                                {company.denomination}
+                                {company.iban
+                                  ? ` - ${company.iban.slice(0, 4)}...${company.iban.slice(-4)}`
+                                  : ' (Dati bancari non configurati)'}
+                              </option>
+                            ))}
+                        </Form.Select>
+                        <Form.Text className="text-muted">
+                          I campi sottostanti verranno compilati automaticamente.
+                        </Form.Text>
+                      </Form.Group>
+                    </Card.Body>
+                  </Card>
+
                   <Row>
                     <Col md={6}>
                       <Form.Group className="mb-3">
