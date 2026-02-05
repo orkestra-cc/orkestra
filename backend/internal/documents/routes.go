@@ -163,6 +163,19 @@ func RegisterRoutes(
 		Tags:          []string{"Documents - PDF"},
 		Security:      []map[string][]string{{"bearerAuth": {}}},
 		DefaultStatus: http.StatusOK,
+		Responses: map[string]*huma.Response{
+			"200": {
+				Description: "PDF document",
+				Content: map[string]*huma.MediaType{
+					"application/pdf": {
+						Schema: &huma.Schema{
+							Type:   huma.TypeString,
+							Format: "binary",
+						},
+					},
+				},
+			},
+		},
 	}, documentHandler.DownloadDocument)
 
 	// ============================================

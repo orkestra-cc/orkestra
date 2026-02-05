@@ -103,13 +103,27 @@ func RegisterRoutes(
 	}, invoiceHandler.GetInvoiceXML)
 
 	huma.Register(api, huma.Operation{
-		OperationID: "download-invoice-pdf",
-		Method:      http.MethodGet,
-		Path:        "/v1/billing/invoices/{id}/download",
-		Summary:     "Download invoice PDF",
-		Description: "Downloads the invoice as a PDF file. For draft invoices, generates PDF locally. For sent invoices, retrieves from SDI.",
-		Tags:        []string{"Billing - Invoices"},
-		Security:    []map[string][]string{{"bearerAuth": {}}},
+		OperationID:   "download-invoice-pdf",
+		Method:        http.MethodGet,
+		Path:          "/v1/billing/invoices/{id}/download",
+		Summary:       "Download invoice PDF",
+		Description:   "Downloads the invoice as a PDF file. For draft invoices, generates PDF locally. For sent invoices, retrieves from SDI.",
+		Tags:          []string{"Billing - Invoices"},
+		Security:      []map[string][]string{{"bearerAuth": {}}},
+		DefaultStatus: http.StatusOK,
+		Responses: map[string]*huma.Response{
+			"200": {
+				Description: "PDF document",
+				Content: map[string]*huma.MediaType{
+					"application/pdf": {
+						Schema: &huma.Schema{
+							Type:   huma.TypeString,
+							Format: "binary",
+						},
+					},
+				},
+			},
+		},
 	}, invoiceHandler.GetInvoicePDF)
 
 	huma.Register(api, huma.Operation{

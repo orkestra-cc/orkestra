@@ -474,12 +474,8 @@ func (s *invoiceService) GetInvoicePDF(ctx context.Context, uuid string) ([]byte
 		return nil, err
 	}
 
-	// If invoice has been sent, get PDF from OpenAPI
-	if invoice.OpenAPIUUID != "" {
-		return s.openAPIClient.DownloadInvoicePDF(ctx, invoice.OpenAPIUUID)
-	}
-
-	// For draft invoices, generate PDF locally using documents module
+	// Always generate PDF locally using Gotenberg (documents module)
+	// OpenAPI SDI does not provide PDF downloads - only XML
 	if s.pdfService == nil {
 		return nil, errors.New("PDF generation not available: documents module not configured")
 	}

@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/orkestra/backend/internal/documents/models"
@@ -67,7 +68,9 @@ type DownloadDocumentRequest struct {
 
 // DownloadDocumentResponse represents a binary PDF download
 type DownloadDocumentResponse struct {
-	Body []byte
+	ContentType        string `header:"Content-Type"`
+	ContentDisposition string `header:"Content-Disposition"`
+	Body               []byte
 }
 
 // ServiceStatusRequest is the request for checking service status
@@ -169,7 +172,7 @@ func (h *DocumentHandler) GetDocument(ctx context.Context, req *GetDocumentReque
 
 // DownloadDocument downloads a document's PDF content
 func (h *DocumentHandler) DownloadDocument(ctx context.Context, req *DownloadDocumentRequest) (*DownloadDocumentResponse, error) {
-	content, _, err := h.pdfService.GetDocumentContent(ctx, req.ID)
+	content, filename, err := h.pdfService.GetDocumentContent(ctx, req.ID)
 	if err != nil {
 		if err == repository.ErrDocumentNotFound {
 			return nil, huma.Error404NotFound("Document not found", err)
@@ -177,7 +180,15 @@ func (h *DocumentHandler) DownloadDocument(ctx context.Context, req *DownloadDoc
 		return nil, huma.Error500InternalServerError("Failed to get document content", err)
 	}
 
-	return &DownloadDocumentResponse{Body: content}, nil
+	if filename == "" {
+		filename = "document.pdf"
+	}
+
+	return &DownloadDocumentResponse{
+		ContentType:        "application/pdf",
+		ContentDisposition: fmt.Sprintf(`attachment; filename="%s"`, filename),
+		Body:               content,
+	}, nil
 }
 
 // GetServiceStatus checks if the PDF service is available
