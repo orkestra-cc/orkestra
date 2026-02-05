@@ -128,11 +128,12 @@ func (j *PollingJob) SyncReceivedInvoices(ctx context.Context) error {
 		)
 
 		for _, inv := range invoices.Invoices {
-			// Check if we already have this invoice
+			// Check if we already have this invoice by OpenAPIUUID
 			existing, _ := j.invoiceRepo.GetByOpenAPIUUID(ctx, inv.UUID)
 			if existing != nil {
-				j.logger.Debug("invoice already exists, skipping",
+				j.logger.Debug("invoice already exists by OpenAPIUUID, skipping",
 					"uuid", inv.UUID,
+					"openAPIUUID", inv.UUID,
 					"marking", inv.Marking,
 				)
 				continue
@@ -156,16 +157,6 @@ func (j *PollingJob) SyncReceivedInvoices(ctx context.Context) error {
 				j.logger.Warn("unknown invoice marking, skipping",
 					"uuid", inv.UUID,
 					"marking", inv.Marking,
-				)
-				continue
-			}
-
-			// Fetch the full XML content
-			xmlContent, err := j.openAPIClient.DownloadInvoiceXML(ctx, inv.UUID)
-			if err != nil {
-				j.logger.Error("failed to download invoice XML",
-					"uuid", inv.UUID,
-					"error", err,
 				)
 				continue
 			}
@@ -223,6 +214,48 @@ func (j *PollingJob) SyncReceivedInvoices(ctx context.Context) error {
 						"error", err,
 					)
 				}
+			}
+
+			// Fallback deduplication: Try to find existing invoice by number
+			// This handles cases where OpenAPIUUID doesn't match (e.g., UUID changed, update failed, etc.)
+			if invoiceNumber != "" {
+				var existingByNumber *models.Invoice
+
+				if inv.Marking == "sent" {
+					// For issued invoices, find by number + direction
+					existingByNumber, _ = j.invoiceRepo.GetByNumber(ctx, invoiceNumber, models.DirectionIssued)
+				} else if inv.Marking == "received" && cedenteFiscalID != "" {
+					// For received invoices, find by number + supplier fiscal ID
+					existingByNumber, _ = j.invoiceRepo.FindByNumberAndSupplierFiscalID(ctx, invoiceNumber, cedenteFiscalID)
+				}
+
+				if existingByNumber != nil {
+					// Found existing invoice by number - UPDATE it with OpenAPIUUID instead of creating duplicate
+					j.logger.Info("found existing invoice by number, updating OpenAPIUUID",
+						"uuid", existingByNumber.UUID,
+						"invoiceNumber", invoiceNumber,
+						"oldOpenAPIUUID", existingByNumber.OpenAPIUUID,
+						"newOpenAPIUUID", inv.UUID,
+						"direction", direction,
+					)
+					if err := j.invoiceRepo.UpdateOpenAPIData(ctx, existingByNumber.UUID, inv.UUID, inv.SDIFileID); err != nil {
+						j.logger.Error("failed to update invoice OpenAPI data",
+							"uuid", existingByNumber.UUID,
+							"error", err,
+						)
+					}
+					continue
+				}
+			}
+
+			// Fetch the full XML content (only for genuinely new invoices)
+			xmlContent, err := j.openAPIClient.DownloadInvoiceXML(ctx, inv.UUID)
+			if err != nil {
+				j.logger.Error("failed to download invoice XML",
+					"uuid", inv.UUID,
+					"error", err,
+				)
+				continue
 			}
 
 			// Fall back to CreatedAt if invoice date not found in payload
