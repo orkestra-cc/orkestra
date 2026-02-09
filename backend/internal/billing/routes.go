@@ -471,6 +471,10 @@ func RegisterRoutes(
 	}, businessRegistryHandler.Configure)
 
 	// ========================================
+	// Webhook Routes (registered separately on public API via RegisterWebhookRoutes)
+	// ========================================
+
+	// ========================================
 	// Manual Sync Routes
 	// ========================================
 	if syncHandler != nil {
@@ -494,4 +498,17 @@ func RegisterRoutes(
 			Security:    []map[string][]string{{"bearerAuth": {}}},
 		}, syncHandler.SyncInvoices)
 	}
+}
+
+// RegisterWebhookRoutes registers public webhook routes (no JWT authentication)
+func RegisterWebhookRoutes(api huma.API, webhookHandler *handlers.WebhookHandler) {
+	huma.Register(api, huma.Operation{
+		OperationID: "sdi-webhook",
+		Method:      http.MethodPost,
+		Path:        "/v1/billing/webhooks/sdi",
+		Summary:     "SDI Webhook Callback",
+		Description: "Receives real-time callbacks from OpenAPI SDI. Public endpoint authenticated via webhook secret.",
+		Tags:        []string{"Billing - Webhooks"},
+		Security:    []map[string][]string{},
+	}, webhookHandler.HandleCallback)
 }

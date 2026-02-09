@@ -90,6 +90,8 @@ services:
       OPENAPI_RETRY_ATTEMPTS: ${OPENAPI_RETRY_ATTEMPTS:-3}
       OPENAPI_POLLING_INTERVAL: ${OPENAPI_POLLING_INTERVAL:-5m}
       OPENAPI_SANDBOX_MODE: ${OPENAPI_SANDBOX_MODE:-true}
+      OPENAPI_WEBHOOK_URL: ${OPENAPI_WEBHOOK_URL:-}
+      OPENAPI_WEBHOOK_SECRET: ${OPENAPI_WEBHOOK_SECRET:-}
     volumes:
       - ./keys:/app/keys:ro
       - orkestra-backend-logs-staging:/app/logs

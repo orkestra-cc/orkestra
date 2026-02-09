@@ -27,7 +27,11 @@
       "Bash(docker logs:*)",
       "mcp__ide__getDiagnostics",
       "WebFetch(domain:github.com)",
-      "Bash(docker ps:*)"
+      "Bash(docker ps:*)",
+      "WebFetch(domain:console.openapi.com)",
+      "WebFetch(domain:www.openapi.it)",
+      "Bash(curl:*)",
+      "Bash(python3:*)"
     ]
   },
   "enableAllProjectMcpServers": true,

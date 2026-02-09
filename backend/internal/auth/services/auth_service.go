@@ -330,6 +330,14 @@ func (s *authService) GenerateEnhancedTokenPair(ctx context.Context, user *userM
 	fmt.Printf("[AUTH_DEBUG] Final device values: ID=%s, Type=%s, Platform=%s, Fingerprint=%s\n",
 		deviceID, deviceType, platform, fingerprint)
 
+	// Revoke existing active tokens for this device to enforce single-token-per-device
+	// This prevents token accumulation when users login multiple times from the same device
+	fmt.Printf("[AUTH_DEBUG] Revoking existing tokens for device: %s\n", deviceID)
+	if err := s.refreshTokenRepo.RevokeTokensByDevice(ctx, user.UUID, deviceID, "new_login"); err != nil {
+		fmt.Printf("[AUTH_DEBUG] WARNING: Failed to revoke existing device tokens: %v\n", err)
+		// Continue with token creation - don't fail the login for cleanup failures
+	}
+
 	refreshTokenRecord := &models.RefreshTokenDoc{
 		UUID:         models.GenerateUUIDv7(),
 		UserUUID:     user.UUID,

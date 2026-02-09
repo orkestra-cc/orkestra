@@ -38,6 +38,8 @@ type BillingConfig struct {
 	PollingInterval      time.Duration // Interval between polling for notifications
 	PollingEnabled       bool          // Enable automatic SDI polling (default: false to stay under API limits)
 	SandboxMode          bool          // Use sandbox environment
+	WebhookURL           string        // Public URL for receiving SDI webhook callbacks (e.g., https://staging-api.orkestra.cc/v1/billing/webhooks/sdi)
+	WebhookSecret        string        // Secret token for verifying incoming webhook requests
 }
 
 // DocumentsConfig holds configuration for the documents/PDF generation module (Gotenberg integration)
@@ -269,6 +271,8 @@ func Load() (*Config, error) {
 		PollingInterval:      getEnvAsDuration("OPENAPI_POLLING_INTERVAL", "12h"),
 		PollingEnabled:       getEnvAsBool("OPENAPI_POLLING_ENABLED", true),
 		SandboxMode:          sandboxMode,
+		WebhookURL:           getEnv("OPENAPI_WEBHOOK_URL", ""),
+		WebhookSecret:        getEnv("OPENAPI_WEBHOOK_SECRET", ""),
 	}
 
 	// Documents/PDF generation configuration (Gotenberg)

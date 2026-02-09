@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -264,6 +265,8 @@ func main() {
 	var billingNotificationHandler *billingHandlers.NotificationHandler
 	var billingBusinessRegistryHandler *billingHandlers.BusinessRegistryHandler
 	var billingSyncHandler *billingHandlers.SyncHandler
+	var billingWebhookHandler *billingHandlers.WebhookHandler
+	var openAPIClient billingSvc.OpenAPIClient
 	billingEnabled := cfg.Billing.OpenAPIBearerToken != ""
 
 	if billingEnabled {
@@ -288,7 +291,7 @@ func main() {
 		notificationRepo := billingRepo.NewNotificationRepository(db)
 
 		// Create OpenAPI client with Redis caching and XML builder
-		openAPIClient := billingSvc.NewOpenAPIClientWithCache(openAPIConfig, logger, redisClientAdapter)
+		openAPIClient = billingSvc.NewOpenAPIClientWithCache(openAPIConfig, logger, redisClientAdapter)
 		xmlBuilder := billingSvc.NewXMLBuilder(openAPIConfig)
 
 		// Create services (pdfSvc can be nil if documents module is disabled, xmlParser nil uses default)
@@ -317,6 +320,15 @@ func main() {
 
 		// Create sync handler for manual sync endpoints
 		billingSyncHandler = billingHandlers.NewSyncHandler(billingPollingJob)
+
+		// Create webhook handler for SDI callbacks
+		if cfg.Billing.WebhookURL != "" {
+			billingWebhookHandler = billingHandlers.NewWebhookHandler(
+				billingPollingJob,
+				cfg.Billing.WebhookSecret,
+				logger,
+			)
+		}
 
 		logger.Info("Billing module initialized",
 			slog.String("baseURL", cfg.Billing.OpenAPIBaseURL),
@@ -516,6 +528,14 @@ func main() {
 		})
 	}
 
+	// Billing webhook routes - PUBLIC (no JWT, authenticated via webhook secret)
+	if billingEnabled && billingWebhookHandler != nil {
+		billing.RegisterWebhookRoutes(publicAPI, billingWebhookHandler)
+		logger.Info("Billing webhook routes registered",
+			slog.String("webhookURL", cfg.Billing.WebhookURL),
+		)
+	}
+
 	// Documents routes - manager role and above for templates, all authenticated for PDF generation
 	// Only register if documents module is enabled
 	if documentsEnabled {
@@ -704,6 +724,35 @@ func main() {
 		logger.Info("SDI polling job disabled - use manual sync endpoints instead (POST /v1/billing/sync)")
 	}
 
+	// Auto-configure API callbacks on OpenAPI.it for webhook reception
+	if billingEnabled && cfg.Billing.WebhookURL != "" && openAPIClient != nil {
+		go func() {
+			configCtx, configCancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer configCancel()
+
+			authHeader := "Bearer " + cfg.Billing.WebhookSecret
+			err := openAPIClient.ConfigureAPICallbacks(configCtx, billingSvc.APICallbackConfig{
+				FiscalID: cfg.Billing.OpenAPIFiscalID,
+				Callbacks: []billingSvc.CallbackConfig{
+					{Event: "supplier-invoice", URL: cfg.Billing.WebhookURL, AuthHeader: authHeader},
+					{Event: "customer-notification", URL: cfg.Billing.WebhookURL, AuthHeader: authHeader},
+					{Event: "legal-storage-receipt", URL: cfg.Billing.WebhookURL, AuthHeader: authHeader},
+				},
+			})
+			if err != nil {
+				logger.Error("Failed to configure API callbacks on OpenAPI.it",
+					slog.String("error", err.Error()),
+					slog.String("webhookURL", cfg.Billing.WebhookURL),
+				)
+			} else {
+				logger.Info("API callbacks configured on OpenAPI.it",
+					slog.String("webhookURL", cfg.Billing.WebhookURL),
+					slog.String("fiscalID", cfg.Billing.OpenAPIFiscalID),
+				)
+			}
+		}()
+	}
+
 	// Log development mode warning
 	if !cfg.IsProduction() {
 		printDevelopmentWarning(cfg.Server.Environment)
@@ -752,8 +801,22 @@ func main() {
 }
 
 func setupLogger() *slog.Logger {
+	level := slog.LevelInfo
+	if logLevel := os.Getenv("LOG_LEVEL"); logLevel != "" {
+		switch strings.ToLower(logLevel) {
+		case "debug":
+			level = slog.LevelDebug
+		case "info":
+			level = slog.LevelInfo
+		case "warn", "warning":
+			level = slog.LevelWarn
+		case "error":
+			level = slog.LevelError
+		}
+	}
+
 	opts := slog.HandlerOptions{
-		Level: slog.LevelInfo,
+		Level: level,
 	}
 
 	var handler slog.Handler

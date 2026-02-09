@@ -113,6 +113,7 @@ func (j *PollingJob) SyncReceivedInvoices(ctx context.Context) error {
 	pageSize := 100
 	totalImportedIssued := 0
 	totalImportedReceived := 0
+	totalSkipped := 0
 
 	for {
 		invoices, err := j.openAPIClient.GetAllInvoices(ctx, fromDate, page, pageSize)
@@ -131,11 +132,12 @@ func (j *PollingJob) SyncReceivedInvoices(ctx context.Context) error {
 			// Check if we already have this invoice by OpenAPIUUID
 			existing, _ := j.invoiceRepo.GetByOpenAPIUUID(ctx, inv.UUID)
 			if existing != nil {
-				j.logger.Debug("invoice already exists by OpenAPIUUID, skipping",
+				j.logger.Info("invoice already exists by OpenAPIUUID, skipping",
 					"uuid", inv.UUID,
 					"openAPIUUID", inv.UUID,
 					"marking", inv.Marking,
 				)
+				totalSkipped++
 				continue
 			}
 
@@ -162,6 +164,7 @@ func (j *PollingJob) SyncReceivedInvoices(ctx context.Context) error {
 					"uuid", inv.UUID,
 					"marking", inv.Marking,
 				)
+				totalSkipped++
 				continue
 			}
 
@@ -258,6 +261,7 @@ func (j *PollingJob) SyncReceivedInvoices(ctx context.Context) error {
 							"error", err,
 						)
 					}
+					totalSkipped++
 					continue
 				}
 			}
@@ -352,6 +356,7 @@ func (j *PollingJob) SyncReceivedInvoices(ctx context.Context) error {
 	j.logger.Info("invoice sync completed",
 		"totalImportedIssued", totalImportedIssued,
 		"totalImportedReceived", totalImportedReceived,
+		"totalSkipped", totalSkipped,
 	)
 
 	return nil
@@ -399,7 +404,7 @@ func (j *PollingJob) poll(ctx context.Context) error {
 	processedCount := 0
 
 	for _, n := range notifications {
-		if err := j.processNotification(ctx, &n); err != nil {
+		if err := j.ProcessNotification(ctx, &n); err != nil {
 			j.logger.Error("failed to process notification",
 				"uuid", n.UUID,
 				"type", n.Type,
@@ -436,7 +441,8 @@ func (j *PollingJob) poll(ctx context.Context) error {
 	return nil
 }
 
-func (j *PollingJob) processNotification(ctx context.Context, n *services.OpenAPINotification) error {
+// ProcessNotification processes a single SDI notification, updating invoice status accordingly
+func (j *PollingJob) ProcessNotification(ctx context.Context, n *services.OpenAPINotification) error {
 	// Invalidate the invoice status cache before processing
 	// This ensures any subsequent status queries fetch fresh data from SDI
 	if err := j.openAPIClient.InvalidateInvoiceStatusCache(ctx, n.InvoiceUUID); err != nil {
@@ -455,7 +461,7 @@ func (j *PollingJob) processNotification(ctx context.Context, n *services.OpenAP
 			"invoiceUUID", n.InvoiceUUID,
 		)
 		// Still save the notification for audit purposes
-		return j.saveNotification(ctx, n, "")
+		return j.SaveNotification(ctx, n, "")
 	}
 
 	// Update invoice status based on notification type
@@ -551,10 +557,11 @@ func (j *PollingJob) processNotification(ctx context.Context, n *services.OpenAP
 	}
 
 	// Save the notification
-	return j.saveNotification(ctx, n, invoice.UUID)
+	return j.SaveNotification(ctx, n, invoice.UUID)
 }
 
-func (j *PollingJob) saveNotification(ctx context.Context, n *services.OpenAPINotification, invoiceUUID string) error {
+// SaveNotification persists an SDI notification to the database
+func (j *PollingJob) SaveNotification(ctx context.Context, n *services.OpenAPINotification, invoiceUUID string) error {
 	notification := &models.SDINotification{
 		UUID:             uuid.New().String(),
 		InvoiceUUID:      invoiceUUID,

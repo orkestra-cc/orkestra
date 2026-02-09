@@ -298,6 +298,7 @@ go build ./cmd/server/ && ./server
 - **Config**: Uses `.env` file for environment variables
 - **Logs**: Accessible via `docker compose logs orkestra-backend`
 - **Restart Policy**: Automatic on file changes
+- **Log Level**: Controlled by `LOG_LEVEL` env var (`debug`, `info`, `warn`, `error`; defaults to `info`). Set in docker-compose: `debug` for dev, `info` for staging, `warn` for production.
 
 ## Common Pitfalls to Avoid
 

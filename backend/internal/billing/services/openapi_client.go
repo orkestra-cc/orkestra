@@ -119,6 +119,10 @@ type OpenAPIClient interface {
 
 	// Cache management
 	InvalidateInvoiceStatusCache(ctx context.Context, uuid string) error
+
+	// API Configuration (webhook callbacks)
+	ConfigureAPICallbacks(ctx context.Context, cfg APICallbackConfig) error
+	GetAPIConfigurations(ctx context.Context) (*APIConfigurationResponse, error)
 }
 
 // BusinessRegistryConfig represents the configuration for a business registry
@@ -236,6 +240,34 @@ type PreservedDocumentResponse struct {
 	Weight           int        `json:"weight,omitempty"`
 	ObjectID         string     `json:"object_id,omitempty"`
 	ObjectType       string     `json:"object_type,omitempty"`
+}
+
+// APICallbackConfig represents the configuration for POST /api_configurations
+// Per OpenAPI.it spec, POST takes fiscal_id + callbacks array
+type APICallbackConfig struct {
+	FiscalID  string           `json:"fiscal_id"`
+	Callbacks []CallbackConfig `json:"callbacks"`
+}
+
+// CallbackConfig represents a single callback configuration
+type CallbackConfig struct {
+	Event        string `json:"event"`
+	URL          string `json:"url"`
+	AuthHeader   string `json:"auth_header,omitempty"`
+	Field        string `json:"field,omitempty"`
+	ProviderUUID string `json:"provider_uuid,omitempty"` // Set by OpenAPI.it in responses
+}
+
+// APIConfigurationEntry represents a single entry from GET /api_configurations
+type APIConfigurationEntry struct {
+	ID       string         `json:"id"`
+	FiscalID string         `json:"fiscal_id"`
+	Callback CallbackConfig `json:"callback"`
+}
+
+// APIConfigurationResponse represents the full response from GET /api_configurations
+type APIConfigurationResponse struct {
+	Entries []APIConfigurationEntry
 }
 
 // openAPIClient implements the OpenAPIClient interface
@@ -790,8 +822,8 @@ func (c *openAPIClient) GetPreservedDocument(ctx context.Context, uuid string) (
 }
 
 func (c *openAPIClient) GetSupplierInvoices(ctx context.Context, fromDate time.Time, page, pageSize int) (*SupplierInvoicesResponse, error) {
-	path := fmt.Sprintf("/invoices?direction=received&from_date=%s&page=%d&page_size=%d",
-		fromDate.Format("2006-01-02"), page, pageSize)
+	path := fmt.Sprintf("/invoices?type=1&createdAt[after]=%s&page=%d",
+		fromDate.Format("2006-01-02"), page)
 
 	respBody, statusCode, err := c.doRequestWithRetry(ctx, http.MethodGet, path, nil)
 	if err != nil {
@@ -841,26 +873,61 @@ func (c *openAPIClient) GetSupplierInvoices(ctx context.Context, fromDate time.T
 	return &result, nil
 }
 
-// GetAllInvoices fetches all invoices (both sent and received) from OpenAPI SDI
-// This allows syncing issued invoices that were sent via other means
+// GetAllInvoices fetches all invoices (both sent and received) from OpenAPI SDI.
+// The API defaults to type=0 (sent) when no type is specified, so we must fetch
+// both type=0 and type=1 separately and merge the results.
 func (c *openAPIClient) GetAllInvoices(ctx context.Context, fromDate time.Time, page, pageSize int) (*SupplierInvoicesResponse, error) {
-	// Query without direction filter to get ALL invoices
-	path := fmt.Sprintf("/invoices?from_date=%s&page=%d&page_size=%d",
-		fromDate.Format("2006-01-02"), page, pageSize)
+	var allInvoices []OpenAPIInvoice
 
-	respBody, statusCode, err := c.doRequestWithRetry(ctx, http.MethodGet, path, nil)
-	if err != nil {
-		return nil, err
+	// Fetch both sent (type=0) and received (type=1) invoices
+	// Per OpenAPI SDI spec: type=0 (sent to customer), type=1 (received from supplier)
+	// Date filter uses createdAt[after], pagination uses page
+	for _, invoiceType := range []int{0, 1} {
+		path := fmt.Sprintf("/invoices?type=%d&createdAt[after]=%s&page=%d",
+			invoiceType, fromDate.Format("2006-01-02"), page)
+
+		respBody, statusCode, err := c.doRequestWithRetry(ctx, http.MethodGet, path, nil)
+		if err != nil {
+			return nil, err
+		}
+
+		if statusCode != http.StatusOK {
+			return nil, fmt.Errorf("%w: status %d, response: %s", ErrOpenAPIRequestFailed, statusCode, string(respBody))
+		}
+
+		typeName := "sent"
+		if invoiceType == 1 {
+			typeName = "received"
+		}
+		c.logger.Debug("invoices raw response",
+			"type", typeName,
+			"response", string(respBody),
+		)
+
+		invoices, err := c.parseInvoicesResponse(respBody, page, pageSize)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse %s invoices: %w", typeName, err)
+		}
+
+		c.logger.Info("fetched invoices from OpenAPI",
+			"type", typeName,
+			"count", len(invoices.Invoices),
+		)
+
+		allInvoices = append(allInvoices, invoices.Invoices...)
 	}
 
-	if statusCode != http.StatusOK {
-		return nil, fmt.Errorf("%w: status %d, response: %s", ErrOpenAPIRequestFailed, statusCode, string(respBody))
-	}
+	return &SupplierInvoicesResponse{
+		Invoices:   allInvoices,
+		Total:      len(allInvoices),
+		Page:       page,
+		PageSize:   pageSize,
+		TotalPages: 1,
+	}, nil
+}
 
-	c.logger.Info("all invoices raw response",
-		"response", string(respBody),
-	)
-
+// parseInvoicesResponse parses an OpenAPI SDI invoices response body.
+func (c *openAPIClient) parseInvoicesResponse(respBody []byte, page, pageSize int) (*SupplierInvoicesResponse, error) {
 	// Try to parse wrapped response first: {"data": [...], "success": true}
 	var wrapper struct {
 		Data    json.RawMessage `json:"data"`
@@ -961,6 +1028,59 @@ func (c *openAPIClient) InvalidateInvoiceStatusCache(ctx context.Context, uuid s
 
 	c.logger.Debug("invoice status cache invalidated", "uuid", uuid)
 	return nil
+}
+
+// ConfigureAPICallbacks configures webhook callbacks on OpenAPI SDI
+// Per OpenAPI.it spec: POST /api_configurations with fiscal_id + callbacks array
+func (c *openAPIClient) ConfigureAPICallbacks(ctx context.Context, cfg APICallbackConfig) error {
+	respBody, statusCode, err := c.doRequestWithRetry(ctx, http.MethodPost, "/api_configurations", cfg)
+	if err != nil {
+		return err
+	}
+
+	if statusCode != http.StatusOK && statusCode != http.StatusCreated {
+		if apiErr := parseOpenAPIError(respBody, statusCode); apiErr != nil {
+			return apiErr
+		}
+		return fmt.Errorf("%w: status %d, body: %s", ErrOpenAPIRequestFailed, statusCode, string(respBody))
+	}
+
+	c.logger.Info("API callbacks configured",
+		"fiscalID", cfg.FiscalID,
+		"callbackCount", len(cfg.Callbacks),
+	)
+
+	return nil
+}
+
+// GetAPIConfigurations retrieves all API configurations from OpenAPI SDI
+// Per OpenAPI.it spec: GET /api_configurations
+// Response: {"data": [{id, fiscal_id, callback: {event, url, ...}}, ...], "success": true}
+func (c *openAPIClient) GetAPIConfigurations(ctx context.Context) (*APIConfigurationResponse, error) {
+	respBody, statusCode, err := c.doRequestWithRetry(ctx, http.MethodGet, "/api_configurations", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	if statusCode == http.StatusNotFound {
+		return nil, ErrOpenAPINotFound
+	}
+
+	if statusCode != http.StatusOK {
+		return nil, fmt.Errorf("%w: status %d", ErrOpenAPIRequestFailed, statusCode)
+	}
+
+	// Parse wrapped response: {"data": [...], "success": true}
+	var wrapper struct {
+		Data    []APIConfigurationEntry `json:"data"`
+		Success bool                    `json:"success"`
+		Message string                  `json:"message"`
+	}
+	if err := json.Unmarshal(respBody, &wrapper); err != nil {
+		return nil, fmt.Errorf("failed to parse API configurations response: %w", err)
+	}
+
+	return &APIConfigurationResponse{Entries: wrapper.Data}, nil
 }
 
 // circuitBreaker implements a simple circuit breaker pattern

@@ -38,10 +38,10 @@ When modifying or adding billing endpoints:
 
 ### Implementation Notes
 
-1. **Notification Strategy**: This module uses **polling** instead of webhooks
-   - Simpler deployment (no public callback URL required)
-   - Configurable interval via `OPENAPI_POLLING_INTERVAL`
-   - Both approaches are valid per the spec
+1. **Notification Strategy**: This module uses **polling + webhooks**
+   - **Webhooks**: OpenAPI.it sends callbacks to `/v1/billing/webhooks/sdi` for real-time events (supplier-invoice, customer-notification, legal-storage-receipt). Configured automatically via `ConfigureAPICallbacks` on startup when `OPENAPI_WEBHOOK_URL` is set.
+   - **Polling**: Background job periodically syncs invoices and notifications as a safety net. Configurable interval via `OPENAPI_POLLING_INTERVAL`.
+   - Both mechanisms trigger the same `SyncReceivedInvoices` flow, which is idempotent (deduplicates by OpenAPIUUID and invoice number).
 
 2. **Invoice Submission Variants** (per OpenAPI SDI spec):
    - `/invoices` - Basic submission
@@ -84,7 +84,8 @@ billing/
 │   ├── invoice_handler.go      # Invoice HTTP handlers
 │   ├── customer_handler.go     # Customer HTTP handlers
 │   ├── supplier_handler.go     # Supplier HTTP handlers
-│   └── notification_handler.go # Notification HTTP handlers
+│   ├── notification_handler.go # Notification HTTP handlers
+│   └── webhook_handler.go      # SDI webhook callback handler
 ├── jobs/
 │   └── polling_job.go          # Background SDI notification polling
 ├── routes.go                   # Huma v2 route registration
@@ -160,14 +161,31 @@ Draft → Sent → [SDI Processing] → Delivered/Rejected
 | DT | Decorrenza Termini | Silent acceptance (15 days elapsed) |
 | AT | Attestazione | Transmission attestation |
 
-### Polling Job
+### Polling Job & Invoice Sync
 
-The `polling_job.go` runs a background goroutine that periodically fetches new notifications from OpenAPI SDI:
+The `polling_job.go` runs a background goroutine that periodically syncs invoices and fetches notifications from OpenAPI SDI:
 
 - Polls at configurable intervals (`OPENAPI_POLLING_INTERVAL`)
+- `SyncReceivedInvoices` fetches **both** sent (`type=0`) and received (`type=1`) invoices from the API, deduplicates by OpenAPIUUID and invoice number, and imports new ones
 - Updates invoice status based on notification type
 - Stores notifications for audit trail
-- Handles errors with exponential backoff
+- Logs a summary with `totalImportedIssued`, `totalImportedReceived`, and `totalSkipped` counts
+- Deduplication skip logs are at `Info` level for troubleshooting visibility
+
+### OpenAPI SDI Query Parameters (GET /invoices)
+
+The `GET /invoices` endpoint uses these parameters (per the [OAS spec](https://console.openapi.com/oas/it/sdi.openapi.json)):
+
+| Parameter | Description | Values |
+|-----------|-------------|--------|
+| `type` | Invoice direction filter | `0` = sent to customer (default), `1` = received from supplier |
+| `createdAt[after]` | Date filter (ISO 8601) | e.g., `2026-01-10` |
+| `page` | Pagination | Integer page number |
+| `marking` | Status filter | `sent`, `received`, `delivered` |
+| `sender` | Filter by sender VAT/CF | Comma-separated fiscal codes |
+| `recipient` | Filter by recipient VAT/CF | Comma-separated fiscal codes |
+
+**IMPORTANT**: The API defaults to `type=0` (sent) when no `type` is specified — it does NOT return both directions. Always specify `type` explicitly when fetching invoices.
 
 ## Environment Variables
 
@@ -184,12 +202,14 @@ The `polling_job.go` runs a background goroutine that periodically fetches new n
 | `OPENAPI_POLLING_INTERVAL` | Notification poll interval | `12h` |
 | `OPENAPI_POLLING_ENABLED` | Enable automatic polling | `true` |
 | `OPENAPI_SANDBOX_MODE` | Use sandbox environment | `true` |
+| `OPENAPI_WEBHOOK_URL` | Public URL for SDI webhook callbacks | _(optional)_ |
+| `OPENAPI_WEBHOOK_SECRET` | Bearer token for webhook authentication | _(optional)_ |
 
 ### API Usage Optimization
 
 The OpenAPI SDI free tier allows 1000 requests/month. The default configuration stays well under this limit:
 
-1. **Automatic polling runs every 12 hours** (2x/day = ~60 requests/month)
+1. **Automatic polling runs every 12 hours** (2x/day, 2 API calls per sync for type=0 + type=1 = ~120 requests/month)
 2. **Invoice status queries are cached** in Redis with 15-minute TTL
 3. **Manual sync endpoints available** for on-demand synchronization
 
@@ -197,7 +217,7 @@ The OpenAPI SDI free tier allows 1000 requests/month. The default configuration 
 
 | Usage Type | Requests/Month |
 |------------|----------------|
-| Automatic polling (12h interval) | ~60 |
+| Automatic polling (12h interval) | ~120 |
 | Invoice sends/receives | ~200-400 |
 | Cached status queries | Minimal |
 | **Total** | **~300-600** (well under 1000 limit) |
