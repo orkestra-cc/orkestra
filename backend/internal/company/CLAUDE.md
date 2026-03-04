@@ -26,11 +26,12 @@ company/
 │   └── config.go                  # CompanyAPIConfig (BaseURL, token, timeouts)
 ├── models/
 │   ├── company.go                 # CompanyLookup domain model (MongoDB document)
-│   └── dto.go                     # API response types + Huma request/response DTOs
+│   ├── dto.go                     # API response types + Huma request/response DTOs
+│   └── enrichments.go             # Typed enrichment structs (Advanced, Marketing, etc.)
 ├── repository/
 │   └── company_repository.go      # Interface + MongoDB impl (company_lookups collection)
 ├── services/
-│   ├── company_service.go         # Interface + business logic (lookup orchestration)
+│   ├── company_service.go         # Interface + business logic (lookup + enrichment)
 │   └── openapi_client.go          # External HTTP client (company.openapi.com)
 ├── handlers/
 │   └── company_handler.go         # Huma HTTP handlers
@@ -42,24 +43,44 @@ company/
 
 | Method | Endpoint | Operation ID | Description |
 |--------|----------|-------------|-------------|
-| GET | `/v1/company/lookup/{taxCode}` | `lookup-company` | Look up company by tax code (calls external API, caches result) |
+| GET | `/v1/company/lookup/{taxCode}` | `lookup-company` | Look up company by tax code (checks MongoDB first, then external API) |
 | GET | `/v1/company/lookups` | `list-company-lookups` | List previously looked-up companies (paginated) |
 | GET | `/v1/company/lookups/search` | `search-company-lookups` | Search stored lookups by name/tax code/VAT code |
 | GET | `/v1/company/lookups/{id}` | `get-company-lookup` | Get a specific stored lookup by UUID |
+| GET | `/v1/company/lookup/{taxCode}/enrich/{type}` | `enrich-company-lookup` | Fetch enrichment data and store on existing lookup |
+
+### Enrichment Types
+
+| Type | API Endpoint | Description |
+|------|-------------|-------------|
+| `advanced` | `IT-advanced` | ATECO, PEC, REA, CCIAA, balance sheets, shareholders, VAT group |
+| `marketing` | `IT-marketing` | Contacts (phone, email, website), social media, employee count |
+| `stakeholders` | `IT-stakeholders` | Company officers and representatives |
+| `aml` | `IT-aml` | Anti-money laundering checks |
+| `full` | `IT-full` | All of the above in one call |
 
 ## Lookup Flow
 
 ```
-Request → Redis Cache Check → External API Call → MongoDB Upsert → Redis Cache Set → Response
-                ↓ (hit)
-            Return cached
+Request → MongoDB Check → Redis Cache Check → External API Call → MongoDB Insert → Redis Cache Set → Response
+              ↓ (hit)          ↓ (hit)
+          Return stored    Return cached
 ```
 
-1. **Redis cache** checked first (key: `company:lookup:{taxCode}`, TTL: 24h default)
-2. **External API** called on cache miss (`GET /IT-start/{taxCode}`)
-3. **MongoDB** upserted with result (deduplicated by `taxCode`)
-4. **Redis** cached for future lookups
-5. **Response** returned to client
+1. **MongoDB** checked first for existing lookup by `taxCode`
+2. **Redis cache** checked on DB miss (key: `company:lookup:{taxCode}`, TTL: 24h default)
+3. **External API** called on cache miss (`GET /IT-start/{taxCode}`)
+4. **MongoDB** inserted with new UUID
+5. **Redis** cached for future lookups
+6. **Response** returned to client
+
+### Enrichment Flow
+
+```
+Request → Lookup by taxCode (must exist) → External API ({type} endpoint) → Update MongoDB document → Response
+```
+
+Enrichment data is stored as nested fields on the existing `CompanyLookup` document. The `fetchedTypes` map tracks which enrichment types have been fetched (key = type, value = timestamp).
 
 ## External API
 
