@@ -2,7 +2,6 @@ package services
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -226,48 +225,38 @@ func mapEnrichmentData(lookupType string, data *models.OpenAPICompanyData) (stri
 		}
 	case models.LookupTypeMarketing:
 		return "marketing", &models.MarketingData{
-			Contacts:    cloneRawMessage(data.Contacts),
-			WebAndSocial: cloneRawMessage(data.WebAndSocial),
-			Mail:        cloneRawMessage(data.Mail),
-			PEC:         data.PEC,
-			Employees:   cloneRawMessage(data.Employees),
-			Ecofin:      cloneRawMessage(data.Ecofin),
-			Branches:    cloneRawMessage(data.Branches),
-			AllOffices:  cloneRawMessage(data.AllOffices),
+			Contacts:     data.Contacts,
+			WebAndSocial: data.WebAndSocial,
+			Mail:         data.Mail,
+			PEC:          data.PEC,
+			Employees:    data.Employees,
+			Ecofin:       data.Ecofin,
+			Branches:     data.Branches,
+			AllOffices:   data.AllOffices,
 		}
 	case models.LookupTypeStakeholders:
 		return "stakeholders", &models.StakeholdersData{
-			Managers:           cloneRawMessage(data.Managers),
-			Shareholders:       cloneRawMessage(data.Shareholders),
-			CorporateGroups:    cloneRawMessage(data.CorporateGroups),
-			Subsidiaries:       cloneRawMessage(data.Subsidiaries),
-			AffiliateCompanies: cloneRawMessage(data.AffiliateCompanies),
+			Managers:           data.Managers,
+			Shareholders:       data.Shareholders,
+			CorporateGroups:    data.CorporateGroups,
+			Subsidiaries:       data.Subsidiaries,
+			AffiliateCompanies: data.AffiliateCompanies,
 		}
 	case models.LookupTypeAML:
 		return "aml", &models.AMLData{
-			Managers:         cloneRawMessage(data.Managers),
-			Shareholders:     cloneRawMessage(data.Shareholders),
-			CorporateGroups:  cloneRawMessage(data.CorporateGroups),
-			ForeignTrade:     cloneRawMessage(data.ForeignTrade),
-			PublicTenders:    cloneRawMessage(data.PublicTenders),
-			OperatingResults: cloneRawMessage(data.OperatingResults),
-			Debts:            cloneRawMessage(data.Debts),
+			Managers:         data.Managers,
+			Shareholders:     data.Shareholders,
+			CorporateGroups:  data.CorporateGroups,
+			ForeignTrade:     data.ForeignTrade,
+			PublicTenders:    data.PublicTenders,
+			OperatingResults: data.OperatingResults,
+			Debts:            data.Debts,
 			RAE:              data.RAE,
 			SAE:              data.SAE,
 		}
 	default:
 		return "", nil
 	}
-}
-
-// cloneRawMessage returns a copy of a json.RawMessage (or nil if empty)
-func cloneRawMessage(rm json.RawMessage) json.RawMessage {
-	if len(rm) == 0 {
-		return nil
-	}
-	cp := make(json.RawMessage, len(rm))
-	copy(cp, rm)
-	return cp
 }
 
 // GetLookup retrieves a previously stored company lookup by UUID

@@ -75,28 +75,28 @@ type OpenAPICompanyData struct {
 	TaxCodeCeased       *bool                `json:"taxCodeCeased,omitempty"`
 
 	// Marketing enrichment fields (IT-marketing)
-	Contacts    json.RawMessage `json:"contacts,omitempty"`
-	WebAndSocial json.RawMessage `json:"webAndSocial,omitempty"`
-	Mail        json.RawMessage `json:"mail,omitempty"`
-	Employees   json.RawMessage `json:"employees,omitempty"`
-	Ecofin      json.RawMessage `json:"ecofin,omitempty"`
-	Branches    json.RawMessage `json:"branches,omitempty"`
-	AllOffices  json.RawMessage `json:"allOffices,omitempty"`
+	Contacts     *ContactsData     `json:"contacts,omitempty"`
+	WebAndSocial *WebAndSocialData `json:"webAndSocial,omitempty"`
+	Mail         *MailData         `json:"mail,omitempty"`
+	Employees    *EmployeesData    `json:"employees,omitempty"`
+	Ecofin       *EcofinData       `json:"ecofin,omitempty"`
+	Branches     *BranchesData     `json:"branches,omitempty"`
+	AllOffices   []OfficeEntry     `json:"allOffices,omitempty"`
 
 	// Stakeholders enrichment fields (IT-stakeholders)
-	Managers           json.RawMessage `json:"managers,omitempty"`
-	Shareholders       json.RawMessage `json:"shareholders,omitempty"`
-	CorporateGroups    json.RawMessage `json:"corporateGroups,omitempty"`
-	Subsidiaries       json.RawMessage `json:"subsidiaries,omitempty"`
-	AffiliateCompanies json.RawMessage `json:"affiliateCompanies,omitempty"`
+	Managers           []Manager            `json:"managers,omitempty"`
+	Shareholders       []Shareholder        `json:"shareholders,omitempty"`
+	CorporateGroups    *CorporateGroupsData `json:"corporateGroups,omitempty"`
+	Subsidiaries       []SubsidiaryCompany  `json:"subsidiaries,omitempty"`
+	AffiliateCompanies []AffiliateCompany   `json:"affiliateCompanies,omitempty"`
 
 	// AML enrichment fields (IT-aml)
-	ForeignTrade     json.RawMessage  `json:"foreignTrade,omitempty"`
-	PublicTenders    json.RawMessage  `json:"publicTenders,omitempty"`
-	OperatingResults json.RawMessage  `json:"operatingResults,omitempty"`
-	Debts            json.RawMessage  `json:"debts,omitempty"`
-	RAE              *CodeDescription `json:"rae,omitempty"`
-	SAE              *CodeDescription `json:"sae,omitempty"`
+	ForeignTrade     *ForeignTradeData     `json:"foreignTrade,omitempty"`
+	PublicTenders    []PublicTender        `json:"publicTenders,omitempty"`
+	OperatingResults *OperatingResultsData `json:"operatingResults,omitempty"`
+	Debts            []DebtsData           `json:"debts,omitempty"`
+	RAE              *CodeDescription      `json:"rae,omitempty"`
+	SAE              *CodeDescription      `json:"sae,omitempty"`
 }
 
 // OpenAPIAddressData represents the address data from the API response
