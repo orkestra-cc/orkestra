@@ -2,7 +2,17 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Badge, Button, Card, Col, Form, Row } from 'react-bootstrap';
 import cytoscape from 'cytoscape';
 import type { Core, EventObject, StylesheetStyle } from 'cytoscape';
+// @ts-expect-error cytoscape-fcose ships without type declarations
+import * as fcoseModule from 'cytoscape-fcose';
 import type { GraphNode, GraphRelationship } from '../../../types/graph';
+
+// Register fcose layout (guarded against HMR double-registration)
+try {
+  const fcose = fcoseModule.default ?? fcoseModule;
+  if (typeof fcose === 'function') cytoscape.use(fcose);
+} catch {
+  // Already registered
+}
 
 // --- Color palette for node labels ---
 
@@ -27,7 +37,7 @@ const EDGE_LINE_STYLES: Array<'solid' | 'dashed' | 'dotted'> = [
   'dotted'
 ];
 
-type LayoutName = 'cose' | 'circle' | 'grid' | 'breadthfirst' | 'concentric';
+type LayoutName = 'fcose' | 'cose' | 'circle' | 'grid' | 'breadthfirst' | 'concentric';
 
 interface CytoscapeViewerProps {
   nodes: GraphNode[];
@@ -112,6 +122,22 @@ function getLayoutOptions(name: LayoutName) {
   const base = { name, animate: false, fit: true, padding: 40 };
 
   switch (name) {
+    case 'fcose':
+      return {
+        ...base,
+        animate: 'end' as const,
+        animationDuration: 400,
+        quality: 'default' as const,
+        randomize: true,
+        nodeDimensionsIncludeLabels: true,
+        nodeSeparation: 120,
+        idealEdgeLength: () => 120,
+        nodeRepulsion: () => 6000,
+        edgeElasticity: () => 0.45,
+        gravity: 0.2,
+        numIter: 2500,
+        packComponents: true,
+      };
     case 'cose':
       return {
         ...base,
@@ -212,7 +238,7 @@ export function CytoscapeViewer({
   onNodeClick,
   onNodeDoubleClick,
   onEdgeClick,
-  layout: layoutProp = 'cose',
+  layout: layoutProp = 'fcose',
   className,
   style
 }: CytoscapeViewerProps) {
@@ -277,7 +303,8 @@ export function CytoscapeViewer({
     let cancelled = false;
     const layoutTimer = requestAnimationFrame(() => {
       if (cancelled) return;
-      const effectiveLayout = (activeLayout === 'cose' && relationships.length === 0)
+      const isForceDirected = activeLayout === 'fcose' || activeLayout === 'cose';
+      const effectiveLayout = (isForceDirected && relationships.length === 0)
         ? 'circle' as LayoutName
         : activeLayout;
       const lo = cy.layout(getLayoutOptions(effectiveLayout));
@@ -337,6 +364,7 @@ export function CytoscapeViewer({
               aria-label="Graph layout"
               style={{ width: 160 }}
             >
+              <option value="fcose">fCoSE</option>
               <option value="cose">CoSE</option>
               <option value="circle">Circle</option>
               <option value="grid">Grid</option>

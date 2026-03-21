@@ -68,7 +68,7 @@ const GraphExplorer: React.FC = () => {
   }, [fetchNeighbors, database, result]);
 
   const handleLabelClick = useCallback((label: string) => {
-    handleExecute(`MATCH (n:\`${label}\`) OPTIONAL MATCH (n)-[r]-(m:\`${label}\`) RETURN n, r, m LIMIT 100`);
+    handleExecute(`MATCH (n:\`${label}\`) OPTIONAL MATCH (n)-[r]-(m) RETURN n, r, m LIMIT 100`);
   }, [handleExecute]);
 
   const handleRelTypeClick = useCallback((type: string) => {

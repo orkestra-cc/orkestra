@@ -27,16 +27,20 @@ interface SchemaPanelProps {
 function LabelItem({ label, onClick }: { label: LabelInfo; onClick?: (name: string) => void }) {
   return (
     <Accordion.Item eventKey={`label-${label.name}`}>
-      <Accordion.Header
-        onClick={(e) => {
-          if (onClick) {
-            e.stopPropagation();
-            onClick(label.name);
-          }
-        }}
-      >
+      <Accordion.Header>
         <div className="d-flex align-items-center justify-content-between w-100 me-2">
-          <span className="fw-semibold">:{label.name}</span>
+          <span
+            role="button"
+            className="fw-semibold text-primary"
+            style={{ cursor: 'pointer' }}
+            onClick={(e) => {
+              e.stopPropagation();
+              onClick?.(label.name);
+            }}
+            title={`Browse :${label.name} nodes`}
+          >
+            :{label.name}
+          </span>
           <Badge bg="primary" pill className="ms-2">
             {label.count.toLocaleString()}
           </Badge>
@@ -63,16 +67,20 @@ function LabelItem({ label, onClick }: { label: LabelInfo; onClick?: (name: stri
 function RelTypeItem({ rel, onClick }: { rel: RelTypeInfo; onClick?: (type: string) => void }) {
   return (
     <Accordion.Item eventKey={`rel-${rel.name}`}>
-      <Accordion.Header
-        onClick={(e) => {
-          if (onClick) {
-            e.stopPropagation();
-            onClick(rel.name);
-          }
-        }}
-      >
+      <Accordion.Header>
         <div className="d-flex align-items-center justify-content-between w-100 me-2">
-          <span className="fw-semibold">:{rel.name}</span>
+          <span
+            role="button"
+            className="fw-semibold text-warning"
+            style={{ cursor: 'pointer' }}
+            onClick={(e) => {
+              e.stopPropagation();
+              onClick?.(rel.name);
+            }}
+            title={`Browse :${rel.name} relationships`}
+          >
+            :{rel.name}
+          </span>
           <Badge bg="warning" text="dark" pill className="ms-2">
             {rel.count.toLocaleString()}
           </Badge>
