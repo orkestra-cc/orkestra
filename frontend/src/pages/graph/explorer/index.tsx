@@ -4,8 +4,9 @@ import { CytoscapeViewer } from '../components/CytoscapeViewer';
 import CypherEditor from '../components/CypherEditor';
 import ResultsTable from '../components/ResultsTable';
 import SchemaPanel from '../components/SchemaPanel';
-import { useExecuteQueryMutation, useLazyGetNodeNeighborsQuery } from '../../../store/api/graphApi';
-import type { QueryResult, GraphNode } from '../../../types/graph';
+import { useExecuteQueryMutation, useLazyGetNodeNeighborsQuery, useDeleteNodeMutation, useDeleteRelationshipMutation } from '../../../store/api/graphApi';
+import { GraphContextMenu, type ContextMenuState } from '../components/GraphContextMenu';
+import type { QueryResult, GraphNode, GraphRelationship } from '../../../types/graph';
 
 type ViewMode = 'graph' | 'table' | 'split';
 
@@ -16,9 +17,12 @@ const GraphExplorer: React.FC = () => {
   const [readOnly, setReadOnly] = useState(true);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
+  const [contextMenu, setContextMenu] = useState<ContextMenuState>({ visible: false, x: 0, y: 0, type: 'node' });
 
   const [executeQuery, { isLoading }] = useExecuteQueryMutation();
   const [fetchNeighbors] = useLazyGetNodeNeighborsQuery();
+  const [deleteNodeMutation] = useDeleteNodeMutation();
+  const [deleteRelationshipMutation] = useDeleteRelationshipMutation();
 
   const handleExecute = useCallback(async (cypher: string, params?: Record<string, unknown>) => {
     try {
@@ -79,6 +83,60 @@ const GraphExplorer: React.FC = () => {
     setDatabase(db);
     setResult(null);
   }, []);
+
+  const handleNodeContextMenu = useCallback((node: GraphNode, position: { x: number; y: number }) => {
+    setContextMenu({ visible: true, x: position.x, y: position.y, type: 'node', node });
+  }, []);
+
+  const handleEdgeContextMenu = useCallback((rel: GraphRelationship, position: { x: number; y: number }) => {
+    setContextMenu({ visible: true, x: position.x, y: position.y, type: 'edge', relationship: rel });
+  }, []);
+
+  const handleCloseContextMenu = useCallback(() => {
+    setContextMenu(prev => ({ ...prev, visible: false }));
+  }, []);
+
+  const handleDeleteNode = useCallback(async (node: GraphNode) => {
+    const labels = node.labels.join(', ');
+    if (!window.confirm(`Delete node ${node.id} (:${labels})?\nThis will also remove all connected relationships.`)) return;
+
+    try {
+      await deleteNodeMutation({ nodeId: node.id, database: database || undefined }).unwrap();
+      if (result?.graph) {
+        setResult({
+          ...result,
+          graph: {
+            nodes: result.graph.nodes.filter(n => n.id !== node.id),
+            relationships: result.graph.relationships.filter(
+              r => r.startNodeId !== node.id && r.endNodeId !== node.id
+            ),
+          },
+        });
+      }
+      if (selectedNode?.id === node.id) setSelectedNode(null);
+    } catch {
+      // Error handled by RTK Query
+    }
+  }, [deleteNodeMutation, database, result, selectedNode]);
+
+  const handleDeleteRelationship = useCallback(async (rel: GraphRelationship) => {
+    if (!window.confirm(`Delete relationship ${rel.id} (:${rel.type})?`)) return;
+
+    try {
+      await deleteRelationshipMutation({ relationshipId: rel.id, database: database || undefined }).unwrap();
+      if (result?.graph) {
+        setResult({
+          ...result,
+          graph: {
+            nodes: result.graph.nodes,
+            relationships: result.graph.relationships.filter(r => r.id !== rel.id),
+          },
+        });
+      }
+    } catch {
+      // Error handled by RTK Query
+    }
+  }, [deleteRelationshipMutation, database, result]);
 
   const graphNodes = useMemo(() => result?.graph?.nodes ?? [], [result]);
   const graphRels = useMemo(() => result?.graph?.relationships ?? [], [result]);
@@ -162,6 +220,8 @@ const GraphExplorer: React.FC = () => {
                 relationships={graphRels}
                 onNodeClick={handleNodeClick}
                 onNodeDoubleClick={handleNodeDoubleClick}
+                onNodeContextMenu={handleNodeContextMenu}
+                onEdgeContextMenu={handleEdgeContextMenu}
               />
             </div>
           )}
@@ -215,6 +275,14 @@ const GraphExplorer: React.FC = () => {
           )}
         </Col>
       </Row>
+
+      <GraphContextMenu
+        menu={contextMenu}
+        onClose={handleCloseContextMenu}
+        onExpandNeighbors={handleNodeDoubleClick}
+        onDeleteNode={handleDeleteNode}
+        onDeleteRelationship={handleDeleteRelationship}
+      />
     </>
   );
 };

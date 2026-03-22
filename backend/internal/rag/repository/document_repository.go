@@ -22,6 +22,7 @@ type DocumentRepository interface {
 	List(ctx context.Context, status, isoStandard string) ([]models.RagDocument, error)
 	UpdateStatus(ctx context.Context, uuid, status, errMsg string) error
 	UpdateCompleted(ctx context.Context, uuid string, chunkCount int) error
+	UpdateMetadata(ctx context.Context, uuid string, title, isoStandard, version *string) (*models.RagDocument, error)
 	Delete(ctx context.Context, uuid string) error
 }
 
@@ -113,6 +114,29 @@ func (r *documentRepository) UpdateCompleted(ctx context.Context, uuid string, c
 		"updatedAt":   now,
 	}})
 	return err
+}
+
+func (r *documentRepository) UpdateMetadata(ctx context.Context, uuid string, title, isoStandard, version *string) (*models.RagDocument, error) {
+	update := bson.M{"updatedAt": time.Now()}
+	if title != nil {
+		update["title"] = *title
+	}
+	if isoStandard != nil {
+		update["isoStandard"] = *isoStandard
+	}
+	if version != nil {
+		update["version"] = *version
+	}
+
+	res, err := r.collection.UpdateOne(ctx, bson.M{"uuid": uuid}, bson.M{"$set": update})
+	if err != nil {
+		return nil, fmt.Errorf("update document: %w", err)
+	}
+	if res.MatchedCount == 0 {
+		return nil, fmt.Errorf("document not found: %s", uuid)
+	}
+
+	return r.GetByUUID(ctx, uuid)
 }
 
 func (r *documentRepository) Delete(ctx context.Context, uuid string) error {

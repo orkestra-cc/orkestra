@@ -281,7 +281,9 @@ func (p *geminiLLMProvider) StreamComplete(ctx context.Context, prompt string, o
 	return ch, nil
 }
 
-// fetchGeminiModels lists models available via the Gemini API
+// fetchGeminiModels lists models available via the Gemini API.
+// The returned RemoteModel.OwnedBy encodes the supported methods as a comma-separated
+// string (e.g. "google | embedContent") so the frontend can filter by capability.
 func fetchGeminiModels(ctx context.Context, apiKey string) ([]RemoteModel, error) {
 	client := &http.Client{Timeout: 10 * time.Second}
 	url := fmt.Sprintf("%s/v1beta/models?key=%s", geminiAPIURL, apiKey)
@@ -303,8 +305,9 @@ func fetchGeminiModels(ctx context.Context, apiKey string) ([]RemoteModel, error
 
 	var result struct {
 		Models []struct {
-			Name        string `json:"name"`
-			DisplayName string `json:"displayName"`
+			Name                       string   `json:"name"`
+			DisplayName                string   `json:"displayName"`
+			SupportedGenerationMethods []string `json:"supportedGenerationMethods"`
 		} `json:"models"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
@@ -315,10 +318,14 @@ func fetchGeminiModels(ctx context.Context, apiKey string) ([]RemoteModel, error
 	for _, m := range result.Models {
 		// name comes as "models/gemini-2.0-flash", strip the prefix
 		id := m.Name
-		if len(id) > 7 && id[:7] == "models/" {
+		if strings.HasPrefix(id, "models/") {
 			id = id[7:]
 		}
-		models = append(models, RemoteModel{ID: id, OwnedBy: "google"})
+
+		// Encode capabilities so frontend can filter by model type
+		capabilities := strings.Join(m.SupportedGenerationMethods, ",")
+
+		models = append(models, RemoteModel{ID: id, OwnedBy: "google", Capabilities: capabilities})
 	}
 	return models, nil
 }

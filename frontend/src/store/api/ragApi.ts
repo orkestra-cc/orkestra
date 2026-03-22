@@ -1,6 +1,8 @@
 import { baseApi } from './baseApi';
 import type {
   RagDocument,
+  RagChunk,
+  UpdateDocumentRequest,
   RagQueryRequest,
   RagQueryResponse,
 } from '../../types/rag';
@@ -35,6 +37,20 @@ export const ragApi = baseApi.injectEndpoints({
       providesTags: ['RagDocument'],
     }),
 
+    updateDocument: builder.mutation<RagDocument, { uuid: string; data: UpdateDocumentRequest }>({
+      query: ({ uuid, data }) => ({
+        url: `/v1/rag/documents/${uuid}`,
+        method: 'PATCH',
+        body: data,
+      }),
+      invalidatesTags: ['RagDocument'],
+    }),
+
+    getDocumentChunks: builder.query<{ chunks: RagChunk[] }, string>({
+      query: (uuid) => `/v1/rag/documents/${uuid}/chunks`,
+      providesTags: ['RagDocument'],
+    }),
+
     deleteDocument: builder.mutation<{ message: string }, string>({
       query: (uuid) => ({
         url: `/v1/rag/documents/${uuid}`,
@@ -59,6 +75,8 @@ export const {
   useUploadDocumentMutation,
   useListDocumentsQuery,
   useGetDocumentQuery,
+  useUpdateDocumentMutation,
+  useGetDocumentChunksQuery,
   useDeleteDocumentMutation,
   useRagQueryMutation,
 } = ragApi;

@@ -93,6 +93,30 @@ func RegisterRoutes(api huma.API, handler *handlers.GraphHandler) {
 	}, handler.GetNodeNeighbors)
 
 	// ========================================
+	// Node & Relationship Management
+	// ========================================
+
+	huma.Register(api, huma.Operation{
+		OperationID: "delete-graph-node",
+		Method:      http.MethodDelete,
+		Path:        "/v1/graph/nodes/{nodeId}",
+		Summary:     "Delete a node",
+		Description: "Deletes a node and all its connected relationships (DETACH DELETE).",
+		Tags:        []string{"Graph"},
+		Security:    []map[string][]string{{"bearerAuth": {}}},
+	}, handler.DeleteNode)
+
+	huma.Register(api, huma.Operation{
+		OperationID: "delete-graph-relationship",
+		Method:      http.MethodDelete,
+		Path:        "/v1/graph/relationships/{relationshipId}",
+		Summary:     "Delete a relationship",
+		Description: "Deletes a single relationship by ID.",
+		Tags:        []string{"Graph"},
+		Security:    []map[string][]string{{"bearerAuth": {}}},
+	}, handler.DeleteRelationship)
+
+	// ========================================
 	// Graph Algorithms (MAGE)
 	// ========================================
 

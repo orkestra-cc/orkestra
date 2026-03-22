@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"strings"
 
 	"github.com/danielgtaylor/huma/v2"
 
@@ -79,12 +80,35 @@ func (h *ModelHandler) FetchAvailableModels(ctx context.Context, req *models.Fet
 
 	resp := &models.FetchModelsResponse{}
 	for _, m := range remoteModels {
+		// Filter by modelType when capabilities are available
+		if req.Body.ModelType != "" && m.Capabilities != "" {
+			switch req.Body.ModelType {
+			case "embedding":
+				if !containsCap(m.Capabilities, "embedContent") {
+					continue
+				}
+			case "llm":
+				if !containsCap(m.Capabilities, "generateContent") {
+					continue
+				}
+			}
+		}
 		resp.Body.Models = append(resp.Body.Models, models.AvailableModel{
-			ID:      m.ID,
-			OwnedBy: m.OwnedBy,
+			ID:           m.ID,
+			OwnedBy:      m.OwnedBy,
+			Capabilities: m.Capabilities,
 		})
 	}
 	return resp, nil
+}
+
+func containsCap(capabilities, target string) bool {
+	for _, c := range strings.Split(capabilities, ",") {
+		if c == target {
+			return true
+		}
+	}
+	return false
 }
 
 func (h *ModelHandler) TestConnectivity(ctx context.Context, req *models.TestModelRequest) (*models.TestModelResponse, error) {

@@ -19,6 +19,24 @@ export interface RagDocument {
   completedAt?: string;
 }
 
+// --- Chunk Types ---
+
+export interface RagChunk {
+  uuid: string;
+  documentUuid: string;
+  text: string;
+  position: number;
+  sectionTitle?: string;
+}
+
+// --- Update Types ---
+
+export interface UpdateDocumentRequest {
+  title?: string;
+  isoStandard?: string;
+  version?: string;
+}
+
 // --- Query Types ---
 
 export interface RagQueryRequest {

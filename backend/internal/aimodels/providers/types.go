@@ -14,6 +14,7 @@ type ModelConfig struct {
 
 // RemoteModel represents a model available on a remote provider
 type RemoteModel struct {
-	ID       string
-	OwnedBy string
+	ID           string
+	OwnedBy      string
+	Capabilities string // comma-separated capabilities (e.g. "embedContent,generateContent")
 }

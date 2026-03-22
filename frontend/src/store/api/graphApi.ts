@@ -13,6 +13,8 @@ import type {
   BrowseNodesParams,
   BrowseRelationshipsParams,
   NodeNeighborsParams,
+  DeleteNodeResponse,
+  DeleteRelationshipResponse,
 } from '../../types/graph';
 
 // Helper to build query params
@@ -140,6 +142,30 @@ export const graphApi = baseApi.injectEndpoints({
       },
       invalidatesTags: ['VectorIndex'],
     }),
+
+    // --- Delete ---
+
+    deleteNode: builder.mutation<DeleteNodeResponse, { nodeId: number; database?: string }>({
+      query: ({ nodeId, database }) => {
+        const qs = database ? `?database=${database}` : '';
+        return {
+          url: `/v1/graph/nodes/${nodeId}${qs}`,
+          method: 'DELETE',
+        };
+      },
+      invalidatesTags: ['GraphQuery', 'GraphSchema'],
+    }),
+
+    deleteRelationship: builder.mutation<DeleteRelationshipResponse, { relationshipId: number; database?: string }>({
+      query: ({ relationshipId, database }) => {
+        const qs = database ? `?database=${database}` : '';
+        return {
+          url: `/v1/graph/relationships/${relationshipId}${qs}`,
+          method: 'DELETE',
+        };
+      },
+      invalidatesTags: ['GraphQuery', 'GraphSchema'],
+    }),
   }),
 });
 
@@ -161,4 +187,6 @@ export const {
   useListVectorIndexesQuery,
   useCreateVectorIndexMutation,
   useDropVectorIndexMutation,
+  useDeleteNodeMutation,
+  useDeleteRelationshipMutation,
 } = graphApi;

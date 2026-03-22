@@ -166,3 +166,16 @@ export interface NodeNeighborsParams {
   depth?: number;
   limit?: number;
 }
+
+// --- Delete Response Types ---
+
+export interface DeleteNodeResponse {
+  message: string;
+  nodesDeleted: number;
+  relationshipsDeleted: number;
+}
+
+export interface DeleteRelationshipResponse {
+  message: string;
+  relationshipsDeleted: number;
+}

@@ -18,6 +18,8 @@ type GraphService interface {
 	BrowseNodes(ctx context.Context, database string, labels []string, limit, skip int) (*models.QueryResult, error)
 	BrowseRelationships(ctx context.Context, database string, types []string, limit, skip int) (*models.QueryResult, error)
 	GetNodeNeighbors(ctx context.Context, database string, nodeID int64, depth, limit int) (*models.GraphData, error)
+	DeleteNode(ctx context.Context, database string, nodeID int64) (nodesDeleted int, relsDeleted int, err error)
+	DeleteRelationship(ctx context.Context, database string, relationshipID int64) error
 	HealthCheck(ctx context.Context) error
 }
 
@@ -162,6 +164,52 @@ func (s *graphService) GetNodeNeighbors(ctx context.Context, database string, no
 		return result.Graph, nil
 	}
 	return &models.GraphData{}, nil
+}
+
+func (s *graphService) DeleteNode(ctx context.Context, database string, nodeID int64) (int, int, error) {
+	cypher := "MATCH (n) WHERE id(n) = $nodeId DETACH DELETE n"
+	params := map[string]interface{}{
+		"nodeId": nodeID,
+	}
+
+	s.logger.Info("deleting node",
+		slog.String("database", database),
+		slog.Int64("nodeId", nodeID),
+	)
+
+	result, err := s.repo.ExecuteWrite(ctx, database, cypher, params)
+	if err != nil {
+		return 0, 0, err
+	}
+
+	if result.Metadata.NodesDeleted == 0 {
+		return 0, 0, fmt.Errorf("node with id %d not found", nodeID)
+	}
+
+	return result.Metadata.NodesDeleted, result.Metadata.RelationshipsDeleted, nil
+}
+
+func (s *graphService) DeleteRelationship(ctx context.Context, database string, relationshipID int64) error {
+	cypher := "MATCH ()-[r]->() WHERE id(r) = $relId DELETE r"
+	params := map[string]interface{}{
+		"relId": relationshipID,
+	}
+
+	s.logger.Info("deleting relationship",
+		slog.String("database", database),
+		slog.Int64("relationshipId", relationshipID),
+	)
+
+	result, err := s.repo.ExecuteWrite(ctx, database, cypher, params)
+	if err != nil {
+		return err
+	}
+
+	if result.Metadata.RelationshipsDeleted == 0 {
+		return fmt.Errorf("relationship with id %d not found", relationshipID)
+	}
+
+	return nil
 }
 
 func (s *graphService) HealthCheck(ctx context.Context) error {

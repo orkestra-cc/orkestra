@@ -81,7 +81,7 @@ export const aiModelsApi = baseApi.injectEndpoints({
 
     fetchAIProviderModels: builder.mutation<
       { models: AvailableModel[] },
-      { provider: string; baseUrl: string; apiKey?: string }
+      { provider: string; baseUrl: string; apiKey?: string; modelType?: string }
     >({
       query: (body) => ({
         url: '/v1/ai/models/fetch',

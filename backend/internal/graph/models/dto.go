@@ -134,6 +134,33 @@ type DropVectorIndexResponse struct {
 	}
 }
 
+// --- Delete DTOs ---
+
+type DeleteNodeRequest struct {
+	NodeID   int64  `path:"nodeId" doc:"ID of the node to delete"`
+	Database string `query:"database" doc:"Target database (uses default if empty)"`
+}
+
+type DeleteNodeResponse struct {
+	Body struct {
+		Message              string `json:"message" doc:"Confirmation message"`
+		NodesDeleted         int    `json:"nodesDeleted" doc:"Number of nodes deleted"`
+		RelationshipsDeleted int    `json:"relationshipsDeleted" doc:"Number of relationships deleted"`
+	}
+}
+
+type DeleteRelationshipRequest struct {
+	RelationshipID int64  `path:"relationshipId" doc:"ID of the relationship to delete"`
+	Database       string `query:"database" doc:"Target database (uses default if empty)"`
+}
+
+type DeleteRelationshipResponse struct {
+	Body struct {
+		Message              string `json:"message" doc:"Confirmation message"`
+		RelationshipsDeleted int    `json:"relationshipsDeleted" doc:"Number of relationships deleted"`
+	}
+}
+
 // --- Health DTOs ---
 
 type HealthCheckResponse struct {

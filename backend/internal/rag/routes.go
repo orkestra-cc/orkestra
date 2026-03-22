@@ -126,6 +126,26 @@ func RegisterDocumentRoutes(api huma.API, handler *handlers.DocumentHandler) {
 	}, handler.GetDocument)
 
 	huma.Register(api, huma.Operation{
+		OperationID: "update-rag-document",
+		Method:      http.MethodPatch,
+		Path:        "/v1/rag/documents/{uuid}",
+		Summary:     "Update document metadata",
+		Description: "Updates document metadata (title, ISO standard, version) in both MongoDB and the knowledge graph.",
+		Tags:        []string{"RAG Documents"},
+		Security:    []map[string][]string{{"bearerAuth": {}}},
+	}, handler.UpdateDocument)
+
+	huma.Register(api, huma.Operation{
+		OperationID: "get-rag-document-chunks",
+		Method:      http.MethodGet,
+		Path:        "/v1/rag/documents/{uuid}/chunks",
+		Summary:     "Get document chunks",
+		Description: "Returns all text chunks for a document, ordered by position.",
+		Tags:        []string{"RAG Documents"},
+		Security:    []map[string][]string{{"bearerAuth": {}}},
+	}, handler.GetDocumentChunks)
+
+	huma.Register(api, huma.Operation{
 		OperationID: "delete-rag-document",
 		Method:      http.MethodDelete,
 		Path:        "/v1/rag/documents/{uuid}",

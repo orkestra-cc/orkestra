@@ -88,12 +88,13 @@ const ModelFormModal: React.FC<ModelFormModalProps> = ({ show, onHide, editingMo
     setForm(prev => ({ ...prev, [field]: value }));
   };
 
-  const fetchModelsForProvider = useCallback(async (provider: string, baseUrl: string, apiKey: string) => {
+  const fetchModelsForProvider = useCallback(async (provider: string, baseUrl: string, apiKey: string, modelType: string) => {
     try {
       const result = await fetchProviderModels({
         provider,
         baseUrl,
         apiKey: apiKey || undefined,
+        modelType,
       }).unwrap();
       setAvailableModels(result.models ?? []);
       if (result.models?.length) {
@@ -113,18 +114,14 @@ const ModelFormModal: React.FC<ModelFormModalProps> = ({ show, onHide, editingMo
       return { ...prev, ...updates };
     });
     setAvailableModels([]);
-
-    // Auto-fetch model list for cloud providers (they don't need a base URL)
-    if (isCloudProvider(provider)) {
-      fetchModelsForProvider(provider, '', '');
-    }
   };
 
   const handleFetchModels = useCallback(async () => {
-    // Cloud providers don't need a base URL
+    // Cloud providers need an API key, local providers need a base URL
+    if (isCloudProvider(form.provider) && !form.apiKey) return;
     if (!isCloudProvider(form.provider) && !form.baseUrl) return;
-    await fetchModelsForProvider(form.provider, form.baseUrl || '', form.apiKey || '');
-  }, [fetchModelsForProvider, form.provider, form.baseUrl, form.apiKey]);
+    await fetchModelsForProvider(form.provider, form.baseUrl || '', form.apiKey || '', form.modelType);
+  }, [fetchModelsForProvider, form.provider, form.baseUrl, form.apiKey, form.modelType]);
 
   const handleSave = useCallback(async () => {
     try {
@@ -186,7 +183,11 @@ const ModelFormModal: React.FC<ModelFormModalProps> = ({ show, onHide, editingMo
               <Form.Select
                 size="sm"
                 value={form.modelType}
-                onChange={e => updateForm('modelType', e.target.value)}
+                onChange={e => {
+                  updateForm('modelType', e.target.value);
+                  setAvailableModels([]);
+                  updateForm('modelName', '');
+                }}
                 disabled={isEditing}
               >
                 <option value="embedding" disabled={form.provider === 'anthropic'}>
@@ -237,7 +238,14 @@ const ModelFormModal: React.FC<ModelFormModalProps> = ({ show, onHide, editingMo
                     disabled={isEditing}
                   >
                     <option value="">Select a model...</option>
-                    {availableModels.map(m => (
+                    {availableModels
+                      .filter(m => {
+                        if (!m.capabilities) return true;
+                        const caps = m.capabilities.split(',');
+                        if (form.modelType === 'embedding') return caps.includes('embedContent');
+                        return caps.includes('generateContent');
+                      })
+                      .map(m => (
                       <option key={m.id} value={m.id}>
                         {m.id}{m.ownedBy ? ` (${m.ownedBy})` : ''}
                       </option>
@@ -248,7 +256,7 @@ const ModelFormModal: React.FC<ModelFormModalProps> = ({ show, onHide, editingMo
                       size="sm"
                       variant="outline-secondary"
                       onClick={handleFetchModels}
-                      disabled={fetching}
+                      disabled={fetching || !form.apiKey}
                       style={{ whiteSpace: 'nowrap' }}
                     >
                       {fetching ? <Spinner size="sm" /> : 'Refresh'}
@@ -265,7 +273,7 @@ const ModelFormModal: React.FC<ModelFormModalProps> = ({ show, onHide, editingMo
                     placeholder={
                       showBaseUrlField(form.provider)
                         ? 'Enter model name or click Fetch Models'
-                        : fetching ? 'Loading models...' : 'e.g. claude-sonnet-4-20250514'
+                        : fetching ? 'Loading models...' : 'Enter API key first, then Fetch Models'
                     }
                   />
                   {!isEditing && isCloudProvider(form.provider) && (
@@ -273,7 +281,7 @@ const ModelFormModal: React.FC<ModelFormModalProps> = ({ show, onHide, editingMo
                       size="sm"
                       variant="outline-secondary"
                       onClick={handleFetchModels}
-                      disabled={fetching}
+                      disabled={fetching || !form.apiKey}
                       style={{ whiteSpace: 'nowrap' }}
                     >
                       {fetching ? <Spinner size="sm" /> : 'Fetch Models'}

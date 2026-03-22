@@ -45,6 +45,8 @@ interface CytoscapeViewerProps {
   onNodeClick?: (node: GraphNode) => void;
   onNodeDoubleClick?: (node: GraphNode) => void;
   onEdgeClick?: (rel: GraphRelationship) => void;
+  onNodeContextMenu?: (node: GraphNode, position: { x: number; y: number }) => void;
+  onEdgeContextMenu?: (rel: GraphRelationship, position: { x: number; y: number }) => void;
   layout?: LayoutName;
   className?: string;
   style?: React.CSSProperties;
@@ -238,6 +240,8 @@ export function CytoscapeViewer({
   onNodeClick,
   onNodeDoubleClick,
   onEdgeClick,
+  onNodeContextMenu,
+  onEdgeContextMenu,
   layout: layoutProp = 'fcose',
   className,
   style
@@ -253,9 +257,13 @@ export function CytoscapeViewer({
   const onNodeClickRef = useRef(onNodeClick);
   const onNodeDoubleClickRef = useRef(onNodeDoubleClick);
   const onEdgeClickRef = useRef(onEdgeClick);
+  const onNodeContextMenuRef = useRef(onNodeContextMenu);
+  const onEdgeContextMenuRef = useRef(onEdgeContextMenu);
   onNodeClickRef.current = onNodeClick;
   onNodeDoubleClickRef.current = onNodeDoubleClick;
   onEdgeClickRef.current = onEdgeClick;
+  onNodeContextMenuRef.current = onNodeContextMenu;
+  onEdgeContextMenuRef.current = onEdgeContextMenu;
 
   // Single effect: build cytoscape, add data, run layout, cleanup
   useEffect(() => {
@@ -299,6 +307,26 @@ export function CytoscapeViewer({
       if (gr && onEdgeClickRef.current) onEdgeClickRef.current(gr);
     });
 
+    // Right-click context menu events
+    const preventContextMenu = (e: Event) => e.preventDefault();
+    containerRef.current.addEventListener('contextmenu', preventContextMenu);
+
+    cy.on('cxttap', 'node', (evt: EventObject) => {
+      const gn = evt.target.data('_graphNode') as GraphNode | undefined;
+      if (gn && onNodeContextMenuRef.current) {
+        const me = evt.originalEvent as MouseEvent;
+        onNodeContextMenuRef.current(gn, { x: me.clientX, y: me.clientY });
+      }
+    });
+
+    cy.on('cxttap', 'edge', (evt: EventObject) => {
+      const gr = evt.target.data('_graphRel') as GraphRelationship | undefined;
+      if (gr && onEdgeContextMenuRef.current) {
+        const me = evt.originalEvent as MouseEvent;
+        onEdgeContextMenuRef.current(gr, { x: me.clientX, y: me.clientY });
+      }
+    });
+
     // Pick layout: force-directed needs edges, fall back to circle if none
     let cancelled = false;
     const layoutTimer = requestAnimationFrame(() => {
@@ -311,9 +339,11 @@ export function CytoscapeViewer({
       lo.run();
     });
 
+    const container = containerRef.current;
     return () => {
       cancelled = true;
       cancelAnimationFrame(layoutTimer);
+      container?.removeEventListener('contextmenu', preventContextMenu);
       cy.destroy();
       cyRef.current = null;
     };

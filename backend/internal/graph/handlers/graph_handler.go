@@ -88,6 +88,30 @@ func (h *GraphHandler) GetNodeNeighbors(ctx context.Context, req *models.GetNode
 	return &models.GetNodeNeighborsResponse{Body: *graphData}, nil
 }
 
+// --- Delete Endpoints ---
+
+func (h *GraphHandler) DeleteNode(ctx context.Context, req *models.DeleteNodeRequest) (*models.DeleteNodeResponse, error) {
+	nodesDeleted, relsDeleted, err := h.graphService.DeleteNode(ctx, req.Database, req.NodeID)
+	if err != nil {
+		return nil, huma.Error400BadRequest("Failed to delete node", err)
+	}
+	resp := &models.DeleteNodeResponse{}
+	resp.Body.Message = "Node deleted successfully"
+	resp.Body.NodesDeleted = nodesDeleted
+	resp.Body.RelationshipsDeleted = relsDeleted
+	return resp, nil
+}
+
+func (h *GraphHandler) DeleteRelationship(ctx context.Context, req *models.DeleteRelationshipRequest) (*models.DeleteRelationshipResponse, error) {
+	if err := h.graphService.DeleteRelationship(ctx, req.Database, req.RelationshipID); err != nil {
+		return nil, huma.Error400BadRequest("Failed to delete relationship", err)
+	}
+	resp := &models.DeleteRelationshipResponse{}
+	resp.Body.Message = "Relationship deleted successfully"
+	resp.Body.RelationshipsDeleted = 1
+	return resp, nil
+}
+
 // --- Algorithm Endpoints ---
 
 func (h *GraphHandler) RunAlgorithm(ctx context.Context, req *models.RunAlgorithmRequestDTO) (*models.RunAlgorithmResponse, error) {

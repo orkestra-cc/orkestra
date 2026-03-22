@@ -56,6 +56,7 @@ export interface QuickPromptResult {
 export interface AvailableModel {
   id: string;
   ownedBy?: string;
+  capabilities?: string;
 }
 
 // Provider metadata for UI rendering

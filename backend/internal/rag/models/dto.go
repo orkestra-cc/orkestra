@@ -137,6 +137,37 @@ type DeleteDocumentResponse struct {
 	}
 }
 
+type UpdateDocumentRequest struct {
+	UUID string `path:"uuid" doc:"Document UUID"`
+	Body struct {
+		Title       *string `json:"title,omitempty" doc:"Document title"`
+		ISOStandard *string `json:"isoStandard,omitempty" doc:"ISO standard"`
+		Version     *string `json:"version,omitempty" doc:"Document version"`
+	}
+}
+
+type UpdateDocumentResponse struct {
+	Body RagDocument
+}
+
+type GetDocumentChunksRequest struct {
+	UUID string `path:"uuid" doc:"Document UUID"`
+}
+
+type RagChunk struct {
+	UUID         string `json:"uuid"`
+	DocumentUUID string `json:"documentUuid"`
+	Text         string `json:"text"`
+	Position     int    `json:"position"`
+	SectionTitle string `json:"sectionTitle,omitempty"`
+}
+
+type GetDocumentChunksResponse struct {
+	Body struct {
+		Chunks []RagChunk `json:"chunks" doc:"Document chunks ordered by position"`
+	}
+}
+
 type ReprocessDocumentRequest struct {
 	UUID string `path:"uuid" doc:"Document UUID"`
 }

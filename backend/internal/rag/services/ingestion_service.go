@@ -20,6 +20,8 @@ type IngestionService interface {
 	IngestDocument(ctx context.Context, title, fileName string, fileData []byte, isoStandard, version string, chunkSize, chunkOverlap int) (*models.RagDocument, error)
 	ListDocuments(ctx context.Context, status, isoStandard string) ([]models.RagDocument, error)
 	GetDocument(ctx context.Context, uuid string) (*models.RagDocument, error)
+	UpdateDocument(ctx context.Context, uuid string, title, isoStandard, version *string) (*models.RagDocument, error)
+	GetDocumentChunks(ctx context.Context, uuid string) ([]models.RagChunk, error)
 	DeleteDocument(ctx context.Context, uuid string) error
 }
 
@@ -254,6 +256,77 @@ func (s *ingestionService) ListDocuments(ctx context.Context, status, isoStandar
 
 func (s *ingestionService) GetDocument(ctx context.Context, uuid string) (*models.RagDocument, error) {
 	return s.docRepo.GetByUUID(ctx, uuid)
+}
+
+func (s *ingestionService) UpdateDocument(ctx context.Context, docUUID string, title, isoStandard, version *string) (*models.RagDocument, error) {
+	doc, err := s.docRepo.UpdateMetadata(ctx, docUUID, title, isoStandard, version)
+	if err != nil {
+		return nil, err
+	}
+
+	// Sync updated fields to Memgraph node
+	updates := map[string]interface{}{"uuid": docUUID}
+	setClauses := []string{}
+	if title != nil {
+		updates["title"] = *title
+		setClauses = append(setClauses, "d.title = $title")
+	}
+	if isoStandard != nil {
+		updates["isoStandard"] = *isoStandard
+		setClauses = append(setClauses, "d.isoStandard = $isoStandard")
+	}
+	if version != nil {
+		updates["version"] = *version
+		setClauses = append(setClauses, "d.version = $version")
+	}
+
+	if len(setClauses) > 0 {
+		cypher := fmt.Sprintf("MATCH (d:RagDocument {uuid: $uuid}) SET %s", strings.Join(setClauses, ", "))
+		if _, err := s.graphRepo.ExecuteWrite(ctx, "", cypher, updates); err != nil {
+			s.logger.Warn("failed to sync document metadata to graph", slog.String("error", err.Error()))
+		}
+	}
+
+	return doc, nil
+}
+
+func (s *ingestionService) GetDocumentChunks(ctx context.Context, docUUID string) ([]models.RagChunk, error) {
+	// Verify document exists
+	if _, err := s.docRepo.GetByUUID(ctx, docUUID); err != nil {
+		return nil, err
+	}
+
+	result, err := s.graphRepo.ExecuteRead(ctx, "", `
+		MATCH (d:RagDocument {uuid: $uuid})-[:HAS_CHUNK]->(c:RagChunk)
+		RETURN c.uuid AS uuid, c.documentUuid AS documentUuid, c.text AS text, c.position AS position, c.sectionTitle AS sectionTitle
+		ORDER BY c.position
+	`, map[string]interface{}{"uuid": docUUID})
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch chunks: %w", err)
+	}
+
+	chunks := make([]models.RagChunk, 0, len(result.Rows))
+	for _, row := range result.Rows {
+		chunk := models.RagChunk{}
+		if v, ok := row["uuid"].(string); ok {
+			chunk.UUID = v
+		}
+		if v, ok := row["documentUuid"].(string); ok {
+			chunk.DocumentUUID = v
+		}
+		if v, ok := row["text"].(string); ok {
+			chunk.Text = v
+		}
+		if v, ok := row["position"].(int64); ok {
+			chunk.Position = int(v)
+		}
+		if v, ok := row["sectionTitle"].(string); ok {
+			chunk.SectionTitle = v
+		}
+		chunks = append(chunks, chunk)
+	}
+
+	return chunks, nil
 }
 
 func (s *ingestionService) DeleteDocument(ctx context.Context, docUUID string) error {

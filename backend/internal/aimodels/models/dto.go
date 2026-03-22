@@ -104,15 +104,17 @@ type QuickPromptResponse struct {
 
 // AvailableModel represents a model available on a provider
 type AvailableModel struct {
-	ID      string `json:"id" doc:"Model identifier"`
-	OwnedBy string `json:"ownedBy,omitempty" doc:"Model owner"`
+	ID           string `json:"id" doc:"Model identifier"`
+	OwnedBy      string `json:"ownedBy,omitempty" doc:"Model owner"`
+	Capabilities string `json:"capabilities,omitempty" doc:"Comma-separated capabilities (e.g. embedContent,generateContent)"`
 }
 
 type FetchModelsRequest struct {
 	Body struct {
-		Provider string `json:"provider" doc:"Provider" required:"true" enum:"ollama,openai,anthropic,gemini"`
-		BaseURL  string `json:"baseUrl,omitempty" doc:"Provider base URL (required for Ollama and OpenAI-compatible)"`
-		APIKey   string `json:"apiKey,omitempty" doc:"API key (required for cloud providers)"`
+		Provider  string `json:"provider" doc:"Provider" required:"true" enum:"ollama,openai,anthropic,gemini"`
+		BaseURL   string `json:"baseUrl,omitempty" doc:"Provider base URL (required for Ollama and OpenAI-compatible)"`
+		APIKey    string `json:"apiKey,omitempty" doc:"API key (required for cloud providers)"`
+		ModelType string `json:"modelType,omitempty" doc:"Filter by model type: embedding or llm" enum:"embedding,llm,"`
 	}
 }
 
