@@ -174,6 +174,16 @@ func RegisterDocumentRoutes(api huma.API, handler *handlers.DocumentHandler) {
 		Tags:        []string{"RAG Documents"},
 		Security:    []map[string][]string{{"bearerAuth": {}}},
 	}, handler.DeleteDocument)
+
+	huma.Register(api, huma.Operation{
+		OperationID: "get-rag-document-relations",
+		Method:      http.MethodGet,
+		Path:        "/v1/rag/documents/{uuid}/relations",
+		Summary:     "Get cross-document relations",
+		Description: "Returns cross-document SIMILAR_TO relationships for a document, showing which chunks from other documents are related.",
+		Tags:        []string{"RAG Documents"},
+		Security:    []map[string][]string{{"bearerAuth": {}}},
+	}, handler.GetDocumentRelations)
 }
 
 // RegisterQueryRoutes registers RAG query routes

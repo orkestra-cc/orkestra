@@ -8,6 +8,7 @@ import type {
   RelationshipTypeConfig,
   CreateRelationshipTypeRequest,
   UpdateRelationshipTypeRequest,
+  DocumentRelationsResponse,
 } from '../../types/rag';
 
 export const ragApi = baseApi.injectEndpoints({
@@ -95,6 +96,13 @@ export const ragApi = baseApi.injectEndpoints({
       invalidatesTags: ['RagRelationship'],
     }),
 
+    // --- Cross-Document Relations ---
+
+    getDocumentRelations: builder.query<DocumentRelationsResponse, string>({
+      query: (uuid) => `/v1/rag/documents/${uuid}/relations`,
+      providesTags: (_result, _err, uuid) => [{ type: 'RagDocument', id: `relations-${uuid}` }],
+    }),
+
     // --- RAG Query ---
 
     ragQuery: builder.mutation<RagQueryResponse, RagQueryRequest>({
@@ -118,5 +126,6 @@ export const {
   useCreateRelationshipTypeMutation,
   useUpdateRelationshipTypeMutation,
   useDeleteRelationshipTypeMutation,
+  useGetDocumentRelationsQuery,
   useRagQueryMutation,
 } = ragApi;

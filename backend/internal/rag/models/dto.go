@@ -204,6 +204,43 @@ type ReprocessDocumentResponse struct {
 	}
 }
 
+// --- Cross-Document Relationship DTOs ---
+
+type GetDocumentRelationsRequest struct {
+	UUID string `path:"uuid" doc:"Document UUID"`
+}
+
+// CrossDocLink represents a similarity link between chunks from two different documents
+type CrossDocLink struct {
+	SourceChunkUUID  string  `json:"sourceChunkUuid"`
+	SourceFullPath   string  `json:"sourceFullPath"`
+	SourceText       string  `json:"sourceText"`
+	TargetChunkUUID  string  `json:"targetChunkUuid"`
+	TargetFullPath   string  `json:"targetFullPath"`
+	TargetText       string  `json:"targetText"`
+	TargetDocUUID    string  `json:"targetDocUuid"`
+	TargetDocTitle   string  `json:"targetDocTitle"`
+	Similarity       float64 `json:"similarity"`
+}
+
+// RelatedDocSummary summarizes cross-doc relationships to another document
+type RelatedDocSummary struct {
+	DocumentUUID  string  `json:"documentUuid"`
+	DocumentTitle string  `json:"documentTitle"`
+	ISOStandard   string  `json:"isoStandard,omitempty"`
+	LinkCount     int     `json:"linkCount"`
+	AvgSimilarity float64 `json:"avgSimilarity"`
+	MaxSimilarity float64 `json:"maxSimilarity"`
+}
+
+type GetDocumentRelationsResponse struct {
+	Body struct {
+		RelatedDocuments []RelatedDocSummary `json:"relatedDocuments" doc:"Summary of related documents"`
+		Links            []CrossDocLink      `json:"links" doc:"Individual cross-document similarity links"`
+		TotalLinks       int                 `json:"totalLinks" doc:"Total number of cross-document links"`
+	}
+}
+
 // --- RAG Query DTOs ---
 
 type RAGQueryRequest struct {

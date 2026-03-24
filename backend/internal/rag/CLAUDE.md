@@ -36,7 +36,7 @@ repository/
 | Document metadata + status | MongoDB `rag_documents` | Status tracking, file info |
 | Document graph nodes | Memgraph `:RagDocument` | Graph traversal |
 | Chunk nodes + embeddings | Memgraph `:RagChunk` | Vector search + context |
-| Relationships | Memgraph `HAS_CHUNK`, `NEXT` | Graph RAG context expansion |
+| Relationships | Memgraph edges | Graph RAG context expansion (intra + cross-document) |
 
 ## Endpoints
 
@@ -58,6 +58,11 @@ repository/
 | POST | `/` | Upload + ingest (multipart form: file, title, isoStandard, version) |
 | GET | `/` | List documents (`?status=...&isoStandard=...`) |
 | GET | `/{uuid}` | Get document details |
+| PATCH | `/{uuid}` | Update metadata (title, isoStandard, version) |
+| GET | `/{uuid}/chunks` | Get document chunks |
+| GET | `/{uuid}/sections` | Get document section tree |
+| GET | `/{uuid}/relations` | Get cross-document similarity links and related doc summaries |
+| POST | `/{uuid}/reprocess` | Clear graph nodes for re-ingestion |
 | DELETE | `/{uuid}` | Delete from MongoDB + Memgraph |
 
 ### Query (`/v1/rag/query`)
@@ -128,9 +133,13 @@ Runs asynchronously in a background goroutine (17 steps):
 14. Create NEXT relationships between sequential chunks
 15. Extract definitions → :RagDefinition nodes + DEFINES edges
 16. Resolve cross-references → REFERENCES edges
-17. Compute SIMILAR_TO edges (cosine > 0.85 threshold)
-18. Create vector + property indexes
-19. Update status → "completed"
+17. Compute intra-document SIMILAR_TO edges (cosine > 0.85 threshold)
+18. Compute cross-document SIMILAR_TO edges via vector search index
+    - For each new chunk, find top 3 similar chunks from OTHER documents
+    - Uses Memgraph vector_search (no LLM calls — embedding-only)
+    - Edges tagged with `crossDocument: true` property
+19. Create vector + property indexes
+20. Update status → "completed"
 ```
 
 ### Memgraph Graph Schema
@@ -149,7 +158,7 @@ Runs asynchronously in a background goroutine (17 steps):
 (RagDocument)-[:HAS_DEFINITION]->(RagDefinition)
 (RagDefinition)-[:DEFINES]->(RagChunk)
 (RagChunk)-[:REFERENCES {referenceText}]->(RagSection)
-(RagChunk)-[:SIMILAR_TO {similarity}]->(RagChunk)
+(RagChunk)-[:SIMILAR_TO {similarity, crossDocument?}]->(RagChunk)
 ```
 
 ### Structural Parsing
@@ -184,7 +193,8 @@ Two parsers produce the same `StructuralNode` tree — the downstream chunking, 
 
 - **Definitions**: Parsed from "Terms and definitions" sections → `RagDefinition` nodes
 - **Cross-references**: Regex-based, resolved to target `RagSection` by numbering
-- **Similarity**: Pairwise cosine between non-adjacent chunks, edges for pairs > 0.85
+- **Similarity (intra-doc)**: Pairwise cosine between non-adjacent chunks within same doc, edges for pairs > 0.85
+- **Similarity (cross-doc)**: Vector search finds top 3 similar chunks from other documents per new chunk. Uses embedding index, no LLM calls. Edges tagged `crossDocument: true`
 
 ## RAG Query Pipeline
 
@@ -193,7 +203,7 @@ Two parsers produce the same `StructuralNode` tree — the downstream chunking, 
 2. Vector search with optional filters (requirementLevel, nodeType)
 3. Context expansion:
    - "vector" mode: prev/next chunks via NEXT edges
-   - "graph" mode: section hierarchy + cross-refs + definitions
+   - "graph" mode: section hierarchy + cross-refs + definitions + cross-document similar chunks via SIMILAR_TO edges
 4. Fetch document metadata → title, isoStandard from :RagDocument nodes
 5. Build richer prompt with structural paths + requirement levels + definitions
 6. LLM generation → default LLMProvider.Complete() with 5-minute timeout

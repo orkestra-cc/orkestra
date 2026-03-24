@@ -240,7 +240,8 @@ import {
   faGaugeHigh,
   faIdCard,
   faGears,
-  faFileExport
+  faFileExport,
+  faRobot
 } from '@fortawesome/free-solid-svg-icons';
 
 library.add(
@@ -487,5 +488,6 @@ library.add(
   faGaugeHigh,
   faIdCard,
   faGears,
-  faFileExport
+  faFileExport,
+  faRobot
 );

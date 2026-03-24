@@ -24,6 +24,7 @@ type IngestionService interface {
 	UpdateDocument(ctx context.Context, uuid string, title, isoStandard, version *string) (*models.RagDocument, error)
 	GetDocumentChunks(ctx context.Context, uuid string) ([]models.RagChunk, error)
 	GetDocumentSections(ctx context.Context, uuid string) ([]models.RagSection, error)
+	GetDocumentRelations(ctx context.Context, uuid string) ([]models.RelatedDocSummary, []models.CrossDocLink, error)
 	DeleteDocument(ctx context.Context, uuid string) error
 	ReprocessDocument(ctx context.Context, uuid string) error
 }
@@ -495,7 +496,7 @@ func (s *ingestionService) processDocument(docUUID string, fileData []byte, docT
 		}
 	}
 
-	// Step 15: Compute SIMILAR_TO edges
+	// Step 15: Compute SIMILAR_TO edges (intra-document)
 	if activeRels["SIMILAR_TO"] {
 		simEdges := ComputeSimilarityEdges(embeddings, s.similarityThreshold)
 		for _, edge := range simEdges {
@@ -512,6 +513,65 @@ func (s *ingestionService) processDocument(docUUID string, fileData []byte, docT
 				s.logger.Warn("failed to create SIMILAR_TO edge", slog.String("error", err.Error()))
 			}
 		}
+	}
+
+	// Step 15b: Compute cross-document SIMILAR_TO edges
+	// For each new chunk, find similar chunks from OTHER documents via vector search
+	if activeRels["SIMILAR_TO"] {
+		crossDocStart := time.Now()
+		crossDocEdges := 0
+		topKCross := 3 // top 3 similar chunks from other docs per chunk
+
+		for i, embedding := range embeddings {
+			result, err := s.graphRepo.ExecuteRead(ctx, "", `
+				CALL vector_search.search('rag_chunk_embedding', $topK, $queryVector)
+				YIELD node, similarity
+				WITH node, similarity
+				WHERE similarity >= $minSim AND node.documentUuid <> $docUuid
+				RETURN node.uuid AS chunkUuid, similarity
+				ORDER BY similarity DESC
+			`, map[string]interface{}{
+				"topK":        topKCross + 5, // fetch extra to account for same-doc filtering
+				"queryVector": embedding,
+				"minSim":      s.similarityThreshold,
+				"docUuid":     docUUID,
+			})
+			if err != nil {
+				continue
+			}
+
+			created := 0
+			for _, row := range result.Rows {
+				if created >= topKCross {
+					break
+				}
+				targetUUID, _ := row["chunkUuid"].(string)
+				sim, _ := row["similarity"].(float64)
+				if targetUUID == "" {
+					continue
+				}
+
+				_, err := s.graphRepo.ExecuteWrite(ctx, "", `
+					MATCH (a:RagChunk {uuid: $aUuid})
+					MATCH (b:RagChunk {uuid: $bUuid})
+					CREATE (a)-[:SIMILAR_TO {similarity: $sim, crossDocument: true}]->(b)
+				`, map[string]interface{}{
+					"aUuid": chunkUUIDs[i],
+					"bUuid": targetUUID,
+					"sim":   sim,
+				})
+				if err == nil {
+					crossDocEdges++
+					created++
+				}
+			}
+		}
+
+		s.logger.Info("cross-document similarity completed",
+			slog.Int("edges", crossDocEdges),
+			slog.Int("chunks", len(embeddings)),
+			slog.Int64("timeMs", time.Since(crossDocStart).Milliseconds()),
+		)
 	}
 
 	// Step 16: Ensure vector indexes exist
@@ -752,4 +812,88 @@ func (s *ingestionService) ReprocessDocument(ctx context.Context, docUUID string
 	// We need the file data — but we don't store it. Return error for now.
 	// The user must re-upload the file to reprocess.
 	return fmt.Errorf("reprocessing requires re-uploading the file — graph nodes have been cleared, please upload the document again")
+}
+
+// GetDocumentRelations returns cross-document SIMILAR_TO relationships for a document.
+func (s *ingestionService) GetDocumentRelations(ctx context.Context, docUUID string) ([]models.RelatedDocSummary, []models.CrossDocLink, error) {
+	// Query all cross-document SIMILAR_TO edges originating from this document's chunks
+	result, err := s.graphRepo.ExecuteRead(ctx, "", `
+		MATCH (src:RagChunk {documentUuid: $docUuid})-[r:SIMILAR_TO]-(tgt:RagChunk)
+		WHERE tgt.documentUuid <> $docUuid
+		OPTIONAL MATCH (tgtDoc:RagDocument {uuid: tgt.documentUuid})
+		RETURN src.uuid AS srcUuid, src.fullPath AS srcPath, src.text AS srcText,
+		       tgt.uuid AS tgtUuid, tgt.fullPath AS tgtPath, tgt.text AS tgtText,
+		       tgt.documentUuid AS tgtDocUuid, tgtDoc.title AS tgtDocTitle,
+		       tgtDoc.isoStandard AS tgtIsoStandard, r.similarity AS similarity
+		ORDER BY similarity DESC
+	`, map[string]interface{}{"docUuid": docUUID})
+	if err != nil {
+		return nil, nil, fmt.Errorf("query cross-doc relations: %w", err)
+	}
+
+	// Build links and aggregate per-document summaries
+	var links []models.CrossDocLink
+	docStats := make(map[string]*models.RelatedDocSummary)
+
+	for _, row := range result.Rows {
+		srcText, _ := row["srcText"].(string)
+		tgtText, _ := row["tgtText"].(string)
+
+		// Truncate text for readability
+		if len(srcText) > 200 {
+			srcText = srcText[:200] + "..."
+		}
+		if len(tgtText) > 200 {
+			tgtText = tgtText[:200] + "..."
+		}
+
+		link := models.CrossDocLink{
+			SourceChunkUUID: strVal(row, "srcUuid"),
+			SourceFullPath:  strVal(row, "srcPath"),
+			SourceText:      srcText,
+			TargetChunkUUID: strVal(row, "tgtUuid"),
+			TargetFullPath:  strVal(row, "tgtPath"),
+			TargetText:      tgtText,
+			TargetDocUUID:   strVal(row, "tgtDocUuid"),
+			TargetDocTitle:  strVal(row, "tgtDocTitle"),
+		}
+		if v, ok := row["similarity"].(float64); ok {
+			link.Similarity = v
+		}
+		links = append(links, link)
+
+		// Aggregate per target document
+		tgtDocUUID := link.TargetDocUUID
+		if _, exists := docStats[tgtDocUUID]; !exists {
+			docStats[tgtDocUUID] = &models.RelatedDocSummary{
+				DocumentUUID:  tgtDocUUID,
+				DocumentTitle: link.TargetDocTitle,
+				ISOStandard:   strVal(row, "tgtIsoStandard"),
+			}
+		}
+		ds := docStats[tgtDocUUID]
+		ds.LinkCount++
+		ds.AvgSimilarity += link.Similarity
+		if link.Similarity > ds.MaxSimilarity {
+			ds.MaxSimilarity = link.Similarity
+		}
+	}
+
+	// Finalize averages
+	var summaries []models.RelatedDocSummary
+	for _, ds := range docStats {
+		if ds.LinkCount > 0 {
+			ds.AvgSimilarity /= float64(ds.LinkCount)
+		}
+		summaries = append(summaries, *ds)
+	}
+
+	return summaries, links, nil
+}
+
+func strVal(row map[string]interface{}, key string) string {
+	if v, ok := row[key].(string); ok {
+		return v
+	}
+	return ""
 }

@@ -210,11 +210,9 @@ func buildAIRoutes() models.RouteGroup {
 			{
 				Name:   "AI Agents",
 				Icon:   "robot",
+				To:     "/ai/agents",
 				Active: true,
 				Roles:  []string{"operator"},
-				Children: []models.NavItem{
-					{Name: "Projects", To: "/ai/agents", Active: true, Roles: []string{"manager"}},
-				},
 			},
 			{
 				Name:   "AI Models",

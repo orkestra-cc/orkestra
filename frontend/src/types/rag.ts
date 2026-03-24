@@ -126,3 +126,32 @@ export interface QueryMeta {
   chunksRetrieved: number;
   modelUsed: string;
 }
+
+// --- Cross-Document Relations ---
+
+export interface CrossDocLink {
+  sourceChunkUuid: string;
+  sourceFullPath: string;
+  sourceText: string;
+  targetChunkUuid: string;
+  targetFullPath: string;
+  targetText: string;
+  targetDocUuid: string;
+  targetDocTitle: string;
+  similarity: number;
+}
+
+export interface RelatedDocSummary {
+  documentUuid: string;
+  documentTitle: string;
+  isoStandard?: string;
+  linkCount: number;
+  avgSimilarity: number;
+  maxSimilarity: number;
+}
+
+export interface DocumentRelationsResponse {
+  relatedDocuments: RelatedDocSummary[];
+  links: CrossDocLink[];
+  totalLinks: number;
+}

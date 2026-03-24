@@ -37,11 +37,13 @@ routes.go                   ← RegisterProjectRoutes, RegisterQueryRoutes, Regi
 
 ```
 1. Validate project + resolve persona
-2. RAG Phase: QueryWithScope(question, project.documentUUIDs)
-3. Retain Phase (async): Store RAG results in Hindsight bank
-4. Reflect Phase: Hindsight combines persistent memory + RAG context + persona directives
-5. Save conversation to MongoDB
-6. Return answer + sources + metadata
+2. Merge project AgentSettings with persona defaults (system prompt, directives, disposition)
+3. RAG Phase: QueryWithScope(question, project.documentUUIDs)
+4. Retain Phase (async): Store RAG results in Hindsight bank
+5. Reflect Phase: Hindsight combines persistent memory + RAG context + persona directives
+6. Capture token usage from Hindsight response (inputTokens, outputTokens, totalTokens)
+7. Save conversation + metadata to MongoDB
+8. Return answer + sources + metadata + token counts
 ```
 
 ## Personas
@@ -69,6 +71,8 @@ Query-time behavior profiles (not RBAC roles). Users select any persona at or be
 | POST | `/{uuid}/documents` | Add documents |
 | DELETE | `/{uuid}/documents` | Remove documents |
 | PATCH | `/{uuid}/filters` | Update filters |
+| GET | `/{uuid}/settings` | Get agent settings |
+| PATCH | `/{uuid}/settings` | Update agent settings |
 
 ### Query (`/v1/agents/projects`) — operator role
 | Method | Path | Description |
@@ -92,6 +96,30 @@ AGENTS_ENABLED=true
 HINDSIGHT_URL=http://hindsight:8888
 HINDSIGHT_NAMESPACE=orkestra
 ```
+
+## Per-Project Agent Settings
+
+Stored in `AgentSettings` on the Project model. All optional — unset fields fall back to persona defaults.
+
+| Setting | Effect |
+|---------|--------|
+| `systemPrompt` | Overrides persona's default system context |
+| `directives` | Extra rules merged on top of persona directives |
+| `skepticism` | 1=trusting, 5=strict to docs (0=persona default) |
+| `literalism` | 1=creative, 5=literal (0=persona default) |
+| `empathy` | 1=detached, 5=helpful/warm (0=persona default) |
+| `temperature` | "precise", "balanced", "creative" |
+| `language` | Force response language (e.g. "en", "it") |
+| `maxTokens` | Response length budget |
+
+## Token Usage Tracking
+
+Each assistant message records Hindsight Reflect token usage:
+- `inputTokens` — question + RAG context + directives sent to LLM
+- `outputTokens` — generated response tokens
+- `totalTokens` — sum
+
+Token data flows: Hindsight API response → `MsgMeta` → MongoDB → frontend display.
 
 ## Graceful Degradation
 

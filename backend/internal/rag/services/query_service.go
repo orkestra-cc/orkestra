@@ -373,7 +373,8 @@ func (s *queryService) expandContext(ctx context.Context, chunkUUID, chunkText s
 }
 
 // expandContextGraph performs full graph-aware context expansion:
-// section hierarchy, sibling chunks, cross-references, and definitions.
+// section hierarchy, sibling chunks, cross-references, definitions,
+// and similar chunks from other documents.
 func (s *queryService) expandContextGraph(ctx context.Context, chunkUUID, chunkText string) string {
 	result, err := s.graphRepo.ExecuteRead(ctx, "", `
 		MATCH (c:RagChunk {uuid: $uuid})
@@ -429,6 +430,32 @@ func (s *queryService) expandContextGraph(ctx context.Context, chunkUUID, chunkT
 				if term != "" && def != "" {
 					sb.WriteString(fmt.Sprintf("\n  - %s: %s", term, def))
 				}
+			}
+		}
+	}
+
+	// Cross-document similar chunks via SIMILAR_TO edges
+	simResult, err := s.graphRepo.ExecuteRead(ctx, "", `
+		MATCH (c:RagChunk {uuid: $uuid})-[r:SIMILAR_TO]-(related:RagChunk)
+		WHERE related.documentUuid <> c.documentUuid
+		WITH related, r.similarity AS sim
+		ORDER BY sim DESC
+		LIMIT 3
+		OPTIONAL MATCH (doc:RagDocument {uuid: related.documentUuid})
+		RETURN related.text AS text, related.fullPath AS fullPath,
+		       doc.title AS docTitle, sim
+	`, map[string]interface{}{"uuid": chunkUUID})
+
+	if err == nil && len(simResult.Rows) > 0 {
+		sb.WriteString("\n\nRelated content from other documents:")
+		for _, r := range simResult.Rows {
+			docTitle, _ := r["docTitle"].(string)
+			fullPath, _ := r["fullPath"].(string)
+			text, _ := r["text"].(string)
+			sim, _ := r["sim"].(float64)
+			if text != "" {
+				sb.WriteString(fmt.Sprintf("\n\n[%s — %s (%.0f%% similar)]:\n%s",
+					docTitle, fullPath, sim*100, text))
 			}
 		}
 	}

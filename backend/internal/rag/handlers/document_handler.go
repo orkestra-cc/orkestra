@@ -136,3 +136,21 @@ func (h *DocumentHandler) DeleteDocument(ctx context.Context, req *models.Delete
 	resp.Body.Message = "Document deleted successfully"
 	return resp, nil
 }
+
+func (h *DocumentHandler) GetDocumentRelations(ctx context.Context, req *models.GetDocumentRelationsRequest) (*models.GetDocumentRelationsResponse, error) {
+	summaries, links, err := h.ingestionService.GetDocumentRelations(ctx, req.UUID)
+	if err != nil {
+		return nil, huma.Error500InternalServerError("Failed to get document relations", err)
+	}
+	resp := &models.GetDocumentRelationsResponse{}
+	resp.Body.RelatedDocuments = summaries
+	resp.Body.Links = links
+	resp.Body.TotalLinks = len(links)
+	if resp.Body.RelatedDocuments == nil {
+		resp.Body.RelatedDocuments = []models.RelatedDocSummary{}
+	}
+	if resp.Body.Links == nil {
+		resp.Body.Links = []models.CrossDocLink{}
+	}
+	return resp, nil
+}
