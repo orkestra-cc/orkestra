@@ -507,7 +507,7 @@ function ProjectsTable() {
   const [showFormModal, setShowFormModal] = useState(false);
   const [editingProject, setEditingProject] = useState<AgentProject | null>(null);
   const [deletingProject, setDeletingProject] = useState<AgentProject | null>(null);
-  const [docsProject, setDocsProject] = useState<AgentProject | null>(null);
+  const [docsProjectUuid, setDocsProjectUuid] = useState<string | null>(null);
   const [settingsProject, setSettingsProject] = useState<AgentProject | null>(null);
 
   const queryParams = statusFilter ? { status: statusFilter } : undefined;
@@ -639,7 +639,7 @@ function ProjectsTable() {
                             <FontAwesomeIcon icon={faEllipsisV} />
                           </Dropdown.Toggle>
                           <Dropdown.Menu>
-                            <Dropdown.Item onClick={() => setDocsProject(project)}>
+                            <Dropdown.Item onClick={() => setDocsProjectUuid(project.uuid)}>
                               <FontAwesomeIcon icon={faFileAlt} className="me-2" />
                               Documents
                             </Dropdown.Item>
@@ -684,9 +684,9 @@ function ProjectsTable() {
       />
 
       <ManageDocumentsModal
-        show={!!docsProject}
-        onHide={() => setDocsProject(null)}
-        project={docsProject}
+        show={!!docsProjectUuid}
+        onHide={() => setDocsProjectUuid(null)}
+        project={projects.find((p) => p.uuid === docsProjectUuid) ?? null}
       />
 
       <SettingsPanel

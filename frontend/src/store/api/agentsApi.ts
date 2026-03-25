@@ -65,7 +65,10 @@ export const agentsApi = baseApi.injectEndpoints({
         method: 'POST',
         body: { documentUuids },
       }),
-      invalidatesTags: (_result, _err, { uuid }) => [{ type: 'AgentProject', id: uuid }],
+      invalidatesTags: (_result, _err, { uuid }) => [
+        'AgentProject',
+        { type: 'AgentProject', id: uuid },
+      ],
     }),
 
     removeProjectDocuments: builder.mutation<AgentProject, { uuid: string; documentUuids: string[] }>({
@@ -74,7 +77,10 @@ export const agentsApi = baseApi.injectEndpoints({
         method: 'DELETE',
         body: { documentUuids },
       }),
-      invalidatesTags: (_result, _err, { uuid }) => [{ type: 'AgentProject', id: uuid }],
+      invalidatesTags: (_result, _err, { uuid }) => [
+        'AgentProject',
+        { type: 'AgentProject', id: uuid },
+      ],
     }),
 
     updateProjectFilters: builder.mutation<AgentProject, { uuid: string; isoStandards?: string[]; categories?: string[] }>({
