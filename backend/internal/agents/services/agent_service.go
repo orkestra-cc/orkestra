@@ -120,15 +120,29 @@ func (s *agentService) Query(ctx context.Context, req *models.AgentQueryRequest,
 	}
 
 	// 6. Retain Phase (async, fire-and-forget) — build persistent knowledge
-	if ragResult != nil && ragResult.ContextText != "" && project.HindsightBankID != "" {
+	if project.HindsightBankID != "" {
 		go func() {
 			retainCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
-			items := []MemoryEntry{{
-				Content: ragResult.ContextText,
-				Context: fmt.Sprintf("RAG query: %s", req.Body.Question),
-				Tags:    []string{"rag", "auto"},
-			}}
+
+			var items []MemoryEntry
+
+			// Always retain the user's message as a conversation memory
+			items = append(items, MemoryEntry{
+				Content: fmt.Sprintf("User said: %s", req.Body.Question),
+				Context: fmt.Sprintf("Conversation %s, persona: %s", conversationID, persona),
+				Tags:    []string{"conversation", "user"},
+			})
+
+			// Retain RAG context when available
+			if ragResult != nil && ragResult.ContextText != "" {
+				items = append(items, MemoryEntry{
+					Content: ragResult.ContextText,
+					Context: fmt.Sprintf("RAG query: %s", req.Body.Question),
+					Tags:    []string{"rag", "auto"},
+				})
+			}
+
 			if err := s.hsClient.Retain(retainCtx, project.HindsightBankID, items, nil); err != nil {
 				s.logger.Warn("Async retain failed", slog.String("error", err.Error()))
 			}
@@ -140,15 +154,27 @@ func (s *agentService) Query(ctx context.Context, req *models.AgentQueryRequest,
 	var reflectTimeMs int64
 	var inputTokens, outputTokens, totalTokens int32
 
-	reflectCtx := s.buildReflectContext(profile, ragResult)
+	// Fetch conversation history for context
+	var conversationMessages []models.Message
+	if conv, err := s.convRepo.GetByUUID(ctx, conversationID); err == nil && conv != nil {
+		conversationMessages = conv.Messages
+	}
+
+	reflectCtx := s.buildReflectContext(profile, ragResult, conversationMessages)
 
 	if project.HindsightBankID != "" {
 		// Use a detached context with generous timeout — local LLMs can be slow
 		reflectCtxTimeout, reflectCancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer reflectCancel()
 
+		// Cap reflect tokens — persona MaxTokens is for full RAG answers; conversational queries need less
+		reflectMaxTokens := profile.MaxTokens
+		if reflectMaxTokens > 2048 {
+			reflectMaxTokens = 2048
+		}
+
 		reflectStart := time.Now()
-		result, err := s.hsClient.Reflect(reflectCtxTimeout, project.HindsightBankID, req.Body.Question, reflectCtx, profile.MaxTokens, nil)
+		result, err := s.hsClient.Reflect(reflectCtxTimeout, project.HindsightBankID, req.Body.Question, reflectCtx, reflectMaxTokens, nil)
 		reflectTimeMs = time.Since(reflectStart).Milliseconds()
 		if err != nil {
 			s.logger.Warn("Hindsight reflect failed, falling back to RAG answer",
@@ -273,8 +299,8 @@ func mergeProfile(base models.PersonaProfile, settings *models.AgentSettings) mo
 	return merged
 }
 
-// buildReflectContext combines persona directives and RAG results into the context for Hindsight reflect.
-func (s *agentService) buildReflectContext(profile models.PersonaProfile, ragResult *RAGBridgeResult) string {
+// buildReflectContext combines persona directives, conversation history, and RAG results into the context for Hindsight reflect.
+func (s *agentService) buildReflectContext(profile models.PersonaProfile, ragResult *RAGBridgeResult, conversationMessages []models.Message) string {
 	var sb strings.Builder
 
 	// Persona context
@@ -285,6 +311,30 @@ func (s *agentService) buildReflectContext(profile models.PersonaProfile, ragRes
 		sb.WriteString("- ")
 		sb.WriteString(d)
 		sb.WriteString("\n")
+	}
+
+	// Conversation history (last 6 messages, compact format)
+	if len(conversationMessages) > 0 {
+		sb.WriteString("\nRECENT CONVERSATION:\n")
+		start := 0
+		if len(conversationMessages) > 6 {
+			start = len(conversationMessages) - 6
+		}
+		for _, msg := range conversationMessages[start:] {
+			if msg.Role == "user" {
+				content := msg.Content
+				if len(content) > 200 {
+					content = content[:200] + "..."
+				}
+				sb.WriteString(fmt.Sprintf("User: %s\n", content))
+			} else if msg.Content != "" {
+				content := msg.Content
+				if len(content) > 200 {
+					content = content[:200] + "..."
+				}
+				sb.WriteString(fmt.Sprintf("Assistant: %s\n", content))
+			}
+		}
 	}
 
 	// RAG context

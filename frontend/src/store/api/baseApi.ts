@@ -134,6 +134,9 @@ export const baseApi = createApi({
     // Agents module tags
     'AgentProject',
     'AgentConversation',
+    // Personal Agent tags
+    'PersonalAgent',
+    'PersonalConversation',
   ],
   // Keep cache for 5 minutes by default
   keepUnusedDataFor: 300,
@@ -150,7 +153,7 @@ export const {
 } = baseApi;
 
 // Helper function to invalidate multiple tags
-export const invalidateApiTags = (tags: Array<"User" | "Auth" | "Navigation" | "Dashboard" | "Analytics" | "Sales" | "Orders" | "Projects" | "Tasks" | "Events" | "Chat" | "Email" | "Kanban" | "SupportTicket" | "Weather" | "Storage" | "Reports" | "Customer" | "Supplier" | "Company" | "Invoice" | "Notification" | "BillingStats" | "BusinessRegistry" | "CompanyLookup" | "DocumentTemplate" | "GeneratedDocument" | "GraphQuery" | "GraphSchema" | "VectorIndex" | "RagModel" | "RagDocument" | "RagRelationship" | "AIModel" | "AgentProject" | "AgentConversation">) => {
+export const invalidateApiTags = (tags: Array<"User" | "Auth" | "Navigation" | "Dashboard" | "Analytics" | "Sales" | "Orders" | "Projects" | "Tasks" | "Events" | "Chat" | "Email" | "Kanban" | "SupportTicket" | "Weather" | "Storage" | "Reports" | "Customer" | "Supplier" | "Company" | "Invoice" | "Notification" | "BillingStats" | "BusinessRegistry" | "CompanyLookup" | "DocumentTemplate" | "GeneratedDocument" | "GraphQuery" | "GraphSchema" | "VectorIndex" | "RagModel" | "RagDocument" | "RagRelationship" | "AIModel" | "AgentProject" | "AgentConversation" | "PersonalAgent" | "PersonalConversation">) => {
   return baseApi.util.invalidateTags(tags);
 };
 

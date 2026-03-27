@@ -6,22 +6,25 @@ AI agent system powered by [Hindsight](https://hindsight.vectorize.io/) persiste
 
 ```
 handlers/
-  ├── project_handler.go    ← Project CRUD endpoints
-  └── agent_handler.go      ← Agent query + conversation endpoints
+  ├── project_handler.go         ← Project CRUD endpoints
+  ├── agent_handler.go           ← Agent query + conversation endpoints
+  └── personal_agent_handler.go  ← Per-user personal agent endpoints
 services/
-  ├── project_service.go    ← Project CRUD + Hindsight bank lifecycle
-  ├── agent_service.go      ← Query orchestration: RAG → Retain → Reflect
-  ├── hindsight_client.go   ← Thin wrapper around Hindsight Go SDK
-  └── rag_bridge.go         ← Consumer interface for scoped RAG queries
+  ├── project_service.go         ← Project CRUD + Hindsight bank lifecycle
+  ├── agent_service.go           ← Query orchestration: RAG → Retain → Reflect
+  ├── personal_agent_service.go  ← Per-user auto-provisioning + delegation
+  ├── hindsight_client.go        ← Thin wrapper around Hindsight Go SDK
+  └── rag_bridge.go              ← Consumer interface for scoped RAG queries
 models/
-  ├── project.go            ← Project MongoDB model
-  ├── conversation.go       ← Conversation + Message models
-  ├── role_config.go        ← Persona definitions + RBAC validation
-  └── dto.go                ← Huma request/response DTOs
+  ├── project.go                 ← Project MongoDB model (incl. IsPersonal fields)
+  ├── conversation.go            ← Conversation + Message models
+  ├── role_config.go             ← Persona definitions + RBAC validation
+  ├── dto.go                     ← Huma request/response DTOs
+  └── personal_dto.go            ← Personal agent DTOs
 repository/
-  ├── project_repository.go       ← MongoDB: agent_projects
-  └── conversation_repository.go  ← MongoDB: agent_conversations
-routes.go                   ← RegisterProjectRoutes, RegisterQueryRoutes, RegisterAdminRoutes
+  ├── project_repository.go      ← MongoDB: agent_projects (incl. GetPersonalByUserUUID)
+  └── conversation_repository.go ← MongoDB: agent_conversations
+routes.go                        ← RegisterProjectRoutes, RegisterQueryRoutes, RegisterAdminRoutes, RegisterPersonalAgentRoutes
 ```
 
 ## Data Storage
@@ -83,11 +86,35 @@ Query-time behavior profiles (not RBAC roles). Users select any persona at or be
 | GET | `/conversations/{uuid}` | Get conversation |
 | DELETE | `/conversations/{uuid}` | Delete conversation |
 
+### Personal Agent (`/v1/agents/personal`) — any authenticated user (guest+)
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/` | Get or auto-create personal agent |
+| POST | `/query` | Query personal agent |
+| POST | `/documents` | Add documents to scope |
+| DELETE | `/documents` | Remove documents from scope |
+| GET | `/settings` | Get personal agent settings |
+| PATCH | `/settings` | Update personal agent settings |
+| GET | `/conversations` | List personal conversations |
+| GET | `/conversations/{uuid}` | Get conversation |
+| DELETE | `/conversations/{uuid}` | Delete conversation |
+
 ### Admin (`/v1/agents`) — administrator role
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/projects/{uuid}/bank` | Hindsight bank info |
 | GET | `/health` | Hindsight health check |
+
+## Personal Agent
+
+Every user gets a personal AI agent backed by an auto-provisioned project. The first `GET /v1/agents/personal` call creates a project with `isPersonal: true` and `personalUserUuid: <userUUID>`, plus a Hindsight bank (`{namespace}-personal-{userUUID}`).
+
+Key design decisions:
+- Personal projects are **excluded** from `ListProjects` (filtered by `isPersonal != true`)
+- Personal projects **cannot be deleted** via project management endpoints
+- Conversations are **ownership-verified** (user can only access their own)
+- **Race condition safe**: unique sparse index on `personalUserUuid` prevents double-creation
+- Uses the same query orchestration flow (RAG → Retain → Reflect) as project agents
 
 ## Configuration
 

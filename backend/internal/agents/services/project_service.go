@@ -129,6 +129,10 @@ func (s *projectService) DeleteProject(ctx context.Context, uuid string) error {
 		return err
 	}
 
+	if project.IsPersonal {
+		return fmt.Errorf("personal agent projects cannot be deleted via project management")
+	}
+
 	// Delete Hindsight bank
 	if project.HindsightBankID != "" {
 		if err := s.hsClient.DeleteBank(ctx, project.HindsightBankID); err != nil {

@@ -19,6 +19,7 @@ const projectCollection = "agent_projects"
 type ProjectRepository interface {
 	Create(ctx context.Context, project *models.Project) error
 	GetByUUID(ctx context.Context, uuid string) (*models.Project, error)
+	GetPersonalByUserUUID(ctx context.Context, userUUID string) (*models.Project, error)
 	List(ctx context.Context, status string) ([]models.Project, error)
 	Update(ctx context.Context, uuid string, update bson.M) (*models.Project, error)
 	Delete(ctx context.Context, uuid string) error
@@ -39,6 +40,12 @@ func NewProjectRepository(db *mongo.Database) ProjectRepository {
 		{Keys: bson.D{{Key: "uuid", Value: 1}}, Options: options.Index().SetUnique(true)},
 		{Keys: bson.D{{Key: "status", Value: 1}}},
 		{Keys: bson.D{{Key: "createdBy", Value: 1}}},
+		{
+			Keys: bson.D{{Key: "personalUserUuid", Value: 1}},
+			Options: options.Index().
+				SetSparse(true).
+				SetUnique(true),
+		},
 	}
 	coll.Indexes().CreateMany(ctx, indexes) //nolint:errcheck
 
@@ -78,8 +85,25 @@ func (r *projectRepository) GetByUUID(ctx context.Context, uuid string) (*models
 	return &project, nil
 }
 
+func (r *projectRepository) GetPersonalByUserUUID(ctx context.Context, userUUID string) (*models.Project, error) {
+	var project models.Project
+	err := r.collection.FindOne(ctx, bson.M{
+		"isPersonal":       true,
+		"personalUserUuid": userUUID,
+	}).Decode(&project)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			return nil, nil // not found — caller should auto-create
+		}
+		return nil, fmt.Errorf("get personal project: %w", err)
+	}
+	return &project, nil
+}
+
 func (r *projectRepository) List(ctx context.Context, status string) ([]models.Project, error) {
-	filter := bson.M{}
+	filter := bson.M{
+		"isPersonal": bson.M{"$ne": true}, // exclude personal projects
+	}
 	if status != "" {
 		filter["status"] = status
 	}

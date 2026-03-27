@@ -8,6 +8,9 @@ export interface AgentProject {
   documentUuids: string[];
   isoStandards?: string[];
   categories?: string[];
+  settings?: AgentSettings;
+  isPersonal?: boolean;
+  personalUserUuid?: string;
   status: 'active' | 'archived';
   createdBy: string;
   createdAt: string;

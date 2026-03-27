@@ -205,8 +205,15 @@ func buildSuperAdminRoutes() models.RouteGroup {
 func buildAIRoutes() models.RouteGroup {
 	return models.RouteGroup{
 		Label: "AI",
-		Roles: []string{"operator"},
+		Roles: []string{"guest"},
 		Children: []models.NavItem{
+			{
+				Name:   "Personal Agent",
+				Icon:   "user-astronaut",
+				To:     "/ai/personal-agent",
+				Active: true,
+				Roles:  []string{"guest"},
+			},
 			{
 				Name:   "AI Agents",
 				Icon:   "robot",

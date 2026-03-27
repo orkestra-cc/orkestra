@@ -254,6 +254,7 @@ const GraphRAG = lazy(() => import('pages/graph/rag'));
 const AIModels = lazy(() => import('pages/ai/models'));
 const AgentProjects = lazy(() => import('pages/ai/agents'));
 const AgentChat = lazy(() => import('pages/ai/agents/AgentChat'));
+const PersonalAgentChat = lazy(() => import('pages/ai/personal-agent/PersonalAgentChat'));
 
 import TableView from 'reference/app-examples/support-desk/tickets-layout/TableView';
 import CardView from 'reference/app-examples/support-desk/tickets-layout/CardView';
@@ -994,6 +995,18 @@ const routes: RouteObject[] = [
               >
                 <Suspense key="ai-models" fallback={<FalconLoader />}>
                   <AIModels />
+                </Suspense>
+              </ProtectedRoute>
+            )
+          },
+          {
+            path: 'ai/personal-agent',
+            element: (
+              <ProtectedRoute
+                requiredPermissions={[['developer', 'ceo', 'administrator', 'manager', 'operator', 'guest']]}
+              >
+                <Suspense key="ai-personal-agent" fallback={<FalconLoader />}>
+                  <PersonalAgentChat />
                 </Suspense>
               </ProtectedRoute>
             )

@@ -19,6 +19,10 @@ type Project struct {
 	// Agent behavior tuning — overrides persona defaults
 	Settings *AgentSettings `bson:"settings,omitempty" json:"settings,omitempty"`
 
+	// Personal agent fields — set when this project backs a per-user personal agent
+	IsPersonal       bool   `bson:"isPersonal,omitempty" json:"isPersonal,omitempty"`
+	PersonalUserUUID string `bson:"personalUserUuid,omitempty" json:"personalUserUuid,omitempty"`
+
 	Status    string    `bson:"status" json:"status"` // active, archived
 	CreatedBy string    `bson:"createdBy" json:"createdBy"`
 	CreatedAt time.Time `bson:"createdAt" json:"createdAt"`

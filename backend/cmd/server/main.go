@@ -495,6 +495,7 @@ func main() {
 	// Initialize Agents module (Hindsight AI agent integration)
 	var agentProjectHandler *agentsHandlers.ProjectHandler
 	var agentQueryHandler *agentsHandlers.AgentHandler
+	var personalAgentHandler *agentsHandlers.PersonalAgentHandler
 	agentsEnabled := cfg.Agents.Enabled
 
 	if agentsEnabled {
@@ -514,6 +515,10 @@ func main() {
 
 		agentProjectHandler = agentsHandlers.NewProjectHandler(projectService)
 		agentQueryHandler = agentsHandlers.NewAgentHandler(agentService)
+
+		// Personal agent — per-user auto-provisioned agent
+		personalAgentService := agentsSvc.NewPersonalAgentService(projectRepo, agentService, hsClient, cfg.Agents.HindsightNamespace, logger)
+		personalAgentHandler = agentsHandlers.NewPersonalAgentHandler(personalAgentService)
 
 		logger.Info("Agents module initialized",
 			slog.String("hindsightURL", cfg.Agents.HindsightURL),
@@ -795,6 +800,13 @@ func main() {
 
 	// Agents routes - different role levels for different operations
 	if agentsEnabled {
+		// Personal agent - any authenticated user (guest and above)
+		protectedRouter.Group(func(r chi.Router) {
+			r.Use(authMiddlewareHandler.RequireHierarchicalRole("guest"))
+			personalAgentAPI := humachi.New(r, apiConfig)
+			agents.RegisterPersonalAgentRoutes(personalAgentAPI, personalAgentHandler)
+		})
+
 		// Project management - manager role and above
 		protectedRouter.Group(func(r chi.Router) {
 			r.Use(authMiddlewareHandler.RequireHierarchicalRole("manager"))

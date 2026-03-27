@@ -198,10 +198,18 @@ func (c *hindsightClient) Recall(ctx context.Context, bankID, query string, maxT
 }
 
 func (c *hindsightClient) Reflect(ctx context.Context, bankID, query, extraContext string, maxTokens int32, tags []string) (*ReflectResult, error) {
-	req := hindsight.NewReflectRequest(query)
+	// Inline context into query (context param is deprecated in Hindsight v0.4+)
+	fullQuery := query
 	if extraContext != "" {
-		req.Context = *hindsight.NewNullableString(&extraContext)
+		fullQuery = query + "\n\n" + extraContext
 	}
+
+	req := hindsight.NewReflectRequest(fullQuery)
+
+	// Use low budget to minimize LLM iterations and token usage
+	budget := hindsight.LOW
+	req.Budget = &budget
+
 	if maxTokens > 0 {
 		req.MaxTokens = &maxTokens
 	}
