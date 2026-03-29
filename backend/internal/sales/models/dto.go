@@ -26,6 +26,33 @@ type SkillResponse struct {
 	}
 }
 
+// SkillTaskResponse is the Huma output for async skill submission
+type SkillTaskResponse struct {
+	Body struct {
+		TaskID string `json:"taskId" doc:"Task UUID for polling"`
+	}
+}
+
+// SkillTaskPollRequest is the Huma input for GET /v1/sales/skills/{taskId}
+type SkillTaskPollRequest struct {
+	TaskID string `path:"taskId" doc:"Task UUID returned by skill submission"`
+}
+
+// SkillTaskPollResponse is the Huma output for polling a skill task
+type SkillTaskPollResponse struct {
+	Body struct {
+		TaskID       string          `json:"taskId"`
+		Status       string          `json:"status" doc:"running, completed, or failed"`
+		Skill        string          `json:"skill,omitempty"`
+		Result       json.RawMessage `json:"result,omitempty"`
+		InputTokens  int             `json:"inputTokens,omitempty"`
+		OutputTokens int             `json:"outputTokens,omitempty"`
+		LatencyMs    int64           `json:"latencyMs,omitempty"`
+		ModelUsed    string          `json:"modelUsed,omitempty"`
+		Error        string          `json:"error,omitempty"`
+	}
+}
+
 // --- Prospect Request/Response ---
 
 // ProspectRequest is the Huma input for POST /v1/sales/prospect

@@ -574,7 +574,8 @@ func main() {
 			cfg.Sales, logger,
 		)
 
-		salesSkillHandler = salesHandlers.NewSkillHandler(orchestrator)
+		skillStore := salesSvc.NewSkillStore()
+		salesSkillHandler = salesHandlers.NewSkillHandler(orchestrator, skillStore, logger)
 		salesProspectHandler = salesHandlers.NewProspectHandler(orchestrator)
 		salesJobHandler = salesHandlers.NewJobHandler(orchestrator)
 		salesReportHandler = salesHandlers.NewReportHandler(salesReportRepo, salesJobRepo, reportGen)

@@ -27,6 +27,10 @@ Produce a comprehensive company profile covering:
 5. Growth signals and recent developments
 6. Market positioning
 
+## Language
+
+All string values in the JSON output MUST be written in **{{.Locale}}**.
+
 ## Output Format
 
 Respond ONLY with a JSON object:

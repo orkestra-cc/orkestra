@@ -1,11 +1,11 @@
-import { useState } from 'react';
+import { useState, useRef, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
 import { Row, Col, Card, Form, Button, Spinner, Badge } from 'react-bootstrap';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faMagic, faPaperPlane } from '@fortawesome/free-solid-svg-icons';
 import Background from 'components/common/Background';
 import greetingsBg from 'assets/img/illustrations/ticket-greetings-bg.png';
-import { useRunSkillMutation } from '../../../store/api/salesApi';
+import { useSubmitSkillMutation, useLazyPollSkillTaskQuery } from '../../../store/api/salesApi';
 
 const SKILL_META: Record<string, { title: string; description: string }> = {
   research: { title: 'Company Research', description: 'Firmographic analysis and business profiling' },
@@ -20,6 +20,8 @@ const SKILL_META: Record<string, { title: string; description: string }> = {
   icp: { title: 'ICP Builder', description: 'Ideal Customer Profile generation' },
 };
 
+const POLL_INTERVAL = 2000;
+
 const SkillPage = () => {
   const { skill } = useParams<{ skill: string }>();
   const meta = SKILL_META[skill || ''] || { title: skill, description: '' };
@@ -28,16 +30,57 @@ const SkillPage = () => {
   const [context, setContext] = useState('');
   const [locale, setLocale] = useState('it');
   const [result, setResult] = useState<any>(null);
+  const [running, setRunning] = useState(false);
 
-  const [runSkill, { isLoading }] = useRunSkillMutation();
+  const [submitSkill] = useSubmitSkillMutation();
+  const [pollTask] = useLazyPollSkillTaskQuery();
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const stopPolling = useCallback(() => {
+    if (pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+  }, []);
 
   const handleSubmit = async () => {
     if (!url || !skill) return;
+    setResult(null);
+    setRunning(true);
+    stopPolling();
+
     try {
-      const data = await runSkill({ skill, url, locale, context: context || undefined }).unwrap();
-      setResult(data);
+      const { taskId } = await submitSkill({ skill, url, locale, context: context || undefined }).unwrap();
+
+      pollRef.current = setInterval(async () => {
+        try {
+          const data = await pollTask(taskId, false).unwrap();
+          if (data.status === 'completed') {
+            stopPolling();
+            setRunning(false);
+            setResult({
+              skill: data.skill,
+              result: data.result,
+              inputTokens: data.inputTokens,
+              outputTokens: data.outputTokens,
+              latencyMs: data.latencyMs,
+              modelUsed: data.modelUsed,
+            });
+          } else if (data.status === 'failed') {
+            stopPolling();
+            setRunning(false);
+            setResult({ error: data.error || 'Skill execution failed' });
+          }
+        } catch {
+          stopPolling();
+          setRunning(false);
+          setResult({ error: 'Failed to poll task status' });
+        }
+      }, POLL_INTERVAL);
     } catch (err: any) {
-      setResult({ error: err?.data?.detail || err?.message || 'Request failed' });
+      setRunning(false);
+      const detail = err?.data?.detail || err?.data?.errors?.[0]?.message;
+      setResult({ error: detail || err?.message || 'Failed to submit skill' });
     }
   };
 
@@ -91,9 +134,9 @@ const SkillPage = () => {
                     </Form.Group>
                   </Col>
                 </Row>
-                <Button variant="primary" type="submit" disabled={!url || isLoading} className="mt-3">
-                  {isLoading ? <Spinner size="sm" className="me-1" /> : <FontAwesomeIcon icon={faPaperPlane} className="me-1" />}
-                  Run {meta.title}
+                <Button variant="primary" type="submit" disabled={!url || running} className="mt-3">
+                  {running ? <Spinner size="sm" className="me-1" /> : <FontAwesomeIcon icon={faPaperPlane} className="me-1" />}
+                  {running ? 'Processing...' : `Run ${meta.title}`}
                 </Button>
               </Form>
             </Card.Body>

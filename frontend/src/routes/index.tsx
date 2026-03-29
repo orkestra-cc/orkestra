@@ -263,7 +263,6 @@ const SalesJobs = lazy(() => import('pages/sales/jobs'));
 const SalesJobDetail = lazy(() => import('pages/sales/jobs/detail'));
 const SalesReports = lazy(() => import('pages/sales/reports'));
 const SalesReportDetail = lazy(() => import('pages/sales/reports/detail'));
-const SalesPrompts = lazy(() => import('pages/sales/prompts'));
 const SalesSettings = lazy(() => import('pages/sales/settings'));
 
 import TableView from 'reference/app-examples/support-desk/tickets-layout/TableView';
@@ -1103,16 +1102,6 @@ const routes: RouteObject[] = [
               <ProtectedRoute requiredPermissions={[['developer', 'ceo', 'administrator', 'manager']]}>
                 <Suspense key="sales-report-detail" fallback={<FalconLoader />}>
                   <SalesReportDetail />
-                </Suspense>
-              </ProtectedRoute>
-            )
-          },
-          {
-            path: 'sales/prompts',
-            element: (
-              <ProtectedRoute requiredPermissions={[['developer', 'ceo', 'administrator', 'manager']]}>
-                <Suspense key="sales-prompts" fallback={<FalconLoader />}>
-                  <SalesPrompts />
                 </Suspense>
               </ProtectedRoute>
             )

@@ -121,7 +121,17 @@ func (s *orchestratorService) RunSkill(ctx context.Context, skillName models.Ski
 		return nil, fmt.Errorf("unknown skill: %s", skillName)
 	}
 
-	llm, userTemp, userMaxTokens, userLocale, err := s.getLLMForUser(ctx, userID)
+	// Use a background context with skill timeout so the LLM call isn't
+	// cancelled by client/proxy disconnects (e.g. Cloudflare dropping the connection).
+	// Same pattern as runProspectPipeline which uses context.Background().
+	skillTimeout := s.cfg.SkillTimeout
+	if skillTimeout == 0 {
+		skillTimeout = 90 * time.Second
+	}
+	skillCtx, cancel := context.WithTimeout(context.Background(), skillTimeout)
+	defer cancel()
+
+	llm, userTemp, userMaxTokens, userLocale, err := s.getLLMForUser(skillCtx, userID)
 	if err != nil {
 		return nil, fmt.Errorf("get LLM provider: %w", err)
 	}
@@ -132,7 +142,7 @@ func (s *orchestratorService) RunSkill(ctx context.Context, skillName models.Ski
 	vars := map[string]any{
 		"URL":     url,
 		"Context": extraContext,
-		"Locale":  locale,
+		"Locale":  localeToLanguage(locale),
 	}
 	systemPrompt, err := s.promptLoader.LoadSkill(string(skillName), locale, vars)
 	if err != nil {
@@ -165,7 +175,7 @@ func (s *orchestratorService) RunSkill(ctx context.Context, skillName models.Ski
 	}
 
 	if usageProvider, ok := llm.(providers.LLMProviderWithUsage); ok {
-		result, callErr := usageProvider.CompleteWithUsage(ctx, userMessage, opts)
+		result, callErr := usageProvider.CompleteWithUsage(skillCtx, userMessage, opts)
 		if callErr != nil {
 			return nil, fmt.Errorf("LLM completion for skill %s: %w", skillName, callErr)
 		}
@@ -173,7 +183,7 @@ func (s *orchestratorService) RunSkill(ctx context.Context, skillName models.Ski
 		inputTokens = result.InputTokens
 		outputTokens = result.OutputTokens
 	} else {
-		text, err = llm.Complete(ctx, userMessage, opts)
+		text, err = llm.Complete(skillCtx, userMessage, opts)
 		if err != nil {
 			return nil, fmt.Errorf("LLM completion for skill %s: %w", skillName, err)
 		}
@@ -634,10 +644,28 @@ func (s *orchestratorService) buildAgentDefs(locale string, vars map[string]any)
 	return defs, nil
 }
 
+// localeToLanguage maps ISO locale codes to full language names for prompt clarity.
+func localeToLanguage(locale string) string {
+	switch locale {
+	case "it":
+		return "Italian"
+	case "en":
+		return "English"
+	case "de":
+		return "German"
+	case "fr":
+		return "French"
+	case "es":
+		return "Spanish"
+	default:
+		return "English"
+	}
+}
+
 func (s *orchestratorService) buildPromptVars(scraped *models.ScrapedCompanyData, enrichment *models.CompanyEnrichmentData, locale, url string) map[string]any {
 	vars := map[string]any{
 		"URL":    url,
-		"Locale": locale,
+		"Locale": localeToLanguage(locale),
 	}
 	if scraped != nil {
 		vars["CompanyName"] = scraped.CompanyName

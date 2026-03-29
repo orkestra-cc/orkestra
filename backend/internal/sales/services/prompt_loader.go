@@ -29,7 +29,16 @@ var promptMeta = []struct {
 	{"agents", "opportunity-scoring", "Opportunity Scoring", "BANT + MEDDIC lead qualification scoring"},
 	{"agents", "competitive-analysis", "Competitive Analysis", "Competitive landscape and market positioning"},
 	{"agents", "outreach-strategy", "Outreach Strategy", "Multi-touch outreach email sequence generation"},
-	{"skills", "research", "Company Research Skill", "Individual company research skill endpoint"},
+	{"skills", "research", "Company Research", "Firmographic analysis and business profiling"},
+	{"skills", "qualify", "Lead Qualification", "BANT + MEDDIC lead qualification scoring"},
+	{"skills", "contacts", "Contact Finder", "Identify decision makers and stakeholders"},
+	{"skills", "outreach", "Outreach", "Generate cold outreach email sequences"},
+	{"skills", "followup", "Follow-up", "Generate follow-up sequences"},
+	{"skills", "prep", "Meeting Prep", "Pre-meeting intelligence brief"},
+	{"skills", "proposal", "Proposal", "Client proposal generation"},
+	{"skills", "objections", "Objections", "Objection handling playbook"},
+	{"skills", "icp", "ICP Builder", "Ideal Customer Profile generation"},
+	{"skills", "competitors", "Competitors", "Competitive landscape analysis"},
 }
 
 // PromptLoader loads prompt templates from MongoDB with embedded fallback.
@@ -51,19 +60,16 @@ func NewPromptLoader(repo repository.PromptRepository, logger *slog.Logger) *Pro
 	}
 }
 
-// SeedDefaults populates the sales_prompts collection from embedded files if empty
+// SeedDefaults ensures all embedded prompts exist in the DB.
+// Existing prompts (especially customized ones) are never overwritten.
 func (l *PromptLoader) SeedDefaults(ctx context.Context) error {
-	count, err := l.repo.Count(ctx)
-	if err != nil {
-		return fmt.Errorf("count prompts: %w", err)
-	}
-	if count > 0 {
-		l.logger.Info("prompts already seeded", slog.Int64("count", count))
-		return nil
-	}
-
 	seeded := 0
 	for _, meta := range promptMeta {
+		// Skip if already in DB
+		if _, err := l.repo.GetByCategoryAndName(ctx, meta.Category, meta.Name); err == nil {
+			continue
+		}
+
 		path := meta.Category + "/" + meta.Name + ".md"
 		data, err := fs.ReadFile(l.fs, path)
 		if err != nil {
@@ -89,7 +95,9 @@ func (l *PromptLoader) SeedDefaults(ctx context.Context) error {
 		seeded++
 	}
 
-	l.logger.Info("prompts seeded from embedded defaults", slog.Int("count", seeded))
+	if seeded > 0 {
+		l.logger.Info("seeded missing prompts", slog.Int("count", seeded))
+	}
 	return nil
 }
 

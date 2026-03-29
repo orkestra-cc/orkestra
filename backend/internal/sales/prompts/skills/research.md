@@ -24,6 +24,10 @@ Research and analyze the company thoroughly. Focus on:
 7. **Market Position**: Competitive positioning, market share indicators
 8. **Italian Market Specifics**: Codice Fiscale/P.IVA if visible, ATECO classification, legal form
 
+## Language
+
+All string values in the JSON output MUST be written in **{{.Locale}}** language.
+
 ## Output Format
 
 Respond ONLY with a JSON object (no markdown fences, no commentary):

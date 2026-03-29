@@ -24,6 +24,10 @@ URL: {{.URL}}
 3. Assess market saturation and differentiation
 4. Identify opportunities for positioning against competitors
 
+## Language
+
+All string values in the JSON output MUST be written in **{{.Locale}}**.
+
 ## Output Format
 
 Respond ONLY with a JSON object:

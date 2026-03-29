@@ -19,8 +19,9 @@ func op(id, method, path, summary string) huma.Operation {
 	}
 }
 
-// RegisterSkillRoutes registers individual skill endpoints
+// RegisterSkillRoutes registers individual skill endpoints (async submission + poll)
 func RegisterSkillRoutes(api huma.API, h *handlers.SkillHandler) {
+	// Skill submission (returns taskId immediately)
 	huma.Register(api, op("sales-research", http.MethodPost, "/v1/sales/research", "Company research & firmographics"), h.Research)
 	huma.Register(api, op("sales-qualify", http.MethodPost, "/v1/sales/qualify", "BANT + MEDDIC lead qualification"), h.Qualify)
 	huma.Register(api, op("sales-contacts", http.MethodPost, "/v1/sales/contacts", "Decision maker identification"), h.Contacts)
@@ -31,6 +32,9 @@ func RegisterSkillRoutes(api huma.API, h *handlers.SkillHandler) {
 	huma.Register(api, op("sales-objections", http.MethodPost, "/v1/sales/objections", "Objection handling playbook"), h.Objections)
 	huma.Register(api, op("sales-icp", http.MethodPost, "/v1/sales/icp", "Ideal Customer Profile builder"), h.ICP)
 	huma.Register(api, op("sales-competitors", http.MethodPost, "/v1/sales/competitors", "Competitive intelligence"), h.Competitors)
+
+	// Poll for skill result
+	huma.Register(api, op("sales-skill-poll", http.MethodGet, "/v1/sales/skills/{taskId}", "Poll skill task result"), h.PollSkillTask)
 }
 
 // RegisterProspectRoutes registers prospect analysis endpoints

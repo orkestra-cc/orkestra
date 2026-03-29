@@ -17,6 +17,18 @@ interface SkillResponse {
   modelUsed: string;
 }
 
+interface SkillTaskPollResponse {
+  taskId: string;
+  status: 'running' | 'completed' | 'failed';
+  skill?: string;
+  result?: any;
+  inputTokens?: number;
+  outputTokens?: number;
+  latencyMs?: number;
+  modelUsed?: string;
+  error?: string;
+}
+
 interface ProspectRequest {
   url: string;
   locale?: string;
@@ -65,13 +77,17 @@ interface JobListResponse {
 
 export const salesApi = baseApi.injectEndpoints({
   endpoints: (builder) => ({
-    // Individual skills
-    runSkill: builder.mutation<SkillResponse, { skill: string } & SkillRequest>({
+    // Individual skills (async: POST returns taskId, then poll)
+    submitSkill: builder.mutation<{ taskId: string }, { skill: string } & SkillRequest>({
       query: ({ skill, ...body }) => ({
         url: `v1/sales/${skill}`,
         method: 'POST',
         body,
       }),
+    }),
+
+    pollSkillTask: builder.query<SkillTaskPollResponse, string>({
+      query: (taskId) => `v1/sales/skills/${taskId}`,
     }),
 
     // Full async prospect
@@ -253,7 +269,8 @@ export interface SalesSettings {
 }
 
 export const {
-  useRunSkillMutation,
+  useSubmitSkillMutation,
+  useLazyPollSkillTaskQuery,
   useCreateProspectJobMutation,
   useRunQuickProspectMutation,
   useListSalesJobsQuery,

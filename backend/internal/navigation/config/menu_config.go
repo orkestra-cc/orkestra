@@ -80,15 +80,8 @@ func buildSalesRoutes() models.RouteGroup {
 			},
 			{
 				Name:   "Reports",
-				Icon:   "file-chart-line",
+				Icon:   "chart-column",
 				To:     "/sales/reports",
-				Active: true,
-				Roles:  []string{"manager"},
-			},
-			{
-				Name:   "Prompts",
-				Icon:   "scroll",
-				To:     "/sales/prompts",
 				Active: true,
 				Roles:  []string{"manager"},
 			},

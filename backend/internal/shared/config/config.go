@@ -35,6 +35,7 @@ type SalesConfig struct {
 	Enabled         bool          // Module enabled flag (SALES_ENABLED)
 	MaxConcurrency  int           // Max parallel agent LLM calls per job (SALES_MAX_CONCURRENCY)
 	DefaultLocale   string        // Default locale for prompts (SALES_DEFAULT_LOCALE)
+	SkillTimeout    time.Duration // Timeout for individual skill calls (SALES_SKILL_TIMEOUT)
 	QuickTimeout    time.Duration // Timeout for sync /prospect/quick (SALES_QUICK_TIMEOUT)
 	FullTimeout     time.Duration // Timeout for async /prospect pipeline (SALES_FULL_TIMEOUT)
 	ScraperTimeout  time.Duration // Timeout per scrape request (SALES_SCRAPER_TIMEOUT)
@@ -403,6 +404,7 @@ func Load() (*Config, error) {
 		Enabled:         getEnvAsBool("SALES_ENABLED", false),
 		MaxConcurrency:  getEnvAsInt("SALES_MAX_CONCURRENCY", 5),
 		DefaultLocale:   getEnv("SALES_DEFAULT_LOCALE", "it"),
+		SkillTimeout:    getEnvAsDuration("SALES_SKILL_TIMEOUT", "5m"),
 		QuickTimeout:    getEnvAsDuration("SALES_QUICK_TIMEOUT", "60s"),
 		FullTimeout:     getEnvAsDuration("SALES_FULL_TIMEOUT", "15m"),
 		ScraperTimeout:  getEnvAsDuration("SALES_SCRAPER_TIMEOUT", "30s"),
