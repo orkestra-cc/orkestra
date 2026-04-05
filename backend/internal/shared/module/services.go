@@ -10,11 +10,16 @@ type ServiceKey string
 
 // Well-known service keys for cross-module communication.
 const (
-	ServiceUserService    ServiceKey = "user.service"
+	ServiceUserService     ServiceKey = "user.service"
+	ServiceAuthService     ServiceKey = "auth.service"
+	ServiceJWTService      ServiceKey = "auth.jwt"
+	ServiceOAuthProviderFactory ServiceKey = "auth.oauth_factory"
+	ServiceOAuthStateService    ServiceKey = "auth.oauth_state"
+	ServiceOAuthProviderRepo    ServiceKey = "auth.oauth_provider_repo"
 	ServiceAIModelProvider ServiceKey = "aimodels.provider"
-	ServicePDFService     ServiceKey = "documents.pdf"
-	ServiceGraphRepo      ServiceKey = "graph.repository"
-	ServiceRAGQuery       ServiceKey = "rag.query"
+	ServicePDFService      ServiceKey = "documents.pdf"
+	ServiceGraphRepo       ServiceKey = "graph.repository"
+	ServiceRAGQuery        ServiceKey = "rag.query"
 )
 
 // ServiceRegistry is a typed key-value store for cross-module service sharing.

@@ -19,9 +19,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
 
-	"github.com/orkestra/backend/internal/auth/handlers"
-	"github.com/orkestra/backend/internal/auth/models"
-	"github.com/orkestra/backend/internal/auth/repository"
+	"github.com/orkestra/backend/internal/auth"
 	"github.com/orkestra/backend/internal/auth/services"
 	"github.com/orkestra/backend/internal/billing"
 	"github.com/orkestra/backend/internal/company"
@@ -31,7 +29,7 @@ import (
 	"github.com/orkestra/backend/internal/agents"
 	"github.com/orkestra/backend/internal/sales"
 	"github.com/orkestra/backend/internal/rag"
-	devHandlers "github.com/orkestra/backend/internal/dev/handlers"
+	"github.com/orkestra/backend/internal/dev"
 	"github.com/orkestra/backend/internal/navigation"
 	"github.com/orkestra/backend/internal/reporting"
 	"github.com/orkestra/backend/internal/user"
@@ -41,9 +39,6 @@ import (
 	authMiddleware "github.com/orkestra/backend/internal/shared/middleware"
 	"github.com/orkestra/backend/internal/shared/module"
 	"github.com/orkestra/backend/internal/shared/utils"
-	userHandlers "github.com/orkestra/backend/internal/user/handlers"
-	userRepository "github.com/orkestra/backend/internal/user/repository"
-	userServices "github.com/orkestra/backend/internal/user/services"
 )
 
 func main() {
@@ -87,77 +82,9 @@ func main() {
 		log.Fatalf("Failed to connect to Redis: %v", err)
 	}
 
-	// Initialize new enhanced repositories
-	authRepo, err := repository.NewAuthRepository(db)
-	if err != nil {
-		log.Fatalf("Failed to create auth repository: %v", err)
-	}
-	oauthProviderRepo := repository.NewOAuthProviderRepository(db)
-
-	refreshTokenRepo := repository.NewRefreshTokenRepository(db)
-	authSessionRepo := repository.NewAuthSessionRepository(db)
-
-	// Initialize OAuth provider factory with configurations
-	providerConfigs := map[models.OAuthProvider]*services.OAuthProviderConfig{
-		models.OAuthProviderGoogle: {
-			ClientID:     cfg.Auth.Google.ClientID,
-			ClientSecret: cfg.Auth.Google.ClientSecret,
-			Scopes:       []string{"openid", "email", "profile"},
-			AdditionalConfig: map[string]string{
-				"android_client_id": cfg.Auth.Google.AndroidClientID,
-				"ios_client_id":     cfg.Auth.Google.IOSClientID,
-			},
-		},
-		models.OAuthProviderApple: {
-			ClientID:     cfg.Auth.Apple.ClientID,
-			ClientSecret: "", // JWT-based for Apple
-			Scopes:       []string{"name", "email"},
-			AdditionalConfig: map[string]string{
-				"team_id":          cfg.Auth.Apple.TeamID,
-				"key_id":           cfg.Auth.Apple.KeyID,
-				"private_key":      cfg.Auth.Apple.PrivateKey,
-				"private_key_path": cfg.Auth.Apple.PrivateKeyPath,
-				"redirect_url":     cfg.Auth.Apple.RedirectURL,
-			},
-		},
-		models.OAuthProviderGitHub: {
-			ClientID:     cfg.Auth.GitHub.ClientID,
-			ClientSecret: cfg.Auth.GitHub.ClientSecret,
-			Scopes:       []string{"user:email", "read:user"},
-			AdditionalConfig: map[string]string{
-				"redirect_url": cfg.Auth.GitHub.RedirectURL,
-			},
-		},
-		models.OAuthProviderDiscord: {
-			ClientID:     cfg.Auth.Discord.ClientID,
-			ClientSecret: cfg.Auth.Discord.ClientSecret,
-			Scopes:       []string{"identify", "email"},
-			AdditionalConfig: map[string]string{
-				"redirect_url": cfg.Auth.Discord.RedirectURL,
-			},
-		},
-	}
-
 	redisClientAdapter := database.NewRedisClientAdapter(redisClient)
-	providerFactory := services.NewOAuthProviderFactory(providerConfigs, redisClientAdapter)
 
-	// Initialize OAuth provider manager
-	providerManager := services.NewOAuthProviderManager(providerFactory)
-	_ = providerManager // TODO: Use in auth handlers
-
-	// Initialize JWT services
-	jwtService := services.NewJWTService(cfg.Auth.JWT.PrivateKey, cfg.Auth.JWT.PublicKey)
-
-	// Initialize OAuth state service with Redis adapter
-	redisStore := services.NewRedisOAuthStateStore(redisClientAdapter)
-	oauthStateService := services.NewOAuthStateService(redisStore)
-
-	// Initialize user management module first (required by auth service)
-	userRepo := userRepository.NewUserRepository(db)
-	userService := userServices.NewUserService(userRepo, oauthProviderRepo)
-	userHandler := userHandlers.NewUserHandler(userService)
-
-	// Initialize module registry for migrated modules
+	// Initialize module registry
 	svcRegistry := module.NewServiceRegistry()
 	modRegistry := module.NewModuleRegistry(logger)
 	modDeps := &module.Dependencies{
@@ -168,38 +95,28 @@ func main() {
 		Services:     svcRegistry,
 	}
 
-	// Register migrated modules (order matters: producers before consumers)
+	// Register all modules (order matters: producers before consumers)
+	modRegistry.Register(user.NewModule())      // produces UserService
+	modRegistry.Register(auth.NewModule())       // consumes UserService, produces JWTService + AuthService
 	modRegistry.Register(navigation.NewModule())
 	modRegistry.Register(reporting.NewModule())
-	modRegistry.Register(documents.NewModule())
-	modRegistry.Register(aimodels.NewModule())
+	modRegistry.Register(documents.NewModule())  // produces PDFService
+	modRegistry.Register(aimodels.NewModule())   // produces AIModelProvider
 	modRegistry.Register(company.NewModule())
-	modRegistry.Register(billing.NewModule())
-	modRegistry.Register(graph.NewModule())
-	modRegistry.Register(rag.NewModule())
-	modRegistry.Register(sales.NewModule())
-	modRegistry.Register(agents.NewModule())
+	modRegistry.Register(billing.NewModule())    // consumes PDFService
+	modRegistry.Register(graph.NewModule())      // produces GraphRepository
+	modRegistry.Register(rag.NewModule())        // consumes Graph + AIModels, produces RAGQuery
+	modRegistry.Register(sales.NewModule())      // consumes AIModels
+	modRegistry.Register(agents.NewModule())     // consumes RAGQuery
+	modRegistry.Register(dev.NewModule())        // consumes JWTService
 
 	if err := modRegistry.InitAll(cfg, modDeps); err != nil {
 		log.Fatalf("Failed to initialize modules: %v", err)
 	}
 
-	// Initialize auth service with all repositories
-	authService, err := services.NewAuthService(&services.AuthConfig{
-		AuthRepo:          authRepo,
-		UserService:       userService,
-		OAuthProviderRepo: oauthProviderRepo,
-		RefreshTokenRepo:  refreshTokenRepo,
-		AuthSessionRepo:   authSessionRepo,
-		JWTService:        jwtService,
-	})
-	if err != nil {
-		log.Fatalf("Failed to create enhanced auth service: %v", err)
-	}
-
-	// Initialize risk assessment service
-	riskService := services.NewRiskAssessmentService(nil, nil, nil)
-	_ = riskService // TODO: Use in auth handlers
+	// Retrieve auth infrastructure from module registry for middleware setup
+	jwtService := svcRegistry.MustGet(module.ServiceJWTService).(services.JWTService)
+	authService := svcRegistry.MustGet(module.ServiceAuthService).(services.AuthService)
 
 	// Initialize error management system
 	isDevelopment := cfg.Server.Environment != "production"
@@ -301,18 +218,6 @@ func main() {
 		})
 	})
 
-	// Dev token routes - registered directly on main router in non-production
-	// These routes are registered BEFORE the protected router mount, so they take precedence
-	if !cfg.IsProduction() {
-		devTokenHandler := devHandlers.NewDevTokenHandler(jwtService, cfg)
-		// Register dev routes directly on the main router (no auth required)
-		router.Post("/dev/token", devTokenHandler.GenerateTokenHTTP)
-		router.Get("/dev/token/roles", devTokenHandler.ListRolesHTTP)
-		logger.Info("Dev token routes registered",
-			slog.String("environment", cfg.Server.Environment),
-		)
-	}
-
 	apiConfig := huma.DefaultConfig("Orkestra API", "1.0.0")
 	apiConfig.DocsPath = ""
 	apiConfig.Components.SecuritySchemes = map[string]*huma.SecurityScheme{
@@ -329,29 +234,8 @@ func main() {
 	// Create protected routes with authentication middleware
 	protectedRouter := chi.NewRouter()
 	protectedRouter.Use(authMiddlewareHandler.RequireAuth)
-	protectedAPI := humachi.New(protectedRouter, apiConfig)
 
-	// Initialize and register authentication handler
-	authHandler := handlers.NewAuthHandler(
-		authService,
-		providerFactory,
-		oauthStateService,
-		oauthProviderRepo,
-		jwtService,
-		cfg,
-	)
-	authHandler.RegisterRoutes(publicAPI, protectedAPI, router, protectedRouter)
-
-	// Create user management routes with role-based protection within protected router
-	// Only administrator, ceo, and developer roles should have access
-	protectedRouter.Group(func(r chi.Router) {
-		r.Use(authMiddlewareHandler.RequireHierarchicalRole("administrator"))
-		userAPI := humachi.New(r, apiConfig)
-		// Register user management routes (protected with role restrictions)
-		user.RegisterRoutes(userAPI, userHandler)
-	})
-
-	// Register routes for all migrated modules
+	// Register routes for all modules
 	modRegistry.RegisterAllRoutes(&module.RouteInfo{
 		PublicAPI:        publicAPI,
 		ProtectedRouter:  protectedRouter,
@@ -362,20 +246,6 @@ func main() {
 
 	// Mount the protected routes
 	router.Mount("/", protectedRouter)
-
-	// Then register other protected routes with middleware
-	router.Group(func(r chi.Router) {
-		r.Use(authMiddlewareHandler.RequireAuth)
-		// TODO: Add other protected routes here as needed
-	})
-
-	router.Route("/protected", func(r chi.Router) {
-		r.Use(authMiddlewareHandler.RequireAuth)
-		r.Get("/", func(w http.ResponseWriter, req *http.Request) {
-			userID := req.Context().Value("userID").(string)
-			w.Write([]byte(fmt.Sprintf("Protected endpoint accessed by user: %s", userID)))
-		})
-	})
 
 	huma.Register(publicAPI, huma.Operation{
 		OperationID: "health-check",
