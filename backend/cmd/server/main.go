@@ -60,60 +60,27 @@ import (
 	documentsRepo "github.com/orkestra/backend/internal/documents/repository"
 	documentsSvc "github.com/orkestra/backend/internal/documents/services"
 	devHandlers "github.com/orkestra/backend/internal/dev/handlers"
+	"github.com/orkestra/backend/internal/navigation"
+	"github.com/orkestra/backend/internal/reporting"
 	reportingHandlers "github.com/orkestra/backend/internal/reporting/handlers"
 	reportingRepository "github.com/orkestra/backend/internal/reporting/repository"
 	reportingServices "github.com/orkestra/backend/internal/reporting/services"
+	"github.com/orkestra/backend/internal/user"
 	"github.com/orkestra/backend/internal/shared/config"
 	"github.com/orkestra/backend/internal/shared/database"
 	"github.com/orkestra/backend/internal/shared/errors"
 	authMiddleware "github.com/orkestra/backend/internal/shared/middleware"
+	"github.com/orkestra/backend/internal/shared/utils"
 	userHandlers "github.com/orkestra/backend/internal/user/handlers"
 	userRepository "github.com/orkestra/backend/internal/user/repository"
 	userServices "github.com/orkestra/backend/internal/user/services"
 	navigationConfig "github.com/orkestra/backend/internal/navigation/config"
 	navigationHandlers "github.com/orkestra/backend/internal/navigation/handlers"
 	navigationServices "github.com/orkestra/backend/internal/navigation/services"
-	"github.com/redis/go-redis/v9"
 )
 
-// redisOAuthStateStore implements services.OAuthStateStore interface
-type redisOAuthStateStore struct {
-	client *redis.Client
-}
-
-func (r *redisOAuthStateStore) Set(ctx context.Context, key string, value []byte, expiry time.Duration) error {
-	return r.client.Set(ctx, key, value, expiry).Err()
-}
-
-func (r *redisOAuthStateStore) Get(ctx context.Context, key string) ([]byte, error) {
-	result, err := r.client.Get(ctx, key).Bytes()
-	if err == redis.Nil {
-		return nil, fmt.Errorf("key not found")
-	}
-	return result, err
-}
-
-func (r *redisOAuthStateStore) Delete(ctx context.Context, key string) error {
-	return r.client.Del(ctx, key).Err()
-}
-
-func (r *redisOAuthStateStore) DeleteByPattern(ctx context.Context, pattern string) error {
-	iter := r.client.Scan(ctx, 0, pattern, 0).Iterator()
-	var keys []string
-	for iter.Next(ctx) {
-		keys = append(keys, iter.Val())
-	}
-	if err := iter.Err(); err != nil {
-		return err
-	}
-	if len(keys) > 0 {
-		return r.client.Del(ctx, keys...).Err()
-	}
-	return nil
-}
-
 func main() {
-	logger := setupLogger()
+	logger := utils.SetupLogger()
 	slog.SetDefault(logger)
 
 	cfg, err := config.Load()
@@ -215,7 +182,7 @@ func main() {
 	jwtService := services.NewJWTService(cfg.Auth.JWT.PrivateKey, cfg.Auth.JWT.PublicKey)
 
 	// Initialize OAuth state service with Redis adapter
-	redisStore := &redisOAuthStateStore{client: redisClient}
+	redisStore := services.NewRedisOAuthStateStore(redisClientAdapter)
 	oauthStateService := services.NewOAuthStateService(redisStore)
 
 	// Initialize user management module first (required by auth service)
@@ -766,7 +733,7 @@ func main() {
 		r.Use(authMiddlewareHandler.RequireHierarchicalRole("administrator"))
 		userAPI := humachi.New(r, apiConfig)
 		// Register user management routes (protected with role restrictions)
-		registerUserRoutes(userAPI, userHandler)
+		user.RegisterRoutes(userAPI, userHandler)
 	})
 
 	// Create reporting routes with role-based protection
@@ -775,13 +742,13 @@ func main() {
 		r.Use(authMiddlewareHandler.RequireHierarchicalRole("manager"))
 		reportingAPI := humachi.New(r, apiConfig)
 		// Register reporting routes (protected with role restrictions)
-		registerReportRoutes(reportingAPI, reportingHandler)
+		reporting.RegisterRoutes(reportingAPI, reportingHandler)
 	})
 
 	// Navigation routes - accessible to all authenticated users
 	// Role filtering happens inside the service based on user's role
 	navigationAPI := humachi.New(protectedRouter, apiConfig)
-	registerNavigationRoutes(navigationAPI, navigationHandler)
+	navigation.RegisterRoutes(navigationAPI, navigationHandler)
 
 	// Billing routes - manager role and above
 	// Only register if billing module is enabled
@@ -1124,7 +1091,7 @@ func main() {
 
 	// Log development mode warning
 	if !cfg.IsProduction() {
-		printDevelopmentWarning(cfg.Server.Environment)
+		utils.PrintDevelopmentWarning(cfg.Server.Environment)
 	}
 
 	go func() {
@@ -1169,234 +1136,5 @@ func main() {
 	logger.Info("Server stopped")
 }
 
-func setupLogger() *slog.Logger {
-	level := slog.LevelInfo
-	if logLevel := os.Getenv("LOG_LEVEL"); logLevel != "" {
-		switch strings.ToLower(logLevel) {
-		case "debug":
-			level = slog.LevelDebug
-		case "info":
-			level = slog.LevelInfo
-		case "warn", "warning":
-			level = slog.LevelWarn
-		case "error":
-			level = slog.LevelError
-		}
-	}
 
-	opts := slog.HandlerOptions{
-		Level: level,
-	}
 
-	var handler slog.Handler
-	env := os.Getenv("ENV")
-
-	// Use JSON logging for production-like environments (production, staging)
-	if env == "production" || env == "staging" {
-		handler = slog.NewJSONHandler(os.Stdout, &opts)
-	} else {
-		handler = slog.NewTextHandler(os.Stdout, &opts)
-	}
-
-	logger := slog.New(handler)
-
-	return logger.With(
-		slog.String("service", "orkestra-backend"),
-		slog.String("version", "1.0.0"),
-		slog.String("environment", env),
-	)
-}
-
-// registerUserRoutes registers all user management routes
-func registerUserRoutes(api huma.API, userHandler *userHandlers.UserHandler) {
-	// Core CRUD operations
-	huma.Register(api, huma.Operation{
-		OperationID: "create-user",
-		Method:      http.MethodPost,
-		Path:        "/v1/users",
-		Summary:     "Create a new user",
-		Description: "Creates a new user with the provided information",
-		Tags:        []string{"Users"},
-		Security:    []map[string][]string{{"bearerAuth": {}}},
-	}, userHandler.CreateUser)
-
-	huma.Register(api, huma.Operation{
-		OperationID: "get-user",
-		Method:      http.MethodGet,
-		Path:        "/v1/users/{id}",
-		Summary:     "Get user by ID",
-		Description: "Retrieves a user by their UUID",
-		Tags:        []string{"Users"},
-		Security:    []map[string][]string{{"bearerAuth": {}}},
-	}, userHandler.GetUser)
-
-	huma.Register(api, huma.Operation{
-		OperationID: "update-user",
-		Method:      http.MethodPut,
-		Path:        "/v1/users/{id}",
-		Summary:     "Update user",
-		Description: "Updates a user's information",
-		Tags:        []string{"Users"},
-		Security:    []map[string][]string{{"bearerAuth": {}}},
-	}, userHandler.UpdateUser)
-
-	huma.Register(api, huma.Operation{
-		OperationID: "delete-user",
-		Method:      http.MethodDelete,
-		Path:        "/v1/users/{id}",
-		Summary:     "Delete user",
-		Description: "Soft deletes a user",
-		Tags:        []string{"Users"},
-		Security:    []map[string][]string{{"bearerAuth": {}}},
-	}, userHandler.DeleteUser)
-
-	huma.Register(api, huma.Operation{
-		OperationID: "list-users",
-		Method:      http.MethodGet,
-		Path:        "/v1/users",
-		Summary:     "List users",
-		Description: "Retrieves a paginated list of users with optional filtering",
-		Tags:        []string{"Users"},
-		Security:    []map[string][]string{{"bearerAuth": {}}},
-	}, userHandler.ListUsers)
-
-	// Query operations
-	huma.Register(api, huma.Operation{
-		OperationID: "get-users-by-role",
-		Method:      http.MethodGet,
-		Path:        "/v1/users/role/{role}",
-		Summary:     "Get users by role",
-		Description: "Retrieves all users with a specific role",
-		Tags:        []string{"Users"},
-		Security:    []map[string][]string{{"bearerAuth": {}}},
-	}, userHandler.GetUsersByRole)
-
-	huma.Register(api, huma.Operation{
-		OperationID: "get-user-by-email",
-		Method:      http.MethodGet,
-		Path:        "/v1/users/by-email",
-		Summary:     "Get user by email",
-		Description: "Retrieves a user by their email address",
-		Tags:        []string{"Users"},
-		Security:    []map[string][]string{{"bearerAuth": {}}},
-	}, userHandler.GetUserByEmail)
-
-	huma.Register(api, huma.Operation{
-		OperationID: "get-user-count",
-		Method:      http.MethodGet,
-		Path:        "/v1/users/count",
-		Summary:     "Get user count",
-		Description: "Returns the total count of users with optional filtering",
-		Tags:        []string{"Users"},
-		Security:    []map[string][]string{{"bearerAuth": {}}},
-	}, userHandler.GetUserCount)
-
-	// Document management operations
-	huma.Register(api, huma.Operation{
-		OperationID: "get-users-with-expired-documents",
-		Method:      http.MethodGet,
-		Path:        "/v1/users/expired-documents",
-		Summary:     "Get users with expired documents",
-		Description: "Retrieves users who have expired driver documents",
-		Tags:        []string{"Users", "Documents"},
-		Security:    []map[string][]string{{"bearerAuth": {}}},
-	}, userHandler.GetUsersWithExpiredDocuments)
-
-	huma.Register(api, huma.Operation{
-		OperationID: "get-users-with-expiring-soon-documents",
-		Method:      http.MethodGet,
-		Path:        "/v1/users/expiring-soon-documents",
-		Summary:     "Get users with documents expiring soon",
-		Description: "Retrieves users who have driver documents expiring within the specified number of days",
-		Tags:        []string{"Users", "Documents"},
-		Security:    []map[string][]string{{"bearerAuth": {}}},
-	}, userHandler.GetUsersWithExpiringSoonDocuments)
-
-	huma.Register(api, huma.Operation{
-		OperationID: "update-user-documents",
-		Method:      http.MethodPatch,
-		Path:        "/v1/users/{id}/documents",
-		Summary:     "Update user documents",
-		Description: "Updates only the document-related fields for a user",
-		Tags:        []string{"Users", "Documents"},
-		Security:    []map[string][]string{{"bearerAuth": {}}},
-	}, userHandler.UpdateUserDocuments)
-
-	huma.Register(api, huma.Operation{
-		OperationID: "check-user-document-expiry",
-		Method:      http.MethodGet,
-		Path:        "/v1/users/{id}/check-expiry",
-		Summary:     "Check document expiry",
-		Description: "Checks which documents are expired for a specific user",
-		Tags:        []string{"Users", "Documents"},
-		Security:    []map[string][]string{{"bearerAuth": {}}},
-	}, userHandler.CheckDocumentExpiry)
-}
-
-// registerReportRoutes registers all reporting routes
-func registerReportRoutes(api huma.API, deadlineHandler *reportingHandlers.DeadlineHandler) {
-	// Deadline reports
-	huma.Register(api, huma.Operation{
-		OperationID: "get-deadline-report",
-		Method:      http.MethodGet,
-		Path:        "/v1/reports/deadlines",
-		Summary:     "Get deadline report",
-		Description: "Retrieves all items with expiry dates (users, certifications)",
-		Tags:        []string{"Reports"},
-		Security:    []map[string][]string{{"bearerAuth": {}}},
-	}, deadlineHandler.GetDeadlines)
-}
-
-// registerNavigationRoutes registers the navigation menu route
-func registerNavigationRoutes(api huma.API, navigationHandler *navigationHandlers.NavigationHandler) {
-	huma.Register(api, huma.Operation{
-		OperationID: "get-navigation",
-		Method:      http.MethodGet,
-		Path:        "/v1/navigation",
-		Summary:     "Get navigation menu",
-		Description: "Returns role-filtered navigation menu for the current authenticated user",
-		Tags:        []string{"Navigation"},
-		Security:    []map[string][]string{{"bearerAuth": {}}},
-	}, navigationHandler.GetNavigation)
-}
-
-// printDevelopmentWarning prints a prominent warning when running in non-production mode
-// This helps ensure developers are aware of relaxed security settings
-func printDevelopmentWarning(environment string) {
-	// Staging has production-like security (HSTS enabled), but still has dev features
-	isStaging := environment == "staging"
-
-	var hstsLine string
-	if isStaging {
-		hstsLine = "║   • HSTS header is ENABLED (production-like security)                        ║"
-	} else {
-		hstsLine = "║   • HSTS header is disabled                                                   ║"
-	}
-
-	warning := `
-╔═══════════════════════════════════════════════════════════════════════════════╗
-║                                                                               ║
-║   ██████╗ ███████╗██╗   ██╗    ███╗   ███╗ ██████╗ ██████╗ ███████╗          ║
-║   ██╔══██╗██╔════╝██║   ██║    ████╗ ████║██╔═══██╗██╔══██╗██╔════╝          ║
-║   ██║  ██║█████╗  ██║   ██║    ██╔████╔██║██║   ██║██║  ██║█████╗            ║
-║   ██║  ██║██╔══╝  ╚██╗ ██╔╝    ██║╚██╔╝██║██║   ██║██║  ██║██╔══╝            ║
-║   ██████╔╝███████╗ ╚████╔╝     ██║ ╚═╝ ██║╚██████╔╝██████╔╝███████╗          ║
-║   ╚═════╝ ╚══════╝  ╚═══╝      ╚═╝     ╚═╝ ╚═════╝ ╚═════╝ ╚══════╝          ║
-║                                                                               ║
-║   RUNNING IN DEVELOPMENT MODE - NOT FOR PRODUCTION USE                        ║
-║                                                                               ║
-║   Environment: %-12s                                                       ║
-║                                                                               ║
-║   The following security features are RELAXED:                                ║
-║   • Dev token endpoints are enabled (/dev/token)                              ║
-║   • Verbose error messages are shown                                          ║
-║   • Localhost OAuth redirects are allowed                                     ║
-%s
-║                                                                               ║
-║   DO NOT deploy to production with these settings!                            ║
-║   Set APP_ENV=production for production deployments.                          ║
-║                                                                               ║
-╚═══════════════════════════════════════════════════════════════════════════════╝
-`
-	fmt.Printf(warning, environment, hstsLine)
-}
