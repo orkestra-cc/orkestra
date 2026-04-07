@@ -156,6 +156,14 @@ func main() {
 		ConfigService:    configService,
 	})
 
+	// Admin module management routes (administrator role)
+	protectedRouter.Group(func(r chi.Router) {
+		r.Use(authMW.RequireHierarchicalRole("administrator"))
+		adminAPI := humachi.New(r, apiConfig)
+		moduleAdminHandler := module.NewModuleAdminHandler(configService)
+		module.RegisterAdminModuleRoutes(adminAPI, moduleAdminHandler)
+	})
+
 	router.Mount("/", protectedRouter)
 
 	// Health, readiness, docs
