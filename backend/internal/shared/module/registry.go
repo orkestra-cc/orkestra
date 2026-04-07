@@ -81,21 +81,17 @@ func (r *ModuleRegistry) InitAll(cfg *config.Config, deps *Dependencies) error {
 	}
 	deps.Services.Register(ServiceNavItems, allNavItems)
 
-	// Initialize modules in registration order.
+	// Initialize ALL modules in registration order.
+	// Core modules: fatal on error. Non-core: attempt Init and track failures.
+	// All modules get routes registered (gated by ModuleGate middleware for non-core).
 	for _, m := range r.modules {
-		if !m.Enabled(cfg) {
-			r.logger.Warn(fmt.Sprintf("Module %s disabled", m.Name()))
-			continue
-		}
-
 		if err := m.Init(deps); err != nil {
 			if m.Category() == CategoryCore {
-				// Core module failure is fatal — server cannot start without it.
 				return fmt.Errorf("core module %s init: %w", m.Name(), err)
 			}
 
-			// Non-core module failure: warn and skip.
-			r.logger.Error("Non-core module init failed, skipping",
+			// Non-core failure: log and track — routes still registered behind gate.
+			r.logger.Warn("Module init failed (routes will be gated)",
 				slog.String("module", m.Name()),
 				slog.String("category", string(m.Category())),
 				slog.String("error", err.Error()),
@@ -110,9 +106,10 @@ func (r *ModuleRegistry) InitAll(cfg *config.Config, deps *Dependencies) error {
 	return nil
 }
 
-// RegisterAllRoutes calls RegisterRoutes on every enabled module.
+// RegisterAllRoutes calls RegisterRoutes on ALL modules (not just enabled).
+// Non-core modules are gated by ModuleGate middleware which checks DB enabled status.
 func (r *ModuleRegistry) RegisterAllRoutes(ri *RouteInfo) {
-	for _, m := range r.enabled {
+	for _, m := range r.modules {
 		m.RegisterRoutes(ri)
 	}
 }
