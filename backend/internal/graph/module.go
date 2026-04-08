@@ -74,18 +74,21 @@ func (m *GraphModule) Init(deps *module.Dependencies) error {
 		return nil
 	}
 
-	m.graphRepo = repository.NewGraphRepository(graphDriver, cfg.Graph.Database)
+	graphDatabase := deps.GetConfig("graph", "database")
+	graphURI := deps.GetConfig("graph", "uri")
+
+	m.graphRepo = repository.NewGraphRepository(graphDriver, graphDatabase)
 	graphService := services.NewGraphService(m.graphRepo, deps.Logger)
 	algorithmService := services.NewAlgorithmService(m.graphRepo, deps.Logger)
 	vectorService := services.NewVectorService(m.graphRepo, deps.Logger)
-	m.handler = handlers.NewGraphHandler(graphService, algorithmService, vectorService, cfg.Graph.URI)
+	m.handler = handlers.NewGraphHandler(graphService, algorithmService, vectorService, graphURI)
 
 	// Register GraphRepository for RAG module consumption
 	deps.Services.Register(module.ServiceGraphRepo, m.graphRepo)
 
 	deps.Logger.Info("Graph database module initialized",
-		slog.String("uri", cfg.Graph.URI),
-		slog.String("database", cfg.Graph.Database),
+		slog.String("uri", graphURI),
+		slog.String("database", graphDatabase),
 	)
 	return nil
 }
