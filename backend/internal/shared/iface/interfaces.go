@@ -12,11 +12,11 @@ package iface
 import (
 	"context"
 
-	aiProviders "github.com/orkestra/backend/internal/aimodels/providers"
-	docModels "github.com/orkestra/backend/internal/documents/models"
-	graphModels "github.com/orkestra/backend/internal/graph/models"
-	ragModels "github.com/orkestra/backend/internal/rag/models"
-	userModels "github.com/orkestra/backend/internal/user/models"
+	aiProviders "github.com/orkestra/backend/internal/addons/aimodels/providers"
+	docModels "github.com/orkestra/backend/internal/addons/documents/models"
+	graphModels "github.com/orkestra/backend/internal/addons/graph/models"
+	ragModels "github.com/orkestra/backend/internal/addons/rag/models"
+	userModels "github.com/orkestra/backend/internal/core/user/models"
 )
 
 // ---------------------------------------------------------------------------

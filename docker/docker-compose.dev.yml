@@ -119,6 +119,9 @@ services:
       HINDSIGHT_URL: ${HINDSIGHT_URL:-http://orkestra-hindsight:8888}
       HINDSIGHT_NAMESPACE: ${HINDSIGHT_NAMESPACE:-orkestra}
 
+      # AI Service sidecar (empty = local modules, set = remote AI service)
+      AI_SERVICE_URL: ${AI_SERVICE_URL:-}
+
       # Hot reload
       AIR_BUILD_CMD: go build -o ./tmp/main ./cmd/server
       AIR_BIN: ./tmp/main

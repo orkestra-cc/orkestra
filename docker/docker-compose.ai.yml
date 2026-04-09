@@ -1,0 +1,100 @@
+# ORKESTRA AI Service - Sidecar for AI module chain
+# Runs graph, aimodels, rag, agents as a standalone service.
+#
+# Usage:
+#   docker compose -f docker-compose.infra.yml -f docker-compose.ai.yml --env-file .env up -d
+#
+# Requires:
+#   - orkestra-network (external)
+#   - Infrastructure services (MongoDB, Redis) from docker-compose.infra.yml
+#   - Memgraph from docker-compose.infra.yml (when added) or standalone
+
+name: orkestra-ai
+
+services:
+  orkestra-ai:
+    image: dhi.io/golang:1
+    container_name: orkestra-ai-dev
+    user: "1000:1000"
+    userns_mode: "host"
+    working_dir: /app
+    restart: unless-stopped
+    ports:
+      - "${AI_SERVICE_PORT:-3100}:3100"
+    environment:
+      ENV: development
+      PORT: 3100
+      AI_SERVICE_PORT: 3100
+
+      # MongoDB (can use separate DB on same instance)
+      MONGO_URI: mongodb://${MONGO_ROOT_USERNAME:-admin}:${MONGO_ROOT_PASSWORD:-changeme}@${MONGO_HOST}:27017/${AI_MONGO_DATABASE:-orkestra}?authSource=admin
+
+      # Redis (shared with monolith for ConfigService caching)
+      REDIS_URL: redis://:${REDIS_PASSWORD:-changeme}@${REDIS_HOST}:6379/${REDIS_DB:-0}
+
+      # JWT (public key only — for token validation, not signing)
+      JWT_PUBLIC_KEY_PATH: /app/keys/jwt-public.pem
+      # Private key path must be set but is not used by the AI service.
+      # The JWTValidator only reads the public key.
+      JWT_PRIVATE_KEY_PATH: /app/keys/jwt-private.pem
+
+      # CORS
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080,http://localhost:5173}
+
+      # Graph Database - Memgraph
+      GRAPH_ENABLED: ${GRAPH_ENABLED:-false}
+      GRAPH_URI: ${GRAPH_URI:-bolt://orkestra-memgraph:7687}
+      GRAPH_USERNAME: ${GRAPH_USERNAME:-}
+      GRAPH_PASSWORD: ${GRAPH_PASSWORD:-}
+      GRAPH_DATABASE: ${GRAPH_DATABASE:-memgraph}
+      GRAPH_MAX_CONN_POOL: ${GRAPH_MAX_CONN_POOL:-25}
+
+      # RAG
+      RAG_ENABLED: ${RAG_ENABLED:-false}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      RAG_CHUNK_SIZE: ${RAG_CHUNK_SIZE:-512}
+      RAG_CHUNK_OVERLAP: ${RAG_CHUNK_OVERLAP:-50}
+      RAG_DEFAULT_TOP_K: ${RAG_DEFAULT_TOP_K:-10}
+
+      # AI Models
+      AIMODELS_ENABLED: ${AIMODELS_ENABLED:-true}
+
+      # Agents / Hindsight
+      AGENTS_ENABLED: ${AGENTS_ENABLED:-false}
+      HINDSIGHT_URL: ${HINDSIGHT_URL:-http://orkestra-hindsight:8888}
+      HINDSIGHT_NAMESPACE: ${HINDSIGHT_NAMESPACE:-orkestra}
+
+      # Gotenberg (text extraction for RAG ingestion)
+      GOTENBERG_URL: ${GOTENBERG_URL:-http://orkestra-gotenberg:3000}
+
+      # Development
+      LOG_LEVEL: debug
+      PRETTY_LOGS: "true"
+
+      # Go module settings
+      GOSUMDB: "off"
+      GOMODCACHE: "/app/.go-mod-cache"
+      GOCACHE: "/app/.go-build-cache"
+      GOBIN: "/app/.go-bin"
+      PATH: "/app/.go-bin:/go/bin:/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+    volumes:
+      - ../backend:/app
+      - ./keys:/app/keys:ro
+    networks:
+      - orkestra-network
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3100/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    command: ["sh", "-c", "go mod download && go install github.com/air-verse/air@latest && air -c .air.ai-service.toml"]
+
+networks:
+  orkestra-network:
+    external: true

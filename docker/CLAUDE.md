@@ -700,5 +700,5 @@ docker compose -f docker-compose.dev.yml restart
 - [Project Overview](../CLAUDE.md) - System architecture and design principles
 - [Backend Containerization](../backend/CLAUDE.md) - Go API server configuration
 - [Frontend Containerization](../frontend/CLAUDE.md) - React application setup
-- [Documents Module](../backend/internal/documents/CLAUDE.md) - PDF generation with Gotenberg
+- [Documents Module](../backend/internal/addons/documents/CLAUDE.md) - PDF generation with Gotenberg
 - [Deployment Scripts](../scripts/CLAUDE.md) - Automation and deployment orchestration

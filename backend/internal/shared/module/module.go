@@ -3,6 +3,7 @@ package module
 import (
 	"context"
 	"log/slog"
+	"net/http"
 	"strconv"
 	"time"
 
@@ -10,7 +11,6 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/orkestra/backend/internal/shared/config"
 	"github.com/orkestra/backend/internal/shared/database"
-	"github.com/orkestra/backend/internal/shared/middleware"
 	"go.mongodb.org/mongo-driver/mongo"
 )
 
@@ -154,6 +154,12 @@ func (d *Dependencies) GetConfigDuration(module, key string, fallback time.Durat
 	return dur
 }
 
+// RoleMiddleware is the interface modules use for RBAC route protection.
+// Implemented by both AuthMiddleware (monolith) and JWTValidator (AI service).
+type RoleMiddleware interface {
+	RequireHierarchicalRole(minRole string) func(http.Handler) http.Handler
+}
+
 // RouteInfo provides the routing infrastructure for module route registration.
 type RouteInfo struct {
 	// PublicAPI is for unauthenticated endpoints (health, webhooks, OAuth callbacks).
@@ -163,7 +169,7 @@ type RouteInfo struct {
 	// Router is the root chi.Router for special cases (dev endpoints, SSE streams).
 	Router chi.Router
 	// AuthMW provides role-based middleware helpers.
-	AuthMW *middleware.AuthMiddleware
+	AuthMW RoleMiddleware
 	// APIConfig is the shared Huma API configuration.
 	APIConfig huma.Config
 	// ConfigService provides runtime module enabled/disabled checks for gate middleware.

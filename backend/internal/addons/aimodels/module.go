@@ -1,0 +1,100 @@
+package aimodels
+
+import (
+	"context"
+	"log/slog"
+
+	"github.com/danielgtaylor/huma/v2/adapters/humachi"
+	"github.com/go-chi/chi/v5"
+	"github.com/orkestra/backend/internal/addons/aimodels/handlers"
+	"github.com/orkestra/backend/internal/addons/aimodels/repository"
+	"github.com/orkestra/backend/internal/addons/aimodels/services"
+	"github.com/orkestra/backend/internal/shared/config"
+	"github.com/orkestra/backend/internal/shared/middleware"
+	"github.com/orkestra/backend/internal/shared/module"
+)
+
+type AIModelsModule struct {
+	module.BaseModule
+	handler         *handlers.ModelHandler
+	internalHandler *handlers.InternalHandler
+	service         services.AIModelService
+}
+
+func NewModule() *AIModelsModule { return &AIModelsModule{} }
+
+func (m *AIModelsModule) Name() string                   { return "aimodels" }
+func (m *AIModelsModule) DisplayName() string             { return "AI Models" }
+func (m *AIModelsModule) Description() string             { return "LLM and embedding model management (Ollama, OpenAI, Anthropic, Gemini)" }
+func (m *AIModelsModule) Category() module.ModuleCategory { return module.CategoryToggleable }
+func (m *AIModelsModule) Enabled(cfg *config.Config) bool { return cfg.AIModels.Enabled }
+
+func (m *AIModelsModule) ProvidedServices() []module.ServiceKey {
+	return []module.ServiceKey{module.ServiceAIModelProvider}
+}
+
+func (m *AIModelsModule) ConfigSchema() []module.ConfigField {
+	return []module.ConfigField{
+		{Key: "ollamaBaseURL", Label: "Ollama Base URL", Type: module.FieldString, Default: "http://host.docker.internal:11434", EnvVar: "OLLAMA_BASE_URL"},
+		{Key: "openaiKey", Label: "OpenAI API Key", Type: module.FieldSecret, EnvVar: "OPENAI_API_KEY"},
+		{Key: "anthropicKey", Label: "Anthropic API Key", Type: module.FieldSecret, EnvVar: "ANTHROPIC_API_KEY"},
+		{Key: "geminiKey", Label: "Gemini API Key", Type: module.FieldSecret, EnvVar: "GEMINI_API_KEY"},
+	}
+}
+
+func (m *AIModelsModule) Collections() []module.CollectionSpec {
+	return []module.CollectionSpec{
+		{Name: "ai_models", Indexes: []module.IndexSpec{
+			{Keys: map[string]int{"uuid": 1}, Unique: true},
+			{Keys: map[string]int{"isDefault": 1, "type": 1}},
+		}},
+	}
+}
+
+func (m *AIModelsModule) NavItems() []module.NavItemSpec {
+	return []module.NavItemSpec{
+		{Group: "AI", Name: "AI Models", Icon: "microchip", Path: "/ai/models", MinRole: "administrator", Active: true},
+	}
+}
+
+func (m *AIModelsModule) Init(deps *module.Dependencies) error {
+	repo := repository.NewModelRepository(deps.DB)
+	m.service = services.NewModelService(repo, services.AIModelsConfig{
+		OllamaBaseURL: deps.GetConfig("aimodels", "ollamaBaseURL"),
+		OpenAIAPIKey:  deps.GetSecret("aimodels", "openaiKey"),
+		AnthropicKey:  deps.GetSecret("aimodels", "anthropicKey"),
+		GeminiKey:     deps.GetSecret("aimodels", "geminiKey"),
+	}, deps.Logger)
+
+	m.handler = handlers.NewModelHandler(m.service)
+	m.internalHandler = handlers.NewInternalHandler(m.service)
+
+	// Register AIModelService for RAG and Sales module consumption
+	deps.Services.Register(module.ServiceAIModelProvider, m.service)
+
+	deps.Logger.Info("AI Models module initialized")
+	return nil
+}
+
+func (m *AIModelsModule) RegisterRoutes(ri *module.RouteInfo) {
+	ri.ProtectedRouter.Group(func(r chi.Router) {
+		r.Use(middleware.ModuleGate(ri.ConfigService, m.Name()))
+		r.Use(ri.AuthMW.RequireHierarchicalRole("administrator"))
+		api := humachi.New(r, ri.APIConfig)
+		RegisterRoutes(api, m.handler)
+		RegisterInternalRoutes(api, m.internalHandler)
+	})
+}
+
+func (m *AIModelsModule) Start(ctx context.Context) error {
+	// Seed default models on startup
+	if m.service != nil {
+		if err := m.service.SeedDefaults(ctx); err != nil {
+			slog.Warn("Failed to seed default AI models", slog.String("error", err.Error()))
+		}
+	}
+	return nil
+}
+
+func (m *AIModelsModule) Stop(_ context.Context) error       { return nil }
+func (m *AIModelsModule) HealthCheck(_ context.Context) error { return nil }

@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/orkestra/backend/internal/auth/models"
-	"github.com/orkestra/backend/internal/auth/services"
+	"github.com/orkestra/backend/internal/core/auth/models"
+	"github.com/orkestra/backend/internal/core/auth/services"
 	"github.com/orkestra/backend/internal/shared/config"
 	"github.com/orkestra/backend/internal/shared/errors"
 	"github.com/orkestra/backend/internal/shared/utils"

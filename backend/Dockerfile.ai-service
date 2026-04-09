@@ -1,0 +1,58 @@
+# ============================================
+# ORKESTRA AI Service - Multi-Stage Dockerfile
+# ============================================
+#
+# Builds the AI service sidecar: graph, aimodels, rag, agents modules.
+# Same Go module as the backend — separate binary entry point.
+#
+# Build:
+#   docker build -f Dockerfile.ai-service -t orkestra-ai:prod .
+#
+# ============================================
+
+# ============================================
+# STAGE 1: Base Dependencies
+# ============================================
+FROM dhi.io/golang:1-dev AS base
+
+WORKDIR /app
+COPY go.mod go.sum ./
+RUN go mod download && go mod verify
+
+# ============================================
+# STAGE 2: Builder
+# ============================================
+FROM base AS builder
+
+COPY . .
+
+ARG VERSION=dev
+ARG BUILD_TIME
+ARG GIT_COMMIT
+
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+    -a \
+    -installsuffix cgo \
+    -ldflags="-w -s \
+    -X main.Version=${VERSION} \
+    -X main.BuildTime=${BUILD_TIME} \
+    -X main.GitCommit=${GIT_COMMIT}" \
+    -o /app/bin/ai-service \
+    ./cmd/ai-service
+
+# ============================================
+# STAGE 3: Production Runtime
+# ============================================
+FROM dhi.io/golang:1 AS production
+
+ENV TZ=Europe/Rome
+WORKDIR /app
+
+COPY --from=builder /app/bin/ai-service /app/ai-service
+
+EXPOSE 3100
+
+ENV ENV=production \
+    PORT=3100
+
+CMD ["/app/ai-service"]

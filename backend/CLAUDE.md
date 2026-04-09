@@ -27,30 +27,38 @@ Enabled, Init, RegisterRoutes, Start, Stop, HealthCheck
 
 ```
 backend/
-├── cmd/server/main.go              # ~226 lines: boot, register 12 modules, start
+├── cmd/
+│   ├── server/                     # Monolith binary
+│   │   ├── main.go                 # Boot, register modules, start
+│   │   └── catalog.go              # Module catalog (core + optional)
+│   └── ai-service/                 # AI sidecar binary (optional)
+│       └── main.go
 ├── internal/
-│   ├── auth/                       # OAuth 2.1, JWT, sessions, RBAC (core)
-│   ├── user/                       # User CRUD, roles, documents (core)
-│   ├── navigation/                 # Dynamic menu from module NavItems (core)
-
-│   ├── billing/                    # FatturaPA/SDI invoicing (external)
-│   ├── documents/                  # PDF generation via Gotenberg (external)
-│   ├── company/                    # Business registry lookup (external)
-│   ├── graph/                      # Memgraph knowledge graph (external)
-│   ├── aimodels/                   # AI model management (toggleable)
-│   ├── rag/                        # RAG pipeline (toggleable)
-│   ├── agents/                     # Hindsight AI agents (toggleable)
-│   ├── sales/                      # AI prospect analysis (toggleable)
-│   ├── dev/                        # Dev token generator (toggleable)
-│   └── shared/
-│       ├── module/                 # Module interface, registry, config service, admin handler
-│       ├── iface/                  # Cross-module interfaces (UserProvider, PDFProvider, etc.)
+│   ├── core/                       # Always loaded
+│   │   ├── auth/                   # OAuth 2.1, JWT, sessions, RBAC
+│   │   ├── user/                   # User CRUD, roles, documents
+│   │   └── navigation/             # Dynamic menu from module NavItems
+│   ├── addons/                     # Optional — loaded via MODULES env var
+│   │   ├── billing/                # FatturaPA/SDI invoicing
+│   │   ├── documents/              # PDF generation via Gotenberg
+│   │   ├── company/                # Business registry lookup
+│   │   ├── graph/                  # Memgraph knowledge graph
+│   │   ├── aimodels/               # AI model management
+│   │   ├── rag/                    # RAG pipeline
+│   │   ├── agents/                 # Hindsight AI agents
+│   │   ├── sales/                  # AI prospect analysis
+│   │   └── dev/                    # Dev token generator
+│   └── shared/                     # Infrastructure — used by core and addons
+│       ├── module/                 # Module interface, registry, config service
+│       ├── iface/                  # Cross-module interfaces
 │       ├── config/                 # App configuration
 │       ├── database/               # MongoDB, Redis, Graph connections
-│       ├── middleware/             # Auth, rate limiting, module gate
+│       ├── middleware/             # Auth, JWT validator, rate limiting
+│       ├── remote/                 # Remote service clients (HTTP)
 │       ├── errors/                 # Error management
 │       └── utils/                  # Utilities
-├── Dockerfile                      # Multi-stage: dev (AIR) / production (stripped binary)
+├── Dockerfile                      # Multi-stage: dev (AIR) / production
+├── Dockerfile.ai-service           # AI service build
 └── go.mod
 ```
 
@@ -58,13 +66,16 @@ Each module follows: `module.go` → `handlers/` → `services/` → `repository
 
 ## Adding a New Module
 
-1. Create `internal/yourmodule/module.go` implementing the `Module` interface
-2. Register in `cmd/server/main.go` (respect dependency order)
+1. Create `internal/addons/yourmodule/module.go` implementing the `Module` interface
+2. Add to `optionalModules` in `cmd/server/catalog.go` (the registry auto-sorts by `Dependencies()`)
 3. Declare `Collections()` for auto-created MongoDB collections + indexes
 4. Declare `NavItems()` for sidebar entries (group, icon, path, minRole)
 5. Declare `ConfigSchema()` for admin-configurable fields
-6. Use `shared/iface` interfaces for cross-module deps — add new interfaces there if needed
-7. Use `deps.Services.Register(key, impl)` to expose services to other modules
+6. Declare `Dependencies()` if your module needs other modules to init first
+7. Use `shared/iface` interfaces for cross-module deps — add new interfaces there if needed
+8. Use `deps.Services.Register(key, impl)` to expose services to other modules
+
+Users enable the module by adding its name to the `MODULES` env var or by setting its `Enabled()` env var.
 
 ## API Endpoints
 

@@ -14,8 +14,8 @@ import (
 )
 
 // ModuleRegistry manages the lifecycle of all application modules.
-// Modules are processed in registration order, so producers must be
-// registered before their consumers.
+// Use Register() for ordered insertion, or RegisterAll() for automatic
+// dependency-based sorting via each module's Dependencies() declaration.
 type ModuleRegistry struct {
 	modules       []Module
 	enabled       []Module           // populated by InitAll
@@ -42,6 +42,73 @@ func (r *ModuleRegistry) SetConfigService(cs *ModuleConfigService) {
 // initialization order — register producers before consumers.
 func (r *ModuleRegistry) Register(m Module) {
 	r.modules = append(r.modules, m)
+}
+
+// RegisterAll adds multiple modules and sorts them by Dependencies()
+// so that producers always initialize before consumers. Callers don't
+// need to worry about registration order.
+func (r *ModuleRegistry) RegisterAll(modules []Module) error {
+	sorted, err := topoSort(modules)
+	if err != nil {
+		return err
+	}
+	r.modules = append(r.modules, sorted...)
+	return nil
+}
+
+// topoSort performs a topological sort on modules using Dependencies().
+// Returns an error on dependency cycles.
+func topoSort(modules []Module) ([]Module, error) {
+	byName := make(map[string]Module, len(modules))
+	for _, m := range modules {
+		byName[m.Name()] = m
+	}
+
+	// Kahn's algorithm
+	inDegree := make(map[string]int, len(modules))
+	dependents := make(map[string][]string) // dep → modules that depend on it
+	for _, m := range modules {
+		name := m.Name()
+		if _, exists := inDegree[name]; !exists {
+			inDegree[name] = 0
+		}
+		for _, dep := range m.Dependencies() {
+			// Only count dependencies that are in this batch.
+			// Dependencies on modules outside this batch (e.g., core modules
+			// already registered) are assumed satisfied.
+			if _, inBatch := byName[dep]; inBatch {
+				inDegree[name]++
+				dependents[dep] = append(dependents[dep], name)
+			}
+		}
+	}
+
+	// Seed queue with modules that have no in-batch dependencies
+	var queue []string
+	for _, m := range modules {
+		if inDegree[m.Name()] == 0 {
+			queue = append(queue, m.Name())
+		}
+	}
+
+	var sorted []Module
+	for len(queue) > 0 {
+		name := queue[0]
+		queue = queue[1:]
+		sorted = append(sorted, byName[name])
+
+		for _, dependent := range dependents[name] {
+			inDegree[dependent]--
+			if inDegree[dependent] == 0 {
+				queue = append(queue, dependent)
+			}
+		}
+	}
+
+	if len(sorted) != len(modules) {
+		return nil, fmt.Errorf("module dependency cycle detected (sorted %d of %d modules)", len(sorted), len(modules))
+	}
+	return sorted, nil
 }
 
 // InitAll initializes all enabled modules in registration order.

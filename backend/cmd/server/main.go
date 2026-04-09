@@ -15,25 +15,14 @@ import (
 	"github.com/danielgtaylor/huma/v2/adapters/humachi"
 	"github.com/go-chi/chi/v5"
 
-	"github.com/orkestra/backend/internal/agents"
-	"github.com/orkestra/backend/internal/aimodels"
-	"github.com/orkestra/backend/internal/auth"
-	"github.com/orkestra/backend/internal/auth/services"
-	"github.com/orkestra/backend/internal/billing"
-	"github.com/orkestra/backend/internal/company"
-	"github.com/orkestra/backend/internal/dev"
-	"github.com/orkestra/backend/internal/documents"
-	"github.com/orkestra/backend/internal/graph"
-	"github.com/orkestra/backend/internal/navigation"
-	"github.com/orkestra/backend/internal/rag"
-	"github.com/orkestra/backend/internal/sales"
+	"github.com/orkestra/backend/internal/core/auth/services"
 	"github.com/orkestra/backend/internal/shared/config"
 	"github.com/orkestra/backend/internal/shared/database"
 	"github.com/orkestra/backend/internal/shared/errors"
 	authMiddleware "github.com/orkestra/backend/internal/shared/middleware"
 	"github.com/orkestra/backend/internal/shared/module"
+	"github.com/orkestra/backend/internal/shared/remote"
 	"github.com/orkestra/backend/internal/shared/utils"
-	"github.com/orkestra/backend/internal/user"
 )
 
 func main() {
@@ -92,19 +81,46 @@ func main() {
 		Services:     svcRegistry,
 	}
 
-	// Register all modules (order matters: producers before consumers)
-	modRegistry.Register(user.NewModule())       // produces UserService
-	modRegistry.Register(auth.NewModule())        // consumes UserService → produces JWTService + AuthService
-	modRegistry.Register(navigation.NewModule())
-	modRegistry.Register(documents.NewModule())   // produces PDFService
-	modRegistry.Register(aimodels.NewModule())    // produces AIModelProvider
-	modRegistry.Register(company.NewModule())
-	modRegistry.Register(billing.NewModule())     // consumes PDFService
-	modRegistry.Register(graph.NewModule())       // produces GraphRepository
-	modRegistry.Register(rag.NewModule())         // consumes Graph + AIModels → produces RAGQuery
-	modRegistry.Register(sales.NewModule())       // consumes AIModels
-	modRegistry.Register(agents.NewModule())      // consumes RAGQuery
-	modRegistry.Register(dev.NewModule())         // consumes JWTService
+	// Core modules — always loaded (auth, users, navigation)
+	for _, factory := range coreModules {
+		modRegistry.Register(factory())
+	}
+
+	// Optional modules — loaded from catalog based on config
+	selected := selectOptionalModules(cfg, logger)
+
+	// AI service sidecar: register remote providers for AI modules
+	// that are not loaded locally
+	if cfg.Server.AIServiceURL != "" {
+		remoteAI := remote.NewAIModelProvider(cfg.Server.AIServiceURL)
+		remoteRAG := remote.NewRAGQueryProvider(cfg.Server.AIServiceURL)
+
+		// Only register remote providers for modules NOT loaded locally
+		if _, local := selected["aimodels"]; !local {
+			svcRegistry.Register(module.ServiceAIModelProvider, remoteAI)
+		}
+		if _, local := selected["rag"]; !local {
+			svcRegistry.Register(module.ServiceRAGQuery, remoteRAG)
+		}
+		logger.Info("AI service sidecar configured",
+			slog.String("url", cfg.Server.AIServiceURL),
+		)
+	}
+
+	// Create module instances and register with dependency-aware sorting
+	var optModules []module.Module
+	for name := range selected {
+		if factory, ok := optionalModules[name]; ok {
+			optModules = append(optModules, factory())
+		} else {
+			logger.Warn("Unknown module in MODULES config, skipping",
+				slog.String("module", name),
+			)
+		}
+	}
+	if err := modRegistry.RegisterAll(optModules); err != nil {
+		log.Fatalf("Failed to resolve module dependencies: %v", err)
+	}
 
 	if err := modRegistry.InitAll(cfg, modDeps); err != nil {
 		log.Fatalf("Failed to initialize modules: %v", err)

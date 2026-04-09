@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/orkestra/backend/internal/auth/models"
-	userModels "github.com/orkestra/backend/internal/user/models"
+	"github.com/orkestra/backend/internal/core/auth/models"
+	userModels "github.com/orkestra/backend/internal/core/user/models"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"

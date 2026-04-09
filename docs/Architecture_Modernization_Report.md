@@ -39,11 +39,11 @@ The system handles professional business management, Italian electronic invoicin
 
 The monolithic architecture has served the rapid development phase well, but the system is approaching three inflection points:
 
-| Inflection Point          | Evidence                                                                                            |
-| ------------------------- | --------------------------------------------------------------------------------------------------- |
+| Inflection Point          | Evidence                                                                                                 |
+| ------------------------- | -------------------------------------------------------------------------------------------------------- |
 | **Wiring Complexity**     | `cmd/server/main.go` is 1,402 lines — every new module requires conditional init blocks and route groups |
-| **Inter-Module Coupling** | RAG imports graph repository directly; Sales imports aimodels service; Agents imports RAG service   |
-| **Delivery Risk**         | No CI/CD pipeline — deployment is via interactive `deploy.sh` with optional (not enforced) testing  |
+| **Inter-Module Coupling** | RAG imports graph repository directly; Sales imports aimodels service; Agents imports RAG service        |
+| **Delivery Risk**         | No CI/CD pipeline — deployment is via interactive `deploy.sh` with optional (not enforced) testing       |
 
 ### Three Strategic Pillars
 
@@ -68,49 +68,49 @@ The monolithic architecture has served the rapid development phase well, but the
 
 ### 2.1 Strengths — What to Preserve
 
-| #   | Strength                            | Evidence                                                                                             |
-| --- | ----------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| 1   | **Consistent 3-layer architecture** | Every module follows Handler → Service → Repository across all 14 modules in `internal/`             |
-| 2   | **Interface-based design**          | AI Model Provider interface shared by RAG and Sales, OAuth provider factory, email service interface  |
-| 3   | **OpenAPI auto-generation**         | Huma v2 generates always-in-sync API documentation at `/docs`                                        |
-| 4   | **Security maturity**               | OAuth 2.1 with PKCE (Google, Apple, GitHub, Discord), RS256 JWT, 6-role RBAC hierarchy, HSTS         |
+| #   | Strength                            | Evidence                                                                                               |
+| --- | ----------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| 1   | **Consistent 3-layer architecture** | Every module follows Handler → Service → Repository across all 14 modules in `internal/`               |
+| 2   | **Interface-based design**          | AI Model Provider interface shared by RAG and Sales, OAuth provider factory, email service interface   |
+| 3   | **OpenAPI auto-generation**         | Huma v2 generates always-in-sync API documentation at `/docs`                                          |
+| 4   | **Security maturity**               | OAuth 2.1 with PKCE (Google, Apple, GitHub, Discord), RS256 JWT, 6-role RBAC hierarchy, HSTS           |
 | 5   | **Feature-flag modules**            | Modules (billing, graph, RAG, agents, sales) enable/disable via config flags — already isolation-ready |
-| 6   | **Multi-provider AI architecture**  | Unified AI model management across Ollama, OpenAI, Anthropic, Gemini with consumer interfaces        |
-| 7   | **Italian billing integration**     | Complete FatturaPA/SDI pipeline with XML generation, webhook reception, polling, and PDF invoicing    |
-| 8   | **Multi-stage Docker builds**       | Separate dev/staging/prod configurations with AIR hot-reload for development                         |
-| 9   | **Comprehensive error system**      | Structured error handling with rate limiting, input sanitization, and request validation              |
-| 10  | **Module-level documentation**      | CLAUDE.md files per module provide excellent developer onboarding                                    |
+| 6   | **Multi-provider AI architecture**  | Unified AI model management across Ollama, OpenAI, Anthropic, Gemini with consumer interfaces          |
+| 7   | **Italian billing integration**     | Complete FatturaPA/SDI pipeline with XML generation, webhook reception, polling, and PDF invoicing     |
+| 8   | **Multi-stage Docker builds**       | Separate dev/staging/prod configurations with AIR hot-reload for development                           |
+| 9   | **Comprehensive error system**      | Structured error handling with rate limiting, input sanitization, and request validation               |
+| 10  | **Module-level documentation**      | CLAUDE.md files per module provide excellent developer onboarding                                      |
 
 ### 2.2 Pain Points — What Must Change
 
-| #   | Pain Point                           | Impact                                                                               | Location                   |
-| --- | ------------------------------------ | ------------------------------------------------------------------------------------ | -------------------------- |
-| 1   | **1,402-line wiring function**       | Adding any module requires conditional init blocks, handler declarations, and route groups | `cmd/server/main.go`       |
-| 2   | **No module registration interface** | Each module is wired differently — conditional blocks with `moduleEnabled` flags       | `cmd/server/main.go`       |
-| 3   | **Cross-module concrete coupling**   | RAG imports graph repository; Agents imports RAG service; Sales imports aimodels       | Throughout `internal/`     |
-| 4   | **No event bus**                     | All cross-module coordination is synchronous function calls                          | Throughout `internal/`     |
-| 5   | **No CI/CD pipeline**                | Interactive bash script, no automated testing gates                                  | `deploy.sh`                |
-| 6   | **Single MongoDB connection**        | All 14 modules share one `*mongo.Database`, no read replicas, no per-module timeouts  | `shared/database/mongo.go` |
-| 7   | **Frontend tag proliferation**       | ~40 cache tags in single `baseApi.ts`, growing with every feature                     | `store/api/baseApi.ts`     |
-| 8   | **No automated test enforcement**    | 80% coverage target in docs, but no CI gate enforces it                              | `CLAUDE.md` vs reality     |
+| #   | Pain Point                           | Impact                                                                                              | Location                   |
+| --- | ------------------------------------ | --------------------------------------------------------------------------------------------------- | -------------------------- |
+| 1   | **1,402-line wiring function**       | Adding any module requires conditional init blocks, handler declarations, and route groups          | `cmd/server/main.go`       |
+| 2   | **No module registration interface** | Each module is wired differently — conditional blocks with `moduleEnabled` flags                    | `cmd/server/main.go`       |
+| 3   | **Cross-module concrete coupling**   | RAG imports graph repository; Agents imports RAG service; Sales imports aimodels                    | Throughout `internal/`     |
+| 4   | **No event bus**                     | All cross-module coordination is synchronous function calls                                         | Throughout `internal/`     |
+| 5   | **No CI/CD pipeline**                | Interactive bash script, no automated testing gates                                                 | `deploy.sh`                |
+| 6   | **Single MongoDB connection**        | All 14 modules share one `*mongo.Database`, no read replicas, no per-module timeouts                | `shared/database/mongo.go` |
+| 7   | **Frontend tag proliferation**       | ~40 cache tags in single `baseApi.ts`, growing with every feature                                   | `store/api/baseApi.ts`     |
+| 8   | **No automated test enforcement**    | 80% coverage target in docs, but no CI gate enforces it                                             | `CLAUDE.md` vs reality     |
 | 9   | **Mixed route registration**         | User and reporting routes registered via helper functions, other modules use RegisterRoutes pattern | `cmd/server/main.go`       |
-| 10  | **No API versioning strategy**       | All routes are `/v1/` with no strategy for introducing v2                             | Route registration         |
+| 10  | **No API versioning strategy**       | All routes are `/v1/` with no strategy for introducing v2                                           | Route registration         |
 
 ### 2.3 Architectural Risk Score
 
-| Area                  |   Score   | Assessment                                                                |
-| --------------------- | :-------: | ------------------------------------------------------------------------- |
-| Module Separation     |    3/5    | Clean per-module structure, but wiring complexity and concrete coupling   |
-| API Design            |    4/5    | Huma v2 + OpenAPI auto-gen is strong                                      |
-| Security              |    4/5    | OAuth 2.1, multi-provider, RBAC hierarchy, HSTS — production-mature       |
-| Observability         |    2/5    | Basic logging present, no metrics pipeline, no alerting, no SLOs          |
-| CI/CD                 |    1/5    | No pipeline exists — critical gap                                         |
-| Scalability           |    2/5    | Docker Compose only, no orchestration                                     |
-| Frontend Architecture |    3/5    | Clean component separation, but single API slice with growing tags        |
-| Data Architecture     |    2/5    | Single MongoDB, no read replicas, no event sourcing                       |
-| Testing               |    2/5    | Tests exist but no enforcement or automated gates                         |
-| Documentation         |    4/5    | CLAUDE.md per module is excellent                                         |
-| **Overall**           | **2.7/5** | **Strong foundations, critical infrastructure gaps**                      |
+| Area                  |   Score   | Assessment                                                              |
+| --------------------- | :-------: | ----------------------------------------------------------------------- |
+| Module Separation     |    3/5    | Clean per-module structure, but wiring complexity and concrete coupling |
+| API Design            |    4/5    | Huma v2 + OpenAPI auto-gen is strong                                    |
+| Security              |    4/5    | OAuth 2.1, multi-provider, RBAC hierarchy, HSTS — production-mature     |
+| Observability         |    2/5    | Basic logging present, no metrics pipeline, no alerting, no SLOs        |
+| CI/CD                 |    1/5    | No pipeline exists — critical gap                                       |
+| Scalability           |    2/5    | Docker Compose only, no orchestration                                   |
+| Frontend Architecture |    3/5    | Clean component separation, but single API slice with growing tags      |
+| Data Architecture     |    2/5    | Single MongoDB, no read replicas, no event sourcing                     |
+| Testing               |    2/5    | Tests exist but no enforcement or automated gates                       |
+| Documentation         |    4/5    | CLAUDE.md per module is excellent                                       |
+| **Overall**           | **2.7/5** | **Strong foundations, critical infrastructure gaps**                    |
 
 ---
 
@@ -569,13 +569,13 @@ internal/shared/
 
 **Target**: Standalone `@orkestra/ui` package with:
 
-| Layer          | Contents                                                                                     | Source                                                                   |
-| -------------- | -------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
-| **Tokens**     | Colors, spacing scale, typography scale, breakpoints                                         | Extract from `assets/scss/theme/` SCSS variable files                    |
-| **Primitives** | Avatar, Button, Card, Badge, Divider, Logo, Flex                                             | Extract from `components/common/`                                        |
-| **Composites** | AdvanceTable, PortalDropdown, FalconEditor, FalconLightBox, Calendar                         | Extract from `components/common/` and `components/common/advance-table/` |
-| **Patterns**   | CardDropdown, ConfirmModal, ErrorBoundary, Toast                                             | Extract from `components/common/`                                        |
-| **Hooks**      | useBreakpoints, useBulkSelect, useAdvanceTable, useToggleStyle                               | Extract from `hooks/`                                                    |
+| Layer          | Contents                                                             | Source                                                                   |
+| -------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| **Tokens**     | Colors, spacing scale, typography scale, breakpoints                 | Extract from `assets/scss/theme/` SCSS variable files                    |
+| **Primitives** | Avatar, Button, Card, Badge, Divider, Logo, Flex                     | Extract from `components/common/`                                        |
+| **Composites** | AdvanceTable, PortalDropdown, FalconEditor, FalconLightBox, Calendar | Extract from `components/common/` and `components/common/advance-table/` |
+| **Patterns**   | CardDropdown, ConfirmModal, ErrorBoundary, Toast                     | Extract from `components/common/`                                        |
+| **Hooks**      | useBreakpoints, useBulkSelect, useAdvanceTable, useToggleStyle       | Extract from `hooks/`                                                    |
 
 **Storybook documentation** for each component enables visual regression testing and serves as a living style guide.
 
@@ -585,12 +585,12 @@ internal/shared/
 
 **Recommended split**:
 
-| State Type       | Technology                                | Rationale                                                                                                                 |
-| ---------------- | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| State Type       | Technology                                | Rationale                                                                                                                            |
+| ---------------- | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
 | **Server state** | TanStack Query (React Query)              | Already available in the project; better cache lifecycle, native Suspense support. RTK Query works but the ~40 tag system is growing |
-| **Auth state**   | Zustand (lightweight) or keep Redux slice | Auth is a single global concern — doesn't need full Redux machinery                                                       |
-| **Form state**   | React Hook Form (already in use)          | Keep as-is — works well                                                                                                   |
-| **UI state**     | React Context (already using providers)   | Theme, sidebar state, toast queue — keep out of Redux                                                                     |
+| **Auth state**   | Zustand (lightweight) or keep Redux slice | Auth is a single global concern — doesn't need full Redux machinery                                                                  |
+| **Form state**   | React Hook Form (already in use)          | Keep as-is — works well                                                                                                              |
+| **UI state**     | React Context (already using providers)   | Theme, sidebar state, toast queue — keep out of Redux                                                                                |
 
 **Migration path**: Keep RTK Query working while progressively migrating domain slices to TanStack Query. No big-bang rewrite.
 
@@ -976,12 +976,12 @@ orkestra-infra/                     # Separate repo for K8s manifests
 
 **Migration path**:
 
-| Phase   | Method                    | Tools                                    |
-| ------- | ------------------------- | ---------------------------------------- |
-| Current | `.env` files per environment | Manual, separate dev/staging/prod files |
-| Phase 1 | Kubernetes Secrets        | `kubectl create secret`, base64-encoded  |
-| Phase 2 | External Secrets Operator | Syncs secrets from external store to K8s |
-| Phase 3 | HashiCorp Vault           | Dynamic secrets, rotation, audit trail   |
+| Phase   | Method                       | Tools                                    |
+| ------- | ---------------------------- | ---------------------------------------- |
+| Current | `.env` files per environment | Manual, separate dev/staging/prod files  |
+| Phase 1 | Kubernetes Secrets           | `kubectl create secret`, base64-encoded  |
+| Phase 2 | External Secrets Operator    | Syncs secrets from external store to K8s |
+| Phase 3 | HashiCorp Vault              | Dynamic secrets, rotation, audit trail   |
 
 **Minimum requirements for Phase 1**:
 
@@ -996,13 +996,13 @@ orkestra-infra/                     # Separate repo for K8s manifests
 
 **Current gaps and solutions**:
 
-| Gap                                 | Solution                           | Tool                              |
-| ----------------------------------- | ---------------------------------- | --------------------------------- |
-| No metrics pipeline                 | Prometheus + OpenTelemetry metrics | Prometheus Operator on K8s        |
-| No dashboards                       | Golden signals dashboards          | Grafana                           |
-| No alerting                         | Alert rules for SLO violations     | Alertmanager → PagerDuty/Opsgenie |
-| No SLOs defined                     | Define and track SLOs              | Grafana SLO dashboard             |
-| Basic logging only                  | Structured logging with search     | Loki + Grafana Explore            |
+| Gap                 | Solution                           | Tool                              |
+| ------------------- | ---------------------------------- | --------------------------------- |
+| No metrics pipeline | Prometheus + OpenTelemetry metrics | Prometheus Operator on K8s        |
+| No dashboards       | Golden signals dashboards          | Grafana                           |
+| No alerting         | Alert rules for SLO violations     | Alertmanager → PagerDuty/Opsgenie |
+| No SLOs defined     | Define and track SLOs              | Grafana SLO dashboard             |
+| Basic logging only  | Structured logging with search     | Loki + Grafana Explore            |
 
 **Golden Signals Dashboard**:
 
@@ -1133,15 +1133,15 @@ func (d *Dependencies) DBForTenant(ctx context.Context) *mongo.Database {
 
 **Goal**: Establish CI/CD and prove the Module interface pattern.
 
-| Task                                | Effort | Owner   | Deliverable                                       |
-| ----------------------------------- | ------ | ------- | ------------------------------------------------- |
-| Set up GitHub Actions CI pipeline   | 1 week | DevOps  | `.github/workflows/ci.yml` with lint + test gates |
-| Set up GitHub Container Registry    | 1 day  | DevOps  | Push images on merge to dev/main                  |
-| Create `pkg/module/` interface      | 3 days | Backend | Module, Registry, Dependencies types              |
+| Task                                   | Effort | Owner   | Deliverable                                       |
+| -------------------------------------- | ------ | ------- | ------------------------------------------------- |
+| Set up GitHub Actions CI pipeline      | 1 week | DevOps  | `.github/workflows/ci.yml` with lint + test gates |
+| Set up GitHub Container Registry       | 1 day  | DevOps  | Push images on merge to dev/main                  |
+| Create `pkg/module/` interface         | 3 days | Backend | Module, Registry, Dependencies types              |
 | Migrate `navigation` module (simplest) | 2 days | Backend | Proof of concept                                  |
-| Migrate `reporting` module          | 2 days | Backend | Second validation                                 |
-| Migrate `company` module            | 2 days | Backend | Pattern solidified                                |
-| Measure: main.go lines reduced      | —      | —       | Target: -300 lines                                |
+| Migrate `reporting` module             | 2 days | Backend | Second validation                                 |
+| Migrate `company` module               | 2 days | Backend | Pattern solidified                                |
+| Measure: main.go lines reduced         | —      | —       | Target: -300 lines                                |
 
 **Exit criteria**: 3 modules migrated, CI pipeline running on every PR, main.go reduced by ~300 lines.
 
@@ -1149,17 +1149,17 @@ func (d *Dependencies) DBForTenant(ctx context.Context) *mongo.Database {
 
 **Goal**: All modules use the Module interface; event bus handles cross-module communication.
 
-| Task                                          | Effort  | Owner    | Deliverable                            |
-| --------------------------------------------- | ------- | -------- | -------------------------------------- |
-| Migrate remaining 9 modules                   | 4 weeks | Backend  | All modules implement Module interface |
-| Define cross-module service interfaces        | 2 weeks | Backend  | AIModelProvider, PDFService, etc.      |
-| Deploy NATS JetStream                         | 1 week  | DevOps   | Docker Compose + K8s manifest          |
-| Define domain events                          | 1 week  | Backend  | `shared/events/events.go`              |
-| Implement event publishing for billing        | 2 weeks | Backend  | InvoiceSent, SDINotification, etc.     |
-| Implement event subscriptions in reporting    | 1 week  | Backend  | Real-time metrics updates              |
-| Extract `@orkestra/ui` design system package  | 4 weeks | Frontend | Storybook + npm package                |
-| Split `baseApi` into domain-scoped slices     | 3 weeks | Frontend | Per-module API slices                  |
-| Set up Turborepo monorepo                     | 1 week  | Frontend | `turbo.json` + workspace config        |
+| Task                                         | Effort  | Owner    | Deliverable                            |
+| -------------------------------------------- | ------- | -------- | -------------------------------------- |
+| Migrate remaining 9 modules                  | 4 weeks | Backend  | All modules implement Module interface |
+| Define cross-module service interfaces       | 2 weeks | Backend  | AIModelProvider, PDFService, etc.      |
+| Deploy NATS JetStream                        | 1 week  | DevOps   | Docker Compose + K8s manifest          |
+| Define domain events                         | 1 week  | Backend  | `shared/events/events.go`              |
+| Implement event publishing for billing       | 2 weeks | Backend  | InvoiceSent, SDINotification, etc.     |
+| Implement event subscriptions in reporting   | 1 week  | Backend  | Real-time metrics updates              |
+| Extract `@orkestra/ui` design system package | 4 weeks | Frontend | Storybook + npm package                |
+| Split `baseApi` into domain-scoped slices    | 3 weeks | Frontend | Per-module API slices                  |
+| Set up Turborepo monorepo                    | 1 week  | Frontend | `turbo.json` + workspace config        |
 
 **Exit criteria**: main.go under 250 lines, NATS running with 5+ event types, frontend builds as monorepo.
 
@@ -1215,30 +1215,30 @@ Month:  1    2    3    4    5    6    7    8    9    10   11   12
 
 ## 10. Risk Assessment
 
-| Risk                                                | Likelihood |    Impact    | Mitigation                                                                                                                                                |
-| --------------------------------------------------- | :--------: | :----------: | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Module extraction breaks cross-module queries       |    High    |    Medium    | Extract simplest modules first (navigation, reporting, company); build integration test suite before touching complex modules (rag, auth)                |
-| Kubernetes learning curve delays feature work       |   Medium   |     High     | Use managed K8s (GKE/EKS); keep Docker Compose for local dev; only ops/deploy changes — application code stays the same                                   |
+| Risk                                                | Likelihood |    Impact    | Mitigation                                                                                                                                            |
+| --------------------------------------------------- | :--------: | :----------: | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Module extraction breaks cross-module queries       |    High    |    Medium    | Extract simplest modules first (navigation, reporting, company); build integration test suite before touching complex modules (rag, auth)             |
+| Kubernetes learning curve delays feature work       |   Medium   |     High     | Use managed K8s (GKE/EKS); keep Docker Compose for local dev; only ops/deploy changes — application code stays the same                               |
 | Event bus introduces eventual consistency bugs      |   Medium   |    Medium    | Start with non-critical events (reporting, analytics); keep synchronous calls for data integrity operations; add dead-letter queues for failed events |
-| Frontend monorepo refactoring breaks existing pages |   Medium   |     High     | Component-level Storybook tests; visual regression testing (Chromatic); keep old import paths working via package aliases during migration                |
-| RAG/Graph decoupling introduces latency             |    Low     |    Medium    | Interface-based communication is still in-process calls; no network overhead unless extracted to microservice                                               |
-| **Migration fatigue — team stops halfway**          |  **High**  | **Critical** | **Each phase delivers independent, measurable value; Phase 0 alone (CI/CD) pays for itself; no phase depends on completing all of the next phase**        |
-| NATS JetStream adds operational complexity          |    Low     |    Medium    | NATS is a single binary with minimal config; start with embedded mode (in-process) before deploying separately                                            |
-| Cost increase from Kubernetes infrastructure        |   Medium   |     Low      | Managed K8s clusters cost ~$70-150/month; offset by reduced manual deployment time and faster incident response                                           |
-| AI provider API key management complexity           |    Low     |    Medium    | Vault integration in Phase 2; until then, K8s Secrets with strict RBAC access controls                                                                    |
+| Frontend monorepo refactoring breaks existing pages |   Medium   |     High     | Component-level Storybook tests; visual regression testing (Chromatic); keep old import paths working via package aliases during migration            |
+| RAG/Graph decoupling introduces latency             |    Low     |    Medium    | Interface-based communication is still in-process calls; no network overhead unless extracted to microservice                                         |
+| **Migration fatigue — team stops halfway**          |  **High**  | **Critical** | **Each phase delivers independent, measurable value; Phase 0 alone (CI/CD) pays for itself; no phase depends on completing all of the next phase**    |
+| NATS JetStream adds operational complexity          |    Low     |    Medium    | NATS is a single binary with minimal config; start with embedded mode (in-process) before deploying separately                                        |
+| Cost increase from Kubernetes infrastructure        |   Medium   |     Low      | Managed K8s clusters cost ~$70-150/month; offset by reduced manual deployment time and faster incident response                                       |
+| AI provider API key management complexity           |    Low     |    Medium    | Vault integration in Phase 2; until then, K8s Secrets with strict RBAC access controls                                                                |
 
 ### Decision Matrix: Build vs Buy vs Wait
 
-| Component        | Recommendation           | Rationale                                                                |
-| ---------------- | ------------------------ | ------------------------------------------------------------------------ |
+| Component        | Recommendation           | Rationale                                                                    |
+| ---------------- | ------------------------ | ---------------------------------------------------------------------------- |
 | Module interface | **Build**                | Go-specific, aligned with existing feature-flag pattern, simple to implement |
-| Event bus        | **Buy (NATS)**           | Production-proven, Go-native, avoids building message infrastructure     |
-| API gateway      | **Buy (Traefik)**        | K8s-native, eliminates custom rate limiting from app code                |
-| Service mesh     | **Buy (Linkerd)**        | mTLS and observability cannot be reasonably built in-house               |
-| CI/CD            | **Buy (GitHub Actions)** | Already on GitHub, zero infrastructure to manage                         |
-| Kubernetes       | **Buy (managed)**        | GKE/EKS/AKS eliminates control plane management                          |
-| Design system    | **Build**                | Extract from existing components, specific to Orkestra's brand           |
-| Multi-tenancy    | **Wait**                 | Only build if SaaS distribution is confirmed as a business goal          |
+| Event bus        | **Buy (NATS)**           | Production-proven, Go-native, avoids building message infrastructure         |
+| API gateway      | **Buy (Traefik)**        | K8s-native, eliminates custom rate limiting from app code                    |
+| Service mesh     | **Buy (Linkerd)**        | mTLS and observability cannot be reasonably built in-house                   |
+| CI/CD            | **Buy (GitHub Actions)** | Already on GitHub, zero infrastructure to manage                             |
+| Kubernetes       | **Buy (managed)**        | GKE/EKS/AKS eliminates control plane management                              |
+| Design system    | **Build**                | Extract from existing components, specific to Orkestra's brand               |
+| Multi-tenancy    | **Wait**                 | Only build if SaaS distribution is confirmed as a business goal              |
 
 ---
 
