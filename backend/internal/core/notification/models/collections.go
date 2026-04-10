@@ -2,7 +2,7 @@ package models
 
 // Collection names owned by the notification module.
 const (
-	NotificationsCollection              = "notifications"
+	NotificationMessagesCollection       = "notification_messages"
 	NotificationTemplatesCollection      = "notification_templates"
 	NotificationPreferencesCollection    = "notification_preferences"
 	NotificationSuppressionsCollection   = "notification_suppressions"

@@ -58,7 +58,7 @@ type templateRepository struct {
 // NewTemplateRepository creates a new template repository instance
 func NewTemplateRepository(db *mongo.Database) TemplateRepository {
 	repo := &templateRepository{
-		collection: db.Collection("document_templates"),
+		collection: db.Collection(models.DocumentTemplatesCollection),
 	}
 	repo.createIndexes(context.Background())
 	return repo

@@ -353,7 +353,7 @@ The module uses specific error types:
 }
 ```
 
-### `generated_documents`
+### `document_outputs`
 
 ```javascript
 {

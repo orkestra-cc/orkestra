@@ -36,7 +36,7 @@ type notificationRepository struct {
 
 func NewNotificationRepository(db *mongo.Database) NotificationRepository {
 	return &notificationRepository{
-		coll: db.Collection(models.NotificationsCollection),
+		coll: db.Collection(models.NotificationMessagesCollection),
 	}
 }
 

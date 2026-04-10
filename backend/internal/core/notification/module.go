@@ -48,7 +48,7 @@ func (m *NotificationModule) Collections() []module.CollectionSpec {
 	day90 := 90 * 24 * time.Hour
 	return []module.CollectionSpec{
 		{
-			Name: models.NotificationsCollection,
+			Name: models.NotificationMessagesCollection,
 			Indexes: []module.IndexSpec{
 				{Keys: map[string]int{"uuid": 1}, Unique: true},
 				{Keys: map[string]int{"recipientUserUuid": 1}},

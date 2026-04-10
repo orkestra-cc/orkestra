@@ -44,7 +44,7 @@ type documentRepository struct {
 // NewDocumentRepository creates a new document repository instance
 func NewDocumentRepository(db *mongo.Database) DocumentRepository {
 	repo := &documentRepository{
-		collection: db.Collection("generated_documents"),
+		collection: db.Collection(models.DocumentOutputsCollection),
 	}
 	repo.createIndexes(context.Background())
 	return repo

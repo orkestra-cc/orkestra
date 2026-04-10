@@ -28,7 +28,7 @@ Use this skill whenever you are touching `Collections()` declarations, repositor
 |---|---|---|
 | `core/auth` | `auth_oauth_providers`, `auth_refresh_tokens`, `auth_sessions`, `auth_security_events`, `auth_email_tokens` | yes |
 | `core/authz` | `authz_permissions`, `authz_roles`, `authz_bindings` | yes |
-| `core/notification` | `notifications`, `notification_templates`, `notification_preferences`, `notification_suppressions`, `notification_unsubscribe_tokens` | yes — `notifications` is the module's main document collection, the rest carry the `notification_` prefix |
+| `core/notification` | `notification_messages`, `notification_templates`, `notification_preferences`, `notification_suppressions`, `notification_unsubscribe_tokens` | yes |
 | `core/tenant` | `tenant_orgs`, `tenant_memberships`, `tenant_org_invites` | yes |
 | `addons/billing` | `billing_invoices`, `billing_customers`, `billing_suppliers`, `billing_companies`, `billing_notifications`, `billing_polling_state` | yes |
 | `addons/rag` | `rag_documents`, `rag_models`, `rag_relationship_types` | yes |

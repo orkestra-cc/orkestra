@@ -47,7 +47,6 @@ func (m *AuthModule) Permissions() []iface.PermissionSpec {
 
 func (m *AuthModule) Collections() []module.CollectionSpec {
 	return []module.CollectionSpec{
-		{Name: "users"},
 		{Name: models.OAuthProvidersCollection, Indexes: []module.IndexSpec{
 			{Keys: map[string]int{"userUuid": 1, "provider": 1}, Unique: true},
 		}},

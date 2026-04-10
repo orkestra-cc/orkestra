@@ -9,6 +9,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/orkestra/backend/internal/addons/documents/config"
 	"github.com/orkestra/backend/internal/addons/documents/handlers"
+	"github.com/orkestra/backend/internal/addons/documents/models"
 	"github.com/orkestra/backend/internal/addons/documents/repository"
 	"github.com/orkestra/backend/internal/addons/documents/services"
 	sharedConfig "github.com/orkestra/backend/internal/shared/config"
@@ -46,8 +47,8 @@ func (m *DocumentsModule) ConfigSchema() []module.ConfigField {
 
 func (m *DocumentsModule) Collections() []module.CollectionSpec {
 	return []module.CollectionSpec{
-		{Name: "document_templates", Indexes: []module.IndexSpec{{Keys: map[string]int{"uuid": 1}, Unique: true}}},
-		{Name: "generated_documents", Indexes: []module.IndexSpec{{Keys: map[string]int{"uuid": 1}, Unique: true}}},
+		{Name: models.DocumentTemplatesCollection, Indexes: []module.IndexSpec{{Keys: map[string]int{"uuid": 1}, Unique: true}}},
+		{Name: models.DocumentOutputsCollection, Indexes: []module.IndexSpec{{Keys: map[string]int{"uuid": 1}, Unique: true}}},
 	}
 }
 
