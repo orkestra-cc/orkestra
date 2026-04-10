@@ -179,6 +179,7 @@ import Faq from 'reference/documentation/Faq';
 const SupportDesk = lazy(() => import('reference/dashboards/SupportDeskDashboard'));
 const UserManagement = lazy(() => import('pages/admin/users'));
 const ModuleManagement = lazy(() => import('pages/admin/modules'));
+const RoleManagement = lazy(() => import('pages/admin/roles'));
 const AdminUserProfile = lazy(
   () => import('pages/admin/user-profile/AdminUserProfile')
 );
@@ -618,6 +619,23 @@ const routes: RouteObject[] = [
                       fallback={<FalconLoader />}
                     >
                       <ModuleManagement />
+                    </Suspense>
+                  </ProtectedRoute>
+                )
+              },
+              {
+                path: 'roles',
+                element: (
+                  <ProtectedRoute
+                    requiredPermissions={[
+                      ['authz.role.read', 'developer', 'ceo', 'administrator']
+                    ]}
+                  >
+                    <Suspense
+                      key="admin-roles"
+                      fallback={<FalconLoader />}
+                    >
+                      <RoleManagement />
                     </Suspense>
                   </ProtectedRoute>
                 )

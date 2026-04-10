@@ -38,6 +38,12 @@ func (m *Module) ProvidedServices() []module.ServiceKey {
 	return []module.ServiceKey{module.ServiceAuthzProvider}
 }
 
+func (m *Module) NavItems() []module.NavItemSpec {
+	return []module.NavItemSpec{
+		{Group: "System Administration", Name: "Role Management", Icon: "shield-alt", Path: "/admin/roles", Active: true},
+	}
+}
+
 func (m *Module) Collections() []module.CollectionSpec {
 	return []module.CollectionSpec{
 		{Name: repository.CollPermissions, Indexes: []module.IndexSpec{

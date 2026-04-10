@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from 'react-toastify';
 import { useAppSelector, useAppDispatch } from 'store/hooks';
 import {
@@ -29,7 +29,7 @@ export const useAuth = () => {
   // the tenant slice (computed per-org by the authz module) rather than
   // on the auth slice, since they are org-scoped.
   const auth = useAppSelector(selectAuth);
-  const permissions = useAppSelector(selectTenantPermissions);
+  const tenantPermissions = useAppSelector(selectTenantPermissions);
   const preferences = useAppSelector(selectPreferences);
 
   // Check if logout is in progress (dynamic check)
@@ -57,6 +57,25 @@ export const useAuth = () => {
 
   // Extract user data from session response
   const currentUser = sessionData?.user || null;
+
+  // Effective permissions shown to ProtectedRoute and hasPermission.
+  // We merge the org-scoped tenant permissions with the user's global
+  // system role so that:
+  //   1) legacy role-name guards like [['developer','administrator']]
+  //      keep working immediately after login, before any org is selected,
+  //   2) the array is never empty for an authenticated user — which
+  //      unblocks ProtectedRoute's permissionsAreLoading spinner for
+  //      accounts that don't yet have an organization membership,
+  //   3) real permission keys from the authz evaluator still take effect
+  //      once useTenantBootstrap resolves an orgId.
+  const permissions = useMemo(() => {
+    const merged = [...tenantPermissions];
+    const systemRole = currentUser?.role;
+    if (systemRole && !merged.includes(systemRole)) {
+      merged.push(systemRole);
+    }
+    return merged;
+  }, [tenantPermissions, currentUser?.role]);
 
   // Debug logging in development (throttled to reduce noise)
   useEffect(() => {

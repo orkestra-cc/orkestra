@@ -123,6 +123,7 @@ export interface AppPaths {
   roleNavigationTester: string;
   userManagement: string;
   moduleManagement: string;
+  roleManagement: string;
   adminUserProfile: string;
 
   operatorProfile: string;
@@ -454,6 +455,7 @@ const paths: AppPaths = {
   roleNavigationTester: '/test/role-navigation',
   userManagement: `/${rootPaths.adminRoot}/users`,
   moduleManagement: `/${rootPaths.adminRoot}/modules`,
+  roleManagement: `/${rootPaths.adminRoot}/roles`,
   adminUserProfile: `/${rootPaths.adminRoot}/user/profile/:userId`,
 
   operatorProfile: `/${rootPaths.adminRoot}/operator/profile/:operatorId`,
