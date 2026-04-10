@@ -24,8 +24,9 @@ const (
 	ServiceGraphRepo       ServiceKey = "graph.repository"
 	ServiceRAGQuery        ServiceKey = "rag.query"
 
-	ServiceNotificationSender ServiceKey = "notification.sender"
-	ServicePasswordService    ServiceKey = "auth.password"
+	ServiceNotificationSender  ServiceKey = "notification.sender"
+	ServicePasswordService     ServiceKey = "auth.password"
+	ServicePasswordAuthService ServiceKey = "auth.password_auth"
 
 	ServiceTenantProvider ServiceKey = "tenant.provider"
 	ServiceAuthzProvider  ServiceKey = "authz.provider"

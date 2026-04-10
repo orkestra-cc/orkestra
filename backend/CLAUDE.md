@@ -58,6 +58,7 @@ backend/
 │       ├── database/               # MongoDB, Redis, Graph connections
 │       ├── middleware/             # Auth, JWT validator, rate limiting
 │       ├── remote/                 # Remote service clients (HTTP)
+│       ├── setup/                  # First-install wizard endpoints (/v1/setup/*)
 │       ├── errors/                 # Error management
 │       └── utils/                  # Utilities
 ├── Dockerfile                      # Multi-stage: dev (AIR) / production — Chainguard hardened base

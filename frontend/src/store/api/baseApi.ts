@@ -78,6 +78,26 @@ const baseQueryWithRetry: BaseQueryFn<
     const isSessionEndpoint = typeof args === 'string' && args.includes('v1/auth/session');
     const isAuthCheck = typeof args === 'string' && (args.includes('v1/auth/me') || args.includes('v1/auth/session'));
 
+    // On a fresh install the session endpoint legitimately returns 401
+    // because no user exists yet. The SetupGate should be steering the
+    // browser to /setup, not /login. Suppress the forced login redirect
+    // and the toast while the setup wizard is active or while we have
+    // not yet confirmed setupCompleted === true.
+    const isOnSetupPath =
+      typeof window !== 'undefined' && window.location.pathname.startsWith('/setup');
+    const apiState = (api.getState() as { api?: { queries?: Record<string, unknown> } }).api;
+    const setupQueryEntry = Object.values(apiState?.queries ?? {}).find((q) => {
+      return (q as { endpointName?: string } | null)?.endpointName === 'getSetupStatus';
+    }) as { data?: { setupCompleted?: boolean } } | undefined;
+    const setupCompleted = setupQueryEntry?.data?.setupCompleted === true;
+
+    if (isOnSetupPath || !setupCompleted) {
+      // First-install mode: never interrupt with a login redirect.
+      // Return the 401 as-is so callers can still handle it (SetupGate's
+      // setup-status query path itself is unauthenticated and returns 200).
+      return result;
+    }
+
     // If session endpoint returns 401, redirect to login immediately
     if (isSessionEndpoint && navigateToLogin) {
       console.log('🔐 Session endpoint returned 401 - redirecting to login');
@@ -167,6 +187,8 @@ export const baseApi = createApi({
     'PersonalConversation',
     // Admin module management tags
     'Module',
+    // First-install onboarding
+    'Setup',
     // Tenant + authz tags
     'Org',
     'Membership',

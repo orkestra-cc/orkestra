@@ -6,6 +6,7 @@ import { Chart as ChartJS, registerables } from 'chart.js';
 import { CloseButton } from 'components/common/Toast';
 import { useAppContext } from 'providers/AppProvider';
 import AuthProvider from 'providers/AuthProvider';
+import SetupGate from 'pages/setup/SetupGate';
 import 'react-datepicker/dist/react-datepicker.css';
 import 'react-toastify/dist/ReactToastify.css';
 import 'simplebar-react/dist/simplebar.min.css';
@@ -47,7 +48,9 @@ const App = () => {
 
   return (
     <AuthProvider>
-      <Outlet />
+      <SetupGate>
+        <Outlet />
+      </SetupGate>
       <ToastContainer
         closeButton={CloseButton as any}
         icon={false}

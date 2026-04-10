@@ -146,6 +146,51 @@ func (s *PasswordAuthService) Register(ctx context.Context, in RegisterInput) (*
 	return user, nil
 }
 
+// RegisterInitialAdmin creates the first administrator during the first-install
+// setup wizard. It bypasses email verification (the wizard runs before SMTP is
+// configured) and explicitly assigns the developer role rather than relying on
+// the first-user heuristic in Register. Returns a full TokenResponse so the
+// wizard can log the operator straight in.
+//
+// Callers must gate this by "no users exist yet." The unique index on
+// users.email is the only protection against concurrent callers slipping
+// through that gate at the same instant.
+func (s *PasswordAuthService) RegisterInitialAdmin(ctx context.Context, email, password, fullName, ip string) (*authModels.TokenResponse, error) {
+	email = strings.ToLower(strings.TrimSpace(email))
+	if email == "" || password == "" || fullName == "" {
+		return nil, fmt.Errorf("email, password and name are required")
+	}
+
+	if err := s.passwordService.ValidatePolicy(ctx, password, email); err != nil {
+		return nil, err
+	}
+
+	hash, err := s.passwordService.Hash(password)
+	if err != nil {
+		return nil, fmt.Errorf("hash password: %w", err)
+	}
+
+	user, err := s.userService.CreateUserWithPassword(ctx, &userModels.CreateUserInput{
+		Email:        email,
+		FullName:     fullName,
+		PasswordHash: hash,
+		Role:         "developer",
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	if err := s.userService.MarkEmailVerified(ctx, user.UUID); err != nil {
+		s.logger.Warn("RegisterInitialAdmin: MarkEmailVerified failed",
+			slog.String("user", user.UUID),
+			slog.String("error", err.Error()),
+		)
+	}
+	user.EmailVerified = true
+
+	return s.issueTokens(ctx, user, LoginInput{IP: ip, Platform: "web"})
+}
+
 // LoginInput is the payload for email/password login.
 type LoginInput struct {
 	Email    string

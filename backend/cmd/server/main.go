@@ -23,6 +23,7 @@ import (
 	authMiddleware "github.com/orkestra/backend/internal/shared/middleware"
 	"github.com/orkestra/backend/internal/shared/module"
 	"github.com/orkestra/backend/internal/shared/remote"
+	"github.com/orkestra/backend/internal/shared/setup"
 	"github.com/orkestra/backend/internal/shared/utils"
 )
 
@@ -175,6 +176,17 @@ func main() {
 		APIConfig:        apiConfig,
 		ConfigService:    configService,
 	})
+
+	// First-install onboarding: public /v1/setup/status and /v1/setup/admin.
+	// Reachable without auth — gated by the "no users exist" invariant
+	// enforced inside setup.Service.CreateInitialAdmin.
+	setupSvc := setup.NewService(
+		module.MustGetTyped[iface.UserProvider](svcRegistry, module.ServiceUserService),
+		module.MustGetTyped[setup.AdminCreator](svcRegistry, module.ServicePasswordAuthService),
+		configService,
+		logger,
+	)
+	setup.NewHandler(setupSvc, cfg.Auth.Cookie).RegisterRoutes(publicAPI)
 
 	// Admin module management routes: platform-level, not per-org.
 	protectedRouter.Group(func(r chi.Router) {

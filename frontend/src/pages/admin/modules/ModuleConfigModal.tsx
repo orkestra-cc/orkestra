@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { Alert, Button, Form, Modal, Spinner } from 'react-bootstrap';
 import { FalconCloseButton } from 'components/common';
-import type { ModuleConfig, ConfigField } from 'store/api/moduleApi';
+import type { ModuleConfig } from 'store/api/moduleApi';
 import { useUpdateModuleMutation } from 'store/api/moduleApi';
+import ModuleConfigFields from './ModuleConfigFields';
 
 interface ModuleConfigModalProps {
   module: ModuleConfig | null;
@@ -89,77 +90,6 @@ const ModuleConfigModal: React.FC<ModuleConfigModalProps> = ({
     }
   };
 
-  const renderField = (field: ConfigField) => {
-    const key = field.key;
-
-    if (field.type === 'secret') {
-      return (
-        <Form.Group key={key} className="mb-3">
-          <Form.Label className="fs-10 fw-semibold">
-            {field.label}
-            {mod?.secretStatus[key] && (
-              <span className="badge badge-subtle-success ms-2 fs-11">Set</span>
-            )}
-          </Form.Label>
-          <Form.Control
-            type="password"
-            size="sm"
-            placeholder={mod?.secretStatus[key] ? 'Leave empty to keep current' : 'Enter value'}
-            value={secretValues[key] || ''}
-            onChange={(e) =>
-              setSecretValues((prev) => ({ ...prev, [key]: e.target.value }))
-            }
-          />
-          {field.description && (
-            <Form.Text className="text-muted">{field.description}</Form.Text>
-          )}
-        </Form.Group>
-      );
-    }
-
-    if (field.type === 'bool') {
-      return (
-        <Form.Group key={key} className="mb-3">
-          <Form.Check
-            type="switch"
-            label={field.label}
-            checked={configValues[key] === 'true'}
-            onChange={(e) =>
-              setConfigValues((prev) => ({
-                ...prev,
-                [key]: e.target.checked ? 'true' : 'false',
-              }))
-            }
-          />
-          {field.description && (
-            <Form.Text className="text-muted">{field.description}</Form.Text>
-          )}
-        </Form.Group>
-      );
-    }
-
-    return (
-      <Form.Group key={key} className="mb-3">
-        <Form.Label className="fs-10 fw-semibold">{field.label}</Form.Label>
-        <Form.Control
-          type={field.type === 'int' ? 'number' : 'text'}
-          size="sm"
-          placeholder={field.default || ''}
-          value={configValues[key] || ''}
-          onChange={(e) =>
-            setConfigValues((prev) => ({ ...prev, [key]: e.target.value }))
-          }
-        />
-        {field.envVar && (
-          <Form.Text className="text-muted">
-            Env: <code>{field.envVar}</code>
-            {field.description ? ` — ${field.description}` : ''}
-          </Form.Text>
-        )}
-      </Form.Group>
-    );
-  };
-
   if (!mod) return null;
 
   const isCore = mod.category === 'core';
@@ -201,7 +131,18 @@ const ModuleConfigModal: React.FC<ModuleConfigModalProps> = ({
         {hasSchema && (
           <>
             <h6 className="fs-9 border-bottom pb-2 mb-3">Configuration</h6>
-            {mod.configSchema.map(renderField)}
+            <ModuleConfigFields
+              schema={mod.configSchema}
+              configValues={configValues}
+              secretValues={secretValues}
+              secretStatus={mod.secretStatus}
+              onConfigChange={(key, value) =>
+                setConfigValues((prev) => ({ ...prev, [key]: value }))
+              }
+              onSecretChange={(key, value) =>
+                setSecretValues((prev) => ({ ...prev, [key]: value }))
+              }
+            />
           </>
         )}
 

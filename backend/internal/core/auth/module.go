@@ -36,7 +36,12 @@ func (m *AuthModule) OptionalServices() []module.ServiceKey {
 	return []module.ServiceKey{module.ServiceNotificationSender}
 }
 func (m *AuthModule) ProvidedServices() []module.ServiceKey {
-	return []module.ServiceKey{module.ServiceAuthService, module.ServiceJWTService, module.ServicePasswordService}
+	return []module.ServiceKey{
+		module.ServiceAuthService,
+		module.ServiceJWTService,
+		module.ServicePasswordService,
+		module.ServicePasswordAuthService,
+	}
 }
 
 func (m *AuthModule) Permissions() []iface.PermissionSpec {
@@ -199,6 +204,7 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 	deps.Services.Register(module.ServiceAuthService, authService)
 	deps.Services.Register(module.ServiceJWTService, jwtService)
 	deps.Services.Register(module.ServicePasswordService, passwordSvc)
+	deps.Services.Register(module.ServicePasswordAuthService, passwordAuthSvc)
 
 	return nil
 }

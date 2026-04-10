@@ -174,6 +174,7 @@ import ForgotPassword from 'components/authentication/ForgotPassword';
 import ResetPassword from 'components/authentication/ResetPassword';
 import VerifyEmailPage from 'components/authentication/VerifyEmailPage';
 import SocialAuthCallback from 'components/authentication/SocialAuthCallback';
+const SetupWizard = lazy(() => import('pages/setup/SetupWizard'));
 const Dashboard = lazy(() => import('reference/dashboards/DefaultDashboard'));
 import Faq from 'reference/documentation/Faq';
 const SupportDesk = lazy(() => import('reference/dashboards/SupportDeskDashboard'));
@@ -309,6 +310,14 @@ const routes: RouteObject[] = [
             element: <Error500 />
           }
         ]
+      },
+      {
+        path: 'setup',
+        element: (
+          <Suspense key="setup-wizard" fallback={<FalconLoader />}>
+            <SetupWizard />
+          </Suspense>
+        )
       },
       {
         path: 'login',
