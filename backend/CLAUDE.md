@@ -1,6 +1,6 @@
 # Backend — Go Modular Server
 
-Single Go binary. 3 core modules (always loaded) + 9 optional addons. Slim `cmd/server/main.go` (~240 lines) that wires infrastructure and delegates everything else to the module registry. Port 3000 inside the container.
+Single Go binary. 4 core modules (always loaded) + 9 optional addons. Slim `cmd/server/main.go` (~240 lines) that wires infrastructure and delegates everything else to the module registry. Port 3000 inside the container.
 
 ## Stack
 
@@ -17,7 +17,7 @@ ProvidedServices, RequiredServices, OptionalServices
 Enabled, Init, RegisterRoutes, Start, Stop, HealthCheck
 ```
 
-**Registration** (`cmd/server/catalog.go`): core modules (user → auth → navigation) are always loaded. Optional modules come from `MODULES=billing,sales,...` or from per-module `Enabled()` env vars, and dependencies are auto-included (e.g. enabling `rag` auto-pulls `graph` and `aimodels`). The registry topologically sorts by `Dependencies()` so producers init before consumers, auto-creates MongoDB collections with their declared indexes, seeds configs, collects nav items, and gates routes for disabled modules.
+**Registration** (`cmd/server/catalog.go`): core modules (user → notification → auth → navigation) are always loaded. Optional modules come from `MODULES=billing,sales,...` or from per-module `Enabled()` env vars, and dependencies are auto-included (e.g. enabling `rag` auto-pulls `graph` and `aimodels`). The registry topologically sorts by `Dependencies()` so producers init before consumers, auto-creates MongoDB collections with their declared indexes, seeds configs, collects nav items, and gates routes for disabled modules.
 
 **Cross-module communication**: modules discover each other through the `ServiceRegistry` (typed key-value store). Consumer modules import interfaces from `internal/shared/iface/` — never import another module's `services/` or `repository/` package.
 
@@ -36,9 +36,10 @@ backend/
 │   └── ai-service/                 # AI sidecar binary (optional)
 │       └── main.go
 ├── internal/
-│   ├── core/                       # Always loaded
-│   │   ├── auth/                   # OAuth 2.1, JWT, sessions, RBAC
+│   ├── core/                       # Always loaded (init order: user → notification → auth → navigation)
 │   │   ├── user/                   # User CRUD, roles, documents
+│   │   ├── notification/           # Email delivery, templates, preferences, unsubscribe
+│   │   ├── auth/                   # Email/password + OAuth 2.1, JWT, sessions, RBAC
 │   │   └── navigation/             # Dynamic menu from module NavItems
 │   ├── addons/                     # Optional — loaded via MODULES env var
 │   │   ├── billing/                # FatturaPA/SDI invoicing
@@ -120,7 +121,7 @@ docker compose -f docker-compose.minimal.yml --env-file .env.minimal up -d
 docker compose -f docker-compose.minimal.yml logs -f backend
 ```
 
-The minimal stack builds from `backend/Dockerfile.minimal` which uses `golang:1.25-alpine` → `alpine:3.20`. It's the recommended path when you don't have `dhi.io` registry access or just want a smoke-test-ready backend with `MODULES=dev` (auth + user + navigation + dev token generator). Runs on host ports 3050/8050/27050/6350 to avoid colliding with the dev stack.
+The minimal stack builds from `backend/Dockerfile.minimal` which uses `golang:1.25-alpine` → `alpine:3.20`. It's the recommended path when you don't have `dhi.io` registry access or just want a smoke-test-ready backend with `MODULES=dev` (user + notification + auth + navigation + dev token generator). Runs on host ports 3050/8050/27050/6350 to avoid colliding with the dev stack.
 
 **WSL2 caveat**: AIR doesn't detect file changes on Windows mounts. Rebuild manually:
 ```bash
@@ -132,7 +133,7 @@ docker restart orkestra-backend-dev
 
 ## Rules
 
-- **Read the module's own CLAUDE.md** before modifying it — billing, documents, graph, rag, agents, aimodels, company each have one
+- **Read the module's own CLAUDE.md** before modifying it — notification, billing, documents, graph, rag, agents, aimodels, company each have one
 - **Use the module system** — don't add routes or init logic directly to main.go
 - **Use `shared/iface`** for cross-module deps — never import another module's services package from module.go
 - **Validate all inputs**, implement RBAC on every endpoint, never expose secrets in responses

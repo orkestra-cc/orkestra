@@ -11,11 +11,11 @@ Professional business and service management system — electronic invoicing, AI
 | **Mobile**         | Flutter 3.35+, Dart, Riverpod                                      |
 | **Database**       | MongoDB 8.0, Redis 8.2                                             |
 | **Infrastructure** | Docker Compose (dev/staging/prod), GitHub Actions CI               |
-| **Auth**           | OAuth 2.1 (Google, Apple, GitHub, Discord), RS256 JWT, 6-role RBAC |
+| **Auth**           | Email/password (argon2id) + OAuth 2.1 (Google, Apple, GitHub, Discord), RS256 JWT, 6-role RBAC |
 
 ## Architecture
 
-**Plugin architecture**: 3 core modules (auth, user, navigation) always load. All other modules are **optional** — users choose which to enable via the `MODULES` env var or per-module env vars. The registry resolves initialization order automatically from each module's `Dependencies()` declaration.
+**Plugin architecture**: 4 core modules (user, notification, auth, navigation) always load. All other modules are **optional** — users choose which to enable via the `MODULES` env var or per-module env vars. The registry resolves initialization order automatically from each module's `Dependencies()` declaration.
 
 **Key components** (`backend/internal/shared/module/`):
 
@@ -23,7 +23,7 @@ Professional business and service management system — electronic invoicing, AI
 - **ModuleRegistry** — `RegisterAll()` with topological sort from `Dependencies()`; tracks failures, gates routes for disabled modules
 - **ServiceRegistry** — typed key-value store for cross-module service sharing (`GetTyped[T]`, `MustGetTyped[T]`)
 - **ConfigService** — DB-backed (MongoDB) + Redis-cached (30s TTL) module configuration with AES-256-GCM encrypted secrets
-- **shared/iface** — consumer-facing interfaces (UserProvider, PDFProvider, GraphProvider, AIModelProvider, RAGQueryProvider, JWTProvider) that prevent direct cross-module imports
+- **shared/iface** — consumer-facing interfaces (UserProvider, NotificationSender, PDFProvider, GraphProvider, AIModelProvider, RAGQueryProvider, JWTProvider) that prevent direct cross-module imports
 - **RoleMiddleware** — interface (`module.go`) for RBAC route protection, satisfied by both `AuthMiddleware` (monolith) and `JWTValidator` (AI service)
 - **Module catalog** (`cmd/server/catalog.go`) — maps module names to factory functions; `selectOptionalModules()` resolves which to load and auto-includes transitive dependencies
 
@@ -106,11 +106,14 @@ docker compose -f docker-compose.ai.yml --env-file .env up -d
 
 **Core (always loaded):**
 
-| Module         | Purpose                                                              |
-| -------------- | -------------------------------------------------------------------- |
-| **auth**       | OAuth 2.1, JWT, sessions, RBAC                                       |
-| **user**       | User CRUD, role management, document tracking                        |
-| **navigation** | Dynamic menu from module NavItems                                    |
+| Module           | Purpose                                                                                                           |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------- |
+| **user**         | User CRUD, role management, document tracking                                                                     |
+| **notification** | Email delivery, templates, user preferences, unsubscribe tokens — [docs](backend/internal/core/notification/CLAUDE.md) |
+| **auth**         | Email/password (argon2id) + OAuth 2.1, JWT, sessions, RBAC                                                        |
+| **navigation**   | Dynamic menu from module NavItems                                                                                 |
+
+Load order (topologically sorted by `Dependencies()`): `user` → `notification` → `auth` → `navigation`. Auth depends on notification (optional at runtime) so it can deliver verification and password-reset emails.
 
 **Optional (loaded via `MODULES` env var or per-module env vars):**
 
@@ -131,13 +134,15 @@ docker compose -f docker-compose.ai.yml --env-file .env up -d
 - **[`/frontend/`](frontend/CLAUDE.md)** — React 19 admin dashboard (port 8080)
 - **[`/mobile/`](mobile/CLAUDE.md)** — Flutter cross-platform app
 - **[`/docker/`](docker/CLAUDE.md)** — Docker Compose configs (dev/staging/prod/infra)
-- **[`/docs/Authentication_flow.md`](docs/Authentication_flow.md)** — OAuth 2.1 + RBAC details
+- **[`/docs/Authentication_flow.md`](docs/Authentication_flow.md)** — Email/password + OAuth 2.1 + RBAC details
 
 ## Quick Start
 
 ### Minimal profile (recommended for first boot)
 
-Boots only the core modules — auth, user, navigation, plus the `dev` token generator — with MongoDB and Redis. Four containers total, no Gotenberg/Memgraph/Hindsight/Ollama, uses only publicly available Docker images so it runs on any VM without registry authentication. Ports are non-standard (3050/8050/27050/6350) so it can run alongside the full dev stack or other Docker projects without conflicts.
+Boots only the core modules — user, notification, auth, navigation, plus the `dev` token generator — with MongoDB and Redis. Four containers total, no Gotenberg/Memgraph/Hindsight/Ollama, uses only publicly available Docker images so it runs on any VM without registry authentication. Ports are non-standard (3050/8050/27050/6350) so it can run alongside the full dev stack or other Docker projects without conflicts.
+
+The notification module boots in `noop` mode by default — verification and password-reset emails are logged to the backend stdout rather than delivered. To send real mail, set `NOTIFICATION_EMAIL_PROVIDER=smtp` plus `SMTP_HOST/PORT/USERNAME/PASSWORD` and `NOTIFICATION_EMAIL_FROM` in the env file, or configure them at `/admin/modules` once you are logged in.
 
 ```bash
 cd docker

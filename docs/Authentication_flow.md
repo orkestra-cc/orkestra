@@ -5,6 +5,120 @@
 [← Root](../CLAUDE.md)
 <!-- /Navigation -->
 
+Orkestra supports two authentication methods for end users:
+
+1. **Email and password** — the default sign-in method for web clients, backed by argon2id password hashing and email verification via the notification module.
+2. **OAuth 2.1 social login** — Google, Apple, GitHub and Discord, for users who prefer a passwordless flow or an existing identity provider.
+
+Both methods issue the same RS256-signed JWT access + refresh token pair, create the same `AuthSessionDoc` audit record, and place the user behind the same RBAC middleware. The only differences are which fields on the user record are populated (`PasswordHash` vs `OAuthLinks`) and the string stored in `AuthSessionDoc.LoginMethod` (`"password"` vs `"google"`, `"apple"`, etc.).
+
+The sections below cover each flow in detail. Email/password is documented first because it is the default.
+
+---
+
+## Email and Password Authentication 🔐
+
+### Password hashing and policy
+
+Passwords are hashed with **argon2id** using OWASP 2025 parameters (19 MiB memory, 2 iterations, 1 parallelism, 16-byte salt, 32-byte output) in a PHC-formatted string:
+
+```
+$argon2id$v=19$m=19456,t=2,p=1$<salt_b64>$<hash_b64>
+```
+
+The PHC format is self-describing, so parameters can be upgraded later and old hashes will still verify — the password service exposes `NeedsRehash(encoded)` and the login handler transparently rehashes on successful sign-in whenever the stored hash uses weaker parameters than the current default.
+
+Policy enforced on every new password:
+
+- Minimum 10 characters, maximum 128 (NIST SP 800-63B-4)
+- Must not contain the local part of the user's email address
+- Best-effort HaveIBeenPwned range API check using k-anonymity (only the first 5 hex chars of the SHA-1 hash leave the server)
+- No rotation requirement, no composition rules (NIST explicitly rejects both)
+
+On the login path, the password service runs `Verify` against a precomputed **dummy hash** when the user doesn't exist so the wall-clock time for "user not found" matches "user found, wrong password" — this foils timing-based user enumeration.
+
+### Endpoints
+
+All seven endpoints live on the auth module. Six are public; the last requires an authenticated session.
+
+| Endpoint                          | Method | Notes                                                                    |
+| --------------------------------- | ------ | ------------------------------------------------------------------------ |
+| `/v1/auth/register`               | POST   | Creates a user, sends verification email via the notification module    |
+| `/v1/auth/login`                  | POST   | Returns `accessToken` in body, sets refresh token cookie                 |
+| `/v1/auth/verify-email`           | POST   | Consumes a token from the email link                                     |
+| `/v1/auth/verify-email/resend`    | POST   | Rate-limited; always returns generic success to prevent enumeration      |
+| `/v1/auth/forgot-password`        | POST   | Issues reset token + email; always returns generic success               |
+| `/v1/auth/reset-password`         | POST   | Consumes reset token, updates hash, revokes all refresh tokens           |
+| `/v1/auth/change-password`        | POST   | Requires auth + current password; **protected**                          |
+
+Error responses use a generic `401 "Invalid email or password"` for all bad-credential paths (wrong email, wrong password, inactive account, OAuth-only account) to avoid leaking which case hit. `403` distinguishes the "email not verified" case when that policy is enforced. `429` indicates a lockout after too many failed attempts. `503` indicates that signup is disabled because the notification sender isn't configured and verification is required.
+
+### Registration flow
+
+1. Client posts `{ email, password, fullName }` to `/v1/auth/register`.
+2. Backend validates policy, runs the HIBP check, hashes with argon2id.
+3. If this is the very first user in the system, the new account gets the `developer` role automatically (bootstrap convenience); otherwise the default role is `operator`.
+4. A 32-byte random verification token is generated, the SHA-256 hash is stored in the `email_tokens` collection with a 24h TTL, and the raw token is embedded in a link sent via `notifier.SendTemplated(auth.verify_email, ...)`.
+5. If `AUTH_REQUIRE_EMAIL_VERIFICATION=false` (dev mode) the user is marked verified immediately and can sign in. If `true` and the notifier is not configured, registration fails with `503`.
+
+### Login flow
+
+1. Client posts `{ email, password }` to `/v1/auth/login`.
+2. The rate limiter checks two buckets — the caller IP and the email address — and returns `429 Account temporarily locked` if either is over the limit (default: 3 failed attempts per 15 minutes per bucket).
+3. The user record is fetched via `UserProvider.GetUserForAuth` (the only method that returns the raw `PasswordHash`).
+4. The password is verified. On a miss, the failed counter is incremented and after 5 misses `LockedUntil` is set 15 minutes in the future.
+5. On success the failed counter is cleared, the hash is rehashed if parameters have since been upgraded, an access token is issued, a refresh token is stored in the `refresh_tokens` collection, an `AuthSessionDoc` with `LoginMethod="password"` is written for audit, and the response sets the refresh token cookie plus returns the access token in the response body.
+
+### Verification and password reset
+
+Both flows use the same `email_tokens` collection:
+
+- **Verification token**: 24h TTL, single-use, generated on signup.
+- **Reset token**: 30 minute TTL, single-use, generated on `forgot-password`.
+
+Tokens are always 32 bytes of `crypto/rand`, base64url-encoded for transport and SHA-256 hashed for storage. The MongoDB TTL index removes expired documents automatically 24h after `ExpiresAt`.
+
+Password reset atomically (a) updates `PasswordHash`, (b) clears the failed login counter, (c) marks the reset token used and (d) calls `refreshTokenRepo.RevokeTokensByUser` so the user must sign in from scratch on all devices.
+
+### Notification module integration
+
+The auth module declares `notification` as a hard dependency. At init time it tries to resolve an `iface.NotificationSender` from the `ServiceRegistry`:
+
+- **Notifier configured** (SMTP settings present in admin config or env): verification and reset emails are sent via `notifier.SendTemplated()` with the `auth.verify_email` and `auth.reset_password` template IDs. The notification module owns template rendering, preferences, idempotency and the delivery log.
+- **Notifier not configured**: if `AUTH_REQUIRE_EMAIL_VERIFICATION=true` (production default), `/register` returns `503 Service Unavailable`. If `false` (dev default), new users are auto-verified and no email is sent.
+- **Notifier in `noop` mode** (`NOTIFICATION_EMAIL_PROVIDER=noop`): emails are logged to the backend stdout instead of delivered. This is the default dev setup — no SMTP server required.
+
+Every email generated by the auth flows ships with an unsubscribe footer wired to `/v1/notifications/unsubscribe?token=...`. Transactional mail is always delivered regardless of user preferences (verification and password reset cannot legitimately be opted out of), but the footer still lets users jump to `/account/notifications` to opt out of *marketing* categories. The unsubscribe token is generated per-send by the notification module and auto-injected into the template data map.
+
+### Config knobs
+
+| Env var                             | Default (dev) | Default (prod)  | Purpose                                                               |
+| ----------------------------------- | ------------- | --------------- | --------------------------------------------------------------------- |
+| `AUTH_REQUIRE_EMAIL_VERIFICATION`   | `false`       | `true`          | Require email verification before users can sign in                   |
+| `NOTIFICATION_EMAIL_PROVIDER`       | `noop`        | `smtp`          | `smtp` or `noop`; `noop` logs mail to stdout                          |
+| `SMTP_HOST`, `SMTP_PORT`            | —             | required        | SMTP relay                                                            |
+| `SMTP_USERNAME`, `SMTP_PASSWORD`    | —             | required        | SMTP auth; password encrypted with AES-256-GCM in DB config           |
+| `SMTP_TLS_MODE`                     | `starttls`    | `starttls`      | `starttls`, `tls`, or `none`                                          |
+| `NOTIFICATION_EMAIL_FROM`           | —             | required        | From address (`noreply@yourdomain.com`)                               |
+| `NOTIFICATION_EMAIL_FROM_NAME`      | `Orkestra`    | `Orkestra`      | Display name                                                          |
+| `APP_NAME`                          | `Orkestra`    | `Orkestra`      | Injected into template data as `{{.AppName}}`                         |
+| `SUPPORT_EMAIL`                     | —             | —               | Injected into template data as `{{.SupportEmail}}`                    |
+
+All of these can also be set from the admin UI at `/admin/modules` → Notifications without a restart. Env var values are used as bootstrap defaults until the first admin logs in and overrides them.
+
+### Rate limiting
+
+Login goes through two buckets maintained by `shared/errors/rate_limiter.go`:
+
+- `auth:failed` per IP (`ip:<client_ip>`): 3 attempts / 15 minutes
+- `auth:failed` per email (`email:<address>`): 3 attempts / 15 minutes
+
+The per-email bucket catches credential-stuffing attacks that rotate IPs across many VPN exits targeting a single account. On top of the token bucket, a hard database-level lockout kicks in after 5 consecutive failures: `User.LockedUntil` is set 15 minutes in the future and the login handler short-circuits with `429` until that timestamp passes. Successful login clears both the counter and the lockout.
+
+---
+
+## OAuth 2.1 Flow (Social Login)
+
 The application will not handle the user's social media credentials directly. Instead, it will receive a one-time code from the social provider (web) or an ID token (mobile), which your backend exchanges for tokens.
 
 Here's a breakdown of the flow and how to manage the different tokens:
