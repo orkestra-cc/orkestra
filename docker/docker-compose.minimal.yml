@@ -1,0 +1,187 @@
+# Orkestra Minimal Stack
+#
+# Single self-contained compose file for running Orkestra on a modest VM
+# with only the core modules: auth, user, navigation (+ the dev token
+# generator for first-login bootstrap). No Gotenberg, Memgraph, Hindsight,
+# Ollama, AI sidecar, or other optional services.
+#
+# Usage:
+#   cd docker
+#   docker network create orkestra-network  # once, if it does not exist
+#   docker compose -f docker-compose.minimal.yml --env-file .env.minimal up -d
+#
+# Services started (4 containers):
+#   - mongodb   (host port 27050 — non-standard to avoid conflicts)
+#   - redis     (host port 6350  — non-standard to avoid conflicts)
+#   - backend   (host port 3050) -> API at http://localhost:3050, docs at /docs
+#   - frontend  (host port 8050) -> UI  at http://localhost:8050
+#
+# The default ports are deliberately non-standard so the minimal stack
+# can run alongside other Docker stacks (e.g. the full orkestra dev
+# stack, or an unrelated ERP dev stack) without colliding. Override by
+# editing .env.minimal if you want the classic 3000/8080/27017/6379.
+#
+# After boot, generate an administrator dev token:
+#   ORKESTRA_API_URL=http://localhost:3050 ../scripts/devtoken.sh administrator
+#
+# The minimal profile sets MODULES=dev so the devtoken CLI works. To also
+# enable other addons, edit .env.minimal and add their names (comma list).
+
+name: orkestra-minimal
+
+services:
+  mongodb:
+    image: mongo:8.0
+    container_name: orkestra-mongodb-minimal
+    restart: unless-stopped
+    ports:
+      - "${MONGO_PORT:-27050}:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USERNAME:-admin}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:-changeme}
+      MONGO_INITDB_DATABASE: ${MONGO_DATABASE:-orkestra}
+    volumes:
+      - orkestra-minimal-mongodb-data:/data/db
+      - orkestra-minimal-mongodb-config:/data/configdb
+    networks:
+      - orkestra-network
+    # Healthcheck authenticates with the root credentials so it only
+    # passes once the entrypoint has finished provisioning the root
+    # user. The unauthenticated ping check races the backend on first
+    # boot and causes collection auto-creation to fail.
+    healthcheck:
+      test: >-
+        mongosh --quiet
+        -u "${MONGO_ROOT_USERNAME:-admin}"
+        -p "${MONGO_ROOT_PASSWORD:-changeme}"
+        --authenticationDatabase admin
+        --eval "db.adminCommand('ping').ok"
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 20s
+
+  redis:
+    image: redis:8.2-alpine
+    container_name: orkestra-redis-minimal
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT:-6350}:6379"
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-changeme}
+    volumes:
+      - orkestra-minimal-redis-data:/data
+    networks:
+      - orkestra-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile.minimal
+    image: orkestra-backend:minimal
+    container_name: orkestra-backend-minimal
+    restart: unless-stopped
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "${BACKEND_PORT:-3050}:3000"
+    environment:
+      ENV: ${ENV:-development}
+      PORT: 3000
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      PRETTY_LOGS: ${PRETTY_LOGS:-true}
+
+      # Module selection — core is always loaded. `dev` enables the dev
+      # token generator so you can log in without configuring OAuth.
+      # Add more modules here to opt in (comma-separated), e.g. "dev,billing".
+      MODULES: ${MODULES:-dev}
+
+      # Infrastructure
+      MONGO_URI: mongodb://${MONGO_ROOT_USERNAME:-admin}:${MONGO_ROOT_PASSWORD:-changeme}@mongodb:27017/${MONGO_DATABASE:-orkestra}?authSource=admin
+      REDIS_URL: redis://:${REDIS_PASSWORD:-changeme}@redis:6379/0
+
+      # JWT (RS256 — keys mounted read-only from ./keys/)
+      JWT_PRIVATE_KEY_PATH: /app/keys/jwt-private.pem
+      JWT_PUBLIC_KEY_PATH: /app/keys/jwt-public.pem
+      JWT_ACCESS_TOKEN_EXPIRY: ${JWT_ACCESS_TOKEN_EXPIRY:-1h}
+      JWT_REFRESH_TOKEN_EXPIRY: ${JWT_REFRESH_TOKEN_EXPIRY:-7d}
+
+      # Secret encryption key for module config values
+      OAUTH_TOKEN_ENCRYPTION_KEY: ${OAUTH_TOKEN_ENCRYPTION_KEY}
+
+      # Cookies (relaxed for local dev — tighten for a real deployment)
+      COOKIE_SECRET: ${COOKIE_SECRET}
+      COOKIE_NAME: ${COOKIE_NAME:-orkestra_cookie}
+      COOKIE_DOMAIN: ${COOKIE_DOMAIN:-}
+      COOKIE_HTTP_ONLY: ${COOKIE_HTTP_ONLY:-true}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      COOKIE_SAME_SITE: ${COOKIE_SAME_SITE:-lax}
+      COOKIE_MAX_AGE: ${COOKIE_MAX_AGE:-86400000}
+
+      # URLs
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:8050}
+      BACKEND_URL: ${BACKEND_URL:-http://localhost:3050}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8050}
+
+      # Rate limits — generous for a single-user modest VM
+      RATE_LIMIT_REQUESTS_PER_MINUTE: ${RATE_LIMIT_REQUESTS_PER_MINUTE:-600}
+      RATE_LIMIT_BURST: ${RATE_LIMIT_BURST:-60}
+
+      # Explicitly disable all optional infrastructure — the minimal
+      # profile does not depend on any of these services.
+      GRAPH_ENABLED: "false"
+      RAG_ENABLED: "false"
+      AGENTS_ENABLED: "false"
+      AIMODELS_ENABLED: "false"
+      SALES_ENABLED: "false"
+      AI_SERVICE_URL: ""
+    volumes:
+      - ./keys:/app/keys:ro
+    networks:
+      - orkestra-network
+
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+      target: production
+      args:
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:3050}
+        VITE_BACKEND_URL: ${VITE_BACKEND_URL:-http://localhost:3050}
+        VITE_WS_URL: ${VITE_WS_URL:-ws://localhost:3050/ws}
+        VITE_PUBLIC_URL: /
+        VITE_ENV: development
+        VITE_DEBUG: "true"
+    image: orkestra-frontend:minimal
+    container_name: orkestra-frontend-minimal
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "${FRONTEND_PORT:-8050}:80"
+    networks:
+      - orkestra-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  orkestra-minimal-mongodb-data:
+    driver: local
+  orkestra-minimal-mongodb-config:
+    driver: local
+  orkestra-minimal-redis-data:
+    driver: local
+
+networks:
+  orkestra-network:
+    external: true

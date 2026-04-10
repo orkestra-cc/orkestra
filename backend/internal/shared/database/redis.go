@@ -3,6 +3,7 @@ package database
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -17,6 +18,13 @@ type RedisConfig struct {
 	ReadTimeout     time.Duration
 	WriteTimeout    time.Duration
 }
+
+// redisConnectMaxAttempts bounds the retry loop at startup. Like
+// MongoDB, Redis containers can accept TCP connections before the
+// `--requirepass` flag finishes being applied, producing WRONGPASS
+// errors on the first few pings. Retrying with backoff closes the
+// window without needing a wait-for wrapper in the container command.
+const redisConnectMaxAttempts = 20
 
 func NewRedisConnection(ctx context.Context, config RedisConfig) (*redis.Client, error) {
 	opts, err := redis.ParseURL(config.URL)
@@ -33,14 +41,37 @@ func NewRedisConnection(ctx context.Context, config RedisConfig) (*redis.Client,
 
 	client := redis.NewClient(opts)
 
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
+	var lastErr error
+	for attempt := 1; attempt <= redisConnectMaxAttempts; attempt++ {
+		pingCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		err := client.Ping(pingCtx).Err()
+		cancel()
+		if err == nil {
+			return client, nil
+		}
+		lastErr = err
 
-	if err := client.Ping(ctx).Err(); err != nil {
-		return nil, fmt.Errorf("failed to ping Redis: %w", err)
+		if attempt == redisConnectMaxAttempts {
+			break
+		}
+		backoff := time.Duration(1<<uint(attempt-1)) * 500 * time.Millisecond
+		if backoff > 5*time.Second {
+			backoff = 5 * time.Second
+		}
+		slog.Info("Redis not ready, retrying",
+			slog.Int("attempt", attempt),
+			slog.Int("max_attempts", redisConnectMaxAttempts),
+			slog.Duration("backoff", backoff),
+			slog.String("error", err.Error()),
+		)
+		select {
+		case <-ctx.Done():
+			return nil, fmt.Errorf("context cancelled waiting for Redis: %w", ctx.Err())
+		case <-time.After(backoff):
+		}
 	}
 
-	return client, nil
+	return nil, fmt.Errorf("failed to ping Redis after %d attempts: %w", redisConnectMaxAttempts, lastErr)
 }
 
 func DisconnectRedis(client *redis.Client) error {

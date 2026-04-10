@@ -268,17 +268,27 @@ func (r *ModuleRegistry) ensureCollections(db *mongo.Database) error {
 }
 
 // ensureCollection creates a single collection and its indexes if they don't exist.
+// Each step is retried on transient auth errors because the Mongo driver's
+// background monitoring connections re-authenticate for several seconds after
+// a container first boots, and they can briefly poison the connection pool
+// even after the main client has completed a successful auth probe.
 func ensureCollection(ctx context.Context, db *mongo.Database, coll CollectionSpec, moduleName string, logger *slog.Logger) error {
-	// Create collection — ignore "already exists" error (MongoDB code 48).
-	err := db.CreateCollection(ctx, coll.Name)
-	if err != nil && !isCollectionAlreadyExists(err) {
+	if err := retryTransient(ctx, logger, "create collection "+coll.Name, func(opCtx context.Context) error {
+		err := db.CreateCollection(opCtx, coll.Name)
+		if err != nil && !isCollectionAlreadyExists(err) {
+			return err
+		}
+		return nil
+	}); err != nil {
 		return fmt.Errorf("create collection %q: %w", coll.Name, err)
 	}
 
-	// Ensure indexes.
 	if len(coll.Indexes) > 0 {
 		indexModels := buildIndexModels(coll.Indexes)
-		if _, err := db.Collection(coll.Name).Indexes().CreateMany(ctx, indexModels); err != nil {
+		if err := retryTransient(ctx, logger, "create indexes "+coll.Name, func(opCtx context.Context) error {
+			_, err := db.Collection(coll.Name).Indexes().CreateMany(opCtx, indexModels)
+			return err
+		}); err != nil {
 			return fmt.Errorf("create indexes for %q: %w", coll.Name, err)
 		}
 	}
@@ -289,6 +299,74 @@ func ensureCollection(ctx context.Context, db *mongo.Database, coll CollectionSp
 		slog.Int("indexes", len(coll.Indexes)),
 	)
 	return nil
+}
+
+// retryTransient runs op with exponential backoff on transient errors
+// (notably "connection pool cleared" caused by the Mongo driver's
+// background auth reconnection during container first-boot).
+func retryTransient(ctx context.Context, logger *slog.Logger, label string, op func(context.Context) error) error {
+	const maxAttempts = 10
+	var lastErr error
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		opCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		err := op(opCtx)
+		cancel()
+		if err == nil {
+			return nil
+		}
+		lastErr = err
+		if !isTransientMongoError(err) || attempt == maxAttempts {
+			return err
+		}
+		backoff := time.Duration(1<<uint(attempt-1)) * 200 * time.Millisecond
+		if backoff > 3*time.Second {
+			backoff = 3 * time.Second
+		}
+		logger.Debug("Transient mongo error, retrying",
+			slog.String("op", label),
+			slog.Int("attempt", attempt),
+			slog.Duration("backoff", backoff),
+			slog.String("error", err.Error()),
+		)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(backoff):
+		}
+	}
+	return lastErr
+}
+
+// isTransientMongoError matches errors worth retrying at startup:
+// pool cleared from a background auth handshake failure, or the
+// AuthenticationFailed (code 18) from a command hitting the window
+// before SCRAM users are fully provisioned.
+func isTransientMongoError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var cmdErr mongo.CommandError
+	if errors.As(err, &cmdErr) && cmdErr.Code == 18 {
+		return true
+	}
+	msg := err.Error()
+	return containsAny(msg,
+		"connection pool",
+		"AuthenticationFailed",
+		"SCRAM",
+		"server selection",
+	)
+}
+
+func containsAny(s string, needles ...string) bool {
+	for _, n := range needles {
+		for i := 0; i+len(n) <= len(s); i++ {
+			if s[i:i+len(n)] == n {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // isCollectionAlreadyExists checks for MongoDB error code 48 (NamespaceExists).

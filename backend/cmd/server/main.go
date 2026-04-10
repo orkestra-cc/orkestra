@@ -34,8 +34,10 @@ func main() {
 		log.Fatalf("Failed to load configuration: %v", err)
 	}
 
-	// Connect infrastructure
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	// Connect infrastructure. 2-minute budget accommodates the
+	// retry-with-backoff loops in NewMongoConnection and NewRedisConnection
+	// (up to 20 attempts each) that wait out first-boot auth init races.
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
 	db, err := database.NewMongoConnection(ctx, database.MongoConfig{

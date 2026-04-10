@@ -1,252 +1,220 @@
-# Module: Frontend - React Web Application
-*Path: `/frontend`*
+# Frontend — React Web Application
+
+*Path: `/frontend`*  
 *Parent: [../CLAUDE.md](../CLAUDE.md)*
 
-<!-- Navigation -->
 [← Root](../CLAUDE.md) | [☰ Module Map](../CLAUDE.md#module-map) | [🚀 Quick Start](../CLAUDE.md#quick-start)
-<!-- /Navigation -->
 
-## Module Purpose
+React 19 + Vite 7 + TypeScript 5.9 admin web app for Orkestra. Cookie-based auth with the Go backend, dynamic navigation driven by `/v1/navigation`, per-module RTK Query slices, Falcon design system + Bootstrap 5.
 
-The frontend serves as the **React-based web application** providing comprehensive admin dashboards and management interfaces for the Orkestra system.
+## Tech stack
 
-- **Primary Role**: Web-based user interface for administrators and managers
-- **System Integration**: Consumes backend APIs and WebSocket events for real-time updates
-- **Architecture**: Modern React 19 application with TypeScript, state management, and responsive design
+| Layer | Choice |
+|---|---|
+| Framework | React 19.1, React Router 7.7 |
+| Build | Vite 7 (dev server + production bundle) |
+| Language | TypeScript 5.9 strict mode |
+| State | Redux Toolkit 2.9 + RTK Query (server state lives in RTK Query, not React Query) |
+| UI kit | React Bootstrap 2.10 + Bootstrap 5.3 + Falcon SCSS theme |
+| Forms | React Hook Form + Yup |
+| Charts | ECharts, Chart.js, D3 (lazy-loaded chunks) |
+| Calendar | FullCalendar |
+| Maps | Google Maps + Leaflet |
+| Tables | TanStack Table v8 |
+| Drag & Drop | dnd-kit |
+| Auth | Cookie sessions + Bearer access tokens (RS256 JWT issued by backend) |
 
-## Dependencies
-
-### Imports
-- **[`/backend/`](../backend/CLAUDE.md)** - REST APIs, WebSocket events, authentication
-- **[`/shared/`](../shared/CLAUDE.md)** - TypeScript types and validation schemas
-
-### Importers
-- **End Users**: Web browsers accessing the dashboard interface
-
-## Architecture & Technology Stack
-
-### Core Technologies
-- **React 19.1.0** - Latest React with functional components and hooks
-- **Vite 7.0.5** - Fast build tool and dev server
-- **React Bootstrap 2.10.10** - UI component library
-- **Bootstrap 5.3.7** - CSS framework
-- **React Router 7.7.0** - Client-side routing
-- **SCSS** - Enhanced CSS with variables and nesting
-
-### Key Libraries
-- **State Management**: Redux Toolkit with React Redux, Redux Persist
-- **Data Fetching**: TanStack Query (React Query) for server state management
-- **Forms**: React Hook Form + Yup validation
-- **Charts**: ECharts, Chart.js, D3.js
-- **Maps**: Google Maps API, Leaflet
-- **Date/Time**: Day.js, React DatePicker, FullCalendar
-- **Rich Text**: TinyMCE editor
-- **Drag & Drop**: DND Kit for Kanban boards
-- **Animations**: Lottie React
-
-## Project Structure
+## Directory layout
 
 ```
-src/
-├── components/           # 🎯 Reusable UI Components ONLY
-│   ├── authentication/ # Auth components & layouts (with barrel export)
-│   ├── common/         # Reusable UI component library (with barrel export)
-│   ├── dashboards/     # Dashboard widget components (with barrel export)
-│   ├── navbar/         # Navigation components
-│   ├── wizard/         # Form wizard components
-│   ├── errors/         # Error page components
-│   └── notification/   # Notification components
-├── reference/          # 📚 Developer/AI Reference Materials
-│   ├── app-examples/   # Full-featured application module examples
-│   │   ├── calendar/   # Calendar application
-│   │   ├── chat/       # Real-time messaging system
-│   │   ├── email/      # Full email client
-│   │   ├── events/     # Event management system
-│   │   ├── kanban/     # Project management boards
-│   │   ├── social/     # Social media features
-│   │   └── support-desk/ # Help desk application
-│   ├── charts/         # Chart library examples (Chart.js, D3, ECharts)
-│   ├── components/     # UI component library showcase
-│   ├── dashboards/     # Complete dashboard layout examples
-│   ├── documentation/  # Developer guides and migration docs
-│   ├── pages/          # Example/demo page templates
-│   │   ├── associations/ # Associations list example
-│   │   ├── faq/        # FAQ page layouts
-│   │   ├── landing/    # Landing page template
-│   │   ├── miscellaneous/ # Static pages (invite, privacy)
-│   │   └── pricing/    # Pricing page templates
-│   ├── test/           # Testing utilities
-│   └── utilities/      # Bootstrap utility examples
-├── pages/             # 📄 Production Page Components
-│   ├── admin/         # Admin management (users)
-│   ├── fleet/         # Fleet management (vehicles, cranes, tachographs)
-│   ├── operator/      # Operator profile
-│   └── user/          # User settings and profile
-├── docs/              # 📚 Documentation & Examples
-│   ├── components/   # Component documentation & examples
-│   ├── documentation/ # Development guides & docs
-│   └── utilities/    # Bootstrap utility class examples
-├── layouts/          # Layout components (9 different layouts)
-├── store/           # Redux store configuration and slices
-├── providers/        # Context providers and Redux integration
-├── routes/          # Routing configuration
-├── data/            # Static data and mock APIs
-├── hooks/           # Custom React hooks
-├── helpers/         # Utility functions
-├── assets/          # Images, icons, SCSS files
-└── reducers/        # State reducers
+frontend/
+├── src/
+│   ├── App.tsx                    # Root component
+│   ├── index.tsx                  # Entry point
+│   ├── config.ts                  # App config, theme defaults
+│   ├── routes/
+│   │   ├── index.tsx              # All routes (lazy-loaded with React.lazy)
+│   │   └── paths.ts               # Path constants
+│   ├── layouts/                   # 9 layouts: MainLayout, VerticalNavLayout, TopNavLayout, ComboNavLayout, AuthLayouts...
+│   ├── providers/                 # AppProvider, AuthProvider, KanbanProvider, ChatProvider, EmailProvider
+│   ├── store/                     # Redux store + RTK Query slices
+│   │   ├── index.ts               # Store configuration
+│   │   ├── ReduxProvider.tsx      # Provider with redux-persist
+│   │   ├── hooks.ts               # Typed useAppSelector / useAppDispatch
+│   │   ├── slices/                # Redux slices (auth, kanban)
+│   │   └── api/                   # RTK Query slices — one per backend module
+│   ├── pages/                     # Production pages, organized by backend module
+│   │   ├── admin/                 # User management
+│   │   ├── ai/                    # aimodels + rag + agents UI
+│   │   ├── billing/               # Invoicing (customers, suppliers, invoices, dashboard, notifications)
+│   │   ├── company/               # Business registry lookup
+│   │   ├── graph/                 # Knowledge graph explorer
+│   │   ├── operator/              # Operator profile
+│   │   ├── sales/                 # Sales jobs, prospects, reports, settings, skills
+│   │   └── user/                  # User settings
+│   ├── modules/
+│   │   ├── README.md              # Module conventions + backend ↔ frontend map
+│   │   └── _template/             # Copy-paste scaffold for adding a new module
+│   ├── components/
+│   │   ├── common/                # 🎯 UI primitives (Avatar, Card, Flex, IconButton, AdvanceTable, ...) — barrel exported
+│   │   ├── authentication/        # Login forms, ProtectedRoute, OAuth callback handlers
+│   │   ├── dashboards/            # Reusable dashboard widgets
+│   │   ├── navbar/                # Sidebar + top navigation
+│   │   ├── wizard/                # Form wizard helpers
+│   │   ├── errors/                # 404, 500 pages
+│   │   └── notification/          # Toast and banner notifications
+│   ├── reference/                 # 📚 Falcon template library (READ-ONLY) — 7 example apps + 60+ samples
+│   │   ├── app-examples/          # calendar, chat, email, events, kanban, social, support-desk
+│   │   ├── components/            # UI showcase (forms, tables, navigation, media, etc.)
+│   │   ├── charts/                # Chart.js, D3, ECharts examples
+│   │   ├── dashboards/            # 11 complete dashboard layouts
+│   │   ├── pages/                 # Landing, FAQ, pricing, miscellaneous templates
+│   │   └── utilities/             # Bootstrap utility-class examples
+│   ├── hooks/                     # Custom hooks (useRoleBasedNavigation, useRAGStream, useSettings, useAuth*)
+│   ├── helpers/                   # Pure utility functions
+│   ├── types/                     # Shared TypeScript types per backend module
+│   ├── data/                      # Static data, mock APIs, lookups
+│   ├── docs/                      # Component docs (separate from src/reference/)
+│   └── assets/                    # Images, SCSS, fonts
+├── public/                        # Static files served as-is
+├── Dockerfile                     # Multi-stage: builder (node:24-alpine) → production (nginx:alpine)
+├── tsconfig.json                  # Path aliases declared here AND in vite.config.js
+├── vite.config.js                 # Vite config with manualChunks for vendor splitting
+└── package.json
 ```
 
-## Component Organization
+## Path aliases
 
-### Perfect Separation of Concerns
-The project now maintains crystal clear boundaries between different types of code:
+The project uses **bare path aliases** (no `@/` prefix). They are declared in both `tsconfig.json` and `vite.config.js`:
 
-#### 🎯 Reusable UI Components (`src/components/`)
-**Only truly reusable UI components belong here:**
-- **`common/`** - Core UI component library (Avatar, Button, Card, etc.) with barrel export
-- **`authentication/`** - Auth-specific components (login forms, protected routes) with barrel export  
-- **`dashboards/`** - Reusable dashboard widgets (WeeklySales, ActiveUsers, etc.) with barrel export
-- **`navbar/`** - Navigation components (top nav, vertical nav, dropdowns)
-- **`wizard/`** - Form wizard components
-- **`errors/`** - Error page components (404, 500)
-- **`notification/`** - Notification system components
-
-#### 📚 Developer/AI Reference Materials (`src/reference/`)
-**Comprehensive reference implementations and examples for developers and AI:**
-
-**App Examples (`app-examples/`)** - Full-featured application module examples:
-- **`calendar/`** - Calendar application with scheduling
-- **`chat/`** - Complete real-time messaging system
-- **`email/`** - Full email client (inbox, compose, detail views)
-- **`events/`** - Event management system (create, list, detail)
-- **`kanban/`** - Project management boards with drag & drop
-- **`social/`** - Social media features (feed, followers, activity log)
-- **`support-desk/`** - Help desk system (tickets, contacts, reports)
-
-**Other Reference Materials:**
-- **`charts/`** - Chart library examples (Chart.js, D3.js, ECharts with 63+ variations)
-- **`components/`** - UI component library showcase (forms, icons, tables, navigation)
-- **`dashboards/`** - Complete dashboard layout examples (11 different layouts)
-- **`documentation/`** - Developer guides, migration docs, changelogs
-- **`pages/`** - Example page templates (FAQ, pricing, landing, associations)
-- **`test/`** - Testing utilities (AuthTestPage, RoleNavigationTester)
-- **`utilities/`** - Bootstrap utility class examples (background, borders, flex, grid)
-
-#### 📄 Production Pages (`src/pages/`)
-**Backend-connected production pages:**
-- **`admin/`** - Admin management (user profiles, user table)
-- **`fleet/`** - Fleet management (vehicles, cranes, tachographs with profiles)
-- **`operator/`** - Operator profile pages
-- **`user/`** - User profile and settings pages
-
-#### 📚 Documentation (`src/docs/`)
-**Documentation, examples, and guides separate from application code:**
-- **`components/`** - Component documentation with interactive examples
-- **`documentation/`** - Development guides, setup docs, changelogs
-- **`utilities/`** - Bootstrap utility class examples and demonstrations
-
-### Layout System
-- **MainLayout** - Primary dashboard layout
-- **VerticalNavLayout** - Sidebar navigation (default)
-- **TopNavLayout** - Top navigation bar
-- **ComboNavLayout** - Combined top + sidebar
-- **Auth Layouts** - Simple, Card, Split, Wizard variations
-
-## State Management
-
-### Redux Toolkit Architecture
-
-**Primary State Management:** Redux Toolkit with React Redux for predictable state management across the application.
-
-#### Store Structure (`src/store/`)
-```
-store/
-├── index.ts                 # Store configuration with middleware
-├── ReduxProvider.tsx        # Provider wrapper with persistence
-├── hooks.ts                 # Typed Redux hooks (useAppSelector, useAppDispatch)
-└── slices/
-    ├── authSlice.ts        # Authentication state management
-    └── kanbanSlice.ts      # Kanban board state management
+```ts
+import Avatar from 'components/common/Avatar';     // not '@/components/common/Avatar'
+import { useRoleBasedNavigation } from 'hooks/useRoleBasedNavigation';
+import BillingDashboard from 'pages/billing/dashboard';
 ```
 
-#### Redux Slices
-- **Auth Slice** - Complete authentication state with session management, user data, permissions, and preferences
-- **Kanban Slice** - Kanban board state with drag-and-drop optimization, task management, and UI state
+Available aliases: `App`, `components`, `pages`, `layouts`, `providers`, `hooks`, `helpers`, `data`, `assets`, `routes`, `store`, `config`, `reference`, `types`, `utils`, `widgets`, `features`, `demos`, `docs`, `reducers`.
 
-#### Key Features
-- **Redux DevTools** - Enhanced debugging with action sanitization and state filtering
-- **Redux Persist** - Selective state persistence (only user preferences, not sensitive auth data)
-- **Type Safety** - Full TypeScript integration with typed hooks and selectors
-- **Development Helpers** - Browser console utilities for debugging and testing
+## How navigation works
 
-### Context Providers (src/providers/)
-- **AppProvider** - Global app configuration (theme, navbar, RTL)
-- **AuthProvider** - Authentication state bridge between Redux and React Query
-- **KanbanProvider** - Kanban state bridge providing Redux hooks through context
-- **ChatProvider** - Chat application state
-- **EmailProvider** - Email client state
+Navigation is **backend-driven**. The React app does not define its own menu — it fetches the menu the user is allowed to see from `/v1/navigation` and renders it.
 
-### Custom Redux Hooks (`src/hooks/redux/`)
-- **useAuth** - Complete auth operations with actions and selectors
-- **useKanban** - Kanban operations with optimized drag-and-drop actions
-- **Component-specific hooks** - Granular hooks for specific state slices
+```
+backend module.go NavItems()
+  → backend navigation core module aggregates all enabled modules
+    → /v1/navigation returns RouteGroup[] filtered by user role
+      → frontend navigationApi (RTK Query) caches the response
+        → useRoleBasedNavigation hook exposes it to layouts
+          → sidebar renders only items the backend reported
+```
 
-**Key Principles:**
-1. **Redux for Complex Shared State**
-   - Use Redux for state that needs to be shared across multiple components
-   - Auth, Kanban, and other complex feature state managed in Redux
+This means:
 
-2. **Choose the Right Tool:**
-   - **Local State** (`useState`) - Simple component-level state, form inputs, toggles
-   - **Redux State** - Complex shared state, authentication, feature-specific state
-   - **Context Providers** - Global configuration, dependency injection, bridging Redux with other systems
+- **Adding a sidebar entry** → edit the backend module's `NavItems()`, not the frontend
+- **Disabling a module on the backend** → its sidebar entry disappears automatically
+- **The frontend route still has to exist** → register it in `src/routes/index.tsx` so the path resolves when clicked
 
-3. **State Persistence Strategy:**
-   - **Auth**: Only user preferences persisted (theme, language, notifications)
-   - **Sensitive Data**: Tokens and user data rely on backend session validation
-   - **UI State**: Not persisted, recreated on app load
+## How data fetching works
 
-4. **Development Workflow:**
-   - Use Redux DevTools for state inspection and time-travel debugging
-   - Type-safe development with TypeScript integration
+All server state goes through **RTK Query**, not React Query / TanStack Query. Each backend module gets its own slice in `src/store/api/`:
 
-**Current Architecture:** Redux Toolkit provides the foundation for complex state management, with Context providers handling configuration and dependency injection.
+```
+src/store/api/
+├── baseApi.ts          # createApi() with createBaseQuery + global tagTypes
+├── authApi.ts          # core: auth endpoints
+├── userApi.ts          # core: user endpoints
+├── navigationApi.ts    # core: /v1/navigation
+├── billingApi.ts       # addon
+├── companyApi.ts       # addon
+├── salesApi.ts         # addon
+├── ragApi.ts           # addon
+├── agentsApi.ts        # addon
+├── aiModelsApi.ts      # addon
+├── graphApi.ts         # addon
+├── documentsApi.ts     # addon
+├── moduleApi.ts        # admin: /v1/admin/modules
+├── personalAgentApi.ts
+├── managementApi.ts
+├── communicationsApi.ts
+└── dashboardApi.ts
+```
 
-## Data Fetching with TanStack Query
+All slices extend `baseApi` via `injectEndpoints`. To add a new tag type, declare it in `baseApi.ts`'s `tagTypes` array. Auth uses **cookies + Bearer token** — `credentials: 'include'` is set in the base query, and the access token from the auth slice is added to the `Authorization` header when present.
 
-### Overview
-TanStack Query (React Query) v5 is integrated for efficient server state management, providing powerful caching, synchronization, and background updates for API calls.
+## Adding a new feature module
 
-### Backend API Specification
-All API queries and mutations must respect the backend OpenAPI specification:
-- **OpenAPI Spec URL**: https://erpb.blacklab.cc/openapi.json
-- **Compliance Required**: All data fetching operations must follow the defined endpoints, request/response schemas, and authentication requirements
-- **Schema Validation**: Ensure request payloads and response handling match the OpenAPI definitions
-- **Authentication Method**: All API calls use cookie-based authentication with `credentials: 'include'` (NOT Bearer tokens)
+This is the **canonical workflow** for an LLM agent or contributor asked to add a new module:
 
-### Core Features
-- **Intelligent Caching** - Automatic caching with configurable stale times
-- **Background Updates** - Keep data fresh with background refetching
-- **Optimistic Updates** - Update UI immediately, rollback on failure
-- **Infinite Queries** - Built-in infinite scrolling support
-- **DevTools Integration** - Debugging tools for development
-- **Error Handling** - Robust error handling and retry logic
+1. **Read `src/modules/_template/README.md`** first. It walks through the full pattern with a worked example (`widgets`).
+2. **Copy the scaffold files**:
+   - `_template/api.ts` → `src/store/api/<name>Api.ts`
+   - `_template/types.ts` → `src/types/<name>.ts`
+   - `_template/pages/ExamplePage.tsx` → `src/pages/<name>/list/index.tsx` (and adapt)
+   - `_template/components/ExampleCard.tsx` → co-locate next to your page
+3. **Add cache tag types** to `src/store/api/baseApi.ts` `tagTypes` array.
+4. **Register routes** in `src/routes/index.tsx` — add `lazy()` imports near the top and `RouteObject` entries inside the protected `MainLayout` children.
+5. **Backend declares the sidebar entry** via its addon's `NavItems()` method. The link appears in the sidebar automatically once the user has the required role and the backend module is enabled.
 
-### Module-Specific Guidelines
+`src/modules/_template/` is the **single source of truth** for the convention. If you change the pattern, update `_template/` so future scaffolds pick up the change.
 
-- **API Integration**: All API calls must comply with backend OpenAPI specification
-- **Authentication**: Use cookie-based authentication with `credentials: 'include'`
-- **State Management**: Use Redux Toolkit for complex shared state, React Query for server state
-- **Component Organization**: Maintain clear separation between reusable components and features
-- **Performance**: Optimize for responsive design and fast loading times
-- **Testing**: Comprehensive unit and integration tests for all components
-- **Accessibility**: Support screen readers and keyboard navigation
+## Component reuse hierarchy
 
----
+When asked to build a UI, look for an existing solution in this order:
 
-### Related Guides
-- [Project Overview](../CLAUDE.md) - System architecture and design principles
-- [Backend APIs](../backend/CLAUDE.md) - API specifications and authentication
-- [Shared Types](../shared/CLAUDE.md) - TypeScript types and validation schemas
-- [Docker Development](../docker/CLAUDE.md) - Development environment setup
+1. **`src/reference/app-examples/`** — full Falcon implementations of common apps (calendar, chat, email, kanban, social, support-desk, events). Copy and adapt — don't reinvent.
+2. **`src/reference/components/`** — 60+ Falcon component samples (forms, tables, navigation, media, charts).
+3. **`src/components/common/`** — UI primitives that the app's pages already use (Avatar, Card, Flex, IconButton, PageHeader, AdvanceTable, FalconDropzone, ...).
+4. **`src/components/dashboards/`** — reusable dashboard widgets (WeeklySales, ActiveUsers, ...).
+5. **`react-bootstrap`** — raw primitives for layout (Row, Col, Card, Button, Form).
+
+Only build a new component if none of the above fits. New components used by exactly one page live next to that page (`src/pages/<module>/<feature>/MyHelper.tsx`). Promote to `components/common/` only when a second page needs it.
+
+## State management
+
+| Concern | Where it lives |
+|---|---|
+| Server state (cached responses) | RTK Query (`src/store/api/`) |
+| Auth user + tokens | Redux slice (`src/store/slices/authSlice.ts`) |
+| Kanban board state | Redux slice (`src/store/slices/kanbanSlice.ts`) |
+| Theme, navbar config, RTL | `AppProvider` context |
+| Form local state | React Hook Form |
+| Component local state | `useState` |
+
+Persisted state is opt-in via `redux-persist` — only user preferences are persisted, never tokens.
+
+## Build & dev
+
+```bash
+npm run dev               # Vite dev server (port 5173 inside container, mapped to host)
+npm run dev:staging       # Dev with staging mode flags
+npm run build             # tsc + vite build (production)
+npm run build:staging     # Staging build
+npm run preview           # Serve built bundle locally
+npm run typecheck         # tsc --noEmit (CI-safe)
+```
+
+The `tsc` step in `build` enforces strict mode — TypeScript errors fail the build.
+
+## Conventions
+
+- **Cookie auth** — every fetch goes through RTK Query's `baseApi` which sets `credentials: 'include'`. Never call `fetch` directly with custom auth headers.
+- **No inline styles** for colors / spacing — use Bootstrap utility classes or SCSS variables.
+- **Co-locate** sub-components, hooks, and helpers next to the page that uses them. Promote to shared only on second use.
+- **Lazy-load route components** — every route in `routes/index.tsx` uses `React.lazy()` so each module ships its own chunk.
+- **Type imports** must come from `src/types/<module>.ts`, not be inlined in the slice.
+- **Cache tags** must be declared in `baseApi.ts` before being used in a slice — TypeScript will reject otherwise.
+
+## Don't
+
+- Don't invent a parallel data-fetching layer (axios, custom fetch helpers). Every endpoint goes through an RTK Query slice that extends `baseApi`.
+- Don't hardcode sidebar entries. Navigation comes from the backend.
+- Don't move things out of `src/reference/` — it's a read-only template library. Copy from it.
+- Don't import from `src/modules/_template/` at runtime. It's a scaffold, not runtime code.
+- Don't add new top-level directories under `src/`. The current layout is stable.
+
+## Related
+
+- [Backend module system](../backend/CLAUDE.md) — how to add the backend half of a new module
+- [Backend addons](../backend/internal/addons/) — match the names of frontend module folders
+- [Module template](src/modules/_template/README.md) — the LLM scaffolding entry point
+- [Module conventions](src/modules/README.md) — backend ↔ frontend mapping

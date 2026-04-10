@@ -1,7 +1,7 @@
 import { useNavigate, useParams } from 'react-router-dom';
 import { Row, Col, Card, Table, Badge, Button, Spinner, Tab, Tabs, Alert } from 'react-bootstrap';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faTasks, faSync, faTrash, faEye, faCheckCircle, faTimesCircle, faClock, faPlay, faRedo, faFileAlt, faSpinner, faArrowLeft } from '@fortawesome/free-solid-svg-icons';
+import { faTasks, faSync, faTrash, faCheckCircle, faTimesCircle, faClock, faPlay, faRedo, faFileAlt, faSpinner, faArrowLeft } from '@fortawesome/free-solid-svg-icons';
 import { Link } from 'react-router-dom';
 import Background from 'components/common/Background';
 import greetingsBg from 'assets/img/illustrations/ticket-greetings-bg.png';
@@ -147,8 +147,8 @@ export function JobDetailPage() {
                 </div>
               </div>
               <div className="d-flex align-items-center gap-2">
-                {job.totalScore > 0 && (
-                  <Badge bg={job.totalScore >= 75 ? 'success' : job.totalScore >= 50 ? 'warning' : 'danger'} className="fs-6">
+                {(job.totalScore ?? 0) > 0 && (
+                  <Badge bg={(job.totalScore ?? 0) >= 75 ? 'success' : (job.totalScore ?? 0) >= 50 ? 'warning' : 'danger'} className="fs-6">
                     {job.totalScore} ({job.grade})
                   </Badge>
                 )}

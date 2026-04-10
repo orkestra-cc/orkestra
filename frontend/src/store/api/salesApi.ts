@@ -8,15 +8,6 @@ interface SkillRequest {
   context?: string;
 }
 
-interface SkillResponse {
-  skill: string;
-  result: any;
-  inputTokens: number;
-  outputTokens: number;
-  latencyMs: number;
-  modelUsed: string;
-}
-
 interface SkillTaskPollResponse {
   taskId: string;
   status: 'running' | 'completed' | 'failed';
@@ -61,6 +52,7 @@ interface Job {
   totalScore?: number;
   grade?: string;
   errorMessage?: string;
+  reportUuid?: string;
   createdAt: string;
   updatedAt: string;
   completedAt?: string;

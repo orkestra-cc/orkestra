@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Row, Col, Card, Form, Button, Spinner, Alert, Nav, Tab, Table, Badge } from 'react-bootstrap';
+import { Row, Col, Card, Form, Button, Spinner, Alert, Nav, Table, Badge } from 'react-bootstrap';
 import { Link } from 'react-router-dom';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faCog, faSave, faExternalLinkAlt, faRobot, faMagic, faScroll, faUndo, faArrowLeft, faPen } from '@fortawesome/free-solid-svg-icons';

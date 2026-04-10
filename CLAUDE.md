@@ -135,6 +135,29 @@ docker compose -f docker-compose.ai.yml --env-file .env up -d
 
 ## Quick Start
 
+### Minimal profile (recommended for first boot)
+
+Boots only the core modules — auth, user, navigation, plus the `dev` token generator — with MongoDB and Redis. Four containers total, no Gotenberg/Memgraph/Hindsight/Ollama, uses only publicly available Docker images so it runs on any VM without registry authentication. Ports are non-standard (3050/8050/27050/6350) so it can run alongside the full dev stack or other Docker projects without conflicts.
+
+```bash
+cd docker
+docker network create orkestra-network   # first time only
+docker compose -f docker-compose.minimal.yml --env-file .env.minimal up -d
+
+# Frontend: http://localhost:8050
+# Backend API: http://localhost:3050
+# API Docs: http://localhost:3050/docs
+
+# Generate an administrator token for first login (run from project root):
+ORKESTRA_API_URL=http://localhost:3050 ./scripts/devtoken.sh administrator
+```
+
+Enable additional modules by editing `MODULES` in `docker/.env.minimal` (comma-separated, e.g. `MODULES=dev,billing,documents`). Dependencies are auto-included by the module registry.
+
+### Full development stack
+
+Adds Gotenberg (PDF), optionally Memgraph/Hindsight, and uses the Chainguard hardened images with AIR hot reload for Go development. Requires access to the `dhi.io` registry.
+
 ```bash
 # From project root — interactive deployment
 ./deploy.sh
@@ -147,11 +170,6 @@ docker compose -f docker-compose.dev.yml up -d      # Backend (AIR) + Frontend (
 # Optional: run AI modules as a separate service
 docker compose -f docker-compose.ai.yml up -d       # AI Service (port 3100)
 # Set AI_SERVICE_URL=http://orkestra-ai-dev:3100 on the backend to enable split mode
-
-# Frontend: http://localhost:8080
-# Backend API: http://localhost:3000
-# AI Service API: http://localhost:3100 (when running split)
-# API Docs: http://localhost:3000/docs
 ```
 
 ## Assistant Rules

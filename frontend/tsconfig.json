@@ -47,5 +47,6 @@
     }
   },
   "include": ["src/**/*", "vite.config.js"],
+  "exclude": ["src/modules/_template/**/*"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }

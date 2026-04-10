@@ -1,6 +1,10 @@
 # Environment files (contains secrets)
 .env
+.env.*
 !.env.example
+# .env.minimal contains only dev placeholder values and is committed so
+# the minimal bootstrap profile works out of the box on a fresh clone.
+!.env.minimal
 
 # Keys and certificates
 keys/
