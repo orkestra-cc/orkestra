@@ -3,15 +3,18 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 
 interface FinishStepProps {
   smtpSkipped: boolean;
+  orgName: string;
   onFinish: () => void;
 }
 
 /**
  * Final step of the setup wizard. No backend call — once an admin exists,
  * `GET /v1/setup/status` reports setupCompleted=true and the SetupGate
- * stops redirecting here. Just a confirmation screen.
+ * stops redirecting here. Just a confirmation screen that recaps what
+ * the previous steps created so the operator knows what state they just
+ * landed in.
  */
-const FinishStep = ({ smtpSkipped, onFinish }: FinishStepProps) => {
+const FinishStep = ({ smtpSkipped, orgName, onFinish }: FinishStepProps) => {
   return (
     <div className="text-center">
       <div className="wizard-lottie-wrapper mb-3">
@@ -23,8 +26,16 @@ const FinishStep = ({ smtpSkipped, onFinish }: FinishStepProps) => {
       </div>
       <h4 className="mb-2">Orkestra is ready</h4>
       <p className="text-muted mb-4">
-        Your administrator account has been created and you&apos;re already
-        signed in. The setup wizard will not appear again.
+        Your administrator account has been created, you&apos;re signed in,
+        {orgName ? (
+          <>
+            {' '}
+            and the organization <strong>{orgName}</strong> is active. You
+            can rename it or create more organizations later.
+          </>
+        ) : (
+          <> and the setup wizard will not appear again.</>
+        )}
       </p>
 
       {smtpSkipped && (

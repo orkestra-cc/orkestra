@@ -5,7 +5,12 @@ import { login as loginAction, setAccessToken } from 'store/slices/authSlice';
 import { useCreateInitialAdminMutation } from 'store/api/setupApi';
 
 interface AdminStepProps {
-  onNext: () => void;
+  /**
+   * Called once the admin is created and the auth slice is hydrated.
+   * The fullName is propagated upward so the next step (organization)
+   * can pre-fill a sensible default like "{first name}'s Workspace".
+   */
+  onNext: (fullName: string) => void;
 }
 
 /**
@@ -54,7 +59,7 @@ const AdminStep = ({ onNext }: AdminStepProps) => {
         localStorage.setItem('access_token', result.accessToken);
       }
 
-      onNext();
+      onNext(fullName.trim());
     } catch (err: unknown) {
       const anyErr = err as { status?: number; data?: { detail?: string } };
       if (anyErr?.status === 409) {

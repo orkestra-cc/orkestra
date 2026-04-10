@@ -10,12 +10,14 @@ import FalconLoader from 'components/common/FalconLoader';
 import { useGetSetupStatusQuery } from 'store/api/setupApi';
 import WelcomeStep from './steps/WelcomeStep';
 import AdminStep from './steps/AdminStep';
+import OrgStep from './steps/OrgStep';
 import SmtpStep from './steps/SmtpStep';
 import FinishStep from './steps/FinishStep';
 
 const STEPS: { icon: string; label: string }[] = [
   { icon: 'hand-holding-heart', label: 'Welcome' },
   { icon: 'user-shield', label: 'Administrator' },
+  { icon: 'building', label: 'Organization' },
   { icon: 'envelope', label: 'Email delivery' },
   { icon: 'check', label: 'Done' },
 ];
@@ -33,6 +35,8 @@ const SetupWizard = () => {
   const navigate = useNavigate();
   const { data: status, isLoading, error, refetch } = useGetSetupStatusQuery();
   const [step, setStep] = useState<number>(1);
+  const [adminFullName, setAdminFullName] = useState<string>('');
+  const [orgName, setOrgName] = useState<string>('');
   const [smtpSkipped, setSmtpSkipped] = useState(false);
 
   // If the wizard is re-opened after setup is already done, refuse to run it
@@ -79,8 +83,25 @@ const SetupWizard = () => {
       case 1:
         return <WelcomeStep onNext={handleNext} />;
       case 2:
-        return <AdminStep onNext={handleNext} />;
+        return (
+          <AdminStep
+            onNext={(fullName) => {
+              setAdminFullName(fullName);
+              handleNext();
+            }}
+          />
+        );
       case 3:
+        return (
+          <OrgStep
+            adminFullName={adminFullName}
+            onNext={(createdName) => {
+              setOrgName(createdName);
+              handleNext();
+            }}
+          />
+        );
+      case 4:
         return (
           <SmtpStep
             onNext={() => {
@@ -93,10 +114,11 @@ const SetupWizard = () => {
             }}
           />
         );
-      case 4:
+      case 5:
         return (
           <FinishStep
             smtpSkipped={smtpSkipped}
+            orgName={orgName}
             onFinish={() => navigate('/dashboard/analytics')}
           />
         );

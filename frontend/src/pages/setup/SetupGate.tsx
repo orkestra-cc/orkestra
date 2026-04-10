@@ -60,12 +60,15 @@ const SetupGate = ({ children }: SetupGateProps) => {
     return <Navigate to="/setup" replace />;
   }
 
-  // If setup is complete but someone navigates to /setup directly, punt
-  // them to the dashboard — the wizard itself also renders a redirect,
-  // but catching it here avoids the flash of the wizard Card.
-  if (data.setupCompleted && isSetupPath) {
-    return <Navigate to="/dashboard/analytics" replace />;
-  }
+  // Note: we intentionally do NOT redirect away from /setup when
+  // setupCompleted becomes true. The createInitialAdmin mutation
+  // invalidates the Setup tag, which makes this query refetch and flip
+  // mid-wizard — if we bounced to /dashboard here, the wizard would
+  // never get past the Administrator step to the Organization / SMTP /
+  // Finish steps. The wizard itself checks `setupCompleted && step === 1`
+  // so a user who navigates to /setup on an already-initialized system
+  // still gets redirected out; anyone who is actively advancing through
+  // steps 2+ is left alone.
 
   return <>{children}</>;
 };

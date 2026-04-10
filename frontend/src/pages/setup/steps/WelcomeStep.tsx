@@ -25,12 +25,17 @@ const WelcomeStep = ({ onNext }: WelcomeStepProps) => {
         needs to happen exactly once per install.
       </p>
 
-      <div className="text-start mx-auto" style={{ maxWidth: 440 }}>
+      <div className="text-start mx-auto" style={{ maxWidth: 460 }}>
         <ol className="ps-3 mb-4">
           <li className="mb-2">
             <strong>Create an administrator account.</strong> The first user
             becomes the root <code>developer</code> and can manage everything
             else from the admin UI.
+          </li>
+          <li className="mb-2">
+            <strong>Create your first organization.</strong> Orkestra is
+            multi-tenant — every feature lives inside an organization, and
+            you&apos;ll be enrolled as the owner.
           </li>
           <li className="mb-2">
             <strong>Configure outbound email.</strong> Password resets and
