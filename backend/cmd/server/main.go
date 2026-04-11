@@ -130,6 +130,19 @@ func main() {
 		log.Fatalf("Failed to initialize modules: %v", err)
 	}
 
+	// Advertise the full optional-module catalog to the config service so the
+	// admin UI can list (and an operator can toggle) addons that weren't
+	// selected for this process. Extends knownModules for lazy-seeding on
+	// first /v1/admin/modules hit; the extras are never initialized or routed.
+	var catalogExtras []module.Module
+	for name, factory := range optionalModules {
+		if selected[name] {
+			continue
+		}
+		catalogExtras = append(catalogExtras, factory())
+	}
+	configService.RegisterKnownModules(catalogExtras, cfg)
+
 	// Retrieve auth infrastructure for middleware setup
 	jwtService := svcRegistry.MustGet(module.ServiceJWTService).(services.JWTService)
 	authService := svcRegistry.MustGet(module.ServiceAuthService).(services.AuthService)

@@ -22,7 +22,14 @@ const statusColors: Record<string, BadgeColor> = {
   disabled: 'secondary',
 };
 
-const ModuleTable: React.FC = () => {
+type ModuleScope = 'core' | 'addons';
+
+interface ModuleTableProps {
+  scope?: ModuleScope;
+  title?: string;
+}
+
+const ModuleTable: React.FC<ModuleTableProps> = ({ scope, title }) => {
   const { data: modules, isLoading, error } = useGetModulesQuery();
   const [updateModule] = useUpdateModuleMutation();
 
@@ -35,9 +42,16 @@ const ModuleTable: React.FC = () => {
   const [showConfigModal, setShowConfigModal] = useState(false);
   const [togglingModule, setTogglingModule] = useState<string | null>(null);
 
-  const filteredModules = useMemo(() => {
+  const scopedModules = useMemo(() => {
     if (!modules) return [];
-    return modules.filter((m) => {
+    if (scope === 'core') return modules.filter((m) => m.category === 'core');
+    if (scope === 'addons')
+      return modules.filter((m) => m.category !== 'core');
+    return modules;
+  }, [modules, scope]);
+
+  const filteredModules = useMemo(() => {
+    return scopedModules.filter((m) => {
       if (
         searchTerm &&
         !m.displayName.toLowerCase().includes(searchTerm.toLowerCase()) &&
@@ -49,7 +63,13 @@ const ModuleTable: React.FC = () => {
       if (statusFilter && m.status !== statusFilter) return false;
       return true;
     });
-  }, [modules, searchTerm, categoryFilter, statusFilter]);
+  }, [scopedModules, searchTerm, categoryFilter, statusFilter]);
+
+  const addonCategoryOptions = [
+    { value: '', label: 'All Categories' },
+    { value: 'toggleable', label: 'Toggleable' },
+    { value: 'external', label: 'External' },
+  ];
 
   const handleToggle = async (mod: ModuleConfig) => {
     if (mod.category === 'core') return;
@@ -98,10 +118,15 @@ const ModuleTable: React.FC = () => {
       <Card>
         <Card.Header className="border-bottom border-200 px-4 py-3">
           <ModuleTableHeader
+            title={title}
             searchTerm={searchTerm}
             onSearchChange={setSearchTerm}
             categoryFilter={categoryFilter}
             onCategoryChange={setCategoryFilter}
+            categoryOptions={
+              scope === 'addons' ? addonCategoryOptions : undefined
+            }
+            hideCategoryFilter={scope === 'core'}
             statusFilter={statusFilter}
             onStatusChange={setStatusFilter}
           />
@@ -212,12 +237,13 @@ const ModuleTable: React.FC = () => {
         </Card.Body>
         {modules && (
           <Card.Footer className="fs-10 text-muted">
-            {modules.length} modules total &middot;{' '}
-            {modules.filter((m) => m.status === 'running').length} running
+            {scopedModules.length} modules total &middot;{' '}
+            {scopedModules.filter((m) => m.status === 'running').length} running
             &middot;{' '}
-            {modules.filter((m) => m.status === 'failed').length} failed
+            {scopedModules.filter((m) => m.status === 'failed').length} failed
             &middot;{' '}
-            {modules.filter((m) => m.status === 'disabled').length} disabled
+            {scopedModules.filter((m) => m.status === 'disabled').length}{' '}
+            disabled
           </Card.Footer>
         )}
       </Card>

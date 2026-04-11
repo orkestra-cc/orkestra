@@ -1,26 +1,39 @@
 import { Col, Form, Row } from 'react-bootstrap';
 
 interface ModuleTableHeaderProps {
+  title?: string;
   searchTerm: string;
   onSearchChange: (value: string) => void;
   categoryFilter: string;
   onCategoryChange: (value: string) => void;
+  categoryOptions?: { value: string; label: string }[];
+  hideCategoryFilter?: boolean;
   statusFilter: string;
   onStatusChange: (value: string) => void;
 }
 
+const defaultCategoryOptions = [
+  { value: '', label: 'All Categories' },
+  { value: 'core', label: 'Core' },
+  { value: 'toggleable', label: 'Toggleable' },
+  { value: 'external', label: 'External' },
+];
+
 const ModuleTableHeader: React.FC<ModuleTableHeaderProps> = ({
+  title = 'Module Management',
   searchTerm,
   onSearchChange,
   categoryFilter,
   onCategoryChange,
+  categoryOptions = defaultCategoryOptions,
+  hideCategoryFilter = false,
   statusFilter,
   onStatusChange,
 }) => {
   return (
     <Row className="align-items-center g-3">
       <Col xs="auto">
-        <h5 className="mb-0">Module Management</h5>
+        <h5 className="mb-0">{title}</h5>
       </Col>
       <Col>
         <Form.Control
@@ -31,18 +44,21 @@ const ModuleTableHeader: React.FC<ModuleTableHeaderProps> = ({
           onChange={(e) => onSearchChange(e.target.value)}
         />
       </Col>
-      <Col xs="auto">
-        <Form.Select
-          size="sm"
-          value={categoryFilter}
-          onChange={(e) => onCategoryChange(e.target.value)}
-        >
-          <option value="">All Categories</option>
-          <option value="core">Core</option>
-          <option value="toggleable">Toggleable</option>
-          <option value="external">External</option>
-        </Form.Select>
-      </Col>
+      {!hideCategoryFilter && (
+        <Col xs="auto">
+          <Form.Select
+            size="sm"
+            value={categoryFilter}
+            onChange={(e) => onCategoryChange(e.target.value)}
+          >
+            {categoryOptions.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </Form.Select>
+        </Col>
+      )}
       <Col xs="auto">
         <Form.Select
           size="sm"
