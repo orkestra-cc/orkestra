@@ -33,24 +33,33 @@ const AdminUserActions: React.FC<AdminUserActionsProps> = ({ user }) => {
     {
       value: 'guest',
       label: 'Guest',
-      description: 'Limited access to own profile'
+      description: 'Read-only access'
     },
     {
       value: 'operator',
       label: 'Operator',
-      description: 'Limited operator access'
+      description: 'Read + self-service'
     },
     {
       value: 'manager',
       label: 'Manager',
-      description: 'Team and task management'
+      description: 'Read/write without delete or admin'
+    },
+    {
+      value: 'developer',
+      label: 'Developer',
+      description: 'Technical power user — cannot manage admin/super_admin'
     },
     {
       value: 'administrator',
       label: 'Administrator',
-      description: 'System administration'
+      description: 'Organization administrator — cannot elevate peers to admin'
     },
-    { value: 'ceo', label: 'CEO', description: 'Full system access' }
+    {
+      value: 'super_admin',
+      label: 'Super Admin',
+      description: 'Full power, wildcard permission'
+    }
   ];
 
   const handleToggleAccountLock = async () => {

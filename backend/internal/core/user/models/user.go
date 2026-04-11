@@ -74,7 +74,7 @@ type User struct {
 	Avatar   string             `bson:"avatar,omitempty" json:"avatar,omitempty"`
 	Phone    string             `bson:"phone" json:"phone" validate:"omitempty,e164"`
 	PIN      string             `bson:"pin,omitempty" json:"-"` // Encrypted, never exposed
-	Role     string             `bson:"role" json:"role" validate:"required,oneof=developer ceo administrator manager operator guest"`
+	Role     string             `bson:"role" json:"role" validate:"required,oneof=super_admin administrator developer manager operator guest"`
 
 	// OAuth fields
 	OAuthLinks    []OAuthLink            `bson:"oauthLinks,omitempty" json:"oauthLinks,omitempty"`
@@ -117,7 +117,7 @@ type CreateUserInput struct {
 	Phone            string                 `json:"phone" validate:"omitempty,e164"`
 	PIN              string                 `json:"pin" validate:"omitempty,len=4,numeric"`
 	PasswordHash     string                 `json:"-"` // set by auth service, never from external input
-	Role             string                 `json:"role" validate:"required,oneof=developer ceo administrator manager operator guest"`
+	Role             string                 `json:"role" validate:"required,oneof=super_admin administrator developer manager operator guest"`
 	OAuthProvider    OAuthProvider          `json:"oauthProvider,omitempty" validate:"omitempty,oneof=google apple discord github"`
 	OAuthID          string                 `json:"oauthId,omitempty"`
 	OAuthData        map[string]interface{} `json:"oauthData,omitempty"`
@@ -140,7 +140,7 @@ type UpdateUserInput struct {
 	Avatar           string         `json:"avatar,omitempty"`
 	Phone            string         `json:"phone,omitempty" validate:"omitempty,e164"`
 	PIN              string         `json:"pin,omitempty" validate:"omitempty,len=4,numeric"`
-	Role             string         `json:"role,omitempty" validate:"omitempty,oneof=developer ceo administrator manager operator guest"`
+	Role             string         `json:"role,omitempty" validate:"omitempty,oneof=super_admin administrator developer manager operator guest"`
 	LicenseNumber    string         `json:"licenseNumber,omitempty"`
 	LicenseExpiry    *time.Time     `json:"licenseExpiry,omitempty"`
 	DriverCardNumber string         `json:"driverCardNumber,omitempty"`
@@ -190,7 +190,7 @@ type UserManagementListResponse struct {
 
 // UserFilters represents filters for user queries
 type UserFilters struct {
-	Role           string `json:"role,omitempty" validate:"omitempty,oneof=developer ceo administrator manager operator guest"`
+	Role           string `json:"role,omitempty" validate:"omitempty,oneof=super_admin administrator developer manager operator guest"`
 	IsActive       *bool  `json:"isActive,omitempty"`
 	EmailVerified  *bool  `json:"emailVerified,omitempty"`
 	Search         string `json:"search,omitempty"`         // Search in name, email, username

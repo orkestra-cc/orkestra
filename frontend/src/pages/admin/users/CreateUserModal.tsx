@@ -26,9 +26,9 @@ const CreateUserModal: React.FC<CreateUserModalProps> = ({
   });
 
   const roles = [
-    { value: 'ceo', label: 'CEO' },
-    { value: 'developer', label: 'Developer' },
+    { value: 'super_admin', label: 'Super Admin' },
     { value: 'administrator', label: 'Administrator' },
+    { value: 'developer', label: 'Developer' },
     { value: 'manager', label: 'Manager' },
     { value: 'operator', label: 'Operator' },
     { value: 'guest', label: 'Guest' }

@@ -8,7 +8,7 @@ set -e
 
 # Configuration
 API_URL="${ORKESTRA_API_URL:-http://localhost:3000}"
-VALID_ROLES=("developer" "ceo" "administrator" "manager" "operator" "guest")
+VALID_ROLES=("super_admin" "administrator" "developer" "manager" "operator" "guest")
 
 # Colors for output
 RED='\033[0;31m'
@@ -47,6 +47,7 @@ usage() {
     echo "  $0 admin --expiry 1h         # Token with 1 hour expiry"
     echo ""
     echo "Shorthand roles:"
+    echo "  su    -> super_admin"
     echo "  admin -> administrator"
     echo "  dev   -> developer"
     echo "  mgr   -> manager"
@@ -57,6 +58,7 @@ usage() {
 expand_role() {
     local role="$1"
     case "$role" in
+        su)    echo "super_admin" ;;
         admin) echo "administrator" ;;
         dev)   echo "developer" ;;
         mgr)   echo "manager" ;;

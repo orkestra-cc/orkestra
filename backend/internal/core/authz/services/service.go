@@ -30,9 +30,11 @@ var ErrRoleInactive = errors.New("authz: role is disabled")
 // Service owns authorization lifecycle and implements iface.AuthzProvider.
 //
 // Permission evaluation rules (in order):
-//  1. If the user's system role is "developer", every permission is granted.
-//  2. If the user's system role is "administrator", every system permission
-//     and every non-delete permission is granted (customizable later).
+//  1. If the user's system role is "super_admin", every permission is granted
+//     (wildcard "*").
+//  2. If the user's system role is "administrator" or "developer", every
+//     system permission is granted; non-system permissions still come from
+//     bindings.
 //  3. Otherwise, the user's permissions in the given org are the union of
 //     all permissions from non-expired role bindings for (userUUID, orgID),
 //     plus any bindings on the user with orgID="" (global grants).
@@ -49,8 +51,9 @@ type Service struct {
 	userRoles UserSystemRoleLookup
 
 	mu                  sync.RWMutex
-	systemPermissionSet map[string]struct{} // keys declared with System=true
-	allPermissionSet    map[string]struct{} // every registered permission
+	systemPermissionSet map[string]struct{}     // keys declared with System=true
+	allPermissionSet    map[string]struct{}     // every registered permission
+	cachedPermSpecs     []iface.PermissionSpec  // full specs for lazy reseed after a DB wipe
 }
 
 // UserSystemRoleLookup resolves a user's system role (from the user module).
@@ -109,11 +112,15 @@ func (s *Service) GetEffectivePermissions(ctx context.Context, userUUID, orgID s
 
 	perms := make(map[string]struct{})
 
-	// System role: developer gets *, administrator gets all system perms.
+	// System role shortcuts. super_admin gets the wildcard; administrator
+	// and developer both inherit every system-level permission so they can
+	// hit platform admin endpoints without needing explicit org bindings.
+	// The finer distinction between administrator and developer is enforced
+	// by the role-assignment cascade (future work), not by the permission set.
 	switch systemRole {
-	case "developer":
+	case "super_admin":
 		perms["*"] = struct{}{}
-	case "administrator":
+	case "administrator", "developer":
 		s.mu.RLock()
 		for k := range s.systemPermissionSet {
 			perms[k] = struct{}{}
@@ -172,6 +179,9 @@ func (s *Service) RegisterPermissions(ctx context.Context, specs []iface.Permiss
 			s.systemPermissionSet[spec.Key] = struct{}{}
 		}
 	}
+	// Remember the full specs so ensureSeeded can re-upsert the catalog
+	// after a live DB wipe without going back to the module registry.
+	s.cachedPermSpecs = append(s.cachedPermSpecs[:0], specs...)
 	s.mu.Unlock()
 
 	for _, spec := range specs {
@@ -194,26 +204,23 @@ func (s *Service) RegisterPermissions(ctx context.Context, specs []iface.Permiss
 // have orgId="" and IsSystem=true. Permission lists are derived from the
 // permissions catalog that modules have registered by the time this runs.
 // Call this after RegisterPermissions has been called for every module.
+//
+// Hierarchy (most to least privileged):
+//
+//	super_admin   — wildcard, full power, can assign every other role
+//	administrator — all org permissions, cannot elevate peers to admin
+//	developer     — all org permissions, cannot touch admin/super_admin
+//	manager       — read/create/update, no delete, no admin
+//	operator      — read + self-service
+//	guest         — read-only
+//
+// The cascade distinction between administrator and developer is enforced
+// at role-assignment time (future work), not baked into the permission set.
 func (s *Service) SeedSystemRoles(ctx context.Context) error {
-	// Older deployments have role rows without the isActive field. Treat
-	// them as active before seeding so re-seeding doesn't re-materialize
-	// them as inserts (the (orgId, name) filter would match and the
-	// $setOnInsert isActive would never fire).
-	if err := s.repo.BackfillIsActive(ctx); err != nil {
-		return fmt.Errorf("backfill isActive: %w", err)
-	}
 	allKeys, err := s.repo.ListAllPermissionKeys(ctx)
 	if err != nil {
 		return err
 	}
-	systemKeys, err := s.repo.ListSystemPermissionKeys(ctx)
-	if err != nil {
-		return err
-	}
-
-	nonDelete := filter(allKeys, func(p string) bool {
-		return !strings.HasSuffix(p, ".delete")
-	})
 
 	// Operator: read-only + self-service update permissions
 	operator := filter(allKeys, func(p string) bool {
@@ -234,9 +241,9 @@ func (s *Service) SeedSystemRoles(ctx context.Context) error {
 	})
 
 	roles := []models.Role{
-		{UUID: uuid.NewString(), Name: "developer", Description: "Super-admin. All permissions everywhere.", Permissions: []string{"*"}, IsSystem: true, IsActive: true},
-		{UUID: uuid.NewString(), Name: "ceo", Description: "Executive. All non-delete permissions + system permissions.", Permissions: union(nonDelete, systemKeys), IsSystem: true, IsActive: true},
-		{UUID: uuid.NewString(), Name: "administrator", Description: "Org admin. All permissions in the org.", Permissions: allKeys, IsSystem: true, IsActive: true},
+		{UUID: uuid.NewString(), Name: "super_admin", Description: "Full power — wildcard permission, can assign every role.", Permissions: []string{"*"}, IsSystem: true, IsActive: true},
+		{UUID: uuid.NewString(), Name: "administrator", Description: "Organization administrator — all permissions. Cannot elevate peers to administrator or super_admin.", Permissions: allKeys, IsSystem: true, IsActive: true},
+		{UUID: uuid.NewString(), Name: "developer", Description: "Technical power user — all permissions. Cannot manage administrator or super_admin accounts.", Permissions: allKeys, IsSystem: true, IsActive: true},
 		{UUID: uuid.NewString(), Name: "manager", Description: "Read/write, no admin, no delete.", Permissions: manager, IsSystem: true, IsActive: true},
 		{UUID: uuid.NewString(), Name: "operator", Description: "Read-only + self-service.", Permissions: operator, IsSystem: true, IsActive: true},
 		{UUID: uuid.NewString(), Name: "guest", Description: "Read-only access.", Permissions: guest, IsSystem: true, IsActive: true},
@@ -322,7 +329,46 @@ func (s *Service) UpdateRole(ctx context.Context, roleUUID string, input models.
 }
 
 func (s *Service) ListRoles(ctx context.Context, orgID string) ([]models.Role, error) {
+	if err := s.ensureSeeded(ctx); err != nil && s.logger != nil {
+		s.logger.Warn("authz ensureSeeded failed",
+			slog.String("error", err.Error()))
+	}
 	return s.repo.ListRoles(ctx, orgID)
+}
+
+// ensureSeeded re-runs the permission catalog + system-role seed if the
+// authz_roles collection has been wiped at runtime (dev DB drop etc.). It
+// relies on the full PermissionSpec list cached by RegisterPermissions so
+// no round trip to the module registry is needed. A no-op when the catalog
+// is already present or when the cache hasn't been populated yet (first
+// boot race — the startup seed path will cover it).
+func (s *Service) ensureSeeded(ctx context.Context) error {
+	count, err := s.repo.CountSystemRoles(ctx)
+	if err != nil {
+		return err
+	}
+	if count > 0 {
+		return nil
+	}
+
+	s.mu.RLock()
+	specs := append([]iface.PermissionSpec(nil), s.cachedPermSpecs...)
+	s.mu.RUnlock()
+	if len(specs) == 0 {
+		return nil
+	}
+
+	if err := s.RegisterPermissions(ctx, specs); err != nil {
+		return fmt.Errorf("lazy reseed permissions: %w", err)
+	}
+	if err := s.SeedSystemRoles(ctx); err != nil {
+		return fmt.Errorf("lazy reseed system roles: %w", err)
+	}
+	if s.logger != nil {
+		s.logger.Info("authz: lazy-reseeded permissions + system roles",
+			slog.Int("permissions", len(specs)))
+	}
+	return nil
 }
 
 // DeleteRole removes a custom role and cascades every binding pointing at
@@ -356,6 +402,10 @@ func (s *Service) DeleteRole(ctx context.Context, roleUUID string) error {
 }
 
 func (s *Service) ListPermissions(ctx context.Context) ([]models.Permission, error) {
+	if err := s.ensureSeeded(ctx); err != nil && s.logger != nil {
+		s.logger.Warn("authz ensureSeeded failed",
+			slog.String("error", err.Error()))
+	}
 	return s.repo.ListPermissions(ctx)
 }
 
@@ -466,17 +516,3 @@ func filter(in []string, pred func(string) bool) []string {
 	return out
 }
 
-func union(a, b []string) []string {
-	set := make(map[string]struct{}, len(a)+len(b))
-	for _, s := range a {
-		set[s] = struct{}{}
-	}
-	for _, s := range b {
-		set[s] = struct{}{}
-	}
-	out := make([]string, 0, len(set))
-	for k := range set {
-		out = append(out, k)
-	}
-	return out
-}

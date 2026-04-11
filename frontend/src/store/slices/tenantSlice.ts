@@ -38,9 +38,13 @@ interface TenantState {
 
 const STORAGE_KEY = 'orkestra.currentOrgId';
 
+// currentOrgId starts null and is rehydrated from localStorage only after
+// memberships load, validated against the fresh list. This prevents a stale
+// localStorage value (e.g. after a backend DB wipe) from injecting
+// X-Org-ID on requests before we know what orgs the user actually has.
 const initialState: TenantState = {
   memberships: [],
-  currentOrgId: typeof window !== 'undefined' ? window.localStorage.getItem(STORAGE_KEY) : null,
+  currentOrgId: null,
   permissions: [],
   features: [],
   systemRole: '',
@@ -55,15 +59,22 @@ const tenantSlice = createSlice({
     setMemberships: (state, action: PayloadAction<Membership[]>) => {
       state.memberships = action.payload;
       // Pick a sensible default: stored selection if still valid, else first
-      // owned org, else first membership.
-      const stored = state.currentOrgId;
+      // owned org, else first membership. We re-read localStorage here (not
+      // at slice init) so a stale id from a previous backend DB can't leak
+      // through before memberships are known.
+      const stored =
+        typeof window !== 'undefined' ? window.localStorage.getItem(STORAGE_KEY) : null;
       const valid = action.payload.some((m) => m.orgId === stored);
-      if (!valid) {
+      if (valid) {
+        state.currentOrgId = stored;
+      } else {
         const owned = action.payload.find((m) => m.isOwner);
         state.currentOrgId = owned?.orgId || action.payload[0]?.orgId || null;
       }
       if (state.currentOrgId && typeof window !== 'undefined') {
         window.localStorage.setItem(STORAGE_KEY, state.currentOrgId);
+      } else if (typeof window !== 'undefined') {
+        window.localStorage.removeItem(STORAGE_KEY);
       }
     },
 

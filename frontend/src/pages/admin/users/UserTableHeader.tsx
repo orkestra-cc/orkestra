@@ -13,22 +13,22 @@ const UserTableHeader = () => {
   const [selectedRole, setSelectedRole] = useState<string>('All');
   const [showCreateModal, setShowCreateModal] = useState(false);
 
-  const roleFilters = [
-    'All',
-    'CEO',
-    'Developer',
-    'Administrator',
-    'Manager',
-    'Operator',
-    'Guest'
+  const roleFilters: { label: string; value: string }[] = [
+    { label: 'All', value: 'All' },
+    { label: 'Super Admin', value: 'super_admin' },
+    { label: 'Administrator', value: 'administrator' },
+    { label: 'Developer', value: 'developer' },
+    { label: 'Manager', value: 'manager' },
+    { label: 'Operator', value: 'operator' },
+    { label: 'Guest', value: 'guest' }
   ];
 
-  const handleRoleFilter = (role: string) => {
-    setSelectedRole(role);
-    if (role === 'All') {
+  const handleRoleFilter = (value: string) => {
+    setSelectedRole(value);
+    if (value === 'All') {
       setColumnFilters([]);
     } else {
-      setColumnFilters([{ id: 'role', value: role.toLowerCase() }]);
+      setColumnFilters([{ id: 'role', value }]);
     }
   };
 
@@ -38,9 +38,9 @@ const UserTableHeader = () => {
 
     // Map role values to English labels
     const roleLabels: Record<string, string> = {
-      ceo: 'CEO',
-      developer: 'Developer',
+      super_admin: 'Super Admin',
       administrator: 'Administrator',
+      developer: 'Developer',
       manager: 'Manager',
       operator: 'Operator',
       guest: 'Guest'
@@ -101,17 +101,19 @@ const UserTableHeader = () => {
             className="text-600"
           >
             <FontAwesomeIcon icon="filter" transform="shrink-4" className="me-2" />
-            <span className="d-none d-sm-inline-block">{selectedRole}</span>
+            <span className="d-none d-sm-inline-block">
+              {roleFilters.find((r) => r.value === selectedRole)?.label ?? selectedRole}
+            </span>
           </Dropdown.Toggle>
           <Dropdown.Menu className="border py-2">
             {roleFilters.map((role) => (
               <Dropdown.Item
-                key={role}
-                onClick={() => handleRoleFilter(role)}
-                className={selectedRole === role ? 'active' : ''}
+                key={role.value}
+                onClick={() => handleRoleFilter(role.value)}
+                className={selectedRole === role.value ? 'active' : ''}
               >
-                {role}
-                {selectedRole === role && (
+                {role.label}
+                {selectedRole === role.value && (
                   <FontAwesomeIcon
                     icon="check"
                     transform="down-4 shrink-4"

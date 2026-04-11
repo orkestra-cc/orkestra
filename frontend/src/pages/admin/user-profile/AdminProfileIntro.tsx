@@ -50,12 +50,12 @@ const AdminProfileIntro: React.FC<AdminProfileIntroProps> = ({ user }) => {
             <p className="mb-2">
               <Badge
                 bg={
-                  user.role === 'developer'
-                    ? 'primary'
-                    : user.role === 'ceo'
-                      ? 'danger'
-                      : user.role === 'administrator'
-                        ? 'warning'
+                  user.role === 'super_admin'
+                    ? 'danger'
+                    : user.role === 'administrator'
+                      ? 'warning'
+                      : user.role === 'developer'
+                        ? 'primary'
                         : user.role === 'manager'
                           ? 'info'
                           : user.role === 'operator'

@@ -575,14 +575,14 @@ func (s *authService) HandleOAuthCallbackWithLinking(ctx context.Context, provid
 			// Check if this is the first user in the system
 			userCount, err := s.userService.GetUserCount(ctx, nil)
 			if err != nil {
-				fmt.Printf("[AUTH_DEBUG] WARNING: Failed to get user count: %v, defaulting to 'user' role\n", err)
+				fmt.Printf("[AUTH_DEBUG] WARNING: Failed to get user count: %v, defaulting to 'operator' role\n", err)
 				userCount = 1 // Default to non-first-user behavior on error
 			}
 
-			role := "user"
+			role := "operator"
 			if userCount == 0 {
-				role = "developer"
-				fmt.Printf("[AUTH_DEBUG] First user detected, assigning 'developer' role\n")
+				role = "super_admin"
+				fmt.Printf("[AUTH_DEBUG] First user detected, assigning 'super_admin' role\n")
 			}
 
 			createInput := &userModels.CreateUserInput{

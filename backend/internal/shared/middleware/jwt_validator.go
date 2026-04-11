@@ -200,7 +200,7 @@ func (v *JWTValidator) RequireSystemPermission(permission string) func(http.Hand
 				next.ServeHTTP(w, r)
 				return
 			}
-			if role, _ := GetSystemRole(r.Context()); role == "developer" || role == "administrator" {
+			if role, _ := GetSystemRole(r.Context()); role == "super_admin" || role == "administrator" || role == "developer" {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -243,11 +243,11 @@ func (v *JWTValidator) RequireEntitlement(feature string) func(http.Handler) htt
 }
 
 // fallbackAllowedByRole implements a minimal role check for the AI sidecar:
-// developer/administrator system roles bypass the check; otherwise the user
-// must have the "administrator" role in the current org. Used only when no
+// super_admin/administrator/developer system roles bypass the check; otherwise
+// the user must hold one of those roles in the current org. Used only when no
 // authz provider is wired.
 func fallbackAllowedByRole(ctx context.Context, hasOrg bool) bool {
-	if role, _ := GetSystemRole(ctx); role == "developer" || role == "administrator" {
+	if role, _ := GetSystemRole(ctx); role == "super_admin" || role == "administrator" || role == "developer" {
 		return true
 	}
 	if !hasOrg {
@@ -255,7 +255,7 @@ func fallbackAllowedByRole(ctx context.Context, hasOrg bool) bool {
 	}
 	roles, _ := GetOrgRoles(ctx)
 	for _, r := range roles {
-		if r == "administrator" || r == "developer" {
+		if r == "super_admin" || r == "administrator" || r == "developer" {
 			return true
 		}
 	}

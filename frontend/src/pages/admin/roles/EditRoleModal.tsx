@@ -21,7 +21,7 @@ interface Props {
  * System roles: only the Active switch writes back — name, description, and
  * permissions are re-seeded from code on every boot so letting operators
  * edit them would be dishonest. Disabling a system role is still allowed so
- * operators can forbid granting, e.g., the ceo role.
+ * operators can forbid granting, e.g., the developer role.
  *
  * The submit dispatches a PATCH with only the fields that actually changed
  * vs the role snapshot at open time.

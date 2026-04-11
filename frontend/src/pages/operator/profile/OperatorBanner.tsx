@@ -40,9 +40,9 @@ const OperatorBanner: React.FC<OperatorBannerProps> = ({ user }) => {
 
   // Role labels
   const roleLabels: Record<string, string> = {
-    developer: 'Developer',
-    ceo: 'CEO',
+    super_admin: 'Super Admin',
     administrator: 'Administrator',
+    developer: 'Developer',
     manager: 'Manager',
     operator: 'Operator',
     guest: 'Guest'

@@ -113,11 +113,11 @@ func (s *PasswordAuthService) Register(ctx context.Context, in RegisterInput) (*
 		return nil, fmt.Errorf("hash password: %w", err)
 	}
 
-	// First-user heuristic: if no users exist, assign developer role.
+	// First-user heuristic: if no users exist, assign super_admin role.
 	userCount, _ := s.userService.GetUserCount(ctx, nil)
 	role := "operator"
 	if userCount == 0 {
-		role = "developer"
+		role = "super_admin"
 	}
 
 	user, err := s.userService.CreateUserWithPassword(ctx, &userModels.CreateUserInput{
@@ -148,8 +148,8 @@ func (s *PasswordAuthService) Register(ctx context.Context, in RegisterInput) (*
 
 // RegisterInitialAdmin creates the first administrator during the first-install
 // setup wizard. It bypasses email verification (the wizard runs before SMTP is
-// configured) and explicitly assigns the developer role rather than relying on
-// the first-user heuristic in Register. Returns a full TokenResponse so the
+// configured) and explicitly assigns the super_admin role rather than relying
+// on the first-user heuristic in Register. Returns a full TokenResponse so the
 // wizard can log the operator straight in.
 //
 // Callers must gate this by "no users exist yet." The unique index on
@@ -174,7 +174,7 @@ func (s *PasswordAuthService) RegisterInitialAdmin(ctx context.Context, email, p
 		Email:        email,
 		FullName:     fullName,
 		PasswordHash: hash,
-		Role:         "developer",
+		Role:         "super_admin",
 	})
 	if err != nil {
 		return nil, err

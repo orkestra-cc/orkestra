@@ -1,6 +1,8 @@
 import { useState, useMemo, FormEvent } from 'react';
 import { Alert, Button, Form, Spinner } from 'react-bootstrap';
 import { useCreateOrgMutation } from 'store/api/tenantApi';
+import { useAppDispatch } from 'store/hooks';
+import { setMemberships } from 'store/slices/tenantSlice';
 
 interface OrgStepProps {
   /**
@@ -40,6 +42,7 @@ const slugify = (input: string): string =>
  * an env-var-driven default.
  */
 const OrgStep = ({ adminFullName, onNext }: OrgStepProps) => {
+  const dispatch = useAppDispatch();
   const [createOrg, { isLoading }] = useCreateOrgMutation();
 
   const defaultName = useMemo(() => {
@@ -76,7 +79,24 @@ const OrgStep = ({ adminFullName, onNext }: OrgStepProps) => {
     }
 
     try {
-      await createOrg({ name: trimmedName, slug, plan: 'enterprise' }).unwrap();
+      const created = await createOrg({ name: trimmedName, slug, plan: 'enterprise' }).unwrap();
+      // Seed tenant state with the freshly created org so the remaining
+      // wizard steps (and the post-wizard dashboard navigation) run with a
+      // valid X-Org-ID. createOrg's onQueryStarted already refreshes the
+      // JWT so the new membership is in claims.Memberships; this hydrates
+      // the Redux side so baseApi stops sending a stale header.
+      dispatch(
+        setMemberships([
+          {
+            orgId: created.id,
+            name: created.name,
+            slug: created.slug,
+            plan: created.plan,
+            roles: ['owner'],
+            isOwner: true,
+          },
+        ])
+      );
       onNext(trimmedName);
     } catch (err: unknown) {
       const anyErr = err as { status?: number; data?: { detail?: string } };

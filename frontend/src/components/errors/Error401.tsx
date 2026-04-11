@@ -38,9 +38,9 @@ const Error401: React.FC<Error401Props> = ({
 
   const getRoleDisplayName = (role?: string) => {
     const roleMap: Record<string, string> = {
-      'developer': 'Developer',
-      'ceo': 'CEO',
+      'super_admin': 'Super Admin',
       'administrator': 'Administrator',
+      'developer': 'Developer',
       'manager': 'Manager',
       'operator': 'Operator',
       'guest': 'Guest'

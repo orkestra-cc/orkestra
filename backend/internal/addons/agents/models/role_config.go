@@ -84,9 +84,9 @@ var personaRBACLevel = map[string]string{
 // rbacHierarchy mirrors the RBAC hierarchy from shared/middleware/auth.go.
 // Each role lists all roles it has permission to act as.
 var rbacHierarchy = map[string][]string{
-	"developer":     {"developer", "ceo", "administrator", "manager", "operator", "guest"},
-	"ceo":           {"ceo", "administrator", "manager", "operator", "guest"},
-	"administrator": {"administrator", "manager", "operator", "guest"},
+	"super_admin":   {"super_admin", "administrator", "developer", "manager", "operator", "guest"},
+	"administrator": {"administrator", "developer", "manager", "operator", "guest"},
+	"developer":     {"developer", "manager", "operator", "guest"},
 	"manager":       {"manager", "operator", "guest"},
 	"operator":      {"operator", "guest"},
 	"guest":         {"guest"},
@@ -113,13 +113,11 @@ func CanUsePersona(userRole, persona string) bool {
 // DefaultPersonaForRole returns the default persona for a given RBAC role
 func DefaultPersonaForRole(role string) string {
 	switch role {
-	case "developer":
+	case "super_admin", "developer":
 		return "developer"
-	case "ceo", "administrator":
+	case "administrator":
 		return "administrator"
-	case "manager":
-		return "manager"
-	case "operator":
+	case "manager", "operator":
 		return "manager"
 	case "guest":
 		return "guest"

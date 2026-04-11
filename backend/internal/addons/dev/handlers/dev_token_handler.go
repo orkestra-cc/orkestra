@@ -30,7 +30,7 @@ func NewDevTokenHandler(jwtService iface.JWTProvider, cfg *config.Config) *DevTo
 }
 
 // ValidRoles contains all valid roles for token generation
-var ValidRoles = []string{"developer", "ceo", "administrator", "manager", "operator", "guest"}
+var ValidRoles = []string{"super_admin", "administrator", "developer", "manager", "operator", "guest"}
 
 // isValidRole checks if a role is valid
 func isValidRole(role string) bool {
@@ -45,7 +45,7 @@ func isValidRole(role string) bool {
 // GenerateTokenRequest is the request body for token generation
 type GenerateTokenRequest struct {
 	Body struct {
-		Role   string `json:"role" validate:"required" doc:"Role for the generated token (developer, ceo, administrator, manager, operator, guest)"`
+		Role   string `json:"role" validate:"required" doc:"Role for the generated token (super_admin, administrator, developer, manager, operator, guest)"`
 		Expiry string `json:"expiry,omitempty" doc:"Token expiry duration (e.g., '15m', '1h', '24h'). Default: 15m, Max: 24h"`
 	}
 }

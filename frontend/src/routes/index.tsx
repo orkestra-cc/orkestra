@@ -603,7 +603,7 @@ const routes: RouteObject[] = [
                 element: (
                   <ProtectedRoute
                     requiredPermissions={[
-                      ['developer', 'ceo', 'administrator']
+                      ['super_admin', 'administrator', 'developer']
                     ]}
                   >
                     <Suspense
@@ -620,7 +620,7 @@ const routes: RouteObject[] = [
                 element: (
                   <ProtectedRoute
                     requiredPermissions={[
-                      ['developer', 'ceo', 'administrator']
+                      ['super_admin', 'administrator', 'developer']
                     ]}
                   >
                     <Suspense
@@ -637,7 +637,7 @@ const routes: RouteObject[] = [
                 element: (
                   <ProtectedRoute
                     requiredPermissions={[
-                      ['authz.role.read', 'developer', 'ceo', 'administrator']
+                      ['authz.role.read', 'super_admin', 'administrator', 'developer']
                     ]}
                   >
                     <Suspense
@@ -654,7 +654,7 @@ const routes: RouteObject[] = [
                 element: (
                   <ProtectedRoute
                     requiredPermissions={[
-                      ['developer', 'ceo', 'administrator']
+                      ['super_admin', 'administrator', 'developer']
                     ]}
                   >
                     <Suspense
@@ -671,7 +671,7 @@ const routes: RouteObject[] = [
                 element: (
                   <ProtectedRoute
                     requiredPermissions={[
-                      ['developer', 'ceo', 'administrator']
+                      ['super_admin', 'administrator', 'developer']
                     ]}
                   >
                     <Suspense
@@ -688,7 +688,7 @@ const routes: RouteObject[] = [
                 element: (
                   <ProtectedRoute
                     requiredPermissions={[
-                      ['developer', 'ceo', 'administrator']
+                      ['super_admin', 'administrator', 'developer']
                     ]}
                   >
                     <Suspense
@@ -705,7 +705,7 @@ const routes: RouteObject[] = [
                 element: (
                   <ProtectedRoute
                     requiredPermissions={[
-                      ['developer', 'ceo', 'administrator', 'manager']
+                      ['super_admin', 'administrator', 'developer', 'manager']
                     ]}
                   >
                     <Suspense
@@ -754,7 +754,7 @@ const routes: RouteObject[] = [
             element: (
               <ProtectedRoute
                 requiredPermissions={[
-                  ['developer', 'ceo', 'administrator']
+                  ['super_admin', 'administrator', 'developer']
                 ]}
               >
                 <Suspense
@@ -771,7 +771,7 @@ const routes: RouteObject[] = [
             element: (
               <ProtectedRoute
                 requiredPermissions={[
-                  ['developer', 'ceo', 'administrator']
+                  ['super_admin', 'administrator', 'developer']
                 ]}
               >
                 <Suspense
@@ -788,7 +788,7 @@ const routes: RouteObject[] = [
             element: (
               <ProtectedRoute
                 requiredPermissions={[
-                  ['developer', 'ceo', 'administrator']
+                  ['super_admin', 'administrator', 'developer']
                 ]}
               >
                 <Suspense
@@ -805,7 +805,7 @@ const routes: RouteObject[] = [
             element: (
               <ProtectedRoute
                 requiredPermissions={[
-                  ['developer', 'ceo', 'administrator']
+                  ['super_admin', 'administrator', 'developer']
                 ]}
               >
                 <Suspense
@@ -822,7 +822,7 @@ const routes: RouteObject[] = [
             element: (
               <ProtectedRoute
                 requiredPermissions={[
-                  ['developer', 'ceo', 'administrator']
+                  ['super_admin', 'administrator', 'developer']
                 ]}
               >
                 <Suspense
@@ -839,7 +839,7 @@ const routes: RouteObject[] = [
             element: (
               <ProtectedRoute
                 requiredPermissions={[
-                  ['developer', 'ceo', 'administrator']
+                  ['super_admin', 'administrator', 'developer']
                 ]}
               >
                 <Suspense
@@ -856,7 +856,7 @@ const routes: RouteObject[] = [
             element: (
               <ProtectedRoute
                 requiredPermissions={[
-                  ['developer', 'ceo', 'administrator']
+                  ['super_admin', 'administrator', 'developer']
                 ]}
               >
                 <Suspense
@@ -873,7 +873,7 @@ const routes: RouteObject[] = [
             element: (
               <ProtectedRoute
                 requiredPermissions={[
-                  ['developer', 'ceo', 'administrator']
+                  ['super_admin', 'administrator', 'developer']
                 ]}
               >
                 <Suspense
@@ -890,7 +890,7 @@ const routes: RouteObject[] = [
             element: (
               <ProtectedRoute
                 requiredPermissions={[
-                  ['developer', 'ceo', 'administrator']
+                  ['super_admin', 'administrator', 'developer']
                 ]}
               >
                 <Suspense
@@ -907,7 +907,7 @@ const routes: RouteObject[] = [
             element: (
               <ProtectedRoute
                 requiredPermissions={[
-                  ['developer', 'ceo', 'administrator', 'manager']
+                  ['super_admin', 'administrator', 'developer', 'manager']
                 ]}
               >
                 <Suspense
@@ -924,7 +924,7 @@ const routes: RouteObject[] = [
             element: (
               <ProtectedRoute
                 requiredPermissions={[
-                  ['developer', 'ceo', 'administrator', 'manager']
+                  ['super_admin', 'administrator', 'developer', 'manager']
                 ]}
               >
                 <Suspense
@@ -941,7 +941,7 @@ const routes: RouteObject[] = [
             element: (
               <ProtectedRoute
                 requiredPermissions={[
-                  ['developer', 'ceo', 'administrator', 'manager']
+                  ['super_admin', 'administrator', 'developer', 'manager']
                 ]}
               >
                 <Suspense
@@ -958,7 +958,7 @@ const routes: RouteObject[] = [
             path: 'graph/explorer',
             element: (
               <ProtectedRoute
-                requiredPermissions={[['developer', 'ceo', 'administrator']]}
+                requiredPermissions={[['super_admin', 'administrator', 'developer']]}
               >
                 <Suspense key="graph-explorer" fallback={<FalconLoader />}>
                   <GraphExplorer />
@@ -970,7 +970,7 @@ const routes: RouteObject[] = [
             path: 'graph/algorithms',
             element: (
               <ProtectedRoute
-                requiredPermissions={[['developer', 'ceo', 'administrator']]}
+                requiredPermissions={[['super_admin', 'administrator', 'developer']]}
               >
                 <Suspense key="graph-algorithms" fallback={<FalconLoader />}>
                   <GraphAlgorithms />
@@ -982,7 +982,7 @@ const routes: RouteObject[] = [
             path: 'graph/databases',
             element: (
               <ProtectedRoute
-                requiredPermissions={[['developer', 'ceo', 'administrator']]}
+                requiredPermissions={[['super_admin', 'administrator', 'developer']]}
               >
                 <Suspense key="graph-databases" fallback={<FalconLoader />}>
                   <GraphDatabases />
@@ -994,7 +994,7 @@ const routes: RouteObject[] = [
             path: 'graph/vector',
             element: (
               <ProtectedRoute
-                requiredPermissions={[['developer', 'ceo', 'administrator']]}
+                requiredPermissions={[['super_admin', 'administrator', 'developer']]}
               >
                 <Suspense key="graph-vector" fallback={<FalconLoader />}>
                   <GraphVector />
@@ -1010,7 +1010,7 @@ const routes: RouteObject[] = [
             path: 'graph/documents',
             element: (
               <ProtectedRoute
-                requiredPermissions={[['developer', 'ceo', 'administrator']]}
+                requiredPermissions={[['super_admin', 'administrator', 'developer']]}
               >
                 <Suspense key="graph-documents" fallback={<FalconLoader />}>
                   <GraphDocuments />
@@ -1022,7 +1022,7 @@ const routes: RouteObject[] = [
             path: 'graph/relationships',
             element: (
               <ProtectedRoute
-                requiredPermissions={[['developer', 'ceo', 'administrator']]}
+                requiredPermissions={[['super_admin', 'administrator', 'developer']]}
               >
                 <Suspense key="graph-relationships" fallback={<FalconLoader />}>
                   <GraphRelationships />
@@ -1034,7 +1034,7 @@ const routes: RouteObject[] = [
             path: 'graph/rag',
             element: (
               <ProtectedRoute
-                requiredPermissions={[['developer', 'ceo', 'administrator']]}
+                requiredPermissions={[['super_admin', 'administrator', 'developer']]}
               >
                 <Suspense key="graph-rag" fallback={<FalconLoader />}>
                   <GraphRAG />
@@ -1046,7 +1046,7 @@ const routes: RouteObject[] = [
             path: 'ai/models',
             element: (
               <ProtectedRoute
-                requiredPermissions={[['developer', 'ceo', 'administrator']]}
+                requiredPermissions={[['super_admin', 'administrator', 'developer']]}
               >
                 <Suspense key="ai-models" fallback={<FalconLoader />}>
                   <AIModels />
@@ -1058,7 +1058,7 @@ const routes: RouteObject[] = [
             path: 'ai/personal-agent',
             element: (
               <ProtectedRoute
-                requiredPermissions={[['developer', 'ceo', 'administrator', 'manager', 'operator', 'guest']]}
+                requiredPermissions={[['super_admin', 'administrator', 'developer', 'manager', 'operator', 'guest']]}
               >
                 <Suspense key="ai-personal-agent" fallback={<FalconLoader />}>
                   <PersonalAgentChat />
@@ -1070,7 +1070,7 @@ const routes: RouteObject[] = [
             path: 'ai/agents',
             element: (
               <ProtectedRoute
-                requiredPermissions={[['developer', 'ceo', 'administrator', 'manager']]}
+                requiredPermissions={[['super_admin', 'administrator', 'developer', 'manager']]}
               >
                 <Suspense key="ai-agents" fallback={<FalconLoader />}>
                   <AgentProjects />
@@ -1082,7 +1082,7 @@ const routes: RouteObject[] = [
             path: 'ai/agents/:uuid/chat',
             element: (
               <ProtectedRoute
-                requiredPermissions={[['developer', 'ceo', 'administrator', 'manager', 'operator']]}
+                requiredPermissions={[['super_admin', 'administrator', 'developer', 'manager', 'operator']]}
               >
                 <Suspense key="ai-agent-chat" fallback={<FalconLoader />}>
                   <AgentChat />
@@ -1095,7 +1095,7 @@ const routes: RouteObject[] = [
           {
             path: 'sales/prospect',
             element: (
-              <ProtectedRoute requiredPermissions={[['developer', 'ceo', 'administrator', 'manager']]}>
+              <ProtectedRoute requiredPermissions={[['super_admin', 'administrator', 'developer', 'manager']]}>
                 <Suspense key="sales-prospect" fallback={<FalconLoader />}>
                   <SalesProspect />
                 </Suspense>
@@ -1105,7 +1105,7 @@ const routes: RouteObject[] = [
           {
             path: 'sales/skills/:skill',
             element: (
-              <ProtectedRoute requiredPermissions={[['developer', 'ceo', 'administrator', 'manager']]}>
+              <ProtectedRoute requiredPermissions={[['super_admin', 'administrator', 'developer', 'manager']]}>
                 <Suspense key="sales-skill" fallback={<FalconLoader />}>
                   <SalesSkill />
                 </Suspense>
@@ -1115,7 +1115,7 @@ const routes: RouteObject[] = [
           {
             path: 'sales/jobs',
             element: (
-              <ProtectedRoute requiredPermissions={[['developer', 'ceo', 'administrator', 'manager']]}>
+              <ProtectedRoute requiredPermissions={[['super_admin', 'administrator', 'developer', 'manager']]}>
                 <Suspense key="sales-jobs" fallback={<FalconLoader />}>
                   <SalesJobs />
                 </Suspense>
@@ -1125,7 +1125,7 @@ const routes: RouteObject[] = [
           {
             path: 'sales/jobs/:uuid',
             element: (
-              <ProtectedRoute requiredPermissions={[['developer', 'ceo', 'administrator', 'manager']]}>
+              <ProtectedRoute requiredPermissions={[['super_admin', 'administrator', 'developer', 'manager']]}>
                 <Suspense key="sales-job-detail" fallback={<FalconLoader />}>
                   <SalesJobDetail />
                 </Suspense>
@@ -1135,7 +1135,7 @@ const routes: RouteObject[] = [
           {
             path: 'sales/reports',
             element: (
-              <ProtectedRoute requiredPermissions={[['developer', 'ceo', 'administrator', 'manager']]}>
+              <ProtectedRoute requiredPermissions={[['super_admin', 'administrator', 'developer', 'manager']]}>
                 <Suspense key="sales-reports" fallback={<FalconLoader />}>
                   <SalesReports />
                 </Suspense>
@@ -1145,7 +1145,7 @@ const routes: RouteObject[] = [
           {
             path: 'sales/reports/:uuid',
             element: (
-              <ProtectedRoute requiredPermissions={[['developer', 'ceo', 'administrator', 'manager']]}>
+              <ProtectedRoute requiredPermissions={[['super_admin', 'administrator', 'developer', 'manager']]}>
                 <Suspense key="sales-report-detail" fallback={<FalconLoader />}>
                   <SalesReportDetail />
                 </Suspense>
@@ -1155,7 +1155,7 @@ const routes: RouteObject[] = [
           {
             path: 'sales/settings',
             element: (
-              <ProtectedRoute requiredPermissions={[['developer', 'ceo', 'administrator', 'manager']]}>
+              <ProtectedRoute requiredPermissions={[['super_admin', 'administrator', 'developer', 'manager']]}>
                 <Suspense key="sales-settings" fallback={<FalconLoader />}>
                   <SalesSettings />
                 </Suspense>

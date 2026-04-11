@@ -176,24 +176,24 @@ const useUserTable = (options?: any) => {
       cell: ({ row: { original } }: { row: { original: User } }) => {
         const { role } = original as { role: RoleType };
         type RoleType =
-          | 'ceo'
-          | 'developer'
+          | 'super_admin'
           | 'administrator'
+          | 'developer'
           | 'manager'
           | 'operator'
           | 'guest';
         const roleColors: Record<RoleType, string> = {
-          ceo: 'danger',
-          developer: 'danger',
+          super_admin: 'danger',
           administrator: 'warning',
+          developer: 'primary',
           manager: 'info',
           operator: 'success',
           guest: 'secondary'
         };
         const roleLabels: Record<RoleType, string> = {
-          ceo: 'CEO',
-          developer: 'Developer',
+          super_admin: 'Super Admin',
           administrator: 'Administrator',
+          developer: 'Developer',
           manager: 'Manager',
           operator: 'Operator',
           guest: 'Guest'

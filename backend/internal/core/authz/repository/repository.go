@@ -54,23 +54,6 @@ func (r *Repository) ListPermissions(ctx context.Context) ([]models.Permission, 
 	return out, nil
 }
 
-func (r *Repository) ListSystemPermissionKeys(ctx context.Context) ([]string, error) {
-	cur, err := r.db.Collection(CollPermissions).Find(ctx, bson.M{"system": true})
-	if err != nil {
-		return nil, err
-	}
-	defer cur.Close(ctx)
-	var out []models.Permission
-	if err := cur.All(ctx, &out); err != nil {
-		return nil, err
-	}
-	keys := make([]string, 0, len(out))
-	for _, p := range out {
-		keys = append(keys, p.Key)
-	}
-	return keys, nil
-}
-
 func (r *Repository) ListAllPermissionKeys(ctx context.Context) ([]string, error) {
 	cur, err := r.db.Collection(CollPermissions).Find(ctx, bson.M{})
 	if err != nil {
@@ -96,8 +79,8 @@ func (r *Repository) UpsertRole(ctx context.Context, role *models.Role) error {
 		role.CreatedAt = role.UpdatedAt
 	}
 	// IsActive is set on insert only — once a role exists, its active state
-	// is controlled by UpdateRoleActive so re-seeding system roles on boot
-	// never stomps an operator's "disable ceo" toggle.
+	// is controlled via UpdateRoleFields so re-seeding system roles on boot
+	// never stomps an operator's disable toggle.
 	_, err := r.db.Collection(CollRoles).UpdateOne(ctx,
 		bson.M{"orgId": role.OrgID, "name": role.Name},
 		bson.M{
@@ -137,16 +120,6 @@ func (r *Repository) UpdateRoleFields(ctx context.Context, uuid string, fields b
 	return nil
 }
 
-// BackfillIsActive ensures every existing role row has an isActive value.
-// Runs on boot before SeedSystemRoles so rows persisted before the field
-// was introduced are treated as active rather than silently disabled.
-func (r *Repository) BackfillIsActive(ctx context.Context) error {
-	_, err := r.db.Collection(CollRoles).UpdateMany(ctx,
-		bson.M{"isActive": bson.M{"$exists": false}},
-		bson.M{"$set": bson.M{"isActive": true}})
-	return err
-}
-
 func (r *Repository) GetRoleByName(ctx context.Context, orgID, name string) (*models.Role, error) {
 	var role models.Role
 	err := r.db.Collection(CollRoles).FindOne(ctx, bson.M{"orgId": orgID, "name": name}).Decode(&role)
@@ -163,6 +136,13 @@ func (r *Repository) GetRoleByUUID(ctx context.Context, uuid string) (*models.Ro
 		return nil, ErrNotFound
 	}
 	return &role, err
+}
+
+// CountSystemRoles returns how many system roles (orgId="", isSystem=true)
+// exist. Used by the service to detect a wiped catalog and lazy-reseed it.
+func (r *Repository) CountSystemRoles(ctx context.Context) (int64, error) {
+	return r.db.Collection(CollRoles).CountDocuments(ctx,
+		bson.M{"orgId": "", "isSystem": true})
 }
 
 // ListRoles returns system roles (orgId=="") plus roles for the given org.

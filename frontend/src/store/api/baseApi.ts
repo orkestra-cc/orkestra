@@ -10,12 +10,16 @@ export const setNavigateToLogin = (fn: (location?: string) => void) => {
 };
 
 // Endpoints that must NOT carry X-Org-ID because they run before the current
-// org is known (login, refresh, org listing, org creation, invite accept).
+// org is known (login, refresh, org listing, org creation, invite accept),
+// or because they are platform-level (module admin, first-install setup)
+// and the backend's org-resolution middleware would reject a stray header.
 const ORG_AGNOSTIC_PATHS = [
   '/v1/auth/',
   '/v1/orgs',                 // GET list, POST create
   '/v1/orgs/accept-invite',
   '/v1/notifications/preferences',
+  '/v1/admin/modules',        // platform-level module admin, not per-org
+  '/v1/setup',                // first-install wizard endpoints
 ];
 
 function isOrgAgnostic(url: string): boolean {

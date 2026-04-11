@@ -1,8 +1,10 @@
-import { ReactNode } from 'react';
+import { ReactNode, useEffect } from 'react';
 import { Alert, Button } from 'react-bootstrap';
 import { Navigate, useLocation } from 'react-router-dom';
 import FalconLoader from 'components/common/FalconLoader';
 import { useGetSetupStatusQuery } from 'store/api/setupApi';
+import { useAppDispatch } from 'store/hooks';
+import { resetTenantState } from 'store/slices/tenantSlice';
 
 interface SetupGateProps {
   children: ReactNode;
@@ -26,7 +28,19 @@ interface SetupGateProps {
  */
 const SetupGate = ({ children }: SetupGateProps) => {
   const location = useLocation();
+  const dispatch = useAppDispatch();
   const { data, isLoading, isError, error, refetch } = useGetSetupStatusQuery();
+
+  // If the backend reports the install is not yet set up, drop any
+  // tenant state left over from a previous session (e.g. a currentOrgId
+  // in localStorage from a database that has since been wiped). Otherwise
+  // baseApi would attach a stale X-Org-ID to wizard requests and the
+  // backend's org-resolution middleware would 403 them.
+  useEffect(() => {
+    if (data && !data.setupCompleted) {
+      dispatch(resetTenantState());
+    }
+  }, [data, dispatch]);
 
   if (isLoading) {
     return <FalconLoader />;

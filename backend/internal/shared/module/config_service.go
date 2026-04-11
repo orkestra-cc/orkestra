@@ -20,6 +20,13 @@ type ModuleConfigService struct {
 	redis       *database.RedisClientAdapter
 	logger      *slog.Logger
 	coreModules map[string]bool // precomputed set — never hits DB/Redis
+
+	// knownModules + cfg are captured during SeedFromModules so the service
+	// can lazy-rebuild the module_configs collection if it is emptied at
+	// runtime (dev DB wipe, accidental drop, etc.) without requiring a
+	// backend restart. Populated once at boot and then read-only.
+	knownModules map[string]Module
+	cfg          *config.Config
 }
 
 const (
@@ -30,10 +37,11 @@ const (
 // NewModuleConfigService creates a new config service.
 func NewModuleConfigService(repo *ModuleConfigRepository, redis *database.RedisClientAdapter, logger *slog.Logger) *ModuleConfigService {
 	return &ModuleConfigService{
-		repo:        repo,
-		redis:       redis,
-		logger:      logger,
-		coreModules: make(map[string]bool),
+		repo:         repo,
+		redis:        redis,
+		logger:       logger,
+		coreModules:  make(map[string]bool),
+		knownModules: make(map[string]Module),
 	}
 }
 
@@ -101,6 +109,13 @@ func (s *ModuleConfigService) IsEnabled(ctx context.Context, moduleName string) 
 func (s *ModuleConfigService) SeedFromModules(ctx context.Context, modules []Module, cfg *config.Config) error {
 	// Build core modules map as a side effect of seeding.
 	s.SetCoreModules(modules)
+
+	// Remember the registered modules + app config so GetConfig can lazy-seed
+	// missing docs later (e.g. after a live DB wipe in dev).
+	s.cfg = cfg
+	for _, m := range modules {
+		s.knownModules[m.Name()] = m
+	}
 
 	for _, m := range modules {
 		existing, err := s.repo.FindByName(ctx, m.Name())
@@ -190,13 +205,70 @@ func (s *ModuleConfigService) buildInitialConfig(m Module, cfg *config.Config) M
 }
 
 // GetConfig retrieves the full config document for a module. Used by admin API.
+// If the module is registered but has no document in MongoDB (e.g. the
+// collection was dropped while the backend was running), the config is
+// rebuilt from the module's ConfigSchema and upserted before being returned.
 func (s *ModuleConfigService) GetConfig(ctx context.Context, name string) (*ModuleConfig, error) {
-	return s.repo.FindByName(ctx, name)
+	doc, err := s.repo.FindByName(ctx, name)
+	if err != nil {
+		return nil, err
+	}
+	if doc != nil {
+		return doc, nil
+	}
+	return s.lazySeed(ctx, name)
 }
 
 // GetAllConfigs retrieves all module config documents. Used by admin API list endpoint.
+// If the DB is missing documents for modules we know about, they are lazily
+// rebuilt from each module's ConfigSchema so the admin UI never sees a
+// partially-seeded catalog after a live DB wipe.
 func (s *ModuleConfigService) GetAllConfigs(ctx context.Context) ([]ModuleConfig, error) {
-	return s.repo.FindAll(ctx)
+	docs, err := s.repo.FindAll(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if len(s.knownModules) == 0 {
+		return docs, nil
+	}
+	present := make(map[string]bool, len(docs))
+	for _, d := range docs {
+		present[d.ModuleName] = true
+	}
+	for name := range s.knownModules {
+		if present[name] {
+			continue
+		}
+		if seeded, err := s.lazySeed(ctx, name); err == nil && seeded != nil {
+			docs = append(docs, *seeded)
+		}
+	}
+	return docs, nil
+}
+
+// lazySeed rebuilds a single module's config document from its declared
+// schema and current env/defaults, then upserts it. Returns nil if the
+// module is not registered with this service or if the seed write fails.
+// Used by GetConfig/GetAllConfigs as a self-healing fallback for missing
+// documents (empty collection after a dev DB wipe is the primary case).
+func (s *ModuleConfigService) lazySeed(ctx context.Context, name string) (*ModuleConfig, error) {
+	m, ok := s.knownModules[name]
+	if !ok {
+		return nil, nil
+	}
+	doc := s.buildInitialConfig(m, s.cfg)
+	if err := s.repo.Upsert(ctx, &doc); err != nil {
+		s.logger.Error("lazySeed: failed to upsert module config",
+			slog.String("module", name),
+			slog.String("error", err.Error()),
+		)
+		return nil, err
+	}
+	s.logger.Info("Module config lazy-seeded",
+		slog.String("module", name),
+		slog.String("category", string(m.Category())),
+	)
+	return s.repo.FindByName(ctx, name)
 }
 
 // UpdateConfig updates a module's config values and encrypted secrets,
