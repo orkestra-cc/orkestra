@@ -50,6 +50,42 @@ func (m *AuthModule) Permissions() []iface.PermissionSpec {
 	}
 }
 
+// ConfigSchema declares every OAuth provider setting as admin-manageable.
+// Values are seeded from the listed env vars on first boot, then owned by
+// the module_configs document in MongoDB. Secrets are encrypted at rest.
+// The Group field drives the admin modal's tab rendering — fields in the
+// same group land on the same tab, in declaration order.
+func (m *AuthModule) ConfigSchema() []module.ConfigField {
+	return []module.ConfigField{
+		// Google
+		{Key: "googleClientId", Label: "Client ID", Group: "Google", Type: module.FieldString, EnvVar: "OAUTH_GOOGLE_CLIENT_ID"},
+		{Key: "googleClientSecret", Label: "Client Secret", Group: "Google", Type: module.FieldSecret, EnvVar: "OAUTH_GOOGLE_CLIENT_SECRET"},
+		{Key: "googleRedirectURL", Label: "Redirect URL", Group: "Google", Type: module.FieldString, EnvVar: "OAUTH_GOOGLE_REDIRECT_URL"},
+		{Key: "googleAndroidClientId", Label: "Android Client ID", Group: "Google", Type: module.FieldString, EnvVar: "OAUTH_GOOGLE_ANDROID_CLIENT_ID"},
+		{Key: "googleIOSClientId", Label: "iOS Client ID", Group: "Google", Type: module.FieldString, EnvVar: "OAUTH_GOOGLE_IOS_CLIENT_ID"},
+
+		// Apple
+		{Key: "appleClientId", Label: "Client ID", Group: "Apple", Type: module.FieldString, EnvVar: "OAUTH_APPLE_CLIENT_ID"},
+		{Key: "appleTeamId", Label: "Team ID", Group: "Apple", Type: module.FieldString, EnvVar: "OAUTH_APPLE_TEAM_ID"},
+		{Key: "appleKeyId", Label: "Key ID", Group: "Apple", Type: module.FieldString, EnvVar: "OAUTH_APPLE_KEY_ID"},
+		{Key: "applePrivateKey", Label: ".p8 Key (PEM)", Group: "Apple", Description: "Inline PEM content of your Apple Sign-In .p8 key", Type: module.FieldSecret, EnvVar: "OAUTH_APPLE_PRIVATE_KEY"},
+		{Key: "applePrivateKeyPath", Label: ".p8 Key Path", Group: "Apple", Description: "Filesystem path fallback if PEM is not inlined", Type: module.FieldString, EnvVar: "OAUTH_APPLE_PRIVATE_KEY_PATH"},
+		{Key: "appleRedirectURL", Label: "Redirect URL", Group: "Apple", Type: module.FieldString, EnvVar: "OAUTH_APPLE_REDIRECT_URL"},
+		{Key: "appleIOSClientId", Label: "iOS Client ID", Group: "Apple", Type: module.FieldString, EnvVar: "OAUTH_APPLE_IOS_CLIENT_ID"},
+		{Key: "appleAndroidClientId", Label: "Android Client ID", Group: "Apple", Type: module.FieldString, EnvVar: "OAUTH_APPLE_ANDROID_CLIENT_ID"},
+
+		// GitHub
+		{Key: "githubClientId", Label: "Client ID", Group: "GitHub", Type: module.FieldString, EnvVar: "OAUTH_GITHUB_CLIENT_ID"},
+		{Key: "githubClientSecret", Label: "Client Secret", Group: "GitHub", Type: module.FieldSecret, EnvVar: "OAUTH_GITHUB_CLIENT_SECRET"},
+		{Key: "githubRedirectURL", Label: "Redirect URL", Group: "GitHub", Type: module.FieldString, EnvVar: "OAUTH_GITHUB_REDIRECT_URL"},
+
+		// Discord
+		{Key: "discordClientId", Label: "Client ID", Group: "Discord", Type: module.FieldString, EnvVar: "OAUTH_DISCORD_CLIENT_ID"},
+		{Key: "discordClientSecret", Label: "Client Secret", Group: "Discord", Type: module.FieldSecret, EnvVar: "OAUTH_DISCORD_CLIENT_SECRET"},
+		{Key: "discordRedirectURL", Label: "Redirect URL", Group: "Discord", Type: module.FieldString, EnvVar: "OAUTH_DISCORD_REDIRECT_URL"},
+	}
+}
+
 func (m *AuthModule) Collections() []module.CollectionSpec {
 	return []module.CollectionSpec{
 		{Name: models.OAuthProvidersCollection, Indexes: []module.IndexSpec{
@@ -90,48 +126,19 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 	authSessionRepo := repository.NewAuthSessionRepository(deps.DB)
 	emailTokenRepo := repository.NewEmailTokenRepository(deps.DB)
 
-	// OAuth provider factory
-	providerConfigs := map[models.OAuthProvider]*services.OAuthProviderConfig{
-		models.OAuthProviderGoogle: {
-			ClientID:     cfg.Auth.Google.ClientID,
-			ClientSecret: cfg.Auth.Google.ClientSecret,
-			Scopes:       []string{"openid", "email", "profile"},
-			AdditionalConfig: map[string]string{
-				"android_client_id": cfg.Auth.Google.AndroidClientID,
-				"ios_client_id":     cfg.Auth.Google.IOSClientID,
-			},
-		},
-		models.OAuthProviderApple: {
-			ClientID:     cfg.Auth.Apple.ClientID,
-			ClientSecret: "",
-			Scopes:       []string{"name", "email"},
-			AdditionalConfig: map[string]string{
-				"team_id":          cfg.Auth.Apple.TeamID,
-				"key_id":           cfg.Auth.Apple.KeyID,
-				"private_key":      cfg.Auth.Apple.PrivateKey,
-				"private_key_path": cfg.Auth.Apple.PrivateKeyPath,
-				"redirect_url":     cfg.Auth.Apple.RedirectURL,
-			},
-		},
-		models.OAuthProviderGitHub: {
-			ClientID:     cfg.Auth.GitHub.ClientID,
-			ClientSecret: cfg.Auth.GitHub.ClientSecret,
-			Scopes:       []string{"user:email", "read:user"},
-			AdditionalConfig: map[string]string{
-				"redirect_url": cfg.Auth.GitHub.RedirectURL,
-			},
-		},
-		models.OAuthProviderDiscord: {
-			ClientID:     cfg.Auth.Discord.ClientID,
-			ClientSecret: cfg.Auth.Discord.ClientSecret,
-			Scopes:       []string{"identify", "email"},
-			AdditionalConfig: map[string]string{
-				"redirect_url": cfg.Auth.Discord.RedirectURL,
-			},
-		},
-	}
-
-	providerFactory := services.NewOAuthProviderFactory(providerConfigs, deps.RedisAdapter)
+	// OAuth provider factory + live config resolver.
+	//
+	// Provider configs live in the module_configs document and are resolved
+	// per-request by OAuthConfigResolver — seeded on first boot from the
+	// OAUTH_* env vars declared in ConfigSchema(), then owned by the admin
+	// UI at /admin/modules. The factory itself holds an empty map; each
+	// handler call passes a freshly resolved config through CreateProvider's
+	// override parameter so secret rotations take effect without a restart.
+	providerFactory := services.NewOAuthProviderFactory(
+		map[models.OAuthProvider]*services.OAuthProviderConfig{},
+		deps.RedisAdapter,
+	)
+	oauthResolver := services.NewOAuthConfigResolver(deps.ConfigService)
 
 	// JWT service. The tenant provider is wired in so that token issuance
 	// can embed the user's current memberships in the JWT.
@@ -163,6 +170,7 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 	m.authHandler = handlers.NewAuthHandler(
 		authService,
 		providerFactory,
+		oauthResolver,
 		oauthStateService,
 		oauthProviderRepo,
 		jwtService,

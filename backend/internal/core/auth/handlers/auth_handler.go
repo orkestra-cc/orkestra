@@ -25,6 +25,7 @@ import (
 type AuthHandler struct {
 	authService       services.AuthService
 	oauthFactory      services.OAuthProviderFactory
+	oauthResolver     *services.OAuthConfigResolver
 	oauthStateService services.OAuthStateService
 	oauthProviderRepo repository.OAuthProviderRepository
 	jwtService        services.JWTService
@@ -35,6 +36,7 @@ type AuthHandler struct {
 func NewAuthHandler(
 	authService services.AuthService,
 	oauthFactory services.OAuthProviderFactory,
+	oauthResolver *services.OAuthConfigResolver,
 	oauthStateService services.OAuthStateService,
 	oauthProviderRepo repository.OAuthProviderRepository,
 	jwtService services.JWTService,
@@ -43,11 +45,53 @@ func NewAuthHandler(
 	return &AuthHandler{
 		authService:       authService,
 		oauthFactory:      oauthFactory,
+		oauthResolver:     oauthResolver,
 		oauthStateService: oauthStateService,
 		oauthProviderRepo: oauthProviderRepo,
 		jwtService:        jwtService,
 		config:            config,
 	}
+}
+
+// resolveProvider fetches the current config for an OAuth provider from the
+// resolver and constructs a provider instance. Returns a 400 equivalent error
+// when the provider is not configured in the admin panel.
+func (h *AuthHandler) resolveProvider(ctx context.Context, p models.OAuthProvider) (services.OAuthProviderInterface, *services.OAuthProviderConfig, error) {
+	cfg, ok := h.oauthResolver.Get(ctx, p)
+	if !ok {
+		return nil, nil, fmt.Errorf("oauth provider %q is not configured", p)
+	}
+	provider, err := h.oauthFactory.CreateProvider(p, cfg)
+	if err != nil {
+		return nil, nil, err
+	}
+	return provider, cfg, nil
+}
+
+// ListOAuthProvidersRequest is the empty input for the providers endpoint —
+// declared as a struct so Huma generates the correct zero-arg operation.
+type ListOAuthProvidersRequest struct{}
+
+// ListOAuthProvidersResponse returns only providers that currently have a
+// client ID configured. The login UI uses this to decide which social
+// buttons to render; never lists a provider the backend can't actually serve.
+type ListOAuthProvidersResponse struct {
+	Body struct {
+		Providers []string `json:"providers" doc:"Provider names that are fully configured and ready to accept logins"`
+	}
+}
+
+// ListOAuthProviders returns the set of OAuth providers configured in the
+// admin panel. Public endpoint — no auth required — because it's used by
+// the unauthenticated login screen.
+func (h *AuthHandler) ListOAuthProviders(ctx context.Context, _ *ListOAuthProvidersRequest) (*ListOAuthProvidersResponse, error) {
+	configured := h.oauthResolver.ConfiguredProviders(ctx)
+	resp := &ListOAuthProvidersResponse{}
+	resp.Body.Providers = make([]string, 0, len(configured))
+	for _, p := range configured {
+		resp.Body.Providers = append(resp.Body.Providers, string(p))
+	}
+	return resp, nil
 }
 
 // OAuth Login Request
@@ -114,26 +158,16 @@ func (h *AuthHandler) InitiateOAuthLogin(ctx context.Context, req *OAuthLoginReq
 		return nil, huma.Error400BadRequest("Failed to create OAuth state", err)
 	}
 
-	// Create OAuth provider
-	provider, err := h.oauthFactory.CreateProvider(req.Body.Provider, nil)
+	// Create OAuth provider from live admin-panel config.
+	provider, _, err := h.resolveProvider(ctx, req.Body.Provider)
 	if err != nil {
 		logger.Error("Failed to create OAuth provider", slog.String("error", err.Error()))
-		return nil, huma.Error400BadRequest("Invalid OAuth provider", err)
+		return nil, huma.Error400BadRequest("OAuth provider not configured", err)
 	}
 
-	// Get auth URL - use configured callback URL for OAuth provider
-	var backendCallbackURL string
-	switch req.Body.Provider {
-	case models.OAuthProviderGoogle:
-		backendCallbackURL = h.config.Auth.Google.RedirectURL
-	case models.OAuthProviderApple:
-		backendCallbackURL = h.config.Auth.Apple.RedirectURL
-	case models.OAuthProviderDiscord:
-		backendCallbackURL = h.config.Auth.Discord.RedirectURL
-	case models.OAuthProviderGitHub:
-		backendCallbackURL = h.config.Auth.GitHub.RedirectURL
-	default:
-		return nil, huma.Error400BadRequest("Unsupported OAuth provider", nil)
+	backendCallbackURL := h.oauthResolver.RedirectURL(ctx, req.Body.Provider)
+	if backendCallbackURL == "" {
+		return nil, huma.Error400BadRequest("OAuth provider redirect URL not configured", nil)
 	}
 
 	authURL := provider.GetAuthURL(stateInfo.State, "", backendCallbackURL)
@@ -257,16 +291,16 @@ func (h *AuthHandler) HandleGoogleCallbackHTTP(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	// Create Google OAuth provider
-	provider, err := h.oauthFactory.CreateProvider(models.OAuthProviderGoogle, nil)
+	// Create Google OAuth provider from live admin-panel config.
+	provider, _, err := h.resolveProvider(ctx, models.OAuthProviderGoogle)
 	if err != nil {
 		logger.Error("Failed to create OAuth provider", slog.String("error", err.Error()))
-		http.Error(w, "Failed to get OAuth provider", http.StatusInternalServerError)
+		http.Error(w, "Google OAuth not configured", http.StatusInternalServerError)
 		return
 	}
 
 	// Exchange code for tokens
-	backendCallbackURL := h.config.Auth.Google.RedirectURL
+	backendCallbackURL := h.oauthResolver.RedirectURL(ctx, models.OAuthProviderGoogle)
 
 	tokenResp, err := provider.ExchangeCodeForToken(ctx, &services.CodeExchangeRequest{
 		Code:        code,
@@ -352,15 +386,15 @@ func (h *AuthHandler) HandleDiscordCallbackHTTP(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	// Create Discord OAuth provider
-	provider, err := h.oauthFactory.CreateProvider(models.OAuthProviderDiscord, nil)
+	// Create Discord OAuth provider from live admin-panel config.
+	provider, _, err := h.resolveProvider(ctx, models.OAuthProviderDiscord)
 	if err != nil {
-		http.Error(w, "Failed to get OAuth provider", http.StatusInternalServerError)
+		http.Error(w, "Discord OAuth not configured", http.StatusInternalServerError)
 		return
 	}
 
 	// Exchange code for tokens
-	backendCallbackURL := h.config.Auth.Discord.RedirectURL
+	backendCallbackURL := h.oauthResolver.RedirectURL(ctx, models.OAuthProviderDiscord)
 	tokenResponse, err := provider.ExchangeCodeForToken(ctx, &services.CodeExchangeRequest{
 		Code:        code,
 		RedirectURI: backendCallbackURL,
@@ -494,17 +528,17 @@ func (h *AuthHandler) HandleAppleCallbackHTTP(w http.ResponseWriter, r *http.Req
 		utils.AuthDebug("OAuth state validated - Provider: %s", stateInfo.Provider)
 	}
 
-	// Create Apple OAuth provider
+	// Create Apple OAuth provider from live admin-panel config.
 	utils.AuthDebug("Creating Apple OAuth provider")
-	provider, err := h.oauthFactory.CreateProvider(models.OAuthProviderApple, nil)
+	provider, _, err := h.resolveProvider(ctx, models.OAuthProviderApple)
 	if err != nil {
 		utils.AuthDebugError("create_provider", err)
-		http.Error(w, "Failed to get OAuth provider", http.StatusInternalServerError)
+		http.Error(w, "Apple OAuth not configured", http.StatusInternalServerError)
 		return
 	}
 
 	// Exchange code for tokens
-	backendCallbackURL := h.config.Auth.Apple.RedirectURL
+	backendCallbackURL := h.oauthResolver.RedirectURL(ctx, models.OAuthProviderApple)
 	utils.AuthDebug("Exchanging code for tokens")
 
 	tokenResp, err := provider.ExchangeCodeForToken(ctx, &services.CodeExchangeRequest{
@@ -589,13 +623,13 @@ func (h *AuthHandler) HandleAppleCallback(ctx context.Context, req *OAuthCallbac
 		return nil, huma.Error400BadRequest("Invalid OAuth state", err)
 	}
 
-	provider, err := h.oauthFactory.CreateProvider(models.OAuthProviderApple, nil)
+	provider, _, err := h.resolveProvider(ctx, models.OAuthProviderApple)
 	if err != nil {
-		return nil, huma.Error500InternalServerError("Failed to get OAuth provider", err)
+		return nil, huma.Error500InternalServerError("Apple OAuth not configured", err)
 	}
 
 	// Exchange code for tokens - must use same redirect URI as initial auth request
-	backendCallbackURL := h.config.Auth.Apple.RedirectURL
+	backendCallbackURL := h.oauthResolver.RedirectURL(ctx, models.OAuthProviderApple)
 	tokenResp, err := provider.ExchangeCodeForToken(ctx, &services.CodeExchangeRequest{
 		Code:        req.Code,
 		RedirectURI: backendCallbackURL,
@@ -717,13 +751,13 @@ func (h *AuthHandler) HandleGitHubCallback(ctx context.Context, req *OAuthCallba
 		return nil, huma.Error400BadRequest("Invalid OAuth state", err)
 	}
 
-	provider, err := h.oauthFactory.CreateProvider(models.OAuthProviderGitHub, nil)
+	provider, _, err := h.resolveProvider(ctx, models.OAuthProviderGitHub)
 	if err != nil {
-		return nil, huma.Error500InternalServerError("Failed to get OAuth provider", err)
+		return nil, huma.Error500InternalServerError("GitHub OAuth not configured", err)
 	}
 
 	// Exchange code for tokens - must use same redirect URI as initial auth request
-	backendCallbackURL := h.config.Auth.GitHub.RedirectURL
+	backendCallbackURL := h.oauthResolver.RedirectURL(ctx, models.OAuthProviderGitHub)
 	tokenResp, err := provider.ExchangeCodeForToken(ctx, &services.CodeExchangeRequest{
 		Code:        req.Code,
 		RedirectURI: backendCallbackURL,
@@ -1044,18 +1078,20 @@ func (h *AuthHandler) HandleMobileGoogleAuth(ctx context.Context, req *MobileGoo
 		Timestamp: time.Now(),
 	}
 
-	// Get Google OAuth provider
-	provider, err := h.oauthFactory.CreateProvider(models.OAuthProviderGoogle, nil)
+	// Get Google OAuth provider from live admin-panel config.
+	provider, _, err := h.resolveProvider(ctx, models.OAuthProviderGoogle)
 	if err != nil {
 		logger.Error("Failed to create Google OAuth provider", slog.String("error", err.Error()))
-		return nil, huma.Error500InternalServerError("Failed to initialize authentication provider", err)
+		return nil, huma.Error500InternalServerError("Google OAuth not configured", err)
 	}
 
-	// Validate ID token and get user info
+	// Validate ID token and get user info. The audience is the platform-specific
+	// client ID registered in Google Console for the mobile app.
+	audience := h.oauthResolver.MobileAudience(ctx, models.OAuthProviderGoogle, "android")
 	validationRequest := &services.IDTokenValidationRequest{
 		IDToken:     req.Body.IDToken,
 		AccessToken: req.Body.AccessToken,
-		Audience:    h.config.Auth.Google.AndroidClientID, // Use Android client ID from environment
+		Audience:    audience,
 	}
 
 	userInfo, err := provider.ValidateIDToken(ctx, validationRequest)
@@ -1149,23 +1185,20 @@ func (h *AuthHandler) HandleMobileAppleAuth(ctx context.Context, req *MobileAppl
 		Timestamp: time.Now(),
 	}
 
-	// Get Apple OAuth provider
-	provider, err := h.oauthFactory.CreateProvider(models.OAuthProviderApple, nil)
+	// Get Apple OAuth provider from live admin-panel config.
+	provider, _, err := h.resolveProvider(ctx, models.OAuthProviderApple)
 	if err != nil {
 		logger.Error("Failed to create Apple OAuth provider", slog.String("error", err.Error()))
-		return nil, huma.Error500InternalServerError("Failed to initialize authentication provider", err)
+		return nil, huma.Error500InternalServerError("Apple OAuth not configured", err)
 	}
 
-	// Determine audience based on platform
-	var audience string
-	if deviceInfo != nil && deviceInfo.Platform == "ios" {
-		audience = h.config.Auth.Apple.IOSClientID
-	} else if deviceInfo != nil && deviceInfo.Platform == "android" {
-		audience = h.config.Auth.Apple.AndroidClientID
-	} else {
-		// Fallback to general client ID if platform is not specified
-		audience = h.config.Auth.Apple.ClientID
+	// Determine audience based on platform — falls back to the web client ID
+	// when the device platform is unknown or the platform-specific ID isn't set.
+	var platform string
+	if deviceInfo != nil {
+		platform = deviceInfo.Platform
 	}
+	audience := h.oauthResolver.MobileAudience(ctx, models.OAuthProviderApple, platform)
 
 	// Validate ID token and get user info
 	validationRequest := &services.IDTokenValidationRequest{
@@ -1524,6 +1557,17 @@ func (h *AuthHandler) GetCurrentUser(ctx context.Context, _ *struct{}) (*GetCurr
 
 // RegisterRoutes registers all auth routes with the Huma API and Chi router
 func (h *AuthHandler) RegisterRoutes(publicAPI huma.API, protectedAPI huma.API, router chi.Router, protectedRouter chi.Router) {
+	// List configured OAuth providers — used by the login UI to decide
+	// which social buttons to render. Public on purpose.
+	huma.Register(publicAPI, huma.Operation{
+		OperationID: "list-oauth-providers",
+		Method:      http.MethodGet,
+		Path:        "/v1/auth/providers",
+		Summary:     "List configured OAuth providers",
+		Description: "Returns the set of OAuth providers that currently have a client ID configured in the admin panel.",
+		Tags:        []string{"Authentication"},
+	}, h.ListOAuthProviders)
+
 	// OAuth login initiation
 	huma.Register(publicAPI, huma.Operation{
 		OperationID: "initiate-oauth-login",

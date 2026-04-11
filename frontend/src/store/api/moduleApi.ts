@@ -5,6 +5,7 @@ import { baseApi } from './baseApi';
 export interface ConfigField {
   key: string;
   label: string;
+  group?: string;
   description: string;
   type: 'string' | 'bool' | 'int' | 'duration' | 'secret';
   required: boolean;

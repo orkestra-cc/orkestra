@@ -30,6 +30,7 @@ const (
 type ConfigField struct {
 	Key         string          `json:"key" bson:"key"`
 	Label       string          `json:"label" bson:"label"`
+	Group       string          `json:"group,omitempty" bson:"group,omitempty"` // optional presentation group — the admin modal renders tabs when a schema has >=2 distinct groups
 	Description string          `json:"description,omitempty" bson:"description,omitempty"`
 	Type        ConfigFieldType `json:"type" bson:"type"`
 	Required    bool            `json:"required" bson:"required"`

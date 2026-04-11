@@ -23,6 +23,7 @@ Does not own user profile data (delegates to `iface.UserProvider`), org membersh
 | `services/password_service.go` | Argon2id hashing + policy validation |
 | `services/jwt_service.go` | RS256 JWT signing, validation, membership embedding |
 | `services/oauth_provider_factory.go` | Factory for Google / Apple / Discord / GitHub providers |
+| `services/oauth_config_resolver.go` | Reads live provider configs from `ModuleConfigService` on every OAuth request |
 | `services/oauth_state_service.go` | Redis-backed OAuth state/nonce with 10-minute TTL |
 | `services/risk_assessment_service.go` | Device-fingerprint + IP risk scoring |
 | `repository/auth_repository.go` | Legacy shared repository, mainly for account/link lookups |
@@ -57,17 +58,18 @@ Only email tokens currently have a TTL — refresh tokens and sessions are rotat
 
 ## Lifecycle
 
-`Init` (`module.go:76-210`) is where every moving part gets wired:
+`Init` is where every moving part gets wired:
 
 1. **Repositories**: auth, OAuth provider, refresh token, auth session, email token.
-2. **OAuth provider factory**: reads `cfg.Auth.{Google,Apple,GitHub,Discord}` and builds a per-provider config. Apple can load its private key either inline (`AUTH_APPLE_PRIVATE_KEY`) or from a file path (`AUTH_APPLE_PRIVATE_KEY_PATH`).
-3. **JWT service**: loaded with the `AUTH_JWT_PRIVATE_KEY` / `AUTH_JWT_PUBLIC_KEY` pair, then has `SetTenantProvider(...)` called on it so every future `GenerateAccessToken` embeds the caller's current org memberships.
-4. **OAuth state service**: Redis-backed state/nonce store, 10-minute TTL.
-5. **Auth service**: the orchestrator for OAuth flows.
-6. **Password service**: argon2id hasher with HIBP policy validation (`services/password_service.go`).
-7. **Password auth service**: register/login/verify/reset/change flows, wired to the optional notification sender and a shared `RateLimiter`.
-8. **Handlers**: OAuth and password handlers, both given access to the cookie config (`cfg.Auth.Cookie.Name`, `Domain`, `Secure`).
-9. **Register services** under `ServiceAuthService`, `ServiceJWTService`, `ServicePasswordService`, `ServicePasswordAuthService`.
+2. **OAuth provider factory**: constructed with an **empty** config map. Provider configs are resolved per-request by `OAuthConfigResolver` from the live `module_configs` document, then passed to `factory.CreateProvider(p, cfg)` through the override parameter. No provider state is pinned at boot — rotating a secret at `/admin/modules` takes effect on the next OAuth request.
+3. **OAuth config resolver**: `NewOAuthConfigResolver(deps.ConfigService)`. Reads are served by `ModuleConfigService` (30s Redis cache in front of Mongo), so per-request resolution is sub-millisecond.
+4. **JWT service**: loaded with the `AUTH_JWT_PRIVATE_KEY` / `AUTH_JWT_PUBLIC_KEY` pair, then has `SetTenantProvider(...)` called on it so every future `GenerateAccessToken` embeds the caller's current org memberships.
+5. **OAuth state service**: Redis-backed state/nonce store, 10-minute TTL.
+6. **Auth service**: the orchestrator for OAuth flows.
+7. **Password service**: argon2id hasher with HIBP policy validation (`services/password_service.go`).
+8. **Password auth service**: register/login/verify/reset/change flows, wired to the optional notification sender and a shared `RateLimiter`.
+9. **Handlers**: OAuth and password handlers, both given access to the cookie config (`cfg.Auth.Cookie.Name`, `Domain`, `Secure`).
+10. **Register services** under `ServiceAuthService`, `ServiceJWTService`, `ServicePasswordService`, `ServicePasswordAuthService`.
 
 `Start / Stop / HealthCheck` inherit from `BaseModule`.
 
@@ -75,21 +77,47 @@ No seeding — there are no default accounts or default tokens. The first user i
 
 ## Runtime configuration
 
-Config today lives in env vars via `cfg *config.Config`, not in `ConfigSchema`. This module does not expose a `/admin/modules` config surface. Relevant env vars:
+OAuth provider settings are admin-managed through `ConfigSchema()` — stored in `module_configs`, cached in Redis for 30s, secrets encrypted at rest with AES-256-GCM, editable at `/admin/modules`. Env vars are the **seed source** only: on first boot the registry populates the document from the `EnvVar` field on each schema entry, and after that the document is authoritative. Non-OAuth settings (JWT keys, cookies, feature toggles) still live in `cfg *config.Config` because they're process-scoped and must not rotate at runtime.
+
+### Admin-managed (ConfigSchema, per-provider)
+
+Schema keys below are what handlers and the resolver look up. The `EnvVar` column is the one-time seed source — once the document exists, editing the env var has no effect without a wipe.
+
+| Provider | Key | Type | Seed env var |
+|---|---|---|---|
+| Google | `googleClientId` | string | `OAUTH_GOOGLE_CLIENT_ID` |
+| Google | `googleClientSecret` | secret | `OAUTH_GOOGLE_CLIENT_SECRET` |
+| Google | `googleRedirectURL` | string | `OAUTH_GOOGLE_REDIRECT_URL` |
+| Google | `googleAndroidClientId` | string | `OAUTH_GOOGLE_ANDROID_CLIENT_ID` |
+| Google | `googleIOSClientId` | string | `OAUTH_GOOGLE_IOS_CLIENT_ID` |
+| Apple | `appleClientId` | string | `OAUTH_APPLE_CLIENT_ID` |
+| Apple | `appleTeamId` / `appleKeyId` | string | `OAUTH_APPLE_TEAM_ID` / `OAUTH_APPLE_KEY_ID` |
+| Apple | `applePrivateKey` | secret | `OAUTH_APPLE_PRIVATE_KEY` (inline PEM) |
+| Apple | `applePrivateKeyPath` | string | `OAUTH_APPLE_PRIVATE_KEY_PATH` (file fallback) |
+| Apple | `appleRedirectURL` | string | `OAUTH_APPLE_REDIRECT_URL` |
+| Apple | `appleIOSClientId` / `appleAndroidClientId` | string | `OAUTH_APPLE_IOS_CLIENT_ID` / `OAUTH_APPLE_ANDROID_CLIENT_ID` |
+| GitHub | `githubClientId` / `githubClientSecret` / `githubRedirectURL` | string / secret / string | `OAUTH_GITHUB_*` |
+| Discord | `discordClientId` / `discordClientSecret` / `discordRedirectURL` | string / secret / string | `OAUTH_DISCORD_*` |
+
+### Process-scoped (env vars only)
 
 | Env var | Purpose | Default |
 |---|---|---|
 | `AUTH_JWT_PRIVATE_KEY` / `AUTH_JWT_PUBLIC_KEY` | RS256 key pair (paths or PEM) | — (required) |
 | `AUTH_REQUIRE_EMAIL_VERIFICATION` | Gate signup on successful verification | `true` in prod, `false` otherwise |
-| `AUTH_GOOGLE_CLIENT_ID` / `SECRET` | Google Web OAuth | — |
-| `AUTH_GOOGLE_ANDROID_CLIENT_ID` / `AUTH_GOOGLE_IOS_CLIENT_ID` | Mobile native Google sign-in | — |
-| `AUTH_APPLE_CLIENT_ID` / `TEAM_ID` / `KEY_ID` | Apple Sign-In | — |
-| `AUTH_APPLE_PRIVATE_KEY` / `AUTH_APPLE_PRIVATE_KEY_PATH` | `.p8` key, inline PEM or file path | — |
-| `AUTH_APPLE_REDIRECT_URL` | Apple OAuth callback | — |
-| `AUTH_GITHUB_CLIENT_ID` / `SECRET` / `REDIRECT_URL` | GitHub OAuth | — |
-| `AUTH_DISCORD_CLIENT_ID` / `SECRET` / `REDIRECT_URL` | Discord OAuth | — |
 | `COOKIE_NAME` / `COOKIE_DOMAIN` / `COOKIE_SECURE` | Refresh-token cookie attributes | set in `cfg.Auth.Cookie` |
 | `APP_NAME` / `SUPPORT_EMAIL` | Rendered into verification/reset email templates | `Orkestra` / empty |
+
+### Resolver API
+
+`OAuthConfigResolver` is the single entry point handlers use to read OAuth settings. Never read `cfg.Auth.Google/Apple/GitHub/Discord` directly — those fields are still populated from env vars for the Load path but are effectively dead code for the OAuth handlers.
+
+| Method | Returns |
+|---|---|
+| `Get(ctx, provider)` | `(*OAuthProviderConfig, bool)` — builds the full config for `factory.CreateProvider(p, cfg)`; `false` means client ID is empty |
+| `RedirectURL(ctx, provider)` | Web callback URL, or `""` |
+| `MobileAudience(ctx, provider, platform)` | Platform-specific client ID for mobile ID-token validation; falls back to the web client ID when `platform` is unknown |
+| `ConfiguredProviders(ctx)` | List of provider names that currently have a client ID — served by `GET /v1/auth/providers` to the login UI |
 
 ## HTTP endpoints
 
@@ -99,6 +127,7 @@ Registered from two handlers — `auth_handler.go` for OAuth/session/refresh, `p
 
 | Method | Path | Purpose |
 |---|---|---|
+| GET | `/v1/auth/providers` | List OAuth providers currently configured in the admin panel (login UI uses this to decide which buttons to render) |
 | POST | `/v1/auth/oauth/login` | Start an OAuth flow, return the provider URL + state token |
 | POST | `/v1/auth/google/mobile` | Exchange a Google ID token from a mobile app for an Orkestra session |
 | POST | `/v1/auth/apple/mobile` | Exchange an Apple ID token from a mobile app for an Orkestra session |
@@ -163,7 +192,8 @@ Everything else (`services.AuthService`, `services.JWTService`, `services.Passwo
 - **Never call `notification.EmailSender.Send` directly.** Every auth-triggered email must go through `SendTemplated` with a `TemplateID` that exists in `notification/services/default_templates.go`.
 - **Never read `cfg.Auth.JWT.PrivateKey` outside the JWT service.** Key material stays inside one package.
 - **Never bypass the rate limiter on login / forgot-password endpoints.** The limiter is the only protection against credential stuffing and reset-flood.
-- **When you add a new OAuth provider**, wire it through the factory in `module.go:94-132`, not directly in the handler. Factory patterns mean the callback handler stays generic.
+- **When you add a new OAuth provider**, add its fields to `ConfigSchema()`, extend the switch in `oauth_config_resolver.go`, and wire the factory case in `services/oauth_provider_factory.go`. Never hardcode provider config inside a handler — everything flows through the resolver so admin edits are live.
+- **Never read `cfg.Auth.{Google,Apple,GitHub,Discord}` from handlers.** Those struct fields still load from env vars for backward compatibility, but OAuth config is owned by the resolver. Handlers must call `h.oauthResolver.Get/RedirectURL/MobileAudience` so the admin panel stays authoritative.
 - **Every new auth-adjacent collection needs a deliberate TTL decision.** Email tokens have TTLs because they're user-initiated. Sessions do not because they're invalidated explicitly. Don't copy-paste one into the other.
 
 ## Related

@@ -1,9 +1,38 @@
-import { useState } from 'react';
-import { Alert, Button, Form, Modal, Spinner } from 'react-bootstrap';
+import { useMemo, useState } from 'react';
+import { Alert, Button, Form, Modal, Spinner, Tab, Tabs } from 'react-bootstrap';
 import { FalconCloseButton } from 'components/common';
-import type { ModuleConfig } from 'store/api/moduleApi';
+import type { ConfigField, ModuleConfig } from 'store/api/moduleApi';
 import { useUpdateModuleMutation } from 'store/api/moduleApi';
 import ModuleConfigFields from './ModuleConfigFields';
+
+// Bucket a schema into ordered groups. Preserves declaration order of both
+// groups (first field of each group sets the tab order) and keys within each
+// group. Fields with an empty `group` land in a trailing "General" bucket so
+// modules can mix grouped and ungrouped fields without losing either.
+const bucketByGroup = (
+  schema: ConfigField[]
+): { group: string; keys: string[] }[] => {
+  const order: string[] = [];
+  const buckets = new Map<string, string[]>();
+  for (const field of schema) {
+    const g = field.group || '';
+    if (!buckets.has(g)) {
+      buckets.set(g, []);
+      order.push(g);
+    }
+    buckets.get(g)!.push(field.key);
+  }
+  // Move the ungrouped bucket to the end and label it "General".
+  const result: { group: string; keys: string[] }[] = [];
+  for (const g of order) {
+    if (g === '') continue;
+    result.push({ group: g, keys: buckets.get(g)! });
+  }
+  if (buckets.has('')) {
+    result.push({ group: 'General', keys: buckets.get('')! });
+  }
+  return result;
+};
 
 interface ModuleConfigModalProps {
   module: ModuleConfig | null;
@@ -90,10 +119,16 @@ const ModuleConfigModal: React.FC<ModuleConfigModalProps> = ({
     }
   };
 
+  const schema = mod?.configSchema ?? [];
+  const groupBuckets = useMemo(() => bucketByGroup(schema), [schema]);
+  const showTabs = groupBuckets.length >= 2;
+  const [activeTab, setActiveTab] = useState<string>('');
+
   if (!mod) return null;
 
   const isCore = mod.category === 'core';
-  const hasSchema = mod.configSchema && mod.configSchema.length > 0;
+  const hasSchema = schema.length > 0;
+  const currentTab = activeTab || groupBuckets[0]?.group || '';
 
   return (
     <Modal show={show} onHide={onHide} onShow={handleShow} size="lg">
@@ -131,18 +166,47 @@ const ModuleConfigModal: React.FC<ModuleConfigModalProps> = ({
         {hasSchema && (
           <>
             <h6 className="fs-9 border-bottom pb-2 mb-3">Configuration</h6>
-            <ModuleConfigFields
-              schema={mod.configSchema}
-              configValues={configValues}
-              secretValues={secretValues}
-              secretStatus={mod.secretStatus}
-              onConfigChange={(key, value) =>
-                setConfigValues((prev) => ({ ...prev, [key]: value }))
-              }
-              onSecretChange={(key, value) =>
-                setSecretValues((prev) => ({ ...prev, [key]: value }))
-              }
-            />
+            {showTabs ? (
+              <Tabs
+                id={`module-config-tabs-${mod.moduleName}`}
+                activeKey={currentTab}
+                onSelect={(k) => setActiveTab(k || '')}
+                className="mb-3"
+              >
+                {groupBuckets.map(({ group, keys }) => (
+                  <Tab eventKey={group} title={group} key={group}>
+                    <div className="pt-3">
+                      <ModuleConfigFields
+                        schema={mod.configSchema}
+                        includeKeys={keys}
+                        configValues={configValues}
+                        secretValues={secretValues}
+                        secretStatus={mod.secretStatus}
+                        onConfigChange={(key, value) =>
+                          setConfigValues((prev) => ({ ...prev, [key]: value }))
+                        }
+                        onSecretChange={(key, value) =>
+                          setSecretValues((prev) => ({ ...prev, [key]: value }))
+                        }
+                      />
+                    </div>
+                  </Tab>
+                ))}
+              </Tabs>
+            ) : (
+              <ModuleConfigFields
+                schema={mod.configSchema}
+                configValues={configValues}
+                secretValues={secretValues}
+                secretStatus={mod.secretStatus}
+                onConfigChange={(key, value) =>
+                  setConfigValues((prev) => ({ ...prev, [key]: value }))
+                }
+                onSecretChange={(key, value) =>
+                  setSecretValues((prev) => ({ ...prev, [key]: value }))
+                }
+              />
+            )}
           </>
         )}
 

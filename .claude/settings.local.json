@@ -38,7 +38,8 @@
       "Bash(git check-ignore:*)",
       "Bash(docker restart:*)",
       "Read(//tmp/**)",
-      "Bash(./scripts/devtoken.sh super_admin --quiet)"
+      "Bash(./scripts/devtoken.sh super_admin --quiet)",
+      "Bash(docker port orkestra-frontend-dev:*)"
     ]
   },
   "enableAllProjectMcpServers": true,
