@@ -1,0 +1,33 @@
+run:
+  timeout: 5m
+  tests: false
+
+linters:
+  enable:
+    - gocritic
+    - gosec
+    - misspell
+    - prealloc
+    - nolintlint
+
+linters-settings:
+  gocritic:
+    enabled-tags:
+      - diagnostic
+      - style
+    disabled-checks:
+      - hugeParam # Huma request/response structs are large by design
+
+  gosec:
+    excludes:
+      - G104 # Unhandled errors in deferred calls — common Go pattern
+
+  nolintlint:
+    require-explanation: true
+    require-specific: true
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  exclude-dirs:
+    - vendor

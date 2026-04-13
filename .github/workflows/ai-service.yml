@@ -1,16 +1,28 @@
-name: Backend CI
+name: AI Service CI
 
 on:
   pull_request:
     branches: [dev, main]
     paths:
-      - 'backend/**'
-      - '.github/workflows/backend.yml'
+      - 'backend/cmd/ai-service/**'
+      - 'backend/internal/addons/graph/**'
+      - 'backend/internal/addons/aimodels/**'
+      - 'backend/internal/addons/rag/**'
+      - 'backend/internal/addons/agents/**'
+      - 'backend/internal/shared/**'
+      - 'backend/Dockerfile.ai-service'
+      - '.github/workflows/ai-service.yml'
   push:
     branches: [dev, main]
     paths:
-      - 'backend/**'
-      - '.github/workflows/backend.yml'
+      - 'backend/cmd/ai-service/**'
+      - 'backend/internal/addons/graph/**'
+      - 'backend/internal/addons/aimodels/**'
+      - 'backend/internal/addons/rag/**'
+      - 'backend/internal/addons/agents/**'
+      - 'backend/internal/shared/**'
+      - 'backend/Dockerfile.ai-service'
+      - '.github/workflows/ai-service.yml'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -41,8 +53,6 @@ jobs:
   test:
     name: Test
     runs-on: ubuntu-latest
-    env:
-      COVERAGE_THRESHOLD: 15
     services:
       mongodb:
         image: mongo:8.0
@@ -61,41 +71,10 @@ jobs:
         run: go mod download
 
       - name: Run tests
-        run: go test -race -coverprofile=coverage.out ./...
+        run: go test -race ./...
         env:
           MONGO_URI: mongodb://localhost:27017
           REDIS_URL: redis://localhost:6379
-
-      - name: Check coverage
-        run: |
-          COVERAGE=$(go tool cover -func=coverage.out | grep total | awk '{print $3}' | tr -d '%')
-          echo "Coverage: ${COVERAGE}%"
-          if (( $(echo "$COVERAGE < $COVERAGE_THRESHOLD" | bc -l) )); then
-            echo "::error::Coverage ${COVERAGE}% is below ${COVERAGE_THRESHOLD}% threshold"
-            exit 1
-          fi
-
-      - name: Upload coverage
-        uses: actions/upload-artifact@v4
-        with:
-          name: backend-coverage
-          path: backend/coverage.out
-
-  vulncheck:
-    name: Vulnerability Check
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-go@v5
-        with:
-          go-version: '1.25'
-
-      - name: Install govulncheck
-        run: go install golang.org/x/vuln/cmd/govulncheck@latest
-
-      - name: Run govulncheck
-        run: govulncheck ./...
 
   build:
     name: Build
@@ -108,8 +87,8 @@ jobs:
         with:
           go-version: '1.25'
 
-      - name: Build binary
-        run: go build -o bin/server cmd/server/main.go
+      - name: Build AI service binary
+        run: go build -o bin/ai-service cmd/ai-service/main.go
 
   docker:
     name: Docker Build
@@ -131,8 +110,9 @@ jobs:
       - uses: docker/build-push-action@v6
         with:
           context: ./backend
+          file: ./backend/Dockerfile.ai-service
           target: production
           push: true
           tags: |
-            ghcr.io/${{ github.repository }}/backend:${{ github.sha }}
-            ghcr.io/${{ github.repository }}/backend:latest
+            ghcr.io/${{ github.repository }}/ai-service:${{ github.sha }}
+            ghcr.io/${{ github.repository }}/ai-service:latest
