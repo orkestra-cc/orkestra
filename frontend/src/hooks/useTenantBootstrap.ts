@@ -27,21 +27,31 @@ import {
  *   3. GET /v1/orgs/{currentOrgId}/authz/me → dispatch setEffectivePermissions
  *   4. GET /v1/orgs/{currentOrgId} → dispatch setFeatures
  */
+const STORAGE_KEY = 'orkestra.currentOrgId';
+
 export function useTenantBootstrap() {
   const dispatch = useAppDispatch();
   const isAuthenticated = useAppSelector(selectIsAuthenticated);
   const currentOrgId = useAppSelector(selectCurrentOrgId);
 
+  // Use stored orgId as an optimistic hint so we can fire all three
+  // queries in parallel instead of waiting for memberships to resolve
+  // before fetching permissions and org details.
+  const storedOrgId = typeof window !== 'undefined'
+    ? window.localStorage.getItem(STORAGE_KEY)
+    : null;
+  const optimisticOrgId = currentOrgId || storedOrgId;
+
   const { data: membershipsData } = useListMyOrgsQuery(undefined, {
     skip: !isAuthenticated
   });
 
-  const { data: effective } = useGetEffectivePermissionsQuery(currentOrgId as string, {
-    skip: !isAuthenticated || !currentOrgId
+  const { data: effective } = useGetEffectivePermissionsQuery(optimisticOrgId as string, {
+    skip: !isAuthenticated || !optimisticOrgId
   });
 
-  const { data: org } = useGetOrgQuery(currentOrgId as string, {
-    skip: !isAuthenticated || !currentOrgId
+  const { data: org } = useGetOrgQuery(optimisticOrgId as string, {
+    skip: !isAuthenticated || !optimisticOrgId
   });
 
   useEffect(() => {

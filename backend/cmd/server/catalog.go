@@ -1,7 +1,9 @@
 package main
 
 import (
+	"context"
 	"log/slog"
+	"time"
 
 	"github.com/orkestra/backend/internal/addons/agents"
 	"github.com/orkestra/backend/internal/addons/aimodels"
@@ -64,7 +66,7 @@ var optionalModules = map[string]func() module.Module{
 //
 // In both modes, dependencies declared by selected modules are auto-included.
 // Example: MODULES=billing auto-includes "documents" because billing depends on it.
-func selectOptionalModules(cfg *config.Config, logger *slog.Logger) map[string]bool {
+func selectOptionalModules(cfg *config.Config, logger *slog.Logger, configRepo *module.ModuleConfigRepository) map[string]bool {
 	selected := make(map[string]bool)
 
 	if len(cfg.Server.Modules) > 0 {
@@ -83,6 +85,27 @@ func selectOptionalModules(cfg *config.Config, logger *slog.Logger) map[string]b
 			m := factory()
 			if m.Enabled(cfg) {
 				selected[name] = true
+			}
+		}
+
+		// Also load modules that an admin enabled via the UI (stored in
+		// module_configs). This makes the admin toggle take effect after
+		// a backend restart without requiring env var changes.
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		dbEnabled, err := configRepo.FindEnabledAddonNames(ctx)
+		if err != nil {
+			logger.Warn("Failed to query DB-enabled modules, using env vars only",
+				slog.String("error", err.Error()),
+			)
+		} else {
+			for _, name := range dbEnabled {
+				if _, isOptional := optionalModules[name]; isOptional && !selected[name] {
+					selected[name] = true
+					logger.Info("Module enabled from admin config",
+						slog.String("module", name),
+					)
+				}
 			}
 		}
 	}

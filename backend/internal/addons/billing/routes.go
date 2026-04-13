@@ -382,7 +382,7 @@ func RegisterRoutes(
 	// Notification Routes
 	// ========================================
 	huma.Register(api, huma.Operation{
-		OperationID: "list-notifications",
+		OperationID: "list-sdi-notifications",
 		Method:      http.MethodGet,
 		Path:        "/v1/billing/notifications",
 		Summary:     "List SDI notifications",

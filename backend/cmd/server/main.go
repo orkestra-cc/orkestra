@@ -91,7 +91,7 @@ func main() {
 	}
 
 	// Optional modules — loaded from catalog based on config
-	selected := selectOptionalModules(cfg, logger)
+	selected := selectOptionalModules(cfg, logger, configRepo)
 
 	// AI service sidecar: register remote providers for AI modules
 	// that are not loaded locally

@@ -249,13 +249,27 @@ func (h *ModuleAdminHandler) toConfigResponse(c ModuleConfig) ModuleConfigRespon
 		DependsOn:    c.DependsOn,
 	}
 
-	// Derive runtime status from registry state
+	// Derive runtime status from registry state.
+	// Build a quick lookup of modules that are actually loaded in this process.
+	loadedModule := false
 	failedModules := h.registry.FailedModules()
+	for _, m := range h.registry.AllModules() {
+		if m.Name() == c.ModuleName {
+			loadedModule = true
+			break
+		}
+	}
+
 	if failErr, isFailed := failedModules[c.ModuleName]; isFailed {
 		resp.Status = "failed"
 		resp.Error = failErr.Error()
 	} else if !c.Enabled {
 		resp.Status = "disabled"
+	} else if !loadedModule && c.Category != CategoryCore {
+		// Module is enabled in DB but was not loaded at boot — admin toggled
+		// it via the UI and needs to restart the backend for it to take effect.
+		resp.Status = "pending_restart"
+		resp.NeedsRestart = true
 	} else {
 		resp.Status = "running"
 	}

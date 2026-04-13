@@ -39,7 +39,10 @@
       "Bash(docker restart:*)",
       "Read(//tmp/**)",
       "Bash(./scripts/devtoken.sh super_admin --quiet)",
-      "Bash(docker port orkestra-frontend-dev:*)"
+      "Bash(docker port orkestra-frontend-dev:*)",
+      "Bash(docker stop:*)",
+      "Bash(docker start:*)",
+      "Bash(ORKESTRA_API_URL=http://localhost:3007 ./scripts/devtoken.sh super_admin --quiet)"
     ]
   },
   "enableAllProjectMcpServers": true,
@@ -47,6 +50,21 @@
     "dart",
     "chrome-devtools"
   ],
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -r '.tool_response.filePath // .tool_input.file_path' | { read -r f; case \"$f\" in */backend/*.go) C=$(docker ps --filter name=orkestra-backend --filter name=backend --format '{{.Names}}' | head -1); [ -n \"$C\" ] && docker exec \"$C\" go build -o /app/tmp/main ./cmd/server/ && docker restart \"$C\" ;; esac; }",
+            "timeout": 120,
+            "statusMessage": "Rebuilding backend..."
+          }
+        ]
+      }
+    ]
+  },
   "enabledPlugins": {
     "greptile@claude-plugins-official": true,
     "claude-md-management@claude-plugins-official": true

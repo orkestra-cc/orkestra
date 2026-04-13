@@ -36,8 +36,8 @@ type GetNotificationResponse struct {
 	Body models.SDINotification `json:"notification" doc:"Notification details"`
 }
 
-// ListNotificationsRequest represents the request to list notifications
-type ListNotificationsRequest struct {
+// ListSDINotificationsRequest represents the request to list notifications
+type ListSDINotificationsRequest struct {
 	InvoiceUUID      string `query:"invoiceId" doc:"Filter by invoice UUID"`
 	NotificationType string `query:"type" enum:"RC,NS,MC,NE,DT,AT" doc:"Filter by notification type"`
 	Processed        string `query:"processed" enum:"true,false" doc:"Filter by processed status"`
@@ -47,8 +47,8 @@ type ListNotificationsRequest struct {
 	PageSize         int    `query:"pageSize" default:"20" minimum:"1" maximum:"100" doc:"Items per page"`
 }
 
-// ListNotificationsResponse represents the paginated list of notifications
-type ListNotificationsResponse struct {
+// ListSDINotificationsResponse represents the paginated list of notifications
+type ListSDINotificationsResponse struct {
 	Body struct {
 		Notifications []models.SDINotification `json:"notifications" doc:"List of notifications"`
 		Total         int64                    `json:"total" doc:"Total count"`
@@ -93,7 +93,7 @@ func (h *NotificationHandler) GetNotification(ctx context.Context, req *GetNotif
 }
 
 // ListNotifications lists notifications with filtering and pagination
-func (h *NotificationHandler) ListNotifications(ctx context.Context, req *ListNotificationsRequest) (*ListNotificationsResponse, error) {
+func (h *NotificationHandler) ListNotifications(ctx context.Context, req *ListSDINotificationsRequest) (*ListSDINotificationsResponse, error) {
 	filters := &models.NotificationFilters{
 		InvoiceUUID: req.InvoiceUUID,
 	}
@@ -137,7 +137,7 @@ func (h *NotificationHandler) ListNotifications(ctx context.Context, req *ListNo
 		totalPages++
 	}
 
-	resp := &ListNotificationsResponse{}
+	resp := &ListSDINotificationsResponse{}
 	resp.Body.Notifications = notifications
 	resp.Body.Total = total
 	resp.Body.Page = pagination.Page

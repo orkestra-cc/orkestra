@@ -97,12 +97,14 @@ func (r *ModuleConfigRepository) Upsert(ctx context.Context, config *ModuleConfi
 	return nil
 }
 
-// UpdateEnabled toggles a module's enabled state.
+// UpdateEnabled toggles a module's enabled state and marks the module as
+// needing a restart so the admin UI can signal that changes take effect
+// after the backend is restarted.
 func (r *ModuleConfigRepository) UpdateEnabled(ctx context.Context, name string, enabled bool) error {
 	_, err := r.collection.UpdateOne(
 		ctx,
 		bson.M{"moduleName": name},
-		bson.M{"$set": bson.M{"enabled": enabled, "updatedAt": time.Now()}},
+		bson.M{"$set": bson.M{"enabled": enabled, "needsRestart": true, "updatedAt": time.Now()}},
 	)
 	if err != nil {
 		return fmt.Errorf("update enabled for %q: %w", name, err)
@@ -125,6 +127,47 @@ func (r *ModuleConfigRepository) UpdateConfigValues(ctx context.Context, name st
 	)
 	if err != nil {
 		return fmt.Errorf("update config values for %q: %w", name, err)
+	}
+	return nil
+}
+
+// FindEnabledAddonNames returns the names of all non-core modules that have
+// enabled=true in the module_configs collection. Used by the boot path so
+// that modules enabled via the admin UI are loaded on next restart.
+func (r *ModuleConfigRepository) FindEnabledAddonNames(ctx context.Context) ([]string, error) {
+	cursor, err := r.collection.Find(ctx, bson.M{
+		"enabled":  true,
+		"category": bson.M{"$ne": string(CategoryCore)},
+	}, options.Find().SetProjection(bson.M{"moduleName": 1}))
+	if err != nil {
+		return nil, fmt.Errorf("find enabled addon names: %w", err)
+	}
+	defer cursor.Close(ctx)
+
+	var names []string
+	for cursor.Next(ctx) {
+		var doc struct {
+			ModuleName string `bson:"moduleName"`
+		}
+		if err := cursor.Decode(&doc); err != nil {
+			return nil, fmt.Errorf("decode enabled addon name: %w", err)
+		}
+		names = append(names, doc.ModuleName)
+	}
+	return names, cursor.Err()
+}
+
+// ClearNeedsRestart resets the needsRestart flag for a module. Called at boot
+// for every loaded module so the flag only remains set for modules that are
+// enabled in the DB but were not loaded in this process.
+func (r *ModuleConfigRepository) ClearNeedsRestart(ctx context.Context, name string) error {
+	_, err := r.collection.UpdateOne(
+		ctx,
+		bson.M{"moduleName": name},
+		bson.M{"$set": bson.M{"needsRestart": false, "updatedAt": time.Now()}},
+	)
+	if err != nil {
+		return fmt.Errorf("clear needsRestart for %q: %w", name, err)
 	}
 	return nil
 }

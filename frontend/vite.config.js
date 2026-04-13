@@ -115,6 +115,23 @@ export default ({ mode }) => {
       global: 'window'
     },
     server: {
+      // Pre-transform frequently visited pages on dev server start so the
+      // first navigation doesn't pay the WSL2 cold-transform penalty (~3-5s).
+      warmup: {
+        clientFiles: [
+          // Shared layout + navbar (every page depends on these)
+          './src/layouts/MainLayout.tsx',
+          './src/components/navbar/vertical/NavbarVertical.tsx',
+          // All production pages — pre-transform so first navigation is instant
+          './src/pages/**/index.tsx',
+          './src/pages/user/dashboard/UserDashboard.tsx',
+          './src/pages/user/settings/Settings.tsx',
+          './src/pages/user/calendar/UserCalendar.tsx',
+          './src/pages/operator/profile/OperatorProfile.tsx',
+          './src/pages/admin/user-profile/AdminUserProfile.tsx',
+          './src/pages/admin/settings/AdminSettings.tsx',
+        ]
+      },
       open: false,
       port: 5173,
       host: '0.0.0.0',

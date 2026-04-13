@@ -152,6 +152,14 @@ func (s *ModuleConfigService) SeedFromModules(ctx context.Context, modules []Mod
 					slog.String("error", err.Error()),
 				)
 			}
+			// Clear needsRestart for loaded modules — this flag should only
+			// remain set for modules that are enabled in DB but not loaded.
+			if err := s.repo.ClearNeedsRestart(ctx, m.Name()); err != nil {
+				s.logger.Error("SeedFromModules: failed to clear needsRestart",
+					slog.String("module", m.Name()),
+					slog.String("error", err.Error()),
+				)
+			}
 			continue
 		}
 
