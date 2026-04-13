@@ -54,7 +54,7 @@ func (m *DocumentsModule) Collections() []module.CollectionSpec {
 
 func (m *DocumentsModule) NavItems() []module.NavItemSpec {
 	return []module.NavItemSpec{
-		{Group: "Administration", Name: "Template Documenti", Icon: "file-alt", Path: "/admin/templates", Active: true},
+		{Group: "Administration", Name: "Template Documenti", Icon: "file-alt", Path: "/documents/templates", Active: true},
 	}
 }
 

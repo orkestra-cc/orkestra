@@ -4,7 +4,7 @@ import { useGetUserByIdQuery } from 'store/api/userApi';
 import AdminBanner from './AdminBanner';
 import AdminProfileIntro from './AdminProfileIntro';
 import { Col, Row, Alert, Spinner } from 'react-bootstrap';
-import AdminActivityLog from './AdminActivityLog';
+
 import AdminUserActions from './AdminUserActions';
 import AdminUserMetrics from './AdminUserMetrics';
 import AdminLicenses from './AdminLicenses';
@@ -54,7 +54,7 @@ const AdminUserProfile: React.FC = () => {
           <AdminProfileIntro user={user} />
           <AdminLicenses user={user} />
           <AdminMedicalChecks user={user} />
-          <AdminActivityLog className="mt-3" userId={userId!} />
+
         </Col>
         <Col lg={4}>
           <div className="sticky-sidebar">

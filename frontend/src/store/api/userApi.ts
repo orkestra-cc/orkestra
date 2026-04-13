@@ -95,22 +95,6 @@ export interface DeleteUserResponse {
   message: string;
 }
 
-export interface UserActivity {
-  id: string;
-  type: 'login' | 'profile' | 'security' | 'task' | 'permission';
-  action: string;
-  timestamp: string;
-  ipAddress: string;
-  device: string;
-  status: 'success' | 'warning' | 'info' | 'danger';
-}
-
-export interface UserActivitiesResponse {
-  activities: UserActivity[];
-  total: number;
-  page: number;
-  pageSize: number;
-}
 
 export interface UserMetrics {
   tasksCompleted: number;
@@ -220,21 +204,6 @@ export const userApi = baseApi.injectEndpoints({
       ],
     }),
 
-    // Get user activities
-    getUserActivities: builder.query<UserActivitiesResponse, { userId: string; page?: number; pageSize?: number; type?: string }>({
-      query: ({ userId, page = 1, pageSize = 10, type }) => {
-        const searchParams = new URLSearchParams();
-        searchParams.append('page', String(page));
-        searchParams.append('pageSize', String(pageSize));
-        if (type) searchParams.append('type', type);
-
-        return `/v1/users/${userId}/activities?${searchParams.toString()}`;
-      },
-      providesTags: (_result, _error, { userId }) => [
-        { type: 'User' as const, id: `activities-${userId}` }
-      ],
-    }),
-
     // Get user metrics
     getUserMetrics: builder.query<UserMetrics, string>({
       query: (userId) => `/v1/users/${userId}/metrics`,
@@ -253,6 +222,6 @@ export const {
   useCreateUserMutation,
   useUpdateUserMutation,
   useDeleteUserMutation,
-  useGetUserActivitiesQuery,
+
   useGetUserMetricsQuery,
 } = userApi;

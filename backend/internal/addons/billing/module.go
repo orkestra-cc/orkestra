@@ -87,6 +87,7 @@ func (m *BillingModule) NavItems() []module.NavItemSpec {
 			{Name: "Clienti", Icon: "users", Path: "/billing/customers", Active: true},
 			{Name: "Fornitori", Icon: "truck", Path: "/billing/suppliers", Active: true},
 			{Name: "Notifiche SDI", Icon: "bell", Path: "/billing/notifications", Active: true},
+			{Name: "Aziende Emittenti", Icon: "building", Path: "/billing/companies", Active: true},
 		},
 	}}
 }

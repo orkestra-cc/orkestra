@@ -461,7 +461,7 @@ const paths: AppPaths = {
   adminUserProfile: `/${rootPaths.adminRoot}/user/profile/:userId`,
 
   operatorProfile: `/${rootPaths.adminRoot}/operator/profile/:operatorId`,
-  documentTemplates: `/${rootPaths.adminRoot}/templates`,
+  documentTemplates: '/documents/templates',
   verticalNavLayout: `/${rootPaths.layoutRoot}/vertical-nav-layout`,
   topNavLayout: `/${rootPaths.layoutRoot}/top-nav-layout`,
   doubleTopNavLayout: `/${rootPaths.layoutRoot}/double-top-nav-layout`,

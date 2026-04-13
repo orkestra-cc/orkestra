@@ -186,11 +186,8 @@ const AdminUserProfile = lazy(
   () => import('pages/admin/user-profile/AdminUserProfile')
 );
 
-const AdminSettings = lazy(
-  () => import('pages/admin/settings/AdminSettings')
-);
 const CompanyManagement = lazy(
-  () => import('pages/admin/settings/companies')
+  () => import('pages/billing/companies')
 );
 const UserDashboard = lazy(
   () => import('pages/user/dashboard/UserDashboard')
@@ -204,7 +201,7 @@ const OperatorProfile = lazy(
 
 // Document templates
 const DocumentTemplates = lazy(
-  () => import('pages/admin/templates')
+  () => import('pages/documents/templates')
 );
 
 // Billing pages
@@ -684,57 +681,6 @@ const routes: RouteObject[] = [
                   </ProtectedRoute>
                 )
               },
-              {
-                path: 'settings',
-                element: (
-                  <ProtectedRoute
-                    requiredPermissions={[
-                      ['super_admin', 'administrator', 'developer']
-                    ]}
-                  >
-                    <Suspense
-                      key="admin-settings"
-                      fallback={<FalconLoader />}
-                    >
-                      <AdminSettings />
-                    </Suspense>
-                  </ProtectedRoute>
-                )
-              },
-              {
-                path: 'settings/companies',
-                element: (
-                  <ProtectedRoute
-                    requiredPermissions={[
-                      ['super_admin', 'administrator', 'developer']
-                    ]}
-                  >
-                    <Suspense
-                      key="admin-companies"
-                      fallback={<FalconLoader />}
-                    >
-                      <CompanyManagement />
-                    </Suspense>
-                  </ProtectedRoute>
-                )
-              },
-              {
-                path: 'templates',
-                element: (
-                  <ProtectedRoute
-                    requiredPermissions={[
-                      ['super_admin', 'administrator', 'developer', 'manager']
-                    ]}
-                  >
-                    <Suspense
-                      key="admin-templates"
-                      fallback={<FalconLoader />}
-                    >
-                      <DocumentTemplates />
-                    </Suspense>
-                  </ProtectedRoute>
-                )
-              }
             ]
           },
           {
@@ -916,6 +862,41 @@ const routes: RouteObject[] = [
                   fallback={<FalconLoader />}
                 >
                   <SDINotifications />
+                </Suspense>
+              </ProtectedRoute>
+            )
+          },
+          {
+            path: 'billing/companies',
+            element: (
+              <ProtectedRoute
+                requiredPermissions={[
+                  ['super_admin', 'administrator', 'developer']
+                ]}
+              >
+                <Suspense
+                  key="billing-companies"
+                  fallback={<FalconLoader />}
+                >
+                  <CompanyManagement />
+                </Suspense>
+              </ProtectedRoute>
+            )
+          },
+          // Document templates
+          {
+            path: 'documents/templates',
+            element: (
+              <ProtectedRoute
+                requiredPermissions={[
+                  ['super_admin', 'administrator', 'developer', 'manager']
+                ]}
+              >
+                <Suspense
+                  key="document-templates"
+                  fallback={<FalconLoader />}
+                >
+                  <DocumentTemplates />
                 </Suspense>
               </ProtectedRoute>
             )

@@ -5,7 +5,7 @@ import { selectUser } from 'store/slices/authSlice';
 import OperatorBanner from './OperatorBanner';
 import OperatorProfileIntro from './OperatorProfileIntro';
 import { Col, Row, Alert, Spinner } from 'react-bootstrap';
-import OperatorActivityLog from './OperatorActivityLog';
+
 
 const OperatorProfile: React.FC = () => {
   const currentUser = useSelector(selectUser);
@@ -51,7 +51,7 @@ const OperatorProfile: React.FC = () => {
       <Row className="g-3 mb-3">
         <Col lg={12}>
           <OperatorProfileIntro user={user} />
-          <OperatorActivityLog className="mt-3" userId={userId!} />
+
         </Col>
       </Row>
     </>
