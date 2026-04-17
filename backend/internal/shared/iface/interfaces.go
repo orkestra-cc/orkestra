@@ -243,3 +243,119 @@ type AuthzProvider interface {
 	// the module registry during boot after the authz module is initialized.
 	RegisterPermissions(ctx context.Context, specs []PermissionSpec) error
 }
+
+// ---------------------------------------------------------------------------
+// PaymentProvider — consumed by: subscriptions
+//
+// Façade over one or more payment gateways (Stripe in v1, PayPal later).
+// The payments module registers an implementation in the ServiceRegistry;
+// consumers use it through this interface so gateway code never leaks out.
+//
+// All monetary amounts are in minor currency units (e.g. cents). Currency
+// is a 3-letter ISO code (EUR in v1).
+// ---------------------------------------------------------------------------
+
+type CustomerInput struct {
+	ClientUUID string
+	Email      string
+	Name       string
+	VATNumber  string
+	Country    string
+	Metadata   map[string]string
+}
+
+type CustomerRef struct {
+	Provider string // "stripe" | "paypal"
+	ID       string // provider-side customer id (e.g. cus_xxx)
+}
+
+type PaymentMethodRef struct {
+	Provider     string
+	ID           string // e.g. pm_xxx
+	Brand        string // e.g. "visa"
+	Last4        string
+	ExpiryMonth  int
+	ExpiryYear   int
+}
+
+type SubscriptionCharge struct {
+	SubscriptionUUID string
+	InvoiceUUID      string // used as idempotency key (provider metadata)
+	Customer         CustomerRef
+	PaymentMethod    *PaymentMethodRef // nil = use default on customer
+	AmountCents      int64
+	Currency         string
+	Description      string
+	Metadata         map[string]string
+}
+
+type ChargeResult struct {
+	ProviderTxID string // e.g. pi_xxx
+	Status       string // "succeeded" | "requires_action" | "failed"
+	FailureCode  string
+	FailureMsg   string
+	ChargedAt    time.Time
+}
+
+type RefundResult struct {
+	ProviderRefundID string
+	Status           string // "succeeded" | "pending" | "failed"
+}
+
+// WebhookEvent is the normalized payload the dispatcher passes to the
+// SubscriptionReconciler after signature verification + dedupe.
+type WebhookEvent struct {
+	Provider         string
+	ProviderEventID  string // used for dedupe (unique index on webhook_events)
+	Type             string // provider-native event type, e.g. "payment_intent.succeeded"
+	Normalized       string // "charge.succeeded" | "charge.failed" | "charge.refunded" | ""
+	SubscriptionUUID string // decoded from metadata
+	InvoiceUUID      string // decoded from metadata
+	ProviderTxID     string
+	ProviderRefundID string
+	AmountCents      int64
+	Currency         string
+	FailureCode      string
+	FailureMsg       string
+	OccurredAt       time.Time
+	RawPayload       map[string]any
+}
+
+type PaymentProvider interface {
+	Name() string
+
+	// CreateCustomer registers a client with the gateway and returns the
+	// provider-side identifier. Called lazily before the first charge.
+	CreateCustomer(ctx context.Context, in CustomerInput) (CustomerRef, error)
+
+	// AttachPaymentMethod associates a tokenized payment method (from the
+	// client-side SDK, e.g. Stripe Elements) with an existing customer.
+	AttachPaymentMethod(ctx context.Context, customer CustomerRef, token string) (PaymentMethodRef, error)
+
+	// ChargeSubscription synchronously charges a subscription invoice and
+	// returns the immediate outcome. Webhooks later confirm settlement.
+	ChargeSubscription(ctx context.Context, in SubscriptionCharge) (ChargeResult, error)
+
+	// RefundCharge refunds an existing provider transaction. AmountCents = 0
+	// refunds the full amount.
+	RefundCharge(ctx context.Context, providerTxID string, amountCents int64, reason string) (RefundResult, error)
+
+	// VerifyWebhook validates provider-specific signature headers and
+	// decodes the raw body into a normalized WebhookEvent. Returns an
+	// error if the signature is invalid.
+	VerifyWebhook(ctx context.Context, rawBody []byte, headers map[string]string) (WebhookEvent, error)
+}
+
+// ---------------------------------------------------------------------------
+// SubscriptionReconciler — consumed by: payments (webhook dispatcher)
+//
+// Reverse-direction interface: the subscriptions module implements it so
+// the payments module can update invoice/subscription state when Stripe
+// fires webhook events. Keeps the two modules free of direct imports.
+// ---------------------------------------------------------------------------
+
+type SubscriptionReconciler interface {
+	MarkInvoicePaid(ctx context.Context, invoiceUUID, providerTxID string, paidAt time.Time) error
+	MarkInvoiceFailed(ctx context.Context, invoiceUUID, failureCode, failureMsg string) error
+	RecordRefund(ctx context.Context, invoiceUUID, providerRefundID string, amountCents int64, reason string) error
+}

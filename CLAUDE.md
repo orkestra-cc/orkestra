@@ -116,6 +116,8 @@ Load order (topologically sorted by `Dependencies()`): `user` → `notification`
 | **rag**        | Document ingestion + retrieval-augmented generation — [docs](backend/internal/addons/rag/CLAUDE.md)                 | graph, aimodels  |
 | **agents**     | Hindsight AI agents with RAG context — [docs](backend/internal/addons/agents/CLAUDE.md)                             | auth, aimodels   |
 | **sales**      | AI-driven prospect analysis and scoring                                                                      | aimodels         |
+| **subscriptions** | Recurring AI-services catalog, clients, subscriptions, activity log — [docs](backend/internal/addons/subscriptions/CLAUDE.md) | —                |
+| **payments**   | Stripe gateway — charges, refunds, webhooks — [docs](backend/internal/addons/payments/CLAUDE.md)                    | —                |
 | **dev**        | Dev token generation (disabled in production)                                                                | auth             |
 
 ### Other Modules

@@ -205,6 +205,16 @@ export const baseApi = createApi({
     // Platform-admin tenant management
     'AdminOrg',
     'OrgInvite',
+    // Subscriptions module
+    'SubscriptionService',
+    'SubscriptionClient',
+    'Subscription',
+    'SubscriptionInvoice',
+    'SubscriptionActivity',
+    // Payments module
+    'PaymentTransaction',
+    'PaymentMethodRec',
+    'PaymentWebhookEvent',
   ],
   // Keep cache for 5 minutes by default
   keepUnusedDataFor: 300,

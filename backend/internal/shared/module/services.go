@@ -30,6 +30,9 @@ const (
 
 	ServiceTenantProvider ServiceKey = "tenant.provider"
 	ServiceAuthzProvider  ServiceKey = "authz.provider"
+
+	ServicePaymentProvider        ServiceKey = "payments.provider"
+	ServiceSubscriptionReconciler ServiceKey = "subscriptions.reconciler"
 )
 
 // ServiceRegistry is a typed key-value store for cross-module service sharing.

@@ -16,6 +16,7 @@ require (
 	github.com/neo4j/neo4j-go-driver/v5 v5.28.4
 	github.com/redis/go-redis/v9 v9.16.0
 	github.com/sashabaranov/go-openai v1.41.2
+	github.com/stripe/stripe-go/v76 v76.25.0
 	github.com/vectorize-io/hindsight/hindsight-clients/go v0.0.0-20260323151157-26944e25bc03
 	github.com/yuin/goldmark v1.7.17
 	go.mongodb.org/mongo-driver v1.17.6

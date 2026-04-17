@@ -52,6 +52,8 @@ backend/
 │   │   ├── rag/                    # RAG pipeline
 │   │   ├── agents/                 # Hindsight AI agents
 │   │   ├── sales/                  # AI prospect analysis
+│   │   ├── subscriptions/          # Recurring services catalog, clients, subscriptions
+│   │   ├── payments/               # Stripe gateway, refunds, webhooks
 │   │   └── dev/                    # Dev token generator
 │   └── shared/                     # Infrastructure — used by core and addons
 │       ├── module/                 # Module interface, registry, config service

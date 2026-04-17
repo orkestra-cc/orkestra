@@ -10,8 +10,10 @@ import (
 	"github.com/orkestra/backend/internal/addons/dev"
 	"github.com/orkestra/backend/internal/addons/documents"
 	"github.com/orkestra/backend/internal/addons/graph"
+	"github.com/orkestra/backend/internal/addons/payments"
 	"github.com/orkestra/backend/internal/addons/rag"
 	"github.com/orkestra/backend/internal/addons/sales"
+	"github.com/orkestra/backend/internal/addons/subscriptions"
 	"github.com/orkestra/backend/internal/core/auth"
 	"github.com/orkestra/backend/internal/core/authz"
 	"github.com/orkestra/backend/internal/core/navigation"
@@ -43,15 +45,17 @@ var coreModules = []func() module.Module{
 // or per-module env vars (BILLING_ENABLED, RAG_ENABLED, etc.).
 // The registry resolves initialization order from Dependencies().
 var optionalModules = map[string]func() module.Module{
-	"billing":   func() module.Module { return billing.NewModule() },
-	"documents": func() module.Module { return documents.NewModule() },
-	"company":   func() module.Module { return company.NewModule() },
-	"graph":     func() module.Module { return graph.NewModule() },
-	"aimodels":  func() module.Module { return aimodels.NewModule() },
-	"rag":       func() module.Module { return rag.NewModule() },
-	"agents":    func() module.Module { return agents.NewModule() },
-	"sales":     func() module.Module { return sales.NewModule() },
-	"dev":       func() module.Module { return dev.NewModule() },
+	"billing":       func() module.Module { return billing.NewModule() },
+	"documents":     func() module.Module { return documents.NewModule() },
+	"company":       func() module.Module { return company.NewModule() },
+	"graph":         func() module.Module { return graph.NewModule() },
+	"aimodels":      func() module.Module { return aimodels.NewModule() },
+	"rag":           func() module.Module { return rag.NewModule() },
+	"agents":        func() module.Module { return agents.NewModule() },
+	"sales":         func() module.Module { return sales.NewModule() },
+	"subscriptions": func() module.Module { return subscriptions.NewModule() },
+	"payments":      func() module.Module { return payments.NewModule() },
+	"dev":           func() module.Module { return dev.NewModule() },
 }
 
 // allOptionalModuleNames returns the names of all optional modules.
