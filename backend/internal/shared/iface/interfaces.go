@@ -359,3 +359,19 @@ type SubscriptionReconciler interface {
 	MarkInvoiceFailed(ctx context.Context, invoiceUUID, failureCode, failureMsg string) error
 	RecordRefund(ctx context.Context, invoiceUUID, providerRefundID string, amountCents int64, reason string) error
 }
+
+// ---------------------------------------------------------------------------
+// ClientOwnershipProvider — consumed by: payments
+//
+// Subscriptions owns the `subscriptions_clients` collection. Payments stores
+// a bare ClientUUID on each Transaction and needs to resolve the owning org
+// to gate by-id reads/mutations. This interface keeps payments free of any
+// direct import of the subscriptions repository package.
+// ---------------------------------------------------------------------------
+
+type ClientOwnershipProvider interface {
+	// GetClientOrgUUID returns the org UUID the client is bound to, or an
+	// empty string if the client is not scoped to an org. Returns an error
+	// when the client does not exist.
+	GetClientOrgUUID(ctx context.Context, clientUUID string) (string, error)
+}

@@ -135,7 +135,7 @@ func (m *PaymentsModule) Init(deps *module.Dependencies) error {
 
 	m.payment = services.NewPaymentService(defaultProvider, providers, txRepo, deps.Logger)
 	m.dispatcher = services.NewDispatcher(whRepo, deps.Services, deps.Logger)
-	m.txHandler = handlers.NewTransactionHandler(txRepo, pmRepository, whRepo, m.payment)
+	m.txHandler = handlers.NewTransactionHandler(txRepo, pmRepository, whRepo, m.payment, deps.Services)
 	m.stripeHandler = webhooks.NewStripeHandler(m.payment, m.dispatcher, deps.Logger)
 
 	// Register the façade as the PaymentProvider for the subscriptions
@@ -152,12 +152,36 @@ func (m *PaymentsModule) Init(deps *module.Dependencies) error {
 }
 
 func (m *PaymentsModule) RegisterRoutes(ri *module.RouteInfo) {
-	// Admin API — protected.
-	ri.ProtectedRouter.Group(func(r chi.Router) {
-		r.Use(middleware.ModuleGate(ri.ConfigService, m.Name()))
-		r.Use(ri.AuthMW.RequirePermission("payments.transaction.view"))
-		api := humachi.New(r, ri.APIConfig)
-		RegisterRoutes(api, m.txHandler)
+	// Admin API — each permission bucket gets its own chi subgroup with a
+	// dedicated RequirePermission middleware. Refunds sit behind the
+	// distinct `payments.transaction.refund` grant so read access cannot
+	// authorise a mutation.
+	ri.ProtectedRouter.Group(func(gated chi.Router) {
+		gated.Use(middleware.ModuleGate(ri.ConfigService, m.Name()))
+
+		gated.Group(func(r chi.Router) {
+			r.Use(ri.AuthMW.RequirePermission("payments.transaction.view"))
+			api := humachi.New(r, ri.APIConfig)
+			RegisterTransactionReadRoutes(api, m.txHandler)
+		})
+
+		gated.Group(func(r chi.Router) {
+			r.Use(ri.AuthMW.RequirePermission("payments.transaction.refund"))
+			api := humachi.New(r, ri.APIConfig)
+			RegisterTransactionRefundRoutes(api, m.txHandler)
+		})
+
+		gated.Group(func(r chi.Router) {
+			r.Use(ri.AuthMW.RequirePermission("payments.method.view"))
+			api := humachi.New(r, ri.APIConfig)
+			RegisterPaymentMethodReadRoutes(api, m.txHandler)
+		})
+
+		gated.Group(func(r chi.Router) {
+			r.Use(ri.AuthMW.RequirePermission("payments.webhook.view"))
+			api := humachi.New(r, ri.APIConfig)
+			RegisterWebhookEventReadRoutes(api, m.txHandler)
+		})
 	})
 
 	// Public webhook — no JWT, HMAC-verified inside the handler. Uses the

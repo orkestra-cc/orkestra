@@ -45,7 +45,10 @@ func (m *SubscriptionsModule) HotReloadConfig() bool           { return true }
 func (m *SubscriptionsModule) Dependencies() []string { return nil }
 
 func (m *SubscriptionsModule) ProvidedServices() []module.ServiceKey {
-	return []module.ServiceKey{module.ServiceSubscriptionReconciler}
+	return []module.ServiceKey{
+		module.ServiceSubscriptionReconciler,
+		module.ServiceClientOwnership,
+	}
 }
 
 func (m *SubscriptionsModule) OptionalServices() []module.ServiceKey {
@@ -140,15 +143,21 @@ func (m *SubscriptionsModule) Init(deps *module.Dependencies) error {
 	)
 	reconciler := services.NewReconciler(invoiceRepo, subRepo, activitySvc, deps.Logger)
 
+	ownershipSvc := services.NewClientOwnershipService(clientRepo)
+
 	m.serviceHandler = handlers.NewServiceHandler(serviceSvc)
 	m.clientHandler = handlers.NewClientHandler(clientSvc)
-	m.subscriptionHandler = handlers.NewSubscriptionHandler(subscriptionSvc, renewalSvc, invoiceRepo, activitySvc)
+	m.subscriptionHandler = handlers.NewSubscriptionHandler(subscriptionSvc, renewalSvc, invoiceRepo, activitySvc, ownershipSvc)
 
 	interval := deps.GetConfigDuration("subscriptions", "renewalInterval", time.Hour)
 	m.renewalJob = jobs.NewRenewalJob(renewalSvc, interval, deps.Logger)
 
 	// Publish the reconciler so the payments module can call into us on webhooks.
 	deps.Services.Register(module.ServiceSubscriptionReconciler, reconciler)
+
+	// Publish a client-ownership resolver so cross-module handlers (payments)
+	// can gate by-id reads/mutations against the requesting user's org.
+	deps.Services.Register(module.ServiceClientOwnership, ownershipSvc)
 
 	deps.Logger.Info("Subscriptions module initialized",
 		slog.Duration("renewalInterval", interval),
@@ -157,11 +166,59 @@ func (m *SubscriptionsModule) Init(deps *module.Dependencies) error {
 }
 
 func (m *SubscriptionsModule) RegisterRoutes(ri *module.RouteInfo) {
-	ri.ProtectedRouter.Group(func(r chi.Router) {
-		r.Use(middleware.ModuleGate(ri.ConfigService, m.Name()))
-		r.Use(ri.AuthMW.RequirePermission("subscriptions.subscription.view"))
-		api := humachi.New(r, ri.APIConfig)
-		RegisterRoutes(api, m.serviceHandler, m.clientHandler, m.subscriptionHandler)
+	// Each permission bucket gets its own chi subgroup. Mutations (POST,
+	// PATCH, DELETE) live behind the `.manage` grants so view-level users
+	// cannot create clients, change pricing, cancel subscriptions, etc.
+	ri.ProtectedRouter.Group(func(gated chi.Router) {
+		gated.Use(middleware.ModuleGate(ri.ConfigService, m.Name()))
+
+		// Services (catalog)
+		gated.Group(func(r chi.Router) {
+			r.Use(ri.AuthMW.RequirePermission("subscriptions.service.view"))
+			api := humachi.New(r, ri.APIConfig)
+			RegisterServiceReadRoutes(api, m.serviceHandler)
+		})
+		gated.Group(func(r chi.Router) {
+			r.Use(ri.AuthMW.RequirePermission("subscriptions.service.manage"))
+			api := humachi.New(r, ri.APIConfig)
+			RegisterServiceWriteRoutes(api, m.serviceHandler)
+		})
+
+		// Clients
+		gated.Group(func(r chi.Router) {
+			r.Use(ri.AuthMW.RequirePermission("subscriptions.client.view"))
+			api := humachi.New(r, ri.APIConfig)
+			RegisterClientReadRoutes(api, m.clientHandler)
+		})
+		gated.Group(func(r chi.Router) {
+			r.Use(ri.AuthMW.RequirePermission("subscriptions.client.manage"))
+			api := humachi.New(r, ri.APIConfig)
+			RegisterClientWriteRoutes(api, m.clientHandler)
+		})
+
+		// Subscriptions
+		gated.Group(func(r chi.Router) {
+			r.Use(ri.AuthMW.RequirePermission("subscriptions.subscription.view"))
+			api := humachi.New(r, ri.APIConfig)
+			RegisterSubscriptionReadRoutes(api, m.subscriptionHandler)
+		})
+		gated.Group(func(r chi.Router) {
+			r.Use(ri.AuthMW.RequirePermission("subscriptions.subscription.manage"))
+			api := humachi.New(r, ri.APIConfig)
+			RegisterSubscriptionWriteRoutes(api, m.subscriptionHandler)
+		})
+
+		// Nested reads
+		gated.Group(func(r chi.Router) {
+			r.Use(ri.AuthMW.RequirePermission("subscriptions.invoice.view"))
+			api := humachi.New(r, ri.APIConfig)
+			RegisterInvoiceReadRoutes(api, m.subscriptionHandler)
+		})
+		gated.Group(func(r chi.Router) {
+			r.Use(ri.AuthMW.RequirePermission("subscriptions.activity.view"))
+			api := humachi.New(r, ri.APIConfig)
+			RegisterActivityReadRoutes(api, m.subscriptionHandler)
+		})
 	})
 }
 

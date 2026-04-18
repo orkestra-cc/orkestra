@@ -2,11 +2,14 @@ package handlers
 
 import (
 	"context"
+	"errors"
 
+	"github.com/danielgtaylor/huma/v2"
 	"github.com/orkestra/backend/internal/addons/payments/models"
 	"github.com/orkestra/backend/internal/addons/payments/repository"
 	"github.com/orkestra/backend/internal/addons/payments/services"
 	"github.com/orkestra/backend/internal/shared/iface"
+	"github.com/orkestra/backend/internal/shared/module"
 )
 
 type TransactionHandler struct {
@@ -14,6 +17,9 @@ type TransactionHandler struct {
 	pmRepo  repository.PaymentMethodRepository
 	whRepo  repository.WebhookEventRepository
 	payment *services.PaymentService
+	// svcReg is consulted on every request so toggling subscriptions on/off
+	// via the admin UI immediately enables/disables the org-ownership guard.
+	svcReg *module.ServiceRegistry
 }
 
 func NewTransactionHandler(
@@ -21,8 +27,15 @@ func NewTransactionHandler(
 	pmRepo repository.PaymentMethodRepository,
 	whRepo repository.WebhookEventRepository,
 	payment *services.PaymentService,
+	svcReg *module.ServiceRegistry,
 ) *TransactionHandler {
-	return &TransactionHandler{txRepo: txRepo, pmRepo: pmRepo, whRepo: whRepo, payment: payment}
+	return &TransactionHandler{
+		txRepo:  txRepo,
+		pmRepo:  pmRepo,
+		whRepo:  whRepo,
+		payment: payment,
+		svcReg:  svcReg,
+	}
 }
 
 type ListTransactionsRequest struct {
@@ -47,8 +60,8 @@ type TransactionResponse struct {
 type RefundRequest struct {
 	ID   string `path:"id"`
 	Body struct {
-		AmountCents int64  `json:"amountCents" doc:"Zero refunds the full amount"`
-		Reason      string `json:"reason,omitempty"`
+		AmountCents int64  `json:"amountCents" minimum:"0" doc:"Zero refunds the full remaining amount"`
+		Reason      string `json:"reason,omitempty" maxLength:"500"`
 	}
 }
 type RefundResponse struct {
@@ -100,16 +113,42 @@ func (h *TransactionHandler) Get(ctx context.Context, in *GetTransactionRequest)
 	if err != nil {
 		return nil, err
 	}
+	if err := assertOrgOwnsClient(ctx, h.svcReg, t.ClientUUID); err != nil {
+		return nil, err
+	}
 	return &TransactionResponse{Body: *t}, nil
 }
 
 func (h *TransactionHandler) Refund(ctx context.Context, in *RefundRequest) (*RefundResponse, error) {
 	tx, err := h.txRepo.GetByUUID(ctx, in.ID)
 	if err != nil {
+		return nil, huma.Error404NotFound("transaction not found", err)
+	}
+	if err := assertOrgOwnsClient(ctx, h.svcReg, tx.ClientUUID); err != nil {
 		return nil, err
+	}
+	if in.Body.AmountCents < 0 {
+		return nil, huma.Error400BadRequest("refund amount cannot be negative", nil)
+	}
+	if tx.Status == models.TxRefunded {
+		return nil, huma.Error409Conflict("transaction is already fully refunded", nil)
+	}
+	remaining := tx.AmountCents - tx.RefundedCents
+	if remaining <= 0 {
+		return nil, huma.Error409Conflict("transaction has no remaining balance to refund", nil)
+	}
+	if in.Body.AmountCents > remaining {
+		return nil, huma.Error400BadRequest("refund amount exceeds remaining balance", nil)
 	}
 	res, err := h.payment.RefundCharge(ctx, tx.ProviderTxID, in.Body.AmountCents, in.Body.Reason)
 	if err != nil {
+		switch {
+		case errors.Is(err, services.ErrRefundAmountNegative),
+			errors.Is(err, services.ErrRefundExceedsBalance):
+			return nil, huma.Error400BadRequest(err.Error(), nil)
+		case errors.Is(err, services.ErrAlreadyRefunded):
+			return nil, huma.Error409Conflict(err.Error(), nil)
+		}
 		return nil, err
 	}
 	resp := &RefundResponse{}
@@ -119,6 +158,9 @@ func (h *TransactionHandler) Refund(ctx context.Context, in *RefundRequest) (*Re
 }
 
 func (h *TransactionHandler) ListPaymentMethods(ctx context.Context, in *ListPaymentMethodsRequest) (*ListPaymentMethodsResponse, error) {
+	if err := assertOrgOwnsClient(ctx, h.svcReg, in.ClientUUID); err != nil {
+		return nil, err
+	}
 	items, err := h.pmRepo.ListByClient(ctx, in.ClientUUID)
 	if err != nil {
 		return nil, err

@@ -13,6 +13,14 @@ import (
 	"github.com/orkestra/backend/internal/shared/iface"
 )
 
+// Sentinel errors returned by RefundCharge for invalid amounts. Handler code
+// maps these to 4xx responses; internal callers can assert against them too.
+var (
+	ErrRefundAmountNegative = errors.New("payments: refund amount cannot be negative")
+	ErrRefundExceedsBalance = errors.New("payments: refund amount exceeds remaining balance")
+	ErrAlreadyRefunded      = errors.New("payments: transaction already fully refunded")
+)
+
 // PaymentService is the iface.PaymentProvider façade registered in the
 // ServiceRegistry. It routes calls to the appropriate underlying provider
 // (currently Stripe only; PayPal slots in here later).
@@ -114,11 +122,28 @@ func (s *PaymentService) ChargeSubscription(ctx context.Context, in iface.Subscr
 }
 
 func (s *PaymentService) RefundCharge(ctx context.Context, providerTxID string, amountCents int64, reason string) (iface.RefundResult, error) {
+	if amountCents < 0 {
+		return iface.RefundResult{}, ErrRefundAmountNegative
+	}
 	// Look up the provider that owns this transaction.
 	tx, err := s.txRepo.GetByProviderTxID(ctx, s.defaultP, providerTxID)
 	var providerKey models.ProviderName = s.defaultP
 	if err == nil && tx != nil {
 		providerKey = tx.Provider
+		// Bounds check against stored transaction state. The handler performs
+		// the same check for friendly 4xx errors; this is defense-in-depth so
+		// internal callers (renewal retry paths, future providers) can't
+		// bypass it.
+		if tx.Status == models.TxRefunded {
+			return iface.RefundResult{}, ErrAlreadyRefunded
+		}
+		remaining := tx.AmountCents - tx.RefundedCents
+		if remaining <= 0 {
+			return iface.RefundResult{}, ErrAlreadyRefunded
+		}
+		if amountCents > remaining {
+			return iface.RefundResult{}, ErrRefundExceedsBalance
+		}
 	}
 	p, ok := s.providers[providerKey]
 	if !ok {

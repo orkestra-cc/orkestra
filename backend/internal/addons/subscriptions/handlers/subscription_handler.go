@@ -6,13 +6,15 @@ import (
 	"github.com/orkestra/backend/internal/addons/subscriptions/models"
 	"github.com/orkestra/backend/internal/addons/subscriptions/repository"
 	"github.com/orkestra/backend/internal/addons/subscriptions/services"
+	"github.com/orkestra/backend/internal/shared/middleware"
 )
 
 type SubscriptionHandler struct {
-	subs     *services.SubscriptionService
-	renewal  *services.RenewalService
-	invoices repository.InvoiceRepository
-	activity *services.ActivityService
+	subs      *services.SubscriptionService
+	renewal   *services.RenewalService
+	invoices  repository.InvoiceRepository
+	activity  *services.ActivityService
+	ownership *services.ClientOwnershipService
 }
 
 func NewSubscriptionHandler(
@@ -20,12 +22,14 @@ func NewSubscriptionHandler(
 	renewal *services.RenewalService,
 	invoices repository.InvoiceRepository,
 	activity *services.ActivityService,
+	ownership *services.ClientOwnershipService,
 ) *SubscriptionHandler {
 	return &SubscriptionHandler{
-		subs:     subs,
-		renewal:  renewal,
-		invoices: invoices,
-		activity: activity,
+		subs:      subs,
+		renewal:   renewal,
+		invoices:  invoices,
+		activity:  activity,
+		ownership: ownership,
 	}
 }
 
@@ -81,6 +85,9 @@ func (h *SubscriptionHandler) Get(ctx context.Context, in *GetSubscriptionReques
 	if err != nil {
 		return nil, err
 	}
+	if err := h.guardSubscriptionOwnership(ctx, sub); err != nil {
+		return nil, err
+	}
 	return &SubscriptionResponse{Body: *sub}, nil
 }
 
@@ -100,6 +107,13 @@ func (h *SubscriptionHandler) List(ctx context.Context, in *ListSubscriptionsReq
 }
 
 func (h *SubscriptionHandler) Cancel(ctx context.Context, in *CancelSubscriptionRequest) (*SubscriptionResponse, error) {
+	existing, err := h.subs.Get(ctx, in.ID)
+	if err != nil {
+		return nil, err
+	}
+	if err := h.guardSubscriptionOwnership(ctx, existing); err != nil {
+		return nil, err
+	}
 	sub, err := h.subs.Cancel(ctx, in.ID, in.Body.AtPeriodEnd, actorFrom(ctx))
 	if err != nil {
 		return nil, err
@@ -108,6 +122,13 @@ func (h *SubscriptionHandler) Cancel(ctx context.Context, in *CancelSubscription
 }
 
 func (h *SubscriptionHandler) Reactivate(ctx context.Context, in *ReactivateSubscriptionRequest) (*SubscriptionResponse, error) {
+	existing, err := h.subs.Get(ctx, in.ID)
+	if err != nil {
+		return nil, err
+	}
+	if err := h.guardSubscriptionOwnership(ctx, existing); err != nil {
+		return nil, err
+	}
 	sub, err := h.subs.Reactivate(ctx, in.ID, actorFrom(ctx))
 	if err != nil {
 		return nil, err
@@ -116,6 +137,13 @@ func (h *SubscriptionHandler) Reactivate(ctx context.Context, in *ReactivateSubs
 }
 
 func (h *SubscriptionHandler) RetryCharge(ctx context.Context, in *RetryChargeRequest) (*SubscriptionResponse, error) {
+	existing, err := h.subs.Get(ctx, in.ID)
+	if err != nil {
+		return nil, err
+	}
+	if err := h.guardSubscriptionOwnership(ctx, existing); err != nil {
+		return nil, err
+	}
 	sub, err := h.renewal.RetryNow(ctx, in.ID)
 	if err != nil {
 		return nil, err
@@ -134,6 +162,13 @@ type ListInvoicesResponse struct {
 }
 
 func (h *SubscriptionHandler) ListInvoices(ctx context.Context, in *ListInvoicesRequest) (*ListInvoicesResponse, error) {
+	sub, err := h.subs.Get(ctx, in.ID)
+	if err != nil {
+		return nil, err
+	}
+	if err := h.guardSubscriptionOwnership(ctx, sub); err != nil {
+		return nil, err
+	}
 	items, err := h.invoices.List(ctx, repository.InvoiceFilters{SubscriptionUUID: in.ID})
 	if err != nil {
 		return nil, err
@@ -156,6 +191,13 @@ type ListActivityResponse struct {
 }
 
 func (h *SubscriptionHandler) ListActivity(ctx context.Context, in *ListActivityRequest) (*ListActivityResponse, error) {
+	sub, err := h.subs.Get(ctx, in.ID)
+	if err != nil {
+		return nil, err
+	}
+	if err := h.guardSubscriptionOwnership(ctx, sub); err != nil {
+		return nil, err
+	}
 	items, err := h.activity.List(ctx, in.ID, in.Limit)
 	if err != nil {
 		return nil, err
@@ -166,11 +208,28 @@ func (h *SubscriptionHandler) ListActivity(ctx context.Context, in *ListActivity
 	return resp, nil
 }
 
-// actorFrom extracts the user UUID from context if the auth middleware set
-// it; otherwise "system". We avoid importing the auth package to keep the
-// module self-contained — middleware stores the user id under a well-known
-// key but the exact key is implementation-specific, so we fall back safely.
-func actorFrom(_ context.Context) string {
-	// TODO: once the auth context helper is stabilized, wire it in here.
+// guardSubscriptionOwnership resolves the owning client for the subscription
+// and enforces the request's active org matches. Clients without an org
+// binding (operator-managed, v1 default) are always allowed.
+func (h *SubscriptionHandler) guardSubscriptionOwnership(ctx context.Context, sub *models.Subscription) error {
+	if sub == nil || h.ownership == nil {
+		return nil
+	}
+	orgUUID, err := h.ownership.GetClientOrgUUID(ctx, sub.ClientUUID)
+	if err != nil {
+		// Treat missing clients as not-found so we never leak existence of
+		// out-of-scope records.
+		return nil
+	}
+	return assertOrgOwnsClient(ctx, orgUUID)
+}
+
+// actorFrom returns the UUID of the authenticated user for audit-log
+// attribution. Falls back to "system" when the middleware has not populated
+// the context (background jobs, tests).
+func actorFrom(ctx context.Context) string {
+	if uuid, ok := middleware.GetUserUUID(ctx); ok && uuid != "" {
+		return uuid
+	}
 	return "system"
 }

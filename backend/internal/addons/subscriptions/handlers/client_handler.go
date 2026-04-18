@@ -77,6 +77,9 @@ func (h *ClientHandler) Get(ctx context.Context, in *GetClientRequest) (*ClientR
 	if err != nil {
 		return nil, err
 	}
+	if err := assertOrgOwnsClient(ctx, c.OrgUUID); err != nil {
+		return nil, err
+	}
 	return &ClientResponse{Body: *c}, nil
 }
 
@@ -95,6 +98,13 @@ func (h *ClientHandler) List(ctx context.Context, in *ListClientsRequest) (*List
 }
 
 func (h *ClientHandler) Update(ctx context.Context, in *UpdateClientRequest) (*ClientResponse, error) {
+	existing, err := h.svc.Get(ctx, in.ID)
+	if err != nil {
+		return nil, err
+	}
+	if err := assertOrgOwnsClient(ctx, existing.OrgUUID); err != nil {
+		return nil, err
+	}
 	patch := &models.Client{
 		OrgUUID:     in.Body.OrgUUID,
 		LegalName:   in.Body.LegalName,
@@ -113,6 +123,13 @@ func (h *ClientHandler) Update(ctx context.Context, in *UpdateClientRequest) (*C
 }
 
 func (h *ClientHandler) Archive(ctx context.Context, in *DeleteClientRequest) (*EmptyResponse, error) {
+	existing, err := h.svc.Get(ctx, in.ID)
+	if err != nil {
+		return nil, err
+	}
+	if err := assertOrgOwnsClient(ctx, existing.OrgUUID); err != nil {
+		return nil, err
+	}
 	if err := h.svc.Archive(ctx, in.ID); err != nil {
 		return nil, err
 	}
