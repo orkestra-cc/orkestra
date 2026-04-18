@@ -34,12 +34,27 @@ func (s *Service) GetOrg(ctx context.Context, orgUUID string) (*iface.Org, error
 	if err != nil {
 		return nil, err
 	}
+	kind := string(o.Kind)
+	if kind == "" {
+		kind = iface.TenantKindInternal
+	}
+	status := string(o.Status)
+	if status == "" {
+		status = iface.TenantStatusActive
+	}
+	var parent string
+	if o.ParentTenantUUID != nil {
+		parent = *o.ParentTenantUUID
+	}
 	return &iface.Org{
-		UUID:     o.UUID,
-		Name:     o.Name,
-		Slug:     o.Slug,
-		Plan:     o.Plan,
-		Features: o.Features,
+		UUID:             o.UUID,
+		Kind:             kind,
+		ParentTenantUUID: parent,
+		Status:           status,
+		Name:             o.Name,
+		Slug:             o.Slug,
+		Plan:             o.Plan,
+		Features:         o.Features,
 	}, nil
 }
 
@@ -54,12 +69,22 @@ func (s *Service) ListUserMemberships(ctx context.Context, userUUID string) ([]i
 		if err != nil {
 			continue // org may be soft-deleted, skip
 		}
+		// Prefer the cached kind on the membership row; fall back to the
+		// tenant row for pre-ADR-0001 memberships where TenantKind is empty.
+		kind := string(m.TenantKind)
+		if kind == "" {
+			kind = string(o.Kind)
+		}
+		if kind == "" {
+			kind = iface.TenantKindInternal
+		}
 		out = append(out, iface.Membership{
-			OrgUUID: o.UUID,
-			OrgName: o.Name,
-			OrgSlug: o.Slug,
-			Roles:   m.Roles,
-			IsOwner: m.IsOwner,
+			OrgUUID:    o.UUID,
+			OrgName:    o.Name,
+			OrgSlug:    o.Slug,
+			TenantKind: kind,
+			Roles:      m.Roles,
+			IsOwner:    m.IsOwner,
 		})
 	}
 	return out, nil
@@ -101,31 +126,148 @@ func (s *Service) CreateOrg(ctx context.Context, ownerUUID string, input models.
 	}
 	features := defaultFeaturesForPlan(plan)
 
+	// Tier discriminator. Default to internal so the pre-ADR-0001 code paths
+	// (setup wizard, tests) behave unchanged. External client self-registration
+	// in Phase 3 will go through CreateExternalTenant instead.
+	kind := input.Kind
+	if !kind.Valid() {
+		kind = models.TenantKindInternal
+	}
+
+	// Sub-tenants only apply to external clients. Enforce here rather than
+	// in the repo so the invariant surfaces as a 4xx at the handler layer.
+	var parent *string
+	if input.ParentTenantUUID != nil && *input.ParentTenantUUID != "" {
+		if kind != models.TenantKindExternal {
+			return nil, fmt.Errorf("parentTenantUUID is only allowed for external tenants")
+		}
+		p := *input.ParentTenantUUID
+		if _, err := s.repo.GetOrgByUUID(ctx, p); err != nil {
+			return nil, fmt.Errorf("parent tenant not found: %s", p)
+		}
+		parent = &p
+	}
+
+	sigChan := models.SignupChannelSeeded
+	if kind == models.TenantKindExternal {
+		sigChan = models.SignupChannelSalesAssisted
+	}
+
 	org := &models.Org{
-		UUID:          uuid.Must(uuid.NewV7()).String(),
-		Name:          strings.TrimSpace(input.Name),
-		Slug:          slug,
-		OwnerUserUUID: ownerUUID,
-		Plan:          plan,
-		Features:      features,
+		UUID:             uuid.Must(uuid.NewV7()).String(),
+		Kind:             kind,
+		Status:           models.TenantStatusActive,
+		ParentTenantUUID: parent,
+		Name:             strings.TrimSpace(input.Name),
+		Slug:             slug,
+		OwnerUserUUID:    ownerUUID,
+		SignupChannel:    sigChan,
+		Region:           "eu-west",
+		Plan:             plan,
+		Features:         features,
 	}
 
 	if err := s.repo.CreateOrg(ctx, org); err != nil {
 		return nil, err
 	}
 
+	// Closure-table bookkeeping: self-row at depth 0 for every tenant,
+	// plus the transitive chain when a parent is set.
+	if err := s.repo.InsertSelfAncestor(ctx, org.UUID); err != nil {
+		return nil, fmt.Errorf("tenant: insert self ancestor: %w", err)
+	}
+	if parent != nil {
+		if err := s.repo.AttachToParent(ctx, org.UUID, *parent); err != nil {
+			return nil, fmt.Errorf("tenant: attach to parent: %w", err)
+		}
+	}
+
 	// Owner is auto-enrolled as a member with the "administrator" role.
 	membership := &models.Membership{
-		UUID:     uuid.Must(uuid.NewV7()).String(),
-		UserUUID: ownerUUID,
-		OrgUUID:  org.UUID,
-		Roles:    []string{"administrator"},
-		IsOwner:  true,
+		UUID:       uuid.Must(uuid.NewV7()).String(),
+		UserUUID:   ownerUUID,
+		OrgUUID:    org.UUID,
+		TenantKind: kind,
+		Roles:      []string{"administrator"},
+		IsOwner:    true,
 	}
 	if err := s.repo.CreateMembership(ctx, membership); err != nil {
 		return nil, err
 	}
 	return org, nil
+}
+
+// CreateExternalTenant is the dedicated factory for Tier-2 tenants (external
+// clients registering on the platform). See ADR-0001. The caller is typically
+// the onboarding module (Phase 3). signupChannel distinguishes self-serve
+// signups from sales-assisted provisioning for later analytics.
+func (s *Service) CreateExternalTenant(ctx context.Context, ownerUUID, name, slug, signupChannel string, parentTenantUUID *string) (*models.Org, error) {
+	if signupChannel == "" {
+		signupChannel = models.SignupChannelSelfServe
+	}
+	input := models.CreateOrgInput{
+		Name:             name,
+		Slug:             slug,
+		Kind:             models.TenantKindExternal,
+		ParentTenantUUID: parentTenantUUID,
+	}
+	org, err := s.CreateOrg(ctx, ownerUUID, input)
+	if err != nil {
+		return nil, err
+	}
+	org.SignupChannel = signupChannel
+	org.Status = models.TenantStatusProvisioning
+	if err := s.repo.UpdateOrg(ctx, org.UUID, bson.M{
+		"signupChannel": signupChannel,
+		"status":        string(models.TenantStatusProvisioning),
+	}); err != nil {
+		return nil, err
+	}
+	return org, nil
+}
+
+// MarkTenantActive flips a provisioning tenant to active once the onboarding
+// saga (KMS key, IdP defaults, trial subscription, welcome email) completes.
+func (s *Service) MarkTenantActive(ctx context.Context, tenantUUID string) error {
+	return s.repo.UpdateOrgStatus(ctx, tenantUUID, models.TenantStatusActive)
+}
+
+// SuspendTenant, ArchiveTenant, PurgeTenant drive the lifecycle transitions
+// introduced by ADR-0001. PurgeTenant eventually triggers crypto-shred of
+// the tenant's KMS key (Phase 4); today it only flips the status so the
+// operator console can exercise the transition end-to-end.
+func (s *Service) SuspendTenant(ctx context.Context, tenantUUID string) error {
+	return s.repo.UpdateOrgStatus(ctx, tenantUUID, models.TenantStatusSuspended)
+}
+
+func (s *Service) ArchiveTenant(ctx context.Context, tenantUUID string) error {
+	return s.repo.UpdateOrgStatus(ctx, tenantUUID, models.TenantStatusArchived)
+}
+
+func (s *Service) PurgeTenant(ctx context.Context, tenantUUID string) error {
+	return s.repo.UpdateOrgStatus(ctx, tenantUUID, models.TenantStatusPurged)
+}
+
+// --- Hierarchy queries (closure table) ---
+
+// GetAncestors returns every ancestor of tenantUUID (including itself at
+// depth 0), sorted by depth ascending. Useful for policy evaluation that
+// needs to walk up the tenant tree.
+func (s *Service) GetAncestors(ctx context.Context, tenantUUID string) ([]models.TenantAncestor, error) {
+	return s.repo.ListAncestors(ctx, tenantUUID)
+}
+
+// GetDescendantUUIDs returns every descendant UUID (including the tenant
+// itself). Used for cascade operations — archive parent → mark every
+// sub-tenant.
+func (s *Service) GetDescendantUUIDs(ctx context.Context, tenantUUID string) ([]string, error) {
+	return s.repo.ListDescendantUUIDs(ctx, tenantUUID)
+}
+
+// IsDescendantOf reports whether descendant is inside the tree rooted at
+// ancestor (inclusive). A tenant is a descendant of itself.
+func (s *Service) IsDescendantOf(ctx context.Context, ancestorUUID, descendantUUID string) (bool, error) {
+	return s.repo.IsAncestorOf(ctx, ancestorUUID, descendantUUID)
 }
 
 func (s *Service) UpdateOrg(ctx context.Context, orgUUID string, input models.UpdateOrgInput) error {

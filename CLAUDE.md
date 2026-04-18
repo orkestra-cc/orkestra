@@ -1,6 +1,37 @@
 # ORKESTRA
 
-Professional business and service management system — electronic invoicing, AI sales intelligence, RAG pipeline, and document generation.
+**Orkestra is a modular, multi-tenant orchestrator platform.** It is not a single-purpose business app — it is a host that exposes business capabilities (invoicing, billing, AI sales, RAG, documents, payments, etc.) as pluggable modules/addons, and manages *who* can consume those capabilities across a two-tier tenancy model.
+
+## Tenancy Model
+
+Orkestra operates on **two distinct tiers of tenants**. Understanding this distinction is load-bearing for every design decision — data isolation, RBAC scope, billing, and module activation all depend on which tier a request is acting in.
+
+### Tier 1 — Internal tenants (operator side)
+
+The companies that **run Orkestra** (one or more of "our" organizations). For each internal tenant the platform manages:
+
+- Internal users, roles, and RBAC
+- The internal company's own electronic invoicing (FatturaPA/SDI), billing, documents
+- Which modules/addons are enabled for that tenant
+- Operational admin (module config, audit logs, compliance evidence)
+
+### Tier 2 — External client tenants (customer side)
+
+**External clients register on the platform**, and each external client can itself be a multi-tenant organization (multiple sub-tenants / workspaces under one client). For each external client the platform manages:
+
+- Client registration and onboarding
+- The client's own users, roles, sub-tenants
+- **Subscriptions to the services Orkestra exposes** (via the `subscriptions` + `payments` modules — Stripe-backed recurring billing)
+- Usage of the subscribed services (AI agents, RAG, document generation, etc.) scoped to the client's data
+
+The `subscriptions` and `payments` modules are **not ordinary feature addons** — they are the mechanism by which Tier-2 clients consume Tier-1-hosted services. Treat them as architecturally load-bearing.
+
+### Implications for contributors
+
+- Every new endpoint must declare **which tier it serves** (internal operator, external client, or both) and enforce org-scoped RBAC accordingly.
+- Every new collection/table must carry a tenant scope (internal org ID *or* external client org ID) and be indexed/queried with that scope — never cross-tenant by default.
+- Module enable/disable is **per internal tenant**, but service consumption is gated **per external client subscription**. Do not conflate the two.
+- When in doubt about which tier owns a resource, ask before implementing.
 
 ## Tech Stack
 

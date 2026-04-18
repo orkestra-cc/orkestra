@@ -14,9 +14,23 @@ type ClientAddress struct {
 	Country    string `bson:"country,omitempty" json:"country,omitempty"`
 }
 
-// Client is an external buyer of services. Clients do not log in to Orkestra
-// in v1; OrgUUID is a nullable hook for when a client also happens to be a
-// tenant of the platform.
+// Client is an external buyer of services.
+//
+// Deprecated: ADR-0001 replaces this entity with tenant.Org{Kind="external"}.
+// Until Phase 3 ships the external-client self-registration flow, Client
+// records continue to exist as operator-managed "CRM-style" rows. Once a
+// client goes through self-registration, Client will be removed and every
+// subscription will point directly at a Tier-2 Tenant UUID.
+//
+// Do not add new fields to Client without documenting the Tenant equivalent.
+// When in doubt, add the field to tenant/models/org.go instead.
+//
+// Migration plan:
+//  1. Phase 3 adds POST /v1/public/tenants and creates Tier-2 Tenants.
+//  2. For each pre-existing Client, we create a paired external Tenant and
+//     set Client.OrgUUID to its UUID.
+//  3. Subscription.ClientUUID is deprecated in favour of Subscription.TenantUUID.
+//  4. Once every subscription is migrated, Client is deleted.
 type Client struct {
 	UUID             string       `bson:"uuid" json:"uuid"`
 	OrgUUID          string       `bson:"orgUUID,omitempty" json:"orgUUID,omitempty"`

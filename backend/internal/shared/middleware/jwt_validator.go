@@ -122,10 +122,13 @@ func (v *JWTValidator) RequireAuth(next http.Handler) http.Handler {
 		ctx = context.WithValue(ctx, ctxClaims, claims)
 		ctx = context.WithValue(ctx, ctxOrgMemberships, claims.Memberships)
 
-		orgID, roles, resolved := resolveCurrentOrg(r, claims)
+		orgID, roles, kind, resolved := resolveCurrentOrg(r, claims)
 		if resolved {
 			ctx = context.WithValue(ctx, ctxOrgID, orgID)
 			ctx = context.WithValue(ctx, ctxOrgRoles, roles)
+			if kind != "" {
+				ctx = context.WithValue(ctx, ctxTenantKind, kind)
+			}
 		}
 		if h := r.Header.Get(OrgIDHeader); h != "" && !resolved {
 			writeErr(w, http.StatusForbidden, "not a member of requested organization")
@@ -138,11 +141,13 @@ func (v *JWTValidator) RequireAuth(next http.Handler) http.Handler {
 
 func parseClaims(m jwt.MapClaims) *authModels.JWTClaims {
 	c := &authModels.JWTClaims{
-		UserUUID:     getStr(m, "sub"),
-		Email:        getStr(m, "email"),
-		SystemRole:   getStr(m, "srole"),
-		TokenType:    getStr(m, "type"),
-		DefaultOrgID: getStr(m, "dorg"),
+		UserUUID:         getStr(m, "sub"),
+		Email:            getStr(m, "email"),
+		SystemRole:       getStr(m, "srole"),
+		TokenType:        getStr(m, "type"),
+		DefaultOrgID:     getStr(m, "dorg"),
+		ActingTenantID:   getStr(m, "acting_tenant_id"),
+		ActingTenantKind: getStr(m, "acting_tenant_kind"),
 	}
 	if mbrs, ok := m["mbr"].([]interface{}); ok {
 		for _, raw := range mbrs {
@@ -150,7 +155,10 @@ func parseClaims(m jwt.MapClaims) *authModels.JWTClaims {
 			if !ok {
 				continue
 			}
-			mb := authModels.OrgMembership{OrgUUID: getStr(obj, "oid")}
+			mb := authModels.OrgMembership{
+				OrgUUID:    getStr(obj, "oid"),
+				TenantKind: getStr(obj, "k"),
+			}
 			if roles, ok := obj["r"].([]interface{}); ok {
 				for _, r := range roles {
 					if s, ok := r.(string); ok {

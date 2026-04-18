@@ -28,6 +28,10 @@ const (
 	ctxOrgID          = "orgID"
 	ctxOrgMemberships = "orgMemberships"
 	ctxOrgRoles       = "orgRoles"
+	// ctxTenantKind carries the tier ("internal" | "external") of the tenant
+	// the current request is acting in. Populated from claims.ActingTenantKind
+	// or resolved from the matched membership. See ADR-0001.
+	ctxTenantKind = "tenantKind"
 )
 
 // OrgIDHeader is the HTTP header clients use to pick the current tenant
@@ -151,10 +155,13 @@ func (m *AuthMiddleware) setUserContext(w http.ResponseWriter, r *http.Request, 
 	ctx = context.WithValue(ctx, ctxClaims, claims)
 	ctx = context.WithValue(ctx, ctxOrgMemberships, claims.Memberships)
 
-	orgID, roles, ok := resolveCurrentOrg(r, claims)
+	orgID, roles, kind, ok := resolveCurrentOrg(r, claims)
 	if ok {
 		ctx = context.WithValue(ctx, ctxOrgID, orgID)
 		ctx = context.WithValue(ctx, ctxOrgRoles, roles)
+		if kind != "" {
+			ctx = context.WithValue(ctx, ctxTenantKind, kind)
+		}
 	}
 
 	// If the client sent X-Org-ID but it doesn't match any membership,
@@ -172,27 +179,96 @@ func (m *AuthMiddleware) setUserContext(w http.ResponseWriter, r *http.Request, 
 }
 
 // resolveCurrentOrg picks the current org for this request. Returns the
-// resolved orgID, the user's roles in that org, and ok=false when no org
-// can be resolved (either the header is missing and there is no default,
-// or the header points to an org the user does not belong to).
-func resolveCurrentOrg(r *http.Request, claims *models.JWTClaims) (string, []string, bool) {
+// resolved orgID, the user's roles in that org, the tenant kind
+// ("internal" | "external" or empty if not known), and ok=false when no
+// org can be resolved.
+//
+// Tier resolution order (ADR-0001):
+//  1. claims.ActingTenantID + ActingTenantKind when set by the issuer — the
+//     JWT was minted for a specific tenant, nothing else can override it.
+//  2. X-Org-ID header when the user is a member of that org.
+//  3. claims.DefaultOrgID.
+func resolveCurrentOrg(r *http.Request, claims *models.JWTClaims) (string, []string, string, bool) {
+	// Stamped-in tenant on the JWT itself: client-portal tokens in Phase 3
+	// will always take this path. The header is ignored.
+	if claims.ActingTenantID != "" {
+		for _, mbr := range claims.Memberships {
+			if mbr.OrgUUID == claims.ActingTenantID {
+				kind := claims.ActingTenantKind
+				if kind == "" {
+					kind = mbr.TenantKind
+				}
+				return mbr.OrgUUID, mbr.Roles, kind, true
+			}
+		}
+	}
 	requested := r.Header.Get(OrgIDHeader)
 	if requested != "" {
 		for _, mbr := range claims.Memberships {
 			if mbr.OrgUUID == requested {
-				return mbr.OrgUUID, mbr.Roles, true
+				return mbr.OrgUUID, mbr.Roles, mbr.TenantKind, true
 			}
 		}
-		return "", nil, false
+		return "", nil, "", false
 	}
 	if claims.DefaultOrgID != "" {
 		for _, mbr := range claims.Memberships {
 			if mbr.OrgUUID == claims.DefaultOrgID {
-				return mbr.OrgUUID, mbr.Roles, true
+				return mbr.OrgUUID, mbr.Roles, mbr.TenantKind, true
 			}
 		}
 	}
-	return "", nil, false
+	return "", nil, "", false
+}
+
+// TenantKindFromContext returns the tier ("internal" | "external") for the
+// tenant this request is acting in, or empty when no tier is known (global
+// routes, or pre-ADR-0001 tokens). See ADR-0001.
+func TenantKindFromContext(ctx context.Context) string {
+	if v, ok := ctx.Value(ctxTenantKind).(string); ok {
+		return v
+	}
+	return ""
+}
+
+// RequireTenantKind rejects any request whose resolved tenant is not of the
+// expected kind. Use to gate Tier-1-only or Tier-2-only endpoints. Routes
+// without a resolved tenant (global routes) are also rejected — callers that
+// want tier-agnostic behavior simply don't use this middleware.
+func (m *AuthMiddleware) RequireTenantKind(expected string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			kind := TenantKindFromContext(r.Context())
+			if kind == "" {
+				m.sendErrorResponse(w, r, errors.AuthorizationError("tenant context required").
+					WithOperation("require_tenant_kind").
+					WithDetail("expected", expected).
+					Build())
+				return
+			}
+			if kind != expected {
+				m.sendErrorResponse(w, r, errors.AuthorizationError("wrong tenant tier for this route").
+					WithOperation("require_tenant_kind").
+					WithDetail("expected", expected).
+					WithDetail("actual", kind).
+					Build())
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// RequireInternalTenant is the convenience wrapper for operator-only routes.
+// Equivalent to RequireTenantKind(iface.TenantKindInternal).
+func (m *AuthMiddleware) RequireInternalTenant() func(http.Handler) http.Handler {
+	return m.RequireTenantKind(iface.TenantKindInternal)
+}
+
+// RequireExternalTenant is the convenience wrapper for client-only routes.
+// Equivalent to RequireTenantKind(iface.TenantKindExternal).
+func (m *AuthMiddleware) RequireExternalTenant() func(http.Handler) http.Handler {
+	return m.RequireTenantKind(iface.TenantKindExternal)
 }
 
 // Extract Bearer token from Authorization header.
@@ -235,9 +311,12 @@ func (m *AuthMiddleware) OptionalAuth(next http.Handler) http.Handler {
 			ctx = context.WithValue(ctx, ctxSystemRole, claims.SystemRole)
 			ctx = context.WithValue(ctx, ctxClaims, claims)
 			ctx = context.WithValue(ctx, ctxOrgMemberships, claims.Memberships)
-			if orgID, roles, ok := resolveCurrentOrg(r, claims); ok {
+			if orgID, roles, kind, ok := resolveCurrentOrg(r, claims); ok {
 				ctx = context.WithValue(ctx, ctxOrgID, orgID)
 				ctx = context.WithValue(ctx, ctxOrgRoles, roles)
+				if kind != "" {
+					ctx = context.WithValue(ctx, ctxTenantKind, kind)
+				}
 			}
 			r = r.WithContext(ctx)
 		}

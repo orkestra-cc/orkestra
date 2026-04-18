@@ -114,6 +114,62 @@ func CurrentOrgID(ctx context.Context) (string, bool) {
 	return middleware.GetOrgID(ctx)
 }
 
+// CurrentTenantKind returns the tier ("internal" | "external") of the
+// tenant the current request is acting in, or empty when no tier is known
+// (global/platform routes, or pre-ADR-0001 tokens). Consumers that need to
+// dispatch on tier — e.g. FatturaPA emission must be internal-only — read
+// this alongside CurrentOrgID.
+func CurrentTenantKind(ctx context.Context) string {
+	return middleware.TenantKindFromContext(ctx)
+}
+
+// RequireInternalTenant returns an error (and panics in dev) when the
+// current request is not acting in an internal operator tenant. Use at the
+// top of repository methods that must never run under an external client
+// tenant — e.g. FatturaPA invoice issuance, module admin, platform settings.
+//
+// Tier is determined from the JWT claim at middleware time — this check is a
+// defense-in-depth guard against a missing or misapplied middleware-level
+// RequireInternalTenant/RequireTenantKind chain.
+func RequireInternalTenant(ctx context.Context) error {
+	kind := CurrentTenantKind(ctx)
+	if kind == "" {
+		if isDev() {
+			panic("tenantrepo.RequireInternalTenant: tenant kind missing — route not gated by RequireAuth?")
+		}
+		return errors.AuthorizationError("tenant kind missing").
+			WithOperation("tenantrepo.RequireInternalTenant").Build()
+	}
+	if kind != "internal" {
+		return errors.AuthorizationError("this operation is restricted to internal tenants").
+			WithOperation("tenantrepo.RequireInternalTenant").
+			WithDetail("tenant_kind", kind).
+			Build()
+	}
+	return nil
+}
+
+// RequireExternalTenant is the mirror of RequireInternalTenant. Use at the
+// top of repository methods that only make sense for external clients — e.g.
+// subscription self-service actions.
+func RequireExternalTenant(ctx context.Context) error {
+	kind := CurrentTenantKind(ctx)
+	if kind == "" {
+		if isDev() {
+			panic("tenantrepo.RequireExternalTenant: tenant kind missing — route not gated by RequireAuth?")
+		}
+		return errors.AuthorizationError("tenant kind missing").
+			WithOperation("tenantrepo.RequireExternalTenant").Build()
+	}
+	if kind != "external" {
+		return errors.AuthorizationError("this operation is restricted to external tenants").
+			WithOperation("tenantrepo.RequireExternalTenant").
+			WithDetail("tenant_kind", kind).
+			Build()
+	}
+	return nil
+}
+
 func isDev() bool {
 	env := os.Getenv("ENVIRONMENT")
 	if env == "" {

@@ -1,7 +1,13 @@
 // Package tenantscope implements a static analyzer that enforces the org-scoping
-// invariant #1 from the Org-scoped RBAC plan: every MongoDB read/write in an
-// addon package must derive its filter (or aggregation pipeline) from
-// shared/tenantrepo.Scope, MustScope, or ScopeAggregate.
+// invariant #1 from the Org-scoped RBAC plan (and ADR-0001): every MongoDB
+// read/write in an addon package must derive its filter (or aggregation
+// pipeline) from shared/tenantrepo.Scope, MustScope, or ScopeAggregate.
+//
+// ADR-0001 reframes org-scoping as tenant-scoping with a two-tier Kind
+// discriminator. The tenantrepo helpers are unchanged at the call-site level
+// (they still take ctx and return a scoped filter); the tier distinction is
+// enforced by middleware, not by this analyzer. This analyzer's job is to
+// guarantee that every addon query is tenant-scoped at all, regardless of tier.
 //
 // Why: any addon repository that skips tenantrepo is a cross-tenant data leak
 // waiting to happen. The helper already panics in dev when the org context is

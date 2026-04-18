@@ -201,20 +201,48 @@ type NotificationSender interface {
 // possibly different roles in each.
 // ---------------------------------------------------------------------------
 
+// TenantKindInternal / TenantKindExternal mirror tenant/models.TenantKind.
+// Redeclared here as constants on the iface package so consumers (auth JWT
+// issuance, middleware, Cedar evaluator) do not have to import the tenant
+// module to read the tier.
+const (
+	TenantKindInternal = "internal"
+	TenantKindExternal = "external"
+)
+
+// TenantStatusActive is the only status that grants request access. All
+// other statuses (provisioning, suspended, archived, purged) cause middleware
+// to 403 or 503 as appropriate. Redeclared here for the same reason as
+// TenantKind* above.
+const (
+	TenantStatusProvisioning = "provisioning"
+	TenantStatusActive       = "active"
+	TenantStatusSuspended    = "suspended"
+	TenantStatusArchived     = "archived"
+	TenantStatusPurged       = "purged"
+)
+
+// Org is the DTO shape the tenant module exposes across the module boundary.
+// The Go type name is Org for historical reasons; semantically it is the
+// Tenant aggregate — see ADR-0001. A follow-up commit renames the type.
 type Org struct {
-	UUID     string
-	Name     string
-	Slug     string
-	Plan     string
-	Features []string
+	UUID             string
+	Kind             string   // iface.TenantKindInternal | iface.TenantKindExternal
+	ParentTenantUUID string   // empty for root tenants
+	Status           string   // iface.TenantStatus*
+	Name             string
+	Slug             string
+	Plan             string   // deprecated: superseded by capability entitlements in Phase 2
+	Features         []string // deprecated: see Plan
 }
 
 type Membership struct {
-	OrgUUID string
-	OrgName string
-	OrgSlug string
-	Roles   []string // authz role names the user holds in this org
-	IsOwner bool
+	OrgUUID    string
+	OrgName    string
+	OrgSlug    string
+	TenantKind string   // iface.TenantKind* — lets consumers dispatch on tier without a tenant lookup
+	Roles      []string // authz role names the user holds in this org
+	IsOwner    bool
 }
 
 type TenantProvider interface {

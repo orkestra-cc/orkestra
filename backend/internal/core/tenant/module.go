@@ -62,6 +62,17 @@ func (m *Module) Collections() []module.CollectionSpec {
 			// because the service only lazily filters expired rows on read.
 			{Keys: map[string]int{"expiresAt": 1}, ExpireAt: true},
 		}},
+		// Closure table for the tenant hierarchy (ADR-0001). Supports
+		// external multi-tenant clients (clients that are themselves
+		// multi-tenant with sub-workspaces). Indexed both ways so
+		// ancestor-of-X and descendants-of-X are O(1)/O(depth) respectively.
+		{Name: repository.CollAncestors, Indexes: []module.IndexSpec{
+			{OrderedKeys: []module.IndexKey{
+				{Field: "descendantUUID", Direction: 1},
+				{Field: "ancestorUUID", Direction: 1},
+			}, Unique: true},
+			{Keys: map[string]int{"ancestorUUID": 1}},
+		}},
 	}
 }
 

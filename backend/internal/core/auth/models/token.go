@@ -17,11 +17,16 @@ type TokenPair struct {
 }
 
 // OrgMembership is the subset of a tenant membership embedded in JWT claims.
-// Only org id and role names are embedded — permissions are resolved per
-// request by the authz module so revocation is instant.
+// Only org id, tenant kind, and role names are embedded — permissions are
+// resolved per-request by the authz module so revocation is instant.
+//
+// TenantKind lets middleware dispatch on tier ("is this request acting in an
+// internal operator tenant or an external client tenant?") without a DB
+// lookup. See ADR-0001.
 type OrgMembership struct {
-	OrgUUID string   `json:"oid"`
-	Roles   []string `json:"r"`
+	OrgUUID    string   `json:"oid"`
+	TenantKind string   `json:"k,omitempty"`
+	Roles      []string `json:"r"`
 }
 
 type JWTClaims struct {
@@ -39,6 +44,17 @@ type JWTClaims struct {
 	// Multi-tenancy claims
 	Memberships  []OrgMembership `json:"mbr,omitempty"`  // orgs the user belongs to
 	DefaultOrgID string          `json:"dorg,omitempty"` // selected when X-Org-ID header is absent
+
+	// ActingTenantID is the tenant this specific token is minted for. When
+	// set, middleware uses it directly instead of deriving the current tenant
+	// from the X-Org-ID header. Phase 3 external-client flows always set
+	// this so a client portal token can never accidentally act on an internal
+	// tenant. See ADR-0001.
+	ActingTenantID string `json:"acting_tenant_id,omitempty"`
+
+	// ActingTenantKind is cached alongside ActingTenantID so tier-aware
+	// middleware does not need to hit the DB. "internal" | "external".
+	ActingTenantKind string `json:"acting_tenant_kind,omitempty"`
 
 	// Security and session claims
 	SessionID   string  `json:"sid"`            // Session identifier
