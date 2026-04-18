@@ -13,7 +13,7 @@ const WebhookEventsPage: React.FC = () => {
     <>
       <PageHeader title="Webhook events" description="Audit trail dei webhook ricevuti dai gateway" className="mb-3">
         <Flex className="gap-2 mt-3">
-          <IconButton icon="sync" variant="falcon-default" onClick={() => refetch()}>
+          <IconButton icon="sync-alt" variant="falcon-default" onClick={() => refetch()}>
             Aggiorna
           </IconButton>
         </Flex>

@@ -66,7 +66,7 @@ const ClientsListPage: React.FC = () => {
           <IconButton icon="plus" variant="primary" onClick={openNew}>
             Nuovo cliente
           </IconButton>
-          <IconButton icon="sync" variant="falcon-default" onClick={() => refetch()}>
+          <IconButton icon="sync-alt" variant="falcon-default" onClick={() => refetch()}>
             Aggiorna
           </IconButton>
         </Flex>

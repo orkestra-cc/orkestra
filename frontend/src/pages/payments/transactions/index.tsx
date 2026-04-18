@@ -48,7 +48,7 @@ const TransactionsListPage: React.FC = () => {
     <>
       <PageHeader title="Transazioni" description="Storico degli addebiti e rimborsi Stripe" className="mb-3">
         <Flex className="gap-2 mt-3">
-          <IconButton icon="sync" variant="falcon-default" onClick={() => refetch()}>
+          <IconButton icon="sync-alt" variant="falcon-default" onClick={() => refetch()}>
             Aggiorna
           </IconButton>
         </Flex>

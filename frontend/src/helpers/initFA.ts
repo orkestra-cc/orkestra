@@ -254,7 +254,10 @@ import {
   faFileExport,
   faFileInvoice,
   faInbox,
-  faRobot
+  faRobot,
+  faCreditCard,
+  faRepeat,
+  faWallet
 } from '@fortawesome/free-solid-svg-icons';
 
 library.add(
@@ -515,5 +518,8 @@ library.add(
   faFileExport,
   faFileInvoice,
   faInbox,
-  faRobot
+  faRobot,
+  faCreditCard,
+  faRepeat,
+  faWallet
 );

@@ -61,7 +61,7 @@ const SubscriptionsListPage: React.FC = () => {
           >
             Nuova sottoscrizione
           </IconButton>
-          <IconButton icon="sync" variant="falcon-default" onClick={() => refetch()}>
+          <IconButton icon="sync-alt" variant="falcon-default" onClick={() => refetch()}>
             Aggiorna
           </IconButton>
         </Flex>

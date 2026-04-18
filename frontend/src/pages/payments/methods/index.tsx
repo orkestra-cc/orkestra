@@ -15,7 +15,7 @@ const PaymentMethodsPage: React.FC = () => {
     <>
       <PageHeader title="Metodi di pagamento" description="Carte e metodi salvati per cliente" className="mb-3">
         <Flex className="gap-2 mt-3">
-          <IconButton icon="sync" variant="falcon-default" onClick={() => refetch()}>
+          <IconButton icon="sync-alt" variant="falcon-default" onClick={() => refetch()}>
             Aggiorna
           </IconButton>
         </Flex>
