@@ -29,12 +29,14 @@ import (
 	"github.com/orkestra/backend/internal/shared/module"
 )
 
-// Module wires the audit sink, DSR pipeline, and admin/me handlers.
+// Module wires the audit sink, DSR pipeline, SOC2 evidence, and
+// admin/me handlers.
 type Module struct {
 	module.BaseModule
 	sink   *services.AuditSink
 	admin  *handlers.AdminHandler
 	me     *handlers.MeHandler
+	soc2   *handlers.SOC2Handler
 	logger *slog.Logger
 }
 
@@ -153,6 +155,12 @@ func (m *Module) Init(deps *module.Dependencies) error {
 		m.me = handlers.NewMeHandler(dsrSvc)
 	}
 
+	// SOC2 evidence service — reads from users, mfa factors, audit
+	// events, kms keys. No cross-module contract; the service queries
+	// collections directly since it's owned by compliance and the
+	// shape is read-only aggregation.
+	m.soc2 = handlers.NewSOC2Handler(services.NewSOC2EvidenceService(deps.DB))
+
 	// Push the sink into known consumer services. Each receiver is optional
 	// — missing services (module disabled, out of init order) are ignored so
 	// compliance boots cleanly regardless of which optional modules are
@@ -180,16 +188,21 @@ func (m *Module) Init(deps *module.Dependencies) error {
 	return nil
 }
 
-// RegisterRoutes mounts two groups: the admin audit read behind the
-// system-level permission, and the DSR self-service endpoints behind
+// RegisterRoutes mounts three groups: audit + SOC2 admin reads behind
+// the system-level permission, and DSR self-service endpoints behind
 // RequireGlobal (any authenticated user can export / erase their own
 // data).
 func (m *Module) RegisterRoutes(ri *module.RouteInfo) {
-	if m.admin != nil {
+	if m.admin != nil || m.soc2 != nil {
 		ri.ProtectedRouter.Group(func(r chi.Router) {
 			r.Use(ri.AuthMW.RequireSystemPermission("system.compliance.audit.read"))
 			api := humachi.New(r, ri.APIConfig)
-			handlers.Register(api, m.admin)
+			if m.admin != nil {
+				handlers.Register(api, m.admin)
+			}
+			if m.soc2 != nil {
+				handlers.RegisterSOC2Routes(api, m.soc2)
+			}
 		})
 	}
 	if m.me != nil {

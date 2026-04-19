@@ -26,7 +26,9 @@ import (
 	"github.com/orkestra/backend/internal/shared/remote"
 	"github.com/orkestra/backend/internal/shared/setup"
 	"github.com/orkestra/backend/internal/shared/systeminit"
+	"github.com/orkestra/backend/internal/shared/telemetry"
 	"github.com/orkestra/backend/internal/shared/utils"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
 func main() {
@@ -37,6 +39,20 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to load configuration: %v", err)
 	}
+
+	// OpenTelemetry tracer provider. Runs no-op when
+	// OTEL_EXPORTER_OTLP_ENDPOINT is unset so local dev stays
+	// frictionless; the per-request tenant baggage middleware still
+	// runs uniformly. Shutdown is deferred so buffered spans flush on
+	// SIGTERM.
+	tracerShutdown := telemetry.Init("orkestra-backend", cfg.Server.Environment, logger)
+	defer func() {
+		sctx, scancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer scancel()
+		if err := tracerShutdown(sctx); err != nil {
+			logger.Warn("telemetry shutdown", slog.String("error", err.Error()))
+		}
+	}()
 
 	// Connect infrastructure. 2-minute budget accommodates the
 	// retry-with-backoff loops in NewMongoConnection and NewRedisConnection
@@ -179,6 +195,11 @@ func main() {
 	// Protected router
 	protectedRouter := chi.NewRouter()
 	protectedRouter.Use(authMW.RequireAuth)
+	// TenantBaggage enriches the current OTEL span with tenant.id /
+	// tenant.kind / user.id / user.role resolved by RequireAuth. Mounted
+	// immediately after so the context values are populated; no-op on
+	// unauthenticated requests.
+	protectedRouter.Use(authMiddleware.TenantBaggage)
 
 	// Module routes
 	modRegistry.RegisterAllRoutes(&module.RouteInfo{
@@ -224,10 +245,16 @@ func main() {
 	registerHealthEndpoints(publicAPI, db, redisClient)
 	registerDocsEndpoints(router, publicAPI)
 
-	// HTTP server
+	// HTTP server. The router is wrapped in otelhttp.NewHandler so every
+	// request spawns a span the tenant-baggage middleware can enrich
+	// with tenant.id / tenant.kind / user.id (ADR-0001 Phase 4.4). When
+	// no OTLP endpoint is configured, span creation is still cheap and
+	// the attribute writes are no-ops — there is no dev-vs-prod
+	// divergence at the middleware level.
+	handler := otelhttp.NewHandler(router, "http.request")
 	srv := &http.Server{
 		Addr:           fmt.Sprintf(":%s", cfg.Server.Port),
-		Handler:        router,
+		Handler:        handler,
 		ReadTimeout:    15 * time.Second,
 		WriteTimeout:   7 * time.Minute,
 		IdleTimeout:    60 * time.Second,
