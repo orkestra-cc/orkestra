@@ -20,6 +20,7 @@ type Reconciler struct {
 	invoices      repository.InvoiceRepository
 	subscriptions repository.SubscriptionRepository
 	activity      *ActivityService
+	entitlement   *EntitlementSyncer
 	logger        *slog.Logger
 }
 
@@ -27,12 +28,14 @@ func NewReconciler(
 	invoices repository.InvoiceRepository,
 	subscriptions repository.SubscriptionRepository,
 	activity *ActivityService,
+	entitlement *EntitlementSyncer,
 	logger *slog.Logger,
 ) *Reconciler {
 	return &Reconciler{
 		invoices:      invoices,
 		subscriptions: subscriptions,
 		activity:      activity,
+		entitlement:   entitlement,
 		logger:        logger,
 	}
 }
@@ -59,17 +62,26 @@ func (r *Reconciler) MarkInvoicePaid(ctx context.Context, invoiceUUID, providerT
 	if err != nil {
 		return err
 	}
+	reactivated := false
 	if sub.Status == models.SubPastDue {
 		sub.Status = models.SubActive
 		sub.FailedChargeCount = 0
 		if err := r.subscriptions.Update(ctx, sub); err != nil {
 			return err
 		}
+		reactivated = true
 	}
 	r.activity.Log(ctx, sub, "system", models.ActivityCharged, "Invoice paid (webhook)", map[string]any{
 		"invoiceUUID":  invoiceUUID,
 		"providerTxID": providerTxID,
 	})
+	// Restore entitlements on the past_due → active recovery path. The
+	// initial activation is handled in SubscriptionService.Create; we only
+	// refresh here if we actually moved state, to avoid redundant grants on
+	// repeat invoice paid webhooks inside the same period.
+	if reactivated {
+		r.entitlement.OnActivate(ctx, sub)
+	}
 	return nil
 }
 
@@ -95,8 +107,10 @@ func (r *Reconciler) MarkInvoiceFailed(ctx context.Context, invoiceUUID, failure
 		return err
 	}
 	sub.FailedChargeCount++
+	suspended := false
 	if sub.FailedChargeCount >= models.MaxChargeFailures {
 		sub.Status = models.SubSuspended
+		suspended = true
 	} else {
 		sub.Status = models.SubPastDue
 	}
@@ -109,6 +123,12 @@ func (r *Reconciler) MarkInvoiceFailed(ctx context.Context, invoiceUUID, failure
 		"message":     failureMsg,
 		"attempts":    sub.FailedChargeCount,
 	})
+	// Past_due is recoverable — keep entitlements alive through the dunning
+	// window. Only revoke on suspension, the terminal state that takes the
+	// subscription out of service.
+	if suspended {
+		r.entitlement.OnDeactivate(ctx, sub)
+	}
 	return nil
 }
 

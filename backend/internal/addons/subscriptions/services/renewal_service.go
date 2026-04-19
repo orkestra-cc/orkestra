@@ -25,14 +25,15 @@ const DefaultVATRate = 0.22 // Italian IVA
 // The PaymentProvider is resolved lazily per call so the subscriptions
 // module can initialize before payments without a cyclic dependency.
 type RenewalService struct {
-	subs     repository.SubscriptionRepository
-	clients  repository.ClientRepository
-	services repository.ServiceRepository
-	invoices repository.InvoiceRepository
-	activity *ActivityService
-	notifier iface.NotificationSender // may be nil
-	registry *module.ServiceRegistry
-	logger   *slog.Logger
+	subs        repository.SubscriptionRepository
+	clients     repository.ClientRepository
+	services    repository.ServiceRepository
+	invoices    repository.InvoiceRepository
+	activity    *ActivityService
+	entitlement *EntitlementSyncer
+	notifier    iface.NotificationSender // may be nil
+	registry    *module.ServiceRegistry
+	logger      *slog.Logger
 }
 
 func NewRenewalService(
@@ -41,19 +42,21 @@ func NewRenewalService(
 	services repository.ServiceRepository,
 	invoices repository.InvoiceRepository,
 	activity *ActivityService,
+	entitlement *EntitlementSyncer,
 	notifier iface.NotificationSender,
 	registry *module.ServiceRegistry,
 	logger *slog.Logger,
 ) *RenewalService {
 	return &RenewalService{
-		subs:     subs,
-		clients:  clients,
-		services: services,
-		invoices: invoices,
-		activity: activity,
-		notifier: notifier,
-		registry: registry,
-		logger:   logger,
+		subs:        subs,
+		clients:     clients,
+		services:    services,
+		invoices:    invoices,
+		activity:    activity,
+		entitlement: entitlement,
+		notifier:    notifier,
+		registry:    registry,
+		logger:      logger,
 	}
 }
 
@@ -247,6 +250,11 @@ func (s *RenewalService) chargeInvoice(ctx context.Context, provider iface.Payme
 			"providerTxID": result.ProviderTxID,
 			"amountCents":  invoice.TotalCents,
 		})
+		// Refresh entitlements: the grant's ExpiresAt is bumped to the new
+		// period end so a tenant renewing on time never loses access, and a
+		// tenant recovering from past_due is re-entitled. Idempotent for
+		// within-period duplicate charges.
+		s.entitlement.OnActivate(ctx, sub)
 		s.sendNotification(ctx, client, "subscriptions.renewal.ok", invoice, nil)
 		return outcomeCharged, nil
 	case "requires_action":
@@ -277,8 +285,10 @@ func (s *RenewalService) handleChargeFailure(ctx context.Context, sub *models.Su
 		return outcomeFailed, err
 	}
 	sub.FailedChargeCount++
+	suspended := false
 	if sub.FailedChargeCount >= models.MaxChargeFailures {
 		sub.Status = models.SubSuspended
+		suspended = true
 	} else {
 		sub.Status = models.SubPastDue
 	}
@@ -286,6 +296,11 @@ func (s *RenewalService) handleChargeFailure(ctx context.Context, sub *models.Su
 	sub.NextBillingAt = now.AddDate(0, 0, 1)
 	if err := s.subs.Update(ctx, sub); err != nil {
 		return outcomeFailed, err
+	}
+	// Past_due stays entitled during the dunning window (max_failures
+	// attempts). Suspension is terminal for service consumption — revoke.
+	if suspended {
+		s.entitlement.OnDeactivate(ctx, sub)
 	}
 	s.activity.Log(ctx, sub, "system", models.ActivityChargeFailed, "Charge failed", map[string]any{
 		"invoiceUUID":  invoice.UUID,

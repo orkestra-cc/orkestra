@@ -133,15 +133,24 @@ func (m *SubscriptionsModule) Init(deps *module.Dependencies) error {
 	activitySvc := services.NewActivityService(activityRepo, deps.Logger)
 	serviceSvc := services.NewServiceService(serviceRepo, deps.Logger)
 	clientSvc := services.NewClientService(clientRepo, deps.Logger)
-	subscriptionSvc := services.NewSubscriptionService(subRepo, clientRepo, serviceRepo, activitySvc, deps.Logger)
+
+	// Resolve the tenant provider for capability entitlement sync. Core
+	// modules init before addons, so this is always present in a full
+	// deployment. Any alternative wiring that runs subscriptions without
+	// the tenant module gets a nil provider and the syncer degrades to
+	// no-ops — subscription state machines still work.
+	tenantProvider, _ := module.GetTyped[iface.TenantProvider](deps.Services, module.ServiceTenantProvider)
+	entitlementSyncer := services.NewEntitlementSyncer(serviceRepo, tenantProvider, deps.Logger)
+
+	subscriptionSvc := services.NewSubscriptionService(subRepo, clientRepo, serviceRepo, activitySvc, entitlementSyncer, deps.Logger)
 
 	notifier, _ := module.GetTyped[iface.NotificationSender](deps.Services, module.ServiceNotificationSender)
 
 	renewalSvc := services.NewRenewalService(
 		subRepo, clientRepo, serviceRepo, invoiceRepo,
-		activitySvc, notifier, deps.Services, deps.Logger,
+		activitySvc, entitlementSyncer, notifier, deps.Services, deps.Logger,
 	)
-	reconciler := services.NewReconciler(invoiceRepo, subRepo, activitySvc, deps.Logger)
+	reconciler := services.NewReconciler(invoiceRepo, subRepo, activitySvc, entitlementSyncer, deps.Logger)
 
 	ownershipSvc := services.NewClientOwnershipService(clientRepo)
 

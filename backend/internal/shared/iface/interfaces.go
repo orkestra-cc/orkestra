@@ -257,6 +257,35 @@ type TenantProvider interface {
 	// entitlement, regardless of whether the capability ID is known in the
 	// catalog — the catalog is advisory, the projection is authoritative.
 	HasCapability(ctx context.Context, tenantUUID, capabilityID string) (bool, error)
+	// GrantCapability creates an active entitlement for (tenantUUID, capID).
+	// If an active entitlement already exists for that pair, it is revoked
+	// first so the one-active-per-(tenant,capability) invariant holds. Safe
+	// to replay — the same input produces the same effective state, with a
+	// fresh audit row.
+	GrantCapability(ctx context.Context, in GrantCapabilityInput) error
+	// RevokeCapability marks the active entitlement for (tenantUUID, capID)
+	// as revoked. Idempotent: a no-op if no active row exists.
+	RevokeCapability(ctx context.Context, tenantUUID, capabilityID string) error
+}
+
+// GrantCapabilityInput is the cross-module payload for granting a capability
+// entitlement. Source/SourceRef tell the projection where the grant came
+// from (subscription row, admin action, trial program) so it can be replayed
+// or revoked by origin.
+type GrantCapabilityInput struct {
+	TenantUUID   string
+	CapabilityID string
+	// Source categorizes the grant. Known values: "subscription", "grant",
+	// "trial". Matches models.EntitlementSource on the tenant side.
+	Source    string
+	SourceRef string
+	GrantedBy string
+	// ExpiresAt is an optional absolute deadline. Nil = no expiry (lifetime
+	// of the grant); expired entitlements are treated as inactive.
+	ExpiresAt *time.Time
+	// Metadata is a free-form blob for provider-specific breadcrumbs. Opaque
+	// to the projection.
+	Metadata map[string]any
 }
 
 // ---------------------------------------------------------------------------

@@ -21,11 +21,12 @@ var (
 // SubscriptionService owns the state machine and period math for a
 // Subscription. It does NOT trigger charges — that's RenewalService's job.
 type SubscriptionService struct {
-	subs     repository.SubscriptionRepository
-	clients  repository.ClientRepository
-	services repository.ServiceRepository
-	activity *ActivityService
-	logger   *slog.Logger
+	subs        repository.SubscriptionRepository
+	clients     repository.ClientRepository
+	services    repository.ServiceRepository
+	activity    *ActivityService
+	entitlement *EntitlementSyncer
+	logger      *slog.Logger
 }
 
 func NewSubscriptionService(
@@ -33,14 +34,16 @@ func NewSubscriptionService(
 	clients repository.ClientRepository,
 	services repository.ServiceRepository,
 	activity *ActivityService,
+	entitlement *EntitlementSyncer,
 	logger *slog.Logger,
 ) *SubscriptionService {
 	return &SubscriptionService{
-		subs:     subs,
-		clients:  clients,
-		services: services,
-		activity: activity,
-		logger:   logger,
+		subs:        subs,
+		clients:     clients,
+		services:    services,
+		activity:    activity,
+		entitlement: entitlement,
+		logger:      logger,
 	}
 }
 
@@ -81,6 +84,11 @@ func (s *SubscriptionService) Create(ctx context.Context, clientUUID, serviceUUI
 		"serviceCode": svc.Code,
 		"tierCode":    tier.Code,
 	})
+	// Brand-new subscriptions start in Active status so the tenant gets the
+	// tier's capability bundle immediately (payment is confirmed on the
+	// first renewal tick). The syncer is a no-op when TenantUUID is empty —
+	// legacy client-only subs keep working without capability grants.
+	s.entitlement.OnActivate(ctx, sub)
 	return sub, nil
 }
 
@@ -118,6 +126,12 @@ func (s *SubscriptionService) Cancel(ctx context.Context, uuid string, atPeriodE
 	s.activity.Log(ctx, sub, actor, models.ActivityCancelled, "Subscription cancelled", map[string]any{
 		"atPeriodEnd": atPeriodEnd,
 	})
+	// Immediate cancel revokes capabilities right away; cancel-at-period-end
+	// keeps them until the period actually lapses (ExpiresAt on the grant
+	// handles the natural expiry). Do nothing on the deferred branch.
+	if !atPeriodEnd {
+		s.entitlement.OnDeactivate(ctx, sub)
+	}
 	return sub, nil
 }
 
@@ -152,6 +166,10 @@ func (s *SubscriptionService) Reactivate(ctx context.Context, uuid string, actor
 		return nil, err
 	}
 	s.activity.Log(ctx, sub, actor, models.ActivityReactivated, "Subscription reactivated", nil)
+	// Reactivation restores tier capabilities — GrantCapability revokes any
+	// stale/revoked row and writes a fresh one so the tenant is back to
+	// entitled without needing a separate admin intervention.
+	s.entitlement.OnActivate(ctx, sub)
 	return sub, nil
 }
 

@@ -9,6 +9,13 @@ type PricingTier struct {
 	Cycle       BillingCycle `bson:"cycle" json:"cycle"`
 	AmountCents int64        `bson:"amountCents" json:"amountCents"`
 	Currency    string       `bson:"currency" json:"currency"`
+	// Capabilities lists the capability IDs this tier grants to the
+	// subscribing tenant. When the subscription activates (created, or
+	// past_due → active after a retry succeeds), the tenant receives an
+	// active entitlement for each ID. When the subscription cancels or
+	// suspends, the entitlements are revoked. Empty for legacy services
+	// that ship no capability gate.
+	Capabilities []string `bson:"capabilities,omitempty" json:"capabilities,omitempty"`
 }
 
 // Service is a sellable item in the catalog (e.g. "N8N Workflow Pro",
