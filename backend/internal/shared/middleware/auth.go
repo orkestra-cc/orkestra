@@ -488,6 +488,47 @@ func (m *AuthMiddleware) RequireEntitlement(feature string) func(http.Handler) h
 	}
 }
 
+// RequireCapability blocks the request unless the current tenant holds an
+// active entitlement to the given capability ID in the tenant_entitlements
+// projection (Phase 2). Returns 402 Payment Required — distinct from 403
+// Forbidden — so the frontend can branch on the error and surface a
+// subscription / upgrade prompt rather than an access-denied screen.
+//
+// Typical use: apply this AFTER RequirePermission so RBAC runs first and
+// a 403 wins over a 402 when neither gate passes. The order does not affect
+// correctness (both must permit the request), only which error the caller
+// sees when multiple gates fail.
+func (m *AuthMiddleware) RequireCapability(capabilityID string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if m.tenant == nil {
+				m.sendErrorResponse(w, r, errors.InternalError("tenant service not ready").
+					WithOperation("require_capability").Build())
+				return
+			}
+			tenantID, ok := GetTenantID(r.Context())
+			if !ok {
+				m.sendErrorResponse(w, r, errors.AuthorizationError("tenant context required").
+					WithOperation("require_capability").
+					WithDetail("capability", capabilityID).Build())
+				return
+			}
+			allowed, err := m.tenant.HasCapability(r.Context(), tenantID, capabilityID)
+			if err != nil {
+				m.sendErrorResponse(w, r, errors.InternalError("capability check failed").
+					WithOperation("require_capability").
+					WithInternal(err).Build())
+				return
+			}
+			if !allowed {
+				m.sendCapabilityRequiredResponse(w, r, capabilityID, tenantID)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
 // RequireGlobal is a pass-through for routes that don't need an org context
 // (auth flows, org listing, user self-service). It just verifies the request
 // is authenticated; RequireAuth on the parent router already handles that.
@@ -602,7 +643,31 @@ func (m *AuthMiddleware) sendPlanLimitResponse(w http.ResponseWriter, r *http.Re
 			"location": "require_entitlement",
 			"value":    "PLAN_LIMIT",
 		}},
-		"feature": feature,
+		"feature":  feature,
 		"tenantId": tenantID,
+	})
+}
+
+// sendCapabilityRequiredResponse returns a 402 Payment Required when a
+// capability-gated route is hit by a tenant that does not hold an active
+// entitlement to that capability. Separate from sendPlanLimitResponse so
+// the frontend can distinguish plan-feature misses from capability misses
+// and surface the right flow (catalog subscribe vs plan upgrade).
+func (m *AuthMiddleware) sendCapabilityRequiredResponse(w http.ResponseWriter, r *http.Request, capabilityID, tenantID string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusPaymentRequired)
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"status": http.StatusPaymentRequired,
+		"title":  "capability required",
+		"detail": "tenant is not entitled to this capability",
+		"type":   "about:blank",
+		"errors": []map[string]interface{}{{
+			"message":  "capability required",
+			"location": "require_capability",
+			"value":    "CAPABILITY_REQUIRED",
+		}},
+		"capability": capabilityID,
+		"tenantId":   tenantID,
+		"code":       "capability_required",
 	})
 }

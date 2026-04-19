@@ -281,6 +281,42 @@ func (v *JWTValidator) RequireEntitlement(feature string) func(http.Handler) htt
 	}
 }
 
+// RequireCapability mirrors AuthMiddleware.RequireCapability for the AI
+// sidecar. When the sidecar has no TenantProvider wired the monolith's
+// upstream enforcement is trusted and the request passes through — matches
+// the RequireEntitlement pattern. When a provider is wired, the capability
+// projection is consulted directly and a miss returns 402.
+func (v *JWTValidator) RequireCapability(capabilityID string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if v.tenant == nil {
+				next.ServeHTTP(w, r)
+				return
+			}
+			tenantID, ok := GetTenantID(r.Context())
+			if !ok {
+				writeErr(w, http.StatusForbidden, "tenant context required")
+				return
+			}
+			allowed, err := v.tenant.HasCapability(r.Context(), tenantID, capabilityID)
+			if err != nil || !allowed {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusPaymentRequired)
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"status":     http.StatusPaymentRequired,
+					"title":      "capability required",
+					"detail":     "tenant is not entitled to this capability",
+					"capability": capabilityID,
+					"tenantId":   tenantID,
+					"code":       "capability_required",
+				})
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
 // fallbackAllowedByRole implements a minimal role check for the AI sidecar:
 // super_admin/administrator/developer system roles bypass the check;
 // otherwise the user must hold one of those roles in the current tenant.

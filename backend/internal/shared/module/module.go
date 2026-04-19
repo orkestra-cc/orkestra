@@ -280,6 +280,15 @@ type RoleMiddleware interface {
 	// includes the given feature. Returns 402 Payment Required.
 	RequireEntitlement(feature string) func(http.Handler) http.Handler
 
+	// RequireCapability blocks the request unless the current tenant holds
+	// an active entitlement to the given capability ID in the
+	// tenant_entitlements projection (Phase 2 of ADR-0001). Returns 402
+	// Payment Required — distinct from 403 Forbidden so the frontend can
+	// route the error to a subscribe / upgrade flow rather than an
+	// access-denied screen. Apply after RequirePermission so RBAC runs
+	// first; both gates must pass.
+	RequireCapability(capabilityID string) func(http.Handler) http.Handler
+
 	// RequireGlobal allows the request without an org context. Use for
 	// auth flows, self-service, and org-list endpoints that run before a
 	// current org is selected.
