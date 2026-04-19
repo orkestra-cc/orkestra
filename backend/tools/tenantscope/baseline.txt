@@ -141,6 +141,10 @@ internal/addons/documents/repository/template_repository.go:427:CountDocuments
 internal/addons/documents/repository/template_repository.go:436:CountDocuments
 internal/addons/documents/repository/template_repository.go:445:CountDocuments
 internal/addons/documents/repository/template_repository.go:450:CountDocuments
+internal/addons/identity/repository/idp_config_repo.go:137:FindOne
+internal/addons/identity/repository/idp_config_repo.go:152:FindOne
+internal/addons/identity/repository/scim_token_repo.go:43:UpdateMany
+internal/addons/identity/repository/scim_token_repo.go:69:FindOne
 internal/addons/payments/repository/payment_method_repository.go:42:FindOne
 internal/addons/payments/repository/payment_method_repository.go:53:Find
 internal/addons/payments/repository/payment_method_repository.go:66:DeleteOne

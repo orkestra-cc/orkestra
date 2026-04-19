@@ -34,7 +34,7 @@ func (m *Module) Description() string {
 func (m *Module) Dependencies() []string { return []string{"user"} }
 
 func (m *Module) ProvidedServices() []module.ServiceKey {
-	return []module.ServiceKey{module.ServiceTenantProvider}
+	return []module.ServiceKey{module.ServiceTenantProvider, module.ServiceTenantService}
 }
 
 func (m *Module) Collections() []module.CollectionSpec {
@@ -113,6 +113,10 @@ func (m *Module) Init(deps *module.Dependencies) error {
 	m.svc = services.New(repo)
 	m.handler = handlers.New(m.svc)
 	deps.Services.Register(module.ServiceTenantProvider, iface.TenantProvider(m.svc))
+	// Also publish the concrete service so addon modules (compliance) that
+	// need to drive post-init setters can resolve it without importing the
+	// tenant package from a second location.
+	deps.Services.Register(module.ServiceTenantService, m.svc)
 	return nil
 }
 

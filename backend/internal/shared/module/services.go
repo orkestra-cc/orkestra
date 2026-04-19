@@ -29,6 +29,11 @@ const (
 	ServicePasswordAuthService ServiceKey = "auth.password_auth"
 
 	ServiceTenantProvider ServiceKey = "tenant.provider"
+	// ServiceTenantService is the concrete *tenant/services.Service registered
+	// alongside the TenantProvider interface. Compliance consumes it to wire
+	// its audit sink via SetAuditSink — the public provider interface stays
+	// slim, the concrete service carries post-init setters.
+	ServiceTenantService  ServiceKey = "tenant.service"
 	ServiceAuthzProvider  ServiceKey = "authz.provider"
 
 	// ServiceCapabilityRegistry is the boot-time catalog of Capability
@@ -46,6 +51,12 @@ const (
 	ServicePaymentProvider        ServiceKey = "payments.provider"
 	ServiceSubscriptionReconciler ServiceKey = "subscriptions.reconciler"
 	ServiceClientOwnership        ServiceKey = "subscriptions.client_ownership"
+
+	// ServiceAuditSink is the platform-wide append-only audit trail sink
+	// provided by the compliance module. Consumers resolve it via
+	// module.GetTyped[iface.AuditSink] and call Emit on hot paths — the
+	// sink is fire-and-forget, so a missing implementation is not fatal.
+	ServiceAuditSink ServiceKey = "compliance.audit_sink"
 )
 
 // ServiceRegistry is a typed key-value store for cross-module service sharing.

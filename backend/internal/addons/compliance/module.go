@@ -1,0 +1,154 @@
+// Package compliance is the Phase-4.1 audit-log foundation. It owns the
+// append-only audit_events collection, registers iface.AuditSink so every
+// other module can emit events without importing this package, and serves
+// the platform-admin read surface at /v1/admin/audit-events.
+//
+// Later Phase-4 commits build GDPR DSR pipelines and SOC2 evidence
+// automation on top of the same collection. Keep the write path lean —
+// consumers call Emit from hot paths.
+package compliance
+
+import (
+	"log/slog"
+	"time"
+
+	"github.com/danielgtaylor/huma/v2/adapters/humachi"
+	"github.com/go-chi/chi/v5"
+
+	"github.com/orkestra/backend/internal/addons/compliance/handlers"
+	"github.com/orkestra/backend/internal/addons/compliance/models"
+	"github.com/orkestra/backend/internal/addons/compliance/repository"
+	"github.com/orkestra/backend/internal/addons/compliance/services"
+	authServices "github.com/orkestra/backend/internal/core/auth/services"
+	tenantServices "github.com/orkestra/backend/internal/core/tenant/services"
+	"github.com/orkestra/backend/internal/shared/config"
+	"github.com/orkestra/backend/internal/shared/iface"
+	"github.com/orkestra/backend/internal/shared/module"
+)
+
+// Module wires the audit sink and admin read handler.
+type Module struct {
+	module.BaseModule
+	sink   *services.AuditSink
+	admin  *handlers.AdminHandler
+	logger *slog.Logger
+}
+
+// NewModule returns an unwired module; Init constructs the sink.
+func NewModule() *Module { return &Module{} }
+
+func (m *Module) Name() string                    { return "compliance" }
+func (m *Module) DisplayName() string             { return "Compliance (Audit + DSR)" }
+func (m *Module) Description() string             { return "Platform compliance plane: append-only audit log consumed by every module, plus (later phases) GDPR DSR pipelines and SOC2 evidence automation." }
+func (m *Module) Category() module.ModuleCategory { return module.CategoryToggleable }
+
+// Enabled defaults to true so compliance evidence is collected on every
+// boot unless an operator explicitly opts out — SOC2 auditors expect
+// uninterrupted audit trail coverage.
+func (m *Module) Enabled(_ *config.Config) bool { return true }
+
+// Dependencies: auth + tenant. Compliance produces the sink and then
+// pushes it into consumer services via their post-init setters — that
+// requires the consumers to be fully constructed before compliance's
+// Init runs. The topological sort guarantees this ordering.
+//
+// Consumers remain loosely coupled: they accept a nil sink when compliance
+// is disabled and skip emission entirely (see emit* helpers). Additional
+// consumers added by later phases (identity, subscriptions) extend this
+// list when their setter wiring lands.
+func (m *Module) Dependencies() []string { return []string{"auth", "tenant"} }
+
+// ProvidedServices publishes the sink under a stable key so every consumer
+// can resolve it with module.GetTyped.
+func (m *Module) ProvidedServices() []module.ServiceKey {
+	return []module.ServiceKey{module.ServiceAuditSink}
+}
+
+// Permissions contributes the system-level read gate used by the admin
+// handler. Marked System:true so super_admin / administrator / developer
+// inherit it automatically from authz role seeding.
+func (m *Module) Permissions() []iface.PermissionSpec {
+	return []iface.PermissionSpec{
+		{
+			Key:         "system.compliance.audit.read",
+			Module:      "compliance",
+			Description: "Read the platform audit event trail",
+			System:      true,
+		},
+	}
+}
+
+// Collections declares the audit_events collection. Indexes are tuned for
+// the admin list (tenant+timestamp desc, actor+timestamp desc, action
+// prefix scans) plus a TTL on timestamp that enforces the default
+// retention window (2 years).
+func (m *Module) Collections() []module.CollectionSpec {
+	return []module.CollectionSpec{
+		{Name: models.AuditEventsCollection, Indexes: []module.IndexSpec{
+			{Keys: map[string]int{"uuid": 1}, Unique: true},
+			{OrderedKeys: []module.IndexKey{
+				{Field: "tenantId", Direction: 1},
+				{Field: "timestamp", Direction: -1},
+			}},
+			{OrderedKeys: []module.IndexKey{
+				{Field: "actorUserId", Direction: 1},
+				{Field: "timestamp", Direction: -1},
+			}},
+			{OrderedKeys: []module.IndexKey{
+				{Field: "action", Direction: 1},
+				{Field: "timestamp", Direction: -1},
+			}},
+			{Keys: map[string]int{"resourceType": 1, "resourceId": 1}},
+			// Retention: 2 years. SOC2 auditors typically require 1 year;
+			// GDPR lets us keep audit logs as long as there is a legitimate
+			// interest. Two years covers both without forcing per-tenant
+			// retention config in this phase.
+			{Keys: map[string]int{"timestamp": 1}, TTL: 2 * 365 * 24 * time.Hour},
+		}},
+	}
+}
+
+// Init constructs the repository, the sink, and the admin handler, then
+// registers the sink in the service registry and pushes it into consumer
+// services that accept post-init wiring.
+func (m *Module) Init(deps *module.Dependencies) error {
+	repo := repository.New(deps.DB)
+	m.sink = services.NewSink(repo, deps.Logger)
+	m.admin = handlers.New(repo)
+	m.logger = deps.Logger
+
+	sink := iface.AuditSink(m.sink)
+	deps.Services.Register(module.ServiceAuditSink, sink)
+
+	// Push the sink into known consumer services. Each receiver is optional
+	// — missing services (module disabled, out of init order) are ignored so
+	// compliance boots cleanly regardless of which optional modules are
+	// active.
+	if pa, ok := module.GetTyped[*authServices.PasswordAuthService](deps.Services, module.ServicePasswordAuthService); ok {
+		pa.SetAuditSink(sink)
+	}
+	if ts, ok := module.GetTyped[*tenantServices.Service](deps.Services, module.ServiceTenantService); ok {
+		ts.SetAuditSink(sink)
+	}
+
+	deps.Logger.Info("Compliance module initialized — audit sink ready")
+	return nil
+}
+
+// RegisterRoutes mounts the admin list endpoint on the protected router
+// behind the system-level read permission. No public surface in 4.1.
+func (m *Module) RegisterRoutes(ri *module.RouteInfo) {
+	if m.admin == nil {
+		return
+	}
+	ri.ProtectedRouter.Group(func(r chi.Router) {
+		r.Use(ri.AuthMW.RequireSystemPermission("system.compliance.audit.read"))
+		api := humachi.New(r, ri.APIConfig)
+		handlers.Register(api, m.admin)
+	})
+}
+
+// Sink exposes the concrete sink for modules that inject it via a setter
+// (onboarding, auth, tenant …) — avoids a second registry lookup when the
+// compliance module and the consumer live in the same binary.
+func (m *Module) Sink() *services.AuditSink { return m.sink }

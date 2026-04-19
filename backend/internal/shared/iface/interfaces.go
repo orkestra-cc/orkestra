@@ -485,3 +485,60 @@ type ClientOwnershipProvider interface {
 	// when the client does not exist.
 	GetClientOrgUUID(ctx context.Context, clientUUID string) (string, error)
 }
+
+// ---------------------------------------------------------------------------
+// AuditSink — consumed by: every module that performs a security-sensitive
+// or lifecycle-changing action. Provided by the compliance module.
+//
+// Emit is fire-and-forget: the sink logs internal failures but never
+// surfaces them, so callers on the hot path do not need to branch on the
+// return value. Consumers resolve the sink with module.GetTyped — a nil
+// result means the compliance module is disabled, in which case callers
+// should simply skip the emit rather than erroring.
+// ---------------------------------------------------------------------------
+
+// AuditEvent is the cross-module shape consumers hand to AuditSink.Emit.
+// Fields mirror the persisted compliance_audit_events record but are kept
+// here so consumers never import the compliance package.
+//
+// Field semantics:
+//   - TenantID / TenantKind — the tenant this action took place in. Leave
+//     empty for platform-level events (no acting tenant).
+//   - ActorUserID / ActorEmail — the authenticated principal. Leave empty
+//     for system or anonymous actors.
+//   - ActorType — "user" | "system" | "anonymous". When empty, the sink
+//     infers "user" if ActorUserID is set, otherwise "system".
+//   - Action — dotted hierarchy identifier, e.g. "auth.login.succeeded".
+//     Consumers use the constants in compliance/models/audit_event.go.
+//   - ResourceType / ResourceID — the subject of the action (e.g.
+//     "tenant" / tenantUUID, "user" / userUUID).
+//   - Outcome — "success" | "failure" | "denied". Empty defaults to
+//     "success".
+//   - IPAddress / UserAgent — request provenance. Safe to leave empty for
+//     non-HTTP emitters.
+//   - Metadata — free-form structured payload, opaque to the sink.
+type AuditEvent struct {
+	TenantID     string
+	TenantKind   string
+	ActorUserID  string
+	ActorEmail   string
+	ActorType    string
+	Action       string
+	ResourceType string
+	ResourceID   string
+	Outcome      string
+	IPAddress    string
+	UserAgent    string
+	Metadata     map[string]any
+}
+
+// AuditSink persists audit events on behalf of consumer modules.
+// Implementations must be safe for concurrent use and must not block the
+// caller on backend failures.
+type AuditSink interface {
+	// Emit appends one audit event. The sink stamps UUID + Timestamp;
+	// callers populate only the semantic fields. Errors are logged
+	// internally and never returned — auditing must never break the
+	// hot path.
+	Emit(ctx context.Context, event AuditEvent)
+}

@@ -99,6 +99,9 @@ type PasswordAuthService struct {
 	// from VerifyEmail — no locking needed as the setter runs once at boot
 	// before the first HTTP request is served.
 	onboardingActivator OnboardingActivator
+	// auditSink is wired post-construction via SetAuditSink by the compliance
+	// module. Nil when compliance is disabled — emit* helpers tolerate that.
+	auditSink iface.AuditSink
 }
 
 // NewPasswordAuthService builds a new password auth service.
@@ -310,20 +313,24 @@ func (s *PasswordAuthService) Login(ctx context.Context, in LoginInput) (*authMo
 		// or not the user exists, foiling user enumeration via timing.
 		_, _ = s.passwordService.Verify(in.Password, s.passwordService.DummyHash())
 		s.recordFailed(ctx, in.IP, email)
+		s.emitLoginFailed(ctx, email, "", in.IP, "unknown_user")
 		return nil, ErrInvalidCredentials
 	}
 
 	if !user.IsActive {
 		s.recordFailed(ctx, in.IP, email)
+		s.emitLoginFailed(ctx, email, user.UUID, in.IP, "user_inactive")
 		return nil, ErrInvalidCredentials
 	}
 	if user.LockedUntil != nil && time.Now().Before(*user.LockedUntil) {
+		s.emitLoginFailed(ctx, email, user.UUID, in.IP, "account_locked")
 		return nil, ErrAccountLocked
 	}
 	if user.PasswordHash == "" {
 		// Account exists but was created via OAuth — don't leak that fact.
 		_, _ = s.passwordService.Verify(in.Password, s.passwordService.DummyHash())
 		s.recordFailed(ctx, in.IP, email)
+		s.emitLoginFailed(ctx, email, user.UUID, in.IP, "no_password")
 		return nil, ErrInvalidCredentials
 	}
 
@@ -336,10 +343,12 @@ func (s *PasswordAuthService) Login(ctx context.Context, in LoginInput) (*authMo
 			lockUntil = &t
 		}
 		_ = s.userService.RecordFailedLogin(ctx, user.UUID, lockUntil)
+		s.emitLoginFailed(ctx, email, user.UUID, in.IP, "bad_password")
 		return nil, ErrInvalidCredentials
 	}
 
 	if s.requireEmailVerification && !user.EmailVerified {
+		s.emitLoginFailed(ctx, email, user.UUID, in.IP, "email_unverified")
 		return nil, ErrEmailNotVerified
 	}
 
@@ -353,7 +362,39 @@ func (s *PasswordAuthService) Login(ctx context.Context, in LoginInput) (*authMo
 	// Successful login: clear the failed counter.
 	_ = s.userService.ClearFailedLogins(ctx, user.UUID)
 
+	s.emitAudit(ctx, iface.AuditEvent{
+		ActorUserID: user.UUID,
+		ActorEmail:  user.Email,
+		ActorType:   "user",
+		Action:      "auth.login.succeeded",
+		Outcome:     "success",
+		IPAddress:   in.IP,
+		Metadata: map[string]any{
+			"deviceId": in.DeviceID,
+			"platform": in.Platform,
+		},
+	})
+
 	return s.completeLogin(ctx, user, in, []string{"pwd"})
+}
+
+// emitLoginFailed is a terse helper for the many login-failure branches.
+// Captures the rejection reason in metadata so auditors can distinguish
+// credential stuffing from locked-account retries.
+func (s *PasswordAuthService) emitLoginFailed(ctx context.Context, email, userUUID, ip, reason string) {
+	actorType := "anonymous"
+	if userUUID != "" {
+		actorType = "user"
+	}
+	s.emitAudit(ctx, iface.AuditEvent{
+		ActorUserID: userUUID,
+		ActorEmail:  email,
+		ActorType:   actorType,
+		Action:      "auth.login.failed",
+		Outcome:     "failure",
+		IPAddress:   ip,
+		Metadata:    map[string]any{"reason": reason},
+	})
 }
 
 // completeLogin applies the MFA decision tree to a user who has already
@@ -452,6 +493,23 @@ func (s *PasswordAuthService) SetOnboardingActivator(fn OnboardingActivator) {
 	s.onboardingActivator = fn
 }
 
+// SetAuditSink wires the compliance audit sink post-construction. The
+// compliance module is optional, so auth's audit-emission helpers skip
+// silently when sink is nil.
+func (s *PasswordAuthService) SetAuditSink(sink iface.AuditSink) {
+	s.auditSink = sink
+}
+
+// emitAudit is a best-effort wrapper over auditSink.Emit that no-ops when
+// the sink is unwired. Kept terse so callers can sprinkle emits through
+// the login/password flows without noise.
+func (s *PasswordAuthService) emitAudit(ctx context.Context, event iface.AuditEvent) {
+	if s.auditSink == nil {
+		return
+	}
+	s.auditSink.Emit(ctx, event)
+}
+
 // VerifyEmail consumes a verification token and marks the user verified.
 func (s *PasswordAuthService) VerifyEmail(ctx context.Context, rawToken string) error {
 	doc, err := s.lookupEmailToken(ctx, rawToken, authModels.EmailTokenPurposeVerifyEmail)
@@ -476,6 +534,14 @@ func (s *PasswordAuthService) VerifyEmail(ctx context.Context, rawToken string) 
 			)
 		}
 	}
+	s.emitAudit(ctx, iface.AuditEvent{
+		ActorUserID:  doc.UserUUID,
+		ActorType:    "user",
+		Action:       "auth.email.verified",
+		Outcome:      "success",
+		ResourceType: "user",
+		ResourceID:   doc.UserUUID,
+	})
 	return nil
 }
 
@@ -585,6 +651,15 @@ func (s *PasswordAuthService) ResetPassword(ctx context.Context, rawToken, newPa
 	if s.refreshTokenRepo != nil {
 		_ = s.refreshTokenRepo.RevokeTokensByUser(ctx, user.UUID, "password_reset")
 	}
+	s.emitAudit(ctx, iface.AuditEvent{
+		ActorUserID:  user.UUID,
+		ActorEmail:   user.Email,
+		ActorType:    "user",
+		Action:       "auth.password.reset_completed",
+		Outcome:      "success",
+		ResourceType: "user",
+		ResourceID:   user.UUID,
+	})
 	return nil
 }
 
@@ -615,6 +690,15 @@ func (s *PasswordAuthService) ChangePassword(ctx context.Context, userUUID, curr
 	if err := s.userService.UpdatePasswordHash(ctx, user.UUID, hash); err != nil {
 		return err
 	}
+	s.emitAudit(ctx, iface.AuditEvent{
+		ActorUserID:  user.UUID,
+		ActorEmail:   user.Email,
+		ActorType:    "user",
+		Action:       "auth.password.changed",
+		Outcome:      "success",
+		ResourceType: "user",
+		ResourceID:   user.UUID,
+	})
 	return nil
 }
 

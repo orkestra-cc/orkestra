@@ -20,11 +20,42 @@ import (
 
 // Service owns tenant lifecycle and implements iface.TenantProvider.
 type Service struct {
-	repo *repository.Repository
+	repo      *repository.Repository
+	auditSink iface.AuditSink
 }
 
 func New(repo *repository.Repository) *Service {
 	return &Service{repo: repo}
+}
+
+// SetAuditSink wires the compliance audit sink post-construction. Optional —
+// the emit* helpers tolerate a nil sink when the compliance module is
+// disabled or initializing later in the topological order.
+func (s *Service) SetAuditSink(sink iface.AuditSink) { s.auditSink = sink }
+
+// emitAudit forwards to the compliance sink when wired; no-op otherwise.
+func (s *Service) emitAudit(ctx context.Context, event iface.AuditEvent) {
+	if s.auditSink == nil {
+		return
+	}
+	s.auditSink.Emit(ctx, event)
+}
+
+// actorFromContext pulls the authenticated principal out of the request
+// context so lifecycle emits can attribute the change. Safe to call when
+// no principal is resolved — returns empty fields.
+func actorFromContext(ctx context.Context) (userUUID, email, kind string) {
+	if v, ok := ctx.Value("userUUID").(string); ok {
+		userUUID = v
+	}
+	if v, ok := ctx.Value("userEmail").(string); ok {
+		email = v
+	}
+	actorType := "system"
+	if userUUID != "" {
+		actorType = "user"
+	}
+	return userUUID, email, actorType
 }
 
 // --- Provider interface ---
@@ -205,28 +236,68 @@ func (s *Service) CreateExternalTenant(ctx context.Context, ownerUUID, name, slu
 	}); err != nil {
 		return nil, err
 	}
+	s.emitAudit(ctx, iface.AuditEvent{
+		TenantID:     t.UUID,
+		TenantKind:   string(t.Kind),
+		ActorUserID:  ownerUUID,
+		ActorType:    "user",
+		Action:       "tenant.lifecycle.provisioned",
+		ResourceType: "tenant",
+		ResourceID:   t.UUID,
+		Metadata:     map[string]any{"signupChannel": signupChannel, "name": t.Name, "slug": t.Slug},
+	})
 	return t, nil
 }
 
 // MarkTenantActive flips a provisioning tenant to active once the onboarding
 // saga (KMS key, IdP defaults, trial subscription, welcome email) completes.
 func (s *Service) MarkTenantActive(ctx context.Context, tenantUUID string) error {
-	return s.repo.UpdateTenantStatus(ctx, tenantUUID, models.TenantStatusActive)
+	if err := s.repo.UpdateTenantStatus(ctx, tenantUUID, models.TenantStatusActive); err != nil {
+		return err
+	}
+	s.emitLifecycle(ctx, "tenant.lifecycle.activated", tenantUUID)
+	return nil
 }
 
 // SuspendTenant, ArchiveTenant, PurgeTenant drive lifecycle transitions.
 // PurgeTenant eventually triggers crypto-shred of the tenant's KMS key
 // (Phase 4); today it only flips the status.
 func (s *Service) SuspendTenant(ctx context.Context, tenantUUID string) error {
-	return s.repo.UpdateTenantStatus(ctx, tenantUUID, models.TenantStatusSuspended)
+	if err := s.repo.UpdateTenantStatus(ctx, tenantUUID, models.TenantStatusSuspended); err != nil {
+		return err
+	}
+	s.emitLifecycle(ctx, "tenant.lifecycle.suspended", tenantUUID)
+	return nil
 }
 
 func (s *Service) ArchiveTenant(ctx context.Context, tenantUUID string) error {
-	return s.repo.UpdateTenantStatus(ctx, tenantUUID, models.TenantStatusArchived)
+	if err := s.repo.UpdateTenantStatus(ctx, tenantUUID, models.TenantStatusArchived); err != nil {
+		return err
+	}
+	s.emitLifecycle(ctx, "tenant.lifecycle.archived", tenantUUID)
+	return nil
 }
 
 func (s *Service) PurgeTenant(ctx context.Context, tenantUUID string) error {
-	return s.repo.UpdateTenantStatus(ctx, tenantUUID, models.TenantStatusPurged)
+	if err := s.repo.UpdateTenantStatus(ctx, tenantUUID, models.TenantStatusPurged); err != nil {
+		return err
+	}
+	s.emitLifecycle(ctx, "tenant.lifecycle.purged", tenantUUID)
+	return nil
+}
+
+// emitLifecycle is shared boilerplate for the status-transition emits.
+func (s *Service) emitLifecycle(ctx context.Context, action, tenantUUID string) {
+	userUUID, email, actorType := actorFromContext(ctx)
+	s.emitAudit(ctx, iface.AuditEvent{
+		TenantID:     tenantUUID,
+		ActorUserID:  userUUID,
+		ActorEmail:   email,
+		ActorType:    actorType,
+		Action:       action,
+		ResourceType: "tenant",
+		ResourceID:   tenantUUID,
+	})
 }
 
 func (s *Service) UpdateTenant(ctx context.Context, tenantUUID string, input models.UpdateTenantInput) error {
@@ -258,7 +329,11 @@ func (s *Service) UpdatePlan(ctx context.Context, tenantUUID string, input model
 }
 
 func (s *Service) DeleteTenant(ctx context.Context, tenantUUID string) error {
-	return s.repo.SoftDeleteTenant(ctx, tenantUUID)
+	if err := s.repo.SoftDeleteTenant(ctx, tenantUUID); err != nil {
+		return err
+	}
+	s.emitLifecycle(ctx, "tenant.deleted", tenantUUID)
+	return nil
 }
 
 // TenantAdminView is a tenant plus its current member count, used by the
