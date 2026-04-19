@@ -72,6 +72,20 @@ func (m *Module) Collections() []module.CollectionSpec {
 			}, Unique: true},
 			{Keys: map[string]int{"ancestorUUID": 1}},
 		}},
+		// Capability entitlements projection (Phase 2). Tenants may hold
+		// many historical rows per capability (revoked + re-granted, or
+		// expired); at most one is active at a time — that invariant is
+		// enforced in the service (Grant revokes any existing active row
+		// before inserting). Indexes here accelerate the common reads.
+		{Name: repository.CollEntitlements, Indexes: []module.IndexSpec{
+			{Keys: map[string]int{"uuid": 1}, Unique: true, Sparse: true},
+			{OrderedKeys: []module.IndexKey{
+				{Field: "tenantId", Direction: 1},
+				{Field: "capabilityId", Direction: 1},
+			}},
+			{Keys: map[string]int{"capabilityId": 1}},
+			{Keys: map[string]int{"expiresAt": 1}, Sparse: true},
+		}},
 	}
 }
 

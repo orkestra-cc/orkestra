@@ -247,7 +247,16 @@ type TenantProvider interface {
 	GetTenant(ctx context.Context, tenantUUID string) (*Tenant, error)
 	ListUserMemberships(ctx context.Context, userUUID string) ([]TenantMembership, error)
 	IsMember(ctx context.Context, userUUID, tenantUUID string) (bool, error)
+	// HasEntitlement is the legacy plan-feature check backed by Tenant.Features.
+	// Kept for backward compatibility while routes migrate off it; new routes
+	// should use HasCapability against the capability entitlement projection.
 	HasEntitlement(ctx context.Context, tenantUUID, feature string) (bool, error)
+	// HasCapability reports whether the tenant currently holds an active
+	// entitlement to the capability ID. Backed by the tenant_entitlements
+	// projection (Phase 2). Returns false if the tenant has no active
+	// entitlement, regardless of whether the capability ID is known in the
+	// catalog — the catalog is advisory, the projection is authoritative.
+	HasCapability(ctx context.Context, tenantUUID, capabilityID string) (bool, error)
 }
 
 // ---------------------------------------------------------------------------

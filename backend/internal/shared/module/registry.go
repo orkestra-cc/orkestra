@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/orkestra/backend/internal/shared/capability"
 	"github.com/orkestra/backend/internal/shared/config"
 	"github.com/orkestra/backend/internal/shared/iface"
 	"go.mongodb.org/mongo-driver/bson"
@@ -180,6 +181,14 @@ func (r *ModuleRegistry) InitAll(cfg *config.Config, deps *Dependencies) error {
 	}
 	deps.Services.Register(ServiceNavItems, allNavItems)
 
+	// Register an empty capability registry so modules can resolve the
+	// pointer during their Init if they want to hold a reference. It's
+	// populated in registerCapabilities after all Init calls complete —
+	// modules typically declare capabilities statically, but config-driven
+	// Capabilities() calls must happen after Init configures the module.
+	capReg := capability.NewRegistry()
+	deps.Services.Register(ServiceCapabilityRegistry, capReg)
+
 	// Initialize ALL modules in registration order.
 	// Core modules: fatal on error. Non-core: attempt Init and track failures.
 	// All modules get routes registered (gated by ModuleGate middleware for non-core).
@@ -210,7 +219,41 @@ func (r *ModuleRegistry) InitAll(cfg *config.Config, deps *Dependencies) error {
 	// permissions too.
 	r.registerPermissions()
 
+	// Collect Capabilities() from every initialized module and populate the
+	// shared capability registry. Runs after Init so modules that compute
+	// their capability list from config have had a chance to configure
+	// themselves. Tenants hold entitlements to capability IDs; middleware
+	// and Cedar policies use this catalog to validate that grants refer to
+	// a known capability and to surface the catalog in the admin UI.
+	r.registerCapabilities(capReg)
+
 	return nil
+}
+
+// registerCapabilities collects Capabilities() from every initialized module
+// into the shared registry. Module-level collisions with different bodies are
+// logged as warnings — the first declaration wins. Empty declarations are
+// normal: not every module owns a capability.
+func (r *ModuleRegistry) registerCapabilities(reg *capability.Registry) {
+	count := 0
+	for _, m := range r.initialized {
+		caps := m.Capabilities()
+		if len(caps) == 0 {
+			continue
+		}
+		if err := reg.Register(caps...); err != nil {
+			r.logger.Warn("capability registration collision",
+				slog.String("module", m.Name()),
+				slog.String("error", err.Error()),
+			)
+			continue
+		}
+		count += len(caps)
+	}
+	r.logger.Info("Registered capability catalog",
+		slog.Int("count", reg.Count()),
+		slog.Int("added_from_this_run", count),
+	)
 }
 
 // registerPermissions collects Permissions() from all initialized modules

@@ -9,6 +9,7 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/go-chi/chi/v5"
+	"github.com/orkestra/backend/internal/shared/capability"
 	"github.com/orkestra/backend/internal/shared/config"
 	"github.com/orkestra/backend/internal/shared/database"
 	"github.com/orkestra/backend/internal/shared/iface"
@@ -45,6 +46,12 @@ type Module interface {
 	// The registry collects these from every module at boot and upserts them
 	// into the authz catalog so administrators can bind them to custom roles.
 	Permissions() []iface.PermissionSpec
+	// Capabilities returns the entitlement-gated capabilities this module
+	// exposes. Capabilities are the units a tenant subscribes to — middleware
+	// and Cedar policies gate routes by checking whether the current tenant
+	// holds an active entitlement to the capability ID. The registry collects
+	// these at boot and makes them available via ServiceCapabilityRegistry.
+	Capabilities() []capability.Capability
 	// Dependencies returns names of modules that must init before this one.
 	Dependencies() []string
 	// ProvidedServices returns ServiceKeys this module registers in the ServiceRegistry.
@@ -182,6 +189,7 @@ func (BaseModule) ConfigSchema() []ConfigField         { return nil }
 func (BaseModule) Collections() []CollectionSpec       { return nil }
 func (BaseModule) NavItems() []NavItemSpec             { return nil }
 func (BaseModule) Permissions() []iface.PermissionSpec { return nil }
+func (BaseModule) Capabilities() []capability.Capability { return nil }
 func (BaseModule) Dependencies() []string              { return nil }
 func (BaseModule) ProvidedServices() []ServiceKey      { return nil }
 func (BaseModule) RequiredServices() []ServiceKey      { return nil }
