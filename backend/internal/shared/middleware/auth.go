@@ -457,37 +457,6 @@ func (m *AuthMiddleware) RequireSystemPermission(permission string) func(http.Ha
 	}
 }
 
-func (m *AuthMiddleware) RequireEntitlement(feature string) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if m.tenant == nil {
-				m.sendErrorResponse(w, r, errors.InternalError("tenant service not ready").
-					WithOperation("require_entitlement").Build())
-				return
-			}
-			tenantID, ok := GetTenantID(r.Context())
-			if !ok {
-				m.sendErrorResponse(w, r, errors.AuthorizationError("tenant context required").
-					WithOperation("require_entitlement").
-					WithDetail("feature", feature).Build())
-				return
-			}
-			allowed, err := m.tenant.HasEntitlement(r.Context(), tenantID, feature)
-			if err != nil {
-				m.sendErrorResponse(w, r, errors.InternalError("entitlement check failed").
-					WithOperation("require_entitlement").
-					WithInternal(err).Build())
-				return
-			}
-			if !allowed {
-				m.sendPlanLimitResponse(w, r, feature, tenantID)
-				return
-			}
-			next.ServeHTTP(w, r)
-		})
-	}
-}
-
 // RequireCapability blocks the request unless the current tenant holds an
 // active entitlement to the given capability ID in the tenant_entitlements
 // projection (Phase 2). Returns 402 Payment Required — distinct from 403
@@ -627,26 +596,6 @@ func (m *AuthMiddleware) sendErrorResponse(w http.ResponseWriter, r *http.Reques
 	json.NewEncoder(w).Encode(response)
 }
 
-// sendPlanLimitResponse returns a 402 Payment Required when a feature isn't
-// included in the tenant's plan. This is a first-class error distinct from
-// 403 Forbidden so the frontend can surface an "upgrade your plan" UI.
-func (m *AuthMiddleware) sendPlanLimitResponse(w http.ResponseWriter, r *http.Request, feature, tenantID string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusPaymentRequired)
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"status": http.StatusPaymentRequired,
-		"title":  "plan limit",
-		"detail": "feature not included in plan",
-		"type":   "about:blank",
-		"errors": []map[string]interface{}{{
-			"message":  "feature not included in plan",
-			"location": "require_entitlement",
-			"value":    "PLAN_LIMIT",
-		}},
-		"feature":  feature,
-		"tenantId": tenantID,
-	})
-}
 
 // sendCapabilityRequiredResponse returns a 402 Payment Required when a
 // capability-gated route is hit by a tenant that does not hold an active

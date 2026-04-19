@@ -248,44 +248,11 @@ func (v *JWTValidator) RequireSystemPermission(permission string) func(http.Hand
 	}
 }
 
-// RequireEntitlement is a pass-through when the sidecar has no tenant
-// provider wired — the monolith that issued the JWT already enforced plan
-// limits upstream, and the sidecar trusts valid tokens.
-func (v *JWTValidator) RequireEntitlement(feature string) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if v.tenant == nil {
-				next.ServeHTTP(w, r)
-				return
-			}
-			tenantID, ok := GetTenantID(r.Context())
-			if !ok {
-				writeErr(w, http.StatusForbidden, "tenant context required")
-				return
-			}
-			allowed, err := v.tenant.HasEntitlement(r.Context(), tenantID, feature)
-			if err != nil || !allowed {
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusPaymentRequired)
-				_ = json.NewEncoder(w).Encode(map[string]any{
-					"status":   http.StatusPaymentRequired,
-					"title":    "plan limit",
-					"detail":   "feature not included in plan",
-					"feature":  feature,
-					"tenantId": tenantID,
-				})
-				return
-			}
-			next.ServeHTTP(w, r)
-		})
-	}
-}
-
 // RequireCapability mirrors AuthMiddleware.RequireCapability for the AI
 // sidecar. When the sidecar has no TenantProvider wired the monolith's
-// upstream enforcement is trusted and the request passes through — matches
-// the RequireEntitlement pattern. When a provider is wired, the capability
-// projection is consulted directly and a miss returns 402.
+// upstream enforcement is trusted and the request passes through. When a
+// provider is wired, the capability projection is consulted directly and
+// a miss returns 402.
 func (v *JWTValidator) RequireCapability(capabilityID string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

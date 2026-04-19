@@ -12,6 +12,7 @@ import (
 	"github.com/orkestra/backend/internal/addons/documents/models"
 	"github.com/orkestra/backend/internal/addons/documents/repository"
 	"github.com/orkestra/backend/internal/addons/documents/services"
+	"github.com/orkestra/backend/internal/shared/capability"
 	sharedConfig "github.com/orkestra/backend/internal/shared/config"
 	"github.com/orkestra/backend/internal/shared/iface"
 	"github.com/orkestra/backend/internal/shared/middleware"
@@ -66,6 +67,19 @@ func (m *DocumentsModule) Permissions() []iface.PermissionSpec {
 	}
 }
 
+func (m *DocumentsModule) Capabilities() []capability.Capability {
+	return []capability.Capability{
+		{
+			ID:          "documents.access",
+			Module:      "documents",
+			Action:      "access",
+			Title:       "Documents",
+			Description: "Generate PDFs from HTML/CSS templates (invoices, offers, receipts, custom).",
+			Published:   true,
+		},
+	}
+}
+
 func (m *DocumentsModule) Init(deps *module.Dependencies) error {
 	docsConfig := &config.Config{
 		GotenbergURL:  deps.GetConfig("documents", "gotenbergURL"),
@@ -99,7 +113,7 @@ func (m *DocumentsModule) Init(deps *module.Dependencies) error {
 func (m *DocumentsModule) RegisterRoutes(ri *module.RouteInfo) {
 	ri.ProtectedRouter.Group(func(r chi.Router) {
 		r.Use(middleware.ModuleGate(ri.ConfigService, m.Name()))
-		r.Use(ri.AuthMW.RequireEntitlement("documents"))
+		r.Use(ri.AuthMW.RequireCapability("documents.access"))
 		r.Use(ri.AuthMW.RequirePermission("documents.template.read"))
 		api := humachi.New(r, ri.APIConfig)
 		RegisterRoutes(api, m.templateHandler, m.documentHandler)

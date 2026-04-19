@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/google/uuid"
@@ -82,9 +83,19 @@ func (s *Service) RevokeCapability(ctx context.Context, tenantUUID, capabilityID
 // HasCapability reports whether the tenant currently has an active
 // entitlement to the given capability. Implements the
 // iface.TenantProvider.HasCapability contract.
+//
+// Internal (operator-side) tenants short-circuit to true: capabilities are
+// the monetization seam for external client tenants, and internal tenants
+// host the platform — they don't subscribe. This keeps operator tooling
+// and dev workflows working without minting entitlement rows for every
+// registered capability on internal tenant creation. External tenants
+// always consult the projection.
 func (s *Service) HasCapability(ctx context.Context, tenantUUID, capabilityID string) (bool, error) {
 	if tenantUUID == "" || capabilityID == "" {
 		return false, nil
+	}
+	if t, err := s.repo.GetTenantByUUID(ctx, tenantUUID); err == nil && t.Kind == models.TenantKindInternal {
+		return true, nil
 	}
 	return s.repo.HasActiveEntitlement(ctx, tenantUUID, capabilityID)
 }
@@ -92,6 +103,38 @@ func (s *Service) HasCapability(ctx context.Context, tenantUUID, capabilityID st
 // ListEntitlements returns the active entitlements held by a tenant.
 func (s *Service) ListEntitlements(ctx context.Context, tenantUUID string) ([]models.Entitlement, error) {
 	return s.repo.ListActiveByTenant(ctx, tenantUUID)
+}
+
+// ListCapabilityIDs returns the deduplicated capability IDs the tenant
+// currently has active entitlements for, in deterministic (sorted) order.
+// Thin projection over ListEntitlements so Cedar's principal builder does
+// not reason about the entitlement metadata. Implements the
+// iface.TenantProvider.ListCapabilityIDs contract.
+func (s *Service) ListCapabilityIDs(ctx context.Context, tenantUUID string) ([]string, error) {
+	if tenantUUID == "" {
+		return nil, nil
+	}
+	ents, err := s.repo.ListActiveByTenant(ctx, tenantUUID)
+	if err != nil {
+		return nil, err
+	}
+	if len(ents) == 0 {
+		return nil, nil
+	}
+	seen := make(map[string]struct{}, len(ents))
+	ids := make([]string, 0, len(ents))
+	for _, e := range ents {
+		if e.CapabilityID == "" {
+			continue
+		}
+		if _, dup := seen[e.CapabilityID]; dup {
+			continue
+		}
+		seen[e.CapabilityID] = struct{}{}
+		ids = append(ids, e.CapabilityID)
+	}
+	sort.Strings(ids)
+	return ids, nil
 }
 
 // Capability source constants mirror iface.GrantCapabilityInput.Source

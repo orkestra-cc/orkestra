@@ -10,6 +10,7 @@ import (
 	"github.com/orkestra/backend/internal/addons/sales/handlers"
 	"github.com/orkestra/backend/internal/addons/sales/repository"
 	"github.com/orkestra/backend/internal/addons/sales/services"
+	"github.com/orkestra/backend/internal/shared/capability"
 	"github.com/orkestra/backend/internal/shared/config"
 	"github.com/orkestra/backend/internal/shared/iface"
 	"github.com/orkestra/backend/internal/shared/middleware"
@@ -72,6 +73,19 @@ func (m *SalesModule) Permissions() []iface.PermissionSpec {
 		{Key: "sales.job.read", Module: "sales", Description: "View sales jobs and reports"},
 		{Key: "sales.job.run", Module: "sales", Description: "Run prospect analysis jobs"},
 		{Key: "sales.admin", Module: "sales", Description: "Manage prompts and settings"},
+	}
+}
+
+func (m *SalesModule) Capabilities() []capability.Capability {
+	return []capability.Capability{
+		{
+			ID:          "sales.access",
+			Module:      "sales",
+			Action:      "access",
+			Title:       "Sales Intelligence",
+			Description: "Run AI-driven prospect analysis, scoring, and report generation.",
+			Published:   true,
+		},
 	}
 }
 
@@ -140,7 +154,7 @@ func (m *SalesModule) Init(deps *module.Dependencies) error {
 func (m *SalesModule) RegisterRoutes(ri *module.RouteInfo) {
 	ri.ProtectedRouter.Group(func(r chi.Router) {
 		r.Use(middleware.ModuleGate(ri.ConfigService, m.Name()))
-		r.Use(ri.AuthMW.RequireEntitlement("sales"))
+		r.Use(ri.AuthMW.RequireCapability("sales.access"))
 		r.Use(ri.AuthMW.RequirePermission("sales.job.read"))
 		api := humachi.New(r, ri.APIConfig)
 		RegisterSkillRoutes(api, m.skillHandler)

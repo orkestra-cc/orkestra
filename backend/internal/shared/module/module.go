@@ -276,10 +276,6 @@ type RoleMiddleware interface {
 	// Does not need an org context.
 	RequireSystemPermission(permission string) func(http.Handler) http.Handler
 
-	// RequireEntitlement blocks the request unless the current org's plan
-	// includes the given feature. Returns 402 Payment Required.
-	RequireEntitlement(feature string) func(http.Handler) http.Handler
-
 	// RequireCapability blocks the request unless the current tenant holds
 	// an active entitlement to the given capability ID in the
 	// tenant_entitlements projection (Phase 2 of ADR-0001). Returns 402

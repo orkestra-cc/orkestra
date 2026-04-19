@@ -52,6 +52,7 @@ type Service struct {
 	logger        *slog.Logger
 	userRoles     UserSystemRoleLookup
 	startMFAGrace MFAGraceStarter
+	lookupCaps    TenantCapabilityLookup
 	production    bool // when true, developer role is restricted to read-only
 
 	// cedarEngine is the Phase 1 shadow-mode Cedar evaluator. nil when
@@ -77,12 +78,20 @@ type UserSystemRoleLookup func(ctx context.Context, userUUID string) (string, er
 // repeated grant doesn't reset an already-running clock.
 type MFAGraceStarter func(ctx context.Context, userUUID string) error
 
+// TenantCapabilityLookup returns the capability IDs the acting tenant
+// currently holds active entitlements for. Used by the Cedar shadow-mode
+// evaluator to populate Principal.Capabilities so the capability_grants
+// defense-in-depth policy can reason about entitlements without this
+// package importing the tenant module.
+type TenantCapabilityLookup func(ctx context.Context, tenantUUID string) ([]string, error)
+
 type Config struct {
-	Repo          *repository.Repository
-	Redis         *database.RedisClientAdapter
-	Logger        *slog.Logger
-	LookupUser    UserSystemRoleLookup
-	StartMFAGrace MFAGraceStarter
+	Repo           *repository.Repository
+	Redis          *database.RedisClientAdapter
+	Logger         *slog.Logger
+	LookupUser     UserSystemRoleLookup
+	LookupCaps     TenantCapabilityLookup
+	StartMFAGrace  MFAGraceStarter
 	// Production gates sensitive role seeding decisions. When true, the
 	// `developer` system role is seeded with a read-only permission set
 	// (decision D9 in the Org-scoped RBAC plan). In dev and staging it
@@ -102,6 +111,7 @@ func New(cfg Config) *Service {
 		logger:              cfg.Logger,
 		userRoles:           cfg.LookupUser,
 		startMFAGrace:       cfg.StartMFAGrace,
+		lookupCaps:          cfg.LookupCaps,
 		production:          cfg.Production,
 		systemPermissionSet: make(map[string]struct{}),
 		allPermissionSet:    make(map[string]struct{}),
@@ -189,10 +199,17 @@ func (s *Service) shadowEvaluate(ctx context.Context, userUUID, tenantID, permis
 		// tier-aware forbid rules don't fire against an unknown kind.
 		tenantKind = "internal"
 	}
+	var capabilities []string
+	if s.lookupCaps != nil && tenantID != "" {
+		if caps, err := s.lookupCaps(ctx, tenantID); err == nil {
+			capabilities = caps
+		}
+	}
 	principal := cedar.Principal{
-		UserUUID:    userUUID,
-		SystemRole:  systemRole,
-		TenantRoles: tenantRoles,
+		UserUUID:     userUUID,
+		SystemRole:   systemRole,
+		TenantRoles:  tenantRoles,
+		Capabilities: capabilities,
 	}
 	resource := cedar.Resource{
 		TenantUUID:   tenantID,

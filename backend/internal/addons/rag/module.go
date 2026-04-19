@@ -9,6 +9,7 @@ import (
 	"github.com/orkestra/backend/internal/addons/rag/handlers"
 	"github.com/orkestra/backend/internal/addons/rag/repository"
 	"github.com/orkestra/backend/internal/addons/rag/services"
+	"github.com/orkestra/backend/internal/shared/capability"
 	"github.com/orkestra/backend/internal/shared/config"
 	"github.com/orkestra/backend/internal/shared/iface"
 	"github.com/orkestra/backend/internal/shared/middleware"
@@ -63,6 +64,19 @@ func (m *RAGModule) Permissions() []iface.PermissionSpec {
 	}
 }
 
+func (m *RAGModule) Capabilities() []capability.Capability {
+	return []capability.Capability{
+		{
+			ID:          "rag.access",
+			Module:      "rag",
+			Action:      "access",
+			Title:       "Retrieval-Augmented Generation",
+			Description: "Ingest documents into the knowledge graph and run grounded RAG queries.",
+			Published:   true,
+		},
+	}
+}
+
 func (m *RAGModule) Init(deps *module.Dependencies) error {
 	cfg := deps.Config
 
@@ -111,7 +125,7 @@ func (m *RAGModule) Init(deps *module.Dependencies) error {
 func (m *RAGModule) RegisterRoutes(ri *module.RouteInfo) {
 	ri.ProtectedRouter.Group(func(r chi.Router) {
 		r.Use(middleware.ModuleGate(ri.ConfigService, m.Name()))
-		r.Use(ri.AuthMW.RequireEntitlement("rag"))
+		r.Use(ri.AuthMW.RequireCapability("rag.access"))
 		r.Use(ri.AuthMW.RequirePermission("rag.document.read"))
 		api := humachi.New(r, ri.APIConfig)
 		if m.documentHandler != nil {

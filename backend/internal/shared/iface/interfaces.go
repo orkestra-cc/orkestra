@@ -223,13 +223,15 @@ const (
 // Tenant is the DTO shape the tenant module exposes across the module boundary.
 type Tenant struct {
 	UUID             string
-	Kind             string   // iface.TenantKindInternal | iface.TenantKindExternal
-	ParentTenantUUID string   // empty for root tenants
-	Status           string   // iface.TenantStatus*
+	Kind             string // iface.TenantKindInternal | iface.TenantKindExternal
+	ParentTenantUUID string // empty for root tenants
+	Status           string // iface.TenantStatus*
 	Name             string
 	Slug             string
-	Plan             string   // deprecated: superseded by capability entitlements in Phase 2
-	Features         []string // deprecated: see Plan
+	// Plan is an informational label kept for UI and reporting. Access to
+	// features is driven by capability entitlements (see HasCapability),
+	// not by plan name.
+	Plan string
 }
 
 // TenantMembership is a user's membership in a tenant — identifying the
@@ -247,10 +249,6 @@ type TenantProvider interface {
 	GetTenant(ctx context.Context, tenantUUID string) (*Tenant, error)
 	ListUserMemberships(ctx context.Context, userUUID string) ([]TenantMembership, error)
 	IsMember(ctx context.Context, userUUID, tenantUUID string) (bool, error)
-	// HasEntitlement is the legacy plan-feature check backed by Tenant.Features.
-	// Kept for backward compatibility while routes migrate off it; new routes
-	// should use HasCapability against the capability entitlement projection.
-	HasEntitlement(ctx context.Context, tenantUUID, feature string) (bool, error)
 	// HasCapability reports whether the tenant currently holds an active
 	// entitlement to the capability ID. Backed by the tenant_entitlements
 	// projection (Phase 2). Returns false if the tenant has no active
@@ -266,6 +264,11 @@ type TenantProvider interface {
 	// RevokeCapability marks the active entitlement for (tenantUUID, capID)
 	// as revoked. Idempotent: a no-op if no active row exists.
 	RevokeCapability(ctx context.Context, tenantUUID, capabilityID string) error
+	// ListCapabilityIDs returns the capability IDs the tenant currently
+	// holds active entitlements for, deduplicated and in deterministic
+	// order. Thin projection of ListEntitlements for consumers (e.g. the
+	// Cedar engine's principal builder) that only need the IDs.
+	ListCapabilityIDs(ctx context.Context, tenantUUID string) ([]string, error)
 }
 
 // GrantCapabilityInput is the cross-module payload for granting a capability

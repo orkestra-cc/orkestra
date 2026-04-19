@@ -78,10 +78,6 @@ const (
 	PlanEnterprise = "enterprise"
 )
 
-// FeatureWildcard — deprecated: superseded by capability-based entitlements
-// in Phase 2.
-const FeatureWildcard = "*"
-
 // ContactInfo is the primary point of contact for a tenant. Used for billing
 // notifications, subscription events, and DSR correspondence.
 type ContactInfo struct {
@@ -157,10 +153,11 @@ type Tenant struct {
 	// amount of tenant-scoped key-value state.
 	Metadata map[string]string `bson:"metadata,omitempty" json:"metadata,omitempty"`
 
-	// Plan + Features — deprecated. Kept during the Phase 2 capability
-	// rewrite. Do not read these from new code.
-	Plan     string   `bson:"plan,omitempty" json:"plan,omitempty"`
-	Features []string `bson:"features,omitempty" json:"features,omitempty"`
+	// Plan is an informational label (e.g. "free", "pro", "enterprise") kept
+	// for admin UI display only. Feature access is driven by capability
+	// entitlements — see the entitlement projection and the capability
+	// registry.
+	Plan string `bson:"plan,omitempty" json:"plan,omitempty"`
 
 	// Settings is a free-form UI config blob.
 	Settings map[string]string `bson:"settings,omitempty" json:"settings,omitempty"`
@@ -185,19 +182,6 @@ func (t *Tenant) IsExternal() bool { return t.Kind == TenantKindExternal }
 
 // IsActive reports whether the tenant is in an operational state.
 func (t *Tenant) IsActive() bool { return t.Status == TenantStatusActive }
-
-// HasFeature reports whether the tenant's plan includes the given feature.
-//
-// Deprecated: feature entitlements move to capability-based subscriptions
-// in Phase 2.
-func (t *Tenant) HasFeature(feature string) bool {
-	for _, f := range t.Features {
-		if f == FeatureWildcard || f == feature {
-			return true
-		}
-	}
-	return false
-}
 
 // TenantAncestor is one row of the transitive-closure hierarchy table
 // materialized for external multi-tenant clients. Every tenant has a
@@ -276,8 +260,7 @@ type UpdateTenantInput struct {
 }
 
 type UpdatePlanInput struct {
-	Plan     string   `json:"plan" validate:"required"`
-	Features []string `json:"features"`
+	Plan string `json:"plan" validate:"required"`
 }
 
 type InviteInput struct {

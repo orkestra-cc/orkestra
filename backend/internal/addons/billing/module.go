@@ -12,6 +12,7 @@ import (
 	"github.com/orkestra/backend/internal/addons/billing/jobs"
 	"github.com/orkestra/backend/internal/addons/billing/repository"
 	"github.com/orkestra/backend/internal/addons/billing/services"
+	"github.com/orkestra/backend/internal/shared/capability"
 	"github.com/orkestra/backend/internal/shared/config"
 	"github.com/orkestra/backend/internal/shared/iface"
 	"github.com/orkestra/backend/internal/shared/middleware"
@@ -173,12 +174,25 @@ func (m *BillingModule) Permissions() []iface.PermissionSpec {
 	}
 }
 
+func (m *BillingModule) Capabilities() []capability.Capability {
+	return []capability.Capability{
+		{
+			ID:          "billing.access",
+			Module:      "billing",
+			Action:      "access",
+			Title:       "Italian Electronic Invoicing",
+			Description: "Issue, send, and receive FatturaPA invoices via the SDI (Sistema di Interscambio).",
+			Published:   true,
+		},
+	}
+}
+
 func (m *BillingModule) RegisterRoutes(ri *module.RouteInfo) {
 	// Protected billing routes: require the billing permission and the
 	// "billing" feature on the tenant's plan.
 	ri.ProtectedRouter.Group(func(r chi.Router) {
 		r.Use(middleware.ModuleGate(ri.ConfigService, m.Name()))
-		r.Use(ri.AuthMW.RequireEntitlement("billing"))
+		r.Use(ri.AuthMW.RequireCapability("billing.access"))
 		r.Use(ri.AuthMW.RequirePermission("billing.invoice.read"))
 		api := humachi.New(r, ri.APIConfig)
 		RegisterRoutes(

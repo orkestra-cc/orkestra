@@ -54,7 +54,6 @@ func (s *Service) GetTenant(ctx context.Context, tenantUUID string) (*iface.Tena
 		Name:             t.Name,
 		Slug:             t.Slug,
 		Plan:             t.Plan,
-		Features:         t.Features,
 	}, nil
 }
 
@@ -99,14 +98,6 @@ func (s *Service) IsMember(ctx context.Context, userUUID, tenantUUID string) (bo
 	return true, nil
 }
 
-func (s *Service) HasEntitlement(ctx context.Context, tenantUUID, feature string) (bool, error) {
-	t, err := s.repo.GetTenantByUUID(ctx, tenantUUID)
-	if err != nil {
-		return false, err
-	}
-	return t.HasFeature(feature), nil
-}
-
 // --- Tenant lifecycle ---
 
 func (s *Service) CreateTenant(ctx context.Context, ownerUUID string, input models.CreateTenantInput) (*models.Tenant, error) {
@@ -122,7 +113,6 @@ func (s *Service) CreateTenant(ctx context.Context, ownerUUID string, input mode
 	if plan == "" {
 		plan = models.PlanFree
 	}
-	features := defaultFeaturesForPlan(plan)
 
 	kind := input.Kind
 	if !kind.Valid() {
@@ -157,7 +147,6 @@ func (s *Service) CreateTenant(ctx context.Context, ownerUUID string, input mode
 		SignupChannel:    sigChan,
 		Region:           "eu-west",
 		Plan:             plan,
-		Features:         features,
 	}
 
 	if err := s.repo.CreateTenant(ctx, t); err != nil {
@@ -261,12 +250,11 @@ func (s *Service) UpdateTenant(ctx context.Context, tenantUUID string, input mod
 	return s.repo.UpdateTenant(ctx, tenantUUID, update)
 }
 
+// UpdatePlan updates the tenant's plan label. Plan is informational only —
+// entitlements are driven by the capability projection (see HasCapability /
+// GrantCapability) and are not derived from the plan name.
 func (s *Service) UpdatePlan(ctx context.Context, tenantUUID string, input models.UpdatePlanInput) error {
-	features := input.Features
-	if features == nil {
-		features = defaultFeaturesForPlan(input.Plan)
-	}
-	return s.repo.UpdateTenant(ctx, tenantUUID, bson.M{"plan": input.Plan, "features": features})
+	return s.repo.UpdateTenant(ctx, tenantUUID, bson.M{"plan": input.Plan})
 }
 
 func (s *Service) DeleteTenant(ctx context.Context, tenantUUID string) error {
@@ -419,17 +407,6 @@ func (s *Service) GetTenantModel(ctx context.Context, tenantUUID string) (*model
 }
 
 // --- Helpers ---
-
-func defaultFeaturesForPlan(plan string) []string {
-	switch plan {
-	case models.PlanEnterprise:
-		return []string{models.FeatureWildcard}
-	case models.PlanPro:
-		return []string{"billing", "documents", "company", "sales", "agents"}
-	default:
-		return []string{"billing", "documents"}
-	}
-}
 
 func slugify(s string) string {
 	s = strings.ToLower(strings.TrimSpace(s))

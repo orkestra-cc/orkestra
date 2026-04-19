@@ -97,6 +97,18 @@ func (m *Module) Permissions() []iface.PermissionSpec {
 func (m *Module) Init(deps *module.Dependencies) error {
 	repo := repository.New(deps.DB)
 
+	// Optional TenantProvider handle: used by the Cedar shadow-mode
+	// evaluator to stamp Principal.Capabilities so capability_grants.cedar
+	// has something to reason about when a caller opts into capability
+	// enforcement. The lookup is nil-safe — when the tenant module is not
+	// yet registered (boot ordering) the Cedar principal simply has an
+	// empty capability set and the defense-in-depth rule is inert.
+	tenantProvider, _ := module.GetTyped[iface.TenantProvider](deps.Services, module.ServiceTenantProvider)
+	var lookupCaps services.TenantCapabilityLookup
+	if tenantProvider != nil {
+		lookupCaps = tenantProvider.ListCapabilityIDs
+	}
+
 	// The evaluator needs to know each user's system role to honor the
 	// developer/administrator shortcuts. We get it from UserProvider.
 	userSvc := module.MustGetTyped[iface.UserProvider](deps.Services, module.ServiceUserService)
@@ -131,6 +143,7 @@ func (m *Module) Init(deps *module.Dependencies) error {
 		Redis:         deps.RedisAdapter,
 		Logger:        deps.Logger,
 		LookupUser:    lookup,
+		LookupCaps:    lookupCaps,
 		StartMFAGrace: startMFAGrace,
 		// Production flag restricts the developer system role to read-only
 		// semantics (D9): dev/staging developers debug freely; prod

@@ -11,6 +11,7 @@ import (
 	"github.com/orkestra/backend/internal/addons/agents/handlers"
 	"github.com/orkestra/backend/internal/addons/agents/repository"
 	"github.com/orkestra/backend/internal/addons/agents/services"
+	"github.com/orkestra/backend/internal/shared/capability"
 	"github.com/orkestra/backend/internal/shared/config"
 	"github.com/orkestra/backend/internal/shared/iface"
 	"github.com/orkestra/backend/internal/shared/middleware"
@@ -61,6 +62,19 @@ func (m *AgentsModule) Permissions() []iface.PermissionSpec {
 		{Key: "agents.project.manage", Module: "agents", Description: "Create and manage agent projects"},
 		{Key: "agents.query", Module: "agents", Description: "Run queries against agents"},
 		{Key: "agents.admin", Module: "agents", Description: "Administer Hindsight banks and health"},
+	}
+}
+
+func (m *AgentsModule) Capabilities() []capability.Capability {
+	return []capability.Capability{
+		{
+			ID:          "agents.access",
+			Module:      "agents",
+			Action:      "access",
+			Title:       "AI Agents",
+			Description: "Run Hindsight-powered AI agents with per-project memory and RAG context.",
+			Published:   true,
+		},
 	}
 }
 
@@ -123,7 +137,7 @@ func (m *AgentsModule) Init(deps *module.Dependencies) error {
 func (m *AgentsModule) RegisterRoutes(ri *module.RouteInfo) {
 	ri.ProtectedRouter.Group(func(gated chi.Router) {
 		gated.Use(middleware.ModuleGate(ri.ConfigService, m.Name()))
-		gated.Use(ri.AuthMW.RequireEntitlement("agents"))
+		gated.Use(ri.AuthMW.RequireCapability("agents.access"))
 
 		gated.Group(func(r chi.Router) {
 			r.Use(ri.AuthMW.RequirePermission("agents.personal"))

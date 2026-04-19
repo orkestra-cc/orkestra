@@ -20,11 +20,11 @@ func newTestEngine(t *testing.T, env string) *Engine {
 func TestPolicyLoadingNonEmpty(t *testing.T) {
 	e := newTestEngine(t, "development")
 	// platform.cedar has 4 policies, tenant_scope.cedar has 5,
-	// tenant_roles.cedar has 4. capability_grants.cedar is intentionally
-	// empty. Sanity check the count is in the expected range so silent
+	// tenant_roles.cedar has 4, capability_grants.cedar has 1.
+	// Sanity check the count is in the expected range so silent
 	// drop-outs don't go unnoticed.
-	if got := e.PolicyCount(); got < 10 {
-		t.Fatalf("policy count too low: got %d, want >= 10", got)
+	if got := e.PolicyCount(); got < 11 {
+		t.Fatalf("policy count too low: got %d, want >= 11", got)
 	}
 }
 
@@ -188,5 +188,75 @@ func TestUnknownPrincipalDenied(t *testing.T) {
 	)
 	if d.Allowed {
 		t.Fatalf("unroled principal must be denied: %+v", d)
+	}
+}
+
+// TestCapabilityGrantInert: when RequiredCapability is empty the
+// defense-in-depth forbid rule must not fire — a super_admin still gets
+// the wildcard allow even though the tenant has no capabilities wired.
+func TestCapabilityGrantInert(t *testing.T) {
+	e := newTestEngine(t, "development")
+	d := e.Evaluate(Request{
+		Principal: Principal{UserUUID: "u1", SystemRole: "super_admin"},
+		Action:    "rag.query",
+		Resource:  Resource{TenantUUID: "t1", TenantKind: "external", TenantStatus: "active"},
+	})
+	if !d.Allowed {
+		t.Fatalf("capability forbid must be inert without RequiredCapability: %+v", d)
+	}
+}
+
+// TestCapabilityGrantForbidsUnentitled: when RequiredCapability is set
+// and the principal lacks that capability, the forbid rule beats every
+// permit — even super_admin's wildcard.
+func TestCapabilityGrantForbidsUnentitled(t *testing.T) {
+	e := newTestEngine(t, "development")
+	d := e.Evaluate(Request{
+		Principal:          Principal{UserUUID: "u1", SystemRole: "super_admin"},
+		Action:             "rag.query",
+		Resource:           Resource{TenantUUID: "t1", TenantKind: "external", TenantStatus: "active"},
+		RequiredCapability: "rag.query",
+	})
+	if d.Allowed {
+		t.Fatalf("unentitled capability must be forbidden: %+v", d)
+	}
+}
+
+// TestCapabilityGrantPermitsEntitled: same request as above but with the
+// capability present on the principal — the forbid rule stays silent and
+// an existing permit wins.
+func TestCapabilityGrantPermitsEntitled(t *testing.T) {
+	e := newTestEngine(t, "development")
+	d := e.Evaluate(Request{
+		Principal: Principal{
+			UserUUID:     "u1",
+			SystemRole:   "super_admin",
+			Capabilities: []string{"rag.query", "agents.run"},
+		},
+		Action:             "rag.query",
+		Resource:           Resource{TenantUUID: "t1", TenantKind: "external", TenantStatus: "active"},
+		RequiredCapability: "rag.query",
+	})
+	if !d.Allowed {
+		t.Fatalf("entitled capability must be allowed: %+v", d)
+	}
+}
+
+// TestCapabilityGrantForbidsWhenWrongCapabilityHeld: holding a different
+// capability than the one the request requires still trips forbid.
+func TestCapabilityGrantForbidsWhenWrongCapabilityHeld(t *testing.T) {
+	e := newTestEngine(t, "development")
+	d := e.Evaluate(Request{
+		Principal: Principal{
+			UserUUID:     "u1",
+			SystemRole:   "administrator",
+			Capabilities: []string{"agents.run"},
+		},
+		Action:             "rag.query",
+		Resource:           Resource{TenantUUID: "t1", TenantKind: "external", TenantStatus: "active"},
+		RequiredCapability: "rag.query",
+	})
+	if d.Allowed {
+		t.Fatalf("mismatched capability must be forbidden: %+v", d)
 	}
 }

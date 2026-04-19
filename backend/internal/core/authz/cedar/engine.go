@@ -57,6 +57,29 @@ type Principal struct {
 	UserUUID    string
 	SystemRole  string   // super_admin | administrator | developer | manager | operator | guest
 	TenantRoles []string // role names the user holds in the acting tenant
+	// Capabilities is the list of capability IDs the acting tenant currently
+	// holds an active entitlement for. Populated from
+	// TenantProvider.ListCapabilityIDs so Cedar's capability_grants.cedar
+	// forbid-unless-entitled rule can reject capability-gated actions when
+	// the tenant is unentitled. Empty when no capability context applies.
+	Capabilities []string
+}
+
+// Request bundles the inputs of an authorization evaluation. Callers that
+// need to enable the capability-enforcement pathway (Phase 2 defense in
+// depth) use Evaluate with a non-empty RequiredCapability; the simpler
+// IsAuthorized wrapper leaves it blank, which keeps shadow-mode semantics
+// unchanged.
+type Request struct {
+	Principal Principal
+	Action    string
+	Resource  Resource
+	// RequiredCapability, when non-empty, is stamped onto the request
+	// context as "requires_capability". capability_grants.cedar's
+	// forbid-unless-entitled rule fires only when this context key is
+	// present, so shadow-mode callers that don't yet wire capability
+	// enforcement stay untouched.
+	RequiredCapability string
 }
 
 // Resource is the target of an authorization request. Today every
@@ -140,14 +163,31 @@ func (e *Engine) PolicyCount() int {
 // Context carries the environment and a derived action_suffix ("read",
 // "update", "admin", …) so policies can dispatch on the naming convention
 // without exhaustively listing every action name.
+//
+// This is a thin wrapper over Evaluate that leaves RequiredCapability
+// empty — use Evaluate directly when you want the capability_grants.cedar
+// forbid-unless-entitled path to fire.
 func (e *Engine) IsAuthorized(p Principal, action string, r Resource) Decision {
+	return e.Evaluate(Request{Principal: p, Action: action, Resource: r})
+}
+
+// Evaluate is the canonical entry point. It accepts a Request so callers
+// can optionally set RequiredCapability (stamped into context for
+// defense-in-depth capability enforcement).
+func (e *Engine) Evaluate(req Request) Decision {
+	p := req.Principal
+	r := req.Resource
+	action := req.Action
+
 	principal := cedar.NewEntityUID(EntityUser, types.String(p.UserUUID))
 	actionUID := cedar.NewEntityUID("Action", types.String(action))
 	resourceUID := cedar.NewEntityUID(EntityTenant, types.String(r.TenantUUID))
 
 	entities := cedar.EntityMap{}
 
-	// Principal entity: system_role + tenant_roles as a Set<String>.
+	// Principal entity: system_role + tenant_roles + capabilities, each as
+	// a Set<String> attribute when non-empty. Absent sets stay absent so
+	// policies can use `principal has capabilities` as a presence check.
 	principalAttrs := types.RecordMap{}
 	if p.SystemRole != "" {
 		principalAttrs["system_role"] = types.String(p.SystemRole)
@@ -158,6 +198,13 @@ func (e *Engine) IsAuthorized(p Principal, action string, r Resource) Decision {
 			rs = append(rs, types.String(role))
 		}
 		principalAttrs["tenant_roles"] = types.NewSet(rs...)
+	}
+	if len(p.Capabilities) > 0 {
+		cs := make([]types.Value, 0, len(p.Capabilities))
+		for _, cap := range p.Capabilities {
+			cs = append(cs, types.String(cap))
+		}
+		principalAttrs["capabilities"] = types.NewSet(cs...)
 	}
 	entities[principal] = types.Entity{
 		UID:        principal,
@@ -181,24 +228,30 @@ func (e *Engine) IsAuthorized(p Principal, action string, r Resource) Decision {
 
 	// Context: env + derived action suffix. The suffix is the substring
 	// after the last "." — e.g. "tenant.member.invite" → "invite".
+	// RequiredCapability (when non-empty) stamps a requires_capability
+	// key so capability_grants.cedar can gate the request.
 	suffix := action
 	if idx := strings.LastIndex(action, "."); idx >= 0 && idx < len(action)-1 {
 		suffix = action[idx+1:]
 	}
-	reqCtx := cedar.NewRecord(cedar.RecordMap{
-		"env":            types.String(e.env),
-		"action_suffix":  types.String(suffix),
-		"action_key":     types.String(action),
-	})
+	ctxRec := cedar.RecordMap{
+		"env":           types.String(e.env),
+		"action_suffix": types.String(suffix),
+		"action_key":    types.String(action),
+	}
+	if req.RequiredCapability != "" {
+		ctxRec["requires_capability"] = types.String(req.RequiredCapability)
+	}
+	reqCtx := cedar.NewRecord(ctxRec)
 
-	req := cedar.Request{
+	cedarReq := cedar.Request{
 		Principal: principal,
 		Action:    actionUID,
 		Resource:  resourceUID,
 		Context:   reqCtx,
 	}
 
-	ok, diag := cedar.Authorize(e.policies, entities, req)
+	ok, diag := cedar.Authorize(e.policies, entities, cedarReq)
 	decision := Decision{Allowed: bool(ok)}
 	if len(diag.Reasons) > 0 {
 		decision.MatchedPolicy = string(diag.Reasons[0].PolicyID)

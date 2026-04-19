@@ -9,6 +9,7 @@ import (
 	"github.com/orkestra/backend/internal/addons/aimodels/handlers"
 	"github.com/orkestra/backend/internal/addons/aimodels/repository"
 	"github.com/orkestra/backend/internal/addons/aimodels/services"
+	"github.com/orkestra/backend/internal/shared/capability"
 	"github.com/orkestra/backend/internal/shared/config"
 	"github.com/orkestra/backend/internal/shared/iface"
 	"github.com/orkestra/backend/internal/shared/middleware"
@@ -63,6 +64,19 @@ func (m *AIModelsModule) Permissions() []iface.PermissionSpec {
 	}
 }
 
+func (m *AIModelsModule) Capabilities() []capability.Capability {
+	return []capability.Capability{
+		{
+			ID:          "aimodels.access",
+			Module:      "aimodels",
+			Action:      "access",
+			Title:       "AI Models",
+			Description: "Configure and exercise LLM + embedding model providers (Ollama, OpenAI, Anthropic, Gemini).",
+			Published:   true,
+		},
+	}
+}
+
 func (m *AIModelsModule) Init(deps *module.Dependencies) error {
 	repo := repository.NewModelRepository(deps.DB)
 
@@ -90,7 +104,7 @@ func (m *AIModelsModule) Init(deps *module.Dependencies) error {
 func (m *AIModelsModule) RegisterRoutes(ri *module.RouteInfo) {
 	ri.ProtectedRouter.Group(func(r chi.Router) {
 		r.Use(middleware.ModuleGate(ri.ConfigService, m.Name()))
-		r.Use(ri.AuthMW.RequireEntitlement("aimodels"))
+		r.Use(ri.AuthMW.RequireCapability("aimodels.access"))
 		r.Use(ri.AuthMW.RequirePermission("aimodels.admin"))
 		api := humachi.New(r, ri.APIConfig)
 		RegisterRoutes(api, m.handler)

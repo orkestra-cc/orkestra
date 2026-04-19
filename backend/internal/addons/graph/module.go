@@ -11,6 +11,7 @@ import (
 	"github.com/orkestra/backend/internal/addons/graph/handlers"
 	"github.com/orkestra/backend/internal/addons/graph/repository"
 	"github.com/orkestra/backend/internal/addons/graph/services"
+	"github.com/orkestra/backend/internal/shared/capability"
 	"github.com/orkestra/backend/internal/shared/config"
 	"github.com/orkestra/backend/internal/shared/database"
 	"github.com/orkestra/backend/internal/shared/iface"
@@ -81,6 +82,19 @@ func (m *GraphModule) Permissions() []iface.PermissionSpec {
 	}
 }
 
+func (m *GraphModule) Capabilities() []capability.Capability {
+	return []capability.Capability{
+		{
+			ID:          "graph.access",
+			Module:      "graph",
+			Action:      "access",
+			Title:       "Knowledge Graph",
+			Description: "Query and browse the Memgraph knowledge graph, run MAGE algorithms, and use vector search.",
+			Published:   true,
+		},
+	}
+}
+
 // Init wires up repositories, services, and handlers against a driver that
 // has not been dialed yet. The neo4j Go driver is lazy — NewDriverWithContext
 // only constructs the client, TCP only opens on VerifyConnectivity or the
@@ -127,7 +141,7 @@ func (m *GraphModule) Init(deps *module.Dependencies) error {
 func (m *GraphModule) RegisterRoutes(ri *module.RouteInfo) {
 	ri.ProtectedRouter.Group(func(r chi.Router) {
 		r.Use(middleware.ModuleGate(ri.ConfigService, m.Name()))
-		r.Use(ri.AuthMW.RequireEntitlement("graph"))
+		r.Use(ri.AuthMW.RequireCapability("graph.access"))
 		r.Use(ri.AuthMW.RequirePermission("graph.query.read"))
 		api := humachi.New(r, ri.APIConfig)
 		RegisterRoutes(api, m.handler)

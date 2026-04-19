@@ -35,9 +35,6 @@ func (s *stubTenantProvider) ListUserMemberships(context.Context, string) ([]ifa
 	return nil, nil
 }
 func (s *stubTenantProvider) IsMember(context.Context, string, string) (bool, error) { return false, nil }
-func (s *stubTenantProvider) HasEntitlement(context.Context, string, string) (bool, error) {
-	return false, nil
-}
 func (s *stubTenantProvider) HasCapability(context.Context, string, string) (bool, error) {
 	return false, nil
 }
@@ -48,6 +45,9 @@ func (s *stubTenantProvider) GrantCapability(_ context.Context, in iface.GrantCa
 func (s *stubTenantProvider) RevokeCapability(_ context.Context, tenantUUID, capabilityID string) error {
 	s.revokes = append(s.revokes, stubRevoke{tenantUUID: tenantUUID, capabilityID: capabilityID})
 	return nil
+}
+func (s *stubTenantProvider) ListCapabilityIDs(context.Context, string) ([]string, error) {
+	return nil, nil
 }
 
 // stubServiceRepo satisfies repository.ServiceRepository with an in-memory map.
