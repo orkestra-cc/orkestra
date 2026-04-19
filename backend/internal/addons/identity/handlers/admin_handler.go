@@ -16,6 +16,8 @@ import (
 
 	"github.com/orkestra/backend/internal/addons/identity/models"
 	"github.com/orkestra/backend/internal/addons/identity/repository"
+	"github.com/orkestra/backend/internal/shared/iface"
+	"github.com/orkestra/backend/internal/shared/middleware"
 	"github.com/orkestra/backend/internal/shared/utils"
 )
 
@@ -25,7 +27,8 @@ import (
 // surface — so only operators who can already manage the tenant can edit
 // its IdP.
 type AdminHandler struct {
-	repo *repository.Repository
+	repo      *repository.Repository
+	auditSink iface.AuditSink
 }
 
 // NewAdminHandler wires the admin handler. The repo is the only
@@ -33,6 +36,31 @@ type AdminHandler struct {
 // handles that at request time.
 func NewAdminHandler(repo *repository.Repository) *AdminHandler {
 	return &AdminHandler{repo: repo}
+}
+
+// SetAuditSink wires the compliance audit sink post-construction. Called
+// from the compliance module's Init after both modules are up.
+func (h *AdminHandler) SetAuditSink(sink iface.AuditSink) { h.auditSink = sink }
+
+// emitIdPChange is the shared emit site for IdP CRUD — pulls the actor
+// from the request context (admin route is already gated by RequireAuth +
+// RequirePermission) and stamps the tenant-scoped resource context.
+func (h *AdminHandler) emitIdPChange(ctx context.Context, action, idpConfigUUID string) {
+	if h.auditSink == nil {
+		return
+	}
+	tenantID, _ := middleware.GetTenantID(ctx)
+	userUUID, _ := middleware.GetUserUUID(ctx)
+	email, _ := middleware.GetUserEmail(ctx)
+	h.auditSink.Emit(ctx, iface.AuditEvent{
+		TenantID:     tenantID,
+		ActorUserID:  userUUID,
+		ActorEmail:   email,
+		ActorType:    "user",
+		Action:       action,
+		ResourceType: "identity_idp",
+		ResourceID:   idpConfigUUID,
+	})
 }
 
 // --- DTOs ---
@@ -146,17 +174,20 @@ func (h *AdminHandler) Put(ctx context.Context, req *PutIdPConfigRequest) (*PutI
 		cfg.ClientSecret = existing.ClientSecret
 	}
 
+	var action string
 	if existing == nil {
 		cfg.UUID = uuid.New().String()
 		if err := h.repo.Create(ctx, cfg); err != nil {
 			return nil, huma.Error500InternalServerError(err.Error())
 		}
+		action = "identity.idp.created"
 	} else {
 		cfg.UUID = existing.UUID
 		cfg.TenantID = existing.TenantID
 		if err := h.repo.UpdateForCurrentTenant(ctx, cfg); err != nil {
 			return nil, huma.Error500InternalServerError(err.Error())
 		}
+		action = "identity.idp.updated"
 	}
 
 	// Re-read to pick up server-owned timestamps.
@@ -164,17 +195,25 @@ func (h *AdminHandler) Put(ctx context.Context, req *PutIdPConfigRequest) (*PutI
 	if err != nil {
 		return nil, huma.Error500InternalServerError(err.Error())
 	}
+	h.emitIdPChange(ctx, action, fresh.UUID)
 	return &PutIdPConfigResponse{Body: toView(fresh)}, nil
 }
 
 // Delete removes the tenant's OIDC config. 404 when none is configured.
 func (h *AdminHandler) Delete(ctx context.Context, _ *struct{}) (*DeleteIdPConfigResponse, error) {
+	// Read first so we can carry the UUID on the audit emit below.
+	existing, lookupErr := h.repo.GetForCurrentTenant(ctx, models.ProtocolOIDC)
 	if err := h.repo.DeleteForCurrentTenant(ctx, models.ProtocolOIDC); err != nil {
 		if errors.Is(err, repository.ErrIdPConfigNotFound) {
 			return nil, huma.Error404NotFound("no OIDC config for this tenant")
 		}
 		return nil, huma.Error500InternalServerError(err.Error())
 	}
+	var deletedUUID string
+	if lookupErr == nil && existing != nil {
+		deletedUUID = existing.UUID
+	}
+	h.emitIdPChange(ctx, "identity.idp.deleted", deletedUUID)
 	out := &DeleteIdPConfigResponse{}
 	out.Body.Success = true
 	return out, nil

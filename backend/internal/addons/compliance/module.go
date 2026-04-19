@@ -19,6 +19,9 @@ import (
 	"github.com/orkestra/backend/internal/addons/compliance/models"
 	"github.com/orkestra/backend/internal/addons/compliance/repository"
 	"github.com/orkestra/backend/internal/addons/compliance/services"
+	identityHandlers "github.com/orkestra/backend/internal/addons/identity/handlers"
+	identityServices "github.com/orkestra/backend/internal/addons/identity/services"
+	subscriptionServices "github.com/orkestra/backend/internal/addons/subscriptions/services"
 	authServices "github.com/orkestra/backend/internal/core/auth/services"
 	tenantServices "github.com/orkestra/backend/internal/core/tenant/services"
 	"github.com/orkestra/backend/internal/shared/config"
@@ -47,16 +50,15 @@ func (m *Module) Category() module.ModuleCategory { return module.CategoryToggle
 // uninterrupted audit trail coverage.
 func (m *Module) Enabled(_ *config.Config) bool { return true }
 
-// Dependencies: auth + tenant. Compliance produces the sink and then
-// pushes it into consumer services via their post-init setters — that
-// requires the consumers to be fully constructed before compliance's
-// Init runs. The topological sort guarantees this ordering.
-//
-// Consumers remain loosely coupled: they accept a nil sink when compliance
-// is disabled and skip emission entirely (see emit* helpers). Additional
-// consumers added by later phases (identity, subscriptions) extend this
-// list when their setter wiring lands.
-func (m *Module) Dependencies() []string { return []string{"auth", "tenant"} }
+// Dependencies: auth + tenant are core (guaranteed loaded), identity and
+// subscriptions are addons compliance pushes sinks into — listing them
+// forces the topological sort to run their Init before this module's so
+// the registry already holds their concrete services when we resolve them.
+// If an addon is absent at boot, the GetTyped lookup returns ok=false and
+// the wiring is silently skipped.
+func (m *Module) Dependencies() []string {
+	return []string{"auth", "tenant", "identity", "subscriptions"}
+}
 
 // ProvidedServices publishes the sink under a stable key so every consumer
 // can resolve it with module.GetTyped.
@@ -129,6 +131,18 @@ func (m *Module) Init(deps *module.Dependencies) error {
 	}
 	if ts, ok := module.GetTyped[*tenantServices.Service](deps.Services, module.ServiceTenantService); ok {
 		ts.SetAuditSink(sink)
+	}
+	if os, ok := module.GetTyped[*identityServices.Service](deps.Services, module.ServiceIdentityOIDCService); ok {
+		os.SetAuditSink(sink)
+	}
+	if ah, ok := module.GetTyped[*identityHandlers.AdminHandler](deps.Services, module.ServiceIdentityAdminHandler); ok {
+		ah.SetAuditSink(sink)
+	}
+	if sh, ok := module.GetTyped[*identityHandlers.ScimAdminHandler](deps.Services, module.ServiceIdentityScimAdminHandler); ok {
+		sh.SetAuditSink(sink)
+	}
+	if ss, ok := module.GetTyped[*subscriptionServices.SubscriptionService](deps.Services, module.ServiceSubscriptionService); ok {
+		ss.SetAuditSink(sink)
 	}
 
 	deps.Logger.Info("Compliance module initialized — audit sink ready")

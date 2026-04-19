@@ -12,6 +12,8 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/orkestra/backend/internal/addons/identity/repository"
+	"github.com/orkestra/backend/internal/shared/iface"
+	"github.com/orkestra/backend/internal/shared/middleware"
 	"github.com/orkestra/backend/internal/shared/utils"
 )
 
@@ -20,13 +22,17 @@ import (
 // actual SCIM protocol surface) so admin mutations stay on the
 // authenticated/protected router with the existing permission gates.
 type ScimAdminHandler struct {
-	tokens *repository.ScimTokenRepository
+	tokens    *repository.ScimTokenRepository
+	auditSink iface.AuditSink
 }
 
 // NewScimAdminHandler wires the admin handler.
 func NewScimAdminHandler(tokens *repository.ScimTokenRepository) *ScimAdminHandler {
 	return &ScimAdminHandler{tokens: tokens}
 }
+
+// SetAuditSink wires the compliance audit sink post-construction.
+func (h *ScimAdminHandler) SetAuditSink(sink iface.AuditSink) { h.auditSink = sink }
 
 // --- Rotate ---
 
@@ -58,6 +64,20 @@ func (h *ScimAdminHandler) Rotate(ctx context.Context, _ *struct{}) (*RotateScim
 	row, err := h.tokens.Rotate(ctx, hash, uuid.New().String())
 	if err != nil {
 		return nil, huma.Error500InternalServerError(err.Error())
+	}
+	if h.auditSink != nil {
+		tenantID, _ := middleware.GetTenantID(ctx)
+		userUUID, _ := middleware.GetUserUUID(ctx)
+		email, _ := middleware.GetUserEmail(ctx)
+		h.auditSink.Emit(ctx, iface.AuditEvent{
+			TenantID:     tenantID,
+			ActorUserID:  userUUID,
+			ActorEmail:   email,
+			ActorType:    "user",
+			Action:       "identity.scim.token_rotated",
+			ResourceType: "scim_token",
+			ResourceID:   row.UUID,
+		})
 	}
 	out := &RotateScimTokenResponse{}
 	out.Body.UUID = row.UUID

@@ -57,6 +57,23 @@ const (
 	// module.GetTyped[iface.AuditSink] and call Emit on hot paths — the
 	// sink is fire-and-forget, so a missing implementation is not fatal.
 	ServiceAuditSink ServiceKey = "compliance.audit_sink"
+
+	// Identity concretes published alongside the module's handlers so the
+	// compliance module can drive their post-init SetAuditSink calls.
+	// Split by emit locus: OIDC callbacks emit from the service, IdP CRUD
+	// emits from the admin handler, SCIM rotations from the scim admin
+	// handler. Compliance looks each up by key — missing keys are
+	// tolerated so the identity module can be disabled independently.
+	ServiceIdentityOIDCService       ServiceKey = "identity.oidc_service"
+	ServiceIdentityAdminHandler      ServiceKey = "identity.admin_handler"
+	ServiceIdentityScimAdminHandler  ServiceKey = "identity.scim_admin_handler"
+
+	// ServiceSubscriptionService is the concrete *subscriptions/services.
+	// SubscriptionService — compliance wires the audit sink into it so
+	// subscription lifecycle events (created, cancelled, reactivated,
+	// self-subscribed) land on the audit trail alongside the module's
+	// own subscriptions_activity log.
+	ServiceSubscriptionService ServiceKey = "subscriptions.service"
 )
 
 // ServiceRegistry is a typed key-value store for cross-module service sharing.

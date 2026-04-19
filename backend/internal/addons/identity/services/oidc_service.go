@@ -77,6 +77,20 @@ type Service struct {
 	// stateTTL is the lifetime of an OIDC state blob in Redis. Defaults to
 	// 10 minutes to match the auth module's OAuth state TTL.
 	stateTTL time.Duration
+	// auditSink is wired post-construction by the compliance module. Nil
+	// when compliance is disabled; emit helpers tolerate that.
+	auditSink iface.AuditSink
+}
+
+// SetAuditSink wires the compliance audit sink post-construction.
+func (s *Service) SetAuditSink(sink iface.AuditSink) { s.auditSink = sink }
+
+// emitAudit forwards to the sink when wired; no-op otherwise.
+func (s *Service) emitAudit(ctx context.Context, event iface.AuditEvent) {
+	if s.auditSink == nil {
+		return
+	}
+	s.auditSink.Emit(ctx, event)
 }
 
 // Config bundles the collaborators. PasswordAuth is used only to mint the
@@ -228,11 +242,13 @@ type CallbackResult struct {
 // mints a full session via PasswordAuthService.IssueLoginTokens.
 func (s *Service) Callback(ctx context.Context, in CallbackInput) (*CallbackResult, error) {
 	if strings.TrimSpace(in.Code) == "" || strings.TrimSpace(in.State) == "" {
+		s.emitOIDCFailure(ctx, "", "", "missing_state_or_code", in.IP)
 		return nil, ErrInvalidState
 	}
 
 	payload, err := s.consumeState(ctx, in.State)
 	if err != nil {
+		s.emitOIDCFailure(ctx, "", "", "invalid_state", in.IP)
 		return nil, err
 	}
 
@@ -275,9 +291,11 @@ func (s *Service) Callback(ctx context.Context, in CallbackInput) (*CallbackResu
 	verifier := provider.Verifier(&oidc.Config{ClientID: cfg.ClientID})
 	idToken, err := verifier.Verify(ctx, rawIDToken)
 	if err != nil {
+		s.emitOIDCFailure(ctx, payload.TenantUUID, payload.IdPConfigUUID, "verify_id_token", in.IP)
 		return nil, fmt.Errorf("identity: verify id_token: %w", err)
 	}
 	if idToken.Nonce != payload.Nonce {
+		s.emitOIDCFailure(ctx, payload.TenantUUID, payload.IdPConfigUUID, "nonce_mismatch", in.IP)
 		return nil, errors.New("identity: nonce mismatch")
 	}
 
@@ -316,7 +334,36 @@ func (s *Service) Callback(ctx context.Context, in CallbackInput) (*CallbackResu
 		slog.String("userUUID", user.UUID),
 		slog.String("sub", sub),
 	)
+	s.emitAudit(ctx, iface.AuditEvent{
+		TenantID:     payload.TenantUUID,
+		ActorUserID:  user.UUID,
+		ActorEmail:   user.Email,
+		ActorType:    "user",
+		Action:       "identity.oidc.login",
+		Outcome:      "success",
+		ResourceType: "identity_idp",
+		ResourceID:   payload.IdPConfigUUID,
+		IPAddress:    in.IP,
+		Metadata:     map[string]any{"issuer": cfg.IssuerURL, "sub": sub},
+	})
 	return &CallbackResult{Tokens: tokens, RedirectTo: payload.RedirectTo}, nil
+}
+
+// emitOIDCFailure centralizes the failure-side audit emit for the OIDC
+// callback. Captures the reason, the best tenant/IdP context available at
+// the point of failure, and the request IP. Actor is anonymous because
+// the callback runs pre-session.
+func (s *Service) emitOIDCFailure(ctx context.Context, tenantUUID, idpConfigUUID, reason, ip string) {
+	s.emitAudit(ctx, iface.AuditEvent{
+		TenantID:     tenantUUID,
+		ActorType:    "anonymous",
+		Action:       "identity.oidc.login",
+		Outcome:      "failure",
+		ResourceType: "identity_idp",
+		ResourceID:   idpConfigUUID,
+		IPAddress:    ip,
+		Metadata:     map[string]any{"reason": reason},
+	})
 }
 
 // findOrCreateUser looks up by email and creates a new operator-role

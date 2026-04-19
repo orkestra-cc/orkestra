@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/orkestra/backend/internal/addons/subscriptions/models"
 	"github.com/orkestra/backend/internal/addons/subscriptions/repository"
+	"github.com/orkestra/backend/internal/shared/iface"
 )
 
 var (
@@ -28,6 +29,33 @@ type SubscriptionService struct {
 	activity    *ActivityService
 	entitlement *EntitlementSyncer
 	logger      *slog.Logger
+	// auditSink is wired post-construction by the compliance module so
+	// subscription lifecycle events land on the platform audit trail
+	// alongside this module's own subscriptions_activity log.
+	auditSink iface.AuditSink
+}
+
+// SetAuditSink wires the compliance audit sink post-construction.
+func (s *SubscriptionService) SetAuditSink(sink iface.AuditSink) { s.auditSink = sink }
+
+// emitAudit forwards to the sink when wired; no-op otherwise. Kept terse
+// so emit sites inline cleanly.
+func (s *SubscriptionService) emitAudit(ctx context.Context, event iface.AuditEvent) {
+	if s.auditSink == nil {
+		return
+	}
+	s.auditSink.Emit(ctx, event)
+}
+
+// subscriptionMetadata builds the common audit metadata payload — service
+// and tier codes plus tenant scope when known.
+func subscriptionMetadata(sub *models.Subscription) map[string]any {
+	return map[string]any{
+		"serviceUUID": sub.ServiceUUID,
+		"tierCode":    sub.TierCode,
+		"tenantUUID":  sub.TenantUUID,
+		"clientUUID":  sub.ClientUUID,
+	}
 }
 
 func NewSubscriptionService(
@@ -85,6 +113,14 @@ func (s *SubscriptionService) Create(ctx context.Context, clientUUID, serviceUUI
 		"serviceCode": svc.Code,
 		"tierCode":    tier.Code,
 	})
+	s.emitAudit(ctx, iface.AuditEvent{
+		TenantID:     sub.TenantUUID,
+		ActorUserID:  actor,
+		Action:       "subscription.created",
+		ResourceType: "subscription",
+		ResourceID:   sub.UUID,
+		Metadata:     subscriptionMetadata(sub),
+	})
 	// Brand-new subscriptions start in Active status so the tenant gets the
 	// tier's capability bundle immediately (payment is confirmed on the
 	// first renewal tick). The syncer is a no-op when TenantUUID is empty —
@@ -138,6 +174,16 @@ func (s *SubscriptionService) CreateForTenant(ctx context.Context, tenantUUID, s
 		"tierCode":    tier.Code,
 		"tenantUUID":  tenantUUID,
 	})
+	selfServeMeta := subscriptionMetadata(sub)
+	selfServeMeta["selfService"] = true
+	s.emitAudit(ctx, iface.AuditEvent{
+		TenantID:     sub.TenantUUID,
+		ActorUserID:  actor,
+		Action:       "subscription.created",
+		ResourceType: "subscription",
+		ResourceID:   sub.UUID,
+		Metadata:     selfServeMeta,
+	})
 	// Grant the tier's capabilities to the tenant right away so the user
 	// can consume gated routes immediately after subscribing. The first
 	// charge still happens on the next renewal tick; if that charge fails,
@@ -180,6 +226,16 @@ func (s *SubscriptionService) Cancel(ctx context.Context, uuid string, atPeriodE
 	s.activity.Log(ctx, sub, actor, models.ActivityCancelled, "Subscription cancelled", map[string]any{
 		"atPeriodEnd": atPeriodEnd,
 	})
+	cancelMeta := subscriptionMetadata(sub)
+	cancelMeta["atPeriodEnd"] = atPeriodEnd
+	s.emitAudit(ctx, iface.AuditEvent{
+		TenantID:     sub.TenantUUID,
+		ActorUserID:  actor,
+		Action:       "subscription.cancelled",
+		ResourceType: "subscription",
+		ResourceID:   sub.UUID,
+		Metadata:     cancelMeta,
+	})
 	// Immediate cancel revokes capabilities right away; cancel-at-period-end
 	// keeps them until the period actually lapses (ExpiresAt on the grant
 	// handles the natural expiry). Do nothing on the deferred branch.
@@ -220,6 +276,14 @@ func (s *SubscriptionService) Reactivate(ctx context.Context, uuid string, actor
 		return nil, err
 	}
 	s.activity.Log(ctx, sub, actor, models.ActivityReactivated, "Subscription reactivated", nil)
+	s.emitAudit(ctx, iface.AuditEvent{
+		TenantID:     sub.TenantUUID,
+		ActorUserID:  actor,
+		Action:       "subscription.reactivated",
+		ResourceType: "subscription",
+		ResourceID:   sub.UUID,
+		Metadata:     subscriptionMetadata(sub),
+	})
 	// Reactivation restores tier capabilities — GrantCapability revokes any
 	// stale/revoked row and writes a fresh one so the tenant is back to
 	// entitled without needing a separate admin intervention.

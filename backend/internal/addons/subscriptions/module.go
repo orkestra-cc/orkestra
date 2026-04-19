@@ -48,6 +48,7 @@ func (m *SubscriptionsModule) ProvidedServices() []module.ServiceKey {
 	return []module.ServiceKey{
 		module.ServiceSubscriptionReconciler,
 		module.ServiceClientOwnership,
+		module.ServiceSubscriptionService,
 	}
 }
 
@@ -167,6 +168,11 @@ func (m *SubscriptionsModule) Init(deps *module.Dependencies) error {
 	// Publish a client-ownership resolver so cross-module handlers (payments)
 	// can gate by-id reads/mutations against the requesting user's org.
 	deps.Services.Register(module.ServiceClientOwnership, ownershipSvc)
+
+	// Publish the concrete subscription service so the compliance module
+	// can wire its audit sink via SetAuditSink. The interface is the
+	// ServiceRegistry's generic `any`; compliance type-asserts on retrieval.
+	deps.Services.Register(module.ServiceSubscriptionService, subscriptionSvc)
 
 	deps.Logger.Info("Subscriptions module initialized",
 		slog.Duration("renewalInterval", interval),

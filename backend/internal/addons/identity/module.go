@@ -68,6 +68,14 @@ func (m *Module) RequiredServices() []module.ServiceKey {
 	}
 }
 
+func (m *Module) ProvidedServices() []module.ServiceKey {
+	return []module.ServiceKey{
+		module.ServiceIdentityOIDCService,
+		module.ServiceIdentityAdminHandler,
+		module.ServiceIdentityScimAdminHandler,
+	}
+}
+
 // Collections declares the collections the module owns:
 //   - identity_idp_configs (composite unique on (tenantId, protocol))
 //   - identity_scim_tokens (one active row per tenant — enforced at the
@@ -115,6 +123,15 @@ func (m *Module) Init(deps *module.Dependencies) error {
 	m.scimTokens = scimTokens
 	m.tenant = tenantProvider
 	m.logger = deps.Logger
+
+	// Publish the concrete audit-emitter components so the compliance
+	// module can drive their SetAuditSink setters. Keeping one key per
+	// component makes the wiring explicit and each receiver independently
+	// swappable. Compliance tolerates missing keys when identity is
+	// disabled — the audit sink simply doesn't stitch into anything.
+	deps.Services.Register(module.ServiceIdentityOIDCService, svc)
+	deps.Services.Register(module.ServiceIdentityAdminHandler, m.admin)
+	deps.Services.Register(module.ServiceIdentityScimAdminHandler, m.scimAdmin)
 
 	deps.Logger.Info("Identity module initialized")
 	return nil
