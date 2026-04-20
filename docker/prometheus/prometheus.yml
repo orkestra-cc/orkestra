@@ -1,0 +1,33 @@
+# Prometheus config for the Orkestra observability stack.
+#
+# Two scrape targets today: the OTEL collector's Prometheus-format
+# exporter, and (from Phase 5.3) the backend's own /metrics endpoint.
+# The backend target is pre-wired but will yield "scrape failed" until
+# Phase 5.3 registers a promhttp handler — that is intentional so this
+# config does not need to change twice.
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: otel-collector
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["orkestra-otel:8889"]
+        labels:
+          service: otel-collector
+
+  - job_name: orkestra-backend
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["orkestra-backend-dev:3000", "orkestra-backend:3000"]
+        labels:
+          service: orkestra-backend
+    # Both dev and prod container names are listed so the same config
+    # file works across profiles; whichever container isn't running just
+    # shows up as "down" in the targets list.
+
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]

@@ -496,17 +496,49 @@ AWS_SECRET_ACCESS_KEY=your_secret_key
 
 ## Monitoring & Observability
 
-### Infrastructure Monitoring
+### Self-hosted OTEL stack (docker-compose.observability.yml)
 
-With the simplified infrastructure, monitoring focuses on essential services:
+Phase 5.2 of the tenancy plan ships a self-hosted observability profile that layers on top of the dev/staging/prod stacks. Four containers, all pinned public images:
 
-- **MongoDB**: Monitor connection health, query performance, disk usage
-- **Redis**: Monitor memory usage, cache hit rates, connection counts
-- **Application Services**: Monitor via application-level instrumentation
+| Service           | Image                                         | Host port | Purpose                                                                            |
+| ----------------- | --------------------------------------------- | --------- | ---------------------------------------------------------------------------------- |
+| **otel-collector**| `otel/opentelemetry-collector-contrib:0.96.0` | 4318 / 4317 | OTLP receiver; fans traces to Tempo, exposes collected metrics for Prometheus     |
+| **tempo**         | `grafana/tempo:2.4.1`                         | 3200        | Trace backend (local storage, 72 h retention)                                      |
+| **prometheus**    | `prom/prometheus:v2.51.2`                     | 9090        | Metric scraper (15 d retention)                                                    |
+| **grafana**       | `grafana/grafana-oss:10.4.2`                  | 3010        | UI; Tempo + Prometheus datasources auto-provisioned; "Tenant traces" dashboard pre-loaded |
 
-### External Monitoring Options
+Boot it alongside the dev stack:
 
-For production environments, consider external monitoring services:
+```bash
+cd docker
+docker network create orkestra-network   # first time only
+docker compose -f docker-compose.infra.yml up -d
+docker compose -f docker-compose.dev.yml  up -d
+docker compose -f docker-compose.observability.yml up -d
+```
+
+Point the backend at the collector by setting in `docker/.env`:
+
+```bash
+OTEL_EXPORTER_OTLP_ENDPOINT=http://orkestra-otel:4318
+OTEL_TRACES_ENABLED=true
+```
+
+Restart the backend (`docker compose -f docker-compose.dev.yml restart backend`) and open:
+
+- Grafana — http://localhost:3010 (admin / admin; anonymous Viewer access is enabled so shareable links work without login)
+- Prometheus — http://localhost:9090
+- Tempo — http://localhost:3200 (not meant for direct use; query via Grafana's Tempo datasource)
+
+The pre-provisioned "Tenant traces" dashboard (`Orkestra` folder in Grafana) takes a `tenant.id` and optional tier filter and shows every span where the `TenantBaggage` middleware stamped the matching attribute. Backing evidence: `backend/internal/shared/middleware/tenant_baggage.go` + `backend/internal/shared/middleware/baggage_coverage_test.go`.
+
+Phase 5.3 will register `/metrics` on the backend; until that ships, Prometheus will show the backend target as "down", which is expected.
+
+### Legacy: External monitoring integrations
+
+### External monitoring alternatives
+
+For production environments, consider managed services instead of (or in addition to) the self-hosted stack above:
 
 - **DataDog**: Comprehensive APM and infrastructure monitoring
 - **New Relic**: Application performance monitoring

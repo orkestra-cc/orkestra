@@ -1,0 +1,134 @@
+name: orkestra-observability
+
+# Phase 5.2 of the tenancy plan: self-hosted OTEL stack that makes the
+# backend's TenantBaggage middleware useful. Layers on top of
+# docker-compose.infra.yml + docker-compose.dev.yml (or staging/prod) so
+# the backend and AI service can export spans to Tempo and metrics to
+# Prometheus with no code changes.
+#
+# Boot order:
+#   docker compose -f docker-compose.infra.yml up -d
+#   docker compose -f docker-compose.dev.yml   up -d
+#   docker compose -f docker-compose.observability.yml up -d
+#
+# Then set OTEL_EXPORTER_OTLP_ENDPOINT=http://orkestra-otel:4318 on the
+# backend (docker-compose.dev.yml honors it via the .env file) and
+# Grafana auto-provisions a Tempo datasource + a tenant-traces dashboard.
+
+services:
+  # OpenTelemetry Collector — receives OTLP from the backend, fans out to
+  # Tempo (traces) and the collector's own /metrics endpoint (scraped by
+  # Prometheus). We deliberately keep the backend pointed at the
+  # collector rather than at Tempo directly so swapping backends (Tempo
+  # → Jaeger, or prod cloud exporter) is a one-file change.
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.96.0
+    container_name: orkestra-otel
+    restart: unless-stopped
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ./otel/otel-collector.yaml:/etc/otelcol/config.yaml:ro
+    ports:
+      - "${OTEL_OTLP_HTTP_PORT:-4318}:4318"   # OTLP/HTTP receiver
+      - "${OTEL_OTLP_GRPC_PORT:-4317}:4317"   # OTLP/gRPC receiver
+      - "${OTEL_METRICS_PORT:-8889}:8889"     # Prometheus exporter of collected metrics
+    networks:
+      - orkestra-network
+    depends_on:
+      - tempo
+    # The opentelemetry-collector-contrib image is distroless (no shell,
+    # no wget / curl / nc). A healthcheck that shells out therefore can
+    # never pass, so we disable it. Liveness is inferred from process
+    # uptime; if the collector's config is invalid it will crash-loop
+    # and docker's restart policy will surface that.
+    healthcheck:
+      disable: true
+
+  # Grafana Tempo — trace backend. Local storage on a volume; production
+  # users are expected to point at an S3-backed Tempo or swap in Grafana
+  # Cloud via the collector config.
+  tempo:
+    image: grafana/tempo:2.4.1
+    container_name: orkestra-tempo
+    restart: unless-stopped
+    command: ["-config.file=/etc/tempo.yaml"]
+    volumes:
+      - ./tempo/tempo.yaml:/etc/tempo.yaml:ro
+      - orkestra-tempo-data:/var/tempo
+    ports:
+      - "${TEMPO_HTTP_PORT:-3200}:3200"
+      - "${TEMPO_OTLP_GRPC_PORT:-4327}:4317"  # non-standard host port so it does not clash with the collector's OTLP/gRPC
+    networks:
+      - orkestra-network
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3200/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Prometheus — scrapes the OTEL collector's exported metrics and (from
+  # Phase 5.3) the backend's /metrics endpoint. Keeps 15 days of data
+  # locally; long-term storage is out of scope for this phase.
+  prometheus:
+    image: prom/prometheus:v2.51.2
+    container_name: orkestra-prometheus
+    restart: unless-stopped
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=15d"
+      - "--web.enable-lifecycle"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - orkestra-prometheus-data:/prometheus
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    networks:
+      - orkestra-network
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:9090/-/healthy"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Grafana — provisions the Tempo + Prometheus datasources at boot plus
+  # one Phase 5.2 dashboard (Tenant traces). The Phase 5.3 dashboards
+  # (capability denials, Cedar shadow divergence) land alongside the
+  # metrics they visualize.
+  grafana:
+    image: grafana/grafana-oss:10.4.2
+    container_name: orkestra-grafana
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: "Viewer"
+      GF_USERS_DEFAULT_THEME: "dark"
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - orkestra-grafana-data:/var/lib/grafana
+    ports:
+      - "${GRAFANA_PORT:-3010}:3000"
+    networks:
+      - orkestra-network
+    depends_on:
+      - tempo
+      - prometheus
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  orkestra-tempo-data:
+    driver: local
+  orkestra-prometheus-data:
+    driver: local
+  orkestra-grafana-data:
+    driver: local
+
+networks:
+  orkestra-network:
+    external: true

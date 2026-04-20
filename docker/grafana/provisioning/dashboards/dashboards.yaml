@@ -1,0 +1,16 @@
+# Dashboard provisioning — Grafana watches this directory and loads any
+# JSON it finds. Dashboards are editable in-session but edits do not
+# persist across container restarts (disableDeletion + updates from disk).
+
+apiVersion: 1
+
+providers:
+  - name: orkestra
+    orgId: 1
+    folder: Orkestra
+    type: file
+    disableDeletion: true
+    updateIntervalSeconds: 30
+    allowUiUpdates: false
+    options:
+      path: /etc/grafana/provisioning/dashboards

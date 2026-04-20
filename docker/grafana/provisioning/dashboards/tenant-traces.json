@@ -1,0 +1,78 @@
+{
+  "title": "Tenant traces",
+  "uid": "orkestra-tenant-traces",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": false,
+  "time": { "from": "now-1h", "to": "now" },
+  "refresh": "30s",
+  "tags": ["orkestra", "tenancy", "phase-5.2"],
+  "templating": {
+    "list": [
+      {
+        "name": "tenant_id",
+        "label": "Tenant UUID",
+        "type": "textbox",
+        "query": "",
+        "current": { "text": "", "value": "" },
+        "hide": 0
+      },
+      {
+        "name": "tenant_kind",
+        "label": "Tier",
+        "type": "custom",
+        "query": "all,internal,external",
+        "current": { "text": "all", "value": "all" },
+        "options": [
+          { "text": "all", "value": "all", "selected": true },
+          { "text": "internal", "value": "internal" },
+          { "text": "external", "value": "external" }
+        ],
+        "hide": 0
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "text",
+      "title": "About",
+      "gridPos": { "x": 0, "y": 0, "w": 24, "h": 3 },
+      "options": {
+        "content": "Every request span carries `tenant.id`, `tenant.kind`, `user.id`, and `user.role` attributes (`backend/internal/shared/middleware/tenant_baggage.go`). Type a tenant UUID above and use the Tempo search panel below to open traces scoped to that tenant. Optionally filter by tier (internal operator vs external client)."
+      }
+    },
+    {
+      "id": 2,
+      "type": "traces",
+      "title": "Traces matching filters",
+      "datasource": { "type": "tempo", "uid": "tempo" },
+      "gridPos": { "x": 0, "y": 3, "w": 24, "h": 20 },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "tempo", "uid": "tempo" },
+          "queryType": "traceqlSearch",
+          "filters": [
+            {
+              "id": "tenant-id",
+              "scope": "span",
+              "tag": "tenant.id",
+              "operator": "=",
+              "value": "$tenant_id",
+              "valueType": "string"
+            },
+            {
+              "id": "tenant-kind",
+              "scope": "span",
+              "tag": "tenant.kind",
+              "operator": "=",
+              "value": "$tenant_kind",
+              "valueType": "string"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

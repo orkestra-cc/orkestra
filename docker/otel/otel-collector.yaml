@@ -1,0 +1,68 @@
+# OpenTelemetry Collector config for the Orkestra observability stack.
+#
+# Receives OTLP from the backend (HTTP on 4318, gRPC on 4317), forwards
+# traces to Tempo, and re-exports metrics as a Prometheus scrape target
+# so Prometheus can pull them over the shared docker network.
+
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+      grpc:
+        endpoint: 0.0.0.0:4317
+
+processors:
+  # Batch processor smooths bursty upstreams and lets Tempo apply its own
+  # ingest rate limits without dropping. 5 s / 1000 spans is the
+  # collector's own default and fits the backend's per-request span rate
+  # comfortably.
+  batch:
+    timeout: 5s
+    send_batch_size: 1000
+
+  # memory_limiter guards against a runaway backend pushing more than the
+  # collector can forward; drops incoming spans when heap exceeds 80 %.
+  memory_limiter:
+    check_interval: 5s
+    limit_percentage: 80
+    spike_limit_percentage: 25
+
+exporters:
+  # Traces → Tempo over OTLP/gRPC on Tempo's internal listener (4317
+  # inside the orkestra-network). insecure: true because traffic stays on
+  # the internal docker network.
+  otlp/tempo:
+    endpoint: tempo:4317
+    tls:
+      insecure: true
+
+  # Metrics → a Prometheus-format endpoint on 8889. Prometheus scrapes
+  # this via the config in ../prometheus/prometheus.yml.
+  prometheus:
+    endpoint: 0.0.0.0:8889
+    # Enable OpenMetrics conventions so a resource attribute (e.g.
+    # tenant.kind) that is later surfaced as a metric label keeps its
+    # type information.
+    enable_open_metrics: true
+
+  # Debug logger — disabled by default. Flip on when a span silently
+  # disappears and you want a tap before Tempo drops it.
+  # debug:
+  #   verbosity: detailed
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+
+service:
+  extensions: [health_check]
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [otlp/tempo]
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [prometheus]

@@ -1,0 +1,32 @@
+# Grafana datasource provisioning — mounted read-only into the grafana
+# container so every boot starts with Tempo + Prometheus already wired.
+# Editing these in the UI is pointless; the file always wins.
+
+apiVersion: 1
+
+datasources:
+  - name: Tempo
+    type: tempo
+    access: proxy
+    orgId: 1
+    url: http://orkestra-tempo:3200
+    uid: tempo
+    isDefault: false
+    version: 1
+    editable: false
+    jsonData:
+      httpMethod: GET
+      tracesToLogs:
+        datasourceUid: ""
+
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    orgId: 1
+    url: http://orkestra-prometheus:9090
+    uid: prometheus
+    isDefault: true
+    version: 1
+    editable: false
+    jsonData:
+      httpMethod: POST
