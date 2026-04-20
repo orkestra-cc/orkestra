@@ -68,6 +68,18 @@ func (m *Module) RequiredServices() []module.ServiceKey {
 	}
 }
 
+// NavItems surfaces the tenant-scoped Identity admin page in the sidebar.
+// Gated by minRole=administrator at the nav layer and by tenant.update at
+// the route layer (see RegisterRoutes below). Tenant-scoped, not platform-
+// admin — backend endpoints operate on the caller's current tenant
+// context (X-Tenant-ID), so operators switch tenants via the tenant
+// switcher before configuring IdP / SCIM here.
+func (m *Module) NavItems() []module.NavItemSpec {
+	return []module.NavItemSpec{
+		{Group: "Administration", Name: "Identity (IdP + SCIM)", Icon: "id-card", Path: "/identity", MinRole: "administrator", Active: true},
+	}
+}
+
 func (m *Module) ProvidedServices() []module.ServiceKey {
 	return []module.ServiceKey{
 		module.ServiceIdentityOIDCService,

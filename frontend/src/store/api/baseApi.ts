@@ -223,6 +223,9 @@ export const baseApi = createApi({
     // Compliance module
     'AuditEvent',
     'Soc2Evidence',
+    // Identity module
+    'IdentityIdP',
+    'IdentityScim',
   ],
   // Keep cache for 5 minutes by default
   keepUnusedDataFor: 300,
