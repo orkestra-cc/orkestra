@@ -987,19 +987,36 @@ func (h *AuthHandler) GetSessionHTTP(w http.ResponseWriter, r *http.Request) {
 		Timestamp: time.Now(),
 	}
 
-	// Extract refresh token from cookie
+	// Extract refresh token from cookie. Try every candidate the browser
+	// sent under this name — when multiple cookies share the name (e.g. a
+	// stale Path=/auth cookie from a prior deployment plus the current
+	// Path=/ one), `r.Cookie()` returns only the first match which may be
+	// the stale rotated token. Trying each one in order and stopping at
+	// the first that successfully refreshes avoids tripping the
+	// family-replay guard on every page refresh.
 	cookieName := h.config.Auth.Cookie.Name
-	refreshToken, err := utils.GetRefreshTokenFromCookieByName(r, cookieName)
-	if err != nil {
+	candidates := utils.GetAllRefreshTokensFromCookies(r, cookieName)
+	if len(candidates) == 0 {
 		http.Error(w, "No refresh token found in cookie", http.StatusUnauthorized)
 		return
 	}
 
-	// Validate and refresh tokens with risk assessment
-	tokenResponse, err := h.authService.RefreshTokensWithRiskAssessment(ctx, refreshToken, securityCtx)
-	if err != nil {
-		logger.Warn("Token refresh failed", slog.String("error", err.Error()))
-		writeRefreshErr(w, err)
+	var tokenResponse *models.TokenResponse
+	var lastErr error
+	for _, candidate := range candidates {
+		resp, err := h.authService.RefreshTokensWithRiskAssessment(ctx, candidate, securityCtx)
+		if err == nil {
+			tokenResponse = resp
+			break
+		}
+		lastErr = err
+	}
+	if tokenResponse == nil {
+		logger.Warn("Token refresh failed",
+			slog.String("error", lastErr.Error()),
+			slog.Int("candidatesTried", len(candidates)),
+		)
+		writeRefreshErr(w, lastErr)
 		return
 	}
 
@@ -1280,37 +1297,50 @@ func (h *AuthHandler) RefreshTokensHTTP(w http.ResponseWriter, r *http.Request) 
 		Timestamp: time.Now(),
 	}
 
-	// Extract refresh token from cookie or request body
-	var refreshToken string
+	// Extract refresh token from cookie or request body. Try every cookie
+	// candidate so a stale Path=/auth cookie (from a prior deployment) does
+	// not mask the current Path=/ cookie — see GetSessionHTTP for the full
+	// rationale. Stop at the first candidate that successfully refreshes.
 	var tokenSource string
-
-	// First, try to get refresh token from cookie (using configured cookie name)
+	var tokenResponse *models.TokenResponse
+	var lastErr error
 	cookieName := h.config.Auth.Cookie.Name
-	if cookieToken, err := utils.GetRefreshTokenFromCookieByName(r, cookieName); err == nil {
-		refreshToken = cookieToken
-		tokenSource = "cookie"
-	} else {
-		// If no token from cookie, try parsing request body
+	candidates := utils.GetAllRefreshTokensFromCookies(r, cookieName)
+	for _, candidate := range candidates {
+		resp, err := h.authService.RefreshTokensWithRiskAssessment(ctx, candidate, securityCtx)
+		if err == nil {
+			tokenResponse = resp
+			tokenSource = "cookie"
+			break
+		}
+		lastErr = err
+	}
+
+	if tokenResponse == nil {
 		var req RefreshTokenRequest
 		if r.Header.Get("Content-Type") == "application/json" {
 			if err := json.NewDecoder(r.Body).Decode(&req); err == nil && req.RefreshToken != "" {
-				refreshToken = req.RefreshToken
-				tokenSource = "request_body"
+				resp, err := h.authService.RefreshTokensWithRiskAssessment(ctx, req.RefreshToken, securityCtx)
+				if err == nil {
+					tokenResponse = resp
+					tokenSource = "request_body"
+				} else {
+					lastErr = err
+				}
 			}
 		}
 	}
 
-	// If no token found in either place
-	if refreshToken == "" {
-		http.Error(w, "No refresh token provided", http.StatusUnauthorized)
-		return
-	}
-
-	// Validate and refresh tokens with risk assessment
-	tokenResponse, err := h.authService.RefreshTokensWithRiskAssessment(ctx, refreshToken, securityCtx)
-	if err != nil {
-		logger.Warn("Token refresh failed", slog.String("error", err.Error()))
-		writeRefreshErr(w, err)
+	if tokenResponse == nil {
+		if lastErr == nil {
+			http.Error(w, "No refresh token provided", http.StatusUnauthorized)
+			return
+		}
+		logger.Warn("Token refresh failed",
+			slog.String("error", lastErr.Error()),
+			slog.Int("candidatesTried", len(candidates)),
+		)
+		writeRefreshErr(w, lastErr)
 		return
 	}
 

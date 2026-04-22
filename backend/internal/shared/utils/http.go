@@ -102,21 +102,35 @@ func GetRefreshTokenFromCookie(r *http.Request) (string, error) {
 	return GetRefreshTokenFromCookieByName(r, "refresh_token")
 }
 
-// GetRefreshTokenFromCookieByName extracts refresh token from HTTP cookie using specified name
+// GetRefreshTokenFromCookieByName extracts refresh token from HTTP cookie using specified name.
+// Returns the last non-empty value — when the browser has multiple cookies under
+// the same name (e.g., a stale Path=/auth cookie from a prior deployment coexisting
+// with the current Path=/ cookie), `r.Cookie()` returns only the first match, which
+// may be the stale one and trips the refresh-token family-replay guard. Returning
+// the last one prefers the most-recently-set cookie; see
+// GetAllRefreshTokensFromCookies for callers that need to try every candidate.
 func GetRefreshTokenFromCookieByName(r *http.Request, cookieName string) (string, error) {
-	cookie, err := r.Cookie(cookieName)
-	if err != nil {
-		if err == http.ErrNoCookie {
-			return "", fmt.Errorf("refresh token cookie '%s' not found", cookieName)
+	candidates := GetAllRefreshTokensFromCookies(r, cookieName)
+	if len(candidates) == 0 {
+		return "", fmt.Errorf("refresh token cookie '%s' not found", cookieName)
+	}
+	return candidates[len(candidates)-1], nil
+}
+
+// GetAllRefreshTokensFromCookies returns every non-empty value present under
+// `cookieName` in the request, in the order the browser sent them. Useful for
+// callers that want to try each candidate against their validation logic before
+// giving up — the /session and /refresh-cookie handlers use this to recover
+// from stale cookies that would otherwise trip replay detection.
+func GetAllRefreshTokensFromCookies(r *http.Request, cookieName string) []string {
+	var out []string
+	for _, c := range r.Cookies() {
+		if c.Name != cookieName || c.Value == "" {
+			continue
 		}
-		return "", fmt.Errorf("failed to read refresh token cookie '%s': %w", cookieName, err)
+		out = append(out, c.Value)
 	}
-
-	if cookie.Value == "" {
-		return "", fmt.Errorf("refresh token cookie '%s' is empty", cookieName)
-	}
-
-	return cookie.Value, nil
+	return out
 }
 
 // SetStateCookie sets a secure OAuth state cookie

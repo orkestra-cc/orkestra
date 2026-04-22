@@ -4,7 +4,7 @@ import {
   selectIsImpersonating,
   stopImpersonation
 } from 'store/slices/tenantSlice';
-import { baseApi } from 'store/api/baseApi';
+import { baseApi, TENANT_SCOPED_TAGS } from 'store/api/baseApi';
 
 /**
  * Thin warning bar that renders only while an operator admin is
@@ -23,7 +23,9 @@ export default function ImpersonationBanner() {
 
   const onStop = () => {
     dispatch(stopImpersonation());
-    dispatch(baseApi.util.resetApiState());
+    // Invalidate per-tenant tags only — preserve the session cache so
+    // ProtectedRoute doesn't bounce to /login during the re-render.
+    dispatch(baseApi.util.invalidateTags([...TENANT_SCOPED_TAGS]));
   };
 
   return (

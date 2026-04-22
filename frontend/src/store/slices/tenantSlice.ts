@@ -166,6 +166,15 @@ const tenantSlice = createSlice({
      * server-side by system.tenants.admin — the backend rejects the header
      * for everyone else. Stored in sessionStorage so it clears when the
      * tab closes.
+     *
+     * We intentionally do NOT clear permissions/features here. The caller
+     * (AdminTenantSwitcher) follows up with invalidateTags(...) which
+     * triggers useGetEffectivePermissionsQuery to refetch against the
+     * impersonated target; the resulting useEffect in useTenantBootstrap
+     * overwrites this slice with the impersonated permissions. Clearing
+     * eagerly would produce a render window where AdminTenantSwitcher's
+     * own gate (hasPermission('system.tenants.admin')) returns false,
+     * hiding the switcher mid-flow.
      */
     startImpersonation: (
       state,
@@ -173,10 +182,6 @@ const tenantSlice = createSlice({
     ) => {
       state.impersonatedTenantId = action.payload.tenantId;
       state.impersonatedTenantName = action.payload.tenantName;
-      // Permissions and features are scoped to the tenant — clear so
-      // downstream checks re-fetch for the impersonated target.
-      state.permissions = [];
-      state.features = [];
       if (typeof window !== 'undefined') {
         window.sessionStorage.setItem(
           IMPERSONATION_STORAGE_KEY,
@@ -191,8 +196,9 @@ const tenantSlice = createSlice({
     stopImpersonation: (state) => {
       state.impersonatedTenantId = null;
       state.impersonatedTenantName = null;
-      state.permissions = [];
-      state.features = [];
+      // Leave permissions/features intact — see startImpersonation for why.
+      // The refetch triggered by invalidateTags in the caller will overwrite
+      // them with the admin's real-tenant permissions a moment later.
       if (typeof window !== 'undefined') {
         window.sessionStorage.removeItem(IMPERSONATION_STORAGE_KEY);
       }

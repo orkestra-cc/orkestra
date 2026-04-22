@@ -331,4 +331,33 @@ export const invalidateApiTags = (tags: Array<"User" | "Auth" | "Navigation" | "
   return baseApi.util.invalidateTags(tags);
 };
 
+// Every cache tag except Auth and Setup. Used by the tenant-impersonation
+// switcher + banner to purge per-tenant cached data without blowing away
+// the session (Auth) or first-install (Setup) entries. Nuking the session
+// cache via baseApi.util.resetApiState() causes a render where sessionData
+// is undefined and ProtectedRoute bounces the user to /login before the
+// session query has a chance to refetch — see the bug fixed alongside this
+// constant.
+export const TENANT_SCOPED_TAGS = [
+  'User', 'Navigation', 'Dashboard', 'Analytics', 'Sales', 'Orders',
+  'Projects', 'Tasks', 'Events', 'Chat', 'Email', 'Kanban',
+  'SupportTicket', 'Weather', 'Storage',
+  'Customer', 'Supplier', 'Company', 'Invoice', 'Notification',
+  'BillingStats', 'BusinessRegistry', 'CompanyLookup',
+  'DocumentTemplate', 'GeneratedDocument',
+  'GraphQuery', 'GraphSchema', 'VectorIndex',
+  'RagModel', 'RagDocument', 'RagRelationship',
+  'AIModel',
+  'AgentProject', 'AgentConversation',
+  'PersonalAgent', 'PersonalConversation',
+  'Module', 'ModuleHealth',
+  'Org', 'Membership', 'Role', 'Binding', 'Permission', 'EffectivePermissions',
+  'AdminOrg', 'OrgInvite',
+  'SubscriptionService', 'SubscriptionClient', 'Subscription',
+  'SubscriptionInvoice', 'SubscriptionActivity',
+  'PaymentTransaction', 'PaymentMethodRec', 'PaymentWebhookEvent',
+  'AuditEvent', 'Soc2Evidence',
+  'IdentityIdP', 'IdentityScim',
+] as const;
+
 export default baseApi;

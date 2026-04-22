@@ -10,7 +10,7 @@ import {
 } from 'store/slices/tenantSlice';
 import { useListAllOrgsAdminQuery } from 'store/api/tenantApi';
 import { useAuth } from 'hooks/auth/useAuthRTK';
-import { baseApi } from 'store/api/baseApi';
+import { baseApi, TENANT_SCOPED_TAGS } from 'store/api/baseApi';
 
 type TierFilter = 'all' | 'internal' | 'external';
 
@@ -61,14 +61,16 @@ export default function AdminTenantSwitcher() {
 
   const onSelect = (tenantId: string, tenantName: string) => {
     dispatch(startImpersonation({ tenantId, tenantName }));
-    // Purge any per-tenant cached data so the next render hits the
-    // impersonated tenant.
-    dispatch(baseApi.util.resetApiState());
+    // Invalidate every tenant-scoped tag so the next render refetches
+    // against the impersonated tenant. resetApiState() would do the same
+    // but also nukes the session cache, producing a render where
+    // ProtectedRoute sees !isAuthenticated and bounces to /login.
+    dispatch(baseApi.util.invalidateTags([...TENANT_SCOPED_TAGS]));
   };
 
   const onStop = () => {
     dispatch(stopImpersonation());
-    dispatch(baseApi.util.resetApiState());
+    dispatch(baseApi.util.invalidateTags([...TENANT_SCOPED_TAGS]));
   };
 
   const toggleLabel = isImpersonating
