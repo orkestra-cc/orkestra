@@ -110,6 +110,8 @@ const SearchBox = ({ autoCompleteItem }: SearchBoxProps) => {
         <Form className="position-relative">
           <Form.Control
             type="search"
+            name="navbar-search"
+            id="navbar-search"
             placeholder="Search..."
             aria-label="Search"
             className="rounded-pill search-input"

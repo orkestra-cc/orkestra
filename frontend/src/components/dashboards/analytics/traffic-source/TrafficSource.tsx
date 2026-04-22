@@ -22,7 +22,7 @@ function TrafficSource() {
       <Card.Footer className="bg-body-tertiary py-2">
         <Row className="g-0 flex-between-center">
           <Col xs="auto">
-            <Form.Select size="sm">
+            <Form.Select size="sm" name="date-range" aria-label="Date range">
               <option>Last 7 days</option>
               <option>Last Month</option>
               <option>Last Year</option>

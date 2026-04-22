@@ -22,7 +22,7 @@ const BounceRate: React.FC<BounceRateProps> = ({ ...rest }) => {
       <Card.Footer className="bg-body-tertiary py-2">
         <Row className="g-0 flex-between-center">
           <Col xs="auto">
-            <Form.Select size="sm" className="me-2">
+            <Form.Select size="sm" className="me-2" name="date-range" aria-label="Date range">
               <option>Last Month</option>
               <option>Last Year</option>
             </Form.Select>

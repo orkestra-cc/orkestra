@@ -89,6 +89,7 @@ export interface SessionResponse {
   expiresIn: number;
   user: BackendUser;
   oauthProviders?: OAuthProviderInfo[];
+  authenticated?: boolean;
   success: boolean;
 }
 
@@ -275,7 +276,10 @@ export const authApi = baseApi.injectEndpoints({
       queryFn: async (_arg, api, _extraOptions, baseQuery) => {
         const result = await baseQuery('v1/auth/session');
 
-        // Handle 401/403 as expected unauthenticated state, not an error
+        // Handle 401/403 as expected unauthenticated state, not an error.
+        // 401 now means "cookie present but refresh rejected" (expired,
+        // revoked, replay) — the bootstrap "no cookie" case returns 200
+        // with authenticated:false, handled below.
         if (result.error && (result.error.status === 401 || result.error.status === 403)) {
           return { data: null };
         }
@@ -287,6 +291,15 @@ export const authApi = baseApi.injectEndpoints({
 
         // For successful responses, enhance user data with OAuth providers
         const sessionData = result.data as SessionResponse;
+
+        // Backend returns 200 + authenticated:false when no refresh cookie
+        // is present (fresh browser, post-logout). Surface this as a null
+        // session so subscribers see the same unauthenticated state the
+        // 401 path produced before.
+        if (sessionData && sessionData.authenticated === false) {
+          return { data: null };
+        }
+
         if (sessionData && sessionData.user && sessionData.oauthProviders) {
           // Add OAuth providers to user data for consistency
           sessionData.user.oauthProviders = sessionData.oauthProviders;

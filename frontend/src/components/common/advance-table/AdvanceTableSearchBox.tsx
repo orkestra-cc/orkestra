@@ -25,7 +25,9 @@ const AdvanceTableSearchBox = ({ placeholder = 'Search...', className }: Advance
         }}
         size="sm"
         id="search"
+        name="search"
         placeholder={placeholder}
+        aria-label={placeholder}
         type="search"
         className="shadow-none"
       />

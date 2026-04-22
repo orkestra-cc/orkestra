@@ -53,10 +53,11 @@ const EmailPasswordForm = () => {
         </Alert>
       )}
 
-      <Form.Group className="mb-3">
+      <Form.Group className="mb-3" controlId="login-email">
         <Form.Label>Email</Form.Label>
         <Form.Control
           type="email"
+          name="email"
           placeholder="you@example.com"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
@@ -65,7 +66,7 @@ const EmailPasswordForm = () => {
         />
       </Form.Group>
 
-      <Form.Group className="mb-3">
+      <Form.Group className="mb-3" controlId="login-password">
         <div className="d-flex justify-content-between">
           <Form.Label>Password</Form.Label>
           <Link to="/forgot-password" className="fs--1">
@@ -74,6 +75,7 @@ const EmailPasswordForm = () => {
         </div>
         <Form.Control
           type="password"
+          name="password"
           placeholder="••••••••"
           value={password}
           onChange={(e) => setPassword(e.target.value)}

@@ -77,28 +77,6 @@ export const useAuth = () => {
     return merged;
   }, [tenantPermissions, currentUser?.role]);
 
-  // Debug logging in development (throttled to reduce noise)
-  useEffect(() => {
-    if (process.env.NODE_ENV === 'development') {
-      const logoutInProgress = sessionStorage.getItem('logout_in_progress');
-      const debugInfo = {
-        sessionData: sessionData === undefined ? 'undefined' : sessionData === null ? 'null' : 'has_data',
-        currentUser: currentUser ? 'has_user' : 'no_user',
-        isAuthLoading,
-        authError: authError ? 'has_error' : 'no_error',
-        logoutInProgress: logoutInProgress ? 'true' : 'false',
-        skipSessionQuery,
-        querySkipped: skipSessionQuery
-      };
-
-      // Only log on significant state changes
-      const isSignificantChange = !isAuthLoading && (sessionData !== undefined);
-      if (isSignificantChange) {
-        console.log('🔍 useAuth State:', debugInfo);
-      }
-    }
-  }, [isAuthLoading, sessionData, currentUser, authError]);
-
   // Profile functionality removed - using currentUser data only
   const userProfile = null;
   const isProfileLoading = false;

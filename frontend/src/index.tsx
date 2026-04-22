@@ -5,6 +5,7 @@ import ReduxProvider from 'store/ReduxProvider';
 import AppProvider from 'providers/AppProvider';
 import { createAppRouter } from 'routes/createRouter';
 import 'helpers/initFA';
+import 'helpers/echartsSetup';
 
 const router = createAppRouter();
 const container = document.getElementById('main') as HTMLElement;

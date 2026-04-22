@@ -997,7 +997,21 @@ func (h *AuthHandler) GetSessionHTTP(w http.ResponseWriter, r *http.Request) {
 	cookieName := h.config.Auth.Cookie.Name
 	candidates := utils.GetAllRefreshTokensFromCookies(r, cookieName)
 	if len(candidates) == 0 {
-		http.Error(w, "No refresh token found in cookie", http.StatusUnauthorized)
+		// Bootstrap probe: no refresh cookie means the browser has never
+		// authenticated (or has logged out). This is a normal state at app
+		// startup, not an auth failure, so return 200 with
+		// authenticated:false. 401 stays reserved for "cookie present but
+		// refresh rejected" (expired, revoked, replay) — a real error the
+		// client should surface. The frontend's getSession query treats
+		// authenticated:false the same as a null session.
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(struct {
+			Authenticated bool `json:"authenticated"`
+			Success       bool `json:"success"`
+		}{Authenticated: false, Success: false}); err != nil {
+			logger.Error("Failed to encode unauthenticated session response", slog.String("error", err.Error()))
+			http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+		}
 		return
 	}
 
@@ -1033,6 +1047,7 @@ func (h *AuthHandler) GetSessionHTTP(w http.ResponseWriter, r *http.Request) {
 		ExpiresIn      int64                              `json:"expiresIn"`
 		User           *userModels.UserManagementResponse `json:"user"`
 		OAuthProviders []models.OAuthProviderInfo         `json:"oauthProviders,omitempty"`
+		Authenticated  bool                               `json:"authenticated"`
 		Success        bool                               `json:"success"`
 	}{
 		AccessToken:    tokenResponse.AccessToken,
@@ -1040,6 +1055,7 @@ func (h *AuthHandler) GetSessionHTTP(w http.ResponseWriter, r *http.Request) {
 		ExpiresIn:      tokenResponse.ExpiresIn,
 		User:           tokenResponse.User,
 		OAuthProviders: tokenResponse.OAuthProviders,
+		Authenticated:  true,
 		Success:        true,
 	}
 
