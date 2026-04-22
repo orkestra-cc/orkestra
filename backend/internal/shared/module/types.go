@@ -65,13 +65,33 @@ type IndexSpec struct {
 
 // NavItemSpec declares a navigation menu entry that a module contributes.
 // The base system collects these from all modules and builds the menu dynamically.
+//
+// v2 classification (Realm + Section + Tier) drives a two-level sidebar layout
+// and tenant-kind-aware filtering:
+//
+//	Realm   — top-level audience. One of "personal", "platform", "business",
+//	          or "shared". Defaults to "shared" when empty.
+//	Section — sub-group label within the realm. Defaults to Group when empty.
+//	Tier    — audience restriction. "internal" = visible only to internal
+//	          (operator) tenants; "external" = visible only to external
+//	          (client) tenants; "" = visible to both. Defaults to "".
+//
+// The legacy Group field is kept for back-compat with v1 consumers; new
+// modules should set Realm + Section instead.
 type NavItemSpec struct {
-	Group      string        `json:"group"`              // menu group: "Administration", "AI", etc.
+	// Classification (v2) — prefer these for new modules.
+	Realm   string `json:"realm,omitempty"`
+	Section string `json:"section,omitempty"`
+	Tier    string `json:"tier,omitempty"`
+
+	// Legacy grouping (v1) — deprecated; kept so v1 clients still work.
+	Group string `json:"group,omitempty"`
+
 	Name       string        `json:"name"`
 	Icon       string        `json:"icon,omitempty"`
-	Path       string        `json:"path,omitempty"`     // frontend route
-	MinRole    string        `json:"minRole,omitempty"`  // minimum role required
+	Path       string        `json:"path,omitempty"`
+	MinRole    string        `json:"minRole,omitempty"`
 	Active     bool          `json:"active"`
-	ModuleName string        `json:"moduleName,omitempty"` // owning module — set by registry for enabled filtering
+	ModuleName string        `json:"moduleName,omitempty"` // stamped by registry
 	Children   []NavItemSpec `json:"children,omitempty"`
 }

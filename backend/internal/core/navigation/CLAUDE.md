@@ -56,16 +56,20 @@ None. Navigation does not expose anything in `shared/iface` — no other backend
 
 ## Key invariants
 
-- **Filter key is the user's system role.** `GetNavigation` (`handlers/navigation_handler.go:32-47`) reads `middleware.GetSystemRole(ctx)` and falls back to `"guest"` when the context has no role (`:37-39`). This is a coarse-grained filter — it does not know about per-org authz bindings or effective permissions.
-- **Each `NavItemSpec` carries a `minRole` string.** Items are included if the user's system role is at or above `minRole` in the hierarchy. Hierarchy order matches `ROLE_HIERARCHY` on the frontend: `super_admin > administrator > developer > manager > operator > guest`.
-- **Module enable/disable filtering.** If `ServiceConfigService` was present at init, the service uses it as a `ModuleEnabledChecker` and filters out items whose owning module is currently disabled (`module_configs.enabled == false`). The check is performed per request, cached through the config service's Redis layer — so toggling a module in `/admin/modules` takes effect on the next nav fetch without a backend restart.
+- **Three filters run per request**, in order, in `services/dynamic_navigation.go::convert`:
+  1. **Module enabled.** If `ServiceConfigService` was present at init, items whose owning module is disabled (`module_configs.enabled == false`) are skipped. The check is per-request, cached through the config service's Redis layer — toggling a module in `/admin/modules` takes effect on the next nav fetch without a restart.
+  2. **Tier vs tenant kind.** Items with `Tier="internal"` are hidden from callers acting in an external tenant; `Tier="external"` items are hidden from internal callers; empty `Tier` is visible to both. Tenant kind is read from `middleware.TenantKindFromContext(ctx)` (populated by the auth middleware from the JWT's resolved acting-tenant).
+  3. **MinRole.** Items are included when the caller's system role is at or above `MinRole` in the hierarchy `super_admin > administrator > developer > manager > operator > guest`. Empty `MinRole` = no restriction. The hierarchy matches `ROLE_HIERARCHY` on the frontend.
+- **Parent items with no path collapse when every child is filtered out.** A parent acts as a menu group if it has `Children` and no `Path`; if all children are hidden, the parent vanishes too.
+- **Dual response shape.** `NavigationResponse` emits **both** the legacy `groups []RouteGroup` (flat `section → items`, v1) and the new `realms []NavRealm` (nested `realm → section → items`, v2). Realms use canonical keys `personal | platform | business | shared` with canonical labels `My workspace | Operator | Clients | Tools`. Realms are emitted in that fixed order; unknown realm keys append in discovery order. The dual shape exists so the frontend can migrate to v2 without a synchronized deploy.
+- **`TenantKind` is surfaced in the response.** `NavigationResponse.TenantKind` echoes the filter context so the frontend can cache per-tier menus without re-reading the JWT. Cache key includes the tenant kind: `nav:<role>:<kind>` (falls back to `nav:<role>` when no tenant is resolved).
 - **Stateless.** No DB writes, no background jobs. All state is the in-memory slice built at boot.
-- **Module-name stamping.** The registry sets `ModuleName` on every `NavItemSpec` and recursively on every child item before it hands them to navigation. This is what the enabled-module filter keys off.
+- **Module-name stamping.** The registry sets `ModuleName` on every `NavItemSpec` and recursively on every child item before handing them to navigation. This is what the enabled-module filter keys off.
 
 ## What this module does NOT do
 
 - Persist user-specific preferences (favorites, collapsed groups, reordering) — not implemented
-- Evaluate fine-grained permissions (e.g., "only show Invoices if the user has `billing.invoice.read` in this org") — filter is system-role-only today
+- Evaluate per-org fine-grained permissions (e.g., "only show Invoices if the user has `billing.invoice.read` in this org"). The tier filter is tenant-kind-scoped, not per-org-binding-scoped — per-org filtering waits on the authz permission-domain-tag refactor.
 - Return a route map or permission gates to the frontend — it only returns human-readable menu entries; the frontend's React Router still has to have the route registered
 - Hide a menu item because its *target* module is failing its health check — only explicit disabled state is honored
 
@@ -74,11 +78,12 @@ None. Navigation does not expose anything in `shared/iface` — no other backend
 - **Never hardcode menu entries in this module.** Every item must come from some other module's `NavItems()`. If you find yourself adding items in `navigation_service.go`, the entry belongs in the owning module instead.
 - **Never return the raw `NavItemSpec`** — wrap in `NavigationResponse` (`models/navigation.go`). The wrapper is the frontend contract; the spec is an internal detail.
 - **Never fall back to the guest tier silently** for a user with a non-empty token but unresolvable role. Log it — it means the system-role field is corrupt or a rename migration was missed.
-- **When the authz permission-domain-tag refactor lands**, replace the system-role filter with `authz.GetEffectivePermissions` and filter items by a `RequiredPermission` field on `NavItemSpec`. This is flagged explicitly as known limitation.
+- **Prefer `Realm` + `Section` over the legacy `Group` field** in new modules. The aggregator maps items into the v2 shape by realm key first, section label second; `Group` is kept only so pre-migration modules still render.
+- **When the authz permission-domain-tag refactor lands**, replace the tenant-kind+role filter with `authz.GetEffectivePermissions` and filter items by a `RequiredPermission` field on `NavItemSpec`.
 
 ## Known limitation
 
-Filtering by a single global system role means this module cannot express "show `Billing` in org A but not org B for the same user". The underlying `authz` module already has per-org effective permissions; the hook-up is future work tied to the permission-domain-tag refactor. Until then, the frontend compensates by hiding a per-org menu section when `authz.GetEffectivePermissions` returns an empty set for that org — but the returned tree still contains every item the role allows.
+Filtering by tenant kind + global system role still can't express per-org scope (e.g., "show `Billing` in org A but not org B for the same user"). The underlying `authz` module already has per-org effective permissions; the hook-up is future work tied to the permission-domain-tag refactor. Until then, the frontend compensates by hiding a per-org menu section when `authz.GetEffectivePermissions` returns an empty set for that org — but the returned tree still contains every item the role+tier allows.
 
 ## Related
 

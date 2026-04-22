@@ -24,7 +24,9 @@ type NavItem struct {
 	Permissions []string `json:"-"` // Required permissions to access this item
 }
 
-// RouteGroup represents a group of navigation items with a label
+// RouteGroup represents a group of navigation items with a label (v1 shape).
+// Kept for back-compat with clients that have not yet migrated to the v2
+// realms/sections shape.
 type RouteGroup struct {
 	Label        string    `json:"label" doc:"Group label displayed in navigation"`
 	LabelDisable bool      `json:"labelDisable,omitempty" doc:"Hide the group label"`
@@ -35,10 +37,29 @@ type RouteGroup struct {
 	Permissions []string `json:"-"` // Required permissions for entire group
 }
 
-// NavigationResponse is the API response for navigation
+// NavSection is a sub-group of items within a realm (v2 shape).
+type NavSection struct {
+	Label    string    `json:"label" doc:"Section label displayed under the realm header"`
+	Children []NavItem `json:"children" doc:"Navigation items in this section"`
+}
+
+// NavRealm is a top-level audience grouping (v2 shape).
+// Key identifies the realm category; Label is the localized display string.
+type NavRealm struct {
+	Key      string       `json:"key" doc:"Realm key (personal | platform | business | shared)"`
+	Label    string       `json:"label" doc:"Realm display label"`
+	Sections []NavSection `json:"sections" doc:"Sections within this realm, in display order"`
+}
+
+// NavigationResponse is the API response for navigation.
+// It emits both the v1 flat groups[] and the v2 nested realms[] so clients
+// can migrate at their own pace. Once all consumers are on v2, Groups can
+// be dropped.
 type NavigationResponse struct {
-	Groups    []RouteGroup `json:"groups" doc:"Navigation route groups"`
-	UserRole  string       `json:"userRole" doc:"Current user's role"`
-	CacheKey  string       `json:"cacheKey" doc:"Cache invalidation key (based on role)"`
-	ExpiresIn int          `json:"expiresIn" doc:"Cache TTL in seconds"`
+	Groups     []RouteGroup `json:"groups" doc:"Navigation route groups (v1, deprecated)"`
+	Realms     []NavRealm   `json:"realms" doc:"Navigation grouped by realm → section (v2)"`
+	UserRole   string       `json:"userRole" doc:"Current user's system role"`
+	TenantKind string       `json:"tenantKind,omitempty" doc:"Current tenant kind: internal | external | ''"`
+	CacheKey   string       `json:"cacheKey" doc:"Cache invalidation key"`
+	ExpiresIn  int          `json:"expiresIn" doc:"Cache TTL in seconds"`
 }
