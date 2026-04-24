@@ -21,6 +21,7 @@ import (
 
 	"github.com/orkestra/backend/internal/core/auth/models"
 	"github.com/orkestra/backend/internal/core/auth/repository"
+	"github.com/orkestra/backend/internal/shared/geoip"
 )
 
 // RiskAssessmentService handles risk assessment functionality.
@@ -29,17 +30,21 @@ type RiskAssessmentService interface {
 	AssessLoginRisk(ctx context.Context, userUUID string, securityCtx *models.SecurityContext) (*models.RiskAssessment, error)
 }
 
-// Factor weights. The three weights sum to 0.9 so a login that trips all
-// three still leaves headroom for C4/C5 additions (impossible-travel,
-// failed-login density) without forcing a rebalance. Each weight maps
-// intuitively to the severity of the underlying signal: rapid IP change
-// is the strongest single indicator of a stolen credential, an unknown
-// IP on a known device is the weakest. Exported so tests and the Cedar
-// attribute plumb can reference the same numbers.
+// Factor weights. Each weight maps intuitively to the severity of the
+// underlying signal. Exported so tests and the Cedar attribute plumb
+// can reference the same numbers. The four weights together can
+// exceed 1.0; the final score is capped.
 const (
 	WeightNewDeviceFingerprint = 0.3
 	WeightNewIP                = 0.2
 	WeightRapidIPChange        = 0.4
+	// WeightImpossibleTravel (Section C item #4) is the strongest
+	// single factor — physically-impossible IP movement is a near-
+	// certainty indicator of session hijacking or credential sharing.
+	// A login that trips this alone lands in the "high" bucket
+	// (>= 0.5); combined with any other factor it crosses into
+	// "critical" (>= 0.7) and triggers the step-up gate.
+	WeightImpossibleTravel = 0.5
 
 	// rapidWindow is how recently the prior session must have started for
 	// a different-IP follow-up to count as "rapid". Five minutes is tight
@@ -55,7 +60,22 @@ const (
 	// that a device retired >6m ago reads as new (intended — stale
 	// fingerprints shouldn't whitelist a returning attacker).
 	historyLookback = 180 * 24 * time.Hour
+
+	// impossibleTravelMinDistanceKm is the minimum great-circle distance
+	// between the two login locations before the factor considers
+	// velocity. Below 100 km the signal is noise — two IPs in the same
+	// metro area can legitimately hop via VPN / mobile tower / office
+	// vs. home switch. Tight enough that an actual cross-country trip
+	// still registers.
+	impossibleTravelMinDistanceKm = 100.0
 )
+
+// Default velocity threshold for the impossible_travel factor. Overridable
+// via AUTH_GEOIP_VELOCITY_THRESHOLD_KMH. 1000 km/h sits above commercial
+// airliner cruise speed (~900 km/h) so actual transoceanic flights don't
+// fire, while anything faster (teleportation, session replay, credential
+// sharing) does. Exported for tests and for the module-level env parser.
+const DefaultImpossibleTravelVelocityKmh = 1000.0
 
 // Risk-level thresholds. Exposed as constants so the step-up middleware
 // (C2) and the Cedar `principal.risk_level` attribute use the same
@@ -84,8 +104,10 @@ func RiskLevelForScore(score float64) string {
 }
 
 type riskAssessmentService struct {
-	sessions repository.AuthSessionRepository
-	logger   *slog.Logger
+	sessions        repository.AuthSessionRepository
+	geoip           geoip.Resolver // optional; NoopResolver when unset
+	velocityKmh     float64
+	logger          *slog.Logger
 	// clock is injectable so the rapid_ip_change test can pin time.Now()
 	// against a deterministic prior-session createdAt.
 	clock func() time.Time
@@ -94,15 +116,34 @@ type riskAssessmentService struct {
 // NewRiskAssessmentService builds the scorer. sessions is required; a
 // nil repository disables all Mongo-backed factors and the scorer
 // returns a zero-score assessment (no bias, no crash). logger is
-// optional — nil falls back to slog.Default.
+// optional — nil falls back to slog.Default. Use NewRiskAssessmentServiceWithGeoIP
+// to enable the impossible_travel factor (Section C item #4).
 func NewRiskAssessmentService(sessions repository.AuthSessionRepository, logger *slog.Logger) RiskAssessmentService {
+	return NewRiskAssessmentServiceWithGeoIP(sessions, geoip.NoopResolver{}, DefaultImpossibleTravelVelocityKmh, logger)
+}
+
+// NewRiskAssessmentServiceWithGeoIP is the full constructor. resolver
+// may be nil or NoopResolver — in both cases the impossible_travel
+// factor is inert. velocityKmh = 0 falls back to the default
+// (DefaultImpossibleTravelVelocityKmh). Exposed as a separate entry
+// point so existing tests that don't care about GeoIP don't need to
+// plumb it.
+func NewRiskAssessmentServiceWithGeoIP(sessions repository.AuthSessionRepository, resolver geoip.Resolver, velocityKmh float64, logger *slog.Logger) RiskAssessmentService {
 	if logger == nil {
 		logger = slog.Default()
 	}
+	if resolver == nil {
+		resolver = geoip.NoopResolver{}
+	}
+	if velocityKmh <= 0 {
+		velocityKmh = DefaultImpossibleTravelVelocityKmh
+	}
 	return &riskAssessmentService{
-		sessions: sessions,
-		logger:   logger,
-		clock:    time.Now,
+		sessions:    sessions,
+		geoip:       resolver,
+		velocityKmh: velocityKmh,
+		logger:      logger,
+		clock:       time.Now,
 	}
 }
 
@@ -209,6 +250,46 @@ func (r *riskAssessmentService) AssessLoginRisk(ctx context.Context, userUUID st
 			},
 		})
 		assessment.Score += WeightRapidIPChange
+	}
+
+	// Factor 4 — impossible travel (Section C item #4). Resolves both
+	// the current IP and the prior session IP to geo coordinates, then
+	// compares great-circle distance against elapsed time. Fires when
+	// the implied velocity exceeds the threshold (default 1000 km/h,
+	// faster than commercial airliner cruise). Inert when GeoIP is
+	// unwired (NoopResolver) or either lookup fails — the other three
+	// factors still compute.
+	if r.geoip != nil && securityCtx.IPAddress != "" && prior.IPAddress != "" &&
+		prior.IPAddress != securityCtx.IPAddress {
+		curLoc, _ := r.geoip.Lookup(ctx, securityCtx.IPAddress)
+		priorLoc, _ := r.geoip.Lookup(ctx, prior.IPAddress)
+		if curLoc != nil && priorLoc != nil {
+			distanceKm := geoip.Distance(curLoc, priorLoc)
+			elapsed := now.Sub(prior.CreatedAt)
+			if distanceKm >= impossibleTravelMinDistanceKm && elapsed > 0 {
+				velocityKmh := distanceKm / elapsed.Hours()
+				if velocityKmh > r.velocityKmh {
+					assessment.Factors = append(assessment.Factors, models.RiskFactor{
+						Type:        "location",
+						Description: "login from a distant location faster than physically plausible",
+						Weight:      WeightImpossibleTravel,
+						Severity:    "high",
+						Details: map[string]interface{}{
+							"factor":          "impossible_travel",
+							"priorCountry":    priorLoc.Country,
+							"priorCity":       priorLoc.City,
+							"currentCountry":  curLoc.Country,
+							"currentCity":     curLoc.City,
+							"distanceKm":      int(distanceKm),
+							"elapsedSeconds":  int(elapsed.Seconds()),
+							"velocityKmh":     int(velocityKmh),
+							"thresholdKmh":    int(r.velocityKmh),
+						},
+					})
+					assessment.Score += WeightImpossibleTravel
+				}
+			}
+		}
 	}
 
 	if assessment.Score > 1.0 {

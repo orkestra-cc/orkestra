@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 	"github.com/orkestra/backend/internal/core/auth/repository"
 	"github.com/orkestra/backend/internal/core/auth/services"
 	sharederrors "github.com/orkestra/backend/internal/shared/errors"
+	"github.com/orkestra/backend/internal/shared/geoip"
 	"github.com/orkestra/backend/internal/shared/iface"
 	authMiddleware "github.com/orkestra/backend/internal/shared/middleware"
 	"github.com/orkestra/backend/internal/shared/module"
@@ -218,7 +220,15 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 	// the auth_sessions repo to compute new_device/new_ip/rapid_ip_change
 	// factors. Shared by the OAuth and password login paths so both surface
 	// a consistent score on the SessionDoc.RiskScore field.
-	riskAssessmentSvc := services.NewRiskAssessmentService(authSessionRepo, logger)
+	// Section C item #4: GeoIP-backed impossible-travel detection.
+	// FromEnv returns a real resolver when AUTH_GEOIP_DB_PATH points
+	// at a MaxMind .mmdb (and the MaxMind library is linked in via a
+	// follow-up commit), or a NoopResolver otherwise. The scorer
+	// silently skips the impossible_travel factor when the resolver
+	// is noop — other factors still compute.
+	geoResolver := geoip.FromEnv(logger)
+	velocityKmh := parseFloatEnv("AUTH_GEOIP_VELOCITY_THRESHOLD_KMH", services.DefaultImpossibleTravelVelocityKmh)
+	riskAssessmentSvc := services.NewRiskAssessmentServiceWithGeoIP(authSessionRepo, geoResolver, velocityKmh, logger)
 
 	authService, err := services.NewAuthService(&services.AuthConfig{
 		AuthRepo:            authRepo,
@@ -426,6 +436,25 @@ func getEnvOrDefault(key, def string) string {
 		return v
 	}
 	return def
+}
+
+// parseFloatEnv reads key as a float64. Falls back to fallback on
+// unset, empty, or malformed input. Malformed input is logged so ops
+// can spot typos instead of running silently on the default.
+func parseFloatEnv(key string, fallback float64) float64 {
+	raw := os.Getenv(key)
+	if raw == "" {
+		return fallback
+	}
+	v, err := strconv.ParseFloat(raw, 64)
+	if err != nil || v <= 0 {
+		slog.Default().Warn("auth: malformed float env var, using default",
+			slog.String("key", key),
+			slog.String("value", raw),
+			slog.Float64("default", fallback))
+		return fallback
+	}
+	return v
 }
 
 // parseDurationEnv reads key as a Go duration string (e.g. "168h",

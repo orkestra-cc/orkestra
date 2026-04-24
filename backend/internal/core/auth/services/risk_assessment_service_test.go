@@ -8,6 +8,7 @@ import (
 
 	"github.com/orkestra/backend/internal/core/auth/models"
 	"github.com/orkestra/backend/internal/core/auth/repository"
+	"github.com/orkestra/backend/internal/shared/geoip"
 )
 
 // stubSessionRepo satisfies repository.AuthSessionRepository. The three
@@ -108,10 +109,35 @@ func (s *stubSessionRepo) GetSuspiciousSessions(context.Context, string) ([]*mod
 var _ repository.AuthSessionRepository = (*stubSessionRepo)(nil)
 
 // newScorer constructs a scorer with the stub repo and a pinned clock so
-// rapid_ip_change assertions don't depend on wall time.
+// rapid_ip_change assertions don't depend on wall time. GeoIP is
+// NoopResolver by default — use newScorerWithGeo for impossible-travel
+// tests.
 func newScorer(t *testing.T, repo *stubSessionRepo, now time.Time) *riskAssessmentService {
 	t.Helper()
 	svc := NewRiskAssessmentService(repo, nil).(*riskAssessmentService)
+	svc.clock = func() time.Time { return now }
+	return svc
+}
+
+// stubGeoResolver returns canned Locations keyed on IP. An IP that
+// isn't in the map returns (nil, nil) — "no match", scorer skips the
+// factor.
+type stubGeoResolver struct {
+	locs map[string]*geoip.Location
+	err  error
+}
+
+func (s *stubGeoResolver) Lookup(_ context.Context, ip string) (*geoip.Location, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	return s.locs[ip], nil
+}
+func (s *stubGeoResolver) Close() error { return nil }
+
+func newScorerWithGeo(t *testing.T, repo *stubSessionRepo, resolver geoip.Resolver, velocityKmh float64, now time.Time) *riskAssessmentService {
+	t.Helper()
+	svc := NewRiskAssessmentServiceWithGeoIP(repo, resolver, velocityKmh, nil).(*riskAssessmentService)
 	svc.clock = func() time.Time { return now }
 	return svc
 }
@@ -328,6 +354,178 @@ func TestAssessLoginRisk_RepoErrorFallsBackToZero(t *testing.T) {
 	}
 	if got.Score != 0.0 {
 		t.Errorf("score on repo error: want 0.0, got %v", got.Score)
+	}
+}
+
+// ----- impossible_travel factor (Section C item #4) -----
+
+// Canonical coordinates used across the travel tests. NYC → Tokyo is
+// a natural "impossibly fast in 1 hour" pair; the short-hop test uses
+// inline coords.
+var (
+	locNYC   = &geoip.Location{IP: "8.8.8.8", Country: "US", City: "New York", Latitude: 40.7128, Longitude: -74.0060}
+	locTokyo = &geoip.Location{IP: "1.1.1.1", Country: "JP", City: "Tokyo", Latitude: 35.6762, Longitude: 139.6503}
+)
+
+func TestAssessLoginRisk_ImpossibleTravelFires(t *testing.T) {
+	// Prior session in NYC 1 hour ago; current login in Tokyo. Distance
+	// ~10,850 km in 1h = 10,850 km/h, way over the 1000 km/h threshold.
+	now := time.Date(2026, 4, 25, 12, 0, 0, 0, time.UTC)
+	repo := &stubSessionRepo{
+		mostRecent: &models.AuthSessionDoc{
+			UserUUID:  "u1",
+			IPAddress: locNYC.IP,
+			CreatedAt: now.Add(-1 * time.Hour),
+		},
+		fpCount: 4, // known fp — isolate the geo factor
+		ipCount: 4, // known IP — isolate the geo factor
+	}
+	resolver := &stubGeoResolver{locs: map[string]*geoip.Location{
+		locNYC.IP:   locNYC,
+		locTokyo.IP: locTokyo,
+	}}
+	scorer := newScorerWithGeo(t, repo, resolver, DefaultImpossibleTravelVelocityKmh, now)
+	got, err := scorer.AssessLoginRisk(context.Background(), "u1", &models.SecurityContext{
+		IPAddress:   locTokyo.IP,
+		Fingerprint: "fp-known",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.Score != WeightImpossibleTravel {
+		t.Errorf("score: want %v, got %v (factors=%+v)", WeightImpossibleTravel, got.Score, got.Factors)
+	}
+	if got.Level != RiskLevelHigh {
+		t.Errorf("level: want high (impossible_travel alone is 0.5), got %q", got.Level)
+	}
+	if len(got.Factors) != 1 || got.Factors[0].Details["factor"] != "impossible_travel" {
+		t.Fatalf("expected single impossible_travel factor, got %+v", got.Factors)
+	}
+	// Sanity-check the factor details carry useful context for audit.
+	if got.Factors[0].Details["priorCountry"] != "US" || got.Factors[0].Details["currentCountry"] != "JP" {
+		t.Errorf("details missing country info: %+v", got.Factors[0].Details)
+	}
+}
+
+func TestAssessLoginRisk_ImpossibleTravelIgnoresRealisticFlight(t *testing.T) {
+	// NYC → Tokyo in 12 hours = ~900 km/h — below the 1000 km/h gate,
+	// consistent with an actual transpacific flight. Factor must not
+	// fire.
+	now := time.Date(2026, 4, 25, 12, 0, 0, 0, time.UTC)
+	repo := &stubSessionRepo{
+		mostRecent: &models.AuthSessionDoc{
+			UserUUID:  "u1",
+			IPAddress: locNYC.IP,
+			CreatedAt: now.Add(-12 * time.Hour),
+		},
+		fpCount: 4,
+		ipCount: 4,
+	}
+	resolver := &stubGeoResolver{locs: map[string]*geoip.Location{
+		locNYC.IP:   locNYC,
+		locTokyo.IP: locTokyo,
+	}}
+	scorer := newScorerWithGeo(t, repo, resolver, DefaultImpossibleTravelVelocityKmh, now)
+	got, _ := scorer.AssessLoginRisk(context.Background(), "u1", &models.SecurityContext{
+		IPAddress:   locTokyo.IP,
+		Fingerprint: "fp-known",
+	})
+	if got.Score != 0 {
+		t.Errorf("realistic flight should not trip factor: got %v (factors=%+v)", got.Score, got.Factors)
+	}
+}
+
+func TestAssessLoginRisk_ImpossibleTravelIgnoresShortHop(t *testing.T) {
+	// Rome → Milan is ~475 km — well above the 100 km minimum, but in
+	// one hour that's ~475 km/h, still below the 1000 km/h gate. And
+	// a 30-second VPN hop Rome→Milan is under 100 km? Actually Rome-
+	// Milan is ~475 km so it's over the min-distance gate. Use two IPs
+	// in the same metro area (distance < 100 km) to exercise the
+	// min-distance gate explicitly.
+	now := time.Date(2026, 4, 25, 12, 0, 0, 0, time.UTC)
+	locRomeA := &geoip.Location{Country: "IT", Latitude: 41.9028, Longitude: 12.4964}
+	locRomeB := &geoip.Location{Country: "IT", Latitude: 41.9500, Longitude: 12.5500} // ~7 km away
+	repo := &stubSessionRepo{
+		mostRecent: &models.AuthSessionDoc{
+			UserUUID:  "u1",
+			IPAddress: "roma-a",
+			CreatedAt: now.Add(-10 * time.Second), // extreme velocity if distance were large
+		},
+		fpCount: 4,
+		ipCount: 4,
+	}
+	resolver := &stubGeoResolver{locs: map[string]*geoip.Location{
+		"roma-a": locRomeA,
+		"roma-b": locRomeB,
+	}}
+	scorer := newScorerWithGeo(t, repo, resolver, DefaultImpossibleTravelVelocityKmh, now)
+	got, _ := scorer.AssessLoginRisk(context.Background(), "u1", &models.SecurityContext{
+		IPAddress:   "roma-b",
+		Fingerprint: "fp-known",
+	})
+	// The rapid_ip_change factor still fires (different IP <5min ago)
+	// but impossible_travel must not: distance is <100 km.
+	for _, f := range got.Factors {
+		if f.Details["factor"] == "impossible_travel" {
+			t.Errorf("short-hop must not trip impossible_travel: %+v", f)
+		}
+	}
+}
+
+func TestAssessLoginRisk_ImpossibleTravelSkipsOnMissingGeoLookup(t *testing.T) {
+	// Resolver returns (nil, nil) for one of the IPs. Factor must stay
+	// inert without erroring.
+	now := time.Date(2026, 4, 25, 12, 0, 0, 0, time.UTC)
+	repo := &stubSessionRepo{
+		mostRecent: &models.AuthSessionDoc{
+			UserUUID:  "u1",
+			IPAddress: locNYC.IP,
+			CreatedAt: now.Add(-1 * time.Hour),
+		},
+		fpCount: 4,
+		ipCount: 4,
+	}
+	// Only the current IP has a geo entry; prior is absent.
+	resolver := &stubGeoResolver{locs: map[string]*geoip.Location{
+		locTokyo.IP: locTokyo,
+	}}
+	scorer := newScorerWithGeo(t, repo, resolver, DefaultImpossibleTravelVelocityKmh, now)
+	got, _ := scorer.AssessLoginRisk(context.Background(), "u1", &models.SecurityContext{
+		IPAddress:   locTokyo.IP,
+		Fingerprint: "fp-known",
+	})
+	for _, f := range got.Factors {
+		if f.Details["factor"] == "impossible_travel" {
+			t.Errorf("missing prior geo must skip factor: %+v", f)
+		}
+	}
+}
+
+func TestAssessLoginRisk_ImpossibleTravelSkipsOnNoopResolver(t *testing.T) {
+	// Default scorer (no GeoIP) must not compute impossible_travel
+	// regardless of the other factors. Safety net against a future
+	// refactor that accidentally defaults the resolver.
+	now := time.Date(2026, 4, 25, 12, 0, 0, 0, time.UTC)
+	repo := &stubSessionRepo{
+		mostRecent: &models.AuthSessionDoc{
+			UserUUID:  "u1",
+			IPAddress: "1.2.3.4",
+			CreatedAt: now.Add(-1 * time.Minute),
+		},
+		fpCount: 4,
+		ipCount: 0, // new IP fires
+	}
+	scorer := newScorer(t, repo, now) // NoopResolver
+	got, _ := scorer.AssessLoginRisk(context.Background(), "u1", &models.SecurityContext{
+		IPAddress:   "5.6.7.8",
+		Fingerprint: "fp-known",
+	})
+	// new_ip + rapid_ip_change should fire (0.2 + 0.4 = 0.6). impossible_travel
+	// must not.
+	for _, f := range got.Factors {
+		if f.Details["factor"] == "impossible_travel" {
+			t.Errorf("NoopResolver must skip impossible_travel, got %+v", f)
+		}
 	}
 }
 
