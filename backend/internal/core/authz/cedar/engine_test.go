@@ -24,10 +24,10 @@ func TestPolicyLoadingNonEmpty(t *testing.T) {
 	e := newTestEngine(t, "development")
 	// platform.cedar has 4 policies, tenant_scope.cedar has 5,
 	// tenant_roles.cedar has 9 (4 legacy + 5 org_*), capability_grants.cedar
-	// has 1. Sanity check the count is in the expected range so silent
-	// drop-outs don't go unnoticed.
-	if got := e.PolicyCount(); got < 16 {
-		t.Fatalf("policy count too low: got %d, want >= 16", got)
+	// has 1, abac.cedar has 2. Sanity check the count is in the expected
+	// range so silent drop-outs don't go unnoticed.
+	if got := e.PolicyCount(); got < 18 {
+		t.Fatalf("policy count too low: got %d, want >= 18", got)
 	}
 }
 
@@ -108,11 +108,15 @@ func TestSystemActionForbiddenOnExternalTenant(t *testing.T) {
 }
 
 // TestSystemActionAllowedOnInternalTenant mirror of the above — system
-// actions on internal tenants remain permitted.
+// actions on internal tenants remain permitted for an MFA-enrolled
+// super_admin. Pre-Commit-C of Section B item #4 the fixture didn't
+// set MFAEnrolled; after the MFA ABAC forbid landed, privileged admin-
+// suffix actions require a second factor. Enrolling MFA here preserves
+// the original intent (permit path works on internal tenants).
 func TestSystemActionAllowedOnInternalTenant(t *testing.T) {
 	e := newTestEngine(t, "development")
 	d := e.IsAuthorized(
-		Principal{UserUUID: "u1", SystemRole: "super_admin"},
+		Principal{UserUUID: "u1", SystemRole: "super_admin", MFAEnrolled: true, AMR: []string{"pwd", "otp"}},
 		"system.modules.admin",
 		Resource{TenantUUID: "t1", TenantKind: "internal", TenantStatus: "active"},
 	)
@@ -505,6 +509,161 @@ func TestContextAttributesDoNotBreakExistingPolicies(t *testing.T) {
 				t.Fatalf("context attributes must not produce Cedar errors: %+v", d.Errors)
 			}
 		})
+	}
+}
+
+// ----- ABAC policy behavior (Section B item #4, Commit C) -----
+
+// TestABACRequireMFAForAdminSuffix_BlocksPrivilegedWithoutMFA: a
+// super_admin hitting a .admin action without a second factor is
+// denied by abac.require_mfa_for_admin_suffix. The forbid wins over
+// platform.super_admin.wildcard.
+func TestABACRequireMFAForAdminSuffix_BlocksPrivilegedWithoutMFA(t *testing.T) {
+	e := newTestEngine(t, "development")
+	for _, role := range []string{"super_admin", "administrator"} {
+		t.Run(role, func(t *testing.T) {
+			d := e.IsAuthorized(
+				Principal{UserUUID: "u", SystemRole: role, MFAEnrolled: false},
+				"system.users.admin",
+				Resource{TenantUUID: "t", TenantKind: "internal", TenantStatus: "active"},
+			)
+			if d.Allowed {
+				t.Fatalf("%s without MFA must be forbidden on admin action: %+v", role, d)
+			}
+			if d.MatchedPolicy != "abac.require_mfa_for_admin_suffix" {
+				t.Errorf("expected abac MFA forbid, got %q", d.MatchedPolicy)
+			}
+		})
+	}
+}
+
+// TestABACRequireMFAForAdminSuffix_PermitsWithMFA: same principal and
+// action as above, but MFAEnrolled=true. The forbid stays silent and
+// the wildcard permits. Captures the intended "enrolled session gets
+// through" contract.
+func TestABACRequireMFAForAdminSuffix_PermitsWithMFA(t *testing.T) {
+	e := newTestEngine(t, "development")
+	d := e.IsAuthorized(
+		Principal{UserUUID: "u", SystemRole: "super_admin", MFAEnrolled: true, AMR: []string{"pwd", "otp"}},
+		"system.users.admin",
+		Resource{TenantUUID: "t", TenantKind: "internal", TenantStatus: "active"},
+	)
+	if !d.Allowed {
+		t.Fatalf("super_admin with MFA must be allowed: %+v", d)
+	}
+}
+
+// TestABACRequireMFAForAdminSuffix_IgnoresNonAdminSuffix: the forbid is
+// scoped to action_suffix == "admin" — a super_admin without MFA on a
+// read action is not impacted.
+func TestABACRequireMFAForAdminSuffix_IgnoresNonAdminSuffix(t *testing.T) {
+	e := newTestEngine(t, "development")
+	d := e.IsAuthorized(
+		Principal{UserUUID: "u", SystemRole: "super_admin", MFAEnrolled: false},
+		"tenant.read",
+		Resource{TenantUUID: "t", TenantKind: "internal", TenantStatus: "active"},
+	)
+	if !d.Allowed {
+		t.Fatalf("non-admin suffix must not trigger MFA forbid: %+v", d)
+	}
+}
+
+// TestABACRequireMFAForAdminSuffix_IgnoresNonPrivilegedRole: operator
+// (not administrator/super_admin) on a .admin action is not blocked by
+// this specific forbid — the existing RBAC gate is what denies them.
+// This test documents the scope; a regression that widened the rule to
+// all principals would break it.
+func TestABACRequireMFAForAdminSuffix_IgnoresNonPrivilegedRole(t *testing.T) {
+	e := newTestEngine(t, "development")
+	d := e.IsAuthorized(
+		Principal{UserUUID: "u", SystemRole: "operator", MFAEnrolled: false},
+		"system.users.admin",
+		Resource{TenantUUID: "t", TenantKind: "internal", TenantStatus: "active"},
+	)
+	// operator doesn't have system.users.admin via any permit, so the
+	// result is deny — but it must NOT be via abac.require_mfa_for_admin_suffix.
+	if d.Allowed {
+		t.Fatalf("operator should not reach system.users.admin: %+v", d)
+	}
+	if d.MatchedPolicy == "abac.require_mfa_for_admin_suffix" {
+		t.Errorf("non-privileged role must not trip the MFA forbid, got matched=%q", d.MatchedPolicy)
+	}
+}
+
+// TestABACDenySystemFromPublicIP_ProdBlocks: the four system.* actions
+// originating from a public IP in production are forbidden. Checks each
+// action in turn so a drift between the list in the policy and the one
+// in tenant_scope.cedar shows up as a specific failure.
+func TestABACDenySystemFromPublicIP_ProdBlocks(t *testing.T) {
+	e := newTestEngine(t, "production")
+	for _, act := range []string{
+		"system.modules.admin",
+		"system.tenants.admin",
+		"system.users.admin",
+		"system.users.mfa_reset",
+	} {
+		t.Run(act, func(t *testing.T) {
+			d := e.Evaluate(Request{
+				Principal: Principal{UserUUID: "u", SystemRole: "super_admin", MFAEnrolled: true},
+				Action:    act,
+				Resource:  Resource{TenantUUID: "t", TenantKind: "internal", TenantStatus: "active"},
+				ClientIP:  "8.8.8.8",
+			})
+			if d.Allowed {
+				t.Fatalf("public-IP %s in prod must be forbidden: %+v", act, d)
+			}
+			if d.MatchedPolicy != "abac.deny_system_actions_from_public_ip_in_prod" {
+				t.Errorf("expected abac IP forbid, got %q", d.MatchedPolicy)
+			}
+		})
+	}
+}
+
+// TestABACDenySystemFromPublicIP_NonProdPermits: outside production the
+// rule is inert. A super_admin on 8.8.8.8 calling system.modules.admin
+// in development is allowed (subject to other policies).
+func TestABACDenySystemFromPublicIP_NonProdPermits(t *testing.T) {
+	e := newTestEngine(t, "development")
+	d := e.Evaluate(Request{
+		Principal: Principal{UserUUID: "u", SystemRole: "super_admin", MFAEnrolled: true},
+		Action:    "system.modules.admin",
+		Resource:  Resource{TenantUUID: "t", TenantKind: "internal", TenantStatus: "active"},
+		ClientIP:  "8.8.8.8",
+	})
+	if !d.Allowed {
+		t.Fatalf("public-IP in dev must not trip the prod-only forbid: %+v", d)
+	}
+}
+
+// TestABACDenySystemFromPublicIP_PrivateIPPermits: an operator coming
+// in over the office VPN in production is permitted; the forbid is
+// public-IP-only by design so internal mesh traffic isn't blocked.
+func TestABACDenySystemFromPublicIP_PrivateIPPermits(t *testing.T) {
+	e := newTestEngine(t, "production")
+	d := e.Evaluate(Request{
+		Principal: Principal{UserUUID: "u", SystemRole: "super_admin", MFAEnrolled: true},
+		Action:    "system.modules.admin",
+		Resource:  Resource{TenantUUID: "t", TenantKind: "internal", TenantStatus: "active"},
+		ClientIP:  "10.0.0.5",
+	})
+	if !d.Allowed {
+		t.Fatalf("private-IP in prod must be allowed: %+v", d)
+	}
+}
+
+// TestABACDenySystemFromPublicIP_UnknownBucketPermits: no IP on the
+// request (background jobs, AI sidecar S2S) buckets as "unknown" and
+// must not be blocked — only explicit "public" trips the forbid.
+func TestABACDenySystemFromPublicIP_UnknownBucketPermits(t *testing.T) {
+	e := newTestEngine(t, "production")
+	d := e.Evaluate(Request{
+		Principal: Principal{UserUUID: "u", SystemRole: "super_admin", MFAEnrolled: true},
+		Action:    "system.modules.admin",
+		Resource:  Resource{TenantUUID: "t", TenantKind: "internal", TenantStatus: "active"},
+		ClientIP:  "", // unknown bucket
+	})
+	if !d.Allowed {
+		t.Fatalf("unknown-bucket in prod must be allowed: %+v", d)
 	}
 }
 

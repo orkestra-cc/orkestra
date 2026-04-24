@@ -122,10 +122,14 @@ func TestApplyCedarEnforcement_FallbackOnCedarError(t *testing.T) {
 func TestShadowEvaluate_SuperAdminInternalTenantSystemAdmin(t *testing.T) {
 	// super_admin acting on an internal tenant with system.users.admin —
 	// platform.cedar's wildcard permits, no tier-aware forbid fires.
-	// Cedar agrees with the role-table (which would also allow).
+	// Section B item #4 Commit C added an MFA forbid on admin-suffix
+	// actions for privileged roles, so the ctx must stamp an MFA-
+	// enrolled AMR for the permit path to survive. Cedar still agrees
+	// with the role-table (which would also allow).
 	svc, _ := newTestService(t, nil)
 	svc.withUserRole("super_admin")
 	ctx := middleware.WithTenantKind(context.Background(), "internal")
+	ctx = middleware.WithAMR(ctx, []string{"pwd", "otp"})
 	decision, ok := svc.shadowEvaluate(ctx, "user-1", "tenant-int", "system.users.admin", true)
 	if !ok {
 		t.Fatalf("Cedar evaluation should succeed, errors: %+v", decision.Errors)

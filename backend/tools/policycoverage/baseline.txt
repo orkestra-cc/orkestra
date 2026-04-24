@@ -88,11 +88,9 @@ permission.declared.unused:user.update
 # Action::"<key>" literal in the relevant policy file, or extend a
 # context.action_suffix clause to cover the suffix (e.g. add "manage" to
 # tenant_roles.cedar's manager permit).
-permission.cedar.unreferenced:agents.admin
 permission.cedar.unreferenced:agents.personal
 permission.cedar.unreferenced:agents.project.manage
 permission.cedar.unreferenced:agents.query
-permission.cedar.unreferenced:aimodels.admin
 permission.cedar.unreferenced:authz.binding.create
 permission.cedar.unreferenced:authz.binding.delete
 permission.cedar.unreferenced:authz.role.create
@@ -101,18 +99,18 @@ permission.cedar.unreferenced:authz.role.update
 # billing.*, payments.*, subscriptions.* are now Cedar-covered via the
 # org_billing role policy in tenant_roles.cedar (action_module dispatch).
 # Kept in this comment for diff history; do NOT re-add to the baseline.
+# .admin-suffix entries (agents.admin, aimodels.admin, graph.admin,
+# rag.admin, sales.admin) are now covered by abac.cedar's MFA forbid
+# (suffix dispatch) as of Section B item #4 commit C, 2026-04-24.
 permission.cedar.unreferenced:company.lookup.enrich
 permission.cedar.unreferenced:documents.generate
 permission.cedar.unreferenced:documents.template.manage
-permission.cedar.unreferenced:graph.admin
 permission.cedar.unreferenced:graph.query.write
 permission.cedar.unreferenced:notification.template.manage
 permission.cedar.unreferenced:notification.test
-permission.cedar.unreferenced:rag.admin
 permission.cedar.unreferenced:rag.document.delete
 permission.cedar.unreferenced:rag.document.ingest
 permission.cedar.unreferenced:rag.query
-permission.cedar.unreferenced:sales.admin
 permission.cedar.unreferenced:sales.job.run
 permission.cedar.unreferenced:tenant.delete
 permission.cedar.unreferenced:tenant.member.invite

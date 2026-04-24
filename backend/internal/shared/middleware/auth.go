@@ -668,6 +668,21 @@ func WithClientIP(ctx context.Context, ip string) context.Context {
 	return context.WithValue(ctx, ctxClientIP, ip)
 }
 
+// WithAMR stamps an amr slice onto the request's JWT claims so tests can
+// exercise MFA-gated ABAC policies without booting the middleware chain.
+// Wraps (or creates) a minimal JWTClaims so GetAMR / IsMFAEnrolled read
+// the same value they would from a real token. Production code paths
+// populate AMR through JWT issuance, not this helper.
+func WithAMR(ctx context.Context, amr []string) context.Context {
+	existing, _ := ctx.Value(ctxClaims).(*models.JWTClaims)
+	var next models.JWTClaims
+	if existing != nil {
+		next = *existing
+	}
+	next.AMR = amr
+	return context.WithValue(ctx, ctxClaims, &next)
+}
+
 // --- RoleMiddleware implementation ---
 
 func (m *AuthMiddleware) RequirePermission(permission string) func(http.Handler) http.Handler {
