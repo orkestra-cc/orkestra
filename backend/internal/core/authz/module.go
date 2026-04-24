@@ -6,14 +6,17 @@ package authz
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"strings"
 
 	"github.com/danielgtaylor/huma/v2/adapters/humachi"
 	"github.com/go-chi/chi/v5"
 	"github.com/orkestra/backend/internal/core/authz/handlers"
+	authzModels "github.com/orkestra/backend/internal/core/authz/models"
 	"github.com/orkestra/backend/internal/core/authz/repository"
 	"github.com/orkestra/backend/internal/core/authz/services"
+	tenantServices "github.com/orkestra/backend/internal/core/tenant/services"
 	"github.com/orkestra/backend/internal/shared/iface"
 	"github.com/orkestra/backend/internal/shared/middleware"
 	"github.com/orkestra/backend/internal/shared/module"
@@ -166,6 +169,30 @@ func (m *Module) Init(deps *module.Dependencies) error {
 	m.handler = handlers.New(m.svc)
 
 	deps.Services.Register(module.ServiceAuthzProvider, iface.AuthzProvider(m.svc))
+
+	// Wire the OwnerRoleBinder so the tenant module can grant the
+	// org_owner authz binding inside CreateTenant. Both modules are
+	// initialized by the time post-Init wiring runs (registry calls
+	// Init in topological order: tenant before authz). The binder
+	// resolves the role by name from the global catalog and creates a
+	// tenant-scoped binding pointing at the new tenant. "system" is
+	// stamped as the granter to flag the binding as a platform-issued
+	// auto-grant rather than a user action.
+	if tenantConcrete, ok := module.GetTyped[*tenantServices.Service](deps.Services, module.ServiceTenantService); ok && tenantConcrete != nil {
+		tenantConcrete.SetOwnerRoleBinder(func(ctx context.Context, ownerUUID, tenantUUID, roleName string) error {
+			role, err := m.svc.GetRoleByName(ctx, "", roleName)
+			if err != nil {
+				return fmt.Errorf("authz: resolve owner role %q: %w", roleName, err)
+			}
+			if _, err := m.svc.CreateBinding(ctx, tenantUUID, "system", authzModels.CreateBindingInput{
+				UserUUID: ownerUUID,
+				RoleUUID: role.UUID,
+			}); err != nil {
+				return fmt.Errorf("authz: bind owner role %q on tenant %s: %w", roleName, tenantUUID, err)
+			}
+			return nil
+		})
+	}
 	return nil
 }
 

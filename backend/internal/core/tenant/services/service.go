@@ -20,10 +20,23 @@ import (
 
 // Service owns tenant lifecycle and implements iface.TenantProvider.
 type Service struct {
-	repo      *repository.Repository
-	auditSink iface.AuditSink
-	kms       iface.KMSProvider
+	repo       *repository.Repository
+	auditSink  iface.AuditSink
+	kms        iface.KMSProvider
+	bindOwner  OwnerRoleBinder
 }
+
+// OwnerRoleBinder is invoked from CreateTenant after the owner membership
+// is inserted, to grant the org_owner authz binding so the new tenant's
+// owner has actual permissions inside their tenant. Wired by the authz
+// module's Init via SetOwnerRoleBinder — the dependency points authz →
+// tenant, so tenant must not import the authz package directly.
+//
+// Failure semantics: a non-nil error from this hook causes CreateTenant
+// to soft-delete the tenant and propagate the error. Without the binding
+// the owner cannot do anything meaningful inside their own tenant, so
+// proceeding silently would create an unrecoverable broken state.
+type OwnerRoleBinder func(ctx context.Context, ownerUUID, tenantUUID, roleName string) error
 
 func New(repo *repository.Repository) *Service {
 	return &Service{repo: repo}
@@ -41,6 +54,14 @@ func (s *Service) SetAuditSink(sink iface.AuditSink) { s.auditSink = sink }
 // provider is nil (compliance module disabled, master key missing)
 // tenants are created without a KMS key; purge remains a status flip.
 func (s *Service) SetKMSProvider(kms iface.KMSProvider) { s.kms = kms }
+
+// SetOwnerRoleBinder wires the post-membership hook that grants the
+// owner's authz binding. See OwnerRoleBinder for failure semantics.
+// Wired by the authz module after both tenant.Init and authz.Init
+// complete; nil binder (authz disabled, or tests) means CreateTenant
+// inserts the membership without an authz binding — the owner relies
+// on their platform system role to act, which is the legacy behavior.
+func (s *Service) SetOwnerRoleBinder(fn OwnerRoleBinder) { s.bindOwner = fn }
 
 // emitAudit forwards to the compliance sink when wired; no-op otherwise.
 func (s *Service) emitAudit(ctx context.Context, event iface.AuditEvent) {
@@ -221,17 +242,37 @@ func (s *Service) CreateTenant(ctx context.Context, ownerUUID string, input mode
 		}
 	}
 
-	// Owner is auto-enrolled as a member with the "administrator" role.
+	// Owner is auto-enrolled as a member with the org_owner role
+	// (Section B item #3 commit B of the auth roadmap, 2026-04-24).
+	// org_owner is a tenant-scoped role; the platform-level
+	// "administrator" string is no longer denormalized here because
+	// granting platform-admin via a tenant membership conflates the two
+	// tiers. The actual authz binding is created by the OwnerRoleBinder
+	// hook below — without it the role name on Membership.Roles is
+	// purely informational.
 	membership := &models.TenantMembership{
 		UUID:       uuid.Must(uuid.NewV7()).String(),
 		UserUUID:   ownerUUID,
 		TenantUUID: t.UUID,
 		TenantKind: kind,
-		Roles:      []string{"administrator"},
+		Roles:      []string{"org_owner"},
 		IsOwner:    true,
 	}
 	if err := s.repo.CreateMembership(ctx, membership); err != nil {
 		return nil, err
+	}
+
+	// Grant the org_owner authz binding so the owner can actually act
+	// in the tenant they just created. Without this hook the owner has
+	// only their platform system role (which for an external client
+	// signing up is "guest"), so they couldn't even read their own
+	// tenant. Failure soft-deletes the tenant — same pattern as the
+	// KMS step above — to avoid leaving a half-provisioned tenant.
+	if s.bindOwner != nil {
+		if err := s.bindOwner(ctx, ownerUUID, t.UUID, "org_owner"); err != nil {
+			_ = s.repo.SoftDeleteTenant(ctx, t.UUID)
+			return nil, fmt.Errorf("tenant: bind owner role: %w", err)
+		}
 	}
 	return t, nil
 }

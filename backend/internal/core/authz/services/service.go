@@ -688,6 +688,18 @@ func (s *Service) UpdateRole(ctx context.Context, roleUUID string, input models.
 	return s.repo.GetRoleByUUID(ctx, roleUUID)
 }
 
+// GetRoleByName resolves a role by (tenantID, name). System roles use
+// tenantID="" — the global catalog. Custom roles use the owning tenant
+// UUID. Public so other modules (e.g. tenant's CreateTenant hook) can
+// look up the system org_owner row by name without holding its UUID.
+func (s *Service) GetRoleByName(ctx context.Context, tenantID, name string) (*models.Role, error) {
+	if err := s.ensureSeeded(ctx); err != nil && s.logger != nil {
+		s.logger.Warn("authz ensureSeeded failed in GetRoleByName",
+			slog.String("error", err.Error()))
+	}
+	return s.repo.GetRoleByName(ctx, tenantID, name)
+}
+
 func (s *Service) ListRoles(ctx context.Context, tenantID string) ([]models.Role, error) {
 	if err := s.ensureSeeded(ctx); err != nil && s.logger != nil {
 		s.logger.Warn("authz ensureSeeded failed",
