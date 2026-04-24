@@ -15,7 +15,9 @@ import (
 	"embed"
 	"fmt"
 	"io/fs"
+	"net"
 	"strings"
+	"time"
 
 	cedar "github.com/cedar-policy/cedar-go"
 	"github.com/cedar-policy/cedar-go/types"
@@ -48,6 +50,11 @@ type Decision struct {
 type Engine struct {
 	policies *cedar.PolicySet
 	env      string // "development" | "staging" | "production"
+	// clock returns the reference time used to stamp context.hour_utc and
+	// context.weekday. Injectable for tests; production defaults to UTC
+	// wall time. Held as a field rather than time.Now directly so
+	// business-hours policies can be exercised deterministically.
+	clock func() time.Time
 }
 
 // Principal is the subject of an authorization request — a User with its
@@ -90,6 +97,13 @@ type Request struct {
 	// present, so shadow-mode callers that don't yet wire capability
 	// enforcement stay untouched.
 	RequiredCapability string
+	// ClientIP is the caller's source IP. Cedar has no native CIDR or
+	// netmask support, so the engine pre-classifies this into
+	// context.ip_bucket ("loopback" | "private" | "public" | "unknown")
+	// and that bucket is what policies match on. Empty means "no IP
+	// known" (service-to-service, background jobs) — bucket becomes
+	// "unknown".
+	ClientIP string
 }
 
 // Resource is the target of an authorization request. Today every
@@ -141,7 +155,11 @@ func New(env string) (*Engine, error) {
 			ps.Add(id, p)
 		}
 	}
-	return &Engine{policies: ps, env: env}, nil
+	return &Engine{
+		policies: ps,
+		env:      env,
+		clock:    func() time.Time { return time.Now().UTC() },
+	}, nil
 }
 
 // hasPolicyStatement reports whether the source text contains something
@@ -263,11 +281,18 @@ func (e *Engine) Evaluate(req Request) Decision {
 	if idx := strings.Index(action, "."); idx > 0 {
 		module = action[:idx]
 	}
+	// Time-of-day + weekday come from the engine's injectable clock so
+	// business-hours ABAC policies are deterministic in tests. hour_utc is
+	// a 0–23 Long, weekday a lowercase 3-letter string ("mon"…"sun").
+	now := e.clock()
 	ctxRec := cedar.RecordMap{
 		"env":           types.String(e.env),
 		"action_suffix": types.String(suffix),
 		"action_module": types.String(module),
 		"action_key":    types.String(action),
+		"hour_utc":      types.Long(int64(now.Hour())),
+		"weekday":       types.String(weekdayShort(now.Weekday())),
+		"ip_bucket":     types.String(classifyIP(req.ClientIP)),
 	}
 	if req.RequiredCapability != "" {
 		ctxRec["requires_capability"] = types.String(req.RequiredCapability)
@@ -297,4 +322,54 @@ func (e *Engine) Evaluate(req Request) Decision {
 		}
 	}
 	return decision
+}
+
+// weekdayShort returns a compact 3-letter lowercase day name. Cedar has
+// no time API, so this string is what ABAC policies match on if they
+// want to gate by day (e.g. deny writes on weekends).
+func weekdayShort(d time.Weekday) string {
+	switch d {
+	case time.Sunday:
+		return "sun"
+	case time.Monday:
+		return "mon"
+	case time.Tuesday:
+		return "tue"
+	case time.Wednesday:
+		return "wed"
+	case time.Thursday:
+		return "thu"
+	case time.Friday:
+		return "fri"
+	case time.Saturday:
+		return "sat"
+	}
+	return ""
+}
+
+// classifyIP buckets the caller's source IP into one of four coarse
+// categories so Cedar policies — which have no CIDR or netmask support —
+// can match on a string. Empty or malformed IPs bucket as "unknown" so
+// policies don't misclassify a missing value as a public one.
+func classifyIP(raw string) string {
+	if raw == "" {
+		return "unknown"
+	}
+	// Proxies and middleware sometimes hand us a "host:port" or
+	// "[v6]:port" — strip the port if present so ParseIP succeeds.
+	if host, _, err := net.SplitHostPort(raw); err == nil {
+		raw = host
+	}
+	ip := net.ParseIP(strings.TrimSpace(raw))
+	if ip == nil {
+		return "unknown"
+	}
+	switch {
+	case ip.IsLoopback():
+		return "loopback"
+	case ip.IsPrivate(), ip.IsLinkLocalUnicast(), ip.IsLinkLocalMulticast():
+		return "private"
+	default:
+		return "public"
+	}
 }

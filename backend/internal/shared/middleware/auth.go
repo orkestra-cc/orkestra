@@ -37,6 +37,12 @@ const (
 	ctxTenantID          = "tenantID"
 	ctxTenantMemberships = "tenantMemberships"
 	ctxTenantRoles       = "tenantRoles"
+	// ctxClientIP carries the caller's source IP as resolved by
+	// utils.GetClientIP. Stamped on every authenticated request so
+	// downstream consumers (Cedar's ip_bucket ABAC attribute, audit
+	// trails, risk scoring) can read the same value the middleware
+	// observed without another request-scoped helper.
+	ctxClientIP = "clientIP"
 	// ctxTenantKind carries the tier ("internal" | "external") of the tenant
 	// the current request is acting in. Populated from claims.ActingTenantKind
 	// or resolved from the matched membership. See ADR-0001.
@@ -240,6 +246,9 @@ func (m *AuthMiddleware) setUserContext(w http.ResponseWriter, r *http.Request, 
 	ctx = context.WithValue(ctx, ctxSystemRole, claims.SystemRole)
 	ctx = context.WithValue(ctx, ctxClaims, claims)
 	ctx = context.WithValue(ctx, ctxTenantMemberships, claims.Memberships)
+	if ip := utils.GetClientIP(r); ip != "" {
+		ctx = context.WithValue(ctx, ctxClientIP, ip)
+	}
 
 	tenantID, roles, kind, ok := resolveCurrentTenant(r, claims)
 	if ok {
@@ -528,6 +537,9 @@ func (m *AuthMiddleware) OptionalAuth(next http.Handler) http.Handler {
 			ctx = context.WithValue(ctx, ctxSystemRole, claims.SystemRole)
 			ctx = context.WithValue(ctx, ctxClaims, claims)
 			ctx = context.WithValue(ctx, ctxTenantMemberships, claims.Memberships)
+			if ip := utils.GetClientIP(r); ip != "" {
+				ctx = context.WithValue(ctx, ctxClientIP, ip)
+			}
 			if tenantID, roles, kind, ok := resolveCurrentTenant(r, claims); ok {
 				ctx = context.WithValue(ctx, ctxTenantID, tenantID)
 				ctx = context.WithValue(ctx, ctxTenantRoles, roles)
@@ -635,6 +647,25 @@ func IsMFAEnrolled(ctx context.Context) bool {
 		return false
 	}
 	return amrSatisfiesMFA(amr)
+}
+
+// GetClientIP returns the caller's source IP as resolved by
+// utils.GetClientIP at the middleware boundary. Background jobs and
+// service-to-service calls made outside the HTTP stack return ok=false.
+func GetClientIP(ctx context.Context) (string, bool) {
+	ip, ok := ctx.Value(ctxClientIP).(string)
+	if !ok || ip == "" {
+		return "", false
+	}
+	return ip, true
+}
+
+// WithClientIP stamps a client IP onto the context under the same key
+// AuthMiddleware uses. Exposed for tests that want to exercise IP-gated
+// ABAC policies without booting the middleware chain. Production code
+// paths receive the IP from utils.GetClientIP in setUserContext.
+func WithClientIP(ctx context.Context, ip string) context.Context {
+	return context.WithValue(ctx, ctxClientIP, ip)
 }
 
 // --- RoleMiddleware implementation ---

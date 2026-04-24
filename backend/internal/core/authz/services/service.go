@@ -339,6 +339,7 @@ func (s *Service) shadowEvaluate(ctx context.Context, userUUID, tenantID, permis
 	// helpers return zero values and the engine stamps mfa_enrolled=false.
 	amr, _ := middleware.GetAMR(ctx)
 	mfaEnrolled := middleware.IsMFAEnrolled(ctx)
+	clientIP, _ := middleware.GetClientIP(ctx)
 	principal := cedar.Principal{
 		UserUUID:     userUUID,
 		SystemRole:   systemRole,
@@ -352,7 +353,16 @@ func (s *Service) shadowEvaluate(ctx context.Context, userUUID, tenantID, permis
 		TenantKind:   tenantKind,
 		TenantStatus: tenantStatus,
 	}
-	decision = s.cedarEngine.IsAuthorized(principal, permission, resource)
+	// Evaluate (not IsAuthorized) so we can plumb ClientIP into the
+	// request — the engine classifies it into context.ip_bucket for
+	// ABAC policies. RequiredCapability stays empty here; callers that
+	// want capability enforcement still go through the dedicated path.
+	decision = s.cedarEngine.Evaluate(cedar.Request{
+		Principal: principal,
+		Action:    permission,
+		Resource:  resource,
+		ClientIP:  clientIP,
+	})
 	attrs := []any{
 		slog.String("user_uuid", userUUID),
 		slog.String("tenant_id", tenantID),

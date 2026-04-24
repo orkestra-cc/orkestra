@@ -1,6 +1,9 @@
 package cedar
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 // newTestEngine builds an engine pinned to a specific environment. Tests
 // that don't care about env can pass "development" which unlocks developer
@@ -418,6 +421,90 @@ func TestInactiveTenantStatusFlowsThrough(t *testing.T) {
 	)
 	if !active.Allowed {
 		t.Errorf("active tenant must permit update: %+v", active)
+	}
+}
+
+// ----- ABAC context plumbing (Section B item #4, Commit B) -----
+
+func TestClassifyIP(t *testing.T) {
+	cases := map[string]string{
+		"":                "unknown",
+		"not-an-ip":       "unknown",
+		"127.0.0.1":       "loopback",
+		"::1":             "loopback",
+		"10.0.0.1":        "private",
+		"192.168.1.1":     "private",
+		"172.16.4.5":      "private",
+		"169.254.1.1":     "private", // link-local
+		"fd00::1":         "private",
+		"8.8.8.8":         "public",
+		"1.1.1.1":         "public",
+		"203.0.113.5":     "public",
+		"203.0.113.5:443": "public", // host:port strips correctly
+		"[::1]:8080":      "loopback",
+	}
+	for in, want := range cases {
+		if got := classifyIP(in); got != want {
+			t.Errorf("classifyIP(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestWeekdayShort(t *testing.T) {
+	cases := map[time.Weekday]string{
+		time.Sunday:    "sun",
+		time.Monday:    "mon",
+		time.Tuesday:   "tue",
+		time.Wednesday: "wed",
+		time.Thursday:  "thu",
+		time.Friday:    "fri",
+		time.Saturday:  "sat",
+	}
+	for d, want := range cases {
+		if got := weekdayShort(d); got != want {
+			t.Errorf("weekdayShort(%v) = %q, want %q", d, got, want)
+		}
+	}
+}
+
+// TestContextAttributesDoNotBreakExistingPolicies: stamping hour_utc,
+// weekday, ip_bucket on every request must not change the outcome of any
+// existing policy. Exercises the same representative slice as the MFA
+// smoke test (Commit A) through a deterministic clock and a set of IPs
+// covering each bucket.
+func TestContextAttributesDoNotBreakExistingPolicies(t *testing.T) {
+	e := newTestEngine(t, "development")
+	// Pin the clock to a Tuesday 10:00 UTC so the output is reproducible.
+	e.clock = func() time.Time { return time.Date(2026, 4, 21, 10, 0, 0, 0, time.UTC) }
+	r := Resource{TenantUUID: "t1", TenantKind: "internal", TenantStatus: "active"}
+
+	cases := []struct {
+		name  string
+		p     Principal
+		act   string
+		ip    string
+		allow bool
+	}{
+		{"super_admin_loopback", Principal{UserUUID: "u", SystemRole: "super_admin"}, "tenant.read", "127.0.0.1", true},
+		{"org_owner_private", Principal{UserUUID: "u", TenantRoles: []string{"org_owner"}}, "tenant.update", "10.0.0.1", true},
+		{"org_viewer_public_denies_write", Principal{UserUUID: "u", TenantRoles: []string{"org_viewer"}}, "tenant.update", "8.8.8.8", false},
+		{"unknown_principal_denied_regardless_of_ip", Principal{UserUUID: "u"}, "tenant.read", "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			d := e.Evaluate(Request{
+				Principal: tc.p,
+				Action:    tc.act,
+				Resource:  r,
+				ClientIP:  tc.ip,
+			})
+			if d.Allowed != tc.allow {
+				t.Fatalf("want allow=%v, got %+v", tc.allow, d)
+			}
+			if len(d.Errors) > 0 {
+				t.Fatalf("context attributes must not produce Cedar errors: %+v", d.Errors)
+			}
+		})
 	}
 }
 
