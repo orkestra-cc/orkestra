@@ -276,6 +276,31 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 		notifier = n
 	}
 
+	// Section C item #5: suspicious-login notifier. Shares a single
+	// SecurityEventService instance with the PII producer below so
+	// user-facing security history + GDPR DSR export read the same
+	// rows. A nil NotificationSender disables only the email half;
+	// the security-event recording still fires whenever a login is
+	// scored. Construction may fail if the Mongo indexes on
+	// auth_security_events can't be built — the notifier stays nil
+	// in that case and logs fall through to a zero-impact no-op.
+	securityEventSvc, securityEventErr := services.NewSecurityEventService(deps.DB)
+	if securityEventErr != nil {
+		logger.Warn("auth: security event service init failed; suspicious-login notifier disabled",
+			slog.String("error", securityEventErr.Error()))
+	}
+	var suspiciousLoginNotifierSvc services.SuspiciousLoginNotifier
+	if securityEventSvc != nil {
+		suspiciousLoginNotifierSvc = services.NewSuspiciousLoginNotifier(services.NotifierConfig{
+			Events:       securityEventSvc,
+			Notifier:     notifier,
+			AppName:      getEnvOrDefault("APP_NAME", "Orkestra"),
+			SupportEmail: os.Getenv("SUPPORT_EMAIL"),
+			FrontendURL:  cfg.Server.FrontendURL,
+			Logger:       logger,
+		})
+	}
+
 	rateLimiter := sharederrors.NewRateLimiter()
 
 	passwordAuthSvc := services.NewPasswordAuthService(services.PasswordAuthConfig{
@@ -291,6 +316,7 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 		FirstAdminClaimer:        firstAdminClaimer,
 		RiskAssessment:           riskAssessmentSvc,
 		DeviceTrust:              deviceTrustSvc,
+		SuspiciousLoginNotifier:  suspiciousLoginNotifierSvc,
 		Notifier:                 notifier,
 		RateLimiter:              rateLimiter,
 		FrontendURL:              cfg.Server.FrontendURL,
@@ -409,15 +435,11 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 	// Register the auth PII producer with the DSR registry pre-created in
 	// main.go. Registers even when the registry is absent so the main
 	// path stays uniform — the helper is a no-op when the key is missing.
+	// Reuses the SecurityEventService instance hoisted above for the
+	// suspicious-login notifier so the user-facing security history and
+	// the DSR export read the same collection.
 	if reg, ok := module.GetTyped[*iface.PIIProducerRegistry](deps.Services, module.ServicePIIProducerRegistry); ok {
-		securityEvents, err := services.NewSecurityEventService(deps.DB)
-		if err != nil {
-			// Nothing else in auth currently writes security events, so a
-			// failure here is survivable — DSR purge of that collection
-			// becomes a no-op until the collection is initialized.
-			logger.Warn("auth: security event service init failed; DSR will skip the collection", slog.String("error", err.Error()))
-		}
-		reg.Register(services.NewPIIProducer(refreshTokenRepo, authSessionRepo, emailTokenRepo, mfaFactorRepo, securityEvents, deviceTrustRepo))
+		reg.Register(services.NewPIIProducer(refreshTokenRepo, authSessionRepo, emailTokenRepo, mfaFactorRepo, securityEventSvc, deviceTrustRepo))
 	}
 
 	return nil

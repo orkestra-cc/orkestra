@@ -11,9 +11,13 @@ const (
 
 // Notification categories used for preference lookup and template IDs.
 const (
-	CategoryAuthVerifyEmail   = "auth.verify_email"
-	CategoryAuthResetPassword = "auth.reset_password"
-	CategoryAuthWelcome       = "auth.welcome"
+	CategoryAuthVerifyEmail     = "auth.verify_email"
+	CategoryAuthResetPassword   = "auth.reset_password"
+	CategoryAuthWelcome         = "auth.welcome"
+	// CategoryAuthSuspiciousLogin is sent when the login-risk scorer
+	// (Section C of the auth roadmap) flags a session at or above the
+	// "high" bucket (>= 0.5). Transactional, cannot be opted out of.
+	CategoryAuthSuspiciousLogin = "auth.suspicious_login"
 )
 
 // Notification types — drives whether preferences are honoured.

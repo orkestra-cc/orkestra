@@ -64,6 +64,68 @@ You will still receive security-related emails.`,
 </html>`,
 	},
 	{
+		TemplateID:  models.CategoryAuthSuspiciousLogin,
+		Locale:      "en",
+		Subject:     "Suspicious login on your {{.AppName}} account",
+		Description: "Sent when the risk scorer flags a login at or above the high bucket (>= 0.5).",
+		Variables:   []string{"AppName", "UserName", "LoginAt", "LoginIP", "LoginDevice", "LoginLocation", "RiskLevel", "RiskFactors", "AccountActivityURL", "SupportEmail", "UnsubscribeURL", "PreferencesURL"},
+		BodyText: `Hi {{.UserName}},
+
+We detected a sign-in to your {{.AppName}} account that looked unusual.
+
+When:    {{.LoginAt}}
+From:    {{.LoginIP}}{{if .LoginLocation}} ({{.LoginLocation}}){{end}}
+Device:  {{.LoginDevice}}
+Risk:    {{.RiskLevel}}{{if .RiskFactors}} — {{.RiskFactors}}{{end}}
+
+If this was you, no action is needed.
+
+If you do NOT recognize this sign-in:
+  1. Change your password immediately at {{.AccountActivityURL}}
+  2. Review recent activity and sign out of any device you don't recognize
+  3. Enable or verify multi-factor authentication
+
+Review recent account activity: {{.AccountActivityURL}}
+
+Need help? Contact {{.SupportEmail}}.
+
+— The {{.AppName}} security team
+
+---
+Manage preferences: {{.PreferencesURL}}
+You will still receive security-related emails.`,
+		BodyHTML: `<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>Suspicious login</title></head>
+<body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:560px;margin:0 auto;padding:32px 24px;color:#333;">
+  <h2 style="color:#b91c1c;">Suspicious login detected</h2>
+  <p>Hi {{.UserName}},</p>
+  <p>We detected a sign-in to your {{.AppName}} account that looked unusual. Review the details below.</p>
+  <table cellpadding="6" style="border-collapse:collapse;margin:16px 0;font-size:14px;">
+    <tr><td style="color:#6c757d;">When</td><td><strong>{{.LoginAt}}</strong></td></tr>
+    <tr><td style="color:#6c757d;">From</td><td><code>{{.LoginIP}}</code>{{if .LoginLocation}} <span style="color:#6c757d;">({{.LoginLocation}})</span>{{end}}</td></tr>
+    <tr><td style="color:#6c757d;">Device</td><td>{{.LoginDevice}}</td></tr>
+    <tr><td style="color:#6c757d;">Risk</td><td><strong>{{.RiskLevel}}</strong>{{if .RiskFactors}} <span style="color:#6c757d;">— {{.RiskFactors}}</span>{{end}}</td></tr>
+  </table>
+  <p style="margin:24px 0;">
+    <a href="{{.AccountActivityURL}}" style="background:#b91c1c;color:#fff;padding:12px 24px;text-decoration:none;border-radius:4px;display:inline-block;font-weight:600;">Review account activity</a>
+  </p>
+  <p>If this was you, no action is needed. If you do not recognize this sign-in:</p>
+  <ol style="color:#333;">
+    <li>Change your password immediately.</li>
+    <li>Review recent activity and sign out of any device you don't recognize.</li>
+    <li>Enable or verify multi-factor authentication.</li>
+  </ol>
+  <p style="color:#6c757d;font-size:14px;">Need help? Contact <a href="mailto:{{.SupportEmail}}" style="color:#6c757d;">{{.SupportEmail}}</a>.</p>
+  <hr style="border:none;border-top:1px solid #e0e0e0;margin:32px 0;">
+  <p style="color:#9ca3af;font-size:12px;">
+    <a href="{{.PreferencesURL}}" style="color:#9ca3af;">Manage preferences</a><br>
+    You will still receive security-related emails.
+  </p>
+</body>
+</html>`,
+	},
+	{
 		TemplateID:  models.CategoryAuthResetPassword,
 		Locale:      "en",
 		Subject:     "Reset your {{.AppName}} password",

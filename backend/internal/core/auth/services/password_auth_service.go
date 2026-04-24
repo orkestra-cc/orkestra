@@ -67,6 +67,7 @@ type PasswordAuthConfig struct {
 	FirstAdminClaimer        FirstAdminClaimer               // required: atomic first-admin claim
 	RiskAssessment           RiskAssessmentService           // nil → session gets zero-score; mandatory in prod
 	DeviceTrust              DeviceTrustService              // nil → never skips MFA; Section C item #3
+	SuspiciousLoginNotifier  SuspiciousLoginNotifier         // nil → no email on high-risk login; Section C item #5
 	Notifier                 iface.NotificationSender
 	RateLimiter              *sharederrors.RateLimiter
 	FrontendURL              string
@@ -91,6 +92,7 @@ type PasswordAuthService struct {
 	firstAdminClaimer        FirstAdminClaimer
 	riskAssessment           RiskAssessmentService
 	deviceTrust              DeviceTrustService
+	suspiciousLoginNotifier  SuspiciousLoginNotifier
 	notifier                 iface.NotificationSender
 	rateLimiter              *sharederrors.RateLimiter
 	frontendURL              string
@@ -142,6 +144,7 @@ func NewPasswordAuthService(cfg PasswordAuthConfig) *PasswordAuthService {
 		firstAdminClaimer:        cfg.FirstAdminClaimer,
 		riskAssessment:           cfg.RiskAssessment,
 		deviceTrust:              cfg.DeviceTrust,
+		suspiciousLoginNotifier:  cfg.SuspiciousLoginNotifier,
 		notifier:                 cfg.Notifier,
 		rateLimiter:              cfg.RateLimiter,
 		frontendURL:              cfg.FrontendURL,
@@ -917,7 +920,7 @@ func (s *PasswordAuthService) issueTokens(ctx context.Context, user *userModels.
 	})
 
 	// Create an auth session doc for audit trail.
-	_ = s.createSessionDoc(ctx, user, sessionID, deviceID, platform, in.IP)
+	_ = s.createSessionDoc(ctx, user, sessionID, deviceID, platform, in.IP, in.UserAgent)
 
 	// Update the last login timestamp.
 	_ = s.userService.UpdateUserLastLogin(ctx, user.UUID)
@@ -933,7 +936,7 @@ func (s *PasswordAuthService) issueTokens(ctx context.Context, user *userModels.
 	}, nil
 }
 
-func (s *PasswordAuthService) createSessionDoc(ctx context.Context, user *userModels.User, sessionID, deviceID, platform, ip string) error {
+func (s *PasswordAuthService) createSessionDoc(ctx context.Context, user *userModels.User, sessionID, deviceID, platform, ip, userAgent string) error {
 	if s.authSessionRepo == nil {
 		return nil
 	}
@@ -945,8 +948,9 @@ func (s *PasswordAuthService) createSessionDoc(ctx context.Context, user *userMo
 	// (0.1 / "medium") when the scorer isn't wired.
 	riskScore := 0.1
 	trustLevel := "medium"
+	var assessment *authModels.RiskAssessment
 	if s.riskAssessment != nil {
-		assessment, err := s.riskAssessment.AssessLoginRisk(ctx, user.UUID, &authModels.SecurityContext{
+		a, err := s.riskAssessment.AssessLoginRisk(ctx, user.UUID, &authModels.SecurityContext{
 			IPAddress: ip,
 			Timestamp: now,
 			// Fingerprint is not computed for password logins today; the
@@ -958,8 +962,9 @@ func (s *PasswordAuthService) createSessionDoc(ctx context.Context, user *userMo
 			s.logger.Warn("risk: assess login risk failed, using default score",
 				slog.String("user_uuid", user.UUID),
 				slog.String("error", err.Error()))
-		} else if assessment != nil {
-			riskScore = assessment.Score
+		} else if a != nil {
+			assessment = a
+			riskScore = a.Score
 			// Session trustLevel mirrors the inverse semantic: a high
 			// risk login lands on an "untrusted" session; a low risk
 			// login keeps the prior "medium" default. A future C3
@@ -992,7 +997,31 @@ func (s *PasswordAuthService) createSessionDoc(ctx context.Context, user *userMo
 		CreatedAt:  now,
 		UpdatedAt:  now,
 	}
-	return s.authSessionRepo.CreateSession(ctx, doc)
+	if err := s.authSessionRepo.CreateSession(ctx, doc); err != nil {
+		return err
+	}
+	// Section C item #5: record the login on the user's security
+	// timeline and, when the risk scorer flagged a high-bucket
+	// anomaly, email the user. Best-effort — failures here don't
+	// undo the just-created session.
+	if s.suspiciousLoginNotifier != nil && assessment != nil {
+		s.suspiciousLoginNotifier.OnLogin(ctx, SuspiciousLoginInput{
+			User: &AuthUser{
+				UUID:  user.UUID,
+				Email: user.Email,
+				Name:  user.FullName,
+			},
+			Session: &SessionSnapshot{
+				UUID:      doc.UUID,
+				CreatedAt: doc.CreatedAt,
+			},
+			Assessment: assessment,
+			IPAddress:  ip,
+			Platform:   platform,
+			UserAgent:  userAgent,
+		})
+	}
+	return nil
 }
 
 func generateEmailToken() (raw, hash string, err error) {
