@@ -87,6 +87,13 @@ const (
 	ServiceTenantSubscriptionProvider ServiceKey = "subscriptions.tenant_provider"
 	ServiceTenantPaymentProvider      ServiceKey = "payments.tenant_provider"
 
+	// ServiceTenantBillingCustomerProvider exposes the per-tenant
+	// FatturaPA Customer linked via Customer.TenantUUID (ADR-0001 PR-4).
+	// Consumed by core/tenant's /v1/admin/tenants/{id}/billing-customer
+	// aggregator endpoint. Missing registration means the billing addon
+	// is disabled — the aggregator returns 404/503 accordingly.
+	ServiceTenantBillingCustomerProvider ServiceKey = "billing.tenant_customer_provider"
+
 	// ServiceAuditSink is the platform-wide append-only audit trail sink
 	// provided by the compliance module. Consumers resolve it via
 	// module.GetTyped[iface.AuditSink] and call Emit on hot paths — the

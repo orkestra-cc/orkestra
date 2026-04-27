@@ -58,6 +58,13 @@ type Customer struct {
 	UpdatedAt time.Time  `bson:"updatedAt" json:"updatedAt"`
 	DeletedAt *time.Time `bson:"deletedAt,omitempty" json:"deletedAt,omitempty"`
 	CreatedBy string     `bson:"createdBy,omitempty" json:"createdBy,omitempty"`
+
+	// --- Tenant link (ADR-0001 PR-4) ---
+	// TenantUUID, when set, links this billing recipient to a Tier-2
+	// external tenant. Optional — most customers are pure invoice
+	// recipients with no platform identity. Sparse index on this field
+	// supports the tenant→customer aggregator lookup.
+	TenantUUID string `bson:"tenantUUID,omitempty" json:"tenantUUID,omitempty"`
 }
 
 // Supplier represents a billing supplier (fornitore per fatture passive)

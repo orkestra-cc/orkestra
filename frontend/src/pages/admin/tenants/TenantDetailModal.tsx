@@ -21,8 +21,11 @@ import {
   useListOrgInvitesAdminQuery,
   useCreateOrgInviteAdminMutation,
   useRevokeOrgInviteAdminMutation,
+  useGetTenantBillingCustomerAdminQuery,
+  usePromoteTenantToBillingCustomerAdminMutation,
   type AdminOrgListItem,
   type Invite,
+  type TenantBillingCustomer,
 } from 'store/api/tenantApi';
 
 interface Props {
@@ -49,14 +52,22 @@ const planColors: Record<string, BadgeColor> = {
   enterprise: 'success',
 };
 
+type TenantTabKey = 'overview' | 'plan' | 'members' | 'invites' | 'billing';
+
 const TenantDetailModal: React.FC<Props> = ({ org, show, onHide, onDelete, onPurge }) => {
-  const [tab, setTab] = useState<'overview' | 'plan' | 'members' | 'invites'>('overview');
+  const [tab, setTab] = useState<TenantTabKey>('overview');
 
   useEffect(() => {
     if (show) setTab('overview');
   }, [show, org?.id]);
 
   if (!org) return null;
+
+  // The Billing tab only makes sense for Tier-2 external tenants —
+  // FatturaPA customers are recipients of invoices the operator issues
+  // to clients. Internal tenants are the operator side and don't carry
+  // their own customer profile. ADR-0001 PR-4.
+  const showBillingTab = org.kind === 'external';
 
   return (
     <Modal show={show} onHide={onHide} size="xl" backdrop="static">
@@ -82,9 +93,7 @@ const TenantDetailModal: React.FC<Props> = ({ org, show, onHide, onDelete, onPur
         <Tabs
           id="tenant-detail-tabs"
           activeKey={tab}
-          onSelect={(k) =>
-            setTab((k as 'overview' | 'plan' | 'members' | 'invites') || 'overview')
-          }
+          onSelect={(k) => setTab((k as TenantTabKey) || 'overview')}
           className="mb-3"
         >
           <Tab eventKey="overview" title="Overview">
@@ -99,6 +108,11 @@ const TenantDetailModal: React.FC<Props> = ({ org, show, onHide, onDelete, onPur
           <Tab eventKey="invites" title="Invites">
             <InvitesTab org={org} />
           </Tab>
+          {showBillingTab && (
+            <Tab eventKey="billing" title="Billing">
+              <BillingTab org={org} />
+            </Tab>
+          )}
         </Tabs>
       </Modal.Body>
       <Modal.Footer className="d-flex justify-content-between flex-wrap gap-2">
@@ -532,6 +546,129 @@ const InvitesTab: React.FC<{ org: AdminOrgListItem }> = ({ org }) => {
         </Table>
       )}
     </>
+  );
+};
+
+// --- Billing tab (ADR-0001 PR-4) ---
+//
+// Surfaces the optional billing.Customer linked via Customer.TenantUUID.
+// The aggregator endpoint returns 404 when no link exists; the consumer
+// (this component) renders that as the empty state with a "Create
+// billing profile" call to action that hits the idempotent promote
+// mutation. Most external tenants will hit the empty state until an
+// operator promotes them.
+
+const BillingTab: React.FC<{ org: AdminOrgListItem }> = ({ org }) => {
+  const { data, error, isLoading, isFetching } = useGetTenantBillingCustomerAdminQuery(
+    org.id,
+  );
+  const [promote, { isLoading: isPromoting }] =
+    usePromoteTenantToBillingCustomerAdminMutation();
+
+  const onCreate = async () => {
+    try {
+      await promote(org.id).unwrap();
+      toast.success('Billing customer created');
+    } catch (err: unknown) {
+      toast.error('Create failed: ' + extractError(err));
+    }
+  };
+
+  if (isLoading || isFetching) {
+    return (
+      <div className="text-center py-4">
+        <Spinner size="sm" animation="border" />
+      </div>
+    );
+  }
+
+  // 404 = "not linked" empty state. Anything else is a real failure.
+  const errorStatus =
+    error && typeof error === 'object' && 'status' in error
+      ? (error as { status?: number | string }).status
+      : undefined;
+  const isNotLinked = !data && errorStatus === 404;
+  const isUnexpectedError = error && !isNotLinked;
+
+  if (isUnexpectedError) {
+    return (
+      <Alert variant="danger" className="fs-10">
+        Failed to load billing customer: {extractError(error)}
+      </Alert>
+    );
+  }
+
+  if (isNotLinked) {
+    return (
+      <>
+        <Alert variant="info" className="fs-10 py-2">
+          This tenant has no FatturaPA billing profile yet. Creating one
+          pre-fills the new customer from the tenant's legal-name, VAT,
+          fiscal code and country. Address fields stay empty — fill them
+          in from the customer page before sending invoices.
+        </Alert>
+        <div className="d-flex justify-content-end">
+          <Button
+            variant="primary"
+            size="sm"
+            disabled={isPromoting}
+            onClick={onCreate}
+          >
+            <FontAwesomeIcon icon="plus" className="me-1" />
+            {isPromoting ? 'Creating…' : 'Create billing profile'}
+          </Button>
+        </div>
+      </>
+    );
+  }
+
+  // Linked — render the projection.
+  const customer = data as TenantBillingCustomer;
+  return (
+    <Form className="px-1">
+      <Form.Group className="mb-3">
+        <Form.Label className="fw-semibold fs-10">Customer ID</Form.Label>
+        <Form.Control
+          readOnly
+          value={customer.uuid}
+          className="fs-11 font-monospace"
+        />
+      </Form.Group>
+      <Form.Group className="mb-3">
+        <Form.Label className="fw-semibold fs-10">Denomination</Form.Label>
+        <Form.Control readOnly value={customer.denomination || '—'} />
+      </Form.Group>
+      <Form.Group className="mb-3">
+        <Form.Label className="fw-semibold fs-10">Fiscal ID code</Form.Label>
+        <Form.Control
+          readOnly
+          value={customer.fiscalIdCode || '—'}
+          className="fs-11 font-monospace"
+        />
+      </Form.Group>
+      <Form.Group className="mb-3">
+        <Form.Label className="fw-semibold fs-10">Country</Form.Label>
+        <Form.Control readOnly value={customer.country || '—'} />
+      </Form.Group>
+      <div className="mb-3">
+        <SubtleBadge bg={customer.isActive ? 'success' : 'secondary'} pill>
+          {customer.isActive ? 'active' : 'inactive'}
+        </SubtleBadge>
+      </div>
+      <div className="d-flex justify-content-end">
+        <Button
+          as="a"
+          href={`/billing/customers`}
+          variant="outline-primary"
+          size="sm"
+          target="_blank"
+          rel="noreferrer"
+        >
+          <FontAwesomeIcon icon="external-link-alt" className="me-1" />
+          Open in Billing
+        </Button>
+      </div>
+    </Form>
   );
 };
 

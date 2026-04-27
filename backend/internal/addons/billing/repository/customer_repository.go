@@ -29,6 +29,9 @@ type CustomerRepository interface {
 	GetByID(ctx context.Context, id string) (*models.Customer, error)
 	GetByUUID(ctx context.Context, uuid string) (*models.Customer, error)
 	GetByFiscalID(ctx context.Context, fiscalIDCode string) (*models.Customer, error)
+	// GetByTenantUUID returns the customer linked to the given Tier-2
+	// tenant. Returns ErrCustomerNotFound when no link exists. ADR-0001 PR-4.
+	GetByTenantUUID(ctx context.Context, tenantUUID string) (*models.Customer, error)
 	List(ctx context.Context, search string, pagination models.PaginationParams) ([]models.Customer, int64, error)
 	ListActive(ctx context.Context) ([]models.Customer, error)
 
@@ -63,6 +66,13 @@ func (r *customerRepository) createIndexes(ctx context.Context) {
 		},
 		{
 			Keys:    bson.D{{Key: "fiscalIdCode", Value: 1}},
+			Options: options.Index().SetUnique(true).SetSparse(true),
+		},
+		{
+			// Sparse + unique: at most one billing profile per Tier-2
+			// tenant, and most customers do not have a tenant link.
+			// ADR-0001 PR-4.
+			Keys:    bson.D{{Key: "tenantUUID", Value: 1}},
 			Options: options.Index().SetUnique(true).SetSparse(true),
 		},
 		{
@@ -130,6 +140,28 @@ func (r *customerRepository) GetByUUID(ctx context.Context, uuid string) (*model
 	err := r.collection.FindOne(ctx, bson.M{
 		"uuid":      uuid,
 		"deletedAt": nil,
+	}).Decode(&customer)
+
+	if err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return nil, ErrCustomerNotFound
+		}
+		return nil, err
+	}
+
+	return &customer, nil
+}
+
+// GetByTenantUUID returns the customer linked to the given Tier-2 tenant.
+// Used by the core/tenant aggregator endpoint and by the promote-tenant flow
+// in the customer service. Soft-deleted rows are filtered out so a previously
+// linked tenant can be re-linked to a new customer after the old one was
+// deleted.
+func (r *customerRepository) GetByTenantUUID(ctx context.Context, tenantUUID string) (*models.Customer, error) {
+	var customer models.Customer
+	err := r.collection.FindOne(ctx, bson.M{
+		"tenantUUID": tenantUUID,
+		"deletedAt":  nil,
 	}).Decode(&customer)
 
 	if err != nil {

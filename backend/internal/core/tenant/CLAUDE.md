@@ -110,6 +110,8 @@ Gated globally by a system permission, not by per-org membership, so platform op
 | POST | `/v1/admin/tenants/{tenantId}/divisions` | Create a division (Kind=external, ParentTenantUUID=this). Refuses internal parents. |
 | GET | `/v1/admin/tenants/{tenantId}/subscriptions` | Aggregator — proxies to `iface.TenantSubscriptionProvider`. Returns `[]` when the subscriptions addon is disabled. |
 | GET | `/v1/admin/tenants/{tenantId}/payments` | Aggregator — proxies to `iface.TenantPaymentProvider`. Returns `[]` when the payments addon is disabled. |
+| GET | `/v1/admin/tenants/{tenantId}/billing-customer` | Aggregator — proxies to `iface.TenantBillingCustomerProvider`. Returns `404` when no `billing.Customer` is linked or the billing addon is disabled. ADR-0001 PR-4. |
+| POST | `/v1/admin/tenants/{tenantId}/billing-customer` | Promotes the tenant to a FatturaPA customer. Idempotent — returns the existing row when already linked, otherwise creates a new `billing.Customer` pre-filled from `iface.Tenant` (LegalName, VATNumber, FiscalCode, Country, Email). 503 when billing is disabled, 404 when the tenant is unknown, 422 when the tenant is internal or has no name. ADR-0001 PR-4. |
 
 The tenant-scoped mutation group additionally exposes `POST /v1/tenants/{tenantId}/divisions` + `GET /v1/tenants/{tenantId}/divisions` for members with `tenant.read` on the parent.
 

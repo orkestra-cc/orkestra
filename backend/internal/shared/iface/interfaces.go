@@ -548,6 +548,52 @@ type TenantPaymentProvider interface {
 }
 
 // ---------------------------------------------------------------------------
+// TenantBillingCustomerProvider — consumed by: core/tenant admin aggregator
+//
+// Mirrors the pattern of TenantSubscriptionProvider / TenantPaymentProvider
+// but for the billing module's FatturaPA Customer registry. ADR-0001 PR-4
+// added an optional Customer.TenantUUID FK so external Tier-2 tenants can
+// be paired with their FatturaPA invoice profile.
+//
+// GetByTenant returns (nil, nil) when no customer is linked to the tenant
+// — the aggregator handler renders that as 404. PromoteTenant is the
+// idempotent create-from-tenant entry point: returns the existing customer
+// when one is already linked, otherwise creates a new Customer pre-filled
+// from the tenant's iface.Tenant fields (LegalName, VATNumber, FiscalCode,
+// Country, Email).
+// ---------------------------------------------------------------------------
+
+// TenantBillingCustomer is the DTO core/tenant exposes for the
+// billing-customer aggregator endpoint. Flat shape — full editing happens
+// through the billing module's own /v1/billing/customers/{id} routes.
+type TenantBillingCustomer struct {
+	UUID         string
+	TenantUUID   string
+	Denomination string
+	Name         string
+	Surname      string
+	FiscalIDCode string
+	IsCompany    bool
+	Country      string
+	IsActive     bool
+	CreatedAt    time.Time
+}
+
+// TenantBillingCustomerProvider is consumed by core/tenant's
+// /v1/admin/tenants/{id}/billing-customer aggregator. The billing addon
+// registers an adapter that talks to its own repository.
+type TenantBillingCustomerProvider interface {
+	// GetByTenant returns (nil, nil) when no customer is linked.
+	GetByTenant(ctx context.Context, tenantUUID string) (*TenantBillingCustomer, error)
+	// PromoteTenant creates (or returns) the customer linked to this tenant.
+	// Idempotent: a tenant with an existing link is returned unchanged.
+	// Errors from the underlying service (tenant not external, missing
+	// denomination, etc.) propagate and are mapped to HTTP status by the
+	// handler — see core/tenant/handlers/handler.go::promoteTenantToBillingCustomer.
+	PromoteTenant(ctx context.Context, tenantUUID string) (*TenantBillingCustomer, error)
+}
+
+// ---------------------------------------------------------------------------
 // AuditSink — consumed by: every module that performs a security-sensitive
 // or lifecycle-changing action. Provided by the compliance module.
 //

@@ -125,6 +125,8 @@ billing/
 | POST/GET/PATCH/DELETE | `/v1/billing/customers[/{id}]` | Customer CRUD |
 | POST/GET/PATCH/DELETE | `/v1/billing/suppliers[/{id}]` | Supplier CRUD |
 
+**Tenant link (ADR-0001 PR-4):** `Customer` carries an optional `TenantUUID` FK to a Tier-2 external tenant (sparse-unique index). Most customers are pure invoice recipients with no platform identity. When set, the link surfaces via `core/tenant`'s aggregator route `GET|POST /v1/admin/tenants/{id}/billing-customer`, backed by `iface.TenantBillingCustomerProvider`. The POST is idempotent and seeds the new customer from `iface.Tenant` (LegalName, VATNumber, FiscalCode, Country, Email).
+
 ### Notifications & Statistics
 
 | Method | Endpoint | Description |

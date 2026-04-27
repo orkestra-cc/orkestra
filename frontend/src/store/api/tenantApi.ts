@@ -90,6 +90,25 @@ export interface TenantPayment {
   createdAt: string;
 }
 
+/**
+ * Flat read-only projection of a tenant's linked FatturaPA customer
+ * (ADR-0001 PR-4). Returned by GET /v1/admin/tenants/{id}/billing-customer.
+ * The full Customer shape lives under the billing module — this DTO is
+ * what the tenant aggregator returns for the admin clients page.
+ */
+export interface TenantBillingCustomer {
+  uuid: string;
+  tenantUUID: string;
+  denomination: string;
+  name: string;
+  surname: string;
+  fiscalIdCode: string;
+  isCompany: boolean;
+  country: string;
+  isActive: boolean;
+  createdAt: string;
+}
+
 export interface AdminOrgListQuery {
   includeDeleted?: boolean;
   /** Filter by tenant tier. Omit for "both". */
@@ -366,6 +385,34 @@ export const tenantApi = baseApi.injectEndpoints({
       providesTags: (_, __, tenantId) => [{ type: 'AdminOrg', id: `${tenantId}:payments` }],
     }),
 
+    // ADR-0001 PR-4 — billing-customer aggregator. 404 is the "not
+    // linked" state and surfaces as `error.status === 404` on the
+    // hook. The consumer (TenantDetailModal Billing tab) renders the
+    // empty state when it sees that. Same pattern as identityApi's
+    // getIdPConfig — keeps the type narrow and avoids a queryFn.
+    getTenantBillingCustomerAdmin: builder.query<TenantBillingCustomer, string>({
+      query: (tenantId) => ({
+        url: `/v1/admin/tenants/${tenantId}/billing-customer`,
+        method: 'GET',
+      }),
+      providesTags: (_, __, tenantId) => [
+        { type: 'AdminOrg', id: `${tenantId}:billing-customer` },
+      ],
+    }),
+
+    promoteTenantToBillingCustomerAdmin: builder.mutation<
+      TenantBillingCustomer,
+      string
+    >({
+      query: (tenantId) => ({
+        url: `/v1/admin/tenants/${tenantId}/billing-customer`,
+        method: 'POST',
+      }),
+      invalidatesTags: (_, __, tenantId) => [
+        { type: 'AdminOrg', id: `${tenantId}:billing-customer` },
+      ],
+    }),
+
     getOrgAdmin: builder.query<Org, string>({
       query: (tenantId) => ({ url: `/v1/admin/tenants/${tenantId}`, method: 'GET' }),
       providesTags: (_, __, id) => [{ type: 'AdminOrg', id }],
@@ -487,4 +534,6 @@ export const {
   useCreateTenantDivisionAdminMutation,
   useListTenantSubscriptionsAdminQuery,
   useListTenantPaymentsAdminQuery,
+  useGetTenantBillingCustomerAdminQuery,
+  usePromoteTenantToBillingCustomerAdminMutation,
 } = tenantApi;

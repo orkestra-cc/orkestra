@@ -210,6 +210,12 @@ export interface Customer {
   updatedAt: string;
   deletedAt?: string;
   createdBy?: string;
+  /**
+   * Optional FK to a Tier-2 external tenant (ADR-0001 PR-4). When set,
+   * this billing recipient is the FatturaPA profile of that tenant.
+   * Most customers leave it empty.
+   */
+  tenantUUID?: string;
 }
 
 export interface CreateCustomerInput {
@@ -234,6 +240,8 @@ export interface CreateCustomerInput {
   isPA?: boolean;
   codiceUfficio?: string;
   notes?: string;
+  /** Optional FK to a Tier-2 external tenant (ADR-0001 PR-4). */
+  tenantUUID?: string;
 }
 
 export interface UpdateCustomerInput {
