@@ -17,9 +17,13 @@ const (
 // The collection has a TTL index on ExpiresAt so used and unused tokens
 // are cleaned up automatically.
 type EmailTokenDoc struct {
-	ID        primitive.ObjectID `bson:"_id,omitempty" json:"-"`
-	UUID      string             `bson:"uuid" json:"id"`
-	UserUUID  string             `bson:"userUuid" json:"userUuid"`
+	ID   primitive.ObjectID `bson:"_id,omitempty" json:"-"`
+	UUID string             `bson:"uuid" json:"id"`
+	// Tier is "operator" / "client" / "" — set by the tier-aware repo
+	// constructor (ADR-0003 PR-D). Defense-in-depth so a misrouted
+	// query against the wrong collection fails the integrity test.
+	Tier      string     `bson:"tier,omitempty" json:"-"`
+	UserUUID  string     `bson:"userUuid" json:"userUuid"`
 	TokenHash string             `bson:"tokenHash" json:"-"`
 	Purpose   string             `bson:"purpose" json:"purpose"`
 	IP        string             `bson:"ip,omitempty" json:"ip,omitempty"`

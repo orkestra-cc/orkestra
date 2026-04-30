@@ -9,9 +9,14 @@ import (
 
 // OAuthProviderDoc represents a document in the oauth_providers collection
 type OAuthProviderDoc struct {
-	ID         primitive.ObjectID `bson:"_id,omitempty" json:"-"`
-	UUID       string             `bson:"uuid" json:"id" validate:"required"`
-	UserUUID   string             `bson:"userUuid" json:"userUuid" validate:"required"`
+	ID   primitive.ObjectID `bson:"_id,omitempty" json:"-"`
+	UUID string             `bson:"uuid" json:"id" validate:"required"`
+	// Tier is "operator" / "client" / "" — set by the tier-aware repo
+	// constructor (ADR-0003 PR-D). Lets a tier-guard test assert that
+	// every row in operator_oauth_providers carries Tier="operator"
+	// and likewise for client.
+	Tier     string `bson:"tier,omitempty" json:"-"`
+	UserUUID string `bson:"userUuid" json:"userUuid" validate:"required"`
 	Provider   OAuthProvider      `bson:"provider" json:"provider" validate:"required,oneof=google apple discord github"`
 	ProviderID string             `bson:"providerId" json:"providerId" validate:"required"`
 	Email      string             `bson:"email" json:"email" validate:"required,email"`
@@ -33,9 +38,11 @@ type OAuthProviderDoc struct {
 
 // RefreshTokenDoc represents a document in the refresh_tokens collection
 type RefreshTokenDoc struct {
-	ID          primitive.ObjectID `bson:"_id,omitempty" json:"-"`
-	UUID        string             `bson:"uuid" json:"id" validate:"required"`
-	UserUUID    string             `bson:"userUuid" json:"userUuid" validate:"required"`
+	ID   primitive.ObjectID `bson:"_id,omitempty" json:"-"`
+	UUID string             `bson:"uuid" json:"id" validate:"required"`
+	// Tier is "operator" / "client" / "" — see OAuthProviderDoc.Tier.
+	Tier        string `bson:"tier,omitempty" json:"-"`
+	UserUUID    string `bson:"userUuid" json:"userUuid" validate:"required"`
 	Token       string             `bson:"token" json:"-" validate:"required"` // Hashed token
 	SessionUUID string             `bson:"sessionUuid" json:"sessionId" validate:"required"`
 
@@ -95,10 +102,12 @@ const (
 
 // AuthSessionDoc represents a document in the auth_sessions collection
 type AuthSessionDoc struct {
-	ID       primitive.ObjectID `bson:"_id,omitempty" json:"-"`
-	UUID     string             `bson:"uuid" json:"id" validate:"required"`
-	UserUUID string             `bson:"userUuid" json:"userUuid" validate:"required"`
-	DeviceID string             `bson:"deviceId" json:"deviceId" validate:"required"`
+	ID   primitive.ObjectID `bson:"_id,omitempty" json:"-"`
+	UUID string             `bson:"uuid" json:"id" validate:"required"`
+	// Tier is "operator" / "client" / "" — see OAuthProviderDoc.Tier.
+	Tier     string `bson:"tier,omitempty" json:"-"`
+	UserUUID string `bson:"userUuid" json:"userUuid" validate:"required"`
+	DeviceID string `bson:"deviceId" json:"deviceId" validate:"required"`
 
 	// Session State
 	IsActive     bool      `bson:"isActive" json:"isActive"`
@@ -138,6 +147,16 @@ type SecurityEventLog struct {
 	RiskDelta   float64                `bson:"riskDelta,omitempty" json:"riskDelta,omitempty"` // Change in risk score
 	Details     map[string]interface{} `bson:"details,omitempty" json:"details,omitempty"`
 }
+
+// Tier values stamped on every auth doc by ADR-0003 PR-D as a
+// defense-in-depth guard. Mirror the user-side constants in
+// core/user/models so a tier-guard test can assert each collection
+// only holds rows of its own tier (e.g. operator_sessions rows must
+// carry Tier="operator").
+const (
+	TierOperator = "operator"
+	TierClient   = "client"
+)
 
 // Collection names
 const (

@@ -27,17 +27,42 @@ type EmailTokenRepository interface {
 
 type emailTokenRepository struct {
 	coll *mongo.Collection
+	// tier — see authSessionRepository.tier (ADR-0003 PR-D).
+	tier string
 }
 
+// NewEmailTokenRepository wires a repository against the legacy
+// `auth_email_tokens` collection. Tier is empty.
 func NewEmailTokenRepository(db *mongo.Database) EmailTokenRepository {
 	return &emailTokenRepository{
 		coll: db.Collection(models.EmailTokensCollection),
 	}
 }
 
+// NewOperatorEmailTokenRepository binds to operator_email_tokens and
+// stamps Tier="operator" on every Create write. ADR-0003 PR-D.
+func NewOperatorEmailTokenRepository(db *mongo.Database) EmailTokenRepository {
+	return &emailTokenRepository{
+		coll: db.Collection(models.OperatorEmailTokensCollection),
+		tier: models.TierOperator,
+	}
+}
+
+// NewClientEmailTokenRepository binds to client_email_tokens and stamps
+// Tier="client" on every Create write. ADR-0003 PR-D.
+func NewClientEmailTokenRepository(db *mongo.Database) EmailTokenRepository {
+	return &emailTokenRepository{
+		coll: db.Collection(models.ClientEmailTokensCollection),
+		tier: models.TierClient,
+	}
+}
+
 func (r *emailTokenRepository) Create(ctx context.Context, doc *models.EmailTokenDoc) error {
 	if doc.CreatedAt.IsZero() {
 		doc.CreatedAt = time.Now()
+	}
+	if r.tier != "" {
+		doc.Tier = r.tier
 	}
 	_, err := r.coll.InsertOne(ctx, doc)
 	return err

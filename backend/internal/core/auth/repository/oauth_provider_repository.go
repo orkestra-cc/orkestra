@@ -39,12 +39,34 @@ type OAuthProviderRepository interface {
 
 type oauthProviderRepository struct {
 	collection *mongo.Collection
+	// tier — see authSessionRepository.tier (ADR-0003 PR-D).
+	tier string
 }
 
-// NewOAuthProviderRepository creates a new OAuth provider repository
+// NewOAuthProviderRepository creates an OAuth-provider repo bound to
+// the legacy `auth_oauth_providers` collection. Tier is empty.
 func NewOAuthProviderRepository(db *mongo.Database) OAuthProviderRepository {
 	return &oauthProviderRepository{
 		collection: db.Collection(models.OAuthProvidersCollection),
+	}
+}
+
+// NewOperatorOAuthProviderRepository binds to operator_oauth_providers
+// and stamps Tier="operator" on every CreateOAuthProvider write.
+// ADR-0003 PR-D.
+func NewOperatorOAuthProviderRepository(db *mongo.Database) OAuthProviderRepository {
+	return &oauthProviderRepository{
+		collection: db.Collection(models.OperatorOAuthProvidersCollection),
+		tier:       models.TierOperator,
+	}
+}
+
+// NewClientOAuthProviderRepository binds to client_oauth_providers and
+// stamps Tier="client" on every CreateOAuthProvider write. ADR-0003 PR-D.
+func NewClientOAuthProviderRepository(db *mongo.Database) OAuthProviderRepository {
+	return &oauthProviderRepository{
+		collection: db.Collection(models.ClientOAuthProvidersCollection),
+		tier:       models.TierClient,
 	}
 }
 
@@ -60,6 +82,10 @@ func (r *oauthProviderRepository) CreateOAuthProvider(ctx context.Context, provi
 	}
 	provider.CreatedAt = now
 	provider.UpdatedAt = now
+	// ADR-0003 PR-D: stamp the audience tier — see authSessionRepository.
+	if r.tier != "" {
+		provider.Tier = r.tier
+	}
 
 	// Check if provider already exists
 	fmt.Printf("[REPO_DEBUG] Checking if provider already exists...\n")
