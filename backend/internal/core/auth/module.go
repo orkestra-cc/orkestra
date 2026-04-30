@@ -456,6 +456,68 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 	deps.Services.Register(module.ServicePasswordAuthService, passwordAuthSvc)
 	deps.Services.Register(module.ServiceSessionRevocation, sessionRevocationSvc)
 
+	// ADR-0003 PR-D D-2: tier-aware auth/password-auth services. Each
+	// bundle wraps its own AuthService + PasswordAuthService bound to
+	// the matching tier's session/refresh/oauth/mfa/email-token repos
+	// (PR-B) and the matching OperatorUserProvider / ClientUserProvider.
+	// Registered alongside the legacy ServiceAuthService /
+	// ServicePasswordAuthService keys so PR-D's per-audience handlers
+	// (D-4 operator paths, D-5 client paths) can pull the audience-
+	// matching service without touching the legacy wiring. The legacy
+	// bundle stays canonical until D-8 deletes the legacy auth_*
+	// collections. Shared singletons (passwordSvc, jwtService,
+	// mfaChallengeSvc, deviceTrustSvc, suspiciousLoginNotifierSvc,
+	// rateLimiter, etc.) are reused across all tiers — only the repos
+	// and risk scorer differ.
+	commonTierDeps := tierBundleDeps{
+		db:                       deps.DB,
+		logger:                   logger,
+		tenantProvider:           tenantProvider,
+		authRepo:                 authRepo,
+		jwtService:               jwtService,
+		passwordService:          passwordSvc,
+		mfaChallengeService:      mfaChallengeSvc,
+		firstAdminClaimer:        firstAdminClaimer,
+		deviceTrust:              deviceTrustSvc,
+		suspiciousLoginNotifier:  suspiciousLoginNotifierSvc,
+		notifier:                 notifier,
+		rateLimiter:              rateLimiter,
+		geoResolver:              geoResolver,
+		velocityKmh:              velocityKmh,
+		frontendURL:              cfg.Server.FrontendURL,
+		requireEmailVerification: getBoolEnv("AUTH_REQUIRE_EMAIL_VERIFICATION", cfg.IsProductionLike()),
+		appName:                  getEnvOrDefault("APP_NAME", "Orkestra"),
+		supportEmail:             os.Getenv("SUPPORT_EMAIL"),
+	}
+
+	if operatorUser, ok := module.GetTyped[iface.UserProvider](deps.Services, module.ServiceOperatorUserProvider); ok {
+		opDeps := commonTierDeps
+		opDeps.tier = tierOperator
+		opDeps.userProvider = operatorUser
+		opBundle, err := buildAuthTierBundle(opDeps)
+		if err != nil {
+			return err
+		}
+		deps.Services.Register(module.ServiceOperatorAuthService, opBundle.authService)
+		deps.Services.Register(module.ServiceOperatorPasswordAuthService, opBundle.passwordSvc)
+	} else {
+		logger.Warn("auth: operator user provider not registered — operator-tier auth bundle skipped (ADR-0003 PR-D)")
+	}
+
+	if clientUser, ok := module.GetTyped[iface.UserProvider](deps.Services, module.ServiceClientUserProvider); ok {
+		clDeps := commonTierDeps
+		clDeps.tier = tierClient
+		clDeps.userProvider = clientUser
+		clBundle, err := buildAuthTierBundle(clDeps)
+		if err != nil {
+			return err
+		}
+		deps.Services.Register(module.ServiceClientAuthService, clBundle.authService)
+		deps.Services.Register(module.ServiceClientPasswordAuthService, clBundle.passwordSvc)
+	} else {
+		logger.Warn("auth: client user provider not registered — client-tier auth bundle skipped (ADR-0003 PR-D)")
+	}
+
 	// Session-risk lookup: resolves the most recent risk score for a sid
 	// against the auth_sessions collection. Consumed post-InitAll by the
 	// HTTP middleware's RequireLowRisk gate and the Cedar shadow
