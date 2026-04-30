@@ -349,7 +349,7 @@ export const billingApi = baseApi.injectEndpoints({
     getInvoicePdf: builder.query<{ success: true }, { id: string; filename?: string }>({
       queryFn: async ({ id, filename }, { getState }) => {
         try {
-          const baseUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000';
+          const baseUrl = import.meta.env.VITE_BACKEND_URL || 'http://console.localhost:3000';
           const state = getState() as { auth?: { accessToken?: string; tokenExpiry?: string } };
 
           const headers: HeadersInit = {};

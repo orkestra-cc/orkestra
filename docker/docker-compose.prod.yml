@@ -51,9 +51,22 @@ services:
       FRONTEND_URL: ${FRONTEND_URL:-https://orkestra.cc}
       BACKEND_URL: ${BACKEND_URL:-https://api.orkestra.cc}
 
+      # ADR-0003 host split. Production has no dev fallthrough — an
+      # unmatched Host header returns 421 Misdirected Request, so both
+      # CONSOLE_HOST and CLIENT_API_HOST must point at the actual public
+      # hostnames behind the ingress.
+      CONSOLE_HOST: ${CONSOLE_HOST:-console.orkestra.com}
+      CLIENT_API_HOST: ${CLIENT_API_HOST:-api.orkestra.com}
+      OPERATOR_CORS_ORIGINS: ${OPERATOR_CORS_ORIGINS:-}
+      CLIENT_CORS_ORIGINS: ${CLIENT_CORS_ORIGINS:-}
+
       # Security (strict)
       RATE_LIMIT_REQUESTS_PER_MINUTE: ${RATE_LIMIT_REQUESTS_PER_MINUTE:-30}
       RATE_LIMIT_BURST: ${RATE_LIMIT_BURST:-5}
+      OPERATOR_RATE_LIMIT_REQUESTS_PER_MINUTE: ${OPERATOR_RATE_LIMIT_REQUESTS_PER_MINUTE:-0}
+      OPERATOR_RATE_LIMIT_BURST: ${OPERATOR_RATE_LIMIT_BURST:-0}
+      CLIENT_RATE_LIMIT_REQUESTS_PER_MINUTE: ${CLIENT_RATE_LIMIT_REQUESTS_PER_MINUTE:-0}
+      CLIENT_RATE_LIMIT_BURST: ${CLIENT_RATE_LIMIT_BURST:-0}
 
       # Production specific
       DEBUG: "false"

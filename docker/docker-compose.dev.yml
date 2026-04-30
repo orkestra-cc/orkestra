@@ -57,12 +57,25 @@ services:
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:8080}
       BACKEND_URL: ${BACKEND_URL:-http://localhost:3000}
 
-      # CORS
-      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080,http://localhost:5173}
+      # CORS (legacy single-host fallback)
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080,http://localhost:5173,http://console.localhost:8080,http://api.localhost:8080}
+
+      # ADR-0003 host split. Defaults use *.localhost so contributors
+      # don't need /etc/hosts entries; the host mux also has a dev
+      # fallthrough that routes unmatched hosts to the operator mux,
+      # so curl http://localhost:3000 still works.
+      CONSOLE_HOST: ${CONSOLE_HOST:-console.localhost:3000}
+      CLIENT_API_HOST: ${CLIENT_API_HOST:-api.localhost:3000}
+      OPERATOR_CORS_ORIGINS: ${OPERATOR_CORS_ORIGINS:-}
+      CLIENT_CORS_ORIGINS: ${CLIENT_CORS_ORIGINS:-}
 
       # Security (relaxed for dev)
       RATE_LIMIT_REQUESTS_PER_MINUTE: ${RATE_LIMIT_REQUESTS_PER_MINUTE:-1000}
       RATE_LIMIT_BURST: ${RATE_LIMIT_BURST:-100}
+      OPERATOR_RATE_LIMIT_REQUESTS_PER_MINUTE: ${OPERATOR_RATE_LIMIT_REQUESTS_PER_MINUTE:-0}
+      OPERATOR_RATE_LIMIT_BURST: ${OPERATOR_RATE_LIMIT_BURST:-0}
+      CLIENT_RATE_LIMIT_REQUESTS_PER_MINUTE: ${CLIENT_RATE_LIMIT_REQUESTS_PER_MINUTE:-0}
+      CLIENT_RATE_LIMIT_BURST: ${CLIENT_RATE_LIMIT_BURST:-0}
 
       # Development specific
       DEBUG: "true"

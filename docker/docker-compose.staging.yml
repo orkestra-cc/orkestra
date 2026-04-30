@@ -50,6 +50,15 @@ services:
       # invalidates every stored secret.
       OAUTH_TOKEN_ENCRYPTION_KEY: ${OAUTH_TOKEN_ENCRYPTION_KEY}
 
+      # Bootstrap OAuth seed values. config.go's production-like Validate()
+      # still requires non-empty client id + secret (a stale check from
+      # before ConfigService owned OAuth credentials — the live values are
+      # now stored in module_configs and edited at /admin/modules). The
+      # placeholders satisfy the boot-time gate without functional impact;
+      # real values come from the admin UI.
+      OAUTH_GOOGLE_CLIENT_ID: ${OAUTH_GOOGLE_CLIENT_ID:-placeholder.apps.googleusercontent.com}
+      OAUTH_GOOGLE_CLIENT_SECRET: ${OAUTH_GOOGLE_CLIENT_SECRET:-placeholder}
+
       # Compliance KMS master key (Phase 4.3) — 64 hex chars = 32 bytes.
       # Wraps per-tenant DEKs; losing this key invalidates every wrapped
       # DEK. Keep env-derived so operators can rotate without a rebuild.
@@ -69,12 +78,28 @@ services:
       FRONTEND_URL: ${FRONTEND_URL:-https://staging.orkestra.cc}
       BACKEND_URL: ${BACKEND_URL:-https://staging-api.orkestra.cc}
 
-      # CORS
+      # CORS — legacy single-host fallback. Per-audience overrides
+      # (OPERATOR_CORS_ORIGINS / CLIENT_CORS_ORIGINS) take precedence
+      # when set.
       CORS_ORIGINS: ${CORS_ORIGINS:-https://staging.orkestra.cc}
+
+      # ADR-0003 host split. CONSOLE_HOST serves the operator dashboard;
+      # CLIENT_API_HOST serves Tier-2 client traffic (subscriptions,
+      # payments, future AI runtime). Empty disables that audience's mux
+      # — leave both unset only on hosts that should not serve any
+      # public traffic.
+      CONSOLE_HOST: ${CONSOLE_HOST:-staging-console.orkestra.cc}
+      CLIENT_API_HOST: ${CLIENT_API_HOST:-staging-api.orkestra.cc}
+      OPERATOR_CORS_ORIGINS: ${OPERATOR_CORS_ORIGINS:-}
+      CLIENT_CORS_ORIGINS: ${CLIENT_CORS_ORIGINS:-}
 
       # Security (production-like)
       RATE_LIMIT_REQUESTS_PER_MINUTE: ${RATE_LIMIT_REQUESTS_PER_MINUTE:-60}
       RATE_LIMIT_BURST: ${RATE_LIMIT_BURST:-10}
+      OPERATOR_RATE_LIMIT_REQUESTS_PER_MINUTE: ${OPERATOR_RATE_LIMIT_REQUESTS_PER_MINUTE:-0}
+      OPERATOR_RATE_LIMIT_BURST: ${OPERATOR_RATE_LIMIT_BURST:-0}
+      CLIENT_RATE_LIMIT_REQUESTS_PER_MINUTE: ${CLIENT_RATE_LIMIT_REQUESTS_PER_MINUTE:-0}
+      CLIENT_RATE_LIMIT_BURST: ${CLIENT_RATE_LIMIT_BURST:-0}
 
       # Staging specific
       DEBUG: "false"

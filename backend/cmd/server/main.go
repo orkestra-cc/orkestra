@@ -199,11 +199,14 @@ func main() {
 	}
 	deviceMW := authMiddleware.NewDeviceMiddleware(errorManager)
 
-	// Router + middleware
-	router := chi.NewRouter()
-	setupMiddleware(router, cfg, errorManager, deviceMW)
-
-	// API config
+	// ADR-0003 PR-C: build two audience-scoped surfaces (operator + client),
+	// each with its own chi.Mux + huma.API + protected sub-router. Both run
+	// in the same process and share the same auth middleware, JWT service,
+	// and module registry — only the host-mux dispatch and the per-audience
+	// CORS / RequireAudience gates differ. PR-D will split the JWT issuance
+	// path so client-side login mints aud=client tokens; until then every
+	// monolith-issued token carries aud=operator and only the operator host
+	// has registered routes.
 	apiConfig := huma.DefaultConfig("Orkestra API", "1.0.0")
 	apiConfig.DocsPath = ""
 	apiConfig.Components.SecuritySchemes = map[string]*huma.SecurityScheme{
@@ -214,62 +217,73 @@ func main() {
 		},
 	}
 
-	publicAPI := humachi.New(router, apiConfig)
+	operatorMux := chi.NewRouter()
+	setupMiddleware(operatorMux, cfg, errorManager, deviceMW, string(module.AudienceOperator), cfg.Server.Operator)
+	operatorAPI := humachi.New(operatorMux, apiConfig)
+	operatorProtected := chi.NewRouter()
+	operatorProtected.Use(authMW.RequireAuth)
+	operatorProtected.Use(authMiddleware.TenantBaggage)
 
-	// Protected router
-	protectedRouter := chi.NewRouter()
-	protectedRouter.Use(authMW.RequireAuth)
-	// TenantBaggage enriches the current OTEL span with tenant.id /
-	// tenant.kind / user.id / user.role resolved by RequireAuth. Mounted
-	// immediately after so the context values are populated; no-op on
-	// unauthenticated requests.
-	protectedRouter.Use(authMiddleware.TenantBaggage)
+	clientMux := chi.NewRouter()
+	setupMiddleware(clientMux, cfg, errorManager, deviceMW, string(module.AudienceClient), cfg.Server.Client)
+	clientAPI := humachi.New(clientMux, apiConfig)
+	clientProtected := chi.NewRouter()
+	clientProtected.Use(authMW.RequireAuth)
+	clientProtected.Use(authMiddleware.TenantBaggage)
 
-	// Module routes — ADR-0003 PR-A: per-audience surfaces, both initially
-	// pointing at the same huma.API / chi.Router / middleware so behavior is
-	// unchanged. PR-C splits these into independent muxes per host.
+	// Module routes — every module currently registers on the Operator
+	// surface (no behavior change from PR-A). Subscriptions / payments /
+	// onboarding migrate to the Client surface in PR-D when the auth path
+	// split + JWT v2 land. Until then the Client surface exists but has
+	// zero registered routes, and visiting api.localhost:3000 returns 404.
 	operatorSurface := &module.APISurface{
 		Audience:        module.AudienceOperator,
-		PublicAPI:       publicAPI,
-		ProtectedRouter: protectedRouter,
+		PublicAPI:       operatorAPI,
+		ProtectedRouter: operatorProtected,
 		AuthMW:          authMW,
 	}
 	clientSurface := &module.APISurface{
 		Audience:        module.AudienceClient,
-		PublicAPI:       publicAPI,
-		ProtectedRouter: protectedRouter,
+		PublicAPI:       clientAPI,
+		ProtectedRouter: clientProtected,
 		AuthMW:          authMW,
 	}
 	modRegistry.RegisterAllRoutes(&module.RouteInfo{
-		Operator:      operatorSurface,
-		Client:        clientSurface,
-		Router:        router,
+		Operator: operatorSurface,
+		Client:   clientSurface,
+		// Root chi.Router for special-case routes (dev/token, SSE that
+		// bypasses Huma). Operator-only — dev tokens never need to land
+		// on the client host.
+		Router:        operatorMux,
 		APIConfig:     apiConfig,
 		ConfigService: configService,
 	})
 
 	// First-install onboarding: public /v1/setup/status and /v1/setup/admin.
 	// Reachable without auth — gated by the "no users exist" invariant
-	// enforced inside setup.Service.CreateInitialAdmin.
+	// enforced inside setup.Service.CreateInitialAdmin. Operator-only:
+	// the initial admin is a Tier-1 super_admin, so the wizard lives on
+	// the operator host.
 	setupSvc := setup.NewService(
 		module.MustGetTyped[iface.UserProvider](svcRegistry, module.ServiceUserService),
 		module.MustGetTyped[setup.AdminCreator](svcRegistry, module.ServicePasswordAuthService),
 		configService,
 		logger,
 	)
-	setup.NewHandler(setupSvc, cfg.Auth.Cookie).RegisterRoutes(publicAPI)
+	setup.NewHandler(setupSvc, cfg.Auth.Cookie).RegisterRoutes(operatorAPI)
 
 	// Admin module management routes: platform-level, not per-org. Split
 	// into reads and mutations so Block B can require MFA on the paths
 	// that write secrets or flip module enablement. Both share the same
 	// system permission; the MFA gate on the mutation group layers on top.
+	// Operator-only — module enable/disable is a Tier-1 operator concern.
 	moduleAdminHandler := module.NewModuleAdminHandler(configService, modRegistry)
-	protectedRouter.Group(func(r chi.Router) {
+	operatorProtected.Group(func(r chi.Router) {
 		r.Use(authMW.RequireSystemPermission("system.modules.admin"))
 		adminAPI := humachi.New(r, apiConfig)
 		module.RegisterAdminModuleReadRoutes(adminAPI, moduleAdminHandler)
 	})
-	protectedRouter.Group(func(r chi.Router) {
+	operatorProtected.Group(func(r chi.Router) {
 		r.Use(authMW.RequireSystemPermission("system.modules.admin"))
 		r.Use(authMW.RequireMFA())
 		// Section C item #2: also gate admin-module writes on low session
@@ -282,21 +296,25 @@ func main() {
 		module.RegisterAdminModuleMutationRoutes(adminAPI, moduleAdminHandler)
 	})
 
-	router.Mount("/", protectedRouter)
+	operatorMux.Mount("/", operatorProtected)
+	clientMux.Mount("/", clientProtected)
 
-	// Health, readiness, docs
-	registerHealthEndpoints(publicAPI, db, redisClient)
-	registerDocsEndpoints(router, publicAPI)
+	// Health, readiness, docs — registered on both surfaces so
+	// orchestrator probes (k8s liveness, ALB target health) can hit
+	// either host. Each audience gets its own /openapi.json so SDK
+	// generators see only that audience's surface.
+	registerHealthEndpoints(operatorAPI, db, redisClient)
+	registerDocsEndpoints(operatorMux, operatorAPI)
+	registerHealthEndpoints(clientAPI, db, redisClient)
+	registerDocsEndpoints(clientMux, clientAPI)
 
-	// Phase 5.3: Prometheus /metrics endpoint. Registered directly on the
-	// chi router (no auth) — deployments that need per-network ACLs
-	// should front it with a sidecar or the ingress config; the handler
-	// itself exposes no principal-identifying data (tenant.id is
-	// deliberately not a label; see ADR-0002).
-	//
-	// METRICS_ENABLED is respected but defaults to true because a
-	// scrape on a disabled handler just yields 404 — cheap enough to
-	// leave on in every environment.
+	// Phase 5.3: Prometheus /metrics endpoint. Operator-only — Prometheus
+	// scrapes from inside the cluster against the operator host; exposing
+	// metrics on the client host would leak internal cardinality to any
+	// browser hitting api.orkestra.com/metrics. METRICS_ENABLED is
+	// respected but defaults to true because a scrape on a disabled
+	// handler just yields 404 — cheap enough to leave on in every
+	// environment.
 	if os.Getenv("METRICS_ENABLED") != "false" {
 		mc := metrics.Default()
 		if err := mc.Register(); err != nil {
@@ -305,16 +323,33 @@ func main() {
 		}
 		stopLag := mc.Start(15 * time.Second)
 		defer stopLag()
-		router.Handle("/metrics", mc.Handler())
+		operatorMux.Handle("/metrics", mc.Handler())
 	}
 
-	// HTTP server. The router is wrapped in otelhttp.NewHandler so every
+	// Host mux dispatches by Host header. In dev (ENV=development) an
+	// unmatched host falls through to operatorMux so curl
+	// http://localhost:3000 still works without DNS gymnastics; in prod
+	// an unmatched host gets 421 Misdirected Request.
+	hostRoutes := map[string]http.Handler{}
+	if cfg.Server.Operator.Host != "" {
+		hostRoutes[cfg.Server.Operator.Host] = operatorMux
+	}
+	if cfg.Server.Client.Host != "" {
+		hostRoutes[cfg.Server.Client.Host] = clientMux
+	}
+	var devFallthrough http.Handler
+	if cfg.Server.Environment == "development" {
+		devFallthrough = operatorMux
+	}
+	root := newHostMux(hostRoutes, devFallthrough)
+
+	// HTTP server. The host mux is wrapped in otelhttp.NewHandler so every
 	// request spawns a span the tenant-baggage middleware can enrich
 	// with tenant.id / tenant.kind / user.id (ADR-0001 Phase 4.4). When
 	// no OTLP endpoint is configured, span creation is still cheap and
 	// the attribute writes are no-ops — there is no dev-vs-prod
 	// divergence at the middleware level.
-	handler := otelhttp.NewHandler(router, "http.request")
+	handler := otelhttp.NewHandler(root, "http.request")
 	srv := &http.Server{
 		Addr:           fmt.Sprintf(":%s", cfg.Server.Port),
 		Handler:        handler,

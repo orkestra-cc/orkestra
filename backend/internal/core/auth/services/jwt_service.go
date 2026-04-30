@@ -88,9 +88,22 @@ func NewJWTService(privateKey *rsa.PrivateKey, publicKey *rsa.PublicKey, env str
 		accessExpiry:  accessTTL,
 		refreshExpiry: refreshTTL,
 		issuer:        issuerFor(env),
-		audience:      "orkestra-api",
+		// ADR-0003 PR-C: every issued token is stamped with the operator
+		// audience. PR-D introduces per-tier issuance (operator/client/
+		// service) once the auth path split lands. Until then the monolith
+		// is single-aud and the host-mux RequireAudience middleware honours
+		// the legacy "orkestra-api" value for tokens minted before PR-C.
+		audience: LegacyAudienceOperator,
 	}
 }
+
+// LegacyAudienceOperator is the JWT `aud` value stamped on every monolith-
+// issued access/refresh token at the PR-C boundary. The literal matches
+// shared/module.AudienceOperator; defined locally to avoid importing the
+// module package (which depends on iface, which the auth services already
+// implement — circular import). PR-D collapses this back into a single
+// shared constant once the JWT v2 cutover removes the transition path.
+const LegacyAudienceOperator = "operator"
 
 // issuerFor produces the canonical iss claim value for a given environment.
 // An empty env is normalised to "development" so local dev and test code

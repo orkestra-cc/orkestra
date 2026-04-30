@@ -92,8 +92,14 @@ function isTenantAgnostic(url: string): boolean {
 // Base fetch with cookies + Bearer token. Tenant context (X-Tenant-ID) is
 // injected by baseQueryWithRetry below, where we have access to the request
 // args and can decide whether the endpoint is tenant-scoped.
+//
+// ADR-0003 PR-C: the operator dashboard targets the operator host
+// (`console.*`). The default below uses `console.localhost:3000` so a
+// fresh checkout boots against the operator mux directly; setups that
+// can't resolve `*.localhost` fall back to the host-mux's dev
+// fallthrough by setting VITE_BACKEND_URL=http://localhost:3000.
 const baseQuery = fetchBaseQuery({
-  baseUrl: `${import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000'}`,
+  baseUrl: `${import.meta.env.VITE_BACKEND_URL || 'http://console.localhost:3000'}`,
   credentials: 'include',
   prepareHeaders: (headers, { getState }) => {
     headers.set('Content-Type', 'application/json');
