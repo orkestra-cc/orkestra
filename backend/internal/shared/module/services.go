@@ -14,6 +14,12 @@ const (
 	ServiceConfigService   ServiceKey = "system.config_svc"  // *ModuleConfigService
 
 	ServiceUserService     ServiceKey = "user.service"
+	// ADR-0003 PR-B: tier-aware user providers. Registered alongside
+	// the legacy ServiceUserService; consumers stay on the legacy key
+	// at the PR-B boundary. PR-D is the cutover — auth flows pick the
+	// audience-matching provider via these keys.
+	ServiceOperatorUserProvider ServiceKey = "user.operator_provider"
+	ServiceClientUserProvider   ServiceKey = "user.client_provider"
 	ServiceAuthService     ServiceKey = "auth.service"
 	ServiceJWTService      ServiceKey = "auth.jwt"
 	ServiceOAuthProviderFactory ServiceKey = "auth.oauth_factory"

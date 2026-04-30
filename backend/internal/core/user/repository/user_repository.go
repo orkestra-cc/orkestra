@@ -90,12 +90,42 @@ type UserRepository interface {
 
 type mongoUserRepository struct {
 	collection *mongo.Collection
+	// tier is the audience this repo binds to ("operator" / "client" /
+	// ""). When non-empty, every Create-side write stamps user.Tier so
+	// the integrity test in B-5 can assert that operator_users rows
+	// always carry Tier="operator" and likewise for clients. The
+	// legacy "users" collection runs with tier="" — its rows are
+	// tier-stamped in-place by backend/scripts/migrate_user_split.go.
+	tier string
 }
 
-// NewUserRepository creates a new user repository
+// NewUserRepository creates a user repository bound to the legacy
+// `users` collection. Tier is empty: writes don't stamp the field, and
+// the migration script is responsible for backfilling it on the rows
+// it copies into operator_users.
 func NewUserRepository(db *mongo.Database) UserRepository {
 	return &mongoUserRepository{
 		collection: db.Collection(UsersCollection),
+	}
+}
+
+// NewOperatorUserRepository binds to operator_users and stamps
+// Tier="operator" on every Create-side write. ADR-0003 PR-B —
+// registered under module.ServiceOperatorUserProvider; the auth
+// module's flows pick it up at PR-D cutover.
+func NewOperatorUserRepository(db *mongo.Database) UserRepository {
+	return &mongoUserRepository{
+		collection: db.Collection(OperatorUsersCollection),
+		tier:       models.TierOperator,
+	}
+}
+
+// NewClientUserRepository binds to client_users and stamps
+// Tier="client" on every Create-side write.
+func NewClientUserRepository(db *mongo.Database) UserRepository {
+	return &mongoUserRepository{
+		collection: db.Collection(ClientUsersCollection),
+		tier:       models.TierClient,
 	}
 }
 
@@ -114,6 +144,16 @@ func (r *mongoUserRepository) Create(ctx context.Context, user *models.User) err
 	now := time.Now()
 	user.CreatedAt = now
 	user.UpdatedAt = now
+
+	// ADR-0003 PR-B: stamp the audience tier on every operator/client
+	// row so the B-5 integrity test can assert each collection only
+	// holds rows of its own tier. Empty repo-tier (legacy `users`
+	// repo) leaves the field untouched — the migration script
+	// backfills it for legacy rows before they move into
+	// operator_users.
+	if r.tier != "" {
+		user.Tier = r.tier
+	}
 
 	_, err = r.collection.InsertOne(ctx, user)
 	if err != nil {

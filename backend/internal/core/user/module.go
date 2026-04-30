@@ -78,6 +78,25 @@ func (m *UserModule) Init(deps *module.Dependencies) error {
 	m.handler = handlers.NewUserHandler(svc)
 	deps.Services.Register(module.ServiceUserService, svc)
 
+	// ADR-0003 PR-B: tier-aware providers registered alongside the
+	// legacy one. They share the legacy oauth_provider_repo at the
+	// PR-B boundary because the auth-side tier split (separate
+	// operator_oauth_providers / client_oauth_providers repos) lands
+	// in PR-D — operator_users / client_users are also empty until
+	// the migration script runs in B-3, so any handler that
+	// accidentally calls these now would just get zero rows. Both
+	// keys are populated regardless of USER_TIER_SPLIT_ENABLED so a
+	// future MustGetTyped lookup never panics; the flag governs which
+	// provider auth flows consume, not whether they exist.
+	deps.Services.Register(
+		module.ServiceOperatorUserProvider,
+		services.NewUserService(repository.NewOperatorUserRepository(deps.DB), oauthProviderRepo),
+	)
+	deps.Services.Register(
+		module.ServiceClientUserProvider,
+		services.NewUserService(repository.NewClientUserRepository(deps.DB), oauthProviderRepo),
+	)
+
 	// Register the user PII producer with the DSR registry pre-created in
 	// main.go. Missing registry means the platform was booted without
 	// compliance infrastructure — tolerate and skip.
