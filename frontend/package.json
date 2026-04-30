@@ -83,7 +83,7 @@
     "simplebar-react": "^3.3.2",
     "slick-carousel": "^1.8.1",
     "tinymce": "^8.3.1",
-    "uuid": "^13.0.0",
+    "uuid": "^14.0.0",
     "video.js": "^8.23.3",
     "web-vitals": "^5.0.3",
     "yet-another-react-lightbox": "^3.24.0",
