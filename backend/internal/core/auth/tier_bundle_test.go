@@ -60,6 +60,16 @@ func TestBuildAuthTierBundlePicksMatchingConstructors(t *testing.T) {
 				bundle.emailTokenRepo == nil {
 				t.Error("bundle has a nil repo")
 			}
+			// D-4: MFA service is always populated (TOTP doesn't gate
+			// on env). WebAuthn stays nil because tierBundleDeps.webauthnRP
+			// is nil here — matches the "passkeys disabled" branch
+			// module.go takes when WEBAUTHN_RP_* env vars don't resolve.
+			if bundle.mfaSvc == nil {
+				t.Error("mfaSvc is nil — every tier should have a TOTP orchestrator")
+			}
+			if bundle.webauthnSvc != nil {
+				t.Error("webauthnSvc should be nil when webauthnRP dep is nil")
+			}
 		})
 	}
 }

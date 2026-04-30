@@ -1642,8 +1642,23 @@ func (h *AuthHandler) GetCurrentUser(ctx context.Context, _ *struct{}) (*GetCurr
 	}, nil
 }
 
-// RegisterRoutes registers all auth routes with the Huma API and Chi router
+// RegisterRoutes registers every auth route — OAuth + tier-mountable
+// session/me routes — under the legacy /v1/auth/... layout. Kept as the
+// canonical entry point for module.go pre-PR-D and as the single legacy
+// mount until D-8 deletes it.
 func (h *AuthHandler) RegisterRoutes(publicAPI huma.API, protectedAPI huma.API, router chi.Router, protectedRouter chi.Router) {
+	h.RegisterOAuthRoutes(publicAPI, protectedAPI, router, protectedRouter)
+	h.RegisterTierMountableRoutes(publicAPI, protectedAPI, router, LegacyMount)
+}
+
+// RegisterOAuthRoutes mounts the OAuth-flow endpoints (provider listing,
+// login initiation, mobile ID-token exchange, web callbacks, GitHub Huma
+// callback, OAuth-side session poll). These stay on the legacy
+// /v1/auth/... layout until ADR-0003 PR-D D-6 introduces state-encoded
+// tier dispatch — at which point the per-audience start endpoints will
+// move to /v1/auth/{operator,client}/oauth/... and a single shared
+// callback decodes the tier from a signed-state JWT.
+func (h *AuthHandler) RegisterOAuthRoutes(publicAPI huma.API, _ huma.API, router chi.Router, _ chi.Router) {
 	// List configured OAuth providers — used by the login UI to decide
 	// which social buttons to render. Public on purpose.
 	huma.Register(publicAPI, huma.Operation{
@@ -1690,15 +1705,10 @@ func (h *AuthHandler) RegisterRoutes(publicAPI huma.API, protectedAPI huma.API, 
 	router.Get("/v1/auth/oauth/discord/callback", h.HandleDiscordCallbackHTTP)
 	router.Post("/v1/auth/oauth/apple/callback", h.HandleAppleCallbackHTTP)
 
-	// Token refresh - use raw HTTP handler for cookie support and custom headers
-	router.Post("/v1/auth/refresh", h.RefreshTokensWithHeaderHTTP)
-	router.Post("/v1/auth/refresh-cookie", h.RefreshTokensHTTP)
-
 	// Session initialization for web clients after OAuth callback - use raw HTTP handler for cookies
 	router.Get("/v1/auth/session", h.GetSessionHTTP)
 
 	// OAuth callbacks (public) - GitHub still uses Huma for consistency with existing implementation
-
 	huma.Register(publicAPI, huma.Operation{
 		OperationID: "github-oauth-callback",
 		Method:      http.MethodGet,
@@ -1707,20 +1717,27 @@ func (h *AuthHandler) RegisterRoutes(publicAPI huma.API, protectedAPI huma.API, 
 		Description: "Handle GitHub OAuth callback and exchange code for tokens",
 		Tags:        []string{"Authentication"},
 	}, h.HandleGitHubCallback)
+}
 
-	// Note: /v1/auth/refresh is now handled by raw HTTP handler above for custom headers
+// RegisterTierMountableRoutes mounts the audience-aware session routes
+// — refresh, refresh-cookie, logout, me — under the prefix described by
+// mount. Each tier (legacy, operator, client) calls this with a distinct
+// AuthHandler instance bound to that tier's authService + JWT issuer so
+// the issued tokens carry the matching aud claim. The raw HTTP refresh
+// + logout handlers are mounted on the supplied chi.Router (the tier's
+// host mux); /v1/auth{prefix}/me is mounted on protectedAPI so the
+// surrounding RequireGlobal()/auth chain runs.
+func (h *AuthHandler) RegisterTierMountableRoutes(publicAPI huma.API, protectedAPI huma.API, router chi.Router, mount RouteMount) {
+	_ = publicAPI // reserved for future tier-mountable public huma routes (D-6 may add per-tier OAuth start endpoints).
 
-	// Logout - use raw HTTP handler for proper cookie clearing
-	// Register on public router since logout can work with just refresh token cookie
-	router.Post("/v1/auth/logout", h.LogoutHTTP)
+	router.Post("/v1/auth"+mount.PathPrefix+"/refresh", h.RefreshTokensWithHeaderHTTP)
+	router.Post("/v1/auth"+mount.PathPrefix+"/refresh-cookie", h.RefreshTokensHTTP)
+	router.Post("/v1/auth"+mount.PathPrefix+"/logout", h.LogoutHTTP)
 
-	// Protected routes (require authentication)
-
-	// Get current user
 	huma.Register(protectedAPI, huma.Operation{
-		OperationID: "get-current-user",
+		OperationID: mount.OpIDPrefix + "get-current-user",
 		Method:      http.MethodGet,
-		Path:        "/v1/auth/me",
+		Path:        "/v1/auth" + mount.PathPrefix + "/me",
 		Summary:     "Get current user",
 		Description: "Get information about the currently authenticated user",
 		Tags:        []string{"Authentication"},

@@ -1,8 +1,10 @@
 package auth
 
 import (
+	"context"
 	"log/slog"
 
+	gowebauthn "github.com/go-webauthn/webauthn/webauthn"
 	"github.com/orkestra/backend/internal/core/auth/repository"
 	"github.com/orkestra/backend/internal/core/auth/services"
 	sharederrors "github.com/orkestra/backend/internal/shared/errors"
@@ -40,6 +42,15 @@ type authTierBundle struct {
 	riskAssessment    services.RiskAssessmentService
 	authService       services.AuthService
 	passwordSvc       *services.PasswordAuthService
+	// mfaSvc and webauthnSvc are tier-bound MFA orchestrators that read
+	// and write through the bundle's tier-specific mfaFactorRepo. PR-D
+	// D-4 wires per-audience MFA handler instances off these so an
+	// operator user's TOTP enrollment lands in operator_mfa_factors and
+	// a client user's lands in client_mfa_factors. webauthnSvc is nil
+	// when the deployment hasn't configured a WebAuthn RP — same
+	// gating semantics as the legacy module.go branch.
+	mfaSvc      services.MFAService
+	webauthnSvc services.WebAuthnService
 }
 
 // tierBundleDeps carries the tier-shared singletons and per-tier user
@@ -66,6 +77,14 @@ type tierBundleDeps struct {
 	requireEmailVerification bool
 	appName                  string
 	supportEmail             string
+	// mfaIssuer is the TOTP provisioning URI label (Authenticator app
+	// row name). Tier-shared because users see the same issuer string
+	// regardless of which tier they sit in.
+	mfaIssuer string
+	// webauthnRP is the configured WebAuthn Relying Party. Nil when
+	// passkeys are disabled at boot — buildAuthTierBundle then leaves
+	// webauthnSvc nil to match the legacy module.go nil-gating.
+	webauthnRP *gowebauthn.WebAuthn
 }
 
 // buildAuthTierBundle constructs the per-tier repos + RiskAssessment +
@@ -144,6 +163,23 @@ func buildAuthTierBundle(d tierBundleDeps) (*authTierBundle, error) {
 		Logger:                   d.logger,
 	})
 
+	mfaSvc := services.NewMFAService(mfaRepo, d.mfaChallengeService, d.passwordService, d.mfaIssuer, d.logger)
+	mfaSvc.SetDeviceTrust(d.deviceTrust)
+
+	var webauthnSvc services.WebAuthnService
+	if d.webauthnRP != nil {
+		webauthnSvc = services.NewWebAuthnService(d.webauthnRP, mfaRepo, d.mfaChallengeService, d.logger)
+		// Mirror the legacy wiring: when WebAuthn is enabled the
+		// password/OAuth login services need to know whether a given
+		// user has any passkeys to surface "use passkey" on the
+		// partial login response. Wiring on the *handler* (status
+		// endpoint, login-finish) happens in module.go after handler
+		// construction since SetWebAuthn lives on the handler, not
+		// the MFAService.
+		passSvc.SetWebAuthnAvailability(tierWebAuthnAvailability{svc: webauthnSvc})
+		authSvc.SetWebAuthnAvailability(tierWebAuthnAvailability{svc: webauthnSvc})
+	}
+
 	return &authTierBundle{
 		tier:              d.tier,
 		authSessionRepo:   sessionRepo,
@@ -154,5 +190,24 @@ func buildAuthTierBundle(d tierBundleDeps) (*authTierBundle, error) {
 		riskAssessment:    risk,
 		authService:       authSvc,
 		passwordSvc:       passSvc,
+		mfaSvc:            mfaSvc,
+		webauthnSvc:       webauthnSvc,
 	}, nil
+}
+
+// tierWebAuthnAvailability adapts the per-tier WebAuthnService to the
+// HasWebAuthnCredentials interface the password/OAuth login services
+// consume. Mirrors the legacy webauthnAvailabilityChecker in module.go,
+// duplicated here to keep the bundle self-contained — both shapes
+// expose the same single method.
+type tierWebAuthnAvailability struct {
+	svc services.WebAuthnService
+}
+
+func (a tierWebAuthnAvailability) HasWebAuthnCredentials(ctx context.Context, userUUID string) bool {
+	if a.svc == nil {
+		return false
+	}
+	ok, _ := a.svc.HasCredentials(ctx, userUUID)
+	return ok
 }

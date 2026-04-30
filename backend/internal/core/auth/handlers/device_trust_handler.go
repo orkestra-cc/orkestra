@@ -130,12 +130,13 @@ func trustedDeviceDoc(d *models.DeviceTrustDoc) trustedDevicePublic {
 }
 
 // RegisterRoutes wires the three endpoints. All share the
-// RequireGlobal() gate applied at the parent router level.
-func (h *DeviceTrustHandler) RegisterRoutes(api huma.API) {
+// RequireGlobal() gate applied at the parent router level. mount controls
+// the path/operation-ID prefix for the ADR-0003 audience-split surfaces.
+func (h *DeviceTrustHandler) RegisterRoutes(api huma.API, mount RouteMount) {
 	huma.Register(api, huma.Operation{
-		OperationID: "list-trusted-devices",
+		OperationID: mount.OpIDPrefix + "list-trusted-devices",
 		Method:      http.MethodGet,
-		Path:        "/v1/auth/me/devices/trust",
+		Path:        "/v1/auth" + mount.PathPrefix + "/me/devices/trust",
 		Summary:     "List trusted devices",
 		Description: "Returns the devices the caller has opted into skipping the MFA prompt on login. Expired grants are reaped by the backend and don't appear.",
 		Tags:        []string{"Auth - Device Trust"},
@@ -143,9 +144,9 @@ func (h *DeviceTrustHandler) RegisterRoutes(api huma.API) {
 	}, h.List)
 
 	huma.Register(api, huma.Operation{
-		OperationID: "revoke-trusted-device",
+		OperationID: mount.OpIDPrefix + "revoke-trusted-device",
 		Method:      http.MethodDelete,
-		Path:        "/v1/auth/me/devices/trust/{deviceId}",
+		Path:        "/v1/auth" + mount.PathPrefix + "/me/devices/trust/{deviceId}",
 		Summary:     "Revoke one trusted device",
 		Description: "Drops the trust grant for a single device. Idempotent — returns 204 even when the device was never trusted.",
 		Tags:        []string{"Auth - Device Trust"},
@@ -154,9 +155,9 @@ func (h *DeviceTrustHandler) RegisterRoutes(api huma.API) {
 	}, h.RevokeOne)
 
 	huma.Register(api, huma.Operation{
-		OperationID: "revoke-all-trusted-devices",
+		OperationID: mount.OpIDPrefix + "revoke-all-trusted-devices",
 		Method:      http.MethodDelete,
-		Path:        "/v1/auth/me/devices/trust",
+		Path:        "/v1/auth" + mount.PathPrefix + "/me/devices/trust",
 		Summary:     "Revoke all trusted devices",
 		Description: "Drops every active trust grant the caller holds. The next login from any device will require completing MFA.",
 		Tags:        []string{"Auth - Device Trust"},
