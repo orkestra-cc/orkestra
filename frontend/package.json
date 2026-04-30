@@ -163,6 +163,6 @@
     "vitest": "^3.2.3"
   },
   "optionalDependencies": {
-    "@rollup/rollup-win32-x64-msvc": "^4.54.0"
+    "@rollup/rollup-win32-x64-msvc": "^4.60.2"
   }
 }
