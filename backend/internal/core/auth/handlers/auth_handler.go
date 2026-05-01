@@ -32,6 +32,34 @@ type AuthHandler struct {
 	jwtService        services.JWTService
 	sessionRevocation services.SessionRevocationService
 	config            *config.Config
+
+	// ADR-0003 PR-D D-6: state-encoded tier dispatch.
+	//
+	// tier identifies which audience this handler instance was wired
+	// for. Stamped into the signed-state JWT every time this instance
+	// initiates an OAuth login so the single shared callback can
+	// dispatch the resulting flow to the matching tier's authService.
+	// Empty on the legacy /v1/auth/oauth/login mount: callbacks for
+	// states without a tier claim self-handle on the legacy authService
+	// instead of delegating, preserving pre-D-6 behaviour for any
+	// /v1/auth/oauth/login flows that were started before the cutover.
+	tier string
+	// stateSecret signs (and validates) the OAuth state JWT. Derived
+	// once at module init from the JWT private key so every replica
+	// agrees on the secret. Empty disables OAuth start endpoints — the
+	// handler returns a configuration error rather than minting an
+	// unsigned state.
+	stateSecret []byte
+	// tierDispatch routes a callback's tier-stamped state to the
+	// AuthHandler instance bound to that tier. Set only on the
+	// handler that owns the callback routes (the legacy / operator-mux
+	// instance); a nil map means "no dispatch — handle every callback
+	// locally" (legacy single-tier deployments). When the state JWT's
+	// tier claim is non-empty and matches a key in this map, the
+	// callback delegates the user-creation/token-issuance step to the
+	// matching handler so the tokens are minted by the audience's
+	// authService and stamped with the audience's JWT aud claim.
+	tierDispatch map[string]*AuthHandler
 }
 
 // SetSessionRevocation wires the revoked-session store so logout can
@@ -40,6 +68,31 @@ type AuthHandler struct {
 // invalidation only (the pre-revocation behavior).
 func (h *AuthHandler) SetSessionRevocation(s services.SessionRevocationService) {
 	h.sessionRevocation = s
+}
+
+// SetTier records which audience this AuthHandler issues OAuth flows
+// for. Operator/client tier handlers stamp this value on the state JWT
+// their start endpoints mint; the callback decodes the same value to
+// dispatch back to the matching authService.
+func (h *AuthHandler) SetTier(t string) {
+	h.tier = t
+}
+
+// SetStateSecret wires the HMAC secret used to sign and validate the
+// OAuth state JWT. Must be the same secret on every replica that may
+// receive a callback for a flow initiated elsewhere — derived from
+// shared key material in the auth module's Init.
+func (h *AuthHandler) SetStateSecret(s []byte) {
+	h.stateSecret = s
+}
+
+// SetTierDispatch wires the per-tier dispatcher map consulted on every
+// OAuth callback. Only the handler instance that owns the callback
+// routes (the legacy / operator-mux instance) needs this set; tier-
+// specific handlers leave it nil and never receive a callback they
+// must dispatch.
+func (h *AuthHandler) SetTierDispatch(d map[string]*AuthHandler) {
+	h.tierDispatch = d
 }
 
 // NewAuthHandler creates a new auth handler
@@ -129,7 +182,18 @@ type OAuthLoginResponse struct {
 // InitiateOAuthLogin handles the OAuth login initiation
 func (h *AuthHandler) InitiateOAuthLogin(ctx context.Context, req *OAuthLoginRequest) (*OAuthLoginResponse, error) {
 	logger := slog.Default()
-	logger.Debug("InitiateOAuthLogin called", slog.String("provider", string(req.Body.Provider)))
+	logger.Debug("InitiateOAuthLogin called",
+		slog.String("provider", string(req.Body.Provider)),
+		slog.String("tier", h.tier),
+	)
+
+	if len(h.stateSecret) == 0 {
+		// ADR-0003 PR-D D-6: every monolith-issued state JWT must be
+		// signable. A missing secret is a wiring bug — surface it
+		// loudly rather than minting an unsigned state.
+		logger.Error("oauth state secret not configured")
+		return nil, huma.Error500InternalServerError("OAuth not available", nil)
+	}
 
 	// Backend always determines frontend redirect URL automatically
 	var frontendRedirectURL string
@@ -161,16 +225,32 @@ func (h *AuthHandler) InitiateOAuthLogin(ctx context.Context, req *OAuthLoginReq
 		}
 	}
 
-	// Create OAuth state
+	// ADR-0003 PR-D D-6: state becomes a signed JWT carrying the tier
+	// claim. The CSRF nonce inside the JWT doubles as the Redis key
+	// used to look up the per-flow side data on callback, so the JWT
+	// itself stays small while the existing one-time-use Redis
+	// semantics carry over.
+	csrf, err := services.GenerateOAuthCSRF()
+	if err != nil {
+		logger.Error("Failed to generate OAuth CSRF nonce", slog.String("error", err.Error()))
+		return nil, huma.Error500InternalServerError("Failed to create OAuth state", err)
+	}
+	signedState, err := services.SignOAuthStateToken(h.stateSecret, h.tier, csrf, 10*time.Minute)
+	if err != nil {
+		logger.Error("Failed to sign OAuth state", slog.String("error", err.Error()))
+		return nil, huma.Error500InternalServerError("Failed to create OAuth state", err)
+	}
+
 	stateRequest := &services.StoreOAuthStateRequest{
 		Provider:       req.Body.Provider,
+		Tier:           h.tier,
+		State:          csrf,
 		RedirectURI:    frontendRedirectURL,
 		DeviceInfo:     deviceInfo,
 		ExpiryDuration: 10 * time.Minute,
 	}
 
-	stateInfo, err := h.oauthStateService.StoreOAuthState(ctx, stateRequest)
-	if err != nil {
+	if _, err := h.oauthStateService.StoreOAuthState(ctx, stateRequest); err != nil {
 		logger.Error("Failed to create OAuth state", slog.String("error", err.Error()))
 		return nil, huma.Error400BadRequest("Failed to create OAuth state", err)
 	}
@@ -187,7 +267,7 @@ func (h *AuthHandler) InitiateOAuthLogin(ctx context.Context, req *OAuthLoginReq
 		return nil, huma.Error400BadRequest("OAuth provider redirect URL not configured", nil)
 	}
 
-	authURL := provider.GetAuthURL(stateInfo.State, "", backendCallbackURL)
+	authURL := provider.GetAuthURL(signedState, "", backendCallbackURL)
 
 	return &OAuthLoginResponse{
 		Body: struct {
@@ -195,9 +275,52 @@ func (h *AuthHandler) InitiateOAuthLogin(ctx context.Context, req *OAuthLoginReq
 			State   string `json:"state" doc:"OAuth state parameter for security"`
 		}{
 			AuthURL: authURL,
-			State:   stateInfo.State,
+			State:   signedState,
 		},
 	}, nil
+}
+
+// resolveStateForCallback validates the signed-state JWT presented to a
+// callback handler, looks up the matching Redis side-data row, and
+// returns the (cross-checked) state info. Returns ErrInvalidStateToken
+// equivalents as a generic 400-style error so callers can render a
+// single neutral message regardless of the failure mode.
+//
+// Tier-cross-check: if the JWT tier claim is non-empty it must match
+// the Redis row's tier — otherwise an attacker who races a legitimate
+// flow could swap their own pre-stored row in. Empty tier on either
+// side is treated as legacy and only legacy-on-both-sides is accepted.
+func (h *AuthHandler) resolveStateForCallback(ctx context.Context, raw string) (*services.OAuthStateInfo, *services.OAuthStateClaims, error) {
+	if len(h.stateSecret) == 0 {
+		return nil, nil, fmt.Errorf("oauth state secret not configured")
+	}
+	claims, err := services.ValidateOAuthStateToken(h.stateSecret, raw)
+	if err != nil {
+		return nil, nil, fmt.Errorf("invalid OAuth state: %w", err)
+	}
+	stateInfo, err := h.oauthStateService.ValidateOAuthState(ctx, claims.CSRF)
+	if err != nil {
+		return nil, nil, fmt.Errorf("OAuth state not found or expired: %w", err)
+	}
+	if stateInfo.Tier != claims.Tier {
+		return nil, nil, fmt.Errorf("OAuth state tier mismatch")
+	}
+	return stateInfo, claims, nil
+}
+
+// dispatchTarget picks the AuthHandler that should drive token issuance
+// for a callback whose state-JWT tier claim is `tier`. Returns the
+// receiver itself when no dispatch is needed (tier empty, no map, or no
+// matching key) so legacy /v1/auth/oauth/* flows keep using the
+// callback handler's own authService.
+func (h *AuthHandler) dispatchTarget(tier string) *AuthHandler {
+	if tier == "" || h.tierDispatch == nil {
+		return h
+	}
+	if target, ok := h.tierDispatch[tier]; ok && target != nil {
+		return target
+	}
+	return h
 }
 
 // OAuth Callback Request
@@ -300,13 +423,17 @@ func (h *AuthHandler) HandleGoogleCallbackHTTP(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	// Validate state
-	stateInfo, err := h.oauthStateService.ValidateOAuthState(ctx, state)
+	// ADR-0003 PR-D D-6: validate the signed-state JWT and dispatch
+	// to the tier-bound AuthHandler for token issuance. dispatchTarget
+	// returns the receiver when no tier was stamped (legacy flow) so
+	// existing /v1/auth/oauth/login callbacks keep self-handling.
+	stateInfo, claims, err := h.resolveStateForCallback(ctx, state)
 	if err != nil {
 		logger.Warn("Invalid OAuth state", slog.String("error", err.Error()))
 		http.Error(w, "Invalid OAuth state", http.StatusBadRequest)
 		return
 	}
+	target := h.dispatchTarget(claims.Tier)
 
 	// Create Google OAuth provider from live admin-panel config.
 	provider, _, err := h.resolveProvider(ctx, models.OAuthProviderGoogle)
@@ -357,7 +484,7 @@ func (h *AuthHandler) HandleGoogleCallbackHTTP(w http.ResponseWriter, r *http.Re
 	}
 
 	// Use enhanced auth service for proper user creation and token management
-	tokenResponse, err := h.authService.HandleOAuthCallbackWithLinking(ctx, models.OAuthProviderGoogle, userInfoMap, oauthTokens, stateInfo.SecurityContext, stateInfo.DeviceInfo)
+	tokenResponse, err := target.authService.HandleOAuthCallbackWithLinking(ctx, models.OAuthProviderGoogle, userInfoMap, oauthTokens, stateInfo.SecurityContext, stateInfo.DeviceInfo)
 	if err != nil {
 		logger.Error("Failed to process OAuth callback", slog.String("error", err.Error()))
 		http.Error(w, "Failed to process OAuth callback", http.StatusInternalServerError)
@@ -365,16 +492,16 @@ func (h *AuthHandler) HandleGoogleCallbackHTTP(w http.ResponseWriter, r *http.Re
 	}
 	// Set only refresh token as secure HttpOnly cookie
 	// Use cookie configuration from environment
-	cookieName := h.config.Auth.Cookie.Name     // Set from COOKIE_NAME env var
-	cookieDomain := h.config.Auth.Cookie.Domain // Set from COOKIE_DOMAIN env var
-	isSecure := h.config.Auth.Cookie.Secure     // Set from COOKIE_SECURE env var
+	cookieName := target.config.Auth.Cookie.Name     // Set from COOKIE_NAME env var
+	cookieDomain := target.config.Auth.Cookie.Domain // Set from COOKIE_DOMAIN env var
+	isSecure := target.config.Auth.Cookie.Secure     // Set from COOKIE_SECURE env var
 
 	// Set only refresh token in cookie (7 days expiry)
 	// Access token will be sent in the redirect URL for the client to store
 	utils.SetRefreshTokenCookie(w, cookieName, tokenResponse.RefreshToken, 7*24*3600, cookieDomain, isSecure) // 7 days for refresh token
 
 	// Redirect to frontend without access token (refresh token is in cookie, access token will be fetched via /auth/session)
-	frontendURL := h.config.Server.FrontendURL
+	frontendURL := target.config.Server.FrontendURL
 	redirectURL := fmt.Sprintf("%s/auth/callback?success=true&user_id=%s&email=%s&provider=google",
 		frontendURL,
 		url.QueryEscape(tokenResponse.User.ID),
@@ -396,12 +523,13 @@ func (h *AuthHandler) HandleDiscordCallbackHTTP(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	// Validate state
-	stateInfo, err := h.oauthStateService.ValidateOAuthState(ctx, state)
+	// ADR-0003 PR-D D-6: validate signed state + dispatch by tier.
+	stateInfo, claims, err := h.resolveStateForCallback(ctx, state)
 	if err != nil {
 		http.Error(w, "Invalid OAuth state", http.StatusBadRequest)
 		return
 	}
+	target := h.dispatchTarget(claims.Tier)
 
 	// Create Discord OAuth provider from live admin-panel config.
 	provider, _, err := h.resolveProvider(ctx, models.OAuthProviderDiscord)
@@ -447,7 +575,7 @@ func (h *AuthHandler) HandleDiscordCallbackHTTP(w http.ResponseWriter, r *http.R
 	}
 
 	// Use enhanced auth service for proper user creation and token management
-	authTokenResponse, err := h.authService.HandleOAuthCallbackWithLinking(ctx, models.OAuthProviderDiscord, userInfoMap, oauthTokens, stateInfo.SecurityContext, stateInfo.DeviceInfo)
+	authTokenResponse, err := target.authService.HandleOAuthCallbackWithLinking(ctx, models.OAuthProviderDiscord, userInfoMap, oauthTokens, stateInfo.SecurityContext, stateInfo.DeviceInfo)
 	if err != nil {
 		http.Error(w, "Failed to process OAuth callback", http.StatusInternalServerError)
 		return
@@ -455,16 +583,16 @@ func (h *AuthHandler) HandleDiscordCallbackHTTP(w http.ResponseWriter, r *http.R
 
 	// Set only refresh token as secure HttpOnly cookie
 	// Use cookie configuration from environment
-	cookieName := h.config.Auth.Cookie.Name     // Set from COOKIE_NAME env var
-	cookieDomain := h.config.Auth.Cookie.Domain // Set from COOKIE_DOMAIN env var
-	isSecure := h.config.Auth.Cookie.Secure     // Set from COOKIE_SECURE env var
+	cookieName := target.config.Auth.Cookie.Name     // Set from COOKIE_NAME env var
+	cookieDomain := target.config.Auth.Cookie.Domain // Set from COOKIE_DOMAIN env var
+	isSecure := target.config.Auth.Cookie.Secure     // Set from COOKIE_SECURE env var
 
 	// Set only refresh token in cookie (7 days expiry)
 	// Access token will be sent in the redirect URL for the client to store
 	utils.SetRefreshTokenCookie(w, cookieName, authTokenResponse.RefreshToken, 7*24*3600, cookieDomain, isSecure) // 7 days for refresh token
 
 	// Redirect to frontend without access token (refresh token is in cookie, access token will be fetched via /auth/session)
-	frontendURL := h.config.Server.FrontendURL
+	frontendURL := target.config.Server.FrontendURL
 	redirectURL := fmt.Sprintf("%s/auth/callback?success=true&user_id=%s&email=%s&provider=discord",
 		frontendURL,
 		url.QueryEscape(authTokenResponse.User.ID),
@@ -502,6 +630,7 @@ func (h *AuthHandler) HandleAppleCallbackHTTP(w http.ResponseWriter, r *http.Req
 	}
 
 	var stateInfo *services.OAuthStateInfo
+	target := h
 
 	if state == "" {
 		// SECURITY: In production, state parameter is REQUIRED to prevent CSRF attacks
@@ -534,15 +663,17 @@ func (h *AuthHandler) HandleAppleCallbackHTTP(w http.ResponseWriter, r *http.Req
 			},
 		}
 	} else {
-		// Normal flow: Validate state parameter
+		// ADR-0003 PR-D D-6: validate signed state + dispatch by tier.
 		var err error
-		stateInfo, err = h.oauthStateService.ValidateOAuthState(ctx, state)
+		var claims *services.OAuthStateClaims
+		stateInfo, claims, err = h.resolveStateForCallback(ctx, state)
 		if err != nil {
 			utils.AuthDebugError("state_validation", err)
 			http.Error(w, "Invalid OAuth state", http.StatusBadRequest)
 			return
 		}
-		utils.AuthDebug("OAuth state validated - Provider: %s", stateInfo.Provider)
+		target = h.dispatchTarget(claims.Tier)
+		utils.AuthDebug("OAuth state validated - Provider: %s, Tier: %s", stateInfo.Provider, claims.Tier)
 	}
 
 	// Create Apple OAuth provider from live admin-panel config.
@@ -606,7 +737,7 @@ func (h *AuthHandler) HandleAppleCallbackHTTP(w http.ResponseWriter, r *http.Req
 
 	// Use enhanced auth service for proper user creation and token management
 	utils.AuthDebug("Processing OAuth callback with linking")
-	tokenResponse, err := h.authService.HandleOAuthCallbackWithLinking(ctx, models.OAuthProviderApple, userInfoMap, oauthTokens, stateInfo.SecurityContext, stateInfo.DeviceInfo)
+	tokenResponse, err := target.authService.HandleOAuthCallbackWithLinking(ctx, models.OAuthProviderApple, userInfoMap, oauthTokens, stateInfo.SecurityContext, stateInfo.DeviceInfo)
 	if err != nil {
 		utils.AuthDebugError("oauth_callback", err)
 		http.Error(w, "Failed to process OAuth callback", http.StatusInternalServerError)
@@ -614,16 +745,16 @@ func (h *AuthHandler) HandleAppleCallbackHTTP(w http.ResponseWriter, r *http.Req
 	}
 	// Set only refresh token as secure HttpOnly cookie
 	// Use cookie configuration from environment
-	cookieName := h.config.Auth.Cookie.Name     // Set from COOKIE_NAME env var
-	cookieDomain := h.config.Auth.Cookie.Domain // Set from COOKIE_DOMAIN env var
-	isSecure := h.config.Auth.Cookie.Secure     // Set from COOKIE_SECURE env var
+	cookieName := target.config.Auth.Cookie.Name     // Set from COOKIE_NAME env var
+	cookieDomain := target.config.Auth.Cookie.Domain // Set from COOKIE_DOMAIN env var
+	isSecure := target.config.Auth.Cookie.Secure     // Set from COOKIE_SECURE env var
 
 	// Set only refresh token in cookie (7 days expiry)
 	// Access token will be sent in the redirect URL for the client to store
 	utils.SetRefreshTokenCookie(w, cookieName, tokenResponse.RefreshToken, 7*24*3600, cookieDomain, isSecure) // 7 days for refresh token
 
 	// Redirect to frontend without access token (refresh token is in cookie, access token will be fetched via /auth/session)
-	frontendURL := h.config.Server.FrontendURL
+	frontendURL := target.config.Server.FrontendURL
 	redirectURL := fmt.Sprintf("%s/auth/callback?success=true&user_id=%s&email=%s&provider=apple",
 		frontendURL,
 		url.QueryEscape(tokenResponse.User.ID),
@@ -635,10 +766,11 @@ func (h *AuthHandler) HandleAppleCallbackHTTP(w http.ResponseWriter, r *http.Req
 // HandleAppleCallback handles Apple OAuth callback
 func (h *AuthHandler) HandleAppleCallback(ctx context.Context, req *OAuthCallbackRequest) (*OAuthCallbackResponse, error) {
 	// Similar to Google callback
-	stateInfo, err := h.oauthStateService.ValidateOAuthState(ctx, req.State)
+	stateInfo, claims, err := h.resolveStateForCallback(ctx, req.State)
 	if err != nil {
 		return nil, huma.Error400BadRequest("Invalid OAuth state", err)
 	}
+	target := h.dispatchTarget(claims.Tier)
 
 	provider, _, err := h.resolveProvider(ctx, models.OAuthProviderApple)
 	if err != nil {
@@ -679,13 +811,13 @@ func (h *AuthHandler) HandleAppleCallback(ctx context.Context, req *OAuthCallbac
 	}
 
 	// Use enhanced auth service for proper user creation and token management
-	tokenResponse, err := h.authService.HandleOAuthCallbackWithLinking(ctx, models.OAuthProviderApple, userInfoMap, oauthTokens, stateInfo.SecurityContext, stateInfo.DeviceInfo)
+	tokenResponse, err := target.authService.HandleOAuthCallbackWithLinking(ctx, models.OAuthProviderApple, userInfoMap, oauthTokens, stateInfo.SecurityContext, stateInfo.DeviceInfo)
 	if err != nil {
 		return nil, huma.Error500InternalServerError("Failed to process OAuth callback", err)
 	}
 
 	// Redirect to frontend with tokens (Note: Huma handlers can't set cookies directly)
-	frontendURL := h.config.Server.FrontendURL
+	frontendURL := target.config.Server.FrontendURL
 	redirectURL := fmt.Sprintf("%s/auth/callback?success=true&access_token=%s&token_type=Bearer&expires_in=%d&user_id=%s&email=%s&provider=apple",
 		frontendURL,
 		url.QueryEscape(tokenResponse.AccessToken),
@@ -763,10 +895,11 @@ func (h *AuthHandler) HandleAppleCallback(ctx context.Context, req *OAuthCallbac
 
 // HandleGitHubCallback handles GitHub OAuth callback
 func (h *AuthHandler) HandleGitHubCallback(ctx context.Context, req *OAuthCallbackRequest) (*OAuthCallbackResponse, error) {
-	stateInfo, err := h.oauthStateService.ValidateOAuthState(ctx, req.State)
+	stateInfo, claims, err := h.resolveStateForCallback(ctx, req.State)
 	if err != nil {
 		return nil, huma.Error400BadRequest("Invalid OAuth state", err)
 	}
+	target := h.dispatchTarget(claims.Tier)
 
 	provider, _, err := h.resolveProvider(ctx, models.OAuthProviderGitHub)
 	if err != nil {
@@ -805,14 +938,14 @@ func (h *AuthHandler) HandleGitHubCallback(ctx context.Context, req *OAuthCallba
 	}
 
 	// Use enhanced auth service for proper user creation and token management
-	tokenResponse, err := h.authService.HandleOAuthCallbackWithLinking(ctx, models.OAuthProviderGitHub, userInfoMap, oauthTokens, stateInfo.SecurityContext, stateInfo.DeviceInfo)
+	tokenResponse, err := target.authService.HandleOAuthCallbackWithLinking(ctx, models.OAuthProviderGitHub, userInfoMap, oauthTokens, stateInfo.SecurityContext, stateInfo.DeviceInfo)
 	if err != nil {
 		return nil, huma.Error500InternalServerError("Failed to process OAuth callback", err)
 	}
 
 	// Redirect to frontend without access token (access token will be fetched via /auth/session)
 	// Note: Huma handlers can't set cookies directly, so refresh token handling may need adjustment
-	frontendURL := h.config.Server.FrontendURL
+	frontendURL := target.config.Server.FrontendURL
 	redirectURL := fmt.Sprintf("%s/auth/callback?success=true&user_id=%s&email=%s&provider=github",
 		frontendURL,
 		url.QueryEscape(tokenResponse.User.ID),
@@ -1651,56 +1784,26 @@ func (h *AuthHandler) RegisterRoutes(publicAPI huma.API, protectedAPI huma.API, 
 	h.RegisterTierMountableRoutes(publicAPI, protectedAPI, router, LegacyMount)
 }
 
-// RegisterOAuthRoutes mounts the OAuth-flow endpoints (provider listing,
-// login initiation, mobile ID-token exchange, web callbacks, GitHub Huma
-// callback, OAuth-side session poll). These stay on the legacy
-// /v1/auth/... layout until ADR-0003 PR-D D-6 introduces state-encoded
-// tier dispatch — at which point the per-audience start endpoints will
-// move to /v1/auth/{operator,client}/oauth/... and a single shared
-// callback decodes the tier from a signed-state JWT.
+// RegisterOAuthRoutes mounts the OAuth-flow endpoints owned by the
+// callback-dispatcher AuthHandler (legacy / operator-mux instance):
+// the legacy start endpoints under /v1/auth/..., every provider
+// callback, and the OAuth-side session poll. The start endpoints can
+// also be mounted on a tier prefix via RegisterOAuthStartRoutes — that
+// is what /v1/auth/{operator,client}/oauth/login uses to stamp the
+// matching tier into the signed-state JWT (ADR-0003 PR-D D-6).
 func (h *AuthHandler) RegisterOAuthRoutes(publicAPI huma.API, _ huma.API, router chi.Router, _ chi.Router) {
-	// List configured OAuth providers — used by the login UI to decide
-	// which social buttons to render. Public on purpose.
-	huma.Register(publicAPI, huma.Operation{
-		OperationID: "list-oauth-providers",
-		Method:      http.MethodGet,
-		Path:        "/v1/auth/providers",
-		Summary:     "List configured OAuth providers",
-		Description: "Returns the set of OAuth providers that currently have a client ID configured in the admin panel.",
-		Tags:        []string{"Authentication"},
-	}, h.ListOAuthProviders)
+	// Legacy start endpoints — same handler set RegisterOAuthStartRoutes
+	// uses, mounted with an empty prefix so existing /v1/auth/... callers
+	// keep working through the cutover.
+	h.RegisterOAuthStartRoutes(publicAPI, LegacyMount)
 
-	// OAuth login initiation
-	huma.Register(publicAPI, huma.Operation{
-		OperationID: "initiate-oauth-login",
-		Method:      http.MethodPost,
-		Path:        "/v1/auth/oauth/login",
-		Summary:     "Initiate OAuth login",
-		Description: "Start the OAuth authentication flow for a specific provider",
-		Tags:        []string{"Authentication"},
-	}, h.InitiateOAuthLogin)
-
-	// Mobile Google authentication endpoint
-	huma.Register(publicAPI, huma.Operation{
-		OperationID: "mobile-google-auth",
-		Method:      http.MethodPost,
-		Path:        "/v1/auth/google/mobile",
-		Summary:     "Authenticate with Google from mobile app",
-		Description: "Validate Google ID token from mobile app and return JWT tokens",
-		Tags:        []string{"Authentication", "Mobile"},
-	}, h.HandleMobileGoogleAuth)
-
-	// Mobile Apple authentication endpoint
-	huma.Register(publicAPI, huma.Operation{
-		OperationID: "mobile-apple-auth",
-		Method:      http.MethodPost,
-		Path:        "/v1/auth/apple/mobile",
-		Summary:     "Authenticate with Apple from mobile app",
-		Description: "Validate Apple ID token from mobile app and return JWT tokens",
-		Tags:        []string{"Authentication", "Mobile"},
-	}, h.HandleMobileAppleAuth)
-
-	// OAuth callbacks - use raw HTTP handlers for proper redirects
+	// OAuth callbacks - use raw HTTP handlers for proper redirects.
+	// Single callback per provider — the signed-state JWT carries the
+	// tier and dispatchTarget routes the resulting flow to the matching
+	// authService. Hosting once on the operator host mux matches the
+	// callback URL the OAuth provider has registered on its side; the
+	// callback then sets cookies under the tier-correct domain via the
+	// dispatched target's config.
 	router.Get("/v1/auth/oauth/google/callback", h.HandleGoogleCallbackHTTP)
 	router.Get("/v1/auth/oauth/discord/callback", h.HandleDiscordCallbackHTTP)
 	router.Post("/v1/auth/oauth/apple/callback", h.HandleAppleCallbackHTTP)
@@ -1717,6 +1820,53 @@ func (h *AuthHandler) RegisterOAuthRoutes(publicAPI huma.API, _ huma.API, router
 		Description: "Handle GitHub OAuth callback and exchange code for tokens",
 		Tags:        []string{"Authentication"},
 	}, h.HandleGitHubCallback)
+}
+
+// RegisterOAuthStartRoutes mounts the OAuth start endpoints under the
+// given mount prefix. This is the surface that stamps the AuthHandler's
+// tier into the signed-state JWT, so per-tier mounts must use a handler
+// instance whose tier matches the audience: the operator-bound handler
+// for /v1/auth/operator/... and the client-bound handler for
+// /v1/auth/client/.... Callbacks are not mounted here — they live on
+// the dispatcher AuthHandler exactly once (RegisterOAuthRoutes) so the
+// OAuth provider only needs to register a single redirect URI per
+// provider regardless of how many audiences exist.
+func (h *AuthHandler) RegisterOAuthStartRoutes(publicAPI huma.API, mount RouteMount) {
+	huma.Register(publicAPI, huma.Operation{
+		OperationID: mount.OpIDPrefix + "list-oauth-providers",
+		Method:      http.MethodGet,
+		Path:        "/v1/auth" + mount.PathPrefix + "/providers",
+		Summary:     "List configured OAuth providers",
+		Description: "Returns the set of OAuth providers that currently have a client ID configured in the admin panel.",
+		Tags:        []string{"Authentication"},
+	}, h.ListOAuthProviders)
+
+	huma.Register(publicAPI, huma.Operation{
+		OperationID: mount.OpIDPrefix + "initiate-oauth-login",
+		Method:      http.MethodPost,
+		Path:        "/v1/auth" + mount.PathPrefix + "/oauth/login",
+		Summary:     "Initiate OAuth login",
+		Description: "Start the OAuth authentication flow for a specific provider. The returned state encodes the audience tier so the single shared callback can dispatch the resulting session to the matching authService.",
+		Tags:        []string{"Authentication"},
+	}, h.InitiateOAuthLogin)
+
+	huma.Register(publicAPI, huma.Operation{
+		OperationID: mount.OpIDPrefix + "mobile-google-auth",
+		Method:      http.MethodPost,
+		Path:        "/v1/auth" + mount.PathPrefix + "/google/mobile",
+		Summary:     "Authenticate with Google from mobile app",
+		Description: "Validate Google ID token from mobile app and return JWT tokens. Tokens are minted with the audience matching this mount.",
+		Tags:        []string{"Authentication", "Mobile"},
+	}, h.HandleMobileGoogleAuth)
+
+	huma.Register(publicAPI, huma.Operation{
+		OperationID: mount.OpIDPrefix + "mobile-apple-auth",
+		Method:      http.MethodPost,
+		Path:        "/v1/auth" + mount.PathPrefix + "/apple/mobile",
+		Summary:     "Authenticate with Apple from mobile app",
+		Description: "Validate Apple ID token from mobile app and return JWT tokens. Tokens are minted with the audience matching this mount.",
+		Tags:        []string{"Authentication", "Mobile"},
+	}, h.HandleMobileAppleAuth)
 }
 
 // RegisterTierMountableRoutes mounts the audience-aware session routes

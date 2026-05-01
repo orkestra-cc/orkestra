@@ -272,6 +272,24 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 	redisStore := services.NewRedisOAuthStateStore(deps.RedisAdapter)
 	oauthStateService := services.NewOAuthStateService(redisStore)
 
+	// ADR-0003 PR-D D-6: derive the HMAC secret used to sign OAuth
+	// state JWTs from the deployment's JWT private key. Every replica
+	// of the monolith reaches the same secret without an extra env
+	// var, and the secret rotates implicitly whenever the JWT key
+	// pair rotates. nil private key means JWT issuance itself is
+	// disabled — leave the state secret nil and let the OAuth start
+	// endpoints surface the misconfiguration with a 500.
+	var oauthStateSecret []byte
+	if cfg.Auth.JWT.PrivateKey != nil {
+		secret, err := services.DeriveOAuthStateSecret(cfg.Auth.JWT.PrivateKey)
+		if err != nil {
+			logger.Warn("auth: failed to derive OAuth state secret",
+				slog.String("error", err.Error()))
+		} else {
+			oauthStateSecret = secret
+		}
+	}
+
 	// Get user service from registry
 	userService := module.MustGetTyped[iface.UserProvider](deps.Services, module.ServiceUserService)
 
@@ -332,7 +350,10 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 		logger,
 	)
 
-	// Auth handler
+	// Auth handler. The legacy mount stamps an empty tier on the state
+	// JWT so callbacks for /v1/auth/oauth/login flows self-handle on
+	// this handler's authService instead of dispatching, preserving
+	// pre-D-6 behaviour for any in-flight legacy flows.
 	m.authHandler = handlers.NewAuthHandler(
 		authService,
 		providerFactory,
@@ -343,6 +364,7 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 		cfg,
 	)
 	m.authHandler.SetSessionRevocation(sessionRevocationSvc)
+	m.authHandler.SetStateSecret(oauthStateSecret)
 
 	// Password auth service — depends on notification module (optional).
 	passwordSvc := services.NewPasswordService(logger, true)
@@ -576,6 +598,8 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 			cfg,
 		)
 		m.operatorAuthHandler.SetSessionRevocation(sessionRevocationSvc)
+		m.operatorAuthHandler.SetStateSecret(oauthStateSecret)
+		m.operatorAuthHandler.SetTier(services.AudienceOperator)
 
 		m.operatorMFAHandler = handlers.NewMFAHandler(
 			opBundle.mfaSvc,
@@ -663,6 +687,8 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 			cfg,
 		)
 		m.clientAuthHandler.SetSessionRevocation(sessionRevocationSvc)
+		m.clientAuthHandler.SetStateSecret(oauthStateSecret)
+		m.clientAuthHandler.SetTier(services.AudienceClient)
 
 		m.clientMFAHandler = handlers.NewMFAHandler(
 			clBundle.mfaSvc,
@@ -692,6 +718,24 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 	} else {
 		logger.Warn("auth: client user provider not registered — client-tier auth bundle skipped (ADR-0003 PR-D)")
 	}
+
+	// ADR-0003 PR-D D-6: wire the per-tier dispatcher map on the
+	// callback-owning AuthHandler. The legacy /v1/auth/... handler
+	// owns the single OAuth callback URL registered with each
+	// provider; on every callback it parses the signed-state JWT
+	// and looks the tier up in this map to pick the AuthHandler
+	// whose authService should mint the resulting tokens. The map
+	// only contains entries for tiers whose user provider was
+	// registered — a missing entry falls back to the legacy
+	// authService so pre-cutover deployments keep working.
+	tierDispatch := map[string]*handlers.AuthHandler{}
+	if m.operatorAuthHandler != nil {
+		tierDispatch[services.AudienceOperator] = m.operatorAuthHandler
+	}
+	if m.clientAuthHandler != nil {
+		tierDispatch[services.AudienceClient] = m.clientAuthHandler
+	}
+	m.authHandler.SetTierDispatch(tierDispatch)
 
 	// Session-risk lookup: resolves the most recent risk score for a sid
 	// against the auth_sessions collection. Consumed post-InitAll by the
@@ -940,6 +984,12 @@ func (m *AuthModule) RegisterRoutes(ri *module.RouteInfo) {
 	// refresh-cookie/logout/me).
 	if m.operatorAuthHandler != nil {
 		m.operatorAuthHandler.RegisterTierMountableRoutes(ri.Operator.PublicAPI, protectedAPI, ri.Router, handlers.OperatorMount)
+		// ADR-0003 PR-D D-6: per-audience OAuth start endpoints. The
+		// signed-state JWT minted here carries `tier=operator` so the
+		// shared callback dispatches the resulting flow to the operator
+		// authService. Mobile ID-token endpoints under this prefix mint
+		// aud=operator tokens via the operator authService directly.
+		m.operatorAuthHandler.RegisterOAuthStartRoutes(ri.Operator.PublicAPI, handlers.OperatorMount)
 	}
 	if m.operatorPasswordHandler != nil {
 		m.operatorPasswordHandler.RegisterPublicRoutes(ri.Operator.PublicAPI, handlers.OperatorMount)
@@ -1008,6 +1058,14 @@ func (m *AuthModule) RegisterRoutes(ri *module.RouteInfo) {
 	clientProtectedAPI := humachi.New(ri.Client.ProtectedRouter, ri.APIConfig)
 	if m.clientAuthHandler != nil && ri.ClientRouter != nil {
 		m.clientAuthHandler.RegisterTierMountableRoutes(ri.Client.PublicAPI, clientProtectedAPI, ri.ClientRouter, handlers.ClientMount)
+		// ADR-0003 PR-D D-6: per-audience OAuth start endpoints. The
+		// signed-state JWT minted here carries `tier=client` so the
+		// shared callback (mounted on the operator host mux at the
+		// OAuth provider's registered redirect URI) dispatches the
+		// resulting flow to the client authService and stamps
+		// aud=client on every minted token. Mobile ID-token endpoints
+		// under this prefix similarly mint client-audience tokens.
+		m.clientAuthHandler.RegisterOAuthStartRoutes(ri.Client.PublicAPI, handlers.ClientMount)
 	}
 	if m.clientPasswordHandler != nil {
 		m.clientPasswordHandler.RegisterPublicRoutes(ri.Client.PublicAPI, handlers.ClientMount)

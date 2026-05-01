@@ -122,6 +122,24 @@ Schema keys below are what handlers and the resolver look up. The `EnvVar` colum
 | `MobileAudience(ctx, provider, platform)` | Platform-specific client ID for mobile ID-token validation; falls back to the web client ID when `platform` is unknown |
 | `ConfiguredProviders(ctx)` | List of provider names that currently have a client ID — served by `GET /v1/auth/providers` to the login UI |
 
+### OAuth state-encoded tier dispatch (ADR-0003 PR-D D-6)
+
+The OAuth `state` parameter is a **signed HS256 JWT** carrying the audience tier the flow was started for:
+
+```json
+{ "tier": "operator" | "client" | "", "csrf": "<32-byte-base64url>", "exp": <now + 10min>, "iat": <now> }
+```
+
+- **HMAC secret** is derived deterministically from `cfg.Auth.JWT.PrivateKey` (`SHA-256("orkestra-oauth-state-secret-v1\x00" || PKCS8(privateKey))`). Every replica reaches the same secret without an env var; rotation is implicit when JWT keys rotate.
+- **CSRF nonce doubles as the Redis key** that holds the per-flow side data (provider, redirectUri, deviceInfo, securityContext). The Redis row also stores `tier`; the callback cross-checks `state.tier == redis.tier` to defeat any tamper that touches only one half.
+- **Per-audience start endpoints** mount under `/v1/auth/{operator,client}/{providers,oauth/login,google/mobile,apple/mobile}` via `RegisterOAuthStartRoutes(api, mount)`. Each tier-bound `AuthHandler` instance has `tier` set so its start endpoints stamp the matching value into the JWT. Legacy `/v1/auth/...` start endpoints stamp `tier=""` so callbacks self-handle on the legacy `authService` (preserves any in-flight pre-cutover flows).
+- **Single shared callback** stays at `/v1/auth/oauth/{provider}/callback` (one redirect URI per provider, no IdP-side duplication). Mounted exclusively on the operator host mux by the legacy `AuthHandler`. On every callback `dispatchTarget(state.tier)` returns either the legacy handler itself (empty/unknown tier) or the matching tier-bound `AuthHandler` from the `tierDispatch` map; that target's `authService` mints the tokens and that target's `config.Auth.Cookie` controls the refresh-token cookie. Tier-aware mobile ID-token endpoints follow the same mount pattern but bypass state — they invoke their handler instance's `authService` directly.
+
+Wiring (in `module.go::Init`):
+- `m.authHandler.SetStateSecret(secret)` + `SetTierDispatch(map[string]*AuthHandler{operator: m.operatorAuthHandler, client: m.clientAuthHandler})` — the dispatcher.
+- `m.operatorAuthHandler.SetTier("operator")` + `SetStateSecret(secret)` — operator-tier start endpoints.
+- `m.clientAuthHandler.SetTier("client")` + `SetStateSecret(secret)` — client-tier start endpoints (also wired to the client-audience JWT service so minted tokens carry `aud=client`).
+
 ## HTTP endpoints
 
 Registered from two handlers — `auth_handler.go` for OAuth/session/refresh, `password_handler.go` for password flows.
@@ -130,10 +148,10 @@ Registered from two handlers — `auth_handler.go` for OAuth/session/refresh, `p
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/v1/auth/providers` | List OAuth providers currently configured in the admin panel (login UI uses this to decide which buttons to render) |
-| POST | `/v1/auth/oauth/login` | Start an OAuth flow, return the provider URL + state token |
-| POST | `/v1/auth/google/mobile` | Exchange a Google ID token from a mobile app for an Orkestra session |
-| POST | `/v1/auth/apple/mobile` | Exchange an Apple ID token from a mobile app for an Orkestra session |
+| GET | `/v1/auth/providers`, `/v1/auth/{operator,client}/providers` | List OAuth providers currently configured (per-audience mounts from D-6 are identical bodies; the prefix is purely for surface uniformity) |
+| POST | `/v1/auth/oauth/login`, `/v1/auth/{operator,client}/oauth/login` | Start an OAuth flow. Per-audience mounts stamp the matching `tier` into the signed-state JWT so the shared callback dispatches the resulting session to the right authService |
+| POST | `/v1/auth/google/mobile`, `/v1/auth/{operator,client}/google/mobile` | Exchange a Google ID token from a mobile app for an Orkestra session. Per-audience mounts mint tokens with the matching `aud` claim |
+| POST | `/v1/auth/apple/mobile`, `/v1/auth/{operator,client}/apple/mobile` | Exchange an Apple ID token from a mobile app for an Orkestra session. Per-audience mounts mint tokens with the matching `aud` claim |
 | GET | `/v1/auth/oauth/google/callback` | Web OAuth callback (raw HTTP, not Huma) |
 | GET | `/v1/auth/oauth/discord/callback` | Web OAuth callback (raw HTTP) |
 | POST | `/v1/auth/oauth/apple/callback` | Apple returns form-post, not a redirect (raw HTTP) |
