@@ -9,15 +9,10 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
-// TestAuthRepoConstructorsBindCorrectTierAndCollection mirrors the
-// PR-B B-5 invariant for the auth-side repos introduced in ADR-0003
-// PR-D. Each of the five repos exposes three constructors (legacy /
-// operator / client) and the test asserts that:
-//
-//   - the legacy constructor binds to the legacy auth_* collection
-//     name with tier="",
-//   - the operator constructor binds to operator_* with tier="operator",
-//   - the client constructor binds to client_* with tier="client".
+// TestAuthRepoConstructorsBindCorrectTierAndCollection asserts that
+// each of the five auth-side repos exposes operator and client
+// constructors that bind to the matching MongoDB collection and stamp
+// the matching Tier value on writes (ADR-0003 PR-D).
 //
 // Mongo is never contacted: mongo.NewClient does not dial; Database()
 // and Collection() are constructor calls that store names. The test
@@ -38,7 +33,6 @@ func TestAuthRepoConstructorsBindCorrectTierAndCollection(t *testing.T) {
 		wantColl string
 	}
 	for _, c := range []sessionCase{
-		{"legacy", NewAuthSessionRepository, "", models.AuthSessionsCollection},
 		{"operator", NewOperatorAuthSessionRepository, models.TierOperator, models.OperatorSessionsCollection},
 		{"client", NewClientAuthSessionRepository, models.TierClient, models.ClientSessionsCollection},
 	} {
@@ -65,7 +59,6 @@ func TestAuthRepoConstructorsBindCorrectTierAndCollection(t *testing.T) {
 		wantColl string
 	}
 	for _, c := range []refreshCase{
-		{"legacy", NewRefreshTokenRepository, "", models.RefreshTokensCollection},
 		{"operator", NewOperatorRefreshTokenRepository, models.TierOperator, models.OperatorRefreshTokensCollection},
 		{"client", NewClientRefreshTokenRepository, models.TierClient, models.ClientRefreshTokensCollection},
 	} {
@@ -92,7 +85,6 @@ func TestAuthRepoConstructorsBindCorrectTierAndCollection(t *testing.T) {
 		wantColl string
 	}
 	for _, c := range []oauthCase{
-		{"legacy", NewOAuthProviderRepository, "", models.OAuthProvidersCollection},
 		{"operator", NewOperatorOAuthProviderRepository, models.TierOperator, models.OperatorOAuthProvidersCollection},
 		{"client", NewClientOAuthProviderRepository, models.TierClient, models.ClientOAuthProvidersCollection},
 	} {
@@ -119,7 +111,6 @@ func TestAuthRepoConstructorsBindCorrectTierAndCollection(t *testing.T) {
 		wantColl string
 	}
 	for _, c := range []mfaCase{
-		{"legacy", NewMFAFactorRepository, "", models.MFAFactorsCollection},
 		{"operator", NewOperatorMFAFactorRepository, models.TierOperator, models.OperatorMFAFactorsCollection},
 		{"client", NewClientMFAFactorRepository, models.TierClient, models.ClientMFAFactorsCollection},
 	} {
@@ -146,7 +137,6 @@ func TestAuthRepoConstructorsBindCorrectTierAndCollection(t *testing.T) {
 		wantColl string
 	}
 	for _, c := range []emailCase{
-		{"legacy", NewEmailTokenRepository, "", models.EmailTokensCollection},
 		{"operator", NewOperatorEmailTokenRepository, models.TierOperator, models.OperatorEmailTokensCollection},
 		{"client", NewClientEmailTokenRepository, models.TierClient, models.ClientEmailTokensCollection},
 	} {
@@ -169,9 +159,8 @@ func TestAuthRepoConstructorsBindCorrectTierAndCollection(t *testing.T) {
 
 // TestAuthDocsTierStampedOnCreate mirrors the production stamp path for
 // each of the five auth doc structs. The assertion is the invariant
-// (legacy repo never overwrites Tier; operator/client repos stamp it
-// regardless of the prior value), not that InsertOne fired. Mongo is
-// never contacted.
+// (operator/client repos stamp Tier regardless of the prior value),
+// not that InsertOne fired. Mongo is never contacted.
 func TestAuthDocsTierStampedOnCreate(t *testing.T) {
 	t.Parallel()
 
@@ -180,8 +169,6 @@ func TestAuthDocsTierStampedOnCreate(t *testing.T) {
 		docTier  string
 		want     string
 	}{
-		{"", "", ""},
-		{"", models.TierOperator, models.TierOperator}, // legacy: never touch the field
 		{models.TierOperator, "", models.TierOperator},
 		{models.TierOperator, models.TierClient, models.TierOperator}, // operator: stamp regardless
 		{models.TierClient, "", models.TierClient},
@@ -199,11 +186,7 @@ func TestAuthDocsTierStampedOnCreate(t *testing.T) {
 
 	for _, c := range cases {
 		c := c
-		name := c.repoTier + "/" + c.docTier
-		if name == "/" {
-			name = "empty/empty"
-		}
-		t.Run(name, func(t *testing.T) {
+		t.Run(c.repoTier+"/"+c.docTier, func(t *testing.T) {
 			t.Parallel()
 
 			session := &models.AuthSessionDoc{Tier: c.docTier, UserUUID: "u-1", DeviceID: "d-1", CreatedAt: time.Now()}

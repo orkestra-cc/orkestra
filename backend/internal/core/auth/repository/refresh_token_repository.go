@@ -96,14 +96,6 @@ type refreshTokenRepository struct {
 	tier string
 }
 
-// NewRefreshTokenRepository creates a refresh-token repo bound to the
-// legacy `auth_refresh_tokens` collection. Tier is empty.
-func NewRefreshTokenRepository(db *mongo.Database) RefreshTokenRepository {
-	return &refreshTokenRepository{
-		collection: db.Collection(models.RefreshTokensCollection),
-	}
-}
-
 // NewOperatorRefreshTokenRepository binds to operator_refresh_tokens
 // and stamps Tier="operator" on every CreateRefreshToken write.
 // ADR-0003 PR-D.

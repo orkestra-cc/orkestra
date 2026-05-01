@@ -8,9 +8,9 @@ import (
 )
 
 // TestBuildAuthTierBundlePicksMatchingConstructors covers the D-2
-// invariant that the builder picks the operator-tier / client-tier /
-// legacy repository constructor that matches d.tier and produces a
-// non-nil AuthService + PasswordAuthService + RiskAssessmentService.
+// invariant that the builder picks the operator-tier or client-tier
+// repository constructor that matches d.tier and produces a non-nil
+// AuthService + PasswordAuthService + RiskAssessmentService.
 //
 // The constructor → collection name binding itself is locked in by
 // tier_guard_test.go in the repository package; this test only
@@ -28,13 +28,9 @@ func TestBuildAuthTierBundlePicksMatchingConstructors(t *testing.T) {
 	}
 	db := client.Database("test")
 
-	for _, tier := range []audienceTier{tierLegacy, tierOperator, tierClient} {
+	for _, tier := range []audienceTier{tierOperator, tierClient} {
 		tier := tier
-		name := string(tier)
-		if name == "" {
-			name = "legacy"
-		}
-		t.Run(name, func(t *testing.T) {
+		t.Run(string(tier), func(t *testing.T) {
 			t.Parallel()
 
 			bundle, err := buildAuthTierBundle(tierBundleDeps{db: db, tier: tier})

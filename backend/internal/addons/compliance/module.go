@@ -179,7 +179,15 @@ func (m *Module) Init(deps *module.Dependencies) error {
 	// — missing services (module disabled, out of init order) are ignored so
 	// compliance boots cleanly regardless of which optional modules are
 	// active.
+	// ADR-0003 PR-D D-8: wire the audit sink into both tier
+	// PasswordAuthService instances so login/register/reset events from
+	// either audience land on the same compliance audit trail. The
+	// canonical ServicePasswordAuthService is operator-tier; the
+	// ServiceClientPasswordAuthService key is the client-tier instance.
 	if pa, ok := module.GetTyped[*authServices.PasswordAuthService](deps.Services, module.ServicePasswordAuthService); ok {
+		pa.SetAuditSink(sink)
+	}
+	if pa, ok := module.GetTyped[*authServices.PasswordAuthService](deps.Services, module.ServiceClientPasswordAuthService); ok {
 		pa.SetAuditSink(sink)
 	}
 	if ts, ok := module.GetTyped[*tenantServices.Service](deps.Services, module.ServiceTenantService); ok {

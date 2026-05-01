@@ -43,14 +43,6 @@ type oauthProviderRepository struct {
 	tier string
 }
 
-// NewOAuthProviderRepository creates an OAuth-provider repo bound to
-// the legacy `auth_oauth_providers` collection. Tier is empty.
-func NewOAuthProviderRepository(db *mongo.Database) OAuthProviderRepository {
-	return &oauthProviderRepository{
-		collection: db.Collection(models.OAuthProvidersCollection),
-	}
-}
-
 // NewOperatorOAuthProviderRepository binds to operator_oauth_providers
 // and stamps Tier="operator" on every CreateOAuthProvider write.
 // ADR-0003 PR-D.

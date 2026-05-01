@@ -1775,43 +1775,27 @@ func (h *AuthHandler) GetCurrentUser(ctx context.Context, _ *struct{}) (*GetCurr
 	}, nil
 }
 
-// RegisterRoutes registers every auth route — OAuth + tier-mountable
-// session/me routes — under the legacy /v1/auth/... layout. Kept as the
-// canonical entry point for module.go pre-PR-D and as the single legacy
-// mount until D-8 deletes it.
-func (h *AuthHandler) RegisterRoutes(publicAPI huma.API, protectedAPI huma.API, router chi.Router, protectedRouter chi.Router) {
-	h.RegisterOAuthRoutes(publicAPI, protectedAPI, router, protectedRouter)
-	h.RegisterTierMountableRoutes(publicAPI, protectedAPI, router, LegacyMount)
-}
-
-// RegisterOAuthRoutes mounts the OAuth-flow endpoints owned by the
-// callback-dispatcher AuthHandler (legacy / operator-mux instance):
-// the legacy start endpoints under /v1/auth/..., every provider
-// callback, and the OAuth-side session poll. The start endpoints can
-// also be mounted on a tier prefix via RegisterOAuthStartRoutes — that
-// is what /v1/auth/{operator,client}/oauth/login uses to stamp the
-// matching tier into the signed-state JWT (ADR-0003 PR-D D-6).
+// RegisterOAuthRoutes mounts the OAuth callback endpoints. Only the
+// dispatcher AuthHandler (operator-mux instance) calls this — the IdP
+// has a single registered redirect URI per provider so there is exactly
+// one callback per provider regardless of how many audiences exist. On
+// every callback the signed-state JWT carries the audience tier and
+// dispatchTarget routes the resulting token issuance to the matching
+// authService (ADR-0003 PR-D D-6).
 func (h *AuthHandler) RegisterOAuthRoutes(publicAPI huma.API, _ huma.API, router chi.Router, _ chi.Router) {
-	// Legacy start endpoints — same handler set RegisterOAuthStartRoutes
-	// uses, mounted with an empty prefix so existing /v1/auth/... callers
-	// keep working through the cutover.
-	h.RegisterOAuthStartRoutes(publicAPI, LegacyMount)
-
-	// OAuth callbacks - use raw HTTP handlers for proper redirects.
-	// Single callback per provider — the signed-state JWT carries the
-	// tier and dispatchTarget routes the resulting flow to the matching
-	// authService. Hosting once on the operator host mux matches the
-	// callback URL the OAuth provider has registered on its side; the
-	// callback then sets cookies under the tier-correct domain via the
-	// dispatched target's config.
+	// OAuth callbacks — raw HTTP handlers for proper redirects. Hosted
+	// once on the operator host mux; the dispatched target's config
+	// owns cookie domain + frontend redirect.
 	router.Get("/v1/auth/oauth/google/callback", h.HandleGoogleCallbackHTTP)
 	router.Get("/v1/auth/oauth/discord/callback", h.HandleDiscordCallbackHTTP)
 	router.Post("/v1/auth/oauth/apple/callback", h.HandleAppleCallbackHTTP)
 
-	// Session initialization for web clients after OAuth callback - use raw HTTP handler for cookies
+	// Session initialization for web clients after OAuth callback — raw
+	// HTTP handler for cookies.
 	router.Get("/v1/auth/session", h.GetSessionHTTP)
 
-	// OAuth callbacks (public) - GitHub still uses Huma for consistency with existing implementation
+	// GitHub callback uses Huma for consistency with the existing
+	// implementation.
 	huma.Register(publicAPI, huma.Operation{
 		OperationID: "github-oauth-callback",
 		Method:      http.MethodGet,

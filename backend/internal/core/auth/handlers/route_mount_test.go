@@ -8,12 +8,12 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-// TestRouteMountsRegisterDistinctPaths locks in the ADR-0003 PR-D D-4
-// invariant that legacy and operator (and prospective client) mounts can
-// coexist on a single huma.API: paths and operation IDs must both
-// distinguish them. Registering twice with the same mount, or two mounts
-// that share a prefix, would panic inside huma. We touch every Register*
-// method so each handler's mount-aware path/opID rewrite is exercised.
+// TestRouteMountsRegisterDistinctPaths locks in the ADR-0003 PR-D
+// invariant that operator and client mounts coexist on a single
+// huma.API: paths and operation IDs must both distinguish them.
+// Registering twice with the same mount, or two mounts that share a
+// prefix, would panic inside huma. We touch every Register* method so
+// each handler's mount-aware path/opID rewrite is exercised.
 //
 // Handlers are constructed with nil services because huma never invokes
 // the bound function values during registration; only the operation
@@ -31,7 +31,7 @@ func TestRouteMountsRegisterDistinctPaths(t *testing.T) {
 	dt := &DeviceTrustHandler{}
 	auth := &AuthHandler{}
 
-	for _, mount := range []RouteMount{LegacyMount, OperatorMount, ClientMount} {
+	for _, mount := range []RouteMount{OperatorMount, ClientMount} {
 		pwd.RegisterPublicRoutes(api, mount)
 		pwd.RegisterProtectedRoutes(api, mount)
 		mfa.RegisterPublicRoutes(api, mount)
@@ -49,14 +49,12 @@ func TestRouteMountsRegisterDistinctPaths(t *testing.T) {
 		t.Fatal("OpenAPI spec or paths missing after registration")
 	}
 
-	// Spot-check the three login paths land at the expected prefixes —
-	// if the mount fields ever drift, this fails loudly before module.go
-	// boots an unreachable surface.
+	// Spot-check the tier-split login paths land at the expected
+	// prefixes — if the mount fields ever drift, this fails loudly
+	// before module.go boots an unreachable surface.
 	want := []string{
-		"/v1/auth/login",
 		"/v1/auth/operator/login",
 		"/v1/auth/client/login",
-		"/v1/auth/me",
 		"/v1/auth/operator/me",
 		"/v1/auth/client/me",
 		"/v1/auth/operator/me/mfa",

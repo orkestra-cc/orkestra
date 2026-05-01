@@ -89,12 +89,9 @@ type DeviceSession struct {
 
 type authSessionRepository struct {
 	collection *mongo.Collection
-	// tier is the audience this repo binds to ("operator" / "client" /
-	// ""). When non-empty, CreateSession stamps session.Tier so a B-5-
-	// style integrity test can assert each tier collection only holds
-	// its own rows. The legacy "auth_sessions" repo keeps tier="" — its
-	// rows pre-date the split and won't be backfilled (sessions are
-	// short-lived and rotate on their own).
+	// tier is the audience this repo binds to ("operator" / "client").
+	// CreateSession stamps session.Tier so a tier-guard test can assert
+	// each tier collection only holds its own rows.
 	tier string
 }
 
@@ -106,15 +103,6 @@ func (r *authSessionRepository) DeleteAllByUser(ctx context.Context, userUUID st
 		return 0, fmt.Errorf("failed to delete sessions by user: %w", err)
 	}
 	return res.DeletedCount, nil
-}
-
-// NewAuthSessionRepository creates a new auth session repository bound
-// to the legacy `auth_sessions` collection. Tier is empty: writes do
-// not stamp the field.
-func NewAuthSessionRepository(db *mongo.Database) AuthSessionRepository {
-	return &authSessionRepository{
-		collection: db.Collection(models.AuthSessionsCollection),
-	}
 }
 
 // NewOperatorAuthSessionRepository binds to operator_sessions and

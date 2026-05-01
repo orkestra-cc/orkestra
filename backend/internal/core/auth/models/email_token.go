@@ -33,12 +33,9 @@ type EmailTokenDoc struct {
 }
 
 const (
-	EmailTokensCollection = "auth_email_tokens"
-
-	// ADR-0003 PR-B: tier-split email tokens (verification + password
-	// reset). Each tier's flow reads from its own collection at
-	// cutover; the legacy auth_email_tokens stays authoritative until
-	// then.
+	// ADR-0003 PR-D D-8: tier-split email tokens (verification +
+	// password reset) are the only canonical storage. Each tier's flow
+	// reads from its own collection.
 	OperatorEmailTokensCollection = "operator_email_tokens"
 	ClientEmailTokensCollection   = "client_email_tokens"
 )

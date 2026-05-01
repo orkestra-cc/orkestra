@@ -68,12 +68,6 @@ services:
       CLIENT_RATE_LIMIT_REQUESTS_PER_MINUTE: ${CLIENT_RATE_LIMIT_REQUESTS_PER_MINUTE:-0}
       CLIENT_RATE_LIMIT_BURST: ${CLIENT_RATE_LIMIT_BURST:-0}
 
-      # ADR-0003 PR-B cutover gate. Production must run
-      # backend/scripts/migrate_user_split with --confirm-prod=I-understand
-      # before this flag flips to true; the legacy `users` collection
-      # stays authoritative at false (default).
-      USER_TIER_SPLIT_ENABLED: ${USER_TIER_SPLIT_ENABLED:-false}
-
       # Production specific
       DEBUG: "false"
       LOG_LEVEL: ${LOG_LEVEL:-warn}

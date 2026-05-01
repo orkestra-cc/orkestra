@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 
 	gowebauthn "github.com/go-webauthn/webauthn/webauthn"
@@ -13,13 +14,13 @@ import (
 	"go.mongodb.org/mongo-driver/mongo"
 )
 
-// audienceTier discriminates the three repository bindings the bundle
-// builder produces. Constant strings (not the iface enum) so the auth
-// package stays free of shared/module imports for this purpose.
+// audienceTier discriminates the per-tier repository bindings the
+// bundle builder produces. Constant strings (not the iface enum) so
+// the auth package stays free of shared/module imports for this
+// purpose.
 type audienceTier string
 
 const (
-	tierLegacy   audienceTier = ""         // legacy auth_* collections; pre-cutover canonical
 	tierOperator audienceTier = "operator" // operator_* collections; ADR-0003 PR-D
 	tierClient   audienceTier = "client"   // client_* collections; ADR-0003 PR-D
 )
@@ -28,7 +29,7 @@ const (
 // auth handlers consume. Each bundle is bound to its tier's session,
 // refresh-token, oauth-provider, mfa-factor, and email-token
 // collections (PR-B) and to the matching user provider (Operator/
-// Client/legacy). Services genuinely shared across tiers
+// Client). Services genuinely shared across tiers
 // (PasswordService, MFAChallengeService, JWTService, DeviceTrust,
 // SecurityEventService) live outside the bundle and are injected via
 // tierBundleDeps.
@@ -62,7 +63,6 @@ type tierBundleDeps struct {
 	tier                     audienceTier
 	userProvider             iface.UserProvider
 	tenantProvider           iface.TenantProvider
-	authRepo                 repository.AuthRepository // legacy single-table; tier-shared
 	jwtService               services.JWTService
 	passwordService          services.PasswordService
 	mfaChallengeService      services.MFAChallengeService
@@ -89,9 +89,8 @@ type tierBundleDeps struct {
 
 // buildAuthTierBundle constructs the per-tier repos + RiskAssessment +
 // AuthService + PasswordAuthService. The tier-bound repos are picked
-// off d.tier; tierLegacy maps to the legacy auth_* collections so the
-// same helper covers the canonical (pre-cutover) bundle and the
-// operator/client bundles uniformly.
+// off d.tier; only operator and client tiers are valid (ADR-0003 PR-D
+// D-8 removed the legacy single-table tier).
 func buildAuthTierBundle(d tierBundleDeps) (*authTierBundle, error) {
 	var (
 		sessionRepo repository.AuthSessionRepository
@@ -114,17 +113,12 @@ func buildAuthTierBundle(d tierBundleDeps) (*authTierBundle, error) {
 		mfaRepo = repository.NewClientMFAFactorRepository(d.db)
 		emailRepo = repository.NewClientEmailTokenRepository(d.db)
 	default:
-		sessionRepo = repository.NewAuthSessionRepository(d.db)
-		refreshRepo = repository.NewRefreshTokenRepository(d.db)
-		oauthRepo = repository.NewOAuthProviderRepository(d.db)
-		mfaRepo = repository.NewMFAFactorRepository(d.db)
-		emailRepo = repository.NewEmailTokenRepository(d.db)
+		return nil, fmt.Errorf("buildAuthTierBundle: unknown tier %q (expected %q or %q)", d.tier, tierOperator, tierClient)
 	}
 
 	risk := services.NewRiskAssessmentServiceWithGeoIP(sessionRepo, d.geoResolver, d.velocityKmh, d.logger)
 
 	authSvc, err := services.NewAuthService(&services.AuthConfig{
-		AuthRepo:            d.authRepo,
 		UserService:         d.userProvider,
 		TenantProvider:      d.tenantProvider,
 		OAuthProviderRepo:   oauthRepo,

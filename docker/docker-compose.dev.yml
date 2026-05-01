@@ -77,10 +77,6 @@ services:
       CLIENT_RATE_LIMIT_REQUESTS_PER_MINUTE: ${CLIENT_RATE_LIMIT_REQUESTS_PER_MINUTE:-0}
       CLIENT_RATE_LIMIT_BURST: ${CLIENT_RATE_LIMIT_BURST:-0}
 
-      # ADR-0003 PR-B cutover gate. Default false in dev; flip to true
-      # after running backend/scripts/migrate_user_split.go.
-      USER_TIER_SPLIT_ENABLED: ${USER_TIER_SPLIT_ENABLED:-false}
-
       # Development specific
       DEBUG: "true"
       LOG_LEVEL: debug

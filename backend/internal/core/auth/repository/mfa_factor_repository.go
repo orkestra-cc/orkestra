@@ -58,14 +58,6 @@ type mfaFactorRepository struct {
 	tier string
 }
 
-// NewMFAFactorRepository wires a repository against the canonical
-// `auth_mfa_factors` collection. Tier is empty.
-func NewMFAFactorRepository(db *mongo.Database) MFAFactorRepository {
-	return &mfaFactorRepository{
-		coll: db.Collection(models.MFAFactorsCollection),
-	}
-}
-
 // NewOperatorMFAFactorRepository binds to operator_mfa_factors and
 // stamps Tier="operator" on every Insert / AppendWebAuthnCredential
 // write. ADR-0003 PR-D.

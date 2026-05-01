@@ -31,14 +31,6 @@ type emailTokenRepository struct {
 	tier string
 }
 
-// NewEmailTokenRepository wires a repository against the legacy
-// `auth_email_tokens` collection. Tier is empty.
-func NewEmailTokenRepository(db *mongo.Database) EmailTokenRepository {
-	return &emailTokenRepository{
-		coll: db.Collection(models.EmailTokensCollection),
-	}
-}
-
 // NewOperatorEmailTokenRepository binds to operator_email_tokens and
 // stamps Tier="operator" on every Create write. ADR-0003 PR-D.
 func NewOperatorEmailTokenRepository(db *mongo.Database) EmailTokenRepository {

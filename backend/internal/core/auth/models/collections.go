@@ -158,23 +158,13 @@ const (
 	TierClient   = "client"
 )
 
-// Collection names
+// Collection names. SecurityEvents and DeviceTrust deliberately stay
+// single (non-tier-split) — security events are an audit log keyed on
+// userUUID alone and device-trust grants follow the user record.
 const (
-	UsersCollection          = "users"
-	OAuthProvidersCollection = "auth_oauth_providers"
-	RefreshTokensCollection  = "auth_refresh_tokens"
-	AuthSessionsCollection   = "auth_sessions"
 	SecurityEventsCollection = "auth_security_events"
-	MFAFactorsCollection     = "auth_mfa_factors"
 	DeviceTrustCollection    = "auth_device_trust"
 
-	// ADR-0003 PR-B: tier-split auth collections. Empty until
-	// migrate_user_split.go runs; the legacy auth_* collections above
-	// remain authoritative at the PR-B boundary. SecurityEvents and
-	// DeviceTrust deliberately stay single — security events are an
-	// audit log keyed on userUUID alone, and device-trust grants follow
-	// the user record (PR-D revisits if the auth-path split needs them
-	// per-tier).
 	OperatorOAuthProvidersCollection = "operator_oauth_providers"
 	ClientOAuthProvidersCollection   = "client_oauth_providers"
 	OperatorRefreshTokensCollection  = "operator_refresh_tokens"
@@ -184,76 +174,6 @@ const (
 	OperatorMFAFactorsCollection     = "operator_mfa_factors"
 	ClientMFAFactorsCollection       = "client_mfa_factors"
 )
-
-// Indexes for collections
-type CollectionIndexes struct {
-	Collection string
-	Indexes    []IndexDefinition
-}
-
-type IndexDefinition struct {
-	Keys   map[string]int
-	Unique bool
-	TTL    *time.Duration
-	Name   string
-}
-
-// GetCollectionIndexes returns the indexes needed for each collection
-func GetCollectionIndexes() []CollectionIndexes {
-	day7 := 7 * 24 * time.Hour // Match refresh token expiry
-	day90 := 90 * 24 * time.Hour
-
-	return []CollectionIndexes{
-		{
-			Collection: UsersCollection,
-			Indexes: []IndexDefinition{
-				{Keys: map[string]int{"uuid": 1}, Unique: true, Name: "idx_uuid"},
-				{Keys: map[string]int{"email": 1}, Unique: true, Name: "idx_email"},
-				{Keys: map[string]int{"oauthLinks.provider": 1, "oauthLinks.providerId": 1}, Name: "idx_oauth_links"},
-			},
-		},
-		{
-			Collection: OAuthProvidersCollection,
-			Indexes: []IndexDefinition{
-				{Keys: map[string]int{"uuid": 1}, Unique: true, Name: "idx_uuid"},
-				{Keys: map[string]int{"userUuid": 1}, Name: "idx_user_uuid"},
-				{Keys: map[string]int{"provider": 1, "providerId": 1}, Unique: true, Name: "idx_provider_id"},
-				{Keys: map[string]int{"email": 1}, Name: "idx_email"},
-			},
-		},
-		{
-			Collection: RefreshTokensCollection,
-			Indexes: []IndexDefinition{
-				{Keys: map[string]int{"uuid": 1}, Unique: true, Name: "idx_uuid"},
-				{Keys: map[string]int{"userUuid": 1}, Name: "idx_user_uuid"},
-				{Keys: map[string]int{"token": 1}, Unique: true, Name: "idx_token"},
-				{Keys: map[string]int{"sessionUuid": 1}, Name: "idx_session_uuid"},
-				{Keys: map[string]int{"deviceId": 1}, Name: "idx_device_id"},
-				{Keys: map[string]int{"expiresAt": 1}, TTL: &day7, Name: "idx_ttl_expires"},
-				{Keys: map[string]int{"isRevoked": 1, "userUuid": 1}, Name: "idx_revoked_user"},
-			},
-		},
-		{
-			Collection: AuthSessionsCollection,
-			Indexes: []IndexDefinition{
-				{Keys: map[string]int{"uuid": 1}, Unique: true, Name: "idx_uuid"},
-				{Keys: map[string]int{"userUuid": 1}, Name: "idx_user_uuid"},
-				{Keys: map[string]int{"deviceId": 1}, Name: "idx_device_id"},
-				{Keys: map[string]int{"isActive": 1, "userUuid": 1}, Name: "idx_active_user"},
-				{Keys: map[string]int{"expiresAt": 1}, TTL: &day90, Name: "idx_ttl_expires"},
-			},
-		},
-		{
-			Collection: SecurityEventsCollection,
-			Indexes: []IndexDefinition{
-				{Keys: map[string]int{"userUuid": 1, "timestamp": -1}, Name: "idx_user_time"},
-				{Keys: map[string]int{"eventType": 1, "timestamp": -1}, Name: "idx_type_time"},
-				{Keys: map[string]int{"severity": 1, "timestamp": -1}, Name: "idx_severity_time"},
-				{Keys: map[string]int{"timestamp": 1}, TTL: &day90, Name: "idx_ttl_events"},
-			},
-		},
-	}
-}
 
 // Helper function to generate UUIDs
 func GenerateUUID() string {

@@ -21,14 +21,9 @@ var (
 )
 
 const (
-	UsersCollection = "users"
-
-	// ADR-0003 PR-B: tier-split user collections. Populated by
-	// backend/scripts/migrate_user_split.go and consumed by the new
-	// OperatorUserProvider / ClientUserProvider once
-	// USER_TIER_SPLIT_ENABLED is flipped (PR-B introduces both; PR-D
-	// is the cutover). The legacy `users` collection above stays the
-	// authoritative source of truth at PR-B boundary.
+	// ADR-0003 PR-D D-8: tier-split user collections are the only
+	// canonical user storage. Operator-tier rows live in
+	// operator_users, client-tier rows in client_users.
 	OperatorUsersCollection = "operator_users"
 	ClientUsersCollection   = "client_users"
 )
@@ -90,29 +85,17 @@ type UserRepository interface {
 
 type mongoUserRepository struct {
 	collection *mongo.Collection
-	// tier is the audience this repo binds to ("operator" / "client" /
-	// ""). When non-empty, every Create-side write stamps user.Tier so
-	// the integrity test in B-5 can assert that operator_users rows
-	// always carry Tier="operator" and likewise for clients. The
-	// legacy "users" collection runs with tier="" — its rows are
-	// tier-stamped in-place by backend/scripts/migrate_user_split.go.
+	// tier is the audience this repo binds to ("operator" / "client").
+	// Every Create-side write stamps user.Tier so a tier-guard test can
+	// assert that operator_users rows always carry Tier="operator" and
+	// likewise for clients.
 	tier string
 }
 
-// NewUserRepository creates a user repository bound to the legacy
-// `users` collection. Tier is empty: writes don't stamp the field, and
-// the migration script is responsible for backfilling it on the rows
-// it copies into operator_users.
-func NewUserRepository(db *mongo.Database) UserRepository {
-	return &mongoUserRepository{
-		collection: db.Collection(UsersCollection),
-	}
-}
-
 // NewOperatorUserRepository binds to operator_users and stamps
-// Tier="operator" on every Create-side write. ADR-0003 PR-B —
-// registered under module.ServiceOperatorUserProvider; the auth
-// module's flows pick it up at PR-D cutover.
+// Tier="operator" on every Create-side write. Registered under
+// module.ServiceOperatorUserProvider and (since ADR-0003 PR-D D-8)
+// the canonical module.ServiceUserService.
 func NewOperatorUserRepository(db *mongo.Database) UserRepository {
 	return &mongoUserRepository{
 		collection: db.Collection(OperatorUsersCollection),
@@ -146,11 +129,8 @@ func (r *mongoUserRepository) Create(ctx context.Context, user *models.User) err
 	user.UpdatedAt = now
 
 	// ADR-0003 PR-B: stamp the audience tier on every operator/client
-	// row so the B-5 integrity test can assert each collection only
-	// holds rows of its own tier. Empty repo-tier (legacy `users`
-	// repo) leaves the field untouched — the migration script
-	// backfills it for legacy rows before they move into
-	// operator_users.
+	// row so the integrity test can assert each collection only
+	// holds rows of its own tier.
 	if r.tier != "" {
 		user.Tier = r.tier
 	}

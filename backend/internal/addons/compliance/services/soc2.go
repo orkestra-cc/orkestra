@@ -6,6 +6,7 @@ import (
 
 	complianceModels "github.com/orkestra/backend/internal/addons/compliance/models"
 	authModels "github.com/orkestra/backend/internal/core/auth/models"
+	userRepo "github.com/orkestra/backend/internal/core/user/repository"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 )
@@ -101,10 +102,12 @@ func (s *SOC2EvidenceService) Generate(ctx context.Context) (*Evidence, error) {
 // roles that can administer the platform (CC6.1). The authz module's
 // role-binding table is the long-term authority; for v1 we read the
 // system role column on users, which matches the JWT srole claim.
+// Privileged roles are operator-tier by definition — clients never
+// hold super_admin/administrator/developer.
 func (s *SOC2EvidenceService) privilegedUsers(ctx context.Context) (map[string]any, error) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	users := s.db.Collection("users")
+	users := s.db.Collection(userRepo.OperatorUsersCollection)
 	roles := []string{"super_admin", "administrator", "developer"}
 	out := map[string]any{"byRole": map[string]int64{}}
 	var total int64
@@ -126,12 +129,17 @@ func (s *SOC2EvidenceService) privilegedUsers(ctx context.Context) (map[string]a
 // a second factor. 100% is the target; any deficit is an auditor
 // findings source. Non-privileged MFA coverage is tracked separately
 // for completeness.
+//
+// Privileged users (super_admin/administrator/developer) live in
+// operator_users by definition (Tier-1), so the count and the MFA
+// factor lookup both query the operator-tier collections (ADR-0003
+// PR-D D-8 cutover).
 func (s *SOC2EvidenceService) mfaCoverage(ctx context.Context) (map[string]any, error) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	users := s.db.Collection("users")
-	factors := s.db.Collection(authModels.MFAFactorsCollection)
+	users := s.db.Collection(userRepo.OperatorUsersCollection)
+	factors := s.db.Collection(authModels.OperatorMFAFactorsCollection)
 
 	//tenantscope:allow platform-wide MFA coverage aggregate — privileged users span tenants
 	privUsers, err := users.Distinct(ctx, "uuid", bson.M{

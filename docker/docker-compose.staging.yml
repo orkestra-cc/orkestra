@@ -101,12 +101,6 @@ services:
       CLIENT_RATE_LIMIT_REQUESTS_PER_MINUTE: ${CLIENT_RATE_LIMIT_REQUESTS_PER_MINUTE:-0}
       CLIENT_RATE_LIMIT_BURST: ${CLIENT_RATE_LIMIT_BURST:-0}
 
-      # ADR-0003 PR-B cutover gate. False (default): legacy `users`
-      # collection is authoritative. True: operator_users takes over
-      # — flip only after backend/scripts/migrate_user_split has run
-      # and the destination collections are populated.
-      USER_TIER_SPLIT_ENABLED: ${USER_TIER_SPLIT_ENABLED:-false}
-
       # Staging specific
       DEBUG: "false"
       LOG_LEVEL: ${LOG_LEVEL:-info}
