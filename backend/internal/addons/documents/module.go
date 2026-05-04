@@ -111,10 +111,10 @@ func (m *DocumentsModule) Init(deps *module.Dependencies) error {
 }
 
 func (m *DocumentsModule) RegisterRoutes(ri *module.RouteInfo) {
-	ri.ProtectedRouter.Group(func(r chi.Router) {
+	ri.Operator.ProtectedRouter.Group(func(r chi.Router) {
 		r.Use(middleware.ModuleGate(ri.ConfigService, m.Name()))
-		r.Use(ri.AuthMW.RequireCapability("documents.access"))
-		r.Use(ri.AuthMW.RequirePermission("documents.template.read"))
+		r.Use(ri.Operator.AuthMW.RequireCapability("documents.access"))
+		r.Use(ri.Operator.AuthMW.RequirePermission("documents.template.read"))
 		api := humachi.New(r, ri.APIConfig)
 		RegisterRoutes(api, m.templateHandler, m.documentHandler)
 	})

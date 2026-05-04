@@ -139,10 +139,10 @@ func (m *GraphModule) Init(deps *module.Dependencies) error {
 }
 
 func (m *GraphModule) RegisterRoutes(ri *module.RouteInfo) {
-	ri.ProtectedRouter.Group(func(r chi.Router) {
+	ri.Operator.ProtectedRouter.Group(func(r chi.Router) {
 		r.Use(middleware.ModuleGate(ri.ConfigService, m.Name()))
-		r.Use(ri.AuthMW.RequireCapability("graph.access"))
-		r.Use(ri.AuthMW.RequirePermission("graph.query.read"))
+		r.Use(ri.Operator.AuthMW.RequireCapability("graph.access"))
+		r.Use(ri.Operator.AuthMW.RequirePermission("graph.query.read"))
 		api := humachi.New(r, ri.APIConfig)
 		RegisterRoutes(api, m.handler)
 	})

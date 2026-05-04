@@ -59,7 +59,7 @@ export interface PasswordLoginResponse {
   expiresIn?: number;
   user?: BackendUser;
   // Populated only when the account has an enrolled second factor. The
-  // caller must POST challengeId+code to /v1/auth/mfa/login/verify to
+  // caller must POST challengeId+code to /v1/auth/operator/mfa/login/verify to
   // complete the flow — no session cookies are set until then.
   requiresMfa?: boolean;
   mfaToken?: string;
@@ -114,7 +114,7 @@ export const authApi = baseApi.injectEndpoints({
     getCurrentUser: builder.query<BackendUser | null, void>({
       providesTags: ['Auth', 'User'],
       queryFn: async (_arg, _api, _extraOptions, baseQuery) => {
-        const result = await baseQuery('v1/auth/me');
+        const result = await baseQuery('v1/auth/operator/me');
 
         // Handle 401/403 as expected unauthenticated state, not an error
         if (result.error && (result.error.status === 401 || result.error.status === 403)) {
@@ -138,7 +138,7 @@ export const authApi = baseApi.injectEndpoints({
     // Email/password login — returns access token + user
     login: builder.mutation<PasswordLoginResponse, LoginCredentials>({
       query: (credentials) => ({
-        url: 'v1/auth/login',
+        url: 'v1/auth/operator/login',
         method: 'POST',
         body: credentials,
       }),
@@ -191,7 +191,7 @@ export const authApi = baseApi.injectEndpoints({
     // Self-service registration with email/password
     register: builder.mutation<RegisterResponse, RegisterInput>({
       query: (input) => ({
-        url: 'v1/auth/register',
+        url: 'v1/auth/operator/register',
         method: 'POST',
         body: input,
       }),
@@ -200,7 +200,7 @@ export const authApi = baseApi.injectEndpoints({
     // Verify email address with token from link
     verifyEmail: builder.mutation<SimpleMessageResponse, { token: string }>({
       query: (body) => ({
-        url: 'v1/auth/verify-email',
+        url: 'v1/auth/operator/verify-email',
         method: 'POST',
         body,
       }),
@@ -209,7 +209,7 @@ export const authApi = baseApi.injectEndpoints({
     // Resend the verification email
     resendVerification: builder.mutation<SimpleMessageResponse, { email: string }>({
       query: (body) => ({
-        url: 'v1/auth/verify-email/resend',
+        url: 'v1/auth/operator/verify-email/resend',
         method: 'POST',
         body,
       }),
@@ -218,7 +218,7 @@ export const authApi = baseApi.injectEndpoints({
     // Request password reset email
     forgotPassword: builder.mutation<SimpleMessageResponse, { email: string }>({
       query: (body) => ({
-        url: 'v1/auth/forgot-password',
+        url: 'v1/auth/operator/forgot-password',
         method: 'POST',
         body,
       }),
@@ -227,7 +227,7 @@ export const authApi = baseApi.injectEndpoints({
     // Consume a password reset token and set a new password
     resetPassword: builder.mutation<SimpleMessageResponse, { token: string; newPassword: string }>({
       query: (body) => ({
-        url: 'v1/auth/reset-password',
+        url: 'v1/auth/operator/reset-password',
         method: 'POST',
         body,
       }),
@@ -236,7 +236,7 @@ export const authApi = baseApi.injectEndpoints({
     // Change password while authenticated
     changePassword: builder.mutation<SimpleMessageResponse, { currentPassword: string; newPassword: string }>({
       query: (body) => ({
-        url: 'v1/auth/change-password',
+        url: 'v1/auth/operator/change-password',
         method: 'POST',
         body,
       }),
@@ -245,7 +245,7 @@ export const authApi = baseApi.injectEndpoints({
     // User logout
     logout: builder.mutation<LogoutResponse, void>({
       query: () => ({
-        url: 'v1/auth/logout',
+        url: 'v1/auth/operator/logout',
         method: 'POST',
       }),
       // Clear navigation cache on logout
@@ -267,15 +267,18 @@ export const authApi = baseApi.injectEndpoints({
     }),
 
 
-    // OAuth endpoints
+    // OAuth start — operator tier. Backend signature is POST
+    // /v1/auth/operator/oauth/login with `{provider}` in the body.
     initiateOAuth: builder.mutation<{ redirectUrl: string }, { provider: string }>({
       query: ({ provider }) => ({
-        url: `v1/auth/oauth/${provider}`,
+        url: 'v1/auth/operator/oauth/login',
         method: 'POST',
+        body: { provider },
       }),
     }),
 
-    // OAuth callback handling
+    // OAuth callback — single shared endpoint per provider, dispatched
+    // server-side to the correct tier via the signed-state JWT.
     handleOAuthCallback: builder.mutation<LoginResponse, { code: string; state?: string; provider: string }>({
       query: ({ code, state, provider }) => ({
         url: `v1/auth/oauth/${provider}/callback`,

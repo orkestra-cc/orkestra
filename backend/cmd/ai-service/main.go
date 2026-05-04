@@ -142,14 +142,23 @@ func main() {
 	protectedRouter := chi.NewRouter()
 	protectedRouter.Use(jwtValidator.RequireAuth)
 
-	// Module routes — JWTValidator satisfies module.RoleMiddleware
-	modRegistry.RegisterAllRoutes(&module.RouteInfo{
-		PublicAPI:        publicAPI,
+	// Module routes — JWTValidator satisfies module.RoleMiddleware. The AI
+	// sidecar serves only the `service` audience, but at PR-A the AI modules
+	// (graph/aimodels/rag/agents) still register on the operator surface; PR-C
+	// flips them onto a dedicated `service` APISurface with its own JWT
+	// audience check. Until then both surfaces point at the same instances.
+	aiSurface := &module.APISurface{
+		Audience:        module.AudienceOperator,
+		PublicAPI:       publicAPI,
 		ProtectedRouter: protectedRouter,
-		Router:          router,
 		AuthMW:          jwtValidator,
-		APIConfig:       apiConfig,
-		ConfigService:   configService,
+	}
+	modRegistry.RegisterAllRoutes(&module.RouteInfo{
+		Operator:      aiSurface,
+		Client:        aiSurface,
+		Router:        router,
+		APIConfig:     apiConfig,
+		ConfigService: configService,
 	})
 
 	router.Mount("/", protectedRouter)

@@ -53,7 +53,7 @@ export const refreshSession = createAsyncThunk(
   'auth/refreshSession',
   async () => {
     try {
-      const response = await fetch('/v1/auth/refresh', {
+      const response = await fetch('/v1/auth/operator/refresh', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include' // Use HttpOnly cookies exclusively

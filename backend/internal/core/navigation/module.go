@@ -38,6 +38,6 @@ func (m *NavigationModule) Init(deps *module.Dependencies) error {
 }
 
 func (m *NavigationModule) RegisterRoutes(ri *module.RouteInfo) {
-	api := humachi.New(ri.ProtectedRouter, ri.APIConfig)
+	api := humachi.New(ri.Operator.ProtectedRouter, ri.APIConfig)
 	RegisterRoutes(api, m.handler)
 }

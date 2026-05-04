@@ -102,10 +102,10 @@ func (m *AIModelsModule) Init(deps *module.Dependencies) error {
 }
 
 func (m *AIModelsModule) RegisterRoutes(ri *module.RouteInfo) {
-	ri.ProtectedRouter.Group(func(r chi.Router) {
+	ri.Operator.ProtectedRouter.Group(func(r chi.Router) {
 		r.Use(middleware.ModuleGate(ri.ConfigService, m.Name()))
-		r.Use(ri.AuthMW.RequireCapability("aimodels.access"))
-		r.Use(ri.AuthMW.RequirePermission("aimodels.admin"))
+		r.Use(ri.Operator.AuthMW.RequireCapability("aimodels.access"))
+		r.Use(ri.Operator.AuthMW.RequirePermission("aimodels.admin"))
 		api := humachi.New(r, ri.APIConfig)
 		RegisterRoutes(api, m.handler)
 		RegisterInternalRoutes(api, m.internalHandler)

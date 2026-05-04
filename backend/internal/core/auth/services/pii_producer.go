@@ -26,9 +26,20 @@ type piiProducer struct {
 	mfa         repository.MFAFactorRepository
 	events      SecurityEventService
 	deviceTrust repository.DeviceTrustRepository
+
+	// Collection name labels for the DSR audit row. Captured at
+	// construction so the producer can report tier-correct names
+	// (operator_refresh_tokens vs client_refresh_tokens, etc.) without
+	// reaching into the repository. Empty falls back to a generic label.
+	refreshCollection  string
+	sessionsCollection string
+	emailsCollection   string
+	mfaCollection      string
 }
 
-// NewPIIProducer builds the auth PII producer.
+// NewPIIProducer builds the auth PII producer for a single tier. Pass
+// the tier's collection-name constants (operator_* or client_*) so the
+// DSR audit row labels are accurate.
 func NewPIIProducer(
 	refresh repository.RefreshTokenRepository,
 	sessions repository.AuthSessionRepository,
@@ -36,14 +47,19 @@ func NewPIIProducer(
 	mfa repository.MFAFactorRepository,
 	events SecurityEventService,
 	deviceTrust repository.DeviceTrustRepository,
+	refreshCollection, sessionsCollection, emailsCollection, mfaCollection string,
 ) iface.PIIProducer {
 	return &piiProducer{
-		refresh:     refresh,
-		sessions:    sessions,
-		emails:      emails,
-		mfa:         mfa,
-		events:      events,
-		deviceTrust: deviceTrust,
+		refresh:            refresh,
+		sessions:           sessions,
+		emails:             emails,
+		mfa:                mfa,
+		events:             events,
+		deviceTrust:        deviceTrust,
+		refreshCollection:  refreshCollection,
+		sessionsCollection: sessionsCollection,
+		emailsCollection:   emailsCollection,
+		mfaCollection:      mfaCollection,
 	}
 }
 
@@ -134,6 +150,11 @@ func (p *piiProducer) ExportPersonalData(ctx context.Context, userUUID string) (
 // replay-detection window (~7 days) tolerates deletions here —
 // subsequent reuse of a now-deleted family would fail with
 // "token not found" rather than triggering a family revocation.
+//
+// Tier note: this producer is registered per-tier in module.go (the
+// canonical instance is operator-tier). The collection labels reflect
+// the tier's storage so an operator-tier purge reports
+// operator_refresh_tokens, etc.
 func (p *piiProducer) PurgePersonalData(ctx context.Context, userUUID string) (iface.PurgeResult, error) {
 	var rows int64
 	collections := make([]string, 0, 5)
@@ -145,7 +166,7 @@ func (p *piiProducer) PurgePersonalData(ctx context.Context, userUUID string) (i
 		}
 		if n > 0 {
 			rows += n
-			collections = append(collections, authModels.RefreshTokensCollection)
+			collections = append(collections, p.refreshCollection)
 		}
 	}
 	if p.sessions != nil {
@@ -155,7 +176,7 @@ func (p *piiProducer) PurgePersonalData(ctx context.Context, userUUID string) (i
 		}
 		if n > 0 {
 			rows += n
-			collections = append(collections, authModels.AuthSessionsCollection)
+			collections = append(collections, p.sessionsCollection)
 		}
 	}
 	if p.emails != nil {
@@ -165,7 +186,7 @@ func (p *piiProducer) PurgePersonalData(ctx context.Context, userUUID string) (i
 		}
 		if n > 0 {
 			rows += n
-			collections = append(collections, authModels.EmailTokensCollection)
+			collections = append(collections, p.emailsCollection)
 		}
 	}
 	if p.mfa != nil {
@@ -175,7 +196,7 @@ func (p *piiProducer) PurgePersonalData(ctx context.Context, userUUID string) (i
 		}
 		if n > 0 {
 			rows += n
-			collections = append(collections, authModels.MFAFactorsCollection)
+			collections = append(collections, p.mfaCollection)
 		}
 	}
 	if p.events != nil {

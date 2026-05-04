@@ -334,16 +334,74 @@ type RoleMiddleware interface {
 	RequireExternalTenant() func(http.Handler) http.Handler
 }
 
-// RouteInfo provides the routing infrastructure for module route registration.
-type RouteInfo struct {
-	// PublicAPI is for unauthenticated endpoints (health, webhooks, OAuth callbacks).
+// Audience identifies which class of consumer an API surface serves. Per
+// ADR-0003, Orkestra splits its HTTP surface into three audiences — operator
+// (Tier-1 internal console), client (Tier-2 external clients), and service
+// (internal sidecar-only). Each audience eventually owns its own host, JWT
+// `aud` claim, OpenAPI document, CORS allowlist, and rate-limit policy.
+type Audience string
+
+const (
+	// AudienceOperator is the Tier-1 operator-facing surface (admin console,
+	// module management, internal billing/SDI, dev tooling).
+	AudienceOperator Audience = "operator"
+	// AudienceClient is the Tier-2 client-facing surface (subscriptions,
+	// payments, onboarding, future AI-runtime endpoints).
+	AudienceClient Audience = "client"
+	// AudienceService is the internal-network-only surface used by the AI
+	// sidecar over /v1/internal/* — never reachable from ingress.
+	AudienceService Audience = "service"
+)
+
+// APISurface is the per-audience routing bundle a module receives at
+// RegisterRoutes time. Modules that target one audience read from the
+// matching surface; modules that legitimately serve both audiences read
+// from each surface and may register the same handler twice.
+//
+// During PR-A of ADR-0003 the host mux does not yet exist: both the
+// Operator and Client surfaces on a `RouteInfo` reference the same
+// underlying huma.API / chi.Router / RoleMiddleware instances, so behavior
+// is unchanged. PR-C is what gives each surface its own mux, JWT audience
+// check, CORS allowlist, and rate-limit policy.
+type APISurface struct {
+	// Audience tags this surface so handlers can branch on it when a single
+	// module legitimately serves both tiers (rare — `auth`, `user`, etc.).
+	Audience Audience
+	// PublicAPI is for unauthenticated endpoints scoped to this audience
+	// (health, webhooks, OAuth callbacks, public catalog browse).
 	PublicAPI huma.API
-	// ProtectedRouter is the chi.Router with auth middleware applied.
+	// ProtectedRouter is the chi.Router with auth middleware applied,
+	// scoped to this audience.
 	ProtectedRouter chi.Router
-	// Router is the root chi.Router for special cases (dev endpoints, SSE streams).
-	Router chi.Router
-	// AuthMW provides role-based middleware helpers.
+	// AuthMW provides role-based middleware helpers for this audience.
+	// Post-PR-D the middleware also enforces JWT `aud == Audience`.
 	AuthMW RoleMiddleware
+}
+
+// RouteInfo provides the routing infrastructure for module route registration.
+// Operator and Client are the per-audience surfaces; Router/APIConfig/
+// ConfigService remain audience-agnostic (root router for SSE/dev/raw HTTP,
+// shared Huma config, runtime enable/disable lookups).
+type RouteInfo struct {
+	// Operator is the Tier-1 operator-facing audience surface. Nil if a
+	// module is not registered on operator (post-PR-A: client-only modules).
+	Operator *APISurface
+	// Client is the Tier-2 client-facing audience surface. Nil if a module
+	// is not registered on client.
+	Client *APISurface
+	// Router is the root chi.Router for special cases (dev endpoints, SSE
+	// streams, raw HTTP handlers that predate the audience split).
+	// Operator-only — dev tokens, setup wizard, and the legacy raw HTTP
+	// auth refresh/logout routes all land here.
+	Router chi.Router
+	// ClientRouter is the root chi.Router for client-tier raw HTTP
+	// routes that don't fit the Huma API surface — i.e. the client-side
+	// equivalents of the refresh / refresh-cookie / logout HTTP handlers
+	// the auth module mounts on `Router` for the operator side.
+	// ADR-0003 PR-D D-5 plumbs this so /v1/auth/client/{refresh,
+	// refresh-cookie,logout} can mount on the client host mux. Nil when
+	// no client surface exists (single-mux deployments).
+	ClientRouter chi.Router
 	// APIConfig is the shared Huma API configuration.
 	APIConfig huma.Config
 	// ConfigService provides runtime module enabled/disabled checks for gate middleware.

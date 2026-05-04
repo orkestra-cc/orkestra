@@ -91,9 +91,9 @@ func (m *CompanyModule) RegisterRoutes(ri *module.RouteInfo) {
 	// Company is a global lookup cache shared across tenants (public
 	// business registry data), so routes require the permission but not
 	// a plan entitlement.
-	ri.ProtectedRouter.Group(func(r chi.Router) {
+	ri.Operator.ProtectedRouter.Group(func(r chi.Router) {
 		r.Use(middleware.ModuleGate(ri.ConfigService, m.Name()))
-		r.Use(ri.AuthMW.RequirePermission("company.lookup.read"))
+		r.Use(ri.Operator.AuthMW.RequirePermission("company.lookup.read"))
 		api := humachi.New(r, ri.APIConfig)
 		RegisterRoutes(api, m.handler)
 	})

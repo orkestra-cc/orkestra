@@ -54,18 +54,35 @@ type MFAFactorRepository interface {
 
 type mfaFactorRepository struct {
 	coll *mongo.Collection
+	// tier — see authSessionRepository.tier (ADR-0003 PR-D).
+	tier string
 }
 
-// NewMFAFactorRepository wires a repository against the canonical collection.
-func NewMFAFactorRepository(db *mongo.Database) MFAFactorRepository {
+// NewOperatorMFAFactorRepository binds to operator_mfa_factors and
+// stamps Tier="operator" on every Insert / AppendWebAuthnCredential
+// write. ADR-0003 PR-D.
+func NewOperatorMFAFactorRepository(db *mongo.Database) MFAFactorRepository {
 	return &mfaFactorRepository{
-		coll: db.Collection(models.MFAFactorsCollection),
+		coll: db.Collection(models.OperatorMFAFactorsCollection),
+		tier: models.TierOperator,
+	}
+}
+
+// NewClientMFAFactorRepository binds to client_mfa_factors and stamps
+// Tier="client" on writes. ADR-0003 PR-D.
+func NewClientMFAFactorRepository(db *mongo.Database) MFAFactorRepository {
+	return &mfaFactorRepository{
+		coll: db.Collection(models.ClientMFAFactorsCollection),
+		tier: models.TierClient,
 	}
 }
 
 func (r *mfaFactorRepository) Insert(ctx context.Context, doc *models.MFAFactorDoc) error {
 	if doc.CreatedAt.IsZero() {
 		doc.CreatedAt = time.Now()
+	}
+	if r.tier != "" {
+		doc.Tier = r.tier
 	}
 	_, err := r.coll.InsertOne(ctx, doc)
 	return err
@@ -153,15 +170,19 @@ func (r *mfaFactorRepository) AppendWebAuthnCredential(ctx context.Context, user
 	}
 	now := time.Now()
 	filter := bson.M{"userUuid": userUUID, "type": models.MFAFactorWebAuthn}
+	setOnInsert := bson.M{
+		"uuid":       uuid.NewString(),
+		"userUuid":   userUUID,
+		"type":       models.MFAFactorWebAuthn,
+		"createdAt":  now,
+		"verifiedAt": now,
+	}
+	if r.tier != "" {
+		setOnInsert["tier"] = r.tier
+	}
 	update := bson.M{
-		"$push": bson.M{"webauthnCredentials": cred},
-		"$setOnInsert": bson.M{
-			"uuid":       uuid.NewString(),
-			"userUuid":   userUUID,
-			"type":       models.MFAFactorWebAuthn,
-			"createdAt":  now,
-			"verifiedAt": now,
-		},
+		"$push":        bson.M{"webauthnCredentials": cred},
+		"$setOnInsert": setOnInsert,
 	}
 	opts := options.Update().SetUpsert(true)
 	_, err := r.coll.UpdateOne(ctx, filter, update, opts)

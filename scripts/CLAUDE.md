@@ -67,7 +67,7 @@ These are called by `orkestra.sh` or used directly during development:
 - **env-validate.sh**: Validates environment files (`./scripts/env-validate.sh all`)
 - **generate-jwt-keys.sh**: Generates the RS256 JWT key pair
 - **install-air.sh**: Installs AIR hot-reload tool
-- **devtoken.sh**: Generates dev JWT tokens for testing (`ORKESTRA_API_URL=... ./scripts/devtoken.sh administrator`)
+- **devtoken.sh**: Generates dev JWT tokens for testing (`ORKESTRA_API_URL=... ./scripts/devtoken.sh administrator`). Pass `--audience client` (or `-a client`) to mint an `aud=client` token that satisfies the `api.*` surface; default is `operator` (ADR-0003 PR-D D-10).
 - **health-check.sh** *(if present)*: Called by `orkestra.sh deploy` post-deployment
 
 ## Script Categories

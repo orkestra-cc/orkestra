@@ -15,11 +15,21 @@ import (
 )
 
 // setupMiddleware configures all global HTTP middleware on the router.
+//
+// audience and audCfg are populated by ADR-0003 PR-C: each audience-scoped
+// mux gets its own CORS allowlist (falling back to the legacy
+// cfg.Server.CORSOrigins when the per-audience list is empty) and its own
+// RequireAudience gate so a token issued for the other tier fails closed
+// at this mux's edge. Pass audience="" / audCfg.Host="" to disable the
+// audience gate (used by the AI sidecar's single-surface mode and any
+// future caller that legitimately serves a non-audience surface).
 func setupMiddleware(
 	router *chi.Mux,
 	cfg *config.Config,
 	errorManager *errors.Manager,
 	deviceMW *authMiddleware.DeviceMiddleware,
+	audience string,
+	audCfg config.AudienceConfig,
 ) {
 	// Security headers
 	router.Use(func(next http.Handler) http.Handler {
@@ -49,15 +59,28 @@ func setupMiddleware(
 		})
 	})
 
-	// CORS
+	// CORS — per-audience allowlist with legacy fallback.
+	corsOrigins := audCfg.CORSOrigins
+	if len(corsOrigins) == 0 {
+		corsOrigins = cfg.Server.CORSOrigins
+	}
 	router.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   cfg.Server.CORSOrigins,
+		AllowedOrigins:   corsOrigins,
 		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token", "X-Request-ID", "X-Tenant-ID", "X-Org-ID"},
 		ExposedHeaders:   []string{"Link", "X-Total-Count", "X-Ratelimit-Limit", "X-Ratelimit-Remaining", "X-New-Access-Token", "X-Token-Refreshed"},
 		AllowCredentials: true,
 		MaxAge:           300,
 	}))
+
+	// ADR-0003 PR-C: RequireAudience runs immediately after CORS so a
+	// cross-audience token is rejected before any handler logic runs.
+	// Mounted at the mux level (not per-route) is what makes the gate
+	// non-skippable: a route mistakenly registered on the wrong mux still
+	// fails closed.
+	if audience != "" {
+		router.Use(authMiddleware.RequireAudience(audience))
+	}
 
 	router.Use(chiMiddleware.RequestID)
 	router.Use(chiMiddleware.RealIP)

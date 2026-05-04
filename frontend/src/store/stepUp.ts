@@ -1,7 +1,7 @@
 // Step-up coordination between the RTK Query base query and the global
 // StepUpModal. The base query calls requestStepUp() when it hits a 401
 // with code="step_up_required"; the modal listens for open events via
-// subscribe(), drives the user through /v1/auth/mfa/verify, and calls
+// subscribe(), drives the user through /v1/auth/operator/mfa/verify, and calls
 // completeStepUp(true) on success or completeStepUp(false) on cancel.
 //
 // Deliberately module-level state (not Redux) so the base query's async

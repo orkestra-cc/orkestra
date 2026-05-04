@@ -85,7 +85,6 @@ type AuthService interface {
 
 // AuthConfig holds configuration for the auth service
 type AuthConfig struct {
-	AuthRepo            repository.AuthRepository
 	UserService         iface.UserProvider
 	TenantProvider      iface.TenantProvider // used by MFA policy evaluation on OAuth login
 	OAuthProviderRepo   repository.OAuthProviderRepository
@@ -103,7 +102,6 @@ type AuthConfig struct {
 }
 
 type authService struct {
-	authRepo            repository.AuthRepository
 	userService         iface.UserProvider
 	tenantProvider      iface.TenantProvider
 	oauthProviderRepo   repository.OAuthProviderRepository
@@ -130,7 +128,6 @@ func (s *authService) SetWebAuthnAvailability(c HasWebAuthnCredentials) {
 // NewAuthService creates a new auth service
 func NewAuthService(config *AuthConfig) (AuthService, error) {
 	return &authService{
-		authRepo:            config.AuthRepo,
 		userService:         config.UserService,
 		tenantProvider:      config.TenantProvider,
 		oauthProviderRepo:   config.OAuthProviderRepo,

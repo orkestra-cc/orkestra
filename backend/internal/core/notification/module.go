@@ -93,6 +93,24 @@ func (m *NotificationModule) Collections() []module.CollectionSpec {
 				{Keys: map[string]int{"expiresAt": 1}, TTL: day30},
 			},
 		},
+		// ADR-0003 PR-B: tier-split unsubscribe tokens. Same shape as
+		// the legacy collection — only the name differs.
+		{
+			Name: models.NotificationOperatorUnsubscribeTokensCollect,
+			Indexes: []module.IndexSpec{
+				{Keys: map[string]int{"uuid": 1}, Unique: true},
+				{Keys: map[string]int{"tokenHash": 1}, Unique: true},
+				{Keys: map[string]int{"expiresAt": 1}, TTL: day30},
+			},
+		},
+		{
+			Name: models.NotificationClientUnsubscribeTokensCollect,
+			Indexes: []module.IndexSpec{
+				{Keys: map[string]int{"uuid": 1}, Unique: true},
+				{Keys: map[string]int{"tokenHash": 1}, Unique: true},
+				{Keys: map[string]int{"expiresAt": 1}, TTL: day30},
+			},
+		},
 	}
 }
 
@@ -187,18 +205,18 @@ func (m *NotificationModule) Start(ctx context.Context) error {
 
 func (m *NotificationModule) RegisterRoutes(ri *module.RouteInfo) {
 	// Public unsubscribe endpoint — no auth required.
-	m.handler.RegisterPublicRoutes(ri.PublicAPI)
+	m.handler.RegisterPublicRoutes(ri.Operator.PublicAPI)
 
 	// User-facing preference endpoints: self-service, no org context needed.
-	ri.ProtectedRouter.Group(func(r chi.Router) {
-		r.Use(ri.AuthMW.RequireGlobal())
+	ri.Operator.ProtectedRouter.Group(func(r chi.Router) {
+		r.Use(ri.Operator.AuthMW.RequireGlobal())
 		api := humachi.New(r, ri.APIConfig)
 		m.handler.RegisterUserRoutes(api)
 	})
 
 	// Admin endpoints: platform-level (delivery log, templates, test email).
-	ri.ProtectedRouter.Group(func(r chi.Router) {
-		r.Use(ri.AuthMW.RequireSystemPermission("notification.log.read"))
+	ri.Operator.ProtectedRouter.Group(func(r chi.Router) {
+		r.Use(ri.Operator.AuthMW.RequireSystemPermission("notification.log.read"))
 		api := humachi.New(r, ri.APIConfig)
 		m.handler.RegisterAdminRoutes(api)
 	})

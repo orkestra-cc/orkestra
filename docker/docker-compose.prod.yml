@@ -42,6 +42,13 @@ services:
       COOKIE_SECRET: ${COOKIE_SECRET}
       COOKIE_NAME: ${COOKIE_NAME:-orkestra_cookie}
       COOKIE_DOMAIN: ${COOKIE_DOMAIN}
+      # ADR-0003 PR-D D-9: per-audience refresh-cookie scopes. Operators
+      # MUST set both — leaving them empty falls back to COOKIE_DOMAIN,
+      # which spans both audiences and defeats the host split. The host
+      # mux already rejects unmatched Host headers with 421, but a wide
+      # cookie scope would still let an operator session leak to api.*.
+      OPERATOR_COOKIE_DOMAIN: ${OPERATOR_COOKIE_DOMAIN:-}
+      CLIENT_COOKIE_DOMAIN: ${CLIENT_COOKIE_DOMAIN:-}
       COOKIE_HTTP_ONLY: ${COOKIE_HTTP_ONLY:-true}
       COOKIE_SECURE: ${COOKIE_SECURE:-true}
       COOKIE_SAME_SITE: ${COOKIE_SAME_SITE:-strict}
@@ -51,9 +58,22 @@ services:
       FRONTEND_URL: ${FRONTEND_URL:-https://orkestra.cc}
       BACKEND_URL: ${BACKEND_URL:-https://api.orkestra.cc}
 
+      # ADR-0003 host split. Production has no dev fallthrough — an
+      # unmatched Host header returns 421 Misdirected Request, so both
+      # CONSOLE_HOST and CLIENT_API_HOST must point at the actual public
+      # hostnames behind the ingress.
+      CONSOLE_HOST: ${CONSOLE_HOST:-console.orkestra.com}
+      CLIENT_API_HOST: ${CLIENT_API_HOST:-api.orkestra.com}
+      OPERATOR_CORS_ORIGINS: ${OPERATOR_CORS_ORIGINS:-}
+      CLIENT_CORS_ORIGINS: ${CLIENT_CORS_ORIGINS:-}
+
       # Security (strict)
       RATE_LIMIT_REQUESTS_PER_MINUTE: ${RATE_LIMIT_REQUESTS_PER_MINUTE:-30}
       RATE_LIMIT_BURST: ${RATE_LIMIT_BURST:-5}
+      OPERATOR_RATE_LIMIT_REQUESTS_PER_MINUTE: ${OPERATOR_RATE_LIMIT_REQUESTS_PER_MINUTE:-0}
+      OPERATOR_RATE_LIMIT_BURST: ${OPERATOR_RATE_LIMIT_BURST:-0}
+      CLIENT_RATE_LIMIT_REQUESTS_PER_MINUTE: ${CLIENT_RATE_LIMIT_REQUESTS_PER_MINUTE:-0}
+      CLIENT_RATE_LIMIT_BURST: ${CLIENT_RATE_LIMIT_BURST:-0}
 
       # Production specific
       DEBUG: "false"

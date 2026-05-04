@@ -129,9 +129,29 @@ type ServerConfig struct {
 	Environment  string
 	LogLevel     string
 	FrontendURL  string
-	CORSOrigins  []string // Allowed CORS origins
+	CORSOrigins  []string // Allowed CORS origins (legacy single-host fallback)
 	MaxBodySize  int64    // Maximum request body size in bytes (default 10MB)
 	AIServiceURL string   // When set, AI modules run in the external AI service sidecar
+
+	// ADR-0003 per-audience host split. Both audiences are served from the
+	// same Go binary, dispatched by Host header at the application layer.
+	// Empty Host disables that audience's mux (the host mux returns 421 for
+	// requests targeting it). Empty CORS / Rate falls back to the legacy
+	// CORSOrigins / Rate values so deployments that haven't set the new
+	// env vars keep their current behaviour.
+	Operator AudienceConfig
+	Client   AudienceConfig
+}
+
+// AudienceConfig groups the per-audience routing settings introduced by
+// ADR-0003 PR-C: the public hostname the audience answers on, the CORS
+// allowlist for cross-origin browser calls, and the rate-limit policy.
+// Populated from ${AUDIENCE_PREFIX}_HOST / ${AUDIENCE_PREFIX}_CORS_ORIGINS
+// / ${AUDIENCE_PREFIX}_RATE_LIMIT_* env vars.
+type AudienceConfig struct {
+	Host        string          // e.g. "console.orkestra.com" — empty disables this audience's mux
+	CORSOrigins []string        // empty falls back to ServerConfig.CORSOrigins
+	Rate        RateLimitConfig // zero values fall back to top-level Rate
 }
 
 type DatabaseConfig struct {
@@ -174,13 +194,26 @@ type JWTConfig struct {
 }
 
 type CookieConfig struct {
-	Secret   string
-	Name     string
-	Domain   string
-	HttpOnly bool
-	Secure   bool
-	SameSite string
-	MaxAge   int
+	Secret string
+	Name   string
+	// Domain is the legacy single-tier cookie domain (`COOKIE_DOMAIN`).
+	// Kept as the fallback when the audience-specific values below are
+	// empty so single-host deployments keep working without changes.
+	// Per-audience deployments (ADR-0003 PR-D D-9) should leave this
+	// empty and set OperatorDomain / ClientDomain instead.
+	Domain string
+	// OperatorDomain scopes refresh-token cookies minted on the operator
+	// host (`console.*`) — set via `OPERATOR_COOKIE_DOMAIN`. Empty falls
+	// back to Domain.
+	OperatorDomain string
+	// ClientDomain scopes refresh-token cookies minted on the client
+	// host (`api.*`) — set via `CLIENT_COOKIE_DOMAIN`. Empty falls back
+	// to Domain.
+	ClientDomain string
+	HttpOnly     bool
+	Secure       bool
+	SameSite     string
+	MaxAge       int
 }
 
 type GoogleOAuthConfig struct {
@@ -230,14 +263,44 @@ func Load() (*Config, error) {
 	defaultCORSOrigins := []string{"http://localhost:8080", "http://localhost:5173"}
 	corsOrigins := getEnvAsSlice("CORS_ORIGINS", defaultCORSOrigins)
 
+	// ADR-0003 per-audience defaults. Dev defaults use *.localhost which
+	// resolves to 127.0.0.1 on most modern OSes (Linux, macOS via mDNS,
+	// Windows since 10) so contributors don't need to edit /etc/hosts.
+	// Prod defaults are intentionally left empty — operators must set
+	// CONSOLE_HOST / CLIENT_API_HOST explicitly so a misconfigured deploy
+	// fails the host-mux check rather than serving the wrong audience.
+	env := getEnv("ENV", "development")
+	defaultConsoleHost := ""
+	defaultClientHost := ""
+	if env == "development" {
+		defaultConsoleHost = "console.localhost:3000"
+		defaultClientHost = "api.localhost:3000"
+	}
+
 	config.Server = ServerConfig{
 		Port:         getEnv("PORT", "3000"),
-		Environment:  getEnv("ENV", "development"),
+		Environment:  env,
 		LogLevel:     getEnv("LOG_LEVEL", "info"),
 		FrontendURL:  getEnv("FRONTEND_URL", "http://localhost:8080"),
 		CORSOrigins:  corsOrigins,
 		MaxBodySize:  getEnvAsInt64("MAX_BODY_SIZE", 10*1024*1024), // Default 10MB
 		AIServiceURL: getEnv("AI_SERVICE_URL", ""),                 // Empty = local modules, set = remote AI service
+		Operator: AudienceConfig{
+			Host:        getEnv("CONSOLE_HOST", defaultConsoleHost),
+			CORSOrigins: getEnvAsSlice("OPERATOR_CORS_ORIGINS", nil),
+			Rate: RateLimitConfig{
+				RequestsPerMinute: getEnvAsInt("OPERATOR_RATE_LIMIT_REQUESTS_PER_MINUTE", 0),
+				Burst:             getEnvAsInt("OPERATOR_RATE_LIMIT_BURST", 0),
+			},
+		},
+		Client: AudienceConfig{
+			Host:        getEnv("CLIENT_API_HOST", defaultClientHost),
+			CORSOrigins: getEnvAsSlice("CLIENT_CORS_ORIGINS", nil),
+			Rate: RateLimitConfig{
+				RequestsPerMinute: getEnvAsInt("CLIENT_RATE_LIMIT_REQUESTS_PER_MINUTE", 0),
+				Burst:             getEnvAsInt("CLIENT_RATE_LIMIT_BURST", 0),
+			},
+		},
 	}
 
 	config.Database = DatabaseConfig{
@@ -277,13 +340,21 @@ func Load() (*Config, error) {
 	config.Auth = AuthConfig{
 		JWT: jwtConfig,
 		Cookie: CookieConfig{
-			Secret:   getEnv("COOKIE_SECRET", "default-cookie-secret"),
-			Name:     getEnv("COOKIE_NAME", "orkestra_cookie"),
-			Domain:   getEnv("COOKIE_DOMAIN", ""),
-			HttpOnly: getEnvAsBool("COOKIE_HTTP_ONLY", true),
-			Secure:   getEnvAsBool("COOKIE_SECURE", false), // Default false for development
-			SameSite: getEnv("COOKIE_SAME_SITE", "lax"),
-			MaxAge:   getEnvAsInt("COOKIE_MAX_AGE", 86400000), // 24 hours in milliseconds
+			Secret: getEnv("COOKIE_SECRET", "default-cookie-secret"),
+			Name:   getEnv("COOKIE_NAME", "orkestra_cookie"),
+			Domain: getEnv("COOKIE_DOMAIN", ""),
+			// ADR-0003 PR-D D-9: per-audience cookie domains. Dev defaults
+			// align with the per-audience host defaults above so the
+			// browser scopes refresh cookies to the matching subdomain
+			// without contributors having to set anything. Prod defaults
+			// are left empty — operators set them explicitly so a stale
+			// COOKIE_DOMAIN does not accidentally cross the audiences.
+			OperatorDomain: getEnv("OPERATOR_COOKIE_DOMAIN", defaultOperatorCookieDomain(env)),
+			ClientDomain:   getEnv("CLIENT_COOKIE_DOMAIN", defaultClientCookieDomain(env)),
+			HttpOnly:       getEnvAsBool("COOKIE_HTTP_ONLY", true),
+			Secure:         getEnvAsBool("COOKIE_SECURE", false), // Default false for development
+			SameSite:       getEnv("COOKIE_SAME_SITE", "lax"),
+			MaxAge:         getEnvAsInt("COOKIE_MAX_AGE", 86400000), // 24 hours in milliseconds
 		},
 		Google: GoogleOAuthConfig{
 			ClientID:        getEnv("OAUTH_GOOGLE_CLIENT_ID", ""),
@@ -491,6 +562,26 @@ func printJWTWarning(err error) {
 ╚══════════════════════════════════════════════════════════════════════════════╝
 `
 	fmt.Printf(warning, err)
+}
+
+// defaultOperatorCookieDomain returns the dev fallback for the operator
+// refresh-cookie scope. Empty in non-dev so a misconfigured prod deploy
+// fails closed (the cookie is set without a Domain attribute, scoped to
+// whatever host minted it) rather than silently leaking across hosts.
+func defaultOperatorCookieDomain(env string) string {
+	if env == "development" {
+		return "console.localhost"
+	}
+	return ""
+}
+
+// defaultClientCookieDomain mirrors defaultOperatorCookieDomain for the
+// client surface (api.*).
+func defaultClientCookieDomain(env string) string {
+	if env == "development" {
+		return "api.localhost"
+	}
+	return ""
 }
 
 func getEnv(key, defaultValue string) string {

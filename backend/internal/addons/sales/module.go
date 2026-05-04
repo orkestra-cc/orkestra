@@ -153,10 +153,10 @@ func (m *SalesModule) Init(deps *module.Dependencies) error {
 }
 
 func (m *SalesModule) RegisterRoutes(ri *module.RouteInfo) {
-	ri.ProtectedRouter.Group(func(r chi.Router) {
+	ri.Operator.ProtectedRouter.Group(func(r chi.Router) {
 		r.Use(middleware.ModuleGate(ri.ConfigService, m.Name()))
-		r.Use(ri.AuthMW.RequireCapability("sales.access"))
-		r.Use(ri.AuthMW.RequirePermission("sales.job.read"))
+		r.Use(ri.Operator.AuthMW.RequireCapability("sales.access"))
+		r.Use(ri.Operator.AuthMW.RequirePermission("sales.job.read"))
 		api := humachi.New(r, ri.APIConfig)
 		RegisterSkillRoutes(api, m.skillHandler)
 		RegisterProspectRoutes(api, m.prospectHandler)

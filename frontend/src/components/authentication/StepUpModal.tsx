@@ -17,8 +17,8 @@ import { subscribeStepUp, completeStepUp } from 'store/stepUp';
  * Global step-up verification modal. Opens whenever the RTK Query base
  * query calls requestStepUp() in response to a 401 with
  * code="step_up_required". Offers two paths to satisfy the gate:
- *   - TOTP / backup code via /v1/auth/mfa/verify (always available);
- *   - Passkey via /v1/auth/mfa/webauthn/verify/{begin,finish}, when the
+ *   - TOTP / backup code via /v1/auth/operator/mfa/verify (always available);
+ *   - Passkey via /v1/auth/operator/mfa/webauthn/verify/{begin,finish}, when the
  *     user has at least one credential and the browser supports WebAuthn.
  *
  * Both branches dispatch a stepped-up access token into Redux through

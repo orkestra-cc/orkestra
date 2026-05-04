@@ -65,10 +65,26 @@ type MedicalCheck struct {
 }
 
 // User represents the unified user model combining authentication and driver-specific fields
+// Tier values stamped on every user record by ADR-0003 PR-B as a
+// defense-in-depth guard. A repository invariant test asserts the field
+// matches the owning collection (operator_users → "operator", client_users
+// → "client") so a misrouted query against the wrong collection fails
+// loudly. The legacy `users` collection (pre-PR-B) leaves the field empty
+// — repositories that read from it skip the guard until the migration
+// script populates Tier in-place.
+const (
+	TierOperator = "operator"
+	TierClient   = "client"
+)
+
 type User struct {
 	ID       primitive.ObjectID `bson:"_id,omitempty" json:"-"`
 	UUID     string             `bson:"uuid" json:"id" validate:"required"`
-	Email    string             `bson:"email" json:"email" validate:"required,email"`
+	// Tier discriminates operator (Tier-1 internal) from client (Tier-2
+	// external) users. Set by the constructor matching the target
+	// collection; checked on read by the tier-aware repositories.
+	Tier  string `bson:"tier,omitempty" json:"-"`
+	Email string `bson:"email" json:"email" validate:"required,email"`
 	Username string             `bson:"username" json:"username"`
 	FullName string             `bson:"fullName" json:"fullName"`
 	Avatar   string             `bson:"avatar,omitempty" json:"avatar,omitempty"`

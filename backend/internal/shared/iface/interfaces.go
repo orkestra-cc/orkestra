@@ -67,6 +67,32 @@ type UserProvider interface {
 }
 
 // ---------------------------------------------------------------------------
+// OperatorUserProvider / ClientUserProvider — ADR-0003 PR-B
+// Tier-aware user-data interfaces. Same surface as UserProvider but each
+// implementation is bound to its tier's collection (operator_users vs
+// client_users) and stamps / asserts Tier on every read & write.
+//
+// At the PR-B boundary the legacy UserProvider remains authoritative;
+// these interfaces are registered under separate ServiceRegistry keys
+// (ServiceOperatorUserProvider / ServiceClientUserProvider) but no
+// consumer reads them yet. PR-D is the cutover — auth flows switch off
+// the legacy provider onto the audience-matching one.
+//
+// The named-interface distinction is a compile-time hint at the call
+// site (you can read which audience a function targets from the type)
+// but does not prevent injecting the wrong implementation. Real
+// enforcement is the per-tier Tier guard inside the repository.
+// ---------------------------------------------------------------------------
+
+type OperatorUserProvider interface {
+	UserProvider
+}
+
+type ClientUserProvider interface {
+	UserProvider
+}
+
+// ---------------------------------------------------------------------------
 // JWTProvider — consumed by: dev
 // Only the method dev actually needs for token generation.
 // ---------------------------------------------------------------------------

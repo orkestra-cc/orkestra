@@ -189,7 +189,13 @@ func (m *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 
 				tokenResponse, err := m.authService.RefreshTokensWithRiskAssessment(r.Context(), refreshToken, securityCtx)
 				if err == nil {
-					cookieDomain := m.config.Auth.Cookie.Domain
+					// ADR-0003 PR-D D-9: write the rotated refresh cookie
+					// scoped to the request's audience so an operator
+					// silent-refresh stays on `console.*` and a client
+					// silent-refresh stays on `api.*`. Falls back to the
+					// legacy single-host Domain when the per-tier value
+					// is empty (single-host deployments).
+					cookieDomain := cookieDomainForAudience(m.config, AudienceFromContext(r.Context()))
 					isSecure := m.config.Auth.Cookie.Secure
 					utils.SetRefreshTokenCookie(w, m.cookieName, tokenResponse.RefreshToken, 7*24*3600, cookieDomain, isSecure)
 

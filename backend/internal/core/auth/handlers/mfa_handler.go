@@ -501,48 +501,49 @@ func mapMFAError(err error) error {
 // RegisterPublicRoutes mounts endpoints that complete an in-flight login
 // and therefore cannot require a bearer token. Only the login-verify path
 // lives here; self-service step-up uses the protected endpoint instead.
-func (h *MFAHandler) RegisterPublicRoutes(api huma.API) {
+// See RouteMount for path/operation-ID prefix semantics.
+func (h *MFAHandler) RegisterPublicRoutes(api huma.API, mount RouteMount) {
 	huma.Register(api, huma.Operation{
-		OperationID: "mfa-login-verify",
+		OperationID: mount.OpIDPrefix + "mfa-login-verify",
 		Method:      http.MethodPost,
-		Path:        "/v1/auth/mfa/login/verify",
+		Path:        "/v1/auth" + mount.PathPrefix + "/mfa/login/verify",
 		Summary:     "Complete a login by verifying a TOTP or backup code",
 		Tags:        []string{"Authentication", "MFA"},
 	}, h.LoginVerify)
 }
 
-func (h *MFAHandler) RegisterProtectedRoutes(api huma.API) {
+func (h *MFAHandler) RegisterProtectedRoutes(api huma.API, mount RouteMount) {
 	huma.Register(api, huma.Operation{
-		OperationID: "mfa-enroll-begin",
+		OperationID: mount.OpIDPrefix + "mfa-enroll-begin",
 		Method:      http.MethodPost,
-		Path:        "/v1/auth/mfa/enroll/begin",
+		Path:        "/v1/auth" + mount.PathPrefix + "/mfa/enroll/begin",
 		Summary:     "Begin MFA (TOTP) enrollment",
 		Tags:        []string{"Authentication", "MFA"},
 		Security:    []map[string][]string{{"bearerAuth": {}}},
 	}, h.EnrollBegin)
 
 	huma.Register(api, huma.Operation{
-		OperationID: "mfa-enroll-confirm",
+		OperationID: mount.OpIDPrefix + "mfa-enroll-confirm",
 		Method:      http.MethodPost,
-		Path:        "/v1/auth/mfa/enroll/confirm",
+		Path:        "/v1/auth" + mount.PathPrefix + "/mfa/enroll/confirm",
 		Summary:     "Confirm MFA enrollment and receive backup codes",
 		Tags:        []string{"Authentication", "MFA"},
 		Security:    []map[string][]string{{"bearerAuth": {}}},
 	}, h.EnrollConfirm)
 
 	huma.Register(api, huma.Operation{
-		OperationID: "mfa-status",
+		OperationID: mount.OpIDPrefix + "mfa-status",
 		Method:      http.MethodGet,
-		Path:        "/v1/auth/me/mfa",
+		Path:        "/v1/auth" + mount.PathPrefix + "/me/mfa",
 		Summary:     "Return the current user's MFA enrollment status",
 		Tags:        []string{"Authentication", "MFA"},
 		Security:    []map[string][]string{{"bearerAuth": {}}},
 	}, h.Status)
 
 	huma.Register(api, huma.Operation{
-		OperationID: "mfa-verify",
+		OperationID: mount.OpIDPrefix + "mfa-verify",
 		Method:      http.MethodPost,
-		Path:        "/v1/auth/mfa/verify",
+		Path:        "/v1/auth" + mount.PathPrefix + "/mfa/verify",
 		Summary:     "Verify a TOTP or backup code; returns a stepped-up access token",
 		Tags:        []string{"Authentication", "MFA"},
 		Security:    []map[string][]string{{"bearerAuth": {}}},
@@ -552,11 +553,11 @@ func (h *MFAHandler) RegisterProtectedRoutes(api huma.API) {
 // RegisterStepUpRoutes mounts endpoints that demand a *fresh* MFA proof.
 // The caller wires RequireStepUp(5m) around this API instance — see
 // auth/module.go.
-func (h *MFAHandler) RegisterStepUpRoutes(api huma.API) {
+func (h *MFAHandler) RegisterStepUpRoutes(api huma.API, mount RouteMount) {
 	huma.Register(api, huma.Operation{
-		OperationID: "mfa-remove",
+		OperationID: mount.OpIDPrefix + "mfa-remove",
 		Method:      http.MethodPost,
-		Path:        "/v1/auth/me/mfa/remove",
+		Path:        "/v1/auth" + mount.PathPrefix + "/me/mfa/remove",
 		Summary:     "Remove the current user's MFA factor (requires fresh step-up)",
 		Tags:        []string{"Authentication", "MFA"},
 		Security:    []map[string][]string{{"bearerAuth": {}}},
@@ -565,7 +566,9 @@ func (h *MFAHandler) RegisterStepUpRoutes(api huma.API) {
 
 // RegisterAdminRoutes mounts the admin-scoped reset endpoint. The caller
 // must chain RequireSystemPermission + RequireStepUp around this API
-// instance before invocation — see auth/module.go for the wiring.
+// instance before invocation — see auth/module.go for the wiring. The
+// admin surface is operator-tier-only by definition (Tier-1 internal
+// console only) so it doesn't take a RouteMount parameter.
 func (h *MFAHandler) RegisterAdminRoutes(api huma.API) {
 	huma.Register(api, huma.Operation{
 		OperationID: "mfa-admin-reset",

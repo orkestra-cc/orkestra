@@ -130,8 +130,8 @@ func (m *Module) Init(deps *module.Dependencies) error {
 func (m *Module) RegisterRoutes(ri *module.RouteInfo) {
 	// Global routes: list/create tenants, accept invites. These need auth
 	// but intentionally do not require a current-tenant context.
-	ri.ProtectedRouter.Group(func(r chi.Router) {
-		r.Use(ri.AuthMW.RequireGlobal())
+	ri.Operator.ProtectedRouter.Group(func(r chi.Router) {
+		r.Use(ri.Operator.AuthMW.RequireGlobal())
 		api := humachi.New(r, ri.APIConfig)
 		m.handler.RegisterGlobalRoutes(api)
 	})
@@ -142,14 +142,14 @@ func (m *Module) RegisterRoutes(ri *module.RouteInfo) {
 	// with just the permission; mutations additionally require an MFA
 	// step-up (Block B) because they can transfer ownership data, change
 	// plan entitlements, or destroy the tenant.
-	ri.ProtectedRouter.Group(func(r chi.Router) {
-		r.Use(ri.AuthMW.RequirePermission("tenant.read"))
+	ri.Operator.ProtectedRouter.Group(func(r chi.Router) {
+		r.Use(ri.Operator.AuthMW.RequirePermission("tenant.read"))
 		api := humachi.New(r, ri.APIConfig)
 		m.handler.RegisterScopedReadRoutes(api)
 	})
-	ri.ProtectedRouter.Group(func(r chi.Router) {
-		r.Use(ri.AuthMW.RequirePermission("tenant.read"))
-		r.Use(ri.AuthMW.RequireMFA())
+	ri.Operator.ProtectedRouter.Group(func(r chi.Router) {
+		r.Use(ri.Operator.AuthMW.RequirePermission("tenant.read"))
+		r.Use(ri.Operator.AuthMW.RequireMFA())
 		api := humachi.New(r, ri.APIConfig)
 		m.handler.RegisterScopedMutationRoutes(api)
 	})
@@ -158,8 +158,8 @@ func (m *Module) RegisterRoutes(ri *module.RouteInfo) {
 	// developer via the system.tenants.admin permission. These bypass
 	// per-tenant membership so a platform operator can manage every tenant
 	// without joining each one.
-	ri.ProtectedRouter.Group(func(r chi.Router) {
-		r.Use(ri.AuthMW.RequireSystemPermission("system.tenants.admin"))
+	ri.Operator.ProtectedRouter.Group(func(r chi.Router) {
+		r.Use(ri.Operator.AuthMW.RequireSystemPermission("system.tenants.admin"))
 		api := humachi.New(r, ri.APIConfig)
 		m.handler.RegisterAdminRoutes(api)
 	})

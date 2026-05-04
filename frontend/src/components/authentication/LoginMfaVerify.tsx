@@ -24,7 +24,7 @@ interface LocationState {
 /**
  * Completes a login that paused on the MFA challenge. The caller arrives
  * here from EmailPasswordForm with `state.challengeId` set; we either:
- *   - POST a TOTP / backup code to /v1/auth/mfa/login/verify, or
+ *   - POST a TOTP / backup code to /v1/auth/operator/mfa/login/verify, or
  *   - run the WebAuthn assertion ceremony when state.webauthnAvailable
  *     and the user picks "Use a passkey".
  *

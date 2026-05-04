@@ -45,7 +45,7 @@ const AuthTestPage: React.FC = () => {
     setCookieResponse(null);
 
     try {
-      const response = await fetch(`${backendUrl}/v1/auth/me`, {
+      const response = await fetch(`${backendUrl}/v1/auth/operator/me`, {
         method: 'GET',
         credentials: 'include', // Include cookies
         headers: {
@@ -97,7 +97,7 @@ const AuthTestPage: React.FC = () => {
       // Always include Authorization header (even if token is invalid/missing)
       headers['Authorization'] = `Bearer ${tokenToUse}`;
 
-      const response = await fetch(`${backendUrl}/v1/auth/me`, {
+      const response = await fetch(`${backendUrl}/v1/auth/operator/me`, {
         method: 'GET',
         credentials: 'omit', // Don't include cookies for Bearer token test
         headers,
@@ -138,7 +138,7 @@ const AuthTestPage: React.FC = () => {
     console.log('[AUTH_TEST] Using HttpOnly cookie authentication');
 
     try {
-      const response = await api.get('/v1/auth/me');
+      const response = await api.get('/v1/auth/operator/me');
       console.log('[AUTH_TEST] API response received:', response);
 
       // The API client will automatically handle token refresh if needed
@@ -268,7 +268,7 @@ const AuthTestPage: React.FC = () => {
                   Testing authentication endpoints with secure token delivery:
                 </p>
                 <div className="d-flex flex-wrap gap-2">
-                  <span className="badge bg-primary">GET /v1/auth/me</span>
+                  <span className="badge bg-primary">GET /v1/auth/operator/me</span>
                   <span className="badge bg-warning text-dark">GET /v1/auth/session</span>
                 </div>
               </div>
@@ -279,7 +279,7 @@ const AuthTestPage: React.FC = () => {
                   <Card className="h-100">
                     <Card.Header>
                       <h6 className="mb-0">Test with Cookies</h6>
-                      <small className="text-muted">GET /v1/auth/me</small>
+                      <small className="text-muted">GET /v1/auth/operator/me</small>
                       <div><small className="text-muted">Uses credentials: 'include'</small></div>
                     </Card.Header>
                     <Card.Body>
@@ -303,7 +303,7 @@ const AuthTestPage: React.FC = () => {
                   <Card className="h-100">
                     <Card.Header>
                       <h6 className="mb-0">Test with Bearer Token</h6>
-                      <small className="text-muted">GET /v1/auth/me</small>
+                      <small className="text-muted">GET /v1/auth/operator/me</small>
                       <div><small className="text-muted">Uses Authorization header from Redux</small></div>
                     </Card.Header>
                     <Card.Body>
@@ -351,7 +351,7 @@ const AuthTestPage: React.FC = () => {
                   <Card className="h-100">
                     <Card.Header className="bg-success text-white">
                       <h6 className="mb-0">Test with API Client</h6>
-                      <small className="text-white">GET /v1/auth/me</small>
+                      <small className="text-white">GET /v1/auth/operator/me</small>
                       <div><small className="text-white-50">Auto-refresh + Bearer tokens</small></div>
                     </Card.Header>
                     <Card.Body>
@@ -424,7 +424,7 @@ const AuthTestPage: React.FC = () => {
                     <dt>Backend URL:</dt>
                     <dd><code>{backendUrl}</code></dd>
                     <dt>Test Endpoints:</dt>
-                    <dd><code>/v1/auth/me</code> & <code>/v1/auth/session</code></dd>
+                    <dd><code>/v1/auth/operator/me</code> & <code>/v1/auth/session</code></dd>
                     <dt>Cookie Method:</dt>
                     <dd><small>HttpOnly cookies with <code>credentials: 'include'</code></small></dd>
                     <dt>Bearer Method:</dt>

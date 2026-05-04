@@ -49,7 +49,7 @@ async function refreshSession(): Promise<boolean> {
     const backendUrl = getBackendUrl();
     console.log('🔄 [SESSION_REFRESH] Attempting to refresh session...');
 
-    const response = await fetch(`${backendUrl}/v1/auth/refresh`, {
+    const response = await fetch(`${backendUrl}/v1/auth/operator/refresh`, {
       method: 'POST',
       credentials: 'include', // Use HttpOnly cookies exclusively
       headers: {

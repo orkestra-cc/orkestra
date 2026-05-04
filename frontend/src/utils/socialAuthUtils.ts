@@ -35,7 +35,7 @@ export const initiateSocialLogin = async (
       provider: provider
     };
 
-    const response = await fetch(`${backendUrl}/v1/auth/oauth/login`, {
+    const response = await fetch(`${backendUrl}/v1/auth/operator/oauth/login`, {
       method: 'POST',
       credentials: 'include',
       headers: {
@@ -113,7 +113,7 @@ export const logoutSocial = async (
   allDevices: boolean = false
 ): Promise<void> => {
   try {
-    await fetch(`${backendUrl}/v1/auth/logout`, {
+    await fetch(`${backendUrl}/v1/auth/operator/logout`, {
       method: 'POST',
       credentials: 'include', // Use HttpOnly cookies for authentication
       headers: {

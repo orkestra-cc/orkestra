@@ -14,7 +14,7 @@ export const testHttpOnlyCookieAuth = async () => {
   console.log('Note: No localStorage tokens used - using secure cookies only');
 
   try {
-    const response = await api.get('/v1/auth/me');
+    const response = await api.get('/v1/auth/operator/me');
     console.log('Response received:', response);
     console.log('Was session refreshed?', response.refreshed);
     console.log('Authentication method: HttpOnly cookies (secure)');
@@ -24,7 +24,7 @@ export const testHttpOnlyCookieAuth = async () => {
 
       // Test another request
       console.log('2. Testing second request with refreshed session...');
-      const response2 = await api.get('/v1/auth/me');
+      const response2 = await api.get('/v1/auth/operator/me');
       console.log('Second response:', response2);
       console.log('Second request refreshed?', response2.refreshed);
     } else {

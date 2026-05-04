@@ -7,6 +7,15 @@ const (
 	NotificationPreferencesCollection    = "notification_preferences"
 	NotificationSuppressionsCollection   = "notification_suppressions"
 	NotificationUnsubscribeTokensCollect = "notification_unsubscribe_tokens"
+
+	// ADR-0003 PR-B: tier-split unsubscribe tokens. The token issuer
+	// stamps the audience tier on the token row so /v1/notifications/
+	// unsubscribe lookup can hit the correct collection and apply the
+	// opt-out to the matching tier's preference row. Empty until the
+	// cutover; legacy notification_unsubscribe_tokens stays
+	// authoritative at PR-B boundary.
+	NotificationOperatorUnsubscribeTokensCollect = "operator_unsubscribe_tokens"
+	NotificationClientUnsubscribeTokensCollect   = "client_unsubscribe_tokens"
 )
 
 // Notification categories used for preference lookup and template IDs.

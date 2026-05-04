@@ -19,7 +19,7 @@ import WebAuthnEnrollDialog from './WebAuthnEnrollDialog';
  *   - Passkeys — zero-or-many WebAuthn credentials, each individually removable.
  *
  * The backend reports overall enrolled state on the same status endpoint
- * (`/v1/auth/me/mfa`) so the cards stay in sync without separate fetches.
+ * (`/v1/auth/operator/me/mfa`) so the cards stay in sync without separate fetches.
  */
 const MfaSettings = () => {
   const { data, isLoading, refetch } = useGetMfaStatusQuery();

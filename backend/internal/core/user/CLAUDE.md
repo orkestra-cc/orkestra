@@ -7,7 +7,7 @@ _Parent: [../CLAUDE.md](../CLAUDE.md)_
 
 ## Purpose
 
-Owns the global `users` collection: account identity, profile fields, the global **system role**, OAuth link bookkeeping, and driver-document expiry tracking. Exposes `iface.UserProvider` so auth, authz, tenant and anything else that needs to look up a user depends on the interface rather than this package.
+Owns the per-tier user collections (`operator_users` and `client_users` after the ADR-0003 PR-D D-8 cutover): account identity, profile fields, the global **system role**, OAuth link bookkeeping, and driver-document expiry tracking. Exposes three providers via the registry — `ServiceOperatorUserProvider`, `ServiceClientUserProvider`, and the canonical `ServiceUserService` (which points at the operator-tier provider) — so auth, authz, tenant and anything else that needs to look up a user depends on the interface rather than this package.
 
 Does not touch passwords, sessions, JWTs, or org memberships — those belong to auth and tenant respectively.
 
@@ -26,16 +26,17 @@ Does not touch passwords, sessions, JWTs, or org memberships — those belong to
 
 | Collection | Indexes | TTL |
 |---|---|---|
-| `users` | `uuid` unique, `email` unique | — |
+| `operator_users` | `uuid` unique, `email` unique, `tier` | — |
+| `client_users` | `uuid` unique, `email` unique, `tier` | — |
 
-Declared in `module.go:29-36`. Both indexes are unique — the repository surfaces a typed `ErrEmailNotUnique` on duplicate insert so callers can format a user-friendly error.
+Declared in `module.go::Collections()`. Email uniqueness is scoped per collection — the same address may legitimately exist as both an operator and a client account (one human running an internal staff role and an external client account). The repository stamps `tier="operator"` / `tier="client"` on every insert so a tier-guard test can assert each collection only holds rows of its own tier.
 
 ## Dependencies
 
 - **Modules**: none (this is a leaf).
 - **Required services**: none.
 - **Optional services**: none.
-- **Provides**: `ServiceUserService` → `iface.UserProvider` (`module.go:25-27`).
+- **Provides**: `ServiceUserService` (canonical, operator-tier) + `ServiceOperatorUserProvider` + `ServiceClientUserProvider` → `iface.UserProvider`.
 - **Permissions contributed** (`module.go:48-55`):
 
 | Key | Purpose |
@@ -49,7 +50,7 @@ These permissions gate the module's own HTTP endpoints. Note that the current `R
 
 ## Lifecycle
 
-- **Init** (`module.go:57-64`): constructs the user repository, instantiates the OAuth provider repository from the auth package (used so this module can read `auth_oauth_providers` without taking a hard dep on auth services), wires `UserService`, and registers it under `ServiceUserService`.
+- **Init**: constructs both per-tier user repositories and matching OAuth provider repositories (operator + client) from the auth package, wires the per-tier `UserService` instances, and registers each under `ServiceOperatorUserProvider` / `ServiceClientUserProvider`. The operator-tier provider is also registered under the canonical `ServiceUserService` key — that's what unaware consumers (setup wizard, dev token generator) get by default; audience-aware consumers (onboarding) request the per-tier key directly.
 - **Start / Stop / HealthCheck**: inherit the no-op from `BaseModule`.
 - **Seeding**: none. Users are created by the auth module's registration flows or the setup wizard.
 

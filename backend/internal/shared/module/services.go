@@ -14,8 +14,34 @@ const (
 	ServiceConfigService   ServiceKey = "system.config_svc"  // *ModuleConfigService
 
 	ServiceUserService     ServiceKey = "user.service"
+	// ADR-0003 PR-B: tier-aware user providers. Registered alongside
+	// the legacy ServiceUserService; consumers stay on the legacy key
+	// at the PR-B boundary. PR-D is the cutover — auth flows pick the
+	// audience-matching provider via these keys.
+	ServiceOperatorUserProvider ServiceKey = "user.operator_provider"
+	ServiceClientUserProvider   ServiceKey = "user.client_provider"
 	ServiceAuthService     ServiceKey = "auth.service"
+	// ADR-0003 PR-D: tier-aware auth/password-auth services. Bound to
+	// the per-tier sessions / refresh-tokens / oauth-providers / mfa-
+	// factors / email-tokens repositories from PR-B and to the matching
+	// OperatorUserProvider / ClientUserProvider. Registered alongside
+	// the legacy ServiceAuthService / ServicePasswordAuthService keys;
+	// the legacy keys remain canonical until D-8 deletes the legacy
+	// auth_* collections. PR-D's per-tier auth path handlers (D-4, D-5)
+	// pull these directly.
+	ServiceOperatorAuthService         ServiceKey = "auth.operator_service"
+	ServiceClientAuthService           ServiceKey = "auth.client_service"
+	ServiceOperatorPasswordAuthService ServiceKey = "auth.operator_password_auth"
+	ServiceClientPasswordAuthService   ServiceKey = "auth.client_password_auth"
 	ServiceJWTService      ServiceKey = "auth.jwt"
+	// ServiceOperatorJWTService / ServiceClientJWTService publish each
+	// tier's JWTService under a named key so audience-aware consumers
+	// (dev token generator, future test harnesses) can mint a token
+	// stamped with the matching `aud` claim. The canonical
+	// ServiceJWTService stays bound to the operator-tier service for
+	// audience-unaware consumers.
+	ServiceOperatorJWTService ServiceKey = "auth.jwt_operator"
+	ServiceClientJWTService   ServiceKey = "auth.jwt_client"
 	ServiceOAuthProviderFactory ServiceKey = "auth.oauth_factory"
 	ServiceOAuthStateService    ServiceKey = "auth.oauth_state"
 	ServiceOAuthProviderRepo    ServiceKey = "auth.oauth_provider_repo"

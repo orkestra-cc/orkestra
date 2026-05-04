@@ -1,5 +1,5 @@
 // MFA — multi-factor authentication types mirroring the backend contracts
-// at `/v1/auth/mfa/*` and `/v1/auth/me/mfa`. Kept here (not colocated with
+// at `/v1/auth/operator/mfa/*` and `/v1/auth/operator/me/mfa`. Kept here (not colocated with
 // mfaApi) so UI components can import types without pulling the slice.
 
 export type MfaStatus = 'none' | 'pending' | 'active';
@@ -16,7 +16,7 @@ export interface MfaStatusResponse {
   // before the grace clock starts (first privileged login).
   graceExpiresAt?: string | null;
   // Number of enrolled passkeys. Drives the passkeys card in settings —
-  // the per-credential metadata lives at /v1/auth/me/mfa/webauthn/credentials.
+  // the per-credential metadata lives at /v1/auth/operator/me/mfa/webauthn/credentials.
   webauthnCredentials: number;
 }
 

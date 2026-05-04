@@ -224,11 +224,11 @@ func (m *BillingModule) RegisterRoutes(ri *module.RouteInfo) {
 	// any external-tenant token. Rollout respects TENANT_KIND_ENFORCEMENT
 	// (warn|enforce) so operators can probe traffic before the gate starts
 	// returning 403.
-	ri.ProtectedRouter.Group(func(r chi.Router) {
+	ri.Operator.ProtectedRouter.Group(func(r chi.Router) {
 		r.Use(middleware.ModuleGate(ri.ConfigService, m.Name()))
-		r.Use(ri.AuthMW.RequireInternalTenant())
-		r.Use(ri.AuthMW.RequireCapability("billing.access"))
-		r.Use(ri.AuthMW.RequirePermission("billing.invoice.read"))
+		r.Use(ri.Operator.AuthMW.RequireInternalTenant())
+		r.Use(ri.Operator.AuthMW.RequireCapability("billing.access"))
+		r.Use(ri.Operator.AuthMW.RequirePermission("billing.invoice.read"))
 		api := humachi.New(r, ri.APIConfig)
 		RegisterRoutes(
 			api,
@@ -244,7 +244,7 @@ func (m *BillingModule) RegisterRoutes(ri *module.RouteInfo) {
 
 	// Public webhook routes (no JWT, authenticated via webhook secret)
 	if m.webhookHandler != nil {
-		RegisterWebhookRoutes(ri.PublicAPI, m.webhookHandler)
+		RegisterWebhookRoutes(ri.Operator.PublicAPI, m.webhookHandler)
 		m.logger.Info("Billing webhook routes registered",
 			slog.String("webhookURL", m.cfg.Billing.WebhookURL),
 		)

@@ -15,6 +15,15 @@ const (
 	CollPermissions = "authz_permissions"
 	CollRoles       = "authz_roles"
 	CollBindings    = "authz_bindings"
+
+	// ADR-0003 PR-B: tier-split role catalogs. The operator catalog
+	// continues to seed the six platform system roles plus any
+	// operator-side custom roles; the client catalog will eventually
+	// hold the four canonical tenant roles (owner/admin/member/viewer)
+	// plus client-defined custom roles. Bindings + permissions stay
+	// single — both reference the per-tier role UUID.
+	CollOperatorRoles = "operator_roles"
+	CollClientRoles   = "client_roles"
 )
 
 var ErrNotFound = errors.New("authz: not found")

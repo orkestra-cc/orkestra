@@ -48,13 +48,18 @@ func (m *Module) Dependencies() []string { return []string{"auth", "tenant"} }
 
 func (m *Module) RequiredServices() []module.ServiceKey {
 	return []module.ServiceKey{
-		module.ServicePasswordAuthService,
+		// ADR-0003 PR-D D-8: onboarding creates Tier-2 (client) users —
+		// pull the client-tier PasswordAuthService directly so signups
+		// land in client_users / client_email_tokens instead of the
+		// canonical (operator-tier) collections.
+		module.ServiceClientPasswordAuthService,
 		module.ServiceTenantProvider,
 	}
 }
 
-// Init fetches PasswordAuthService + TenantProvider from the registry and
-// wires them into the orchestration service. No collections, no seeds.
+// Init fetches the client-tier PasswordAuthService + TenantProvider from
+// the registry and wires them into the orchestration service. No
+// collections, no seeds.
 //
 // The onboarding service also owns the activate-on-verify hook: it's set on
 // PasswordAuthService after construction so the auth module stays free of a
@@ -63,7 +68,7 @@ func (m *Module) RequiredServices() []module.ServiceKey {
 // that's acceptable because the callback is side-effect-only. Future work
 // can clear it on Stop() if a clean toggle matters.
 func (m *Module) Init(deps *module.Dependencies) error {
-	passwordAuth := module.MustGetTyped[*authServices.PasswordAuthService](deps.Services, module.ServicePasswordAuthService)
+	passwordAuth := module.MustGetTyped[*authServices.PasswordAuthService](deps.Services, module.ServiceClientPasswordAuthService)
 	tenantProvider := module.MustGetTyped[iface.TenantProvider](deps.Services, module.ServiceTenantProvider)
 
 	svc := services.New(passwordAuth, tenantProvider, deps.Logger)
@@ -76,12 +81,13 @@ func (m *Module) Init(deps *module.Dependencies) error {
 	return nil
 }
 
-// RegisterRoutes mounts the single public endpoint on the shared public
-// Huma API. Mirrors the pattern used by auth.RegisterPublicRoutes so the
-// endpoint is visible in the root OpenAPI spec and reachable without an
-// access token — signup is the one flow that predates authentication.
-// Operators disable the endpoint at runtime via the admin UI; the module
-// registry clears the route list when disabled.
+// RegisterRoutes mounts the single public endpoint on the client-tier
+// public Huma API. ADR-0003 PR-D D-7: onboarding is a Tier-2 self-service
+// flow (creates an external tenant + owner user), so its surface lives on
+// `api.*` rather than the operator console. The endpoint stays anonymous —
+// signup is the one flow that predates authentication. Operators disable
+// the endpoint at runtime via the admin UI; the module registry clears
+// the route list when disabled.
 func (m *Module) RegisterRoutes(ri *module.RouteInfo) {
-	handlers.Register(ri.PublicAPI, m.handler)
+	handlers.Register(ri.Client.PublicAPI, m.handler)
 }

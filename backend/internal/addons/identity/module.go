@@ -159,11 +159,11 @@ func (m *Module) Init(deps *module.Dependencies) error {
 //     directly from the token, without the JWT auth middleware).
 func (m *Module) RegisterRoutes(ri *module.RouteInfo) {
 	if m.public != nil {
-		handlers.RegisterPublicRoutes(ri.PublicAPI, m.public)
+		handlers.RegisterPublicRoutes(ri.Operator.PublicAPI, m.public)
 	}
 	if m.admin != nil {
-		ri.ProtectedRouter.Group(func(r chi.Router) {
-			r.Use(ri.AuthMW.RequirePermission("tenant.update"))
+		ri.Operator.ProtectedRouter.Group(func(r chi.Router) {
+			r.Use(ri.Operator.AuthMW.RequirePermission("tenant.update"))
 			api := humachi.New(r, ri.APIConfig)
 			handlers.RegisterAdminRoutes(api, m.admin)
 			handlers.RegisterScimAdminRoutes(api, m.scimAdmin)

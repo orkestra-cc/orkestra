@@ -123,10 +123,10 @@ func (m *RAGModule) Init(deps *module.Dependencies) error {
 }
 
 func (m *RAGModule) RegisterRoutes(ri *module.RouteInfo) {
-	ri.ProtectedRouter.Group(func(r chi.Router) {
+	ri.Operator.ProtectedRouter.Group(func(r chi.Router) {
 		r.Use(middleware.ModuleGate(ri.ConfigService, m.Name()))
-		r.Use(ri.AuthMW.RequireCapability("rag.access"))
-		r.Use(ri.AuthMW.RequirePermission("rag.document.read"))
+		r.Use(ri.Operator.AuthMW.RequireCapability("rag.access"))
+		r.Use(ri.Operator.AuthMW.RequirePermission("rag.document.read"))
 		api := humachi.New(r, ri.APIConfig)
 		if m.documentHandler != nil {
 			RegisterDocumentRoutes(api, m.documentHandler)

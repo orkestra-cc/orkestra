@@ -173,73 +173,92 @@ func (m *SubscriptionsModule) Init(deps *module.Dependencies) error {
 }
 
 func (m *SubscriptionsModule) RegisterRoutes(ri *module.RouteInfo) {
-	// Public catalog — no auth, no gate. Mounted on ri.PublicAPI so
-	// anonymous signup UIs can render pricing before login. Disabling the
-	// subscriptions module via /admin/modules does NOT detach this route
-	// at runtime (same caveat as onboarding.RegisterRoutes in commit 3.1) —
-	// to fully stop public exposure, restart with the module disabled
-	// before boot (delete its row in module_configs or mark enabled=false).
-	RegisterPublicCatalogRoutes(ri.PublicAPI, m.serviceHandler)
+	// ADR-0003 PR-D D-7: subscriptions is bucketed as a client-tier module
+	// (Tier-2 catalog browse, self-service subscribe, view activity). The
+	// Tier-2-facing routes — anonymous catalog and POST /v1/me/subscriptions
+	// — move to the client host (api.*) so operator JWTs (aud=operator) no
+	// longer satisfy the mux-level RequireAudience gate on those paths.
+	//
+	// Operator-admin routes (catalog CRUD, subscription admin, invoice /
+	// activity reads) stay on the operator host. They gate on
+	// RequireInternalTenant() and serve Tier-1 oversight of Tier-2 billing;
+	// moving them to the client surface would make them unreachable
+	// (operator tokens fail aud=client) with no replacement endpoint in
+	// PR-D's scope. Future work can fold them into core/tenant's
+	// /v1/admin/tenants/{id}/* aggregator surface or a dedicated admin
+	// module once the catalog-management UI moves off the console.
 
+	// --- Client surface (api.*) ---
+	//
+	// Public catalog — no auth, no gate. Mounted on ri.Client.PublicAPI so
+	// the Tier-2 signup UI can render pricing before any credentials exist.
+	// Disabling the subscriptions module via /admin/modules does NOT detach
+	// this route at runtime (same caveat as onboarding.RegisterRoutes) — to
+	// fully stop public exposure, restart with the module disabled before
+	// boot (delete its row in module_configs or mark enabled=false).
+	RegisterPublicCatalogRoutes(ri.Client.PublicAPI, m.serviceHandler)
+
+	// Self-service subscribe — RequireGlobal() so callers don't need a
+	// tenant-scoping header, then the handler enforces ownership via
+	// TenantProvider.ListUserMemberships. The mux-level RequireAudience
+	// gate already restricts callers to aud=client tokens, so the Tier-2
+	// scope is enforced at the surface boundary.
+	ri.Client.ProtectedRouter.Group(func(gated chi.Router) {
+		gated.Use(middleware.ModuleGate(ri.ConfigService, m.Name()))
+		gated.Group(func(r chi.Router) {
+			r.Use(ri.Client.AuthMW.RequireGlobal())
+			api := humachi.New(r, ri.APIConfig)
+			RegisterSelfServiceRoutes(api, m.subscriptionHandler)
+		})
+	})
+
+	// --- Operator surface (console.*) ---
+	//
 	// Each permission bucket gets its own chi subgroup. Mutations (POST,
 	// PATCH, DELETE) live behind the `.manage` grants so view-level users
 	// cannot create subscriptions, change pricing, cancel subscriptions, etc.
-	//
-	// Operator-admin routes (catalog, subscriptions admin, invoice/activity
-	// reads) require an internal tenant. The self-service subscribe path
-	// stays kind-agnostic — external tenants self-subscribing is its
-	// entire purpose.
-	ri.ProtectedRouter.Group(func(gated chi.Router) {
+	// All admin routes require an internal tenant.
+	ri.Operator.ProtectedRouter.Group(func(gated chi.Router) {
 		gated.Use(middleware.ModuleGate(ri.ConfigService, m.Name()))
 
 		// Services (catalog) — operator admin only.
 		gated.Group(func(r chi.Router) {
-			r.Use(ri.AuthMW.RequireInternalTenant())
-			r.Use(ri.AuthMW.RequirePermission("subscriptions.service.view"))
+			r.Use(ri.Operator.AuthMW.RequireInternalTenant())
+			r.Use(ri.Operator.AuthMW.RequirePermission("subscriptions.service.view"))
 			api := humachi.New(r, ri.APIConfig)
 			RegisterServiceReadRoutes(api, m.serviceHandler)
 		})
 		gated.Group(func(r chi.Router) {
-			r.Use(ri.AuthMW.RequireInternalTenant())
-			r.Use(ri.AuthMW.RequirePermission("subscriptions.service.manage"))
+			r.Use(ri.Operator.AuthMW.RequireInternalTenant())
+			r.Use(ri.Operator.AuthMW.RequirePermission("subscriptions.service.manage"))
 			api := humachi.New(r, ri.APIConfig)
 			RegisterServiceWriteRoutes(api, m.serviceHandler)
 		})
 
 		// Subscriptions — operator admin (not the external self-subscribe).
 		gated.Group(func(r chi.Router) {
-			r.Use(ri.AuthMW.RequireInternalTenant())
-			r.Use(ri.AuthMW.RequirePermission("subscriptions.subscription.view"))
+			r.Use(ri.Operator.AuthMW.RequireInternalTenant())
+			r.Use(ri.Operator.AuthMW.RequirePermission("subscriptions.subscription.view"))
 			api := humachi.New(r, ri.APIConfig)
 			RegisterSubscriptionReadRoutes(api, m.subscriptionHandler)
 		})
 		gated.Group(func(r chi.Router) {
-			r.Use(ri.AuthMW.RequireInternalTenant())
-			r.Use(ri.AuthMW.RequirePermission("subscriptions.subscription.manage"))
+			r.Use(ri.Operator.AuthMW.RequireInternalTenant())
+			r.Use(ri.Operator.AuthMW.RequirePermission("subscriptions.subscription.manage"))
 			api := humachi.New(r, ri.APIConfig)
 			RegisterSubscriptionWriteRoutes(api, m.subscriptionHandler)
 		})
 
-		// Self-service subscribe — RequireGlobal() so callers don't need a
-		// tenant-scoping header, then the handler enforces ownership via
-		// TenantProvider.ListUserMemberships. Kind-agnostic by design: the
-		// endpoint exists for external tenants to subscribe themselves.
-		gated.Group(func(r chi.Router) {
-			r.Use(ri.AuthMW.RequireGlobal())
-			api := humachi.New(r, ri.APIConfig)
-			RegisterSelfServiceRoutes(api, m.subscriptionHandler)
-		})
-
 		// Nested reads — operator admin only.
 		gated.Group(func(r chi.Router) {
-			r.Use(ri.AuthMW.RequireInternalTenant())
-			r.Use(ri.AuthMW.RequirePermission("subscriptions.invoice.view"))
+			r.Use(ri.Operator.AuthMW.RequireInternalTenant())
+			r.Use(ri.Operator.AuthMW.RequirePermission("subscriptions.invoice.view"))
 			api := humachi.New(r, ri.APIConfig)
 			RegisterInvoiceReadRoutes(api, m.subscriptionHandler)
 		})
 		gated.Group(func(r chi.Router) {
-			r.Use(ri.AuthMW.RequireInternalTenant())
-			r.Use(ri.AuthMW.RequirePermission("subscriptions.activity.view"))
+			r.Use(ri.Operator.AuthMW.RequireInternalTenant())
+			r.Use(ri.Operator.AuthMW.RequirePermission("subscriptions.activity.view"))
 			api := humachi.New(r, ri.APIConfig)
 			RegisterActivityReadRoutes(api, m.subscriptionHandler)
 		})

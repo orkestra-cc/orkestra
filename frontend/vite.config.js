@@ -8,11 +8,46 @@ import compileSCSS from './compile-scss';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// LAN liveness probe for HAProxy / k8s. Vite's `server.middlewares` is
+// not a valid config key (the inline middleware that used to live there
+// was silently ignored, and Vite's transform pipeline returned 500 on
+// /health). Surfacing it as a plugin via configureServer is the
+// supported path: the middleware runs before the dev server's module
+// resolver, so /health short-circuits to a JSON 200 without ever
+// reaching the import pipeline. Mirrored on configurePreviewServer so
+// `vite preview` answers the same way.
+const healthCheckPlugin = () => {
+  const handler = (req, res, next) => {
+    if (req.url === '/health' || req.url === '/health/') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(
+        JSON.stringify({
+          status: 'healthy',
+          service: 'orkestra-frontend',
+          timestamp: new Date().toISOString(),
+          version: '0.3.0'
+        })
+      );
+      return;
+    }
+    next();
+  };
+  return {
+    name: 'orkestra-health-check',
+    configureServer(server) {
+      server.middlewares.use(handler);
+    },
+    configurePreviewServer(server) {
+      server.middlewares.use(handler);
+    }
+  };
+};
+
 export default ({ mode }) => {
   process.env = { ...process.env, ...loadEnv(mode, process.cwd()) };
 
   return defineConfig({
-    plugins: [react(), compileSCSS()],
+    plugins: [react(), compileSCSS(), healthCheckPlugin()],
     base: process.env.VITE_PUBLIC_URL || '/',
     resolve: {
       extensions: ['.mjs', '.js', '.mts', '.ts', '.jsx', '.tsx', '.json'],
@@ -153,23 +188,7 @@ export default ({ mode }) => {
       watch: {
         usePolling: true,
         interval: 300
-      },
-      middlewares: [
-        '/health',
-        (req, res, next) => {
-          if (req.url === '/health') {
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({
-              status: 'healthy',
-              service: 'orkestra-frontend',
-              timestamp: new Date().toISOString(),
-              version: '0.3.0'
-            }));
-          } else {
-            next();
-          }
-        }
-      ]
+      }
     }
   });
 };

@@ -135,30 +135,30 @@ func (m *AgentsModule) Init(deps *module.Dependencies) error {
 }
 
 func (m *AgentsModule) RegisterRoutes(ri *module.RouteInfo) {
-	ri.ProtectedRouter.Group(func(gated chi.Router) {
+	ri.Operator.ProtectedRouter.Group(func(gated chi.Router) {
 		gated.Use(middleware.ModuleGate(ri.ConfigService, m.Name()))
-		gated.Use(ri.AuthMW.RequireCapability("agents.access"))
+		gated.Use(ri.Operator.AuthMW.RequireCapability("agents.access"))
 
 		gated.Group(func(r chi.Router) {
-			r.Use(ri.AuthMW.RequirePermission("agents.personal"))
+			r.Use(ri.Operator.AuthMW.RequirePermission("agents.personal"))
 			api := humachi.New(r, ri.APIConfig)
 			RegisterPersonalAgentRoutes(api, m.personalAgentHandler)
 		})
 
 		gated.Group(func(r chi.Router) {
-			r.Use(ri.AuthMW.RequirePermission("agents.project.manage"))
+			r.Use(ri.Operator.AuthMW.RequirePermission("agents.project.manage"))
 			api := humachi.New(r, ri.APIConfig)
 			RegisterProjectRoutes(api, m.projectHandler)
 		})
 
 		gated.Group(func(r chi.Router) {
-			r.Use(ri.AuthMW.RequirePermission("agents.query"))
+			r.Use(ri.Operator.AuthMW.RequirePermission("agents.query"))
 			api := humachi.New(r, ri.APIConfig)
 			RegisterQueryRoutes(api, m.agentHandler)
 		})
 
 		gated.Group(func(r chi.Router) {
-			r.Use(ri.AuthMW.RequirePermission("agents.admin"))
+			r.Use(ri.Operator.AuthMW.RequirePermission("agents.admin"))
 			api := humachi.New(r, ri.APIConfig)
 			RegisterAdminRoutes(api, m.agentHandler)
 		})

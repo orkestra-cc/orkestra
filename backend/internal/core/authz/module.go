@@ -80,6 +80,23 @@ func (m *Module) Collections() []module.CollectionSpec {
 			{Keys: map[string]int{"roleId": 1}},
 			{Keys: map[string]int{"expiresAt": 1}},
 		}},
+		// ADR-0003 PR-B: tier-split role catalogs — same index shape
+		// as authz_roles so the seed/lookup paths can be drop-in
+		// replacements once the cutover lands.
+		{Name: repository.CollOperatorRoles, Indexes: []module.IndexSpec{
+			{OrderedKeys: []module.IndexKey{
+				{Field: "tenantId", Direction: 1},
+				{Field: "name", Direction: 1},
+			}, Unique: true},
+			{Keys: map[string]int{"uuid": 1}, Unique: true},
+		}},
+		{Name: repository.CollClientRoles, Indexes: []module.IndexSpec{
+			{OrderedKeys: []module.IndexKey{
+				{Field: "tenantId", Direction: 1},
+				{Field: "name", Direction: 1},
+			}, Unique: true},
+			{Keys: map[string]int{"uuid": 1}, Unique: true},
+		}},
 	}
 }
 
@@ -215,8 +232,8 @@ func (m *Module) Init(deps *module.Dependencies) error {
 
 func (m *Module) RegisterRoutes(ri *module.RouteInfo) {
 	// Catalog is global (not per-org).
-	ri.ProtectedRouter.Group(func(r chi.Router) {
-		r.Use(ri.AuthMW.RequireGlobal())
+	ri.Operator.ProtectedRouter.Group(func(r chi.Router) {
+		r.Use(ri.Operator.AuthMW.RequireGlobal())
 		api := humachi.New(r, ri.APIConfig)
 		m.handler.RegisterGlobalRoutes(api)
 	})
@@ -225,14 +242,14 @@ func (m *Module) RegisterRoutes(ri *module.RouteInfo) {
 	// permission, mutations additionally require a second factor (Block B)
 	// so a stolen pwd-only token cannot silently grant a role or bump
 	// permissions. The caller must step up via /v1/auth/mfa/verify first.
-	ri.ProtectedRouter.Group(func(r chi.Router) {
-		r.Use(ri.AuthMW.RequirePermission("authz.role.read"))
+	ri.Operator.ProtectedRouter.Group(func(r chi.Router) {
+		r.Use(ri.Operator.AuthMW.RequirePermission("authz.role.read"))
 		api := humachi.New(r, ri.APIConfig)
 		m.handler.RegisterScopedReadRoutes(api)
 	})
-	ri.ProtectedRouter.Group(func(r chi.Router) {
-		r.Use(ri.AuthMW.RequirePermission("authz.role.read"))
-		r.Use(ri.AuthMW.RequireMFA())
+	ri.Operator.ProtectedRouter.Group(func(r chi.Router) {
+		r.Use(ri.Operator.AuthMW.RequirePermission("authz.role.read"))
+		r.Use(ri.Operator.AuthMW.RequireMFA())
 		// Section C item #2: also reject binding writes when the session's
 		// risk score exceeds the configured threshold. MFA alone can be
 		// satisfied by a stolen stepped-up token; the risk gate catches
@@ -240,7 +257,7 @@ func (m *Module) RegisterRoutes(ri *module.RouteInfo) {
 		// risk scorer (new device / rapid IP change). Fails open when
 		// the lookup isn't wired, so tests and minimal deploys don't
 		// need the scorer plumbed.
-		r.Use(ri.AuthMW.RequireLowRisk(parseRiskStepUpThreshold(os.Getenv("AUTH_RISK_STEP_UP_THRESHOLD"))))
+		r.Use(ri.Operator.AuthMW.RequireLowRisk(parseRiskStepUpThreshold(os.Getenv("AUTH_RISK_STEP_UP_THRESHOLD"))))
 		api := humachi.New(r, ri.APIConfig)
 		m.handler.RegisterScopedMutationRoutes(api)
 	})

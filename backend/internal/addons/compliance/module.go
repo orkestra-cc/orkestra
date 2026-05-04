@@ -179,7 +179,15 @@ func (m *Module) Init(deps *module.Dependencies) error {
 	// — missing services (module disabled, out of init order) are ignored so
 	// compliance boots cleanly regardless of which optional modules are
 	// active.
+	// ADR-0003 PR-D D-8: wire the audit sink into both tier
+	// PasswordAuthService instances so login/register/reset events from
+	// either audience land on the same compliance audit trail. The
+	// canonical ServicePasswordAuthService is operator-tier; the
+	// ServiceClientPasswordAuthService key is the client-tier instance.
 	if pa, ok := module.GetTyped[*authServices.PasswordAuthService](deps.Services, module.ServicePasswordAuthService); ok {
+		pa.SetAuditSink(sink)
+	}
+	if pa, ok := module.GetTyped[*authServices.PasswordAuthService](deps.Services, module.ServiceClientPasswordAuthService); ok {
 		pa.SetAuditSink(sink)
 	}
 	if ts, ok := module.GetTyped[*tenantServices.Service](deps.Services, module.ServiceTenantService); ok {
@@ -208,8 +216,8 @@ func (m *Module) Init(deps *module.Dependencies) error {
 // data).
 func (m *Module) RegisterRoutes(ri *module.RouteInfo) {
 	if m.admin != nil || m.soc2 != nil {
-		ri.ProtectedRouter.Group(func(r chi.Router) {
-			r.Use(ri.AuthMW.RequireSystemPermission("system.compliance.audit.read"))
+		ri.Operator.ProtectedRouter.Group(func(r chi.Router) {
+			r.Use(ri.Operator.AuthMW.RequireSystemPermission("system.compliance.audit.read"))
 			api := humachi.New(r, ri.APIConfig)
 			if m.admin != nil {
 				handlers.Register(api, m.admin)
@@ -220,8 +228,8 @@ func (m *Module) RegisterRoutes(ri *module.RouteInfo) {
 		})
 	}
 	if m.me != nil {
-		ri.ProtectedRouter.Group(func(r chi.Router) {
-			r.Use(ri.AuthMW.RequireGlobal())
+		ri.Operator.ProtectedRouter.Group(func(r chi.Router) {
+			r.Use(ri.Operator.AuthMW.RequireGlobal())
 			api := humachi.New(r, ri.APIConfig)
 			handlers.RegisterMeRoutes(api, m.me)
 		})

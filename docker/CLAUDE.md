@@ -392,6 +392,52 @@ GOBIN=$PWD/.go-bin GOMODCACHE=$PWD/.go-mod-cache go install github.com/air-verse
 - **Security**: Isolated container network, no external access to internal services
 - **Subnet**: 172.20.0.0/16 (configured in docker-compose.yml)
 
+### Host split (ADR-0003)
+
+The backend serves three audiences from one Go binary, dispatched by `Host` header at the application layer (no reverse-proxy needed for the split itself):
+
+| Audience | Default host (dev) | Default host (prod) | Purpose |
+|---|---|---|---|
+| `operator` | `console.localhost:3000` | `console.orkestra.com` | Tier-1 operator dashboard — module admin, SDI/FatturaPA self-invoicing, dev tooling |
+| `client` | `api.localhost:3000` | `api.orkestra.com` | Tier-2 client tenants — subscriptions, payments, future AI runtime (PR-E) |
+| `service` | *(internal docker network only)* | *(internal docker network only)* | AI sidecar `/v1/internal/*` — never published by ingress |
+
+The host mux ([cmd/server/hostmux.go](../backend/cmd/server/hostmux.go)) strips the port from `r.Host` and dispatches to the matching audience's chi.Mux. Each mux mounts its own `RequireAudience` middleware ([shared/middleware/audience.go](../backend/internal/shared/middleware/audience.go)) so a token issued for the wrong audience is rejected before any handler runs (defense in depth above per-route RBAC).
+
+**Dev fallthrough**: when `ENV=development` an unmatched Host falls through to the operator mux, so `curl http://localhost:3000` keeps working without `/etc/hosts` gymnastics. In staging/prod an unmatched Host returns 421 Misdirected Request — the canonical signal that an HTTP/1.1 request reached a server that doesn't serve it. This closes the door on host-header smuggling against the Tier-1 console.
+
+**Per-audience env vars** (compose passes these through to the backend):
+
+| Variable | Purpose | Default |
+|---|---|---|
+| `CONSOLE_HOST` | Hostname the operator mux answers on | `console.localhost:3000` (dev) / unset (prod, operator-set) |
+| `CLIENT_API_HOST` | Hostname the client mux answers on | `api.localhost:3000` (dev) / unset (prod) |
+| `OPERATOR_CORS_ORIGINS` | CORS allowlist for operator mux | falls back to `CORS_ORIGINS` |
+| `CLIENT_CORS_ORIGINS` | CORS allowlist for client mux | falls back to `CORS_ORIGINS` |
+| `OPERATOR_RATE_LIMIT_REQUESTS_PER_MINUTE` / `_BURST` | Per-audience throttling | falls back to `RATE_LIMIT_*` |
+| `CLIENT_RATE_LIMIT_REQUESTS_PER_MINUTE` / `_BURST` | Per-audience throttling | falls back to `RATE_LIMIT_*` |
+| `OPERATOR_COOKIE_DOMAIN` | Refresh-cookie `Domain=` for operator-tier tokens (ADR-0003 PR-D D-9). | `console.localhost` (dev) / empty (prod, operator-set) |
+| `CLIENT_COOKIE_DOMAIN` | Refresh-cookie `Domain=` for client-tier tokens. | `api.localhost` (dev) / empty (prod, operator-set) |
+
+In production-like environments **set both `OPERATOR_COOKIE_DOMAIN` and `CLIENT_COOKIE_DOMAIN` explicitly** — leaving them empty falls back to the legacy `COOKIE_DOMAIN` (which spans both audiences) and defeats the host split.
+
+**JWT audience** (post PR-D): operator login mints `aud=operator`, client login mints `aud=client`; both issuance paths now exist. Each mux's `RequireAudience` gate rejects cross-audience tokens with `401 audience_mismatch`. The dev token endpoint accepts an `audience` field (`operator`|`client`) to mint a matching token for either surface — see `scripts/devtoken.sh --audience client`.
+
+**Smoke test**:
+```bash
+# Operator surface (default — works via dev fallthrough or *.localhost):
+curl -i http://console.localhost:3000/health
+curl -i http://localhost:3000/health   # dev fallthrough → operator
+# Client surface (post-PR-D registers per-tier auth + onboarding/subscriptions/payments):
+curl -i http://api.localhost:3000/health
+# 421 in non-dev when Host doesn't match (run with ENV=staging):
+curl -i -H 'Host: example.com' http://localhost:3000/health
+
+# Mint per-audience dev tokens (see scripts/devtoken.sh):
+./scripts/devtoken.sh administrator                  # default — aud=operator
+./scripts/devtoken.sh administrator --audience client  # aud=client (api.* surface)
+```
+
 ### Port Mapping Strategy
 
 Host ports vary per profile so multiple stacks can coexist on the same machine. Container-internal ports stay standard.

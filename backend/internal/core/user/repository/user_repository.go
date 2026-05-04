@@ -21,7 +21,11 @@ var (
 )
 
 const (
-	UsersCollection = "users"
+	// ADR-0003 PR-D D-8: tier-split user collections are the only
+	// canonical user storage. Operator-tier rows live in
+	// operator_users, client-tier rows in client_users.
+	OperatorUsersCollection = "operator_users"
+	ClientUsersCollection   = "client_users"
 )
 
 type UserRepository interface {
@@ -81,12 +85,30 @@ type UserRepository interface {
 
 type mongoUserRepository struct {
 	collection *mongo.Collection
+	// tier is the audience this repo binds to ("operator" / "client").
+	// Every Create-side write stamps user.Tier so a tier-guard test can
+	// assert that operator_users rows always carry Tier="operator" and
+	// likewise for clients.
+	tier string
 }
 
-// NewUserRepository creates a new user repository
-func NewUserRepository(db *mongo.Database) UserRepository {
+// NewOperatorUserRepository binds to operator_users and stamps
+// Tier="operator" on every Create-side write. Registered under
+// module.ServiceOperatorUserProvider and (since ADR-0003 PR-D D-8)
+// the canonical module.ServiceUserService.
+func NewOperatorUserRepository(db *mongo.Database) UserRepository {
 	return &mongoUserRepository{
-		collection: db.Collection(UsersCollection),
+		collection: db.Collection(OperatorUsersCollection),
+		tier:       models.TierOperator,
+	}
+}
+
+// NewClientUserRepository binds to client_users and stamps
+// Tier="client" on every Create-side write.
+func NewClientUserRepository(db *mongo.Database) UserRepository {
+	return &mongoUserRepository{
+		collection: db.Collection(ClientUsersCollection),
+		tier:       models.TierClient,
 	}
 }
 
@@ -105,6 +127,13 @@ func (r *mongoUserRepository) Create(ctx context.Context, user *models.User) err
 	now := time.Now()
 	user.CreatedAt = now
 	user.UpdatedAt = now
+
+	// ADR-0003 PR-B: stamp the audience tier on every operator/client
+	// row so the integrity test can assert each collection only
+	// holds rows of its own tier.
+	if r.tier != "" {
+		user.Tier = r.tier
+	}
 
 	_, err = r.collection.InsertOne(ctx, user)
 	if err != nil {

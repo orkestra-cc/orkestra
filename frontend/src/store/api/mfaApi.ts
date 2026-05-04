@@ -32,7 +32,7 @@ export const mfaApi = baseApi.injectEndpoints({
   endpoints: (builder) => ({
     // Current user's factor status — drives the settings card.
     getMfaStatus: builder.query<MfaStatusResponse, void>({
-      query: () => 'v1/auth/me/mfa',
+      query: () => 'v1/auth/operator/me/mfa',
       providesTags: ['MFA'],
       transformResponse: (res: unknown) => unwrap<MfaStatusResponse>(res),
     }),
@@ -41,7 +41,7 @@ export const mfaApi = baseApi.injectEndpoints({
     // The challengeId must be round-tripped to /confirm.
     enrollMfaBegin: builder.mutation<MfaEnrollBeginResponse, void>({
       query: () => ({
-        url: 'v1/auth/mfa/enroll/begin',
+        url: 'v1/auth/operator/mfa/enroll/begin',
         method: 'POST',
       }),
       transformResponse: (res: unknown) => unwrap<MfaEnrollBeginResponse>(res),
@@ -51,7 +51,7 @@ export const mfaApi = baseApi.injectEndpoints({
     // one-shot backup codes that MUST be displayed exactly once.
     enrollMfaConfirm: builder.mutation<MfaEnrollConfirmResponse, MfaEnrollConfirmInput>({
       query: (body) => ({
-        url: 'v1/auth/mfa/enroll/confirm',
+        url: 'v1/auth/operator/mfa/enroll/confirm',
         method: 'POST',
         body,
       }),
@@ -65,7 +65,7 @@ export const mfaApi = baseApi.injectEndpoints({
     // requests carry the stepped-up bearer automatically.
     verifyMfa: builder.mutation<MfaVerifyResponse, MfaVerifyInput>({
       query: (body) => ({
-        url: 'v1/auth/mfa/verify',
+        url: 'v1/auth/operator/mfa/verify',
         method: 'POST',
         body,
       }),
@@ -90,7 +90,7 @@ export const mfaApi = baseApi.injectEndpoints({
     // body is empty; the middleware enforces freshness from JWT claims.
     removeMfa: builder.mutation<{ success: boolean }, void>({
       query: () => ({
-        url: 'v1/auth/me/mfa/remove',
+        url: 'v1/auth/operator/me/mfa/remove',
         method: 'POST',
         body: {},
       }),
@@ -116,7 +116,7 @@ export const mfaApi = baseApi.injectEndpoints({
     // ties the code back to the paused login so the same user UUID is used.
     loginVerifyMfa: builder.mutation<MfaLoginVerifyResponse, MfaLoginVerifyInput>({
       query: (body) => ({
-        url: 'v1/auth/mfa/login/verify',
+        url: 'v1/auth/operator/mfa/login/verify',
         method: 'POST',
         body,
       }),
@@ -145,14 +145,14 @@ export const mfaApi = baseApi.injectEndpoints({
 
     webAuthnRegisterBegin: builder.mutation<WebAuthnRegisterBeginResponse, void>({
       query: () => ({
-        url: 'v1/auth/mfa/webauthn/register/begin',
+        url: 'v1/auth/operator/mfa/webauthn/register/begin',
         method: 'POST',
       }),
       transformResponse: (res: unknown) => unwrap<WebAuthnRegisterBeginResponse>(res),
     }),
     webAuthnRegisterFinish: builder.mutation<WebAuthnRegisterFinishResponse, WebAuthnRegisterFinishInput>({
       query: (body) => ({
-        url: 'v1/auth/mfa/webauthn/register/finish',
+        url: 'v1/auth/operator/mfa/webauthn/register/finish',
         method: 'POST',
         body,
       }),
@@ -161,7 +161,7 @@ export const mfaApi = baseApi.injectEndpoints({
     }),
 
     webAuthnList: builder.query<WebAuthnCredentialsListResponse, void>({
-      query: () => 'v1/auth/me/mfa/webauthn/credentials',
+      query: () => 'v1/auth/operator/me/mfa/webauthn/credentials',
       providesTags: ['MFA'],
       transformResponse: (res: unknown) => unwrap<WebAuthnCredentialsListResponse>(res),
     }),
@@ -170,7 +170,7 @@ export const mfaApi = baseApi.injectEndpoints({
     // the global StepUpModal will intercept the 401 and replay this DELETE.
     webAuthnRemove: builder.mutation<{ success: boolean }, { credentialId: string }>({
       query: ({ credentialId }) => ({
-        url: `v1/auth/me/mfa/webauthn/credentials/${encodeURIComponent(credentialId)}`,
+        url: `v1/auth/operator/me/mfa/webauthn/credentials/${encodeURIComponent(credentialId)}`,
         method: 'DELETE',
       }),
       invalidatesTags: ['MFA'],
@@ -179,14 +179,14 @@ export const mfaApi = baseApi.injectEndpoints({
 
     webAuthnVerifyBegin: builder.mutation<WebAuthnVerifyBeginResponse, void>({
       query: () => ({
-        url: 'v1/auth/mfa/webauthn/verify/begin',
+        url: 'v1/auth/operator/mfa/webauthn/verify/begin',
         method: 'POST',
       }),
       transformResponse: (res: unknown) => unwrap<WebAuthnVerifyBeginResponse>(res),
     }),
     webAuthnVerifyFinish: builder.mutation<WebAuthnVerifyFinishResponse, WebAuthnVerifyFinishInput>({
       query: (body) => ({
-        url: 'v1/auth/mfa/webauthn/verify/finish',
+        url: 'v1/auth/operator/mfa/webauthn/verify/finish',
         method: 'POST',
         body,
       }),
@@ -208,7 +208,7 @@ export const mfaApi = baseApi.injectEndpoints({
 
     webAuthnLoginBegin: builder.mutation<WebAuthnLoginBeginResponse, WebAuthnLoginBeginInput>({
       query: (body) => ({
-        url: 'v1/auth/mfa/webauthn/login/begin',
+        url: 'v1/auth/operator/mfa/webauthn/login/begin',
         method: 'POST',
         body,
       }),
@@ -216,7 +216,7 @@ export const mfaApi = baseApi.injectEndpoints({
     }),
     webAuthnLoginFinish: builder.mutation<WebAuthnLoginFinishResponse, WebAuthnLoginFinishInput>({
       query: (body) => ({
-        url: 'v1/auth/mfa/webauthn/login/finish',
+        url: 'v1/auth/operator/mfa/webauthn/login/finish',
         method: 'POST',
         body,
       }),

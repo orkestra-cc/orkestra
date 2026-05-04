@@ -312,62 +312,67 @@ func mapPasswordError(err error) error {
 }
 
 // RegisterPublicRoutes registers the endpoints that don't require auth.
-func (h *PasswordAuthHandler) RegisterPublicRoutes(api huma.API) {
+// mount controls the path + operation-ID prefix; LegacyMount preserves
+// the pre-PR-D /v1/auth/... layout while OperatorMount/ClientMount mount
+// the same handlers under /v1/auth/operator/... and /v1/auth/client/...
+// for the ADR-0003 audience-split surfaces.
+func (h *PasswordAuthHandler) RegisterPublicRoutes(api huma.API, mount RouteMount) {
 	huma.Register(api, huma.Operation{
-		OperationID: "password-register",
+		OperationID: mount.OpIDPrefix + "password-register",
 		Method:      http.MethodPost,
-		Path:        "/v1/auth/register",
+		Path:        "/v1/auth" + mount.PathPrefix + "/register",
 		Summary:     "Register a new account with email and password",
 		Tags:        []string{"Authentication"},
 	}, h.Register)
 
 	huma.Register(api, huma.Operation{
-		OperationID: "password-login",
+		OperationID: mount.OpIDPrefix + "password-login",
 		Method:      http.MethodPost,
-		Path:        "/v1/auth/login",
+		Path:        "/v1/auth" + mount.PathPrefix + "/login",
 		Summary:     "Log in with email and password",
 		Tags:        []string{"Authentication"},
 	}, h.Login)
 
 	huma.Register(api, huma.Operation{
-		OperationID: "password-verify-email",
+		OperationID: mount.OpIDPrefix + "password-verify-email",
 		Method:      http.MethodPost,
-		Path:        "/v1/auth/verify-email",
+		Path:        "/v1/auth" + mount.PathPrefix + "/verify-email",
 		Summary:     "Verify an email address with a token",
 		Tags:        []string{"Authentication"},
 	}, h.VerifyEmail)
 
 	huma.Register(api, huma.Operation{
-		OperationID: "password-resend-verification",
+		OperationID: mount.OpIDPrefix + "password-resend-verification",
 		Method:      http.MethodPost,
-		Path:        "/v1/auth/verify-email/resend",
+		Path:        "/v1/auth" + mount.PathPrefix + "/verify-email/resend",
 		Summary:     "Resend email verification",
 		Tags:        []string{"Authentication"},
 	}, h.ResendVerification)
 
 	huma.Register(api, huma.Operation{
-		OperationID: "password-forgot",
+		OperationID: mount.OpIDPrefix + "password-forgot",
 		Method:      http.MethodPost,
-		Path:        "/v1/auth/forgot-password",
+		Path:        "/v1/auth" + mount.PathPrefix + "/forgot-password",
 		Summary:     "Request a password reset email",
 		Tags:        []string{"Authentication"},
 	}, h.ForgotPassword)
 
 	huma.Register(api, huma.Operation{
-		OperationID: "password-reset",
+		OperationID: mount.OpIDPrefix + "password-reset",
 		Method:      http.MethodPost,
-		Path:        "/v1/auth/reset-password",
+		Path:        "/v1/auth" + mount.PathPrefix + "/reset-password",
 		Summary:     "Reset a password with a token",
 		Tags:        []string{"Authentication"},
 	}, h.ResetPassword)
 }
 
-// RegisterProtectedRoutes registers the change-password endpoint.
-func (h *PasswordAuthHandler) RegisterProtectedRoutes(api huma.API) {
+// RegisterProtectedRoutes registers the change-password endpoint. See
+// RegisterPublicRoutes for the mount semantics.
+func (h *PasswordAuthHandler) RegisterProtectedRoutes(api huma.API, mount RouteMount) {
 	huma.Register(api, huma.Operation{
-		OperationID: "password-change",
+		OperationID: mount.OpIDPrefix + "password-change",
 		Method:      http.MethodPost,
-		Path:        "/v1/auth/change-password",
+		Path:        "/v1/auth" + mount.PathPrefix + "/change-password",
 		Summary:     "Change the current user's password",
 		Tags:        []string{"Authentication"},
 		Security:    []map[string][]string{{"bearerAuth": {}}},

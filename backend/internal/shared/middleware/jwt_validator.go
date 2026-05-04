@@ -130,6 +130,16 @@ func (v *JWTValidator) RequireAuth(next http.Handler) http.Handler {
 			return
 		}
 
+		// ADR-0003 PR-D D-3: aud is mandatory post-cutover. The host-mux
+		// RequireAudience middleware enforces a specific value upstream,
+		// but defense-in-depth here catches any bypass (e.g. a sidecar
+		// surface that legitimately serves multiple audiences and must
+		// still reject v1 tokens).
+		if getStr(mapClaims, "aud") == "" {
+			writeErr(w, http.StatusUnauthorized, "invalid or expired token")
+			return
+		}
+
 		claims := parseClaims(mapClaims)
 
 		if v.sessionRevocation != nil && claims.SessionID != "" {

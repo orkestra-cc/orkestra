@@ -161,49 +161,69 @@ func (m *PaymentsModule) Init(deps *module.Dependencies) error {
 }
 
 func (m *PaymentsModule) RegisterRoutes(ri *module.RouteInfo) {
+	// ADR-0003 PR-D D-7: payments is bucketed as a client-tier module
+	// (Stripe billing for Tier-2 subscriptions). The Stripe webhook moves
+	// to the client host (api.*) so the inbound POST lands on the audience
+	// that owns the billing relationship; the URL needs to be reconfigured
+	// in the Stripe dashboard / CLI to point at api.orkestra.com (dev:
+	// api.localhost:3000).
+	//
+	// Operator-admin routes (transaction list/refund, payment-method view,
+	// webhook audit log) stay on the operator host. They gate on
+	// RequireInternalTenant() and serve Tier-1 oversight; moving them to
+	// the client surface would make them unreachable (operator tokens fail
+	// aud=client) with no replacement endpoint in PR-D's scope. The
+	// /v1/admin/tenants/{id}/payments aggregator on core/tenant remains the
+	// per-tenant operator read path and is unaffected.
+
+	// --- Operator surface (console.*) ---
+	//
 	// Admin API — each permission bucket gets its own chi subgroup with a
 	// dedicated RequirePermission middleware. Refunds sit behind the
 	// distinct `payments.transaction.refund` grant so read access cannot
 	// authorise a mutation.
-	// Admin API — all operator-only. Each bucket gates by Kind
-	// (RequireInternalTenant) so an external-tenant token cannot hit the
-	// admin read/refund/method/webhook-log surfaces.
-	ri.ProtectedRouter.Group(func(gated chi.Router) {
+	ri.Operator.ProtectedRouter.Group(func(gated chi.Router) {
 		gated.Use(middleware.ModuleGate(ri.ConfigService, m.Name()))
 
 		gated.Group(func(r chi.Router) {
-			r.Use(ri.AuthMW.RequireInternalTenant())
-			r.Use(ri.AuthMW.RequirePermission("payments.transaction.view"))
+			r.Use(ri.Operator.AuthMW.RequireInternalTenant())
+			r.Use(ri.Operator.AuthMW.RequirePermission("payments.transaction.view"))
 			api := humachi.New(r, ri.APIConfig)
 			RegisterTransactionReadRoutes(api, m.txHandler)
 		})
 
 		gated.Group(func(r chi.Router) {
-			r.Use(ri.AuthMW.RequireInternalTenant())
-			r.Use(ri.AuthMW.RequirePermission("payments.transaction.refund"))
+			r.Use(ri.Operator.AuthMW.RequireInternalTenant())
+			r.Use(ri.Operator.AuthMW.RequirePermission("payments.transaction.refund"))
 			api := humachi.New(r, ri.APIConfig)
 			RegisterTransactionRefundRoutes(api, m.txHandler)
 		})
 
 		gated.Group(func(r chi.Router) {
-			r.Use(ri.AuthMW.RequireInternalTenant())
-			r.Use(ri.AuthMW.RequirePermission("payments.method.view"))
+			r.Use(ri.Operator.AuthMW.RequireInternalTenant())
+			r.Use(ri.Operator.AuthMW.RequirePermission("payments.method.view"))
 			api := humachi.New(r, ri.APIConfig)
 			RegisterPaymentMethodReadRoutes(api, m.txHandler)
 		})
 
 		gated.Group(func(r chi.Router) {
-			r.Use(ri.AuthMW.RequireInternalTenant())
-			r.Use(ri.AuthMW.RequirePermission("payments.webhook.view"))
+			r.Use(ri.Operator.AuthMW.RequireInternalTenant())
+			r.Use(ri.Operator.AuthMW.RequirePermission("payments.webhook.view"))
 			api := humachi.New(r, ri.APIConfig)
 			RegisterWebhookEventReadRoutes(api, m.txHandler)
 		})
 	})
 
-	// Public webhook — no JWT, HMAC-verified inside the handler. Uses the
-	// root chi router directly so we can read the raw request body (Huma's
-	// binding would have already consumed it).
-	ri.Router.Post("/v1/payments/webhooks/stripe", m.stripeHandler.ServeHTTP)
+	// --- Client surface (api.*) ---
+	//
+	// Public Stripe webhook — no JWT, HMAC-verified inside the handler.
+	// Mounted on the client root router so we can read the raw request
+	// body (Huma's binding would have already consumed it). Mux-level
+	// RequireAudience passes through bearer-less requests, so the webhook
+	// remains anonymous.
+	if ri.ClientRouter != nil {
+		ri.ClientRouter.Post("/v1/payments/webhooks/stripe", m.stripeHandler.ServeHTTP)
+	}
 }
 
 func (m *PaymentsModule) Start(_ context.Context) error  { return nil }

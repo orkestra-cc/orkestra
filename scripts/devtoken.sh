@@ -9,6 +9,12 @@ set -e
 # Configuration
 API_URL="${ORKESTRA_API_URL:-http://localhost:3000}"
 VALID_ROLES=("super_admin" "administrator" "developer" "manager" "operator" "guest")
+# ADR-0003 PR-D D-10: dev tokens are stamped with an explicit JWT `aud`
+# so the host muxes' RequireAudience gates accept them. Default operator
+# matches the canonical service binding; pass --audience client to mint
+# tokens that satisfy api.* surfaces.
+VALID_AUDIENCES=("operator" "client")
+DEFAULT_AUDIENCE="operator"
 
 # Colors for output
 RED='\033[0;31m'
@@ -31,6 +37,7 @@ usage() {
     echo "  -q, --quiet       Output only the token (for piping)"
     echo "  -c, --curl        Output a ready-to-use curl command"
     echo "  -e, --expiry      Token expiry duration (e.g., '15m', '1h', '24h')"
+    echo "  -a, --audience    JWT audience: operator (default) or client (ADR-0003 PR-D)"
     echo "  -u, --url         API URL (default: $API_URL)"
     echo "  -h, --help        Show this help message"
     echo ""
@@ -40,11 +47,13 @@ usage() {
     done
     echo ""
     echo "Examples:"
-    echo "  $0                           # Interactive role selection"
-    echo "  $0 administrator             # Generate admin token"
-    echo "  $0 manager --quiet           # Token only (for pbcopy/clipboard)"
-    echo "  $0 operator --curl           # Output curl command"
-    echo "  $0 admin --expiry 1h         # Token with 1 hour expiry"
+    echo "  $0                                      # Interactive role selection"
+    echo "  $0 administrator                        # Generate admin operator token"
+    echo "  $0 manager --quiet                      # Token only (for pbcopy/clipboard)"
+    echo "  $0 operator --curl                      # Output curl command"
+    echo "  $0 admin --expiry 1h                    # Token with 1 hour expiry"
+    echo "  $0 administrator --audience client      # Mint a client-aud token for api.*"
+    echo "  $0 admin -a client -q                   # Quiet client-aud token"
     echo ""
     echo "Shorthand roles:"
     echo "  su    -> super_admin"
@@ -78,6 +87,17 @@ is_valid_role() {
     return 1
 }
 
+# Check if audience is valid (ADR-0003 PR-D D-10).
+is_valid_audience() {
+    local audience="$1"
+    for valid in "${VALID_AUDIENCES[@]}"; do
+        if [ "$audience" = "$valid" ]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
 # Interactive role selection
 select_role() {
     echo -e "${BLUE}Select a role for the token:${NC}"
@@ -96,6 +116,7 @@ ROLE=""
 QUIET=false
 CURL_OUTPUT=false
 EXPIRY=""
+AUDIENCE="$DEFAULT_AUDIENCE"
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -113,6 +134,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         -e|--expiry)
             EXPIRY="$2"
+            shift 2
+            ;;
+        -a|--audience)
+            AUDIENCE="$2"
             shift 2
             ;;
         -u|--url)
@@ -133,6 +158,13 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+# Validate audience
+if ! is_valid_audience "$AUDIENCE"; then
+    echo -e "${RED}Error: Invalid audience '$AUDIENCE'${NC}" >&2
+    echo "Valid audiences: ${VALID_AUDIENCES[*]}" >&2
+    exit 1
+fi
+
 # Interactive role selection if no role provided
 if [ -z "$ROLE" ]; then
     if [ "$QUIET" = true ]; then
@@ -151,6 +183,7 @@ fi
 
 # Build request body
 REQUEST_BODY="{\"role\": \"$ROLE\""
+REQUEST_BODY="$REQUEST_BODY, \"audience\": \"$AUDIENCE\""
 if [ -n "$EXPIRY" ]; then
     REQUEST_BODY="$REQUEST_BODY, \"expiry\": \"$EXPIRY\""
 fi
@@ -208,11 +241,13 @@ else
     EXPIRES_AT=$(echo "$RESPONSE" | grep -o '"expiresAt":"[^"]*"' | sed 's/"expiresAt":"//;s/"$//')
     EXPIRES_IN=$(echo "$RESPONSE" | grep -o '"expiresIn":[0-9]*' | sed 's/"expiresIn"://')
     EMAIL=$(echo "$RESPONSE" | grep -o '"email":"[^"]*"' | sed 's/"email":"//;s/"$//')
+    AUD=$(echo "$RESPONSE" | grep -o '"audience":"[^"]*"' | sed 's/"audience":"//;s/"$//')
 
     echo ""
     echo -e "${GREEN}Token generated successfully!${NC}"
     echo ""
     echo -e "${YELLOW}Role:${NC}       $ROLE"
+    echo -e "${YELLOW}Audience:${NC}   ${AUD:-$AUDIENCE}"
     echo -e "${YELLOW}Email:${NC}      $EMAIL"
     echo -e "${YELLOW}Expires:${NC}    $EXPIRES_AT (${EXPIRES_IN}s)"
     echo ""
