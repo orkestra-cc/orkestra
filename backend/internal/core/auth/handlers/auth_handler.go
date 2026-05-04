@@ -33,6 +33,14 @@ type AuthHandler struct {
 	sessionRevocation services.SessionRevocationService
 	config            *config.Config
 
+	// cookieDomain scopes refresh-token cookies minted by this handler
+	// instance — operator-tier handlers carry the operator host's domain
+	// (`console.*`), client-tier handlers carry the client host's
+	// (`api.*`). ADR-0003 PR-D D-9 split: handlers no longer share a
+	// single cfg.Auth.Cookie.Domain — that field is the legacy single-
+	// host fallback, resolved at construction time in module.go.
+	cookieDomain string
+
 	// ADR-0003 PR-D D-6: state-encoded tier dispatch.
 	//
 	// tier identifies which audience this handler instance was wired
@@ -104,6 +112,7 @@ func NewAuthHandler(
 	oauthProviderRepo repository.OAuthProviderRepository,
 	jwtService services.JWTService,
 	config *config.Config,
+	cookieDomain string,
 ) *AuthHandler {
 	return &AuthHandler{
 		authService:       authService,
@@ -113,6 +122,7 @@ func NewAuthHandler(
 		oauthProviderRepo: oauthProviderRepo,
 		jwtService:        jwtService,
 		config:            config,
+		cookieDomain:      cookieDomain,
 	}
 }
 
@@ -493,7 +503,7 @@ func (h *AuthHandler) HandleGoogleCallbackHTTP(w http.ResponseWriter, r *http.Re
 	// Set only refresh token as secure HttpOnly cookie
 	// Use cookie configuration from environment
 	cookieName := target.config.Auth.Cookie.Name     // Set from COOKIE_NAME env var
-	cookieDomain := target.config.Auth.Cookie.Domain // Set from COOKIE_DOMAIN env var
+	cookieDomain := target.cookieDomain // ADR-0003 PR-D D-9: per-tier
 	isSecure := target.config.Auth.Cookie.Secure     // Set from COOKIE_SECURE env var
 
 	// Set only refresh token in cookie (7 days expiry)
@@ -584,7 +594,7 @@ func (h *AuthHandler) HandleDiscordCallbackHTTP(w http.ResponseWriter, r *http.R
 	// Set only refresh token as secure HttpOnly cookie
 	// Use cookie configuration from environment
 	cookieName := target.config.Auth.Cookie.Name     // Set from COOKIE_NAME env var
-	cookieDomain := target.config.Auth.Cookie.Domain // Set from COOKIE_DOMAIN env var
+	cookieDomain := target.cookieDomain // ADR-0003 PR-D D-9: per-tier
 	isSecure := target.config.Auth.Cookie.Secure     // Set from COOKIE_SECURE env var
 
 	// Set only refresh token in cookie (7 days expiry)
@@ -746,7 +756,7 @@ func (h *AuthHandler) HandleAppleCallbackHTTP(w http.ResponseWriter, r *http.Req
 	// Set only refresh token as secure HttpOnly cookie
 	// Use cookie configuration from environment
 	cookieName := target.config.Auth.Cookie.Name     // Set from COOKIE_NAME env var
-	cookieDomain := target.config.Auth.Cookie.Domain // Set from COOKIE_DOMAIN env var
+	cookieDomain := target.cookieDomain // ADR-0003 PR-D D-9: per-tier
 	isSecure := target.config.Auth.Cookie.Secure     // Set from COOKIE_SECURE env var
 
 	// Set only refresh token in cookie (7 days expiry)
@@ -1094,7 +1104,7 @@ func (h *AuthHandler) RefreshTokensWithHeaderHTTP(w http.ResponseWriter, r *http
 
 	// Set new refresh token as cookie if we got the original from a cookie
 	if tokenSource == "cookie" {
-		cookieDomain := h.config.Auth.Cookie.Domain
+		cookieDomain := h.cookieDomain
 		isSecure := h.config.Auth.Cookie.Secure
 		utils.SetRefreshTokenCookie(w, cookieName, tokenResponse.RefreshToken, 7*24*3600, cookieDomain, isSecure) // 7 days
 	}
@@ -1184,7 +1194,7 @@ func (h *AuthHandler) GetSessionHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Set new refresh token as cookie
-	cookieDomain := h.config.Auth.Cookie.Domain
+	cookieDomain := h.cookieDomain
 	isSecure := h.config.Auth.Cookie.Secure
 	utils.SetRefreshTokenCookie(w, cookieName, tokenResponse.RefreshToken, 7*24*3600, cookieDomain, isSecure) // 7 days
 
@@ -1511,7 +1521,7 @@ func (h *AuthHandler) RefreshTokensHTTP(w http.ResponseWriter, r *http.Request) 
 
 	// Set new refresh token as cookie if we got the original from a cookie
 	if tokenSource == "cookie" {
-		cookieDomain := h.config.Auth.Cookie.Domain
+		cookieDomain := h.cookieDomain
 		isSecure := h.config.Auth.Cookie.Secure
 		utils.SetRefreshTokenCookie(w, cookieName, tokenResponse.RefreshToken, 7*24*3600, cookieDomain, isSecure) // 7 days
 	}
@@ -1560,7 +1570,7 @@ func (h *AuthHandler) LogoutHTTP(w http.ResponseWriter, r *http.Request) {
 		refreshToken, err := utils.GetRefreshTokenFromCookieByName(r, cookieName)
 		if err != nil || refreshToken == "" {
 			// Still clear the cookie even if we can't find it
-			cookieDomain := h.config.Auth.Cookie.Domain
+			cookieDomain := h.cookieDomain
 			isSecure := h.config.Auth.Cookie.Secure
 			utils.ClearRefreshTokenCookie(w, cookieName, cookieDomain, isSecure)
 
@@ -1581,7 +1591,7 @@ func (h *AuthHandler) LogoutHTTP(w http.ResponseWriter, r *http.Request) {
 		refreshClaims, err := h.jwtService.ParseUnverifiedClaims(refreshToken)
 		if err != nil || refreshClaims.UserUUID == "" {
 			// Still clear the cookie
-			cookieDomain := h.config.Auth.Cookie.Domain
+			cookieDomain := h.cookieDomain
 			isSecure := h.config.Auth.Cookie.Secure
 			utils.ClearRefreshTokenCookie(w, cookieName, cookieDomain, isSecure)
 
@@ -1658,7 +1668,7 @@ func (h *AuthHandler) LogoutHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Clear the refresh token cookie
-	cookieDomain := h.config.Auth.Cookie.Domain
+	cookieDomain := h.cookieDomain
 	isSecure := h.config.Auth.Cookie.Secure
 	utils.ClearRefreshTokenCookie(w, cookieName, cookieDomain, isSecure)
 

@@ -42,6 +42,13 @@ services:
       COOKIE_SECRET: ${COOKIE_SECRET}
       COOKIE_NAME: ${COOKIE_NAME:-orkestra_cookie}
       COOKIE_DOMAIN: ${COOKIE_DOMAIN}
+      # ADR-0003 PR-D D-9: per-audience refresh-cookie scopes. Operators
+      # MUST set both — leaving them empty falls back to COOKIE_DOMAIN,
+      # which spans both audiences and defeats the host split. The host
+      # mux already rejects unmatched Host headers with 421, but a wide
+      # cookie scope would still let an operator session leak to api.*.
+      OPERATOR_COOKIE_DOMAIN: ${OPERATOR_COOKIE_DOMAIN:-}
+      CLIENT_COOKIE_DOMAIN: ${CLIENT_COOKIE_DOMAIN:-}
       COOKIE_HTTP_ONLY: ${COOKIE_HTTP_ONLY:-true}
       COOKIE_SECURE: ${COOKIE_SECURE:-true}
       COOKIE_SAME_SITE: ${COOKIE_SAME_SITE:-strict}

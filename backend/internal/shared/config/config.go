@@ -194,13 +194,26 @@ type JWTConfig struct {
 }
 
 type CookieConfig struct {
-	Secret   string
-	Name     string
-	Domain   string
-	HttpOnly bool
-	Secure   bool
-	SameSite string
-	MaxAge   int
+	Secret string
+	Name   string
+	// Domain is the legacy single-tier cookie domain (`COOKIE_DOMAIN`).
+	// Kept as the fallback when the audience-specific values below are
+	// empty so single-host deployments keep working without changes.
+	// Per-audience deployments (ADR-0003 PR-D D-9) should leave this
+	// empty and set OperatorDomain / ClientDomain instead.
+	Domain string
+	// OperatorDomain scopes refresh-token cookies minted on the operator
+	// host (`console.*`) — set via `OPERATOR_COOKIE_DOMAIN`. Empty falls
+	// back to Domain.
+	OperatorDomain string
+	// ClientDomain scopes refresh-token cookies minted on the client
+	// host (`api.*`) — set via `CLIENT_COOKIE_DOMAIN`. Empty falls back
+	// to Domain.
+	ClientDomain string
+	HttpOnly     bool
+	Secure       bool
+	SameSite     string
+	MaxAge       int
 }
 
 type GoogleOAuthConfig struct {
@@ -327,13 +340,21 @@ func Load() (*Config, error) {
 	config.Auth = AuthConfig{
 		JWT: jwtConfig,
 		Cookie: CookieConfig{
-			Secret:   getEnv("COOKIE_SECRET", "default-cookie-secret"),
-			Name:     getEnv("COOKIE_NAME", "orkestra_cookie"),
-			Domain:   getEnv("COOKIE_DOMAIN", ""),
-			HttpOnly: getEnvAsBool("COOKIE_HTTP_ONLY", true),
-			Secure:   getEnvAsBool("COOKIE_SECURE", false), // Default false for development
-			SameSite: getEnv("COOKIE_SAME_SITE", "lax"),
-			MaxAge:   getEnvAsInt("COOKIE_MAX_AGE", 86400000), // 24 hours in milliseconds
+			Secret: getEnv("COOKIE_SECRET", "default-cookie-secret"),
+			Name:   getEnv("COOKIE_NAME", "orkestra_cookie"),
+			Domain: getEnv("COOKIE_DOMAIN", ""),
+			// ADR-0003 PR-D D-9: per-audience cookie domains. Dev defaults
+			// align with the per-audience host defaults above so the
+			// browser scopes refresh cookies to the matching subdomain
+			// without contributors having to set anything. Prod defaults
+			// are left empty — operators set them explicitly so a stale
+			// COOKIE_DOMAIN does not accidentally cross the audiences.
+			OperatorDomain: getEnv("OPERATOR_COOKIE_DOMAIN", defaultOperatorCookieDomain(env)),
+			ClientDomain:   getEnv("CLIENT_COOKIE_DOMAIN", defaultClientCookieDomain(env)),
+			HttpOnly:       getEnvAsBool("COOKIE_HTTP_ONLY", true),
+			Secure:         getEnvAsBool("COOKIE_SECURE", false), // Default false for development
+			SameSite:       getEnv("COOKIE_SAME_SITE", "lax"),
+			MaxAge:         getEnvAsInt("COOKIE_MAX_AGE", 86400000), // 24 hours in milliseconds
 		},
 		Google: GoogleOAuthConfig{
 			ClientID:        getEnv("OAUTH_GOOGLE_CLIENT_ID", ""),
@@ -541,6 +562,26 @@ func printJWTWarning(err error) {
 ╚══════════════════════════════════════════════════════════════════════════════╝
 `
 	fmt.Printf(warning, err)
+}
+
+// defaultOperatorCookieDomain returns the dev fallback for the operator
+// refresh-cookie scope. Empty in non-dev so a misconfigured prod deploy
+// fails closed (the cookie is set without a Domain attribute, scoped to
+// whatever host minted it) rather than silently leaking across hosts.
+func defaultOperatorCookieDomain(env string) string {
+	if env == "development" {
+		return "console.localhost"
+	}
+	return ""
+}
+
+// defaultClientCookieDomain mirrors defaultOperatorCookieDomain for the
+// client surface (api.*).
+func defaultClientCookieDomain(env string) string {
+	if env == "development" {
+		return "api.localhost"
+	}
+	return ""
 }
 
 func getEnv(key, defaultValue string) string {

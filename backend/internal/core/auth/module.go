@@ -348,6 +348,21 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 		webauthnRP:               webauthnRP,
 	}
 
+	// ADR-0003 PR-D D-9: per-audience refresh-cookie domains. Each
+	// tier's handler trio gets the matching value so refresh cookies are
+	// scoped to the host that minted them — operator tokens stay on
+	// `console.*`, client tokens on `api.*`. Empty per-tier fields fall
+	// back to the legacy single-host `Domain` so single-host deployments
+	// keep working unchanged.
+	operatorCookieDomain := cfg.Auth.Cookie.OperatorDomain
+	if operatorCookieDomain == "" {
+		operatorCookieDomain = cfg.Auth.Cookie.Domain
+	}
+	clientCookieDomain := cfg.Auth.Cookie.ClientDomain
+	if clientCookieDomain == "" {
+		clientCookieDomain = cfg.Auth.Cookie.Domain
+	}
+
 	// Operator tier — required after the D-8 cutover. The user module
 	// always registers ServiceOperatorUserProvider, so a missing
 	// provider here means the user module failed to init.
@@ -364,7 +379,7 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 	m.operatorPasswordHandler = handlers.NewPasswordAuthHandler(
 		opBundle.passwordSvc,
 		cfg.Auth.Cookie.Name,
-		cfg.Auth.Cookie.Domain,
+		operatorCookieDomain,
 		cfg.Auth.Cookie.Secure,
 	)
 	m.operatorPasswordHandler.SetSessionRevocation(sessionRevocationSvc)
@@ -377,6 +392,7 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 		opBundle.oauthProviderRepo,
 		operatorJWT,
 		cfg,
+		operatorCookieDomain,
 	)
 	m.operatorAuthHandler.SetSessionRevocation(sessionRevocationSvc)
 	m.operatorAuthHandler.SetStateSecret(oauthStateSecret)
@@ -389,7 +405,7 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 		operatorUser,
 		opBundle.passwordSvc,
 		cfg.Auth.Cookie.Name,
-		cfg.Auth.Cookie.Domain,
+		operatorCookieDomain,
 		cfg.Auth.Cookie.Secure,
 	)
 	m.operatorMFAHandler.SetDeviceTrust(deviceTrustSvc)
@@ -402,7 +418,7 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 			operatorUser,
 			opBundle.passwordSvc,
 			cfg.Auth.Cookie.Name,
-			cfg.Auth.Cookie.Domain,
+			operatorCookieDomain,
 			cfg.Auth.Cookie.Secure,
 		)
 		m.operatorWebAuthnHandler.SetDeviceTrust(deviceTrustSvc)
@@ -441,7 +457,7 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 	m.clientPasswordHandler = handlers.NewPasswordAuthHandler(
 		clBundle.passwordSvc,
 		cfg.Auth.Cookie.Name,
-		cfg.Auth.Cookie.Domain,
+		clientCookieDomain,
 		cfg.Auth.Cookie.Secure,
 	)
 	m.clientPasswordHandler.SetSessionRevocation(sessionRevocationSvc)
@@ -454,6 +470,7 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 		clBundle.oauthProviderRepo,
 		clientJWT,
 		cfg,
+		clientCookieDomain,
 	)
 	m.clientAuthHandler.SetSessionRevocation(sessionRevocationSvc)
 	m.clientAuthHandler.SetStateSecret(oauthStateSecret)
@@ -466,7 +483,7 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 		clientUser,
 		clBundle.passwordSvc,
 		cfg.Auth.Cookie.Name,
-		cfg.Auth.Cookie.Domain,
+		clientCookieDomain,
 		cfg.Auth.Cookie.Secure,
 	)
 	m.clientMFAHandler.SetDeviceTrust(deviceTrustSvc)
@@ -479,7 +496,7 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 			clientUser,
 			clBundle.passwordSvc,
 			cfg.Auth.Cookie.Name,
-			cfg.Auth.Cookie.Domain,
+			clientCookieDomain,
 			cfg.Auth.Cookie.Secure,
 		)
 		m.clientWebAuthnHandler.SetDeviceTrust(deviceTrustSvc)
