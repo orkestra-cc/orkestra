@@ -68,9 +68,14 @@ type updatePlanInput struct {
 	Body     models.UpdatePlanInput
 }
 
+type membershipRow struct {
+	models.TenantMembership
+	Email string `json:"email,omitempty"`
+}
+
 type membershipListOutput struct {
 	Body struct {
-		Members []models.TenantMembership `json:"members"`
+		Members []membershipRow `json:"members"`
 	}
 }
 
@@ -297,8 +302,40 @@ func (h *Handler) listMembers(ctx context.Context, in *tenantIDPath) (*membershi
 		return nil, huma.Error500InternalServerError("list failed", err)
 	}
 	out := &membershipListOutput{}
-	out.Body.Members = members
+	out.Body.Members = make([]membershipRow, len(members))
+	for i, m := range members {
+		out.Body.Members[i] = membershipRow{TenantMembership: m}
+	}
+	h.enrichMemberEmails(ctx, in.TenantID, out.Body.Members)
 	return out, nil
+}
+
+// enrichMemberEmails fills in the Email field of each row by looking up the
+// user via the tier-appropriate UserProvider. Best-effort: any failure leaves
+// Email empty so the table still renders.
+func (h *Handler) enrichMemberEmails(ctx context.Context, tenantUUID string, rows []membershipRow) {
+	if h.registry == nil || len(rows) == 0 {
+		return
+	}
+	kind := iface.TenantKindInternal
+	if t, err := h.svc.GetTenant(ctx, tenantUUID); err == nil && t != nil && t.Kind != "" {
+		kind = t.Kind
+	}
+	providerKey := module.ServiceOperatorUserProvider
+	if kind == iface.TenantKindExternal {
+		providerKey = module.ServiceClientUserProvider
+	}
+	provider, ok := module.GetTyped[iface.UserProvider](h.registry, providerKey)
+	if !ok || provider == nil {
+		return
+	}
+	for i := range rows {
+		u, err := provider.GetUserByID(ctx, rows[i].UserUUID)
+		if err != nil || u == nil {
+			continue
+		}
+		rows[i].Email = u.Email
+	}
 }
 
 type removeMemberInput struct {

@@ -57,6 +57,7 @@ const MembersTab: React.FC<Props> = ({ org }) => {
       <Table size="sm" className="fs-10 mb-0">
         <thead className="bg-body-tertiary">
           <tr>
+            <th>Email</th>
             <th>User UUID</th>
             <th>Roles</th>
             <th>Joined</th>
@@ -67,6 +68,7 @@ const MembersTab: React.FC<Props> = ({ org }) => {
         <tbody>
           {members.map((m) => (
             <tr key={m.id} className="align-middle">
+              <td>{m.email || <span className="text-muted">—</span>}</td>
               <td className="font-monospace fs-11">{m.userUUID}</td>
               <td>{m.roles.join(', ') || '—'}</td>
               <td className="text-muted">
@@ -95,7 +97,7 @@ const MembersTab: React.FC<Props> = ({ org }) => {
           ))}
           {members.length === 0 && (
             <tr>
-              <td colSpan={5} className="text-center text-muted py-3">
+              <td colSpan={6} className="text-center text-muted py-3">
                 No members yet.
               </td>
             </tr>

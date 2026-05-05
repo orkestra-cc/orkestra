@@ -198,6 +198,7 @@ export interface MembershipRecord {
   invitedBy?: string;
   joinedAt: string;
   expiresAt?: string | null;
+  email?: string;
 }
 
 export const tenantApi = baseApi.injectEndpoints({
