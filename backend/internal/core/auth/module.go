@@ -371,6 +371,9 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 	opDeps.tier = tierOperator
 	opDeps.userProvider = operatorUser
 	opDeps.jwtService = operatorJWT
+	if cfg.Server.Operator.FrontendURL != "" {
+		opDeps.frontendURL = cfg.Server.Operator.FrontendURL
+	}
 	opBundle, err := buildAuthTierBundle(opDeps)
 	if err != nil {
 		return err
@@ -449,6 +452,9 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 	clDeps.tier = tierClient
 	clDeps.userProvider = clientUser
 	clDeps.jwtService = clientJWT
+	if cfg.Server.Client.FrontendURL != "" {
+		clDeps.frontendURL = cfg.Server.Client.FrontendURL
+	}
 	clBundle, err := buildAuthTierBundle(clDeps)
 	if err != nil {
 		return err

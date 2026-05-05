@@ -420,6 +420,8 @@ The host mux ([cmd/server/hostmux.go](../backend/cmd/server/hostmux.go)) strips 
 | `CLIENT_RATE_LIMIT_REQUESTS_PER_MINUTE` / `_BURST` | Per-audience throttling | falls back to `RATE_LIMIT_*` |
 | `OPERATOR_COOKIE_DOMAIN` | Refresh-cookie `Domain=` for operator-tier tokens (ADR-0003 PR-D D-9). | `console.localhost` (dev) / empty (prod, operator-set) |
 | `CLIENT_COOKIE_DOMAIN` | Refresh-cookie `Domain=` for client-tier tokens. | `api.localhost` (dev) / empty (prod, operator-set) |
+| `OPERATOR_FRONTEND_URL` | Operator-tier SPA origin (`console.*`) used to build verify-email / reset-password links in transactional email. | falls back to `FRONTEND_URL` |
+| `CLIENT_FRONTEND_URL` | Client-tier SPA origin (`app.*`) used to build verify-email / reset-password links for signups landing on the client API host. | falls back to `FRONTEND_URL` |
 
 In production-like environments **set both `OPERATOR_COOKIE_DOMAIN` and `CLIENT_COOKIE_DOMAIN` explicitly** — leaving them empty falls back to the legacy `COOKIE_DOMAIN` (which spans both audiences) and defeats the host split.
 

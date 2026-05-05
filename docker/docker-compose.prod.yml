@@ -57,6 +57,10 @@ services:
       # URLs
       FRONTEND_URL: ${FRONTEND_URL:-https://orkestra.cc}
       BACKEND_URL: ${BACKEND_URL:-https://api.orkestra.cc}
+      # Per-tier frontend origins for verification + reset email links.
+      # Empty falls back to FRONTEND_URL above.
+      OPERATOR_FRONTEND_URL: ${OPERATOR_FRONTEND_URL:-}
+      CLIENT_FRONTEND_URL: ${CLIENT_FRONTEND_URL:-}
 
       # ADR-0003 host split. Production has no dev fallthrough — an
       # unmatched Host header returns 421 Misdirected Request, so both

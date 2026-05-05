@@ -83,6 +83,12 @@ services:
       # URLs
       FRONTEND_URL: ${FRONTEND_URL:-https://staging.orkestra.cc}
       BACKEND_URL: ${BACKEND_URL:-https://staging-api.orkestra.cc}
+      # Per-tier frontend origins for verification + reset email links.
+      # Empty falls back to FRONTEND_URL above. Set explicitly so a signup
+      # on the client SPA gets a verify URL on the client host instead of
+      # the operator console.
+      OPERATOR_FRONTEND_URL: ${OPERATOR_FRONTEND_URL:-}
+      CLIENT_FRONTEND_URL: ${CLIENT_FRONTEND_URL:-}
 
       # CORS — legacy single-host fallback. Per-audience overrides
       # (OPERATOR_CORS_ORIGINS / CLIENT_CORS_ORIGINS) take precedence

@@ -113,6 +113,9 @@ Schema keys below are what handlers and the resolver look up. The `EnvVar` colum
 | `COOKIE_DOMAIN` | Legacy single-host cookie domain. Used as the fallback when the per-audience values below are empty (single-host or transitional deployments). | empty |
 | `OPERATOR_COOKIE_DOMAIN` | Refresh-cookie `Domain=` for tokens minted on the operator host (`console.*`). ADR-0003 PR-D D-9 — keep this distinct from `CLIENT_COOKIE_DOMAIN` so a session minted on one surface can't be replayed on the other. | `console.localhost` (dev) / empty (prod, operator-set) |
 | `CLIENT_COOKIE_DOMAIN` | Refresh-cookie `Domain=` for tokens minted on the client host (`api.*`). | `api.localhost` (dev) / empty (prod, operator-set) |
+| `FRONTEND_URL` | Legacy single-host SPA origin. Used to build `verify-email` / `reset-password` links in transactional email and as the fallback when the per-tier values below are empty. | `http://localhost:8080` |
+| `OPERATOR_FRONTEND_URL` | Operator-tier SPA origin (`console.*`). Verification + reset links minted by the operator-tier `PasswordAuthService` use this host. Empty falls back to `FRONTEND_URL`. | empty |
+| `CLIENT_FRONTEND_URL` | Client-tier SPA origin (`app.*`). Set this so signups landing on the client API host get verify links pointing at the client SPA, not the operator console. Empty falls back to `FRONTEND_URL`. | empty |
 | `APP_NAME` / `SUPPORT_EMAIL` | Rendered into verification/reset email templates | `Orkestra` / empty |
 
 ### Resolver API

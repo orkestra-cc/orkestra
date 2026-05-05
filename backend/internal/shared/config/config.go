@@ -158,6 +158,11 @@ type AudienceConfig struct {
 	Host        string          // e.g. "console.orkestra.com" — empty disables this audience's mux
 	CORSOrigins []string        // empty falls back to ServerConfig.CORSOrigins
 	Rate        RateLimitConfig // zero values fall back to top-level Rate
+	// FrontendURL is the public origin of the SPA serving this audience —
+	// used to build verification + reset links in transactional email so a
+	// signup on the client SPA gets a verify URL on the client host (not
+	// the operator console). Empty falls back to ServerConfig.FrontendURL.
+	FrontendURL string
 }
 
 type DatabaseConfig struct {
@@ -298,6 +303,7 @@ func Load() (*Config, error) {
 				RequestsPerMinute: getEnvAsInt("OPERATOR_RATE_LIMIT_REQUESTS_PER_MINUTE", 0),
 				Burst:             getEnvAsInt("OPERATOR_RATE_LIMIT_BURST", 0),
 			},
+			FrontendURL: getEnv("OPERATOR_FRONTEND_URL", ""),
 		},
 		Client: AudienceConfig{
 			Host:        getEnv("CLIENT_API_HOST", defaultClientHost),
@@ -306,6 +312,7 @@ func Load() (*Config, error) {
 				RequestsPerMinute: getEnvAsInt("CLIENT_RATE_LIMIT_REQUESTS_PER_MINUTE", 0),
 				Burst:             getEnvAsInt("CLIENT_RATE_LIMIT_BURST", 0),
 			},
+			FrontendURL: getEnv("CLIENT_FRONTEND_URL", ""),
 		},
 	}
 
