@@ -72,6 +72,120 @@
     "resendSubmit": "Resend",
     "resendSent": "If that address is registered and not yet verified, we've sent a new email."
   },
+  "login": {
+    "title": "Sign in to your account",
+    "subtitle": "Enter your credentials to continue.",
+    "email": "Email",
+    "password": "Password",
+    "submit": "Sign in",
+    "submitting": "Signing in…",
+    "forgot": "Forgot password?",
+    "signupLink": "Create an account",
+    "mfa": {
+      "prompt": "Enter the 6-digit code from your authenticator app.",
+      "code": "Verification code",
+      "backupCode": "Backup code",
+      "useBackup": "Use a backup code",
+      "submit": "Verify",
+      "submitting": "Verifying…",
+      "cancel": "Cancel"
+    }
+  },
+  "forgot": {
+    "title": "Forgot password",
+    "subtitle": "Enter your email and we'll send you a link to reset your password.",
+    "email": "Email",
+    "submit": "Send link",
+    "submitting": "Sending…",
+    "successTitle": "Check your email",
+    "successBody": "If that address is registered, we've sent a password reset link.",
+    "backToLogin": "Back to sign in"
+  },
+  "reset": {
+    "title": "Reset password",
+    "subtitle": "Choose a new password for your account.",
+    "newPassword": "New password",
+    "confirmPassword": "Confirm password",
+    "passwordHint": "At least 10 characters",
+    "submit": "Update password",
+    "submitting": "Updating…",
+    "successTitle": "Password updated",
+    "successBody": "You can now sign in with your new password.",
+    "signinCta": "Go to sign in",
+    "missingToken": "Missing token. Open the link from the email you received.",
+    "errorTooShort": "Password must be at least 10 characters",
+    "errorMismatch": "Passwords do not match"
+  },
+  "account": {
+    "title": "Account",
+    "subtitle": "Manage your profile and security.",
+    "back": "Back to account",
+    "fullName": "Name",
+    "email": "Email",
+    "emailVerified": "Email verified",
+    "verified": "Yes",
+    "notVerified": "No",
+    "role": "Role",
+    "security": {
+      "title": "Security",
+      "cta": "Change password and manage 2FA"
+    },
+    "subscriptions": {
+      "title": "Subscriptions",
+      "placeholder": "Coming in the next phase."
+    },
+    "changePassword": {
+      "title": "Change password",
+      "subtitle": "Enter your current password and a new one. Your active session will be invalidated.",
+      "current": "Current password",
+      "new": "New password",
+      "confirm": "Confirm new password",
+      "submit": "Update password",
+      "submitting": "Updating…"
+    },
+    "mfa": {
+      "title": "Two-factor authentication",
+      "subtitle": "Add a second step at sign-in using an authenticator app (TOTP).",
+      "status": "Status",
+      "type": "Type",
+      "backupCodesRemaining": "Backup codes remaining",
+      "required": "Required",
+      "requiredYes": "Yes",
+      "graceWarning": "Two-factor is required for your role. Deadline: {{date}}.",
+      "enrol": "Set up now",
+      "statusValue": {
+        "not_required": "Not required",
+        "required": "Setup required",
+        "enrolled": "Active",
+        "disabled": "Disabled"
+      }
+    }
+  },
+  "mfa": {
+    "enrol": {
+      "title": "Set up two-factor",
+      "subtitle": "Three steps: start, scan, confirm. Save the backup codes somewhere safe.",
+      "step1": "Start the flow to generate a fresh secret.",
+      "start": "Start setup",
+      "starting": "Starting…",
+      "step2": "Add the account to your authenticator app",
+      "scanInstructions": "Open Google Authenticator, 1Password, Authy, or any TOTP app and add a new account by entering the secret below.",
+      "secret": "Secret",
+      "copy": "Copy",
+      "copied": "Copied!",
+      "uriToggle": "Show otpauth URI (mobile-friendly)",
+      "step3": "Confirm with the code from your app",
+      "codeLabel": "6-digit code",
+      "confirm": "Confirm",
+      "confirming": "Confirming…",
+      "backupTitle": "Save your backup codes",
+      "backupSubtitle": "Use these codes to sign in if you lose access to your authenticator. They are shown only once.",
+      "backupCopy": "Copy all",
+      "backupDownload": "Download .txt",
+      "backupAcknowledge": "I have saved these codes somewhere safe",
+      "backupContinue": "Done, continue"
+    }
+  },
   "lang": {
     "switch": "Language",
     "it": "Italiano",

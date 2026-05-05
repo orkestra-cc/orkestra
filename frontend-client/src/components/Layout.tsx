@@ -1,7 +1,8 @@
-import { Link, NavLink, Outlet } from 'react-router-dom';
+import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 
 import { LanguageSwitcher } from '@/components/LanguageSwitcher';
+import { useAuth } from '@/auth/useAuth';
 
 const navLinkClass = ({ isActive }: { isActive: boolean }) =>
   [
@@ -13,6 +14,14 @@ const navLinkClass = ({ isActive }: { isActive: boolean }) =>
 
 export function Layout() {
   const { t } = useTranslation();
+  const { isAuthenticated, signOut } = useAuth();
+  const navigate = useNavigate();
+
+  async function handleSignOut() {
+    await signOut();
+    navigate('/', { replace: true });
+  }
+
   return (
     <div className="flex min-h-screen flex-col">
       <header className="border-b border-slate-200 bg-white">
@@ -24,18 +33,35 @@ export function Layout() {
             <NavLink to="/catalog" className={navLinkClass}>
               {t('nav.catalog')}
             </NavLink>
-            <Link
-              to="/signin"
-              className="rounded-md px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900"
-            >
-              {t('nav.signin')}
-            </Link>
-            <Link
-              to="/signup"
-              className="rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white hover:bg-slate-700"
-            >
-              {t('nav.signup')}
-            </Link>
+            {isAuthenticated ? (
+              <>
+                <NavLink to="/account" className={navLinkClass}>
+                  {t('nav.account')}
+                </NavLink>
+                <button
+                  type="button"
+                  onClick={handleSignOut}
+                  className="rounded-md px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+                >
+                  {t('nav.signout')}
+                </button>
+              </>
+            ) : (
+              <>
+                <Link
+                  to="/login"
+                  className="rounded-md px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+                >
+                  {t('nav.signin')}
+                </Link>
+                <Link
+                  to="/signup"
+                  className="rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white hover:bg-slate-700"
+                >
+                  {t('nav.signup')}
+                </Link>
+              </>
+            )}
             <LanguageSwitcher />
           </nav>
         </div>

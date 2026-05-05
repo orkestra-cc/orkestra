@@ -72,6 +72,120 @@
     "resendSubmit": "Reinvia",
     "resendSent": "Se l'indirizzo è registrato e non ancora verificato, ti abbiamo inviato una nuova email."
   },
+  "login": {
+    "title": "Accedi al tuo account",
+    "subtitle": "Inserisci le tue credenziali per continuare.",
+    "email": "Email",
+    "password": "Password",
+    "submit": "Accedi",
+    "submitting": "Accesso in corso…",
+    "forgot": "Password dimenticata?",
+    "signupLink": "Crea un account",
+    "mfa": {
+      "prompt": "Inserisci il codice a 6 cifre del tuo autenticatore.",
+      "code": "Codice di verifica",
+      "backupCode": "Codice di backup",
+      "useBackup": "Usa un codice di backup",
+      "submit": "Verifica",
+      "submitting": "Verifica in corso…",
+      "cancel": "Annulla"
+    }
+  },
+  "forgot": {
+    "title": "Password dimenticata",
+    "subtitle": "Inserisci la tua email e ti invieremo un link per reimpostare la password.",
+    "email": "Email",
+    "submit": "Invia link",
+    "submitting": "Invio in corso…",
+    "successTitle": "Controlla la tua email",
+    "successBody": "Se l'indirizzo è registrato, abbiamo inviato un link per reimpostare la password.",
+    "backToLogin": "Torna al login"
+  },
+  "reset": {
+    "title": "Reimposta la password",
+    "subtitle": "Scegli una nuova password per il tuo account.",
+    "newPassword": "Nuova password",
+    "confirmPassword": "Conferma password",
+    "passwordHint": "Almeno 10 caratteri",
+    "submit": "Aggiorna password",
+    "submitting": "Aggiornamento…",
+    "successTitle": "Password aggiornata",
+    "successBody": "Ora puoi accedere con la nuova password.",
+    "signinCta": "Vai al login",
+    "missingToken": "Token mancante. Apri il link dall'email che hai ricevuto.",
+    "errorTooShort": "La password deve avere almeno 10 caratteri",
+    "errorMismatch": "Le password non corrispondono"
+  },
+  "account": {
+    "title": "Account",
+    "subtitle": "Gestisci il tuo profilo e la sicurezza.",
+    "back": "Torna all'account",
+    "fullName": "Nome",
+    "email": "Email",
+    "emailVerified": "Email verificata",
+    "verified": "Sì",
+    "notVerified": "No",
+    "role": "Ruolo",
+    "security": {
+      "title": "Sicurezza",
+      "cta": "Cambia password e gestisci la 2FA"
+    },
+    "subscriptions": {
+      "title": "Abbonamenti",
+      "placeholder": "Disponibile nella prossima fase."
+    },
+    "changePassword": {
+      "title": "Cambia password",
+      "subtitle": "Inserisci la password attuale e quella nuova. La sessione attiva verrà invalidata.",
+      "current": "Password attuale",
+      "new": "Nuova password",
+      "confirm": "Conferma nuova password",
+      "submit": "Aggiorna password",
+      "submitting": "Aggiornamento…"
+    },
+    "mfa": {
+      "title": "Autenticazione a due fattori",
+      "subtitle": "Aggiungi un secondo passaggio al login con un'app di autenticazione (TOTP).",
+      "status": "Stato",
+      "type": "Tipo",
+      "backupCodesRemaining": "Codici di backup rimasti",
+      "required": "Obbligatoria",
+      "requiredYes": "Sì",
+      "graceWarning": "La 2FA è obbligatoria per il tuo ruolo. Termine: {{date}}.",
+      "enrol": "Configura ora",
+      "statusValue": {
+        "not_required": "Non richiesta",
+        "required": "Da configurare",
+        "enrolled": "Attiva",
+        "disabled": "Disattivata"
+      }
+    }
+  },
+  "mfa": {
+    "enrol": {
+      "title": "Configura la 2FA",
+      "subtitle": "Tre passaggi: avvia, scansiona, conferma. Conserva i codici di backup in un luogo sicuro.",
+      "step1": "Avvia la procedura per generare un nuovo segreto.",
+      "start": "Avvia configurazione",
+      "starting": "Avvio…",
+      "step2": "Aggiungi l'account alla tua app di autenticazione",
+      "scanInstructions": "Apri Google Authenticator, 1Password, Authy o un'app simile e aggiungi un nuovo account inserendo il segreto qui sotto.",
+      "secret": "Segreto",
+      "copy": "Copia",
+      "copied": "Copiato!",
+      "uriToggle": "Mostra URI otpauth (per dispositivi mobili)",
+      "step3": "Conferma con il codice generato dalla tua app",
+      "codeLabel": "Codice a 6 cifre",
+      "confirm": "Conferma",
+      "confirming": "Conferma in corso…",
+      "backupTitle": "Salva i codici di backup",
+      "backupSubtitle": "Questi codici servono ad accedere se perdi l'app. Saranno mostrati una sola volta.",
+      "backupCopy": "Copia tutti",
+      "backupDownload": "Scarica .txt",
+      "backupAcknowledge": "Ho salvato i codici in un luogo sicuro",
+      "backupContinue": "Ho fatto, continua"
+    }
+  },
   "lang": {
     "switch": "Lingua",
     "it": "Italiano",

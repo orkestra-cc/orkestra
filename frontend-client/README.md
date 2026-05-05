@@ -82,10 +82,10 @@ src/
 
 | Phase | Scope | Status |
 |---|---|---|
-| 1 | Scaffold (Vite + React + auth shell + i18n + Tailwind + dev container) | ✅ this commit |
-| 2 | Anonymous catalog browse + onboarding signup + email verification | next |
-| 3 | Login / account / profile / password change / MFA enrol | |
-| 4 | Self-subscribe + Stripe Checkout redirect + return-URL polling | |
+| 1 | Scaffold (Vite + React + auth shell + i18n + Tailwind + dev container) | ✅ done |
+| 2 | Anonymous catalog browse + onboarding signup + email verification | ✅ done |
+| 3 | Login / account / profile / password change / MFA enrol | ✅ done |
+| 4 | Self-subscribe + Stripe Checkout redirect + return-URL polling | next |
 | 5 | Account dashboard (subscriptions, invoices, transactions, payment methods) | |
 
 Phase E AI runtime endpoints (deferred per ADR-0003) stay stubbed — the dashboard renders "Open service" placeholders until those routes land.
