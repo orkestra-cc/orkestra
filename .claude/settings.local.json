@@ -39,7 +39,7 @@
       "Bash(docker restart:*)",
       "Read(//tmp/**)",
       "Bash(./scripts/devtoken.sh super_admin --quiet)",
-      "Bash(docker port orkestra-frontend-dev:*)",
+      "Bash(docker port orkestra-frontend-admin-dev:*)",
       "Bash(docker stop:*)",
       "Bash(docker start:*)",
       "Bash(ORKESTRA_API_URL=http://localhost:3007 ./scripts/devtoken.sh super_admin --quiet)",

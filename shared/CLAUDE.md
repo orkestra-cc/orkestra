@@ -21,7 +21,7 @@ The shared module contains **unified data models, types, and interfaces** used a
 
 ### Importers
 - **[`/backend/`](../backend/CLAUDE.md)** - Go structs and validation logic
-- **[`/frontend/`](../frontend/CLAUDE.md)** - TypeScript interfaces and validation schemas
+- **[`/frontend-admin/`](../frontend-admin/CLAUDE.md)** - TypeScript interfaces and validation schemas
 - **[`/mobile/`](../mobile/CLAUDE.md)** - Dart classes and serialization methods
 
 ## Overview
@@ -697,5 +697,5 @@ module.exports = {
 ### Related Guides
 - [Project Overview](../CLAUDE.md) - System architecture and design principles
 - [Backend Implementation](../backend/CLAUDE.md) - Go structs and MongoDB schemas
-- [Frontend Types](../frontend/CLAUDE.md) - TypeScript interfaces and validation
+- [Frontend Types](../frontend-admin/CLAUDE.md) - TypeScript interfaces and validation
 - [Mobile Models](../mobile/CLAUDE.md) - Dart classes and serialization

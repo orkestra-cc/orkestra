@@ -132,7 +132,7 @@ All four items are tenant-facing (Tier 2). Each is independently valuable; pick 
 
 **Key files:**
 - `backend/internal/core/compliance/handlers/audit_viewer.go` (new)
-- `frontend/src/pages/settings/audit.tsx` (new)
+- `frontend-admin/src/pages/settings/audit.tsx` (new)
 
 **Checks:**
 - [ ] Filter: by actor, action, outcome, date range
@@ -194,7 +194,7 @@ All four items are tenant-facing (Tier 2). Each is independently valuable; pick 
 **Scope:** small — the backend endpoints already exist (`GET /v1/auth/sessions`, `DELETE /v1/auth/sessions/{id}`). Shipping is mostly a frontend view.
 
 **Key files:**
-- `frontend/src/pages/account/security.tsx` (new) — rendering + revoke action
+- `frontend-admin/src/pages/account/security.tsx` (new) — rendering + revoke action
 - Backend: verify existing endpoints surface the fields the UI needs (location, trust level, last activity)
 
 **Checks:**
@@ -322,7 +322,7 @@ From `project_auth_audit_2026_04_24.md`, the seven confirmed issues the audit fl
 
 | # | Issue | Status |
 |---|---|---|
-| 1 | localStorage access-token leak (XSS foothold) | ⏳ **open** — the audit flagged `frontend/src/components/authentication/EmailPasswordForm.tsx:30` and `frontend/src/pages/setup/steps/AdminStep.tsx:58-60` |
+| 1 | localStorage access-token leak (XSS foothold) | ⏳ **open** — the audit flagged `frontend-admin/src/components/authentication/EmailPasswordForm.tsx:30` and `frontend-admin/src/pages/setup/steps/AdminStep.tsx:58-60` |
 | 2 | `docs/Authentication_flow.md` is ~50% stale | ⏳ **open** — tracked as [F2](#f2--rewrite-docsauthentication_flowmd) |
 | 3 | No revoked-token reaper scheduled | ⏳ **open** — tracked as [E4](#e4--scheduled-revoked-token-reaper) |
 | 4 | Rate-limit constants hardcoded | ⏳ **open** — should become admin-tunable via ConfigSchema |
@@ -335,7 +335,7 @@ From `project_auth_audit_2026_04_24.md`, the seven confirmed issues the audit fl
 Original flag was "CRITICAL — XSS foothold". Access tokens land in `localStorage` in two places, contradicting the HttpOnly cookie design. Fix: access token lives only in Redux memory via `setAccessToken` dispatch; refresh token stays in the HttpOnly cookie.
 
 **Checks:**
-- [ ] No `localStorage.setItem.*access.*token` references in `frontend/src/`
+- [ ] No `localStorage.setItem.*access.*token` references in `frontend-admin/src/`
 - [ ] Page reload still works (access token rehydrates from refresh cookie on first API call)
 - [ ] XSS smoke test: injected `<script>document.write(localStorage.accessToken)</script>` writes nothing
 

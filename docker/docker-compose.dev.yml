@@ -133,9 +133,9 @@ services:
       - 8.8.4.4
     command: ["sh", "-c", "go mod download && go install github.com/air-verse/air@latest && air"]
 
-  orkestra-frontend:
+  orkestra-frontend-admin:
     image: dhi.io/node:24-dev
-    container_name: orkestra-frontend-dev
+    container_name: orkestra-frontend-admin-dev
     user: "1000:1000"
     userns_mode: "host"
     working_dir: /app
@@ -152,8 +152,8 @@ services:
       VITE_WS_URL: ${VITE_WS_URL:-ws://localhost:3000}
       NODE_OPTIONS: "--max-old-space-size=4096"
     volumes:
-      - ../frontend:/app
-      - ../frontend/.vite-cache:/app/.vite
+      - ../frontend-admin:/app
+      - ../frontend-admin/.vite-cache:/app/.vite
     networks:
       - orkestra-network
     command: ["sh", "-c", "npm install && npm run dev -- --host 0.0.0.0"]

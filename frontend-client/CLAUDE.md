@@ -3,11 +3,11 @@
 *Path: `/frontend-client`*
 *Parent: [../CLAUDE.md](../CLAUDE.md)*
 
-[← Root](../CLAUDE.md) | [☰ Module Map](../CLAUDE.md#module-map) | [Operator console](../frontend/CLAUDE.md)
+[← Root](../CLAUDE.md) | [☰ Module Map](../CLAUDE.md#module-map) | [Operator console](../frontend-admin/CLAUDE.md)
 
-The customer-facing SPA. External (Tier-2) tenants register, manage their account, browse the catalog, subscribe to services, and view their billing here — sibling to the operator console at [`../frontend`](../frontend/CLAUDE.md), but with a separate origin, cookie domain, design system, and data layer.
+The customer-facing SPA. External (Tier-2) tenants register, manage their account, browse the catalog, subscribe to services, and view their billing here — sibling to the operator console at [`../frontend-admin`](../frontend-admin/CLAUDE.md), but with a separate origin, cookie domain, design system, and data layer.
 
-This app **does not** render anything operator-specific. Internal admin pages live in `../frontend`. If a feature targets internal staff, it does not belong here.
+This app **does not** render anything operator-specific. Internal admin pages live in `../frontend-admin`. If a feature targets internal staff, it does not belong here.
 
 ## Tier model recap
 
@@ -108,7 +108,7 @@ Compact keys come from `backend/internal/core/auth/services/jwt_service.go::clai
 
 ## How data fetching works
 
-All server state goes through **TanStack Query v5**, not RTK Query. (The operator console at `../frontend` uses RTK Query; this app intentionally diverges because the surface is small enough that the Redux infrastructure is not worth it.)
+All server state goes through **TanStack Query v5**, not RTK Query. (The operator console at `../frontend-admin` uses RTK Query; this app intentionally diverges because the surface is small enough that the Redux infrastructure is not worth it.)
 
 ```
 QueryClient (created once in main.tsx)
@@ -173,7 +173,7 @@ import { listPublicCatalog } from '@/api/catalog';
 import { Layout } from '@/components/Layout';
 ```
 
-This is **different from the operator console** at `../frontend`, which uses bare aliases (`components/`, `pages/`, …). Don't mix the two styles.
+This is **different from the operator console** at `../frontend-admin`, which uses bare aliases (`components/`, `pages/`, …). Don't mix the two styles.
 
 ## Build & dev
 
@@ -215,13 +215,13 @@ The Vite dev server runs inside Docker; if you need to rebuild outside Docker (e
 ## Don't
 
 - **Don't import RTK Query, redux, or redux-persist.** TanStack Query is the only server-state library. Adding Redux is a breaking architectural change — discuss first.
-- **Don't import Bootstrap, Falcon, react-bootstrap, or copy components from `../frontend`.** This SPA's design language is intentionally distinct from the operator console (locked decision in the MVP plan). Tailwind utilities + a fresh aesthetic.
+- **Don't import Bootstrap, Falcon, react-bootstrap, or copy components from `../frontend-admin`.** This SPA's design language is intentionally distinct from the operator console (locked decision in the MVP plan). Tailwind utilities + a fresh aesthetic.
 - **Don't hit operator-tier endpoints** (`/v1/tenants`, `/v1/admin/*`, `/v1/auth/operator/*`, etc.). They're not mounted on the client API surface and will 404. If you need data they expose, add a `/v1/me/*` mirror in the backend instead.
 - **Don't store the access token in localStorage / sessionStorage.** In-memory is the policy. The session marker is the only thing that goes to localStorage and it's not a credential.
 - **Don't bypass `RequireAuth`** by checking `getAccessToken()` in components. Use the auth context — it re-renders on token rotation.
 - **Don't add Stripe Elements without explicit sign-off.** Hosted Checkout is the locked decision; Elements would re-introduce PCI scope.
 - **Don't ship English-only strings.** Every user-visible string goes through `t()` with both `en.json` and `it.json` entries in the same PR.
-- **Don't share storage / cookies / auth state with `../frontend`.** Cookie domains, JWT audiences, and refresh cookies are deliberately split per ADR-0003 PR-D D-8/D-9.
+- **Don't share storage / cookies / auth state with `../frontend-admin`.** Cookie domains, JWT audiences, and refresh cookies are deliberately split per ADR-0003 PR-D D-8/D-9.
 
 ## Phase status
 
@@ -229,7 +229,7 @@ Tracked in [README.md § Roadmap](README.md). At time of writing: phases 1–4 d
 
 ## Related
 
-- [Operator console](../frontend/CLAUDE.md) — the Tier-1 admin SPA (different stack, different audience, different cookie domain)
+- [Operator console](../frontend-admin/CLAUDE.md) — the Tier-1 admin SPA (different stack, different audience, different cookie domain)
 - [Backend payments addon](../backend/internal/addons/payments/CLAUDE.md) — Stripe Checkout endpoints + webhook pipeline
 - [Backend subscriptions addon](../backend/internal/addons/subscriptions/CLAUDE.md) — `/v1/me/subscriptions/*` self-service surface, entitlement syncer
 - [Backend auth core](../backend/internal/core/auth/CLAUDE.md) — `/v1/auth/client/*` audience-split routes, JWT claims, refresh-cookie behaviour

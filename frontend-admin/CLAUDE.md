@@ -1,11 +1,11 @@
-# Frontend — React Web Application
+# Frontend Admin — Operator Console (Tier-1)
 
-*Path: `/frontend`*  
+*Path: `/frontend-admin`*  
 *Parent: [../CLAUDE.md](../CLAUDE.md)*
 
-[← Root](../CLAUDE.md) | [☰ Module Map](../CLAUDE.md#module-map) | [🚀 Quick Start](../CLAUDE.md#quick-start)
+[← Root](../CLAUDE.md) | [☰ Module Map](../CLAUDE.md#module-map) | [🚀 Quick Start](../CLAUDE.md#quick-start) | [Tier-2 client SPA](../frontend-client/CLAUDE.md)
 
-React 19 + Vite 7 + TypeScript 5.9 admin web app for Orkestra. Cookie-based auth with the Go backend, dynamic navigation driven by `/v1/navigation`, per-module RTK Query slices, Falcon design system + Bootstrap 5.
+React 19 + Vite 7 + TypeScript 5.9 operator console for Orkestra — the **Tier-1 admin dashboard** used by internal staff. Cookie-based auth with the Go backend (operator audience), dynamic navigation driven by `/v1/navigation`, per-module RTK Query slices, Falcon design system + Bootstrap 5. Sibling to [`../frontend-client`](../frontend-client/CLAUDE.md), the Tier-2 customer-facing SPA — different audience, different cookie domain, different stack.
 
 ## Tech stack
 
@@ -27,7 +27,7 @@ React 19 + Vite 7 + TypeScript 5.9 admin web app for Orkestra. Cookie-based auth
 ## Directory layout
 
 ```
-frontend/
+frontend-admin/
 ├── src/
 │   ├── App.tsx                    # Root component
 │   ├── index.tsx                  # Entry point

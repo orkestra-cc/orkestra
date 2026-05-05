@@ -115,7 +115,7 @@ done
 
 # Install frontend dependencies
 echo "Installing frontend dependencies..."
-(cd frontend && npm install)
+(cd frontend-admin && npm install)
 
 # Install mobile dependencies
 echo "Installing mobile dependencies..."
@@ -161,7 +161,7 @@ done
 
 # Start frontend
 echo "Starting frontend..."
-(cd frontend && npm run dev) &
+(cd frontend-admin && npm run dev) &
 
 echo "Development environment is ready!"
 echo "Frontend: http://localhost:3000"
@@ -189,7 +189,7 @@ done
 
 # Frontend tests
 echo "Running frontend tests..."
-(cd frontend && npm test) || FAILED_TESTS=$((FAILED_TESTS + 1))
+(cd frontend-admin && npm test) || FAILED_TESTS=$((FAILED_TESTS + 1))
 
 # Mobile tests
 echo "Running mobile tests..."
@@ -223,7 +223,7 @@ done
 
 # Build frontend
 echo "Building frontend..."
-docker build -t orkestra/frontend:$VERSION -f frontend/Dockerfile frontend
+docker build -t orkestra/frontend-admin:$VERSION -f frontend-admin/Dockerfile frontend-admin
 
 echo "Build complete!"
 ```
@@ -360,7 +360,7 @@ echo "Pushing Docker images..."
 for service in auth user operator tracking task; do
     docker push orkestra/$service:$VERSION
 done
-docker push orkestra/frontend:$VERSION
+docker push orkestra/frontend-admin:$VERSION
 
 # Deploy using docker-compose
 echo "Deploying with Docker Compose to $ENVIRONMENT..."
@@ -625,7 +625,7 @@ for service in backend/*/; do
 done
 
 # Generate frontend docs
-(cd frontend && npm run build:docs)
+(cd frontend-admin && npm run build:docs)
 
 echo "Documentation generated in docs/"
 ```
@@ -812,7 +812,7 @@ for service in backend/*/; do
 done
 
 echo "Running frontend tests..."
-(cd frontend && npm run test:ci)
+(cd frontend-admin && npm run test:ci)
 
 echo "Running mobile tests..."
 (cd mobile && flutter test --coverage)
@@ -858,5 +858,5 @@ echo "CI tests complete!"
 - [Project Overview](../CLAUDE.md) - System architecture and development workflow
 - [Docker Infrastructure](../docker/CLAUDE.md) - Container orchestration and environment setup
 - [Backend Deployment](../backend/CLAUDE.md) - Go application build and deployment
-- [Frontend Build](../frontend/CLAUDE.md) - React application build process
+- [Frontend Build](../frontend-admin/CLAUDE.md) - React application build process
 - [Mobile Build](../mobile/CLAUDE.md) - Flutter application build and release

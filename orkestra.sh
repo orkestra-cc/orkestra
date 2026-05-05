@@ -557,10 +557,10 @@ minimal_deploy() {
     echo
     draw_box "Minimal stack is up" \
         "" \
-        "  Frontend      ${c_info}${MINIMAL_FRONTEND_URL}${c_reset}" \
-        "  Backend API   ${c_info}${MINIMAL_BACKEND_URL}${c_reset}" \
-        "  API docs      ${c_info}${MINIMAL_BACKEND_URL}/docs${c_reset}" \
-        "  Health        ${c_info}${MINIMAL_BACKEND_URL}/health${c_reset}" \
+        "  Admin frontend ${c_info}${MINIMAL_FRONTEND_URL}${c_reset}" \
+        "  Backend API    ${c_info}${MINIMAL_BACKEND_URL}${c_reset}" \
+        "  API docs       ${c_info}${MINIMAL_BACKEND_URL}/docs${c_reset}" \
+        "  Health         ${c_info}${MINIMAL_BACKEND_URL}/health${c_reset}" \
         "" \
         "  ${c_muted}Generate an admin token for first login:${c_reset}" \
         "  ${c_accent}ORKESTRA_API_URL=${MINIMAL_BACKEND_URL} ./scripts/devtoken.sh administrator${c_reset}" \
@@ -679,11 +679,11 @@ minimal_info() {
     echo
 
     p_section "Access points"
-    printf '  Frontend      %s%s%s\n' "$c_info" "$MINIMAL_FRONTEND_URL" "$c_reset"
-    printf '  Backend API   %s%s%s\n' "$c_info" "$MINIMAL_BACKEND_URL" "$c_reset"
-    printf '  API docs      %s%s/docs%s\n' "$c_info" "$MINIMAL_BACKEND_URL" "$c_reset"
-    printf '  OpenAPI JSON  %s%s/openapi.json%s\n' "$c_info" "$MINIMAL_BACKEND_URL" "$c_reset"
-    printf '  Health        %s%s/health%s\n' "$c_info" "$MINIMAL_BACKEND_URL" "$c_reset"
+    printf '  Admin frontend %s%s%s\n' "$c_info" "$MINIMAL_FRONTEND_URL" "$c_reset"
+    printf '  Backend API    %s%s%s\n' "$c_info" "$MINIMAL_BACKEND_URL" "$c_reset"
+    printf '  API docs       %s%s/docs%s\n' "$c_info" "$MINIMAL_BACKEND_URL" "$c_reset"
+    printf '  OpenAPI JSON   %s%s/openapi.json%s\n' "$c_info" "$MINIMAL_BACKEND_URL" "$c_reset"
+    printf '  Health         %s%s/health%s\n' "$c_info" "$MINIMAL_BACKEND_URL" "$c_reset"
     echo
 
     p_section "Generate a dev token for first login"
@@ -792,8 +792,8 @@ fullstack_deploy_interactive() {
     case "$scope" in
         "All (full stack)") DEPLOY_SCOPE="all" ;;
         "Backend only") DEPLOY_SCOPE="backend" ;;
-        "Frontend only") DEPLOY_SCOPE="frontend" ;;
-        "Frontend + Backend") DEPLOY_SCOPE="frontend+backend" ;;
+        "Admin frontend only") DEPLOY_SCOPE="frontend-admin" ;;
+        "Admin frontend + Backend") DEPLOY_SCOPE="frontend-admin+backend" ;;
         "Infrastructure only") DEPLOY_SCOPE="infra" ;;
         *)
             p_warn "Deployment cancelled."
@@ -828,10 +828,10 @@ fullstack_execute_deploy() {
 
     if [ "$ENV" = "development" ]; then
         BACKEND_SERVICE="orkestra-backend"
-        FRONTEND_SERVICE="orkestra-frontend"
+        FRONTEND_SERVICE="orkestra-frontend-admin"
     else
         BACKEND_SERVICE="backend"
-        FRONTEND_SERVICE="frontend"
+        FRONTEND_SERVICE="frontend-admin"
     fi
 
     echo
@@ -925,7 +925,7 @@ fullstack_execute_deploy() {
         p_muted "  Commit     $GIT_COMMIT"
         echo
 
-        if [ "$DEPLOY_SCOPE" = "all" ] || [ "$DEPLOY_SCOPE" = "backend" ] || [ "$DEPLOY_SCOPE" = "frontend+backend" ]; then
+        if [ "$DEPLOY_SCOPE" = "all" ] || [ "$DEPLOY_SCOPE" = "backend" ] || [ "$DEPLOY_SCOPE" = "frontend-admin+backend" ]; then
             with_spinner "Building backend image (no cache)" \
                 docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" build --no-cache \
                 --build-arg VERSION="$VERSION" \
@@ -933,8 +933,8 @@ fullstack_execute_deploy() {
                 --build-arg GIT_COMMIT="$GIT_COMMIT" \
                 "$BACKEND_SERVICE"
         fi
-        if [ "$DEPLOY_SCOPE" = "all" ] || [ "$DEPLOY_SCOPE" = "frontend" ] || [ "$DEPLOY_SCOPE" = "frontend+backend" ]; then
-            with_spinner "Building frontend image (no cache)" \
+        if [ "$DEPLOY_SCOPE" = "all" ] || [ "$DEPLOY_SCOPE" = "frontend-admin" ] || [ "$DEPLOY_SCOPE" = "frontend-admin+backend" ]; then
+            with_spinner "Building admin frontend image (no cache)" \
                 docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" build --no-cache \
                 --build-arg VERSION="$VERSION" \
                 --build-arg BUILD_TIME="$BUILD_TIME" \
@@ -953,13 +953,13 @@ fullstack_execute_deploy() {
     if [ "$DEPLOY_SCOPE" = "infra" ]; then
         p_ok "Infrastructure-only deployment complete"
     elif [ "$ENV" = "production" ]; then
-        if [ "$DEPLOY_SCOPE" = "all" ] || [ "$DEPLOY_SCOPE" = "backend" ] || [ "$DEPLOY_SCOPE" = "frontend+backend" ]; then
+        if [ "$DEPLOY_SCOPE" = "all" ] || [ "$DEPLOY_SCOPE" = "backend" ] || [ "$DEPLOY_SCOPE" = "frontend-admin+backend" ]; then
             with_spinner "Rolling-update backend" \
                 docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d --no-deps "$BACKEND_SERVICE"
             with_spinner "Waiting for backend to be healthy" sleep 15
         fi
-        if [ "$DEPLOY_SCOPE" = "all" ] || [ "$DEPLOY_SCOPE" = "frontend" ] || [ "$DEPLOY_SCOPE" = "frontend+backend" ]; then
-            with_spinner "Deploying frontend" \
+        if [ "$DEPLOY_SCOPE" = "all" ] || [ "$DEPLOY_SCOPE" = "frontend-admin" ] || [ "$DEPLOY_SCOPE" = "frontend-admin+backend" ]; then
+            with_spinner "Deploying admin frontend" \
                 docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d --no-deps "$FRONTEND_SERVICE"
         fi
         with_spinner "Waiting for services to stabilize" sleep 30
@@ -975,14 +975,14 @@ fullstack_execute_deploy() {
                 with_spinner "Restarting backend" \
                     docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d "$BACKEND_SERVICE"
             fi
-            if [ "$DEPLOY_SCOPE" = "frontend" ]; then
+            if [ "$DEPLOY_SCOPE" = "frontend-admin" ]; then
                 docker compose -f "$COMPOSE_FILE" stop "$FRONTEND_SERVICE" 2> /dev/null || true
-                with_spinner "Restarting frontend" \
+                with_spinner "Restarting admin frontend" \
                     docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d "$FRONTEND_SERVICE"
             fi
-            if [ "$DEPLOY_SCOPE" = "frontend+backend" ]; then
+            if [ "$DEPLOY_SCOPE" = "frontend-admin+backend" ]; then
                 docker compose -f "$COMPOSE_FILE" stop "$FRONTEND_SERVICE" "$BACKEND_SERVICE" 2> /dev/null || true
-                with_spinner "Restarting frontend and backend" \
+                with_spinner "Restarting admin frontend and backend" \
                     docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d "$FRONTEND_SERVICE" "$BACKEND_SERVICE"
             fi
         fi
@@ -1048,11 +1048,11 @@ fullstack_execute_deploy() {
     if [ "$ENV" = "production" ]; then
         docker tag orkestra-backend:production "orkestra-backend:$DEPLOYMENT_ID"
         docker tag orkestra-backend:production orkestra-backend:latest
-        docker tag orkestra-frontend:production "orkestra-frontend:$DEPLOYMENT_ID"
-        docker tag orkestra-frontend:production orkestra-frontend:latest
+        docker tag orkestra-frontend-admin:production "orkestra-frontend-admin:$DEPLOYMENT_ID"
+        docker tag orkestra-frontend-admin:production orkestra-frontend-admin:latest
     else
         docker tag "orkestra-backend:$ENV" "orkestra-backend:$DEPLOYMENT_ID" 2> /dev/null || true
-        docker tag "orkestra-frontend:$ENV" "orkestra-frontend:$DEPLOYMENT_ID" 2> /dev/null || true
+        docker tag "orkestra-frontend-admin:$ENV" "orkestra-frontend-admin:$DEPLOYMENT_ID" 2> /dev/null || true
     fi
     p_ok "Images tagged"
 
@@ -1082,7 +1082,7 @@ EOF
         "  ${c_success}${ic_ok}${c_reset} Deployment ID  ${c_accent}${DEPLOYMENT_ID}${c_reset}" \
         "  Environment    $(echo "$ENV" | tr '[:lower:]' '[:upper:]')" \
         "  Commit         ${COMMIT_HASH}" \
-        "  Frontend URL   ${c_info}${FRONTEND_URL}${c_reset}" \
+        "  Admin frontend ${c_info}${FRONTEND_URL}${c_reset}" \
         "  Backend URL    ${c_info}${BACKEND_URL}${c_reset}" \
         ""
 
@@ -1458,8 +1458,8 @@ ${c_bold}MINIMAL PROFILE${c_reset}
 
 ${c_bold}FULL STACK${c_reset} ${c_muted}(uses ENV from docker/.env or ENV=... prefix)${c_reset}
   ${c_accent}deploy${c_reset} [--scope SCOPE] [--rebuild] [--yes]
-                                   Deploy. SCOPE: all | backend | frontend |
-                                                 frontend+backend | infra
+                                   Deploy. SCOPE: all | backend | frontend-admin |
+                                                 frontend-admin+backend | infra
   ${c_accent}stop${c_reset} [--with-infra]               Stop application services (+ infra)
   ${c_accent}status${c_reset}                            Containers + health + resources
   ${c_accent}logs${c_reset} <service> [flags]            View logs for a full-stack service
@@ -1554,7 +1554,7 @@ cli_dispatch() {
                 esac
             done
             case "$scope" in
-                all | backend | frontend | frontend+backend | infra) ;;
+                all | backend | frontend-admin | frontend-admin+backend | infra) ;;
                 *) die "Invalid scope: $scope" ;;
             esac
             fullstack_deploy_cli "$scope" "$rebuild" "$yes_flag"

@@ -177,9 +177,9 @@ services:
       retries: 5
       start_period: 60s
 
-  frontend:
+  frontend-admin:
     image: dhi.io/node:24-dev
-    container_name: orkestra-frontend
+    container_name: orkestra-frontend-admin
     user: "1000:1000"
     userns_mode: "host"
     working_dir: /app
@@ -198,9 +198,9 @@ services:
       NODE_OPTIONS: "--max-old-space-size=4096"
       npm_config_cache: /app/.npm-cache
     volumes:
-      - ../frontend:/app
-      - ../frontend/.vite-cache:/app/.vite
-      - ../frontend/.npm-cache:/app/.npm-cache
+      - ../frontend-admin:/app
+      - ../frontend-admin/.vite-cache:/app/.vite
+      - ../frontend-admin/.npm-cache:/app/.npm-cache
     networks:
       - orkestra-network
     depends_on:

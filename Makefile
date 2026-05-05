@@ -1,7 +1,7 @@
 # Orkestra Project Management
 .PHONY: help infra-up infra-down infra-restart infra-logs infra-status clean volumes-clean
 .PHONY: backend-run backend-dev backend-build backend-test backend-clean backend-deps
-.PHONY: frontend-run frontend-dev frontend-build frontend-test frontend-clean frontend-deps frontend-preview frontend-type-check
+.PHONY: frontend-admin-run frontend-admin-dev frontend-admin-build frontend-admin-test frontend-admin-clean frontend-admin-deps frontend-admin-preview frontend-admin-type-check
 .PHONY: run dev build test start stop restart full-dev
 
 # Default target
@@ -24,14 +24,14 @@ help:
 	@echo "  make backend-clean    - Clean backend build artifacts"
 	@echo ""
 	@echo "Frontend:"
-	@echo "  make frontend-run     - Run frontend dev server"
-	@echo "  make frontend-dev     - Run frontend with hot reload (alias for frontend-run)"
-	@echo "  make frontend-build   - Build frontend for production"
-	@echo "  make frontend-preview - Preview production build"
-	@echo "  make frontend-test    - Run frontend tests"
-	@echo "  make frontend-type-check - Run TypeScript type checking"
-	@echo "  make frontend-deps    - Install frontend dependencies"
-	@echo "  make frontend-clean   - Clean frontend build artifacts"
+	@echo "  make frontend-admin-run     - Run frontend dev server"
+	@echo "  make frontend-admin-dev     - Run frontend with hot reload (alias for frontend-admin-run)"
+	@echo "  make frontend-admin-build   - Build frontend for production"
+	@echo "  make frontend-admin-preview - Preview production build"
+	@echo "  make frontend-admin-test    - Run frontend tests"
+	@echo "  make frontend-admin-type-check - Run TypeScript type checking"
+	@echo "  make frontend-admin-deps    - Install frontend dependencies"
+	@echo "  make frontend-admin-clean   - Clean frontend build artifacts"
 	@echo ""
 	@echo "Infrastructure:"
 	@echo "  make infra-up         - Start all infrastructure services"
@@ -139,38 +139,38 @@ backend-clean:
 	@echo "Backend artifacts cleaned."
 
 # Frontend Management
-frontend-run:
+frontend-admin-run:
 	@echo "Starting frontend development server..."
-	@cd frontend && npm run dev
+	@cd frontend-admin && npm run dev
 
-frontend-dev: frontend-run
+frontend-admin-dev: frontend-admin-run
 
-frontend-build:
+frontend-admin-build:
 	@echo "Building frontend for production..."
-	@cd frontend && npm run build
-	@echo "Frontend built in frontend/dist/"
+	@cd frontend-admin && npm run build
+	@echo "Frontend built in frontend-admin/dist/"
 
-frontend-preview:
+frontend-admin-preview:
 	@echo "Starting frontend preview server..."
-	@cd frontend && npm run preview
+	@cd frontend-admin && npm run preview
 
-frontend-test:
+frontend-admin-test:
 	@echo "Running frontend tests..."
-	@cd frontend && npm test
+	@cd frontend-admin && npm test
 
-frontend-type-check:
+frontend-admin-type-check:
 	@echo "Running TypeScript type checking..."
-	@cd frontend && npm run type-check
+	@cd frontend-admin && npm run type-check
 
-frontend-deps:
+frontend-admin-deps:
 	@echo "Installing frontend dependencies..."
-	@cd frontend && npm install
+	@cd frontend-admin && npm install
 	@echo "Frontend dependencies installed."
 
-frontend-clean:
+frontend-admin-clean:
 	@echo "Cleaning frontend build artifacts..."
-	@rm -rf frontend/dist/
-	@rm -rf frontend/node_modules/.vite/
+	@rm -rf frontend-admin/dist/
+	@rm -rf frontend-admin/node_modules/.vite/
 	@echo "Frontend artifacts cleaned."
 
 # Combined Operations
@@ -240,12 +240,12 @@ full-dev:
 	@echo "Waiting for backend to start..."
 	@sleep 3
 	@echo "Starting frontend..."
-	@make frontend-dev
+	@make frontend-admin-dev
 
-build: backend-deps frontend-deps backend-build frontend-build
+build: backend-deps frontend-admin-deps backend-build frontend-admin-build
 	@echo "Build complete! Backend and frontend built successfully."
 
-test: backend-test frontend-test
+test: backend-test frontend-admin-test
 	@echo "All tests complete!"
 
 # Cleanup
@@ -257,7 +257,7 @@ clean:
 	@pkill -f "vite" || true
 	@docker-compose -f docker/docker-compose.yml down
 	@make backend-clean
-	@make frontend-clean
+	@make frontend-admin-clean
 	@echo "Cleanup complete."
 
 volumes-clean:

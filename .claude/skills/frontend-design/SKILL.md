@@ -218,7 +218,7 @@ const { config: { isDark, isRTL } } = useAppContext();
 
 ## Reference
 
-Before creating new components, check `/frontend/src/reference/` for existing patterns:
+Before creating new components, check `/frontend-admin/src/reference/` for existing patterns:
 - `reference/components/` - UI component examples
 - `reference/app-examples/` - Full feature implementations
 - `reference/pages/` - Page layout examples

@@ -674,7 +674,7 @@ This ensures that loading the billing module does not download the sales module'
 # Namespace: orkestra
 Deployments:
   - orkestra-backend     (2-5 replicas, HPA on CPU/memory)
-  - orkestra-frontend    (2 replicas, Nginx serving static files)
+  - orkestra-frontend-admin    (2 replicas, Nginx serving static files)
 
 StatefulSets:
   - orkestra-mongodb     (3 replicas, replica set)
@@ -684,12 +684,12 @@ StatefulSets:
 
 Services:
   - orkestra-backend-svc   (ClusterIP, load balances across backend pods)
-  - orkestra-frontend-svc  (ClusterIP, behind Ingress)
+  - orkestra-frontend-admin-svc  (ClusterIP, behind Ingress)
   - orkestra-mongodb-svc   (Headless, for replica set discovery)
 
 Ingress:
   - Traefik IngressRoute
-    - app.orkestra.cc      → orkestra-frontend-svc
+    - app.orkestra.cc      → orkestra-frontend-admin-svc
     - api.orkestra.cc      → orkestra-backend-svc
     - /docs                → orkestra-backend-svc (OpenAPI docs)
 ```
@@ -766,7 +766,7 @@ spec:
     - match: Host(`app.orkestra.cc`)
       kind: Rule
       services:
-        - name: orkestra-frontend-svc
+        - name: orkestra-frontend-admin-svc
           port: 80
       middlewares:
         - name: compress
@@ -881,14 +881,14 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: "22" }
-      - run: cd frontend && npm ci && npm run lint
+      - run: cd frontend-admin && npm ci && npm run lint
 
   frontend-test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-      - run: cd frontend && npm ci && npm run test -- --coverage
+      - run: cd frontend-admin && npm ci && npm run test -- --coverage
 
   # ─── Build (after quality gates) ────────────────────
   build-backend:
@@ -909,9 +909,9 @@ jobs:
       - uses: actions/checkout@v4
       - uses: docker/build-push-action@v5
         with:
-          context: ./frontend
+          context: ./frontend-admin
           push: ${{ github.event_name == 'push' }}
-          tags: ghcr.io/orkestra/frontend:${{ github.sha }}
+          tags: ghcr.io/orkestra/frontend-admin:${{ github.sha }}
 
   # ─── Deploy (on push to dev/main) ───────────────────
   deploy-staging:
@@ -922,8 +922,8 @@ jobs:
       - run: |
           kubectl set image deployment/orkestra-backend \
             backend=ghcr.io/orkestra/backend:${{ github.sha }}
-          kubectl set image deployment/orkestra-frontend \
-            frontend=ghcr.io/orkestra/frontend:${{ github.sha }}
+          kubectl set image deployment/orkestra-frontend-admin \
+            frontend=ghcr.io/orkestra/frontend-admin:${{ github.sha }}
           kubectl rollout status deployment/orkestra-backend --timeout=300s
 
   deploy-production:

@@ -22,7 +22,7 @@ The docker module provides **containerized infrastructure and deployment configu
 ### Imports
 
 - **[`/backend/`](../backend/CLAUDE.md)** - Go application containerization
-- **[`/frontend/`](../frontend/CLAUDE.md)** - React application containerization
+- **[`/frontend-admin/`](../frontend-admin/CLAUDE.md)** - React application containerization
 
 ### Importers
 
@@ -55,8 +55,8 @@ grep "^ENV=" /home/tore/orkestra/docker/.env
 ```bash
 # ✅ CORRECT - Always specify the env file
 docker compose -f docker-compose.staging.yml --env-file .env up -d
-docker compose -f docker-compose.staging.yml --env-file .env restart frontend
-docker compose -f docker-compose.staging.yml --env-file .env logs frontend
+docker compose -f docker-compose.staging.yml --env-file .env restart frontend-admin
+docker compose -f docker-compose.staging.yml --env-file .env logs frontend-admin
 
 # ❌ WRONG - Using wrong compose file without checking ENV first
 docker compose -f docker-compose.dev.yml up -d
@@ -151,7 +151,7 @@ Vars **deleted as dead code** during the cleanup (do not re-add): `MODULES`, `BA
 
 Separate infrastructure from applications across five compose files:
 
-1. **`docker-compose.minimal.yml`** — Self-contained 4-container stack (mongo, redis, backend, frontend) using only public images. Recommended for first boot on a modest VM or when you don't have `dhi.io` registry access.
+1. **`docker-compose.minimal.yml`** — Self-contained 4-container stack (mongo, redis, backend, frontend-admin) using only public images. Recommended for first boot on a modest VM or when you don't have `dhi.io` registry access.
 2. **`docker-compose.infra.yml`** - Infrastructure services only (MongoDB, Redis, Gotenberg, Hindsight)
 3. **`docker-compose.dev.yml`** - Application services in development mode with hot reload
 4. **`docker-compose.staging.yml`** - Application services in staging mode (staging-like env + AIR/Vite hot reload)
@@ -231,7 +231,7 @@ cp .env.example .env.production
 ./orkestra.sh minimal logs <service> [-f] [-n N] [-t]
 
 # Full stack (uses ENV from docker/.env, or ENV=... prefix)
-./orkestra.sh deploy [--scope all|backend|frontend|frontend+backend|infra] [--rebuild] [--yes]
+./orkestra.sh deploy [--scope all|backend|frontend-admin|frontend-admin+backend|infra] [--rebuild] [--yes]
 ./orkestra.sh stop [--with-infra]
 ./orkestra.sh status
 ./orkestra.sh logs <service> [-f] [-n N] [-t]
@@ -265,7 +265,7 @@ docker compose -f docker-compose.prod.yml --env-file .env.production up -d
 | **mongodb**  | 27050     | Primary DB    | `mongo:8.0`, authenticated healthcheck                                |
 | **redis**    | 6350      | Cache         | `redis:8.2-alpine`                                                    |
 | **backend**  | 3050      | Go API server | Built from `backend/Dockerfile.minimal` (public `golang:1.25-alpine`) |
-| **frontend** | 8050      | React web app | Built from `frontend/Dockerfile` (`nginx:alpine` static serving)      |
+| **frontend-admin** | 8050      | React web app | Built from `frontend-admin/Dockerfile` (`nginx:alpine` static serving)      |
 
 The minimal profile:
 
@@ -353,7 +353,7 @@ The dev/staging/prod compose files mount `/var/run/docker.sock` into the `orkest
 | Service                  | Host port | Purpose                              | Features                                                       |
 | ------------------------ | --------- | ------------------------------------ | -------------------------------------------------------------- |
 | **backend**              | 3007      | Go API server                        | Hot reload (AIR), debug logs                                   |
-| **frontend**             | 8087      | Operator console (Tier-1)            | Vite dev server, HMR; host `console.localhost`                 |
+| **frontend-admin**             | 8087      | Operator console (Tier-1)            | Vite dev server, HMR; host `console.localhost`                 |
 | **client-frontend**      | 8081      | Tier-2 client demo SPA               | Vite dev server, HMR; host `client.localhost`; consumes `api.*`|
 
 #### Staging (`docker-compose.staging.yml`)
@@ -363,7 +363,7 @@ The dev/staging/prod compose files mount `/var/run/docker.sock` into the `orkest
 | Service                      | Host port | Purpose                              | Features                                                        |
 | ---------------------------- | --------- | ------------------------------------ | --------------------------------------------------------------- |
 | **orkestra-backend**         | 3000      | Go API server                        | Hot reload (AIR), staging-like env, RS256 JWT                   |
-| **orkestra-frontend**        | 8080      | Operator console (Tier-1)            | Vite dev server, HMR; host `staging.orkestra.cc`                |
+| **orkestra-frontend-admin**        | 8080      | Operator console (Tier-1)            | Vite dev server, HMR; host `staging.orkestra.cc`                |
 | **orkestra-client-frontend** | 8081      | Tier-2 client demo SPA               | Vite dev server, HMR; host `app.orkestra.cc`; consumes `staging-api.*` |
 
 The backend mounts `../backend:/app` and runs AIR from the bind mount — no image rebuild on code change. AIR and the Go module/build cache live under `backend/.go-bin/` and `backend/.go-mod-cache/` (gitignored), pre-installed by the host. To bootstrap on a fresh machine:
@@ -383,7 +383,7 @@ GOBIN=$PWD/.go-bin GOMODCACHE=$PWD/.go-mod-cache go install github.com/air-verse
 | Service      | Host port | Purpose       | Features                       |
 | ------------ | --------- | ------------- | ------------------------------ |
 | **backend**  | 3000      | Go API server | Optimized build, health checks |
-| **frontend** | 8080      | React web app | Nginx static serving           |
+| **frontend-admin** | 8080      | React web app | Nginx static serving           |
 
 ## Network Architecture
 
@@ -447,13 +447,13 @@ Host ports vary per profile so multiple stacks can coexist on the same machine. 
 ```
 Minimal profile (docker-compose.minimal.yml):
 3050  → backend:3000      # API server
-8050  → frontend:80       # Web application
+8050  → frontend-admin:80       # Web application
 27050 → mongodb:27017     # Dedicated mongo for minimal
 6350  → redis:6379        # Dedicated redis for minimal
 
 Dev stack (docker-compose.infra.yml + docker-compose.dev.yml):
 3007  → backend:3000             # API server
-8087  → frontend:5173            # Operator console (host: console.localhost)
+8087  → frontend-admin:5173            # Operator console (host: console.localhost)
 8081  → client-frontend:5173     # Tier-2 client demo SPA (host: client.localhost)
 27027 → mongodb:27017            # Shared infra mongo
 6387  → redis:6379               # Shared infra redis
@@ -462,7 +462,7 @@ Dev stack (docker-compose.infra.yml + docker-compose.dev.yml):
 
 Production (docker-compose.prod.yml):
 3000  → backend:3000      # API server
-8080  → frontend:80       # Nginx static
+8080  → frontend-admin:80       # Nginx static
 ```
 
 ### Security & Secrets Management
@@ -747,7 +747,7 @@ docker compose -f docker-compose.dev.yml up -d
 docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
 
 # View logs for specific services
-docker compose -f docker-compose.dev.yml logs -f orkestra-backend orkestra-frontend
+docker compose -f docker-compose.dev.yml logs -f orkestra-backend orkestra-frontend-admin
 
 # Restart a specific service
 docker compose -f docker-compose.dev.yml restart orkestra-backend
@@ -829,14 +829,14 @@ docker compose logs backend | grep -i error
 #### Frontend Logs
 
 ```bash
-# View frontend logs
-docker compose logs frontend
+# View admin frontend logs (Tier-1 operator console)
+docker compose logs frontend-admin
 
-# Follow frontend logs in real-time
-docker compose logs -f frontend
+# Follow admin frontend logs in real-time
+docker compose logs -f frontend-admin
 
 # Frontend build errors
-docker compose logs frontend | grep -i error
+docker compose logs frontend-admin | grep -i error
 ```
 
 #### Infrastructure Logs
@@ -872,7 +872,7 @@ docker stats
 docker compose logs backend | grep -i "watching\|building\|reload"
 
 # Frontend: Vite HMR logs
-docker compose logs frontend | grep -i "hmr\|updated\|ready"
+docker compose logs frontend-admin | grep -i "hmr\|updated\|ready"
 ```
 
 ### 🚨 Troubleshooting
@@ -938,6 +938,6 @@ docker compose -f docker-compose.dev.yml restart
 
 - [Project Overview](../CLAUDE.md) - System architecture and design principles
 - [Backend Containerization](../backend/CLAUDE.md) - Go API server configuration
-- [Frontend Containerization](../frontend/CLAUDE.md) - React application setup
+- [Frontend Containerization](../frontend-admin/CLAUDE.md) - React application setup
 - [Documents Module](../backend/internal/addons/documents/CLAUDE.md) - PDF generation with Gotenberg
 - [Deployment Scripts](../scripts/CLAUDE.md) - Automation and deployment orchestration

@@ -101,7 +101,7 @@ See `backend/CLAUDE.md` for details.
 
 ### Frontend
 
-The React app reads the enabled modules from `/v1/navigation` at boot and only renders routes for modules the backend has turned on. Add per-module UI under `frontend/src/modules/<name>/` (see `frontend/CLAUDE.md`).
+The React app reads the enabled modules from `/v1/navigation` at boot and only renders routes for modules the backend has turned on. Add per-module UI under `frontend-admin/src/modules/<name>/` (see `frontend-admin/CLAUDE.md`).
 
 ## Repository layout
 
@@ -117,7 +117,8 @@ orkestra/
 │   │   └── shared/          # Module interface, config, middleware, interfaces
 │   ├── Dockerfile           # Chainguard hardened images (dev + prod)
 │   └── Dockerfile.minimal   # Public images for the minimal profile
-├── frontend/                # React 19 + Vite 7
+├── frontend-admin/          # React 19 + Vite 7 — operator console (Tier-1)
+├── frontend-client/         # React 19 + Vite 7 — Tier-2 external client SPA
 ├── mobile/                  # Flutter 3.35
 ├── docker/                  # Compose files + env templates
 ├── docs/                    # Architecture and modernization docs

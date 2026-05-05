@@ -154,7 +154,7 @@ Load order (topologically sorted by `Dependencies()`): `user` → `notification`
 
 ### Other Modules
 
-- **[`/frontend/`](frontend/CLAUDE.md)** — React 19 operator console / Tier-1 admin dashboard (port 8080, host `console.localhost`)
+- **[`/frontend-admin/`](frontend-admin/CLAUDE.md)** — React 19 operator console / Tier-1 admin dashboard (port 8080, host `console.localhost`)
 - **[`/frontend-client/`](frontend-client/CLAUDE.md)** — React 19 Tier-2 client demo SPA — consumes the ADR-0003 client API surface (port 8081, host `client.localhost`)
 - **[`/mobile/`](mobile/CLAUDE.md)** — Flutter cross-platform app
 - **[`/docker/`](docker/CLAUDE.md)** — Docker Compose configs (dev/staging/prod/infra)
@@ -232,5 +232,5 @@ docker restart orkestra-backend-dev
 GitHub Actions workflows (`.github/workflows/`) run on PR and push to `dev`/`main`:
 
 - `backend.yml` — lint (golangci-lint), test (80% coverage gate), build, Docker push to GHCR
-- `frontend.yml` — TypeScript check, ESLint, build, Docker push
+- `frontend-admin.yml` — TypeScript check, ESLint, build, Docker push
 - `mobile.yml` — Flutter analyze, test, APK build
