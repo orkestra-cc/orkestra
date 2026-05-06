@@ -57,6 +57,10 @@ func (m *SubscriptionsModule) OptionalServices() []module.ServiceKey {
 		module.ServicePaymentProvider,
 		module.ServiceNotificationSender,
 		module.ServicePDFService,
+		// User billing provider drives renewal of user-owned subscriptions
+		// (Phase 2). Optional: when missing, user-owner renewals fail fast
+		// while tenant-owner renewals continue unchanged.
+		module.ServiceUserBillingCustomerProvider,
 	}
 }
 
@@ -146,10 +150,11 @@ func (m *SubscriptionsModule) Init(deps *module.Dependencies) error {
 	subscriptionSvc := services.NewSubscriptionService(subRepo, serviceRepo, activitySvc, entitlementSyncer, tenantProvider, deps.Logger)
 
 	notifier, _ := module.GetTyped[iface.NotificationSender](deps.Services, module.ServiceNotificationSender)
+	userBilling, _ := module.GetTyped[iface.UserBillingCustomerProvider](deps.Services, module.ServiceUserBillingCustomerProvider)
 
 	renewalSvc := services.NewRenewalService(
 		subRepo, serviceRepo, invoiceRepo,
-		activitySvc, entitlementSyncer, tenantProvider, notifier, deps.Services, deps.Logger,
+		activitySvc, entitlementSyncer, tenantProvider, userBilling, notifier, deps.Services, deps.Logger,
 	)
 	reconciler := services.NewReconciler(invoiceRepo, subRepo, activitySvc, entitlementSyncer, deps.Logger)
 

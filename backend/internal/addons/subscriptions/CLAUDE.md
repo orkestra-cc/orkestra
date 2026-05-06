@@ -46,7 +46,7 @@ Operator-admin routes (service catalog, subscription admin, invoice/activity rea
 
 A thin `TenantSubscriptionAdapter` (`services/tenant_provider.go`) implements `iface.TenantSubscriptionProvider` so `core/tenant` can serve `GET /v1/admin/tenants/{id}/subscriptions` — the adapter filters by `Owner{Kind:"tenant", UUID:tenantUUID}`.
 
-**Renewal limitation (Phase 0):** user-owned subscriptions cannot complete a renewal cycle yet — `RenewalService.loadOwnerTenant` returns `"user-owned subscription billing profile not yet available"` until Phase 2 wires the `client_billing_customers` projection. Tenant-owned subscriptions renew unchanged.
+**User-owner renewals (Phase 2):** `RenewalService.loadOwnerTenant` resolves user-owned subscriptions through the clientbilling addon's `iface.UserBillingCustomerProvider` and projects the user's profile onto a synthetic `*iface.Tenant` so the rest of the renewal pipeline stays owner-agnostic. The Stripe-customer-id write is dispatched per-owner-kind (tenants → `TenantProvider.SetTenantStripeCustomerID`, users → `UserBillingCustomerProvider.SetStripeCustomerID`). When the clientbilling addon is disabled, user-owner renewals fail fast with `"user billing provider not configured"`; tenant-owner renewals are unaffected.
 
 ## Collections
 

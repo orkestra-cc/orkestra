@@ -135,6 +135,16 @@ const (
 	// is disabled — the aggregator returns 404/503 accordingly.
 	ServiceTenantBillingCustomerProvider ServiceKey = "billing.tenant_customer_provider"
 
+	// ServiceUserBillingCustomerProvider exposes the user-level billing
+	// projection introduced in the post-onboarding refactor (Phase 2).
+	// Consumed by the payments client handler (Stripe customer creation
+	// for user-owned checkout) and by the subscriptions renewal service
+	// (per-cycle charge for user-owned subscriptions). Implemented by the
+	// clientbilling addon. Missing registration means the addon is
+	// disabled — user-owned checkout returns 503 and user-owned renewals
+	// fail fast with a clear error.
+	ServiceUserBillingCustomerProvider ServiceKey = "clientbilling.user_customer_provider"
+
 	// ServiceAuditSink is the platform-wide append-only audit trail sink
 	// provided by the compliance module. Consumers resolve it via
 	// module.GetTyped[iface.AuditSink] and call Emit on hot paths — the

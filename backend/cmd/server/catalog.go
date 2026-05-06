@@ -6,6 +6,7 @@ import (
 	"github.com/orkestra/backend/internal/addons/agents"
 	"github.com/orkestra/backend/internal/addons/aimodels"
 	"github.com/orkestra/backend/internal/addons/billing"
+	"github.com/orkestra/backend/internal/addons/clientbilling"
 	"github.com/orkestra/backend/internal/addons/company"
 	"github.com/orkestra/backend/internal/addons/compliance"
 	"github.com/orkestra/backend/internal/addons/dev"
@@ -58,6 +59,7 @@ var optionalModules = map[string]func() module.Module{
 	"sales":         func() module.Module { return sales.NewModule() },
 	"subscriptions": func() module.Module { return subscriptions.NewModule() },
 	"payments":      func() module.Module { return payments.NewModule() },
+	"clientbilling": func() module.Module { return clientbilling.NewModule() },
 	"identity":      func() module.Module { return identity.NewModule() },
 	"compliance":    func() module.Module { return compliance.NewModule() },
 	"dev":           func() module.Module { return dev.NewModule() },

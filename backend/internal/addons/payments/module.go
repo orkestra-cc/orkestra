@@ -60,6 +60,10 @@ func (m *PaymentsModule) OptionalServices() []module.ServiceKey {
 		// /v1/me/* routes are simply not mounted (logged at Init time).
 		module.ServiceTenantProvider,
 		module.ServiceSelfServiceCheckoutPlanner,
+		// User billing provider drives the user-owned checkout path
+		// (clientbilling addon, Phase 2). Optional: when missing, the
+		// user-owner branch in ensureCustomerForOwner returns 503.
+		module.ServiceUserBillingCustomerProvider,
 	}
 }
 
@@ -171,11 +175,13 @@ func (m *PaymentsModule) Init(deps *module.Dependencies) error {
 
 	// Tier-2 self-service handler — built only when TenantProvider is wired
 	// because every /v1/me/* route re-checks ownership against memberships.
-	// SelfServiceCheckoutPlanner stays optional even when the handler is
-	// built; the checkout-session route returns 503 if the planner is nil.
+	// SelfServiceCheckoutPlanner and UserBillingCustomerProvider stay
+	// optional even when the handler is built; their absence degrades
+	// individual routes (checkout-session → 503, user-owner branch → 503/409).
 	if tenants, ok := module.GetTyped[iface.TenantProvider](deps.Services, module.ServiceTenantProvider); ok {
 		planner, _ := module.GetTyped[iface.SelfServiceCheckoutPlanner](deps.Services, module.ServiceSelfServiceCheckoutPlanner)
-		m.clientHandler = handlers.NewClientHandler(m.payment, txRepo, pmRepository, tenants, planner)
+		userBilling, _ := module.GetTyped[iface.UserBillingCustomerProvider](deps.Services, module.ServiceUserBillingCustomerProvider)
+		m.clientHandler = handlers.NewClientHandler(m.payment, txRepo, pmRepository, tenants, userBilling, planner)
 	} else {
 		deps.Logger.Warn("payments: tenant provider missing — Tier-2 self-service routes will not mount")
 	}

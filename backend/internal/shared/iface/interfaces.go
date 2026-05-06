@@ -750,6 +750,107 @@ type TenantBillingCustomerProvider interface {
 }
 
 // ---------------------------------------------------------------------------
+// UserBillingCustomerProvider — consumed by: payments client handler,
+// subscriptions renewal service.
+//
+// Owns the user-level billing-customer projection introduced in the post-
+// onboarding refactor (Phase 2). Keyed by userUUID — every self-registered
+// client has at most one row. The projection carries the natural-person /
+// sole-proprietor billing identity (legal name, VAT, fiscal code, country,
+// email) plus the lazily-populated Stripe customer id, mirroring the
+// equivalent fields on iface.Tenant for tenant-owned billing.
+//
+// Implemented by the clientbilling addon. Optional from the consumer's
+// point of view — when missing, user-owned checkout returns 503 and the
+// renewal service refuses to charge user-owned subscriptions.
+// ---------------------------------------------------------------------------
+
+// UserBillingProfile is the cross-module shape the clientbilling addon
+// returns. Flat, JSON-friendly — full editing happens through the addon's
+// own /v1/me/billing-profile route.
+type UserBillingProfile struct {
+	UserUUID         string
+	LegalName        string // company name for sole-proprietors / freelancers; empty for individuals
+	FirstName        string // populated for individuals
+	LastName         string // populated for individuals
+	Email            string
+	VATNumber        string
+	FiscalCode       string
+	Country          string // ISO-3166 alpha-2
+	AddressLine1     string
+	AddressLine2     string
+	City             string
+	PostalCode       string
+	Province         string
+	IsCompany        bool
+	StripeCustomerID string
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
+}
+
+// DisplayName returns the most descriptive label for the profile, falling
+// through LegalName → "FirstName LastName" → Email → UserUUID. Used by the
+// renewal service when stamping Stripe charge descriptions and by
+// notifications.
+func (p *UserBillingProfile) DisplayName() string {
+	if p == nil {
+		return ""
+	}
+	if p.LegalName != "" {
+		return p.LegalName
+	}
+	if p.FirstName != "" || p.LastName != "" {
+		switch {
+		case p.FirstName != "" && p.LastName != "":
+			return p.FirstName + " " + p.LastName
+		case p.FirstName != "":
+			return p.FirstName
+		default:
+			return p.LastName
+		}
+	}
+	if p.Email != "" {
+		return p.Email
+	}
+	return p.UserUUID
+}
+
+// UpsertUserBillingProfileInput is the cross-module write payload. The
+// implementation enforces ownership (UserUUID must match the caller) and
+// validates the natural-person vs. company shape (e.g. denomination
+// required when IsCompany=true).
+type UpsertUserBillingProfileInput struct {
+	UserUUID     string
+	LegalName    string
+	FirstName    string
+	LastName     string
+	Email        string
+	VATNumber    string
+	FiscalCode   string
+	Country      string
+	AddressLine1 string
+	AddressLine2 string
+	City         string
+	PostalCode   string
+	Province     string
+	IsCompany    bool
+}
+
+// UserBillingCustomerProvider is the cross-module surface for the user-
+// level billing projection. Get returns (nil, nil) when no profile has
+// been created yet — consumers map that to 404 or a "complete your profile"
+// prompt. Upsert creates or updates the row in place.
+type UserBillingCustomerProvider interface {
+	Get(ctx context.Context, userUUID string) (*UserBillingProfile, error)
+	Upsert(ctx context.Context, in UpsertUserBillingProfileInput) (*UserBillingProfile, error)
+	// SetStripeCustomerID persists the gateway customer identifier on the
+	// user's profile. Called by payment flows on the first charge / setup
+	// session so subsequent calls reuse the same Stripe customer.
+	// Idempotent: re-applying the same value is a no-op.
+	SetStripeCustomerID(ctx context.Context, userUUID, stripeCustomerID string) error
+}
+
+// ---------------------------------------------------------------------------
 // AuditSink — consumed by: every module that performs a security-sensitive
 // or lifecycle-changing action. Provided by the compliance module.
 //

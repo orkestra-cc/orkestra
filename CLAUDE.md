@@ -149,6 +149,7 @@ Load order (topologically sorted by `Dependencies()`): `user` → `notification`
 | **sales**      | AI-driven prospect analysis and scoring                                                                      | aimodels         |
 | **subscriptions** | Recurring AI-services catalog, clients, subscriptions, activity log — [docs](backend/internal/addons/subscriptions/CLAUDE.md) | —                |
 | **payments**   | Stripe gateway — charges, refunds, webhooks — [docs](backend/internal/addons/payments/CLAUDE.md)                    | —                |
+| **clientbilling** | User-level billing profile for self-registered Tier-2 clients (`/v1/me/billing-profile`)                  | —                |
 | **dev**        | Dev token generation (disabled in production)                                                                | auth             |
 
 ### Other Modules

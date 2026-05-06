@@ -54,6 +54,7 @@ backend/
 │   │   ├── sales/                  # AI prospect analysis
 │   │   ├── subscriptions/          # Recurring services catalog, clients, subscriptions
 │   │   ├── payments/               # Stripe gateway, refunds, webhooks
+│   │   ├── clientbilling/          # User-level billing profile (Phase 2 of polymorphic-owner refactor)
 │   │   └── dev/                    # Dev token generator
 │   ├── shared/                     # Infrastructure — used by core and addons
 │   │   ├── module/                 # Module interface, registry, config service

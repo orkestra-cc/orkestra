@@ -28,27 +28,33 @@ type ClientHandler struct {
 	txRepo  repository.TransactionRepository
 	pmRepo  repository.PaymentMethodRepository
 	tenants iface.TenantProvider
+	// userBilling is optional — when nil (clientbilling addon disabled)
+	// user-owner checkout returns 503. Tenant-owner flows still work.
+	userBilling iface.UserBillingCustomerProvider
 	// planner is optional — the checkout-session route returns 503 when
 	// the subscriptions module is disabled or has not registered the key.
 	planner iface.SelfServiceCheckoutPlanner
 }
 
 // NewClientHandler constructs the handler. tenants may be nil — tenant-
-// owner routes return 503 in that case; user-owner routes still work.
-// planner is optional in the same shape as the legacy contract.
+// owner routes return 503 in that case; user-owner routes still work
+// when userBilling is wired. planner is optional in the same shape as the
+// legacy contract.
 func NewClientHandler(
 	payment *services.PaymentService,
 	txRepo repository.TransactionRepository,
 	pmRepo repository.PaymentMethodRepository,
 	tenants iface.TenantProvider,
+	userBilling iface.UserBillingCustomerProvider,
 	planner iface.SelfServiceCheckoutPlanner,
 ) *ClientHandler {
 	return &ClientHandler{
-		payment: payment,
-		txRepo:  txRepo,
-		pmRepo:  pmRepo,
-		tenants: tenants,
-		planner: planner,
+		payment:     payment,
+		txRepo:      txRepo,
+		pmRepo:      pmRepo,
+		tenants:     tenants,
+		userBilling: userBilling,
+		planner:     planner,
 	}
 }
 
@@ -122,10 +128,37 @@ func (h *ClientHandler) ensureCustomerForOwner(ctx context.Context, owner iface.
 		_ = h.tenants.SetTenantStripeCustomerID(ctx, t.UUID, ref.ID)
 		return ref, t.Email, nil
 	case iface.OwnerKindUser:
-		// Phase 2 will wire client_billing_customers; until then the
-		// user-owner checkout path needs that projection to know which
-		// VAT/CF/email to stamp on the Stripe customer.
-		return iface.CustomerRef{}, "", huma.Error503ServiceUnavailable("user billing profile not yet available")
+		if h.userBilling == nil {
+			return iface.CustomerRef{}, "", huma.Error503ServiceUnavailable("user billing profile not configured")
+		}
+		prof, err := h.userBilling.Get(ctx, owner.UUID)
+		if err != nil {
+			return iface.CustomerRef{}, "", err
+		}
+		if prof == nil {
+			// The client has not filled in their billing details yet —
+			// surface a 409 so the SPA can route them to the billing-
+			// profile form before retrying checkout.
+			return iface.CustomerRef{}, "", huma.Error409Conflict("complete your billing profile before checkout")
+		}
+		if prof.StripeCustomerID != "" {
+			return iface.CustomerRef{Provider: "stripe", ID: prof.StripeCustomerID}, prof.Email, nil
+		}
+		ref, err := h.payment.CreateCustomer(ctx, iface.CustomerInput{
+			Owner:     owner,
+			Email:     prof.Email,
+			Name:      prof.DisplayName(),
+			VATNumber: prof.VATNumber,
+			Country:   prof.Country,
+		})
+		if err != nil {
+			return iface.CustomerRef{}, "", err
+		}
+		// Best-effort persistence: the customer exists on Stripe and the
+		// renewal job's metadata-keyed lookup will reuse it even if this
+		// write fails.
+		_ = h.userBilling.SetStripeCustomerID(ctx, owner.UUID, ref.ID)
+		return ref, prof.Email, nil
 	default:
 		return iface.CustomerRef{}, "", fmt.Errorf("unknown owner kind %q", owner.Kind)
 	}

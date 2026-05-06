@@ -49,7 +49,7 @@ Every operator-admin route under the module sits behind `RequireInternalTenant()
 
 Transaction and PaymentMethod rows are owner-scoped via polymorphic `(ownerKind, ownerUUID)` — `Kind="user"` for self-registered clients, `Kind="tenant"` for admin-attached business members. `PaymentService.ChargeSubscription` reads the owner from the charge struct's `Owner` field (preferred) or from `ownerKind`/`ownerUUID` metadata stamps populated by the subscriptions renewal service. A thin `TenantPaymentAdapter` (`services/tenant_provider.go`) implements `iface.TenantPaymentProvider` so `core/tenant` can serve `GET /v1/admin/tenants/{id}/payments` — the adapter filters by `Owner{Kind:"tenant", UUID:tenantUUID}`.
 
-User-owner support is wire-complete (models, repos, list endpoints) but the Phase 0 checkout path returns 503 `"user billing profile not yet available"` for `Kind="user"` until Phase 2 wires the `client_billing_customers` projection. Tenant-owner checkout works unchanged.
+User-owner checkout (Phase 2) reads the caller's profile through `iface.UserBillingCustomerProvider` (wired by the `clientbilling` addon). On the first charge / setup session the handler creates the Stripe customer and persists the id back onto the profile via `SetStripeCustomerID`, mirroring the tenant-owner flow against `Tenant.StripeCustomerID`. When the clientbilling addon is disabled the user-owner branch returns 503 `"user billing profile not configured"`; when the addon is enabled but the user has not filled out their profile yet, the handler returns 409 `"complete your billing profile before checkout"` so the SPA can route them to `PUT /v1/me/billing-profile` before retrying.
 
 ## Collections
 
