@@ -226,8 +226,8 @@ func TestRealms_LabelsCanonicalized(t *testing.T) {
 	if resp.Realms[0].Key != realmPlatform {
 		t.Fatalf("want key=%q, got %q", realmPlatform, resp.Realms[0].Key)
 	}
-	if resp.Realms[0].Label != "Companies" {
-		t.Fatalf("want label %q, got %q", "Companies", resp.Realms[0].Label)
+	if resp.Realms[0].Label != "Administration" {
+		t.Fatalf("want label %q, got %q", "Administration", resp.Realms[0].Label)
 	}
 }
 

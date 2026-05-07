@@ -80,8 +80,8 @@ func (m *Module) ProvidedServices() []module.ServiceKey {
 // alongside the other admin surfaces.
 func (m *Module) NavItems() []module.NavItemSpec {
 	return []module.NavItemSpec{
-		{Realm: "platform", Section: "Audit & Compliance", Tier: "internal", Name: "Audit Events", Icon: "clipboard-list", Path: "/admin/audit-events", MinRole: "administrator", Active: true},
-		{Realm: "platform", Section: "Audit & Compliance", Tier: "internal", Name: "SOC2 Evidence", Icon: "shield-alt", Path: "/admin/compliance/soc2", MinRole: "administrator", Active: true},
+		{Realm: "platform", Tier: "internal", Name: "Audit Events", Icon: "clipboard-list", Path: "/admin/audit-events", MinRole: "administrator", Active: true},
+		{Realm: "platform", Tier: "internal", Name: "SOC2 Evidence", Icon: "shield-alt", Path: "/admin/compliance/soc2", MinRole: "administrator", Active: true},
 	}
 }
 

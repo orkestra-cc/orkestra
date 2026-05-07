@@ -106,7 +106,7 @@ func (m *SubscriptionsModule) Collections() []module.CollectionSpec {
 
 func (m *SubscriptionsModule) NavItems() []module.NavItemSpec {
 	return []module.NavItemSpec{{
-		Realm: "business", Section: "Revenue", Tier: "internal",
+		Realm: "business", Tier: "internal",
 		Name: "Subscriptions", Icon: "repeat", Path: "/subscriptions", Active: true,
 		Children: []module.NavItemSpec{
 			{Name: "Services", Icon: "layer-group", Path: "/subscriptions/services", Active: true},

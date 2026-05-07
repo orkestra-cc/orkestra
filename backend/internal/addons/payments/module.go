@@ -109,7 +109,7 @@ func (m *PaymentsModule) Collections() []module.CollectionSpec {
 
 func (m *PaymentsModule) NavItems() []module.NavItemSpec {
 	return []module.NavItemSpec{{
-		Realm: "business", Section: "Revenue", Tier: "internal",
+		Realm: "business", Tier: "internal",
 		Name: "Payments", Icon: "credit-card", Path: "/payments", Active: true,
 		Children: []module.NavItemSpec{
 			{Name: "Transactions", Icon: "exchange-alt", Path: "/payments/transactions", Active: true},

@@ -47,8 +47,8 @@ func (m *UserModule) NavItems() []module.NavItemSpec {
 		{Realm: "personal", Section: "My workspace", Name: "Dashboard", Icon: "chart-pie", Path: "/user/dashboard", Active: true},
 		{Realm: "personal", Section: "My workspace", Name: "Profile", Icon: "user", Path: "/user/profile", Active: true},
 		{Realm: "personal", Section: "My workspace", Name: "Calendar", Icon: "calendar-alt", Path: "/user/calendar", Active: true},
-		{Realm: "platform", Section: "Admin", Tier: "internal", Name: "User Management", Icon: "users-cog", Path: "/admin/users", Active: true},
-		{Realm: "platform", Section: "Admin", Tier: "internal", Name: "Module Management", Icon: "puzzle-piece", Path: "/admin/modules", Active: true},
+		{Realm: "platform", Tier: "internal", Name: "User Management", Icon: "users-cog", Path: "/admin/users", MinRole: "administrator", Active: true},
+		{Realm: "platform", Tier: "internal", Name: "Module Management", Icon: "puzzle-piece", Path: "/admin/modules", MinRole: "administrator", Active: true},
 	}
 }
 

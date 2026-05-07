@@ -113,7 +113,7 @@ func (m *BillingModule) Collections() []module.CollectionSpec {
 
 func (m *BillingModule) NavItems() []module.NavItemSpec {
 	return []module.NavItemSpec{{
-		Realm: "business", Section: "Revenue", Tier: "internal",
+		Realm: "business", Tier: "internal",
 		Name: "Invoicing", Icon: "file-invoice", Path: "/billing",
 		Active: true,
 		Children: []module.NavItemSpec{

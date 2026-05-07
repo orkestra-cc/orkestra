@@ -122,15 +122,13 @@ Route registration and handler implementations in `handlers/handler.go`. The per
 `module.go::NavItems()` contributes **two** sidebar entries (ADR-0001 Phase 3 split — operator side vs client side must never be conflated). Both carry `Tier="internal"` so external Tier-2 callers never see them even when the menu is rendered for an admin user:
 
 ```
-Realm:   platform   (renders under "Operator")
-Section: Admin
+Realm:   platform   (renders under "Administration")
 Tier:    internal
 Name:    Internal Tenants
 Path:    /admin/internal/tenants
 MinRole: administrator
 
-Realm:   business   (renders under "Clients")
-Section: Accounts
+Realm:   business   (renders under "Business")
 Tier:    internal
 Name:    Clients
 Path:    /admin/clients

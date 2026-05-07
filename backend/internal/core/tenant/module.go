@@ -114,8 +114,8 @@ func (m *Module) NavItems() []module.NavItemSpec {
 	// entries require the administrator role and the system.tenants.admin
 	// permission (enforced at the route layer).
 	return []module.NavItemSpec{
-		{Realm: "platform", Section: "Admin", Tier: "internal", Name: "Internal Tenants", Icon: "building", Path: "/admin/internal/tenants", MinRole: "administrator", Active: true},
-		{Realm: "business", Section: "Accounts", Tier: "internal", Name: "Clients", Icon: "users", Path: "/admin/clients", MinRole: "administrator", Active: true},
+		{Realm: "platform", Tier: "internal", Name: "Internal Tenants", Icon: "building", Path: "/admin/internal/tenants", MinRole: "administrator", Active: true},
+		{Realm: "business", Tier: "internal", Name: "Clients", Icon: "users", Path: "/admin/clients", MinRole: "administrator", Active: true},
 	}
 }
 

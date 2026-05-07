@@ -55,7 +55,7 @@ func (m *Module) ProvidedServices() []module.ServiceKey {
 
 func (m *Module) NavItems() []module.NavItemSpec {
 	return []module.NavItemSpec{
-		{Realm: "platform", Section: "Admin", Tier: "internal", Name: "Role Management", Icon: "shield-alt", Path: "/admin/roles", Active: true},
+		{Realm: "platform", Tier: "internal", Name: "Role Management", Icon: "shield-alt", Path: "/admin/roles", MinRole: "administrator", Active: true},
 	}
 }
 
