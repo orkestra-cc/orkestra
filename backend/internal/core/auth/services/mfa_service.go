@@ -72,6 +72,11 @@ type MFAService interface {
 	// can revoke every trust grant the user holds. Optional — nil
 	// leaves the revoke step inert. Section C item #3.
 	SetDeviceTrust(dt DeviceTrustService)
+	// SetPolicy wires the admin-managed policy reader so backup-code
+	// generation can honour the recoveryCodesCount toggle (Phase 10
+	// of the auth-policy roadmap). Nil falls back to the legacy
+	// hardcoded BackupCodeCount.
+	SetPolicy(p *AuthPolicyService)
 }
 
 type mfaService struct {
@@ -81,12 +86,18 @@ type mfaService struct {
 	deviceTrust DeviceTrustService // optional — see SetDeviceTrust
 	issuer      string
 	logger      *slog.Logger
+	policy      *AuthPolicyService // optional — Phase 10 backup-code count
 }
 
 // SetDeviceTrust wires the optional device-trust service. Called
 // post-construction from module.go so the construction graph stays
 // free of a cross-service dependency.
 func (s *mfaService) SetDeviceTrust(dt DeviceTrustService) { s.deviceTrust = dt }
+
+// SetPolicy wires the optional auth-policy reader. Phase 10 of the
+// auth-policy roadmap — used today only by backup-code generation
+// (recoveryCodesCount). Safe to call multiple times.
+func (s *mfaService) SetPolicy(p *AuthPolicyService) { s.policy = p }
 
 // NewMFAService builds the service. `issuer` ends up as the label prefix in
 // the TOTP provisioning URI — authenticator apps show it above the 6-digit
@@ -179,7 +190,7 @@ func (s *mfaService) ConfirmEnrollment(ctx context.Context, userUUID, challengeI
 		return nil, fmt.Errorf("encrypt totp secret: %w", err)
 	}
 
-	plaintextCodes, hashedCodes, err := s.generateBackupCodes(BackupCodeCount)
+	plaintextCodes, hashedCodes, err := s.generateBackupCodes(s.recoveryCodesCount(ctx))
 	if err != nil {
 		return nil, fmt.Errorf("generate backup codes: %w", err)
 	}
@@ -392,6 +403,22 @@ func subtleConstantTimeEq(a, b string) bool {
 		diff |= a[i] ^ b[i]
 	}
 	return diff == 0
+}
+
+// recoveryCodesCount returns the configured number of one-shot
+// recovery codes to issue at enrollment time. Falls back to the
+// legacy BackupCodeCount when the policy is unwired or returns a
+// value outside the safe range (1..50). The upper bound prevents a
+// misedit from generating thousands of codes on every enrollment.
+func (s *mfaService) recoveryCodesCount(ctx context.Context) int {
+	if s.policy == nil {
+		return BackupCodeCount
+	}
+	n := s.policy.RecoveryCodesCount(ctx)
+	if n < 1 || n > 50 {
+		return BackupCodeCount
+	}
+	return n
 }
 
 // generateBackupCodes returns (plaintext, hashed) pairs. Plaintext is shown

@@ -357,6 +357,24 @@ func (m *AuthModule) ConfigSchema() []module.ConfigField {
 			Description: "Comma-separated list of role names that mandate a second factor. Recognised system roles: super_admin, administrator, developer, manager, operator, guest. Recognised org roles: org_owner, org_admin, org_member. Empty restores the built-in default (super_admin, administrator, org_owner, org_admin).",
 			Type:        module.FieldStringList,
 		},
+		{
+			Key: "recoveryCodesCount", Label: "Recovery codes issued on enrollment", Group: "MFA",
+			Description: "Number of one-shot backup codes minted when a user confirms TOTP enrollment. Default 10. Range 1–50 — outside that the legacy default (10) is used.",
+			Type:        module.FieldInt, Default: "10",
+		},
+
+		// OAuth account linking — Phase 10 of the auth-policy roadmap.
+		// Today's flow auto-links an OAuth provider to an existing
+		// account when the email matches. That's convenient but lets
+		// an attacker who controls a verified email at the IdP take
+		// over an existing Orkestra account whose owner used a
+		// password. Operators in higher-assurance deployments turn
+		// this off.
+		{
+			Key: "oauthAutoLinkByEmail", Label: "Auto-link OAuth provider to existing email account", Group: "OAuth Providers",
+			Description: "When on (default), an OAuth callback for an existing Orkestra account (matched by email) attaches the provider to that user automatically. When off, the OAuth flow refuses with 403 oauth_link_disabled and the user must initiate linking from their account settings while authenticated. Recommended off for compliance-sensitive deployments.",
+			Type:        module.FieldBool, Default: "true",
+		},
 	}
 }
 

@@ -496,6 +496,48 @@ func TestMFARequired_KillSwitchBeatsRoleList(t *testing.T) {
 	}
 }
 
+// Phase 10: recovery codes count + oauthAutoLinkByEmail.
+
+func TestRecoveryCodesCount(t *testing.T) {
+	// Unset / out-of-range returns 0 so the caller can fall through to
+	// its hardcoded default. Valid values pass through unchanged.
+	cases := []struct {
+		name string
+		set  map[string]string
+		want int
+	}{
+		{"unset → 0", nil, 0},
+		{"empty → 0", map[string]string{"recoveryCodesCount": ""}, 0},
+		{"valid 12", map[string]string{"recoveryCodesCount": "12"}, 12},
+		{"valid 1", map[string]string{"recoveryCodesCount": "1"}, 1},
+		{"non-numeric → 0", map[string]string{"recoveryCodesCount": "abc"}, 0},
+		{"zero → 0", map[string]string{"recoveryCodesCount": "0"}, 0},
+		{"negative → 0", map[string]string{"recoveryCodesCount": "-3"}, 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			p := newPolicy(tc.set)
+			if got := p.RecoveryCodesCount(context.Background()); got != tc.want {
+				t.Errorf("got %d want %d", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestOAuthAutoLinkByEmail_DefaultsTrue(t *testing.T) {
+	var p *AuthPolicyService
+	if !p.OAuthAutoLinkByEmail(context.Background()) {
+		t.Fatalf("nil policy must default to true (preserve current UX)")
+	}
+	if !newPolicy(nil).OAuthAutoLinkByEmail(context.Background()) {
+		t.Fatalf("empty config must default to true")
+	}
+	off := newPolicy(map[string]string{"oauthAutoLinkByEmail": "false"})
+	if off.OAuthAutoLinkByEmail(context.Background()) {
+		t.Fatalf("explicit false must opt out")
+	}
+}
+
 // TestMFARequired_OrgRoleStillRequiresMFA pins behaviour: even when only
 // an org_owner membership grants the privilege, the kill switch must
 // still suppress the requirement — guards against a regression where

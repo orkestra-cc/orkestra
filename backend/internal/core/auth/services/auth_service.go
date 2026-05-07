@@ -36,6 +36,12 @@ var (
 	// is off, so we refuse to provision a new account. Translated to
 	// 403 oauth_signup_disabled at the handler boundary.
 	ErrOAuthSignupDisabled = errors.New("oauth signup disabled by policy")
+	// ErrOAuthLinkDisabled signals that the OAuth callback resolved to
+	// an existing account by email but oauthAutoLinkByEmail is off.
+	// The user must initiate linking from their account settings while
+	// already authenticated. Translated to 403 oauth_link_disabled at
+	// the handler boundary.
+	ErrOAuthLinkDisabled = errors.New("oauth account linking by email is disabled")
 )
 
 // AuthService extends the basic auth service with UUID support and OAuth linking
@@ -822,6 +828,16 @@ func (s *authService) HandleOAuthCallbackWithLinking(ctx context.Context, provid
 			user = convertUserModelToAuthModel(userModel)
 			fmt.Printf("[AUTH_DEBUG] New user created successfully with UUID: %s\n", user.UUID)
 		} else {
+			// Phase 10: oauthAutoLinkByEmail gate. The callback found an
+			// existing Orkestra account by email — auto-linking the
+			// OAuth provider to it is convenient but lets an attacker
+			// who controls a matching IdP email hijack a password
+			// account. When off, refuse here so account linking must
+			// happen from an authenticated settings page instead.
+			if s.policy != nil && !s.policy.OAuthAutoLinkByEmail(ctx) {
+				fmt.Printf("[AUTH_DEBUG] OAuth auto-link disabled by policy, refusing to attach provider to existing account\n")
+				return nil, ErrOAuthLinkDisabled
+			}
 			user = convertUserResponseToAuthModel(userResponse)
 			fmt.Printf("[AUTH_DEBUG] Existing user found with UUID: %s\n", user.UUID)
 		}

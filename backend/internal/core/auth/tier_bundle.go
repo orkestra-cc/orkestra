@@ -175,6 +175,9 @@ func buildAuthTierBundle(d tierBundleDeps) (*authTierBundle, error) {
 
 	mfaSvc := services.NewMFAService(mfaRepo, d.mfaChallengeService, d.passwordService, d.mfaIssuer, d.logger)
 	mfaSvc.SetDeviceTrust(d.deviceTrust)
+	// Phase 10: hand the policy to the MFA service so backup-code
+	// generation honours the recoveryCodesCount toggle live.
+	mfaSvc.SetPolicy(d.authPolicy)
 
 	var webauthnSvc services.WebAuthnService
 	if d.webauthnRP != nil {

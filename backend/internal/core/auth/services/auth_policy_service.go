@@ -490,6 +490,36 @@ func (s *AuthPolicyService) OAuthAllowSignup(ctx context.Context, audience Polic
 	return readBool(s.cs.GetValue(ctx, "auth", key), true)
 }
 
+// RecoveryCodesCount returns the configured number of one-shot
+// backup codes to issue on TOTP enrollment. 0 / unset / out-of-range
+// returns 0 — callers fall back to their own default in that case.
+func (s *AuthPolicyService) RecoveryCodesCount(ctx context.Context) int {
+	if s == nil || s.cs == nil {
+		return 0
+	}
+	v := strings.TrimSpace(s.cs.GetValue(ctx, "auth", "recoveryCodesCount"))
+	if v == "" {
+		return 0
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 1 {
+		return 0
+	}
+	return n
+}
+
+// OAuthAutoLinkByEmail reports whether the OAuth callback should
+// auto-attach a provider to an existing Orkestra account when the
+// emails match. Defaults to true — preserves today's UX. Operators
+// in higher-assurance deployments flip it off so account linking
+// must be initiated by an authenticated user from their settings.
+func (s *AuthPolicyService) OAuthAutoLinkByEmail(ctx context.Context) bool {
+	if s == nil || s.cs == nil {
+		return true
+	}
+	return readBool(s.cs.GetValue(ctx, "auth", "oauthAutoLinkByEmail"), true)
+}
+
 // MFARequiredRoles returns the admin-managed list of role names that
 // mandate a second factor. Each entry is lowercased + trimmed so the
 // caller can do a direct case-insensitive comparison. Empty (the
