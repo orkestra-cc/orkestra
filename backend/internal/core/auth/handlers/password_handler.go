@@ -244,10 +244,13 @@ func (h *PasswordAuthHandler) ChangePassword(ctx context.Context, req *ChangePas
 	if err := h.svc.ChangePassword(ctx, userUUID, req.Body.CurrentPassword, req.Body.NewPassword); err != nil {
 		return nil, mapPasswordError(err)
 	}
-	// Refresh tokens are already invalidated inside ChangePassword; revoke
-	// the current access token's sid too so the old bearer stops working
-	// immediately instead of staying valid until its 15-minute TTL.
-	if h.sessionRevocation != nil {
+	// Phase 8: revoke the caller's session id so the old bearer stops
+	// working immediately instead of staying valid until its 15-minute
+	// TTL. Gated on the live revokeSessionsOnPasswordChange policy so
+	// admins can opt out (e.g. for migration workflows where preserving
+	// existing sessions matters more than the immediate cutover).
+	// Default-on preserves the historical behaviour.
+	if h.sessionRevocation != nil && h.svc.ShouldRevokeOnPasswordChange(ctx) {
 		if sid := currentSessionID(ctx); sid != "" {
 			_ = h.sessionRevocation.Revoke(ctx, sid, "password_change")
 		}

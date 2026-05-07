@@ -315,6 +315,19 @@ func (m *AuthModule) ConfigSchema() []module.ConfigField {
 			Description: "Disables a user account when its lastLogin is older than the configured number of days. Checked at login time so a stale account is denied at the next attempt without a periodic job. 0 = disabled.",
 			Type:        module.FieldInt, Default: "0",
 		},
+
+		// Sessions & Account — Phase 8 trivial toggles. Two existing
+		// security behaviours surfaced as live-editable knobs.
+		{
+			Key: "revokeSessionsOnPasswordChange", Label: "Revoke sessions on password change", Group: "Sessions & Account",
+			Description: "When on, a successful POST /v1/auth/{tier}/change-password also revokes the caller's current session id and every device-trust grant for the user. When off, password change leaves existing sessions alive (used for migrations or staged rollouts; not recommended in steady state). Default on.",
+			Type:        module.FieldBool, Default: "true",
+		},
+		{
+			Key: "selfServiceAccountDeletionClient", Label: "Allow client users to self-delete (GDPR erase)", Group: "Sessions & Account",
+			Description: "When on, Tier-2 client users can call POST /v1/me/dsr/erase to irreversibly wipe their personal data across every PII producer. When off (default), client tier returns 403 self_service_deletion_disabled and erasure must be triggered through the operator console. Operator-side erasure is unaffected.",
+			Type:        module.FieldBool, Default: "false",
+		},
 	}
 }
 

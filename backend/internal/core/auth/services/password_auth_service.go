@@ -867,7 +867,11 @@ func (s *PasswordAuthService) ChangePassword(ctx context.Context, userUUID, curr
 	// must not piggyback on a trust row the legitimate owner created
 	// before the breach. Best-effort — revoke failure doesn't roll
 	// the password update back.
-	if s.deviceTrust != nil {
+	//
+	// Phase 8: gated on the revokeSessionsOnPasswordChange policy toggle
+	// so admins can opt out for staged-rollout / migration workflows.
+	// Default true preserves today's behaviour.
+	if s.shouldRevokeOnPasswordChange(ctx) && s.deviceTrust != nil {
 		if err := s.deviceTrust.RevokeAllByUser(ctx, user.UUID, authModels.DeviceTrustRevokedOnPasswordChange); err != nil && s.logger != nil {
 			s.logger.Warn("device_trust: revoke on password change failed",
 				slog.String("user_uuid", user.UUID),
@@ -1153,6 +1157,21 @@ func (s *PasswordAuthService) inactiveAccountThresholdDays(ctx context.Context) 
 		return 0
 	}
 	return s.policy.InactiveAccountAutoDisableDays(ctx)
+}
+
+// ShouldRevokeOnPasswordChange exposes the live revokeSessionsOnPasswordChange
+// policy. Public so the password handler can read it before deciding
+// whether to revoke the caller's session id (the service handles the
+// service-side half — device-trust grants — itself).
+func (s *PasswordAuthService) ShouldRevokeOnPasswordChange(ctx context.Context) bool {
+	return s.shouldRevokeOnPasswordChange(ctx)
+}
+
+func (s *PasswordAuthService) shouldRevokeOnPasswordChange(ctx context.Context) bool {
+	if s.policy == nil {
+		return true
+	}
+	return s.policy.RevokeSessionsOnPasswordChange(ctx)
 }
 
 // notifyNewDeviceLogin sends the auth.new_device_login template when

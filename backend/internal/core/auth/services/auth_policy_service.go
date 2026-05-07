@@ -437,6 +437,28 @@ func (s *AuthPolicyService) CountryBlocked(ctx context.Context, country string) 
 	return false
 }
 
+// RevokeSessionsOnPasswordChange reports whether a successful password
+// change should also revoke the caller's session id + device-trust
+// grants. Defaults to true so today's behaviour is preserved when the
+// toggle isn't configured.
+func (s *AuthPolicyService) RevokeSessionsOnPasswordChange(ctx context.Context) bool {
+	if s == nil || s.cs == nil {
+		return true
+	}
+	return readBool(s.cs.GetValue(ctx, "auth", "revokeSessionsOnPasswordChange"), true)
+}
+
+// SelfServiceAccountDeletionClient reports whether Tier-2 client users
+// can call /v1/me/dsr/erase. Defaults to false so today's behaviour
+// (operator-only erasure) is preserved unless an admin explicitly
+// opens the surface up.
+func (s *AuthPolicyService) SelfServiceAccountDeletionClient(ctx context.Context) bool {
+	if s == nil || s.cs == nil {
+		return false
+	}
+	return readBool(s.cs.GetValue(ctx, "auth", "selfServiceAccountDeletionClient"), false)
+}
+
 // InactiveAccountAutoDisableDays returns the configured stale-login
 // threshold in days. 0 (or unset / negative / malformed) means the
 // inactive-account-disable feature is off.

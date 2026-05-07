@@ -551,6 +551,33 @@ func TestInactiveAccountAutoDisableDays(t *testing.T) {
 	}
 }
 
+// Phase 8: trivial toggles.
+
+func TestRevokeSessionsOnPasswordChange_DefaultsTrue(t *testing.T) {
+	var p *AuthPolicyService
+	if !p.RevokeSessionsOnPasswordChange(context.Background()) {
+		t.Fatalf("nil policy must default to true (preserve current behaviour)")
+	}
+	if !newPolicy(nil).RevokeSessionsOnPasswordChange(context.Background()) {
+		t.Fatalf("empty config must default to true")
+	}
+	off := newPolicy(map[string]string{"revokeSessionsOnPasswordChange": "false"})
+	if off.RevokeSessionsOnPasswordChange(context.Background()) {
+		t.Fatalf("explicit false must opt out")
+	}
+}
+
+func TestSelfServiceAccountDeletionClient_DefaultsFalse(t *testing.T) {
+	var p *AuthPolicyService
+	if p.SelfServiceAccountDeletionClient(context.Background()) {
+		t.Fatalf("nil policy must default to false (operator-only deletion)")
+	}
+	on := newPolicy(map[string]string{"selfServiceAccountDeletionClient": "yes"})
+	if !on.SelfServiceAccountDeletionClient(context.Background()) {
+		t.Fatalf("yes must enable the client surface")
+	}
+}
+
 func TestDefaultClientRole_FallbackAndOverride(t *testing.T) {
 	cases := []struct {
 		name string
