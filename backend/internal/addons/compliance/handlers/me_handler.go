@@ -133,6 +133,16 @@ func RegisterMeRoutes(api huma.API, h *MeHandler) {
 // selfServiceAccountDeletionClient policy toggle.
 type SelfDeletionGate func(ctx context.Context) bool
 
+// EraseGated wraps Erase with a SelfDeletionGate check. Returns 403
+// when the gate denies; otherwise delegates to Erase. Exported so the
+// gate logic can be exercised by tests without a full Huma server.
+func (h *MeHandler) EraseGated(ctx context.Context, gate SelfDeletionGate, req *struct{}) (*EraseOutput, error) {
+	if gate != nil && !gate(ctx) {
+		return nil, huma.NewError(http.StatusForbidden, "Self-service account deletion is disabled. Contact an administrator.")
+	}
+	return h.Erase(ctx, req)
+}
+
 // RegisterClientMeRoutes mounts the DSR endpoints on the client API
 // surface. Export is unconditional — read access is always safe.
 // Erase is wrapped in the gate: when SelfServiceAccountDeletionClient
@@ -148,12 +158,6 @@ func RegisterClientMeRoutes(api huma.API, h *MeHandler, gate SelfDeletionGate) {
 		Tags:        []string{"Compliance", "DSR"},
 	}, h.Export)
 
-	gated := func(ctx context.Context, req *struct{}) (*EraseOutput, error) {
-		if gate != nil && !gate(ctx) {
-			return nil, huma.NewError(http.StatusForbidden, "Self-service account deletion is disabled. Contact an administrator.")
-		}
-		return h.Erase(ctx, req)
-	}
 	huma.Register(api, huma.Operation{
 		OperationID: "compliance-me-dsr-erase-client",
 		Method:      http.MethodPost,
@@ -161,5 +165,7 @@ func RegisterClientMeRoutes(api huma.API, h *MeHandler, gate SelfDeletionGate) {
 		Summary:     "Erase the caller's personal data (GDPR right to erasure)",
 		Description: "Irreversibly deletes the caller's personal data. Gated on the auth.selfServiceAccountDeletionClient admin toggle — disabled by default.",
 		Tags:        []string{"Compliance", "DSR"},
-	}, gated)
+	}, func(ctx context.Context, req *struct{}) (*EraseOutput, error) {
+		return h.EraseGated(ctx, gate, req)
+	})
 }
