@@ -6,15 +6,13 @@ import (
 	"time"
 
 	"github.com/orkestra/backend/internal/core/tenant/models"
-	"github.com/orkestra/backend/internal/shared/iface"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 // CollEntitlements is the projection of active and historical capability
-// entitlements held by owners (users or tenants). See models/entitlement.go
-// for the row shape.
+// entitlements held by tenants. See models/entitlement.go for the row shape.
 const CollEntitlements = "tenant_entitlements"
 
 // CreateEntitlement inserts a new entitlement row. The caller stamps UUID and
@@ -28,27 +26,19 @@ func (r *Repository) CreateEntitlement(ctx context.Context, e *models.Entitlemen
 	return err
 }
 
-// ownerFilter builds the polymorphic-owner predicate every entitlement query
-// shares. Centralized so the bson field names (ownerKind/ownerUUID) live in
-// exactly one place.
-func ownerFilter(owner iface.Owner) bson.M {
-	return bson.M{
-		"ownerKind": string(owner.Kind),
-		"ownerUUID": owner.UUID,
-	}
-}
-
 // GetActiveEntitlement returns the active (non-revoked, non-expired)
-// entitlement of an owner for a specific capability. Returns ErrNotFound if
+// entitlement of a tenant for a specific capability. Returns ErrNotFound if
 // none exists.
-func (r *Repository) GetActiveEntitlement(ctx context.Context, owner iface.Owner, capabilityID string) (*models.Entitlement, error) {
+func (r *Repository) GetActiveEntitlement(ctx context.Context, tenantUUID, capabilityID string) (*models.Entitlement, error) {
 	now := time.Now()
-	filter := ownerFilter(owner)
-	filter["capabilityId"] = capabilityID
-	filter["revokedAt"] = nil
-	filter["$or"] = []bson.M{
-		{"expiresAt": nil},
-		{"expiresAt": bson.M{"$gt": now}},
+	filter := bson.M{
+		"tenantUUID":   tenantUUID,
+		"capabilityId": capabilityID,
+		"revokedAt":    nil,
+		"$or": []bson.M{
+			{"expiresAt": nil},
+			{"expiresAt": bson.M{"$gt": now}},
+		},
 	}
 	var e models.Entitlement
 	err := r.db.Collection(CollEntitlements).FindOne(ctx, filter).Decode(&e)
@@ -61,17 +51,19 @@ func (r *Repository) GetActiveEntitlement(ctx context.Context, owner iface.Owner
 	return &e, nil
 }
 
-// HasActiveEntitlement reports whether the owner currently has any active
+// HasActiveEntitlement reports whether the tenant currently has any active
 // entitlement to the capability. A read-optimized shortcut over
 // GetActiveEntitlement that avoids decoding the full row.
-func (r *Repository) HasActiveEntitlement(ctx context.Context, owner iface.Owner, capabilityID string) (bool, error) {
+func (r *Repository) HasActiveEntitlement(ctx context.Context, tenantUUID, capabilityID string) (bool, error) {
 	now := time.Now()
-	filter := ownerFilter(owner)
-	filter["capabilityId"] = capabilityID
-	filter["revokedAt"] = nil
-	filter["$or"] = []bson.M{
-		{"expiresAt": nil},
-		{"expiresAt": bson.M{"$gt": now}},
+	filter := bson.M{
+		"tenantUUID":   tenantUUID,
+		"capabilityId": capabilityID,
+		"revokedAt":    nil,
+		"$or": []bson.M{
+			{"expiresAt": nil},
+			{"expiresAt": bson.M{"$gt": now}},
+		},
 	}
 	n, err := r.db.Collection(CollEntitlements).CountDocuments(ctx, filter, options.Count().SetLimit(1))
 	if err != nil {
@@ -80,15 +72,17 @@ func (r *Repository) HasActiveEntitlement(ctx context.Context, owner iface.Owner
 	return n > 0, nil
 }
 
-// ListActiveByOwner returns every active entitlement held by an owner,
+// ListActiveByTenant returns every active entitlement held by a tenant,
 // sorted by capability ID for deterministic output.
-func (r *Repository) ListActiveByOwner(ctx context.Context, owner iface.Owner) ([]models.Entitlement, error) {
+func (r *Repository) ListActiveByTenant(ctx context.Context, tenantUUID string) ([]models.Entitlement, error) {
 	now := time.Now()
-	filter := ownerFilter(owner)
-	filter["revokedAt"] = nil
-	filter["$or"] = []bson.M{
-		{"expiresAt": nil},
-		{"expiresAt": bson.M{"$gt": now}},
+	filter := bson.M{
+		"tenantUUID": tenantUUID,
+		"revokedAt":  nil,
+		"$or": []bson.M{
+			{"expiresAt": nil},
+			{"expiresAt": bson.M{"$gt": now}},
+		},
 	}
 	cur, err := r.db.Collection(CollEntitlements).Find(ctx, filter, options.Find().SetSort(bson.D{{Key: "capabilityId", Value: 1}}))
 	if err != nil {
@@ -103,12 +97,14 @@ func (r *Repository) ListActiveByOwner(ctx context.Context, owner iface.Owner) (
 }
 
 // RevokeActiveEntitlement marks the active entitlement for the
-// (owner, capability) pair as revoked. Idempotent: returns ErrNotFound if no
-// active row exists. Never mutates already-revoked rows.
-func (r *Repository) RevokeActiveEntitlement(ctx context.Context, owner iface.Owner, capabilityID string, at time.Time) error {
-	filter := ownerFilter(owner)
-	filter["capabilityId"] = capabilityID
-	filter["revokedAt"] = nil
+// (tenantUUID, capabilityID) pair as revoked. Idempotent: returns
+// ErrNotFound if no active row exists. Never mutates already-revoked rows.
+func (r *Repository) RevokeActiveEntitlement(ctx context.Context, tenantUUID, capabilityID string, at time.Time) error {
+	filter := bson.M{
+		"tenantUUID":   tenantUUID,
+		"capabilityId": capabilityID,
+		"revokedAt":    nil,
+	}
 	res, err := r.db.Collection(CollEntitlements).UpdateOne(ctx, filter, bson.M{"$set": bson.M{"revokedAt": at}})
 	if err != nil {
 		return err

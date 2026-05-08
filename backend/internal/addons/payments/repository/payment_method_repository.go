@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/orkestra/backend/internal/addons/payments/models"
-	"github.com/orkestra/backend/internal/shared/iface"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 )
@@ -16,7 +15,7 @@ var ErrPaymentMethodNotFound = errors.New("payments: payment method not found")
 type PaymentMethodRepository interface {
 	Create(ctx context.Context, pm *models.PaymentMethod) error
 	GetByUUID(ctx context.Context, uuid string) (*models.PaymentMethod, error)
-	ListByOwner(ctx context.Context, owner iface.Owner) ([]models.PaymentMethod, error)
+	ListByTenant(ctx context.Context, tenantUUID string) ([]models.PaymentMethod, error)
 	Delete(ctx context.Context, uuid string) error
 }
 
@@ -50,14 +49,11 @@ func (r *paymentMethodRepository) GetByUUID(ctx context.Context, uuid string) (*
 	return &pm, nil
 }
 
-func (r *paymentMethodRepository) ListByOwner(ctx context.Context, owner iface.Owner) ([]models.PaymentMethod, error) {
-	if owner.IsZero() {
+func (r *paymentMethodRepository) ListByTenant(ctx context.Context, tenantUUID string) ([]models.PaymentMethod, error) {
+	if tenantUUID == "" {
 		return nil, nil
 	}
-	filter := bson.M{
-		"ownerKind": string(owner.Kind),
-		"ownerUUID": owner.UUID,
-	}
+	filter := bson.M{"tenantUUID": tenantUUID}
 	cur, err := r.coll.Find(ctx, filter)
 	if err != nil {
 		return nil, err

@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/orkestra/backend/internal/addons/subscriptions/models"
-	"github.com/orkestra/backend/internal/shared/iface"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
@@ -20,7 +19,7 @@ func optionsFindSortCreatedAtDesc() *options.FindOptions {
 var ErrSubscriptionNotFound = errors.New("subscriptions: subscription not found")
 
 type SubscriptionFilters struct {
-	Owner       iface.Owner // Kind+UUID; either field empty disables the filter
+	TenantUUID  string
 	ServiceUUID string
 	Status      models.SubStatus
 }
@@ -33,10 +32,10 @@ type SubscriptionRepository interface {
 	// FindDue returns subscriptions in active/past_due whose NextBillingAt is
 	// on or before `now`. Used by the renewal job every tick.
 	FindDue(ctx context.Context, now time.Time) ([]models.Subscription, error)
-	// FindByOwner returns every subscription bound to the given polymorphic
-	// owner. Sorted by createdAt desc. Used by self-service handlers and the
-	// admin aggregator GET /v1/admin/tenants/{id}/subscriptions.
-	FindByOwner(ctx context.Context, owner iface.Owner) ([]models.Subscription, error)
+	// FindByTenant returns every subscription bound to the given tenant.
+	// Sorted by createdAt desc. Used by self-service handlers and the admin
+	// aggregator GET /v1/admin/tenants/{id}/subscriptions.
+	FindByTenant(ctx context.Context, tenantUUID string) ([]models.Subscription, error)
 	UpdateStatus(ctx context.Context, uuid string, status models.SubStatus) error
 	Delete(ctx context.Context, uuid string) error
 }
@@ -73,9 +72,8 @@ func (r *subscriptionRepository) GetByUUID(ctx context.Context, uuid string) (*m
 
 func (r *subscriptionRepository) List(ctx context.Context, f SubscriptionFilters) ([]models.Subscription, error) {
 	filter := bson.M{}
-	if !f.Owner.IsZero() {
-		filter["ownerKind"] = string(f.Owner.Kind)
-		filter["ownerUUID"] = f.Owner.UUID
+	if f.TenantUUID != "" {
+		filter["tenantUUID"] = f.TenantUUID
 	}
 	if f.ServiceUUID != "" {
 		filter["serviceUUID"] = f.ServiceUUID
@@ -95,15 +93,12 @@ func (r *subscriptionRepository) List(ctx context.Context, f SubscriptionFilters
 	return out, nil
 }
 
-func (r *subscriptionRepository) FindByOwner(ctx context.Context, owner iface.Owner) ([]models.Subscription, error) {
-	if owner.IsZero() {
+func (r *subscriptionRepository) FindByTenant(ctx context.Context, tenantUUID string) ([]models.Subscription, error) {
+	if tenantUUID == "" {
 		return nil, nil
 	}
 	opts := optionsFindSortCreatedAtDesc()
-	filter := bson.M{
-		"ownerKind": string(owner.Kind),
-		"ownerUUID": owner.UUID,
-	}
+	filter := bson.M{"tenantUUID": tenantUUID}
 	cur, err := r.coll.Find(ctx, filter, opts)
 	if err != nil {
 		return nil, err

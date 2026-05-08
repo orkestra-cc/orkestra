@@ -825,14 +825,14 @@ func (m *AuthMiddleware) RequireCapability(capabilityID string) func(http.Handle
 					WithOperation("require_capability").Build())
 				return
 			}
-			owner, ok := capabilityOwnerFromRequest(r)
+			tenantUUID, ok := capabilityTenantFromRequest(r)
 			if !ok {
-				m.sendErrorResponse(w, r, errors.AuthorizationError("authentication required").
+				m.sendErrorResponse(w, r, errors.AuthorizationError("tenant context required").
 					WithOperation("require_capability").
 					WithDetail("capability", capabilityID).Build())
 				return
 			}
-			allowed, err := m.access.HasCapability(r.Context(), owner, capabilityID)
+			allowed, err := m.access.HasCapability(r.Context(), tenantUUID, capabilityID)
 			if err != nil {
 				m.sendErrorResponse(w, r, errors.InternalError("capability check failed").
 					WithOperation("require_capability").
@@ -840,12 +840,12 @@ func (m *AuthMiddleware) RequireCapability(capabilityID string) func(http.Handle
 				return
 			}
 			if !allowed {
-				// Phase 5.3: count every 402 so operators can see
-				// which capabilities generate the most owner
-				// friction. Label is the capability ID (bounded by
-				// the Capabilities() catalog cardinality).
+				// Count every 402 so operators can see which capabilities
+				// generate the most tenant friction. Label is the
+				// capability ID (bounded by the Capabilities() catalog
+				// cardinality).
 				metrics.Default().RecordCapabilityDenied(capabilityID)
-				m.sendCapabilityRequiredResponse(w, r, capabilityID, owner.UUID)
+				m.sendCapabilityRequiredResponse(w, r, capabilityID, tenantUUID)
 				return
 			}
 			next.ServeHTTP(w, r)
@@ -853,19 +853,16 @@ func (m *AuthMiddleware) RequireCapability(capabilityID string) func(http.Handle
 	}
 }
 
-// capabilityOwnerFromRequest derives the polymorphic owner the capability
-// gate evaluates against. Tenant context wins when present (X-Tenant-ID
-// already verified by middleware-level RequireAuth membership checks);
-// otherwise the calling user is the owner. Returns false when neither
-// context is set — the caller is unauthenticated.
-func capabilityOwnerFromRequest(r *http.Request) (iface.Owner, bool) {
+// capabilityTenantFromRequest returns the tenant UUID the capability gate
+// evaluates against — the request's resolved X-Tenant-ID. Returns false
+// when no tenant context is set; capability gating without a tenant is
+// undefined post Unified Client Aggregate (every billable principal is a
+// tenant).
+func capabilityTenantFromRequest(r *http.Request) (string, bool) {
 	if tenantID, ok := GetTenantID(r.Context()); ok && tenantID != "" {
-		return iface.TenantOwner(tenantID), true
+		return tenantID, true
 	}
-	if userUUID, ok := GetUserUUID(r.Context()); ok && userUUID != "" {
-		return iface.UserOwner(userUUID), true
-	}
-	return iface.Owner{}, false
+	return "", false
 }
 
 // RequireGlobal is a pass-through for routes that don't need an org context

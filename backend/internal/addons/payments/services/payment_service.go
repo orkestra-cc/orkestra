@@ -90,13 +90,10 @@ func (s *PaymentService) ChargeSubscription(ctx context.Context, in iface.Subscr
 		ProviderTxID:     result.ProviderTxID,
 		SubscriptionUUID: in.SubscriptionUUID,
 		InvoiceUUID:      in.InvoiceUUID,
-		// Polymorphic owner binding — preferred from the charge's Owner
-		// field, with a fallback to the metadata stamp the renewal
-		// service writes. Either source carries the same data; the
-		// metadata fallback handles legacy callers that have not yet
-		// switched off iface.SubscriptionCharge.Metadata.
-		OwnerKind:   ownerKindFromCharge(in),
-		OwnerUUID:   ownerUUIDFromCharge(in),
+		// Tenant binding — preferred from the charge's TenantUUID field,
+		// with a fallback to the metadata stamp the renewal service writes
+		// alongside it.
+		TenantUUID:  tenantUUIDFromCharge(in),
 		AmountCents: in.AmountCents,
 		Currency:    in.Currency,
 		Description: in.Description,
@@ -219,8 +216,7 @@ func (s *PaymentService) Provider(name models.ProviderName) (iface.PaymentProvid
 
 // metadataID returns the value stored under key in the subscription-charge
 // metadata map, or the empty string when the map is nil or the key is
-// absent. Used to extract polymorphic-owner fields stamped by the renewal
-// service when the explicit Owner field on the charge struct is unset.
+// absent.
 func metadataID(md map[string]string, key string) string {
 	if md == nil {
 		return ""
@@ -228,21 +224,12 @@ func metadataID(md map[string]string, key string) string {
 	return md[key]
 }
 
-// ownerKindFromCharge returns the owner kind to persist on the transaction.
-// Prefers the explicit Owner field; falls back to the metadata stamp the
-// renewal service writes alongside it.
-func ownerKindFromCharge(in iface.SubscriptionCharge) iface.OwnerKind {
-	if in.Owner.Kind != "" {
-		return in.Owner.Kind
+// tenantUUIDFromCharge returns the tenant UUID to persist on the
+// transaction. Prefers the explicit TenantUUID field; falls back to the
+// metadata stamp the renewal service writes alongside it.
+func tenantUUIDFromCharge(in iface.SubscriptionCharge) string {
+	if in.TenantUUID != "" {
+		return in.TenantUUID
 	}
-	return iface.OwnerKind(metadataID(in.Metadata, "ownerKind"))
-}
-
-// ownerUUIDFromCharge returns the owner UUID to persist on the transaction.
-// Prefers the explicit Owner field; falls back to the metadata stamp.
-func ownerUUIDFromCharge(in iface.SubscriptionCharge) string {
-	if in.Owner.UUID != "" {
-		return in.Owner.UUID
-	}
-	return metadataID(in.Metadata, "ownerUUID")
+	return metadataID(in.Metadata, "tenantUUID")
 }

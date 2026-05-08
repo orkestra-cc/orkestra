@@ -21,14 +21,12 @@ func NewTenantPaymentAdapter(transactions repository.TransactionRepository) *Ten
 	return &TenantPaymentAdapter{transactions: transactions}
 }
 
-// ListByTenant returns every transaction billed to the tenant. After the
-// post-onboarding refactor the owner is polymorphic; the admin aggregator
-// only renders tenant-owned rows.
+// ListByTenant returns every transaction billed to the tenant.
 func (a *TenantPaymentAdapter) ListByTenant(ctx context.Context, tenantUUID string) ([]iface.TenantPayment, error) {
 	if tenantUUID == "" {
 		return []iface.TenantPayment{}, nil
 	}
-	rows, err := a.transactions.FindByOwner(ctx, iface.TenantOwner(tenantUUID))
+	rows, err := a.transactions.FindByTenant(ctx, tenantUUID)
 	if err != nil {
 		return nil, err
 	}
@@ -37,7 +35,7 @@ func (a *TenantPaymentAdapter) ListByTenant(ctx context.Context, tenantUUID stri
 		r := rows[i]
 		out = append(out, iface.TenantPayment{
 			UUID:             r.UUID,
-			TenantUUID:       r.OwnerUUID,
+			TenantUUID:       r.TenantUUID,
 			SubscriptionUUID: r.SubscriptionUUID,
 			InvoiceUUID:      r.InvoiceUUID,
 			Provider:         string(r.Provider),

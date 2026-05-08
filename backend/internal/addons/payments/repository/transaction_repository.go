@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/orkestra/backend/internal/addons/payments/models"
-	"github.com/orkestra/backend/internal/shared/iface"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
@@ -17,7 +16,7 @@ var ErrTransactionNotFound = errors.New("payments: transaction not found")
 type TransactionFilters struct {
 	SubscriptionUUID string
 	InvoiceUUID      string
-	Owner            iface.Owner
+	TenantUUID       string
 	Status           models.TransactionStatus
 	Since            *time.Time
 	Until            *time.Time
@@ -28,10 +27,10 @@ type TransactionRepository interface {
 	GetByUUID(ctx context.Context, uuid string) (*models.Transaction, error)
 	GetByProviderTxID(ctx context.Context, provider models.ProviderName, providerTxID string) (*models.Transaction, error)
 	List(ctx context.Context, f TransactionFilters) ([]models.Transaction, error)
-	// FindByOwner lists transactions billed to the polymorphic owner. Backs
-	// the admin aggregator GET /v1/admin/tenants/{id}/payments and the
-	// self-service /v1/me/transactions endpoint.
-	FindByOwner(ctx context.Context, owner iface.Owner) ([]models.Transaction, error)
+	// FindByTenant lists transactions billed to the given tenant. Backs the
+	// admin aggregator GET /v1/admin/tenants/{id}/payments and the self-
+	// service /v1/me/transactions endpoint.
+	FindByTenant(ctx context.Context, tenantUUID string) ([]models.Transaction, error)
 	Update(ctx context.Context, t *models.Transaction) error
 }
 
@@ -85,9 +84,8 @@ func (r *transactionRepository) List(ctx context.Context, f TransactionFilters) 
 	if f.InvoiceUUID != "" {
 		filter["invoiceUUID"] = f.InvoiceUUID
 	}
-	if !f.Owner.IsZero() {
-		filter["ownerKind"] = string(f.Owner.Kind)
-		filter["ownerUUID"] = f.Owner.UUID
+	if f.TenantUUID != "" {
+		filter["tenantUUID"] = f.TenantUUID
 	}
 	if f.Status != "" {
 		filter["status"] = f.Status
@@ -115,15 +113,12 @@ func (r *transactionRepository) List(ctx context.Context, f TransactionFilters) 
 	return out, nil
 }
 
-func (r *transactionRepository) FindByOwner(ctx context.Context, owner iface.Owner) ([]models.Transaction, error) {
-	if owner.IsZero() {
+func (r *transactionRepository) FindByTenant(ctx context.Context, tenantUUID string) ([]models.Transaction, error) {
+	if tenantUUID == "" {
 		return nil, nil
 	}
 	opts := options.Find().SetSort(bson.D{{Key: "createdAt", Value: -1}})
-	filter := bson.M{
-		"ownerKind": string(owner.Kind),
-		"ownerUUID": owner.UUID,
-	}
+	filter := bson.M{"tenantUUID": tenantUUID}
 	cur, err := r.coll.Find(ctx, filter, opts)
 	if err != nil {
 		return nil, err

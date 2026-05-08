@@ -57,10 +57,6 @@ func (m *SubscriptionsModule) OptionalServices() []module.ServiceKey {
 		module.ServicePaymentProvider,
 		module.ServiceNotificationSender,
 		module.ServicePDFService,
-		// User billing provider drives renewal of user-owned subscriptions
-		// (Phase 2). Optional: when missing, user-owner renewals fail fast
-		// while tenant-owner renewals continue unchanged.
-		module.ServiceUserBillingCustomerProvider,
 	}
 }
 
@@ -80,13 +76,10 @@ func (m *SubscriptionsModule) Collections() []module.CollectionSpec {
 		}},
 		{Name: models.SubscriptionsCollection, Indexes: []module.IndexSpec{
 			{Keys: map[string]int{"uuid": 1}, Unique: true},
-			// Owner-scoped lookups for self-service /v1/me/subscriptions and
-			// the admin aggregator GET /v1/admin/tenants/{id}/subscriptions.
-			// Owners are polymorphic: Kind="user" for self-registered clients,
-			// Kind="tenant" for admin-attached business members.
+			// Tenant-scoped lookups for self-service /v1/me/subscriptions
+			// and the admin aggregator GET /v1/admin/tenants/{id}/subscriptions.
 			{OrderedKeys: []module.IndexKey{
-				{Field: "ownerKind", Direction: 1},
-				{Field: "ownerUUID", Direction: 1},
+				{Field: "tenantUUID", Direction: 1},
 				{Field: "status", Direction: 1},
 			}},
 			{Keys: map[string]int{"nextBillingAt": 1, "status": 1}},
@@ -146,26 +139,20 @@ func (m *SubscriptionsModule) Init(deps *module.Dependencies) error {
 	tenantProvider, _ := module.GetTyped[iface.TenantProvider](deps.Services, module.ServiceTenantProvider)
 	accessProvider, _ := module.GetTyped[iface.AccessProvider](deps.Services, module.ServiceAccessProvider)
 
-	lazyTenantProvisioning := false
-	if deps.Config != nil {
-		lazyTenantProvisioning = deps.Config.Features.LazyTenantProvisioning
-	}
-
-	entitlementSyncer := services.NewEntitlementSyncer(serviceRepo, accessProvider, tenantProvider, lazyTenantProvisioning, deps.Logger)
+	entitlementSyncer := services.NewEntitlementSyncer(serviceRepo, accessProvider, tenantProvider, deps.Logger)
 
 	subscriptionSvc := services.NewSubscriptionService(subRepo, serviceRepo, activitySvc, entitlementSyncer, tenantProvider, deps.Logger)
 
 	notifier, _ := module.GetTyped[iface.NotificationSender](deps.Services, module.ServiceNotificationSender)
-	userBilling, _ := module.GetTyped[iface.UserBillingCustomerProvider](deps.Services, module.ServiceUserBillingCustomerProvider)
 
 	renewalSvc := services.NewRenewalService(
 		subRepo, serviceRepo, invoiceRepo,
-		activitySvc, entitlementSyncer, tenantProvider, userBilling, notifier, deps.Services, deps.Logger,
+		activitySvc, entitlementSyncer, tenantProvider, notifier, deps.Services, deps.Logger,
 	)
 	reconciler := services.NewReconciler(invoiceRepo, subRepo, activitySvc, entitlementSyncer, deps.Logger)
 
 	m.serviceHandler = handlers.NewServiceHandler(serviceSvc)
-	m.subscriptionHandler = handlers.NewSubscriptionHandler(subscriptionSvc, renewalSvc, invoiceRepo, activitySvc, tenantProvider, lazyTenantProvisioning)
+	m.subscriptionHandler = handlers.NewSubscriptionHandler(subscriptionSvc, renewalSvc, invoiceRepo, activitySvc, tenantProvider)
 
 	interval := deps.GetConfigDuration("subscriptions", "renewalInterval", time.Hour)
 	m.renewalJob = jobs.NewRenewalJob(renewalSvc, interval, deps.Logger)

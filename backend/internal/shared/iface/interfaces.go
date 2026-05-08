@@ -254,45 +254,6 @@ type NotificationSender interface {
 }
 
 // ---------------------------------------------------------------------------
-// Owner — polymorphic principal for entitlement / billing ownership.
-//
-// After the post-onboarding refactor, subscriptions, transactions, payment
-// methods, billing customers and capability entitlements no longer assume a
-// tenant scope. A self-registered client can own any of those resources
-// directly (Kind = "user"); admin-curated tenants aggregate multiple clients
-// (Kind = "tenant"). Every cross-module call that used to pass a tenant UUID
-// now passes an Owner so the implementation can branch on Kind.
-// ---------------------------------------------------------------------------
-
-// OwnerKind discriminates the owner universe. Constants are duplicated from
-// the persisted bson values so every consumer can compare without importing
-// a deeper model package.
-type OwnerKind string
-
-const (
-	OwnerKindUser   OwnerKind = "user"
-	OwnerKindTenant OwnerKind = "tenant"
-)
-
-// Owner identifies the principal that holds an entitlement / subscription /
-// billing customer. UUID is the user UUID when Kind=="user", the tenant UUID
-// when Kind=="tenant".
-type Owner struct {
-	Kind OwnerKind
-	UUID string
-}
-
-// IsZero reports whether the Owner is unset. Helpers panic on zero values
-// rather than silently writing rows with no scope.
-func (o Owner) IsZero() bool { return o.Kind == "" || o.UUID == "" }
-
-// UserOwner is a constructor for the common Kind="user" case.
-func UserOwner(userUUID string) Owner { return Owner{Kind: OwnerKindUser, UUID: userUUID} }
-
-// TenantOwner is a constructor for the common Kind="tenant" case.
-func TenantOwner(tenantUUID string) Owner { return Owner{Kind: OwnerKindTenant, UUID: tenantUUID} }
-
-// ---------------------------------------------------------------------------
 // TenantProvider — consumed by: authz, auth (JWT issuance), middleware,
 // every data module via the tenantrepo helper.
 //
@@ -471,32 +432,31 @@ type BillingTenantProvider interface {
 // AccessProvider — consumed by: middleware (RequireCapability), authz
 // (Cedar principal builder), subscriptions (entitlement syncer).
 //
-// Owns the capability-entitlements projection. After the post-onboarding
-// refactor entitlements are keyed by polymorphic Owner — a self-registered
-// client carries Kind=user, an admin-attached business carries Kind=tenant.
-// Internal operator tenants short-circuit to true: capabilities are the
-// monetization seam for external clients only.
+// Owns the capability-entitlements projection. Entitlements are keyed by
+// tenant UUID — every billable principal is a Tenant aggregate after the
+// Unified Client Aggregate refactor. Internal operator tenants short-circuit
+// to true: capabilities are the monetization seam for external clients only.
 // ---------------------------------------------------------------------------
 
 type AccessProvider interface {
-	// HasCapability reports whether the owner currently holds an active
+	// HasCapability reports whether the tenant currently holds an active
 	// entitlement to the capability ID. Returns false if no active row
 	// exists, regardless of whether the capability ID is known in the
 	// catalog — the catalog is advisory, the projection is authoritative.
-	HasCapability(ctx context.Context, owner Owner, capabilityID string) (bool, error)
-	// GrantCapability creates an active entitlement for (owner, capID).
+	HasCapability(ctx context.Context, tenantUUID, capabilityID string) (bool, error)
+	// GrantCapability creates an active entitlement for (tenant, capID).
 	// If an active entitlement already exists for that pair, it is revoked
-	// first so the one-active-per-(owner, capability) invariant holds.
+	// first so the one-active-per-(tenant, capability) invariant holds.
 	// Safe to replay — the same input produces the same effective state,
 	// with a fresh audit row.
 	GrantCapability(ctx context.Context, in GrantCapabilityInput) error
-	// RevokeCapability marks the active entitlement for (owner, capID) as
+	// RevokeCapability marks the active entitlement for (tenant, capID) as
 	// revoked. Idempotent: a no-op if no active row exists.
-	RevokeCapability(ctx context.Context, owner Owner, capabilityID string) error
-	// ListCapabilityIDs returns the capability IDs the owner currently
+	RevokeCapability(ctx context.Context, tenantUUID, capabilityID string) error
+	// ListCapabilityIDs returns the capability IDs the tenant currently
 	// holds active entitlements for, deduplicated and in deterministic
 	// order.
-	ListCapabilityIDs(ctx context.Context, owner Owner) ([]string, error)
+	ListCapabilityIDs(ctx context.Context, tenantUUID string) ([]string, error)
 }
 
 // GrantCapabilityInput is the cross-module payload for granting a capability
@@ -504,9 +464,9 @@ type AccessProvider interface {
 // from (subscription row, admin action, trial program) so it can be replayed
 // or revoked by origin.
 type GrantCapabilityInput struct {
-	// Owner is the principal receiving the grant. Required — empty kind or
-	// UUID is rejected at the service layer.
-	Owner        Owner
+	// TenantUUID is the tenant receiving the grant. Required — empty values
+	// are rejected at the service layer.
+	TenantUUID   string
 	CapabilityID string
 	// Source categorizes the grant. Known values: "subscription", "grant",
 	// "trial". Matches models.EntitlementSource on the tenant side.
@@ -566,15 +526,15 @@ type AuthzProvider interface {
 // ---------------------------------------------------------------------------
 
 type CustomerInput struct {
-	// Owner is the polymorphic principal the gateway customer represents.
-	// Echoed into Stripe customer metadata so cross-system reconciliation
-	// can locate the owning user / tenant from the gateway side.
-	Owner     Owner
-	Email     string
-	Name      string
-	VATNumber string
-	Country   string
-	Metadata  map[string]string
+	// TenantUUID is the tenant the gateway customer represents. Echoed into
+	// Stripe customer metadata so cross-system reconciliation can locate
+	// the owning tenant from the gateway side.
+	TenantUUID string
+	Email      string
+	Name       string
+	VATNumber  string
+	Country    string
+	Metadata   map[string]string
 }
 
 type CustomerRef struct {
@@ -594,10 +554,10 @@ type PaymentMethodRef struct {
 type SubscriptionCharge struct {
 	SubscriptionUUID string
 	InvoiceUUID      string // used as idempotency key (provider metadata)
-	// Owner is the polymorphic principal the charge is attributed to.
-	// Stamped into the resulting PaymentIntent metadata so the webhook
-	// reconciler can route events back to the owner without a join.
-	Owner         Owner
+	// TenantUUID is the tenant the charge is attributed to. Stamped into
+	// the resulting PaymentIntent metadata so the webhook reconciler can
+	// route events back to the tenant without a join.
+	TenantUUID    string
 	Customer      CustomerRef
 	PaymentMethod *PaymentMethodRef // nil = use default on customer
 	AmountCents   int64
@@ -766,10 +726,10 @@ type TenantSubscriptionProvider interface {
 
 type CheckoutPlan struct {
 	SubscriptionUUID string
-	// Owner is the polymorphic principal owning the subscription. Handlers
-	// re-check ownership (membership for tenant; identity for user) before
-	// opening the gateway session.
-	Owner         Owner
+	// TenantUUID is the tenant owning the subscription. Handlers re-check
+	// ownership (caller is a member of the tenant) before opening the
+	// gateway session.
+	TenantUUID    string
 	ServiceUUID   string
 	ServiceName   string
 	TierCode      string

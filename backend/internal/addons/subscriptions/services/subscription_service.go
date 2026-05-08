@@ -18,16 +18,16 @@ var (
 	ErrSubscriptionCancelled    = errors.New("subscription is already cancelled")
 	ErrSubscriptionNotPausable  = errors.New("subscription cannot be reactivated from current state")
 	ErrSubscriptionServiceCode  = errors.New("service code not found or inactive")
-	ErrSubscriptionOwner        = errors.New("owner (kind+uuid) is required")
+	ErrSubscriptionTenant       = errors.New("tenantUUID is required")
 )
 
 // SubscriptionService owns the state machine and period math for a
 // Subscription. It does NOT trigger charges — that's RenewalService's job.
 //
-// Subscriptions are owned by a polymorphic Owner (a self-registered user or
-// an admin-attached tenant) — the post-onboarding refactor replaced the
-// tenant-only ownership with `(OwnerKind, OwnerUUID)` so personal clients
-// can subscribe without a tenant existing.
+// Subscriptions are owned by a Tenant aggregate (post Unified Client
+// Aggregate refactor). Self-registered clients hold subscriptions on their
+// personal tenant; admin-attached business clients hold them on the
+// business tenant.
 type SubscriptionService struct {
 	subs        repository.SubscriptionRepository
 	services    repository.ServiceRepository
@@ -56,24 +56,13 @@ func (s *SubscriptionService) emitAudit(ctx context.Context, event iface.AuditEv
 }
 
 // subscriptionMetadata builds the common audit metadata payload — service
-// and tier codes plus the polymorphic owner scope.
+// and tier codes plus the tenant scope.
 func subscriptionMetadata(sub *models.Subscription) map[string]any {
 	return map[string]any{
 		"serviceUUID": sub.ServiceUUID,
 		"tierCode":    sub.TierCode,
-		"ownerKind":   string(sub.OwnerKind),
-		"ownerUUID":   sub.OwnerUUID,
+		"tenantUUID":  sub.TenantUUID,
 	}
-}
-
-// auditTenantID is the tenant scope to stamp on audit events when present.
-// User-owned subscriptions have no tenant scope — auditTenantID returns ""
-// in that case so the audit row records the actor without an org binding.
-func auditTenantID(sub *models.Subscription) string {
-	if sub != nil && sub.OwnerKind == iface.OwnerKindTenant {
-		return sub.OwnerUUID
-	}
-	return ""
 }
 
 func NewSubscriptionService(
@@ -94,17 +83,16 @@ func NewSubscriptionService(
 	}
 }
 
-// Create begins a subscription for the given polymorphic owner. The first
-// charge is handled by the renewal job as soon as NextBillingAt (= now)
-// comes due.
+// Create begins a subscription for the given tenant. The first charge is
+// handled by the renewal job as soon as NextBillingAt (= now) comes due.
 //
 // Entitlements are granted immediately on activation so admin- or
-// self-service-created subscriptions let the owner hit gated routes without
-// waiting for the first renewal tick; if the first charge later fails, the
-// standard past_due → suspended flow revokes them.
-func (s *SubscriptionService) Create(ctx context.Context, owner iface.Owner, serviceUUID, tierCode, actor string) (*models.Subscription, error) {
-	if owner.IsZero() {
-		return nil, ErrSubscriptionOwner
+// self-service-created subscriptions let the tenant hit gated routes
+// without waiting for the first renewal tick; if the first charge later
+// fails, the standard past_due → suspended flow revokes them.
+func (s *SubscriptionService) Create(ctx context.Context, tenantUUID, serviceUUID, tierCode, actor string) (*models.Subscription, error) {
+	if tenantUUID == "" {
+		return nil, ErrSubscriptionTenant
 	}
 	svc, err := s.services.GetByUUID(ctx, serviceUUID)
 	if err != nil {
@@ -118,8 +106,7 @@ func (s *SubscriptionService) Create(ctx context.Context, owner iface.Owner, ser
 	now := time.Now().UTC()
 	sub := &models.Subscription{
 		UUID:               uuid.NewString(),
-		OwnerKind:          owner.Kind,
-		OwnerUUID:          owner.UUID,
+		TenantUUID:         tenantUUID,
 		ServiceUUID:        svc.UUID,
 		TierCode:           tier.Code,
 		Status:             models.SubActive,
@@ -136,11 +123,10 @@ func (s *SubscriptionService) Create(ctx context.Context, owner iface.Owner, ser
 	s.activity.Log(ctx, sub, actor, models.ActivityCreated, "Subscription created", map[string]any{
 		"serviceCode": svc.Code,
 		"tierCode":    tier.Code,
-		"ownerKind":   string(owner.Kind),
-		"ownerUUID":   owner.UUID,
+		"tenantUUID":  tenantUUID,
 	})
 	s.emitAudit(ctx, iface.AuditEvent{
-		TenantID:     auditTenantID(sub),
+		TenantID:     sub.TenantUUID,
 		ActorUserID:  actor,
 		Action:       "subscription.created",
 		ResourceType: "subscription",
@@ -151,14 +137,14 @@ func (s *SubscriptionService) Create(ctx context.Context, owner iface.Owner, ser
 	return sub, nil
 }
 
-// CreateForOwner is the self-service subscribe path. Looks up the service by
-// its human-typed code (instead of the internal serviceUUID Create accepts)
-// so the owner UI can pass a stable SKU identifier. Activation fires
-// immediately via the entitlement syncer so the owner's capability
+// CreateForTenant is the self-service subscribe path. Looks up the service
+// by its human-typed code (instead of the internal serviceUUID Create
+// accepts) so the SPA can pass a stable SKU identifier. Activation fires
+// immediately via the entitlement syncer so the tenant's capability
 // projection receives the tier's grants before the first renewal tick.
-func (s *SubscriptionService) CreateForOwner(ctx context.Context, owner iface.Owner, serviceCode, tierCode, actor string) (*models.Subscription, error) {
-	if owner.IsZero() {
-		return nil, ErrSubscriptionOwner
+func (s *SubscriptionService) CreateForTenant(ctx context.Context, tenantUUID, serviceCode, tierCode, actor string) (*models.Subscription, error) {
+	if tenantUUID == "" {
+		return nil, ErrSubscriptionTenant
 	}
 	svc, err := s.services.GetByCode(ctx, serviceCode)
 	if err != nil || svc == nil || !svc.Active {
@@ -172,8 +158,7 @@ func (s *SubscriptionService) CreateForOwner(ctx context.Context, owner iface.Ow
 	now := time.Now().UTC()
 	sub := &models.Subscription{
 		UUID:               uuid.NewString(),
-		OwnerKind:          owner.Kind,
-		OwnerUUID:          owner.UUID,
+		TenantUUID:         tenantUUID,
 		ServiceUUID:        svc.UUID,
 		TierCode:           tier.Code,
 		Status:             models.SubActive,
@@ -190,13 +175,12 @@ func (s *SubscriptionService) CreateForOwner(ctx context.Context, owner iface.Ow
 	s.activity.Log(ctx, sub, actor, models.ActivityCreated, "Subscription created (self-service)", map[string]any{
 		"serviceCode": svc.Code,
 		"tierCode":    tier.Code,
-		"ownerKind":   string(owner.Kind),
-		"ownerUUID":   owner.UUID,
+		"tenantUUID":  tenantUUID,
 	})
 	selfServeMeta := subscriptionMetadata(sub)
 	selfServeMeta["selfService"] = true
 	s.emitAudit(ctx, iface.AuditEvent{
-		TenantID:     auditTenantID(sub),
+		TenantID:     sub.TenantUUID,
 		ActorUserID:  actor,
 		Action:       "subscription.created",
 		ResourceType: "subscription",
@@ -244,7 +228,7 @@ func (s *SubscriptionService) Cancel(ctx context.Context, uuid string, atPeriodE
 	cancelMeta := subscriptionMetadata(sub)
 	cancelMeta["atPeriodEnd"] = atPeriodEnd
 	s.emitAudit(ctx, iface.AuditEvent{
-		TenantID:     auditTenantID(sub),
+		TenantID:     sub.TenantUUID,
 		ActorUserID:  actor,
 		Action:       "subscription.cancelled",
 		ResourceType: "subscription",
@@ -292,7 +276,7 @@ func (s *SubscriptionService) Reactivate(ctx context.Context, uuid string, actor
 	}
 	s.activity.Log(ctx, sub, actor, models.ActivityReactivated, "Subscription reactivated", nil)
 	s.emitAudit(ctx, iface.AuditEvent{
-		TenantID:     auditTenantID(sub),
+		TenantID:     sub.TenantUUID,
 		ActorUserID:  actor,
 		Action:       "subscription.reactivated",
 		ResourceType: "subscription",

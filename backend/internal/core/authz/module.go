@@ -133,7 +133,7 @@ func (m *Module) Init(deps *module.Dependencies) error {
 	var lookupTenantStatus services.TenantStatusLookup
 	if accessProvider != nil {
 		lookupCaps = func(ctx context.Context, tenantUUID string) ([]string, error) {
-			return accessProvider.ListCapabilityIDs(ctx, iface.TenantOwner(tenantUUID))
+			return accessProvider.ListCapabilityIDs(ctx, tenantUUID)
 		}
 	}
 	if tenantProvider != nil {

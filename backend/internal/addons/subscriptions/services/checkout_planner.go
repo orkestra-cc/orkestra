@@ -80,7 +80,7 @@ func (p *CheckoutPlanner) PlanCheckoutSession(ctx context.Context, subscriptionU
 
 	return iface.CheckoutPlan{
 		SubscriptionUUID: sub.UUID,
-		Owner:            sub.Owner(),
+		TenantUUID:       sub.TenantUUID,
 		ServiceUUID:      svc.UUID,
 		ServiceName:      svc.Name,
 		TierCode:         tier.Code,

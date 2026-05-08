@@ -60,10 +60,6 @@ func (m *PaymentsModule) OptionalServices() []module.ServiceKey {
 		// /v1/me/* routes are simply not mounted (logged at Init time).
 		module.ServiceTenantProvider,
 		module.ServiceSelfServiceCheckoutPlanner,
-		// User billing provider drives the user-owned checkout path
-		// (clientbilling addon, Phase 2). Optional: when missing, the
-		// user-owner branch in ensureCustomerForOwner returns 503.
-		module.ServiceUserBillingCustomerProvider,
 	}
 }
 
@@ -82,11 +78,10 @@ func (m *PaymentsModule) Collections() []module.CollectionSpec {
 			{Keys: map[string]int{"uuid": 1}, Unique: true},
 			{OrderedKeys: []module.IndexKey{{Field: "provider", Direction: 1}, {Field: "providerTxID", Direction: 1}}, Unique: true, Sparse: true},
 			{Keys: map[string]int{"subscriptionUUID": 1, "createdAt": -1}},
-			// Owner-scoped lookups for self-service /v1/me/transactions and
-			// the admin aggregator GET /v1/admin/tenants/{id}/payments.
+			// Tenant-scoped lookups for self-service /v1/me/transactions
+			// and the admin aggregator GET /v1/admin/tenants/{id}/payments.
 			{OrderedKeys: []module.IndexKey{
-				{Field: "ownerKind", Direction: 1},
-				{Field: "ownerUUID", Direction: 1},
+				{Field: "tenantUUID", Direction: 1},
 				{Field: "createdAt", Direction: -1},
 			}},
 			{Keys: map[string]int{"status": 1}},
@@ -94,8 +89,7 @@ func (m *PaymentsModule) Collections() []module.CollectionSpec {
 		{Name: models.PaymentMethodsCollection, Indexes: []module.IndexSpec{
 			{Keys: map[string]int{"uuid": 1}, Unique: true},
 			{OrderedKeys: []module.IndexKey{
-				{Field: "ownerKind", Direction: 1},
-				{Field: "ownerUUID", Direction: 1},
+				{Field: "tenantUUID", Direction: 1},
 				{Field: "provider", Direction: 1},
 			}},
 			{Keys: map[string]int{"providerMethodID": 1}, Unique: true, Sparse: true},
@@ -174,18 +168,13 @@ func (m *PaymentsModule) Init(deps *module.Dependencies) error {
 	deps.Services.Register(module.ServiceTenantPaymentProvider, iface.TenantPaymentProvider(services.NewTenantPaymentAdapter(txRepo)))
 
 	// Tier-2 self-service handler — built only when TenantProvider is wired
-	// because every /v1/me/* route re-checks ownership against memberships.
-	// SelfServiceCheckoutPlanner and UserBillingCustomerProvider stay
-	// optional even when the handler is built; their absence degrades
-	// individual routes (checkout-session → 503, user-owner branch → 503/409).
+	// because every /v1/me/* route re-checks ownership against memberships
+	// (and materializes the caller's personal tenant via EnsureTenantForUser).
+	// SelfServiceCheckoutPlanner stays optional even when the handler is
+	// built; its absence degrades the checkout-session route to 503.
 	if tenants, ok := module.GetTyped[iface.TenantProvider](deps.Services, module.ServiceTenantProvider); ok {
 		planner, _ := module.GetTyped[iface.SelfServiceCheckoutPlanner](deps.Services, module.ServiceSelfServiceCheckoutPlanner)
-		userBilling, _ := module.GetTyped[iface.UserBillingCustomerProvider](deps.Services, module.ServiceUserBillingCustomerProvider)
-		lazyTenantProvisioning := false
-		if deps.Config != nil {
-			lazyTenantProvisioning = deps.Config.Features.LazyTenantProvisioning
-		}
-		m.clientHandler = handlers.NewClientHandler(m.payment, txRepo, pmRepository, tenants, userBilling, planner, lazyTenantProvisioning)
+		m.clientHandler = handlers.NewClientHandler(m.payment, txRepo, pmRepository, tenants, planner)
 	} else {
 		deps.Logger.Warn("payments: tenant provider missing — Tier-2 self-service routes will not mount")
 	}

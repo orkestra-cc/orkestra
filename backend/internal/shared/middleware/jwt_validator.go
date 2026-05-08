@@ -303,22 +303,21 @@ func (v *JWTValidator) RequireCapability(capabilityID string) func(http.Handler)
 				next.ServeHTTP(w, r)
 				return
 			}
-			owner, ok := capabilityOwnerFromRequest(r)
+			tenantUUID, ok := capabilityTenantFromRequest(r)
 			if !ok {
-				writeErr(w, http.StatusForbidden, "authentication required")
+				writeErr(w, http.StatusForbidden, "tenant context required")
 				return
 			}
-			allowed, err := v.access.HasCapability(r.Context(), owner, capabilityID)
+			allowed, err := v.access.HasCapability(r.Context(), tenantUUID, capabilityID)
 			if err != nil || !allowed {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusPaymentRequired)
 				_ = json.NewEncoder(w).Encode(map[string]any{
 					"status":     http.StatusPaymentRequired,
 					"title":      "capability required",
-					"detail":     "owner is not entitled to this capability",
+					"detail":     "tenant is not entitled to this capability",
 					"capability": capabilityID,
-					"ownerKind":  string(owner.Kind),
-					"ownerId":    owner.UUID,
+					"tenantId":   tenantUUID,
 					"code":       "capability_required",
 				})
 				return

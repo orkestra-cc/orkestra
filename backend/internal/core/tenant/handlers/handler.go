@@ -639,24 +639,6 @@ func (h *Handler) RegisterAdminRoutes(api huma.API) {
 		Tags:        []string{"Tenants Admin"},
 	}, h.listTenantPaymentsAdmin)
 
-	huma.Register(api, huma.Operation{
-		OperationID: "get-tenant-billing-customer-admin",
-		Method:      http.MethodGet,
-		Path:        "/v1/admin/tenants/{tenantId}/billing-customer",
-		Summary:     "Get a tenant's linked FatturaPA customer (platform admin)",
-		Description: "Aggregator over the billing module. Returns 404 when no customer is linked or the billing addon is disabled. ADR-0001 PR-4.",
-		Tags:        []string{"Tenants Admin"},
-	}, h.getTenantBillingCustomerAdmin)
-
-	huma.Register(api, huma.Operation{
-		OperationID: "promote-tenant-to-billing-customer-admin",
-		Method:      http.MethodPost,
-		Path:        "/v1/admin/tenants/{tenantId}/billing-customer",
-		Summary:     "Create a FatturaPA customer for the tenant (platform admin)",
-		Description: "Idempotent — when a customer is already linked, returns the existing row. Otherwise creates a new Customer pre-filled from the tenant's iface.Tenant fields (LegalName, VATNumber, FiscalCode, Country, Email). Address fields are intentionally left empty: iface.Tenant doesn't carry the breakdown. ADR-0001 PR-4.",
-		Tags:        []string{"Tenants Admin"},
-	}, h.promoteTenantToBillingCustomerAdmin)
-
 	// --- Unified Client Aggregate (Phase 1) — billing-identity sub-document ---
 
 	huma.Register(api, huma.Operation{
@@ -859,10 +841,6 @@ type tenantPaymentsOutput struct {
 	}
 }
 
-type tenantBillingCustomerOutput struct {
-	Body *iface.TenantBillingCustomer
-}
-
 // listTenantSubscriptionsAdmin proxies to the subscriptions module via the
 // TenantSubscriptionProvider iface. When the addon is disabled (nil
 // registry lookup) the endpoint returns an empty list rather than 500 —
@@ -904,80 +882,3 @@ func (h *Handler) listTenantPaymentsAdmin(ctx context.Context, in *tenantIDPath)
 	return out, nil
 }
 
-// getTenantBillingCustomerAdmin returns the FatturaPA Customer linked to
-// the given tenant. Diverges from the listing aggregators: rather than
-// returning [] when no link exists, it returns 404 — the resource is
-// singular, not a collection. Returns 404 (with a different reason) when
-// the billing module is disabled, so the admin UI can degrade gracefully.
-// ADR-0001 PR-4.
-func (h *Handler) getTenantBillingCustomerAdmin(ctx context.Context, in *tenantIDPath) (*tenantBillingCustomerOutput, error) {
-	if h.registry == nil {
-		return nil, huma.Error404NotFound("billing module unavailable")
-	}
-	provider, ok := module.GetTyped[iface.TenantBillingCustomerProvider](h.registry, module.ServiceTenantBillingCustomerProvider)
-	if !ok || provider == nil {
-		return nil, huma.Error404NotFound("billing module unavailable")
-	}
-	customer, err := provider.GetByTenant(ctx, in.TenantID)
-	if err != nil {
-		return nil, huma.Error500InternalServerError("failed to load tenant billing customer", err)
-	}
-	if customer == nil {
-		return nil, huma.Error404NotFound("no billing customer linked to this tenant")
-	}
-	return &tenantBillingCustomerOutput{Body: customer}, nil
-}
-
-// promoteTenantToBillingCustomerAdmin creates (or returns the existing)
-// FatturaPA Customer for the given tenant. Idempotent — repeat calls
-// return the existing row. Errors are mapped to specific HTTP statuses so
-// the frontend can show a meaningful toast:
-//
-//   - 503 when the billing module is disabled (registry has no provider)
-//   - 404 when the tenant doesn't exist
-//   - 422 when the tenant is internal (only Tier-2 can have a billing profile)
-//   - 422 when the tenant has no LegalName/Name to seed Denomination
-//   - 500 for everything else
-//
-// ADR-0001 PR-4.
-func (h *Handler) promoteTenantToBillingCustomerAdmin(ctx context.Context, in *tenantIDPath) (*tenantBillingCustomerOutput, error) {
-	if h.registry == nil {
-		return nil, huma.Error503ServiceUnavailable("billing module unavailable")
-	}
-	provider, ok := module.GetTyped[iface.TenantBillingCustomerProvider](h.registry, module.ServiceTenantBillingCustomerProvider)
-	if !ok || provider == nil {
-		return nil, huma.Error503ServiceUnavailable("billing module unavailable")
-	}
-	customer, err := provider.PromoteTenant(ctx, in.TenantID)
-	if err != nil {
-		return nil, mapPromoteCustomerError(err)
-	}
-	return &tenantBillingCustomerOutput{Body: customer}, nil
-}
-
-// mapPromoteCustomerError translates the billing service's sentinel errors
-// into Huma HTTP errors. Kept as a small helper so the handler stays
-// declarative. Imports from the billing services package would cause an
-// import cycle (billing → iface → core/tenant via aggregator), so we
-// match on the error message instead — the sentinels are documented on
-// iface.TenantBillingCustomerProvider for that reason.
-func mapPromoteCustomerError(err error) error {
-	if err == nil {
-		return nil
-	}
-	msg := err.Error()
-	switch msg {
-	case "tenant not found":
-		return huma.Error404NotFound(msg)
-	case "tenant is not an external (Tier-2) tenant":
-		return huma.Error422UnprocessableEntity(msg)
-	case "tenant has no name to derive customer denomination from":
-		return huma.Error422UnprocessableEntity(msg)
-	case "tenant provider unavailable":
-		return huma.Error503ServiceUnavailable(msg)
-	case "tenantUUID is required":
-		return huma.Error400BadRequest(msg)
-	default:
-		return huma.Error500InternalServerError("failed to promote tenant", err)
-	}
-}

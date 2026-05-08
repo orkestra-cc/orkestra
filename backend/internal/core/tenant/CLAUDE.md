@@ -112,8 +112,6 @@ Gated globally by a system permission, not by per-org membership, so platform op
 | POST | `/v1/admin/tenants/{tenantId}/divisions` | Create a division (Kind=external, ParentTenantUUID=this). Refuses internal parents. |
 | GET | `/v1/admin/tenants/{tenantId}/subscriptions` | Aggregator — proxies to `iface.TenantSubscriptionProvider`. Returns `[]` when the subscriptions addon is disabled. |
 | GET | `/v1/admin/tenants/{tenantId}/payments` | Aggregator — proxies to `iface.TenantPaymentProvider`. Returns `[]` when the payments addon is disabled. |
-| GET | `/v1/admin/tenants/{tenantId}/billing-customer` | Aggregator — proxies to `iface.TenantBillingCustomerProvider`. Returns `404` when no `billing.Customer` is linked or the billing addon is disabled. ADR-0001 PR-4. |
-| POST | `/v1/admin/tenants/{tenantId}/billing-customer` | Promotes the tenant to a FatturaPA customer. Idempotent — returns the existing row when already linked, otherwise creates a new `billing.Customer` pre-filled from `iface.Tenant` (LegalName, VATNumber, FiscalCode, Country, Email). 503 when billing is disabled, 404 when the tenant is unknown, 422 when the tenant is internal or has no name. ADR-0001 PR-4. |
 | PATCH | `/v1/admin/clients/{tenantId}/billing-identity` | Unified-clients Phase 1 — sets `IsCompany`, `LegalName`, VAT/fiscal codes, billing address, and the FatturaPA routing sub-document on a Tier-2 tenant. All body fields optional; nil leaves the existing value. The data this endpoint writes is what Phase 5 resolves via `BillingTenantProvider` in place of the soon-to-be-deleted `billing.Customer` row. |
 | POST | `/v1/admin/clients/{tenantId}/italian-billable` | Unified-clients Phase 1 — flips `Tenant.IsItalianBillable`. Enabling requires a FatturaPA profile carrying `CodiceDestinatario` or `PECDestinatario` (422 otherwise); disabling is unconditional. Send-time validation enforces the same invariant a second time, so the toggle on its own is not load-bearing. |
 
@@ -153,25 +151,25 @@ ActivateTenant(ctx, tenantUUID) error
 SetTenantStripeCustomerID(ctx, tenantUUID, stripeCustomerID) error
 ```
 
-`iface.AccessProvider` (same file) — polymorphic-owner capability surface. The same concrete `*tenant/services.Service` implements both interfaces; registered separately under `module.ServiceAccessProvider` so consumers ask for the capability surface without the tenant CRUD surface:
+`iface.AccessProvider` (same file) — capability surface keyed by tenant UUID. The same concrete `*tenant/services.Service` implements both interfaces; registered separately under `module.ServiceAccessProvider` so consumers ask for the capability surface without the tenant CRUD surface:
 
 ```go
-HasCapability(ctx, owner Owner, capabilityID) (bool, error)
-GrantCapability(ctx, GrantCapabilityInput) error            // GrantCapabilityInput.Owner carries kind+uuid
-RevokeCapability(ctx, owner Owner, capabilityID) error
-ListCapabilityIDs(ctx, owner Owner) ([]string, error)
+HasCapability(ctx, tenantUUID, capabilityID) (bool, error)
+GrantCapability(ctx, GrantCapabilityInput) error            // GrantCapabilityInput.TenantUUID carries the scope
+RevokeCapability(ctx, tenantUUID, capabilityID) error
+ListCapabilityIDs(ctx, tenantUUID) ([]string, error)
 ```
 
-`Owner{Kind, UUID}` is `Kind="user"` for self-registered clients (post-onboarding refactor) and `Kind="tenant"` for admin-attached business members. The `tenant_entitlements` collection is keyed by `(ownerKind, ownerUUID, capabilityID)`.
+The `tenant_entitlements` collection is keyed by `(tenantUUID, capabilityID)`. Self-registered clients ride on a personal Tenant aggregate (created lazily by `EnsureTenantForUser`) so every billable principal looks like a tenant.
 
 `Tenant` exposes `UUID, Kind, ParentTenantUUID, Status, Name, Slug, Plan`. `TenantMembership` exposes `TenantUUID, TenantName, TenantSlug, TenantKind, Roles, IsOwner`. Both are intentionally trimmed — anything richer lives in `tenant/models` and is only reachable via the concrete service, not through the provider interface.
 
 Typical consumers:
 - **auth** — `ListUserMemberships` during JWT issuance so memberships are embedded in the access token's `memberships` claim (frontend reads them to build the org switcher without an extra round trip).
-- **middleware** — `IsMember` on every protected request that resolves an `X-Org-ID` header; `RequireCapability` consumes `AccessProvider.HasCapability` against the request's polymorphic owner (tenant when `X-Tenant-ID` is set, calling user otherwise) and returns 402 on a miss.
-- **authz (Cedar shadow evaluator)** — `AccessProvider.ListCapabilityIDs(TenantOwner(tenantUUID))` populates `cedar.Principal.Capabilities` so the `capability_grants.cedar` forbid-unless-entitled rule can reason about entitlements.
-- **subscriptions (entitlement syncer)** — `AccessProvider.GrantCapability/RevokeCapability` on every subscription lifecycle transition; the syncer hands an `Owner` derived from the subscription row so user-owned and tenant-owned subscriptions both land grants on the same projection.
-- **client signup (`/v1/auth/client/register`)** — creates a user only; tenants are now admin-curated and attached to existing users by an operator (no anonymous tenant provisioning).
+- **middleware** — `IsMember` on every protected request that resolves an `X-Org-ID` header; `RequireCapability` consumes `AccessProvider.HasCapability` against the request's resolved tenant UUID (`X-Tenant-ID`) and returns 402 on a miss. Capability gating without a tenant context is undefined post-Unified-Client-Aggregate.
+- **authz (Cedar shadow evaluator)** — `AccessProvider.ListCapabilityIDs(tenantUUID)` populates `cedar.Principal.Capabilities` so the `capability_grants.cedar` forbid-unless-entitled rule can reason about entitlements.
+- **subscriptions (entitlement syncer)** — `AccessProvider.GrantCapability/RevokeCapability` on every subscription lifecycle transition; the syncer hands `sub.TenantUUID` directly.
+- **client signup (`/v1/auth/client/register`)** — creates a user only; the personal tenant is materialized lazily by `EnsureTenantForUser` on the first tenant-requiring action.
 - **tenant handlers themselves** — use the concrete service for richer operations that don't fit on the interface.
 
 ## Key invariants

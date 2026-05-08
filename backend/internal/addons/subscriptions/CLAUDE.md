@@ -33,28 +33,25 @@ Transitions happen in `services/subscription_service.go` (user actions) and `ser
 
 `jobs/renewal_job.go` tickles every `SUBSCRIPTIONS_RENEWAL_INTERVAL` (default 1h). Each tick: find subscriptions with `NextBillingAt <= now` AND `status ∈ {active, past_due}`, generate an invoice, attempt a charge, update state. Failed charges push `NextBillingAt` out by 1 day so we retry tomorrow, not every tick.
 
-## Owner scope (post-onboarding refactor)
+## Tenant scope (Unified Client Aggregate)
 
-Subscriptions are owned by a polymorphic `iface.Owner{Kind, UUID}`:
+Every subscription is owned by a single `Tenant` aggregate (`Subscription.TenantUUID`). Self-registered clients ride on a personal tenant materialized lazily by `TenantProvider.EnsureTenantForUser`; admin-attached business clients ride on the business tenant.
 
-- `Kind="user"` — self-registered clients hold subscriptions on their own user UUID. Default for the `POST /v1/me/subscriptions` self-service path.
-- `Kind="tenant"` — admin-attached business members (or admin-created subscriptions) hold subscriptions on a tenant UUID. The legacy tenant-only model is now this case.
+`SubscriptionService.Create(ctx, tenantUUID, serviceUUID, tierCode, actor)` is the operator-admin entry point; `CreateForTenant(ctx, tenantUUID, serviceCode, tierCode, actor)` is the self-service variant that resolves the service by its human-typed SKU code.
 
-`SubscriptionService.Create(ctx, owner, serviceUUID, tierCode, actor)` is the operator-admin entry point; `CreateForOwner(ctx, owner, serviceCode, tierCode, actor)` is the self-service variant that resolves the service by its human-typed SKU code.
+Operator-admin routes (service catalog, subscription admin, invoice/activity reads) sit behind `RequireInternalTenant()`. The self-service `POST /v1/me/subscriptions` defaults the scope to the caller's personal tenant; pass `tenantUuid` to subscribe under a tenant the caller owns (handler enforces ownership via `TenantProvider.ListUserMemberships`).
 
-Operator-admin routes (service catalog, subscription admin, invoice/activity reads) sit behind `RequireInternalTenant()`. The self-service `POST /v1/me/subscriptions` accepts `ownerKind` (defaults to `"user"`); when `"tenant"`, the handler enforces ownership via `TenantProvider.ListUserMemberships` against the supplied `tenantUuid`.
+A thin `TenantSubscriptionAdapter` (`services/tenant_provider.go`) implements `iface.TenantSubscriptionProvider` so `core/tenant` can serve `GET /v1/admin/tenants/{id}/subscriptions` — the adapter filters by `tenantUUID`.
 
-A thin `TenantSubscriptionAdapter` (`services/tenant_provider.go`) implements `iface.TenantSubscriptionProvider` so `core/tenant` can serve `GET /v1/admin/tenants/{id}/subscriptions` — the adapter filters by `Owner{Kind:"tenant", UUID:tenantUUID}`.
-
-**User-owner renewals (Phase 2):** `RenewalService.loadOwnerTenant` resolves user-owned subscriptions through the clientbilling addon's `iface.UserBillingCustomerProvider` and projects the user's profile onto a synthetic `*iface.Tenant` so the rest of the renewal pipeline stays owner-agnostic. The Stripe-customer-id write is dispatched per-owner-kind (tenants → `TenantProvider.SetTenantStripeCustomerID`, users → `UserBillingCustomerProvider.SetStripeCustomerID`). When the clientbilling addon is disabled, user-owner renewals fail fast with `"user billing provider not configured"`; tenant-owner renewals are unaffected.
+**Renewals:** `RenewalService.loadTenant` calls `TenantProvider.GetTenant(sub.TenantUUID)` for billing identity (LegalName, VAT, country, email, StripeCustomerID); the Stripe-customer-id write goes through `TenantProvider.SetTenantStripeCustomerID`. No per-owner-kind branching — the personal tenant aggregate carries everything the renewal flow needs.
 
 ## Collections
 
 | Collection | Notes |
 |---|---|
 | `subscriptions_services` | Catalog items with pricing tiers. `code` is unique. |
-| `subscriptions_subscriptions` | Cycle state. `(ownerKind, ownerUUID, status)` for owner-scoped reads, `(nextBillingAt, status)` for the renewal scan, `serviceUUID` for catalog joins. |
-| `subscriptions_invoices` | Generated per cycle. `(subscriptionUUID, periodStart)` unique prevents double-billing the same cycle. Carries `(ownerKind, ownerUUID)` denormalized from the parent subscription for cross-owner listings. |
+| `subscriptions_subscriptions` | Cycle state. `(tenantUUID, status)` for tenant-scoped reads, `(nextBillingAt, status)` for the renewal scan, `serviceUUID` for catalog joins. |
+| `subscriptions_invoices` | Generated per cycle. `(subscriptionUUID, periodStart)` unique prevents double-billing the same cycle. Carries `tenantUUID` denormalized from the parent subscription for cross-tenant listings. |
 | `subscriptions_activity` | Append-only audit log. `(subscriptionUUID, createdAt desc)` indexed for the detail-page timeline. |
 
 ## Permissions
@@ -68,11 +65,11 @@ subscriptions.activity.view
 
 ## Tier-2 self-service routes (ADR-0003 client surface)
 
-Mounted on `ri.Client.ProtectedRouter` behind `RequireGlobal()` via `RegisterSelfServiceRoutes`; each handler re-checks ownership against the caller's identity (user) and `TenantProvider.ListUserMemberships` (tenant). Reads fan out across every owner the caller may act under (always the calling user, plus every tenant they own); mutations target one subscription at a time.
+Mounted on `ri.Client.ProtectedRouter` behind `RequireGlobal()` via `RegisterSelfServiceRoutes`. Each handler builds a "caller tenant set" from `TenantProvider.EnsureTenantForUser` (the personal tenant) plus every owned tenant from `ListUserMemberships`; reads fan out across that set, mutations target one subscription at a time.
 
 ```
-POST /v1/me/subscriptions                          { ownerKind?, tenantUuid?, serviceCode, tierCode }
-GET  /v1/me/subscriptions                          ?ownerKind&ownerUuid&status   (legacy ?tenantUuid alias)
+POST /v1/me/subscriptions                          { tenantUuid?, serviceCode, tierCode }
+GET  /v1/me/subscriptions                          ?tenantUuid&status
 GET  /v1/me/subscriptions/{id}
 POST /v1/me/subscriptions/{id}/cancel              { atPeriodEnd }
 POST /v1/me/subscriptions/{id}/reactivate
@@ -80,7 +77,7 @@ GET  /v1/me/subscriptions/{id}/invoices
 GET  /v1/me/subscriptions/{id}/activity
 ```
 
-`POST /v1/me/subscriptions` defaults `ownerKind` to `"user"` (the calling user); pass `"tenant"` plus a `tenantUuid` the caller owns to subscribe on the organization's behalf.
+`POST /v1/me/subscriptions` defaults the scope to the caller's personal tenant; pass `tenantUuid` to subscribe under a tenant the caller owns.
 
 The module also publishes `iface.SelfServiceCheckoutPlanner` under `module.ServiceSelfServiceCheckoutPlanner`. Implementation in `services/checkout_planner.go` resolves a subscription UUID into the snapshot the payments client handler needs to open a Stripe Checkout session (`Owner` + pending invoice + tier price). Returns `iface.ErrCheckoutNoPendingInvoice` when nothing is due — the payments handler maps that to 409.
 

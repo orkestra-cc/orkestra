@@ -11,9 +11,6 @@ import (
 // translating the rich subscriptions_subscriptions documents into the flat
 // DTOs the core/tenant aggregator endpoint returns. It is intentionally
 // read-only — mutations stay on the dedicated Subscription handlers.
-//
-// The adapter holds only the repository because that is the sole dependency
-// this read path needs; no Client/Service/Tier joins happen here.
 type TenantSubscriptionAdapter struct {
 	subs repository.SubscriptionRepository
 }
@@ -24,16 +21,13 @@ func NewTenantSubscriptionAdapter(subs repository.SubscriptionRepository) *Tenan
 	return &TenantSubscriptionAdapter{subs: subs}
 }
 
-// ListByTenant returns every subscription owned by the tenant. After the
-// post-onboarding refactor a subscription's owner is polymorphic; the
-// admin aggregator only cares about tenant-owned rows so we filter on
-// Owner{Kind:"tenant", UUID:tenantUUID}. The repository layer already
-// sorts by createdAt desc.
+// ListByTenant returns every subscription owned by the tenant. The
+// repository layer already sorts by createdAt desc.
 func (a *TenantSubscriptionAdapter) ListByTenant(ctx context.Context, tenantUUID string) ([]iface.TenantSubscription, error) {
 	if tenantUUID == "" {
 		return []iface.TenantSubscription{}, nil
 	}
-	rows, err := a.subs.FindByOwner(ctx, iface.TenantOwner(tenantUUID))
+	rows, err := a.subs.FindByTenant(ctx, tenantUUID)
 	if err != nil {
 		return nil, err
 	}
@@ -42,7 +36,7 @@ func (a *TenantSubscriptionAdapter) ListByTenant(ctx context.Context, tenantUUID
 		r := rows[i]
 		out = append(out, iface.TenantSubscription{
 			UUID:               r.UUID,
-			TenantUUID:         r.OwnerUUID,
+			TenantUUID:         r.TenantUUID,
 			ServiceUUID:        r.ServiceUUID,
 			TierCode:           r.TierCode,
 			Status:             string(r.Status),
