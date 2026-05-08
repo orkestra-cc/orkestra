@@ -38,9 +38,8 @@ type EntitlementSyncer struct {
 	// behavior: when true, user-owned subscriptions resolve their owner
 	// through TenantProvider.EnsureTenantForUser and entitlement grants /
 	// revocations are applied to the personal tenant instead of the user.
-	// Off by default; flipped via UNIFIED_CLIENTS_LAZY_TENANT_ENABLED in
-	// Phase 3 after legacy clientbilling rows have been migrated onto
-	// the resulting personal tenants.
+	// Default ON since Phase 3; set UNIFIED_CLIENTS_LAZY_TENANT_ENABLED=false
+	// to revert to the user-owner projection while Phase 4/5 land.
 	lazyTenantProvisioning bool
 }
 

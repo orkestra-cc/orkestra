@@ -39,9 +39,12 @@ type FeaturesConfig struct {
 	// behavior: when true, self-service callers (subscriptions, payments)
 	// resolve their personal tenant via TenantProvider.EnsureTenantForUser
 	// and the entitlement syncer redirects user-owned subscription
-	// activations onto that tenant. Default off — flipped on in Phase 3
-	// after the one-shot migration of legacy clientbilling rows lands.
-	// Env var: UNIFIED_CLIENTS_LAZY_TENANT_ENABLED.
+	// activations onto that tenant. Default ON since Phase 3 — the
+	// one-shot 0001_unify_clients migration has folded legacy
+	// clientbilling rows into the matching Tenant, so every self-service
+	// flow now expects the personal tenant to exist (or be lazily
+	// minted). Set UNIFIED_CLIENTS_LAZY_TENANT_ENABLED=false to revert
+	// to the legacy user-owner code path while Phase 4/5 land.
 	LazyTenantProvisioning bool
 }
 
@@ -532,7 +535,7 @@ func Load() (*Config, error) {
 
 	// Cross-module feature flags
 	config.Features = FeaturesConfig{
-		LazyTenantProvisioning: getEnvAsBool("UNIFIED_CLIENTS_LAZY_TENANT_ENABLED", false),
+		LazyTenantProvisioning: getEnvAsBool("UNIFIED_CLIENTS_LAZY_TENANT_ENABLED", true),
 	}
 
 	// Documents/PDF generation configuration (Gotenberg)

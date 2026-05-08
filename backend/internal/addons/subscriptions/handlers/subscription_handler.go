@@ -24,8 +24,9 @@ type SubscriptionHandler struct {
 	tenants iface.TenantProvider
 	// lazyTenantProvisioning flips on the Unified Client Aggregate Phase 2
 	// behavior: callerOwnerSet calls TenantProvider.EnsureTenantForUser and
-	// adds the resulting personal tenant to the owner set. Off by default;
-	// flipped via UNIFIED_CLIENTS_LAZY_TENANT_ENABLED in Phase 3.
+	// adds the resulting personal tenant to the owner set. Default ON since
+	// Phase 3; set UNIFIED_CLIENTS_LAZY_TENANT_ENABLED=false to revert to
+	// the user-owner-only path.
 	lazyTenantProvisioning bool
 }
 

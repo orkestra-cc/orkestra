@@ -36,8 +36,9 @@ type ClientHandler struct {
 	planner iface.SelfServiceCheckoutPlanner
 	// lazyTenantProvisioning gates the Unified Client Aggregate Phase 2
 	// behavior: callerOwnerSet calls TenantProvider.EnsureTenantForUser and
-	// adds the resulting personal tenant to the caller's owner set. Off by
-	// default — flipped via UNIFIED_CLIENTS_LAZY_TENANT_ENABLED in Phase 3.
+	// adds the resulting personal tenant to the caller's owner set. Default
+	// ON since Phase 3; set UNIFIED_CLIENTS_LAZY_TENANT_ENABLED=false to
+	// revert to the user-owner-only path while Phase 4/5 land.
 	lazyTenantProvisioning bool
 }
 
