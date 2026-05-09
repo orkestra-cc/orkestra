@@ -40,8 +40,8 @@ When modifying or adding billing endpoints:
 ### Implementation Notes
 
 1. **Notification Strategy**: This module uses **polling + webhooks**
-   - **Webhooks**: OpenAPI.it sends callbacks to `/v1/billing/webhooks/sdi` for real-time events (supplier-invoice, customer-notification, legal-storage-receipt). Configured automatically via `ConfigureAPICallbacks` on startup when `OPENAPI_BILLING_WEBHOOK_URL` is set.
-   - **Polling**: Background job periodically syncs invoices and notifications as a safety net. Configurable interval via `OPENAPI_BILLING_POLLING_INTERVAL`.
+   - **Webhooks**: OpenAPI.it sends callbacks to `/v1/billing/webhooks/sdi` for real-time events (supplier-invoice, customer-notification, legal-storage-receipt). Configured automatically via `ConfigureAPICallbacks` on startup when `OPENAPI_BILLING_WEBHOOK_URL` is set. Notifications (RC/NS/MC/NE/DT/AT) flow through the `customer-notification` event — there is **no** standalone notifications endpoint.
+   - **Polling**: Background job periodically calls `SyncReceivedInvoices` as a safety net for missed webhooks. Configurable interval via `OPENAPI_BILLING_POLLING_INTERVAL`. Invoice status is reconciled from the per-invoice `marking` field on each sync (no separate notification fetch).
    - Both mechanisms trigger the same `SyncReceivedInvoices` flow, which is idempotent (deduplicates by OpenAPIUUID and invoice number).
 
 2. **Invoice Submission Variants** (per OpenAPI SDI spec):
@@ -85,7 +85,7 @@ billing/
 │   ├── notification_handler.go # SDI notification HTTP handlers
 │   └── webhook_handler.go      # SDI webhook callback handler
 ├── jobs/
-│   └── polling_job.go          # Background SDI notification polling
+│   └── polling_job.go          # Background SDI invoice sync (webhook safety net)
 ├── routes.go                   # Huma v2 route registration
 └── CLAUDE.md                   # This file
 ```
@@ -162,14 +162,15 @@ Draft → Sent → [SDI Processing] → Delivered/Rejected
 
 ### Polling Job & Invoice Sync
 
-The `polling_job.go` runs a background goroutine that periodically syncs invoices and fetches notifications from OpenAPI SDI:
+The `polling_job.go` runs a background goroutine that periodically syncs invoices from OpenAPI SDI as a safety net for missed webhooks:
 
 - Polls at configurable intervals (`OPENAPI_BILLING_POLLING_INTERVAL`)
 - `SyncReceivedInvoices` fetches **both** sent (`type=0`) and received (`type=1`) invoices from the API, deduplicates by OpenAPIUUID and invoice number, and imports new ones
-- Updates invoice status based on notification type
-- Stores notifications for audit trail
+- Reconciles invoice status from the per-invoice `marking` field (`sent`/`delivered`/`received`)
+- Stores polling health (`LastPolledAt`, `LastError`, `ConsecutiveErrors`) in `billing_polling_state`
 - Logs a summary with `totalImportedIssued`, `totalImportedReceived`, and `totalSkipped` counts
 - Deduplication skip logs are at `Info` level for troubleshooting visibility
+- Real-time SDI notifications (RC/NS/MC/NE/DT/AT) arrive via the `customer-notification` webhook event and are persisted by `ProcessNotification`/`SaveNotification`. There is no separate notifications-fetch endpoint.
 
 ### OpenAPI SDI Query Parameters (GET /invoices)
 
@@ -285,7 +286,7 @@ if cfg.OpenAPI.BearerToken != "" {
 4. **Test invoice flow**:
    - Create a draft invoice via API or frontend
    - Send invoice to SDI
-   - Verify notification polling retrieves SDI responses
+   - Verify the polling tick imports the invoice and that the `customer-notification` webhook updates its status (or wait for the next sync to reconcile via the `marking` field)
 
 5. **Self-invoicing for testing**: Use document types TD16-TD20 (autofatture) which allow cedente=cessionario (sender=recipient). Standard TD01 invoices cannot be sent to yourself.
 

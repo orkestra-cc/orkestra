@@ -396,68 +396,26 @@ func (j *PollingJob) SyncReceivedInvoices(ctx context.Context) error {
 }
 
 func (j *PollingJob) poll(ctx context.Context) error {
-	j.logger.Debug("polling for SDI notifications")
+	j.logger.Debug("polling SDI for invoice updates")
 
-	// Also sync received invoices
-	if err := j.SyncReceivedInvoices(ctx); err != nil {
-		j.logger.Error("failed to sync received invoices", "error", err)
-		// Continue with notification polling
-	}
-
-	// Get last polling state
 	state, err := j.notificationRepo.GetPollingState(ctx)
 	if err != nil {
 		j.logger.Error("failed to get polling state", "error", err)
 		return err
 	}
 
-	// Fetch notifications from OpenAPI
-	fromDate := state.LastPolledAt.Add(-1 * time.Hour) // Overlap by 1 hour to avoid missing notifications
-	notifications, err := j.openAPIClient.GetNotifications(ctx, fromDate)
-	if err != nil {
-		j.logger.Error("failed to fetch notifications from OpenAPI", "error", err)
-
-		// Update state with error
-		state.LastError = err.Error()
+	syncErr := j.SyncReceivedInvoices(ctx)
+	if syncErr != nil {
+		j.logger.Error("failed to sync invoices from SDI", "error", syncErr)
+		state.LastError = syncErr.Error()
 		now := time.Now()
 		state.LastErrorAt = &now
 		state.ConsecutiveErrors++
 		_ = j.notificationRepo.UpdatePollingState(ctx, state)
-
-		return err
+		return syncErr
 	}
 
-	j.logger.Info("fetched notifications from OpenAPI",
-		"count", len(notifications),
-		"fromDate", fromDate.Format(time.RFC3339),
-	)
-
-	// Process each notification
-	var lastNotificationTime time.Time
-	processedCount := 0
-
-	for _, n := range notifications {
-		if err := j.ProcessNotification(ctx, &n); err != nil {
-			j.logger.Error("failed to process notification",
-				"uuid", n.UUID,
-				"type", n.Type,
-				"error", err,
-			)
-			continue
-		}
-		processedCount++
-
-		if n.Date.After(lastNotificationTime) {
-			lastNotificationTime = n.Date
-		}
-	}
-
-	// Update polling state
 	state.LastPolledAt = time.Now()
-	if !lastNotificationTime.IsZero() {
-		state.LastNotificationAt = &lastNotificationTime
-	}
-	state.TotalPolled += int64(processedCount)
 	state.LastError = ""
 	state.LastErrorAt = nil
 	state.ConsecutiveErrors = 0
@@ -466,11 +424,7 @@ func (j *PollingJob) poll(ctx context.Context) error {
 		j.logger.Error("failed to update polling state", "error", err)
 	}
 
-	j.logger.Info("polling completed",
-		"processedCount", processedCount,
-		"totalNotifications", len(notifications),
-	)
-
+	j.logger.Debug("polling completed")
 	return nil
 }
 

@@ -106,9 +106,6 @@ type OpenAPIClient interface {
 	// All invoices (both sent and received) - for syncing from OpenAPI
 	GetAllInvoices(ctx context.Context, fromDate time.Time, page, pageSize int) (*SupplierInvoicesResponse, error)
 
-	// Notifications
-	GetNotifications(ctx context.Context, fromDate time.Time) ([]OpenAPINotification, error)
-
 	// Legal storage / preserved documents
 	GetPreservedDocument(ctx context.Context, uuid string) (*PreservedDocumentResponse, error)
 
@@ -1067,28 +1064,6 @@ func (c *openAPIClient) parseInvoicesResponse(respBody []byte, page, pageSize in
 	}
 
 	return &result, nil
-}
-
-func (c *openAPIClient) GetNotifications(ctx context.Context, fromDate time.Time) ([]OpenAPINotification, error) {
-	path := fmt.Sprintf("/notifications?from_date=%s", fromDate.Format("2006-01-02T15:04:05Z"))
-
-	respBody, statusCode, err := c.doRequestWithRetry(ctx, http.MethodGet, path, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	if statusCode != http.StatusOK {
-		return nil, fmt.Errorf("%w: status %d", ErrOpenAPIRequestFailed, statusCode)
-	}
-
-	var result struct {
-		Notifications []OpenAPINotification `json:"notifications"`
-	}
-	if err := json.Unmarshal(respBody, &result); err != nil {
-		return nil, fmt.Errorf("failed to parse response: %w", err)
-	}
-
-	return result.Notifications, nil
 }
 
 func (c *openAPIClient) GetInvoiceStats(ctx context.Context) (*InvoiceStatsResponse, error) {
