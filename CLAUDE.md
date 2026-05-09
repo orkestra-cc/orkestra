@@ -104,7 +104,7 @@ The AI module chain (graph, aimodels, rag, agents) can optionally run as a **sta
 | `backend/internal/addons/aimodels/internal_routes.go` | Internal API: `/v1/internal/ai/embed`, `/complete`, `/embedding-info`, `/llm-info` |
 | `backend/internal/addons/rag/internal_routes.go` | Internal API: `/v1/internal/rag/query` (with `documentUUIDs` scoping) |
 | `backend/Dockerfile.ai-service` | Multi-stage build for AI service binary |
-| `docker/docker-compose.ai.yml` | Dev container for AI service |
+| `docker/docker-compose.ai-sidecar.yml` | Dev container for AI service |
 
 **Running split mode (dev):**
 
@@ -112,7 +112,7 @@ The AI module chain (graph, aimodels, rag, agents) can optionally run as a **sta
 cd docker
 docker compose -f docker-compose.infra.yml up -d
 AI_SERVICE_URL=http://orkestra-ai-dev:3100 docker compose -f docker-compose.dev.yml --env-file .env up -d
-docker compose -f docker-compose.ai.yml --env-file .env up -d
+docker compose -f docker-compose.ai-sidecar.yml --env-file .env up -d
 ```
 
 **Design constraints for the split:**
@@ -203,7 +203,7 @@ docker compose -f docker-compose.infra.yml up -d   # MongoDB, Redis, Gotenberg, 
 docker compose -f docker-compose.dev.yml up -d      # Backend (AIR) + Frontend (Vite)
 
 # Optional: run AI modules as a separate service
-docker compose -f docker-compose.ai.yml up -d       # AI Service (port 3100)
+docker compose -f docker-compose.ai-sidecar.yml up -d  # AI Service (port 3100)
 # Set AI_SERVICE_URL=http://orkestra-ai-dev:3100 on the backend to enable split mode
 ```
 

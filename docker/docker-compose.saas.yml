@@ -1,34 +1,31 @@
-# Orkestra — AI SKU (published image)
+# Orkestra — SaaS SKU (published image)
 #
-# Pulls the ai profile image from GHCR (graph + aimodels + rag + agents +
-# sales addons) and runs it against the shared mongodb/redis services from
-# docker-compose.infra.yml. Memgraph and Hindsight are managed by the graph
-# and agents modules respectively — toggle them at /admin/modules.
-#
-# Note: this is the BUILD-PROFILE compose for the bundled AI SKU. The
-# AI sidecar split (separate ai-service binary) lives in docker-compose.ai-sidecar.yml.
+# Pulls the saas profile image from GHCR (subscriptions + payments +
+# compliance + identity addons) and runs it against the shared mongodb/redis
+# services from docker-compose.infra.yml. The payments addon expects Stripe
+# credentials configured at /admin/modules.
 #
 # Usage:
 #   cd docker
 #   docker network create orkestra-network                        # once
 #   docker compose -f docker-compose.infra.yml up -d              # mongodb + redis
-#   docker compose -f docker-compose.ai.yml --env-file .env up -d
+#   docker compose -f docker-compose.saas.yml --env-file .env up -d
 #
 # Health check: backend `/health` returns 200 once mongo/redis come up.
 
-name: orkestra-ai
+name: orkestra-saas
 
 services:
   backend:
-    image: ${BACKEND_IMAGE_REPO:-ghcr.io/orkestra-cc/orkestra}/backend:${BACKEND_IMAGE_TAG:-ai}
-    container_name: orkestra-backend-ai
+    image: ${BACKEND_IMAGE_REPO:-ghcr.io/orkestra-cc/orkestra}/backend:${BACKEND_IMAGE_TAG:-saas}
+    container_name: orkestra-backend-saas
     restart: unless-stopped
     ports:
       - "${BACKEND_PORT:-3000}:3000"
     environment:
       ENV: ${ENV:-production}
       PORT: 3000
-      ORKESTRA_PROFILE: ai
+      ORKESTRA_PROFILE: saas
 
       MONGO_URI: mongodb://${MONGO_ROOT_USERNAME}:${MONGO_ROOT_PASSWORD}@${MONGO_HOST:-mongodb}:27017/${MONGO_DATABASE}?authSource=admin
       REDIS_URL: redis://:${REDIS_PASSWORD}@${REDIS_HOST:-redis}:6379/${REDIS_DB:-0}
@@ -68,21 +65,10 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-info}
       PRETTY_LOGS: ${PRETTY_LOGS:-false}
 
-      # Gotenberg is needed for RAG ingestion of PDF documents.
-      GOTENBERG_URL: ${GOTENBERG_URL:-http://orkestra-gotenberg:3000}
-
-      # graph and agents modules manage their own infra containers
-      # (memgraph + hindsight). Container control is on by default.
-      # Disable with CONTAINER_CONTROL_ENABLED=false on Kubernetes.
-      CONTAINER_CONTROL_ENABLED: ${CONTAINER_CONTROL_ENABLED:-true}
+      # No infra-owning addon in this profile — container control off.
+      CONTAINER_CONTROL_ENABLED: ${CONTAINER_CONTROL_ENABLED:-false}
     volumes:
       - ./keys:/app/keys:ro
-      # Required when CONTAINER_CONTROL_ENABLED=true so the backend can
-      # start memgraph/hindsight via the Docker SDK. Front with
-      # tecnativa/docker-socket-proxy in production.
-      - /var/run/docker.sock:/var/run/docker.sock
-    group_add:
-      - "${DOCKER_GID:-1001}"
     networks:
       - orkestra-network
     healthcheck:

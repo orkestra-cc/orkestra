@@ -171,7 +171,12 @@ The minimal profile is **self-contained** — it does NOT layer on top of `docke
     ├── docker-compose.dev.yml     # Development: Backend, Frontend with hot reload
     ├── docker-compose.staging.yml # Staging: AIR/Vite hot reload + staging-like env
     ├── docker-compose.prod.yml    # Production: Optimized Backend, Frontend
-    ├── docker-compose.ai.yml      # Optional AI sidecar (graph, rag, agents, aimodels)
+    ├── docker-compose.ai-sidecar.yml # Optional AI sidecar (graph, rag, agents, aimodels)
+    ├── docker-compose.starter.yml    # Profile pull: starter SKU image from GHCR (layer on infra.yml)
+    ├── docker-compose.billing.yml    # Profile pull: billing/documents/company SKU
+    ├── docker-compose.ai.yml         # Profile pull: graph/aimodels/rag/agents/sales SKU
+    ├── docker-compose.saas.yml       # Profile pull: subscriptions/payments/compliance/identity SKU
+    ├── docker-compose.enterprise.yml # Profile pull: every addon (alias for :latest)
     ├── .env.example               # Template for environment files
     ├── .env.minimal               # Tracked dev-only env for the minimal profile
     ├── .env                       # Active env (gitignored) - contains ENV=development|staging|production
