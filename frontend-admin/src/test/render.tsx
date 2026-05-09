@@ -1,5 +1,5 @@
 import { type PropsWithChildren, type ReactElement } from 'react';
-import { configureStore, combineReducers, type PreloadedState } from '@reduxjs/toolkit';
+import { configureStore, combineReducers } from '@reduxjs/toolkit';
 import { Provider } from 'react-redux';
 import { MemoryRouter } from 'react-router';
 import { render, type RenderOptions, type RenderResult } from '@testing-library/react';
@@ -22,7 +22,7 @@ const rootReducer = combineReducers({
 export type TestRootState = ReturnType<typeof rootReducer>;
 export type TestStore = ReturnType<typeof setupStore>;
 
-export const setupStore = (preloadedState?: PreloadedState<TestRootState>) =>
+export const setupStore = (preloadedState?: Partial<TestRootState>) =>
   configureStore({
     reducer: rootReducer,
     preloadedState,
@@ -30,7 +30,7 @@ export const setupStore = (preloadedState?: PreloadedState<TestRootState>) =>
   });
 
 interface ExtendedRenderOptions extends Omit<RenderOptions, 'queries'> {
-  preloadedState?: PreloadedState<TestRootState>;
+  preloadedState?: Partial<TestRootState>;
   store?: TestStore;
   // Initial URL(s) for the in-memory router. Defaults to "/".
   routerEntries?: string[];
@@ -60,8 +60,9 @@ export function renderWithProviders(
     </Provider>
   );
 
-  return {
-    store,
-    ...render(ui, { wrapper: Wrapper, ...renderOptions }),
-  };
+  const renderResult: RenderResult = render(ui, {
+    wrapper: Wrapper,
+    ...renderOptions,
+  });
+  return { store, ...renderResult };
 }

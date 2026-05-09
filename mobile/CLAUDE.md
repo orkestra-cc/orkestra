@@ -73,6 +73,8 @@ mobile/
 │   └── config/
 │       ├── environment.dart         # Environment configuration
 │       └── app_config.dart          # Global app config singleton
+├── test/
+│   └── widget_smoke_test.dart       # Boots OrkestraApp + asserts home renders
 ├── android/                         # Android platform files
 ├── ios/                             # iOS platform files
 ├── pubspec.yaml                     # Flutter dependencies
