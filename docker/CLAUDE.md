@@ -86,12 +86,14 @@ ORKESTRA uses a three-stage DevOps workflow: **Development**, **Staging**, and *
 
 ```bash
 # Interactive TUI — single entry point for every stack operation
-./orkestra.sh                      # Profile menu: minimal or full stack
+./orkestra.sh                      # Profile menu: minimal / SKU profile / full stack
 
 # CLI mode (scriptable, same operations)
 ./orkestra.sh minimal deploy --build
 ./orkestra.sh minimal logs backend -f
 ./orkestra.sh minimal reset --yes
+./orkestra.sh profile billing deploy --pull
+./orkestra.sh profile ai status
 ENV=development ./orkestra.sh deploy --scope backend --rebuild --yes
 ./orkestra.sh logs orkestra-backend-dev -f
 ./orkestra.sh --help               # Full command surface
@@ -211,29 +213,39 @@ cp .env.example .env.production
 
 ### Using orkestra.sh (Recommended)
 
-`orkestra.sh` is the single entry point for every stack operation. It works as both an interactive TUI and a scriptable CLI, and knows about all five profiles (minimal, infra+dev, infra+staging, infra+prod, ai sidecar).
+`orkestra.sh` is the single entry point for every stack operation. It works as both an interactive TUI and a scriptable CLI, and knows about three deployment shapes: **minimal** (build from source), **SKU profile** (pull a per-profile image from GHCR — `starter` / `billing` / `ai` / `saas` / `enterprise`), and **full stack** (dev / staging / prod, auto-detected from `docker/.env`).
 
 ```bash
 # Interactive TUI — profile menu appears, then a per-profile op menu
 ./orkestra.sh
 
 # The TUI flow:
-# 1. Pick profile: "Minimal" or "Full stack"
+# 1. Pick profile: "Minimal" / "Profile" (SKU picker) / "Full stack"
 # 2. Minimal: Deploy / Stop / Reset (wipe volumes) / Status / Logs / Info / Back
-# 3. Full stack: Deploy (with scope selection) / Stop / Status / Logs / Back
-# 4. ENV is autodetected from docker/.env for the full-stack path
+# 3. Profile: pick a SKU (starter / billing / ai / saas / enterprise) → ops menu
+#    (same shape as Minimal: Deploy [--pull] / Stop / Reset / Status / Logs / Info)
+# 4. Full stack: Deploy (with scope selection) / Stop / Status / Logs / Back
+# 5. ENV is autodetected from docker/.env for the full-stack path
 ```
 
 **CLI mode** — same operations, non-interactive, suitable for scripting and CI:
 
 ```bash
-# Minimal profile
+# Minimal profile (built locally from Dockerfile.minimal)
 ./orkestra.sh minimal deploy [--build]
 ./orkestra.sh minimal stop
 ./orkestra.sh minimal reset [--yes]
 ./orkestra.sh minimal status
 ./orkestra.sh minimal info
 ./orkestra.sh minimal logs <service> [-f] [-n N] [-t]
+
+# SKU profile (pulled from GHCR; <name> = starter | billing | ai | saas | enterprise)
+./orkestra.sh profile <name> deploy [--pull]
+./orkestra.sh profile <name> stop
+./orkestra.sh profile <name> reset [--yes]
+./orkestra.sh profile <name> status
+./orkestra.sh profile <name> info
+./orkestra.sh profile <name> logs <service> [-f] [-n N] [-t]
 
 # Full stack (uses ENV from docker/.env, or ENV=... prefix)
 ./orkestra.sh deploy [--scope all|backend|frontend-admin|frontend-admin+backend|infra] [--rebuild] [--yes]

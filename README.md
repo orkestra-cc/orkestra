@@ -54,6 +54,27 @@ docker compose -f docker-compose.minimal.yml --env-file .env.minimal up -d --for
 
 Addons with external dependencies (Gotenberg for PDFs, Memgraph for graph, Hindsight for agents) will need their infrastructure to be reachable — either add those services to the compose file or point the module at a remote host via the admin API (`GET/PATCH /v1/admin/modules`).
 
+## SKU profiles — pulled from GHCR
+
+For VMs that should run a specific addon SKU (no source build, no Chainguard registry), the published per-profile images on GHCR are exposed through five compose files. They layer on top of `docker-compose.infra.yml` for MongoDB and Redis.
+
+| Profile      | Image tag                                                  | Addons                                              |
+| ------------ | ---------------------------------------------------------- | --------------------------------------------------- |
+| `starter`    | `ghcr.io/orkestra-cc/orkestra/backend:starter`             | core only                                           |
+| `billing`    | `ghcr.io/orkestra-cc/orkestra/backend:billing`             | billing, documents, company                         |
+| `ai`         | `ghcr.io/orkestra-cc/orkestra/backend:ai`                  | graph, aimodels, rag, agents, sales                 |
+| `saas`       | `ghcr.io/orkestra-cc/orkestra/backend:saas`                | subscriptions, payments, compliance, identity       |
+| `enterprise` | `ghcr.io/orkestra-cc/orkestra/backend:enterprise` (latest) | every addon                                         |
+
+```bash
+cd docker
+docker network create orkestra-network                              # first time only
+docker compose -f docker-compose.infra.yml up -d                    # mongodb + redis
+docker compose -f docker-compose.billing.yml --env-file .env up -d  # any profile name
+```
+
+The same operations are wrapped by `./orkestra.sh profile <name> <op>` — see "Managing the stack" below.
+
 ## Full development stack
 
 For hot-reload Go development with AIR and the full addon fleet (Gotenberg, Hindsight, etc.), use the dev compose. Note that this stack uses Chainguard hardened images (`dhi.io/*`) and requires registry access.
@@ -72,15 +93,22 @@ docker compose -f docker-compose.dev.yml up -d
 
 Two ways to use it:
 
-**Interactive TUI** — `./orkestra.sh` launches a profile menu (minimal / full stack) followed by a per-profile operations menu with deploy, stop, reset, status, logs, and info.
+**Interactive TUI** — `./orkestra.sh` launches a profile menu (minimal / SKU profile picker / full stack) followed by a per-profile operations menu with deploy, stop, reset, status, logs, and info.
 
 **CLI mode** — every operation also works as a non-interactive command for scripting:
 
 ```bash
+# Minimal — built locally from Dockerfile.minimal
 ./orkestra.sh minimal deploy --build
 ./orkestra.sh minimal logs backend -f
 ./orkestra.sh minimal reset --yes
 
+# SKU profile — pulled from GHCR (starter | billing | ai | saas | enterprise)
+./orkestra.sh profile billing deploy --pull
+./orkestra.sh profile ai status
+./orkestra.sh profile enterprise logs backend -f
+
+# Full stack — uses ENV from docker/.env or ENV=... prefix
 ENV=development ./orkestra.sh deploy --scope backend --rebuild --yes
 ./orkestra.sh status
 ./orkestra.sh logs orkestra-backend-dev -f
