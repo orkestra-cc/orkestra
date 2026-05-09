@@ -25,11 +25,16 @@ const (
 	maxOverFetchTopK         = 200
 )
 
-// StreamResult holds the pre-LLM data and token channel for streaming queries
+// StreamResult holds the pre-LLM data and token channel for streaming queries.
+//
+// Cancel must be invoked once the caller is done draining TokenChan (typically
+// `defer result.Cancel()`) so the LLM context's timer is released. It is
+// always non-nil — a no-op when no LLM stream was started.
 type StreamResult struct {
 	Sources   []iface.SourceRef
 	PreMeta   iface.QueryMeta
 	TokenChan <-chan aimodelsProviders.StreamChunk
+	Cancel    context.CancelFunc
 	ModelName string
 	StartTime time.Time // total query start for final metadata
 	LLMStart  time.Time // LLM start for llmTimeMs
@@ -372,11 +377,13 @@ func (s *queryService) QueryStream(ctx context.Context, question string, topK in
 				TotalTimeMs:     time.Since(totalStart).Milliseconds(),
 			},
 			TokenChan: nil,
+			Cancel:    func() {},
 		}, nil
 	}
 
-	// Start streaming LLM generation
-	llmCtx, _ := context.WithTimeout(context.Background(), 5*time.Minute)
+	// Start streaming LLM generation. Caller must invoke result.Cancel() when
+	// done draining TokenChan to release the timer.
+	llmCtx, llmCancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	llmStart := time.Now()
 
 	tokenChan, err := pc.llmProvider.StreamComplete(llmCtx, pc.prompt, aimodelsProviders.CompletionOptions{
@@ -385,6 +392,7 @@ func (s *queryService) QueryStream(ctx context.Context, question string, topK in
 		MaxTokens:    2048,
 	})
 	if err != nil {
+		llmCancel()
 		return nil, fmt.Errorf("LLM stream failed: %w", err)
 	}
 
@@ -397,6 +405,7 @@ func (s *queryService) QueryStream(ctx context.Context, question string, topK in
 			ModelUsed:       pc.llmProvider.ModelName(),
 		},
 		TokenChan: tokenChan,
+		Cancel:    llmCancel,
 		ModelName: pc.llmProvider.ModelName(),
 		StartTime: totalStart,
 		LLMStart:  llmStart,

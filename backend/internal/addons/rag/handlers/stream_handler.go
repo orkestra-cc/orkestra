@@ -78,6 +78,7 @@ func (h *StreamHandler) HandleQueryStream(w http.ResponseWriter, r *http.Request
 		http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusInternalServerError)
 		return
 	}
+	defer result.Cancel()
 
 	// Set SSE headers
 	w.Header().Set("Content-Type", "text/event-stream")
