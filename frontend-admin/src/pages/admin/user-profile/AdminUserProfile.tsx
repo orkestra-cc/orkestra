@@ -7,8 +7,6 @@ import { Col, Row, Alert, Spinner } from 'react-bootstrap';
 
 import AdminUserActions from './AdminUserActions';
 import AdminUserMetrics from './AdminUserMetrics';
-import AdminLicenses from './AdminLicenses';
-import AdminMedicalChecks from './AdminMedicalChecks';
 
 const AdminUserProfile: React.FC = () => {
   const { userId } = useParams<{ userId: string }>();
@@ -52,9 +50,6 @@ const AdminUserProfile: React.FC = () => {
       <Row className="g-3 mb-3">
         <Col lg={8}>
           <AdminProfileIntro user={user} />
-          <AdminLicenses user={user} />
-          <AdminMedicalChecks user={user} />
-
         </Col>
         <Col lg={4}>
           <div className="sticky-sidebar">

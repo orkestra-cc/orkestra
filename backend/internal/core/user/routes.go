@@ -91,46 +91,6 @@ func RegisterRoutes(api huma.API, userHandler *handlers.UserHandler) {
 		Security:    []map[string][]string{{"bearerAuth": {}}},
 	}, userHandler.GetUserCount)
 
-	// Document management operations
-	huma.Register(api, huma.Operation{
-		OperationID: "get-users-with-expired-documents",
-		Method:      http.MethodGet,
-		Path:        "/v1/users/expired-documents",
-		Summary:     "Get users with expired documents",
-		Description: "Retrieves users who have expired driver documents",
-		Tags:        []string{"Users", "Documents"},
-		Security:    []map[string][]string{{"bearerAuth": {}}},
-	}, userHandler.GetUsersWithExpiredDocuments)
-
-	huma.Register(api, huma.Operation{
-		OperationID: "get-users-with-expiring-soon-documents",
-		Method:      http.MethodGet,
-		Path:        "/v1/users/expiring-soon-documents",
-		Summary:     "Get users with documents expiring soon",
-		Description: "Retrieves users who have driver documents expiring within the specified number of days",
-		Tags:        []string{"Users", "Documents"},
-		Security:    []map[string][]string{{"bearerAuth": {}}},
-	}, userHandler.GetUsersWithExpiringSoonDocuments)
-
-	huma.Register(api, huma.Operation{
-		OperationID: "update-user-documents",
-		Method:      http.MethodPatch,
-		Path:        "/v1/users/{id}/documents",
-		Summary:     "Update user documents",
-		Description: "Updates only the document-related fields for a user",
-		Tags:        []string{"Users", "Documents"},
-		Security:    []map[string][]string{{"bearerAuth": {}}},
-	}, userHandler.UpdateUserDocuments)
-
-	huma.Register(api, huma.Operation{
-		OperationID: "check-user-document-expiry",
-		Method:      http.MethodGet,
-		Path:        "/v1/users/{id}/check-expiry",
-		Summary:     "Check document expiry",
-		Description: "Checks which documents are expired for a specific user",
-		Tags:        []string{"Users", "Documents"},
-		Security:    []map[string][]string{{"bearerAuth": {}}},
-	}, userHandler.CheckDocumentExpiry)
 }
 
 // RegisterAdminClientRoutes mounts the admin endpoints that operate on

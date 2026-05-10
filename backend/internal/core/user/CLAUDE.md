@@ -68,10 +68,6 @@ All routes are behind `RequireSystemPermission("system.users.admin")` (`module.g
 | GET | `/v1/users/count` | Count users with optional filters |
 | GET | `/v1/users/by-email?email=` | Look up user by email |
 | GET | `/v1/users/role/{role}` | Users with a specific system role |
-| GET | `/v1/users/expired-documents` | Users with at least one expired document |
-| GET | `/v1/users/expiring-soon-documents?days=N` | Users with documents expiring within N days |
-| PATCH | `/v1/users/{id}/documents` | Update only document fields (license, CQC, ADR, etc.) |
-| GET | `/v1/users/{id}/check-expiry` | Return which of one user's documents are currently expired |
 | GET | `/v1/admin/client-users` | List Tier-2 client users with tenant memberships joined (powers `/admin/clients`) |
 | GET | `/v1/admin/client-users/{id}` | Single Tier-2 client user with memberships + OAuth providers |
 | POST | `/v1/admin/client-users` | Admin-direct create of a client_users row, password hashed against the live policy, EmailVerified=true |
@@ -108,7 +104,6 @@ Key method groups:
 - **Email uniqueness** is enforced at the DB level by the unique index plus at the service level by a pre-insert existence check. Concurrent creates with the same email will have one succeed and one error.
 - **Soft delete only** — `DeleteUser` sets `DeletedAt` on the document. The unique email index still matches soft-deleted rows, so reactivating a soft-deleted account requires either a hard delete or a permanent email alias. `SoftDeleteAndAliasEmail` is the alias path: it stamps `deletedAt` AND atomically rewrites `email` to `<original>+deleted-<unixNano>@orphan.local` (preserving the original on `originalEmail` for audit) so the unique index frees up. Used by the tenant cascade hook for orphaned external (Tier-2) owners — internal users are intentionally never aliased because operator humans outlive single workspaces.
 - **`User.MFAGraceStartedAt` is stamped by the auth module**, cleared by the auth module (on successful enrollment), and read by both auth (to decide login grace vs 403) and the admin MFA reset flow (which calls `ResetMFAGrace` to restart the countdown). The field is non-serialized (`json:"-"`) — it's internal bookkeeping, not part of the public user surface.
-- **Driver document fields are legacy but live.** `LicenseNumber`, `LicenseExpiry`, `DriverCardNumber`, `DriverCardExpiry`, `CQCExpiry`, `ADRNumber`, `ADRExpiry`, `TachigrafExpiry`, `MedicalChecks` are fleet-management artifacts from the product's original scope. The expiry endpoints exist because Italian transport compliance needs them — do not delete them as dead code.
 - **`OAuthLinks` is embedded in the user document**, not a separate collection. The auth module has its *own* `auth_oauth_providers` collection for provider-side metadata (IDs, tokens). The two are synced but serve different roles: `User.OAuthLinks` is the "connected accounts" list surfaced to the user; `auth_oauth_providers` is the provider-lookup index used during OAuth callback.
 
 ## What this module does NOT do

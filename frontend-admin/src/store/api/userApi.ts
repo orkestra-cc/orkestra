@@ -7,17 +7,6 @@ export interface UserOAuthProviderInfo {
   avatar?: string;
 }
 
-// Medical check record
-export interface MedicalCheck {
-  id: string;
-  type: string;
-  notes?: string;
-  expiry?: string;
-  booked?: string;
-  where?: string;
-  doctor?: string;
-}
-
 // User management types based on backend OpenAPI
 export interface User {
   id: string;
@@ -28,15 +17,6 @@ export interface User {
   role: string;
   phone?: string;
   providers: UserOAuthProviderInfo[];
-  licenseNumber?: string;
-  licenseExpiry?: string;
-  driverCardNumber?: string;
-  driverCardExpiry?: string;
-  cqcExpiry?: string;
-  adrNumber?: string;
-  adrExpiry?: string;
-  tachigrafExpiry?: string;
-  medicalChecks?: MedicalCheck[];
   isActive: boolean;
   emailVerified: boolean;
   lastLogin?: string;
@@ -59,15 +39,6 @@ export interface CreateUserInput {
   phone: string;
   pin: string;
   role: string;
-  licenseNumber?: string;
-  licenseExpiry?: string;
-  driverCardNumber?: string;
-  driverCardExpiry?: string;
-  cqcExpiry?: string;
-  adrNumber?: string;
-  adrExpiry?: string;
-  tachigrafExpiry?: string;
-  medicalChecks?: MedicalCheck[];
 }
 
 export interface UpdateUserInput {
@@ -79,15 +50,6 @@ export interface UpdateUserInput {
   isActive?: boolean;
   pin?: string;
   avatar?: string;
-  licenseNumber?: string;
-  licenseExpiry?: string;
-  driverCardNumber?: string;
-  driverCardExpiry?: string;
-  cqcExpiry?: string;
-  adrNumber?: string;
-  adrExpiry?: string;
-  tachigrafExpiry?: string;
-  medicalChecks?: MedicalCheck[];
 }
 
 export interface DeleteUserResponse {
@@ -121,7 +83,6 @@ export interface UserListParams {
   isActive?: boolean;
   emailVerified?: boolean;
   search?: string;
-  hasExpiredDocs?: boolean;
   page?: number;
   pageSize?: number;
 }
@@ -230,7 +191,6 @@ export const userApi = baseApi.injectEndpoints({
         if (params?.isActive !== undefined) searchParams.append('isActive', String(params.isActive));
         if (params?.emailVerified !== undefined) searchParams.append('emailVerified', String(params.emailVerified));
         if (params?.search) searchParams.append('search', params.search);
-        if (params?.hasExpiredDocs !== undefined) searchParams.append('hasExpiredDocs', String(params.hasExpiredDocs));
         if (params?.page !== undefined) searchParams.append('page', String(params.page));
         if (params?.pageSize !== undefined) searchParams.append('pageSize', String(params.pageSize));
 

@@ -82,8 +82,6 @@ type UserRepository interface {
 	List(ctx context.Context, filters *models.UserFilters, pagination *models.PaginationParams) ([]*models.User, int64, error)
 	ListWithOptions(ctx context.Context, filter bson.M, opts ...*options.FindOptions) ([]*models.User, error)
 	GetByRole(ctx context.Context, role string) ([]*models.User, error)
-	GetUsersWithExpiredDocuments(ctx context.Context) ([]*models.User, error)
-	GetUsersWithExpiringSoonDocuments(ctx context.Context, days int) ([]*models.User, error)
 
 	// Utility Operations
 	Count(ctx context.Context, filters *models.UserFilters) (int64, error)
@@ -223,33 +221,6 @@ func (r *mongoUserRepository) Update(ctx context.Context, id string, input *mode
 	}
 	if input.Role != "" {
 		update["$set"].(bson.M)["role"] = input.Role
-	}
-	if input.LicenseNumber != "" {
-		update["$set"].(bson.M)["licenseNumber"] = input.LicenseNumber
-	}
-	if input.LicenseExpiry != nil {
-		update["$set"].(bson.M)["licenseExpiry"] = input.LicenseExpiry
-	}
-	if input.DriverCardNumber != "" {
-		update["$set"].(bson.M)["driverCardNumber"] = input.DriverCardNumber
-	}
-	if input.DriverCardExpiry != nil {
-		update["$set"].(bson.M)["driverCardExpiry"] = input.DriverCardExpiry
-	}
-	if input.CQCExpiry != nil {
-		update["$set"].(bson.M)["cqcExpiry"] = input.CQCExpiry
-	}
-	if input.ADRNumber != "" {
-		update["$set"].(bson.M)["adrNumber"] = input.ADRNumber
-	}
-	if input.ADRExpiry != nil {
-		update["$set"].(bson.M)["adrExpiry"] = input.ADRExpiry
-	}
-	if input.TachigrafExpiry != nil {
-		update["$set"].(bson.M)["tachigrafExpiry"] = input.TachigrafExpiry
-	}
-	if input.MedicalChecks != nil {
-		update["$set"].(bson.M)["medicalChecks"] = input.MedicalChecks
 	}
 	if input.IsActive != nil {
 		update["$set"].(bson.M)["isActive"] = *input.IsActive
@@ -428,72 +399,6 @@ func (r *mongoUserRepository) GetByRole(ctx context.Context, role string) ([]*mo
 	return users, nil
 }
 
-// GetUsersWithExpiredDocuments retrieves users with expired documents
-func (r *mongoUserRepository) GetUsersWithExpiredDocuments(ctx context.Context) ([]*models.User, error) {
-	now := time.Now()
-	filter := bson.M{
-		"deletedAt": bson.M{"$exists": false},
-		"$or": []bson.M{
-			{"licenseExpiry": bson.M{"$lt": now}},
-			{"driverCardExpiry": bson.M{"$lt": now}},
-			{"cqcExpiry": bson.M{"$lt": now}},
-			{"adrExpiry": bson.M{"$lt": now}},
-			{"tachigrafExpiry": bson.M{"$lt": now}},
-		},
-	}
-
-	cursor, err := r.collection.Find(ctx, filter)
-	if err != nil {
-		return nil, fmt.Errorf("failed to find users with expired documents: %w", err)
-	}
-	defer cursor.Close(ctx)
-
-	var users []*models.User
-	for cursor.Next(ctx) {
-		var user models.User
-		if err := cursor.Decode(&user); err != nil {
-			return nil, fmt.Errorf("failed to decode user: %w", err)
-		}
-		users = append(users, &user)
-	}
-
-	return users, nil
-}
-
-// GetUsersWithExpiringSoonDocuments retrieves users with documents expiring soon
-func (r *mongoUserRepository) GetUsersWithExpiringSoonDocuments(ctx context.Context, days int) ([]*models.User, error) {
-	now := time.Now()
-	futureDate := now.AddDate(0, 0, days)
-
-	filter := bson.M{
-		"deletedAt": bson.M{"$exists": false},
-		"$or": []bson.M{
-			{"licenseExpiry": bson.M{"$gte": now, "$lte": futureDate}},
-			{"driverCardExpiry": bson.M{"$gte": now, "$lte": futureDate}},
-			{"cqcExpiry": bson.M{"$gte": now, "$lte": futureDate}},
-			{"adrExpiry": bson.M{"$gte": now, "$lte": futureDate}},
-			{"tachigrafExpiry": bson.M{"$gte": now, "$lte": futureDate}},
-		},
-	}
-
-	cursor, err := r.collection.Find(ctx, filter)
-	if err != nil {
-		return nil, fmt.Errorf("failed to find users with expiring documents: %w", err)
-	}
-	defer cursor.Close(ctx)
-
-	var users []*models.User
-	for cursor.Next(ctx) {
-		var user models.User
-		if err := cursor.Decode(&user); err != nil {
-			return nil, fmt.Errorf("failed to decode user: %w", err)
-		}
-		users = append(users, &user)
-	}
-
-	return users, nil
-}
-
 // Count counts users with filters
 func (r *mongoUserRepository) Count(ctx context.Context, filters *models.UserFilters) (int64, error) {
 	filter := r.buildFilter(filters)
@@ -564,17 +469,6 @@ func (r *mongoUserRepository) buildFilter(filters *models.UserFilters) bson.M {
 			{"fullName": searchRegex},
 			{"email": searchRegex},
 			{"username": searchRegex},
-		}
-	}
-
-	if filters.HasExpiredDocs {
-		now := time.Now()
-		filter["$or"] = []bson.M{
-			{"licenseExpiry": bson.M{"$lt": now}},
-			{"driverCardExpiry": bson.M{"$lt": now}},
-			{"cqcExpiry": bson.M{"$lt": now}},
-			{"adrExpiry": bson.M{"$lt": now}},
-			{"tachigrafExpiry": bson.M{"$lt": now}},
 		}
 	}
 
