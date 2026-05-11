@@ -11,6 +11,7 @@ on:
     paths:
       - 'mobile/**'
       - '.github/workflows/mobile.yml'
+  workflow_dispatch:
 
 defaults:
   run:
