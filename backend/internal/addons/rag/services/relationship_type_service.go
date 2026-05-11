@@ -65,6 +65,10 @@ func (s *relationshipTypeService) Create(ctx context.Context, name, description,
 	return rt, nil
 }
 
+// Update applies the supplied changes to the given relationship type. Pointer
+// types distinguish "not provided" (nil) from "explicit clear" (empty value).
+//
+//nolint:gocritic // ptrToRefParam: intentional optional-update semantics for cats/props.
 func (s *relationshipTypeService) Update(ctx context.Context, uuid string, desc *string, props *[]string, cats *map[string]bool) (*models.RelationshipTypeConfig, error) {
 	rt, err := s.repo.GetByUUID(ctx, uuid)
 	if err != nil {

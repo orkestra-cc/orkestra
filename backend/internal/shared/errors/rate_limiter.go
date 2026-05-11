@@ -166,6 +166,30 @@ func (rl *RateLimiter) RecordFailedAuth(ctx context.Context, identifier string) 
 	rl.Check(ctx, key, "auth:failed")
 }
 
+// SetAuthFailedConfig replaces the "auth:failed" lockout configuration
+// at runtime so admin-managed values can drive the per-IP / per-email
+// brute-force guard. The auth module calls this on every login attempt
+// using the live AuthPolicyService values; the swap is cheap because
+// it only mutates a map entry. New token buckets pick up the new
+// capacity / window immediately; already-allocated buckets keep their
+// current refill rate until they are evicted by the cleanup ticker (5
+// min). Threshold < 1 or window <= 0 is ignored to avoid a misedit
+// turning the limiter into a deny-all.
+func (rl *RateLimiter) SetAuthFailedConfig(threshold int, window time.Duration) {
+	if threshold < 1 || window <= 0 {
+		return
+	}
+	cfg := &RateLimitConfig{
+		Capacity:   threshold,
+		RefillRate: 1,
+		Window:     window,
+		MaxBurst:   1,
+	}
+	rl.mu.Lock()
+	rl.configs["auth:failed"] = cfg
+	rl.mu.Unlock()
+}
+
 // IsBlocked checks if an identifier is currently blocked due to failed attempts
 func (rl *RateLimiter) IsBlocked(ctx context.Context, identifier string) bool {
 	key := fmt.Sprintf("auth_failed:%s", identifier)
@@ -435,10 +459,3 @@ func cleanRemoteAddr(addr string) string {
 	return addr
 }
 
-// min returns the minimum of two float64 values
-func min(a, b float64) float64 {
-	if a < b {
-		return a
-	}
-	return b
-}

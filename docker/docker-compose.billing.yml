@@ -1,0 +1,88 @@
+# Orkestra — Billing SKU (published image)
+#
+# Pulls the billing profile image from GHCR (billing + documents + company
+# addons) and runs it against the shared mongodb/redis services from
+# docker-compose.infra.yml. The documents addon expects a Gotenberg endpoint —
+# infra.yml ships one at orkestra-gotenberg:3000.
+#
+# Usage:
+#   cd docker
+#   docker network create orkestra-network                        # once
+#   docker compose -f docker-compose.infra.yml up -d              # mongodb + redis + gotenberg
+#   docker compose -f docker-compose.billing.yml --env-file .env up -d
+#
+# Health check: backend `/health` returns 200 once mongo/redis come up.
+
+name: orkestra-billing
+
+services:
+  backend:
+    image: ${BACKEND_IMAGE_REPO:-ghcr.io/orkestra-cc/orkestra}/backend:${BACKEND_IMAGE_TAG:-billing}
+    container_name: orkestra-backend-billing
+    restart: unless-stopped
+    ports:
+      - "${BACKEND_PORT:-3000}:3000"
+    environment:
+      ENV: ${ENV:-production}
+      PORT: 3000
+      ORKESTRA_PROFILE: billing
+
+      MONGO_URI: mongodb://${MONGO_ROOT_USERNAME}:${MONGO_ROOT_PASSWORD}@${MONGO_HOST:-mongodb}:27017/${MONGO_DATABASE}?authSource=admin
+      REDIS_URL: redis://:${REDIS_PASSWORD}@${REDIS_HOST:-redis}:6379/${REDIS_DB:-0}
+
+      JWT_PRIVATE_KEY_PATH: ${JWT_PRIVATE_KEY_PATH:-/app/keys/jwt-private.pem}
+      JWT_PUBLIC_KEY_PATH: ${JWT_PUBLIC_KEY_PATH:-/app/keys/jwt-public.pem}
+      JWT_ACCESS_TOKEN_EXPIRY: ${JWT_ACCESS_TOKEN_EXPIRY:-15m}
+      JWT_REFRESH_TOKEN_EXPIRY: ${JWT_REFRESH_TOKEN_EXPIRY:-7d}
+
+      OAUTH_TOKEN_ENCRYPTION_KEY: ${OAUTH_TOKEN_ENCRYPTION_KEY}
+      ORKESTRA_KMS_MASTER_KEY: ${ORKESTRA_KMS_MASTER_KEY:-}
+
+      COOKIE_SECRET: ${COOKIE_SECRET}
+      COOKIE_NAME: ${COOKIE_NAME:-orkestra_cookie}
+      COOKIE_DOMAIN: ${COOKIE_DOMAIN:-}
+      OPERATOR_COOKIE_DOMAIN: ${OPERATOR_COOKIE_DOMAIN:-}
+      CLIENT_COOKIE_DOMAIN: ${CLIENT_COOKIE_DOMAIN:-}
+      COOKIE_HTTP_ONLY: ${COOKIE_HTTP_ONLY:-true}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      COOKIE_SAME_SITE: ${COOKIE_SAME_SITE:-lax}
+      COOKIE_MAX_AGE: ${COOKIE_MAX_AGE:-86400000}
+
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:8080}
+      BACKEND_URL: ${BACKEND_URL:-http://localhost:3000}
+      OPERATOR_FRONTEND_URL: ${OPERATOR_FRONTEND_URL:-}
+      CLIENT_FRONTEND_URL: ${CLIENT_FRONTEND_URL:-}
+
+      CONSOLE_HOST: ${CONSOLE_HOST:-console.localhost:3000}
+      CLIENT_API_HOST: ${CLIENT_API_HOST:-api.localhost:3000}
+      OPERATOR_CORS_ORIGINS: ${OPERATOR_CORS_ORIGINS:-}
+      CLIENT_CORS_ORIGINS: ${CLIENT_CORS_ORIGINS:-}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080}
+
+      RATE_LIMIT_REQUESTS_PER_MINUTE: ${RATE_LIMIT_REQUESTS_PER_MINUTE:-60}
+      RATE_LIMIT_BURST: ${RATE_LIMIT_BURST:-10}
+
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      PRETTY_LOGS: ${PRETTY_LOGS:-false}
+
+      # Billing addons (FatturaPA/SDI, company API) read their secrets from
+      # ConfigService — bootstrap them at /admin/modules. Documents needs
+      # GOTENBERG_URL pointing at the infra Gotenberg container.
+      GOTENBERG_URL: ${GOTENBERG_URL:-http://orkestra-gotenberg:3000}
+
+      # No infra-owning addon in this profile — container control off.
+      CONTAINER_CONTROL_ENABLED: ${CONTAINER_CONTROL_ENABLED:-false}
+    volumes:
+      - ./keys:/app/keys:ro
+    networks:
+      - orkestra-network
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+networks:
+  orkestra-network:
+    external: true

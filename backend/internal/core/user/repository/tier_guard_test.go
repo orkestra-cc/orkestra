@@ -10,11 +10,9 @@ import (
 )
 
 // TestRepoConstructorsBindCorrectTierAndCollection locks in the
-// ADR-0003 PR-B invariant that the three user-repo constructors each
-// bind to the matching MongoDB collection and stamp the matching Tier
-// value on writes. The legacy constructor leaves Tier empty so
-// migrate_user_split.go can backfill it without colliding with code
-// that already wrote the field.
+// ADR-0003 PR-D invariant that the user-repo constructors each bind
+// to the matching MongoDB collection and stamp the matching Tier value
+// on writes.
 //
 // Mongo is never contacted: mongo.NewClient does not dial; Database()
 // and Collection() are constructor calls that just store names. The
@@ -34,7 +32,6 @@ func TestRepoConstructorsBindCorrectTierAndCollection(t *testing.T) {
 		wantTier string
 		wantColl string
 	}{
-		{"legacy", NewUserRepository, "", UsersCollection},
 		{"operator", NewOperatorUserRepository, models.TierOperator, OperatorUsersCollection},
 		{"client", NewClientUserRepository, models.TierClient, ClientUsersCollection},
 	}
@@ -74,11 +71,10 @@ func TestTierStampedOnCreate(t *testing.T) {
 		userTier string // pre-existing value, should be overwritten only when repoTier is non-empty
 		want     string
 	}{
-		{"", "", ""},
-		{"", "operator", "operator"}, // legacy repo: never touch the field
 		{models.TierOperator, "", models.TierOperator},
 		{models.TierOperator, "client", models.TierOperator}, // operator repo: stamp regardless of prior value
 		{models.TierClient, "", models.TierClient},
+		{models.TierClient, "operator", models.TierClient},
 	}
 	for _, c := range cases {
 		c := c

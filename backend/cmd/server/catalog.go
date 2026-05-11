@@ -3,20 +3,6 @@ package main
 import (
 	"log/slog"
 
-	"github.com/orkestra/backend/internal/addons/agents"
-	"github.com/orkestra/backend/internal/addons/aimodels"
-	"github.com/orkestra/backend/internal/addons/billing"
-	"github.com/orkestra/backend/internal/addons/company"
-	"github.com/orkestra/backend/internal/addons/compliance"
-	"github.com/orkestra/backend/internal/addons/dev"
-	"github.com/orkestra/backend/internal/addons/documents"
-	"github.com/orkestra/backend/internal/addons/graph"
-	"github.com/orkestra/backend/internal/addons/identity"
-	"github.com/orkestra/backend/internal/addons/onboarding"
-	"github.com/orkestra/backend/internal/addons/payments"
-	"github.com/orkestra/backend/internal/addons/rag"
-	"github.com/orkestra/backend/internal/addons/sales"
-	"github.com/orkestra/backend/internal/addons/subscriptions"
 	"github.com/orkestra/backend/internal/core/auth"
 	"github.com/orkestra/backend/internal/core/authz"
 	"github.com/orkestra/backend/internal/core/navigation"
@@ -44,26 +30,20 @@ var coreModules = []func() module.Module{
 	func() module.Module { return navigation.NewModule() },
 }
 
-// optionalModules are all instantiated and initialized at boot.
-// Their enabled state is read from the module_configs collection
-// (managed via /admin/modules); the registry resolves initialization
-// order from Dependencies().
-var optionalModules = map[string]func() module.Module{
-	"billing":       func() module.Module { return billing.NewModule() },
-	"documents":     func() module.Module { return documents.NewModule() },
-	"company":       func() module.Module { return company.NewModule() },
-	"graph":         func() module.Module { return graph.NewModule() },
-	"aimodels":      func() module.Module { return aimodels.NewModule() },
-	"rag":           func() module.Module { return rag.NewModule() },
-	"agents":        func() module.Module { return agents.NewModule() },
-	"sales":         func() module.Module { return sales.NewModule() },
-	"subscriptions": func() module.Module { return subscriptions.NewModule() },
-	"payments":      func() module.Module { return payments.NewModule() },
-	"onboarding":    func() module.Module { return onboarding.NewModule() },
-	"identity":      func() module.Module { return identity.NewModule() },
-	"compliance":    func() module.Module { return compliance.NewModule() },
-	"dev":           func() module.Module { return dev.NewModule() },
-}
+// optionalModules is the catalog of addons the binary can boot. It is
+// populated at init time by the per-addon catalog_<name>.go files, each
+// gated by `//go:build !no_addons || addon_<name>`:
+//
+//   - default build (no tags): every catalog_<name>.go compiles, every
+//     addon is registered — same behavior as before the split.
+//   - `-tags "no_addons"`: only core modules ship; the addon packages
+//     are unreachable from main and never compiled.
+//   - `-tags "no_addons,addon_billing,addon_documents"`: ship a curated
+//     subset — useful for per-customer SKUs and lean container images.
+//
+// Enabled state at runtime is still controlled by the module_configs
+// collection via /admin/modules; build tags only decide what is *installable*.
+var optionalModules = map[string]func() module.Module{}
 
 // allOptionalModuleNames returns the names of all optional modules.
 // All optional modules are always instantiated and initialized at boot

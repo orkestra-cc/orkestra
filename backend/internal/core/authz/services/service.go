@@ -89,6 +89,30 @@ func isPlatformSystemRole(role *models.Role) bool {
 	return ok
 }
 
+// repoBackend is the narrow surface Service consumes from the
+// repository. Declared as an interface so tests can inject an
+// in-memory fake without standing up Mongo. *repository.Repository
+// satisfies it via Go's structural typing — production wiring is
+// unchanged.
+type repoBackend interface {
+	UpsertPermission(ctx context.Context, p *models.Permission) error
+	ListPermissions(ctx context.Context) ([]models.Permission, error)
+	ListAllPermissionKeys(ctx context.Context) ([]string, error)
+	UpsertRole(ctx context.Context, role *models.Role) error
+	UpdateRoleFields(ctx context.Context, uuid string, fields bson.M) error
+	GetRoleByName(ctx context.Context, tenantID, name string) (*models.Role, error)
+	GetRoleByUUID(ctx context.Context, uuid string) (*models.Role, error)
+	CountSystemRoles(ctx context.Context) (int64, error)
+	ListRoles(ctx context.Context, tenantID string) ([]models.Role, error)
+	DeleteRole(ctx context.Context, uuid string) error
+	CreateBinding(ctx context.Context, b *models.Binding) error
+	DeleteBinding(ctx context.Context, uuid string) error
+	DeleteBindingsByRoleUUID(ctx context.Context, roleUUID string) (int64, error)
+	DeleteBindingsByTenant(ctx context.Context, tenantUUID string) (int64, error)
+	ListActiveBindingsForUser(ctx context.Context, userUUID, tenantID string) ([]models.Binding, error)
+	ListBindingsByTenant(ctx context.Context, tenantID string) ([]models.Binding, error)
+}
+
 // Service owns authorization lifecycle and implements iface.AuthzProvider.
 //
 // Permission evaluation rules (in order):
@@ -107,7 +131,7 @@ func isPlatformSystemRole(role *models.Role) bool {
 // Results are cached in Redis for 60 seconds per (userUUID, orgID) key and
 // invalidated when bindings or roles change.
 type Service struct {
-	repo               *repository.Repository
+	repo               repoBackend
 	redis              *database.RedisClientAdapter
 	logger             *slog.Logger
 	userRoles          UserSystemRoleLookup
@@ -1013,6 +1037,22 @@ func (s *Service) DeleteBinding(ctx context.Context, uuid string) error {
 	}
 	s.flushCache(ctx)
 	return nil
+}
+
+// RemoveBindingsByTenant drops every binding scoped to the given tenant
+// and flushes the effective-permission cache so any in-flight request can
+// no longer consult a cached entry pointing at a now-deleted tenant.
+// Called by the cascade hook the authz module registers on the tenant
+// service. Returns the number of bindings removed for audit purposes.
+func (s *Service) RemoveBindingsByTenant(ctx context.Context, tenantUUID string) (int64, error) {
+	n, err := s.repo.DeleteBindingsByTenant(ctx, tenantUUID)
+	if err != nil {
+		return 0, err
+	}
+	if n > 0 {
+		s.flushCache(ctx)
+	}
+	return n, nil
 }
 
 func (s *Service) flushCache(ctx context.Context) {

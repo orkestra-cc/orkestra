@@ -16,6 +16,7 @@ import (
 
 	"github.com/orkestra/backend/internal/addons/billing/config"
 	"github.com/orkestra/backend/internal/addons/billing/models"
+	"github.com/orkestra/backend/internal/shared/openapiauth"
 )
 
 // Common errors
@@ -104,9 +105,6 @@ type OpenAPIClient interface {
 
 	// All invoices (both sent and received) - for syncing from OpenAPI
 	GetAllInvoices(ctx context.Context, fromDate time.Time, page, pageSize int) (*SupplierInvoicesResponse, error)
-
-	// Notifications
-	GetNotifications(ctx context.Context, fromDate time.Time) ([]OpenAPINotification, error)
 
 	// Legal storage / preserved documents
 	GetPreservedDocument(ctx context.Context, uuid string) (*PreservedDocumentResponse, error)
@@ -277,6 +275,29 @@ type openAPIClient struct {
 	circuitBreaker *circuitBreaker
 	logger         *slog.Logger
 	redisClient    RedisClient // Optional Redis client for caching
+
+	// Lazily-built JWT minter. Cached across requests as long as the
+	// credentials in `configLoader()` don't change; rebuilt when an
+	// admin-UI hot-reload swaps the API key, email, or OAuth host.
+	minterMu  sync.Mutex
+	minter    *openapiauth.Minter
+	minterSig string
+}
+
+// billingOAuthScopes is the scope set requested when minting JWTs for the
+// SDI API. Covers every endpoint the billing client may hit. Adjust here
+// (and re-mint, by rotating the API key) when adding new SDI calls.
+var billingOAuthScopes = []string{
+	"GET:sdi.openapi.it/*",
+	"POST:sdi.openapi.it/*",
+	"PUT:sdi.openapi.it/*",
+	"PATCH:sdi.openapi.it/*",
+	"DELETE:sdi.openapi.it/*",
+	"GET:test.sdi.openapi.it/*",
+	"POST:test.sdi.openapi.it/*",
+	"PUT:test.sdi.openapi.it/*",
+	"PATCH:test.sdi.openapi.it/*",
+	"DELETE:test.sdi.openapi.it/*",
 }
 
 // NewOpenAPIClient creates a new OpenAPI client
@@ -296,6 +317,59 @@ func NewOpenAPIClientWithCache(loader config.ConfigLoader, logger *slog.Logger, 
 		logger:         logger,
 		redisClient:    redisClient,
 	}
+}
+
+// getMinter returns the cached JWT minter when the OAuth credentials
+// haven't changed since it was constructed; otherwise rebuilds it. The
+// signature digest covers email + API key + OAuth host so a hot-reload
+// of any of those fields produces a fresh minter (and a fresh JWT).
+// Returns nil when API-key credentials are not configured — callers fall
+// back to the static BearerToken in that case.
+func (c *openAPIClient) getMinter(cfg *config.OpenAPIConfig) *openapiauth.Minter {
+	if !cfg.HasOAuthCredentials() {
+		return nil
+	}
+	sig := cfg.AccountEmail + "|" + cfg.APIKey + "|" + cfg.OAuthBaseURL
+
+	c.minterMu.Lock()
+	defer c.minterMu.Unlock()
+	if c.minter != nil && c.minterSig == sig {
+		return c.minter
+	}
+	var cache openapiauth.Cache
+	if c.redisClient != nil {
+		cache = c.redisClient
+	}
+	c.minter = openapiauth.NewMinter(openapiauth.Config{
+		AccountEmail: cfg.AccountEmail,
+		APIKey:       cfg.APIKey,
+		OAuthBaseURL: cfg.OAuthBaseURL,
+		Scopes:       billingOAuthScopes,
+		TTL:          31536000,
+		Tag:          "billing",
+	}, cache, &http.Client{Timeout: 15 * time.Second}, c.logger)
+	c.minterSig = sig
+	return c.minter
+}
+
+// resolveBearerToken returns the JWT to send in Authorization. Uses the
+// OAuth minter when API-key credentials are set; otherwise falls back to
+// the legacy static BearerToken.
+func (c *openAPIClient) resolveBearerToken(ctx context.Context, cfg *config.OpenAPIConfig) (string, error) {
+	if m := c.getMinter(cfg); m != nil {
+		tok, err := m.Token(ctx)
+		if err == nil {
+			return tok, nil
+		}
+		if errors.Is(err, openapiauth.ErrUpstreamAuth) {
+			return "", fmt.Errorf("%w: openapi auth rejected billing credentials", ErrOpenAPIRequestFailed)
+		}
+		return "", fmt.Errorf("%w: %v", ErrOpenAPIRequestFailed, err)
+	}
+	if cfg.BearerToken == "" {
+		return "", fmt.Errorf("%w: no openapi credentials configured", ErrOpenAPIRequestFailed)
+	}
+	return cfg.BearerToken, nil
 }
 
 func (c *openAPIClient) doRequest(ctx context.Context, method, path string, body interface{}) ([]byte, int, error) {
@@ -322,8 +396,13 @@ func (c *openAPIClient) doRequest(ctx context.Context, method, path string, body
 		return nil, 0, fmt.Errorf("failed to create request: %w", err)
 	}
 
+	bearer, err := c.resolveBearerToken(ctx, cfg)
+	if err != nil {
+		return nil, 0, err
+	}
+
 	// Set headers
-	req.Header.Set("Authorization", "Bearer "+cfg.BearerToken)
+	req.Header.Set("Authorization", "Bearer "+bearer)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
 
@@ -337,6 +416,14 @@ func (c *openAPIClient) doRequest(ctx context.Context, method, path string, body
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, resp.StatusCode, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	// Drop the cached JWT if the SDI API rejected it — common when the
+	// operator rotates the API key in the OpenAPI console mid-flight.
+	if (resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden) {
+		if m := c.getMinter(cfg); m != nil {
+			m.Invalidate(ctx)
+		}
 	}
 
 	// Record success/failure for circuit breaker
@@ -365,8 +452,13 @@ func (c *openAPIClient) doXMLRequest(ctx context.Context, method, path string, x
 		return nil, 0, fmt.Errorf("failed to create request: %w", err)
 	}
 
+	bearer, err := c.resolveBearerToken(ctx, cfg)
+	if err != nil {
+		return nil, 0, err
+	}
+
 	// Set headers for XML request
-	req.Header.Set("Authorization", "Bearer "+cfg.BearerToken)
+	req.Header.Set("Authorization", "Bearer "+bearer)
 	req.Header.Set("Content-Type", "application/xml")
 	req.Header.Set("Accept", "application/json")
 
@@ -380,6 +472,12 @@ func (c *openAPIClient) doXMLRequest(ctx context.Context, method, path string, x
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, resp.StatusCode, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	if (resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden) {
+		if m := c.getMinter(cfg); m != nil {
+			m.Invalidate(ctx)
+		}
 	}
 
 	// Record success/failure for circuit breaker
@@ -968,28 +1066,6 @@ func (c *openAPIClient) parseInvoicesResponse(respBody []byte, page, pageSize in
 	return &result, nil
 }
 
-func (c *openAPIClient) GetNotifications(ctx context.Context, fromDate time.Time) ([]OpenAPINotification, error) {
-	path := fmt.Sprintf("/notifications?from_date=%s", fromDate.Format("2006-01-02T15:04:05Z"))
-
-	respBody, statusCode, err := c.doRequestWithRetry(ctx, http.MethodGet, path, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	if statusCode != http.StatusOK {
-		return nil, fmt.Errorf("%w: status %d", ErrOpenAPIRequestFailed, statusCode)
-	}
-
-	var result struct {
-		Notifications []OpenAPINotification `json:"notifications"`
-	}
-	if err := json.Unmarshal(respBody, &result); err != nil {
-		return nil, fmt.Errorf("failed to parse response: %w", err)
-	}
-
-	return result.Notifications, nil
-}
-
 func (c *openAPIClient) GetInvoiceStats(ctx context.Context) (*InvoiceStatsResponse, error) {
 	path := "/invoices/stats"
 
@@ -1154,5 +1230,5 @@ func (cb *circuitBreaker) RecordFailure() {
 // writeDebugXML writes XML to a file for debugging purposes
 func writeDebugXML(xmlContent string, invoiceNumber string) error {
 	filename := fmt.Sprintf("/tmp/invoice_%s.xml", strings.ReplaceAll(invoiceNumber, "/", "_"))
-	return os.WriteFile(filename, []byte(xmlContent), 0644)
+	return os.WriteFile(filename, []byte(xmlContent), 0o600)
 }

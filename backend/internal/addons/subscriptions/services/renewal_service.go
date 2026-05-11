@@ -24,6 +24,11 @@ const DefaultVATRate = 0.22 // Italian IVA
 //
 // The PaymentProvider is resolved lazily per call so the subscriptions
 // module can initialize before payments without a cyclic dependency.
+//
+// Tenant ownership: every subscription resolves its billing identity through
+// TenantProvider. Personal clients ride on their personal Tenant aggregate
+// (created lazily by EnsureTenantForUser); admin-attached business clients
+// ride on the business tenant.
 type RenewalService struct {
 	subs        repository.SubscriptionRepository
 	services    repository.ServiceRepository
@@ -130,7 +135,7 @@ func (s *RenewalService) ProcessOne(ctx context.Context, sub *models.Subscriptio
 	if tier == nil {
 		return outcomeFailed, ErrSubscriptionTierNotFound
 	}
-	tenant, err := s.loadTenant(ctx, sub.TenantUUID)
+	tenant, err := s.loadTenant(ctx, sub)
 	if err != nil {
 		return outcomeFailed, fmt.Errorf("load tenant: %w", err)
 	}
@@ -199,7 +204,7 @@ func (s *RenewalService) chargeInvoice(ctx context.Context, provider iface.Payme
 	if stripeCustomerID == "" {
 		// First charge for this tenant — create the Stripe customer on the fly.
 		ref, err := provider.CreateCustomer(ctx, iface.CustomerInput{
-			TenantUUID: tenant.UUID,
+			TenantUUID: sub.TenantUUID,
 			Email:      tenant.Email,
 			Name:       tenantBillingName(tenant),
 			VATNumber:  tenant.VATNumber,
@@ -210,19 +215,18 @@ func (s *RenewalService) chargeInvoice(ctx context.Context, provider iface.Payme
 		}
 		stripeCustomerID = ref.ID
 		tenant.StripeCustomerID = stripeCustomerID
-		if s.tenants != nil {
-			if err := s.tenants.SetTenantStripeCustomerID(ctx, tenant.UUID, stripeCustomerID); err != nil {
-				s.logger.Warn("renewal: persist stripe customer id failed",
-					slog.String("tenantUUID", tenant.UUID),
-					slog.String("error", err.Error()),
-				)
-			}
+		if err := s.persistStripeCustomerID(ctx, sub.TenantUUID, stripeCustomerID); err != nil {
+			s.logger.Warn("renewal: persist stripe customer id failed",
+				slog.String("tenantUUID", sub.TenantUUID),
+				slog.String("error", err.Error()),
+			)
 		}
 	}
 
 	charge := iface.SubscriptionCharge{
 		SubscriptionUUID: sub.UUID,
 		InvoiceUUID:      invoice.UUID,
+		TenantUUID:       sub.TenantUUID,
 		Customer:         iface.CustomerRef{Provider: provider.Name(), ID: stripeCustomerID},
 		AmountCents:      invoice.TotalCents,
 		Currency:         invoice.Currency,
@@ -367,17 +371,16 @@ func (s *RenewalService) paymentProvider() (iface.PaymentProvider, bool) {
 	return module.GetTyped[iface.PaymentProvider](s.registry, module.ServicePaymentProvider)
 }
 
-// loadTenant resolves the tenant DTO for the renewal flow. Returns an error
-// when the tenant provider is not wired or the lookup fails — the renewal
-// cannot drive a Stripe customer without billing details.
-func (s *RenewalService) loadTenant(ctx context.Context, tenantUUID string) (*iface.Tenant, error) {
-	if tenantUUID == "" {
-		return nil, errors.New("subscription has no tenantUUID")
+// loadTenant resolves a tenant DTO carrying billing details for the
+// subscription's tenant.
+func (s *RenewalService) loadTenant(ctx context.Context, sub *models.Subscription) (*iface.Tenant, error) {
+	if sub == nil || sub.TenantUUID == "" {
+		return nil, errors.New("subscription has no tenant")
 	}
 	if s.tenants == nil {
 		return nil, errors.New("tenant provider not configured")
 	}
-	t, err := s.tenants.GetTenant(ctx, tenantUUID)
+	t, err := s.tenants.GetTenant(ctx, sub.TenantUUID)
 	if err != nil {
 		return nil, err
 	}
@@ -385,6 +388,17 @@ func (s *RenewalService) loadTenant(ctx context.Context, tenantUUID string) (*if
 		return nil, errors.New("tenant not found")
 	}
 	return t, nil
+}
+
+// persistStripeCustomerID writes the lazy Stripe customer-id back onto the
+// tenant. Best-effort by design — failures are surfaced to the caller for
+// logging only; the customer already exists on Stripe and the renewal job's
+// metadata-keyed lookup will reuse it next cycle.
+func (s *RenewalService) persistStripeCustomerID(ctx context.Context, tenantUUID, stripeCustomerID string) error {
+	if s.tenants == nil {
+		return nil
+	}
+	return s.tenants.SetTenantStripeCustomerID(ctx, tenantUUID, stripeCustomerID)
 }
 
 // tenantBillingName picks the most descriptive label for the tenant when

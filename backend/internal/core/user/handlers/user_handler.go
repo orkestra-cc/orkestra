@@ -142,11 +142,10 @@ func (h *UserHandler) DeleteUser(ctx context.Context, req *DeleteUserRequest) (*
 // List Users Request
 type ListUsersRequest struct {
 	// Query parameters for filtering
-	Role           string `query:"role" doc:"Filter by user role"`
-	IsActive       bool   `query:"isActive" doc:"Filter by active status"`
-	EmailVerified  bool   `query:"emailVerified" doc:"Filter by email verification status"`
-	Search         string `query:"search" doc:"Search in name, email, username"`
-	HasExpiredDocs bool   `query:"hasExpiredDocs" doc:"Filter users with expired documents"`
+	Role          string `query:"role" doc:"Filter by user role"`
+	IsActive      bool   `query:"isActive" doc:"Filter by active status"`
+	EmailVerified bool   `query:"emailVerified" doc:"Filter by email verification status"`
+	Search        string `query:"search" doc:"Search in name, email, username"`
 
 	// Pagination parameters
 	Page     int `query:"page" default:"1" minimum:"1" doc:"Page number"`
@@ -161,9 +160,8 @@ type ListUsersResponse struct {
 // ListUsers handles GET /api/users
 func (h *UserHandler) ListUsers(ctx context.Context, req *ListUsersRequest) (*ListUsersResponse, error) {
 	filters := &models.UserFilters{
-		Role:           req.Role,
-		Search:         req.Search,
-		HasExpiredDocs: req.HasExpiredDocs,
+		Role:   req.Role,
+		Search: req.Search,
 	}
 
 	// Handle optional boolean flags - only set if provided
@@ -229,78 +227,6 @@ func (h *UserHandler) GetUsersByRole(ctx context.Context, req *GetUsersByRoleReq
 	}, nil
 }
 
-// Get Users with Expired Documents Response
-type GetUsersWithExpiredDocumentsResponse struct {
-	Body struct {
-		Users []models.UserManagementResponse `json:"users" doc:"List of users with expired documents"`
-		Total int                             `json:"total" doc:"Total number of users with expired documents"`
-	}
-}
-
-// GetUsersWithExpiredDocuments handles GET /api/users/expired-documents
-func (h *UserHandler) GetUsersWithExpiredDocuments(ctx context.Context, req *struct{}) (*GetUsersWithExpiredDocumentsResponse, error) {
-	users, err := h.userService.GetUsersWithExpiredDocuments(ctx)
-	if err != nil {
-		return nil, huma.Error500InternalServerError("Failed to get users with expired documents", err)
-	}
-
-	// Convert to response format
-	userResponses := make([]models.UserManagementResponse, len(users))
-	for i, user := range users {
-		userResponses[i] = *user
-	}
-
-	return &GetUsersWithExpiredDocumentsResponse{
-		Body: struct {
-			Users []models.UserManagementResponse `json:"users" doc:"List of users with expired documents"`
-			Total int                             `json:"total" doc:"Total number of users with expired documents"`
-		}{
-			Users: userResponses,
-			Total: len(userResponses),
-		},
-	}, nil
-}
-
-// Get Users with Expiring Soon Documents Request
-type GetUsersWithExpiringSoonDocumentsRequest struct {
-	Days int `query:"days" default:"30" minimum:"1" maximum:"365" doc:"Number of days to check for expiring documents"`
-}
-
-// Get Users with Expiring Soon Documents Response
-type GetUsersWithExpiringSoonDocumentsResponse struct {
-	Body struct {
-		Users []models.UserManagementResponse `json:"users" doc:"List of users with documents expiring soon"`
-		Total int                             `json:"total" doc:"Total number of users with expiring documents"`
-		Days  int                             `json:"days" doc:"Number of days used for filtering"`
-	}
-}
-
-// GetUsersWithExpiringSoonDocuments handles GET /api/users/expiring-soon-documents
-func (h *UserHandler) GetUsersWithExpiringSoonDocuments(ctx context.Context, req *GetUsersWithExpiringSoonDocumentsRequest) (*GetUsersWithExpiringSoonDocumentsResponse, error) {
-	users, err := h.userService.GetUsersWithExpiringSoonDocuments(ctx, req.Days)
-	if err != nil {
-		return nil, huma.Error500InternalServerError("Failed to get users with expiring documents", err)
-	}
-
-	// Convert to response format
-	userResponses := make([]models.UserManagementResponse, len(users))
-	for i, user := range users {
-		userResponses[i] = *user
-	}
-
-	return &GetUsersWithExpiringSoonDocumentsResponse{
-		Body: struct {
-			Users []models.UserManagementResponse `json:"users" doc:"List of users with documents expiring soon"`
-			Total int                             `json:"total" doc:"Total number of users with expiring documents"`
-			Days  int                             `json:"days" doc:"Number of days used for filtering"`
-		}{
-			Users: userResponses,
-			Total: len(userResponses),
-			Days:  req.Days,
-		},
-	}, nil
-}
-
 // Get User by Email Request
 type GetUserByEmailRequest struct {
 	Email string `query:"email" doc:"User email address"`
@@ -327,78 +253,13 @@ func (h *UserHandler) GetUserByEmail(ctx context.Context, req *GetUserByEmailReq
 	return &GetUserResponse{Body: *user}, nil
 }
 
-// Update User Documents Request
-type UpdateUserDocumentsRequest struct {
-	ID   string                 `path:"id" doc:"User ID (UUID)"`
-	Body models.UpdateUserInput `json:"documents" doc:"Document data to update"`
-}
-
-// UpdateUserDocuments handles PATCH /api/users/{id}/documents
-func (h *UserHandler) UpdateUserDocuments(ctx context.Context, req *UpdateUserDocumentsRequest) (*UpdateUserResponse, error) {
-	user, err := h.userService.UpdateUserDocuments(ctx, req.ID, &req.Body)
-	if err != nil {
-		switch err {
-		case services.ErrUserNotFound:
-			return nil, huma.Error404NotFound("User not found", err)
-		case services.ErrInvalidInput:
-			return nil, huma.Error400BadRequest("Invalid input data", err)
-		default:
-			return nil, huma.Error500InternalServerError("Failed to update user documents", err)
-		}
-	}
-
-	return &UpdateUserResponse{Body: *user}, nil
-}
-
-// Check Document Expiry Request
-type CheckDocumentExpiryRequest struct {
-	ID string `path:"id" doc:"User ID (UUID)"`
-}
-
-// Check Document Expiry Response
-type CheckDocumentExpiryResponse struct {
-	Body struct {
-		UserID           string   `json:"userId" doc:"User ID"`
-		ExpiredDocuments []string `json:"expiredDocuments" doc:"List of expired documents"`
-		HasExpired       bool     `json:"hasExpired" doc:"Whether user has any expired documents"`
-	}
-}
-
-// CheckDocumentExpiry handles GET /api/users/{id}/check-expiry
-func (h *UserHandler) CheckDocumentExpiry(ctx context.Context, req *CheckDocumentExpiryRequest) (*CheckDocumentExpiryResponse, error) {
-	expired, err := h.userService.CheckDocumentExpiry(ctx, req.ID)
-	if err != nil {
-		switch err {
-		case services.ErrUserNotFound:
-			return nil, huma.Error404NotFound("User not found", err)
-		case services.ErrInvalidInput:
-			return nil, huma.Error400BadRequest("Invalid user ID", err)
-		default:
-			return nil, huma.Error500InternalServerError("Failed to check document expiry", err)
-		}
-	}
-
-	return &CheckDocumentExpiryResponse{
-		Body: struct {
-			UserID           string   `json:"userId" doc:"User ID"`
-			ExpiredDocuments []string `json:"expiredDocuments" doc:"List of expired documents"`
-			HasExpired       bool     `json:"hasExpired" doc:"Whether user has any expired documents"`
-		}{
-			UserID:           req.ID,
-			ExpiredDocuments: expired,
-			HasExpired:       len(expired) > 0,
-		},
-	}, nil
-}
-
 // Get User Count Request
 type GetUserCountRequest struct {
 	// Query parameters for filtering (same as ListUsersRequest)
-	Role           string `query:"role" doc:"Filter by user role"`
-	IsActive       bool   `query:"isActive" doc:"Filter by active status"`
-	EmailVerified  bool   `query:"emailVerified" doc:"Filter by email verification status"`
-	Search         string `query:"search" doc:"Search in name, email, username"`
-	HasExpiredDocs bool   `query:"hasExpiredDocs" doc:"Filter users with expired documents"`
+	Role          string `query:"role" doc:"Filter by user role"`
+	IsActive      bool   `query:"isActive" doc:"Filter by active status"`
+	EmailVerified bool   `query:"emailVerified" doc:"Filter by email verification status"`
+	Search        string `query:"search" doc:"Search in name, email, username"`
 }
 
 // Get User Count Response
@@ -411,9 +272,8 @@ type GetUserCountResponse struct {
 // GetUserCount handles GET /api/users/count
 func (h *UserHandler) GetUserCount(ctx context.Context, req *GetUserCountRequest) (*GetUserCountResponse, error) {
 	filters := &models.UserFilters{
-		Role:           req.Role,
-		Search:         req.Search,
-		HasExpiredDocs: req.HasExpiredDocs,
+		Role:   req.Role,
+		Search: req.Search,
 	}
 
 	// Handle optional boolean flags - only set if provided

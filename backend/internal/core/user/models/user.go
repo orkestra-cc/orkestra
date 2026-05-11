@@ -53,17 +53,6 @@ type OAuthLink struct {
 	LastUsed   *time.Time             `bson:"lastUsed,omitempty" json:"lastUsed,omitempty"`
 }
 
-// MedicalCheck represents a medical check record for a user
-type MedicalCheck struct {
-	ID     string     `bson:"id" json:"id"`
-	Type   string     `bson:"type" json:"type" validate:"required"`
-	Notes  string     `bson:"notes,omitempty" json:"notes,omitempty"`
-	Expiry *time.Time `bson:"expiry,omitempty" json:"expiry,omitempty"`
-	Booked *time.Time `bson:"booked,omitempty" json:"booked,omitempty"`
-	Where  string     `bson:"where,omitempty" json:"where,omitempty"`
-	Doctor string     `bson:"doctor,omitempty" json:"doctor,omitempty"`
-}
-
 // User represents the unified user model combining authentication and driver-specific fields
 // Tier values stamped on every user record by ADR-0003 PR-B as a
 // defense-in-depth guard. A repository invariant test asserts the field
@@ -98,17 +87,6 @@ type User struct {
 	OAuthID       string                 `bson:"oauthId,omitempty" json:"oauthId,omitempty"`             // Deprecated, for backward compatibility
 	OAuthData     map[string]interface{} `bson:"oauthData,omitempty" json:"-"`                           // Deprecated, for backward compatibility
 
-	// Driver-specific fields
-	LicenseNumber    string         `bson:"licenseNumber,omitempty" json:"licenseNumber,omitempty"`
-	LicenseExpiry    *time.Time     `bson:"licenseExpiry,omitempty" json:"licenseExpiry,omitempty"`
-	DriverCardNumber string         `bson:"driverCardNumber,omitempty" json:"driverCardNumber,omitempty"`
-	DriverCardExpiry *time.Time     `bson:"driverCardExpiry,omitempty" json:"driverCardExpiry,omitempty"`
-	CQCExpiry        *time.Time     `bson:"cqcExpiry,omitempty" json:"cqcExpiry,omitempty"`
-	ADRNumber        string         `bson:"adrNumber,omitempty" json:"adrNumber,omitempty"`
-	ADRExpiry        *time.Time     `bson:"adrExpiry,omitempty" json:"adrExpiry,omitempty"`
-	TachigrafExpiry  *time.Time     `bson:"tachigrafExpiry,omitempty" json:"tachigrafExpiry,omitempty"`
-	MedicalChecks    []MedicalCheck `bson:"medicalChecks,omitempty" json:"medicalChecks,omitempty"`
-
 	// Password authentication (argon2id hash). Never serialized.
 	PasswordHash      string     `bson:"passwordHash,omitempty" json:"-"`
 	PasswordUpdatedAt *time.Time `bson:"passwordUpdatedAt,omitempty" json:"-"`
@@ -137,74 +115,47 @@ type CreateUserInput struct {
 	// end up on the user document. Leave empty for the service to mint a
 	// UUIDv7. Never exposed over the JSON API surface — external callers
 	// do not get to pick UUIDs.
-	UUID             string                 `json:"-"`
-	Email            string                 `json:"email" validate:"required,email"`
-	Username         string                 `json:"username" validate:"omitempty,min=3,max=50"`
-	FullName         string                 `json:"fullName" validate:"required,min=1,max=100"`
-	Avatar           string                 `json:"avatar,omitempty"`
-	Phone            string                 `json:"phone" validate:"omitempty,e164"`
-	PIN              string                 `json:"pin" validate:"omitempty,len=4,numeric"`
-	PasswordHash     string                 `json:"-"` // set by auth service, never from external input
-	Role             string                 `json:"role" validate:"required,oneof=super_admin administrator developer manager operator guest"`
-	OAuthProvider    OAuthProvider          `json:"oauthProvider,omitempty" validate:"omitempty,oneof=google apple discord github"`
-	OAuthID          string                 `json:"oauthId,omitempty"`
-	OAuthData        map[string]interface{} `json:"oauthData,omitempty"`
-	LicenseNumber    string                 `json:"licenseNumber,omitempty"`
-	LicenseExpiry    *time.Time             `json:"licenseExpiry,omitempty"`
-	DriverCardNumber string                 `json:"driverCardNumber,omitempty"`
-	DriverCardExpiry *time.Time             `json:"driverCardExpiry,omitempty"`
-	CQCExpiry        *time.Time             `json:"cqcExpiry,omitempty"`
-	ADRNumber        string                 `json:"adrNumber,omitempty"`
-	ADRExpiry        *time.Time             `json:"adrExpiry,omitempty"`
-	TachigrafExpiry  *time.Time             `json:"tachigrafExpiry,omitempty"`
-	MedicalChecks    []MedicalCheck         `json:"medicalChecks,omitempty"`
+	UUID          string                 `json:"-"`
+	Email         string                 `json:"email" validate:"required,email"`
+	Username      string                 `json:"username" validate:"omitempty,min=3,max=50"`
+	FullName      string                 `json:"fullName" validate:"required,min=1,max=100"`
+	Avatar        string                 `json:"avatar,omitempty"`
+	Phone         string                 `json:"phone" validate:"omitempty,e164"`
+	PIN           string                 `json:"pin" validate:"omitempty,len=4,numeric"`
+	PasswordHash  string                 `json:"-"` // set by auth service, never from external input
+	Role          string                 `json:"role" validate:"required,oneof=super_admin administrator developer manager operator guest"`
+	OAuthProvider OAuthProvider          `json:"oauthProvider,omitempty" validate:"omitempty,oneof=google apple discord github"`
+	OAuthID       string                 `json:"oauthId,omitempty"`
+	OAuthData     map[string]interface{} `json:"oauthData,omitempty"`
 }
 
 // UpdateUserInput represents input for updating a user
 type UpdateUserInput struct {
-	Email            string         `json:"email,omitempty" validate:"omitempty,email"`
-	Username         string         `json:"username,omitempty" validate:"omitempty,min=3,max=50"`
-	FullName         string         `json:"fullName,omitempty" validate:"omitempty,min=1,max=100"`
-	Avatar           string         `json:"avatar,omitempty"`
-	Phone            string         `json:"phone,omitempty" validate:"omitempty,e164"`
-	PIN              string         `json:"pin,omitempty" validate:"omitempty,len=4,numeric"`
-	Role             string         `json:"role,omitempty" validate:"omitempty,oneof=super_admin administrator developer manager operator guest"`
-	LicenseNumber    string         `json:"licenseNumber,omitempty"`
-	LicenseExpiry    *time.Time     `json:"licenseExpiry,omitempty"`
-	DriverCardNumber string         `json:"driverCardNumber,omitempty"`
-	DriverCardExpiry *time.Time     `json:"driverCardExpiry,omitempty"`
-	CQCExpiry        *time.Time     `json:"cqcExpiry,omitempty"`
-	ADRNumber        string         `json:"adrNumber,omitempty"`
-	ADRExpiry        *time.Time     `json:"adrExpiry,omitempty"`
-	TachigrafExpiry  *time.Time     `json:"tachigrafExpiry,omitempty"`
-	MedicalChecks    []MedicalCheck `json:"medicalChecks,omitempty"`
-	IsActive         *bool          `json:"isActive,omitempty"`
+	Email    string `json:"email,omitempty" validate:"omitempty,email"`
+	Username string `json:"username,omitempty" validate:"omitempty,min=3,max=50"`
+	FullName string `json:"fullName,omitempty" validate:"omitempty,min=1,max=100"`
+	Avatar   string `json:"avatar,omitempty"`
+	Phone    string `json:"phone,omitempty" validate:"omitempty,e164"`
+	PIN      string `json:"pin,omitempty" validate:"omitempty,len=4,numeric"`
+	Role     string `json:"role,omitempty" validate:"omitempty,oneof=super_admin administrator developer manager operator guest"`
+	IsActive *bool  `json:"isActive,omitempty"`
 }
 
 // UserManagementResponse represents the user data returned in API responses
 type UserManagementResponse struct {
-	ID               string                  `json:"id"`
-	Email            string                  `json:"email"`
-	Username         string                  `json:"username"`
-	FullName         string                  `json:"fullName"`
-	Avatar           string                  `json:"avatar,omitempty"`
-	Phone            string                  `json:"phone,omitempty"`
-	Role             string                  `json:"role"`
-	Providers        []UserOAuthProviderInfo `json:"providers"`
-	LicenseNumber    string                  `json:"licenseNumber,omitempty"`
-	LicenseExpiry    *time.Time              `json:"licenseExpiry,omitempty"`
-	DriverCardNumber string                  `json:"driverCardNumber,omitempty"`
-	DriverCardExpiry *time.Time              `json:"driverCardExpiry,omitempty"`
-	CQCExpiry        *time.Time              `json:"cqcExpiry,omitempty"`
-	ADRNumber        string                  `json:"adrNumber,omitempty"`
-	ADRExpiry        *time.Time              `json:"adrExpiry,omitempty"`
-	TachigrafExpiry  *time.Time              `json:"tachigrafExpiry,omitempty"`
-	MedicalChecks    []MedicalCheck          `json:"medicalChecks,omitempty"`
-	IsActive         bool                    `json:"isActive"`
-	EmailVerified    bool                    `json:"emailVerified"`
-	LastLogin        *time.Time              `json:"lastLogin,omitempty"`
-	CreatedAt        time.Time               `json:"createdAt"`
-	UpdatedAt        time.Time               `json:"updatedAt"`
+	ID            string                  `json:"id"`
+	Email         string                  `json:"email"`
+	Username      string                  `json:"username"`
+	FullName      string                  `json:"fullName"`
+	Avatar        string                  `json:"avatar,omitempty"`
+	Phone         string                  `json:"phone,omitempty"`
+	Role          string                  `json:"role"`
+	Providers     []UserOAuthProviderInfo `json:"providers"`
+	IsActive      bool                    `json:"isActive"`
+	EmailVerified bool                    `json:"emailVerified"`
+	LastLogin     *time.Time              `json:"lastLogin,omitempty"`
+	CreatedAt     time.Time               `json:"createdAt"`
+	UpdatedAt     time.Time               `json:"updatedAt"`
 }
 
 // UserManagementListResponse represents paginated user list response
@@ -216,13 +167,58 @@ type UserManagementListResponse struct {
 	TotalPages int                      `json:"totalPages"`
 }
 
+// AdminUserMembership is the trimmed tenant-membership row embedded on
+// admin user-list responses. Mirrors iface.TenantMembership shape so the
+// admin frontend can render a "Tenants" column without a per-row fetch.
+type AdminUserMembership struct {
+	TenantUUID string   `json:"tenantUUID"`
+	TenantName string   `json:"tenantName"`
+	TenantSlug string   `json:"tenantSlug,omitempty"`
+	TenantKind string   `json:"tenantKind"`
+	Roles      []string `json:"roles,omitempty"`
+	IsOwner    bool     `json:"isOwner,omitempty"`
+}
+
+// AdminClientUserItem is the row shape for the admin "Clients" page —
+// a client_users row with its tenant memberships joined in. Self-registered
+// users that are not yet attached to any tenant return an empty Memberships
+// array so the frontend can render an "unattached" pill.
+//
+// Providers is populated only by the single-user GET path (the detail
+// endpoint enriches with OAuth links via UserService). The list path
+// leaves it empty to avoid an N+1 over the OAuth provider repo — the
+// list does not need that column.
+type AdminClientUserItem struct {
+	ID            string                  `json:"id"`
+	Email         string                  `json:"email"`
+	Username      string                  `json:"username,omitempty"`
+	FullName      string                  `json:"fullName,omitempty"`
+	Avatar        string                  `json:"avatar,omitempty"`
+	Role          string                  `json:"role"`
+	IsActive      bool                    `json:"isActive"`
+	EmailVerified bool                    `json:"emailVerified"`
+	LastLogin     *time.Time              `json:"lastLogin,omitempty"`
+	CreatedAt     time.Time               `json:"createdAt"`
+	Memberships   []AdminUserMembership   `json:"memberships"`
+	Providers     []UserOAuthProviderInfo `json:"providers,omitempty"`
+}
+
+// AdminClientUserListResponse is the paginated payload for the admin
+// client-users endpoint.
+type AdminClientUserListResponse struct {
+	Users      []AdminClientUserItem `json:"users"`
+	Total      int64                 `json:"total"`
+	Page       int                   `json:"page"`
+	PageSize   int                   `json:"pageSize"`
+	TotalPages int                   `json:"totalPages"`
+}
+
 // UserFilters represents filters for user queries
 type UserFilters struct {
-	Role           string `json:"role,omitempty" validate:"omitempty,oneof=super_admin administrator developer manager operator guest"`
-	IsActive       *bool  `json:"isActive,omitempty"`
-	EmailVerified  *bool  `json:"emailVerified,omitempty"`
-	Search         string `json:"search,omitempty"`         // Search in name, email, username
-	HasExpiredDocs bool   `json:"hasExpiredDocs,omitempty"` // Filter users with expired documents
+	Role          string `json:"role,omitempty" validate:"omitempty,oneof=super_admin administrator developer manager operator guest"`
+	IsActive      *bool  `json:"isActive,omitempty"`
+	EmailVerified *bool  `json:"emailVerified,omitempty"`
+	Search        string `json:"search,omitempty"` // Search in name, email, username
 }
 
 // PaginationParams represents pagination parameters
@@ -234,77 +230,20 @@ type PaginationParams struct {
 // ToResponse converts User model to UserManagementResponse
 func (u *User) ToResponse() *UserManagementResponse {
 	return &UserManagementResponse{
-		ID:               u.UUID,
-		Email:            u.Email,
-		Username:         u.Username,
-		FullName:         u.FullName,
-		Avatar:           u.Avatar,
-		Phone:            u.Phone,
-		Role:             u.Role,
-		Providers:        make([]UserOAuthProviderInfo, 0), // Initialize as empty, will be populated by service
-		LicenseNumber:    u.LicenseNumber,
-		LicenseExpiry:    u.LicenseExpiry,
-		DriverCardNumber: u.DriverCardNumber,
-		DriverCardExpiry: u.DriverCardExpiry,
-		CQCExpiry:        u.CQCExpiry,
-		ADRNumber:        u.ADRNumber,
-		ADRExpiry:        u.ADRExpiry,
-		TachigrafExpiry:  u.TachigrafExpiry,
-		MedicalChecks:    u.MedicalChecks,
-		IsActive:         u.IsActive,
-		EmailVerified:    u.EmailVerified,
-		LastLogin:        u.LastLogin,
-		CreatedAt:        u.CreatedAt,
-		UpdatedAt:        u.UpdatedAt,
+		ID:            u.UUID,
+		Email:         u.Email,
+		Username:      u.Username,
+		FullName:      u.FullName,
+		Avatar:        u.Avatar,
+		Phone:         u.Phone,
+		Role:          u.Role,
+		Providers:     make([]UserOAuthProviderInfo, 0), // Initialize as empty, will be populated by service
+		IsActive:      u.IsActive,
+		EmailVerified: u.EmailVerified,
+		LastLogin:     u.LastLogin,
+		CreatedAt:     u.CreatedAt,
+		UpdatedAt:     u.UpdatedAt,
 	}
-}
-
-// HasExpiredDocuments checks if the user has any expired driver documents
-func (u *User) HasExpiredDocuments() bool {
-	now := time.Now()
-
-	if u.LicenseExpiry != nil && u.LicenseExpiry.Before(now) {
-		return true
-	}
-	if u.DriverCardExpiry != nil && u.DriverCardExpiry.Before(now) {
-		return true
-	}
-	if u.CQCExpiry != nil && u.CQCExpiry.Before(now) {
-		return true
-	}
-	if u.ADRExpiry != nil && u.ADRExpiry.Before(now) {
-		return true
-	}
-	if u.TachigrafExpiry != nil && u.TachigrafExpiry.Before(now) {
-		return true
-	}
-
-	return false
-}
-
-// GetExpiringSoonDocuments returns documents expiring within the next 30 days
-func (u *User) GetExpiringSoonDocuments() []string {
-	var expiring []string
-	now := time.Now()
-	thirtyDaysFromNow := now.AddDate(0, 0, 30)
-
-	if u.LicenseExpiry != nil && u.LicenseExpiry.After(now) && u.LicenseExpiry.Before(thirtyDaysFromNow) {
-		expiring = append(expiring, "License")
-	}
-	if u.DriverCardExpiry != nil && u.DriverCardExpiry.After(now) && u.DriverCardExpiry.Before(thirtyDaysFromNow) {
-		expiring = append(expiring, "Driver Card")
-	}
-	if u.CQCExpiry != nil && u.CQCExpiry.After(now) && u.CQCExpiry.Before(thirtyDaysFromNow) {
-		expiring = append(expiring, "CQC")
-	}
-	if u.ADRExpiry != nil && u.ADRExpiry.After(now) && u.ADRExpiry.Before(thirtyDaysFromNow) {
-		expiring = append(expiring, "ADR")
-	}
-	if u.TachigrafExpiry != nil && u.TachigrafExpiry.After(now) && u.TachigrafExpiry.Before(thirtyDaysFromNow) {
-		expiring = append(expiring, "Tachigrafo")
-	}
-
-	return expiring
 }
 
 // NewUser creates a new user with default values
@@ -318,7 +257,6 @@ func NewUser() *User {
 		CreatedAt:     now,
 		UpdatedAt:     now,
 		OAuthLinks:    make([]OAuthLink, 0),
-		MedicalChecks: make([]MedicalCheck, 0),
 	}
 }
 

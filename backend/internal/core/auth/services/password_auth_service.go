@@ -15,9 +15,11 @@ import (
 	"github.com/google/uuid"
 	authModels "github.com/orkestra/backend/internal/core/auth/models"
 	"github.com/orkestra/backend/internal/core/auth/repository"
-	sharederrors "github.com/orkestra/backend/internal/shared/errors"
-	"github.com/orkestra/backend/internal/shared/iface"
+	notifModels "github.com/orkestra/backend/internal/core/notification/models"
 	userModels "github.com/orkestra/backend/internal/core/user/models"
+	sharederrors "github.com/orkestra/backend/internal/shared/errors"
+	"github.com/orkestra/backend/internal/shared/geoip"
+	"github.com/orkestra/backend/internal/shared/iface"
 )
 
 var (
@@ -28,20 +30,14 @@ var (
 	ErrPasswordReused         = stderrors.New("new password must differ from the current one")
 	ErrNotificationDown       = stderrors.New("notifications disabled — cannot send email")
 	ErrMFAEnrollmentRequired  = stderrors.New("mfa enrollment required — grace period expired")
+	ErrRegistrationDisabled   = stderrors.New("registration disabled for this surface")
+	ErrEmailDomainNotAllowed  = stderrors.New("email domain not allowed")
+	ErrLoginDisabled          = stderrors.New("login disabled for this surface")
+	// ErrCountryBlocked is returned when geoBlockCountries is configured
+	// and the request IP resolves to a blocked country. Translated to
+	// 403 country_blocked at the handler boundary.
+	ErrCountryBlocked = stderrors.New("country blocked by policy")
 )
-
-// OnboardingActivator is invoked after a successful email verification so
-// onboarding-adjacent side effects (flipping the owner's tenant from
-// provisioning → active) can run without the auth module importing
-// onboarding or tenant. Set via SetOnboardingActivator at boot — nil by
-// default so flows that do not run the onboarding module (setup wizard,
-// admin-created users) are unaffected.
-//
-// The callback must be best-effort: a failure here is logged but does not
-// roll back the email verification itself. The owner has already proven
-// they control the inbox; we don't want to force them to reclick because
-// of a transient tenant-side failure.
-type OnboardingActivator func(ctx context.Context, userUUID string) error
 
 // FirstAdminClaimer is the contract the password auth service uses to
 // atomically reserve the platform's super_admin seat on a fresh install.
@@ -75,6 +71,19 @@ type PasswordAuthConfig struct {
 	AppName                  string
 	SupportEmail             string
 	Logger                   *slog.Logger
+	// Policy resolves admin-managed signup policy (registration on/off,
+	// email-domain allowlist, default client role) at request time. Nil
+	// is allowed: the service falls back to the legacy "always-on,
+	// any domain, role=operator" behaviour.
+	Policy *AuthPolicyService
+	// Audience identifies which surface this service instance serves.
+	// Empty defaults to operator semantics (preserves legacy behaviour
+	// when the policy service is not wired).
+	Audience PolicyAudience
+	// GeoResolver resolves a request IP to an ISO-3166-1 country code so
+	// the geoBlockCountries policy can reject login attempts. Nil
+	// (geoip disabled) makes the geo-block half a no-op.
+	GeoResolver geoip.Resolver
 }
 
 // PasswordAuthService handles the register / login / verify / reset / change
@@ -100,11 +109,11 @@ type PasswordAuthService struct {
 	appName                  string
 	supportEmail             string
 	logger                   *slog.Logger
-	// onboardingActivator is wired post-construction via SetOnboardingActivator
-	// because the onboarding module initializes after auth. Accessed only
-	// from VerifyEmail — no locking needed as the setter runs once at boot
-	// before the first HTTP request is served.
-	onboardingActivator OnboardingActivator
+	// policy resolves admin-managed signup policy. Nil = legacy fallback
+	// (registration always allowed, any domain, role=operator).
+	policy      *AuthPolicyService
+	audience    PolicyAudience
+	geoResolver geoip.Resolver
 	// auditSink is wired post-construction via SetAuditSink by the compliance
 	// module. Nil when compliance is disabled — emit* helpers tolerate that.
 	auditSink iface.AuditSink
@@ -152,6 +161,9 @@ func NewPasswordAuthService(cfg PasswordAuthConfig) *PasswordAuthService {
 		appName:                  cfg.AppName,
 		supportEmail:             cfg.SupportEmail,
 		logger:                   cfg.Logger,
+		policy:                   cfg.Policy,
+		audience:                 cfg.Audience,
+		geoResolver:              cfg.GeoResolver,
 	}
 }
 
@@ -168,6 +180,26 @@ func (s *PasswordAuthService) Register(ctx context.Context, in RegisterInput) (*
 	email := strings.ToLower(strings.TrimSpace(in.Email))
 	if email == "" || in.Password == "" || in.FullName == "" {
 		return nil, fmt.Errorf("email, password and name are required")
+	}
+
+	// Admin-managed registration policy. Bypass for the very first
+	// account on a fresh install — otherwise an operator who flips
+	// "registrationEnabledAdmin=false" before any user exists locks
+	// themselves out. Bypass detection: ask the user count; the
+	// firstAdminClaimer's atomic claim later still races correctly.
+	if s.policy != nil {
+		isFirstUser := false
+		if count, err := s.userService.GetUserCount(ctx, nil); err == nil && count == 0 {
+			isFirstUser = true
+		}
+		if !isFirstUser {
+			if !s.policy.RegistrationAllowed(ctx, s.audience) {
+				return nil, ErrRegistrationDisabled
+			}
+			if !s.policy.EmailDomainAllowed(ctx, s.audience, email) {
+				return nil, ErrEmailDomainNotAllowed
+			}
+		}
 	}
 
 	// Reject signups up-front if verification is required but the
@@ -188,11 +220,15 @@ func (s *PasswordAuthService) Register(ctx context.Context, in RegisterInput) (*
 	// Atomic first-admin claim. Previous implementation checked
 	// GetUserCount()==0 and then created the user, racing with concurrent
 	// signups. Now the first caller to upsert the system_init sentinel wins
-	// super_admin; losers fall through to operator. The userUUID is minted
-	// up front so we can hand it to both the claimer and the user-create
-	// call.
+	// super_admin; losers fall through to a tier-default role (operator
+	// for tier-1, admin-policy-controlled for tier-2). The userUUID is
+	// minted up front so we can hand it to both the claimer and the
+	// user-create call.
 	proposedUUID := uuid.New().String()
 	role := "operator"
+	if s.audience == PolicyAudienceClient && s.policy != nil {
+		role = s.policy.DefaultClientRole(ctx)
+	}
 	claimed := false
 	if s.firstAdminClaimer != nil {
 		claimed, err = s.firstAdminClaimer.ClaimFirstAdmin(ctx, proposedUUID)
@@ -338,6 +374,42 @@ func (s *PasswordAuthService) Login(ctx context.Context, in LoginInput) (*authMo
 		return nil, ErrInvalidCredentials
 	}
 
+	// Admin-managed kill switch — same shape as the registration check
+	// in Register. Returns 403 to make the disabled state visible to
+	// the caller (the maintenance UI relies on this to render a banner)
+	// rather than silently failing as if credentials were wrong.
+	if s.policy != nil && !s.policy.LoginAllowed(ctx, s.audience) {
+		return nil, ErrLoginDisabled
+	}
+
+	// Geo block — checked before the rate-limiter and password lookup so
+	// a blocked country never spends a token from the per-IP bucket and
+	// never lights up the audit log with a noisy rejected-login row.
+	// Skipped when the policy is unwired, the resolver is nil (geoip
+	// disabled), or the IP can't be resolved (private/loopback) — the
+	// gate must fail open on degraded geoip lookups so an outage can't
+	// lock everyone out.
+	if s.policy != nil && s.geoResolver != nil && in.IP != "" {
+		if loc, err := s.geoResolver.Lookup(ctx, in.IP); err == nil && loc != nil && loc.Country != "" {
+			if s.policy.CountryBlocked(ctx, loc.Country) {
+				s.emitLoginFailed(ctx, email, "", in.IP, "country_blocked")
+				return nil, ErrCountryBlocked
+			}
+		}
+	}
+
+	// Refresh the rate limiter's lockout config from the live policy so
+	// admin edits take effect on the next login attempt without a
+	// restart. New buckets pick up the updated values immediately;
+	// already-running buckets ride out their existing window, which is
+	// fine — the next refill cycle reflects the new policy.
+	if s.policy != nil && s.rateLimiter != nil {
+		s.rateLimiter.SetAuthFailedConfig(
+			s.policy.LockoutThreshold(ctx),
+			s.policy.LockoutDuration(ctx),
+		)
+	}
+
 	// Combined IP + email bucket so that a single credential-stuffer rotating
 	// IPs still trips the per-account lock.
 	if s.rateLimiter != nil {
@@ -354,6 +426,39 @@ func (s *PasswordAuthService) Login(ctx context.Context, in LoginInput) (*authMo
 		s.recordFailed(ctx, in.IP, email)
 		s.emitLoginFailed(ctx, email, "", in.IP, "unknown_user")
 		return nil, ErrInvalidCredentials
+	}
+
+	// Inactive-account auto-disable: if the policy is configured and
+	// the user's lastLogin is older than the threshold, flip
+	// isActive=false before the IsActive check below so the next branch
+	// returns ErrInvalidCredentials and emits the standard
+	// user_inactive audit event. We skip users who never logged in at
+	// all — disabling those would brick fresh signups whose initial
+	// login hasn't completed yet.
+	if days := s.inactiveAccountThresholdDays(ctx); days > 0 && user.LastLogin != nil {
+		threshold := time.Now().Add(-time.Duration(days) * 24 * time.Hour)
+		if user.LastLogin.Before(threshold) && user.IsActive {
+			isActive := false
+			if _, uerr := s.userService.UpdateUser(ctx, user.UUID, &userModels.UpdateUserInput{IsActive: &isActive}); uerr == nil {
+				user.IsActive = false
+				s.emitAudit(ctx, iface.AuditEvent{
+					ActorUserID: user.UUID,
+					ActorEmail:  user.Email,
+					ActorType:   "system",
+					Action:      "auth.account.auto_disabled",
+					Outcome:     "success",
+					IPAddress:   in.IP,
+					Metadata: map[string]any{
+						"thresholdDays": days,
+						"lastLogin":     user.LastLogin.UTC().Format(time.RFC3339),
+					},
+				})
+			} else if s.logger != nil {
+				s.logger.Warn("auth: failed to auto-disable inactive account",
+					slog.String("user_uuid", user.UUID),
+					slog.String("error", uerr.Error()))
+			}
+		}
 	}
 
 	if !user.IsActive {
@@ -445,7 +550,7 @@ func (s *PasswordAuthService) emitLoginFailed(ctx context.Context, email, userUU
 //   - ErrMFAEnrollmentRequired (privileged user, no factor, grace expired)
 func (s *PasswordAuthService) completeLogin(ctx context.Context, user *userModels.User, in LoginInput, sourceAMR []string) (*authModels.TokenResponse, error) {
 	memberships := s.loadMembershipsAsAuthModel(ctx, user.UUID)
-	requires := RoleRequiresMFA(user, memberships)
+	requires := s.policy.MFARequired(user, memberships)
 	if !requires {
 		return s.issueTokens(ctx, user, in, sourceAMR, 0)
 	}
@@ -515,7 +620,7 @@ func (s *PasswordAuthService) completeLogin(ctx context.Context, user *userModel
 
 	// Privileged, no factor → grace logic.
 	now := time.Now()
-	if GraceExpired(user, now) {
+	if s.policy.MFAGraceExpired(ctx, user, now) {
 		return nil, ErrMFAEnrollmentRequired
 	}
 	if user.MFAGraceStartedAt == nil {
@@ -530,8 +635,7 @@ func (s *PasswordAuthService) completeLogin(ctx context.Context, user *userModel
 		return nil, err
 	}
 	resp.MFAEnrollmentRequired = true
-	if user.MFAGraceStartedAt != nil {
-		deadline := user.MFAGraceStartedAt.Add(MFAEnrollmentGraceWindow)
+	if deadline := s.policy.MFAGraceExpiresAt(ctx, user); !deadline.IsZero() {
 		resp.MFAGraceExpiresAt = &deadline
 	}
 	return resp, nil
@@ -554,13 +658,6 @@ func (s *PasswordAuthService) loadMembershipsAsAuthModel(ctx context.Context, us
 		out = append(out, authModels.TenantMembership{TenantUUID: m.TenantUUID, TenantKind: m.TenantKind, Roles: m.Roles})
 	}
 	return out
-}
-
-// SetOnboardingActivator wires the activate-on-verify hook. Called once
-// from the onboarding module's Init, after both auth and tenant are up.
-// Passing nil clears the hook — used by tests that want the bare flow.
-func (s *PasswordAuthService) SetOnboardingActivator(fn OnboardingActivator) {
-	s.onboardingActivator = fn
 }
 
 // SetAuditSink wires the compliance audit sink post-construction. The
@@ -592,18 +689,6 @@ func (s *PasswordAuthService) VerifyEmail(ctx context.Context, rawToken string) 
 	if err := s.emailTokenRepo.MarkUsed(ctx, doc.TokenHash); err != nil {
 		return err
 	}
-	// Best-effort onboarding activation. A transient tenant-side failure
-	// here leaves the tenant in `provisioning`; the operator can flip it
-	// manually via /admin/tenants. Do not surface the error to the caller —
-	// the email has been verified, which is the user-visible contract.
-	if s.onboardingActivator != nil {
-		if err := s.onboardingActivator(ctx, doc.UserUUID); err != nil {
-			s.logger.Warn("verify-email: onboarding activator failed",
-				slog.String("userUUID", doc.UserUUID),
-				slog.String("error", err.Error()),
-			)
-		}
-	}
 	s.emitAudit(ctx, iface.AuditEvent{
 		ActorUserID:  doc.UserUUID,
 		ActorType:    "user",
@@ -616,18 +701,35 @@ func (s *PasswordAuthService) VerifyEmail(ctx context.Context, rawToken string) 
 }
 
 // ResendVerification issues a new verification email.
+//
+// Always returns nil regardless of outcome so callers cannot distinguish
+// "address unknown", "already verified", "rate-limited", or "sent" — the
+// public-facing 200 response stays neutral. Rate limiting shares the
+// same per-IP and per-email buckets as Login/ForgotPassword so an
+// attacker can't bypass one surface by hitting another.
 func (s *PasswordAuthService) ResendVerification(ctx context.Context, email, ip string) error {
 	email = strings.ToLower(strings.TrimSpace(email))
+	if s.rateLimiter != nil {
+		if s.rateLimiter.IsBlocked(ctx, "ip:"+ip) || s.rateLimiter.IsBlocked(ctx, "email:"+email) {
+			return nil
+		}
+	}
 	user, err := s.userService.GetUserForAuth(ctx, email)
 	if err != nil {
-		// Always return success to avoid enumeration.
 		return nil
 	}
 	if user.EmailVerified {
 		return nil
 	}
 	_ = s.emailTokenRepo.InvalidateByUserAndPurpose(ctx, user.UUID, authModels.EmailTokenPurposeVerifyEmail)
-	return s.sendVerificationEmail(ctx, user, ip)
+	if err := s.sendVerificationEmail(ctx, user, ip); err != nil {
+		return err
+	}
+	// Each successful send counts toward the shared limiter so a script
+	// spamming the endpoint from one IP / against one address trips the
+	// same lockout window that protects login.
+	s.recordFailed(ctx, ip, email)
+	return nil
 }
 
 // ForgotPassword issues a reset token and emails it. Always returns nil
@@ -765,7 +867,11 @@ func (s *PasswordAuthService) ChangePassword(ctx context.Context, userUUID, curr
 	// must not piggyback on a trust row the legitimate owner created
 	// before the breach. Best-effort — revoke failure doesn't roll
 	// the password update back.
-	if s.deviceTrust != nil {
+	//
+	// Phase 8: gated on the revokeSessionsOnPasswordChange policy toggle
+	// so admins can opt out for staged-rollout / migration workflows.
+	// Default true preserves today's behaviour.
+	if s.shouldRevokeOnPasswordChange(ctx) && s.deviceTrust != nil {
 		if err := s.deviceTrust.RevokeAllByUser(ctx, user.UUID, authModels.DeviceTrustRevokedOnPasswordChange); err != nil && s.logger != nil {
 			s.logger.Warn("device_trust: revoke on password change failed",
 				slog.String("user_uuid", user.UUID),
@@ -941,6 +1047,18 @@ func (s *PasswordAuthService) createSessionDoc(ctx context.Context, user *userMo
 		return nil
 	}
 	now := time.Now()
+	// Detect a never-before-seen (userUUID, deviceID) pair before
+	// CreateSession so the just-inserted row doesn't count as its own
+	// "prior history". A nil error + zero-length list means new — any
+	// repo error degrades to "treat as known" so a flaky lookup never
+	// spams the user with a false-positive new-device email.
+	newDevice := false
+	if deviceID != "" {
+		history, err := s.authSessionRepo.GetDeviceSessionHistory(ctx, user.UUID, deviceID, 1)
+		if err == nil && len(history) == 0 {
+			newDevice = true
+		}
+	}
 	// Compute login risk against the user's session history BEFORE
 	// inserting the new row — otherwise the just-created session would
 	// count as its own "prior" and the counts come back ≥1 for every
@@ -1021,7 +1139,102 @@ func (s *PasswordAuthService) createSessionDoc(ctx context.Context, user *userMo
 			UserAgent:  userAgent,
 		})
 	}
+	// Phase 7: new-device-login email. Independent of the risk score
+	// so even a low-risk login from a brand-new (deviceId, userUUID)
+	// pair surfaces. Gated by the notifyUserOnNewDeviceLogin policy
+	// toggle. Best-effort — a notification failure leaves the session
+	// intact.
+	if newDevice {
+		s.notifyNewDeviceLogin(ctx, user, doc, deviceID, platform, ip, userAgent)
+	}
 	return nil
+}
+
+// inactiveAccountThresholdDays is a small wrapper that returns 0 when
+// the policy is unwired, so callers don't have to repeat the nil-check.
+func (s *PasswordAuthService) inactiveAccountThresholdDays(ctx context.Context) int {
+	if s.policy == nil {
+		return 0
+	}
+	return s.policy.InactiveAccountAutoDisableDays(ctx)
+}
+
+// ShouldRevokeOnPasswordChange exposes the live revokeSessionsOnPasswordChange
+// policy. Public so the password handler can read it before deciding
+// whether to revoke the caller's session id (the service handles the
+// service-side half — device-trust grants — itself).
+func (s *PasswordAuthService) ShouldRevokeOnPasswordChange(ctx context.Context) bool {
+	return s.shouldRevokeOnPasswordChange(ctx)
+}
+
+func (s *PasswordAuthService) shouldRevokeOnPasswordChange(ctx context.Context) bool {
+	if s.policy == nil {
+		return true
+	}
+	return s.policy.RevokeSessionsOnPasswordChange(ctx)
+}
+
+// notifyNewDeviceLogin sends the auth.new_device_login template when
+// notifyUserOnNewDeviceLogin is enabled and the notification module is
+// wired. Idempotency key includes the session UUID so a retry of the
+// same login can't dispatch duplicates.
+func (s *PasswordAuthService) notifyNewDeviceLogin(
+	ctx context.Context,
+	user *userModels.User,
+	session *authModels.AuthSessionDoc,
+	deviceID, platform, ip, userAgent string,
+) {
+	if s.notifier == nil || !s.notifier.IsConfigured(ctx) {
+		return
+	}
+	if s.policy != nil && !s.policy.NotifyUserOnNewDeviceLogin(ctx) {
+		return
+	}
+	if user == nil || user.Email == "" || session == nil {
+		return
+	}
+	deviceSummary := platform
+	if deviceSummary == "" {
+		deviceSummary = "Unknown device"
+	}
+	userName := user.FullName
+	if userName == "" {
+		userName = user.Email
+	}
+	loginAt := session.CreatedAt
+	if loginAt.IsZero() {
+		loginAt = time.Now()
+	}
+	accountActivityURL := strings.TrimRight(s.frontendURL, "/") + "/user/security?tab=sessions"
+	vars := map[string]any{
+		"AppName":            s.appName,
+		"UserName":           userName,
+		"LoginAt":            loginAt.UTC().Format("2006-01-02 15:04 UTC"),
+		"LoginIP":            ip,
+		"LoginDevice":        deviceSummary,
+		"LoginLocation":      "",
+		"AccountActivityURL": accountActivityURL,
+		"SupportEmail":       s.supportEmail,
+	}
+	req := iface.TemplatedNotificationRequest{
+		Channel:  notifModels.ChannelEmail,
+		Type:     notifModels.TypeTransactional,
+		Category: notifModels.CategoryAuthNewDeviceLogin,
+		Recipients: []iface.Recipient{{
+			UserUUID: user.UUID,
+			Address:  user.Email,
+			Name:     userName,
+		}},
+		TemplateID:     notifModels.CategoryAuthNewDeviceLogin,
+		Data:           vars,
+		IdempotencyKey: fmt.Sprintf("new-device:%s:%s:%s", user.UUID, deviceID, session.UUID),
+	}
+	if _, err := s.notifier.SendTemplated(ctx, req); err != nil && s.logger != nil {
+		s.logger.Warn("auth: new-device-login email failed",
+			slog.String("user_uuid", user.UUID),
+			slog.String("session_uuid", session.UUID),
+			slog.String("error", err.Error()))
+	}
 }
 
 func generateEmailToken() (raw, hash string, err error) {
@@ -1038,6 +1251,184 @@ func generateEmailToken() (raw, hash string, err error) {
 func hashEmailToken(raw string) string {
 	sum := sha256.Sum256([]byte(raw))
 	return hex.EncodeToString(sum[:])
+}
+
+// ---------------------------------------------------------------------------
+// Admin-triggered flows (Phase 3 of the /admin/clients management surface)
+//
+// These complement the public-facing Resend/Forgot variants. They surface
+// real errors instead of the enumeration-proof silent return — the admin
+// already knows the user exists, so signalling "not found" or "notifier
+// unavailable" is information they're entitled to.
+// ---------------------------------------------------------------------------
+
+// AdminSendInvite issues an admin_invite email-token for the given user
+// and emails the auth.admin_invite template. Used both by the
+// invite-create flow (when the user has no password yet) and as a
+// "resend invite" affordance from the user-detail page. Invalidates any
+// prior unused invite token for the same user before minting the new
+// one. Returns ErrNotificationDown if the notifier is missing.
+func (s *PasswordAuthService) AdminSendInvite(ctx context.Context, userUUID, inviterName string) error {
+	user, err := s.userService.GetUserByID(ctx, userUUID)
+	if err != nil {
+		return err
+	}
+	_ = s.emailTokenRepo.InvalidateByUserAndPurpose(ctx, userUUID, authModels.EmailTokenPurposeAdminInvite)
+
+	raw, hash, err := generateEmailToken()
+	if err != nil {
+		return err
+	}
+	doc := &authModels.EmailTokenDoc{
+		UUID:      uuid.Must(uuid.NewV7()).String(),
+		UserUUID:  userUUID,
+		TokenHash: hash,
+		Purpose:   authModels.EmailTokenPurposeAdminInvite,
+		CreatedAt: time.Now(),
+		ExpiresAt: time.Now().Add(7 * 24 * time.Hour),
+	}
+	if err := s.emailTokenRepo.Create(ctx, doc); err != nil {
+		return err
+	}
+
+	if s.notifier == nil || !s.notifier.IsConfigured(ctx) {
+		return ErrNotificationDown
+	}
+
+	inviteURL := s.frontendURL + "/accept-invite?token=" + raw
+	_, err = s.notifier.SendTemplated(ctx, iface.TemplatedNotificationRequest{
+		Channel:    "email",
+		Type:       "transactional",
+		Category:   notifModels.CategoryAuthAdminInvite,
+		TemplateID: notifModels.CategoryAuthAdminInvite,
+		Recipients: []iface.Recipient{{
+			UserUUID: userUUID,
+			Address:  user.Email,
+			Name:     user.FullName,
+		}},
+		Data: map[string]any{
+			"UserName":     coalesce(user.FullName, user.Email),
+			"InviteURL":    inviteURL,
+			"ExpiresIn":    "7 days",
+			"InviterName":  inviterName,
+			"AppName":      s.appName,
+			"SupportEmail": s.supportEmail,
+		},
+		IdempotencyKey: "invite:" + userUUID + ":" + doc.UUID,
+	})
+	return err
+}
+
+// AdminResendVerification re-sends a verification email on behalf of an
+// admin. Unlike the public ResendVerification it surfaces concrete
+// errors and skips rate-limiting (the admin operator is implicitly
+// trusted; the operator host is already privileged).
+func (s *PasswordAuthService) AdminResendVerification(ctx context.Context, userUUID string) error {
+	user, err := s.userService.GetUserByID(ctx, userUUID)
+	if err != nil {
+		return err
+	}
+	if user.EmailVerified {
+		return nil
+	}
+	_ = s.emailTokenRepo.InvalidateByUserAndPurpose(ctx, user.UUID, authModels.EmailTokenPurposeVerifyEmail)
+	return s.sendVerificationEmail(ctx, user, "")
+}
+
+// AdminTriggerPasswordReset emits a reset-password token + email on
+// behalf of an admin. Surfaces real errors (404 on missing user,
+// 503 ErrNotificationDown). The redemption path is the same
+// /v1/auth/{tier}/reset-password the public flow uses.
+func (s *PasswordAuthService) AdminTriggerPasswordReset(ctx context.Context, userUUID string) error {
+	user, err := s.userService.GetUserByID(ctx, userUUID)
+	if err != nil {
+		return err
+	}
+	_ = s.emailTokenRepo.InvalidateByUserAndPurpose(ctx, userUUID, authModels.EmailTokenPurposeResetPassword)
+
+	raw, hash, err := generateEmailToken()
+	if err != nil {
+		return err
+	}
+	doc := &authModels.EmailTokenDoc{
+		UUID:      uuid.Must(uuid.NewV7()).String(),
+		UserUUID:  userUUID,
+		TokenHash: hash,
+		Purpose:   authModels.EmailTokenPurposeResetPassword,
+		CreatedAt: time.Now(),
+		ExpiresAt: time.Now().Add(30 * time.Minute),
+	}
+	if err := s.emailTokenRepo.Create(ctx, doc); err != nil {
+		return err
+	}
+
+	if s.notifier == nil || !s.notifier.IsConfigured(ctx) {
+		return ErrNotificationDown
+	}
+
+	resetURL := s.frontendURL + "/reset-password?token=" + raw
+	_, err = s.notifier.SendTemplated(ctx, iface.TemplatedNotificationRequest{
+		Channel:    "email",
+		Type:       "transactional",
+		Category:   authModels.EmailTokenPurposeResetPassword,
+		TemplateID: notifModels.CategoryAuthResetPassword,
+		Recipients: []iface.Recipient{{
+			UserUUID: userUUID,
+			Address:  user.Email,
+			Name:     user.FullName,
+		}},
+		Data: map[string]any{
+			"UserName":     coalesce(user.FullName, user.Email),
+			"ResetURL":     resetURL,
+			"ExpiresIn":    "30 minutes",
+			"RequestIP":    "(admin-triggered)",
+			"AppName":      s.appName,
+			"SupportEmail": s.supportEmail,
+		},
+		IdempotencyKey: "reset:" + userUUID + ":" + doc.UUID,
+	})
+	return err
+}
+
+// ConsumeInvite redeems an admin_invite token: validates the token,
+// validates the new password against live policy, hashes it, sets it on
+// the target user, and marks the email verified. Used by the
+// /v1/auth/client/accept-invite redemption endpoint.
+func (s *PasswordAuthService) ConsumeInvite(ctx context.Context, rawToken, newPassword string) error {
+	doc, err := s.lookupEmailToken(ctx, rawToken, authModels.EmailTokenPurposeAdminInvite)
+	if err != nil {
+		return err
+	}
+	user, err := s.userService.GetUserByID(ctx, doc.UserUUID)
+	if err != nil {
+		return err
+	}
+	if err := s.passwordService.ValidatePolicy(ctx, newPassword, user.Email); err != nil {
+		return err
+	}
+	hash, err := s.passwordService.Hash(newPassword)
+	if err != nil {
+		return err
+	}
+	if err := s.userService.UpdatePasswordHash(ctx, user.UUID, hash); err != nil {
+		return err
+	}
+	// Admin vouched for the address by typing it — invite redemption
+	// implies the recipient controls the inbox, so mark the email
+	// verified in the same step.
+	if err := s.userService.MarkEmailVerified(ctx, user.UUID); err != nil {
+		// Non-fatal: password is set, user can log in. Log + continue
+		// so a verify-mark hiccup doesn't strand a freshly-onboarded
+		// account at "set password again".
+		if s.logger != nil {
+			s.logger.Warn("invite consume: mark email verified failed",
+				slog.String("user_uuid", user.UUID),
+				slog.String("error", err.Error()))
+		}
+	}
+	_ = s.emailTokenRepo.MarkUsed(ctx, doc.TokenHash)
+	_ = s.userService.ClearFailedLogins(ctx, user.UUID)
+	return nil
 }
 
 func coalesce(values ...string) string {

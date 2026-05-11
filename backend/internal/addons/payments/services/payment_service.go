@@ -90,12 +90,10 @@ func (s *PaymentService) ChargeSubscription(ctx context.Context, in iface.Subscr
 		ProviderTxID:     result.ProviderTxID,
 		SubscriptionUUID: in.SubscriptionUUID,
 		InvoiceUUID:      in.InvoiceUUID,
-		// TenantUUID is the only tenant binding (ADR-0001 Phase 1 removed
-		// the legacy SubscriptionClient indirection). Sourced from the
-		// charge metadata populated by the renewal service so the admin
-		// aggregator GET /v1/admin/tenants/{id}/payments can locate rows
-		// without joining through any addon-private collection.
-		TenantUUID:  metadataID(in.Metadata, "tenantUUID"),
+		// Tenant binding — preferred from the charge's TenantUUID field,
+		// with a fallback to the metadata stamp the renewal service writes
+		// alongside it.
+		TenantUUID:  tenantUUIDFromCharge(in),
 		AmountCents: in.AmountCents,
 		Currency:    in.Currency,
 		Description: in.Description,
@@ -185,6 +183,30 @@ func (s *PaymentService) VerifyWebhook(ctx context.Context, rawBody []byte, head
 	return s.providers[s.defaultP].VerifyWebhook(ctx, rawBody, headers)
 }
 
+// CreateCheckoutSession routes the call to the provider associated with
+// in.Customer.Provider (defaulting to the configured default provider).
+// No transaction row is persisted at session-open time — the row lands
+// when the webhook reports the resulting PaymentIntent's outcome, the
+// same path the renewal job's off-session charges follow.
+func (s *PaymentService) CreateCheckoutSession(ctx context.Context, in iface.CheckoutSessionInput) (iface.CheckoutSessionResult, error) {
+	p, _, err := s.resolve(in.Customer.Provider)
+	if err != nil {
+		return iface.CheckoutSessionResult{}, err
+	}
+	return p.CreateCheckoutSession(ctx, in)
+}
+
+// CreateSetupCheckoutSession routes the call to the provider associated
+// with in.Customer.Provider. No charge is made — the session only collects
+// a payment method against the customer for use on future renewals.
+func (s *PaymentService) CreateSetupCheckoutSession(ctx context.Context, in iface.SetupCheckoutInput) (iface.CheckoutSessionResult, error) {
+	p, _, err := s.resolve(in.Customer.Provider)
+	if err != nil {
+		return iface.CheckoutSessionResult{}, err
+	}
+	return p.CreateSetupCheckoutSession(ctx, in)
+}
+
 // Provider returns the underlying provider by name, for the webhook handler
 // that needs direct access to VerifyWebhook with a specific secret.
 func (s *PaymentService) Provider(name models.ProviderName) (iface.PaymentProvider, bool) {
@@ -194,10 +216,20 @@ func (s *PaymentService) Provider(name models.ProviderName) (iface.PaymentProvid
 
 // metadataID returns the value stored under key in the subscription-charge
 // metadata map, or the empty string when the map is nil or the key is
-// absent. Used to extract the tenantUUID stamped on Transaction rows.
+// absent.
 func metadataID(md map[string]string, key string) string {
 	if md == nil {
 		return ""
 	}
 	return md[key]
+}
+
+// tenantUUIDFromCharge returns the tenant UUID to persist on the
+// transaction. Prefers the explicit TenantUUID field; falls back to the
+// metadata stamp the renewal service writes alongside it.
+func tenantUUIDFromCharge(in iface.SubscriptionCharge) string {
+	if in.TenantUUID != "" {
+		return in.TenantUUID
+	}
+	return metadataID(in.Metadata, "tenantUUID")
 }

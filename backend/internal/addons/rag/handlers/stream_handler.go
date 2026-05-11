@@ -7,8 +7,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/orkestra/backend/internal/addons/rag/models"
 	"github.com/orkestra/backend/internal/addons/rag/services"
+	"github.com/orkestra/backend/internal/shared/iface"
 )
 
 // StreamHandler handles SSE streaming for RAG queries
@@ -39,8 +39,8 @@ type streamRequest struct {
 
 // sourcesEvent is sent immediately after vector search completes
 type sourcesEvent struct {
-	Sources  []models.SourceRef `json:"sources"`
-	Metadata models.QueryMeta   `json:"metadata"`
+	Sources  []iface.SourceRef `json:"sources"`
+	Metadata iface.QueryMeta   `json:"metadata"`
 }
 
 // tokenEvent is sent for each LLM token
@@ -50,7 +50,7 @@ type tokenEvent struct {
 
 // doneEvent is sent when streaming is complete
 type doneEvent struct {
-	Metadata models.QueryMeta `json:"metadata"`
+	Metadata iface.QueryMeta `json:"metadata"`
 }
 
 // errorEvent is sent when an error occurs
@@ -78,6 +78,7 @@ func (h *StreamHandler) HandleQueryStream(w http.ResponseWriter, r *http.Request
 		http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusInternalServerError)
 		return
 	}
+	defer result.Cancel()
 
 	// Set SSE headers
 	w.Header().Set("Content-Type", "text/event-stream")
@@ -149,8 +150,8 @@ func (h *StreamHandler) HandleQueryStream(w http.ResponseWriter, r *http.Request
 	}
 }
 
-func (h *StreamHandler) buildFinalMeta(result *services.StreamResult) models.QueryMeta {
-	return models.QueryMeta{
+func (h *StreamHandler) buildFinalMeta(result *services.StreamResult) iface.QueryMeta {
+	return iface.QueryMeta{
 		EmbeddingTimeMs: result.PreMeta.EmbeddingTimeMs,
 		SearchTimeMs:    result.PreMeta.SearchTimeMs,
 		LLMTimeMs:       time.Since(result.LLMStart).Milliseconds(),

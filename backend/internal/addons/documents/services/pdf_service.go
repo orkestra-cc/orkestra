@@ -11,6 +11,7 @@ import (
 	"github.com/orkestra/backend/internal/addons/documents/config"
 	"github.com/orkestra/backend/internal/addons/documents/models"
 	"github.com/orkestra/backend/internal/addons/documents/repository"
+	"github.com/orkestra/backend/internal/shared/iface"
 )
 
 // Errors for PDF service
@@ -24,7 +25,7 @@ var (
 // PDFService defines the interface for PDF generation
 type PDFService interface {
 	// PDF generation
-	GeneratePDF(ctx context.Context, input *models.GeneratePDFInput, generatedBy string) (*models.GeneratedDocument, error)
+	GeneratePDF(ctx context.Context, input *models.GeneratePDFInput, generatedBy string) (*iface.GeneratedDocument, error)
 	GeneratePDFFromContent(ctx context.Context, htmlContent string, cssContent string, opts *config.PDFOptions) ([]byte, error)
 
 	// Preview
@@ -32,11 +33,11 @@ type PDFService interface {
 	PreviewHTMLFromContent(ctx context.Context, input *models.PreviewHTMLFromContentInput) (string, error)
 
 	// Document retrieval
-	GetDocument(ctx context.Context, uuid string) (*models.GeneratedDocument, error)
+	GetDocument(ctx context.Context, uuid string) (*iface.GeneratedDocument, error)
 	GetDocumentContent(ctx context.Context, uuid string) ([]byte, string, error)
 
 	// Specific document type generation
-	GenerateInvoicePDF(ctx context.Context, invoiceData map[string]interface{}, templateUUID string, generatedBy string) (*models.GeneratedDocument, error)
+	GenerateInvoicePDF(ctx context.Context, invoiceData map[string]interface{}, templateUUID string, generatedBy string) (*iface.GeneratedDocument, error)
 
 	// Service status
 	IsAvailable(ctx context.Context) bool
@@ -68,7 +69,7 @@ func NewPDFService(
 }
 
 // GeneratePDF generates a PDF from a template and data
-func (s *pdfService) GeneratePDF(ctx context.Context, input *models.GeneratePDFInput, generatedBy string) (*models.GeneratedDocument, error) {
+func (s *pdfService) GeneratePDF(ctx context.Context, input *models.GeneratePDFInput, generatedBy string) (*iface.GeneratedDocument, error) {
 	if input.TemplateUUID == "" {
 		return nil, ErrTemplateRequired
 	}
@@ -130,7 +131,7 @@ func (s *pdfService) GeneratePDF(ctx context.Context, input *models.GeneratePDFI
 	fileName = fileName + ".pdf"
 
 	// Create document record
-	doc := &models.GeneratedDocument{
+	doc := &iface.GeneratedDocument{
 		UUID:         uuid.New().String(),
 		SourceType:   input.SourceType,
 		SourceUUID:   input.SourceUUID,
@@ -219,7 +220,7 @@ func (s *pdfService) PreviewHTMLFromContent(ctx context.Context, input *models.P
 }
 
 // GetDocument retrieves a generated document by UUID (without binary content)
-func (s *pdfService) GetDocument(ctx context.Context, uuid string) (*models.GeneratedDocument, error) {
+func (s *pdfService) GetDocument(ctx context.Context, uuid string) (*iface.GeneratedDocument, error) {
 	return s.documentRepo.GetByUUID(ctx, uuid)
 }
 
@@ -233,7 +234,7 @@ func (s *pdfService) GetDocumentContent(ctx context.Context, uuid string) ([]byt
 }
 
 // GenerateInvoicePDF generates a PDF for an invoice
-func (s *pdfService) GenerateInvoicePDF(ctx context.Context, invoiceData map[string]interface{}, templateUUID string, generatedBy string) (*models.GeneratedDocument, error) {
+func (s *pdfService) GenerateInvoicePDF(ctx context.Context, invoiceData map[string]interface{}, templateUUID string, generatedBy string) (*iface.GeneratedDocument, error) {
 	// If no template specified, use default invoice template
 	if templateUUID == "" {
 		defaultTemplate, err := s.templateRepo.GetDefault(ctx, models.TemplateTypeInvoice)
@@ -259,7 +260,7 @@ func (s *pdfService) GenerateInvoicePDF(ctx context.Context, invoiceData map[str
 		TemplateUUID: templateUUID,
 		Data:         invoiceData,
 		FileName:     fmt.Sprintf("fattura_%s", invoiceNumber),
-		SourceType:   models.SourceTypeInvoice,
+		SourceType:   iface.SourceTypeInvoice,
 		SourceUUID:   sourceUUID,
 	}
 

@@ -108,8 +108,9 @@ func RegisterSubscriptionWriteRoutes(api huma.API, h *handlers.SubscriptionHandl
 
 // RegisterSelfServiceRoutes mounts /v1/me/subscriptions on a router the
 // caller has already gated with RequireGlobal(). No RBAC permission
-// grant is required — the handler validates that the caller owns the
-// target tenant via TenantProvider memberships.
+// grant is required — every handler validates that the caller owns the
+// target tenant via TenantProvider memberships (read live, not from JWT
+// context, so revocations land immediately).
 func RegisterSelfServiceRoutes(api huma.API, h *handlers.SubscriptionHandler) {
 	huma.Register(api, huma.Operation{
 		OperationID: "subscriptions-self-subscribe",
@@ -118,6 +119,54 @@ func RegisterSelfServiceRoutes(api huma.API, h *handlers.SubscriptionHandler) {
 		Tags:     []string{"Subscriptions - Self-service"},
 		Security: subscriptionsSec,
 	}, h.SelfSubscribe)
+
+	huma.Register(api, huma.Operation{
+		OperationID: "me-list-subscriptions",
+		Method:      http.MethodGet, Path: "/v1/me/subscriptions",
+		Summary:  "List subscriptions across tenants the caller owns",
+		Tags:     []string{"Subscriptions - Self-service"},
+		Security: subscriptionsSec,
+	}, h.MeList)
+
+	huma.Register(api, huma.Operation{
+		OperationID: "me-get-subscription",
+		Method:      http.MethodGet, Path: "/v1/me/subscriptions/{id}",
+		Summary:  "Get a subscription owned by the caller",
+		Tags:     []string{"Subscriptions - Self-service"},
+		Security: subscriptionsSec,
+	}, h.MeGet)
+
+	huma.Register(api, huma.Operation{
+		OperationID: "me-cancel-subscription",
+		Method:      http.MethodPost, Path: "/v1/me/subscriptions/{id}/cancel",
+		Summary:  "Cancel a subscription owned by the caller",
+		Tags:     []string{"Subscriptions - Self-service"},
+		Security: subscriptionsSec,
+	}, h.MeCancel)
+
+	huma.Register(api, huma.Operation{
+		OperationID: "me-reactivate-subscription",
+		Method:      http.MethodPost, Path: "/v1/me/subscriptions/{id}/reactivate",
+		Summary:  "Reactivate a cancelled subscription owned by the caller",
+		Tags:     []string{"Subscriptions - Self-service"},
+		Security: subscriptionsSec,
+	}, h.MeReactivate)
+
+	huma.Register(api, huma.Operation{
+		OperationID: "me-list-subscription-invoices",
+		Method:      http.MethodGet, Path: "/v1/me/subscriptions/{id}/invoices",
+		Summary:  "List invoices for a subscription owned by the caller",
+		Tags:     []string{"Subscriptions - Self-service"},
+		Security: subscriptionsSec,
+	}, h.MeListInvoices)
+
+	huma.Register(api, huma.Operation{
+		OperationID: "me-list-subscription-activity",
+		Method:      http.MethodGet, Path: "/v1/me/subscriptions/{id}/activity",
+		Summary:  "List activity log for a subscription owned by the caller",
+		Tags:     []string{"Subscriptions - Self-service"},
+		Security: subscriptionsSec,
+	}, h.MeListActivity)
 }
 
 // --- Nested reads ---

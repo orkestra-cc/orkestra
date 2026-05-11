@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"regexp"
 	"time"
 
 	"github.com/orkestra/backend/internal/core/tenant/models"
@@ -153,7 +154,38 @@ type TenantListFilter struct {
 	RootsOnly bool
 	// IncludeDeleted returns soft-deleted rows when true.
 	IncludeDeleted bool
+	// Q, when non-empty, narrows results to tenants whose name/slug match
+	// (case-insensitive substring) OR who have at least one member whose
+	// email/fullName/username matches. Service.ListAllTenantsFiltered routes
+	// to SearchTenantsByQ when set.
+	Q string
+	// IncludeDeletedUsers controls whether soft-deleted users count as
+	// matches in Q's member-side join. Only meaningful when Q is set.
+	IncludeDeletedUsers bool
 }
+
+// MemberMatch is the projection of a member-side hit returned alongside a
+// tenant when Q matches the member rather than the tenant itself. Used by the
+// /admin/clients search to show "matched: alice@x" chips on each row.
+type MemberMatch struct {
+	UserUUID string `bson:"uuid" json:"userUUID"`
+	Email    string `bson:"email" json:"email"`
+	FullName string `bson:"fullName" json:"fullName,omitempty"`
+	Username string `bson:"username" json:"username,omitempty"`
+}
+
+// TenantSearchResult is what SearchTenantsByQ returns: the tenant itself plus
+// up to MaxMatchedMembersPerTenant member-side hits.
+type TenantSearchResult struct {
+	Tenant          models.Tenant `bson:",inline"`
+	MatchedMembers  []MemberMatch `bson:"matchedMembers" json:"matchedMembers"`
+	MemberCount     int           `bson:"memberCount" json:"memberCount"`
+}
+
+// MaxMatchedMembersPerTenant bounds the matchedMembers payload so a tenant
+// with thousands of members doesn't bloat a search response. The UI only
+// shows the first few chips anyway.
+const MaxMatchedMembersPerTenant = 5
 
 // ListTenants is the general-purpose admin list with optional filters. Sorts
 // by createdAt descending.
@@ -188,6 +220,185 @@ func (r *Repository) ListTenants(ctx context.Context, f TenantListFilter) ([]mod
 	return out, nil
 }
 
+// SearchTenantsByQ runs the unified-clients member-aware search aggregation.
+// Matches f.Q (case-insensitive substring) against tenants.name, tenants.slug,
+// AND every member's email/fullName/username in the tier-appropriate user
+// collection (operator_users for Kind=internal, client_users for
+// Kind=external). Returns the tenants that hit plus up to
+// MaxMatchedMembersPerTenant matched-member projections per row so the UI can
+// show "matched: alice@x" chips.
+//
+// Requires f.Q != "" and f.Kind != ""; the caller (Service.ListAllTenantsFiltered)
+// is expected to fall back to the plain ListTenants path otherwise.
+//
+// Cost note: $lookup against the user collection is bounded by the membership
+// fan-out (memberships of one tenant) plus the regex scan against email +
+// fullName + username on those users. At current Tier-2 volumes (low
+// thousands) this is fine; if it ever shows up in slow query logs the
+// straightforward fix is denormalizing a memberSearchIndex array onto each
+// tenant row.
+func (r *Repository) SearchTenantsByQ(ctx context.Context, f TenantListFilter) ([]TenantSearchResult, error) {
+	q := regexp.QuoteMeta(f.Q)
+	userColl := userCollectionForKind(f.Kind)
+	if userColl == "" {
+		// No user collection means we cannot do the member-side join; fall
+		// back to tenant-only matching by promoting the regex up.
+		return r.searchTenantsByQTenantOnly(ctx, f, q)
+	}
+
+	tenantMatch := bson.M{}
+	if f.Kind != "" {
+		tenantMatch["kind"] = string(f.Kind)
+	}
+	switch {
+	case f.RootsOnly:
+		tenantMatch["$or"] = []bson.M{
+			{"parentTenantUUID": bson.M{"$exists": false}},
+			{"parentTenantUUID": nil},
+			{"parentTenantUUID": ""},
+		}
+	case f.ParentTenantUUID != nil:
+		tenantMatch["parentTenantUUID"] = *f.ParentTenantUUID
+	}
+	if !f.IncludeDeleted {
+		tenantMatch["deletedAt"] = nil
+	}
+
+	memberLookupPipeline := mongo.Pipeline{
+		{{Key: "$match", Value: bson.M{"$expr": bson.M{"$in": bson.A{"$uuid", "$$memberUUIDs"}}}}},
+	}
+	if !f.IncludeDeletedUsers {
+		memberLookupPipeline = append(memberLookupPipeline,
+			bson.D{{Key: "$match", Value: bson.M{"deletedAt": nil}}},
+		)
+	}
+	memberLookupPipeline = append(memberLookupPipeline,
+		bson.D{{Key: "$project", Value: bson.M{
+			"_id":      0,
+			"uuid":     1,
+			"email":    1,
+			"fullName": 1,
+			"username": 1,
+		}}},
+	)
+
+	regex := bson.M{"$regex": q, "$options": "i"}
+	matchedMembersFilter := bson.M{
+		"$filter": bson.M{
+			"input": "$memberUsers",
+			"as":    "m",
+			"cond": bson.M{"$or": bson.A{
+				bson.M{"$regexMatch": bson.M{"input": bson.M{"$ifNull": bson.A{"$$m.email", ""}}, "regex": q, "options": "i"}},
+				bson.M{"$regexMatch": bson.M{"input": bson.M{"$ifNull": bson.A{"$$m.fullName", ""}}, "regex": q, "options": "i"}},
+				bson.M{"$regexMatch": bson.M{"input": bson.M{"$ifNull": bson.A{"$$m.username", ""}}, "regex": q, "options": "i"}},
+			}},
+		},
+	}
+
+	pipeline := mongo.Pipeline{
+		{{Key: "$match", Value: tenantMatch}},
+		{{Key: "$lookup", Value: bson.M{
+			"from":         CollMemberships,
+			"localField":   "uuid",
+			"foreignField": "tenantId",
+			"as":           "members",
+		}}},
+		{{Key: "$lookup", Value: bson.M{
+			"from":     userColl,
+			"let":      bson.M{"memberUUIDs": "$members.userUUID"},
+			"pipeline": memberLookupPipeline,
+			"as":       "memberUsers",
+		}}},
+		{{Key: "$addFields", Value: bson.M{"matchedMembers": matchedMembersFilter}}},
+		{{Key: "$match", Value: bson.M{"$or": bson.A{
+			bson.M{"name": regex},
+			bson.M{"slug": regex},
+			bson.M{"matchedMembers.0": bson.M{"$exists": true}},
+		}}}},
+		{{Key: "$addFields", Value: bson.M{
+			"memberCount":    bson.M{"$size": "$members"},
+			"matchedMembers": bson.M{"$slice": bson.A{"$matchedMembers", MaxMatchedMembersPerTenant}},
+		}}},
+		{{Key: "$project", Value: bson.M{"members": 0, "memberUsers": 0}}},
+		{{Key: "$sort", Value: bson.D{{Key: "createdAt", Value: -1}}}},
+	}
+
+	cur, err := r.db.Collection(CollTenants).Aggregate(ctx, pipeline)
+	if err != nil {
+		return nil, err
+	}
+	defer cur.Close(ctx)
+	var out []TenantSearchResult
+	if err := cur.All(ctx, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// searchTenantsByQTenantOnly is the fallback path when Kind is unset (so we
+// don't know which user collection to join) — matches Q against tenant name
+// and slug only and returns empty matchedMembers.
+func (r *Repository) searchTenantsByQTenantOnly(ctx context.Context, f TenantListFilter, quotedQ string) ([]TenantSearchResult, error) {
+	regex := bson.M{"$regex": quotedQ, "$options": "i"}
+	conds := []bson.M{
+		{"$or": []bson.M{{"name": regex}, {"slug": regex}}},
+	}
+	switch {
+	case f.RootsOnly:
+		conds = append(conds, bson.M{"$or": []bson.M{
+			{"parentTenantUUID": bson.M{"$exists": false}},
+			{"parentTenantUUID": nil},
+			{"parentTenantUUID": ""},
+		}})
+	case f.ParentTenantUUID != nil:
+		conds = append(conds, bson.M{"parentTenantUUID": *f.ParentTenantUUID})
+	}
+	if !f.IncludeDeleted {
+		conds = append(conds, bson.M{"deletedAt": nil})
+	}
+	tenantMatch := bson.M{"$and": conds}
+
+	pipeline := mongo.Pipeline{
+		{{Key: "$match", Value: tenantMatch}},
+		{{Key: "$lookup", Value: bson.M{
+			"from":         CollMemberships,
+			"localField":   "uuid",
+			"foreignField": "tenantId",
+			"as":           "members",
+		}}},
+		{{Key: "$addFields", Value: bson.M{
+			"memberCount":    bson.M{"$size": "$members"},
+			"matchedMembers": bson.A{},
+		}}},
+		{{Key: "$project", Value: bson.M{"members": 0}}},
+		{{Key: "$sort", Value: bson.D{{Key: "createdAt", Value: -1}}}},
+	}
+	cur, err := r.db.Collection(CollTenants).Aggregate(ctx, pipeline)
+	if err != nil {
+		return nil, err
+	}
+	defer cur.Close(ctx)
+	var out []TenantSearchResult
+	if err := cur.All(ctx, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// userCollectionForKind picks the tier-appropriate user collection for the
+// member-side join in SearchTenantsByQ. Kept as a tiny helper so future
+// changes (e.g. a unified user collection) only need to update one site.
+func userCollectionForKind(kind models.TenantKind) string {
+	switch kind {
+	case models.TenantKindInternal:
+		return "operator_users"
+	case models.TenantKindExternal:
+		return "client_users"
+	default:
+		return ""
+	}
+}
+
 // UpdateTenantStatus transitions a tenant to a new lifecycle state.
 func (r *Repository) UpdateTenantStatus(ctx context.Context, uuid string, status models.TenantStatus) error {
 	update := bson.M{"status": string(status), "updatedAt": time.Now()}
@@ -205,6 +416,43 @@ func (r *Repository) UpdateTenantStatus(ctx context.Context, uuid string, status
 		return ErrNotFound
 	}
 	return nil
+}
+
+// FindPersonalTenant returns the unique tenant matching the canonical
+// personal-tenant predicate
+//
+//	(Kind=external, IsCompany=false, SignupChannel=self_serve,
+//	 OwnerUserUUID=userUUID, deletedAt=nil)
+//
+// or (nil, ErrNotFound) when no row matches. Used by the unified-clients
+// lazy provisioner (services.EnsureTenantForUser) — see the design notes in
+// services/billing.go. The predicate is what makes lazy provisioning safe:
+// IsCompany=false ensures we don't auto-route a personal subscription onto
+// the user's existing B2B tenant. Soft-deleted rows are excluded so a user
+// who deleted their personal tenant gets a fresh one on the next call.
+//
+// The personal-tenant predicate has no dedicated index today — Mongo will
+// pick the existing ownerUserUUID index and filter the rest in-memory.
+// Volumes are bounded (one row per user) so this is safe; if the call
+// becomes hot we can add a compound index later.
+func (r *Repository) FindPersonalTenant(ctx context.Context, userUUID string) (*models.Tenant, error) {
+	filter := bson.M{
+		"ownerUserUUID": userUUID,
+		"kind":          string(models.TenantKindExternal),
+		"signupChannel": models.SignupChannelSelfServe,
+		"isCompany":     false,
+		"deletedAt":     nil,
+	}
+	opts := options.FindOne().SetSort(bson.D{{Key: "createdAt", Value: 1}})
+	var t models.Tenant
+	err := r.db.Collection(CollTenants).FindOne(ctx, filter, opts).Decode(&t)
+	if errors.Is(err, mongo.ErrNoDocuments) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &t, nil
 }
 
 // CountMembersByTenants returns a map tenantUUID -> member count for the
@@ -248,6 +496,19 @@ func (r *Repository) CreateMembership(ctx context.Context, m *models.TenantMembe
 func (r *Repository) DeleteMembership(ctx context.Context, userUUID, tenantUUID string) error {
 	_, err := r.db.Collection(CollMemberships).DeleteOne(ctx, bson.M{"userUUID": userUUID, "tenantId": tenantUUID})
 	return err
+}
+
+// DeleteMembershipsByTenant hard-deletes every membership row that belongs
+// to the given tenant. Used by Service.DeleteTenant / PurgeTenant to drop
+// orphaned org_owner and member rows so platform admins can re-use the
+// freed names and so the tenant's owners can re-register without a stale
+// membership pointing at a deleted tenant.
+func (r *Repository) DeleteMembershipsByTenant(ctx context.Context, tenantUUID string) (int64, error) {
+	res, err := r.db.Collection(CollMemberships).DeleteMany(ctx, bson.M{"tenantId": tenantUUID})
+	if err != nil {
+		return 0, err
+	}
+	return res.DeletedCount, nil
 }
 
 func (r *Repository) ListMembershipsByUser(ctx context.Context, userUUID string) ([]models.TenantMembership, error) {
@@ -435,6 +696,24 @@ func (r *Repository) ListDescendantUUIDs(ctx context.Context, ancestorUUID strin
 		out = append(out, anc.DescendantUUID)
 	}
 	return out, cur.Err()
+}
+
+// DeleteAncestorsByTenant removes every closure row in which the given
+// tenant appears (either as ancestor or as descendant). Used by the
+// cascade-delete path so a deleted tenant leaves no dangling hierarchy
+// links — both its self-row and the rows linking it to its parent chain
+// are dropped in one call.
+func (r *Repository) DeleteAncestorsByTenant(ctx context.Context, tenantUUID string) (int64, error) {
+	res, err := r.db.Collection(CollAncestors).DeleteMany(ctx, bson.M{
+		"$or": []bson.M{
+			{"descendantUUID": tenantUUID},
+			{"ancestorUUID": tenantUUID},
+		},
+	})
+	if err != nil {
+		return 0, err
+	}
+	return res.DeletedCount, nil
 }
 
 // IsAncestorOf reports whether ancestorUUID is an ancestor (at any depth,

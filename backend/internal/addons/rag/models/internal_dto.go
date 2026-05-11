@@ -1,5 +1,7 @@
 package models
 
+import "github.com/orkestra/backend/internal/shared/iface"
+
 // --- Internal Service-to-Service DTOs ---
 // Used by the monolith's RemoteRAGQueryProvider to call the AI service.
 
@@ -21,4 +23,4 @@ type InternalRAGQueryRequest struct {
 
 // InternalRAGQueryResponse reuses the standard RAGQueryResponse shape.
 // Defined as a type alias for clarity in the internal routes.
-type InternalRAGQueryResponse = RAGQueryResponse
+type InternalRAGQueryResponse = iface.RAGQueryResponse

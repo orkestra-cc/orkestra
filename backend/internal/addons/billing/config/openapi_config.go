@@ -9,7 +9,16 @@ type OpenAPIConfig struct {
 	// Sandbox: https://test.sdi.openapi.it
 	BaseURL string
 
-	// OAuth Bearer Token for authentication
+	// AccountEmail + APIKey are the long-lived credentials used to mint
+	// short-lived JWT bearer tokens at OAuthBaseURL/token. When both are
+	// set, the API client mints + caches the JWT itself; when empty, the
+	// client falls back to the static BearerToken below (back-compat).
+	AccountEmail string
+	APIKey       string
+	OAuthBaseURL string
+
+	// OAuth Bearer Token for authentication (legacy static-JWT fallback —
+	// used only when AccountEmail+APIKey are empty)
 	BearerToken string
 
 	// Company fiscal ID (P.IVA)
@@ -56,18 +65,26 @@ func (c *OpenAPIConfig) GetEndpoint(path string) string {
 	return c.BaseURL + path
 }
 
-// Validate checks if the configuration is valid
+// Validate checks if the configuration is valid. Either an explicit
+// BearerToken (legacy path) OR AccountEmail+APIKey (preferred — module
+// mints + rotates JWTs) must be present.
 func (c *OpenAPIConfig) Validate() error {
 	if c.BaseURL == "" {
 		return ErrMissingBaseURL
 	}
-	if c.BearerToken == "" {
+	if c.BearerToken == "" && (c.AccountEmail == "" || c.APIKey == "") {
 		return ErrMissingBearerToken
 	}
 	if c.FiscalID == "" {
 		return ErrMissingFiscalID
 	}
 	return nil
+}
+
+// HasOAuthCredentials reports whether the module should mint JWTs itself
+// rather than rely on the static BearerToken fallback.
+func (c *OpenAPIConfig) HasOAuthCredentials() bool {
+	return c.AccountEmail != "" && c.APIKey != ""
 }
 
 // ConfigLoader returns a fresh OpenAPIConfig on each call,

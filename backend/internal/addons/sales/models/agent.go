@@ -4,14 +4,14 @@ import (
 	"context"
 	"encoding/json"
 
-	"github.com/orkestra/backend/internal/addons/aimodels/providers"
+	"github.com/orkestra/backend/internal/shared/iface"
 )
 
 // SalesAgent defines a parallel prospect analysis agent
 type SalesAgent interface {
 	Name() AgentName
 	Weight() float64
-	Execute(ctx context.Context, input *AgentInput, llm providers.LLMProvider, systemPrompt string) (*AgentResult, error)
+	Execute(ctx context.Context, input *AgentInput, llm iface.LLMProvider, systemPrompt string) (*AgentResult, error)
 }
 
 // AgentInput is the data passed to each agent during parallel analysis

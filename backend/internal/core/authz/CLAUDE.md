@@ -80,7 +80,7 @@ Two route groups (`module.go:113-127`):
 
 ### Per-org — mutation (`RequirePermission("authz.role.read")` + `RequireMFA()`)
 
-Block B gates every mutation path behind an MFA step-up because each can grant or revoke effective permissions. A pwd-only or oauth-only token fails with 401 `mfa_required`; the client steps up via `/v1/auth/mfa/verify` then retries.
+Block B gates every mutation path behind an MFA step-up because each can grant or revoke effective permissions. A pwd-only or oauth-only token fails with 401 `step_up_required`; the client steps up via `/v1/auth/mfa/verify` then retries.
 
 | Method | Path | Purpose |
 |---|---|---|
@@ -161,6 +161,7 @@ Permission-evaluation rules (`services/service.go:31-44`, implemented in `GetEff
 - **`CreateBinding` eagerly starts the target's MFA enrollment grace clock** when the granted role is `super_admin`, `administrator`, `org_owner`, or `org_admin`. Implemented via the `MFAGraceStarter` callback (see `Config.StartMFAGrace`) so the service stays free of a direct user-module import. The callback is idempotent — repeated grants don't reset an already-running clock. This list must stay in sync with `auth/services/mfa_policy.go::RoleRequiresMFA`; if they drift a user could be gated at login without ever having had their grace window started.
 - **Binding expiration is advisory, not TTL.** The `expiresAt` index exists, but it's not declared as a TTL index. Expired bindings are filtered out by `ListActiveBindingsForUser` but they stay in the collection. A background reaper is future work.
 - **`DeleteRole` cascades bindings.** The service calls `DeleteBindingsByRoleUUID` before the role delete so nothing is left pointing at a nonexistent role. System roles refuse to delete regardless (via the repository's `isSystem=false` filter).
+- **Tenant deletion cascades bindings.** The authz module registers a `TenantPostDeleteHook` on the tenant service (`module.go::Init`) that calls `RemoveBindingsByTenant` for every deleted/purged tenant and flushes the effective-permission cache. Without this, dropped tenants leave dangling `org_owner` / `org_admin` / custom-role rows the evaluator would still consult if the tenant UUID were re-used. Global bindings (`tenantId=""`) are untouched — those carry platform system roles that outlive any single tenant.
 
 ## What this module does NOT do
 
@@ -192,7 +193,7 @@ These invariants apply across **every** module, not just authz. They are the enf
 | # | Invariant | Enforcement today | Full enforcement |
 |---|---|---|---|
 | 1 | Every non-global data read/write carries `ctxOrgID` | `tenantrepo.Scope()` helper exists; panics in dev when missing | **planned (Phase 0)**: CI linter `tools/tenantscope` flags raw `collection.Find/UpdateOne/...` in `internal/addons/**` when filter doesn't come from `tenantrepo.Scope*`. **Phase 4**: every addon repo migrated to use it. |
-| 2 | `X-Tenant-ID` must match a membership carried in the JWT | ✅ `shared/middleware/auth.go::resolveCurrentTenant`, with one exception: holders of `system.tenants.admin` bypass the membership check (`tryImpersonationBypass`) so operator admins can act in any tenant. Every impersonation emits an `admin.tenant.impersonate` audit event and sets `ctxTenantImpersonated=true` in context. | Keep. |
+| 2 | `X-Tenant-ID` must match a membership carried in the JWT | ✅ `shared/middleware/auth.go::resolveCurrentTenant`, with one exception: holders of `system.tenants.admin` bypass the membership check (`tryImpersonationBypass`) so operator admins can act in any tenant. Every impersonation emits an `admin.tenant.impersonate.{personal,business}` audit event (split by target's IsCompany+SignupChannel shape) and sets `ctxTenantImpersonated=true` in context. Personal targets additionally require an MFA-satisfied session — pwd-only sessions hit a 401 step-up before the bypass applies. | Keep. |
 | 3 | System roles (`super_admin`/`administrator`/`developer`/`manager`/`operator`/`guest`) are **platform-level**; org roles (`org_owner`/`org_admin`/`org_member`/`org_viewer`/`org_billing`) are **tenant-level**. Never mix. | ✅ org roles seeded globally (commit A 2026-04-24); `CreateBinding` enforces system-role-needs-global / tenant-role-needs-tenant separation (commit C 2026-04-24). | Keep. |
 | 4 | Permission checks always run in a resolved org context unless the route uses `RequireGlobal()` or `RequireSystemPermission()` | ✅ middleware chain | Keep. |
 | 5 | A user cannot grant a role whose permissions they themselves lack | ✅ `CreateBinding` cascade rule (commit C 2026-04-24) returns `ErrInsufficientPermissionsToGrant`. Wildcard `*` (super_admin) bypasses; the literal sentinel granter `"system"` bypasses for platform-issued auto-grants. | Keep. |
@@ -223,7 +224,7 @@ Current catalog status (snapshot as of this doc update — the live catalog is i
 
 **When adding a new permission:** declare it in the owning module's `Permissions()` only. Never write directly to `authz_permissions`. Include `System: true` only for platform-level operations that system roles inherit without a binding. Then ensure Cedar coverage — either name it as `Action::"<key>"` in a `cedar/policies/*.cedar` file, or use a suffix already covered by `context.action_suffix == "X"` (today: `read`, `view`, `self`); otherwise the `policycoverage` CI gate will fail with `permission.cedar.unreferenced`.
 
-**Cedar enforce mode:** the `CEDAR_ENFORCE_ACTIONS` env var (comma-separated permission keys) opts each listed action out of shadow mode and into Cedar-authoritative mode — for those actions Cedar's verdict overrides the role table, including the tier-aware forbids in `tenant_scope.cedar`. Unset (the default) keeps every action in pure shadow mode. Cedar-side failures during an enforced check fall back to the role-table verdict (logged at Error, counted as `fallback_role` on `orkestra_cedar_enforced_total`). Recommended starter list: `system.modules.admin,system.tenants.admin,system.users.admin,system.users.mfa_reset` — those four are explicitly named as `Action::` literals in `tenant_scope.cedar`. Roll back is a single env-var change.
+**Cedar enforce mode:** the `CEDAR_ENFORCE_ACTIONS` env var (comma-separated permission keys) opts each listed action out of shadow mode and into Cedar-authoritative mode — for those actions Cedar's verdict overrides the role table, including the tier-aware forbids in `tenant_scope.cedar`. Unset (the default) keeps every action in pure shadow mode. Cedar-side failures during an enforced check fall back to the role-table verdict (logged at Error, counted as `fallback_role` on `orkestra_cedar_enforced_total`). Recommended starter list: `system.modules.admin,system.tenants.admin,system.users.admin,system.users.mfa_reset` — those four were the original `Action::` literals named in `tenant_scope.cedar`. The same file now also names `system.users.password_reset`, `system.users.email_verify_resend`, and `system.users.oauth_unlink` (admin-managed user-credential operations) as operator-only forbids; fold them into the enforced list as they roll out. Roll back is a single env-var change.
 
 ## Cedar ABAC attributes
 
@@ -233,7 +234,7 @@ Section B item #4 of the auth roadmap (2026-04-24) plumbs attribute-based signal
 |-----------|-------------------|--------------|--------|
 | principal | `system_role`     | String       | user module, present when non-empty |
 | principal | `tenant_roles`    | Set<String>  | TenantMembership.Roles, present when non-empty |
-| principal | `capabilities`    | Set<String>  | TenantProvider.ListCapabilityIDs, present when non-empty |
+| principal | `capabilities`    | Set<String>  | AccessProvider.ListCapabilityIDs(TenantOwner(tenantUUID)), present when non-empty |
 | principal | `mfa_enrolled`    | Bool         | JWT `amr` claim → middleware.IsMFAEnrolled — always stamped |
 | principal | `amr`             | Set<String>  | JWT `amr` claim, present when non-empty |
 | resource  | `kind`            | String       | TenantProvider.GetTenant.Kind (internal/external) |
@@ -252,7 +253,7 @@ Section B item #4 of the auth roadmap (2026-04-24) plumbs attribute-based signal
 | @id | Shape | Fires when |
 |-----|-------|------------|
 | `abac.require_mfa_for_admin_suffix` | forbid | principal.system_role ∈ {super_admin, administrator} AND context.action_suffix == "admin" AND principal.mfa_enrolled == false |
-| `abac.deny_system_actions_from_public_ip_in_prod` | forbid | action ∈ the 4 system.* literals AND context.env == "production" AND context.ip_bucket == "public" |
+| `abac.deny_system_actions_from_public_ip_in_prod` | forbid | action ∈ the 7 system.* literals (`system.modules.admin`, `system.tenants.admin`, `system.users.{admin,mfa_reset,password_reset,email_verify_resend,oauth_unlink}`) AND context.env == "production" AND context.ip_bucket == "public" |
 
 **IP bucketing:** Cedar has no CIDR or netmask support, so `ip_bucket` is pre-classified by the engine. Policies never see the raw IP. If you need a new bucket (e.g. `allowlist` for a per-tenant CIDR config), extend `classifyIP` in `cedar/engine.go` and document the new value here — drift between policy literals and the classifier is a silent bug.
 

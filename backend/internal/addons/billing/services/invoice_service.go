@@ -19,16 +19,16 @@ import (
 
 // Common errors
 var (
-	ErrInvoiceNotFound       = errors.New("invoice not found")
-	ErrInvoiceCannotEdit     = errors.New("invoice cannot be edited in current status")
-	ErrInvoiceCannotSend     = errors.New("invoice cannot be sent in current status")
-	ErrInvoiceCannotDelete   = errors.New("invoice cannot be deleted in current status")
-	ErrInvoiceHTMLNotReady   = errors.New("HTML view not available: invoice has not been sent to SDI")
-	ErrCustomerNotFound      = errors.New("customer not found")
-	ErrSupplierNotFound      = errors.New("supplier not found")
-	ErrInvalidInvoiceData    = errors.New("invalid invoice data")
-	ErrInvoiceDuplicate      = errors.New("invoice already exists")
-	ErrXMLParseError         = errors.New("failed to parse XML")
+	ErrInvoiceNotFound      = errors.New("invoice not found")
+	ErrInvoiceCannotEdit    = errors.New("invoice cannot be edited in current status")
+	ErrInvoiceCannotSend    = errors.New("invoice cannot be sent in current status")
+	ErrInvoiceCannotDelete  = errors.New("invoice cannot be deleted in current status")
+	ErrInvoiceHTMLNotReady  = errors.New("HTML view not available: invoice has not been sent to SDI")
+	ErrTenantNotBillable    = errors.New("tenant is not configured for FatturaPA billing")
+	ErrSupplierNotFound     = errors.New("supplier not found")
+	ErrInvalidInvoiceData   = errors.New("invalid invoice data")
+	ErrInvoiceDuplicate     = errors.New("invoice already exists")
+	ErrXMLParseError        = errors.New("failed to parse XML")
 )
 
 // InvoiceService defines the interface for invoice business logic
@@ -61,23 +61,30 @@ type InvoiceService interface {
 }
 
 type invoiceService struct {
-	invoiceRepo   repository.InvoiceRepository
-	customerRepo  repository.CustomerRepository
-	supplierRepo  repository.SupplierRepository
-	companyRepo   repository.CompanyRepository
-	openAPIClient OpenAPIClient
-	xmlBuilder    XMLBuilder
-	xmlParser     XMLParser
-	pdfService    iface.PDFProvider // Optional: nil if documents module disabled
-	logger        *slog.Logger
+	invoiceRepo    repository.InvoiceRepository
+	supplierRepo   repository.SupplierRepository
+	companyRepo    repository.CompanyRepository
+	billingTenants iface.BillingTenantProvider // Optional: nil disables tenant→party resolution
+	openAPIClient  OpenAPIClient
+	xmlBuilder     XMLBuilder
+	xmlParser      XMLParser
+	pdfService     iface.PDFProvider // Optional: nil if documents module disabled
+	logger         *slog.Logger
 }
 
-// NewInvoiceService creates a new InvoiceService
+// NewInvoiceService creates a new InvoiceService.
+//
+// billingTenants is the Unified Client Aggregate seam (Phase 5) used to
+// resolve a CessionarioCommittente snapshot from a TenantUUID. It is
+// optional from this service's POV — when nil, CreateInvoice rejects
+// inputs that carry a tenantUUID with ErrTenantNotBillable so handlers can
+// surface a clear "billing module not fully wired" error rather than
+// silently dropping the recipient.
 func NewInvoiceService(
 	invoiceRepo repository.InvoiceRepository,
-	customerRepo repository.CustomerRepository,
 	supplierRepo repository.SupplierRepository,
 	companyRepo repository.CompanyRepository,
+	billingTenants iface.BillingTenantProvider,
 	openAPIClient OpenAPIClient,
 	xmlBuilder XMLBuilder,
 	xmlParser XMLParser, // Can be nil, will be created if not provided
@@ -88,15 +95,15 @@ func NewInvoiceService(
 		xmlParser = NewXMLParser()
 	}
 	return &invoiceService{
-		invoiceRepo:   invoiceRepo,
-		customerRepo:  customerRepo,
-		supplierRepo:  supplierRepo,
-		companyRepo:   companyRepo,
-		openAPIClient: openAPIClient,
-		xmlBuilder:    xmlBuilder,
-		xmlParser:     xmlParser,
-		pdfService:    pdfService,
-		logger:        logger,
+		invoiceRepo:    invoiceRepo,
+		supplierRepo:   supplierRepo,
+		companyRepo:    companyRepo,
+		billingTenants: billingTenants,
+		openAPIClient:  openAPIClient,
+		xmlBuilder:     xmlBuilder,
+		xmlParser:      xmlParser,
+		pdfService:     pdfService,
+		logger:         logger,
 	}
 }
 
@@ -130,30 +137,38 @@ func (s *invoiceService) CreateInvoice(ctx context.Context, input *models.Create
 		companyData = company.ToPartyData()
 	}
 
-	// Get customer data
+	// Get customer data — Unified Client Aggregate (Phase 5): the
+	// CessionarioCommittente snapshot is resolved by walking up the
+	// tenant's parent chain via BillingTenantProvider. Returns
+	// ErrTenantNotBillable when the chain bottoms out with no FatturaPA
+	// profile so handlers can prompt the operator to fill the billing
+	// identity before retrying.
 	var customerData *models.PartyData
-	if input.CustomerID != "" {
-		customer, err := s.customerRepo.GetByUUID(ctx, input.CustomerID)
+	if input.TenantUUID != "" {
+		if s.billingTenants == nil {
+			return nil, ErrTenantNotBillable
+		}
+		party, err := s.billingTenants.ResolveBillingParty(ctx, input.TenantUUID)
 		if err != nil {
-			if errors.Is(err, repository.ErrCustomerNotFound) {
-				return nil, ErrCustomerNotFound
+			if errors.Is(err, iface.ErrBillingPartyNotConfigured) {
+				return nil, ErrTenantNotBillable
 			}
 			return nil, err
 		}
-		customerData = customer.ToPartyData()
+		customerData = billingPartyToPartyData(party)
 	}
 
 	// Build invoice
 	invoice := &models.Invoice{
-		UUID:               uuid.New().String(),
-		Direction:          models.DirectionIssued,
-		DocumentType:       input.DocumentType,
-		Number:             input.Number,
-		Date:               input.Date,
-		Currency:           "EUR",
-		CompanyID:          input.CompanyID,
-		CedentePrestatore:  companyData,
-		CustomerID:         input.CustomerID,
+		UUID:                   uuid.New().String(),
+		Direction:              models.DirectionIssued,
+		DocumentType:           input.DocumentType,
+		Number:                 input.Number,
+		Date:                   input.Date,
+		Currency:               "EUR",
+		CompanyID:              input.CompanyID,
+		CedentePrestatore:      companyData,
+		TenantUUID:             input.TenantUUID,
 		CessionarioCommittente: customerData,
 		Status:             models.StatusDraft,
 		LegalStorageEnabled: input.LegalStorageEnabled,
@@ -674,7 +689,7 @@ func (s *invoiceService) DuplicateInvoice(ctx context.Context, invoiceUUID strin
 
 		// Copy party references
 		CompanyID:  original.CompanyID,
-		CustomerID: original.CustomerID,
+		TenantUUID: original.TenantUUID,
 		SupplierID: original.SupplierID,
 
 		// Deep copy party data snapshots
@@ -749,6 +764,76 @@ func (s *invoiceService) DuplicateInvoice(ctx context.Context, invoiceUUID strin
 	)
 
 	return duplicate, nil
+}
+
+// billingPartyToPartyData maps the tenant module's resolved BillingParty
+// snapshot onto the FatturaPA-shaped PartyData embedded in invoices. The
+// snapshot lives across module boundaries (iface.BillingParty), so the
+// translation happens at the consumer-side seam.
+//
+// For natural-person tenants (IsCompany=false) the BillingParty.LegalName
+// already carries the rendered "First Last" name from the tenant service.
+// We split it on the last whitespace so the FatturaPA Name/Surname pair is
+// populated; if the value is a single token (or already structured upstream)
+// it lands in Name with Surname empty — XSD allows that for sole
+// proprietors.
+func billingPartyToPartyData(p *iface.BillingParty) *models.PartyData {
+	if p == nil {
+		return nil
+	}
+	pd := &models.PartyData{
+		FiscalIDCountry:    p.Address.Country,
+		FiscalIDCode:       p.VATNumber,
+		CodiceFiscale:      p.FiscalCode,
+		IsCompany:          p.IsCompany,
+		Address:            p.Address.Line1,
+		City:               p.Address.City,
+		Province:           p.Address.Province,
+		PostalCode:         p.Address.PostalCode,
+		Country:            p.Address.Country,
+		Email:              p.Email,
+		CodiceDestinatario: p.FatturaPA.CodiceDestinatario,
+		PECDestinatario:    p.FatturaPA.PECDestinatario,
+	}
+	// Fall back to Country when FiscalIDCountry comes back empty — Italian
+	// FatturaPA mandates a 2-char ISO code on every party and IT is the
+	// default for the tenant address.
+	if pd.FiscalIDCountry == "" {
+		pd.FiscalIDCountry = p.Country
+	}
+	if pd.Country == "" {
+		pd.Country = p.Country
+	}
+	if pd.FiscalIDCode == "" {
+		// Some natural-person tenants only carry FiscalCode (codice fiscale),
+		// not a separate VAT number. The FatturaPA recipient identifier
+		// requires a fiscal id so reuse the codice fiscale here.
+		pd.FiscalIDCode = p.FiscalCode
+	}
+	if p.IsCompany {
+		pd.Denomination = p.LegalName
+	} else {
+		first, last := splitFullName(p.LegalName)
+		pd.Name = first
+		pd.Surname = last
+	}
+	return pd
+}
+
+// splitFullName splits "First Middle Last" into ("First Middle", "Last").
+// Used when projecting an iface.BillingParty for a natural-person tenant
+// onto the FatturaPA Name/Surname pair. A single-token name lands in the
+// first return value.
+func splitFullName(full string) (string, string) {
+	full = strings.TrimSpace(full)
+	if full == "" {
+		return "", ""
+	}
+	idx := strings.LastIndex(full, " ")
+	if idx <= 0 {
+		return full, ""
+	}
+	return strings.TrimSpace(full[:idx]), strings.TrimSpace(full[idx+1:])
 }
 
 // Deep copy helper functions
@@ -1690,7 +1775,7 @@ func getPartyName(party *models.PartyData) string {
 
 // formatAddress formats a party's address for display
 func formatAddress(party *models.PartyData) string {
-	var parts []string
+	parts := make([]string, 0, 2)
 
 	// Street address with number
 	address := party.Address

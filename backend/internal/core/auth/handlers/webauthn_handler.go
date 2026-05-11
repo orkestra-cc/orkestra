@@ -478,65 +478,65 @@ func mapWebAuthnError(err error) error {
 
 // --- registration ---
 
-func (h *WebAuthnHandler) RegisterPublicRoutes(api huma.API) {
+func (h *WebAuthnHandler) RegisterPublicRoutes(api huma.API, mount RouteMount) {
 	huma.Register(api, huma.Operation{
-		OperationID: "mfa-webauthn-login-begin",
+		OperationID: mount.OpIDPrefix + "mfa-webauthn-login-begin",
 		Method:      http.MethodPost,
-		Path:        "/v1/auth/mfa/webauthn/login/begin",
+		Path:        "/v1/auth" + mount.PathPrefix + "/mfa/webauthn/login/begin",
 		Summary:     "Begin a passkey assertion to complete a paused login",
 		Tags:        []string{"Authentication", "MFA", "WebAuthn"},
 	}, h.LoginBegin)
 
 	huma.Register(api, huma.Operation{
-		OperationID: "mfa-webauthn-login-finish",
+		OperationID: mount.OpIDPrefix + "mfa-webauthn-login-finish",
 		Method:      http.MethodPost,
-		Path:        "/v1/auth/mfa/webauthn/login/finish",
+		Path:        "/v1/auth" + mount.PathPrefix + "/mfa/webauthn/login/finish",
 		Summary:     "Finish a passkey assertion to complete a paused login",
 		Tags:        []string{"Authentication", "MFA", "WebAuthn"},
 	}, h.LoginFinish)
 }
 
-func (h *WebAuthnHandler) RegisterProtectedRoutes(api huma.API) {
+func (h *WebAuthnHandler) RegisterProtectedRoutes(api huma.API, mount RouteMount) {
 	huma.Register(api, huma.Operation{
-		OperationID: "mfa-webauthn-register-begin",
+		OperationID: mount.OpIDPrefix + "mfa-webauthn-register-begin",
 		Method:      http.MethodPost,
-		Path:        "/v1/auth/mfa/webauthn/register/begin",
+		Path:        "/v1/auth" + mount.PathPrefix + "/mfa/webauthn/register/begin",
 		Summary:     "Begin enrolling a new passkey",
 		Tags:        []string{"Authentication", "MFA", "WebAuthn"},
 		Security:    []map[string][]string{{"bearerAuth": {}}},
 	}, h.RegisterBegin)
 
 	huma.Register(api, huma.Operation{
-		OperationID: "mfa-webauthn-register-finish",
+		OperationID: mount.OpIDPrefix + "mfa-webauthn-register-finish",
 		Method:      http.MethodPost,
-		Path:        "/v1/auth/mfa/webauthn/register/finish",
+		Path:        "/v1/auth" + mount.PathPrefix + "/mfa/webauthn/register/finish",
 		Summary:     "Finish enrolling a new passkey",
 		Tags:        []string{"Authentication", "MFA", "WebAuthn"},
 		Security:    []map[string][]string{{"bearerAuth": {}}},
 	}, h.RegisterFinish)
 
 	huma.Register(api, huma.Operation{
-		OperationID: "mfa-webauthn-list",
+		OperationID: mount.OpIDPrefix + "mfa-webauthn-list",
 		Method:      http.MethodGet,
-		Path:        "/v1/auth/me/mfa/webauthn/credentials",
+		Path:        "/v1/auth" + mount.PathPrefix + "/me/mfa/webauthn/credentials",
 		Summary:     "List the current user's enrolled passkeys",
 		Tags:        []string{"Authentication", "MFA", "WebAuthn"},
 		Security:    []map[string][]string{{"bearerAuth": {}}},
 	}, h.List)
 
 	huma.Register(api, huma.Operation{
-		OperationID: "mfa-webauthn-verify-begin",
+		OperationID: mount.OpIDPrefix + "mfa-webauthn-verify-begin",
 		Method:      http.MethodPost,
-		Path:        "/v1/auth/mfa/webauthn/verify/begin",
+		Path:        "/v1/auth" + mount.PathPrefix + "/mfa/webauthn/verify/begin",
 		Summary:     "Begin a step-up assertion using a passkey",
 		Tags:        []string{"Authentication", "MFA", "WebAuthn"},
 		Security:    []map[string][]string{{"bearerAuth": {}}},
 	}, h.VerifyBegin)
 
 	huma.Register(api, huma.Operation{
-		OperationID: "mfa-webauthn-verify-finish",
+		OperationID: mount.OpIDPrefix + "mfa-webauthn-verify-finish",
 		Method:      http.MethodPost,
-		Path:        "/v1/auth/mfa/webauthn/verify/finish",
+		Path:        "/v1/auth" + mount.PathPrefix + "/mfa/webauthn/verify/finish",
 		Summary:     "Finish a step-up assertion; mints a stepped-up access token",
 		Tags:        []string{"Authentication", "MFA", "WebAuthn"},
 		Security:    []map[string][]string{{"bearerAuth": {}}},
@@ -546,11 +546,11 @@ func (h *WebAuthnHandler) RegisterProtectedRoutes(api huma.API) {
 // RegisterStepUpRoutes mounts the credential-removal endpoint, which
 // requires a fresh step-up — pulling a passkey is irreversible from the
 // user's perspective (the authenticator hardware can only re-enroll).
-func (h *WebAuthnHandler) RegisterStepUpRoutes(api huma.API) {
+func (h *WebAuthnHandler) RegisterStepUpRoutes(api huma.API, mount RouteMount) {
 	huma.Register(api, huma.Operation{
-		OperationID: "mfa-webauthn-remove",
+		OperationID: mount.OpIDPrefix + "mfa-webauthn-remove",
 		Method:      http.MethodDelete,
-		Path:        "/v1/auth/me/mfa/webauthn/credentials/{credentialId}",
+		Path:        "/v1/auth" + mount.PathPrefix + "/me/mfa/webauthn/credentials/{credentialId}",
 		Summary:     "Delete a passkey (requires fresh step-up)",
 		Tags:        []string{"Authentication", "MFA", "WebAuthn"},
 		Security:    []map[string][]string{{"bearerAuth": {}}},

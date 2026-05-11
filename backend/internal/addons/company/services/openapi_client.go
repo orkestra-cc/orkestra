@@ -15,12 +15,14 @@ import (
 
 	"github.com/orkestra/backend/internal/addons/company/config"
 	"github.com/orkestra/backend/internal/addons/company/models"
+	"github.com/orkestra/backend/internal/shared/openapiauth"
 )
 
 // Client errors
 var (
 	ErrCompanyNotFound     = errors.New("company not found")
 	ErrAPIRequestFailed    = errors.New("company API request failed")
+	ErrUpstreamAuth        = errors.New("company API upstream authentication failed")
 	ErrCircuitBreakerOpen  = errors.New("circuit breaker is open")
 	ErrInvalidTaxCode      = errors.New("invalid tax code")
 )
@@ -46,11 +48,26 @@ type companyAPIClient struct {
 	logger  *slog.Logger
 	redis   RedisClient
 	breaker *circuitBreaker
+	minter  *openapiauth.Minter // nil when only the legacy static BearerToken is configured
+}
+
+// companyOAuthScopes lists every endpoint the Company API client may hit.
+// The minted JWT is bound to this scope set; expanding the surface (e.g. a
+// new enrichment type) requires adding an entry here so newly minted
+// tokens accept it. Existing cached tokens keep working until expiry.
+var companyOAuthScopes = []string{
+	"GET:company.openapi.com/IT-start/*",
+	"GET:company.openapi.com/IT-search/*",
+	"GET:company.openapi.com/IT-advanced/*",
+	"GET:company.openapi.com/IT-marketing/*",
+	"GET:company.openapi.com/IT-stakeholders/*",
+	"GET:company.openapi.com/IT-aml/*",
+	"GET:company.openapi.com/IT-full/*",
 }
 
 // NewCompanyAPIClient creates a new CompanyAPIClient without Redis caching
 func NewCompanyAPIClient(cfg *config.CompanyAPIConfig, logger *slog.Logger) CompanyAPIClient {
-	return &companyAPIClient{
+	c := &companyAPIClient{
 		config: cfg,
 		client: &http.Client{
 			Timeout: cfg.Timeout,
@@ -58,11 +75,13 @@ func NewCompanyAPIClient(cfg *config.CompanyAPIConfig, logger *slog.Logger) Comp
 		logger:  logger,
 		breaker: newCircuitBreaker(5, 30*time.Second),
 	}
+	c.minter = buildMinter(cfg, nil, logger)
+	return c
 }
 
 // NewCompanyAPIClientWithCache creates a new CompanyAPIClient with Redis caching
 func NewCompanyAPIClientWithCache(cfg *config.CompanyAPIConfig, logger *slog.Logger, redis RedisClient) CompanyAPIClient {
-	return &companyAPIClient{
+	c := &companyAPIClient{
 		config: cfg,
 		client: &http.Client{
 			Timeout: cfg.Timeout,
@@ -71,6 +90,52 @@ func NewCompanyAPIClientWithCache(cfg *config.CompanyAPIConfig, logger *slog.Log
 		redis:   redis,
 		breaker: newCircuitBreaker(5, 30*time.Second),
 	}
+	c.minter = buildMinter(cfg, redis, logger)
+	return c
+}
+
+// buildMinter wires the shared OAuth minter when API-key credentials are
+// present. Returns nil when only the legacy static BearerToken is set —
+// the request path then sends the static token directly without minting.
+func buildMinter(cfg *config.CompanyAPIConfig, redis RedisClient, logger *slog.Logger) *openapiauth.Minter {
+	if !cfg.HasOAuthCredentials() {
+		return nil
+	}
+	var cache openapiauth.Cache
+	if redis != nil {
+		cache = redis
+	}
+	return openapiauth.NewMinter(openapiauth.Config{
+		AccountEmail: cfg.AccountEmail,
+		APIKey:       cfg.APIKey,
+		OAuthBaseURL: cfg.OAuthBaseURL,
+		Scopes:       companyOAuthScopes,
+		TTL:          31536000,
+		Tag:          "company",
+	}, cache, &http.Client{Timeout: cfg.Timeout}, logger)
+}
+
+// resolveBearerToken returns the JWT to send in the Authorization header.
+// When the OAuth minter is configured, it produces a fresh/cached JWT;
+// otherwise we fall back to the static BearerToken from config.
+func (c *companyAPIClient) resolveBearerToken(ctx context.Context) (string, error) {
+	if c.minter != nil {
+		tok, err := c.minter.Token(ctx)
+		if err == nil {
+			return tok, nil
+		}
+		// Distinguish credential-rejection from transport problems so the
+		// handler maps the failure to a meaningful HTTP status. Falling
+		// back to the static token here would mask the configuration bug.
+		if errors.Is(err, openapiauth.ErrUpstreamAuth) {
+			return "", fmt.Errorf("%w: oauth minter rejected credentials", ErrUpstreamAuth)
+		}
+		return "", fmt.Errorf("%w: %v", ErrAPIRequestFailed, err)
+	}
+	if c.config.BearerToken == "" {
+		return "", fmt.Errorf("%w: no credentials configured", ErrUpstreamAuth)
+	}
+	return c.config.BearerToken, nil
 }
 
 // LookupByTaxCode calls the OpenAPI Company API to look up a company by tax code
@@ -120,7 +185,7 @@ func (c *companyAPIClient) LookupByTaxCode(ctx context.Context, taxCode string) 
 			"statusCode", statusCode,
 			"message", response.Message,
 		)
-		return nil, fmt.Errorf("%w: %s", ErrAPIRequestFailed, response.Message)
+		return nil, fmt.Errorf("%w: %s", ErrUpstreamAuth, response.Message)
 	}
 
 	// Handle API-level errors
@@ -202,7 +267,7 @@ func (c *companyAPIClient) LookupByType(ctx context.Context, taxCode string, loo
 			"statusCode", statusCode,
 			"message", response.Message,
 		)
-		return nil, fmt.Errorf("%w: %s", ErrAPIRequestFailed, response.Message)
+		return nil, fmt.Errorf("%w: %s", ErrUpstreamAuth, response.Message)
 	}
 
 	if statusCode == http.StatusNotFound || !response.Success {
@@ -286,7 +351,7 @@ func (c *companyAPIClient) SearchCompanies(ctx context.Context, params *models.C
 			"statusCode", statusCode,
 			"message", response.Message,
 		)
-		return nil, fmt.Errorf("%w: %s", ErrAPIRequestFailed, response.Message)
+		return nil, fmt.Errorf("%w: %s", ErrUpstreamAuth, response.Message)
 	}
 
 	if !response.Success {
@@ -386,13 +451,21 @@ func (c *companyAPIClient) doRequest(ctx context.Context, method, path string, b
 		return nil, 0, ErrCircuitBreakerOpen
 	}
 
+	bearer, err := c.resolveBearerToken(ctx)
+	if err != nil {
+		// Token resolution failures aren't a circuit-breaker concern (the
+		// upstream API was never contacted) and they aren't retryable —
+		// surface them immediately.
+		return nil, 0, err
+	}
+
 	url := c.config.GetEndpoint(path)
 	req, err := http.NewRequestWithContext(ctx, method, url, body)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	req.Header.Set("Authorization", "Bearer "+c.config.BearerToken)
+	req.Header.Set("Authorization", "Bearer "+bearer)
 	req.Header.Set("Accept", "application/json")
 
 	resp, err := c.client.Do(req)
@@ -406,6 +479,13 @@ func (c *companyAPIClient) doRequest(ctx context.Context, method, path string, b
 	if err != nil {
 		c.breaker.RecordFailure()
 		return nil, resp.StatusCode, fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	// If the API rejected our minted JWT, drop it from the cache so the
+	// next attempt mints a fresh one. Common when the operator rotates
+	// the API key in the OpenAPI console mid-flight.
+	if (resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden) && c.minter != nil {
+		c.minter.Invalidate(ctx)
 	}
 
 	if resp.StatusCode >= 500 {

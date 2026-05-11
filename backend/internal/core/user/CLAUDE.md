@@ -7,7 +7,7 @@ _Parent: [../CLAUDE.md](../CLAUDE.md)_
 
 ## Purpose
 
-Owns the global `users` collection: account identity, profile fields, the global **system role**, OAuth link bookkeeping, and driver-document expiry tracking. Exposes `iface.UserProvider` so auth, authz, tenant and anything else that needs to look up a user depends on the interface rather than this package.
+Owns the per-tier user collections (`operator_users` and `client_users` after the ADR-0003 PR-D D-8 cutover): account identity, profile fields, the global **system role**, OAuth link bookkeeping, and driver-document expiry tracking. Exposes three providers via the registry — `ServiceOperatorUserProvider`, `ServiceClientUserProvider`, and the canonical `ServiceUserService` (which points at the operator-tier provider) — so auth, authz, tenant and anything else that needs to look up a user depends on the interface rather than this package.
 
 Does not touch passwords, sessions, JWTs, or org memberships — those belong to auth and tenant respectively.
 
@@ -26,16 +26,17 @@ Does not touch passwords, sessions, JWTs, or org memberships — those belong to
 
 | Collection | Indexes | TTL |
 |---|---|---|
-| `users` | `uuid` unique, `email` unique | — |
+| `operator_users` | `uuid` unique, `email` unique, `tier` | — |
+| `client_users` | `uuid` unique, `email` unique, `tier` | — |
 
-Declared in `module.go:29-36`. Both indexes are unique — the repository surfaces a typed `ErrEmailNotUnique` on duplicate insert so callers can format a user-friendly error.
+Declared in `module.go::Collections()`. Email uniqueness is scoped per collection — the same address may legitimately exist as both an operator and a client account (one human running an internal staff role and an external client account). The repository stamps `tier="operator"` / `tier="client"` on every insert so a tier-guard test can assert each collection only holds rows of its own tier.
 
 ## Dependencies
 
 - **Modules**: none (this is a leaf).
 - **Required services**: none.
 - **Optional services**: none.
-- **Provides**: `ServiceUserService` → `iface.UserProvider` (`module.go:25-27`).
+- **Provides**: `ServiceUserService` (canonical, operator-tier) + `ServiceOperatorUserProvider` + `ServiceClientUserProvider` → `iface.UserProvider`.
 - **Permissions contributed** (`module.go:48-55`):
 
 | Key | Purpose |
@@ -49,7 +50,7 @@ These permissions gate the module's own HTTP endpoints. Note that the current `R
 
 ## Lifecycle
 
-- **Init** (`module.go:57-64`): constructs the user repository, instantiates the OAuth provider repository from the auth package (used so this module can read `auth_oauth_providers` without taking a hard dep on auth services), wires `UserService`, and registers it under `ServiceUserService`.
+- **Init**: constructs both per-tier user repositories and matching OAuth provider repositories (operator + client) from the auth package, wires the per-tier `UserService` instances, and registers each under `ServiceOperatorUserProvider` / `ServiceClientUserProvider`. The operator-tier provider is also registered under the canonical `ServiceUserService` key — that's what unaware consumers (setup wizard, dev token generator) get by default; audience-aware consumers (onboarding) request the per-tier key directly.
 - **Start / Stop / HealthCheck**: inherit the no-op from `BaseModule`.
 - **Seeding**: none. Users are created by the auth module's registration flows or the setup wizard.
 
@@ -67,12 +68,19 @@ All routes are behind `RequireSystemPermission("system.users.admin")` (`module.g
 | GET | `/v1/users/count` | Count users with optional filters |
 | GET | `/v1/users/by-email?email=` | Look up user by email |
 | GET | `/v1/users/role/{role}` | Users with a specific system role |
-| GET | `/v1/users/expired-documents` | Users with at least one expired document |
-| GET | `/v1/users/expiring-soon-documents?days=N` | Users with documents expiring within N days |
-| PATCH | `/v1/users/{id}/documents` | Update only document fields (license, CQC, ADR, etc.) |
-| GET | `/v1/users/{id}/check-expiry` | Return which of one user's documents are currently expired |
+| GET | `/v1/admin/client-users` | List Tier-2 client users with tenant memberships joined (powers `/admin/clients`) |
+| GET | `/v1/admin/client-users/{id}` | Single Tier-2 client user with memberships + OAuth providers |
+| POST | `/v1/admin/client-users` | Admin-direct create of a client_users row, password hashed against the live policy, EmailVerified=true |
+| POST | `/v1/admin/client-users/invite` | Invite-flow create: row with no password, 7-day `admin_invite` email-token sent. Recipient redeems via `/v1/auth/client/accept-invite` |
+| POST | `/v1/admin/client-users/{id}/invite/resend` | Re-emit the invite email (invalidates prior unused invite token) |
+| POST | `/v1/admin/client-users/{id}/resend-verification` | Admin-trigger variant of resend verification — surfaces real errors instead of the public flow's silent return |
+| POST | `/v1/admin/client-users/{id}/send-password-reset` | Admin-trigger variant of forgot-password — same enumeration-safe primitive but signals 404 / 503 directly to the operator |
+| PATCH | `/v1/admin/client-users/{id}` | Update name / username / email / phone / role / isActive on a client user |
+| DELETE | `/v1/admin/client-users/{id}` | Soft-delete + email alias on a client user (reuses `SoftDeleteAndAliasEmail`) |
 
-Full registration in `routes.go:11-134`.
+Full registration in `routes.go`. The `/v1/admin/client-users[/{id}]` family is implemented by `handlers/admin_client_handler.go` (the `AdminClientUserHandler`). It binds to the **client-tier** `UserService` directly, looks up `iface.TenantProvider` lazily from the registry to join memberships, looks up `iface.PasswordHasher` lazily on create so it can hash the supplied password without importing auth's package, and looks up `iface.AdminAuthInviter` (satisfied by the client-tier `*services.PasswordAuthService`) for the invite / resend-verification / send-password-reset endpoints.
+
+The companion tier-aware MFA reset is mounted by the auth module at `POST /v1/admin/client-users/{userId}/mfa/reset` — see [`../auth/CLAUDE.md`](../auth/CLAUDE.md).
 
 ## Service contract
 
@@ -83,7 +91,7 @@ Key method groups:
 - **Identity / lookup** — `GetUserByID`, `GetUserByEmail`, `GetUserForAuth` (includes password hash + lockout fields; auth-only), `GetUserCount`
 - **Creation** — `CreateUserWithPassword` (called by password signup), `CreateUserFromOAuth` (called by OAuth flows)
 - **Auth-side mutations** — `UpdatePasswordHash`, `MarkEmailVerified`, `RecordFailedLogin` (optional `lockUntil`), `ClearFailedLogins`, `UpdateUserLastLogin`, `StartMFAGraceIfUnset` (idempotent — preserves an existing clock), `ResetMFAGrace` (unconditionally restarts — used by admin MFA reset), `ClearMFAGrace` (wipe on successful enrollment)
-- **OAuth link management** — `GetUserOAuthLinks`, `RemoveOAuthLinkFromUser`, `SetPrimaryOAuthLink`
+- **OAuth link management** — `GetUserOAuthLinks`, `AddOAuthLinkToUser`, `RemoveOAuthLinkFromUser`, `SetPrimaryOAuthLink`
 - **General mutation** — `UpdateUser`, `DeleteUser`
 
 `GetUserForAuth` returns the full `*User` including the password hash. Every other read path returns `*UserManagementResponse` which strips sensitive fields — use the right one.
@@ -94,9 +102,8 @@ Key method groups:
 - **`NewUser()` defaults the role to `operator`** (`models/user.go:289`). The first user created on a fresh install is bumped to `super_admin` by the auth module's first-user heuristic — this module is agnostic.
 - **Validator `oneof`** in `user.go:77,120,143,193` enforces the six role names on every create/update/filter DTO. If you rename a role, update all four lines in lock-step.
 - **Email uniqueness** is enforced at the DB level by the unique index plus at the service level by a pre-insert existence check. Concurrent creates with the same email will have one succeed and one error.
-- **Soft delete only** — `DeleteUser` sets `DeletedAt` on the document. The unique email index still matches soft-deleted rows, so reactivating a soft-deleted account requires either a hard delete or a permanent email alias.
+- **Soft delete only** — `DeleteUser` sets `DeletedAt` on the document. The unique email index still matches soft-deleted rows, so reactivating a soft-deleted account requires either a hard delete or a permanent email alias. `SoftDeleteAndAliasEmail` is the alias path: it stamps `deletedAt` AND atomically rewrites `email` to `<original>+deleted-<unixNano>@orphan.local` (preserving the original on `originalEmail` for audit) so the unique index frees up. Used by the tenant cascade hook for orphaned external (Tier-2) owners — internal users are intentionally never aliased because operator humans outlive single workspaces.
 - **`User.MFAGraceStartedAt` is stamped by the auth module**, cleared by the auth module (on successful enrollment), and read by both auth (to decide login grace vs 403) and the admin MFA reset flow (which calls `ResetMFAGrace` to restart the countdown). The field is non-serialized (`json:"-"`) — it's internal bookkeeping, not part of the public user surface.
-- **Driver document fields are legacy but live.** `LicenseNumber`, `LicenseExpiry`, `DriverCardNumber`, `DriverCardExpiry`, `CQCExpiry`, `ADRNumber`, `ADRExpiry`, `TachigrafExpiry`, `MedicalChecks` are fleet-management artifacts from the product's original scope. The expiry endpoints exist because Italian transport compliance needs them — do not delete them as dead code.
 - **`OAuthLinks` is embedded in the user document**, not a separate collection. The auth module has its *own* `auth_oauth_providers` collection for provider-side metadata (IDs, tokens). The two are synced but serve different roles: `User.OAuthLinks` is the "connected accounts" list surfaced to the user; `auth_oauth_providers` is the provider-lookup index used during OAuth callback.
 
 ## What this module does NOT do

@@ -32,10 +32,10 @@ type SubscriptionRepository interface {
 	// FindDue returns subscriptions in active/past_due whose NextBillingAt is
 	// on or before `now`. Used by the renewal job every tick.
 	FindDue(ctx context.Context, now time.Time) ([]models.Subscription, error)
-	// FindByTenantUUID returns every subscription bound to the tenant via
-	// the TenantUUID forward pointer. Sorted by createdAt desc. Used by the
-	// admin aggregator GET /v1/admin/tenants/{id}/subscriptions.
-	FindByTenantUUID(ctx context.Context, tenantUUID string) ([]models.Subscription, error)
+	// FindByTenant returns every subscription bound to the given tenant.
+	// Sorted by createdAt desc. Used by self-service handlers and the admin
+	// aggregator GET /v1/admin/tenants/{id}/subscriptions.
+	FindByTenant(ctx context.Context, tenantUUID string) ([]models.Subscription, error)
 	UpdateStatus(ctx context.Context, uuid string, status models.SubStatus) error
 	Delete(ctx context.Context, uuid string) error
 }
@@ -93,9 +93,13 @@ func (r *subscriptionRepository) List(ctx context.Context, f SubscriptionFilters
 	return out, nil
 }
 
-func (r *subscriptionRepository) FindByTenantUUID(ctx context.Context, tenantUUID string) ([]models.Subscription, error) {
+func (r *subscriptionRepository) FindByTenant(ctx context.Context, tenantUUID string) ([]models.Subscription, error) {
+	if tenantUUID == "" {
+		return nil, nil
+	}
 	opts := optionsFindSortCreatedAtDesc()
-	cur, err := r.coll.Find(ctx, bson.M{"tenantUUID": tenantUUID}, opts)
+	filter := bson.M{"tenantUUID": tenantUUID}
+	cur, err := r.coll.Find(ctx, filter, opts)
 	if err != nil {
 		return nil, err
 	}

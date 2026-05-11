@@ -11,8 +11,8 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	"github.com/orkestra/backend/internal/addons/aimodels/providers"
 	"github.com/orkestra/backend/internal/addons/sales/models"
+	"github.com/orkestra/backend/internal/shared/iface"
 )
 
 // reasoningTagRe strips <think>...</think> blocks emitted by reasoning models
@@ -54,7 +54,7 @@ func (e *AgentExecutor) RunParallel(
 	ctx context.Context,
 	agents []AgentDef,
 	input *models.AgentInput,
-	llm providers.LLMProvider,
+	llm iface.LLMProvider,
 	progressFn func(models.AgentName, string, int), // optional: (agent, status, score)
 ) []*models.AgentResult {
 	results := make([]*models.AgentResult, len(agents))
@@ -90,7 +90,7 @@ func (e *AgentExecutor) executeAgent(
 	ctx context.Context,
 	agent AgentDef,
 	input *models.AgentInput,
-	llm providers.LLMProvider,
+	llm iface.LLMProvider,
 ) *models.AgentResult {
 	start := time.Now()
 
@@ -105,8 +105,8 @@ func (e *AgentExecutor) executeAgent(
 	var text string
 	var err error
 
-	if usageProvider, ok := llm.(providers.LLMProviderWithUsage); ok {
-		completionResult, callErr := usageProvider.CompleteWithUsage(ctx, userMessage, providers.CompletionOptions{
+	if usageProvider, ok := llm.(iface.LLMProviderWithUsage); ok {
+		completionResult, callErr := usageProvider.CompleteWithUsage(ctx, userMessage, iface.CompletionOptions{
 			SystemPrompt: agent.Prompt,
 			Temperature:  0.3,
 			MaxTokens:    e.maxTokens,
@@ -119,7 +119,7 @@ func (e *AgentExecutor) executeAgent(
 			result.OutputTokens = completionResult.OutputTokens
 		}
 	} else {
-		text, err = llm.Complete(ctx, userMessage, providers.CompletionOptions{
+		text, err = llm.Complete(ctx, userMessage, iface.CompletionOptions{
 			SystemPrompt: agent.Prompt,
 			Temperature:  0.3,
 			MaxTokens:    e.maxTokens,

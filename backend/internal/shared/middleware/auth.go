@@ -70,6 +70,7 @@ type AuthMiddleware struct {
 	jwtService        services.JWTService
 	authService       services.AuthService
 	tenant            iface.TenantProvider
+	access            iface.AccessProvider
 	authz             iface.AuthzProvider
 	auditSink         iface.AuditSink
 	sessionRevocation services.SessionRevocationService
@@ -119,6 +120,14 @@ func (m *AuthMiddleware) SetAuthService(authService services.AuthService) {
 // and entitlement checks. Called from main.go after all modules initialize.
 func (m *AuthMiddleware) SetTenantProvider(t iface.TenantProvider) {
 	m.tenant = t
+}
+
+// SetAccessProvider wires the polymorphic-owner capability surface.
+// RequireCapability uses it to evaluate entitlements for either a tenant
+// (X-Tenant-ID present) or the calling user (no tenant context). Called
+// from main.go after the tenant module initializes.
+func (m *AuthMiddleware) SetAccessProvider(a iface.AccessProvider) {
+	m.access = a
 }
 
 // SetAuthzProvider wires the authz provider for permission evaluation.
@@ -189,7 +198,13 @@ func (m *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 
 				tokenResponse, err := m.authService.RefreshTokensWithRiskAssessment(r.Context(), refreshToken, securityCtx)
 				if err == nil {
-					cookieDomain := m.config.Auth.Cookie.Domain
+					// ADR-0003 PR-D D-9: write the rotated refresh cookie
+					// scoped to the request's audience so an operator
+					// silent-refresh stays on `console.*` and a client
+					// silent-refresh stays on `api.*`. Falls back to the
+					// legacy single-host Domain when the per-tier value
+					// is empty (single-host deployments).
+					cookieDomain := cookieDomainForAudience(m.config, AudienceFromContext(r.Context()))
 					isSecure := m.config.Auth.Cookie.Secure
 					utils.SetRefreshTokenCookie(w, m.cookieName, tokenResponse.RefreshToken, 7*24*3600, cookieDomain, isSecure)
 
@@ -280,43 +295,78 @@ func (m *AuthMiddleware) setUserContext(w http.ResponseWriter, r *http.Request, 
 	// system.tenants.admin can act in any tenant. Falls through to 403 for
 	// non-admins so a stale header can't leak data from another tenant.
 	if h := r.Header.Get(TenantIDHeader); h != "" && !ok {
-		impCtx, _, impersonated := m.tryImpersonationBypass(ctx, r, claims, h)
-		if !impersonated {
+		impCtx, _, decision := m.tryImpersonationBypass(ctx, r, claims, h)
+		switch decision {
+		case impersonationBypassMFARequired:
+			m.sendMFARequired(w, r)
+			return
+		case impersonationBypassDenied:
 			m.sendErrorResponse(w, r, errors.AuthorizationError("not a member of requested tenant").
 				WithOperation("resolve_tenant").
 				WithDetail("tenantId", h).
 				Build())
 			return
+		case impersonationBypassAllowed:
+			ctx = impCtx
 		}
-		ctx = impCtx
 	}
 
 	next.ServeHTTP(w, r.WithContext(ctx))
 }
 
+// impersonationBypassDecision is the tri-state result tryImpersonationBypass
+// returns so the caller can distinguish "you're not allowed" (403) from
+// "you'd be allowed but need a fresh second factor first" (401 step-up).
+// The middleware emits a different response for each — folding them into a
+// single ok=false would have hidden the MFA branch from the client.
+type impersonationBypassDecision int
+
+const (
+	impersonationBypassDenied impersonationBypassDecision = iota
+	impersonationBypassAllowed
+	impersonationBypassMFARequired
+)
+
+// Audit action names for the impersonation event, split by target shape so
+// SOC2/security review can tell apart sensitive personal-tenant access from
+// routine business-tenant operator work. See Phase 7 of the Unified Client
+// Aggregate plan.
+const (
+	auditActionImpersonatePersonal = "admin.tenant.impersonate.personal"
+	auditActionImpersonateBusiness = "admin.tenant.impersonate.business"
+)
+
 // tryImpersonationBypass resolves a non-member X-Tenant-ID when the caller
 // holds system.tenants.admin. On success it returns an enriched context
 // stamping tenantID + looked-up kind + synthetic administrator roles + an
-// impersonation flag, and emits one de-duped admin.tenant.impersonate
-// audit event per (actor, tenant, TTL). On failure (no admin permission,
-// tenant lookup failed, required services not wired) it returns ok=false
-// so the caller can fall through to the existing 403 path.
+// impersonation flag, and emits one de-duped admin.tenant.impersonate.*
+// audit event per (actor, tenant, TTL). The decision discriminates:
+//   - Denied: missing services, no admin permission, tenant lookup failed.
+//   - MFARequired: target is a personal tenant (IsCompany=false +
+//     SignupChannel=self_serve) and the actor's session has not completed
+//     a second factor — caller surfaces 401 step_up_required.
+//   - Allowed: bypass applied; caller adopts the enriched context.
 func (m *AuthMiddleware) tryImpersonationBypass(
 	ctx context.Context,
 	r *http.Request,
 	claims *models.JWTClaims,
 	requestedTenantID string,
-) (context.Context, string, bool) {
+) (context.Context, string, impersonationBypassDecision) {
 	if m.authz == nil || m.tenant == nil {
-		return ctx, "", false
+		return ctx, "", impersonationBypassDenied
 	}
 	allowed, err := m.authz.HasPermission(ctx, claims.UserUUID, "", "system.tenants.admin")
 	if err != nil || !allowed {
-		return ctx, "", false
+		return ctx, "", impersonationBypassDenied
 	}
 	target, err := m.tenant.GetTenant(ctx, requestedTenantID)
 	if err != nil || target == nil {
-		return ctx, "", false
+		return ctx, "", impersonationBypassDenied
+	}
+
+	personal := isPersonalTenant(target)
+	if personal && !amrSatisfiesMFA(claims.AMR) {
+		return ctx, target.Kind, impersonationBypassMFARequired
 	}
 
 	ctx = context.WithValue(ctx, ctxTenantID, target.UUID)
@@ -326,12 +376,26 @@ func (m *AuthMiddleware) tryImpersonationBypass(
 	}
 	ctx = context.WithValue(ctx, ctxTenantImpersonated, true)
 
-	m.recordImpersonationAudit(ctx, r, claims, target)
-	return ctx, target.Kind, true
+	action := auditActionImpersonateBusiness
+	if personal {
+		action = auditActionImpersonatePersonal
+	}
+	m.recordImpersonationAudit(ctx, r, claims, target, action)
+	return ctx, target.Kind, impersonationBypassAllowed
+}
+
+// isPersonalTenant matches the canonical "personal tenant" predicate from
+// the Unified Client Aggregate plan: a Tier-2 self-serve signup that has
+// not been promoted to a business entity. Anything else (companies,
+// sales-assisted onboarding, seeded ops tenants) is treated as business.
+func isPersonalTenant(t *iface.Tenant) bool {
+	return t != nil && !t.IsCompany && t.SignupChannel == iface.SignupChannelSelfServe
 }
 
 // recordImpersonationAudit emits a dedupe'd audit event so a single page
-// load that fires many XHRs produces one audit row per minute. When the
+// load that fires many XHRs produces one audit row per minute. action is
+// the split admin.tenant.impersonate.{personal,business} variant chosen by
+// the caller based on the target's IsCompany+SignupChannel shape. When the
 // compliance sink is not registered, the event is silently dropped — the
 // impersonation still works, it just isn't recorded.
 func (m *AuthMiddleware) recordImpersonationAudit(
@@ -339,6 +403,7 @@ func (m *AuthMiddleware) recordImpersonationAudit(
 	r *http.Request,
 	claims *models.JWTClaims,
 	target *iface.Tenant,
+	action string,
 ) {
 	if m.auditSink == nil {
 		return
@@ -358,16 +423,18 @@ func (m *AuthMiddleware) recordImpersonationAudit(
 		ActorUserID:  claims.UserUUID,
 		ActorEmail:   claims.Email,
 		ActorType:    "user",
-		Action:       "admin.tenant.impersonate",
+		Action:       action,
 		ResourceType: "tenant",
 		ResourceID:   target.UUID,
 		Outcome:      "success",
 		IPAddress:    utils.GetClientIP(r),
 		UserAgent:    r.UserAgent(),
 		Metadata: map[string]any{
-			"targetTenantSlug": target.Slug,
-			"targetTenantName": target.Name,
-			"requestPath":      r.URL.Path,
+			"targetTenantSlug":     target.Slug,
+			"targetTenantName":     target.Name,
+			"targetIsCompany":      target.IsCompany,
+			"targetSignupChannel":  target.SignupChannel,
+			"requestPath":          r.URL.Path,
 		},
 	})
 }
@@ -787,11 +854,16 @@ func (m *AuthMiddleware) RequireSystemPermission(permission string) func(http.Ha
 	}
 }
 
-// RequireCapability blocks the request unless the current tenant holds an
+// RequireCapability blocks the request unless the current owner holds an
 // active entitlement to the given capability ID in the tenant_entitlements
-// projection (Phase 2). Returns 402 Payment Required — distinct from 403
-// Forbidden — so the frontend can branch on the error and surface a
-// subscription / upgrade prompt rather than an access-denied screen.
+// projection. Returns 402 Payment Required — distinct from 403 Forbidden —
+// so the frontend can branch on the error and surface a subscription /
+// upgrade prompt rather than an access-denied screen.
+//
+// Owner resolution: when X-Tenant-ID is present (and the caller is a member
+// per the existing membership check), the owner is the tenant. Otherwise it
+// is the calling user — self-registered clients hold entitlements on their
+// own user UUID after the post-onboarding refactor.
 //
 // Typical use: apply this AFTER RequirePermission so RBAC runs first and
 // a 403 wins over a 402 when neither gate passes. The order does not affect
@@ -800,19 +872,19 @@ func (m *AuthMiddleware) RequireSystemPermission(permission string) func(http.Ha
 func (m *AuthMiddleware) RequireCapability(capabilityID string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if m.tenant == nil {
-				m.sendErrorResponse(w, r, errors.InternalError("tenant service not ready").
+			if m.access == nil {
+				m.sendErrorResponse(w, r, errors.InternalError("access service not ready").
 					WithOperation("require_capability").Build())
 				return
 			}
-			tenantID, ok := GetTenantID(r.Context())
+			tenantUUID, ok := capabilityTenantFromRequest(r)
 			if !ok {
 				m.sendErrorResponse(w, r, errors.AuthorizationError("tenant context required").
 					WithOperation("require_capability").
 					WithDetail("capability", capabilityID).Build())
 				return
 			}
-			allowed, err := m.tenant.HasCapability(r.Context(), tenantID, capabilityID)
+			allowed, err := m.access.HasCapability(r.Context(), tenantUUID, capabilityID)
 			if err != nil {
 				m.sendErrorResponse(w, r, errors.InternalError("capability check failed").
 					WithOperation("require_capability").
@@ -820,17 +892,29 @@ func (m *AuthMiddleware) RequireCapability(capabilityID string) func(http.Handle
 				return
 			}
 			if !allowed {
-				// Phase 5.3: count every 402 so operators can see
-				// which capabilities generate the most tenant
-				// friction. Label is the capability ID (bounded by
-				// the Capabilities() catalog cardinality).
+				// Count every 402 so operators can see which capabilities
+				// generate the most tenant friction. Label is the
+				// capability ID (bounded by the Capabilities() catalog
+				// cardinality).
 				metrics.Default().RecordCapabilityDenied(capabilityID)
-				m.sendCapabilityRequiredResponse(w, r, capabilityID, tenantID)
+				m.sendCapabilityRequiredResponse(w, r, capabilityID, tenantUUID)
 				return
 			}
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+// capabilityTenantFromRequest returns the tenant UUID the capability gate
+// evaluates against — the request's resolved X-Tenant-ID. Returns false
+// when no tenant context is set; capability gating without a tenant is
+// undefined post Unified Client Aggregate (every billable principal is a
+// tenant).
+func capabilityTenantFromRequest(r *http.Request) (string, bool) {
+	if tenantID, ok := GetTenantID(r.Context()); ok && tenantID != "" {
+		return tenantID, true
+	}
+	return "", false
 }
 
 // RequireGlobal is a pass-through for routes that don't need an org context
@@ -1003,11 +1087,13 @@ func amrSatisfiesMFA(amr []string) bool {
 }
 
 // sendMFARequired emits the structured 401 the frontend looks for to trigger
-// a step-up prompt. The body mirrors sendErrorResponse's shape but adds the
-// stable `code` field so the client can switch on it without parsing prose.
+// a step-up prompt. Shares the `step_up_required` code with sendStepUpRequired
+// and sendRiskStepUp so the client switches on a single value to drive the
+// MFA modal regardless of whether the gate is session-MFA, freshness, or
+// risk-based.
 func (m *AuthMiddleware) sendMFARequired(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("WWW-Authenticate", `MFA error="mfa_required"`)
+	w.Header().Set("WWW-Authenticate", `MFA error="step_up_required"`)
 	w.WriteHeader(http.StatusUnauthorized)
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"status": http.StatusUnauthorized,
@@ -1017,9 +1103,9 @@ func (m *AuthMiddleware) sendMFARequired(w http.ResponseWriter, r *http.Request)
 		"errors": []map[string]any{{
 			"message":  "mfa required",
 			"location": "require_mfa",
-			"value":    "MFA_REQUIRED",
+			"value":    "STEP_UP_REQUIRED",
 		}},
-		"code": "mfa_required",
+		"code": "step_up_required",
 	})
 }
 

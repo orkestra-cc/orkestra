@@ -43,7 +43,7 @@ Declared in `module.go::Collections()` and auto-created on boot:
 ## Lifecycle
 
 - **Init**: constructs repositories, loads email settings via a closure over `ConfigService` (so admin UI changes propagate without restart), wires the `NotificationService` and registers it as `ServiceNotificationSender`.
-- **Start**: calls `TemplateService.SeedDefaults(ctx)` which inserts the `auth.verify_email` and `auth.reset_password` system templates into the DB if they are missing. Source strings live in `services/default_templates.go` as Go constants.
+- **Start**: calls `TemplateService.SeedDefaults(ctx)` which inserts every `auth.*` system template (`verify_email`, `reset_password`, `suspicious_login`, `new_device_login`, `admin_suspicious_login`, `admin_invite`) into the DB if they are missing. Source strings live in `services/default_templates.go` as Go constants.
 - **Stop / HealthCheck**: inherit base no-op from `BaseModule`.
 
 ## Settings (loaded lazily per send)
@@ -76,7 +76,7 @@ Rendering uses Go's `text/template` for the subject and plain-text body, and `ht
 - `{{.PreferencesURL}}` — absolute URL to `/account/notifications`
 - `{{.AppName}}`, `{{.SupportEmail}}` — from module config, if not already provided by the caller
 
-Each system template documents its expected variables in the `variables` array of the seeded document. For `auth.verify_email`: `AppName`, `UserName`, `VerifyURL`, `ExpiresIn`, `SupportEmail`, `UnsubscribeURL`, `PreferencesURL`. For `auth.reset_password`: the same set plus `ResetURL` and `RequestIP`.
+Each system template documents its expected variables in the `variables` array of the seeded document. For `auth.verify_email`: `AppName`, `UserName`, `VerifyURL`, `ExpiresIn`, `SupportEmail`, `UnsubscribeURL`, `PreferencesURL`. For `auth.reset_password`: the same set plus `ResetURL` and `RequestIP`. For `auth.admin_invite`: `AppName`, `UserName`, `InviteURL`, `ExpiresIn`, `InviterName` (optional), `SupportEmail`, `UnsubscribeURL`, `PreferencesURL`.
 
 ## Preferences and transactional mail
 

@@ -134,9 +134,7 @@ func createTemplateFuncMap() template.FuncMap {
 		"formatDateTime": func(t time.Time) string {
 			return t.Format("02/01/2006 15:04")
 		},
-		"now": func() time.Time {
-			return time.Now()
-		},
+		"now": time.Now,
 
 		// Money formatting
 		"formatMoney": func(amount float64, decimals int, symbol string) string {
@@ -169,9 +167,7 @@ func createTemplateFuncMap() template.FuncMap {
 		"lower": strings.ToLower,
 		"trim":  strings.TrimSpace,
 		"title": strings.Title,
-		"replace": func(s, old, new string) string {
-			return strings.ReplaceAll(s, old, new)
-		},
+		"replace": strings.ReplaceAll,
 		"truncate": func(s string, maxLen int) string {
 			if len(s) <= maxLen {
 				return s

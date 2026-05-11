@@ -30,7 +30,19 @@ type Invoice struct {
 	// Related parties
 	CompanyID  string `bson:"companyId,omitempty" json:"companyId,omitempty"`   // Reference to Company (for issued invoices)
 	SupplierID string `bson:"supplierId,omitempty" json:"supplierId,omitempty"` // Reference to Supplier (for received invoices)
-	CustomerID string `bson:"customerId,omitempty" json:"customerId,omitempty"` // Reference to Customer (for issued invoices)
+	// TenantUUID is the Tier-2 tenant whose FatturaPA profile drives the
+	// CessionarioCommittente snapshot. Replaces the legacy CustomerID in the
+	// Unified Client Aggregate model — billing.Customer was deleted in Phase
+	// 5; the resolution path is now BillingTenantProvider.ResolveBillingParty.
+	TenantUUID string `bson:"tenantUUID,omitempty" json:"tenantUUID,omitempty"`
+	// CustomerID is retained as a legacy safety-belt field for one phase so
+	// post-migration forensics can still trace an invoice back to its old
+	// billing.Customer row. New invoices stamp TenantUUID instead. A
+	// follow-up migration drops this field once invoice send is verified
+	// working in production.
+	//
+	// Deprecated: use TenantUUID.
+	CustomerID string `bson:"customerId,omitempty" json:"-"`
 
 	// Party data snapshots (embedded for immutability)
 	CedentePrestatore       *PartyData `bson:"cedentePrestatore" json:"cedentePrestatore"`             // Seller/Provider

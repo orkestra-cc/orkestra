@@ -6,9 +6,9 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/orkestra/backend/internal/addons/aimodels/providers"
 	"github.com/orkestra/backend/internal/addons/sales/models"
 	"github.com/orkestra/backend/internal/addons/sales/repository"
+	"github.com/orkestra/backend/internal/shared/iface"
 )
 
 // BatchPoller polls pending batch jobs and completes the prospect pipeline when results arrive
@@ -97,7 +97,7 @@ func (p *BatchPoller) checkBatch(ctx context.Context, batch *models.BatchJob) {
 		return
 	}
 
-	batchProvider, ok := llm.(providers.BatchLLMProvider)
+	batchProvider, ok := llm.(iface.BatchLLMProvider)
 	if !ok {
 		p.failBatch(ctx, batch, "LLM provider no longer supports batch")
 		return
@@ -130,7 +130,7 @@ func (p *BatchPoller) checkBatch(ctx context.Context, batch *models.BatchJob) {
 	}
 }
 
-func (p *BatchPoller) completeBatch(ctx context.Context, batch *models.BatchJob, results []providers.BatchResult) {
+func (p *BatchPoller) completeBatch(ctx context.Context, batch *models.BatchJob, results []iface.BatchResult) {
 	// Save raw results to batch record
 	entries := make([]models.BatchResultEntry, len(results))
 	for i, r := range results {

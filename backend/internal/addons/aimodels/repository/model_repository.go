@@ -45,7 +45,7 @@ func NewModelRepository(db *mongo.Database) ModelRepository {
 		{Keys: bson.D{{Key: "provider", Value: 1}}},
 		{Keys: bson.D{{Key: "providerCategory", Value: 1}}},
 	}
-	coll.Indexes().CreateMany(ctx, indexes) //nolint:errcheck
+	coll.Indexes().CreateMany(ctx, indexes) //nolint:errcheck // best-effort index ensure; subsequent reads will surface persistent failures
 
 	return &modelRepository{collection: coll}
 }

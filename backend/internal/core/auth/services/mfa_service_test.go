@@ -93,6 +93,18 @@ func (r *fakeFactorRepo) ConsumeBackupCode(_ context.Context, userUUID, hashed s
 	return false, nil
 }
 
+func (r *fakeFactorRepo) ReplaceBackupCodes(_ context.Context, userUUID string, hashed []string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, d := range r.byUser {
+		if d.UserUUID == userUUID && d.Type == models.MFAFactorTOTP {
+			d.BackupCodesHashed = append([]string{}, hashed...)
+			return nil
+		}
+	}
+	return repository.ErrMFAFactorNotFound
+}
+
 func (r *fakeFactorRepo) Delete(_ context.Context, uuid string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()

@@ -21,14 +21,9 @@ var (
 )
 
 const (
-	UsersCollection = "users"
-
-	// ADR-0003 PR-B: tier-split user collections. Populated by
-	// backend/scripts/migrate_user_split.go and consumed by the new
-	// OperatorUserProvider / ClientUserProvider once
-	// USER_TIER_SPLIT_ENABLED is flipped (PR-B introduces both; PR-D
-	// is the cutover). The legacy `users` collection above stays the
-	// authoritative source of truth at PR-B boundary.
+	// ADR-0003 PR-D D-8: tier-split user collections are the only
+	// canonical user storage. Operator-tier rows live in
+	// operator_users, client-tier rows in client_users.
 	OperatorUsersCollection = "operator_users"
 	ClientUsersCollection   = "client_users"
 )
@@ -50,6 +45,16 @@ type UserRepository interface {
 	// for right-to-erasure. Distinct from Delete which soft-deletes via a
 	// deletedAt stamp (keeps the row for audit + re-activation).
 	HardDelete(ctx context.Context, id string) error
+	// SoftDeleteAndAliasEmail soft-deletes the row AND renames the email
+	// to a one-shot alias so the per-collection unique email index no
+	// longer collides with a fresh signup using the original address.
+	// Used by the tenant cascade-delete hook: when an external Tier-2
+	// tenant is deleted and its owner has no other live memberships,
+	// this frees the email so the same human can re-register without
+	// hitting "Email already in use". The original email is preserved on
+	// originalEmail for audit. Returns ErrUserNotFound if no live row
+	// matches.
+	SoftDeleteAndAliasEmail(ctx context.Context, id string) error
 
 	// Password-auth operations
 	UpdatePasswordHash(ctx context.Context, userUUID, hash string) error
@@ -77,8 +82,6 @@ type UserRepository interface {
 	List(ctx context.Context, filters *models.UserFilters, pagination *models.PaginationParams) ([]*models.User, int64, error)
 	ListWithOptions(ctx context.Context, filter bson.M, opts ...*options.FindOptions) ([]*models.User, error)
 	GetByRole(ctx context.Context, role string) ([]*models.User, error)
-	GetUsersWithExpiredDocuments(ctx context.Context) ([]*models.User, error)
-	GetUsersWithExpiringSoonDocuments(ctx context.Context, days int) ([]*models.User, error)
 
 	// Utility Operations
 	Count(ctx context.Context, filters *models.UserFilters) (int64, error)
@@ -90,29 +93,17 @@ type UserRepository interface {
 
 type mongoUserRepository struct {
 	collection *mongo.Collection
-	// tier is the audience this repo binds to ("operator" / "client" /
-	// ""). When non-empty, every Create-side write stamps user.Tier so
-	// the integrity test in B-5 can assert that operator_users rows
-	// always carry Tier="operator" and likewise for clients. The
-	// legacy "users" collection runs with tier="" — its rows are
-	// tier-stamped in-place by backend/scripts/migrate_user_split.go.
+	// tier is the audience this repo binds to ("operator" / "client").
+	// Every Create-side write stamps user.Tier so a tier-guard test can
+	// assert that operator_users rows always carry Tier="operator" and
+	// likewise for clients.
 	tier string
 }
 
-// NewUserRepository creates a user repository bound to the legacy
-// `users` collection. Tier is empty: writes don't stamp the field, and
-// the migration script is responsible for backfilling it on the rows
-// it copies into operator_users.
-func NewUserRepository(db *mongo.Database) UserRepository {
-	return &mongoUserRepository{
-		collection: db.Collection(UsersCollection),
-	}
-}
-
 // NewOperatorUserRepository binds to operator_users and stamps
-// Tier="operator" on every Create-side write. ADR-0003 PR-B —
-// registered under module.ServiceOperatorUserProvider; the auth
-// module's flows pick it up at PR-D cutover.
+// Tier="operator" on every Create-side write. Registered under
+// module.ServiceOperatorUserProvider and (since ADR-0003 PR-D D-8)
+// the canonical module.ServiceUserService.
 func NewOperatorUserRepository(db *mongo.Database) UserRepository {
 	return &mongoUserRepository{
 		collection: db.Collection(OperatorUsersCollection),
@@ -146,11 +137,8 @@ func (r *mongoUserRepository) Create(ctx context.Context, user *models.User) err
 	user.UpdatedAt = now
 
 	// ADR-0003 PR-B: stamp the audience tier on every operator/client
-	// row so the B-5 integrity test can assert each collection only
-	// holds rows of its own tier. Empty repo-tier (legacy `users`
-	// repo) leaves the field untouched — the migration script
-	// backfills it for legacy rows before they move into
-	// operator_users.
+	// row so the integrity test can assert each collection only
+	// holds rows of its own tier.
 	if r.tier != "" {
 		user.Tier = r.tier
 	}
@@ -234,33 +222,6 @@ func (r *mongoUserRepository) Update(ctx context.Context, id string, input *mode
 	if input.Role != "" {
 		update["$set"].(bson.M)["role"] = input.Role
 	}
-	if input.LicenseNumber != "" {
-		update["$set"].(bson.M)["licenseNumber"] = input.LicenseNumber
-	}
-	if input.LicenseExpiry != nil {
-		update["$set"].(bson.M)["licenseExpiry"] = input.LicenseExpiry
-	}
-	if input.DriverCardNumber != "" {
-		update["$set"].(bson.M)["driverCardNumber"] = input.DriverCardNumber
-	}
-	if input.DriverCardExpiry != nil {
-		update["$set"].(bson.M)["driverCardExpiry"] = input.DriverCardExpiry
-	}
-	if input.CQCExpiry != nil {
-		update["$set"].(bson.M)["cqcExpiry"] = input.CQCExpiry
-	}
-	if input.ADRNumber != "" {
-		update["$set"].(bson.M)["adrNumber"] = input.ADRNumber
-	}
-	if input.ADRExpiry != nil {
-		update["$set"].(bson.M)["adrExpiry"] = input.ADRExpiry
-	}
-	if input.TachigrafExpiry != nil {
-		update["$set"].(bson.M)["tachigrafExpiry"] = input.TachigrafExpiry
-	}
-	if input.MedicalChecks != nil {
-		update["$set"].(bson.M)["medicalChecks"] = input.MedicalChecks
-	}
 	if input.IsActive != nil {
 		update["$set"].(bson.M)["isActive"] = *input.IsActive
 	}
@@ -325,6 +286,50 @@ func (r *mongoUserRepository) HardDelete(ctx context.Context, id string) error {
 	return nil
 }
 
+// SoftDeleteAndAliasEmail soft-deletes a live user row AND rewrites the
+// email to a one-shot alias of the form "<original>+deleted-<unix>@orphan.local".
+// Both fields are updated atomically so a concurrent read can never see a
+// soft-deleted row that still owns the original email. The unique email
+// index on this collection is full (not partial) so freeing the email
+// requires renaming it — see user/CLAUDE.md "Soft delete only" note.
+func (r *mongoUserRepository) SoftDeleteAndAliasEmail(ctx context.Context, id string) error {
+	now := time.Now()
+	// Read the current email so we can prefix the alias for traceability
+	// without leaking the address in cleartext to any other index.
+	var existing struct {
+		Email string `bson:"email"`
+	}
+	err := r.collection.FindOne(ctx, bson.M{
+		"uuid":      id,
+		"deletedAt": bson.M{"$exists": false},
+	}).Decode(&existing)
+	if errors.Is(err, mongo.ErrNoDocuments) {
+		return ErrUserNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("failed to read user before soft-delete-and-alias: %w", err)
+	}
+	alias := fmt.Sprintf("%s+deleted-%d@orphan.local", existing.Email, now.UnixNano())
+	res, updateErr := r.collection.UpdateOne(ctx,
+		bson.M{"uuid": id, "deletedAt": bson.M{"$exists": false}},
+		bson.M{"$set": bson.M{
+			"deletedAt":     now,
+			"updatedAt":     now,
+			"originalEmail": existing.Email,
+			"email":         alias,
+		}},
+	)
+	if updateErr != nil {
+		return fmt.Errorf("failed to soft-delete-and-alias user: %w", updateErr)
+	}
+	if res.MatchedCount == 0 {
+		// The row was deleted between the read and the update — treat as
+		// already gone, the caller's intent is satisfied.
+		return ErrUserNotFound
+	}
+	return nil
+}
+
 // List retrieves users with filters and pagination
 func (r *mongoUserRepository) List(ctx context.Context, filters *models.UserFilters, pagination *models.PaginationParams) ([]*models.User, int64, error) {
 	// Build filter
@@ -379,72 +384,6 @@ func (r *mongoUserRepository) GetByRole(ctx context.Context, role string) ([]*mo
 	cursor, err := r.collection.Find(ctx, filter)
 	if err != nil {
 		return nil, fmt.Errorf("failed to find users by role: %w", err)
-	}
-	defer cursor.Close(ctx)
-
-	var users []*models.User
-	for cursor.Next(ctx) {
-		var user models.User
-		if err := cursor.Decode(&user); err != nil {
-			return nil, fmt.Errorf("failed to decode user: %w", err)
-		}
-		users = append(users, &user)
-	}
-
-	return users, nil
-}
-
-// GetUsersWithExpiredDocuments retrieves users with expired documents
-func (r *mongoUserRepository) GetUsersWithExpiredDocuments(ctx context.Context) ([]*models.User, error) {
-	now := time.Now()
-	filter := bson.M{
-		"deletedAt": bson.M{"$exists": false},
-		"$or": []bson.M{
-			{"licenseExpiry": bson.M{"$lt": now}},
-			{"driverCardExpiry": bson.M{"$lt": now}},
-			{"cqcExpiry": bson.M{"$lt": now}},
-			{"adrExpiry": bson.M{"$lt": now}},
-			{"tachigrafExpiry": bson.M{"$lt": now}},
-		},
-	}
-
-	cursor, err := r.collection.Find(ctx, filter)
-	if err != nil {
-		return nil, fmt.Errorf("failed to find users with expired documents: %w", err)
-	}
-	defer cursor.Close(ctx)
-
-	var users []*models.User
-	for cursor.Next(ctx) {
-		var user models.User
-		if err := cursor.Decode(&user); err != nil {
-			return nil, fmt.Errorf("failed to decode user: %w", err)
-		}
-		users = append(users, &user)
-	}
-
-	return users, nil
-}
-
-// GetUsersWithExpiringSoonDocuments retrieves users with documents expiring soon
-func (r *mongoUserRepository) GetUsersWithExpiringSoonDocuments(ctx context.Context, days int) ([]*models.User, error) {
-	now := time.Now()
-	futureDate := now.AddDate(0, 0, days)
-
-	filter := bson.M{
-		"deletedAt": bson.M{"$exists": false},
-		"$or": []bson.M{
-			{"licenseExpiry": bson.M{"$gte": now, "$lte": futureDate}},
-			{"driverCardExpiry": bson.M{"$gte": now, "$lte": futureDate}},
-			{"cqcExpiry": bson.M{"$gte": now, "$lte": futureDate}},
-			{"adrExpiry": bson.M{"$gte": now, "$lte": futureDate}},
-			{"tachigrafExpiry": bson.M{"$gte": now, "$lte": futureDate}},
-		},
-	}
-
-	cursor, err := r.collection.Find(ctx, filter)
-	if err != nil {
-		return nil, fmt.Errorf("failed to find users with expiring documents: %w", err)
 	}
 	defer cursor.Close(ctx)
 
@@ -530,17 +469,6 @@ func (r *mongoUserRepository) buildFilter(filters *models.UserFilters) bson.M {
 			{"fullName": searchRegex},
 			{"email": searchRegex},
 			{"username": searchRegex},
-		}
-	}
-
-	if filters.HasExpiredDocs {
-		now := time.Now()
-		filter["$or"] = []bson.M{
-			{"licenseExpiry": bson.M{"$lt": now}},
-			{"driverCardExpiry": bson.M{"$lt": now}},
-			{"cqcExpiry": bson.M{"$lt": now}},
-			{"adrExpiry": bson.M{"$lt": now}},
-			{"tachigrafExpiry": bson.M{"$lt": now}},
 		}
 	}
 

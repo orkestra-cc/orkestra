@@ -8,6 +8,9 @@
 package tenant
 
 import (
+	"context"
+	"fmt"
+
 	"github.com/danielgtaylor/huma/v2/adapters/humachi"
 	"github.com/go-chi/chi/v5"
 	"github.com/orkestra/backend/internal/core/tenant/handlers"
@@ -34,7 +37,12 @@ func (m *Module) Description() string {
 func (m *Module) Dependencies() []string { return []string{"user"} }
 
 func (m *Module) ProvidedServices() []module.ServiceKey {
-	return []module.ServiceKey{module.ServiceTenantProvider, module.ServiceTenantService}
+	return []module.ServiceKey{
+		module.ServiceTenantProvider,
+		module.ServiceAccessProvider,
+		module.ServiceTenantService,
+		module.ServiceBillingTenantProvider,
+	}
 }
 
 func (m *Module) Collections() []module.CollectionSpec {
@@ -73,15 +81,15 @@ func (m *Module) Collections() []module.CollectionSpec {
 			}, Unique: true},
 			{Keys: map[string]int{"ancestorUUID": 1}},
 		}},
-		// Capability entitlements projection (Phase 2). Tenants may hold
-		// many historical rows per capability (revoked + re-granted, or
+		// Capability entitlements projection. Tenants may hold many
+		// historical rows per capability (revoked + re-granted, or
 		// expired); at most one is active at a time — that invariant is
 		// enforced in the service (Grant revokes any existing active row
 		// before inserting). Indexes here accelerate the common reads.
 		{Name: repository.CollEntitlements, Indexes: []module.IndexSpec{
 			{Keys: map[string]int{"uuid": 1}, Unique: true, Sparse: true},
 			{OrderedKeys: []module.IndexKey{
-				{Field: "tenantId", Direction: 1},
+				{Field: "tenantUUID", Direction: 1},
 				{Field: "capabilityId", Direction: 1},
 			}},
 			{Keys: map[string]int{"capabilityId": 1}},
@@ -110,8 +118,8 @@ func (m *Module) NavItems() []module.NavItemSpec {
 	// entries require the administrator role and the system.tenants.admin
 	// permission (enforced at the route layer).
 	return []module.NavItemSpec{
-		{Realm: "platform", Section: "Admin", Tier: "internal", Name: "Internal Tenants", Icon: "building", Path: "/admin/internal/tenants", MinRole: "administrator", Active: true},
-		{Realm: "business", Section: "Accounts", Tier: "internal", Name: "Clients", Icon: "users", Path: "/admin/clients", MinRole: "administrator", Active: true},
+		{Realm: "platform", Tier: "internal", Name: "Internal Tenants", Icon: "building", Path: "/admin/internal/tenants", MinRole: "administrator", Active: true},
+		{Realm: "business", Tier: "internal", Name: "Clients", Icon: "users", Path: "/admin/clients", MinRole: "administrator", Active: true},
 	}
 }
 
@@ -120,10 +128,56 @@ func (m *Module) Init(deps *module.Dependencies) error {
 	m.svc = services.New(repo)
 	m.handler = handlers.New(m.svc, deps.Services)
 	deps.Services.Register(module.ServiceTenantProvider, iface.TenantProvider(m.svc))
+	// Polymorphic-owner capability surface lives on the same concrete
+	// Service so the entitlement projection has one writer.
+	deps.Services.Register(module.ServiceAccessProvider, iface.AccessProvider(m.svc))
 	// Also publish the concrete service so addon modules (compliance) that
 	// need to drive post-init setters can resolve it without importing the
 	// tenant package from a second location.
 	deps.Services.Register(module.ServiceTenantService, m.svc)
+	// Billing-party resolver for the unified-clients refactor (Phase 1):
+	// walks up Tenant.ParentTenantUUID until it finds a tenant with FatturaPA
+	// fields and returns the snapshot the billing send path needs. Same
+	// concrete Service so the resolver shares the tenant repository.
+	deps.Services.Register(module.ServiceBillingTenantProvider, iface.BillingTenantProvider(m.svc))
+
+	// Cascade hook: evict the owner's client_users row when an external
+	// Tier-2 tenant is deleted and the owner has no other live
+	// memberships. Without this, the per-collection unique email index
+	// would block a fresh self-serve signup with the same address even
+	// though the only tenant the account ever belonged to is gone.
+	// Internal tenants are intentionally skipped — operator users
+	// outlive single workspaces (one human can run several internal
+	// admin sessions). The user module loads before tenant in the
+	// topological order, so the client provider is already in the
+	// registry by the time this Init runs.
+	if clientUsers, ok := module.GetTyped[iface.ClientUserProvider](deps.Services, module.ServiceClientUserProvider); ok && clientUsers != nil {
+		m.svc.RegisterPostDeleteHook(func(ctx context.Context, c services.TenantPostDeleteContext) error {
+			if c.Kind != iface.TenantKindExternal {
+				return nil
+			}
+			if c.OwnerUserUUID == "" || c.OwnerHasOtherTenants {
+				return nil
+			}
+			if err := clientUsers.SoftDeleteAndAliasEmail(ctx, c.OwnerUserUUID); err != nil {
+				return fmt.Errorf("tenant: evict orphaned client owner: %w", err)
+			}
+			return nil
+		})
+		// Wire the user-display resolver consumed by EnsureTenantForUser
+		// (seeds the personal tenant's Name from the User's FullName) and
+		// by ResolveBillingParty (renders the FatturaPA party name for
+		// sole-proprietor tenants). Bound to the ClientUserProvider because
+		// only Tier-2 self-registered users need this path; operator users
+		// never trigger lazy provisioning.
+		m.svc.SetUserDisplayResolver(func(ctx context.Context, userUUID string) (string, string, error) {
+			u, err := clientUsers.GetUserByID(ctx, userUUID)
+			if err != nil || u == nil {
+				return "", "", err
+			}
+			return u.FullName, u.Email, nil
+		})
+	}
 	return nil
 }
 
@@ -163,6 +217,19 @@ func (m *Module) RegisterRoutes(ri *module.RouteInfo) {
 		api := humachi.New(r, ri.APIConfig)
 		m.handler.RegisterAdminRoutes(api)
 	})
+
+	// Tier-2 self-service: /v1/me/billing-identity. Mounted on the client
+	// audience surface so frontend-client tokens (aud=client) can call it
+	// to manage their own tenant's billing identity. The handler resolves
+	// the personal tenant via EnsureTenantForUser — Tier-2 users never
+	// touch another tenant's row.
+	if ri.Client != nil {
+		ri.Client.ProtectedRouter.Group(func(r chi.Router) {
+			r.Use(ri.Client.AuthMW.RequireGlobal())
+			api := humachi.New(r, ri.APIConfig)
+			m.handler.RegisterClientRoutes(api)
+		})
+	}
 }
 
 // Service returns the tenant service — exposed so the authz module can

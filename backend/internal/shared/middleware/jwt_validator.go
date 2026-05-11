@@ -28,6 +28,7 @@ type JWTValidator struct {
 	publicKey         *rsa.PublicKey
 	expectedIssuer    string
 	tenant            iface.TenantProvider
+	access            iface.AccessProvider
 	authz             iface.AuthzProvider
 	sessionRevocation SessionRevocationChecker
 }
@@ -79,6 +80,10 @@ func NewJWTValidator(publicKeyPath, env string) (*JWTValidator, error) {
 // SetTenantProvider wires the tenant provider for entitlement checks.
 func (v *JWTValidator) SetTenantProvider(t iface.TenantProvider) { v.tenant = t }
 
+// SetAccessProvider wires the polymorphic-owner capability surface.
+// RequireCapability uses it instead of TenantProvider.HasCapability.
+func (v *JWTValidator) SetAccessProvider(a iface.AccessProvider) { v.access = a }
+
 // SetAuthzProvider wires the authz provider for permission evaluation.
 func (v *JWTValidator) SetAuthzProvider(a iface.AuthzProvider) { v.authz = a }
 
@@ -126,6 +131,16 @@ func (v *JWTValidator) RequireAuth(next http.Handler) http.Handler {
 			// not validate in production even if the signing key somehow
 			// overlaps (test deploy, leaked key, misconfig). Matching the
 			// monolith's check in jwt_service.validateTokenEnhanced.
+			writeErr(w, http.StatusUnauthorized, "invalid or expired token")
+			return
+		}
+
+		// ADR-0003 PR-D D-3: aud is mandatory post-cutover. The host-mux
+		// RequireAudience middleware enforces a specific value upstream,
+		// but defense-in-depth here catches any bypass (e.g. a sidecar
+		// surface that legitimately serves multiple audiences and must
+		// still reject v1 tokens).
+		if getStr(mapClaims, "aud") == "" {
 			writeErr(w, http.StatusUnauthorized, "invalid or expired token")
 			return
 		}
@@ -276,23 +291,24 @@ func (v *JWTValidator) RequireSystemPermission(permission string) func(http.Hand
 }
 
 // RequireCapability mirrors AuthMiddleware.RequireCapability for the AI
-// sidecar. When the sidecar has no TenantProvider wired the monolith's
+// sidecar. When the sidecar has no AccessProvider wired the monolith's
 // upstream enforcement is trusted and the request passes through. When a
-// provider is wired, the capability projection is consulted directly and
-// a miss returns 402.
+// provider is wired, the capability projection is consulted directly with
+// the request's polymorphic owner (tenant when X-Tenant-ID is present,
+// otherwise the calling user) and a miss returns 402.
 func (v *JWTValidator) RequireCapability(capabilityID string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if v.tenant == nil {
+			if v.access == nil {
 				next.ServeHTTP(w, r)
 				return
 			}
-			tenantID, ok := GetTenantID(r.Context())
+			tenantUUID, ok := capabilityTenantFromRequest(r)
 			if !ok {
 				writeErr(w, http.StatusForbidden, "tenant context required")
 				return
 			}
-			allowed, err := v.tenant.HasCapability(r.Context(), tenantID, capabilityID)
+			allowed, err := v.access.HasCapability(r.Context(), tenantUUID, capabilityID)
 			if err != nil || !allowed {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusPaymentRequired)
@@ -301,7 +317,7 @@ func (v *JWTValidator) RequireCapability(capabilityID string) func(http.Handler)
 					"title":      "capability required",
 					"detail":     "tenant is not entitled to this capability",
 					"capability": capabilityID,
-					"tenantId":   tenantID,
+					"tenantId":   tenantUUID,
 					"code":       "capability_required",
 				})
 				return
@@ -360,14 +376,14 @@ func (v *JWTValidator) RequireMFA() func(http.Handler) http.Handler {
 					return
 				}
 			}
-			w.Header().Set("WWW-Authenticate", `MFA error="mfa_required"`)
+			w.Header().Set("WWW-Authenticate", `MFA error="step_up_required"`)
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusUnauthorized)
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"status": http.StatusUnauthorized,
 				"title":  "mfa required",
 				"detail": "this action requires a second authentication factor",
-				"code":   "mfa_required",
+				"code":   "step_up_required",
 			})
 		})
 	}

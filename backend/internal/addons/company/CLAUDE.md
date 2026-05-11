@@ -15,7 +15,7 @@ The company module provides **Italian company data lookup** by tax code (Codice 
 
 - **Primary Role**: Look up external company data for auto-filling customer/supplier details and company verification
 - **External Integration**: OpenAPI Company API for real-time company information
-- **Conditional Activation**: Module activates only when `OPENAPI_COMPANY_BEARER_TOKEN` (or `OPENAPI_BILLING_BEARER_TOKEN` as fallback) is configured
+- **Conditional Activation**: Module activates when either (a) `OPENAPI_COMPANY_ACCOUNT_EMAIL` + `OPENAPI_COMPANY_API_KEY` are configured (preferred — module mints + rotates JWTs), or (b) the legacy static `OPENAPI_COMPANY_BEARER_TOKEN` is set
 - **Scope**: Italy only (`/IT-start/{taxCode}` endpoint)
 
 ## Module Structure
@@ -86,19 +86,31 @@ Enrichment data is stored as nested fields on the existing `CompanyLookup` docum
 
 - **Production**: `https://company.openapi.com`
 - **Sandbox**: `https://test.company.openapi.com`
-- **Authentication**: Bearer token (`OPENAPI_COMPANY_BEARER_TOKEN`, falls back to `OPENAPI_BILLING_BEARER_TOKEN`)
+- **OAuth host**: `https://oauth.openapi.it` (sandbox: `https://test.oauth.openapi.it`)
+- **Authentication**: account email + API key minted into a short-lived JWT bearer (preferred), or legacy static `OPENAPI_COMPANY_BEARER_TOKEN` fallback
 - **Endpoint used**: `GET /IT-start/{vatCode_taxCode_or_id}`
 - **Free tier**: 30 requests/month
 
+### Authentication flow
+
+The module uses the shared [`internal/shared/openapiauth`](../../shared/openapiauth) minter. On the first request after start (or after the operator rotates credentials), the client POSTs to `<OAuthBaseURL>/token` with HTTP Basic auth (`accountEmail:apiKey`) and the scope set declared in `companyOAuthScopes`. The returned JWT is cached two-tier (in-process + Redis under `openapiauth:company:<digest>`) for `responseTTL − 60s`. An upstream 401/403 invalidates the cached JWT so the next attempt mints fresh — useful when the operator rotates the API key mid-flight.
+
+When `accountEmail` or `apiKey` is empty, the client falls back to the static `bearerToken` field for back-compat with installs that minted JWTs manually before this flow landed. Configure either path at `/admin/modules/company`.
+
 ## Environment Variables
+
+These env vars seed the initial `module_configs` document on first install only — once the document exists, `/admin/modules/company` is authoritative.
 
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `OPENAPI_COMPANY_BASE_URL` | Override base URL | Derived from `OPENAPI_SANDBOX_MODE` |
-| `OPENAPI_COMPANY_BEARER_TOKEN` | Authentication token (falls back to `OPENAPI_BILLING_BEARER_TOKEN`) | _(required to enable)_ |
+| `OPENAPI_COMPANY_ACCOUNT_EMAIL` | OpenAPI.com account email (paired with API key for OAuth /token) | _(empty)_ |
+| `OPENAPI_COMPANY_API_KEY` | Long-lived API key from console.openapi.com | _(empty)_ |
+| `OPENAPI_OAUTH_BASE_URL` | OAuth host (shared with billing) | `https://oauth.openapi.it` (sandbox: `https://test.oauth.openapi.it`) |
+| `OPENAPI_COMPANY_BEARER_TOKEN` | Legacy static JWT fallback (used only when API key is empty) | _(empty)_ |
 | `OPENAPI_COMPANY_TIMEOUT` | HTTP request timeout | `15s` |
 | `OPENAPI_COMPANY_RETRY_ATTEMPTS` | Retry count on failure | `3` |
-| `OPENAPI_COMPANY_CACHE_TTL` | Redis cache TTL | `24h` |
+| `OPENAPI_COMPANY_CACHE_TTL` | Redis cache TTL for company lookups | `24h` |
 | `OPENAPI_SANDBOX_MODE` | Use sandbox environment (shared) | `true` |
 
 ## MongoDB Collection

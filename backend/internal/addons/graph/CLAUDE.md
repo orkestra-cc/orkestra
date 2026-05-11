@@ -163,9 +163,10 @@ To add a new algorithm: add an entry to `mageAlgorithms` map and `ListAlgorithms
 | `services/algorithm_service.go` | MAGE algorithm mapping + execution |
 | `services/vector_service.go` | Vector index management + search |
 | `repository/graph_repository.go` | Bolt driver, result marshaling, schema queries |
-| `models/models.go` | GraphNode, GraphRelationship, QueryResult |
+| `models/models.go` | Schema introspection types (DatabaseInfo, SchemaInfo, LabelInfo, RelTypeInfo, IndexInfo, ConstraintInfo) — internal to the addon |
 | `models/gds.go` | AlgorithmInfo, VectorIndex, search/index requests |
 | `models/dto.go` | Huma request/response DTOs |
+| `shared/iface/graph_types.go` | Cross-module types — GraphNode, GraphRelationship, GraphData, QueryResult, QueryMetadata. Live in `iface` (not in this addon) so consumers see the contract without forcing the addon's package to compile in builds that don't include it. |
 
 ## Adding New Features
 

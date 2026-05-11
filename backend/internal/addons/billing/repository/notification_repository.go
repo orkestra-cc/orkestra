@@ -34,7 +34,7 @@ type NotificationRepository interface {
 	MarkAsProcessed(ctx context.Context, uuid string, processedBy string) error
 
 	// Statistics
-	GetSummary(ctx context.Context) (*models.NotificationSummary, error)
+	GetSummary(ctx context.Context, fromDate, toDate *time.Time) (*models.NotificationSummary, error)
 	CountUnprocessed(ctx context.Context) (int64, error)
 
 	// Polling state
@@ -252,41 +252,64 @@ func (r *notificationRepository) MarkAsProcessed(ctx context.Context, uuid strin
 	return nil
 }
 
-func (r *notificationRepository) GetSummary(ctx context.Context) (*models.NotificationSummary, error) {
+func (r *notificationRepository) GetSummary(ctx context.Context, fromDate, toDate *time.Time) (*models.NotificationSummary, error) {
 	summary := &models.NotificationSummary{}
 
+	dateScope := bson.M{}
+	if fromDate != nil || toDate != nil {
+		bounds := bson.M{}
+		if fromDate != nil {
+			bounds["$gte"] = *fromDate
+		}
+		if toDate != nil {
+			bounds["$lte"] = *toDate
+		}
+		dateScope["notificationDate"] = bounds
+	}
+
+	merge := func(extra bson.M) bson.M {
+		out := bson.M{}
+		for k, v := range dateScope {
+			out[k] = v
+		}
+		for k, v := range extra {
+			out[k] = v
+		}
+		return out
+	}
+
 	// Total count
-	summary.TotalCount, _ = r.collection.CountDocuments(ctx, bson.M{})
+	summary.TotalCount, _ = r.collection.CountDocuments(ctx, merge(bson.M{}))
 
 	// Unprocessed count
-	summary.UnprocessedCount, _ = r.collection.CountDocuments(ctx, bson.M{"processed": false})
+	summary.UnprocessedCount, _ = r.collection.CountDocuments(ctx, merge(bson.M{"processed": false}))
 
 	// Positive notifications (RC, DT, NE with EC01)
-	summary.PositiveCount, _ = r.collection.CountDocuments(ctx, bson.M{
+	summary.PositiveCount, _ = r.collection.CountDocuments(ctx, merge(bson.M{
 		"$or": []bson.M{
 			{"notificationType": models.NotificationRC},
 			{"notificationType": models.NotificationDT},
 			{"notificationType": models.NotificationNE, "outcome": models.OutcomeAccepted},
 		},
-	})
+	}))
 
 	// Negative notifications (NS, NE with EC02)
-	summary.NegativeCount, _ = r.collection.CountDocuments(ctx, bson.M{
+	summary.NegativeCount, _ = r.collection.CountDocuments(ctx, merge(bson.M{
 		"$or": []bson.M{
 			{"notificationType": models.NotificationNS},
 			{"notificationType": models.NotificationNE, "outcome": models.OutcomeRejected},
 		},
-	})
+	}))
 
 	// Pending action (unprocessed NS, MC, or rejected NE)
-	summary.PendingAction, _ = r.collection.CountDocuments(ctx, bson.M{
+	summary.PendingAction, _ = r.collection.CountDocuments(ctx, merge(bson.M{
 		"processed": false,
 		"$or": []bson.M{
 			{"notificationType": models.NotificationNS},
 			{"notificationType": models.NotificationMC},
 			{"notificationType": models.NotificationNE, "outcome": models.OutcomeRejected},
 		},
-	})
+	}))
 
 	return summary, nil
 }

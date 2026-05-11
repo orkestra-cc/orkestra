@@ -256,35 +256,10 @@ type RAGQueryRequest struct {
 	}
 }
 
-type SourceRef struct {
-	DocumentUUID     string  `json:"documentUuid"`
-	DocumentTitle    string  `json:"documentTitle"`
-	ISOStandard      string  `json:"isoStandard,omitempty"`
-	ChunkUUID        string  `json:"chunkUuid"`
-	ChunkText        string  `json:"chunkText"`
-	FullPath         string  `json:"fullPath,omitempty"`
-	NodeType         string  `json:"nodeType,omitempty"`
-	RequirementLevel string  `json:"requirementLevel,omitempty"`
-	Score            float64 `json:"score"`
-	Position         int     `json:"position"`
-}
-
-type QueryMeta struct {
-	EmbeddingTimeMs int64  `json:"embeddingTimeMs"`
-	SearchTimeMs    int64  `json:"searchTimeMs"`
-	LLMTimeMs       int64  `json:"llmTimeMs"`
-	TotalTimeMs     int64  `json:"totalTimeMs"`
-	ChunksRetrieved int    `json:"chunksRetrieved"`
-	ModelUsed       string `json:"modelUsed"`
-}
-
-type RAGQueryResponse struct {
-	Body struct {
-		Answer   string      `json:"answer" doc:"Generated answer"`
-		Sources  []SourceRef `json:"sources" doc:"Source references"`
-		Metadata QueryMeta   `json:"metadata" doc:"Query timing metadata"`
-	}
-}
+// RAG query contract types (SourceRef, QueryMeta, RAGQueryResponse) live
+// in shared/iface/rag_types.go so the iface contract layer doesn't import
+// this addon package. Consumers — including this addon — reference them
+// as iface.SourceRef, iface.QueryMeta, iface.RAGQueryResponse.
 
 // --- Relationship Type DTOs ---
 

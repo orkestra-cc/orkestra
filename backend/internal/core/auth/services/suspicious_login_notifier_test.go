@@ -169,7 +169,7 @@ func TestSuspiciousLogin_HighScoreRecordsAndEmails(t *testing.T) {
 	if got, _ := req.Data["LoginIP"].(string); got != "203.0.113.5" {
 		t.Errorf("LoginIP = %q, want 203.0.113.5", got)
 	}
-	if got, _ := req.Data["AccountActivityURL"].(string); got != "https://app.example.com/account/security" {
+	if got, _ := req.Data["AccountActivityURL"].(string); got != "https://app.example.com/user/security?tab=sessions" {
 		t.Errorf("AccountActivityURL = %q", got)
 	}
 }
@@ -251,6 +251,150 @@ func TestSuspiciousLogin_EventErrorDoesNotBlockEmail(t *testing.T) {
 	if len(notifier.sends) != 1 {
 		t.Errorf("expected 1 email despite event error, got %d", len(notifier.sends))
 	}
+}
+
+// Phase 7: admin-recipient email branch.
+
+func TestSuspiciousLogin_AdminEmail_DisabledByDefault(t *testing.T) {
+	events := &stubEvents{}
+	notifier := &stubNotifier{configured: true}
+	policy := newPolicy(map[string]string{
+		// notifyAdminOnSuspiciousLogin defaults to false; recipient list
+		// is even configured but the toggle gates it.
+		"suspiciousLoginRecipients": "ops@example.com",
+	})
+	svc := NewSuspiciousLoginNotifier(NotifierConfig{
+		Events:      events,
+		Notifier:    notifier,
+		AppName:     "Orkestra",
+		FrontendURL: "https://app.example.com",
+		Policy:      policy,
+	}).(*suspiciousLoginNotifier)
+	svc.clock = func() time.Time { return time.Date(2026, 4, 25, 15, 30, 0, 0, time.UTC) }
+
+	svc.OnLogin(context.Background(), sampleInput())
+
+	// User email + 0 admin emails (toggle off).
+	if len(notifier.sends) != 1 {
+		t.Fatalf("expected only the user email, got %d", len(notifier.sends))
+	}
+	if notifier.sends[0].TemplateID != "auth.suspicious_login" {
+		t.Errorf("first send must be the user template, got %q", notifier.sends[0].TemplateID)
+	}
+}
+
+func TestSuspiciousLogin_AdminEmail_FansOutToRecipients(t *testing.T) {
+	events := &stubEvents{}
+	notifier := &stubNotifier{configured: true}
+	policy := newPolicy(map[string]string{
+		"notifyAdminOnSuspiciousLogin": "true",
+		"suspiciousLoginRecipients":    "ops@example.com, security@example.com",
+	})
+	svc := NewSuspiciousLoginNotifier(NotifierConfig{
+		Events:      events,
+		Notifier:    notifier,
+		AppName:     "Orkestra",
+		FrontendURL: "https://app.example.com",
+		Policy:      policy,
+	}).(*suspiciousLoginNotifier)
+	svc.clock = func() time.Time { return time.Date(2026, 4, 25, 15, 30, 0, 0, time.UTC) }
+
+	svc.OnLogin(context.Background(), sampleInput())
+
+	// 1 user email + 2 admin emails.
+	if len(notifier.sends) != 3 {
+		t.Fatalf("expected user email + 2 admin emails, got %d", len(notifier.sends))
+	}
+	tplCount := map[string]int{}
+	for _, s := range notifier.sends {
+		tplCount[s.TemplateID]++
+	}
+	if tplCount["auth.suspicious_login"] != 1 {
+		t.Errorf("user template count: got %d, want 1", tplCount["auth.suspicious_login"])
+	}
+	if tplCount["auth.admin_suspicious_login"] != 2 {
+		t.Errorf("admin template count: got %d, want 2", tplCount["auth.admin_suspicious_login"])
+	}
+	// Verify each admin email carries a distinct idempotency key with
+	// the recipient embedded — a parallel handler invocation can't
+	// silently collapse the fan-out.
+	keys := map[string]bool{}
+	for _, s := range notifier.sends {
+		if s.TemplateID == "auth.admin_suspicious_login" {
+			keys[s.IdempotencyKey] = true
+			if got, _ := s.Data["AffectedUserEmail"].(string); got != "user@example.com" {
+				t.Errorf("admin email AffectedUserEmail = %q", got)
+			}
+			if got, _ := s.Data["AffectedUserUUID"].(string); got != "u1" {
+				t.Errorf("admin email AffectedUserUUID = %q", got)
+			}
+		}
+	}
+	if len(keys) != 2 {
+		t.Errorf("admin idempotency keys must be distinct per recipient, got %v", keys)
+	}
+}
+
+func TestSuspiciousLogin_AdminEmail_EmptyRecipientsSkips(t *testing.T) {
+	events := &stubEvents{}
+	notifier := &stubNotifier{configured: true}
+	policy := newPolicy(map[string]string{
+		"notifyAdminOnSuspiciousLogin": "true",
+		// No recipients — must short-circuit.
+	})
+	svc := NewSuspiciousLoginNotifier(NotifierConfig{
+		Events:      events,
+		Notifier:    notifier,
+		AppName:     "Orkestra",
+		FrontendURL: "https://app.example.com",
+		Policy:      policy,
+	}).(*suspiciousLoginNotifier)
+	svc.clock = func() time.Time { return time.Date(2026, 4, 25, 15, 30, 0, 0, time.UTC) }
+
+	svc.OnLogin(context.Background(), sampleInput())
+
+	// Only the user email — toggle on but no recipients should never
+	// silently swallow alerts: better to send nothing than to dispatch
+	// to nobody.
+	if len(notifier.sends) != 1 || notifier.sends[0].TemplateID != "auth.suspicious_login" {
+		t.Errorf("toggle on + empty recipients must skip admin half, got sends=%v", templateIDs(notifier.sends))
+	}
+}
+
+func TestSuspiciousLogin_AdminEmail_LowScoreSkips(t *testing.T) {
+	events := &stubEvents{}
+	notifier := &stubNotifier{configured: true}
+	policy := newPolicy(map[string]string{
+		"notifyAdminOnSuspiciousLogin": "true",
+		"suspiciousLoginRecipients":    "ops@example.com",
+	})
+	svc := NewSuspiciousLoginNotifier(NotifierConfig{
+		Events:      events,
+		Notifier:    notifier,
+		AppName:     "Orkestra",
+		FrontendURL: "https://app.example.com",
+		Policy:      policy,
+	}).(*suspiciousLoginNotifier)
+	svc.clock = func() time.Time { return time.Date(2026, 4, 25, 15, 30, 0, 0, time.UTC) }
+
+	in := sampleInput()
+	in.Assessment.Score = 0.1 // below threshold
+	in.Assessment.Level = "low"
+	svc.OnLogin(context.Background(), in)
+
+	// No emails at all — the admin half is gated on the same threshold
+	// as the user half.
+	if len(notifier.sends) != 0 {
+		t.Errorf("low-score must skip both user and admin emails, got %d sends", len(notifier.sends))
+	}
+}
+
+func templateIDs(sends []iface.TemplatedNotificationRequest) []string {
+	out := make([]string, 0, len(sends))
+	for _, s := range sends {
+		out = append(out, s.TemplateID)
+	}
+	return out
 }
 
 func TestSuspiciousLogin_ThresholdOverride(t *testing.T) {

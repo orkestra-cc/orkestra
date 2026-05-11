@@ -48,6 +48,12 @@ services:
       COOKIE_SECRET: ${COOKIE_SECRET}
       COOKIE_NAME: ${COOKIE_NAME:-orkestra_cookie}
       COOKIE_DOMAIN: ${COOKIE_DOMAIN}
+      # ADR-0003 PR-D D-9: per-audience refresh-cookie domains. Dev
+      # defaults align with the *.localhost host defaults below; leave
+      # them empty (or unset OPERATOR_COOKIE_DOMAIN/CLIENT_COOKIE_DOMAIN)
+      # to fall back to COOKIE_DOMAIN.
+      OPERATOR_COOKIE_DOMAIN: ${OPERATOR_COOKIE_DOMAIN:-console.localhost}
+      CLIENT_COOKIE_DOMAIN: ${CLIENT_COOKIE_DOMAIN:-api.localhost}
       COOKIE_HTTP_ONLY: ${COOKIE_HTTP_ONLY:-true}
       COOKIE_SECURE: ${COOKIE_SECURE:-false}
       COOKIE_SAME_SITE: ${COOKIE_SAME_SITE:-lax}
@@ -56,6 +62,10 @@ services:
       # URLs
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:8080}
       BACKEND_URL: ${BACKEND_URL:-http://localhost:3000}
+      # Per-tier frontend origins for verification + reset email links.
+      # Empty falls back to FRONTEND_URL above.
+      OPERATOR_FRONTEND_URL: ${OPERATOR_FRONTEND_URL:-}
+      CLIENT_FRONTEND_URL: ${CLIENT_FRONTEND_URL:-http://client.localhost:8081}
 
       # CORS (legacy single-host fallback)
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080,http://localhost:5173,http://console.localhost:8080,http://api.localhost:8080}
@@ -67,7 +77,10 @@ services:
       CONSOLE_HOST: ${CONSOLE_HOST:-console.localhost:3000}
       CLIENT_API_HOST: ${CLIENT_API_HOST:-api.localhost:3000}
       OPERATOR_CORS_ORIGINS: ${OPERATOR_CORS_ORIGINS:-}
-      CLIENT_CORS_ORIGINS: ${CLIENT_CORS_ORIGINS:-}
+      # Default CLIENT_CORS_ORIGINS allows the new Tier-2 demo SPA at
+      # http://client.localhost:8081 (served by orkestra-client-frontend).
+      # Override in .env to add staging/prod origins.
+      CLIENT_CORS_ORIGINS: ${CLIENT_CORS_ORIGINS:-http://client.localhost:8081,http://localhost:8081}
 
       # Security (relaxed for dev)
       RATE_LIMIT_REQUESTS_PER_MINUTE: ${RATE_LIMIT_REQUESTS_PER_MINUTE:-1000}
@@ -76,10 +89,6 @@ services:
       OPERATOR_RATE_LIMIT_BURST: ${OPERATOR_RATE_LIMIT_BURST:-0}
       CLIENT_RATE_LIMIT_REQUESTS_PER_MINUTE: ${CLIENT_RATE_LIMIT_REQUESTS_PER_MINUTE:-0}
       CLIENT_RATE_LIMIT_BURST: ${CLIENT_RATE_LIMIT_BURST:-0}
-
-      # ADR-0003 PR-B cutover gate. Default false in dev; flip to true
-      # after running backend/scripts/migrate_user_split.go.
-      USER_TIER_SPLIT_ENABLED: ${USER_TIER_SPLIT_ENABLED:-false}
 
       # Development specific
       DEBUG: "true"
@@ -128,9 +137,9 @@ services:
       - 8.8.4.4
     command: ["sh", "-c", "go mod download && go install github.com/air-verse/air@latest && air"]
 
-  orkestra-frontend:
+  orkestra-frontend-admin:
     image: dhi.io/node:24-dev
-    container_name: orkestra-frontend-dev
+    container_name: orkestra-frontend-admin-dev
     user: "1000:1000"
     userns_mode: "host"
     working_dir: /app
@@ -147,11 +156,51 @@ services:
       VITE_WS_URL: ${VITE_WS_URL:-ws://localhost:3000}
       NODE_OPTIONS: "--max-old-space-size=4096"
     volumes:
-      - ../frontend:/app
-      - ../frontend/.vite-cache:/app/.vite
+      - ../frontend-admin:/app
+      - ../frontend-admin/.vite-cache:/app/.vite
     networks:
       - orkestra-network
     command: ["sh", "-c", "npm install && npm run dev -- --host 0.0.0.0"]
+
+  # Tier-2 (external client) demo SPA — consumes the ADR-0003 client API
+  # surface (api.localhost:3000, JWT aud=client). Sibling app to the
+  # operator console; lives at frontend-client/. Bind-mounts the source
+  # for hot reload, hits the backend at api.localhost from the browser.
+  #
+  # Add to /etc/hosts for cookie-domain isolation to work end-to-end:
+  #   127.0.0.1 console.localhost api.localhost client.localhost
+  orkestra-client-frontend:
+    image: node:24-alpine
+    container_name: orkestra-client-frontend-dev
+    user: "1000:1000"
+    working_dir: /app
+    restart: unless-stopped
+    ports:
+      - "${CLIENT_FRONTEND_PORT:-8081}:5173"
+    environment:
+      NODE_ENV: development
+      # The browser hits the backend directly, so this URL must resolve
+      # from the host (not from inside the container network).
+      VITE_API_BASE: ${VITE_CLIENT_API_BASE:-http://api.localhost:3000}
+      VITE_STRIPE_PUBLISHABLE_KEY: ${VITE_STRIPE_PUBLISHABLE_KEY:-}
+      # Hostnames the Vite dev server accepts (DNS-rebinding defence).
+      # Localhost is always allowed; add deployed hostnames here.
+      VITE_ALLOWED_HOSTS: ${VITE_CLIENT_ALLOWED_HOSTS:-client.localhost}
+      NODE_OPTIONS: "--max-old-space-size=4096"
+    volumes:
+      - ../frontend-client:/app
+      - ../frontend-client/.vite-cache:/app/.vite
+    networks:
+      - orkestra-network
+    command: ["sh", "-c", "npm install && npm run dev -- --host 0.0.0.0"]
+    # Probes the in-process /health endpoint registered by the Vite
+    # plugin in frontend-client/vite.config.ts.
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:5173/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
 
 networks:
   orkestra-network:

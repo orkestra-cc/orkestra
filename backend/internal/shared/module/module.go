@@ -294,8 +294,9 @@ type RoleMiddleware interface {
 	// that a second factor was completed for this session (amr claim
 	// contains "otp" or "webauthn"). Applied to sensitive routes such as
 	// role grant/revoke and module secret writes. Returns 401 with
-	// error="mfa_required" so the frontend can prompt for a TOTP code and
-	// retry against /v1/auth/mfa/verify.
+	// code="step_up_required" — shared with RequireStepUp and RequireLowRisk
+	// so the frontend's step-up modal handles every MFA-driven 401 the same
+	// way: prompt for a TOTP code, call /v1/auth/mfa/verify, retry.
 	RequireMFA() func(http.Handler) http.Handler
 
 	// RequireStepUp blocks the request unless the caller completed a second
@@ -391,7 +392,17 @@ type RouteInfo struct {
 	Client *APISurface
 	// Router is the root chi.Router for special cases (dev endpoints, SSE
 	// streams, raw HTTP handlers that predate the audience split).
+	// Operator-only — dev tokens, setup wizard, and the legacy raw HTTP
+	// auth refresh/logout routes all land here.
 	Router chi.Router
+	// ClientRouter is the root chi.Router for client-tier raw HTTP
+	// routes that don't fit the Huma API surface — i.e. the client-side
+	// equivalents of the refresh / refresh-cookie / logout HTTP handlers
+	// the auth module mounts on `Router` for the operator side.
+	// ADR-0003 PR-D D-5 plumbs this so /v1/auth/client/{refresh,
+	// refresh-cookie,logout} can mount on the client host mux. Nil when
+	// no client surface exists (single-mux deployments).
+	ClientRouter chi.Router
 	// APIConfig is the shared Huma API configuration.
 	APIConfig huma.Config
 	// ConfigService provides runtime module enabled/disabled checks for gate middleware.

@@ -89,6 +89,10 @@ type DeviceSession struct {
 
 type authSessionRepository struct {
 	collection *mongo.Collection
+	// tier is the audience this repo binds to ("operator" / "client").
+	// CreateSession stamps session.Tier so a tier-guard test can assert
+	// each tier collection only holds its own rows.
+	tier string
 }
 
 // DeleteAllByUser removes every session row for userUUID. Hard delete,
@@ -101,10 +105,21 @@ func (r *authSessionRepository) DeleteAllByUser(ctx context.Context, userUUID st
 	return res.DeletedCount, nil
 }
 
-// NewAuthSessionRepository creates a new auth session repository
-func NewAuthSessionRepository(db *mongo.Database) AuthSessionRepository {
+// NewOperatorAuthSessionRepository binds to operator_sessions and
+// stamps Tier="operator" on every CreateSession write. ADR-0003 PR-D.
+func NewOperatorAuthSessionRepository(db *mongo.Database) AuthSessionRepository {
 	return &authSessionRepository{
-		collection: db.Collection(models.AuthSessionsCollection),
+		collection: db.Collection(models.OperatorSessionsCollection),
+		tier:       models.TierOperator,
+	}
+}
+
+// NewClientAuthSessionRepository binds to client_sessions and stamps
+// Tier="client" on every CreateSession write. ADR-0003 PR-D.
+func NewClientAuthSessionRepository(db *mongo.Database) AuthSessionRepository {
+	return &authSessionRepository{
+		collection: db.Collection(models.ClientSessionsCollection),
+		tier:       models.TierClient,
 	}
 }
 
@@ -123,6 +138,14 @@ func (r *authSessionRepository) CreateSession(ctx context.Context, session *mode
 	// Initialize security events if not provided
 	if session.SecurityEvents == nil {
 		session.SecurityEvents = []models.SecurityEventLog{}
+	}
+
+	// ADR-0003 PR-D: stamp the audience tier so the tier-guard test
+	// can assert each operator_/client_ collection only holds its own
+	// rows. Empty repo-tier (legacy auth_sessions) leaves the field
+	// untouched.
+	if r.tier != "" {
+		session.Tier = r.tier
 	}
 
 	// Validate required fields

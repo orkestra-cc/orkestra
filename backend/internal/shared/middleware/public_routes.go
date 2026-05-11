@@ -23,10 +23,6 @@ var PublicRoutes = []string{
 	// tenant exists.
 	"/v1/setup/",
 
-	// Anonymous external-tenant registration.
-	"/v1/onboarding/public/",
-	"/v1/onboarding/register",
-
 	// OAuth / OIDC callback endpoints. The callback itself is
 	// anonymous (the IdP is the principal until we mint a session).
 	"/v1/auth/oauth/callback/",

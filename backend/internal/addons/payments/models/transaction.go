@@ -1,17 +1,21 @@
 package models
 
-import "time"
+import (
+	"time"
+)
 
 // Transaction is one provider-side charge attempt. One invoice may have
 // multiple transactions (e.g. after retries), distinguished by ProviderTxID.
+//
+// TenantUUID is the tenant billed for the charge. Webhook reconciliation
+// reads tenantUUID off the metadata stamp the renewal service places on
+// every PaymentIntent.
 type Transaction struct {
 	UUID             string            `bson:"uuid" json:"uuid"`
 	Provider         ProviderName      `bson:"provider" json:"provider"`
 	ProviderTxID     string            `bson:"providerTxID" json:"providerTxID"`
 	SubscriptionUUID string            `bson:"subscriptionUUID,omitempty" json:"subscriptionUUID,omitempty"`
 	InvoiceUUID      string            `bson:"invoiceUUID,omitempty" json:"invoiceUUID,omitempty"`
-	// TenantUUID is the tenant binding (ADR-0001). Every transaction row
-	// points directly at a Tier-2 external tenant.
 	TenantUUID       string            `bson:"tenantUUID,omitempty" json:"tenantUUID,omitempty"`
 	AmountCents      int64             `bson:"amountCents" json:"amountCents"`
 	Currency         string            `bson:"currency" json:"currency"`

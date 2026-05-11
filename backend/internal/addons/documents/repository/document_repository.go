@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/orkestra/backend/internal/addons/documents/models"
+	"github.com/orkestra/backend/internal/shared/iface"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
@@ -20,14 +21,14 @@ var (
 // DocumentRepository defines the interface for generated document data access
 type DocumentRepository interface {
 	// Create operations
-	Create(ctx context.Context, doc *models.GeneratedDocument) error
+	Create(ctx context.Context, doc *iface.GeneratedDocument) error
 
 	// Read operations
-	GetByUUID(ctx context.Context, uuid string) (*models.GeneratedDocument, error)
-	GetByUUIDWithContent(ctx context.Context, uuid string) (*models.GeneratedDocument, error)
-	GetBySource(ctx context.Context, sourceType models.SourceType, sourceUUID string) (*models.GeneratedDocument, error)
-	List(ctx context.Context, pagination models.PaginationParams) ([]models.GeneratedDocument, int64, error)
-	ListBySource(ctx context.Context, sourceType models.SourceType, sourceUUID string) ([]models.GeneratedDocument, error)
+	GetByUUID(ctx context.Context, uuid string) (*iface.GeneratedDocument, error)
+	GetByUUIDWithContent(ctx context.Context, uuid string) (*iface.GeneratedDocument, error)
+	GetBySource(ctx context.Context, sourceType iface.SourceType, sourceUUID string) (*iface.GeneratedDocument, error)
+	List(ctx context.Context, pagination models.PaginationParams) ([]iface.GeneratedDocument, int64, error)
+	ListBySource(ctx context.Context, sourceType iface.SourceType, sourceUUID string) ([]iface.GeneratedDocument, error)
 
 	// Delete operations
 	SoftDelete(ctx context.Context, uuid string) error
@@ -88,7 +89,7 @@ func (r *documentRepository) createIndexes(ctx context.Context) {
 }
 
 // Create creates a new generated document
-func (r *documentRepository) Create(ctx context.Context, doc *models.GeneratedDocument) error {
+func (r *documentRepository) Create(ctx context.Context, doc *iface.GeneratedDocument) error {
 	if doc.UUID == "" {
 		doc.UUID = uuid.New().String()
 	}
@@ -101,8 +102,8 @@ func (r *documentRepository) Create(ctx context.Context, doc *models.GeneratedDo
 }
 
 // GetByUUID retrieves a document by UUID (without the binary PDF content)
-func (r *documentRepository) GetByUUID(ctx context.Context, uuid string) (*models.GeneratedDocument, error) {
-	var doc models.GeneratedDocument
+func (r *documentRepository) GetByUUID(ctx context.Context, uuid string) (*iface.GeneratedDocument, error) {
+	var doc iface.GeneratedDocument
 	// Exclude pdfContent to reduce memory usage
 	opts := options.FindOne().SetProjection(bson.M{"pdfContent": 0})
 	err := r.collection.FindOne(ctx, bson.M{
@@ -116,8 +117,8 @@ func (r *documentRepository) GetByUUID(ctx context.Context, uuid string) (*model
 }
 
 // GetByUUIDWithContent retrieves a document by UUID including the binary PDF content
-func (r *documentRepository) GetByUUIDWithContent(ctx context.Context, uuid string) (*models.GeneratedDocument, error) {
-	var doc models.GeneratedDocument
+func (r *documentRepository) GetByUUIDWithContent(ctx context.Context, uuid string) (*iface.GeneratedDocument, error) {
+	var doc iface.GeneratedDocument
 	err := r.collection.FindOne(ctx, bson.M{
 		"uuid":      uuid,
 		"deletedAt": nil,
@@ -129,8 +130,8 @@ func (r *documentRepository) GetByUUIDWithContent(ctx context.Context, uuid stri
 }
 
 // GetBySource retrieves the most recent document for a specific source
-func (r *documentRepository) GetBySource(ctx context.Context, sourceType models.SourceType, sourceUUID string) (*models.GeneratedDocument, error) {
-	var doc models.GeneratedDocument
+func (r *documentRepository) GetBySource(ctx context.Context, sourceType iface.SourceType, sourceUUID string) (*iface.GeneratedDocument, error) {
+	var doc iface.GeneratedDocument
 	opts := options.FindOne().
 		SetProjection(bson.M{"pdfContent": 0}).
 		SetSort(bson.D{{Key: "generatedAt", Value: -1}})
@@ -147,7 +148,7 @@ func (r *documentRepository) GetBySource(ctx context.Context, sourceType models.
 }
 
 // List retrieves documents with pagination (without binary content)
-func (r *documentRepository) List(ctx context.Context, pagination models.PaginationParams) ([]models.GeneratedDocument, int64, error) {
+func (r *documentRepository) List(ctx context.Context, pagination models.PaginationParams) ([]iface.GeneratedDocument, int64, error) {
 	filter := bson.M{"deletedAt": nil}
 
 	// Count total matching documents
@@ -172,7 +173,7 @@ func (r *documentRepository) List(ctx context.Context, pagination models.Paginat
 	}
 	defer cursor.Close(ctx)
 
-	var docs []models.GeneratedDocument
+	var docs []iface.GeneratedDocument
 	if err := cursor.All(ctx, &docs); err != nil {
 		return nil, 0, err
 	}
@@ -181,7 +182,7 @@ func (r *documentRepository) List(ctx context.Context, pagination models.Paginat
 }
 
 // ListBySource retrieves all documents for a specific source
-func (r *documentRepository) ListBySource(ctx context.Context, sourceType models.SourceType, sourceUUID string) ([]models.GeneratedDocument, error) {
+func (r *documentRepository) ListBySource(ctx context.Context, sourceType iface.SourceType, sourceUUID string) ([]iface.GeneratedDocument, error) {
 	opts := options.Find().
 		SetProjection(bson.M{"pdfContent": 0}).
 		SetSort(bson.D{{Key: "generatedAt", Value: -1}})
@@ -196,7 +197,7 @@ func (r *documentRepository) ListBySource(ctx context.Context, sourceType models
 	}
 	defer cursor.Close(ctx)
 
-	var docs []models.GeneratedDocument
+	var docs []iface.GeneratedDocument
 	if err := cursor.All(ctx, &docs); err != nil {
 		return nil, err
 	}

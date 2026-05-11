@@ -15,6 +15,7 @@ import (
 	"time"
 
 	stripelib "github.com/stripe/stripe-go/v76"
+	checkoutsession "github.com/stripe/stripe-go/v76/checkout/session"
 	"github.com/stripe/stripe-go/v76/customer"
 	"github.com/stripe/stripe-go/v76/paymentintent"
 	"github.com/stripe/stripe-go/v76/paymentmethod"
@@ -200,6 +201,101 @@ func (p *Provider) RefundCharge(ctx context.Context, providerTxID string, amount
 		ProviderRefundID: ref.ID,
 		Status:           string(ref.Status),
 	}, nil
+}
+
+// CreateCheckoutSession opens a payment-mode Stripe Checkout session for a
+// one-shot charge that also saves the chosen card off-session for future
+// renewal cycles. The PaymentIntent created by Stripe carries the supplied
+// metadata, so the existing webhook reconciler picks up subscriptionUUID
+// and invoiceUUID without any new wiring.
+func (p *Provider) CreateCheckoutSession(ctx context.Context, in iface.CheckoutSessionInput) (iface.CheckoutSessionResult, error) {
+	if in.Customer.ID == "" {
+		return iface.CheckoutSessionResult{}, errors.New("stripe: checkout session requires a customer id")
+	}
+	if in.AmountCents <= 0 {
+		return iface.CheckoutSessionResult{}, errors.New("stripe: checkout session amount must be positive")
+	}
+	if in.Currency == "" {
+		return iface.CheckoutSessionResult{}, errors.New("stripe: checkout session requires a currency")
+	}
+	if in.SuccessURL == "" || in.CancelURL == "" {
+		return iface.CheckoutSessionResult{}, errors.New("stripe: checkout session requires success and cancel URLs")
+	}
+
+	productName := in.Description
+	if productName == "" {
+		productName = "Subscription charge"
+	}
+
+	params := &stripelib.CheckoutSessionParams{
+		Mode:       stripelib.String(string(stripelib.CheckoutSessionModePayment)),
+		Customer:   stripelib.String(in.Customer.ID),
+		SuccessURL: stripelib.String(in.SuccessURL),
+		CancelURL:  stripelib.String(in.CancelURL),
+		LineItems: []*stripelib.CheckoutSessionLineItemParams{{
+			Quantity: stripelib.Int64(1),
+			PriceData: &stripelib.CheckoutSessionLineItemPriceDataParams{
+				Currency:   stripelib.String(in.Currency),
+				UnitAmount: stripelib.Int64(in.AmountCents),
+				ProductData: &stripelib.CheckoutSessionLineItemPriceDataProductDataParams{
+					Name: stripelib.String(productName),
+				},
+			},
+		}},
+		PaymentIntentData: &stripelib.CheckoutSessionPaymentIntentDataParams{
+			SetupFutureUsage: stripelib.String(string(stripelib.PaymentIntentSetupFutureUsageOffSession)),
+			Description:      stripelib.String(in.Description),
+		},
+	}
+	for k, v := range in.Metadata {
+		// Stamped on both the Checkout Session AND the resulting
+		// PaymentIntent so the webhook reconciler keys off
+		// subscriptionUUID / invoiceUUID exactly like the renewal job's
+		// off-session charges.
+		params.AddMetadata(k, v)
+		params.PaymentIntentData.AddMetadata(k, v)
+	}
+	params.Context = ctx
+
+	s, err := checkoutsession.New(params)
+	if err != nil {
+		return iface.CheckoutSessionResult{}, fmt.Errorf("stripe.checkout.session.new: %w", err)
+	}
+	return iface.CheckoutSessionResult{SessionID: s.ID, URL: s.URL}, nil
+}
+
+// CreateSetupCheckoutSession opens a setup-mode Stripe Checkout session —
+// no charge, only collects and stores a payment method against the
+// customer. Used by the "add card" flow on the Tier-2 client account page.
+func (p *Provider) CreateSetupCheckoutSession(ctx context.Context, in iface.SetupCheckoutInput) (iface.CheckoutSessionResult, error) {
+	if in.Customer.ID == "" {
+		return iface.CheckoutSessionResult{}, errors.New("stripe: setup checkout requires a customer id")
+	}
+	if in.SuccessURL == "" || in.CancelURL == "" {
+		return iface.CheckoutSessionResult{}, errors.New("stripe: setup checkout requires success and cancel URLs")
+	}
+
+	params := &stripelib.CheckoutSessionParams{
+		Mode:               stripelib.String(string(stripelib.CheckoutSessionModeSetup)),
+		Customer:           stripelib.String(in.Customer.ID),
+		SuccessURL:         stripelib.String(in.SuccessURL),
+		CancelURL:          stripelib.String(in.CancelURL),
+		PaymentMethodTypes: stripelib.StringSlice([]string{"card"}),
+		SetupIntentData: &stripelib.CheckoutSessionSetupIntentDataParams{
+			Description: stripelib.String("Save payment method for future subscription renewals"),
+		},
+	}
+	for k, v := range in.Metadata {
+		params.AddMetadata(k, v)
+		params.SetupIntentData.AddMetadata(k, v)
+	}
+	params.Context = ctx
+
+	s, err := checkoutsession.New(params)
+	if err != nil {
+		return iface.CheckoutSessionResult{}, fmt.Errorf("stripe.checkout.session.new (setup): %w", err)
+	}
+	return iface.CheckoutSessionResult{SessionID: s.ID, URL: s.URL}, nil
 }
 
 // VerifyWebhook validates the Stripe-Signature header against the shared

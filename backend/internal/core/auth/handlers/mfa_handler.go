@@ -32,6 +32,7 @@ type MFAHandler struct {
 	tokens       LoginTokenIssuer
 	webauthn     services.WebAuthnService // optional — populated when WebAuthn is configured
 	deviceTrust  services.DeviceTrustService // optional — Section C item #3
+	policy       *services.AuthPolicyService // optional — admin-managed mfaEnabled + grace-window source
 	cookieName   string
 	cookieDomain string
 	cookieSecure bool
@@ -75,6 +76,14 @@ func (h *MFAHandler) SetWebAuthn(wa services.WebAuthnService) {
 // Optional — nil leaves the handler's trust-granting path inert.
 func (h *MFAHandler) SetDeviceTrust(dt services.DeviceTrustService) {
 	h.deviceTrust = dt
+}
+
+// SetPolicy wires the admin-managed AuthPolicyService so the Status
+// endpoint reports the configured grace deadline (instead of the
+// hardcoded 7-day fallback) and honours the master mfaEnabled flag.
+// Optional — nil falls back to legacy hardcoded values.
+func (h *MFAHandler) SetPolicy(p *services.AuthPolicyService) {
+	h.policy = p
 }
 
 // --- Enrollment ---
@@ -186,9 +195,9 @@ func (h *MFAHandler) Status(ctx context.Context, _ *struct{}) (*MFAStatusRespons
 		if claims, ok := ctx.Value("claims").(*authModels.JWTClaims); ok && claims != nil {
 			memberships = claims.Memberships
 		}
-		if services.RoleRequiresMFA(user, memberships) {
+		if h.policy.MFARequired(user, memberships) {
 			resp.Body.RequiresMFA = true
-			if deadline := services.GraceExpiresAt(user); !deadline.IsZero() {
+			if deadline := h.policy.MFAGraceExpiresAt(ctx, user); !deadline.IsZero() {
 				resp.Body.GraceExpiresAt = &deadline
 			}
 		}
@@ -235,6 +244,37 @@ func (h *MFAHandler) Remove(ctx context.Context, req *MFARemoveRequest) (*MFARem
 	}
 	resp := &MFARemoveResponse{}
 	resp.Body.Success = true
+	return resp, nil
+}
+
+// --- Regenerate backup codes ---
+
+type MFARegenerateBackupCodesRequest struct {
+	Body struct{}
+}
+
+type MFARegenerateBackupCodesResponse struct {
+	Body struct {
+		Codes []string `json:"codes"`
+	}
+}
+
+// RegenerateBackupCodes destroys the user's existing backup codes
+// and returns a freshly generated set exactly once. The route is
+// gated by RequireStepUp(5m) — the action is irreversible and any
+// captured plaintext code is revoked the moment the new set lands.
+// Returns 400 mfa_not_enrolled when the user has no TOTP factor.
+func (h *MFAHandler) RegenerateBackupCodes(ctx context.Context, req *MFARegenerateBackupCodesRequest) (*MFARegenerateBackupCodesResponse, error) {
+	userUUID, _ := ctx.Value("userUUID").(string)
+	if userUUID == "" {
+		return nil, huma.Error401Unauthorized("authentication required")
+	}
+	codes, err := h.mfa.RegenerateBackupCodes(ctx, userUUID)
+	if err != nil {
+		return nil, mapMFAError(err)
+	}
+	resp := &MFARegenerateBackupCodesResponse{}
+	resp.Body.Codes = codes
 	return resp, nil
 }
 
@@ -501,48 +541,49 @@ func mapMFAError(err error) error {
 // RegisterPublicRoutes mounts endpoints that complete an in-flight login
 // and therefore cannot require a bearer token. Only the login-verify path
 // lives here; self-service step-up uses the protected endpoint instead.
-func (h *MFAHandler) RegisterPublicRoutes(api huma.API) {
+// See RouteMount for path/operation-ID prefix semantics.
+func (h *MFAHandler) RegisterPublicRoutes(api huma.API, mount RouteMount) {
 	huma.Register(api, huma.Operation{
-		OperationID: "mfa-login-verify",
+		OperationID: mount.OpIDPrefix + "mfa-login-verify",
 		Method:      http.MethodPost,
-		Path:        "/v1/auth/mfa/login/verify",
+		Path:        "/v1/auth" + mount.PathPrefix + "/mfa/login/verify",
 		Summary:     "Complete a login by verifying a TOTP or backup code",
 		Tags:        []string{"Authentication", "MFA"},
 	}, h.LoginVerify)
 }
 
-func (h *MFAHandler) RegisterProtectedRoutes(api huma.API) {
+func (h *MFAHandler) RegisterProtectedRoutes(api huma.API, mount RouteMount) {
 	huma.Register(api, huma.Operation{
-		OperationID: "mfa-enroll-begin",
+		OperationID: mount.OpIDPrefix + "mfa-enroll-begin",
 		Method:      http.MethodPost,
-		Path:        "/v1/auth/mfa/enroll/begin",
+		Path:        "/v1/auth" + mount.PathPrefix + "/mfa/enroll/begin",
 		Summary:     "Begin MFA (TOTP) enrollment",
 		Tags:        []string{"Authentication", "MFA"},
 		Security:    []map[string][]string{{"bearerAuth": {}}},
 	}, h.EnrollBegin)
 
 	huma.Register(api, huma.Operation{
-		OperationID: "mfa-enroll-confirm",
+		OperationID: mount.OpIDPrefix + "mfa-enroll-confirm",
 		Method:      http.MethodPost,
-		Path:        "/v1/auth/mfa/enroll/confirm",
+		Path:        "/v1/auth" + mount.PathPrefix + "/mfa/enroll/confirm",
 		Summary:     "Confirm MFA enrollment and receive backup codes",
 		Tags:        []string{"Authentication", "MFA"},
 		Security:    []map[string][]string{{"bearerAuth": {}}},
 	}, h.EnrollConfirm)
 
 	huma.Register(api, huma.Operation{
-		OperationID: "mfa-status",
+		OperationID: mount.OpIDPrefix + "mfa-status",
 		Method:      http.MethodGet,
-		Path:        "/v1/auth/me/mfa",
+		Path:        "/v1/auth" + mount.PathPrefix + "/me/mfa",
 		Summary:     "Return the current user's MFA enrollment status",
 		Tags:        []string{"Authentication", "MFA"},
 		Security:    []map[string][]string{{"bearerAuth": {}}},
 	}, h.Status)
 
 	huma.Register(api, huma.Operation{
-		OperationID: "mfa-verify",
+		OperationID: mount.OpIDPrefix + "mfa-verify",
 		Method:      http.MethodPost,
-		Path:        "/v1/auth/mfa/verify",
+		Path:        "/v1/auth" + mount.PathPrefix + "/mfa/verify",
 		Summary:     "Verify a TOTP or backup code; returns a stepped-up access token",
 		Tags:        []string{"Authentication", "MFA"},
 		Security:    []map[string][]string{{"bearerAuth": {}}},
@@ -552,26 +593,57 @@ func (h *MFAHandler) RegisterProtectedRoutes(api huma.API) {
 // RegisterStepUpRoutes mounts endpoints that demand a *fresh* MFA proof.
 // The caller wires RequireStepUp(5m) around this API instance — see
 // auth/module.go.
-func (h *MFAHandler) RegisterStepUpRoutes(api huma.API) {
+func (h *MFAHandler) RegisterStepUpRoutes(api huma.API, mount RouteMount) {
 	huma.Register(api, huma.Operation{
-		OperationID: "mfa-remove",
+		OperationID: mount.OpIDPrefix + "mfa-remove",
 		Method:      http.MethodPost,
-		Path:        "/v1/auth/me/mfa/remove",
+		Path:        "/v1/auth" + mount.PathPrefix + "/me/mfa/remove",
 		Summary:     "Remove the current user's MFA factor (requires fresh step-up)",
 		Tags:        []string{"Authentication", "MFA"},
 		Security:    []map[string][]string{{"bearerAuth": {}}},
 	}, h.Remove)
+
+	huma.Register(api, huma.Operation{
+		OperationID: mount.OpIDPrefix + "mfa-regenerate-backup-codes",
+		Method:      http.MethodPost,
+		Path:        "/v1/auth" + mount.PathPrefix + "/me/mfa/backup-codes/regenerate",
+		Summary:     "Regenerate the current user's MFA backup codes (requires fresh step-up)",
+		Description: "Destroys the existing backup-code set and returns a freshly generated list exactly once. Old codes stop working immediately.",
+		Tags:        []string{"Authentication", "MFA"},
+		Security:    []map[string][]string{{"bearerAuth": {}}},
+	}, h.RegenerateBackupCodes)
 }
 
 // RegisterAdminRoutes mounts the admin-scoped reset endpoint. The caller
 // must chain RequireSystemPermission + RequireStepUp around this API
-// instance before invocation — see auth/module.go for the wiring.
+// instance before invocation — see auth/module.go for the wiring. The
+// admin surface is operator-tier-only by definition (Tier-1 internal
+// console only) so it doesn't take a RouteMount parameter.
 func (h *MFAHandler) RegisterAdminRoutes(api huma.API) {
 	huma.Register(api, huma.Operation{
 		OperationID: "mfa-admin-reset",
 		Method:      http.MethodPost,
 		Path:        "/v1/admin/users/{userId}/mfa/reset",
-		Summary:     "Admin: delete another user's MFA factor and restart their enrollment grace",
+		Summary:     "Admin: delete an operator user's MFA factor and restart their enrollment grace",
+		Tags:        []string{"Administration", "MFA"},
+		Security:    []map[string][]string{{"bearerAuth": {}}},
+	}, h.AdminReset)
+}
+
+// RegisterClientAdminRoutes mounts the same AdminReset action under the
+// /v1/admin/client-users path so an operator (mounted on the operator
+// host) can reset a Tier-2 client user's MFA factor. Callers wire the
+// **client-tier** MFAHandler instance here so the reset operates against
+// client_mfa_factors and the client UserService — preventing an
+// operator-tier handler from accidentally targeting client tables.
+// Same RequireSystemPermission + RequireStepUp gating as the operator
+// admin route.
+func (h *MFAHandler) RegisterClientAdminRoutes(api huma.API) {
+	huma.Register(api, huma.Operation{
+		OperationID: "mfa-admin-reset-client",
+		Method:      http.MethodPost,
+		Path:        "/v1/admin/client-users/{userId}/mfa/reset",
+		Summary:     "Admin: delete a Tier-2 client user's MFA factor and restart their enrollment grace",
 		Tags:        []string{"Administration", "MFA"},
 		Security:    []map[string][]string{{"bearerAuth": {}}},
 	}, h.AdminReset)

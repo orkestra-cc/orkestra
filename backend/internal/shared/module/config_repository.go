@@ -27,7 +27,7 @@ func NewModuleConfigRepository(db *mongo.Database) *ModuleConfigRepository {
 	indexes := []mongo.IndexModel{
 		{Keys: bson.D{{Key: "moduleName", Value: 1}}, Options: options.Index().SetUnique(true)},
 	}
-	coll.Indexes().CreateMany(ctx, indexes) //nolint:errcheck
+	coll.Indexes().CreateMany(ctx, indexes) //nolint:errcheck // best-effort index ensure; subsequent reads will surface persistent failures
 
 	return &ModuleConfigRepository{collection: coll}
 }

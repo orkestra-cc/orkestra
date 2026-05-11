@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"time"
 
 	"github.com/orkestra/backend/internal/addons/billing/models"
 	"github.com/orkestra/backend/internal/addons/billing/repository"
@@ -15,7 +16,7 @@ type NotificationService interface {
 	GetNotificationsByInvoice(ctx context.Context, invoiceUUID string) ([]models.SDINotification, error)
 	ListNotifications(ctx context.Context, filters *models.NotificationFilters, pagination models.PaginationParams) ([]models.SDINotification, int64, error)
 	MarkAsProcessed(ctx context.Context, uuid string, processedBy string) error
-	GetSummary(ctx context.Context) (*models.NotificationSummary, error)
+	GetSummary(ctx context.Context, fromDate, toDate *time.Time) (*models.NotificationSummary, error)
 }
 
 type notificationService struct {
@@ -54,6 +55,6 @@ func (s *notificationService) MarkAsProcessed(ctx context.Context, uuid string, 
 	return s.notificationRepo.MarkAsProcessed(ctx, uuid, processedBy)
 }
 
-func (s *notificationService) GetSummary(ctx context.Context) (*models.NotificationSummary, error) {
-	return s.notificationRepo.GetSummary(ctx)
+func (s *notificationService) GetSummary(ctx context.Context, fromDate, toDate *time.Time) (*models.NotificationSummary, error) {
+	return s.notificationRepo.GetSummary(ctx, fromDate, toDate)
 }

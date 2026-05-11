@@ -18,11 +18,13 @@ const (
 type ConfigFieldType string
 
 const (
-	FieldString   ConfigFieldType = "string"
-	FieldBool     ConfigFieldType = "bool"
-	FieldInt      ConfigFieldType = "int"
-	FieldDuration ConfigFieldType = "duration"
-	FieldSecret   ConfigFieldType = "secret" // encrypted at rest with AES-256-GCM
+	FieldString     ConfigFieldType = "string"
+	FieldBool       ConfigFieldType = "bool"
+	FieldInt        ConfigFieldType = "int"
+	FieldDuration   ConfigFieldType = "duration"
+	FieldSecret     ConfigFieldType = "secret"     // encrypted at rest with AES-256-GCM
+	FieldEnum       ConfigFieldType = "enum"       // single value from Options
+	FieldStringList ConfigFieldType = "stringList" // comma-separated list of strings; stored as a single comma-joined string
 )
 
 // ConfigField describes a single configurable setting for a module.
@@ -36,6 +38,7 @@ type ConfigField struct {
 	Required    bool            `json:"required" bson:"required"`
 	Default     string          `json:"default,omitempty" bson:"default,omitempty"`
 	EnvVar      string          `json:"envVar,omitempty" bson:"envVar,omitempty"` // source env var for seed
+	Options     []string        `json:"options,omitempty" bson:"options,omitempty"` // valid values for FieldEnum (ignored for other types)
 }
 
 // CollectionSpec declares a MongoDB collection that a module owns.

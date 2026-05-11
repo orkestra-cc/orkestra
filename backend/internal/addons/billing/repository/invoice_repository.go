@@ -138,7 +138,7 @@ func (r *invoiceRepository) createIndexes(ctx context.Context) {
 			Keys: bson.D{{Key: "sdiStatus", Value: 1}},
 		},
 		{
-			Keys: bson.D{{Key: "customerId", Value: 1}},
+			Keys: bson.D{{Key: "tenantUUID", Value: 1}},
 		},
 		{
 			Keys: bson.D{{Key: "supplierId", Value: 1}},
@@ -280,8 +280,8 @@ func (r *invoiceRepository) List(ctx context.Context, filters *models.InvoiceFil
 		if filters.SDIStatus != nil {
 			filter["sdiStatus"] = *filters.SDIStatus
 		}
-		if filters.CustomerID != "" {
-			filter["customerId"] = filters.CustomerID
+		if filters.TenantUUID != "" {
+			filter["tenantUUID"] = filters.TenantUUID
 		}
 		if filters.SupplierID != "" {
 			filter["supplierId"] = filters.SupplierID

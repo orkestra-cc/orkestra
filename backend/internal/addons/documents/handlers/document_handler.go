@@ -107,7 +107,7 @@ func (h *DocumentHandler) GeneratePDF(ctx context.Context, req *GeneratePDFReque
 		return nil, huma.Error500InternalServerError("Failed to generate PDF", err)
 	}
 
-	return &GeneratePDFResponse{Body: doc.ToMeta()}, nil
+	return &GeneratePDFResponse{Body: models.MetaOf(doc)}, nil
 }
 
 // PreviewHTML renders a template to HTML without generating PDF
@@ -167,7 +167,7 @@ func (h *DocumentHandler) GetDocument(ctx context.Context, req *GetDocumentReque
 		return nil, huma.Error500InternalServerError("Failed to get document", err)
 	}
 
-	return &GetDocumentResponse{Body: doc.ToMeta()}, nil
+	return &GetDocumentResponse{Body: models.MetaOf(doc)}, nil
 }
 
 // DownloadDocument downloads a document's PDF content

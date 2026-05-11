@@ -8,12 +8,13 @@ import (
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j/dbtype"
 	"github.com/orkestra/backend/internal/addons/graph/models"
+	"github.com/orkestra/backend/internal/shared/iface"
 )
 
 // GraphRepository defines the interface for graph database operations
 type GraphRepository interface {
-	ExecuteRead(ctx context.Context, database string, cypher string, params map[string]interface{}) (*models.QueryResult, error)
-	ExecuteWrite(ctx context.Context, database string, cypher string, params map[string]interface{}) (*models.QueryResult, error)
+	ExecuteRead(ctx context.Context, database string, cypher string, params map[string]interface{}) (*iface.QueryResult, error)
+	ExecuteWrite(ctx context.Context, database string, cypher string, params map[string]interface{}) (*iface.QueryResult, error)
 	// ExecuteAutoCommit runs a query as an implicit/auto-commit transaction.
 	// Required for Memgraph storage commands (CREATE INDEX, SHOW INDEX INFO, etc.)
 	ExecuteAutoCommit(ctx context.Context, database string, cypher string, params map[string]interface{}) error
@@ -42,7 +43,7 @@ func (r *graphRepository) resolveDatabase(database string) string {
 	return r.defaultDatabase
 }
 
-func (r *graphRepository) ExecuteRead(ctx context.Context, database string, cypher string, params map[string]interface{}) (*models.QueryResult, error) {
+func (r *graphRepository) ExecuteRead(ctx context.Context, database string, cypher string, params map[string]interface{}) (*iface.QueryResult, error) {
 	db := r.resolveDatabase(database)
 	session := r.driver.NewSession(ctx, neo4j.SessionConfig{DatabaseName: db, AccessMode: neo4j.AccessModeRead})
 	defer session.Close(ctx)
@@ -59,12 +60,12 @@ func (r *graphRepository) ExecuteRead(ctx context.Context, database string, cyph
 		return nil, fmt.Errorf("read query failed: %w", err)
 	}
 
-	qr := result.(*models.QueryResult)
+	qr := result.(*iface.QueryResult)
 	qr.Metadata.ExecutionTimeMs = time.Since(start).Milliseconds()
 	return qr, nil
 }
 
-func (r *graphRepository) ExecuteWrite(ctx context.Context, database string, cypher string, params map[string]interface{}) (*models.QueryResult, error) {
+func (r *graphRepository) ExecuteWrite(ctx context.Context, database string, cypher string, params map[string]interface{}) (*iface.QueryResult, error) {
 	db := r.resolveDatabase(database)
 	session := r.driver.NewSession(ctx, neo4j.SessionConfig{DatabaseName: db, AccessMode: neo4j.AccessModeWrite})
 	defer session.Close(ctx)
@@ -81,7 +82,7 @@ func (r *graphRepository) ExecuteWrite(ctx context.Context, database string, cyp
 		return nil, fmt.Errorf("write query failed: %w", err)
 	}
 
-	qr := result.(*models.QueryResult)
+	qr := result.(*iface.QueryResult)
 	qr.Metadata.ExecutionTimeMs = time.Since(start).Milliseconds()
 	return qr, nil
 }
@@ -273,9 +274,9 @@ func (r *graphRepository) VerifyConnectivity(ctx context.Context) error {
 }
 
 // collectResults processes a result set into a QueryResult
-func collectResults(ctx context.Context, res neo4j.ResultWithContext) (*models.QueryResult, error) {
-	qr := &models.QueryResult{
-		Graph: &models.GraphData{},
+func collectResults(ctx context.Context, res neo4j.ResultWithContext) (*iface.QueryResult, error) {
+	qr := &iface.QueryResult{
+		Graph: &iface.GraphData{},
 	}
 
 	// Track unique nodes/rels for graph extraction
@@ -329,14 +330,14 @@ func collectResults(ctx context.Context, res neo4j.ResultWithContext) (*models.Q
 
 // marshalValue converts Bolt driver types to JSON-serializable values
 // and extracts graph elements for visualization
-func marshalValue(val interface{}, graph *models.GraphData, seenNodes map[int64]bool, seenRels map[int64]bool) interface{} {
+func marshalValue(val interface{}, graph *iface.GraphData, seenNodes map[int64]bool, seenRels map[int64]bool) interface{} {
 	if val == nil {
 		return nil
 	}
 
 	switch v := val.(type) {
 	case dbtype.Node:
-		node := models.GraphNode{
+		node := iface.GraphNode{
 			ID:         v.Id,
 			ElementID:  v.ElementId,
 			Labels:     v.Labels,
@@ -349,7 +350,7 @@ func marshalValue(val interface{}, graph *models.GraphData, seenNodes map[int64]
 		return node
 
 	case dbtype.Relationship:
-		rel := models.GraphRelationship{
+		rel := iface.GraphRelationship{
 			ID:             v.Id,
 			ElementID:      v.ElementId,
 			Type:           v.Type,

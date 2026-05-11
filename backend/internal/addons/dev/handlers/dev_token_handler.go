@@ -13,24 +13,45 @@ import (
 	userModels "github.com/orkestra/backend/internal/core/user/models"
 )
 
-// DevTokenHandler handles development token generation endpoints
+// DevTokenHandler handles development token generation endpoints.
+//
+// ADR-0003 PR-D D-10: every dev token now carries an explicit `aud`
+// claim — `operator` (default) or `client` — so the host muxes'
+// RequireAudience gates accept the token on the matching surface. The
+// handler holds one JWTProvider per tier and dispatches by the
+// `audience` request field.
 type DevTokenHandler struct {
-	jwtService iface.JWTProvider
-	cfg        *config.Config
-	logger     *slog.Logger
+	operatorJWT iface.JWTProvider
+	clientJWT   iface.JWTProvider
+	cfg         *config.Config
+	logger      *slog.Logger
 }
 
-// NewDevTokenHandler creates a new DevTokenHandler
-func NewDevTokenHandler(jwtService iface.JWTProvider, cfg *config.Config) *DevTokenHandler {
+// NewDevTokenHandler creates a new DevTokenHandler. Both JWT providers
+// are required — the canonical (operator) key is the back-compat default
+// the handler picks when the request omits `audience`, and the client
+// provider serves the client-tier path.
+func NewDevTokenHandler(operatorJWT, clientJWT iface.JWTProvider, cfg *config.Config) *DevTokenHandler {
 	return &DevTokenHandler{
-		jwtService: jwtService,
-		cfg:        cfg,
-		logger:     slog.Default().With(slog.String("handler", "dev_token")),
+		operatorJWT: operatorJWT,
+		clientJWT:   clientJWT,
+		cfg:         cfg,
+		logger:      slog.Default().With(slog.String("handler", "dev_token")),
 	}
 }
 
 // ValidRoles contains all valid roles for token generation
 var ValidRoles = []string{"super_admin", "administrator", "developer", "manager", "operator", "guest"}
+
+// ValidAudiences lists the JWT `aud` values the dev token endpoint can
+// mint. Mirrors the AudienceOperator / AudienceClient constants in the
+// auth package — duplicated as plain strings here so the dev addon
+// doesn't import auth/services for two literals.
+var ValidAudiences = []string{"operator", "client"}
+
+// DefaultAudience matches the canonical ServiceJWTService binding so
+// callers that omit `audience` keep getting operator-aud tokens.
+const DefaultAudience = "operator"
 
 // isValidRole checks if a role is valid
 func isValidRole(role string) bool {
@@ -42,11 +63,29 @@ func isValidRole(role string) bool {
 	return false
 }
 
+// resolveAudience normalizes a request's audience field. Empty falls
+// back to operator (back-compat). Returns the effective audience and
+// the matching JWTProvider, or an error message for an unknown value.
+func (h *DevTokenHandler) resolveAudience(audience string) (string, iface.JWTProvider, error) {
+	if audience == "" {
+		audience = DefaultAudience
+	}
+	switch audience {
+	case "operator":
+		return audience, h.operatorJWT, nil
+	case "client":
+		return audience, h.clientJWT, nil
+	default:
+		return "", nil, fmt.Errorf("invalid audience %q (valid: %v)", audience, ValidAudiences)
+	}
+}
+
 // GenerateTokenRequest is the request body for token generation
 type GenerateTokenRequest struct {
 	Body struct {
-		Role   string `json:"role" validate:"required" doc:"Role for the generated token (super_admin, administrator, developer, manager, operator, guest)"`
-		Expiry string `json:"expiry,omitempty" doc:"Token expiry duration (e.g., '15m', '1h', '24h'). Default: 15m, Max: 24h"`
+		Role     string `json:"role" validate:"required" doc:"Role for the generated token (super_admin, administrator, developer, manager, operator, guest)"`
+		Audience string `json:"audience,omitempty" doc:"JWT audience the token should target (operator or client). Default: operator. ADR-0003 PR-D."`
+		Expiry   string `json:"expiry,omitempty" doc:"Token expiry duration (e.g., '15m', '1h', '24h'). Default: 15m, Max: 24h"`
 	}
 }
 
@@ -55,6 +94,7 @@ type GenerateTokenResponse struct {
 	Body struct {
 		AccessToken string    `json:"accessToken" doc:"JWT access token"`
 		Role        string    `json:"role" doc:"Role assigned to the token"`
+		Audience    string    `json:"audience" doc:"JWT audience stamped on the token (operator or client)"`
 		Email       string    `json:"email" doc:"Synthetic email used for the token"`
 		ExpiresAt   time.Time `json:"expiresAt" doc:"Token expiration timestamp"`
 		ExpiresIn   int64     `json:"expiresIn" doc:"Seconds until token expires"`
@@ -73,6 +113,12 @@ func (h *DevTokenHandler) GenerateToken(ctx context.Context, req *GenerateTokenR
 	// Validate role
 	if !isValidRole(req.Body.Role) {
 		return nil, fmt.Errorf("invalid role '%s'. Valid roles: %v", req.Body.Role, ValidRoles)
+	}
+
+	// Resolve target audience to its JWT service
+	audience, jwtSvc, err := h.resolveAudience(req.Body.Audience)
+	if err != nil {
+		return nil, err
 	}
 
 	// Parse expiry duration (default 15 minutes, max 24 hours)
@@ -105,7 +151,7 @@ func (h *DevTokenHandler) GenerateToken(ctx context.Context, req *GenerateTokenR
 	}
 
 	// Generate access token
-	token, err := h.jwtService.GenerateAccessToken(user)
+	token, err := jwtSvc.GenerateAccessToken(user)
 	if err != nil {
 		h.logger.Error("Failed to generate dev token", slog.String("error", err.Error()))
 		return nil, fmt.Errorf("failed to generate token: %w", err)
@@ -117,6 +163,7 @@ func (h *DevTokenHandler) GenerateToken(ctx context.Context, req *GenerateTokenR
 	if h.cfg.IsStaging() {
 		h.logger.Info("Dev token generated in staging",
 			slog.String("role", req.Body.Role),
+			slog.String("audience", audience),
 			slog.String("expiry", expiry.String()),
 		)
 	}
@@ -124,6 +171,7 @@ func (h *DevTokenHandler) GenerateToken(ctx context.Context, req *GenerateTokenR
 	resp := &GenerateTokenResponse{}
 	resp.Body.AccessToken = token
 	resp.Body.Role = req.Body.Role
+	resp.Body.Audience = audience
 	resp.Body.Email = syntheticEmail
 	resp.Body.ExpiresAt = expiresAt
 	resp.Body.ExpiresIn = int64(expiry.Seconds())
@@ -162,14 +210,16 @@ func (h *DevTokenHandler) ListRoles(ctx context.Context, req *ListRolesRequest) 
 
 // generateTokenHTTPRequest is the request body for HTTP handler
 type generateTokenHTTPRequest struct {
-	Role   string `json:"role"`
-	Expiry string `json:"expiry,omitempty"`
+	Role     string `json:"role"`
+	Audience string `json:"audience,omitempty"`
+	Expiry   string `json:"expiry,omitempty"`
 }
 
 // generateTokenHTTPResponse is the response for HTTP handler
 type generateTokenHTTPResponse struct {
 	AccessToken string    `json:"accessToken"`
 	Role        string    `json:"role"`
+	Audience    string    `json:"audience"`
 	Email       string    `json:"email"`
 	ExpiresAt   time.Time `json:"expiresAt"`
 	ExpiresIn   int64     `json:"expiresIn"`
@@ -201,6 +251,13 @@ func (h *DevTokenHandler) GenerateTokenHTTP(w http.ResponseWriter, r *http.Reque
 	// Validate role
 	if !isValidRole(req.Role) {
 		http.Error(w, fmt.Sprintf(`{"error": "invalid role '%s'. Valid roles: %v"}`, req.Role, ValidRoles), http.StatusBadRequest)
+		return
+	}
+
+	// Resolve audience → matching JWT service
+	audience, jwtSvc, err := h.resolveAudience(req.Audience)
+	if err != nil {
+		http.Error(w, fmt.Sprintf(`{"error": %q}`, err.Error()), http.StatusBadRequest)
 		return
 	}
 
@@ -237,7 +294,7 @@ func (h *DevTokenHandler) GenerateTokenHTTP(w http.ResponseWriter, r *http.Reque
 	}
 
 	// Generate access token
-	token, err := h.jwtService.GenerateAccessToken(user)
+	token, err := jwtSvc.GenerateAccessToken(user)
 	if err != nil {
 		h.logger.Error("Failed to generate dev token", slog.String("error", err.Error()))
 		http.Error(w, `{"error": "failed to generate token"}`, http.StatusInternalServerError)
@@ -250,6 +307,7 @@ func (h *DevTokenHandler) GenerateTokenHTTP(w http.ResponseWriter, r *http.Reque
 	if h.cfg.IsStaging() {
 		h.logger.Info("Dev token generated in staging",
 			slog.String("role", req.Role),
+			slog.String("audience", audience),
 			slog.String("expiry", expiry.String()),
 		)
 	}
@@ -257,6 +315,7 @@ func (h *DevTokenHandler) GenerateTokenHTTP(w http.ResponseWriter, r *http.Reque
 	resp := generateTokenHTTPResponse{
 		AccessToken: token,
 		Role:        req.Role,
+		Audience:    audience,
 		Email:       syntheticEmail,
 		ExpiresAt:   expiresAt,
 		ExpiresIn:   int64(expiry.Seconds()),

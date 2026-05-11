@@ -2,7 +2,9 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/orkestra/backend/internal/core/tenant/models"
@@ -68,9 +70,14 @@ type updatePlanInput struct {
 	Body     models.UpdatePlanInput
 }
 
+type membershipRow struct {
+	models.TenantMembership
+	Email string `json:"email,omitempty"`
+}
+
 type membershipListOutput struct {
 	Body struct {
-		Members []models.TenantMembership `json:"members"`
+		Members []membershipRow `json:"members"`
 	}
 }
 
@@ -297,8 +304,40 @@ func (h *Handler) listMembers(ctx context.Context, in *tenantIDPath) (*membershi
 		return nil, huma.Error500InternalServerError("list failed", err)
 	}
 	out := &membershipListOutput{}
-	out.Body.Members = members
+	out.Body.Members = make([]membershipRow, len(members))
+	for i, m := range members {
+		out.Body.Members[i] = membershipRow{TenantMembership: m}
+	}
+	h.enrichMemberEmails(ctx, in.TenantID, out.Body.Members)
 	return out, nil
+}
+
+// enrichMemberEmails fills in the Email field of each row by looking up the
+// user via the tier-appropriate UserProvider. Best-effort: any failure leaves
+// Email empty so the table still renders.
+func (h *Handler) enrichMemberEmails(ctx context.Context, tenantUUID string, rows []membershipRow) {
+	if h.registry == nil || len(rows) == 0 {
+		return
+	}
+	kind := iface.TenantKindInternal
+	if t, err := h.svc.GetTenant(ctx, tenantUUID); err == nil && t != nil && t.Kind != "" {
+		kind = t.Kind
+	}
+	providerKey := module.ServiceOperatorUserProvider
+	if kind == iface.TenantKindExternal {
+		providerKey = module.ServiceClientUserProvider
+	}
+	provider, ok := module.GetTyped[iface.UserProvider](h.registry, providerKey)
+	if !ok || provider == nil {
+		return
+	}
+	for i := range rows {
+		u, err := provider.GetUserByID(ctx, rows[i].UserUUID)
+		if err != nil || u == nil {
+			continue
+		}
+		rows[i].Email = u.Email
+	}
 }
 
 type removeMemberInput struct {
@@ -311,6 +350,92 @@ func (h *Handler) removeMember(ctx context.Context, in *removeMemberInput) (*str
 		return nil, huma.Error400BadRequest("remove failed: " + err.Error())
 	}
 	return &struct{}{}, nil
+}
+
+// attachMemberAdminInput is the wire shape for the admin direct-grant flow.
+// Either UserUUID or UserEmail must be supplied; UserUUID wins when both are
+// provided. Role is the authz role name to grant (typically org_owner /
+// org_admin / org_member); IsOwner stamps the denormalized owner flag on the
+// membership row but does not change the tenant's primary owner.
+type attachMemberAdminInput struct {
+	TenantID string `path:"tenantId"`
+	Body     struct {
+		UserUUID  string `json:"userUuid,omitempty" doc:"UUID of the existing user to attach (preferred over userEmail when both are supplied)"`
+		UserEmail string `json:"userEmail,omitempty" doc:"Email of the existing user; resolved against the tier-aware UserProvider"`
+		Role      string `json:"role" doc:"authz role name to grant (e.g. org_owner, org_admin, org_member)"`
+		IsOwner   bool   `json:"isOwner,omitempty" doc:"Stamp the denormalized owner flag on the membership row"`
+	}
+}
+
+type attachMemberAdminOutput struct {
+	Body struct {
+		Member membershipRow `json:"member"`
+	}
+}
+
+// attachMemberAdmin resolves the target user (by UUID or by email through
+// the tier-appropriate UserProvider), validates the tenant exists, and
+// delegates the membership write + authz binding to services.AttachMember.
+// The handler maps service errors to HTTP status codes verbatim — the
+// service layer is the single place that owns the validation taxonomy.
+func (h *Handler) attachMemberAdmin(ctx context.Context, in *attachMemberAdminInput) (*attachMemberAdminOutput, error) {
+	if in.Body.Role == "" {
+		return nil, huma.Error400BadRequest("role is required")
+	}
+	if in.Body.UserUUID == "" && in.Body.UserEmail == "" {
+		return nil, huma.Error400BadRequest("userUuid or userEmail is required")
+	}
+
+	t, err := h.svc.GetTenant(ctx, in.TenantID)
+	if err != nil || t == nil {
+		return nil, huma.Error404NotFound("tenant not found")
+	}
+
+	userUUID := strings.TrimSpace(in.Body.UserUUID)
+	resolvedEmail := ""
+	if userUUID == "" {
+		// Resolve by email via the tier-matched UserProvider. Internal
+		// tenants get operator users; external tenants get client users —
+		// admin-attach must not silently mix audiences.
+		providerKey := module.ServiceOperatorUserProvider
+		if t.Kind == iface.TenantKindExternal {
+			providerKey = module.ServiceClientUserProvider
+		}
+		provider, ok := module.GetTyped[iface.UserProvider](h.registry, providerKey)
+		if !ok || provider == nil {
+			return nil, huma.Error503ServiceUnavailable("user provider not configured for tenant tier")
+		}
+		u, err := provider.GetUserByEmail(ctx, strings.ToLower(strings.TrimSpace(in.Body.UserEmail)))
+		if err != nil || u == nil {
+			return nil, huma.Error404NotFound("user not found")
+		}
+		userUUID = u.ID
+		resolvedEmail = u.Email
+	}
+
+	mbr, err := h.svc.AttachMember(ctx, in.TenantID, userUUID, in.Body.Role, in.Body.IsOwner)
+	if err != nil {
+		switch {
+		case errors.Is(err, services.ErrAttachInput):
+			return nil, huma.Error400BadRequest(err.Error())
+		case errors.Is(err, services.ErrMembershipExists):
+			return nil, huma.Error409Conflict("user is already a member of this tenant")
+		case errors.Is(err, repository.ErrNotFound):
+			return nil, huma.Error404NotFound("tenant not found")
+		default:
+			return nil, huma.Error500InternalServerError("attach failed", err)
+		}
+	}
+
+	out := &attachMemberAdminOutput{}
+	out.Body.Member = membershipRow{TenantMembership: *mbr, Email: resolvedEmail}
+	if out.Body.Member.Email == "" {
+		// Email was not resolved upfront (UUID-only request) — best-effort
+		// enrich for the response so the operator UI can render the row
+		// without an extra round trip.
+		h.enrichMemberEmails(ctx, in.TenantID, []membershipRow{out.Body.Member})
+	}
+	return out, nil
 }
 
 func (h *Handler) createInvite(ctx context.Context, in *inviteInput) (*inviteOutput, error) {
@@ -336,9 +461,20 @@ func (h *Handler) acceptInvite(ctx context.Context, in *acceptInviteInput) (*ten
 
 // --- Platform admin routes ---
 
+type adminMatchedMember struct {
+	UserUUID string `json:"userUUID"`
+	Email    string `json:"email"`
+	FullName string `json:"fullName,omitempty"`
+	Username string `json:"username,omitempty"`
+}
+
 type adminTenantListItem struct {
 	models.Tenant
 	MemberCount int `json:"memberCount"`
+	// MatchedMembers carries the member-side hits when the request used the
+	// `q` query param. Empty otherwise. Bounded by
+	// repository.MaxMatchedMembersPerTenant.
+	MatchedMembers []adminMatchedMember `json:"matchedMembers,omitempty"`
 }
 
 type adminTenantListInput struct {
@@ -351,6 +487,14 @@ type adminTenantListInput struct {
 	// RootsOnly restricts to tenants that have no parent (used by the Clients
 	// root list to exclude divisions).
 	RootsOnly bool `query:"rootsOnly"`
+	// Q narrows results to tenants whose name/slug match (case-insensitive
+	// substring) OR who have at least one member whose email / fullName /
+	// username matches. Used by the search box on /admin/clients and
+	// /admin/internal/tenants. Empty disables the search path.
+	Q string `query:"q"`
+	// IncludeDeletedUsers controls whether soft-deleted users count as
+	// matches in Q's member-side join. Only meaningful when Q is set.
+	IncludeDeletedUsers bool `query:"includeDeletedUsers"`
 }
 
 type adminTenantListOutput struct {
@@ -436,6 +580,15 @@ func (h *Handler) RegisterAdminRoutes(api huma.API) {
 	}, h.listMembers)
 
 	huma.Register(api, huma.Operation{
+		OperationID: "attach-tenant-member-admin",
+		Method:      http.MethodPost,
+		Path:        "/v1/admin/tenants/{tenantId}/members",
+		Summary:     "Attach an existing user to a tenant (platform admin direct grant)",
+		Description: "Direct-grant alternative to the email invite flow. Looks up the target user by UUID or email (tier-aware), then inserts a membership row and creates the matching authz binding so the user can act in the tenant immediately. 404 when the tenant or user is missing, 409 when the user is already a member.",
+		Tags:        []string{"Tenants Admin"},
+	}, h.attachMemberAdmin)
+
+	huma.Register(api, huma.Operation{
 		OperationID: "remove-tenant-member-admin",
 		Method:      http.MethodDelete,
 		Path:        "/v1/admin/tenants/{tenantId}/members/{userUUID}",
@@ -505,27 +658,100 @@ func (h *Handler) RegisterAdminRoutes(api huma.API) {
 		Tags:        []string{"Tenants Admin"},
 	}, h.listTenantPaymentsAdmin)
 
-	huma.Register(api, huma.Operation{
-		OperationID: "get-tenant-billing-customer-admin",
-		Method:      http.MethodGet,
-		Path:        "/v1/admin/tenants/{tenantId}/billing-customer",
-		Summary:     "Get a tenant's linked FatturaPA customer (platform admin)",
-		Description: "Aggregator over the billing module. Returns 404 when no customer is linked or the billing addon is disabled. ADR-0001 PR-4.",
-		Tags:        []string{"Tenants Admin"},
-	}, h.getTenantBillingCustomerAdmin)
+	// --- Unified Client Aggregate (Phase 1) — billing-identity sub-document ---
 
 	huma.Register(api, huma.Operation{
-		OperationID: "promote-tenant-to-billing-customer-admin",
-		Method:      http.MethodPost,
-		Path:        "/v1/admin/tenants/{tenantId}/billing-customer",
-		Summary:     "Create a FatturaPA customer for the tenant (platform admin)",
-		Description: "Idempotent — when a customer is already linked, returns the existing row. Otherwise creates a new Customer pre-filled from the tenant's iface.Tenant fields (LegalName, VATNumber, FiscalCode, Country, Email). Address fields are intentionally left empty: iface.Tenant doesn't carry the breakdown. ADR-0001 PR-4.",
+		OperationID: "set-tenant-billing-identity-admin",
+		Method:      http.MethodPatch,
+		Path:        "/v1/admin/clients/{tenantId}/billing-identity",
+		Summary:     "Update a tenant's billing-identity sub-document (platform admin)",
+		Description: "Sets IsCompany, LegalName, VAT/fiscal codes, billing address, and the FatturaPA routing sub-document on a Tier-2 tenant. Phase 1 of the Unified Client Aggregate refactor — the data this endpoint writes is what Phase 5 will resolve via BillingTenantProvider in place of the soon-to-be-deleted billing.Customer row. All body fields are optional; nil leaves the existing value.",
 		Tags:        []string{"Tenants Admin"},
-	}, h.promoteTenantToBillingCustomerAdmin)
+	}, h.setTenantBillingIdentityAdmin)
+
+	huma.Register(api, huma.Operation{
+		OperationID: "set-tenant-italian-billable-admin",
+		Method:      http.MethodPost,
+		Path:        "/v1/admin/clients/{tenantId}/italian-billable",
+		Summary:     "Toggle a tenant's Italian-billable flag (platform admin)",
+		Description: "Flips Tenant.IsItalianBillable. Enabling requires a FatturaPA profile with at least one routing handle (CodiceDestinatario or PECDestinatario) — 422 otherwise. Disabling is unconditional.",
+		Tags:        []string{"Tenants Admin"},
+	}, h.setTenantItalianBillableAdmin)
+}
+
+// --- Unified Client Aggregate (Phase 1) handlers ---
+
+// setBillingIdentityInput is the wire shape for PATCH
+// /v1/admin/clients/{tenantId}/billing-identity. All fields optional;
+// missing fields leave the existing value untouched. FatturaPA is
+// wholesale-replaced when present so the operator UI can post a complete
+// sub-document without merge logic.
+type setBillingIdentityInput struct {
+	TenantID string `path:"tenantId"`
+	Body     struct {
+		IsCompany      *bool                    `json:"isCompany,omitempty" doc:"Legal-entity discriminator: false=natural person/sole-proprietor, true=corporation"`
+		LegalName      *string                  `json:"legalName,omitempty"`
+		VATNumber      *string                  `json:"vatNumber,omitempty"`
+		FiscalCode     *string                  `json:"fiscalCode,omitempty"`
+		BillingAddress *models.TenantAddress    `json:"billingAddress,omitempty"`
+		FatturaPA      *models.FatturaPAProfile `json:"fatturaPA,omitempty" doc:"FatturaPA routing sub-document — required when IsItalianBillable is true"`
+	}
+}
+
+type setItalianBillableInput struct {
+	TenantID string `path:"tenantId"`
+	Body     struct {
+		Enabled bool `json:"enabled" doc:"true to enable Italian billable mode (requires FatturaPA routing); false to disable"`
+	}
+}
+
+func (h *Handler) setTenantBillingIdentityAdmin(ctx context.Context, in *setBillingIdentityInput) (*tenantOutput, error) {
+	svcInput := services.SetBillingIdentityInput{
+		IsCompany:      in.Body.IsCompany,
+		LegalName:      in.Body.LegalName,
+		VATNumber:      in.Body.VATNumber,
+		FiscalCode:     in.Body.FiscalCode,
+		BillingAddress: in.Body.BillingAddress,
+		FatturaPA:      in.Body.FatturaPA,
+	}
+	if err := h.svc.SetBillingIdentity(ctx, in.TenantID, svcInput); err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, huma.Error404NotFound("tenant not found")
+		}
+		return nil, huma.Error400BadRequest("billing-identity update failed: " + err.Error())
+	}
+	t, err := h.svc.GetTenantModel(ctx, in.TenantID)
+	if err != nil {
+		return nil, huma.Error404NotFound("tenant not found")
+	}
+	return &tenantOutput{Body: t}, nil
+}
+
+func (h *Handler) setTenantItalianBillableAdmin(ctx context.Context, in *setItalianBillableInput) (*tenantOutput, error) {
+	if err := h.svc.SetItalianBillable(ctx, in.TenantID, in.Body.Enabled); err != nil {
+		switch {
+		case errors.Is(err, repository.ErrNotFound):
+			return nil, huma.Error404NotFound("tenant not found")
+		case errors.Is(err, services.ErrItalianBillableMissingProfile):
+			return nil, huma.Error422UnprocessableEntity(err.Error())
+		default:
+			return nil, huma.Error400BadRequest("italian-billable toggle failed: " + err.Error())
+		}
+	}
+	t, err := h.svc.GetTenantModel(ctx, in.TenantID)
+	if err != nil {
+		return nil, huma.Error404NotFound("tenant not found")
+	}
+	return &tenantOutput{Body: t}, nil
 }
 
 func (h *Handler) listAllTenantsAdmin(ctx context.Context, in *adminTenantListInput) (*adminTenantListOutput, error) {
-	filter := repository.TenantListFilter{IncludeDeleted: in.IncludeDeleted, RootsOnly: in.RootsOnly}
+	filter := repository.TenantListFilter{
+		IncludeDeleted:      in.IncludeDeleted,
+		RootsOnly:           in.RootsOnly,
+		Q:                   strings.TrimSpace(in.Q),
+		IncludeDeletedUsers: in.IncludeDeletedUsers,
+	}
 	if in.Kind != "" {
 		kind := models.TenantKind(in.Kind)
 		if !kind.Valid() {
@@ -544,7 +770,19 @@ func (h *Handler) listAllTenantsAdmin(ctx context.Context, in *adminTenantListIn
 	out := &adminTenantListOutput{}
 	out.Body.Tenants = make([]adminTenantListItem, 0, len(views))
 	for _, v := range views {
-		out.Body.Tenants = append(out.Body.Tenants, adminTenantListItem{Tenant: *v.Tenant, MemberCount: v.MemberCount})
+		item := adminTenantListItem{Tenant: *v.Tenant, MemberCount: v.MemberCount}
+		if len(v.MatchedMembers) > 0 {
+			item.MatchedMembers = make([]adminMatchedMember, len(v.MatchedMembers))
+			for i, m := range v.MatchedMembers {
+				item.MatchedMembers[i] = adminMatchedMember{
+					UserUUID: m.UserUUID,
+					Email:    m.Email,
+					FullName: m.FullName,
+					Username: m.Username,
+				}
+			}
+		}
+		out.Body.Tenants = append(out.Body.Tenants, item)
 	}
 	return out, nil
 }
@@ -639,10 +877,6 @@ type tenantPaymentsOutput struct {
 	}
 }
 
-type tenantBillingCustomerOutput struct {
-	Body *iface.TenantBillingCustomer
-}
-
 // listTenantSubscriptionsAdmin proxies to the subscriptions module via the
 // TenantSubscriptionProvider iface. When the addon is disabled (nil
 // registry lookup) the endpoint returns an empty list rather than 500 —
@@ -684,80 +918,160 @@ func (h *Handler) listTenantPaymentsAdmin(ctx context.Context, in *tenantIDPath)
 	return out, nil
 }
 
-// getTenantBillingCustomerAdmin returns the FatturaPA Customer linked to
-// the given tenant. Diverges from the listing aggregators: rather than
-// returning [] when no link exists, it returns 404 — the resource is
-// singular, not a collection. Returns 404 (with a different reason) when
-// the billing module is disabled, so the admin UI can degrade gracefully.
-// ADR-0001 PR-4.
-func (h *Handler) getTenantBillingCustomerAdmin(ctx context.Context, in *tenantIDPath) (*tenantBillingCustomerOutput, error) {
-	if h.registry == nil {
-		return nil, huma.Error404NotFound("billing module unavailable")
-	}
-	provider, ok := module.GetTyped[iface.TenantBillingCustomerProvider](h.registry, module.ServiceTenantBillingCustomerProvider)
-	if !ok || provider == nil {
-		return nil, huma.Error404NotFound("billing module unavailable")
-	}
-	customer, err := provider.GetByTenant(ctx, in.TenantID)
-	if err != nil {
-		return nil, huma.Error500InternalServerError("failed to load tenant billing customer", err)
-	}
-	if customer == nil {
-		return nil, huma.Error404NotFound("no billing customer linked to this tenant")
-	}
-	return &tenantBillingCustomerOutput{Body: customer}, nil
+// --- Unified Client Aggregate (Phase 6) — Tier-2 self-service ---
+
+// BillingIdentityDTO is the focused projection returned by the self-service
+// /v1/me/billing-identity endpoints. Trimmed from the full Tenant model so
+// the client surface doesn't leak operator-only fields (KMSKeyID, Plan,
+// IdPConfigUUID, etc.) and stays stable independently of the tenant aggregate.
+type BillingIdentityDTO struct {
+	TenantID          string                   `json:"tenantId"`
+	IsCompany         bool                     `json:"isCompany"`
+	IsItalianBillable bool                     `json:"isItalianBillable"`
+	LegalName         string                   `json:"legalName,omitempty"`
+	VATNumber         string                   `json:"vatNumber,omitempty"`
+	FiscalCode        string                   `json:"fiscalCode,omitempty"`
+	BillingAddress    models.TenantAddress     `json:"billingAddress,omitempty"`
+	FatturaPA         *models.FatturaPAProfile `json:"fatturaPA,omitempty"`
 }
 
-// promoteTenantToBillingCustomerAdmin creates (or returns the existing)
-// FatturaPA Customer for the given tenant. Idempotent — repeat calls
-// return the existing row. Errors are mapped to specific HTTP statuses so
-// the frontend can show a meaningful toast:
-//
-//   - 503 when the billing module is disabled (registry has no provider)
-//   - 404 when the tenant doesn't exist
-//   - 422 when the tenant is internal (only Tier-2 can have a billing profile)
-//   - 422 when the tenant has no LegalName/Name to seed Denomination
-//   - 500 for everything else
-//
-// ADR-0001 PR-4.
-func (h *Handler) promoteTenantToBillingCustomerAdmin(ctx context.Context, in *tenantIDPath) (*tenantBillingCustomerOutput, error) {
-	if h.registry == nil {
-		return nil, huma.Error503ServiceUnavailable("billing module unavailable")
-	}
-	provider, ok := module.GetTyped[iface.TenantBillingCustomerProvider](h.registry, module.ServiceTenantBillingCustomerProvider)
-	if !ok || provider == nil {
-		return nil, huma.Error503ServiceUnavailable("billing module unavailable")
-	}
-	customer, err := provider.PromoteTenant(ctx, in.TenantID)
-	if err != nil {
-		return nil, mapPromoteCustomerError(err)
-	}
-	return &tenantBillingCustomerOutput{Body: customer}, nil
+type billingIdentityOutput struct {
+	Body BillingIdentityDTO
 }
 
-// mapPromoteCustomerError translates the billing service's sentinel errors
-// into Huma HTTP errors. Kept as a small helper so the handler stays
-// declarative. Imports from the billing services package would cause an
-// import cycle (billing → iface → core/tenant via aggregator), so we
-// match on the error message instead — the sentinels are documented on
-// iface.TenantBillingCustomerProvider for that reason.
-func mapPromoteCustomerError(err error) error {
-	if err == nil {
-		return nil
-	}
-	msg := err.Error()
-	switch msg {
-	case "tenant not found":
-		return huma.Error404NotFound(msg)
-	case "tenant is not an external (Tier-2) tenant":
-		return huma.Error422UnprocessableEntity(msg)
-	case "tenant has no name to derive customer denomination from":
-		return huma.Error422UnprocessableEntity(msg)
-	case "tenant provider unavailable":
-		return huma.Error503ServiceUnavailable(msg)
-	case "tenantUUID is required":
-		return huma.Error400BadRequest(msg)
-	default:
-		return huma.Error500InternalServerError("failed to promote tenant", err)
+type setMyBillingIdentityInput struct {
+	Body struct {
+		IsCompany      *bool                    `json:"isCompany,omitempty" doc:"Legal-entity discriminator: false=natural person/sole-proprietor, true=corporation"`
+		LegalName      *string                  `json:"legalName,omitempty"`
+		VATNumber      *string                  `json:"vatNumber,omitempty"`
+		FiscalCode     *string                  `json:"fiscalCode,omitempty"`
+		BillingAddress *models.TenantAddress    `json:"billingAddress,omitempty"`
+		FatturaPA      *models.FatturaPAProfile `json:"fatturaPA,omitempty" doc:"FatturaPA routing sub-document — required when IsItalianBillable is true"`
 	}
 }
+
+type setMyItalianBillableInput struct {
+	Body struct {
+		Enabled bool `json:"enabled"`
+	}
+}
+
+// RegisterClientRoutes mounts the Tier-2 self-service billing-identity surface
+// on the client audience. Each handler resolves the caller's personal tenant
+// via EnsureTenantForUser (lazy provisioning), then delegates to the same
+// service methods the admin endpoints call. Tier-2 users never see another
+// tenant's data — the personal tenant is keyed by the authenticated userUUID.
+func (h *Handler) RegisterClientRoutes(api huma.API) {
+	huma.Register(api, huma.Operation{
+		OperationID: "get-my-billing-identity",
+		Method:      http.MethodGet,
+		Path:        "/v1/me/billing-identity",
+		Summary:     "Read the caller's billing identity",
+		Description: "Returns the billing-identity sub-document of the caller's personal tenant. Lazy-provisions the personal tenant on first call.",
+		Tags:        []string{"Tenants"},
+	}, h.getMyBillingIdentity)
+
+	huma.Register(api, huma.Operation{
+		OperationID: "set-my-billing-identity",
+		Method:      http.MethodPatch,
+		Path:        "/v1/me/billing-identity",
+		Summary:     "Update the caller's billing identity",
+		Description: "Patches IsCompany, LegalName, VAT/fiscal codes, billing address, and the FatturaPA routing sub-document on the caller's personal tenant. All fields optional; nil leaves the existing value. FatturaPA is wholesale-replaced when present.",
+		Tags:        []string{"Tenants"},
+	}, h.setMyBillingIdentity)
+
+	huma.Register(api, huma.Operation{
+		OperationID: "set-my-italian-billable",
+		Method:      http.MethodPost,
+		Path:        "/v1/me/italian-billable",
+		Summary:     "Toggle the caller's Italian-billable flag",
+		Description: "Flips Tenant.IsItalianBillable on the caller's personal tenant. Enabling requires a FatturaPA profile with CodiceDestinatario or PECDestinatario (422 otherwise); disabling is unconditional.",
+		Tags:        []string{"Tenants"},
+	}, h.setMyItalianBillable)
+}
+
+func (h *Handler) resolveCallerTenant(ctx context.Context) (*models.Tenant, error) {
+	userUUID, ok := middleware.GetUserUUID(ctx)
+	if !ok {
+		return nil, huma.Error401Unauthorized("not authenticated")
+	}
+	personal, err := h.svc.EnsureTenantForUser(ctx, userUUID)
+	if err != nil {
+		return nil, huma.Error500InternalServerError("failed to resolve personal tenant", err)
+	}
+	t, err := h.svc.GetTenantModel(ctx, personal.UUID)
+	if err != nil {
+		return nil, huma.Error500InternalServerError("failed to load personal tenant", err)
+	}
+	return t, nil
+}
+
+func tenantToBillingIdentityDTO(t *models.Tenant) BillingIdentityDTO {
+	return BillingIdentityDTO{
+		TenantID:          t.UUID,
+		IsCompany:         t.IsCompany,
+		IsItalianBillable: t.IsItalianBillable,
+		LegalName:         t.LegalName,
+		VATNumber:         t.VATNumber,
+		FiscalCode:        t.FiscalCode,
+		BillingAddress:    t.BillingAddress,
+		FatturaPA:         t.FatturaPA,
+	}
+}
+
+func (h *Handler) getMyBillingIdentity(ctx context.Context, _ *struct{}) (*billingIdentityOutput, error) {
+	t, err := h.resolveCallerTenant(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &billingIdentityOutput{Body: tenantToBillingIdentityDTO(t)}, nil
+}
+
+func (h *Handler) setMyBillingIdentity(ctx context.Context, in *setMyBillingIdentityInput) (*billingIdentityOutput, error) {
+	t, err := h.resolveCallerTenant(ctx)
+	if err != nil {
+		return nil, err
+	}
+	svcInput := services.SetBillingIdentityInput{
+		IsCompany:      in.Body.IsCompany,
+		LegalName:      in.Body.LegalName,
+		VATNumber:      in.Body.VATNumber,
+		FiscalCode:     in.Body.FiscalCode,
+		BillingAddress: in.Body.BillingAddress,
+		FatturaPA:      in.Body.FatturaPA,
+	}
+	if err := h.svc.SetBillingIdentity(ctx, t.UUID, svcInput); err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, huma.Error404NotFound("tenant not found")
+		}
+		return nil, huma.Error400BadRequest("billing-identity update failed: " + err.Error())
+	}
+	updated, err := h.svc.GetTenantModel(ctx, t.UUID)
+	if err != nil {
+		return nil, huma.Error404NotFound("tenant not found")
+	}
+	return &billingIdentityOutput{Body: tenantToBillingIdentityDTO(updated)}, nil
+}
+
+func (h *Handler) setMyItalianBillable(ctx context.Context, in *setMyItalianBillableInput) (*billingIdentityOutput, error) {
+	t, err := h.resolveCallerTenant(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := h.svc.SetItalianBillable(ctx, t.UUID, in.Body.Enabled); err != nil {
+		switch {
+		case errors.Is(err, repository.ErrNotFound):
+			return nil, huma.Error404NotFound("tenant not found")
+		case errors.Is(err, services.ErrItalianBillableMissingProfile):
+			return nil, huma.Error422UnprocessableEntity(err.Error())
+		default:
+			return nil, huma.Error400BadRequest("italian-billable toggle failed: " + err.Error())
+		}
+	}
+	updated, err := h.svc.GetTenantModel(ctx, t.UUID)
+	if err != nil {
+		return nil, huma.Error404NotFound("tenant not found")
+	}
+	return &billingIdentityOutput{Body: tenantToBillingIdentityDTO(updated)}, nil
+}
+

@@ -55,7 +55,7 @@ func (m *DocumentsModule) Collections() []module.CollectionSpec {
 
 func (m *DocumentsModule) NavItems() []module.NavItemSpec {
 	return []module.NavItemSpec{
-		{Realm: "shared", Section: "Tools", Name: "Document Templates", Icon: "file-alt", Path: "/documents/templates", Active: true},
+		{Realm: "shared", Section: "Tools", Name: "Document Templates", Icon: "file-alt", Path: "/documents/templates", MinRole: "manager", Active: true},
 	}
 }
 

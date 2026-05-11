@@ -24,20 +24,41 @@ type OAuthStateService interface {
 	CleanupExpiredStates(ctx context.Context) error
 }
 
-// StoreOAuthStateRequest contains parameters for storing OAuth state
+// StoreOAuthStateRequest contains parameters for storing OAuth state.
+//
+// Tier (ADR-0003 PR-D D-6) records which audience initiated the flow —
+// "operator", "client", or "" for legacy pre-cutover paths. Stored
+// alongside the side data so the callback can cross-check the value
+// against the tier claim in the signed-state JWT; mismatch is rejected
+// the same as a forged state.
+//
+// State (ADR-0003 PR-D D-6) is the externally-visible OAuth state value
+// returned to the caller. When empty, StoreOAuthState mints a fresh
+// random nonce as before; D-6 supplies the JWT-signed value here so the
+// Redis row is keyed by the same CSRF nonce embedded in the JWT.
 type StoreOAuthStateRequest struct {
 	Provider        models.OAuthProvider    `json:"provider"`
+	Tier            string                  `json:"tier"`
+	State           string                  `json:"state"`
 	RedirectURI     string                  `json:"redirectUri"`
 	CodeVerifier    string                  `json:"codeVerifier"`  // PKCE code verifier
 	CodeChallenge   string                  `json:"codeChallenge"` // PKCE code challenge
 	DeviceInfo      *models.DeviceInfo      `json:"deviceInfo"`
 	SecurityContext *models.SecurityContext `json:"securityContext"`
 	ExpiryDuration  time.Duration           `json:"expiryDuration"` // Default: 10 minutes
+	// Mode + LinkUserUUID — see OAuthStateClaims. Mirrored on the
+	// Redis side-data row so the callback can cross-check against the
+	// signed-state JWT (defeats tampering with one half in isolation).
+	Mode         string `json:"mode,omitempty"`
+	LinkUserUUID string `json:"linkUserUuid,omitempty"`
 }
 
-// OAuthStateInfo contains stored OAuth state information
+// OAuthStateInfo contains stored OAuth state information. Tier mirrors
+// StoreOAuthStateRequest.Tier so the callback can confirm the
+// signed-state JWT's tier matches what the start endpoint stamped here.
 type OAuthStateInfo struct {
 	State           string                  `json:"state"`
+	Tier            string                  `json:"tier,omitempty"`
 	Provider        models.OAuthProvider    `json:"provider"`
 	RedirectURI     string                  `json:"redirectUri"`
 	CodeVerifier    string                  `json:"codeVerifier"`
@@ -46,6 +67,9 @@ type OAuthStateInfo struct {
 	SecurityContext *models.SecurityContext `json:"securityContext"`
 	CreatedAt       time.Time               `json:"createdAt"`
 	ExpiresAt       time.Time               `json:"expiresAt"`
+	// Mode + LinkUserUUID — see StoreOAuthStateRequest.
+	Mode         string `json:"mode,omitempty"`
+	LinkUserUUID string `json:"linkUserUuid,omitempty"`
 }
 
 // OAuthStateStore defines the storage interface for OAuth states
@@ -68,12 +92,18 @@ func NewOAuthStateService(store OAuthStateStore) OAuthStateService {
 }
 
 func (s *oAuthStateService) StoreOAuthState(ctx context.Context, request *StoreOAuthStateRequest) (*OAuthStateInfo, error) {
-	// Generate cryptographically secure state
-	stateBytes := make([]byte, 32)
-	if _, err := rand.Read(stateBytes); err != nil {
-		return nil, fmt.Errorf("failed to generate OAuth state: %w", err)
+	// ADR-0003 PR-D D-6: callers signing a state JWT supply the CSRF
+	// nonce as request.State so the Redis row is keyed by the same
+	// value embedded in the JWT. Pre-D-6 callers leave it empty and the
+	// service mints an opaque random state (legacy behaviour).
+	state := request.State
+	if state == "" {
+		stateBytes := make([]byte, 32)
+		if _, err := rand.Read(stateBytes); err != nil {
+			return nil, fmt.Errorf("failed to generate OAuth state: %w", err)
+		}
+		state = base64.RawURLEncoding.EncodeToString(stateBytes)
 	}
-	state := base64.RawURLEncoding.EncodeToString(stateBytes)
 
 	// Set default expiry if not provided
 	expiry := request.ExpiryDuration
@@ -84,6 +114,7 @@ func (s *oAuthStateService) StoreOAuthState(ctx context.Context, request *StoreO
 	// Create state info
 	stateInfo := &OAuthStateInfo{
 		State:           state,
+		Tier:            request.Tier,
 		Provider:        request.Provider,
 		RedirectURI:     request.RedirectURI,
 		CodeVerifier:    request.CodeVerifier,
@@ -92,6 +123,8 @@ func (s *oAuthStateService) StoreOAuthState(ctx context.Context, request *StoreO
 		SecurityContext: request.SecurityContext,
 		CreatedAt:       time.Now(),
 		ExpiresAt:       time.Now().Add(expiry),
+		Mode:            request.Mode,
+		LinkUserUUID:    request.LinkUserUUID,
 	}
 
 	// Serialize state info

@@ -3,7 +3,7 @@ package remote
 import (
 	"context"
 
-	ragModels "github.com/orkestra/backend/internal/addons/rag/models"
+	"github.com/orkestra/backend/internal/shared/iface"
 )
 
 // RemoteRAGQueryProvider implements iface.RAGQueryProvider by calling the AI
@@ -28,7 +28,7 @@ func (p *RemoteRAGQueryProvider) Query(
 	minScore float64,
 	isoStandard, llmOverrideUUID, requirementLevel, nodeType, retrievalMode string,
 	documentUUIDs []string,
-) (*ragModels.RAGQueryResponse, error) {
+) (*iface.RAGQueryResponse, error) {
 	reqBody := map[string]interface{}{
 		"question":         question,
 		"topK":             topK,
@@ -41,7 +41,7 @@ func (p *RemoteRAGQueryProvider) Query(
 		"documentUuids":    documentUUIDs,
 	}
 
-	var resp ragModels.RAGQueryResponse
+	var resp iface.RAGQueryResponse
 	if err := p.client.post(ctx, "/v1/internal/rag/query", reqBody, &resp); err != nil {
 		return nil, err
 	}

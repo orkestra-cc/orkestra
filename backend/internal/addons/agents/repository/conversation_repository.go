@@ -40,7 +40,7 @@ func NewConversationRepository(db *mongo.Database) ConversationRepository {
 		{Keys: bson.D{{Key: "projectUuid", Value: 1}, {Key: "createdAt", Value: -1}}},
 		{Keys: bson.D{{Key: "userUuid", Value: 1}}},
 	}
-	coll.Indexes().CreateMany(ctx, indexes) //nolint:errcheck
+	coll.Indexes().CreateMany(ctx, indexes) //nolint:errcheck // best-effort index ensure; subsequent reads will surface persistent failures
 
 	return &conversationRepository{collection: coll}
 }

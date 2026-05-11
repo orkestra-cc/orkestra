@@ -120,6 +120,12 @@ services:
       COOKIE_SECRET: ${COOKIE_SECRET}
       COOKIE_NAME: ${COOKIE_NAME:-orkestra_cookie}
       COOKIE_DOMAIN: ${COOKIE_DOMAIN:-}
+      # ADR-0003 PR-D D-9: minimal profile is single-host on
+      # localhost:8050 — leave both empty so cookies fall back to
+      # COOKIE_DOMAIN (which is also empty, scoping the cookie to the
+      # exact host that minted it).
+      OPERATOR_COOKIE_DOMAIN: ${OPERATOR_COOKIE_DOMAIN:-}
+      CLIENT_COOKIE_DOMAIN: ${CLIENT_COOKIE_DOMAIN:-}
       COOKIE_HTTP_ONLY: ${COOKIE_HTTP_ONLY:-true}
       COOKIE_SECURE: ${COOKIE_SECURE:-false}
       COOKIE_SAME_SITE: ${COOKIE_SAME_SITE:-lax}
@@ -152,9 +158,9 @@ services:
     networks:
       - orkestra-network
 
-  frontend:
+  frontend-admin:
     build:
-      context: ../frontend
+      context: ../frontend-admin
       dockerfile: Dockerfile
       target: production
       args:
@@ -164,8 +170,8 @@ services:
         VITE_PUBLIC_URL: /
         VITE_ENV: development
         VITE_DEBUG: "true"
-    image: orkestra-frontend:minimal
-    container_name: orkestra-frontend-minimal
+    image: orkestra-frontend-admin:minimal
+    container_name: orkestra-frontend-admin-minimal
     restart: unless-stopped
     depends_on:
       - backend

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 
-	"github.com/orkestra/backend/internal/addons/aimodels/providers"
 	"github.com/orkestra/backend/internal/shared/iface"
 )
 
@@ -24,19 +23,19 @@ func NewAIModelProvider(aiServiceURL string) *RemoteAIModelProvider {
 	}
 }
 
-func (p *RemoteAIModelProvider) GetDefaultEmbeddingProvider(ctx context.Context) (providers.EmbeddingProvider, error) {
+func (p *RemoteAIModelProvider) GetDefaultEmbeddingProvider(ctx context.Context) (iface.EmbeddingProvider, error) {
 	return newRemoteEmbeddingProvider(p.client, "")
 }
 
-func (p *RemoteAIModelProvider) GetDefaultLLMProvider(ctx context.Context) (providers.LLMProvider, error) {
+func (p *RemoteAIModelProvider) GetDefaultLLMProvider(ctx context.Context) (iface.LLMProvider, error) {
 	return newRemoteLLMProvider(p.client, "")
 }
 
-func (p *RemoteAIModelProvider) GetLLMProvider(ctx context.Context, uuid string) (providers.LLMProvider, error) {
+func (p *RemoteAIModelProvider) GetLLMProvider(ctx context.Context, uuid string) (iface.LLMProvider, error) {
 	return newRemoteLLMProvider(p.client, uuid)
 }
 
-func (p *RemoteAIModelProvider) GetEmbeddingProvider(ctx context.Context, uuid string) (providers.EmbeddingProvider, error) {
+func (p *RemoteAIModelProvider) GetEmbeddingProvider(ctx context.Context, uuid string) (iface.EmbeddingProvider, error) {
 	return newRemoteEmbeddingProvider(p.client, uuid)
 }
 

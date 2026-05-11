@@ -53,7 +53,7 @@ type ListInvoicesRequest struct {
 	Direction    string `query:"direction" enum:"issued,received" doc:"Filter by direction (issued/received)"`
 	Status       string `query:"status" enum:"draft,pending,sent,delivered,rejected,accepted,paid,cancelled" doc:"Filter by status"`
 	SDIStatus    string `query:"sdiStatus" enum:"RC,NS,MC,NE,DT,AT" doc:"Filter by SDI status"`
-	CustomerID   string `query:"customerId" doc:"Filter by customer ID"`
+	TenantUUID   string `query:"tenantUUID" doc:"Filter by Tier-2 tenant UUID (cessionario committente)"`
 	SupplierID   string `query:"supplierId" doc:"Filter by supplier ID"`
 	FromDate     string `query:"fromDate" doc:"Filter invoices from this date (YYYY-MM-DD)"`
 	ToDate       string `query:"toDate" doc:"Filter invoices to this date (YYYY-MM-DD)"`
@@ -228,8 +228,8 @@ func (h *InvoiceHandler) CreateInvoice(ctx context.Context, req *CreateInvoiceRe
 	invoice, err := h.invoiceService.CreateInvoice(ctx, &req.Body, userID)
 	if err != nil {
 		switch err {
-		case services.ErrCustomerNotFound:
-			return nil, huma.Error404NotFound("Customer not found", err)
+		case services.ErrTenantNotBillable:
+			return nil, huma.Error422UnprocessableEntity("Tenant has no FatturaPA profile in its ancestor chain", err)
 		case services.ErrInvalidInvoiceData:
 			return nil, huma.Error400BadRequest("Invalid invoice data", err)
 		default:
@@ -283,9 +283,9 @@ func (h *InvoiceHandler) ListInvoices(ctx context.Context, req *ListInvoicesRequ
 		filters.DocumentType = &docType
 	}
 
-	// Parse customer/supplier IDs
-	if req.CustomerID != "" {
-		filters.CustomerID = req.CustomerID
+	// Parse tenant/supplier IDs
+	if req.TenantUUID != "" {
+		filters.TenantUUID = req.TenantUUID
 	}
 	if req.SupplierID != "" {
 		filters.SupplierID = req.SupplierID

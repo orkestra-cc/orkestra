@@ -47,7 +47,7 @@ func NewProjectRepository(db *mongo.Database) ProjectRepository {
 				SetUnique(true),
 		},
 	}
-	coll.Indexes().CreateMany(ctx, indexes) //nolint:errcheck
+	coll.Indexes().CreateMany(ctx, indexes) //nolint:errcheck // best-effort index ensure; subsequent reads will surface persistent failures
 
 	return &projectRepository{collection: coll}
 }

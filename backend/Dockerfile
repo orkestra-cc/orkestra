@@ -65,11 +65,17 @@ COPY . .
 ARG VERSION=dev
 ARG BUILD_TIME
 ARG GIT_COMMIT
+# BUILD_TAGS selects the addon profile baked into the binary. Empty (default)
+# matches the !no_addons branch in cmd/server/catalog_<addon>.go and pulls
+# every addon — same behavior as before profile builds existed. Set to e.g.
+# "no_addons addon_billing addon_documents" to ship a curated SKU.
+ARG BUILD_TAGS=""
 
 # Build optimized binary
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
     -a \
     -installsuffix cgo \
+    -tags "${BUILD_TAGS}" \
     -ldflags="-w -s \
     -X main.Version=${VERSION} \
     -X main.BuildTime=${BUILD_TIME} \

@@ -205,6 +205,23 @@ func (r *Repository) DeleteBindingsByRoleUUID(ctx context.Context, roleUUID stri
 	return res.DeletedCount, nil
 }
 
+// DeleteBindingsByTenant removes every tenant-scoped binding for the given
+// tenant. Called by the cascade hook the authz module registers on the
+// tenant service so a deleted tenant leaves no dangling org_owner /
+// org_admin / custom-role bindings. Global bindings (tenantId=="") are
+// untouched — those carry platform system roles that outlive any single
+// tenant.
+func (r *Repository) DeleteBindingsByTenant(ctx context.Context, tenantUUID string) (int64, error) {
+	if tenantUUID == "" {
+		return 0, nil
+	}
+	res, err := r.db.Collection(CollBindings).DeleteMany(ctx, bson.M{"tenantId": tenantUUID})
+	if err != nil {
+		return 0, err
+	}
+	return res.DeletedCount, nil
+}
+
 // ListActiveBindingsForUser returns all bindings for (userUUID, tenantID)
 // that have not expired. Pass tenantID="" to fetch global/system bindings.
 func (r *Repository) ListActiveBindingsForUser(ctx context.Context, userUUID, tenantID string) ([]models.Binding, error) {

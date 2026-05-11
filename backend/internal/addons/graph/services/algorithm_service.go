@@ -8,11 +8,12 @@ import (
 
 	"github.com/orkestra/backend/internal/addons/graph/models"
 	"github.com/orkestra/backend/internal/addons/graph/repository"
+	"github.com/orkestra/backend/internal/shared/iface"
 )
 
 // AlgorithmService defines the interface for graph algorithm operations (MAGE)
 type AlgorithmService interface {
-	RunAlgorithm(ctx context.Context, database string, req models.AlgorithmRequest) (*models.QueryResult, error)
+	RunAlgorithm(ctx context.Context, database string, req models.AlgorithmRequest) (*iface.QueryResult, error)
 	ListAlgorithms(ctx context.Context) []models.AlgorithmInfo
 }
 
@@ -68,7 +69,7 @@ func isMageNotAvailable(err error) bool {
 		strings.Contains(err.Error(), "no procedure"))
 }
 
-func (s *algorithmService) RunAlgorithm(ctx context.Context, database string, req models.AlgorithmRequest) (*models.QueryResult, error) {
+func (s *algorithmService) RunAlgorithm(ctx context.Context, database string, req models.AlgorithmRequest) (*iface.QueryResult, error) {
 	if req.Algorithm == "" {
 		return nil, fmt.Errorf("algorithm name is required")
 	}
@@ -88,7 +89,7 @@ func (s *algorithmService) RunAlgorithm(ctx context.Context, database string, re
 	)
 
 	var (
-		result *models.QueryResult
+		result *iface.QueryResult
 		err    error
 	)
 	if algoDef.IsWrite {

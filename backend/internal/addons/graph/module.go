@@ -62,7 +62,7 @@ func (m *GraphModule) ConfigSchema() []module.ConfigField {
 
 func (m *GraphModule) NavItems() []module.NavItemSpec {
 	return []module.NavItemSpec{
-		{Realm: "platform", Section: "Infrastructure", Tier: "internal", Name: "Graph Database", Icon: "project-diagram", Path: "/graph",
+		{Realm: "platform", Tier: "internal", Name: "Graph Database", Icon: "project-diagram", Path: "/graph", MinRole: "administrator",
 			Active: true,
 			Children: []module.NavItemSpec{
 				{Name: "Explorer", Icon: "search", Path: "/graph/explorer", Active: true},

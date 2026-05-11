@@ -42,7 +42,7 @@ func NewRelationshipTypeRepository(db *mongo.Database) RelationshipTypeRepositor
 		{Keys: bson.D{{Key: "uuid", Value: 1}}, Options: options.Index().SetUnique(true)},
 		{Keys: bson.D{{Key: "name", Value: 1}}, Options: options.Index().SetUnique(true)},
 	}
-	coll.Indexes().CreateMany(ctx, indexes) //nolint:errcheck
+	coll.Indexes().CreateMany(ctx, indexes) //nolint:errcheck // best-effort index ensure; subsequent reads will surface persistent failures
 
 	repo := &relationshipTypeRepository{collection: coll}
 
@@ -65,7 +65,7 @@ func (r *relationshipTypeRepository) seed(ctx context.Context) {
 		rt.UpdatedAt = now
 		docs[i] = rt
 	}
-	r.collection.InsertMany(ctx, docs) //nolint:errcheck
+	r.collection.InsertMany(ctx, docs) //nolint:errcheck // best-effort seed; caller does not depend on insert outcome
 }
 
 func (r *relationshipTypeRepository) List(ctx context.Context) ([]models.RelationshipTypeConfig, error) {
@@ -108,6 +108,9 @@ func (r *relationshipTypeRepository) Create(ctx context.Context, rt *models.Rela
 	return err
 }
 
+// Update mirrors the service signature so callers can pass nil to skip a field.
+//
+//nolint:gocritic // ptrToRefParam: intentional optional-update semantics for cats/props.
 func (r *relationshipTypeRepository) Update(ctx context.Context, uuid string, desc *string, props *[]string, cats *map[string]bool) (*models.RelationshipTypeConfig, error) {
 	set := bson.M{"updatedAt": time.Now()}
 	if desc != nil {

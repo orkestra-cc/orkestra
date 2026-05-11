@@ -13,8 +13,9 @@ type RedirectURIConfig struct {
 	AllowLocalhost      bool     `json:"allowLocalhost"`
 }
 
-// DefaultRedirectURIConfig returns a default configuration for redirect URI validation
-// DEPRECATED: Use NewRedirectURIConfig(allowLocalhost bool) instead for production safety
+// DefaultRedirectURIConfig returns a default configuration for redirect URI validation.
+//
+// Deprecated: use NewRedirectURIConfig(allowLocalhost bool) instead for production safety.
 func DefaultRedirectURIConfig() *RedirectURIConfig {
 	return NewRedirectURIConfig(true) // Default to allowing localhost for backwards compatibility
 }

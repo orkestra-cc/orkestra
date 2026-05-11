@@ -35,8 +35,11 @@ const (
 // so a database dump does not expose live credentials. WebAuthn credentials
 // store only public keys + counters, so no encryption is required for them.
 type MFAFactorDoc struct {
-	ID                primitive.ObjectID `bson:"_id,omitempty" json:"-"`
-	UUID              string             `bson:"uuid" json:"id"`
+	ID   primitive.ObjectID `bson:"_id,omitempty" json:"-"`
+	UUID string             `bson:"uuid" json:"id"`
+	// Tier is "operator" / "client" / "" — see auth/models.collections.go
+	// OAuthProviderDoc.Tier comment (ADR-0003 PR-D).
+	Tier              string             `bson:"tier,omitempty" json:"-"`
 	UserUUID          string             `bson:"userUuid" json:"userUuid"`
 	Type              MFAFactorType      `bson:"type" json:"type"`
 	SecretEnc         string             `bson:"secretEnc,omitempty" json:"-"`

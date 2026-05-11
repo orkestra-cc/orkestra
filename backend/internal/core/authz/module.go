@@ -55,7 +55,7 @@ func (m *Module) ProvidedServices() []module.ServiceKey {
 
 func (m *Module) NavItems() []module.NavItemSpec {
 	return []module.NavItemSpec{
-		{Realm: "platform", Section: "Admin", Tier: "internal", Name: "Role Management", Icon: "shield-alt", Path: "/admin/roles", Active: true},
+		{Realm: "platform", Tier: "internal", Name: "Role Management", Icon: "shield-alt", Path: "/admin/roles", MinRole: "administrator", Active: true},
 	}
 }
 
@@ -128,10 +128,15 @@ func (m *Module) Init(deps *module.Dependencies) error {
 	// registered (boot ordering) the Cedar principal simply has an empty
 	// capability set and the resource falls back to status="active".
 	tenantProvider, _ := module.GetTyped[iface.TenantProvider](deps.Services, module.ServiceTenantProvider)
+	accessProvider, _ := module.GetTyped[iface.AccessProvider](deps.Services, module.ServiceAccessProvider)
 	var lookupCaps services.TenantCapabilityLookup
 	var lookupTenantStatus services.TenantStatusLookup
+	if accessProvider != nil {
+		lookupCaps = func(ctx context.Context, tenantUUID string) ([]string, error) {
+			return accessProvider.ListCapabilityIDs(ctx, tenantUUID)
+		}
+	}
 	if tenantProvider != nil {
-		lookupCaps = tenantProvider.ListCapabilityIDs
 		lookupTenantStatus = func(ctx context.Context, tenantUUID string) (string, error) {
 			t, err := tenantProvider.GetTenant(ctx, tenantUUID)
 			if err != nil {
@@ -223,6 +228,19 @@ func (m *Module) Init(deps *module.Dependencies) error {
 				RoleUUID: role.UUID,
 			}); err != nil {
 				return fmt.Errorf("authz: bind owner role %q on tenant %s: %w", roleName, tenantUUID, err)
+			}
+			return nil
+		})
+		// Cascade hook: when a tenant is deleted or purged, drop every
+		// binding scoped to it. Without this, deleting a tenant leaves
+		// org_owner / org_admin / custom-role rows pointing at a
+		// nonexistent tenant — the next DB scan would surface them as
+		// orphans and the evaluator would still consult them when
+		// resolving permissions for a re-used tenant UUID.
+		svc := m.svc
+		tenantConcrete.RegisterPostDeleteHook(func(ctx context.Context, c tenantServices.TenantPostDeleteContext) error {
+			if _, err := svc.RemoveBindingsByTenant(ctx, c.TenantUUID); err != nil {
+				return fmt.Errorf("authz: remove tenant bindings: %w", err)
 			}
 			return nil
 		})

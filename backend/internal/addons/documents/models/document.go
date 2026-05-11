@@ -3,52 +3,34 @@ package models
 import (
 	"time"
 
-	"go.mongodb.org/mongo-driver/bson/primitive"
+	"github.com/orkestra/backend/internal/shared/iface"
 )
 
-// GeneratedDocument represents a PDF document that was generated
-type GeneratedDocument struct {
-	ID           primitive.ObjectID `bson:"_id,omitempty" json:"-"`
-	UUID         string             `bson:"uuid" json:"id"`
-	SourceType   SourceType         `bson:"sourceType" json:"sourceType"`     // Type of source (invoice, offer, custom)
-	SourceUUID   string             `bson:"sourceUuid" json:"sourceUuid"`     // UUID of source document (e.g., invoice UUID)
-	TemplateUUID string             `bson:"templateUuid" json:"templateUuid"` // UUID of template used
+// GeneratedDocument (and SourceType) live in shared/iface/document_types.go
+// so the cross-module contract layer doesn't import this addon. Only the
+// addon-internal "metadata-without-binary" projection stays here.
 
-	// File information
-	FileName    string `bson:"fileName" json:"fileName"`
-	FileSize    int64  `bson:"fileSize" json:"fileSize"`       // Size in bytes
-	ContentType string `bson:"contentType" json:"contentType"` // MIME type (application/pdf)
-
-	// PDF binary content (stored in MongoDB)
-	PDFContent []byte `bson:"pdfContent" json:"-"` // Binary PDF data, not exposed in JSON
-
-	// Generation metadata
-	GeneratedAt time.Time  `bson:"generatedAt" json:"generatedAt"`
-	GeneratedBy string     `bson:"generatedBy" json:"generatedBy"` // User UUID who generated it
-	ExpiresAt   *time.Time `bson:"expiresAt,omitempty" json:"expiresAt,omitempty"`
-
-	// Audit fields
-	CreatedAt time.Time  `bson:"createdAt" json:"createdAt"`
-	DeletedAt *time.Time `bson:"deletedAt,omitempty" json:"deletedAt,omitempty"`
-}
-
-// GeneratedDocumentMeta represents document metadata without the binary content
+// GeneratedDocumentMeta represents document metadata without the binary content.
+// Used by list endpoints that should not return PDF bytes.
 type GeneratedDocumentMeta struct {
-	UUID         string     `json:"id"`
-	SourceType   SourceType `json:"sourceType"`
-	SourceUUID   string     `json:"sourceUuid"`
-	TemplateUUID string     `json:"templateUuid"`
-	FileName     string     `json:"fileName"`
-	FileSize     int64      `json:"fileSize"`
-	ContentType  string     `json:"contentType"`
-	GeneratedAt  time.Time  `json:"generatedAt"`
-	GeneratedBy  string     `json:"generatedBy"`
-	ExpiresAt    *time.Time `json:"expiresAt,omitempty"`
-	CreatedAt    time.Time  `json:"createdAt"`
+	UUID         string           `json:"id"`
+	SourceType   iface.SourceType `json:"sourceType"`
+	SourceUUID   string           `json:"sourceUuid"`
+	TemplateUUID string           `json:"templateUuid"`
+	FileName     string           `json:"fileName"`
+	FileSize     int64            `json:"fileSize"`
+	ContentType  string           `json:"contentType"`
+	GeneratedAt  time.Time        `json:"generatedAt"`
+	GeneratedBy  string           `json:"generatedBy"`
+	ExpiresAt    *time.Time       `json:"expiresAt,omitempty"`
+	CreatedAt    time.Time        `json:"createdAt"`
 }
 
-// ToMeta converts a GeneratedDocument to GeneratedDocumentMeta (without binary content)
-func (d *GeneratedDocument) ToMeta() GeneratedDocumentMeta {
+// MetaOf builds a GeneratedDocumentMeta from an iface.GeneratedDocument
+// (the body without the binary). Replaces the previous d.ToMeta() method —
+// since the underlying type now lives in iface, the projection lives here
+// as a free function.
+func MetaOf(d *iface.GeneratedDocument) GeneratedDocumentMeta {
 	return GeneratedDocumentMeta{
 		UUID:         d.UUID,
 		SourceType:   d.SourceType,

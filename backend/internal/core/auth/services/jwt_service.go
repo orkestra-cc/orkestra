@@ -19,6 +19,11 @@ var (
 	ErrInvalidTokenType  = errors.New("invalid token type")
 	ErrInvalidSigningKey = errors.New("invalid signing key")
 	ErrJWTKeysNotLoaded  = errors.New("JWT keys not loaded - authentication is disabled")
+	// ErrMissingAudience signals a JWT v1 token (no `aud` claim). After
+	// ADR-0003 PR-D D-3's hard cutover the audience claim is mandatory
+	// at issuance, so any v1 token presented to the validator is rejected
+	// here. Surfaces to the boundary the same way as ErrInvalidToken.
+	ErrMissingAudience = errors.New("token is missing aud claim")
 )
 
 type JWTService interface {
@@ -88,22 +93,47 @@ func NewJWTService(privateKey *rsa.PrivateKey, publicKey *rsa.PublicKey, env str
 		accessExpiry:  accessTTL,
 		refreshExpiry: refreshTTL,
 		issuer:        issuerFor(env),
-		// ADR-0003 PR-C: every issued token is stamped with the operator
-		// audience. PR-D introduces per-tier issuance (operator/client/
-		// service) once the auth path split lands. Until then the monolith
-		// is single-aud and the host-mux RequireAudience middleware honours
-		// the legacy "orkestra-api" value for tokens minted before PR-C.
-		audience: LegacyAudienceOperator,
+		// ADR-0003 PR-D D-3: every monolith-issued token carries an
+		// audience claim (mandatory after the v2 cutover). The default
+		// here is operator; D-4/D-5 will let per-tier login paths
+		// override via NewJWTServiceWithAudience so client tokens
+		// are stamped aud=client.
+		audience: AudienceOperator,
 	}
 }
 
-// LegacyAudienceOperator is the JWT `aud` value stamped on every monolith-
-// issued access/refresh token at the PR-C boundary. The literal matches
-// shared/module.AudienceOperator; defined locally to avoid importing the
-// module package (which depends on iface, which the auth services already
-// implement — circular import). PR-D collapses this back into a single
-// shared constant once the JWT v2 cutover removes the transition path.
-const LegacyAudienceOperator = "operator"
+// NewJWTServiceWithAudience constructs a JWT service bound to a specific
+// audience. ADR-0003 PR-D's auth-path split (D-4 operator, D-5 client)
+// uses this so the matching login flow stamps the right `aud` value on
+// every minted access + refresh token. Empty audience is rejected — the
+// post-cutover invariant is that no monolith-issued token leaves the
+// boundary without a known audience.
+func NewJWTServiceWithAudience(privateKey *rsa.PrivateKey, publicKey *rsa.PublicKey, env, audience string, accessTTL, refreshTTL time.Duration) (JWTService, error) {
+	if audience == "" {
+		return nil, fmt.Errorf("jwt service: audience is required (ADR-0003 PR-D)")
+	}
+	svc := NewJWTService(privateKey, publicKey, env, accessTTL, refreshTTL).(*jwtService)
+	svc.audience = audience
+	return svc, nil
+}
+
+// Audience constants stamped on monolith-issued tokens. Mirror
+// shared/module.Audience{Operator,Client,Service}; defined locally to
+// avoid the auth services package depending on the module registry
+// (which depends on iface, which the auth services already implement —
+// circular import).
+const (
+	AudienceOperator = "operator"
+	AudienceClient   = "client"
+	AudienceService  = "service"
+)
+
+// LegacyAudienceOperator preserves the pre-PR-D constant name for any
+// remaining external callers; new code should use AudienceOperator.
+//
+// Deprecated: use AudienceOperator. Kept as an alias so the PR-D
+// commit's diff stays scoped to the cutover.
+const LegacyAudienceOperator = AudienceOperator
 
 // issuerFor produces the canonical iss claim value for a given environment.
 // An empty env is normalised to "development" so local dev and test code
@@ -232,12 +262,16 @@ func (s *jwtService) GenerateEnhancedRefreshToken(
 	expiresAt := now.Add(s.refreshExpiry)
 
 	claims := &models.JWTClaims{
-		UserUUID:    user.UUID,
-		Email:       user.Email,
-		TokenType:   "refresh",
-		ExpiresAt:   expiresAt.Unix(),
-		IssuedAt:    now.Unix(),
-		Issuer:      s.issuer,
+		UserUUID:  user.UUID,
+		Email:     user.Email,
+		TokenType: "refresh",
+		ExpiresAt: expiresAt.Unix(),
+		IssuedAt:  now.Unix(),
+		Issuer:    s.issuer,
+		// ADR-0003 PR-D D-3: refresh tokens carry the same audience as
+		// the access token they pair with. Cross-audience refresh is
+		// blocked at the host-mux's RequireAudience middleware.
+		Audience:    s.audience,
 		SessionID:   securityCtx.SessionID,
 		DeviceID:    deviceInfo.DeviceID,
 		Fingerprint: deviceInfo.Fingerprint,
@@ -340,6 +374,17 @@ func (s *jwtService) validateTokenEnhanced(tokenString string, expectedType stri
 	issuer, _ := mapClaims["iss"].(string)
 	if issuer != s.issuer {
 		return nil, ErrInvalidToken
+	}
+
+	// ADR-0003 PR-D D-3: aud is mandatory post-cutover. v1 tokens (no
+	// `aud` claim) are rejected here; the host-mux RequireAudience
+	// middleware also blocks them at an earlier stage but defense in
+	// depth at validation time keeps the contract explicit for any
+	// caller that bypasses the audience MW (sidecar internal calls,
+	// future test paths).
+	aud, _ := mapClaims["aud"].(string)
+	if aud == "" {
+		return nil, ErrMissingAudience
 	}
 
 	claims := s.mapToClaims(mapClaims)

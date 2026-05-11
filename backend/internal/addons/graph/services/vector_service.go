@@ -8,11 +8,12 @@ import (
 
 	"github.com/orkestra/backend/internal/addons/graph/models"
 	"github.com/orkestra/backend/internal/addons/graph/repository"
+	"github.com/orkestra/backend/internal/shared/iface"
 )
 
 // VectorService defines the interface for vector search operations
 type VectorService interface {
-	VectorSearch(ctx context.Context, database string, req models.VectorSearchRequest) (*models.QueryResult, error)
+	VectorSearch(ctx context.Context, database string, req models.VectorSearchRequest) (*iface.QueryResult, error)
 	ListVectorIndexes(ctx context.Context, database string) ([]models.VectorIndex, error)
 	CreateVectorIndex(ctx context.Context, database string, req models.CreateVectorIndexRequest) error
 	DropVectorIndex(ctx context.Context, database, name string) error
@@ -31,7 +32,7 @@ func NewVectorService(repo repository.GraphRepository, logger *slog.Logger) Vect
 	}
 }
 
-func (s *vectorService) VectorSearch(ctx context.Context, database string, req models.VectorSearchRequest) (*models.QueryResult, error) {
+func (s *vectorService) VectorSearch(ctx context.Context, database string, req models.VectorSearchRequest) (*iface.QueryResult, error) {
 	if req.IndexName == "" {
 		return nil, fmt.Errorf("index name is required")
 	}

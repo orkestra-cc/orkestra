@@ -37,9 +37,9 @@ documents/
 │   └── config.go              # Gotenberg configuration
 ├── models/
 │   ├── template.go            # Template model
-│   ├── document.go            # Generated document model
+│   ├── document.go            # GeneratedDocumentMeta projection + MetaOf() — the GeneratedDocument struct and SourceType enum live in shared/iface/document_types.go
 │   ├── dto.go                 # Request/Response DTOs
-│   └── enums.go               # TemplateType, PageSize, etc.
+│   └── enums.go               # TemplateType, PageSize, page orientation, etc.
 ├── repository/
 │   ├── template_repository.go # Template CRUD
 │   └── document_repository.go # Generated docs storage

@@ -91,44 +91,94 @@ func RegisterRoutes(api huma.API, userHandler *handlers.UserHandler) {
 		Security:    []map[string][]string{{"bearerAuth": {}}},
 	}, userHandler.GetUserCount)
 
-	// Document management operations
+}
+
+// RegisterAdminClientRoutes mounts the admin endpoints that operate on
+// the client_users tier — list / get / create / update / delete behind
+// the same system.users.admin gate as the legacy /v1/users surface.
+func RegisterAdminClientRoutes(api huma.API, h *handlers.AdminClientUserHandler) {
 	huma.Register(api, huma.Operation{
-		OperationID: "get-users-with-expired-documents",
+		OperationID: "list-client-users-admin",
 		Method:      http.MethodGet,
-		Path:        "/v1/users/expired-documents",
-		Summary:     "Get users with expired documents",
-		Description: "Retrieves users who have expired driver documents",
-		Tags:        []string{"Users", "Documents"},
+		Path:        "/v1/admin/client-users",
+		Summary:     "List Tier-2 client users with their tenant memberships",
+		Description: "Returns every client_users row joined with tenant memberships. Self-registered users with no memberships are included with an empty memberships array.",
+		Tags:        []string{"Users Admin"},
 		Security:    []map[string][]string{{"bearerAuth": {}}},
-	}, userHandler.GetUsersWithExpiredDocuments)
+	}, h.ListClientUsersAdmin)
 
 	huma.Register(api, huma.Operation{
-		OperationID: "get-users-with-expiring-soon-documents",
+		OperationID: "get-client-user-admin",
 		Method:      http.MethodGet,
-		Path:        "/v1/users/expiring-soon-documents",
-		Summary:     "Get users with documents expiring soon",
-		Description: "Retrieves users who have driver documents expiring within the specified number of days",
-		Tags:        []string{"Users", "Documents"},
+		Path:        "/v1/admin/client-users/{id}",
+		Summary:     "Get a single Tier-2 client user with tenant memberships",
+		Tags:        []string{"Users Admin"},
 		Security:    []map[string][]string{{"bearerAuth": {}}},
-	}, userHandler.GetUsersWithExpiringSoonDocuments)
+	}, h.GetClientUserAdmin)
 
 	huma.Register(api, huma.Operation{
-		OperationID: "update-user-documents",
+		OperationID: "update-client-user-admin",
 		Method:      http.MethodPatch,
-		Path:        "/v1/users/{id}/documents",
-		Summary:     "Update user documents",
-		Description: "Updates only the document-related fields for a user",
-		Tags:        []string{"Users", "Documents"},
+		Path:        "/v1/admin/client-users/{id}",
+		Summary:     "Update profile, role, or active status of a Tier-2 client user",
+		Tags:        []string{"Users Admin"},
 		Security:    []map[string][]string{{"bearerAuth": {}}},
-	}, userHandler.UpdateUserDocuments)
+	}, h.UpdateClientUserAdmin)
 
 	huma.Register(api, huma.Operation{
-		OperationID: "check-user-document-expiry",
-		Method:      http.MethodGet,
-		Path:        "/v1/users/{id}/check-expiry",
-		Summary:     "Check document expiry",
-		Description: "Checks which documents are expired for a specific user",
-		Tags:        []string{"Users", "Documents"},
+		OperationID: "delete-client-user-admin",
+		Method:      http.MethodDelete,
+		Path:        "/v1/admin/client-users/{id}",
+		Summary:     "Soft-delete a Tier-2 client user and free its email",
+		Description: "Calls SoftDeleteAndAliasEmail so the original address can be reused for a fresh signup. The original email is preserved on the user document for audit.",
+		Tags:        []string{"Users Admin"},
 		Security:    []map[string][]string{{"bearerAuth": {}}},
-	}, userHandler.CheckDocumentExpiry)
+	}, h.DeleteClientUserAdmin)
+
+	huma.Register(api, huma.Operation{
+		OperationID: "create-client-user-admin",
+		Method:      http.MethodPost,
+		Path:        "/v1/admin/client-users",
+		Summary:     "Admin-direct create of a Tier-2 client user",
+		Description: "Inserts a client_users row with the supplied password (validated against the live policy) and EmailVerified=true so the user can log in immediately. For an alternate flow that emails a token instead of needing a password, use POST /v1/admin/client-users/invite.",
+		Tags:        []string{"Users Admin"},
+		Security:    []map[string][]string{{"bearerAuth": {}}},
+	}, h.CreateClientUserAdmin)
+
+	huma.Register(api, huma.Operation{
+		OperationID: "invite-client-user-admin",
+		Method:      http.MethodPost,
+		Path:        "/v1/admin/client-users/invite",
+		Summary:     "Invite a new Tier-2 client user via email",
+		Description: "Creates the client_users row with no password, emails an admin_invite token. The recipient redeems it via /v1/auth/client/accept-invite to set their password and verify the email in one step.",
+		Tags:        []string{"Users Admin"},
+		Security:    []map[string][]string{{"bearerAuth": {}}},
+	}, h.InviteClientUserAdmin)
+
+	huma.Register(api, huma.Operation{
+		OperationID: "resend-invite-client-user-admin",
+		Method:      http.MethodPost,
+		Path:        "/v1/admin/client-users/{id}/invite/resend",
+		Summary:     "Resend the admin invite email for an existing Tier-2 user",
+		Tags:        []string{"Users Admin"},
+		Security:    []map[string][]string{{"bearerAuth": {}}},
+	}, h.ResendInviteClientUserAdmin)
+
+	huma.Register(api, huma.Operation{
+		OperationID: "resend-verification-client-user-admin",
+		Method:      http.MethodPost,
+		Path:        "/v1/admin/client-users/{id}/resend-verification",
+		Summary:     "Resend the email-verification link for a Tier-2 client user",
+		Tags:        []string{"Users Admin"},
+		Security:    []map[string][]string{{"bearerAuth": {}}},
+	}, h.ResendVerificationClientUserAdmin)
+
+	huma.Register(api, huma.Operation{
+		OperationID: "send-password-reset-client-user-admin",
+		Method:      http.MethodPost,
+		Path:        "/v1/admin/client-users/{id}/send-password-reset",
+		Summary:     "Trigger a password-reset email for a Tier-2 client user",
+		Tags:        []string{"Users Admin"},
+		Security:    []map[string][]string{{"bearerAuth": {}}},
+	}, h.SendPasswordResetClientUserAdmin)
 }

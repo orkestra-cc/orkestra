@@ -1,5 +1,7 @@
 package models
 
+import "github.com/orkestra/backend/internal/shared/iface"
+
 // PaginationParams holds pagination parameters for list operations
 type PaginationParams struct {
 	Page     int `query:"page" json:"page" default:"1" minimum:"1" doc:"Page number (1-indexed)"`
@@ -57,13 +59,13 @@ type GeneratePDFInput struct {
 	TemplateUUID string                 `json:"templateUuid" validate:"required" doc:"UUID of template to use"`
 	Data         map[string]interface{} `json:"data" validate:"required" doc:"Data to populate the template"`
 	FileName     string                 `json:"fileName,omitempty" doc:"Optional custom filename (without extension)"`
-	SourceType   SourceType             `json:"sourceType,omitempty" doc:"Source document type (for tracking)"`
+	SourceType   iface.SourceType       `json:"sourceType,omitempty" doc:"Source document type (for tracking)"`
 	SourceUUID   string                 `json:"sourceUuid,omitempty" doc:"Source document UUID (for tracking)"`
 }
 
 // GeneratePDFFromSourceInput holds input for generating PDF from a specific source
 type GeneratePDFFromSourceInput struct {
-	SourceType   SourceType `json:"sourceType" validate:"required" doc:"Source document type"`
+	SourceType   iface.SourceType `json:"sourceType" validate:"required" doc:"Source document type"`
 	SourceUUID   string     `json:"sourceUuid" validate:"required" doc:"Source document UUID"`
 	TemplateUUID string     `json:"templateUuid,omitempty" doc:"Optional template UUID (uses default if not specified)"`
 }

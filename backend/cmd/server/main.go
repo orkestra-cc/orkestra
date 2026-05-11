@@ -175,6 +175,7 @@ func main() {
 	authMW := authMiddleware.NewAuthMiddlewareWithConfig(jwtService, errorManager, cfg)
 	authMW.SetAuthService(authService)
 	authMW.SetTenantProvider(module.MustGetTyped[iface.TenantProvider](svcRegistry, module.ServiceTenantProvider))
+	authMW.SetAccessProvider(module.MustGetTyped[iface.AccessProvider](svcRegistry, module.ServiceAccessProvider))
 	authMW.SetAuthzProvider(module.MustGetTyped[iface.AuthzProvider](svcRegistry, module.ServiceAuthzProvider))
 	if sink, ok := module.GetTyped[iface.AuditSink](svcRegistry, module.ServiceAuditSink); ok {
 		authMW.SetAuditSink(sink)
@@ -219,6 +220,17 @@ func main() {
 
 	operatorMux := chi.NewRouter()
 	setupMiddleware(operatorMux, cfg, errorManager, deviceMW, string(module.AudienceOperator), cfg.Server.Operator)
+	// Phase 7: admin-managed IP allow/block gate on the operator host
+	// only. Reads ipAllowlistAdmin / ipBlocklistAdmin live from
+	// AuthPolicyService on every request — admin edits take effect
+	// immediately. Skipped silently when the policy isn't wired.
+	if policy, ok := module.GetTyped[*services.AuthPolicyService](svcRegistry, module.ServiceAuthPolicy); ok && policy != nil {
+		gate := authMiddleware.NewIPGate(func() (allow []string, block []string) {
+			ctx := context.Background()
+			return policy.IPAllowlistOperator(ctx), policy.IPBlocklistOperator(ctx)
+		})
+		operatorMux.Use(gate.Middleware)
+	}
 	operatorAPI := humachi.New(operatorMux, apiConfig)
 	operatorProtected := chi.NewRouter()
 	operatorProtected.Use(authMW.RequireAuth)
@@ -231,11 +243,15 @@ func main() {
 	clientProtected.Use(authMW.RequireAuth)
 	clientProtected.Use(authMiddleware.TenantBaggage)
 
-	// Module routes — every module currently registers on the Operator
-	// surface (no behavior change from PR-A). Subscriptions / payments /
-	// onboarding migrate to the Client surface in PR-D when the auth path
-	// split + JWT v2 land. Until then the Client surface exists but has
-	// zero registered routes, and visiting api.localhost:3000 returns 404.
+	// Module routes — operator-only modules (billing, documents, company,
+	// graph, aimodels, rag, agents, sales, dev) register on the Operator
+	// surface; the auth core module dual-registers per ADR-0003 PR-D D-4/D-5
+	// for the operator and client login paths; PR-D D-7 moves onboarding's
+	// public signup, subscriptions' Tier-2 self-service routes (public
+	// catalog + /v1/me/subscriptions), and the payments Stripe webhook to
+	// the Client surface. Operator-admin oversight of subscriptions /
+	// payments stays on the Operator surface (RequireInternalTenant gates
+	// preclude a clean client-surface mount).
 	operatorSurface := &module.APISurface{
 		Audience:        module.AudienceOperator,
 		PublicAPI:       operatorAPI,
@@ -254,7 +270,11 @@ func main() {
 		// Root chi.Router for special-case routes (dev/token, SSE that
 		// bypasses Huma). Operator-only — dev tokens never need to land
 		// on the client host.
-		Router:        operatorMux,
+		Router: operatorMux,
+		// ADR-0003 PR-D D-5: client-side raw HTTP router so the auth
+		// module can mount /v1/auth/client/{refresh,refresh-cookie,
+		// logout} on the client host mux alongside its Huma routes.
+		ClientRouter:  clientMux,
 		APIConfig:     apiConfig,
 		ConfigService: configService,
 	})
@@ -341,7 +361,12 @@ func main() {
 	if cfg.Server.Environment == "development" {
 		devFallthrough = operatorMux
 	}
-	root := newHostMux(hostRoutes, devFallthrough)
+	// LAN probe escape hatch: HAProxy / k8s liveness checks hit the pod
+	// by IP, so their Host header never matches an audience. Carve out
+	// /health and /ready (only) so those probes can answer 200 without
+	// spoofing a Host header. Everything else on a non-matching host
+	// still gets 421 — the host-header smuggling guard stays intact.
+	root := newHostMux(hostRoutes, devFallthrough, lanOpsHandler(db, redisClient))
 
 	// HTTP server. The host mux is wrapped in otelhttp.NewHandler so every
 	// request spawns a span the tenant-baggage middleware can enrich

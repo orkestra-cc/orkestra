@@ -18,15 +18,16 @@ var (
 	ErrSubscriptionCancelled    = errors.New("subscription is already cancelled")
 	ErrSubscriptionNotPausable  = errors.New("subscription cannot be reactivated from current state")
 	ErrSubscriptionServiceCode  = errors.New("service code not found or inactive")
-	ErrSubscriptionTenantUUID   = errors.New("tenantUUID is required")
+	ErrSubscriptionTenant       = errors.New("tenantUUID is required")
 )
 
 // SubscriptionService owns the state machine and period math for a
 // Subscription. It does NOT trigger charges — that's RenewalService's job.
 //
-// Every subscription points directly at a Tier-2 external Tenant via
-// TenantUUID; the legacy SubscriptionClient entity has been removed
-// (ADR-0001 Phase 1).
+// Subscriptions are owned by a Tenant aggregate (post Unified Client
+// Aggregate refactor). Self-registered clients hold subscriptions on their
+// personal tenant; admin-attached business clients hold them on the
+// business tenant.
 type SubscriptionService struct {
 	subs        repository.SubscriptionRepository
 	services    repository.ServiceRepository
@@ -82,16 +83,16 @@ func NewSubscriptionService(
 	}
 }
 
-// Create begins a subscription for the given external tenant. The first charge
-// is handled by the renewal job as soon as NextBillingAt (= now) comes due.
+// Create begins a subscription for the given tenant. The first charge is
+// handled by the renewal job as soon as NextBillingAt (= now) comes due.
 //
 // Entitlements are granted immediately on activation so admin- or
-// self-service-created subscriptions let the tenant hit gated routes without
-// waiting for the first renewal tick; if the first charge later fails, the
-// standard past_due → suspended flow revokes them.
+// self-service-created subscriptions let the tenant hit gated routes
+// without waiting for the first renewal tick; if the first charge later
+// fails, the standard past_due → suspended flow revokes them.
 func (s *SubscriptionService) Create(ctx context.Context, tenantUUID, serviceUUID, tierCode, actor string) (*models.Subscription, error) {
 	if tenantUUID == "" {
-		return nil, ErrSubscriptionTenantUUID
+		return nil, ErrSubscriptionTenant
 	}
 	svc, err := s.services.GetByUUID(ctx, serviceUUID)
 	if err != nil {
@@ -136,14 +137,14 @@ func (s *SubscriptionService) Create(ctx context.Context, tenantUUID, serviceUUI
 	return sub, nil
 }
 
-// CreateForTenant is the self-service subscribe path. Looks up the service by
-// its human-typed code (instead of the internal serviceUUID Create accepts) so
-// the tenant-owner UI can pass a stable SKU identifier. Activation fires
-// immediately via the entitlement syncer so the tenant's capability projection
-// receives the tier's grants before the first renewal tick.
+// CreateForTenant is the self-service subscribe path. Looks up the service
+// by its human-typed code (instead of the internal serviceUUID Create
+// accepts) so the SPA can pass a stable SKU identifier. Activation fires
+// immediately via the entitlement syncer so the tenant's capability
+// projection receives the tier's grants before the first renewal tick.
 func (s *SubscriptionService) CreateForTenant(ctx context.Context, tenantUUID, serviceCode, tierCode, actor string) (*models.Subscription, error) {
 	if tenantUUID == "" {
-		return nil, ErrSubscriptionTenantUUID
+		return nil, ErrSubscriptionTenant
 	}
 	svc, err := s.services.GetByCode(ctx, serviceCode)
 	if err != nil || svc == nil || !svc.Active {

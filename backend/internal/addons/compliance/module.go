@@ -9,6 +9,7 @@
 package compliance
 
 import (
+	"context"
 	"log/slog"
 	"time"
 
@@ -33,11 +34,12 @@ import (
 // admin/me handlers.
 type Module struct {
 	module.BaseModule
-	sink   *services.AuditSink
-	admin  *handlers.AdminHandler
-	me     *handlers.MeHandler
-	soc2   *handlers.SOC2Handler
-	logger *slog.Logger
+	sink       *services.AuditSink
+	admin      *handlers.AdminHandler
+	me         *handlers.MeHandler
+	soc2       *handlers.SOC2Handler
+	logger     *slog.Logger
+	authPolicy *authServices.AuthPolicyService // optional — Phase 8 self-service deletion gate
 }
 
 // NewModule returns an unwired module; Init constructs the sink.
@@ -78,8 +80,8 @@ func (m *Module) ProvidedServices() []module.ServiceKey {
 // alongside the other admin surfaces.
 func (m *Module) NavItems() []module.NavItemSpec {
 	return []module.NavItemSpec{
-		{Realm: "platform", Section: "Audit & Compliance", Tier: "internal", Name: "Audit Events", Icon: "clipboard-list", Path: "/admin/audit-events", MinRole: "administrator", Active: true},
-		{Realm: "platform", Section: "Audit & Compliance", Tier: "internal", Name: "SOC2 Evidence", Icon: "shield-alt", Path: "/admin/compliance/soc2", MinRole: "administrator", Active: true},
+		{Realm: "platform", Tier: "internal", Name: "Audit Events", Icon: "clipboard-list", Path: "/admin/audit-events", MinRole: "administrator", Active: true},
+		{Realm: "platform", Tier: "internal", Name: "SOC2 Evidence", Icon: "shield-alt", Path: "/admin/compliance/soc2", MinRole: "administrator", Active: true},
 	}
 }
 
@@ -179,8 +181,23 @@ func (m *Module) Init(deps *module.Dependencies) error {
 	// — missing services (module disabled, out of init order) are ignored so
 	// compliance boots cleanly regardless of which optional modules are
 	// active.
+	// ADR-0003 PR-D D-8: wire the audit sink into both tier
+	// PasswordAuthService instances so login/register/reset events from
+	// either audience land on the same compliance audit trail. The
+	// canonical ServicePasswordAuthService is operator-tier; the
+	// ServiceClientPasswordAuthService key is the client-tier instance.
 	if pa, ok := module.GetTyped[*authServices.PasswordAuthService](deps.Services, module.ServicePasswordAuthService); ok {
 		pa.SetAuditSink(sink)
+	}
+	if pa, ok := module.GetTyped[*authServices.PasswordAuthService](deps.Services, module.ServiceClientPasswordAuthService); ok {
+		pa.SetAuditSink(sink)
+	}
+	// Phase 8: pull the auth policy so the client-side DSR erase route
+	// can gate on selfServiceAccountDeletionClient. Optional — when the
+	// policy isn't published the client erase route stays unmounted (no
+	// silent open path).
+	if p, ok := module.GetTyped[*authServices.AuthPolicyService](deps.Services, module.ServiceAuthPolicy); ok {
+		m.authPolicy = p
 	}
 	if ts, ok := module.GetTyped[*tenantServices.Service](deps.Services, module.ServiceTenantService); ok {
 		ts.SetAuditSink(sink)
@@ -225,6 +242,21 @@ func (m *Module) RegisterRoutes(ri *module.RouteInfo) {
 			api := humachi.New(r, ri.APIConfig)
 			handlers.RegisterMeRoutes(api, m.me)
 		})
+		// Phase 8: client-tier self-service. Export is unconditional
+		// (read), erase is gated by the selfServiceAccountDeletionClient
+		// policy toggle resolved live on every call. The route is only
+		// mounted when both the client surface AND the auth policy are
+		// available — a missing policy means we stay closed by default.
+		if ri.Client != nil && m.authPolicy != nil {
+			gate := handlers.SelfDeletionGate(func(ctx context.Context) bool {
+				return m.authPolicy.SelfServiceAccountDeletionClient(ctx)
+			})
+			ri.Client.ProtectedRouter.Group(func(r chi.Router) {
+				r.Use(ri.Client.AuthMW.RequireGlobal())
+				api := humachi.New(r, ri.APIConfig)
+				handlers.RegisterClientMeRoutes(api, m.me, gate)
+			})
+		}
 	}
 }
 

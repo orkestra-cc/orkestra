@@ -3,75 +3,6 @@ package models
 import "time"
 
 // ========================================
-// Customer DTOs
-// ========================================
-
-// CreateCustomerInput represents the input for creating a customer
-type CreateCustomerInput struct {
-	// Fiscal identifiers
-	FiscalIDCountry string `json:"fiscalIdCountry" validate:"required,len=2" doc:"Country code (IT)"`
-	FiscalIDCode    string `json:"fiscalIdCode" validate:"required" doc:"VAT number or fiscal code"`
-	CodiceFiscale   string `json:"codiceFiscale,omitempty" doc:"Fiscal code if different from VAT"`
-
-	// Company/Person data
-	IsCompany    bool   `json:"isCompany" doc:"True if company, false if individual"`
-	Denomination string `json:"denomination,omitempty" doc:"Company name (required if isCompany)"`
-	Name         string `json:"name,omitempty" doc:"First name (required if not company)"`
-	Surname      string `json:"surname,omitempty" doc:"Last name (required if not company)"`
-
-	// Address
-	Address      string `json:"address" validate:"required" doc:"Street address"`
-	NumeroCivico string `json:"numeroCivico,omitempty" doc:"Street number"`
-	City         string `json:"city" validate:"required" doc:"City"`
-	Province     string `json:"province,omitempty" doc:"Province code (2 chars)"`
-	PostalCode   string `json:"postalCode" validate:"required" doc:"Postal code"`
-	Country      string `json:"country" validate:"required,len=2" doc:"Country code ISO 3166-1 alpha-2"`
-
-	// Contacts
-	Email string `json:"email,omitempty" validate:"omitempty,email" doc:"Email address"`
-	PEC   string `json:"pec,omitempty" validate:"omitempty,email" doc:"PEC address"`
-	Phone string `json:"phone,omitempty" doc:"Phone number"`
-
-	// SDI delivery
-	CodiceDestinatario string `json:"codiceDestinatario,omitempty" doc:"SDI recipient code (7 chars B2B, 6 chars PA)"`
-	PECDestinatario    string `json:"pecDestinatario,omitempty" doc:"PEC for SDI delivery"`
-
-	// PA specific
-	IsPA          bool   `json:"isPA,omitempty" doc:"True if Public Administration"`
-	CodiceUfficio string `json:"codiceUfficio,omitempty" doc:"PA office code (6 chars)"`
-
-	// Notes
-	Notes string `json:"notes,omitempty" doc:"Internal notes"`
-}
-
-// UpdateCustomerInput represents the input for updating a customer
-type UpdateCustomerInput struct {
-	Denomination       *string `json:"denomination,omitempty"`
-	Name               *string `json:"name,omitempty"`
-	Surname            *string `json:"surname,omitempty"`
-	Address            *string `json:"address,omitempty"`
-	NumeroCivico       *string `json:"numeroCivico,omitempty"`
-	City               *string `json:"city,omitempty"`
-	Province           *string `json:"province,omitempty"`
-	PostalCode         *string `json:"postalCode,omitempty"`
-	Email              *string `json:"email,omitempty"`
-	PEC                *string `json:"pec,omitempty"`
-	Phone              *string `json:"phone,omitempty"`
-	CodiceDestinatario *string `json:"codiceDestinatario,omitempty"`
-	PECDestinatario    *string `json:"pecDestinatario,omitempty"`
-	Notes              *string `json:"notes,omitempty"`
-}
-
-// CustomerListResponse represents a paginated list of customers
-type CustomerListResponse struct {
-	Customers  []Customer `json:"customers"`
-	Total      int64      `json:"total"`
-	Page       int        `json:"page"`
-	PageSize   int        `json:"pageSize"`
-	TotalPages int        `json:"totalPages"`
-}
-
-// ========================================
 // Company DTOs (Issuing Company / Cedente Prestatore)
 // ========================================
 
@@ -253,8 +184,12 @@ type CreateInvoiceInput struct {
 	// Company (seller/provider for issued invoices)
 	CompanyID string `json:"companyId,omitempty" doc:"Reference to issuing company (uses default if not specified)"`
 
-	// Customer (for issued invoices)
-	CustomerID string `json:"customerId,omitempty" doc:"Reference to existing customer"`
+	// Tenant (Tier-2 client) whose FatturaPA profile drives the
+	// CessionarioCommittente snapshot. The unified-client model resolves
+	// this through BillingTenantProvider.ResolveBillingParty — the tenant
+	// must carry IsItalianBillable=true and a FatturaPA routing handle
+	// (CodiceDestinatario or PECDestinatario) for the send path to succeed.
+	TenantUUID string `json:"tenantUUID,omitempty" doc:"Tier-2 tenant UUID (cessionario committente)"`
 
 	// Invoice lines
 	Lines []CreateInvoiceLineInput `json:"lines" validate:"required,min=1,dive" doc:"Invoice line items"`
@@ -345,7 +280,7 @@ type InvoiceFilters struct {
 	Direction    *InvoiceDirection `json:"direction,omitempty"`
 	Status       *InvoiceStatus    `json:"status,omitempty"`
 	SDIStatus    *SDIStatus        `json:"sdiStatus,omitempty"`
-	CustomerID   string            `json:"customerId,omitempty"`
+	TenantUUID   string            `json:"tenantUUID,omitempty"`
 	SupplierID   string            `json:"supplierId,omitempty"`
 	FromDate     *time.Time        `json:"fromDate,omitempty"`
 	ToDate       *time.Time        `json:"toDate,omitempty"`

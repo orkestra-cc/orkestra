@@ -1,6 +1,8 @@
 package models
 
-import "time"
+import (
+	"time"
+)
 
 // ActivityLog is an append-only audit record per subscription. Used both
 // for human-readable history on the subscription detail page and for

@@ -57,6 +57,45 @@ forbid (
     resource.kind == "external"
 };
 
+// system.users.password_reset is operator-side (admin triggers a
+// password-reset email for another user).
+@id("tenant_scope.system_users_password_reset_internal_only")
+forbid (
+    principal,
+    action == Action::"system.users.password_reset",
+    resource
+) when {
+    resource is Orkestra::Tenant &&
+    resource has kind &&
+    resource.kind == "external"
+};
+
+// system.users.email_verify_resend is operator-side (admin resends the
+// email-verification message).
+@id("tenant_scope.system_users_email_verify_resend_internal_only")
+forbid (
+    principal,
+    action == Action::"system.users.email_verify_resend",
+    resource
+) when {
+    resource is Orkestra::Tenant &&
+    resource has kind &&
+    resource.kind == "external"
+};
+
+// system.users.oauth_unlink is operator-side (admin unlinks an OAuth
+// identity from another user).
+@id("tenant_scope.system_users_oauth_unlink_internal_only")
+forbid (
+    principal,
+    action == Action::"system.users.oauth_unlink",
+    resource
+) when {
+    resource is Orkestra::Tenant &&
+    resource has kind &&
+    resource.kind == "external"
+};
+
 // Suspended / archived / purged tenants reject every non-read action. A
 // tenant that's been suspended by the operator console should surface as
 // read-only until it's reactivated.

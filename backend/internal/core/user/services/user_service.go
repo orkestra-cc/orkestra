@@ -21,7 +21,6 @@ var (
 	ErrUserAlreadyExists = errors.New("user already exists")
 	ErrInvalidInput      = errors.New("invalid input")
 	ErrUnauthorized      = errors.New("unauthorized operation")
-	ErrExpiredDocuments  = errors.New("user has expired documents")
 	ErrEmailNotUnique    = errors.New("email address already in use")
 )
 
@@ -39,19 +38,18 @@ type UserService interface {
 	ClearFailedLogins(ctx context.Context, userUUID string) error
 	UpdateUser(ctx context.Context, id string, input *models.UpdateUserInput) (*models.UserManagementResponse, error)
 	DeleteUser(ctx context.Context, id string) error
+	// SoftDeleteAndAliasEmail soft-deletes the user and renames the
+	// email to a one-shot alias so the unique index no longer collides
+	// with a fresh signup using the original address. Used by the
+	// tenant-cascade hook for orphaned external owners.
+	SoftDeleteAndAliasEmail(ctx context.Context, id string) error
 
 	// Query operations
 	ListUsers(ctx context.Context, filters *models.UserFilters, pagination *models.PaginationParams) (*models.UserManagementListResponse, error)
 	GetUsersByRole(ctx context.Context, role string) ([]*models.UserManagementResponse, error)
 
-	// Document management
-	GetUsersWithExpiredDocuments(ctx context.Context) ([]*models.UserManagementResponse, error)
-	GetUsersWithExpiringSoonDocuments(ctx context.Context, days int) ([]*models.UserManagementResponse, error)
-	UpdateUserDocuments(ctx context.Context, id string, input *models.UpdateUserInput) (*models.UserManagementResponse, error)
-
 	// Utility operations
 	ValidateUserRole(ctx context.Context, userID string, allowedRoles []string) error
-	CheckDocumentExpiry(ctx context.Context, userID string) ([]string, error)
 	GetUserCount(ctx context.Context, filters *models.UserFilters) (int64, error)
 
 	// Methods needed by auth module (raw model returns)
@@ -118,15 +116,6 @@ func (s *userService) CreateUser(ctx context.Context, input *models.CreateUserIn
 	user.Avatar = input.Avatar
 	user.Phone = input.Phone
 	user.Role = input.Role
-	user.LicenseNumber = input.LicenseNumber
-	user.LicenseExpiry = input.LicenseExpiry
-	user.DriverCardNumber = input.DriverCardNumber
-	user.DriverCardExpiry = input.DriverCardExpiry
-	user.CQCExpiry = input.CQCExpiry
-	user.ADRNumber = input.ADRNumber
-	user.ADRExpiry = input.ADRExpiry
-	user.TachigrafExpiry = input.TachigrafExpiry
-	user.MedicalChecks = input.MedicalChecks
 
 	// Encrypt PIN if provided
 	if input.PIN != "" {
@@ -272,6 +261,23 @@ func (s *userService) DeleteUser(ctx context.Context, id string) error {
 	return nil
 }
 
+// SoftDeleteAndAliasEmail soft-deletes a user and frees the email by
+// rewriting it to an alias. Idempotent: a missing or already-deleted row
+// is treated as success (the caller's intent — "this email should no
+// longer block signup" — is already satisfied).
+func (s *userService) SoftDeleteAndAliasEmail(ctx context.Context, id string) error {
+	if id == "" {
+		return ErrInvalidInput
+	}
+	if err := s.userRepo.SoftDeleteAndAliasEmail(ctx, id); err != nil {
+		if errors.Is(err, repository.ErrUserNotFound) {
+			return nil
+		}
+		return fmt.Errorf("failed to soft-delete-and-alias user: %w", err)
+	}
+	return nil
+}
+
 // ListUsers retrieves users with filters and pagination
 func (s *userService) ListUsers(ctx context.Context, filters *models.UserFilters, pagination *models.PaginationParams) (*models.UserManagementListResponse, error) {
 	// Set default pagination if not provided
@@ -358,92 +364,6 @@ func (s *userService) GetUsersByRole(ctx context.Context, role string) ([]*model
 	return responses, nil
 }
 
-// GetUsersWithExpiredDocuments retrieves users with expired documents
-func (s *userService) GetUsersWithExpiredDocuments(ctx context.Context) ([]*models.UserManagementResponse, error) {
-	users, err := s.userRepo.GetUsersWithExpiredDocuments(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get users with expired documents: %w", err)
-	}
-
-	responses := make([]*models.UserManagementResponse, len(users))
-	for i, user := range users {
-		responses[i] = user.ToResponse()
-	}
-
-	// Convert to slice for enrichment
-	responseSlice := make([]models.UserManagementResponse, len(responses))
-	for i, response := range responses {
-		responseSlice[i] = *response
-	}
-
-	// Enrich with OAuth data (providers and avatars)
-	if err := s.enrichMultipleWithOAuthData(ctx, responseSlice); err != nil {
-		// Log error but don't fail the request
-		fmt.Printf("Warning: failed to enrich expired documents users with OAuth data: %v\n", err)
-	}
-
-	// Convert back to pointer slice
-	for i := range responses {
-		responses[i] = &responseSlice[i]
-	}
-
-	return responses, nil
-}
-
-// GetUsersWithExpiringSoonDocuments retrieves users with documents expiring soon
-func (s *userService) GetUsersWithExpiringSoonDocuments(ctx context.Context, days int) ([]*models.UserManagementResponse, error) {
-	if days <= 0 {
-		days = 30 // Default to 30 days
-	}
-
-	users, err := s.userRepo.GetUsersWithExpiringSoonDocuments(ctx, days)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get users with expiring documents: %w", err)
-	}
-
-	responses := make([]*models.UserManagementResponse, len(users))
-	for i, user := range users {
-		responses[i] = user.ToResponse()
-	}
-
-	// Convert to slice for enrichment
-	responseSlice := make([]models.UserManagementResponse, len(responses))
-	for i, response := range responses {
-		responseSlice[i] = *response
-	}
-
-	// Enrich with OAuth data (providers and avatars)
-	if err := s.enrichMultipleWithOAuthData(ctx, responseSlice); err != nil {
-		// Log error but don't fail the request
-		fmt.Printf("Warning: failed to enrich expiring documents users with OAuth data: %v\n", err)
-	}
-
-	// Convert back to pointer slice
-	for i := range responses {
-		responses[i] = &responseSlice[i]
-	}
-
-	return responses, nil
-}
-
-// UpdateUserDocuments updates only document-related fields
-func (s *userService) UpdateUserDocuments(ctx context.Context, id string, input *models.UpdateUserInput) (*models.UserManagementResponse, error) {
-	// Filter input to only include document fields
-	documentInput := &models.UpdateUserInput{
-		LicenseNumber:    input.LicenseNumber,
-		LicenseExpiry:    input.LicenseExpiry,
-		DriverCardNumber: input.DriverCardNumber,
-		DriverCardExpiry: input.DriverCardExpiry,
-		CQCExpiry:        input.CQCExpiry,
-		ADRNumber:        input.ADRNumber,
-		ADRExpiry:        input.ADRExpiry,
-		TachigrafExpiry:  input.TachigrafExpiry,
-		MedicalChecks:    input.MedicalChecks,
-	}
-
-	return s.UpdateUser(ctx, id, documentInput)
-}
-
 // ValidateUserRole checks if a user has one of the allowed roles
 func (s *userService) ValidateUserRole(ctx context.Context, userID string, allowedRoles []string) error {
 	user, err := s.userRepo.GetByID(ctx, userID)
@@ -458,35 +378,6 @@ func (s *userService) ValidateUserRole(ctx context.Context, userID string, allow
 	}
 
 	return ErrUnauthorized
-}
-
-// CheckDocumentExpiry checks which documents are expired for a user
-func (s *userService) CheckDocumentExpiry(ctx context.Context, userID string) ([]string, error) {
-	user, err := s.userRepo.GetByID(ctx, userID)
-	if err != nil {
-		return nil, err
-	}
-
-	var expired []string
-	now := time.Now()
-
-	if user.LicenseExpiry != nil && user.LicenseExpiry.Before(now) {
-		expired = append(expired, "License")
-	}
-	if user.DriverCardExpiry != nil && user.DriverCardExpiry.Before(now) {
-		expired = append(expired, "Driver Card")
-	}
-	if user.CQCExpiry != nil && user.CQCExpiry.Before(now) {
-		expired = append(expired, "CQC")
-	}
-	if user.ADRExpiry != nil && user.ADRExpiry.Before(now) {
-		expired = append(expired, "ADR")
-	}
-	if user.TachigrafExpiry != nil && user.TachigrafExpiry.Before(now) {
-		expired = append(expired, "Tachigrafo")
-	}
-
-	return expired, nil
 }
 
 // GetUserCount returns the total count of users with filters

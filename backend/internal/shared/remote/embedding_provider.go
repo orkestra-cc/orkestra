@@ -6,7 +6,7 @@ import (
 	"net/url"
 )
 
-// RemoteEmbeddingProvider implements providers.EmbeddingProvider by calling
+// RemoteEmbeddingProvider implements iface.EmbeddingProvider by calling
 // the AI service's internal embed endpoints over HTTP.
 type RemoteEmbeddingProvider struct {
 	client    *client

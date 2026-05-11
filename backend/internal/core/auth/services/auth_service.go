@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -31,6 +32,53 @@ var (
 	// again after its successor already existed — a textbook replay attack.
 	// The whole family is revoked before this error is returned.
 	ErrRefreshTokenReplay = errors.New("refresh token replay detected — session revoked")
+	// ErrOAuthSignupDisabled signals that an OAuth callback resolved to
+	// an unknown email but the audience-scoped oauthAllowSignup policy
+	// is off, so we refuse to provision a new account. Translated to
+	// 403 oauth_signup_disabled at the handler boundary.
+	ErrOAuthSignupDisabled = errors.New("oauth signup disabled by policy")
+	// ErrOAuthLinkDisabled signals that the OAuth callback resolved to
+	// an existing account by email but oauthAutoLinkByEmail is off.
+	// The user must initiate linking from their account settings while
+	// already authenticated. Translated to 403 oauth_link_disabled at
+	// the handler boundary.
+	ErrOAuthLinkDisabled = errors.New("oauth account linking by email is disabled")
+	// ErrLastCredentialRemoval signals that an admin tried to unlink an
+	// OAuth identity that would leave the target with no usable login
+	// method (no password set AND it was their only OAuth provider).
+	// Translated to 409 last_credential at the handler boundary so the
+	// UI can prompt the operator to send a password-reset first.
+	ErrLastCredentialRemoval = errors.New("cannot remove the user's only remaining credential")
+	// ErrAdminSelfAction signals that an admin tried to invoke an
+	// admin-on-user action against their own account (MFA reset, OAuth
+	// unlink) — actions where lock-out risk is real and the admin
+	// should be using the self-service flow instead. Translated to 409
+	// self_action at the handler boundary.
+	ErrAdminSelfAction = errors.New("admin cannot perform this action on their own account")
+	// ErrCannotRevokeCurrent signals that the user tried to revoke the
+	// session they are calling from. The existing logout endpoint is
+	// the right tool for that — revoking the current session through
+	// the self-service surface would race the user's own response.
+	// Translated to 409 cannot_revoke_current at the handler boundary.
+	ErrCannotRevokeCurrent = errors.New("cannot revoke the current session — use logout instead")
+	// ErrSessionNotFound signals that the requested session UUID does
+	// not exist or does not belong to the calling user. We collapse
+	// "doesn't exist" and "not yours" to one error so the response
+	// doesn't leak the existence of someone else's session UUID.
+	ErrSessionNotFound = errors.New("session not found")
+	// ErrOAuthLinkClaimedByOther signals that the OAuth identity the
+	// caller is trying to link is already attached to a different
+	// account. Returned by SelfLinkOAuthFromCallback so the callback
+	// surface can render an "already in use" error rather than
+	// silently re-binding the identity to the new user. Translated to
+	// 409 oauth_already_linked at the redirect query layer.
+	ErrOAuthLinkClaimedByOther = errors.New("OAuth identity already linked to another account")
+	// ErrOAuthLinkInvalidUserInfo signals that the OAuth provider's
+	// userInfo response was missing fields required to build a link
+	// (typically providerID or email). Distinct from ErrOAuthLinkNotFound
+	// — that's "the link doesn't exist", this is "the link can't be
+	// built from what we got back".
+	ErrOAuthLinkInvalidUserInfo = errors.New("OAuth provider returned incomplete user info")
 )
 
 // AuthService extends the basic auth service with UUID support and OAuth linking
@@ -46,6 +94,47 @@ type AuthService interface {
 	RemoveOAuthLink(ctx context.Context, userUUID string, input models.UnlinkOAuthProviderInput) error
 	SetPrimaryOAuthLink(ctx context.Context, userUUID string, input models.SetPrimaryOAuthProviderInput) error
 	GetOAuthLinks(ctx context.Context, userUUID string) (*models.OAuthLinksResponse, error)
+	// AdminUnlinkOAuth removes a linked OAuth identity from another
+	// user's account. Enforces two safeguards in addition to the route
+	// gate: rejects self-action (actorUUID == targetUUID) and rejects
+	// removing the user's only remaining credential (no password +
+	// single OAuth link). Both safeguards live here so any caller —
+	// HTTP handler, future CLI, internal job — gets the same checks.
+	AdminUnlinkOAuth(ctx context.Context, actorUUID, targetUUID string, provider userModels.OAuthProvider) error
+	// SelfUnlinkOAuth removes one OAuth identity from the caller's own
+	// account. Mirrors AdminUnlinkOAuth's last-credential safeguard so
+	// a user cannot accidentally remove their only login method, but
+	// drops the self-action check (self-action IS the point here). The
+	// HTTP handler is gated by RequireStepUp(5m) — credential removal
+	// demands a fresh MFA proof.
+	SelfUnlinkOAuth(ctx context.Context, userUUID string, provider userModels.OAuthProvider) error
+	// SelfLinkOAuthFromCallback binds a freshly-completed OAuth flow
+	// to an authenticated user. Called from the OAuth callback when
+	// the signed-state JWT carries Mode=link. Rejects with
+	// ErrOAuthLinkClaimedByOther when the (provider, providerID) pair
+	// is already attached to a different user; with
+	// ErrOAuthLinkAlreadyExists when the user already has the same
+	// provider linked.
+	SelfLinkOAuthFromCallback(ctx context.Context, userUUID string, provider userModels.OAuthProvider, userInfo map[string]interface{}, oauthTokens *models.OAuthProviderTokens) error
+	// GetUserAuthMethods aggregates the user's auth state across the
+	// user record, MFA factor row(s), and linked OAuth providers into
+	// a single view consumed by the admin profile card and by the
+	// self-service /user/security page. The HTTP gate (admin
+	// permission vs. RequireGlobal) is applied at the handler.
+	GetUserAuthMethods(ctx context.Context, targetUUID string) (*models.AuthMethodsView, error)
+	// ListUserSessions returns the active sessions for the user. The
+	// IsCurrent flag is NOT populated here — the HTTP handler stamps
+	// it by comparing each SessionInfo.SessionID against the JWT sid.
+	ListUserSessions(ctx context.Context, userUUID string) (*models.SessionsResponse, error)
+	// RevokeUserSession revokes one session by UUID for the user.
+	// Rejects revoke-current with ErrCannotRevokeCurrent so the
+	// caller's response can complete; returns ErrSessionNotFound when
+	// the session doesn't exist or doesn't belong to the user.
+	RevokeUserSession(ctx context.Context, userUUID, sessionUUID, currentSid string) error
+	// RevokeAllUserSessionsExcept revokes every active session for
+	// the user except the one matching currentSid. Returns the count
+	// of revoked sessions.
+	RevokeAllUserSessionsExcept(ctx context.Context, userUUID, currentSid string) (int, error)
 
 	// Account consolidation
 	ConsolidateAccountsByEmail(ctx context.Context, email string) (*userModels.User, error)
@@ -79,13 +168,31 @@ type AuthService interface {
 	// PasswordAuthService — both login paths must surface the field uniformly.
 	SetWebAuthnAvailability(c HasWebAuthnCredentials)
 
+	// SetSessionRevocation wires the Redis-backed sid revocation store
+	// post-construction so RevokeUserSession / RevokeAllUserSessionsExcept
+	// can push revoked sids into the set the AuthMiddleware consults on
+	// every authenticated request. Optional — when nil the persisted
+	// session+refresh-token state is still updated, but in-flight access
+	// tokens stay valid until their TTL ticks over.
+	SetSessionRevocation(rev SessionRevocationService)
+
+	// SetPolicy wires the admin-managed policy reader. Optional — the
+	// OAuth login MFA evaluation falls back to legacy hardcoded values
+	// when the receiver is nil.
+	SetPolicy(p *AuthPolicyService)
+
+	// SetAudience wires the surface this service serves so policy
+	// reads can fetch audience-scoped values (oauthAllowSignup, etc.)
+	// without callers having to thread the audience through every
+	// signature. Empty falls back to operator semantics.
+	SetAudience(a PolicyAudience)
+
 	// Enhanced OAuth callback handling with account linking
 	HandleOAuthCallbackWithLinking(ctx context.Context, provider models.OAuthProvider, userInfo map[string]interface{}, oauthTokens *models.OAuthProviderTokens, securityCtx *models.SecurityContext, deviceInfo *models.DeviceInfo) (*models.TokenResponse, error)
 }
 
 // AuthConfig holds configuration for the auth service
 type AuthConfig struct {
-	AuthRepo            repository.AuthRepository
 	UserService         iface.UserProvider
 	TenantProvider      iface.TenantProvider // used by MFA policy evaluation on OAuth login
 	OAuthProviderRepo   repository.OAuthProviderRepository
@@ -103,7 +210,6 @@ type AuthConfig struct {
 }
 
 type authService struct {
-	authRepo            repository.AuthRepository
 	userService         iface.UserProvider
 	tenantProvider      iface.TenantProvider
 	oauthProviderRepo   repository.OAuthProviderRepository
@@ -118,6 +224,20 @@ type authService struct {
 	// branch can flag passkey availability on the partial response. Nil
 	// when WebAuthn is disabled — falls back to TOTP-only behavior.
 	webauthnAvailability HasWebAuthnCredentials
+	// policy is the admin-managed kill switches + grace-window source
+	// for the OAuth login MFA evaluation. Nil falls back to legacy
+	// hardcoded values (mfaEnabled=true, grace=7d).
+	policy *AuthPolicyService
+	// audience names the surface this service serves. Used so OAuth
+	// signup gating can read the audience-scoped oauthAllowSignup
+	// policy without needing the caller to pass it explicitly.
+	audience PolicyAudience
+	// sessionRevocation is the Redis-backed sid revocation store
+	// shared across all tiers. Wired post-construction via
+	// SetSessionRevocation; nil disables the in-flight access-token
+	// kill (the persisted state still updates, just no immediate
+	// effect on outstanding bearer tokens).
+	sessionRevocation SessionRevocationService
 }
 
 // SetWebAuthnAvailability wires the optional checker. Mirrors the same
@@ -127,10 +247,27 @@ func (s *authService) SetWebAuthnAvailability(c HasWebAuthnCredentials) {
 	s.webauthnAvailability = c
 }
 
+// SetPolicy wires the admin-managed AuthPolicyService so the OAuth
+// login path honours the same MFA kill switch + grace window the
+// password login path consults.
+func (s *authService) SetPolicy(p *AuthPolicyService) {
+	s.policy = p
+}
+
+// SetAudience records the surface this service serves so policy
+// reads can fetch audience-scoped knobs.
+func (s *authService) SetAudience(a PolicyAudience) {
+	s.audience = a
+}
+
+// SetSessionRevocation wires the Redis-backed sid revocation store.
+func (s *authService) SetSessionRevocation(rev SessionRevocationService) {
+	s.sessionRevocation = rev
+}
+
 // NewAuthService creates a new auth service
 func NewAuthService(config *AuthConfig) (AuthService, error) {
 	return &authService{
-		authRepo:            config.AuthRepo,
 		userService:         config.UserService,
 		tenantProvider:      config.TenantProvider,
 		oauthProviderRepo:   config.OAuthProviderRepo,
@@ -255,6 +392,382 @@ func (s *authService) GetOAuthLinks(ctx context.Context, userUUID string) (*mode
 	}, nil
 }
 
+// AdminUnlinkOAuth removes one linked OAuth identity from another
+// user's account. The HTTP handler is gated by
+// RequireSystemPermission("system.users.oauth_unlink") + RequireStepUp,
+// but the lock-out and self-action invariants are enforced here so a
+// future caller (CLI, internal job) cannot bypass them.
+//
+// Safeguards (in this order):
+//  1. actorUUID != targetUUID — admins must not unlink their own
+//     identities through the admin path; the self-service flow exists
+//     for that and carries different audit semantics.
+//  2. Last-credential lockout — refuse when the target has no usable
+//     password AND this is their only OAuth link. The operator should
+//     send a password-reset first, then unlink.
+//
+// The provider-specific subject ID is resolved from the target's
+// User.OAuthLinks rather than from the OAuth provider repo so this
+// path stays free of tier-specific repo plumbing.
+func (s *authService) AdminUnlinkOAuth(ctx context.Context, actorUUID, targetUUID string, provider userModels.OAuthProvider) error {
+	if actorUUID == "" || targetUUID == "" {
+		return fmt.Errorf("admin unlink: actorUUID and targetUUID are required")
+	}
+	if actorUUID == targetUUID {
+		return ErrAdminSelfAction
+	}
+
+	target, err := s.userService.GetUserByID(ctx, targetUUID)
+	if err != nil {
+		return err
+	}
+	if target == nil {
+		return ErrOAuthLinkNotFound
+	}
+
+	links, err := s.userService.GetUserOAuthLinks(ctx, targetUUID)
+	if err != nil {
+		return err
+	}
+	providerID, locked, found := wouldLockOutOAuthUnlink(target, links, provider)
+	if !found {
+		return ErrOAuthLinkNotFound
+	}
+	if locked {
+		return ErrLastCredentialRemoval
+	}
+
+	if err := s.userService.RemoveOAuthLinkFromUser(ctx, targetUUID, provider, providerID); err != nil {
+		return err
+	}
+
+	slog.Info("admin_auth_action",
+		"event", "admin_oauth_unlink",
+		"actorUUID", actorUUID,
+		"targetUUID", targetUUID,
+		"provider", string(provider),
+	)
+	return nil
+}
+
+// wouldLockOutOAuthUnlink computes the shared lockout decision used by
+// AdminUnlinkOAuth and SelfUnlinkOAuth. Returns the matched providerID
+// (empty when no link is found), a `locked` flag set when removing the
+// link would leave the user with no usable credential (no password
+// AND single active OAuth link), and a `found` flag distinguishing
+// "provider not linked" (404) from a benign mismatch.
+func wouldLockOutOAuthUnlink(target *userModels.User, links []userModels.OAuthLink, provider userModels.OAuthProvider) (providerID string, locked bool, found bool) {
+	if target == nil {
+		return "", false, false
+	}
+	activeCount := 0
+	for _, link := range links {
+		if link.IsActive {
+			activeCount++
+		}
+		if link.Provider == provider && providerID == "" {
+			providerID = link.ProviderID
+		}
+	}
+	found = providerID != ""
+	if !found {
+		return "", false, false
+	}
+	locked = target.PasswordHash == "" && activeCount <= 1
+	return providerID, locked, true
+}
+
+// SelfUnlinkOAuth removes one OAuth identity from the caller's own
+// account. Reuses the shared wouldLockOutOAuthUnlink helper so a user
+// cannot accidentally lock themselves out — but skips the self-action
+// guard, since self-action is the entire point. The HTTP handler
+// gates this with RequireStepUp(5m); credential removal demands a
+// fresh MFA proof.
+func (s *authService) SelfUnlinkOAuth(ctx context.Context, userUUID string, provider userModels.OAuthProvider) error {
+	if userUUID == "" {
+		return fmt.Errorf("self unlink: userUUID is required")
+	}
+	user, err := s.userService.GetUserByID(ctx, userUUID)
+	if err != nil {
+		return err
+	}
+	if user == nil {
+		return ErrOAuthLinkNotFound
+	}
+	links, err := s.userService.GetUserOAuthLinks(ctx, userUUID)
+	if err != nil {
+		return err
+	}
+	providerID, locked, found := wouldLockOutOAuthUnlink(user, links, provider)
+	if !found {
+		return ErrOAuthLinkNotFound
+	}
+	if locked {
+		return ErrLastCredentialRemoval
+	}
+	if err := s.userService.RemoveOAuthLinkFromUser(ctx, userUUID, provider, providerID); err != nil {
+		return err
+	}
+	slog.Info("self_auth_action",
+		"event", "self_oauth_unlink",
+		"userUUID", userUUID,
+		"provider", string(provider),
+	)
+	return nil
+}
+
+// SelfLinkOAuthFromCallback binds an OAuth identity returned by a
+// completed OAuth flow to an authenticated user. Driven by the
+// link-mode branch of the shared OAuth callback (state.Mode=="link";
+// state.LinkUserUUID names this user). Mirrors the safeguards in
+// HandleOAuthCallbackWithLinking but never mints tokens — the user
+// is already authenticated.
+//
+// Safeguards:
+//  1. providerID + email must be present in userInfo; reject with
+//     ErrOAuthLinkInvalidUserInfo otherwise.
+//  2. (provider, providerID) must not already be claimed by a
+//     different user — return ErrOAuthLinkClaimedByOther.
+//  3. The user must not already have a link for this provider —
+//     return ErrOAuthLinkAlreadyExists.
+//
+// On success the link is appended to User.OAuthLinks (the embedded
+// slice that powers self/admin OAuth-unlink) and a corresponding
+// row is written to the auth-side oauth_provider_repo so existing
+// provider-side lookups (login resolution) see the new identity.
+func (s *authService) SelfLinkOAuthFromCallback(
+	ctx context.Context,
+	userUUID string,
+	provider userModels.OAuthProvider,
+	userInfo map[string]interface{},
+	oauthTokens *models.OAuthProviderTokens,
+) error {
+	if userUUID == "" {
+		return fmt.Errorf("self link: userUUID is required")
+	}
+	user, err := s.userService.GetUserByID(ctx, userUUID)
+	if err != nil {
+		return err
+	}
+	if user == nil {
+		return fmt.Errorf("user not found")
+	}
+
+	providerID, _ := userInfo["provider_id"].(string)
+	email, _ := userInfo["email"].(string)
+	if providerID == "" || email == "" {
+		return ErrOAuthLinkInvalidUserInfo
+	}
+
+	// Already-claimed-by-another check: keyed on the provider-side
+	// index, the source of truth for "who owns this providerID". The
+	// repo speaks the auth-side OAuthProvider type, so cross from
+	// user-side to auth-side at the boundary.
+	authProvider := models.OAuthProvider(provider)
+	if existing, _ := s.oauthProviderRepo.GetByProviderAndID(ctx, authProvider, providerID); existing != nil {
+		if existing.UserUUID != userUUID {
+			return ErrOAuthLinkClaimedByOther
+		}
+		// Already linked to this same user — make the call idempotent
+		// so a refresh / replay doesn't surface as a hard error.
+		return nil
+	}
+
+	// Already-on-this-user check: walk the embedded array. Picking up
+	// here means a row exists on the user without a matching provider
+	// repo doc — defensive, treat as duplicate.
+	existingLinks, err := s.userService.GetUserOAuthLinks(ctx, userUUID)
+	if err != nil {
+		return err
+	}
+	for _, l := range existingLinks {
+		if l.Provider == provider {
+			return ErrOAuthLinkAlreadyExists
+		}
+	}
+
+	now := time.Now()
+	name, _ := userInfo["name"].(string)
+	picture, _ := userInfo["picture"].(string)
+	emailVerified, _ := userInfo["email_verified"].(bool)
+	metadata := map[string]interface{}{
+		"name":           name,
+		"picture":        picture,
+		"email_verified": emailVerified,
+	}
+
+	link := userModels.OAuthLink{
+		Provider:   provider,
+		ProviderID: providerID,
+		Email:      email,
+		LinkedAt:   now,
+		IsActive:   true,
+		IsPrimary:  false,
+		LastUsed:   &now,
+		OAuthData:  metadata,
+	}
+	if err := s.userService.AddOAuthLinkToUser(ctx, userUUID, link); err != nil {
+		return fmt.Errorf("persist user link: %w", err)
+	}
+
+	// Mirror to the provider-side index so future logins by this
+	// identity resolve back to the right user. Best-effort — a write
+	// failure here leaves the embedded link in place; admin can
+	// re-link if needed. Tokens are stored unencrypted only when the
+	// caller chose not to provide encryption material; the canonical
+	// HandleOAuthCallbackWithLinking does encrypt — we keep the
+	// surface minimal here since these tokens are only used as a
+	// linking artifact, not for ongoing API access.
+	providerDoc := &models.OAuthProviderDoc{
+		UUID:       models.GenerateUUIDv7(),
+		UserUUID:   userUUID,
+		Provider:   authProvider,
+		ProviderID: providerID,
+		Email:      email,
+		IsPrimary:  false,
+		LinkedAt:   now,
+		Metadata:   metadata,
+		CreatedAt:  now,
+		UpdatedAt:  now,
+	}
+	if oauthTokens != nil {
+		providerDoc.Scopes = oauthTokens.Scopes
+	}
+	if err := s.oauthProviderRepo.CreateOAuthProvider(ctx, providerDoc); err != nil {
+		slog.Warn("self_oauth_link: provider repo write failed (link still attached to user)",
+			"userUUID", userUUID,
+			"provider", string(provider),
+			"error", err.Error(),
+		)
+	}
+
+	slog.Info("self_auth_action",
+		"event", "self_oauth_link",
+		"userUUID", userUUID,
+		"provider", string(provider),
+	)
+	return nil
+}
+
+// GetUserAuthMethods aggregates a single user's authentication state
+// (password, MFA factors, OAuth identities, email verification) into
+// the AuthMethodsView the admin card consumes. Reads from three
+// sources: the user record (PasswordHash, MFAGraceStartedAt,
+// OAuthLinks, EmailVerified, LastLogin), the tier's mfa_factors
+// collection (TOTP + WebAuthn rows for the user), and — implicitly —
+// the policy reader for MFARequired/MFAGraceExpiresAt.
+//
+// MFA factor reads are best-effort: a transient repo error must not
+// blank the password / OAuth half of the response. The caller can
+// retry the whole call to refresh the MFA section if it surfaces as
+// empty when it shouldn't.
+func (s *authService) GetUserAuthMethods(ctx context.Context, targetUUID string) (*models.AuthMethodsView, error) {
+	if targetUUID == "" {
+		return nil, fmt.Errorf("get auth methods: targetUUID is required")
+	}
+	user, err := s.userService.GetUserByID(ctx, targetUUID)
+	if err != nil {
+		return nil, err
+	}
+	if user == nil {
+		return nil, ErrOAuthLinkNotFound
+	}
+
+	view := &models.AuthMethodsView{
+		HasUsablePassword: user.PasswordHash != "",
+		PasswordUpdatedAt: user.PasswordUpdatedAt,
+		EmailVerified:     user.EmailVerified,
+		LastLoginAt:       user.LastLogin,
+		MFAGraceStartedAt: user.MFAGraceStartedAt,
+		MFAFactors:        []models.MFAFactorView{},
+		OAuthProviders:    []models.OAuthProviderView{},
+	}
+
+	// MFARequired starts from the role-only check — covers the system
+	// roles (super_admin / administrator) without needing a tenant
+	// lookup. If the role alone doesn't trigger it and a tenant
+	// provider is wired, fold in the user's tenant memberships so an
+	// org_owner / org_admin in any tenant flips the requirement on.
+	view.MFARequired = RoleRequiresMFA(user, nil)
+	if !view.MFARequired && s.tenantProvider != nil {
+		if mems, mErr := s.tenantProvider.ListUserMemberships(ctx, targetUUID); mErr == nil {
+			view.MFARequired = RoleRequiresMFA(user, ifaceMembershipsToAuth(mems))
+		}
+	}
+	if s.policy != nil {
+		if deadline := s.policy.MFAGraceExpiresAt(ctx, user); !deadline.IsZero() {
+			view.MFAGraceExpiresAt = &deadline
+		}
+	}
+
+	if s.mfaFactorRepo != nil {
+		if totp, err := s.mfaFactorRepo.FindByUserAndType(ctx, targetUUID, models.MFAFactorTOTP); err == nil && totp != nil {
+			view.MFAFactors = append(view.MFAFactors, models.MFAFactorView{
+				Type:                 string(models.MFAFactorTOTP),
+				EnrolledAt:           totp.VerifiedAt,
+				LastUsedAt:           totp.LastUsedAt,
+				BackupCodesRemaining: len(totp.BackupCodesHashed),
+			})
+		}
+		if wa, err := s.mfaFactorRepo.FindByUserAndType(ctx, targetUUID, models.MFAFactorWebAuthn); err == nil && wa != nil && len(wa.WebAuthnCredentials) > 0 {
+			creds := make([]models.WebAuthnCredentialSummary, 0, len(wa.WebAuthnCredentials))
+			for _, c := range wa.WebAuthnCredentials {
+				creds = append(creds, models.WebAuthnCredentialSummary{
+					CredentialID: encodeCredentialID(c.CredentialID),
+					Name:         c.Name,
+					CreatedAt:    c.CreatedAt,
+					LastUsedAt:   c.LastUsedAt,
+				})
+			}
+			view.MFAFactors = append(view.MFAFactors, models.MFAFactorView{
+				Type:        string(models.MFAFactorWebAuthn),
+				EnrolledAt:  wa.VerifiedAt,
+				LastUsedAt:  wa.LastUsedAt,
+				Credentials: creds,
+			})
+		}
+	}
+
+	for _, link := range user.OAuthLinks {
+		if !link.IsActive {
+			continue
+		}
+		view.OAuthProviders = append(view.OAuthProviders, models.OAuthProviderView{
+			Provider:   string(link.Provider),
+			Email:      link.Email,
+			LinkedAt:   link.LinkedAt,
+			LastUsedAt: link.LastUsed,
+			IsPrimary:  link.IsPrimary,
+		})
+	}
+
+	return view, nil
+}
+
+// ifaceMembershipsToAuth converts the iface.TenantMembership slice
+// returned by TenantProvider.ListUserMemberships into the
+// authModels.OrgMembership shape that RoleRequiresMFA consumes. Only
+// the fields the policy reads are copied; everything else is dropped.
+func ifaceMembershipsToAuth(mems []iface.TenantMembership) []models.OrgMembership {
+	out := make([]models.OrgMembership, 0, len(mems))
+	for _, m := range mems {
+		out = append(out, models.OrgMembership{
+			TenantUUID: m.TenantUUID,
+			TenantKind: m.TenantKind,
+			Roles:      m.Roles,
+		})
+	}
+	return out
+}
+
+// encodeCredentialID renders the raw WebAuthn credential ID bytes as
+// the same base64url-no-padding string the W3C JSON wire format uses,
+// so the admin UI can deep-link to "remove this credential" later
+// without reshaping IDs at the boundary.
+func encodeCredentialID(b []byte) string {
+	return base64.RawURLEncoding.EncodeToString(b)
+}
+
 func (s *authService) ConsolidateAccountsByEmail(ctx context.Context, email string) (*userModels.User, error) {
 	userResponse, err := s.userService.GetUserByEmail(ctx, email)
 	if err != nil {
@@ -273,26 +786,222 @@ func (s *authService) FindAccountsForConsolidation(ctx context.Context, email st
 	return []*userModels.User{convertUserResponseToAuthModel(userResponse)}, nil
 }
 
+// GetUserSessionsByUUID lists active (isActive && !expired) sessions
+// for the user, sorted most-recent-first. The IsCurrent flag is left
+// unset — the HTTP handler stamps it by comparing each
+// SessionInfo.SessionID against the JWT sid claim.
 func (s *authService) GetUserSessionsByUUID(ctx context.Context, userUUID string) (*models.SessionsResponse, error) {
+	if userUUID == "" {
+		return nil, fmt.Errorf("get user sessions: userUUID is required")
+	}
+	if s.authSessionRepo == nil {
+		return &models.SessionsResponse{Sessions: []models.SessionInfo{}}, nil
+	}
+	docs, err := s.authSessionRepo.GetActiveSessionsByUser(ctx, userUUID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]models.SessionInfo, 0, len(docs))
+	for _, d := range docs {
+		if d == nil {
+			continue
+		}
+		out = append(out, models.SessionInfo{
+			SessionID:    d.UUID,
+			DeviceID:     d.DeviceID,
+			DeviceName:   d.DeviceInfo.DeviceName,
+			DeviceType:   d.DeviceInfo.DeviceType,
+			Platform:     d.DeviceInfo.Platform,
+			Location:     d.Location,
+			IPAddress:    d.IPAddress,
+			LastActivity: d.LastActivity,
+			CreatedAt:    d.CreatedAt,
+			ExpiresAt:    d.ExpiresAt,
+			RiskScore:    d.RiskScore,
+		})
+	}
 	return &models.SessionsResponse{
-		Sessions: []models.SessionInfo{},
+		Sessions:    out,
+		ActiveCount: len(out),
 	}, nil
 }
 
+// ListUserSessions is the explicitly-named alias used by the
+// self-service handler. Same contract as GetUserSessionsByUUID.
+func (s *authService) ListUserSessions(ctx context.Context, userUUID string) (*models.SessionsResponse, error) {
+	return s.GetUserSessionsByUUID(ctx, userUUID)
+}
+
 func (s *authService) GetSessionCountByUUID(ctx context.Context, userUUID string) (int, error) {
-	return 0, nil
+	if userUUID == "" || s.authSessionRepo == nil {
+		return 0, nil
+	}
+	docs, err := s.authSessionRepo.GetActiveSessionsByUser(ctx, userUUID)
+	if err != nil {
+		return 0, err
+	}
+	return len(docs), nil
 }
 
 func (s *authService) RenameSessionByUUID(ctx context.Context, userUUID string, deviceID, deviceName string) error {
-	return fmt.Errorf("session management not yet implemented")
+	if s.authSessionRepo == nil {
+		return fmt.Errorf("session repo unavailable")
+	}
+	return s.authSessionRepo.RenameDevice(ctx, userUUID, deviceID, deviceName)
 }
 
+// TerminateSessionByUUID terminates every active session matching
+// (userUUID, deviceID). Used by the existing logout-by-device path
+// (auth_handler.LogoutHTTP). Coordinates the three-step revoke per
+// matching session so refresh tokens are revoked, the session doc is
+// flipped, and the sid is pushed into the Redis revocation set.
 func (s *authService) TerminateSessionByUUID(ctx context.Context, userUUID string, deviceID string) error {
-	return fmt.Errorf("session management not yet implemented")
+	if userUUID == "" || deviceID == "" {
+		return fmt.Errorf("terminate session: userUUID and deviceID required")
+	}
+	if s.authSessionRepo == nil {
+		return fmt.Errorf("session repo unavailable")
+	}
+	sessions, err := s.authSessionRepo.GetActiveSessionsByUser(ctx, userUUID)
+	if err != nil {
+		return err
+	}
+	for _, sess := range sessions {
+		if sess == nil || sess.DeviceID != deviceID {
+			continue
+		}
+		if err := s.revokeSessionInternal(ctx, sess.UUID, "user_logout"); err != nil {
+			return err
+		}
+	}
+	// Sweep any stale rows the per-session loop didn't touch (older
+	// duplicates, expired-but-still-active rows that the repo's
+	// "active" predicate filtered out).
+	return s.authSessionRepo.TerminateSessionByDevice(ctx, userUUID, deviceID)
 }
 
+// TerminateAllSessionsByUUID terminates every active session for the
+// user. Drives /v1/auth/logout?allDevices=true. Best-effort revoke
+// across each session, then a final TerminateAllUserSessions sweep so
+// any rows missed by the per-session loop still flip isActive=false.
 func (s *authService) TerminateAllSessionsByUUID(ctx context.Context, userUUID string) error {
-	return fmt.Errorf("session management not yet implemented")
+	if userUUID == "" {
+		return fmt.Errorf("terminate all sessions: userUUID required")
+	}
+	if s.authSessionRepo == nil {
+		return fmt.Errorf("session repo unavailable")
+	}
+	sessions, err := s.authSessionRepo.GetActiveSessionsByUser(ctx, userUUID)
+	if err != nil {
+		return err
+	}
+	for _, sess := range sessions {
+		if sess == nil {
+			continue
+		}
+		if err := s.revokeSessionInternal(ctx, sess.UUID, "user_logout_all"); err != nil {
+			return err
+		}
+	}
+	return s.authSessionRepo.TerminateAllUserSessions(ctx, userUUID)
+}
+
+// RevokeUserSession revokes one session by UUID for the user.
+// Rejects revoke-current with ErrCannotRevokeCurrent (the user has
+// the existing logout for that). Returns ErrSessionNotFound when
+// the session doesn't exist or doesn't belong to the calling user —
+// the two are collapsed so the response can't be used to probe for
+// other users' session UUIDs.
+func (s *authService) RevokeUserSession(ctx context.Context, userUUID, sessionUUID, currentSid string) error {
+	if userUUID == "" || sessionUUID == "" {
+		return fmt.Errorf("revoke session: userUUID and sessionUUID required")
+	}
+	if currentSid != "" && sessionUUID == currentSid {
+		return ErrCannotRevokeCurrent
+	}
+	if s.authSessionRepo == nil {
+		return fmt.Errorf("session repo unavailable")
+	}
+	sess, err := s.authSessionRepo.GetByUUID(ctx, sessionUUID)
+	if err != nil {
+		return err
+	}
+	if sess == nil || sess.UserUUID != userUUID {
+		return ErrSessionNotFound
+	}
+	if err := s.revokeSessionInternal(ctx, sessionUUID, "user_self_revoke"); err != nil {
+		return err
+	}
+	slog.Info("self_auth_action",
+		"event", "self_session_revoke",
+		"userUUID", userUUID,
+		"sessionUUID", sessionUUID,
+	)
+	return nil
+}
+
+// RevokeAllUserSessionsExcept revokes every active session for the
+// user except the one matching currentSid so the caller's request
+// can complete. Returns the count of sessions revoked.
+func (s *authService) RevokeAllUserSessionsExcept(ctx context.Context, userUUID, currentSid string) (int, error) {
+	if userUUID == "" {
+		return 0, fmt.Errorf("revoke all sessions: userUUID required")
+	}
+	if s.authSessionRepo == nil {
+		return 0, nil
+	}
+	sessions, err := s.authSessionRepo.GetActiveSessionsByUser(ctx, userUUID)
+	if err != nil {
+		return 0, err
+	}
+	revoked := 0
+	for _, sess := range sessions {
+		if sess == nil || sess.UUID == currentSid {
+			continue
+		}
+		if err := s.revokeSessionInternal(ctx, sess.UUID, "user_self_revoke_others"); err != nil {
+			return revoked, err
+		}
+		revoked++
+	}
+	slog.Info("self_auth_action",
+		"event", "self_session_revoke_all",
+		"userUUID", userUUID,
+		"revoked", revoked,
+	)
+	return revoked, nil
+}
+
+// revokeSessionInternal performs the three-step revocation for a
+// single session: revoke its refresh tokens → flip the session doc
+// to inactive → push the sid into the Redis revocation set so
+// in-flight access tokens are rejected by AuthMiddleware on the
+// next request. The Redis push is best-effort (fail-open on outage)
+// — the persisted state still updates so reauth via cookie is
+// blocked even when Redis is unavailable.
+func (s *authService) revokeSessionInternal(ctx context.Context, sessionUUID, reason string) error {
+	if sessionUUID == "" {
+		return nil
+	}
+	if s.refreshTokenRepo != nil {
+		if err := s.refreshTokenRepo.RevokeTokensBySession(ctx, sessionUUID, reason); err != nil {
+			return fmt.Errorf("revoke refresh tokens: %w", err)
+		}
+	}
+	if s.authSessionRepo != nil {
+		if err := s.authSessionRepo.TerminateSession(ctx, sessionUUID); err != nil {
+			// Tolerate the repo's "session not found" sentinel —
+			// the row may already be terminated by a concurrent
+			// caller. Anything else is a real failure.
+			if err.Error() != "session not found" {
+				return fmt.Errorf("terminate session doc: %w", err)
+			}
+		}
+	}
+	if s.sessionRevocation != nil {
+		_ = s.sessionRevocation.Revoke(ctx, sessionUUID, reason)
+	}
+	return nil
 }
 
 func (s *authService) GenerateEnhancedTokenPair(ctx context.Context, user *userModels.User, deviceInfo *models.DeviceInfo, securityCtx *models.SecurityContext) (*models.TokenResponse, error) {
@@ -737,6 +1446,15 @@ func (s *authService) HandleOAuthCallbackWithLinking(ctx context.Context, provid
 		fmt.Printf("[AUTH_DEBUG] No existing provider link found, checking for user by email: %s\n", email)
 		userResponse, err := s.userService.GetUserByEmail(ctx, email)
 		if err != nil {
+			// Phase 9: oauthAllowSignup gate. When the policy is wired
+			// and the audience-scoped toggle is off, an unknown email
+			// must NOT be auto-provisioned via OAuth — keeps signups
+			// invitation-only while OAuth login still works for
+			// existing accounts.
+			if s.policy != nil && !s.policy.OAuthAllowSignup(ctx, s.audience) {
+				fmt.Printf("[AUTH_DEBUG] OAuth signup disabled by policy for audience %q, refusing to create user\n", s.audience)
+				return nil, ErrOAuthSignupDisabled
+			}
 			fmt.Printf("[AUTH_DEBUG] User not found in database, creating new user\n")
 			// Create new user via UserService
 			newUUID := models.GenerateUUIDv7()
@@ -779,6 +1497,16 @@ func (s *authService) HandleOAuthCallbackWithLinking(ctx context.Context, provid
 			user = convertUserModelToAuthModel(userModel)
 			fmt.Printf("[AUTH_DEBUG] New user created successfully with UUID: %s\n", user.UUID)
 		} else {
+			// Phase 10: oauthAutoLinkByEmail gate. The callback found an
+			// existing Orkestra account by email — auto-linking the
+			// OAuth provider to it is convenient but lets an attacker
+			// who controls a matching IdP email hijack a password
+			// account. When off, refuse here so account linking must
+			// happen from an authenticated settings page instead.
+			if s.policy != nil && !s.policy.OAuthAutoLinkByEmail(ctx) {
+				fmt.Printf("[AUTH_DEBUG] OAuth auto-link disabled by policy, refusing to attach provider to existing account\n")
+				return nil, ErrOAuthLinkDisabled
+			}
 			user = convertUserResponseToAuthModel(userResponse)
 			fmt.Printf("[AUTH_DEBUG] Existing user found with UUID: %s\n", user.UUID)
 		}
@@ -1020,7 +1748,7 @@ func (s *authService) evaluateMFAForOAuth(ctx context.Context, user *userModels.
 		return nil, false, nil
 	}
 	memberships := s.loadMembershipsAsAuthModel(ctx, user.UUID)
-	if !RoleRequiresMFA(user, memberships) {
+	if !s.policy.MFARequired(user, memberships) {
 		return nil, false, nil
 	}
 
@@ -1062,7 +1790,7 @@ func (s *authService) evaluateMFAForOAuth(ctx context.Context, user *userModels.
 
 	// Privileged user without a factor → grace window.
 	now := time.Now()
-	if GraceExpired(user, now) {
+	if s.policy.MFAGraceExpired(ctx, user, now) {
 		return nil, true, ErrMFAEnrollmentRequired
 	}
 	if user.MFAGraceStartedAt == nil {

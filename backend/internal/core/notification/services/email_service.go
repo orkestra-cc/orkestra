@@ -6,11 +6,32 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"mime/quotedprintable"
 	"net"
 	"net/smtp"
 	"strings"
 	"time"
 )
+
+// encodeQuotedPrintable encodes s with RFC 2045 quoted-printable so that
+// '=' bytes (and any non-printable / >0x7E) become '=XX' hex sequences
+// and long lines are wrapped at 76 chars with soft '=' line endings.
+//
+// Without this, declaring Content-Transfer-Encoding: quoted-printable
+// while writing the body verbatim produces invalid QP whenever the body
+// contains a literal '=' (e.g. "?token=ABC"). Strict decoders — Stalwart
+// among them — treat the unescaped '=' as a malformed escape and drop
+// it, mangling URLs in flight.
+func encodeQuotedPrintable(s string) string {
+	if s == "" {
+		return ""
+	}
+	var b strings.Builder
+	w := quotedprintable.NewWriter(&b)
+	_, _ = w.Write([]byte(s))
+	_ = w.Close()
+	return b.String()
+}
 
 var ErrEmailNotConfigured = errors.New("notification: email sender not configured")
 
@@ -205,19 +226,20 @@ func buildMIMEMessage(cfg EmailSettings, msg EmailMessage) string {
 		fmt.Fprintf(&b, "--%s\r\n", boundary)
 		b.WriteString("Content-Type: text/plain; charset=\"utf-8\"\r\n")
 		b.WriteString("Content-Transfer-Encoding: quoted-printable\r\n\r\n")
-		b.WriteString(msg.BodyText)
+		b.WriteString(encodeQuotedPrintable(msg.BodyText))
 		b.WriteString("\r\n")
 
 		fmt.Fprintf(&b, "--%s\r\n", boundary)
 		b.WriteString("Content-Type: text/html; charset=\"utf-8\"\r\n")
 		b.WriteString("Content-Transfer-Encoding: quoted-printable\r\n\r\n")
-		b.WriteString(msg.BodyHTML)
+		b.WriteString(encodeQuotedPrintable(msg.BodyHTML))
 		b.WriteString("\r\n")
 
 		fmt.Fprintf(&b, "--%s--\r\n", boundary)
 	} else {
-		b.WriteString("Content-Type: text/plain; charset=\"utf-8\"\r\n\r\n")
-		b.WriteString(msg.BodyText)
+		b.WriteString("Content-Type: text/plain; charset=\"utf-8\"\r\n")
+		b.WriteString("Content-Transfer-Encoding: quoted-printable\r\n\r\n")
+		b.WriteString(encodeQuotedPrintable(msg.BodyText))
 	}
 
 	return b.String()

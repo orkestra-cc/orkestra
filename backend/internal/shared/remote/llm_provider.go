@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"net/url"
 
-	"github.com/orkestra/backend/internal/addons/aimodels/providers"
+	"github.com/orkestra/backend/internal/shared/iface"
 )
 
-// RemoteLLMProvider implements providers.LLMProvider by calling
+// RemoteLLMProvider implements iface.LLMProvider by calling
 // the AI service's internal complete endpoint over HTTP.
 type RemoteLLMProvider struct {
 	client    *client
@@ -36,7 +36,7 @@ func newRemoteLLMProvider(c *client, modelUUID string) (*RemoteLLMProvider, erro
 	return p, nil
 }
 
-func (p *RemoteLLMProvider) Complete(ctx context.Context, prompt string, opts providers.CompletionOptions) (string, error) {
+func (p *RemoteLLMProvider) Complete(ctx context.Context, prompt string, opts iface.CompletionOptions) (string, error) {
 	reqBody := map[string]interface{}{
 		"prompt":       prompt,
 		"systemPrompt": opts.SystemPrompt,
@@ -56,7 +56,7 @@ func (p *RemoteLLMProvider) Complete(ctx context.Context, prompt string, opts pr
 	return resp.Text, nil
 }
 
-func (p *RemoteLLMProvider) StreamComplete(ctx context.Context, prompt string, opts providers.CompletionOptions) (<-chan providers.StreamChunk, error) {
+func (p *RemoteLLMProvider) StreamComplete(ctx context.Context, prompt string, opts iface.CompletionOptions) (<-chan iface.StreamChunk, error) {
 	// Streaming is handled directly by the frontend → AI service.
 	// The monolith never needs to stream through this client.
 	return nil, fmt.Errorf("remote: streaming not supported via service-to-service — use direct AI service connection")

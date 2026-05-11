@@ -1,14 +1,12 @@
 package models
 
-import "time"
+import (
+	"time"
+)
 
-// Subscription links an external Tenant to a Service tier with a recurring
-// billing cycle. The renewal job scans NextBillingAt and transitions Status
-// through the state machine defined in services/subscription_service.go.
-//
-// ADR-0001: TenantUUID is the only tenant pointer — the legacy SubscriptionClient
-// entity has been removed. Every row points directly at a Tier-2 external
-// tenant.
+// Subscription links a Tenant to a Service tier with a recurring billing
+// cycle. The renewal job scans NextBillingAt and transitions Status through
+// the state machine defined in services/subscription_service.go.
 type Subscription struct {
 	UUID               string         `bson:"uuid" json:"uuid"`
 	TenantUUID         string         `bson:"tenantUUID" json:"tenantUUID"`

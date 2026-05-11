@@ -42,7 +42,7 @@ func NewDocumentRepository(db *mongo.Database) DocumentRepository {
 		{Keys: bson.D{{Key: "status", Value: 1}}},
 		{Keys: bson.D{{Key: "isoStandard", Value: 1}}},
 	}
-	coll.Indexes().CreateMany(ctx, indexes) //nolint:errcheck
+	coll.Indexes().CreateMany(ctx, indexes) //nolint:errcheck // best-effort index ensure; subsequent reads will surface persistent failures
 
 	return &documentRepository{collection: coll}
 }

@@ -1,13 +1,15 @@
 package models
 
-import "time"
+import (
+	"time"
+)
 
 // PaymentMethod is a tokenized card/SEPA/etc. stored on a provider customer.
 // We never store raw PANs — only the provider's reference token (pm_xxx).
+//
+// TenantUUID is the tenant the saved card belongs to.
 type PaymentMethod struct {
-	UUID string `bson:"uuid" json:"uuid"`
-	// TenantUUID is the tenant binding (ADR-0001). Every payment method
-	// points directly at a Tier-2 external tenant.
+	UUID             string       `bson:"uuid" json:"uuid"`
 	TenantUUID       string       `bson:"tenantUUID" json:"tenantUUID"`
 	Provider         ProviderName `bson:"provider" json:"provider"`
 	ProviderMethodID string       `bson:"providerMethodID" json:"providerMethodID"` // pm_xxx

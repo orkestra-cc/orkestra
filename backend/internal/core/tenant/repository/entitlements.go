@@ -32,7 +32,7 @@ func (r *Repository) CreateEntitlement(ctx context.Context, e *models.Entitlemen
 func (r *Repository) GetActiveEntitlement(ctx context.Context, tenantUUID, capabilityID string) (*models.Entitlement, error) {
 	now := time.Now()
 	filter := bson.M{
-		"tenantId":     tenantUUID,
+		"tenantUUID":   tenantUUID,
 		"capabilityId": capabilityID,
 		"revokedAt":    nil,
 		"$or": []bson.M{
@@ -57,7 +57,7 @@ func (r *Repository) GetActiveEntitlement(ctx context.Context, tenantUUID, capab
 func (r *Repository) HasActiveEntitlement(ctx context.Context, tenantUUID, capabilityID string) (bool, error) {
 	now := time.Now()
 	filter := bson.M{
-		"tenantId":     tenantUUID,
+		"tenantUUID":   tenantUUID,
 		"capabilityId": capabilityID,
 		"revokedAt":    nil,
 		"$or": []bson.M{
@@ -77,8 +77,8 @@ func (r *Repository) HasActiveEntitlement(ctx context.Context, tenantUUID, capab
 func (r *Repository) ListActiveByTenant(ctx context.Context, tenantUUID string) ([]models.Entitlement, error) {
 	now := time.Now()
 	filter := bson.M{
-		"tenantId":  tenantUUID,
-		"revokedAt": nil,
+		"tenantUUID": tenantUUID,
+		"revokedAt":  nil,
 		"$or": []bson.M{
 			{"expiresAt": nil},
 			{"expiresAt": bson.M{"$gt": now}},
@@ -97,11 +97,11 @@ func (r *Repository) ListActiveByTenant(ctx context.Context, tenantUUID string) 
 }
 
 // RevokeActiveEntitlement marks the active entitlement for the
-// (tenant, capability) pair as revoked. Idempotent: returns ErrNotFound if no
-// active row exists. Never mutates already-revoked rows.
+// (tenantUUID, capabilityID) pair as revoked. Idempotent: returns
+// ErrNotFound if no active row exists. Never mutates already-revoked rows.
 func (r *Repository) RevokeActiveEntitlement(ctx context.Context, tenantUUID, capabilityID string, at time.Time) error {
 	filter := bson.M{
-		"tenantId":     tenantUUID,
+		"tenantUUID":   tenantUUID,
 		"capabilityId": capabilityID,
 		"revokedAt":    nil,
 	}

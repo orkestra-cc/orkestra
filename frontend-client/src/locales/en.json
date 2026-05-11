@@ -1,0 +1,417 @@
+{
+  "app": {
+    "name": "Orkestra",
+    "tagline": "Managed services for your business"
+  },
+  "nav": {
+    "catalog": "Services",
+    "signin": "Sign in",
+    "signup": "Sign up",
+    "account": "Account",
+    "signout": "Sign out"
+  },
+  "home": {
+    "hero": "Pick the services you need. Nothing more.",
+    "subhero": "Monthly subscriptions, transparent invoicing, secure payments via Stripe.",
+    "cta": "Browse the catalog"
+  },
+  "catalog": {
+    "title": "Service catalog",
+    "subtitle": "All services currently available on the platform.",
+    "empty": "No active services right now. Check back soon.",
+    "viewDetail": "View details",
+    "from": "From",
+    "subscribe": "Subscribe",
+    "noPricing": "Pricing coming soon",
+    "category": "Category",
+    "capabilities": "Included capabilities",
+    "setupFee": "Setup fee",
+    "back": "Back to catalog"
+  },
+  "cycle": {
+    "monthly": "/ month",
+    "quarterly": "/ quarter",
+    "annual": "/ year"
+  },
+  "signup": {
+    "title": "Create your account",
+    "subtitle": "Takes a few seconds. We'll send you an email to confirm your address.",
+    "email": "Email",
+    "password": "Password",
+    "passwordHint": "At least 10 characters",
+    "fullName": "Full name",
+    "terms": "I accept the Terms of Service and Privacy Policy",
+    "submit": "Create account",
+    "submitting": "Creating account…",
+    "haveAccount": "Already have an account?",
+    "signinLink": "Sign in",
+    "successTitle": "Almost there!",
+    "successBody": "We've sent a confirmation email to {{email}}. Click the link to activate your account.",
+    "successResend": "Didn't receive the email? Resend",
+    "errorEmailRequired": "Email is required",
+    "errorEmailInvalid": "Invalid email format",
+    "errorPasswordRequired": "Password is required",
+    "errorPasswordTooShort": "Password must be at least 10 characters",
+    "errorFullNameRequired": "Name is required",
+    "errorTermsRequired": "You must accept the terms to continue",
+    "disabled": "Self-service registration is currently disabled. Please contact us if you need an account."
+  },
+  "verify": {
+    "title": "Verify email",
+    "pending": "Verifying…",
+    "successTitle": "Email verified!",
+    "successBody": "Your account is active. You can now sign in.",
+    "errorTitle": "Verification failed",
+    "errorBody": "The link is expired or invalid. Request a new verification email below.",
+    "missingToken": "Missing token. Open the link from the email you received.",
+    "signinCta": "Go to sign in",
+    "resendTitle": "Resend verification email",
+    "resendEmailLabel": "Your email",
+    "resendSubmit": "Resend",
+    "resendSent": "If that address is registered and not yet verified, we've sent a new email."
+  },
+  "login": {
+    "title": "Sign in to your account",
+    "subtitle": "Enter your credentials to continue.",
+    "email": "Email",
+    "password": "Password",
+    "submit": "Sign in",
+    "submitting": "Signing in…",
+    "forgot": "Forgot password?",
+    "signupLink": "Create an account",
+    "disabled": "Login is temporarily disabled by an administrator. Please try again later.",
+    "mfa": {
+      "prompt": "Enter the 6-digit code from your authenticator app.",
+      "code": "Verification code",
+      "backupCode": "Backup code",
+      "useBackup": "Use a backup code",
+      "submit": "Verify",
+      "submitting": "Verifying…",
+      "cancel": "Cancel"
+    },
+    "notVerified": {
+      "title": "Email address not verified",
+      "body": "We sent a verification link when you signed up. If you can't find it, request a new one.",
+      "resendCta": "Resend verification email",
+      "resendSending": "Sending…",
+      "resendCooldown": "Resend available in {{seconds}}s",
+      "resendDone": "If that address is registered and not yet verified, we've sent a new email."
+    }
+  },
+  "forgot": {
+    "title": "Forgot password",
+    "subtitle": "Enter your email and we'll send you a link to reset your password.",
+    "email": "Email",
+    "submit": "Send link",
+    "submitting": "Sending…",
+    "successTitle": "Check your email",
+    "successBody": "If that address is registered, we've sent a password reset link.",
+    "backToLogin": "Back to sign in"
+  },
+  "reset": {
+    "title": "Reset password",
+    "subtitle": "Choose a new password for your account.",
+    "newPassword": "New password",
+    "confirmPassword": "Confirm password",
+    "passwordHint": "At least 10 characters",
+    "submit": "Update password",
+    "submitting": "Updating…",
+    "successTitle": "Password updated",
+    "successBody": "You can now sign in with your new password.",
+    "signinCta": "Go to sign in",
+    "missingToken": "Missing token. Open the link from the email you received.",
+    "errorTooShort": "Password must be at least 10 characters",
+    "errorMismatch": "Passwords do not match"
+  },
+  "invite": {
+    "title": "Accept your invitation",
+    "subtitle": "Pick a password to finish setting up your account.",
+    "newPassword": "Choose a password",
+    "confirmPassword": "Confirm password",
+    "passwordHint": "At least 10 characters",
+    "submit": "Activate account",
+    "submitting": "Activating…",
+    "successTitle": "Welcome aboard",
+    "successBody": "Your account is ready. Sign in to get started.",
+    "signinCta": "Go to sign in",
+    "missingToken": "Missing token. Open the link from the invitation email.",
+    "errorTooShort": "Password must be at least 10 characters",
+    "errorMismatch": "Passwords do not match"
+  },
+  "account": {
+    "title": "Account",
+    "subtitle": "Manage your profile and security.",
+    "back": "Back to account",
+    "fullName": "Name",
+    "email": "Email",
+    "emailVerified": "Email verified",
+    "verified": "Yes",
+    "notVerified": "No",
+    "role": "Role",
+    "security": {
+      "title": "Security",
+      "cta": "Change password and manage 2FA"
+    },
+    "billing": {
+      "title": "Billing details",
+      "cta": "The address and tax info we put on Stripe and on your invoices."
+    },
+    "subscriptions": {
+      "title": "Subscriptions",
+      "cta": "View active subscriptions, invoices, and activity."
+    },
+    "transactions": {
+      "title": "Transactions",
+      "cta": "Charges, refunds, and Stripe transaction history."
+    },
+    "paymentMethods": {
+      "title": "Payment methods",
+      "cta": "Saved cards used for renewals and outstanding invoices."
+    },
+    "changePassword": {
+      "title": "Change password",
+      "subtitle": "Enter your current password and a new one. Your active session will be invalidated.",
+      "current": "Current password",
+      "new": "New password",
+      "confirm": "Confirm new password",
+      "submit": "Update password",
+      "submitting": "Updating…"
+    },
+    "mfa": {
+      "title": "Two-factor authentication",
+      "subtitle": "Add a second step at sign-in using an authenticator app (TOTP).",
+      "status": "Status",
+      "type": "Type",
+      "backupCodesRemaining": "Backup codes remaining",
+      "required": "Required",
+      "requiredYes": "Yes",
+      "graceWarning": "Two-factor is required for your role. Deadline: {{date}}.",
+      "enrol": "Set up now",
+      "statusValue": {
+        "not_required": "Not required",
+        "required": "Setup required",
+        "enrolled": "Active",
+        "disabled": "Disabled"
+      }
+    }
+  },
+  "mfa": {
+    "enrol": {
+      "title": "Set up two-factor",
+      "subtitle": "Three steps: start, scan, confirm. Save the backup codes somewhere safe.",
+      "step1": "Start the flow to generate a fresh secret.",
+      "start": "Start setup",
+      "starting": "Starting…",
+      "step2": "Add the account to your authenticator app",
+      "scanInstructions": "Open Google Authenticator, 1Password, Authy, or any TOTP app and add a new account by entering the secret below.",
+      "secret": "Secret",
+      "copy": "Copy",
+      "copied": "Copied!",
+      "uriToggle": "Show otpauth URI (mobile-friendly)",
+      "step3": "Confirm with the code from your app",
+      "codeLabel": "6-digit code",
+      "confirm": "Confirm",
+      "confirming": "Confirming…",
+      "backupTitle": "Save your backup codes",
+      "backupSubtitle": "Use these codes to sign in if you lose access to your authenticator. They are shown only once.",
+      "backupCopy": "Copy all",
+      "backupDownload": "Download .txt",
+      "backupAcknowledge": "I have saved these codes somewhere safe",
+      "backupContinue": "Done, continue"
+    }
+  },
+  "subscribe": {
+    "title": "Confirm your subscription",
+    "subtitle": "Review the plan and we'll take you to Stripe to save a payment method. The first charge happens at the start of your billing cycle.",
+    "back": "Back to service details",
+    "browseCatalog": "Browse the catalog",
+    "servicePlan": "Service",
+    "plusSetup": "Plus a one-time setup fee of {{fee}}.",
+    "ownerLabel": "Bill this subscription to",
+    "ownerHint": "Default is personal billing. Pick an organization if you want to invoice on its behalf.",
+    "ownerPersonal": "Personal (just me)",
+    "cardNotice": "We'll redirect you to Stripe Checkout to securely save a card. We won't charge it now — your first invoice is generated at the start of the billing cycle.",
+    "submit": "Continue to payment",
+    "submitting": "Opening checkout…",
+    "cancel": "Not now",
+    "errorTitle": "Something's missing",
+    "errorMissingTier": "We couldn't find which plan you wanted. Pick one from the catalog.",
+    "errorTierGone": "That plan is no longer available. Browse the catalog for current options."
+  },
+  "billing": {
+    "title": "Billing details",
+    "subtitle": "Used for Stripe customer creation and on the invoices we issue.",
+    "errorTitle": "Couldn't load billing details",
+    "italianBillableEnabled": "FatturaPA enabled",
+    "nextHint": "Save your billing details to continue with checkout.",
+    "typeLegend": "Account type",
+    "typePerson": "Personal",
+    "typeCompany": "Company / sole proprietor",
+    "identityLegend": "Identity",
+    "addressLegend": "Address",
+    "legalName": "Legal name",
+    "legalNameHintPerson": "Optional. Defaults to your account name when empty.",
+    "vatNumber": "VAT number",
+    "vatHint": "Italian P.IVA or EU VAT identifier.",
+    "fiscalCode": "Tax code",
+    "fiscalHintPerson": "Italian Codice Fiscale (16 chars).",
+    "fiscalHintCompany": "Italian Codice Fiscale (often equal to VAT number).",
+    "country": "Country",
+    "countryHint": "ISO 3166-1 alpha-2 code (e.g. IT, DE, FR).",
+    "addressLine1": "Address",
+    "addressLine2": "Additional address (optional)",
+    "city": "City",
+    "postalCode": "Postal code",
+    "province": "Province",
+    "provinceHint": "Italian province code (e.g. RM, MI). Optional outside Italy.",
+    "fatturaPALegend": "FatturaPA routing",
+    "fatturaPAHint": "Required to receive Italian electronic invoices via SDI. Either of these is enough.",
+    "codiceDestinatario": "Codice Destinatario (SDI)",
+    "codiceDestinatarioHint": "7-character SDI code provided by your invoicing platform.",
+    "pecDestinatario": "PEC address",
+    "pecDestinatarioHint": "Used when no SDI code is registered.",
+    "italianBillableLabel": "Italian electronic invoices (FatturaPA)",
+    "italianBillableActiveHint": "Active. We deliver invoices through SDI using the routing above.",
+    "italianBillableIdleHint": "Off. Invoices won't be transmitted to SDI until you enable this.",
+    "italianBillableNeedsRouting": "Add a Codice Destinatario or PEC address and save before enabling.",
+    "enable": "Enable",
+    "disable": "Disable",
+    "toggling": "Saving…",
+    "submit": "Save billing details",
+    "submitting": "Saving…",
+    "saved": "Billing details saved.",
+    "errorLegalName": "Legal name is required for company billing.",
+    "errorCountry": "Country is required."
+  },
+  "subscribeReturn": {
+    "successTitle": "Subscription confirmed",
+    "successBody": "Your card is saved with Stripe and your subscription is active.",
+    "cancelTitle": "Checkout cancelled",
+    "cancelBody": "We didn't save a payment method. You can return to the catalog anytime to retry.",
+    "errorTitle": "Missing reference",
+    "errorMissing": "We couldn't find which subscription this return URL refers to.",
+    "warnLookup": "We couldn't load the subscription details. Check your account page in a moment.",
+    "browseCatalog": "Back to catalog",
+    "goAccount": "Go to account",
+    "statusLabel": "Status",
+    "tierLabel": "Plan",
+    "nextBillingLabel": "Next billing",
+    "firstChargeNotice": "Your first invoice is generated at the start of your billing cycle and the card you just saved is charged automatically.",
+    "status": {
+      "active": "Active",
+      "past_due": "Past due",
+      "suspended": "Suspended",
+      "cancelled": "Cancelled",
+      "expired": "Expired"
+    }
+  },
+  "ownerScope": {
+    "label": "Showing",
+    "all": "All accounts",
+    "personal": "Personal only",
+    "tenantOption": "Organization · {{id}}"
+  },
+  "dashboard": {
+    "subscriptions": {
+      "title": "Subscriptions",
+      "subtitle": "Active and past subscriptions across your accounts.",
+      "startNew": "Start a new subscription",
+      "browseCatalog": "Browse the catalog",
+      "empty": "No subscriptions yet. Pick a service to get started.",
+      "ownerPersonal": "Personal",
+      "ownerTenant": "Organization · {{id}}",
+      "serviceRef": "Service · {{id}}…",
+      "periodStart": "Period start",
+      "periodEnd": "Period end",
+      "nextBilling": "Next billing",
+      "willEnd": "Ends on"
+    },
+    "subscriptionDetail": {
+      "errorMissing": "We couldn't find which subscription this link refers to.",
+      "errorLoad": "Couldn't load this subscription. Try again in a moment.",
+      "cancel": "Cancel subscription",
+      "cancelPrompt": "How should we cancel? Keep access until the period ends, or stop right away?",
+      "cancelAtPeriodEnd": "End on period end",
+      "cancelImmediately": "Cancel now",
+      "cancelKeep": "Keep it",
+      "reactivate": "Reactivate",
+      "reactivating": "Reactivating…",
+      "invoicesTitle": "Invoices",
+      "invoicesEmpty": "No invoices yet — your first one is generated at the start of the billing cycle.",
+      "invoicesError": "Couldn't load invoices.",
+      "invoiceNumber": "Number",
+      "invoicePeriod": "Period",
+      "invoiceAmount": "Amount",
+      "invoiceStatus": "Status",
+      "invoiceIssued": "Issued",
+      "invoiceStatusValue": {
+        "pending": "Pending",
+        "paid": "Paid",
+        "failed": "Failed",
+        "refunded": "Refunded",
+        "void": "Void",
+        "awaiting_manual_payment": "Awaiting manual payment"
+      },
+      "payNow": "Pay now",
+      "paying": "Opening checkout…",
+      "payNoPending": "Nothing to pay right now — the renewal job will generate the next invoice automatically.",
+      "paySuccess": "Payment received. The invoice status will update once Stripe confirms it.",
+      "payCancel": "Checkout cancelled. Nothing was charged.",
+      "activityTitle": "Activity",
+      "activityEmpty": "No activity recorded yet.",
+      "activityError": "Couldn't load activity."
+    },
+    "activity": {
+      "actor": "By {{actor}}",
+      "type": {
+        "created": "Subscription created",
+        "charged": "Charge succeeded",
+        "charge_failed": "Charge failed",
+        "refunded": "Refunded",
+        "cancelled": "Cancelled",
+        "reactivated": "Reactivated",
+        "suspended": "Suspended",
+        "tier_changed": "Plan changed",
+        "invoice_issued": "Invoice issued",
+        "manual_payment_required": "Manual payment required"
+      }
+    },
+    "transactions": {
+      "title": "Transactions",
+      "subtitle": "Every charge, retry, and refund attributed to your accounts.",
+      "empty": "No transactions yet. Your first charge will appear here after the next billing cycle.",
+      "date": "Date",
+      "amount": "Amount",
+      "status": "Status",
+      "provider": "Gateway",
+      "reference": "Reference",
+      "refundedAmount": "({{amount}} refunded)",
+      "statusValue": {
+        "pending": "Pending",
+        "requires_action": "Awaiting action",
+        "succeeded": "Succeeded",
+        "failed": "Failed",
+        "refunded": "Refunded",
+        "partially_refunded": "Partially refunded"
+      }
+    },
+    "paymentMethods": {
+      "title": "Payment methods",
+      "subtitle": "Cards saved with Stripe and used for off-session renewals.",
+      "empty": "No saved payment methods. Add a card to power automatic renewals.",
+      "addCard": "Add a card",
+      "adding": "Opening Stripe…",
+      "defaultBadge": "Default",
+      "expires": "Expires {{date}}"
+    }
+  },
+  "lang": {
+    "switch": "Language",
+    "it": "Italiano",
+    "en": "English"
+  },
+  "loading": "Loading…",
+  "error": {
+    "generic": "Something went wrong. Please try again."
+  }
+}

@@ -66,12 +66,24 @@ type MFAService interface {
 	VerifyBackupCode(ctx context.Context, userUUID, code string) error
 
 	RemoveFactor(ctx context.Context, userUUID, actorUUID string) error
+	// RegenerateBackupCodes replaces the user's existing backup codes
+	// with a freshly generated set, persists their hashes (atomic
+	// $set, not append), and returns the plaintext codes exactly
+	// once. Callers must apply the step-up middleware — destroying
+	// the existing codes is irreversible. Returns ErrMFANotEnrolled
+	// when no TOTP factor exists for the user.
+	RegenerateBackupCodes(ctx context.Context, userUUID string) ([]string, error)
 	Status(ctx context.Context, userUUID string) (*MFAStatusSnapshot, error)
 	// SetDeviceTrust wires the "remember this device" service so
 	// factor removal (and the admin-reset variant on top of it)
 	// can revoke every trust grant the user holds. Optional — nil
 	// leaves the revoke step inert. Section C item #3.
 	SetDeviceTrust(dt DeviceTrustService)
+	// SetPolicy wires the admin-managed policy reader so backup-code
+	// generation can honour the recoveryCodesCount toggle (Phase 10
+	// of the auth-policy roadmap). Nil falls back to the legacy
+	// hardcoded BackupCodeCount.
+	SetPolicy(p *AuthPolicyService)
 }
 
 type mfaService struct {
@@ -81,12 +93,18 @@ type mfaService struct {
 	deviceTrust DeviceTrustService // optional — see SetDeviceTrust
 	issuer      string
 	logger      *slog.Logger
+	policy      *AuthPolicyService // optional — Phase 10 backup-code count
 }
 
 // SetDeviceTrust wires the optional device-trust service. Called
 // post-construction from module.go so the construction graph stays
 // free of a cross-service dependency.
 func (s *mfaService) SetDeviceTrust(dt DeviceTrustService) { s.deviceTrust = dt }
+
+// SetPolicy wires the optional auth-policy reader. Phase 10 of the
+// auth-policy roadmap — used today only by backup-code generation
+// (recoveryCodesCount). Safe to call multiple times.
+func (s *mfaService) SetPolicy(p *AuthPolicyService) { s.policy = p }
 
 // NewMFAService builds the service. `issuer` ends up as the label prefix in
 // the TOTP provisioning URI — authenticator apps show it above the 6-digit
@@ -179,7 +197,7 @@ func (s *mfaService) ConfirmEnrollment(ctx context.Context, userUUID, challengeI
 		return nil, fmt.Errorf("encrypt totp secret: %w", err)
 	}
 
-	plaintextCodes, hashedCodes, err := s.generateBackupCodes(BackupCodeCount)
+	plaintextCodes, hashedCodes, err := s.generateBackupCodes(s.recoveryCodesCount(ctx))
 	if err != nil {
 		return nil, fmt.Errorf("generate backup codes: %w", err)
 	}
@@ -312,6 +330,40 @@ func (s *mfaService) RemoveFactor(ctx context.Context, userUUID, actorUUID strin
 	return nil
 }
 
+// RegenerateBackupCodes replaces the user's existing backup-code
+// hash list with a fresh set, returning the plaintext exactly once.
+// The repo's $set replace is atomic — old codes stop working the
+// instant the write lands, so a stolen code race is bounded by the
+// regeneration latency itself. Returns ErrMFANotEnrolled when the
+// user has no TOTP factor (the caller has nothing to replace).
+func (s *mfaService) RegenerateBackupCodes(ctx context.Context, userUUID string) ([]string, error) {
+	if userUUID == "" {
+		return nil, ErrMFANotEnrolled
+	}
+	if _, err := s.factors.FindByUserAndType(ctx, userUUID, models.MFAFactorTOTP); err != nil {
+		if errors.Is(err, repository.ErrMFAFactorNotFound) {
+			return nil, ErrMFANotEnrolled
+		}
+		return nil, err
+	}
+	plaintext, hashed, err := s.generateBackupCodes(s.recoveryCodesCount(ctx))
+	if err != nil {
+		return nil, fmt.Errorf("generate backup codes: %w", err)
+	}
+	if err := s.factors.ReplaceBackupCodes(ctx, userUUID, hashed); err != nil {
+		if errors.Is(err, repository.ErrMFAFactorNotFound) {
+			return nil, ErrMFANotEnrolled
+		}
+		return nil, fmt.Errorf("persist backup codes: %w", err)
+	}
+	s.logger.Info("self_auth_action",
+		"event", "self_backup_codes_regenerated",
+		"userUUID", userUUID,
+		"count", len(plaintext),
+	)
+	return plaintext, nil
+}
+
 func (s *mfaService) Status(ctx context.Context, userUUID string) (*MFAStatusSnapshot, error) {
 	factor, err := s.factors.FindByUserAndType(ctx, userUUID, models.MFAFactorTOTP)
 	if err != nil {
@@ -382,7 +434,7 @@ func subtleConstantTimeEq(a, b string) bool {
 		// beyond what the code-length convention already reveals.
 		var x byte
 		for i := 0; i < len(a); i++ {
-			x |= a[i] ^ a[i]
+			x |= a[i] ^ a[i] //nolint:gocritic // dupSubExpr: intentional self-XOR keeps loop timing symmetric with the equal-length branch below.
 		}
 		_ = x
 		return false
@@ -392,6 +444,22 @@ func subtleConstantTimeEq(a, b string) bool {
 		diff |= a[i] ^ b[i]
 	}
 	return diff == 0
+}
+
+// recoveryCodesCount returns the configured number of one-shot
+// recovery codes to issue at enrollment time. Falls back to the
+// legacy BackupCodeCount when the policy is unwired or returns a
+// value outside the safe range (1..50). The upper bound prevents a
+// misedit from generating thousands of codes on every enrollment.
+func (s *mfaService) recoveryCodesCount(ctx context.Context) int {
+	if s.policy == nil {
+		return BackupCodeCount
+	}
+	n := s.policy.RecoveryCodesCount(ctx)
+	if n < 1 || n > 50 {
+		return BackupCodeCount
+	}
+	return n
 }
 
 // generateBackupCodes returns (plaintext, hashed) pairs. Plaintext is shown

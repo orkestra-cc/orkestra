@@ -133,6 +133,9 @@ func (h *CompanyHandler) LookupCompany(ctx context.Context, req *LookupCompanyRe
 		if errors.Is(err, services.ErrCircuitBreakerOpen) {
 			return nil, huma.Error503ServiceUnavailable("Company lookup service temporarily unavailable", err)
 		}
+		if errors.Is(err, services.ErrUpstreamAuth) {
+			return nil, huma.Error502BadGateway("Company API authentication failed — rotate OPENAPI_COMPANY_BEARER_TOKEN", err)
+		}
 		return nil, huma.Error500InternalServerError("Failed to look up company", err)
 	}
 
@@ -254,6 +257,9 @@ func (h *CompanyHandler) SearchCompanies(ctx context.Context, req *SearchCompani
 		if errors.Is(err, services.ErrCircuitBreakerOpen) {
 			return nil, huma.Error503ServiceUnavailable("Company search service temporarily unavailable", err)
 		}
+		if errors.Is(err, services.ErrUpstreamAuth) {
+			return nil, huma.Error502BadGateway("Company API authentication failed — rotate OPENAPI_COMPANY_BEARER_TOKEN", err)
+		}
 		if errors.Is(err, services.ErrAPIRequestFailed) {
 			return nil, huma.Error502BadGateway("Company search API request failed", err)
 		}
@@ -278,6 +284,9 @@ func (h *CompanyHandler) EnrichCompany(ctx context.Context, req *EnrichCompanyRe
 		}
 		if errors.Is(err, services.ErrCircuitBreakerOpen) {
 			return nil, huma.Error503ServiceUnavailable("Company lookup service temporarily unavailable", err)
+		}
+		if errors.Is(err, services.ErrUpstreamAuth) {
+			return nil, huma.Error502BadGateway("Company API authentication failed — rotate OPENAPI_COMPANY_BEARER_TOKEN", err)
 		}
 		return nil, huma.Error500InternalServerError("Failed to enrich company", err)
 	}

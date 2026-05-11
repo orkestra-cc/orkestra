@@ -1,0 +1,417 @@
+{
+  "app": {
+    "name": "Orkestra",
+    "tagline": "Servizi gestiti per la tua azienda"
+  },
+  "nav": {
+    "catalog": "Servizi",
+    "signin": "Accedi",
+    "signup": "Registrati",
+    "account": "Account",
+    "signout": "Esci"
+  },
+  "home": {
+    "hero": "Scegli i servizi che ti servono. Niente di più.",
+    "subhero": "Abbonamenti mensili, fatturazione trasparente, pagamenti sicuri tramite Stripe.",
+    "cta": "Esplora il catalogo"
+  },
+  "catalog": {
+    "title": "Catalogo servizi",
+    "subtitle": "Tutti i servizi attualmente attivi sulla piattaforma.",
+    "empty": "Nessun servizio attivo al momento. Torna a trovarci.",
+    "viewDetail": "Dettagli",
+    "from": "A partire da",
+    "subscribe": "Abbonati",
+    "noPricing": "Prezzi in fase di definizione",
+    "category": "Categoria",
+    "capabilities": "Funzionalità incluse",
+    "setupFee": "Costo di attivazione",
+    "back": "Torna al catalogo"
+  },
+  "cycle": {
+    "monthly": "/ mese",
+    "quarterly": "/ trimestre",
+    "annual": "/ anno"
+  },
+  "signup": {
+    "title": "Crea il tuo account",
+    "subtitle": "Bastano pochi secondi. Riceverai un'email per confermare l'indirizzo.",
+    "email": "Email",
+    "password": "Password",
+    "passwordHint": "Almeno 10 caratteri",
+    "fullName": "Nome e cognome",
+    "terms": "Accetto i Termini di Servizio e la Privacy Policy",
+    "submit": "Crea account",
+    "submitting": "Creazione in corso…",
+    "haveAccount": "Hai già un account?",
+    "signinLink": "Accedi",
+    "successTitle": "Quasi fatto!",
+    "successBody": "Abbiamo inviato un'email di conferma a {{email}}. Clicca sul link per attivare l'account.",
+    "successResend": "Non hai ricevuto l'email? Reinvia",
+    "errorEmailRequired": "L'email è obbligatoria",
+    "errorEmailInvalid": "Formato email non valido",
+    "errorPasswordRequired": "La password è obbligatoria",
+    "errorPasswordTooShort": "La password deve avere almeno 10 caratteri",
+    "errorFullNameRequired": "Il nome è obbligatorio",
+    "errorTermsRequired": "Devi accettare i termini per continuare",
+    "disabled": "La registrazione self-service è momentaneamente disabilitata. Contattaci se hai bisogno di un account."
+  },
+  "verify": {
+    "title": "Verifica email",
+    "pending": "Verifica in corso…",
+    "successTitle": "Email verificata!",
+    "successBody": "Il tuo account è attivo. Ora puoi accedere.",
+    "errorTitle": "Verifica non riuscita",
+    "errorBody": "Il link è scaduto o non è valido. Richiedi una nuova email di verifica qui sotto.",
+    "missingToken": "Token mancante. Apri il link dall'email che hai ricevuto.",
+    "signinCta": "Vai al login",
+    "resendTitle": "Reinvia email di verifica",
+    "resendEmailLabel": "La tua email",
+    "resendSubmit": "Reinvia",
+    "resendSent": "Se l'indirizzo è registrato e non ancora verificato, ti abbiamo inviato una nuova email."
+  },
+  "login": {
+    "title": "Accedi al tuo account",
+    "subtitle": "Inserisci le tue credenziali per continuare.",
+    "email": "Email",
+    "password": "Password",
+    "submit": "Accedi",
+    "submitting": "Accesso in corso…",
+    "forgot": "Password dimenticata?",
+    "signupLink": "Crea un account",
+    "disabled": "L'accesso è momentaneamente disabilitato da un amministratore. Riprova più tardi.",
+    "mfa": {
+      "prompt": "Inserisci il codice a 6 cifre del tuo autenticatore.",
+      "code": "Codice di verifica",
+      "backupCode": "Codice di backup",
+      "useBackup": "Usa un codice di backup",
+      "submit": "Verifica",
+      "submitting": "Verifica in corso…",
+      "cancel": "Annulla"
+    },
+    "notVerified": {
+      "title": "Indirizzo email non verificato",
+      "body": "Ti abbiamo inviato un link di verifica al momento della registrazione. Se non lo trovi, richiedine uno nuovo.",
+      "resendCta": "Reinvia email di verifica",
+      "resendSending": "Invio in corso…",
+      "resendCooldown": "Reinvio disponibile tra {{seconds}}s",
+      "resendDone": "Se l'indirizzo è registrato e non ancora verificato, ti abbiamo inviato una nuova email."
+    }
+  },
+  "forgot": {
+    "title": "Password dimenticata",
+    "subtitle": "Inserisci la tua email e ti invieremo un link per reimpostare la password.",
+    "email": "Email",
+    "submit": "Invia link",
+    "submitting": "Invio in corso…",
+    "successTitle": "Controlla la tua email",
+    "successBody": "Se l'indirizzo è registrato, abbiamo inviato un link per reimpostare la password.",
+    "backToLogin": "Torna al login"
+  },
+  "reset": {
+    "title": "Reimposta la password",
+    "subtitle": "Scegli una nuova password per il tuo account.",
+    "newPassword": "Nuova password",
+    "confirmPassword": "Conferma password",
+    "passwordHint": "Almeno 10 caratteri",
+    "submit": "Aggiorna password",
+    "submitting": "Aggiornamento…",
+    "successTitle": "Password aggiornata",
+    "successBody": "Ora puoi accedere con la nuova password.",
+    "signinCta": "Vai al login",
+    "missingToken": "Token mancante. Apri il link dall'email che hai ricevuto.",
+    "errorTooShort": "La password deve avere almeno 10 caratteri",
+    "errorMismatch": "Le password non corrispondono"
+  },
+  "invite": {
+    "title": "Accetta l'invito",
+    "subtitle": "Scegli una password per attivare il tuo account.",
+    "newPassword": "Scegli una password",
+    "confirmPassword": "Conferma password",
+    "passwordHint": "Almeno 10 caratteri",
+    "submit": "Attiva account",
+    "submitting": "Attivazione…",
+    "successTitle": "Benvenuto",
+    "successBody": "Il tuo account è pronto. Accedi per iniziare.",
+    "signinCta": "Vai al login",
+    "missingToken": "Token mancante. Apri il link dall'email di invito.",
+    "errorTooShort": "La password deve avere almeno 10 caratteri",
+    "errorMismatch": "Le password non corrispondono"
+  },
+  "account": {
+    "title": "Account",
+    "subtitle": "Gestisci il tuo profilo e la sicurezza.",
+    "back": "Torna all'account",
+    "fullName": "Nome",
+    "email": "Email",
+    "emailVerified": "Email verificata",
+    "verified": "Sì",
+    "notVerified": "No",
+    "role": "Ruolo",
+    "security": {
+      "title": "Sicurezza",
+      "cta": "Cambia password e gestisci la 2FA"
+    },
+    "billing": {
+      "title": "Dati di fatturazione",
+      "cta": "L'anagrafica e i dati fiscali che useremo su Stripe e sulle fatture."
+    },
+    "subscriptions": {
+      "title": "Abbonamenti",
+      "cta": "Vedi gli abbonamenti attivi, le fatture e l'attività."
+    },
+    "transactions": {
+      "title": "Transazioni",
+      "cta": "Addebiti, rimborsi e cronologia delle transazioni Stripe."
+    },
+    "paymentMethods": {
+      "title": "Metodi di pagamento",
+      "cta": "Carte salvate per i rinnovi e le fatture in sospeso."
+    },
+    "changePassword": {
+      "title": "Cambia password",
+      "subtitle": "Inserisci la password attuale e quella nuova. La sessione attiva verrà invalidata.",
+      "current": "Password attuale",
+      "new": "Nuova password",
+      "confirm": "Conferma nuova password",
+      "submit": "Aggiorna password",
+      "submitting": "Aggiornamento…"
+    },
+    "mfa": {
+      "title": "Autenticazione a due fattori",
+      "subtitle": "Aggiungi un secondo passaggio al login con un'app di autenticazione (TOTP).",
+      "status": "Stato",
+      "type": "Tipo",
+      "backupCodesRemaining": "Codici di backup rimasti",
+      "required": "Obbligatoria",
+      "requiredYes": "Sì",
+      "graceWarning": "La 2FA è obbligatoria per il tuo ruolo. Termine: {{date}}.",
+      "enrol": "Configura ora",
+      "statusValue": {
+        "not_required": "Non richiesta",
+        "required": "Da configurare",
+        "enrolled": "Attiva",
+        "disabled": "Disattivata"
+      }
+    }
+  },
+  "mfa": {
+    "enrol": {
+      "title": "Configura la 2FA",
+      "subtitle": "Tre passaggi: avvia, scansiona, conferma. Conserva i codici di backup in un luogo sicuro.",
+      "step1": "Avvia la procedura per generare un nuovo segreto.",
+      "start": "Avvia configurazione",
+      "starting": "Avvio…",
+      "step2": "Aggiungi l'account alla tua app di autenticazione",
+      "scanInstructions": "Apri Google Authenticator, 1Password, Authy o un'app simile e aggiungi un nuovo account inserendo il segreto qui sotto.",
+      "secret": "Segreto",
+      "copy": "Copia",
+      "copied": "Copiato!",
+      "uriToggle": "Mostra URI otpauth (per dispositivi mobili)",
+      "step3": "Conferma con il codice generato dalla tua app",
+      "codeLabel": "Codice a 6 cifre",
+      "confirm": "Conferma",
+      "confirming": "Conferma in corso…",
+      "backupTitle": "Salva i codici di backup",
+      "backupSubtitle": "Questi codici servono ad accedere se perdi l'app. Saranno mostrati una sola volta.",
+      "backupCopy": "Copia tutti",
+      "backupDownload": "Scarica .txt",
+      "backupAcknowledge": "Ho salvato i codici in un luogo sicuro",
+      "backupContinue": "Ho fatto, continua"
+    }
+  },
+  "subscribe": {
+    "title": "Conferma il tuo abbonamento",
+    "subtitle": "Controlla il piano e ti porteremo su Stripe per salvare un metodo di pagamento. Il primo addebito avviene all'inizio del ciclo di fatturazione.",
+    "back": "Torna ai dettagli del servizio",
+    "browseCatalog": "Sfoglia il catalogo",
+    "servicePlan": "Servizio",
+    "plusSetup": "Più un costo di attivazione una tantum di {{fee}}.",
+    "ownerLabel": "Fattura questo abbonamento a",
+    "ownerHint": "Per impostazione predefinita la fatturazione è personale. Scegli un'organizzazione se vuoi intestare la fattura a essa.",
+    "ownerPersonal": "Personale (solo io)",
+    "cardNotice": "Ti reindirizzeremo a Stripe Checkout per salvare in sicurezza una carta. Non addebiteremo nulla ora — la prima fattura viene generata all'inizio del ciclo di fatturazione.",
+    "submit": "Vai al pagamento",
+    "submitting": "Apertura checkout…",
+    "cancel": "Non ora",
+    "errorTitle": "Manca qualcosa",
+    "errorMissingTier": "Non riusciamo a trovare il piano che hai scelto. Selezionalo dal catalogo.",
+    "errorTierGone": "Questo piano non è più disponibile. Sfoglia il catalogo per vedere le opzioni attuali."
+  },
+  "billing": {
+    "title": "Dati di fatturazione",
+    "subtitle": "Servono per creare il cliente Stripe e per le fatture che emettiamo.",
+    "errorTitle": "Impossibile caricare i dati di fatturazione",
+    "italianBillableEnabled": "FatturaPA attiva",
+    "nextHint": "Salva i dati di fatturazione per proseguire con il pagamento.",
+    "typeLegend": "Tipo di intestazione",
+    "typePerson": "Persona fisica",
+    "typeCompany": "Società / ditta individuale",
+    "identityLegend": "Anagrafica",
+    "addressLegend": "Indirizzo",
+    "legalName": "Ragione sociale",
+    "legalNameHintPerson": "Facoltativa. Se vuota viene usato il nome dell'account.",
+    "vatNumber": "Partita IVA",
+    "vatHint": "Partita IVA italiana o identificativo VAT UE.",
+    "fiscalCode": "Codice fiscale",
+    "fiscalHintPerson": "Codice fiscale italiano a 16 caratteri.",
+    "fiscalHintCompany": "Codice fiscale italiano (spesso uguale alla partita IVA).",
+    "country": "Paese",
+    "countryHint": "Codice ISO 3166-1 alpha-2 (es. IT, DE, FR).",
+    "addressLine1": "Indirizzo",
+    "addressLine2": "Indirizzo aggiuntivo (facoltativo)",
+    "city": "Città",
+    "postalCode": "CAP",
+    "province": "Provincia",
+    "provinceHint": "Sigla della provincia italiana (es. RM, MI). Facoltativa fuori dall'Italia.",
+    "fatturaPALegend": "Recapiti FatturaPA",
+    "fatturaPAHint": "Necessari per ricevere fatture elettroniche tramite SDI. Basta uno dei due.",
+    "codiceDestinatario": "Codice Destinatario (SDI)",
+    "codiceDestinatarioHint": "Codice SDI a 7 caratteri fornito dal tuo gestionale.",
+    "pecDestinatario": "PEC",
+    "pecDestinatarioHint": "Indicato quando non è registrato un Codice Destinatario.",
+    "italianBillableLabel": "Fatture elettroniche italiane (FatturaPA)",
+    "italianBillableActiveHint": "Attiva. Le fatture verranno trasmesse al SDI usando i recapiti sopra.",
+    "italianBillableIdleHint": "Disattivata. Le fatture non saranno trasmesse al SDI fino all'attivazione.",
+    "italianBillableNeedsRouting": "Aggiungi un Codice Destinatario o un indirizzo PEC e salva prima di attivare.",
+    "enable": "Attiva",
+    "disable": "Disattiva",
+    "toggling": "Salvataggio…",
+    "submit": "Salva i dati di fatturazione",
+    "submitting": "Salvataggio…",
+    "saved": "Dati di fatturazione salvati.",
+    "errorLegalName": "La ragione sociale è obbligatoria per intestazioni aziendali.",
+    "errorCountry": "Il paese è obbligatorio."
+  },
+  "subscribeReturn": {
+    "successTitle": "Abbonamento confermato",
+    "successBody": "La tua carta è stata salvata su Stripe e l'abbonamento è attivo.",
+    "cancelTitle": "Checkout annullato",
+    "cancelBody": "Non abbiamo salvato alcun metodo di pagamento. Puoi tornare al catalogo in qualsiasi momento per riprovare.",
+    "errorTitle": "Riferimento mancante",
+    "errorMissing": "Non riusciamo a capire a quale abbonamento si riferisce questo URL di ritorno.",
+    "warnLookup": "Non riusciamo a caricare i dettagli dell'abbonamento. Controlla la pagina account tra qualche istante.",
+    "browseCatalog": "Torna al catalogo",
+    "goAccount": "Vai all'account",
+    "statusLabel": "Stato",
+    "tierLabel": "Piano",
+    "nextBillingLabel": "Prossima fatturazione",
+    "firstChargeNotice": "La prima fattura viene generata all'inizio del ciclo di fatturazione e la carta che hai appena salvato verrà addebitata automaticamente.",
+    "status": {
+      "active": "Attivo",
+      "past_due": "In ritardo",
+      "suspended": "Sospeso",
+      "cancelled": "Annullato",
+      "expired": "Scaduto"
+    }
+  },
+  "ownerScope": {
+    "label": "Visualizza",
+    "all": "Tutti gli account",
+    "personal": "Solo personale",
+    "tenantOption": "Organizzazione · {{id}}"
+  },
+  "dashboard": {
+    "subscriptions": {
+      "title": "Abbonamenti",
+      "subtitle": "Abbonamenti attivi e passati per i tuoi account.",
+      "startNew": "Avvia un nuovo abbonamento",
+      "browseCatalog": "Sfoglia il catalogo",
+      "empty": "Ancora nessun abbonamento. Scegli un servizio per iniziare.",
+      "ownerPersonal": "Personale",
+      "ownerTenant": "Organizzazione · {{id}}",
+      "serviceRef": "Servizio · {{id}}…",
+      "periodStart": "Inizio periodo",
+      "periodEnd": "Fine periodo",
+      "nextBilling": "Prossima fatturazione",
+      "willEnd": "Termina il"
+    },
+    "subscriptionDetail": {
+      "errorMissing": "Non riusciamo a capire a quale abbonamento si riferisce questo link.",
+      "errorLoad": "Impossibile caricare l'abbonamento. Riprova tra poco.",
+      "cancel": "Annulla abbonamento",
+      "cancelPrompt": "Come vuoi annullare? Mantieni l'accesso fino alla fine del periodo o blocca subito?",
+      "cancelAtPeriodEnd": "Termina a fine periodo",
+      "cancelImmediately": "Annulla subito",
+      "cancelKeep": "Mantieni",
+      "reactivate": "Riattiva",
+      "reactivating": "Riattivazione…",
+      "invoicesTitle": "Fatture",
+      "invoicesEmpty": "Ancora nessuna fattura — la prima viene generata all'inizio del ciclo di fatturazione.",
+      "invoicesError": "Impossibile caricare le fatture.",
+      "invoiceNumber": "Numero",
+      "invoicePeriod": "Periodo",
+      "invoiceAmount": "Importo",
+      "invoiceStatus": "Stato",
+      "invoiceIssued": "Emessa",
+      "invoiceStatusValue": {
+        "pending": "In attesa",
+        "paid": "Pagata",
+        "failed": "Fallita",
+        "refunded": "Rimborsata",
+        "void": "Annullata",
+        "awaiting_manual_payment": "In attesa di pagamento manuale"
+      },
+      "payNow": "Paga ora",
+      "paying": "Apertura checkout…",
+      "payNoPending": "Niente da pagare al momento — il prossimo addebito verrà generato automaticamente al rinnovo.",
+      "paySuccess": "Pagamento ricevuto. Lo stato della fattura si aggiornerà appena Stripe lo conferma.",
+      "payCancel": "Checkout annullato. Nessun addebito eseguito.",
+      "activityTitle": "Attività",
+      "activityEmpty": "Nessuna attività registrata.",
+      "activityError": "Impossibile caricare l'attività."
+    },
+    "activity": {
+      "actor": "Da {{actor}}",
+      "type": {
+        "created": "Abbonamento creato",
+        "charged": "Addebito riuscito",
+        "charge_failed": "Addebito fallito",
+        "refunded": "Rimborso eseguito",
+        "cancelled": "Annullato",
+        "reactivated": "Riattivato",
+        "suspended": "Sospeso",
+        "tier_changed": "Piano cambiato",
+        "invoice_issued": "Fattura emessa",
+        "manual_payment_required": "Pagamento manuale richiesto"
+      }
+    },
+    "transactions": {
+      "title": "Transazioni",
+      "subtitle": "Tutti gli addebiti, i tentativi e i rimborsi attribuiti ai tuoi account.",
+      "empty": "Nessuna transazione. Il primo addebito apparirà qui dopo il prossimo ciclo di fatturazione.",
+      "date": "Data",
+      "amount": "Importo",
+      "status": "Stato",
+      "provider": "Gateway",
+      "reference": "Riferimento",
+      "refundedAmount": "({{amount}} rimborsati)",
+      "statusValue": {
+        "pending": "In attesa",
+        "requires_action": "Richiede azione",
+        "succeeded": "Completata",
+        "failed": "Fallita",
+        "refunded": "Rimborsata",
+        "partially_refunded": "Parzialmente rimborsata"
+      }
+    },
+    "paymentMethods": {
+      "title": "Metodi di pagamento",
+      "subtitle": "Carte salvate su Stripe e usate per i rinnovi automatici.",
+      "empty": "Nessun metodo di pagamento salvato. Aggiungi una carta per i rinnovi automatici.",
+      "addCard": "Aggiungi una carta",
+      "adding": "Apertura Stripe…",
+      "defaultBadge": "Predefinita",
+      "expires": "Scade {{date}}"
+    }
+  },
+  "lang": {
+    "switch": "Lingua",
+    "it": "Italiano",
+    "en": "English"
+  },
+  "loading": "Caricamento…",
+  "error": {
+    "generic": "Si è verificato un errore. Riprova."
+  }
+}

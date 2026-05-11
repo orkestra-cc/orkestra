@@ -37,8 +37,9 @@ type RefreshTokenRepository interface {
 	// Token updates
 	UpdateLastActivity(ctx context.Context, uuid string) error
 	UpdateRiskScore(ctx context.Context, uuid string, riskScore float64, riskFactors []string) error
-	// RotateToken is the legacy single-token rotation. Deprecated in favour
-	// of RotateWithFamily; still callable so older code paths keep building.
+	// RotateToken is the legacy single-token rotation, still callable so older
+	// code paths keep building.
+	//
 	// Deprecated: use RotateWithFamily.
 	RotateToken(ctx context.Context, oldTokenHash, newTokenHash string) error
 	// RotateWithFamily atomically marks oldTokenHash as rotated (setting
@@ -92,12 +93,26 @@ type TokenStats struct {
 
 type refreshTokenRepository struct {
 	collection *mongo.Collection
+	// tier — see authSessionRepository.tier (ADR-0003 PR-D).
+	tier string
 }
 
-// NewRefreshTokenRepository creates a new refresh token repository
-func NewRefreshTokenRepository(db *mongo.Database) RefreshTokenRepository {
+// NewOperatorRefreshTokenRepository binds to operator_refresh_tokens
+// and stamps Tier="operator" on every CreateRefreshToken write.
+// ADR-0003 PR-D.
+func NewOperatorRefreshTokenRepository(db *mongo.Database) RefreshTokenRepository {
 	return &refreshTokenRepository{
-		collection: db.Collection(models.RefreshTokensCollection),
+		collection: db.Collection(models.OperatorRefreshTokensCollection),
+		tier:       models.TierOperator,
+	}
+}
+
+// NewClientRefreshTokenRepository binds to client_refresh_tokens and
+// stamps Tier="client" on every CreateRefreshToken write. ADR-0003 PR-D.
+func NewClientRefreshTokenRepository(db *mongo.Database) RefreshTokenRepository {
+	return &refreshTokenRepository{
+		collection: db.Collection(models.ClientRefreshTokensCollection),
+		tier:       models.TierClient,
 	}
 }
 
@@ -115,6 +130,11 @@ func (r *refreshTokenRepository) CreateRefreshToken(ctx context.Context, token *
 	// Hash the token for storage security
 	if token.Token != "" {
 		token.Token = utils.HashRefreshToken(token.Token)
+	}
+
+	// ADR-0003 PR-D: stamp the audience tier — see authSessionRepository.
+	if r.tier != "" {
+		token.Tier = r.tier
 	}
 
 	// Validate required fields
@@ -331,6 +351,9 @@ func (r *refreshTokenRepository) RotateWithFamily(ctx context.Context, oldTokenH
 	if newDoc.Token != "" {
 		newDoc.Token = utils.HashRefreshToken(newDoc.Token)
 	}
+	if r.tier != "" {
+		newDoc.Tier = r.tier
+	}
 	if _, err := r.collection.InsertOne(ctx, newDoc); err != nil {
 		return fmt.Errorf("failed to insert rotated token: %w", err)
 	}
@@ -396,6 +419,9 @@ func (r *refreshTokenRepository) RotateToken(ctx context.Context, oldTokenHash, 
 		newToken.Token = newTokenHash
 		newToken.IssuedAt = time.Now()
 		newToken.UpdatedAt = time.Now()
+		if r.tier != "" {
+			newToken.Tier = r.tier
+		}
 
 		// Insert new token
 		_, err = r.collection.InsertOne(sc, &newToken)

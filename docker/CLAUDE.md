@@ -22,7 +22,7 @@ The docker module provides **containerized infrastructure and deployment configu
 ### Imports
 
 - **[`/backend/`](../backend/CLAUDE.md)** - Go application containerization
-- **[`/frontend/`](../frontend/CLAUDE.md)** - React application containerization
+- **[`/frontend-admin/`](../frontend-admin/CLAUDE.md)** - React application containerization
 
 ### Importers
 
@@ -55,8 +55,8 @@ grep "^ENV=" /home/tore/orkestra/docker/.env
 ```bash
 # ✅ CORRECT - Always specify the env file
 docker compose -f docker-compose.staging.yml --env-file .env up -d
-docker compose -f docker-compose.staging.yml --env-file .env restart frontend
-docker compose -f docker-compose.staging.yml --env-file .env logs frontend
+docker compose -f docker-compose.staging.yml --env-file .env restart frontend-admin
+docker compose -f docker-compose.staging.yml --env-file .env logs frontend-admin
 
 # ❌ WRONG - Using wrong compose file without checking ENV first
 docker compose -f docker-compose.dev.yml up -d
@@ -86,12 +86,14 @@ ORKESTRA uses a three-stage DevOps workflow: **Development**, **Staging**, and *
 
 ```bash
 # Interactive TUI — single entry point for every stack operation
-./orkestra.sh                      # Profile menu: minimal or full stack
+./orkestra.sh                      # Profile menu: minimal / SKU profile / full stack
 
 # CLI mode (scriptable, same operations)
 ./orkestra.sh minimal deploy --build
 ./orkestra.sh minimal logs backend -f
 ./orkestra.sh minimal reset --yes
+./orkestra.sh profile billing deploy --pull
+./orkestra.sh profile ai status
 ENV=development ./orkestra.sh deploy --scope backend --rebuild --yes
 ./orkestra.sh logs orkestra-backend-dev -f
 ./orkestra.sh --help               # Full command surface
@@ -115,9 +117,10 @@ Keep this split when touching `.env*` or `docker-compose.*.yml`:
 | Encryption keys (`OAUTH_TOKEN_ENCRYPTION_KEY`, `ORKESTRA_KMS_MASTER_KEY`, optional `MFA_SECRET_ENCRYPTION_KEY`) | process — bootstraps ConfigService | ✅ yes |
 | Process-scoped auth tunables (`AUTH_REQUIRE_EMAIL_VERIFICATION`, `AUTH_RISK_STEP_UP_THRESHOLD`, `WEBAUTHN_RP_ID`, `AUTH_GEOIP_DB_PATH`, `TENANT_KIND_ENFORCEMENT`, `CEDAR_ENFORCE_ACTIONS`) | process | ✅ yes |
 | `CONTAINER_CONTROL_ENABLED`, `DOCKER_GID`, `AI_SERVICE_URL`, `AI_SERVICE_PORT` | process | ✅ yes |
+| `ORKESTRA_PROFILE` (starter / minimal / billing / ai / saas / enterprise) — pre-enables the SKU's addons on first boot only; subsequent boots use the `module_configs` document | process — first-boot seeder | ✅ yes |
 | `SALES_*`, `RAG_CHUNK_*` | process — runtime knobs not yet migrated to ConfigSchema | ✅ yes (transitional) |
 | OAuth provider credentials (`OAUTH_GOOGLE/APPLE/GITHUB/DISCORD_*`) | ConfigService (auth module) | ❌ admin UI |
-| OpenAPI billing / company tokens (`OPENAPI_BILLING_*`, `OPENAPI_COMPANY_*`, `OPENAPI_SANDBOX_MODE`, `BILLING_WEBHOOK_*`) | ConfigService (billing, company modules) | ❌ admin UI |
+| OpenAPI billing / company credentials (`OPENAPI_BILLING_*`, `OPENAPI_COMPANY_*`, `OPENAPI_OAUTH_BASE_URL`, `OPENAPI_SANDBOX_MODE`, `BILLING_WEBHOOK_*`) — `accountEmail` + `apiKey` for the shared OAuth minter, or legacy static `bearerToken` | ConfigService (billing, company modules) | ❌ admin UI |
 | AI provider keys (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `OLLAMA_BASE_URL`) | ConfigService (aimodels module) | ❌ admin UI |
 | Memgraph / Hindsight URLs and credentials (`GRAPH_*`, `HINDSIGHT_URL`, `HINDSIGHT_NAMESPACE`, `HINDSIGHT_IMAGE`, `GRAPH_IMAGE`) | ConfigService (graph, agents modules) | ❌ admin UI |
 | Gotenberg URL (`GOTENBERG_*`) | ConfigService (documents module) | ❌ admin UI |
@@ -151,7 +154,7 @@ Vars **deleted as dead code** during the cleanup (do not re-add): `MODULES`, `BA
 
 Separate infrastructure from applications across five compose files:
 
-1. **`docker-compose.minimal.yml`** — Self-contained 4-container stack (mongo, redis, backend, frontend) using only public images. Recommended for first boot on a modest VM or when you don't have `dhi.io` registry access.
+1. **`docker-compose.minimal.yml`** — Self-contained 4-container stack (mongo, redis, backend, frontend-admin) using only public images. Recommended for first boot on a modest VM or when you don't have `dhi.io` registry access.
 2. **`docker-compose.infra.yml`** - Infrastructure services only (MongoDB, Redis, Gotenberg, Hindsight)
 3. **`docker-compose.dev.yml`** - Application services in development mode with hot reload
 4. **`docker-compose.staging.yml`** - Application services in staging mode (staging-like env + AIR/Vite hot reload)
@@ -171,7 +174,12 @@ The minimal profile is **self-contained** — it does NOT layer on top of `docke
     ├── docker-compose.dev.yml     # Development: Backend, Frontend with hot reload
     ├── docker-compose.staging.yml # Staging: AIR/Vite hot reload + staging-like env
     ├── docker-compose.prod.yml    # Production: Optimized Backend, Frontend
-    ├── docker-compose.ai.yml      # Optional AI sidecar (graph, rag, agents, aimodels)
+    ├── docker-compose.ai-sidecar.yml # Optional AI sidecar (graph, rag, agents, aimodels)
+    ├── docker-compose.starter.yml    # Profile pull: starter SKU image from GHCR (layer on infra.yml)
+    ├── docker-compose.billing.yml    # Profile pull: billing/documents/company SKU
+    ├── docker-compose.ai.yml         # Profile pull: graph/aimodels/rag/agents/sales SKU
+    ├── docker-compose.saas.yml       # Profile pull: subscriptions/payments/compliance/identity SKU
+    ├── docker-compose.enterprise.yml # Profile pull: every addon (alias for :latest)
     ├── .env.example               # Template for environment files
     ├── .env.minimal               # Tracked dev-only env for the minimal profile
     ├── .env                       # Active env (gitignored) - contains ENV=development|staging|production
@@ -206,23 +214,25 @@ cp .env.example .env.production
 
 ### Using orkestra.sh (Recommended)
 
-`orkestra.sh` is the single entry point for every stack operation. It works as both an interactive TUI and a scriptable CLI, and knows about all five profiles (minimal, infra+dev, infra+staging, infra+prod, ai sidecar).
+`orkestra.sh` is the single entry point for every stack operation. It works as both an interactive TUI and a scriptable CLI, and knows about three deployment shapes: **minimal** (build from source), **SKU profile** (pull a per-profile image from GHCR — `starter` / `billing` / `ai` / `saas` / `enterprise`), and **full stack** (dev / staging / prod, auto-detected from `docker/.env`).
 
 ```bash
 # Interactive TUI — profile menu appears, then a per-profile op menu
 ./orkestra.sh
 
 # The TUI flow:
-# 1. Pick profile: "Minimal" or "Full stack"
+# 1. Pick profile: "Minimal" / "Profile" (SKU picker) / "Full stack"
 # 2. Minimal: Deploy / Stop / Reset (wipe volumes) / Status / Logs / Info / Back
-# 3. Full stack: Deploy (with scope selection) / Stop / Status / Logs / Back
-# 4. ENV is autodetected from docker/.env for the full-stack path
+# 3. Profile: pick a SKU (starter / billing / ai / saas / enterprise) → ops menu
+#    (same shape as Minimal: Deploy [--pull] / Stop / Reset / Status / Logs / Info)
+# 4. Full stack: Deploy (with scope selection) / Stop / Status / Logs / Back
+# 5. ENV is autodetected from docker/.env for the full-stack path
 ```
 
 **CLI mode** — same operations, non-interactive, suitable for scripting and CI:
 
 ```bash
-# Minimal profile
+# Minimal profile (built locally from Dockerfile.minimal)
 ./orkestra.sh minimal deploy [--build]
 ./orkestra.sh minimal stop
 ./orkestra.sh minimal reset [--yes]
@@ -230,8 +240,16 @@ cp .env.example .env.production
 ./orkestra.sh minimal info
 ./orkestra.sh minimal logs <service> [-f] [-n N] [-t]
 
+# SKU profile (pulled from GHCR; <name> = starter | billing | ai | saas | enterprise)
+./orkestra.sh profile <name> deploy [--pull]
+./orkestra.sh profile <name> stop
+./orkestra.sh profile <name> reset [--yes]
+./orkestra.sh profile <name> status
+./orkestra.sh profile <name> info
+./orkestra.sh profile <name> logs <service> [-f] [-n N] [-t]
+
 # Full stack (uses ENV from docker/.env, or ENV=... prefix)
-./orkestra.sh deploy [--scope all|backend|frontend|frontend+backend|infra] [--rebuild] [--yes]
+./orkestra.sh deploy [--scope all|backend|frontend-admin|frontend-admin+backend|infra] [--rebuild] [--yes]
 ./orkestra.sh stop [--with-infra]
 ./orkestra.sh status
 ./orkestra.sh logs <service> [-f] [-n N] [-t]
@@ -265,7 +283,7 @@ docker compose -f docker-compose.prod.yml --env-file .env.production up -d
 | **mongodb**  | 27050     | Primary DB    | `mongo:8.0`, authenticated healthcheck                                |
 | **redis**    | 6350      | Cache         | `redis:8.2-alpine`                                                    |
 | **backend**  | 3050      | Go API server | Built from `backend/Dockerfile.minimal` (public `golang:1.25-alpine`) |
-| **frontend** | 8050      | React web app | Built from `frontend/Dockerfile` (`nginx:alpine` static serving)      |
+| **frontend-admin** | 8050      | React web app | Built from `frontend-admin/Dockerfile` (`nginx:alpine` static serving)      |
 
 The minimal profile:
 
@@ -350,19 +368,21 @@ The dev/staging/prod compose files mount `/var/run/docker.sock` into the `orkest
 
 **Lightweight development with hot reload. Uses `dhi.io` Chainguard hardened base images.**
 
-| Service      | Host port | Purpose       | Features                     |
-| ------------ | --------- | ------------- | ---------------------------- |
-| **backend**  | 3007      | Go API server | Hot reload (AIR), debug logs |
-| **frontend** | 8087      | React web app | Vite dev server, HMR         |
+| Service                  | Host port | Purpose                              | Features                                                       |
+| ------------------------ | --------- | ------------------------------------ | -------------------------------------------------------------- |
+| **backend**              | 3007      | Go API server                        | Hot reload (AIR), debug logs                                   |
+| **frontend-admin**             | 8087      | Operator console (Tier-1)            | Vite dev server, HMR; host `console.localhost`                 |
+| **client-frontend**      | 8081      | Tier-2 client demo SPA               | Vite dev server, HMR; host `client.localhost`; consumes `api.*`|
 
 #### Staging (`docker-compose.staging.yml`)
 
 **Hot-reload stack with staging-like behavior (cookie strict, JWT, CORS, rate limits).** Used as the primary development environment on long-lived VMs that mirror production-style URLs/cookies but still need fast iteration.
 
-| Service           | Host port | Purpose       | Features                                  |
-| ----------------- | --------- | ------------- | ----------------------------------------- |
-| **orkestra-backend**  | 3000      | Go API server | Hot reload (AIR), staging-like env, RS256 JWT |
-| **orkestra-frontend** | 8080      | React web app | Vite dev server, HMR                       |
+| Service                      | Host port | Purpose                              | Features                                                        |
+| ---------------------------- | --------- | ------------------------------------ | --------------------------------------------------------------- |
+| **orkestra-backend**         | 3000      | Go API server                        | Hot reload (AIR), staging-like env, RS256 JWT                   |
+| **orkestra-frontend-admin**        | 8080      | Operator console (Tier-1)            | Vite dev server, HMR; host `staging.orkestra.cc`                |
+| **orkestra-client-frontend** | 8081      | Tier-2 client demo SPA               | Vite dev server, HMR; host `app.orkestra.cc`; consumes `staging-api.*` |
 
 The backend mounts `../backend:/app` and runs AIR from the bind mount — no image rebuild on code change. AIR and the Go module/build cache live under `backend/.go-bin/` and `backend/.go-mod-cache/` (gitignored), pre-installed by the host. To bootstrap on a fresh machine:
 
@@ -381,7 +401,7 @@ GOBIN=$PWD/.go-bin GOMODCACHE=$PWD/.go-mod-cache go install github.com/air-verse
 | Service      | Host port | Purpose       | Features                       |
 | ------------ | --------- | ------------- | ------------------------------ |
 | **backend**  | 3000      | Go API server | Optimized build, health checks |
-| **frontend** | 8080      | React web app | Nginx static serving           |
+| **frontend-admin** | 8080      | React web app | Nginx static serving           |
 
 ## Network Architecture
 
@@ -416,18 +436,28 @@ The host mux ([cmd/server/hostmux.go](../backend/cmd/server/hostmux.go)) strips 
 | `CLIENT_CORS_ORIGINS` | CORS allowlist for client mux | falls back to `CORS_ORIGINS` |
 | `OPERATOR_RATE_LIMIT_REQUESTS_PER_MINUTE` / `_BURST` | Per-audience throttling | falls back to `RATE_LIMIT_*` |
 | `CLIENT_RATE_LIMIT_REQUESTS_PER_MINUTE` / `_BURST` | Per-audience throttling | falls back to `RATE_LIMIT_*` |
+| `OPERATOR_COOKIE_DOMAIN` | Refresh-cookie `Domain=` for operator-tier tokens (ADR-0003 PR-D D-9). | `console.localhost` (dev) / empty (prod, operator-set) |
+| `CLIENT_COOKIE_DOMAIN` | Refresh-cookie `Domain=` for client-tier tokens. | `api.localhost` (dev) / empty (prod, operator-set) |
+| `OPERATOR_FRONTEND_URL` | Operator-tier SPA origin (`console.*`) used to build verify-email / reset-password links in transactional email. | falls back to `FRONTEND_URL` |
+| `CLIENT_FRONTEND_URL` | Client-tier SPA origin (`app.*`) used to build verify-email / reset-password links for signups landing on the client API host. | falls back to `FRONTEND_URL` |
 
-**JWT audience**: PR-C sets `aud=operator` on every issued access/refresh token (single-aud cutover). Client-issued tokens (`aud=client`) and the auth-path split land in PR-D. Until then the client mux exists but has zero registered routes and visiting `api.localhost:3000` returns 404.
+In production-like environments **set both `OPERATOR_COOKIE_DOMAIN` and `CLIENT_COOKIE_DOMAIN` explicitly** — leaving them empty falls back to the legacy `COOKIE_DOMAIN` (which spans both audiences) and defeats the host split.
+
+**JWT audience** (post PR-D): operator login mints `aud=operator`, client login mints `aud=client`; both issuance paths now exist. Each mux's `RequireAudience` gate rejects cross-audience tokens with `401 audience_mismatch`. The dev token endpoint accepts an `audience` field (`operator`|`client`) to mint a matching token for either surface — see `scripts/devtoken.sh --audience client`.
 
 **Smoke test**:
 ```bash
 # Operator surface (default — works via dev fallthrough or *.localhost):
 curl -i http://console.localhost:3000/health
 curl -i http://localhost:3000/health   # dev fallthrough → operator
-# Client surface (no routes registered until PR-D):
+# Client surface (post-PR-D registers per-tier auth + onboarding/subscriptions/payments):
 curl -i http://api.localhost:3000/health
 # 421 in non-dev when Host doesn't match (run with ENV=staging):
 curl -i -H 'Host: example.com' http://localhost:3000/health
+
+# Mint per-audience dev tokens (see scripts/devtoken.sh):
+./scripts/devtoken.sh administrator                  # default — aud=operator
+./scripts/devtoken.sh administrator --audience client  # aud=client (api.* surface)
 ```
 
 ### Port Mapping Strategy
@@ -437,21 +467,22 @@ Host ports vary per profile so multiple stacks can coexist on the same machine. 
 ```
 Minimal profile (docker-compose.minimal.yml):
 3050  → backend:3000      # API server
-8050  → frontend:80       # Web application
+8050  → frontend-admin:80       # Web application
 27050 → mongodb:27017     # Dedicated mongo for minimal
 6350  → redis:6379        # Dedicated redis for minimal
 
 Dev stack (docker-compose.infra.yml + docker-compose.dev.yml):
-3007  → backend:3000      # API server
-8087  → frontend:5173     # Vite dev server
-27027 → mongodb:27017     # Shared infra mongo
-6387  → redis:6379        # Shared infra redis
-3030  → gotenberg:3000    # PDF generation
-8888  → hindsight:8888    # AI agents backend
+3007  → backend:3000             # API server
+8087  → frontend-admin:5173            # Operator console (host: console.localhost)
+8081  → client-frontend:5173     # Tier-2 client demo SPA (host: client.localhost)
+27027 → mongodb:27017            # Shared infra mongo
+6387  → redis:6379               # Shared infra redis
+3030  → gotenberg:3000           # PDF generation
+8888  → hindsight:8888           # AI agents backend
 
 Production (docker-compose.prod.yml):
 3000  → backend:3000      # API server
-8080  → frontend:80       # Nginx static
+8080  → frontend-admin:80       # Nginx static
 ```
 
 ### Security & Secrets Management
@@ -736,7 +767,7 @@ docker compose -f docker-compose.dev.yml up -d
 docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
 
 # View logs for specific services
-docker compose -f docker-compose.dev.yml logs -f orkestra-backend orkestra-frontend
+docker compose -f docker-compose.dev.yml logs -f orkestra-backend orkestra-frontend-admin
 
 # Restart a specific service
 docker compose -f docker-compose.dev.yml restart orkestra-backend
@@ -818,14 +849,14 @@ docker compose logs backend | grep -i error
 #### Frontend Logs
 
 ```bash
-# View frontend logs
-docker compose logs frontend
+# View admin frontend logs (Tier-1 operator console)
+docker compose logs frontend-admin
 
-# Follow frontend logs in real-time
-docker compose logs -f frontend
+# Follow admin frontend logs in real-time
+docker compose logs -f frontend-admin
 
 # Frontend build errors
-docker compose logs frontend | grep -i error
+docker compose logs frontend-admin | grep -i error
 ```
 
 #### Infrastructure Logs
@@ -861,7 +892,7 @@ docker stats
 docker compose logs backend | grep -i "watching\|building\|reload"
 
 # Frontend: Vite HMR logs
-docker compose logs frontend | grep -i "hmr\|updated\|ready"
+docker compose logs frontend-admin | grep -i "hmr\|updated\|ready"
 ```
 
 ### 🚨 Troubleshooting
@@ -927,6 +958,6 @@ docker compose -f docker-compose.dev.yml restart
 
 - [Project Overview](../CLAUDE.md) - System architecture and design principles
 - [Backend Containerization](../backend/CLAUDE.md) - Go API server configuration
-- [Frontend Containerization](../frontend/CLAUDE.md) - React application setup
+- [Frontend Containerization](../frontend-admin/CLAUDE.md) - React application setup
 - [Documents Module](../backend/internal/addons/documents/CLAUDE.md) - PDF generation with Gotenberg
 - [Deployment Scripts](../scripts/CLAUDE.md) - Automation and deployment orchestration

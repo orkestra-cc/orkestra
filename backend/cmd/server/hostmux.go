@@ -23,16 +23,27 @@ import (
 //     preserves "curl http://localhost:3000" ergonomics in development
 //     where DNS for `*.localhost` may not resolve to 127.0.0.1 on every
 //     platform.
-//   - Otherwise the response is 421 Misdirected Request (RFC 7540 §9.1.2),
-//     the canonical signal that an HTTP/1.1 request reached a host that
-//     does not serve it. Closes the door on host-header smuggling against
-//     the Tier-1 console.
+//   - Otherwise, requests for the well-known LAN probe paths in opsPaths
+//     (/health, /ready) are served by opsHandler so a load balancer
+//     hitting the pod by IP doesn't have to spoof a Host header. Every
+//     other path on a non-matching host gets 421 Misdirected Request
+//     (RFC 7540 §9.1.2), closing the door on host-header smuggling
+//     against the Tier-1 console.
 type hostMux struct {
 	routes         map[string]http.Handler
 	devFallthrough http.Handler
+	opsHandler     http.Handler
 }
 
-func newHostMux(routes map[string]http.Handler, devFallthrough http.Handler) *hostMux {
+// opsPaths is the closed set of paths that escape the host-header gate
+// when no audience matches. Kept tight on purpose — adding a path here
+// exposes it on every Host the binary answers to.
+var opsPaths = map[string]struct{}{
+	"/health": {},
+	"/ready":  {},
+}
+
+func newHostMux(routes map[string]http.Handler, devFallthrough, opsHandler http.Handler) *hostMux {
 	normalized := make(map[string]http.Handler, len(routes)*2)
 	for host, h := range routes {
 		key := strings.ToLower(strings.TrimSpace(host))
@@ -47,7 +58,7 @@ func newHostMux(routes map[string]http.Handler, devFallthrough http.Handler) *ho
 			normalized[bare] = h
 		}
 	}
-	return &hostMux{routes: normalized, devFallthrough: devFallthrough}
+	return &hostMux{routes: normalized, devFallthrough: devFallthrough, opsHandler: opsHandler}
 }
 
 func (h *hostMux) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -67,6 +78,13 @@ func (h *hostMux) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if h.devFallthrough != nil {
 		h.devFallthrough.ServeHTTP(w, r)
 		return
+	}
+
+	if h.opsHandler != nil {
+		if _, ok := opsPaths[r.URL.Path]; ok {
+			h.opsHandler.ServeHTTP(w, r)
+			return
+		}
 	}
 
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")

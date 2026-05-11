@@ -1,0 +1,20 @@
+@import "tailwindcss";
+
+/* Tailwind v4 reads design tokens straight from a @theme block — no
+ * tailwind.config.ts file is needed. We override the base font stack and
+ * carry over a small palette to keep the demo distinct from the operator
+ * console (which uses Falcon's Bootstrap styling). */
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+    Roboto, "Helvetica Neue", Arial, sans-serif;
+  --color-brand-50: oklch(0.97 0.02 250);
+  --color-brand-500: oklch(0.6 0.18 250);
+  --color-brand-600: oklch(0.55 0.2 250);
+  --color-brand-700: oklch(0.48 0.2 250);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}

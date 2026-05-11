@@ -15,7 +15,7 @@ The billing module handles **Italian electronic invoicing** (Fatturazione Elettr
 
 - **Primary Role**: Create, send, and receive electronic invoices compliant with FatturaPA format
 - **External Integration**: OpenAPI SDI for invoice transmission and notification retrieval
-- **Conditional Activation**: Module activates only when `OPENAPI_BILLING_BEARER_TOKEN` is configured
+- **Conditional Activation**: Module activates when either (a) `OPENAPI_BILLING_ACCOUNT_EMAIL` + `OPENAPI_BILLING_API_KEY` are configured (preferred — module mints + rotates JWTs against `oauth.openapi.it/token` via the shared [`openapiauth`](../../shared/openapiauth) minter), or (b) the legacy static `OPENAPI_BILLING_BEARER_TOKEN` is set
 - **Internal-tenant only** (ADR-0001 Phase 2): every protected route sits behind `RequireInternalTenant()`. FatturaPA/SDI is an operator-side concern; external-tenant tokens cannot hit these endpoints. The gate honours `TENANT_KIND_ENFORCEMENT=warn|enforce` for staged rollout.
 
 **IMPORTANT**: This module is disabled by default. Configure the OpenAPI SDI credentials to enable billing functionality.
@@ -40,8 +40,8 @@ When modifying or adding billing endpoints:
 ### Implementation Notes
 
 1. **Notification Strategy**: This module uses **polling + webhooks**
-   - **Webhooks**: OpenAPI.it sends callbacks to `/v1/billing/webhooks/sdi` for real-time events (supplier-invoice, customer-notification, legal-storage-receipt). Configured automatically via `ConfigureAPICallbacks` on startup when `OPENAPI_BILLING_WEBHOOK_URL` is set.
-   - **Polling**: Background job periodically syncs invoices and notifications as a safety net. Configurable interval via `OPENAPI_BILLING_POLLING_INTERVAL`.
+   - **Webhooks**: OpenAPI.it sends callbacks to `/v1/billing/webhooks/sdi` for real-time events (supplier-invoice, customer-notification, legal-storage-receipt). Configured automatically via `ConfigureAPICallbacks` on startup when `OPENAPI_BILLING_WEBHOOK_URL` is set. Notifications (RC/NS/MC/NE/DT/AT) flow through the `customer-notification` event — there is **no** standalone notifications endpoint.
+   - **Polling**: Background job periodically calls `SyncReceivedInvoices` as a safety net for missed webhooks. Configurable interval via `OPENAPI_BILLING_POLLING_INTERVAL`. Invoice status is reconciled from the per-invoice `marking` field on each sync (no separate notification fetch).
    - Both mechanisms trigger the same `SyncReceivedInvoices` flow, which is idempotent (deduplicates by OpenAPIUUID and invoice number).
 
 2. **Invoice Submission Variants** (per OpenAPI SDI spec):
@@ -64,31 +64,28 @@ billing/
 │   └── openapi_config.go       # OpenAPI SDI configuration
 ├── models/
 │   ├── enums.go                # Status, document types, notification types
-│   ├── party.go                # Customer/Supplier models
+│   ├── party.go                # Supplier + PartyData (snapshot embedded in invoices)
 │   ├── invoice.go              # Invoice model with line items
 │   ├── notification.go         # SDI notification models
 │   ├── dto.go                  # Request/Response DTOs
 │   └── xml_types.go            # FatturaPA XML structure types
 ├── repository/
 │   ├── invoice_repository.go   # Invoice CRUD operations
-│   ├── customer_repository.go  # Customer management
 │   ├── supplier_repository.go  # Supplier management
 │   └── notification_repository.go # SDI notifications
 ├── services/
-│   ├── invoice_service.go      # Invoice business logic
-│   ├── customer_service.go     # Customer service
+│   ├── invoice_service.go      # Invoice business logic; resolves CessionarioCommittente via iface.BillingTenantProvider
 │   ├── supplier_service.go     # Supplier service
 │   ├── notification_service.go # Notification processing
 │   ├── openapi_client.go       # HTTP client for OpenAPI SDI
 │   └── xml_builder.go          # FatturaPA XML generation
 ├── handlers/
 │   ├── invoice_handler.go      # Invoice HTTP handlers
-│   ├── customer_handler.go     # Customer HTTP handlers
 │   ├── supplier_handler.go     # Supplier HTTP handlers
-│   ├── notification_handler.go # Notification HTTP handlers
+│   ├── notification_handler.go # SDI notification HTTP handlers
 │   └── webhook_handler.go      # SDI webhook callback handler
 ├── jobs/
-│   └── polling_job.go          # Background SDI notification polling
+│   └── polling_job.go          # Background SDI invoice sync (webhook safety net)
 ├── routes.go                   # Huma v2 route registration
 └── CLAUDE.md                   # This file
 ```
@@ -118,14 +115,13 @@ billing/
 | POST | `/v1/billing/received-invoices/{id}/accept` | Accept invoice |
 | POST | `/v1/billing/received-invoices/{id}/reject` | Reject invoice |
 
-### Customers & Suppliers
+### Suppliers
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| POST/GET/PATCH/DELETE | `/v1/billing/customers[/{id}]` | Customer CRUD |
 | POST/GET/PATCH/DELETE | `/v1/billing/suppliers[/{id}]` | Supplier CRUD |
 
-**Tenant link (ADR-0001 PR-4):** `Customer` carries an optional `TenantUUID` FK to a Tier-2 external tenant (sparse-unique index). Most customers are pure invoice recipients with no platform identity. When set, the link surfaces via `core/tenant`'s aggregator route `GET|POST /v1/admin/tenants/{id}/billing-customer`, backed by `iface.TenantBillingCustomerProvider`. The POST is idempotent and seeds the new customer from `iface.Tenant` (LegalName, VATNumber, FiscalCode, Country, Email).
+**No customer registry.** As of Phase 5 of the Unified Client Aggregate refactor (May 2026) the FatturaPA recipient (CessionarioCommittente) is resolved from the Tier-2 `Tenant` aggregate via `iface.BillingTenantProvider.ResolveBillingParty(tenantUUID)`. The provider walks up `Tenant.ParentTenantUUID` until it finds a tenant whose `IsItalianBillable=true` AND `FatturaPA` carries at least one routing handle (`CodiceDestinatario` or `PECDestinatario`). `CreateInvoice` calls the resolver and snapshots the resulting `BillingParty` into `Invoice.CessionarioCommittente` for legal-immutability. The legacy `billing.Customer` model + `/v1/billing/customers` routes were deleted; operators configure the FatturaPA profile per Tier-2 client at `PATCH /v1/admin/clients/{tenantUUID}/billing-identity` (tenant module). When the chain bottoms out with no FatturaPA profile, `CreateInvoice` returns `ErrTenantNotBillable` (HTTP 422) so the SPA can prompt the operator to fill in the billing identity before retrying.
 
 ### Notifications & Statistics
 
@@ -166,14 +162,15 @@ Draft → Sent → [SDI Processing] → Delivered/Rejected
 
 ### Polling Job & Invoice Sync
 
-The `polling_job.go` runs a background goroutine that periodically syncs invoices and fetches notifications from OpenAPI SDI:
+The `polling_job.go` runs a background goroutine that periodically syncs invoices from OpenAPI SDI as a safety net for missed webhooks:
 
 - Polls at configurable intervals (`OPENAPI_BILLING_POLLING_INTERVAL`)
 - `SyncReceivedInvoices` fetches **both** sent (`type=0`) and received (`type=1`) invoices from the API, deduplicates by OpenAPIUUID and invoice number, and imports new ones
-- Updates invoice status based on notification type
-- Stores notifications for audit trail
+- Reconciles invoice status from the per-invoice `marking` field (`sent`/`delivered`/`received`)
+- Stores polling health (`LastPolledAt`, `LastError`, `ConsecutiveErrors`) in `billing_polling_state`
 - Logs a summary with `totalImportedIssued`, `totalImportedReceived`, and `totalSkipped` counts
 - Deduplication skip logs are at `Info` level for troubleshooting visibility
+- Real-time SDI notifications (RC/NS/MC/NE/DT/AT) arrive via the `customer-notification` webhook event and are persisted by `ProcessNotification`/`SaveNotification`. There is no separate notifications-fetch endpoint.
 
 ### OpenAPI SDI Query Parameters (GET /invoices)
 
@@ -195,7 +192,10 @@ The `GET /invoices` endpoint uses these parameters (per the [OAS spec](https://c
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `OPENAPI_BILLING_BASE_URL` | OpenAPI SDI API URL | `https://test.sdi.openapi.it` |
-| `OPENAPI_BILLING_BEARER_TOKEN` | Authentication token | _(required to enable)_ |
+| `OPENAPI_BILLING_ACCOUNT_EMAIL` | OpenAPI.com account email (paired with API key for OAuth /token) | _(empty)_ |
+| `OPENAPI_BILLING_API_KEY` | Long-lived API key from console.openapi.com — module mints + caches JWTs from this | _(empty)_ |
+| `OPENAPI_OAUTH_BASE_URL` | OAuth host (shared with company) | `https://oauth.openapi.it` (sandbox: `https://test.oauth.openapi.it`) |
+| `OPENAPI_BILLING_BEARER_TOKEN` | Legacy static JWT fallback (used only when API key is empty) | _(empty)_ |
 | `OPENAPI_BILLING_FISCAL_ID` | Company fiscal code (P.IVA) | _(required)_ |
 | `OPENAPI_BILLING_RECIPIENT_CODE` | Default recipient code | `JKKZDGR` |
 | `OPENAPI_BILLING_APPLY_SIGNATURE` | Enable digital signature | `true` |
@@ -286,7 +286,7 @@ if cfg.OpenAPI.BearerToken != "" {
 4. **Test invoice flow**:
    - Create a draft invoice via API or frontend
    - Send invoice to SDI
-   - Verify notification polling retrieves SDI responses
+   - Verify the polling tick imports the invoice and that the `customer-notification` webhook updates its status (or wait for the next sync to reconcile via the `marking` field)
 
 5. **Self-invoicing for testing**: Use document types TD16-TD20 (autofatture) which allow cedente=cessionario (sender=recipient). Standard TD01 invoices cannot be sent to yourself.
 
@@ -344,16 +344,16 @@ For **IdTrasmittente** (XML element 1.1.1), SDI requires the **CodiceFiscale**, 
 | Collection | Description |
 |------------|-------------|
 | `billing_invoices` | Invoice documents |
-| `billing_customers` | Customer registry |
 | `billing_suppliers` | Supplier registry |
 | `billing_notifications` | SDI notifications |
 | `billing_polling_state` | Polling job state |
 
+The legacy `billing_customers` collection is no longer registered in `Collections()` after Phase 5 of the Unified Client Aggregate refactor. The Mongo collection itself survives in dev/staging/prod as a one-phase forensics safety belt — a follow-up migration drops it after invoice send is verified working in production.
+
 ### Indexes
 
 Ensure these indexes exist for performance:
-- `billing_invoices`: `number`, `customer_id`, `status`, `created_at`
-- `billing_customers`: `fiscal_code`, `vat_number`
+- `billing_invoices`: `number`, `tenantUUID`, `status`, `created_at`
 - `billing_notifications`: `invoice_uuid`, `notification_type`, `processed`
 
 ## Security Considerations

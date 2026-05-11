@@ -227,6 +227,27 @@ func (h *PasswordAuthHandler) ResetPassword(ctx context.Context, req *ResetPassw
 	return resp, nil
 }
 
+// AcceptInviteRequest is the redemption payload for the admin_invite
+// flow — same shape as ResetPassword but a different purpose claim.
+type AcceptInviteRequest struct {
+	Body struct {
+		Token       string `json:"token" doc:"Invite token from the admin invite email"`
+		NewPassword string `json:"newPassword" doc:"Password the new user picks"`
+	}
+}
+
+// AcceptInvite redeems an admin_invite email token: sets the user's
+// password and marks the email verified in one step.
+func (h *PasswordAuthHandler) AcceptInvite(ctx context.Context, req *AcceptInviteRequest) (*ForgotPasswordResponse, error) {
+	if err := h.svc.ConsumeInvite(ctx, req.Body.Token, req.Body.NewPassword); err != nil {
+		return nil, mapPasswordError(err)
+	}
+	resp := &ForgotPasswordResponse{}
+	resp.Body.Success = true
+	resp.Body.Message = "Welcome — your account is ready. You can now sign in."
+	return resp, nil
+}
+
 // --- Change password (authenticated) ---
 
 type ChangePasswordRequest struct {
@@ -244,10 +265,13 @@ func (h *PasswordAuthHandler) ChangePassword(ctx context.Context, req *ChangePas
 	if err := h.svc.ChangePassword(ctx, userUUID, req.Body.CurrentPassword, req.Body.NewPassword); err != nil {
 		return nil, mapPasswordError(err)
 	}
-	// Refresh tokens are already invalidated inside ChangePassword; revoke
-	// the current access token's sid too so the old bearer stops working
-	// immediately instead of staying valid until its 15-minute TTL.
-	if h.sessionRevocation != nil {
+	// Phase 8: revoke the caller's session id so the old bearer stops
+	// working immediately instead of staying valid until its 15-minute
+	// TTL. Gated on the live revokeSessionsOnPasswordChange policy so
+	// admins can opt out (e.g. for migration workflows where preserving
+	// existing sessions matters more than the immediate cutover).
+	// Default-on preserves the historical behaviour.
+	if h.sessionRevocation != nil && h.svc.ShouldRevokeOnPasswordChange(ctx) {
 		if sid := currentSessionID(ctx); sid != "" {
 			_ = h.sessionRevocation.Revoke(ctx, sid, "password_change")
 		}
@@ -284,12 +308,32 @@ func buildRefreshCookie(name, value, domain string, secure bool) string {
 	return c.String()
 }
 
+// codedError is a huma.StatusError that adds a stable machine-readable
+// `code` field on top of the standard problem+json shape, so SPAs can
+// discriminate specific error cases without parsing the localized
+// `detail` text. Mirrors the convention used by the step_up_required
+// 401 envelope in shared/middleware/auth.go.
+type codedError struct {
+	Status int    `json:"status"`
+	Title  string `json:"title,omitempty"`
+	Detail string `json:"detail"`
+	Code   string `json:"code,omitempty"`
+}
+
+func (e *codedError) Error() string  { return e.Detail }
+func (e *codedError) GetStatus() int { return e.Status }
+
 func mapPasswordError(err error) error {
 	switch {
 	case errors.Is(err, services.ErrInvalidCredentials):
 		return huma.Error401Unauthorized("Invalid email or password")
 	case errors.Is(err, services.ErrEmailNotVerified):
-		return huma.Error403Forbidden("Email address not verified. Please check your inbox for the verification email.")
+		return &codedError{
+			Status: http.StatusForbidden,
+			Title:  "Forbidden",
+			Detail: "Email address not verified. Please check your inbox for the verification email.",
+			Code:   "email_not_verified",
+		}
 	case errors.Is(err, services.ErrAccountLocked):
 		return huma.Error429TooManyRequests("Too many failed attempts. Please try again later.")
 	case errors.Is(err, services.ErrUserInactive):
@@ -300,10 +344,42 @@ func mapPasswordError(err error) error {
 		return huma.Error503ServiceUnavailable("Email delivery is not configured — signups are temporarily unavailable. Please contact an administrator.")
 	case errors.Is(err, services.ErrMFAEnrollmentRequired):
 		return huma.Error403Forbidden("MFA enrollment required — the grace period for this account has expired. Please complete MFA setup via an admin before signing in.")
+	case errors.Is(err, services.ErrRegistrationDisabled):
+		return &codedError{
+			Status: http.StatusForbidden,
+			Title:  "Forbidden",
+			Detail: "Self-service registration is disabled for this surface. Contact an administrator.",
+			Code:   "registration_disabled",
+		}
+	case errors.Is(err, services.ErrEmailDomainNotAllowed):
+		return &codedError{
+			Status: http.StatusForbidden,
+			Title:  "Forbidden",
+			Detail: "Registrations from this email domain are not allowed.",
+			Code:   "email_domain_not_allowed",
+		}
+	case errors.Is(err, services.ErrLoginDisabled):
+		return &codedError{
+			Status: http.StatusForbidden,
+			Title:  "Forbidden",
+			Detail: "Login is temporarily disabled for this surface. Contact an administrator.",
+			Code:   "login_disabled",
+		}
+	case errors.Is(err, services.ErrCountryBlocked):
+		return &codedError{
+			Status: http.StatusForbidden,
+			Title:  "Forbidden",
+			Detail: "Access from your country is not permitted.",
+			Code:   "country_blocked",
+		}
 	case errors.Is(err, services.ErrPasswordTooShort),
 		errors.Is(err, services.ErrPasswordTooLong),
 		errors.Is(err, services.ErrPasswordContainsEmail),
-		errors.Is(err, services.ErrPasswordBreached):
+		errors.Is(err, services.ErrPasswordBreached),
+		errors.Is(err, services.ErrPasswordMissingUpper),
+		errors.Is(err, services.ErrPasswordMissingLower),
+		errors.Is(err, services.ErrPasswordMissingDigit),
+		errors.Is(err, services.ErrPasswordMissingSymbol):
 		return huma.Error400BadRequest(err.Error())
 	default:
 		slog.Default().Warn("password auth error", slog.String("error", err.Error()))
@@ -312,62 +388,75 @@ func mapPasswordError(err error) error {
 }
 
 // RegisterPublicRoutes registers the endpoints that don't require auth.
-func (h *PasswordAuthHandler) RegisterPublicRoutes(api huma.API) {
+// mount controls the path + operation-ID prefix; LegacyMount preserves
+// the pre-PR-D /v1/auth/... layout while OperatorMount/ClientMount mount
+// the same handlers under /v1/auth/operator/... and /v1/auth/client/...
+// for the ADR-0003 audience-split surfaces.
+func (h *PasswordAuthHandler) RegisterPublicRoutes(api huma.API, mount RouteMount) {
 	huma.Register(api, huma.Operation{
-		OperationID: "password-register",
+		OperationID: mount.OpIDPrefix + "password-register",
 		Method:      http.MethodPost,
-		Path:        "/v1/auth/register",
+		Path:        "/v1/auth" + mount.PathPrefix + "/register",
 		Summary:     "Register a new account with email and password",
 		Tags:        []string{"Authentication"},
 	}, h.Register)
 
 	huma.Register(api, huma.Operation{
-		OperationID: "password-login",
+		OperationID: mount.OpIDPrefix + "password-login",
 		Method:      http.MethodPost,
-		Path:        "/v1/auth/login",
+		Path:        "/v1/auth" + mount.PathPrefix + "/login",
 		Summary:     "Log in with email and password",
 		Tags:        []string{"Authentication"},
 	}, h.Login)
 
 	huma.Register(api, huma.Operation{
-		OperationID: "password-verify-email",
+		OperationID: mount.OpIDPrefix + "password-verify-email",
 		Method:      http.MethodPost,
-		Path:        "/v1/auth/verify-email",
+		Path:        "/v1/auth" + mount.PathPrefix + "/verify-email",
 		Summary:     "Verify an email address with a token",
 		Tags:        []string{"Authentication"},
 	}, h.VerifyEmail)
 
 	huma.Register(api, huma.Operation{
-		OperationID: "password-resend-verification",
+		OperationID: mount.OpIDPrefix + "password-resend-verification",
 		Method:      http.MethodPost,
-		Path:        "/v1/auth/verify-email/resend",
+		Path:        "/v1/auth" + mount.PathPrefix + "/verify-email/resend",
 		Summary:     "Resend email verification",
 		Tags:        []string{"Authentication"},
 	}, h.ResendVerification)
 
 	huma.Register(api, huma.Operation{
-		OperationID: "password-forgot",
+		OperationID: mount.OpIDPrefix + "password-forgot",
 		Method:      http.MethodPost,
-		Path:        "/v1/auth/forgot-password",
+		Path:        "/v1/auth" + mount.PathPrefix + "/forgot-password",
 		Summary:     "Request a password reset email",
 		Tags:        []string{"Authentication"},
 	}, h.ForgotPassword)
 
 	huma.Register(api, huma.Operation{
-		OperationID: "password-reset",
+		OperationID: mount.OpIDPrefix + "password-reset",
 		Method:      http.MethodPost,
-		Path:        "/v1/auth/reset-password",
+		Path:        "/v1/auth" + mount.PathPrefix + "/reset-password",
 		Summary:     "Reset a password with a token",
 		Tags:        []string{"Authentication"},
 	}, h.ResetPassword)
+
+	huma.Register(api, huma.Operation{
+		OperationID: mount.OpIDPrefix + "password-accept-invite",
+		Method:      http.MethodPost,
+		Path:        "/v1/auth" + mount.PathPrefix + "/accept-invite",
+		Summary:     "Redeem an admin invite token: set password + verify email",
+		Tags:        []string{"Authentication"},
+	}, h.AcceptInvite)
 }
 
-// RegisterProtectedRoutes registers the change-password endpoint.
-func (h *PasswordAuthHandler) RegisterProtectedRoutes(api huma.API) {
+// RegisterProtectedRoutes registers the change-password endpoint. See
+// RegisterPublicRoutes for the mount semantics.
+func (h *PasswordAuthHandler) RegisterProtectedRoutes(api huma.API, mount RouteMount) {
 	huma.Register(api, huma.Operation{
-		OperationID: "password-change",
+		OperationID: mount.OpIDPrefix + "password-change",
 		Method:      http.MethodPost,
-		Path:        "/v1/auth/change-password",
+		Path:        "/v1/auth" + mount.PathPrefix + "/change-password",
 		Summary:     "Change the current user's password",
 		Tags:        []string{"Authentication"},
 		Security:    []map[string][]string{{"bearerAuth": {}}},

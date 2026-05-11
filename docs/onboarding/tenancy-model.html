@@ -1,0 +1,538 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Orkestra Tenancy Model — Operator Onboarding</title>
+<style>
+  :root {
+    --bg: #0f172a;
+    --panel: #ffffff;
+    --ink: #0f172a;
+    --muted: #475569;
+    --line: #e2e8f0;
+    --accent: #6366f1;
+    --tier1: #0ea5e9;
+    --tier1-bg: #e0f2fe;
+    --tier2: #f97316;
+    --tier2-bg: #ffedd5;
+    --owns: #10b981;
+    --owns-bg: #d1fae5;
+    --warn: #b45309;
+    --warn-bg: #fef3c7;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, "Helvetica Neue", Arial, sans-serif;
+    color: var(--ink);
+    background: linear-gradient(180deg, #f8fafc 0%, #eef2ff 100%);
+    padding: 32px 16px 64px;
+  }
+  .page {
+    max-width: 1180px;
+    margin: 0 auto;
+    background: var(--panel);
+    border-radius: 24px;
+    box-shadow: 0 30px 60px -30px rgba(15, 23, 42, 0.25), 0 6px 16px -8px rgba(15, 23, 42, 0.08);
+    overflow: hidden;
+  }
+  header {
+    padding: 36px 40px 28px;
+    background: radial-gradient(circle at 0% 0%, rgba(99, 102, 241, 0.18), transparent 55%),
+                radial-gradient(circle at 100% 0%, rgba(14, 165, 233, 0.12), transparent 55%),
+                #0f172a;
+    color: #f8fafc;
+  }
+  header .eyebrow {
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    font-size: 11px;
+    color: #93c5fd;
+    margin: 0 0 8px;
+    font-weight: 700;
+  }
+  header h1 {
+    margin: 0 0 6px;
+    font-size: 30px;
+    line-height: 1.15;
+    letter-spacing: -0.01em;
+  }
+  header p.lede {
+    margin: 0;
+    color: #cbd5e1;
+    font-size: 15px;
+    max-width: 720px;
+  }
+  header .oneliner {
+    margin-top: 18px;
+    padding: 12px 16px;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(148, 163, 184, 0.25);
+    border-left: 4px solid var(--accent);
+    border-radius: 8px;
+    font-size: 16px;
+  }
+  header .oneliner b { color: #fff; }
+  section {
+    padding: 32px 40px;
+    border-top: 1px solid var(--line);
+  }
+  section:first-of-type { border-top: 0; }
+  h2 {
+    font-size: 20px;
+    margin: 0 0 6px;
+    letter-spacing: -0.005em;
+  }
+  h2 .num {
+    display: inline-block;
+    width: 28px; height: 28px;
+    border-radius: 8px;
+    background: var(--accent);
+    color: #fff;
+    text-align: center;
+    line-height: 28px;
+    font-size: 13px;
+    font-weight: 700;
+    margin-right: 10px;
+    vertical-align: 2px;
+  }
+  section .sub {
+    margin: 0 0 20px;
+    color: var(--muted);
+  }
+
+  /* Tiers grid */
+  .tiers {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 18px;
+  }
+  .tier {
+    border-radius: 14px;
+    padding: 18px 18px 16px;
+    border: 1px solid var(--line);
+    background: var(--panel);
+  }
+  .tier.t1 { background: var(--tier1-bg); border-color: #bae6fd; }
+  .tier.t2 { background: var(--tier2-bg); border-color: #fed7aa; }
+  .tier h3 {
+    margin: 0 0 4px;
+    font-size: 15px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .badge {
+    display: inline-block;
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    font-weight: 700;
+    padding: 3px 8px;
+    border-radius: 999px;
+    background: #fff;
+    color: var(--ink);
+    border: 1px solid var(--line);
+  }
+  .tier.t1 .badge { background: #fff; color: var(--tier1); border-color: #bae6fd; }
+  .tier.t2 .badge { background: #fff; color: var(--tier2); border-color: #fed7aa; }
+  .tier .who {
+    font-size: 12px;
+    color: var(--muted);
+    margin: 2px 0 12px;
+  }
+  .tier ul {
+    margin: 0; padding: 0; list-style: none;
+    display: grid; gap: 6px;
+  }
+  .tier li {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 8px 10px;
+    font-size: 13px;
+  }
+  .tier li b { font-weight: 600; }
+  .tier li code {
+    font-size: 12px;
+    background: #f1f5f9;
+    padding: 1px 6px;
+    border-radius: 4px;
+  }
+
+  /* Relationship diagram */
+  .rel {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr auto 1fr;
+    align-items: center;
+    gap: 14px;
+    background: #f8fafc;
+    border: 1px dashed var(--line);
+    border-radius: 14px;
+    padding: 22px;
+  }
+  .rel .node {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 14px;
+    text-align: center;
+    box-shadow: 0 4px 14px -8px rgba(15, 23, 42, 0.15);
+  }
+  .rel .node .label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    color: var(--muted);
+    margin-bottom: 4px;
+  }
+  .rel .node .title {
+    font-size: 16px;
+    font-weight: 700;
+    margin-bottom: 4px;
+  }
+  .rel .node .meta {
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .rel .arrow {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    color: var(--muted);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+  }
+  .rel .arrow .line {
+    width: 64px; height: 2px;
+    background: linear-gradient(90deg, #cbd5e1, var(--accent));
+    margin: 6px 0;
+    position: relative;
+  }
+  .rel .arrow .line::after {
+    content: "";
+    position: absolute; right: -1px; top: -4px;
+    border: 5px solid transparent;
+    border-left-color: var(--accent);
+  }
+  .rel .node.user { border-color: #c7d2fe; }
+  .rel .node.tenant { border-color: #99f6e4; }
+  .rel .node.resources { border-color: #bbf7d0; }
+  .rel .node.tenant .title { color: #0f766e; }
+  .rel .node.resources .title { color: #047857; }
+
+  /* Tenant flavors */
+  .flavors {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 18px;
+  }
+  .flavor {
+    border-radius: 14px;
+    border: 1px solid var(--line);
+    padding: 18px;
+    background: #fff;
+    position: relative;
+  }
+  .flavor h4 {
+    margin: 0 0 4px;
+    font-size: 15px;
+  }
+  .flavor .pred {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12px;
+    color: var(--muted);
+    background: #f1f5f9;
+    padding: 4px 8px;
+    border-radius: 6px;
+    display: inline-block;
+    margin: 4px 0 12px;
+  }
+  .flavor.b2b { border-top: 4px solid var(--accent); }
+  .flavor.solo { border-top: 4px solid var(--tier2); }
+  .flavor ul { margin: 0; padding-left: 18px; }
+  .flavor li { margin: 4px 0; font-size: 13px; }
+  .flavor .ex {
+    margin-top: 12px;
+    padding: 10px 12px;
+    background: #f8fafc;
+    border-radius: 8px;
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .flavor .ex b { color: var(--ink); }
+
+  /* Owns grid */
+  .owns {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+  }
+  .own {
+    background: var(--owns-bg);
+    border: 1px solid #a7f3d0;
+    border-radius: 10px;
+    padding: 12px;
+  }
+  .own .ttl { font-weight: 700; font-size: 13px; color: #065f46; margin-bottom: 4px; }
+  .own .desc { font-size: 12px; color: #047857; }
+
+  /* Shapes */
+  .shapes {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+  }
+  .shape {
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 18px;
+    background: #fff;
+  }
+  .shape h4 { margin: 0 0 10px; font-size: 14px; }
+  .shape .diagram {
+    background: #f8fafc;
+    border: 1px dashed #e2e8f0;
+    border-radius: 10px;
+    padding: 14px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12px;
+    line-height: 1.6;
+    color: var(--ink);
+    white-space: pre;
+    overflow-x: auto;
+  }
+  .shape p { font-size: 12px; color: var(--muted); margin: 10px 0 0; }
+
+  /* Glossary */
+  .glossary {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px 24px;
+  }
+  .gl {
+    border-bottom: 1px solid var(--line);
+    padding: 8px 0;
+  }
+  .gl b { display: block; font-size: 13px; }
+  .gl span { font-size: 12px; color: var(--muted); }
+
+  footer {
+    padding: 18px 40px;
+    background: #f8fafc;
+    color: var(--muted);
+    font-size: 12px;
+    border-top: 1px solid var(--line);
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  footer code { background: #fff; padding: 1px 6px; border-radius: 4px; border: 1px solid var(--line); }
+
+  @media (max-width: 880px) {
+    .tiers, .flavors { grid-template-columns: 1fr; }
+    .owns { grid-template-columns: repeat(2, 1fr); }
+    .shapes { grid-template-columns: 1fr; }
+    .rel { grid-template-columns: 1fr; }
+    .rel .arrow { transform: rotate(90deg); }
+    section, header, footer { padding-left: 22px; padding-right: 22px; }
+  }
+  @media print {
+    body { background: #fff; padding: 0; }
+    .page { box-shadow: none; border-radius: 0; }
+  }
+</style>
+</head>
+<body>
+  <div class="page">
+    <header>
+      <p class="eyebrow">Operator Onboarding · Orkestra</p>
+      <h1>Users, Tenants &amp; Business Units</h1>
+      <p class="lede">A one-page mental model for operators who are new to Orkestra. Read top to bottom.</p>
+      <div class="oneliner"><b>Users are <i>who</i>. Tenants are <i>where</i>.</b> &nbsp;Users act. Tenants own. Everything billable, entitled, or invoiced is attached to a tenant — never to a user directly.</div>
+    </header>
+
+    <!-- 1: Two tiers -->
+    <section>
+      <h2><span class="num">1</span>Two tiers of tenancy</h2>
+      <p class="sub">Orkestra is a host. Two completely separate populations live inside it.</p>
+      <div class="tiers">
+        <div class="tier t1">
+          <h3>Tier 1 — Internal <span class="badge">operator side</span></h3>
+          <div class="who">The companies that <b>run</b> Orkestra.</div>
+          <ul>
+            <li><b>Internal users</b> — operators, admins, support staff</li>
+            <li><b>Internal tenants</b> — <code>Tenant{Kind:internal}</code></li>
+            <li>Decide which modules are enabled, run the platform, see audit logs</li>
+            <li>Manage their own FatturaPA / SDI invoicing (the operator's books)</li>
+          </ul>
+        </div>
+        <div class="tier t2">
+          <h3>Tier 2 — External <span class="badge">customer side</span></h3>
+          <div class="who">The customers who <b>use</b> Orkestra.</div>
+          <ul>
+            <li><b>External users</b> — humans who sign up at <code>app.orkestra.cc</code></li>
+            <li><b>External tenants</b> — <code>Tenant{Kind:external}</code></li>
+            <li>Subscribe to AI / RAG / billing services via Stripe</li>
+            <li>Consume capabilities scoped to their tenant's data</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- 2: Users, Tenants, Resources -->
+    <section>
+      <h2><span class="num">2</span>How a user, a tenant, and the things they own fit together</h2>
+      <p class="sub">A user belongs to one or more tenants. The tenant is what owns subscriptions, payments, entitlements.</p>
+      <div class="rel">
+        <div class="node user">
+          <div class="label">Who</div>
+          <div class="title">User</div>
+          <div class="meta">A human. Has email, password,<br/>OAuth, MFA, profile.</div>
+        </div>
+        <div class="arrow">
+          <span>member of</span>
+          <span class="line"></span>
+          <span>(many-to-many)</span>
+        </div>
+        <div class="node tenant">
+          <div class="label">Where</div>
+          <div class="title">Tenant</div>
+          <div class="meta">An organizational scope.<br/>Carries billing identity + RBAC.</div>
+        </div>
+        <div class="arrow">
+          <span>owns</span>
+          <span class="line"></span>
+          <span>(one-to-many)</span>
+        </div>
+        <div class="node resources">
+          <div class="label">What</div>
+          <div class="title">Resources</div>
+          <div class="meta">Subscriptions, payments,<br/>entitlements, invoices, data.</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 3: Two flavors of external tenant -->
+    <section>
+      <h2><span class="num">3</span>Two flavors of external tenant</h2>
+      <p class="sub">Within Tier 2, every tenant is one of two shapes. The discriminator is the boolean <code>IsCompany</code>.</p>
+      <div class="flavors">
+        <div class="flavor b2b">
+          <h4>B2B / Company tenant</h4>
+          <span class="pred">IsCompany = true</span>
+          <ul>
+            <li>The legal entity (S.r.l., S.p.A., Ltd, Inc., …)</li>
+            <li>Created <b>eagerly</b> during onboarding</li>
+            <li>Usually has multiple member users (employees, admins)</li>
+            <li>Carries full FatturaPA / SDI billing identity</li>
+            <li>Can have <b>divisions</b> — parent/child tenants</li>
+          </ul>
+          <div class="ex"><b>Example.</b> "Acme S.r.l." signs up. Three employees join. Subscriptions, invoices, and Stripe customer all attach to the Acme tenant.</div>
+        </div>
+        <div class="flavor solo">
+          <h4>Personal tenant</h4>
+          <span class="pred">IsCompany = false &nbsp;·&nbsp; signupChannel = self_serve</span>
+          <ul>
+            <li>A single-member account container</li>
+            <li>Created <b>lazily</b> on first tenant-requiring action (subscribe, pay)</li>
+            <li>Name defaults to the user's display name</li>
+            <li>Billing party rendered from the User's first/last name</li>
+            <li>Same data model as a company tenant — just a 1-member case</li>
+          </ul>
+          <div class="ex"><b>Example.</b> A freelancer signs up, browses, then clicks Subscribe. <code>EnsureTenantForUser</code> mints their personal tenant on the spot.</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 4: What a tenant owns -->
+    <section>
+      <h2><span class="num">4</span>What lives on a tenant</h2>
+      <p class="sub">If you find yourself looking up a billable thing by user ID, you are looking in the wrong place. Everything below keys on <code>tenantUUID</code>.</p>
+      <div class="owns">
+        <div class="own"><div class="ttl">Subscriptions</div><div class="desc">Recurring AI-services plans (Stripe-backed).</div></div>
+        <div class="own"><div class="ttl">Payments &amp; methods</div><div class="desc">Transactions, cards, Stripe customer ID.</div></div>
+        <div class="own"><div class="ttl">Entitlements</div><div class="desc">Capability grants <code>(tenantUUID, capabilityID)</code>.</div></div>
+        <div class="own"><div class="ttl">Invoices</div><div class="desc">FatturaPA / SDI invoices issued or received.</div></div>
+        <div class="own"><div class="ttl">Billing identity</div><div class="desc">VAT, fiscal code, codice destinatario, PEC.</div></div>
+        <div class="own"><div class="ttl">Members</div><div class="desc">Which users belong to it, with which role.</div></div>
+        <div class="own"><div class="ttl">Sub-tenants</div><div class="desc">Child workspaces / divisions, if any.</div></div>
+        <div class="own"><div class="ttl">Data scope</div><div class="desc">RAG documents, agents, prospects — all tenant-scoped.</div></div>
+      </div>
+    </section>
+
+    <!-- 5: Common shapes -->
+    <section>
+      <h2><span class="num">5</span>Common shapes you will see in admin</h2>
+      <p class="sub">Three real-world layouts, drawn the same way every time.</p>
+      <div class="shapes">
+        <div class="shape">
+          <h4>Solo signup</h4>
+<div class="diagram">    User: alice@x.com
+        |
+        | member
+        v
+   ┌───────────────┐
+   │ Personal      │
+   │ tenant        │
+   │ IsCompany=F   │
+   │ members: 1    │
+   └───────────────┘</div>
+          <p>One human, one personal tenant, one membership. The tenant exists only because Alice subscribed.</p>
+        </div>
+        <div class="shape">
+          <h4>Company with employees</h4>
+<div class="diagram">  Users: bob, carla, dan
+       \   |   /
+        \  |  /  members
+         v v v
+   ┌───────────────┐
+   │ Acme S.r.l.   │
+   │ IsCompany=T   │
+   │ members: 3    │
+   └───────────────┘</div>
+          <p>Three users belong to one B2B tenant. Subscriptions and invoices roll up to Acme, not to the individuals.</p>
+        </div>
+        <div class="shape">
+          <h4>Company with divisions</h4>
+<div class="diagram">   ┌───────────────┐
+   │ Acme Holding  │  parent
+   │ FatturaPA ✓   │
+   └──────┬────────┘
+          │
+   ┌──────┴────────┐
+   │ Acme Italia   │  child
+   │ no FatturaPA  │
+   └───────────────┘</div>
+          <p>Subscriptions live on the consuming workspace. Invoicing walks up <code>parentTenantUUID</code> until it finds a tenant with billing identity.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- 6: Mental shortcuts -->
+    <section>
+      <h2><span class="num">6</span>Quick reference</h2>
+      <div class="glossary">
+        <div class="gl"><b>User</b><span>A human identity. Auth, profile, MFA. Cannot directly own a subscription or invoice.</span></div>
+        <div class="gl"><b>Tenant</b><span>An organizational scope. Owns subscriptions, payments, entitlements, invoices, data.</span></div>
+        <div class="gl"><b>Membership</b><span>The link between a user and a tenant. Carries the user's role inside that tenant.</span></div>
+        <div class="gl"><b>Tier 1 — internal</b><span><code>Tenant{Kind:internal}</code>. The operator's own org. Configures modules, runs the platform.</span></div>
+        <div class="gl"><b>Tier 2 — external</b><span><code>Tenant{Kind:external}</code>. A customer. Either a company (B2B) or a personal account.</span></div>
+        <div class="gl"><b>IsCompany</b><span>Discriminates B2B (true) from personal (false). Drives billing party rendering and lazy provisioning.</span></div>
+        <div class="gl"><b>EnsureTenantForUser</b><span>Lazy-provisions a personal tenant on first tenant-requiring action.</span></div>
+        <div class="gl"><b>Division</b><span>A child external tenant under a parent. Billing walks up <code>parentTenantUUID</code>.</span></div>
+        <div class="gl"><b>FatturaPA</b><span>Italian electronic-invoicing identity. Required when <code>IsItalianBillable=true</code>.</span></div>
+        <div class="gl"><b>Stripe customer</b><span>External-tenant field. Stored on the tenant, never on the user.</span></div>
+      </div>
+    </section>
+
+    <footer>
+      <span>Source of truth: <code>backend/internal/core/tenant/</code> · <code>CLAUDE.md</code> at repo root.</span>
+      <span>For operator first-login, see the minimal-profile Quick Start.</span>
+    </footer>
+  </div>
+</body>
+</html>

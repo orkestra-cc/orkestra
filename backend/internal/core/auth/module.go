@@ -25,11 +25,46 @@ import (
 
 type AuthModule struct {
 	module.BaseModule
-	authHandler        *handlers.AuthHandler
-	passwordHandler    *handlers.PasswordAuthHandler
-	mfaHandler         *handlers.MFAHandler
-	webauthnHandler    *handlers.WebAuthnHandler    // optional — nil when WebAuthn isn't configured
-	deviceTrustHandler *handlers.DeviceTrustHandler // Section C item #3
+
+	// deviceTrust is a single non-tier-split collection so one handler
+	// is reused across both operator and client mounts.
+	deviceTrustHandler *handlers.DeviceTrustHandler
+
+	// ADR-0003 PR-D: operator-tier handler instances bound to the
+	// operator authTierBundle. Mounted under /v1/auth/operator/...
+	// The operator AuthHandler also owns the single shared OAuth
+	// callback URL — its tierDispatch map routes callbacks to the
+	// matching tier's authService. webauthn handler stays nil when
+	// passkeys are disabled at boot.
+	operatorAuthHandler          *handlers.AuthHandler
+	operatorPasswordHandler      *handlers.PasswordAuthHandler
+	operatorMFAHandler           *handlers.MFAHandler
+	operatorWebAuthnHandler      *handlers.WebAuthnHandler
+	// operatorAdminUserAuthHandler hosts the admin endpoints that
+	// inspect and manage another operator user's auth methods
+	// (password, MFA, OAuth, email verification). Mounted under
+	// /v1/admin/users/{userId}/... on the operator host mux only —
+	// admin actions on Tier-2 client users live on the user module's
+	// AdminClientUserHandler.
+	operatorAdminUserAuthHandler *handlers.AdminUserAuthHandler
+	// operatorSelfUserAuthHandler hosts the self-service security-center
+	// endpoints under /v1/auth/operator/me/... (auth-methods aggregator,
+	// session list/revoke, OAuth self-unlink). Drives the
+	// frontend-admin /user/security page. Tier-bound to operator
+	// because session + OAuth state lives in operator_* collections;
+	// the client-tier mirror is a deliberate follow-up.
+	operatorSelfUserAuthHandler *handlers.SelfUserAuthHandler
+
+	// ADR-0003 PR-D D-5: client-tier handler instances bound to the
+	// client authTierBundle. Same shape as the operator block above but
+	// tied to client_* collections + a JWT service that stamps
+	// aud=client on every minted token, so /v1/auth/client/* requests
+	// produce client-audience access + refresh tokens that only the
+	// client host mux accepts.
+	clientAuthHandler     *handlers.AuthHandler
+	clientPasswordHandler *handlers.PasswordAuthHandler
+	clientMFAHandler      *handlers.MFAHandler
+	clientWebAuthnHandler *handlers.WebAuthnHandler
 }
 
 func NewModule() *AuthModule { return &AuthModule{} }
@@ -60,6 +95,9 @@ func (m *AuthModule) Permissions() []iface.PermissionSpec {
 		{Key: "auth.self", Module: "auth", Description: "Edit your own password and sessions"},
 		{Key: "auth.mfa.self", Module: "auth", Description: "Enroll, verify, and remove your own MFA factors"},
 		{Key: "system.users.mfa_reset", Module: "auth", Description: "Admin: reset another user's MFA factors"},
+		{Key: "system.users.password_reset", Module: "auth", Description: "Admin: trigger a password-reset email for another user"},
+		{Key: "system.users.email_verify_resend", Module: "auth", Description: "Admin: resend the email-verification mail for another user"},
+		{Key: "system.users.oauth_unlink", Module: "auth", Description: "Admin: unlink an OAuth identity (Google/Apple/GitHub/Discord) from another user"},
 	}
 }
 
@@ -96,52 +134,283 @@ func (m *AuthModule) ConfigSchema() []module.ConfigField {
 		{Key: "discordClientId", Label: "Client ID", Group: "Discord", Type: module.FieldString, EnvVar: "OAUTH_DISCORD_CLIENT_ID"},
 		{Key: "discordClientSecret", Label: "Client Secret", Group: "Discord", Type: module.FieldSecret, EnvVar: "OAUTH_DISCORD_CLIENT_SECRET"},
 		{Key: "discordRedirectURL", Label: "Redirect URL", Group: "Discord", Type: module.FieldString, EnvVar: "OAUTH_DISCORD_REDIRECT_URL"},
+
+		// Registration — tier-aware site-wide signup policy. Read at
+		// request time by AuthPolicyService; edits via the admin UI take
+		// effect on the next signup with no restart.
+		{
+			Key: "registrationEnabledAdmin", Label: "Allow signups on operator console", Group: "Registration",
+			Description: "When off, POST /v1/auth/operator/register returns 403. Operator accounts must be invited or created via /admin.",
+			Type:        module.FieldBool, Default: "true",
+		},
+		{
+			Key: "registrationEnabledClient", Label: "Allow signups on client app", Group: "Registration",
+			Description: "When off, POST /v1/auth/client/register returns 403. Tier-2 clients can no longer self-register.",
+			Type:        module.FieldBool, Default: "true",
+		},
+		{
+			Key: "defaultRoleClient", Label: "Default role for new client signups", Group: "Registration",
+			Description: "System role assigned to a Tier-2 client account on signup. Lower-privilege roles are recommended.",
+			Type:        module.FieldEnum, Default: "operator",
+			Options:     []string{"operator", "manager", "guest"},
+		},
+		{
+			Key: "allowedEmailDomainsAdmin", Label: "Allowed email domains (operator)", Group: "Registration",
+			Description: "Comma-separated allowlist (e.g. acme.com, ops.acme.com). Empty = any domain. Applied only to /v1/auth/operator/register.",
+			Type:        module.FieldStringList,
+		},
+		{
+			Key: "allowedEmailDomainsClient", Label: "Allowed email domains (client)", Group: "Registration",
+			Description: "Comma-separated allowlist applied only to /v1/auth/client/register. Empty = any domain.",
+			Type:        module.FieldStringList,
+		},
+
+		// Login & Sessions — per-surface kill switches + lockout policy.
+		// Read at request time by AuthPolicyService; lockout values flow
+		// into shared/errors.RateLimiter via SetAuthFailedConfig before
+		// each login attempt so admin edits take effect on the next try.
+		{
+			Key: "loginEnabledAdmin", Label: "Allow logins on operator console", Group: "Login & Sessions",
+			Description: "When off, POST /v1/auth/operator/login returns 403. Use during maintenance to lock out the operator console without taking the backend offline.",
+			Type:        module.FieldBool, Default: "true",
+		},
+		{
+			Key: "loginEnabledClient", Label: "Allow logins on client app", Group: "Login & Sessions",
+			Description: "When off, POST /v1/auth/client/login returns 403. Affects /v1/auth/client/* only.",
+			Type:        module.FieldBool, Default: "true",
+		},
+		{
+			Key: "accountLockoutThreshold", Label: "Failed login attempts before lockout", Group: "Login & Sessions",
+			Description: "Number of failed login attempts (per IP and per email) before the account is temporarily locked. Default 5.",
+			Type:        module.FieldInt, Default: "5",
+		},
+		{
+			Key: "accountLockoutDuration", Label: "Lockout duration", Group: "Login & Sessions",
+			Description: "Go duration string (e.g. 15m, 1h) — how long an IP/email stays locked after exceeding the threshold. Default 15m.",
+			Type:        module.FieldDuration, Default: "15m",
+		},
+
+		// Password Policy — site-wide rules enforced by passwordService.
+		// ValidatePolicy on signup / change-password / reset. Defaults
+		// match the legacy hardcoded behaviour (10..128 chars, no
+		// complexity, HIBP on) so existing deployments observe no change
+		// after the migration.
+		{
+			Key: "passwordMinLength", Label: "Minimum length", Group: "Password Policy",
+			Description: "Minimum number of characters in a new password. Default 10. Recommend 12+.",
+			Type:        module.FieldInt, Default: "10",
+		},
+		{
+			Key: "passwordMaxLength", Label: "Maximum length", Group: "Password Policy",
+			Description: "Upper bound on password length. Argon2id is not a bottleneck; raise this only if you have a concrete reason.",
+			Type:        module.FieldInt, Default: "128",
+		},
+		{
+			Key: "passwordRequireUpper", Label: "Require an uppercase letter", Group: "Password Policy",
+			Type: module.FieldBool, Default: "false",
+		},
+		{
+			Key: "passwordRequireLower", Label: "Require a lowercase letter", Group: "Password Policy",
+			Type: module.FieldBool, Default: "false",
+		},
+		{
+			Key: "passwordRequireDigit", Label: "Require a digit", Group: "Password Policy",
+			Type: module.FieldBool, Default: "false",
+		},
+		{
+			Key: "passwordRequireSymbol", Label: "Require a symbol", Group: "Password Policy",
+			Description: "Any non-alphanumeric character.",
+			Type:        module.FieldBool, Default: "false",
+		},
+		{
+			Key: "breachedPasswordCheck", Label: "Reject breached passwords (HIBP)", Group: "Password Policy",
+			Description: "k-anonymity lookup against haveibeenpwned.com — only the first 5 chars of the SHA-1 hash leave the server. Disable for air-gapped deployments.",
+			Type:        module.FieldBool, Default: "true",
+		},
+
+		// OAuth Providers — per-surface enable. The credential fields
+		// stay where they are (one set per provider, shared across
+		// audiences) but each provider can be exposed only on the
+		// surfaces that should accept it. A provider that is configured
+		// but disabled for a surface is filtered out of GET
+		// /v1/auth/{tier}/providers and returns 403 oauth_disabled
+		// from the start endpoints.
+		{
+			Key: "googleEnabledAdmin", Label: "Google on operator console", Group: "OAuth Providers",
+			Type: module.FieldBool, Default: "true",
+		},
+		{
+			Key: "googleEnabledClient", Label: "Google on client app", Group: "OAuth Providers",
+			Type: module.FieldBool, Default: "true",
+		},
+		{
+			Key: "appleEnabledAdmin", Label: "Apple on operator console", Group: "OAuth Providers",
+			Type: module.FieldBool, Default: "true",
+		},
+		{
+			Key: "appleEnabledClient", Label: "Apple on client app", Group: "OAuth Providers",
+			Type: module.FieldBool, Default: "true",
+		},
+		{
+			Key: "githubEnabledAdmin", Label: "GitHub on operator console", Group: "OAuth Providers",
+			Type: module.FieldBool, Default: "true",
+		},
+		{
+			Key: "githubEnabledClient", Label: "GitHub on client app", Group: "OAuth Providers",
+			Type: module.FieldBool, Default: "true",
+		},
+		{
+			Key: "discordEnabledAdmin", Label: "Discord on operator console", Group: "OAuth Providers",
+			Type: module.FieldBool, Default: "true",
+		},
+		{
+			Key: "discordEnabledClient", Label: "Discord on client app", Group: "OAuth Providers",
+			Type: module.FieldBool, Default: "true",
+		},
+
+		// MFA — global feature flag + grace window. The privileged-role
+		// list (super_admin / administrator / org_owner / org_admin) is
+		// still hardcoded in services/mfa_policy.go; that's a follow-up
+		// once we agree on UX for editing it. For today, operators can:
+		//   - flip the master switch off in an emergency (existing
+		//     enrollments stay intact; users can still verify
+		//     voluntarily, but RoleRequiresMFA returns false)
+		//   - tune how long a freshly-promoted admin has to enroll
+		{
+			Key: "mfaEnabled", Label: "Require MFA for privileged users", Group: "MFA",
+			Description: "Master switch. When off, RoleRequiresMFA returns false — privileged users can sign in without a second factor. Existing TOTP/passkey enrollments are not deleted; users can still use them.",
+			Type:        module.FieldBool, Default: "true",
+		},
+		{
+			Key: "mfaEnrollmentGraceDays", Label: "Enrollment grace period (days)", Group: "MFA",
+			Description: "How many days a newly privileged user has to enroll a second factor before login returns 403 mfa_enrollment_required. Default 7.",
+			Type:        module.FieldInt, Default: "7",
+		},
+
+		// Anti-abuse & Notifications — Tab 7. Operational guardrails on
+		// top of the per-tier login/registration kill switches: who gets
+		// emailed on suspicious logins, which IPs/countries are
+		// allowed/blocked at the operator host, and when to retire stale
+		// accounts. Read at request time by AuthPolicyService; admin
+		// edits take effect immediately. The IP and geo gates are
+		// scoped to the operator surface only — Tier-2 client traffic
+		// is far broader and gating it by IP/country would lock real
+		// customers out, while operator console access is already a
+		// privileged surface where allow/blocklists make sense.
+		{
+			Key: "notifyUserOnNewDeviceLogin", Label: "Email user on first login from a new device", Group: "Anti-abuse & Notifications",
+			Description: "When on, sends an auth.new_device_login transactional email the first time a user logs in from a (deviceId, userUUID) pair the system has not seen before. Helps users notice unauthorised access on the same day it happens.",
+			Type:        module.FieldBool, Default: "true",
+		},
+		{
+			Key: "notifyAdminOnSuspiciousLogin", Label: "Email admins on high-risk login", Group: "Anti-abuse & Notifications",
+			Description: "When on, every high-risk login (risk score ≥ 0.5) emails each address in the recipients list below in addition to notifying the user. Default off — recipients must be explicitly configured first.",
+			Type:        module.FieldBool, Default: "false",
+		},
+		{
+			Key: "suspiciousLoginRecipients", Label: "Suspicious-login admin recipients", Group: "Anti-abuse & Notifications",
+			Description: "Comma-separated list of admin email addresses notified on high-risk logins. Empty disables the admin email half regardless of the toggle above.",
+			Type:        module.FieldStringList,
+		},
+		{
+			Key: "ipAllowlistAdmin", Label: "IP allowlist (operator console)", Group: "Anti-abuse & Notifications",
+			Description: "Comma-separated list of CIDR ranges allowed to reach the operator host. Empty = open. Applied only to operator host traffic — the client API is unaffected. Example: 10.0.0.0/8, 192.0.2.5/32.",
+			Type:        module.FieldStringList,
+		},
+		{
+			Key: "ipBlocklistAdmin", Label: "IP blocklist (operator console)", Group: "Anti-abuse & Notifications",
+			Description: "Comma-separated list of CIDR ranges denied at the operator host. Evaluated after the allowlist — a blocked entry rejects the request even if it also matches the allowlist.",
+			Type:        module.FieldStringList,
+		},
+		{
+			Key: "geoBlockCountries", Label: "Country blocklist", Group: "Anti-abuse & Notifications",
+			Description: "Comma-separated ISO-3166-1 alpha-2 country codes (e.g. RU, KP) that cannot complete login on either tier. Requires the GeoIP resolver (AUTH_GEOIP_DB_PATH) — empty when GeoIP is disabled has no effect.",
+			Type:        module.FieldStringList,
+		},
+		{
+			Key: "inactiveAccountAutoDisableDays", Label: "Auto-disable inactive accounts after (days)", Group: "Anti-abuse & Notifications",
+			Description: "Disables a user account when its lastLogin is older than the configured number of days. Checked at login time so a stale account is denied at the next attempt without a periodic job. 0 = disabled.",
+			Type:        module.FieldInt, Default: "0",
+		},
+
+		// Sessions & Account — Phase 8 trivial toggles. Two existing
+		// security behaviours surfaced as live-editable knobs.
+		{
+			Key: "revokeSessionsOnPasswordChange", Label: "Revoke sessions on password change", Group: "Sessions & Account",
+			Description: "When on, a successful POST /v1/auth/{tier}/change-password also revokes the caller's current session id and every device-trust grant for the user. When off, password change leaves existing sessions alive (used for migrations or staged rollouts; not recommended in steady state). Default on.",
+			Type:        module.FieldBool, Default: "true",
+		},
+		{
+			Key: "selfServiceAccountDeletionClient", Label: "Allow client users to self-delete (GDPR erase)", Group: "Sessions & Account",
+			Description: "When on, Tier-2 client users can call POST /v1/me/dsr/erase to irreversibly wipe their personal data across every PII producer. When off (default), client tier returns 403 self_service_deletion_disabled and erasure must be triggered through the operator console. Operator-side erasure is unaffected.",
+			Type:        module.FieldBool, Default: "false",
+		},
+
+		// OAuth signup allowance — Phase 9 small backlog. The OAuth
+		// provider tabs above gate which buttons appear; this pair gates
+		// what happens when an OAuth login arrives for an unknown email.
+		// When off, the callback returns 403 oauth_signup_disabled
+		// instead of provisioning a new account — useful when an
+		// operator wants to allow existing users to sign in via OAuth
+		// while keeping signups invitation-only.
+		{
+			Key: "oauthAllowSignupAdmin", Label: "Allow OAuth signups on operator console", Group: "OAuth Providers",
+			Description: "When off, OAuth callbacks on the operator host that resolve to an unknown email return 403 instead of creating a new operator account. Existing users can still sign in.",
+			Type:        module.FieldBool, Default: "true",
+		},
+		{
+			Key: "oauthAllowSignupClient", Label: "Allow OAuth signups on client app", Group: "OAuth Providers",
+			Description: "When off, OAuth callbacks on the client host that resolve to an unknown email return 403 instead of creating a new client account.",
+			Type:        module.FieldBool, Default: "true",
+		},
+
+		// MFA — admin-managed list of roles that mandate a second factor.
+		// Phase 9 small backlog. Empty falls back to the legacy hardcoded
+		// list (super_admin, administrator, org_owner, org_admin) so an
+		// unset value preserves today's behaviour. Adding a role here is
+		// security-sensitive — broaden carefully.
+		{
+			Key: "mfaRequiredForRoles", Label: "Roles that require MFA", Group: "MFA",
+			Description: "Comma-separated list of role names that mandate a second factor. Recognised system roles: super_admin, administrator, developer, manager, operator, guest. Recognised org roles: org_owner, org_admin, org_member. Empty restores the built-in default (super_admin, administrator, org_owner, org_admin).",
+			Type:        module.FieldStringList,
+		},
+		{
+			Key: "recoveryCodesCount", Label: "Recovery codes issued on enrollment", Group: "MFA",
+			Description: "Number of one-shot backup codes minted when a user confirms TOTP enrollment. Default 10. Range 1–50 — outside that the legacy default (10) is used.",
+			Type:        module.FieldInt, Default: "10",
+		},
+
+		// OAuth account linking — Phase 10 of the auth-policy roadmap.
+		// Today's flow auto-links an OAuth provider to an existing
+		// account when the email matches. That's convenient but lets
+		// an attacker who controls a verified email at the IdP take
+		// over an existing Orkestra account whose owner used a
+		// password. Operators in higher-assurance deployments turn
+		// this off.
+		{
+			Key: "oauthAutoLinkByEmail", Label: "Auto-link OAuth provider to existing email account", Group: "OAuth Providers",
+			Description: "When on (default), an OAuth callback for an existing Orkestra account (matched by email) attaches the provider to that user automatically. When off, the OAuth flow refuses with 403 oauth_link_disabled and the user must initiate linking from their account settings while authenticated. Recommended off for compliance-sensitive deployments.",
+			Type:        module.FieldBool, Default: "true",
+		},
 	}
 }
 
 func (m *AuthModule) Collections() []module.CollectionSpec {
 	return []module.CollectionSpec{
-		{Name: models.OAuthProvidersCollection, Indexes: []module.IndexSpec{
-			{Keys: map[string]int{"userUuid": 1, "provider": 1}, Unique: true},
-		}},
-		{Name: models.RefreshTokensCollection, Indexes: []module.IndexSpec{
-			{Keys: map[string]int{"uuid": 1}, Unique: true},
-			{Keys: map[string]int{"userUuid": 1}},
-			// Block C: family lookup for RevokeFamily / replay detection.
-			{Keys: map[string]int{"familyId": 1}},
-		}},
-		{Name: models.AuthSessionsCollection, Indexes: []module.IndexSpec{
-			{Keys: map[string]int{"uuid": 1}, Unique: true},
-		}},
+		// Non-tier-split collections: security events are an audit log
+		// keyed on userUUID alone, device-trust grants follow the user
+		// record and the auth-path split does not need them per-tier.
 		{Name: models.SecurityEventsCollection},
-		{Name: models.EmailTokensCollection, Indexes: []module.IndexSpec{
-			{Keys: map[string]int{"uuid": 1}, Unique: true},
-			{Keys: map[string]int{"tokenHash": 1}, Unique: true},
-			{Keys: map[string]int{"userUuid": 1}},
-			// TTL: documents are removed 24h after ExpiresAt (max TTL for both verify and reset).
-			{Keys: map[string]int{"expiresAt": 1}, TTL: 24 * time.Hour},
-		}},
-		{Name: models.MFAFactorsCollection, Indexes: []module.IndexSpec{
-			{Keys: map[string]int{"uuid": 1}, Unique: true},
-			{Keys: map[string]int{"userUuid": 1, "type": 1}, Unique: true},
-		}},
-		// Device trust grants (Section C item #3): "remember this
-		// device for 30 days" rows that let a returning user skip the
-		// MFA prompt on login. ExpireAt reaps rows when trustedUntil
-		// passes; (userUuid, deviceId) non-unique because we keep
-		// revoked history for audit — the repo enforces one ACTIVE
-		// row per pair on insert.
 		{Name: models.DeviceTrustCollection, Indexes: []module.IndexSpec{
 			{Keys: map[string]int{"uuid": 1}, Unique: true},
 			{Keys: map[string]int{"userUuid": 1, "deviceId": 1}},
 			{Keys: map[string]int{"trustedUntil": 1}, ExpireAt: true},
 		}},
 
-		// ADR-0003 PR-B: tier-split auth collections. Mirror the
-		// legacy auth_* indexes so the tier-aware repos can be a
-		// drop-in replacement once USER_TIER_SPLIT_ENABLED flips. Each
-		// pair below shares an identical IndexSpec set with its legacy
-		// sibling; only the collection name differs.
+		// ADR-0003 PR-D D-8: operator-tier and client-tier auth
+		// collections are the only canonical storage. Each pair below
+		// shares an identical IndexSpec set; only the collection name
+		// differs.
 		{Name: models.OperatorOAuthProvidersCollection, Indexes: []module.IndexSpec{
 			{Keys: map[string]int{"userUuid": 1, "provider": 1}, Unique: true},
 		}},
@@ -194,64 +463,62 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 		logger = slog.New(slog.NewTextHandler(os.Stderr, nil))
 	}
 
-	// Repositories
-	authRepo, err := repository.NewAuthRepository(deps.DB)
-	if err != nil {
-		return err
-	}
-	oauthProviderRepo := repository.NewOAuthProviderRepository(deps.DB)
-	refreshTokenRepo := repository.NewRefreshTokenRepository(deps.DB)
-	authSessionRepo := repository.NewAuthSessionRepository(deps.DB)
-	emailTokenRepo := repository.NewEmailTokenRepository(deps.DB)
-	mfaFactorRepo := repository.NewMFAFactorRepository(deps.DB)
+	// Device-trust is the only auth collection that stays single (not
+	// tier-split) — the grant follows the user record and is reused
+	// across both tier mounts.
 	deviceTrustRepo := repository.NewDeviceTrustRepository(deps.DB)
-	// Device-trust service (Section C item #3). Duration is env-
-	// overridable via AUTH_DEVICE_TRUST_DURATION (Go duration string,
-	// e.g. "168h" for 7 days). Unset falls back to 30 days.
 	deviceTrustDuration := parseDurationEnv("AUTH_DEVICE_TRUST_DURATION", models.DeviceTrustDuration)
 	deviceTrustSvc := services.NewDeviceTrustService(deviceTrustRepo, deviceTrustDuration, logger)
 
-	// OAuth provider factory + live config resolver.
-	//
-	// Provider configs live in the module_configs document and are resolved
-	// per-request by OAuthConfigResolver — seeded on first boot from the
-	// OAUTH_* env vars declared in ConfigSchema(), then owned by the admin
-	// UI at /admin/modules. The factory itself holds an empty map; each
-	// handler call passes a freshly resolved config through CreateProvider's
-	// override parameter so secret rotations take effect without a restart.
+	// OAuth provider factory + live config resolver. Provider configs
+	// live in the module_configs document, resolved per-request from
+	// admin-managed values; secret rotations take effect without a
+	// restart.
 	providerFactory := services.NewOAuthProviderFactory(
 		map[models.OAuthProvider]*services.OAuthProviderConfig{},
 		deps.RedisAdapter,
 	)
 	oauthResolver := services.NewOAuthConfigResolver(deps.ConfigService)
 
-	// JWT service. The tenant provider is wired in so that token issuance
-	// can embed the user's current memberships in the JWT. The environment
-	// is stamped into the iss claim (orkestra.<env>) so a token minted in
-	// one deployment is rejected by another even if the signing keys ever
-	// overlap. Keys themselves should differ per environment — this claim
-	// is defense in depth.
-	jwtService := services.NewJWTService(
+	// Operator-audience JWT service. The environment is stamped into
+	// the iss claim (orkestra.<env>) so a token minted in one
+	// deployment is rejected by another even if the signing keys ever
+	// overlap. The same key pair is reused by the client-audience JWT
+	// service constructed below — only the aud claim differs.
+	operatorJWT, err := services.NewJWTServiceWithAudience(
 		cfg.Auth.JWT.PrivateKey,
 		cfg.Auth.JWT.PublicKey,
 		cfg.Server.Environment,
+		services.AudienceOperator,
 		cfg.Auth.JWT.AccessTokenExpiry,
 		cfg.Auth.JWT.RefreshTokenExpiry,
 	)
+	if err != nil {
+		return err
+	}
 	tenantProvider := module.MustGetTyped[iface.TenantProvider](deps.Services, module.ServiceTenantProvider)
-	jwtService.SetTenantProvider(tenantProvider)
+	operatorJWT.SetTenantProvider(tenantProvider)
 
-	// OAuth state service
+	// OAuth state service + signed-state JWT secret (D-6). The HMAC
+	// secret is derived from the JWT private key so every replica
+	// agrees without an extra env var; rotation is implicit when the
+	// JWT key pair rotates.
 	redisStore := services.NewRedisOAuthStateStore(deps.RedisAdapter)
 	oauthStateService := services.NewOAuthStateService(redisStore)
+	var oauthStateSecret []byte
+	if cfg.Auth.JWT.PrivateKey != nil {
+		secret, err := services.DeriveOAuthStateSecret(cfg.Auth.JWT.PrivateKey)
+		if err != nil {
+			logger.Warn("auth: failed to derive OAuth state secret",
+				slog.String("error", err.Error()))
+		} else {
+			oauthStateSecret = secret
+		}
+	}
 
-	// Get user service from registry
-	userService := module.MustGetTyped[iface.UserProvider](deps.Services, module.ServiceUserService)
-
-	// Auth service
-	// First-admin claimer is shared between OAuth and password signup. The
-	// lookup is lifted here from its earlier spot in the password section
-	// so both services see the same instance.
+	// First-admin claimer is shared between OAuth and password signup
+	// so both tiers race-proof the first-user super_admin election
+	// against the same atomic claimer.
 	var firstAdminClaimer services.FirstAdminClaimer
 	if c, ok := module.GetTyped[services.FirstAdminClaimer](deps.Services, module.ServiceFirstAdminClaimer); ok {
 		firstAdminClaimer = c
@@ -259,159 +526,47 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 		logger.Warn("first-admin claimer not wired — signup flows will fall through to non-atomic first-user heuristic")
 	}
 
-	// MFA challenge store is needed by both the auth service (OAuth login
-	// partial response) and the password auth service (password login
-	// partial response), so build it before either consumer.
 	mfaChallengeSvc := services.NewMFAChallengeService(redisStore)
 
-	// Section C item #1: login-risk scorer. Reads session history through
-	// the auth_sessions repo to compute new_device/new_ip/rapid_ip_change
-	// factors. Shared by the OAuth and password login paths so both surface
-	// a consistent score on the SessionDoc.RiskScore field.
-	// Section C item #4: GeoIP-backed impossible-travel detection.
-	// FromEnv returns a real resolver when AUTH_GEOIP_DB_PATH points
-	// at a MaxMind .mmdb (and the MaxMind library is linked in via a
-	// follow-up commit), or a NoopResolver otherwise. The scorer
-	// silently skips the impossible_travel factor when the resolver
-	// is noop — other factors still compute.
-	geoResolver := geoip.FromEnv(logger)
-	velocityKmh := parseFloatEnv("AUTH_GEOIP_VELOCITY_THRESHOLD_KMH", services.DefaultImpossibleTravelVelocityKmh)
-	riskAssessmentSvc := services.NewRiskAssessmentServiceWithGeoIP(authSessionRepo, geoResolver, velocityKmh, logger)
-
-	authService, err := services.NewAuthService(&services.AuthConfig{
-		AuthRepo:            authRepo,
-		UserService:         userService,
-		TenantProvider:      tenantProvider,
-		OAuthProviderRepo:   oauthProviderRepo,
-		RefreshTokenRepo:    refreshTokenRepo,
-		AuthSessionRepo:     authSessionRepo,
-		JWTService:          jwtService,
-		MFAFactorRepo:       mfaFactorRepo,
-		MFAChallengeService: mfaChallengeSvc,
-		FirstAdminClaimer:   firstAdminClaimer,
-		RiskAssessment:      riskAssessmentSvc,
-	})
-	if err != nil {
-		return err
-	}
-
-	// Session revocation list (Block D): Redis-backed set of revoked `sid`
-	// claims checked on every authenticated request. Populated on logout,
-	// password reset, and admin kill-session so a stolen access token stops
-	// working instantly instead of staying valid until its TTL expires.
+	// Session revocation list (Block D): Redis-backed set of revoked
+	// `sid` claims checked on every authenticated request. Single
+	// instance shared across both tiers since the sid namespace is
+	// global.
 	sessionRevocationSvc := services.NewSessionRevocationService(
 		deps.RedisAdapter,
 		cfg.Auth.JWT.AccessTokenExpiry,
 		logger,
 	)
 
-	// Auth handler
-	m.authHandler = handlers.NewAuthHandler(
-		authService,
-		providerFactory,
-		oauthResolver,
-		oauthStateService,
-		oauthProviderRepo,
-		jwtService,
-		cfg,
-	)
-	m.authHandler.SetSessionRevocation(sessionRevocationSvc)
-
-	// Password auth service — depends on notification module (optional).
 	passwordSvc := services.NewPasswordService(logger, true)
 	var notifier iface.NotificationSender
 	if n, ok := module.GetTyped[iface.NotificationSender](deps.Services, module.ServiceNotificationSender); ok {
 		notifier = n
 	}
 
-	// Section C item #5: suspicious-login notifier. Shares a single
-	// SecurityEventService instance with the PII producer below so
-	// user-facing security history + GDPR DSR export read the same
-	// rows. A nil NotificationSender disables only the email half;
-	// the security-event recording still fires whenever a login is
-	// scored. Construction may fail if the Mongo indexes on
-	// auth_security_events can't be built — the notifier stays nil
-	// in that case and logs fall through to a zero-impact no-op.
+	// Suspicious-login notifier shares one SecurityEventService
+	// instance with the PII producer below so user-facing security
+	// history and GDPR DSR export read the same rows. The policy
+	// pointer below is constructed further down — wire it on the
+	// notifier after `authPolicy` exists.
 	securityEventSvc, securityEventErr := services.NewSecurityEventService(deps.DB)
 	if securityEventErr != nil {
 		logger.Warn("auth: security event service init failed; suspicious-login notifier disabled",
 			slog.String("error", securityEventErr.Error()))
 	}
-	var suspiciousLoginNotifierSvc services.SuspiciousLoginNotifier
-	if securityEventSvc != nil {
-		suspiciousLoginNotifierSvc = services.NewSuspiciousLoginNotifier(services.NotifierConfig{
-			Events:       securityEventSvc,
-			Notifier:     notifier,
-			AppName:      getEnvOrDefault("APP_NAME", "Orkestra"),
-			SupportEmail: os.Getenv("SUPPORT_EMAIL"),
-			FrontendURL:  cfg.Server.FrontendURL,
-			Logger:       logger,
-		})
-	}
 
 	rateLimiter := sharederrors.NewRateLimiter()
 
-	passwordAuthSvc := services.NewPasswordAuthService(services.PasswordAuthConfig{
-		UserService:              userService,
-		TenantProvider:           tenantProvider,
-		PasswordService:          passwordSvc,
-		JWTService:               jwtService,
-		EmailTokenRepo:           emailTokenRepo,
-		RefreshTokenRepo:         refreshTokenRepo,
-		AuthSessionRepo:          authSessionRepo,
-		MFAFactorRepo:            mfaFactorRepo,
-		MFAChallengeService:      mfaChallengeSvc,
-		FirstAdminClaimer:        firstAdminClaimer,
-		RiskAssessment:           riskAssessmentSvc,
-		DeviceTrust:              deviceTrustSvc,
-		SuspiciousLoginNotifier:  suspiciousLoginNotifierSvc,
-		Notifier:                 notifier,
-		RateLimiter:              rateLimiter,
-		FrontendURL:              cfg.Server.FrontendURL,
-		RequireEmailVerification: getBoolEnv("AUTH_REQUIRE_EMAIL_VERIFICATION", cfg.IsProductionLike()),
-		AppName:                  getEnvOrDefault("APP_NAME", "Orkestra"),
-		SupportEmail:             os.Getenv("SUPPORT_EMAIL"),
-		Logger:                   logger,
-	})
-
-	m.passwordHandler = handlers.NewPasswordAuthHandler(
-		passwordAuthSvc,
-		cfg.Auth.Cookie.Name,
-		cfg.Auth.Cookie.Domain,
-		cfg.Auth.Cookie.Secure,
-	)
-	m.passwordHandler.SetSessionRevocation(sessionRevocationSvc)
-
-	// MFA orchestrator — issuer drives the TOTP provisioning URI label.
-	// Borrows the password service's argon2id hasher for backup-code
-	// storage so we don't ship a second hasher.
 	mfaIssuer := getEnvOrDefault("APP_NAME", "Orkestra")
-	mfaSvc := services.NewMFAService(mfaFactorRepo, mfaChallengeSvc, passwordSvc, mfaIssuer, logger)
-	mfaSvc.SetDeviceTrust(deviceTrustSvc)
+	geoResolver := geoip.FromEnv(logger)
+	velocityKmh := parseFloatEnv("AUTH_GEOIP_VELOCITY_THRESHOLD_KMH", services.DefaultImpossibleTravelVelocityKmh)
 
-	m.mfaHandler = handlers.NewMFAHandler(
-		mfaSvc,
-		mfaChallengeSvc,
-		jwtService,
-		userService,
-		passwordAuthSvc,
-		cfg.Auth.Cookie.Name,
-		cfg.Auth.Cookie.Domain,
-		cfg.Auth.Cookie.Secure,
-	)
-	m.mfaHandler.SetDeviceTrust(deviceTrustSvc)
-
-	// Device-trust self-service endpoints (Section C item #3): list +
-	// revoke the caller's active "remember this device 30d" grants.
-	// Granting happens on the MFA login-verify endpoints above.
-	m.deviceTrustHandler = handlers.NewDeviceTrustHandler(deviceTrustSvc)
-
-	// WebAuthn — only enabled when the deployment has declared an RP via
-	// env vars. Skipping the wiring is the documented "passkeys disabled"
-	// path; the frontend hides the passkeys UI based on /v1/auth/me/mfa
-	// returning webauthnCredentials=0 and the endpoints simply 404 when
-	// not registered.
+	// WebAuthn relying party — resolved once and shared across both
+	// tier bundles so an env-misconfiguration produces a single
+	// warning. Nil disables passkeys at boot; the per-tier bundles
+	// inherit a nil webauthnSvc to match.
 	rpID, rpOrigins := resolveWebAuthnRP(cfg.Server.FrontendURL)
+	var webauthnRP *gowebauthn.WebAuthn
 	if rpID != "" && len(rpOrigins) > 0 {
 		wa, err := gowebauthn.New(&gowebauthn.Config{
 			RPDisplayName: mfaIssuer,
@@ -424,22 +579,7 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 				slog.String("error", err.Error()),
 			)
 		} else {
-			webauthnSvc := services.NewWebAuthnService(wa, mfaFactorRepo, mfaChallengeSvc, logger)
-			m.mfaHandler.SetWebAuthn(webauthnSvc)
-			m.webauthnHandler = handlers.NewWebAuthnHandler(
-				webauthnSvc,
-				mfaChallengeSvc,
-				jwtService,
-				userService,
-				passwordAuthSvc,
-				cfg.Auth.Cookie.Name,
-				cfg.Auth.Cookie.Domain,
-				cfg.Auth.Cookie.Secure,
-			)
-			m.webauthnHandler.SetDeviceTrust(deviceTrustSvc)
-			deps.Services.Register(module.ServiceWebAuthn, webauthnSvc)
-			passwordAuthSvc.SetWebAuthnAvailability(webauthnAvailabilityChecker{svc: webauthnSvc})
-			authService.SetWebAuthnAvailability(webauthnAvailabilityChecker{svc: webauthnSvc})
+			webauthnRP = wa
 			logger.Info("webauthn enabled",
 				slog.String("rpId", rpID),
 				slog.Int("rpOrigins", len(rpOrigins)),
@@ -449,27 +589,299 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 		logger.Info("webauthn disabled — WEBAUTHN_RP_ID/WEBAUTHN_RP_ORIGINS not set")
 	}
 
-	// Register services for main.go middleware setup
-	deps.Services.Register(module.ServiceAuthService, authService)
-	deps.Services.Register(module.ServiceJWTService, jwtService)
-	deps.Services.Register(module.ServicePasswordService, passwordSvc)
-	deps.Services.Register(module.ServicePasswordAuthService, passwordAuthSvc)
-	deps.Services.Register(module.ServiceSessionRevocation, sessionRevocationSvc)
+	// Device-trust self-service handler is reused across both tier
+	// mounts since the underlying collection is single.
+	m.deviceTrustHandler = handlers.NewDeviceTrustHandler(deviceTrustSvc)
 
-	// Session-risk lookup: resolves the most recent risk score for a sid
-	// against the auth_sessions collection. Consumed post-InitAll by the
-	// HTTP middleware's RequireLowRisk gate and the Cedar shadow
-	// evaluator's principal.risk_score attribute. Registered as a plain
-	// function (not an interface) so consumers on either side of the
-	// auth/authz split bind to the same concrete closure without
-	// importing auth's types. A nil error with score==0 is legitimate
+	// Shared admin-policy reader. Both tier bundles consume the same
+	// instance — schema keys carry their own Admin/Client suffix so a
+	// single ConfigService read disambiguates by audience.
+	authPolicy := services.NewAuthPolicyService(deps.ConfigService)
+	// Hand the policy to the (already-constructed) shared password
+	// service so length / complexity / HIBP rules can be edited live
+	// at /admin/modules/auth without a restart.
+	passwordSvc.SetPolicy(authPolicy)
+
+	// Suspicious-login notifier — constructed here (after authPolicy)
+	// so the admin-email half can read notifyAdminOnSuspiciousLogin /
+	// suspiciousLoginRecipients live on every OnLogin call.
+	var suspiciousLoginNotifierSvc services.SuspiciousLoginNotifier
+	if securityEventSvc != nil {
+		suspiciousLoginNotifierSvc = services.NewSuspiciousLoginNotifier(services.NotifierConfig{
+			Events:       securityEventSvc,
+			Notifier:     notifier,
+			AppName:      getEnvOrDefault("APP_NAME", "Orkestra"),
+			SupportEmail: os.Getenv("SUPPORT_EMAIL"),
+			FrontendURL:  cfg.Server.FrontendURL,
+			Logger:       logger,
+			Policy:       authPolicy,
+		})
+	}
+
+	commonTierDeps := tierBundleDeps{
+		db:                       deps.DB,
+		logger:                   logger,
+		tenantProvider:           tenantProvider,
+		passwordService:          passwordSvc,
+		mfaChallengeService:      mfaChallengeSvc,
+		firstAdminClaimer:        firstAdminClaimer,
+		deviceTrust:              deviceTrustSvc,
+		suspiciousLoginNotifier:  suspiciousLoginNotifierSvc,
+		notifier:                 notifier,
+		rateLimiter:              rateLimiter,
+		geoResolver:              geoResolver,
+		velocityKmh:              velocityKmh,
+		frontendURL:              cfg.Server.FrontendURL,
+		requireEmailVerification: getBoolEnv("AUTH_REQUIRE_EMAIL_VERIFICATION", cfg.IsProductionLike()),
+		appName:                  getEnvOrDefault("APP_NAME", "Orkestra"),
+		supportEmail:             os.Getenv("SUPPORT_EMAIL"),
+		mfaIssuer:                mfaIssuer,
+		webauthnRP:               webauthnRP,
+		authPolicy:               authPolicy,
+	}
+
+	// ADR-0003 PR-D D-9: per-audience refresh-cookie domains. Each
+	// tier's handler trio gets the matching value so refresh cookies are
+	// scoped to the host that minted them — operator tokens stay on
+	// `console.*`, client tokens on `api.*`. Empty per-tier fields fall
+	// back to the legacy single-host `Domain` so single-host deployments
+	// keep working unchanged.
+	operatorCookieDomain := cfg.Auth.Cookie.OperatorDomain
+	if operatorCookieDomain == "" {
+		operatorCookieDomain = cfg.Auth.Cookie.Domain
+	}
+	clientCookieDomain := cfg.Auth.Cookie.ClientDomain
+	if clientCookieDomain == "" {
+		clientCookieDomain = cfg.Auth.Cookie.Domain
+	}
+
+	// Operator tier — required after the D-8 cutover. The user module
+	// always registers ServiceOperatorUserProvider, so a missing
+	// provider here means the user module failed to init.
+	operatorUser := module.MustGetTyped[iface.UserProvider](deps.Services, module.ServiceOperatorUserProvider)
+	opDeps := commonTierDeps
+	opDeps.tier = tierOperator
+	opDeps.userProvider = operatorUser
+	opDeps.jwtService = operatorJWT
+	if cfg.Server.Operator.FrontendURL != "" {
+		opDeps.frontendURL = cfg.Server.Operator.FrontendURL
+	}
+	opBundle, err := buildAuthTierBundle(opDeps)
+	if err != nil {
+		return err
+	}
+
+	m.operatorPasswordHandler = handlers.NewPasswordAuthHandler(
+		opBundle.passwordSvc,
+		cfg.Auth.Cookie.Name,
+		operatorCookieDomain,
+		cfg.Auth.Cookie.Secure,
+	)
+	m.operatorPasswordHandler.SetSessionRevocation(sessionRevocationSvc)
+
+	m.operatorAuthHandler = handlers.NewAuthHandler(
+		opBundle.authService,
+		providerFactory,
+		oauthResolver,
+		oauthStateService,
+		opBundle.oauthProviderRepo,
+		operatorJWT,
+		cfg,
+		operatorCookieDomain,
+	)
+	m.operatorAuthHandler.SetSessionRevocation(sessionRevocationSvc)
+	m.operatorAuthHandler.SetStateSecret(oauthStateSecret)
+	m.operatorAuthHandler.SetTier(services.AudienceOperator)
+	m.operatorAuthHandler.SetPolicy(authPolicy)
+
+	// User-security plan Phase 1: hand the revocation store to the
+	// auth service so RevokeUserSession / RevokeAllUserSessionsExcept
+	// push to the same Redis set the AuthMiddleware consults on every
+	// authenticated request. Without this, in-flight access tokens
+	// would stay valid until the per-token TTL ticked over.
+	opBundle.authService.SetSessionRevocation(sessionRevocationSvc)
+
+	m.operatorMFAHandler = handlers.NewMFAHandler(
+		opBundle.mfaSvc,
+		mfaChallengeSvc,
+		operatorJWT,
+		operatorUser,
+		opBundle.passwordSvc,
+		cfg.Auth.Cookie.Name,
+		operatorCookieDomain,
+		cfg.Auth.Cookie.Secure,
+	)
+	m.operatorMFAHandler.SetDeviceTrust(deviceTrustSvc)
+	m.operatorMFAHandler.SetPolicy(authPolicy)
+	if opBundle.webauthnSvc != nil {
+		m.operatorMFAHandler.SetWebAuthn(opBundle.webauthnSvc)
+		m.operatorWebAuthnHandler = handlers.NewWebAuthnHandler(
+			opBundle.webauthnSvc,
+			mfaChallengeSvc,
+			operatorJWT,
+			operatorUser,
+			opBundle.passwordSvc,
+			cfg.Auth.Cookie.Name,
+			operatorCookieDomain,
+			cfg.Auth.Cookie.Secure,
+		)
+		m.operatorWebAuthnHandler.SetDeviceTrust(deviceTrustSvc)
+		deps.Services.Register(module.ServiceWebAuthn, opBundle.webauthnSvc)
+	}
+
+	// Admin user-auth handler — operator-tier only. Reuses the operator
+	// auth service for the GET aggregator + OAuth unlink, and the
+	// operator password-auth service (which satisfies
+	// iface.AdminAuthInviter via structural typing) for the
+	// send-password-reset / resend-verification routes.
+	m.operatorAdminUserAuthHandler = handlers.NewAdminUserAuthHandler(opBundle.authService, opBundle.passwordSvc)
+
+	// Self-service security-center handler — operator tier this
+	// iteration. Wired to the operator authService + mfaSvc so reads
+	// + revokes hit operator_sessions / operator_mfa_factors. The
+	// route gates (RequireGlobal vs RequireGlobal+RequireStepUp(5m))
+	// are applied in RegisterRoutes.
+	m.operatorSelfUserAuthHandler = handlers.NewSelfUserAuthHandler(opBundle.authService, opBundle.mfaSvc)
+
+	// Client tier — required after the D-8 cutover. Same expectation
+	// as operator tier above. Mints aud=client tokens via the client-
+	// audience JWT service so the client host mux's
+	// RequireAudience("client") gate accepts them and the operator
+	// mux rejects them. Reuses the same RS256 key pair as the operator
+	// service — only the audience claim differs.
+	clientUser := module.MustGetTyped[iface.UserProvider](deps.Services, module.ServiceClientUserProvider)
+	clientJWT, err := services.NewJWTServiceWithAudience(
+		cfg.Auth.JWT.PrivateKey,
+		cfg.Auth.JWT.PublicKey,
+		cfg.Server.Environment,
+		services.AudienceClient,
+		cfg.Auth.JWT.AccessTokenExpiry,
+		cfg.Auth.JWT.RefreshTokenExpiry,
+	)
+	if err != nil {
+		return err
+	}
+	clientJWT.SetTenantProvider(tenantProvider)
+
+	clDeps := commonTierDeps
+	clDeps.tier = tierClient
+	clDeps.userProvider = clientUser
+	clDeps.jwtService = clientJWT
+	if cfg.Server.Client.FrontendURL != "" {
+		clDeps.frontendURL = cfg.Server.Client.FrontendURL
+	}
+	clBundle, err := buildAuthTierBundle(clDeps)
+	if err != nil {
+		return err
+	}
+
+	m.clientPasswordHandler = handlers.NewPasswordAuthHandler(
+		clBundle.passwordSvc,
+		cfg.Auth.Cookie.Name,
+		clientCookieDomain,
+		cfg.Auth.Cookie.Secure,
+	)
+	m.clientPasswordHandler.SetSessionRevocation(sessionRevocationSvc)
+
+	m.clientAuthHandler = handlers.NewAuthHandler(
+		clBundle.authService,
+		providerFactory,
+		oauthResolver,
+		oauthStateService,
+		clBundle.oauthProviderRepo,
+		clientJWT,
+		cfg,
+		clientCookieDomain,
+	)
+	m.clientAuthHandler.SetSessionRevocation(sessionRevocationSvc)
+	m.clientAuthHandler.SetStateSecret(oauthStateSecret)
+	m.clientAuthHandler.SetTier(services.AudienceClient)
+	m.clientAuthHandler.SetPolicy(authPolicy)
+	clBundle.authService.SetSessionRevocation(sessionRevocationSvc)
+
+	m.clientMFAHandler = handlers.NewMFAHandler(
+		clBundle.mfaSvc,
+		mfaChallengeSvc,
+		clientJWT,
+		clientUser,
+		clBundle.passwordSvc,
+		cfg.Auth.Cookie.Name,
+		clientCookieDomain,
+		cfg.Auth.Cookie.Secure,
+	)
+	m.clientMFAHandler.SetDeviceTrust(deviceTrustSvc)
+	m.clientMFAHandler.SetPolicy(authPolicy)
+	if clBundle.webauthnSvc != nil {
+		m.clientMFAHandler.SetWebAuthn(clBundle.webauthnSvc)
+		m.clientWebAuthnHandler = handlers.NewWebAuthnHandler(
+			clBundle.webauthnSvc,
+			mfaChallengeSvc,
+			clientJWT,
+			clientUser,
+			clBundle.passwordSvc,
+			cfg.Auth.Cookie.Name,
+			clientCookieDomain,
+			cfg.Auth.Cookie.Secure,
+		)
+		m.clientWebAuthnHandler.SetDeviceTrust(deviceTrustSvc)
+	}
+
+	// ADR-0003 PR-D D-6: per-tier dispatcher map on the operator
+	// AuthHandler — that's the instance that owns the single shared
+	// OAuth callback URL registered with each provider. On every
+	// callback it parses the signed-state JWT and looks the tier up in
+	// this map to pick the AuthHandler whose authService should mint
+	// the resulting tokens. Empty/unknown state.tier falls back to
+	// operator (the receiver) so stray pre-cutover flows still resolve.
+	tierDispatch := map[string]*handlers.AuthHandler{
+		services.AudienceOperator: m.operatorAuthHandler,
+		services.AudienceClient:   m.clientAuthHandler,
+	}
+	m.operatorAuthHandler.SetTierDispatch(tierDispatch)
+
+	// Canonical service registrations. After the D-8 cutover the
+	// operator-tier services back the canonical keys — they are the
+	// default an unaware consumer (setup wizard, dev token, middleware
+	// auto-refresh) gets. Audience-aware consumers (onboarding,
+	// compliance audit sink) request the per-tier key directly.
+	deps.Services.Register(module.ServiceAuthService, opBundle.authService)
+	deps.Services.Register(module.ServiceJWTService, operatorJWT)
+	// ADR-0003 PR-D D-10: per-tier JWT services published so audience-
+	// aware consumers (dev token generator) can mint a token stamped
+	// with the matching `aud` claim without poking at tier internals.
+	deps.Services.Register(module.ServiceOperatorJWTService, operatorJWT)
+	deps.Services.Register(module.ServiceClientJWTService, clientJWT)
+	deps.Services.Register(module.ServicePasswordService, passwordSvc)
+	deps.Services.Register(module.ServicePasswordAuthService, opBundle.passwordSvc)
+	deps.Services.Register(module.ServiceSessionRevocation, sessionRevocationSvc)
+	deps.Services.Register(module.ServiceOperatorAuthService, opBundle.authService)
+	deps.Services.Register(module.ServiceOperatorPasswordAuthService, opBundle.passwordSvc)
+	deps.Services.Register(module.ServiceClientAuthService, clBundle.authService)
+	deps.Services.Register(module.ServiceClientPasswordAuthService, clBundle.passwordSvc)
+	// Phase 7: publish the policy reader so non-auth callers (operator
+	// IP-gate middleware, future admin tooling) can hit the live
+	// admin-managed config without reaching into auth-module internals.
+	deps.Services.Register(module.ServiceAuthPolicy, authPolicy)
+
+	// Session-risk lookup: resolves the most recent risk score for a
+	// sid against the auth_sessions collections. Sessions are tier-
+	// scoped (operator_sessions vs client_sessions) but the sid
+	// namespace is global, so the lookup tries operator first and
+	// falls through to client. A nil error with score==0 is legitimate
 	// (session absent, terminated, or scorer not yet populated) —
 	// callers treat it as zero risk and fail open.
+	operatorSessions := opBundle.authSessionRepo
+	clientSessions := clBundle.authSessionRepo
 	var sessionRiskLookup authMiddleware.SessionRiskLookup = func(ctx context.Context, sessionID string) (float64, error) {
 		if sessionID == "" {
 			return 0, nil
 		}
-		session, err := authSessionRepo.GetByUUID(ctx, sessionID)
+		if session, err := operatorSessions.GetByUUID(ctx, sessionID); err != nil {
+			return 0, err
+		} else if session != nil {
+			return session.RiskScore, nil
+		}
+		session, err := clientSessions.GetByUUID(ctx, sessionID)
 		if err != nil {
 			return 0, err
 		}
@@ -480,14 +892,23 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 	}
 	deps.Services.Register(module.ServiceSessionRiskLookup, sessionRiskLookup)
 
-	// Register the auth PII producer with the DSR registry pre-created in
-	// main.go. Registers even when the registry is absent so the main
-	// path stays uniform — the helper is a no-op when the key is missing.
-	// Reuses the SecurityEventService instance hoisted above for the
-	// suspicious-login notifier so the user-facing security history and
-	// the DSR export read the same collection.
+	// Register one PII producer per tier with the DSR registry. Each
+	// producer reports tier-correct collection names in the DSR audit
+	// row. The registry tolerates missing producers — a deployment
+	// without compliance just skips registration silently.
 	if reg, ok := module.GetTyped[*iface.PIIProducerRegistry](deps.Services, module.ServicePIIProducerRegistry); ok {
-		reg.Register(services.NewPIIProducer(refreshTokenRepo, authSessionRepo, emailTokenRepo, mfaFactorRepo, securityEventSvc, deviceTrustRepo))
+		reg.Register(services.NewPIIProducer(
+			opBundle.refreshTokenRepo, opBundle.authSessionRepo, opBundle.emailTokenRepo, opBundle.mfaFactorRepo,
+			securityEventSvc, deviceTrustRepo,
+			models.OperatorRefreshTokensCollection, models.OperatorSessionsCollection,
+			models.OperatorEmailTokensCollection, models.OperatorMFAFactorsCollection,
+		))
+		reg.Register(services.NewPIIProducer(
+			clBundle.refreshTokenRepo, clBundle.authSessionRepo, clBundle.emailTokenRepo, clBundle.mfaFactorRepo,
+			securityEventSvc, deviceTrustRepo,
+			models.ClientRefreshTokensCollection, models.ClientSessionsCollection,
+			models.ClientEmailTokensCollection, models.ClientMFAFactorsCollection,
+		))
 	}
 
 	return nil
@@ -583,105 +1004,192 @@ func resolveWebAuthnRP(frontendURL string) (string, []string) {
 	return rpID, origins
 }
 
-// webauthnAvailabilityChecker adapts the WebAuthnService to the smaller
-// HasWebAuthnCredentials interface that the password / OAuth login services
-// consume. The narrow shape keeps service-to-service coupling minimal —
-// the login services don't need to know about register/verify ceremonies.
-type webauthnAvailabilityChecker struct {
-	svc services.WebAuthnService
-}
-
-func (c webauthnAvailabilityChecker) HasWebAuthnCredentials(ctx context.Context, userUUID string) bool {
-	if c.svc == nil {
-		return false
-	}
-	ok, _ := c.svc.HasCredentials(ctx, userUUID)
-	return ok
-}
-
 func (m *AuthModule) RegisterRoutes(ri *module.RouteInfo) {
-	// Auth has both public and protected routes
-	protectedAPI := humachi.New(ri.Operator.ProtectedRouter, ri.APIConfig)
-	m.authHandler.RegisterRoutes(ri.Operator.PublicAPI, protectedAPI, ri.Router, ri.Operator.ProtectedRouter)
+	// ADR-0003 PR-D D-8: only audience-split mounts survive. The
+	// operator AuthHandler also owns the single shared OAuth callback
+	// URL (RegisterOAuthRoutes), since the IdP has one registered
+	// redirect URI per provider; the callback's signed-state JWT
+	// carries the audience tier and dispatches to the matching
+	// authService.
 
-	// Password auth endpoints: register/login/verify/reset/forgot live on the
-	// public API; change-password is protected and runs without an org
-	// context (it's a user self-service flow).
-	if m.passwordHandler != nil {
-		m.passwordHandler.RegisterPublicRoutes(ri.Operator.PublicAPI)
+	operatorProtectedAPI := humachi.New(ri.Operator.ProtectedRouter, ri.APIConfig)
+
+	// Operator OAuth callback (the single dispatcher) + operator
+	// tier-mountable routes (refresh / refresh-cookie / logout / me) +
+	// per-audience OAuth start endpoints stamped with tier=operator.
+	m.operatorAuthHandler.RegisterOAuthRoutes(ri.Operator.PublicAPI, operatorProtectedAPI, ri.Router, ri.Operator.ProtectedRouter)
+	m.operatorAuthHandler.RegisterTierMountableRoutes(ri.Operator.PublicAPI, operatorProtectedAPI, ri.Router, handlers.OperatorMount)
+	m.operatorAuthHandler.RegisterOAuthStartRoutes(ri.Operator.PublicAPI, handlers.OperatorMount)
+
+	// Operator password auth: register/login/verify/reset/forgot are
+	// public; change-password is protected and runs without an org
+	// context (user self-service).
+	m.operatorPasswordHandler.RegisterPublicRoutes(ri.Operator.PublicAPI, handlers.OperatorMount)
+	ri.Operator.ProtectedRouter.Group(func(r chi.Router) {
+		r.Use(ri.Operator.AuthMW.RequireGlobal())
+		api := humachi.New(r, ri.APIConfig)
+		m.operatorPasswordHandler.RegisterProtectedRoutes(api, handlers.OperatorMount)
+	})
+
+	// Operator MFA endpoints split into four halves:
+	//   - public: /v1/auth/operator/mfa/login/verify completes an in-
+	//     flight login (caller has a challengeId, not yet a bearer).
+	//   - protected (no step-up): enroll / status / verify.
+	//   - protected (step-up): /v1/auth/operator/me/mfa/remove —
+	//     dropping your own second factor is catastrophic, demand a
+	//     <5min OTP proof.
+	//   - admin (step-up): /v1/admin/users/{id}/mfa/reset — admin reset
+	//     stays under /v1/admin/... since admin is operator-tier by
+	//     definition.
+	m.operatorMFAHandler.RegisterPublicRoutes(ri.Operator.PublicAPI, handlers.OperatorMount)
+	ri.Operator.ProtectedRouter.Group(func(r chi.Router) {
+		r.Use(ri.Operator.AuthMW.RequireGlobal())
+		api := humachi.New(r, ri.APIConfig)
+		m.operatorMFAHandler.RegisterProtectedRoutes(api, handlers.OperatorMount)
+	})
+	ri.Operator.ProtectedRouter.Group(func(r chi.Router) {
+		r.Use(ri.Operator.AuthMW.RequireGlobal())
+		r.Use(ri.Operator.AuthMW.RequireStepUp(5 * time.Minute))
+		api := humachi.New(r, ri.APIConfig)
+		m.operatorMFAHandler.RegisterStepUpRoutes(api, handlers.OperatorMount)
+	})
+	ri.Operator.ProtectedRouter.Group(func(r chi.Router) {
+		r.Use(ri.Operator.AuthMW.RequireSystemPermission("system.users.mfa_reset"))
+		r.Use(ri.Operator.AuthMW.RequireStepUp(5 * time.Minute))
+		api := humachi.New(r, ri.APIConfig)
+		m.operatorMFAHandler.RegisterAdminRoutes(api)
+		// Tier-aware client-user MFA reset — same gate, different
+		// path, different handler instance. Mounted on the operator
+		// router because admins act from the operator console.
+		m.clientMFAHandler.RegisterClientAdminRoutes(api)
+	})
+
+	// Admin user-auth surface — four endpoints under
+	// /v1/admin/users/{userId}/... each gated by its own permission so
+	// the audit trail stays per-action. Step-up applies only to OAuth
+	// unlink (credential removal); password-reset / resend-verification
+	// dispatch a notification but do not read or remove a secret.
+	ri.Operator.ProtectedRouter.Group(func(r chi.Router) {
+		r.Use(ri.Operator.AuthMW.RequireSystemPermission("system.users.admin"))
+		api := humachi.New(r, ri.APIConfig)
+		m.operatorAdminUserAuthHandler.RegisterReadAuthMethodsRoute(api)
+	})
+	ri.Operator.ProtectedRouter.Group(func(r chi.Router) {
+		r.Use(ri.Operator.AuthMW.RequireSystemPermission("system.users.password_reset"))
+		api := humachi.New(r, ri.APIConfig)
+		m.operatorAdminUserAuthHandler.RegisterPasswordResetRoute(api)
+	})
+	ri.Operator.ProtectedRouter.Group(func(r chi.Router) {
+		r.Use(ri.Operator.AuthMW.RequireSystemPermission("system.users.email_verify_resend"))
+		api := humachi.New(r, ri.APIConfig)
+		m.operatorAdminUserAuthHandler.RegisterResendVerificationRoute(api)
+	})
+	ri.Operator.ProtectedRouter.Group(func(r chi.Router) {
+		r.Use(ri.Operator.AuthMW.RequireSystemPermission("system.users.oauth_unlink"))
+		r.Use(ri.Operator.AuthMW.RequireStepUp(5 * time.Minute))
+		api := humachi.New(r, ri.APIConfig)
+		m.operatorAdminUserAuthHandler.RegisterOAuthUnlinkRoute(api)
+	})
+
+	// Self-service security-center surface — operator tier this
+	// iteration. Read endpoints under RequireGlobal(); destructive
+	// endpoints (OAuth unlink, session revoke, revoke-all) under
+	// RequireGlobal()+RequireStepUp(5m) so a fresh MFA proof is
+	// required for credential / session removal.
+	ri.Operator.ProtectedRouter.Group(func(r chi.Router) {
+		r.Use(ri.Operator.AuthMW.RequireGlobal())
+		api := humachi.New(r, ri.APIConfig)
+		m.operatorSelfUserAuthHandler.RegisterReadRoutes(api, handlers.OperatorMount)
+	})
+	ri.Operator.ProtectedRouter.Group(func(r chi.Router) {
+		r.Use(ri.Operator.AuthMW.RequireGlobal())
+		r.Use(ri.Operator.AuthMW.RequireStepUp(5 * time.Minute))
+		api := humachi.New(r, ri.APIConfig)
+		m.operatorSelfUserAuthHandler.RegisterStepUpRoutes(api, handlers.OperatorMount)
+		// Linking a new OAuth identity adds a credential, same shape
+		// as unlinking removes one — apply the same RequireStepUp(5m)
+		// gate so a hijacked session can't silently attach a
+		// persistence vector.
+		m.operatorAuthHandler.RegisterOAuthLinkRoute(api, handlers.OperatorMount)
+	})
+
+	// Operator WebAuthn — public/protected/step-up halves mirror the
+	// TOTP layout. Nil handler means passkeys are disabled at boot.
+	if m.operatorWebAuthnHandler != nil {
+		m.operatorWebAuthnHandler.RegisterPublicRoutes(ri.Operator.PublicAPI, handlers.OperatorMount)
 		ri.Operator.ProtectedRouter.Group(func(r chi.Router) {
 			r.Use(ri.Operator.AuthMW.RequireGlobal())
 			api := humachi.New(r, ri.APIConfig)
-			m.passwordHandler.RegisterProtectedRoutes(api)
-		})
-	}
-
-	// MFA endpoints split into four halves:
-	//   - public: /v1/auth/mfa/login/verify completes an in-flight login
-	//     (the caller has a challengeId, not yet a bearer token).
-	//   - protected (no step-up): enroll/status/verify — RequireGlobal()
-	//     so the caller is already authenticated with a primary factor.
-	//   - protected (step-up): /v1/auth/me/mfa/remove — dropping your own
-	//     second factor is catastrophic, so demand a <5min OTP proof.
-	//   - admin (step-up): /v1/admin/users/{id}/mfa/reset — resetting
-	//     another user's MFA lets the admin enroll their own device, so
-	//     step-up here gates the same move.
-	if m.mfaHandler != nil {
-		m.mfaHandler.RegisterPublicRoutes(ri.Operator.PublicAPI)
-		ri.Operator.ProtectedRouter.Group(func(r chi.Router) {
-			r.Use(ri.Operator.AuthMW.RequireGlobal())
-			api := humachi.New(r, ri.APIConfig)
-			m.mfaHandler.RegisterProtectedRoutes(api)
+			m.operatorWebAuthnHandler.RegisterProtectedRoutes(api, handlers.OperatorMount)
 		})
 		ri.Operator.ProtectedRouter.Group(func(r chi.Router) {
 			r.Use(ri.Operator.AuthMW.RequireGlobal())
 			r.Use(ri.Operator.AuthMW.RequireStepUp(5 * time.Minute))
 			api := humachi.New(r, ri.APIConfig)
-			m.mfaHandler.RegisterStepUpRoutes(api)
-		})
-		ri.Operator.ProtectedRouter.Group(func(r chi.Router) {
-			r.Use(ri.Operator.AuthMW.RequireSystemPermission("system.users.mfa_reset"))
-			r.Use(ri.Operator.AuthMW.RequireStepUp(5 * time.Minute))
-			api := humachi.New(r, ri.APIConfig)
-			m.mfaHandler.RegisterAdminRoutes(api)
+			m.operatorWebAuthnHandler.RegisterStepUpRoutes(api, handlers.OperatorMount)
 		})
 	}
 
-	// WebAuthn endpoints split into three halves, mirroring the TOTP layout:
-	//   - public: /v1/auth/mfa/webauthn/login/{begin,finish} complete a
-	//     paused password/OAuth login that the partial response flagged with
-	//     webauthnAvailable=true.
-	//   - protected (no step-up): register/verify/list — RequireGlobal()
-	//     so the caller is authenticated with a primary factor.
-	//   - protected (step-up): DELETE credentials — pulling a passkey is
-	//     irreversible so demand a <5min OTP/WebAuthn proof first.
-	if m.webauthnHandler != nil {
-		m.webauthnHandler.RegisterPublicRoutes(ri.Operator.PublicAPI)
-		ri.Operator.ProtectedRouter.Group(func(r chi.Router) {
-			r.Use(ri.Operator.AuthMW.RequireGlobal())
-			api := humachi.New(r, ri.APIConfig)
-			m.webauthnHandler.RegisterProtectedRoutes(api)
-		})
-		ri.Operator.ProtectedRouter.Group(func(r chi.Router) {
-			r.Use(ri.Operator.AuthMW.RequireGlobal())
-			r.Use(ri.Operator.AuthMW.RequireStepUp(5 * time.Minute))
-			api := humachi.New(r, ri.APIConfig)
-			m.webauthnHandler.RegisterStepUpRoutes(api)
-		})
-	}
+	// Device-trust self-service on the operator mount. Single non-tier-
+	// split handler reused under both tier prefixes.
+	ri.Operator.ProtectedRouter.Group(func(r chi.Router) {
+		r.Use(ri.Operator.AuthMW.RequireGlobal())
+		api := humachi.New(r, ri.APIConfig)
+		m.deviceTrustHandler.RegisterRoutes(api, handlers.OperatorMount)
+	})
 
-	// Device-trust self-service (Section C item #3):
-	//   GET    /v1/auth/me/devices/trust          — list active grants
-	//   DELETE /v1/auth/me/devices/trust/{id}     — revoke one
-	//   DELETE /v1/auth/me/devices/trust          — revoke all
-	// All three are protected self-service: RequireGlobal() gates on
-	// authenticated session, no org context needed.
-	if m.deviceTrustHandler != nil {
-		ri.Operator.ProtectedRouter.Group(func(r chi.Router) {
-			r.Use(ri.Operator.AuthMW.RequireGlobal())
+	// ADR-0003 PR-D D-5: client-tier auth paths under
+	// /v1/auth/client/... — mounted on the client host mux. Each
+	// client-bound handler reads/writes through client_* collections
+	// and mints aud=client tokens via the client-audience JWT service
+	// constructed in Init. OAuth callbacks are NOT mounted here — the
+	// operator dispatcher above owns the single shared callback URL
+	// and dispatches client-tier flows back to the client authService
+	// via the tierDispatch map. Admin paths stay operator-only.
+	if ri.Client == nil {
+		return
+	}
+	clientProtectedAPI := humachi.New(ri.Client.ProtectedRouter, ri.APIConfig)
+	if ri.ClientRouter != nil {
+		m.clientAuthHandler.RegisterTierMountableRoutes(ri.Client.PublicAPI, clientProtectedAPI, ri.ClientRouter, handlers.ClientMount)
+		m.clientAuthHandler.RegisterOAuthStartRoutes(ri.Client.PublicAPI, handlers.ClientMount)
+	}
+	m.clientPasswordHandler.RegisterPublicRoutes(ri.Client.PublicAPI, handlers.ClientMount)
+	ri.Client.ProtectedRouter.Group(func(r chi.Router) {
+		r.Use(ri.Client.AuthMW.RequireGlobal())
+		api := humachi.New(r, ri.APIConfig)
+		m.clientPasswordHandler.RegisterProtectedRoutes(api, handlers.ClientMount)
+	})
+	m.clientMFAHandler.RegisterPublicRoutes(ri.Client.PublicAPI, handlers.ClientMount)
+	ri.Client.ProtectedRouter.Group(func(r chi.Router) {
+		r.Use(ri.Client.AuthMW.RequireGlobal())
+		api := humachi.New(r, ri.APIConfig)
+		m.clientMFAHandler.RegisterProtectedRoutes(api, handlers.ClientMount)
+	})
+	ri.Client.ProtectedRouter.Group(func(r chi.Router) {
+		r.Use(ri.Client.AuthMW.RequireGlobal())
+		r.Use(ri.Client.AuthMW.RequireStepUp(5 * time.Minute))
+		api := humachi.New(r, ri.APIConfig)
+		m.clientMFAHandler.RegisterStepUpRoutes(api, handlers.ClientMount)
+	})
+	if m.clientWebAuthnHandler != nil {
+		m.clientWebAuthnHandler.RegisterPublicRoutes(ri.Client.PublicAPI, handlers.ClientMount)
+		ri.Client.ProtectedRouter.Group(func(r chi.Router) {
+			r.Use(ri.Client.AuthMW.RequireGlobal())
 			api := humachi.New(r, ri.APIConfig)
-			m.deviceTrustHandler.RegisterRoutes(api)
+			m.clientWebAuthnHandler.RegisterProtectedRoutes(api, handlers.ClientMount)
+		})
+		ri.Client.ProtectedRouter.Group(func(r chi.Router) {
+			r.Use(ri.Client.AuthMW.RequireGlobal())
+			r.Use(ri.Client.AuthMW.RequireStepUp(5 * time.Minute))
+			api := humachi.New(r, ri.APIConfig)
+			m.clientWebAuthnHandler.RegisterStepUpRoutes(api, handlers.ClientMount)
 		})
 	}
+	ri.Client.ProtectedRouter.Group(func(r chi.Router) {
+		r.Use(ri.Client.AuthMW.RequireGlobal())
+		api := humachi.New(r, ri.APIConfig)
+		m.deviceTrustHandler.RegisterRoutes(api, handlers.ClientMount)
+	})
 }
 

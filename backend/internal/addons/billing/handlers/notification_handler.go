@@ -71,7 +71,10 @@ type MarkProcessedResponse struct {
 }
 
 // GetSummaryRequest represents the request to get notification summary
-type GetSummaryRequest struct{}
+type GetSummaryRequest struct {
+	FromDate string `query:"fromDate" doc:"Filter notifications from this date (YYYY-MM-DD)"`
+	ToDate   string `query:"toDate" doc:"Filter notifications to this date (YYYY-MM-DD)"`
+}
 
 // GetSummaryResponse represents the response with notification summary
 type GetSummaryResponse struct {
@@ -163,7 +166,20 @@ func (h *NotificationHandler) MarkAsProcessed(ctx context.Context, req *MarkProc
 
 // GetSummary returns notification summary statistics
 func (h *NotificationHandler) GetSummary(ctx context.Context, req *GetSummaryRequest) (*GetSummaryResponse, error) {
-	summary, err := h.notificationService.GetSummary(ctx)
+	var fromDate, toDate *time.Time
+	if req.FromDate != "" {
+		if parsed, err := time.Parse("2006-01-02", req.FromDate); err == nil {
+			fromDate = &parsed
+		}
+	}
+	if req.ToDate != "" {
+		if parsed, err := time.Parse("2006-01-02", req.ToDate); err == nil {
+			end := parsed.Add(23*time.Hour + 59*time.Minute + 59*time.Second)
+			toDate = &end
+		}
+	}
+
+	summary, err := h.notificationService.GetSummary(ctx, fromDate, toDate)
 	if err != nil {
 		return nil, huma.Error500InternalServerError("Failed to get notification summary", err)
 	}

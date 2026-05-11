@@ -11,13 +11,10 @@ package iface
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"time"
 
-	aiProviders "github.com/orkestra/backend/internal/addons/aimodels/providers"
-	docModels "github.com/orkestra/backend/internal/addons/documents/models"
-	graphModels "github.com/orkestra/backend/internal/addons/graph/models"
-	ragModels "github.com/orkestra/backend/internal/addons/rag/models"
 	userModels "github.com/orkestra/backend/internal/core/user/models"
 )
 
@@ -47,7 +44,19 @@ type UserProvider interface {
 	UpdateUser(ctx context.Context, id string, input *userModels.UpdateUserInput) (*userModels.UserManagementResponse, error)
 	UpdateUserLastLogin(ctx context.Context, id string) error
 	DeleteUser(ctx context.Context, id string) error
+	// SoftDeleteAndAliasEmail soft-deletes the user and renames the
+	// email to a one-shot alias so the unique email index no longer
+	// blocks a fresh signup. Used by the tenant cascade-delete hook
+	// when an external Tier-2 tenant is dropped and its owner has no
+	// other live memberships. Idempotent.
+	SoftDeleteAndAliasEmail(ctx context.Context, userUUID string) error
 	GetUserOAuthLinks(ctx context.Context, userUUID string) ([]userModels.OAuthLink, error)
+	// AddOAuthLinkToUser appends an OAuth identity to the user's
+	// embedded OAuthLinks slice. Used by the self-service "add a
+	// sign-in provider" flow on /user/security and by any future
+	// caller that needs to bind a new identity to an existing
+	// account. Mirrors RemoveOAuthLinkFromUser.
+	AddOAuthLinkToUser(ctx context.Context, userUUID string, link userModels.OAuthLink) error
 	RemoveOAuthLinkFromUser(ctx context.Context, userUUID string, provider userModels.OAuthProvider, providerID string) error
 	SetPrimaryOAuthLink(ctx context.Context, userUUID string, provider userModels.OAuthProvider, providerID string) error
 	GetUserCount(ctx context.Context, filters *userModels.UserFilters) (int64, error)
@@ -102,12 +111,39 @@ type JWTProvider interface {
 }
 
 // ---------------------------------------------------------------------------
+// PasswordHasher — consumed by: user (admin-direct client-user create)
+// Slim view of auth.PasswordService for callers that only need to hash
+// and policy-check a plaintext password. Auth's PasswordService satisfies
+// this via structural typing.
+// ---------------------------------------------------------------------------
+
+type PasswordHasher interface {
+	Hash(plaintext string) (string, error)
+	ValidatePolicy(ctx context.Context, plaintext, email string) error
+}
+
+// ---------------------------------------------------------------------------
+// AdminAuthInviter — consumed by: user (admin-triggered Tier-2 flows)
+// Slim view of auth.PasswordAuthService for the admin "Resend
+// verification" / "Send password reset" / "Send invite" buttons on the
+// client-user detail page. Each tier's *services.PasswordAuthService
+// satisfies this via structural typing — the user module fetches the
+// client-tier instance from the registry by key.
+// ---------------------------------------------------------------------------
+
+type AdminAuthInviter interface {
+	AdminSendInvite(ctx context.Context, userUUID, inviterName string) error
+	AdminResendVerification(ctx context.Context, userUUID string) error
+	AdminTriggerPasswordReset(ctx context.Context, userUUID string) error
+}
+
+// ---------------------------------------------------------------------------
 // PDFProvider — consumed by: billing
 // Only the methods billing's invoice service calls.
 // ---------------------------------------------------------------------------
 
 type PDFProvider interface {
-	GenerateInvoicePDF(ctx context.Context, invoiceData map[string]interface{}, templateUUID string, generatedBy string) (*docModels.GeneratedDocument, error)
+	GenerateInvoicePDF(ctx context.Context, invoiceData map[string]interface{}, templateUUID string, generatedBy string) (*GeneratedDocument, error)
 	GetDocumentContent(ctx context.Context, uuid string) ([]byte, string, error)
 }
 
@@ -117,8 +153,8 @@ type PDFProvider interface {
 // ---------------------------------------------------------------------------
 
 type GraphProvider interface {
-	ExecuteRead(ctx context.Context, database string, cypher string, params map[string]interface{}) (*graphModels.QueryResult, error)
-	ExecuteWrite(ctx context.Context, database string, cypher string, params map[string]interface{}) (*graphModels.QueryResult, error)
+	ExecuteRead(ctx context.Context, database string, cypher string, params map[string]interface{}) (*QueryResult, error)
+	ExecuteWrite(ctx context.Context, database string, cypher string, params map[string]interface{}) (*QueryResult, error)
 	ExecuteAutoCommit(ctx context.Context, database string, cypher string, params map[string]interface{}) error
 }
 
@@ -128,10 +164,10 @@ type GraphProvider interface {
 // ---------------------------------------------------------------------------
 
 type AIModelProvider interface {
-	GetDefaultEmbeddingProvider(ctx context.Context) (aiProviders.EmbeddingProvider, error)
-	GetDefaultLLMProvider(ctx context.Context) (aiProviders.LLMProvider, error)
-	GetLLMProvider(ctx context.Context, uuid string) (aiProviders.LLMProvider, error)
-	GetEmbeddingProvider(ctx context.Context, uuid string) (aiProviders.EmbeddingProvider, error)
+	GetDefaultEmbeddingProvider(ctx context.Context) (EmbeddingProvider, error)
+	GetDefaultLLMProvider(ctx context.Context) (LLMProvider, error)
+	GetLLMProvider(ctx context.Context, uuid string) (LLMProvider, error)
+	GetEmbeddingProvider(ctx context.Context, uuid string) (EmbeddingProvider, error)
 	// GetDefaultLLMConfig returns the raw configuration of the default LLM
 	// model (provider name, model name, API key, base URL). Consumed by
 	// modules that need the underlying credentials, e.g. the agents
@@ -156,7 +192,7 @@ type LLMConfig struct {
 // ---------------------------------------------------------------------------
 
 type RAGQueryProvider interface {
-	Query(ctx context.Context, question string, topK int, minScore float64, isoStandard, llmOverrideUUID, requirementLevel, nodeType, retrievalMode string, documentUUIDs []string) (*ragModels.RAGQueryResponse, error)
+	Query(ctx context.Context, question string, topK int, minScore float64, isoStandard, llmOverrideUUID, requirementLevel, nodeType, retrievalMode string, documentUUIDs []string) (*RAGQueryResponse, error)
 }
 
 // ---------------------------------------------------------------------------
@@ -247,6 +283,15 @@ const (
 	TenantStatusPurged       = "purged"
 )
 
+// SignupChannelSelfServe mirrors tenant/models.SignupChannelSelfServe.
+// Redeclared here so consumers (impersonation bypass, audit emitters)
+// reading iface.Tenant.SignupChannel can match against the canonical
+// "personal tenant" predicate (IsCompany=false + SignupChannel=self_serve)
+// without importing the tenant module.
+const (
+	SignupChannelSelfServe = "self_serve"
+)
+
 // Tenant is the DTO shape the tenant module exposes across the module boundary.
 type Tenant struct {
 	UUID             string
@@ -270,6 +315,19 @@ type Tenant struct {
 	FiscalCode       string
 	Country          string
 	StripeCustomerID string
+
+	// IsCompany discriminates the legal-entity shape (false = natural person /
+	// sole-proprietor, true = corporate entity). Combined with SignupChannel,
+	// it identifies the canonical "personal tenant" predicate
+	// (IsCompany=false + SignupChannel=SignupChannelSelfServe) consumed by
+	// the impersonation bypass to require MFA step-up and to split the
+	// admin.tenant.impersonate audit action between .personal and .business.
+	IsCompany bool
+	// SignupChannel records how the tenant was created — see the
+	// tenant/models.SignupChannel* constants. Mirrored here so consumers
+	// can match against SignupChannelSelfServe without importing the
+	// tenant module.
+	SignupChannel string
 }
 
 // TenantMembership is a user's membership in a tenant — identifying the
@@ -287,61 +345,142 @@ type TenantProvider interface {
 	GetTenant(ctx context.Context, tenantUUID string) (*Tenant, error)
 	ListUserMemberships(ctx context.Context, userUUID string) ([]TenantMembership, error)
 	IsMember(ctx context.Context, userUUID, tenantUUID string) (bool, error)
-	// HasCapability reports whether the tenant currently holds an active
-	// entitlement to the capability ID. Backed by the tenant_entitlements
-	// projection (Phase 2). Returns false if the tenant has no active
-	// entitlement, regardless of whether the capability ID is known in the
-	// catalog — the catalog is advisory, the projection is authoritative.
-	HasCapability(ctx context.Context, tenantUUID, capabilityID string) (bool, error)
-	// GrantCapability creates an active entitlement for (tenantUUID, capID).
-	// If an active entitlement already exists for that pair, it is revoked
-	// first so the one-active-per-(tenant,capability) invariant holds. Safe
-	// to replay — the same input produces the same effective state, with a
-	// fresh audit row.
-	GrantCapability(ctx context.Context, in GrantCapabilityInput) error
-	// RevokeCapability marks the active entitlement for (tenantUUID, capID)
-	// as revoked. Idempotent: a no-op if no active row exists.
-	RevokeCapability(ctx context.Context, tenantUUID, capabilityID string) error
-	// ListCapabilityIDs returns the capability IDs the tenant currently
-	// holds active entitlements for, deduplicated and in deterministic
-	// order. Thin projection of ListEntitlements for consumers (e.g. the
-	// Cedar engine's principal builder) that only need the IDs.
-	ListCapabilityIDs(ctx context.Context, tenantUUID string) ([]string, error)
-	// ProvisionExternalTenant is the onboarding entry point for anonymous
-	// self-service signup. Creates a Tier-2 tenant owned by the given user
-	// in the provisioning lifecycle state (kind=external, signup=self_serve).
-	// A follow-up activate-on-verify hook flips the status to active after
-	// the owner has completed email verification. Distinct from the
-	// admin-facing CreateTenant surface — different defaults, narrower
-	// input shape.
-	ProvisionExternalTenant(ctx context.Context, ownerUserUUID string, in OnboardingTenantInput) (*Tenant, error)
 	// ActivateTenant transitions a tenant from `provisioning` to `active`.
 	// Idempotent: calling it on an already-active tenant is a no-op on the
-	// status field. The onboarding activate-on-verify hook uses this after
-	// the owner has completed email verification. Does not validate the
-	// previous state — admin callers can also use it to unsuspend, though
-	// that is not the primary use case and richer transitions live on the
-	// concrete tenant service.
+	// status field. Does not validate the previous state — admin callers
+	// can also use it to unsuspend, though that is not the primary use
+	// case and richer transitions live on the concrete tenant service.
 	ActivateTenant(ctx context.Context, tenantUUID string) error
 	// SetTenantStripeCustomerID persists the Stripe customer identifier the
 	// payment provider returned for the tenant. Called on the first charge
 	// for an external tenant so subsequent renewal cycles skip customer
 	// creation. Idempotent: re-applying the same value is a no-op.
 	SetTenantStripeCustomerID(ctx context.Context, tenantUUID, stripeCustomerID string) error
+	// EnsureTenantForUser is the lazy-provisioning seam introduced by the
+	// Unified Client Aggregate refactor (Phase 1). It returns the user's
+	// existing personal tenant — uniquely identified by
+	// (Kind=external, IsCompany=false, SignupChannel=self_serve,
+	// OwnerUserUUID=userUUID) — or creates one when none exists, with
+	// Name=user.FullName (the User aggregate's display field). Idempotent:
+	// concurrent calls collapse onto the first row that wins the slug-
+	// uniqueness race; later callers receive the existing personal tenant.
+	// Phase 2 wires this into subscriptions/payments callers behind a
+	// feature flag; Phase 3 flips the flag and migrates legacy clientbilling
+	// rows onto the resulting personal tenants.
+	EnsureTenantForUser(ctx context.Context, userUUID string) (*Tenant, error)
 }
 
-// OnboardingTenantInput is the cross-module payload for self-service
-// external-tenant creation. Kept minimal: anonymous signups only carry
-// the bare identifiers; richer fields (legal name, VAT, address) are
-// collected later in the onboarding wizard.
-type OnboardingTenantInput struct {
-	Name string
-	// Slug is optional — when empty, the tenant service derives it from
-	// Name via the same slugifier the authenticated create path uses.
-	Slug string
-	// Plan is optional — defaults to "free" when empty. Entitlements are
-	// driven by subscriptions, not plan name, so this is a label only.
-	Plan string
+// ---------------------------------------------------------------------------
+// BillingTenantProvider — consumed by: billing (Phase 5), payments self-
+// service (Phase 5), invoice send path.
+//
+// Owns the billing-party resolution algorithm for the Unified Client Aggregate
+// (Phase 1): walk up Tenant.ParentTenantUUID until a tenant with FatturaPA
+// fields is found, then return a snapshot the consumer can stamp onto an
+// invoice's CessionarioCommittente. Subscriptions stay attached to the
+// consuming workspace; invoicing rolls up to the right legal entity in the
+// hierarchy.
+//
+// Phase 1 wires the resolver but does not switch any consumer onto it —
+// billing.invoice_service still uses the legacy billing.Customer lookup.
+// Phase 5 deletes Customer and points Send at this seam.
+// ---------------------------------------------------------------------------
+
+// BillingParty is the snapshot the billing module stamps onto an invoice
+// when it would otherwise reach for a billing.Customer row. Flat by design:
+// invoice send is a one-way snapshot for legal-immutability reasons (FatturaPA
+// requires the party fields to remain stable after issuance). Mirrors the
+// fields the FatturaPA XML's CessionarioCommittente section carries.
+type BillingParty struct {
+	// TenantUUID is the tenant the resolver landed on after walking up the
+	// parent chain. May differ from the requested tenantUUID when the input
+	// is a division and billing rolls up to its parent.
+	TenantUUID string
+	// LegalName is the canonical party name. For IsCompany=true this is the
+	// corporate Denominazione; for IsCompany=false the resolver falls back to
+	// the owner User's FullName (rendered server-side; see ResolveBillingParty
+	// implementation note).
+	LegalName  string
+	IsCompany  bool
+	VATNumber  string
+	FiscalCode string
+	Country    string
+	Email      string
+	Address    BillingAddress
+	FatturaPA  FatturaPAProfile
+}
+
+// BillingAddress is the snapshot variant of TenantAddress kept inside iface
+// so consumers don't reach into the tenant module's models. Field shape
+// matches tenant/models.TenantAddress one-for-one.
+type BillingAddress struct {
+	Line1      string
+	Line2      string
+	City       string
+	Province   string
+	PostalCode string
+	Country    string
+}
+
+// FatturaPAProfile is the cross-module snapshot of tenant/models.FatturaPAProfile.
+// Same field shape, repeated here so consumers (billing, payments) don't
+// import the tenant model package.
+type FatturaPAProfile struct {
+	CodiceDestinatario string
+	PECDestinatario    string
+	IsPA               bool
+	CodiceUfficio      string
+	RiferimentoAmm     string
+	ConvenzioneNumero  string
+}
+
+// ErrBillingPartyNotConfigured is the sentinel returned by ResolveBillingParty
+// when neither the requested tenant nor any ancestor carries FatturaPA fields
+// — i.e. the tenant is not yet ready to be billed via FatturaPA. Handlers map
+// this to 422 so the SPA can prompt the operator to fill in the billing
+// identity before sending an invoice.
+var ErrBillingPartyNotConfigured = errors.New("billing: tenant has no FatturaPA profile in its ancestor chain")
+
+// BillingTenantProvider resolves the legal-entity tenant a Tier-2 client
+// (or one of its divisions) bills under, plus the snapshot the billing send
+// path needs.
+type BillingTenantProvider interface {
+	// ResolveBillingParty walks up the parent chain from tenantUUID until it
+	// finds a tenant whose IsItalianBillable=true AND FatturaPA carries at
+	// least one routing field (CodiceDestinatario or PECDestinatario). Returns
+	// ErrBillingPartyNotConfigured when the chain bottoms out with no match.
+	ResolveBillingParty(ctx context.Context, tenantUUID string) (*BillingParty, error)
+}
+
+// ---------------------------------------------------------------------------
+// AccessProvider — consumed by: middleware (RequireCapability), authz
+// (Cedar principal builder), subscriptions (entitlement syncer).
+//
+// Owns the capability-entitlements projection. Entitlements are keyed by
+// tenant UUID — every billable principal is a Tenant aggregate after the
+// Unified Client Aggregate refactor. Internal operator tenants short-circuit
+// to true: capabilities are the monetization seam for external clients only.
+// ---------------------------------------------------------------------------
+
+type AccessProvider interface {
+	// HasCapability reports whether the tenant currently holds an active
+	// entitlement to the capability ID. Returns false if no active row
+	// exists, regardless of whether the capability ID is known in the
+	// catalog — the catalog is advisory, the projection is authoritative.
+	HasCapability(ctx context.Context, tenantUUID, capabilityID string) (bool, error)
+	// GrantCapability creates an active entitlement for (tenant, capID).
+	// If an active entitlement already exists for that pair, it is revoked
+	// first so the one-active-per-(tenant, capability) invariant holds.
+	// Safe to replay — the same input produces the same effective state,
+	// with a fresh audit row.
+	GrantCapability(ctx context.Context, in GrantCapabilityInput) error
+	// RevokeCapability marks the active entitlement for (tenant, capID) as
+	// revoked. Idempotent: a no-op if no active row exists.
+	RevokeCapability(ctx context.Context, tenantUUID, capabilityID string) error
+	// ListCapabilityIDs returns the capability IDs the tenant currently
+	// holds active entitlements for, deduplicated and in deterministic
+	// order.
+	ListCapabilityIDs(ctx context.Context, tenantUUID string) ([]string, error)
 }
 
 // GrantCapabilityInput is the cross-module payload for granting a capability
@@ -349,6 +488,8 @@ type OnboardingTenantInput struct {
 // from (subscription row, admin action, trial program) so it can be replayed
 // or revoked by origin.
 type GrantCapabilityInput struct {
+	// TenantUUID is the tenant receiving the grant. Required — empty values
+	// are rejected at the service layer.
 	TenantUUID   string
 	CapabilityID string
 	// Source categorizes the grant. Known values: "subscription", "grant",
@@ -409,9 +550,9 @@ type AuthzProvider interface {
 // ---------------------------------------------------------------------------
 
 type CustomerInput struct {
-	// TenantUUID is the external tenant the customer is being created for.
-	// Echoed into Stripe customer metadata so cross-system reconciliation
-	// can locate the owning tenant from the gateway side.
+	// TenantUUID is the tenant the gateway customer represents. Echoed into
+	// Stripe customer metadata so cross-system reconciliation can locate
+	// the owning tenant from the gateway side.
 	TenantUUID string
 	Email      string
 	Name       string
@@ -437,12 +578,16 @@ type PaymentMethodRef struct {
 type SubscriptionCharge struct {
 	SubscriptionUUID string
 	InvoiceUUID      string // used as idempotency key (provider metadata)
-	Customer         CustomerRef
-	PaymentMethod    *PaymentMethodRef // nil = use default on customer
-	AmountCents      int64
-	Currency         string
-	Description      string
-	Metadata         map[string]string
+	// TenantUUID is the tenant the charge is attributed to. Stamped into
+	// the resulting PaymentIntent metadata so the webhook reconciler can
+	// route events back to the tenant without a join.
+	TenantUUID    string
+	Customer      CustomerRef
+	PaymentMethod *PaymentMethodRef // nil = use default on customer
+	AmountCents   int64
+	Currency      string
+	Description   string
+	Metadata      map[string]string
 }
 
 type ChargeResult struct {
@@ -500,6 +645,52 @@ type PaymentProvider interface {
 	// decodes the raw body into a normalized WebhookEvent. Returns an
 	// error if the signature is invalid.
 	VerifyWebhook(ctx context.Context, rawBody []byte, headers map[string]string) (WebhookEvent, error)
+
+	// CreateCheckoutSession opens a hosted-checkout session in payment mode
+	// for a one-shot charge that also saves the chosen payment method on
+	// the customer for future off-session renewals. The returned URL is the
+	// gateway-hosted page the SPA redirects the user to.
+	CreateCheckoutSession(ctx context.Context, in CheckoutSessionInput) (CheckoutSessionResult, error)
+
+	// CreateSetupCheckoutSession opens a hosted-checkout session in setup
+	// mode — no charge, only collects and stores a payment method on the
+	// customer. Used by the "add card" flow on the client account page.
+	CreateSetupCheckoutSession(ctx context.Context, in SetupCheckoutInput) (CheckoutSessionResult, error)
+}
+
+// CheckoutSessionInput parameterises a payment-mode hosted checkout. The
+// gateway charges Customer for AmountCents in Currency once, surfaces the
+// transaction under the metadata-stamped subscription/invoice, and saves
+// the card off-session so the renewal job can reuse it next cycle.
+type CheckoutSessionInput struct {
+	Customer      CustomerRef
+	AmountCents   int64
+	Currency      string // ISO 4217 (e.g. "EUR")
+	Description   string
+	SuccessURL    string // absolute URL the gateway redirects to on success
+	CancelURL     string // absolute URL the gateway redirects to on cancel
+	CustomerEmail string // optional pre-fill for the checkout email field
+	// Metadata is copied to the underlying PaymentIntent so the existing
+	// webhook reconciler picks up subscriptionUUID/invoiceUUID/tenantUUID
+	// without any new plumbing.
+	Metadata map[string]string
+}
+
+// SetupCheckoutInput parameterises a setup-mode hosted checkout — collects
+// a payment method against Customer with no charge.
+type SetupCheckoutInput struct {
+	Customer      CustomerRef
+	SuccessURL    string
+	CancelURL     string
+	CustomerEmail string
+	Metadata      map[string]string // copied to the underlying SetupIntent
+}
+
+// CheckoutSessionResult is the shape returned to the SPA — the hosted URL
+// to redirect to plus the gateway-side session id for client-side recovery.
+type CheckoutSessionResult struct {
+	SessionID string
+	URL       string
 }
 
 // ---------------------------------------------------------------------------
@@ -545,6 +736,50 @@ type TenantSubscriptionProvider interface {
 }
 
 // ---------------------------------------------------------------------------
+// SelfServiceCheckoutPlanner — consumed by: payments self-service handler.
+//
+// Resolves a subscription UUID into the snapshot the payments module needs
+// to open a hosted Stripe Checkout session: the owning tenant (for the
+// ownership re-check), the pending invoice (for the metadata stamp the
+// existing webhook reconciler keys off), and the catalog tier price + label.
+//
+// Implemented by the subscriptions module and registered under
+// module.ServiceSelfServiceCheckoutPlanner. Optional from payments' point
+// of view — when absent, the checkout-session route returns 503.
+// ---------------------------------------------------------------------------
+
+type CheckoutPlan struct {
+	SubscriptionUUID string
+	// TenantUUID is the tenant owning the subscription. Handlers re-check
+	// ownership (caller is a member of the tenant) before opening the
+	// gateway session.
+	TenantUUID    string
+	ServiceUUID   string
+	ServiceName   string
+	TierCode      string
+	InvoiceUUID   string // pending invoice; required by the webhook reconciler
+	InvoiceNumber string
+	AmountCents   int64
+	Currency      string
+	Description   string // human-readable line for the Checkout page
+}
+
+// SelfServiceCheckoutPlanner translates a subscription UUID into a payable
+// checkout snapshot. Returns ErrCheckoutNoPendingInvoice when the
+// subscription has no invoice in `pending` status — the handler maps that
+// to 409 so the SPA can prompt the user to retry the renewal cycle.
+type SelfServiceCheckoutPlanner interface {
+	PlanCheckoutSession(ctx context.Context, subscriptionUUID string) (CheckoutPlan, error)
+}
+
+// ErrCheckoutNoPendingInvoice is returned by SelfServiceCheckoutPlanner.
+// PlanCheckoutSession when the subscription exists and is owned by the
+// caller but has no invoice in `pending` status to charge. Handlers map
+// this to a 409 response so the SPA can guide the user to wait for the
+// next renewal tick or trigger a retry-charge first.
+var ErrCheckoutNoPendingInvoice = errors.New("self-service checkout: no pending invoice for subscription")
+
+// ---------------------------------------------------------------------------
 // TenantPaymentProvider — consumed by: core/tenant admin aggregator
 //
 // Parallels TenantSubscriptionProvider for payments. Flattened to the
@@ -571,52 +806,6 @@ type TenantPaymentProvider interface {
 	// ListByTenant returns every transaction bound to the tenant via
 	// Transaction.TenantUUID. Sorted by createdAt desc.
 	ListByTenant(ctx context.Context, tenantUUID string) ([]TenantPayment, error)
-}
-
-// ---------------------------------------------------------------------------
-// TenantBillingCustomerProvider — consumed by: core/tenant admin aggregator
-//
-// Mirrors the pattern of TenantSubscriptionProvider / TenantPaymentProvider
-// but for the billing module's FatturaPA Customer registry. ADR-0001 PR-4
-// added an optional Customer.TenantUUID FK so external Tier-2 tenants can
-// be paired with their FatturaPA invoice profile.
-//
-// GetByTenant returns (nil, nil) when no customer is linked to the tenant
-// — the aggregator handler renders that as 404. PromoteTenant is the
-// idempotent create-from-tenant entry point: returns the existing customer
-// when one is already linked, otherwise creates a new Customer pre-filled
-// from the tenant's iface.Tenant fields (LegalName, VATNumber, FiscalCode,
-// Country, Email).
-// ---------------------------------------------------------------------------
-
-// TenantBillingCustomer is the DTO core/tenant exposes for the
-// billing-customer aggregator endpoint. Flat shape — full editing happens
-// through the billing module's own /v1/billing/customers/{id} routes.
-type TenantBillingCustomer struct {
-	UUID         string
-	TenantUUID   string
-	Denomination string
-	Name         string
-	Surname      string
-	FiscalIDCode string
-	IsCompany    bool
-	Country      string
-	IsActive     bool
-	CreatedAt    time.Time
-}
-
-// TenantBillingCustomerProvider is consumed by core/tenant's
-// /v1/admin/tenants/{id}/billing-customer aggregator. The billing addon
-// registers an adapter that talks to its own repository.
-type TenantBillingCustomerProvider interface {
-	// GetByTenant returns (nil, nil) when no customer is linked.
-	GetByTenant(ctx context.Context, tenantUUID string) (*TenantBillingCustomer, error)
-	// PromoteTenant creates (or returns) the customer linked to this tenant.
-	// Idempotent: a tenant with an existing link is returned unchanged.
-	// Errors from the underlying service (tenant not external, missing
-	// denomination, etc.) propagate and are mapped to HTTP status by the
-	// handler — see core/tenant/handlers/handler.go::promoteTenantToBillingCustomer.
-	PromoteTenant(ctx context.Context, tenantUUID string) (*TenantBillingCustomer, error)
 }
 
 // ---------------------------------------------------------------------------

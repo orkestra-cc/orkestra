@@ -43,7 +43,7 @@ func NewModelRepository(db *mongo.Database) ModelRepository {
 		{Keys: bson.D{{Key: "uuid", Value: 1}}, Options: options.Index().SetUnique(true)},
 		{Keys: bson.D{{Key: "modelType", Value: 1}, {Key: "isDefault", Value: 1}}},
 	}
-	coll.Indexes().CreateMany(ctx, indexes) //nolint:errcheck
+	coll.Indexes().CreateMany(ctx, indexes) //nolint:errcheck // best-effort index ensure; subsequent reads will surface persistent failures
 
 	return &modelRepository{collection: coll}
 }

@@ -1,52 +1,10 @@
 package models
 
-// GraphNode represents a Neo4j node
-type GraphNode struct {
-	ID         int64                  `json:"id" doc:"Internal Neo4j node ID"`
-	ElementID  string                 `json:"elementId" doc:"Neo4j element ID"`
-	Labels     []string               `json:"labels" doc:"Node labels"`
-	Properties map[string]interface{} `json:"properties" doc:"Node properties"`
-}
-
-// GraphRelationship represents a Neo4j relationship
-type GraphRelationship struct {
-	ID            int64                  `json:"id" doc:"Internal Neo4j relationship ID"`
-	ElementID     string                 `json:"elementId" doc:"Neo4j element ID"`
-	Type          string                 `json:"type" doc:"Relationship type"`
-	StartNodeID   int64                  `json:"startNodeId" doc:"Start node ID"`
-	EndNodeID     int64                  `json:"endNodeId" doc:"End node ID"`
-	StartElementID string               `json:"startElementId" doc:"Start node element ID"`
-	EndElementID   string               `json:"endElementId" doc:"End node element ID"`
-	Properties    map[string]interface{} `json:"properties" doc:"Relationship properties"`
-}
-
-// GraphData contains nodes and relationships for graph visualization
-type GraphData struct {
-	Nodes         []GraphNode         `json:"nodes" doc:"Graph nodes"`
-	Relationships []GraphRelationship `json:"relationships" doc:"Graph relationships"`
-}
-
-// QueryResult represents the result of a Cypher query
-type QueryResult struct {
-	Columns   []string                 `json:"columns" doc:"Result column names"`
-	Rows      []map[string]interface{} `json:"rows" doc:"Result rows"`
-	Graph     *GraphData               `json:"graph,omitempty" doc:"Extracted graph data for visualization"`
-	Metadata  QueryMetadata            `json:"metadata" doc:"Query execution metadata"`
-}
-
-// QueryMetadata contains execution statistics
-type QueryMetadata struct {
-	ExecutionTimeMs      int64 `json:"executionTimeMs" doc:"Query execution time in milliseconds"`
-	ResultCount          int   `json:"resultCount" doc:"Number of result rows"`
-	NodesCreated         int   `json:"nodesCreated,omitempty" doc:"Nodes created"`
-	NodesDeleted         int   `json:"nodesDeleted,omitempty" doc:"Nodes deleted"`
-	RelationshipsCreated int   `json:"relationshipsCreated,omitempty" doc:"Relationships created"`
-	RelationshipsDeleted int   `json:"relationshipsDeleted,omitempty" doc:"Relationships deleted"`
-	PropertiesSet        int   `json:"propertiesSet,omitempty" doc:"Properties set"`
-	LabelsAdded          int   `json:"labelsAdded,omitempty" doc:"Labels added"`
-	LabelsRemoved        int   `json:"labelsRemoved,omitempty" doc:"Labels removed"`
-	ContainsUpdates      bool  `json:"containsUpdates,omitempty" doc:"Whether the query modified data"`
-}
+// Graph query types (GraphNode, GraphRelationship, GraphData, QueryResult,
+// QueryMetadata) live in shared/iface so the iface contract layer doesn't
+// have to import this addon package — see iface/graph_types.go. Schema
+// introspection types stay here because they are graph-internal and never
+// cross the iface boundary.
 
 // DatabaseInfo represents a Neo4j database
 type DatabaseInfo struct {

@@ -10,10 +10,10 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/orkestra/backend/internal/addons/aimodels/providers"
 	"github.com/orkestra/backend/internal/addons/sales/models"
 	"github.com/orkestra/backend/internal/addons/sales/repository"
 	"github.com/orkestra/backend/internal/shared/config"
+	"github.com/orkestra/backend/internal/shared/iface"
 )
 
 // OrchestratorService manages the lifecycle of sales intelligence jobs and skill execution
@@ -85,7 +85,7 @@ func NewOrchestrator(
 
 // userLLMSettings holds resolved LLM provider and user preferences
 type userLLMSettings struct {
-	llm        providers.LLMProvider
+	llm        iface.LLMProvider
 	modelUUID  string
 	temp       float64
 	maxTokens  int
@@ -182,13 +182,13 @@ func (s *orchestratorService) RunSkill(ctx context.Context, skillName models.Ski
 		maxTok = 4096
 	}
 
-	opts := providers.CompletionOptions{
+	opts := iface.CompletionOptions{
 		SystemPrompt: systemPrompt,
 		Temperature:  temp,
 		MaxTokens:    maxTok,
 	}
 
-	if usageProvider, ok := us.llm.(providers.LLMProviderWithUsage); ok {
+	if usageProvider, ok := us.llm.(iface.LLMProviderWithUsage); ok {
 		result, callErr := usageProvider.CompleteWithUsage(skillCtx, userMessage, opts)
 		if callErr != nil {
 			return nil, fmt.Errorf("LLM completion for skill %s: %w", skillName, callErr)
@@ -592,7 +592,7 @@ func (s *orchestratorService) runProspectPipeline(ctx context.Context, job *mode
 	}
 
 	// Check if batch mode is enabled and provider supports it
-	if batchProvider, ok := llm.(providers.BatchLLMProvider); ok && us.batchMode && s.batchRepo != nil {
+	if batchProvider, ok := llm.(iface.BatchLLMProvider); ok && us.batchMode && s.batchRepo != nil {
 		s.submitBatchAnalysis(dbCtx, job, batchProvider, us.modelUUID, agentDefs, input)
 		return // pipeline continues via batch poller
 	}
@@ -644,21 +644,21 @@ func (s *orchestratorService) runProspectPipeline(ctx context.Context, job *mode
 func (s *orchestratorService) submitBatchAnalysis(
 	ctx context.Context,
 	job *models.Job,
-	batchProvider providers.BatchLLMProvider,
+	batchProvider iface.BatchLLMProvider,
 	modelUUID string,
 	agentDefs []AgentDef,
 	input *models.AgentInput,
 ) {
 	// Build batch requests from agent defs
-	requests := make([]providers.BatchRequest, len(agentDefs))
+	requests := make([]iface.BatchRequest, len(agentDefs))
 	requestMap := make(map[string]int, len(agentDefs))
 
 	for i, def := range agentDefs {
 		customID := string(def.Name)
-		requests[i] = providers.BatchRequest{
+		requests[i] = iface.BatchRequest{
 			CustomID: customID,
 			Prompt:   s.agentExecutor.BuildUserMessage(input),
-			Options: providers.CompletionOptions{
+			Options: iface.CompletionOptions{
 				SystemPrompt: def.Prompt,
 				Temperature:  0.3,
 				MaxTokens:    s.cfg.MaxTokens,

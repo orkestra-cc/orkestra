@@ -27,9 +27,10 @@ type TransactionRepository interface {
 	GetByUUID(ctx context.Context, uuid string) (*models.Transaction, error)
 	GetByProviderTxID(ctx context.Context, provider models.ProviderName, providerTxID string) (*models.Transaction, error)
 	List(ctx context.Context, f TransactionFilters) ([]models.Transaction, error)
-	// FindByTenantUUID lists transactions bound to the tenant. Backs the
-	// admin aggregator GET /v1/admin/tenants/{id}/payments.
-	FindByTenantUUID(ctx context.Context, tenantUUID string) ([]models.Transaction, error)
+	// FindByTenant lists transactions billed to the given tenant. Backs the
+	// admin aggregator GET /v1/admin/tenants/{id}/payments and the self-
+	// service /v1/me/transactions endpoint.
+	FindByTenant(ctx context.Context, tenantUUID string) ([]models.Transaction, error)
 	Update(ctx context.Context, t *models.Transaction) error
 }
 
@@ -112,9 +113,13 @@ func (r *transactionRepository) List(ctx context.Context, f TransactionFilters) 
 	return out, nil
 }
 
-func (r *transactionRepository) FindByTenantUUID(ctx context.Context, tenantUUID string) ([]models.Transaction, error) {
+func (r *transactionRepository) FindByTenant(ctx context.Context, tenantUUID string) ([]models.Transaction, error) {
+	if tenantUUID == "" {
+		return nil, nil
+	}
 	opts := options.Find().SetSort(bson.D{{Key: "createdAt", Value: -1}})
-	cur, err := r.coll.Find(ctx, bson.M{"tenantUUID": tenantUUID}, opts)
+	filter := bson.M{"tenantUUID": tenantUUID}
+	cur, err := r.coll.Find(ctx, filter, opts)
 	if err != nil {
 		return nil, err
 	}

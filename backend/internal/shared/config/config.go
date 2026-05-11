@@ -28,6 +28,24 @@ type Config struct {
 	AIModels  AIModelsConfig
 	Agents    AgentsConfig
 	Sales     SalesConfig
+	Features  FeaturesConfig
+}
+
+// FeaturesConfig holds cross-module feature flags driving phased migrations.
+// These are intentionally not module-scoped — they switch behavior in
+// multiple addons at once and are flipped centrally during a refactor.
+type FeaturesConfig struct {
+	// LazyTenantProvisioning gates the Unified Client Aggregate Phase 2
+	// behavior: when true, self-service callers (subscriptions, payments)
+	// resolve their personal tenant via TenantProvider.EnsureTenantForUser
+	// and the entitlement syncer redirects user-owned subscription
+	// activations onto that tenant. Default ON since Phase 3 — the
+	// one-shot 0001_unify_clients migration has folded legacy
+	// clientbilling rows into the matching Tenant, so every self-service
+	// flow now expects the personal tenant to exist (or be lazily
+	// minted). Set UNIFIED_CLIENTS_LAZY_TENANT_ENABLED=false to revert
+	// to the legacy user-owner code path while Phase 4/5 land.
+	LazyTenantProvisioning bool
 }
 
 // SalesConfig holds configuration for the AI Sales Intelligence module
@@ -84,7 +102,10 @@ type RAGConfig struct {
 // CompanyConfig holds configuration for the company lookup module (OpenAPI Company API)
 type CompanyConfig struct {
 	BaseURL       string        // Base URL: https://company.openapi.com (prod) or https://test.company.openapi.com (sandbox)
-	BearerToken   string        // Dedicated token for Company API (falls back to OPENAPI_BILLING_BEARER_TOKEN)
+	AccountEmail  string        // OpenAPI.com account email — paired with APIKey to mint JWTs at OAuthBaseURL/token
+	APIKey        string        // Long-lived API key from console.openapi.com (Basic-auth password to OAuth /token)
+	OAuthBaseURL  string        // OAuth host: https://oauth.openapi.it (prod) or https://test.oauth.openapi.it (sandbox)
+	BearerToken   string        // Legacy static JWT — used only when AccountEmail+APIKey are empty
 	Timeout       time.Duration // HTTP client timeout
 	RetryAttempts int           // Number of retry attempts for failed requests
 	CacheTTL      time.Duration // Redis cache TTL for company lookups
@@ -94,7 +115,10 @@ type CompanyConfig struct {
 type BillingConfig struct {
 	// OpenAPI SDI configuration
 	OpenAPIBaseURL       string        // Base URL: https://sdi.openapi.it (prod) or https://test.sdi.openapi.it (sandbox)
-	OpenAPIBearerToken   string        // OAuth Bearer Token for authentication
+	OpenAPIAccountEmail  string        // Account email — paired with OpenAPIAPIKey to mint JWTs at OpenAPIOAuthBaseURL/token
+	OpenAPIAPIKey        string        // Long-lived API key (Basic-auth password to OAuth /token)
+	OpenAPIOAuthBaseURL  string        // OAuth host: https://oauth.openapi.it (prod) or https://test.oauth.openapi.it (sandbox)
+	OpenAPIBearerToken   string        // Legacy static JWT — used only when OpenAPIAccountEmail+APIKey are empty
 	OpenAPIFiscalID      string        // Company fiscal ID (P.IVA with country code, e.g., IT12345678901)
 	OpenAPIRecipientCode string        // SDI recipient code (OpenAPI's code: JKKZDGR)
 	ApplySignature       bool          // Enable digital signature for invoices
@@ -152,6 +176,11 @@ type AudienceConfig struct {
 	Host        string          // e.g. "console.orkestra.com" — empty disables this audience's mux
 	CORSOrigins []string        // empty falls back to ServerConfig.CORSOrigins
 	Rate        RateLimitConfig // zero values fall back to top-level Rate
+	// FrontendURL is the public origin of the SPA serving this audience —
+	// used to build verification + reset links in transactional email so a
+	// signup on the client SPA gets a verify URL on the client host (not
+	// the operator console). Empty falls back to ServerConfig.FrontendURL.
+	FrontendURL string
 }
 
 type DatabaseConfig struct {
@@ -194,13 +223,26 @@ type JWTConfig struct {
 }
 
 type CookieConfig struct {
-	Secret   string
-	Name     string
-	Domain   string
-	HttpOnly bool
-	Secure   bool
-	SameSite string
-	MaxAge   int
+	Secret string
+	Name   string
+	// Domain is the legacy single-tier cookie domain (`COOKIE_DOMAIN`).
+	// Kept as the fallback when the audience-specific values below are
+	// empty so single-host deployments keep working without changes.
+	// Per-audience deployments (ADR-0003 PR-D D-9) should leave this
+	// empty and set OperatorDomain / ClientDomain instead.
+	Domain string
+	// OperatorDomain scopes refresh-token cookies minted on the operator
+	// host (`console.*`) — set via `OPERATOR_COOKIE_DOMAIN`. Empty falls
+	// back to Domain.
+	OperatorDomain string
+	// ClientDomain scopes refresh-token cookies minted on the client
+	// host (`api.*`) — set via `CLIENT_COOKIE_DOMAIN`. Empty falls back
+	// to Domain.
+	ClientDomain string
+	HttpOnly     bool
+	Secure       bool
+	SameSite     string
+	MaxAge       int
 }
 
 type GoogleOAuthConfig struct {
@@ -279,6 +321,7 @@ func Load() (*Config, error) {
 				RequestsPerMinute: getEnvAsInt("OPERATOR_RATE_LIMIT_REQUESTS_PER_MINUTE", 0),
 				Burst:             getEnvAsInt("OPERATOR_RATE_LIMIT_BURST", 0),
 			},
+			FrontendURL: getEnv("OPERATOR_FRONTEND_URL", ""),
 		},
 		Client: AudienceConfig{
 			Host:        getEnv("CLIENT_API_HOST", defaultClientHost),
@@ -287,6 +330,7 @@ func Load() (*Config, error) {
 				RequestsPerMinute: getEnvAsInt("CLIENT_RATE_LIMIT_REQUESTS_PER_MINUTE", 0),
 				Burst:             getEnvAsInt("CLIENT_RATE_LIMIT_BURST", 0),
 			},
+			FrontendURL: getEnv("CLIENT_FRONTEND_URL", ""),
 		},
 	}
 
@@ -327,13 +371,21 @@ func Load() (*Config, error) {
 	config.Auth = AuthConfig{
 		JWT: jwtConfig,
 		Cookie: CookieConfig{
-			Secret:   getEnv("COOKIE_SECRET", "default-cookie-secret"),
-			Name:     getEnv("COOKIE_NAME", "orkestra_cookie"),
-			Domain:   getEnv("COOKIE_DOMAIN", ""),
-			HttpOnly: getEnvAsBool("COOKIE_HTTP_ONLY", true),
-			Secure:   getEnvAsBool("COOKIE_SECURE", false), // Default false for development
-			SameSite: getEnv("COOKIE_SAME_SITE", "lax"),
-			MaxAge:   getEnvAsInt("COOKIE_MAX_AGE", 86400000), // 24 hours in milliseconds
+			Secret: getEnv("COOKIE_SECRET", "default-cookie-secret"),
+			Name:   getEnv("COOKIE_NAME", "orkestra_cookie"),
+			Domain: getEnv("COOKIE_DOMAIN", ""),
+			// ADR-0003 PR-D D-9: per-audience cookie domains. Dev defaults
+			// align with the per-audience host defaults above so the
+			// browser scopes refresh cookies to the matching subdomain
+			// without contributors having to set anything. Prod defaults
+			// are left empty — operators set them explicitly so a stale
+			// COOKIE_DOMAIN does not accidentally cross the audiences.
+			OperatorDomain: getEnv("OPERATOR_COOKIE_DOMAIN", defaultOperatorCookieDomain(env)),
+			ClientDomain:   getEnv("CLIENT_COOKIE_DOMAIN", defaultClientCookieDomain(env)),
+			HttpOnly:       getEnvAsBool("COOKIE_HTTP_ONLY", true),
+			Secure:         getEnvAsBool("COOKIE_SECURE", false), // Default false for development
+			SameSite:       getEnv("COOKIE_SAME_SITE", "lax"),
+			MaxAge:         getEnvAsInt("COOKIE_MAX_AGE", 86400000), // 24 hours in milliseconds
 		},
 		Google: GoogleOAuthConfig{
 			ClientID:        getEnv("OAUTH_GOOGLE_CLIENT_ID", ""),
@@ -377,8 +429,16 @@ func Load() (*Config, error) {
 		defaultBaseURL = "https://sdi.openapi.it"
 	}
 
+	billingDefaultOAuthBaseURL := "https://oauth.openapi.it"
+	if sandboxMode {
+		billingDefaultOAuthBaseURL = "https://test.oauth.openapi.it"
+	}
+
 	config.Billing = BillingConfig{
 		OpenAPIBaseURL:       getEnv("OPENAPI_BILLING_BASE_URL", defaultBaseURL),
+		OpenAPIAccountEmail:  getEnv("OPENAPI_BILLING_ACCOUNT_EMAIL", ""),
+		OpenAPIAPIKey:        getEnv("OPENAPI_BILLING_API_KEY", ""),
+		OpenAPIOAuthBaseURL:  getEnv("OPENAPI_OAUTH_BASE_URL", billingDefaultOAuthBaseURL),
 		OpenAPIBearerToken:   getEnv("OPENAPI_BILLING_BEARER_TOKEN", ""),
 		OpenAPIFiscalID:      getEnv("OPENAPI_BILLING_FISCAL_ID", ""),
 		OpenAPIRecipientCode: getEnv("OPENAPI_BILLING_RECIPIENT_CODE", "JKKZDGR"),
@@ -406,8 +466,16 @@ func Load() (*Config, error) {
 		companyToken = config.Billing.OpenAPIBearerToken
 	}
 
+	defaultOAuthBaseURL := "https://oauth.openapi.it"
+	if sandboxMode {
+		defaultOAuthBaseURL = "https://test.oauth.openapi.it"
+	}
+
 	config.Company = CompanyConfig{
 		BaseURL:       getEnv("OPENAPI_COMPANY_BASE_URL", defaultCompanyBaseURL),
+		AccountEmail:  getEnv("OPENAPI_COMPANY_ACCOUNT_EMAIL", ""),
+		APIKey:        getEnv("OPENAPI_COMPANY_API_KEY", ""),
+		OAuthBaseURL:  getEnv("OPENAPI_OAUTH_BASE_URL", defaultOAuthBaseURL),
 		BearerToken:   companyToken,
 		Timeout:       getEnvAsDuration("OPENAPI_COMPANY_TIMEOUT", "15s"),
 		RetryAttempts: getEnvAsInt("OPENAPI_COMPANY_RETRY_ATTEMPTS", 3),
@@ -463,6 +531,11 @@ func Load() (*Config, error) {
 		ScraperTimeout:  getEnvAsDuration("SALES_SCRAPER_TIMEOUT", "30s"),
 		ScraperMaxDepth: getEnvAsInt("SALES_SCRAPER_MAX_DEPTH", 3),
 		MaxTokens:       getEnvAsInt("SALES_MAX_TOKENS", 8192),
+	}
+
+	// Cross-module feature flags
+	config.Features = FeaturesConfig{
+		LazyTenantProvisioning: getEnvAsBool("UNIFIED_CLIENTS_LAZY_TENANT_ENABLED", true),
 	}
 
 	// Documents/PDF generation configuration (Gotenberg)
@@ -541,6 +614,26 @@ func printJWTWarning(err error) {
 ╚══════════════════════════════════════════════════════════════════════════════╝
 `
 	fmt.Printf(warning, err)
+}
+
+// defaultOperatorCookieDomain returns the dev fallback for the operator
+// refresh-cookie scope. Empty in non-dev so a misconfigured prod deploy
+// fails closed (the cookie is set without a Domain attribute, scoped to
+// whatever host minted it) rather than silently leaking across hosts.
+func defaultOperatorCookieDomain(env string) string {
+	if env == "development" {
+		return "console.localhost"
+	}
+	return ""
+}
+
+// defaultClientCookieDomain mirrors defaultOperatorCookieDomain for the
+// client surface (api.*).
+func defaultClientCookieDomain(env string) string {
+	if env == "development" {
+		return "api.localhost"
+	}
+	return ""
 }
 
 func getEnv(key, defaultValue string) string {

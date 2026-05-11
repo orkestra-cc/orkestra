@@ -39,14 +39,10 @@ func (s EntitlementSource) Valid() bool {
 // previous subscription cycles), but at most one active row at any given
 // time — enforced in the service layer (Grant revokes any existing active
 // row before inserting the replacement).
-//
-// The row is intentionally flat (no embedded subscription detail) so the
-// projection stays simple to rebuild from an event log. Richer context lives
-// on the SourceRef pointer.
 type Entitlement struct {
 	ID           primitive.ObjectID `bson:"_id,omitempty" json:"-"`
 	UUID         string             `bson:"uuid" json:"uuid"`
-	TenantUUID   string             `bson:"tenantId" json:"tenantId"`
+	TenantUUID   string             `bson:"tenantUUID" json:"tenantUUID"`
 	CapabilityID string             `bson:"capabilityId" json:"capabilityId"`
 	Source       EntitlementSource  `bson:"source" json:"source"`
 	// SourceRef is the opaque identifier of the thing that created this

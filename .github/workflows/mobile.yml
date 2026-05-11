@@ -38,6 +38,8 @@ jobs:
   test:
     name: Test
     runs-on: ubuntu-latest
+    permissions:
+      contents: write   # needed by the auto-commit step that refreshes the coverage badge
     steps:
       - uses: actions/checkout@v4
 
@@ -50,8 +52,31 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
-      - name: Run tests
-        run: flutter test
+      - name: Run tests with coverage
+        run: flutter test --coverage
+
+      - name: Refresh coverage badge
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main')
+        run: |
+          PCT=$(awk -F: 'BEGIN{lh=0;lf=0} /^LH:/{lh+=$2} /^LF:/{lf+=$2} END{ if(lf>0) printf "%.1f", lh/lf*100; else print "0.0"}' coverage/lcov.info)
+          INT=$(printf '%.0f' "$PCT")
+          if   [ "$INT" -ge 80 ]; then COLOR=brightgreen
+          elif [ "$INT" -ge 70 ]; then COLOR=green
+          elif [ "$INT" -ge 60 ]; then COLOR=yellowgreen
+          elif [ "$INT" -ge 50 ]; then COLOR=yellow
+          elif [ "$INT" -ge 40 ]; then COLOR=orange
+          else                          COLOR=red
+          fi
+          mkdir -p ../.github/badges
+          curl -fsSL "https://img.shields.io/badge/coverage-${PCT}%25-${COLOR}?style=flat-square&logo=flutter&logoColor=white&label=mobile" \
+            -o ../.github/badges/mobile-coverage.svg
+
+      - name: Commit refreshed badge
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main')
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "chore(badges): refresh mobile coverage [skip ci]"
+          file_pattern: .github/badges/mobile-coverage.svg
 
   build-android:
     name: Build Android

@@ -125,3 +125,47 @@ func RegisterMeRoutes(api huma.API, h *MeHandler) {
 		Tags:        []string{"Compliance", "DSR"},
 	}, h.Erase)
 }
+
+// SelfDeletionGate returns true when the caller's audience is allowed to
+// trigger self-service erasure. Phase 8 of the auth-policy roadmap:
+// operator surface is unconditionally allowed (admins control their
+// own deletion); client surface is gated on the
+// selfServiceAccountDeletionClient policy toggle.
+type SelfDeletionGate func(ctx context.Context) bool
+
+// EraseGated wraps Erase with a SelfDeletionGate check. Returns 403
+// when the gate denies; otherwise delegates to Erase. Exported so the
+// gate logic can be exercised by tests without a full Huma server.
+func (h *MeHandler) EraseGated(ctx context.Context, gate SelfDeletionGate, req *struct{}) (*EraseOutput, error) {
+	if gate != nil && !gate(ctx) {
+		return nil, huma.NewError(http.StatusForbidden, "Self-service account deletion is disabled. Contact an administrator.")
+	}
+	return h.Erase(ctx, req)
+}
+
+// RegisterClientMeRoutes mounts the DSR endpoints on the client API
+// surface. Export is unconditional — read access is always safe.
+// Erase is wrapped in the gate: when SelfServiceAccountDeletionClient
+// is off the route returns 403 self_service_deletion_disabled instead
+// of running the erasure pipeline.
+func RegisterClientMeRoutes(api huma.API, h *MeHandler, gate SelfDeletionGate) {
+	huma.Register(api, huma.Operation{
+		OperationID: "compliance-me-dsr-export-client",
+		Method:      http.MethodPost,
+		Path:        "/v1/me/dsr/export",
+		Summary:     "Export the caller's personal data (GDPR right of access)",
+		Description: "Synchronously collects the caller's personal data across every registered PII producer and returns it inline. Safe to retry — read-only.",
+		Tags:        []string{"Compliance", "DSR"},
+	}, h.Export)
+
+	huma.Register(api, huma.Operation{
+		OperationID: "compliance-me-dsr-erase-client",
+		Method:      http.MethodPost,
+		Path:        "/v1/me/dsr/erase",
+		Summary:     "Erase the caller's personal data (GDPR right to erasure)",
+		Description: "Irreversibly deletes the caller's personal data. Gated on the auth.selfServiceAccountDeletionClient admin toggle — disabled by default.",
+		Tags:        []string{"Compliance", "DSR"},
+	}, func(ctx context.Context, req *struct{}) (*EraseOutput, error) {
+		return h.EraseGated(ctx, gate, req)
+	})
+}

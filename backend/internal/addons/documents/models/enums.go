@@ -108,28 +108,6 @@ func (o PageOrientation) String() string {
 	return string(o)
 }
 
-// SourceType represents the type of source document that generated the PDF
-type SourceType string
-
-const (
-	// SourceTypeInvoice indicates the PDF was generated from an invoice
-	SourceTypeInvoice SourceType = "invoice"
-	// SourceTypeOffer indicates the PDF was generated from an offer
-	SourceTypeOffer SourceType = "offer"
-	// SourceTypeCustom indicates the PDF was generated from custom data
-	SourceTypeCustom SourceType = "custom"
-)
-
-// IsValid checks if the source type is valid
-func (s SourceType) IsValid() bool {
-	switch s {
-	case SourceTypeInvoice, SourceTypeOffer, SourceTypeCustom:
-		return true
-	}
-	return false
-}
-
-// String returns the string representation
-func (s SourceType) String() string {
-	return string(s)
-}
+// SourceType (and its constants/methods) lives in shared/iface/document_types.go
+// — see iface.SourceType, iface.SourceTypeInvoice, etc. Kept out of this
+// addon package so the iface contract layer doesn't import addon code.

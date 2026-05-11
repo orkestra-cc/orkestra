@@ -5,6 +5,7 @@
 package models
 
 import (
+	"strings"
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson/primitive"
@@ -98,6 +99,35 @@ type TenantAddress struct {
 	Country    string `bson:"country,omitempty" json:"country,omitempty"`
 }
 
+// FatturaPAProfile carries the FatturaPA-specific routing fields a tenant
+// needs to act as a CessionarioCommittente on an electronic invoice. Required
+// when Tenant.IsItalianBillable is true; optional otherwise. Either
+// CodiceDestinatario or PECDestinatario must be present at send time —
+// CodiceDestinatario is the seven-character SDI code; PECDestinatario is the
+// fallback PEC address used when the recipient hasn't registered an SDI code.
+// IsPA toggles the public-administration variant; CodiceUfficio,
+// RiferimentoAmm, ConvenzioneNumero are the PA-only routing fields populated
+// when IsPA is true.
+type FatturaPAProfile struct {
+	CodiceDestinatario string `bson:"codiceDestinatario,omitempty" json:"codiceDestinatario,omitempty"`
+	PECDestinatario    string `bson:"pecDestinatario,omitempty" json:"pecDestinatario,omitempty"`
+	IsPA               bool   `bson:"isPA,omitempty" json:"isPA,omitempty"`
+	CodiceUfficio      string `bson:"codiceUfficio,omitempty" json:"codiceUfficio,omitempty"`
+	RiferimentoAmm     string `bson:"riferimentoAmm,omitempty" json:"riferimentoAmm,omitempty"`
+	ConvenzioneNumero  string `bson:"convenzioneNumero,omitempty" json:"convenzioneNumero,omitempty"`
+}
+
+// HasRouting reports whether the profile carries at least one routing handle
+// (SDI code or PEC). FatturaPA send-time validation rejects a profile that
+// has neither.
+func (p *FatturaPAProfile) HasRouting() bool {
+	if p == nil {
+		return false
+	}
+	return strings.TrimSpace(p.CodiceDestinatario) != "" ||
+		strings.TrimSpace(p.PECDestinatario) != ""
+}
+
 // Tenant is the unified aggregate for the two-tier tenancy model.
 type Tenant struct {
 	ID primitive.ObjectID `bson:"_id,omitempty" json:"-"`
@@ -130,6 +160,27 @@ type Tenant struct {
 	// EU B2B tenants once the billing module is exposed as a service.
 	VATNumber  string `bson:"vatNumber,omitempty" json:"vatNumber,omitempty"`
 	FiscalCode string `bson:"fiscalCode,omitempty" json:"fiscalCode,omitempty"`
+
+	// IsCompany discriminates the legal-entity shape. False = natural person /
+	// sole-proprietor / freelancer (the FatturaPA CedentePrestatore party name
+	// is rendered from the owner User's profile). True = corporate entity
+	// (LegalName is the canonical party name). Mandatory after the Unified
+	// Client Aggregate refactor, but zero-defaults to false on legacy rows so
+	// the additive Phase 1 migration is safe — Phase 5 enforces the discriminator
+	// when collapsing billing.Customer into this struct.
+	IsCompany bool `bson:"isCompany,omitempty" json:"isCompany,omitempty"`
+
+	// IsItalianBillable toggles the FatturaPA invoicing path for this tenant.
+	// When true, FatturaPA must carry either a CodiceDestinatario or a
+	// PECDestinatario — SetItalianBillable enforces this at toggle time and
+	// the billing send path enforces it again at send time.
+	IsItalianBillable bool `bson:"isItalianBillable,omitempty" json:"isItalianBillable,omitempty"`
+
+	// FatturaPA holds the SDI routing fields used by the billing module when
+	// emitting a FatturaPA XML for this tenant. Nil = not configured. Pointer
+	// so the BSON document omits the sub-document entirely on tenants that
+	// will never invoice (most external Tier-2 clients pre-onboarding).
+	FatturaPA *FatturaPAProfile `bson:"fatturaPA,omitempty" json:"fatturaPA,omitempty"`
 
 	// SignupChannel — see signup constants above.
 	SignupChannel string `bson:"signupChannel,omitempty" json:"signupChannel,omitempty"`

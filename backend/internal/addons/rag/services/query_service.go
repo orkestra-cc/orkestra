@@ -8,7 +8,6 @@ import (
 	"time"
 
 	aimodelsProviders "github.com/orkestra/backend/internal/addons/aimodels/providers"
-	"github.com/orkestra/backend/internal/addons/rag/models"
 	"github.com/orkestra/backend/internal/shared/iface"
 )
 
@@ -26,11 +25,16 @@ const (
 	maxOverFetchTopK         = 200
 )
 
-// StreamResult holds the pre-LLM data and token channel for streaming queries
+// StreamResult holds the pre-LLM data and token channel for streaming queries.
+//
+// Cancel must be invoked once the caller is done draining TokenChan (typically
+// `defer result.Cancel()`) so the LLM context's timer is released. It is
+// always non-nil — a no-op when no LLM stream was started.
 type StreamResult struct {
-	Sources   []models.SourceRef
-	PreMeta   models.QueryMeta
+	Sources   []iface.SourceRef
+	PreMeta   iface.QueryMeta
 	TokenChan <-chan aimodelsProviders.StreamChunk
+	Cancel    context.CancelFunc
 	ModelName string
 	StartTime time.Time // total query start for final metadata
 	LLMStart  time.Time // LLM start for llmTimeMs
@@ -38,7 +42,7 @@ type StreamResult struct {
 
 // QueryService handles RAG query execution
 type QueryService interface {
-	Query(ctx context.Context, question string, topK int, minScore float64, isoStandard, llmOverrideUUID, requirementLevel, nodeType, retrievalMode string, documentUUIDs []string) (*models.RAGQueryResponse, error)
+	Query(ctx context.Context, question string, topK int, minScore float64, isoStandard, llmOverrideUUID, requirementLevel, nodeType, retrievalMode string, documentUUIDs []string) (*iface.RAGQueryResponse, error)
 	QueryStream(ctx context.Context, question string, topK int, minScore float64, isoStandard, llmOverrideUUID, requirementLevel, nodeType, retrievalMode string, documentUUIDs []string) (*StreamResult, error)
 }
 
@@ -61,7 +65,7 @@ func NewQueryService(gr iface.GraphProvider, modelProvider AIModelProvider, defa
 
 // preparedContext holds the results of embedding + vector search + context expansion
 type preparedContext struct {
-	sources      []models.SourceRef
+	sources      []iface.SourceRef
 	contextStr   string
 	prompt       string
 	embTimeMs    int64
@@ -162,11 +166,11 @@ func (s *queryService) prepareContext(ctx context.Context, question string, topK
 	)
 
 	// Build source refs with document metadata
-	var sources []models.SourceRef
+	var sources []iface.SourceRef
 	var contextParts []string
 
 	for _, row := range searchResult.Rows {
-		src := models.SourceRef{}
+		src := iface.SourceRef{}
 		if v, ok := row["chunkUuid"].(string); ok {
 			src.ChunkUUID = v
 		}
@@ -257,7 +261,7 @@ func (s *queryService) prepareContext(ctx context.Context, question string, topK
 		}
 
 		// Rebuild in original similarity order
-		var balSources []models.SourceRef
+		var balSources []iface.SourceRef
 		var balParts []string
 		for i := range sources {
 			if !selected[i] {
@@ -301,7 +305,7 @@ func (s *queryService) prepareContext(ctx context.Context, question string, topK
 	}, nil
 }
 
-func (s *queryService) Query(ctx context.Context, question string, topK int, minScore float64, isoStandard, llmOverrideUUID, requirementLevel, nodeType, retrievalMode string, documentUUIDs []string) (*models.RAGQueryResponse, error) {
+func (s *queryService) Query(ctx context.Context, question string, topK int, minScore float64, isoStandard, llmOverrideUUID, requirementLevel, nodeType, retrievalMode string, documentUUIDs []string) (*iface.RAGQueryResponse, error) {
 	totalStart := time.Now()
 
 	pc, err := s.prepareContext(ctx, question, topK, minScore, isoStandard, llmOverrideUUID, requirementLevel, nodeType, retrievalMode, documentUUIDs)
@@ -310,10 +314,10 @@ func (s *queryService) Query(ctx context.Context, question string, topK int, min
 	}
 
 	if len(pc.sources) == 0 {
-		resp := &models.RAGQueryResponse{}
+		resp := &iface.RAGQueryResponse{}
 		resp.Body.Answer = "No relevant information found in the knowledge base for your question."
-		resp.Body.Sources = []models.SourceRef{}
-		resp.Body.Metadata = models.QueryMeta{
+		resp.Body.Sources = []iface.SourceRef{}
+		resp.Body.Metadata = iface.QueryMeta{
 			EmbeddingTimeMs: pc.embTimeMs,
 			SearchTimeMs:    pc.searchTimeMs,
 			TotalTimeMs:     time.Since(totalStart).Milliseconds(),
@@ -336,10 +340,10 @@ func (s *queryService) Query(ctx context.Context, question string, topK int, min
 	}
 	llmTimeMs := time.Since(llmStart).Milliseconds()
 
-	resp := &models.RAGQueryResponse{}
+	resp := &iface.RAGQueryResponse{}
 	resp.Body.Answer = answer
 	resp.Body.Sources = pc.sources
-	resp.Body.Metadata = models.QueryMeta{
+	resp.Body.Metadata = iface.QueryMeta{
 		EmbeddingTimeMs: pc.embTimeMs,
 		SearchTimeMs:    pc.searchTimeMs,
 		LLMTimeMs:       llmTimeMs,
@@ -366,18 +370,20 @@ func (s *queryService) QueryStream(ctx context.Context, question string, topK in
 
 	if len(pc.sources) == 0 {
 		return &StreamResult{
-			Sources: []models.SourceRef{},
-			PreMeta: models.QueryMeta{
+			Sources: []iface.SourceRef{},
+			PreMeta: iface.QueryMeta{
 				EmbeddingTimeMs: pc.embTimeMs,
 				SearchTimeMs:    pc.searchTimeMs,
 				TotalTimeMs:     time.Since(totalStart).Milliseconds(),
 			},
 			TokenChan: nil,
+			Cancel:    func() {},
 		}, nil
 	}
 
-	// Start streaming LLM generation
-	llmCtx, _ := context.WithTimeout(context.Background(), 5*time.Minute)
+	// Start streaming LLM generation. Caller must invoke result.Cancel() when
+	// done draining TokenChan to release the timer.
+	llmCtx, llmCancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	llmStart := time.Now()
 
 	tokenChan, err := pc.llmProvider.StreamComplete(llmCtx, pc.prompt, aimodelsProviders.CompletionOptions{
@@ -386,18 +392,20 @@ func (s *queryService) QueryStream(ctx context.Context, question string, topK in
 		MaxTokens:    2048,
 	})
 	if err != nil {
+		llmCancel()
 		return nil, fmt.Errorf("LLM stream failed: %w", err)
 	}
 
 	return &StreamResult{
 		Sources: pc.sources,
-		PreMeta: models.QueryMeta{
+		PreMeta: iface.QueryMeta{
 			EmbeddingTimeMs: pc.embTimeMs,
 			SearchTimeMs:    pc.searchTimeMs,
 			ChunksRetrieved: len(pc.sources),
 			ModelUsed:       pc.llmProvider.ModelName(),
 		},
 		TokenChan: tokenChan,
+		Cancel:    llmCancel,
 		ModelName: pc.llmProvider.ModelName(),
 		StartTime: totalStart,
 		LLMStart:  llmStart,

@@ -6,67 +6,6 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
-// Customer represents a billing customer (cliente per fatture attive)
-type Customer struct {
-	ID primitive.ObjectID `bson:"_id,omitempty" json:"-"`
-
-	// Unique identifier
-	UUID string `bson:"uuid" json:"id" validate:"required"`
-
-	// Fiscal identifiers
-	FiscalIDCountry string `bson:"fiscalIdCountry" json:"fiscalIdCountry" validate:"required,len=2"` // IT
-	FiscalIDCode    string `bson:"fiscalIdCode" json:"fiscalIdCode" validate:"required"`             // P.IVA (11 chars) o CF (16 chars)
-	CodiceFiscale   string `bson:"codiceFiscale,omitempty" json:"codiceFiscale,omitempty"`           // Codice Fiscale se diverso
-
-	// Company/Person data
-	IsCompany    bool   `bson:"isCompany" json:"isCompany"`
-	Denomination string `bson:"denomination,omitempty" json:"denomination,omitempty"` // Ragione sociale (aziende)
-	Name         string `bson:"name,omitempty" json:"name,omitempty"`                 // Nome (persone fisiche)
-	Surname      string `bson:"surname,omitempty" json:"surname,omitempty"`           // Cognome (persone fisiche)
-
-	// Address
-	Address      string `bson:"address" json:"address" validate:"required"`
-	NumeroCivico string `bson:"numeroCivico,omitempty" json:"numeroCivico,omitempty"` // Street number
-	City         string `bson:"city" json:"city" validate:"required"`
-	Province     string `bson:"province,omitempty" json:"province,omitempty"` // Sigla provincia (2 chars)
-	PostalCode   string `bson:"postalCode" json:"postalCode" validate:"required"`
-	Country      string `bson:"country" json:"country" validate:"required,len=2"` // ISO 3166-1 alpha-2
-
-	// Contacts
-	Email string `bson:"email,omitempty" json:"email,omitempty" validate:"omitempty,email"`
-	PEC   string `bson:"pec,omitempty" json:"pec,omitempty" validate:"omitempty,email"`
-	Phone string `bson:"phone,omitempty" json:"phone,omitempty"`
-
-	// SDI delivery
-	CodiceDestinatario string `bson:"codiceDestinatario,omitempty" json:"codiceDestinatario,omitempty"` // 7 chars for B2B, 6 chars for PA
-	PECDestinatario    string `bson:"pecDestinatario,omitempty" json:"pecDestinatario,omitempty"`       // PEC for delivery (alternative to codice)
-
-	// PA specific
-	IsPA              bool   `bson:"isPA" json:"isPA"`                                           // Is Public Administration
-	CodiceUfficio     string `bson:"codiceUfficio,omitempty" json:"codiceUfficio,omitempty"`     // Codice Univoco Ufficio (6 chars for PA)
-	RiferimentoAmm    string `bson:"riferimentoAmm,omitempty" json:"riferimentoAmm,omitempty"`   // Riferimento Amministrazione
-	ConvenzioneNumero string `bson:"convenzioneNumero,omitempty" json:"convenzioneNumero,omitempty"` // Numero convenzione
-
-	// Notes
-	Notes string `bson:"notes,omitempty" json:"notes,omitempty"`
-
-	// Status
-	IsActive bool `bson:"isActive" json:"isActive"`
-
-	// Audit
-	CreatedAt time.Time  `bson:"createdAt" json:"createdAt"`
-	UpdatedAt time.Time  `bson:"updatedAt" json:"updatedAt"`
-	DeletedAt *time.Time `bson:"deletedAt,omitempty" json:"deletedAt,omitempty"`
-	CreatedBy string     `bson:"createdBy,omitempty" json:"createdBy,omitempty"`
-
-	// --- Tenant link (ADR-0001 PR-4) ---
-	// TenantUUID, when set, links this billing recipient to a Tier-2
-	// external tenant. Optional — most customers are pure invoice
-	// recipients with no platform identity. Sparse index on this field
-	// supports the tenant→customer aggregator lookup.
-	TenantUUID string `bson:"tenantUUID,omitempty" json:"tenantUUID,omitempty"`
-}
-
 // Supplier represents a billing supplier (fornitore per fatture passive)
 type Supplier struct {
 	ID primitive.ObjectID `bson:"_id,omitempty" json:"-"`
@@ -177,56 +116,6 @@ func (p *PartyData) GetDisplayName() string {
 		return p.Name
 	}
 	return p.FiscalIDCode
-}
-
-// CustomerFromPartyData creates a Customer from PartyData
-func CustomerFromPartyData(pd *PartyData, uuid string) *Customer {
-	return &Customer{
-		UUID:               uuid,
-		FiscalIDCountry:    pd.FiscalIDCountry,
-		FiscalIDCode:       pd.FiscalIDCode,
-		CodiceFiscale:      pd.CodiceFiscale,
-		IsCompany:          pd.IsCompany,
-		Denomination:       pd.Denomination,
-		Name:               pd.Name,
-		Surname:            pd.Surname,
-		Address:            pd.Address,
-		NumeroCivico:       pd.NumeroCivico,
-		City:               pd.City,
-		Province:           pd.Province,
-		PostalCode:         pd.PostalCode,
-		Country:            pd.Country,
-		Email:              pd.Email,
-		PEC:                pd.PEC,
-		CodiceDestinatario: pd.CodiceDestinatario,
-		PECDestinatario:    pd.PECDestinatario,
-		IsActive:           true,
-		CreatedAt:          time.Now(),
-		UpdatedAt:          time.Now(),
-	}
-}
-
-// ToPartyData converts a Customer to PartyData
-func (c *Customer) ToPartyData() *PartyData {
-	return &PartyData{
-		FiscalIDCountry:    c.FiscalIDCountry,
-		FiscalIDCode:       c.FiscalIDCode,
-		CodiceFiscale:      c.CodiceFiscale,
-		IsCompany:          c.IsCompany,
-		Denomination:       c.Denomination,
-		Name:               c.Name,
-		Surname:            c.Surname,
-		Address:            c.Address,
-		NumeroCivico:       c.NumeroCivico,
-		City:               c.City,
-		Province:           c.Province,
-		PostalCode:         c.PostalCode,
-		Country:            c.Country,
-		Email:              c.Email,
-		PEC:                c.PEC,
-		CodiceDestinatario: c.CodiceDestinatario,
-		PECDestinatario:    c.PECDestinatario,
-	}
 }
 
 // ToPartyData converts a Supplier to PartyData

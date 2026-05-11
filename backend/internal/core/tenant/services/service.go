@@ -20,10 +20,17 @@ import (
 
 // Service owns tenant lifecycle and implements iface.TenantProvider.
 type Service struct {
-	repo       *repository.Repository
-	auditSink  iface.AuditSink
-	kms        iface.KMSProvider
-	bindOwner  OwnerRoleBinder
+	repo            *repository.Repository
+	auditSink       iface.AuditSink
+	kms             iface.KMSProvider
+	bindOwner       OwnerRoleBinder
+	postDeleteHooks []TenantPostDeleteHook
+	// userDisplay is the lazy lookup the unified-clients refactor (Phase 1)
+	// uses to seed a personal tenant's Name from the owner User's FullName
+	// (EnsureTenantForUser) and to render the FatturaPA CedentePrestatore
+	// party name for sole-proprietor tenants (ResolveBillingParty). Wired by
+	// the tenant module's Init from the registered ClientUserProvider.
+	userDisplay UserDisplayResolver
 }
 
 // OwnerRoleBinder is invoked from CreateTenant after the owner membership
@@ -62,6 +69,53 @@ func (s *Service) SetKMSProvider(kms iface.KMSProvider) { s.kms = kms }
 // inserts the membership without an authz binding — the owner relies
 // on their platform system role to act, which is the legacy behavior.
 func (s *Service) SetOwnerRoleBinder(fn OwnerRoleBinder) { s.bindOwner = fn }
+
+// TenantPostDeleteContext carries the data a cascade hook needs to clean
+// up tenant-adjacent state owned by other modules — authz bindings, the
+// orphaned owner's user account on the per-tier user collections, anything
+// else that points at the tenant. Computed inside DeleteTenant /
+// PurgeTenant before the hooks fire so each subscriber gets a consistent
+// snapshot regardless of execution order.
+type TenantPostDeleteContext struct {
+	TenantUUID string
+	// Kind is "internal" or "external". User-cleanup hooks key on this
+	// because operator users may legitimately outlive a single tenant
+	// (one human, many internal workspaces) while external Tier-2
+	// signups exist solely to hold the client tenant.
+	Kind string
+	// OwnerUserUUID is the tenant's recorded owner. May be empty for
+	// legacy rows that never stamped an owner — hooks must tolerate that.
+	OwnerUserUUID string
+	// OwnerHasOtherTenants is true when the owner still belongs to at
+	// least one tenant after this delete. User-eviction hooks must check
+	// it before reclaiming the email — a user with active memberships
+	// elsewhere cannot have their account aliased away.
+	OwnerHasOtherTenants bool
+	// Hard is true for PurgeTenant (irreversible erasure), false for
+	// DeleteTenant (soft-delete with deletedAt). Hooks may use this to
+	// hard-delete vs soft-delete on their side, though most cascade
+	// targets (memberships, ancestors, bindings) are hard-deleted in
+	// either case because they have no soft-delete pattern.
+	Hard bool
+}
+
+// TenantPostDeleteHook is invoked after the tenant module has finished
+// its own cascade (memberships, ancestors, lifecycle status). Hooks fire
+// in registration order; a non-nil error is logged via the audit sink
+// but does not abort subsequent hooks — best-effort cleanup so a single
+// flaky downstream module doesn't leave the rest of the system in a
+// half-cascaded state.
+type TenantPostDeleteHook func(ctx context.Context, c TenantPostDeleteContext) error
+
+// RegisterPostDeleteHook appends a cascade hook. Called by other modules
+// during their Init (authz wires binding-cleanup, tenant itself wires the
+// orphaned-owner-user evictor via the user iface).
+func (s *Service) RegisterPostDeleteHook(fn TenantPostDeleteHook) {
+	if fn == nil {
+		return
+	}
+	s.postDeleteHooks = append(s.postDeleteHooks, fn)
+}
 
 // emitAudit forwards to the compliance sink when wired; no-op otherwise.
 func (s *Service) emitAudit(ctx context.Context, event iface.AuditEvent) {
@@ -127,6 +181,8 @@ func tenantToIface(t *models.Tenant) *iface.Tenant {
 		FiscalCode:       t.FiscalCode,
 		Country:          t.BillingAddress.Country,
 		StripeCustomerID: t.StripeCustomerID,
+		IsCompany:        t.IsCompany,
+		SignupChannel:    t.SignupChannel,
 	}
 }
 
@@ -429,6 +485,10 @@ func (s *Service) PurgeTenant(ctx context.Context, tenantUUID string) error {
 	// status — the row is still readable in purged state but carrying
 	// a live keyID would defeat crypto-shred.
 	existing, lookupErr := s.repo.GetTenantByUUID(ctx, tenantUUID)
+	cascadeCtx := s.buildPostDeleteContext(ctx, existing, true)
+	if err := s.cascadeTenantData(ctx, tenantUUID); err != nil {
+		return err
+	}
 	if err := s.repo.UpdateTenantStatus(ctx, tenantUUID, models.TenantStatusPurged); err != nil {
 		return err
 	}
@@ -445,6 +505,7 @@ func (s *Service) PurgeTenant(ctx context.Context, tenantUUID string) error {
 			_ = err
 		}
 	}
+	s.runPostDeleteHooks(ctx, cascadeCtx)
 	s.emitLifecycle(ctx, "tenant.lifecycle.purged", tenantUUID)
 	return nil
 }
@@ -492,18 +553,103 @@ func (s *Service) UpdatePlan(ctx context.Context, tenantUUID string, input model
 }
 
 func (s *Service) DeleteTenant(ctx context.Context, tenantUUID string) error {
+	// Fetch the tenant before mutating so the cascade context
+	// (kind / owner / orphan flag) is computed against the pre-delete
+	// state. A missing row falls through with a nil snapshot — hooks
+	// already tolerate empty fields and the soft-delete below will
+	// surface ErrNotFound the same as before.
+	existing, _ := s.repo.GetTenantByUUID(ctx, tenantUUID)
+	cascadeCtx := s.buildPostDeleteContext(ctx, existing, false)
+	if err := s.cascadeTenantData(ctx, tenantUUID); err != nil {
+		return err
+	}
 	if err := s.repo.SoftDeleteTenant(ctx, tenantUUID); err != nil {
 		return err
 	}
+	s.runPostDeleteHooks(ctx, cascadeCtx)
 	s.emitLifecycle(ctx, "tenant.deleted", tenantUUID)
 	return nil
 }
 
+// cascadeTenantData hard-deletes data the tenant module owns directly:
+// memberships and the closure-table rows. Memberships have no soft-delete
+// pattern (DeleteMembership has always hard-deleted singles) and ancestors
+// are pure derived data, so dropping them outright matches the existing
+// invariants. Cross-module data (authz bindings, the owner's user row) is
+// handled by registered hooks.
+func (s *Service) cascadeTenantData(ctx context.Context, tenantUUID string) error {
+	if _, err := s.repo.DeleteMembershipsByTenant(ctx, tenantUUID); err != nil {
+		return fmt.Errorf("tenant: drop memberships: %w", err)
+	}
+	if _, err := s.repo.DeleteAncestorsByTenant(ctx, tenantUUID); err != nil {
+		return fmt.Errorf("tenant: drop ancestors: %w", err)
+	}
+	return nil
+}
+
+// buildPostDeleteContext snapshots the data hooks need before mutation.
+// The orphan flag is computed against the pre-cascade membership set so
+// "owner has at least one other tenant" stays true even though we are
+// about to drop the membership for THIS tenant — the count check filters
+// the deleting tenant out explicitly.
+func (s *Service) buildPostDeleteContext(ctx context.Context, t *models.Tenant, hard bool) TenantPostDeleteContext {
+	out := TenantPostDeleteContext{Hard: hard}
+	if t == nil {
+		return out
+	}
+	out.TenantUUID = t.UUID
+	out.Kind = string(t.Kind)
+	out.OwnerUserUUID = t.OwnerUserUUID
+	if t.OwnerUserUUID == "" {
+		return out
+	}
+	memberships, err := s.repo.ListMembershipsByUser(ctx, t.OwnerUserUUID)
+	if err != nil {
+		// Be conservative on a lookup failure: assume the owner has
+		// other tenants so we never accidentally evict an account
+		// that's still in use elsewhere.
+		out.OwnerHasOtherTenants = true
+		return out
+	}
+	for i := range memberships {
+		if memberships[i].TenantUUID != t.UUID {
+			out.OwnerHasOtherTenants = true
+			return out
+		}
+	}
+	return out
+}
+
+// runPostDeleteHooks fans out the cascade to subscribers. Hooks are
+// best-effort: an error is recorded as an audit event but does not abort
+// the remaining hooks — leaving the system half-cascaded because hook 2
+// failed would be worse than continuing.
+func (s *Service) runPostDeleteHooks(ctx context.Context, c TenantPostDeleteContext) {
+	for _, hook := range s.postDeleteHooks {
+		if hook == nil {
+			continue
+		}
+		if err := hook(ctx, c); err != nil {
+			s.emitAudit(ctx, iface.AuditEvent{
+				TenantID:     c.TenantUUID,
+				Action:       "tenant.cascade.hook_failed",
+				ResourceType: "tenant",
+				ResourceID:   c.TenantUUID,
+				Outcome:      "failure",
+				Metadata:     map[string]any{"error": err.Error()},
+			})
+		}
+	}
+}
+
 // TenantAdminView is a tenant plus its current member count, used by the
-// platform-admin list endpoint to avoid an N+1.
+// platform-admin list endpoint to avoid an N+1. When the caller passed a Q
+// filter, MatchedMembers carries up to repository.MaxMatchedMembersPerTenant
+// member-side hits so the UI can show "matched: alice@x" chips on each row.
 type TenantAdminView struct {
-	Tenant      *models.Tenant
-	MemberCount int
+	Tenant         *models.Tenant
+	MemberCount    int
+	MatchedMembers []repository.MemberMatch
 }
 
 // ListAllTenants returns every tenant in the system with live member counts.
@@ -513,10 +659,43 @@ func (s *Service) ListAllTenants(ctx context.Context, includeDeleted bool) ([]Te
 	return s.ListAllTenantsFiltered(ctx, repository.TenantListFilter{IncludeDeleted: includeDeleted})
 }
 
+// adminListRepo is the slice of repository.Repository that
+// listAllTenantsFiltered needs. Extracted so the routing decision (Q trim,
+// search-vs-list dispatch, count attachment) can be tested with a fake repo
+// without spinning up Mongo.
+type adminListRepo interface {
+	ListTenants(ctx context.Context, f repository.TenantListFilter) ([]models.Tenant, error)
+	SearchTenantsByQ(ctx context.Context, f repository.TenantListFilter) ([]repository.TenantSearchResult, error)
+	CountMembersByTenants(ctx context.Context, tenantUUIDs []string) (map[string]int, error)
+}
+
 // ListAllTenantsFiltered is the kind/parent-aware variant used by the Phase 3
-// split between the Internal Tenants and Clients admin pages.
+// split between the Internal Tenants and Clients admin pages. When filter.Q
+// is non-empty it routes to the member-aware aggregation in
+// repository.SearchTenantsByQ so the search box on /admin/clients can match
+// tenant name + slug + member email/fullName/username in a single round trip.
 func (s *Service) ListAllTenantsFiltered(ctx context.Context, filter repository.TenantListFilter) ([]TenantAdminView, error) {
-	tenants, err := s.repo.ListTenants(ctx, filter)
+	return listAllTenantsFiltered(ctx, s.repo, filter)
+}
+
+func listAllTenantsFiltered(ctx context.Context, repo adminListRepo, filter repository.TenantListFilter) ([]TenantAdminView, error) {
+	if strings.TrimSpace(filter.Q) != "" {
+		results, err := repo.SearchTenantsByQ(ctx, filter)
+		if err != nil {
+			return nil, err
+		}
+		out := make([]TenantAdminView, len(results))
+		for i := range results {
+			t := results[i].Tenant
+			out[i] = TenantAdminView{
+				Tenant:         &t,
+				MemberCount:    results[i].MemberCount,
+				MatchedMembers: results[i].MatchedMembers,
+			}
+		}
+		return out, nil
+	}
+	tenants, err := repo.ListTenants(ctx, filter)
 	if err != nil {
 		return nil, err
 	}
@@ -527,7 +706,7 @@ func (s *Service) ListAllTenantsFiltered(ctx context.Context, filter repository.
 	for i := range tenants {
 		uuids[i] = tenants[i].UUID
 	}
-	counts, err := s.repo.CountMembersByTenants(ctx, uuids)
+	counts, err := repo.CountMembersByTenants(ctx, uuids)
 	if err != nil {
 		return nil, err
 	}
@@ -561,6 +740,18 @@ func (s *Service) IsDescendantOf(ctx context.Context, ancestorUUID, descendantUU
 
 // --- Memberships ---
 
+// ErrMembershipExists is returned by AttachMember when (userUUID, tenantUUID)
+// already has a membership row. Admin-attach is intentionally not a "re-bind
+// with a different role" path — separating create-vs-update at the service
+// boundary keeps the authz binding mutation explicit (callers must use
+// SetMemberRoles + a separate authz binding update to change role).
+var ErrMembershipExists = errors.New("tenant: user is already a member of tenant")
+
+// ErrAttachInput is returned when the inputs to AttachMember are missing or
+// blank. The handler maps this to 400 — the callers are admins, not anonymous
+// clients, so a clear validation error is appropriate.
+var ErrAttachInput = errors.New("tenant: attach requires non-empty tenantUUID, userUUID, role")
+
 func (s *Service) ListMembers(ctx context.Context, tenantUUID string) ([]models.TenantMembership, error) {
 	return s.repo.ListMembershipsByTenant(ctx, tenantUUID)
 }
@@ -571,6 +762,80 @@ func (s *Service) RemoveMember(ctx context.Context, tenantUUID, userUUID string)
 
 func (s *Service) SetMemberRoles(ctx context.Context, tenantUUID, userUUID string, roles []string) error {
 	return s.repo.UpdateMembershipRoles(ctx, userUUID, tenantUUID, roles)
+}
+
+// AttachMember binds an existing user to an existing tenant with a single
+// tenant-scoped role. Used by the operator-admin direct-grant flow that
+// replaces the retired token-based invite (Phase 5 of the polymorphic-owner
+// refactor) — operators curate which clients aggregate under which tenants
+// without going through an email-invite handshake.
+//
+// Behavior:
+//   - 404 (repository.ErrNotFound) when the tenant is missing or soft-deleted
+//   - 409 (ErrMembershipExists) when the user is already a member; admins
+//     change roles via the (future) SetMemberRoles route, not by re-attach
+//   - the membership is inserted with Roles=[roleName], IsOwner=isOwner
+//   - the OwnerRoleBinder hook (wired by authz) creates the authz binding
+//     for the named role using granter="system" so the cascade rule does
+//     not block platform-issued grants. Without authz wired the membership
+//     still persists — the role name on Membership.Roles is informational
+//     and the user has no extra permissions until a binding lands later.
+//
+// Idempotency: not idempotent on input — each call requires a clean state.
+// The tenant lookup happens before the membership write so a missing tenant
+// 404s cleanly without a half-attached row.
+func (s *Service) AttachMember(ctx context.Context, tenantUUID, userUUID, roleName string, isOwner bool) (*models.TenantMembership, error) {
+	if strings.TrimSpace(tenantUUID) == "" || strings.TrimSpace(userUUID) == "" || strings.TrimSpace(roleName) == "" {
+		return nil, ErrAttachInput
+	}
+	t, err := s.repo.GetTenantByUUID(ctx, tenantUUID)
+	if err != nil {
+		return nil, err
+	}
+	if t.DeletedAt != nil {
+		return nil, repository.ErrNotFound
+	}
+	if existing, err := s.repo.GetMembership(ctx, userUUID, tenantUUID); err == nil && existing != nil {
+		return nil, ErrMembershipExists
+	} else if err != nil && !errors.Is(err, repository.ErrNotFound) {
+		return nil, err
+	}
+	membership := &models.TenantMembership{
+		UUID:       uuid.Must(uuid.NewV7()).String(),
+		UserUUID:   userUUID,
+		TenantUUID: tenantUUID,
+		TenantKind: t.Kind,
+		Roles:      []string{roleName},
+		IsOwner:    isOwner,
+	}
+	if err := s.repo.CreateMembership(ctx, membership); err != nil {
+		return nil, err
+	}
+	if s.bindOwner != nil {
+		if err := s.bindOwner(ctx, userUUID, tenantUUID, roleName); err != nil {
+			// Roll back the membership so the operator sees a clean failure
+			// rather than a half-attached row with no authz binding.
+			_ = s.repo.DeleteMembership(ctx, userUUID, tenantUUID)
+			return nil, fmt.Errorf("tenant: bind role on attach: %w", err)
+		}
+	}
+	actor, _, _ := actorFromContext(ctx)
+	if actor == "" {
+		actor = "system"
+	}
+	s.emitAudit(ctx, iface.AuditEvent{
+		TenantID:     tenantUUID,
+		ActorUserID:  actor,
+		Action:       "tenant.member.attached",
+		ResourceType: "tenant_membership",
+		ResourceID:   membership.UUID,
+		Metadata: map[string]any{
+			"userUUID": userUUID,
+			"role":     roleName,
+			"isOwner":  isOwner,
+		},
+	})
+	return membership, nil
 }
 
 // --- Invites ---

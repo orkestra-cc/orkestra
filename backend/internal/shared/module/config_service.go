@@ -6,12 +6,34 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/orkestra/backend/internal/shared/config"
 	"github.com/orkestra/backend/internal/shared/database"
 	"github.com/orkestra/backend/internal/shared/utils"
 )
+
+// profileAddons maps SKU profile names (set via the ORKESTRA_PROFILE env var
+// in each docker-compose.<profile>.yml) to the addons pre-enabled on first
+// boot. Names match each Module's Name() return value and mirror the build
+// tag sets in backend/Makefile.
+//
+// "enterprise" uses the "*" sentinel which expands at runtime to every
+// non-core addon in the binary. The dev addon is intentionally omitted from
+// every profile because forcing it on in a production-tagged compose file
+// would be surprising — dev keeps its own !IsProduction() gate.
+//
+// On subsequent boots (existing module_configs document found) the override
+// is ignored entirely; admin-set values are authoritative.
+var profileAddons = map[string][]string{
+	"starter":    {},
+	"minimal":    {},
+	"billing":    {"billing", "documents", "company"},
+	"ai":         {"graph", "aimodels", "rag", "agents", "sales"},
+	"saas":       {"subscriptions", "payments", "compliance", "identity"},
+	"enterprise": {"*"},
+}
 
 // ModuleConfigService manages module configurations in MongoDB with Redis caching.
 // It provides the hot-path IsEnabled() check used by the ModuleGate middleware.
@@ -133,6 +155,10 @@ func (s *ModuleConfigService) SeedFromModules(ctx context.Context, modules []Mod
 		s.knownModules[m.Name()] = m
 	}
 
+	// ORKESTRA_PROFILE override applies only to modules that don't yet have a
+	// config document. Computed once so logging fires at most once per boot.
+	profileOverride := s.computeProfileOverride(modules)
+
 	for _, m := range modules {
 		existing, err := s.repo.FindByName(ctx, m.Name())
 		if err != nil {
@@ -166,7 +192,7 @@ func (s *ModuleConfigService) SeedFromModules(ctx context.Context, modules []Mod
 		}
 
 		// First boot for this module — create the config document with environments.
-		doc := s.buildInitialConfig(m, cfg)
+		doc := s.buildInitialConfig(m, cfg, profileOverride)
 		if err := s.repo.Upsert(ctx, &doc); err != nil {
 			s.logger.Error("SeedFromModules: failed to seed module config",
 				slog.String("module", m.Name()),
@@ -178,14 +204,60 @@ func (s *ModuleConfigService) SeedFromModules(ctx context.Context, modules []Mod
 		s.logger.Info("Module config seeded",
 			slog.String("module", m.Name()),
 			slog.String("category", string(m.Category())),
+			slog.Bool("enabled", doc.Enabled),
 		)
 	}
 
 	return nil
 }
 
-// buildInitialConfig constructs a ModuleConfig from a module's declarations and current env vars.
-func (s *ModuleConfigService) buildInitialConfig(m Module, cfg *config.Config) ModuleConfig {
+// computeProfileOverride resolves ORKESTRA_PROFILE to a set of addon names
+// that should be marked enabled on first boot. Returns nil when the env var
+// is unset or names an unknown profile — callers fall back to each module's
+// own Enabled() in that case.
+//
+// Core modules and the dev addon are excluded from the override regardless
+// of profile: core is always on, dev keeps its own !IsProduction() gate.
+func (s *ModuleConfigService) computeProfileOverride(modules []Module) map[string]bool {
+	profile := strings.TrimSpace(os.Getenv("ORKESTRA_PROFILE"))
+	if profile == "" {
+		return nil
+	}
+	addons, ok := profileAddons[profile]
+	if !ok {
+		s.logger.Warn("ORKESTRA_PROFILE: unknown profile, ignoring",
+			slog.String("profile", profile),
+		)
+		return nil
+	}
+
+	enabled := make(map[string]bool)
+	if len(addons) == 1 && addons[0] == "*" {
+		// "enterprise" sentinel — every non-core addon except dev.
+		for _, m := range modules {
+			if m.Category() == CategoryCore || m.Name() == "dev" {
+				continue
+			}
+			enabled[m.Name()] = true
+		}
+	} else {
+		for _, name := range addons {
+			enabled[name] = true
+		}
+	}
+
+	s.logger.Info("ORKESTRA_PROFILE: pre-enabling addons on first boot",
+		slog.String("profile", profile),
+		slog.Int("count", len(enabled)),
+	)
+	return enabled
+}
+
+// buildInitialConfig constructs a ModuleConfig from a module's declarations
+// and current env vars. When profileOverride is non-nil, non-core, non-dev
+// addons take their enabled state from the override map (true if listed,
+// false otherwise) instead of m.Enabled(cfg).
+func (s *ModuleConfigService) buildInitialConfig(m Module, cfg *config.Config, profileOverride map[string]bool) ModuleConfig {
 	configValues := make(map[string]string)
 	encryptedValues := make(map[string]string)
 
@@ -231,12 +303,17 @@ func (s *ModuleConfigService) buildInitialConfig(m Module, cfg *config.Config) M
 		},
 	}
 
+	enabled := m.Enabled(cfg)
+	if profileOverride != nil && m.Category() != CategoryCore && m.Name() != "dev" {
+		enabled = profileOverride[m.Name()]
+	}
+
 	return ModuleConfig{
 		ModuleName:        m.Name(),
 		DisplayName:       m.DisplayName(),
 		Description:       m.Description(),
 		Category:          m.Category(),
-		Enabled:           m.Enabled(cfg),
+		Enabled:           enabled,
 		ConfigValues:      configValues,
 		EncryptedValues:   encryptedValues,
 		ConfigSchema:      m.ConfigSchema(),
@@ -341,7 +418,14 @@ func (s *ModuleConfigService) lazySeed(ctx context.Context, name string) (*Modul
 	if !ok {
 		return nil, nil
 	}
-	doc := s.buildInitialConfig(m, s.cfg)
+	// Mirror first-boot seeding so a wiped collection rebuilds with the same
+	// SKU defaults the operator originally got.
+	moduleSlice := make([]Module, 0, len(s.knownModules))
+	for _, mm := range s.knownModules {
+		moduleSlice = append(moduleSlice, mm)
+	}
+	profileOverride := s.computeProfileOverride(moduleSlice)
+	doc := s.buildInitialConfig(m, s.cfg, profileOverride)
 	if err := s.repo.Upsert(ctx, &doc); err != nil {
 		s.logger.Error("lazySeed: failed to upsert module config",
 			slog.String("module", name),

@@ -8,16 +8,17 @@ import (
 
 	"github.com/orkestra/backend/internal/addons/graph/models"
 	"github.com/orkestra/backend/internal/addons/graph/repository"
+	"github.com/orkestra/backend/internal/shared/iface"
 )
 
 // GraphService defines the interface for graph operations
 type GraphService interface {
-	ExecuteQuery(ctx context.Context, database, cypher string, params map[string]interface{}, readOnly bool) (*models.QueryResult, error)
+	ExecuteQuery(ctx context.Context, database, cypher string, params map[string]interface{}, readOnly bool) (*iface.QueryResult, error)
 	ListDatabases(ctx context.Context) ([]models.DatabaseInfo, error)
 	GetSchema(ctx context.Context, database string) (*models.SchemaInfo, error)
-	BrowseNodes(ctx context.Context, database string, labels []string, limit, skip int) (*models.QueryResult, error)
-	BrowseRelationships(ctx context.Context, database string, types []string, limit, skip int) (*models.QueryResult, error)
-	GetNodeNeighbors(ctx context.Context, database string, nodeID int64, depth, limit int) (*models.GraphData, error)
+	BrowseNodes(ctx context.Context, database string, labels []string, limit, skip int) (*iface.QueryResult, error)
+	BrowseRelationships(ctx context.Context, database string, types []string, limit, skip int) (*iface.QueryResult, error)
+	GetNodeNeighbors(ctx context.Context, database string, nodeID int64, depth, limit int) (*iface.GraphData, error)
 	DeleteNode(ctx context.Context, database string, nodeID int64) (nodesDeleted int, relsDeleted int, err error)
 	DeleteRelationship(ctx context.Context, database string, relationshipID int64) error
 	HealthCheck(ctx context.Context) error
@@ -39,7 +40,7 @@ func NewGraphService(repo repository.GraphRepository, logger *slog.Logger) Graph
 // writeKeywords are Cypher keywords that indicate a write operation
 var writeKeywords = []string{"CREATE", "MERGE", "DELETE", "DETACH", "SET ", "REMOVE", "DROP", "CALL {"}
 
-func (s *graphService) ExecuteQuery(ctx context.Context, database, cypher string, params map[string]interface{}, readOnly bool) (*models.QueryResult, error) {
+func (s *graphService) ExecuteQuery(ctx context.Context, database, cypher string, params map[string]interface{}, readOnly bool) (*iface.QueryResult, error) {
 	if strings.TrimSpace(cypher) == "" {
 		return nil, fmt.Errorf("cypher query cannot be empty")
 	}
@@ -79,7 +80,7 @@ func (s *graphService) GetSchema(ctx context.Context, database string) (*models.
 	return s.repo.GetSchema(ctx, database)
 }
 
-func (s *graphService) BrowseNodes(ctx context.Context, database string, labels []string, limit, skip int) (*models.QueryResult, error) {
+func (s *graphService) BrowseNodes(ctx context.Context, database string, labels []string, limit, skip int) (*iface.QueryResult, error) {
 	if limit <= 0 {
 		limit = 50
 	}
@@ -105,7 +106,7 @@ func (s *graphService) BrowseNodes(ctx context.Context, database string, labels 
 	return s.repo.ExecuteRead(ctx, database, cypher, params)
 }
 
-func (s *graphService) BrowseRelationships(ctx context.Context, database string, types []string, limit, skip int) (*models.QueryResult, error) {
+func (s *graphService) BrowseRelationships(ctx context.Context, database string, types []string, limit, skip int) (*iface.QueryResult, error) {
 	if limit <= 0 {
 		limit = 50
 	}
@@ -132,7 +133,7 @@ func (s *graphService) BrowseRelationships(ctx context.Context, database string,
 	return s.repo.ExecuteRead(ctx, database, cypher, params)
 }
 
-func (s *graphService) GetNodeNeighbors(ctx context.Context, database string, nodeID int64, depth, limit int) (*models.GraphData, error) {
+func (s *graphService) GetNodeNeighbors(ctx context.Context, database string, nodeID int64, depth, limit int) (*iface.GraphData, error) {
 	if depth <= 0 {
 		depth = 1
 	}
@@ -163,7 +164,7 @@ func (s *graphService) GetNodeNeighbors(ctx context.Context, database string, no
 	if result.Graph != nil {
 		return result.Graph, nil
 	}
-	return &models.GraphData{}, nil
+	return &iface.GraphData{}, nil
 }
 
 func (s *graphService) DeleteNode(ctx context.Context, database string, nodeID int64) (int, int, error) {

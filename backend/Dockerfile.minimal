@@ -19,9 +19,16 @@ COPY . .
 ARG VERSION=minimal
 ARG BUILD_TIME
 ARG GIT_COMMIT
+# BUILD_TAGS defaults to the actual minimal profile — core modules + the
+# dev-token generator. To bake a different profile into this image, override
+# (e.g. `--build-arg BUILD_TAGS=""` for the full suite, or
+# `--build-arg BUILD_TAGS="no_addons addon_billing addon_documents addon_dev"`
+# for a billing-only SKU). See backend/Makefile for the canonical tag sets.
+ARG BUILD_TAGS="no_addons addon_dev"
 
 RUN CGO_ENABLED=0 GOOS=linux go build \
     -trimpath \
+    -tags "${BUILD_TAGS}" \
     -ldflags="-w -s \
       -X main.Version=${VERSION} \
       -X main.BuildTime=${BUILD_TIME} \

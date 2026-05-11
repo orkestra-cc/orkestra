@@ -67,7 +67,7 @@ type RefundResponse struct {
 }
 
 type ListPaymentMethodsRequest struct {
-	TenantUUID string `query:"tenantUUID" required:"true"`
+	TenantUUID string `query:"tenantUUID"`
 }
 type ListPaymentMethodsResponse struct {
 	Body struct {
@@ -153,6 +153,9 @@ func (h *TransactionHandler) Refund(ctx context.Context, in *RefundRequest) (*Re
 }
 
 func (h *TransactionHandler) ListPaymentMethods(ctx context.Context, in *ListPaymentMethodsRequest) (*ListPaymentMethodsResponse, error) {
+	if in.TenantUUID == "" {
+		return nil, huma.Error400BadRequest("tenantUUID is required", nil)
+	}
 	if err := assertTenantScope(ctx, in.TenantUUID); err != nil {
 		return nil, err
 	}
@@ -178,10 +181,8 @@ func (h *TransactionHandler) ListWebhookEvents(ctx context.Context, in *ListWebh
 }
 
 // assertTenantScope enforces that the request's active tenant matches the
-// row's TenantUUID. Rows without a tenant binding (legacy/orphan) are
-// always allowed — platform admins use the impersonation bypass to inspect
-// arbitrary tenants. Returns 404 on mismatch so existence of out-of-scope
-// records is not leaked.
+// row's tenant. Returns 404 on mismatch so existence of out-of-scope records
+// is not leaked.
 func assertTenantScope(ctx context.Context, tenantUUID string) error {
 	if tenantUUID == "" {
 		return nil

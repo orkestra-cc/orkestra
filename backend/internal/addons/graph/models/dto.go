@@ -1,5 +1,7 @@
 package models
 
+import "github.com/orkestra/backend/internal/shared/iface"
+
 // --- Query DTOs ---
 
 type ExecuteQueryRequest struct {
@@ -12,7 +14,7 @@ type ExecuteQueryRequest struct {
 }
 
 type ExecuteQueryResponse struct {
-	Body QueryResult
+	Body iface.QueryResult
 }
 
 // --- Database DTOs ---
@@ -43,7 +45,7 @@ type BrowseNodesRequest struct {
 }
 
 type BrowseNodesResponse struct {
-	Body QueryResult
+	Body iface.QueryResult
 }
 
 type BrowseRelationshipsRequest struct {
@@ -54,7 +56,7 @@ type BrowseRelationshipsRequest struct {
 }
 
 type BrowseRelationshipsResponse struct {
-	Body QueryResult
+	Body iface.QueryResult
 }
 
 type GetNodeNeighborsRequest struct {
@@ -65,7 +67,7 @@ type GetNodeNeighborsRequest struct {
 }
 
 type GetNodeNeighborsResponse struct {
-	Body GraphData
+	Body iface.GraphData
 }
 
 // --- Algorithm DTOs ---
@@ -78,7 +80,7 @@ type RunAlgorithmRequestDTO struct {
 }
 
 type RunAlgorithmResponse struct {
-	Body QueryResult
+	Body iface.QueryResult
 }
 
 type ListAlgorithmsResponse struct {
@@ -97,7 +99,7 @@ type VectorSearchRequestDTO struct {
 }
 
 type VectorSearchResponse struct {
-	Body QueryResult
+	Body iface.QueryResult
 }
 
 type ListVectorIndexesRequest struct {

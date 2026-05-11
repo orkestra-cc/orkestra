@@ -12,7 +12,6 @@ import (
 func RegisterRoutes(
 	api huma.API,
 	invoiceHandler *handlers.InvoiceHandler,
-	customerHandler *handlers.CustomerHandler,
 	supplierHandler *handlers.SupplierHandler,
 	companyHandler *handlers.CompanyHandler,
 	notificationHandler *handlers.NotificationHandler,
@@ -198,59 +197,6 @@ func RegisterRoutes(
 		Tags:        []string{"Billing - Received Invoices"},
 		Security:    []map[string][]string{{"bearerAuth": {}}},
 	}, invoiceHandler.RejectReceivedInvoice)
-
-	// ========================================
-	// Customer Routes
-	// ========================================
-	huma.Register(api, huma.Operation{
-		OperationID: "create-customer",
-		Method:      http.MethodPost,
-		Path:        "/v1/billing/customers",
-		Summary:     "Create customer",
-		Description: "Creates a new billing customer for invoice emission",
-		Tags:        []string{"Billing - Customers"},
-		Security:    []map[string][]string{{"bearerAuth": {}}},
-	}, customerHandler.CreateCustomer)
-
-	huma.Register(api, huma.Operation{
-		OperationID: "list-customers",
-		Method:      http.MethodGet,
-		Path:        "/v1/billing/customers",
-		Summary:     "List customers",
-		Description: "Lists billing customers with optional search and pagination",
-		Tags:        []string{"Billing - Customers"},
-		Security:    []map[string][]string{{"bearerAuth": {}}},
-	}, customerHandler.ListCustomers)
-
-	huma.Register(api, huma.Operation{
-		OperationID: "get-customer",
-		Method:      http.MethodGet,
-		Path:        "/v1/billing/customers/{id}",
-		Summary:     "Get customer",
-		Description: "Retrieves a billing customer by its UUID",
-		Tags:        []string{"Billing - Customers"},
-		Security:    []map[string][]string{{"bearerAuth": {}}},
-	}, customerHandler.GetCustomer)
-
-	huma.Register(api, huma.Operation{
-		OperationID: "update-customer",
-		Method:      http.MethodPatch,
-		Path:        "/v1/billing/customers/{id}",
-		Summary:     "Update customer",
-		Description: "Updates a billing customer's information",
-		Tags:        []string{"Billing - Customers"},
-		Security:    []map[string][]string{{"bearerAuth": {}}},
-	}, customerHandler.UpdateCustomer)
-
-	huma.Register(api, huma.Operation{
-		OperationID: "delete-customer",
-		Method:      http.MethodDelete,
-		Path:        "/v1/billing/customers/{id}",
-		Summary:     "Delete customer",
-		Description: "Soft deletes (deactivates) a billing customer",
-		Tags:        []string{"Billing - Customers"},
-		Security:    []map[string][]string{{"bearerAuth": {}}},
-	}, customerHandler.DeleteCustomer)
 
 	// ========================================
 	// Supplier Routes

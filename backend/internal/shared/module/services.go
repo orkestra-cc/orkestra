@@ -21,7 +21,27 @@ const (
 	ServiceOperatorUserProvider ServiceKey = "user.operator_provider"
 	ServiceClientUserProvider   ServiceKey = "user.client_provider"
 	ServiceAuthService     ServiceKey = "auth.service"
+	// ADR-0003 PR-D: tier-aware auth/password-auth services. Bound to
+	// the per-tier sessions / refresh-tokens / oauth-providers / mfa-
+	// factors / email-tokens repositories from PR-B and to the matching
+	// OperatorUserProvider / ClientUserProvider. Registered alongside
+	// the legacy ServiceAuthService / ServicePasswordAuthService keys;
+	// the legacy keys remain canonical until D-8 deletes the legacy
+	// auth_* collections. PR-D's per-tier auth path handlers (D-4, D-5)
+	// pull these directly.
+	ServiceOperatorAuthService         ServiceKey = "auth.operator_service"
+	ServiceClientAuthService           ServiceKey = "auth.client_service"
+	ServiceOperatorPasswordAuthService ServiceKey = "auth.operator_password_auth"
+	ServiceClientPasswordAuthService   ServiceKey = "auth.client_password_auth"
 	ServiceJWTService      ServiceKey = "auth.jwt"
+	// ServiceOperatorJWTService / ServiceClientJWTService publish each
+	// tier's JWTService under a named key so audience-aware consumers
+	// (dev token generator, future test harnesses) can mint a token
+	// stamped with the matching `aud` claim. The canonical
+	// ServiceJWTService stays bound to the operator-tier service for
+	// audience-unaware consumers.
+	ServiceOperatorJWTService ServiceKey = "auth.jwt_operator"
+	ServiceClientJWTService   ServiceKey = "auth.jwt_client"
 	ServiceOAuthProviderFactory ServiceKey = "auth.oauth_factory"
 	ServiceOAuthStateService    ServiceKey = "auth.oauth_state"
 	ServiceOAuthProviderRepo    ServiceKey = "auth.oauth_provider_repo"
@@ -56,12 +76,37 @@ const (
 	// Value: auth/services.WebAuthnService.
 	ServiceWebAuthn ServiceKey = "auth.webauthn"
 
+	// ServiceAuthPolicy publishes the shared *services.AuthPolicyService so
+	// non-auth callers (the operator IP-gate middleware in main.go,
+	// future admin tooling) can read the live admin-managed policy
+	// without reaching into auth-module internals. Phase 7 of the
+	// auth-policy roadmap. Value: *auth/services.AuthPolicyService.
+	ServiceAuthPolicy ServiceKey = "auth.policy"
+
 	ServiceTenantProvider ServiceKey = "tenant.provider"
+	// ServiceAccessProvider is the polymorphic-owner capability-entitlement
+	// surface. Registered by the tenant module alongside ServiceTenantProvider
+	// because the entitlements projection lives in the tenant collection set
+	// today. Consumers (RequireCapability middleware, authz Cedar evaluator,
+	// subscriptions entitlement syncer) ask for this key directly so the
+	// capability check is independent of whether the owner is a user or a
+	// tenant. Value: iface.AccessProvider.
+	ServiceAccessProvider ServiceKey = "access.provider"
 	// ServiceTenantService is the concrete *tenant/services.Service registered
 	// alongside the TenantProvider interface. Compliance consumes it to wire
 	// its audit sink via SetAuditSink — the public provider interface stays
 	// slim, the concrete service carries post-init setters.
 	ServiceTenantService  ServiceKey = "tenant.service"
+	// ServiceBillingTenantProvider exposes the unified-clients billing-party
+	// resolver: walks up Tenant.ParentTenantUUID until it finds a tenant
+	// carrying FatturaPA fields and returns the snapshot the billing send
+	// path stamps onto an Invoice's CessionarioCommittente. Registered by
+	// the tenant module from the same concrete *tenant/services.Service that
+	// implements TenantProvider — the unified-client refactor (Phase 5)
+	// switches billing.invoice_service.Send onto this seam in place of the
+	// soon-to-be-deleted billing.Customer lookup.
+	// Value: iface.BillingTenantProvider.
+	ServiceBillingTenantProvider ServiceKey = "tenant.billing_provider"
 	ServiceAuthzProvider  ServiceKey = "authz.provider"
 	// ServiceAuthzService is the concrete *authz/services.Service registered
 	// alongside the AuthzProvider interface. main.go resolves it post-
@@ -84,6 +129,13 @@ const (
 	ServicePaymentProvider        ServiceKey = "payments.provider"
 	ServiceSubscriptionReconciler ServiceKey = "subscriptions.reconciler"
 
+	// ServiceSelfServiceCheckoutPlanner is the per-subscription checkout
+	// snapshot resolver consumed by the payments client-surface handler
+	// when building Stripe Checkout sessions for /v1/me/payments/checkout-
+	// session. Implemented by the subscriptions module. Optional from
+	// payments' point of view — when absent, the route returns 503.
+	ServiceSelfServiceCheckoutPlanner ServiceKey = "subscriptions.checkout_planner"
+
 	// ServiceTenantSubscriptionProvider / ServiceTenantPaymentProvider expose
 	// per-tenant read-only listings consumed by the Phase 2 admin aggregator
 	// endpoints under /v1/admin/tenants/{id}/{subscriptions,payments}. Core
@@ -92,13 +144,6 @@ const (
 	// the addon is disabled — aggregator returns an empty list, not 500.
 	ServiceTenantSubscriptionProvider ServiceKey = "subscriptions.tenant_provider"
 	ServiceTenantPaymentProvider      ServiceKey = "payments.tenant_provider"
-
-	// ServiceTenantBillingCustomerProvider exposes the per-tenant
-	// FatturaPA Customer linked via Customer.TenantUUID (ADR-0001 PR-4).
-	// Consumed by core/tenant's /v1/admin/tenants/{id}/billing-customer
-	// aggregator endpoint. Missing registration means the billing addon
-	// is disabled — the aggregator returns 404/503 accordingly.
-	ServiceTenantBillingCustomerProvider ServiceKey = "billing.tenant_customer_provider"
 
 	// ServiceAuditSink is the platform-wide append-only audit trail sink
 	// provided by the compliance module. Consumers resolve it via

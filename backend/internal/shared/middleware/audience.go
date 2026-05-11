@@ -7,7 +7,32 @@ import (
 	"strings"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/orkestra/backend/internal/shared/config"
 )
+
+// cookieDomainForAudience returns the refresh-cookie Domain attribute the
+// middleware should mint for a request acting in the given audience.
+// ADR-0003 PR-D D-9 split: operator requests get cfg.Auth.Cookie.OperatorDomain,
+// client requests get ClientDomain, anything else (legacy single-host or
+// pre-audience routes) falls back to cfg.Auth.Cookie.Domain. An empty
+// per-tier field also falls back so single-host deployments still set the
+// scope they expect.
+func cookieDomainForAudience(cfg *config.Config, audience string) string {
+	if cfg == nil {
+		return ""
+	}
+	switch audience {
+	case "operator":
+		if cfg.Auth.Cookie.OperatorDomain != "" {
+			return cfg.Auth.Cookie.OperatorDomain
+		}
+	case "client":
+		if cfg.Auth.Cookie.ClientDomain != "" {
+			return cfg.Auth.Cookie.ClientDomain
+		}
+	}
+	return cfg.Auth.Cookie.Domain
+}
 
 // AudienceContextKey holds the resolved JWT audience for the current
 // request. Stamped by RequireAudience after a successful match.
@@ -27,28 +52,20 @@ func AudienceFromContext(ctx context.Context) string {
 	return ""
 }
 
-// legacyAudience is the JWT `aud` value monolith-issued tokens carried
-// before ADR-0003 PR-C. RequireAudience accepts it as equivalent to a
-// missing `aud` claim so in-flight sessions survive the PR-C deploy
-// without being forced to re-login. PR-D ("JWT v2 hard cutover") removes
-// this transition path and starts rejecting both missing and legacy aud.
-const legacyAudience = "orkestra-api"
-
 // RequireAudience returns chi middleware that rejects requests whose
 // bearer token carries a JWT `aud` claim not equal to expected. It is
 // designed to be mounted on an audience-scoped chi.Mux at construction
 // time so every route on that mux fails closed if a token from a
 // different audience reaches it — defense in depth above per-route RBAC.
 //
-// Behaviour summary:
+// Behaviour (ADR-0003 PR-D D-3 hard cutover — no transition compat):
 //
 //   - No bearer token              → pass through (public route or
 //                                     downstream auth middleware will
 //                                     enforce). Audience is not stamped.
-//   - Token with no `aud` claim    → pass through (legacy v1 token from
-//                                     before PR-C). Audience not stamped.
-//   - Token with `aud == legacy`   → pass through, transition compat.
 //   - Token with `aud == expected` → pass through, audience stamped.
+//   - Token with no `aud` claim    → 401 with code "audience_mismatch"
+//                                     (v1 token rejected per PR-D cutover).
 //   - Token with mismatched aud    → 401 with code "audience_mismatch".
 //
 // The unverified claim parse here is intentionally cheap (no key, no
@@ -66,11 +83,7 @@ func RequireAudience(expected string) func(http.Handler) http.Handler {
 			}
 
 			aud := readUnverifiedAudience(token)
-			switch aud {
-			case "", legacyAudience:
-				next.ServeHTTP(w, r)
-				return
-			case expected:
+			if aud == expected && aud != "" {
 				ctx := context.WithValue(r.Context(), AudienceContextKey, aud)
 				next.ServeHTTP(w, r.WithContext(ctx))
 				return

@@ -62,7 +62,10 @@ forbid (
     (action == Action::"system.modules.admin" ||
      action == Action::"system.tenants.admin" ||
      action == Action::"system.users.admin" ||
-     action == Action::"system.users.mfa_reset") &&
+     action == Action::"system.users.mfa_reset" ||
+     action == Action::"system.users.password_reset" ||
+     action == Action::"system.users.email_verify_resend" ||
+     action == Action::"system.users.oauth_unlink") &&
     context has env && context.env == "production" &&
     context has ip_bucket && context.ip_bucket == "public"
 };

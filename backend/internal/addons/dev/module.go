@@ -23,12 +23,18 @@ func (m *DevModule) Description() string  { return "Dev token generation and tes
 
 func (m *DevModule) Enabled(cfg *config.Config) bool { return !cfg.IsProduction() }
 
-func (m *DevModule) Dependencies() []string           { return []string{"auth"} }
-func (m *DevModule) RequiredServices() []module.ServiceKey { return []module.ServiceKey{module.ServiceJWTService} }
+func (m *DevModule) Dependencies() []string { return []string{"auth"} }
+func (m *DevModule) RequiredServices() []module.ServiceKey {
+	// ADR-0003 PR-D D-10: dev token mints per-audience tokens so the
+	// caller can exercise either host mux. Both per-tier JWT services
+	// are required dependencies; the canonical key is no longer used.
+	return []module.ServiceKey{module.ServiceOperatorJWTService, module.ServiceClientJWTService}
+}
 
 func (m *DevModule) Init(deps *module.Dependencies) error {
-	jwtService := module.MustGetTyped[iface.JWTProvider](deps.Services, module.ServiceJWTService)
-	m.handler = handlers.NewDevTokenHandler(jwtService, deps.Config)
+	operatorJWT := module.MustGetTyped[iface.JWTProvider](deps.Services, module.ServiceOperatorJWTService)
+	clientJWT := module.MustGetTyped[iface.JWTProvider](deps.Services, module.ServiceClientJWTService)
+	m.handler = handlers.NewDevTokenHandler(operatorJWT, clientJWT, deps.Config)
 	m.logger = deps.Logger
 	return nil
 }

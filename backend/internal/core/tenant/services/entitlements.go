@@ -15,12 +15,12 @@ import (
 )
 
 // GrantCapability creates an active entitlement for the tenant on the
-// capability. If an active entitlement already exists, it is revoked first so
-// the "at most one active row per (tenant, capability)" invariant holds. The
-// replacement pattern lets subscription upgrades/downgrades land as a pair of
-// (revoke old, insert new) rows — the history stays auditable.
+// capability. If an active entitlement already exists, it is revoked first
+// so the "at most one active row per (tenant, capability)" invariant holds.
+// The replacement pattern lets subscription upgrades/downgrades land as a
+// pair of (revoke old, insert new) rows — the history stays auditable.
 //
-// Signature matches iface.TenantProvider.GrantCapability so any module
+// Signature matches iface.AccessProvider.GrantCapability so any module
 // holding that interface handle can grant entitlements without importing
 // the concrete tenant service.
 func (s *Service) GrantCapability(ctx context.Context, in iface.GrantCapabilityInput) error {
@@ -82,15 +82,12 @@ func (s *Service) RevokeCapability(ctx context.Context, tenantUUID, capabilityID
 }
 
 // HasCapability reports whether the tenant currently has an active
-// entitlement to the given capability. Implements the
-// iface.TenantProvider.HasCapability contract.
+// entitlement to the given capability. Implements
+// iface.AccessProvider.HasCapability.
 //
 // Internal (operator-side) tenants short-circuit to true: capabilities are
-// the monetization seam for external client tenants, and internal tenants
-// host the platform — they don't subscribe. This keeps operator tooling
-// and dev workflows working without minting entitlement rows for every
-// registered capability on internal tenant creation. External tenants
-// always consult the projection.
+// the monetization seam for external clients, and internal tenants host
+// the platform — they don't subscribe.
 func (s *Service) HasCapability(ctx context.Context, tenantUUID, capabilityID string) (bool, error) {
 	if tenantUUID == "" || capabilityID == "" {
 		return false, nil
@@ -109,8 +106,8 @@ func (s *Service) ListEntitlements(ctx context.Context, tenantUUID string) ([]mo
 // ListCapabilityIDs returns the deduplicated capability IDs the tenant
 // currently has active entitlements for, in deterministic (sorted) order.
 // Thin projection over ListEntitlements so Cedar's principal builder does
-// not reason about the entitlement metadata. Implements the
-// iface.TenantProvider.ListCapabilityIDs contract.
+// not reason about the entitlement metadata. Implements
+// iface.AccessProvider.ListCapabilityIDs.
 func (s *Service) ListCapabilityIDs(ctx context.Context, tenantUUID string) ([]string, error) {
 	if tenantUUID == "" {
 		return nil, nil
@@ -156,32 +153,6 @@ func (s *Service) ActivateTenant(ctx context.Context, tenantUUID string) error {
 		return errors.New("tenant: ActivateTenant requires tenantUUID")
 	}
 	return s.MarkTenantActive(ctx, tenantUUID)
-}
-
-// ProvisionExternalTenant is the onboarding entry point for anonymous
-// self-service signup. Delegates to CreateExternalTenant for the
-// Tier-2 bookkeeping (status=provisioning, signupChannel=self_serve,
-// owner membership) and returns the DTO shape so callers crossing the
-// module boundary don't import models.Tenant. Implements
-// iface.TenantProvider.ProvisionExternalTenant.
-func (s *Service) ProvisionExternalTenant(ctx context.Context, ownerUserUUID string, in iface.OnboardingTenantInput) (*iface.Tenant, error) {
-	if ownerUserUUID == "" {
-		return nil, errors.New("tenant: ProvisionExternalTenant requires ownerUserUUID")
-	}
-	if in.Name == "" {
-		return nil, errors.New("tenant: ProvisionExternalTenant requires Name")
-	}
-	t, err := s.CreateExternalTenant(ctx, ownerUserUUID, in.Name, in.Slug, models.SignupChannelSelfServe, nil)
-	if err != nil {
-		return nil, fmt.Errorf("tenant: ProvisionExternalTenant: %w", err)
-	}
-	if in.Plan != "" && t.Plan != in.Plan {
-		if err := s.repo.UpdateTenant(ctx, t.UUID, bson.M{"plan": in.Plan}); err != nil {
-			return nil, fmt.Errorf("tenant: ProvisionExternalTenant: set plan: %w", err)
-		}
-		t.Plan = in.Plan
-	}
-	return tenantToIface(t), nil
 }
 
 // SetTenantStripeCustomerID persists the Stripe customer identifier on the

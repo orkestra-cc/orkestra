@@ -495,19 +495,20 @@ func (h *ModuleAdminHandler) toConfigResponse(c ModuleConfig) ModuleConfigRespon
 
 	// Populate service declarations from the registered module
 	for _, m := range h.registry.AllModules() {
-		if m.Name() == c.ModuleName {
-			for _, k := range m.ProvidedServices() {
-				resp.ProvidedServices = append(resp.ProvidedServices, string(k))
-			}
-			for _, k := range m.RequiredServices() {
-				resp.RequiredServices = append(resp.RequiredServices, string(k))
-			}
-			for _, k := range m.OptionalServices() {
-				resp.OptionalServices = append(resp.OptionalServices, string(k))
-			}
-			resp.InfraContainers = h.collectInfraStatus(m)
-			break
+		if m.Name() != c.ModuleName {
+			continue
 		}
+		for _, k := range m.ProvidedServices() {
+			resp.ProvidedServices = append(resp.ProvidedServices, string(k))
+		}
+		for _, k := range m.RequiredServices() {
+			resp.RequiredServices = append(resp.RequiredServices, string(k))
+		}
+		for _, k := range m.OptionalServices() {
+			resp.OptionalServices = append(resp.OptionalServices, string(k))
+		}
+		resp.InfraContainers = h.collectInfraStatus(m)
+		break
 	}
 
 	if !c.CreatedAt.IsZero() {

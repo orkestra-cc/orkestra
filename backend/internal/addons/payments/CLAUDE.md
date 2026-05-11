@@ -43,17 +43,19 @@ All reconciler methods are idempotent, so a replayed webhook (same `evt.id`) is 
 
 `PaymentIntent.metadata` must carry `subscriptionUUID` + `invoiceUUID` — those are how webhook handlers find the right subscription/invoice to update. Set in `renewal_service.go:chargeInvoice` and echoed back by Stripe on every related event (succeeded, failed, refunded).
 
-## Tenant scope (ADR-0001)
+## Tenant scope (Unified Client Aggregate)
 
 Every operator-admin route under the module sits behind `RequireInternalTenant()` — external-tenant tokens cannot hit transaction reads, refunds, payment-method reads, or the webhook audit log. The Stripe webhook endpoint stays public (HMAC-verified inside the handler).
 
-Transaction and PaymentMethod rows are tenant-scoped via `TenantUUID` only — the legacy `SubscriptionClient` indirection was removed. `PaymentService.ChargeSubscription` reads `tenantUUID` from the charge metadata populated by the subscriptions renewal service. A thin `TenantPaymentAdapter` (`services/tenant_provider.go`) implements `iface.TenantPaymentProvider` so `core/tenant` can serve `GET /v1/admin/tenants/{id}/payments` without importing this addon.
+Transaction and PaymentMethod rows are tenant-scoped via `tenantUUID`. `PaymentService.ChargeSubscription` reads the tenant from the charge struct's `TenantUUID` field (preferred) or from the `tenantUUID` metadata stamp populated by the subscriptions renewal service. A thin `TenantPaymentAdapter` (`services/tenant_provider.go`) implements `iface.TenantPaymentProvider` so `core/tenant` can serve `GET /v1/admin/tenants/{id}/payments` — the adapter filters by `tenantUUID`.
+
+Self-service checkout reads the tenant's billing identity (LegalName, VAT, country, email, StripeCustomerID) through `iface.TenantProvider.GetTenant`. On the first charge / setup session the handler creates the Stripe customer and persists the id back onto the tenant via `SetTenantStripeCustomerID`. The caller's tenant set is built from `EnsureTenantForUser` (personal tenant) + `ListUserMemberships` (owned tenants); operations against an unowned tenant return 404.
 
 ## Collections
 
 | Collection | Key indexes |
 |---|---|
-| `payments_transactions` | `(provider, providerTxID)` unique, `(subscriptionUUID, createdAt desc)`, `(tenantUUID, createdAt desc)` for the admin aggregator, `status` |
+| `payments_transactions` | `(provider, providerTxID)` unique, `(subscriptionUUID, createdAt desc)`, `(tenantUUID, createdAt desc)` for self-service `/v1/me/transactions` and the admin aggregator, `status` |
 | `payments_payment_methods` | `(tenantUUID, provider)`, `providerMethodID` unique |
 | `payments_webhook_events` | `(provider, providerEventID)` **unique** — the idempotency guard |
 
@@ -66,6 +68,21 @@ stripeApiVersion      string   STRIPE_API_VERSION        pinned: 2024-12-18.acac
 defaultProvider       string                             "stripe" in v1
 ```
 
+## Tier-2 self-service routes (ADR-0003 client surface)
+
+Mounted on `ri.Client.ProtectedRouter` behind `RequireGlobal()`; each handler builds the caller's tenant set from `EnsureTenantForUser` (personal tenant) + `ListUserMemberships` (owned tenants). Reads fan out across that set. The routes only mount when `TenantProvider` is wired — otherwise the entire client surface is skipped at boot.
+
+```
+GET  /v1/me/transactions                      ?tenantUuid&subscriptionUuid&status
+GET  /v1/me/payment-methods                   ?tenantUuid
+POST /v1/me/payments/checkout-session         { subscriptionUuid, successUrl, cancelUrl }
+POST /v1/me/payments/setup-checkout-session   { tenantUuid?, successUrl, cancelUrl }
+```
+
+`checkout-session` opens a Stripe Checkout in `mode=payment` for the subscription's most recent pending invoice, with `setup_future_usage=off_session` so the card is saved for next-cycle renewals. Stamps `subscriptionUUID/invoiceUUID/tenantUUID` into the resulting PaymentIntent metadata so the existing webhook reconciler picks it up — no new reconciliation path. Returns 409 when the subscription has no pending invoice. The tenant is resolved from the planner's `CheckoutPlan.TenantUUID` and re-checked against the caller's tenant set.
+
+`setup-checkout-session` opens Stripe Checkout in `mode=setup` (card-only, no charge) so a Tier-2 user can save a card from the account page. Defaults to the caller's personal tenant; pass `tenantUuid` to save a card on an owned tenant.
+
 ## Not in v1
 
-PayPal, SEPA Direct Debit, bank transfers, hosted checkout, client-side payment element (Stripe Elements) endpoints — those come with the self-service client portal in v2.
+PayPal, SEPA Direct Debit, bank transfers, embedded Stripe Elements (hosted Checkout only). Anonymous-checkout (no auth, sessionless) is also out — every `/v1/me/*` route requires an authenticated client session.

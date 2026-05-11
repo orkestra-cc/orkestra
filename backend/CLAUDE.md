@@ -1,6 +1,6 @@
 # Backend — Go Modular Server
 
-Single Go binary. 4 core modules (always loaded) + 12 optional addons. Slim `cmd/server/main.go` (~240 lines) that wires infrastructure and delegates everything else to the module registry. Port 3000 inside the container.
+Single Go binary. 6 core modules (always loaded) + 13 optional addons. Slim `cmd/server/main.go` (~240 lines) that wires infrastructure and delegates everything else to the module registry. Port 3000 inside the container.
 
 ## Stack
 
@@ -17,7 +17,20 @@ ProvidedServices, RequiredServices, OptionalServices
 Enabled, Init, RegisterRoutes, Start, Stop, HealthCheck
 ```
 
-**Registration** (`cmd/server/catalog.go`): core modules (user → notification → auth → navigation) are always loaded. All optional modules are always instantiated, initialized, and routed at boot — only enabled ones have `Start()` called. The admin API can enable/disable modules at runtime via `StartModule()`/`StopModule()` without restart. The registry topologically sorts by `Dependencies()` so producers init before consumers, auto-creates MongoDB collections with their declared indexes, seeds configs, collects nav items, and gates routes for disabled modules via `ModuleGate` middleware.
+**Registration** (`cmd/server/catalog.go` + `catalog_<addon>.go`): core modules (user → notification → tenant → authz → auth → navigation) are always loaded — they live in `catalog.go`. Each optional addon lives in its own `cmd/server/catalog_<addon>.go` file, gated by `//go:build !no_addons || addon_<name>`, and registers itself into `optionalModules` via `init()`. The default build (no tags) compiles every addon — same behavior as before. Pass `-tags "no_addons"` for a core-only "starter" binary, or `-tags "no_addons addon_billing addon_documents"` for a curated subset. All optional modules that are compiled in are always instantiated, initialized, and routed at boot — only enabled ones have `Start()` called. The admin API can enable/disable modules at runtime via `StartModule()`/`StopModule()` without restart. The registry topologically sorts by `Dependencies()` so producers init before consumers, auto-creates MongoDB collections with their declared indexes, seeds configs, collects nav items, and gates routes for disabled modules via `ModuleGate` middleware.
+
+**Profile builds** (Makefile + Dockerfile `BUILD_TAGS` arg): the canonical addon SKUs are defined in `backend/Makefile`. Build-tag sets are closed under module dependencies (see the `Dependencies()` declarations) — picking a profile that omits a transitive dependency fails loudly at boot via the registry's topo sort, not silently at request time.
+
+| Profile      | `make` target          | Tag set                                                                                  |
+| ------------ | ---------------------- | ---------------------------------------------------------------------------------------- |
+| starter      | `make build-starter`   | `no_addons`                                                                              |
+| minimal      | `make build-minimal`   | `no_addons addon_dev`                                                                    |
+| billing      | `make build-billing`   | `no_addons addon_billing addon_documents addon_company addon_dev`                        |
+| ai           | `make build-ai`        | `no_addons addon_graph addon_aimodels addon_rag addon_agents addon_sales addon_dev`      |
+| saas         | `make build-saas`      | `no_addons addon_subscriptions addon_payments addon_compliance addon_identity addon_dev` |
+| enterprise   | `make build`           | (no tags — every addon)                                                                  |
+
+Container builds: `Dockerfile` accepts `--build-arg BUILD_TAGS="..."` (default empty = enterprise). `Dockerfile.minimal` defaults to `BUILD_TAGS="no_addons addon_dev"` so `docker-compose.minimal.yml` ships a true minimal binary. CI builds every profile on each PR via the matrix in `.github/workflows/backend.yml` — that's how a missing tag in `catalog_<addon>.go` gets caught before merge. On push to `dev`/`main`, the same matrix publishes one image per profile to GHCR: `ghcr.io/<repo>/backend:<profile>` (rolling) and `:<profile>-<sha>` (pinned). `:latest` stays as an alias for `:enterprise` for backward compatibility.
 
 **Cross-module communication**: modules discover each other through the `ServiceRegistry` (typed key-value store). Consumer modules import interfaces from `internal/shared/iface/` — never import another module's `services/` or `repository/` package.
 
@@ -38,9 +51,11 @@ backend/
 │   └── ai-service/                 # AI sidecar binary (optional)
 │       └── main.go
 ├── internal/
-│   ├── core/                       # Always loaded (init order: user → notification → auth → navigation)
+│   ├── core/                       # Always loaded (init order: user → notification → tenant → authz → auth → navigation)
 │   │   ├── user/                   # User CRUD, roles, documents
 │   │   ├── notification/           # Email delivery, templates, preferences, unsubscribe
+│   │   ├── tenant/                 # Orgs + memberships (two-tier tenancy)
+│   │   ├── authz/                  # Permissions, roles, Cedar policy engine
 │   │   ├── auth/                   # Email/password + OAuth 2.1, JWT, sessions, RBAC
 │   │   └── navigation/             # Dynamic menu from module NavItems
 │   ├── addons/                     # Optional — toggled at /admin/modules
@@ -54,7 +69,8 @@ backend/
 │   │   ├── sales/                  # AI prospect analysis
 │   │   ├── subscriptions/          # Recurring services catalog, clients, subscriptions
 │   │   ├── payments/               # Stripe gateway, refunds, webhooks
-│   │   ├── onboarding/             # Anonymous self-service signup (external tenant + owner)
+│   │   ├── compliance/             # Platform audit log + (future) DSR / SOC2 evidence
+│   │   ├── identity/               # Per-tenant BYO OIDC + SCIM 2.0 stubs
 │   │   └── dev/                    # Dev token generator
 │   ├── shared/                     # Infrastructure — used by core and addons
 │   │   ├── module/                 # Module interface, registry, config service
@@ -82,7 +98,7 @@ Each module follows: `module.go` → `handlers/` → `services/` → `repository
 ## Adding a New Module
 
 1. Create `internal/addons/yourmodule/module.go` implementing the `Module` interface
-2. Add to `optionalModules` in `cmd/server/catalog.go` (the registry auto-sorts by `Dependencies()`)
+2. Create `cmd/server/catalog_yourmodule.go` with build tag `//go:build !no_addons || addon_yourmodule`, a single `init()` that registers `optionalModules["yourmodule"] = func() module.Module { return yourmodule.NewModule() }` (the registry auto-sorts by `Dependencies()`)
 3. Declare `Collections()` for auto-created MongoDB collections + indexes
 4. Declare `NavItems()` for sidebar entries (group, icon, path, minRole)
 5. Declare `ConfigSchema()` for admin-configurable fields
@@ -90,7 +106,7 @@ Each module follows: `module.go` → `handlers/` → `services/` → `repository
 7. Use `shared/iface` interfaces for cross-module deps — add new interfaces there if needed
 8. Use `deps.Services.Register(key, impl)` to expose services to other modules
 
-Users enable the module via the admin UI at `/admin/modules` (takes effect immediately, no restart needed). For first boot of a fresh install, the module's `ConfigSchema().EnvVar` fields seed the initial `module_configs` document from the host environment — see [docker/CLAUDE.md](../docker/CLAUDE.md) for the env-var-vs-admin-UI split.
+Users enable the module via the admin UI at `/admin/modules` (takes effect immediately, no restart needed). For first boot of a fresh install, the module's `ConfigSchema().EnvVar` fields seed the initial `module_configs` document from the host environment — see [docker/CLAUDE.md](../docker/CLAUDE.md) for the env-var-vs-admin-UI split. On first boot only, setting `ORKESTRA_PROFILE` (resolved by `shared/module/config_service.go::computeProfileOverride`) pre-enables the SKU's addons in the seeded document; the dev addon is excluded so it keeps its `!IsProduction()` gate.
 
 ## API Endpoints
 
@@ -106,12 +122,15 @@ OpenAPI specs are auto-generated by Huma v2 — add endpoints with `huma.Registe
 ## Dev Tokens (Dev/Staging Only)
 
 ```bash
-./scripts/devtoken.sh developer          # Generate token for role
-./scripts/devtoken.sh admin --quiet      # Token only (for piping)
-./scripts/devtoken.sh operator --curl    # Ready-to-use curl command
+./scripts/devtoken.sh developer                       # Generate operator-aud token
+./scripts/devtoken.sh admin --quiet                   # Token only (for piping)
+./scripts/devtoken.sh operator --curl                 # Ready-to-use curl command
+./scripts/devtoken.sh administrator --audience client # ADR-0003 PR-D — mint aud=client for api.*
 ```
 
-Roles (highest to lowest): `super_admin` > `administrator` > `developer` > `manager` > `operator` > `guest`
+Roles (highest to lowest): `super_admin` > `administrator` > `developer` > `manager` > `operator` > `guest`.
+
+Audiences (ADR-0003 PR-D D-10): `operator` (default, hits `console.*`) or `client` (hits `api.*`). Both surfaces' `RequireAudience` gates reject cross-audience tokens with `401 audience_mismatch`.
 
 Disabled in production. Creates synthetic users (no DB writes).
 

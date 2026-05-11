@@ -427,17 +427,24 @@ func TestBuildMinimalB2BInvoice(t *testing.T) {
 		t.Fatalf("Build failed: %v", err)
 	}
 
-	// Verify essential elements are present
+	// Verify essential elements are present.
+	//
+	// Go's encoding/xml encoder declares the FatturaPA namespace on the
+	// root element (`xmlns="..."`) rather than via a `p:` prefix, and
+	// emits `xmlns=""` on the two top-level children (Header / Body) to
+	// reset it for the no-namespace inner schema. Both forms are valid
+	// per the FatturaPA XSD and SDI accepts either — assertions match
+	// the prefix-less default-namespace form we actually ship.
 	checks := []string{
-		`<p:FatturaElettronica`,
+		`<FatturaElettronica `,
 		`SistemaEmittente="ORKESTRA"`,
 		`versione="FPR12"`,
-		`<FatturaElettronicaHeader>`,
+		`<FatturaElettronicaHeader`, // followed by ` xmlns=""` — match the open tag only
 		`<DatiTrasmissione>`,
 		`<IdTrasmittente>`,
 		`<CedentePrestatore>`,
 		`<CessionarioCommittente>`,
-		`<FatturaElettronicaBody>`,
+		`<FatturaElettronicaBody`, // same ` xmlns=""` reset as Header
 		`<DatiGenerali>`,
 		`<DatiGeneraliDocumento>`,
 		`<TipoDocumento>TD01</TipoDocumento>`,

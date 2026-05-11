@@ -21,13 +21,12 @@ func NewTenantPaymentAdapter(transactions repository.TransactionRepository) *Ten
 	return &TenantPaymentAdapter{transactions: transactions}
 }
 
-// ListByTenant returns every transaction bound to the tenant via TenantUUID.
-// The repository layer sorts by createdAt desc.
+// ListByTenant returns every transaction billed to the tenant.
 func (a *TenantPaymentAdapter) ListByTenant(ctx context.Context, tenantUUID string) ([]iface.TenantPayment, error) {
 	if tenantUUID == "" {
 		return []iface.TenantPayment{}, nil
 	}
-	rows, err := a.transactions.FindByTenantUUID(ctx, tenantUUID)
+	rows, err := a.transactions.FindByTenant(ctx, tenantUUID)
 	if err != nil {
 		return nil, err
 	}

@@ -2,11 +2,27 @@
 
 | Field | Value |
 |---|---|
-| **Status** | Proposed |
-| **Date** | 2026-04-30 |
+| **Status** | Accepted (PR-A/B/C merged 2026-04-30; PR-D phases D-1..D-10 landed on `feat/adr-0003-prd-auth-path-split`, ready for review) |
+| **Date** | 2026-04-30 (proposed) / 2026-05-04 (PR-D feature-complete) |
 | **Authors** | @salvatore.balestrino |
 | **Supersedes** | — |
 | **Related** | [ADR-0001](0001-unified-tenant-model.md), [ADR-0002](0002-metrics-label-schema.md) |
+
+## Implementation status
+
+| PR | Commit / merge | Status |
+|---|---|---|
+| PR-A — `APISurface` / `RouteInfo` reshape | `ed7af67` (PR #1) | merged 2026-04-30 |
+| PR-C — host mux + audience MW + JWT `aud=operator` | merge `56ee4cd` | merged 2026-04-30 |
+| PR-B — split user/auth collections (B-1..B-5) | merge `57d1adc` | merged 2026-04-30 |
+| PR-D D-1..D-3 — tier-aware repos/services/JWT v2 cutover | `6f16163`, `837a700`, `9036fea` | landed on `feat/adr-0003-prd-auth-path-split` |
+| PR-D D-4..D-5 — per-tier auth paths | `4f0cb44`, `ddce086` | landed |
+| PR-D D-6 — OAuth state-encoded tier dispatch | `0716663` | landed |
+| PR-D D-7 — client-surface routes (onboarding/subscriptions/payments) | `3b4f2fe` | landed |
+| PR-D D-8 — hard cutover, drop legacy auth paths + `USER_TIER_SPLIT_ENABLED` (-1319 lines) | `ff4b089` | landed |
+| PR-D D-9 — frontend cookie-domain split (`OPERATOR_COOKIE_DOMAIN` / `CLIENT_COOKIE_DOMAIN`) | `966aae8` | landed |
+| PR-D D-10 — devtoken `--audience` + integration smoke | `76e10c5` | landed |
+| PR-E — client-facing AI runtime endpoints | — | deferred (post-merge) |
 
 ## Context
 
@@ -272,7 +288,7 @@ Land **after** the in-flight tenant-consolidation series (current branch: `feat/
 | PR | Title | Scope | Mergeable independently |
 |---|---|---|---|
 | **PR-A** | `module.APISurface` and per-audience `RouteInfo` | Mechanical signature change across 12 modules. Both `Operator` and `Client` initially point at the same mux — no behavior change. Ship as a no-op refactor. | Yes — fully reversible |
-| **PR-B** | Split user/auth collections + tier-aware providers | Heavy. New collections, new providers (`OperatorUserProvider`, `ClientUserProvider`), data migration script (`backend/scripts/migrate_user_split.go`), integrity tests, repository tier guards. Behavior preserved (single login path still works). | Yes — gated by feature flag `USER_TIER_SPLIT_ENABLED` until cutover |
+| **PR-B** | Split user/auth collections + tier-aware providers | Heavy. New collections, new providers (`OperatorUserProvider`, `ClientUserProvider`), data migration script (`backend/scripts/migrate_user_split.go`), integrity tests, repository tier guards. Behavior preserved (single login path still works). | Yes — was gated by feature flag `USER_TIER_SPLIT_ENABLED`; flag removed in PR-D D-8 hard cutover |
 | **PR-C** | Host mux + audience middleware + new env vars | `hostRouter`, two `huma.API`s, two `chi.Mux`es, `requireAudience` middleware. New env: `CONSOLE_HOST`, `CLIENT_API_HOST`, per-audience `*_CORS_ORIGINS`, `*_RATE_LIMIT_*`. Frontend operator dashboard moves to `console.*`. JWT issuance still single-aud (`operator` for everything; clients still issued via legacy path). | Yes |
 | **PR-D** | Auth path split + JWT v2 + hard cutover | `/v1/auth/{operator|client}/login` + per-tier refresh/logout/MFA/WebAuthn. JWT version bump, `v1` rejection. OAuth state-encoded tier. Onboarding module moves to `client` API. Sessions invalidated. | **Coordinated release** — frontend + backend land together |
 | **PR-E** *(future)* | Client-facing AI runtime endpoints | `/v1/agents/run`, `/v1/rag/query`, `/v1/documents/generate` on `client` API, gated by `subscriptions` entitlement, dispatched to `service` audience via existing remote providers (`shared/remote/`). | Yes |
@@ -317,9 +333,10 @@ The script is idempotent given the sentinel and re-runnable in dev. Production g
 | `backend/internal/addons/subscriptions/`, `payments/` | Routes move to `Client` surface only |
 | `backend/internal/addons/billing/`, `documents/`, `company/`, `graph/`, `aimodels/`, `rag/`, `agents/`, `sales/`, `dev/` | Routes move to `Operator` surface only |
 | `frontend/` | Operator dashboard base URL → `console.*`; client SPA(s) → `api.*` |
-| `docker/.env.example`, `docker-compose.{dev,staging,prod}.yml` | New `CONSOLE_HOST`, `CLIENT_API_HOST`, per-audience CORS / rate limits |
+| `docker/.env.example`, `docker-compose.{dev,staging,prod,minimal}.yml` | New `CONSOLE_HOST`, `CLIENT_API_HOST`, per-audience CORS / rate limits, **per-audience cookie domains** (`OPERATOR_COOKIE_DOMAIN` / `CLIENT_COOKIE_DOMAIN`, D-9) |
 | `docker/CLAUDE.md` | Document the host split + per-audience env vars |
-| `scripts/devtoken.sh` | Add `--audience operator|client` flag |
+| `scripts/devtoken.sh` | `--audience operator\|client` flag (D-10) |
+| `backend/internal/addons/dev/handlers/dev_token_audience_test.go` | Smoke covering default→operator, explicit operator/client dispatch, unknown→400 (D-10) |
 
 ### Backwards compatibility
 

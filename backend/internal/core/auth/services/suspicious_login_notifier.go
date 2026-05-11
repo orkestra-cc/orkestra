@@ -82,6 +82,10 @@ type NotifierConfig struct {
 	SupportEmail       string
 	FrontendURL        string
 	Logger             *slog.Logger
+	// Policy is read on every OnLogin call so the admin recipient
+	// list / toggle behave live without restarts. Nil falls back to
+	// "admin email half disabled".
+	Policy *AuthPolicyService
 	// EmailThreshold overrides SuspiciousLoginEmailThreshold for
 	// tests. Zero or negative falls back to the default.
 	EmailThreshold     float64
@@ -97,6 +101,7 @@ type suspiciousLoginNotifier struct {
 	supportEmail string
 	frontendURL  string
 	logger       *slog.Logger
+	policy       *AuthPolicyService
 	threshold    float64
 	clock        func() time.Time
 }
@@ -129,6 +134,7 @@ func NewSuspiciousLoginNotifier(cfg NotifierConfig) SuspiciousLoginNotifier {
 		supportEmail: cfg.SupportEmail,
 		frontendURL:  cfg.FrontendURL,
 		logger:       logger,
+		policy:       cfg.Policy,
 		threshold:    threshold,
 		clock:        clock,
 	}
@@ -145,6 +151,12 @@ func (n *suspiciousLoginNotifier) OnLogin(ctx context.Context, in SuspiciousLogi
 		return
 	}
 	n.sendEmail(ctx, in)
+	// Admin half — gated by notifyAdminOnSuspiciousLogin and a
+	// non-empty recipient list. Same threshold as the user email so
+	// admins see exactly what the user sees, no more no less. Each
+	// recipient gets a distinct idempotency key so a parallel handler
+	// invocation can't collapse the fan-out.
+	n.sendAdminEmail(ctx, in)
 }
 
 // recordSecurityEvent persists a security_events row regardless of
@@ -229,7 +241,7 @@ func (n *suspiciousLoginNotifier) sendEmail(ctx context.Context, in SuspiciousLo
 			}
 		}
 	}
-	accountActivityURL := strings.TrimRight(n.frontendURL, "/") + "/account/security"
+	accountActivityURL := strings.TrimRight(n.frontendURL, "/") + "/user/security?tab=sessions"
 
 	loginAt := in.Session.CreatedAt
 	if loginAt.IsZero() {
@@ -272,6 +284,89 @@ func (n *suspiciousLoginNotifier) sendEmail(ctx context.Context, in SuspiciousLo
 		slog.String("session_uuid", in.Session.UUID),
 		slog.Float64("score", in.Assessment.Score),
 		slog.String("level", in.Assessment.Level))
+}
+
+// sendAdminEmail dispatches CategoryAuthAdminSuspiciousLogin to each
+// configured admin recipient when notifyAdminOnSuspiciousLogin is on
+// and at least one recipient is configured. Reads the policy live so
+// admin edits don't require a restart. Best-effort — failures log and
+// continue to the next recipient instead of aborting the fan-out.
+func (n *suspiciousLoginNotifier) sendAdminEmail(ctx context.Context, in SuspiciousLoginInput) {
+	if n.policy == nil || n.notifier == nil || !n.notifier.IsConfigured(ctx) {
+		return
+	}
+	if !n.policy.NotifyAdminOnSuspiciousLogin(ctx) {
+		return
+	}
+	recipients := n.policy.SuspiciousLoginRecipients(ctx)
+	if len(recipients) == 0 {
+		return
+	}
+	deviceSummary := in.DeviceName
+	if deviceSummary == "" {
+		deviceSummary = in.Platform
+	}
+	if deviceSummary == "" {
+		deviceSummary = "Unknown device"
+	}
+	factorNames := make([]string, 0, len(in.Assessment.Factors))
+	for _, f := range in.Assessment.Factors {
+		if f.Details != nil {
+			if name, ok := f.Details["factor"].(string); ok && name != "" {
+				factorNames = append(factorNames, name)
+			}
+		}
+	}
+	loginAt := in.Session.CreatedAt
+	if loginAt.IsZero() {
+		loginAt = n.clock()
+	}
+	accountActivityURL := strings.TrimRight(n.frontendURL, "/") + "/user/security?tab=sessions"
+	affectedName := in.User.Name
+	if affectedName == "" {
+		affectedName = in.User.Email
+	}
+	vars := map[string]any{
+		"AppName":            n.appName,
+		"AffectedUserName":   affectedName,
+		"AffectedUserEmail":  in.User.Email,
+		"AffectedUserUUID":   in.User.UUID,
+		"LoginAt":            loginAt.UTC().Format("2006-01-02 15:04 UTC"),
+		"LoginIP":            in.IPAddress,
+		"LoginDevice":        deviceSummary,
+		"LoginLocation":      "",
+		"RiskLevel":          capitalize(in.Assessment.Level),
+		"RiskFactors":        strings.Join(factorNames, ", "),
+		"AccountActivityURL": accountActivityURL,
+		"SupportEmail":       n.supportEmail,
+	}
+	for _, addr := range recipients {
+		req := iface.TemplatedNotificationRequest{
+			Channel:  notifModels.ChannelEmail,
+			Type:     notifModels.TypeTransactional,
+			Category: notifModels.CategoryAuthAdminSuspiciousLogin,
+			Recipients: []iface.Recipient{{
+				Address: addr,
+				Name:    addr,
+			}},
+			TemplateID:     notifModels.CategoryAuthAdminSuspiciousLogin,
+			Data:           vars,
+			IdempotencyKey: fmt.Sprintf("suspicious-admin:%s:%s:%s", in.User.UUID, in.Session.UUID, addr),
+		}
+		if _, err := n.notifier.SendTemplated(ctx, req); err != nil {
+			n.logger.Warn("suspicious_login: failed to send admin email",
+				slog.String("recipient", addr),
+				slog.String("user_uuid", in.User.UUID),
+				slog.String("session_uuid", in.Session.UUID),
+				slog.String("error", err.Error()))
+			continue
+		}
+		n.logger.Info("suspicious_login: notified admin",
+			slog.String("recipient", addr),
+			slog.String("user_uuid", in.User.UUID),
+			slog.String("session_uuid", in.Session.UUID),
+			slog.Float64("score", in.Assessment.Score))
+	}
 }
 
 // afterAt returns the substring after the "@" in an email. Used to

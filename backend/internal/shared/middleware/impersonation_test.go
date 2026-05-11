@@ -70,12 +70,12 @@ func (f *fakeTenantProvider) RevokeCapability(_ context.Context, _, _ string) er
 func (f *fakeTenantProvider) ListCapabilityIDs(_ context.Context, _ string) ([]string, error) {
 	return nil, nil
 }
-func (f *fakeTenantProvider) ProvisionExternalTenant(_ context.Context, _ string, _ iface.OnboardingTenantInput) (*iface.Tenant, error) {
-	return nil, nil
-}
 func (f *fakeTenantProvider) ActivateTenant(_ context.Context, _ string) error { return nil }
 func (f *fakeTenantProvider) SetTenantStripeCustomerID(_ context.Context, _, _ string) error {
 	return nil
+}
+func (f *fakeTenantProvider) EnsureTenantForUser(_ context.Context, _ string) (*iface.Tenant, error) {
+	return nil, nil
 }
 
 type capturingSink struct {
@@ -135,9 +135,10 @@ func TestSetUserContext_NonMember_WithoutSystemAdmin_Rejects(t *testing.T) {
 
 func TestSetUserContext_NonMember_WithSystemAdmin_Impersonates(t *testing.T) {
 	authz := &fakeAuthz{allow: true}
+	// IsCompany=true → business path (no MFA gate, .business audit action).
 	tenants := &fakeTenantProvider{
 		tenants: map[string]*iface.Tenant{
-			"tenant-X": {UUID: "tenant-X", Kind: iface.TenantKindExternal, Name: "ACME", Slug: "acme"},
+			"tenant-X": {UUID: "tenant-X", Kind: iface.TenantKindExternal, Name: "ACME", Slug: "acme", IsCompany: true},
 		},
 	}
 	sink := &capturingSink{}
@@ -169,11 +170,99 @@ func TestSetUserContext_NonMember_WithSystemAdmin_Impersonates(t *testing.T) {
 	if len(sink.events) != 1 {
 		t.Fatalf("expected 1 audit event, got %d", len(sink.events))
 	}
-	if sink.events[0].Action != "admin.tenant.impersonate" {
-		t.Fatalf("expected admin.tenant.impersonate, got %q", sink.events[0].Action)
+	if got := sink.events[0].Action; got != auditActionImpersonateBusiness {
+		t.Fatalf("expected %q for IsCompany=true target, got %q", auditActionImpersonateBusiness, got)
 	}
 	if sink.events[0].ResourceID != "tenant-X" || sink.events[0].ActorUserID != "admin-1" {
 		t.Fatalf("audit event fields mismatch: %+v", sink.events[0])
+	}
+}
+
+func TestSetUserContext_PersonalTarget_WithoutMFA_DemandsStepUp(t *testing.T) {
+	authz := &fakeAuthz{allow: true}
+	tenants := &fakeTenantProvider{
+		tenants: map[string]*iface.Tenant{
+			"tenant-P": {
+				UUID:          "tenant-P",
+				Kind:          iface.TenantKindExternal,
+				Name:          "alice",
+				Slug:          "alice",
+				SignupChannel: iface.SignupChannelSelfServe,
+			},
+		},
+	}
+	sink := &capturingSink{}
+	m := newTestMiddleware(authz, tenants, sink)
+	claims := baseClaims("admin-1", nil) // no AMR — pwd-only session
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/anything", nil)
+	req.Header.Set(TenantIDHeader, "tenant-P")
+	rec := httptest.NewRecorder()
+
+	called := false
+	m.setUserContext(rec, req, claims, http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
+		called = true
+	}))
+
+	if called {
+		t.Fatalf("downstream handler must not run when personal-target MFA gate fails")
+	}
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 step_up_required, got %d", rec.Code)
+	}
+	if got := rec.Header().Get("WWW-Authenticate"); got != `MFA error="step_up_required"` {
+		t.Fatalf("expected step_up_required challenge, got %q", got)
+	}
+	if len(sink.events) != 0 {
+		t.Fatalf("MFA-gated impersonation must not emit audit event, got %d", len(sink.events))
+	}
+}
+
+func TestSetUserContext_PersonalTarget_WithMFA_ImpersonatesAndAuditsPersonal(t *testing.T) {
+	authz := &fakeAuthz{allow: true}
+	tenants := &fakeTenantProvider{
+		tenants: map[string]*iface.Tenant{
+			"tenant-P": {
+				UUID:          "tenant-P",
+				Kind:          iface.TenantKindExternal,
+				Name:          "alice",
+				Slug:          "alice",
+				SignupChannel: iface.SignupChannelSelfServe,
+			},
+		},
+	}
+	sink := &capturingSink{}
+	m := newTestMiddleware(authz, tenants, sink)
+	claims := baseClaims("admin-1", nil)
+	claims.AMR = []string{"pwd", "otp"}
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/anything", nil)
+	req.Header.Set(TenantIDHeader, "tenant-P")
+	rec := httptest.NewRecorder()
+
+	var seen context.Context
+	m.setUserContext(rec, req, claims, http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		seen = r.Context()
+	}))
+
+	if seen == nil {
+		t.Fatalf("handler must run when personal-target impersonation passes the MFA gate")
+	}
+	if !IsImpersonating(seen) {
+		t.Fatalf("expected IsImpersonating(ctx)=true")
+	}
+	if len(sink.events) != 1 {
+		t.Fatalf("expected 1 audit event, got %d", len(sink.events))
+	}
+	if got := sink.events[0].Action; got != auditActionImpersonatePersonal {
+		t.Fatalf("expected %q for personal target, got %q", auditActionImpersonatePersonal, got)
+	}
+	md := sink.events[0].Metadata
+	if isCompany, _ := md["targetIsCompany"].(bool); isCompany {
+		t.Fatalf("metadata.targetIsCompany must be false for personal target")
+	}
+	if ch, _ := md["targetSignupChannel"].(string); ch != iface.SignupChannelSelfServe {
+		t.Fatalf("metadata.targetSignupChannel = %q, want %q", ch, iface.SignupChannelSelfServe)
 	}
 }
 
@@ -207,7 +296,7 @@ func TestImpersonationAudit_DedupesWithinTTL(t *testing.T) {
 	authz := &fakeAuthz{allow: true}
 	tenants := &fakeTenantProvider{
 		tenants: map[string]*iface.Tenant{
-			"tenant-X": {UUID: "tenant-X", Kind: iface.TenantKindExternal, Name: "ACME", Slug: "acme"},
+			"tenant-X": {UUID: "tenant-X", Kind: iface.TenantKindExternal, Name: "ACME", Slug: "acme", IsCompany: true},
 		},
 	}
 	sink := &capturingSink{}

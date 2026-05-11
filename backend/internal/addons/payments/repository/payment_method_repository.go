@@ -50,7 +50,11 @@ func (r *paymentMethodRepository) GetByUUID(ctx context.Context, uuid string) (*
 }
 
 func (r *paymentMethodRepository) ListByTenant(ctx context.Context, tenantUUID string) ([]models.PaymentMethod, error) {
-	cur, err := r.coll.Find(ctx, bson.M{"tenantUUID": tenantUUID})
+	if tenantUUID == "" {
+		return nil, nil
+	}
+	filter := bson.M{"tenantUUID": tenantUUID}
+	cur, err := r.coll.Find(ctx, filter)
 	if err != nil {
 		return nil, err
 	}
