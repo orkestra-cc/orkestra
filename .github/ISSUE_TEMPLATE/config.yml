@@ -1,0 +1,10 @@
+# Disable blank issues — every issue must follow a template so triage can route it.
+blank_issues_enabled: false
+
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/orkestra-cc/orkestra/security/policy
+    about: For security issues, please follow SECURITY.md (private disclosure). Do not open a public issue.
+  - name: Questions and discussion
+    url: https://github.com/orkestra-cc/orkestra/discussions
+    about: Use GitHub Discussions for questions, setup help, and architecture conversations.

@@ -25,7 +25,7 @@
 [![Docker](https://img.shields.io/badge/Docker-Ready-2496ED?logo=docker&logoColor=white&style=flat-square)](https://docker.com)
 [![Huma v2](https://img.shields.io/badge/Huma-v2-FE7A16?style=flat-square)](https://huma.rocks)
 [![OpenAPI 3.1](https://img.shields.io/badge/OpenAPI-3.1-6BA539?logo=openapiinitiative&logoColor=white&style=flat-square)](https://www.openapis.org)
-[![License: Proprietary](https://img.shields.io/badge/License-Proprietary-lightgrey?style=flat-square)](#license)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg?style=flat-square)](LICENSE)
 
 [Quick Start](#quick-start-minimal-profile) · [SKU Profiles](#sku-profiles-pulled-from-ghcr) · [Architecture](CLAUDE.md) · [Backend](backend/CLAUDE.md) · [Frontend Admin](frontend-admin/CLAUDE.md) · [Frontend Client](frontend-client/CLAUDE.md) · [Docker](docker/CLAUDE.md)
 
@@ -268,4 +268,4 @@ We use [Conventional Commits](https://www.conventionalcommits.org/) (enforced by
 
 ## License
 
-Proprietary, all rights reserved. © Orkestra.
+Licensed under the [Apache License, Version 2.0](LICENSE). See [`NOTICE`](NOTICE) for attribution. Contributions are accepted under the same license — see [CONTRIBUTING.md](CONTRIBUTING.md). Security disclosures: [SECURITY.md](SECURITY.md). Community conduct: [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).

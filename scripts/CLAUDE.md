@@ -68,6 +68,7 @@ These are called by `orkestra.sh` or used directly during development:
 - **generate-jwt-keys.sh**: Generates the RS256 JWT key pair
 - **install-air.sh**: Installs AIR hot-reload tool
 - **devtoken.sh**: Generates dev JWT tokens for testing (`ORKESTRA_API_URL=... ./scripts/devtoken.sh administrator`). Pass `--audience client` (or `-a client`) to mint an `aud=client` token that satisfies the `api.*` surface; default is `operator` (ADR-0003 PR-D D-10).
+- **refresh-coverage-badge.sh**: Refreshes a coverage badge SVG under `.github/badges/` from a project's coverage artifact. Called by the `coverage-badge` job in `.github/workflows/{backend,frontend-admin,mobile}.yml` on push to dev/main. Usage: `scripts/refresh-coverage-badge.sh <backend|frontend-admin|mobile>`. Project-aware: parses `go tool cover` (backend), `coverage-summary.json` via `jq` (admin), or `lcov.info` via awk (mobile).
 - **health-check.sh** *(if present)*: Called by `orkestra.sh deploy` post-deployment
 
 ## Script Categories

@@ -1,0 +1,82 @@
+name: Feature request
+description: Propose a new feature, addon module, or behavior change.
+title: "feat: <short summary>"
+labels: [enhancement, needs-triage]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for proposing a feature. The most useful feature requests describe the **problem** before the **solution** — that lets us evaluate alternatives we may not have considered. Significant architectural changes are best discussed in [GitHub Discussions](https://github.com/orkestra-cc/orkestra/discussions) or as an RFC PR under `docs/rfcs/` before opening an issue.
+
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Affected surface
+      multiple: true
+      options:
+        - backend (Go monolith)
+        - backend / AI service sidecar
+        - backend / new addon module
+        - frontend-admin (Tier-1 operator SPA)
+        - frontend-client (Tier-2 customer SPA)
+        - mobile (Flutter)
+        - docker / deployment
+        - docs / CI / tooling
+    validations:
+      required: true
+
+  - type: dropdown
+    id: tenancy-tier
+    attributes:
+      label: Tenancy tier
+      description: Which tenant tier consumes this feature?
+      options:
+        - Tier-1 (internal operator)
+        - Tier-2 (external customer)
+        - Both
+        - Cross-tier (changes the boundary itself)
+        - Not applicable
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem you're trying to solve
+      description: What can't you do today? What workaround are you using? Who is affected?
+      placeholder: As a <Tier-1 operator | Tier-2 client | contributor>, I want to <goal> so that <outcome>.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What should the feature do? UI sketches, API shape, config knobs, ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: What else did you think about? Why is the proposed solution better?
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope and trade-offs
+      description: |
+        What's explicitly out of scope? What new dependencies / migrations / breaking changes does this imply?
+        Does it require RBAC changes (new permission, new role)? A new MongoDB collection?
+        Does it intersect any existing addon module's responsibility?
+
+  - type: checkboxes
+    id: searched
+    attributes:
+      label: Pre-flight checks
+      options:
+        - label: I searched existing issues and Discussions and didn't find a duplicate
+          required: true
+        - label: For substantial changes, I'm open to opening an RFC under `docs/rfcs/` if maintainers ask
+          required: true

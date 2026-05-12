@@ -32,6 +32,8 @@ config.yaml
 config.yml
 *.env
 environment.json
+# Allowlist GitHub issue-template config — required by the issue forms feature
+!.github/ISSUE_TEMPLATE/config.yml
 
 # Secrets and keys
 secrets/

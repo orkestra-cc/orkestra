@@ -1,0 +1,105 @@
+name: Bug report
+description: Something is broken or behaves unexpectedly.
+title: "bug: <short summary>"
+labels: [bug, needs-triage]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug. The more specific you can be — exact versions, exact reproduction steps, exact output — the faster we can act on it.
+
+        **If this is a security issue, stop here** and follow [SECURITY.md](https://github.com/orkestra-cc/orkestra/blob/main/SECURITY.md) instead.
+
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Affected surface
+      description: Which part of the codebase is affected?
+      multiple: true
+      options:
+        - backend (Go monolith)
+        - backend / AI service sidecar
+        - frontend-admin (Tier-1 operator SPA)
+        - frontend-client (Tier-2 customer SPA)
+        - mobile (Flutter)
+        - docker / deployment
+        - docs / CI / tooling
+        - unsure
+    validations:
+      required: true
+
+  - type: dropdown
+    id: tenancy-tier
+    attributes:
+      label: Tenancy tier (if relevant)
+      description: Orkestra has two tiers — pick the one the bug surfaces in. See [CLAUDE.md](https://github.com/orkestra-cc/orkestra/blob/main/CLAUDE.md#tenancy-model).
+      options:
+        - Tier-1 (internal operator)
+        - Tier-2 (external customer)
+        - Both / spans the boundary
+        - Not applicable
+    validations:
+      required: false
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear description of the actual behavior.
+      placeholder: When I do X, Y happens. I expected Z.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Exact commands / clicks. If a minimal repro repo or snippet exists, link it.
+      value: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs / output
+      description: Backend logs, browser console, network tab, stack traces. Wrap in code blocks. Redact secrets.
+      render: shell
+
+  - type: input
+    id: version
+    attributes:
+      label: Orkestra version / commit SHA
+      description: Output of `git rev-parse HEAD` or the GHCR tag of the image you're running.
+      placeholder: e.g. main@43434a0 or ghcr.io/orkestra-cc/orkestra/backend:enterprise-43434a0
+    validations:
+      required: true
+
+  - type: input
+    id: deployment
+    attributes:
+      label: How are you running it?
+      description: Compose profile, Kubernetes manifest, local `mise install`, ...
+      placeholder: e.g. docker-compose.minimal.yml on Ubuntu 24.04
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: searched
+    attributes:
+      label: Pre-flight checks
+      options:
+        - label: I searched existing issues and didn't find a duplicate
+          required: true
+        - label: I am running a recent `main` or a published image, not a stale local fork
+          required: true
