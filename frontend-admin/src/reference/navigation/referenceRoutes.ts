@@ -1,4 +1,8 @@
 import paths, { rootPaths } from 'routes/paths';
+import type {
+  NavItem as ApiNavItem,
+  NavRealm
+} from 'store/api/navigationApi';
 
 export interface Badge {
   type: string;
@@ -1848,3 +1852,24 @@ const routeGroups: RouteGroup[] = [
 ];
 
 export default routeGroups;
+
+// Developer realm — surfaced in the operator sidebar only in dev builds
+// (or when VITE_ENABLE_REFERENCE is set). Wraps the existing referenceRoutes
+// tree as a v2 NavRealm so NavbarVertical can render it through the same
+// realm → section → items path as backend-driven realms.
+//
+// This is the single hardcoded-nav exception in the frontend. Production
+// nav must come from the backend module's NavItems() — do not extend this
+// pattern to anything other than the dev-only Falcon template pages.
+export const developerRealm: NavRealm = {
+  key: 'developer',
+  label: 'Developer',
+  sections: [
+    {
+      // Matches the realm label so NavbarVertical hides the section sub-label
+      // (see the `section.label !== realm.label` guard in NavbarVertical.tsx).
+      label: 'Developer',
+      children: referenceRoutes.children as ApiNavItem[]
+    }
+  ]
+};

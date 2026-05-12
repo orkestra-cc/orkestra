@@ -137,6 +137,8 @@ This means:
 - **Disabling a module on the backend** → its sidebar entry disappears automatically, and `ModuleGate` redirects to 404 if the URL is accessed directly.
 - **The frontend route is declared in the module manifest** → `src/modules/<name>.tsx` defines routes, registered via `src/modules/index.ts`.
 
+**Dev-only exception — Developer realm.** When `import.meta.env.DEV` is true (or `VITE_ENABLE_REFERENCE` is set), `NavbarVertical` appends a hardcoded `Developer` realm from `src/reference/navigation/referenceRoutes.ts` (`developerRealm` export) pointing at the dev-only `/reference/*` routes registered by `src/routes/referenceRoutes.tsx`. The gate matches the one on the routes themselves, so nav and routes stay in lockstep. This is the **only** place sidebar entries are hardcoded in the frontend — do not extend the pattern to production features.
+
 ## How data fetching works
 
 All server state goes through **RTK Query**, not React Query / TanStack Query. Each backend module gets its own slice in `src/store/api/`:
@@ -262,7 +264,7 @@ expect(store.getState().auth.accessToken).toBe('...');
 ## Don't
 
 - Don't invent a parallel data-fetching layer (axios, custom fetch helpers). Every endpoint goes through an RTK Query slice that extends `baseApi`.
-- Don't hardcode sidebar entries. Navigation comes from the backend.
+- Don't hardcode sidebar entries **for production features** — navigation comes from the backend. The dev-only Developer realm (see "How navigation works") is the single documented exception.
 - Don't move things out of `src/reference/` — it's a read-only template library. Copy from it.
 - Don't import from `src/modules/_template/` at runtime. It's a scaffold, not runtime code.
 - Don't add new top-level directories under `src/`. The current layout is stable.

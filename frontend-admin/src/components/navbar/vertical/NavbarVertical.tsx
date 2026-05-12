@@ -11,6 +11,13 @@ import NavbarTopDropDownMenus from 'components/navbar/top/NavbarTopDropDownMenus
 import bgNavbar from 'assets/img/generic/bg-navbar.png';
 import { useAppContext } from 'providers/AppProvider';
 import { useRoleBasedNavigation } from 'hooks/useRoleBasedNavigation';
+import { developerRealm } from 'reference/navigation/referenceRoutes';
+
+// Show the Developer realm whenever the reference routes are registered.
+// Mirrors the gate in `src/routes/referenceRoutes.tsx` so nav and routes
+// stay in lockstep — they're either both present or both absent.
+const SHOW_DEVELOPER_REALM =
+  import.meta.env.DEV || !!import.meta.env.VITE_ENABLE_REFERENCE;
 
 interface NavbarLabelProps {
   label: string;
@@ -152,12 +159,18 @@ const NavbarVertical = () => {
           </div>
         )}
 
-        {/* Loaded navigation — prefer v2 realms shape; fall back to v1 flat groups. */}
-        {!isLoading && !isError && (
+        {/* Loaded navigation — prefer v2 realms shape; fall back to v1 flat groups.
+            In dev (or when VITE_ENABLE_REFERENCE is set), append the Developer realm
+            pointing at the dev-only /reference/* routes. */}
+        {!isLoading && !isError && (() => {
+          const renderedRealms = SHOW_DEVELOPER_REALM
+            ? [...realms, developerRealm]
+            : realms;
+          return (
           <div className="navbar-vertical-content scrollbar">
             <Nav className="flex-column" as="ul">
-              {realms.length > 0
-                ? realms.map(realm => (
+              {renderedRealms.length > 0
+                ? renderedRealms.map(realm => (
                     <Fragment key={realm.key}>
                       <NavbarLabel label={capitalize(realm.label)} />
                       {realm.sections.map(section => (
@@ -195,7 +208,8 @@ const NavbarVertical = () => {
               )}
             </>
           </div>
-        )}
+          );
+        })()}
       </Navbar.Collapse>
     </Navbar>
   );
