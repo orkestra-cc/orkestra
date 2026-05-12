@@ -1,5 +1,5 @@
 
-import FalconComponentCard from 'components/common/FalconComponentCard';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 
 import { ScatterChart } from 'echarts/charts';
 import {
@@ -147,12 +147,12 @@ const chartCode = `function ChartOptions() {
 
 const SingleAxisScatterChart = () => {
   return (
-    <FalconComponentCard className="h-100">
-      <FalconComponentCard.Header
+    <OrkestraComponentCard className="h-100">
+      <OrkestraComponentCard.Header
         title="Single axis scatter chart"
         light={false}
       />
-      <FalconComponentCard.Body
+      <OrkestraComponentCard.Body
         code={chartCode}
         language="jsx"
         scope={{
@@ -162,7 +162,7 @@ const SingleAxisScatterChart = () => {
           getRandomNumber
         }}
       />
-    </FalconComponentCard>
+    </OrkestraComponentCard>
   );
 };
 

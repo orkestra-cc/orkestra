@@ -31,7 +31,7 @@ const UnsolvedTicketsHeader = ({
       <div className="border-bottom border-200 my-3"></div>
       <div className="d-flex align-items-center justify-content-between justify-content-lg-end px-x1">
         <IconButton
-          variant="falcon-default"
+          variant="orkestra-default"
           size="sm"
           icon="filter"
           transform="shrink-4"
@@ -53,7 +53,7 @@ const UnsolvedTicketsHeader = ({
             </Form.Select>
             <Button
               type="button"
-              variant="falcon-default"
+              variant="orkestra-default"
               size="sm"
               className="ms-2"
             >
@@ -66,7 +66,7 @@ const UnsolvedTicketsHeader = ({
               align="end"
               className="btn-reveal-trigger d-inline-block me-2"
             >
-              <Dropdown.Toggle split variant="falcon-default" size="sm">
+              <Dropdown.Toggle split variant="orkestra-default" size="sm">
                 <span className="d-none d-sm-inline-block d-xl-none d-xxl-inline-block me-1">
                   {layout === 'tableView' ? 'Table view' : 'Card view'}
                 </span>
@@ -92,7 +92,7 @@ const UnsolvedTicketsHeader = ({
               </Dropdown.Menu>
             </Dropdown>
             <IconButton
-              variant="falcon-default"
+              variant="orkestra-default"
               size="sm"
               icon="plus"
               transform="shrink-3"
@@ -103,7 +103,7 @@ const UnsolvedTicketsHeader = ({
               </span>
             </IconButton>
             <IconButton
-              variant="falcon-default"
+              variant="orkestra-default"
               size="sm"
               icon="external-link-alt"
               transform="shrink-3"
@@ -115,7 +115,7 @@ const UnsolvedTicketsHeader = ({
               </span>
             </IconButton>
             <Dropdown align="end" className="btn-reveal-trigger d-inline-block">
-              <Dropdown.Toggle variant="falcon-default" size="sm">
+              <Dropdown.Toggle variant="orkestra-default" size="sm">
                 <FontAwesomeIcon icon="ellipsis-h" className="fs-11" />
               </Dropdown.Toggle>
 

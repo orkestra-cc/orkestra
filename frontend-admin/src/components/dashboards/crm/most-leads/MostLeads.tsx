@@ -3,9 +3,9 @@ import Flex from 'components/common/Flex';
 import { Card, Col, Row } from 'react-bootstrap';
 import MostLeadsChart from './MostLeadsChart';
 import { leadsData } from 'data/dashboard/crm';
-import FalconCardFooterLink from 'components/common/FalconCardFooterLink';
+import OrkestraCardFooterLink from 'components/common/OrkestraCardFooterLink';
 import classNames from 'classnames';
-import FalconCardHeader from 'components/common/FalconCardHeader';
+import OrkestraCardHeader from 'components/common/OrkestraCardHeader';
 
 interface LeadItemData {
   id: string | number;
@@ -42,7 +42,7 @@ const LeadItem = ({ item, isLast }: LeadItemProps) => {
 const MostLeads = () => {
   return (
     <Card className="h-100">
-      <FalconCardHeader
+      <OrkestraCardHeader
         title="Most Leads"
         titleTag="h6"
         className="border-200 border-bottom py-2"
@@ -65,7 +65,7 @@ const MostLeads = () => {
           )}
         </Col>
       </Card.Body>
-      <FalconCardFooterLink title="View all" size="sm" to="#!" />
+      <OrkestraCardFooterLink title="View all" size="sm" to="#!" />
     </Card>
   );
 };

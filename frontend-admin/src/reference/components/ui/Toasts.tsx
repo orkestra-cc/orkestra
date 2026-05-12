@@ -1,5 +1,5 @@
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import FalconComponentCard from 'components/common/FalconComponentCard';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 import PageHeader from 'components/common/PageHeader';
 import { reactBootstrapDocsUrl } from 'helpers/utils';
 
@@ -178,55 +178,55 @@ const Toasts = () => (
       </Button>
     </PageHeader>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Example" light={false} />
-      <FalconComponentCard.Body code={exampleCode} language="jsx" />
-    </FalconComponentCard>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Example" light={false} />
+      <OrkestraComponentCard.Body code={exampleCode} language="jsx" />
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Stacking" light={false}>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Stacking" light={false}>
         <p className="mb-0 mt-2">
           When you have multiple toasts, we default to vertically stacking them
           in a readable manner.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body code={stackingCode} language="jsx" />
-    </FalconComponentCard>
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body code={stackingCode} language="jsx" />
+    </OrkestraComponentCard>
 
-    <FalconComponentCard multiSections>
+    <OrkestraComponentCard multiSections>
       <Tab.Container defaultActiveKey="preview">
-        <FalconComponentCard.Header title="Placement" light={false}>
+        <OrkestraComponentCard.Header title="Placement" light={false}>
           <p className="mb-0 mt-2">
             Place toasts by setting a <code>position</code> in a{' '}
             <code>ToastContainer</code>. The top right is often used for
             notifications, as is the top middle.
           </p>
-        </FalconComponentCard.Header>
-        <FalconComponentCard.Body code={placementCode} language="jsx" />
+        </OrkestraComponentCard.Header>
+        <OrkestraComponentCard.Body code={placementCode} language="jsx" />
       </Tab.Container>
       <Tab.Container defaultActiveKey="preview">
-        <FalconComponentCard.Header light={false}>
+        <OrkestraComponentCard.Header light={false}>
           <p className="mb-0">
             For systems that generate more notifications, consider using a
             wrapping element so they can easily stack.
           </p>
-        </FalconComponentCard.Header>
-        <FalconComponentCard.Body code={placementStackedCode} language="jsx" />
+        </OrkestraComponentCard.Header>
+        <OrkestraComponentCard.Body code={placementStackedCode} language="jsx" />
       </Tab.Container>
-    </FalconComponentCard>
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Translucent" light={false}>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Translucent" light={false}>
         <p className="mb-0 mt-2">
           Toasts are slightly translucent, too, so they blend over whatever they
           might appear over.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body code={transcluentCode} language="jsx" />
-    </FalconComponentCard>
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body code={transcluentCode} language="jsx" />
+    </OrkestraComponentCard>
 
-    <FalconComponentCard noGuttersBottom>
-      <FalconComponentCard.Header title="Autohide" light={false}>
+    <OrkestraComponentCard noGuttersBottom>
+      <OrkestraComponentCard.Header title="Autohide" light={false}>
         <p className="mb-0 mt-2">
           A Toast can also automatically hide after X milliseconds. For that,
           use the <code>autohide</code> prop in combination with{' '}
@@ -234,9 +234,9 @@ const Toasts = () => (
           it will only trigger the <code>onClose</code> function, you have to
           set manually the show property.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body code={autoHideCode} language="jsx" />
-    </FalconComponentCard>
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body code={autoHideCode} language="jsx" />
+    </OrkestraComponentCard>
   </>
 );
 

@@ -12,7 +12,7 @@ export default [
     color: 'danger',
     title: 'Blueprint & design',
     description:
-      'With Falcon as your guide, now you have a fine-tuned state of the earth tool to make your wireframe a reality.',
+      'With Orkestra as your guide, now you have a fine-tuned state of the earth tool to make your wireframe a reality.',
     image: illustration1,
     imageDark: illustration1Dark
   },
@@ -22,7 +22,7 @@ export default [
     color: 'info',
     title: '38 Sets of components',
     description:
-      "Build any UI effortlessly with Falcon's robust set of layouts, 38 sets of built-in elements, carefully chosen colors, typography, and css helpers.",
+      "Build any UI effortlessly with Orkestra's robust set of layouts, 38 sets of built-in elements, carefully chosen colors, typography, and css helpers.",
     image: illustration2,
     imageDark: illustration2Dark,
     inverse: true
@@ -33,7 +33,7 @@ export default [
     color: 'success',
     title: 'Review and test',
     description:
-      'From IE to iOS, rigorously tested and optimized Falcon will give the near perfect finishing to your webapp; from the landing page to the logout screen.',
+      'From IE to iOS, rigorously tested and optimized Orkestra will give the near perfect finishing to your webapp; from the landing page to the logout screen.',
     image: illustration3,
     imageDark: illustration3Dark
   }

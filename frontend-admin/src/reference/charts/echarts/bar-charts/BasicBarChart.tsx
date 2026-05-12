@@ -1,5 +1,5 @@
 
-import FalconComponentCard from 'components/common/FalconComponentCard';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 import { BarChart } from 'echarts/charts';
 import {
   GridComponent,
@@ -127,9 +127,9 @@ interface BasicBarChartProps {
 
 const BasicBarChart = ({ title }: BasicBarChartProps) => {
   return (
-    <FalconComponentCard className="h-100">
-      <FalconComponentCard.Header title={title} light={false} />
-      <FalconComponentCard.Body
+    <OrkestraComponentCard className="h-100">
+      <OrkestraComponentCard.Header title={title} light={false} />
+      <OrkestraComponentCard.Body
         code={chartCode}
         language="jsx"
         scope={{
@@ -139,7 +139,7 @@ const BasicBarChart = ({ title }: BasicBarChartProps) => {
           useAppContext
         }}
       />
-    </FalconComponentCard>
+    </OrkestraComponentCard>
   );
 };
 

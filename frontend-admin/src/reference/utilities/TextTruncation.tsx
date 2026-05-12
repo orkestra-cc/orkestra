@@ -1,6 +1,6 @@
 
 import PageHeader from 'components/common/PageHeader';
-import FalconComponentCard from 'components/common/FalconComponentCard';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 
 const exampleCode = `<>
   <Row>
@@ -21,17 +21,17 @@ const TextTruncation = () => (
       className="mb-3"
     />
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Example">
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Example">
         <p className="mb-0 mt-2">
           For longer content, you can add a <code> .text-truncate </code> class
           to truncate the text with an ellipsis. <strong> Requires </strong>
           <code> display:inline-block </code> <strong>or</strong>{' '}
           <code>display:block</code>.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body code={exampleCode} language="jsx" />
-    </FalconComponentCard>
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body code={exampleCode} language="jsx" />
+    </OrkestraComponentCard>
   </>
 );
 

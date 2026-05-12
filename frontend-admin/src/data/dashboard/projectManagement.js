@@ -112,7 +112,7 @@ export const projectsTable = [
   {
     id: 1,
     project: 'Organizing UI',
-    team: 'ThemeWagon',
+    team: 'Orkestra',
     iconColor: 'text-primary'
   },
   {
@@ -130,7 +130,7 @@ export const projectsTable = [
   {
     id: 4,
     project: 'Front end issues',
-    team: 'Falcon Team',
+    team: 'Orkestra Team',
     iconColor: 'text-info'
   }
 ];
@@ -171,7 +171,7 @@ const thisYear = dayjs().format('YYYY');
 export const managementEvents = [
   {
     id: uuid(),
-    title: `Monthly team meeting for Falcon React Project`,
+    title: `Monthly team meeting for Orkestra React Project`,
     start: `${thisYear}-${thisMonthNumber}-07`,
     end: `${thisYear}-${thisMonthNumber}-09`,
     startTime: `07 ${thisMonthName}, ${thisYear}`,
@@ -444,7 +444,7 @@ export const runningProjects = [
       name: 'C',
       size: 'xl'
     },
-    projectName: 'Falcon',
+    projectName: 'Orkestra',
     members: [
       {
         id: uuid(),
@@ -475,7 +475,7 @@ export const runningProjects = [
       size: 'xl',
       contentClass: 'text-success bg-success-subtle fs-9'
     },
-    projectName: 'Themewagon',
+    projectName: 'Orkestra',
     members: [
       {
         id: uuid(),
@@ -532,7 +532,7 @@ export const runningProjects = [
       size: 'xl',
       contentClass: 'text-warning bg-warning-subtle fs-9'
     },
-    projectName: 'Themewagon',
+    projectName: 'Orkestra',
     members: [
       {
         id: uuid(),
@@ -594,7 +594,7 @@ export const runningProjects = [
       size: 'xl',
       contentClass: 'text-success bg-success-subtle fs-9'
     },
-    projectName: 'Themewagon',
+    projectName: 'Orkestra',
     members: [
       {
         id: uuid(),
@@ -637,8 +637,8 @@ export const recentActivities = [
   },
   {
     id: 2,
-    title: 'Falcon v3.0.0 released with new features',
-    text: 'Falcon new version is released successfully with new Dashboards',
+    title: 'Orkestra v3.0.0 released with new features',
+    text: 'Orkestra new version is released successfully with new Dashboards',
     icon: 'code',
     time: '1h ago',
     status: 'current'

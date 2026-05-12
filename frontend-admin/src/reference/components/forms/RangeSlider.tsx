@@ -2,14 +2,14 @@
 import { Button } from 'react-bootstrap';
 import PageHeader from 'components/common/PageHeader';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import FalconComponentCard from 'components/common/FalconComponentCard';
-import FalconReactRange from './FalconReactRange';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
+import OrkestraReactRange from './OrkestraReactRange';
 
 const defaultExampleCode = `
   function DefaultExample() {
     const [values, setValues] = useState([20]);
     return (
-      <FalconReactRange
+      <OrkestraReactRange
         values={values}
         variant="primary"
         onChange={val => setValues(val)}
@@ -21,7 +21,7 @@ const rangeExampleCode = `
   function RangeExample() {
     const [values, setValues] = useState([20, 70]);
     return (
-      <FalconReactRange
+      <OrkestraReactRange
         values={values}
         variant="primary"
         onChange={val => setValues(val)}
@@ -33,7 +33,7 @@ const draggableTrackExampleCode = `
   function RangeExample() {
     const [values, setValues] = useState([10, 55]);
     return (
-      <FalconReactRange
+      <OrkestraReactRange
         draggableTrack
         values={values}
         variant="primary"
@@ -46,7 +46,7 @@ const marksExampleCode = `
   function MarksExample() {
     const [values, setValues] = useState([20, 80]);
     return (
-      <FalconReactRange
+      <OrkestraReactRange
         marks
         step={10}
         trackHeight=".3rem"
@@ -69,32 +69,32 @@ const variantExampleCode = `
     });
     return (
       <>
-        <FalconReactRange
+        <OrkestraReactRange
           values={values['primary']}
           variant="primary"
           onChange={val => setValues({...values, primary: val})}
         />
-        <FalconReactRange
+        <OrkestraReactRange
           values={values['secondary']}
           variant="secondary"
           onChange={val => setValues({...values, secondary: val})}
         />
-        <FalconReactRange
+        <OrkestraReactRange
           values={values['success']}
           variant="success"
           onChange={val => setValues({...values, success: val})}
         />
-        <FalconReactRange
+        <OrkestraReactRange
           values={values['danger']}
           variant="danger"
           onChange={val => setValues({...values, danger: val})}
         />
-        <FalconReactRange
+        <OrkestraReactRange
           values={values['warning']}
           variant="warning"
           onChange={val => setValues({...values, warning: val})}
         />
-        <FalconReactRange
+        <OrkestraReactRange
           values={values['info']}
           variant="info"
           onChange={val => setValues({...values, info: val})}
@@ -109,7 +109,7 @@ const RangeSlider = () => {
     <>
       <PageHeader
         title="React Range"
-        description="Falcon using React-range for advanced input with a slider which allows bring your own styles and markup."
+        description="Orkestra using React-range for advanced input with a slider which allows bring your own styles and markup."
         className="mb-3"
       >
         <Button
@@ -124,54 +124,54 @@ const RangeSlider = () => {
         </Button>
       </PageHeader>
 
-      <FalconComponentCard>
-        <FalconComponentCard.Header title="Default Example" light={false} />
-        <FalconComponentCard.Body
+      <OrkestraComponentCard>
+        <OrkestraComponentCard.Header title="Default Example" light={false} />
+        <OrkestraComponentCard.Body
           code={defaultExampleCode}
-          scope={{ FalconReactRange }}
+          scope={{ OrkestraReactRange }}
           language="jsx"
         />
-      </FalconComponentCard>
-      <FalconComponentCard>
-        <FalconComponentCard.Header title="Range Slider" light={false} />
-        <FalconComponentCard.Body
+      </OrkestraComponentCard>
+      <OrkestraComponentCard>
+        <OrkestraComponentCard.Header title="Range Slider" light={false} />
+        <OrkestraComponentCard.Body
           code={rangeExampleCode}
-          scope={{ FalconReactRange }}
+          scope={{ OrkestraReactRange }}
           language="jsx"
         />
-      </FalconComponentCard>
-      <FalconComponentCard>
-        <FalconComponentCard.Header title="Draggable Track" light={false} />
-        <FalconComponentCard.Body
+      </OrkestraComponentCard>
+      <OrkestraComponentCard>
+        <OrkestraComponentCard.Header title="Draggable Track" light={false} />
+        <OrkestraComponentCard.Body
           code={draggableTrackExampleCode}
-          scope={{ FalconReactRange }}
+          scope={{ OrkestraReactRange }}
           language="jsx"
         />
-      </FalconComponentCard>
-      <FalconComponentCard>
-        <FalconComponentCard.Header title="With Marks" light={false} />
-        <FalconComponentCard.Body
+      </OrkestraComponentCard>
+      <OrkestraComponentCard>
+        <OrkestraComponentCard.Header title="With Marks" light={false} />
+        <OrkestraComponentCard.Body
           code={marksExampleCode}
-          scope={{ FalconReactRange }}
+          scope={{ OrkestraReactRange }}
           language="jsx"
         />
-      </FalconComponentCard>
-      <FalconComponentCard>
-        <FalconComponentCard.Header title="Range Variants" light={false} />
-        <FalconComponentCard.Body
+      </OrkestraComponentCard>
+      <OrkestraComponentCard>
+        <OrkestraComponentCard.Header title="Range Variants" light={false} />
+        <OrkestraComponentCard.Body
           code={variantExampleCode}
-          scope={{ FalconReactRange }}
+          scope={{ OrkestraReactRange }}
           language="jsx"
         />
-      </FalconComponentCard>
-      <FalconComponentCard>
-        <FalconComponentCard.Header title="React Range" light={false} />
-        <FalconComponentCard.Body
+      </OrkestraComponentCard>
+      <OrkestraComponentCard>
+        <OrkestraComponentCard.Header title="React Range" light={false} />
+        <OrkestraComponentCard.Body
           code={defaultExampleCode}
           language="jsx"
-          scope={{ FalconReactRange }}
-        ></FalconComponentCard.Body>
-      </FalconComponentCard>
+          scope={{ OrkestraReactRange }}
+        ></OrkestraComponentCard.Body>
+      </OrkestraComponentCard>
     </>
   );
 };

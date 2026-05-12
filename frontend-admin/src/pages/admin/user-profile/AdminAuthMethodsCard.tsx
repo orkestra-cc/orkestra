@@ -171,7 +171,7 @@ const AdminAuthMethodsCard: React.FC<AdminAuthMethodsCardProps> = ({
             }
             action={
               <Button
-                variant="falcon-default"
+                variant="orkestra-default"
                 size="sm"
                 disabled={pwBusy}
                 onClick={handleSendReset}
@@ -206,7 +206,7 @@ const AdminAuthMethodsCard: React.FC<AdminAuthMethodsCardProps> = ({
             action={
               !data.emailVerified ? (
                 <Button
-                  variant="falcon-default"
+                  variant="orkestra-default"
                   size="sm"
                   disabled={verifyBusy}
                   onClick={handleResendVerification}
@@ -446,7 +446,7 @@ const ProviderActions: React.FC<ProviderActionsProps> = ({
   return (
     <Dropdown>
       <Dropdown.Toggle
-        variant="falcon-default"
+        variant="orkestra-default"
         size="sm"
         disabled={unlinkBusy}
         aria-label={`actions for ${provider.provider}`}

@@ -2,7 +2,7 @@
 import { Button } from 'react-bootstrap';
 import PageHeader from 'components/common/PageHeader';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import FalconComponentCard from 'components/common/FalconComponentCard';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 import { reactBootstrapDocsUrl } from 'helpers/utils';
 
 const basicFormCode = `
@@ -335,18 +335,18 @@ const FormLayout = () => (
       </Button>
     </PageHeader>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Basic form" light={false} />
-      <FalconComponentCard.Body code={basicFormCode} language="jsx" />
-    </FalconComponentCard>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Basic form" light={false} />
+      <OrkestraComponentCard.Body code={basicFormCode} language="jsx" />
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Horizontal form" light={false} />
-      <FalconComponentCard.Body code={horizontalFormCode} language="jsx" />
-    </FalconComponentCard>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Horizontal form" light={false} />
+      <OrkestraComponentCard.Body code={horizontalFormCode} language="jsx" />
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header
         title="Horizontal form label sizing"
         light={false}
       >
@@ -354,21 +354,21 @@ const FormLayout = () => (
           You can size the <code>&lt;FormLabel&gt;</code> using the column prop
           as shown.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body code={horizontalSizingCode} language="jsx" />
-    </FalconComponentCard>
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body code={horizontalSizingCode} language="jsx" />
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Form Grid Layout" light={false}>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Form Grid Layout" light={false}>
         <p className="mt-2 mb-0">
           More complex layouts can also be created with the grid system.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body code={formGridLayout} language="jsx" />
-    </FalconComponentCard>
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body code={formGridLayout} language="jsx" />
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Grid - Column Sizing" light={false}>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Grid - Column Sizing" light={false}>
         <p className="mt-2 mb-0">
           As shown in the previous examples, our grid system allows you to place
           any number of <code>&lt;Col&gt;</code>s within a{' '}
@@ -378,12 +378,12 @@ const FormLayout = () => (
           equally split the rest, with specific column classes like{' '}
           <code>&lt;Col xs={7}&gt;</code>.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body code={columnSizingCode} language="jsx" />
-    </FalconComponentCard>
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body code={columnSizingCode} language="jsx" />
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Grid - Auto Sizing" light={false}>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Grid - Auto Sizing" light={false}>
         <p className="mt-2 mb-0">
           The example below uses a flexbox utility to vertically center the
           contents and changes <code>&lt;Col&gt;</code> to{' '}
@@ -391,19 +391,19 @@ const FormLayout = () => (
           as much space as needed. Put another way, the column sizes itself
           based on on the contents.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body code={autoSizingCode} language="jsx" />
-    </FalconComponentCard>
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body code={autoSizingCode} language="jsx" />
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Gutters" light={false}>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Gutters" light={false}>
         <p className="mt-2 mb-0">
           By adding <code>gutter modifier classes</code>, you can have control
           over the gutter width in as well the inline as block direction
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body code={guttersCode} language="jsx" />
-    </FalconComponentCard>
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body code={guttersCode} language="jsx" />
+    </OrkestraComponentCard>
   </>
 );
 

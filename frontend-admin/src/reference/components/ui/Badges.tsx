@@ -1,5 +1,5 @@
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import FalconComponentCard from 'components/common/FalconComponentCard';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 import PageHeader from 'components/common/PageHeader';
 import SubtleBadge from 'components/common/SubtleBadge';
 import { reactBootstrapDocsUrl } from 'helpers/utils';
@@ -89,32 +89,32 @@ const Badges = () => (
       </Button>
     </PageHeader>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Subtle badges" light={false} />
-      <FalconComponentCard.Body
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Subtle badges" light={false} />
+      <OrkestraComponentCard.Body
         code={SubtleBadgesCode}
         scope={{ SubtleBadge }}
         language="jsx"
       />
-    </FalconComponentCard>
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Subtle pill badges" light={false} />
-      <FalconComponentCard.Body
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Subtle pill badges" light={false} />
+      <OrkestraComponentCard.Body
         code={subtlePillBadgesCode}
         scope={{ SubtleBadge }}
         language="jsx"
       />
-    </FalconComponentCard>
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Solid badges" light={false} />
-      <FalconComponentCard.Body code={solidBagesCode} language="jsx" />
-    </FalconComponentCard>
-    <FalconComponentCard noGuttersBottom>
-      <FalconComponentCard.Header title="Solid pill badges" light={false} />
-      <FalconComponentCard.Body code={solidPillBagesCode} language="jsx" />
-    </FalconComponentCard>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Solid badges" light={false} />
+      <OrkestraComponentCard.Body code={solidBagesCode} language="jsx" />
+    </OrkestraComponentCard>
+    <OrkestraComponentCard noGuttersBottom>
+      <OrkestraComponentCard.Header title="Solid pill badges" light={false} />
+      <OrkestraComponentCard.Body code={solidPillBagesCode} language="jsx" />
+    </OrkestraComponentCard>
   </>
 );
 

@@ -1,5 +1,5 @@
 
-import FalconComponentCard from 'components/common/FalconComponentCard';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 import dayjs from 'dayjs';
 
 import { LineChart } from 'echarts/charts';
@@ -170,9 +170,9 @@ const chartCode = `function ChartOptions() {
 
 const LineGradientChart = () => {
   return (
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Line gradient chart" light={false} />
-      <FalconComponentCard.Body
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Line gradient chart" light={false} />
+      <OrkestraComponentCard.Body
         code={chartCode}
         language="jsx"
         scope={{
@@ -183,7 +183,7 @@ const LineGradientChart = () => {
           tooltipFormatter
         }}
       />
-    </FalconComponentCard>
+    </OrkestraComponentCard>
   );
 };
 

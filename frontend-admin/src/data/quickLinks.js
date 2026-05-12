@@ -1,4 +1,4 @@
-import themewagon from 'assets/img/nav-icons/themewagon.png';
+import orkestra from 'assets/img/nav-icons/orkestra.png';
 import mailbluster from 'assets/img/nav-icons/mailbluster.png';
 import google from 'assets/img/nav-icons/google.png';
 import spotify from 'assets/img/nav-icons/spotify.png';
@@ -24,9 +24,9 @@ export const quickLinks = [
     link: `/user/profile`
   },
   {
-    img: themewagon,
-    title: 'Themewagon',
-    link: 'https://themewagon.com/'
+    img: orkestra,
+    title: 'Orkestra',
+    link: 'https://orkestra.cc/'
   },
   {
     img: mailbluster,

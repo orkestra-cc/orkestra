@@ -1,11 +1,11 @@
 export default [
   {
     version: '5.0.0',
-    title: `Eleonora's Falcon`,
+    title: `Eleonora's Orkestra`,
     publish: '27 July, 2025',
     warning: {
       title: 'Major update!',
-      text: `We have updated Falcon from React 18.* to React 19.* version. Please backup your project before upgrading to the latest version. Follow the <a href='/migration' target="_blank" rel="noreferrer">migration guide</a> for proper setup.`
+      text: `We have updated Orkestra from React 18.* to React 19.* version. Please backup your project before upgrading to the latest version. Follow the <a href='/migration' target="_blank" rel="noreferrer">migration guide</a> for proper setup.`
     },
     logs: {
       New: [
@@ -39,11 +39,11 @@ export default [
   },
   {
     version: '4.8.0',
-    title: 'Red-footed Falcon',
+    title: 'Red-footed Orkestra',
     publish: '05 May, 2025',
     warning: {
       title: 'Major update!',
-      text: `We have updated Falcon from Create-React-App to Vite version. Please backup your project before upgrading to the latest version. Follow the <a href='/migration' target="_blank" rel="noreferrer">migration guide</a> for proper setup.`
+      text: `We have updated Orkestra from Create-React-App to Vite version. Please backup your project before upgrading to the latest version. Follow the <a href='/migration' target="_blank" rel="noreferrer">migration guide</a> for proper setup.`
     },
     logs: {
       New: [
@@ -72,7 +72,7 @@ export default [
   },
   {
     version: '4.7.0',
-    title: 'Tundra Peregrine Falcon',
+    title: 'Tundra Peregrine Orkestra',
     publish: '24 December, 2024',
     logs: {
       New: [
@@ -125,11 +125,11 @@ export default [
   },
   {
     version: '4.6.0',
-    title: 'Taita falcon',
+    title: 'Taita orkestra',
     publish: '22 August, 2024',
     logs: {
       New: [
-        '<span class="fw-bold">Vite starter version</span> (Contact <a href="mailto:support@themewagon.com">support</a> with the purchase ID)',
+        '<span class="fw-bold">Vite starter version</span> (Contact <a href="mailto:support@orkestra.cc">support</a> with the purchase ID)',
         'Plugin: <code>react-simple-star-rating</code>',
         `Page: <ul>
           <li><code>layouts/vertical-nav-layout</code></li>
@@ -149,14 +149,14 @@ export default [
         `Removed: <ul>
           <li>Plugin: <code>react-rating</code></li>
         </ul>`,
-        '<span class="fw-bold">Falcon Next.js starter with App router</span> (Contact <a href="mailto:support@themewagon.com">support</a> with the purchase ID)'
+        '<span class="fw-bold">Orkestra Next.js starter with App router</span> (Contact <a href="mailto:support@orkestra.cc">support</a> with the purchase ID)'
       ],
       Fix: ['Fix echarts issue while changing layouts', 'Minor bugs.']
     }
   },
   {
     version: '4.5.0',
-    title: 'Collared falcon',
+    title: 'Collared orkestra',
     publish: '20 Mar, 2024',
     warning: {
       title: 'Update Alert!',
@@ -212,7 +212,7 @@ export default [
   },
   {
     version: '4.4.0',
-    title: 'Bush hawk falcon',
+    title: 'Bush hawk orkestra',
     publish: '23 Nov, 2023',
     logs: {
       New: [
@@ -318,7 +318,7 @@ export default [
   },
   {
     version: '4.2.0',
-    title: 'Sooty falcon',
+    title: 'Sooty orkestra',
     publish: '08 June, 2023',
     logs: {
       New: [
@@ -349,7 +349,7 @@ export default [
   },
   {
     version: '4.1.0',
-    title: 'Lanner falcon',
+    title: 'Lanner orkestra',
     publish: '29 March, 2023',
     logs: {
       New: [
@@ -370,7 +370,7 @@ export default [
   },
   {
     version: '4.0.0',
-    title: 'Laggar falcon',
+    title: 'Laggar orkestra',
     publish: '22 December, 2022',
     warning: {
       title: 'Major update!',
@@ -416,7 +416,7 @@ export default [
   },
   {
     version: '3.9.0',
-    title: 'Black falcon',
+    title: 'Black orkestra',
     publish: '22 December, 2022',
     logs: {
       New: [
@@ -450,7 +450,7 @@ export default [
   },
   {
     version: '3.8.0',
-    title: 'Gyrfalcon',
+    title: 'Gyrorkestra',
     publish: '29 Novembar, 2022',
     logs: {
       New: [
@@ -503,7 +503,7 @@ export default [
   },
   {
     version: '3.7.1',
-    title: 'Bat falcon',
+    title: 'Bat orkestra',
     publish: '16 Septembor, 2022',
     logs: {
       Fix: ['process env issue'],
@@ -512,7 +512,7 @@ export default [
   },
   {
     version: '3.7.0',
-    title: 'Prairie falcon',
+    title: 'Prairie orkestra',
     publish: '11 Septembor, 2022',
     logs: {
       New: ['SCSS: to <code>src/scss/theme/_maps.scss</code>'],
@@ -547,7 +547,7 @@ export default [
   },
   {
     version: '3.6.0',
-    title: 'Aplomado falcon',
+    title: 'Aplomado orkestra',
     publish: '04 August, 2022',
     logs: {
       Update: [
@@ -573,7 +573,7 @@ export default [
   },
   {
     version: '3.5.1',
-    title: 'Barbary falcon',
+    title: 'Barbary orkestra',
     publish: '06 july, 2022',
     logs: {
       Update: ['React bootstrap version to <code>v2.4.0</code>'],
@@ -591,7 +591,7 @@ export default [
   },
   {
     version: '3.5.0',
-    title: 'Lesser falcon',
+    title: 'Lesser orkestra',
     publish: '12 May, 2022',
     logs: {
       Update: ['React bootstrap version to <code>v2.3.1</code>'],
@@ -618,7 +618,7 @@ export default [
   },
   {
     version: '3.4.0',
-    title: 'Peregrine falcon',
+    title: 'Peregrine orkestra',
     publish: '21 March, 2022',
     logs: {
       New: ['Reset button on setting panel', 'Page: Faq in Documentation'],
@@ -665,7 +665,7 @@ export default [
   },
   {
     version: '3.3.0',
-    title: 'Bateleur falcon',
+    title: 'Bateleur orkestra',
     badgeTitle: '!! Breaking Change !!',
     publish: '17 February, 2022',
     logs: {
@@ -848,7 +848,7 @@ export default [
         'React-Bootstrap to v2.0.3',
         'Plugin : <strong>Removed</strong> <code>react-scrollspy</code>',
         'Plugin : <strong>Removed</strong> <code>video.js</code>',
-        'Component : <strong>Removed</strong> <code>FalconVideoJS</code>',
+        'Component : <strong>Removed</strong> <code>OrkestraVideoJS</code>',
         'Doc : Renamed bootstrap-components directory to docs-components'
       ],
 
@@ -895,7 +895,7 @@ export default [
           '<code>src/features/social/feed/CreatePost.js</code>',
           '<code>src/features/social/feed/FeedCard.js</code>',
           '<code>src/features/social/feed/FeedContent.js</code>',
-          '<code>src/components/common/FalconLink.js</code>',
+          '<code>src/components/common/OrkestraLink.js</code>',
           '<code>src/components/dashboards/analytics/active-users/ActiveUsers.js</code>',
           '<code>src/components/dashboards/analytics/audience/Audience.js</code>',
           '<code>src/components/dashboards/analytics/bounce-rate/BounceRate.js</code>',
@@ -937,7 +937,7 @@ export default [
           '<code>src/routes/routes.js</code>',
           '<code>package.json</code>'
         ],
-        Delete: ['<code>src/components/common/FalconVideoJS.js</code>']
+        Delete: ['<code>src/components/common/OrkestraVideoJS.js</code>']
       }
     }
   },
@@ -994,7 +994,7 @@ export default [
           '<code>src/components/common/Avatar.js</code>',
           '<code>src/components/common/BasicEChart.js</code>',
           '<code>src/components/common/CardDropdown.js</code>',
-          '<code>src/components/common/FalconLink.js</code>',
+          '<code>src/components/common/OrkestraLink.js</code>',
           '<code>src/components/common/advance-table/AdvanceTableFooter.js</code>',
           '<code>src/components/common/advance-table/AdvanceTablePagination.js</code>',
           '<code>src/components/common/advance-table/AdvanceTableSearchBox.js</code>',
@@ -1265,7 +1265,7 @@ export default [
           '<code>src/components/pages/associations/*</code>',
           '<code>src/components/notification/*</code>',
           '<code>src/components/common/SubtleBadge.js</code>',
-          '<code>src/components/common/FalconLink.js</code>',
+          '<code>src/components/common/OrkestraLink.js</code>',
           '<code>src/components/bootstrap-components/Placeholder.js</code>',
           '<code>src/components/bootstrap-components/Lightbox.js</code>',
           '<code>src/components/common/AdvanceTable.js</code>',

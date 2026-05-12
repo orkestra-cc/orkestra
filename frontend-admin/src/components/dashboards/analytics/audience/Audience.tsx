@@ -2,7 +2,7 @@ import { Card, Col, Row, Tab, Nav, Form } from 'react-bootstrap';
 import Flex from 'components/common/Flex';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import AudienceChart from './AudienceChart';
-import FalconLink from 'components/common/FalconLink';
+import OrkestraLink from 'components/common/OrkestraLink';
 import SimpleBar from 'simplebar-react';
 import classNames from 'classnames';
 
@@ -129,7 +129,7 @@ const Audience = ({ chartData, className }: AudienceProps) => {
             </Form.Select>
           </Col>
           <Col xs="auto">
-            <FalconLink title="Visitors overview" className="px-0 fw-medium" />
+            <OrkestraLink title="Visitors overview" className="px-0 fw-medium" />
           </Col>
         </Row>
       </Card.Footer>

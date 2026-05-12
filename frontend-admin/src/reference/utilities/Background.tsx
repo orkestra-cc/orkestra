@@ -1,7 +1,7 @@
 
 import { Row, Col } from 'react-bootstrap';
 import PageHeader from 'components/common/PageHeader';
-import FalconComponentCard from 'components/common/FalconComponentCard';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 import Flex from 'components/common/Flex';
 import classNames from 'classnames';
 import { useAppContext } from 'providers/AppProvider';
@@ -18,9 +18,9 @@ const Background = () => {
         className="mb-3"
       />
 
-      <FalconComponentCard>
-        <FalconComponentCard.Header title="Theme colors" noPreview />
-        <FalconComponentCard.Body>
+      <OrkestraComponentCard>
+        <OrkestraComponentCard.Header title="Theme colors" noPreview />
+        <OrkestraComponentCard.Body>
           <Row className="g-0">
             {[
               'primary',
@@ -48,12 +48,12 @@ const Background = () => {
               </Col>
             ))}
           </Row>
-        </FalconComponentCard.Body>
-      </FalconComponentCard>
+        </OrkestraComponentCard.Body>
+      </OrkestraComponentCard>
 
-      <FalconComponentCard>
-        <FalconComponentCard.Header title="Gray shades" noPreview />
-        <FalconComponentCard.Body>
+      <OrkestraComponentCard>
+        <OrkestraComponentCard.Header title="Gray shades" noPreview />
+        <OrkestraComponentCard.Body>
           <Row className="g-0">
             {[
               '1100',
@@ -92,11 +92,11 @@ const Background = () => {
               </Col>
             ))}
           </Row>
-        </FalconComponentCard.Body>
-      </FalconComponentCard>
+        </OrkestraComponentCard.Body>
+      </OrkestraComponentCard>
 
-      <FalconComponentCard>
-        <FalconComponentCard.Header title="Background Gradient" noPreview>
+      <OrkestraComponentCard>
+        <OrkestraComponentCard.Header title="Background Gradient" noPreview>
           <p className="mt-2">
             By adding a <code>.bg-gradient</code> class, a linear gradient is
             added as background image to the backgrounds. This gradient starts
@@ -106,8 +106,8 @@ const Background = () => {
             Do you need a gradient in your custom CSS ? Just add{' '}
             <code>background-image: var(--bs-gradient);</code>.
           </p>
-        </FalconComponentCard.Header>
-        <FalconComponentCard.Body>
+        </OrkestraComponentCard.Header>
+        <OrkestraComponentCard.Body>
           <Row className="g-0">
             {[
               'primary',
@@ -147,12 +147,12 @@ const Background = () => {
               </Col>
             ))}
           </Row>
-        </FalconComponentCard.Body>
-      </FalconComponentCard>
+        </OrkestraComponentCard.Body>
+      </OrkestraComponentCard>
 
-      <FalconComponentCard>
-        <FalconComponentCard.Header title="Subtle colors" noPreview />
-        <FalconComponentCard.Body>
+      <OrkestraComponentCard>
+        <OrkestraComponentCard.Header title="Subtle colors" noPreview />
+        <OrkestraComponentCard.Body>
           <Row className="g-0">
             {[
               'primary',
@@ -188,12 +188,12 @@ const Background = () => {
               </Col>
             ))}
           </Row>
-        </FalconComponentCard.Body>
-      </FalconComponentCard>
+        </OrkestraComponentCard.Body>
+      </OrkestraComponentCard>
 
-      <FalconComponentCard>
-        <FalconComponentCard.Header title="Brand colors" noPreview />
-        <FalconComponentCard.Body>
+      <OrkestraComponentCard>
+        <OrkestraComponentCard.Header title="Brand colors" noPreview />
+        <OrkestraComponentCard.Body>
           <Row className="g-0">
             {[
               'facebook',
@@ -215,11 +215,11 @@ const Background = () => {
               </Col>
             ))}
           </Row>
-        </FalconComponentCard.Body>
-      </FalconComponentCard>
-      <FalconComponentCard noGuttersBottom>
-        <FalconComponentCard.Header title="Color and background" noPreview />
-        <FalconComponentCard.Body>
+        </OrkestraComponentCard.Body>
+      </OrkestraComponentCard>
+      <OrkestraComponentCard noGuttersBottom>
+        <OrkestraComponentCard.Header title="Color and background" noPreview />
+        <OrkestraComponentCard.Body>
           <Row className="g-0">
             {[
               'primary',
@@ -247,8 +247,8 @@ const Background = () => {
               </Col>
             ))}
           </Row>
-        </FalconComponentCard.Body>
-      </FalconComponentCard>
+        </OrkestraComponentCard.Body>
+      </OrkestraComponentCard>
     </>
   );
 };

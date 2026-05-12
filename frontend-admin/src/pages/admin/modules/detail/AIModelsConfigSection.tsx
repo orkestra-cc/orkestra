@@ -11,7 +11,7 @@ import {
   Spinner,
   Table
 } from 'react-bootstrap';
-import { FalconCardHeader } from 'components/common';
+import { OrkestraCardHeader } from 'components/common';
 import type {
   ModuleConfig,
   EnvironmentConfigResponse
@@ -331,7 +331,7 @@ const AIModelsConfigSection: React.FC<AIModelsConfigSectionProps> = ({
       )}
 
       <Card className="mb-3">
-        <FalconCardHeader
+        <OrkestraCardHeader
           title="AI Provider Configuration"
           light={false}
           endEl={

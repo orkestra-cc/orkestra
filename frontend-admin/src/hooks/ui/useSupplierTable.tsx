@@ -11,7 +11,7 @@ import {
 } from 'store/api/billingApi';
 import type { Supplier } from 'types/billing';
 import { getPartyDisplayName, REGIME_FISCALE_LABELS } from 'types/billing';
-import FalconCloseButton from 'components/common/FalconCloseButton';
+import OrkestraCloseButton from 'components/common/OrkestraCloseButton';
 
 // Deactivation Modal Component
 interface SupplierDeactivationModalProps {
@@ -35,7 +35,7 @@ const SupplierDeactivationModal: React.FC<SupplierDeactivationModalProps> = ({
     <Modal show={show} onHide={onHide} centered>
       <Modal.Header>
         <Modal.Title>Disattiva Fornitore</Modal.Title>
-        <FalconCloseButton onClick={onHide} />
+        <OrkestraCloseButton onClick={onHide} />
       </Modal.Header>
       <Modal.Body>
         <p>

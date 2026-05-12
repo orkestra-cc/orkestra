@@ -1,6 +1,6 @@
 
 import { Button, Form, Modal } from 'react-bootstrap';
-import FalconCloseButton from 'components/common/FalconCloseButton';
+import OrkestraCloseButton from 'components/common/OrkestraCloseButton';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 
 // Types for Ask Question Modal
@@ -18,7 +18,7 @@ const AskQuestionModal: React.FC<AskQuestionModalProps> = ({ show, handleClose }
       <Modal.Title as="h5" className="text-white">
         Ask your question
       </Modal.Title>
-      <FalconCloseButton noOutline variant="white" onClick={handleClose} />
+      <OrkestraCloseButton noOutline variant="white" onClick={handleClose} />
     </Modal.Header>
     <Modal.Body>
       <Form>

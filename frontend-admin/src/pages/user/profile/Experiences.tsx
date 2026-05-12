@@ -1,12 +1,12 @@
 import { Card } from 'react-bootstrap';
 import experiences from 'data/experiences';
-import FalconCardHeader from 'components/common/FalconCardHeader';
+import OrkestraCardHeader from 'components/common/OrkestraCardHeader';
 import Experience from '../Experience';
 
 const Experiences: React.FC = () => {
   return (
     <Card className="mb-3">
-      <FalconCardHeader title="Experience" light />
+      <OrkestraCardHeader title="Experience" light />
       <Card.Body className="fs-10">
         {(experiences as any[]).map((experience: any, index: number) => (
           <Experience

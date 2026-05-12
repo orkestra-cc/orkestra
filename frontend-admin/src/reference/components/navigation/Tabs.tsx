@@ -2,7 +2,7 @@
 import { Button, Row, Col } from 'react-bootstrap';
 import PageHeader from 'components/common/PageHeader';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import FalconComponentCard from 'components/common/FalconComponentCard';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 import { reactBootstrapDocsUrl } from 'helpers/utils';
 
 const exampleCode = `
@@ -153,45 +153,45 @@ const Tabs = () => (
 
     <Row className="mb-3 g-3">
       <Col md={6}>
-        <FalconComponentCard className="h-100">
-          <FalconComponentCard.Header title="Basic Example" light={false} />
-          <FalconComponentCard.Body code={exampleCode} language="jsx" />
-        </FalconComponentCard>
+        <OrkestraComponentCard className="h-100">
+          <OrkestraComponentCard.Header title="Basic Example" light={false} />
+          <OrkestraComponentCard.Body code={exampleCode} language="jsx" />
+        </OrkestraComponentCard>
       </Col>
       <Col md={6}>
-        <FalconComponentCard className="h-100" noGuttersBottom>
-          <FalconComponentCard.Header title="Controlled" light={false}>
+        <OrkestraComponentCard className="h-100" noGuttersBottom>
+          <OrkestraComponentCard.Header title="Controlled" light={false}>
             <p className="mt-2 mb-0">
               <code>Tabs</code> can be controlled directly when you want to
               handle the selection logic personally.
             </p>
-          </FalconComponentCard.Header>
-          <FalconComponentCard.Body code={controlledCode} language="jsx" />
-        </FalconComponentCard>
+          </OrkestraComponentCard.Header>
+          <OrkestraComponentCard.Body code={controlledCode} language="jsx" />
+        </OrkestraComponentCard>
       </Col>
     </Row>
 
     <Row className="mb-3 g-3">
       <Col md={6}>
-        <FalconComponentCard className="h-100" noGuttersBottom>
-          <FalconComponentCard.Header title="No animation" light={false}>
+        <OrkestraComponentCard className="h-100" noGuttersBottom>
+          <OrkestraComponentCard.Header title="No animation" light={false}>
             <p className="mt-2 mb-0">
               Set the <code>transition</code> prop to <code>false</code>
             </p>
-          </FalconComponentCard.Header>
-          <FalconComponentCard.Body code={NoAnimationCode} language="jsx" />
-        </FalconComponentCard>
+          </OrkestraComponentCard.Header>
+          <OrkestraComponentCard.Body code={NoAnimationCode} language="jsx" />
+        </OrkestraComponentCard>
       </Col>
       <Col md={6}>
-        <FalconComponentCard className="h-100" noGuttersBottom>
-          <FalconComponentCard.Header title="Pills" light={false} />
-          <FalconComponentCard.Body code={pillsCode} language="jsx" />
-        </FalconComponentCard>
+        <OrkestraComponentCard className="h-100" noGuttersBottom>
+          <OrkestraComponentCard.Header title="Pills" light={false} />
+          <OrkestraComponentCard.Body code={pillsCode} language="jsx" />
+        </OrkestraComponentCard>
       </Col>
     </Row>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Custom Tab Layout" light={false}>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Custom Tab Layout" light={false}>
         <p className="mt-2">
           For more complex layouts the flexible <code>TabContainer</code>,
           <code>TabContent</code>, and <code>TabPane</code> components along
@@ -205,9 +205,9 @@ const Tabs = () => (
           functioning custom tabs component. Check out the below example making
           use of the grid system and pills.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body code={customLayoutCode} language="jsx" />
-    </FalconComponentCard>
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body code={customLayoutCode} language="jsx" />
+    </OrkestraComponentCard>
   </>
 );
 

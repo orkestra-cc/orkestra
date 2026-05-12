@@ -103,7 +103,7 @@ const ServicesListPage: React.FC = () => {
           </IconButton>
           <IconButton
             icon="sync-alt"
-            variant="falcon-default"
+            variant="orkestra-default"
             onClick={() => refetch()}
           >
             Aggiorna
@@ -270,7 +270,7 @@ const ServicesListPage: React.FC = () => {
             <hr />
             <Flex justifyContent="between" alignItems="center" className="mb-2">
               <strong>Tier di prezzo</strong>
-              <Button size="sm" variant="falcon-default" onClick={addTier}>
+              <Button size="sm" variant="orkestra-default" onClick={addTier}>
                 + Tier
               </Button>
             </Flex>

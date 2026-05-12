@@ -8,7 +8,7 @@ import {
 } from 'echarts/components';
 import * as echarts from 'echarts/core';
 import { CanvasRenderer } from 'echarts/renderers';
-import FalconCardHeader from 'components/common/FalconCardHeader';
+import OrkestraCardHeader from 'components/common/OrkestraCardHeader';
 import ReactEchart from 'components/common/ReactEchart';
 import { useGetBillingStatsQuery } from 'store/api/billingApi';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
@@ -225,7 +225,7 @@ const InvoiceTrendChart = () => {
   if (isLoading) {
     return (
       <Card className="h-100">
-        <FalconCardHeader title="Andamento Fatturazione" titleTag="h6" light />
+        <OrkestraCardHeader title="Andamento Fatturazione" titleTag="h6" light />
         <Card.Body
           className="d-flex align-items-center justify-content-center"
           style={{ minHeight: 300 }}
@@ -239,7 +239,7 @@ const InvoiceTrendChart = () => {
   if (error || !stats) {
     return (
       <Card className="h-100">
-        <FalconCardHeader title="Andamento Fatturazione" titleTag="h6" light />
+        <OrkestraCardHeader title="Andamento Fatturazione" titleTag="h6" light />
         <Card.Body
           className="d-flex align-items-center justify-content-center"
           style={{ minHeight: 300 }}
@@ -258,7 +258,7 @@ const InvoiceTrendChart = () => {
 
   return (
     <Card className="h-100">
-      <FalconCardHeader
+      <OrkestraCardHeader
         title="Andamento Fatturazione"
         titleTag="h6"
         light

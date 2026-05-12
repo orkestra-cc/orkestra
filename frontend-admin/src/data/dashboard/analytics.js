@@ -35,7 +35,7 @@ export const realTimeUsers = [
     count: 3
   },
   {
-    page: '/preview/falcon/dashboard/',
+    page: '/preview/orkestra/dashboard/',
     count: 3
   },
   {
@@ -43,7 +43,7 @@ export const realTimeUsers = [
     count: 3
   },
   {
-    page: '/product/falcon-admin-dashboard/',
+    page: '/product/orkestra-admin-dashboard/',
     count: 3
   }
 ];
@@ -215,14 +215,14 @@ export const topPagesTableData = [
   },
   {
     id: 2,
-    path: '/falcon/pages/starter.html',
+    path: '/orkestra/pages/starter.html',
     views: 1422,
     time: '2m:14s',
     exitRate: '52.4%'
   },
   {
     id: 3,
-    path: '/pages/falcon-webapp-theme',
+    path: '/pages/orkestra-webapp-theme',
     views: 1378,
     time: '2m:23s',
     exitRate: '25.1%'
@@ -236,14 +236,14 @@ export const topPagesTableData = [
   },
   {
     id: 5,
-    path: '/themes/falcon/components',
+    path: '/themes/orkestra/components',
     views: 11047,
     time: '1m:16s',
     exitRate: '49.3%'
   },
   {
     id: 6,
-    path: '/themewagon.com/themes/free-website-template',
+    path: '/orkestra.cc/themes/free-website-template',
     views: 1007,
     time: '0m:34s',
     exitRate: '35.9%'
@@ -264,7 +264,7 @@ export const topPagesTableData = [
   },
   {
     id: 9,
-    path: '/themewagon.com/themes/free-website-template',
+    path: '/orkestra.cc/themes/free-website-template',
     views: 971,
     time: '1m:06s',
     exitRate: '49.3%'
@@ -285,14 +285,14 @@ export const topPagesTableData = [
   },
   {
     id: 12,
-    path: '/themewagon.com/themes/bootstrap-template',
+    path: '/orkestra.cc/themes/bootstrap-template',
     views: 11047,
     time: '1m:16s',
     exitRate: '21.5%'
   },
   {
     id: 13,
-    path: '/themewagon.com/themes/free-website-template',
+    path: '/orkestra.cc/themes/free-website-template',
     views: 11047,
     time: '0m:54s',
     exitRate: '62.5%'

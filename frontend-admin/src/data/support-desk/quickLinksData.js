@@ -139,12 +139,12 @@ export const account = [
     color: 'primary',
     title: 'Log of Audits',
     description:
-      'All of the changes made to your falcon Support tickets account.'
+      'All of the changes made to your orkestra Support tickets account.'
   },
   {
     icon: <FiAlertCircle className="text-info fs-7" />,
     color: 'info',
     title: 'Configure the Helpdesk',
-    description: 'Your Falcon Support Tickets will be personalized.'
+    description: 'Your Orkestra Support Tickets will be personalized.'
   }
 ];

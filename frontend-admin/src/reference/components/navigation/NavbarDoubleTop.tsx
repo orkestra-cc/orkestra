@@ -2,7 +2,7 @@
 import { Button, Card } from 'react-bootstrap';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import PageHeader from 'components/common/PageHeader';
-import FalconCardHeader from 'components/common/FalconCardHeader';
+import OrkestraCardHeader from 'components/common/OrkestraCardHeader';
 import { reactBootstrapDocsUrl } from 'helpers/utils';
 import { useAppContext } from 'providers/AppProvider';
 
@@ -16,7 +16,7 @@ const NavbarDoubleTop = () => {
     <>
       <PageHeader
         title="Navbar Double Top"
-        description="Navbar Double Top is a different user friendly layout system in Falcon. You can start developing with Navbar Double Top layout with the starter page."
+        description="Navbar Double Top is a different user friendly layout system in Orkestra. You can start developing with Navbar Double Top layout with the starter page."
         className="mb-3"
       >
         <Button
@@ -35,10 +35,10 @@ const NavbarDoubleTop = () => {
         </Button>
       </PageHeader>
       <Card className="mb-3">
-        <FalconCardHeader title="Supported Content" light={false} />
+        <OrkestraCardHeader title="Supported Content" light={false} />
         <Card.Body className="bg-body-tertiary">
           <p>
-            Falcon Navbar Double Top support all of
+            Orkestra Navbar Double Top support all of
             <a href={`${reactBootstrapDocsUrl}/docs/components/navbar/`}>
               {' '}
               React-Bootstrap Navbar{' '}
@@ -51,16 +51,16 @@ const NavbarDoubleTop = () => {
         </Card.Body>
       </Card>
       <Card className="mb-3">
-        <FalconCardHeader title="Behaviors" light={false} />
+        <OrkestraCardHeader title="Behaviors" light={false} />
         <Card.Body className="bg-body-tertiary">
           <p>
-            Falcon Navbar Double Top uses
+            Orkestra Navbar Double Top uses
             <a href={`${reactBootstrapDocsUrl}/docs/components/navbar/`}>
               {' '}
               React-Bootstrap Navbar{' '}
             </a>
             responsive behaviors and all other behavior they support. The
-            dropdown menu display onClick by default on react-bootstrap. Falcon
+            dropdown menu display onClick by default on react-bootstrap. Orkestra
             navbar top dropdown menu display on hover. To achieve this behavior,
             we use react <code>onMouseOver</code> Event and{' '}
             <code>onMouseLeave</code> event at{' '}
@@ -69,10 +69,10 @@ const NavbarDoubleTop = () => {
         </Card.Body>
       </Card>
       <Card className="mb-3">
-        <FalconCardHeader title="Color Schemes" light={false} />
+        <OrkestraCardHeader title="Color Schemes" light={false} />
         <Card.Body className="bg-body-tertiary">
           <p>
-            Changing the color of Falcon Navbar Double Top is very easy. Falcon
+            Changing the color of Orkestra Navbar Double Top is very easy. Orkestra
             uses React-Bootstrap's default <code> variant='light' </code> for
             navabr component. You can use other background-color utilitie with{' '}
             <code>bg</code> prop to update the Navbar. Learn more about

@@ -127,7 +127,7 @@ const Mail = ({ message, index }: MailProps) => {
               <Col xs="auto">
                 <IconButton
                   icon="file-download"
-                  variant="falcon-default"
+                  variant="orkestra-default"
                   size="sm"
                 >
                   <span className="ms-1">Download all</span>
@@ -182,7 +182,7 @@ const Conversation = () => {
         <Card.Footer className="bg-body-tertiary">
           <IconButton
             size="sm"
-            variant="falcon-default"
+            variant="orkestra-default"
             icon="reply"
             onClick={() => setShowForm(true)}
           >
@@ -190,7 +190,7 @@ const Conversation = () => {
           </IconButton>
           <IconButton
             size="sm"
-            variant="falcon-default"
+            variant="orkestra-default"
             icon="location-arrow"
             className="mx-2"
             onClick={() => setShowForm(true)}
@@ -199,7 +199,7 @@ const Conversation = () => {
           </IconButton>
           <IconButton
             size="sm"
-            variant="falcon-default"
+            variant="orkestra-default"
             icon="file-alt"
             onClick={() => setShowForm(true)}
           >

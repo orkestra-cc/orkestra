@@ -4,7 +4,7 @@ import signalImg from 'assets/img/icons/signal.png';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { IconProp } from '@fortawesome/fontawesome-svg-core';
 import { Link } from 'react-router';
-import FalconLink from 'components/common/FalconLink';
+import OrkestraLink from 'components/common/OrkestraLink';
 import SimpleBar from 'simplebar-react';
 
 interface IntelligenceItem {
@@ -43,7 +43,7 @@ const Intelligence = ({ data }: IntelligenceProps) => {
       <Card.Header as={Flex} alignItems="center">
         <img src={signalImg} alt="intelligence" height={35} className="me-2" />
         <h5 className="fs-9 fw-normal text-800 mb-0">
-          Ask Falcon Intelligence
+          Ask Orkestra Intelligence
         </h5>
       </Card.Header>
       <Card.Body className="p-0">
@@ -61,7 +61,7 @@ const Intelligence = ({ data }: IntelligenceProps) => {
         </SimpleBar>
       </Card.Body>
       <Card.Footer className="bg-body-tertiary text-end py-2">
-        <FalconLink title="More Insights" className="px-0 fw-medium" />
+        <OrkestraLink title="More Insights" className="px-0 fw-medium" />
       </Card.Footer>
     </Card>
   );

@@ -2,7 +2,7 @@
 import { Button, Row, Col } from 'react-bootstrap';
 import PageHeader from 'components/common/PageHeader';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import FalconComponentCard from 'components/common/FalconComponentCard';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 import { reactBootstrapDocsUrl } from 'helpers/utils';
 
 const exampleCode = `
@@ -76,51 +76,51 @@ const Progress = () => (
 
     <Row className="mb-3 g-3">
       <Col lg={6}>
-        <FalconComponentCard noGuttersBottom>
-          <FalconComponentCard.Header title="Basic Example" light={false} />
-          <FalconComponentCard.Body code={exampleCode} language="jsx" />
-        </FalconComponentCard>
+        <OrkestraComponentCard noGuttersBottom>
+          <OrkestraComponentCard.Header title="Basic Example" light={false} />
+          <OrkestraComponentCard.Body code={exampleCode} language="jsx" />
+        </OrkestraComponentCard>
       </Col>
       <Col lg={6}>
-        <FalconComponentCard noGuttersBottom>
-          <FalconComponentCard.Header title="Label" light={false} />
-          <FalconComponentCard.Body code={labelCode} language="jsx" />
-        </FalconComponentCard>
+        <OrkestraComponentCard noGuttersBottom>
+          <OrkestraComponentCard.Header title="Label" light={false} />
+          <OrkestraComponentCard.Body code={labelCode} language="jsx" />
+        </OrkestraComponentCard>
       </Col>
     </Row>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Height" light={false} />
-      <FalconComponentCard.Body code={heightCode} language="jsx" />
-    </FalconComponentCard>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Height" light={false} />
+      <OrkestraComponentCard.Body code={heightCode} language="jsx" />
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Background" light={false} />
-      <FalconComponentCard.Body code={bgCode} language="jsx" />
-    </FalconComponentCard>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Background" light={false} />
+      <OrkestraComponentCard.Body code={bgCode} language="jsx" />
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Striped" light={false} />
-      <FalconComponentCard.Body code={stripedCode} language="jsx" />
-    </FalconComponentCard>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Striped" light={false} />
+      <OrkestraComponentCard.Body code={stripedCode} language="jsx" />
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Stacked" light={false}>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Stacked" light={false}>
         <p className="mt-2 mb-0">
           Nest <code>&lt;ProgressBar /&gt;</code>s to stack them.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body code={stackedCode} language="jsx" />
-    </FalconComponentCard>
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body code={stackedCode} language="jsx" />
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Animated" light={false}>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Animated" light={false}>
         <p className="mt-2 mb-0">
           Add <code>animated</code> prop to animate the stripes right to left.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body code={animatedCode} language="jsx" />
-    </FalconComponentCard>
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body code={animatedCode} language="jsx" />
+    </OrkestraComponentCard>
   </>
 );
 

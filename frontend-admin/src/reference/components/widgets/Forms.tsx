@@ -24,7 +24,7 @@ const Forms = () => {
       <WidgetSectionTitle
         icon="file-alt"
         title="Forms"
-        subtitle="Get different types of data from the user by using Falcon's customizable form."
+        subtitle="Get different types of data from the user by using Orkestra's customizable form."
         transform="shrink-2"
         className="mb-4 mt-6"
       />

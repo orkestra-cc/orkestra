@@ -137,7 +137,7 @@ const EventOtherInfo = ({ register, control }: EventOtherInfoProps) => {
             Public page:
           </Form.Check.Label>
           <div className="form-text mt-0">
-            Discoverable by anyone on Falcon, our distribution partners, and
+            Discoverable by anyone on Orkestra, our distribution partners, and
             search engines.
           </div>
         </Form.Check>

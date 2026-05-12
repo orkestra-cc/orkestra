@@ -13,7 +13,7 @@ import MediaImg4 from 'assets/img/chat/4.jpg';
 import MediaImg5 from 'assets/img/chat/5.jpg';
 import MediaImg6 from 'assets/img/chat/6.jpg';
 import users from 'data/people';
-import FalconLightBoxGallery from 'components/common/FalconLightBoxGallery';
+import OrkestraLightBoxGallery from 'components/common/OrkestraLightBoxGallery';
 import SimpleBar from 'simplebar-react';
 import { useChatContext } from 'providers/ChatProvider';
 import paths from 'routes/paths';
@@ -241,7 +241,7 @@ const ThreadInfo = ({ thread }: ThreadInfoProps) => {
               </Button>
               <Collapse in={isOpenSharedMediaCollapse}>
                 <div className="mt-2">
-                  <FalconLightBoxGallery images={images}>
+                  <OrkestraLightBoxGallery images={images}>
                     {setImgIndex => (
                       <Row className="mx-n1">
                         {images.map((image, index) => (
@@ -258,7 +258,7 @@ const ThreadInfo = ({ thread }: ThreadInfoProps) => {
                         ))}
                       </Row>
                     )}
-                  </FalconLightBoxGallery>
+                  </OrkestraLightBoxGallery>
                 </div>
               </Collapse>
             </div>

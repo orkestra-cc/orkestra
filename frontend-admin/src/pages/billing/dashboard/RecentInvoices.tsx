@@ -1,7 +1,7 @@
 import { Card, Table, Spinner, Badge } from 'react-bootstrap';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faFileInvoice, faFileImport } from '@fortawesome/free-solid-svg-icons';
-import FalconCardHeader from 'components/common/FalconCardHeader';
+import OrkestraCardHeader from 'components/common/OrkestraCardHeader';
 import { Link } from 'react-router';
 import { useGetInvoicesQuery } from 'store/api/billingApi';
 import {
@@ -48,7 +48,7 @@ const RecentInvoices = () => {
   if (isLoading) {
     return (
       <Card className="h-100">
-        <FalconCardHeader title="Fatture Recenti" titleTag="h6" light />
+        <OrkestraCardHeader title="Fatture Recenti" titleTag="h6" light />
         <Card.Body
           className="d-flex align-items-center justify-content-center"
           style={{ minHeight: 250 }}
@@ -79,7 +79,7 @@ const RecentInvoices = () => {
 
   return (
     <Card className="h-100">
-      <FalconCardHeader
+      <OrkestraCardHeader
         title="Fatture Recenti"
         titleTag="h6"
         light

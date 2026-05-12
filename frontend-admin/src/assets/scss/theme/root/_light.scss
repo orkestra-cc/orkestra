@@ -69,34 +69,34 @@
   --#{$prefix}btn-reveal-focus-border-color: #{shade-color($white, 12.5%)};
 
   //
-  // Falcon Button
+  // Orkestra Button
   //
-  --#{$prefix}btn-falcon-background: var(--#{$prefix}quaternary-bg);
+  --#{$prefix}btn-orkestra-background: var(--#{$prefix}quaternary-bg);
   --#{$prefix}btn-disabled-color: #4d5969;
-  --#{$prefix}btn-falcon-box-shadow: #{$btn-falcon-box-shadow};
-  --#{$prefix}btn-falcon-hover-box-shadow: #{$btn-falcon-hover-box-shadow};
+  --#{$prefix}btn-orkestra-box-shadow: #{$btn-orkestra-box-shadow};
+  --#{$prefix}btn-orkestra-hover-box-shadow: #{$btn-orkestra-hover-box-shadow};
 
-  --#{$prefix}btn-falcon-default-color: var(--#{$prefix}gray-800);
-  --#{$prefix}btn-falcon-default-hover-color: #{shift-color($gray-800, 17%)};
-  --#{$prefix}btn-falcon-default-active-background: #{shade-color($white, 10%)};
-  --#{$prefix}btn-falcon-default-active-border: #{shift-color($gray-800, 17%)};
+  --#{$prefix}btn-orkestra-default-color: var(--#{$prefix}gray-800);
+  --#{$prefix}btn-orkestra-default-hover-color: #{shift-color($gray-800, 17%)};
+  --#{$prefix}btn-orkestra-default-active-background: #{shade-color($white, 10%)};
+  --#{$prefix}btn-orkestra-default-active-border: #{shift-color($gray-800, 17%)};
   --#{$prefix}btn-active-border-color: transparent;
 
-  [class^='btn-falcon-'].show {
-    --#{$prefix}btn-active-shadow: var(--#{$prefix}btn-falcon-box-shadow);
+  [class^='btn-orkestra-'].show {
+    --#{$prefix}btn-active-shadow: var(--#{$prefix}btn-orkestra-box-shadow);
   }
 
   @each $color, $value in $theme-colors {
     //
-    // Falcon Button
+    // Orkestra Button
     //
-    --#{$prefix}btn-falcon-#{$color}-color: var(--#{$prefix}#{$color});
-    --#{$prefix}btn-falcon-#{$color}-hover-color: #{shift-color($value, 17%)};
-    --#{$prefix}btn-falcon-#{$color}-active-background: #{shift-color(
+    --#{$prefix}btn-orkestra-#{$color}-color: var(--#{$prefix}#{$color});
+    --#{$prefix}btn-orkestra-#{$color}-hover-color: #{shift-color($value, 17%)};
+    --#{$prefix}btn-orkestra-#{$color}-active-background: #{shift-color(
         $value,
         -80%
       )};
-    --#{$prefix}btn-falcon-#{$color}-active-color: #{shift-color($value, 17%)};
+    --#{$prefix}btn-orkestra-#{$color}-active-color: #{shift-color($value, 17%)};
   }
 
   // Need To Work
@@ -312,9 +312,9 @@
   --#{$prefix}simplebar-bg: #{rgba($gray-400, 1)};
 
   //
-  // Falcon pill
+  // Orkestra pill
   //
-  --#{$prefix}nav-pills-falcon-active-bg-color: var(--#{$prefix}quaternary-bg);
+  --#{$prefix}nav-pills-orkestra-active-bg-color: var(--#{$prefix}quaternary-bg);
 
   //
   // Custom disabled button

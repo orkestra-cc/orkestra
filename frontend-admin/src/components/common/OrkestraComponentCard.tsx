@@ -1,6 +1,6 @@
 import { ReactNode } from 'react';
 import { Card, Tab, Row, Col, Nav, Button } from 'react-bootstrap';
-import FalconCardBody from './FalconCardBody';
+import OrkestraCardBody from './OrkestraCardBody';
 import classNames from 'classnames';
 import { HashLink } from 'react-router-hash-link';
 import Flex from './Flex';
@@ -12,7 +12,7 @@ const PreviewCode = () => {
   return (
     <Row className="d-inline-block">
       <Col>
-        <Nav variant="pills" className="nav-pills-falcon m-0">
+        <Nav variant="pills" className="nav-pills-orkestra m-0">
           <Nav.Item>
             <Nav.Link as={Button} size="sm" eventKey="preview">
               Preview
@@ -35,7 +35,7 @@ const PreviewCode = () => {
   );
 };
 
-interface FalconComponentCardHeaderProps {
+interface OrkestraComponentCardHeaderProps {
   light?: boolean;
   className?: string;
   title?: string;
@@ -43,13 +43,13 @@ interface FalconComponentCardHeaderProps {
   noPreview?: boolean;
 }
 
-const FalconComponentCardHeader = ({
+const OrkestraComponentCardHeader = ({
   light,
   className,
   title,
   children,
   noPreview
-}: FalconComponentCardHeaderProps) => {
+}: OrkestraComponentCardHeaderProps) => {
   const location = useLocation();
   const {
     config: { isRTL }
@@ -114,19 +114,19 @@ const FalconComponentCardHeader = ({
   );
 };
 
-interface FalconComponentCardProps {
+interface OrkestraComponentCardProps {
   children: ReactNode;
   multiSections?: boolean;
   noGuttersBottom?: boolean;
   [key: string]: any;
 }
 
-const FalconComponentCard = ({
+const OrkestraComponentCard = ({
   children,
   multiSections,
   noGuttersBottom,
   ...rest
-}: FalconComponentCardProps) => {
+}: OrkestraComponentCardProps) => {
   return (
     <Card className={classNames({ 'mb-3': !noGuttersBottom })} {...rest}>
       {multiSections ? (
@@ -138,7 +138,7 @@ const FalconComponentCard = ({
   );
 };
 
-FalconComponentCard.Header = FalconComponentCardHeader;
-FalconComponentCard.Body = FalconCardBody;
+OrkestraComponentCard.Header = OrkestraComponentCardHeader;
+OrkestraComponentCard.Body = OrkestraCardBody;
 
-export default FalconComponentCard;
+export default OrkestraComponentCard;

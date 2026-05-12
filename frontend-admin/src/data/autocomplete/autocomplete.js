@@ -59,7 +59,7 @@ const autoCompleteInitialItem = [
     url: '#!',
     img: imageFile2,
     file: true,
-    title: 'Falcon v1.8.2',
+    title: 'Orkestra v1.8.2',
     imgAttrs: {
       class: 'img-fluid'
     },

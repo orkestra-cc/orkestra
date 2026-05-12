@@ -2,7 +2,7 @@
 import { Button, Tab } from 'react-bootstrap';
 import PageHeader from 'components/common/PageHeader';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import FalconComponentCard from 'components/common/FalconComponentCard';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 import { reactBootstrapDocsUrl } from 'helpers/utils';
 
 const horizontalCode = `
@@ -181,13 +181,13 @@ const Navs = () => (
       </Button>
     </PageHeader>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Horizontal" light={false} />
-      <FalconComponentCard.Body code={horizontalCode} language="jsx" />
-    </FalconComponentCard>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Horizontal" light={false} />
+      <OrkestraComponentCard.Body code={horizontalCode} language="jsx" />
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header
         title="Alignment and orientation"
         light={false}
       >
@@ -200,55 +200,55 @@ const Navs = () => (
           utility classes. By default, navs are left-aligned, but that is easily
           changed to center or right-aligned.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body code={alignmentCode} language="jsx" />
-    </FalconComponentCard>
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body code={alignmentCode} language="jsx" />
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Vertical" light={false}>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Vertical" light={false}>
         <p className="mt-2 mb-0">
           Create stacked navs by changing the flex item direction with the
           <code>.flex-column</code> class, or your own css. You can even use the
           responsive versions to stack in some viewports but not others (e.g.
           <code>.flex-sm-column</code>).
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body code={verticalCode} language="jsx" />
-    </FalconComponentCard>
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body code={verticalCode} language="jsx" />
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Pills" light={false}>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Pills" light={false}>
         <p className="mt-2 mb-0">An alternative visual variant.</p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body code={pillsCode} language="jsx" />
-    </FalconComponentCard>
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body code={pillsCode} language="jsx" />
+    </OrkestraComponentCard>
 
-    <FalconComponentCard multiSections>
+    <OrkestraComponentCard multiSections>
       <Tab.Container defaultActiveKey="preview">
-        <FalconComponentCard.Header title="Fill and justify" light={false}>
+        <OrkestraComponentCard.Header title="Fill and justify" light={false}>
           <p className="mt-2 mb-0">
             Force the contents of your nav to extend the full available width.
             To proportionately fill the space use <code>fill</code>. Notice that
             the nav is the entire width but each nav item is a different size.
           </p>
-        </FalconComponentCard.Header>
-        <FalconComponentCard.Body code={fillsCode} language="jsx" />
+        </OrkestraComponentCard.Header>
+        <OrkestraComponentCard.Body code={fillsCode} language="jsx" />
       </Tab.Container>
       <Tab.Container defaultActiveKey="preview">
-        <FalconComponentCard.Header>
+        <OrkestraComponentCard.Header>
           <p className="mt-2 mb-0">
             If you want each NavItem to be the same size use{' '}
             <code>justify</code>.
           </p>
-        </FalconComponentCard.Header>
-        <FalconComponentCard.Body code={justifyCode} language="jsx" />
+        </OrkestraComponentCard.Header>
+        <OrkestraComponentCard.Body code={justifyCode} language="jsx" />
       </Tab.Container>
-    </FalconComponentCard>
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Dropdowns" light={false} />
-      <FalconComponentCard.Body code={dropdownsCode} language="jsx" />
-    </FalconComponentCard>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Dropdowns" light={false} />
+      <OrkestraComponentCard.Body code={dropdownsCode} language="jsx" />
+    </OrkestraComponentCard>
   </>
 );
 

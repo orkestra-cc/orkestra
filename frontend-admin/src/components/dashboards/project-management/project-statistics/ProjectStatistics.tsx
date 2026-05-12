@@ -1,5 +1,5 @@
 import CardDropdown from 'components/common/CardDropdown';
-import FalconCardHeader from 'components/common/FalconCardHeader';
+import OrkestraCardHeader from 'components/common/OrkestraCardHeader';
 
 import { Card } from 'react-bootstrap';
 import Avatar, { AvatarGroup } from 'components/common/Avatar';
@@ -38,7 +38,7 @@ const ProjectStatistics = ({
 }: ProjectStatisticsProps) => {
   return (
     <Card className="h-100">
-      <FalconCardHeader
+      <OrkestraCardHeader
         title="Project Statistics"
         titleTag="h6"
         endEl={<CardDropdown />}

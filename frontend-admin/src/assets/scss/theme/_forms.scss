@@ -49,11 +49,11 @@ label {
         &:checked {
           background-color: $value !important;
         }
-        &.falcon-form-check-input {
+        &.orkestra-form-check-input {
           background-color: $value !important;
         }
       }
-      &.falcon-form-check-input {
+      &.orkestra-form-check-input {
         background-color: $primary;
       }
     }
@@ -61,7 +61,7 @@ label {
 }
 
 .form-switch {
-  .falcon-form-check-input.form-check-input {
+  .orkestra-form-check-input.form-check-input {
     background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='-4 -4 8 8'%3E%3Ccircle r='3' fill='%23fff'/%3E%3C/svg%3E");
   }
 }

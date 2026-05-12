@@ -27,7 +27,7 @@ const InviteToBoard = () => {
   return (
     <Dropdown>
       <Dropdown.Toggle
-        variant="falcon-default"
+        variant="orkestra-default"
         size="sm"
         className="dropdown-caret-none me-2"
       >
@@ -85,7 +85,7 @@ const InviteToBoard = () => {
                 type="text"
                 ref={copyTextRef as any}
                 readOnly
-                defaultValue="https://prium.github.io/falcon/kanban/QhNCShh8TdxKx0kYN1oWzzKJDjOYUXhm9IJ035laUVdWMYsUN5"
+                defaultValue="https://prium.github.io/orkestra/kanban/QhNCShh8TdxKx0kYN1oWzzKJDjOYUXhm9IJ035laUVdWMYsUN5"
                 className="bg-white dark__bg-dark border-0 fs-11 px-1 rounded-top-0"
               />
             </div>

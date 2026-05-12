@@ -1,7 +1,7 @@
 
 import PageHeader from 'components/common/PageHeader';
-import FalconComponentCard from 'components/common/FalconComponentCard';
-import FalconEditor from 'components/common/FalconEditor';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
+import OrkestraEditor from 'components/common/OrkestraEditor';
 
 const exampleCode = `
 <>
@@ -18,8 +18,8 @@ const Visibility = () => (
       className="mb-3"
     />
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Example" noPreview>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Example" noPreview>
         <p className="mt-2">
           Set the <code>visibility </code>of elements with our visibility
           utilities. These utility classes do not modify the display value at
@@ -30,11 +30,11 @@ const Visibility = () => (
         <p className="mb-0">
           Apply <code>.visible </code>or <code>.invisible </code>as needed.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body>
-        <FalconEditor code={exampleCode} language="jsx" hidePreview />
-      </FalconComponentCard.Body>
-    </FalconComponentCard>
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body>
+        <OrkestraEditor code={exampleCode} language="jsx" hidePreview />
+      </OrkestraComponentCard.Body>
+    </OrkestraComponentCard>
   </>
 );
 

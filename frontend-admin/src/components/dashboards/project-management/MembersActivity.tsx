@@ -1,8 +1,8 @@
 import { Card, Row, Col, Image } from 'react-bootstrap';
-import FalconCardHeader from 'components/common/FalconCardHeader';
+import OrkestraCardHeader from 'components/common/OrkestraCardHeader';
 import CardDropdown from 'components/common/CardDropdown';
 import SimpleBar from 'simplebar-react';
-import FalconLink from 'components/common/FalconLink';
+import OrkestraLink from 'components/common/OrkestraLink';
 import Avatar from 'components/common/Avatar';
 import SubtleBadge, { BadgeColor } from 'components/common/SubtleBadge';
 
@@ -54,7 +54,7 @@ interface MembersActivityProps {
 const MembersActivity = ({ data }: MembersActivityProps) => {
   return (
     <Card className="h-100 members-activity">
-      <FalconCardHeader
+      <OrkestraCardHeader
         className="py-2"
         light
         title="Members Activity"
@@ -69,7 +69,7 @@ const MembersActivity = ({ data }: MembersActivityProps) => {
         </Card.Body>
       </SimpleBar>
       <Card.Footer className="bg-body-tertiary p-0">
-        <FalconLink title="See all projects" className="d-block py-2" />
+        <OrkestraLink title="See all projects" className="d-block py-2" />
       </Card.Footer>
     </Card>
   );

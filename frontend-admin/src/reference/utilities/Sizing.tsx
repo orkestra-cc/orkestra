@@ -1,7 +1,7 @@
 
 import PageHeader from 'components/common/PageHeader';
-import FalconComponentCard from 'components/common/FalconComponentCard';
-import FalconEditor from 'components/common/FalconEditor';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
+import OrkestraEditor from 'components/common/OrkestraEditor';
 
 const sizingWidthCode = `<>
   <div className="bg-body-tertiary text-dark p-2 border border-dashed mb-3 w-100"><code>.w-100</code></div>
@@ -144,18 +144,18 @@ const Sizing = () => (
       </p>
     </PageHeader>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Width (relative to parent)" />
-      <FalconComponentCard.Body code={sizingWidthCode} language="jsx" />
-    </FalconComponentCard>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Width (relative to parent)" />
+      <OrkestraComponentCard.Body code={sizingWidthCode} language="jsx" />
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Height (relative to parent)" />
-      <FalconComponentCard.Body code={sizingHeightCode} language="jsx" />
-    </FalconComponentCard>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Height (relative to parent)" />
+      <OrkestraComponentCard.Body code={sizingHeightCode} language="jsx" />
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header
         title="Special classes (relative to viewport)"
         noPreview
       >
@@ -163,16 +163,16 @@ const Sizing = () => (
           Responsive variations also exist for sizing classes relative to the{' '}
           <code>viewport</code>. Here are all the support classes:
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body>
-        <FalconEditor
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body>
+        <OrkestraEditor
           code={specialClassesCode}
           language="jsx"
           hidePreview
           className="p-2"
         />
-      </FalconComponentCard.Body>
-    </FalconComponentCard>
+      </OrkestraComponentCard.Body>
+    </OrkestraComponentCard>
   </>
 );
 

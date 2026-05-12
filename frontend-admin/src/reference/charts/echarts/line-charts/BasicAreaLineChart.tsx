@@ -1,5 +1,5 @@
 
-import FalconComponentCard from 'components/common/FalconComponentCard';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 
 import { rgbaColor } from 'helpers/utils';
 
@@ -162,9 +162,9 @@ const chartCode = `function ChartOptions() {
 `;
 const BasicAreaLineChart = () => {
   return (
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Basic area line chart" light={false} />
-      <FalconComponentCard.Body
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Basic area line chart" light={false} />
+      <OrkestraComponentCard.Body
         code={chartCode}
         language="jsx"
         scope={{
@@ -175,7 +175,7 @@ const BasicAreaLineChart = () => {
           rgbaColor
         }}
       />
-    </FalconComponentCard>
+    </OrkestraComponentCard>
   );
 };
 

@@ -2,7 +2,7 @@
 import { Button } from 'react-bootstrap';
 import PageHeader from 'components/common/PageHeader';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import FalconComponentCard from 'components/common/FalconComponentCard';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 import { reactBootstrapDocsUrl } from 'helpers/utils';
 
 const navbarCode = `
@@ -119,10 +119,10 @@ const Navbars = () => (
       </Button>
     </PageHeader>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Color schemes" light={false} />
-      <FalconComponentCard.Body code={navbarCode} language="jsx" />
-    </FalconComponentCard>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Color schemes" light={false} />
+      <OrkestraComponentCard.Body code={navbarCode} language="jsx" />
+    </OrkestraComponentCard>
   </>
 );
 

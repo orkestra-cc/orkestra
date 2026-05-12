@@ -1,7 +1,7 @@
 
 import PageHeader from 'components/common/PageHeader';
 import { Card } from 'react-bootstrap';
-import FalconEditor from 'components/common/FalconEditor';
+import OrkestraEditor from 'components/common/OrkestraEditor';
 import {
   removeCode,
   viteConfigCode,
@@ -24,7 +24,7 @@ const MigrationToVite = () => {
       <Card.Header>
         <PageHeader
           title="Migration Guide from v4.7.0 to v4.8.0"
-          description="This guide will help you migrate Falcon React from Create React App (CRA) to Vite."
+          description="This guide will help you migrate Orkestra React from Create React App (CRA) to Vite."
           className="mb-3"
         />
       </Card.Header>
@@ -52,7 +52,7 @@ const MigrationToVite = () => {
             Remove the existing CRA setup and Webpack dependencies. Run the
             following command:
           </p>
-          <FalconEditor code={removeCode} language="bash" hidePreview />
+          <OrkestraEditor code={removeCode} language="bash" hidePreview />
         </div>
 
         <div className="mb-3">
@@ -73,7 +73,7 @@ const MigrationToVite = () => {
             compile-scss dependencies, to compile SCSS into CSS by running the
             following command:
           </p>
-          <FalconEditor code={viteInstallCode} language="bash" hidePreview />
+          <OrkestraEditor code={viteInstallCode} language="bash" hidePreview />
         </div>
 
         <div className="mb-3">
@@ -83,11 +83,11 @@ const MigrationToVite = () => {
           <p className='mb-2'>
             Now add the following scripts in the <code>package.json</code> file:
           </p>
-          <FalconEditor code={jsonScriptCode} language="json" hidePreview />
+          <OrkestraEditor code={jsonScriptCode} language="json" hidePreview />
           <p className='mb-2'>
             Remove this scripts from the <code>package.json</code> file
           </p>
-          <FalconEditor
+          <OrkestraEditor
             code={jsonScriptRemoveCode}
             language="json"
             hidePreview
@@ -101,7 +101,7 @@ const MigrationToVite = () => {
           <p className="mb-2">
             Now rename the existing <code>.env</code> variables.
           </p>
-          <FalconEditor code={envCode} language="env" hidePreview />
+          <OrkestraEditor code={envCode} language="env" hidePreview />
         </div>
 
         <div className="mb-3">
@@ -114,7 +114,7 @@ const MigrationToVite = () => {
             file and includes settings for plugins, the development server, and
             the build process. Below is a sample configuration:
           </p>
-          <FalconEditor code={viteConfigCode} language="js" hidePreview />
+          <OrkestraEditor code={viteConfigCode} language="js" hidePreview />
         </div>
 
         <div className="mb-3">
@@ -127,7 +127,7 @@ const MigrationToVite = () => {
             CSS. Below is a sample code snippet for the{' '}
             <code>compile-scss.js</code> file:
           </p>
-          <FalconEditor code={compileSCSSCode} language="js" hidePreview />
+          <OrkestraEditor code={compileSCSSCode} language="js" hidePreview />
         </div>
         <div className="mb-3">
           <h5 className="mb-2" id="renaming-js-files">
@@ -148,7 +148,7 @@ const MigrationToVite = () => {
                 <code>.jsx</code>{' '}
                 for the provided folder path.
               </p>
-              <FalconEditor
+              <OrkestraEditor
                 code={renameJsToJsxCode}
                 language="jsx"
                 hidePreview
@@ -162,7 +162,7 @@ const MigrationToVite = () => {
                 renameJsToJsx.js. Modify the paths array according to the
                 folders you want to target.
               </p>
-              <FalconEditor code={paths} language="js" hidePreview />
+              <OrkestraEditor code={paths} language="js" hidePreview />
             </li>
             <li className="mb-3">
               <h5 id="run-rename-script">Run the Rename script</h5>
@@ -172,7 +172,7 @@ const MigrationToVite = () => {
                 detect all the <code>.js</code> file rename them to{' '}
                 <code>.jsx</code> preserve the folder structure.
               </p>
-              <FalconEditor
+              <OrkestraEditor
                 code={`node renameJsToJsx.js`}
                 language="bash"
                 hidePreview
@@ -185,7 +185,7 @@ const MigrationToVite = () => {
                 dependencies to ensure Vite picks up the new file extensions
                 properly.
               </p>
-              <FalconEditor
+              <OrkestraEditor
                 code={`rm -rf package-lock.json node_modules && npm i`}
                 language="bash"
                 hidePreview
@@ -232,7 +232,7 @@ const MigrationToVite = () => {
             to serve the application. Below is a sample <code>index.html</code>{' '}
             file:
           </p>
-          <FalconEditor code={indexHTMLCode} language="html" hidePreview />
+          <OrkestraEditor code={indexHTMLCode} language="html" hidePreview />
         </div>
 
         <div className="mb-3">
@@ -245,7 +245,7 @@ const MigrationToVite = () => {
             application's style. Below is a sample of the{' '}
             <code>useToggleStyle.jsx</code> file:
           </p>
-          <FalconEditor code={useToggleStyleCode} language="js" hidePreview />
+          <OrkestraEditor code={useToggleStyleCode} language="js" hidePreview />
         </div>
 
         <div className="mb-3">
@@ -325,7 +325,7 @@ const MigrationToVite = () => {
             Now run the following command to run the application. It will the
             code in the <code>localhost:3000</code>
           </p>
-          <FalconEditor code="npm run dev" language="bash" hidePreview />
+          <OrkestraEditor code="npm run dev" language="bash" hidePreview />
         </div>
       </Card.Body>
     </Card>

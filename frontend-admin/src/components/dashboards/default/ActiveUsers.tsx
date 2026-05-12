@@ -1,5 +1,5 @@
-import FalconCardFooterLink from 'components/common/FalconCardFooterLink';
-import FalconCardHeader from 'components/common/FalconCardHeader';
+import OrkestraCardFooterLink from 'components/common/OrkestraCardFooterLink';
+import OrkestraCardHeader from 'components/common/OrkestraCardHeader';
 import CardDropdown from 'components/common/CardDropdown';
 import { Card, CardProps } from 'react-bootstrap';
 import Flex from 'components/common/Flex';
@@ -29,7 +29,7 @@ interface ActiveUsersProps extends CardProps {
 const ActiveUsers = ({ users, end = 5, ...rest }: ActiveUsersProps) => {
   return (
     <Card {...rest}>
-      <FalconCardHeader
+      <OrkestraCardHeader
         light
         title="Active Users"
         titleTag="h6"
@@ -47,7 +47,7 @@ const ActiveUsers = ({ users, end = 5, ...rest }: ActiveUsersProps) => {
           />
         ))}
       </Card.Body>
-      <FalconCardFooterLink
+      <OrkestraCardFooterLink
         title="All active users"
         to={paths.followers}
         size="sm"

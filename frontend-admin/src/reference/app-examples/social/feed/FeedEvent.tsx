@@ -32,7 +32,7 @@ const FeedEvent = ({ title, calender, author, regFee, eventImg }: FeedEventProps
           </Flex>
         </Col>
         <Col md="auto" className="d-none d-md-block">
-          <Button variant="falcon-default" size="sm" className="px-4">
+          <Button variant="orkestra-default" size="sm" className="px-4">
             Register
           </Button>
         </Col>

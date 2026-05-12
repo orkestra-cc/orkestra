@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import classNames from 'classnames';
 
-interface FalconCardFooterLinkProps {
+interface OrkestraCardFooterLinkProps {
   title: string;
   bg?: string;
   borderTop?: boolean;
@@ -12,14 +12,14 @@ interface FalconCardFooterLinkProps {
   [key: string]: any;
 }
 
-const FalconCardFooterLink = ({
+const OrkestraCardFooterLink = ({
   title,
   bg = 'body-tertiary',
   borderTop,
   to = '#!',
   className,
   ...rest
-}: FalconCardFooterLinkProps) => (
+}: OrkestraCardFooterLinkProps) => (
   <Card.Footer
     className={classNames(className, `bg-${bg} p-0`, {
       'border-top': borderTop
@@ -34,4 +34,4 @@ const FalconCardFooterLink = ({
   </Card.Footer>
 );
 
-export default FalconCardFooterLink;
+export default OrkestraCardFooterLink;

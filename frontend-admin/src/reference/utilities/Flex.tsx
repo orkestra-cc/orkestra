@@ -1,7 +1,7 @@
 
 import { Tab } from 'react-bootstrap';
 import PageHeader from 'components/common/PageHeader';
-import FalconComponentCard from 'components/common/FalconComponentCard';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 import Flex from 'components/common/Flex';
 
 const flexCode = `<>
@@ -297,55 +297,55 @@ const Flexs = () => (
       className="mb-3"
     />
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Flex Behaviors">
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Flex Behaviors">
         <p className="mt-2 mb-0">
-          Apply Falcon's <code> &lt;Flex&gt; </code> component to create a
+          Apply Orkestra's <code> &lt;Flex&gt; </code> component to create a
           flexbox container and transform direct children elements into flex
           items. Flex containers and items are able to be modified further with
           additional flex properties.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body
         code={flexCode}
         scope={{ Flex }}
         language="jsx"
       />
-    </FalconComponentCard>
+    </OrkestraComponentCard>
 
-    <FalconComponentCard multiSections>
+    <OrkestraComponentCard multiSections>
       <Tab.Container defaultActiveKey="preview">
-        <FalconComponentCard.Header title="Direction">
+        <OrkestraComponentCard.Header title="Direction">
           <p className="mt-2 mb-0">
             Use <code>direction={'{row|row-reverse}'}</code> prop to set a
             horizontal direction.Set direction with{' '}
             <code>{'{xxl|xl|lg|md|sm}'}</code> prefix for responsiveness.
           </p>
-        </FalconComponentCard.Header>
-        <FalconComponentCard.Body
+        </OrkestraComponentCard.Header>
+        <OrkestraComponentCard.Body
           code={flexDirectionRowCode}
           scope={{ Flex }}
           language="jsx"
         />
       </Tab.Container>
       <Tab.Container defaultActiveKey="preview">
-        <FalconComponentCard.Header>
+        <OrkestraComponentCard.Header>
           <p className=" mb-0">
             Use <code>direction={'{column|column-reverse}'}</code> prop to set a
             vertical direction.Set direction with{' '}
             <code>{'{xxl|xl|lg|md|sm}'}</code> prefix for responsiveness.
           </p>
-        </FalconComponentCard.Header>
-        <FalconComponentCard.Body
+        </OrkestraComponentCard.Header>
+        <OrkestraComponentCard.Body
           code={flexDirectionColumnCode}
           scope={{ Flex }}
           language="jsx"
         />
       </Tab.Container>
-    </FalconComponentCard>
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Justify Content">
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Justify Content">
         <p className="mt-2 mb-0">
           Use <code>justifyContent</code> prop to change the alignment of flex
           items on the main axis (the x-axis to start, y-axis if{' '}
@@ -355,16 +355,16 @@ const Flexs = () => (
           <code>justifyContent</code> with <code>{'{xxl|xl|lg|md|sm}'}</code>{' '}
           prefix for responsiveness.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body
         code={justifyCode}
         scope={{ Flex }}
         language="jsx"
       />
-    </FalconComponentCard>
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Align items">
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Align items">
         <p className="mt-2 mb-0">
           Use <code>alignItems</code> prop to change the alignment of flex items
           on the cross axis (the y-axis to start, x-axis if{' '}
@@ -373,16 +373,16 @@ const Flexs = () => (
           <code>stretch</code> (browser default). Set <code>alignItems</code>{' '}
           with <code>{'{xxl|xl|lg|md|sm}'}</code> prefix for responsiveness.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body
         code={alignItemsCode}
         scope={{ Flex }}
         language="jsx"
       />
-    </FalconComponentCard>
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Align self">
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Align self">
         <p className="mt-2 mb-0">
           Use <code>align-self</code> utilities on flexbox items to individually
           change their alignment on the cross axis (the y-axis to start, x-axis
@@ -391,48 +391,48 @@ const Flexs = () => (
           <code>center</code>, <code>baseline</code>, or <code>stretch</code>{' '}
           (browser default).
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body
         code={alignSelfCode}
         scope={{ Flex }}
         language="jsx"
       />
-    </FalconComponentCard>
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Fill">
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Fill">
         <p className="mt-2 mb-0">
           Use the <code>.flex-fill</code> class on a series of sibling elements
           to force them into widths equal to their content (or equal widths if
           their content does not surpass their border-boxes) while taking up all
           available horizontal space.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body
         code={fillCode}
         scope={{ Flex }}
         language="jsx"
       />
-    </FalconComponentCard>
+    </OrkestraComponentCard>
 
-    <FalconComponentCard multiSections>
+    <OrkestraComponentCard multiSections>
       <Tab.Container defaultActiveKey="preview">
-        <FalconComponentCard.Header title="Grow and Shrink">
+        <OrkestraComponentCard.Header title="Grow and Shrink">
           <p className="mt-2 mb-0">
             Use <code>.flex-grow-*</code> utilities to toggle a flex item’s
             ability to grow to fill available space. In the example below, the{' '}
             <code>.flex-grow-1</code> elements uses all available space it can,
             while allowing the remaining two flex items their necessary space.
           </p>
-        </FalconComponentCard.Header>
-        <FalconComponentCard.Body
+        </OrkestraComponentCard.Header>
+        <OrkestraComponentCard.Body
           code={growCode}
           scope={{ Flex }}
           language="jsx"
         />
       </Tab.Container>
       <Tab.Container defaultActiveKey="preview">
-        <FalconComponentCard.Header>
+        <OrkestraComponentCard.Header>
           <p className="mb-0">
             Use <code>.flex-shrink-*</code> utilities to toggle a flex item’s
             ability to shrink if necessary. In the example below, the second
@@ -440,17 +440,17 @@ const Flexs = () => (
             contents to a new line, “shrinking” to allow more space for the
             previous flex item with <code>.w-100</code>.
           </p>
-        </FalconComponentCard.Header>
-        <FalconComponentCard.Body
+        </OrkestraComponentCard.Header>
+        <OrkestraComponentCard.Body
           code={shrinkCode}
           scope={{ Flex }}
           language="jsx"
         />
       </Tab.Container>
-    </FalconComponentCard>
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Wrap">
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Wrap">
         <p className="mt-2 mb-0">
           Use <code>wrap</code> prop to change how flex items wrap in a flex
           container. Choose from no wrapping at all (the browser default) with{' '}
@@ -459,31 +459,31 @@ const Flexs = () => (
           <code>justifyContent</code> with <code>{'{xxl|xl|lg|md|sm}'}</code>{' '}
           prefix for responsiveness.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body
         code={wrapCode}
         scope={{ Flex }}
         language="jsx"
       />
-    </FalconComponentCard>
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Order">
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Order">
         <p className="mt-2 mb-0">
           Change the <em>visual</em> order of specific flex items with a handful
           of <code>order</code> utilities. We only provide options for making an
           item first or last, as well as a reset to use the DOM order.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body
         code={orderCode}
         scope={{ Flex }}
         language="jsx"
       />
-    </FalconComponentCard>
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Align content">
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Align content">
         <p className="mt-2 mb-0">
           Use <code>alignContent</code> prop to align flex items{' '}
           <em>together</em> on the cross axis. Choose from <code>start</code>{' '}
@@ -492,13 +492,13 @@ const Flexs = () => (
           demonstrate these, we’ve enforced <code>wrap='wrap'</code> prop and
           increased the number of flex items.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body
         code={alignContentCode}
         scope={{ Flex }}
         language="jsx"
       />
-    </FalconComponentCard>
+    </OrkestraComponentCard>
   </>
 );
 

@@ -6,7 +6,7 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { IconProp } from '@fortawesome/fontawesome-svg-core';
 import IconButton from 'components/common/IconButton';
 import Flex from 'components/common/Flex';
-import FalconLoader from 'components/common/FalconLoader';
+import OrkestraLoader from 'components/common/OrkestraLoader';
 import { useGetSetupStatusQuery } from 'store/api/setupApi';
 import WelcomeStep from './steps/WelcomeStep';
 import AdminStep from './steps/AdminStep';
@@ -48,7 +48,7 @@ const SetupWizard = () => {
   }, [status]);
 
   if (isLoading) {
-    return <FalconLoader />;
+    return <OrkestraLoader />;
   }
 
   if (error && !status) {

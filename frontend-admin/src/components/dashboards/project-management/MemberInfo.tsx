@@ -7,7 +7,7 @@ import { Link } from 'react-router';
 import SubtleBadge, { BadgeColor } from 'components/common/SubtleBadge';
 import BasicECharts from 'components/common/BasicEChart';
 import * as echarts from 'echarts/core';
-import FalconLink from 'components/common/FalconLink';
+import OrkestraLink from 'components/common/OrkestraLink';
 import SimpleBar from 'simplebar-react';
 import { useAppContext } from 'providers/AppProvider';
 
@@ -146,7 +146,7 @@ const MemberInfo = ({ data }: MemberInfoProps) => {
             </Form.Select>
           </Col>
           <Col xs="auto">
-            <FalconLink title="View All" className="px-0" />
+            <OrkestraLink title="View All" className="px-0" />
           </Col>
         </Row>
       </Card.Footer>

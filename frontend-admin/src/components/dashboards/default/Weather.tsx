@@ -1,5 +1,5 @@
 import { Card, CardProps, Col, Row } from 'react-bootstrap';
-import FalconCardHeader from 'components/common/FalconCardHeader';
+import OrkestraCardHeader from 'components/common/OrkestraCardHeader';
 import CardDropdown from 'components/common/CardDropdown';
 import weatherIcon from 'assets/img/icons/weather-icon.png';
 import Flex from 'components/common/Flex';
@@ -29,7 +29,7 @@ const Weather = ({
   ...rest
 }: WeatherProps) => (
   <Card {...rest} className="h-100">
-    <FalconCardHeader
+    <OrkestraCardHeader
       title="Weather"
       light={false}
       titleTag="h6"

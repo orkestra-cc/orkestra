@@ -65,7 +65,7 @@ const ToDoList = () => {
       <Card.Header className="d-flex flex-between-center bg-body-tertiary d-none d-xl-flex">
         <h6 className="mb-0">To-do List</h6>
         <IconButton
-          variant="falcon-default"
+          variant="orkestra-default"
           size="sm"
           icon="plus"
           transform="shrink-3"

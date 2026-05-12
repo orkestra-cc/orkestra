@@ -1,6 +1,6 @@
 
 import PageHeader from 'components/common/PageHeader';
-import FalconComponentCard from 'components/common/FalconComponentCard';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 import generic1 from 'assets/img/generic/1.jpg';
 import generic2 from 'assets/img/generic/2.jpg';
 import { Link } from 'react-router';
@@ -59,8 +59,8 @@ const StretchedLink = () => (
       className="mb-3"
     />
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Example" light={false}>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Example" light={false}>
         <p className="mt-2">
           Add <code>.stretched-link </code>to a link to make its containing
           block clickable via a <code>::after</code> pseudo element. In most
@@ -80,16 +80,16 @@ const StretchedLink = () => (
           <code> position </code>and <code>z-index </code>styles can help should
           this be required.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body
         code={stretchedLinkCode}
         scope={{ generic1, Link }}
         language="jsx"
       />
-    </FalconComponentCard>
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header
         title="Identifying the containing block"
         light={false}
       >
@@ -119,13 +119,13 @@ const StretchedLink = () => (
             Firefox)
           </li>
         </ul>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body
         code={containingBlockCode}
         scope={{ generic2, Link }}
         language="jsx"
       />
-    </FalconComponentCard>
+    </OrkestraComponentCard>
   </>
 );
 

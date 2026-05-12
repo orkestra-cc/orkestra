@@ -142,7 +142,7 @@ const EventCustomField = ({ register, setValue }: EventCustomFieldProps) => {
             )}
             <Col>
               <IconButton
-                variant="falcon-default"
+                variant="orkestra-default"
                 size="sm"
                 icon="plus"
                 disabled={disabled}

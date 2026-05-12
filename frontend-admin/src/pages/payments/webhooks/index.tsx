@@ -21,7 +21,7 @@ const WebhookEventsPage: React.FC = () => {
         <Flex className="gap-2 mt-3">
           <IconButton
             icon="sync-alt"
-            variant="falcon-default"
+            variant="orkestra-default"
             onClick={() => refetch()}
           >
             Aggiorna

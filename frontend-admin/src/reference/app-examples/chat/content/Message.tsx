@@ -6,9 +6,9 @@ import Avatar from 'components/common/Avatar';
 import Flex from 'components/common/Flex';
 import classNames from 'classnames';
 import users from 'data/people';
-import FalconLightBox from 'components/common/FalconLightBox';
+import OrkestraLightBox from 'components/common/OrkestraLightBox';
 import createMarkup from 'helpers/createMarkup';
-import FalconLightBoxGallery from 'components/common/FalconLightBoxGallery';
+import OrkestraLightBoxGallery from 'components/common/OrkestraLightBoxGallery';
 import ChatMessageOptions from './ChatMessageOptions';
 
 // Type definitions for chat messages
@@ -77,7 +77,7 @@ const Message: React.FC<MessageProps> = ({ message, senderUserId, status = '', t
                     }}
                   />
                 )}
-                <FalconLightBoxGallery images={(message as ChatMessage).attachments || []}>
+                <OrkestraLightBoxGallery images={(message as ChatMessage).attachments || []}>
                   {(setImgIndex: (index: number) => void) => (
                     <Row className="mx-n1">
                       {((message as ChatMessage).attachments || []).map((img: string, index: number) => {
@@ -102,7 +102,7 @@ const Message: React.FC<MessageProps> = ({ message, senderUserId, status = '', t
                       })}
                     </Row>
                   )}
-                </FalconLightBoxGallery>
+                </OrkestraLightBoxGallery>
               </div>
             ) : (
               <>
@@ -121,7 +121,7 @@ const Message: React.FC<MessageProps> = ({ message, senderUserId, status = '', t
                     />
                   )}
                   {isMessageObject && (message as ChatMessage).attachment && (
-                    <FalconLightBox image={(message as ChatMessage).attachment!}>
+                    <OrkestraLightBox image={(message as ChatMessage).attachment!}>
                       <Image
                         fluid
                         rounded
@@ -129,7 +129,7 @@ const Message: React.FC<MessageProps> = ({ message, senderUserId, status = '', t
                         width={150}
                         alt=""
                       />
-                    </FalconLightBox>
+                    </OrkestraLightBox>
                   )}
                 </div>
               </>

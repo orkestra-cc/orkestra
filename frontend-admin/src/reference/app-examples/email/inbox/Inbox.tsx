@@ -55,7 +55,7 @@ const ActionButton: React.FC<ActionButtonProps> = ({
   tooltip,
   icon,
   handleClick,
-  variant = 'falcon-default'
+  variant = 'orkestra-default'
 }) => (
   <OverlayTrigger
     overlay={<Tooltip style={{ position: 'fixed' }}>{tooltip}</Tooltip>}
@@ -121,7 +121,7 @@ const InboxElement: React.FC = () => {
             {selectedItems.length === 0 && (
               <>
                 <IconButton
-                  variant="falcon-default"
+                  variant="orkestra-default"
                   size="sm"
                   className="ms-sm-1"
                   icon="redo"
@@ -161,7 +161,7 @@ const InboxElement: React.FC = () => {
           </Col>
           <Col xs="auto">
             <IconButton
-              variant="falcon-primary"
+              variant="orkestra-primary"
               size="sm"
               icon="plus"
               as={Link}

@@ -1,5 +1,5 @@
-import FalconComponentCard from 'components/common/FalconComponentCard';
-import FalconEditor from 'components/common/FalconEditor';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
+import OrkestraEditor from 'components/common/OrkestraEditor';
 import PageHeader from 'components/common/PageHeader';
 
 
@@ -24,18 +24,18 @@ $success: #00d27a;
 $danger: #e63757;
 :root,
 [data-bs-theme="light"] {
-  --falcon-primary:  #{success};
-  --falcon-primary-rgb: #{successRgb};
+  --orkestra-primary:  #{success};
+  --orkestra-primary-rgb: #{successRgb};
   ...
   ...
   ...
 }
 @if $enable-dark-mode {
   @include color-mode(dark, true) {
-    --falcon-primary: #{danger};
-    --falcon-primary-rgb: #{dangerRgb};
+    --orkestra-primary: #{danger};
+    --orkestra-primary-rgb: #{dangerRgb};
     .card{
-      --falcon-card-bg: #{success};
+      --orkestra-card-bg: #{success};
     }
   }
 }
@@ -80,9 +80,9 @@ const Styling = () => (
       </p>
     </PageHeader>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Edit SCSS" light={false} noPreview />
-      <FalconComponentCard.Body>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Edit SCSS" light={false} noPreview />
+      <OrkestraComponentCard.Body>
         <p>
           You can add your own SCSS and override the theme style in the{' '}
           <code>_user.scss</code> file.
@@ -106,12 +106,12 @@ const Styling = () => (
           your necessity. We recommend to follow this approach.
         </p>
         <p>
-          Light mode is default theme style in Falcon. So, if you update any
+          Light mode is default theme style in Orkestra. So, if you update any
           bootstrap’s SCSS variables, it will effect in Light mode. If you want
           to update any color, find the corresponding variable for thise color
           and place theme to _user-variables.scss file. For example:
         </p>
-        <FalconEditor code={style} language="css" hidePreview />
+        <OrkestraEditor code={style} language="css" hidePreview />
 
         <p className="mt-3">
           if you want to update any theme colors for dark mode, update
@@ -120,7 +120,7 @@ const Styling = () => (
           <code> $dark-grays </code>
           variable.
         </p>
-        <FalconEditor code={darkStyle} language="css" hidePreview />
+        <OrkestraEditor code={darkStyle} language="css" hidePreview />
         <h6 className="fs-9 mt-3">Using CSS variable:</h6>
         <div className="border rounded-1 bg-white dark__bg-1100 px-3 py-2 mb-3">
           <code>_user.scss</code>
@@ -132,9 +132,9 @@ const Styling = () => (
           to update corresponding component's CSS variable. For example:
         </p>
 
-        <FalconEditor code={cssVariables} language="css" hidePreview />
-      </FalconComponentCard.Body>
-    </FalconComponentCard>
+        <OrkestraEditor code={cssVariables} language="css" hidePreview />
+      </OrkestraComponentCard.Body>
+    </OrkestraComponentCard>
   </>
 );
 

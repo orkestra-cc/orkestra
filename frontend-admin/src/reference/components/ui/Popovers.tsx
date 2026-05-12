@@ -2,7 +2,7 @@
 import { Button } from 'react-bootstrap';
 import PageHeader from 'components/common/PageHeader';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import FalconComponentCard from 'components/common/FalconComponentCard';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 import { reactBootstrapDocsUrl } from 'helpers/utils';
 
 const exampleCode = `
@@ -108,9 +108,9 @@ const Popovers = () => (
       </Button>
     </PageHeader>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Overview" noPreview />
-      <FalconComponentCard.Body>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Overview" noPreview />
+      <OrkestraComponentCard.Body>
         <p>
           The <code>&lt;Popover&gt;</code> component do not position themselves.
           Instead the <code>&lt;Overlay&gt;</code> (or{' '}
@@ -127,26 +127,26 @@ const Popovers = () => (
           Learn more about Overlays
           <FontAwesomeIcon icon="chevron-right" className="ms-1 fs-11" />
         </Button>
-      </FalconComponentCard.Body>
-    </FalconComponentCard>
+      </OrkestraComponentCard.Body>
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Examples" light={false} />
-      <FalconComponentCard.Body code={exampleCode} language="jsx" noInline />
-    </FalconComponentCard>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Examples" light={false} />
+      <OrkestraComponentCard.Body code={exampleCode} language="jsx" noInline />
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Placement" light={false}>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Placement" light={false}>
         <p className="mt-2 mb-0">
           As with <code>&lt;Tooltip&gt;</code>s, you can control the placement
           of the Popover.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body code={placementCode} language="jsx" />
-    </FalconComponentCard>
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body code={placementCode} language="jsx" />
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Disabled elements" light={false}>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Disabled elements" light={false}>
         <p className="mt-2 mb-0">
           Elements with the <code>disabled</code> attribute aren’t interactive,
           meaning users cannot hover or click them to trigger a popover (or
@@ -154,20 +154,20 @@ const Popovers = () => (
           wrapper <code>&lt;div&gt;</code> or <code>&lt;span&gt;</code> and
           override the <code>pointer-events</code> on the disabled element.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body code={disableElCode} language="jsx" />
-    </FalconComponentCard>
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body code={disableElCode} language="jsx" />
+    </OrkestraComponentCard>
 
-    <FalconComponentCard noGuttersBottom>
-      <FalconComponentCard.Header title="Changing containers" light={false}>
+    <OrkestraComponentCard noGuttersBottom>
+      <OrkestraComponentCard.Header title="Changing containers" light={false}>
         <p className="mt-2 mb-0">
           You can specify a <code>container</code> to control the DOM element
           the overlay is appended to. This is especially useful when styles
           conflict with your Overlay's.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body code={changingContainersCode} language="jsx" />
-    </FalconComponentCard>
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body code={changingContainersCode} language="jsx" />
+    </OrkestraComponentCard>
   </>
 );
 

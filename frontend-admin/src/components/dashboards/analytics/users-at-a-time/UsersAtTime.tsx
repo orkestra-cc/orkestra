@@ -1,5 +1,5 @@
-import FalconCardHeader from 'components/common/FalconCardHeader';
-import FalconLink from 'components/common/FalconLink';
+import OrkestraCardHeader from 'components/common/OrkestraCardHeader';
+import OrkestraLink from 'components/common/OrkestraLink';
 
 import { Card, Col, Form, Row } from 'react-bootstrap';
 import UsersAtTimeChart from './UsersAtTimeChart';
@@ -7,7 +7,7 @@ import UsersAtTimeChart from './UsersAtTimeChart';
 const UsersAtTime = () => {
   return (
     <Card className="h-100">
-      <FalconCardHeader
+      <OrkestraCardHeader
         title="Users at a Time"
         titleTag="h6"
         className="py-3"
@@ -32,7 +32,7 @@ const UsersAtTime = () => {
             </Form.Select>
           </Col>
           <Col xs="auto">
-            <FalconLink title="Overview" className="px-0 fw-medium" />
+            <OrkestraLink title="Overview" className="px-0 fw-medium" />
           </Col>
         </Row>
       </Card.Footer>

@@ -1,5 +1,5 @@
 
-import FalconComponentCard from 'components/common/FalconComponentCard';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 
 import { BarChart } from 'echarts/charts';
 import {
@@ -344,9 +344,9 @@ const chartCode = `function ChartOptions() {
 
 const BarTimelineChart = () => {
   return (
-    <FalconComponentCard className="h-100">
-      <FalconComponentCard.Header title="e  chart" light={false} />
-      <FalconComponentCard.Body
+    <OrkestraComponentCard className="h-100">
+      <OrkestraComponentCard.Header title="e  chart" light={false} />
+      <OrkestraComponentCard.Body
         code={chartCode}
         language="jsx"
         scope={{
@@ -356,7 +356,7 @@ const BarTimelineChart = () => {
           useAppContext
         }}
       />
-    </FalconComponentCard>
+    </OrkestraComponentCard>
   );
 };
 

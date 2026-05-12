@@ -2,7 +2,7 @@ import { Suspense, lazy } from 'react';
 import type { ModuleManifest } from './types';
 import ProtectedRoute from 'components/authentication/ProtectedRoute';
 import ModuleGate from 'components/common/ModuleGate';
-import FalconLoader from 'components/common/FalconLoader';
+import OrkestraLoader from 'components/common/OrkestraLoader';
 
 const AgentProjects = lazy(() => import('pages/ai/agents'));
 const AgentChat = lazy(() => import('pages/ai/agents/AgentChat'));
@@ -29,7 +29,7 @@ export const agentsManifest: ModuleManifest = {
               ]
             ]}
           >
-            <Suspense key="ai-personal-agent" fallback={<FalconLoader />}>
+            <Suspense key="ai-personal-agent" fallback={<OrkestraLoader />}>
               <PersonalAgentChat />
             </Suspense>
           </ProtectedRoute>
@@ -45,7 +45,7 @@ export const agentsManifest: ModuleManifest = {
               ['super_admin', 'administrator', 'developer', 'manager']
             ]}
           >
-            <Suspense key="ai-agents" fallback={<FalconLoader />}>
+            <Suspense key="ai-agents" fallback={<OrkestraLoader />}>
               <AgentProjects />
             </Suspense>
           </ProtectedRoute>
@@ -67,7 +67,7 @@ export const agentsManifest: ModuleManifest = {
               ]
             ]}
           >
-            <Suspense key="ai-agent-chat" fallback={<FalconLoader />}>
+            <Suspense key="ai-agent-chat" fallback={<OrkestraLoader />}>
               <AgentChat />
             </Suspense>
           </ProtectedRoute>

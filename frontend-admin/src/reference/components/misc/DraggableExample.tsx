@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Button } from 'react-bootstrap';
 import PageHeader from 'components/common/PageHeader';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import FalconComponentCard from 'components/common/FalconComponentCard';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 import { Link } from 'react-router';
 import { DndContext, closestCorners, DragOverlay } from '@dnd-kit/core';
 import paths from 'routes/paths';
@@ -283,8 +283,8 @@ const DraggableExample = () => (
       </Button>
     </PageHeader>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Example">
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Example">
         <p className="mt-2 mb-0">
           Here is the example of the Multiple Container Sortable feature of the
           Draggable library. We also design{' '}
@@ -292,8 +292,8 @@ const DraggableExample = () => (
           Library.{' '}
           <b>You can drag any card in between the two columns below:</b>
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body
         code={draggableCode}
         scope={{
           useState,
@@ -310,7 +310,7 @@ const DraggableExample = () => (
         }}
         language="jsx"
       />
-    </FalconComponentCard>
+    </OrkestraComponentCard>
   </>
 );
 

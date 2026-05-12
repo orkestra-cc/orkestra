@@ -2,7 +2,7 @@
 import { Button } from 'react-bootstrap';
 import PageHeader from 'components/common/PageHeader';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import FalconComponentCard from 'components/common/FalconComponentCard';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 import { reactBootstrapDocsUrl } from 'helpers/utils';
 import user1 from 'assets/img/team/1.jpg';
 import user2 from 'assets/img/team/2.jpg';
@@ -57,42 +57,42 @@ const Images = () => (
       </Button>
     </PageHeader>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Shape" light={false}>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Shape" light={false}>
         <p className="mt-2 mb-0">
           Use the <code>rounded</code>, <code>roundedCircle</code> and{' '}
           <code>thumbnail</code> props to customise the image.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body
         code={shapeCode}
         scope={{ user1, user2, user3 }}
         language="jsx"
       />
-    </FalconComponentCard>
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Fluid" light={false}>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Fluid" light={false}>
         <p className="mt-2 mb-0">
           Use the <code>fluid</code> to scale image nicely to the parent
           element.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body
         code={fluidCode}
         scope={{ generic3 }}
         language="jsx"
       />
-    </FalconComponentCard>
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Aligning images" light={false} />
-      <FalconComponentCard.Body
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Aligning images" light={false} />
+      <OrkestraComponentCard.Body
         code={aligningCode}
         scope={{ user24, user25, Flex }}
         language="jsx"
       />
-    </FalconComponentCard>
+    </OrkestraComponentCard>
   </>
 );
 

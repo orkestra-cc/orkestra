@@ -3,8 +3,8 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import corner4 from 'assets/img/illustrations/corner-4.png';
 import corner7 from 'assets/img/illustrations/corner-7.png';
 import Background from 'components/common/Background';
-import FalconCardHeader from 'components/common/FalconCardHeader';
-import FalconEditor from 'components/common/FalconEditor';
+import OrkestraCardHeader from 'components/common/OrkestraCardHeader';
+import OrkestraEditor from 'components/common/OrkestraEditor';
 import SubtleBadge from 'components/common/SubtleBadge';
 
 import { Card, Col, Row } from 'react-bootstrap';
@@ -29,14 +29,14 @@ const GettingStarted = () => (
             <p className="mb-0">
               Welcome to the ReactJS version of the{' '}
               <a
-                href="https://themes.getbootstrap.com/product/falcon-admin-dashboard-webapp-template/"
+                href="https://themes.getbootstrap.com/product/orkestra-admin-dashboard-webapp-template/"
                 target="_blank"
                 rel="noopener noreferrer"
               >
-                original Falcon theme{' '}
+                original Orkestra theme{' '}
               </a>
               . This doc will guide you to understand how{' '}
-              <strong>Falcon-React</strong> theme is organized, basics of how to
+              <strong>Orkestra-React</strong> theme is organized, basics of how to
               customize, and how to compile from the source code if you want.
             </p>
           </Card.Body>
@@ -71,14 +71,14 @@ const GettingStarted = () => (
           </Card.Body>
           <Card.Footer className="position-relative pt-0">
             <span className="fw-semibold">Give us a nudge at </span>
-            <a href="mailto:support@themewagon.com">support@themewagon.com</a>
+            <a href="mailto:support@orkestra.cc">support@orkestra.cc</a>
           </Card.Footer>
         </Card>
       </Col>
     </Row>
 
     <Card className="mb-3">
-      <FalconCardHeader title="Running in Local environment" />
+      <OrkestraCardHeader title="Running in Local environment" />
       <Card.Body>
         <p>
           This project is scaffolded using{' '}
@@ -103,11 +103,11 @@ const GettingStarted = () => (
             </a>{' '}
             if you do not already have it installed on your machine.
           </li>
-          <li>Open the “falcon-react” directory with your cmd or terminal</li>
+          <li>Open the “orkestra-react” directory with your cmd or terminal</li>
           <li>
             Run <code>npm i</code>
             <br />
-            This command will download all the necessary dependencies for falcon
+            This command will download all the necessary dependencies for orkestra
             in the <code>node_modules</code> directory.
           </li>
           <li>
@@ -118,7 +118,7 @@ const GettingStarted = () => (
       </Card.Body>
     </Card>
     <Card className="mb-3">
-      <FalconCardHeader title="Creating a Production Build" />
+      <OrkestraCardHeader title="Creating a Production Build" />
       <Card.Body>
         <p>
           After you done your customization, when you are ready to build, Edit{' '}
@@ -143,12 +143,12 @@ const GettingStarted = () => (
           To run the production build locally at
           <code> http://localhost:4173 </code> run the following commands:
         </p>
-        <FalconEditor code={serveCode} language="bash" hidePreview />
+        <OrkestraEditor code={serveCode} language="bash" hidePreview />
       </Card.Body>
     </Card>
 
     <Card className="mb-3">
-      <FalconCardHeader title="Contents" />
+      <OrkestraCardHeader title="Contents" />
       <Card.Body>
         <p className="mb-0">
           Inside the zip-file you'll find the following directories and files.

@@ -1,6 +1,6 @@
 import { Navigate, useLocation } from 'react-router';
 import { useAuth } from 'hooks/auth/useAuthRTK';
-import FalconLoader from 'components/common/FalconLoader';
+import OrkestraLoader from 'components/common/OrkestraLoader';
 import {
   ProtectedRouteProps,
   PublicRouteProps,
@@ -27,7 +27,7 @@ const ProtectedRoute = ({
 
   // Show loading state while checking authentication
   if (isLoading) {
-    return loadingComponent || <FalconLoader />;
+    return loadingComponent || <OrkestraLoader />;
   }
 
   // Check if authentication is required
@@ -47,7 +47,7 @@ const ProtectedRoute = ({
 
       if (permissionsAreLoading) {
         console.log('⏳ Waiting for permissions to load...');
-        return loadingComponent || <FalconLoader />;
+        return loadingComponent || <OrkestraLoader />;
       }
 
       const hasRequiredPermission = Array.isArray(requiredPermissions[0])

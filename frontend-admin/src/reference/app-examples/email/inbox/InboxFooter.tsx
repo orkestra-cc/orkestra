@@ -37,7 +37,7 @@ const InboxFooter = ({
           {from}-{to} of {totalItems}
         </small>
         <Button
-          variant="falcon-default"
+          variant="orkestra-default"
           size="sm"
           className="ms-1 ms-sm-2"
           disabled={!canPreviousPage}
@@ -46,7 +46,7 @@ const InboxFooter = ({
           <FontAwesomeIcon icon={`chevron-${isRTL ? 'right' : 'left'}`} />
         </Button>
         <Button
-          variant="falcon-default"
+          variant="orkestra-default"
           size="sm"
           className="ms-1 ms-sm-2"
           disabled={!canNextPage}

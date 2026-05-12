@@ -1,14 +1,14 @@
 import { Card, Col, Image, Row } from 'react-bootstrap';
-import FalconCardHeader from 'components/common/FalconCardHeader';
+import OrkestraCardHeader from 'components/common/OrkestraCardHeader';
 import images from 'data/gallery';
-import FalconLightBoxGallery from 'components/common/FalconLightBoxGallery';
+import OrkestraLightBoxGallery from 'components/common/OrkestraLightBoxGallery';
 
 const Photos: React.FC = () => {
   return (
     <Card className="mt-3">
-      <FalconCardHeader title="Photos" light />
+      <OrkestraCardHeader title="Photos" light />
       <Card.Body>
-        <FalconLightBoxGallery images={images}>
+        <OrkestraLightBoxGallery images={images}>
           {setImgIndex => (
             <Row className="g-2">
               <Col xs={6}>
@@ -58,7 +58,7 @@ const Photos: React.FC = () => {
               </Col>
             </Row>
           )}
-        </FalconLightBoxGallery>
+        </OrkestraLightBoxGallery>
       </Card.Body>
     </Card>
   );

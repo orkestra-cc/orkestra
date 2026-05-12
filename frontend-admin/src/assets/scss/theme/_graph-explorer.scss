@@ -10,11 +10,11 @@
 
   &:hover,
   &--active {
-    background-color: rgba(var(--falcon-primary-rgb), 0.12);
+    background-color: rgba(var(--orkestra-primary-rgb), 0.12);
   }
 
   &--active {
-    background-color: rgba(var(--falcon-primary-rgb), 0.2);
+    background-color: rgba(var(--orkestra-primary-rgb), 0.2);
   }
 }
 
@@ -35,14 +35,14 @@
     width: 4px;
     height: 4px;
     border-radius: 50%;
-    background-color: var(--falcon-gray-400);
+    background-color: var(--orkestra-gray-400);
     transition: background-color 0.15s ease;
   }
 
   .resize-handle:hover &,
   .resize-handle--active & {
     span {
-      background-color: var(--falcon-primary);
+      background-color: var(--orkestra-primary);
     }
   }
 }
@@ -68,23 +68,23 @@
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  border: 1px solid var(--falcon-border-color);
-  border-radius: var(--falcon-border-radius);
-  background-color: var(--falcon-card-bg);
+  border: 1px solid var(--orkestra-border-color);
+  border-radius: var(--orkestra-border-radius);
+  background-color: var(--orkestra-card-bg);
   transition: background-color 0.15s ease;
 
   &:hover {
-    background-color: var(--falcon-body-highlight-bg);
+    background-color: var(--orkestra-body-highlight-bg);
   }
 
   .toggle-icon {
-    color: var(--falcon-gray-500);
+    color: var(--orkestra-gray-500);
     font-size: 0.875rem;
     transition: color 0.15s ease;
   }
 
   &:hover .toggle-icon {
-    color: var(--falcon-primary);
+    color: var(--orkestra-primary);
   }
 }
 

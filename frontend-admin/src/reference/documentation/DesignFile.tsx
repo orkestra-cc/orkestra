@@ -1,19 +1,19 @@
 
-import FalconComponentCard from 'components/common/FalconComponentCard';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 import PageHeader from 'components/common/PageHeader';
 
 const DesignFile = () => (
   <>
     <PageHeader title="Design File" className="mb-3">
       <p className="mt-2 mb-0">
-        We have designed Falcon initially directly with code. After receiving
+        We have designed Orkestra initially directly with code. After receiving
         multiple requests from our customers for design files, we recreated the
         design in Figma.
       </p>
     </PageHeader>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Body>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Body>
         <p>
           This is an early demo of Figma files. All the design is not yet
           recreated with Figma. But hopefully, we will port all the layouts in
@@ -32,12 +32,12 @@ const DesignFile = () => (
           <li>
             The file is "read-only", so you'll have to duplicate it! Go to your
             grid of documents in Figma, click the ellipsis icon on{' '}
-            <b className="text-primary text-600">Falcon (Distributed)</b>, and
+            <b className="text-primary text-600">Orkestra (Distributed)</b>, and
             then "Duplicate" to create an editable version.
           </li>
         </ul>
-      </FalconComponentCard.Body>
-    </FalconComponentCard>
+      </OrkestraComponentCard.Body>
+    </OrkestraComponentCard>
   </>
 );
 

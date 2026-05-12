@@ -2,9 +2,9 @@
 import { Button, Form } from 'react-bootstrap';
 import PageHeader from 'components/common/PageHeader';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import FalconComponentCard from 'components/common/FalconComponentCard';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 import TinymceEditor from 'components/common/TinymceEditor';
-import FalconEditor from 'components/common/FalconEditor';
+import OrkestraEditor from 'components/common/OrkestraEditor';
 import { Controller, useForm } from 'react-hook-form';
 import * as yup from 'yup';
 import { yupResolver } from '@hookform/resolvers/yup';
@@ -23,7 +23,7 @@ const Editor = () => (
   <>
     <PageHeader
       title="Editor"
-      description="React-Falcon uses <strong>Tinymce React</strong> for rich text editor. TinyMCE React component integrates TinyMCE into React projects."
+      description="React-Orkestra uses <strong>Tinymce React</strong> for rich text editor. TinyMCE React component integrates TinyMCE into React projects."
       className="mb-3"
     >
       <Button
@@ -38,8 +38,8 @@ const Editor = () => (
       </Button>
     </PageHeader>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Pre Requirement" noPreview>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Pre Requirement" noPreview>
         <p className="mt-2 mb-0">
           To use Tinymce editor at first you need to sign up in{' '}
           <a
@@ -52,18 +52,18 @@ const Editor = () => (
           . And collect your api key and paste it in .env file variable
           <code> REACT_APP_TINYMCE_APIKEY</code>
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body>
-        <FalconEditor
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body>
+        <OrkestraEditor
           code={`REACT_APP_TINYMCE_APIKEY= your_api_key_here`}
           language="bash"
           hidePreview
         />
-      </FalconComponentCard.Body>
-    </FalconComponentCard>
+      </OrkestraComponentCard.Body>
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Self Hosted" noPreview>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Self Hosted" noPreview>
         <p className="mt-2 mb-0">
           Please note that we have used{' '}
           <a
@@ -86,9 +86,9 @@ const Editor = () => (
           </a>{' '}
           remove <code>tinymceScriptSrc</code> and <code>license_key</code>.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body>
-        <FalconEditor
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body>
+        <OrkestraEditor
           code={`
             <TinymceEditor 
               tinymceScriptSrc="/tinymce/tinymce.min.js" // remove tinymceScriptSrc if you use tiny cloud
@@ -100,24 +100,24 @@ const Editor = () => (
           `}
           hidePreview
         />
-      </FalconComponentCard.Body>
-    </FalconComponentCard>
+      </OrkestraComponentCard.Body>
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Example" />
-      <FalconComponentCard.Body
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Example" />
+      <OrkestraComponentCard.Body
         code={exampleCode}
         scope={{ TinymceEditor }}
         language="jsx"
       />
-    </FalconComponentCard>
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="With validation" />
-      <FalconComponentCard.Body language="jsx" hidePreview>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="With validation" />
+      <OrkestraComponentCard.Body language="jsx" hidePreview>
         <TinymceValidation />
-      </FalconComponentCard.Body>
-    </FalconComponentCard>
+      </OrkestraComponentCard.Body>
+    </OrkestraComponentCard>
   </>
 );
 

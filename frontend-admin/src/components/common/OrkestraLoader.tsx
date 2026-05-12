@@ -1,11 +1,11 @@
-import logo from 'assets/img/illustrations/falcon.png';
+import logo from 'assets/img/illustrations/orkestra.png';
 import classNames from 'classnames';
 
-interface FalconLoaderProps {
+interface OrkestraLoaderProps {
   fullPage?: boolean;
 }
 
-const FalconLoader: React.FC<FalconLoaderProps> = ({ fullPage }) => {
+const OrkestraLoader: React.FC<OrkestraLoaderProps> = ({ fullPage }) => {
   return (
     <div
       className={classNames(
@@ -18,31 +18,31 @@ const FalconLoader: React.FC<FalconLoaderProps> = ({ fullPage }) => {
       <div>
         <img
           src={logo}
-          alt="falcon"
+          alt="orkestra"
           className="logo-ripple ripple-1"
           width={75}
         />
         <img
           src={logo}
-          alt="falcon"
+          alt="orkestra"
           className="logo-ripple ripple-2"
           width={75}
         />
         <img
           src={logo}
-          alt="falcon"
+          alt="orkestra"
           className="logo-ripple ripple-3"
           width={75}
         />
         <img
           src={logo}
-          alt="falcon"
+          alt="orkestra"
           className="logo-ripple ripple-4"
           width={75}
         />
         <img
           src={logo}
-          alt="falcon"
+          alt="orkestra"
           className="logo-ripple ripple-5"
           width={75}
         />
@@ -51,4 +51,4 @@ const FalconLoader: React.FC<FalconLoaderProps> = ({ fullPage }) => {
   );
 };
 
-export default FalconLoader;
+export default OrkestraLoader;

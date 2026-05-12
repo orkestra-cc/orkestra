@@ -2,7 +2,7 @@
 import { Button, Tab } from 'react-bootstrap';
 import PageHeader from 'components/common/PageHeader';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import FalconComponentCard from 'components/common/FalconComponentCard';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 import { reactBootstrapDocsUrl } from 'helpers/utils';
 
 const containerCode = `<Container>
@@ -175,64 +175,64 @@ const Grid = () => (
       </Button>
     </PageHeader>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Container">
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Container">
         <p className="mt-2 mb-0">
           Containers provide a means to center and horizontally pad your site’s
           contents. Use <code>Container</code> for a responsive pixel width.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body code={containerCode} language="jsx" />
-    </FalconComponentCard>
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body code={containerCode} language="jsx" />
+    </OrkestraComponentCard>
 
-    <FalconComponentCard multiSections>
+    <OrkestraComponentCard multiSections>
       <Tab.Container defaultActiveKey="preview">
-        <FalconComponentCard.Header title="Fluid Container">
+        <OrkestraComponentCard.Header title="Fluid Container">
           <p className="mt-1 mb-0">
             You can use <code>&lt;Container fluid /&gt;</code> for width: 100%
             across all viewport and device sizes.
           </p>
-        </FalconComponentCard.Header>
-        <FalconComponentCard.Body code={fluidCode} language="jsx" />
+        </OrkestraComponentCard.Header>
+        <OrkestraComponentCard.Body code={fluidCode} language="jsx" />
       </Tab.Container>
       <Tab.Container defaultActiveKey="preview">
-        <FalconComponentCard.Header>
+        <OrkestraComponentCard.Header>
           <p className="mb-0">
             You can set breakpoints for the <code>fluid</code> prop. Setting it
             to a breakpoint (<code>sm, md, lg, xl, xxl</code>) will set the{' '}
             <code>Container</code> as fluid until the specified breakpoint.
           </p>
-        </FalconComponentCard.Header>
-        <FalconComponentCard.Body code={fluidBreakpointsCode} language="jsx" />
+        </OrkestraComponentCard.Header>
+        <OrkestraComponentCard.Body code={fluidBreakpointsCode} language="jsx" />
       </Tab.Container>
-    </FalconComponentCard>
+    </OrkestraComponentCard>
 
-    <FalconComponentCard multiSections>
+    <OrkestraComponentCard multiSections>
       <Tab.Container defaultActiveKey="preview">
-        <FalconComponentCard.Header title="Column Width">
+        <OrkestraComponentCard.Header title="Column Width">
           <p className="mt-1 mb-0">
             When no column widths are specified the <code>Col</code> component
             will render equal width columns.you can set the width of columns and
             have the sibling columns automatically resize around it.
           </p>
-        </FalconComponentCard.Header>
-        <FalconComponentCard.Body code={columnWidthCode} language="jsx" />
+        </OrkestraComponentCard.Header>
+        <OrkestraComponentCard.Body code={columnWidthCode} language="jsx" />
       </Tab.Container>
       <Tab.Container defaultActiveKey="preview">
-        <FalconComponentCard.Header>
+        <OrkestraComponentCard.Header>
           <p className="mb-0">
             Set the column value (for any breakpoint size) to{' '}
             <code>"auto"</code> to size columns based on the natural width of
             their content.
           </p>
-        </FalconComponentCard.Header>
-        <FalconComponentCard.Body code={widthAutoCode} language="jsx" />
+        </OrkestraComponentCard.Header>
+        <OrkestraComponentCard.Body code={widthAutoCode} language="jsx" />
       </Tab.Container>
-    </FalconComponentCard>
+    </OrkestraComponentCard>
 
-    <FalconComponentCard multiSections>
+    <OrkestraComponentCard multiSections>
       <Tab.Container defaultActiveKey="preview">
-        <FalconComponentCard.Header title="Responsive grids">
+        <OrkestraComponentCard.Header title="Responsive grids">
           <p className="mt-2 mb-0">
             The <code>Col</code> lets you specify column widths across 6
             breakpoint sizes (<code>xs, sm, md, lg, xl and xxl</code>). For
@@ -240,45 +240,45 @@ const Grid = () => (
             set the prop to <code>&lt;Col lg={'{true}'} /&gt;</code> for auto
             layout widths.
           </p>
-        </FalconComponentCard.Header>
-        <FalconComponentCard.Body code={responsiveGridsCode} language="jsx" />
+        </OrkestraComponentCard.Header>
+        <OrkestraComponentCard.Body code={responsiveGridsCode} language="jsx" />
       </Tab.Container>
       <Tab.Container defaultActiveKey="preview">
-        <FalconComponentCard.Header>
+        <OrkestraComponentCard.Header>
           <p className="mb-0">
             You can also mix and match breakpoints to create different grids
             depending on the screen size.
           </p>
-        </FalconComponentCard.Header>
-        <FalconComponentCard.Body
+        </OrkestraComponentCard.Header>
+        <OrkestraComponentCard.Body
           code={responsiveGridsMixCode}
           language="jsx"
         />
       </Tab.Container>
-    </FalconComponentCard>
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Order">
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Order">
         <p className="mt-2 mb-0">
           You can use the <code>order</code> property to control the visual
           order of your content.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body code={orderCode} language="jsx" />
-    </FalconComponentCard>
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body code={orderCode} language="jsx" />
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Offset">
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Offset">
         <p className="mt-2 mb-0">
           For offsetting grid columns you can set an <code>offset</code> value
           or for a more general layout, use the margin class utilities.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body code={offsetCode} language="jsx" />
-    </FalconComponentCard>
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body code={offsetCode} language="jsx" />
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Setting column widths in Row">
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Setting column widths in Row">
         <p className="mt-2 mb-0">
           The <code>Row</code> lets you specify column widths across 5
           breakpoint sizes (<code>xs, sm, md, lg, xl and xxl</code>). For every
@@ -286,9 +286,9 @@ const Grid = () => (
           to each other. You can also specify <code>auto</code> to set the
           columns to their natural widths.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body code={columnWidthInRowCode} language="jsx" />
-    </FalconComponentCard>
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body code={columnWidthInRowCode} language="jsx" />
+    </OrkestraComponentCard>
   </>
 );
 

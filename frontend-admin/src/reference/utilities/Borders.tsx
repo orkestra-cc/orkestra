@@ -1,4 +1,4 @@
-import FalconComponentCard from 'components/common/FalconComponentCard';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 import PageHeader from 'components/common/PageHeader';
 
 import { Col, Row } from 'react-bootstrap';
@@ -106,9 +106,9 @@ const Borders = () => (
       className="mb-3"
     />
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Example" light={false} />
-      <FalconComponentCard.Body>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Example" light={false} />
+      <OrkestraComponentCard.Body>
         <p>
           The classes are named using the format <code>border-{'{side}'}</code>{' '}
           for <code>xs</code>
@@ -154,49 +154,49 @@ const Borders = () => (
           Use border utilities to quickly style the <code>border</code> of an
           element. Great for images, buttons, or any other element.
         </p>
-      </FalconComponentCard.Body>
-    </FalconComponentCard>
+      </OrkestraComponentCard.Body>
+    </OrkestraComponentCard>
 
     <Row className="mb-3 g-3">
       <Col md={6}>
-        <FalconComponentCard noGuttersBottom>
-          <FalconComponentCard.Header title="Additive" />
-          <FalconComponentCard.Body
+        <OrkestraComponentCard noGuttersBottom>
+          <OrkestraComponentCard.Header title="Additive" />
+          <OrkestraComponentCard.Body
             code={additiveBorderCode}
             language="jsx"
             className="border-component"
           />
-        </FalconComponentCard>
+        </OrkestraComponentCard>
       </Col>
       <Col md={6}>
-        <FalconComponentCard noGuttersBottom>
-          <FalconComponentCard.Header title="Subtractive" />
-          <FalconComponentCard.Body
+        <OrkestraComponentCard noGuttersBottom>
+          <OrkestraComponentCard.Header title="Subtractive" />
+          <OrkestraComponentCard.Body
             code={subtrativeBorderCode}
             language="jsx"
             className="border-component"
           />
-        </FalconComponentCard>
+        </OrkestraComponentCard>
       </Col>
     </Row>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Border Radius">
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Border Radius">
         <p className="mt-2 mb-0">
           Add helper classes to an element to easily round its corners. For the
           rounded border, the class are named using the format{' '}
           <code> rounded-*</code>
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body
         code={borderRadiusCode}
         language="jsx"
         className="border-component"
       />
-    </FalconComponentCard>
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Border Sizes">
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Border Sizes">
         <p className="mb-0 mt-2">
           You can control top, right, bottom, left border radius of different
           size, using the helper classes. The classes also support responsive
@@ -204,47 +204,47 @@ const Borders = () => (
           <code> rounded-{'{xxl | xl | lg | md | sm}'}-*</code> . Examples are
           given below
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body
         code={borderSizesCode}
         language="jsx"
         className="border-component"
       />
-    </FalconComponentCard>
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Border Style">
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Border Style">
         <p className="mb-0 mt-2">
           For the different border style, add
           <code> border-{'{dashed/dotted/hidden/none}'}</code> with
           <code> border</code> class.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body
         code={borderStyleCode}
         language="jsx"
         className="border-component"
       />
-    </FalconComponentCard>
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Border Width">
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Border Width">
         <p className="mb-0 mt-2">
           You can control border width using helper classes{' '}
           <code>border-{'{1 | 2 | 3 | 4 | 5}'}.</code> In addition, you can also
           use <code>border-top-2</code>,<code>border-end-2</code>,{' '}
           <code>border-bottom-2</code>, <code>border-start-2</code>.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body
         code={borderWidthCode}
         language="jsx"
         className="border-component"
       />
-    </FalconComponentCard>
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Border Color">
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Border Color">
         <p className="mt-2">
           Border color set as <code>currentColor</code> and border width{' '}
           <code>1px</code>. Modifier can be used to change border color and
@@ -261,13 +261,13 @@ const Borders = () => (
           , <code>300</code>, <code>200</code>, <code>100</code>,{' '}
           <code>white</code>,
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body
         code={borderColorCode}
         language="jsx"
         className="border-component"
       />
-    </FalconComponentCard>
+    </OrkestraComponentCard>
   </>
 );
 

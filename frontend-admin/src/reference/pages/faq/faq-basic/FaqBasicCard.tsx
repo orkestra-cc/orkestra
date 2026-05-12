@@ -41,10 +41,10 @@ const FaqBasicCard: React.FC<FaqBasicCardProps> = ({ faqs, header, headerText, b
           <h5 className="d-inline-block me-3 mb-0 fs-10">
             Was this information helpful?
           </h5>
-          <Button variant="falcon-default" size="sm">
+          <Button variant="orkestra-default" size="sm">
             Yes
           </Button>
-          <Button variant="falcon-default" size="sm" className="ms-2">
+          <Button variant="orkestra-default" size="sm" className="ms-2">
             No
           </Button>
         </Flex>

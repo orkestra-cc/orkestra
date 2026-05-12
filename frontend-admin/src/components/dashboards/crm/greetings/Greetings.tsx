@@ -15,7 +15,7 @@ const Greetings = () => {
               <div>
                 <h6 className="text-primary fs-10 mb-0">Welcome to </h6>
                 <h4 className="text-primary fw-bold mb-0">
-                  Falcon
+                  Orkestra
                   <span className="text-info fw-medium"> CRM</span>
                 </h4>
               </div>

@@ -51,7 +51,7 @@ const FaqAlt: React.FC = () => {
       <Card.Footer className="py-3">
         <div className="text-center">
           <h6 className="fs-9 fw-normal">Have more questions?</h6>
-          <Button variant="falcon-primary" size="sm" onClick={handleModalShow}>
+          <Button variant="orkestra-primary" size="sm" onClick={handleModalShow}>
             Ask us anything
           </Button>
         </div>

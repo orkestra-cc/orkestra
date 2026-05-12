@@ -8,7 +8,7 @@ import shoppingList from 'assets/img/animated-icons/shopping-list.json';
 import sleeping404 from 'assets/img/animated-icons/sleeping-404.json';
 import starFeedback from 'assets/img/animated-icons/star-feedback.json';
 import warningLight from 'assets/img/animated-icons/warning-light.json';
-import FalconComponentCard from 'components/common/FalconComponentCard';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 import PageHeader from 'components/common/PageHeader';
 import Lottie from 'lottie-react';
 
@@ -69,7 +69,7 @@ const AnimatedIcons = () => (
   <>
     <PageHeader
       title="Animated Icons"
-      description="Falcon uses <strong>Lottie React</strong> for animated icons. <strong>Lottie React</strong> render After Effects animations natively in React.js"
+      description="Orkestra uses <strong>Lottie React</strong> for animated icons. <strong>Lottie React</strong> render After Effects animations natively in React.js"
       className="mb-3"
     >
       <Button
@@ -84,8 +84,8 @@ const AnimatedIcons = () => (
       </Button>
     </PageHeader>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Example" light={false}>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Example" light={false}>
         <p className="mb-0">
           You can update colors, animation duration, and other stuff from this
           excellent editor.
@@ -100,16 +100,16 @@ const AnimatedIcons = () => (
           Lottie Editor
           <FontAwesomeIcon icon="chevron-right" className="ms-1 fs-11" />
         </Button>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body
         code={exampleCode}
         scope={{ Lottie, heart, checkPrimaryLight, warningLight }}
         language="jsx"
       />
-    </FalconComponentCard>
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header
         title="Loading Animation Example"
         light={false}
       >
@@ -123,16 +123,16 @@ const AnimatedIcons = () => (
           Get More Animation
           <FontAwesomeIcon icon="chevron-right" className="ms-1 fs-11" />
         </Button>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body
         code={loadingCode}
         scope={{ Lottie, infiniteLoop, loading, loadingSquare }}
         language="jsx"
       />
-    </FalconComponentCard>
+    </OrkestraComponentCard>
 
-    <FalconComponentCard noGuttersBottom>
-      <FalconComponentCard.Header
+    <OrkestraComponentCard noGuttersBottom>
+      <OrkestraComponentCard.Header
         title="Featured Animation Example"
         light={false}
       >
@@ -146,13 +146,13 @@ const AnimatedIcons = () => (
           Get More Animation
           <FontAwesomeIcon icon="chevron-right" className="ms-1 fs-11" />
         </Button>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body
         code={featuredAnimationCode}
         scope={{ Lottie, sleeping404, shoppingList, starFeedback }}
         language="jsx"
       />
-    </FalconComponentCard>
+    </OrkestraComponentCard>
   </>
 );
 

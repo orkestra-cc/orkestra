@@ -45,9 +45,9 @@
 }
 
 /*-----------------------------------------------
-|   Falcon buttons
+|   Orkestra buttons
 -----------------------------------------------*/
-$theme-falcon-btn-colors: (
+$theme-orkestra-btn-colors: (
   'primary': var(--#{$prefix}primary),
   'success': var(--#{$prefix}success),
   'info': var(--#{$prefix}info),
@@ -56,9 +56,9 @@ $theme-falcon-btn-colors: (
   'default': var(--#{$prefix}default)
 );
 
-@each $color, $value in $theme-falcon-btn-colors {
-  .btn-falcon-#{$color} {
-    @include falcon-button-variant($color);
+@each $color, $value in $theme-orkestra-btn-colors {
+  .btn-orkestra-#{$color} {
+    @include orkestra-button-variant($color);
   }
 }
 
@@ -113,7 +113,7 @@ $theme-falcon-btn-colors: (
 
 // Close Button
 
-.btn-close-falcon {
+.btn-close-orkestra {
   cursor: pointer;
   position: relative;
   // width: 100%;

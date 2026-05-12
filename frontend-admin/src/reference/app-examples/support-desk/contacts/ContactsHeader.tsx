@@ -27,7 +27,7 @@ const ContactsHeader = ({ handleShow }: ContactsHeaderProps) => {
       <div className="border-bottom border-200 my-3"></div>
       <div className="d-flex align-items-center justify-content-between justify-content-lg-end px-x1">
         <IconButton
-          variant="falcon-default"
+          variant="orkestra-default"
           size="sm"
           icon="filter"
           transform="shrink-4"
@@ -51,7 +51,7 @@ const ContactsHeader = ({ handleShow }: ContactsHeaderProps) => {
             </Form.Select>
             <Button
               type="button"
-              variant="falcon-default"
+              variant="orkestra-default"
               size="sm"
               className="ms-2"
             >
@@ -61,7 +61,7 @@ const ContactsHeader = ({ handleShow }: ContactsHeaderProps) => {
         ) : (
           <div id="orders-actions">
             <IconButton
-              variant="falcon-default"
+              variant="orkestra-default"
               size="sm"
               icon="plus"
               transform="shrink-3"
@@ -72,7 +72,7 @@ const ContactsHeader = ({ handleShow }: ContactsHeaderProps) => {
               </span>
             </IconButton>
             <IconButton
-              variant="falcon-default"
+              variant="orkestra-default"
               size="sm"
               icon="external-link-alt"
               transform="shrink-3"
@@ -84,7 +84,7 @@ const ContactsHeader = ({ handleShow }: ContactsHeaderProps) => {
               </span>
             </IconButton>
             <IconButton
-              variant="falcon-default"
+              variant="orkestra-default"
               size="sm"
               icon="file-import"
               transform="shrink-3"
@@ -96,7 +96,7 @@ const ContactsHeader = ({ handleShow }: ContactsHeaderProps) => {
               </span>
             </IconButton>
             <Dropdown align="end" className="btn-reveal-trigger d-inline-block">
-              <Dropdown.Toggle split variant="falcon-default" size="sm">
+              <Dropdown.Toggle split variant="orkestra-default" size="sm">
                 <FontAwesomeIcon icon="ellipsis-h" className="fs-11" />
               </Dropdown.Toggle>
 

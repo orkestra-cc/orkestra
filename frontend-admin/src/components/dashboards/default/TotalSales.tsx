@@ -1,5 +1,5 @@
 import CardDropdown from 'components/common/CardDropdown';
-import FalconCardHeader from 'components/common/FalconCardHeader';
+import OrkestraCardHeader from 'components/common/OrkestraCardHeader';
 import Flex from 'components/common/Flex';
 import { LineChart } from 'echarts/charts';
 import * as echarts from 'echarts/core';
@@ -135,7 +135,7 @@ const TotalSales = ({ data }: TotalSalesProps) => {
   const { getThemeColor } = useAppContext();
   return (
     <Card className="h-100">
-      <FalconCardHeader
+      <OrkestraCardHeader
         title="Total Sales"
         titleTag="h6"
         className="pb-0"

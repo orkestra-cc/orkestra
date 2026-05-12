@@ -1,5 +1,5 @@
 import CardDropdown from 'components/common/CardDropdown';
-import FalconCardHeader from 'components/common/FalconCardHeader';
+import OrkestraCardHeader from 'components/common/OrkestraCardHeader';
 import Flex from 'components/common/Flex';
 import { BarChart } from 'echarts/charts';
 import {
@@ -125,7 +125,7 @@ const TopProducts = ({ data, className }: TopProductsProps) => {
   const { getThemeColor } = useAppContext();
   return (
     <Card className={className || 'h-100'}>
-      <FalconCardHeader
+      <OrkestraCardHeader
         title="Top Products"
         titleTag="h6"
         className="py-2"

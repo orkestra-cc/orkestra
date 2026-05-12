@@ -6,7 +6,7 @@ import generic12 from 'assets/img/generic/12.jpg';
 import generic3 from 'assets/img/generic/3.jpg';
 import team1 from 'assets/img/team/1.jpg';
 import classNames from 'classnames';
-import FalconComponentCard from 'components/common/FalconComponentCard';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 import PageHeader from 'components/common/PageHeader';
 import Notification from 'components/notification/Notification';
 import { reactBootstrapDocsUrl } from 'helpers/utils';
@@ -172,7 +172,7 @@ const Card = () => {
     <>
       <PageHeader
         title="Cards"
-        description="Falcon’s cards provide a flexible and extensible content container with multiple variants and options."
+        description="Orkestra’s cards provide a flexible and extensible content container with multiple variants and options."
         className="mb-3"
       >
         <Button
@@ -189,79 +189,79 @@ const Card = () => {
 
       <Row className="g-3 mb-3">
         <Col lg={6}>
-          <FalconComponentCard className="h-100">
-            <FalconComponentCard.Header title="Example" light={false} />
-            <FalconComponentCard.Body
+          <OrkestraComponentCard className="h-100">
+            <OrkestraComponentCard.Header title="Example" light={false} />
+            <OrkestraComponentCard.Body
               code={exampleCode}
               language="jsx"
               scope={{ generic1 }}
             />
-          </FalconComponentCard>
+          </OrkestraComponentCard>
         </Col>
         <Col lg={6}>
-          <FalconComponentCard className="h-100">
-            <FalconComponentCard.Header title="Card with image" light={false} />
-            <FalconComponentCard.Body
+          <OrkestraComponentCard className="h-100">
+            <OrkestraComponentCard.Header title="Card with image" light={false} />
+            <OrkestraComponentCard.Body
               code={cardWithImageCode}
               language="jsx"
               scope={{ generic3 }}
             />
-          </FalconComponentCard>
+          </OrkestraComponentCard>
         </Col>
       </Row>
 
-      <FalconComponentCard>
-        <FalconComponentCard.Header
+      <OrkestraComponentCard>
+        <OrkestraComponentCard.Header
           title="Card with background"
           light={false}
         />
-        <FalconComponentCard.Body
+        <OrkestraComponentCard.Body
           code={cardWithBgCode}
           language="jsx"
           scope={{ PageHeader, FontAwesomeIcon }}
         />
-      </FalconComponentCard>
+      </OrkestraComponentCard>
 
-      <FalconComponentCard>
-        <FalconComponentCard.Header title="Notification" light={false} />
-        <FalconComponentCard.Body
+      <OrkestraComponentCard>
+        <OrkestraComponentCard.Header title="Notification" light={false} />
+        <OrkestraComponentCard.Body
           code={notificationCode}
           language="jsx"
           scope={{ team1, Notification }}
         />
-      </FalconComponentCard>
+      </OrkestraComponentCard>
 
-      <FalconComponentCard>
-        <FalconComponentCard.Header title="Background" light={false} />
-        <FalconComponentCard.Body
+      <OrkestraComponentCard>
+        <OrkestraComponentCard.Header title="Background" light={false} />
+        <OrkestraComponentCard.Body
           code={backgroundCode}
           language="jsx"
           scope={{ generic3 }}
         />
-      </FalconComponentCard>
+      </OrkestraComponentCard>
 
-      <FalconComponentCard>
-        <FalconComponentCard.Header title="Card Groups" light={false} />
-        <FalconComponentCard.Body
+      <OrkestraComponentCard>
+        <OrkestraComponentCard.Header title="Card Groups" light={false} />
+        <OrkestraComponentCard.Body
           code={cardGroupCode}
           language="jsx"
           scope={{ generic10, generic11, generic12 }}
         />
-      </FalconComponentCard>
+      </OrkestraComponentCard>
 
-      <FalconComponentCard noGuttersBottom>
-        <FalconComponentCard.Header title="Card Styles" light={false}>
+      <OrkestraComponentCard noGuttersBottom>
+        <OrkestraComponentCard.Header title="Card Styles" light={false}>
           <p className="mb-0">
             You can change a card's appearance by changing their{' '}
             <code>&lt;bg&gt;</code>, and <code>&lt;text&gt;</code> props.
           </p>
-        </FalconComponentCard.Header>
-        <FalconComponentCard.Body
+        </OrkestraComponentCard.Header>
+        <OrkestraComponentCard.Body
           code={cardStylesCode}
           language="jsx"
           scope={{ generic3, classNames }}
         />
-      </FalconComponentCard>
+      </OrkestraComponentCard>
     </>
   );
 };

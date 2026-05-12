@@ -50,7 +50,7 @@ const ChatContentHeader = ({ thread, setHideSidebar }: ChatContentHeaderProps) =
               </Tooltip>
             }
           >
-            <Button variant="falcon-primary" className="me-2" size="sm">
+            <Button variant="orkestra-primary" className="me-2" size="sm">
               <FontAwesomeIcon icon="phone" />
             </Button>
           </OverlayTrigger>
@@ -62,7 +62,7 @@ const ChatContentHeader = ({ thread, setHideSidebar }: ChatContentHeaderProps) =
               </Tooltip>
             }
           >
-            <Button variant="falcon-primary" className="me-2" size="sm">
+            <Button variant="orkestra-primary" className="me-2" size="sm">
               <FontAwesomeIcon icon="video" />
             </Button>
           </OverlayTrigger>
@@ -75,7 +75,7 @@ const ChatContentHeader = ({ thread, setHideSidebar }: ChatContentHeaderProps) =
             }
           >
             <Button
-              variant="falcon-primary"
+              variant="orkestra-primary"
               size="sm"
               onClick={() => setIsOpenThreadInfo(!isOpenThreadInfo)}
             >

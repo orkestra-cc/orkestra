@@ -25,7 +25,7 @@ const PricingDefaultHeader: React.FC = () => {
           <Form.Check type="switch" className="mb-0">
             <Form.Check.Input
               type="checkbox"
-              className="pe-0 falcon-form-check-input"
+              className="pe-0 orkestra-form-check-input"
               defaultChecked
             />
           </Form.Check>

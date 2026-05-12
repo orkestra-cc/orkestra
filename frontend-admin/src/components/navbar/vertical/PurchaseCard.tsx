@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Button, Card } from 'react-bootstrap';
 import { Link } from 'react-router';
 import image from 'assets/img/icons/spot-illustrations/navbar-vertical.png';
-import FalconCloseButton from 'components/common/FalconCloseButton';
+import OrkestraCloseButton from 'components/common/OrkestraCloseButton';
 
 const PurchaseCard = () => {
   const [show, setShow] = useState(true);
@@ -14,7 +14,7 @@ const PurchaseCard = () => {
             className="position-absolute"
             style={{ right: '6px', top: '3px' }}
           >
-            <FalconCloseButton
+            <OrkestraCloseButton
               size="sm"
               className="fs-11"
               noOutline
@@ -26,12 +26,12 @@ const PurchaseCard = () => {
             <p className="fs-11 mt-2">
               Loving what you see?
               <br />
-              Get your copy of <Link to="#!">Falcon</Link>
+              Get your copy of <Link to="#!">Orkestra</Link>
             </p>
             <div className="d-grid gap-2">
               <Button
                 as={'a'}
-                href="https://themes.getbootstrap.com/product/falcon-admin-dashboard-webapp-template-react/"
+                href="https://themes.getbootstrap.com/product/orkestra-admin-dashboard-webapp-template-react/"
                 target="_blank"
                 size="sm"
                 className="btn-primary"

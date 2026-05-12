@@ -2,12 +2,12 @@ import { useState, ReactNode } from 'react';
 import Lightbox from 'yet-another-react-lightbox';
 import 'yet-another-react-lightbox/styles.css';
 
-interface FalconLightBoxProps {
+interface OrkestraLightBoxProps {
   image: string;
   children: ReactNode;
 }
 
-const FalconLightBox = ({ image, children }: FalconLightBoxProps) => {
+const OrkestraLightBox = ({ image, children }: OrkestraLightBoxProps) => {
   const [isOpen, setIsOpen] = useState(false);
   return (
     <>
@@ -31,4 +31,4 @@ const FalconLightBox = ({ image, children }: FalconLightBoxProps) => {
   );
 };
 
-export default FalconLightBox;
+export default OrkestraLightBox;

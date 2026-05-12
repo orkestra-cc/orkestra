@@ -100,7 +100,7 @@ const NotificationTableHeader = () => {
       <div className="d-flex align-items-center justify-content-between justify-content-lg-end px-x1">
         <Dropdown className="font-sans-serif">
           <Dropdown.Toggle
-            variant="falcon-default"
+            variant="orkestra-default"
             size="sm"
             className="text-600"
           >
@@ -142,7 +142,7 @@ const NotificationTableHeader = () => {
             </Form.Select>
             <Button
               type="button"
-              variant="falcon-default"
+              variant="orkestra-default"
               size="sm"
               className="ms-2"
             >
@@ -152,7 +152,7 @@ const NotificationTableHeader = () => {
         ) : (
           <div id="notification-actions">
             <IconButton
-              variant="falcon-default"
+              variant="orkestra-default"
               size="sm"
               icon="external-link-alt"
               transform="shrink-3"
@@ -167,7 +167,7 @@ const NotificationTableHeader = () => {
               align="end"
               className="btn-reveal-trigger d-inline-block ms-2"
             >
-              <Dropdown.Toggle variant="falcon-default" size="sm">
+              <Dropdown.Toggle variant="orkestra-default" size="sm">
                 <FontAwesomeIcon icon="ellipsis-h" className="fs-11" />
               </Dropdown.Toggle>
 

@@ -1,4 +1,4 @@
-import FalconLink from 'components/common/FalconLink';
+import OrkestraLink from 'components/common/OrkestraLink';
 import { bounceRate } from 'data/dashboard/analytics';
 
 import { Card, Col, Form, Row } from 'react-bootstrap';
@@ -33,7 +33,7 @@ const BounceRate: React.FC<BounceRateProps> = ({ ...rest }) => {
             </Form.Select>
           </Col>
           <Col xs="auto">
-            <FalconLink title="View full report" className="px-0 fw-medium" />
+            <OrkestraLink title="View full report" className="px-0 fw-medium" />
           </Col>
         </Row>
       </Card.Footer>

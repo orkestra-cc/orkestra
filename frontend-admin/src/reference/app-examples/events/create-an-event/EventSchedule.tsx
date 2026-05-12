@@ -70,7 +70,7 @@ const EventSchedule = ({ register, setValue }: EventScheduleProps) => {
 
         <IconButton
           onClick={handleAddSchedule}
-          variant="falcon-default"
+          variant="orkestra-default"
           size="sm"
           icon="plus"
           transform="shrink-3"

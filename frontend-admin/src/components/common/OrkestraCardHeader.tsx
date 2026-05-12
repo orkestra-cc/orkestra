@@ -30,7 +30,7 @@ const Title: React.FC<TitleProps> = ({
   </TitleTag>
 );
 
-interface FalconCardHeaderProps {
+interface OrkestraCardHeaderProps {
   title?: React.ReactNode;
   light?: boolean;
   titleTag?: TitleTag;
@@ -41,7 +41,7 @@ interface FalconCardHeaderProps {
   children?: React.ReactNode;
 }
 
-const FalconCardHeader: React.FC<FalconCardHeaderProps> = ({
+const OrkestraCardHeader: React.FC<OrkestraCardHeaderProps> = ({
   title,
   light,
   titleTag,
@@ -79,4 +79,4 @@ const FalconCardHeader: React.FC<FalconCardHeaderProps> = ({
   </Card.Header>
 );
 
-export default FalconCardHeader;
+export default OrkestraCardHeader;

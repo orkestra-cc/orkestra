@@ -2,7 +2,7 @@
 import { Button } from 'react-bootstrap';
 import PageHeader from 'components/common/PageHeader';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import FalconComponentCard from 'components/common/FalconComponentCard';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 import { reactBootstrapDocsUrl } from 'helpers/utils';
 
 const exampleCode = `
@@ -142,20 +142,20 @@ const Offcanvas = () => (
       </Button>
     </PageHeader>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Example" light={false}>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Example" light={false}>
         <p className="mb-0 mt-2">
           Offcanvas includes support for a header with a close button and an
           optional body class for some initial padding. We suggest that you
           include offcanvas headers with dismiss actions whenever possible, or
           provide an explicit dismiss action.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body code={exampleCode} language="jsx" />
-    </FalconComponentCard>
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body code={exampleCode} language="jsx" />
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Placement" light={false}>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Placement" light={false}>
         <p className="mb-0 mt-2">
           Offcanvas supports a few different placements:
         </p>
@@ -173,21 +173,21 @@ const Offcanvas = () => (
             <code>bottom</code> places offcanvas on the bottom of the viewport
           </li>
         </ul>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body code={placementCode} language="jsx" noInline />
-    </FalconComponentCard>
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body code={placementCode} language="jsx" noInline />
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Backdrop" light={false}>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Backdrop" light={false}>
         <p className="mb-0 mt-2">
           Scrolling the <code>&lt;body&gt;</code> element is disabled when an
           offcanvas and its backdrop are visible. Use the <code>scroll</code>{' '}
           prop to toggle <code>&lt;body&gt;</code> scrolling and the{' '}
           <code>backdrop</code> prop to toggle the backdrop.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body code={backdropCode} language="jsx" noInline />
-    </FalconComponentCard>
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body code={backdropCode} language="jsx" noInline />
+    </OrkestraComponentCard>
   </>
 );
 

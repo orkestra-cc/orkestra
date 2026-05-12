@@ -1,5 +1,5 @@
 
-import FalconComponentCard from 'components/common/FalconComponentCard';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 
 import { LineChart } from 'echarts/charts';
 import {
@@ -172,9 +172,9 @@ const chartCode = `function ChartOptions() {
 
 const StepLineChart = () => {
   return (
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Step line chart" light={false} />
-      <FalconComponentCard.Body
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Step line chart" light={false} />
+      <OrkestraComponentCard.Body
         code={chartCode}
         language="jsx"
         scope={{
@@ -184,7 +184,7 @@ const StepLineChart = () => {
           tooltipFormatter
         }}
       />
-    </FalconComponentCard>
+    </OrkestraComponentCard>
   );
 };
 

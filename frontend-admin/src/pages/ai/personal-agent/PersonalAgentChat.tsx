@@ -757,7 +757,7 @@ const PersonalAgentChat: React.FC = () => {
           </div>
           <div className="d-flex align-items-center gap-2">
             <Dropdown>
-              <Dropdown.Toggle variant="falcon-default" size="sm">
+              <Dropdown.Toggle variant="orkestra-default" size="sm">
                 <FontAwesomeIcon icon={faUser} className="me-1" />
                 {PERSONA_LABELS[persona]}
               </Dropdown.Toggle>
@@ -778,7 +778,7 @@ const PersonalAgentChat: React.FC = () => {
               </Dropdown.Menu>
             </Dropdown>
             <Button
-              variant="falcon-default"
+              variant="orkestra-default"
               size="sm"
               onClick={() => setShowSettings(true)}
               title="Agent settings"
@@ -786,7 +786,7 @@ const PersonalAgentChat: React.FC = () => {
               <FontAwesomeIcon icon={faCog} />
             </Button>
             <Button
-              variant="falcon-default"
+              variant="orkestra-default"
               size="sm"
               onClick={() => setShowDocuments(true)}
               title="Manage documents"

@@ -2,7 +2,7 @@
 import { Button, Tab, Alert } from 'react-bootstrap';
 import PageHeader from 'components/common/PageHeader';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import FalconComponentCard from 'components/common/FalconComponentCard';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 import { reactBootstrapDocsUrl } from 'helpers/utils';
 import IconAlert from 'components/common/IconAlert';
 
@@ -153,75 +153,75 @@ const Alerts = () => (
       </Button>
     </PageHeader>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Alerts with icon" />
-      <FalconComponentCard.Body
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Alerts with icon" />
+      <OrkestraComponentCard.Body
         code={iconAlertCode}
         scope={{ IconAlert }}
         language="jsx"
         noInline
       />
-    </FalconComponentCard>
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Basic Examples">
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Basic Examples">
         <p className="mb-0">
           Alerts are available for any length of text, as well as an optional
           dismiss button. For proper styling, use one of the eight{' '}
           <code>variants</code>.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body
         code={alertCode}
         scope={{ Alert }}
         language="jsx"
       />
-    </FalconComponentCard>
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Links">
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Links">
         <p className="mb-0">
           For links, use the <code>{` <Alert.Link> `}</code> component to
           provide matching colored links within any alert.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body
         code={linkCode}
         scope={{ Alert }}
         language="jsx"
       />
-    </FalconComponentCard>
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Additional content">
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Additional content">
         <p className="mb-0">
           Add the <code>dismissible</code> prop to add a functioning dismiss
           button to the Alert.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body code={additionalContentCode} language="jsx" />
-    </FalconComponentCard>
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body code={additionalContentCode} language="jsx" />
+    </OrkestraComponentCard>
 
-    <FalconComponentCard multiSections noGuttersBottom>
+    <OrkestraComponentCard multiSections noGuttersBottom>
       <Tab.Container defaultActiveKey="preview">
-        <FalconComponentCard.Header title="Dismissing">
+        <OrkestraComponentCard.Header title="Dismissing">
           <p className="mb-0">
             Alerts can contain whatever content you like. Headers, paragraphs,
             dividers, go crazy.
           </p>
-        </FalconComponentCard.Header>
-        <FalconComponentCard.Body code={dismissCodeOne} language="jsx" />
+        </OrkestraComponentCard.Header>
+        <OrkestraComponentCard.Body code={dismissCodeOne} language="jsx" />
       </Tab.Container>
       <Tab.Container defaultActiveKey="preview">
-        <FalconComponentCard.Header>
+        <OrkestraComponentCard.Header>
           <p className="mb-0">
             You can also control the visual state directly which is great if you
             want to build more complicated alerts.
           </p>
-        </FalconComponentCard.Header>
-        <FalconComponentCard.Body code={dismissCodeTwo} language="jsx" />
+        </OrkestraComponentCard.Header>
+        <OrkestraComponentCard.Body code={dismissCodeTwo} language="jsx" />
       </Tab.Container>
-    </FalconComponentCard>
+    </OrkestraComponentCard>
   </>
 );
 

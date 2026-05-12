@@ -9,7 +9,7 @@ import {
 } from 'data/notification/notification';
 import { isIterableArray } from 'helpers/utils';
 import useFakeFetch from 'hooks/ui/useFakeFetch';
-import FalconCardHeader from 'components/common/FalconCardHeader';
+import OrkestraCardHeader from 'components/common/OrkestraCardHeader';
 import Notification from 'components/notification/Notification';
 import SimpleBar from 'simplebar-react';
 import type { AvatarSize } from 'components/common/Avatar';
@@ -94,7 +94,7 @@ const NotificationDropdown = () => {
           className="dropdown-menu-notification dropdown-menu-end shadow-none"
           style={{ maxWidth: '20rem' }}
         >
-          <FalconCardHeader
+          <OrkestraCardHeader
             className="card-header"
             title="Notifications"
             titleTag="h6"

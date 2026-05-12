@@ -6,7 +6,7 @@ import Background from 'components/common/Background';
 import { Link } from 'react-router';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { Modal, CloseButton } from 'react-bootstrap';
-import FalconLightBoxGallery from 'components/common/FalconLightBoxGallery';
+import OrkestraLightBoxGallery from 'components/common/OrkestraLightBoxGallery';
 
 interface Attachment {
   id: string;
@@ -129,7 +129,7 @@ const ModalAttachmentContent = () => {
 
   return (
     <>
-      <FalconLightBoxGallery images={images}>
+      <OrkestraLightBoxGallery images={images}>
         {(setImgIndex: (index: number) => void) => (
           <>
             {(attachments as Attachment[]).map((attachment: Attachment, index: number) => (
@@ -143,7 +143,7 @@ const ModalAttachmentContent = () => {
             ))}
           </>
         )}
-      </FalconLightBoxGallery>
+      </OrkestraLightBoxGallery>
     </>
   );
 };

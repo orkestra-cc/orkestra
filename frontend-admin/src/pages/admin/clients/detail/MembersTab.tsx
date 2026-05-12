@@ -134,7 +134,7 @@ const MembersTab: React.FC<Props> = ({ org }) => {
               <td className="text-end">
                 <Dropdown align="end">
                   <Dropdown.Toggle
-                    variant="falcon-default"
+                    variant="orkestra-default"
                     size="sm"
                     className="border-0"
                   >

@@ -37,10 +37,10 @@ const DoMoreCard: React.FC<DoMoreCardProps> = ({ ...rest }) => {
   return (
     <Card {...rest}>
       <Card.Body className="p-4">
-        <h4 className="text-800">More with Falcon</h4>
+        <h4 className="text-800">More with Orkestra</h4>
         <h5 className="text-600 fs-9">
           Get <span className="text-primary fw-semibold">70% OFF </span> with
-          Falcon+
+          Orkestra+
         </h5>
         <Alert variant="success" className="mt-3">
           <h3 className="mb-0 text-800">
@@ -69,7 +69,7 @@ const DoMoreCard: React.FC<DoMoreCardProps> = ({ ...rest }) => {
           iconClassName="me-2"
           className="w-100"
         >
-          Upgrade to Falcon+
+          Upgrade to Orkestra+
         </IconButton>
       </Card.Body>
     </Card>

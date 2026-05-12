@@ -22,7 +22,7 @@
   .treeview-border {
     border-left-style: solid;
     border-width: 1px;
-    border-color: var(--falcon-border-color);
+    border-color: var(--orkestra-border-color);
     margin-left: 3px;
   }
   .treeview-border-transparent {
@@ -131,7 +131,7 @@
   .treeview-list-item{
     .active {
       .treeview-text {
-        color: var(--falcon-primary);
+        color: var(--orkestra-primary);
         font-weight: $font-weight-bold;
       }
     }

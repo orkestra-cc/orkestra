@@ -1,5 +1,5 @@
 import { Card, Col, ProgressBar, Row } from 'react-bootstrap';
-import FalconCardHeader from 'components/common/FalconCardHeader';
+import OrkestraCardHeader from 'components/common/OrkestraCardHeader';
 import CardDropdown from 'components/common/CardDropdown';
 import { dealForecastData } from 'data/dashboard/crm';
 import classNames from 'classnames';
@@ -20,7 +20,7 @@ const DealForecastBar = () => {
 
   return (
     <Card className="h-100">
-      <FalconCardHeader
+      <OrkestraCardHeader
         title="Deal Forecast"
         titleTag="h6"
         className="border-200 border-bottom py-2"

@@ -1,7 +1,7 @@
 import { ReactNode, useEffect } from 'react';
 import { Alert, Button } from 'react-bootstrap';
 import { Navigate, useLocation } from 'react-router-dom';
-import FalconLoader from 'components/common/FalconLoader';
+import OrkestraLoader from 'components/common/OrkestraLoader';
 import { useGetSetupStatusQuery } from 'store/api/setupApi';
 import { useAppDispatch } from 'store/hooks';
 import { resetTenantState } from 'store/slices/tenantSlice';
@@ -43,7 +43,7 @@ const SetupGate = ({ children }: SetupGateProps) => {
   }, [data, dispatch]);
 
   if (isLoading) {
-    return <FalconLoader />;
+    return <OrkestraLoader />;
   }
 
   if (isError || !data) {

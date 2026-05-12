@@ -6,13 +6,13 @@ const { homepage } = packageInfo;
 export const faqs = [
   {
     id: 0,
-    title: `How does Falcon's pricing work?`,
-    description: `The free version of Falcon is available for teams of up to 15 people. Our Falcon Premium plans of 15 or fewer qualify for a small team discount. As your team grows to 20 users or more and gets more value out of Falcon, you'll get closer to our standard monthly price per seat. The price of a paid Falcon plan is tiered, starting in groups of 5 and 10 users, based on the number of people you have in your Team or Organization.`
+    title: `How does Orkestra's pricing work?`,
+    description: `The free version of Orkestra is available for teams of up to 15 people. Our Orkestra Premium plans of 15 or fewer qualify for a small team discount. As your team grows to 20 users or more and gets more value out of Orkestra, you'll get closer to our standard monthly price per seat. The price of a paid Orkestra plan is tiered, starting in groups of 5 and 10 users, based on the number of people you have in your Team or Organization.`
   },
   {
     id: 1,
     title: 'What forms of payment do you accept?',
-    description: `You can purchase Falcon with any major credit card. For annual subscriptions, we can issue an invoice payable by bank transfer or check. Please contact us to arrange an invoice purchase. Monthly purchases must be paid for by credit card.`
+    description: `You can purchase Orkestra with any major credit card. For annual subscriptions, we can issue an invoice payable by bank transfer or check. Please contact us to arrange an invoice purchase. Monthly purchases must be paid for by credit card.`
   },
   {
     id: 2,
@@ -21,8 +21,8 @@ export const faqs = [
   },
   {
     id: 3,
-    title: `How secure is Falcon?`,
-    description: `Protecting the data you trust to Falcon is our first priority. Falcon uses physical, procedural, and technical safeguards to preserve the integrity and security of your information. We regularly back up your data to prevent data loss and aid in recovery. Additionally, we host data in secure SSAE 16 / SOC1 certified data centers, implement firewalls and access restrictions on our servers to better protect your information, and work with third party security researchers to ensure our practices are secure.`
+    title: `How secure is Orkestra?`,
+    description: `Protecting the data you trust to Orkestra is our first priority. Orkestra uses physical, procedural, and technical safeguards to preserve the integrity and security of your information. We regularly back up your data to prevent data loss and aid in recovery. Additionally, we host data in secure SSAE 16 / SOC1 certified data centers, implement firewalls and access restrictions on our servers to better protect your information, and work with third party security researchers to ensure our practices are secure.`
   },
   {
     id: 4,
@@ -37,12 +37,12 @@ export const faqs = [
   {
     id: 6,
     title: `Do you offer academic pricing?`,
-    description: `We're happy to work with student groups using Falcon. Contact Us`
+    description: `We're happy to work with student groups using Orkestra. Contact Us`
   },
   {
     id: 7,
-    title: `Is there an on-premise version of Falcon?`,
-    description: `We are passionate about the web. We don't plan to offer an internally hosted version of Falcon. We hope you trust us to provide a robust and secure service so you can do the work only your team can do.`
+    title: `Is there an on-premise version of Orkestra?`,
+    description: `We are passionate about the web. We don't plan to offer an internally hosted version of Orkestra. We hope you trust us to provide a robust and secure service so you can do the work only your team can do.`
   },
   {
     id: 8,
@@ -81,17 +81,17 @@ export const faqAccordions = [
 export const faqDoc = [
   {
     id: 1,
-    title: 'How to start working with Falcon React',
+    title: 'How to start working with Orkestra React',
     description: `<p class='mb-0'>Install latest version of Node js to your PC <a href='https://nodejs.dev/' target="_blank">https://nodejs.dev/</a> Download the template file and unzip it.
-    You will get 2 files in the folder. Now unzip the <code>falcon-react-${version}</code> directory and open this directory from your terminal.
+    You will get 2 files in the folder. Now unzip the <code>orkestra-react-${version}</code> directory and open this directory from your terminal.
     Run <code>npm install </code> from your terminal.
     After installing all the required packages, run <code>npm start</code>. <br>
-    Please check the following link to see How to Getting started in Falcon React: <a target='_blank' href='//${homepage}/documentation/getting-started'>${homepage}/documentation/getting-started<a/>.</p>`
+    Please check the following link to see How to Getting started in Orkestra React: <a target='_blank' href='//${homepage}/documentation/getting-started'>${homepage}/documentation/getting-started<a/>.</p>`
   },
   {
     id: 2,
     title:
-      'Is there a specific version of Node.js I should use for Falcon React?',
+      'Is there a specific version of Node.js I should use for Orkestra React?',
     description: `<p class="mb-0">Node version to <code>16.15.1</code> or any further updated version.</p>`
   },
 
@@ -109,19 +109,19 @@ export const faqDoc = [
     id: 5,
     title:
       'Which bootstrap react framework you are using? Reactstrap or React-Bootstrap?',
-    description: `<p class="mb-0">We used the <b>reactstrap</b> for Falcon React <code>v2.x</code> and <b>React bootstrap</b> for Falcon React <code>v3.x</code>.</p>`
+    description: `<p class="mb-0">We used the <b>reactstrap</b> for Orkestra React <code>v2.x</code> and <b>React bootstrap</b> for Orkestra React <code>v3.x</code>.</p>`
   },
   {
     id: 6,
     title: 'Where will I get the Figma Files?',
-    description: `<p >You will find the Figma link in the <code>README.md</code> file on your downloaded copy of Falcon. Here is the detailed documentation: <a target='_blank' href='//${homepage}/documentation/design-file'> ${homepage}/documentation/design-file</a>.</p>
-    <p class='mb-0'>If you still have any problem with the link, reach us out with your purchase ID at <a href="mailto:support@themewagon.com">support@themewagon.com</a></p>`
+    description: `<p >You will find the Figma link in the <code>README.md</code> file on your downloaded copy of Orkestra. Here is the detailed documentation: <a target='_blank' href='//${homepage}/documentation/design-file'> ${homepage}/documentation/design-file</a>.</p>
+    <p class='mb-0'>If you still have any problem with the link, reach us out with your purchase ID at <a href="mailto:support@orkestra.cc">support@orkestra.cc</a></p>`
   },
   {
     id: 7,
     title:
       'What are the bare minimum files just to get the layout and navigation?',
-    description: `<p >You can start from the Falcon’s Starter page where the minimum required components are included to get layout and navigation.
+    description: `<p >You can start from the Orkestra’s Starter page where the minimum required components are included to get layout and navigation.
     More specifically, the below list of files are required to work with layout and navigation:<br>
     <code>src/assets</code><br>
     <code>src/components/common</code><br>
@@ -146,40 +146,40 @@ export const faqDoc = [
 
     <p>Note:  Remember deleting other files/directories will be the cause of errors. You have to remove the corresponding import statement and unnecessary lines from your code manually.
     </p>
-    <p class="mb-0">We have created a mini version of Falcon React with all the essential files only. If you are interested, please reach us out with your purchase ID at <a href="mailto:support@themewagon.com">support@themewagon.com</a>.
+    <p class="mb-0">We have created a mini version of Orkestra React with all the essential files only. If you are interested, please reach us out with your purchase ID at <a href="mailto:support@orkestra.cc">support@orkestra.cc</a>.
     </p>`
   },
   {
     id: 8,
-    title: 'How to compile SCSS files with Falcon React?',
-    description: `<p class="mb-0">To compile scss files in Falcon react run npm run <code>build:css</code> from your terminal, or you can watch the scss files by running npm run <code>watch:css</code> to a separate terminal. 
-    Check the link below to have a look on the styling documentation in Falcon React <a target='_blank' href='//${homepage}/documentation/styling'> ${homepage}/documentation/styling</a>
+    title: 'How to compile SCSS files with Orkestra React?',
+    description: `<p class="mb-0">To compile scss files in Orkestra react run npm run <code>build:css</code> from your terminal, or you can watch the scss files by running npm run <code>watch:css</code> to a separate terminal. 
+    Check the link below to have a look on the styling documentation in Orkestra React <a target='_blank' href='//${homepage}/documentation/styling'> ${homepage}/documentation/styling</a>
     </p>`
   },
   {
     id: 9,
-    title: 'How to update from Falcon React v2.x to the upper version?',
+    title: 'How to update from Orkestra React v2.x to the upper version?',
     description: `<p><b>Updating from any earlier version of 3.x to ${version}:</b></br>
     Check out the following link and follow the changes: <a target='_blank' href='//${homepage}/changelog'> ${homepage}/changelog</a>
     </p>
     <p class='mb-0'><b>Updating from version 2 to version 3:</b></br>
     As the latest versions of templates and all their packages have different structures behind their components, you have to update all the components manually into your project.<br>
-    So, it would be better to start building applications with the Bootstrap 5 version of Falcon from scratch. You can include any components from your existing project to your current project. Bring the component and its required SCSS and place it into your current project.
+    So, it would be better to start building applications with the Bootstrap 5 version of Orkestra from scratch. You can include any components from your existing project to your current project. Bring the component and its required SCSS and place it into your current project.
     </p>`
   },
   {
     id: 10,
-    title: 'Can I use Falcon React with Next.js?',
-    description: `<p>Yes, Falcon React is compatible with Next.js. We provide a starter 
+    title: 'Can I use Orkestra React with Next.js?',
+    description: `<p>Yes, Orkestra React is compatible with Next.js. We provide a starter 
     version for Next.js (App Router) with basic navigation and layout setups. If you want
      the starter version, please reach out to us with your purchase ID at 
-     <a href="mailto:support@themewagon.com">support@themewagon.com</a>.
+     <a href="mailto:support@orkestra.cc">support@orkestra.cc</a>.
      </p>
     `
   },
   {
     id: 11,
-    title: 'Does Falcon React work with Vite?',
-    description: `<p>Yes, Falcon React works seamlessly with Vite. We offer a starter version for Vite that includes basic navigation and layouts. To get the starter, contact us with your purchase ID at <a href="mailto:support@themewagon.com">support@themewagon.com</a>.</p>`
+    title: 'Does Orkestra React work with Vite?',
+    description: `<p>Yes, Orkestra React works seamlessly with Vite. We offer a starter version for Vite that includes basic navigation and layouts. To get the starter, contact us with your purchase ID at <a href="mailto:support@orkestra.cc">support@orkestra.cc</a>.</p>`
   }
 ];

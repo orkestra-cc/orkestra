@@ -1,5 +1,5 @@
 import { Button, Card, OverlayTrigger, Tooltip } from 'react-bootstrap';
-import FalconCardHeader from 'components/common/FalconCardHeader';
+import OrkestraCardHeader from 'components/common/OrkestraCardHeader';
 import { Link } from 'react-router';
 import Flex from 'components/common/Flex';
 import classNames from 'classnames';
@@ -28,7 +28,7 @@ interface SharedFileItemProps {
 const SharedFiles = ({ files, className }: SharedFilesProps) => {
   return (
     <Card className={className}>
-      <FalconCardHeader
+      <OrkestraCardHeader
         title="Shared Files"
         titleTag="h6"
         className="py-2"

@@ -32,7 +32,7 @@ const TableWidgets = () => {
       <WidgetSectionTitle
         icon="list"
         title="Tables, Files, and Lists"
-        subtitle="Falcon's styled components are dedicatedly made for displaying your contents and lists."
+        subtitle="Orkestra's styled components are dedicatedly made for displaying your contents and lists."
         transform="shrink-2"
         className="mb-4 mt-6"
       />

@@ -2,12 +2,12 @@
 import { Button, Row, Col } from 'react-bootstrap';
 import PageHeader from 'components/common/PageHeader';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import FalconComponentCard from 'components/common/FalconComponentCard';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 import { reactBootstrapDocsUrl } from 'helpers/utils';
 
 const exampleCode = `
 <Dropdown>
-  <Dropdown.Toggle variant="falcon-default">
+  <Dropdown.Toggle variant="orkestra-default">
     Dropdown
   </Dropdown.Toggle>
   <Dropdown.Menu className='py-2'>
@@ -20,7 +20,7 @@ const exampleCode = `
 </Dropdown>
 `;
 const dropdownBtnCode = `
-<DropdownButton id="dropdown-basic-button" title="Dropdown button" variant='falcon-default'>
+<DropdownButton id="dropdown-basic-button" title="Dropdown button" variant='orkestra-default'>
   <Dropdown.Item href="#/action-1">Action</Dropdown.Item>
   <Dropdown.Item href="#/action-2">Another action</Dropdown.Item>
   <Dropdown.Item href="#/action-3">Something else</Dropdown.Item>
@@ -292,41 +292,41 @@ const Dropdowns = () => (
 
     <Row className="g-lg-3">
       <Col lg={6}>
-        <FalconComponentCard>
-          <FalconComponentCard.Header title="Example" light={false} />
-          <FalconComponentCard.Body code={exampleCode} language="jsx" />
-        </FalconComponentCard>
+        <OrkestraComponentCard>
+          <OrkestraComponentCard.Header title="Example" light={false} />
+          <OrkestraComponentCard.Body code={exampleCode} language="jsx" />
+        </OrkestraComponentCard>
       </Col>
       <Col lg={6}>
-        <FalconComponentCard>
-          <FalconComponentCard.Header title="Dropwdown Button" light={false} />
-          <FalconComponentCard.Body code={dropdownBtnCode} language="jsx" />
-        </FalconComponentCard>
+        <OrkestraComponentCard>
+          <OrkestraComponentCard.Header title="Dropwdown Button" light={false} />
+          <OrkestraComponentCard.Body code={dropdownBtnCode} language="jsx" />
+        </OrkestraComponentCard>
       </Col>
     </Row>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Button Variant" light={false} />
-      <FalconComponentCard.Body code={btnVariantCode} language="jsx" />
-    </FalconComponentCard>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Button Variant" light={false} />
+      <OrkestraComponentCard.Body code={btnVariantCode} language="jsx" />
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Split Button Code" light={false} />
-      <FalconComponentCard.Body code={splitBtnCode} language="jsx" />
-    </FalconComponentCard>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Split Button Code" light={false} />
+      <OrkestraComponentCard.Body code={splitBtnCode} language="jsx" />
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Sizing" light={false} />
-      <FalconComponentCard.Body code={sizingCode} language="jsx" />
-    </FalconComponentCard>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Sizing" light={false} />
+      <OrkestraComponentCard.Body code={sizingCode} language="jsx" />
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Directions" light={false} />
-      <FalconComponentCard.Body code={directionCode} language="jsx" />
-    </FalconComponentCard>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Directions" light={false} />
+      <OrkestraComponentCard.Body code={directionCode} language="jsx" />
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Dropdown items" light={false}>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Dropdown items" light={false}>
         <p className="mt-2 mb-2">
           Historically dropdown menu contents had to be links, but that’s no
           longer the case with v4. Now you can optionally use
@@ -338,24 +338,24 @@ const Dropdowns = () => (
           <code>&lt;Dropdown.ItemText&gt;</code>. Feel free to style further
           with custom CSS or text utilities.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body code={dropdownItemsCode} language="jsx" />
-    </FalconComponentCard>
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body code={dropdownItemsCode} language="jsx" />
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Menu alignment" light={false}>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Menu alignment" light={false}>
         <p className="mt-2 mb-0">
           By default, a dropdown menu is aligned to the left, but you can switch
           it by passing <code>align="end"</code> to a{' '}
           <code>&lt;Dropdown&gt;</code>, <code>&lt;DropdownButton&gt;</code>, or{' '}
           <code>&lt;SplitButton&gt;</code>.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body code={menuAlignMentCode} language="jsx" />
-    </FalconComponentCard>
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body code={menuAlignMentCode} language="jsx" />
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Responsive alignment" light={false}>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Responsive alignment" light={false}>
         <p className="mt-2 mb-0">
           If you want to use responsive menu alignment, pass an object
           containing a breakpoint to the
@@ -364,22 +364,22 @@ const Dropdowns = () => (
           <code>&lt;SplitButton&gt;</code>. You can specify <code>start</code>{' '}
           or <code>end</code> for the various breakpoints.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body code={responsiveAlignmentCode} language="jsx" />
-    </FalconComponentCard>
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body code={responsiveAlignmentCode} language="jsx" />
+    </OrkestraComponentCard>
 
     <Row className="g-lg-3">
       <Col lg={6}>
-        <FalconComponentCard>
-          <FalconComponentCard.Header title="Dropwdown Headers" light={false} />
-          <FalconComponentCard.Body code={headerCode} language="jsx" />
-        </FalconComponentCard>
+        <OrkestraComponentCard>
+          <OrkestraComponentCard.Header title="Dropwdown Headers" light={false} />
+          <OrkestraComponentCard.Body code={headerCode} language="jsx" />
+        </OrkestraComponentCard>
       </Col>
       <Col lg={6}>
-        <FalconComponentCard>
-          <FalconComponentCard.Header title="Dropwdown Divider" light={false} />
-          <FalconComponentCard.Body code={dividerCode} language="jsx" />
-        </FalconComponentCard>
+        <OrkestraComponentCard>
+          <OrkestraComponentCard.Header title="Dropwdown Divider" light={false} />
+          <OrkestraComponentCard.Body code={dividerCode} language="jsx" />
+        </OrkestraComponentCard>
       </Col>
     </Row>
   </>

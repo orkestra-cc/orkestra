@@ -2,7 +2,7 @@ import { Suspense, lazy } from 'react';
 import type { ModuleManifest } from './types';
 import ProtectedRoute from 'components/authentication/ProtectedRoute';
 import ModuleGate from 'components/common/ModuleGate';
-import FalconLoader from 'components/common/FalconLoader';
+import OrkestraLoader from 'components/common/OrkestraLoader';
 
 const TransactionsPage = lazy(() => import('pages/payments/transactions'));
 const MethodsPage = lazy(() => import('pages/payments/methods'));
@@ -13,7 +13,7 @@ const perms: [string[]] = [['super_admin', 'administrator']];
 const wrap = (node: React.ReactNode, key: string) => (
   <ModuleGate module="payments">
     <ProtectedRoute requiredPermissions={perms}>
-      <Suspense key={key} fallback={<FalconLoader />}>
+      <Suspense key={key} fallback={<OrkestraLoader />}>
         {node}
       </Suspense>
     </ProtectedRoute>

@@ -12,13 +12,13 @@ const EventHeader = () => {
           <Col xs="auto">
             <Button
               size="sm"
-              variant="falcon-default"
+              variant="orkestra-default"
               className="me-2"
               type="submit"
             >
               Save
             </Button>
-            <Button size="sm" variant="falcon-primary">
+            <Button size="sm" variant="orkestra-primary">
               Make your event live
             </Button>
           </Col>

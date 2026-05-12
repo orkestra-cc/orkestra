@@ -1,5 +1,5 @@
 
-import FalconComponentCard from 'components/common/FalconComponentCard';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 
 import { HeatmapChart } from 'echarts/charts';
 import {
@@ -137,12 +137,12 @@ const chartCode = `function ChartOptions() {
 
 const HeatmapSingleSeriesChart = () => {
   return (
-    <FalconComponentCard dir="ltr" className="h-100">
-      <FalconComponentCard.Header
+    <OrkestraComponentCard dir="ltr" className="h-100">
+      <OrkestraComponentCard.Header
         title="Heatmap single series chart"
         light={false}
       />
-      <FalconComponentCard.Body
+      <OrkestraComponentCard.Body
         code={chartCode}
         language="jsx"
         scope={{
@@ -153,7 +153,7 @@ const HeatmapSingleSeriesChart = () => {
           getRandomNumber
         }}
       />
-    </FalconComponentCard>
+    </OrkestraComponentCard>
   );
 };
 

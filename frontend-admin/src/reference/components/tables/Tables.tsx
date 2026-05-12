@@ -6,7 +6,7 @@ import team4 from 'assets/img/team/4.jpg';
 import ActionButton from 'components/common/ActionButton';
 import Avatar from 'components/common/Avatar';
 import CardDropdown from 'components/common/CardDropdown';
-import FalconComponentCard from 'components/common/FalconComponentCard';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 import PageHeader from 'components/common/PageHeader';
 import SubtleBadge from 'components/common/SubtleBadge';
 import IconButton from 'components/common/IconButton';
@@ -422,16 +422,16 @@ function BulkActions() {
               <option value="deactivate">Deactivate</option>
               <option value="delete">Delete</option>
             </Form.Select>
-            <Button variant="falcon-default" size="sm" className="ms-2">
+            <Button variant="orkestra-default" size="sm" className="ms-2">
               Apply
             </Button>
           </div>
         ) : (
           <div id="table-actions">
-            <IconButton variant="falcon-default" size="sm" icon="plus" transform="shrink-3" className='me-2'>
+            <IconButton variant="orkestra-default" size="sm" icon="plus" transform="shrink-3" className='me-2'>
               <span className="d-none d-sm-inline-block ms-1">New</span>
             </IconButton>
-            <IconButton variant="falcon-default" size="sm" icon="external-link-alt" transform="shrink-3">
+            <IconButton variant="orkestra-default" size="sm" icon="external-link-alt" transform="shrink-3">
               <span className="d-none d-sm-inline-block ms-1">Export</span>
             </IconButton>
           </div>
@@ -623,7 +623,7 @@ const TableHeader = () => {
       <div className="d-flex align-items-center justify-content-between justify-content-lg-end px-x1">
         {/* Filter Dropdown */}
         <Dropdown className="font-sans-serif">
-          <Dropdown.Toggle variant="falcon-default" size="sm" className="text-600">
+          <Dropdown.Toggle variant="orkestra-default" size="sm" className="text-600">
             <FontAwesomeIcon icon="filter" transform="shrink-4" className="me-2" />
             <span className="d-none d-sm-inline-block">{selectedFilter}</span>
           </Dropdown.Toggle>
@@ -653,17 +653,17 @@ const TableHeader = () => {
               <option value="activate">Activate</option>
               <option value="delete">Delete</option>
             </Form.Select>
-            <Button variant="falcon-default" size="sm" className="ms-2">
+            <Button variant="orkestra-default" size="sm" className="ms-2">
               Apply
             </Button>
           </div>
         ) : (
           <div id="table-actions">
-            <IconButton variant="falcon-default" size="sm" icon="plus" transform="shrink-3" iconAlign="middle">
+            <IconButton variant="orkestra-default" size="sm" icon="plus" transform="shrink-3" iconAlign="middle">
               <span className="d-none d-sm-inline-block ms-1">New</span>
             </IconButton>
             <IconButton
-              variant="falcon-default"
+              variant="orkestra-default"
               size="sm"
               icon="external-link-alt"
               transform="shrink-3"
@@ -758,57 +758,57 @@ const Tables = () => (
 
     <Row className="mb-3 g-3">
       <Col lg={6}>
-        <FalconComponentCard noGuttersBottom className="h-100">
-          <FalconComponentCard.Header
+        <OrkestraComponentCard noGuttersBottom className="h-100">
+          <OrkestraComponentCard.Header
             title="Basic Table"
             className="border-bottom"
           >
             <p className="mt-2 mb-0">
               Use <code>Table</code> component for basic bootstrap table with action buttons.
             </p>
-          </FalconComponentCard.Header>
-          <FalconComponentCard.Body
+          </OrkestraComponentCard.Header>
+          <OrkestraComponentCard.Body
             code={basicTableCode}
             language="jsx"
             scope={{ ActionButton, Table }}
             noLight
             className="p-0"
           />
-        </FalconComponentCard>
+        </OrkestraComponentCard>
       </Col>
       <Col lg={6}>
-        <FalconComponentCard noGuttersBottom className="h-100">
-          <FalconComponentCard.Header
+        <OrkestraComponentCard noGuttersBottom className="h-100">
+          <OrkestraComponentCard.Header
             title="Striped Table with Dropdown"
             className="border-bottom"
           >
             <p className="mt-2 mb-0">
               Use <code>striped</code> prop with <code>CardDropdown</code> for action menus.
             </p>
-          </FalconComponentCard.Header>
-          <FalconComponentCard.Body
+          </OrkestraComponentCard.Header>
+          <OrkestraComponentCard.Body
             code={stripedTableCode}
             language="jsx"
             scope={{ ActionButton, CardDropdown, Table, Dropdown }}
             noLight
             className="p-0"
           />
-        </FalconComponentCard>
+        </OrkestraComponentCard>
       </Col>
     </Row>
 
     <Row className="mb-3 g-3">
       <Col lg={6}>
-        <FalconComponentCard noGuttersBottom className="h-100">
-          <FalconComponentCard.Header
+        <OrkestraComponentCard noGuttersBottom className="h-100">
+          <OrkestraComponentCard.Header
             title="Hoverable Rows with Actions"
             className="border-bottom"
           >
             <p className="mt-2 mb-0">
               Use <code>hover-actions-trigger</code> class to show actions on row hover.
             </p>
-          </FalconComponentCard.Header>
-          <FalconComponentCard.Body
+          </OrkestraComponentCard.Header>
+          <OrkestraComponentCard.Body
             code={hoverableCode}
             language="jsx"
             scope={{ FontAwesomeIcon, Button, Table }}
@@ -816,19 +816,19 @@ const Tables = () => (
             className="p-0"
             noInline
           />
-        </FalconComponentCard>
+        </OrkestraComponentCard>
       </Col>
       <Col lg={6}>
-        <FalconComponentCard noGuttersBottom className="h-100">
-          <FalconComponentCard.Header
+        <OrkestraComponentCard noGuttersBottom className="h-100">
+          <OrkestraComponentCard.Header
             title="Responsive Table with Avatars"
             className="border-bottom"
           >
             <p className="mt-2 mb-0">
               Use <code>responsive</code> prop with Avatar and SubtleBadge components.
             </p>
-          </FalconComponentCard.Header>
-          <FalconComponentCard.Body
+          </OrkestraComponentCard.Header>
+          <OrkestraComponentCard.Body
             code={responsiveTableCode}
             language="jsx"
             scope={{
@@ -838,7 +838,7 @@ const Tables = () => (
             className="p-0"
             noInline
           />
-        </FalconComponentCard>
+        </OrkestraComponentCard>
       </Col>
     </Row>
 
@@ -852,13 +852,13 @@ const Tables = () => (
       sortable, filterable, and paginated data tables. Built on TanStack React Table v8.
     </p>
 
-    <FalconComponentCard className="mb-3">
-      <FalconComponentCard.Header title="Basic AdvanceTable Setup" light={false}>
+    <OrkestraComponentCard className="mb-3">
+      <OrkestraComponentCard.Header title="Basic AdvanceTable Setup" light={false}>
         <p className="mt-2 mb-0">
           Core pattern: <code>useAdvanceTable</code> → <code>AdvanceTableProvider</code> → <code>AdvanceTable</code>
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body
         code={advanceTableBasicCode}
         scope={{
           useAdvanceTable, AdvanceTableProvider, AdvanceTable, AdvanceTableFooter
@@ -867,7 +867,7 @@ const Tables = () => (
         noInline
         noLight
       />
-    </FalconComponentCard>
+    </OrkestraComponentCard>
 
     {/* ========== PAGINATION ========== */}
     <h5 className="mb-3 mt-5 fw-bold text-primary">
@@ -879,13 +879,13 @@ const Tables = () => (
       or <code>AdvanceTablePagination</code> (numbered pages).
     </p>
 
-    <FalconComponentCard className="mb-3">
-      <FalconComponentCard.Header title="Numbered Pagination" light={false}>
+    <OrkestraComponentCard className="mb-3">
+      <OrkestraComponentCard.Header title="Numbered Pagination" light={false}>
         <p className="mt-2 mb-0">
           Use <code>AdvanceTablePagination</code> for numbered page navigation.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body
         code={paginationNumberingCode}
         scope={{
           useAdvanceTable, AdvanceTableProvider, AdvanceTable, AdvanceTablePagination
@@ -894,7 +894,7 @@ const Tables = () => (
         noInline
         noLight
       />
-    </FalconComponentCard>
+    </OrkestraComponentCard>
 
     {/* ========== SEARCH & FILTERING ========== */}
     <h5 className="mb-3 mt-5 fw-bold text-primary">
@@ -906,8 +906,8 @@ const Tables = () => (
       For column-specific filters, use <code>setColumnFilters</code> from context.
     </p>
 
-    <FalconComponentCard className="mb-3">
-      <FalconComponentCard.Header
+    <OrkestraComponentCard className="mb-3">
+      <OrkestraComponentCard.Header
         title="Searchable Table"
         light={false}
         className="border-bottom border-200"
@@ -915,8 +915,8 @@ const Tables = () => (
         <p className="mt-2 mb-0">
           Global search filters all rows based on any matching cell value.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body
         code={searchableTableCode}
         scope={{
           useAdvanceTable, AdvanceTableProvider, AdvanceTable, AdvanceTableFooter,
@@ -926,7 +926,7 @@ const Tables = () => (
         noInline
         noLight
       />
-    </FalconComponentCard>
+    </OrkestraComponentCard>
 
     {/* ========== ROW SELECTION ========== */}
     <h5 className="mb-3 mt-5 fw-bold text-primary">
@@ -938,8 +938,8 @@ const Tables = () => (
       Use <code>getSelectedRowModel()</code> to access selected rows.
     </p>
 
-    <FalconComponentCard className="mb-3">
-      <FalconComponentCard.Header
+    <OrkestraComponentCard className="mb-3">
+      <OrkestraComponentCard.Header
         title="Selection with Bulk Actions"
         light={false}
         className="border-bottom border-200"
@@ -947,8 +947,8 @@ const Tables = () => (
         <p className="mt-2 mb-0">
           Checkbox selection with conditional bulk action dropdown.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body
         code={selectionCode}
         scope={{
           useAdvanceTable, AdvanceTableProvider, AdvanceTable, AdvanceTableFooter,
@@ -958,7 +958,7 @@ const Tables = () => (
         noInline
         noLight
       />
-    </FalconComponentCard>
+    </OrkestraComponentCard>
 
     {/* ========== CUSTOM CELLS ========== */}
     <h5 className="mb-3 mt-5 fw-bold text-primary">
@@ -970,8 +970,8 @@ const Tables = () => (
       like Avatars, Badges, Dropdowns, and formatted dates.
     </p>
 
-    <FalconComponentCard className="mb-3">
-      <FalconComponentCard.Header
+    <OrkestraComponentCard className="mb-3">
+      <OrkestraComponentCard.Header
         title="Custom Cell Examples"
         light={false}
         className="border-bottom border-200"
@@ -979,8 +979,8 @@ const Tables = () => (
         <p className="mt-2 mb-0">
           Avatar cells, Badge roles, Status indicators, and Action dropdowns.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body
         code={customCellCode}
         scope={{
           useAdvanceTable, AdvanceTableProvider, AdvanceTable,
@@ -991,7 +991,7 @@ const Tables = () => (
         noInline
         noLight
       />
-    </FalconComponentCard>
+    </OrkestraComponentCard>
 
     {/* ========== PRODUCTION PATTERNS ========== */}
     <h5 className="mb-3 mt-5 fw-bold text-primary">
@@ -1003,8 +1003,8 @@ const Tables = () => (
       and CSV export - as used in production tables like UserTable and VehicleTable.
     </p>
 
-    <FalconComponentCard className="mb-3">
-      <FalconComponentCard.Header
+    <OrkestraComponentCard className="mb-3">
+      <OrkestraComponentCard.Header
         title="Table Header Pattern"
         light={false}
         className="border-bottom border-200"
@@ -1013,13 +1013,13 @@ const Tables = () => (
           Production-ready header with search, filter dropdown, and conditional actions.
           See <code>src/pages/admin/users/UserTableHeader.tsx</code> for complete implementation.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body
         code={tableHeaderPatternCode}
         language="jsx"
         hidePreview
       />
-    </FalconComponentCard>
+    </OrkestraComponentCard>
 
     {/* ========== HOOK OPTIONS ========== */}
     <h5 className="mb-3 mt-5 fw-bold text-primary">
@@ -1030,8 +1030,8 @@ const Tables = () => (
       Complete reference for <code>useAdvanceTable</code> hook options.
     </p>
 
-    <FalconComponentCard className="mb-0">
-      <FalconComponentCard.Header
+    <OrkestraComponentCard className="mb-0">
+      <OrkestraComponentCard.Header
         title="useAdvanceTable Options"
         light={false}
         className="border-bottom border-200"
@@ -1039,13 +1039,13 @@ const Tables = () => (
         <p className="mt-2 mb-0">
           All available configuration options for the useAdvanceTable hook.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body
         code={hookOptionsCode}
         language="tsx"
         hidePreview
       />
-    </FalconComponentCard>
+    </OrkestraComponentCard>
   </>
 );
 

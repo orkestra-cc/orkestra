@@ -15,14 +15,14 @@ const ContactDetailsHeader = ({ handleShow }: ContactDetailsHeaderProps) => {
       <Card.Header className="d-flex flex-between-center">
         <IconButton
           onClick={() => navigate(-1)}
-          variant="falcon-default"
+          variant="orkestra-default"
           size="sm"
           icon="arrow-left"
         />
         <Flex>
           <IconButton
             onClick={handleShow}
-            variant="falcon-default"
+            variant="orkestra-default"
             size="sm"
             icon="tasks"
             transform="shrink-2"
@@ -36,7 +36,7 @@ const ContactDetailsHeader = ({ handleShow }: ContactDetailsHeaderProps) => {
             style={{ width: '1px', height: '29px' }}
           ></div>
           <IconButton
-            variant="falcon-default"
+            variant="orkestra-default"
             size="sm"
             icon="edit"
             transform="shrink-2"
@@ -46,7 +46,7 @@ const ContactDetailsHeader = ({ handleShow }: ContactDetailsHeaderProps) => {
             <span className="d-none d-xl-inline-block ms-1">Edit</span>
           </IconButton>
           <IconButton
-            variant="falcon-default"
+            variant="orkestra-default"
             size="sm"
             icon="sync-alt"
             iconAlign="middle"
@@ -57,7 +57,7 @@ const ContactDetailsHeader = ({ handleShow }: ContactDetailsHeaderProps) => {
             </span>
           </IconButton>
           <IconButton
-            variant="falcon-default"
+            variant="orkestra-default"
             size="sm"
             icon="lock"
             iconAlign="middle"
@@ -68,7 +68,7 @@ const ContactDetailsHeader = ({ handleShow }: ContactDetailsHeaderProps) => {
             </span>
           </IconButton>
           <IconButton
-            variant="falcon-default"
+            variant="orkestra-default"
             size="sm"
             icon="trash-alt"
             iconAlign="middle"
@@ -77,7 +77,7 @@ const ContactDetailsHeader = ({ handleShow }: ContactDetailsHeaderProps) => {
             <span className="d-none d-xl-inline-block ms-1">Delete</span>
           </IconButton>
           <IconButton
-            variant="falcon-default"
+            variant="orkestra-default"
             size="sm"
             icon="key"
             iconAlign="middle"
@@ -88,7 +88,7 @@ const ContactDetailsHeader = ({ handleShow }: ContactDetailsHeaderProps) => {
             </span>
           </IconButton>
           <Dropdown align="end" className="btn-reveal-trigger d-inline-block">
-            <Dropdown.Toggle split variant="falcon-default" size="sm">
+            <Dropdown.Toggle split variant="orkestra-default" size="sm">
               <FontAwesomeIcon icon="ellipsis-v" className="fs-11" />
             </Dropdown.Toggle>
 

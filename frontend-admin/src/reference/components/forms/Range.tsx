@@ -2,7 +2,7 @@
 import { Button } from 'react-bootstrap';
 import PageHeader from 'components/common/PageHeader';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import FalconComponentCard from 'components/common/FalconComponentCard';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 import { reactBootstrapDocsUrl } from 'helpers/utils';
 
 const exampleCode = `
@@ -50,8 +50,8 @@ const Range = () => (
       </Button>
     </PageHeader>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Overview" light={false}>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Overview" light={false}>
         <p className="mt-2 mb-0">
           Create custom <code> &lt;input type="range"&gt;</code> controls with{' '}
           <code>&lt;FormRange&gt;</code>. The track (the background) and thumb
@@ -60,32 +60,32 @@ const Range = () => (
           the thumb as a means to visually indicate progress, we do not
           currently support it.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body code={exampleCode} language="jsx" />
-    </FalconComponentCard>
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body code={exampleCode} language="jsx" />
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Min and max" light={false}>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Min and max" light={false}>
         <p className="mt-2 mb-0">
           Range inputs have implicit values for <code>min</code> and{' '}
           <code>max</code>—<code>0</code> and <code>100</code>, respectively.
           You may specify new values for those using the <code>min</code> and{' '}
           <code>max</code> attributes.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body code={minmaxCode} language="jsx" />
-    </FalconComponentCard>
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body code={minmaxCode} language="jsx" />
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Steps" light={false}>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Steps" light={false}>
         <p className="mt-2 mb-0">
           By default, range inputs “snap” to integer values. To change this, you
           can specify a <code>step</code> value. In the example below, we double
           the number of steps by using <code>step="0.5"</code>.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body code={stepsCode} language="jsx" />
-    </FalconComponentCard>
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body code={stepsCode} language="jsx" />
+    </OrkestraComponentCard>
   </>
 );
 

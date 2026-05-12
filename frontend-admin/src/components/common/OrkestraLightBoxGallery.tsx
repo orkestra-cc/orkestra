@@ -2,15 +2,15 @@ import { useState, ReactNode, Dispatch, SetStateAction } from 'react';
 import Lightbox from 'yet-another-react-lightbox';
 import 'yet-another-react-lightbox/styles.css';
 
-interface FalconLightBoxGalleryProps {
+interface OrkestraLightBoxGalleryProps {
   images: string[];
   children: (setImgIndex: Dispatch<SetStateAction<number | null>>) => ReactNode;
 }
 
-const FalconLightBoxGallery = ({
+const OrkestraLightBoxGallery = ({
   images,
   children
-}: FalconLightBoxGalleryProps) => {
+}: OrkestraLightBoxGalleryProps) => {
   const [imgIndex, setImgIndex] = useState<number | null>(null);
   return (
     <div>
@@ -34,4 +34,4 @@ const FalconLightBoxGallery = ({
   );
 };
 
-export default FalconLightBoxGallery;
+export default OrkestraLightBoxGallery;

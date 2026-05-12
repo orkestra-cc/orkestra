@@ -2,7 +2,7 @@
 import { Button, Tab } from 'react-bootstrap';
 import PageHeader from 'components/common/PageHeader';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import FalconComponentCard from 'components/common/FalconComponentCard';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 import { reactBootstrapDocsUrl } from 'helpers/utils';
 
 const exampleCode = `
@@ -116,60 +116,60 @@ const FormControl = () => (
       </Button>
     </PageHeader>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Example" light={false} />
-      <FalconComponentCard.Body code={exampleCode} language="jsx" />
-    </FalconComponentCard>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Example" light={false} />
+      <OrkestraComponentCard.Body code={exampleCode} language="jsx" />
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Sizing" light={false}>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Sizing" light={false}>
         <p className="mt-2 mb-0">
           Use <code>size</code> on <code>&lt;FormControl&gt;</code> and{' '}
           <code>&lt;FormLabel&gt;</code> to change the size of inputs and labels
           respectively.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body code={sizingCode} language="jsx" />
-    </FalconComponentCard>
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body code={sizingCode} language="jsx" />
+    </OrkestraComponentCard>
 
-    <FalconComponentCard multiSections>
+    <OrkestraComponentCard multiSections>
       <Tab.Container defaultActiveKey="preview">
-        <FalconComponentCard.Header title="Readonly" light={false}>
+        <OrkestraComponentCard.Header title="Readonly" light={false}>
           <p className="mt-2 mb-0">
             Add the <code>readOnly</code> prop on an input to prevent
             modification of the input's value. Read-only inputs appear lighter
             (just like disabled inputs), but retain the standard cursor.
           </p>
-        </FalconComponentCard.Header>
-        <FalconComponentCard.Body code={readOnlyCode} language="jsx" />
+        </OrkestraComponentCard.Header>
+        <OrkestraComponentCard.Body code={readOnlyCode} language="jsx" />
       </Tab.Container>
       <Tab.Container defaultActiveKey="preview">
-        <FalconComponentCard.Header title="Readonly plain text" light={false}>
+        <OrkestraComponentCard.Header title="Readonly plain text" light={false}>
           <p className="mt-2 mb-0">
             If you want to have readonly elements in your form styled as plain
             text, use the <code>plaintext</code> prop on FormControls to remove
             the default form field styling and preserve the correct margin and
             padding.
           </p>
-        </FalconComponentCard.Header>
-        <FalconComponentCard.Body code={readOnlyTextCode} language="jsx" />
+        </OrkestraComponentCard.Header>
+        <OrkestraComponentCard.Body code={readOnlyTextCode} language="jsx" />
       </Tab.Container>
-    </FalconComponentCard>
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="File Input" light={false} />
-      <FalconComponentCard.Body code={fileInputCode} language="jsx" />
-    </FalconComponentCard>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="File Input" light={false} />
+      <OrkestraComponentCard.Body code={fileInputCode} language="jsx" />
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="File Input Sizing" light={false} />
-      <FalconComponentCard.Body code={fileInputSizingCode} language="jsx" />
-    </FalconComponentCard>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="File Input Sizing" light={false} />
+      <OrkestraComponentCard.Body code={fileInputSizingCode} language="jsx" />
+    </OrkestraComponentCard>
 
-    <FalconComponentCard noGuttersBottom>
-      <FalconComponentCard.Header title="Datalist" light={false} />
-      <FalconComponentCard.Body code={datalistCode} language="jsx" />
-    </FalconComponentCard>
+    <OrkestraComponentCard noGuttersBottom>
+      <OrkestraComponentCard.Header title="Datalist" light={false} />
+      <OrkestraComponentCard.Body code={datalistCode} language="jsx" />
+    </OrkestraComponentCard>
   </>
 );
 

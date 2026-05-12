@@ -4,8 +4,8 @@ import type { CellContext } from '@tanstack/react-table';
 import AdvanceTable from 'components/common/advance-table/AdvanceTable';
 import Avatar from 'components/common/Avatar';
 import CardDropdown from 'components/common/CardDropdown';
-import FalconCardFooterLink from 'components/common/FalconCardFooterLink';
-import FalconCardHeader from 'components/common/FalconCardHeader';
+import OrkestraCardFooterLink from 'components/common/OrkestraCardFooterLink';
+import OrkestraCardHeader from 'components/common/OrkestraCardHeader';
 import Flex from 'components/common/Flex';
 import IconItem from 'components/common/icon/IconItem';
 import SubtleBadge, { BadgeColor } from 'components/common/SubtleBadge';
@@ -125,7 +125,7 @@ const RecentLeads = () => {
   return (
     <AdvanceTableProvider {...table}>
       <Card>
-        <FalconCardHeader
+        <OrkestraCardHeader
           title="Recent Leads"
           titleTag="h6"
           className="py-2"
@@ -141,7 +141,7 @@ const RecentLeads = () => {
           />
         </Card.Body>
         <Card.Footer className="p-0">
-          <FalconCardFooterLink title="Show full list" size="sm" />
+          <OrkestraCardFooterLink title="Show full list" size="sm" />
         </Card.Footer>
       </Card>
     </AdvanceTableProvider>

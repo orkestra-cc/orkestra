@@ -1,5 +1,5 @@
 
-import FalconComponentCard from 'components/common/FalconComponentCard';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 
 import { PieChart } from 'echarts/charts';
 import {
@@ -145,12 +145,12 @@ const chartCode = `function ChartOptions() {
 
 const DoughnutRoundedChart = () => {
   return (
-    <FalconComponentCard dir="ltr" className="h-100">
-      <FalconComponentCard.Header
+    <OrkestraComponentCard dir="ltr" className="h-100">
+      <OrkestraComponentCard.Header
         title="Doughnut rounded chart"
         light={false}
       />
-      <FalconComponentCard.Body
+      <OrkestraComponentCard.Body
         code={chartCode}
         language="jsx"
         scope={{
@@ -159,7 +159,7 @@ const DoughnutRoundedChart = () => {
           useAppContext
         }}
       />
-    </FalconComponentCard>
+    </OrkestraComponentCard>
   );
 };
 

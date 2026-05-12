@@ -2,7 +2,7 @@
 import { Button } from 'react-bootstrap';
 import PageHeader from 'components/common/PageHeader';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import FalconComponentCard from 'components/common/FalconComponentCard';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 import { reactBootstrapDocsUrl } from 'helpers/utils';
 import user24 from 'assets/img/team/24.jpg';
 import user25 from 'assets/img/team/25.jpg';
@@ -51,28 +51,28 @@ const Figures = () => (
       </Button>
     </PageHeader>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Example" light={false} />
-      <FalconComponentCard.Body
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Example" light={false} />
+      <OrkestraComponentCard.Body
         code={exampleCode}
         scope={{ user24 }}
         language="jsx"
       />
-    </FalconComponentCard>
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Caption Alignment" light={false}>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Caption Alignment" light={false}>
         <p className="mt-2 mb-0">
           Aligning the figure’s caption is easy with bootstrap{' '}
           <code> text utilities</code>
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body
         code={captionAlignCode}
         scope={{ user25 }}
         language="jsx"
       />
-    </FalconComponentCard>
+    </OrkestraComponentCard>
   </>
 );
 

@@ -1,6 +1,6 @@
 
 import CardDropdown from 'components/common/CardDropdown';
-import FalconCardHeader from 'components/common/FalconCardHeader';
+import OrkestraCardHeader from 'components/common/OrkestraCardHeader';
 import { Button, Card, Col, Form, Row } from 'react-bootstrap';
 // import SimpleBar from 'simplebar-react';
 import DistributionOfPerformanceChart from './DistributionOfPerformanceChart';
@@ -9,7 +9,7 @@ import { Link } from 'react-router';
 const DistributionOfPerformance = () => {
   return (
     <Card className="mt-3">
-      <FalconCardHeader
+      <OrkestraCardHeader
         title="Distribution of Performance"
         titleTag="h6"
         className="py-2 border-bottom"
@@ -36,7 +36,7 @@ const DistributionOfPerformance = () => {
             </Form.Select>
           </Col>
           <Col xs="auto">
-            <Button variant="falcon-default" size="sm" as={Link as any} to="#!">
+            <Button variant="orkestra-default" size="sm" as={Link as any} to="#!">
               View All
             </Button>
           </Col>

@@ -20,7 +20,7 @@ import type {
   RegimeFiscale
 } from 'types/billing';
 import { REGIME_FISCALE_LABELS } from 'types/billing';
-import FalconCloseButton from 'components/common/FalconCloseButton';
+import OrkestraCloseButton from 'components/common/OrkestraCloseButton';
 
 interface SupplierModalProps {
   show: boolean;
@@ -205,7 +205,7 @@ const SupplierModal: React.FC<SupplierModalProps> = ({
         <Modal.Title>
           {isEditMode ? 'Modifica Fornitore' : 'Nuovo Fornitore'}
         </Modal.Title>
-        <FalconCloseButton onClick={handleClose} />
+        <OrkestraCloseButton onClick={handleClose} />
       </Modal.Header>
       <Form onSubmit={handleSubmit}>
         <Modal.Body>

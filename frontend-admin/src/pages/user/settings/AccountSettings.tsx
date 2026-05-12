@@ -1,4 +1,4 @@
-import FalconCardHeader from 'components/common/FalconCardHeader';
+import OrkestraCardHeader from 'components/common/OrkestraCardHeader';
 import TooltipBadge from 'components/common/TooltipBadge';
 import React, { useState } from 'react';
 import { Card, Form } from 'react-bootstrap';
@@ -30,7 +30,7 @@ const AccountSettings: React.FC = () => {
 
   return (
     <Card className="mb-3">
-      <FalconCardHeader title="Account Settings" />
+      <OrkestraCardHeader title="Account Settings" />
       <Card.Body className="bg-body-tertiary">
         <div>
           <h6 className="fw-bold">

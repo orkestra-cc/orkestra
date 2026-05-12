@@ -2,9 +2,9 @@
 import { Button, Row, Col } from 'react-bootstrap';
 import PageHeader from 'components/common/PageHeader';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import FalconComponentCard from 'components/common/FalconComponentCard';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 import { reactBootstrapDocsUrl } from 'helpers/utils';
-import FalconCloseButton from 'components/common/FalconCloseButton';
+import OrkestraCloseButton from 'components/common/OrkestraCloseButton';
 import { Link } from 'react-router';
 import paths from 'routes/paths';
 
@@ -99,7 +99,7 @@ function StaticBackdropModal() {
       <Modal show={show} onHide={handleClose} backdrop="static" keyboard={false}>
         <Modal.Header>
           <Modal.Title>Modal title</Modal.Title>
-          <FalconCloseButton onClick={handleClose}/>
+          <OrkestraCloseButton onClick={handleClose}/>
         </Modal.Header>
         <Modal.Body>
           I will not close if you click outside me. Don't even try to press escape key.
@@ -228,7 +228,7 @@ function Example() {
           <Modal.Title id="example-modal-sizes-title-sm">
             Small Modal
           </Modal.Title>
-          <FalconCloseButton onClick={() => setSmShow(false)}/>
+          <OrkestraCloseButton onClick={() => setSmShow(false)}/>
         </Modal.Header>
         <Modal.Body>...</Modal.Body>
       </Modal>
@@ -242,7 +242,7 @@ function Example() {
           <Modal.Title id="example-modal-sizes-title-lg">
             Large Modal
           </Modal.Title>
-          <FalconCloseButton onClick={() => setLgShow(false)}/>
+          <OrkestraCloseButton onClick={() => setLgShow(false)}/>
         </Modal.Header>
         <Modal.Body>...</Modal.Body>
       </Modal>
@@ -271,75 +271,75 @@ const Modals = () => (
 
     <Row className="mb-3 g-3">
       <Col lg={6}>
-        <FalconComponentCard noGuttersBottom>
-          <FalconComponentCard.Header title="Example" light={false} />
-          <FalconComponentCard.Body code={exampleCode} language="jsx" />
-        </FalconComponentCard>
+        <OrkestraComponentCard noGuttersBottom>
+          <OrkestraComponentCard.Header title="Example" light={false} />
+          <OrkestraComponentCard.Body code={exampleCode} language="jsx" />
+        </OrkestraComponentCard>
       </Col>
       <Col lg={6}>
-        <FalconComponentCard noGuttersBottom>
-          <FalconComponentCard.Header
+        <OrkestraComponentCard noGuttersBottom>
+          <OrkestraComponentCard.Header
             title="Custom Close Button"
             light={false}
           />
-          <FalconComponentCard.Body code={customCloseBtnCode} language="jsx" />
-        </FalconComponentCard>
+          <OrkestraComponentCard.Body code={customCloseBtnCode} language="jsx" />
+        </OrkestraComponentCard>
       </Col>
     </Row>
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Static backdrop" light={false}>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Static backdrop" light={false}>
         <p className="mb-0 mt-2">
           When backdrop is set to static, the modal will not close when clicking
           outside it. Click the button below to try it.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body
         code={staticBackdropCode}
         language="jsx"
-        scope={{ FalconCloseButton }}
+        scope={{ OrkestraCloseButton }}
       />
-    </FalconComponentCard>
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Tooltips and Popovers" light={false}>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Tooltips and Popovers" light={false}>
         <p className="mb-0 mt-2">
           <Link to={paths.tooltips}>Tooltips</Link> and{' '}
           <Link to={paths.popovers}>popovers</Link> can be placed within modals
           as needed. When modals are closed, any tooltips and popovers within
           are also automatically dismissed.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body
         code={popoverCode}
         language="jsx"
         scope={{ Link }}
       />
-    </FalconComponentCard>
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Optional Sizes" light={false}>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Optional Sizes" light={false}>
         <p className="mb-0 mt-2">
           You can specify a bootstrap large or small modal by using the{' '}
           <code>size</code> prop.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body
         code={sizeCode}
         language="jsx"
-        scope={{ FalconCloseButton }}
+        scope={{ OrkestraCloseButton }}
       />
-    </FalconComponentCard>
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Fullscreen Modal" light={false}>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Fullscreen Modal" light={false}>
         <p className="mb-0 mt-2">
           You can use the <code>fullscreen</code> prop to make the modal
           fullscreen. Specifying a breakpoint will only set the modal as
           fullscreen <b>below</b> the breakpoint size.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body code={fullscreenCode} language="jsx" />
-    </FalconComponentCard>
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body code={fullscreenCode} language="jsx" />
+    </OrkestraComponentCard>
   </>
 );
 

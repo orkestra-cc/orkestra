@@ -1825,7 +1825,7 @@ export default routeGroups;
 //
 // This is the single hardcoded-nav exception in the frontend. Production
 // nav must come from the backend module's NavItems() — do not extend this
-// pattern to anything other than the dev-only Falcon template pages.
+// pattern to anything other than the dev-only Orkestra template pages.
 export const developerRealm: NavRealm = {
   key: 'developer',
   label: 'Developer',

@@ -1,4 +1,4 @@
-import FalconCardHeader from 'components/common/FalconCardHeader';
+import OrkestraCardHeader from 'components/common/OrkestraCardHeader';
 import React, { useState } from 'react';
 import { Button, Card, Form } from 'react-bootstrap';
 
@@ -22,7 +22,7 @@ const ChangePassword: React.FC = () => {
 
   return (
     <Card className="mb-3">
-      <FalconCardHeader title="Change Password" />
+      <OrkestraCardHeader title="Change Password" />
       <Card.Body className="bg-body-tertiary">
         <Form onSubmit={handleSubmit}>
           <Form.Group className="mb-3" controlId="oldPassword">

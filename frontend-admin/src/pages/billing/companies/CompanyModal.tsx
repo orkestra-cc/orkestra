@@ -22,7 +22,7 @@ import type {
   UpdateCompanyInput
 } from 'types/billing';
 import { REGIME_FISCALE_OPTIONS } from 'types/billing';
-import FalconCloseButton from 'components/common/FalconCloseButton';
+import OrkestraCloseButton from 'components/common/OrkestraCloseButton';
 
 interface CompanyModalProps {
   show: boolean;
@@ -313,7 +313,7 @@ const CompanyModal: React.FC<CompanyModalProps> = ({
         <Modal.Title>
           {isEditMode ? 'Modifica Azienda' : 'Nuova Azienda'}
         </Modal.Title>
-        <FalconCloseButton onClick={handleClose} />
+        <OrkestraCloseButton onClick={handleClose} />
       </Modal.Header>
       <Form onSubmit={handleSubmit}>
         <Modal.Body>

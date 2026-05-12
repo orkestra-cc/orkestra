@@ -1,6 +1,6 @@
 
 import PageHeader from 'components/common/PageHeader';
-import FalconComponentCard from 'components/common/FalconComponentCard';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 import Background from 'components/common/Background';
 import gallery2 from 'assets/img/gallery/2.jpg';
 import beachMp4 from 'assets/video/beach.mp4';
@@ -29,23 +29,23 @@ const Backgrounds = () => (
       className="mb-3"
     />
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Image Background" />
-      <FalconComponentCard.Body
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Image Background" />
+      <OrkestraComponentCard.Body
         code={imageCode}
         scope={{ Background, gallery2 }}
         language="jsx"
       />
-    </FalconComponentCard>
+    </OrkestraComponentCard>
 
-    <FalconComponentCard noGuttersBottom>
-      <FalconComponentCard.Header title="Video Background" />
-      <FalconComponentCard.Body
+    <OrkestraComponentCard noGuttersBottom>
+      <OrkestraComponentCard.Header title="Video Background" />
+      <OrkestraComponentCard.Body
         code={videoCode}
         scope={{ Background, beachMp4, beachWebm, beachImage }}
         language="jsx"
       />
-    </FalconComponentCard>
+    </OrkestraComponentCard>
   </>
 );
 

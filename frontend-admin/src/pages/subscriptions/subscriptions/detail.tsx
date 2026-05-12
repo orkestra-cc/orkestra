@@ -75,7 +75,7 @@ const SubscriptionDetailPage: React.FC = () => {
           {s.status === 'active' && (
             <IconButton
               icon="times"
-              variant="falcon-warning"
+              variant="orkestra-warning"
               size="sm"
               onClick={async () => {
                 if (confirm('Cancellare a fine periodo?')) {
@@ -90,7 +90,7 @@ const SubscriptionDetailPage: React.FC = () => {
             <>
               <IconButton
                 icon="redo"
-                variant="falcon-primary"
+                variant="orkestra-primary"
                 size="sm"
                 onClick={() => retry(s.uuid).unwrap()}
               >
@@ -98,7 +98,7 @@ const SubscriptionDetailPage: React.FC = () => {
               </IconButton>
               <IconButton
                 icon="play"
-                variant="falcon-success"
+                variant="orkestra-success"
                 size="sm"
                 onClick={() => reactivate(s.uuid).unwrap()}
               >

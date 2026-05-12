@@ -2,7 +2,7 @@
 import { Button } from 'react-bootstrap';
 import PageHeader from 'components/common/PageHeader';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import FalconComponentCard from 'components/common/FalconComponentCard';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 import product1 from 'assets/img/products/1.jpg';
 import product12 from 'assets/img/products/1-2.jpg';
 import product13 from 'assets/img/products/1-3.jpg';
@@ -67,7 +67,7 @@ const SlickCarousel = () => (
   <>
     <PageHeader
       title="Slick Carousel"
-      description="Falcon-React uses <strong>React Slick</strong> for advance carousel experience. <strong>React slick</strong> is a carousel component built with React. It is a react port of  slick carousel"
+      description="Orkestra-React uses <strong>React Slick</strong> for advance carousel experience. <strong>React slick</strong> is a carousel component built with React. It is a react port of  slick carousel"
       className="mb-3"
     >
       <Button
@@ -82,9 +82,9 @@ const SlickCarousel = () => (
       </Button>
     </PageHeader>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Basic Example" light={false} />
-      <FalconComponentCard.Body
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Basic Example" light={false} />
+      <OrkestraComponentCard.Body
         code={exampleCode}
         scope={{
           product1,
@@ -97,7 +97,7 @@ const SlickCarousel = () => (
         }}
         language="jsx"
       />
-    </FalconComponentCard>
+    </OrkestraComponentCard>
   </>
 );
 

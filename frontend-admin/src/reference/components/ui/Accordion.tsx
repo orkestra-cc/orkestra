@@ -3,7 +3,7 @@ import { reactBootstrapDocsUrl } from 'helpers/utils';
 import { Button } from 'react-bootstrap';
 import PageHeader from 'components/common/PageHeader';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import FalconComponentCard from 'components/common/FalconComponentCard';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 
 const basicExampleCode = `
 <Accordion defaultActiveKey="0">
@@ -97,7 +97,7 @@ function CustomToggle({ children, eventKey }) {
   const decoratedOnClick = useAccordionButton(eventKey)
   return (
     <Button
-      variant='falcon-primary' 
+      variant='orkestra-primary' 
       onClick={decoratedOnClick}
     >
       {children}
@@ -150,50 +150,50 @@ const Accordion = () => {
         </Button>
       </PageHeader>
 
-      <FalconComponentCard>
-        <FalconComponentCard.Header title="Basic Example" />
-        <FalconComponentCard.Body code={basicExampleCode} language="jsx" />
-      </FalconComponentCard>
+      <OrkestraComponentCard>
+        <OrkestraComponentCard.Header title="Basic Example" />
+        <OrkestraComponentCard.Body code={basicExampleCode} language="jsx" />
+      </OrkestraComponentCard>
 
-      <FalconComponentCard>
-        <FalconComponentCard.Header title="Fully Collapsed State">
+      <OrkestraComponentCard>
+        <OrkestraComponentCard.Header title="Fully Collapsed State">
           <p className="mb-0">
             If you want your <code>Accordion</code> to start in a
             fully-collapsed state, then simply don't pass in a{' '}
             <code>defaultActiveKey</code> prop to <code>Accordion</code>.
           </p>
-        </FalconComponentCard.Header>
-        <FalconComponentCard.Body
+        </OrkestraComponentCard.Header>
+        <OrkestraComponentCard.Body
           code={fullyCollapsedStateCode}
           language="jsx"
         />
-      </FalconComponentCard>
+      </OrkestraComponentCard>
 
-      <FalconComponentCard>
-        <FalconComponentCard.Header title="Flush">
+      <OrkestraComponentCard>
+        <OrkestraComponentCard.Header title="Flush">
           <p className="mb-0">
             Add <code>flush</code> to remove the default background-color, some
             borders, and some rounded corners to render accordions edge-to-edge
             with their parent container.
           </p>
-        </FalconComponentCard.Header>
-        <FalconComponentCard.Body code={flushCode} language="jsx" />
-      </FalconComponentCard>
+        </OrkestraComponentCard.Header>
+        <OrkestraComponentCard.Body code={flushCode} language="jsx" />
+      </OrkestraComponentCard>
 
-      <FalconComponentCard noGuttersBottom>
-        <FalconComponentCard.Header title="Custom Accordions">
+      <OrkestraComponentCard noGuttersBottom>
+        <OrkestraComponentCard.Header title="Custom Accordions">
           <p className="mb-0">
             You can still create card-based accordions like those in Bootstrap
             4. You can hook into the Accordion toggle functionality via{' '}
             <code>useAccordionButton</code> to make custom toggle components.
           </p>
-        </FalconComponentCard.Header>
-        <FalconComponentCard.Body
+        </OrkestraComponentCard.Header>
+        <OrkestraComponentCard.Body
           code={customAccordionCode}
           language="jsx"
           noInline
         />
-      </FalconComponentCard>
+      </OrkestraComponentCard>
     </>
   );
 };

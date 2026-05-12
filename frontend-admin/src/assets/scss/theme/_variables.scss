@@ -1,7 +1,7 @@
 /* prettier-ignore */
 @use 'sass:math';
 @use 'sass:string';
-$prefix: 'falcon-';
+$prefix: 'orkestra-';
 
 // Grid containers
 //
@@ -307,14 +307,14 @@ $table-bg-scale: -80% !default;
 //
 // Shared variables that are reassigned to `$input-` and `$btn-` specific variables.
 
-// scss-docs-start btn-falcon-variables
-$btn-falcon-box-shadow: 0 0 0 1px rgba(43, 45, 80, 0.1),
+// scss-docs-start btn-orkestra-variables
+$btn-orkestra-box-shadow: 0 0 0 1px rgba(43, 45, 80, 0.1),
   0 2px 5px 0 rgba(43, 45, 80, 0.08), 0 1px 1.5px 0 rgba($black, 0.07),
   0 1px 2px 0 rgba($black, 0.08) !default;
-$btn-falcon-hover-box-shadow: 0 0 0 1px rgba(43, 45, 80, 0.1),
+$btn-orkestra-hover-box-shadow: 0 0 0 1px rgba(43, 45, 80, 0.1),
   0 2px 5px 0 rgba(43, 45, 80, 0.1), 0 3px 9px 0 rgba(43, 45, 80, 0.08),
   0 1px 1.5px 0 rgba($black, 0.08), 0 1px 2px 0 rgba($black, 0.08) !default;
-// scss-docs-end btn-falcon-variables
+// scss-docs-end btn-orkestra-variables
 
 // scss-docs-start input-btn-variables
 $input-btn-padding-y: 0.3125rem !default;
@@ -645,7 +645,7 @@ $spinner-height-sm: $spinner-width-sm !default;
 // scss-docs-end spinner-variables
 
 //
-// Falcon Specific
+// Orkestra Specific
 //
 
 $transparent-50: rgba(var(--#{$prefix}quaternary-bg-rgb), 0.5) !default;

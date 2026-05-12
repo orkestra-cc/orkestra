@@ -10,7 +10,7 @@ const Faq = () => {
     <>
       <PageHeader
         title="FAQ Accordion"
-        description="Below you'll find answers to the questions we get asked the most about to join with Falcon"
+        description="Below you'll find answers to the questions we get asked the most about to join with Orkestra"
         className="mb-3"
       />
       <Card>

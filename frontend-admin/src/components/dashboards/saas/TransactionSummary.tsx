@@ -1,12 +1,12 @@
 import { Card, Col, Form, Image, Row, Table } from 'react-bootstrap';
-import FalconCardHeader from 'components/common/FalconCardHeader';
+import OrkestraCardHeader from 'components/common/OrkestraCardHeader';
 import CardDropdown from 'components/common/CardDropdown';
 import classNames from 'classnames';
 import Flex from 'components/common/Flex';
 import { Link } from 'react-router';
 import SubtleBadge, { BadgeColor } from 'components/common/SubtleBadge';
 import SimpleBar from 'simplebar-react';
-import FalconLink from 'components/common/FalconLink';
+import OrkestraLink from 'components/common/OrkestraLink';
 
 interface TransactionSummaryData {
   id: string | number;
@@ -97,7 +97,7 @@ const TransactionSummary = ({
 }: TransactionSummaryProps) => {
   return (
     <Card className="overflow-hidden">
-      <FalconCardHeader
+      <OrkestraCardHeader
         title="Transaction Summary"
         titleTag="h6"
         className="py-2"
@@ -129,7 +129,7 @@ const TransactionSummary = ({
             </Form.Select>
           </Col>
           <Col xs="auto">
-            <FalconLink title="View All" className="px-0 fw-medium" />
+            <OrkestraLink title="View All" className="px-0 fw-medium" />
           </Col>
         </Row>
       </Card.Footer>

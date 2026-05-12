@@ -1,7 +1,7 @@
 import { Suspense, lazy } from 'react';
 import type { ModuleManifest } from './types';
 import ProtectedRoute from 'components/authentication/ProtectedRoute';
-import FalconLoader from 'components/common/FalconLoader';
+import OrkestraLoader from 'components/common/OrkestraLoader';
 
 // Compliance is a core-like addon — always enabled in the backend so SOC2
 // auditors see uninterrupted coverage. It therefore skips the usual
@@ -20,7 +20,7 @@ export const complianceManifest: ModuleManifest = {
         <ProtectedRoute
           requiredPermissions={[['super_admin', 'administrator', 'developer']]}
         >
-          <Suspense key="admin-audit-events" fallback={<FalconLoader />}>
+          <Suspense key="admin-audit-events" fallback={<OrkestraLoader />}>
             <AuditEventsPage />
           </Suspense>
         </ProtectedRoute>
@@ -32,7 +32,7 @@ export const complianceManifest: ModuleManifest = {
         <ProtectedRoute
           requiredPermissions={[['super_admin', 'administrator', 'developer']]}
         >
-          <Suspense key="admin-compliance-soc2" fallback={<FalconLoader />}>
+          <Suspense key="admin-compliance-soc2" fallback={<OrkestraLoader />}>
             <Soc2EvidencePage />
           </Suspense>
         </ProtectedRoute>
@@ -45,7 +45,7 @@ export const complianceManifest: ModuleManifest = {
       path: 'user/privacy',
       element: (
         <ProtectedRoute>
-          <Suspense key="user-privacy" fallback={<FalconLoader />}>
+          <Suspense key="user-privacy" fallback={<OrkestraLoader />}>
             <UserPrivacyPage />
           </Suspense>
         </ProtectedRoute>

@@ -39,7 +39,7 @@ const PricingAlt: React.FC = () => {
                 Looking for personal or small team task management?
               </h5>
               <p className="fs-8">
-                Try the <Link to="#!">basic version</Link> of Falcon
+                Try the <Link to="#!">basic version</Link> of Orkestra
               </p>
             </Col>
           </Row>

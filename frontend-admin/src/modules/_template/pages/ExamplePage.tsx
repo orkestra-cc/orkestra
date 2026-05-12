@@ -2,11 +2,11 @@
 //
 // To use: copy this file to `src/pages/<name>/list/index.tsx` and adapt.
 // Use the primitives in `components/common/` as building blocks — they
-// are the Falcon design-system kit and match the look of every other
+// are the Orkestra design-system kit and match the look of every other
 // page in the app.
 //
 // For richer patterns (calendar, kanban, chat, email, social), copy
-// from `src/reference/app-examples/` instead — those are full Falcon
+// from `src/reference/app-examples/` instead — those are full Orkestra
 // implementations you can lift wholesale.
 
 import { useState } from 'react';
@@ -43,7 +43,7 @@ const ExamplePage: React.FC = () => {
           </IconButton>
           <IconButton
             icon="sync"
-            variant="falcon-default"
+            variant="orkestra-default"
             onClick={() => refetch()}
           >
             Refresh

@@ -1,5 +1,5 @@
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import FalconComponentCard from 'components/common/FalconComponentCard';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 import PageHeader from 'components/common/PageHeader';
 
 import { Button } from 'react-bootstrap';
@@ -24,7 +24,7 @@ const TypedText = () => (
   <>
     <PageHeader
       title="Typed Text"
-      description="Falcon-React uses <strong>react-simple-typewriter</strong> for text typing animation."
+      description="Orkestra-React uses <strong>react-simple-typewriter</strong> for text typing animation."
       className="mb-3"
     >
       <Button
@@ -39,14 +39,14 @@ const TypedText = () => (
       </Button>
     </PageHeader>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Example" light={false} />
-      <FalconComponentCard.Body
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Example" light={false} />
+      <OrkestraComponentCard.Body
         code={exampleCode}
         scope={{ Typewriter }}
         language="jsx"
       />
-    </FalconComponentCard>
+    </OrkestraComponentCard>
   </>
 );
 

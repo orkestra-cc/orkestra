@@ -2,7 +2,7 @@
 import { Button, Form } from 'react-bootstrap';
 import PageHeader from 'components/common/PageHeader';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import FalconComponentCard from 'components/common/FalconComponentCard';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 import Select from 'react-select';
 import * as yup from 'yup';
 import { Controller, useForm } from 'react-hook-form';
@@ -114,7 +114,7 @@ const Placeholder = () => (
   <>
     <PageHeader
       title="Advance Select"
-      description="React-Falcon uses <strong>React Select</strong> for advance select component. React Select is a flexible and beautiful Select Input control for ReactJS with multiselect, autocomplete, async and creatable support."
+      description="React-Orkestra uses <strong>React Select</strong> for advance select component. React Select is a flexible and beautiful Select Input control for ReactJS with multiselect, autocomplete, async and creatable support."
       className="mb-3"
     >
       <Button
@@ -129,34 +129,34 @@ const Placeholder = () => (
       </Button>
     </PageHeader>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Multiple Select" />
-      <FalconComponentCard.Body
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Multiple Select" />
+      <OrkestraComponentCard.Body
         code={multipleSelectCode}
         scope={{ Select }}
         language="jsx"
       />
-    </FalconComponentCard>
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Single Select" />
-      <FalconComponentCard.Body
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Single Select" />
+      <OrkestraComponentCard.Body
         code={singleSelectCode}
         scope={{ Select }}
         language="jsx"
       />
-    </FalconComponentCard>
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="With validation" />
-      <FalconComponentCard.Body
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="With validation" />
+      <OrkestraComponentCard.Body
         code={reactSelectValidationCode}
         language="jsx"
         hidePreview
       >
         <ReactSelectValidation />
-      </FalconComponentCard.Body>
-    </FalconComponentCard>
+      </OrkestraComponentCard.Body>
+    </OrkestraComponentCard>
   </>
 );
 

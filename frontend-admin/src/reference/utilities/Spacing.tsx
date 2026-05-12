@@ -1,6 +1,6 @@
 
 import PageHeader from 'components/common/PageHeader';
-import FalconComponentCard from 'components/common/FalconComponentCard';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 
 const gapCode = `<div className="d-grid gap-3">
   <div className="p-2 bg-body-tertiary border">Grid item 1</div>
@@ -16,9 +16,9 @@ const Spacing = () => (
       className="mb-3"
     ></PageHeader>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Overview" noPreview />
-      <FalconComponentCard.Body>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Overview" noPreview />
+      <OrkestraComponentCard.Body>
         <p>
           The classes are named using the format{' '}
           <code>
@@ -83,12 +83,12 @@ const Spacing = () => (
           <code>6</code>, <code>7</code>, <code>8</code>, <code>9</code>,{' '}
           <code>10</code>, <code>11</code> &amp; <code>auto</code>
         </p>
-      </FalconComponentCard.Body>
-    </FalconComponentCard>
+      </OrkestraComponentCard.Body>
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Gap" />
-      <FalconComponentCard.Body code={gapCode} language="jsx">
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Gap" />
+      <OrkestraComponentCard.Body code={gapCode} language="jsx">
         <p>
           When using <code>display: grid</code>, you can make use of{' '}
           <code>gap </code>utilities on the parent grid container. This can save
@@ -97,8 +97,8 @@ const Spacing = () => (
           default, and are generated via our utilities API, based on the{' '}
           <code>$spacers </code>Sass map.
         </p>
-      </FalconComponentCard.Body>
-    </FalconComponentCard>
+      </OrkestraComponentCard.Body>
+    </OrkestraComponentCard>
   </>
 );
 

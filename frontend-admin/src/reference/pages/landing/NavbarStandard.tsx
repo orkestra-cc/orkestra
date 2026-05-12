@@ -33,7 +33,7 @@ const NavbarStandard: React.FC = () => {
     >
       <Container>
         <Navbar.Brand className="text-white" as={Link as any} to="/">
-          Falcon
+          Orkestra
         </Navbar.Brand>
         <Flex alignItems="center" className="gap-2">
           <ThemeControlDropdown dropdownClassName="d-lg-none" />

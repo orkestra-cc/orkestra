@@ -133,7 +133,7 @@ const BestSellingProducts = ({ products }: BestSellingProductsProps) => {
             </Form.Select>
           </Col>
           <Col xs="auto">
-            <Button variant="falcon-default" size="sm" as="a" href="#!">
+            <Button variant="orkestra-default" size="sm" as="a" href="#!">
               View All
             </Button>
           </Col>

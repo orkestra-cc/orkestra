@@ -1,6 +1,6 @@
 
 import PageHeader from 'components/common/PageHeader';
-import FalconComponentCard from 'components/common/FalconComponentCard';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 
 const baselineCode = `<>
   <span className="text-body align-baseline">baseline</span>
@@ -32,8 +32,8 @@ const VerticalAlign = () => (
       className="mb-3"
     />
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Example" light={false}>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Example" light={false}>
         <p className="my-2">
           Change the alignment of elements with the vertical-alignment
           utilities. Please note that vertical-align only affects inline,
@@ -52,17 +52,17 @@ const VerticalAlign = () => (
           links. However, some <code>position </code>and <code>z-index </code>
           styles can help should this be required.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body code={baselineCode} language="jsx" />
-    </FalconComponentCard>
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body code={baselineCode} language="jsx" />
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header
         title="Vertical Alignment With Table Cells"
         light={false}
       />
-      <FalconComponentCard.Body code={tableCellsCode} language="jsx" />
-    </FalconComponentCard>
+      <OrkestraComponentCard.Body code={tableCellsCode} language="jsx" />
+    </OrkestraComponentCard>
   </>
 );
 

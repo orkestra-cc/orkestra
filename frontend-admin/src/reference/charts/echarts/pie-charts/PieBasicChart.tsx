@@ -1,5 +1,5 @@
 
-import FalconComponentCard from 'components/common/FalconComponentCard';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 
 import { PieChart } from 'echarts/charts';
 import {
@@ -134,9 +134,9 @@ const chartCode = `function ChartOptions() {
 
 const PieBasicChart = () => {
   return (
-    <FalconComponentCard dir="ltr" className="h-100">
-      <FalconComponentCard.Header title="Pie chart" light={false} />
-      <FalconComponentCard.Body
+    <OrkestraComponentCard dir="ltr" className="h-100">
+      <OrkestraComponentCard.Header title="Pie chart" light={false} />
+      <OrkestraComponentCard.Body
         code={chartCode}
         language="jsx"
         scope={{
@@ -146,7 +146,7 @@ const PieBasicChart = () => {
           rgbaColor
         }}
       />
-    </FalconComponentCard>
+    </OrkestraComponentCard>
   );
 };
 

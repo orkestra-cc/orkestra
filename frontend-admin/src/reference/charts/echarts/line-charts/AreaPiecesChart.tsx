@@ -1,5 +1,5 @@
 
-import FalconComponentCard from 'components/common/FalconComponentCard';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 import dayjs from 'dayjs';
 
 import { LineChart } from 'echarts/charts';
@@ -139,9 +139,9 @@ const chartCode = `function ChartOptions() {
 
 const AreaPiecesChart = () => {
   return (
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Area pieces chart" light={false} />
-      <FalconComponentCard.Body
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Area pieces chart" light={false} />
+      <OrkestraComponentCard.Body
         code={chartCode}
         language="jsx"
         scope={{
@@ -153,7 +153,7 @@ const AreaPiecesChart = () => {
           rgbaColor
         }}
       />
-    </FalconComponentCard>
+    </OrkestraComponentCard>
   );
 };
 

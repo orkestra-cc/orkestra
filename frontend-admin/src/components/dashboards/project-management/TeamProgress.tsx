@@ -1,14 +1,14 @@
-import FalconCardHeader from 'components/common/FalconCardHeader';
-import FalconLink from 'components/common/FalconLink';
+import OrkestraCardHeader from 'components/common/OrkestraCardHeader';
+import OrkestraLink from 'components/common/OrkestraLink';
 
 import { Card, ProgressBar } from 'react-bootstrap';
 
 const TeamProgress: React.FC = () => {
   return (
     <Card className="h-100">
-      <FalconCardHeader
+      <OrkestraCardHeader
         title="Team Progress"
-        endEl={<FalconLink title="Report" className="px-0" />}
+        endEl={<OrkestraLink title="Report" className="px-0" />}
       />
       <Card.Body>
         <p className="fs-10 text-600">

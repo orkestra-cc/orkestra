@@ -3,19 +3,19 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { IconProp } from '@fortawesome/fontawesome-svg-core';
 import classNames from 'classnames';
 
-interface FalconLinkProps {
+interface OrkestraLinkProps {
   to?: string;
   icon?: IconProp;
   title: string;
   className?: string;
 }
 
-const FalconLink = ({
+const OrkestraLink = ({
   to = '#!',
   icon = 'chevron-right',
   title,
   className
-}: FalconLinkProps) => {
+}: OrkestraLinkProps) => {
   return (
     <Link to={to} className={classNames('btn btn-link btn-sm p-0', className)}>
       {title}
@@ -24,4 +24,4 @@ const FalconLink = ({
   );
 };
 
-export default FalconLink;
+export default OrkestraLink;

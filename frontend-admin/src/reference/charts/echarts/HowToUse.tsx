@@ -2,8 +2,8 @@
 import { Button, Card } from 'react-bootstrap';
 import PageHeader from 'components/common/PageHeader';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import FalconComponentCard from 'components/common/FalconComponentCard';
-import FalconEditor from 'components/common/FalconEditor';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
+import OrkestraEditor from 'components/common/OrkestraEditor';
 import BasicBarChart from 'reference/charts/echarts/bar-charts/BasicBarChart';
 
 const structureCode = `// import the core library.
@@ -63,9 +63,9 @@ const Placeholder = () => (
     </PageHeader>
 
     <Card className="mb-3">
-      <FalconComponentCard.Header title="Usage" noPreview />
+      <OrkestraComponentCard.Header title="Usage" noPreview />
       <Card.Body className="pt-0">
-        <FalconEditor code={structureCode} language="jsx" hidePreview />
+        <OrkestraEditor code={structureCode} language="jsx" hidePreview />
       </Card.Body>
     </Card>
     <BasicBarChart title="Basic Example" />

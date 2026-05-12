@@ -95,7 +95,7 @@ const FooterStandard: React.FC = () => {
           <Col lg={4}>
             <FooterTitle>Our Mission</FooterTitle>
             <p className="text-600">
-              Falcon enables front end developers to build custom streamlined
+              Orkestra enables front end developers to build custom streamlined
               user interfaces in a matter of hours, while it gives backend
               developers all the UI elements they need to develop their web
               app.And it's rich design can be easily integrated with backends
@@ -129,16 +129,16 @@ const FooterStandard: React.FC = () => {
           <Row className="justify-content-between">
             <Col xs={12} sm="auto">
               <p className="mb-0 text-600">
-                Thank you for creating with Falcon{' '}
+                Thank you for creating with Orkestra{' '}
                 <span className="d-none d-sm-inline-block">| </span>
                 <br className="d-sm-none" /> {new Date().getFullYear()} &copy;{' '}
                 <a
                   className="text-white opacity-85"
-                  href="https://themewagon.com"
+                  href="https://orkestra.cc"
                   target="_blank"
                   rel="noopener noreferrer"
                 >
-                  ThemeWagon
+                  Orkestra
                 </a>
               </p>
             </Col>

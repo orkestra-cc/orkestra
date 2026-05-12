@@ -40,7 +40,7 @@ import {
   getPartyDisplayName
 } from 'types/billing';
 import PageHeader from 'components/common/PageHeader';
-import FalconCardHeader from 'components/common/FalconCardHeader';
+import OrkestraCardHeader from 'components/common/OrkestraCardHeader';
 
 const getStatusBadgeVariant = (status: InvoiceStatus): string => {
   const variants: Record<InvoiceStatus, string> = {
@@ -254,7 +254,7 @@ const ReceivedInvoiceDetail: React.FC = () => {
         className="mb-3"
       >
         <Button
-          variant="falcon-default"
+          variant="orkestra-default"
           size="sm"
           className="me-2"
           onClick={() => navigate('/billing/invoices/received')}
@@ -263,7 +263,7 @@ const ReceivedInvoiceDetail: React.FC = () => {
           Torna alla lista
         </Button>
         <Button
-          variant="falcon-default"
+          variant="orkestra-default"
           size="sm"
           className="me-2"
           onClick={handleViewHtml}
@@ -273,7 +273,7 @@ const ReceivedInvoiceDetail: React.FC = () => {
           Anteprima
         </Button>
         <Button
-          variant="falcon-default"
+          variant="orkestra-default"
           size="sm"
           className="me-2"
           onClick={handleViewXml}
@@ -283,7 +283,7 @@ const ReceivedInvoiceDetail: React.FC = () => {
           XML
         </Button>
         <Button
-          variant="falcon-default"
+          variant="orkestra-default"
           size="sm"
           className="me-2"
           onClick={handleDownloadXml}
@@ -293,7 +293,7 @@ const ReceivedInvoiceDetail: React.FC = () => {
           XML
         </Button>
         <Button
-          variant="falcon-primary"
+          variant="orkestra-primary"
           size="sm"
           onClick={handleDownloadPdf}
           title="Scarica PDF"
@@ -305,7 +305,7 @@ const ReceivedInvoiceDetail: React.FC = () => {
 
       {/* Invoice Info Summary */}
       <Card className="mb-3">
-        <FalconCardHeader title="Riepilogo Fattura" light={false} />
+        <OrkestraCardHeader title="Riepilogo Fattura" light={false} />
         <Card.Body>
           <Row>
             <Col md={3}>
@@ -397,7 +397,7 @@ const ReceivedInvoiceDetail: React.FC = () => {
 
       {/* Invoice Lines */}
       <Card className="mb-3">
-        <FalconCardHeader title="Dettaglio Righe" light={false} />
+        <OrkestraCardHeader title="Dettaglio Righe" light={false} />
         <Card.Body>
           <div className="table-responsive">
             <Table bordered hover size="sm">
@@ -469,7 +469,7 @@ const ReceivedInvoiceDetail: React.FC = () => {
       {/* Payment Terms */}
       {invoice.paymentTerms && (
         <Card className="mb-3">
-          <FalconCardHeader title="Termini di Pagamento" light={false} />
+          <OrkestraCardHeader title="Termini di Pagamento" light={false} />
           <Card.Body>
             <Row>
               <Col md={3}>

@@ -2,7 +2,7 @@
 import { Button } from 'react-bootstrap';
 import PageHeader from 'components/common/PageHeader';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import FalconComponentCard from 'components/common/FalconComponentCard';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 import EmojiPicker from 'emoji-picker-react';
 import { getColor } from 'helpers/utils';
 import { useAppContext } from 'providers/AppProvider';
@@ -62,14 +62,14 @@ const EmojiPickerExample = () => (
       </Button>
     </PageHeader>
 
-    <FalconComponentCard noGuttersBottom>
-      <FalconComponentCard.Header title="Example" />
-      <FalconComponentCard.Body
+    <OrkestraComponentCard noGuttersBottom>
+      <OrkestraComponentCard.Header title="Example" />
+      <OrkestraComponentCard.Body
         code={emojiPicker}
         scope={{ getColor, EmojiPicker, useAppContext, FontAwesomeIcon }}
         language="jsx"
       />
-    </FalconComponentCard>
+    </OrkestraComponentCard>
   </>
 );
 

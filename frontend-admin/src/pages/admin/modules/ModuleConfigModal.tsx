@@ -8,7 +8,7 @@ import {
   Tab,
   Tabs
 } from 'react-bootstrap';
-import { FalconCloseButton } from 'components/common';
+import { OrkestraCloseButton } from 'components/common';
 import type { ModuleConfig } from 'store/api/moduleApi';
 import { useUpdateModuleMutation } from 'store/api/moduleApi';
 import ModuleConfigFields from './ModuleConfigFields';
@@ -120,7 +120,7 @@ const ModuleConfigModal: React.FC<ModuleConfigModalProps> = ({
           {mod.displayName}
           <span className="text-muted fs-10 ms-2">({mod.moduleName})</span>
         </Modal.Title>
-        <FalconCloseButton onClick={onHide} />
+        <OrkestraCloseButton onClick={onHide} />
       </Modal.Header>
       <Modal.Body>
         {error && (

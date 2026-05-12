@@ -38,7 +38,7 @@ When asked to build something new, consult these directories in order:
 
 1. **`src/modules/_template/`** — first stop for "how do I add a module?" Read its README before doing anything else.
 2. **`src/components/common/`** — UI primitives (Avatar, Card, Flex, IconButton, PageHeader, AdvanceTable, etc.). Use these before reaching for raw Bootstrap.
-3. **`src/reference/`** — Falcon template library with full example apps (calendar, chat, email, kanban, social, support-desk) and 60+ component samples. When asked for a calendar or kanban, copy from here rather than reinventing.
+3. **`src/reference/`** — Orkestra template library with full example apps (calendar, chat, email, kanban, social, support-desk) and 60+ component samples. When asked for a calendar or kanban, copy from here rather than reinventing.
 4. **`src/pages/<existing-module>/`** — for "build a page like X" requests, find an existing page in the same module category and follow its conventions.
 
 ## Navigation is backend-driven

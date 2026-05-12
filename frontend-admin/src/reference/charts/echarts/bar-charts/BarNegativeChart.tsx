@@ -1,5 +1,5 @@
 
-import FalconComponentCard from 'components/common/FalconComponentCard';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 
 import { BarChart } from 'echarts/charts';
 
@@ -111,12 +111,12 @@ const chartCode = `function ChartOptions() {
 
 const BarNegativeChart = () => {
   return (
-    <FalconComponentCard className="h-100">
-      <FalconComponentCard.Header
+    <OrkestraComponentCard className="h-100">
+      <OrkestraComponentCard.Header
         title="Bar chart with negative value"
         light={false}
       />
-      <FalconComponentCard.Body
+      <OrkestraComponentCard.Body
         code={chartCode}
         language="jsx"
         scope={{
@@ -126,7 +126,7 @@ const BarNegativeChart = () => {
           useAppContext
         }}
       />
-    </FalconComponentCard>
+    </OrkestraComponentCard>
   );
 };
 

@@ -19,7 +19,7 @@ import {
   useUpdateUserMutation,
   User
 } from 'store/api/userApi';
-import FalconCloseButton from 'components/common/FalconCloseButton';
+import OrkestraCloseButton from 'components/common/OrkestraCloseButton';
 
 // Confirmation Modal Component
 interface UserActivationModalProps {
@@ -47,7 +47,7 @@ const UserActivationModal: React.FC<UserActivationModalProps> = ({
         <Modal.Title>
           {isActivating ? 'Activate User' : 'Deactivate User'}
         </Modal.Title>
-        <FalconCloseButton onClick={onHide} />
+        <OrkestraCloseButton onClick={onHide} />
       </Modal.Header>
       <Modal.Body>
         <p>

@@ -1,7 +1,7 @@
 
 import { Row, Col } from 'react-bootstrap';
 import PageHeader from 'components/common/PageHeader';
-import FalconComponentCard from 'components/common/FalconComponentCard';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 import generic1 from 'assets/img/generic/1.jpg';
 import generic2 from 'assets/img/generic/2.jpg';
 import generic3 from 'assets/img/generic/3.jpg';
@@ -42,24 +42,24 @@ const HoverboxExample = () => (
 
     <Row className="g-3 mb-0">
       <Col lg={6}>
-        <FalconComponentCard>
-          <FalconComponentCard.Header title="Example" light={false} />
-          <FalconComponentCard.Body
+        <OrkestraComponentCard>
+          <OrkestraComponentCard.Header title="Example" light={false} />
+          <OrkestraComponentCard.Body
             code={exampleCode}
             language="jsx"
             scope={{ Hoverbox, generic3 }}
           />
-        </FalconComponentCard>
+        </OrkestraComponentCard>
       </Col>
       <Col lg={6}>
-        <FalconComponentCard>
-          <FalconComponentCard.Header title="Change Image" light={false} />
-          <FalconComponentCard.Body
+        <OrkestraComponentCard>
+          <OrkestraComponentCard.Header title="Change Image" light={false} />
+          <OrkestraComponentCard.Body
             code={changeImageCode}
             language="jsx"
             scope={{ Hoverbox, generic1, generic2 }}
-          ></FalconComponentCard.Body>
-        </FalconComponentCard>
+          ></OrkestraComponentCard.Body>
+        </OrkestraComponentCard>
       </Col>
     </Row>
   </>

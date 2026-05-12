@@ -1,5 +1,5 @@
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import FalconComponentCard from 'components/common/FalconComponentCard';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 import PageHeader from 'components/common/PageHeader';
 import GoogleMap from 'components/map/GoogleMap';
 
@@ -50,14 +50,14 @@ const GoogleMapExample = () => {
         </Button>
       </PageHeader>
 
-      <FalconComponentCard>
-        <FalconComponentCard.Header title="Example" />
-        <FalconComponentCard.Body
+      <OrkestraComponentCard>
+        <OrkestraComponentCard.Header title="Example" />
+        <OrkestraComponentCard.Body
           code={exampleCode}
           scope={{ GoogleMap }}
           language="jsx"
         />
-      </FalconComponentCard>
+      </OrkestraComponentCard>
 
       <Card className="mb-3">
         <Card.Header>
@@ -97,18 +97,18 @@ const GoogleMapExample = () => {
         </Card.Body>
       </Card>
 
-      <FalconComponentCard>
-        <FalconComponentCard.Header title="Example">
+      <OrkestraComponentCard>
+        <OrkestraComponentCard.Header title="Example">
           <p className="mt-2 mb-0">
             With <code>AssassianCreed</code> scheme
           </p>
-        </FalconComponentCard.Header>
-        <FalconComponentCard.Body
+        </OrkestraComponentCard.Header>
+        <OrkestraComponentCard.Body
           code={colorScehemCode}
           scope={{ GoogleMap }}
           language="jsx"
         />
-      </FalconComponentCard>
+      </OrkestraComponentCard>
     </>
   );
 };

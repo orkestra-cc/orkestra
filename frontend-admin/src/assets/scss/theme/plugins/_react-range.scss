@@ -1,8 +1,8 @@
-.falcon-react-range {
+.orkestra-react-range {
   height: 2.25rem;
   display: flex;
   width: 100%;
-  & .falcon-react-range-track {
+  & .orkestra-react-range-track {
     width: $form-range-track-width;
     height: $form-range-track-height;
     border: none;
@@ -11,20 +11,20 @@
     border-radius: 3px;
   }
 
-  & .falcon-react-range-thumb {
+  & .orkestra-react-range-thumb {
     width: 16px;
     height: 24px;
     background: $white;
     border: 1px solid $white;
     border-radius: $border-radius-sm;
-    box-shadow: $btn-falcon-box-shadow;
+    box-shadow: $btn-orkestra-box-shadow;
     outline: none;
     display: flex;
     align-items: center;
     justify-content: center;
 
     &:active {
-      box-shadow: var(--#{$prefix}btn-falcon-hover-box-shadow);
+      box-shadow: var(--#{$prefix}btn-orkestra-hover-box-shadow);
     }
 
     &::after {
@@ -46,11 +46,11 @@
       background: $gray-100;
     }
 
-    &:hover .falcon-react-range-tooltip {
+    &:hover .orkestra-react-range-tooltip {
       display: block;
     }
 
-    & .falcon-react-range-tooltip {
+    & .orkestra-react-range-tooltip {
       &.show {
         display: block;
       }

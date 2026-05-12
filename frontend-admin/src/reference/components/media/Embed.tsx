@@ -1,6 +1,6 @@
 
 import PageHeader from 'components/common/PageHeader';
-import FalconComponentCard from 'components/common/FalconComponentCard';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 
 const exampleCode = `<Ratio aspectRatio="16x9">
   <iframe
@@ -19,16 +19,16 @@ const Embed = () => (
       className="mb-3"
     />
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Example" light={false}>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Example" light={false}>
         <p className="mb-0 mt-2">
           Wrap any embed, like an <code> &lt;iframe&gt;</code> in a parent{' '}
           <code>&lt;Ratio&gt;</code> component with <code> aspectRatio </code>{' '}
           prop.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body code={exampleCode} language="jsx" />
-    </FalconComponentCard>
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body code={exampleCode} language="jsx" />
+    </OrkestraComponentCard>
   </>
 );
 

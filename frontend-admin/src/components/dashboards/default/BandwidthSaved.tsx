@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import classNames from 'classnames';
 import CardDropdown from 'components/common/CardDropdown';
-import FalconCardHeader from 'components/common/FalconCardHeader';
+import OrkestraCardHeader from 'components/common/OrkestraCardHeader';
 import Flex from 'components/common/Flex';
 import { GaugeChart } from 'echarts/charts';
 import {
@@ -95,7 +95,7 @@ const BandwidthSaved = ({ bodyClassName }: BandwidthSavedProps) => {
 
   return (
     <Card className="h-100">
-      <FalconCardHeader
+      <OrkestraCardHeader
         title="Bandwidth Saved"
         titleTag="h6"
         className="py-2"

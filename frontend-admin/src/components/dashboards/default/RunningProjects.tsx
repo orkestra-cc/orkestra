@@ -1,6 +1,6 @@
 import classNames from 'classnames';
-import FalconCardFooterLink from 'components/common/FalconCardFooterLink';
-import FalconCardHeader from 'components/common/FalconCardHeader';
+import OrkestraCardFooterLink from 'components/common/OrkestraCardFooterLink';
+import OrkestraCardHeader from 'components/common/OrkestraCardHeader';
 import Flex from 'components/common/Flex';
 
 import { Badge, Card, Col, Form, ProgressBar, Row } from 'react-bootstrap';
@@ -66,7 +66,7 @@ interface RunningProjectsProps {
 const RunningProjects = ({ data }: RunningProjectsProps) => {
   return (
     <Card>
-      <FalconCardHeader
+      <OrkestraCardHeader
         title="Running Projects"
         light
         titleTag="h6"
@@ -89,7 +89,7 @@ const RunningProjects = ({ data }: RunningProjectsProps) => {
         ))}
       </Card.Body>
 
-      <FalconCardFooterLink title="Show all projects" size="sm" />
+      <OrkestraCardFooterLink title="Show all projects" size="sm" />
     </Card>
   );
 };

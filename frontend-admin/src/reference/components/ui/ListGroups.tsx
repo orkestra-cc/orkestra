@@ -2,7 +2,7 @@
 import { Button, Row, Col } from 'react-bootstrap';
 import PageHeader from 'components/common/PageHeader';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import FalconComponentCard from 'components/common/FalconComponentCard';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 import SubtleBadge from 'components/common/SubtleBadge';
 import { reactBootstrapDocsUrl } from 'helpers/utils';
 import Flex from 'components/common/Flex';
@@ -187,21 +187,21 @@ const ListGroups = () => (
 
     <Row className="g-3 mb-3">
       <Col lg={6}>
-        <FalconComponentCard noGuttersBottom>
-          <FalconComponentCard.Header title="Example" light={false} />
-          <FalconComponentCard.Body code={exampleCode} language="jsx" />
-        </FalconComponentCard>
+        <OrkestraComponentCard noGuttersBottom>
+          <OrkestraComponentCard.Header title="Example" light={false} />
+          <OrkestraComponentCard.Body code={exampleCode} language="jsx" />
+        </OrkestraComponentCard>
       </Col>
       <Col lg={6}>
-        <FalconComponentCard noGuttersBottom>
-          <FalconComponentCard.Header title="Active items" light={false} />
-          <FalconComponentCard.Body code={activeExampleCode} language="jsx" />
-        </FalconComponentCard>
+        <OrkestraComponentCard noGuttersBottom>
+          <OrkestraComponentCard.Header title="Active items" light={false} />
+          <OrkestraComponentCard.Body code={activeExampleCode} language="jsx" />
+        </OrkestraComponentCard>
       </Col>
     </Row>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Actionable items" light={false}>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Actionable items" light={false}>
         <p className="mt-2 mb-2">
           Toggle the <code>action</code> prop to create <em>actionable</em> list
           group items, with disabled, hover and active styles. List item actions
@@ -214,40 +214,40 @@ const ListGroups = () => (
           ensure that click or tap affordances aren't applied to non-interactive
           items.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body code={actionableCode} language="jsx" />
-    </FalconComponentCard>
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body code={actionableCode} language="jsx" />
+    </OrkestraComponentCard>
 
     <Row className="g-3 mb-3">
       <Col lg={6}>
-        <FalconComponentCard noGuttersBottom>
-          <FalconComponentCard.Header title="List group flush" light={false}>
+        <OrkestraComponentCard noGuttersBottom>
+          <OrkestraComponentCard.Header title="List group flush" light={false}>
             <p className="mt-2 mb-0">
               Add the <code>flush</code> variant to remove outer borders and
               rounded corners to render list group items edge-to-edge in a
               parent container such as a <code>Card</code>.
             </p>
-          </FalconComponentCard.Header>
-          <FalconComponentCard.Body code={flushCode} language="jsx" />
-        </FalconComponentCard>
+          </OrkestraComponentCard.Header>
+          <OrkestraComponentCard.Body code={flushCode} language="jsx" />
+        </OrkestraComponentCard>
       </Col>
       <Col lg={6}>
-        <FalconComponentCard noGuttersBottom>
-          <FalconComponentCard.Header
+        <OrkestraComponentCard noGuttersBottom>
+          <OrkestraComponentCard.Header
             title="List group with badge"
             light={false}
           />
-          <FalconComponentCard.Body
+          <OrkestraComponentCard.Body
             code={badgeCode}
             language="jsx"
             scope={{ Flex, SubtleBadge }}
           />
-        </FalconComponentCard>
+        </OrkestraComponentCard>
       </Col>
     </Row>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Horizontal List Group" light={false}>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Horizontal List Group" light={false}>
         <p className="mt-2 mb-0">
           Use the <code>horizontal</code> prop to make the ListGroup render
           horizontally. Currently
@@ -255,12 +255,12 @@ const ListGroups = () => (
             horizontal list groups cannot be combined with flush list groups.
           </strong>
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body code={horizontalCode} language="jsx" />
-    </FalconComponentCard>
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body code={horizontalCode} language="jsx" />
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header
         title="Responsive Horizontal List Group"
         light={false}
       >
@@ -270,38 +270,38 @@ const ListGroups = () => (
           <code> sm | md | lg | xl | xxl </code> makes the list group horizontal
           starting at that breakpoint’s <code>min-width</code>.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body
         code={responsiveHorizontalCode}
         language="jsx"
       />
-    </FalconComponentCard>
+    </OrkestraComponentCard>
 
     <Row className="g-3 mb-3">
       <Col lg={6}>
-        <FalconComponentCard noGuttersBottom>
-          <FalconComponentCard.Header
+        <OrkestraComponentCard noGuttersBottom>
+          <OrkestraComponentCard.Header
             title="List Group Background"
             light={false}
           />
-          <FalconComponentCard.Body
+          <OrkestraComponentCard.Body
             code={listGroupBackgroundCode}
             language="jsx"
           />
-        </FalconComponentCard>
+        </OrkestraComponentCard>
       </Col>
       <Col lg={6}>
-        <FalconComponentCard noGuttersBottom>
-          <FalconComponentCard.Header
+        <OrkestraComponentCard noGuttersBottom>
+          <OrkestraComponentCard.Header
             title="List Group With Link"
             light={false}
           />
-          <FalconComponentCard.Body
+          <OrkestraComponentCard.Body
             code={linkCode}
             language="jsx"
             scope={{ Flex, Link }}
           />
-        </FalconComponentCard>
+        </OrkestraComponentCard>
       </Col>
     </Row>
   </>

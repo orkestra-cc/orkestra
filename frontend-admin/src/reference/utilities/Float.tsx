@@ -1,6 +1,6 @@
 
 import PageHeader from 'components/common/PageHeader';
-import FalconComponentCard from 'components/common/FalconComponentCard';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 
 const exampleCode = `
 <>
@@ -20,8 +20,8 @@ const Float = () => (
       className="mb-3"
     />
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Overview" light={false}>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Overview" light={false}>
         <p className="mb-0 mt-2">
           These utility classes float an element to the left or right, or
           disable floating, based on the current viewport size using the
@@ -32,9 +32,9 @@ const Float = () => (
           These use the same viewport breakpoints as our grid system. Please be
           aware float utilities have no effect on flex items.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body code={exampleCode} language="jsx" />
-    </FalconComponentCard>
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body code={exampleCode} language="jsx" />
+    </OrkestraComponentCard>
   </>
 );
 

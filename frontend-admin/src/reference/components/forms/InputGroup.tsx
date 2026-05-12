@@ -2,7 +2,7 @@
 import { Button } from 'react-bootstrap';
 import PageHeader from 'components/common/PageHeader';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import FalconComponentCard from 'components/common/FalconComponentCard';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 import { reactBootstrapDocsUrl } from 'helpers/utils';
 
 const exampleCode = `
@@ -257,75 +257,75 @@ const InputGroup = () => (
       </Button>
     </PageHeader>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Basic example" light={false}>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Basic example" light={false}>
         <p className="mt-2 mb-0">
           Place one add-on or button on either side of an input. You may also
           place one on both sides of an input. Remember to place{' '}
           <code>&lt;label&gt;</code> outside the input group.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body code={exampleCode} language="jsx" />
-    </FalconComponentCard>
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body code={exampleCode} language="jsx" />
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Sizing" light={false}>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Sizing" light={false}>
         <p className="mt-2 mb-0">
           Add the relative form sizing classes to the <code>InputGroup</code>{' '}
           and contents within will automatically resize—no need for repeating
           the form control size classes on each element.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body code={sizingCode} language="jsx" />
-    </FalconComponentCard>
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body code={sizingCode} language="jsx" />
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Checkboxes and radios" light={false}>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Checkboxes and radios" light={false}>
         <p className="mt-2 mb-0">
           Use the <code>InputGroup.Radio</code> or{' '}
           <code>InputGroup.Checkbox</code> to add options to an input group.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body code={checkboxesCode} language="jsx" />
-    </FalconComponentCard>
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body code={checkboxesCode} language="jsx" />
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Multiple inputs" light={false}>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Multiple inputs" light={false}>
         <p className="mt-2 mb-0">
           While multiple inputs are supported visually, validation styles are
           only available for input groups with a single input.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body code={multipleInputCode} language="jsx" />
-    </FalconComponentCard>
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body code={multipleInputCode} language="jsx" />
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Multiple addons" light={false}>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Multiple addons" light={false}>
         <p className="mt-2 mb-0">
           Multiple add-ons are supported and can be mixed with checkbox and
           radio input versions.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body code={multipleAddonsCode} language="jsx" />
-    </FalconComponentCard>
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body code={multipleAddonsCode} language="jsx" />
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Button addons" light={false} />
-      <FalconComponentCard.Body code={buttonAddOnsCode} language="jsx" />
-    </FalconComponentCard>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Button addons" light={false} />
+      <OrkestraComponentCard.Body code={buttonAddOnsCode} language="jsx" />
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header
         title="Buttons with Dropdowns"
         light={false}
       />
-      <FalconComponentCard.Body code={buttonsWithDropdowsCode} language="jsx" />
-    </FalconComponentCard>
+      <OrkestraComponentCard.Body code={buttonsWithDropdowsCode} language="jsx" />
+    </OrkestraComponentCard>
 
-    <FalconComponentCard noGuttersBottom>
-      <FalconComponentCard.Header title="Segmented buttons" light={false} />
-      <FalconComponentCard.Body code={segmentedButtonsCode} language="jsx" />
-    </FalconComponentCard>
+    <OrkestraComponentCard noGuttersBottom>
+      <OrkestraComponentCard.Header title="Segmented buttons" light={false} />
+      <OrkestraComponentCard.Body code={segmentedButtonsCode} language="jsx" />
+    </OrkestraComponentCard>
   </>
 );
 

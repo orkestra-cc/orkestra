@@ -2,7 +2,7 @@ import { Suspense, lazy } from 'react';
 import type { ModuleManifest } from './types';
 import ProtectedRoute from 'components/authentication/ProtectedRoute';
 import ModuleGate from 'components/common/ModuleGate';
-import FalconLoader from 'components/common/FalconLoader';
+import OrkestraLoader from 'components/common/OrkestraLoader';
 
 const BillingDashboard = lazy(() => import('pages/billing/dashboard'));
 const SupplierManagement = lazy(() => import('pages/billing/suppliers'));
@@ -33,7 +33,7 @@ export const billingManifest: ModuleManifest = {
               ['super_admin', 'administrator', 'developer']
             ]}
           >
-            <Suspense key="billing-dashboard" fallback={<FalconLoader />}>
+            <Suspense key="billing-dashboard" fallback={<OrkestraLoader />}>
               <BillingDashboard />
             </Suspense>
           </ProtectedRoute>
@@ -49,7 +49,7 @@ export const billingManifest: ModuleManifest = {
               ['super_admin', 'administrator', 'developer']
             ]}
           >
-            <Suspense key="billing-suppliers" fallback={<FalconLoader />}>
+            <Suspense key="billing-suppliers" fallback={<OrkestraLoader />}>
               <SupplierManagement />
             </Suspense>
           </ProtectedRoute>
@@ -67,7 +67,7 @@ export const billingManifest: ModuleManifest = {
           >
             <Suspense
               key="billing-invoices-issued-new"
-              fallback={<FalconLoader />}
+              fallback={<OrkestraLoader />}
             >
               <NewIssuedInvoice />
             </Suspense>
@@ -86,7 +86,7 @@ export const billingManifest: ModuleManifest = {
           >
             <Suspense
               key="billing-invoices-issued-detail"
-              fallback={<FalconLoader />}
+              fallback={<OrkestraLoader />}
             >
               <IssuedInvoiceDetail />
             </Suspense>
@@ -103,7 +103,7 @@ export const billingManifest: ModuleManifest = {
               ['super_admin', 'administrator', 'developer']
             ]}
           >
-            <Suspense key="billing-invoices-issued" fallback={<FalconLoader />}>
+            <Suspense key="billing-invoices-issued" fallback={<OrkestraLoader />}>
               <IssuedInvoices />
             </Suspense>
           </ProtectedRoute>
@@ -121,7 +121,7 @@ export const billingManifest: ModuleManifest = {
           >
             <Suspense
               key="billing-invoices-received"
-              fallback={<FalconLoader />}
+              fallback={<OrkestraLoader />}
             >
               <ReceivedInvoices />
             </Suspense>
@@ -140,7 +140,7 @@ export const billingManifest: ModuleManifest = {
           >
             <Suspense
               key="billing-invoices-received-detail"
-              fallback={<FalconLoader />}
+              fallback={<OrkestraLoader />}
             >
               <ReceivedInvoiceDetail />
             </Suspense>
@@ -157,7 +157,7 @@ export const billingManifest: ModuleManifest = {
               ['super_admin', 'administrator', 'developer']
             ]}
           >
-            <Suspense key="billing-notifications" fallback={<FalconLoader />}>
+            <Suspense key="billing-notifications" fallback={<OrkestraLoader />}>
               <SDINotifications />
             </Suspense>
           </ProtectedRoute>
@@ -173,7 +173,7 @@ export const billingManifest: ModuleManifest = {
               ['super_admin', 'administrator', 'developer']
             ]}
           >
-            <Suspense key="billing-companies" fallback={<FalconLoader />}>
+            <Suspense key="billing-companies" fallback={<OrkestraLoader />}>
               <CompanyManagement />
             </Suspense>
           </ProtectedRoute>
@@ -189,7 +189,7 @@ export const billingManifest: ModuleManifest = {
               ['super_admin', 'administrator', 'developer', 'manager']
             ]}
           >
-            <Suspense key="document-templates" fallback={<FalconLoader />}>
+            <Suspense key="document-templates" fallback={<OrkestraLoader />}>
               <DocumentTemplates />
             </Suspense>
           </ProtectedRoute>

@@ -1,8 +1,8 @@
 import { Card, Col, Form, Row, Table } from 'react-bootstrap';
-import FalconCardHeader from 'components/common/FalconCardHeader';
+import OrkestraCardHeader from 'components/common/OrkestraCardHeader';
 import CardDropdown from 'components/common/CardDropdown';
 import Flex from 'components/common/Flex';
-import FalconLink from 'components/common/FalconLink';
+import OrkestraLink from 'components/common/OrkestraLink';
 import SessionByBrowserChart from './SessionByBrowserChart';
 import TableRow from './TableRow';
 
@@ -22,7 +22,7 @@ interface SessionByBrowserProps {
 const SessionByBrowser = ({ data }: SessionByBrowserProps) => {
   return (
     <Card className="h-100">
-      <FalconCardHeader
+      <OrkestraCardHeader
         title="Session By Browser"
         titleTag="h6"
         className="py-2"
@@ -64,7 +64,7 @@ const SessionByBrowser = ({ data }: SessionByBrowserProps) => {
             </Form.Select>
           </Col>
           <Col xs="auto">
-            <FalconLink title="Browser Overview" className="px-0 fw-medium" />
+            <OrkestraLink title="Browser Overview" className="px-0 fw-medium" />
           </Col>
         </Row>
       </Card.Footer>

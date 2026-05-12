@@ -23,7 +23,7 @@ const ItemButton = ({ tootltip, icon, className, onClick }: ItemButtonProps) => 
     >
       <div className="d-inline-block">
         <IconButton
-          variant="falcon-default"
+          variant="orkestra-default"
           size="sm"
           icon={icon}
           className={className}
@@ -71,13 +71,13 @@ const EmailDetailHeader = () => {
           <div className="d-none d-md-block">
             <small> 2 of 354</small>
             <IconButton
-              variant="falcon-default"
+              variant="orkestra-default"
               size="sm"
               icon="chevron-left"
               className="ms-2"
             />
             <IconButton
-              variant="falcon-default"
+              variant="orkestra-default"
               size="sm"
               icon="chevron-right"
               className="ms-2"
@@ -85,7 +85,7 @@ const EmailDetailHeader = () => {
           </div>
           <Dropdown className="font-sans-serif" align="end">
             <Dropdown.Toggle
-              variant="falcon-default"
+              variant="orkestra-default"
               size="sm"
               className="text-600 dropdown-caret-none ms-2"
             >

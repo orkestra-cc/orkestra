@@ -11,9 +11,9 @@ const KanbanHeader = () => {
   return (
     <Row className="gx-0 gap-2 kanban-header rounded-2 px-x1 py-2 mt-2 mb-3">
       <Col className="d-flex align-items-center">
-        <h5 className="mb-0">Falcon</h5>
+        <h5 className="mb-0">Orkestra</h5>
         <IconButton
-          variant="falcon-default"
+          variant="orkestra-default"
           size="sm"
           className="ms-3 d-none d-sm-block"
           icon={['far', 'star']}
@@ -30,14 +30,14 @@ const KanbanHeader = () => {
         <InviteToBoard />
       </Col>
       <Col xs="auto" as={Flex} alignItems="center">
-        <Button className="me-2" variant="falcon-default" size="sm">
+        <Button className="me-2" variant="orkestra-default" size="sm">
           <FontAwesomeIcon icon="filter" className="me-md-2" />
           <span className="d-none d-md-inline-block">Filter</span>
         </Button>
         <Dropdown align="end" className="font-sans-serif">
           <Dropdown.Toggle
             size="sm"
-            variant="falcon-default"
+            variant="orkestra-default"
             className="dropdown-caret-none"
           >
             <FontAwesomeIcon icon="ellipsis-h" />

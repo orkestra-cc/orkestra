@@ -1,12 +1,12 @@
 import educationData from 'data/educations';
-import FalconCardHeader from 'components/common/FalconCardHeader';
+import OrkestraCardHeader from 'components/common/OrkestraCardHeader';
 import { Card } from 'react-bootstrap';
 import EducationItem from '../EducationItem';
 
 const Education: React.FC = () => {
   return (
     <Card className="mb-3">
-      <FalconCardHeader title="Education" light />
+      <OrkestraCardHeader title="Education" light />
       <Card.Body className="fs-10">
         {(educationData as any[]).map((item: any, index: number) => (
           <EducationItem

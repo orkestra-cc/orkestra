@@ -2,7 +2,7 @@
 import { Button, Row, Col } from 'react-bootstrap';
 import PageHeader from 'components/common/PageHeader';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import FalconComponentCard from 'components/common/FalconComponentCard';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 import { reactBootstrapDocsUrl } from 'helpers/utils';
 
 const exampleCode = `
@@ -90,53 +90,53 @@ const Spinners = () => (
 
     <Row className="mb-3 g-3">
       <Col lg={6}>
-        <FalconComponentCard noGuttersBottom>
-          <FalconComponentCard.Header title="Basic Example" light={false} />
-          <FalconComponentCard.Body code={exampleCode} language="jsx" />
-        </FalconComponentCard>
+        <OrkestraComponentCard noGuttersBottom>
+          <OrkestraComponentCard.Header title="Basic Example" light={false} />
+          <OrkestraComponentCard.Body code={exampleCode} language="jsx" />
+        </OrkestraComponentCard>
       </Col>
       <Col lg={6}>
-        <FalconComponentCard noGuttersBottom>
-          <FalconComponentCard.Header title="Growing spinner" light={false} />
-          <FalconComponentCard.Body code={growingCode} language="jsx" />
-        </FalconComponentCard>
+        <OrkestraComponentCard noGuttersBottom>
+          <OrkestraComponentCard.Header title="Growing spinner" light={false} />
+          <OrkestraComponentCard.Body code={growingCode} language="jsx" />
+        </OrkestraComponentCard>
       </Col>
     </Row>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Variants" light={false}>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Variants" light={false}>
         <p className="mb-0 mt-2">
           All standard visual variants are available for both animation styles
           by setting the <code>variant</code> property. Alternatively spinners
           can be custom sized with the <code>style</code> property, or custom
           CSS classes.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body code={variantsCode} language="jsx" />
-    </FalconComponentCard>
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body code={variantsCode} language="jsx" />
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Sizing" light={false}>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Sizing" light={false}>
         <p className="mb-0 mt-2">
           In addition to the standard size, a smaller additional preconfigured
           size is available by configuring the <code>size</code> property to{' '}
           <code>sm</code>.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body code={SizingCode} language="jsx" />
-    </FalconComponentCard>
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body code={SizingCode} language="jsx" />
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Buttons" light={false}>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Buttons" light={false}>
         <p className="mb-0 mt-2">
           Like the original Bootstrap spinners, these can also be used with
           buttons. To use this component out-of-the-box it is recommended you
           change the element type to <code>span</code> by configuring the{' '}
           <code>as</code> property when using spinners inside buttons.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body code={buttonsCode} language="jsx" />
-    </FalconComponentCard>
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body code={buttonsCode} language="jsx" />
+    </OrkestraComponentCard>
   </>
 );
 

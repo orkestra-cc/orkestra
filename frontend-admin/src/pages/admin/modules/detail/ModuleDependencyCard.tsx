@@ -1,5 +1,5 @@
 import { Card } from 'react-bootstrap';
-import { FalconCardHeader } from 'components/common';
+import { OrkestraCardHeader } from 'components/common';
 import SubtleBadge from 'components/common/SubtleBadge';
 import type { ModuleConfig } from 'store/api/moduleApi';
 
@@ -23,7 +23,7 @@ const ModuleDependencyCard: React.FC<ModuleDependencyCardProps> = ({
 
   return (
     <Card className="mb-3">
-      <FalconCardHeader title="Dependencies & Services" light={false} />
+      <OrkestraCardHeader title="Dependencies & Services" light={false} />
       <Card.Body className="py-3">
         {hasDeps && (
           <div className="mb-3">

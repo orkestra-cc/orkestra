@@ -1,5 +1,5 @@
 
-import FalconComponentCard from 'components/common/FalconComponentCard';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 import { months } from 'data/common';
 
 import { LineChart } from 'echarts/charts';
@@ -133,9 +133,9 @@ const chartCode = `function ChartOptions() {
 
 const LineLogChart = () => {
   return (
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Line log chart" light={false} />
-      <FalconComponentCard.Body
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Line log chart" light={false} />
+      <OrkestraComponentCard.Body
         code={chartCode}
         language="jsx"
         scope={{
@@ -146,7 +146,7 @@ const LineLogChart = () => {
           tooltipFormatter
         }}
       />
-    </FalconComponentCard>
+    </OrkestraComponentCard>
   );
 };
 

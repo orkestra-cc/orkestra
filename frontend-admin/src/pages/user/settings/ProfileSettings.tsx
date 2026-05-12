@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Button, Card, Col, Form, Row } from 'react-bootstrap';
-import FalconCardHeader from 'components/common/FalconCardHeader';
+import OrkestraCardHeader from 'components/common/OrkestraCardHeader';
 
 const ProfileSettings: React.FC = () => {
   const [formData, setFormData] = useState({
@@ -28,7 +28,7 @@ const ProfileSettings: React.FC = () => {
 
   return (
     <Card>
-      <FalconCardHeader title="Profile Settings" />
+      <OrkestraCardHeader title="Profile Settings" />
       <Card.Body className="bg-body-tertiary">
         <Form onSubmit={handleSubmit}>
           <Row className="mb-3 g-3">

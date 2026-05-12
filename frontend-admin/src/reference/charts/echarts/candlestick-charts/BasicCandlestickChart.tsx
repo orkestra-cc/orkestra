@@ -1,5 +1,5 @@
 
-import FalconComponentCard from 'components/common/FalconComponentCard';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 import dayjs from 'dayjs';
 
 import { CandlestickChart } from 'echarts/charts';
@@ -203,12 +203,12 @@ const chartCode = `function ChartOptions() {
 
 const BasicCandlestickChart = () => {
   return (
-    <FalconComponentCard dir="ltr" className="h-100">
-      <FalconComponentCard.Header
+    <OrkestraComponentCard dir="ltr" className="h-100">
+      <OrkestraComponentCard.Header
         title="Basic candlestick chart"
         light={false}
       />
-      <FalconComponentCard.Body
+      <OrkestraComponentCard.Body
         code={chartCode}
         language="jsx"
         scope={{
@@ -218,7 +218,7 @@ const BasicCandlestickChart = () => {
           dayjs
         }}
       />
-    </FalconComponentCard>
+    </OrkestraComponentCard>
   );
 };
 

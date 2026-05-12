@@ -5,7 +5,7 @@ import Flex from 'components/common/Flex';
 const PricingAltHeader: React.FC = () => {
   return (
     <Col xs={12} className="text-center mb-4">
-      <div className="fs-8">Falcon Pricing</div>
+      <div className="fs-8">Orkestra Pricing</div>
       <h3 className="fs-7 fs-md-6">
         Free plan with all the basic features.{' '}
         <br className="d-none d-md-block" /> Pro plan for advanced users.
@@ -17,7 +17,7 @@ const PricingAltHeader: React.FC = () => {
         <Form.Check type="switch">
           <Form.Check.Input
             type="checkbox"
-            className="falcon-form-check-input"
+            className="orkestra-form-check-input"
             defaultChecked
           />
         </Form.Check>

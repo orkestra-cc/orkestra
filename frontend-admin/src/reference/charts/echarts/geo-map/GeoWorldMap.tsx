@@ -1,7 +1,7 @@
 
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import world from 'assets/json/world.json';
-import FalconComponentCard from 'components/common/FalconComponentCard';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 import dayjs from 'dayjs';
 
 import { MapChart } from 'echarts/charts';
@@ -298,7 +298,7 @@ const tooltipFormatter = params =>
       <>
       <div className="position-absolute z-index-2" style={{ right: '16px' }}>
         <Button
-          variant="falcon-default"
+          variant="orkestra-default"
           size="sm"
           className="btn-reveal "
           type="button"
@@ -320,9 +320,9 @@ const tooltipFormatter = params =>
 
 const GeoWorldMap = () => {
   return (
-    <FalconComponentCard className="h-100">
-      <FalconComponentCard.Header title="World map" light={false} />
-      <FalconComponentCard.Body
+    <OrkestraComponentCard className="h-100">
+      <OrkestraComponentCard.Header title="World map" light={false} />
+      <OrkestraComponentCard.Body
         code={chartCode}
         language="jsx"
         scope={{
@@ -333,8 +333,8 @@ const GeoWorldMap = () => {
           dayjs,
           FontAwesomeIcon
         }}
-      ></FalconComponentCard.Body>
-    </FalconComponentCard>
+      ></OrkestraComponentCard.Body>
+    </OrkestraComponentCard>
   );
 };
 

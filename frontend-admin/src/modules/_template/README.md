@@ -13,7 +13,7 @@ Use it when:
 
 Do **not** use it for:
 
-- Pure UI experiments — those go in `src/reference/` (the Falcon template library).
+- Pure UI experiments — those go in `src/reference/` (the Orkestra template library).
 - Cross-cutting components used by many modules — those go in `src/components/common/` and are exported via the barrel.
 
 ## How the existing frontend is wired
@@ -73,7 +73,7 @@ Create `frontend/src/types/widgets.ts` with the request/response shapes returned
 
 Create `frontend/src/pages/widgets/list/index.tsx` and `frontend/src/pages/widgets/detail/index.tsx`. Use the components in `src/components/common/` (Avatar, Card, AdvanceTable, Flex, IconButton, PageHeader, etc.) as building blocks. Use `react-bootstrap` primitives for layout. Co-locate any sub-components in the same directory.
 
-If you need a richer page (calendar, kanban, chat, email client), look at `src/reference/app-examples/` first — they are full Falcon template implementations you can copy and adapt.
+If you need a richer page (calendar, kanban, chat, email client), look at `src/reference/app-examples/` first — they are full Orkestra template implementations you can copy and adapt.
 
 ### 6. Create a module manifest
 
@@ -84,7 +84,7 @@ import { Suspense, lazy } from 'react';
 import type { ModuleManifest } from './types';
 import ProtectedRoute from 'components/authentication/ProtectedRoute';
 import ModuleGate from 'components/common/ModuleGate';
-import FalconLoader from 'components/common/FalconLoader';
+import OrkestraLoader from 'components/common/OrkestraLoader';
 
 const WidgetList = lazy(() => import('pages/widgets/list'));
 const WidgetDetail = lazy(() => import('pages/widgets/detail'));
@@ -97,7 +97,7 @@ export const widgetsManifest: ModuleManifest = {
       element: (
         <ModuleGate module="widgets">
           <ProtectedRoute requiredPermissions={[['super_admin', 'administrator', 'developer', 'operator']]}>
-            <Suspense key="widget-list" fallback={<FalconLoader />}>
+            <Suspense key="widget-list" fallback={<OrkestraLoader />}>
               <WidgetList />
             </Suspense>
           </ProtectedRoute>
@@ -109,7 +109,7 @@ export const widgetsManifest: ModuleManifest = {
       element: (
         <ModuleGate module="widgets">
           <ProtectedRoute requiredPermissions={[['super_admin', 'administrator', 'developer', 'operator']]}>
-            <Suspense key="widget-detail" fallback={<FalconLoader />}>
+            <Suspense key="widget-detail" fallback={<OrkestraLoader />}>
               <WidgetDetail />
             </Suspense>
           </ProtectedRoute>

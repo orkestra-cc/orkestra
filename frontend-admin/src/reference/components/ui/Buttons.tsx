@@ -2,21 +2,21 @@
 import { Button } from 'react-bootstrap';
 import PageHeader from 'components/common/PageHeader';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import FalconComponentCard from 'components/common/FalconComponentCard';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 import IconButton from 'components/common/IconButton';
 import { reactBootstrapDocsUrl } from 'helpers/utils';
 import ButtonGroup from './ButtonGroup';
-import FalconCloseButton from 'components/common/FalconCloseButton';
+import OrkestraCloseButton from 'components/common/OrkestraCloseButton';
 import Flex from 'components/common/Flex';
 
 const faconBtnsCode = `
 <>
-  <Button variant='falcon-primary' className='me-2 mb-1'>Primary</Button>
-  <Button variant='falcon-success' className='me-2 mb-1'>Success</Button>
-  <Button variant='falcon-info' className='me-2 mb-1'>Info</Button>
-  <Button variant='falcon-warning' className='me-2 mb-1'>Warning</Button>
-  <Button variant='falcon-danger' className='me-2 mb-1'>Danger</Button>
-  <Button variant='falcon-default' className='me-2 mb-1'>Default</Button>
+  <Button variant='orkestra-primary' className='me-2 mb-1'>Primary</Button>
+  <Button variant='orkestra-success' className='me-2 mb-1'>Success</Button>
+  <Button variant='orkestra-info' className='me-2 mb-1'>Info</Button>
+  <Button variant='orkestra-warning' className='me-2 mb-1'>Warning</Button>
+  <Button variant='orkestra-danger' className='me-2 mb-1'>Danger</Button>
+  <Button variant='orkestra-default' className='me-2 mb-1'>Default</Button>
 </>
 `;
 const solidBtnsCode = `
@@ -55,17 +55,17 @@ const iconBtnCode = `
 <>
   <IconButton
     className="me-2 mb-1"
-    variant="falcon-default"
+    variant="orkestra-default"
     size="sm"
     icon="plus"
     transform="shrink-3"
   >
     Small
   </IconButton>
-  <IconButton className="me-2 mb-1" variant="falcon-default" icon="plus" transform="shrink-3">
+  <IconButton className="me-2 mb-1" variant="orkestra-default" icon="plus" transform="shrink-3">
     Regular
   </IconButton>
-  <IconButton className="mb-1" variant="falcon-default" size="lg" icon="plus" transform="shrink-3">
+  <IconButton className="mb-1" variant="orkestra-default" size="lg" icon="plus" transform="shrink-3">
     Large
   </IconButton>
   <hr />
@@ -84,12 +84,12 @@ const iconBtnCode = `
 
 const roundedBtnCode = `
 <>
-  <Button className="me-2" variant="falcon-default" className="rounded-pill me-1 mb-1">
+  <Button className="me-2" variant="orkestra-default" className="rounded-pill me-1 mb-1">
     Example
   </Button>
   <IconButton
     className="rounded-pill me-1 mb-1"
-    variant="falcon-default"
+    variant="orkestra-default"
     icon="align-left"
     transform="shrink-3"
   >
@@ -97,7 +97,7 @@ const roundedBtnCode = `
   </IconButton>
   <IconButton
     className="rounded-pill me-1 mb-1"
-    variant="falcon-default"
+    variant="orkestra-default"
     icon="align-right"
     iconAlign="right"
     transform="shrink-3"
@@ -108,13 +108,13 @@ const roundedBtnCode = `
     Outline
   </Button>
   <hr />
-  <Button variant="falcon-default" className="rounded-pill me-2 mb-1" size="sm">
+  <Button variant="orkestra-default" className="rounded-pill me-2 mb-1" size="sm">
     Capsule Small
   </Button>
-  <Button variant="falcon-default" className="rounded-pill me-2 mb-1">
+  <Button variant="orkestra-default" className="rounded-pill me-2 mb-1">
     Capsule Regular
   </Button>
-  <Button variant="falcon-default" className="rounded-pill me-2 mb-1" size="lg">
+  <Button variant="orkestra-default" className="rounded-pill me-2 mb-1" size="lg">
     Capsule large
   </Button>
 </>
@@ -182,17 +182,17 @@ const closeBtnWhiteCode = `<div className="bg-1000 p-3" data-bs-theme="light">
   <CloseButton variant="white" disabled aria-label="Hide"/>
 </div>`;
 
-const falconCloseBtnCode = `
+const orkestraCloseBtnCode = `
 <>
-  <FalconCloseButton
+  <OrkestraCloseButton
     size='lg'
     className='me-2'
   />
-  <FalconCloseButton
+  <OrkestraCloseButton
     noOutline
     className='me-2'
   />
-  <FalconCloseButton
+  <OrkestraCloseButton
     size='sm'
   />
 </>
@@ -202,7 +202,7 @@ const Buttons = () => (
   <>
     <PageHeader
       title="Buttons"
-      description="Use Falcon custom button styles for actions in forms, dialogs, and more with support for multiple sizes, states, and more."
+      description="Use Orkestra custom button styles for actions in forms, dialogs, and more with support for multiple sizes, states, and more."
       className="mb-3"
     >
       <Button
@@ -217,28 +217,28 @@ const Buttons = () => (
       </Button>
     </PageHeader>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Falcon Buttons" light={false} />
-      <FalconComponentCard.Body code={faconBtnsCode} language="jsx" />
-    </FalconComponentCard>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Orkestra Buttons" light={false} />
+      <OrkestraComponentCard.Body code={faconBtnsCode} language="jsx" />
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Solid Buttons" light={false} />
-      <FalconComponentCard.Body code={solidBtnsCode} language="jsx" />
-    </FalconComponentCard>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Solid Buttons" light={false} />
+      <OrkestraComponentCard.Body code={solidBtnsCode} language="jsx" />
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Outline Buttons" light={false}>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Outline Buttons" light={false}>
         <p className="mb-0">
           For a lighter touch, Buttons also come in <code>outline-* </code>
           variants with no background color.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body code={outlineBtnsCode} language="jsx" />
-    </FalconComponentCard>
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body code={outlineBtnsCode} language="jsx" />
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Close Button" light={false}>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Close Button" light={false}>
         <p className="mt-2 mb-0">
           To ensure the maximum accessibility for Close Button components, it is
           recommended that you provide relevant text for screen readers. The
@@ -246,12 +246,12 @@ const Buttons = () => (
           component by way of the
           <code> aria-label </code> property.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body code={closeBtnCode} language="jsx" />
-    </FalconComponentCard>
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body code={closeBtnCode} language="jsx" />
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header
         title="Close Buttons white variant"
         light={false}
       >
@@ -259,95 +259,95 @@ const Buttons = () => (
           Change the default dark color to white using{' '}
           <code>variant="white"</code>.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body code={closeBtnWhiteCode} language="jsx" />
-    </FalconComponentCard>
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body code={closeBtnWhiteCode} language="jsx" />
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Falcon Close Button" light={false}>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Orkestra Close Button" light={false}>
         <p className="mb-0">
-          Falcon close button is properly optimized for both light and dark
-          mode.To use falcon close button wrap{' '}
+          Orkestra close button is properly optimized for both light and dark
+          mode.To use orkestra close button wrap{' '}
           <code> &lt;FlaconCloseButton&gt; </code> inside a{' '}
           <code> position-relative </code> element.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body
-        code={falconCloseBtnCode}
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body
+        code={orkestraCloseBtnCode}
         language="jsx"
-        scope={{ FalconCloseButton, Flex }}
+        scope={{ OrkestraCloseButton, Flex }}
       />
-    </FalconComponentCard>
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Button Sizes" light={false}>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Button Sizes" light={false}>
         <p>
           Fancy larger or smaller buttons? Add <code>size="lg"</code>,
           <code>size="sm"</code> for additional sizes.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body code={btnSizesCode} language="jsx" />
-    </FalconComponentCard>
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body code={btnSizesCode} language="jsx" />
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Icon Buttons" light={false} />
-      <FalconComponentCard.Body
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Icon Buttons" light={false} />
+      <OrkestraComponentCard.Body
         code={iconBtnCode}
         language="jsx"
         scope={{ FontAwesomeIcon, IconButton }}
-      ></FalconComponentCard.Body>
-    </FalconComponentCard>
+      ></OrkestraComponentCard.Body>
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Capsule Buttons" light={false} />
-      <FalconComponentCard.Body
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Capsule Buttons" light={false} />
+      <OrkestraComponentCard.Body
         code={roundedBtnCode}
         language="jsx"
         scope={{ FontAwesomeIcon, IconButton }}
       />
-    </FalconComponentCard>
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Block buttons" light={false}>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Block buttons" light={false}>
         <p className="mb-0">
           Create responsive stacks of full-width, “block buttons” like those in
           Bootstrap 4 with a mix of our display and gap utilities.{' '}
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body code={blockBtnCode} language="jsx" />
-    </FalconComponentCard>
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body code={blockBtnCode} language="jsx" />
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Active state" light={false}>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Active state" light={false}>
         <p className="mb-0">
           To set a button's active state simply set the component's{' '}
           <code> active</code> prop.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body code={activeStateCode} language="jsx" />
-    </FalconComponentCard>
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body code={activeStateCode} language="jsx" />
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Disabled state" light={false}>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Disabled state" light={false}>
         <p className="mb-0">
           Make buttons look inactive by adding the <code>disabled</code> prop
           to.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body code={disableStateCode} language="jsx" />
-    </FalconComponentCard>
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body code={disableStateCode} language="jsx" />
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Button loading state" light={false}>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Button loading state" light={false}>
         <p className="mb-0">
           When activating an asynchronous action from a button it is a good UX
           pattern to give the user feedback as to the loading state, this can
           easily be done by updating your <code>&lt;Button/&gt;</code>s props
           from a state change like below.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body code={loadingStateCode} language="jsx" />
-    </FalconComponentCard>
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body code={loadingStateCode} language="jsx" />
+    </OrkestraComponentCard>
     <ButtonGroup />
   </>
 );

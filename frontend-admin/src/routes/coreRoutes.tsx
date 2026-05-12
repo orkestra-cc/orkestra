@@ -14,7 +14,7 @@ import paths from './paths';
 import MainLayout from 'layouts/MainLayout';
 import ErrorLayout from 'layouts/ErrorLayout';
 import ProtectedRoute from 'components/authentication/ProtectedRoute';
-import FalconLoader from 'components/common/FalconLoader';
+import OrkestraLoader from 'components/common/OrkestraLoader';
 
 import Error401 from 'components/errors/Error401';
 import Error404 from 'components/errors/Error404';
@@ -78,7 +78,7 @@ export function buildCoreRoutes(
         {
           path: 'setup',
           element: (
-            <Suspense key="setup-wizard" fallback={<FalconLoader />}>
+            <Suspense key="setup-wizard" fallback={<OrkestraLoader />}>
               <SetupWizard />
             </Suspense>
           )
@@ -116,7 +116,7 @@ export function buildCoreRoutes(
                     >
                       <Suspense
                         key="admin-userManagement"
-                        fallback={<FalconLoader />}
+                        fallback={<OrkestraLoader />}
                       >
                         <UserManagement />
                       </Suspense>
@@ -131,7 +131,7 @@ export function buildCoreRoutes(
                         ['super_admin', 'administrator', 'developer']
                       ]}
                     >
-                      <Suspense key="admin-modules" fallback={<FalconLoader />}>
+                      <Suspense key="admin-modules" fallback={<OrkestraLoader />}>
                         <ModuleManagement />
                       </Suspense>
                     </ProtectedRoute>
@@ -147,7 +147,7 @@ export function buildCoreRoutes(
                     >
                       <Suspense
                         key="admin-module-detail"
-                        fallback={<FalconLoader />}
+                        fallback={<OrkestraLoader />}
                       >
                         <ModuleDetail />
                       </Suspense>
@@ -167,7 +167,7 @@ export function buildCoreRoutes(
                         ]
                       ]}
                     >
-                      <Suspense key="admin-roles" fallback={<FalconLoader />}>
+                      <Suspense key="admin-roles" fallback={<OrkestraLoader />}>
                         <RoleManagement />
                       </Suspense>
                     </ProtectedRoute>
@@ -191,7 +191,7 @@ export function buildCoreRoutes(
                     >
                       <Suspense
                         key="admin-internal-tenants"
-                        fallback={<FalconLoader />}
+                        fallback={<OrkestraLoader />}
                       >
                         <InternalTenants />
                       </Suspense>
@@ -208,7 +208,7 @@ export function buildCoreRoutes(
                     >
                       <Suspense
                         key="admin-internal-tenant-detail"
-                        fallback={<FalconLoader />}
+                        fallback={<OrkestraLoader />}
                       >
                         <InternalTenantDetail />
                       </Suspense>
@@ -223,7 +223,7 @@ export function buildCoreRoutes(
                         ['super_admin', 'administrator', 'developer']
                       ]}
                     >
-                      <Suspense key="admin-clients" fallback={<FalconLoader />}>
+                      <Suspense key="admin-clients" fallback={<OrkestraLoader />}>
                         <ClientManagement />
                       </Suspense>
                     </ProtectedRoute>
@@ -246,7 +246,7 @@ export function buildCoreRoutes(
                     >
                       <Suspense
                         key="admin-client-detail"
-                        fallback={<FalconLoader />}
+                        fallback={<OrkestraLoader />}
                       >
                         <ClientDetail />
                       </Suspense>
@@ -270,7 +270,7 @@ export function buildCoreRoutes(
                     >
                       <Suspense
                         key="admin-userProfile"
-                        fallback={<FalconLoader />}
+                        fallback={<OrkestraLoader />}
                       >
                         <AdminUserProfile />
                       </Suspense>
@@ -288,7 +288,7 @@ export function buildCoreRoutes(
                   element: (
                     <Suspense
                       key="operator-profile"
-                      fallback={<FalconLoader />}
+                      fallback={<OrkestraLoader />}
                     >
                       <OperatorProfile />
                     </Suspense>
@@ -297,7 +297,7 @@ export function buildCoreRoutes(
                 {
                   path: 'dashboard',
                   element: (
-                    <Suspense key="user-dashboard" fallback={<FalconLoader />}>
+                    <Suspense key="user-dashboard" fallback={<OrkestraLoader />}>
                       <UserDashboard />
                     </Suspense>
                   )
@@ -305,7 +305,7 @@ export function buildCoreRoutes(
                 {
                   path: 'calendar',
                   element: (
-                    <Suspense key="user-calendar" fallback={<FalconLoader />}>
+                    <Suspense key="user-calendar" fallback={<OrkestraLoader />}>
                       <UserCalendar />
                     </Suspense>
                   )
@@ -313,7 +313,7 @@ export function buildCoreRoutes(
                 {
                   path: 'settings',
                   element: (
-                    <Suspense key="user-settings" fallback={<FalconLoader />}>
+                    <Suspense key="user-settings" fallback={<OrkestraLoader />}>
                       <Settings />
                     </Suspense>
                   )
@@ -321,7 +321,7 @@ export function buildCoreRoutes(
                 {
                   path: 'security',
                   element: (
-                    <Suspense key="user-security" fallback={<FalconLoader />}>
+                    <Suspense key="user-security" fallback={<OrkestraLoader />}>
                       <SecurityPage />
                     </Suspense>
                   )

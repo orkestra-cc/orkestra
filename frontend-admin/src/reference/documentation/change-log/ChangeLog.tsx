@@ -5,7 +5,7 @@ import Flex from 'components/common/Flex';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import changeLogs from './changelogs';
 import Logs from './Logs';
-import FalconEditor from 'components/common/FalconEditor';
+import OrkestraEditor from 'components/common/OrkestraEditor';
 
 const Changelog = () => (
   <>
@@ -18,10 +18,10 @@ const Changelog = () => (
             <FontAwesomeIcon icon="exclamation-triangle" className="fs-6" />
             <div className="ms-3 flex-1">
               <h4 className="alert-heading">Before you update!</h4>
-              Backup your files and read the changelog before updating Falcon on
-              your project. If you come across with any problems with Falcon
+              Backup your files and read the changelog before updating Orkestra on
+              your project. If you come across with any problems with Orkestra
               template during the update, feel free to contact us at{' '}
-              <a href="mailto:support@themewagon.com">support@themewagon.com</a>
+              <a href="mailto:support@orkestra.cc">support@orkestra.cc</a>
               .
             </div>
           </Flex>
@@ -39,7 +39,7 @@ const Changelog = () => (
 
               <p className="mb-0">
                 After successfully updating all the latest files and changes
-                from a new version of Falcon in your ReactJS project, you need
+                from a new version of Orkestra in your ReactJS project, you need
                 to run the following commands in your project directory. These
                 commands will install the updated versions of all dependencies,
                 install if any new dependencies are required, and run the
@@ -52,7 +52,7 @@ const Changelog = () => (
                 </strong>{' '}
                 , run:
               </h6>
-              <FalconEditor
+              <OrkestraEditor
                 code={`yarn install && yarn run dev`}
                 language="bash"
                 hidePreview
@@ -64,7 +64,7 @@ const Changelog = () => (
                 </strong>{' '}
                 , run:
               </h6>
-              <FalconEditor
+              <OrkestraEditor
                 code={`npm i && npm run dev`}
                 language="bash"
                 hidePreview

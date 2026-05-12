@@ -1,5 +1,5 @@
 import { Card, Col, Form, Row } from 'react-bootstrap';
-import FalconCardHeader from 'components/common/FalconCardHeader';
+import OrkestraCardHeader from 'components/common/OrkestraCardHeader';
 import CardDropdown from 'components/common/CardDropdown';
 import IconButton from 'components/common/IconButton';
 import LeafletMap from './LeafletMap';
@@ -21,7 +21,7 @@ interface ProjectLocationProps {
 const ProjectLocation = ({ data }: ProjectLocationProps) => {
   return (
     <Card className="h-100">
-      <FalconCardHeader
+      <OrkestraCardHeader
         title="Project Locations"
         titleTag="h5"
         endEl={<CardDropdown />}
@@ -45,7 +45,7 @@ const ProjectLocation = ({ data }: ProjectLocationProps) => {
           </Col>
           <Col xs="auto">
             <IconButton
-              variant="falcon-default"
+              variant="orkestra-default"
               size="sm"
               icon="chevron-right"
               iconClassName="ms-1 fs-10"

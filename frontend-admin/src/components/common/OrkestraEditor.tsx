@@ -4,7 +4,7 @@ import { LiveEditor, LiveError, LivePreview, LiveProvider } from 'react-live';
 import { themes, PrismTheme } from 'prism-react-renderer';
 import classNames from 'classnames';
 
-interface FalconEditorProps {
+interface OrkestraEditorProps {
   code: string;
   scope?: any;
   language?: string;
@@ -13,14 +13,14 @@ interface FalconEditorProps {
   className?: string;
 }
 
-const FalconEditor = ({
+const OrkestraEditor = ({
   code,
   scope,
   language = 'markup',
   hidePreview = false,
   theme = themes.okaidia,
   className
-}: FalconEditorProps) => {
+}: OrkestraEditorProps) => {
   const importRegex =
     /import(?:["'\s]*([\w*{}\n, ]+)from\s*)["'\s]*([@\w/_-]+)["'\s]*;?/gm;
   const requireRegex =
@@ -74,4 +74,4 @@ const FalconEditor = ({
   );
 };
 
-export default FalconEditor;
+export default OrkestraEditor;

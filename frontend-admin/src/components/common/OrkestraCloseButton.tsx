@@ -4,7 +4,7 @@ import { CloseButton, CloseButtonProps } from 'react-bootstrap';
 
 type ButtonSize = 'sm' | 'lg';
 
-interface FalconCloseButtonProps extends Omit<CloseButtonProps, 'variant'> {
+interface OrkestraCloseButtonProps extends Omit<CloseButtonProps, 'variant'> {
   size?: ButtonSize;
   onClick?: (event: React.MouseEvent<HTMLButtonElement>) => void;
   noOutline?: boolean;
@@ -12,7 +12,7 @@ interface FalconCloseButtonProps extends Omit<CloseButtonProps, 'variant'> {
   className?: string;
 }
 
-const FalconCloseButton: React.FC<FalconCloseButtonProps> = ({
+const OrkestraCloseButton: React.FC<OrkestraCloseButtonProps> = ({
   size,
   onClick,
   noOutline,
@@ -41,4 +41,4 @@ const FalconCloseButton: React.FC<FalconCloseButtonProps> = ({
   );
 };
 
-export default FalconCloseButton;
+export default OrkestraCloseButton;

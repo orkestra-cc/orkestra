@@ -1,6 +1,6 @@
 
 import PageHeader from 'components/common/PageHeader';
-import FalconComponentCard from 'components/common/FalconComponentCard';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 import { Link } from 'react-router';
 
 const exampleCode = `
@@ -46,8 +46,8 @@ const ColoredLinks = () => (
       className="mb-3"
     />
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Example">
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Example">
         <p className="mb-0 mt-2">
           You can use the <code>.link-*</code> classes to colorize links. Unlike
           the{' '}
@@ -61,22 +61,22 @@ const ColoredLinks = () => (
           , these classes have a <code>:hover</code> and <code>:focus</code>{' '}
           state.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body
         code={exampleCode}
         scope={{ Link }}
         language="jsx"
       />
-    </FalconComponentCard>
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Grays" />
-      <FalconComponentCard.Body
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Grays" />
+      <OrkestraComponentCard.Body
         code={graysCode}
         scope={{ Link }}
         language="jsx"
       />
-    </FalconComponentCard>
+    </OrkestraComponentCard>
   </>
 );
 

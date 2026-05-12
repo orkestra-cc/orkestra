@@ -1,5 +1,5 @@
 
-import FalconComponentCard from 'components/common/FalconComponentCard';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 import { LineChart } from 'echarts/charts';
 import {
   GridComponent,
@@ -173,9 +173,9 @@ const chartCode = `function ChartOptions() {
 
 const StackedLineChart = () => {
   return (
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Stacked line chart" light={false} />
-      <FalconComponentCard.Body
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Stacked line chart" light={false} />
+      <OrkestraComponentCard.Body
         code={chartCode}
         language="jsx"
         scope={{
@@ -185,7 +185,7 @@ const StackedLineChart = () => {
           tooltipFormatter
         }}
       />
-    </FalconComponentCard>
+    </OrkestraComponentCard>
   );
 };
 

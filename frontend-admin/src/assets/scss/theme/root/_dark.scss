@@ -33,18 +33,18 @@
 
     @each $color, $value in $theme-dark-colors {
       //
-      // Falcon Button
+      // Orkestra Button
       //
-      --#{$prefix}btn-falcon-#{$color}-color: var(--#{$prefix}#{$color});
-      --#{$prefix}btn-falcon-#{$color}-hover-color: #{shift-color(
+      --#{$prefix}btn-orkestra-#{$color}-color: var(--#{$prefix}#{$color});
+      --#{$prefix}btn-orkestra-#{$color}-hover-color: #{shift-color(
           $value,
           -17%
         )};
-      --#{$prefix}btn-falcon-#{$color}-active-background: #{shade-color(
+      --#{$prefix}btn-orkestra-#{$color}-active-background: #{shade-color(
           $dark,
           40%
         )};
-      --#{$prefix}btn-falcon-#{$color}-active-color: #{shift-color(
+      --#{$prefix}btn-orkestra-#{$color}-active-color: #{shift-color(
           $value,
           -17%
         )};
@@ -109,18 +109,18 @@
     --#{$prefix}btn-reveal-focus-border-color: #{shade-color($dark, 12.5%)};
 
     //
-    // Falcon Button
+    // Orkestra Button
     //
-    --#{$prefix}btn-falcon-box-shadow: 0 0 0 1px rgba(0, 8, 19, 0.3),
+    --#{$prefix}btn-orkestra-box-shadow: 0 0 0 1px rgba(0, 8, 19, 0.3),
       0 2px 5px 0 rgba(0, 13, 33, 0.5), 0 1px 1.5px 0 rgba(0, 8, 1, 0.48),
       0 1px 2px 0 rgba(0, 8, 1, 0.4);
-    --#{$prefix}btn-falcon-hover-box-shadow: 0 0 0 1px rgba(0, 8, 19, 0.3),
+    --#{$prefix}btn-orkestra-hover-box-shadow: 0 0 0 1px rgba(0, 8, 19, 0.3),
       0 3px 7px 0 rgba(0, 13, 33, 0.8), 0 1px 1.5px 0 #000801,
       0 1px 2px 0 #000801;
 
-    --#{$prefix}btn-falcon-default-hover-color: #{shift-color($gray-400, -17%)};
-    --#{$prefix}btn-falcon-default-active-background: #{shade-color($dark, 10%)};
-    --#{$prefix}btn-falcon-default-active-border: #{shift-color($gray-400, -17%)};
+    --#{$prefix}btn-orkestra-default-hover-color: #{shift-color($gray-400, -17%)};
+    --#{$prefix}btn-orkestra-default-active-background: #{shade-color($dark, 10%)};
+    --#{$prefix}btn-orkestra-default-active-border: #{shift-color($gray-400, -17%)};
 
     //
     // Avarar

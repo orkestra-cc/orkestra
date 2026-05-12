@@ -42,7 +42,7 @@ const InboxFilterDropdown = () => {
   return (
     <Dropdown className="font-sans-serif">
       <Dropdown.Toggle
-        variant="falcon-default"
+        variant="orkestra-default"
         size="sm"
         className="text-600 dropdown-caret-none ms-2"
       >

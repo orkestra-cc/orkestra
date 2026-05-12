@@ -71,7 +71,7 @@ export const products = [
   {
     id: 3,
     img: product11,
-    title: 'Falcon',
+    title: 'Orkestra',
     type: 'Admin',
     unit: 11,
     price: 49
@@ -97,7 +97,7 @@ export const products = [
 export const runningProjects = [
   {
     id: 1,
-    title: 'Falcon',
+    title: 'Orkestra',
     progress: 90,
     duration: '58:20:00',
     color: 'primary'
@@ -175,7 +175,7 @@ export const files = [
   {
     id: 3,
     img: iconZip,
-    name: 'Falcon v1.8.2',
+    name: 'Orkestra v1.8.2',
     user: 'Jane',
     time: '27 Sep at 10:30 AM',
     border: false
@@ -276,7 +276,7 @@ export const topProducts = [
   ['Boots4', 43, 85],
   ['Reign Pro', 83, 73],
   ['Slick', 86, 62],
-  ['Falcon', 72, 53],
+  ['Orkestra', 72, 53],
   ['Sparrow', 80, 50],
   ['Hideaway', 50, 70],
   ['Freya', 80, 90]

@@ -7,7 +7,7 @@ import IconItem from 'components/common/icon/IconItem';
 import classNames from 'classnames';
 import { Link } from 'react-router';
 import { todoList } from 'data/dashboard/projectManagement';
-import FalconCardHeader from 'components/common/FalconCardHeader';
+import OrkestraCardHeader from 'components/common/OrkestraCardHeader';
 
 interface ToDoItem {
   id: string | number;
@@ -84,7 +84,7 @@ const ToDoList = () => {
   };
   return (
     <Card className="h-100">
-      <FalconCardHeader title="To Do List" titleTag="h6" />
+      <OrkestraCardHeader title="To Do List" titleTag="h6" />
       <Card.Body className="p-0 overflow-hidden">
         {todoItems.map((item: ToDoItem, index: number) => (
           <ToDoListItem

@@ -1,7 +1,7 @@
 
 import { Card, Table } from 'react-bootstrap';
-import FalconCardHeader from 'components/common/FalconCardHeader';
-import FalconEditor from 'components/common/FalconEditor';
+import OrkestraCardHeader from 'components/common/OrkestraCardHeader';
+import OrkestraEditor from 'components/common/OrkestraEditor';
 import PageHeader from 'components/common/PageHeader';
 import { version } from 'config';
 
@@ -26,13 +26,13 @@ const Configuration = () => (
   <>
     <PageHeader title="Setting up configuration" className="mb-3">
       <p className="mt-2 mb-0">
-        Falcon-React has a global configuration system. You can change the theme
+        Orkestra-React has a global configuration system. You can change the theme
         settings with a single global javascript object.
       </p>
     </PageHeader>
 
     <Card className="mb-3">
-      <FalconCardHeader title="Settings configuration" />
+      <OrkestraCardHeader title="Settings configuration" />
       <Card.Body>
         <p>
           Control side panel settings from one place. Go to{' '}
@@ -40,12 +40,12 @@ const Configuration = () => (
           any config value is already saved in local storage and you want to
           change the default config, please clear the local storage first.
         </p>
-        <FalconEditor code={configCode} language="js" hidePreview />
+        <OrkestraEditor code={configCode} language="js" hidePreview />
       </Card.Body>
     </Card>
 
     <Card className="mb-3">
-      <FalconCardHeader title="Available Options" light={false} />
+      <OrkestraCardHeader title="Available Options" light={false} />
       <Card.Body className="bg-body-tertiary">
         <Table bordered responsive className="fs-10 mb-0">
           <thead className="bg-300 text-900">

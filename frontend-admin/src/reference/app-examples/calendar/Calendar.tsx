@@ -170,7 +170,7 @@ const Calendar: React.FC = () => {
             <Col xs md="auto" className="d-flex justify-content-end order-md-3">
               <Button
                 size="sm"
-                variant="falcon-primary"
+                variant="orkestra-primary"
                 onClick={() => {
                   calendarApi.today();
                   setTitle(calendarApi.getCurrentData().viewTitle);

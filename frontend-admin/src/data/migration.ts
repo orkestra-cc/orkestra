@@ -186,7 +186,7 @@ export const indexHTMLCode = `
         href="https://fonts.googleapis.com/css?family=Open+Sans:300,400,500,600,700|Poppins:100,200,300,400,500,600,700,800,900&display=swap"
       />
 
-      <title>Falcon React | ReactJS Dashboard & WebApp Template</title>
+      <title>Orkestra React | ReactJS Dashboard & WebApp Template</title>
     </head>
 
     <body>

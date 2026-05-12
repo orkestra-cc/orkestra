@@ -20,7 +20,7 @@ interface StatCardProps {
   badge?: { text: string; bg: BadgeColor };
 }
 
-// Reused Falcon-style card pattern from /admin/tenants. Kept local so the
+// Reused Orkestra-style card pattern from /admin/tenants. Kept local so the
 // SOC2 page owns its visual language — stat cards elsewhere tend to drift.
 const StatCard: React.FC<StatCardProps> = ({
   title,

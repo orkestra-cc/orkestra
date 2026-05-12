@@ -2,7 +2,7 @@
 import { Button } from 'react-bootstrap';
 import PageHeader from 'components/common/PageHeader';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import FalconComponentCard from 'components/common/FalconComponentCard';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 import { IMaskInput } from 'react-imask';
 
 const exampleCode = `
@@ -72,7 +72,7 @@ const InputMaskExample = () => (
   <>
     <PageHeader
       title="Input Mask"
-      description="Falcon-React uses <strong>imask</strong> and <strong>react-imask</strong> for masking input components."
+      description="Orkestra-React uses <strong>imask</strong> and <strong>react-imask</strong> for masking input components."
       className="mb-3"
     >
       <Button
@@ -87,14 +87,14 @@ const InputMaskExample = () => (
       </Button>
     </PageHeader>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Inputmask Examples" light={false} />
-      <FalconComponentCard.Body
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Inputmask Examples" light={false} />
+      <OrkestraComponentCard.Body
         code={exampleCode}
         scope={{ IMaskInput }}
         language="jsx"
       />
-    </FalconComponentCard>
+    </OrkestraComponentCard>
   </>
 );
 

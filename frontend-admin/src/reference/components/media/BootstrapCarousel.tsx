@@ -2,7 +2,7 @@
 import { Button } from 'react-bootstrap';
 import PageHeader from 'components/common/PageHeader';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import FalconComponentCard from 'components/common/FalconComponentCard';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 import { reactBootstrapDocsUrl } from 'helpers/utils';
 import generic6 from 'assets/img/generic/6.jpg';
 import generic7 from 'assets/img/generic/7.jpg';
@@ -270,63 +270,63 @@ const Carousel = () => (
       </Button>
     </PageHeader>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Basic Example" light={false} />
-      <FalconComponentCard.Body
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Basic Example" light={false} />
+      <OrkestraComponentCard.Body
         code={exampleCode}
         scope={{ generic6, generic7, generic8, FontAwesomeIcon }}
         language="jsx"
       />
-    </FalconComponentCard>
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Styled Carousel" light={false} />
-      <FalconComponentCard.Body
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Styled Carousel" light={false} />
+      <OrkestraComponentCard.Body
         code={customStyledCode}
         scope={{ generic6, generic7, generic8, FontAwesomeIcon }}
         language="jsx"
       />
-    </FalconComponentCard>
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="With Captions" light={false} />
-      <FalconComponentCard.Body
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="With Captions" light={false} />
+      <OrkestraComponentCard.Body
         code={withCaptionsCode}
         scope={{ generic5, chat8, generic9 }}
         language="jsx"
       />
-    </FalconComponentCard>
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Controlled" light={false}>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Controlled" light={false}>
         <p className="mt-2 mb-0">
           You can also <em> control </em> the Carousel state, via the
           <code> activeIndex </code> prop and <code> onSelect </code> handler.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body
         code={controlledCode}
         scope={{ generic6, generic7, generic8 }}
         language="jsx"
       />
-    </FalconComponentCard>
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Crossfade" light={false}>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Crossfade" light={false}>
         <p className="mt-2 mb-0">
           Add the <code>fade</code> prop to your carousel to animate slides with
           a fade transition instead of a slide.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body
         code={fadeCode}
         scope={{ generic6, generic7, generic8 }}
         language="jsx"
       />
-    </FalconComponentCard>
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header
         title="Individual Item Intervals"
         light={false}
       >
@@ -335,27 +335,27 @@ const Carousel = () => (
           <code>interval</code>
           prop.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body
         code={intervalCode}
         scope={{ generic5, chat8, generic9 }}
         language="jsx"
       />
-    </FalconComponentCard>
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Dark variant" light={false}>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Dark variant" light={false}>
         <p className="mt-2 mb-0">
           Add <code>variant="dark"</code> to the <code>Carousel</code> for
           darker controls, indicators, and captions.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body
         code={darkCode}
         scope={{ generic6, generic7, generic8 }}
         language="jsx"
       />
-    </FalconComponentCard>
+    </OrkestraComponentCard>
   </>
 );
 

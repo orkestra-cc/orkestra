@@ -1,6 +1,6 @@
 
 import dayjs from 'dayjs';
-import FalconComponentCard from 'components/common/FalconComponentCard';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 
 import { BarChart, CandlestickChart } from 'echarts/charts';
 import * as echarts from 'echarts/core';
@@ -311,12 +311,12 @@ const chartCode = `function ChartOptions() {
 
 const CandlestickMixedChart = () => {
   return (
-    <FalconComponentCard dir="ltr" className="h-100">
-      <FalconComponentCard.Header
+    <OrkestraComponentCard dir="ltr" className="h-100">
+      <OrkestraComponentCard.Header
         title="Candlestick mixed chart"
         light={false}
       />
-      <FalconComponentCard.Body
+      <OrkestraComponentCard.Body
         code={chartCode}
         language="jsx"
         scope={{
@@ -327,7 +327,7 @@ const CandlestickMixedChart = () => {
           getPastDates
         }}
       />
-    </FalconComponentCard>
+    </OrkestraComponentCard>
   );
 };
 

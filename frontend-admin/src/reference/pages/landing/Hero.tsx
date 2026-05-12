@@ -57,7 +57,7 @@ const Hero: React.FC = () => {
             to your webapp
           </h1>
           <p className="lead text-white opacity-75">
-            With the power of Falcon, you can now focus only on functionaries
+            With the power of Orkestra, you can now focus only on functionaries
             for your digital products, while leaving the UI design on us!
           </p>
           <Button
@@ -67,7 +67,7 @@ const Hero: React.FC = () => {
             className="border-2 rounded-pill mt-4 fs-9 py-2"
             to="#!"
           >
-            Start building with the falcon
+            Start building with the orkestra
             <FontAwesomeIcon icon="play" transform="shrink-6 down-1 right-5" />
           </Button>
         </Col>

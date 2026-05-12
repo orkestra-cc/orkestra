@@ -1,7 +1,7 @@
 import { Card, Col, Form, Row } from 'react-bootstrap';
-import FalconCardHeader from 'components/common/FalconCardHeader';
+import OrkestraCardHeader from 'components/common/OrkestraCardHeader';
 import CardDropdown from 'components/common/CardDropdown';
-import FalconLink from 'components/common/FalconLink';
+import OrkestraLink from 'components/common/OrkestraLink';
 import PerfomanceTable from './PerfomanceTable';
 import { campaignTable, campaignChart } from 'data/dashboard/analytics';
 import CampaignChart from './CampaignChart';
@@ -11,7 +11,7 @@ const CampaignPerfomance = () => {
   const { getThemeColor } = useAppContext();
   return (
     <Card className="h-100">
-      <FalconCardHeader
+      <OrkestraCardHeader
         title="Ad campaigns perfomance"
         titleTag="h6"
         className="py-2"
@@ -57,7 +57,7 @@ const CampaignPerfomance = () => {
             </Form.Select>
           </Col>
           <Col xs="auto">
-            <FalconLink title="Browser Overview" className="px-0 fw-medium" />
+            <OrkestraLink title="Browser Overview" className="px-0 fw-medium" />
           </Col>
         </Row>
       </Card.Footer>

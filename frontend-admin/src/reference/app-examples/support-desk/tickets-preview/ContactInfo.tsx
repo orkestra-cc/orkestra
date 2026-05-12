@@ -1,6 +1,6 @@
 import Avatar from 'components/common/Avatar';
 import CardDropdown from 'components/common/CardDropdown';
-import FalconCardHeader from 'components/common/FalconCardHeader';
+import OrkestraCardHeader from 'components/common/OrkestraCardHeader';
 
 import { Card, Col, Row } from 'react-bootstrap';
 import profileImg from 'assets/img/team/1.jpg';
@@ -11,7 +11,7 @@ import paths from 'routes/paths';
 const ContactInfo = () => {
   return (
     <Card>
-      <FalconCardHeader
+      <OrkestraCardHeader
         title="Contact Information"
         titleTag="h6"
         className="py-2 bg-body-tertiary"

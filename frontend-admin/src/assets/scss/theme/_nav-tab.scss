@@ -35,7 +35,7 @@
   }
 }
 
-.nav-pills-falcon {
+.nav-pills-orkestra {
   --#{$prefix}nav-link-font-size: #{$font-size-sm};
   --#{$prefix}nav-link-font-weight: #{$font-weight-medium};
 
@@ -55,10 +55,10 @@
 
     &.active {
       background-color: var(
-        --#{$prefix}nav-pills-falcon-active-bg-color
+        --#{$prefix}nav-pills-orkestra-active-bg-color
       ) !important;
-      box-shadow: var(--#{$prefix}btn-falcon-box-shadow) !important;
-      color: var(--#{$prefix}btn-falcon-default-color) !important;
+      box-shadow: var(--#{$prefix}btn-orkestra-box-shadow) !important;
+      color: var(--#{$prefix}btn-orkestra-default-color) !important;
     }
 
     &:active:focus {
@@ -66,7 +66,7 @@
     }
 
     @include hover-focus {
-      color: var(--#{$prefix}btn-falcon-default-color);
+      color: var(--#{$prefix}btn-orkestra-default-color);
       background-color: unset;
     }
   }

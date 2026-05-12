@@ -1,4 +1,4 @@
-import FalconComponentCard from 'components/common/FalconComponentCard';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 import PageHeader from 'components/common/PageHeader';
 import createMarkup from 'helpers/createMarkup';
 import { useState } from 'react';
@@ -28,7 +28,7 @@ const Plugins = () => {
     },
     {
       title: 'Echarts For React',
-      description: ` Falcon-React uses <strong>echarts-for-react</strong> for chart component.
+      description: ` Orkestra-React uses <strong>echarts-for-react</strong> for chart component.
       <strong> echarts-for-react </strong>
       is the simplest, and the best React wrapper for
       <a href="https://echarts.apache.org/en/index.html" target="_blank">
@@ -166,7 +166,7 @@ const Plugins = () => {
     <>
       <PageHeader title="Plugins" className="mb-3">
         <p className="mt-2 mb-0">
-          Falcon-React uses some third-party library to make it more flexible
+          Orkestra-React uses some third-party library to make it more flexible
           and robust.Here is the list of all plugins:
         </p>
       </PageHeader>
@@ -190,15 +190,15 @@ interface PluginCardProps {
 }
 
 const PluginCard = ({ title, description, docLink }: PluginCardProps) => (
-  <FalconComponentCard>
-    <FalconComponentCard.Header title={title} light={false} noPreview />
-    <FalconComponentCard.Body>
+  <OrkestraComponentCard>
+    <OrkestraComponentCard.Header title={title} light={false} noPreview />
+    <OrkestraComponentCard.Body>
       <p dangerouslySetInnerHTML={createMarkup(description)} />
       <a href={docLink} target="_blank" rel="noreferrer">
         Full Documentation
       </a>
-    </FalconComponentCard.Body>
-  </FalconComponentCard>
+    </OrkestraComponentCard.Body>
+  </OrkestraComponentCard>
 );
 
 export default Plugins;

@@ -2,7 +2,7 @@
 import { Button } from 'react-bootstrap';
 import PageHeader from 'components/common/PageHeader';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import FalconComponentCard from 'components/common/FalconComponentCard';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 import FullCalendar from '@fullcalendar/react';
 import dayGridPlugin from '@fullcalendar/daygrid';
 import timeGridPlugin from '@fullcalendar/timegrid';
@@ -26,7 +26,7 @@ const Figures = () => (
   <>
     <PageHeader
       title="Calendar"
-      description="Falcon uses <strong>FullCalendar</strong> for calendar component. FullCalendar seamlessly integrates with the React JavaScript framework. It provides a component that exactly matches the functionality of FullCalendar’s standard API."
+      description="Orkestra uses <strong>FullCalendar</strong> for calendar component. FullCalendar seamlessly integrates with the React JavaScript framework. It provides a component that exactly matches the functionality of FullCalendar’s standard API."
       className="mb-3"
     >
       <Button
@@ -41,14 +41,14 @@ const Figures = () => (
       </Button>
     </PageHeader>
 
-    <FalconComponentCard noGuttersBottom>
-      <FalconComponentCard.Header title="Example" light={false} />
-      <FalconComponentCard.Body
+    <OrkestraComponentCard noGuttersBottom>
+      <OrkestraComponentCard.Header title="Example" light={false} />
+      <OrkestraComponentCard.Body
         code={calenderCode}
         scope={{ FullCalendar, dayGridPlugin, timeGridPlugin }}
         language="jsx"
       />
-    </FalconComponentCard>
+    </OrkestraComponentCard>
   </>
 );
 

@@ -58,7 +58,7 @@ const Notes = () => {
                   align="end"
                   className="btn-reveal-trigger d-inline-block"
                 >
-                  <Dropdown.Toggle split variant="falcon-default" size="sm">
+                  <Dropdown.Toggle split variant="orkestra-default" size="sm">
                     <FontAwesomeIcon icon="ellipsis-h" className="fs-11" />
                   </Dropdown.Toggle>
 

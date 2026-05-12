@@ -2,8 +2,8 @@
 import { Button } from 'react-bootstrap';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import PageHeader from 'components/common/PageHeader';
-import FalconEditor from 'components/common/FalconEditor';
-import FalconComponentCard from 'components/common/FalconComponentCard';
+import OrkestraEditor from 'components/common/OrkestraEditor';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 import { useAppContext } from 'providers/AppProvider';
 
 const comboCode = `settings:{
@@ -21,7 +21,7 @@ const ComboNavbar = () => {
     <>
       <PageHeader
         title="Combo Nav"
-        description="Combo Nav is an additional layout system of Falcon where you can place both Navbar Top and Navbar Vertical in a same page."
+        description="Combo Nav is an additional layout system of Orkestra where you can place both Navbar Top and Navbar Vertical in a same page."
         className="mb-3"
       >
         <Button
@@ -40,11 +40,11 @@ const ComboNavbar = () => {
         </Button>
       </PageHeader>
 
-      <FalconComponentCard>
-        <FalconComponentCard.Header title="How to" noPreview />
-        <FalconComponentCard.Body>
+      <OrkestraComponentCard>
+        <OrkestraComponentCard.Header title="How to" noPreview />
+        <OrkestraComponentCard.Body>
           <p>
-            Combo layout uses Falcon's{' '}
+            Combo layout uses Orkestra's{' '}
             <a href="/components/navs-and-tabs/vertical-navbar" target="_blank">
               Navbar vertical{' '}
             </a>
@@ -62,20 +62,20 @@ const ComboNavbar = () => {
             <code> navbarPosition:'combo' </code> of <code>settings</code>{' '}
             object.
           </p>
-          <FalconEditor code={comboCode} language="js" hidePreview />
-        </FalconComponentCard.Body>
-      </FalconComponentCard>
+          <OrkestraEditor code={comboCode} language="js" hidePreview />
+        </OrkestraComponentCard.Body>
+      </OrkestraComponentCard>
 
-      <FalconComponentCard>
-        <FalconComponentCard.Header title="Behaviors" noPreview />
-        <FalconComponentCard.Body>
+      <OrkestraComponentCard>
+        <OrkestraComponentCard.Header title="Behaviors" noPreview />
+        <OrkestraComponentCard.Body>
           <p>
             For responsive collapsing pass{' '}
             <code>{`expand = {'sm | md | lg | xl'}`}</code> prop to
             React-Bootstrap's <code>Navbar</code> component.
           </p>
-        </FalconComponentCard.Body>
-      </FalconComponentCard>
+        </OrkestraComponentCard.Body>
+      </OrkestraComponentCard>
     </>
   );
 };

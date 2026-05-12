@@ -3,7 +3,7 @@ import { Col, Nav, Row, Button } from 'react-bootstrap';
 import useScrollSpy from 'hooks/useScrollSpy';
 import PageHeader from 'components/common/PageHeader';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import FalconComponentCard from 'components/common/FalconComponentCard';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 
 const exampleCode = `function Scrollspy(){
   const [sections] = useState(['Home', 'Profile', 'Messages', 'Settings']);
@@ -135,17 +135,17 @@ const Scrollspy = () => (
         <FontAwesomeIcon icon="chevron-right" className="ms-1 fs-11" />
       </Button>
     </PageHeader>
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Example" light={false} />
-      <FalconComponentCard.Body
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Example" light={false} />
+      <OrkestraComponentCard.Body
         code={exampleCode}
         scope={{ useScrollSpy }}
         language="jsx"
         hidePreview
       >
         <ScrollspyExample />
-      </FalconComponentCard.Body>
-    </FalconComponentCard>
+      </OrkestraComponentCard.Body>
+    </OrkestraComponentCard>
   </>
 );
 

@@ -12,13 +12,13 @@ const TicketsPreviewHeader = () => {
       <Card.Header className="d-flex flex-between-center">
         <IconButton
           onClick={() => navigate(-1)}
-          variant="falcon-default"
+          variant="orkestra-default"
           size="sm"
           icon="arrow-left"
         />
         <Flex>
           <IconButton
-            variant="falcon-default"
+            variant="orkestra-default"
             size="sm"
             icon="object-ungroup"
             transform="shrink-2"
@@ -27,7 +27,7 @@ const TicketsPreviewHeader = () => {
             <span className="d-none d-md-inline-block ms-1">Merge</span>
           </IconButton>
           <IconButton
-            variant="falcon-default"
+            variant="orkestra-default"
             size="sm"
             icon="check"
             transform="shrink-2"
@@ -37,7 +37,7 @@ const TicketsPreviewHeader = () => {
             <span className="d-none d-md-inline-block ms-1">close</span>
           </IconButton>
           <IconButton
-            variant="falcon-default"
+            variant="orkestra-default"
             size="sm"
             icon="ban"
             transform="shrink-2"
@@ -46,7 +46,7 @@ const TicketsPreviewHeader = () => {
             <span className="d-none d-md-inline-block ms-1">Ban visitor</span>
           </IconButton>
           <IconButton
-            variant="falcon-default"
+            variant="orkestra-default"
             size="sm"
             icon="trash-alt"
             transform="shrink-2"
@@ -59,7 +59,7 @@ const TicketsPreviewHeader = () => {
             align="end"
             className="btn-reveal-trigger d-inline-block ms-2"
           >
-            <Dropdown.Toggle split variant="falcon-default" size="sm">
+            <Dropdown.Toggle split variant="orkestra-default" size="sm">
               <FontAwesomeIcon icon="ellipsis-v" className="fs-11" />
             </Dropdown.Toggle>
 

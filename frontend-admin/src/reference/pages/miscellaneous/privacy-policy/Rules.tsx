@@ -73,11 +73,11 @@ const Rules: React.FC<RulesProps> = ({ ref }) => {
         <h6>Reporting abuse</h6>
         <p className="mb-0 ps-3">
           If you think anyone is violating any of these Terms, please{' '}
-          <a href="mailto:support@themewagon.com">notify us</a> immediately. If
-          you received spam you think came from a falcon user, we want to{' '}
-          <a href="mailto:support@themewagon.com">hear about it</a>. If you
+          <a href="mailto:support@orkestra.cc">notify us</a> immediately. If
+          you received spam you think came from a orkestra user, we want to{' '}
+          <a href="mailto:support@orkestra.cc">hear about it</a>. If you
           think anyone has posted material that violates any copyrights, then
-          you may <a href="mailto:support@themewagon.com">notify us</a>
+          you may <a href="mailto:support@orkestra.cc">notify us</a>
         </p>
         <hr className="my-4" />
         <h6>SES and third-party providers</h6>
@@ -91,7 +91,7 @@ const Rules: React.FC<RulesProps> = ({ ref }) => {
             agreement between you and Amazon Web Services.
           </li>
           <li>
-            falcon facilitates integration with a number of third party services
+            orkestra facilitates integration with a number of third party services
             which you can use in relation to your account or your Contents
             (“Third Party Service”), although we make no warranty as to any
             ongoing support for any third party service. We make no

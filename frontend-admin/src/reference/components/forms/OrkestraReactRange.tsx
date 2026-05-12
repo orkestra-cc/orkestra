@@ -2,7 +2,7 @@
 import { Range, getTrackBackground } from 'react-range';
 import { useAppContext } from 'providers/AppProvider';
 
-interface FalconReactRangeProps {
+interface OrkestraReactRangeProps {
   step?: number;
   min?: number;
   max?: number;
@@ -16,7 +16,7 @@ interface FalconReactRangeProps {
   onChange: (values: number[]) => void;
 }
 
-const FalconReactRange = ({
+const OrkestraReactRange = ({
   step = 0.1,
   min = 0,
   max = 100,
@@ -28,7 +28,7 @@ const FalconReactRange = ({
   marks = false,
   values,
   onChange
-}: FalconReactRangeProps) => {
+}: OrkestraReactRangeProps) => {
   const {
     config: { isDark, isRTL },
     getThemeColor
@@ -42,11 +42,11 @@ const FalconReactRange = ({
       style={{
         ...properties.style
       }}
-      className="falcon-react-range"
+      className="orkestra-react-range"
     >
       <div
         ref={properties.ref}
-        className="falcon-react-range-track"
+        className="orkestra-react-range-track"
         style={{
           height: trackHeight,
           cursor: !draggableTrack ? 'pointer' : 'ew-resize',
@@ -75,13 +75,13 @@ const FalconReactRange = ({
     <div
       {...properties}
       key={properties.key}
-      className={`falcon-react-range-thumb ${isDragged && 'dragging'}`}
+      className={`orkestra-react-range-thumb ${isDragged && 'dragging'}`}
       style={{
         ...properties.style
       }}
     >
       <div
-        className={`falcon-react-range-tooltip ${
+        className={`orkestra-react-range-tooltip ${
           (alwaysShowTooltip || isDragged) && 'show'
         }`}
       >
@@ -97,7 +97,7 @@ const FalconReactRange = ({
       <div
         {...properties}
         key={properties.key}
-        className="falcon-react-range-mark"
+        className="orkestra-react-range-mark"
         style={{
           ...properties.style,
           height: '16px',
@@ -132,4 +132,4 @@ const FalconReactRange = ({
   );
 };
 
-export default FalconReactRange;
+export default OrkestraReactRange;

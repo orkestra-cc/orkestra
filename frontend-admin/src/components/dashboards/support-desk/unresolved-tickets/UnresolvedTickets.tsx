@@ -1,7 +1,7 @@
 import { useRef, ChangeEvent } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import CardDropdown from 'components/common/CardDropdown';
-import FalconCardHeader from 'components/common/FalconCardHeader';
+import OrkestraCardHeader from 'components/common/OrkestraCardHeader';
 import { Card, Col, Form, Row } from 'react-bootstrap';
 import UnresolvedTicktsChart from './UnresolvedTicktsChart';
 import ReactEChartsCore from 'echarts-for-react/lib/core';
@@ -23,7 +23,7 @@ const UnresolvedTickets = ({ data }: UnresolvedTicketsProps) => {
   };
   return (
     <Card className="h-100">
-      <FalconCardHeader
+      <OrkestraCardHeader
         title="Unresolved Tickets by Priority"
         titleTag="h6"
         className="border-200 border-bottom py-2"

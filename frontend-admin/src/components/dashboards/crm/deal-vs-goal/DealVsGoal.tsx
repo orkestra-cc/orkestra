@@ -1,5 +1,5 @@
 import { Card } from 'react-bootstrap';
-import FalconCardHeader from 'components/common/FalconCardHeader';
+import OrkestraCardHeader from 'components/common/OrkestraCardHeader';
 import CardDropdown from 'components/common/CardDropdown';
 import DealVSGoalChart from './DealVsGoalChart';
 import { dealClosedVsGoalChart } from 'data/dashboard/crm';
@@ -7,7 +7,7 @@ import { dealClosedVsGoalChart } from 'data/dashboard/crm';
 const DealVsGoal = () => {
   return (
     <Card className="h-100">
-      <FalconCardHeader
+      <OrkestraCardHeader
         title="Deal Closed vs Goal"
         titleTag="h6"
         className="py-2"

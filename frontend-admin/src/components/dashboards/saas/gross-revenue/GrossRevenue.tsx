@@ -5,7 +5,7 @@ import SubtleBadge from 'components/common/SubtleBadge';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import classNames from 'classnames';
 import GrossRevenueChart from './GrossRevenueChart';
-import FalconLink from 'components/common/FalconLink';
+import OrkestraLink from 'components/common/OrkestraLink';
 import { IconProp } from '@fortawesome/fontawesome-svg-core';
 
 const months = [
@@ -191,7 +191,7 @@ const GrossRevenue = ({ data }: GrossRevenueProps) => {
             <span className="text">{previousMonth}</span>
           </Button>
         </Flex>
-        <FalconLink title="View report" className="px-0" />
+        <OrkestraLink title="View report" className="px-0" />
       </Card.Footer>
     </Card>
   );

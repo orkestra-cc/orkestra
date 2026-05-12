@@ -7,18 +7,18 @@ import {
   ZigzagTimelineData
 } from 'data/timeline/timeline';
 import classNames from 'classnames';
-import FalconComponentCard from 'components/common/FalconComponentCard';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 
 const Timeline = () => {
   return (
     <>
       <PageHeader
         title="Timeline"
-        description="Create timeline, stories, roadmap, history with Falcon’s exclusive timeline component."
+        description="Create timeline, stories, roadmap, history with Orkestra’s exclusive timeline component."
         className="mb-3"
       />
       <Card className="mb-3">
-        <FalconComponentCard.Header
+        <OrkestraComponentCard.Header
           className="bg-body-tertiary"
           title="Example"
           noPreview
@@ -68,7 +68,7 @@ const Timeline = () => {
       </Card>
 
       <Card>
-        <FalconComponentCard.Header
+        <OrkestraComponentCard.Header
           className="bg-body-tertiary"
           title="Timeline with media"
           noPreview

@@ -41,7 +41,7 @@ const EventDetailHeader = () => {
             <Flex>
               <IconButton
                 className="me-2"
-                variant="falcon-default"
+                variant="orkestra-default"
                 size="sm"
                 icon="heart"
                 iconClassName="text-danger"
@@ -50,14 +50,14 @@ const EventDetailHeader = () => {
               </IconButton>
               <IconButton
                 className="me-2"
-                variant="falcon-default"
+                variant="orkestra-default"
                 size="sm"
                 icon="share-alt"
               >
                 Share
               </IconButton>
               <Button
-                variant="falcon-primary"
+                variant="orkestra-primary"
                 size="sm"
                 className="px-4 px-sm-5"
               >

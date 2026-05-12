@@ -68,7 +68,7 @@ const CandleChart = ({ data }: CandleChartProps) => {
           dir="ltr"
         >
           <Button
-            variant="falcon-default"
+            variant="orkestra-default"
             size="sm"
             className="mb-1"
             onClick={zoomInAction}
@@ -77,7 +77,7 @@ const CandleChart = ({ data }: CandleChartProps) => {
             <FontAwesomeIcon icon="plus" />
           </Button>
           <Button
-            variant="falcon-default"
+            variant="orkestra-default"
             size="sm"
             className="mb-1"
             onClick={zoomOutAction}

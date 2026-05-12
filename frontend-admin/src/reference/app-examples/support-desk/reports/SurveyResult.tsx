@@ -153,7 +153,7 @@ const BulkAction = () => {
           </Form.Select>
           <Button
             type="button"
-            variant="falcon-default"
+            variant="orkestra-default"
             size="sm"
             className="ms-2"
           >

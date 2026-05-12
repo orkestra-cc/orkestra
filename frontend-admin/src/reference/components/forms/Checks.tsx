@@ -2,7 +2,7 @@
 import { Button } from 'react-bootstrap';
 import PageHeader from 'components/common/PageHeader';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import FalconComponentCard from 'components/common/FalconComponentCard';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 import { reactBootstrapDocsUrl } from 'helpers/utils';
 
 const checksExampleCode = `
@@ -163,33 +163,33 @@ const Checks = () => (
       </Button>
     </PageHeader>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Checks" light={false} />
-      <FalconComponentCard.Body code={checksExampleCode} language="jsx" />
-    </FalconComponentCard>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Checks" light={false} />
+      <OrkestraComponentCard.Body code={checksExampleCode} language="jsx" />
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Radios" light={false} />
-      <FalconComponentCard.Body code={radioExampleCode} language="jsx" />
-    </FalconComponentCard>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Radios" light={false} />
+      <OrkestraComponentCard.Body code={radioExampleCode} language="jsx" />
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Switches" light={false} />
-      <FalconComponentCard.Body code={switchesCode} language="jsx" />
-    </FalconComponentCard>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Switches" light={false} />
+      <OrkestraComponentCard.Body code={switchesCode} language="jsx" />
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Check Inline" light={false} />
-      <FalconComponentCard.Body code={inlineCheckboxCode} language="jsx" />
-    </FalconComponentCard>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Check Inline" light={false} />
+      <OrkestraComponentCard.Body code={inlineCheckboxCode} language="jsx" />
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Radio Inline" light={false} />
-      <FalconComponentCard.Body code={inlineRadioCode} language="jsx" />
-    </FalconComponentCard>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Radio Inline" light={false} />
+      <OrkestraComponentCard.Body code={inlineRadioCode} language="jsx" />
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Custom rendering" light={false}>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Custom rendering" light={false}>
         <p className="mt-2">
           When you need tighter control, or want to customize how the{' '}
           <code>FormCheck</code> component renders, it may better to use it's
@@ -201,9 +201,9 @@ const Checks = () => (
           provide an <code>id</code> to the <code>FormCheck</code> or{' '}
           <code>FormGroup</code> and have it propagate to the label and input).
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body code={customRenderCode} language="jsx" />
-    </FalconComponentCard>
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body code={customRenderCode} language="jsx" />
+    </OrkestraComponentCard>
   </>
 );
 

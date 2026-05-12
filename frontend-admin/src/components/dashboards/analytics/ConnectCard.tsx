@@ -24,11 +24,11 @@ const ConnectCard = () => {
               <Col className="pe-xl-8">
                 <h5 className="fs-9 mb-3 mb-sm-0 text-primary">
                   Connect your domain to your website and get things done faster
-                  with Falcon
+                  with Orkestra
                 </h5>
               </Col>
               <Col sm="auto" className="ms-auto">
-                <Button variant="falcon-primary">Connect</Button>
+                <Button variant="orkestra-primary">Connect</Button>
               </Col>
             </Row>
           </Col>

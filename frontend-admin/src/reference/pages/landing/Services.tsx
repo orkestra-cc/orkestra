@@ -18,7 +18,7 @@ const Services: React.FC = () => (
   <Section className="text-center bg-body-tertiary dark__bg-opacity-50">
     <SectionHeader
       title="Here's what's in it for you"
-      subtitle="Things you will get right out of the box with Falcon."
+      subtitle="Things you will get right out of the box with Orkestra."
     />
     <Row className="mt-6">
       {serviceList.map((service: Service, index: number) => (

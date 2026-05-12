@@ -20,8 +20,8 @@ const Rights: React.FC<RightsProps> = ({ ref }) => {
           related intellectual property rights (including patents, trademarks,
           trade secrets, and copyrights). No rights are granted to you under
           these Terms other than as expressly set forth in these Terms. You will
-          respect our proprietary rights. “falcon” and the “falcon” logo are
-          trademarks belonging to ThemeWagon, Inc. You are not authorized by us
+          respect our proprietary rights. “orkestra” and the “orkestra” logo are
+          trademarks belonging to Orkestra, Inc. You are not authorized by us
           to use our trademarks or brand assets without prior permission.
         </p>
         <hr className="my-4" />

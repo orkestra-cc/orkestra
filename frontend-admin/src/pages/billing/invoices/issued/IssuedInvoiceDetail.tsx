@@ -66,7 +66,7 @@ import {
   getPartyDisplayName
 } from 'types/billing';
 import PageHeader from 'components/common/PageHeader';
-import FalconCardHeader from 'components/common/FalconCardHeader';
+import OrkestraCardHeader from 'components/common/OrkestraCardHeader';
 
 // Payment method options
 const PAYMENT_METHODS: { value: PaymentMethod; label: string }[] = [
@@ -803,7 +803,7 @@ const IssuedInvoiceDetail: React.FC = () => {
         className="mb-3"
       >
         <Button
-          variant="falcon-default"
+          variant="orkestra-default"
           size="sm"
           className="me-2"
           onClick={() => navigate('/billing/invoices/issued')}
@@ -816,7 +816,7 @@ const IssuedInvoiceDetail: React.FC = () => {
             {invoice?.status &&
               !['draft', 'pending', 'cancelled'].includes(invoice.status) && (
                 <Button
-                  variant="falcon-default"
+                  variant="orkestra-default"
                   size="sm"
                   className="me-2"
                   onClick={handleViewHtml}
@@ -827,7 +827,7 @@ const IssuedInvoiceDetail: React.FC = () => {
                 </Button>
               )}
             <Button
-              variant="falcon-default"
+              variant="orkestra-default"
               size="sm"
               className="me-2"
               onClick={handleViewXml}
@@ -837,7 +837,7 @@ const IssuedInvoiceDetail: React.FC = () => {
               XML
             </Button>
             <Button
-              variant="falcon-default"
+              variant="orkestra-default"
               size="sm"
               className="me-2"
               onClick={handleDownloadXml}
@@ -847,7 +847,7 @@ const IssuedInvoiceDetail: React.FC = () => {
               XML
             </Button>
             <Button
-              variant="falcon-primary"
+              variant="orkestra-primary"
               size="sm"
               className="me-2"
               onClick={handleDownloadPdf}
@@ -862,7 +862,7 @@ const IssuedInvoiceDetail: React.FC = () => {
                 invoice.documentType
               ) && (
                 <Button
-                  variant="falcon-warning"
+                  variant="orkestra-warning"
                   size="sm"
                   className="me-2"
                   onClick={() =>
@@ -878,7 +878,7 @@ const IssuedInvoiceDetail: React.FC = () => {
               )}
             {canEdit && (
               <Button
-                variant="falcon-primary"
+                variant="orkestra-primary"
                 size="sm"
                 onClick={() => setIsEditMode(true)}
               >
@@ -905,7 +905,7 @@ const IssuedInvoiceDetail: React.FC = () => {
       {/* Invoice Info Summary (Read-only) */}
       {!isEditMode && (
         <Card className="mb-3">
-          <FalconCardHeader title="Riepilogo Fattura" light={false} />
+          <OrkestraCardHeader title="Riepilogo Fattura" light={false} />
           <Card.Body>
             <Row>
               <Col md={3}>
@@ -987,7 +987,7 @@ const IssuedInvoiceDetail: React.FC = () => {
 
       {/* Invoice Lines (Read-only view or Edit form) */}
       <Card className="mb-3">
-        <FalconCardHeader
+        <OrkestraCardHeader
           title={isEditMode ? 'Modifica Fattura' : 'Dettaglio Righe'}
           light={false}
         />
@@ -1407,7 +1407,7 @@ const IssuedInvoiceDetail: React.FC = () => {
                         <tr>
                           <td colSpan={9}>
                             <Button
-                              variant="falcon-primary"
+                              variant="orkestra-primary"
                               size="sm"
                               onClick={handleAddLine}
                             >
@@ -1962,7 +1962,7 @@ const IssuedInvoiceDetail: React.FC = () => {
           invoice.datiBollo ||
           invoice.datiCassaPrevidenziale?.length) && (
           <Card className="mb-3">
-            <FalconCardHeader title="Ritenute e Contributi" light={false} />
+            <OrkestraCardHeader title="Ritenute e Contributi" light={false} />
             <Card.Body>
               {/* Ritenuta d'Acconto */}
               {invoice.datiRitenuta && invoice.datiRitenuta.length > 0 && (
@@ -2050,7 +2050,7 @@ const IssuedInvoiceDetail: React.FC = () => {
       {/* Payment Terms (Read-only) */}
       {!isEditMode && invoice.paymentTerms && (
         <Card className="mb-3">
-          <FalconCardHeader title="Termini di Pagamento" light={false} />
+          <OrkestraCardHeader title="Termini di Pagamento" light={false} />
           <Card.Body>
             <Row>
               <Col md={3}>
@@ -2124,7 +2124,7 @@ const IssuedInvoiceDetail: React.FC = () => {
           {isEditMode ? (
             <>
               <Button
-                variant="falcon-default"
+                variant="orkestra-default"
                 onClick={handleCancelEdit}
                 disabled={isLoading}
               >
@@ -2132,7 +2132,7 @@ const IssuedInvoiceDetail: React.FC = () => {
               </Button>
               <div>
                 <Button
-                  variant="falcon-primary"
+                  variant="orkestra-primary"
                   onClick={handleSave}
                   disabled={isLoading}
                 >
@@ -2146,7 +2146,7 @@ const IssuedInvoiceDetail: React.FC = () => {
               <div>
                 {canEdit && (
                   <Button
-                    variant="falcon-danger"
+                    variant="orkestra-danger"
                     onClick={handleDelete}
                     disabled={isLoading}
                   >

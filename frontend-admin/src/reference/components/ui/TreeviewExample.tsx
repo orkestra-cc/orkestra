@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import { Card } from 'react-bootstrap';
 import PageHeader from 'components/common/PageHeader';
-import FalconComponentCard from 'components/common/FalconComponentCard';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 import Treeview, { TreeviewItem } from 'components/common/Treeview';
-import FalconEditor from 'components/common/FalconEditor';
+import OrkestraEditor from 'components/common/OrkestraEditor';
 
 const treeviewItems: TreeviewItem[] = [
   {
@@ -19,7 +19,7 @@ const treeviewItems: TreeviewItem[] = [
             id: '3',
             children: [
               {
-                name: 'falcon.png',
+                name: 'orkestra.png',
                 icon: 'image',
                 iconClass: 'text-success',
                 dot: 'info',
@@ -195,7 +195,7 @@ const treeviewItems = [
             id: '3',
             children: [
               {
-                name: 'falcon.png',
+                name: 'orkestra.png',
                 icon: 'image',
                 iconClass: 'text-success',
                 dot: 'info',
@@ -366,7 +366,7 @@ const objectCode = `{
       id: '2',
       children: [
         {
-          name: 'falcon.png', 
+          name: 'orkestra.png', 
           id: '3' // Every item should have an unique id
           icon: 'image', 
           iconClass: 'text-success',
@@ -411,15 +411,15 @@ const TreeviewExample = () => {
       />
 
       <Card className="mb-3">
-        <FalconComponentCard.Header title="Treeview Item Structure" noPreview />
+        <OrkestraComponentCard.Header title="Treeview Item Structure" noPreview />
         <Card.Body className="pt-0">
-          <FalconEditor code={objectCode} language="jsx" hidePreview />
+          <OrkestraEditor code={objectCode} language="jsx" hidePreview />
         </Card.Body>
       </Card>
 
-      <FalconComponentCard>
-        <FalconComponentCard.Header title="Example" />
-        <FalconComponentCard.Body
+      <OrkestraComponentCard>
+        <OrkestraComponentCard.Header title="Example" />
+        <OrkestraComponentCard.Body
           code={exampleCode}
           scope={{ Treeview }}
           language="jsx"
@@ -429,12 +429,12 @@ const TreeviewExample = () => {
             data={treeviewItems}
             expanded={['1', '2', '3', '7', '18']}
           />
-        </FalconComponentCard.Body>
-      </FalconComponentCard>
+        </OrkestraComponentCard.Body>
+      </OrkestraComponentCard>
 
-      <FalconComponentCard>
-        <FalconComponentCard.Header title="Select Example" />
-        <FalconComponentCard.Body
+      <OrkestraComponentCard>
+        <OrkestraComponentCard.Header title="Select Example" />
+        <OrkestraComponentCard.Body
           code={selectionCode}
           scope={{ Treeview }}
           language="jsx"
@@ -448,8 +448,8 @@ const TreeviewExample = () => {
             setSelectedItems={setSelectedItems}
             expanded={['1', '2', '3', '7', '18']}
           />
-        </FalconComponentCard.Body>
-      </FalconComponentCard>
+        </OrkestraComponentCard.Body>
+      </OrkestraComponentCard>
     </>
   );
 };

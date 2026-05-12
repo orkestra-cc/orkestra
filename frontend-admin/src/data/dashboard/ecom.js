@@ -89,7 +89,7 @@ export const topProducts = [
   ['Boots4', 43, 85],
   ['Reign Pro', 83, 73],
   ['Slick', 86, 62],
-  ['Falcon', 72, 53],
+  ['Orkestra', 72, 53],
   ['Sparrow', 80, 50],
   ['Hideaway', 50, 70],
   ['Freya', 80, 90]
@@ -160,7 +160,7 @@ export const recentPurchaseTableData = [
   {
     customer: 'John Doe',
     email: 'doe@gmail.com',
-    product: 'Falcon - Responsive Dashboard Template',
+    product: 'Orkestra - Responsive Dashboard Template',
     status: recentPurchaseTableBadge[0],
     amount: '$57'
   },
@@ -202,7 +202,7 @@ export const recentPurchaseTableData = [
 ];
 
 export const marketShare = [
-  { id: 1, value: 53000000, name: 'Falcon', color: 'primary' },
+  { id: 1, value: 53000000, name: 'Orkestra', color: 'primary' },
   { id: 2, value: 19000000, name: 'Sparrow', color: 'info' },
   { id: 3, value: 20000000, name: 'Phoenix', color: 'warning' }
 ];

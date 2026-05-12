@@ -75,7 +75,7 @@ const SubscriptionsListPage: React.FC = () => {
           </IconButton>
           <IconButton
             icon="sync-alt"
-            variant="falcon-default"
+            variant="orkestra-default"
             onClick={() => refetch()}
           >
             Aggiorna

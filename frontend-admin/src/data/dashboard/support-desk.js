@@ -75,13 +75,13 @@ export const todoList = [
   {
     id: 1,
     task: 'Sidenav text cutoff rendering issue',
-    title: 'Problem with Falcon theme',
+    title: 'Problem with Orkestra theme',
     completed: false
   },
   {
     id: 2,
     task: 'Notify when the WebPack release is ready',
-    title: 'Falcon Bootstarp 5',
+    title: 'Orkestra Bootstarp 5',
     completed: false
   },
   {
@@ -101,13 +101,13 @@ export const todoList = [
   {
     id: 5,
     task: 'Sidenav text cutoff rendering issue',
-    title: 'Problem with Falcon theme',
+    title: 'Problem with Orkestra theme',
     completed: false
   },
   {
     id: 6,
     task: 'Notify when the WebPack release is ready',
-    title: 'Falcon Bootstarp 5',
+    title: 'Orkestra Bootstarp 5',
     completed: false
   },
   {
@@ -259,7 +259,7 @@ export const tickets = [
       img: person3,
       size: 'xl'
     },
-    subject: 'Regarding Falcon Theme #3262',
+    subject: 'Regarding Orkestra Theme #3262',
     status: ticketsBadges[0],
     priority: {
       title: 'High',
@@ -506,7 +506,7 @@ export const tickets = [
       img: person3,
       size: 'xl'
     },
-    subject: 'Regarding Falcon Theme #3262',
+    subject: 'Regarding Orkestra Theme #3262',
     status: ticketsBadges[0],
     priority: {
       title: 'Low',
@@ -612,7 +612,7 @@ export const tickets = [
       img: person3,
       size: 'xl'
     },
-    subject: 'Regarding Falcon Theme #3262',
+    subject: 'Regarding Orkestra Theme #3262',
     status: ticketsBadges[0],
     priority: {
       title: 'Low',

@@ -7,7 +7,7 @@ import {
   faExclamationTriangle,
   faClock
 } from '@fortawesome/free-solid-svg-icons';
-import FalconCardHeader from 'components/common/FalconCardHeader';
+import OrkestraCardHeader from 'components/common/OrkestraCardHeader';
 import { Link } from 'react-router';
 import { useGetNotificationSummaryQuery } from 'store/api/billingApi';
 import { NOTIFICATION_TYPE_LABELS } from 'types/billing';
@@ -43,7 +43,7 @@ const SDINotificationsSummary = () => {
   if (isLoading) {
     return (
       <Card className="h-100">
-        <FalconCardHeader title="Notifiche SDI" titleTag="h6" light />
+        <OrkestraCardHeader title="Notifiche SDI" titleTag="h6" light />
         <Card.Body
           className="d-flex align-items-center justify-content-center"
           style={{ minHeight: 200 }}
@@ -57,7 +57,7 @@ const SDINotificationsSummary = () => {
   if (error || !summary) {
     return (
       <Card className="h-100">
-        <FalconCardHeader title="Notifiche SDI" titleTag="h6" light />
+        <OrkestraCardHeader title="Notifiche SDI" titleTag="h6" light />
         <Card.Body
           className="d-flex align-items-center justify-content-center text-warning"
           style={{ minHeight: 200 }}
@@ -90,7 +90,7 @@ const SDINotificationsSummary = () => {
 
   return (
     <Card className="h-100">
-      <FalconCardHeader
+      <OrkestraCardHeader
         title="Notifiche SDI"
         titleTag="h6"
         light

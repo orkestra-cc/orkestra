@@ -2,7 +2,7 @@
 import { Button } from 'react-bootstrap';
 import PageHeader from 'components/common/PageHeader';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import FalconComponentCard from 'components/common/FalconComponentCard';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 import { reactBootstrapDocsUrl } from 'helpers/utils';
 
 const exampleCode = `
@@ -274,28 +274,28 @@ const ButtonGroup = () => (
       </Button>
     </PageHeader>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Basic example" light={false}>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Basic example" light={false}>
         <p className="mb-0">
           Wrap a series of <code>&lt;Button&gt;</code>s in a{' '}
           <code>&lt;ButtonGroup&gt;</code>.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body code={exampleCode} language="jsx" />
-    </FalconComponentCard>
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body code={exampleCode} language="jsx" />
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Button toolbar" light={false}>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Button toolbar" light={false}>
         <p className="mb-0">
           Combine sets of <code>&lt;ButtonGroup&gt;</code>s into a{' '}
           <code>&lt;ButtonToolbar&gt;</code> for more complex components.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body code={btnToolbarCode} language="jsx" />
-    </FalconComponentCard>
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body code={btnToolbarCode} language="jsx" />
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header
         title="Button toolbar with input group"
         light={false}
       >
@@ -304,57 +304,57 @@ const ButtonGroup = () => (
           Similar to the example above, you’ll likely need some utilities though
           to space things properly.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body code={inputGroupExampleCode} language="jsx" />
-    </FalconComponentCard>
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body code={inputGroupExampleCode} language="jsx" />
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Sizing" light={false}>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Sizing" light={false}>
         <p className="mb-0">
           Instead of applying button sizing props to every button in a group,
           just add <code>size </code> prop to the{' '}
           <code>&lt;ButtonGroup&gt;</code>.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body code={sizingCode} language="jsx" />
-    </FalconComponentCard>
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body code={sizingCode} language="jsx" />
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Nesting" light={false}>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Nesting" light={false}>
         <p className="mb-0">
           You can place other button types within the
           <code>&lt;ButtonGroup&gt;</code> like{' '}
           <code>&lt;DropdownButton&gt;</code>s.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body code={nestingCode} language="jsx" />
-    </FalconComponentCard>
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body code={nestingCode} language="jsx" />
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Vertical variation" light={false}>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Vertical variation" light={false}>
         <p className="mb-0">
           Make a set of buttons appear vertically stacked rather than
           horizontally, by adding
           <code>vertical</code> to the <code>&lt;ButtonGroup&gt;</code>.
           <strong>Split button dropdowns are not supported here.</strong>
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body code={verticalVariationCode} language="jsx" />
-    </FalconComponentCard>
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body code={verticalVariationCode} language="jsx" />
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Checkbox / Radio" light={false}>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Checkbox / Radio" light={false}>
         <p className="mb-0">
           Buttons can also be used to style <code>checkbox</code> and
           <code>radio</code> form elements. This is helpful when you want a
           toggle button that works neatly inside an HTML form.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body code={toggleBtnCode} language="jsx" />
-    </FalconComponentCard>
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body code={toggleBtnCode} language="jsx" />
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Uncontrolled" light={false}>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Uncontrolled" light={false}>
         <p className="mb-0">
           For a nicer experience with checked state management use the
           <code>&lt;ToggleButtonGroup&gt;</code> instead of a{' '}
@@ -364,14 +364,14 @@ const ButtonGroup = () => (
           <code>value</code>s for a named checkbox group or the single toggled
           <code>value</code> in a similarly named radio group.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body code={unControlledCode} language="jsx" />
-    </FalconComponentCard>
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body code={unControlledCode} language="jsx" />
+    </OrkestraComponentCard>
 
-    <FalconComponentCard noGuttersBottom>
-      <FalconComponentCard.Header title="Controlled" light={false} />
-      <FalconComponentCard.Body code={controlledCode} language="jsx" />
-    </FalconComponentCard>
+    <OrkestraComponentCard noGuttersBottom>
+      <OrkestraComponentCard.Header title="Controlled" light={false} />
+      <OrkestraComponentCard.Body code={controlledCode} language="jsx" />
+    </OrkestraComponentCard>
   </>
 );
 

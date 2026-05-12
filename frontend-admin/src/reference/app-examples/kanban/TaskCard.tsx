@@ -80,7 +80,7 @@ const TaskDropMenu = ({ id }: TaskDropMenuProps) => {
       className="font-sans-serif"
     >
       <Dropdown.Toggle
-        variant="falcon-default"
+        variant="orkestra-default"
         size="sm"
         className="kanban-item-dropdown-btn hover-actions dropdown-caret-none"
       >

@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Button } from 'react-bootstrap';
 import PageHeader from 'components/common/PageHeader';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import FalconComponentCard from 'components/common/FalconComponentCard';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 import Flex from 'components/common/Flex';
 import cookieImg from 'assets/img/icons/cookie-1.png';
 import CookieNotice from 'components/common/CookieNotice';
@@ -29,7 +29,7 @@ const exampleCode = `<>
             </p>
             <Button
               size="sm"
-              variant="falcon-primary"
+              variant="orkestra-primary"
               className="me-3"
               onClick={() => setShow(!show)}
             >
@@ -48,7 +48,7 @@ const CookieNoticeExample = () => {
     <>
       <PageHeader
         title="Cookie Notice"
-        description="Falcon React has a built-in notification component that allows users to notify cookie uses on the website."
+        description="Orkestra React has a built-in notification component that allows users to notify cookie uses on the website."
         className="mb-3"
       >
         <Button
@@ -62,10 +62,10 @@ const CookieNoticeExample = () => {
         </Button>
       </PageHeader>
 
-      <FalconComponentCard>
-        <FalconComponentCard.Header title="Example" light={false}>
+      <OrkestraComponentCard>
+        <OrkestraComponentCard.Header title="Example" light={false}>
           <p className="mb-0 mt-2">
-            Falcon React's Cookie Notice uses React-Bootstrap's "Toast" feature
+            Orkestra React's Cookie Notice uses React-Bootstrap's "Toast" feature
             to show the notice content. <code>.notice </code>class is
             responsible for showing the notice as a popup. You can pass any
             React-Bootstrap's "Toast" props to <code>CookieNotice</code>{' '}
@@ -78,13 +78,13 @@ const CookieNoticeExample = () => {
               Toasts documentation on React-Bootstrap.
             </a>
           </p>
-        </FalconComponentCard.Header>
-        <FalconComponentCard.Body
+        </OrkestraComponentCard.Header>
+        <OrkestraComponentCard.Body
           code={exampleCode}
           scope={{ CookieNotice, show, setShow, Flex, cookieImg }}
           language="jsx"
         />
-      </FalconComponentCard>
+      </OrkestraComponentCard>
     </>
   );
 };

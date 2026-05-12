@@ -2,10 +2,10 @@
 import { Button, Row, Col, ListGroup } from 'react-bootstrap';
 import PageHeader from 'components/common/PageHeader';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import FalconComponentCard from 'components/common/FalconComponentCard';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 import DatePicker, { registerLocale } from 'react-datepicker';
 import { es } from 'date-fns/locale/es';
-import FalconEditor from 'components/common/FalconEditor';
+import OrkestraEditor from 'components/common/OrkestraEditor';
 
 registerLocale('es', es);
 
@@ -226,7 +226,7 @@ const DatePickerExample = () => (
   <>
     <PageHeader
       title="Date Picker"
-      description="Falcon-React uses <strong>React Datepicker</strong> as datepicker. <strong>React Datepicker</strong> is a simple and reusable Datepicker component for React."
+      description="Orkestra-React uses <strong>React Datepicker</strong> as datepicker. <strong>React Datepicker</strong> is a simple and reusable Datepicker component for React."
       className="mb-3"
     >
       <Button
@@ -243,89 +243,89 @@ const DatePickerExample = () => (
 
     <Row className="mb-3 g-3">
       <Col lg={6}>
-        <FalconComponentCard noGuttersBottom>
-          <FalconComponentCard.Header title="Date picker" />
-          <FalconComponentCard.Body
+        <OrkestraComponentCard noGuttersBottom>
+          <OrkestraComponentCard.Header title="Date picker" />
+          <OrkestraComponentCard.Body
             code={dateCode}
             scope={{ DatePicker }}
             language="jsx"
           />
-        </FalconComponentCard>
+        </OrkestraComponentCard>
       </Col>
       <Col lg={6}>
-        <FalconComponentCard noGuttersBottom>
-          <FalconComponentCard.Header title="Time picker" />
+        <OrkestraComponentCard noGuttersBottom>
+          <OrkestraComponentCard.Header title="Time picker" />
 
-          <FalconComponentCard.Body
+          <OrkestraComponentCard.Body
             code={timeCode}
             scope={{ DatePicker }}
             language="jsx"
           />
-        </FalconComponentCard>
+        </OrkestraComponentCard>
       </Col>
     </Row>
 
     <Row className="mb-3 g-3">
       <Col lg={6}>
-        <FalconComponentCard noGuttersBottom>
-          <FalconComponentCard.Header title="Date & Time picker" />
-          <FalconComponentCard.Body
+        <OrkestraComponentCard noGuttersBottom>
+          <OrkestraComponentCard.Header title="Date & Time picker" />
+          <OrkestraComponentCard.Body
             code={dateTimeCode}
             scope={{ DatePicker }}
             language="jsx"
           />
-        </FalconComponentCard>
+        </OrkestraComponentCard>
       </Col>
       <Col lg={6}>
-        <FalconComponentCard noGuttersBottom>
-          <FalconComponentCard.Header title="Date Format" />
-          <FalconComponentCard.Body
+        <OrkestraComponentCard noGuttersBottom>
+          <OrkestraComponentCard.Header title="Date Format" />
+          <OrkestraComponentCard.Body
             code={formatCode}
             scope={{ DatePicker }}
             language="jsx"
           />
-        </FalconComponentCard>
+        </OrkestraComponentCard>
       </Col>
     </Row>
 
     <Row className="mb-3 g-3">
       <Col lg={6}>
-        <FalconComponentCard noGuttersBottom>
-          <FalconComponentCard.Header title="Date Range" />
-          <FalconComponentCard.Body
+        <OrkestraComponentCard noGuttersBottom>
+          <OrkestraComponentCard.Header title="Date Range" />
+          <OrkestraComponentCard.Body
             code={rangeCode}
             scope={{ DatePicker }}
             language="jsx"
           />
-        </FalconComponentCard>
+        </OrkestraComponentCard>
       </Col>
       <Col lg={6}>
-        <FalconComponentCard noGuttersBottom>
-          <FalconComponentCard.Header title="Custom Input" />
-          <FalconComponentCard.Body
+        <OrkestraComponentCard noGuttersBottom>
+          <OrkestraComponentCard.Header title="Custom Input" />
+          <OrkestraComponentCard.Body
             code={customInputCode}
             scope={{ DatePicker, FontAwesomeIcon }}
             language="jsx"
           />
-        </FalconComponentCard>
+        </OrkestraComponentCard>
       </Col>
     </Row>
     <Row className="mb-3">
       <Col>
-        <FalconComponentCard noGuttersBottom>
-          <FalconComponentCard.Header title="Predefined Date Range" />
-          <FalconComponentCard.Body
+        <OrkestraComponentCard noGuttersBottom>
+          <OrkestraComponentCard.Header title="Predefined Date Range" />
+          <OrkestraComponentCard.Body
             code={predefinedRangesCode}
             scope={{ DatePicker, ListGroup }}
             language="jsx"
           />
-        </FalconComponentCard>
+        </OrkestraComponentCard>
       </Col>
     </Row>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Localization" noPreview />
-      <FalconComponentCard.Body>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Localization" noPreview />
+      <OrkestraComponentCard.Body>
         <p className="mb-1">
           To localize <strong>React Datepicker</strong> display components
           import <code>registerLocale</code> from react-datepicker and{' '}
@@ -336,17 +336,17 @@ const DatePickerExample = () => (
             React Datepicker Localization Documentation.
           </a>
         </p>
-        <FalconEditor code={localeDocCode} language="js" hidePreview />
-      </FalconComponentCard.Body>
-    </FalconComponentCard>
+        <OrkestraEditor code={localeDocCode} language="js" hidePreview />
+      </OrkestraComponentCard.Body>
+    </OrkestraComponentCard>
 
-    <FalconComponentCard noGuttersBottom>
-      <FalconComponentCard.Header title="Localization Example" />
-      <FalconComponentCard.Body
+    <OrkestraComponentCard noGuttersBottom>
+      <OrkestraComponentCard.Header title="Localization Example" />
+      <OrkestraComponentCard.Body
         code={LocalizationCode}
         scope={{ DatePicker }}
       />
-    </FalconComponentCard>
+    </OrkestraComponentCard>
   </>
 );
 

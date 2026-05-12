@@ -2,7 +2,7 @@
 import { Button } from 'react-bootstrap';
 import PageHeader from 'components/common/PageHeader';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import FalconComponentCard from 'components/common/FalconComponentCard';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 import { reactBootstrapDocsUrl } from 'helpers/utils';
 import { useForm } from 'react-hook-form';
 
@@ -309,13 +309,13 @@ const FormValidation = () => (
       </Button>
     </PageHeader>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Example" light={false} />
-      <FalconComponentCard.Body code={exampleCode} language="jsx" />
-    </FalconComponentCard>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Example" light={false} />
+      <OrkestraComponentCard.Body code={exampleCode} language="jsx" />
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Tooltips" light={false}>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Tooltips" light={false}>
         <p className="mt-2 mb-0">
           If your form layout allows it, you can use the <code>tooltip</code>{' '}
           prop to display validation feedback in a styled tooltip. Be sure to
@@ -323,23 +323,23 @@ const FormValidation = () => (
           positioning. In the example below, our column classes have this
           already, but your project may require an alternative setup.z
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body code={tooltipsCode} language="jsx" />
-    </FalconComponentCard>
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body code={tooltipsCode} language="jsx" />
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Input group validation" light={false}>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Input group validation" light={false}>
         <p className="mt-2 mb-0">
           To properly show rounded corners in an <code>&lt;InputGroup&gt;</code>{' '}
           with validation, the <code>&lt;InputGroup&gt;</code> requires the{' '}
           <code>hasValidation</code> prop.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body
         code={inputGroupValidationCode}
         language="jsx"
       />
-    </FalconComponentCard>
+    </OrkestraComponentCard>
 
     <PageHeader
       title="React hook form"
@@ -358,17 +358,17 @@ const FormValidation = () => (
       </Button>
     </PageHeader>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header
         title="Validation with React hook form"
         light={false}
       />
-      <FalconComponentCard.Body
+      <OrkestraComponentCard.Body
         code={reactFormHookCode}
         scope={{ useForm }}
         language="jsx"
       />
-    </FalconComponentCard>
+    </OrkestraComponentCard>
   </>
 );
 

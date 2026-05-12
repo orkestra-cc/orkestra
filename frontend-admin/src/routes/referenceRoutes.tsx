@@ -1,12 +1,12 @@
 /**
- * Reference routes — Falcon template examples and component showcases.
+ * Reference routes — Orkestra template examples and component showcases.
  * Only registered in development builds (gated by import.meta.env.DEV).
  */
 import { Suspense, lazy } from 'react';
 import type { RouteObject } from 'react-router';
 import { rootPaths } from './paths';
 import paths from './paths';
-import FalconLoader from 'components/common/FalconLoader';
+import OrkestraLoader from 'components/common/OrkestraLoader';
 import ProtectedRoute from 'components/authentication/ProtectedRoute';
 
 // Layouts
@@ -220,14 +220,14 @@ export function getReferenceRoutes(): RouteObject[] {
   }
 
   return [
-    // Legacy Falcon routes (top-level paths used by the original template)
+    // Legacy Orkestra routes (top-level paths used by the original template)
     {
       path: rootPaths.dashboardRoot,
       children: [
         {
           path: paths.analytics,
           element: (
-            <Suspense key="dashboard-analytics" fallback={<FalconLoader />}>
+            <Suspense key="dashboard-analytics" fallback={<OrkestraLoader />}>
               <Analytics />
             </Suspense>
           )
@@ -235,7 +235,7 @@ export function getReferenceRoutes(): RouteObject[] {
         {
           path: paths.crm,
           element: (
-            <Suspense key="dashboard-crm" fallback={<FalconLoader />}>
+            <Suspense key="dashboard-crm" fallback={<OrkestraLoader />}>
               <Crm />
             </Suspense>
           )
@@ -243,7 +243,7 @@ export function getReferenceRoutes(): RouteObject[] {
         {
           path: paths.saas,
           element: (
-            <Suspense key="dashboard-sass" fallback={<FalconLoader />}>
+            <Suspense key="dashboard-sass" fallback={<OrkestraLoader />}>
               <Saas />
             </Suspense>
           )
@@ -253,7 +253,7 @@ export function getReferenceRoutes(): RouteObject[] {
           element: (
             <Suspense
               key="dashboard-projectManagement"
-              fallback={<FalconLoader />}
+              fallback={<OrkestraLoader />}
             >
               <ProjectManagement />
             </Suspense>
@@ -262,7 +262,7 @@ export function getReferenceRoutes(): RouteObject[] {
         {
           path: paths.supportDesk,
           element: (
-            <Suspense key="dashboard-supportDesk" fallback={<FalconLoader />}>
+            <Suspense key="dashboard-supportDesk" fallback={<OrkestraLoader />}>
               <SupportDesk />
             </Suspense>
           )
@@ -275,7 +275,7 @@ export function getReferenceRoutes(): RouteObject[] {
         {
           path: paths.calendar,
           element: (
-            <Suspense key="calendar" fallback={<FalconLoader />}>
+            <Suspense key="calendar" fallback={<OrkestraLoader />}>
               <Calendar />
             </Suspense>
           )
@@ -284,7 +284,7 @@ export function getReferenceRoutes(): RouteObject[] {
         {
           path: paths.kanban,
           element: (
-            <Suspense key="kanban" fallback={<FalconLoader />}>
+            <Suspense key="kanban" fallback={<OrkestraLoader />}>
               <Kanban />
             </Suspense>
           )
@@ -391,7 +391,7 @@ export function getReferenceRoutes(): RouteObject[] {
     {
       path: rootPaths.tableRoot,
       element: (
-        <Suspense key="tables" fallback={<FalconLoader />}>
+        <Suspense key="tables" fallback={<OrkestraLoader />}>
           <Tables />
         </Suspense>
       )
@@ -407,7 +407,7 @@ export function getReferenceRoutes(): RouteObject[] {
             {
               path: paths.lineCharts,
               element: (
-                <Suspense key="echarts-lineChart" fallback={<FalconLoader />}>
+                <Suspense key="echarts-lineChart" fallback={<OrkestraLoader />}>
                   <LineCharts />
                 </Suspense>
               )
@@ -415,7 +415,7 @@ export function getReferenceRoutes(): RouteObject[] {
             {
               path: paths.barCharts,
               element: (
-                <Suspense key="echarts-barChart" fallback={<FalconLoader />}>
+                <Suspense key="echarts-barChart" fallback={<OrkestraLoader />}>
                   <BarCharts />
                 </Suspense>
               )
@@ -423,7 +423,7 @@ export function getReferenceRoutes(): RouteObject[] {
             {
               path: paths.candlestickCharts,
               element: (
-                <Suspense key="echarts-candleStick" fallback={<FalconLoader />}>
+                <Suspense key="echarts-candleStick" fallback={<OrkestraLoader />}>
                   <CandlestickCharts />
                 </Suspense>
               )
@@ -431,7 +431,7 @@ export function getReferenceRoutes(): RouteObject[] {
             {
               path: paths.geoMap,
               element: (
-                <Suspense key="echarts-geoMap" fallback={<FalconLoader />}>
+                <Suspense key="echarts-geoMap" fallback={<OrkestraLoader />}>
                   <GeoMaps />
                 </Suspense>
               )
@@ -441,7 +441,7 @@ export function getReferenceRoutes(): RouteObject[] {
               element: (
                 <Suspense
                   key="echarts-scatterChart"
-                  fallback={<FalconLoader />}
+                  fallback={<OrkestraLoader />}
                 >
                   <ScatterCharts />
                 </Suspense>
@@ -450,7 +450,7 @@ export function getReferenceRoutes(): RouteObject[] {
             {
               path: paths.pieCharts,
               element: (
-                <Suspense key="echarts-pieChart" fallback={<FalconLoader />}>
+                <Suspense key="echarts-pieChart" fallback={<OrkestraLoader />}>
                   <PieCharts />
                 </Suspense>
               )
@@ -458,7 +458,7 @@ export function getReferenceRoutes(): RouteObject[] {
             {
               path: paths.radarCharts,
               element: (
-                <Suspense key="echarts-radarChart" fallback={<FalconLoader />}>
+                <Suspense key="echarts-radarChart" fallback={<OrkestraLoader />}>
                   <RadarCharts />
                 </Suspense>
               )
@@ -468,7 +468,7 @@ export function getReferenceRoutes(): RouteObject[] {
               element: (
                 <Suspense
                   key="echarts-heatmapChart"
-                  fallback={<FalconLoader />}
+                  fallback={<OrkestraLoader />}
                 >
                   <HeatmapCharts />
                 </Suspense>
@@ -493,7 +493,7 @@ export function getReferenceRoutes(): RouteObject[] {
         {
           path: paths.googleMap,
           element: (
-            <Suspense key="googleMap" fallback={<FalconLoader />}>
+            <Suspense key="googleMap" fallback={<OrkestraLoader />}>
               <GoogleMapExample />
             </Suspense>
           )
@@ -501,7 +501,7 @@ export function getReferenceRoutes(): RouteObject[] {
         {
           path: paths.leafletMap,
           element: (
-            <Suspense key="leafletMap" fallback={<FalconLoader />}>
+            <Suspense key="leafletMap" fallback={<OrkestraLoader />}>
               <LeafletMapExample />
             </Suspense>
           )
@@ -515,7 +515,7 @@ export function getReferenceRoutes(): RouteObject[] {
         {
           path: paths.alerts,
           element: (
-            <Suspense key="alerts" fallback={<FalconLoader />}>
+            <Suspense key="alerts" fallback={<OrkestraLoader />}>
               <Alerts />
             </Suspense>
           )
@@ -523,7 +523,7 @@ export function getReferenceRoutes(): RouteObject[] {
         {
           path: paths.accordion,
           element: (
-            <Suspense key="accordion" fallback={<FalconLoader />}>
+            <Suspense key="accordion" fallback={<OrkestraLoader />}>
               <Accordion />
             </Suspense>
           )
@@ -533,7 +533,7 @@ export function getReferenceRoutes(): RouteObject[] {
         {
           path: paths.badges,
           element: (
-            <Suspense key="badges" fallback={<FalconLoader />}>
+            <Suspense key="badges" fallback={<OrkestraLoader />}>
               <Badges />
             </Suspense>
           )
@@ -541,7 +541,7 @@ export function getReferenceRoutes(): RouteObject[] {
         {
           path: paths.breadcrumbs,
           element: (
-            <Suspense key="breadcrumbs" fallback={<FalconLoader />}>
+            <Suspense key="breadcrumbs" fallback={<OrkestraLoader />}>
               <Breadcrumbs />
             </Suspense>
           )
@@ -549,7 +549,7 @@ export function getReferenceRoutes(): RouteObject[] {
         {
           path: paths.buttons,
           element: (
-            <Suspense key="buttons" fallback={<FalconLoader />}>
+            <Suspense key="buttons" fallback={<OrkestraLoader />}>
               <Buttons />
             </Suspense>
           )
@@ -557,7 +557,7 @@ export function getReferenceRoutes(): RouteObject[] {
         {
           path: paths.calendarExample,
           element: (
-            <Suspense key="calendarExample" fallback={<FalconLoader />}>
+            <Suspense key="calendarExample" fallback={<OrkestraLoader />}>
               <CalendarExample />
             </Suspense>
           )
@@ -660,7 +660,7 @@ export function getReferenceRoutes(): RouteObject[] {
     {
       path: paths.widgets,
       element: (
-        <Suspense key="widgets" fallback={<FalconLoader />}>
+        <Suspense key="widgets" fallback={<OrkestraLoader />}>
           <Widgets />
         </Suspense>
       )
@@ -679,7 +679,7 @@ export function getReferenceRoutes(): RouteObject[] {
               element: (
                 <Suspense
                   key="ref-dashboard-default"
-                  fallback={<FalconLoader />}
+                  fallback={<OrkestraLoader />}
                 >
                   <Dashboard />
                 </Suspense>
@@ -690,7 +690,7 @@ export function getReferenceRoutes(): RouteObject[] {
               element: (
                 <Suspense
                   key="ref-dashboard-analytics"
-                  fallback={<FalconLoader />}
+                  fallback={<OrkestraLoader />}
                 >
                   <Analytics />
                 </Suspense>
@@ -699,7 +699,7 @@ export function getReferenceRoutes(): RouteObject[] {
             {
               path: 'crm',
               element: (
-                <Suspense key="ref-dashboard-crm" fallback={<FalconLoader />}>
+                <Suspense key="ref-dashboard-crm" fallback={<OrkestraLoader />}>
                   <Crm />
                 </Suspense>
               )
@@ -707,7 +707,7 @@ export function getReferenceRoutes(): RouteObject[] {
             {
               path: 'saas',
               element: (
-                <Suspense key="ref-dashboard-saas" fallback={<FalconLoader />}>
+                <Suspense key="ref-dashboard-saas" fallback={<OrkestraLoader />}>
                   <Saas />
                 </Suspense>
               )
@@ -715,7 +715,7 @@ export function getReferenceRoutes(): RouteObject[] {
             {
               path: 'project-management',
               element: (
-                <Suspense key="ref-dashboard-pm" fallback={<FalconLoader />}>
+                <Suspense key="ref-dashboard-pm" fallback={<OrkestraLoader />}>
                   <ProjectManagement />
                 </Suspense>
               )
@@ -725,7 +725,7 @@ export function getReferenceRoutes(): RouteObject[] {
               element: (
                 <Suspense
                   key="ref-dashboard-supportdesk"
-                  fallback={<FalconLoader />}
+                  fallback={<OrkestraLoader />}
                 >
                   <SupportDesk />
                 </Suspense>
@@ -739,7 +739,7 @@ export function getReferenceRoutes(): RouteObject[] {
             {
               path: 'calendar',
               element: (
-                <Suspense key="ref-app-calendar" fallback={<FalconLoader />}>
+                <Suspense key="ref-app-calendar" fallback={<OrkestraLoader />}>
                   <Calendar />
                 </Suspense>
               )
@@ -748,7 +748,7 @@ export function getReferenceRoutes(): RouteObject[] {
             {
               path: 'kanban',
               element: (
-                <Suspense key="ref-app-kanban" fallback={<FalconLoader />}>
+                <Suspense key="ref-app-kanban" fallback={<OrkestraLoader />}>
                   <Kanban />
                 </Suspense>
               )
@@ -798,7 +798,7 @@ export function getReferenceRoutes(): RouteObject[] {
             {
               path: 'alerts',
               element: (
-                <Suspense key="ref-comp-alerts" fallback={<FalconLoader />}>
+                <Suspense key="ref-comp-alerts" fallback={<OrkestraLoader />}>
                   <Alerts />
                 </Suspense>
               )
@@ -806,7 +806,7 @@ export function getReferenceRoutes(): RouteObject[] {
             {
               path: 'accordion',
               element: (
-                <Suspense key="ref-comp-accordion" fallback={<FalconLoader />}>
+                <Suspense key="ref-comp-accordion" fallback={<OrkestraLoader />}>
                   <Accordion />
                 </Suspense>
               )
@@ -816,7 +816,7 @@ export function getReferenceRoutes(): RouteObject[] {
             {
               path: 'badges',
               element: (
-                <Suspense key="ref-comp-badges" fallback={<FalconLoader />}>
+                <Suspense key="ref-comp-badges" fallback={<OrkestraLoader />}>
                   <Badges />
                 </Suspense>
               )
@@ -826,7 +826,7 @@ export function getReferenceRoutes(): RouteObject[] {
               element: (
                 <Suspense
                   key="ref-comp-breadcrumbs"
-                  fallback={<FalconLoader />}
+                  fallback={<OrkestraLoader />}
                 >
                   <Breadcrumbs />
                 </Suspense>
@@ -835,7 +835,7 @@ export function getReferenceRoutes(): RouteObject[] {
             {
               path: 'buttons',
               element: (
-                <Suspense key="ref-comp-buttons" fallback={<FalconLoader />}>
+                <Suspense key="ref-comp-buttons" fallback={<OrkestraLoader />}>
                   <Buttons />
                 </Suspense>
               )
@@ -843,7 +843,7 @@ export function getReferenceRoutes(): RouteObject[] {
             {
               path: 'calendar',
               element: (
-                <Suspense key="ref-comp-calendar" fallback={<FalconLoader />}>
+                <Suspense key="ref-comp-calendar" fallback={<OrkestraLoader />}>
                   <CalendarExample />
                 </Suspense>
               )
@@ -942,7 +942,7 @@ export function getReferenceRoutes(): RouteObject[] {
         {
           path: 'tables',
           element: (
-            <Suspense key="ref-tables" fallback={<FalconLoader />}>
+            <Suspense key="ref-tables" fallback={<OrkestraLoader />}>
               <Tables />
             </Suspense>
           )
@@ -960,7 +960,7 @@ export function getReferenceRoutes(): RouteObject[] {
             {
               path: 'google',
               element: (
-                <Suspense key="ref-maps-google" fallback={<FalconLoader />}>
+                <Suspense key="ref-maps-google" fallback={<OrkestraLoader />}>
                   <GoogleMapExample />
                 </Suspense>
               )
@@ -971,7 +971,7 @@ export function getReferenceRoutes(): RouteObject[] {
         {
           path: 'widgets',
           element: (
-            <Suspense key="ref-widgets" fallback={<FalconLoader />}>
+            <Suspense key="ref-widgets" fallback={<OrkestraLoader />}>
               <Widgets />
             </Suspense>
           )
@@ -988,7 +988,7 @@ export function getReferenceRoutes(): RouteObject[] {
                   element: (
                     <Suspense
                       key="ref-echarts-line"
-                      fallback={<FalconLoader />}
+                      fallback={<OrkestraLoader />}
                     >
                       <LineCharts />
                     </Suspense>
@@ -997,7 +997,7 @@ export function getReferenceRoutes(): RouteObject[] {
                 {
                   path: 'bar-charts',
                   element: (
-                    <Suspense key="ref-echarts-bar" fallback={<FalconLoader />}>
+                    <Suspense key="ref-echarts-bar" fallback={<OrkestraLoader />}>
                       <BarCharts />
                     </Suspense>
                   )
@@ -1007,7 +1007,7 @@ export function getReferenceRoutes(): RouteObject[] {
                   element: (
                     <Suspense
                       key="ref-echarts-candlestick"
-                      fallback={<FalconLoader />}
+                      fallback={<OrkestraLoader />}
                     >
                       <CandlestickCharts />
                     </Suspense>
@@ -1016,7 +1016,7 @@ export function getReferenceRoutes(): RouteObject[] {
                 {
                   path: 'geo-map',
                   element: (
-                    <Suspense key="ref-echarts-geo" fallback={<FalconLoader />}>
+                    <Suspense key="ref-echarts-geo" fallback={<OrkestraLoader />}>
                       <GeoMaps />
                     </Suspense>
                   )
@@ -1026,7 +1026,7 @@ export function getReferenceRoutes(): RouteObject[] {
                   element: (
                     <Suspense
                       key="ref-echarts-scatter"
-                      fallback={<FalconLoader />}
+                      fallback={<OrkestraLoader />}
                     >
                       <ScatterCharts />
                     </Suspense>
@@ -1035,7 +1035,7 @@ export function getReferenceRoutes(): RouteObject[] {
                 {
                   path: 'pie-charts',
                   element: (
-                    <Suspense key="ref-echarts-pie" fallback={<FalconLoader />}>
+                    <Suspense key="ref-echarts-pie" fallback={<OrkestraLoader />}>
                       <PieCharts />
                     </Suspense>
                   )
@@ -1045,7 +1045,7 @@ export function getReferenceRoutes(): RouteObject[] {
                   element: (
                     <Suspense
                       key="ref-echarts-radar"
-                      fallback={<FalconLoader />}
+                      fallback={<OrkestraLoader />}
                     >
                       <RadarCharts />
                     </Suspense>
@@ -1056,7 +1056,7 @@ export function getReferenceRoutes(): RouteObject[] {
                   element: (
                     <Suspense
                       key="ref-echarts-heatmap"
-                      fallback={<FalconLoader />}
+                      fallback={<OrkestraLoader />}
                     >
                       <HeatmapCharts />
                     </Suspense>
@@ -1124,7 +1124,7 @@ export function getReferenceRoutes(): RouteObject[] {
                   element: (
                     <Suspense
                       key="ref-layout-vertical"
-                      fallback={<FalconLoader />}
+                      fallback={<OrkestraLoader />}
                     >
                       <Dashboard />
                     </Suspense>
@@ -1133,7 +1133,7 @@ export function getReferenceRoutes(): RouteObject[] {
                 {
                   path: 'top-nav',
                   element: (
-                    <Suspense key="ref-layout-top" fallback={<FalconLoader />}>
+                    <Suspense key="ref-layout-top" fallback={<OrkestraLoader />}>
                       <Dashboard />
                     </Suspense>
                   )
@@ -1143,7 +1143,7 @@ export function getReferenceRoutes(): RouteObject[] {
                   element: (
                     <Suspense
                       key="ref-layout-doubletop"
-                      fallback={<FalconLoader />}
+                      fallback={<OrkestraLoader />}
                     >
                       <Dashboard />
                     </Suspense>
@@ -1154,7 +1154,7 @@ export function getReferenceRoutes(): RouteObject[] {
                   element: (
                     <Suspense
                       key="ref-layout-combo"
-                      fallback={<FalconLoader />}
+                      fallback={<OrkestraLoader />}
                     >
                       <Dashboard />
                     </Suspense>

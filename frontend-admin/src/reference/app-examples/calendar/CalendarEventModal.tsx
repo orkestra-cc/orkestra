@@ -149,14 +149,14 @@ const CalendarEventModal = ({
       <Modal.Footer className="bg-body-tertiary px-x1 border-top-0">
         <Link
           to={paths.createEvent}
-          className="btn btn-falcon-default btn-sm"
+          className="btn btn-orkestra-default btn-sm"
         >
           <FontAwesomeIcon icon="pencil-alt" className="fs-11 me-2" />
           <span>Edit</span>
         </Link>
         <Link
           to={paths.eventDetail}
-          className="btn btn-falcon-primary btn-sm"
+          className="btn btn-orkestra-primary btn-sm"
         >
           <span>See more details</span>
           <FontAwesomeIcon icon="angle-right" className="fs-11 ms-1" />

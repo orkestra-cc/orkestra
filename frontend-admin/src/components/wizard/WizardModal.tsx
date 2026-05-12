@@ -1,4 +1,4 @@
-import FalconCloseButton from 'components/common/FalconCloseButton';
+import OrkestraCloseButton from 'components/common/OrkestraCloseButton';
 import Flex from 'components/common/Flex';
 import Lottie from 'lottie-react';
 
@@ -14,7 +14,7 @@ const WizardModal = ({ modal, setModal }: WizardModalProps) => {
   return (
     <Modal show={modal} centered dialogClassName="wizard-modal">
       <Modal.Body className="p-4">
-        <FalconCloseButton
+        <OrkestraCloseButton
           size="sm"
           className="position-absolute top-0 end-0 me-2 mt-2"
           onClick={() => setModal(!modal)}

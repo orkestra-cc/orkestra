@@ -1,6 +1,6 @@
 
 import PageHeader from 'components/common/PageHeader';
-import FalconComponentCard from 'components/common/FalconComponentCard';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 
 const textColorsCode = `<>
   <h5 class="text-primary">.text-primary</h5>
@@ -52,14 +52,14 @@ const Colors = () => (
       description="Convey meaning through color with a handful of color utility classes. Includes support for styling links with hover states, too."
       className="mb-3"
     />
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Text colors"></FalconComponentCard.Header>
-      <FalconComponentCard.Body code={textColorsCode} language="jsx" />
-    </FalconComponentCard>
-    <FalconComponentCard noGuttersBottom>
-      <FalconComponentCard.Header title="Text opacity"></FalconComponentCard.Header>
-      <FalconComponentCard.Body code={textOpacityCode} language="jsx" />
-    </FalconComponentCard>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Text colors"></OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body code={textColorsCode} language="jsx" />
+    </OrkestraComponentCard>
+    <OrkestraComponentCard noGuttersBottom>
+      <OrkestraComponentCard.Header title="Text opacity"></OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body code={textOpacityCode} language="jsx" />
+    </OrkestraComponentCard>
   </>
 );
 

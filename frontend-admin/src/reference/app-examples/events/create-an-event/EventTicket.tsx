@@ -110,13 +110,13 @@ const EventTicket = () => {
     <Card className="mb-3">
       <Card.Header as="h5">Ticket Price</Card.Header>
       <Card.Body className="bg-body-tertiary">
-        <Button variant="falcon-default" size="sm">
+        <Button variant="orkestra-default" size="sm">
           Free <span className="d-none d-sm-inline">Ticket</span>
         </Button>
-        <Button variant="falcon-primary" className="ms-2" size="sm">
+        <Button variant="orkestra-primary" className="ms-2" size="sm">
           Paid <span className="d-none d-sm-inline">Ticket</span>
         </Button>
-        <Button variant="falcon-default" className="ms-2" size="sm">
+        <Button variant="orkestra-default" className="ms-2" size="sm">
           Donation
         </Button>
 
@@ -163,7 +163,7 @@ const EventTicket = () => {
 
         <IconButton
           onClick={handleAddTicket}
-          variant="falcon-default"
+          variant="orkestra-default"
           size="sm"
           icon="plus"
           transform="shrink-3"

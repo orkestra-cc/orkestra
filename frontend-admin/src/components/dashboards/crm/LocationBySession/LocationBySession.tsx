@@ -1,6 +1,6 @@
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import CardDropdown from 'components/common/CardDropdown';
-import FalconCardHeader from 'components/common/FalconCardHeader';
+import OrkestraCardHeader from 'components/common/OrkestraCardHeader';
 import Flex from 'components/common/Flex';
 import WorldMap from 'components/dashboards/analytics/users-by-country/WorldMap';
 import { countryData } from 'data/countryData';
@@ -44,7 +44,7 @@ const LocationBySession = () => {
 
   return (
     <Card className="h-100">
-      <FalconCardHeader
+      <OrkestraCardHeader
         title="Location By Session"
         titleTag="h6"
         className="py-2"

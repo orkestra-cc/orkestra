@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useBlocker } from 'react-router';
 import { Alert, Button, Card, Modal, Nav, Spinner } from 'react-bootstrap';
-import { FalconCardHeader } from 'components/common';
+import { OrkestraCardHeader } from 'components/common';
 import type {
   ModuleConfig,
   EnvironmentConfigResponse
@@ -140,7 +140,7 @@ const ModuleConfigSection: React.FC<ModuleConfigSectionProps> = ({
   if (schema.length === 0) {
     return (
       <Card className="mb-3">
-        <FalconCardHeader title="Configuration" light={false} />
+        <OrkestraCardHeader title="Configuration" light={false} />
         <Card.Body className="text-muted text-center py-4 fs-10">
           This module has no configurable settings.
         </Card.Body>
@@ -195,7 +195,7 @@ const ModuleConfigSection: React.FC<ModuleConfigSectionProps> = ({
       )}
 
       <Card className="mb-3">
-        <FalconCardHeader
+        <OrkestraCardHeader
           title="Configuration"
           light={false}
           endEl={

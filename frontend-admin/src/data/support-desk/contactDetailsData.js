@@ -23,7 +23,7 @@ export const timeline = [
   {
     subject: 'Subscription Issue #362',
     description:
-      'On November 2, 2022, your membership at Falcon is going to expire. We really hope that you have benefited from your membership.',
+      'On November 2, 2022, your membership at Orkestra is going to expire. We really hope that you have benefited from your membership.',
     time: '09:26 PM',
     icon: 'envelope',
     priority: {

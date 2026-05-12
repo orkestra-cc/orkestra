@@ -1,5 +1,5 @@
 import { Col, Image, Row } from 'react-bootstrap';
-import FalconLightBoxGallery from 'components/common/FalconLightBoxGallery';
+import OrkestraLightBoxGallery from 'components/common/OrkestraLightBoxGallery';
 
 interface FeedGalleryProps {
   images: string[];
@@ -7,7 +7,7 @@ interface FeedGalleryProps {
 
 const FeedGallery = ({ images }: FeedGalleryProps) => {
   return (
-    <FalconLightBoxGallery images={images}>
+    <OrkestraLightBoxGallery images={images}>
       {setImgIndex => (
         <Row className="g-2">
           <Col xs={6}>
@@ -52,7 +52,7 @@ const FeedGallery = ({ images }: FeedGalleryProps) => {
           </Col>
         </Row>
       )}
-    </FalconLightBoxGallery>
+    </OrkestraLightBoxGallery>
   );
 };
 

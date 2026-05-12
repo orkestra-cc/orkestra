@@ -3,7 +3,7 @@ import { Navigate } from 'react-router';
 import type { ModuleManifest } from './types';
 import ProtectedRoute from 'components/authentication/ProtectedRoute';
 import ModuleGate from 'components/common/ModuleGate';
-import FalconLoader from 'components/common/FalconLoader';
+import OrkestraLoader from 'components/common/OrkestraLoader';
 
 const GraphExplorer = lazy(() => import('pages/graph/explorer'));
 const GraphAlgorithms = lazy(() => import('pages/graph/algorithms'));
@@ -23,7 +23,7 @@ export const graphManifest: ModuleManifest = {
       element: (
         <ModuleGate module="graph">
           <ProtectedRoute requiredPermissions={graphPerms}>
-            <Suspense key="graph-explorer" fallback={<FalconLoader />}>
+            <Suspense key="graph-explorer" fallback={<OrkestraLoader />}>
               <GraphExplorer />
             </Suspense>
           </ProtectedRoute>
@@ -35,7 +35,7 @@ export const graphManifest: ModuleManifest = {
       element: (
         <ModuleGate module="graph">
           <ProtectedRoute requiredPermissions={graphPerms}>
-            <Suspense key="graph-algorithms" fallback={<FalconLoader />}>
+            <Suspense key="graph-algorithms" fallback={<OrkestraLoader />}>
               <GraphAlgorithms />
             </Suspense>
           </ProtectedRoute>
@@ -47,7 +47,7 @@ export const graphManifest: ModuleManifest = {
       element: (
         <ModuleGate module="graph">
           <ProtectedRoute requiredPermissions={graphPerms}>
-            <Suspense key="graph-databases" fallback={<FalconLoader />}>
+            <Suspense key="graph-databases" fallback={<OrkestraLoader />}>
               <GraphDatabases />
             </Suspense>
           </ProtectedRoute>
@@ -59,7 +59,7 @@ export const graphManifest: ModuleManifest = {
       element: (
         <ModuleGate module="graph">
           <ProtectedRoute requiredPermissions={graphPerms}>
-            <Suspense key="graph-vector" fallback={<FalconLoader />}>
+            <Suspense key="graph-vector" fallback={<OrkestraLoader />}>
               <GraphVector />
             </Suspense>
           </ProtectedRoute>
@@ -75,7 +75,7 @@ export const graphManifest: ModuleManifest = {
       element: (
         <ModuleGate module="graph">
           <ProtectedRoute requiredPermissions={graphPerms}>
-            <Suspense key="graph-documents" fallback={<FalconLoader />}>
+            <Suspense key="graph-documents" fallback={<OrkestraLoader />}>
               <GraphDocuments />
             </Suspense>
           </ProtectedRoute>
@@ -87,7 +87,7 @@ export const graphManifest: ModuleManifest = {
       element: (
         <ModuleGate module="graph">
           <ProtectedRoute requiredPermissions={graphPerms}>
-            <Suspense key="graph-relationships" fallback={<FalconLoader />}>
+            <Suspense key="graph-relationships" fallback={<OrkestraLoader />}>
               <GraphRelationships />
             </Suspense>
           </ProtectedRoute>
@@ -99,7 +99,7 @@ export const graphManifest: ModuleManifest = {
       element: (
         <ModuleGate module="graph">
           <ProtectedRoute requiredPermissions={graphPerms}>
-            <Suspense key="graph-rag" fallback={<FalconLoader />}>
+            <Suspense key="graph-rag" fallback={<OrkestraLoader />}>
               <GraphRAG />
             </Suspense>
           </ProtectedRoute>

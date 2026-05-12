@@ -2,7 +2,7 @@
 import { Button } from 'react-bootstrap';
 import PageHeader from 'components/common/PageHeader';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import FalconComponentCard from 'components/common/FalconComponentCard';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 import { reactBootstrapDocsUrl } from 'helpers/utils';
 import generic1 from 'assets/img/generic/1.jpg';
 
@@ -96,63 +96,63 @@ const Placeholder = () => (
       </Button>
     </PageHeader>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Example">
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Example">
         <p className="mt-2 mb-0">
           In the example below, we take a typical card component and recreate it
           with placeholders applied to create a “loading card”. Size and
           proportions are the same between the two.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body
         code={exampleCode}
         scope={{ generic1 }}
         language="jsx"
       />
-    </FalconComponentCard>
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Width">
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Width">
         <p className="mt-2 mb-0">
           You can change the <code>width</code> through grid column classes,
           width utilities, or inline styles.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body code={widthCode} language="jsx" />
-    </FalconComponentCard>
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body code={widthCode} language="jsx" />
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Color">
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Color">
         <p className="mt-2 mb-0">
           By default, the <code> Placeholder </code> uses
           <code> currentColor </code>. This can be overriden with a custom color
           or utility class.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body code={colorCode} language="jsx" />
-    </FalconComponentCard>
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body code={colorCode} language="jsx" />
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Sizing">
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Sizing">
         <p className="mt-2 mb-0">
           The size of <code> Placeholder</code>'s are based on the typographic
           style of the parent element. Customize them with sizing props:
           <code> lg </code>, <code> sm </code>, or <code>xs</code>.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body code={sizingCode} language="jsx" />
-    </FalconComponentCard>
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body code={sizingCode} language="jsx" />
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Animation">
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Animation">
         <p className="mt-2 mb-0">
           Animate placeholders by setting the prop <code> animation </code> to
           <code> glow </code> or <code> wave </code> to better convey the
           perception of something being <em>actively</em> loaded.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body code={animationCode} language="jsx" />
-    </FalconComponentCard>
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body code={animationCode} language="jsx" />
+    </OrkestraComponentCard>
   </>
 );
 

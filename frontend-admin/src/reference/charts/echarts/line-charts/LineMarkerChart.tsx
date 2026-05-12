@@ -1,5 +1,5 @@
 
-import FalconComponentCard from 'components/common/FalconComponentCard';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 import { LineChart } from 'echarts/charts';
 import {
   GridComponent,
@@ -216,9 +216,9 @@ const chartCode = `function ChartOptions() {
 
 const LineMarkerChart = () => {
   return (
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Line marker chart" light={false} />
-      <FalconComponentCard.Body
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Line marker chart" light={false} />
+      <OrkestraComponentCard.Body
         code={chartCode}
         language="jsx"
         scope={{
@@ -228,7 +228,7 @@ const LineMarkerChart = () => {
           tooltipFormatter
         }}
       />
-    </FalconComponentCard>
+    </OrkestraComponentCard>
   );
 };
 

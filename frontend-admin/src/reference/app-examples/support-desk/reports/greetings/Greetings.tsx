@@ -13,7 +13,7 @@ const Greetings = () => {
             <div className="ms-x1">
               <h6 className="mb-1 text-primary">Welcome to</h6>
               <h4 className="mb-0 text-primary fw-bold">
-                Falcon
+                Orkestra
                 <span className="text-info fw-medium"> Support - Reports</span>
               </h4>
             </div>

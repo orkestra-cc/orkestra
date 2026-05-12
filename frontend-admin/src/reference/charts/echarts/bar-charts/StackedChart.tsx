@@ -1,5 +1,5 @@
 
-import FalconComponentCard from 'components/common/FalconComponentCard';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 
 import { BarChart } from 'echarts/charts';
 import {
@@ -157,9 +157,9 @@ const chartCode = `function ChartOptions() {
 
 const StackedChart = () => {
   return (
-    <FalconComponentCard dir="ltr" className="h-100">
-      <FalconComponentCard.Header title="Stacked chart" light={false} />
-      <FalconComponentCard.Body
+    <OrkestraComponentCard dir="ltr" className="h-100">
+      <OrkestraComponentCard.Header title="Stacked chart" light={false} />
+      <OrkestraComponentCard.Body
         code={chartCode}
         language="jsx"
         scope={{
@@ -169,7 +169,7 @@ const StackedChart = () => {
           rgbaColor
         }}
       />
-    </FalconComponentCard>
+    </OrkestraComponentCard>
   );
 };
 

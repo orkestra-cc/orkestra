@@ -2,7 +2,7 @@
 import { Button } from 'react-bootstrap';
 import PageHeader from 'components/common/PageHeader';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import FalconComponentCard from 'components/common/FalconComponentCard';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 import { BsFillAlarmFill, BsFacebook } from 'react-icons/bs';
 import { FiActivity } from 'react-icons/fi';
 import { MdAddShoppingCart } from 'react-icons/md';
@@ -65,32 +65,32 @@ const ReactIcons = () => (
       </Button>
     </PageHeader>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Bootstrap Icons" light={false} />
-      <FalconComponentCard.Body
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Bootstrap Icons" light={false} />
+      <OrkestraComponentCard.Body
         code={exampleCode}
         scope={{ BsFillAlarmFill, BsFacebook }}
         language="jsx"
       />
-    </FalconComponentCard>
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Feather Icons" light={false} />
-      <FalconComponentCard.Body
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Feather Icons" light={false} />
+      <OrkestraComponentCard.Body
         code={featherIconCode}
         scope={{ FiActivity }}
         language="jsx"
       />
-    </FalconComponentCard>
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Material Icons" light={false} />
-      <FalconComponentCard.Body
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Material Icons" light={false} />
+      <OrkestraComponentCard.Body
         code={materialIconCode}
         scope={{ MdAddShoppingCart }}
         language="jsx"
       />
-    </FalconComponentCard>
+    </OrkestraComponentCard>
   </>
 );
 

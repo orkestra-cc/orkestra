@@ -20,7 +20,7 @@ const Processes: React.FC = () => (
   <Section>
     <SectionHeader
       title="WebApp theme of the future"
-      subtitle="Built on top of Bootstrap 5, super modular Falcon provides you gorgeous design & streamlined UX for your WebApp."
+      subtitle="Built on top of Bootstrap 5, super modular Orkestra provides you gorgeous design & streamlined UX for your WebApp."
     />
     {isIterableArray(processList) &&
       (processList as ProcessItem[]).map((process, index) => (

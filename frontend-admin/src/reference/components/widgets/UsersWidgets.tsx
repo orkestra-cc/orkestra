@@ -8,7 +8,7 @@ import Notification from 'components/notification/Notification';
 import FeedCard from 'reference/app-examples/social/feed/FeedCard';
 import rawFeeds from 'data/feed';
 import FeedProvider from 'providers/FeedProvider';
-import FalconCardFooterLink from 'components/common/FalconCardFooterLink';
+import OrkestraCardFooterLink from 'components/common/OrkestraCardFooterLink';
 import ProfileBanner from 'pages/user/profile/Banner';
 import EventBanner from 'reference/app-examples/events/create-an-event/EventBanner';
 import Associations from 'reference/pages/associations/Associations';
@@ -52,7 +52,7 @@ const UsersWidgets = () => {
                 <Notification {...notification} key={notification.id} />
               ))}
             </Card.Body>
-            <FalconCardFooterLink
+            <OrkestraCardFooterLink
               title="All Notifications"
               to={paths.notifications}
               size="sm"

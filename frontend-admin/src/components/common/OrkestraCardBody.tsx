@@ -6,7 +6,7 @@ import classNames from 'classnames';
 
 type ChildrenPosition = 'top' | 'bottom';
 
-interface FalconCardBodyProps {
+interface OrkestraCardBodyProps {
   code?: string;
   scope?: Record<string, unknown>;
   language?: string;
@@ -18,7 +18,7 @@ interface FalconCardBodyProps {
   childrenPosition?: ChildrenPosition;
 }
 
-const FalconCardBody: FC<FalconCardBodyProps> = ({
+const OrkestraCardBody: FC<OrkestraCardBodyProps> = ({
   code,
   scope,
   language = 'jsx',
@@ -67,4 +67,4 @@ const FalconCardBody: FC<FalconCardBodyProps> = ({
   );
 };
 
-export default FalconCardBody;
+export default OrkestraCardBody;

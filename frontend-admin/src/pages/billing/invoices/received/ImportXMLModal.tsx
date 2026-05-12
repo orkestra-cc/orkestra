@@ -21,7 +21,7 @@ import {
   formatCurrency,
   formatItalianDate
 } from 'types/billing';
-import FalconCloseButton from 'components/common/FalconCloseButton';
+import OrkestraCloseButton from 'components/common/OrkestraCloseButton';
 
 interface ImportXMLModalProps {
   show: boolean;
@@ -147,7 +147,7 @@ const ImportXMLModal: React.FC<ImportXMLModalProps> = ({
           <FontAwesomeIcon icon="file-import" className="me-2 text-primary" />
           Importa Fattura XML
         </Modal.Title>
-        <FalconCloseButton onClick={handleClose} />
+        <OrkestraCloseButton onClick={handleClose} />
       </Modal.Header>
 
       <Modal.Body className="p-4">

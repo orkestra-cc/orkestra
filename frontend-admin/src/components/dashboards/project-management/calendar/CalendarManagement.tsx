@@ -128,7 +128,7 @@ const CalendarManagement = ({ data }: CalendarManagementProps) => {
                       }
                     >
                       <Button
-                        variant="falcon-default"
+                        variant="orkestra-default"
                         size="sm"
                         className="me-1"
                         onClick={() => {
@@ -143,7 +143,7 @@ const CalendarManagement = ({ data }: CalendarManagementProps) => {
                     </OverlayTrigger>
                     <Button
                       size="sm"
-                      variant="falcon-default"
+                      variant="orkestra-default"
                       onClick={() => {
                         if (!calendarApi) return;
                         calendarApi.today();
@@ -162,7 +162,7 @@ const CalendarManagement = ({ data }: CalendarManagementProps) => {
                       }
                     >
                       <Button
-                        variant="falcon-default"
+                        variant="orkestra-default"
                         size="sm"
                         className="ms-1"
                         onClick={() => {
@@ -178,7 +178,7 @@ const CalendarManagement = ({ data }: CalendarManagementProps) => {
                   </div>
 
                   <IconButton
-                    variant="falcon-primary"
+                    variant="orkestra-primary"
                     iconClassName="me-2"
                     icon="plus"
                     size="sm"

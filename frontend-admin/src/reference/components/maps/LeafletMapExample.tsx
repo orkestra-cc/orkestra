@@ -2,7 +2,7 @@
 import { Button } from 'react-bootstrap';
 import PageHeader from 'components/common/PageHeader';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import FalconComponentCard from 'components/common/FalconComponentCard';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 import L from 'leaflet';
 import 'leaflet.tilelayer.colorfilter';
 import 'leaflet/dist/leaflet.css';
@@ -96,7 +96,7 @@ const LeafletMapExample = () => {
     <>
       <PageHeader
         title="React Leaflet"
-        description={`Falcon uses <code> React-Leaflet </code> that provides an abstraction of <strong>Leaflet</strong> as <strong>React components</strong>. For the beautiful animated marker Clustering functionality for leaflet map we use <a href="https://github.com/YUzhva/react-leaflet-markercluster#readme" target="_blank">react-leaflet-markercluster</a> and we apply CSS color filter on map tiles by <a href="https://github.com/xtk93x/Leaflet.TileLayer.ColorFilter" target="_blank">Leaflet.TileLayer.ColorFilter</a> .  It has all the mapping features most developers ever need`}
+        description={`Orkestra uses <code> React-Leaflet </code> that provides an abstraction of <strong>Leaflet</strong> as <strong>React components</strong>. For the beautiful animated marker Clustering functionality for leaflet map we use <a href="https://github.com/YUzhva/react-leaflet-markercluster#readme" target="_blank">react-leaflet-markercluster</a> and we apply CSS color filter on map tiles by <a href="https://github.com/xtk93x/Leaflet.TileLayer.ColorFilter" target="_blank">Leaflet.TileLayer.ColorFilter</a> .  It has all the mapping features most developers ever need`}
         className="mb-3"
       >
         <Button
@@ -111,9 +111,9 @@ const LeafletMapExample = () => {
         </Button>
       </PageHeader>
 
-      <FalconComponentCard>
-        <FalconComponentCard.Header title="Example" />
-        <FalconComponentCard.Body
+      <OrkestraComponentCard>
+        <OrkestraComponentCard.Header title="Example" />
+        <OrkestraComponentCard.Body
           code={exampleCode}
           language="jsx"
           noInline
@@ -129,7 +129,7 @@ const LeafletMapExample = () => {
             useAppContext
           }}
         />
-      </FalconComponentCard>
+      </OrkestraComponentCard>
     </>
   );
 };

@@ -23,7 +23,7 @@ export const AdvanceTablePagination = () => {
     <Flex alignItems="center" justifyContent="center">
       <Button
         size="sm"
-        variant="falcon-default"
+        variant="orkestra-default"
         onClick={() => previousPage()}
         className={classNames({ disabled: !getCanPreviousPage() })}
       >
@@ -34,7 +34,7 @@ export const AdvanceTablePagination = () => {
           <li key={page} className={classNames({ active: pageIndex === page })}>
             <Button
               size="sm"
-              variant="falcon-default"
+              variant="orkestra-default"
               className={classNames('page', {
                 'me-2': index + 1 !== getPageCount()
               })}
@@ -47,7 +47,7 @@ export const AdvanceTablePagination = () => {
       </ul>
       <Button
         size="sm"
-        variant="falcon-default"
+        variant="orkestra-default"
         onClick={() => nextPage()}
         className={classNames({ disabled: !getCanNextPage() })}
       >

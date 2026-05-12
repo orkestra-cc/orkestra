@@ -1,8 +1,8 @@
 import { useRef } from 'react';
 import ReactEChartsCore from 'echarts-for-react/lib/core';
 import CardDropdown from 'components/common/CardDropdown';
-import FalconCardHeader from 'components/common/FalconCardHeader';
-import FalconLink from 'components/common/FalconLink';
+import OrkestraCardHeader from 'components/common/OrkestraCardHeader';
+import OrkestraLink from 'components/common/OrkestraLink';
 import { Button, Card, Col, Form, Row } from 'react-bootstrap';
 import UsersByCountryChart from './UsersByCountryChart';
 import WorldMap from './WorldMap';
@@ -29,7 +29,7 @@ const UsersByCountry = ({ chartData, mapData }: UsersByCountryProps) => {
   };
   return (
     <Card className="h-100">
-      <FalconCardHeader
+      <OrkestraCardHeader
         title="Users By Country"
         titleTag="h6"
         className="py-2"
@@ -71,7 +71,7 @@ const UsersByCountry = ({ chartData, mapData }: UsersByCountryProps) => {
             </Form.Select>
           </Col>
           <Col xs="auto">
-            <FalconLink title="Browser Overview" className="px-0 fw-medium" />
+            <OrkestraLink title="Browser Overview" className="px-0 fw-medium" />
           </Col>
         </Row>
       </Card.Footer>

@@ -16,7 +16,7 @@ const Starter: React.FC = () => {
             <h3 className="text-primary">Edit me!</h3>
             <p className="lead">Create Something Beautiful.</p>
             <Button
-              variant="falcon-primary"
+              variant="orkestra-primary"
               as={Link as any}
               to={paths.gettingStarted}
             >

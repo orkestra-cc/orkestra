@@ -1,5 +1,5 @@
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import FalconCardHeader from 'components/common/FalconCardHeader';
+import OrkestraCardHeader from 'components/common/OrkestraCardHeader';
 import Flex from 'components/common/Flex';
 import educationData from 'data/educations';
 import experiences from 'data/experiences';
@@ -12,7 +12,7 @@ const EducationSettings: React.FC = () => {
   const [collapsed, setCollapsed] = useState(false);
   return (
     <Card className="mt-3">
-      <FalconCardHeader title="Education" />
+      <OrkestraCardHeader title="Education" />
       <Card.Body className="fs-10 bg-body-tertiary">
         <div>
           <Flex

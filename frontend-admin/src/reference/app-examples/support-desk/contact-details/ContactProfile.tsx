@@ -1,6 +1,6 @@
 import Background from 'components/common/Background';
 import CardDropdown from 'components/common/CardDropdown';
-import FalconCardHeader from 'components/common/FalconCardHeader';
+import OrkestraCardHeader from 'components/common/OrkestraCardHeader';
 import cornerBg from 'assets/img/illustrations/corner-2.png';
 import profileImg from 'assets/img/team/5-thumb.png';
 import { Card, Col, Row } from 'react-bootstrap';
@@ -45,7 +45,7 @@ const InfoItem = ({ title, content, className }: InfoItemProps) => {
 const ContactProfile = () => {
   return (
     <Card className="mb-xl-3">
-      <FalconCardHeader
+      <OrkestraCardHeader
         title="Contact Information"
         titleTag="h6"
         className="py-2"
@@ -76,7 +76,7 @@ const ContactProfile = () => {
                   <span className="fs-11">New Ticket</span>
                 </IconButton>
                 <IconButton
-                  variant="falcon-default"
+                  variant="orkestra-default"
                   icon="phone-alt"
                   transform="shrink-4"
                   size="sm"

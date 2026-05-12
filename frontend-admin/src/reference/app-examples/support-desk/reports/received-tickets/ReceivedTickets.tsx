@@ -1,4 +1,4 @@
-import FalconLink from 'components/common/FalconLink';
+import OrkestraLink from 'components/common/OrkestraLink';
 
 import { Card, Col, Form, Row } from 'react-bootstrap';
 import SimpleBar from 'simplebar-react';
@@ -28,7 +28,7 @@ const ReceivedTickets = () => {
         </Card.Body>
       </SimpleBar>
       <Card.Footer className="text-center bg-body-tertiary py-2">
-        <FalconLink title="View all report" className="px-0 fw-medium" />
+        <OrkestraLink title="View all report" className="px-0 fw-medium" />
       </Card.Footer>
     </Card>
   );

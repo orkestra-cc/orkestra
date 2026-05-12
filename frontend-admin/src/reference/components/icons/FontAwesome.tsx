@@ -2,8 +2,8 @@
 import { Button } from 'react-bootstrap';
 import PageHeader from 'components/common/PageHeader';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import FalconComponentCard from 'components/common/FalconComponentCard';
-import FalconEditor from 'components/common/FalconEditor';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
+import OrkestraEditor from 'components/common/OrkestraEditor';
 
 const addIconCode = `import { library } from '@fortawesome/fontawesome-svg-core'
 import { faGulp } from '@fortawesome/free-brands-svg-icons' // module
@@ -48,21 +48,21 @@ const FontAwesome = () => (
       </Button>
     </PageHeader>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Add Icon" light={false} noPreview />
-      <FalconComponentCard.Body>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Add Icon" light={false} noPreview />
+      <OrkestraComponentCard.Body>
         <p>
           For adding new icon, go to <code>src/helpers/initFA.js</code> file. We
           initialize all fontawesome icons here for globally use. Import your
           icon from your desired icon module and then pass it to{' '}
           <code>library.add()</code> function.
         </p>
-        <FalconEditor code={addIconCode} language="jsx" hidePreview />
+        <OrkestraEditor code={addIconCode} language="jsx" hidePreview />
         <p className="my-3">
           you can explicitly import icons into each component for individual
           use.
         </p>
-        <FalconEditor code={individualAddIconCode} language="jsx" hidePreview />
+        <OrkestraEditor code={individualAddIconCode} language="jsx" hidePreview />
 
         <p className="mb-0 mt-3">
           For better understanding you can visit{' '}
@@ -70,17 +70,17 @@ const FontAwesome = () => (
             fontawesome usage
           </a>
         </p>
-      </FalconComponentCard.Body>
-    </FalconComponentCard>
+      </OrkestraComponentCard.Body>
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Example" light={false} />
-      <FalconComponentCard.Body
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Example" light={false} />
+      <OrkestraComponentCard.Body
         code={exampleCode}
         scope={{ FontAwesomeIcon }}
         language="jsx"
       />
-    </FalconComponentCard>
+    </OrkestraComponentCard>
   </>
 );
 

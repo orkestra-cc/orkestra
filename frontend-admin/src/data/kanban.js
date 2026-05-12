@@ -164,7 +164,7 @@ export const kanbanItems = [
           'Update profile page layout with cover image and user setting menu',
         user: 'Emma',
         labels: [{ type: 'info', text: 'Enhancement' }],
-        attachments: [{ type: 'txt', url: `falcon.txt` }],
+        attachments: [{ type: 'txt', url: `orkestra.txt` }],
         members: [
           { name: 'Emma', url: team1 },
           { name: 'Antony', url: team2 },

@@ -23,7 +23,7 @@ const Greetings = ({ data }: GreetingsProps) => {
     <Card className="h-100">
       <Background image={corner1} className="rounded-soft bg-card" />
       <Card.Header className="z-1">
-        <h5 className="text-primary">Welcome to Falcon!</h5>
+        <h5 className="text-primary">Welcome to Orkestra!</h5>
         <h6 className="text-600">Here are some quick links for you to start</h6>
       </Card.Header>
       <Card.Body className="z-1">

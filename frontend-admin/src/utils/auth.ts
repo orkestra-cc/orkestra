@@ -109,6 +109,6 @@ export const getAuthenticatedUser = (): AuthenticatedUser | null => {
 
 // Temporary function to set auth cookie for testing
 export const setTestAuthCookie = (): void => {
-  document.cookie = 'falcon_auth_token=test_token_123; path=/; max-age=86400';
+  document.cookie = 'orkestra_auth_token=test_token_123; path=/; max-age=86400';
   console.log('Test auth cookie set');
 };

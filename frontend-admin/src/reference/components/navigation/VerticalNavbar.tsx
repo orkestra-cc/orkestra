@@ -5,8 +5,8 @@ import vibrantImg from 'assets/img/generic/vibrant.png';
 import invertedImg from 'assets/img/generic/inverted.png';
 import cardImg from 'assets/img/generic/card.png';
 import PageHeader from 'components/common/PageHeader';
-import FalconComponentCard from 'components/common/FalconComponentCard';
-import FalconEditor from 'components/common/FalconEditor';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
+import OrkestraEditor from 'components/common/OrkestraEditor';
 import createMarkup from 'helpers/createMarkup';
 import Flex from 'components/common/Flex';
 
@@ -37,31 +37,31 @@ const SpinnersExample = () => {
     <>
       <PageHeader
         title="Vertical Navbar"
-        description="Here is the available built-in option of Falcon's powerful, responsive vertical navigation. The following sections describe how you can customize both the responsive breakpoint and collapsing behavior."
+        description="Here is the available built-in option of Orkestra's powerful, responsive vertical navigation. The following sections describe how you can customize both the responsive breakpoint and collapsing behavior."
         className="mb-3"
       />
 
-      <FalconComponentCard>
-        <FalconComponentCard.Header title="Responsive behavior" noPreview>
+      <OrkestraComponentCard>
+        <OrkestraComponentCard.Header title="Responsive behavior" noPreview>
           <p className="mt-2 mb-0">
-            Falcon used the react-bootstraps's <code>expand</code> property in{' '}
+            Orkestra used the react-bootstraps's <code>expand</code> property in{' '}
             <code>Navbar</code> component to decide when the navbar vertical
             will expand or not.
           </p>
-        </FalconComponentCard.Header>
-        <FalconComponentCard.Body>
-          <FalconEditor code={responsiveCode} language="jsx" hidePreview />
-        </FalconComponentCard.Body>
-      </FalconComponentCard>
+        </OrkestraComponentCard.Header>
+        <OrkestraComponentCard.Body>
+          <OrkestraEditor code={responsiveCode} language="jsx" hidePreview />
+        </OrkestraComponentCard.Body>
+      </OrkestraComponentCard>
 
-      <FalconComponentCard>
-        <FalconComponentCard.Header
+      <OrkestraComponentCard>
+        <OrkestraComponentCard.Header
           title="Collapsing behavior"
           noPreview
-        ></FalconComponentCard.Header>
-        <FalconComponentCard.Body>
+        ></OrkestraComponentCard.Header>
+        <OrkestraComponentCard.Body>
           <p>
-            You can control the default collapsing behavior of Falcon's vertical
+            You can control the default collapsing behavior of Orkestra's vertical
             navigation - whether it will show up with the collapsed or expanded
             state when the page loads. First clear your browser's localstorage
             then from your project directory go to, <code>src/config.js</code>{' '}
@@ -69,24 +69,24 @@ const SpinnersExample = () => {
             <code> isNavbarVerticalCollapsed: false </code> of{' '}
             <code>settings</code> object.
           </p>
-          <FalconEditor code={collapsingCode} language="js" hidePreview />
-        </FalconComponentCard.Body>
-      </FalconComponentCard>
+          <OrkestraEditor code={collapsingCode} language="js" hidePreview />
+        </OrkestraComponentCard.Body>
+      </OrkestraComponentCard>
 
-      <FalconComponentCard>
-        <FalconComponentCard.Header title="Customize" noPreview>
+      <OrkestraComponentCard>
+        <OrkestraComponentCard.Header title="Customize" noPreview>
           <p className="mt-2 mb-0">
-            You can easily customize Falcon's <strong>Navbar Vertical</strong>{' '}
+            You can easily customize Orkestra's <strong>Navbar Vertical</strong>{' '}
             style using SCSS variables in{' '}
             <code>src/assets/scss/theme/_variables.scss</code> file. All
             available variables are listed below:
           </p>
-        </FalconComponentCard.Header>
-        <FalconComponentCard.Body className="pb-0">
+        </OrkestraComponentCard.Header>
+        <OrkestraComponentCard.Body className="pb-0">
           <VariableValue
             title="Breakpoints"
-            description={`  Falcon use <code>$grid-brekpoints </code>in reversed order for styling navbar vertical
-              when screen size is above the breakpoint. Note: Falcon get the brekpoint from
+            description={`  Orkestra use <code>$grid-brekpoints </code>in reversed order for styling navbar vertical
+              when screen size is above the breakpoint. Note: Orkestra get the brekpoint from
               <code>.navbar-expand-* </code>class.`}
             code={`$navbar-vertical-breakpoints: mapReverse($grid-breakpoints) !default;`}
           />
@@ -123,7 +123,7 @@ const SpinnersExample = () => {
 
           <VariableValue
             title="Variation Width"
-            description="Falcon comes with different types of navbar vertical and you can change the width of those navbar by updating the variable."
+            description="Orkestra comes with different types of navbar vertical and you can change the width of those navbar by updating the variable."
             code={`$navbar-vertical-variation-width: 14.5rem !default;`}
           />
 
@@ -186,8 +186,8 @@ const SpinnersExample = () => {
             description="To change the navbar vertical scrollbar color, add the variable in your <code>_user-variables.scss</code> file"
             code={`$navbar-vertical-scrollbar-color: rgba($gray-600, 0.3) !default;`}
           />
-        </FalconComponentCard.Body>
-      </FalconComponentCard>
+        </OrkestraComponentCard.Body>
+      </OrkestraComponentCard>
 
       <hr className="bg-300 my-5" />
 
@@ -232,9 +232,9 @@ const SpinnersExample = () => {
           </Card.Body>
         </Card>
 
-        <FalconComponentCard>
-          <FalconComponentCard.Header title="How to" noPreview />
-          <FalconComponentCard.Body>
+        <OrkestraComponentCard>
+          <OrkestraComponentCard.Header title="How to" noPreview />
+          <OrkestraComponentCard.Body>
             <p>
               To convert <strong>Transparent Vertical Navbar</strong> to{' '}
               <strong>Inverted Vertical Navbar </strong>
@@ -244,15 +244,15 @@ const SpinnersExample = () => {
               <code> navbarStyle:'inverted' </code> of <code>settings</code>{' '}
               object.
             </p>
-            <FalconEditor code={invertedCode} language="js" hidePreview />
-          </FalconComponentCard.Body>
-        </FalconComponentCard>
+            <OrkestraEditor code={invertedCode} language="js" hidePreview />
+          </OrkestraComponentCard.Body>
+        </OrkestraComponentCard>
 
-        <FalconComponentCard>
-          <FalconComponentCard.Header title="SCSS" noPreview />
-          <FalconComponentCard.Body className="pb-0">
+        <OrkestraComponentCard>
+          <OrkestraComponentCard.Header title="SCSS" noPreview />
+          <OrkestraComponentCard.Body className="pb-0">
             <p>
-              Falcon allow you to customize your Navbar Inverted with SCSS
+              Orkestra allow you to customize your Navbar Inverted with SCSS
               variables. The available options are listed below:
             </p>
             <VariableValue
@@ -290,8 +290,8 @@ const SpinnersExample = () => {
               description="To change the scrollbar color, add the SCSS variable <code>$navbar-inverted-scrollbar-color </code>in your <code>_user-variables.scss</code>. Example:"
               code={`$navbar-inverted-scrollbar-color: $gray-400;`}
             />
-          </FalconComponentCard.Body>
-        </FalconComponentCard>
+          </OrkestraComponentCard.Body>
+        </OrkestraComponentCard>
       </>
 
       <>
@@ -309,7 +309,7 @@ const SpinnersExample = () => {
                   Navbar Vertical Vibrant
                 </h5>
                 <p className="mb-1">
-                  Make your Navbar Vertical more live and awesome with Falcon
+                  Make your Navbar Vertical more live and awesome with Orkestra
                   Navbar Vibrant.
                 </p>
                 <Button
@@ -330,9 +330,9 @@ const SpinnersExample = () => {
           </Card.Body>
         </Card>
 
-        <FalconComponentCard>
-          <FalconComponentCard.Header title="How to" noPreview />
-          <FalconComponentCard.Body>
+        <OrkestraComponentCard>
+          <OrkestraComponentCard.Header title="How to" noPreview />
+          <OrkestraComponentCard.Body>
             <p>
               To convert <strong>Transparent Vertical Navbar</strong> to{' '}
               <strong>Vibrant Vertical Navbar </strong>
@@ -342,13 +342,13 @@ const SpinnersExample = () => {
               <code> navbarStyle:'vibrant' </code> of <code>settings</code>{' '}
               object.
             </p>
-            <FalconEditor code={vibrantCode} language="js" hidePreview />
-          </FalconComponentCard.Body>
-        </FalconComponentCard>
+            <OrkestraEditor code={vibrantCode} language="js" hidePreview />
+          </OrkestraComponentCard.Body>
+        </OrkestraComponentCard>
 
-        <FalconComponentCard>
-          <FalconComponentCard.Header title="SCSS" noPreview />
-          <FalconComponentCard.Body className="pb-0">
+        <OrkestraComponentCard>
+          <OrkestraComponentCard.Header title="SCSS" noPreview />
+          <OrkestraComponentCard.Body className="pb-0">
             <p>
               To customize your Navbar Vibrant you can use SCSS variables. The
               available options are listed below:
@@ -388,8 +388,8 @@ const SpinnersExample = () => {
               description="To change the scrollbar, add the SCSS variable <code>$navbar-vibrant-scrollbar-color </code>in your <code>_user-variables.scss</code>. Example:"
               code={`$navbar-vibrant-scrollbar-color: $gray-400;`}
             />
-          </FalconComponentCard.Body>
-        </FalconComponentCard>
+          </OrkestraComponentCard.Body>
+        </OrkestraComponentCard>
       </>
 
       <>
@@ -407,7 +407,7 @@ const SpinnersExample = () => {
                   Navbar Vertical Card
                 </h5>
                 <p className="mb-1">
-                  Make your navbar vertical like Falcon card by using Navbar
+                  Make your navbar vertical like Orkestra card by using Navbar
                   Vertical Card.
                 </p>
                 <Button
@@ -428,9 +428,9 @@ const SpinnersExample = () => {
           </Card.Body>
         </Card>
 
-        <FalconComponentCard>
-          <FalconComponentCard.Header title="How to" noPreview />
-          <FalconComponentCard.Body>
+        <OrkestraComponentCard>
+          <OrkestraComponentCard.Header title="How to" noPreview />
+          <OrkestraComponentCard.Body>
             <p>
               To convert <strong>Transparent Vertical Navbar</strong> to{' '}
               <strong>Card Vertical Navbar </strong>
@@ -439,13 +439,13 @@ const SpinnersExample = () => {
               <code>src/config.js</code> and set
               <code> navbarStyle:'card' </code> of <code>settings</code> object.
             </p>
-            <FalconEditor code={cardCode} language="js" hidePreview />
-          </FalconComponentCard.Body>
-        </FalconComponentCard>
+            <OrkestraEditor code={cardCode} language="js" hidePreview />
+          </OrkestraComponentCard.Body>
+        </OrkestraComponentCard>
 
-        <FalconComponentCard>
-          <FalconComponentCard.Header title="SCSS" noPreview />
-          <FalconComponentCard.Body className="pb-0">
+        <OrkestraComponentCard>
+          <OrkestraComponentCard.Header title="SCSS" noPreview />
+          <OrkestraComponentCard.Body className="pb-0">
             <p>
               To customize your Navbar Vibrant you can use SCSS variables. The
               available options are listed below:
@@ -491,8 +491,8 @@ const SpinnersExample = () => {
               description="To change the scrollbar color, add the SCSS variable <code>$navbar-card-scrollbar-color </code>in your <code>_user-variables.scss</code>. Example:"
               code={`$navbar-card-scrollbar-color: $gray-400;`}
             />
-          </FalconComponentCard.Body>
-        </FalconComponentCard>
+          </OrkestraComponentCard.Body>
+        </OrkestraComponentCard>
       </>
     </>
   );
@@ -505,7 +505,7 @@ const VariableValue = ({ title, description, code }: { title: string; descriptio
     <div className="mb-4">
       <h6 className="fs-9">{title}</h6>
       <p dangerouslySetInnerHTML={createMarkup(description)} />
-      <FalconEditor code={code} language="css" hidePreview />
+      <OrkestraEditor code={code} language="css" hidePreview />
     </div>
   );
 };

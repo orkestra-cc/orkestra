@@ -3,7 +3,7 @@ import PageHeader from 'components/common/PageHeader';
 import { Card, Alert } from 'react-bootstrap';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faCircleInfo } from '@fortawesome/free-solid-svg-icons';
-import FalconEditor from 'components/common/FalconEditor';
+import OrkestraEditor from 'components/common/OrkestraEditor';
 import { contextProviderCode, forwardRefCode, useContextCode } from 'data/migration';
 
 const MigrationToNineteen = () => {
@@ -12,7 +12,7 @@ const MigrationToNineteen = () => {
       <Card.Header>
         <PageHeader
           title="Migration Guide from v4.8.0 to v5.0.0"
-          description="This guide will help you migrate Falcon React from React 18 to React 19."
+          description="This guide will help you migrate Orkestra React from React 18 to React 19."
           className="mb-3"
         />
       </Card.Header>
@@ -43,8 +43,8 @@ const MigrationToNineteen = () => {
             Step 1: Update the <code>package.json</code>
           </h5>
           <p>
-            All Falcon React packages are compatible with React 19. Please update all the dependencies {' '}
-            and devDependencies in your <code>package.json</code> to the latest version from Falcon React.
+            All Orkestra React packages are compatible with React 19. Please update all the dependencies {' '}
+            and devDependencies in your <code>package.json</code> to the latest version from Orkestra React.
           </p>
         </div>
         <div className='mb-3'>
@@ -67,7 +67,7 @@ const MigrationToNineteen = () => {
             In the <code>routes/index.js</code> where we have used suspense, you should use the <code>key</code> property.
             {' '} It helps with better page transitions that avoid hiding already visible content.
           </p>
-          <FalconEditor
+          <OrkestraEditor
             code={`<Suspense key={location.pathname} fallback={'loading...'}>\n {Your code...}\n</Suspense>`}
             language='jsx'
             hidePreview
@@ -83,7 +83,7 @@ const MigrationToNineteen = () => {
             their target. For updating the forwardRef, useContext and context provider, you can run the {' '}
             following commands:
           </p>
-          <FalconEditor
+          <OrkestraEditor
             code={`npx codemod react/19/remove-forward-ref --target src/ \nnpx codemod react/19/use-context-hook --target src/ \nnpx codemod react/19/remove-context-provider --target src/ `}
             language='bash'
             hidePreview
@@ -98,7 +98,7 @@ const MigrationToNineteen = () => {
             {' '} In the current version of react, you can use <code>ref</code> directly in
             the component. You need to update the components that use <code>forwardRef</code> to reference.
           </p>
-          <FalconEditor
+          <OrkestraEditor
             code={forwardRefCode}
             language='jsx'
             hidePreview
@@ -113,7 +113,7 @@ const MigrationToNineteen = () => {
             async data. Now look for all occurrence of <code>useContext</code> and replace them with
             {' '} <code>use()</code> hook.
           </p>
-          <FalconEditor
+          <OrkestraEditor
             code={useContextCode}
             language='jsx'
             hidePreview
@@ -128,7 +128,7 @@ const MigrationToNineteen = () => {
             {' '} So replace all the occurrences of <code>{'<Context.Provider></Context.Provider>'}</code> with the shorthand
             {' '} <code>{'<Context></Context>'}</code> syntax.
           </p>
-          <FalconEditor
+          <OrkestraEditor
             code={contextProviderCode}
             language='jsx'
             hidePreview
@@ -152,7 +152,7 @@ const MigrationToNineteen = () => {
             After replacing the <code>package.json</code> file, remove the existing <code>package-lock.json</code>
             {' '} and the <code>node_modules</code>. Then run the install command to add the dependencies.
           </p>
-          <FalconEditor
+          <OrkestraEditor
             code={`rm -rf package-lock.json node_modules && npm i`}
             language='bash'
             hidePreview
@@ -163,7 +163,7 @@ const MigrationToNineteen = () => {
           <p className='mb-2'>
             After updating all the changes. Run the projecct to see if everything works as expected.
           </p>
-          <FalconEditor
+          <OrkestraEditor
             code={`npm run dev`}
             language='bash'
             hidePreview

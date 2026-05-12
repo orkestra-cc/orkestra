@@ -1,6 +1,6 @@
 
 import PageHeader from 'components/common/PageHeader';
-import FalconComponentCard from 'components/common/FalconComponentCard';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 import { Button } from 'react-bootstrap';
 import ReactPlayer from 'react-player';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
@@ -39,23 +39,23 @@ const ReactPlayerExample = () => (
       </Button>
     </PageHeader>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Youtube player" light={false} />
-      <FalconComponentCard.Body
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Youtube player" light={false} />
+      <OrkestraComponentCard.Body
         code={youtubeCode}
         language="jsx"
         scope={{ ReactPlayer }}
       />
-    </FalconComponentCard>
+    </OrkestraComponentCard>
 
-    <FalconComponentCard noGuttersBottom>
-      <FalconComponentCard.Header title="Vimeo player" light={false} />
-      <FalconComponentCard.Body
+    <OrkestraComponentCard noGuttersBottom>
+      <OrkestraComponentCard.Header title="Vimeo player" light={false} />
+      <OrkestraComponentCard.Body
         code={vimeoCode}
         language="jsx"
         scope={{ ReactPlayer }}
       />
-    </FalconComponentCard>
+    </OrkestraComponentCard>
   </>
 );
 

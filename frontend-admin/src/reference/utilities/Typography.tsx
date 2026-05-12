@@ -1,6 +1,6 @@
 
 import PageHeader from 'components/common/PageHeader';
-import FalconComponentCard from 'components/common/FalconComponentCard';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 
 const fontFamilyCode = `<>
   <div className="text-sans-serif">Poppins</div>
@@ -107,112 +107,112 @@ const Typography = () => (
   <>
     <PageHeader
       title="Typography"
-      description="Documentation and examples for Falcon typography, including global settings, headings, body text, lists, and special typographic element."
+      description="Documentation and examples for Orkestra typography, including global settings, headings, body text, lists, and special typographic element."
       className="mb-3"
     />
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Font Family">
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Font Family">
         <p className="mb-0 mt-2">
           You have three font-family helper classes available to use.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body code={fontFamilyCode} language="jsx" />
-    </FalconComponentCard>
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body code={fontFamilyCode} language="jsx" />
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Headings">
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Headings">
         <p className="mb-0 mt-2">
           All HTML headings, <code> h1 </code>through <code> h6 </code>, are
           available.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body code={headingCode} language="jsx" />
-    </FalconComponentCard>
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body code={headingCode} language="jsx" />
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Headings with classes">
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Headings with classes">
         <p className="mb-0 mt-2">
           <code>.h1</code> through <code>.h6</code> classes are also available,
           for when you want to match the font styling of a heading but cannot
           use the associated HTML element.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body code={headingWithClassesCode} language="jsx" />
-    </FalconComponentCard>
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body code={headingWithClassesCode} language="jsx" />
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Customizing headings">
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Customizing headings">
         <p className="mb-0 mt-2">
           Use the included utility classes to recreate the small secondary
           heading text
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body code={customizingHeadingCode} language="jsx" />
-    </FalconComponentCard>
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body code={customizingHeadingCode} language="jsx" />
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Font Weights" />
-      <FalconComponentCard.Body code={fontWeightCode} language="jsx" />
-    </FalconComponentCard>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Font Weights" />
+      <OrkestraComponentCard.Body code={fontWeightCode} language="jsx" />
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Display headings">
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Display headings">
         <p className="mb-0 mt-2">
           Traditional heading elements are designed to work best in the meat of
           your page content. When you need a heading to stand out, consider
           using a<strong> display heading </strong> —a larger, slightly more
           opinionated heading style.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body code={displayCode} language="jsx" />
-    </FalconComponentCard>
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body code={displayCode} language="jsx" />
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Colors">
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Colors">
         <p className="mb-0 mt-2">
           Use the following colors to change the text color
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body code={textColorsCode} language="jsx" />
-    </FalconComponentCard>
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body code={textColorsCode} language="jsx" />
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Sizes">
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Sizes">
         <p className="mb-0 mt-2">
           If you want different sizes of fonts, you may use the following
           classes.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body code={fontSizeCode} language="jsx" />
-    </FalconComponentCard>
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body code={fontSizeCode} language="jsx" />
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Text Transformation">
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Text Transformation">
         <p className="mb-0 mt-2">
           Transform text in components with text capitalization classes.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body code={tranformationCode} language="jsx" />
-    </FalconComponentCard>
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body code={tranformationCode} language="jsx" />
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Lead">
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Lead">
         <p className="mb-0 mt-2">
           Make a paragraph stand out by adding <code>.lead</code>
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body code={leadCode} language="jsx" />
-    </FalconComponentCard>
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body code={leadCode} language="jsx" />
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Dropcap">
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Dropcap">
         <p className="mb-0 mt-2">
           Make a paragraph stand out by adding <code>.dropcap</code> class.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body code={dropCapCode} language="jsx" />
-    </FalconComponentCard>
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body code={dropCapCode} language="jsx" />
+    </OrkestraComponentCard>
   </>
 );
 

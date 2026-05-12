@@ -27,7 +27,7 @@ const Instructions: React.FC<InstructionsProps> = ({ ref }) => {
             <tr>
               <td>Subject matter of the processing</td>
               <td>
-                Providing the Customer with bulk email sending via the Falcon
+                Providing the Customer with bulk email sending via the Orkestra
                 platform.
               </td>
             </tr>
@@ -81,7 +81,7 @@ const Instructions: React.FC<InstructionsProps> = ({ ref }) => {
         <Row>
           <Col xs={6}>
             <p>
-              <strong>Falcon</strong>
+              <strong>Orkestra</strong>
               <br />
             </p>
             <p>

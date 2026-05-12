@@ -1,13 +1,13 @@
 import { Card, Col, Form, Row } from 'react-bootstrap';
-import FalconCardHeader from 'components/common/FalconCardHeader';
+import OrkestraCardHeader from 'components/common/OrkestraCardHeader';
 import CardDropdown from 'components/common/CardDropdown';
-import FalconLink from 'components/common/FalconLink';
+import OrkestraLink from 'components/common/OrkestraLink';
 import TrafficSourceChart from './TrafficSourceChart';
 
 function TrafficSource() {
   return (
     <Card className="h-100">
-      <FalconCardHeader
+      <OrkestraCardHeader
         title="Traffic source"
         titleTag="h6"
         className="py-2"
@@ -28,7 +28,7 @@ function TrafficSource() {
             </Form.Select>
           </Col>
           <Col xs="auto">
-            <FalconLink
+            <OrkestraLink
               title="Acquisition overview"
               className="px-0 fw-medium"
             />

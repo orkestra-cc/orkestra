@@ -22,7 +22,7 @@ const Discussion = ({ data }: DiscussionProps) => {
         <Flex justifyContent="between">
           <div>
             <p className="mb-1 fs-11 text-500">Upcoming schedule</p>
-            <h5 className="text-primary fs-9">Falcon discussion</h5>
+            <h5 className="text-primary fs-9">Orkestra discussion</h5>
           </div>
           <div
             className="bg-primary-subtle px-3 py-3 rounded-circle text-center"
@@ -40,7 +40,7 @@ const Discussion = ({ data }: DiscussionProps) => {
         <Row className="g-3 justify-content-between">
           <Col xs={10} className="mt-0">
             <p className="fs-10 text-600 mb-0">
-              The very first general meeting for planning Falcon’s design and
+              The very first general meeting for planning Orkestra’s design and
               development roadmap
             </p>
           </Col>

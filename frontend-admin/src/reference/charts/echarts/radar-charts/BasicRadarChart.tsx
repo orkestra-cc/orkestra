@@ -1,5 +1,5 @@
 
-import FalconComponentCard from 'components/common/FalconComponentCard';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 
 import { RadarChart } from 'echarts/charts';
 import {
@@ -98,9 +98,9 @@ const chartCode = `function ChartOptions() {
 
 const BasicRadarChart = () => {
   return (
-    <FalconComponentCard dir="ltr">
-      <FalconComponentCard.Header title="Radar chart" light={false} />
-      <FalconComponentCard.Body
+    <OrkestraComponentCard dir="ltr">
+      <OrkestraComponentCard.Header title="Radar chart" light={false} />
+      <OrkestraComponentCard.Body
         code={chartCode}
         language="jsx"
         scope={{
@@ -110,7 +110,7 @@ const BasicRadarChart = () => {
           rgbaColor
         }}
       />
-    </FalconComponentCard>
+    </OrkestraComponentCard>
   );
 };
 

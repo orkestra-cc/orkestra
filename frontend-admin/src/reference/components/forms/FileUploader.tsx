@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Button, Dropdown, Form } from 'react-bootstrap';
 import PageHeader from 'components/common/PageHeader';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import FalconComponentCard from 'components/common/FalconComponentCard';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 import { getSize } from 'helpers/utils';
 import Flex from 'components/common/Flex';
 import { useDropzone } from 'react-dropzone';
@@ -277,7 +277,7 @@ function FileUploadValidation() {
           </Flex>
         ))}
       </div>
-      <Button variant="falcon-primary" type="submit" className="me-2" size="sm">
+      <Button variant="orkestra-primary" type="submit" className="me-2" size="sm">
         Submit
       </Button>
     </Form>
@@ -289,7 +289,7 @@ const FileUploader = () => (
   <>
     <PageHeader
       title="File Uploader"
-      description="Falcon-React uses <strong>React Dropzone</strong> for file-uploader. <strong>React Dropzone</strong> provides a simple react hook to create a HTML5-compliant drag'n'drop zone for files."
+      description="Orkestra-React uses <strong>React Dropzone</strong> for file-uploader. <strong>React Dropzone</strong> provides a simple react hook to create a HTML5-compliant drag'n'drop zone for files."
       className="mb-3"
     >
       <Button
@@ -304,43 +304,43 @@ const FileUploader = () => (
       </Button>
     </PageHeader>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Example" light={false} />
-      <FalconComponentCard.Body
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Example" light={false} />
+      <OrkestraComponentCard.Body
         code={exampleCode}
         language="jsx"
         scope={{ useDropzone, Flex, cloudUpload }}
       />
-    </FalconComponentCard>
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Single File Upload" light={false} />
-      <FalconComponentCard.Body
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Single File Upload" light={false} />
+      <OrkestraComponentCard.Body
         code={singleFileCode}
         language="jsx"
         scope={{ useDropzone, Flex, cloudUpload }}
       />
-    </FalconComponentCard>
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Image Preview" light={false} />
-      <FalconComponentCard.Body
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Image Preview" light={false} />
+      <OrkestraComponentCard.Body
         code={previewCode}
         language="jsx"
         scope={{ useDropzone, Flex, cloudUpload, CardDropdown, getSize }}
       />
-    </FalconComponentCard>
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="With Validation" light={false} />
-      <FalconComponentCard.Body
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="With Validation" light={false} />
+      <OrkestraComponentCard.Body
         code={validationCode}
         language="jsx"
         hidePreview
       >
         <FileUploadValidation />
-      </FalconComponentCard.Body>
-    </FalconComponentCard>
+      </OrkestraComponentCard.Body>
+    </OrkestraComponentCard>
   </>
 );
 

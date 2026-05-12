@@ -48,7 +48,7 @@ import type {
 } from 'types/billing';
 import { formatItalianDate, DOCUMENT_TYPE_LABELS } from 'types/billing';
 import PageHeader from 'components/common/PageHeader';
-import FalconCardHeader from 'components/common/FalconCardHeader';
+import OrkestraCardHeader from 'components/common/OrkestraCardHeader';
 
 // Forfettario (RF19) mandatory causale texts
 const FORFETTARIO_CAUSALE =
@@ -750,7 +750,7 @@ const NewIssuedInvoice: React.FC = () => {
         className="mb-3"
       >
         <Button
-          variant="falcon-default"
+          variant="orkestra-default"
           size="sm"
           className="me-2"
           onClick={() => navigate('/billing/invoices/issued')}
@@ -794,7 +794,7 @@ const NewIssuedInvoice: React.FC = () => {
       )}
 
       <Card className="mb-3">
-        <FalconCardHeader
+        <OrkestraCardHeader
           title={isCreditNote ? 'Dati Nota di Credito' : 'Dati Fattura'}
           light={false}
         />
@@ -1308,7 +1308,7 @@ const NewIssuedInvoice: React.FC = () => {
                       <tr>
                         <td colSpan={9}>
                           <Button
-                            variant="falcon-primary"
+                            variant="orkestra-primary"
                             size="sm"
                             onClick={handleAddLine}
                           >
@@ -1876,7 +1876,7 @@ const NewIssuedInvoice: React.FC = () => {
       <Card>
         <Card.Body className="d-flex justify-content-between">
           <Button
-            variant="falcon-default"
+            variant="orkestra-default"
             onClick={() => navigate('/billing/invoices/issued')}
             disabled={isLoading}
           >
@@ -1884,7 +1884,7 @@ const NewIssuedInvoice: React.FC = () => {
           </Button>
           <div>
             <Button
-              variant="falcon-primary"
+              variant="orkestra-primary"
               className="me-2"
               onClick={handleSaveDraft}
               disabled={isLoading}

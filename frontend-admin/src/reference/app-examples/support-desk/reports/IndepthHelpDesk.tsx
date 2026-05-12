@@ -2,7 +2,7 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { inDepthItems } from 'data/support-desk/reportsData';
 import { Card, Col, Form, Nav, ProgressBar, Row, Tab } from 'react-bootstrap';
 import SimpleBar from 'simplebar-react';
-import FalconLink from 'components/common/FalconLink';
+import OrkestraLink from 'components/common/OrkestraLink';
 
 interface InDepthItemProps {
   item: any;
@@ -31,7 +31,7 @@ const InDepthItem = ({ item, status }: InDepthItemProps) => {
           className="w-100 animated-progress-bar"
           style={{
             height: '6px',
-            '--falcon-progressbar-width': `${
+            '--orkestra-progressbar-width': `${
               status === 'created'
                 ? item.progressbarWidth[0]
                 : status === 'resolved'
@@ -183,7 +183,7 @@ const IndepthHelpDesk = () => {
             </Form.Select>
           </Col>
           <Col xs="auto">
-            <FalconLink title="View all" className="px-0 fw-medium" />
+            <OrkestraLink title="View all" className="px-0 fw-medium" />
           </Col>
         </Row>
       </Card.Footer>

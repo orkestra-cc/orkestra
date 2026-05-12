@@ -59,7 +59,7 @@ const InvitePeople: React.FC = () => {
               <Row className="gx-2 my-4">
                 <Col lg={4}>
                   <Button
-                    variant="falcon-default"
+                    variant="orkestra-default"
                     className="d-block w-100 mb-2 mb-xl-0"
                   >
                     <img src={gmail} width="20" alt="icon" />
@@ -70,7 +70,7 @@ const InvitePeople: React.FC = () => {
                   <IconButton
                     className="d-block w-100 mb-2 mb-xl-0"
                     iconClassName="me-2"
-                    variant="falcon-default"
+                    variant="orkestra-default"
                     icon="link"
                     onClick={handleCopy}
                   >
@@ -80,7 +80,7 @@ const InvitePeople: React.FC = () => {
                 <Col lg={4}>
                   <IconButton
                     className="d-block w-100 mb-xl-0"
-                    variant="falcon-default"
+                    variant="orkestra-default"
                     icon={['fab', 'facebook-square']}
                     iconClassName="text-facebook me-2"
                     transform="grow-2"

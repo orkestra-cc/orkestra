@@ -8,7 +8,7 @@ interface InvitePeopleModalProps {
 }
 
 const InvitePeopleModal: React.FC<InvitePeopleModalProps> = ({ show, setShow }) => {
-  const [copyLinkText] = useState('https://falcon.com/invited');
+  const [copyLinkText] = useState('https://orkestra.cc/invited');
   const copyRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {

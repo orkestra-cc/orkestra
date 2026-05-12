@@ -5,7 +5,7 @@ import FeedEvent from './FeedEvent';
 import classNames from 'classnames';
 import FeedUrl from './FeedUrl';
 import FeedGallery from 'reference/app-examples/social/feed/FeedGallery';
-import FalconLightBox from 'components/common/FalconLightBox';
+import OrkestraLightBox from 'components/common/OrkestraLightBox';
 
 interface FeedCardContentProps {
   status?: string;
@@ -28,9 +28,9 @@ const FeedCardContent = ({
     <Card.Body className={classNames({ 'p-0': !!feedEvent })}>
       {!!status && <p dangerouslySetInnerHTML={createMarkup(status)} />}
       {!!imgSrc && (
-        <FalconLightBox image={imgSrc}>
+        <OrkestraLightBox image={imgSrc}>
           <Image src={imgSrc} fluid rounded />
-        </FalconLightBox>
+        </OrkestraLightBox>
       )}
       {!!gallery && <FeedGallery images={gallery} />}
       {!!feedEvent && <FeedEvent {...feedEvent} />}

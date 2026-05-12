@@ -17,7 +17,7 @@ import tenantReducer from './slices/tenantSlice';
 import { baseApi } from './api/baseApi';
 
 const authPersistConfig = {
-  key: 'falcon-auth-storage',
+  key: 'orkestra-auth-storage',
   storage,
   whitelist: ['preferences']
 };

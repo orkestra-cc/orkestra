@@ -33,7 +33,7 @@ export const notifications = [
       size: 'xl'
     },
     children:
-      'Last chance to vote in <strong>The 2018 Falcon Choice Awards</strong>! See what made it to the Final Round and help your favorites take home the win. Voting closes on November 26',
+      'Last chance to vote in <strong>The 2018 Orkestra Choice Awards</strong>! See what made it to the Final Round and help your favorites take home the win. Voting closes on November 26',
     time: '15m',
     emoji: '🏆',
     className: 'rounded-0 border-x-0 border-300 border-bottom-0',

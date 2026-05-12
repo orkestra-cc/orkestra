@@ -1,6 +1,6 @@
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import CardDropdown from 'components/common/CardDropdown';
-import FalconCardHeader from 'components/common/FalconCardHeader';
+import OrkestraCardHeader from 'components/common/OrkestraCardHeader';
 
 import { Badge, Card, Col, Row } from 'react-bootstrap';
 import CustomerSatisfactionChart from './CustomerSatisfactionChart';
@@ -8,7 +8,7 @@ import CustomerSatisfactionChart from './CustomerSatisfactionChart';
 const CustomerSatisfaction = () => {
   return (
     <Card className="card h-100">
-      <FalconCardHeader
+      <OrkestraCardHeader
         title="Customer Satisfaction"
         titleTag="h6"
         className="border-200 border-bottom py-2"

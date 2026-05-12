@@ -7,7 +7,7 @@ interface UseScrollSpyOptions {
 
 // Local replacement for the abandoned `react-use-scrollspy` package, which
 // transitively pinned a vulnerable lodash with no upstream remediation.
-// API mirrors the v3 signature so the three Falcon-reference call sites stay
+// API mirrors the v3 signature so the three Orkestra-reference call sites stay
 // untouched in shape.
 export default function useScrollSpy({
   sectionElementRefs,

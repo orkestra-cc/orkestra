@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Card } from 'react-bootstrap';
 import experiences from 'data/experiences';
-import FalconCardHeader from 'components/common/FalconCardHeader';
+import OrkestraCardHeader from 'components/common/OrkestraCardHeader';
 import Experience from '../Experience';
 import ExperienceForm from './ExperienceForm';
 
@@ -9,7 +9,7 @@ const ExperiencesSettings: React.FC = () => {
   const [collapsed, setCollapsed] = useState(false);
   return (
     <Card className="mt-3">
-      <FalconCardHeader title="Experiences" />
+      <OrkestraCardHeader title="Experiences" />
       <Card.Body className="fs-10 bg-body-tertiary">
         <ExperienceForm collapsed={collapsed} setCollapsed={setCollapsed} />
         {experiences.map((experience: any, index: number) => (

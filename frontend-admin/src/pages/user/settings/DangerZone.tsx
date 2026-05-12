@@ -1,4 +1,4 @@
-import FalconCardHeader from 'components/common/FalconCardHeader';
+import OrkestraCardHeader from 'components/common/OrkestraCardHeader';
 
 import { Button, Card } from 'react-bootstrap';
 import { Link } from 'react-router';
@@ -6,7 +6,7 @@ import { Link } from 'react-router';
 const DangerZone: React.FC = () => {
   return (
     <Card>
-      <FalconCardHeader title="Danger Zone" />
+      <OrkestraCardHeader title="Danger Zone" />
       <Card.Body className="bg-body-tertiary">
         <h5 className="mb-0">Privacy & your data</h5>
         <p className="fs-10">
@@ -16,7 +16,7 @@ const DangerZone: React.FC = () => {
         <Button
           as={Link as any}
           to="/user/privacy"
-          variant="falcon-danger"
+          variant="orkestra-danger"
           className="w-100"
         >
           Manage privacy

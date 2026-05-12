@@ -2,7 +2,7 @@
 import { Button } from 'react-bootstrap';
 import PageHeader from 'components/common/PageHeader';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import FalconComponentCard from 'components/common/FalconComponentCard';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 import { reactBootstrapDocsUrl } from 'helpers/utils';
 
 const exampleCode = `
@@ -126,8 +126,8 @@ const FloatingLabels = () => (
       </Button>
     </PageHeader>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Example" light={false}>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Example" light={false}>
         <p className="mt-2 mb-0">
           Wrap a <code>&lt;Form.Control&gt;</code> element in{' '}
           <code>&lt;FloatingLabel&gt;</code> to enable floating labels with
@@ -136,12 +136,12 @@ const FloatingLabels = () => (
           CSS-only floating labels uses the <code>:placeholder-shown</code>{' '}
           pseudo-element.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body code={exampleCode} language="jsx" />
-    </FalconComponentCard>
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body code={exampleCode} language="jsx" />
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Textareas" light={false}>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Textareas" light={false}>
         <p className="mt-2 mb-0">
           By default, <code>&lt;textarea&gt;</code>s will be the same height as{' '}
           <code>&lt;input&gt;</code>s. To set a custom height on your{' '}
@@ -149,53 +149,53 @@ const FloatingLabels = () => (
           attribute. Instead, set an explicit <code>height</code> (either inline
           or via custom CSS).
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body code={textAreaCodes} language="jsx" />
-    </FalconComponentCard>
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body code={textAreaCodes} language="jsx" />
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Validation" light={false}>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Validation" light={false}>
         <p className="mt-2 mb-0">
           Use <code>isValid</code> or <code>isInvalid</code> props for
           validation.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body code={validationCode} language="jsx" />
-    </FalconComponentCard>
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body code={validationCode} language="jsx" />
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Selects" light={false}>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Selects" light={false}>
         <p className="mt-2 mb-0">
           Other than <code>&lt;Form.Control&gt;</code>, floating labels are only
           available on <code>&lt;Form.Select&gt;</code>s. They work in the same
           way, but unlike <code>&lt;input&gt;</code>s, they’ll always show the{' '}
           <code>&lt;label&gt;</code> in its floated state.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body code={selectsCode} language="jsx" />
-    </FalconComponentCard>
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body code={selectsCode} language="jsx" />
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Layout" light={false}>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Layout" light={false}>
         <p className="mt-2 mb-0">
           When working with the Bootstrap grid system, be sure to place form
           elements within column classes.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body code={layoutCode} language="jsx" />
-    </FalconComponentCard>
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body code={layoutCode} language="jsx" />
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Customizing rendering" light={false}>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Customizing rendering" light={false}>
         <p className="mt-2 mb-0">
           If you need greater control over the rendering, use the{' '}
           <code>&lt;FormFloating&gt;</code> component to wrap your input and
           label. Also note that the <code>&lt;Form.Control&gt;</code> must come
           first so we can utilize a sibling selector (e.g., ~).
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body code={customizingRenderCode} language="jsx" />
-    </FalconComponentCard>
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body code={customizingRenderCode} language="jsx" />
+    </OrkestraComponentCard>
   </>
 );
 

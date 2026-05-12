@@ -1,15 +1,15 @@
 
 import CardDropdown from 'components/common/CardDropdown';
-import FalconCardHeader from 'components/common/FalconCardHeader';
+import OrkestraCardHeader from 'components/common/OrkestraCardHeader';
 import SimpleBar from 'simplebar-react';
 import { Card } from 'react-bootstrap';
 import SatisfactionSurveyChart from './SatisfactionSurveyChart';
-import FalconLink from 'components/common/FalconLink';
+import OrkestraLink from 'components/common/OrkestraLink';
 
 const SatisfactionSurvey = () => {
   return (
     <Card className="mt-3">
-      <FalconCardHeader
+      <OrkestraCardHeader
         title="Customer Satisfaction Survey"
         titleTag="h6"
         className="py-2 border-bottom"
@@ -21,7 +21,7 @@ const SatisfactionSurvey = () => {
         </Card.Body>
       </SimpleBar>
       <Card.Footer className="text-center bg-body-tertiary py-2">
-        <FalconLink title="View all" className="px-0 fw-medium" />
+        <OrkestraLink title="View all" className="px-0 fw-medium" />
       </Card.Footer>
     </Card>
   );

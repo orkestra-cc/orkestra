@@ -39,10 +39,10 @@ const Banner: React.FC = () => {
               Senior Software Engineer at Technext Limited
             </h5>
             <p className="text-500">New York, USA</p>
-            <Button variant="falcon-primary" size="sm" className="px-3">
+            <Button variant="orkestra-primary" size="sm" className="px-3">
               Following
             </Button>
-            <Button variant="falcon-default" size="sm" className="px-3 ms-2">
+            <Button variant="orkestra-default" size="sm" className="px-3 ms-2">
               Message
             </Button>
             <div className="border-dashed border-bottom my-4 d-lg-none" />

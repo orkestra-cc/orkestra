@@ -219,7 +219,7 @@ export const rgbaColors: string[] = colors.map(color => rgbaColor(color));
 
 export const getColor = (name: string): string => {
   const dom = document.documentElement;
-  return getComputedStyle(dom).getPropertyValue(`--falcon-${name}`).trim();
+  return getComputedStyle(dom).getPropertyValue(`--orkestra-${name}`).trim();
 };
 
 //===============================

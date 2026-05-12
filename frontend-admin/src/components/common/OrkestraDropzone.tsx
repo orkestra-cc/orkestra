@@ -13,7 +13,7 @@ export interface CustomFile {
   type?: string;
 }
 
-interface FalconDropzoneProps extends Omit<DropzoneOptions, 'onDrop'> {
+interface OrkestraDropzoneProps extends Omit<DropzoneOptions, 'onDrop'> {
   className?: string;
   onChange: (files: CustomFile[]) => void;
   files?: CustomFile[];
@@ -44,14 +44,14 @@ const getSize = (size: number) => {
   }
 };
 
-const FalconDropzone = ({
+const OrkestraDropzone = ({
   placeholder = <img src={cloudUpload} alt="" width={25} className="me-2" />,
   className,
   onChange,
   files = [],
   preview = false,
   ...rest
-}: FalconDropzoneProps) => (
+}: OrkestraDropzoneProps) => (
   <>
     <Dropzone
       {...rest}
@@ -127,4 +127,4 @@ const FalconDropzone = ({
   </>
 );
 
-export default FalconDropzone;
+export default OrkestraDropzone;

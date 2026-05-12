@@ -1,5 +1,5 @@
 
-import FalconComponentCard from 'components/common/FalconComponentCard';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 import { BarChart } from 'echarts/charts';
 import {
   GridComponent,
@@ -200,9 +200,9 @@ const chartCode = `function ChartOptions() {
 
 const BarLineMixedChart = () => {
   return (
-    <FalconComponentCard className="h-100">
-      <FalconComponentCard.Header title="Mixed chart" light={false} />
-      <FalconComponentCard.Body
+    <OrkestraComponentCard className="h-100">
+      <OrkestraComponentCard.Header title="Mixed chart" light={false} />
+      <OrkestraComponentCard.Body
         code={chartCode}
         language="jsx"
         scope={{
@@ -212,7 +212,7 @@ const BarLineMixedChart = () => {
           useAppContext
         }}
       />
-    </FalconComponentCard>
+    </OrkestraComponentCard>
   );
 };
 

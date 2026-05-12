@@ -1,5 +1,5 @@
 
-import FalconComponentCard from 'components/common/FalconComponentCard';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 import { LineChart, PieChart } from 'echarts/charts';
 import {
   GridComponent,
@@ -207,9 +207,9 @@ const chartCode = `function ChartOptions() {
 
 const LineShareDatasetChart = () => {
   return (
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Share Dataset" light={false} />
-      <FalconComponentCard.Body
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Share Dataset" light={false} />
+      <OrkestraComponentCard.Body
         code={chartCode}
         language="jsx"
         scope={{
@@ -218,7 +218,7 @@ const LineShareDatasetChart = () => {
           useAppContext
         }}
       />
-    </FalconComponentCard>
+    </OrkestraComponentCard>
   );
 };
 

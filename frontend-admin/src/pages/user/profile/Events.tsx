@@ -1,6 +1,6 @@
-import FalconCardHeader from 'components/common/FalconCardHeader';
+import OrkestraCardHeader from 'components/common/OrkestraCardHeader';
 import { Card } from 'react-bootstrap';
-import FalconCardFooterLink from 'components/common/FalconCardFooterLink';
+import OrkestraCardFooterLink from 'components/common/OrkestraCardFooterLink';
 import Event from 'reference/app-examples/events/event-list/Event';
 import paths from 'routes/paths';
 
@@ -13,7 +13,7 @@ interface EventsProps {
 const Events = ({ cardTitle, events, ...rest }: EventsProps) => {
   return (
     <Card {...rest}>
-      <FalconCardHeader title={cardTitle} light />
+      <OrkestraCardHeader title={cardTitle} light />
       <Card.Body className="fs-10 border-bottom">
         {events.map((event: any, index: number) => (
           <Event
@@ -23,7 +23,7 @@ const Events = ({ cardTitle, events, ...rest }: EventsProps) => {
           />
         ))}
       </Card.Body>
-      <FalconCardFooterLink title="All Events" to={paths.eventList} size="sm" />
+      <OrkestraCardFooterLink title="All Events" to={paths.eventList} size="sm" />
     </Card>
   );
 };

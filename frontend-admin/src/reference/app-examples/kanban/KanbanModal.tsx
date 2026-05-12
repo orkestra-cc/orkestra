@@ -76,7 +76,7 @@ const KanbanModal = () => {
                   illustraion must described the concept of the design. To know
                   more about the theme visit the page.{' '}
                   <Link to="/" target="_blank" rel="noopener noreferrer">
-                    https://falconreact.prium.me/
+                    https://orkestrareact.prium.me/
                   </Link>
                 </p>
               </ModalMediaContent>
@@ -89,7 +89,7 @@ const KanbanModal = () => {
                 headingContent={
                   <Dropdown>
                     <Dropdown.Toggle
-                      variant="falcon-default"
+                      variant="orkestra-default"
                       size="sm"
                       className="dropdown-caret-none fs-11"
                     >

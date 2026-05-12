@@ -5,7 +5,7 @@
 
 [← Root](../CLAUDE.md) | [☰ Module Map](../CLAUDE.md#module-map) | [🚀 Quick Start](../CLAUDE.md#quick-start) | [Tier-2 client SPA](../frontend-client/CLAUDE.md)
 
-React 19 + Vite 7 + TypeScript 5.9 operator console for Orkestra — the **Tier-1 admin dashboard** used by internal staff. Cookie-based auth with the Go backend (operator audience), dynamic navigation driven by `/v1/navigation`, per-module RTK Query slices, Falcon design system + Bootstrap 5. Sibling to [`../frontend-client`](../frontend-client/CLAUDE.md), the Tier-2 customer-facing SPA — different audience, different cookie domain, different stack.
+React 19 + Vite 7 + TypeScript 5.9 operator console for Orkestra — the **Tier-1 admin dashboard** used by internal staff. Cookie-based auth with the Go backend (operator audience), dynamic navigation driven by `/v1/navigation`, per-module RTK Query slices, Orkestra design system + Bootstrap 5. Sibling to [`../frontend-client`](../frontend-client/CLAUDE.md), the Tier-2 customer-facing SPA — different audience, different cookie domain, different stack.
 
 ## Tech stack
 
@@ -15,7 +15,7 @@ React 19 + Vite 7 + TypeScript 5.9 operator console for Orkestra — the **Tier-
 | Build | Vite 7 (dev server + production bundle) |
 | Language | TypeScript 5.9 strict mode |
 | State | Redux Toolkit 2.9 + RTK Query (server state lives in RTK Query, not React Query) |
-| UI kit | React Bootstrap 2.10 + Bootstrap 5.3 + Falcon SCSS theme |
+| UI kit | React Bootstrap 2.10 + Bootstrap 5.3 + Orkestra SCSS theme |
 | Forms | React Hook Form + Yup |
 | Charts | ECharts (lazy-loaded chunks). Chart.js + D3 reference samples were removed — use `echarts-for-react` for any new chart work. |
 | Calendar | FullCalendar |
@@ -35,7 +35,7 @@ frontend-admin/
 │   ├── routes/
 │   │   ├── createRouter.ts        # Router factory — assembles core + module + reference routes
 │   │   ├── coreRoutes.tsx         # Auth, admin, user/operator routes (always loaded)
-│   │   ├── referenceRoutes.tsx    # Falcon template routes (dev-only, gated by import.meta.env.DEV)
+│   │   ├── referenceRoutes.tsx    # Orkestra template routes (dev-only, gated by import.meta.env.DEV)
 │   │   └── paths.ts               # Path constants
 │   ├── layouts/                   # 9 layouts: MainLayout, VerticalNavLayout, TopNavLayout, ComboNavLayout, AuthLayouts...
 │   ├── providers/                 # AppProvider, AuthProvider, KanbanProvider, ChatProvider, EmailProvider
@@ -75,7 +75,7 @@ frontend-admin/
 │   │   ├── wizard/                # Form wizard helpers
 │   │   ├── errors/                # 404, 500 pages
 │   │   └── notification/          # Toast and banner notifications
-│   ├── reference/                 # 📚 Falcon template library (READ-ONLY) — 7 example apps + 60+ samples
+│   ├── reference/                 # 📚 Orkestra template library (READ-ONLY) — 7 example apps + 60+ samples
 │   │   ├── app-examples/          # calendar, chat, email, events, kanban, social, support-desk
 │   │   ├── components/            # UI showcase (forms, tables, navigation, media, etc.)
 │   │   ├── charts/                # ECharts examples only (chartjs/d3js removed — unresolved imports)
@@ -187,9 +187,9 @@ This is the **canonical workflow** for an LLM agent or contributor asked to add 
 
 When asked to build a UI, look for an existing solution in this order:
 
-1. **`src/reference/app-examples/`** — full Falcon implementations of common apps (calendar, chat, email, kanban, social, support-desk, events). Copy and adapt — don't reinvent.
-2. **`src/reference/components/`** — 60+ Falcon component samples (forms, tables, navigation, media, charts).
-3. **`src/components/common/`** — UI primitives that the app's pages already use (Avatar, Card, Flex, IconButton, PageHeader, AdvanceTable, FalconDropzone, ...).
+1. **`src/reference/app-examples/`** — full Orkestra implementations of common apps (calendar, chat, email, kanban, social, support-desk, events). Copy and adapt — don't reinvent.
+2. **`src/reference/components/`** — 60+ Orkestra component samples (forms, tables, navigation, media, charts).
+3. **`src/components/common/`** — UI primitives that the app's pages already use (Avatar, Card, Flex, IconButton, PageHeader, AdvanceTable, OrkestraDropzone, ...).
 4. **`src/components/dashboards/`** — reusable dashboard widgets (WeeklySales, ActiveUsers, ...).
 5. **`react-bootstrap`** — raw primitives for layout (Row, Col, Card, Button, Form).
 

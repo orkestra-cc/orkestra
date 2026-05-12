@@ -7,7 +7,7 @@ import {
   faTruck,
   faBell
 } from '@fortawesome/free-solid-svg-icons';
-import FalconCardHeader from 'components/common/FalconCardHeader';
+import OrkestraCardHeader from 'components/common/OrkestraCardHeader';
 import Flex from 'components/common/Flex';
 
 const BillingGreetings = () => {
@@ -40,7 +40,7 @@ const BillingGreetings = () => {
 
   return (
     <Card>
-      <FalconCardHeader
+      <OrkestraCardHeader
         title="Fatturazione Elettronica"
         titleTag="h5"
         className="py-2"

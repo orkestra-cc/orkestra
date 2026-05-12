@@ -7,7 +7,7 @@ import {
   faArrowLeft
 } from '@fortawesome/free-solid-svg-icons';
 import { Link } from 'react-router';
-import FalconCardHeader from 'components/common/FalconCardHeader';
+import OrkestraCardHeader from 'components/common/OrkestraCardHeader';
 import Flex from 'components/common/Flex';
 import { useGetBillingStatsQuery } from 'store/api/billingApi';
 import CountUp from 'react-countup';
@@ -51,7 +51,7 @@ const IssuedInvoiceGreetings = () => {
 
   return (
     <Card>
-      <FalconCardHeader
+      <OrkestraCardHeader
         title={
           <Flex alignItems="center">
             <Link to="/billing/dashboard" className="text-body-tertiary me-2">

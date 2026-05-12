@@ -35,7 +35,7 @@ const ContactDetails = () => {
                 </Offcanvas.Header>
                 <Offcanvas.Body className="scrollbar scrollbar-none-xl p-0">
                   <IconButton
-                    variant="falcon-default"
+                    variant="orkestra-default"
                     size="sm"
                     icon="plus"
                     transform="shrink-3"

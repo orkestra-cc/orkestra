@@ -1,6 +1,6 @@
-# React Falcon Dashboard
+# React Orkestra Dashboard
 
-A comprehensive, feature-rich admin dashboard template built with React 19 and Bootstrap 5. React Falcon provides multiple specialized dashboards and a complete component library for building modern web applications.
+A comprehensive, feature-rich admin dashboard template built with React 19 and Bootstrap 5. React Orkestra provides multiple specialized dashboards and a complete component library for building modern web applications.
 
 ## ✨ Features
 
@@ -72,7 +72,7 @@ $navbar-padding-y: 1rem;
 
 ## 📱 Responsive Design
 
-React Falcon is built with a mobile-first approach:
+React Orkestra is built with a mobile-first approach:
 - **Mobile** (< 576px) - Optimized mobile experience
 - **Tablet** (≥ 576px) - Touch-friendly tablet interface  
 - **Desktop** (≥ 768px) - Full desktop functionality

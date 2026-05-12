@@ -1,7 +1,7 @@
 
 import PageHeader from 'components/common/PageHeader';
-import FalconComponentCard from 'components/common/FalconComponentCard';
-import FalconEditor from 'components/common/FalconEditor';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
+import OrkestraEditor from 'components/common/OrkestraEditor';
 
 const commonCode = `.position-static
 .position-relative
@@ -41,8 +41,8 @@ const Position = () => (
       className="mb-3"
     />
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Common values" noPreview>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Common values" noPreview>
         <p className="mt-2">
           Quick positioning classes are available, though they responsive.
         </p>
@@ -53,14 +53,14 @@ const Position = () => (
           for <code>sm</code>,<code>md</code>,<code>lg,</code>
           <code>xl</code>, and <code>xxl</code>.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body>
-        <FalconEditor code={commonCode} hidePreview className="p-2" />
-      </FalconComponentCard.Body>
-    </FalconComponentCard>
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body>
+        <OrkestraEditor code={commonCode} hidePreview className="p-2" />
+      </OrkestraComponentCard.Body>
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Arrange Elements" light={false}>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Arrange Elements" light={false}>
         <p className="mb-0 mt-2">
           Arrange elements easily with the edge positioning utilities. The
           format is
@@ -68,12 +68,12 @@ const Position = () => (
           has special utility class <code>.all-0 </code>to give full
           height/width to child element of parent element.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body code={arrangElementsCode} language="jsx" />
-    </FalconComponentCard>
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body code={arrangElementsCode} language="jsx" />
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Arrange Elements" light={false}>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Arrange Elements" light={false}>
         <p className="mb-0 mt-2">
           In addition, you can also center the elements with the transform
           utility classes
@@ -85,9 +85,9 @@ const Position = () => (
           </code>
           .
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body code={centerElementsCode} language="jsx" />
-    </FalconComponentCard>
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body code={centerElementsCode} language="jsx" />
+    </OrkestraComponentCard>
   </>
 );
 

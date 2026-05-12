@@ -2,7 +2,7 @@ import { Suspense, lazy } from 'react';
 import type { ModuleManifest } from './types';
 import ProtectedRoute from 'components/authentication/ProtectedRoute';
 import ModuleGate from 'components/common/ModuleGate';
-import FalconLoader from 'components/common/FalconLoader';
+import OrkestraLoader from 'components/common/OrkestraLoader';
 
 const CompanyLookup = lazy(() => import('pages/company/lookup'));
 const CompanyDetail = lazy(() => import('pages/company/lookup/CompanyDetail'));
@@ -20,7 +20,7 @@ export const companyManifest: ModuleManifest = {
               ['super_admin', 'administrator', 'developer', 'manager']
             ]}
           >
-            <Suspense key="company-lookup" fallback={<FalconLoader />}>
+            <Suspense key="company-lookup" fallback={<OrkestraLoader />}>
               <CompanyLookup />
             </Suspense>
           </ProtectedRoute>
@@ -36,7 +36,7 @@ export const companyManifest: ModuleManifest = {
               ['super_admin', 'administrator', 'developer', 'manager']
             ]}
           >
-            <Suspense key="company-detail" fallback={<FalconLoader />}>
+            <Suspense key="company-detail" fallback={<OrkestraLoader />}>
               <CompanyDetail />
             </Suspense>
           </ProtectedRoute>
@@ -52,7 +52,7 @@ export const companyManifest: ModuleManifest = {
               ['super_admin', 'administrator', 'developer', 'manager']
             ]}
           >
-            <Suspense key="company-search" fallback={<FalconLoader />}>
+            <Suspense key="company-search" fallback={<OrkestraLoader />}>
               <CompanySearch />
             </Suspense>
           </ProtectedRoute>

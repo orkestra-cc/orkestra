@@ -1,7 +1,7 @@
 
 import { Table } from 'react-bootstrap';
 import PageHeader from 'components/common/PageHeader';
-import FalconComponentCard from 'components/common/FalconComponentCard';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 
 const exampleCode = `
 <>
@@ -24,9 +24,9 @@ const Display = () => (
       className="mb-3"
     ></PageHeader>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Notation" noPreview />
-      <FalconComponentCard.Body>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Notation" noPreview />
+      <OrkestraComponentCard.Body>
         <p>
           Display utility classes that apply to all breakpoints, from{' '}
           <code>xs </code>to <code>xl</code>, have no breakpoint abbreviation in
@@ -89,17 +89,17 @@ const Display = () => (
           <code>.d-lg-none </code>sets <code>display: none;</code>on both{' '}
           <code>lg </code>and <code>xl </code>screens.
         </p>
-      </FalconComponentCard.Body>
-    </FalconComponentCard>
+      </OrkestraComponentCard.Body>
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Example" />
-      <FalconComponentCard.Body code={exampleCode} language="jsx" />
-    </FalconComponentCard>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Example" />
+      <OrkestraComponentCard.Body code={exampleCode} language="jsx" />
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Example" noPreview />
-      <FalconComponentCard.Body>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Example" noPreview />
+      <OrkestraComponentCard.Body>
         <p>
           For faster mobile-friendly development, use responsive display classes
           for showing and hiding elements by device. Avoid creating entirely
@@ -201,11 +201,11 @@ const Display = () => (
             </tr>
           </tbody>
         </Table>
-      </FalconComponentCard.Body>
-    </FalconComponentCard>
+      </OrkestraComponentCard.Body>
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Display in print">
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Display in print">
         <p className="mt-2">
           Change the <code>display </code>value of elements when printing with
           our print display utility classes. Includes support for the same{' '}
@@ -242,9 +242,9 @@ const Display = () => (
           </li>
         </ul>
         <p className="mb-0">The print and display classes can be combined.</p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body code={displayInPrintCode} language="jsx" />
-    </FalconComponentCard>
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body code={displayInPrintCode} language="jsx" />
+    </OrkestraComponentCard>
   </>
 );
 

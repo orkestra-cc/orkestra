@@ -2,7 +2,7 @@
 import { Button } from 'react-bootstrap';
 import PageHeader from 'components/common/PageHeader';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import FalconComponentCard from 'components/common/FalconComponentCard';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 import SearchBox from 'components/navbar/top/SearchBox';
 import autoCompleteInitialItem from 'data/autocomplete/autocomplete';
 
@@ -10,7 +10,7 @@ const Search = () => (
   <>
     <PageHeader
       title="Search"
-      description="Falcon uses <code>Fuse.js</code>  for search functionality. <code>Fuse.js</code> is a powerful, lightweight fuzzy-search library, with zero dependencies."
+      description="Orkestra uses <code>Fuse.js</code>  for search functionality. <code>Fuse.js</code> is a powerful, lightweight fuzzy-search library, with zero dependencies."
       className="mb-3"
     >
       <Button
@@ -24,18 +24,18 @@ const Search = () => (
         <FontAwesomeIcon icon="chevron-right" className="ms-1 fs-11" />
       </Button>
     </PageHeader>
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Search Example" noPreview>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Search Example" noPreview>
         <p className="mt-2 mb-0">
-          You can find Falcon's default searchbox component in{' '}
+          You can find Orkestra's default searchbox component in{' '}
           <code>src/components/navbar/top/SearchBox.js</code>. And demo data for
           search box in <code>src/data/autocomplete/autocomplete.js</code>
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body>
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body>
         <SearchBox autoCompleteItem={autoCompleteInitialItem} />
-      </FalconComponentCard.Body>
-    </FalconComponentCard>
+      </OrkestraComponentCard.Body>
+    </OrkestraComponentCard>
   </>
 );
 

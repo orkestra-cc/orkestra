@@ -2,7 +2,7 @@
 import { Button } from 'react-bootstrap';
 import PageHeader from 'components/common/PageHeader';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import FalconComponentCard from 'components/common/FalconComponentCard';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 import { reactBootstrapDocsUrl } from 'helpers/utils';
 
 const exampleCode = `function Example() {
@@ -14,7 +14,7 @@ const exampleCode = `function Example() {
         onClick={() => setOpen(!open)}
         aria-controls="example-collapse-text"
         aria-expanded={open}
-        variant='falcon-primary'
+        variant='orkestra-primary'
         className='mb-3'
       >
         Click
@@ -39,7 +39,7 @@ const fadeCode = `function Example() {
         onClick={() => setOpen(!open)}
         aria-controls="example-fade-text"
         aria-expanded={open}
-        variant='falcon-primary'
+        variant='orkestra-primary'
         className='mb-3'
       >
         Toggle text
@@ -74,23 +74,23 @@ const Collapse = () => (
       </Button>
     </PageHeader>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Example" light={false}>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Example" light={false}>
         <p className="mt-2 mb-0">
           Add a collapse toggle animation to an element or component.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body code={exampleCode} language="jsx" />
-    </FalconComponentCard>
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body code={exampleCode} language="jsx" />
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Fade" light={false}>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Fade" light={false}>
         <p className="mt-2 mb-0">
           Add a fade animation to a child element or component.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body code={fadeCode} language="jsx" />
-    </FalconComponentCard>
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body code={fadeCode} language="jsx" />
+    </OrkestraComponentCard>
   </>
 );
 

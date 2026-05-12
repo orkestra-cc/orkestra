@@ -1,5 +1,5 @@
 import { Card, Col, Row } from 'react-bootstrap';
-import FalconCardHeader from 'components/common/FalconCardHeader';
+import OrkestraCardHeader from 'components/common/OrkestraCardHeader';
 import classNames from 'classnames';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import type { IconProp } from '@fortawesome/fontawesome-svg-core';
@@ -63,7 +63,7 @@ interface RecentActivityProps {
 const RecentActivity = ({ data }: RecentActivityProps) => {
   return (
     <Card className="h-100 recent-activity-card">
-      <FalconCardHeader title="Recent Activity" titleTag="h6" />
+      <OrkestraCardHeader title="Recent Activity" titleTag="h6" />
       <SimpleBar style={{ height: '26rem' }}>
         <Card.Body className="ps-2 recent-activity-body-height">
           {data.map((activity: ActivityData, index: number) => (

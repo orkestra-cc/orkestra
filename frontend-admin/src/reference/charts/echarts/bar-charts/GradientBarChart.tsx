@@ -1,5 +1,5 @@
 
-import FalconComponentCard from 'components/common/FalconComponentCard';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 
 import { BarChart, LineChart } from 'echarts/charts';
 import {
@@ -186,9 +186,9 @@ const chartCode = `function ChartOptions() {
 
 const GradientBarChart = () => {
   return (
-    <FalconComponentCard className="h-100">
-      <FalconComponentCard.Header title="Gradient bar chart" light={false} />
-      <FalconComponentCard.Body
+    <OrkestraComponentCard className="h-100">
+      <OrkestraComponentCard.Header title="Gradient bar chart" light={false} />
+      <OrkestraComponentCard.Body
         code={chartCode}
         language="jsx"
         scope={{
@@ -197,7 +197,7 @@ const GradientBarChart = () => {
           useAppContext
         }}
       />
-    </FalconComponentCard>
+    </OrkestraComponentCard>
   );
 };
 

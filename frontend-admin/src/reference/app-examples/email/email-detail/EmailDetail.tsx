@@ -75,7 +75,7 @@ const EmailDetail = () => {
                     Happy International Women’s Day!
                   </h3>
                   <p className="mb-2">
-                    On International Women’s Day, we at ThemeWagon want you to
+                    On International Women’s Day, we at Orkestra want you to
                     discover the skills you can learn from our amazing women
                     digital marketing instructors.
                   </p>
@@ -122,7 +122,7 @@ const EmailDetail = () => {
             <Col xs="auto">
               <IconButton
                 as={Link}
-                variant="falcon-default"
+                variant="orkestra-default"
                 size="sm"
                 icon="reply"
                 to="#!"
@@ -131,7 +131,7 @@ const EmailDetail = () => {
               </IconButton>
               <IconButton
                 as={Link}
-                variant="falcon-default"
+                variant="orkestra-default"
                 size="sm"
                 className="ms-2"
                 icon="location-arrow"
@@ -143,13 +143,13 @@ const EmailDetail = () => {
             <Col xs="auto" as={Flex} alignItems="center">
               <small>2 of 354</small>
               <IconButton
-                variant="falcon-default"
+                variant="orkestra-default"
                 size="sm"
                 icon="chevron-left"
                 className="ms-2"
               />
               <IconButton
-                variant="falcon-default"
+                variant="orkestra-default"
                 size="sm"
                 icon="chevron-right"
                 className="ms-2"

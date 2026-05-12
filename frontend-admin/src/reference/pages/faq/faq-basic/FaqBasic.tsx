@@ -10,7 +10,7 @@ const FaqBasic: React.FC = () => {
     <>
       <PageHeader
         title="Frequently Asked Questions"
-        description="Below you'll find answers to the questions we get <br class='d-none.d-sm-block' /> asked the most about to join with Falcon"
+        description="Below you'll find answers to the questions we get <br class='d-none.d-sm-block' /> asked the most about to join with Orkestra"
         className="mb-3"
       />
       <FaqBasicCard faqs={faqs} />

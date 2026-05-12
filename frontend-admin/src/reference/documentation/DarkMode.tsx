@@ -3,7 +3,7 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { Col, Row, Button } from 'react-bootstrap';
 import { Link } from 'react-router';
 import { useAppContext } from 'providers/AppProvider';
-import FalconComponentCard from 'components/common/FalconComponentCard';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 import PageHeader from 'components/common/PageHeader';
 import { themeVariants } from 'config';
 import paths from 'routes/paths';
@@ -123,7 +123,7 @@ const darkModeExampleCode = `function DarkModeExample(){
           <Dropdown.Toggle
             bsPrefix="toggle"
             as={Button}
-            variant="falcon-default"
+            variant="orkestra-default"
             className="btn-sm dropdown-caret-none"
           >
             <FontAwesomeIcon
@@ -171,35 +171,35 @@ const DarkMode = () => (
   <>
     <PageHeader title="Dark Mode" className="mb-3">
       <p className="mt-2 mb-0">
-        It’s effortless to switch Dark Mode in Falcon-React. You can enable Dark
+        It’s effortless to switch Dark Mode in Orkestra-React. You can enable Dark
         Mode by default or create a Dark/Light switch if you want. To set the
         default mode "Dark", please see the{' '}
         <Link to={paths.configuration}>configuration page</Link>.
       </p>
     </PageHeader>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Toggle Dark Mode" light={false}>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Toggle Dark Mode" light={false}>
         <p className="mt-2 mb-0">
-          Toggling dark mode is very easy in Falcon-React. You can toggle dark
+          Toggling dark mode is very easy in Orkestra-React. You can toggle dark
           or light mode by using checkbox, radio input, switch input and custom
           icon component.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body
         code={darkModeExampleCode}
         scope={{ useAppContext, FontAwesomeIcon, Button, Link, themeVariants }}
         language="jsx"
       />
-    </FalconComponentCard>
+    </OrkestraComponentCard>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header
         title="Modify Dark colors"
         light={false}
         noPreview
       />
-      <FalconComponentCard.Body>
+      <OrkestraComponentCard.Body>
         <p className="mb-0">
           You can find all the variables used to create the dark mode in
           <code> src/assets/scss/theme/root/_dark.scss </code> file. If you want
@@ -207,16 +207,16 @@ const DarkMode = () => (
           <code> src/assets/scss/_user-variables.scss </code> file and update it
           as you see fit. After changing the variable build your scss again.
         </p>
-      </FalconComponentCard.Body>
-    </FalconComponentCard>
+      </OrkestraComponentCard.Body>
+    </OrkestraComponentCard>
 
-    <FalconComponentCard noGuttersBottom>
-      <FalconComponentCard.Header
+    <OrkestraComponentCard noGuttersBottom>
+      <OrkestraComponentCard.Header
         title="Using the Dark className"
         light={false}
         noPreview
       />
-      <FalconComponentCard.Body>
+      <OrkestraComponentCard.Body>
         <h6 className="fs-9">
           You can keep a style constant regardless of current (light or dark)
           mode
@@ -236,16 +236,16 @@ const DarkMode = () => (
 
         <Row>
           <Col>
-            <FalconComponentCard>
-              <FalconComponentCard.Header light={false} />
-              <FalconComponentCard.Body code={lightCode} language="jsx" />
-            </FalconComponentCard>
+            <OrkestraComponentCard>
+              <OrkestraComponentCard.Header light={false} />
+              <OrkestraComponentCard.Body code={lightCode} language="jsx" />
+            </OrkestraComponentCard>
           </Col>
           <Col>
-            <FalconComponentCard>
-              <FalconComponentCard.Header light={false} />
-              <FalconComponentCard.Body code={darkCode} language="jsx" />
-            </FalconComponentCard>
+            <OrkestraComponentCard>
+              <OrkestraComponentCard.Header light={false} />
+              <OrkestraComponentCard.Body code={darkCode} language="jsx" />
+            </OrkestraComponentCard>
           </Col>
         </Row>
 
@@ -270,12 +270,12 @@ const DarkMode = () => (
 
         <p>The following element illustrates the example:</p>
 
-        <FalconComponentCard>
-          <FalconComponentCard.Header light={false} />
-          <FalconComponentCard.Body code={dark__Code} language="jsx" />
-        </FalconComponentCard>
-      </FalconComponentCard.Body>
-    </FalconComponentCard>
+        <OrkestraComponentCard>
+          <OrkestraComponentCard.Header light={false} />
+          <OrkestraComponentCard.Body code={dark__Code} language="jsx" />
+        </OrkestraComponentCard>
+      </OrkestraComponentCard.Body>
+    </OrkestraComponentCard>
   </>
 );
 

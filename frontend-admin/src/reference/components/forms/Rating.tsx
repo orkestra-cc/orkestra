@@ -2,7 +2,7 @@
 import { Button, Row, Col } from 'react-bootstrap';
 import PageHeader from 'components/common/PageHeader';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import FalconComponentCard from 'components/common/FalconComponentCard';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 import StarRating from 'components/common/StarRating';
 import { Rating } from 'react-simple-star-rating';
 
@@ -98,7 +98,7 @@ const RatingExample = () => (
   <>
     <PageHeader
       title="Rating"
-      description="React-Falcon uses <strong>React Simple Rating</strong> as rating component. It's a simple react component for adding a star rating to your project."
+      description="React-Orkestra uses <strong>React Simple Rating</strong> as rating component. It's a simple react component for adding a star rating to your project."
       className="mb-3"
     >
       <Button
@@ -115,86 +115,86 @@ const RatingExample = () => (
 
     <Row className="mb-3 g-3">
       <Col lg={6}>
-        <FalconComponentCard noGuttersBottom>
-          <FalconComponentCard.Header title="Basic Example" />
-          <FalconComponentCard.Body
+        <OrkestraComponentCard noGuttersBottom>
+          <OrkestraComponentCard.Header title="Basic Example" />
+          <OrkestraComponentCard.Body
             code={defaultRatingCode}
             scope={{ Rating, FontAwesomeIcon }}
             language="jsx"
           />
-        </FalconComponentCard>
+        </OrkestraComponentCard>
       </Col>
       <Col lg={6}>
-        <FalconComponentCard noGuttersBottom>
-          <FalconComponentCard.Header title="Custom Icon" />
-          <FalconComponentCard.Body
+        <OrkestraComponentCard noGuttersBottom>
+          <OrkestraComponentCard.Header title="Custom Icon" />
+          <OrkestraComponentCard.Body
             code={customIconCode}
             scope={{ Rating, FontAwesomeIcon }}
             language="jsx"
           />
-        </FalconComponentCard>
+        </OrkestraComponentCard>
       </Col>
     </Row>
 
     <Row className="mb-3 g-3">
       <Col lg={6}>
-        <FalconComponentCard noGuttersBottom>
-          <FalconComponentCard.Header title="Readonly rating" />
-          <FalconComponentCard.Body
+        <OrkestraComponentCard noGuttersBottom>
+          <OrkestraComponentCard.Header title="Readonly rating" />
+          <OrkestraComponentCard.Body
             code={readOnlyCode}
             scope={{ Rating, FontAwesomeIcon }}
             language="jsx"
           />
-        </FalconComponentCard>
+        </OrkestraComponentCard>
       </Col>
       <Col lg={6}>
-        <FalconComponentCard noGuttersBottom>
-          <FalconComponentCard.Header title="Fractional rating" />
-          <FalconComponentCard.Body
+        <OrkestraComponentCard noGuttersBottom>
+          <OrkestraComponentCard.Header title="Fractional rating" />
+          <OrkestraComponentCard.Body
             code={fractionalRatingCode}
             scope={{ Rating, FontAwesomeIcon }}
             language="jsx"
           />
-        </FalconComponentCard>
+        </OrkestraComponentCard>
       </Col>
     </Row>
 
     <Row className="mb-3 g-3">
       <Col lg={6}>
-        <FalconComponentCard noGuttersBottom>
-          <FalconComponentCard.Header title="1 to 10 rating" />
-          <FalconComponentCard.Body
+        <OrkestraComponentCard noGuttersBottom>
+          <OrkestraComponentCard.Header title="1 to 10 rating" />
+          <OrkestraComponentCard.Body
             code={oneToTenCode}
             scope={{ Rating, FontAwesomeIcon }}
             language="jsx"
           />
-        </FalconComponentCard>
+        </OrkestraComponentCard>
       </Col>
       <Col lg={6}>
-        <FalconComponentCard noGuttersBottom>
-          <FalconComponentCard.Header title="RTL Support" />
-          <FalconComponentCard.Body
+        <OrkestraComponentCard noGuttersBottom>
+          <OrkestraComponentCard.Header title="RTL Support" />
+          <OrkestraComponentCard.Body
             code={rtlSupportCode}
             scope={{ Rating, FontAwesomeIcon }}
             language="jsx"
           />
-        </FalconComponentCard>
+        </OrkestraComponentCard>
       </Col>
     </Row>
 
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Star Rating" light={false}>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Star Rating" light={false}>
         <p className="mb-0">
           <strong>StarRating</strong> is a custom component for star rating. Use
           this component for star rating only.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body
         code={starRatingCode}
         language="jsx"
         scope={{ StarRating }}
       />
-    </FalconComponentCard>
+    </OrkestraComponentCard>
   </>
 );
 

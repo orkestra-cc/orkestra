@@ -16,7 +16,7 @@ export default [
     read: '2min'
   },
   {
-    title: 'The New Falcon Theme',
+    title: 'The New Orkestra Theme',
     date: 'Dec 23',
     read: '10min'
   }

@@ -2,7 +2,7 @@
 import { Row, Col } from 'react-bootstrap';
 import PageHeader from 'components/common/PageHeader';
 import Avatar, { AvatarGroup } from 'components/common/Avatar';
-import FalconComponentCard from 'components/common/FalconComponentCard';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 import user1 from 'assets/img/team/1.jpg';
 import user2 from 'assets/img/team/2.jpg';
 import user3 from 'assets/img/team/3.jpg';
@@ -115,113 +115,113 @@ const Avatars = () => {
 
       <Row className="mb-3 g-3">
         <Col md={4}>
-          <FalconComponentCard noGuttersBottom>
-            <FalconComponentCard.Header title="Circular" light={false} />
-            <FalconComponentCard.Body
+          <OrkestraComponentCard noGuttersBottom>
+            <OrkestraComponentCard.Header title="Circular" light={false} />
+            <OrkestraComponentCard.Body
               code={circularCode}
               scope={{ Avatar, user1 }}
               language="jsx"
             />
-          </FalconComponentCard>
+          </OrkestraComponentCard>
         </Col>
         <Col md={4}>
-          <FalconComponentCard noGuttersBottom>
-            <FalconComponentCard.Header title="Square" light={false} />
-            <FalconComponentCard.Body
+          <OrkestraComponentCard noGuttersBottom>
+            <OrkestraComponentCard.Header title="Square" light={false} />
+            <OrkestraComponentCard.Body
               code={squareCode}
               scope={{ Avatar, user2 }}
               language="jsx"
             />
-          </FalconComponentCard>
+          </OrkestraComponentCard>
         </Col>
         <Col md={4}>
-          <FalconComponentCard noGuttersBottom>
-            <FalconComponentCard.Header title="Soft" light={false} />
-            <FalconComponentCard.Body
+          <OrkestraComponentCard noGuttersBottom>
+            <OrkestraComponentCard.Header title="Soft" light={false} />
+            <OrkestraComponentCard.Body
               code={softCode}
               scope={{ Avatar, user3 }}
               language="jsx"
             />
-          </FalconComponentCard>
+          </OrkestraComponentCard>
         </Col>
       </Row>
 
       <Row className="mb-3 g-3">
         <Col md={4}>
-          <FalconComponentCard noGuttersBottom>
-            <FalconComponentCard.Header title="Content" light={false} />
-            <FalconComponentCard.Body
+          <OrkestraComponentCard noGuttersBottom>
+            <OrkestraComponentCard.Header title="Content" light={false} />
+            <OrkestraComponentCard.Body
               code={contentCode}
               scope={{ Avatar }}
               language="jsx"
             />
-          </FalconComponentCard>
+          </OrkestraComponentCard>
         </Col>
         <Col md={4}>
-          <FalconComponentCard noGuttersBottom>
-            <FalconComponentCard.Header title="Name" light={false} />
-            <FalconComponentCard.Body
+          <OrkestraComponentCard noGuttersBottom>
+            <OrkestraComponentCard.Header title="Name" light={false} />
+            <OrkestraComponentCard.Body
               code={nameCode}
               scope={{ Avatar }}
               language="jsx"
             />
-          </FalconComponentCard>
+          </OrkestraComponentCard>
         </Col>
         <Col md={4}>
-          <FalconComponentCard noGuttersBottom>
-            <FalconComponentCard.Header title="Emoji" light={false} />
-            <FalconComponentCard.Body
+          <OrkestraComponentCard noGuttersBottom>
+            <OrkestraComponentCard.Header title="Emoji" light={false} />
+            <OrkestraComponentCard.Body
               code={emojiCode}
               scope={{ Avatar }}
               language="jsx"
             />
-          </FalconComponentCard>
+          </OrkestraComponentCard>
         </Col>
       </Row>
 
-      <FalconComponentCard>
-        <FalconComponentCard.Header title="Status" light={false} />
-        <FalconComponentCard.Body
+      <OrkestraComponentCard>
+        <OrkestraComponentCard.Header title="Status" light={false} />
+        <OrkestraComponentCard.Body
           code={statusCode}
           scope={{ Avatar, user1 }}
           language="jsx"
         />
-      </FalconComponentCard>
+      </OrkestraComponentCard>
 
-      <FalconComponentCard>
-        <FalconComponentCard.Header title="Sizes" light={false} />
-        <FalconComponentCard.Body
+      <OrkestraComponentCard>
+        <OrkestraComponentCard.Header title="Sizes" light={false} />
+        <OrkestraComponentCard.Body
           code={sizesCode}
           scope={{ Avatar, user1 }}
           language="jsx"
         />
-      </FalconComponentCard>
+      </OrkestraComponentCard>
 
       <Row className="mb-3 g-3">
         <Col lg={6}>
-          <FalconComponentCard noGuttersBottom>
-            <FalconComponentCard.Header title="Avatar Group" light={false} />
-            <FalconComponentCard.Body
+          <OrkestraComponentCard noGuttersBottom>
+            <OrkestraComponentCard.Header title="Avatar Group" light={false} />
+            <OrkestraComponentCard.Body
               className="overflow-auto"
               code={groupCode}
               scope={{ Avatar, AvatarGroup, user1, user2 }}
               language="jsx"
             />
-          </FalconComponentCard>
+          </OrkestraComponentCard>
         </Col>
         <Col lg={6}>
-          <FalconComponentCard noGuttersBottom>
-            <FalconComponentCard.Header
+          <OrkestraComponentCard noGuttersBottom>
+            <OrkestraComponentCard.Header
               title="Avatar Group Dense"
               light={false}
             />
-            <FalconComponentCard.Body
+            <OrkestraComponentCard.Body
               className="overflow-auto"
               code={groupDenseCode}
               scope={{ Avatar, AvatarGroup, user1, user2 }}
               language="jsx"
             />
-          </FalconComponentCard>
+          </OrkestraComponentCard>
         </Col>
       </Row>
     </>

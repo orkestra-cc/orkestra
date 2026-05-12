@@ -1,5 +1,5 @@
 import CardDropdown from 'components/common/CardDropdown';
-import FalconCardHeader from 'components/common/FalconCardHeader';
+import OrkestraCardHeader from 'components/common/OrkestraCardHeader';
 import { useState } from 'react';
 import { Card, Col, Form, Nav, Row, Tab } from 'react-bootstrap';
 import { topCustomerData } from 'data/support-desk/reportsData';
@@ -7,7 +7,7 @@ import Flex from 'components/common/Flex';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import SubtleBadge from 'components/common/SubtleBadge';
 import TopCustomerChart from './TopCustomerChart';
-import FalconLink from 'components/common/FalconLink';
+import OrkestraLink from 'components/common/OrkestraLink';
 
 interface NavItemProps {
   item: string;
@@ -58,7 +58,7 @@ const TopCustomers = () => {
   ]);
   return (
     <Card className="mt-3">
-      <FalconCardHeader
+      <OrkestraCardHeader
         title="Analysis of the Top Customers"
         titleTag="h6"
         className="py-2 bg-body-tertiary"
@@ -139,7 +139,7 @@ const TopCustomers = () => {
             </Form.Select>
           </Col>
           <Col xs="auto">
-            <FalconLink title="View all reports" className="px-0 fw-medium" />
+            <OrkestraLink title="View all reports" className="px-0 fw-medium" />
           </Col>
         </Row>
       </Card.Footer>

@@ -3,8 +3,8 @@ import type { CellContext } from '@tanstack/react-table';
 import Flex from 'components/common/Flex';
 import Avatar, { AvatarGroup } from 'components/common/Avatar';
 import { Link } from 'react-router';
-import FalconCardFooterLink from 'components/common/FalconCardFooterLink';
-import FalconCardHeader from 'components/common/FalconCardHeader';
+import OrkestraCardFooterLink from 'components/common/OrkestraCardFooterLink';
+import OrkestraCardHeader from 'components/common/OrkestraCardHeader';
 import AdvanceTable from 'components/common/advance-table/AdvanceTable';
 import useAdvanceTable from 'hooks/ui/useAdvanceTable';
 import AdvanceTableProvider from 'providers/AdvanceTableProvider';
@@ -147,7 +147,7 @@ const RunningProjects = ({ data }: RunningProjectsProps) => {
   return (
     <AdvanceTableProvider {...table}>
       <Card className="h-100">
-        <FalconCardHeader title="Running Projects" titleTag="h6" />
+        <OrkestraCardHeader title="Running Projects" titleTag="h6" />
         <Card.Body className="p-0">
           <AdvanceTable
             headerClassName="bg-body-tertiary text-nowrap align-middle"
@@ -158,7 +158,7 @@ const RunningProjects = ({ data }: RunningProjectsProps) => {
             }}
           />
         </Card.Body>
-        <FalconCardFooterLink title="Show all projects" size="sm" />
+        <OrkestraCardFooterLink title="Show all projects" size="sm" />
       </Card>
     </AdvanceTableProvider>
   );

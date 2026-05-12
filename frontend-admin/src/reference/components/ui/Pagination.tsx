@@ -2,7 +2,7 @@
 import { Button, Row, Col } from 'react-bootstrap';
 import PageHeader from 'components/common/PageHeader';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import FalconComponentCard from 'components/common/FalconComponentCard';
+import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 import { reactBootstrapDocsUrl } from 'helpers/utils';
 
 const exampleCode = `
@@ -80,38 +80,38 @@ const Pagin = () => (
     </PageHeader>
     <Row className="mb-3 g-3">
       <Col lg={6}>
-        <FalconComponentCard noGuttersBottom>
-          <FalconComponentCard.Header title="Example with text" light={false} />
-          <FalconComponentCard.Body code={exampleCode} language="jsx" />
-        </FalconComponentCard>
+        <OrkestraComponentCard noGuttersBottom>
+          <OrkestraComponentCard.Header title="Example with text" light={false} />
+          <OrkestraComponentCard.Body code={exampleCode} language="jsx" />
+        </OrkestraComponentCard>
       </Col>
       <Col lg={6}>
-        <FalconComponentCard noGuttersBottom>
-          <FalconComponentCard.Header title="Example with Icon" light={false} />
-          <FalconComponentCard.Body code={iconExampleCode} language="jsx" />
-        </FalconComponentCard>
+        <OrkestraComponentCard noGuttersBottom>
+          <OrkestraComponentCard.Header title="Example with Icon" light={false} />
+          <OrkestraComponentCard.Body code={iconExampleCode} language="jsx" />
+        </OrkestraComponentCard>
       </Col>
     </Row>
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="Sizing" light={false}>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="Sizing" light={false}>
         <p className="mb-0 mt-2">
           Fancy larger or smaller pagination? Add <code> size='lg' </code> or{' '}
           <code> size='sm' </code> props for additional sizes.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body code={sizingCode} language="jsx" />
-    </FalconComponentCard>
-    <FalconComponentCard>
-      <FalconComponentCard.Header title="More Options" light={false}>
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body code={sizingCode} language="jsx" />
+    </OrkestraComponentCard>
+    <OrkestraComponentCard>
+      <OrkestraComponentCard.Header title="More Options" light={false}>
         <p className="mb-0 mt-2">
           For building more complex pagination UI, there are few convenient
           sub-components for adding "First", "Previous", "Next", and "Last"
           buttons, as well as an <code>Ellipsis</code> item for indicating
           previous or continuing results.
         </p>
-      </FalconComponentCard.Header>
-      <FalconComponentCard.Body code={moreOptionsCode} language="jsx" />
-    </FalconComponentCard>
+      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Body code={moreOptionsCode} language="jsx" />
+    </OrkestraComponentCard>
   </>
 );
 

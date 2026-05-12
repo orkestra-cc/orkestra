@@ -1,17 +1,17 @@
 import { Card } from 'react-bootstrap';
-import FalconCardHeader from 'components/common/FalconCardHeader';
+import OrkestraCardHeader from 'components/common/OrkestraCardHeader';
 import DealStorageFunnelChart from './DealStorageFunnelChart';
 import Flex from 'components/common/Flex';
-import FalconLink from 'components/common/FalconLink';
+import OrkestraLink from 'components/common/OrkestraLink';
 
 const DealStorageFunnel = () => {
   return (
     <Card>
-      <FalconCardHeader
+      <OrkestraCardHeader
         title="Deal Storage Funnel"
         titleTag="h6"
         className="border-200 border-bottom py-2"
-        endEl={<FalconLink title="View Details" className="px-0" />}
+        endEl={<OrkestraLink title="View Details" className="px-0" />}
       />
       <Card.Body dir="ltr">
         <Flex

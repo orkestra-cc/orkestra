@@ -1,14 +1,14 @@
-import FalconCardHeader from 'components/common/FalconCardHeader';
+import OrkestraCardHeader from 'components/common/OrkestraCardHeader';
 import CardDropdown from 'components/common/CardDropdown';
 import { Card, Col, Row } from 'react-bootstrap';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import LeadConversationChart from './LeadConversationChart';
-import FalconCardFooterLink from 'components/common/FalconCardFooterLink';
+import OrkestraCardFooterLink from 'components/common/OrkestraCardFooterLink';
 
 const LeadConversation = () => {
   return (
     <Card>
-      <FalconCardHeader
+      <OrkestraCardHeader
         title="Lead Conversion"
         titleTag="h6"
         className="py-2"
@@ -38,7 +38,7 @@ const LeadConversation = () => {
         <LeadConversationChart />
       </Card.Body>
 
-      <FalconCardFooterLink title="View Details" size="sm" />
+      <OrkestraCardFooterLink title="View Details" size="sm" />
     </Card>
   );
 };
