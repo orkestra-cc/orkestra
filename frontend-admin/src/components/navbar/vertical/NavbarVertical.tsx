@@ -162,54 +162,57 @@ const NavbarVertical = () => {
         {/* Loaded navigation — prefer v2 realms shape; fall back to v1 flat groups.
             In dev (or when VITE_ENABLE_REFERENCE is set), append the Developer realm
             pointing at the dev-only /reference/* routes. */}
-        {!isLoading && !isError && (() => {
-          const renderedRealms = SHOW_DEVELOPER_REALM
-            ? [...realms, developerRealm]
-            : realms;
-          return (
-          <div className="navbar-vertical-content scrollbar">
-            <Nav className="flex-column" as="ul">
-              {renderedRealms.length > 0
-                ? renderedRealms.map(realm => (
-                    <Fragment key={realm.key}>
-                      <NavbarLabel label={capitalize(realm.label)} />
-                      {realm.sections.map(section => (
-                        <Fragment key={`${realm.key}::${section.label}`}>
-                          {section.label && section.label !== realm.label && (
-                            <NavbarSectionLabel
-                              label={capitalize(section.label)}
-                            />
+        {!isLoading &&
+          !isError &&
+          (() => {
+            const renderedRealms = SHOW_DEVELOPER_REALM
+              ? [...realms, developerRealm]
+              : realms;
+            return (
+              <div className="navbar-vertical-content scrollbar">
+                <Nav className="flex-column" as="ul">
+                  {renderedRealms.length > 0
+                    ? renderedRealms.map(realm => (
+                        <Fragment key={realm.key}>
+                          <NavbarLabel label={capitalize(realm.label)} />
+                          {realm.sections.map(section => (
+                            <Fragment key={`${realm.key}::${section.label}`}>
+                              {section.label &&
+                                section.label !== realm.label && (
+                                  <NavbarSectionLabel
+                                    label={capitalize(section.label)}
+                                  />
+                                )}
+                              <NavbarVerticalMenu routes={section.children} />
+                            </Fragment>
+                          ))}
+                        </Fragment>
+                      ))
+                    : filteredNavigation.map(route => (
+                        <Fragment key={route.label}>
+                          {!route.labelDisable && (
+                            <NavbarLabel label={capitalize(route.label)} />
                           )}
-                          <NavbarVerticalMenu routes={section.children} />
+                          <NavbarVerticalMenu routes={route.children} />
                         </Fragment>
                       ))}
-                    </Fragment>
-                  ))
-                : filteredNavigation.map(route => (
-                    <Fragment key={route.label}>
-                      {!route.labelDisable && (
-                        <NavbarLabel label={capitalize(route.label)} />
-                      )}
-                      <NavbarVerticalMenu routes={route.children} />
-                    </Fragment>
-                  ))}
-            </Nav>
+                </Nav>
 
-            <>
-              {navbarPosition === 'combo' && (
-                <div className={`d-${topNavbarBreakpoint}-none`}>
-                  <div className="navbar-vertical-divider">
-                    <hr className="navbar-vertical-hr my-2" />
-                  </div>
-                  <Nav navbar>
-                    <NavbarTopDropDownMenus />
-                  </Nav>
-                </div>
-              )}
-            </>
-          </div>
-          );
-        })()}
+                <>
+                  {navbarPosition === 'combo' && (
+                    <div className={`d-${topNavbarBreakpoint}-none`}>
+                      <div className="navbar-vertical-divider">
+                        <hr className="navbar-vertical-hr my-2" />
+                      </div>
+                      <Nav navbar>
+                        <NavbarTopDropDownMenus />
+                      </Nav>
+                    </div>
+                  )}
+                </>
+              </div>
+            );
+          })()}
       </Navbar.Collapse>
     </Navbar>
   );

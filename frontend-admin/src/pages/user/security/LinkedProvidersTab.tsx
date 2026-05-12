@@ -140,7 +140,10 @@ const LinkedProvidersTab = () => {
         setError(
           'You have no other login method. Set a password before unlinking this provider.'
         );
-      } else if (code === 'step_up_required' || code === 'password_confirm_required') {
+      } else if (
+        code === 'step_up_required' ||
+        code === 'password_confirm_required'
+      ) {
         // The global StepUpModal / PasswordConfirmModal will pick this
         // up and replay; close the inline modal so the prompt isn't
         // obscured.

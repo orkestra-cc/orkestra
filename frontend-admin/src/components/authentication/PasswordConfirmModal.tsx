@@ -62,7 +62,8 @@ const PasswordConfirmModal = () => {
         setError('Too many attempts. Please wait a moment and try again.');
       } else {
         setError(
-          anyErr?.data?.detail ?? 'Could not verify the password. Please try again.'
+          anyErr?.data?.detail ??
+            'Could not verify the password. Please try again.'
         );
       }
     }
@@ -81,8 +82,7 @@ const PasswordConfirmModal = () => {
       <Form onSubmit={handleSubmit} noValidate>
         <Modal.Body>
           <p className="fs-10 mb-3">
-            For your security, re-enter your password to continue this
-            action.
+            For your security, re-enter your password to continue this action.
           </p>
 
           {error && (

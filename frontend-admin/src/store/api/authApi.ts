@@ -353,7 +353,12 @@ export const authApi = baseApi.injectEndpoints({
     // request passes RequireStepUp. The fresh token is dispatched into
     // Redux on success so the in-flight replay carries it.
     confirmPassword: builder.mutation<
-      { success: boolean; accessToken: string; tokenType: string; expiresIn: number },
+      {
+        success: boolean;
+        accessToken: string;
+        tokenType: string;
+        expiresIn: number;
+      },
       { password: string }
     >({
       query: body => ({
