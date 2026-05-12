@@ -1,0 +1,13 @@
+# Vulnerabilities reachable in our code that upstream has marked
+# "Fixed in: N/A" — no remediation available. Each entry MUST be
+# re-evaluated whenever the relevant dependency is bumped.
+#
+# Format: one OSV ID per line. Lines starting with `#` are comments.
+# Consumed by `make backend-vulncheck` and the Backend CI workflow.
+
+# Moby AuthZ plugin bypass on oversized request bodies. Affects Docker
+# daemon-side authz plugin enforcement, not SDK consumers like us.
+GO-2026-4887
+
+# Moby off-by-one in plugin privilege validation. Same daemon-side scope.
+GO-2026-4883

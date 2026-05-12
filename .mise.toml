@@ -1,0 +1,31 @@
+# https://mise.jdx.dev — single static binary, manages multi-language
+# tool versions per project. After cloning Orkestra:
+#
+#   curl https://mise.run | sh && exec $SHELL
+#   mise install
+#
+# provisions every toolchain below at the pinned version. CI uses the
+# jdx/mise-action so workflows resolve from this same file — local and
+# CI cannot drift.
+
+[tools]
+# Matches the version in .github/workflows/*.yml. Bump in lockstep.
+go            = "1.25.10"
+node          = "22"
+flutter       = "3.35"
+# CI uses 'latest'; we pin here for reproducibility and bump deliberately.
+# When bumping, also update .github/workflows/backend.yml.
+golangci-lint = "2.5"
+pre-commit    = "4"
+jq            = "1.7"
+
+# Go tools, installed via mise's go: backend (kept out of $GOPATH/bin).
+"go:golang.org/x/vuln/cmd/govulncheck" = "latest"
+
+[env]
+# So `backend/bin/server-*` profile binaries built by `make build-*` are
+# directly invocable from the repo root.
+_.path = ["{{config_root}}/backend/bin"]
+
+[settings]
+experimental = true

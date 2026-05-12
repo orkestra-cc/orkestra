@@ -1,0 +1,9 @@
+# Commits listed here are skipped by `git blame --ignore-revs-file` and by
+# the GitHub blame UI when blame.ignoreRevsFile is configured.
+#
+# Local one-time setup (recommended):
+#   git config blame.ignoreRevsFile .git-blame-ignore-revs
+
+# chore(repo): normalize line endings to LF — replaces .gitattributes with
+# a comprehensive ruleset and runs `git add --renormalize .`. Whitespace-only.
+0bb7b6c72b68ecd071231a79c5826df9d3b68e11

@@ -1,0 +1,106 @@
+# https://pre-commit.com — language-agnostic git hook framework.
+# Bootstrap on a fresh clone:
+#
+#   pre-commit install --install-hooks
+#
+# Pre-commit hooks must stay fast (<5s on a small change). Heavy checks
+# (full ESLint, full `go test`, type checking) run in `make ci` on
+# pre-push instead, so the inner loop stays tight.
+
+default_install_hook_types: [pre-commit, commit-msg, pre-push]
+default_stages: [pre-commit]
+
+repos:
+  # --- Generic hygiene -----------------------------------------------------
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+        exclude: \.md$  # respect markdown trailing-space line breaks
+      - id: end-of-file-fixer
+      - id: check-merge-conflict
+      - id: check-yaml
+      - id: check-json
+        exclude: |
+          (?x)^(
+            .*tsconfig.*\.json|         # tsconfig files allow JSONC (comments)
+            frontend-admin/\.vscode/.*  # VSCode JSONC
+          )$
+      - id: check-added-large-files
+        args: [--maxkb=500]
+      - id: mixed-line-ending
+        args: [--fix=lf]
+
+  # --- Commit message: Conventional Commits --------------------------------
+  - repo: https://github.com/compilerla/conventional-pre-commit
+    rev: v3.6.0
+    hooks:
+      - id: conventional-pre-commit
+        stages: [commit-msg]
+        args: [feat, fix, chore, docs, refactor, test, ci, build, perf, style, revert]
+
+  # --- Go (local hooks — use the mise-installed gofmt) ---------------------
+  - repo: local
+    hooks:
+      - id: gofmt
+        name: gofmt
+        entry: gofmt -w -l
+        language: system
+        files: ^backend/.*\.go$
+        exclude: ^backend/.*\.(gen|pb)\.go$
+
+      - id: go-mod-tidy
+        name: go mod tidy (backend)
+        entry: bash -c 'cd backend && go mod tidy'
+        language: system
+        files: ^backend/(go\.mod|go\.sum|.*\.go)$
+        pass_filenames: false
+
+  # --- Prettier (frontend-admin + frontend-client) -------------------------
+  - repo: https://github.com/pre-commit/mirrors-prettier
+    rev: v3.1.0
+    hooks:
+      - id: prettier
+        files: ^(frontend-admin|frontend-client)/.*\.(ts|tsx|js|jsx|json|md|yml|yaml|css|scss)$
+        exclude: |
+          (?x)^(
+            (frontend-admin|frontend-client)/(dist|coverage|node_modules)/.*|
+            frontend-client/src/api/openapi\.gen\.ts
+          )$
+
+  # --- ESLint (local — needs each app's node_modules) ----------------------
+  - repo: local
+    hooks:
+      - id: eslint-admin
+        name: eslint (frontend-admin)
+        entry: bash -c 'cd frontend-admin && npx eslint --max-warnings 0 --fix'
+        language: system
+        files: ^frontend-admin/src/.*\.(ts|tsx|js|jsx)$
+        pass_filenames: false
+
+      - id: eslint-client
+        name: eslint (frontend-client)
+        entry: bash -c 'cd frontend-client && npm run lint -- --max-warnings 0 --fix'
+        language: system
+        files: ^frontend-client/src/.*\.(ts|tsx|js|jsx)$
+        pass_filenames: false
+
+  # --- Dart (mobile) -------------------------------------------------------
+  - repo: local
+    hooks:
+      - id: dart-format
+        name: dart format
+        entry: bash -c 'cd mobile && dart format --set-exit-if-changed .'
+        language: system
+        files: ^mobile/.*\.dart$
+        pass_filenames: false
+
+  # --- Pre-push: full make ci for changed surfaces -------------------------
+  - repo: local
+    hooks:
+      - id: make-ci
+        name: make ci (changed surfaces)
+        entry: make ci
+        language: system
+        stages: [pre-push]
+        pass_filenames: false

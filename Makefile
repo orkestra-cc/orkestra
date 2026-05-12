@@ -316,3 +316,190 @@ docker-build-backend:
 docker-run-backend:
 	@echo "Running backend in Docker..."
 	@docker run -p 3000:3000 --env-file backend/.env --network orkestra-network orkestra-backend:latest
+
+# ============================================================================
+# CI parity — single source of truth for "what is a passing build."
+# Both contributors (`make ci`) and GitHub Actions (.github/workflows/*.yml)
+# invoke these targets, so local and CI cannot drift. See CONTRIBUTING.md.
+# ============================================================================
+
+.PHONY: install install-hooks fmt ci-help
+.PHONY: ci ci-all ci-backend ci-backend-matrix ci-frontend-admin ci-frontend-client ci-mobile
+.PHONY: backend-lint backend-test-ci backend-tenantscope backend-policycoverage backend-vulncheck backend-build-enterprise
+.PHONY: admin-typecheck admin-lint admin-test admin-audit admin-build
+.PHONY: client-typecheck client-lint client-build
+.PHONY: mobile-analyze mobile-test
+
+# Detect changed surfaces vs $(BASE_REF). Override with `BASE_REF=origin/main make ci`.
+BASE_REF ?= origin/dev
+SINCE := $(shell git merge-base HEAD $(BASE_REF) 2>/dev/null || echo HEAD~1)
+CI_CHANGED := $(shell { git diff --name-only $(SINCE)...HEAD 2>/dev/null; git diff --name-only 2>/dev/null; git diff --name-only --cached 2>/dev/null; } | sort -u)
+BACKEND_CHANGED := $(if $(filter backend/%,$(CI_CHANGED)),1,)
+ADMIN_CHANGED   := $(if $(filter frontend-admin/%,$(CI_CHANGED)),1,)
+CLIENT_CHANGED  := $(if $(filter frontend-client/%,$(CI_CHANGED)),1,)
+MOBILE_CHANGED  := $(if $(filter mobile/%,$(CI_CHANGED)),1,)
+
+# ---- Setup ----
+
+install:
+	@echo "Provisioning all toolchains and dependencies..."
+	@command -v mise >/dev/null 2>&1 && mise install || echo "mise not installed — see CONTRIBUTING.md"
+	@command -v pre-commit >/dev/null 2>&1 && pre-commit install --install-hooks || echo "pre-commit not installed — see CONTRIBUTING.md"
+	@cd backend && go mod download
+	@cd frontend-admin && npm ci
+	@cd frontend-client && npm ci
+	@cd mobile && flutter pub get
+	@echo "Install complete."
+
+install-hooks:
+	@pre-commit install --install-hooks
+
+# ---- Top-level CI dispatch ----
+
+ci:
+	@echo "Detecting changed surfaces vs $(BASE_REF)..."
+	@if [ -z "$(BACKEND_CHANGED)$(ADMIN_CHANGED)$(CLIENT_CHANGED)$(MOBILE_CHANGED)" ]; then \
+	  echo "  (no surface changes — nothing to check)"; \
+	else \
+	  [ -n "$(BACKEND_CHANGED)" ] && echo "  - backend"          || true; \
+	  [ -n "$(ADMIN_CHANGED)"   ] && echo "  - frontend-admin"   || true; \
+	  [ -n "$(CLIENT_CHANGED)"  ] && echo "  - frontend-client"  || true; \
+	  [ -n "$(MOBILE_CHANGED)"  ] && echo "  - mobile"           || true; \
+	fi
+	@[ -n "$(BACKEND_CHANGED)" ] && $(MAKE) ci-backend         || true
+	@[ -n "$(ADMIN_CHANGED)"   ] && $(MAKE) ci-frontend-admin  || true
+	@[ -n "$(CLIENT_CHANGED)"  ] && $(MAKE) ci-frontend-client || true
+	@[ -n "$(MOBILE_CHANGED)"  ] && $(MAKE) ci-mobile          || true
+
+ci-all: ci-backend ci-frontend-admin ci-frontend-client ci-mobile
+	@echo "All surface checks passed."
+
+# ---- Backend ----
+
+ci-backend: backend-lint backend-tenantscope backend-policycoverage backend-vulncheck backend-test-ci backend-build-enterprise
+	@echo "Backend CI: OK"
+
+ci-backend-matrix: ci-backend
+	@cd backend && $(MAKE) build-starter build-minimal build-billing build-ai build-saas build-enterprise
+
+backend-lint:
+	@cd backend && golangci-lint run --config=.golangci.yml
+
+backend-test-ci:
+	@cd backend && go test -race -coverprofile=coverage.out ./...
+	@cd backend && go tool cover -func=coverage.out | tail -1
+
+backend-tenantscope:
+	@cd backend && go test ./tools/tenantscope/...
+	@cd backend && go run ./tools/tenantscope/cmd/tenantscope \
+	  -baseline=tools/tenantscope/baseline.txt ./internal/...
+
+backend-policycoverage:
+	@cd backend && go test ./tools/policycoverage/...
+	@cd backend && go run ./tools/policycoverage/cmd/policycoverage \
+	  -baseline=tools/policycoverage/baseline.txt \
+	  -cedar=internal/core/authz/cedar/policies ./internal/...
+
+# Reads OSV IDs (one per line, '#'-comments) from backend/.vulncheck-allowlist.txt.
+# Fails only if a reachable vulnerability is NOT on the allowlist.
+backend-vulncheck:
+	@cd backend && { \
+	  set +e; \
+	  govulncheck -format=json ./... > /tmp/govuln.json; \
+	  set -e; \
+	  govulncheck ./... || true; \
+	  reachable_ids=$$(jq -r 'select(.finding != null and (.finding.trace | length) > 0) | .finding.osv' /tmp/govuln.json | sort -u); \
+	  echo "Reachable vulnerability IDs: $${reachable_ids:-<none>}"; \
+	  allowlist=$$(grep -vE '^\s*(#|$$)' .vulncheck-allowlist.txt | tr '\n' ' '); \
+	  unaccepted=""; \
+	  for id in $$reachable_ids; do \
+	    case " $$allowlist " in \
+	      *" $$id "*) ;; \
+	      *) unaccepted="$$unaccepted $$id" ;; \
+	    esac; \
+	  done; \
+	  if [ -n "$$unaccepted" ]; then \
+	    echo "::error::Unaccepted vulnerabilities reachable from our code:$$unaccepted"; \
+	    exit 1; \
+	  fi; \
+	  echo "All reachable vulnerabilities are on the allowlist."; \
+	}
+
+backend-build-enterprise:
+	@cd backend && $(MAKE) build-enterprise
+
+# ---- Frontend Admin ----
+
+ci-frontend-admin: admin-typecheck admin-lint admin-test admin-audit admin-build
+	@echo "Frontend-admin CI: OK"
+
+admin-typecheck:
+	@cd frontend-admin && npm run typecheck
+
+admin-lint:
+	@cd frontend-admin && npx eslint src/ --ext .js,.jsx,.ts,.tsx --max-warnings 0
+
+admin-test:
+	@cd frontend-admin && npm run test:coverage
+
+admin-audit:
+	@cd frontend-admin && npm audit --audit-level=high
+
+admin-build:
+	@cd frontend-admin && npm run build
+
+# ---- Frontend Client ----
+
+ci-frontend-client: client-typecheck client-lint client-build
+	@echo "Frontend-client CI: OK"
+
+client-typecheck:
+	@cd frontend-client && npm run typecheck
+
+client-lint:
+	@cd frontend-client && npm run lint -- --max-warnings 0
+
+client-build:
+	@cd frontend-client && npm run build
+
+# ---- Mobile ----
+
+ci-mobile: mobile-analyze mobile-test
+	@echo "Mobile CI: OK"
+
+mobile-analyze:
+	@cd mobile && flutter analyze
+
+mobile-test:
+	@cd mobile && flutter test
+
+# ---- Formatters (write mode) ----
+
+fmt:
+	@echo "Running all formatters..."
+	@cd backend && gofmt -w .
+	@cd frontend-admin && npx prettier --write 'src/**/*.{ts,tsx,js,jsx,json,css,scss}' 2>/dev/null || true
+	@cd frontend-client && npx prettier --write 'src/**/*.{ts,tsx,js,jsx,json,css,scss}' 2>/dev/null || true
+	@cd mobile && dart format .
+	@echo "Formatters done."
+
+# ---- Help ----
+
+ci-help:
+	@echo "CI parity targets (see CONTRIBUTING.md for the full guide):"
+	@echo ""
+	@echo "  make install               - Provision toolchains + dependencies (mise, npm, go, flutter)"
+	@echo "  make install-hooks         - (Re-)install pre-commit git hooks"
+	@echo "  make fmt                   - Run all formatters in write mode"
+	@echo ""
+	@echo "  make ci                    - Run CI checks for changed surfaces only (pre-push)"
+	@echo "  make ci-all                - Run every surface (what CI does on dev/main)"
+	@echo ""
+	@echo "  make ci-backend            - Backend CI (lint + tests + analyzers + vuln + enterprise build)"
+	@echo "  make ci-backend-matrix     - Backend CI + all 6 profile builds"
+	@echo "  make ci-frontend-admin     - Admin SPA CI (typecheck + lint + tests + build + audit)"
+	@echo "  make ci-frontend-client    - Client SPA CI (typecheck + lint + build)"
+	@echo "  make ci-mobile             - Flutter CI (analyze + test)"
+	@echo ""
+	@echo "Scope detection uses BASE_REF (default: origin/dev)."
+	@echo "  BASE_REF=origin/main make ci"

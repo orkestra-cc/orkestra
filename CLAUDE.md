@@ -235,8 +235,19 @@ docker restart orkestra-backend-dev
 
 ### CI/CD
 
-GitHub Actions workflows (`.github/workflows/`) run on PR and push to `dev`/`main`:
+GitHub Actions workflows (`.github/workflows/`) run on PR and push to `dev`/`main`. **CI workflows invoke `make` targets from the repo root — local and CI cannot drift.** Run `make ci-help` for the full list.
 
-- `backend.yml` — lint (golangci-lint), test (80% coverage gate), build, Docker push to GHCR
-- `frontend-admin.yml` — TypeScript check, ESLint, build, Docker push
-- `mobile.yml` — Flutter analyze, test, APK build
+- `backend.yml` → `make ci-backend` (lint, tenantscope, policycoverage, vuln, tests, enterprise build) + a profile-build matrix
+- `frontend-admin.yml` → `make ci-frontend-admin` (typecheck, eslint, tests, audit, build)
+- `frontend-client.yml` → `make ci-frontend-client` (typecheck, eslint, build) — no tests yet
+- `mobile.yml` → `make ci-mobile` (flutter analyze, test)
+- `security.yml` — Trivy/CodeQL scanning, untouched by the make refactor
+
+Local reproduction is the same one-liner CI uses:
+
+```bash
+make ci          # only the surfaces you changed (default base: origin/dev)
+make ci-all      # everything — what CI does on dev/main
+```
+
+Toolchain versions live in `.mise.toml` and CI installs them via `jdx/mise-action`, so a contributor running `mise install` gets exactly the Go/Node/Flutter/golangci-lint versions CI uses. See [CONTRIBUTING.md](CONTRIBUTING.md) for the contributor flow.

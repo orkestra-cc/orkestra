@@ -170,3 +170,4 @@ docker restart orkestra-backend-dev
 - **Use `shared/iface`** for cross-module deps — never import another module's services package from module.go
 - **Validate all inputs**, implement RBAC on every endpoint, never expose secrets in responses
 - **MongoDB indexes** — declare them in `Collections()`, don't create them manually
+- **Vulnerability allowlist** — `backend/.vulncheck-allowlist.txt` lists upstream-unfixed reachable CVEs accepted by `make backend-vulncheck` (and the Backend CI workflow). Each entry must be re-evaluated when the relevant dependency is bumped.

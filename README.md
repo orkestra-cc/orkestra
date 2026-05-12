@@ -247,6 +247,22 @@ Every pull request runs through:
 
 The coverage badges in the header are SVGs committed to `.github/badges/`. Each CI workflow's test job refreshes its own SVG on push to `dev` or `main` (badge fetch from shields.io + `stefanzweifel/git-auto-commit-action`); commit messages are tagged `[skip ci]` to avoid re-trigger loops. The `frontend-client` badge stays static until that project has tests.
 
+## Contributing
+
+We welcome contributions. The full guide is in [CONTRIBUTING.md](CONTRIBUTING.md); the short version:
+
+```bash
+curl https://mise.run | sh && exec $SHELL    # install mise (one binary)
+mise install                                 # provision Go/Node/Flutter at pinned versions
+make install                                 # bootstrap all dependencies
+pre-commit install --install-hooks           # auto-format on commit, CI on push
+make ci                                      # run the same checks GitHub Actions runs
+```
+
+`make ci` auto-detects which surfaces (`backend`, `frontend-admin`, `frontend-client`, `mobile`) you touched and runs only those. CI workflows invoke the same `make` targets, so local-green ≡ CI-green by construction. Run `make ci-help` for the full target list.
+
+We use [Conventional Commits](https://www.conventionalcommits.org/) (enforced by the `commit-msg` hook) and the [two-tier tenancy model](CLAUDE.md#tenancy-model) is load-bearing — every endpoint and every collection must declare its tier.
+
 ## License
 
 Proprietary, all rights reserved. © Orkestra.

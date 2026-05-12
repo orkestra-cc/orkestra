@@ -1,0 +1,9 @@
+# Default flags for `act` (https://github.com/nektos/act), which runs
+# .github/workflows/*.yml locally in Docker. Use as the escape hatch when
+# `make ci` passes locally but GitHub Actions fails — most often a
+# services/container or runner-environment difference.
+#
+# The medium image carries Go, Node, jq, etc. — closer parity with
+# ubuntu-latest than the default micro image, at a ~1.5GB download cost.
+-P ubuntu-latest=catthehacker/ubuntu:act-latest
+--container-architecture linux/amd64
