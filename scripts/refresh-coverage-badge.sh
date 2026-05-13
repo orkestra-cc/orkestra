@@ -23,7 +23,8 @@ case "$project" in
   backend)
     file="backend/coverage.out"
     [ -f "$file" ] || { echo "::error::missing $file"; exit 1; }
-    pct=$(go tool cover -func="$file" | awk '/^total:/ {gsub("%",""); print $NF}')
+    # `go tool cover -func` resolves package paths, so it must run inside the Go module.
+    pct=$(cd backend && go tool cover -func=coverage.out | awk '/^total:/ {gsub("%",""); print $NF}')
     logo="go"
     label="backend"
     ;;
