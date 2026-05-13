@@ -407,17 +407,6 @@ internal/core/user/repository/user_repository.go:923:UpdateOne
 internal/core/user/repository/user_repository.go:947:UpdateOne
 internal/core/user/repository/user_repository.go:964:UpdateOne
 internal/core/user/repository/user_repository.go:986:UpdateOne
-internal/shared/module/config_repository.go:112:UpdateOne
-internal/shared/module/config_repository.go:126:UpdateOne
-internal/shared/module/config_repository.go:146:Find
-internal/shared/module/config_repository.go:172:UpdateOne
-internal/shared/module/config_repository.go:196:UpdateOne
-internal/shared/module/config_repository.go:206:UpdateOne
-internal/shared/module/config_repository.go:232:UpdateOne
-internal/shared/module/config_repository.go:253:UpdateOne
-internal/shared/module/config_repository.go:38:FindOne
-internal/shared/module/config_repository.go:50:Find
-internal/shared/module/config_repository.go:96:UpdateOne
 internal/shared/systeminit/systeminit.go:101:DeleteOne
 internal/shared/systeminit/systeminit.go:117:CountDocuments
 internal/shared/systeminit/systeminit.go:78:UpdateOne
