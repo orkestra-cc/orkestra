@@ -172,6 +172,10 @@ the SDK split) and the build-profile matrix.
 
 ## Related
 
+- [README.md](README.md) — external-facing intro shipped to the public
+  SDK repo (install, Module contract, hello-world example, versioning
+  policy). Audience: someone discovering the SDK from
+  `github.com/orkestra-cc/orkestra-sdk`. Keep in sync with this file.
 - [Onboarding doc](../../../docs/onboarding/orkestra-sdk.md) — narrative
   walkthrough aimed at new contributors
 - [SDK split plan](../../../docs/plans/orkestra-sdk-split.md) — multi-
