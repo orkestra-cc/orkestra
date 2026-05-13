@@ -3,7 +3,7 @@ package services
 import (
 	"testing"
 
-	"github.com/orkestra/backend/internal/addons/sales/models"
+	"github.com/orkestra-cc/orkestra-addon-sales/models"
 )
 
 func TestScorer_Calculate_AllAgents(t *testing.T) {

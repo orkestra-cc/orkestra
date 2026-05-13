@@ -3,8 +3,8 @@
 package main
 
 import (
+	"github.com/orkestra-cc/orkestra-addon-sales"
 	"github.com/orkestra-cc/orkestra-sdk/module"
-	"github.com/orkestra/backend/internal/addons/sales"
 )
 
 func init() {

@@ -8,8 +8,8 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/go-chi/chi/v5"
 
-	"github.com/orkestra/backend/internal/addons/sales/models"
-	"github.com/orkestra/backend/internal/addons/sales/repository"
+	"github.com/orkestra-cc/orkestra-addon-sales/models"
+	"github.com/orkestra-cc/orkestra-addon-sales/repository"
 )
 
 // ReportHandler handles report endpoints

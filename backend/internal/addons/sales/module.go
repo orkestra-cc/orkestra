@@ -9,14 +9,14 @@ import (
 
 	"github.com/danielgtaylor/huma/v2/adapters/humachi"
 	"github.com/go-chi/chi/v5"
+	"github.com/orkestra-cc/orkestra-addon-sales/config"
+	"github.com/orkestra-cc/orkestra-addon-sales/handlers"
+	"github.com/orkestra-cc/orkestra-addon-sales/repository"
+	"github.com/orkestra-cc/orkestra-addon-sales/services"
 	"github.com/orkestra-cc/orkestra-sdk/capability"
 	"github.com/orkestra-cc/orkestra-sdk/iface"
 	"github.com/orkestra-cc/orkestra-sdk/module"
 	"github.com/orkestra-cc/orkestra-sdk/modulegate"
-	"github.com/orkestra/backend/internal/addons/sales/handlers"
-	"github.com/orkestra/backend/internal/addons/sales/repository"
-	"github.com/orkestra/backend/internal/addons/sales/services"
-	"github.com/orkestra/backend/internal/shared/config"
 )
 
 // Settings mirrors the sales ConfigSchema 1:1. Init() unmarshals into a

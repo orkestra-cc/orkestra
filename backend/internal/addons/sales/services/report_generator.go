@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/orkestra/backend/internal/addons/sales/models"
-	"github.com/orkestra/backend/internal/addons/sales/repository"
+	"github.com/orkestra-cc/orkestra-addon-sales/models"
+	"github.com/orkestra-cc/orkestra-addon-sales/repository"
 )
 
 // ReportGenerator creates Markdown reports from completed prospect jobs

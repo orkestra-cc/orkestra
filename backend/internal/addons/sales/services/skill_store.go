@@ -4,7 +4,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/orkestra/backend/internal/addons/sales/models"
+	"github.com/orkestra-cc/orkestra-addon-sales/models"
 )
 
 // SkillTask represents an in-flight or completed skill execution

@@ -27,7 +27,6 @@ type Config struct {
 	RAG       RAGConfig
 	AIModels  AIModelsConfig
 	Agents    AgentsConfig
-	Sales     SalesConfig
 	Features  FeaturesConfig
 }
 
@@ -46,19 +45,6 @@ type FeaturesConfig struct {
 	// minted). Set UNIFIED_CLIENTS_LAZY_TENANT_ENABLED=false to revert
 	// to the legacy user-owner code path while Phase 4/5 land.
 	LazyTenantProvisioning bool
-}
-
-// SalesConfig holds configuration for the AI Sales Intelligence module
-type SalesConfig struct {
-	Enabled         bool          // Module enabled flag (SALES_ENABLED)
-	MaxConcurrency  int           // Max parallel agent LLM calls per job (SALES_MAX_CONCURRENCY)
-	DefaultLocale   string        // Default locale for prompts (SALES_DEFAULT_LOCALE)
-	SkillTimeout    time.Duration // Timeout for individual skill calls (SALES_SKILL_TIMEOUT)
-	QuickTimeout    time.Duration // Timeout for sync /prospect/quick (SALES_QUICK_TIMEOUT)
-	FullTimeout     time.Duration // Timeout for async /prospect pipeline (SALES_FULL_TIMEOUT)
-	ScraperTimeout  time.Duration // Timeout per scrape request (SALES_SCRAPER_TIMEOUT)
-	ScraperMaxDepth int           // Max subpage depth for scraping (SALES_SCRAPER_MAX_DEPTH)
-	MaxTokens       int           // Max output tokens per agent/skill LLM call (SALES_MAX_TOKENS)
 }
 
 // AgentsConfig holds configuration for the AI agents module (Hindsight integration)
@@ -518,19 +504,6 @@ func Load() (*Config, error) {
 		Enabled:            getEnvAsBool("AGENTS_ENABLED", false),
 		HindsightURL:       getEnv("HINDSIGHT_URL", "http://hindsight:8888"),
 		HindsightNamespace: getEnv("HINDSIGHT_NAMESPACE", "orkestra"),
-	}
-
-	// Sales Intelligence configuration
-	config.Sales = SalesConfig{
-		Enabled:         getEnvAsBool("SALES_ENABLED", false),
-		MaxConcurrency:  getEnvAsInt("SALES_MAX_CONCURRENCY", 5),
-		DefaultLocale:   getEnv("SALES_DEFAULT_LOCALE", "it"),
-		SkillTimeout:    getEnvAsDuration("SALES_SKILL_TIMEOUT", "5m"),
-		QuickTimeout:    getEnvAsDuration("SALES_QUICK_TIMEOUT", "5m"),
-		FullTimeout:     getEnvAsDuration("SALES_FULL_TIMEOUT", "15m"),
-		ScraperTimeout:  getEnvAsDuration("SALES_SCRAPER_TIMEOUT", "30s"),
-		ScraperMaxDepth: getEnvAsInt("SALES_SCRAPER_MAX_DEPTH", 3),
-		MaxTokens:       getEnvAsInt("SALES_MAX_TOKENS", 8192),
 	}
 
 	// Cross-module feature flags

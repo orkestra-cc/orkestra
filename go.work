@@ -29,4 +29,5 @@ use (
 	./backend/internal/addons/aimodels
 	./backend/internal/addons/company
 	./backend/internal/addons/graph
+	./backend/internal/addons/sales
 )

@@ -3,7 +3,7 @@ package services
 import (
 	"context"
 
-	"github.com/orkestra/backend/internal/addons/sales/models"
+	"github.com/orkestra-cc/orkestra-addon-sales/models"
 )
 
 // CompanyEnrichmentService is the consumer-defined interface for Italian business registry lookups.

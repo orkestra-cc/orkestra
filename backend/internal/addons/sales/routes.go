@@ -5,7 +5,7 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
-	"github.com/orkestra/backend/internal/addons/sales/handlers"
+	"github.com/orkestra-cc/orkestra-addon-sales/handlers"
 )
 
 func op(id, method, path, summary string) huma.Operation {

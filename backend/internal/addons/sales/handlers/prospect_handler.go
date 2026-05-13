@@ -6,8 +6,8 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
-	"github.com/orkestra/backend/internal/addons/sales/models"
-	"github.com/orkestra/backend/internal/addons/sales/services"
+	"github.com/orkestra-cc/orkestra-addon-sales/models"
+	"github.com/orkestra-cc/orkestra-addon-sales/services"
 )
 
 // ProspectHandler handles prospect intelligence endpoints

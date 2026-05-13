@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/orkestra/backend/internal/addons/sales/models"
+	"github.com/orkestra-cc/orkestra-addon-sales/models"
 )
 
 func TestJoinStrings(t *testing.T) {

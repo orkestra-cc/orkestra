@@ -9,8 +9,8 @@ import (
 
 	"github.com/gocolly/colly/v2"
 
-	"github.com/orkestra/backend/internal/addons/sales/models"
-	"github.com/orkestra/backend/internal/shared/config"
+	"github.com/orkestra-cc/orkestra-addon-sales/config"
+	"github.com/orkestra-cc/orkestra-addon-sales/models"
 )
 
 // Scraper extracts structured company data from a website

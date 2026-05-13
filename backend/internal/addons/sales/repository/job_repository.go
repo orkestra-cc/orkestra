@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/orkestra/backend/internal/addons/sales/models"
+	"github.com/orkestra-cc/orkestra-addon-sales/models"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"

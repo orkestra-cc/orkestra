@@ -8,8 +8,8 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/google/uuid"
 
-	"github.com/orkestra/backend/internal/addons/sales/models"
-	"github.com/orkestra/backend/internal/addons/sales/services"
+	"github.com/orkestra-cc/orkestra-addon-sales/models"
+	"github.com/orkestra-cc/orkestra-addon-sales/services"
 )
 
 // SkillHandler handles HTTP requests for individual sales intelligence skills

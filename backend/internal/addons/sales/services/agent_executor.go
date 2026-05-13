@@ -11,8 +11,8 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
+	"github.com/orkestra-cc/orkestra-addon-sales/models"
 	"github.com/orkestra-cc/orkestra-sdk/iface"
-	"github.com/orkestra/backend/internal/addons/sales/models"
 )
 
 // reasoningTagRe strips <think>...</think> blocks emitted by reasoning models

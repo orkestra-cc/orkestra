@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/orkestra/backend/internal/addons/sales/models"
+	"github.com/orkestra-cc/orkestra-addon-sales/models"
 )
 
 // fakePromptRepo is a minimal PromptRepository for unit tests.
