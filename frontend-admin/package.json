@@ -18,7 +18,7 @@
     "@fullcalendar/bootstrap": "^6.1.18",
     "@fullcalendar/daygrid": "^6.1.18",
     "@fullcalendar/interaction": "^6.1.18",
-    "@fullcalendar/list": "^6.1.18",
+    "@fullcalendar/list": "^6.1.20",
     "@fullcalendar/react": "^6.1.18",
     "@fullcalendar/timegrid": "^6.1.18",
     "@hookform/resolvers": "^5.1.1",
