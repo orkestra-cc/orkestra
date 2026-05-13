@@ -144,10 +144,14 @@ locally after any dep change keeps the two `go.mod`s in sync.
   `ErrTenantKindMismatch`), never the `internal/shared/errors` builders.
   Backend code that wants HTTP-shaped responses wraps further with its
   own typed errors at the boundary.
-- **`Dependencies.Config` is typed `any` deliberately.** Don't add a
-  type-specific accessor in the SDK. The only consumer is auth, which
-  type-asserts to `*config.Config` at boot. Phase 1c will retire the
-  field entirely.
+- **There is no `Dependencies.Config` field.** The legacy `any`-typed
+  handle was retired in Phase 1c. If a core module legitimately needs
+  the backend's app-wide config (today only auth qualifies), thread it
+  in through that module's own `NewModule(cfg *config.Config, ...)`
+  constructor at the catalog factory — see
+  `cmd/server/catalog.go::coreModules` for the closure-capture pattern.
+  Addons should never need this; if you reach for it, write an iface
+  contract instead.
 
 ## CI
 

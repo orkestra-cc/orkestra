@@ -68,9 +68,19 @@ type AuthModule struct {
 	clientPasswordHandler *handlers.PasswordAuthHandler
 	clientMFAHandler      *handlers.MFAHandler
 	clientWebAuthnHandler *handlers.WebAuthnHandler
+
+	// cfg is captured at construction time so Init does not need
+	// Dependencies.Config (Phase 1c). The Module interface contract has
+	// no field for app-wide config; auth is the only consumer of
+	// *config.Config and threads it in via the catalog factory.
+	cfg *config.Config
 }
 
-func NewModule() *AuthModule { return &AuthModule{} }
+// NewModule constructs an AuthModule bound to the live application config.
+// cfg must be non-nil — Init dereferences it to read JWT keys, cookie
+// settings, and the per-audience frontend URLs. The catalog factory in
+// cmd/server/catalog.go threads main.go's cfg through a closure.
+func NewModule(cfg *config.Config) *AuthModule { return &AuthModule{cfg: cfg} }
 
 func (m *AuthModule) Name() string        { return "auth" }
 func (m *AuthModule) DisplayName() string { return "Authentication" }
@@ -462,13 +472,9 @@ func (m *AuthModule) Collections() []module.CollectionSpec {
 }
 
 func (m *AuthModule) Init(deps *module.Dependencies) error {
-	// Auth is the last consumer of the legacy Dependencies.Config handle
-	// (the field is typed `any` so the SDK package has no shared/config
-	// dependency). Phase 1c retires this entirely; until then the auth
-	// module type-asserts at boot.
-	cfg, ok := deps.Config.(*config.Config)
-	if !ok || cfg == nil {
-		return fmt.Errorf("auth: deps.Config must be *config.Config, got %T", deps.Config)
+	cfg := m.cfg
+	if cfg == nil {
+		return fmt.Errorf("auth: NewModule was called without *config.Config — check cmd/server/catalog.go")
 	}
 	logger := deps.Logger
 	if logger == nil {

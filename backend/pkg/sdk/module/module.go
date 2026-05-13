@@ -456,20 +456,16 @@ type PlatformInfo interface {
 }
 
 // Dependencies holds shared infrastructure injected into every module.
+//
+// Note: there is no app-wide *config.Config field here by design. Modules
+// that need backend-internal config (today: only auth) take it via their
+// own constructor — see cmd/server/catalog.go for how the auth factory
+// captures cfg through a closure. Module-scoped runtime config flows
+// through ConfigService / UnmarshalModule; environment classification
+// and the public frontend URL flow through Platform.
 type Dependencies struct {
-	DB           *mongo.Database
-	RedisAdapter RedisClient
-	// Config is the legacy app-wide configuration handle. New code should
-	// use Platform for environment + frontend URL info and ConfigService /
-	// UnmarshalModule for per-module values. Auth core still type-asserts
-	// this field to *config.Config and is retired in Phase 1c.
-	//
-	// Typed as `any` so the SDK module package has no import of any
-	// backend-internal struct — extracted addons can ignore the field
-	// entirely and the SDK stays publishable.
-	//
-	// Deprecated: use Platform + ConfigService instead.
-	Config        any
+	DB            *mongo.Database
+	RedisAdapter  RedisClient
 	Platform      PlatformInfo
 	Logger        *slog.Logger
 	Services      *ServiceRegistry

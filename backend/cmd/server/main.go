@@ -115,14 +115,15 @@ func main() {
 	modDeps := &module.Dependencies{
 		DB:           db,
 		RedisAdapter: redisAdapter,
-		Config:       cfg,
 		Platform:     cfg,
 		Logger:       logger,
 		Services:     svcRegistry,
 	}
 
-	// Core modules — always loaded (auth, users, navigation)
-	for _, factory := range coreModules {
+	// Core modules — always loaded (auth, users, navigation). The auth
+	// factory captures cfg via the closure returned by coreModules so
+	// auth's Init does not need Dependencies.Config (Phase 1c).
+	for _, factory := range coreModules(cfg) {
 		modRegistry.Register(factory())
 	}
 
@@ -410,7 +411,7 @@ func main() {
 		}
 	}
 	// Core modules are always started.
-	for _, factory := range coreModules {
+	for _, factory := range coreModules(cfg) {
 		m := factory()
 		startSet[m.Name()] = true
 	}

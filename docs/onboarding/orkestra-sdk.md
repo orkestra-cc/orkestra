@@ -230,11 +230,10 @@ Three key invariants:
 ```go
 type Dependencies struct {
     DB            *mongo.Database
-    RedisAdapter  RedisClient        // SDK interface, satisfied by *database.RedisClientAdapter
-    Config        any                // legacy *config.Config handle — auth-only, type-assert
-    Platform      PlatformInfo       // IsProduction / IsStaging / FrontendURL / GetEnvironment
+    RedisAdapter  RedisClient           // SDK interface, satisfied by *database.RedisClientAdapter
+    Platform      PlatformInfo          // IsProduction / IsStaging / FrontendURL / GetEnvironment
     Logger        *slog.Logger
-    Services      *ServiceRegistry   // cross-module service handles
+    Services      *ServiceRegistry      // cross-module service handles
     ConfigService *ModuleConfigService  // module config, UnmarshalModule, etc.
 }
 ```
@@ -253,9 +252,14 @@ What to use what for:
   providers from here (see "Talking to other modules" below).
 - **`deps.ConfigService`** — read your own module's runtime config via
   `UnmarshalModule` (see next section).
-- **`deps.Config`** — only `auth` uses this today; it's typed `any` so
-  the SDK has no dependency on the backend's `*config.Config`. Phase 1c
-  retires it entirely.
+
+There's no `Dependencies.Config *config.Config` field. The auth core
+module is the only consumer of the backend's app-wide config, and it
+takes `cfg` via its own `NewModule(cfg *config.Config)` constructor —
+see `cmd/server/catalog.go` for how `main.go`'s cfg threads through
+the factory closure. Addons that need a piece of backend config they
+can't get from `Platform` should request a typed service via
+`deps.Services`.
 
 ## Module configuration
 
@@ -420,9 +424,11 @@ Full list of `ctxauth` getters: `GetUserUUID`, `GetUserEmail`,
 `WithTenantKind`, `WithClientIP` for tests.
 
 The claim-derived signals (`GetSessionID`, `GetAMR`, `IsMFAEnrolled`)
-stay in `internal/shared/middleware` for now — they depend on the auth
-module's claims type, which doesn't belong in the SDK. Phase 1c moves
-them behind an `iface.ClaimsAccessor` SDK contract.
+stay in `internal/shared/middleware` — they depend on the auth
+module's claims type, which doesn't belong in the SDK. A future
+refactor lifts them behind an `iface.ClaimsAccessor` contract if
+an extracted addon genuinely needs them; today the only consumers
+are backend-internal (middleware itself + authz).
 
 ## Repository pattern: tenant scoping is mandatory
 

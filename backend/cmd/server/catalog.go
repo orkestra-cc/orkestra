@@ -10,24 +10,31 @@ import (
 	"github.com/orkestra/backend/internal/core/notification"
 	"github.com/orkestra/backend/internal/core/tenant"
 	"github.com/orkestra/backend/internal/core/user"
+	"github.com/orkestra/backend/internal/shared/config"
 )
 
-// coreModules are always loaded — they provide the foundation
-// (users, notifications, tenancy, authorization, auth, navigation).
-// Order matters: each entry below depends on the previous ones.
+// coreModules returns the always-loaded module factories — user,
+// notification, tenant, authz, auth, navigation — bound to the live
+// application config. Order matters: each entry below depends on the
+// previous ones.
+//
 //   - user: base identity (no deps)
 //   - notification: email delivery (no hard deps)
 //   - tenant: orgs + memberships (depends on user)
 //   - authz: permissions + roles (depends on user + tenant)
-//   - auth: JWT + OAuth + password login (depends on user, notification, tenant, authz)
+//   - auth: JWT + OAuth + password login (depends on user, notification, tenant, authz) —
+//     also the only core module that takes *config.Config at construction
+//     time, retired from Dependencies.Config in Phase 1c
 //   - navigation: menu aggregation (no deps; reads others' NavItems at runtime)
-var coreModules = []func() module.Module{
-	func() module.Module { return user.NewModule() },
-	func() module.Module { return notification.NewModule() },
-	func() module.Module { return tenant.NewModule() },
-	func() module.Module { return authz.NewModule() },
-	func() module.Module { return auth.NewModule() },
-	func() module.Module { return navigation.NewModule() },
+func coreModules(cfg *config.Config) []func() module.Module {
+	return []func() module.Module{
+		func() module.Module { return user.NewModule() },
+		func() module.Module { return notification.NewModule() },
+		func() module.Module { return tenant.NewModule() },
+		func() module.Module { return authz.NewModule() },
+		func() module.Module { return auth.NewModule(cfg) },
+		func() module.Module { return navigation.NewModule() },
+	}
 }
 
 // optionalModules is the catalog of addons the binary can boot. It is

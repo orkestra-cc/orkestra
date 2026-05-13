@@ -93,7 +93,6 @@ func main() {
 	modDeps := &module.Dependencies{
 		DB:           db,
 		RedisAdapter: redisAdapter,
-		Config:       cfg,
 		Platform:     cfg,
 		Logger:       logger,
 		Services:     svcRegistry,
