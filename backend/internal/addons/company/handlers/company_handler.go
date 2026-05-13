@@ -6,8 +6,8 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
-	"github.com/orkestra/backend/internal/addons/company/models"
-	"github.com/orkestra/backend/internal/addons/company/services"
+	"github.com/orkestra-cc/orkestra-addon-company/models"
+	"github.com/orkestra-cc/orkestra-addon-company/services"
 )
 
 // CompanyHandler handles company lookup HTTP requests

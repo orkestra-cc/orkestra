@@ -9,6 +9,27 @@ _Parent: [../../../CLAUDE.md](../../../CLAUDE.md)_
 
 <!-- /Navigation -->
 
+## Module home
+
+This directory is a **separate Go module**
+(`github.com/orkestra-cc/orkestra-addon-company`) since Phase 5c of
+the SDK split. Source lives in-tree at this path for monorepo
+development; the same tree is mirrored to
+[github.com/orkestra-cc/orkestra-addon-company](https://github.com/orkestra-cc/orkestra-addon-company)
+and tagged starting from `v0.1.0`. Backend's `go.mod` carries a
+`replace` directive pointing at this path so changes here take effect
+without a tag bump during cross-cutting work; CI and external
+consumers fetch the published version through the Go module proxy.
+
+The addon depends on
+[`orkestra-cc/orkestra-openapi-auth`](https://github.com/orkestra-cc/orkestra-openapi-auth)
+for the OAuth-token minter that exchanges (account email, API key)
+HTTP Basic credentials for short-lived JWT bearers at
+`oauth.openapi.it/token`. That helper was previously imported from
+`backend/internal/shared/openapiauth` and was carved out into its own
+module in the same Phase 5c commit so this addon could cross the new
+module boundary.
+
 ## Module Purpose
 
 The company module provides **Italian company data lookup** by tax code (Codice Fiscale) or VAT number (Partita IVA) through integration with the OpenAPI Company API (`company.openapi.com`).
@@ -93,7 +114,7 @@ Enrichment data is stored as nested fields on the existing `CompanyLookup` docum
 
 ### Authentication flow
 
-The module uses the shared [`internal/shared/openapiauth`](../../shared/openapiauth) minter. On the first request after start (or after the operator rotates credentials), the client POSTs to `<OAuthBaseURL>/token` with HTTP Basic auth (`accountEmail:apiKey`) and the scope set declared in `companyOAuthScopes`. The returned JWT is cached two-tier (in-process + Redis under `openapiauth:company:<digest>`) for `responseTTL − 60s`. An upstream 401/403 invalidates the cached JWT so the next attempt mints fresh — useful when the operator rotates the API key mid-flight.
+The module uses the shared [`orkestra-openapi-auth`](../../shared/openapiauth) minter (in-tree at `backend/internal/shared/openapiauth/`, published as `github.com/orkestra-cc/orkestra-openapi-auth`). On the first request after start (or after the operator rotates credentials), the client POSTs to `<OAuthBaseURL>/token` with HTTP Basic auth (`accountEmail:apiKey`) and the scope set declared in `companyOAuthScopes`. The returned JWT is cached two-tier (in-process + Redis under `openapiauth:company:<digest>`) for `responseTTL − 60s`. An upstream 401/403 invalidates the cached JWT so the next attempt mints fresh — useful when the operator rotates the API key mid-flight.
 
 When `accountEmail` or `apiKey` is empty, the client falls back to the static `bearerToken` field for back-compat with installs that minted JWTs manually before this flow landed. Configure either path at `/admin/modules/company`.
 

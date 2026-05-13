@@ -99,15 +99,6 @@ internal/addons/billing/repository/supplier_repository.go:225:Find
 internal/addons/billing/repository/supplier_repository.go:242:ReplaceOne
 internal/addons/billing/repository/supplier_repository.go:268:UpdateOne
 internal/addons/billing/repository/supplier_repository.go:285:CountDocuments
-internal/addons/company/repository/company_repository.go:151:FindOne
-internal/addons/company/repository/company_repository.go:164:FindOne
-internal/addons/company/repository/company_repository.go:186:CountDocuments
-internal/addons/company/repository/company_repository.go:199:Find
-internal/addons/company/repository/company_repository.go:235:CountDocuments
-internal/addons/company/repository/company_repository.go:248:Find
-internal/addons/company/repository/company_repository.go:273:UpdateOne
-internal/addons/company/repository/company_repository.go:79:FindOne
-internal/addons/company/repository/company_repository.go:86:ReplaceOne
 internal/addons/identity/repository/idp_config_repo.go:137:FindOne
 internal/addons/identity/repository/idp_config_repo.go:152:FindOne
 internal/addons/identity/repository/scim_token_repo.go:43:UpdateMany

@@ -24,6 +24,8 @@ go 1.25.10
 use (
 	./backend
 	./backend/pkg/sdk
+	./backend/internal/shared/openapiauth
 	./backend/internal/addons/documents
 	./backend/internal/addons/aimodels
+	./backend/internal/addons/company
 )

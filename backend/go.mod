@@ -28,6 +28,20 @@ replace github.com/orkestra-cc/orkestra-addon-documents => ./internal/addons/doc
 // orkestra-addon-aimodels as a transitive require.
 replace github.com/orkestra-cc/orkestra-addon-aimodels => ./internal/addons/aimodels
 
+// Phase 5c: the openapiauth shared helper is its own Go module so the
+// company addon (also extracted in Phase 5c) and billing (still
+// in-tree) can both import it across module boundaries. Source lives
+// in-tree at backend/internal/shared/openapiauth/; the same tree is
+// mirrored to orkestra-cc/orkestra-openapi-auth and tagged from v0.1.0.
+replace github.com/orkestra-cc/orkestra-openapi-auth => ./internal/shared/openapiauth
+
+// Phase 5c: the company addon is its own Go module. Mirrors the
+// documents/aimodels pattern — source lives in-tree, mirrored to
+// orkestra-cc/orkestra-addon-company and tagged from v0.1.0. The
+// addon depends on orkestra-openapi-auth (above) for the OAuth-token
+// minter previously at internal/shared/openapiauth/.
+replace github.com/orkestra-cc/orkestra-addon-company => ./internal/addons/company
+
 require (
 	github.com/alicebob/miniredis/v2 v2.37.0
 	github.com/cedar-policy/cedar-go v1.6.0
@@ -45,7 +59,9 @@ require (
 	github.com/joho/godotenv v1.5.1
 	github.com/neo4j/neo4j-go-driver/v5 v5.28.4
 	github.com/orkestra-cc/orkestra-addon-aimodels v0.1.0
+	github.com/orkestra-cc/orkestra-addon-company v0.1.0
 	github.com/orkestra-cc/orkestra-addon-documents v0.1.0
+	github.com/orkestra-cc/orkestra-openapi-auth v0.1.0
 	github.com/orkestra-cc/orkestra-sdk v0.2.0
 	github.com/pquerna/otp v1.5.0
 	github.com/redis/go-redis/v9 v9.16.0

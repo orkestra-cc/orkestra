@@ -9,8 +9,8 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/orkestra/backend/internal/addons/company/models"
-	"github.com/orkestra/backend/internal/addons/company/repository"
+	"github.com/orkestra-cc/orkestra-addon-company/models"
+	"github.com/orkestra-cc/orkestra-addon-company/repository"
 )
 
 // Service errors

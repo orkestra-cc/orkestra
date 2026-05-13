@@ -5,7 +5,7 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
-	"github.com/orkestra/backend/internal/addons/company/handlers"
+	"github.com/orkestra-cc/orkestra-addon-company/handlers"
 )
 
 // RegisterRoutes registers all company lookup module routes
