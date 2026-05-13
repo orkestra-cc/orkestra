@@ -233,10 +233,10 @@ func (r *ModuleConfigRepository) MigrateToEnvironments(ctx context.Context, name
 		ctx,
 		bson.M{"moduleName": name},
 		bson.M{"$set": bson.M{
-			"activeEnvironment":      "production",
+			"activeEnvironment":       "production",
 			"environments.production": prodEnv,
 			"environments.sandbox":    sandboxEnv,
-			"updatedAt":              now,
+			"updatedAt":               now,
 		}},
 	)
 	if err != nil {
@@ -254,11 +254,11 @@ func (r *ModuleConfigRepository) RefreshMetadata(ctx context.Context, m Module) 
 		ctx,
 		bson.M{"moduleName": m.Name()},
 		bson.M{"$set": bson.M{
-			"displayName":  m.DisplayName(),
-			"description":  m.Description(),
+			"displayName":  DisplayNameOf(m),
+			"description":  DescriptionOf(m),
 			"category":     m.Category(),
-			"configSchema": m.ConfigSchema(),
-			"dependsOn":    m.Dependencies(),
+			"configSchema": ConfigSchemaOf(m),
+			"dependsOn":    DependenciesOf(m),
 			"updatedAt":    time.Now(),
 		}},
 	)

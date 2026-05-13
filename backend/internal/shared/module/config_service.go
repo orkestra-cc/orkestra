@@ -255,7 +255,8 @@ func (s *ModuleConfigService) buildInitialConfig(m Module, profileOverride map[s
 	configValues := make(map[string]string)
 	encryptedValues := make(map[string]string)
 
-	for _, field := range m.ConfigSchema() {
+	schema := ConfigSchemaOf(m)
+	for _, field := range schema {
 		value := ""
 		if field.EnvVar != "" {
 			value = os.Getenv(field.EnvVar)
@@ -297,21 +298,21 @@ func (s *ModuleConfigService) buildInitialConfig(m Module, profileOverride map[s
 		},
 	}
 
-	enabled := m.Enabled()
+	enabled := EnabledByDefault(m)
 	if profileOverride != nil && m.Category() != CategoryCore && m.Name() != "dev" {
 		enabled = profileOverride[m.Name()]
 	}
 
 	return ModuleConfig{
 		ModuleName:        m.Name(),
-		DisplayName:       m.DisplayName(),
-		Description:       m.Description(),
+		DisplayName:       DisplayNameOf(m),
+		Description:       DescriptionOf(m),
 		Category:          m.Category(),
 		Enabled:           enabled,
 		ConfigValues:      configValues,
 		EncryptedValues:   encryptedValues,
-		ConfigSchema:      m.ConfigSchema(),
-		DependsOn:         m.Dependencies(),
+		ConfigSchema:      schema,
+		DependsOn:         DependenciesOf(m),
 		ActiveEnvironment: "production",
 		Environments:      environments,
 	}

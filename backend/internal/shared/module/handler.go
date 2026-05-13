@@ -71,26 +71,26 @@ type ModuleHealthStatus struct {
 // ModuleConfigResponse is the API representation of a module config.
 // Secrets are never returned — only a per-field indicator of whether a value exists.
 type ModuleConfigResponse struct {
-	ModuleName            string                   `json:"moduleName"`
-	DisplayName           string                   `json:"displayName"`
-	Description           string                   `json:"description"`
-	Category              ModuleCategory           `json:"category"`
-	Enabled               bool                     `json:"enabled"`
-	Status                string                   `json:"status"` // "running" | "failed" | "disabled" | "stopped"
-	Error                 string                   `json:"error,omitempty"`
-	NeedsRestart          bool                     `json:"needsRestart"`
-	ConfigValues          map[string]string        `json:"configValues"`
-	SecretStatus          map[string]bool          `json:"secretStatus"`
-	ConfigSchema          []ConfigField            `json:"configSchema"`
-	DependsOn             []string                 `json:"dependsOn,omitempty"`
-	ProvidedServices      []string                 `json:"providedServices,omitempty"`
-	RequiredServices      []string                 `json:"requiredServices,omitempty"`
-	OptionalServices      []string                 `json:"optionalServices,omitempty"`
-	InfraContainers       []InfraContainerStatus   `json:"infraContainers,omitempty"`
-	ActiveEnvironment     string                   `json:"activeEnvironment"`
-	AvailableEnvironments []string                 `json:"availableEnvironments"`
-	CreatedAt             string                   `json:"createdAt"`
-	UpdatedAt             string                   `json:"updatedAt"`
+	ModuleName            string                 `json:"moduleName"`
+	DisplayName           string                 `json:"displayName"`
+	Description           string                 `json:"description"`
+	Category              ModuleCategory         `json:"category"`
+	Enabled               bool                   `json:"enabled"`
+	Status                string                 `json:"status"` // "running" | "failed" | "disabled" | "stopped"
+	Error                 string                 `json:"error,omitempty"`
+	NeedsRestart          bool                   `json:"needsRestart"`
+	ConfigValues          map[string]string      `json:"configValues"`
+	SecretStatus          map[string]bool        `json:"secretStatus"`
+	ConfigSchema          []ConfigField          `json:"configSchema"`
+	DependsOn             []string               `json:"dependsOn,omitempty"`
+	ProvidedServices      []string               `json:"providedServices,omitempty"`
+	RequiredServices      []string               `json:"requiredServices,omitempty"`
+	OptionalServices      []string               `json:"optionalServices,omitempty"`
+	InfraContainers       []InfraContainerStatus `json:"infraContainers,omitempty"`
+	ActiveEnvironment     string                 `json:"activeEnvironment"`
+	AvailableEnvironments []string               `json:"availableEnvironments"`
+	CreatedAt             string                 `json:"createdAt"`
+	UpdatedAt             string                 `json:"updatedAt"`
 }
 
 // InfraContainerStatus describes the observed state of a Docker container
@@ -325,7 +325,7 @@ func (h *ModuleAdminHandler) HealthCheck(ctx context.Context, _ *struct{}) (*Mod
 			continue
 		}
 
-		if err := m.HealthCheck(ctx); err != nil {
+		if err := CheckHealth(ctx, m); err != nil {
 			statuses = append(statuses, ModuleHealthStatus{
 				ModuleName: name,
 				Status:     "unhealthy",
@@ -498,13 +498,13 @@ func (h *ModuleAdminHandler) toConfigResponse(c ModuleConfig) ModuleConfigRespon
 		if m.Name() != c.ModuleName {
 			continue
 		}
-		for _, k := range m.ProvidedServices() {
+		for _, k := range ProvidedServicesOf(m) {
 			resp.ProvidedServices = append(resp.ProvidedServices, string(k))
 		}
-		for _, k := range m.RequiredServices() {
+		for _, k := range RequiredServicesOf(m) {
 			resp.RequiredServices = append(resp.RequiredServices, string(k))
 		}
-		for _, k := range m.OptionalServices() {
+		for _, k := range OptionalServicesOf(m) {
 			resp.OptionalServices = append(resp.OptionalServices, string(k))
 		}
 		resp.InfraContainers = h.collectInfraStatus(m)
@@ -525,7 +525,7 @@ func (h *ModuleAdminHandler) toConfigResponse(c ModuleConfig) ModuleConfigRespon
 // of every container declared by the module. Returns nil when the module
 // declares no containers (the most common case).
 func (h *ModuleAdminHandler) collectInfraStatus(m Module) []InfraContainerStatus {
-	specs := m.InfraContainers()
+	specs := InfraContainersOf(m)
 	if len(specs) == 0 {
 		return nil
 	}

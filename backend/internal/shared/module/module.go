@@ -19,97 +19,156 @@ import (
 // Module defines the contract for a self-contained backend module.
 // Each module declares everything it needs (DB, config, nav, services)
 // and the registry wires it automatically.
+// Module is the minimum contract every Orkestra module must satisfy. The
+// registry can boot, seed, and route a module that implements ONLY these
+// three methods. Every other capability — config schemas, nav items,
+// permissions, lifecycle hooks, infra containers — lives behind an
+// optional sub-interface below (HasConfigSchema, HasNavItems, Startable,
+// etc.) and is invoked via type assertion.
+//
+// PR-1b reshape rationale: when this interface becomes the public SDK
+// surface (Phase 4), every method here is frozen. Future capabilities
+// must be added as new sub-interfaces; widening Module would break every
+// addon published outside the monorepo.
+//
+// In-monorepo modules typically embed BaseModule, which implements every
+// sub-interface with sensible defaults so the type assertions all
+// succeed at runtime. Extracted addons may skip BaseModule and implement
+// only the sub-interfaces they care about — the registry handles both.
 type Module interface {
-	// --- Identity ---
-
 	// Name returns the unique identifier (e.g., "billing", "sales").
 	Name() string
-	// DisplayName returns a human-readable name for the admin UI.
-	DisplayName() string
-	// Description returns a short description of the module's purpose.
-	Description() string
 	// Category returns whether this module is core, toggleable, or external.
+	// Drives registry decisions like "fatal on init failure for core".
 	Category() ModuleCategory
-
-	// --- Schema declarations ---
-
-	// ConfigSchema returns the configurable fields for this module.
-	// The admin UI renders forms from these, and the registry seeds DB defaults.
-	ConfigSchema() []ConfigField
-	// Collections returns the MongoDB collections this module owns.
-	// The registry auto-creates collections and indexes on boot.
-	Collections() []CollectionSpec
-	// NavItems returns menu entries this module contributes to the navigation.
-	// The navigation module aggregates these from all enabled modules.
-	NavItems() []NavItemSpec
-	// Permissions returns the authorization permissions this module exposes.
-	// The registry collects these from every module at boot and upserts them
-	// into the authz catalog so administrators can bind them to custom roles.
-	Permissions() []iface.PermissionSpec
-	// Capabilities returns the entitlement-gated capabilities this module
-	// exposes. Capabilities are the units a tenant subscribes to — middleware
-	// and Cedar policies gate routes by checking whether the current tenant
-	// holds an active entitlement to the capability ID. The registry collects
-	// these at boot and makes them available via ServiceCapabilityRegistry.
-	Capabilities() []capability.Capability
-	// Dependencies returns names of modules that must init before this one.
-	Dependencies() []string
-	// ProvidedServices returns ServiceKeys this module registers in the ServiceRegistry.
-	ProvidedServices() []ServiceKey
-	// RequiredServices returns ServiceKeys this module needs (hard dependency — panics if missing).
-	RequiredServices() []ServiceKey
-	// OptionalServices returns ServiceKeys this module can use (graceful degradation if missing).
-	OptionalServices() []ServiceKey
-
-	// --- Activation ---
-
-	// Enabled returns the module's default activation state on first install.
-	// Consulted exactly once by buildInitialConfig() when seeding the
-	// module_configs collection; after first boot the persisted Enabled
-	// flag (admin-UI editable) is authoritative.
-	//
-	// Implementations should be self-contained — read env vars directly
-	// when their default depends on deployment configuration, do NOT
-	// reach into shared/config. Addons published outside the monorepo
-	// cannot import shared/config at all.
-	Enabled() bool
-
-	// --- Runtime capabilities ---
-
-	// HotReloadConfig returns true when the module reads its configuration
-	// lazily (via a ConfigLoader closure) so that admin-UI changes take
-	// effect without a backend restart.  Modules that still read config
-	// once during Init should return false (the default in BaseModule).
-	HotReloadConfig() bool
-
-	// --- Lifecycle ---
-
 	// Init initializes repositories, services, and handlers.
 	Init(deps *Dependencies) error
-	// RegisterRoutes registers HTTP endpoints.
+}
+
+// --- Optional sub-interfaces (queried via type assertion) ---
+
+// HasDisplayInfo lets a module advertise a human-readable name and
+// description for the admin UI. Modules that omit this are listed by
+// their Name() alone.
+type HasDisplayInfo interface {
+	DisplayName() string
+	Description() string
+}
+
+// HasConfigSchema lets a module declare its admin-editable configuration
+// fields. The registry seeds DB defaults from the schema's EnvVar /
+// Default values at first boot; the admin UI renders forms from it.
+type HasConfigSchema interface {
+	ConfigSchema() []ConfigField
+}
+
+// HasCollections lets a module declare the MongoDB collections it owns.
+// The registry auto-creates them with the requested indexes on boot.
+type HasCollections interface {
+	Collections() []CollectionSpec
+}
+
+// HasNavItems lets a module contribute entries to the dynamic sidebar.
+// The navigation module aggregates them from every enabled module.
+type HasNavItems interface {
+	NavItems() []NavItemSpec
+}
+
+// HasPermissions lets a module register authorization permissions in
+// the central catalog. The registry collects these from every module at
+// boot and upserts them so administrators can bind them to custom roles.
+type HasPermissions interface {
+	Permissions() []iface.PermissionSpec
+}
+
+// HasCapabilities lets a module declare entitlement-gated capabilities —
+// the units tenants subscribe to. Middleware and Cedar policies gate
+// routes by checking whether the current tenant holds an active
+// entitlement to the capability ID.
+type HasCapabilities interface {
+	Capabilities() []capability.Capability
+}
+
+// HasDependencies lets a module declare other modules that must init
+// before it. The registry's topological sort consumes this declaration.
+type HasDependencies interface {
+	Dependencies() []string
+}
+
+// HasServiceContracts lets a module declare its participation in the
+// ServiceRegistry: what it produces, what it hard-requires, and what
+// it would consume gracefully if present. The three lists are
+// conceptually a unit — addons that have any will declare all three —
+// hence the grouped interface.
+type HasServiceContracts interface {
+	ProvidedServices() []ServiceKey
+	RequiredServices() []ServiceKey
+	OptionalServices() []ServiceKey
+}
+
+// HasDefaultEnabled lets a module override the default first-install
+// activation state. Consulted exactly once by buildInitialConfig() when
+// seeding the module_configs collection; after first boot the persisted
+// flag in the DB is authoritative. Modules that omit this default to
+// enabled=true (BaseModule's behavior).
+//
+// Implementations must be self-contained — read env vars directly when
+// the default depends on deployment configuration, do NOT reach into
+// shared/config. Addons published outside the monorepo cannot import
+// shared/config at all.
+type HasDefaultEnabled interface {
+	Enabled() bool
+}
+
+// HotReloadable indicates that a module reads its configuration lazily
+// (typically via a ConfigLoader closure passed into services), so admin
+// UI edits to its config take effect without a backend restart.
+// Default (modules that omit it) is false: changes require a restart.
+type HotReloadable interface {
+	HotReloadConfig() bool
+}
+
+// Routable lets a module register HTTP routes with the host's router
+// (and Huma adapter). Modules that expose no HTTP surface — pure
+// background workers or service providers — can omit this entirely.
+type Routable interface {
 	RegisterRoutes(ri *RouteInfo)
-	// Start launches background goroutines (polling jobs, workers).
+}
+
+// Startable lets a module launch background goroutines (polling jobs,
+// queue workers, etc.) after Init. Called per-enable when modules are
+// hot-toggled at runtime, not just at boot.
+type Startable interface {
 	Start(ctx context.Context) error
-	// Stop performs graceful shutdown of background goroutines.
+}
+
+// Stoppable performs graceful shutdown of whatever Startable started.
+// Called on module hot-disable and on host shutdown.
+type Stoppable interface {
 	Stop(ctx context.Context) error
-	// HealthCheck verifies runtime dependencies are healthy.
+}
+
+// HealthCheckable verifies the module's runtime dependencies are
+// healthy. Polled by the /admin/modules/health endpoint.
+type HealthCheckable interface {
 	HealthCheck(ctx context.Context) error
+}
 
-	// InfraContainers declares Docker containers the registry should start
-	// before this module's Start() and stop after its Stop(). Returns nil
-	// for modules that don't own external infrastructure.
+// HasInfraContainers lets a module declare Docker containers the
+// registry should start before the module's Start() and stop after its
+// Stop() — used by graph (Memgraph) and agents (Hindsight).
+type HasInfraContainers interface {
 	InfraContainers() []InfraContainerSpec
+}
 
-	// Preflight validates runtime prerequisites that depend on mutable
-	// state (other modules' config, external services, etc.) and must be
-	// checked at each toggle-on rather than at Init. The registry calls
-	// it before touching infra containers, so a failure here prevents
-	// any side effects. BaseModule returns nil by default.
-	//
-	// Typical use: a module that requires another module's configuration
-	// (e.g. agents requires aimodels to have a default LLM set) checks
-	// that invariant here and returns a descriptive error that surfaces
-	// directly to the admin UI.
+// HasPreflight lets a module validate runtime prerequisites that depend
+// on mutable state (other modules' config, external services, etc.)
+// before the registry brings up its infra containers. Returning an
+// error here surfaces directly to the admin UI without side effects.
+//
+// Typical use: agents requires aimodels to have a default LLM
+// configured; Preflight() returns a descriptive error otherwise.
+type HasPreflight interface {
 	Preflight(ctx context.Context) error
 }
 
@@ -207,6 +266,178 @@ func (BaseModule) Stop(_ context.Context) error          { return nil }
 func (BaseModule) HealthCheck(_ context.Context) error   { return nil }
 func (BaseModule) InfraContainers() []InfraContainerSpec { return nil }
 func (BaseModule) Preflight(_ context.Context) error     { return nil }
+
+// --- Optional-capability accessors ---
+//
+// Each helper queries one optional sub-interface and falls back to a
+// sensible default when the module doesn't implement it. The registry
+// (and any other consumer of Module) should call these instead of
+// reaching for methods on the interface directly — they keep the
+// type-assertion logic in one place and let modules opt in piecemeal.
+
+// DisplayNameOf returns the module's display name, falling back to the
+// module's Name when HasDisplayInfo is not implemented.
+func DisplayNameOf(m Module) string {
+	if di, ok := m.(HasDisplayInfo); ok {
+		if name := di.DisplayName(); name != "" {
+			return name
+		}
+	}
+	return m.Name()
+}
+
+// DescriptionOf returns the module's description, or empty if the
+// module does not implement HasDisplayInfo.
+func DescriptionOf(m Module) string {
+	if di, ok := m.(HasDisplayInfo); ok {
+		return di.Description()
+	}
+	return ""
+}
+
+// ConfigSchemaOf returns the module's config schema, or nil when the
+// module declares no schema.
+func ConfigSchemaOf(m Module) []ConfigField {
+	if cs, ok := m.(HasConfigSchema); ok {
+		return cs.ConfigSchema()
+	}
+	return nil
+}
+
+// CollectionsOf returns the MongoDB collections the module owns, or nil
+// when the module declares none.
+func CollectionsOf(m Module) []CollectionSpec {
+	if c, ok := m.(HasCollections); ok {
+		return c.Collections()
+	}
+	return nil
+}
+
+// NavItemsOf returns the module's nav items, or nil when none declared.
+func NavItemsOf(m Module) []NavItemSpec {
+	if n, ok := m.(HasNavItems); ok {
+		return n.NavItems()
+	}
+	return nil
+}
+
+// PermissionsOf returns the module's permission declarations, or nil.
+func PermissionsOf(m Module) []iface.PermissionSpec {
+	if p, ok := m.(HasPermissions); ok {
+		return p.Permissions()
+	}
+	return nil
+}
+
+// CapabilitiesOf returns the module's entitlement-gated capabilities, or nil.
+func CapabilitiesOf(m Module) []capability.Capability {
+	if c, ok := m.(HasCapabilities); ok {
+		return c.Capabilities()
+	}
+	return nil
+}
+
+// DependenciesOf returns the names of modules that must init before m,
+// or nil when m declares no dependencies.
+func DependenciesOf(m Module) []string {
+	if d, ok := m.(HasDependencies); ok {
+		return d.Dependencies()
+	}
+	return nil
+}
+
+// ProvidedServicesOf returns the ServiceKeys m registers in the
+// ServiceRegistry, or nil.
+func ProvidedServicesOf(m Module) []ServiceKey {
+	if s, ok := m.(HasServiceContracts); ok {
+		return s.ProvidedServices()
+	}
+	return nil
+}
+
+// RequiredServicesOf returns the ServiceKeys m hard-requires, or nil.
+func RequiredServicesOf(m Module) []ServiceKey {
+	if s, ok := m.(HasServiceContracts); ok {
+		return s.RequiredServices()
+	}
+	return nil
+}
+
+// OptionalServicesOf returns the ServiceKeys m can use gracefully, or nil.
+func OptionalServicesOf(m Module) []ServiceKey {
+	if s, ok := m.(HasServiceContracts); ok {
+		return s.OptionalServices()
+	}
+	return nil
+}
+
+// EnabledByDefault returns the module's preferred first-install state.
+// Defaults to true when the module does not implement HasDefaultEnabled.
+func EnabledByDefault(m Module) bool {
+	if e, ok := m.(HasDefaultEnabled); ok {
+		return e.Enabled()
+	}
+	return true
+}
+
+// HotReloadsConfig reports whether the module reloads config without
+// a backend restart. Defaults to false.
+func HotReloadsConfig(m Module) bool {
+	if h, ok := m.(HotReloadable); ok {
+		return h.HotReloadConfig()
+	}
+	return false
+}
+
+// RegisterRoutes invokes m's Routable.RegisterRoutes when implemented;
+// no-op otherwise. Modules that expose no HTTP surface simply omit it.
+func RegisterRoutes(m Module, ri *RouteInfo) {
+	if r, ok := m.(Routable); ok {
+		r.RegisterRoutes(ri)
+	}
+}
+
+// StartModule invokes Startable.Start when implemented; no-op otherwise.
+func StartModule(ctx context.Context, m Module) error {
+	if s, ok := m.(Startable); ok {
+		return s.Start(ctx)
+	}
+	return nil
+}
+
+// StopModule invokes Stoppable.Stop when implemented; no-op otherwise.
+func StopModule(ctx context.Context, m Module) error {
+	if s, ok := m.(Stoppable); ok {
+		return s.Stop(ctx)
+	}
+	return nil
+}
+
+// CheckHealth invokes HealthCheckable.HealthCheck when implemented;
+// returns nil otherwise.
+func CheckHealth(ctx context.Context, m Module) error {
+	if h, ok := m.(HealthCheckable); ok {
+		return h.HealthCheck(ctx)
+	}
+	return nil
+}
+
+// InfraContainersOf returns the docker containers m owns, or nil.
+func InfraContainersOf(m Module) []InfraContainerSpec {
+	if i, ok := m.(HasInfraContainers); ok {
+		return i.InfraContainers()
+	}
+	return nil
+}
+
+// Preflight invokes HasPreflight.Preflight when implemented; returns
+// nil otherwise.
+func Preflight(ctx context.Context, m Module) error {
+	if p, ok := m.(HasPreflight); ok {
+		return p.Preflight(ctx)
+	}
+	return nil
+}
 
 // PlatformInfo is the SDK-visible subset of the backend's app config that
 // addons may legitimately need: the runtime environment classification and
