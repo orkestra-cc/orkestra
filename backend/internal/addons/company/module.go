@@ -17,6 +17,23 @@ import (
 	"github.com/orkestra/backend/internal/shared/module"
 )
 
+// Settings mirrors the company ConfigSchema 1:1 plus the legacy
+// RetryAttempts knob that the existing code reads via GetConfigInt but that
+// the schema doesn't declare yet — see CLAUDE.md "OPENAPI_COMPANY_RETRY_ATTEMPTS".
+// Leaving the Settings field in place keeps a single typed surface; when the
+// schema is fixed in a follow-up, the field starts picking up DB/env values
+// automatically.
+type Settings struct {
+	BaseURL       string        `module:"baseURL"`
+	AccountEmail  string        `module:"accountEmail"`
+	APIKey        string        `module:"apiKey"`
+	OAuthBaseURL  string        `module:"oauthBaseURL"`
+	BearerToken   string        `module:"bearerToken"`
+	Timeout       time.Duration `module:"timeout"`
+	RetryAttempts int           `module:"retryAttempts"`
+	CacheTTL      time.Duration `module:"cacheTTL"`
+}
+
 type CompanyModule struct {
 	module.BaseModule
 	handler *handlers.CompanyHandler
@@ -24,10 +41,12 @@ type CompanyModule struct {
 
 func NewModule() *CompanyModule { return &CompanyModule{} }
 
-func (m *CompanyModule) Name() string                       { return "company" }
-func (m *CompanyModule) DisplayName() string                 { return "Company Lookup" }
-func (m *CompanyModule) Description() string                 { return "Italian company data lookup by CF/P.IVA via OpenAPI" }
-func (m *CompanyModule) Category() module.ModuleCategory     { return module.CategoryExternal }
+func (m *CompanyModule) Name() string        { return "company" }
+func (m *CompanyModule) DisplayName() string { return "Company Lookup" }
+func (m *CompanyModule) Description() string {
+	return "Italian company data lookup by CF/P.IVA via OpenAPI"
+}
+func (m *CompanyModule) Category() module.ModuleCategory { return module.CategoryExternal }
 func (m *CompanyModule) Enabled(cfg *sharedConfig.Config) bool {
 	if cfg.Company.BearerToken != "" {
 		return true
@@ -85,15 +104,29 @@ func (m *CompanyModule) Permissions() []iface.PermissionSpec {
 }
 
 func (m *CompanyModule) Init(deps *module.Dependencies) error {
+	var settings Settings
+	if err := deps.ConfigService.UnmarshalModule(context.Background(), m.Name(), &settings); err != nil {
+		return err
+	}
+	if settings.Timeout <= 0 {
+		settings.Timeout = 15 * time.Second
+	}
+	if settings.RetryAttempts <= 0 {
+		settings.RetryAttempts = 3
+	}
+	if settings.CacheTTL <= 0 {
+		settings.CacheTTL = 24 * time.Hour
+	}
+
 	companyCfg := &config.CompanyAPIConfig{
-		BaseURL:       deps.GetConfig("company", "baseURL"),
-		AccountEmail:  deps.GetConfig("company", "accountEmail"),
-		APIKey:        deps.GetSecret("company", "apiKey"),
-		OAuthBaseURL:  deps.GetConfig("company", "oauthBaseURL"),
-		BearerToken:   deps.GetSecret("company", "bearerToken"),
-		Timeout:       deps.GetConfigDuration("company", "timeout", 15*time.Second),
-		RetryAttempts: deps.GetConfigInt("company", "retryAttempts", 3),
-		CacheTTL:      deps.GetConfigDuration("company", "cacheTTL", 24*time.Hour),
+		BaseURL:       settings.BaseURL,
+		AccountEmail:  settings.AccountEmail,
+		APIKey:        settings.APIKey,
+		OAuthBaseURL:  settings.OAuthBaseURL,
+		BearerToken:   settings.BearerToken,
+		Timeout:       settings.Timeout,
+		RetryAttempts: settings.RetryAttempts,
+		CacheTTL:      settings.CacheTTL,
 	}
 
 	repo := repository.NewCompanyRepository(deps.DB)
@@ -120,6 +153,6 @@ func (m *CompanyModule) RegisterRoutes(ri *module.RouteInfo) {
 	})
 }
 
-func (m *CompanyModule) Start(_ context.Context) error      { return nil }
-func (m *CompanyModule) Stop(_ context.Context) error       { return nil }
+func (m *CompanyModule) Start(_ context.Context) error       { return nil }
+func (m *CompanyModule) Stop(_ context.Context) error        { return nil }
 func (m *CompanyModule) HealthCheck(_ context.Context) error { return nil }
