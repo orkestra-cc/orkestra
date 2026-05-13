@@ -45,8 +45,8 @@ type Invoice struct {
 	CustomerID string `bson:"customerId,omitempty" json:"-"`
 
 	// Party data snapshots (embedded for immutability)
-	CedentePrestatore       *PartyData `bson:"cedentePrestatore" json:"cedentePrestatore"`             // Seller/Provider
-	CessionarioCommittente  *PartyData `bson:"cessionarioCommittente" json:"cessionarioCommittente"`   // Buyer/Client
+	CedentePrestatore      *PartyData `bson:"cedentePrestatore" json:"cedentePrestatore"`           // Seller/Provider
+	CessionarioCommittente *PartyData `bson:"cessionarioCommittente" json:"cessionarioCommittente"` // Buyer/Client
 
 	// Invoice lines
 	Lines []InvoiceLine `bson:"lines" json:"lines" validate:"required,min=1,dive"`
@@ -75,8 +75,8 @@ type Invoice struct {
 	PreservedDocumentID string `bson:"preservedDocumentId,omitempty" json:"preservedDocumentId,omitempty"`
 
 	// File content
-	XMLContent string `bson:"xmlContent,omitempty" json:"-"`     // Raw XML content (not exposed in JSON)
-	PDFPath    string `bson:"pdfPath,omitempty" json:"-"`        // Path to PDF file
+	XMLContent string `bson:"xmlContent,omitempty" json:"-"` // Raw XML content (not exposed in JSON)
+	PDFPath    string `bson:"pdfPath,omitempty" json:"-"`    // Path to PDF file
 
 	// References to other documents
 	RelatedDocuments []RelatedDocument `bson:"relatedDocuments,omitempty" json:"relatedDocuments,omitempty"`
@@ -91,7 +91,7 @@ type Invoice struct {
 	DatiCassaPrevidenziale []DatiCassaInput `bson:"datiCassa,omitempty" json:"datiCassa,omitempty"`
 
 	// Additional data
-	Causale     []string          `bson:"causale,omitempty" json:"causale,omitempty"`         // Causale (max 200 chars each)
+	Causale     []string            `bson:"causale,omitempty" json:"causale,omitempty"` // Causale (max 200 chars each)
 	Attachments []InvoiceAttachment `bson:"attachments,omitempty" json:"attachments,omitempty"`
 
 	// Notes (internal)
@@ -151,20 +151,20 @@ type LineDiscount struct {
 // AltriDatiInput represents additional management data for a line item (AltriDatiGestionali)
 // Used for automation, commercial data, and marketing purposes in FatturaPA
 type AltriDatiInput struct {
-	TipoDato          string     `bson:"tipoDato" json:"tipoDato" validate:"required,max=10"`                       // Data type identifier (max 10 chars)
+	TipoDato          string     `bson:"tipoDato" json:"tipoDato" validate:"required,max=10"`                            // Data type identifier (max 10 chars)
 	RiferimentoTesto  string     `bson:"riferimentoTesto,omitempty" json:"riferimentoTesto,omitempty" validate:"max=60"` // Text reference (max 60 chars)
-	RiferimentoNumero float64    `bson:"riferimentoNumero,omitempty" json:"riferimentoNumero,omitempty"`             // Numeric reference
-	RiferimentoData   *time.Time `bson:"riferimentoData,omitempty" json:"riferimentoData,omitempty"`                 // Date reference
+	RiferimentoNumero float64    `bson:"riferimentoNumero,omitempty" json:"riferimentoNumero,omitempty"`                 // Numeric reference
+	RiferimentoData   *time.Time `bson:"riferimentoData,omitempty" json:"riferimentoData,omitempty"`                     // Date reference
 }
 
 // VATSummaryLine represents a VAT summary line (riepilogo IVA)
 type VATSummaryLine struct {
-	VATRate         float64   `bson:"vatRate" json:"vatRate"`
-	VATNature       VATNature `bson:"vatNature,omitempty" json:"vatNature,omitempty"`
-	TaxableAmount   float64   `bson:"taxableAmount" json:"taxableAmount"`     // Imponibile
-	VATAmount       float64   `bson:"vatAmount" json:"vatAmount"`             // Imposta
-	VATExigibility  string    `bson:"vatExigibility,omitempty" json:"vatExigibility,omitempty"` // I=immediata, D=differita, S=split payment
-	NormativeRef    string    `bson:"normativeRef,omitempty" json:"normativeRef,omitempty"`    // Riferimento normativo
+	VATRate        float64   `bson:"vatRate" json:"vatRate"`
+	VATNature      VATNature `bson:"vatNature,omitempty" json:"vatNature,omitempty"`
+	TaxableAmount  float64   `bson:"taxableAmount" json:"taxableAmount"`                       // Imponibile
+	VATAmount      float64   `bson:"vatAmount" json:"vatAmount"`                               // Imposta
+	VATExigibility string    `bson:"vatExigibility,omitempty" json:"vatExigibility,omitempty"` // I=immediata, D=differita, S=split payment
+	NormativeRef   string    `bson:"normativeRef,omitempty" json:"normativeRef,omitempty"`     // Riferimento normativo
 }
 
 // PaymentTerms represents the payment terms for an invoice
@@ -191,21 +191,21 @@ type PaymentTerms struct {
 
 // PaymentInstallment represents a single payment installment
 type PaymentInstallment struct {
-	DueDate time.Time `bson:"dueDate" json:"dueDate"`
-	Amount  float64   `bson:"amount" json:"amount"`
-	Paid    bool      `bson:"paid" json:"paid"`
+	DueDate time.Time  `bson:"dueDate" json:"dueDate"`
+	Amount  float64    `bson:"amount" json:"amount"`
+	Paid    bool       `bson:"paid" json:"paid"`
 	PaidAt  *time.Time `bson:"paidAt,omitempty" json:"paidAt,omitempty"`
 }
 
 // RelatedDocument represents a reference to another document
 type RelatedDocument struct {
-	Type      string     `bson:"type" json:"type"` // ordine, contratto, convenzione, ricezione, fattura collegata
-	ID        string     `bson:"id,omitempty" json:"id,omitempty"`
-	Date      *time.Time `bson:"date,omitempty" json:"date,omitempty"`
-	Number    string     `bson:"number,omitempty" json:"number,omitempty"`
-	CIG       string     `bson:"cig,omitempty" json:"cig,omitempty"` // Codice Identificativo Gara
-	CUP       string     `bson:"cup,omitempty" json:"cup,omitempty"` // Codice Unico Progetto
-	LineRef   string     `bson:"lineRef,omitempty" json:"lineRef,omitempty"`
+	Type    string     `bson:"type" json:"type"` // ordine, contratto, convenzione, ricezione, fattura collegata
+	ID      string     `bson:"id,omitempty" json:"id,omitempty"`
+	Date    *time.Time `bson:"date,omitempty" json:"date,omitempty"`
+	Number  string     `bson:"number,omitempty" json:"number,omitempty"`
+	CIG     string     `bson:"cig,omitempty" json:"cig,omitempty"` // Codice Identificativo Gara
+	CUP     string     `bson:"cup,omitempty" json:"cup,omitempty"` // Codice Unico Progetto
+	LineRef string     `bson:"lineRef,omitempty" json:"lineRef,omitempty"`
 }
 
 // InvoiceAttachment represents an attachment to an invoice
@@ -221,7 +221,7 @@ type InvoiceAttachment struct {
 // Used for invoices to professionals/freelancers subject to withholding
 type DatiRitenutaInput struct {
 	TipoRitenuta     string  `bson:"tipoRitenuta" json:"tipoRitenuta" validate:"required,oneof=RT01 RT02 RT03 RT04 RT05 RT06"`
-	ImportoRitenuta  float64 `bson:"importoRitenuta" json:"importoRitenuta" validate:"required"`  // Withholding amount
+	ImportoRitenuta  float64 `bson:"importoRitenuta" json:"importoRitenuta" validate:"required"`   // Withholding amount
 	AliquotaRitenuta float64 `bson:"aliquotaRitenuta" json:"aliquotaRitenuta" validate:"required"` // Withholding rate (e.g., 20.00)
 	CausalePagamento string  `bson:"causalePagamento,omitempty" json:"causalePagamento,omitempty"` // Payment reason code (A-Z)
 }
@@ -235,14 +235,14 @@ type DatiBolloInput struct {
 // DatiCassaInput represents social security fund contribution data
 // Used for professionals with mandatory fund contributions (INPS, ENPAM, etc.)
 type DatiCassaInput struct {
-	TipoCassa              string  `bson:"tipoCassa" json:"tipoCassa" validate:"required"` // TC01-TC22
-	AlCassa                float64 `bson:"alCassa" json:"alCassa" validate:"required"`     // Fund contribution rate
-	ImportoContributoCassa float64 `bson:"importoCassa" json:"importoCassa" validate:"required"` // Contribution amount
+	TipoCassa              string  `bson:"tipoCassa" json:"tipoCassa" validate:"required"`             // TC01-TC22
+	AlCassa                float64 `bson:"alCassa" json:"alCassa" validate:"required"`                 // Fund contribution rate
+	ImportoContributoCassa float64 `bson:"importoCassa" json:"importoCassa" validate:"required"`       // Contribution amount
 	ImponibileCassa        float64 `bson:"imponibileCassa,omitempty" json:"imponibileCassa,omitempty"` // Taxable base
-	AliquotaIVA            float64 `bson:"aliquotaIva" json:"aliquotaIva"`                 // VAT rate on contribution
-	Ritenuta               bool    `bson:"ritenuta,omitempty" json:"ritenuta,omitempty"`  // Subject to withholding
-	Natura                 string  `bson:"natura,omitempty" json:"natura,omitempty"`      // VAT nature if rate is 0
-	RiferimentoAmm         string  `bson:"riferimentoAmm,omitempty" json:"riferimentoAmm,omitempty"` // Admin reference
+	AliquotaIVA            float64 `bson:"aliquotaIva" json:"aliquotaIva"`                             // VAT rate on contribution
+	Ritenuta               bool    `bson:"ritenuta,omitempty" json:"ritenuta,omitempty"`               // Subject to withholding
+	Natura                 string  `bson:"natura,omitempty" json:"natura,omitempty"`                   // VAT nature if rate is 0
+	RiferimentoAmm         string  `bson:"riferimentoAmm,omitempty" json:"riferimentoAmm,omitempty"`   // Admin reference
 }
 
 // ProductCode represents a product code with type identifier

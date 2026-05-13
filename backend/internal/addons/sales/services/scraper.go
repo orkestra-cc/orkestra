@@ -243,16 +243,16 @@ func cleanText(s string) string {
 func inferIndustry(description string) string {
 	lower := strings.ToLower(description)
 	industries := map[string][]string{
-		"Technology":     {"software", "saas", "tech", "digital", "cloud", "platform", "app"},
-		"Manufacturing":  {"manufacturing", "produzione", "industrial", "factory"},
-		"Finance":        {"finance", "fintech", "banking", "insurance", "assicura"},
-		"Healthcare":     {"health", "medical", "pharma", "sanit"},
-		"E-commerce":     {"ecommerce", "e-commerce", "shop", "store", "retail"},
-		"Consulting":     {"consulting", "consulen", "advisory"},
-		"Construction":   {"construction", "edil", "building", "costruz"},
+		"Technology":      {"software", "saas", "tech", "digital", "cloud", "platform", "app"},
+		"Manufacturing":   {"manufacturing", "produzione", "industrial", "factory"},
+		"Finance":         {"finance", "fintech", "banking", "insurance", "assicura"},
+		"Healthcare":      {"health", "medical", "pharma", "sanit"},
+		"E-commerce":      {"ecommerce", "e-commerce", "shop", "store", "retail"},
+		"Consulting":      {"consulting", "consulen", "advisory"},
+		"Construction":    {"construction", "edil", "building", "costruz"},
 		"Food & Beverage": {"food", "beverage", "ristoraz", "alimentar"},
-		"Logistics":      {"logistics", "logistic", "transport", "spediz"},
-		"Education":      {"education", "formazione", "training", "school"},
+		"Logistics":       {"logistics", "logistic", "transport", "spediz"},
+		"Education":       {"education", "formazione", "training", "school"},
 	}
 	for industry, keywords := range industries {
 		for _, kw := range keywords {

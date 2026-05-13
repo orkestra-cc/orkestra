@@ -14,7 +14,7 @@
 // type signatures no longer touch the User struct.
 package models
 
-import "github.com/orkestra/backend/pkg/sdk/iface"
+import "github.com/orkestra-cc/orkestra-sdk/iface"
 
 // Tier discriminators — re-exported via aliases to avoid two sources of
 // truth.

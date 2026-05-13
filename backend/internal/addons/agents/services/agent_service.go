@@ -23,11 +23,11 @@ type AgentService interface {
 }
 
 type agentService struct {
-	projectRepo  repository.ProjectRepository
-	convRepo     repository.ConversationRepository
-	hsClient     HindsightClient
-	ragBridge    RAGBridge // may be nil if RAG is disabled
-	logger       *slog.Logger
+	projectRepo repository.ProjectRepository
+	convRepo    repository.ConversationRepository
+	hsClient    HindsightClient
+	ragBridge   RAGBridge // may be nil if RAG is disabled
+	logger      *slog.Logger
 }
 
 // NewAgentService creates a new AgentService

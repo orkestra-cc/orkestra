@@ -10,15 +10,15 @@ import (
 	"sync"
 	"time"
 
+	"github.com/orkestra-cc/orkestra-sdk/ctxauth"
+	"github.com/orkestra-cc/orkestra-sdk/iface"
+	"github.com/orkestra-cc/orkestra-sdk/metrics"
 	"github.com/orkestra/backend/internal/core/auth/models"
 	"github.com/orkestra/backend/internal/core/auth/services"
 	userModels "github.com/orkestra/backend/internal/core/user/models"
 	"github.com/orkestra/backend/internal/shared/config"
 	"github.com/orkestra/backend/internal/shared/errors"
 	"github.com/orkestra/backend/internal/shared/utils"
-	"github.com/orkestra/backend/pkg/sdk/ctxauth"
-	"github.com/orkestra/backend/pkg/sdk/iface"
-	"github.com/orkestra/backend/pkg/sdk/metrics"
 )
 
 // slogString is a terse wrapper for slog.String so the warn-mode log site

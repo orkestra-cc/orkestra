@@ -70,13 +70,13 @@ type CallbackRequest struct {
 }
 
 type CallbackResponseBody struct {
-	Success      bool                       `json:"success"`
-	AccessToken  string                     `json:"accessToken"`
-	RefreshToken string                     `json:"refreshToken"`
-	TokenType    string                     `json:"tokenType"`
-	ExpiresIn    int64                      `json:"expiresIn"`
+	Success      bool                               `json:"success"`
+	AccessToken  string                             `json:"accessToken"`
+	RefreshToken string                             `json:"refreshToken"`
+	TokenType    string                             `json:"tokenType"`
+	ExpiresIn    int64                              `json:"expiresIn"`
 	User         *userModels.UserManagementResponse `json:"user,omitempty"`
-	RedirectTo   string                     `json:"redirectTo,omitempty"`
+	RedirectTo   string                             `json:"redirectTo,omitempty"`
 }
 
 type CallbackResponse struct {

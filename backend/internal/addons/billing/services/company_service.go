@@ -68,18 +68,18 @@ func (s *companyService) CreateCompany(ctx context.Context, input *models.Create
 	isDefault := input.IsDefault || count == 0 // First company is automatically default
 
 	company := &models.Company{
-		UUID:                uuid.New().String(),
-		FiscalIDCountry:     input.FiscalIDCountry,
-		FiscalIDCode:        input.FiscalIDCode,
-		CodiceFiscale:       input.CodiceFiscale,
-		Denomination:        input.Denomination,
-		RegimeFiscale:       input.RegimeFiscale,
-		Address:             input.Address,
-		NumeroCivico:        input.NumeroCivico,
-		City:                input.City,
-		Province:            input.Province,
-		PostalCode:          input.PostalCode,
-		Country:             input.Country,
+		UUID:            uuid.New().String(),
+		FiscalIDCountry: input.FiscalIDCountry,
+		FiscalIDCode:    input.FiscalIDCode,
+		CodiceFiscale:   input.CodiceFiscale,
+		Denomination:    input.Denomination,
+		RegimeFiscale:   input.RegimeFiscale,
+		Address:         input.Address,
+		NumeroCivico:    input.NumeroCivico,
+		City:            input.City,
+		Province:        input.Province,
+		PostalCode:      input.PostalCode,
+		Country:         input.Country,
 		// REA registration (flat fields)
 		REAOffice:         input.REAOffice,
 		REANumber:         input.REANumber,
@@ -359,25 +359,25 @@ func (s *companyService) validateCreateInput(input *models.CreateCompanyInput) e
 
 	// Validate fiscal regime (RF01-RF20, excluding RF03 which is invalid)
 	validRegimes := map[models.RegimeFiscale]bool{
-		models.RegimeOrdinario:          true, // RF01
-		models.RegimeContributtiMinimi:  true, // RF02
-		models.RegimeAgevolato:          true, // RF04
+		models.RegimeOrdinario:           true, // RF01
+		models.RegimeContributtiMinimi:   true, // RF02
+		models.RegimeAgevolato:           true, // RF04
 		models.RegimeVenditaSaliTabacchi: true, // RF05
 		models.RegimeCommercioFiammiferi: true, // RF06
-		models.RegimeEditoria:           true, // RF07
-		models.RegimeTelefonia:          true, // RF08
-		models.RegimeRivenditaDocumenti: true, // RF09
-		models.RegimeIntrattenimenti:    true, // RF10
-		models.RegimeAgenzieViaggio:     true, // RF11
-		models.RegimeAgroalimentare:     true, // RF12
-		models.RegimeVenditePortaPorta:  true, // RF13
-		models.RegimeRivenditaBeniUsati: true, // RF14
-		models.RegimeAgenzieVenditeAste: true, // RF15
-		models.RegimeIVAPerCassa:        true, // RF16
+		models.RegimeEditoria:            true, // RF07
+		models.RegimeTelefonia:           true, // RF08
+		models.RegimeRivenditaDocumenti:  true, // RF09
+		models.RegimeIntrattenimenti:     true, // RF10
+		models.RegimeAgenzieViaggio:      true, // RF11
+		models.RegimeAgroalimentare:      true, // RF12
+		models.RegimeVenditePortaPorta:   true, // RF13
+		models.RegimeRivenditaBeniUsati:  true, // RF14
+		models.RegimeAgenzieVenditeAste:  true, // RF15
+		models.RegimeIVAPerCassa:         true, // RF16
 		models.RegimeIVAPerCassaGenerale: true, // RF17
-		models.RegimeAltro:              true, // RF18
-		models.RegimeForfettario:        true, // RF19
-		models.RegimeFranchigiaIVA:      true, // RF20
+		models.RegimeAltro:               true, // RF18
+		models.RegimeForfettario:         true, // RF19
+		models.RegimeFranchigiaIVA:       true, // RF20
 	}
 	if !validRegimes[input.RegimeFiscale] {
 		return errors.New("invalid fiscal regime")

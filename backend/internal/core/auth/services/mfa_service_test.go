@@ -20,8 +20,8 @@ import (
 // fakeFactorRepo is an in-memory MFAFactorRepository that keeps the tests
 // hermetic — no Mongo involvement. Keyed by userUUID+type for realism.
 type fakeFactorRepo struct {
-	mu      sync.Mutex
-	byUser  map[string]*models.MFAFactorDoc
+	mu     sync.Mutex
+	byUser map[string]*models.MFAFactorDoc
 }
 
 func newFakeFactorRepo() *fakeFactorRepo {

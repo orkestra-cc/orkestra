@@ -72,7 +72,7 @@ type ListTemplatesResponse struct {
 
 // UpdateTemplateRequest is the request for updating a template
 type UpdateTemplateRequest struct {
-	ID   string                    `path:"id" doc:"Template UUID"`
+	ID   string                     `path:"id" doc:"Template UUID"`
 	Body models.UpdateTemplateInput `json:"template" doc:"Template update data"`
 }
 

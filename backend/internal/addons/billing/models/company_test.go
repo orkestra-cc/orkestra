@@ -61,10 +61,10 @@ func TestCompany_ToPartyData_PartialREAOmitted(t *testing.T) {
 	// Per Article 2250 Civil Code, partial REA is invalid; PartyData should
 	// leave IscrizioneREA nil rather than emit incomplete data.
 	cases := []*Company{
-		{REAOffice: "RM", REANumber: "RM-1"},                   // missing StatoLiquidazione
-		{REAOffice: "RM", StatoLiquidazione: "LN"},              // missing NumeroREA
-		{REANumber: "RM-1", StatoLiquidazione: "LN"},            // missing REAOffice
-		{},                                                      // none set
+		{REAOffice: "RM", REANumber: "RM-1"},         // missing StatoLiquidazione
+		{REAOffice: "RM", StatoLiquidazione: "LN"},   // missing NumeroREA
+		{REANumber: "RM-1", StatoLiquidazione: "LN"}, // missing REAOffice
+		{}, // none set
 	}
 	for i, c := range cases {
 		p := c.ToPartyData()

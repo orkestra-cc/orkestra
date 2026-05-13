@@ -13,13 +13,13 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/orkestra-cc/orkestra-sdk/iface"
 	authModels "github.com/orkestra/backend/internal/core/auth/models"
 	"github.com/orkestra/backend/internal/core/auth/repository"
 	notifModels "github.com/orkestra/backend/internal/core/notification/models"
 	userModels "github.com/orkestra/backend/internal/core/user/models"
 	sharederrors "github.com/orkestra/backend/internal/shared/errors"
 	"github.com/orkestra/backend/internal/shared/geoip"
-	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
 var (

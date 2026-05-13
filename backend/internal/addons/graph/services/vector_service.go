@@ -6,9 +6,9 @@ import (
 	"log/slog"
 	"strings"
 
+	"github.com/orkestra-cc/orkestra-sdk/iface"
 	"github.com/orkestra/backend/internal/addons/graph/models"
 	"github.com/orkestra/backend/internal/addons/graph/repository"
-	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
 // VectorService defines the interface for vector search operations

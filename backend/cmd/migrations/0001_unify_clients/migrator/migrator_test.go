@@ -14,15 +14,15 @@ import (
 type fakeStore struct {
 	mu        sync.Mutex
 	rows      []SourceRow
-	tenants   map[string]*TenantSnapshot          // tenantUUID -> snapshot
-	personal  map[string]string                   // userUUID -> tenantUUID (lookup index)
-	memberKey map[string]bool                     // userUUID + "|" + tenantUUID
-	owned     map[string]map[string]int           // userUUID -> collection -> rowCount
-	pivots    map[string]map[string]string        // tenantUUID -> collection -> "moved"
-	sentinel  map[string]bool                     // sourceID
-	createIDs []string                            // tenantUUIDs we minted
-	patched   map[string]TenantPatch              // tenantUUID -> last patch
-	failOn    map[string]error                    // op-name -> error
+	tenants   map[string]*TenantSnapshot   // tenantUUID -> snapshot
+	personal  map[string]string            // userUUID -> tenantUUID (lookup index)
+	memberKey map[string]bool              // userUUID + "|" + tenantUUID
+	owned     map[string]map[string]int    // userUUID -> collection -> rowCount
+	pivots    map[string]map[string]string // tenantUUID -> collection -> "moved"
+	sentinel  map[string]bool              // sourceID
+	createIDs []string                     // tenantUUIDs we minted
+	patched   map[string]TenantPatch       // tenantUUID -> last patch
+	failOn    map[string]error             // op-name -> error
 }
 
 func newFake() *fakeStore {

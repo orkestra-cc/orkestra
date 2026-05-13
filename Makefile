@@ -12,7 +12,7 @@
 
 .PHONY: help up down status logs reset
 .PHONY: mongo-shell redis-cli
-.PHONY: backend-build backend-test backend-deps backend-clean
+.PHONY: backend-build backend-test sdk-test backend-deps backend-clean
 .PHONY: frontend-admin-build frontend-admin-test frontend-admin-deps
 .PHONY: frontend-admin-clean frontend-admin-preview frontend-admin-type-check
 .PHONY: frontend-client-build frontend-client-typecheck frontend-client-clean
@@ -95,13 +95,21 @@ backend-build:
 	@cd backend && go build -o bin/server cmd/server/main.go
 	@echo "Backend built: backend/bin/server"
 
-backend-test:
+backend-test: sdk-test
 	@echo "Running backend tests..."
 	@cd backend && go test ./...
+
+# sdk-test exercises the pkg/sdk/ workspace module separately — it lives
+# in its own go.mod so `cd backend && go test ./...` does not include
+# its packages. Run by backend-test and backend-test-ci as a dependency.
+sdk-test:
+	@echo "Running SDK tests..."
+	@cd backend/pkg/sdk && go test ./...
 
 backend-deps:
 	@echo "Installing backend dependencies..."
 	@cd backend && go mod download && go mod tidy
+	@cd backend/pkg/sdk && go mod download && go mod tidy
 	@echo "Backend dependencies installed."
 
 backend-clean:
@@ -148,7 +156,7 @@ frontend-client-clean:
 
 .PHONY: install install-hooks fmt ci-help
 .PHONY: ci ci-all ci-backend ci-backend-matrix ci-frontend-admin ci-frontend-client ci-mobile
-.PHONY: backend-lint backend-test-ci backend-tenantscope backend-policycoverage backend-vulncheck backend-build-enterprise
+.PHONY: backend-lint sdk-lint backend-test-ci sdk-test-ci backend-tenantscope backend-policycoverage backend-vulncheck backend-build-enterprise
 .PHONY: admin-typecheck admin-lint admin-test admin-audit admin-build
 .PHONY: client-typecheck client-lint client-build
 .PHONY: mobile-analyze mobile-test
@@ -199,7 +207,7 @@ ci-all: ci-backend ci-frontend-admin ci-frontend-client ci-mobile
 
 # ---- Backend ----
 
-ci-backend: backend-lint backend-tenantscope backend-policycoverage backend-vulncheck backend-test-ci backend-build-enterprise
+ci-backend: backend-lint sdk-lint backend-tenantscope backend-policycoverage backend-vulncheck backend-test-ci backend-build-enterprise
 	@echo "Backend CI: OK"
 
 ci-backend-matrix: ci-backend
@@ -208,12 +216,24 @@ ci-backend-matrix: ci-backend
 backend-lint:
 	@cd backend && golangci-lint run --config=.golangci.yml
 
+# sdk-lint runs golangci-lint against the workspace SDK module separately —
+# its own go.mod means `cd backend && golangci-lint run ./...` does not
+# cover its packages. Shares the backend lint config to keep settings
+# unified until the SDK extracts to its own repo (Phase 4).
+sdk-lint:
+	@cd backend/pkg/sdk && golangci-lint run --config=../../.golangci.yml ./...
+
 # `-race` requires cgo. CI runners have CGO_ENABLED=1 by default, but the
 # Go toolchain mise installs locally defaults to 0 — force it on so local
 # and CI behave the same. Needs a working C compiler on PATH (gcc/clang).
-backend-test-ci:
+backend-test-ci: sdk-test-ci
 	@cd backend && CGO_ENABLED=1 go test -race -coverprofile=coverage.out ./...
 	@cd backend && go tool cover -func=coverage.out | tail -1
+
+# sdk-test-ci mirrors backend-test-ci for the workspace SDK module.
+sdk-test-ci:
+	@cd backend/pkg/sdk && CGO_ENABLED=1 go test -race -coverprofile=coverage.out ./...
+	@cd backend/pkg/sdk && go tool cover -func=coverage.out | tail -1
 
 backend-tenantscope:
 	@cd backend && go test ./tools/tenantscope/...

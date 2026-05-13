@@ -7,10 +7,10 @@ import (
 	"log/slog"
 	"testing"
 
+	"github.com/orkestra-cc/orkestra-sdk/ctxauth"
 	"github.com/orkestra/backend/internal/core/authz/cedar"
 	"github.com/orkestra/backend/internal/core/authz/models"
 	"github.com/orkestra/backend/internal/shared/middleware"
-	"github.com/orkestra/backend/pkg/sdk/ctxauth"
 )
 
 // newTestService constructs a Service with only the fields the Cedar paths

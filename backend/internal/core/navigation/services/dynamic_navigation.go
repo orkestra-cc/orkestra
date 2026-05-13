@@ -3,11 +3,11 @@ package services
 import (
 	"context"
 
+	"github.com/orkestra-cc/orkestra-sdk/ctxauth"
+	"github.com/orkestra-cc/orkestra-sdk/iface"
+	"github.com/orkestra-cc/orkestra-sdk/module"
+	"github.com/orkestra-cc/orkestra-sdk/modulegate"
 	"github.com/orkestra/backend/internal/core/navigation/models"
-	"github.com/orkestra/backend/pkg/sdk/ctxauth"
-	"github.com/orkestra/backend/pkg/sdk/iface"
-	"github.com/orkestra/backend/pkg/sdk/module"
-	"github.com/orkestra/backend/pkg/sdk/modulegate"
 )
 
 // dynamicNavigationService builds navigation from module-declared NavItems

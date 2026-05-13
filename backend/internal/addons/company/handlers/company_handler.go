@@ -73,31 +73,31 @@ type SearchCompanyLookupsResponse struct {
 // Note: Huma v2 does not support pointer types for query params, so we use zero-value
 // semantics and convert to pointers in the handler when non-zero.
 type SearchCompaniesRequest struct {
-	CompanyName        string  `query:"companyName" doc:"Company name or partial match"`
-	Autocomplete       string  `query:"autocomplete" doc:"Autocomplete prefix search"`
-	Province           string  `query:"province" doc:"Italian province code"`
-	TownCode           string  `query:"townCode" doc:"Cadastral/Belfiore town code"`
-	AtecoCode          string  `query:"atecoCode" doc:"ATECO industry code"`
-	CCIAA              string  `query:"cciaa" doc:"Chamber of Commerce"`
-	REACode            string  `query:"reaCode" doc:"REA registry code"`
-	MinTurnover        int64   `query:"minTurnover" doc:"Minimum annual turnover"`
-	MaxTurnover        int64   `query:"maxTurnover" doc:"Maximum annual turnover"`
-	MinEmployees       int     `query:"minEmployees" doc:"Minimum employees"`
-	MaxEmployees       int     `query:"maxEmployees" doc:"Maximum employees"`
-	SDICode            string  `query:"sdiCode" doc:"SDI electronic invoicing code"`
-	LegalFormCode      string  `query:"legalFormCode" doc:"Legal form code"`
-	PEC                string  `query:"pec" doc:"Certified email (PEC)"`
-	ShareHolderTaxCode string  `query:"shareHolderTaxCode" doc:"Shareholder tax code"`
-	Latitude           float64 `query:"lat" doc:"GPS latitude"`
-	Longitude          float64 `query:"long" doc:"GPS longitude"`
-	Radius             int     `query:"radius" doc:"Search radius in meters"`
-	ActivityStatus     string  `query:"activityStatus" doc:"Business status filter" enum:"ATTIVA,CESSATA,REGISTRATA,INATTIVA,SOSPESA,IN_ISCRIZIONE"`
-	DataEnrichment     string  `query:"dataEnrichment" doc:"Response detail level (omit for basic results)" enum:"name,start,advanced,pec,address,shareholders"`
-	CreationTimestamp  int64   `query:"creationTimestamp" doc:"Companies created after this Unix timestamp"`
-	LastUpdateTimestamp int64  `query:"lastUpdateTimestamp" doc:"Companies updated after this Unix timestamp"`
-	DryRun             int     `query:"dryRun" doc:"Set to 1 to count results without consuming quota" minimum:"0" maximum:"1"`
-	Limit              int     `query:"limit" default:"100" minimum:"1" maximum:"1000" doc:"Max results to return"`
-	Skip               int     `query:"skip" default:"0" minimum:"0" doc:"Number of results to skip"`
+	CompanyName         string  `query:"companyName" doc:"Company name or partial match"`
+	Autocomplete        string  `query:"autocomplete" doc:"Autocomplete prefix search"`
+	Province            string  `query:"province" doc:"Italian province code"`
+	TownCode            string  `query:"townCode" doc:"Cadastral/Belfiore town code"`
+	AtecoCode           string  `query:"atecoCode" doc:"ATECO industry code"`
+	CCIAA               string  `query:"cciaa" doc:"Chamber of Commerce"`
+	REACode             string  `query:"reaCode" doc:"REA registry code"`
+	MinTurnover         int64   `query:"minTurnover" doc:"Minimum annual turnover"`
+	MaxTurnover         int64   `query:"maxTurnover" doc:"Maximum annual turnover"`
+	MinEmployees        int     `query:"minEmployees" doc:"Minimum employees"`
+	MaxEmployees        int     `query:"maxEmployees" doc:"Maximum employees"`
+	SDICode             string  `query:"sdiCode" doc:"SDI electronic invoicing code"`
+	LegalFormCode       string  `query:"legalFormCode" doc:"Legal form code"`
+	PEC                 string  `query:"pec" doc:"Certified email (PEC)"`
+	ShareHolderTaxCode  string  `query:"shareHolderTaxCode" doc:"Shareholder tax code"`
+	Latitude            float64 `query:"lat" doc:"GPS latitude"`
+	Longitude           float64 `query:"long" doc:"GPS longitude"`
+	Radius              int     `query:"radius" doc:"Search radius in meters"`
+	ActivityStatus      string  `query:"activityStatus" doc:"Business status filter" enum:"ATTIVA,CESSATA,REGISTRATA,INATTIVA,SOSPESA,IN_ISCRIZIONE"`
+	DataEnrichment      string  `query:"dataEnrichment" doc:"Response detail level (omit for basic results)" enum:"name,start,advanced,pec,address,shareholders"`
+	CreationTimestamp   int64   `query:"creationTimestamp" doc:"Companies created after this Unix timestamp"`
+	LastUpdateTimestamp int64   `query:"lastUpdateTimestamp" doc:"Companies updated after this Unix timestamp"`
+	DryRun              int     `query:"dryRun" doc:"Set to 1 to count results without consuming quota" minimum:"0" maximum:"1"`
+	Limit               int     `query:"limit" default:"100" minimum:"1" maximum:"1000" doc:"Max results to return"`
+	Skip                int     `query:"skip" default:"0" minimum:"0" doc:"Number of results to skip"`
 }
 
 // SearchCompaniesResponse represents the response with search results
@@ -225,31 +225,31 @@ func ptrIfNonZero[T comparable](v T) *T {
 // SearchCompanies searches Italian companies via the external IT-search API
 func (h *CompanyHandler) SearchCompanies(ctx context.Context, req *SearchCompaniesRequest) (*SearchCompaniesResponse, error) {
 	params := &models.CompanySearchParams{
-		CompanyName:        req.CompanyName,
-		Autocomplete:       req.Autocomplete,
-		Province:           req.Province,
-		TownCode:           req.TownCode,
-		AtecoCode:          req.AtecoCode,
-		CCIAA:              req.CCIAA,
-		REACode:            req.REACode,
-		MinTurnover:        ptrIfNonZero(req.MinTurnover),
-		MaxTurnover:        ptrIfNonZero(req.MaxTurnover),
-		MinEmployees:       ptrIfNonZero(req.MinEmployees),
-		MaxEmployees:       ptrIfNonZero(req.MaxEmployees),
-		SDICode:            req.SDICode,
-		LegalFormCode:      req.LegalFormCode,
-		PEC:                req.PEC,
-		ShareHolderTaxCode: req.ShareHolderTaxCode,
-		Latitude:           ptrIfNonZero(req.Latitude),
-		Longitude:          ptrIfNonZero(req.Longitude),
-		Radius:             ptrIfNonZero(req.Radius),
-		ActivityStatus:     req.ActivityStatus,
-		DataEnrichment:     req.DataEnrichment,
-		CreationTimestamp:  ptrIfNonZero(req.CreationTimestamp),
+		CompanyName:         req.CompanyName,
+		Autocomplete:        req.Autocomplete,
+		Province:            req.Province,
+		TownCode:            req.TownCode,
+		AtecoCode:           req.AtecoCode,
+		CCIAA:               req.CCIAA,
+		REACode:             req.REACode,
+		MinTurnover:         ptrIfNonZero(req.MinTurnover),
+		MaxTurnover:         ptrIfNonZero(req.MaxTurnover),
+		MinEmployees:        ptrIfNonZero(req.MinEmployees),
+		MaxEmployees:        ptrIfNonZero(req.MaxEmployees),
+		SDICode:             req.SDICode,
+		LegalFormCode:       req.LegalFormCode,
+		PEC:                 req.PEC,
+		ShareHolderTaxCode:  req.ShareHolderTaxCode,
+		Latitude:            ptrIfNonZero(req.Latitude),
+		Longitude:           ptrIfNonZero(req.Longitude),
+		Radius:              ptrIfNonZero(req.Radius),
+		ActivityStatus:      req.ActivityStatus,
+		DataEnrichment:      req.DataEnrichment,
+		CreationTimestamp:   ptrIfNonZero(req.CreationTimestamp),
 		LastUpdateTimestamp: ptrIfNonZero(req.LastUpdateTimestamp),
-		DryRun:             ptrIfNonZero(req.DryRun),
-		Limit:              req.Limit,
-		Skip:               req.Skip,
+		DryRun:              ptrIfNonZero(req.DryRun),
+		Limit:               req.Limit,
+		Skip:                req.Skip,
 	}
 
 	result, err := h.service.SearchCompanies(ctx, params)

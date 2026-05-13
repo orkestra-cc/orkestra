@@ -13,6 +13,7 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/go-chi/chi/v5"
+	"github.com/orkestra-cc/orkestra-sdk/ctxauth"
 	"github.com/orkestra/backend/internal/core/auth/models"
 	"github.com/orkestra/backend/internal/core/auth/repository"
 	"github.com/orkestra/backend/internal/core/auth/services"
@@ -21,7 +22,6 @@ import (
 	"github.com/orkestra/backend/internal/shared/middleware"
 	"github.com/orkestra/backend/internal/shared/types"
 	"github.com/orkestra/backend/internal/shared/utils"
-	"github.com/orkestra/backend/pkg/sdk/ctxauth"
 )
 
 // AuthHandler handles authentication endpoints

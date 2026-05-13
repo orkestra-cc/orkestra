@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/orkestra-cc/orkestra-sdk/iface"
 	"github.com/orkestra/backend/internal/core/notification/models"
 	"github.com/orkestra/backend/internal/core/notification/repository"
-	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
 // ---- Fakes --------------------------------------------------------------

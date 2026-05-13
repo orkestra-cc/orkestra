@@ -5,7 +5,7 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/orkestra/backend/pkg/sdk/iface"
+	"github.com/orkestra-cc/orkestra-sdk/iface"
 )
 
 // DSRService orchestrates the GDPR data-subject-request pipelines:

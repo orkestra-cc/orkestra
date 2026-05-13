@@ -46,7 +46,7 @@ type AgentSettings struct {
 	// Response style
 	MaxTokens   int32  `bson:"maxTokens,omitempty" json:"maxTokens,omitempty"`     // 0 = use persona default
 	Temperature string `bson:"temperature,omitempty" json:"temperature,omitempty"` // "precise", "balanced", "creative"
-	Language    string `bson:"language,omitempty" json:"language,omitempty"`        // e.g. "en", "it" — forces response language
+	Language    string `bson:"language,omitempty" json:"language,omitempty"`       // e.g. "en", "it" — forces response language
 }
 
 const (

@@ -69,8 +69,10 @@ func (f *fakeNotifRepo) GetSummary(_ context.Context, from, to *time.Time) (*mod
 	f.lastFrom, f.lastTo = from, to
 	return f.summary, f.summaryErr
 }
-func (f *fakeNotifRepo) CountUnprocessed(_ context.Context) (int64, error)              { return 0, nil }
-func (f *fakeNotifRepo) GetPollingState(_ context.Context) (*models.PollingState, error) { return nil, nil }
+func (f *fakeNotifRepo) CountUnprocessed(_ context.Context) (int64, error) { return 0, nil }
+func (f *fakeNotifRepo) GetPollingState(_ context.Context) (*models.PollingState, error) {
+	return nil, nil
+}
 func (f *fakeNotifRepo) UpdatePollingState(_ context.Context, _ *models.PollingState) error {
 	return nil
 }

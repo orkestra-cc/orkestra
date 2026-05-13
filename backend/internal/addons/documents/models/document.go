@@ -3,7 +3,7 @@ package models
 import (
 	"time"
 
-	"github.com/orkestra/backend/pkg/sdk/iface"
+	"github.com/orkestra-cc/orkestra-sdk/iface"
 )
 
 // GeneratedDocument (and SourceType) live in shared/iface/document_types.go

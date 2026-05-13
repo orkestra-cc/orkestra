@@ -177,9 +177,9 @@ type MemberMatch struct {
 // TenantSearchResult is what SearchTenantsByQ returns: the tenant itself plus
 // up to MaxMatchedMembersPerTenant member-side hits.
 type TenantSearchResult struct {
-	Tenant          models.Tenant `bson:",inline"`
-	MatchedMembers  []MemberMatch `bson:"matchedMembers" json:"matchedMembers"`
-	MemberCount     int           `bson:"memberCount" json:"memberCount"`
+	Tenant         models.Tenant `bson:",inline"`
+	MatchedMembers []MemberMatch `bson:"matchedMembers" json:"matchedMembers"`
+	MemberCount    int           `bson:"memberCount" json:"memberCount"`
 }
 
 // MaxMatchedMembersPerTenant bounds the matchedMembers payload so a tenant

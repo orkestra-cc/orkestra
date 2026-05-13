@@ -326,13 +326,13 @@ func processListNode(list *ast.List, source []byte, parent *StructuralNode) {
 		}
 
 		node := &StructuralNode{
-			UUID:     uuid.New().String(),
-			NodeType: "list_item",
+			UUID:      uuid.New().String(),
+			NodeType:  "list_item",
 			Numbering: numbering,
-			Text:     strings.Join(textParts, "\n\n"),
-			Depth:    parent.Depth + 1,
-			Parent:   parent,
-			Position: len(parent.Children),
+			Text:      strings.Join(textParts, "\n\n"),
+			Depth:     parent.Depth + 1,
+			Parent:    parent,
+			Position:  len(parent.Children),
 		}
 		parent.Children = append(parent.Children, node)
 
@@ -587,4 +587,3 @@ func MarkdownToStructuredChunks(source []byte, maxChunkSize, minChunkSize int) [
 	root := ParseMarkdownStructure(source)
 	return ChunkStructured(root, maxChunkSize, minChunkSize)
 }
-

@@ -7,8 +7,8 @@
 //  1. resolves the tenant the customer is bound to:
 //     - tenantUUID set → load the existing tenant
 //     - tenantUUID empty → mint a new admin-flagged external tenant from the
-//       customer row (memberCount=0; operators attach members via the admin
-//       UI later)
+//     customer row (memberCount=0; operators attach members via the admin
+//     UI later)
 //  2. copies the customer's billing identity onto the tenant (LegalName,
 //     IsCompany, VATNumber, FiscalCode, billing address) — additive only:
 //     never overwrites a non-empty tenant value with empty

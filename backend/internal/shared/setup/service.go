@@ -16,9 +16,9 @@ import (
 	"log/slog"
 	"strings"
 
+	"github.com/orkestra-cc/orkestra-sdk/iface"
+	"github.com/orkestra-cc/orkestra-sdk/module"
 	authModels "github.com/orkestra/backend/internal/core/auth/models"
-	"github.com/orkestra/backend/pkg/sdk/iface"
-	"github.com/orkestra/backend/pkg/sdk/module"
 )
 
 // ErrAlreadyCompleted is returned by CreateInitialAdmin when at least one

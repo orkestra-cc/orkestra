@@ -9,13 +9,15 @@
 // To activate, in a follow-up commit:
 //
 //  1. Add the library to backend/go.mod:
-//       github.com/oschwald/geoip2-golang
+//     github.com/oschwald/geoip2-golang
+//
 //  2. Run `go mod tidy` to populate go.sum.
+//
 //  3. Replace the body of newMaxMindResolver below with:
 //
-//       db, err := geoip2.Open(path)
-//       if err != nil { return nil, fmt.Errorf("geoip: open %s: %w", path, err) }
-//       return &maxMindResolver{db: db, logger: logger}, nil
+//     db, err := geoip2.Open(path)
+//     if err != nil { return nil, fmt.Errorf("geoip: open %s: %w", path, err) }
+//     return &maxMindResolver{db: db, logger: logger}, nil
 //
 //     and implement maxMindResolver.Lookup around db.City(net.ParseIP(ip))
 //     mapping record.Country.IsoCode + record.City.Names["en"] +

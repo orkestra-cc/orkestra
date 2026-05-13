@@ -13,10 +13,10 @@ import (
 
 	"github.com/pquerna/otp/totp"
 
+	"github.com/orkestra-cc/orkestra-sdk/iface"
 	authModels "github.com/orkestra/backend/internal/core/auth/models"
 	userModels "github.com/orkestra/backend/internal/core/user/models"
 	sharederrors "github.com/orkestra/backend/internal/shared/errors"
-	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
 // totpGenerateNow is a small adapter around totp.GenerateCode so the

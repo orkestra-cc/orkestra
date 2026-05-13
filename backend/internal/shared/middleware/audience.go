@@ -61,11 +61,11 @@ func AudienceFromContext(ctx context.Context) string {
 // Behaviour (ADR-0003 PR-D D-3 hard cutover — no transition compat):
 //
 //   - No bearer token              → pass through (public route or
-//                                     downstream auth middleware will
-//                                     enforce). Audience is not stamped.
+//     downstream auth middleware will
+//     enforce). Audience is not stamped.
 //   - Token with `aud == expected` → pass through, audience stamped.
 //   - Token with no `aud` claim    → 401 with code "audience_mismatch"
-//                                     (v1 token rejected per PR-D cutover).
+//     (v1 token rejected per PR-D cutover).
 //   - Token with mismatched aud    → 401 with code "audience_mismatch".
 //
 // The unverified claim parse here is intentionally cheap (no key, no

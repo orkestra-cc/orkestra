@@ -7,14 +7,14 @@ import (
 
 	"github.com/danielgtaylor/huma/v2/adapters/humachi"
 	"github.com/go-chi/chi/v5"
+	"github.com/orkestra-cc/orkestra-sdk/iface"
+	"github.com/orkestra-cc/orkestra-sdk/module"
+	"github.com/orkestra-cc/orkestra-sdk/modulegate"
 	"github.com/orkestra/backend/internal/addons/subscriptions/handlers"
 	"github.com/orkestra/backend/internal/addons/subscriptions/jobs"
 	"github.com/orkestra/backend/internal/addons/subscriptions/models"
 	"github.com/orkestra/backend/internal/addons/subscriptions/repository"
 	"github.com/orkestra/backend/internal/addons/subscriptions/services"
-	"github.com/orkestra/backend/pkg/sdk/iface"
-	"github.com/orkestra/backend/pkg/sdk/module"
-	"github.com/orkestra/backend/pkg/sdk/modulegate"
 )
 
 // Settings is the typed view of the subscriptions module's config schema.

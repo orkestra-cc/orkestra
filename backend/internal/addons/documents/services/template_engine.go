@@ -163,10 +163,10 @@ func createTemplateFuncMap() template.FuncMap {
 		},
 
 		// String manipulation
-		"upper": strings.ToUpper,
-		"lower": strings.ToLower,
-		"trim":  strings.TrimSpace,
-		"title": strings.Title,
+		"upper":   strings.ToUpper,
+		"lower":   strings.ToLower,
+		"trim":    strings.TrimSpace,
+		"title":   strings.Title,
 		"replace": strings.ReplaceAll,
 		"truncate": func(s string, maxLen int) string {
 			if len(s) <= maxLen {

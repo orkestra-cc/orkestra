@@ -52,10 +52,10 @@ type RegisterRequest struct {
 
 type RegisterResponse struct {
 	Body struct {
-		Success             bool   `json:"success"`
-		UserUUID            string `json:"userUuid"`
-		Message             string `json:"message"`
-		RequiresVerification bool  `json:"requiresVerification"`
+		Success              bool   `json:"success"`
+		UserUUID             string `json:"userUuid"`
+		Message              string `json:"message"`
+		RequiresVerification bool   `json:"requiresVerification"`
 	}
 }
 
@@ -545,4 +545,3 @@ func (h *PasswordAuthHandler) RegisterProtectedRoutes(api huma.API, mount RouteM
 		Security:    []map[string][]string{{"bearerAuth": {}}},
 	}, h.PasswordConfirm)
 }
-

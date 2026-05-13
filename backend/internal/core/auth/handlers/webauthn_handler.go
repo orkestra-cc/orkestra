@@ -10,9 +10,9 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
+	"github.com/orkestra-cc/orkestra-sdk/iface"
 	authModels "github.com/orkestra/backend/internal/core/auth/models"
 	"github.com/orkestra/backend/internal/core/auth/services"
-	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
 // WebAuthnHandler binds the WebAuthn ceremony endpoints. It mirrors the

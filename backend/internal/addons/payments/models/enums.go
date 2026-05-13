@@ -1,9 +1,9 @@
 package models
 
 const (
-	TransactionsCollection  = "payments_transactions"
+	TransactionsCollection   = "payments_transactions"
 	PaymentMethodsCollection = "payments_payment_methods"
-	WebhookEventsCollection = "payments_webhook_events"
+	WebhookEventsCollection  = "payments_webhook_events"
 )
 
 // ProviderName identifies a payment gateway implementation.
@@ -18,8 +18,8 @@ const (
 type TransactionStatus string
 
 const (
-	TxPending         TransactionStatus = "pending"          // awaiting provider response
-	TxRequiresAction  TransactionStatus = "requires_action"  // 3DS / user action needed
+	TxPending         TransactionStatus = "pending"         // awaiting provider response
+	TxRequiresAction  TransactionStatus = "requires_action" // 3DS / user action needed
 	TxSucceeded       TransactionStatus = "succeeded"
 	TxFailed          TransactionStatus = "failed"
 	TxRefunded        TransactionStatus = "refunded"

@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/orkestra-cc/orkestra-sdk/module"
 	authModels "github.com/orkestra/backend/internal/core/auth/models"
 	userModels "github.com/orkestra/backend/internal/core/user/models"
-	"github.com/orkestra/backend/pkg/sdk/module"
 )
 
 // Defaults applied when the corresponding ConfigSchema key is unset

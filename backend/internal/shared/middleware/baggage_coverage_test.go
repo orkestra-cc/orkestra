@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/orkestra/backend/pkg/sdk/ctxauth"
+	"github.com/orkestra-cc/orkestra-sdk/ctxauth"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"

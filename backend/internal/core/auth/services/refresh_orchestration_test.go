@@ -16,11 +16,11 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/orkestra-cc/orkestra-sdk/iface"
 	authModels "github.com/orkestra/backend/internal/core/auth/models"
 	"github.com/orkestra/backend/internal/core/auth/repository"
 	userModels "github.com/orkestra/backend/internal/core/user/models"
 	"github.com/orkestra/backend/internal/shared/utils"
-	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
 // orchestrationEnv mirrors gatesEnv but wires AuthService instead of

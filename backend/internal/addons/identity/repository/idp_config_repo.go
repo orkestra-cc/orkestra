@@ -11,8 +11,8 @@ import (
 	"errors"
 	"time"
 
+	"github.com/orkestra-cc/orkestra-sdk/tenantrepo"
 	"github.com/orkestra/backend/internal/addons/identity/models"
-	"github.com/orkestra/backend/pkg/sdk/tenantrepo"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 )

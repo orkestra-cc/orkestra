@@ -26,8 +26,8 @@ func newFake() *fakeStore {
 	}
 }
 
-func (f *fakeStore) seedRow(r SourceRow)              { f.rows = append(f.rows, r) }
-func (f *fakeStore) seedTenant(t *TenantSnapshot)     { f.tenants[t.UUID] = t }
+func (f *fakeStore) seedRow(r SourceRow)          { f.rows = append(f.rows, r) }
+func (f *fakeStore) seedTenant(t *TenantSnapshot) { f.tenants[t.UUID] = t }
 
 func (f *fakeStore) SourceRows(ctx context.Context) ([]SourceRow, error) {
 	f.mu.Lock()
@@ -265,8 +265,8 @@ func TestMigrate_DryRun_NoWrites(t *testing.T) {
 
 func TestBuildPatch_DoesNotOverwriteNonEmpty(t *testing.T) {
 	row := SourceRow{
-		Denomination: "Source Co",
-		FiscalIDCode: "ITSOURCE",
+		Denomination:    "Source Co",
+		FiscalIDCode:    "ITSOURCE",
 		FiscalIDCountry: "IT",
 	}
 	tenant := &TenantSnapshot{

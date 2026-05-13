@@ -10,10 +10,10 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/orkestra-cc/orkestra-sdk/iface"
 	"github.com/orkestra/backend/internal/addons/sales/models"
 	"github.com/orkestra/backend/internal/addons/sales/repository"
 	"github.com/orkestra/backend/internal/shared/config"
-	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
 // OrchestratorService manages the lifecycle of sales intelligence jobs and skill execution

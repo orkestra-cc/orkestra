@@ -33,10 +33,10 @@ type AuthMethodsView struct {
 // covers both TOTP and WebAuthn factors — for TOTP only
 // BackupCodesRemaining is populated; for WebAuthn only Credentials is.
 type MFAFactorView struct {
-	Type                 string                     `json:"type" enum:"totp,webauthn"`
-	EnrolledAt           *time.Time                 `json:"enrolledAt,omitempty"`
-	LastUsedAt           *time.Time                 `json:"lastUsedAt,omitempty"`
-	BackupCodesRemaining int                        `json:"backupCodesRemaining,omitempty"`
+	Type                 string                      `json:"type" enum:"totp,webauthn"`
+	EnrolledAt           *time.Time                  `json:"enrolledAt,omitempty"`
+	LastUsedAt           *time.Time                  `json:"lastUsedAt,omitempty"`
+	BackupCodesRemaining int                         `json:"backupCodesRemaining,omitempty"`
 	Credentials          []WebAuthnCredentialSummary `json:"credentials,omitempty"`
 }
 

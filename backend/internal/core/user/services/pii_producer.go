@@ -4,8 +4,8 @@ import (
 	"context"
 	stderrors "errors"
 
+	"github.com/orkestra-cc/orkestra-sdk/iface"
 	"github.com/orkestra/backend/internal/core/user/repository"
-	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
 // piiProducer implements iface.PIIProducer for the user module. Exports

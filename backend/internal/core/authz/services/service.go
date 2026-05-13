@@ -11,14 +11,14 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/orkestra-cc/orkestra-sdk/ctxauth"
+	"github.com/orkestra-cc/orkestra-sdk/iface"
+	"github.com/orkestra-cc/orkestra-sdk/metrics"
+	"github.com/orkestra-cc/orkestra-sdk/module"
 	"github.com/orkestra/backend/internal/core/authz/cedar"
 	"github.com/orkestra/backend/internal/core/authz/models"
 	"github.com/orkestra/backend/internal/core/authz/repository"
 	"github.com/orkestra/backend/internal/shared/middleware"
-	"github.com/orkestra/backend/pkg/sdk/ctxauth"
-	"github.com/orkestra/backend/pkg/sdk/iface"
-	"github.com/orkestra/backend/pkg/sdk/metrics"
-	"github.com/orkestra/backend/pkg/sdk/module"
 	"go.mongodb.org/mongo-driver/bson"
 )
 

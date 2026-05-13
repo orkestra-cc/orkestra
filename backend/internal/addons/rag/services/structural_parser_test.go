@@ -295,12 +295,12 @@ func TestChunkStructured_LargeTextSplitsAtSentences(t *testing.T) {
 		NodeType: "document",
 		Children: []*StructuralNode{
 			{
-				UUID:     "clause1",
-				NodeType: "clause",
+				UUID:      "clause1",
+				NodeType:  "clause",
 				Numbering: "1",
-				Title:    "Test Clause",
-				Text:     largeText,
-				Depth:    1,
+				Title:     "Test Clause",
+				Text:      largeText,
+				Depth:     1,
 			},
 		},
 	}

@@ -13,8 +13,8 @@ import (
 	"log/slog"
 	"testing"
 
+	"github.com/orkestra-cc/orkestra-sdk/iface"
 	"github.com/orkestra/backend/internal/core/authz/models"
-	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
 func testLogger(_ *testing.T) *slog.Logger {

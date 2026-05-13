@@ -4,10 +4,10 @@
 // zero-score stub with a real login-risk scorer. The score is composed
 // from three factors derived from existing auth_sessions history:
 //
-//   new_device_fingerprint — user has prior sessions but none from this
-//   new_ip                 — user has prior sessions but none from this IP
-//   rapid_ip_change        — last prior session was <rapidWindow ago
-//                            from a different IP
+//	new_device_fingerprint — user has prior sessions but none from this
+//	new_ip                 — user has prior sessions but none from this IP
+//	rapid_ip_change        — last prior session was <rapidWindow ago
+//	                         from a different IP
 //
 // First-ever logins score 0.0 (no baseline to compare against) — the
 // scorer is deliberately conservative on bootstrap to avoid false
@@ -104,10 +104,10 @@ func RiskLevelForScore(score float64) string {
 }
 
 type riskAssessmentService struct {
-	sessions        repository.AuthSessionRepository
-	geoip           geoip.Resolver // optional; NoopResolver when unset
-	velocityKmh     float64
-	logger          *slog.Logger
+	sessions    repository.AuthSessionRepository
+	geoip       geoip.Resolver // optional; NoopResolver when unset
+	velocityKmh float64
+	logger      *slog.Logger
 	// clock is injectable so the rapid_ip_change test can pin time.Now()
 	// against a deterministic prior-session createdAt.
 	clock func() time.Time
@@ -275,15 +275,15 @@ func (r *riskAssessmentService) AssessLoginRisk(ctx context.Context, userUUID st
 						Weight:      WeightImpossibleTravel,
 						Severity:    "high",
 						Details: map[string]interface{}{
-							"factor":          "impossible_travel",
-							"priorCountry":    priorLoc.Country,
-							"priorCity":       priorLoc.City,
-							"currentCountry":  curLoc.Country,
-							"currentCity":     curLoc.City,
-							"distanceKm":      int(distanceKm),
-							"elapsedSeconds":  int(elapsed.Seconds()),
-							"velocityKmh":     int(velocityKmh),
-							"thresholdKmh":    int(r.velocityKmh),
+							"factor":         "impossible_travel",
+							"priorCountry":   priorLoc.Country,
+							"priorCity":      priorLoc.City,
+							"currentCountry": curLoc.Country,
+							"currentCity":    curLoc.City,
+							"distanceKm":     int(distanceKm),
+							"elapsedSeconds": int(elapsed.Seconds()),
+							"velocityKmh":    int(velocityKmh),
+							"thresholdKmh":   int(r.velocityKmh),
 						},
 					})
 					assessment.Score += WeightImpossibleTravel

@@ -182,16 +182,16 @@ func (j *PollingJob) SyncReceivedInvoices(ctx context.Context) error {
 			switch inv.Marking {
 			case "sent":
 				direction = models.DirectionIssued
-				status = models.StatusSent      // Issued invoices were sent to SDI
+				status = models.StatusSent       // Issued invoices were sent to SDI
 				sdiStatus = models.SDIStatusNone // Awaiting delivery notification
 			case "received":
 				direction = models.DirectionReceived
-				status = models.StatusDelivered  // Received invoices are already delivered to us
-				sdiStatus = models.SDIStatusRC   // Ricevuta di Consegna
+				status = models.StatusDelivered // Received invoices are already delivered to us
+				sdiStatus = models.SDIStatusRC  // Ricevuta di Consegna
 			case "delivered":
 				direction = models.DirectionIssued
-				status = models.StatusDelivered  // Issued invoice was delivered to recipient
-				sdiStatus = models.SDIStatusRC   // Ricevuta di Consegna (delivery receipt)
+				status = models.StatusDelivered // Issued invoice was delivered to recipient
+				sdiStatus = models.SDIStatusRC  // Ricevuta di Consegna (delivery receipt)
 			default:
 				j.logger.Warn("unknown invoice marking, skipping",
 					"uuid", inv.UUID,

@@ -28,11 +28,11 @@ type CreateCompanyInput struct {
 	Country      string `json:"country" validate:"required,len=2" doc:"Country code ISO 3166-1 alpha-2"`
 
 	// REA registration (flat fields for easier frontend integration)
-	REAOffice          string   `json:"reaOffice,omitempty" doc:"REA office (province code)"`
-	REANumber          string   `json:"reaNumber,omitempty" doc:"REA registration number"`
-	CapitaleSociale    *float64 `json:"capitaleSociale,omitempty" doc:"Share capital"`
-	SocioUnico         string   `json:"socioUnico,omitempty" doc:"SU=sole shareholder, SM=multiple shareholders"`
-	StatoLiquidazione  string   `json:"statoLiquidazione,omitempty" doc:"LN=not in liquidation, LS=in liquidation"`
+	REAOffice         string   `json:"reaOffice,omitempty" doc:"REA office (province code)"`
+	REANumber         string   `json:"reaNumber,omitempty" doc:"REA registration number"`
+	CapitaleSociale   *float64 `json:"capitaleSociale,omitempty" doc:"Share capital"`
+	SocioUnico        string   `json:"socioUnico,omitempty" doc:"SU=sole shareholder, SM=multiple shareholders"`
+	StatoLiquidazione string   `json:"statoLiquidazione,omitempty" doc:"LN=not in liquidation, LS=in liquidation"`
 
 	// Contacts
 	Email string `json:"email,omitempty" validate:"omitempty,email" doc:"Email address"`
@@ -59,15 +59,15 @@ type CreateCompanyInput struct {
 
 // UpdateCompanyInput represents the input for updating a company
 type UpdateCompanyInput struct {
-	Denomination        *string        `json:"denomination,omitempty"`
-	CodiceFiscale       *string        `json:"codiceFiscale,omitempty" doc:"Fiscal code (required for XML export per D.P.R. 605-1973)"`
-	RegimeFiscale       *RegimeFiscale `json:"regimeFiscale,omitempty"`
-	Address             *string        `json:"address,omitempty"`
-	NumeroCivico        *string        `json:"numeroCivico,omitempty"`
-	City                *string        `json:"city,omitempty"`
-	Province            *string        `json:"province,omitempty"`
-	PostalCode          *string        `json:"postalCode,omitempty"`
-	Country             *string        `json:"country,omitempty"`
+	Denomination  *string        `json:"denomination,omitempty"`
+	CodiceFiscale *string        `json:"codiceFiscale,omitempty" doc:"Fiscal code (required for XML export per D.P.R. 605-1973)"`
+	RegimeFiscale *RegimeFiscale `json:"regimeFiscale,omitempty"`
+	Address       *string        `json:"address,omitempty"`
+	NumeroCivico  *string        `json:"numeroCivico,omitempty"`
+	City          *string        `json:"city,omitempty"`
+	Province      *string        `json:"province,omitempty"`
+	PostalCode    *string        `json:"postalCode,omitempty"`
+	Country       *string        `json:"country,omitempty"`
 	// REA registration (flat fields)
 	REAOffice         *string  `json:"reaOffice,omitempty"`
 	REANumber         *string  `json:"reaNumber,omitempty"`
@@ -229,27 +229,27 @@ type CreateInvoiceLineInput struct {
 
 // CreatePaymentTermsInput represents input for payment terms
 type CreatePaymentTermsInput struct {
-	Condition     PaymentCondition `json:"condition" validate:"required"`
-	PaymentMethod PaymentMethod    `json:"paymentMethod" validate:"required"`
-	IBAN          string           `json:"iban,omitempty"`
-	BIC           string           `json:"bic,omitempty"`
-	ABI           string           `json:"abi,omitempty"`
-	CAB           string           `json:"cab,omitempty"`
-	Beneficiario        string `json:"beneficiario,omitempty" doc:"Payment beneficiary name"`
-	IstitutoFinanziario string `json:"istitutoFinanziario,omitempty" doc:"Financial institution name"`
-	DueDate       *time.Time       `json:"dueDate,omitempty"`
+	Condition           PaymentCondition `json:"condition" validate:"required"`
+	PaymentMethod       PaymentMethod    `json:"paymentMethod" validate:"required"`
+	IBAN                string           `json:"iban,omitempty"`
+	BIC                 string           `json:"bic,omitempty"`
+	ABI                 string           `json:"abi,omitempty"`
+	CAB                 string           `json:"cab,omitempty"`
+	Beneficiario        string           `json:"beneficiario,omitempty" doc:"Payment beneficiary name"`
+	IstitutoFinanziario string           `json:"istitutoFinanziario,omitempty" doc:"Financial institution name"`
+	DueDate             *time.Time       `json:"dueDate,omitempty"`
 }
 
 // UpdateInvoiceInput represents the input for updating an invoice (only draft)
 type UpdateInvoiceInput struct {
-	Number           *string                   `json:"number,omitempty"`
-	Date             *time.Time                `json:"date,omitempty"`
-	Lines            []CreateInvoiceLineInput  `json:"lines,omitempty"`
-	PaymentTerms     *CreatePaymentTermsInput  `json:"paymentTerms,omitempty"`
-	RelatedDocuments []RelatedDocument         `json:"relatedDocuments,omitempty"`
-	Causale          []string                  `json:"causale,omitempty"`
-	InternalNotes    *string                   `json:"internalNotes,omitempty"`
-	DatiBollo        *DatiBolloInput           `json:"datiBollo,omitempty"`
+	Number           *string                  `json:"number,omitempty"`
+	Date             *time.Time               `json:"date,omitempty"`
+	Lines            []CreateInvoiceLineInput `json:"lines,omitempty"`
+	PaymentTerms     *CreatePaymentTermsInput `json:"paymentTerms,omitempty"`
+	RelatedDocuments []RelatedDocument        `json:"relatedDocuments,omitempty"`
+	Causale          []string                 `json:"causale,omitempty"`
+	InternalNotes    *string                  `json:"internalNotes,omitempty"`
+	DatiBollo        *DatiBolloInput          `json:"datiBollo,omitempty"`
 }
 
 // InvoiceListResponse represents a paginated list of invoices
@@ -263,16 +263,16 @@ type InvoiceListResponse struct {
 
 // InvoiceSummary represents a summary of an invoice for list views
 type InvoiceSummary struct {
-	UUID          string           `json:"id"`
-	Direction     InvoiceDirection `json:"direction"`
-	DocumentType  DocumentType     `json:"documentType"`
-	Number        string           `json:"number"`
-	Date          time.Time        `json:"date"`
-	PartyName     string           `json:"partyName"` // Customer or Supplier name
-	TotalAmount   float64          `json:"totalAmount"`
-	Status        InvoiceStatus    `json:"status"`
-	SDIStatus     SDIStatus        `json:"sdiStatus,omitempty"`
-	CreatedAt     time.Time        `json:"createdAt"`
+	UUID         string           `json:"id"`
+	Direction    InvoiceDirection `json:"direction"`
+	DocumentType DocumentType     `json:"documentType"`
+	Number       string           `json:"number"`
+	Date         time.Time        `json:"date"`
+	PartyName    string           `json:"partyName"` // Customer or Supplier name
+	TotalAmount  float64          `json:"totalAmount"`
+	Status       InvoiceStatus    `json:"status"`
+	SDIStatus    SDIStatus        `json:"sdiStatus,omitempty"`
+	CreatedAt    time.Time        `json:"createdAt"`
 }
 
 // InvoiceFilters for querying invoices
@@ -290,11 +290,11 @@ type InvoiceFilters struct {
 
 // SendInvoiceResponse represents the response after sending an invoice to SDI
 type SendInvoiceResponse struct {
-	InvoiceUUID   string `json:"invoiceId"`
-	OpenAPIUUID   string `json:"openApiUuid"`
-	SDIIdentifier string `json:"sdiIdentifier,omitempty"`
+	InvoiceUUID   string        `json:"invoiceId"`
+	OpenAPIUUID   string        `json:"openApiUuid"`
+	SDIIdentifier string        `json:"sdiIdentifier,omitempty"`
 	Status        InvoiceStatus `json:"status"`
-	Message       string `json:"message"`
+	Message       string        `json:"message"`
 }
 
 // ========================================
@@ -314,19 +314,19 @@ type WeeklyInvoiceData struct {
 // BillingStats represents billing statistics
 type BillingStats struct {
 	// Issued invoices
-	IssuedTotal       int64   `json:"issuedTotal"`
-	IssuedDraft       int64   `json:"issuedDraft"`
-	IssuedSent        int64   `json:"issuedSent"`
-	IssuedDelivered   int64   `json:"issuedDelivered"`
-	IssuedRejected    int64   `json:"issuedRejected"`
-	IssuedAmount      float64 `json:"issuedAmount"`
+	IssuedTotal     int64   `json:"issuedTotal"`
+	IssuedDraft     int64   `json:"issuedDraft"`
+	IssuedSent      int64   `json:"issuedSent"`
+	IssuedDelivered int64   `json:"issuedDelivered"`
+	IssuedRejected  int64   `json:"issuedRejected"`
+	IssuedAmount    float64 `json:"issuedAmount"`
 
 	// Received invoices
-	ReceivedTotal     int64   `json:"receivedTotal"`
-	ReceivedPending   int64   `json:"receivedPending"`
-	ReceivedAccepted  int64   `json:"receivedAccepted"`
-	ReceivedRejected  int64   `json:"receivedRejected"`
-	ReceivedAmount    float64 `json:"receivedAmount"`
+	ReceivedTotal    int64   `json:"receivedTotal"`
+	ReceivedPending  int64   `json:"receivedPending"`
+	ReceivedAccepted int64   `json:"receivedAccepted"`
+	ReceivedRejected int64   `json:"receivedRejected"`
+	ReceivedAmount   float64 `json:"receivedAmount"`
 
 	// Notifications
 	UnprocessedNotifications int64 `json:"unprocessedNotifications"`

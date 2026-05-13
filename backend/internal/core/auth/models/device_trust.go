@@ -19,17 +19,17 @@ const DeviceTrustDuration = 30 * 24 * time.Hour
 // IsTrusted read so a stolen deviceID alone can't bypass MFA — the
 // attacker would also need the original device's fingerprint.
 type DeviceTrustDoc struct {
-	UUID          string     `bson:"uuid" json:"uuid"`
-	UserUUID      string     `bson:"userUuid" json:"userUuid"`
-	DeviceID      string     `bson:"deviceId" json:"deviceId"`
-	Fingerprint   string     `bson:"fingerprint" json:"fingerprint"`
-	DeviceName    string     `bson:"deviceName,omitempty" json:"deviceName,omitempty"`
-	Platform      string     `bson:"platform,omitempty" json:"platform,omitempty"`
-	IPAddress     string     `bson:"ipAddress,omitempty" json:"ipAddress,omitempty"`
-	UserAgent     string     `bson:"userAgent,omitempty" json:"userAgent,omitempty"`
-	TrustedAt     time.Time  `bson:"trustedAt" json:"trustedAt"`
-	TrustedUntil  time.Time  `bson:"trustedUntil" json:"trustedUntil"`
-	LastUsedAt    time.Time  `bson:"lastUsedAt,omitempty" json:"lastUsedAt,omitempty"`
+	UUID         string    `bson:"uuid" json:"uuid"`
+	UserUUID     string    `bson:"userUuid" json:"userUuid"`
+	DeviceID     string    `bson:"deviceId" json:"deviceId"`
+	Fingerprint  string    `bson:"fingerprint" json:"fingerprint"`
+	DeviceName   string    `bson:"deviceName,omitempty" json:"deviceName,omitempty"`
+	Platform     string    `bson:"platform,omitempty" json:"platform,omitempty"`
+	IPAddress    string    `bson:"ipAddress,omitempty" json:"ipAddress,omitempty"`
+	UserAgent    string    `bson:"userAgent,omitempty" json:"userAgent,omitempty"`
+	TrustedAt    time.Time `bson:"trustedAt" json:"trustedAt"`
+	TrustedUntil time.Time `bson:"trustedUntil" json:"trustedUntil"`
+	LastUsedAt   time.Time `bson:"lastUsedAt,omitempty" json:"lastUsedAt,omitempty"`
 	// GrantedAMR records which factor was verified when the trust row
 	// was granted ("otp" | "webauthn"). Login-from-trusted-device
 	// echoes this into the new token's amr claim so downstream
@@ -46,7 +46,7 @@ type DeviceTrustDoc struct {
 // small constant set so operators have a clean vocabulary on audit
 // trails and PII exports.
 const (
-	DeviceTrustRevokedByUser          = "user_initiated"
+	DeviceTrustRevokedByUser           = "user_initiated"
 	DeviceTrustRevokedOnPasswordChange = "password_changed"
 	DeviceTrustRevokedOnMFARemove      = "mfa_factor_removed"
 	DeviceTrustRevokedOnAdminReset     = "admin_mfa_reset"

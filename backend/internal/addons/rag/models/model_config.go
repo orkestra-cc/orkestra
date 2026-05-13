@@ -11,9 +11,9 @@ type ModelConfig struct {
 	ID          primitive.ObjectID `bson:"_id,omitempty" json:"-"`
 	UUID        string             `bson:"uuid" json:"uuid"`
 	Name        string             `bson:"name" json:"name"`
-	Provider    string             `bson:"provider" json:"provider"`     // "ollama" | "openai"
-	ModelType   string             `bson:"modelType" json:"modelType"`   // "embedding" | "llm"
-	ModelName   string             `bson:"modelName" json:"modelName"`   // e.g. "nomic-embed-text", "gpt-4o"
+	Provider    string             `bson:"provider" json:"provider"`   // "ollama" | "openai"
+	ModelType   string             `bson:"modelType" json:"modelType"` // "embedding" | "llm"
+	ModelName   string             `bson:"modelName" json:"modelName"` // e.g. "nomic-embed-text", "gpt-4o"
 	BaseURL     string             `bson:"baseUrl,omitempty" json:"baseUrl,omitempty"`
 	APIKey      string             `bson:"apiKey,omitempty" json:"-"` // Never exposed in JSON
 	Dimensions  int                `bson:"dimensions,omitempty" json:"dimensions,omitempty"`

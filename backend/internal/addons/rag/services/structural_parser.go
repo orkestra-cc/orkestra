@@ -36,9 +36,9 @@ type StructuredChunk struct {
 
 // CrossReference represents an intra-document cross-reference found in text.
 type CrossReference struct {
-	SourceText    string // the matched text, e.g. "see 4.1.3"
-	TargetNumber  string // the resolved target numbering, e.g. "4.1.3"
-	TargetType    string // "clause", "article", "annex", etc.
+	SourceText   string // the matched text, e.g. "see 4.1.3"
+	TargetNumber string // the resolved target numbering, e.g. "4.1.3"
+	TargetType   string // "clause", "article", "annex", etc.
 }
 
 // headingRule maps a regex to a node type and how to extract numbering/title.
@@ -60,8 +60,8 @@ func init() {
 	headingRules = []headingRule{
 		// Italian legal: TITOLO I, TITOLO II, ...
 		{
-			Pattern:  regexp.MustCompile(`^(TITOLO\s+[IVXLCDM]+)\s*[—–-]?\s*(.*)$`),
-			NodeType: "title",
+			Pattern:   regexp.MustCompile(`^(TITOLO\s+[IVXLCDM]+)\s*[—–-]?\s*(.*)$`),
+			NodeType:  "title",
 			DepthFunc: func(_ []string) int { return 1 },
 			ExtractFunc: func(m []string) (string, string) {
 				return strings.TrimSpace(m[1]), strings.TrimSpace(m[2])
@@ -69,8 +69,8 @@ func init() {
 		},
 		// Italian legal: CAPO I, CAPO II, ...
 		{
-			Pattern:  regexp.MustCompile(`^(CAPO\s+[IVXLCDM]+)\s*[—–-]?\s*(.*)$`),
-			NodeType: "chapter",
+			Pattern:   regexp.MustCompile(`^(CAPO\s+[IVXLCDM]+)\s*[—–-]?\s*(.*)$`),
+			NodeType:  "chapter",
 			DepthFunc: func(_ []string) int { return 2 },
 			ExtractFunc: func(m []string) (string, string) {
 				return strings.TrimSpace(m[1]), strings.TrimSpace(m[2])
@@ -78,8 +78,8 @@ func init() {
 		},
 		// Italian legal: SEZIONE I, SEZIONE II, ...
 		{
-			Pattern:  regexp.MustCompile(`^(SEZIONE\s+[IVXLCDM]+)\s*[—–-]?\s*(.*)$`),
-			NodeType: "section",
+			Pattern:   regexp.MustCompile(`^(SEZIONE\s+[IVXLCDM]+)\s*[—–-]?\s*(.*)$`),
+			NodeType:  "section",
 			DepthFunc: func(_ []string) int { return 3 },
 			ExtractFunc: func(m []string) (string, string) {
 				return strings.TrimSpace(m[1]), strings.TrimSpace(m[2])
@@ -87,8 +87,8 @@ func init() {
 		},
 		// Italian legal: Articolo 12, Art. 12
 		{
-			Pattern:  regexp.MustCompile(`^(?:Articolo|Art\.?)\s+(\d+)\s*[—–.-]?\s*(.*)$`),
-			NodeType: "article",
+			Pattern:   regexp.MustCompile(`^(?:Articolo|Art\.?)\s+(\d+)\s*[—–.-]?\s*(.*)$`),
+			NodeType:  "article",
 			DepthFunc: func(_ []string) int { return 4 },
 			ExtractFunc: func(m []string) (string, string) {
 				return "Art. " + m[1], strings.TrimSpace(m[2])
@@ -104,8 +104,8 @@ func init() {
 		},
 		// Annex A / ALLEGATO A
 		{
-			Pattern:  regexp.MustCompile(`^(?:Annex|ALLEGATO)\s+([A-Z])\s*[—–.-]?\s*(.*)$`),
-			NodeType: "annex",
+			Pattern:   regexp.MustCompile(`^(?:Annex|ALLEGATO)\s+([A-Z])\s*[—–.-]?\s*(.*)$`),
+			NodeType:  "annex",
 			DepthFunc: func(_ []string) int { return 1 },
 			ExtractFunc: func(m []string) (string, string) {
 				return "Annex " + m[1], strings.TrimSpace(m[2])
@@ -135,8 +135,8 @@ func init() {
 		},
 		// Top-level numbered clause: "4 Context of the organization"
 		{
-			Pattern:  regexp.MustCompile(`^(\d+)\s+([A-Z].+)$`),
-			NodeType: "clause",
+			Pattern:   regexp.MustCompile(`^(\d+)\s+([A-Z].+)$`),
+			NodeType:  "clause",
 			DepthFunc: func(_ []string) int { return 1 },
 			ExtractFunc: func(m []string) (string, string) {
 				return m[1], strings.TrimSpace(m[2])
@@ -144,8 +144,8 @@ func init() {
 		},
 		// Well-known ISO section names
 		{
-			Pattern:  regexp.MustCompile(`^(Introduction|Scope|Normative references|Terms and definitions|Bibliography)$`),
-			NodeType: "clause",
+			Pattern:   regexp.MustCompile(`^(Introduction|Scope|Normative references|Terms and definitions|Bibliography)$`),
+			NodeType:  "clause",
 			DepthFunc: func(_ []string) int { return 1 },
 			ExtractFunc: func(m []string) (string, string) {
 				return "", m[1]
@@ -173,8 +173,8 @@ func init() {
 		},
 		// ALL CAPS heading (min 6 chars, not a note/example which are handled above)
 		{
-			Pattern:  regexp.MustCompile(`^([A-Z][A-Z\s]{5,})$`),
-			NodeType: "clause",
+			Pattern:   regexp.MustCompile(`^([A-Z][A-Z\s]{5,})$`),
+			NodeType:  "clause",
 			DepthFunc: func(_ []string) int { return 1 },
 			ExtractFunc: func(m []string) (string, string) {
 				return "", strings.TrimSpace(m[1])
@@ -260,11 +260,11 @@ func ParseDocumentStructure(text string) *StructuralNode {
 			}
 
 			node := &StructuralNode{
-				UUID:     uuid.New().String(),
-				NodeType: rule.NodeType,
+				UUID:      uuid.New().String(),
+				NodeType:  rule.NodeType,
 				Numbering: numbering,
-				Title:    title,
-				Depth:    depth,
+				Title:     title,
+				Depth:     depth,
 			}
 
 			// Handle text body: if the paragraph has more content beyond the heading line

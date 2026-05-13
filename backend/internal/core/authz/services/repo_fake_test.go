@@ -20,8 +20,8 @@ import (
 type fakeRepo struct {
 	mu          sync.Mutex
 	permissions map[string]models.Permission
-	roles       map[string]models.Role         // keyed by UUID
-	bindings    map[string]models.Binding      // keyed by binding UUID
+	roles       map[string]models.Role    // keyed by UUID
+	bindings    map[string]models.Binding // keyed by binding UUID
 	// Toggleable error injection for failure-path tests.
 	createBindingErr error
 }

@@ -5,9 +5,9 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
+	"github.com/orkestra-cc/orkestra-sdk/ctxauth"
 	"github.com/orkestra/backend/internal/addons/agents/models"
 	"github.com/orkestra/backend/internal/addons/agents/services"
-	"github.com/orkestra/backend/pkg/sdk/ctxauth"
 )
 
 // AgentHandler handles HTTP requests for agent queries and conversations

@@ -139,8 +139,8 @@ func TestWriteList(t *testing.T) {
 func TestRenderFindings_CompanyResearch(t *testing.T) {
 	var sb strings.Builder
 	renderFindings(&sb, "company-research", map[string]any{
-		"industry":      "SaaS",
-		"techStack":     []any{"Go", "React"},
+		"industry":       "SaaS",
+		"techStack":      []any{"Go", "React"},
 		"scoreReasoning": "Strong fit",
 	})
 	out := sb.String()
@@ -158,9 +158,9 @@ func TestRenderFindings_CompanyResearch(t *testing.T) {
 func TestRenderFindings_DefaultFallback(t *testing.T) {
 	var sb strings.Builder
 	renderFindings(&sb, "unknown-agent", map[string]any{
-		"score":          90,         // explicitly excluded
-		"scoreReasoning": "ok",       // rendered separately
-		"customField":    "myValue",  // generic render
+		"score":          90,        // explicitly excluded
+		"scoreReasoning": "ok",      // rendered separately
+		"customField":    "myValue", // generic render
 	})
 	out := sb.String()
 	if strings.Contains(out, "score:") {

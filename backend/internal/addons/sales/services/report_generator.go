@@ -274,7 +274,7 @@ func buildAgentDataMap(results []*models.AgentResult) map[string]any {
 			continue
 		}
 		entry := map[string]any{
-			"score":    r.Score,
+			"score":     r.Score,
 			"latencyMs": r.LatencyMs,
 		}
 		if r.Error != "" {

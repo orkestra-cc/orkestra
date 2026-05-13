@@ -104,14 +104,14 @@ func TestSelfUserAuthHandlerMountsAllRoutes(t *testing.T) {
 	}
 
 	want := map[string]string{
-		"/v1/auth/operator/me/auth-methods":             "GET",
-		"/v1/auth/client/me/auth-methods":               "GET",
-		"/v1/auth/operator/me/sessions":                 "GET",
-		"/v1/auth/client/me/sessions":                   "GET",
-		"/v1/auth/operator/me/oauth/{provider}":         "DELETE",
-		"/v1/auth/client/me/oauth/{provider}":           "DELETE",
-		"/v1/auth/operator/me/sessions/{sessionId}":     "DELETE",
-		"/v1/auth/client/me/sessions/{sessionId}":       "DELETE",
+		"/v1/auth/operator/me/auth-methods":         "GET",
+		"/v1/auth/client/me/auth-methods":           "GET",
+		"/v1/auth/operator/me/sessions":             "GET",
+		"/v1/auth/client/me/sessions":               "GET",
+		"/v1/auth/operator/me/oauth/{provider}":     "DELETE",
+		"/v1/auth/client/me/oauth/{provider}":       "DELETE",
+		"/v1/auth/operator/me/sessions/{sessionId}": "DELETE",
+		"/v1/auth/client/me/sessions/{sessionId}":   "DELETE",
 	}
 	for path, method := range want {
 		item, ok := spec.Paths[path]
@@ -164,10 +164,10 @@ func TestAdminUserAuthHandlerMountsAllRoutes(t *testing.T) {
 	}
 
 	want := map[string]string{
-		"/v1/admin/users/{userId}/auth-methods":         "GET",
-		"/v1/admin/users/{userId}/send-password-reset":  "POST",
-		"/v1/admin/users/{userId}/resend-verification":  "POST",
-		"/v1/admin/users/{userId}/oauth/{provider}":     "DELETE",
+		"/v1/admin/users/{userId}/auth-methods":        "GET",
+		"/v1/admin/users/{userId}/send-password-reset": "POST",
+		"/v1/admin/users/{userId}/resend-verification": "POST",
+		"/v1/admin/users/{userId}/oauth/{provider}":    "DELETE",
 	}
 	for path, method := range want {
 		item, ok := spec.Paths[path]

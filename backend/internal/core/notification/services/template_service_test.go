@@ -17,15 +17,15 @@ func discardLogger() *slog.Logger {
 }
 
 type fakeTemplateRepo struct {
-	docs        map[string]*models.TemplateDoc // by templateId|locale
-	exists      map[string]bool                // by templateId|locale
-	existsErr   error
-	upsertErr   error
-	deleteErr   error
-	getErr      error
-	listErr     error
-	upserts     []*models.TemplateDoc
-	deletes     []string
+	docs      map[string]*models.TemplateDoc // by templateId|locale
+	exists    map[string]bool                // by templateId|locale
+	existsErr error
+	upsertErr error
+	deleteErr error
+	getErr    error
+	listErr   error
+	upserts   []*models.TemplateDoc
+	deletes   []string
 }
 
 func newFakeTemplateRepo() *fakeTemplateRepo {

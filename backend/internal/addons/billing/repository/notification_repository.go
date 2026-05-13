@@ -43,14 +43,14 @@ type NotificationRepository interface {
 }
 
 type notificationRepository struct {
-	collection      *mongo.Collection
+	collection       *mongo.Collection
 	pollingStateColl *mongo.Collection
 }
 
 // NewNotificationRepository creates a new NotificationRepository
 func NewNotificationRepository(db *mongo.Database) NotificationRepository {
 	repo := &notificationRepository{
-		collection:      db.Collection("billing_notifications"),
+		collection:       db.Collection("billing_notifications"),
 		pollingStateColl: db.Collection("billing_polling_state"),
 	}
 	repo.createIndexes(context.Background())

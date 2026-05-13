@@ -9,11 +9,11 @@ import (
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
+	"github.com/orkestra-cc/orkestra-sdk/iface"
 	"github.com/orkestra/backend/internal/addons/subscriptions/models"
 	"github.com/orkestra/backend/internal/addons/subscriptions/repository"
 	"github.com/orkestra/backend/internal/addons/subscriptions/services"
 	"github.com/orkestra/backend/internal/testkit"
-	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
 // stubSubRepo is a minimal SubscriptionRepository that records every List

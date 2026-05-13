@@ -1,6 +1,6 @@
 package models
 
-import "github.com/orkestra/backend/pkg/sdk/iface"
+import "github.com/orkestra-cc/orkestra-sdk/iface"
 
 // PaginationParams holds pagination parameters for list operations
 type PaginationParams struct {

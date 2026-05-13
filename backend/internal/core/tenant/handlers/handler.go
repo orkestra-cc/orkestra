@@ -7,12 +7,12 @@ import (
 	"strings"
 
 	"github.com/danielgtaylor/huma/v2"
+	"github.com/orkestra-cc/orkestra-sdk/ctxauth"
+	"github.com/orkestra-cc/orkestra-sdk/iface"
+	"github.com/orkestra-cc/orkestra-sdk/module"
 	"github.com/orkestra/backend/internal/core/tenant/models"
 	"github.com/orkestra/backend/internal/core/tenant/repository"
 	"github.com/orkestra/backend/internal/core/tenant/services"
-	"github.com/orkestra/backend/pkg/sdk/ctxauth"
-	"github.com/orkestra/backend/pkg/sdk/iface"
-	"github.com/orkestra/backend/pkg/sdk/module"
 )
 
 type Handler struct {

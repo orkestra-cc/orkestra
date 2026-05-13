@@ -95,13 +95,13 @@ func RegisterModelRoutes(api huma.API, handler *handlers.ModelHandler) {
 // RegisterDocumentRoutes registers document ingestion routes
 func RegisterDocumentRoutes(api huma.API, handler *handlers.DocumentHandler) {
 	huma.Register(api, huma.Operation{
-		OperationID:   "upload-rag-document",
-		Method:        http.MethodPost,
-		Path:          "/v1/rag/documents",
-		Summary:       "Upload and ingest document",
-		Description:   "Uploads a document (PDF/text), extracts text, chunks, embeds, and stores in the knowledge graph.",
-		Tags:          []string{"RAG Documents"},
-		Security:      []map[string][]string{{"bearerAuth": {}}},
+		OperationID:      "upload-rag-document",
+		Method:           http.MethodPost,
+		Path:             "/v1/rag/documents",
+		Summary:          "Upload and ingest document",
+		Description:      "Uploads a document (PDF/text), extracts text, chunks, embeds, and stores in the knowledge graph.",
+		Tags:             []string{"RAG Documents"},
+		Security:         []map[string][]string{{"bearerAuth": {}}},
 		SkipValidateBody: true,
 	}, handler.UploadDocument)
 

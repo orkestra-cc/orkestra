@@ -31,10 +31,10 @@ import (
 // Gateway when ErrUpstreamAuth bubbles up — the operator must rotate the
 // API key in /admin/modules).
 var (
-	ErrMissingCredentials = errors.New("openapi auth: account email and api key are required")
-	ErrUpstreamAuth       = errors.New("openapi auth: upstream rejected credentials")
+	ErrMissingCredentials  = errors.New("openapi auth: account email and api key are required")
+	ErrUpstreamAuth        = errors.New("openapi auth: upstream rejected credentials")
 	ErrUpstreamUnreachable = errors.New("openapi auth: upstream OAuth endpoint unreachable")
-	ErrUpstreamMalformed  = errors.New("openapi auth: upstream returned malformed response")
+	ErrUpstreamMalformed   = errors.New("openapi auth: upstream returned malformed response")
 )
 
 // Cache is the subset of Redis the Minter needs. Either of the company or

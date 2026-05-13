@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"net/url"
 
-	"github.com/orkestra/backend/pkg/sdk/iface"
+	"github.com/orkestra-cc/orkestra-sdk/iface"
 )
 
 // RemoteLLMProvider implements iface.LLMProvider by calling

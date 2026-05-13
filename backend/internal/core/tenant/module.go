@@ -13,11 +13,11 @@ import (
 
 	"github.com/danielgtaylor/huma/v2/adapters/humachi"
 	"github.com/go-chi/chi/v5"
+	"github.com/orkestra-cc/orkestra-sdk/iface"
+	"github.com/orkestra-cc/orkestra-sdk/module"
 	"github.com/orkestra/backend/internal/core/tenant/handlers"
 	"github.com/orkestra/backend/internal/core/tenant/repository"
 	"github.com/orkestra/backend/internal/core/tenant/services"
-	"github.com/orkestra/backend/pkg/sdk/iface"
-	"github.com/orkestra/backend/pkg/sdk/module"
 )
 
 type Module struct {

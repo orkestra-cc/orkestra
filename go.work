@@ -1,0 +1,27 @@
+// go.work — Multi-module workspace for the Orkestra monorepo.
+//
+// Two modules live here today:
+//
+//   - backend/                    github.com/orkestra/backend
+//     The monolith + ai-service binary, all core modules, all addons, and
+//     backend-internal infrastructure (config, database, middleware,
+//     telemetry, error wrappers, etc.).
+//
+//   - backend/pkg/sdk/            github.com/orkestra-cc/orkestra-sdk
+//     The public SDK contract — Module interface, ServiceRegistry,
+//     ConfigService, iface, ctxauth, modulegate, capability, tenantrepo,
+//     metrics. Self-contained: no imports of any backend internal/
+//     package. Phase 4 publishes this to its own GitHub repo at
+//     orkestra-cc/orkestra-sdk; until then the workspace + a `replace`
+//     directive in backend/go.mod bind it locally.
+//
+// Both `cd backend && go build ./...` and `cd backend/pkg/sdk && go test ./...`
+// resolve correctly because the workspace knows where each module lives.
+// CI runs make targets from the repo root, so go.work is always picked up.
+
+go 1.25.10
+
+use (
+	./backend
+	./backend/pkg/sdk
+)

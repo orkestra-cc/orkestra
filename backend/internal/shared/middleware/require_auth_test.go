@@ -26,12 +26,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/orkestra-cc/orkestra-sdk/ctxauth"
+	"github.com/orkestra-cc/orkestra-sdk/iface"
 	authModels "github.com/orkestra/backend/internal/core/auth/models"
 	"github.com/orkestra/backend/internal/core/auth/services"
 	userModels "github.com/orkestra/backend/internal/core/user/models"
 	sharederrors "github.com/orkestra/backend/internal/shared/errors"
-	"github.com/orkestra/backend/pkg/sdk/ctxauth"
-	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
 // stubTenant satisfies iface.TenantProvider with the empty-membership

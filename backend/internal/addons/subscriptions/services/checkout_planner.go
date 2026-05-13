@@ -5,9 +5,9 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/orkestra-cc/orkestra-sdk/iface"
 	"github.com/orkestra/backend/internal/addons/subscriptions/models"
 	"github.com/orkestra/backend/internal/addons/subscriptions/repository"
-	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
 // CheckoutPlanner implements iface.SelfServiceCheckoutPlanner. It resolves a

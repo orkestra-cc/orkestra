@@ -113,10 +113,10 @@ func TestReconcile_FlagsDrift(t *testing.T) {
 	report := Reconcile(f, nil)
 
 	wantCategories := map[string]Severity{
-		"permission.used.undeclared:fake.typo":        SeverityError,
-		"permission.declared.unused:fake.dead":        SeverityError,
-		"capability.used.undeclared:fake.ghost_cap":   SeverityError,
-		"capability.declared.unused:fake.unused_cap":  SeverityWarn,
+		"permission.used.undeclared:fake.typo":       SeverityError,
+		"permission.declared.unused:fake.dead":       SeverityError,
+		"capability.used.undeclared:fake.ghost_cap":  SeverityError,
+		"capability.declared.unused:fake.unused_cap": SeverityWarn,
 	}
 	found := map[string]Severity{}
 	for _, d := range report.Diagnostics {

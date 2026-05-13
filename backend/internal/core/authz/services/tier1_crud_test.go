@@ -9,8 +9,8 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/orkestra-cc/orkestra-sdk/iface"
 	"github.com/orkestra/backend/internal/core/authz/models"
-	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
 // ===== CreateRole =====

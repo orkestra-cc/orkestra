@@ -20,11 +20,11 @@ import (
 
 // Client errors
 var (
-	ErrCompanyNotFound     = errors.New("company not found")
-	ErrAPIRequestFailed    = errors.New("company API request failed")
-	ErrUpstreamAuth        = errors.New("company API upstream authentication failed")
-	ErrCircuitBreakerOpen  = errors.New("circuit breaker is open")
-	ErrInvalidTaxCode      = errors.New("invalid tax code")
+	ErrCompanyNotFound    = errors.New("company not found")
+	ErrAPIRequestFailed   = errors.New("company API request failed")
+	ErrUpstreamAuth       = errors.New("company API upstream authentication failed")
+	ErrCircuitBreakerOpen = errors.New("circuit breaker is open")
+	ErrInvalidTaxCode     = errors.New("invalid tax code")
 )
 
 // RedisClient defines the interface for Redis operations

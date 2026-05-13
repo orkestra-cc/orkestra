@@ -2,16 +2,16 @@ package models
 
 // AdvancedData holds data from the IT-advanced endpoint
 type AdvancedData struct {
-	REACode             string               `bson:"reaCode,omitempty" json:"reaCode,omitempty"`
-	CCIAA               string               `bson:"cciaa,omitempty" json:"cciaa,omitempty"`
-	AtecoClassification *AtecoClassification `bson:"atecoClassification,omitempty" json:"atecoClassification,omitempty"`
-	DetailedLegalForm   *LegalFormDetail     `bson:"detailedLegalForm,omitempty" json:"detailedLegalForm,omitempty"`
-	PEC                 string               `bson:"pec,omitempty" json:"pec,omitempty"`
-	StartDate           string               `bson:"startDate,omitempty" json:"startDate,omitempty"`
-	EndDate             string               `bson:"endDate,omitempty" json:"endDate,omitempty"`
-	TaxCodeCeased       *bool                `bson:"taxCodeCeased,omitempty" json:"taxCodeCeased,omitempty"`
-	VATGroup            *VATGroupData        `bson:"vatGroup,omitempty" json:"vatGroup,omitempty"`
-	BalanceSheets       *BalanceSheetsData   `bson:"balanceSheets,omitempty" json:"balanceSheets,omitempty"`
+	REACode             string                `bson:"reaCode,omitempty" json:"reaCode,omitempty"`
+	CCIAA               string                `bson:"cciaa,omitempty" json:"cciaa,omitempty"`
+	AtecoClassification *AtecoClassification  `bson:"atecoClassification,omitempty" json:"atecoClassification,omitempty"`
+	DetailedLegalForm   *LegalFormDetail      `bson:"detailedLegalForm,omitempty" json:"detailedLegalForm,omitempty"`
+	PEC                 string                `bson:"pec,omitempty" json:"pec,omitempty"`
+	StartDate           string                `bson:"startDate,omitempty" json:"startDate,omitempty"`
+	EndDate             string                `bson:"endDate,omitempty" json:"endDate,omitempty"`
+	TaxCodeCeased       *bool                 `bson:"taxCodeCeased,omitempty" json:"taxCodeCeased,omitempty"`
+	VATGroup            *VATGroupData         `bson:"vatGroup,omitempty" json:"vatGroup,omitempty"`
+	BalanceSheets       *BalanceSheetsData    `bson:"balanceSheets,omitempty" json:"balanceSheets,omitempty"`
 	ShareHolders        []AdvancedShareholder `bson:"shareHolders,omitempty" json:"shareHolders,omitempty"`
 }
 
@@ -33,21 +33,21 @@ type VATGroupData struct {
 
 // BalanceSheetsData holds balance sheet information
 type BalanceSheetsData struct {
-	Last *BalanceSheetEntry   `bson:"last,omitempty" json:"last,omitempty"`
-	All  []BalanceSheetEntry  `bson:"all,omitempty" json:"all,omitempty"`
+	Last *BalanceSheetEntry  `bson:"last,omitempty" json:"last,omitempty"`
+	All  []BalanceSheetEntry `bson:"all,omitempty" json:"all,omitempty"`
 }
 
 // BalanceSheetEntry represents a single balance sheet year
 type BalanceSheetEntry struct {
-	Year           *int     `bson:"year,omitempty" json:"year,omitempty"`
-	Employees      *int     `bson:"employees,omitempty" json:"employees,omitempty"`
-	BalanceSheetDate string `bson:"balanceSheetDate,omitempty" json:"balanceSheetDate,omitempty"`
-	Turnover       *float64 `bson:"turnover,omitempty" json:"turnover,omitempty"`
-	NetWorth       *float64 `bson:"netWorth,omitempty" json:"netWorth,omitempty"`
-	ShareCapital   *float64 `bson:"shareCapital,omitempty" json:"shareCapital,omitempty"`
-	TotalStaffCost *float64 `bson:"totalStaffCost,omitempty" json:"totalStaffCost,omitempty"`
-	TotalAssets    *float64 `bson:"totalAssets,omitempty" json:"totalAssets,omitempty"`
-	AvgGrossSalary *float64 `bson:"avgGrossSalary,omitempty" json:"avgGrossSalary,omitempty"`
+	Year             *int     `bson:"year,omitempty" json:"year,omitempty"`
+	Employees        *int     `bson:"employees,omitempty" json:"employees,omitempty"`
+	BalanceSheetDate string   `bson:"balanceSheetDate,omitempty" json:"balanceSheetDate,omitempty"`
+	Turnover         *float64 `bson:"turnover,omitempty" json:"turnover,omitempty"`
+	NetWorth         *float64 `bson:"netWorth,omitempty" json:"netWorth,omitempty"`
+	ShareCapital     *float64 `bson:"shareCapital,omitempty" json:"shareCapital,omitempty"`
+	TotalStaffCost   *float64 `bson:"totalStaffCost,omitempty" json:"totalStaffCost,omitempty"`
+	TotalAssets      *float64 `bson:"totalAssets,omitempty" json:"totalAssets,omitempty"`
+	AvgGrossSalary   *float64 `bson:"avgGrossSalary,omitempty" json:"avgGrossSalary,omitempty"`
 }
 
 // AdvancedShareholder represents a shareholder from the advanced endpoint
@@ -225,12 +225,12 @@ type NationalParentCompany struct {
 
 // CorporateGroupsData holds corporate group information
 type CorporateGroupsData struct {
-	BelongsToGroup         *bool                  `bson:"belongsToGroup,omitempty" json:"belongsToGroup,omitempty"`
-	GroupName              string                 `bson:"groupName,omitempty" json:"groupName,omitempty"`
-	HoldingCompanyName     string                 `bson:"holdingCompanyName,omitempty" json:"holdingCompanyName,omitempty"`
-	HoldingCountry         *CodeDescription       `bson:"holdingCountry,omitempty" json:"holdingCountry,omitempty"`
-	NationalParentCompany  *NationalParentCompany `bson:"nationalParentCompany,omitempty" json:"nationalParentCompany,omitempty"`
-	HasForeignParentCompany *bool                 `bson:"hasForeignParentCompany,omitempty" json:"hasForeignParentCompany,omitempty"`
+	BelongsToGroup          *bool                  `bson:"belongsToGroup,omitempty" json:"belongsToGroup,omitempty"`
+	GroupName               string                 `bson:"groupName,omitempty" json:"groupName,omitempty"`
+	HoldingCompanyName      string                 `bson:"holdingCompanyName,omitempty" json:"holdingCompanyName,omitempty"`
+	HoldingCountry          *CodeDescription       `bson:"holdingCountry,omitempty" json:"holdingCountry,omitempty"`
+	NationalParentCompany   *NationalParentCompany `bson:"nationalParentCompany,omitempty" json:"nationalParentCompany,omitempty"`
+	HasForeignParentCompany *bool                  `bson:"hasForeignParentCompany,omitempty" json:"hasForeignParentCompany,omitempty"`
 }
 
 // SubsidiaryCompany represents a subsidiary company
@@ -265,12 +265,12 @@ type StakeholdersData struct {
 
 // ForeignTradeData holds import/export trade information
 type ForeignTradeData struct {
-	IsImporter        *bool    `bson:"isImporter,omitempty" json:"isImporter,omitempty"`
+	IsImporter         *bool    `bson:"isImporter,omitempty" json:"isImporter,omitempty"`
 	ImportPercentShare *float64 `bson:"importPercentShare,omitempty" json:"importPercentShare,omitempty"`
-	ImportCountries   string   `bson:"importCountries,omitempty" json:"importCountries,omitempty"`
-	IsExporter        *bool    `bson:"isExporter,omitempty" json:"isExporter,omitempty"`
+	ImportCountries    string   `bson:"importCountries,omitempty" json:"importCountries,omitempty"`
+	IsExporter         *bool    `bson:"isExporter,omitempty" json:"isExporter,omitempty"`
 	ExportPercentShare *float64 `bson:"exportPercentShare,omitempty" json:"exportPercentShare,omitempty"`
-	ExportCountries   string   `bson:"exportCountries,omitempty" json:"exportCountries,omitempty"`
+	ExportCountries    string   `bson:"exportCountries,omitempty" json:"exportCountries,omitempty"`
 }
 
 // PublicTender represents a public tender record

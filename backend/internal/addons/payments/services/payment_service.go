@@ -8,9 +8,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/orkestra-cc/orkestra-sdk/iface"
 	"github.com/orkestra/backend/internal/addons/payments/models"
 	"github.com/orkestra/backend/internal/addons/payments/repository"
-	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
 // Sentinel errors returned by RefundCharge for invalid amounts. Handler code

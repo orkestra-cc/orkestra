@@ -9,12 +9,12 @@ import (
 
 // SkillTask represents an in-flight or completed skill execution
 type SkillTask struct {
-	ID        string                     `json:"id"`
-	Skill     string                     `json:"skill"`
-	Status    string                     `json:"status"` // "running", "completed", "failed"
+	ID        string                      `json:"id"`
+	Skill     string                      `json:"skill"`
+	Status    string                      `json:"status"` // "running", "completed", "failed"
 	Result    *models.SkillResultInternal `json:"result,omitempty"`
-	Error     string                     `json:"error,omitempty"`
-	CreatedAt time.Time                  `json:"createdAt"`
+	Error     string                      `json:"error,omitempty"`
+	CreatedAt time.Time                   `json:"createdAt"`
 }
 
 // SkillStore is an in-memory store for async skill results with automatic TTL cleanup.

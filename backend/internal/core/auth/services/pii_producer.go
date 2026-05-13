@@ -3,9 +3,9 @@ package services
 import (
 	"context"
 
+	"github.com/orkestra-cc/orkestra-sdk/iface"
 	authModels "github.com/orkestra/backend/internal/core/auth/models"
 	"github.com/orkestra/backend/internal/core/auth/repository"
-	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
 // piiProducer implements iface.PIIProducer for the auth module. It

@@ -4,9 +4,9 @@ import (
 	"context"
 	"testing"
 
+	"github.com/orkestra-cc/orkestra-sdk/iface"
+	"github.com/orkestra-cc/orkestra-sdk/module"
 	"github.com/orkestra/backend/internal/core/navigation/models"
-	"github.com/orkestra/backend/pkg/sdk/iface"
-	"github.com/orkestra/backend/pkg/sdk/module"
 )
 
 // ctxTenantKindKey mirrors the unexported middleware.ctxTenantKind constant

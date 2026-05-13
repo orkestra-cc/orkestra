@@ -33,9 +33,9 @@ func NewSOC2EvidenceService(db *mongo.Database) *SOC2EvidenceService {
 // with a SOC2 common-criteria control so auditors can map it to their
 // sample request directly.
 type Evidence struct {
-	GeneratedAt time.Time         `json:"generatedAt"`
-	Controls    map[string]any    `json:"controls"`
-	Summary     map[string]int64  `json:"summary"`
+	GeneratedAt time.Time        `json:"generatedAt"`
+	Controls    map[string]any   `json:"controls"`
+	Summary     map[string]int64 `json:"summary"`
 }
 
 // Generate assembles the evidence snapshot. Every sub-query runs with

@@ -44,7 +44,7 @@ func NewLLMProvider(cfg ModelConfig) (LLMProvider, error) {
 
 // RemoteModel represents a model available on a remote provider
 type RemoteModel struct {
-	ID       string
+	ID      string
 	OwnedBy string
 }
 

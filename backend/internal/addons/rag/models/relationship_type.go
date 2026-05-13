@@ -10,13 +10,13 @@ import (
 type RelationshipTypeConfig struct {
 	ID          primitive.ObjectID `bson:"_id,omitempty" json:"-"`
 	UUID        string             `bson:"uuid" json:"uuid"`
-	Name        string             `bson:"name" json:"name"`                 // e.g. "REFERENCES", "SIMILAR_TO"
-	Description string             `bson:"description" json:"description"`   // human-readable description
-	FromNode    string             `bson:"fromNode" json:"fromNode"`         // e.g. "RagChunk", "RagDocument"
-	ToNode      string             `bson:"toNode" json:"toNode"`             // e.g. "RagSection", "RagChunk"
-	Properties  []string           `bson:"properties" json:"properties"`     // edge properties, e.g. ["similarity"]
-	Categories  map[string]bool    `bson:"categories" json:"categories"`     // {"iso": true, "law": false, ...}
-	IsSystem    bool               `bson:"isSystem" json:"isSystem"`         // system rels cannot be deleted
+	Name        string             `bson:"name" json:"name"`               // e.g. "REFERENCES", "SIMILAR_TO"
+	Description string             `bson:"description" json:"description"` // human-readable description
+	FromNode    string             `bson:"fromNode" json:"fromNode"`       // e.g. "RagChunk", "RagDocument"
+	ToNode      string             `bson:"toNode" json:"toNode"`           // e.g. "RagSection", "RagChunk"
+	Properties  []string           `bson:"properties" json:"properties"`   // edge properties, e.g. ["similarity"]
+	Categories  map[string]bool    `bson:"categories" json:"categories"`   // {"iso": true, "law": false, ...}
+	IsSystem    bool               `bson:"isSystem" json:"isSystem"`       // system rels cannot be deleted
 	CreatedAt   time.Time          `bson:"createdAt" json:"createdAt"`
 	UpdatedAt   time.Time          `bson:"updatedAt" json:"updatedAt"`
 }

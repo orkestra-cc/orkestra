@@ -212,15 +212,15 @@ type GetDocumentRelationsRequest struct {
 
 // CrossDocLink represents a similarity link between chunks from two different documents
 type CrossDocLink struct {
-	SourceChunkUUID  string  `json:"sourceChunkUuid"`
-	SourceFullPath   string  `json:"sourceFullPath"`
-	SourceText       string  `json:"sourceText"`
-	TargetChunkUUID  string  `json:"targetChunkUuid"`
-	TargetFullPath   string  `json:"targetFullPath"`
-	TargetText       string  `json:"targetText"`
-	TargetDocUUID    string  `json:"targetDocUuid"`
-	TargetDocTitle   string  `json:"targetDocTitle"`
-	Similarity       float64 `json:"similarity"`
+	SourceChunkUUID string  `json:"sourceChunkUuid"`
+	SourceFullPath  string  `json:"sourceFullPath"`
+	SourceText      string  `json:"sourceText"`
+	TargetChunkUUID string  `json:"targetChunkUuid"`
+	TargetFullPath  string  `json:"targetFullPath"`
+	TargetText      string  `json:"targetText"`
+	TargetDocUUID   string  `json:"targetDocUuid"`
+	TargetDocTitle  string  `json:"targetDocTitle"`
+	Similarity      float64 `json:"similarity"`
 }
 
 // RelatedDocSummary summarizes cross-doc relationships to another document

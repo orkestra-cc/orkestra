@@ -17,8 +17,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/orkestra/backend/internal/core/auth/models"
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/orkestra/backend/internal/core/auth/models"
 )
 
 // cachedPublicKey represents a cached Apple public key for Redis storage

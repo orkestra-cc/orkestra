@@ -125,11 +125,11 @@ type OpenAPIClient interface {
 
 // BusinessRegistryConfig represents the configuration for a business registry
 type BusinessRegistryConfig struct {
-	FiscalID         string `json:"fiscal_id"`
-	Email            string `json:"email"`
-	ApplySignature   bool   `json:"apply_signature"`
-	ApplyLegalStorage bool  `json:"apply_legal_storage"`
-	Active           bool   `json:"active"`
+	FiscalID          string `json:"fiscal_id"`
+	Email             string `json:"email"`
+	ApplySignature    bool   `json:"apply_signature"`
+	ApplyLegalStorage bool   `json:"apply_legal_storage"`
+	Active            bool   `json:"active"`
 }
 
 // SendInvoiceResponse represents the response from sending an invoice
@@ -145,12 +145,12 @@ type SendInvoiceResponse struct {
 
 // InvoiceStatusResponse represents the status of an invoice
 type InvoiceStatusResponse struct {
-	UUID              string                     `json:"uuid"`
-	SDIIdentifier     string                     `json:"sdi_identifier,omitempty"`
-	Status            string                     `json:"status"`
-	LastNotification  string                     `json:"last_notification,omitempty"`
-	DeliveredAt       *time.Time                 `json:"delivered_at,omitempty"`
-	ReceivedAt        *time.Time                 `json:"received_at,omitempty"`
+	UUID             string     `json:"uuid"`
+	SDIIdentifier    string     `json:"sdi_identifier,omitempty"`
+	Status           string     `json:"status"`
+	LastNotification string     `json:"last_notification,omitempty"`
+	DeliveredAt      *time.Time `json:"delivered_at,omitempty"`
+	ReceivedAt       *time.Time `json:"received_at,omitempty"`
 	// Legal storage (conservazione digitale) fields
 	LegallyStored     bool                       `json:"legally_stored,omitempty"`
 	PreservedDocument *PreservedDocumentResponse `json:"preserved_document,omitempty"`
@@ -167,29 +167,29 @@ type SupplierInvoicesResponse struct {
 
 // OpenAPIInvoice represents an invoice from OpenAPI
 type OpenAPIInvoice struct {
-	UUID             string    `json:"uuid"`
-	SDIFileID        string    `json:"sdi_file_id"`
-	SDIFileName      string    `json:"sdi_file_name"`
-	DocumentType     string    `json:"document_type"`
-	CreatedAt        time.Time `json:"created_at"`
-	Marking          string    `json:"marking"` // sent, received
-	Sender           *OpenAPIParty `json:"sender"`
-	Recipient        *OpenAPIParty `json:"recipient"`
-	Payload          string    `json:"payload"` // Raw FatturaPA JSON
+	UUID         string        `json:"uuid"`
+	SDIFileID    string        `json:"sdi_file_id"`
+	SDIFileName  string        `json:"sdi_file_name"`
+	DocumentType string        `json:"document_type"`
+	CreatedAt    time.Time     `json:"created_at"`
+	Marking      string        `json:"marking"` // sent, received
+	Sender       *OpenAPIParty `json:"sender"`
+	Recipient    *OpenAPIParty `json:"recipient"`
+	Payload      string        `json:"payload"` // Raw FatturaPA JSON
 }
 
 // OpenAPIParty represents a party (sender/recipient) in OpenAPI response
 type OpenAPIParty struct {
-	UUID                   string `json:"uuid"`
-	BusinessVATNumberCode  string `json:"business_vat_number_code"`
-	BusinessFiscalCode     string `json:"business_fiscal_code"`
-	BusinessName           string `json:"business_name"`
-	Name                   string `json:"name"`
-	Surname                string `json:"surname"`
+	UUID                    string `json:"uuid"`
+	BusinessVATNumberCode   string `json:"business_vat_number_code"`
+	BusinessFiscalCode      string `json:"business_fiscal_code"`
+	BusinessName            string `json:"business_name"`
+	Name                    string `json:"name"`
+	Surname                 string `json:"surname"`
 	HeadOfficeAddressStreet string `json:"head_office_address_street"`
 	HeadOfficeAddressCity   string `json:"head_office_address_city"`
-	RecipientCode          string `json:"recipient_code"`
-	PEC                    string `json:"pec"`
+	RecipientCode           string `json:"recipient_code"`
+	PEC                     string `json:"pec"`
 }
 
 // OpenAPINotification represents a notification from OpenAPI
@@ -216,7 +216,7 @@ type InvoiceStatsResponse struct {
 // ImportInvoiceInput represents the input for importing supplier invoices
 // Per OpenAPI SDI spec: POST /invoices/import
 type ImportInvoiceInput struct {
-	Invoice         string                 `json:"invoice"`           // Base64-encoded FatturaPA XML
+	Invoice         string                 `json:"invoice"` // Base64-encoded FatturaPA XML
 	InvoiceFileName string                 `json:"invoice_file_name,omitempty"`
 	SDIID           string                 `json:"sdi_id,omitempty"`
 	Metadata        map[string]interface{} `json:"metadata,omitempty"`
@@ -420,7 +420,7 @@ func (c *openAPIClient) doRequest(ctx context.Context, method, path string, body
 
 	// Drop the cached JWT if the SDI API rejected it — common when the
 	// operator rotates the API key in the OpenAPI console mid-flight.
-	if (resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden) {
+	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
 		if m := c.getMinter(cfg); m != nil {
 			m.Invalidate(ctx)
 		}
@@ -474,7 +474,7 @@ func (c *openAPIClient) doXMLRequest(ctx context.Context, method, path string, x
 		return nil, resp.StatusCode, fmt.Errorf("failed to read response: %w", err)
 	}
 
-	if (resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden) {
+	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
 		if m := c.getMinter(cfg); m != nil {
 			m.Invalidate(ctx)
 		}

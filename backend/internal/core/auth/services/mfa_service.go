@@ -49,10 +49,10 @@ type MFAEnrollmentBegin struct {
 // by GET /v1/auth/me/mfa. Block A reports only Enrolled/NotRequired — the
 // role-based required states arrive in Block B.
 type MFAStatusSnapshot struct {
-	Status                models.MFAStatus
-	Type                  models.MFAFactorType
-	BackupCodesRemaining  int
-	LastUsedAt            *time.Time
+	Status               models.MFAStatus
+	Type                 models.MFAFactorType
+	BackupCodesRemaining int
+	LastUsedAt           *time.Time
 }
 
 // MFAService orchestrates enrollment, verification, and recovery for TOTP.
@@ -89,7 +89,7 @@ type MFAService interface {
 type mfaService struct {
 	factors     repository.MFAFactorRepository
 	challenges  MFAChallengeService
-	passwords   PasswordService // reused for argon2id hashing of backup codes
+	passwords   PasswordService    // reused for argon2id hashing of backup codes
 	deviceTrust DeviceTrustService // optional — see SetDeviceTrust
 	issuer      string
 	logger      *slog.Logger

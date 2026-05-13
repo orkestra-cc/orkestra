@@ -8,9 +8,9 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/orkestra-cc/orkestra-sdk/iface"
+	"github.com/orkestra-cc/orkestra-sdk/module"
 	userModels "github.com/orkestra/backend/internal/core/user/models"
-	"github.com/orkestra/backend/pkg/sdk/iface"
-	"github.com/orkestra/backend/pkg/sdk/module"
 )
 
 // DevTokenHandler handles development token generation endpoints.

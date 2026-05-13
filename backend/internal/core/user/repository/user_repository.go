@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/orkestra/backend/internal/shared/utils"
 	"github.com/orkestra/backend/internal/core/user/models"
+	"github.com/orkestra/backend/internal/shared/utils"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"

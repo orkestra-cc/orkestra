@@ -12,9 +12,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/orkestra-cc/orkestra-sdk/iface"
 	"github.com/orkestra/backend/internal/core/tenant/models"
 	"github.com/orkestra/backend/internal/core/tenant/repository"
-	"github.com/orkestra/backend/pkg/sdk/iface"
 	"go.mongodb.org/mongo-driver/bson"
 )
 

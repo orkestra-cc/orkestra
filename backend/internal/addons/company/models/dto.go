@@ -52,15 +52,15 @@ func (r *OpenAPIBaseResponse) UnmarshalJSON(b []byte) error {
 // Enrichment endpoints add extra fields; base fields are always present.
 type OpenAPICompanyData struct {
 	// Base fields (IT-start)
-	ID                 string             `json:"id"`
-	TaxCode            string             `json:"taxCode"`
-	CompanyName        string             `json:"companyName"`
-	VATCode            string             `json:"vatCode"`
-	ActivityStatus     string             `json:"activityStatus"`
-	SDICode            string             `json:"sdiCode"`
+	ID                  string             `json:"id"`
+	TaxCode             string             `json:"taxCode"`
+	CompanyName         string             `json:"companyName"`
+	VATCode             string             `json:"vatCode"`
+	ActivityStatus      string             `json:"activityStatus"`
+	SDICode             string             `json:"sdiCode"`
 	SDICodeTimestamp    interface{}        `json:"sdiCodeTimestamp"`
-	RegistrationDate   string             `json:"registrationDate"`
-	Address            OpenAPIAddressData `json:"address"`
+	RegistrationDate    string             `json:"registrationDate"`
+	Address             OpenAPIAddressData `json:"address"`
 	CreationTimestamp   interface{}        `json:"creationTimestamp"`
 	LastUpdateTimestamp interface{}        `json:"lastUpdateTimestamp"`
 
@@ -109,17 +109,17 @@ type OpenAPIAddressData struct {
 
 // OpenAPIRegisteredOffice represents the registered office address
 type OpenAPIRegisteredOffice struct {
-	Toponym      string          `json:"toponym"`
-	Street       string          `json:"street"`
-	StreetNumber string          `json:"streetNumber"`
-	StreetName   string          `json:"streetName"`
-	Town         string          `json:"town"`
-	Hamlet       string          `json:"hamlet"`
-	Province     string          `json:"province"`
-	ZipCode      string          `json:"zipCode"`
-	Region       *OpenAPIRegion  `json:"region"`
-	TownCode     string          `json:"townCode"`
-	GPS          *OpenAPIGPS     `json:"gps"`
+	Toponym      string         `json:"toponym"`
+	Street       string         `json:"street"`
+	StreetNumber string         `json:"streetNumber"`
+	StreetName   string         `json:"streetName"`
+	Town         string         `json:"town"`
+	Hamlet       string         `json:"hamlet"`
+	Province     string         `json:"province"`
+	ZipCode      string         `json:"zipCode"`
+	Region       *OpenAPIRegion `json:"region"`
+	TownCode     string         `json:"townCode"`
+	GPS          *OpenAPIGPS    `json:"gps"`
 }
 
 // OpenAPIRegion represents the region in the API response
@@ -197,31 +197,31 @@ func (r *OpenAPISearchResponse) UnmarshalJSON(b []byte) error {
 
 // CompanySearchParams holds all IT-search query parameters
 type CompanySearchParams struct {
-	CompanyName          string   `json:"companyName,omitempty"`
-	Autocomplete         string   `json:"autocomplete,omitempty"`
-	Province             string   `json:"province,omitempty"`
-	TownCode             string   `json:"townCode,omitempty"`
-	AtecoCode            string   `json:"atecoCode,omitempty"`
-	CCIAA                string   `json:"cciaa,omitempty"`
-	REACode              string   `json:"reaCode,omitempty"`
-	MinTurnover          *int64   `json:"minTurnover,omitempty"`
-	MaxTurnover          *int64   `json:"maxTurnover,omitempty"`
-	MinEmployees         *int     `json:"minEmployees,omitempty"`
-	MaxEmployees         *int     `json:"maxEmployees,omitempty"`
-	SDICode              string   `json:"sdiCode,omitempty"`
-	LegalFormCode        string   `json:"legalFormCode,omitempty"`
-	PEC                  string   `json:"pec,omitempty"`
-	ShareHolderTaxCode   string   `json:"shareHolderTaxCode,omitempty"`
-	Latitude             *float64 `json:"lat,omitempty"`
-	Longitude            *float64 `json:"long,omitempty"`
-	Radius               *int     `json:"radius,omitempty"`
-	ActivityStatus       string   `json:"activityStatus,omitempty"`
-	DataEnrichment       string   `json:"dataEnrichment,omitempty"`
-	CreationTimestamp    *int64   `json:"creationTimestamp,omitempty"`
-	LastUpdateTimestamp  *int64   `json:"lastUpdateTimestamp,omitempty"`
-	DryRun               *int     `json:"dryRun,omitempty"`
-	Limit                int      `json:"limit,omitempty"`
-	Skip                 int      `json:"skip,omitempty"`
+	CompanyName         string   `json:"companyName,omitempty"`
+	Autocomplete        string   `json:"autocomplete,omitempty"`
+	Province            string   `json:"province,omitempty"`
+	TownCode            string   `json:"townCode,omitempty"`
+	AtecoCode           string   `json:"atecoCode,omitempty"`
+	CCIAA               string   `json:"cciaa,omitempty"`
+	REACode             string   `json:"reaCode,omitempty"`
+	MinTurnover         *int64   `json:"minTurnover,omitempty"`
+	MaxTurnover         *int64   `json:"maxTurnover,omitempty"`
+	MinEmployees        *int     `json:"minEmployees,omitempty"`
+	MaxEmployees        *int     `json:"maxEmployees,omitempty"`
+	SDICode             string   `json:"sdiCode,omitempty"`
+	LegalFormCode       string   `json:"legalFormCode,omitempty"`
+	PEC                 string   `json:"pec,omitempty"`
+	ShareHolderTaxCode  string   `json:"shareHolderTaxCode,omitempty"`
+	Latitude            *float64 `json:"lat,omitempty"`
+	Longitude           *float64 `json:"long,omitempty"`
+	Radius              *int     `json:"radius,omitempty"`
+	ActivityStatus      string   `json:"activityStatus,omitempty"`
+	DataEnrichment      string   `json:"dataEnrichment,omitempty"`
+	CreationTimestamp   *int64   `json:"creationTimestamp,omitempty"`
+	LastUpdateTimestamp *int64   `json:"lastUpdateTimestamp,omitempty"`
+	DryRun              *int     `json:"dryRun,omitempty"`
+	Limit               int      `json:"limit,omitempty"`
+	Skip                int      `json:"skip,omitempty"`
 }
 
 // CompanySearchResult represents the search response

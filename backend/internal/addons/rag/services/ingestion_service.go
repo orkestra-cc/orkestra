@@ -10,10 +10,10 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/orkestra-cc/orkestra-sdk/iface"
 	aimodelsProviders "github.com/orkestra/backend/internal/addons/aimodels/providers"
 	"github.com/orkestra/backend/internal/addons/rag/models"
 	"github.com/orkestra/backend/internal/addons/rag/repository"
-	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
 // IngestionService manages document ingestion into the knowledge graph

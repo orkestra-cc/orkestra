@@ -9,8 +9,8 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/go-chi/chi/v5"
-	"github.com/orkestra/backend/pkg/sdk/capability"
-	"github.com/orkestra/backend/pkg/sdk/iface"
+	"github.com/orkestra-cc/orkestra-sdk/capability"
+	"github.com/orkestra-cc/orkestra-sdk/iface"
 	"go.mongodb.org/mongo-driver/mongo"
 )
 

@@ -10,13 +10,13 @@ import (
 
 	"github.com/danielgtaylor/huma/v2/adapters/humachi"
 	"github.com/go-chi/chi/v5"
+	"github.com/orkestra-cc/orkestra-sdk/capability"
+	"github.com/orkestra-cc/orkestra-sdk/iface"
+	"github.com/orkestra-cc/orkestra-sdk/module"
+	"github.com/orkestra-cc/orkestra-sdk/modulegate"
 	"github.com/orkestra/backend/internal/addons/agents/handlers"
 	"github.com/orkestra/backend/internal/addons/agents/repository"
 	"github.com/orkestra/backend/internal/addons/agents/services"
-	"github.com/orkestra/backend/pkg/sdk/capability"
-	"github.com/orkestra/backend/pkg/sdk/iface"
-	"github.com/orkestra/backend/pkg/sdk/module"
-	"github.com/orkestra/backend/pkg/sdk/modulegate"
 )
 
 // Default image reference for the Hindsight container. Overridable via the

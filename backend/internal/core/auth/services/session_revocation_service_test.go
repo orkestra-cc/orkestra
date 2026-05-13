@@ -15,9 +15,9 @@ import (
 // for missing keys so the service's "not found → not revoked" branch can
 // be exercised without a live Redis.
 type fakeRedisClient struct {
-	mu      sync.Mutex
-	data    map[string]string
-	getErr  error
+	mu     sync.Mutex
+	data   map[string]string
+	getErr error
 }
 
 func newFakeRedisClient() *fakeRedisClient {

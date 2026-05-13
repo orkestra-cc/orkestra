@@ -82,11 +82,11 @@ const (
 	ActionMembershipRemoved = "tenant.membership.removed"
 
 	// identity.*
-	ActionIdentityIdPCreated   = "identity.idp.created"
-	ActionIdentityIdPUpdated   = "identity.idp.updated"
-	ActionIdentityIdPDeleted   = "identity.idp.deleted"
-	ActionIdentityOIDCLogin    = "identity.oidc.login"
-	ActionIdentitySCIMRotated  = "identity.scim.token_rotated"
+	ActionIdentityIdPCreated  = "identity.idp.created"
+	ActionIdentityIdPUpdated  = "identity.idp.updated"
+	ActionIdentityIdPDeleted  = "identity.idp.deleted"
+	ActionIdentityOIDCLogin   = "identity.oidc.login"
+	ActionIdentitySCIMRotated = "identity.scim.token_rotated"
 
 	// onboarding.*
 	ActionOnboardingRegistered = "onboarding.register.completed"

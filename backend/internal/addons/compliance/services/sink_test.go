@@ -14,10 +14,10 @@ func TestDefaultActorType(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {
-		name    string
-		given   string
-		userID  string
-		want    string
+		name   string
+		given  string
+		userID string
+		want   string
 	}{
 		{"explicit user is preserved", models.ActorTypeUser, "", models.ActorTypeUser},
 		{"explicit system is preserved", models.ActorTypeSystem, "u-1", models.ActorTypeSystem},

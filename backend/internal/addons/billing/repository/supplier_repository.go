@@ -16,7 +16,7 @@ import (
 
 // Common errors
 var (
-	ErrSupplierNotFound     = errors.New("supplier not found")
+	ErrSupplierNotFound      = errors.New("supplier not found")
 	ErrSupplierAlreadyExists = errors.New("supplier with this fiscal ID already exists")
 )
 

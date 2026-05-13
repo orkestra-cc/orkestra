@@ -48,8 +48,8 @@ type Company struct {
 	// Bank details (for payment terms in invoices)
 	IBAN                string `bson:"iban,omitempty" json:"iban,omitempty"`
 	BIC                 string `bson:"bic,omitempty" json:"bic,omitempty"`
-	ABI                 string `bson:"abi,omitempty" json:"abi,omitempty"` // Italian bank code
-	CAB                 string `bson:"cab,omitempty" json:"cab,omitempty"` // Italian branch code
+	ABI                 string `bson:"abi,omitempty" json:"abi,omitempty"`                                 // Italian bank code
+	CAB                 string `bson:"cab,omitempty" json:"cab,omitempty"`                                 // Italian branch code
 	Beneficiario        string `bson:"beneficiario,omitempty" json:"beneficiario,omitempty"`               // Beneficiary name
 	IstitutoFinanziario string `bson:"istitutoFinanziario,omitempty" json:"istitutoFinanziario,omitempty"` // Bank name
 

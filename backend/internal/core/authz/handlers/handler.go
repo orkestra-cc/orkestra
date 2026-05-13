@@ -6,10 +6,10 @@ import (
 	"net/http"
 
 	"github.com/danielgtaylor/huma/v2"
+	"github.com/orkestra-cc/orkestra-sdk/ctxauth"
 	"github.com/orkestra/backend/internal/core/authz/models"
 	"github.com/orkestra/backend/internal/core/authz/repository"
 	"github.com/orkestra/backend/internal/core/authz/services"
-	"github.com/orkestra/backend/pkg/sdk/ctxauth"
 )
 
 type Handler struct {

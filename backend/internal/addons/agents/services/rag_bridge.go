@@ -5,8 +5,8 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/orkestra-cc/orkestra-sdk/iface"
 	"github.com/orkestra/backend/internal/addons/agents/models"
-	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
 // RAGBridge provides a scoped interface to the RAG query system for the agents module.

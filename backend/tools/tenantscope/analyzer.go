@@ -35,10 +35,10 @@
 // the insert; a weaker heuristic is used because insert payloads vary widely.
 //
 // Acceptable filter sources:
-//   1. A direct call to tenantrepo.Scope / MustScope / ScopeAggregate /
-//      StampInsertM passed inline as the filter argument.
-//   2. A local variable whose most recent assignment in the same function is
-//      a call to one of the above helpers.
+//  1. A direct call to tenantrepo.Scope / MustScope / ScopeAggregate /
+//     StampInsertM passed inline as the filter argument.
+//  2. A local variable whose most recent assignment in the same function is
+//     a call to one of the above helpers.
 //
 // Anything else — a bson.M literal, a struct value, a function parameter, a
 // field access — is reported.
@@ -103,19 +103,19 @@ func init() {
 // counting the receiver); Mongo methods take ctx as arg 0 in almost every
 // case, and the filter follows.
 var targetMethods = map[string]int{
-	"Find":                 1,
-	"FindOne":              1,
-	"FindOneAndUpdate":     1,
-	"FindOneAndDelete":     1,
-	"FindOneAndReplace":    1,
-	"UpdateOne":            1,
-	"UpdateMany":           1,
-	"ReplaceOne":           1,
-	"DeleteOne":            1,
-	"DeleteMany":           1,
-	"CountDocuments":       1,
-	"Aggregate":            1,
-	"Distinct":             2, // (ctx, fieldName, filter, ...)
+	"Find":              1,
+	"FindOne":           1,
+	"FindOneAndUpdate":  1,
+	"FindOneAndDelete":  1,
+	"FindOneAndReplace": 1,
+	"UpdateOne":         1,
+	"UpdateMany":        1,
+	"ReplaceOne":        1,
+	"DeleteOne":         1,
+	"DeleteMany":        1,
+	"CountDocuments":    1,
+	"Aggregate":         1,
+	"Distinct":          2, // (ctx, fieldName, filter, ...)
 }
 
 // scopeFuncs lists the helper functions in shared/tenantrepo that the

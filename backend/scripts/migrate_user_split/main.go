@@ -253,8 +253,8 @@ func writeSentinel(ctx context.Context, db *mongo.Database, counts map[string]in
 	_, err := db.Collection("system_init").UpdateOne(ctx,
 		bson.M{"key": sentinelKey},
 		bson.M{"$setOnInsert": bson.M{
-			"key":       sentinelKey,
-			"counts":    counts,
+			"key":        sentinelKey,
+			"counts":     counts,
 			"migratedAt": time.Now().UTC(),
 		}},
 		options.Update().SetUpsert(true),

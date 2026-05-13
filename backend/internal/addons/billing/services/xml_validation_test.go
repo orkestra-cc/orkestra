@@ -15,11 +15,11 @@ func TestValidateCodiceDestinatario_More(t *testing.T) {
 		in      string
 		wantErr error
 	}{
-		{"", nil},          // optional
-		{"ABC123", nil},    // 6 chars upper
-		{"abc123", nil},    // 6 chars lower — uppercased then matches
-		{"ABCDEFG", nil},   // 7 chars upper
-		{"ABCDE", ErrInvalidCodiceDestinatario},  // too short
+		{"", nil},                               // optional
+		{"ABC123", nil},                         // 6 chars upper
+		{"abc123", nil},                         // 6 chars lower — uppercased then matches
+		{"ABCDEFG", nil},                        // 7 chars upper
+		{"ABCDE", ErrInvalidCodiceDestinatario}, // too short
 		{"ABCDEFGH", ErrInvalidCodiceDestinatario}, // too long
 		{"ABC-12", ErrInvalidCodiceDestinatario},   // bad char
 	}
@@ -39,8 +39,8 @@ func TestValidateCodiceDestinatario_More(t *testing.T) {
 
 func TestValidateCAP_More(t *testing.T) {
 	cases := []struct {
-		in   string
-		ok   bool
+		in string
+		ok bool
 	}{
 		{"", true},
 		{"00100", true},
@@ -530,10 +530,10 @@ func TestNormalizeCAP(t *testing.T) {
 
 func TestNormalizeProvincia(t *testing.T) {
 	cases := map[string]string{
-		"":      "",
-		"mi":    "MI",
-		" rm ":  "RM",
-		"To":    "TO",
+		"":     "",
+		"mi":   "MI",
+		" rm ": "RM",
+		"To":   "TO",
 	}
 	for in, want := range cases {
 		if got := NormalizeProvincia(in); got != want {

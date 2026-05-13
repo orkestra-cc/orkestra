@@ -7,10 +7,10 @@ import (
 
 func TestInvoice_LifecycleGates(t *testing.T) {
 	cases := []struct {
-		status   InvoiceStatus
-		edit     bool
-		send     bool
-		del      bool
+		status InvoiceStatus
+		edit   bool
+		send   bool
+		del    bool
 	}{
 		{StatusDraft, true, true, true},
 		{StatusRejected, false, true, false},

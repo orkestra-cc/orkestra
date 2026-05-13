@@ -38,7 +38,7 @@ type geminiBatchResponse struct {
 	Dest  *struct {
 		InlineResponses []struct {
 			Response struct {
-				Candidates []geminiCandidate `json:"candidates"`
+				Candidates    []geminiCandidate `json:"candidates"`
 				UsageMetadata *struct {
 					PromptTokenCount     int `json:"promptTokenCount"`
 					CandidatesTokenCount int `json:"candidatesTokenCount"`

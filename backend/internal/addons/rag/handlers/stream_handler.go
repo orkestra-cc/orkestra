@@ -7,8 +7,8 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/orkestra-cc/orkestra-sdk/iface"
 	"github.com/orkestra/backend/internal/addons/rag/services"
-	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
 // StreamHandler handles SSE streaming for RAG queries

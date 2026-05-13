@@ -243,9 +243,9 @@ func TestPromptLoader_InvalidateCache(t *testing.T) {
 func TestFormatAgentName_ExportedHelper(t *testing.T) {
 	// Exported counterpart of the (unexported) formatAgentName in report_generator.go.
 	cases := map[string]string{
-		"":            "",
-		"foo":         "Foo",
-		"a-b-c":       "A B C",
+		"":                 "",
+		"foo":              "Foo",
+		"a-b-c":            "A B C",
 		"company-research": "Company Research",
 	}
 	for in, want := range cases {

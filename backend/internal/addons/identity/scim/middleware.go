@@ -8,8 +8,8 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/orkestra-cc/orkestra-sdk/iface"
 	"github.com/orkestra/backend/internal/addons/identity/repository"
-	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
 // ctxTenantIDKey mirrors the middleware.ctxTenantID string literal so

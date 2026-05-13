@@ -91,11 +91,11 @@ func TestEmailDomainAllowed_PerAudience(t *testing.T) {
 		email    string
 		want     bool
 	}{
-		{PolicyAudienceOperator, "alice@acme.com", true},     // case-insensitive match
-		{PolicyAudienceOperator, "bob@OPS.ACME.COM", true},   // case-insensitive match
-		{PolicyAudienceOperator, "evil@attacker.com", false}, // not in allowlist
-		{PolicyAudienceOperator, "noatsign", false},          // malformed
-		{PolicyAudienceOperator, "trailing@", false},         // empty domain
+		{PolicyAudienceOperator, "alice@acme.com", true},          // case-insensitive match
+		{PolicyAudienceOperator, "bob@OPS.ACME.COM", true},        // case-insensitive match
+		{PolicyAudienceOperator, "evil@attacker.com", false},      // not in allowlist
+		{PolicyAudienceOperator, "noatsign", false},               // malformed
+		{PolicyAudienceOperator, "trailing@", false},              // empty domain
 		{PolicyAudienceOperator, "sub.alice@sub.acme.com", false}, // exact match only
 		{PolicyAudienceClient, "user@client.io", true},
 		{PolicyAudienceClient, "user@acme.com", false}, // different audience

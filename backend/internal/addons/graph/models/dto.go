@@ -1,6 +1,6 @@
 package models
 
-import "github.com/orkestra/backend/pkg/sdk/iface"
+import "github.com/orkestra-cc/orkestra-sdk/iface"
 
 // --- Query DTOs ---
 

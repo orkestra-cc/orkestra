@@ -6,15 +6,15 @@ import (
 
 	"github.com/danielgtaylor/huma/v2/adapters/humachi"
 	"github.com/go-chi/chi/v5"
+	"github.com/orkestra-cc/orkestra-sdk/iface"
+	"github.com/orkestra-cc/orkestra-sdk/module"
+	"github.com/orkestra-cc/orkestra-sdk/modulegate"
 	"github.com/orkestra/backend/internal/addons/payments/handlers"
 	"github.com/orkestra/backend/internal/addons/payments/models"
 	stripeProvider "github.com/orkestra/backend/internal/addons/payments/providers/stripe"
 	"github.com/orkestra/backend/internal/addons/payments/repository"
 	"github.com/orkestra/backend/internal/addons/payments/services"
 	"github.com/orkestra/backend/internal/addons/payments/webhooks"
-	"github.com/orkestra/backend/pkg/sdk/iface"
-	"github.com/orkestra/backend/pkg/sdk/module"
-	"github.com/orkestra/backend/pkg/sdk/modulegate"
 )
 
 // Settings mirrors the payments ConfigSchema 1:1. Init() unmarshals into a

@@ -26,13 +26,13 @@ const (
 type SDIStatus string
 
 const (
-	SDIStatusNone SDIStatus = ""     // Nessuna notifica
-	SDIStatusRC   SDIStatus = "RC"   // Ricevuta di Consegna
-	SDIStatusNS   SDIStatus = "NS"   // Notifica di Scarto
-	SDIStatusMC   SDIStatus = "MC"   // Mancata Consegna
-	SDIStatusNE   SDIStatus = "NE"   // Notifica Esito (PA)
-	SDIStatusDT   SDIStatus = "DT"   // Decorrenza Termini
-	SDIStatusAT   SDIStatus = "AT"   // Attestazione di avvenuta trasmissione
+	SDIStatusNone SDIStatus = ""   // Nessuna notifica
+	SDIStatusRC   SDIStatus = "RC" // Ricevuta di Consegna
+	SDIStatusNS   SDIStatus = "NS" // Notifica di Scarto
+	SDIStatusMC   SDIStatus = "MC" // Mancata Consegna
+	SDIStatusNE   SDIStatus = "NE" // Notifica Esito (PA)
+	SDIStatusDT   SDIStatus = "DT" // Decorrenza Termini
+	SDIStatusAT   SDIStatus = "AT" // Attestazione di avvenuta trasmissione
 )
 
 // DocumentType represents the tipo documento as per FatturaPA specification
@@ -71,25 +71,25 @@ const (
 type RegimeFiscale string
 
 const (
-	RegimeOrdinario                  RegimeFiscale = "RF01" // Ordinario
-	RegimeContributtiMinimi          RegimeFiscale = "RF02" // Contribuenti minimi (art.1, c.96-117, L. 244/07)
-	RegimeAgevolato                  RegimeFiscale = "RF04" // Agricoltura e attività connesse e pesca (artt.34 e 34-bis, DPR 633/72)
-	RegimeVenditaSaliTabacchi        RegimeFiscale = "RF05" // Vendita sali e tabacchi (art.74, c.1, DPR. 633/72)
-	RegimeCommercioFiammiferi        RegimeFiscale = "RF06" // Commercio fiammiferi (art.74, c.1, DPR 633/72)
-	RegimeEditoria                   RegimeFiscale = "RF07" // Editoria (art.74, c.1, DPR 633/72)
-	RegimeTelefonia                  RegimeFiscale = "RF08" // Gestione servizi telefonia pubblica (art.74, c.1, DPR 633/72)
-	RegimeRivenditaDocumenti         RegimeFiscale = "RF09" // Rivendita documenti di trasporto pubblico e di sosta (art.74, c.1, DPR 633/72)
-	RegimeIntrattenimenti            RegimeFiscale = "RF10" // Intrattenimenti, giochi e altre attività (art.74, c.6, DPR 633/72)
-	RegimeAgenzieViaggio             RegimeFiscale = "RF11" // Agenzie viaggi e turismo (art.74-ter, DPR 633/72)
-	RegimeAgroalimentare             RegimeFiscale = "RF12" // Agriturismo (art.5, c.2, L. 413/91)
-	RegimeVenditePortaPorta          RegimeFiscale = "RF13" // Vendite a domicilio (art.25-bis, c.6, DPR 600/73)
-	RegimeRivenditaBeniUsati         RegimeFiscale = "RF14" // Rivendita beni usati, oggetti d'arte, d'antiquariato o da collezione (art.36, DL 41/95)
-	RegimeAgenzieVenditeAste         RegimeFiscale = "RF15" // Agenzie di vendite all'asta di oggetti d'arte, antiquariato o da collezione (art.40-bis, DL 41/95)
-	RegimeIVAPerCassa                RegimeFiscale = "RF16" // IVA per cassa P.A. (art.6, c.5, DPR 633/72)
-	RegimeIVAPerCassaGenerale        RegimeFiscale = "RF17" // IVA per cassa (art. 32-bis, DL 83/2012)
-	RegimeAltro                      RegimeFiscale = "RF18" // Altro
-	RegimeForfettario                RegimeFiscale = "RF19" // Regime forfettario (art.1, c.54-89, L. 190/2014)
-	RegimeFranchigiaIVA              RegimeFiscale = "RF20" // Regime transfrontaliero di Franchigia IVA (Direttiva UE 2020/285 - v1.9 Jan 2025)
+	RegimeOrdinario           RegimeFiscale = "RF01" // Ordinario
+	RegimeContributtiMinimi   RegimeFiscale = "RF02" // Contribuenti minimi (art.1, c.96-117, L. 244/07)
+	RegimeAgevolato           RegimeFiscale = "RF04" // Agricoltura e attività connesse e pesca (artt.34 e 34-bis, DPR 633/72)
+	RegimeVenditaSaliTabacchi RegimeFiscale = "RF05" // Vendita sali e tabacchi (art.74, c.1, DPR. 633/72)
+	RegimeCommercioFiammiferi RegimeFiscale = "RF06" // Commercio fiammiferi (art.74, c.1, DPR 633/72)
+	RegimeEditoria            RegimeFiscale = "RF07" // Editoria (art.74, c.1, DPR 633/72)
+	RegimeTelefonia           RegimeFiscale = "RF08" // Gestione servizi telefonia pubblica (art.74, c.1, DPR 633/72)
+	RegimeRivenditaDocumenti  RegimeFiscale = "RF09" // Rivendita documenti di trasporto pubblico e di sosta (art.74, c.1, DPR 633/72)
+	RegimeIntrattenimenti     RegimeFiscale = "RF10" // Intrattenimenti, giochi e altre attività (art.74, c.6, DPR 633/72)
+	RegimeAgenzieViaggio      RegimeFiscale = "RF11" // Agenzie viaggi e turismo (art.74-ter, DPR 633/72)
+	RegimeAgroalimentare      RegimeFiscale = "RF12" // Agriturismo (art.5, c.2, L. 413/91)
+	RegimeVenditePortaPorta   RegimeFiscale = "RF13" // Vendite a domicilio (art.25-bis, c.6, DPR 600/73)
+	RegimeRivenditaBeniUsati  RegimeFiscale = "RF14" // Rivendita beni usati, oggetti d'arte, d'antiquariato o da collezione (art.36, DL 41/95)
+	RegimeAgenzieVenditeAste  RegimeFiscale = "RF15" // Agenzie di vendite all'asta di oggetti d'arte, antiquariato o da collezione (art.40-bis, DL 41/95)
+	RegimeIVAPerCassa         RegimeFiscale = "RF16" // IVA per cassa P.A. (art.6, c.5, DPR 633/72)
+	RegimeIVAPerCassaGenerale RegimeFiscale = "RF17" // IVA per cassa (art. 32-bis, DL 83/2012)
+	RegimeAltro               RegimeFiscale = "RF18" // Altro
+	RegimeForfettario         RegimeFiscale = "RF19" // Regime forfettario (art.1, c.54-89, L. 190/2014)
+	RegimeFranchigiaIVA       RegimeFiscale = "RF20" // Regime transfrontaliero di Franchigia IVA (Direttiva UE 2020/285 - v1.9 Jan 2025)
 )
 
 // PaymentMethod represents the modalità di pagamento as per FatturaPA specification
@@ -125,9 +125,9 @@ const (
 type PaymentCondition string
 
 const (
-	PaymentConditionRata      PaymentCondition = "TP01" // Pagamento a rate
-	PaymentConditionCompleto  PaymentCondition = "TP02" // Pagamento completo
-	PaymentConditionAnticipo  PaymentCondition = "TP03" // Anticipo
+	PaymentConditionRata     PaymentCondition = "TP01" // Pagamento a rate
+	PaymentConditionCompleto PaymentCondition = "TP02" // Pagamento completo
+	PaymentConditionAnticipo PaymentCondition = "TP03" // Anticipo
 )
 
 // VATNature represents the natura IVA for zero-rate or exempt transactions
@@ -192,15 +192,15 @@ const (
 type UnitOfMeasure string
 
 const (
-	UnitPiece   UnitOfMeasure = "PZ"  // Pezzo
-	UnitKg      UnitOfMeasure = "KG"  // Chilogrammo
-	UnitLt      UnitOfMeasure = "LT"  // Litro
-	UnitMt      UnitOfMeasure = "MT"  // Metro
-	UnitMq      UnitOfMeasure = "MQ"  // Metro quadrato
-	UnitMc      UnitOfMeasure = "MC"  // Metro cubo
-	UnitHour    UnitOfMeasure = "H"   // Ora
-	UnitDay     UnitOfMeasure = "GG"  // Giorno
-	UnitMonth   UnitOfMeasure = "MESE"// Mese
-	UnitYear    UnitOfMeasure = "ANNO"// Anno
-	UnitPercent UnitOfMeasure = "%"   // Percentuale
+	UnitPiece   UnitOfMeasure = "PZ"   // Pezzo
+	UnitKg      UnitOfMeasure = "KG"   // Chilogrammo
+	UnitLt      UnitOfMeasure = "LT"   // Litro
+	UnitMt      UnitOfMeasure = "MT"   // Metro
+	UnitMq      UnitOfMeasure = "MQ"   // Metro quadrato
+	UnitMc      UnitOfMeasure = "MC"   // Metro cubo
+	UnitHour    UnitOfMeasure = "H"    // Ora
+	UnitDay     UnitOfMeasure = "GG"   // Giorno
+	UnitMonth   UnitOfMeasure = "MESE" // Mese
+	UnitYear    UnitOfMeasure = "ANNO" // Anno
+	UnitPercent UnitOfMeasure = "%"    // Percentuale
 )

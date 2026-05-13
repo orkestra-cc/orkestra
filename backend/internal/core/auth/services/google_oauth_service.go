@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/orkestra/backend/internal/core/auth/models"
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/orkestra/backend/internal/core/auth/models"
 )
 
 // googleOAuthService implements OAuthProviderInterface for Google OAuth 2.1

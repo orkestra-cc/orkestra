@@ -126,14 +126,14 @@ type geminiPart struct {
 }
 
 type geminiGenerateRequest struct {
-	Contents         []geminiContent         `json:"contents"`
+	Contents          []geminiContent         `json:"contents"`
 	SystemInstruction *geminiContent          `json:"systemInstruction,omitempty"`
-	GenerationConfig *geminiGenerationConfig `json:"generationConfig,omitempty"`
+	GenerationConfig  *geminiGenerationConfig `json:"generationConfig,omitempty"`
 }
 
 type geminiGenerationConfig struct {
-	Temperature *float64 `json:"temperature,omitempty"`
-	MaxOutputTokens *int `json:"maxOutputTokens,omitempty"`
+	Temperature     *float64 `json:"temperature,omitempty"`
+	MaxOutputTokens *int     `json:"maxOutputTokens,omitempty"`
 }
 
 type geminiCandidate struct {

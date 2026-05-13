@@ -3,7 +3,7 @@ package middleware
 import (
 	"net/http"
 
-	"github.com/orkestra/backend/pkg/sdk/ctxauth"
+	"github.com/orkestra-cc/orkestra-sdk/ctxauth"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 )

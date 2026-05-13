@@ -16,6 +16,9 @@ import (
 	"github.com/danielgtaylor/huma/v2/adapters/humachi"
 	"github.com/go-chi/chi/v5"
 
+	"github.com/orkestra-cc/orkestra-sdk/iface"
+	"github.com/orkestra-cc/orkestra-sdk/metrics"
+	"github.com/orkestra-cc/orkestra-sdk/module"
 	"github.com/orkestra/backend/internal/core/auth/services"
 	authzServices "github.com/orkestra/backend/internal/core/authz/services"
 	"github.com/orkestra/backend/internal/shared/config"
@@ -28,9 +31,6 @@ import (
 	"github.com/orkestra/backend/internal/shared/systeminit"
 	"github.com/orkestra/backend/internal/shared/telemetry"
 	"github.com/orkestra/backend/internal/shared/utils"
-	"github.com/orkestra/backend/pkg/sdk/iface"
-	"github.com/orkestra/backend/pkg/sdk/metrics"
-	"github.com/orkestra/backend/pkg/sdk/module"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 

@@ -5,9 +5,9 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
+	"github.com/orkestra-cc/orkestra-sdk/iface"
 	"github.com/orkestra/backend/internal/addons/rag/models"
 	"github.com/orkestra/backend/internal/addons/rag/services"
-	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
 // QueryHandler handles RAG query HTTP requests

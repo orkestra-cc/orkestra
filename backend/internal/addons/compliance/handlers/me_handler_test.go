@@ -8,9 +8,9 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
+	"github.com/orkestra-cc/orkestra-sdk/iface"
 	"github.com/orkestra/backend/internal/addons/compliance/services"
 	"github.com/orkestra/backend/internal/testkit"
-	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
 // stubProducer satisfies iface.PIIProducer just enough to walk the

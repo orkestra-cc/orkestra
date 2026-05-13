@@ -14,7 +14,7 @@ import (
 // methods the service consumes carry configurable return values; the
 // others are no-op/panic so accidental use surfaces loudly.
 type stubDeviceTrustRepo struct {
-	upserted *models.DeviceTrustDoc
+	upserted  *models.DeviceTrustDoc
 	upsertErr error
 
 	getActive    *models.DeviceTrustDoc
@@ -28,8 +28,8 @@ type stubDeviceTrustRepo struct {
 	revokeByDeviceCalls []string
 	revokeByDeviceErr   error
 
-	revokeAllCount int64
-	revokeAllErr   error
+	revokeAllCount  int64
+	revokeAllErr    error
 	revokeAllReason string
 
 	deleteAllCount int64

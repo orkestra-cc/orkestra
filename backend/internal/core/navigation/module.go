@@ -2,10 +2,10 @@ package navigation
 
 import (
 	"github.com/danielgtaylor/huma/v2/adapters/humachi"
+	"github.com/orkestra-cc/orkestra-sdk/module"
+	"github.com/orkestra-cc/orkestra-sdk/modulegate"
 	"github.com/orkestra/backend/internal/core/navigation/handlers"
 	"github.com/orkestra/backend/internal/core/navigation/services"
-	"github.com/orkestra/backend/pkg/sdk/module"
-	"github.com/orkestra/backend/pkg/sdk/modulegate"
 )
 
 type NavigationModule struct {

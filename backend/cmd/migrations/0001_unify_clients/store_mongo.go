@@ -11,10 +11,10 @@ import (
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 
+	"github.com/orkestra/backend/cmd/migrations/0001_unify_clients/migrator"
 	pmtmodels "github.com/orkestra/backend/internal/addons/payments/models"
 	submodels "github.com/orkestra/backend/internal/addons/subscriptions/models"
 	tenantrepo "github.com/orkestra/backend/internal/core/tenant/repository"
-	"github.com/orkestra/backend/cmd/migrations/0001_unify_clients/migrator"
 )
 
 // sentinelCollection is where per-row completion records land. A separate

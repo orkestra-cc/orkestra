@@ -35,20 +35,20 @@ func (s Severity) String() string {
 // short identifier the baseline file matches on; Key is the permission /
 // capability ID being flagged; Detail is human-readable context.
 type Diagnostic struct {
-	Severity Severity  `json:"severity"`
-	Category string    `json:"category"`
-	Key      string    `json:"key"`
-	Owner    string    `json:"owner,omitempty"`
-	Detail   string    `json:"detail,omitempty"`
-	Sites    []string  `json:"sites,omitempty"`
+	Severity Severity `json:"severity"`
+	Category string   `json:"category"`
+	Key      string   `json:"key"`
+	Owner    string   `json:"owner,omitempty"`
+	Detail   string   `json:"detail,omitempty"`
+	Sites    []string `json:"sites,omitempty"`
 }
 
 // Report is the reconciliation output. Diagnostics is the full list across
 // severities; Summary is counts by severity for the CLI exit-code decision.
 type Report struct {
-	Diagnostics []Diagnostic         `json:"diagnostics"`
-	Summary     map[Severity]int     `json:"summary"`
-	Cedar       CedarReconciliation  `json:"cedar"`
+	Diagnostics []Diagnostic        `json:"diagnostics"`
+	Summary     map[Severity]int    `json:"summary"`
+	Cedar       CedarReconciliation `json:"cedar"`
 }
 
 // CedarReconciliation surfaces the overlap between permission keys and the

@@ -21,8 +21,14 @@ profile.cov
 # vendor/
 
 # Go workspace file
-go.work
-go.work.sum
+# go.work and go.work.sum are tracked at the repo root — they bind the two
+# in-tree Go modules (backend/ + backend/pkg/sdk/) and CI depends on them
+# resolving the SDK to its local path. Individual modules' own go.work
+# files remain ignored.
+/backend/go.work
+/backend/go.work.sum
+/backend/pkg/sdk/go.work
+/backend/pkg/sdk/go.work.sum
 
 # Environment and configuration files
 .env

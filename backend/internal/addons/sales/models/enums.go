@@ -4,14 +4,14 @@ package models
 type JobStatus string
 
 const (
-	JobStatusQueued    JobStatus = "queued"
-	JobStatusDiscovery JobStatus = "discovery"
-	JobStatusAnalysis  JobStatus = "analysis"
-	JobStatusSynthesis JobStatus = "synthesis"
-	JobStatusCompleted JobStatus = "completed"
+	JobStatusQueued       JobStatus = "queued"
+	JobStatusDiscovery    JobStatus = "discovery"
+	JobStatusAnalysis     JobStatus = "analysis"
+	JobStatusSynthesis    JobStatus = "synthesis"
+	JobStatusCompleted    JobStatus = "completed"
 	JobStatusBatchPending JobStatus = "batch_pending"
-	JobStatusFailed      JobStatus = "failed"
-	JobStatusCancelled   JobStatus = "cancelled"
+	JobStatusFailed       JobStatus = "failed"
+	JobStatusCancelled    JobStatus = "cancelled"
 )
 
 // SkillName identifies a sales intelligence skill
@@ -48,11 +48,11 @@ var ValidSkills = map[SkillName]bool{
 type AgentName string
 
 const (
-	AgentCompanyResearch    AgentName = "company-research"
-	AgentContactFinder      AgentName = "contact-finder"
-	AgentOpportunityScoring AgentName = "opportunity-scoring"
+	AgentCompanyResearch     AgentName = "company-research"
+	AgentContactFinder       AgentName = "contact-finder"
+	AgentOpportunityScoring  AgentName = "opportunity-scoring"
 	AgentCompetitiveAnalysis AgentName = "competitive-analysis"
-	AgentOutreachStrategy   AgentName = "outreach-strategy"
+	AgentOutreachStrategy    AgentName = "outreach-strategy"
 )
 
 // Grade maps a prospect score (0-100) to a letter grade

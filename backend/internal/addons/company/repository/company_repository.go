@@ -265,8 +265,8 @@ func (r *companyRepository) UpdateEnrichment(ctx context.Context, taxCode string
 	update := bson.M{
 		"$set": bson.M{
 			enrichmentField:               data,
-			"fetchedTypes." + fetchedType:  fetchedAt,
-			"updatedAt":                    fetchedAt,
+			"fetchedTypes." + fetchedType: fetchedAt,
+			"updatedAt":                   fetchedAt,
 		},
 	}
 

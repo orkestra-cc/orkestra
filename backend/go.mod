@@ -2,6 +2,15 @@ module github.com/orkestra/backend
 
 go 1.25.10
 
+// SDK split (Phase 3): the public SDK contract lives in pkg/sdk/ as its
+// own Go module so addons extracted to standalone repositories can
+// `go get` the same surface the monolith consumes. The replace directive
+// binds the in-tree path; the repo-root go.work file does the same for
+// any tooling that doesn't resolve replaces. Phase 4 publishes the SDK
+// to its own repo and tags a real version — this line drops to a
+// regular `require` then.
+replace github.com/orkestra-cc/orkestra-sdk => ./pkg/sdk
+
 require (
 	github.com/alicebob/miniredis/v2 v2.37.0
 	github.com/cedar-policy/cedar-go v1.6.0
@@ -18,8 +27,8 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/joho/godotenv v1.5.1
 	github.com/neo4j/neo4j-go-driver/v5 v5.28.4
+	github.com/orkestra-cc/orkestra-sdk v0.0.0-00010101000000-000000000000
 	github.com/pquerna/otp v1.5.0
-	github.com/prometheus/client_golang v1.23.2
 	github.com/redis/go-redis/v9 v9.16.0
 	github.com/sashabaranov/go-openai v1.41.2
 	github.com/stripe/stripe-go/v76 v76.25.0
@@ -74,7 +83,6 @@ require (
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.28.0 // indirect
 	github.com/kennygrant/sanitize v1.2.4 // indirect
 	github.com/klauspost/compress v1.18.1 // indirect
-	github.com/kylelemons/godebug v1.1.0 // indirect
 	github.com/leodido/go-urn v1.4.0 // indirect
 	github.com/moby/docker-image-spec v1.3.1 // indirect
 	github.com/moby/sys/atomicwriter v0.1.0 // indirect
@@ -87,6 +95,7 @@ require (
 	github.com/opencontainers/image-spec v1.1.1 // indirect
 	github.com/philhofer/fwd v1.2.0 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
+	github.com/prometheus/client_golang v1.23.2 // indirect
 	github.com/prometheus/client_model v0.6.2 // indirect
 	github.com/prometheus/common v0.66.1 // indirect
 	github.com/prometheus/procfs v0.16.1 // indirect

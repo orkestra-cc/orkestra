@@ -27,6 +27,7 @@ import (
 	chiMiddleware "github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
 
+	"github.com/orkestra-cc/orkestra-sdk/module"
 	"github.com/orkestra/backend/internal/addons/agents"
 	"github.com/orkestra/backend/internal/addons/aimodels"
 	"github.com/orkestra/backend/internal/addons/graph"
@@ -36,7 +37,6 @@ import (
 	"github.com/orkestra/backend/internal/shared/database"
 	"github.com/orkestra/backend/internal/shared/middleware"
 	"github.com/orkestra/backend/internal/shared/utils"
-	"github.com/orkestra/backend/pkg/sdk/module"
 )
 
 func main() {

@@ -704,7 +704,6 @@ func shouldApplyStampDuty(invoice *models.Invoice) bool {
 	return false
 }
 
-
 // GenerateProgressivoInvio generates a unique progressivo invio
 // Max 10 characters alphanumeric as per FatturaPA spec
 func GenerateProgressivoInvio() string {

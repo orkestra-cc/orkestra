@@ -8,11 +8,11 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
+	"github.com/orkestra-cc/orkestra-sdk/ctxauth"
 	authModels "github.com/orkestra/backend/internal/core/auth/models"
 	"github.com/orkestra/backend/internal/core/auth/services"
 	userModels "github.com/orkestra/backend/internal/core/user/models"
 	"github.com/orkestra/backend/internal/shared/middleware"
-	"github.com/orkestra/backend/pkg/sdk/ctxauth"
 )
 
 // SelfUserAuthHandler hosts the self-service security-center endpoints

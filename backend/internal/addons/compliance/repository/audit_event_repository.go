@@ -27,9 +27,10 @@ func New(db *mongo.Database) *AuditEventRepository {
 // — this method does not patch them so the sink can guarantee the event's
 // ordering identity without racing the clock.
 //
-//tenantscope:allow audit events are written with whatever tenantId the
 // emitter supplies (or empty for platform-level events); the collection is
 // explicitly cross-tenant and exempt from tenantrepo.StampInsert.
+//
+//tenantscope:allow audit events are written with whatever tenantId the
 func (r *AuditEventRepository) Insert(ctx context.Context, e *models.AuditEvent) error {
 	_, err := r.coll.InsertOne(ctx, e)
 	return err
@@ -56,8 +57,9 @@ type Filter struct {
 // to enforce RBAC before invoking — the repository itself does not gate
 // visibility.
 //
-//tenantscope:allow audit admin read spans tenants by design — platform
 // admins filter by tenantId via the optional Filter.TenantID field.
+//
+//tenantscope:allow audit admin read spans tenants by design — platform
 func (r *AuditEventRepository) List(ctx context.Context, f Filter) ([]models.AuditEvent, int64, error) {
 	query := bson.M{}
 	if f.TenantID != "" {

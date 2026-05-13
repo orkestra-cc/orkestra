@@ -37,9 +37,9 @@ type GetProjectResponse struct {
 type UpdateProjectRequest struct {
 	UUID string `path:"uuid" doc:"Project UUID"`
 	Body struct {
-		Name        *string  `json:"name,omitempty" doc:"Project name"`
-		Description *string  `json:"description,omitempty" doc:"Project description"`
-		Status      *string  `json:"status,omitempty" doc:"Project status: active or archived"`
+		Name        *string `json:"name,omitempty" doc:"Project name"`
+		Description *string `json:"description,omitempty" doc:"Project description"`
+		Status      *string `json:"status,omitempty" doc:"Project status: active or archived"`
 	}
 }
 
@@ -196,9 +196,9 @@ type GetBankInfoRequest struct {
 
 type GetBankInfoResponse struct {
 	Body struct {
-		BankID    string `json:"bankId" doc:"Hindsight bank ID"`
-		Status    string `json:"status" doc:"Bank status"`
-		Memories  int    `json:"memories,omitempty" doc:"Number of stored memories"`
+		BankID   string `json:"bankId" doc:"Hindsight bank ID"`
+		Status   string `json:"status" doc:"Bank status"`
+		Memories int    `json:"memories,omitempty" doc:"Number of stored memories"`
 	}
 }
 

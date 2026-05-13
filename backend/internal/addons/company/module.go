@@ -8,13 +8,13 @@ import (
 
 	"github.com/danielgtaylor/huma/v2/adapters/humachi"
 	"github.com/go-chi/chi/v5"
+	"github.com/orkestra-cc/orkestra-sdk/iface"
+	"github.com/orkestra-cc/orkestra-sdk/module"
+	"github.com/orkestra-cc/orkestra-sdk/modulegate"
 	"github.com/orkestra/backend/internal/addons/company/config"
 	"github.com/orkestra/backend/internal/addons/company/handlers"
 	"github.com/orkestra/backend/internal/addons/company/repository"
 	"github.com/orkestra/backend/internal/addons/company/services"
-	"github.com/orkestra/backend/pkg/sdk/iface"
-	"github.com/orkestra/backend/pkg/sdk/module"
-	"github.com/orkestra/backend/pkg/sdk/modulegate"
 )
 
 // Settings mirrors the company ConfigSchema 1:1 plus the legacy

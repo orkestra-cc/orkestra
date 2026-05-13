@@ -222,9 +222,9 @@ func (r *mfaFactorRepository) AppendWebAuthnCredential(ctx context.Context, user
 func (r *mfaFactorRepository) UpdateWebAuthnCredential(ctx context.Context, userUUID string, credentialID []byte, signCount uint32, when time.Time, cloneWarning bool) (bool, error) {
 	res, err := r.coll.UpdateOne(ctx,
 		bson.M{
-			"userUuid":                          userUUID,
-			"type":                              models.MFAFactorWebAuthn,
-			"webauthnCredentials.credentialId":  credentialID,
+			"userUuid":                         userUUID,
+			"type":                             models.MFAFactorWebAuthn,
+			"webauthnCredentials.credentialId": credentialID,
 		},
 		bson.M{"$set": bson.M{
 			"webauthnCredentials.$.signCount":    signCount,

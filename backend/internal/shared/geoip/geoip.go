@@ -49,7 +49,7 @@ type Resolver interface {
 type NoopResolver struct{}
 
 func (NoopResolver) Lookup(_ context.Context, _ string) (*Location, error) { return nil, nil }
-func (NoopResolver) Close() error                                           { return nil }
+func (NoopResolver) Close() error                                          { return nil }
 
 // FromEnv reads AUTH_GEOIP_DB_PATH and returns a Resolver. When the
 // variable is unset, returns NoopResolver (GeoIP disabled — scorer

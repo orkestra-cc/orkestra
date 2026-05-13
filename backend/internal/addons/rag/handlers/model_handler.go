@@ -80,7 +80,7 @@ func (h *ModelHandler) FetchAvailableModels(ctx context.Context, req *models.Fet
 	resp := &models.FetchModelsResponse{}
 	for _, m := range remoteModels {
 		resp.Body.Models = append(resp.Body.Models, models.AvailableModel{
-			ID:       m.ID,
+			ID:      m.ID,
 			OwnedBy: m.OwnedBy,
 		})
 	}

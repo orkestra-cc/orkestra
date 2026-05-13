@@ -24,7 +24,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/orkestra/backend/pkg/sdk/ctxauth"
+	"github.com/orkestra-cc/orkestra-sdk/ctxauth"
 	"go.mongodb.org/mongo-driver/bson"
 )
 

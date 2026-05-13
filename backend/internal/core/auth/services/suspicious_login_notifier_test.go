@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/orkestra-cc/orkestra-sdk/iface"
 	"github.com/orkestra/backend/internal/core/auth/models"
-	"github.com/orkestra/backend/pkg/sdk/iface"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 

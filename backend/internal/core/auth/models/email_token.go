@@ -29,12 +29,12 @@ type EmailTokenDoc struct {
 	// query against the wrong collection fails the integrity test.
 	Tier      string     `bson:"tier,omitempty" json:"-"`
 	UserUUID  string     `bson:"userUuid" json:"userUuid"`
-	TokenHash string             `bson:"tokenHash" json:"-"`
-	Purpose   string             `bson:"purpose" json:"purpose"`
-	IP        string             `bson:"ip,omitempty" json:"ip,omitempty"`
-	CreatedAt time.Time          `bson:"createdAt" json:"createdAt"`
-	ExpiresAt time.Time          `bson:"expiresAt" json:"expiresAt"`
-	UsedAt    *time.Time         `bson:"usedAt,omitempty" json:"usedAt,omitempty"`
+	TokenHash string     `bson:"tokenHash" json:"-"`
+	Purpose   string     `bson:"purpose" json:"purpose"`
+	IP        string     `bson:"ip,omitempty" json:"ip,omitempty"`
+	CreatedAt time.Time  `bson:"createdAt" json:"createdAt"`
+	ExpiresAt time.Time  `bson:"expiresAt" json:"expiresAt"`
+	UsedAt    *time.Time `bson:"usedAt,omitempty" json:"usedAt,omitempty"`
 }
 
 const (

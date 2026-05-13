@@ -8,9 +8,9 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/orkestra-cc/orkestra-sdk/iface"
 	"github.com/orkestra/backend/internal/core/auth/models"
 	userModels "github.com/orkestra/backend/internal/core/user/models"
-	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
 var (

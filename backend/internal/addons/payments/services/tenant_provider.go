@@ -3,8 +3,8 @@ package services
 import (
 	"context"
 
+	"github.com/orkestra-cc/orkestra-sdk/iface"
 	"github.com/orkestra/backend/internal/addons/payments/repository"
-	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
 // TenantPaymentAdapter implements iface.TenantPaymentProvider by flattening

@@ -7,10 +7,10 @@ import (
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
+	"github.com/orkestra-cc/orkestra-sdk/iface"
 	"github.com/orkestra/backend/internal/addons/payments/models"
 	"github.com/orkestra/backend/internal/addons/payments/repository"
 	"github.com/orkestra/backend/internal/testkit"
-	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
 // stubTxRepo is a minimal TransactionRepository — only List is exercised by

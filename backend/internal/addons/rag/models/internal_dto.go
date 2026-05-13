@@ -1,6 +1,6 @@
 package models
 
-import "github.com/orkestra/backend/pkg/sdk/iface"
+import "github.com/orkestra-cc/orkestra-sdk/iface"
 
 // --- Internal Service-to-Service DTOs ---
 // Used by the monolith's RemoteRAGQueryProvider to call the AI service.

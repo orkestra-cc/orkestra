@@ -7,12 +7,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	authModels "github.com/orkestra/backend/internal/core/auth/models"
 	authRepository "github.com/orkestra/backend/internal/core/auth/repository"
-	"github.com/orkestra/backend/internal/shared/utils"
 	"github.com/orkestra/backend/internal/core/user/models"
 	"github.com/orkestra/backend/internal/core/user/repository"
-	"github.com/google/uuid"
+	"github.com/orkestra/backend/internal/shared/utils"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 

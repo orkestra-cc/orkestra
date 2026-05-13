@@ -15,14 +15,14 @@ type OAuthProviderDoc struct {
 	// constructor (ADR-0003 PR-D). Lets a tier-guard test assert that
 	// every row in operator_oauth_providers carries Tier="operator"
 	// and likewise for client.
-	Tier     string `bson:"tier,omitempty" json:"-"`
-	UserUUID string `bson:"userUuid" json:"userUuid" validate:"required"`
-	Provider   OAuthProvider      `bson:"provider" json:"provider" validate:"required,oneof=google apple discord github"`
-	ProviderID string             `bson:"providerId" json:"providerId" validate:"required"`
-	Email      string             `bson:"email" json:"email" validate:"required,email"`
-	IsPrimary  bool               `bson:"isPrimary" json:"isPrimary"`
-	LinkedAt   time.Time          `bson:"linkedAt" json:"linkedAt"`
-	LastUsed   *time.Time         `bson:"lastUsed,omitempty" json:"lastUsed,omitempty"`
+	Tier       string        `bson:"tier,omitempty" json:"-"`
+	UserUUID   string        `bson:"userUuid" json:"userUuid" validate:"required"`
+	Provider   OAuthProvider `bson:"provider" json:"provider" validate:"required,oneof=google apple discord github"`
+	ProviderID string        `bson:"providerId" json:"providerId" validate:"required"`
+	Email      string        `bson:"email" json:"email" validate:"required,email"`
+	IsPrimary  bool          `bson:"isPrimary" json:"isPrimary"`
+	LinkedAt   time.Time     `bson:"linkedAt" json:"linkedAt"`
+	LastUsed   *time.Time    `bson:"lastUsed,omitempty" json:"lastUsed,omitempty"`
 	// OAuth Provider Tokens (encrypted)
 	AccessToken           string                 `bson:"accessToken,omitempty" json:"-"`  // Encrypted OAuth access token
 	RefreshToken          string                 `bson:"refreshToken,omitempty" json:"-"` // Encrypted OAuth refresh token, only if ongoing access needed
@@ -43,8 +43,8 @@ type RefreshTokenDoc struct {
 	// Tier is "operator" / "client" / "" — see OAuthProviderDoc.Tier.
 	Tier        string `bson:"tier,omitempty" json:"-"`
 	UserUUID    string `bson:"userUuid" json:"userUuid" validate:"required"`
-	Token       string             `bson:"token" json:"-" validate:"required"` // Hashed token
-	SessionUUID string             `bson:"sessionUuid" json:"sessionId" validate:"required"`
+	Token       string `bson:"token" json:"-" validate:"required"` // Hashed token
+	SessionUUID string `bson:"sessionUuid" json:"sessionId" validate:"required"`
 
 	// Device Information
 	DeviceID   string `bson:"deviceId" json:"deviceId" validate:"required"`

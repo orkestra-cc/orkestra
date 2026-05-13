@@ -8,15 +8,15 @@ import (
 
 	"github.com/danielgtaylor/huma/v2/adapters/humachi"
 	"github.com/go-chi/chi/v5"
+	"github.com/orkestra-cc/orkestra-sdk/capability"
+	"github.com/orkestra-cc/orkestra-sdk/iface"
+	"github.com/orkestra-cc/orkestra-sdk/module"
+	"github.com/orkestra-cc/orkestra-sdk/modulegate"
 	billingConfig "github.com/orkestra/backend/internal/addons/billing/config"
 	"github.com/orkestra/backend/internal/addons/billing/handlers"
 	"github.com/orkestra/backend/internal/addons/billing/jobs"
 	"github.com/orkestra/backend/internal/addons/billing/repository"
 	"github.com/orkestra/backend/internal/addons/billing/services"
-	"github.com/orkestra/backend/pkg/sdk/capability"
-	"github.com/orkestra/backend/pkg/sdk/iface"
-	"github.com/orkestra/backend/pkg/sdk/module"
-	"github.com/orkestra/backend/pkg/sdk/modulegate"
 )
 
 // Settings mirrors the billing ConfigSchema 1:1. Captured once at Init for

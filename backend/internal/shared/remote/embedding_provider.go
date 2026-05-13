@@ -72,5 +72,5 @@ func (p *RemoteEmbeddingProvider) EmbedBatch(ctx context.Context, texts []string
 	return resp.Embeddings, nil
 }
 
-func (p *RemoteEmbeddingProvider) Dimensions() int  { return p.dims }
+func (p *RemoteEmbeddingProvider) Dimensions() int   { return p.dims }
 func (p *RemoteEmbeddingProvider) ModelName() string { return p.model }

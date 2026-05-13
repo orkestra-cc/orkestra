@@ -22,7 +22,7 @@ import (
 	"github.com/stripe/stripe-go/v76/refund"
 	"github.com/stripe/stripe-go/v76/webhook"
 
-	"github.com/orkestra/backend/pkg/sdk/iface"
+	"github.com/orkestra-cc/orkestra-sdk/iface"
 )
 
 // Provider is the Stripe implementation of iface.PaymentProvider.

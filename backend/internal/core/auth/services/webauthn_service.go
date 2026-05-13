@@ -343,8 +343,8 @@ type webAuthnUser struct {
 	credentials []authModels.WebAuthnCredential
 }
 
-func (u *webAuthnUser) WebAuthnID() []byte             { return []byte(u.user.UUID) }
-func (u *webAuthnUser) WebAuthnName() string           { return u.user.Email }
+func (u *webAuthnUser) WebAuthnID() []byte   { return []byte(u.user.UUID) }
+func (u *webAuthnUser) WebAuthnName() string { return u.user.Email }
 func (u *webAuthnUser) WebAuthnDisplayName() string {
 	if u.user.FullName != "" {
 		return u.user.FullName

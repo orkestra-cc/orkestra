@@ -17,11 +17,11 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/orkestra-cc/orkestra-sdk/iface"
 	authModels "github.com/orkestra/backend/internal/core/auth/models"
 	"github.com/orkestra/backend/internal/core/auth/repository"
 	userModels "github.com/orkestra/backend/internal/core/user/models"
 	"github.com/orkestra/backend/internal/shared/geoip"
-	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
 // gateUserFake is a minimal in-memory iface.UserProvider. Tests pre-

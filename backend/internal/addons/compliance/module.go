@@ -16,6 +16,8 @@ import (
 	"github.com/danielgtaylor/huma/v2/adapters/humachi"
 	"github.com/go-chi/chi/v5"
 
+	"github.com/orkestra-cc/orkestra-sdk/iface"
+	"github.com/orkestra-cc/orkestra-sdk/module"
 	"github.com/orkestra/backend/internal/addons/compliance/handlers"
 	"github.com/orkestra/backend/internal/addons/compliance/models"
 	"github.com/orkestra/backend/internal/addons/compliance/repository"
@@ -25,8 +27,6 @@ import (
 	subscriptionServices "github.com/orkestra/backend/internal/addons/subscriptions/services"
 	authServices "github.com/orkestra/backend/internal/core/auth/services"
 	tenantServices "github.com/orkestra/backend/internal/core/tenant/services"
-	"github.com/orkestra/backend/pkg/sdk/iface"
-	"github.com/orkestra/backend/pkg/sdk/module"
 )
 
 // Module wires the audit sink, DSR pipeline, SOC2 evidence, and

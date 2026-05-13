@@ -23,9 +23,9 @@ func NewScorer() *Scorer {
 
 // ScoreResult holds the computed composite score and per-agent breakdown
 type ScoreResult struct {
-	Total      int                    `json:"total"`
-	Grade      string                 `json:"grade"`
-	PerAgent   map[string]AgentScore  `json:"perAgent"`
+	Total    int                   `json:"total"`
+	Grade    string                `json:"grade"`
+	PerAgent map[string]AgentScore `json:"perAgent"`
 }
 
 // AgentScore tracks one agent's contribution

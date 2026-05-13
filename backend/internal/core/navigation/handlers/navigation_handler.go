@@ -3,9 +3,9 @@ package handlers
 import (
 	"context"
 
+	"github.com/orkestra-cc/orkestra-sdk/ctxauth"
 	"github.com/orkestra/backend/internal/core/navigation/models"
 	"github.com/orkestra/backend/internal/core/navigation/services"
-	"github.com/orkestra/backend/pkg/sdk/ctxauth"
 )
 
 // NavigationHandler handles navigation HTTP requests

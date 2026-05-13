@@ -27,9 +27,9 @@ func TestJoinStrings(t *testing.T) {
 func TestTruncate_AgentExecutor(t *testing.T) {
 	// Local helper distinct from billing.notification.truncate.
 	cases := []struct {
-		in       string
-		max      int
-		want     string
+		in   string
+		max  int
+		want string
 	}{
 		{"hello", 10, "hello"},
 		{"hello", 5, "hello"},
@@ -86,8 +86,8 @@ func TestBuildAgentUserMessage_AllScrapedFields(t *testing.T) {
 }
 
 func TestBuildAgentUserMessage_TruncatesAboutAndRawText(t *testing.T) {
-	bigAbout := strings.Repeat("A", 5000)  // > 3000 → truncated
-	bigRaw := strings.Repeat("B", 10000)    // > 8000 → truncated
+	bigAbout := strings.Repeat("A", 5000) // > 3000 → truncated
+	bigRaw := strings.Repeat("B", 10000)  // > 8000 → truncated
 	input := &models.AgentInput{
 		CompanyURL: "u",
 		ScrapedData: &models.ScrapedCompanyData{

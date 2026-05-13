@@ -70,7 +70,7 @@ type ListInvoicesResponse struct {
 
 // UpdateInvoiceRequest represents the request to update an invoice
 type UpdateInvoiceRequest struct {
-	ID   string                   `path:"id" doc:"Invoice UUID"`
+	ID   string                    `path:"id" doc:"Invoice UUID"`
 	Body models.UpdateInvoiceInput `json:"invoice" doc:"Invoice update data"`
 }
 
@@ -207,7 +207,7 @@ type ImportXMLInvoiceResponse struct {
 
 // DuplicateInvoiceRequest represents the request to duplicate an invoice
 type DuplicateInvoiceRequest struct {
-	ID   string                      `path:"id" doc:"Invoice UUID"`
+	ID   string                       `path:"id" doc:"Invoice UUID"`
 	Body models.DuplicateInvoiceInput `json:"input" doc:"Duplicate options"`
 }
 

@@ -3,12 +3,12 @@ package user
 import (
 	"github.com/danielgtaylor/huma/v2/adapters/humachi"
 	"github.com/go-chi/chi/v5"
+	"github.com/orkestra-cc/orkestra-sdk/iface"
+	"github.com/orkestra-cc/orkestra-sdk/module"
 	authRepo "github.com/orkestra/backend/internal/core/auth/repository"
 	"github.com/orkestra/backend/internal/core/user/handlers"
 	"github.com/orkestra/backend/internal/core/user/repository"
 	"github.com/orkestra/backend/internal/core/user/services"
-	"github.com/orkestra/backend/pkg/sdk/iface"
-	"github.com/orkestra/backend/pkg/sdk/module"
 )
 
 type UserModule struct {

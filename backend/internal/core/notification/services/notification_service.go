@@ -9,9 +9,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/orkestra-cc/orkestra-sdk/iface"
 	"github.com/orkestra/backend/internal/core/notification/models"
 	"github.com/orkestra/backend/internal/core/notification/repository"
-	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
 // URLBuilder renders the absolute URLs used inside templates.

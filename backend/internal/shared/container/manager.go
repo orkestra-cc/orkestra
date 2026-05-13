@@ -25,7 +25,7 @@ import (
 	"github.com/docker/docker/errdefs"
 	"github.com/docker/go-connections/nat"
 
-	"github.com/orkestra/backend/pkg/sdk/module"
+	"github.com/orkestra-cc/orkestra-sdk/module"
 )
 
 // Manager is the interface consumed by the module registry.

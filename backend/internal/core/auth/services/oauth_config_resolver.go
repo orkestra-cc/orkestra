@@ -3,8 +3,8 @@ package services
 import (
 	"context"
 
+	"github.com/orkestra-cc/orkestra-sdk/module"
 	"github.com/orkestra/backend/internal/core/auth/models"
-	"github.com/orkestra/backend/pkg/sdk/module"
 )
 
 // OAuthConfigResolver builds a per-provider OAuthProviderConfig from the live

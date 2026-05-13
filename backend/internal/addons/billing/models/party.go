@@ -97,10 +97,10 @@ type PartyData struct {
 // IscrizioneREAInput represents REA (Registro Imprese) registration data
 // Required for Italian companies in the seller/provider section
 type IscrizioneREAInput struct {
-	Ufficio           string  `bson:"ufficio" json:"ufficio" validate:"required,len=2"`      // Province code (2 chars)
-	NumeroREA         string  `bson:"numeroREA" json:"numeroREA" validate:"required"`        // REA registration number
-	CapitaleSociale   float64 `bson:"capitaleSociale,omitempty" json:"capitaleSociale,omitempty"` // Share capital
-	SocioUnico        string  `bson:"socioUnico,omitempty" json:"socioUnico,omitempty"`      // SU=single shareholder, SM=multiple
+	Ufficio           string  `bson:"ufficio" json:"ufficio" validate:"required,len=2"`                           // Province code (2 chars)
+	NumeroREA         string  `bson:"numeroREA" json:"numeroREA" validate:"required"`                             // REA registration number
+	CapitaleSociale   float64 `bson:"capitaleSociale,omitempty" json:"capitaleSociale,omitempty"`                 // Share capital
+	SocioUnico        string  `bson:"socioUnico,omitempty" json:"socioUnico,omitempty"`                           // SU=single shareholder, SM=multiple
 	StatoLiquidazione string  `bson:"statoLiquidazione" json:"statoLiquidazione" validate:"required,oneof=LS LN"` // LS=in liquidation, LN=not in liquidation
 }
 

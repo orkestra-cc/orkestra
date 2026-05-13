@@ -351,11 +351,11 @@ func TestIsExpired(t *testing.T) {
 
 func TestInScope(t *testing.T) {
 	cases := map[string]bool{
-		"github.com/orkestra/backend/internal/addons/billing":     true,
-		"github.com/orkestra/backend/internal/core/auth":          true,
-		"github.com/orkestra/backend/internal/shared/middleware":  true,
-		"github.com/orkestra/backend/tools/tenantscope":           false,
-		"github.com/orkestra/backend/cmd/server":                  false,
+		"github.com/orkestra/backend/internal/addons/billing":    true,
+		"github.com/orkestra/backend/internal/core/auth":         true,
+		"github.com/orkestra/backend/internal/shared/middleware": true,
+		"github.com/orkestra/backend/tools/tenantscope":          false,
+		"github.com/orkestra/backend/cmd/server":                 false,
 	}
 	for pkg, want := range cases {
 		if got := inScope(pkg); got != want {

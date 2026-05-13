@@ -3,13 +3,13 @@ package main
 import (
 	"log/slog"
 
+	"github.com/orkestra-cc/orkestra-sdk/module"
 	"github.com/orkestra/backend/internal/core/auth"
 	"github.com/orkestra/backend/internal/core/authz"
 	"github.com/orkestra/backend/internal/core/navigation"
 	"github.com/orkestra/backend/internal/core/notification"
 	"github.com/orkestra/backend/internal/core/tenant"
 	"github.com/orkestra/backend/internal/core/user"
-	"github.com/orkestra/backend/pkg/sdk/module"
 )
 
 // coreModules are always loaded — they provide the foundation

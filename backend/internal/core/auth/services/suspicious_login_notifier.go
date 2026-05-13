@@ -22,9 +22,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/orkestra-cc/orkestra-sdk/iface"
 	"github.com/orkestra/backend/internal/core/auth/models"
 	notifModels "github.com/orkestra/backend/internal/core/notification/models"
-	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
 // SuspiciousLoginEmailThreshold is the risk-score boundary at which

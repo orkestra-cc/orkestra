@@ -18,7 +18,7 @@ import (
 
 // Common errors
 var (
-	ErrInvoiceNotFound     = errors.New("invoice not found")
+	ErrInvoiceNotFound      = errors.New("invoice not found")
 	ErrInvoiceAlreadyExists = errors.New("invoice with this number already exists")
 )
 
@@ -119,7 +119,7 @@ func (r *invoiceRepository) createIndexes(ctx context.Context) {
 			Options: options.Index().SetUnique(true),
 		},
 		{
-			Keys: bson.D{{Key: "openApiUuid", Value: 1}},
+			Keys:    bson.D{{Key: "openApiUuid", Value: 1}},
 			Options: options.Index().SetSparse(true),
 		},
 		{
@@ -251,10 +251,10 @@ func (r *invoiceRepository) GetByNumber(ctx context.Context, number string, dire
 func (r *invoiceRepository) FindByNumberAndSupplierFiscalID(ctx context.Context, number string, fiscalIDCode string) (*models.Invoice, error) {
 	var invoice models.Invoice
 	err := r.collection.FindOne(ctx, bson.M{
-		"number":                          number,
-		"direction":                       models.DirectionReceived,
-		"cedentePrestatore.fiscalIdCode":  fiscalIDCode,
-		"deletedAt":                       nil,
+		"number":                         number,
+		"direction":                      models.DirectionReceived,
+		"cedentePrestatore.fiscalIdCode": fiscalIDCode,
+		"deletedAt":                      nil,
 	}).Decode(&invoice)
 
 	if err != nil {

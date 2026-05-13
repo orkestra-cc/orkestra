@@ -16,7 +16,7 @@ import (
 // `{isRevoked:false}` is modelled by a quick check under the mutex — so
 // the tests reflect real-world behaviour without needing a live database.
 type inMemoryRefreshRepo struct {
-	mu    sync.Mutex
+	mu     sync.Mutex
 	byHash map[string]*authModels.RefreshTokenDoc
 }
 

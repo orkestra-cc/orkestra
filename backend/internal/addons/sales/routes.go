@@ -61,7 +61,9 @@ func RegisterReportRoutes(api huma.API, h *handlers.ReportHandler) {
 }
 
 // RegisterReportDownloadRoute registers the raw Markdown download route on chi directly
-func RegisterReportDownloadRoute(r interface{ Get(string, http.HandlerFunc) }, h *handlers.ReportHandler) {
+func RegisterReportDownloadRoute(r interface {
+	Get(string, http.HandlerFunc)
+}, h *handlers.ReportHandler) {
 	r.Get("/v1/sales/reports/{uuid}/md", h.DownloadMarkdown)
 }
 

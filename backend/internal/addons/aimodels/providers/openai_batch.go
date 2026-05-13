@@ -52,10 +52,10 @@ type openaiBatchJSONLLine struct {
 	Method   string `json:"method"`
 	URL      string `json:"url"`
 	Body     struct {
-		Model       string                  `json:"model"`
-		Messages    []openaiBatchMessage    `json:"messages"`
-		MaxTokens   int                     `json:"max_tokens,omitempty"`
-		Temperature float32                 `json:"temperature,omitempty"`
+		Model       string               `json:"model"`
+		Messages    []openaiBatchMessage `json:"messages"`
+		MaxTokens   int                  `json:"max_tokens,omitempty"`
+		Temperature float32              `json:"temperature,omitempty"`
 	} `json:"body"`
 }
 

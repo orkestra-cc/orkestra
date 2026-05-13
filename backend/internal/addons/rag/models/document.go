@@ -16,8 +16,8 @@ type RagDocument struct {
 	ISOStandard      string             `bson:"isoStandard,omitempty" json:"isoStandard,omitempty"`
 	Version          string             `bson:"version,omitempty" json:"version,omitempty"`
 	DocumentCategory string             `bson:"documentCategory,omitempty" json:"documentCategory,omitempty"` // "iso", "law", "regulation", "generic"
-	DocType          string             `bson:"docType" json:"docType"`                                      // "pdf", "text"
-	Status           string             `bson:"status" json:"status"`                                        // pending, processing, completed, failed
+	DocType          string             `bson:"docType" json:"docType"`                                       // "pdf", "text"
+	Status           string             `bson:"status" json:"status"`                                         // pending, processing, completed, failed
 	Error            string             `bson:"error,omitempty" json:"error,omitempty"`
 	ChunkCount       int                `bson:"chunkCount" json:"chunkCount"`
 	ModelUUID        string             `bson:"modelUuid" json:"modelUuid"`

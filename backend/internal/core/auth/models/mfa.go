@@ -24,10 +24,10 @@ const (
 type MFAStatus string
 
 const (
-	MFAStatusNotRequired             MFAStatus = "not_required"
+	MFAStatusNotRequired               MFAStatus = "not_required"
 	MFAStatusRequiredPendingEnrollment MFAStatus = "required_pending_enrollment"
-	MFAStatusEnrolled                MFAStatus = "enrolled"
-	MFAStatusGrace                   MFAStatus = "grace"
+	MFAStatusEnrolled                  MFAStatus = "enrolled"
+	MFAStatusGrace                     MFAStatus = "grace"
 )
 
 // MFAFactorDoc represents a stored second-factor binding for a user.
@@ -39,14 +39,14 @@ type MFAFactorDoc struct {
 	UUID string             `bson:"uuid" json:"id"`
 	// Tier is "operator" / "client" / "" — see auth/models.collections.go
 	// OAuthProviderDoc.Tier comment (ADR-0003 PR-D).
-	Tier              string             `bson:"tier,omitempty" json:"-"`
-	UserUUID          string             `bson:"userUuid" json:"userUuid"`
-	Type              MFAFactorType      `bson:"type" json:"type"`
-	SecretEnc         string             `bson:"secretEnc,omitempty" json:"-"`
-	VerifiedAt        *time.Time         `bson:"verifiedAt,omitempty" json:"verifiedAt,omitempty"`
-	CreatedAt         time.Time          `bson:"createdAt" json:"createdAt"`
-	LastUsedAt        *time.Time         `bson:"lastUsedAt,omitempty" json:"lastUsedAt,omitempty"`
-	BackupCodesHashed []string           `bson:"backupCodesHashed,omitempty" json:"-"`
+	Tier              string        `bson:"tier,omitempty" json:"-"`
+	UserUUID          string        `bson:"userUuid" json:"userUuid"`
+	Type              MFAFactorType `bson:"type" json:"type"`
+	SecretEnc         string        `bson:"secretEnc,omitempty" json:"-"`
+	VerifiedAt        *time.Time    `bson:"verifiedAt,omitempty" json:"verifiedAt,omitempty"`
+	CreatedAt         time.Time     `bson:"createdAt" json:"createdAt"`
+	LastUsedAt        *time.Time    `bson:"lastUsedAt,omitempty" json:"lastUsedAt,omitempty"`
+	BackupCodesHashed []string      `bson:"backupCodesHashed,omitempty" json:"-"`
 	// LastUsedStep is the most recent TOTP step index (unix / period)
 	// accepted for this factor. Verify refuses any candidate whose step
 	// is ≤ LastUsedStep, preventing replay of a just-captured code within
@@ -68,16 +68,16 @@ type WebAuthnCredential struct {
 	// CredentialID is the raw bytes returned by the authenticator. Stored
 	// as a byte slice (BSON binary) — base64url-encoded only at the API
 	// boundary so the wire format stays compatible with the W3C JSON.
-	CredentialID    []byte    `bson:"credentialId" json:"credentialId"`
-	PublicKey       []byte    `bson:"publicKey" json:"publicKey"`
-	AttestationType string    `bson:"attestationType,omitempty" json:"attestationType,omitempty"`
-	AAGUID          []byte    `bson:"aaguid,omitempty" json:"aaguid,omitempty"`
-	SignCount       uint32    `bson:"signCount" json:"signCount"`
-	CloneWarning    bool      `bson:"cloneWarning,omitempty" json:"cloneWarning,omitempty"`
-	Transports      []string  `bson:"transports,omitempty" json:"transports,omitempty"`
-	UserVerified    bool      `bson:"userVerified,omitempty" json:"userVerified,omitempty"`
-	BackupEligible  bool      `bson:"backupEligible,omitempty" json:"backupEligible,omitempty"`
-	BackupState     bool      `bson:"backupState,omitempty" json:"backupState,omitempty"`
+	CredentialID    []byte   `bson:"credentialId" json:"credentialId"`
+	PublicKey       []byte   `bson:"publicKey" json:"publicKey"`
+	AttestationType string   `bson:"attestationType,omitempty" json:"attestationType,omitempty"`
+	AAGUID          []byte   `bson:"aaguid,omitempty" json:"aaguid,omitempty"`
+	SignCount       uint32   `bson:"signCount" json:"signCount"`
+	CloneWarning    bool     `bson:"cloneWarning,omitempty" json:"cloneWarning,omitempty"`
+	Transports      []string `bson:"transports,omitempty" json:"transports,omitempty"`
+	UserVerified    bool     `bson:"userVerified,omitempty" json:"userVerified,omitempty"`
+	BackupEligible  bool     `bson:"backupEligible,omitempty" json:"backupEligible,omitempty"`
+	BackupState     bool     `bson:"backupState,omitempty" json:"backupState,omitempty"`
 	// Name is the user-supplied label so the settings UI can show
 	// "Yubikey 5C" or "iPhone Touch ID" rather than a hex blob.
 	Name       string     `bson:"name" json:"name"`

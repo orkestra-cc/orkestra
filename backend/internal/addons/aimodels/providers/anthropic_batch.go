@@ -15,8 +15,8 @@ import (
 // --- Anthropic Message Batches API types ---
 
 type anthropicBatchRequestItem struct {
-	CustomID string                `json:"custom_id"`
-	Params   anthropicBatchParams  `json:"params"`
+	CustomID string               `json:"custom_id"`
+	Params   anthropicBatchParams `json:"params"`
 }
 
 type anthropicBatchParams struct {
@@ -51,7 +51,7 @@ type anthropicBatchResponse struct {
 type anthropicBatchResultLine struct {
 	CustomID string `json:"custom_id"`
 	Result   struct {
-		Type    string `json:"type"` // "succeeded", "errored", "canceled", "expired"
+		Type    string             `json:"type"` // "succeeded", "errored", "canceled", "expired"
 		Message *anthropicResponse `json:"message,omitempty"`
 		Error   *struct {
 			Type    string `json:"type"`

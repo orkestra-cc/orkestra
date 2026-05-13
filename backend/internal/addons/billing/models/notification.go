@@ -14,8 +14,8 @@ type SDINotification struct {
 	UUID string `bson:"uuid" json:"id" validate:"required"`
 
 	// Related invoice
-	InvoiceUUID  string `bson:"invoiceUuid" json:"invoiceUuid" validate:"required"`
-	OpenAPIUUID  string `bson:"openApiUuid" json:"openApiUuid"`
+	InvoiceUUID string `bson:"invoiceUuid" json:"invoiceUuid" validate:"required"`
+	OpenAPIUUID string `bson:"openApiUuid" json:"openApiUuid"`
 
 	// Notification type
 	NotificationType NotificationType `bson:"notificationType" json:"notificationType" validate:"required"`
@@ -26,8 +26,8 @@ type SDINotification struct {
 	ProgressivoInvio string `bson:"progressivoInvio,omitempty" json:"progressivoInvio,omitempty"`
 
 	// Content
-	RawContent       string `bson:"rawContent,omitempty" json:"-"` // Full XML/JSON content (not exposed)
-	Description      string `bson:"description,omitempty" json:"description,omitempty"`
+	RawContent  string `bson:"rawContent,omitempty" json:"-"` // Full XML/JSON content (not exposed)
+	Description string `bson:"description,omitempty" json:"description,omitempty"`
 
 	// Error details (for NS - Notifica Scarto)
 	ErrorCode        string `bson:"errorCode,omitempty" json:"errorCode,omitempty"`
@@ -35,12 +35,12 @@ type SDINotification struct {
 	ErrorSuggestion  string `bson:"errorSuggestion,omitempty" json:"errorSuggestion,omitempty"`
 
 	// Outcome (for NE - Notifica Esito, only for PA)
-	Outcome          NEOutcome `bson:"outcome,omitempty" json:"outcome,omitempty"` // EC01 (accepted) or EC02 (rejected)
-	OutcomeReason    string    `bson:"outcomeReason,omitempty" json:"outcomeReason,omitempty"`
+	Outcome       NEOutcome `bson:"outcome,omitempty" json:"outcome,omitempty"` // EC01 (accepted) or EC02 (rejected)
+	OutcomeReason string    `bson:"outcomeReason,omitempty" json:"outcomeReason,omitempty"`
 
 	// Mancata Consegna details (for MC)
-	MCDescription    string `bson:"mcDescription,omitempty" json:"mcDescription,omitempty"`
-	NextAttemptDate  *time.Time `bson:"nextAttemptDate,omitempty" json:"nextAttemptDate,omitempty"`
+	MCDescription   string     `bson:"mcDescription,omitempty" json:"mcDescription,omitempty"`
+	NextAttemptDate *time.Time `bson:"nextAttemptDate,omitempty" json:"nextAttemptDate,omitempty"`
 
 	// Legal storage receipt (for AT)
 	PreservedDocumentID string `bson:"preservedDocumentId,omitempty" json:"preservedDocumentId,omitempty"`
@@ -135,12 +135,12 @@ type NotificationFilters struct {
 
 // PollingState tracks the last successful polling timestamp
 type PollingState struct {
-	ID                primitive.ObjectID `bson:"_id,omitempty"`
-	LastPolledAt      time.Time          `bson:"lastPolledAt"`
-	LastNotificationAt *time.Time        `bson:"lastNotificationAt,omitempty"`
-	TotalPolled       int64              `bson:"totalPolled"`
-	LastError         string             `bson:"lastError,omitempty"`
-	LastErrorAt       *time.Time         `bson:"lastErrorAt,omitempty"`
-	ConsecutiveErrors int                `bson:"consecutiveErrors"`
-	UpdatedAt         time.Time          `bson:"updatedAt"`
+	ID                 primitive.ObjectID `bson:"_id,omitempty"`
+	LastPolledAt       time.Time          `bson:"lastPolledAt"`
+	LastNotificationAt *time.Time         `bson:"lastNotificationAt,omitempty"`
+	TotalPolled        int64              `bson:"totalPolled"`
+	LastError          string             `bson:"lastError,omitempty"`
+	LastErrorAt        *time.Time         `bson:"lastErrorAt,omitempty"`
+	ConsecutiveErrors  int                `bson:"consecutiveErrors"`
+	UpdatedAt          time.Time          `bson:"updatedAt"`
 }

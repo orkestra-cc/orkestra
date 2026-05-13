@@ -37,8 +37,8 @@ type IdPConfig struct {
 
 	// OIDC-specific fields. IssuerURL is the base (no trailing slash) that
 	// discovery appends `/.well-known/openid-configuration` to.
-	IssuerURL    string `bson:"issuerURL" json:"issuerURL"`
-	ClientID     string `bson:"clientId" json:"clientId"`
+	IssuerURL string `bson:"issuerURL" json:"issuerURL"`
+	ClientID  string `bson:"clientId" json:"clientId"`
 	// ClientSecret is the AES-256-GCM-encrypted client secret. Handlers
 	// return "***" (or the empty string) in place of this field — never the
 	// ciphertext.

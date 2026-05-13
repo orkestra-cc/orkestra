@@ -17,8 +17,8 @@ import (
 // and TerminateAllUserSessions — anything else panics so a future
 // dependency surfaces immediately.
 type fakeAuthSessionRepo struct {
-	mu       sync.Mutex
-	byUUID   map[string]*authModels.AuthSessionDoc
+	mu         sync.Mutex
+	byUUID     map[string]*authModels.AuthSessionDoc
 	terminated []string // UUIDs that hit TerminateSession
 }
 

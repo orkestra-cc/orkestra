@@ -93,10 +93,10 @@ func (p *ollamaProvider) EmbedBatch(ctx context.Context, texts []string) ([][]fl
 // --- LLM ---
 
 type ollamaGenerateRequest struct {
-	Model  string `json:"model"`
-	Prompt string `json:"prompt"`
-	System string `json:"system,omitempty"`
-	Stream bool   `json:"stream"`
+	Model   string `json:"model"`
+	Prompt  string `json:"prompt"`
+	System  string `json:"system,omitempty"`
+	Stream  bool   `json:"stream"`
 	Options struct {
 		Temperature float64 `json:"temperature,omitempty"`
 		NumPredict  int     `json:"num_predict,omitempty"`

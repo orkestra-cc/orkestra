@@ -8,15 +8,15 @@ import (
 
 	"github.com/danielgtaylor/huma/v2/adapters/humachi"
 	"github.com/go-chi/chi/v5"
+	"github.com/orkestra-cc/orkestra-sdk/capability"
+	"github.com/orkestra-cc/orkestra-sdk/iface"
+	"github.com/orkestra-cc/orkestra-sdk/module"
+	"github.com/orkestra-cc/orkestra-sdk/modulegate"
 	"github.com/orkestra/backend/internal/addons/documents/config"
 	"github.com/orkestra/backend/internal/addons/documents/handlers"
 	"github.com/orkestra/backend/internal/addons/documents/models"
 	"github.com/orkestra/backend/internal/addons/documents/repository"
 	"github.com/orkestra/backend/internal/addons/documents/services"
-	"github.com/orkestra/backend/pkg/sdk/capability"
-	"github.com/orkestra/backend/pkg/sdk/iface"
-	"github.com/orkestra/backend/pkg/sdk/module"
-	"github.com/orkestra/backend/pkg/sdk/modulegate"
 )
 
 // Settings mirrors the documents ConfigSchema 1:1 and is the typed surface
