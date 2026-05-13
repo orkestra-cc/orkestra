@@ -17,6 +17,23 @@ import (
 	"github.com/orkestra/backend/internal/shared/module"
 )
 
+// Settings mirrors the sales ConfigSchema 1:1. Init() unmarshals into a
+// value of this type, then materializes a config.SalesConfig (from
+// shared/config) so existing service constructors (NewScraper,
+// NewOrchestrator, NewAgentExecutor) keep their signatures unchanged. The
+// Enabled flag on SalesConfig is set true here — by the time Init runs, the
+// registry has already gated activation on the module_configs document.
+type Settings struct {
+	MaxConcurrency  int           `module:"maxConcurrency"`
+	DefaultLocale   string        `module:"defaultLocale"`
+	SkillTimeout    time.Duration `module:"skillTimeout"`
+	QuickTimeout    time.Duration `module:"quickTimeout"`
+	FullTimeout     time.Duration `module:"fullTimeout"`
+	ScraperTimeout  time.Duration `module:"scraperTimeout"`
+	ScraperMaxDepth int           `module:"scraperMaxDepth"`
+	MaxTokens       int           `module:"maxTokens"`
+}
+
 type SalesModule struct {
 	module.BaseModule
 	skillHandler    *handlers.SkillHandler
@@ -30,9 +47,11 @@ type SalesModule struct {
 
 func NewModule() *SalesModule { return &SalesModule{} }
 
-func (m *SalesModule) Name() string                   { return "sales" }
-func (m *SalesModule) DisplayName() string             { return "Sales Intelligence" }
-func (m *SalesModule) Description() string             { return "AI-driven prospect analysis, scoring, and outreach" }
+func (m *SalesModule) Name() string        { return "sales" }
+func (m *SalesModule) DisplayName() string { return "Sales Intelligence" }
+func (m *SalesModule) Description() string {
+	return "AI-driven prospect analysis, scoring, and outreach"
+}
 func (m *SalesModule) Category() module.ModuleCategory { return module.CategoryToggleable }
 func (m *SalesModule) Enabled(cfg *config.Config) bool { return cfg.Sales.Enabled }
 
@@ -43,6 +62,23 @@ func (m *SalesModule) Dependencies() []string { return []string{"aimodels"} }
 
 func (m *SalesModule) OptionalServices() []module.ServiceKey {
 	return []module.ServiceKey{module.ServiceAIModelProvider}
+}
+
+// ConfigSchema declares the per-module runtime tunables. Fields previously
+// read from cfg.Sales (shared/config) move here so they can be adjusted
+// through /admin/modules without a restart. Defaults match the env-var
+// defaults in shared/config so existing deployments keep their behavior.
+func (m *SalesModule) ConfigSchema() []module.ConfigField {
+	return []module.ConfigField{
+		{Key: "maxConcurrency", Label: "Max Parallel Agent Calls", Type: module.FieldInt, Default: "5", EnvVar: "SALES_MAX_CONCURRENCY"},
+		{Key: "defaultLocale", Label: "Default Locale", Type: module.FieldString, Default: "it", EnvVar: "SALES_DEFAULT_LOCALE"},
+		{Key: "skillTimeout", Label: "Skill Timeout", Type: module.FieldDuration, Default: "5m", EnvVar: "SALES_SKILL_TIMEOUT"},
+		{Key: "quickTimeout", Label: "Quick Prospect Timeout", Type: module.FieldDuration, Default: "5m", EnvVar: "SALES_QUICK_TIMEOUT"},
+		{Key: "fullTimeout", Label: "Full Prospect Pipeline Timeout", Type: module.FieldDuration, Default: "15m", EnvVar: "SALES_FULL_TIMEOUT"},
+		{Key: "scraperTimeout", Label: "Scraper Request Timeout", Type: module.FieldDuration, Default: "30s", EnvVar: "SALES_SCRAPER_TIMEOUT"},
+		{Key: "scraperMaxDepth", Label: "Scraper Max Subpage Depth", Type: module.FieldInt, Default: "3", EnvVar: "SALES_SCRAPER_MAX_DEPTH"},
+		{Key: "maxTokens", Label: "Max LLM Output Tokens", Type: module.FieldInt, Default: "8192", EnvVar: "SALES_MAX_TOKENS"},
+	}
 }
 
 func (m *SalesModule) Collections() []module.CollectionSpec {
@@ -91,7 +127,46 @@ func (m *SalesModule) Capabilities() []capability.Capability {
 }
 
 func (m *SalesModule) Init(deps *module.Dependencies) error {
-	cfg := deps.Config
+	var settings Settings
+	if err := deps.ConfigService.UnmarshalModule(context.Background(), m.Name(), &settings); err != nil {
+		return err
+	}
+	if settings.MaxConcurrency <= 0 {
+		settings.MaxConcurrency = 5
+	}
+	if settings.SkillTimeout <= 0 {
+		settings.SkillTimeout = 5 * time.Minute
+	}
+	if settings.QuickTimeout <= 0 {
+		settings.QuickTimeout = 5 * time.Minute
+	}
+	if settings.FullTimeout <= 0 {
+		settings.FullTimeout = 15 * time.Minute
+	}
+	if settings.ScraperTimeout <= 0 {
+		settings.ScraperTimeout = 30 * time.Second
+	}
+	if settings.ScraperMaxDepth <= 0 {
+		settings.ScraperMaxDepth = 3
+	}
+	if settings.MaxTokens <= 0 {
+		settings.MaxTokens = 8192
+	}
+
+	// Build the legacy SalesConfig (shared/config type) from Settings so
+	// existing service constructors keep their signatures. Enabled is true
+	// by construction — Init only runs when the module is enabled.
+	salesCfg := config.SalesConfig{
+		Enabled:         true,
+		MaxConcurrency:  settings.MaxConcurrency,
+		DefaultLocale:   settings.DefaultLocale,
+		SkillTimeout:    settings.SkillTimeout,
+		QuickTimeout:    settings.QuickTimeout,
+		FullTimeout:     settings.FullTimeout,
+		ScraperTimeout:  settings.ScraperTimeout,
+		ScraperMaxDepth: settings.ScraperMaxDepth,
+		MaxTokens:       settings.MaxTokens,
+	}
 
 	salesJobRepo := repository.NewJobRepository(deps.DB)
 
@@ -112,8 +187,8 @@ func (m *SalesModule) Init(deps *module.Dependencies) error {
 	if err := promptLoader.SeedDefaults(context.Background()); err != nil {
 		deps.Logger.Warn("Failed to seed sales prompts", slog.String("error", err.Error()))
 	}
-	scraper := services.NewScraper(cfg.Sales, deps.Logger)
-	agentExecutor := services.NewAgentExecutor(cfg.Sales.MaxConcurrency, cfg.Sales.MaxTokens, deps.Logger)
+	scraper := services.NewScraper(salesCfg, deps.Logger)
+	agentExecutor := services.NewAgentExecutor(salesCfg.MaxConcurrency, salesCfg.MaxTokens, deps.Logger)
 	scorer := services.NewScorer()
 
 	salesSettingsRepo := repository.NewSettingsRepository(deps.DB)
@@ -125,7 +200,7 @@ func (m *SalesModule) Init(deps *module.Dependencies) error {
 	orchestrator := services.NewOrchestrator(
 		salesJobRepo, salesReportRepo, salesSettingsRepo, salesBatchRepo, salesModelProvider, promptLoader,
 		scraper, agentExecutor, scorer, salesEnrichment, reportGen,
-		cfg.Sales, deps.Logger,
+		salesCfg, deps.Logger,
 	)
 
 	// Create batch poller for async LLM batch results
