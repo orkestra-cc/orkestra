@@ -12,7 +12,7 @@
 
 .PHONY: help up down status logs reset
 .PHONY: mongo-shell redis-cli
-.PHONY: backend-build backend-test sdk-test addon-documents-test addon-aimodels-test addon-company-test addon-graph-test addon-sales-test addon-subscriptions-test addon-payments-test addon-billing-test addon-dev-test addon-compliance-test openapi-auth-test backend-deps backend-clean
+.PHONY: backend-build backend-test sdk-test addon-documents-test addon-aimodels-test addon-company-test addon-graph-test addon-sales-test addon-subscriptions-test addon-payments-test addon-billing-test addon-dev-test addon-compliance-test addon-identity-test openapi-auth-test backend-deps backend-clean
 .PHONY: frontend-admin-build frontend-admin-test frontend-admin-deps
 .PHONY: frontend-admin-clean frontend-admin-preview frontend-admin-type-check
 .PHONY: frontend-client-build frontend-client-typecheck frontend-client-clean
@@ -95,7 +95,7 @@ backend-build:
 	@cd backend && go build -o bin/server cmd/server/main.go
 	@echo "Backend built: backend/bin/server"
 
-backend-test: sdk-test openapi-auth-test addon-documents-test addon-aimodels-test addon-company-test addon-graph-test addon-sales-test addon-subscriptions-test addon-payments-test addon-billing-test addon-dev-test addon-compliance-test
+backend-test: sdk-test openapi-auth-test addon-documents-test addon-aimodels-test addon-company-test addon-graph-test addon-sales-test addon-subscriptions-test addon-payments-test addon-billing-test addon-dev-test addon-compliance-test addon-identity-test
 	@echo "Running backend tests..."
 	@cd backend && go test ./...
 
@@ -189,6 +189,13 @@ addon-compliance-test:
 	@echo "Running compliance addon tests..."
 	@cd backend/internal/addons/compliance && go test ./...
 
+# addon-identity-test mirrors addon-compliance-test for the identity
+# addon (Phase 5k — second hard-tier extraction). Covers the OIDC
+# orchestration (via mock_oidc_harness) and SCIM 2.0 types.
+addon-identity-test:
+	@echo "Running identity addon tests..."
+	@cd backend/internal/addons/identity && go test ./...
+
 backend-deps:
 	@echo "Installing backend dependencies..."
 	@cd backend && go mod download && go mod tidy
@@ -204,6 +211,12 @@ backend-deps:
 	@cd backend/internal/addons/billing && go mod download && go mod tidy
 	@cd backend/internal/addons/dev && go mod download && go mod tidy
 	@cd backend/internal/addons/compliance && go mod download && go mod tidy
+	@# addon-identity `go mod tidy` requires orkestra-sdk v0.4.0 on the Go
+	@# proxy (lifts iface.LoginTokenIssuer + iface.LoginTokens added in
+	@# Phase 5k). Workspace go.work resolves the deps for build/test, but
+	@# `tidy` would fail until the SDK tag is published — uncomment once
+	@# orkestra-cc/orkestra-sdk@v0.4.0 lands on the proxy.
+	@# @cd backend/internal/addons/identity && go mod download && go mod tidy
 	@echo "Backend dependencies installed."
 
 backend-clean:
@@ -250,7 +263,7 @@ frontend-client-clean:
 
 .PHONY: install install-hooks fmt ci-help
 .PHONY: ci ci-all ci-backend ci-backend-matrix ci-frontend-admin ci-frontend-client ci-mobile
-.PHONY: backend-lint sdk-lint addon-documents-lint addon-aimodels-lint addon-company-lint addon-graph-lint addon-sales-lint addon-subscriptions-lint addon-payments-lint addon-billing-lint addon-dev-lint addon-compliance-lint openapi-auth-lint backend-test-ci sdk-test-ci addon-documents-test-ci addon-aimodels-test-ci addon-company-test-ci addon-graph-test-ci addon-sales-test-ci addon-subscriptions-test-ci addon-payments-test-ci addon-billing-test-ci addon-dev-test-ci addon-compliance-test-ci openapi-auth-test-ci backend-tenantscope backend-policycoverage backend-vulncheck backend-build-enterprise
+.PHONY: backend-lint sdk-lint addon-documents-lint addon-aimodels-lint addon-company-lint addon-graph-lint addon-sales-lint addon-subscriptions-lint addon-payments-lint addon-billing-lint addon-dev-lint addon-compliance-lint addon-identity-lint openapi-auth-lint backend-test-ci sdk-test-ci addon-documents-test-ci addon-aimodels-test-ci addon-company-test-ci addon-graph-test-ci addon-sales-test-ci addon-subscriptions-test-ci addon-payments-test-ci addon-billing-test-ci addon-dev-test-ci addon-compliance-test-ci addon-identity-test-ci openapi-auth-test-ci backend-tenantscope backend-policycoverage backend-vulncheck backend-build-enterprise
 .PHONY: admin-typecheck admin-lint admin-test admin-audit admin-build
 .PHONY: client-typecheck client-lint client-build
 .PHONY: mobile-analyze mobile-test
@@ -301,7 +314,7 @@ ci-all: ci-backend ci-frontend-admin ci-frontend-client ci-mobile
 
 # ---- Backend ----
 
-ci-backend: backend-lint sdk-lint openapi-auth-lint addon-documents-lint addon-aimodels-lint addon-company-lint addon-graph-lint addon-sales-lint addon-subscriptions-lint addon-payments-lint addon-billing-lint addon-dev-lint addon-compliance-lint backend-tenantscope backend-policycoverage backend-vulncheck backend-test-ci backend-build-enterprise
+ci-backend: backend-lint sdk-lint openapi-auth-lint addon-documents-lint addon-aimodels-lint addon-company-lint addon-graph-lint addon-sales-lint addon-subscriptions-lint addon-payments-lint addon-billing-lint addon-dev-lint addon-compliance-lint addon-identity-lint backend-tenantscope backend-policycoverage backend-vulncheck backend-test-ci backend-build-enterprise
 	@echo "Backend CI: OK"
 
 ci-backend-matrix: ci-backend
@@ -373,10 +386,15 @@ addon-dev-lint:
 addon-compliance-lint:
 	@cd backend/internal/addons/compliance && golangci-lint run --config=../../../.golangci.yml ./...
 
+# addon-identity-lint mirrors addon-compliance-lint for the identity
+# addon's own Go module (Phase 5k). Shares the lint config.
+addon-identity-lint:
+	@cd backend/internal/addons/identity && golangci-lint run --config=../../../.golangci.yml ./...
+
 # `-race` requires cgo. CI runners have CGO_ENABLED=1 by default, but the
 # Go toolchain mise installs locally defaults to 0 — force it on so local
 # and CI behave the same. Needs a working C compiler on PATH (gcc/clang).
-backend-test-ci: sdk-test-ci openapi-auth-test-ci addon-documents-test-ci addon-aimodels-test-ci addon-company-test-ci addon-graph-test-ci addon-sales-test-ci addon-subscriptions-test-ci addon-payments-test-ci addon-billing-test-ci addon-dev-test-ci addon-compliance-test-ci
+backend-test-ci: sdk-test-ci openapi-auth-test-ci addon-documents-test-ci addon-aimodels-test-ci addon-company-test-ci addon-graph-test-ci addon-sales-test-ci addon-subscriptions-test-ci addon-payments-test-ci addon-billing-test-ci addon-dev-test-ci addon-compliance-test-ci addon-identity-test-ci
 	@cd backend && CGO_ENABLED=1 go test -race -coverprofile=coverage.out ./...
 	@cd backend && go tool cover -func=coverage.out | tail -1
 
@@ -458,6 +476,13 @@ addon-dev-test-ci:
 addon-compliance-test-ci:
 	@cd backend/internal/addons/compliance && CGO_ENABLED=1 go test -race -coverprofile=coverage.out ./...
 	@cd backend/internal/addons/compliance && go tool cover -func=coverage.out | tail -1
+
+# addon-identity-test-ci mirrors addon-compliance-test-ci for the
+# identity addon (Phase 5k). Covers the OIDC mock harness flow + SCIM
+# types.
+addon-identity-test-ci:
+	@cd backend/internal/addons/identity && CGO_ENABLED=1 go test -race -coverprofile=coverage.out ./...
+	@cd backend/internal/addons/identity && go tool cover -func=coverage.out | tail -1
 
 backend-tenantscope:
 	@cd backend && go test ./tools/tenantscope/...

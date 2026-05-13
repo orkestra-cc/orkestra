@@ -108,10 +108,21 @@ replace github.com/orkestra-cc/orkestra-addon-dev => ./internal/addons/dev
 // internal/testkit backend-internal only.
 replace github.com/orkestra-cc/orkestra-addon-compliance => ./internal/addons/compliance
 
+// Phase 5k: the identity addon is its own Go module. Source lives
+// in-tree, mirrored to orkestra-cc/orkestra-addon-identity and
+// tagged from v0.1.0. Two SDK iface lifts unblock the extraction:
+// `iface.LoginTokenIssuer` + `iface.LoginTokens` (so identity can
+// mint sessions through core/auth without importing its concrete
+// `*PasswordAuthService`) — bumped the SDK to v0.4.0. The handful
+// of `internal/shared/utils` helpers identity used (OAuth-token
+// encryption, secure-random, OIDC state/nonce, GetClientIP) were
+// inlined into the addon's private `internal/cryptoutil` subpackage
+// with byte-for-byte identical algorithms.
+replace github.com/orkestra-cc/orkestra-addon-identity => ./internal/addons/identity
+
 require (
 	github.com/alicebob/miniredis/v2 v2.37.0
 	github.com/cedar-policy/cedar-go v1.6.0
-	github.com/coreos/go-oidc/v3 v3.18.0
 	github.com/danielgtaylor/huma/v2 v2.34.1
 	github.com/docker/docker v28.5.2+incompatible
 	github.com/docker/go-connections v0.7.0
@@ -129,10 +140,11 @@ require (
 	github.com/orkestra-cc/orkestra-addon-dev v0.1.0
 	github.com/orkestra-cc/orkestra-addon-documents v0.1.0
 	github.com/orkestra-cc/orkestra-addon-graph v0.1.1
+	github.com/orkestra-cc/orkestra-addon-identity v0.1.0
 	github.com/orkestra-cc/orkestra-addon-payments v0.1.0
 	github.com/orkestra-cc/orkestra-addon-sales v0.1.0
 	github.com/orkestra-cc/orkestra-addon-subscriptions v0.1.0
-	github.com/orkestra-cc/orkestra-sdk v0.2.0
+	github.com/orkestra-cc/orkestra-sdk v0.4.0
 	github.com/pquerna/otp v1.5.0
 	github.com/redis/go-redis/v9 v9.16.0
 	github.com/sashabaranov/go-openai v1.41.2
@@ -145,7 +157,6 @@ require (
 	go.opentelemetry.io/otel/sdk v1.43.0
 	go.opentelemetry.io/otel/trace v1.43.0
 	golang.org/x/crypto v0.51.0
-	golang.org/x/oauth2 v0.36.0
 	golang.org/x/tools v0.44.0
 )
 
@@ -164,6 +175,7 @@ require (
 	github.com/containerd/errdefs v1.0.0 // indirect
 	github.com/containerd/errdefs/pkg v0.3.0 // indirect
 	github.com/containerd/log v0.1.0 // indirect
+	github.com/coreos/go-oidc/v3 v3.18.0 // indirect
 	github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f // indirect
 	github.com/distribution/reference v0.6.0 // indirect
 	github.com/docker/go-units v0.5.0 // indirect
@@ -222,6 +234,7 @@ require (
 	golang.org/x/exp v0.0.0-20220921023135-46d9e7742f1e // indirect
 	golang.org/x/mod v0.35.0 // indirect
 	golang.org/x/net v0.54.0 // indirect
+	golang.org/x/oauth2 v0.36.0 // indirect
 	golang.org/x/sync v0.20.0 // indirect
 	golang.org/x/sys v0.44.0 // indirect
 	golang.org/x/text v0.37.0 // indirect

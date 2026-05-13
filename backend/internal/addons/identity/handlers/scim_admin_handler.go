@@ -11,10 +11,10 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/google/uuid"
 
+	"github.com/orkestra-cc/orkestra-addon-identity/internal/cryptoutil"
+	"github.com/orkestra-cc/orkestra-addon-identity/repository"
 	"github.com/orkestra-cc/orkestra-sdk/ctxauth"
 	"github.com/orkestra-cc/orkestra-sdk/iface"
-	"github.com/orkestra/backend/internal/addons/identity/repository"
-	"github.com/orkestra/backend/internal/shared/utils"
 )
 
 // ScimAdminHandler owns the tenant-scoped endpoints for managing the
@@ -56,7 +56,7 @@ type RotateScimTokenBody struct {
 // hash (not argon2id — throughput matters at token validation time, and
 // the input is high-entropy so there's no rainbow-table risk).
 func (h *ScimAdminHandler) Rotate(ctx context.Context, _ *struct{}) (*RotateScimTokenResponse, error) {
-	raw, err := utils.SecureRandomString(32) // 43-char base64url
+	raw, err := cryptoutil.SecureRandomString(32) // 43-char base64url
 	if err != nil {
 		return nil, huma.Error500InternalServerError("generate SCIM token: " + err.Error())
 	}

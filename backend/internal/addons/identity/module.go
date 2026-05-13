@@ -22,14 +22,13 @@ import (
 	"github.com/danielgtaylor/huma/v2/adapters/humachi"
 	"github.com/go-chi/chi/v5"
 
+	"github.com/orkestra-cc/orkestra-addon-identity/handlers"
+	"github.com/orkestra-cc/orkestra-addon-identity/models"
+	"github.com/orkestra-cc/orkestra-addon-identity/repository"
+	"github.com/orkestra-cc/orkestra-addon-identity/scim"
+	"github.com/orkestra-cc/orkestra-addon-identity/services"
 	"github.com/orkestra-cc/orkestra-sdk/iface"
 	"github.com/orkestra-cc/orkestra-sdk/module"
-	"github.com/orkestra/backend/internal/addons/identity/handlers"
-	"github.com/orkestra/backend/internal/addons/identity/models"
-	"github.com/orkestra/backend/internal/addons/identity/repository"
-	"github.com/orkestra/backend/internal/addons/identity/scim"
-	"github.com/orkestra/backend/internal/addons/identity/services"
-	authServices "github.com/orkestra/backend/internal/core/auth/services"
 )
 
 // Module wires the identity module's handlers + service.
@@ -114,7 +113,7 @@ func (m *Module) Collections() []module.CollectionSpec {
 
 // Init wires the repositories, OIDC service, and handlers.
 func (m *Module) Init(deps *module.Dependencies) error {
-	passwordAuth := module.MustGetTyped[*authServices.PasswordAuthService](deps.Services, module.ServicePasswordAuthService)
+	passwordAuth := module.MustGetTyped[iface.LoginTokenIssuer](deps.Services, module.ServicePasswordAuthService)
 	tenantProvider := module.MustGetTyped[iface.TenantProvider](deps.Services, module.ServiceTenantProvider)
 	userProvider := module.MustGetTyped[iface.UserProvider](deps.Services, module.ServiceUserService)
 

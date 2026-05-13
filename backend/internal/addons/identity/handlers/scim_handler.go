@@ -6,7 +6,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/orkestra/backend/internal/addons/identity/scim"
+	"github.com/orkestra-cc/orkestra-addon-identity/scim"
 )
 
 // ScimHandler owns the `/scim/v2/*` surface. Implemented as raw

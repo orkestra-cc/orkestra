@@ -1091,6 +1091,30 @@ func (s *PasswordAuthService) IssueLoginTokens(ctx context.Context, user *userMo
 	return s.issueTokens(ctx, user, LoginInput{DeviceID: deviceID, Platform: platform, IP: ip}, amr, lastOTPAt)
 }
 
+// IssueLoginTokensExternal is the iface.LoginTokenIssuer-shaped wrapper
+// around IssueLoginTokens. Extracted addons (today: identity, for the
+// OIDC bridge) consume it through the kernel's ServiceRegistry without
+// importing this package's concrete types. Returns the SDK-canonical
+// `iface.LoginTokens` shape instead of the auth-internal
+// `authModels.TokenResponse`; only the five fields external callers
+// need are carried over. `lastOTPAt` is fixed at 0 because federated
+// flows don't satisfy the OTP step — when an SP that adds an MFA
+// requirement on top of OIDC appears, the caller will mint via
+// IssueLoginTokens directly.
+func (s *PasswordAuthService) IssueLoginTokensExternal(ctx context.Context, user *iface.User, deviceID, platform, ip string, amr []string) (*iface.LoginTokens, error) {
+	resp, err := s.IssueLoginTokens(ctx, user, deviceID, platform, ip, amr, 0)
+	if err != nil {
+		return nil, err
+	}
+	return &iface.LoginTokens{
+		AccessToken:  resp.AccessToken,
+		RefreshToken: resp.RefreshToken,
+		TokenType:    resp.TokenType,
+		ExpiresIn:    resp.ExpiresIn,
+		User:         resp.User,
+	}, nil
+}
+
 func (s *PasswordAuthService) issueTokens(ctx context.Context, user *userModels.User, in LoginInput, amr []string, lastOTPAt int64) (*authModels.TokenResponse, error) {
 	deviceID := in.DeviceID
 	if deviceID == "" {

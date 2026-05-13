@@ -863,6 +863,30 @@ type AuditSink interface {
 	Emit(ctx context.Context, event AuditEvent)
 }
 
+// LoginTokens is the shape an external authentication flow (OIDC,
+// SAML, etc.) needs back from the auth module after the user has
+// been verified. Consumed by the identity addon's OIDC service to
+// complete a federated login and return tokens to the caller.
+type LoginTokens struct {
+	AccessToken  string
+	RefreshToken string
+	TokenType    string
+	ExpiresIn    int64
+	User         *UserManagementResponse
+}
+
+// LoginTokenIssuer mints a fresh Orkestra session for an already-
+// verified user. Implemented by core/auth's PasswordAuthService via
+// `IssueLoginTokensExternal`; consumed by extracted addons (today:
+// identity) that need to bridge an external authentication into a
+// platform session without importing concrete auth-service types.
+//
+// `amr` is the RFC 8176 authentication-methods reference list
+// describing how the user proved identity (e.g. `["oidc"]`).
+type LoginTokenIssuer interface {
+	IssueLoginTokensExternal(ctx context.Context, user *User, deviceID, platform, ip string, amr []string) (*LoginTokens, error)
+}
+
 // AuditSinkSetter is satisfied by any module-level service that
 // receives the platform AuditSink during compliance's post-init
 // wiring. The pattern lets compliance push its sink into the auth,

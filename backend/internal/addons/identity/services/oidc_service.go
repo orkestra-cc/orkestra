@@ -31,13 +31,10 @@ import (
 	"github.com/google/uuid"
 	"golang.org/x/oauth2"
 
+	"github.com/orkestra-cc/orkestra-addon-identity/internal/cryptoutil"
+	identityModels "github.com/orkestra-cc/orkestra-addon-identity/models"
+	"github.com/orkestra-cc/orkestra-addon-identity/repository"
 	"github.com/orkestra-cc/orkestra-sdk/iface"
-	identityModels "github.com/orkestra/backend/internal/addons/identity/models"
-	"github.com/orkestra/backend/internal/addons/identity/repository"
-	authModels "github.com/orkestra/backend/internal/core/auth/models"
-	authServices "github.com/orkestra/backend/internal/core/auth/services"
-	userModels "github.com/orkestra/backend/internal/core/user/models"
-	"github.com/orkestra/backend/internal/shared/utils"
 )
 
 // ErrIdPDisabled signals an attempt to start a login against a config
@@ -67,7 +64,7 @@ type Service struct {
 	repo         *repository.Repository
 	users        iface.UserProvider
 	tenant       iface.TenantProvider
-	passwordAuth *authServices.PasswordAuthService
+	passwordAuth iface.LoginTokenIssuer
 	state        StateStore
 	logger       *slog.Logger
 	// providerFactory resolves the IdP metadata. Kept as a field so tests
@@ -100,7 +97,7 @@ type Config struct {
 	Repo         *repository.Repository
 	Users        iface.UserProvider
 	Tenant       iface.TenantProvider
-	PasswordAuth *authServices.PasswordAuthService
+	PasswordAuth iface.LoginTokenIssuer
 	State        StateStore
 	Logger       *slog.Logger
 }
@@ -176,7 +173,7 @@ func (s *Service) StartLogin(ctx context.Context, in StartInput) (*StartResult, 
 		return nil, ErrIdPDisabled
 	}
 
-	secret, err := utils.DecryptOAuthToken(cfg.ClientSecret)
+	secret, err := cryptoutil.Decrypt(cfg.ClientSecret)
 	if err != nil {
 		return nil, fmt.Errorf("identity: decrypt client secret: %w", err)
 	}
@@ -194,11 +191,11 @@ func (s *Service) StartLogin(ctx context.Context, in StartInput) (*StartResult, 
 		Scopes:       effectiveScopes(cfg.Scopes),
 	}
 
-	stateTok, err := utils.GenerateState()
+	stateTok, err := cryptoutil.GenerateState()
 	if err != nil {
 		return nil, err
 	}
-	nonce, err := utils.GenerateNonce()
+	nonce, err := cryptoutil.GenerateNonce()
 	if err != nil {
 		return nil, err
 	}
@@ -233,7 +230,7 @@ type CallbackInput struct {
 // the browser should land on. The handler encodes the redirect into a 302
 // with the access token set as a cookie (or returns JSON for XHR flows).
 type CallbackResult struct {
-	Tokens     *authModels.TokenResponse
+	Tokens     *iface.LoginTokens
 	RedirectTo string
 }
 
@@ -260,7 +257,7 @@ func (s *Service) Callback(ctx context.Context, in CallbackInput) (*CallbackResu
 		return nil, ErrIdPDisabled
 	}
 
-	secret, err := utils.DecryptOAuthToken(cfg.ClientSecret)
+	secret, err := cryptoutil.Decrypt(cfg.ClientSecret)
 	if err != nil {
 		return nil, fmt.Errorf("identity: decrypt client secret: %w", err)
 	}
@@ -316,13 +313,12 @@ func (s *Service) Callback(ctx context.Context, in CallbackInput) (*CallbackResu
 		return nil, err
 	}
 
-	tokens, err := s.passwordAuth.IssueLoginTokens(
+	tokens, err := s.passwordAuth.IssueLoginTokensExternal(
 		ctx, user,
 		firstNonEmpty(in.DeviceID, "oidc-"+strings.ReplaceAll(uuid.NewString(), "-", "")[:12]),
 		firstNonEmpty(in.Platform, "web"),
 		in.IP,
 		[]string{"oidc"},
-		0,
 	)
 	if err != nil {
 		return nil, err
@@ -370,7 +366,7 @@ func (s *Service) emitOIDCFailure(ctx context.Context, tenantUUID, idpConfigUUID
 // account if none exists. Newly-provisioned OIDC users are marked verified
 // in-line because the IdP has asserted control over the email — requiring
 // them to click a second link would be theater.
-func (s *Service) findOrCreateUser(ctx context.Context, email, fullName string) (*userModels.User, error) {
+func (s *Service) findOrCreateUser(ctx context.Context, email, fullName string) (*iface.User, error) {
 	email = strings.ToLower(strings.TrimSpace(email))
 	if fullName == "" {
 		fullName = email
@@ -380,7 +376,7 @@ func (s *Service) findOrCreateUser(ctx context.Context, email, fullName string) 
 		return existing, nil
 	}
 
-	created, err := s.users.CreateUserFromOAuth(ctx, &userModels.CreateUserInput{
+	created, err := s.users.CreateUserFromOAuth(ctx, &iface.CreateUserInput{
 		UUID:     uuid.New().String(),
 		Email:    email,
 		FullName: fullName,

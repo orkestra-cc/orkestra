@@ -35,4 +35,5 @@ use (
 	./backend/internal/addons/billing
 	./backend/internal/addons/dev
 	./backend/internal/addons/compliance
+	./backend/internal/addons/identity
 )

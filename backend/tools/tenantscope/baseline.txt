@@ -38,10 +38,6 @@ internal/addons/agents/repository/project_repository.go:133:FindOneAndUpdate
 internal/addons/agents/repository/project_repository.go:149:DeleteOne
 internal/addons/agents/repository/project_repository.go:78:FindOne
 internal/addons/agents/repository/project_repository.go:90:FindOne
-internal/addons/identity/repository/idp_config_repo.go:137:FindOne
-internal/addons/identity/repository/idp_config_repo.go:152:FindOne
-internal/addons/identity/repository/scim_token_repo.go:43:UpdateMany
-internal/addons/identity/repository/scim_token_repo.go:69:FindOne
 internal/addons/rag/repository/document_repository.go:104:UpdateOne
 internal/addons/rag/repository/document_repository.go:110:UpdateOne
 internal/addons/rag/repository/document_repository.go:131:UpdateOne

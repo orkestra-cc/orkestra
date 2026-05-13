@@ -7,10 +7,10 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
-	"github.com/orkestra/backend/internal/addons/identity/repository"
-	"github.com/orkestra/backend/internal/addons/identity/services"
-	userModels "github.com/orkestra/backend/internal/core/user/models"
-	"github.com/orkestra/backend/internal/shared/utils"
+	"github.com/orkestra-cc/orkestra-addon-identity/internal/cryptoutil"
+	"github.com/orkestra-cc/orkestra-addon-identity/repository"
+	"github.com/orkestra-cc/orkestra-addon-identity/services"
+	"github.com/orkestra-cc/orkestra-sdk/iface"
 )
 
 // PublicHandler exposes the anonymous OIDC login endpoints.
@@ -70,13 +70,13 @@ type CallbackRequest struct {
 }
 
 type CallbackResponseBody struct {
-	Success      bool                               `json:"success"`
-	AccessToken  string                             `json:"accessToken"`
-	RefreshToken string                             `json:"refreshToken"`
-	TokenType    string                             `json:"tokenType"`
-	ExpiresIn    int64                              `json:"expiresIn"`
-	User         *userModels.UserManagementResponse `json:"user,omitempty"`
-	RedirectTo   string                             `json:"redirectTo,omitempty"`
+	Success      bool                          `json:"success"`
+	AccessToken  string                        `json:"accessToken"`
+	RefreshToken string                        `json:"refreshToken"`
+	TokenType    string                        `json:"tokenType"`
+	ExpiresIn    int64                         `json:"expiresIn"`
+	User         *iface.UserManagementResponse `json:"user,omitempty"`
+	RedirectTo   string                        `json:"redirectTo,omitempty"`
 }
 
 type CallbackResponse struct {
@@ -141,7 +141,7 @@ func mapPublicError(err error) error {
 
 func clientIPFromCtx(ctx context.Context) string {
 	if r, ok := ctx.Value("http_request").(*http.Request); ok && r != nil {
-		return utils.GetClientIP(r)
+		return cryptoutil.GetClientIP(r)
 	}
 	return ""
 }

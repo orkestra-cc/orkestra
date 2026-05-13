@@ -14,11 +14,11 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/google/uuid"
 
+	"github.com/orkestra-cc/orkestra-addon-identity/internal/cryptoutil"
+	"github.com/orkestra-cc/orkestra-addon-identity/models"
+	"github.com/orkestra-cc/orkestra-addon-identity/repository"
 	"github.com/orkestra-cc/orkestra-sdk/ctxauth"
 	"github.com/orkestra-cc/orkestra-sdk/iface"
-	"github.com/orkestra/backend/internal/addons/identity/models"
-	"github.com/orkestra/backend/internal/addons/identity/repository"
-	"github.com/orkestra/backend/internal/shared/utils"
 )
 
 // AdminHandler exposes tenant-scoped IdP config CRUD to authenticated
@@ -165,7 +165,7 @@ func (h *AdminHandler) Put(ctx context.Context, req *PutIdPConfigRequest) (*PutI
 	// update. This avoids clients having to reenter the secret on every
 	// cosmetic edit.
 	if req.Body.ClientSecret != "" {
-		encrypted, err := utils.EncryptOAuthToken(req.Body.ClientSecret)
+		encrypted, err := cryptoutil.Encrypt(req.Body.ClientSecret)
 		if err != nil {
 			return nil, huma.Error500InternalServerError("encrypt client secret: " + err.Error())
 		}
