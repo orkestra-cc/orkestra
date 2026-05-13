@@ -8,10 +8,10 @@ import (
 
 	"go.mongodb.org/mongo-driver/bson"
 
+	"github.com/orkestra-cc/orkestra-addon-aimodels/models"
+	"github.com/orkestra-cc/orkestra-addon-aimodels/providers"
+	"github.com/orkestra-cc/orkestra-addon-aimodels/repository"
 	"github.com/orkestra-cc/orkestra-sdk/iface"
-	"github.com/orkestra/backend/internal/addons/aimodels/models"
-	"github.com/orkestra/backend/internal/addons/aimodels/providers"
-	"github.com/orkestra/backend/internal/addons/aimodels/repository"
 )
 
 // AIModelService manages AI model configurations and provider creation

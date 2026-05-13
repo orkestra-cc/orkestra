@@ -38,13 +38,6 @@ internal/addons/agents/repository/project_repository.go:133:FindOneAndUpdate
 internal/addons/agents/repository/project_repository.go:149:DeleteOne
 internal/addons/agents/repository/project_repository.go:78:FindOne
 internal/addons/agents/repository/project_repository.go:90:FindOne
-internal/addons/aimodels/repository/model_repository.go:107:UpdateOne
-internal/addons/aimodels/repository/model_repository.go:115:DeleteOne
-internal/addons/aimodels/repository/model_repository.go:127:FindOne
-internal/addons/aimodels/repository/model_repository.go:138:UpdateMany
-internal/addons/aimodels/repository/model_repository.go:146:CountDocuments
-internal/addons/aimodels/repository/model_repository.go:70:FindOne
-internal/addons/aimodels/repository/model_repository.go:92:Find
 internal/addons/billing/repository/company_repository.go:118:FindOne
 internal/addons/billing/repository/company_repository.go:135:FindOne
 internal/addons/billing/repository/company_repository.go:152:FindOne

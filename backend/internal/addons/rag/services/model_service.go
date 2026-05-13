@@ -7,7 +7,7 @@ import (
 
 	"go.mongodb.org/mongo-driver/bson"
 
-	"github.com/orkestra/backend/internal/addons/aimodels/providers"
+	"github.com/orkestra-cc/orkestra-addon-aimodels/providers"
 	"github.com/orkestra/backend/internal/addons/rag/models"
 	"github.com/orkestra/backend/internal/addons/rag/repository"
 	"github.com/orkestra/backend/internal/shared/config"

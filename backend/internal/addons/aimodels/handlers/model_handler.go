@@ -6,8 +6,8 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
-	"github.com/orkestra/backend/internal/addons/aimodels/models"
-	"github.com/orkestra/backend/internal/addons/aimodels/services"
+	"github.com/orkestra-cc/orkestra-addon-aimodels/models"
+	"github.com/orkestra-cc/orkestra-addon-aimodels/services"
 )
 
 // ModelHandler handles AI model configuration HTTP requests

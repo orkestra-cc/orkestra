@@ -5,9 +5,9 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
-	"github.com/orkestra/backend/internal/addons/aimodels/models"
-	"github.com/orkestra/backend/internal/addons/aimodels/providers"
-	"github.com/orkestra/backend/internal/addons/aimodels/services"
+	"github.com/orkestra-cc/orkestra-addon-aimodels/models"
+	"github.com/orkestra-cc/orkestra-addon-aimodels/providers"
+	"github.com/orkestra-cc/orkestra-addon-aimodels/services"
 )
 
 // InternalHandler handles service-to-service AI model requests.

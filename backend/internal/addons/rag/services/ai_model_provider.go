@@ -3,7 +3,7 @@ package services
 import (
 	"context"
 
-	"github.com/orkestra/backend/internal/addons/aimodels/providers"
+	"github.com/orkestra-cc/orkestra-addon-aimodels/providers"
 )
 
 // AIModelProvider defines the minimal interface that RAG services need from the AI models module.

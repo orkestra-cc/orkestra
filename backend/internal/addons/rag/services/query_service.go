@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
+	aimodelsProviders "github.com/orkestra-cc/orkestra-addon-aimodels/providers"
 	"github.com/orkestra-cc/orkestra-sdk/iface"
-	aimodelsProviders "github.com/orkestra/backend/internal/addons/aimodels/providers"
 )
 
 const ragSystemPrompt = `You are an expert assistant for ISO standards, laws, and regulatory compliance. Answer the question based ONLY on the provided context.

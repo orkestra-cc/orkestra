@@ -20,6 +20,14 @@ replace github.com/orkestra-cc/orkestra-sdk => ./pkg/sdk
 // one replace line per addon until cross-cutting churn settles.
 replace github.com/orkestra-cc/orkestra-addon-documents => ./internal/addons/documents
 
+// Phase 5b: the aimodels addon is its own Go module. Mirrors the
+// documents pattern — source lives in-tree, mirrored to
+// orkestra-cc/orkestra-addon-aimodels and tagged from v0.1.0. Note
+// that rag and sales consume aimodels' providers package directly,
+// so when those addons are extracted later they'll pick up
+// orkestra-addon-aimodels as a transitive require.
+replace github.com/orkestra-cc/orkestra-addon-aimodels => ./internal/addons/aimodels
+
 require (
 	github.com/alicebob/miniredis/v2 v2.37.0
 	github.com/cedar-policy/cedar-go v1.6.0
@@ -36,6 +44,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/joho/godotenv v1.5.1
 	github.com/neo4j/neo4j-go-driver/v5 v5.28.4
+	github.com/orkestra-cc/orkestra-addon-aimodels v0.1.0
 	github.com/orkestra-cc/orkestra-addon-documents v0.1.0
 	github.com/orkestra-cc/orkestra-sdk v0.2.0
 	github.com/pquerna/otp v1.5.0

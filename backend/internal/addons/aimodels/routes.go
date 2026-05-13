@@ -5,7 +5,7 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
-	"github.com/orkestra/backend/internal/addons/aimodels/handlers"
+	"github.com/orkestra-cc/orkestra-addon-aimodels/handlers"
 )
 
 // RegisterRoutes registers all AI model management routes

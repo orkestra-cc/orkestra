@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"strings"
 
-	aimodelsProviders "github.com/orkestra/backend/internal/addons/aimodels/providers"
+	aimodelsProviders "github.com/orkestra-cc/orkestra-addon-aimodels/providers"
 )
 
 const contextSystemPrompt = "You generate brief contextual descriptions for document chunks. Be concise and factual. Respond with ONLY the context, no preamble. /no_think"

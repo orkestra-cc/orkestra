@@ -2,6 +2,25 @@
 
 Standalone module for managing AI/LLM model configurations. Supports local (Ollama, llama.cpp, vLLM) and cloud (OpenAI, Anthropic, Google Gemini) providers.
 
+## Module home
+
+This directory is a **separate Go module**
+(`github.com/orkestra-cc/orkestra-addon-aimodels`) since Phase 5b of
+the SDK split. Source lives in-tree at this path for monorepo
+development; the same tree is mirrored to
+[github.com/orkestra-cc/orkestra-addon-aimodels](https://github.com/orkestra-cc/orkestra-addon-aimodels)
+and tagged starting from `v0.1.0`. Backend's go.mod carries a
+`replace` directive pointing at this path so changes here take effect
+without a tag bump during cross-cutting work; CI and external
+consumers fetch the published version through the Go module proxy.
+
+Note that rag and sales import this addon's `providers` package
+directly (RAG uses `providers.EmbeddingProvider`,
+`providers.LLMProvider`, and the provider-creation helpers; agents
+calls into `services.AIModelService` via the iface contract). When
+those addons get extracted later they'll pick up
+`orkestra-addon-aimodels` as a transitive require.
+
 ## Architecture
 
 ```

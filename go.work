@@ -25,4 +25,5 @@ use (
 	./backend
 	./backend/pkg/sdk
 	./backend/internal/addons/documents
+	./backend/internal/addons/aimodels
 )

@@ -10,8 +10,8 @@ import (
 
 	"github.com/google/uuid"
 
+	aimodelsProviders "github.com/orkestra-cc/orkestra-addon-aimodels/providers"
 	"github.com/orkestra-cc/orkestra-sdk/iface"
-	aimodelsProviders "github.com/orkestra/backend/internal/addons/aimodels/providers"
 	"github.com/orkestra/backend/internal/addons/rag/models"
 	"github.com/orkestra/backend/internal/addons/rag/repository"
 )

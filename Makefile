@@ -12,7 +12,7 @@
 
 .PHONY: help up down status logs reset
 .PHONY: mongo-shell redis-cli
-.PHONY: backend-build backend-test sdk-test addon-documents-test backend-deps backend-clean
+.PHONY: backend-build backend-test sdk-test addon-documents-test addon-aimodels-test backend-deps backend-clean
 .PHONY: frontend-admin-build frontend-admin-test frontend-admin-deps
 .PHONY: frontend-admin-clean frontend-admin-preview frontend-admin-type-check
 .PHONY: frontend-client-build frontend-client-typecheck frontend-client-clean
@@ -95,7 +95,7 @@ backend-build:
 	@cd backend && go build -o bin/server cmd/server/main.go
 	@echo "Backend built: backend/bin/server"
 
-backend-test: sdk-test addon-documents-test
+backend-test: sdk-test addon-documents-test addon-aimodels-test
 	@echo "Running backend tests..."
 	@cd backend && go test ./...
 
@@ -116,11 +116,19 @@ addon-documents-test:
 	@echo "Running documents addon tests..."
 	@cd backend/internal/addons/documents && go test ./...
 
+# addon-aimodels-test mirrors addon-documents-test for the aimodels
+# addon, which Phase 5b carved into its own Go module
+# (github.com/orkestra-cc/orkestra-addon-aimodels).
+addon-aimodels-test:
+	@echo "Running aimodels addon tests..."
+	@cd backend/internal/addons/aimodels && go test ./...
+
 backend-deps:
 	@echo "Installing backend dependencies..."
 	@cd backend && go mod download && go mod tidy
 	@cd backend/pkg/sdk && go mod download && go mod tidy
 	@cd backend/internal/addons/documents && go mod download && go mod tidy
+	@cd backend/internal/addons/aimodels && go mod download && go mod tidy
 	@echo "Backend dependencies installed."
 
 backend-clean:
@@ -167,7 +175,7 @@ frontend-client-clean:
 
 .PHONY: install install-hooks fmt ci-help
 .PHONY: ci ci-all ci-backend ci-backend-matrix ci-frontend-admin ci-frontend-client ci-mobile
-.PHONY: backend-lint sdk-lint addon-documents-lint backend-test-ci sdk-test-ci addon-documents-test-ci backend-tenantscope backend-policycoverage backend-vulncheck backend-build-enterprise
+.PHONY: backend-lint sdk-lint addon-documents-lint addon-aimodels-lint backend-test-ci sdk-test-ci addon-documents-test-ci addon-aimodels-test-ci backend-tenantscope backend-policycoverage backend-vulncheck backend-build-enterprise
 .PHONY: admin-typecheck admin-lint admin-test admin-audit admin-build
 .PHONY: client-typecheck client-lint client-build
 .PHONY: mobile-analyze mobile-test
@@ -218,7 +226,7 @@ ci-all: ci-backend ci-frontend-admin ci-frontend-client ci-mobile
 
 # ---- Backend ----
 
-ci-backend: backend-lint sdk-lint addon-documents-lint backend-tenantscope backend-policycoverage backend-vulncheck backend-test-ci backend-build-enterprise
+ci-backend: backend-lint sdk-lint addon-documents-lint addon-aimodels-lint backend-tenantscope backend-policycoverage backend-vulncheck backend-test-ci backend-build-enterprise
 	@echo "Backend CI: OK"
 
 ci-backend-matrix: ci-backend
@@ -239,10 +247,15 @@ sdk-lint:
 addon-documents-lint:
 	@cd backend/internal/addons/documents && golangci-lint run --config=../../../.golangci.yml ./...
 
+# addon-aimodels-lint mirrors addon-documents-lint for the aimodels
+# addon's own Go module (Phase 5b). Shares the backend lint config.
+addon-aimodels-lint:
+	@cd backend/internal/addons/aimodels && golangci-lint run --config=../../../.golangci.yml ./...
+
 # `-race` requires cgo. CI runners have CGO_ENABLED=1 by default, but the
 # Go toolchain mise installs locally defaults to 0 — force it on so local
 # and CI behave the same. Needs a working C compiler on PATH (gcc/clang).
-backend-test-ci: sdk-test-ci addon-documents-test-ci
+backend-test-ci: sdk-test-ci addon-documents-test-ci addon-aimodels-test-ci
 	@cd backend && CGO_ENABLED=1 go test -race -coverprofile=coverage.out ./...
 	@cd backend && go tool cover -func=coverage.out | tail -1
 
@@ -255,6 +268,12 @@ sdk-test-ci:
 addon-documents-test-ci:
 	@cd backend/internal/addons/documents && CGO_ENABLED=1 go test -race -coverprofile=coverage.out ./...
 	@cd backend/internal/addons/documents && go tool cover -func=coverage.out | tail -1
+
+# addon-aimodels-test-ci mirrors addon-documents-test-ci for the
+# aimodels addon (Phase 5b).
+addon-aimodels-test-ci:
+	@cd backend/internal/addons/aimodels && CGO_ENABLED=1 go test -race -coverprofile=coverage.out ./...
+	@cd backend/internal/addons/aimodels && go tool cover -func=coverage.out | tail -1
 
 backend-tenantscope:
 	@cd backend && go test ./tools/tenantscope/...
