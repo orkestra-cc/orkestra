@@ -14,8 +14,6 @@ import (
 	"errors"
 	"sync"
 	"time"
-
-	userModels "github.com/orkestra/backend/internal/core/user/models"
 )
 
 // ---------------------------------------------------------------------------
@@ -24,15 +22,15 @@ import (
 // ---------------------------------------------------------------------------
 
 type UserProvider interface {
-	GetUserByID(ctx context.Context, id string) (*userModels.User, error)
-	GetUserByEmail(ctx context.Context, email string) (*userModels.UserManagementResponse, error)
+	GetUserByID(ctx context.Context, id string) (*User, error)
+	GetUserByEmail(ctx context.Context, email string) (*UserManagementResponse, error)
 	// GetUserForAuth returns the raw user (including password hash and
 	// lockout fields) for authentication flows. Do NOT use for regular
 	// user lookups — the response contains sensitive fields.
-	GetUserForAuth(ctx context.Context, email string) (*userModels.User, error)
-	CreateUserFromOAuth(ctx context.Context, input *userModels.CreateUserInput) (*userModels.User, error)
+	GetUserForAuth(ctx context.Context, email string) (*User, error)
+	CreateUserFromOAuth(ctx context.Context, input *CreateUserInput) (*User, error)
 	// CreateUserWithPassword creates a new user with a pre-hashed password.
-	CreateUserWithPassword(ctx context.Context, input *userModels.CreateUserInput) (*userModels.User, error)
+	CreateUserWithPassword(ctx context.Context, input *CreateUserInput) (*User, error)
 	// UpdatePasswordHash stores a new argon2id hash and timestamps the change.
 	UpdatePasswordHash(ctx context.Context, userUUID, hash string) error
 	// MarkEmailVerified flips emailVerified to true.
@@ -41,7 +39,7 @@ type UserProvider interface {
 	RecordFailedLogin(ctx context.Context, userUUID string, lockUntil *time.Time) error
 	// ClearFailedLogins resets the counter after a successful login.
 	ClearFailedLogins(ctx context.Context, userUUID string) error
-	UpdateUser(ctx context.Context, id string, input *userModels.UpdateUserInput) (*userModels.UserManagementResponse, error)
+	UpdateUser(ctx context.Context, id string, input *UpdateUserInput) (*UserManagementResponse, error)
 	UpdateUserLastLogin(ctx context.Context, id string) error
 	DeleteUser(ctx context.Context, id string) error
 	// SoftDeleteAndAliasEmail soft-deletes the user and renames the
@@ -50,16 +48,16 @@ type UserProvider interface {
 	// when an external Tier-2 tenant is dropped and its owner has no
 	// other live memberships. Idempotent.
 	SoftDeleteAndAliasEmail(ctx context.Context, userUUID string) error
-	GetUserOAuthLinks(ctx context.Context, userUUID string) ([]userModels.OAuthLink, error)
+	GetUserOAuthLinks(ctx context.Context, userUUID string) ([]OAuthLink, error)
 	// AddOAuthLinkToUser appends an OAuth identity to the user's
 	// embedded OAuthLinks slice. Used by the self-service "add a
 	// sign-in provider" flow on /user/security and by any future
 	// caller that needs to bind a new identity to an existing
 	// account. Mirrors RemoveOAuthLinkFromUser.
-	AddOAuthLinkToUser(ctx context.Context, userUUID string, link userModels.OAuthLink) error
-	RemoveOAuthLinkFromUser(ctx context.Context, userUUID string, provider userModels.OAuthProvider, providerID string) error
-	SetPrimaryOAuthLink(ctx context.Context, userUUID string, provider userModels.OAuthProvider, providerID string) error
-	GetUserCount(ctx context.Context, filters *userModels.UserFilters) (int64, error)
+	AddOAuthLinkToUser(ctx context.Context, userUUID string, link OAuthLink) error
+	RemoveOAuthLinkFromUser(ctx context.Context, userUUID string, provider OAuthProvider, providerID string) error
+	SetPrimaryOAuthLink(ctx context.Context, userUUID string, provider OAuthProvider, providerID string) error
+	GetUserCount(ctx context.Context, filters *UserFilters) (int64, error)
 
 	// StartMFAGraceIfUnset stamps MFAGraceStartedAt on the user if nil.
 	// Idempotent — an existing grace timestamp is preserved so repeated
@@ -107,7 +105,7 @@ type ClientUserProvider interface {
 // ---------------------------------------------------------------------------
 
 type JWTProvider interface {
-	GenerateAccessToken(user *userModels.User) (string, error)
+	GenerateAccessToken(user *User) (string, error)
 }
 
 // ---------------------------------------------------------------------------

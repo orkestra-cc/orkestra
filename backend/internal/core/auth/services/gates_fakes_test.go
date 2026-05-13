@@ -22,7 +22,6 @@ import (
 	userModels "github.com/orkestra/backend/internal/core/user/models"
 	"github.com/orkestra/backend/internal/shared/geoip"
 	"github.com/orkestra/backend/pkg/sdk/iface"
-	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
 // gateUserFake is a minimal in-memory iface.UserProvider. Tests pre-
@@ -99,7 +98,6 @@ func (f *gateUserFake) createInternal(in *userModels.CreateUserInput) (*userMode
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	u := &userModels.User{
-		ID:           primitive.NewObjectID(),
 		UUID:         in.UUID,
 		Email:        in.Email,
 		FullName:     in.FullName,
@@ -616,7 +614,6 @@ func testRSAKey() *rsa.PrivateKey {
 // stale lastLogin / inactive flag / etc.
 func activeUser(email, hash string) *userModels.User {
 	return &userModels.User{
-		ID:            primitive.NewObjectID(),
 		UUID:          uuid.NewString(),
 		Email:         email,
 		FullName:      "Test User",
