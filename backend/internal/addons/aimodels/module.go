@@ -16,6 +16,17 @@ import (
 	"github.com/orkestra/backend/internal/shared/module"
 )
 
+// Settings mirrors the aimodels ConfigSchema 1:1. Unlike other addons, this
+// module re-reads config on every model-service invocation (see configLoader
+// closure in Init) so admin UI changes take effect without restart — Settings
+// is therefore used both for the boot-time unmarshal and inside the closure.
+type Settings struct {
+	OllamaBaseURL string `module:"ollamaBaseURL"`
+	OpenAIKey     string `module:"openaiKey"`
+	AnthropicKey  string `module:"anthropicKey"`
+	GeminiKey     string `module:"geminiKey"`
+}
+
 type AIModelsModule struct {
 	module.BaseModule
 	handler         *handlers.ModelHandler
@@ -25,9 +36,11 @@ type AIModelsModule struct {
 
 func NewModule() *AIModelsModule { return &AIModelsModule{} }
 
-func (m *AIModelsModule) Name() string                   { return "aimodels" }
-func (m *AIModelsModule) DisplayName() string             { return "AI Models" }
-func (m *AIModelsModule) Description() string             { return "LLM and embedding model management (Ollama, OpenAI, Anthropic, Gemini)" }
+func (m *AIModelsModule) Name() string        { return "aimodels" }
+func (m *AIModelsModule) DisplayName() string { return "AI Models" }
+func (m *AIModelsModule) Description() string {
+	return "LLM and embedding model management (Ollama, OpenAI, Anthropic, Gemini)"
+}
 func (m *AIModelsModule) Category() module.ModuleCategory { return module.CategoryToggleable }
 func (m *AIModelsModule) Enabled(cfg *config.Config) bool { return cfg.AIModels.Enabled }
 
@@ -80,12 +93,19 @@ func (m *AIModelsModule) Capabilities() []capability.Capability {
 func (m *AIModelsModule) Init(deps *module.Dependencies) error {
 	repo := repository.NewModelRepository(deps.DB)
 
+	// configLoader returns the live config on every invocation so admin UI
+	// changes apply without a restart. Each call costs one DB+cache read.
 	configLoader := func() services.AIModelsConfig {
+		var s Settings
+		if err := deps.ConfigService.UnmarshalModule(context.Background(), m.Name(), &s); err != nil {
+			deps.Logger.Warn("aimodels: config reload failed", slog.String("error", err.Error()))
+			return services.AIModelsConfig{}
+		}
 		return services.AIModelsConfig{
-			OllamaBaseURL: deps.GetConfig("aimodels", "ollamaBaseURL"),
-			OpenAIAPIKey:  deps.GetSecret("aimodels", "openaiKey"),
-			AnthropicKey:  deps.GetSecret("aimodels", "anthropicKey"),
-			GeminiKey:     deps.GetSecret("aimodels", "geminiKey"),
+			OllamaBaseURL: s.OllamaBaseURL,
+			OpenAIAPIKey:  s.OpenAIKey,
+			AnthropicKey:  s.AnthropicKey,
+			GeminiKey:     s.GeminiKey,
 		}
 	}
 
@@ -122,5 +142,5 @@ func (m *AIModelsModule) Start(ctx context.Context) error {
 	return nil
 }
 
-func (m *AIModelsModule) Stop(_ context.Context) error       { return nil }
+func (m *AIModelsModule) Stop(_ context.Context) error        { return nil }
 func (m *AIModelsModule) HealthCheck(_ context.Context) error { return nil }
