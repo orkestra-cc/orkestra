@@ -90,7 +90,6 @@ package hello
 
 import (
     "context"
-    "errors"
     "fmt"
 
     "github.com/danielgtaylor/huma/v2"
@@ -98,13 +97,17 @@ import (
     "github.com/orkestra-cc/orkestra-sdk/module"
 )
 
-// Settings is what `module:"key"` tags bind to. The registry decrypts
-// secret fields automatically before unmarshaling.
+// Settings is the Go struct UnmarshalModule populates from the
+// active-environment config. Field-to-key mapping uses the `module:"…"`
+// tag; secret fields are decrypted with AES-256-GCM transparently
+// based on their ConfigField type, no struct tag needed.
 type Settings struct {
     Greeting string `module:"greeting"`
-    APIKey   string `module:"apiKey" secret:"true"`
+    APIKey   string `module:"apiKey"`
 }
 
+// Module is the addon root. Embedding BaseModule gives no-op defaults
+// for every optional sub-interface, so only override what you need.
 type Module struct {
     module.BaseModule
     settings Settings
@@ -112,25 +115,34 @@ type Module struct {
 
 func New() module.Module { return &Module{} }
 
-func (m *Module) Name() string                  { return "hello" }
+func (m *Module) Name() string                    { return "hello" }
 func (m *Module) Category() module.ModuleCategory { return module.CategoryToggleable }
 
+// ConfigSchema declares admin-editable fields. FieldSecret marks
+// apiKey for AES-256-GCM at rest; the admin UI renders a password
+// input and ConfigService.GetSecret / UnmarshalModule decrypt on read.
 func (m *Module) ConfigSchema() []module.ConfigField {
     return []module.ConfigField{
-        {Key: "greeting", Type: module.FieldString, Default: "hello", EnvVar: "HELLO_GREETING"},
-        {Key: "apiKey", Type: module.FieldString, Secret: true, EnvVar: "HELLO_API_KEY"},
+        {Key: "greeting", Label: "Greeting", Type: module.FieldString, Default: "hello", EnvVar: "HELLO_GREETING"},
+        {Key: "apiKey", Label: "API key", Type: module.FieldSecret, EnvVar: "HELLO_API_KEY"},
     }
 }
 
 func (m *Module) Init(deps *module.Dependencies) error {
-    if err := module.UnmarshalModule(deps.ConfigService, m.Name(), &m.settings); err != nil {
+    if err := deps.ConfigService.UnmarshalModule(context.Background(), m.Name(), &m.settings); err != nil {
         return fmt.Errorf("hello: load settings: %w", err)
     }
     return nil
 }
 
-// HasRoutes — mount whatever Huma routes your module exposes.
-func (m *Module) RegisterRoutes(api huma.API) {
+// RegisterRoutes satisfies module.Routable. RouteInfo provides
+// per-audience API surfaces (Operator / Client / service-internal);
+// pick the one your addon targets.
+func (m *Module) RegisterRoutes(ri *module.RouteInfo) {
+    if ri.Operator == nil {
+        return
+    }
+    api := ri.Operator.PublicAPI
     huma.Get(api, "/v1/hello", func(ctx context.Context, _ *struct{}) (*GreetingOut, error) {
         uid, ok := ctxauth.GetUserUUID(ctx)
         if !ok {
@@ -143,12 +155,12 @@ func (m *Module) RegisterRoutes(api huma.API) {
 }
 
 type GreetingOut struct{ Body GreetingBody }
-type GreetingBody struct{ Message string `json:"message"` }
-
-var _ = errors.New // keep imports honest in the snippet
+type GreetingBody struct {
+    Message string `json:"message"`
+}
 ```
 
-The same pattern works for billing, invoicing, payments — anything you want to plug into Orkestra. The kernel boots your module, mounts the route, gates it behind `/admin/modules` toggle state, and enforces tenant scope on every Mongo query you make through `tenantrepo`.
+This file compiles cleanly against `github.com/orkestra-cc/orkestra-sdk@v0.2.0` from a fresh `go mod init` outside the monorepo — `go build` and `go vet` both pass. The same pattern works for billing, invoicing, payments — anything you want to plug into Orkestra. The kernel boots your module, mounts the route, gates it behind `/admin/modules` toggle state, and enforces tenant scope on every Mongo query you make through `tenantrepo`.
 
 For the full new-developer walkthrough — `Dependencies` fields, `ConfigService` reads, `ServiceRegistry` typed getters, `tenantrepo.Scope` invariants, an end-to-end addon checklist — see [`docs/onboarding/orkestra-sdk.md`](https://github.com/orkestra-cc/orkestra/blob/main/docs/onboarding/orkestra-sdk.md) in the monorepo.
 
