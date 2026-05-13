@@ -5,10 +5,10 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/orkestra-cc/orkestra-addon-subscriptions/models"
+	"github.com/orkestra-cc/orkestra-addon-subscriptions/repository"
 	"github.com/orkestra-cc/orkestra-sdk/iface"
 	"github.com/orkestra-cc/orkestra-sdk/metrics"
-	"github.com/orkestra/backend/internal/addons/subscriptions/models"
-	"github.com/orkestra/backend/internal/addons/subscriptions/repository"
 )
 
 // EntitlementSyncer keeps the capability projection aligned with

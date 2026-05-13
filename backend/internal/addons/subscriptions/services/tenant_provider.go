@@ -3,8 +3,8 @@ package services
 import (
 	"context"
 
+	"github.com/orkestra-cc/orkestra-addon-subscriptions/repository"
 	"github.com/orkestra-cc/orkestra-sdk/iface"
-	"github.com/orkestra/backend/internal/addons/subscriptions/repository"
 )
 
 // TenantSubscriptionAdapter implements iface.TenantSubscriptionProvider by

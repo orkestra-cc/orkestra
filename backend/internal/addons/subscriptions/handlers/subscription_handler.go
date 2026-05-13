@@ -5,11 +5,11 @@ import (
 	"errors"
 
 	"github.com/danielgtaylor/huma/v2"
+	"github.com/orkestra-cc/orkestra-addon-subscriptions/models"
+	"github.com/orkestra-cc/orkestra-addon-subscriptions/repository"
+	"github.com/orkestra-cc/orkestra-addon-subscriptions/services"
 	"github.com/orkestra-cc/orkestra-sdk/ctxauth"
 	"github.com/orkestra-cc/orkestra-sdk/iface"
-	"github.com/orkestra/backend/internal/addons/subscriptions/models"
-	"github.com/orkestra/backend/internal/addons/subscriptions/repository"
-	"github.com/orkestra/backend/internal/addons/subscriptions/services"
 )
 
 type SubscriptionHandler struct {

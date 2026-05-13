@@ -58,6 +58,15 @@ replace github.com/orkestra-cc/orkestra-addon-graph => ./internal/addons/graph
 // already dead code.
 replace github.com/orkestra-cc/orkestra-addon-sales => ./internal/addons/sales
 
+// Phase 5f: the subscriptions addon is its own Go module. Source
+// lives in-tree, mirrored to orkestra-cc/orkestra-addon-subscriptions
+// and tagged from v0.1.0. The subscriptions handler tests dropped
+// their `internal/testkit` import in favor of an inline `authedCtx`
+// helper that stamps the SDK ctxauth keys directly; testkit stays
+// in-tree until the remaining consumers (payments, compliance) get
+// extracted in their own phases.
+replace github.com/orkestra-cc/orkestra-addon-subscriptions => ./internal/addons/subscriptions
+
 require (
 	github.com/alicebob/miniredis/v2 v2.37.0
 	github.com/cedar-policy/cedar-go v1.6.0
@@ -77,6 +86,7 @@ require (
 	github.com/orkestra-cc/orkestra-addon-documents v0.1.0
 	github.com/orkestra-cc/orkestra-addon-graph v0.1.1
 	github.com/orkestra-cc/orkestra-addon-sales v0.1.0
+	github.com/orkestra-cc/orkestra-addon-subscriptions v0.1.0
 	github.com/orkestra-cc/orkestra-openapi-auth v0.1.0
 	github.com/orkestra-cc/orkestra-sdk v0.2.0
 	github.com/pquerna/otp v1.5.0

@@ -16,6 +16,7 @@ import (
 	"github.com/danielgtaylor/huma/v2/adapters/humachi"
 	"github.com/go-chi/chi/v5"
 
+	subscriptionServices "github.com/orkestra-cc/orkestra-addon-subscriptions/services"
 	"github.com/orkestra-cc/orkestra-sdk/iface"
 	"github.com/orkestra-cc/orkestra-sdk/module"
 	"github.com/orkestra/backend/internal/addons/compliance/handlers"
@@ -24,7 +25,6 @@ import (
 	"github.com/orkestra/backend/internal/addons/compliance/services"
 	identityHandlers "github.com/orkestra/backend/internal/addons/identity/handlers"
 	identityServices "github.com/orkestra/backend/internal/addons/identity/services"
-	subscriptionServices "github.com/orkestra/backend/internal/addons/subscriptions/services"
 	authServices "github.com/orkestra/backend/internal/core/auth/services"
 	tenantServices "github.com/orkestra/backend/internal/core/tenant/services"
 )

@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/orkestra/backend/internal/addons/subscriptions/models"
+	"github.com/orkestra-cc/orkestra-addon-subscriptions/models"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"

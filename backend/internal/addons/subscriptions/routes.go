@@ -4,7 +4,7 @@ import (
 	"net/http"
 
 	"github.com/danielgtaylor/huma/v2"
-	"github.com/orkestra/backend/internal/addons/subscriptions/handlers"
+	"github.com/orkestra-cc/orkestra-addon-subscriptions/handlers"
 )
 
 // Routes are split across permission buckets so mutating operations require

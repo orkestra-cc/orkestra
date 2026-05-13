@@ -9,12 +9,25 @@ import (
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
+	"github.com/orkestra-cc/orkestra-addon-subscriptions/models"
+	"github.com/orkestra-cc/orkestra-addon-subscriptions/repository"
+	"github.com/orkestra-cc/orkestra-addon-subscriptions/services"
+	"github.com/orkestra-cc/orkestra-sdk/ctxauth"
 	"github.com/orkestra-cc/orkestra-sdk/iface"
-	"github.com/orkestra/backend/internal/addons/subscriptions/models"
-	"github.com/orkestra/backend/internal/addons/subscriptions/repository"
-	"github.com/orkestra/backend/internal/addons/subscriptions/services"
-	"github.com/orkestra/backend/internal/testkit"
 )
+
+// authedCtx stamps the SDK ctxauth keys onto ctx the same way
+// AuthMiddleware would after a real JWT validation, minus the
+// JWTClaims-on-context payload that production handlers in this
+// package don't read. Replaces the cross-module testkit dependency
+// so this addon can sit in its own Go module (Phase 5f).
+func authedCtx(userUUID, email, systemRole string) context.Context {
+	ctx := context.Background()
+	ctx = context.WithValue(ctx, ctxauth.KeyUserUUID, userUUID)
+	ctx = context.WithValue(ctx, ctxauth.KeyUserEmail, email)
+	ctx = context.WithValue(ctx, ctxauth.KeySystemRole, systemRole)
+	return ctx
+}
 
 // stubSubRepo is a minimal SubscriptionRepository that records every List
 // filter and replays a fixture set indexed by tenant UUID.
@@ -153,8 +166,7 @@ func TestMeList_PersonalTenantOnlyReturnsPersonalRows(t *testing.T) {
 	}
 	h := newHandlerForList(repo, tp)
 
-	id := testkit.NewIdentity("user-A", "a@example.com", "user")
-	ctx := id.ContextFor(context.Background(), "-")
+	ctx := authedCtx("user-A", "a@example.com", "user")
 
 	resp, err := h.MeList(ctx, &MeListSubscriptionsRequest{})
 	if err != nil {
@@ -182,7 +194,7 @@ func TestMeList_OwnedTenantFansIn(t *testing.T) {
 	}
 	h := newHandlerForList(repo, tp)
 
-	ctx := testkit.NewIdentity("user-A", "a@example.com", "user").ContextFor(context.Background(), "-")
+	ctx := authedCtx("user-A", "a@example.com", "user")
 	resp, err := h.MeList(ctx, &MeListSubscriptionsRequest{})
 	if err != nil {
 		t.Fatalf("MeList: %v", err)
@@ -209,7 +221,7 @@ func TestMeList_FilterUnownedTenantReturnsEmpty(t *testing.T) {
 	}
 	h := newHandlerForList(repo, tp)
 
-	ctx := testkit.NewIdentity("user-A", "a@example.com", "user").ContextFor(context.Background(), "-")
+	ctx := authedCtx("user-A", "a@example.com", "user")
 	resp, err := h.MeList(ctx, &MeListSubscriptionsRequest{TenantUUID: "tenant-Z"})
 	if err != nil {
 		t.Fatalf("MeList: %v", err)
@@ -230,7 +242,7 @@ func TestMeList_StatusFilterPropagates(t *testing.T) {
 	}
 	h := newHandlerForList(repo, tp)
 
-	ctx := testkit.NewIdentity("user-A", "a@example.com", "user").ContextFor(context.Background(), "-")
+	ctx := authedCtx("user-A", "a@example.com", "user")
 	resp, err := h.MeList(ctx, &MeListSubscriptionsRequest{Status: string(models.SubActive)})
 	if err != nil {
 		t.Fatalf("MeList: %v", err)
@@ -251,7 +263,7 @@ func TestMeList_NilTenantProviderReturns503(t *testing.T) {
 	repo := newStubSubRepo()
 	h := newHandlerForList(repo, nil)
 
-	ctx := testkit.NewIdentity("user-A", "a@example.com", "user").ContextFor(context.Background(), "-")
+	ctx := authedCtx("user-A", "a@example.com", "user")
 	_, err := h.MeList(ctx, &MeListSubscriptionsRequest{})
 	if err == nil {
 		t.Fatal("expected 503, got nil")
@@ -270,7 +282,7 @@ func TestMeList_EnsureTenantForUserErrorPropagates(t *testing.T) {
 	}
 	h := newHandlerForList(repo, tp)
 
-	ctx := testkit.NewIdentity("user-A", "a@example.com", "user").ContextFor(context.Background(), "-")
+	ctx := authedCtx("user-A", "a@example.com", "user")
 	_, err := h.MeList(ctx, &MeListSubscriptionsRequest{})
 	if err == nil {
 		t.Fatal("expected EnsureTenantForUser failure to surface")

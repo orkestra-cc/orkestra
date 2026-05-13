@@ -3,6 +3,28 @@
 _Path: `/backend/internal/addons/subscriptions`_
 _Parent: [../../../CLAUDE.md](../../../CLAUDE.md)_
 
+## Module home
+
+This directory is a **separate Go module**
+(`github.com/orkestra-cc/orkestra-addon-subscriptions`) since Phase 5f
+of the SDK split. Source lives in-tree at this path for monorepo
+development; the same tree is mirrored to
+[github.com/orkestra-cc/orkestra-addon-subscriptions](https://github.com/orkestra-cc/orkestra-addon-subscriptions)
+and tagged starting from `v0.1.0`. Backend's `go.mod` carries a
+`replace` directive pointing at this path so changes here take effect
+without a tag bump during cross-cutting work; CI and external
+consumers fetch the published version through the Go module proxy.
+
+`handlers/me_handler_test.go` previously imported
+`backend/internal/testkit` for its `NewIdentity(...).ContextFor(...)`
+helper. Phase 5f replaced that call site with an inline `authedCtx`
+that stamps the SDK `ctxauth.Key*` constants directly — the
+production handlers in this package don't read `JWTClaims` from
+context, so the slimmer helper is sufficient. `internal/testkit`
+stays in the backend module for now; it still serves the payments
+and compliance addons, which will get the same treatment as part of
+their own extractions.
+
 Recurring-revenue core: a catalog of AI services the operator sells and subscriptions binding Tier-2 external tenants to those services with cycle-based billing and an append-only activity log.
 
 ## Responsibility split

@@ -5,8 +5,8 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/orkestra/backend/internal/addons/subscriptions/models"
-	"github.com/orkestra/backend/internal/addons/subscriptions/repository"
+	"github.com/orkestra-cc/orkestra-addon-subscriptions/models"
+	"github.com/orkestra-cc/orkestra-addon-subscriptions/repository"
 )
 
 // Reconciler implements iface.SubscriptionReconciler. The payments module's

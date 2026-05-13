@@ -12,7 +12,7 @@
 
 .PHONY: help up down status logs reset
 .PHONY: mongo-shell redis-cli
-.PHONY: backend-build backend-test sdk-test addon-documents-test addon-aimodels-test addon-company-test addon-graph-test addon-sales-test openapi-auth-test backend-deps backend-clean
+.PHONY: backend-build backend-test sdk-test addon-documents-test addon-aimodels-test addon-company-test addon-graph-test addon-sales-test addon-subscriptions-test openapi-auth-test backend-deps backend-clean
 .PHONY: frontend-admin-build frontend-admin-test frontend-admin-deps
 .PHONY: frontend-admin-clean frontend-admin-preview frontend-admin-type-check
 .PHONY: frontend-client-build frontend-client-typecheck frontend-client-clean
@@ -95,7 +95,7 @@ backend-build:
 	@cd backend && go build -o bin/server cmd/server/main.go
 	@echo "Backend built: backend/bin/server"
 
-backend-test: sdk-test openapi-auth-test addon-documents-test addon-aimodels-test addon-company-test addon-graph-test addon-sales-test
+backend-test: sdk-test openapi-auth-test addon-documents-test addon-aimodels-test addon-company-test addon-graph-test addon-sales-test addon-subscriptions-test
 	@echo "Running backend tests..."
 	@cd backend && go test ./...
 
@@ -152,6 +152,13 @@ addon-sales-test:
 	@echo "Running sales addon tests..."
 	@cd backend/internal/addons/sales && go test ./...
 
+# addon-subscriptions-test mirrors addon-sales-test for the
+# subscriptions addon, which Phase 5f carved into its own Go module
+# (github.com/orkestra-cc/orkestra-addon-subscriptions).
+addon-subscriptions-test:
+	@echo "Running subscriptions addon tests..."
+	@cd backend/internal/addons/subscriptions && go test ./...
+
 backend-deps:
 	@echo "Installing backend dependencies..."
 	@cd backend && go mod download && go mod tidy
@@ -162,6 +169,7 @@ backend-deps:
 	@cd backend/internal/addons/company && go mod download && go mod tidy
 	@cd backend/internal/addons/graph && go mod download && go mod tidy
 	@cd backend/internal/addons/sales && go mod download && go mod tidy
+	@cd backend/internal/addons/subscriptions && go mod download && go mod tidy
 	@echo "Backend dependencies installed."
 
 backend-clean:
@@ -208,7 +216,7 @@ frontend-client-clean:
 
 .PHONY: install install-hooks fmt ci-help
 .PHONY: ci ci-all ci-backend ci-backend-matrix ci-frontend-admin ci-frontend-client ci-mobile
-.PHONY: backend-lint sdk-lint addon-documents-lint addon-aimodels-lint addon-company-lint addon-graph-lint addon-sales-lint openapi-auth-lint backend-test-ci sdk-test-ci addon-documents-test-ci addon-aimodels-test-ci addon-company-test-ci addon-graph-test-ci addon-sales-test-ci openapi-auth-test-ci backend-tenantscope backend-policycoverage backend-vulncheck backend-build-enterprise
+.PHONY: backend-lint sdk-lint addon-documents-lint addon-aimodels-lint addon-company-lint addon-graph-lint addon-sales-lint addon-subscriptions-lint openapi-auth-lint backend-test-ci sdk-test-ci addon-documents-test-ci addon-aimodels-test-ci addon-company-test-ci addon-graph-test-ci addon-sales-test-ci addon-subscriptions-test-ci openapi-auth-test-ci backend-tenantscope backend-policycoverage backend-vulncheck backend-build-enterprise
 .PHONY: admin-typecheck admin-lint admin-test admin-audit admin-build
 .PHONY: client-typecheck client-lint client-build
 .PHONY: mobile-analyze mobile-test
@@ -259,7 +267,7 @@ ci-all: ci-backend ci-frontend-admin ci-frontend-client ci-mobile
 
 # ---- Backend ----
 
-ci-backend: backend-lint sdk-lint openapi-auth-lint addon-documents-lint addon-aimodels-lint addon-company-lint addon-graph-lint addon-sales-lint backend-tenantscope backend-policycoverage backend-vulncheck backend-test-ci backend-build-enterprise
+ci-backend: backend-lint sdk-lint openapi-auth-lint addon-documents-lint addon-aimodels-lint addon-company-lint addon-graph-lint addon-sales-lint addon-subscriptions-lint backend-tenantscope backend-policycoverage backend-vulncheck backend-test-ci backend-build-enterprise
 	@echo "Backend CI: OK"
 
 ci-backend-matrix: ci-backend
@@ -305,10 +313,16 @@ addon-graph-lint:
 addon-sales-lint:
 	@cd backend/internal/addons/sales && golangci-lint run --config=../../../.golangci.yml ./...
 
+# addon-subscriptions-lint mirrors addon-sales-lint for the
+# subscriptions addon's own Go module (Phase 5f). Shares the lint
+# config.
+addon-subscriptions-lint:
+	@cd backend/internal/addons/subscriptions && golangci-lint run --config=../../../.golangci.yml ./...
+
 # `-race` requires cgo. CI runners have CGO_ENABLED=1 by default, but the
 # Go toolchain mise installs locally defaults to 0 — force it on so local
 # and CI behave the same. Needs a working C compiler on PATH (gcc/clang).
-backend-test-ci: sdk-test-ci openapi-auth-test-ci addon-documents-test-ci addon-aimodels-test-ci addon-company-test-ci addon-graph-test-ci addon-sales-test-ci
+backend-test-ci: sdk-test-ci openapi-auth-test-ci addon-documents-test-ci addon-aimodels-test-ci addon-company-test-ci addon-graph-test-ci addon-sales-test-ci addon-subscriptions-test-ci
 	@cd backend && CGO_ENABLED=1 go test -race -coverprofile=coverage.out ./...
 	@cd backend && go tool cover -func=coverage.out | tail -1
 
@@ -354,6 +368,13 @@ addon-graph-test-ci:
 addon-sales-test-ci:
 	@cd backend/internal/addons/sales && CGO_ENABLED=1 go test -race -coverprofile=coverage.out ./...
 	@cd backend/internal/addons/sales && go tool cover -func=coverage.out | tail -1
+
+# addon-subscriptions-test-ci mirrors addon-sales-test-ci for the
+# subscriptions addon (Phase 5f). Covers the renewal pipeline, the
+# entitlement syncer, and the self-service MeList tenant-fan-out.
+addon-subscriptions-test-ci:
+	@cd backend/internal/addons/subscriptions && CGO_ENABLED=1 go test -race -coverprofile=coverage.out ./...
+	@cd backend/internal/addons/subscriptions && go tool cover -func=coverage.out | tail -1
 
 backend-tenantscope:
 	@cd backend && go test ./tools/tenantscope/...

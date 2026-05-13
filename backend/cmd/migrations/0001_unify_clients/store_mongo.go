@@ -11,9 +11,9 @@ import (
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 
+	submodels "github.com/orkestra-cc/orkestra-addon-subscriptions/models"
 	"github.com/orkestra/backend/cmd/migrations/0001_unify_clients/migrator"
 	pmtmodels "github.com/orkestra/backend/internal/addons/payments/models"
-	submodels "github.com/orkestra/backend/internal/addons/subscriptions/models"
 	tenantrepo "github.com/orkestra/backend/internal/core/tenant/repository"
 )
 
