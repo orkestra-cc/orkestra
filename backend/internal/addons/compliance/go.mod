@@ -25,7 +25,7 @@ require (
 	github.com/danielgtaylor/huma/v2 v2.34.1
 	github.com/go-chi/chi/v5 v5.2.5
 	github.com/google/uuid v1.6.0
-	github.com/orkestra-cc/orkestra-sdk v0.2.0
+	github.com/orkestra-cc/orkestra-sdk v0.3.0
 	go.mongodb.org/mongo-driver v1.17.6
 )
 
