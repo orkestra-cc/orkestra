@@ -109,12 +109,23 @@ services:
       retries: 5
 
 volumes:
+  # All volumes pin their literal Docker name (no project prefix) so the
+  # data survives across compose project namespaces — e.g. running
+  # `docker compose -f docker-compose.infra.yml ...` vs
+  # `docker compose -f docker-compose.infra.yml -f docker-compose.starter.yml ...`
+  # (the second file's `name:` would otherwise replace the prefix and
+  # produce a separate, empty volume). Without explicit name pinning,
+  # MongoDB data is silently lost every time you change which SKU compose
+  # is layered on top.
   orkestra-mongodb-data:
     driver: local
+    name: orkestra-mongodb-data
   orkestra-mongodb-config:
     driver: local
+    name: orkestra-mongodb-config
   orkestra-redis-data:
     driver: local
+    name: orkestra-redis-data
   orkestra-hindsight-data:
     driver: local
     # Pinned name so the backend's container.Manager and the manual-only
