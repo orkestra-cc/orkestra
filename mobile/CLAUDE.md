@@ -75,8 +75,7 @@ mobile/
 │       └── app_config.dart          # Global app config singleton
 ├── test/
 │   └── widget_smoke_test.dart       # Boots OrkestraApp + asserts home renders
-├── android/                         # Android platform files
-├── ios/                             # iOS platform files
+├── android/                         # Android platform files (scaffolded 2026-05-14 — applicationId `cc.orkestra.orkestra_mobile`)
 ├── pubspec.yaml                     # Flutter dependencies
 └── analysis_options.yaml            # Dart analyzer configuration
 ```
@@ -134,12 +133,17 @@ flutter test
 # Build release APK
 flutter build apk -t lib/main_production.dart --release
 
-# Build release iOS
-flutter build ios -t lib/main_production.dart --release
-
 # Clean and rebuild
 flutter clean && flutter pub get
 ```
+
+## Platform scaffolds
+
+Only **Android** is currently scaffolded under `mobile/android/` (added 2026-05-14 to unblock `Mobile CI > Build Android` on pushes to `main`). iOS, web, macOS, Linux, and Windows have no platform scaffold yet — `flutter build ios` / `flutter run -d <other>` will fail until those are added with `flutter create --platforms=<name> .` and the resulting directories committed.
+
+Two notes on the Android scaffold:
+- `gradle-wrapper.jar`, `gradlew`, and `gradlew.bat` are committed (Flutter's default `.gitignore` would exclude them, but `flutter pub get` does not regenerate them and CI fails without them). The gitignore in `mobile/android/.gitignore` is patched accordingly with a comment explaining why.
+- Release builds sign with the debug keystore. Fine for CI artifacts; a real signing config is needed before any APK ships to users.
 
 ---
 

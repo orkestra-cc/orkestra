@@ -1,0 +1,15 @@
+# Flutter's default scaffold gitignores gradle-wrapper.jar, /gradlew and
+# /gradlew.bat — but `flutter pub get` does NOT regenerate them, so CI
+# builds fail with "no gradlew" if these aren't committed. Commit the
+# wrapper so `flutter build apk` works on a fresh checkout.
+/.gradle
+/captures/
+/local.properties
+GeneratedPluginRegistrant.java
+.cxx/
+
+# Remember to never publicly share your keystore.
+# See https://flutter.dev/to/reference-keystore
+key.properties
+**/*.keystore
+**/*.jks
