@@ -22,7 +22,7 @@ help:
 	@echo ""
 	@echo "Profile builds (smaller binaries — pick one):"
 	@echo "  make build-starter     - Core modules only"
-	@echo "  make build-minimal     - Core + dev (what docker-compose.minimal.yml expects)"
+	@echo "  make build-minimal     - Core + dev token generator"
 	@echo "  make build-billing     - Italian invoicing SKU (billing+documents+company)"
 	@echo "  make build-ai          - AI suite (graph+aimodels+rag+agents+sales)"
 	@echo "  make build-saas        - Tier-2 SaaS SKU (subscriptions+payments+compliance+identity)"

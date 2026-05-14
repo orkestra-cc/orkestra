@@ -36,18 +36,18 @@ This module contains automation scripts, development tools, and utilities for ma
 
 ```bash
 # Single entry point — interactive TUI
-./orkestra.sh                         # Profile menu: minimal or full stack
+./orkestra.sh                         # Profile menu: SKU profile or full stack
 
 # Same operations via CLI (scriptable)
-./orkestra.sh minimal deploy --build
-./orkestra.sh minimal logs backend -f
-./orkestra.sh minimal reset --yes
+./orkestra.sh profile starter deploy --pull
+./orkestra.sh profile billing logs backend -f
+./orkestra.sh profile ai reset --yes
 ENV=development ./orkestra.sh deploy --scope backend --rebuild --yes
 ./orkestra.sh logs orkestra-backend-dev -f
 ./orkestra.sh --help                  # Full command surface
 ```
 
-`orkestra.sh` handles every docker compose operation for both the minimal profile (`docker-compose.minimal.yml`) and the full-stack dev/staging/prod profiles (`docker-compose.infra.yml` + `docker-compose.{dev,staging,prod}.yml`). See [docker/CLAUDE.md](../docker/CLAUDE.md) for compose-file details.
+`orkestra.sh` handles every docker compose operation for both the SKU profiles (`docker-compose.{starter,billing,ai,saas,enterprise}.yml`) and the full-stack dev/staging/prod profiles (`docker-compose.infra.yml` + `docker-compose.{dev,staging,prod}.yml`). See [docker/CLAUDE.md](../docker/CLAUDE.md) for compose-file details.
 
 ### 🚫 Removed / Consolidated Scripts
 

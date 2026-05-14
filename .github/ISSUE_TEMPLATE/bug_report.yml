@@ -90,7 +90,7 @@ body:
     attributes:
       label: How are you running it?
       description: Compose profile, Kubernetes manifest, local `mise install`, ...
-      placeholder: e.g. docker-compose.minimal.yml on Ubuntu 24.04
+      placeholder: e.g. docker-compose.starter.yml on Ubuntu 24.04
     validations:
       required: true
 

@@ -5,12 +5,12 @@
 # ============================================================================
 #
 # Single entry point for managing the Orkestra stack. Combines the former
-# deploy.sh and logs.sh scripts and adds first-class minimal-profile support.
+# deploy.sh and logs.sh scripts with first-class SKU-profile support.
 #
 # Two modes:
 #
 #   Interactive TUI     ./orkestra.sh
-#                       Profile menu (minimal / full stack) then a per-profile
+#                       Profile menu (SKU profile / full stack) then a per-profile
 #                       operations menu.
 #
 #   Non-interactive CLI ./orkestra.sh <command> [args...]
@@ -134,38 +134,25 @@ PROJECT_ROOT="$SCRIPT_DIR"
 DOCKER_DIR="$PROJECT_ROOT/docker"
 
 ENV_FILE="$DOCKER_DIR/.env"
-MINIMAL_COMPOSE_FILE="$DOCKER_DIR/docker-compose.minimal.yml"
-MINIMAL_ENV_FILE="$DOCKER_DIR/.env.minimal"
-MINIMAL_BACKEND_URL="http://localhost:3050"
-MINIMAL_FRONTEND_URL="http://localhost:8050"
 
-# Profile state — "minimal", "fullstack", a SKU profile name, or "" (at profile menu)
+# Profile state — "fullstack", a SKU profile name, or "" (at profile menu)
 PROFILE=""
 
 # SKU profiles published to GHCR. Order matters: it drives the TUI picker.
 SKU_PROFILES=(starter billing ai saas enterprise)
 
 # Per-profile compose file, env file, backend URL, refresh mode, and infra
-# layering. The minimal profile builds from a local Dockerfile; the SKU
-# profiles pull a pre-built image from GHCR. Only minimal is self-contained;
-# every SKU profile expects docker-compose.infra.yml to be running first.
+# layering. SKU profiles pull a pre-built image from GHCR and expect
+# docker-compose.infra.yml to be running first.
 declare -A PROFILE_COMPOSE
 declare -A PROFILE_ENV
 declare -A PROFILE_BACKEND_URL
 declare -A PROFILE_FRONTEND_URL
-declare -A PROFILE_REFRESH_MODE      # "build" or "pull"
+declare -A PROFILE_REFRESH_MODE      # "pull"
 declare -A PROFILE_LAYER_INFRA       # "yes" or "no"
 declare -A PROFILE_DESCRIPTION
 
 init_profile_configs() {
-    PROFILE_COMPOSE[minimal]="$MINIMAL_COMPOSE_FILE"
-    PROFILE_ENV[minimal]="$MINIMAL_ENV_FILE"
-    PROFILE_BACKEND_URL[minimal]="$MINIMAL_BACKEND_URL"
-    PROFILE_FRONTEND_URL[minimal]="$MINIMAL_FRONTEND_URL"
-    PROFILE_REFRESH_MODE[minimal]="build"
-    PROFILE_LAYER_INFRA[minimal]="no"
-    PROFILE_DESCRIPTION[minimal]="Core only — built locally from Dockerfile.minimal"
-
     local p
     for p in "${SKU_PROFILES[@]}"; do
         PROFILE_COMPOSE[$p]="$DOCKER_DIR/docker-compose.$p.yml"
@@ -382,9 +369,6 @@ draw_status_line() {
 
     local profile_chip
     case "$PROFILE" in
-        minimal)
-            profile_chip="${c_accent}${ic_bullet} minimal${c_reset}"
-            ;;
         fullstack)
             local env_upper
             env_upper=$(echo "${ENV:-?}" | tr '[:lower:]' '[:upper:]')
@@ -575,12 +559,10 @@ is_service_running() {
 # Generic profile operations
 # ---------------------------------------------------------------------------
 #
-# A "profile" here is any entry in PROFILE_COMPOSE — currently minimal plus
-# the five SKU profiles (starter/billing/ai/saas/enterprise). minimal builds
-# from source, the SKUs pull pre-built images from GHCR; everything else is
-# the same operation surface (deploy/stop/reset/status/info/logs).
-#
-# minimal_* below are thin wrappers that delegate here with name="minimal".
+# A "profile" here is any entry in PROFILE_COMPOSE — the five SKU profiles
+# (starter/billing/ai/saas/enterprise). Each pulls a pre-built image from
+# GHCR; everything else is the same operation surface
+# (deploy/stop/reset/status/info/logs).
 
 # Echo the docker-compose -f / --env-file argument list for the named profile,
 # one token per line. Capture with: mapfile -t args < <(_profile_compose_args foo)
@@ -611,21 +593,13 @@ profile_check_prereqs() {
 
     local env_file="${PROFILE_ENV[$name]:-}"
     if [ -n "$env_file" ] && [ ! -f "$env_file" ]; then
-        if [ "$name" = "minimal" ]; then
-            p_err "$env_file not found"
-            p_muted "  The minimal env file is tracked in git — did you delete it?"
-            p_muted "  Recover with: git checkout docker/.env.minimal"
-            exit 1
-        else
-            p_warn "$env_file not found — required secrets must be exported in the shell"
-        fi
+        p_warn "$env_file not found — required secrets must be exported in the shell"
     fi
 
     ensure_network_exists
 }
 
-# Render the post-deploy access box, branching on whether the profile ships a
-# frontend (minimal) or is backend-only (SKU profiles).
+# Render the post-deploy access box. SKU profiles are backend-only (no frontend).
 _profile_show_access_box() {
     local name=$1
     local backend_url="${PROFILE_BACKEND_URL[$name]:-http://localhost:3000}"
@@ -657,7 +631,7 @@ _profile_show_access_box() {
 }
 
 # profile_deploy <name> [refresh=yes|no]
-# refresh=yes: build for minimal, pull for SKU profiles. refresh=no: cached.
+# refresh=yes: pull the SKU image from GHCR before bringing up. refresh=no: cached.
 profile_deploy() {
     local name=$1 refresh=${2:-no}
     PROFILE="$name"
@@ -812,14 +786,9 @@ profile_status() {
     fi
 }
 
-# Generic info screen for SKU profiles. Minimal has its own custom info screen
-# (minimal_info) because its message about MODULES + dev tokens is bespoke.
+# Generic info screen for SKU profiles.
 profile_info() {
     local name=$1
-    if [ "$name" = "minimal" ]; then
-        minimal_info
-        return
-    fi
     PROFILE="$name"
     local title
     title=$(echo "${name:0:1}" | tr '[:lower:]' '[:upper:]')${name:1}
@@ -854,62 +823,6 @@ profile_info() {
     p_section "Toggle addons"
     p_muted "  Visit /admin/modules in the operator console to enable/disable addons."
     p_muted "  Build tags decide what is installable; runtime config decides what is on."
-}
-
-# ---------------------------------------------------------------------------
-# Minimal profile operations (thin wrappers over profile_*)
-# ---------------------------------------------------------------------------
-
-minimal_check_prereqs() {
-    profile_check_prereqs "minimal"
-}
-
-minimal_deploy() { profile_deploy "minimal" "${1:-no}"; }
-
-minimal_stop() { profile_stop "minimal"; }
-
-minimal_reset() { profile_reset "minimal" "${1:-ask}"; }
-
-minimal_status() { profile_status "minimal"; }
-
-minimal_info() {
-    PROFILE="minimal"
-    page_header "Minimal · Profile Info"
-
-    draw_box "Minimal profile" \
-        "" \
-        "  The minimal profile boots Orkestra with only core modules:" \
-        "" \
-        "    ${c_accent}auth${c_reset}         OAuth 2.1, JWT, sessions, RBAC" \
-        "    ${c_accent}user${c_reset}         User CRUD, roles" \
-        "    ${c_accent}navigation${c_reset}   Dynamic menu aggregator" \
-        "    ${c_accent}dev${c_reset}          Dev token generator (first login)" \
-        ""
-    echo
-
-    p_section "Access points"
-    printf '  Admin frontend %s%s%s\n' "$c_info" "$MINIMAL_FRONTEND_URL" "$c_reset"
-    printf '  Backend API    %s%s%s\n' "$c_info" "$MINIMAL_BACKEND_URL" "$c_reset"
-    printf '  API docs       %s%s/docs%s\n' "$c_info" "$MINIMAL_BACKEND_URL" "$c_reset"
-    printf '  OpenAPI JSON   %s%s/openapi.json%s\n' "$c_info" "$MINIMAL_BACKEND_URL" "$c_reset"
-    printf '  Health         %s%s/health%s\n' "$c_info" "$MINIMAL_BACKEND_URL" "$c_reset"
-    echo
-
-    p_section "Generate a dev token for first login"
-    printf '  %sORKESTRA_API_URL=%s ./scripts/devtoken.sh administrator%s\n' \
-        "$c_accent" "$MINIMAL_BACKEND_URL" "$c_reset"
-    echo
-
-    p_section "Enable more modules"
-    printf '  Edit %sMODULES=%s in %s%s%s, e.g.:\n' \
-        "$c_accent" "$c_reset" "$c_info" "$MINIMAL_ENV_FILE" "$c_reset"
-    printf '    %sMODULES=dev,billing,documents%s\n' "$c_accent" "$c_reset"
-    printf '  Dependencies are auto-included by the backend module registry.\n'
-    echo
-
-    p_muted "Ports are non-standard (3050/8050/27050/6350) so the minimal stack can"
-    p_muted "coexist with full dev/staging/prod stacks without port collisions."
-    p_muted "See docker/CLAUDE.md and backend/CLAUDE.md for details."
 }
 
 # ---------------------------------------------------------------------------
@@ -1375,7 +1288,7 @@ fullstack_status() {
 }
 
 # ---------------------------------------------------------------------------
-# Unified logs picker (minimal + full-stack aware)
+# Unified logs picker (SKU profiles + full-stack aware)
 # ---------------------------------------------------------------------------
 
 # Populates the global SERVICES array and SERVICE_FILE map.
@@ -1389,9 +1302,6 @@ list_all_services() {
 
     local -a files=()
     case "$profile" in
-        minimal)
-            files+=("$MINIMAL_COMPOSE_FILE")
-            ;;
         fullstack)
             files+=("$DOCKER_DIR/docker-compose.infra.yml")
             files+=("$COMPOSE_FILE")
@@ -1567,16 +1477,13 @@ show_profile_menu() {
     echo
     draw_box "Orkestra Stack Manager" \
         "" \
-        "  ${c_accent}1${c_reset} ${c_bold}Minimal profile${c_reset}        ${c_muted}(build from source)${c_reset}" \
-        "     ${c_muted}core modules only, public images, modest VM${c_reset}" \
-        "" \
-        "  ${c_accent}2${c_reset} ${c_bold}Profile${c_reset}                 ${c_muted}(pull published image)${c_reset}" \
+        "  ${c_accent}1${c_reset} ${c_bold}Profile${c_reset}                 ${c_muted}(pull published image)${c_reset}" \
         "     ${c_muted}starter / billing / ai / saas / enterprise${c_reset}" \
         "" \
-        "  ${c_accent}3${c_reset} ${c_bold}Full stack${c_reset}              ${c_muted}(dev / staging / production)${c_reset}" \
+        "  ${c_accent}2${c_reset} ${c_bold}Full stack${c_reset}              ${c_muted}(dev / staging / production)${c_reset}" \
         "     ${c_muted}ENV autodetected from docker/.env${c_reset}" \
         "" \
-        "  ${c_accent}4${c_reset} ${c_bold}Quit${c_reset}" \
+        "  ${c_accent}3${c_reset} ${c_bold}Quit${c_reset}" \
         ""
 }
 
@@ -1654,20 +1561,6 @@ profile_ops_menu_loop() {
     done
 }
 
-show_minimal_menu() {
-    page_header "Minimal profile"
-    draw_box "Select operation" \
-        "" \
-        "  ${c_accent}1${c_reset}  Deploy / Update    ${c_muted}(up -d [--build])${c_reset}" \
-        "  ${c_accent}2${c_reset}  Stop               ${c_muted}(keeps volumes)${c_reset}" \
-        "  ${c_accent}3${c_reset}  Reset              ${c_muted}(wipes volumes — destructive)${c_reset}" \
-        "  ${c_accent}4${c_reset}  Status             ${c_muted}(ps + /health + stats)${c_reset}" \
-        "  ${c_accent}5${c_reset}  Logs               ${c_muted}(service picker)${c_reset}" \
-        "  ${c_accent}6${c_reset}  Info               ${c_muted}(URLs + dev-token recipe)${c_reset}" \
-        "  ${c_accent}7${c_reset}  Back to profile menu" \
-        ""
-}
-
 show_fullstack_menu() {
     page_header "Full stack"
     draw_box "Select operation" \
@@ -1678,31 +1571,6 @@ show_fullstack_menu() {
         "  ${c_accent}4${c_reset}  Logs               ${c_muted}(service picker)${c_reset}" \
         "  ${c_accent}5${c_reset}  Back to profile menu" \
         ""
-}
-
-minimal_menu_loop() {
-    PROFILE="minimal"
-    while true; do
-        show_minimal_menu
-        printf '%s%s Select operation [1-7]: %s' "$c_prompt" "$ic_arrow" "$c_reset"
-        local choice
-        read -r choice
-        case "$choice" in
-            1)
-                local rebuild="no"
-                ask_yes_no "Rebuild images?" "n" && rebuild="yes"
-                minimal_deploy "$rebuild"
-                pause_for_return
-                ;;
-            2) minimal_stop; pause_for_return ;;
-            3) minimal_reset "ask"; pause_for_return ;;
-            4) minimal_status; pause_for_return ;;
-            5) logs_interactive "minimal"; pause_for_return ;;
-            6) minimal_info; pause_for_return ;;
-            7) PROFILE=""; return ;;
-            *) p_warn "Invalid selection"; sleep 1 ;;
-        esac
-    done
 }
 
 fullstack_menu_loop() {
@@ -1741,14 +1609,6 @@ ${c_bold}USAGE${c_reset}
   ./orkestra.sh                    ${c_muted}# interactive TUI (profile menu)${c_reset}
   ./orkestra.sh <command> [args]   ${c_muted}# non-interactive CLI${c_reset}
 
-${c_bold}MINIMAL PROFILE${c_reset} ${c_muted}(builds locally from Dockerfile.minimal)${c_reset}
-  ${c_accent}minimal deploy${c_reset} [--build]          Start minimal stack (optionally rebuild)
-  ${c_accent}minimal stop${c_reset}                      Stop minimal stack (volumes kept)
-  ${c_accent}minimal reset${c_reset} [--yes]             Wipe volumes and redeploy
-  ${c_accent}minimal status${c_reset}                    Containers + /health + resources
-  ${c_accent}minimal info${c_reset}                      URLs, dev-token recipe, MODULES hint
-  ${c_accent}minimal logs${c_reset} <service> [flags]    View logs for a minimal-stack service
-
 ${c_bold}SKU PROFILE${c_reset} ${c_muted}(pulls published image from GHCR)${c_reset}
   ${c_accent}profile <name> deploy${c_reset} [--pull]    Start SKU stack (--pull refreshes the image)
   ${c_accent}profile <name> stop${c_reset}               Stop containers (volumes kept)
@@ -1780,9 +1640,6 @@ ${c_bold}SHORTCUTS${c_reset}
 
 ${c_bold}EXAMPLES${c_reset}
   ./orkestra.sh
-  ./orkestra.sh minimal deploy --build
-  ./orkestra.sh minimal logs backend -f
-  ./orkestra.sh minimal reset --yes
   ./orkestra.sh profile billing deploy --pull
   ./orkestra.sh profile ai status
   ./orkestra.sh profile enterprise logs backend -f
@@ -1808,45 +1665,6 @@ cli_dispatch() {
         -v | --version | version)
             show_version
             exit 0
-            ;;
-
-        minimal)
-            PROFILE="minimal"
-            local subcmd=${1:-}
-            [ -n "$subcmd" ] && shift
-            case "$subcmd" in
-                deploy)
-                    local rebuild="no"
-                    while [ $# -gt 0 ]; do
-                        case "$1" in
-                            --build) rebuild="yes"; shift ;;
-                            *) die "Unknown flag: $1" ;;
-                        esac
-                    done
-                    minimal_deploy "$rebuild"
-                    ;;
-                stop) minimal_stop ;;
-                reset)
-                    local confirm="ask"
-                    while [ $# -gt 0 ]; do
-                        case "$1" in
-                            --yes | -y) confirm="yes"; shift ;;
-                            *) die "Unknown flag: $1" ;;
-                        esac
-                    done
-                    minimal_reset "$confirm"
-                    ;;
-                status) minimal_status ;;
-                info) minimal_info ;;
-                logs)
-                    local service=${1:-}
-                    [ -n "$service" ] && shift
-                    [ -z "$service" ] && die "Usage: ./orkestra.sh minimal logs <service> [-f] [-n N] [-t]"
-                    logs_cli "minimal" "$service" "$@"
-                    ;;
-                "") die "Missing minimal subcommand. Try --help." ;;
-                *) die "Unknown minimal subcommand: $subcmd" ;;
-            esac
             ;;
 
         profile)
@@ -1966,14 +1784,13 @@ main() {
 
     while true; do
         show_profile_menu
-        printf '%s%s Select profile [1-4]: %s' "$c_prompt" "$ic_arrow" "$c_reset"
+        printf '%s%s Select profile [1-3]: %s' "$c_prompt" "$ic_arrow" "$c_reset"
         local choice
         read -r choice
         case "$choice" in
-            1) minimal_menu_loop ;;
-            2) profile_picker_loop ;;
-            3) fullstack_menu_loop ;;
-            4)
+            1) profile_picker_loop ;;
+            2) fullstack_menu_loop ;;
+            3)
                 echo
                 printf '%s%s Goodbye!%s\n' "$c_success" "$ic_ok" "$c_reset"
                 exit 0

@@ -169,26 +169,24 @@ Load order (topologically sorted by `Dependencies()`): `user` → `notification`
 
 ## Quick Start
 
-### Minimal profile (recommended for first boot)
+### SKU profile (recommended for first boot)
 
-Boots only the core modules — user, notification, auth, navigation, plus the `dev` token generator — with MongoDB and Redis. Four containers total, no Gotenberg/Memgraph/Hindsight/Ollama, uses only publicly available Docker images so it runs on any VM without registry authentication. Ports are non-standard (3050/8050/27050/6350) so it can run alongside the full dev stack or other Docker projects without conflicts.
-
-The notification module boots in `noop` mode by default — verification and password-reset emails are logged to the backend stdout rather than delivered. To send real mail, set `NOTIFICATION_EMAIL_PROVIDER=smtp` plus `SMTP_HOST/PORT/USERNAME/PASSWORD` and `NOTIFICATION_EMAIL_FROM` in the env file, or configure them at `/admin/modules` once you are logged in.
+Pull a pre-built image from GHCR and layer it on top of `docker-compose.infra.yml` (MongoDB + Redis). Five SKUs are published per push: `starter`, `billing`, `ai`, `saas`, `enterprise`. Start with `starter` for the smallest surface (core modules only), or `enterprise` for everything.
 
 ```bash
 cd docker
-docker network create orkestra-network   # first time only
-docker compose -f docker-compose.minimal.yml --env-file .env.minimal up -d
+docker network create orkestra-network                              # first time only
+docker compose -f docker-compose.infra.yml up -d                    # mongodb + redis
+docker compose -f docker-compose.starter.yml --env-file .env up -d  # or billing / ai / saas / enterprise
 
-# Frontend: http://localhost:8050
-# Backend API: http://localhost:3050
-# API Docs: http://localhost:3050/docs
+# Backend API: http://localhost:3000
+# API Docs:    http://localhost:3000/docs
 
 # Generate an administrator token for first login (run from project root):
-ORKESTRA_API_URL=http://localhost:3050 ./scripts/devtoken.sh administrator
+ORKESTRA_API_URL=http://localhost:3000 ./scripts/devtoken.sh administrator
 ```
 
-Every optional module is loaded on boot regardless of profile. To enable additional modules, log in and toggle them at `/admin/modules` — the registry hot-reloads without a restart and auto-resolves dependencies.
+Every optional module compiled into the SKU is instantiated and initialized at boot regardless of enabled state. To enable additional addons that were compiled in, log in and toggle them at `/admin/modules` — the registry hot-reloads without a restart and auto-resolves dependencies. The notification module boots in `noop` mode by default — verification and password-reset emails are logged to the backend stdout rather than delivered. To send real mail, configure SMTP at `/admin/modules` after first login.
 
 ### Full development stack
 

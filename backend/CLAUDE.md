@@ -33,7 +33,7 @@ Enabled, Init, RegisterRoutes, Start, Stop, HealthCheck
 | saas         | `make build-saas`      | `no_addons addon_subscriptions addon_payments addon_compliance addon_identity addon_dev` |
 | enterprise   | `make build`           | (no tags — every addon)                                                                  |
 
-Container builds: `Dockerfile` accepts `--build-arg BUILD_TAGS="..."` (default empty = enterprise). `Dockerfile.minimal` defaults to `BUILD_TAGS="no_addons addon_dev"` so `docker-compose.minimal.yml` ships a true minimal binary. CI builds every profile on each PR via the matrix in `.github/workflows/backend.yml` — that's how a missing tag in `catalog_<addon>.go` gets caught before merge. On push to `dev`/`main`, the same matrix publishes one image per profile to GHCR: `ghcr.io/<repo>/backend:<profile>` (rolling) and `:<profile>-<sha>` (pinned). `:latest` stays as an alias for `:enterprise` for backward compatibility.
+Container builds: `Dockerfile` accepts `--build-arg BUILD_TAGS="..."` (default empty = enterprise). CI builds every profile on each PR via the matrix in `.github/workflows/backend.yml` — that's how a missing tag in `catalog_<addon>.go` gets caught before merge. On push to `dev`/`main`, the same matrix publishes one image per profile to GHCR: `ghcr.io/<repo>/backend:<profile>` (rolling) and `:<profile>-<sha>` (pinned). `:latest` stays as an alias for `:enterprise` for backward compatibility.
 
 **Cross-module communication**: modules discover each other through the `ServiceRegistry` (typed key-value store). Consumer modules import interfaces from `pkg/sdk/iface/` — never import another module's `services/` or `repository/` package.
 
@@ -91,8 +91,7 @@ backend/
 ├── tools/
 │   └── tenantscope/                # Static analyzer: enforces tenantrepo use in addons (CI gate)
 ├── Dockerfile                      # Multi-stage: dev (AIR) / production — Chainguard hardened base
-├── Dockerfile.minimal              # Public-image build (golang:1.25-alpine → alpine:3.20) used by the minimal compose profile
-├── Dockerfile.ai-service           # AI service build
+├── Dockerfile.ai-service           # AI service build (multi-stage, dhi.io hardened base)
 └── go.mod
 ```
 
@@ -149,14 +148,15 @@ docker compose -f docker-compose.dev.yml up -d
 docker compose logs -f orkestra-backend-dev
 ```
 
-**Minimal stack (public images only, core modules only, no hot reload):**
+**SKU profile stack (pre-built image from GHCR, no source build, no hot reload):**
 ```bash
 cd docker
-docker compose -f docker-compose.minimal.yml --env-file .env.minimal up -d
-docker compose -f docker-compose.minimal.yml logs -f backend
+docker compose -f docker-compose.infra.yml up -d                       # MongoDB + Redis
+docker compose -f docker-compose.starter.yml --env-file .env up -d     # or billing / ai / saas / enterprise
+docker compose -f docker-compose.starter.yml logs -f backend
 ```
 
-The minimal stack builds from `backend/Dockerfile.minimal` which uses `golang:1.25-alpine` → `alpine:3.20`. It's the recommended path when you don't have `dhi.io` registry access or just want a smoke-test-ready backend with the core modules + dev token generator. Runs on host ports 3050/8050/27050/6350 to avoid colliding with the dev stack.
+The five SKU compose files (`starter`/`billing`/`ai`/`saas`/`enterprise`) pull `ghcr.io/orkestra-cc/orkestra/backend:<sku>` and layer on `docker-compose.infra.yml`. They're the recommended path when you don't have `dhi.io` registry access or just want a smoke-test-ready backend; the `starter` SKU is the leanest (core modules only, no addons), with `enterprise` covering every addon.
 
 **WSL2 caveat**: AIR doesn't detect file changes on Windows mounts. Rebuild manually:
 ```bash

@@ -27,7 +27,7 @@
 [![OpenAPI 3.1](https://img.shields.io/badge/OpenAPI-3.1-6BA539?logo=openapiinitiative&logoColor=white&style=flat-square)](https://www.openapis.org)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg?style=flat-square)](LICENSE)
 
-[Quick Start](#quick-start-minimal-profile) · [SKU Profiles](#sku-profiles-pulled-from-ghcr) · [Architecture](CLAUDE.md) · [Backend](backend/CLAUDE.md) · [Frontend Admin](frontend-admin/CLAUDE.md) · [Frontend Client](frontend-client/CLAUDE.md) · [Docker](docker/CLAUDE.md)
+[Quick Start](#sku-profiles-pulled-from-ghcr) · [Architecture](CLAUDE.md) · [Backend](backend/CLAUDE.md) · [Frontend Admin](frontend-admin/CLAUDE.md) · [Frontend Client](frontend-client/CLAUDE.md) · [Docker](docker/CLAUDE.md)
 
 </div>
 
@@ -52,48 +52,6 @@ It runs on a **two-tier tenancy model**: Tier-1 operators manage staff and modul
 - **Data.** MongoDB 8 + Redis 8. Optional Memgraph knowledge graph for the RAG / graph modules.
 - **Auth.** Email + password (argon2id) and OAuth 2.1 (Google, Apple, GitHub, Discord), RS256 JWT, 6-role RBAC, optional TOTP + WebAuthn MFA, per-audience tier split for operator vs. client surfaces.
 - **AI sidecar (optional).** graph + aimodels + rag + agents can run as a separate `cmd/ai-service` binary; the monolith swaps in `RemoteAIModelProvider` / `RemoteRAGQueryProvider` HTTP clients via the `AI_SERVICE_URL` env var. Zero code changes in consumer modules. See `backend/cmd/ai-service/`.
-
-## Quick start, minimal profile
-
-The minimal profile boots Orkestra with just the core modules (user, notification, auth, navigation, dev-token generator) on any Docker host. Four containers, public base images only, ~500 MB of RAM. Ports are non-standard (3050/8050/27050/6350) so it runs alongside the full dev stack without colliding.
-
-```bash
-cd docker
-docker network create orkestra-network   # first time only
-docker compose -f docker-compose.minimal.yml --env-file .env.minimal up -d
-```
-
-Wait ~30 seconds for the backend to come up, then:
-
-| Service | URL |
-| --- | --- |
-| Frontend | http://localhost:8050 |
-| Backend API | http://localhost:3050 |
-| OpenAPI docs | http://localhost:3050/docs |
-| Health check | http://localhost:3050/health |
-
-Generate an administrator token for first login:
-
-```bash
-ORKESTRA_API_URL=http://localhost:3050 ./scripts/devtoken.sh administrator
-```
-
-### Enabling more modules
-
-Edit `docker/.env.minimal` and add module names to `MODULES`. Dependencies are auto-included.
-
-```bash
-# Enable billing + documents (documents is a dependency, auto-included)
-MODULES=dev,billing
-```
-
-Then restart the backend:
-
-```bash
-docker compose -f docker-compose.minimal.yml --env-file .env.minimal up -d --force-recreate backend
-```
-
-Addons with external dependencies (Gotenberg for PDFs, Memgraph for graph, Hindsight for agents) need their infrastructure to be reachable. Either add those services to the compose file or point the module at a remote host via the admin API (`GET/PATCH /v1/admin/modules`).
 
 ## SKU profiles, pulled from GHCR
 
@@ -132,16 +90,11 @@ docker compose -f docker-compose.dev.yml up -d
 
 `orkestra.sh` at the project root is the single entry point for every stack operation. It replaces the old `deploy.sh` and `logs.sh`.
 
-**Interactive TUI.** `./orkestra.sh` launches a profile menu (minimal / SKU profile picker / full stack) followed by a per-profile operations menu with deploy, stop, reset, status, logs, and info.
+**Interactive TUI.** `./orkestra.sh` launches a profile menu (SKU profile picker / full stack) followed by a per-profile operations menu with deploy, stop, reset, status, logs, and info.
 
 **CLI mode.** Every operation also works as a non-interactive command for scripting:
 
 ```bash
-# Minimal, built locally from Dockerfile.minimal
-./orkestra.sh minimal deploy --build
-./orkestra.sh minimal logs backend -f
-./orkestra.sh minimal reset --yes
-
 # SKU profile, pulled from GHCR (starter | billing | ai | saas | enterprise)
 ./orkestra.sh profile billing deploy --pull
 ./orkestra.sh profile ai status
@@ -215,7 +168,7 @@ orkestra/
 │   │   └── shared/          # Module interface, config, middleware, interfaces
 │   ├── tools/               # tenantscope + policycoverage CI gates
 │   ├── Dockerfile           # Chainguard hardened images (dev + prod)
-│   └── Dockerfile.minimal   # Public images for the minimal profile
+│   └── Dockerfile.ai-service # AI sidecar binary
 ├── frontend-admin/          # React 19 + Vite 7, operator console (Tier-1)
 ├── frontend-client/         # React 19 + Vite 7, external client SPA (Tier-2)
 ├── mobile/                  # Flutter 3.35
