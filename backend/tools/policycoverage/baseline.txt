@@ -74,6 +74,11 @@ permission.declared.unused:tenant.member.invite
 permission.declared.unused:tenant.member.read
 permission.declared.unused:tenant.member.remove
 permission.declared.unused:tenant.plan.update
+# tenant.update is consumed at addons/identity/module.go:166 (IdP + SCIM admin
+# CRUD) — invisible to the analyzer because the identity addon was extracted
+# to its own Go module in Phase 5k (commit 944dd19). Same caveat applies to
+# any future addons that route on tenant.* without an in-tree consumer.
+permission.declared.unused:tenant.update
 permission.declared.unused:user.delete
 permission.declared.unused:user.read
 permission.declared.unused:user.self
