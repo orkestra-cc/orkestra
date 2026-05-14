@@ -38,7 +38,12 @@ type gateUserFake struct {
 	lastLoginTouches []string
 	createdUsers     []*userModels.User
 	createWithPwdErr error
-	updateUserErr    error
+	// createFromOAuthAbortErr lets a test capture the role assigned at
+	// signup without driving the OAuth flow all the way through token
+	// issuance (where downstream fakes panic). When non-nil, the input
+	// is still appended to createdUsers before returning the error.
+	createFromOAuthAbortErr error
+	updateUserErr           error
 }
 
 func newGateUserFake() *gateUserFake {
@@ -84,7 +89,11 @@ func (f *gateUserFake) GetUserForAuth(_ context.Context, email string) (*userMod
 }
 
 func (f *gateUserFake) CreateUserFromOAuth(_ context.Context, in *userModels.CreateUserInput) (*userModels.User, error) {
-	return f.createInternal(in)
+	u, _ := f.createInternal(in)
+	if f.createFromOAuthAbortErr != nil {
+		return nil, f.createFromOAuthAbortErr
+	}
+	return u, nil
 }
 
 func (f *gateUserFake) CreateUserWithPassword(_ context.Context, in *userModels.CreateUserInput) (*userModels.User, error) {

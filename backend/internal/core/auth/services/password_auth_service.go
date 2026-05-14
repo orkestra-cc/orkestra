@@ -232,7 +232,13 @@ func (s *PasswordAuthService) Register(ctx context.Context, in RegisterInput) (*
 	// minted up front so we can hand it to both the claimer and the
 	// user-create call.
 	proposedUUID := uuid.New().String()
-	role := "operator"
+	// Tier-default role for a non-first signup. Operator-tier defaults to
+	// "guest" (lowest system role) so a fresh password registration can't
+	// grant itself elevated privileges; client-tier consults the
+	// admin-configurable defaultRoleClient (falls back to "operator" when
+	// unset). The first-admin claim below upgrades the very first account
+	// to "super_admin" regardless of tier.
+	role := "guest"
 	if s.audience == PolicyAudienceClient && s.policy != nil {
 		role = s.policy.DefaultClientRole(ctx)
 	}

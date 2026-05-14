@@ -283,6 +283,26 @@ func TestRegister_EmailDomainNotAllowed_ReturnsError(t *testing.T) {
 	}
 }
 
+func TestRegister_OperatorDefaultRoleGuest(t *testing.T) {
+	// Non-first operator-tier password signup must land as "guest"
+	// (lowest system role) so a fresh registration can't silently grant
+	// itself elevated privileges. First-admin sentinel covers the
+	// "first account on a fresh install" case separately.
+	env := newGatesEnv(t, PolicyAudienceOperator, nil, nil)
+	env.users.seed(activeUser("seed@example.com", "x"))
+	env.claimer.claimed = map[string]bool{"seed": true} // next claim returns false
+
+	u, err := env.auth.Register(context.Background(), RegisterInput{
+		Email: "newop@example.com", Password: "correct-horse-battery", FullName: "New", IP: "1.1.1.1",
+	})
+	if err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	if u.Role != "guest" {
+		t.Fatalf("expected role=guest for non-first operator-tier signup, got %q", u.Role)
+	}
+}
+
 func TestRegister_DefaultRoleClient_AppliedFromPolicy(t *testing.T) {
 	env := newGatesEnv(t, PolicyAudienceClient, map[string]string{
 		"defaultRoleClient": "guest",
@@ -493,6 +513,77 @@ func TestOAuthCallback_SignupDisabled_ReturnsErr(t *testing.T) {
 	}
 }
 
+func TestOAuthCallback_OperatorDefaultRoleGuest(t *testing.T) {
+	// Non-first OAuth signup on the operator surface lands as "guest"
+	// (lowest system role) so a fresh OAuth callback can't silently
+	// grant itself elevated privileges. First-admin sentinel claim
+	// upgrades the very first account to super_admin — covered
+	// elsewhere; here we want the non-first path. Abort the OAuth flow
+	// right after CreateUserFromOAuth captures the role so downstream
+	// token-issuance fakes (which panic) don't run.
+	env := newOAuthGatesEnv(t, PolicyAudienceOperator, nil)
+	env.users.seed(activeUser("seed@example.com", "x"))
+	env.claimer.claimed = map[string]bool{"seed": true} // next claim returns false
+	env.users.createFromOAuthAbortErr = errors.New("stop here, role captured")
+	_, _ = env.auth.HandleOAuthCallbackWithLinking(
+		context.Background(),
+		authModels.OAuthProviderGoogle,
+		map[string]any{"id": "g-200", "email": "joiner@example.com", "name": "Joiner"},
+		nil, &authModels.SecurityContext{}, &authModels.DeviceInfo{},
+	)
+	created := env.users.byEmail["joiner@example.com"]
+	if created == nil {
+		t.Fatalf("OAuth signup did not persist the new user before abort")
+	}
+	if created.Role != "guest" {
+		t.Fatalf("operator-tier OAuth signup must default to role=guest, got %q", created.Role)
+	}
+}
+
+func TestOAuthCallback_ClientDefaultRoleReadsPolicy(t *testing.T) {
+	// Tier-2 OAuth signup must honour the admin-configurable
+	// defaultRoleClient — mirrors the password Register() path so the
+	// two surfaces agree on the role for a new tier-2 account.
+	env := newOAuthGatesEnv(t, PolicyAudienceClient, map[string]string{
+		"defaultRoleClient": "guest",
+	})
+	env.users.seed(activeUser("seed-client@example.com", "x"))
+	env.claimer.claimed = map[string]bool{"seed": true} // next claim returns false
+	env.users.createFromOAuthAbortErr = errors.New("stop here, role captured")
+	_, _ = env.auth.HandleOAuthCallbackWithLinking(
+		context.Background(),
+		authModels.OAuthProviderGoogle,
+		map[string]any{"id": "g-300", "email": "client-joiner@example.com", "name": "Client"},
+		nil, &authModels.SecurityContext{}, &authModels.DeviceInfo{},
+	)
+	created := env.users.byEmail["client-joiner@example.com"]
+	if created == nil {
+		t.Fatalf("OAuth signup did not persist the new user before abort")
+	}
+	if created.Role != "guest" {
+		t.Fatalf("client-tier OAuth signup must read defaultRoleClient (=guest), got %q", created.Role)
+	}
+}
+
+func TestOAuthCallback_RegistrationDisabled_ReturnsErr(t *testing.T) {
+	// The umbrella "Allow signups on operator console" toggle must also
+	// gate the OAuth new-user branch — not just the password Register()
+	// path. Audience-scoped: operator surface reads
+	// registrationEnabledAdmin.
+	env := newOAuthGatesEnv(t, PolicyAudienceOperator, map[string]string{
+		"registrationEnabledAdmin": "false",
+	})
+	_, err := env.auth.HandleOAuthCallbackWithLinking(
+		context.Background(),
+		authModels.OAuthProviderGoogle,
+		map[string]any{"id": "g-100", "email": "newcomer2@example.com", "name": "New2"},
+		nil, &authModels.SecurityContext{}, &authModels.DeviceInfo{},
+	)
+	if !errors.Is(err, ErrOAuthSignupDisabled) {
+		t.Fatalf("got %v, want ErrOAuthSignupDisabled", err)
+	}
+}
+
 func TestOAuthCallback_AutoLinkDisabled_ReturnsErr(t *testing.T) {
 	env := newOAuthGatesEnv(t, PolicyAudienceOperator, map[string]string{
 		"oauthAutoLinkByEmail": "false",
@@ -520,6 +611,7 @@ type oauthGatesEnv struct {
 	sessions *gateSessionRepo
 	policy   *AuthPolicyService
 	auth     AuthService
+	claimer  *gateClaimer
 }
 
 func newOAuthGatesEnv(t *testing.T, audience PolicyAudience, policyValues map[string]string) *oauthGatesEnv {
@@ -537,6 +629,7 @@ func newOAuthGatesEnv(t *testing.T, audience PolicyAudience, policyValues map[st
 	}
 	jwt.SetTenantProvider(gateTenantProvider{})
 
+	claimer := newGateClaimer()
 	authSvc, err := NewAuthService(&AuthConfig{
 		UserService:         users,
 		TenantProvider:      gateTenantProvider{},
@@ -546,7 +639,7 @@ func newOAuthGatesEnv(t *testing.T, audience PolicyAudience, policyValues map[st
 		JWTService:          jwt,
 		MFAFactorRepo:       nil,
 		MFAChallengeService: nil,
-		FirstAdminClaimer:   newGateClaimer(),
+		FirstAdminClaimer:   claimer,
 	})
 	if err != nil {
 		t.Fatalf("NewAuthService: %v", err)
@@ -554,7 +647,7 @@ func newOAuthGatesEnv(t *testing.T, audience PolicyAudience, policyValues map[st
 	authSvc.SetPolicy(policy)
 	authSvc.SetAudience(audience)
 	return &oauthGatesEnv{
-		users: users, refresh: refresh, sessions: sessions, policy: policy, auth: authSvc,
+		users: users, refresh: refresh, sessions: sessions, policy: policy, auth: authSvc, claimer: claimer,
 	}
 }
 

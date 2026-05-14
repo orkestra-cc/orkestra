@@ -1446,14 +1446,22 @@ func (s *authService) HandleOAuthCallbackWithLinking(ctx context.Context, provid
 		fmt.Printf("[AUTH_DEBUG] No existing provider link found, checking for user by email: %s\n", email)
 		userResponse, err := s.userService.GetUserByEmail(ctx, email)
 		if err != nil {
-			// Phase 9: oauthAllowSignup gate. When the policy is wired
-			// and the audience-scoped toggle is off, an unknown email
-			// must NOT be auto-provisioned via OAuth — keeps signups
-			// invitation-only while OAuth login still works for
-			// existing accounts.
-			if s.policy != nil && !s.policy.OAuthAllowSignup(ctx, s.audience) {
-				fmt.Printf("[AUTH_DEBUG] OAuth signup disabled by policy for audience %q, refusing to create user\n", s.audience)
-				return nil, ErrOAuthSignupDisabled
+			// Signup gates. Two toggles must both allow the new account:
+			// the audience-scoped registration kill switch (the umbrella
+			// "Allow signups" toggle, shared with password signup) and
+			// the OAuth-specific gate. Unlike the password Register()
+			// path there is no first-user bypass here — operators
+			// bootstrap a fresh install via the password flow, which
+			// retains its own kill-switch bypass for that case.
+			if s.policy != nil {
+				if !s.policy.RegistrationAllowed(ctx, s.audience) {
+					fmt.Printf("[AUTH_DEBUG] Registration disabled by policy for audience %q, refusing OAuth signup\n", s.audience)
+					return nil, ErrOAuthSignupDisabled
+				}
+				if !s.policy.OAuthAllowSignup(ctx, s.audience) {
+					fmt.Printf("[AUTH_DEBUG] OAuth signup disabled by policy for audience %q, refusing to create user\n", s.audience)
+					return nil, ErrOAuthSignupDisabled
+				}
 			}
 			fmt.Printf("[AUTH_DEBUG] User not found in database, creating new user\n")
 			// Create new user via UserService
@@ -1462,13 +1470,21 @@ func (s *authService) HandleOAuthCallbackWithLinking(ctx context.Context, provid
 
 			// Atomic first-admin claim (replaces the former count-based race).
 			// If the sentinel is already taken by another concurrent signup,
-			// fall through to operator role.
-			role := "operator"
+			// fall through to the tier-default role: "guest" (lowest system
+			// role) for operator-tier signups so a fresh OAuth callback
+			// can't grant itself elevated privileges by default; for
+			// client-tier signups, the admin-configurable defaultRoleClient
+			// (falls back to "operator" when unset, matching today's
+			// password-path behaviour).
+			role := "guest"
+			if s.audience == PolicyAudienceClient && s.policy != nil {
+				role = s.policy.DefaultClientRole(ctx)
+			}
 			claimed := false
 			if s.firstAdminClaimer != nil {
 				c, err := s.firstAdminClaimer.ClaimFirstAdmin(ctx, newUUID)
 				if err != nil {
-					fmt.Printf("[AUTH_DEBUG] WARNING: first-admin claim failed: %v; defaulting to operator\n", err)
+					fmt.Printf("[AUTH_DEBUG] WARNING: first-admin claim failed: %v; defaulting to %q\n", err, role)
 				} else if c {
 					claimed = true
 					role = "super_admin"
