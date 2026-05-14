@@ -41,7 +41,7 @@ jobs:
 
       - uses: actions/setup-go@v6
         with:
-          go-version-file: '../go.work'
+          go-version-file: 'go.work'
 
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v8
@@ -65,7 +65,7 @@ jobs:
 
       - uses: actions/setup-go@v6
         with:
-          go-version-file: '../go.work'
+          go-version-file: 'go.work'
 
       - name: Download dependencies
         run: go mod download
@@ -85,7 +85,7 @@ jobs:
 
       - uses: actions/setup-go@v6
         with:
-          go-version-file: '../go.work'
+          go-version-file: 'go.work'
 
       - name: Build AI service binary
         run: go build -o bin/ai-service ./cmd/ai-service/
