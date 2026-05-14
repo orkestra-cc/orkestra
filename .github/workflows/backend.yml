@@ -112,7 +112,7 @@ jobs:
       - name: Refresh badge SVG
         run: scripts/refresh-coverage-badge.sh backend
       - name: Commit refreshed badge
-        uses: stefanzweifel/git-auto-commit-action@v5
+        uses: stefanzweifel/git-auto-commit-action@v7
         with:
           commit_message: "chore(badges): refresh backend coverage [skip ci]"
           file_pattern: .github/badges/backend-coverage.svg
