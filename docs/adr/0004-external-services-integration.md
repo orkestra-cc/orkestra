@@ -10,36 +10,46 @@
 
 ## Context
 
+Orkestra is intended as the **control plane that a company runs to manage its own self-hosted fleet** — internal users, RBAC, billing, *and* the set of supporting services (transcription, OCR, document parsing, workflow automation, object storage, web crawling, ...) that live on the operator's infrastructure under company control. Every new self-hosted service that joins the fleet should slot into the same provisioning / auth / metering / lifecycle plumbing as the previous one. Today there is no formal pattern.
+
 Three forms of integration with code outside the Orkestra monolith already coexist or are imminent, and they need to be told apart:
 
 1. **Addon (in-process)** — Go module compiled into the monolith binary. Cross-module access via `iface` interfaces + `ServiceRegistry`. Examples: `billing`, `documents`, `subscriptions`, `payments`.
 2. **Sidecar (out-of-process, same `go.mod`)** — separate binary cut from the same backend module. The AI service split (`cmd/ai-service/`, monolith communicates via `iface.AIModelProvider` over HTTP). Used for runtime separation, not boundary separation.
-3. **External service (out-of-process, separate runtime, separate repo, separate team boundary)** — a self-contained product running on its own host with its own database, deployment cycle, and (often) its own customer-facing UI.
+3. **External service (out-of-process, self-hosted under operator control, independent deployment lifecycle)** — a separate product running on its own host or VM on the operator's internal network, with its own release cycle, that Orkestra acts as the control plane for. May be stateful (holds customer data) or a stateless processor — both shapes belong here.
 
-Category 3 has no formal pattern today. Two concrete cases are imminent:
+Category 3 has no formal pattern today. Near-term cases drive the work:
 
 - **octo-stt** — Python/CUDA speech-to-text service on `ai-1`, multi-tenant by design (`workspace_id` on every collection). To be consumed by both Tier-1 (operator's own use) and Tier-2 (sold as `octo-stt — 50h` subscriptions via `subscriptions`/`payments`). Its `AuthProvider` abstraction is already built to delegate to Orkestra (`AUTH_BACKEND=orkestra`).
 - **n8n self-hosted** — Node.js workflow automation. **NOT** multi-tenant in Community Edition. Intended for Tier-1 operator use only (each internal tenant gets its own workflows). Per-tenant instance topology is the only sane fit.
+
+Additional candidates the framework must accommodate as the fleet grows:
+
+- **docling self-hosted** — IBM-led Python document parser running on its own VM. Stateless converter (upload → Markdown/JSON); consumed primarily by `rag` ingestion, possibly sold as a `docling — 1M-pages` capability.
+- **crawl4ai self-hosted** — Python LLM-friendly web crawler on its own VM. Stateless per request; consumed by `agents` and `sales`, possibly sold as a web-research capability.
+- **rustfs self-hosted** — Rust S3-compatible object store on its own host. Stateful (objects = customer data); usable as substrate for `documents`/`rag` uploads and (later) as a sellable storage product. See §Out of scope on gauge-based metering.
 
 Without a uniform pattern each integration would reinvent provisioning, key issuance, usage tracking, GDPR cascade, and outbound webhook delivery — leaving inconsistent security boundaries and ~80% duplicated plumbing.
 
 ## Decision
 
-Establish **external service** as a formal class of integration distinct from addon and sidecar, with a dedicated broker module (`external_services`) and a generic framework that classifies products along three orthogonal axes.
+Establish **external service** as a formal class of integration distinct from addon and sidecar, with a dedicated broker module (`external_services`) and a generic framework that classifies products along four orthogonal axes.
 
 ### 1. Boundary definition
 
 A component is an *external service* if it satisfies all of:
 
-- Runs in a separate process with a runtime/toolchain Orkestra cannot embed (non-Go; GPU-bound; third-party OSS we don't control).
+- Runs in a separate process with a runtime/toolchain Orkestra cannot embed (non-Go; GPU-bound; upstream OSS we don't control; etc.).
 - Has independent deployment, versioning, and release cycle from Orkestra.
-- Holds its own customer-relevant data (transcripts, workflows, files) — Orkestra holds only the tenant identity and integration metadata.
+- **Is part of the operator's self-hosted fleet** — the operator deploys, monitors, upgrades, and decommissions it on their own infrastructure (separate VM, container, or host on the internal network). Orkestra is the control plane for its lifecycle.
 - Communicates with Orkestra over HTTP under a versioned contract; never via direct DB or in-process call.
+
+Whether the service **holds** customer-relevant data (transcripts, workflows, objects) versus **passes it through** statelessly (document parsing, web crawling) is captured by the `DataResidency` axis in §3, not by the boundary test. Both shapes are first-class members of the fleet and use the same broker.
 
 Counter-examples (deliberately excluded):
 
 - **AI sidecar** is not an external service — same `go.mod`, same team, deployment split for resource isolation only.
-- **Stripe / Mailgun / SMTP providers** are vendor APIs, already handled by `payments` / `notification`. This ADR doesn't displace them.
+- **SaaS vendor APIs (Stripe, Mailgun, AssemblyAI cloud)** are managed by the vendor, not the operator. They are consumed via their public APIs from feature addons (`payments`, `notification`, etc.) and are out of scope for this framework.
 - **Hindsight** is consumed via `iface.AIModelProvider` and is part of the AI sidecar addon chain.
 
 ### 2. Broker module: `external_services`
@@ -55,24 +65,26 @@ A new Go addon at `backend/internal/addons/external_services/`. Eventual SDK spl
 
 The broker is intentionally **stateless about product behavior**: every product-specific decision lives in its driver.
 
-### 3. Three classification axes
+### 3. Four classification axes
 
 ```go
 type Product struct {
-    Code             string    // "octo-stt", "n8n"
+    Code             string    // "octo-stt", "n8n", "docling"
     Audience         Audience  // operator-only | sellable
     MeteringProtocol Protocol  // push | pull
     Topology         Topology  // shared | per-tenant | byo
+    DataResidency    Residency // resident | passthrough
     BaseURL          string    // or URL template for per-tenant ("{slug}.n8n.tuodominio.it")
     SharedSecret     string    // HMAC, encrypted at rest
     CapabilityID     string    // empty for operator-only
-    UnitTypes        []string  // ["seconds", "tokens_input", "tokens_output"]
+    UnitTypes        []string  // ["seconds", "tokens_input", "tokens_output", "pages"]
     DataRegion       string    // "eu"
 }
 
-type Audience string  // "operator-only" | "sellable"
-type Protocol string  // "push" | "pull"
-type Topology string  // "shared" | "per-tenant" | "byo"
+type Audience  string  // "operator-only" | "sellable"
+type Protocol  string  // "push" | "pull"
+type Topology  string  // "shared" | "per-tenant" | "byo"
+type Residency string  // "resident" | "passthrough"
 ```
 
 **Axis 1 — Audience**: determines which Orkestra modules wire into the lifecycle.
@@ -91,14 +103,23 @@ type Topology string  // "shared" | "per-tenant" | "byo"
 - `per-tenant` — broker provisions one dedicated instance per tenant. The product is single-tenant or lacks native isolation we trust.
 - `byo` — the tenant runs their own instance, registers URL + credentials as a `Connection`. **Out of scope for v1**; reserved for future commercial tier.
 
+**Axis 4 — Data residency**: determines whether the GDPR cascade (§10) applies.
+
+- `resident` — the product stores customer-relevant data (transcripts, workflows, objects, files) that outlives any individual request. Tenant deletion **must** cascade to the product per §10.
+- `passthrough` — the product is a stateless processor (document parser, web crawler, format converter). Each call is self-contained; there is no remote customer data to delete on `tenant.purged`. The workspace lifecycle still applies (key revocation, catalog unbinding), but Phase 1/2 of §10 are short-circuited — see §10 for the exemption rules. Passthrough services are still part of the fleet and still go through the broker for provisioning, monitoring, key issuance, usage metering, and SSO.
+
 ### 4. Reference classifications
 
-| Product | Audience | Protocol | Topology |
-|---|---|---|---|
-| `octo-stt` | sellable | push | shared |
-| `n8n` self-hosted | operator-only | pull | per-tenant |
-| `octo-ocr` (future) | sellable | push | shared |
-| `assemblyai-burst` (future cloud fallback) | sellable | pull | shared |
+| Product | Audience | Protocol | Topology | DataResidency |
+|---|---|---|---|---|
+| `octo-stt` | sellable | push | shared | resident |
+| `n8n` self-hosted | operator-only | pull | per-tenant | resident |
+| `docling` self-hosted | operator-only / sellable | push | shared | passthrough |
+| `crawl4ai` self-hosted | operator-only / sellable | push | shared | passthrough |
+| `rustfs` self-hosted | operator-only (substrate) / sellable (storage product) | pull (gauge — see Out of scope) | shared (bucket-per-tenant) | resident |
+| `octo-ocr` (future) | sellable | push | shared | resident |
+
+Cloud-only services (e.g. AssemblyAI as a burst fallback) are deliberately **not** in this table — they are managed by the vendor, not the operator, and fail the boundary test in §1. If used, they are consumed from a feature addon as a vendor API, not registered in the broker catalog.
 
 ### 5. `ProductDriver` contract
 
@@ -309,7 +330,9 @@ Out of scope:
 
 ### 10. Data and GDPR
 
-Customer-relevant data (transcripts, workflows, embeddings, audio files) **resides in the external service**, never in Orkestra. Orkestra stores only:
+**Applicability**: the cascade described below applies only to products with `DataResidency = resident`. For `passthrough` products (stateless processors like docling, crawl4ai), there is no remote customer data to delete; instead `tenant.archived` revokes the workspace's API keys (immediate) and `tenant.purged` removes the catalog binding (`external_services_workspaces` row marked `purged`). The workspace lifecycle state machine (§5) still applies, but Phase 1/2 below are short-circuited and no `workspace.deleted` cascade webhook is emitted. Passthrough drivers therefore implement `SuspendWorkspace` as "revoke API keys" and `Deprovision` as "revoke keys + unbind catalog row"; both are idempotent and cheap.
+
+Customer-relevant data (transcripts, workflows, embeddings, audio files) of `resident` products **resides in the external service**, never in Orkestra. Orkestra stores only:
 
 - Tenant identity and metadata (`tenant` aggregate from ADR-0001).
 - Integration binding (`external_services_workspaces`).
@@ -369,6 +392,7 @@ Data residency: each product declares its `DataRegion` in the catalog. Tenants w
 - Tier-change live-resize for per-tenant instances (v1: stop + reprovision with new `ResourceClass`).
 - Cloud burst / fallback routing (e.g. octo-stt → AssemblyAI when GPU saturated).
 - BYO topology (`byo` axis value).
+- **Storage-as-product gauge metering** — sellable storage products (RustFS exposed to Tier-2 as e.g. `storage — 100GB`) require gauge-based usage tracking (`bytes_stored × time`, integrated over the billing period) rather than the counter-based `GrantedUnits` model in §7, and request-time `jobs/authorize` is impractical for every S3 op. Deferred to a follow-up ADR. RustFS as a Tier-1 substrate (no per-tenant quota enforcement) is *not* blocked by this — it can ship under v1 as an `operator-only` product.
 
 ## Alternatives considered
 
@@ -392,12 +416,13 @@ Rejected. That pattern splits a single product's deployment for resource reasons
 | Phase | Scope | Outcome |
 |---|---|---|
 | **1 — Broker skeleton** | `external_services` addon: models, catalog CRUD, admin routes (`/v1/admin/external-services/products`, `/workspaces`, `/keys`), capability registration, `ProductDriver` interface in `pkg/sdk/iface/`. No concrete drivers yet. | Operator-admin UI exists; products can be registered but nothing is provisioned. |
-| **2 — octo-stt driver (push, shared, sellable)** | `driver_octo_stt.go` with `Provision`/`Deprovision`/`IssueAPIKey`. Internal endpoints `/internal/v1/external-services/{keys/verify, usage}`. Outbound `workspace.created/deleted` webhooks. Side of octo-stt: implement `OrkestraAuthProvider`. | Tier-1 internal tenant can use octo-stt end-to-end with Orkestra as control plane. |
+| **2 — octo-stt driver (push, shared, sellable, resident)** | `driver_octo_stt.go` with `Provision`/`Deprovision`/`IssueAPIKey`. Internal endpoints `/internal/v1/external-services/{keys/verify, usage}`. Outbound `workspace.created/deleted` webhooks. Side of octo-stt: implement `OrkestraAuthProvider`. | Tier-1 internal tenant can use octo-stt end-to-end with Orkestra as control plane. |
 | **3 — Subscription wiring** | `EntitlementSyncer` observer in `external_services`, capability `external-services.octo-stt.workspace`, Tier-2 self-service routes `/v1/me/external-services/*`. `PricingTier.GrantedUnits` field added. Quota enforcement via `/internal/v1/external-services/jobs/authorize`. | Tier-2 client can buy and consume octo-stt subscription end-to-end. |
-| **4 — n8n driver (pull, per-tenant, operator-only) + JWKS + SSO** | `driver_n8n.go`, Docker Compose template at `docker/templates/n8n/`, edge nginx subdomain routing, polling job for usage. Auth module exposes `/.well-known/jwks.json`. Orkestra-as-IdP SSO via `iface.JWTProvider` with `aud=external-service:n8n`. | Operator can provision n8n per internal tenant with SSO login from Orkestra UI. |
-| **5 — GDPR cascade + audit** | `compliance` listener for `tenant.purged`, cascade `Deprovision` across all workspaces. SSO audit log entries. `external_services_workspaces.purged_at` lifecycle. Manual-task fallback for pull-mode products without delete API. | Tenant erasure deletes data across all integrated services; audit trail complete; GA-ready. |
+| **4 — n8n driver (pull, per-tenant, operator-only, resident) + JWKS + SSO** | `driver_n8n.go`, Docker Compose template at `docker/templates/n8n/`, edge nginx subdomain routing, polling job for usage. Auth module exposes `/.well-known/jwks.json`. Orkestra-as-IdP SSO via `iface.JWTProvider` with `aud=external-service:n8n`. | Operator can provision n8n per internal tenant with SSO login from Orkestra UI. |
+| **5 — Passthrough driver exemplar (docling — push, shared, passthrough)** | `driver_docling.go` with `Provision`/`Deprovision`/`IssueAPIKey` shaped for the passthrough path: no cascade webhook on delete, `SuspendWorkspace` revokes keys only. Exercises the §10 passthrough exemption end-to-end. Validates that stateless processors get the catalog, capability gating, key issuance, usage metering, and SSO without paying for the GDPR-cascade machinery. | Stateless services join the fleet under the same broker; framework is proven against both residency shapes before GA. |
+| **6 — GDPR cascade + audit** | `compliance` listener for `tenant.purged`, cascade `Deprovision` across all `resident` workspaces (passthrough workspaces unbind without webhook per §10). SSO audit log entries. `external_services_workspaces.purged_at` lifecycle. Manual-task fallback for pull-mode resident products without a delete API. | Tenant erasure deletes data across all integrated services; audit trail complete; GA-ready. |
 
-Each phase is independently deployable. Phases 2-3 unblock octo-stt; phase 4 unblocks n8n; phase 5 closes compliance gaps before GA.
+Each phase is independently deployable. Phases 2-3 unblock octo-stt; phase 4 unblocks n8n; phase 5 unblocks docling/crawl4ai and validates the passthrough path; phase 6 closes compliance gaps before GA.
 
 ## References
 
