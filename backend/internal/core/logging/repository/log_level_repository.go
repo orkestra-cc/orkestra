@@ -44,6 +44,7 @@ func NewMongoRepository(coll *mongo.Collection) Repository {
 // one document.
 func (r *mongoRepo) Get(ctx context.Context) (*models.LogLevelDoc, error) {
 	var doc models.LogLevelDoc
+	//tenantscope:allow log_levels is a single global system-config document (_id="default"), not tenant-data — see backend/internal/core/logging/CLAUDE.md "What this module does NOT do".
 	err := r.coll.FindOne(ctx, bson.M{"_id": models.DefaultConfigKey}).Decode(&doc)
 	if err != nil {
 		if errors.Is(err, mongo.ErrNoDocuments) {
@@ -65,6 +66,7 @@ func (r *mongoRepo) Upsert(ctx context.Context, doc *models.LogLevelDoc) error {
 		doc.UpdatedAt = time.Now().UTC()
 	}
 	opts := options.Replace().SetUpsert(true)
+	//tenantscope:allow log_levels is a single global system-config document (_id="default"), not tenant-data — see backend/internal/core/logging/CLAUDE.md "What this module does NOT do".
 	_, err := r.coll.ReplaceOne(ctx, bson.M{"_id": doc.ConfigKey}, doc, opts)
 	return err
 }
