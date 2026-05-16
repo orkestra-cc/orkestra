@@ -123,7 +123,7 @@ func main() {
 
 	// Router + middleware
 	router := chi.NewRouter()
-	setupAIMiddleware(router, cfg)
+	setupAIMiddleware(router, cfg, logger)
 
 	// API config
 	apiConfig := huma.DefaultConfig("Orkestra AI Service", "1.0.0")
@@ -257,7 +257,14 @@ func (c *sidecarSessionRevocationChecker) IsRevoked(ctx context.Context, sid str
 }
 
 // setupAIMiddleware configures global middleware for the AI service.
-func setupAIMiddleware(router *chi.Mux, cfg *config.Config) {
+func setupAIMiddleware(router *chi.Mux, cfg *config.Config, logger *slog.Logger) {
+	// ADR-0005 §2 — structured request logger sits as outer as possible
+	// so CORS rejects and body-size rejects produce a log line.
+	// RequestID + RealIP must run first to populate request_id and IP.
+	router.Use(chiMiddleware.RequestID)
+	router.Use(chiMiddleware.RealIP)
+	router.Use(middleware.RequestLogger(logger, middleware.NewRequestLoggerOptions()))
+
 	// Security headers
 	router.Use(func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -291,20 +298,6 @@ func setupAIMiddleware(router *chi.Mux, cfg *config.Config) {
 		AllowCredentials: true,
 		MaxAge:           300,
 	}))
-
-	router.Use(chiMiddleware.RequestID)
-	router.Use(chiMiddleware.RealIP)
-
-	// Logger (exclude /health)
-	router.Use(func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.URL.Path != "/health" {
-				chiMiddleware.Logger(next).ServeHTTP(w, r)
-			} else {
-				next.ServeHTTP(w, r)
-			}
-		})
-	})
 
 	// Inject HTTP request into context for Huma handlers
 	router.Use(func(next http.Handler) http.Handler {

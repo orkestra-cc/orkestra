@@ -38,6 +38,10 @@ func SetupLogger() *slog.Logger {
 		handler = slog.NewTextHandler(os.Stdout, &opts)
 	}
 
+	// ADR-0005 §1.1 — wrap with trace correlation so every log line
+	// stamped via *Context variants carries trace_id / span_id.
+	handler = NewTraceContextHandler(handler)
+
 	logger := slog.New(handler)
 
 	return logger.With(

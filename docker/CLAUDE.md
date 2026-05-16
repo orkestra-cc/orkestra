@@ -629,6 +629,13 @@ The pre-provisioned "Tenant traces" dashboard (`Orkestra` folder in Grafana) tak
 
 Phase 5.3 landed `/metrics` on the backend (`GET http://backend:3000/metrics`), scraped automatically by Prometheus. Three metric families ship today — Cedar shadow divergence, capability denial, entitlement projection lag — with the label schema frozen in [ADR-0002](../docs/adr/0002-metrics-label-schema.md). Disable the endpoint by setting `METRICS_ENABLED=false`.
 
+[ADR-0005](../docs/adr/0005-observability-logging-tracing-metrics.md) (Phase A) replaced Chi's unstructured request logger with a structured one that emits one JSON line per request with `trace_id`, `span_id`, `tenant_id`, `tenant_kind`, `user_id`, `user_role`, `audience`, `request_id`, `method`, `path`, `status`, `duration_ms`, `bytes`, `remote`, `ua` (and `slow=true` when over threshold). Two process-scoped tunables, both safe to leave at the default:
+
+- `LOG_HTTP_SKIP_PATHS` — comma list of exact paths to suppress (`/health,/ready,/metrics,/openapi.json` by default). When set, REPLACES the default list — include defaults explicitly to extend.
+- `LOG_HTTP_SLOW_THRESHOLD_MS` — integer milliseconds; default `1000`. Slower requests get `slow=true` stamped so `{slow=true}` is a one-liner in Loki.
+
+The request-log payload is **allowlist-only** by ADR contract — bodies, the `Authorization` header, and raw query strings never reach the log surface.
+
 ### Legacy: External monitoring integrations
 
 ### External monitoring alternatives

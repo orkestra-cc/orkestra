@@ -10,6 +10,7 @@ Durable, dated records of architectural decisions that shape Orkestra. One file 
 | [0002](0002-metrics-label-schema.md) | Prometheus metric label schema | Accepted | 2026-04-20 |
 | [0003](0003-three-audience-host-split.md) | Three-audience API host split (operator / client / service) | Proposed | 2026-04-30 |
 | [0004](0004-external-services-integration.md) | External services integration framework | Proposed | 2026-05-14 |
+| [0005](0005-observability-logging-tracing-metrics.md) | Observability — logging, tracing, metrics as core platform features | Proposed | 2026-05-16 |
 
 ## Format
 

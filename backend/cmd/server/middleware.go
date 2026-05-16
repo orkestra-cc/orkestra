@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -30,7 +31,17 @@ func setupMiddleware(
 	deviceMW *authMiddleware.DeviceMiddleware,
 	audience string,
 	audCfg config.AudienceConfig,
+	logger *slog.Logger,
 ) {
+	// ADR-0005 §2 — structured request logger sits as outer as possible
+	// so CORS rejects, body-size rejects, and audience-mismatch rejects
+	// all produce a log line. RequestID + RealIP must run first so the
+	// logger can attach request_id and the real client IP; otherwise the
+	// logger has no way to learn them from r.
+	router.Use(chiMiddleware.RequestID)
+	router.Use(chiMiddleware.RealIP)
+	router.Use(authMiddleware.RequestLogger(logger, authMiddleware.NewRequestLoggerOptions()))
+
 	// Security headers
 	router.Use(func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -81,20 +92,6 @@ func setupMiddleware(
 	if audience != "" {
 		router.Use(authMiddleware.RequireAudience(audience))
 	}
-
-	router.Use(chiMiddleware.RequestID)
-	router.Use(chiMiddleware.RealIP)
-
-	// Logger that excludes /health
-	router.Use(func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.URL.Path != "/health" {
-				chiMiddleware.Logger(next).ServeHTTP(w, r)
-			} else {
-				next.ServeHTTP(w, r)
-			}
-		})
-	})
 
 	router.Use(deviceMW.ExtractDeviceInfo)
 

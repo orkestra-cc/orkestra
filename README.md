@@ -51,6 +51,7 @@ It runs on a **two-tier tenancy model**: Tier-1 operators manage staff and modul
 - **Mobile.** Flutter 3.35 + Riverpod (early-stage).
 - **Data.** MongoDB 8 + Redis 8. Optional Memgraph knowledge graph for the RAG / graph modules.
 - **Auth.** Email + password (argon2id) and OAuth 2.1 (Google, Apple, GitHub, Discord), RS256 JWT, 6-role RBAC, optional TOTP + WebAuthn MFA, per-audience tier split for operator vs. client surfaces.
+- **Observability.** Structured JSON logs with `trace_id` / `tenant_id` / `user_id` on every line out of the box, OpenTelemetry traces with tenant baggage (ADR-0001), Prometheus metrics with exemplars, audit log kept separate from operational log. Zero-config locally; one env var to ship to a self-hosted Tempo + Loki + Grafana stack; one env var to ship to Honeycomb / Datadog / Grafana Cloud / Axiom. See [ADR-0005](docs/adr/0005-observability-logging-tracing-metrics.md).
 - **AI sidecar (optional).** graph + aimodels + rag + agents can run as a separate `cmd/ai-service` binary; the monolith swaps in `RemoteAIModelProvider` / `RemoteRAGQueryProvider` HTTP clients via the `AI_SERVICE_URL` env var. Zero code changes in consumer modules. See `backend/cmd/ai-service/`.
 
 ## SKU profiles, pulled from GHCR
@@ -138,6 +139,44 @@ Run `./orkestra.sh --help` for the full command surface.
 | `compliance` | Platform audit log; future GDPR DSR pipelines, SOC2 evidence |
 | `identity` | Per-tenant BYO OpenID Connect login + SCIM 2.0 stubs |
 | `dev` | Dev token generator (disabled in production) |
+
+## Observability, built in
+
+Logging, tracing, and metrics are core platform features — same footing as `auth` or `tenant`, not a side quest. The promise is **simple by default, pro on demand**: zero configuration must produce useful output; opting into a self-hosted Grafana stack or a managed OTLP backend must require only environment variables, not code changes. See [ADR-0005](docs/adr/0005-observability-logging-tracing-metrics.md) for the full design.
+
+### Multi-tenant log correlation, automatic
+
+Every operational log line is auto-stamped with `trace_id`, `span_id`, `tenant_id`, `tenant_kind`, `user_id`, `user_role`, `audience`, and `request_id`. In Loki, "show me everything client X did in the last hour, across every module" is a one-liner:
+
+```logql
+{service="orkestra-backend"} | json | tenant_id="<uuid>"
+```
+
+The same `trace_id` jumps to the matching Tempo trace and to Prometheus exemplars on the latency histogram. No setup beyond pointing the backend at a collector.
+
+### Three tiers, three env vars
+
+| Tier | What you get | What you set |
+|---|---|---|
+| **0 — Zero config** | Structured JSON logs to stdout with trace + tenant correlation, Chi request log replaced by a typed middleware (allowlist-only, never logs bodies or auth headers), OpenTelemetry tracer running no-op, `/metrics` live. | `LOG_LEVEL=info` (default) |
+| **1 — Self-hosted** | Adds Tempo (traces) + Prometheus (metrics) + Loki (logs) + Grafana (datasources auto-provisioned, "Tenant traces + logs" dashboard pre-loaded). Everything stays on operator hardware. | `OBSERVABILITY_PROFILE=self-hosted` |
+| **2 — OTLP-native** | Ships traces and logs to any OTLP-compatible vendor — Honeycomb, Datadog, Grafana Cloud, Axiom, New Relic. Stdout remains the source of truth; OTLP is an additive fanout so a collector outage never loses lines. | `OTEL_EXPORTER_OTLP_ENDPOINT=https://…` (+ `OTEL_EXPORTER_OTLP_HEADERS` for auth) |
+
+### Audit log ≠ operational log
+
+The `compliance` module's audit sink (append-only `audit_events` in MongoDB) is **never** conflated with operational logs. Audit is forever, never sampled, drives SOC2/GDPR evidence. Operational is retention-bounded, lives in Loki or the vendor backend. Operators can drop the operational tier entirely (regulated air-gapped deployments) without losing audit fidelity.
+
+### Per-module debug, no global noise
+
+```bash
+LOG_LEVEL=info LOG_LEVEL_RAG=debug docker compose -f docker-compose.dev.yml up
+```
+
+RAG ingestion floods with detail; the rest of the backend stays readable.
+
+### PII-safe by construction
+
+Request logging is **allowlist-only**: only the enumerated fields (`method`, `path`, `status`, `duration_ms`, `bytes`, `request_id`, `trace_id`, `span_id`, `tenant_id`, `tenant_kind`, `user_id`, `user_role`, `audience`, `remote`, `ua`, `slow`) ever reach stdout. No bodies, no `Authorization` headers, no raw query strings. New fields require an ADR amendment. This is what makes the logging surface GDPR-safe by design, not by ad-hoc denylist scrubbing.
 
 ## Adding a new module
 
