@@ -551,8 +551,33 @@ get_services() {
 
 is_service_running() {
     local compose_file=$1 service=$2 count
+    # Fast path: query within the compose file's own project.
     count=$(docker compose -f "$compose_file" ps -q "$service" 2> /dev/null | wc -l)
-    [ "$count" -gt 0 ]
+    if [ "$count" -gt 0 ]; then
+        return 0
+    fi
+    # Fallback: a container with this compose-service label may be running
+    # under a different project (e.g. infra+SKU stacks are merged under one
+    # project name like "orkestra-enterprise", so the bare infra compose
+    # file's project lookup misses them). Match by label instead.
+    [ -n "$(docker ps -q \
+        --filter "label=com.docker.compose.service=$service" \
+        --filter "status=running" 2> /dev/null)" ]
+}
+
+# Resolve the actual running container for (compose_file, service), preferring
+# the compose file's project but falling back to any project hosting that
+# compose-service label. Echoes the container id, or empty if nothing matches.
+resolve_running_container() {
+    local compose_file=$1 service=$2 cid
+    cid=$(docker compose -f "$compose_file" ps -q "$service" 2> /dev/null | head -1)
+    if [ -n "$cid" ]; then
+        printf '%s\n' "$cid"
+        return 0
+    fi
+    docker ps -q \
+        --filter "label=com.docker.compose.service=$service" \
+        --filter "status=running" 2> /dev/null | head -1
 }
 
 # ---------------------------------------------------------------------------
@@ -1407,14 +1432,42 @@ view_logs() {
         fi
     fi
 
-    local -a cmd=(docker compose -f "$compose_file" logs)
-    [ "$timestamps" = "true" ] && cmd+=(--timestamps)
-    if [ "$follow" = "true" ]; then
-        cmd+=(--follow)
-    else
-        cmd+=(--tail="$lines")
+    # If the compose-file's project has no matching container, but a
+    # container with this service label exists under another project (e.g.
+    # the SKU-profile merge case), tail that container directly via
+    # `docker logs` instead of `docker compose logs` (which would target an
+    # empty project and exit silently).
+    local cid_in_project cid_anywhere
+    cid_in_project=$(docker compose -f "$compose_file" ps -q "$service" 2> /dev/null | head -1)
+    if [ -z "$cid_in_project" ]; then
+        cid_anywhere=$(resolve_running_container "$compose_file" "$service")
     fi
-    cmd+=("$service")
+
+    local -a cmd
+    if [ -z "$cid_in_project" ] && [ -n "$cid_anywhere" ]; then
+        local owner_project
+        owner_project=$(docker inspect --format \
+            '{{ index .Config.Labels "com.docker.compose.project" }}' \
+            "$cid_anywhere" 2> /dev/null)
+        p_muted "  Service is running under a different compose project (${owner_project:-unknown}); tailing the container directly."
+        cmd=(docker logs)
+        [ "$timestamps" = "true" ] && cmd+=(--timestamps)
+        if [ "$follow" = "true" ]; then
+            cmd+=(--follow)
+        else
+            cmd+=(--tail "$lines")
+        fi
+        cmd+=("$cid_anywhere")
+    else
+        cmd=(docker compose -f "$compose_file" logs)
+        [ "$timestamps" = "true" ] && cmd+=(--timestamps)
+        if [ "$follow" = "true" ]; then
+            cmd+=(--follow)
+        else
+            cmd+=(--tail="$lines")
+        fi
+        cmd+=("$service")
+    fi
 
     echo
     # Build a space-joined command string; avoid ${cmd[*]} here because the
@@ -1776,12 +1829,14 @@ main() {
         exit 0
     fi
 
-    # Backward compat: if ENV is already set, jump straight to full-stack.
-    if [ -n "${ENV:-}" ]; then
-        fullstack_menu_loop
-        return
-    fi
-
+    # Always show the top-level menu. We used to auto-route into the
+    # full-stack loop when $ENV was set (from shell or docker/.env), but that
+    # silently hid the SKU-profile menu — so users who had deployed e.g.
+    # the `enterprise` profile would be shown the staging service list with
+    # everything marked "stopped" (since each compose file declares its own
+    # `name:`, the staging-project lookup misses orkestra-enterprise's
+    # containers). Force the menu so the user can pick the profile that
+    # matches their running stack.
     while true; do
         show_profile_menu
         printf '%s%s Select profile [1-3]: %s' "$c_prompt" "$ic_arrow" "$c_reset"

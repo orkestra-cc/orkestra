@@ -239,7 +239,7 @@ cp .env.example .env.production
 ./orkestra.sh logs <service> [-f] [-n N] [-t]
 ```
 
-**Backward-compat shortcut**: `ENV=development ./orkestra.sh` skips the profile menu and opens the full-stack TUI directly (same convention the old deploy.sh used). Any existing scripted usage along those lines keeps working.
+**Interactive TUI always shows the top-level profile menu** (SKU profile vs. full stack), even when `ENV` is set in the shell or in `docker/.env`. Auto-routing into the full-stack loop based on `$ENV` was removed because it hid the SKU-profile picker — e.g. with a running `enterprise` stack and `ENV=staging`, the staging-project log lookup would report every container "stopped" because each compose file declares its own `name:` and the running containers live under `orkestra-enterprise`. CLI usage like `ENV=development ./orkestra.sh deploy --scope backend` is unaffected — the CLI dispatch path never enters the interactive menu.
 
 ### Manual Docker Compose (Alternative)
 
