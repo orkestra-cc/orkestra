@@ -602,7 +602,7 @@ Phase 5.2 of the tenancy plan ships a self-hosted observability profile that lay
 | **prometheus**    | `prom/prometheus:v2.51.2`                     | 9090        | Metric scraper (15 d retention)                                                    |
 | **loki**          | `grafana/loki:3.0.0`                          | 3100        | Log backend (filesystem store; 14 d info / 30 d warn+ via per-stream retention)   |
 | **promtail**      | `grafana/promtail:3.0.0`                      | —           | Log shipper; tails docker stdout, JSON-parses, ships to Loki                       |
-| **grafana**       | `grafana/grafana-oss:10.4.2`                  | 3010        | UI; Tempo + Prometheus + Loki datasources auto-provisioned with cross-jumping; "Tenant traces + logs" dashboard pre-loaded |
+| **grafana**       | `grafana/grafana-oss:10.4.2`                  | 3010        | UI; Tempo + Prometheus + Loki datasources auto-provisioned with cross-jumping; six dashboards under `Orkestra/` pre-loaded |
 
 Boot it alongside the dev stack. Easiest path via `orkestra.sh`:
 
@@ -637,7 +637,18 @@ Restart the backend (`docker compose -f docker-compose.dev.yml restart backend`)
 - Tempo — http://localhost:3200 (not meant for direct use; query via Grafana's Tempo datasource)
 - Loki — http://localhost:3100 (not meant for direct use; query via Grafana's Loki datasource or the Explore tab)
 
-The pre-provisioned "Tenant traces + logs" dashboard (`Orkestra` folder in Grafana) takes a `tenant.id`, an optional tier filter, and an optional module name. The traces panel shows every span where the `TenantBaggage` middleware stamped the matching `tenant.id` attribute; the logs panels show every Loki entry where the structured JSON line carries the matching `tenant_id` or `module` field. Both sides cross-link by `trace_id` — clicking a span jumps to filtered Loki logs, and clicking `trace_id` in any log line jumps back to Tempo. Backing evidence: `backend/internal/shared/middleware/tenant_baggage.go`, `backend/internal/shared/middleware/request_logger.go` (ADR-0005 Phase A), and `backend/internal/shared/utils/per_module_level_handler.go` (ADR-0005 Phase C).
+Six pre-provisioned dashboards ship under the `Orkestra/` folder in Grafana (`docker/grafana/provisioning/dashboards/*.json`):
+
+| Dashboard | Purpose | Primary signal sources |
+| --- | --- | --- |
+| **Service Overview** | Operator landing page — request rate, error %, p95 latency, log volume by level, top routes, recent error tail | Prometheus (Phase B histogram) + Loki |
+| **HTTP RED** | Per-audience RED method with `audience`/`route` template variables; latency percentiles, status-class breakdown, top slow/heavy routes | Prometheus histogram |
+| **Logs Explorer** | Log volume by level + by module, application log feed (filter by `module`+`level`), HTTP request feed (filter by `audience`+`level`). Split into two feeds because `module` and `audience` labels are mutually exclusive per stream | Loki |
+| **Observability Pipeline Health** | Self-check for the trifecta: collector receiver/exporter rates, drops, failures, scrape target up/down, scrape duration | Prometheus (`otelcol_*` self-telemetry + `up`) |
+| **Module Health Matrix** | Per-module log volume + ERROR count, rate by module over time, ADR-0001 Cedar/capability/entitlement panels (populate when those code paths fire) | Loki + Prometheus |
+| **Tenant traces + logs** | Multi-tenant correlation surface. Takes a `tenant.id`, an optional tier filter, and an optional module name. The traces panel shows every span where the `TenantBaggage` middleware stamped the matching `tenant.id` attribute; the logs panels show every Loki entry where the structured JSON line carries the matching `tenant_id` or `module` field | Tempo + Loki |
+
+All six cross-link by `trace_id` — clicking a span jumps to filtered Loki logs, and clicking `trace_id` in any log line jumps back to Tempo. Backing evidence: `backend/internal/shared/middleware/tenant_baggage.go`, `backend/internal/shared/middleware/request_logger.go` (ADR-0005 Phase A), and `backend/internal/shared/utils/per_module_level_handler.go` (ADR-0005 Phase C).
 
 Phase 5.3 landed `/metrics` on the backend (`GET http://backend:3000/metrics`), scraped automatically by Prometheus. The handler is mounted on both the operator mux (for in-product browsing under the audience host) AND on the `lanOpsHandler` so a scrape against `orkestra-backend:3000` works without spoofing a Host header — Prometheus has no per-scrape Host override. The hostMux `opsPaths` allowlist (`/health`, `/ready`, `/metrics`) is the single source of truth for paths that escape the audience gate; the client mux still does not mount `/metrics`, so a browser hitting `api.orkestra.com/metrics` continues to 404 through the reverse proxy. Four metric families ship today — Cedar shadow divergence, capability denial, entitlement projection lag, and (ADR-0005 Phase B) `orkestra_http_request_duration_seconds` — with the label schema frozen in [ADR-0002](../docs/adr/0002-metrics-label-schema.md). Disable the endpoint by setting `METRICS_ENABLED=false`.
 

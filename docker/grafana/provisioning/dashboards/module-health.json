@@ -1,0 +1,196 @@
+{
+  "title": "Module Health Matrix",
+  "uid": "orkestra-module-health",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": false,
+  "time": { "from": "now-1h", "to": "now" },
+  "refresh": "30s",
+  "tags": ["orkestra", "modules", "adr-0005"],
+  "templating": {
+    "list": [
+      {
+        "name": "module",
+        "label": "Module",
+        "type": "query",
+        "datasource": { "type": "loki", "uid": "loki" },
+        "query": "label_values({service=\"orkestra-backend\"}, module)",
+        "includeAll": true,
+        "multi": true,
+        "current": { "text": "All", "value": "$__all" },
+        "refresh": 2
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "text",
+      "title": "Module Health Matrix",
+      "gridPos": { "x": 0, "y": 0, "w": 24, "h": 3 },
+      "options": {
+        "content": "Per-module signal density and error rate from ADR-0005 Phase C (the registry auto-stamps `module=<name>` on every line emitted from `deps.Logger`). Use this to spot a sick module — e.g. RAG suddenly emitting 100× the usual log volume after a query store deploy. The bottom panels surface ADR-0001 metrics (Cedar shadow divergence, capability denial, entitlement projection lag) when their code paths fire; they show 'no data' until then."
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Active modules (lines / 5m)",
+      "datasource": { "type": "loki", "uid": "loki" },
+      "gridPos": { "x": 0, "y": 3, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "count(count by (module) (rate({service=\"orkestra-backend\"}[5m])))", "queryType": "instant" }
+      ],
+      "fieldConfig": { "defaults": { "decimals": 0 } }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Modules emitting ERROR (5m)",
+      "datasource": { "type": "loki", "uid": "loki" },
+      "gridPos": { "x": 6, "y": 3, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "count(count by (module) (rate({service=\"orkestra-backend\", level=\"ERROR\"}[5m])))", "queryType": "instant" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 0,
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "yellow", "value": 1 }, { "color": "red", "value": 3 } ] }
+        }
+      },
+      "options": { "colorMode": "background" }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Total module lines / 5m",
+      "datasource": { "type": "loki", "uid": "loki" },
+      "gridPos": { "x": 12, "y": 3, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "sum(count_over_time({service=\"orkestra-backend\", module=~\"$module\"}[5m]))", "queryType": "instant" }
+      ],
+      "fieldConfig": { "defaults": { "decimals": 0 } }
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Total module ERROR / 5m",
+      "datasource": { "type": "loki", "uid": "loki" },
+      "gridPos": { "x": 18, "y": 3, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "sum(count_over_time({service=\"orkestra-backend\", module=~\"$module\", level=\"ERROR\"}[5m]))", "queryType": "instant" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 0,
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "yellow", "value": 1 }, { "color": "red", "value": 20 } ] }
+        }
+      },
+      "options": { "colorMode": "background" }
+    },
+    {
+      "id": 10,
+      "type": "barchart",
+      "title": "Log volume by module (last 5m)",
+      "datasource": { "type": "loki", "uid": "loki" },
+      "gridPos": { "x": 0, "y": 7, "w": 12, "h": 10 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (module) (count_over_time({service=\"orkestra-backend\", module=~\"$module\"}[5m]))",
+          "queryType": "instant",
+          "legendFormat": "{{module}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "decimals": 0, "custom": { "axisPlacement": "left" } } },
+      "options": { "orientation": "horizontal", "legend": { "displayMode": "hidden" }, "showValue": "always" }
+    },
+    {
+      "id": 11,
+      "type": "barchart",
+      "title": "ERROR count by module (last 5m)",
+      "datasource": { "type": "loki", "uid": "loki" },
+      "gridPos": { "x": 12, "y": 7, "w": 12, "h": 10 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (module) (count_over_time({service=\"orkestra-backend\", module=~\"$module\", level=\"ERROR\"}[5m]))",
+          "queryType": "instant",
+          "legendFormat": "{{module}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 0,
+          "color": { "mode": "fixed", "fixedColor": "red" },
+          "custom": { "axisPlacement": "left" }
+        }
+      },
+      "options": { "orientation": "horizontal", "legend": { "displayMode": "hidden" }, "showValue": "always" }
+    },
+    {
+      "id": 20,
+      "type": "timeseries",
+      "title": "Log rate by module (lines / sec)",
+      "datasource": { "type": "loki", "uid": "loki" },
+      "gridPos": { "x": 0, "y": 17, "w": 24, "h": 10 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (module) (rate({service=\"orkestra-backend\", module=~\"$module\"}[1m]))",
+          "legendFormat": "{{module}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "logs/s", "custom": { "drawStyle": "line", "fillOpacity": 5 } } },
+      "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["mean", "max"] } }
+    },
+    {
+      "id": 30,
+      "type": "timeseries",
+      "title": "Cedar shadow divergence (ADR-0001)",
+      "description": "Disagreements between the production policy engine and the shadow Cedar engine. Should be flat at 0 once Cedar reaches parity.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "x": 0, "y": 27, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (decision) (rate(orkestra_cedar_shadow_divergence_total[5m]))",
+          "legendFormat": "{{decision}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "ops", "custom": { "drawStyle": "line", "fillOpacity": 5 }, "noValue": "no data — Cedar shadow disabled or no traffic yet" } }
+    },
+    {
+      "id": 31,
+      "type": "timeseries",
+      "title": "Capability denial rate",
+      "description": "Requests rejected by the capability gate.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "x": 12, "y": 27, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (capability) (rate(orkestra_capability_denied_total[5m]))",
+          "legendFormat": "{{capability}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "ops", "custom": { "drawStyle": "line", "fillOpacity": 5 }, "noValue": "no data — capability gate not exercised yet" } }
+    },
+    {
+      "id": 32,
+      "type": "timeseries",
+      "title": "Entitlement projection lag",
+      "description": "Seconds between an upstream entitlement change and its projection into the read store. Spikes indicate a backed-up projector.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "x": 0, "y": 35, "w": 24, "h": 8 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(orkestra_entitlement_projection_lag_seconds)",
+          "legendFormat": "lag"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s", "custom": { "drawStyle": "line", "fillOpacity": 5 }, "noValue": "no data — projector idle" } }
+    }
+  ]
+}

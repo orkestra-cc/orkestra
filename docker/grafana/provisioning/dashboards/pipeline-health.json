@@ -1,0 +1,162 @@
+{
+  "title": "Observability Pipeline Health",
+  "uid": "orkestra-pipeline-health",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": false,
+  "time": { "from": "now-1h", "to": "now" },
+  "refresh": "30s",
+  "tags": ["orkestra", "observability", "meta", "adr-0005"],
+  "templating": { "list": [] },
+  "panels": [
+    {
+      "id": 1,
+      "type": "text",
+      "title": "Pipeline Health",
+      "gridPos": { "x": 0, "y": 0, "w": 24, "h": 3 },
+      "options": {
+        "content": "Self-check for the observability stack itself: are spans/logs/metrics flowing, are exporters dropping anything, are Prometheus scrape targets up. If a downstream dashboard (Service Overview, HTTP RED) looks empty, look here first. Counters come from the OTel collector's self-telemetry (`otelcol_*` on `:8889`) and Prometheus's `up` series."
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Scrape targets up",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "x": 0, "y": 3, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "sum(up)" }
+      ],
+      "fieldConfig": { "defaults": { "decimals": 0 } }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Scrape targets down",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "x": 6, "y": 3, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "sum(up == 0) or vector(0)" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 0,
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "red", "value": 1 } ] }
+        }
+      },
+      "options": { "colorMode": "background" }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Spans / sec (collector → Tempo)",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "x": 12, "y": 3, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "sum(rate(otelcol_exporter_sent_spans[1m]))" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "ops", "decimals": 2 } }
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Log records / sec (collector → Loki)",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "x": 18, "y": 3, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "sum(rate(otelcol_exporter_sent_log_records[1m]))" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "ops", "decimals": 2 } }
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Traces — receiver vs exporter",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "x": 0, "y": 7, "w": 12, "h": 9 },
+      "targets": [
+        { "refId": "A", "expr": "sum(rate(otelcol_receiver_accepted_spans[1m]))",   "legendFormat": "received" },
+        { "refId": "B", "expr": "sum(rate(otelcol_exporter_sent_spans[1m]))",         "legendFormat": "sent" },
+        { "refId": "C", "expr": "sum(rate(otelcol_exporter_send_failed_spans[1m]))",  "legendFormat": "failed" },
+        { "refId": "D", "expr": "sum(rate(otelcol_processor_dropped_spans[1m]))",     "legendFormat": "dropped (memory_limiter)" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "ops", "custom": { "drawStyle": "line", "fillOpacity": 5 } } },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } }
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "Logs — receiver vs exporter",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "x": 12, "y": 7, "w": 12, "h": 9 },
+      "targets": [
+        { "refId": "A", "expr": "sum(rate(otelcol_receiver_accepted_log_records[1m]))",  "legendFormat": "received" },
+        { "refId": "B", "expr": "sum(rate(otelcol_exporter_sent_log_records[1m]))",      "legendFormat": "sent" },
+        { "refId": "C", "expr": "sum(rate(otelcol_exporter_send_failed_log_records[1m]))","legendFormat": "failed" },
+        { "refId": "D", "expr": "sum(rate(otelcol_processor_dropped_log_records[1m]))",  "legendFormat": "dropped (memory_limiter)" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "ops", "custom": { "drawStyle": "line", "fillOpacity": 5 } } },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } }
+    },
+    {
+      "id": 20,
+      "type": "timeseries",
+      "title": "Prometheus scrape duration by target",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "x": 0, "y": 16, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "scrape_duration_seconds",
+          "legendFormat": "{{job}} @ {{instance}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s", "custom": { "drawStyle": "line", "fillOpacity": 5 } } },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["mean", "max"] } }
+    },
+    {
+      "id": 21,
+      "type": "table",
+      "title": "Targets — status snapshot",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "x": 12, "y": 16, "w": 12, "h": 8 },
+      "targets": [
+        { "refId": "A", "expr": "up", "instant": true, "format": "table" }
+      ],
+      "transformations": [
+        { "id": "organize", "options": { "excludeByName": { "Time": true, "__name__": true }, "renameByName": { "Value": "up" } } }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "align": "left" },
+          "mappings": [
+            { "type": "value", "options": { "1": { "text": "UP", "color": "green" }, "0": { "text": "DOWN", "color": "red" } } }
+          ]
+        }
+      }
+    },
+    {
+      "id": 30,
+      "type": "logs",
+      "title": "Collector recent logs",
+      "datasource": { "type": "loki", "uid": "loki" },
+      "gridPos": { "x": 0, "y": 24, "w": 24, "h": 9 },
+      "options": {
+        "showTime": true,
+        "showLabels": false,
+        "wrapLogMessage": true,
+        "prettifyLogMessage": false,
+        "enableLogDetails": true,
+        "sortOrder": "Descending",
+        "dedupStrategy": "none"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "{container=\"orkestra-otel\"}",
+          "queryType": "range"
+        }
+      ]
+    }
+  ]
+}

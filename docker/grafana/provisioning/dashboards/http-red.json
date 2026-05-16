@@ -1,0 +1,205 @@
+{
+  "title": "HTTP RED",
+  "uid": "orkestra-http-red",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": false,
+  "time": { "from": "now-1h", "to": "now" },
+  "refresh": "30s",
+  "tags": ["orkestra", "http", "red", "adr-0002", "adr-0005"],
+  "templating": {
+    "list": [
+      {
+        "name": "audience",
+        "label": "Audience",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "query": { "query": "label_values(orkestra_http_request_duration_seconds_count, audience)", "refId": "Variable-audience" },
+        "includeAll": true,
+        "multi": false,
+        "current": { "text": "All", "value": "$__all" }
+      },
+      {
+        "name": "route",
+        "label": "Route",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "query": { "query": "label_values(orkestra_http_request_duration_seconds_count{audience=~\"$audience\"}, route)", "refId": "Variable-route" },
+        "includeAll": true,
+        "multi": true,
+        "current": { "text": "All", "value": "$__all" }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "text",
+      "title": "HTTP RED (Rate / Errors / Duration)",
+      "gridPos": { "x": 0, "y": 0, "w": 24, "h": 3 },
+      "options": {
+        "content": "Per-route RED method from the Phase B histogram `orkestra_http_request_duration_seconds{audience, method, route, status_class}`. Routes are Chi templates (never raw paths) so cardinality stays bounded — ADR-0002. Filter by audience (operator/client) and route via the template variables above. Latency panels read p50/p95/p99 from the histogram buckets; click any spike to jump to the matching span via Prometheus exemplars (Tempo datasource → trace_id link)."
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Total RPS",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "x": 0, "y": 3, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "sum(rate(orkestra_http_request_duration_seconds_count{audience=~\"$audience\", route=~\"$route\"}[5m]))" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "reqps", "decimals": 2 } }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "5xx error %",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "x": 6, "y": 3, "w": 6, "h": 4 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "(sum(rate(orkestra_http_request_duration_seconds_count{audience=~\"$audience\", route=~\"$route\", status_class=\"5xx\"}[5m])) or vector(0)) / clamp_min(sum(rate(orkestra_http_request_duration_seconds_count{audience=~\"$audience\", route=~\"$route\"}[5m])), 1) * 100"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "decimals": 2,
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "yellow", "value": 1 }, { "color": "red", "value": 5 } ] }
+        }
+      },
+      "options": { "colorMode": "background" }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "4xx ratio",
+      "description": "Share of client errors — high values often indicate a buggy frontend or missing auth.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "x": 12, "y": 3, "w": 6, "h": 4 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "(sum(rate(orkestra_http_request_duration_seconds_count{audience=~\"$audience\", route=~\"$route\", status_class=\"4xx\"}[5m])) or vector(0)) / clamp_min(sum(rate(orkestra_http_request_duration_seconds_count{audience=~\"$audience\", route=~\"$route\"}[5m])), 1) * 100"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "percent", "decimals": 2 } }
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "p99 latency",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "x": 18, "y": 3, "w": 6, "h": 4 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(orkestra_http_request_duration_seconds_bucket{audience=~\"$audience\", route=~\"$route\"}[5m])))"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "decimals": 3,
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "yellow", "value": 1 }, { "color": "red", "value": 5 } ] }
+        }
+      },
+      "options": { "colorMode": "value" }
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Request rate by route",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "x": 0, "y": 7, "w": 12, "h": 9 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "topk(10, sum by (route) (rate(orkestra_http_request_duration_seconds_count{audience=~\"$audience\", route=~\"$route\"}[1m])))",
+          "legendFormat": "{{route}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "reqps", "custom": { "drawStyle": "line", "fillOpacity": 10 } } },
+      "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["mean", "max"] } }
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "Status-class breakdown",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "x": 12, "y": 7, "w": 12, "h": 9 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (status_class) (rate(orkestra_http_request_duration_seconds_count{audience=~\"$audience\", route=~\"$route\"}[1m]))",
+          "legendFormat": "{{status_class}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "reqps", "custom": { "drawStyle": "bars", "fillOpacity": 70, "stacking": { "mode": "normal", "group": "A" } } },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "2xx" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "green" } } ] },
+          { "matcher": { "id": "byName", "options": "3xx" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "blue" } } ] },
+          { "matcher": { "id": "byName", "options": "4xx" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "orange" } } ] },
+          { "matcher": { "id": "byName", "options": "5xx" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } } ] }
+        ]
+      },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } }
+    },
+    {
+      "id": 20,
+      "type": "timeseries",
+      "title": "Latency p50 / p95 / p99",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "x": 0, "y": 16, "w": 24, "h": 9 },
+      "targets": [
+        { "refId": "A", "expr": "histogram_quantile(0.50, sum by (le) (rate(orkestra_http_request_duration_seconds_bucket{audience=~\"$audience\", route=~\"$route\"}[5m])))", "legendFormat": "p50" },
+        { "refId": "B", "expr": "histogram_quantile(0.95, sum by (le) (rate(orkestra_http_request_duration_seconds_bucket{audience=~\"$audience\", route=~\"$route\"}[5m])))", "legendFormat": "p95" },
+        { "refId": "C", "expr": "histogram_quantile(0.99, sum by (le) (rate(orkestra_http_request_duration_seconds_bucket{audience=~\"$audience\", route=~\"$route\"}[5m])))", "legendFormat": "p99" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s", "custom": { "drawStyle": "line", "fillOpacity": 5 } } },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } }
+    },
+    {
+      "id": 30,
+      "type": "table",
+      "title": "Top 15 slowest routes (p95, last 5m)",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "x": 0, "y": 25, "w": 12, "h": 10 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "topk(15, histogram_quantile(0.95, sum by (audience, route, le) (rate(orkestra_http_request_duration_seconds_bucket{audience=~\"$audience\", route=~\"$route\"}[5m]))))",
+          "instant": true,
+          "format": "table"
+        }
+      ],
+      "transformations": [
+        { "id": "organize", "options": { "excludeByName": { "Time": true, "__name__": true, "instance": true, "job": true, "service": true, "method": true, "status_class": true }, "renameByName": { "Value": "p95 (s)" } } }
+      ],
+      "fieldConfig": { "defaults": { "custom": { "align": "left" }, "decimals": 3 } }
+    },
+    {
+      "id": 31,
+      "type": "table",
+      "title": "Top 15 by request count (last 5m)",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "x": 12, "y": 25, "w": 12, "h": 10 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "topk(15, sum by (audience, method, route, status_class) (increase(orkestra_http_request_duration_seconds_count{audience=~\"$audience\", route=~\"$route\"}[5m])))",
+          "instant": true,
+          "format": "table"
+        }
+      ],
+      "transformations": [
+        { "id": "organize", "options": { "excludeByName": { "Time": true, "__name__": true, "instance": true, "job": true, "service": true }, "renameByName": { "Value": "requests (5m)" } } }
+      ],
+      "fieldConfig": { "defaults": { "custom": { "align": "left" }, "decimals": 0 } }
+    }
+  ]
+}

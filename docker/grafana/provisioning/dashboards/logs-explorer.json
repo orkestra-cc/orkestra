@@ -1,0 +1,206 @@
+{
+  "title": "Logs Explorer",
+  "uid": "orkestra-logs-explorer",
+  "schemaVersion": 39,
+  "version": 2,
+  "editable": false,
+  "time": { "from": "now-1h", "to": "now" },
+  "refresh": "30s",
+  "tags": ["orkestra", "logs", "adr-0005"],
+  "templating": {
+    "list": [
+      {
+        "name": "module",
+        "label": "Module",
+        "type": "query",
+        "datasource": { "type": "loki", "uid": "loki" },
+        "query": "label_values({service=\"orkestra-backend\"}, module)",
+        "includeAll": true,
+        "multi": true,
+        "current": { "text": "All", "value": "$__all" },
+        "refresh": 2
+      },
+      {
+        "name": "level",
+        "label": "Level",
+        "type": "query",
+        "datasource": { "type": "loki", "uid": "loki" },
+        "query": "label_values({service=\"orkestra-backend\"}, level)",
+        "includeAll": true,
+        "multi": true,
+        "current": { "text": "All", "value": "$__all" },
+        "refresh": 2
+      },
+      {
+        "name": "audience",
+        "label": "Audience (HTTP only)",
+        "type": "query",
+        "datasource": { "type": "loki", "uid": "loki" },
+        "query": "label_values({service=\"orkestra-backend\"}, audience)",
+        "includeAll": true,
+        "multi": true,
+        "current": { "text": "All", "value": "$__all" },
+        "refresh": 2,
+        "description": "Audience is stamped only on the structured HTTP request log (Phase A), not on application logs. The HTTP request panel honors this filter; the application-log feed does not."
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "text",
+      "title": "Logs Explorer",
+      "gridPos": { "x": 0, "y": 0, "w": 24, "h": 4 },
+      "options": {
+        "content": "Three signal classes from ADR-0005: (1) Phase A HTTP request log carries `audience`/`method`/`path`/`status`/`duration_ms`/`trace_id`, (2) Phase C application log lines auto-stamped with `module`, (3) Promtail-shipped startup lines without either. `module` and `audience` are NOT universal — a stream carries one or the other depending on origin, so the **Application feed** filters by module+level and ignores audience, while the **HTTP request feed** filters by audience+level and ignores module. Click any `trace_id` in either panel to jump to Tempo."
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Total lines / 5m",
+      "datasource": { "type": "loki", "uid": "loki" },
+      "gridPos": { "x": 0, "y": 4, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "sum(count_over_time({service=\"orkestra-backend\"}[5m]))", "queryType": "instant" }
+      ],
+      "fieldConfig": { "defaults": { "decimals": 0 } }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "ERROR / 5m",
+      "datasource": { "type": "loki", "uid": "loki" },
+      "gridPos": { "x": 6, "y": 4, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "sum(count_over_time({service=\"orkestra-backend\", level=\"ERROR\"}[5m]))", "queryType": "instant" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 0,
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "yellow", "value": 1 }, { "color": "red", "value": 20 } ] }
+        }
+      },
+      "options": { "colorMode": "background" }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "WARN / 5m",
+      "datasource": { "type": "loki", "uid": "loki" },
+      "gridPos": { "x": 12, "y": 4, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "sum(count_over_time({service=\"orkestra-backend\", level=\"WARN\"}[5m]))", "queryType": "instant" }
+      ],
+      "fieldConfig": { "defaults": { "decimals": 0 } }
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Slow HTTP requests / 5m",
+      "description": "Requests exceeding LOG_HTTP_SLOW_THRESHOLD_MS (default 1000ms). Phase A stamps slow=true on these.",
+      "datasource": { "type": "loki", "uid": "loki" },
+      "gridPos": { "x": 18, "y": 4, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "expr": "sum(count_over_time({service=\"orkestra-backend\"} |= `\"slow\":true` [5m]))", "queryType": "instant" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 0,
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "yellow", "value": 1 }, { "color": "red", "value": 10 } ] }
+        }
+      },
+      "options": { "colorMode": "background" }
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Log volume by level (1m bins)",
+      "datasource": { "type": "loki", "uid": "loki" },
+      "gridPos": { "x": 0, "y": 8, "w": 12, "h": 9 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (level) (count_over_time({service=\"orkestra-backend\"}[1m]))",
+          "legendFormat": "{{level}}",
+          "queryType": "range"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "custom": { "drawStyle": "bars", "fillOpacity": 60, "stacking": { "mode": "normal", "group": "A" }, "lineWidth": 0 } },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "ERROR" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } } ] },
+          { "matcher": { "id": "byName", "options": "WARN" },  "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "orange" } } ] },
+          { "matcher": { "id": "byName", "options": "INFO" },  "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "blue" } } ] },
+          { "matcher": { "id": "byName", "options": "DEBUG" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "grey" } } ] }
+        ]
+      },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } }
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "Application log rate by module",
+      "datasource": { "type": "loki", "uid": "loki" },
+      "gridPos": { "x": 12, "y": 8, "w": 12, "h": 9 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "topk(10, sum by (module) (rate({service=\"orkestra-backend\", module=~\"$module\"}[1m])))",
+          "legendFormat": "{{module}}",
+          "queryType": "range"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "logs/s", "custom": { "drawStyle": "line", "fillOpacity": 15 } } },
+      "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["mean", "sum"] } }
+    },
+    {
+      "id": 20,
+      "type": "logs",
+      "title": "Application log feed — module=$module · level=$level",
+      "description": "Application-level lines (registry-stamped). Audience filter NOT applied here — these lines don't carry an audience label. Use the HTTP request feed below for audience-filtered traffic.",
+      "datasource": { "type": "loki", "uid": "loki" },
+      "gridPos": { "x": 0, "y": 17, "w": 24, "h": 14 },
+      "options": {
+        "showTime": true,
+        "showLabels": true,
+        "wrapLogMessage": true,
+        "prettifyLogMessage": true,
+        "enableLogDetails": true,
+        "sortOrder": "Descending",
+        "dedupStrategy": "none"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "{service=\"orkestra-backend\", module=~\"$module\", level=~\"$level\"}",
+          "queryType": "range"
+        }
+      ]
+    },
+    {
+      "id": 30,
+      "type": "logs",
+      "title": "HTTP request feed — audience=$audience · level=$level",
+      "description": "Phase A structured request logs. Audience is stamped by the host mux on every HTTP request. Module filter NOT applied here — these lines don't carry a module label.",
+      "datasource": { "type": "loki", "uid": "loki" },
+      "gridPos": { "x": 0, "y": 31, "w": 24, "h": 14 },
+      "options": {
+        "showTime": true,
+        "showLabels": true,
+        "wrapLogMessage": true,
+        "prettifyLogMessage": true,
+        "enableLogDetails": true,
+        "sortOrder": "Descending",
+        "dedupStrategy": "none"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "{service=\"orkestra-backend\", audience=~\"$audience\", level=~\"$level\"}",
+          "queryType": "range"
+        }
+      ]
+    }
+  ]
+}
