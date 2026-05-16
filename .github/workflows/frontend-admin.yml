@@ -62,7 +62,7 @@ jobs:
       - name: Install frontend toolchain only
         run: mise install node
       - name: Download coverage artifact
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v8
         with:
           name: frontend-admin-coverage
           path: frontend-admin/coverage/

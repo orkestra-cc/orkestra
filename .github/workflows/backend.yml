@@ -105,7 +105,7 @@ jobs:
       - name: Install backend toolchain only
         run: mise install go golangci-lint jq "go:golang.org/x/vuln/cmd/govulncheck"
       - name: Download coverage artifact
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v8
         with:
           name: backend-coverage
           path: backend/
