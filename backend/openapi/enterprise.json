@@ -2251,6 +2251,47 @@
         ],
         "type": "object"
       },
+      "Consent": {
+        "additionalProperties": false,
+        "properties": {
+          "marketingEmail": {
+            "$ref": "#/components/schemas/ConsentRecord"
+          },
+          "marketingPhone": {
+            "$ref": "#/components/schemas/ConsentRecord"
+          },
+          "profiling": {
+            "$ref": "#/components/schemas/ConsentRecord"
+          }
+        },
+        "type": "object"
+      },
+      "ConsentRecord": {
+        "additionalProperties": false,
+        "properties": {
+          "basis": {
+            "type": "string"
+          },
+          "given": {
+            "type": "boolean"
+          },
+          "givenAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "revokedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "given"
+        ],
+        "type": "object"
+      },
       "ConstraintInfo": {
         "additionalProperties": false,
         "properties": {
@@ -3616,6 +3657,89 @@
         ],
         "type": "object"
       },
+      "CustomFieldSchemaPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/CustomFieldSchemaPayload.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "allowUnknownFields": {
+            "type": "boolean"
+          },
+          "fields": {
+            "items": {
+              "$ref": "#/components/schemas/FieldDef"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "targetCollection": {
+            "description": "persons | organizations",
+            "type": "string"
+          }
+        },
+        "required": [
+          "targetCollection",
+          "fields"
+        ],
+        "type": "object"
+      },
+      "CustomFieldSchemaView": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/CustomFieldSchemaView.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "allowUnknownFields": {
+            "type": "boolean"
+          },
+          "fields": {
+            "items": {
+              "$ref": "#/components/schemas/FieldDef"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "targetCollection": {
+            "type": "string"
+          },
+          "tenantId": {
+            "type": "string"
+          },
+          "uuid": {
+            "type": "string"
+          },
+          "version": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "uuid",
+          "tenantId",
+          "targetCollection",
+          "fields",
+          "allowUnknownFields",
+          "version"
+        ],
+        "type": "object"
+      },
       "DatabaseInfo": {
         "additionalProperties": false,
         "properties": {
@@ -4229,6 +4353,37 @@
         ],
         "type": "object"
       },
+      "EmailEntry": {
+        "additionalProperties": false,
+        "properties": {
+          "address": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "optIn": {
+            "type": "boolean"
+          },
+          "optInAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "optInSource": {
+            "type": "string"
+          },
+          "primary": {
+            "type": "boolean"
+          },
+          "verified": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "address"
+        ],
+        "type": "object"
+      },
       "EmbedBatchRequestBody": {
         "additionalProperties": false,
         "properties": {
@@ -4775,6 +4930,56 @@
         },
         "required": [
           "models"
+        ],
+        "type": "object"
+      },
+      "FieldDef": {
+        "additionalProperties": false,
+        "properties": {
+          "default": {},
+          "description": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "options": {
+            "items": {
+              "$ref": "#/components/schemas/FieldOption"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "required": {
+            "type": "boolean"
+          },
+          "type": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "type"
+        ],
+        "type": "object"
+      },
+      "FieldOption": {
+        "additionalProperties": false,
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "value"
         ],
         "type": "object"
       },
@@ -5690,6 +5895,106 @@
           "uuids",
           "count",
           "message"
+        ],
+        "type": "object"
+      },
+      "ImportJobStats": {
+        "additionalProperties": false,
+        "properties": {
+          "conflictsSkipped": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "membershipsLinked": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "orgsCreated": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "orgsMerged": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "personsCreated": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "personsMerged": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "rowsFailed": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "rowsRead": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "rowsRead"
+        ],
+        "type": "object"
+      },
+      "ImportJobView": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/ImportJobView.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "completedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "createdBy": {
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          },
+          "importer": {
+            "type": "string"
+          },
+          "sourceName": {
+            "type": "string"
+          },
+          "startedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "stats": {
+            "$ref": "#/components/schemas/ImportJobStats"
+          },
+          "status": {
+            "type": "string"
+          },
+          "tenantId": {
+            "type": "string"
+          },
+          "uuid": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "uuid",
+          "tenantId",
+          "importer",
+          "status",
+          "stats",
+          "createdAt"
         ],
         "type": "object"
       },
@@ -6920,6 +7225,37 @@
         ],
         "type": "object"
       },
+      "ListImportsResponseBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/ListImportsResponseBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ImportJobView"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ListMeta"
+          }
+        },
+        "required": [
+          "items",
+          "meta"
+        ],
+        "type": "object"
+      },
       "ListInvoicesResponseBody": {
         "additionalProperties": false,
         "properties": {
@@ -6949,6 +7285,30 @@
         "required": [
           "items",
           "total"
+        ],
+        "type": "object"
+      },
+      "ListMeta": {
+        "additionalProperties": false,
+        "properties": {
+          "count": {
+            "description": "Number of items in this page",
+            "format": "int64",
+            "type": "integer"
+          },
+          "limit": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "skip": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "limit",
+          "skip",
+          "count"
         ],
         "type": "object"
       },
@@ -7089,6 +7449,37 @@
         ],
         "type": "object"
       },
+      "ListOrgsResponseBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/ListOrgsResponseBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/OrganizationView"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ListMeta"
+          }
+        },
+        "required": [
+          "items",
+          "meta"
+        ],
+        "type": "object"
+      },
       "ListPaymentMethodsResponseBody": {
         "additionalProperties": false,
         "properties": {
@@ -7118,6 +7509,64 @@
         "required": [
           "items",
           "total"
+        ],
+        "type": "object"
+      },
+      "ListPersonMembershipsResponseBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/ListPersonMembershipsResponseBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/MembershipView"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "ListPersonsResponseBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/ListPersonsResponseBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PersonView"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ListMeta"
+          }
+        },
+        "required": [
+          "items",
+          "meta"
         ],
         "type": "object"
       },
@@ -7325,6 +7774,33 @@
         ],
         "type": "object"
       },
+      "ListSchemasResponseBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/ListSchemasResponseBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/CustomFieldSchemaView"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
       "ListServicesResponseBody": {
         "additionalProperties": false,
         "properties": {
@@ -7386,6 +7862,33 @@
         "required": [
           "items",
           "total"
+        ],
+        "type": "object"
+      },
+      "ListTagsResponseBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/ListTagsResponseBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/TagView"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items"
         ],
         "type": "object"
       },
@@ -8351,6 +8854,50 @@
         ],
         "type": "object"
       },
+      "MembershipPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/MembershipPayload.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "department": {
+            "type": "string"
+          },
+          "notes": {
+            "type": "string"
+          },
+          "orgUuid": {
+            "description": "UUID of the organization this person belongs to",
+            "type": "string"
+          },
+          "primary": {
+            "description": "Mark this membership as the person's primary affiliation. Demotes any other active-primary in the same person.",
+            "type": "boolean"
+          },
+          "role": {
+            "type": "string"
+          },
+          "since": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "until": {
+            "description": "Set to a date to close the membership immediately; null while active",
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "orgUuid"
+        ],
+        "type": "object"
+      },
       "MembershipRow": {
         "additionalProperties": false,
         "properties": {
@@ -8400,6 +8947,64 @@
           "roles",
           "isOwner",
           "joinedAt"
+        ],
+        "type": "object"
+      },
+      "MembershipView": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/MembershipView.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "active": {
+            "type": "boolean"
+          },
+          "department": {
+            "type": "string"
+          },
+          "notes": {
+            "type": "string"
+          },
+          "orgUuid": {
+            "type": "string"
+          },
+          "personUuid": {
+            "type": "string"
+          },
+          "primary": {
+            "type": "boolean"
+          },
+          "role": {
+            "type": "string"
+          },
+          "since": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "tenantId": {
+            "type": "string"
+          },
+          "until": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "uuid": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "uuid",
+          "tenantId",
+          "personUuid",
+          "orgUuid",
+          "active",
+          "primary"
         ],
         "type": "object"
       },
@@ -9376,6 +9981,184 @@
         },
         "type": "object"
       },
+      "OrganizationPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/OrganizationPayload.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "addresses": {
+            "items": {
+              "$ref": "#/components/schemas/PostalAddress"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "customFields": {
+            "additionalProperties": {},
+            "type": "object"
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "emails": {
+            "items": {
+              "$ref": "#/components/schemas/EmailEntry"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "kind": {
+            "description": "company | public_administration | foundation | association | other (defaults to company)",
+            "type": "string"
+          },
+          "legalName": {
+            "description": "Official institution name",
+            "type": "string"
+          },
+          "notes": {
+            "type": "string"
+          },
+          "phones": {
+            "items": {
+              "$ref": "#/components/schemas/PhoneEntry"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "taxCode": {
+            "type": "string"
+          },
+          "vat": {
+            "type": "string"
+          },
+          "website": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "legalName"
+        ],
+        "type": "object"
+      },
+      "OrganizationView": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/OrganizationView.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "addresses": {
+            "items": {
+              "$ref": "#/components/schemas/PostalAddress"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "customFields": {
+            "additionalProperties": {},
+            "type": "object"
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "emails": {
+            "items": {
+              "$ref": "#/components/schemas/EmailEntry"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "kind": {
+            "type": "string"
+          },
+          "legalName": {
+            "type": "string"
+          },
+          "notes": {
+            "type": "string"
+          },
+          "phones": {
+            "items": {
+              "$ref": "#/components/schemas/PhoneEntry"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/ProvenanceSource"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "taxCode": {
+            "type": "string"
+          },
+          "tenantId": {
+            "type": "string"
+          },
+          "uuid": {
+            "type": "string"
+          },
+          "vat": {
+            "type": "string"
+          },
+          "website": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "uuid",
+          "tenantId",
+          "legalName",
+          "kind"
+        ],
+        "type": "object"
+      },
       "PageMargins": {
         "additionalProperties": false,
         "properties": {
@@ -9789,6 +10572,171 @@
         ],
         "type": "object"
       },
+      "PersonPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/PersonPayload.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "birthdate": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "consent": {
+            "$ref": "#/components/schemas/Consent"
+          },
+          "customFields": {
+            "additionalProperties": {},
+            "type": "object"
+          },
+          "emails": {
+            "items": {
+              "$ref": "#/components/schemas/EmailEntry"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "firstName": {
+            "type": "string"
+          },
+          "language": {
+            "description": "BCP-47 tag (e.g. en, it, it-IT)",
+            "type": "string"
+          },
+          "lastName": {
+            "type": "string"
+          },
+          "notes": {
+            "type": "string"
+          },
+          "phones": {
+            "items": {
+              "$ref": "#/components/schemas/PhoneEntry"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "PersonView": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/PersonView.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "activeCardUuids": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "birthdate": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "consent": {
+            "$ref": "#/components/schemas/Consent"
+          },
+          "customFields": {
+            "additionalProperties": {},
+            "type": "object"
+          },
+          "emails": {
+            "items": {
+              "$ref": "#/components/schemas/EmailEntry"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "firstName": {
+            "type": "string"
+          },
+          "language": {
+            "type": "string"
+          },
+          "lastName": {
+            "type": "string"
+          },
+          "notes": {
+            "type": "string"
+          },
+          "phones": {
+            "items": {
+              "$ref": "#/components/schemas/PhoneEntry"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/ProvenanceSource"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "tenantId": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "uuid": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "uuid",
+          "tenantId"
+        ],
+        "type": "object"
+      },
       "PersonalAddDocumentsRequestBody": {
         "additionalProperties": false,
         "properties": {
@@ -10063,6 +11011,51 @@
           },
           "temperature": {
             "description": "Response style: precise, balanced, creative",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "PhoneEntry": {
+        "additionalProperties": false,
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "number": {
+            "type": "string"
+          },
+          "primary": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "number"
+        ],
+        "type": "object"
+      },
+      "PostalAddress": {
+        "additionalProperties": false,
+        "properties": {
+          "city": {
+            "type": "string"
+          },
+          "country": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "postalCode": {
+            "type": "string"
+          },
+          "primary": {
+            "type": "boolean"
+          },
+          "province": {
+            "type": "string"
+          },
+          "street": {
             "type": "string"
           }
         },
@@ -10417,6 +11410,32 @@
         "required": [
           "jobId",
           "streamUrl"
+        ],
+        "type": "object"
+      },
+      "ProvenanceSource": {
+        "additionalProperties": false,
+        "properties": {
+          "externalId": {
+            "type": "string"
+          },
+          "importedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "importer": {
+            "type": "string"
+          },
+          "jobUuid": {
+            "type": "string"
+          },
+          "rawPayloadRef": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "importer",
+          "importedAt"
         ],
         "type": "object"
       },
@@ -13321,6 +14340,27 @@
         },
         "type": "object"
       },
+      "SuccessResponseBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/SuccessResponseBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "success": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "success"
+        ],
+        "type": "object"
+      },
       "Supplier": {
         "additionalProperties": false,
         "properties": {
@@ -13529,6 +14569,87 @@
         "required": [
           "success",
           "message"
+        ],
+        "type": "object"
+      },
+      "TagPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/TagPayload.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "color": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "parentUuid": {
+            "description": "UUID of the parent tag; empty for root tags",
+            "type": "string"
+          },
+          "slug": {
+            "description": "Stable machine identifier; auto-derived from name when omitted",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      },
+      "TagView": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/TagView.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "color": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "parentUuid": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "tenantId": {
+            "type": "string"
+          },
+          "uuid": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "uuid",
+          "tenantId",
+          "name",
+          "slug",
+          "path"
         ],
         "type": "object"
       },
@@ -28814,6 +29935,1173 @@
         "summary": "RAG query (internal)",
         "tags": [
           "Internal RAG"
+        ]
+      }
+    },
+    "/v1/marketing/custom-field-schemas": {
+      "get": {
+        "operationId": "marketing-list-custom-field-schemas",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListSchemasResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "List custom-field schemas",
+        "tags": [
+          "Marketing - Custom Fields"
+        ]
+      },
+      "put": {
+        "operationId": "marketing-upsert-custom-field-schema",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CustomFieldSchemaPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomFieldSchemaView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Create or replace the schema for a target collection",
+        "tags": [
+          "Marketing - Custom Fields"
+        ]
+      }
+    },
+    "/v1/marketing/custom-field-schemas/{target}": {
+      "delete": {
+        "operationId": "marketing-delete-custom-field-schema",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "target",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Delete the schema for a target collection",
+        "tags": [
+          "Marketing - Custom Fields"
+        ]
+      },
+      "get": {
+        "operationId": "marketing-get-custom-field-schema",
+        "parameters": [
+          {
+            "description": "persons | organizations",
+            "in": "path",
+            "name": "target",
+            "required": true,
+            "schema": {
+              "description": "persons | organizations",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomFieldSchemaView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Get the custom-field schema for a target collection",
+        "tags": [
+          "Marketing - Custom Fields"
+        ]
+      }
+    },
+    "/v1/marketing/imports": {
+      "get": {
+        "operationId": "marketing-list-imports",
+        "parameters": [
+          {
+            "description": "Page size, defaults to 50, capped at 500",
+            "explode": false,
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "description": "Page size, defaults to 50, capped at 500",
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Number of items to skip",
+            "explode": false,
+            "in": "query",
+            "name": "skip",
+            "schema": {
+              "description": "Number of items to skip",
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListImportsResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "List import jobs",
+        "tags": [
+          "Marketing - Imports"
+        ]
+      },
+      "post": {
+        "description": "Upload a CSV file with a column mapping JSON; runs synchronously and returns the final import job. Multipart fields: file (required), mapping (required, JSON ColumnMapping), importer (optional, defaults to csv), sourceName (optional, defaults to filename).",
+        "operationId": "marketing-run-import",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportJobView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Run a CSV import",
+        "tags": [
+          "Marketing - Imports"
+        ]
+      }
+    },
+    "/v1/marketing/imports/{id}": {
+      "get": {
+        "operationId": "marketing-get-import",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportJobView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Get an import job",
+        "tags": [
+          "Marketing - Imports"
+        ]
+      }
+    },
+    "/v1/marketing/memberships/{id}": {
+      "delete": {
+        "operationId": "marketing-delete-membership",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Delete a membership",
+        "tags": [
+          "Marketing - Memberships"
+        ]
+      },
+      "patch": {
+        "operationId": "marketing-update-membership",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": {},
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MembershipView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Update a membership",
+        "tags": [
+          "Marketing - Memberships"
+        ]
+      }
+    },
+    "/v1/marketing/organizations": {
+      "get": {
+        "operationId": "marketing-list-organizations",
+        "parameters": [
+          {
+            "description": "Page size, defaults to 50, capped at 500",
+            "explode": false,
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "description": "Page size, defaults to 50, capped at 500",
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Number of items to skip",
+            "explode": false,
+            "in": "query",
+            "name": "skip",
+            "schema": {
+              "description": "Number of items to skip",
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "kind",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "tag",
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "type": [
+                "array",
+                "null"
+              ]
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "source",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListOrgsResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "List organizations",
+        "tags": [
+          "Marketing - Organizations"
+        ]
+      },
+      "post": {
+        "operationId": "marketing-create-organization",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrganizationPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationView"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Create an organization",
+        "tags": [
+          "Marketing - Organizations"
+        ]
+      }
+    },
+    "/v1/marketing/organizations/{id}": {
+      "delete": {
+        "operationId": "marketing-delete-organization",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Delete an organization",
+        "tags": [
+          "Marketing - Organizations"
+        ]
+      },
+      "get": {
+        "operationId": "marketing-get-organization",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Get an organization",
+        "tags": [
+          "Marketing - Organizations"
+        ]
+      },
+      "patch": {
+        "operationId": "marketing-update-organization",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": {},
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Update an organization",
+        "tags": [
+          "Marketing - Organizations"
+        ]
+      }
+    },
+    "/v1/marketing/persons": {
+      "get": {
+        "operationId": "marketing-list-persons",
+        "parameters": [
+          {
+            "description": "Page size, defaults to 50, capped at 500",
+            "explode": false,
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "description": "Page size, defaults to 50, capped at 500",
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Number of items to skip",
+            "explode": false,
+            "in": "query",
+            "name": "skip",
+            "schema": {
+              "description": "Number of items to skip",
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "tag",
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "type": [
+                "array",
+                "null"
+              ]
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "hasEmail",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "source",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListPersonsResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "List persons",
+        "tags": [
+          "Marketing - Persons"
+        ]
+      },
+      "post": {
+        "operationId": "marketing-create-person",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PersonPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PersonView"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Create a person",
+        "tags": [
+          "Marketing - Persons"
+        ]
+      }
+    },
+    "/v1/marketing/persons/{id}": {
+      "delete": {
+        "operationId": "marketing-delete-person",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Delete a person",
+        "tags": [
+          "Marketing - Persons"
+        ]
+      },
+      "get": {
+        "operationId": "marketing-get-person",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PersonView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Get a person",
+        "tags": [
+          "Marketing - Persons"
+        ]
+      },
+      "patch": {
+        "operationId": "marketing-update-person",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": {},
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PersonView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Update a person",
+        "tags": [
+          "Marketing - Persons"
+        ]
+      }
+    },
+    "/v1/marketing/persons/{id}/memberships": {
+      "get": {
+        "operationId": "marketing-list-person-memberships",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListPersonMembershipsResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "List a person's memberships",
+        "tags": [
+          "Marketing - Memberships"
+        ]
+      },
+      "post": {
+        "operationId": "marketing-create-person-membership",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MembershipPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MembershipView"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Add a membership to a person",
+        "tags": [
+          "Marketing - Memberships"
+        ]
+      }
+    },
+    "/v1/marketing/tags": {
+      "get": {
+        "operationId": "marketing-list-tags",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListTagsResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "List tags",
+        "tags": [
+          "Marketing - Tags"
+        ]
+      },
+      "post": {
+        "operationId": "marketing-create-tag",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TagPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TagView"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Create a tag",
+        "tags": [
+          "Marketing - Tags"
+        ]
+      }
+    },
+    "/v1/marketing/tags/{id}": {
+      "delete": {
+        "operationId": "marketing-delete-tag",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Delete a tag",
+        "tags": [
+          "Marketing - Tags"
+        ]
+      },
+      "get": {
+        "operationId": "marketing-get-tag",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TagView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Get a tag",
+        "tags": [
+          "Marketing - Tags"
+        ]
+      },
+      "patch": {
+        "operationId": "marketing-update-tag",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": {},
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TagView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Update a tag",
+        "tags": [
+          "Marketing - Tags"
         ]
       }
     },

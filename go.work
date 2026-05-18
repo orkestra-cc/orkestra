@@ -37,4 +37,5 @@ use (
 	./backend/internal/addons/compliance
 	./backend/internal/addons/identity
 	./backend/internal/addons/rag
+	./backend/internal/addons/marketing
 )

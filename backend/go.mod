@@ -133,6 +133,14 @@ replace github.com/orkestra-cc/orkestra-addon-identity => ./internal/addons/iden
 // package).
 replace github.com/orkestra-cc/orkestra-addon-rag => ./internal/addons/rag
 
+// Marketing addon (Phase 1 — Fondazione anagrafica MVP): contact base,
+// importer pipeline, and (in future phases) immutable activity log,
+// scoring engine, card lifecycle. Hosted in-tree at
+// backend/internal/addons/marketing/ as its own Go module, mirrored to
+// orkestra-cc/orkestra-addon-marketing from v0.1.0 once Phase 1 stabilizes.
+// Design + per-phase plan at docs/plans/marketing-addon/ in this repo.
+replace github.com/orkestra-cc/orkestra-addon-marketing => ./internal/addons/marketing
+
 require (
 	github.com/alicebob/miniredis/v2 v2.37.0
 	github.com/cedar-policy/cedar-go v1.6.0
@@ -154,6 +162,7 @@ require (
 	github.com/orkestra-cc/orkestra-addon-documents v0.1.0
 	github.com/orkestra-cc/orkestra-addon-graph v0.1.1
 	github.com/orkestra-cc/orkestra-addon-identity v0.1.1
+	github.com/orkestra-cc/orkestra-addon-marketing v0.1.0
 	github.com/orkestra-cc/orkestra-addon-payments v0.1.0
 	github.com/orkestra-cc/orkestra-addon-rag v0.1.0
 	github.com/orkestra-cc/orkestra-addon-sales v0.1.0

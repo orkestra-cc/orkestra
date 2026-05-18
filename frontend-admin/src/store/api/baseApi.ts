@@ -417,7 +417,14 @@ export const baseApi = createApi({
     'IdentityIdP',
     'IdentityScim',
     // Observability — ADR-0005 Phase F runtime log-level mutation
-    'LogLevels'
+    'LogLevels',
+    // Marketing module — Phase 1 contact base + importer surface
+    'MarketingOrg',
+    'MarketingPerson',
+    'MarketingMembership',
+    'MarketingTag',
+    'MarketingCustomFieldSchema',
+    'MarketingImport'
   ],
   // Keep cache for 5 minutes by default
   keepUnusedDataFor: 300,
@@ -538,7 +545,13 @@ export const TENANT_SCOPED_TAGS = [
   'AuditEvent',
   'Soc2Evidence',
   'IdentityIdP',
-  'IdentityScim'
+  'IdentityScim',
+  'MarketingOrg',
+  'MarketingPerson',
+  'MarketingMembership',
+  'MarketingTag',
+  'MarketingCustomFieldSchema',
+  'MarketingImport'
 ] as const;
 
 export default baseApi;
