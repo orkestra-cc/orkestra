@@ -73,8 +73,8 @@ type Person struct {
 	// does not need a write-blocking rebuild.
 	ActiveCardUUIDs []string `bson:"activeCardUuids,omitempty" json:"activeCardUuids,omitempty"`
 
-	Sources []Source `bson:"sources,omitempty" json:"sources,omitempty"`
-	Notes   string   `bson:"notes,omitempty" json:"notes,omitempty"`
+	Sources []ProvenanceSource `bson:"sources,omitempty" json:"sources,omitempty"`
+	Notes   string             `bson:"notes,omitempty" json:"notes,omitempty"`
 
 	CreatedAt time.Time `bson:"createdAt" json:"createdAt"`
 	UpdatedAt time.Time `bson:"updatedAt" json:"updatedAt"`

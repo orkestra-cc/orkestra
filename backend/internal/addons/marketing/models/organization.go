@@ -43,10 +43,10 @@ type Organization struct {
 
 	Kind OrganizationKind `bson:"kind" json:"kind"`
 
-	Website   string       `bson:"website,omitempty" json:"website,omitempty"`
-	Emails    []EmailEntry `bson:"emails,omitempty" json:"emails,omitempty"`
-	Phones    []PhoneEntry `bson:"phones,omitempty" json:"phones,omitempty"`
-	Addresses []Address    `bson:"addresses,omitempty" json:"addresses,omitempty"`
+	Website   string          `bson:"website,omitempty" json:"website,omitempty"`
+	Emails    []EmailEntry    `bson:"emails,omitempty" json:"emails,omitempty"`
+	Phones    []PhoneEntry    `bson:"phones,omitempty" json:"phones,omitempty"`
+	Addresses []PostalAddress `bson:"addresses,omitempty" json:"addresses,omitempty"`
 
 	// Tags references marketing_tags by UUID. Set-union merged on
 	// import auto-merge (decision §5.6).
@@ -56,8 +56,8 @@ type Organization struct {
 	// marketing_custom_field_schemas with target = "organizations".
 	CustomFields map[string]any `bson:"customFields,omitempty" json:"customFields,omitempty"`
 
-	Sources []Source `bson:"sources,omitempty" json:"sources,omitempty"`
-	Notes   string   `bson:"notes,omitempty" json:"notes,omitempty"`
+	Sources []ProvenanceSource `bson:"sources,omitempty" json:"sources,omitempty"`
+	Notes   string             `bson:"notes,omitempty" json:"notes,omitempty"`
 
 	CreatedAt time.Time `bson:"createdAt" json:"createdAt"`
 	UpdatedAt time.Time `bson:"updatedAt" json:"updatedAt"`

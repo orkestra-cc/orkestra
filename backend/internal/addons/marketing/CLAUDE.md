@@ -90,3 +90,28 @@ Auto-enabled on the **enterprise** SKU only (which uses the `"*"`
 sentinel in `pkg/sdk/module/config_service.go::profileAddons` to
 pre-enable every optional addon on first boot). All other profiles
 leave marketing off; operators flip it on at `/admin/modules`.
+
+## CI analyzer blind spots inherited from the extracted-addon shape
+
+Two static analyzers in `backend/tools/` walk `./internal/...` from
+the backend module's perspective. Because the marketing addon is a
+separate Go module (`github.com/orkestra-cc/orkestra-addon-marketing`)
+they do **not** traverse into this tree:
+
+- **`tenantscope`** — would normally fail the build on any
+  `coll.Find(filter)` that does not flow through `pkg/sdk/tenantrepo`.
+  Our code is clean by construction (every repository call uses
+  `tenantrepo.Scope` / `StampInsert`), but the gate cannot enforce
+  it from the outside. Manual review during code changes here.
+- **`policycoverage`** — would normally fail when a declared
+  permission has no Cedar coverage. The 3 Phase-1 permissions
+  (`marketing.contact.{read,write,delete}`) are not visible to the
+  analyzer, so the gate passes regardless. At the Cedar engine level
+  the platform `super_admin` / `administrator` wildcard rules in
+  `internal/core/authz/cedar/policies/platform.cedar` already cover
+  every marketing action; finer-grained role-based coverage will
+  arrive when the design's role catalog firms up (Phase 2+).
+
+Widening these analyzers to traverse `go.work` is tracked as
+deferred infra work — see the
+`project_policycoverage_addon_scan` memory entry.

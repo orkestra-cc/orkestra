@@ -8,7 +8,7 @@ import "time"
 // ones, so audit, re-import idempotence, and dedup debugging all work
 // off a complete history of where the row came from. Design decision
 // D06 in docs/plans/marketing-addon/Orkestra_marketing_addon.md.
-type Source struct {
+type ProvenanceSource struct {
 	// Importer names the channel that produced this record. The canonical
 	// values are "csv", "excel", "odoo", "manual", "form". Future
 	// importers append values without breaking existing rows.
@@ -63,10 +63,14 @@ type PhoneEntry struct {
 	Primary bool   `bson:"primary,omitempty" json:"primary,omitempty"`
 }
 
-// Address models one postal address attached to an Organization. Person
-// rows do not carry addresses in Phase 1 — they relate to organizations
-// via marketing_memberships, and addresses live on the organization.
-type Address struct {
+// PostalAddress models one postal address attached to an Organization.
+// Person rows do not carry addresses in Phase 1 — they relate to
+// organizations via marketing_memberships, and addresses live on the
+// organization. Named PostalAddress rather than Address to avoid an
+// OpenAPI schema-name collision with the company addon's models.Address;
+// the huma schema registry resolves types by unqualified name across
+// every addon compiled into the enterprise build.
+type PostalAddress struct {
 	Street     string `bson:"street,omitempty" json:"street,omitempty"`
 	City       string `bson:"city,omitempty" json:"city,omitempty"`
 	Province   string `bson:"province,omitempty" json:"province,omitempty"`

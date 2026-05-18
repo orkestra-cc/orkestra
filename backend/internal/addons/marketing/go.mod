@@ -18,15 +18,15 @@ module github.com/orkestra-cc/orkestra-addon-marketing
 go 1.25.10
 
 require (
+	github.com/danielgtaylor/huma/v2 v2.34.1
+	github.com/go-chi/chi/v5 v5.2.5
+	github.com/google/uuid v1.6.0
 	github.com/orkestra-cc/orkestra-sdk v0.4.0
 	go.mongodb.org/mongo-driver v1.17.6
 )
 
 require (
-	github.com/danielgtaylor/huma/v2 v2.34.1 // indirect
-	github.com/go-chi/chi/v5 v5.2.5 // indirect
 	github.com/golang/snappy v1.0.0 // indirect
-	github.com/google/uuid v1.6.0 // indirect
 	github.com/klauspost/compress v1.18.1 // indirect
 	github.com/montanaflynn/stats v0.7.1 // indirect
 	github.com/xdg-go/pbkdf2 v1.0.0 // indirect

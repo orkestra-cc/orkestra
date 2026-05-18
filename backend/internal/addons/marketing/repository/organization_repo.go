@@ -200,7 +200,7 @@ func (r *OrganizationRepository) Update(ctx context.Context, uuid string, patch 
 // AppendSource pushes a new provenance entry onto the organization's
 // sources[] array. Used by importers + manual create paths to record
 // where the row came from without overwriting prior provenance.
-func (r *OrganizationRepository) AppendSource(ctx context.Context, uuid string, src models.Source) error {
+func (r *OrganizationRepository) AppendSource(ctx context.Context, uuid string, src models.ProvenanceSource) error {
 	filter, err := tenantrepo.Scope(ctx, bson.M{"uuid": uuid})
 	if err != nil {
 		return err

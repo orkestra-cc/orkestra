@@ -168,7 +168,7 @@ func (r *PersonRepository) Update(ctx context.Context, uuid string, patch bson.M
 
 // AppendSource pushes a new provenance entry onto the person's
 // sources[] array.
-func (r *PersonRepository) AppendSource(ctx context.Context, uuid string, src models.Source) error {
+func (r *PersonRepository) AppendSource(ctx context.Context, uuid string, src models.ProvenanceSource) error {
 	filter, err := tenantrepo.Scope(ctx, bson.M{"uuid": uuid})
 	if err != nil {
 		return err

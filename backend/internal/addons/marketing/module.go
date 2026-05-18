@@ -14,18 +14,32 @@ package marketing
 import (
 	"log/slog"
 
+	"github.com/danielgtaylor/huma/v2/adapters/humachi"
+	"github.com/go-chi/chi/v5"
+	"github.com/orkestra-cc/orkestra-addon-marketing/handlers"
 	"github.com/orkestra-cc/orkestra-addon-marketing/models"
+	"github.com/orkestra-cc/orkestra-addon-marketing/repository"
+	"github.com/orkestra-cc/orkestra-addon-marketing/services"
+	"github.com/orkestra-cc/orkestra-sdk/iface"
 	"github.com/orkestra-cc/orkestra-sdk/module"
+	"github.com/orkestra-cc/orkestra-sdk/modulegate"
 )
 
 // MarketingModule implements the Orkestra SDK Module interface for the
-// marketing addon. Phase 1 ships only the shell — subsequent PRs on
-// feature/marketing-addon wire collections, handlers, services, and the
-// CSV importer.
+// marketing addon. Phase 1 wires the data layer (PR-2), CRUD handlers
+// + routes (PR-3), CSV importer (PR-4), and operator nav items (PR-5).
 type MarketingModule struct {
 	module.BaseModule
 
 	logger *slog.Logger
+
+	// Handlers held on the module so RegisterRoutes can mount them
+	// after Init wires the service + repo graph.
+	orgHandler         *handlers.OrganizationHandler
+	personHandler      *handlers.PersonHandler
+	membershipHandler  *handlers.MembershipHandler
+	tagHandler         *handlers.TagHandler
+	customFieldHandler *handlers.CustomFieldSchemaHandler
 }
 
 // NewModule returns a new instance. The registry calls this once per
@@ -183,12 +197,117 @@ func (m *MarketingModule) Collections() []module.CollectionSpec {
 	}
 }
 
-// Init is the lifecycle hook the registry calls after all dependencies
-// have been initialized. Phase 1 keeps it minimal — the logger is
-// stashed so subsequent phase work can wire repositories, services,
-// and handlers without changing this signature.
+// Permissions declares the Cedar permission catalog this module
+// publishes. Phase 1 ships three coarse-grained keys covering Person,
+// Organization, Membership, Tag, and Custom-Field-Schema operations —
+// the design document's finer-grained marketing.tag.write /
+// marketing.custom_field.* permissions are intentionally folded into
+// marketing.contact.* to keep the RBAC surface small until a real
+// separation-of-duties requirement appears.
+//
+// Later phases add:
+//   - marketing.import.run (PR-4, importer trigger gate)
+//   - marketing.activity.read / write (Phase 2, event log)
+//   - marketing.score_profile.write (Phase 2, scoring tuning)
+//   - marketing.card_type.write / marketing.card.{issue,suspend,revoke}
+//     (Phase 4, card lifecycle)
+//   - marketing.conflict.resolve (Phase 3, review queue)
+func (m *MarketingModule) Permissions() []iface.PermissionSpec {
+	return []iface.PermissionSpec{
+		{Key: "marketing.contact.read", Module: m.Name(), Description: "View persons, organizations, memberships, tags, and custom-field schemas"},
+		{Key: "marketing.contact.write", Module: m.Name(), Description: "Create and update persons, organizations, memberships, tags, and custom-field schemas"},
+		{Key: "marketing.contact.delete", Module: m.Name(), Description: "Hard-delete contacts (org/person cascades to memberships) and tags/schemas"},
+	}
+}
+
+// Init wires the data + service + handler graph. The registry calls
+// this after all dependencies have been initialized.
+//
+// Wiring order: repositories first (Mongo collections only), then
+// services (orchestration), then handlers (HTTP/Huma adapters). The
+// custom-field service is shared by both contact services because
+// each calls Validate before persisting record bags.
 func (m *MarketingModule) Init(deps *module.Dependencies) error {
 	m.logger = deps.Logger
-	m.logger.Info("Marketing module initialized (phase 1 scaffold)")
+
+	orgRepo := repository.NewOrganizationRepository(deps.DB)
+	personRepo := repository.NewPersonRepository(deps.DB)
+	mshipRepo := repository.NewMembershipRepository(deps.DB)
+	tagRepo := repository.NewTagRepository(deps.DB)
+	cfSchemaRepo := repository.NewCustomFieldSchemaRepository(deps.DB)
+
+	cfSvc := services.NewCustomFieldService(cfSchemaRepo)
+	orgSvc := services.NewOrganizationService(orgRepo, cfSvc, mshipRepo)
+	personSvc := services.NewPersonService(personRepo, cfSvc, mshipRepo)
+	mshipSvc := services.NewMembershipService(mshipRepo)
+	tagSvc := services.NewTagService(tagRepo)
+
+	m.orgHandler = handlers.NewOrganizationHandler(orgSvc)
+	m.personHandler = handlers.NewPersonHandler(personSvc)
+	m.membershipHandler = handlers.NewMembershipHandler(mshipSvc)
+	m.tagHandler = handlers.NewTagHandler(tagSvc)
+	m.customFieldHandler = handlers.NewCustomFieldSchemaHandler(cfSvc)
+
+	m.logger.Info("Marketing module initialized")
 	return nil
+}
+
+// RegisterRoutes mounts the CRUD surface on the operator API. The
+// addon serves Tier-1 internal-tenant operators only — Tier-2 client
+// surfaces will arrive in Phase 5 (campaigns, segments, preference
+// center) if the design requires them.
+//
+// Three permission buckets, mirrored to read / write / delete:
+//   - marketing.contact.read   → list + get on all 5 collections
+//   - marketing.contact.write  → create + update on all 5 collections
+//   - marketing.contact.delete → delete on all 5 collections (cascades
+//     on org/person via the service layer)
+//
+// Every bucket is wrapped in ModuleGate so disabled-module routes
+// return 503 (the registry does NOT detach the routes at runtime),
+// and in RequireInternalTenant so only operators can hit the routes
+// — these are Tier-1 management endpoints, not Tier-2 self-service.
+func (m *MarketingModule) RegisterRoutes(ri *module.RouteInfo) {
+	if m.orgHandler == nil {
+		return
+	}
+	ri.Operator.ProtectedRouter.Group(func(gated chi.Router) {
+		gated.Use(modulegate.ModuleGate(ri.ConfigService, m.Name()))
+
+		// READ bucket
+		gated.Group(func(r chi.Router) {
+			r.Use(ri.Operator.AuthMW.RequireInternalTenant())
+			r.Use(ri.Operator.AuthMW.RequirePermission("marketing.contact.read"))
+			api := humachi.New(r, ri.APIConfig)
+			handlers.RegisterOrgReadRoutes(api, m.orgHandler)
+			handlers.RegisterPersonReadRoutes(api, m.personHandler)
+			handlers.RegisterMembershipReadRoutes(api, m.membershipHandler)
+			handlers.RegisterTagReadRoutes(api, m.tagHandler)
+			handlers.RegisterCustomFieldReadRoutes(api, m.customFieldHandler)
+		})
+
+		// WRITE bucket
+		gated.Group(func(r chi.Router) {
+			r.Use(ri.Operator.AuthMW.RequireInternalTenant())
+			r.Use(ri.Operator.AuthMW.RequirePermission("marketing.contact.write"))
+			api := humachi.New(r, ri.APIConfig)
+			handlers.RegisterOrgWriteRoutes(api, m.orgHandler)
+			handlers.RegisterPersonWriteRoutes(api, m.personHandler)
+			handlers.RegisterMembershipWriteRoutes(api, m.membershipHandler)
+			handlers.RegisterTagWriteRoutes(api, m.tagHandler)
+			handlers.RegisterCustomFieldWriteRoutes(api, m.customFieldHandler)
+		})
+
+		// DELETE bucket
+		gated.Group(func(r chi.Router) {
+			r.Use(ri.Operator.AuthMW.RequireInternalTenant())
+			r.Use(ri.Operator.AuthMW.RequirePermission("marketing.contact.delete"))
+			api := humachi.New(r, ri.APIConfig)
+			handlers.RegisterOrgDeleteRoutes(api, m.orgHandler)
+			handlers.RegisterPersonDeleteRoutes(api, m.personHandler)
+			handlers.RegisterMembershipDeleteRoutes(api, m.membershipHandler)
+			handlers.RegisterTagDeleteRoutes(api, m.tagHandler)
+			handlers.RegisterCustomFieldDeleteRoutes(api, m.customFieldHandler)
+		})
+	})
 }
