@@ -129,9 +129,7 @@ const WebAuthnEnrollDialog = ({ show, onHide }: Props) => {
               placeholder={t('userMfa.webauthn.enroll.namePlaceholder')}
               maxLength={60}
             />
-            <Form.Text muted>
-              {t('userMfa.webauthn.enroll.nameHint')}
-            </Form.Text>
+            <Form.Text muted>{t('userMfa.webauthn.enroll.nameHint')}</Form.Text>
           </Form.Group>
         </Modal.Body>
         <Modal.Footer>

@@ -188,16 +188,11 @@ const CreateTenantModal: React.FC<Props> = ({
   );
 };
 
-function extractError(
-  err: unknown,
-  t: (key: string) => string
-): string {
+function extractError(err: unknown, t: (key: string) => string): string {
   if (err && typeof err === 'object' && 'data' in err) {
     const data = (err as { data?: { detail?: string; title?: string } }).data;
     return (
-      data?.detail ||
-      data?.title ||
-      t('adminTenants.createModal.unknownError')
+      data?.detail || data?.title || t('adminTenants.createModal.unknownError')
     );
   }
   return String(err);

@@ -90,16 +90,11 @@ const DeleteRoleModal: React.FC<Props> = ({ tenantId, role, show, onHide }) => {
   );
 };
 
-function extractError(
-  err: unknown,
-  t: (key: string) => string
-): string {
+function extractError(err: unknown, t: (key: string) => string): string {
   if (err && typeof err === 'object' && 'data' in err) {
     const data = (err as { data?: { detail?: string; title?: string } }).data;
     return (
-      data?.detail ||
-      data?.title ||
-      t('adminRoles.deleteModal.unknownError')
+      data?.detail || data?.title || t('adminRoles.deleteModal.unknownError')
     );
   }
   return String(err);

@@ -168,10 +168,7 @@ const PurgeTenantModal: React.FC<Props> = ({ org, show, onHide, onPurged }) => {
   );
 };
 
-function extractError(
-  err: unknown,
-  t: (key: string) => string
-): string {
+function extractError(err: unknown, t: (key: string) => string): string {
   if (err && typeof err === 'object' && 'data' in err) {
     const data = (err as { data?: { detail?: string; title?: string } }).data;
     return (

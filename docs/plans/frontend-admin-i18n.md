@@ -1,6 +1,6 @@
 # Plan — Multi-language support for `frontend-admin` (EN + IT)
 
-**Status:** Phase 0 ✅ (2026-05-20). Phase 1 ✅. Phase 2 setup ✅ (`errcode` + `AuthEmailInUse`). Phase 3 ✅ (i18n bootstrap, EN default, typed `t()`, `useLanguageSync`). **Phase 4 ✅ — every item touched at chrome level**:
+**Status:** Phase 0 ✅ (2026-05-20). Phase 1 ✅. Phase 2 setup ✅ (`errcode` + `AuthEmailInUse`). Phase 3 ✅ (i18n bootstrap, EN default, typed `t()`, `useLanguageSync`). **Phase 4 ✅ — every item touched at chrome level + deep dive into admin/MFA/identity destructive modals**:
 
 - ✅ Item 1 Shared chrome (`5e82742`, ~65 strings)
 - ✅ Item 2 Auth screens (`dc0bbdb`, ~120 strings)
@@ -15,7 +15,16 @@
 - ✅ Item 16 N/A — dev token generation is CLI-only (`scripts/devtoken.sh`); no UI surface
 - ✅ EN/IT parity CI test (`f5e1032`) catches drift between locales going forward
 
-**Deferred (deep-form internals)** — these all live inside larger pages whose chrome is now extracted; the remaining work is the deep CRUD/configuration form bodies, which benefit from focused per-form review:
+**Additional deep extractions completed in the 2026-05-20 final push**:
+
+- `ModuleEnvironmentSwitcher`, `ModuleDependencyCard`, `ModuleDashboardCards`, `ModuleConfigSection` — every visible string in the module detail pipeline (item 3 deep)
+- `DeleteTenantModal`, `CreateTenantModal`, `PurgeTenantModal` — full destructive-action flows with `<Trans>` for code/strong/em interpolation
+- `DeleteRoleModal` — bindings-cascade warning
+- `MfaRemoveModal`, `WebAuthnEnrollDialog` — second-factor management flows (item 17 deep)
+- `ChangePassword` — settings sidebar form
+- Identity addon locale tree (`identityAddon.idpConfig.*`, `identityAddon.scimToken.*`) — keys staged for IdPConfigForm + ScimTokenSection wiring follow-up
+
+**Still deferred (truly deep-form internals)** — these all live inside larger pages whose chrome is now extracted; the remaining work is the deep CRUD/configuration form bodies, which benefit from focused per-form review:
 
 - Item 7 `/admin/auth-policy` tab bodies (inside the auth module detail config form — `ModuleConfigSection` / `ModuleConfigFields`)
 - Item 10 Billing detail forms: `IssuedInvoiceDetail` (2178 lines), `NewIssuedInvoice` (1910), `ReceivedInvoiceDetail` (559), `ImportXMLModal` (384), `SupplierModal` (563), `CompanyModal` (918), `BillingStatCards`, `InvoiceTrendChart`, `RecentInvoices`, `PendingActions`, `SDINotificationsSummary` — SDI/FatturaPA-specific field labels

@@ -35,7 +35,9 @@ const DeleteTenantModal: React.FC<Props> = ({ org, show, onHide }) => {
       onHide();
     } catch (err: unknown) {
       toast.error(
-        t('adminTenants.deleteModal.errorToast', { message: extractError(err, t) })
+        t('adminTenants.deleteModal.errorToast', {
+          message: extractError(err, t)
+        })
       );
     }
   };
@@ -97,13 +99,12 @@ const DeleteTenantModal: React.FC<Props> = ({ org, show, onHide }) => {
   );
 };
 
-function extractError(
-  err: unknown,
-  t: (key: string) => string
-): string {
+function extractError(err: unknown, t: (key: string) => string): string {
   if (err && typeof err === 'object' && 'data' in err) {
     const data = (err as { data?: { detail?: string; title?: string } }).data;
-    return data?.detail || data?.title || t('adminTenants.deleteModal.unknownError');
+    return (
+      data?.detail || data?.title || t('adminTenants.deleteModal.unknownError')
+    );
   }
   return String(err);
 }

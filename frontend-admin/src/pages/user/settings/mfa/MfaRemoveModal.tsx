@@ -45,9 +45,7 @@ const MfaRemoveModal = ({ show, onHide }: Props) => {
       if (anyErr?.status === 401 && anyErr?.data?.code !== 'step_up_required') {
         setError(t('userMfa.remove.errors.incorrectCode'));
       } else {
-        setError(
-          anyErr?.data?.detail ?? t('userMfa.remove.errors.generic')
-        );
+        setError(anyErr?.data?.detail ?? t('userMfa.remove.errors.generic'));
       }
     }
   };
