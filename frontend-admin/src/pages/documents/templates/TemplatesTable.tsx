@@ -12,6 +12,7 @@ import {
   Col
 } from 'react-bootstrap';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { useTranslation } from 'react-i18next';
 import {
   faPlus,
   faSearch,
@@ -42,6 +43,7 @@ import TemplateModal from './components/TemplateModal';
 import DeleteConfirmModal from './components/DeleteConfirmModal';
 
 const TemplatesTable: React.FC = () => {
+  const { t } = useTranslation();
   // Filters
   const [search, setSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState<TemplateType | ''>('');
@@ -113,7 +115,11 @@ const TemplatesTable: React.FC = () => {
 
   const openDuplicateModal = (template: TemplateListItem) => {
     setTemplateToDuplicate(template);
-    setDuplicateName(`${template.name} (Copia)`);
+    setDuplicateName(
+      t('documents.templates.table.duplicateModal.copySuffix', {
+        name: template.name
+      })
+    );
     setShowDuplicateModal(true);
   };
 
@@ -123,7 +129,7 @@ const TemplatesTable: React.FC = () => {
       <Card>
         <Card.Body>
           <Alert variant="danger">
-            Errore nel caricamento dei template. Riprova più tardi.
+            {t('documents.templates.table.loadError')}
           </Alert>
         </Card.Body>
       </Card>
@@ -142,7 +148,7 @@ const TemplatesTable: React.FC = () => {
                 </InputGroup.Text>
                 <Form.Control
                   type="text"
-                  placeholder="Cerca template..."
+                  placeholder={t('documents.templates.table.searchPlaceholder')}
                   value={search}
                   onChange={e => {
                     setSearch(e.target.value);
@@ -163,7 +169,9 @@ const TemplatesTable: React.FC = () => {
                     setPage(1);
                   }}
                 >
-                  <option value="">Tutti i tipi</option>
+                  <option value="">
+                    {t('documents.templates.table.typeFilterAll')}
+                  </option>
                   {Object.entries(TEMPLATE_TYPE_LABELS).map(
                     ([value, label]) => (
                       <option key={value} value={value}>
@@ -180,7 +188,7 @@ const TemplatesTable: React.FC = () => {
                 onClick={() => setShowCreateModal(true)}
               >
                 <FontAwesomeIcon icon={faPlus} className="me-1" />
-                Nuovo Template
+                {t('documents.templates.table.newTemplate')}
               </Button>
             </Col>
           </Row>
@@ -190,7 +198,9 @@ const TemplatesTable: React.FC = () => {
           {isLoading ? (
             <div className="text-center py-5">
               <Spinner animation="border" variant="primary" />
-              <p className="mt-2 text-muted">Caricamento template...</p>
+              <p className="mt-2 text-muted">
+                {t('documents.templates.table.loadingTemplates')}
+              </p>
             </div>
           ) : data?.templates?.length === 0 ? (
             <div className="text-center py-5">
@@ -199,12 +209,14 @@ const TemplatesTable: React.FC = () => {
                 className="text-muted mb-3"
                 size="3x"
               />
-              <p className="text-muted">Nessun template trovato</p>
+              <p className="text-muted">
+                {t('documents.templates.table.empty')}
+              </p>
               <Button
                 variant="outline-primary"
                 onClick={() => setShowCreateModal(true)}
               >
-                Crea il primo template
+                {t('documents.templates.table.createFirst')}
               </Button>
             </div>
           ) : (
@@ -212,12 +224,14 @@ const TemplatesTable: React.FC = () => {
               <table className="table table-hover mb-0">
                 <thead className="bg-body-tertiary">
                   <tr>
-                    <th>Nome</th>
-                    <th>Tipo</th>
-                    <th>Formato</th>
-                    <th>Stato</th>
-                    <th>Ultima modifica</th>
-                    <th className="text-end">Azioni</th>
+                    <th>{t('documents.templates.table.colName')}</th>
+                    <th>{t('documents.templates.table.colType')}</th>
+                    <th>{t('documents.templates.table.colFormat')}</th>
+                    <th>{t('documents.templates.table.colStatus')}</th>
+                    <th>{t('documents.templates.table.colUpdated')}</th>
+                    <th className="text-end">
+                      {t('documents.templates.table.colActions')}
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -232,7 +246,9 @@ const TemplatesTable: React.FC = () => {
                                 <FontAwesomeIcon
                                   icon={faStar}
                                   className="ms-1 text-warning"
-                                  title="Template predefinito"
+                                  title={t(
+                                    'documents.templates.table.defaultTooltip'
+                                  )}
                                 />
                               )}
                             </span>
@@ -258,11 +274,13 @@ const TemplatesTable: React.FC = () => {
                       <td>
                         {template.isBuiltIn ? (
                           <Badge bg="info" className="me-1">
-                            Built-in
+                            {t('documents.templates.table.builtIn')}
                           </Badge>
                         ) : null}
                         <Badge bg={template.isActive ? 'success' : 'secondary'}>
-                          {template.isActive ? 'Attivo' : 'Inattivo'}
+                          {template.isActive
+                            ? t('documents.templates.table.statusActive')
+                            : t('documents.templates.table.statusInactive')}
                         </Badge>
                       </td>
                       <td className="text-nowrap">
@@ -282,13 +300,13 @@ const TemplatesTable: React.FC = () => {
                               onClick={() => setEditTemplate(template)}
                             >
                               <FontAwesomeIcon icon={faEdit} className="me-2" />
-                              Modifica
+                              {t('documents.templates.table.edit')}
                             </Dropdown.Item>
                             <Dropdown.Item
                               onClick={() => openDuplicateModal(template)}
                             >
                               <FontAwesomeIcon icon={faCopy} className="me-2" />
-                              Duplica
+                              {t('documents.templates.table.duplicate')}
                             </Dropdown.Item>
                             {!template.isDefault && (
                               <Dropdown.Item
@@ -299,7 +317,7 @@ const TemplatesTable: React.FC = () => {
                                   icon={faStar}
                                   className="me-2"
                                 />
-                                Imposta predefinito
+                                {t('documents.templates.table.setDefault')}
                               </Dropdown.Item>
                             )}
                             <Dropdown.Divider />
@@ -313,8 +331,8 @@ const TemplatesTable: React.FC = () => {
                                 className="me-2"
                               />
                               {template.isBuiltIn
-                                ? 'Non eliminabile'
-                                : 'Elimina'}
+                                ? t('documents.templates.table.deleteBlocked')
+                                : t('documents.templates.table.delete')}
                             </Dropdown.Item>
                           </Dropdown.Menu>
                         </Dropdown>
@@ -330,8 +348,11 @@ const TemplatesTable: React.FC = () => {
         {data && data.totalPages > 1 && (
           <Card.Footer className="d-flex justify-content-between align-items-center">
             <span className="text-muted fs-10">
-              Pagina {data.page} di {data.totalPages} ({data.total} template
-              totali)
+              {t('documents.templates.table.pageOfTotal', {
+                page: data.page,
+                totalPages: data.totalPages,
+                total: data.total
+              })}
             </span>
             <div>
               <Button
@@ -341,7 +362,7 @@ const TemplatesTable: React.FC = () => {
                 onClick={() => setPage(page - 1)}
                 className="me-1"
               >
-                Precedente
+                {t('documents.templates.table.previous')}
               </Button>
               <Button
                 variant="outline-secondary"
@@ -349,7 +370,7 @@ const TemplatesTable: React.FC = () => {
                 disabled={page >= data.totalPages}
                 onClick={() => setPage(page + 1)}
               >
-                Successivo
+                {t('documents.templates.table.next')}
               </Button>
             </div>
           </Card.Footer>
@@ -391,19 +412,23 @@ const TemplatesTable: React.FC = () => {
         onConfirm={handleDuplicate}
         isLoading={isDuplicating}
         templateName=""
-        title="Duplica Template"
+        title={t('documents.templates.table.duplicateModal.title')}
         body={
           <Form.Group>
-            <Form.Label>Nome del nuovo template</Form.Label>
+            <Form.Label>
+              {t('documents.templates.table.duplicateModal.nameLabel')}
+            </Form.Label>
             <Form.Control
               type="text"
               value={duplicateName}
               onChange={e => setDuplicateName(e.target.value)}
-              placeholder="Inserisci il nome..."
+              placeholder={t(
+                'documents.templates.table.duplicateModal.namePlaceholder'
+              )}
             />
           </Form.Group>
         }
-        confirmText="Duplica"
+        confirmText={t('documents.templates.table.duplicateModal.confirm')}
         confirmVariant="primary"
       />
     </>

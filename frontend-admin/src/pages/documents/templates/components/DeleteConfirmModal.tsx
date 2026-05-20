@@ -4,6 +4,7 @@ import {
   faExclamationTriangle,
   faTimes
 } from '@fortawesome/free-solid-svg-icons';
+import { Trans, useTranslation } from 'react-i18next';
 
 interface DeleteConfirmModalProps {
   show: boolean;
@@ -25,9 +26,10 @@ const DeleteConfirmModal: React.FC<DeleteConfirmModalProps> = ({
   templateName,
   title,
   body,
-  confirmText = 'Elimina',
+  confirmText,
   confirmVariant = 'danger'
 }) => {
+  const { t } = useTranslation();
   return (
     <Modal show={show} onHide={onHide} centered>
       <Modal.Header>
@@ -37,7 +39,7 @@ const DeleteConfirmModal: React.FC<DeleteConfirmModalProps> = ({
           {confirmVariant === 'danger' && (
             <FontAwesomeIcon icon={faExclamationTriangle} className="me-2" />
           )}
-          {title || 'Conferma eliminazione'}
+          {title || t('documents.templates.deleteModal.title')}
         </Modal.Title>
         <Button
           variant="link"
@@ -51,11 +53,14 @@ const DeleteConfirmModal: React.FC<DeleteConfirmModalProps> = ({
       <Modal.Body>
         {body || (
           <p>
-            Sei sicuro di voler eliminare il template{' '}
-            <strong>{templateName}</strong>?
+            <Trans
+              i18nKey="documents.templates.deleteModal.body"
+              values={{ name: templateName }}
+              components={{ strong: <strong /> }}
+            />
             <br />
             <span className="text-muted">
-              Questa azione non può essere annullata.
+              {t('documents.templates.deleteModal.warning')}
             </span>
           </p>
         )}
@@ -63,7 +68,7 @@ const DeleteConfirmModal: React.FC<DeleteConfirmModalProps> = ({
 
       <Modal.Footer>
         <Button variant="secondary" onClick={onHide} disabled={isLoading}>
-          Annulla
+          {t('documents.templates.deleteModal.cancel')}
         </Button>
         <Button
           variant={confirmVariant}
@@ -73,7 +78,7 @@ const DeleteConfirmModal: React.FC<DeleteConfirmModalProps> = ({
           {isLoading ? (
             <Spinner animation="border" size="sm" className="me-1" />
           ) : null}
-          {confirmText}
+          {confirmText || t('documents.templates.deleteModal.confirm')}
         </Button>
       </Modal.Footer>
     </Modal>

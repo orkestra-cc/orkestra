@@ -562,6 +562,106 @@
       }
     }
   },
+  "documents": {
+    "templates": {
+      "greetings": {
+        "title": "Template Documenti",
+        "subtitle": "Gestisci i template per la generazione di PDF (fatture, preventivi, documenti)",
+        "serviceActive": "Servizio attivo",
+        "serviceUnavailable": "Servizio non disponibile"
+      },
+      "table": {
+        "loadError": "Errore nel caricamento dei template. Riprova più tardi.",
+        "searchPlaceholder": "Cerca template...",
+        "typeFilterAll": "Tutti i tipi",
+        "newTemplate": "Nuovo Template",
+        "loadingTemplates": "Caricamento template...",
+        "empty": "Nessun template trovato",
+        "createFirst": "Crea il primo template",
+        "colName": "Nome",
+        "colType": "Tipo",
+        "colFormat": "Formato",
+        "colStatus": "Stato",
+        "colUpdated": "Ultima modifica",
+        "colActions": "Azioni",
+        "defaultTooltip": "Template predefinito",
+        "builtIn": "Built-in",
+        "statusActive": "Attivo",
+        "statusInactive": "Inattivo",
+        "edit": "Modifica",
+        "duplicate": "Duplica",
+        "setDefault": "Imposta predefinito",
+        "delete": "Elimina",
+        "deleteBlocked": "Non eliminabile",
+        "pageOfTotal": "Pagina {{page}} di {{totalPages}} ({{total}} template totali)",
+        "previous": "Precedente",
+        "next": "Successivo",
+        "duplicateModal": {
+          "title": "Duplica Template",
+          "nameLabel": "Nome del nuovo template",
+          "namePlaceholder": "Inserisci il nome...",
+          "copySuffix": "{{name}} (Copia)",
+          "confirm": "Duplica"
+        }
+      },
+      "deleteModal": {
+        "title": "Conferma eliminazione",
+        "body": "Sei sicuro di voler eliminare il template <strong>{{name}}</strong>?",
+        "warning": "Questa azione non può essere annullata.",
+        "cancel": "Annulla",
+        "confirm": "Elimina"
+      },
+      "modal": {
+        "createTitle": "Nuovo Template",
+        "editTitle": "Modifica Template",
+        "tabs": {
+          "general": "Generale",
+          "html": "HTML",
+          "css": "CSS",
+          "preview": "Anteprima"
+        },
+        "general": {
+          "nameLabel": "Nome *",
+          "namePlaceholder": "Es: Fattura Standard",
+          "typeLabel": "Tipo *",
+          "descriptionLabel": "Descrizione",
+          "descriptionPlaceholder": "Breve descrizione del template...",
+          "pageSizeLabel": "Formato pagina",
+          "orientationLabel": "Orientamento",
+          "marginsLabel": "Margini (mm)",
+          "marginTop": "Sopra",
+          "marginBottom": "Sotto",
+          "marginLeft": "Sinistra",
+          "marginRight": "Destra"
+        },
+        "html": {
+          "label": "Contenuto HTML *",
+          "placeholder": "<!DOCTYPE html>\n<html>\n<head>...</head>\n<body>...</body>\n</html>",
+          "help": "Usa le variabili Go template come {{number}}, {{seller.name}}, {{range .lines}}...{{end}}"
+        },
+        "css": {
+          "label": "Stili CSS",
+          "placeholder": "body { font-family: Arial, sans-serif; }\n.header { ... }",
+          "help": "Gli stili CSS verranno inclusi automaticamente nel documento"
+        },
+        "preview": {
+          "subtitle": "Anteprima con dati di esempio",
+          "refreshButton": "Aggiorna anteprima",
+          "empty": "Clicca \"Aggiorna anteprima\" per visualizzare il template"
+        },
+        "errors": {
+          "previewMissingHtml": "Inserisci il contenuto HTML prima di visualizzare l'anteprima",
+          "previewFailed": "Errore durante la generazione dell'anteprima",
+          "nameRequired": "Il nome è obbligatorio",
+          "htmlRequired": "Il contenuto HTML è obbligatorio",
+          "saveFailed": "Errore durante il salvataggio del template"
+        },
+        "cancel": "Annulla",
+        "saveChanges": "Salva modifiche",
+        "create": "Crea template"
+      }
+    }
+  },
   "identityAddon": {
     "title": "Identity (IdP + SCIM)",
     "description": "Configura il login OIDC per tenant e provvedi il bearer SCIM 2.0 che l'IdP usa per inviare eventi di ciclo di vita degli utenti. Le modifiche si applicano al <strong>tenant attualmente selezionato</strong>; cambia tenant per configurarne uno diverso."
