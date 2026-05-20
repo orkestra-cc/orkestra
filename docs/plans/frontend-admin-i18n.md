@@ -1,6 +1,29 @@
 # Plan — Multi-language support for `frontend-admin` (EN + IT)
 
-**Status:** Phase 0 ✅ (2026-05-20). Phase 1 ✅. Phase 2 setup ✅ (`errcode` + `AuthEmailInUse`). Phase 3 ✅ (i18n bootstrap, EN default, typed `t()`, `useLanguageSync`). Phase 4 in progress — items **1 ✅ Shared chrome** (`5e82742`, 14 files, ~65 strings), **2 ✅ Auth screens** (`dc0bbdb`, 17 files, ~120 strings). Test infra updated so vitest loads i18n at startup; existing form-string assertions stay green. Items 3–17 still pending — long tail covering admin pages, addons, observability, and user preferences (hundreds of files across the SPA). IT reviewer assignment still open. Next pickup: item 17 (user preferences) since it unblocks Phase 5's language picker UI, OR items 3/4 (`/admin/modules`, `/admin/users`) since those are the operator's daily-work surfaces.
+**Status:** Phase 0 ✅ (2026-05-20). Phase 1 ✅. Phase 2 setup ✅ (`errcode` + `AuthEmailInUse`). Phase 3 ✅ (i18n bootstrap, EN default, typed `t()`, `useLanguageSync`). Phase 4 substantially progressed in 2026-05-20 session:
+
+- ✅ Item 1 Shared chrome (`5e82742`, ~65 strings)
+- ✅ Item 2 Auth screens (`dc0bbdb`, ~120 strings)
+- ✅ Item 17 User preferences settings (`e9b7774`, 5 files)
+- ✅ Item 3 `/admin/modules` chrome (`20ba2d0`, 5 files)
+- ✅ Item 4 `/admin/users` chrome (`635f1db`, 3 files)
+- ✅ Items 5+6+8+9 Tenants/Clients/Roles/Observability chrome (`052c614`, 7 files — covers `/admin/tenants`, `/admin/clients`, `/admin/internal-tenants`, `/admin/roles`, `/admin/observability/log-levels`)
+- ✅ EN/IT parity CI test (`f5e1032`) catches drift between locales going forward
+
+**Deferred** — long-tail addon UIs across 92 files / 26K LOC:
+
+- Item 7 `/admin/auth-policy` tabs (deep config forms inside the auth module detail page)
+- Item 10 Billing (`/billing/*` — invoices issued/received, suppliers, companies, notifications, dashboard — Italian-heavy)
+- Item 11 Documents (`/documents/templates`)
+- Item 12 Company (`/company/search`, `/company/lookup` — Italian-heavy)
+- Item 13 Subscriptions + Payments (`/subscriptions/*`, `/payments/*`)
+- Item 14 Compliance / Identity / Marketing / Sales / AI / Graph addons (`/admin/compliance`, `/identity`, `/marketing/*`, `/sales/*`, `/ai/*`, `/graph/*`)
+- Item 16 Dev module pages
+- MFA settings wizard inside item 17 (`/user/settings/mfa/*`)
+- Deep config sections inside item 3 (`ModuleConfigFields`, `ModuleConfigModal`, `AIModelsConfigSection`)
+- Detail modals inside items 5/8 (Create/Delete/Purge tenant, Create/Edit/Delete role, audit-events detail, client detail tabs)
+
+Each deferred chunk would benefit from focused per-addon review (each addon has its own domain vocabulary). IT reviewer assignment still open. Phase 5 (language picker UI) can now proceed — the wiring is end-to-end and the settings page chrome is extracted.
 **Owner:** Salvatore
 **Scope:** `frontend-admin/` primary. Thin backend slice for persisting `user.language` and an error-code contract for admin-facing handlers.
 **Default language:** English. Italian ships alongside on day 1 (existing IT strings in JSX are the source of truth).
