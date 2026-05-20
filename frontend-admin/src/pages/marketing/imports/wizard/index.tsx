@@ -10,6 +10,7 @@
 import { useState } from 'react';
 import { useNavigate, Link } from 'react-router';
 import { Alert, Button, Card, Form, ProgressBar } from 'react-bootstrap';
+import { useTranslation } from 'react-i18next';
 import { useAppDispatch, useAppSelector } from 'store/hooks';
 import runtimeConfig from 'config/environment';
 import { baseApi } from 'store/api/baseApi';
@@ -52,6 +53,7 @@ const CANONICAL_KEYS = [
 ];
 
 const ImportWizardPage: React.FC = () => {
+  const { t } = useTranslation();
   const dispatch = useAppDispatch();
   const navigate = useNavigate();
   const accessToken = useAppSelector(s => s.auth.accessToken);
@@ -68,13 +70,17 @@ const ImportWizardPage: React.FC = () => {
     setError(null);
     setResult(null);
     if (!file) {
-      setError('Pick a CSV file first.');
+      setError(t('marketing.imports.wizard.errorNoFile'));
       return;
     }
     try {
       JSON.parse(mapping);
     } catch (err) {
-      setError(`Mapping is not valid JSON: ${(err as Error).message}`);
+      setError(
+        t('marketing.imports.wizard.errorInvalidJson', {
+          message: (err as Error).message
+        })
+      );
       return;
     }
     setRunning(true);
@@ -116,14 +122,15 @@ const ImportWizardPage: React.FC = () => {
     <>
       <div className="mb-3 d-flex justify-content-between align-items-center">
         <div>
-          <h3 className="fw-normal mb-1">New import</h3>
+          <h3 className="fw-normal mb-1">
+            {t('marketing.imports.wizard.heading')}
+          </h3>
           <p className="fs-10 text-muted mb-0">
-            Upload a CSV and supply a column mapping. The pipeline runs
-            synchronously — keep the tab open until the result panel appears.
+            {t('marketing.imports.wizard.subtitle')}
           </p>
         </div>
         <Link to="/marketing/imports" className="text-muted">
-          ← All imports
+          {t('marketing.imports.wizard.allImports')}
         </Link>
       </div>
 
@@ -131,7 +138,7 @@ const ImportWizardPage: React.FC = () => {
         <Card.Body>
           <Form onSubmit={onSubmit}>
             <Form.Group className="mb-3">
-              <Form.Label>CSV file</Form.Label>
+              <Form.Label>{t('marketing.imports.wizard.fileLabel')}</Form.Label>
               <Form.Control
                 type="file"
                 accept=".csv,text/csv"
@@ -143,23 +150,28 @@ const ImportWizardPage: React.FC = () => {
                 disabled={running}
               />
               <Form.Text className="text-muted">
-                In-memory parse: files up to 32 MB stay in RAM; larger files
-                spill to a temp directory.
+                {t('marketing.imports.wizard.fileHelp')}
               </Form.Text>
             </Form.Group>
 
             <Form.Group className="mb-3">
-              <Form.Label>Source name</Form.Label>
+              <Form.Label>
+                {t('marketing.imports.wizard.sourceNameLabel')}
+              </Form.Label>
               <Form.Control
                 value={sourceName}
                 onChange={e => setSourceName(e.target.value)}
-                placeholder="Defaults to the uploaded filename"
+                placeholder={t(
+                  'marketing.imports.wizard.sourceNamePlaceholder'
+                )}
                 disabled={running}
               />
             </Form.Group>
 
             <Form.Group className="mb-3">
-              <Form.Label>Column mapping (JSON)</Form.Label>
+              <Form.Label>
+                {t('marketing.imports.wizard.mappingLabel')}
+              </Form.Label>
               <Form.Control
                 as="textarea"
                 rows={10}
@@ -169,7 +181,9 @@ const ImportWizardPage: React.FC = () => {
                 style={{ fontFamily: 'monospace', fontSize: 12 }}
               />
               <Form.Text className="text-muted">
-                Recognised canonical keys: {CANONICAL_KEYS.join(', ')}
+                {t('marketing.imports.wizard.mappingHelp', {
+                  keys: CANONICAL_KEYS.join(', ')
+                })}
               </Form.Text>
             </Form.Group>
 
@@ -178,7 +192,7 @@ const ImportWizardPage: React.FC = () => {
               <div className="mb-3">
                 <ProgressBar animated now={100} />
                 <small className="text-muted">
-                  Pipeline is running… do not close the tab.
+                  {t('marketing.imports.wizard.progressLabel')}
                 </small>
               </div>
             )}
@@ -189,7 +203,7 @@ const ImportWizardPage: React.FC = () => {
                 variant="primary"
                 disabled={running || !file}
               >
-                Run import
+                {t('marketing.imports.wizard.runImport')}
               </Button>
             </div>
           </Form>
@@ -200,29 +214,49 @@ const ImportWizardPage: React.FC = () => {
         <Card className="mt-3 border-success">
           <Card.Body>
             <h5 className="mb-2">
-              Import {result.status === 'done' ? 'completed' : 'finished'}
+              {result.status === 'done'
+                ? t('marketing.imports.wizard.result.headingDone')
+                : t('marketing.imports.wizard.result.headingFinished')}
             </h5>
             <div className="mb-2 text-muted fs-10">
-              Job <code>{result.uuid}</code>
+              {t('marketing.imports.wizard.result.jobLabel')}{' '}
+              <code>{result.uuid}</code>
             </div>
             <ul className="list-unstyled mb-3">
-              <li>Rows read: {result.stats.rowsRead}</li>
-              <li>Rows failed: {result.stats.rowsFailed ?? 0}</li>
               <li>
-                Organizations: {result.stats.orgsCreated ?? 0} created,{' '}
-                {result.stats.orgsMerged ?? 0} merged
+                {t('marketing.imports.wizard.result.rowsRead', {
+                  count: result.stats.rowsRead
+                })}
               </li>
               <li>
-                Persons: {result.stats.personsCreated ?? 0} created,{' '}
-                {result.stats.personsMerged ?? 0} merged
+                {t('marketing.imports.wizard.result.rowsFailed', {
+                  count: result.stats.rowsFailed ?? 0
+                })}
               </li>
-              <li>Memberships linked: {result.stats.membershipsLinked ?? 0}</li>
               <li>
-                Conflicts skipped: {result.stats.conflictsSkipped ?? 0}
+                {t('marketing.imports.wizard.result.organizations', {
+                  created: result.stats.orgsCreated ?? 0,
+                  merged: result.stats.orgsMerged ?? 0
+                })}
+              </li>
+              <li>
+                {t('marketing.imports.wizard.result.persons', {
+                  created: result.stats.personsCreated ?? 0,
+                  merged: result.stats.personsMerged ?? 0
+                })}
+              </li>
+              <li>
+                {t('marketing.imports.wizard.result.membershipsLinked', {
+                  count: result.stats.membershipsLinked ?? 0
+                })}
+              </li>
+              <li>
+                {t('marketing.imports.wizard.result.conflictsSkipped', {
+                  count: result.stats.conflictsSkipped ?? 0
+                })}
                 {result.stats.conflictsSkipped ? (
                   <small className="text-warning ms-1">
-                    (dedup-key disagreements — Phase 3 review queue will route
-                    these for resolution)
+                    {t('marketing.imports.wizard.result.conflictsNote')}
                   </small>
                 ) : null}
               </li>
@@ -233,7 +267,7 @@ const ImportWizardPage: React.FC = () => {
                 size="sm"
                 onClick={() => navigate('/marketing/imports')}
               >
-                Back to imports list
+                {t('marketing.imports.wizard.result.backToList')}
               </Button>
               <Button
                 variant="outline-secondary"
@@ -244,7 +278,7 @@ const ImportWizardPage: React.FC = () => {
                   setError(null);
                 }}
               >
-                Run another
+                {t('marketing.imports.wizard.result.runAnother')}
               </Button>
             </div>
           </Card.Body>

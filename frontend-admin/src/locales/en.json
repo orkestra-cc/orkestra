@@ -807,7 +807,54 @@
       "title": "Custom fields"
     },
     "imports": {
-      "title": "Imports"
+      "title": "Imports",
+      "list": {
+        "subtitle": "Audit log of every contact-base import. Phase 1 ships CSV; Excel + Odoo adapters arrive in Phase 3.",
+        "refresh": "Refresh",
+        "newImport": "New import",
+        "loading": "Loading…",
+        "empty": "No imports yet. Click <strong>New import</strong> to upload a CSV.",
+        "colSource": "Source",
+        "colAdapter": "Adapter",
+        "colStatus": "Status",
+        "colRows": "Rows",
+        "colCreated": "Created",
+        "colCreatedMerged": "Created · Merged",
+        "unnamed": "(unnamed)",
+        "rowsFailedSuffix": " ({{count}} failed)",
+        "conflictsSuffix": " ({{count}} conflicts)",
+        "orgsLine": "Orgs: {{created}} · {{merged}}",
+        "personsLine": "Persons: {{created}} · {{merged}}"
+      },
+      "wizard": {
+        "heading": "New import",
+        "subtitle": "Upload a CSV and supply a column mapping. The pipeline runs synchronously — keep the tab open until the result panel appears.",
+        "allImports": "← All imports",
+        "fileLabel": "CSV file",
+        "fileHelp": "In-memory parse: files up to 32 MB stay in RAM; larger files spill to a temp directory.",
+        "sourceNameLabel": "Source name",
+        "sourceNamePlaceholder": "Defaults to the uploaded filename",
+        "mappingLabel": "Column mapping (JSON)",
+        "mappingHelp": "Recognised canonical keys: {{keys}}",
+        "errorNoFile": "Pick a CSV file first.",
+        "errorInvalidJson": "Mapping is not valid JSON: {{message}}",
+        "progressLabel": "Pipeline is running… do not close the tab.",
+        "runImport": "Run import",
+        "result": {
+          "headingDone": "Import completed",
+          "headingFinished": "Import finished",
+          "jobLabel": "Job",
+          "rowsRead": "Rows read: {{count}}",
+          "rowsFailed": "Rows failed: {{count}}",
+          "organizations": "Organizations: {{created}} created, {{merged}} merged",
+          "persons": "Persons: {{created}} created, {{merged}} merged",
+          "membershipsLinked": "Memberships linked: {{count}}",
+          "conflictsSkipped": "Conflicts skipped: {{count}}",
+          "conflictsNote": "(dedup-key disagreements — Phase 3 review queue will route these for resolution)",
+          "backToList": "Back to imports list",
+          "runAnother": "Run another"
+        }
+      }
     }
   },
   "sales": {

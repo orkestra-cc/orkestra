@@ -807,7 +807,54 @@
       "title": "Campi personalizzati"
     },
     "imports": {
-      "title": "Importazioni"
+      "title": "Importazioni",
+      "list": {
+        "subtitle": "Log audit di tutte le importazioni nella contact base. La Fase 1 supporta CSV; gli adapter Excel + Odoo arrivano in Fase 3.",
+        "refresh": "Aggiorna",
+        "newImport": "Nuova importazione",
+        "loading": "Caricamento…",
+        "empty": "Nessuna importazione ancora. Clicca <strong>Nuova importazione</strong> per caricare un CSV.",
+        "colSource": "Sorgente",
+        "colAdapter": "Adapter",
+        "colStatus": "Stato",
+        "colRows": "Righe",
+        "colCreated": "Creato",
+        "colCreatedMerged": "Creati · Uniti",
+        "unnamed": "(senza nome)",
+        "rowsFailedSuffix": " ({{count}} falliti)",
+        "conflictsSuffix": " ({{count}} conflitti)",
+        "orgsLine": "Org: {{created}} · {{merged}}",
+        "personsLine": "Persone: {{created}} · {{merged}}"
+      },
+      "wizard": {
+        "heading": "Nuova importazione",
+        "subtitle": "Carica un CSV e fornisci un mapping di colonne. La pipeline viene eseguita in modo sincrono — tieni la tab aperta finché non appare il pannello dei risultati.",
+        "allImports": "← Tutte le importazioni",
+        "fileLabel": "File CSV",
+        "fileHelp": "Parsing in memoria: file fino a 32 MB restano in RAM; file più grandi vengono salvati su una cartella temporanea.",
+        "sourceNameLabel": "Nome sorgente",
+        "sourceNamePlaceholder": "Default: nome del file caricato",
+        "mappingLabel": "Mapping colonne (JSON)",
+        "mappingHelp": "Chiavi canoniche riconosciute: {{keys}}",
+        "errorNoFile": "Seleziona prima un file CSV.",
+        "errorInvalidJson": "Il mapping non è JSON valido: {{message}}",
+        "progressLabel": "La pipeline è in esecuzione… non chiudere la tab.",
+        "runImport": "Esegui importazione",
+        "result": {
+          "headingDone": "Importazione completata",
+          "headingFinished": "Importazione terminata",
+          "jobLabel": "Job",
+          "rowsRead": "Righe lette: {{count}}",
+          "rowsFailed": "Righe fallite: {{count}}",
+          "organizations": "Organizzazioni: {{created}} create, {{merged}} unite",
+          "persons": "Persone: {{created}} create, {{merged}} unite",
+          "membershipsLinked": "Membership collegate: {{count}}",
+          "conflictsSkipped": "Conflitti saltati: {{count}}",
+          "conflictsNote": "(dedup-key in disaccordo — la coda di review di Fase 3 le instraderà per la risoluzione)",
+          "backToList": "Torna alla lista importazioni",
+          "runAnother": "Esegui un'altra"
+        }
+      }
     }
   },
   "sales": {
