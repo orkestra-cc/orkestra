@@ -323,6 +323,31 @@
       "manage": "Manage security"
     }
   },
+  "adminUsers": {
+    "welcomeKicker": "Welcome to",
+    "welcomeTitle": "User",
+    "welcomeTitleAccent": " Management",
+    "mfaReset": {
+      "title": "Reset MFA for {{user}}",
+      "warning": "This will delete the user's registered authenticator and backup codes. They will be forced to enroll a new factor on their next sign-in, subject to the 7-day grace window.",
+      "prompt": "Enter <strong>your own</strong> authenticator code to authorize this action.",
+      "yourCode": "Your authenticator code",
+      "yourBackup": "Your backup code",
+      "useBackup": "Use a backup code instead",
+      "useAuthenticator": "Use authenticator app instead",
+      "authenticatorPlaceholder": "123 456",
+      "backupPlaceholder": "XXXX-XXXX",
+      "submit": "Reset MFA",
+      "submitting": "Resetting…",
+      "cancel": "Cancel",
+      "errors": {
+        "missingCode": "Enter your authenticator code to authorize the reset.",
+        "incorrectCode": "Incorrect code. Please try again.",
+        "noFactor": "This user has no MFA factor to reset.",
+        "generic": "Could not reset the factor. Please try again."
+      }
+    }
+  },
   "adminModules": {
     "pageTitle": "Module Management",
     "modulesCount_one": "{{count}} module",

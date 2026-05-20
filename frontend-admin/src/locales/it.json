@@ -323,6 +323,31 @@
       "manage": "Gestisci la sicurezza"
     }
   },
+  "adminUsers": {
+    "welcomeKicker": "Benvenuto in",
+    "welcomeTitle": "Gestione",
+    "welcomeTitleAccent": " utenti",
+    "mfaReset": {
+      "title": "Reset MFA per {{user}}",
+      "warning": "Questo eliminerà l'autenticatore registrato e i codici di backup dell'utente. Sarà costretto a configurare un nuovo fattore al prossimo accesso, soggetto al periodo di tolleranza di 7 giorni.",
+      "prompt": "Inserisci il <strong>tuo</strong> codice dell'autenticatore per autorizzare questa azione.",
+      "yourCode": "Il tuo codice autenticatore",
+      "yourBackup": "Il tuo codice di backup",
+      "useBackup": "Usa un codice di backup",
+      "useAuthenticator": "Usa l'app di autenticazione",
+      "authenticatorPlaceholder": "123 456",
+      "backupPlaceholder": "XXXX-XXXX",
+      "submit": "Reset MFA",
+      "submitting": "Reset in corso…",
+      "cancel": "Annulla",
+      "errors": {
+        "missingCode": "Inserisci il tuo codice autenticatore per autorizzare il reset.",
+        "incorrectCode": "Codice errato. Riprova.",
+        "noFactor": "Questo utente non ha un fattore MFA da reimpostare.",
+        "generic": "Impossibile reimpostare il fattore. Riprova."
+      }
+    }
+  },
   "adminModules": {
     "pageTitle": "Gestione moduli",
     "modulesCount_one": "{{count}} modulo",
