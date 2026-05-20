@@ -1,4 +1,5 @@
 import React, { useState, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   Modal,
   Button,
@@ -34,6 +35,7 @@ const ImportXMLModal: React.FC<ImportXMLModalProps> = ({
   onHide,
   onSuccess
 }) => {
+  const { t } = useTranslation();
   const [importXMLInvoice, { isLoading }] = useImportXMLInvoiceMutation();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -58,7 +60,7 @@ const ImportXMLModal: React.FC<ImportXMLModalProps> = ({
       setXmlContent(content);
     };
     reader.onerror = () => {
-      setError('Errore durante la lettura del file');
+      setError(t('billing.importXml.errors.readFile'));
     };
     reader.readAsText(file);
   };
@@ -75,7 +77,7 @@ const ImportXMLModal: React.FC<ImportXMLModalProps> = ({
     setResult(null);
 
     if (!xmlContent.trim()) {
-      setError('Il contenuto XML è obbligatorio');
+      setError(t('billing.importXml.errors.xmlRequired'));
       return;
     }
 
@@ -84,7 +86,7 @@ const ImportXMLModal: React.FC<ImportXMLModalProps> = ({
       !xmlContent.includes('<FatturaElettronica') &&
       !xmlContent.includes('<?xml')
     ) {
-      setError('Il contenuto non sembra essere un file FatturaPA XML valido');
+      setError(t('billing.importXml.errors.notValidFatturaPa'));
       return;
     }
 
@@ -113,7 +115,7 @@ const ImportXMLModal: React.FC<ImportXMLModalProps> = ({
       } else if (apiError?.data?.error) {
         setError(apiError.data.error);
       } else {
-        setError("Errore durante l'importazione della fattura");
+        setError(t('billing.importXml.errors.importFailed'));
       }
     }
   };
@@ -145,7 +147,7 @@ const ImportXMLModal: React.FC<ImportXMLModalProps> = ({
       <Modal.Header className="bg-body-tertiary d-flex justify-content-between align-items-center">
         <Modal.Title as="h5" id="import-xml-modal-title">
           <FontAwesomeIcon icon="file-import" className="me-2 text-primary" />
-          Importa Fattura XML
+          {t('billing.importXml.title')}
         </Modal.Title>
         <OrkestraCloseButton onClick={handleClose} />
       </Modal.Header>
@@ -175,16 +177,19 @@ const ImportXMLModal: React.FC<ImportXMLModalProps> = ({
                     icon="building"
                     className="me-2 text-primary"
                   />
-                  Fornitore
+                  {t('billing.importXml.result.supplier')}
                   {result.supplier.isNew && (
-                    <span className="badge bg-success ms-2">Nuovo</span>
+                    <span className="badge bg-success ms-2">
+                      {t('billing.importXml.result.supplierNewBadge')}
+                    </span>
                   )}
                 </h6>
                 <div>
                   <strong>{result.supplier.name}</strong>
                   <br />
                   <small className="text-body-secondary">
-                    P.IVA: {result.supplier.fiscalId}
+                    {t('billing.importXml.result.supplierVat')}{' '}
+                    {result.supplier.fiscalId}
                   </small>
                 </div>
               </div>
@@ -197,15 +202,19 @@ const ImportXMLModal: React.FC<ImportXMLModalProps> = ({
                     icon="file-invoice"
                     className="me-2 text-success"
                   />
-                  Fatture Importate ({result.count})
+                  {t('billing.importXml.result.imported', {
+                    count: result.count
+                  })}
                 </h6>
                 <Table size="sm" bordered hover responsive>
                   <thead className="bg-body-tertiary">
                     <tr>
-                      <th>Numero</th>
-                      <th>Tipo</th>
-                      <th>Data</th>
-                      <th className="text-end">Importo</th>
+                      <th>{t('billing.importXml.result.colNumber')}</th>
+                      <th>{t('billing.importXml.result.colType')}</th>
+                      <th>{t('billing.importXml.result.colDate')}</th>
+                      <th className="text-end">
+                        {t('billing.importXml.result.colAmount')}
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
@@ -236,13 +245,15 @@ const ImportXMLModal: React.FC<ImportXMLModalProps> = ({
                     icon="forward"
                     className="me-2 text-warning"
                   />
-                  Fatture Saltate ({result.skipped.length})
+                  {t('billing.importXml.result.skipped', {
+                    count: result.skipped.length
+                  })}
                 </h6>
                 <Table size="sm" bordered responsive className="table-warning">
                   <thead>
                     <tr>
-                      <th>Numero</th>
-                      <th>Motivo</th>
+                      <th>{t('billing.importXml.result.colNumber')}</th>
+                      <th>{t('billing.importXml.result.colReason')}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -262,10 +273,10 @@ const ImportXMLModal: React.FC<ImportXMLModalProps> = ({
             <div className="d-flex gap-2 justify-content-end mt-4">
               <Button variant="outline-secondary" onClick={handleImportAnother}>
                 <FontAwesomeIcon icon="plus" className="me-1" />
-                Importa altra fattura
+                {t('billing.importXml.actions.importAnother')}
               </Button>
               <Button variant="primary" onClick={handleClose}>
-                Chiudi
+                {t('billing.importXml.actions.close')}
               </Button>
             </div>
           </div>
@@ -279,13 +290,13 @@ const ImportXMLModal: React.FC<ImportXMLModalProps> = ({
                 <Nav.Item>
                   <Nav.Link eventKey="file">
                     <FontAwesomeIcon icon="upload" className="me-1" />
-                    Carica File
+                    {t('billing.importXml.tabs.file')}
                   </Nav.Link>
                 </Nav.Item>
                 <Nav.Item>
                   <Nav.Link eventKey="paste">
                     <FontAwesomeIcon icon="paste" className="me-1" />
-                    Incolla XML
+                    {t('billing.importXml.tabs.paste')}
                   </Nav.Link>
                 </Nav.Item>
               </Nav>
@@ -293,7 +304,7 @@ const ImportXMLModal: React.FC<ImportXMLModalProps> = ({
               <Tab.Content>
                 <Tab.Pane eventKey="file">
                   <Form.Group className="mb-3">
-                    <Form.Label>Seleziona file FatturaPA (.xml)</Form.Label>
+                    <Form.Label>{t('billing.importXml.file.label')}</Form.Label>
                     <Form.Control
                       ref={fileInputRef}
                       type="file"
@@ -301,31 +312,33 @@ const ImportXMLModal: React.FC<ImportXMLModalProps> = ({
                       onChange={handleFileChange}
                     />
                     <Form.Text className="text-body-secondary">
-                      Supporta file FatturaPA in formato XML (es.
-                      IT12345678901_XXXXX.xml)
+                      {t('billing.importXml.file.help')}
                     </Form.Text>
                   </Form.Group>
                   {fileName && (
                     <Alert variant="info" className="py-2">
                       <FontAwesomeIcon icon="file-code" className="me-2" />
-                      File selezionato: <strong>{fileName}</strong>
+                      {t('billing.importXml.file.selected')}{' '}
+                      <strong>{fileName}</strong>
                     </Alert>
                   )}
                 </Tab.Pane>
 
                 <Tab.Pane eventKey="paste">
                   <Form.Group className="mb-3">
-                    <Form.Label>Contenuto XML FatturaPA</Form.Label>
+                    <Form.Label>
+                      {t('billing.importXml.paste.label')}
+                    </Form.Label>
                     <Form.Control
                       as="textarea"
                       rows={10}
                       value={xmlContent}
                       onChange={handleXmlChange}
-                      placeholder="Incolla qui il contenuto XML della fattura..."
+                      placeholder={t('billing.importXml.paste.placeholder')}
                       style={{ fontFamily: 'monospace', fontSize: '0.85rem' }}
                     />
                     <Form.Text className="text-body-secondary">
-                      Incolla il contenuto completo del file XML FatturaPA
+                      {t('billing.importXml.paste.help')}
                     </Form.Text>
                   </Form.Group>
                 </Tab.Pane>
@@ -338,13 +351,12 @@ const ImportXMLModal: React.FC<ImportXMLModalProps> = ({
               <Form.Check
                 type="checkbox"
                 id="skipDuplicates"
-                label="Salta fatture duplicate (consigliato)"
+                label={t('billing.importXml.skipDuplicates.label')}
                 checked={skipDuplicates}
                 onChange={e => setSkipDuplicates(e.target.checked)}
               />
               <Form.Text className="text-body-secondary">
-                Se attivo, le fatture già presenti nel sistema verranno saltate
-                invece di generare un errore
+                {t('billing.importXml.skipDuplicates.help')}
               </Form.Text>
             </Form.Group>
 
@@ -354,7 +366,7 @@ const ImportXMLModal: React.FC<ImportXMLModalProps> = ({
                 onClick={handleClose}
                 disabled={isLoading}
               >
-                Annulla
+                {t('billing.importXml.actions.cancel')}
               </Button>
               <Button
                 variant="primary"
@@ -364,12 +376,12 @@ const ImportXMLModal: React.FC<ImportXMLModalProps> = ({
                 {isLoading ? (
                   <>
                     <Spinner animation="border" size="sm" className="me-1" />
-                    Importazione in corso...
+                    {t('billing.importXml.actions.importing')}
                   </>
                 ) : (
                   <>
                     <FontAwesomeIcon icon="file-import" className="me-1" />
-                    Importa Fattura
+                    {t('billing.importXml.actions.import')}
                   </>
                 )}
               </Button>

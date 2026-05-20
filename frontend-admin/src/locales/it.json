@@ -752,6 +752,189 @@
       "title": "Aziende Emittenti",
       "newCompany": "Nuova Azienda"
     },
+    "importXml": {
+      "title": "Importa Fattura XML",
+      "tabs": {
+        "file": "Carica File",
+        "paste": "Incolla XML"
+      },
+      "file": {
+        "label": "Seleziona file FatturaPA (.xml)",
+        "help": "Supporta file FatturaPA in formato XML (es. IT12345678901_XXXXX.xml)",
+        "selected": "File selezionato:"
+      },
+      "paste": {
+        "label": "Contenuto XML FatturaPA",
+        "placeholder": "Incolla qui il contenuto XML della fattura...",
+        "help": "Incolla il contenuto completo del file XML FatturaPA"
+      },
+      "skipDuplicates": {
+        "label": "Salta fatture duplicate (consigliato)",
+        "help": "Se attivo, le fatture già presenti nel sistema verranno saltate invece di generare un errore"
+      },
+      "actions": {
+        "cancel": "Annulla",
+        "import": "Importa Fattura",
+        "importing": "Importazione in corso...",
+        "importAnother": "Importa altra fattura",
+        "close": "Chiudi"
+      },
+      "result": {
+        "supplier": "Fornitore",
+        "supplierNewBadge": "Nuovo",
+        "supplierVat": "P.IVA:",
+        "imported": "Fatture Importate ({{count}})",
+        "skipped": "Fatture Saltate ({{count}})",
+        "colNumber": "Numero",
+        "colType": "Tipo",
+        "colDate": "Data",
+        "colAmount": "Importo",
+        "colReason": "Motivo"
+      },
+      "errors": {
+        "readFile": "Errore durante la lettura del file",
+        "xmlRequired": "Il contenuto XML è obbligatorio",
+        "notValidFatturaPa": "Il contenuto non sembra essere un file FatturaPA XML valido",
+        "importFailed": "Errore durante l'importazione della fattura"
+      }
+    },
+    "receivedDetail": {
+      "loading": "Caricamento...",
+      "loadError": "Errore durante il caricamento della fattura. Riprova più tardi.",
+      "notFound": "Fattura non trovata.",
+      "header": {
+        "title": "Fattura {{number}}",
+        "subtitle": "{{type}} - {{status}}",
+        "subtitleWithSdi": "{{type}} - {{status}} ({{sdiStatus}})",
+        "backToList": "Torna alla lista",
+        "preview": "Anteprima",
+        "viewXml": "Visualizza XML",
+        "downloadXml": "Scarica XML",
+        "downloadPdf": "Scarica PDF"
+      },
+      "summary": {
+        "title": "Riepilogo Fattura",
+        "number": "Numero",
+        "date": "Data",
+        "documentType": "Tipo Documento",
+        "status": "Stato",
+        "supplier": "Fornitore",
+        "taxable": "Imponibile",
+        "total": "Totale",
+        "sdiId": "ID SDI",
+        "causale": "Causale",
+        "notAvailable": "N/D",
+        "dash": "-"
+      },
+      "linesCard": {
+        "title": "Dettaglio Righe",
+        "colNumber": "#",
+        "colDescription": "Descrizione",
+        "colQuantity": "Qtà",
+        "colUnit": "U.M.",
+        "colUnitPrice": "Prezzo Unit.",
+        "colVat": "IVA %",
+        "colNature": "Natura",
+        "colTotal": "Totale",
+        "footerTaxable": "Imponibile:",
+        "footerVat": "IVA:",
+        "footerTotal": "Totale:"
+      },
+      "paymentCard": {
+        "title": "Termini di Pagamento",
+        "condition": "Condizione",
+        "method": "Metodo",
+        "dueDate": "Scadenza",
+        "beneficiario": "Beneficiario",
+        "istituto": "Istituto Finanziario",
+        "iban": "IBAN",
+        "bic": "BIC/SWIFT"
+      },
+      "actions": {
+        "accept": "Accetta",
+        "reject": "Rifiuta",
+        "processing": "Elaborazione..."
+      },
+      "confirm": {
+        "accept": "Sei sicuro di voler accettare questa fattura?",
+        "rejectReason": "Inserisci il motivo del rifiuto:"
+      }
+    },
+    "supplierModal": {
+      "title": {
+        "create": "Nuovo Fornitore",
+        "edit": "Modifica Fornitore"
+      },
+      "tabs": {
+        "general": "Dati Generali",
+        "address": "Indirizzo",
+        "contact": "Contatti",
+        "bank": "Dati Bancari"
+      },
+      "general": {
+        "isCompanyLabel": "Azienda",
+        "denominationLabel": "Ragione Sociale",
+        "denominationPlaceholder": "es. Fornitore S.r.l.",
+        "nameLabel": "Nome",
+        "namePlaceholder": "es. Mario",
+        "surnameLabel": "Cognome",
+        "surnamePlaceholder": "es. Rossi",
+        "countryLabel": "Paese",
+        "vatLabel": "Partita IVA",
+        "vatPlaceholder": "es. 12345678901",
+        "codiceFiscaleLabel": "Codice Fiscale",
+        "codiceFiscalePlaceholder": "es. RSSMRA80A01H501Z",
+        "codiceFiscaleHelp": "Solo se diverso dalla P.IVA",
+        "regimeFiscaleLabel": "Regime Fiscale"
+      },
+      "address": {
+        "addressLabel": "Indirizzo",
+        "addressPlaceholder": "es. Via Roma",
+        "numeroCivicoLabel": "N. Civico",
+        "numeroCivicoPlaceholder": "123",
+        "cityLabel": "Città",
+        "cityPlaceholder": "es. Roma",
+        "provinceLabel": "Prov.",
+        "provincePlaceholder": "RM",
+        "postalCodeLabel": "CAP",
+        "postalCodePlaceholder": "00100",
+        "countryLabel": "Nazione"
+      },
+      "contact": {
+        "emailLabel": "Email",
+        "emailPlaceholder": "es. info@fornitore.it",
+        "pecLabel": "PEC",
+        "pecPlaceholder": "es. fornitore@pec.it",
+        "phoneLabel": "Telefono",
+        "phonePlaceholder": "es. +39 06 1234567",
+        "notesLabel": "Note",
+        "notesPlaceholder": "Note interne..."
+      },
+      "bank": {
+        "ibanLabel": "IBAN",
+        "ibanPlaceholder": "es. IT60X0542811101000000123456",
+        "ibanHelp": "Coordinate bancarie per pagamenti al fornitore",
+        "bicLabel": "BIC/SWIFT",
+        "bicPlaceholder": "es. BCITITMM"
+      },
+      "validation": {
+        "vatRequired": "La Partita IVA / Codice Fiscale è obbligatorio",
+        "denominationRequired": "La Ragione Sociale è obbligatoria per le aziende",
+        "namesRequired": "Nome e Cognome sono obbligatori per le persone fisiche",
+        "addressRequired": "Indirizzo, Città e CAP sono obbligatori"
+      },
+      "toasts": {
+        "saveErrorCreate": "Errore durante il creazione del fornitore",
+        "saveErrorEdit": "Errore durante il salvataggio del fornitore"
+      },
+      "actions": {
+        "cancel": "Annulla",
+        "saving": "Salvataggio...",
+        "creating": "Creazione...",
+        "save": "Salva Modifiche",
+        "create": "Crea Fornitore"
+      }
+    },
     "companyModal": {
       "title": {
         "create": "Nuova Azienda",

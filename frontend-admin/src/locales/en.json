@@ -752,6 +752,189 @@
       "title": "Issuing Companies",
       "newCompany": "New company"
     },
+    "importXml": {
+      "title": "Import XML Invoice",
+      "tabs": {
+        "file": "Upload File",
+        "paste": "Paste XML"
+      },
+      "file": {
+        "label": "Select FatturaPA file (.xml)",
+        "help": "Supports FatturaPA files in XML format (e.g. IT12345678901_XXXXX.xml)",
+        "selected": "File selected:"
+      },
+      "paste": {
+        "label": "FatturaPA XML content",
+        "placeholder": "Paste the XML content of the invoice here…",
+        "help": "Paste the full content of the FatturaPA XML file"
+      },
+      "skipDuplicates": {
+        "label": "Skip duplicate invoices (recommended)",
+        "help": "If enabled, invoices already in the system will be skipped instead of producing an error"
+      },
+      "actions": {
+        "cancel": "Cancel",
+        "import": "Import Invoice",
+        "importing": "Importing…",
+        "importAnother": "Import another invoice",
+        "close": "Close"
+      },
+      "result": {
+        "supplier": "Supplier",
+        "supplierNewBadge": "New",
+        "supplierVat": "VAT:",
+        "imported": "Imported Invoices ({{count}})",
+        "skipped": "Skipped Invoices ({{count}})",
+        "colNumber": "Number",
+        "colType": "Type",
+        "colDate": "Date",
+        "colAmount": "Amount",
+        "colReason": "Reason"
+      },
+      "errors": {
+        "readFile": "Error reading the file",
+        "xmlRequired": "XML content is required",
+        "notValidFatturaPa": "The content does not look like a valid FatturaPA XML file",
+        "importFailed": "Error while importing the invoice"
+      }
+    },
+    "receivedDetail": {
+      "loading": "Loading…",
+      "loadError": "Error loading the invoice. Please try again later.",
+      "notFound": "Invoice not found.",
+      "header": {
+        "title": "Invoice {{number}}",
+        "subtitle": "{{type}} - {{status}}",
+        "subtitleWithSdi": "{{type}} - {{status}} ({{sdiStatus}})",
+        "backToList": "Back to list",
+        "preview": "Preview",
+        "viewXml": "View XML",
+        "downloadXml": "Download XML",
+        "downloadPdf": "Download PDF"
+      },
+      "summary": {
+        "title": "Invoice Summary",
+        "number": "Number",
+        "date": "Date",
+        "documentType": "Document Type",
+        "status": "Status",
+        "supplier": "Supplier",
+        "taxable": "Taxable",
+        "total": "Total",
+        "sdiId": "SDI ID",
+        "causale": "Description",
+        "notAvailable": "N/A",
+        "dash": "-"
+      },
+      "linesCard": {
+        "title": "Line Details",
+        "colNumber": "#",
+        "colDescription": "Description",
+        "colQuantity": "Qty",
+        "colUnit": "U.M.",
+        "colUnitPrice": "Unit Price",
+        "colVat": "VAT %",
+        "colNature": "Nature",
+        "colTotal": "Total",
+        "footerTaxable": "Taxable:",
+        "footerVat": "VAT:",
+        "footerTotal": "Total:"
+      },
+      "paymentCard": {
+        "title": "Payment Terms",
+        "condition": "Condition",
+        "method": "Method",
+        "dueDate": "Due Date",
+        "beneficiario": "Beneficiary",
+        "istituto": "Financial Institution",
+        "iban": "IBAN",
+        "bic": "BIC/SWIFT"
+      },
+      "actions": {
+        "accept": "Accept",
+        "reject": "Reject",
+        "processing": "Processing…"
+      },
+      "confirm": {
+        "accept": "Are you sure you want to accept this invoice?",
+        "rejectReason": "Enter the rejection reason:"
+      }
+    },
+    "supplierModal": {
+      "title": {
+        "create": "New Supplier",
+        "edit": "Edit Supplier"
+      },
+      "tabs": {
+        "general": "General Data",
+        "address": "Address",
+        "contact": "Contacts",
+        "bank": "Bank Details"
+      },
+      "general": {
+        "isCompanyLabel": "Company",
+        "denominationLabel": "Company Name",
+        "denominationPlaceholder": "e.g. Supplier S.r.l.",
+        "nameLabel": "First Name",
+        "namePlaceholder": "e.g. Mario",
+        "surnameLabel": "Last Name",
+        "surnamePlaceholder": "e.g. Rossi",
+        "countryLabel": "Country",
+        "vatLabel": "VAT Number",
+        "vatPlaceholder": "e.g. 12345678901",
+        "codiceFiscaleLabel": "Tax Code",
+        "codiceFiscalePlaceholder": "e.g. RSSMRA80A01H501Z",
+        "codiceFiscaleHelp": "Only if different from VAT number",
+        "regimeFiscaleLabel": "Tax Regime"
+      },
+      "address": {
+        "addressLabel": "Address",
+        "addressPlaceholder": "e.g. Via Roma",
+        "numeroCivicoLabel": "Street No.",
+        "numeroCivicoPlaceholder": "123",
+        "cityLabel": "City",
+        "cityPlaceholder": "e.g. Roma",
+        "provinceLabel": "Prov.",
+        "provincePlaceholder": "RM",
+        "postalCodeLabel": "ZIP",
+        "postalCodePlaceholder": "00100",
+        "countryLabel": "Country"
+      },
+      "contact": {
+        "emailLabel": "Email",
+        "emailPlaceholder": "e.g. info@supplier.com",
+        "pecLabel": "PEC",
+        "pecPlaceholder": "e.g. supplier@pec.it",
+        "phoneLabel": "Phone",
+        "phonePlaceholder": "e.g. +39 06 1234567",
+        "notesLabel": "Notes",
+        "notesPlaceholder": "Internal notes…"
+      },
+      "bank": {
+        "ibanLabel": "IBAN",
+        "ibanPlaceholder": "e.g. IT60X0542811101000000123456",
+        "ibanHelp": "Bank details for supplier payments",
+        "bicLabel": "BIC/SWIFT",
+        "bicPlaceholder": "e.g. BCITITMM"
+      },
+      "validation": {
+        "vatRequired": "VAT number / Tax code is required",
+        "denominationRequired": "Company name is required for companies",
+        "namesRequired": "First and last name are required for individuals",
+        "addressRequired": "Address, City and ZIP are required"
+      },
+      "toasts": {
+        "saveErrorCreate": "Error while creating the supplier",
+        "saveErrorEdit": "Error while saving the supplier"
+      },
+      "actions": {
+        "cancel": "Cancel",
+        "saving": "Saving…",
+        "creating": "Creating…",
+        "save": "Save Changes",
+        "create": "Create Supplier"
+      }
+    },
     "companyModal": {
       "title": {
         "create": "New Company",

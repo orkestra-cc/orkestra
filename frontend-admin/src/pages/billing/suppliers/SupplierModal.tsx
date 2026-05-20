@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   Modal,
   Button,
@@ -35,6 +36,7 @@ const SupplierModal: React.FC<SupplierModalProps> = ({
   supplier,
   onSuccess
 }) => {
+  const { t } = useTranslation();
   const isEditMode = !!supplier;
   const [createSupplier, { isLoading: isCreating }] =
     useCreateSupplierMutation();
@@ -120,13 +122,13 @@ const SupplierModal: React.FC<SupplierModalProps> = ({
 
     // Validation
     if (!formData.fiscalIdCode.trim()) {
-      setError('La Partita IVA / Codice Fiscale è obbligatorio');
+      setError(t('billing.supplierModal.validation.vatRequired'));
       setActiveTab('general');
       return;
     }
 
     if (formData.isCompany && !formData.denomination?.trim()) {
-      setError('La Ragione Sociale è obbligatoria per le aziende');
+      setError(t('billing.supplierModal.validation.denominationRequired'));
       setActiveTab('general');
       return;
     }
@@ -135,7 +137,7 @@ const SupplierModal: React.FC<SupplierModalProps> = ({
       !formData.isCompany &&
       (!formData.name?.trim() || !formData.surname?.trim())
     ) {
-      setError('Nome e Cognome sono obbligatori per le persone fisiche');
+      setError(t('billing.supplierModal.validation.namesRequired'));
       setActiveTab('general');
       return;
     }
@@ -145,7 +147,7 @@ const SupplierModal: React.FC<SupplierModalProps> = ({
       !formData.city.trim() ||
       !formData.postalCode.trim()
     ) {
-      setError('Indirizzo, Città e CAP sono obbligatori');
+      setError(t('billing.supplierModal.validation.addressRequired'));
       setActiveTab('address');
       return;
     }
@@ -179,7 +181,9 @@ const SupplierModal: React.FC<SupplierModalProps> = ({
     } catch (err: any) {
       setError(
         err?.data?.message ||
-          `Errore durante il ${isEditMode ? 'salvataggio' : 'creazione'} del fornitore`
+          (isEditMode
+            ? t('billing.supplierModal.toasts.saveErrorEdit')
+            : t('billing.supplierModal.toasts.saveErrorCreate'))
       );
     }
   };
@@ -203,7 +207,9 @@ const SupplierModal: React.FC<SupplierModalProps> = ({
     <Modal show={show} onHide={handleClose} centered size="lg">
       <Modal.Header>
         <Modal.Title>
-          {isEditMode ? 'Modifica Fornitore' : 'Nuovo Fornitore'}
+          {isEditMode
+            ? t('billing.supplierModal.title.edit')
+            : t('billing.supplierModal.title.create')}
         </Modal.Title>
         <OrkestraCloseButton onClick={handleClose} />
       </Modal.Header>
@@ -221,16 +227,24 @@ const SupplierModal: React.FC<SupplierModalProps> = ({
           >
             <Nav variant="tabs" className="mb-3">
               <Nav.Item>
-                <Nav.Link eventKey="general">Dati Generali</Nav.Link>
+                <Nav.Link eventKey="general">
+                  {t('billing.supplierModal.tabs.general')}
+                </Nav.Link>
               </Nav.Item>
               <Nav.Item>
-                <Nav.Link eventKey="address">Indirizzo</Nav.Link>
+                <Nav.Link eventKey="address">
+                  {t('billing.supplierModal.tabs.address')}
+                </Nav.Link>
               </Nav.Item>
               <Nav.Item>
-                <Nav.Link eventKey="contact">Contatti</Nav.Link>
+                <Nav.Link eventKey="contact">
+                  {t('billing.supplierModal.tabs.contact')}
+                </Nav.Link>
               </Nav.Item>
               <Nav.Item>
-                <Nav.Link eventKey="bank">Dati Bancari</Nav.Link>
+                <Nav.Link eventKey="bank">
+                  {t('billing.supplierModal.tabs.bank')}
+                </Nav.Link>
               </Nav.Item>
             </Nav>
 
@@ -242,7 +256,7 @@ const SupplierModal: React.FC<SupplierModalProps> = ({
                     type="switch"
                     id="isCompany"
                     name="isCompany"
-                    label="Azienda"
+                    label={t('billing.supplierModal.general.isCompanyLabel')}
                     checked={formData.isCompany}
                     onChange={handleChange}
                     disabled={isEditMode}
@@ -252,14 +266,17 @@ const SupplierModal: React.FC<SupplierModalProps> = ({
                 {formData.isCompany ? (
                   <Form.Group className="mb-3">
                     <Form.Label>
-                      Ragione Sociale <span className="text-danger">*</span>
+                      {t('billing.supplierModal.general.denominationLabel')}{' '}
+                      <span className="text-danger">*</span>
                     </Form.Label>
                     <Form.Control
                       type="text"
                       name="denomination"
                       value={formData.denomination}
                       onChange={handleChange}
-                      placeholder="es. Fornitore S.r.l."
+                      placeholder={t(
+                        'billing.supplierModal.general.denominationPlaceholder'
+                      )}
                       required
                     />
                   </Form.Group>
@@ -268,14 +285,17 @@ const SupplierModal: React.FC<SupplierModalProps> = ({
                     <Col md={6}>
                       <Form.Group className="mb-3">
                         <Form.Label>
-                          Nome <span className="text-danger">*</span>
+                          {t('billing.supplierModal.general.nameLabel')}{' '}
+                          <span className="text-danger">*</span>
                         </Form.Label>
                         <Form.Control
                           type="text"
                           name="name"
                           value={formData.name}
                           onChange={handleChange}
-                          placeholder="es. Mario"
+                          placeholder={t(
+                            'billing.supplierModal.general.namePlaceholder'
+                          )}
                           required
                         />
                       </Form.Group>
@@ -283,14 +303,17 @@ const SupplierModal: React.FC<SupplierModalProps> = ({
                     <Col md={6}>
                       <Form.Group className="mb-3">
                         <Form.Label>
-                          Cognome <span className="text-danger">*</span>
+                          {t('billing.supplierModal.general.surnameLabel')}{' '}
+                          <span className="text-danger">*</span>
                         </Form.Label>
                         <Form.Control
                           type="text"
                           name="surname"
                           value={formData.surname}
                           onChange={handleChange}
-                          placeholder="es. Rossi"
+                          placeholder={t(
+                            'billing.supplierModal.general.surnamePlaceholder'
+                          )}
                           required
                         />
                       </Form.Group>
@@ -301,7 +324,9 @@ const SupplierModal: React.FC<SupplierModalProps> = ({
                 <Row>
                   <Col md={2}>
                     <Form.Group className="mb-3">
-                      <Form.Label>Paese</Form.Label>
+                      <Form.Label>
+                        {t('billing.supplierModal.general.countryLabel')}
+                      </Form.Label>
                       <Form.Control
                         type="text"
                         name="fiscalIdCountry"
@@ -315,14 +340,17 @@ const SupplierModal: React.FC<SupplierModalProps> = ({
                   <Col md={5}>
                     <Form.Group className="mb-3">
                       <Form.Label>
-                        Partita IVA <span className="text-danger">*</span>
+                        {t('billing.supplierModal.general.vatLabel')}{' '}
+                        <span className="text-danger">*</span>
                       </Form.Label>
                       <Form.Control
                         type="text"
                         name="fiscalIdCode"
                         value={formData.fiscalIdCode}
                         onChange={handleChange}
-                        placeholder="es. 12345678901"
+                        placeholder={t(
+                          'billing.supplierModal.general.vatPlaceholder'
+                        )}
                         maxLength={11}
                         disabled={isEditMode}
                         required
@@ -331,25 +359,31 @@ const SupplierModal: React.FC<SupplierModalProps> = ({
                   </Col>
                   <Col md={5}>
                     <Form.Group className="mb-3">
-                      <Form.Label>Codice Fiscale</Form.Label>
+                      <Form.Label>
+                        {t('billing.supplierModal.general.codiceFiscaleLabel')}
+                      </Form.Label>
                       <Form.Control
                         type="text"
                         name="codiceFiscale"
                         value={formData.codiceFiscale}
                         onChange={handleChange}
-                        placeholder="es. RSSMRA80A01H501Z"
+                        placeholder={t(
+                          'billing.supplierModal.general.codiceFiscalePlaceholder'
+                        )}
                         maxLength={16}
                         disabled={isEditMode}
                       />
                       <Form.Text className="text-muted">
-                        Solo se diverso dalla P.IVA
+                        {t('billing.supplierModal.general.codiceFiscaleHelp')}
                       </Form.Text>
                     </Form.Group>
                   </Col>
                 </Row>
 
                 <Form.Group className="mb-3">
-                  <Form.Label>Regime Fiscale</Form.Label>
+                  <Form.Label>
+                    {t('billing.supplierModal.general.regimeFiscaleLabel')}
+                  </Form.Label>
                   <Form.Select
                     name="regimeFiscale"
                     value={formData.regimeFiscale}
@@ -370,27 +404,34 @@ const SupplierModal: React.FC<SupplierModalProps> = ({
                   <Col md={9}>
                     <Form.Group className="mb-3">
                       <Form.Label>
-                        Indirizzo <span className="text-danger">*</span>
+                        {t('billing.supplierModal.address.addressLabel')}{' '}
+                        <span className="text-danger">*</span>
                       </Form.Label>
                       <Form.Control
                         type="text"
                         name="address"
                         value={formData.address}
                         onChange={handleChange}
-                        placeholder="es. Via Roma"
+                        placeholder={t(
+                          'billing.supplierModal.address.addressPlaceholder'
+                        )}
                         required
                       />
                     </Form.Group>
                   </Col>
                   <Col md={3}>
                     <Form.Group className="mb-3">
-                      <Form.Label>N. Civico</Form.Label>
+                      <Form.Label>
+                        {t('billing.supplierModal.address.numeroCivicoLabel')}
+                      </Form.Label>
                       <Form.Control
                         type="text"
                         name="numeroCivico"
                         value={formData.numeroCivico}
                         onChange={handleChange}
-                        placeholder="123"
+                        placeholder={t(
+                          'billing.supplierModal.address.numeroCivicoPlaceholder'
+                        )}
                         maxLength={10}
                       />
                     </Form.Group>
@@ -401,27 +442,34 @@ const SupplierModal: React.FC<SupplierModalProps> = ({
                   <Col md={6}>
                     <Form.Group className="mb-3">
                       <Form.Label>
-                        Città <span className="text-danger">*</span>
+                        {t('billing.supplierModal.address.cityLabel')}{' '}
+                        <span className="text-danger">*</span>
                       </Form.Label>
                       <Form.Control
                         type="text"
                         name="city"
                         value={formData.city}
                         onChange={handleChange}
-                        placeholder="es. Roma"
+                        placeholder={t(
+                          'billing.supplierModal.address.cityPlaceholder'
+                        )}
                         required
                       />
                     </Form.Group>
                   </Col>
                   <Col md={2}>
                     <Form.Group className="mb-3">
-                      <Form.Label>Prov.</Form.Label>
+                      <Form.Label>
+                        {t('billing.supplierModal.address.provinceLabel')}
+                      </Form.Label>
                       <Form.Control
                         type="text"
                         name="province"
                         value={formData.province}
                         onChange={handleChange}
-                        placeholder="RM"
+                        placeholder={t(
+                          'billing.supplierModal.address.provincePlaceholder'
+                        )}
                         maxLength={2}
                       />
                     </Form.Group>
@@ -429,14 +477,17 @@ const SupplierModal: React.FC<SupplierModalProps> = ({
                   <Col md={2}>
                     <Form.Group className="mb-3">
                       <Form.Label>
-                        CAP <span className="text-danger">*</span>
+                        {t('billing.supplierModal.address.postalCodeLabel')}{' '}
+                        <span className="text-danger">*</span>
                       </Form.Label>
                       <Form.Control
                         type="text"
                         name="postalCode"
                         value={formData.postalCode}
                         onChange={handleChange}
-                        placeholder="00100"
+                        placeholder={t(
+                          'billing.supplierModal.address.postalCodePlaceholder'
+                        )}
                         maxLength={5}
                         required
                       />
@@ -444,7 +495,9 @@ const SupplierModal: React.FC<SupplierModalProps> = ({
                   </Col>
                   <Col md={2}>
                     <Form.Group className="mb-3">
-                      <Form.Label>Nazione</Form.Label>
+                      <Form.Label>
+                        {t('billing.supplierModal.address.countryLabel')}
+                      </Form.Label>
                       <Form.Control
                         type="text"
                         name="country"
@@ -460,47 +513,63 @@ const SupplierModal: React.FC<SupplierModalProps> = ({
               {/* Contact Tab */}
               <Tab.Pane eventKey="contact">
                 <Form.Group className="mb-3">
-                  <Form.Label>Email</Form.Label>
+                  <Form.Label>
+                    {t('billing.supplierModal.contact.emailLabel')}
+                  </Form.Label>
                   <Form.Control
                     type="email"
                     name="email"
                     value={formData.email}
                     onChange={handleChange}
-                    placeholder="es. info@fornitore.it"
+                    placeholder={t(
+                      'billing.supplierModal.contact.emailPlaceholder'
+                    )}
                   />
                 </Form.Group>
 
                 <Form.Group className="mb-3">
-                  <Form.Label>PEC</Form.Label>
+                  <Form.Label>
+                    {t('billing.supplierModal.contact.pecLabel')}
+                  </Form.Label>
                   <Form.Control
                     type="email"
                     name="pec"
                     value={formData.pec}
                     onChange={handleChange}
-                    placeholder="es. fornitore@pec.it"
+                    placeholder={t(
+                      'billing.supplierModal.contact.pecPlaceholder'
+                    )}
                   />
                 </Form.Group>
 
                 <Form.Group className="mb-3">
-                  <Form.Label>Telefono</Form.Label>
+                  <Form.Label>
+                    {t('billing.supplierModal.contact.phoneLabel')}
+                  </Form.Label>
                   <Form.Control
                     type="tel"
                     name="phone"
                     value={formData.phone}
                     onChange={handleChange}
-                    placeholder="es. +39 06 1234567"
+                    placeholder={t(
+                      'billing.supplierModal.contact.phonePlaceholder'
+                    )}
                   />
                 </Form.Group>
 
                 <Form.Group className="mb-3">
-                  <Form.Label>Note</Form.Label>
+                  <Form.Label>
+                    {t('billing.supplierModal.contact.notesLabel')}
+                  </Form.Label>
                   <Form.Control
                     as="textarea"
                     rows={3}
                     name="notes"
                     value={formData.notes}
                     onChange={handleChange}
-                    placeholder="Note interne..."
+                    placeholder={t(
+                      'billing.supplierModal.contact.notesPlaceholder'
+                    )}
                   />
                 </Form.Group>
               </Tab.Pane>
@@ -508,28 +577,34 @@ const SupplierModal: React.FC<SupplierModalProps> = ({
               {/* Bank Tab */}
               <Tab.Pane eventKey="bank">
                 <Form.Group className="mb-3">
-                  <Form.Label>IBAN</Form.Label>
+                  <Form.Label>
+                    {t('billing.supplierModal.bank.ibanLabel')}
+                  </Form.Label>
                   <Form.Control
                     type="text"
                     name="iban"
                     value={formData.iban}
                     onChange={handleChange}
-                    placeholder="es. IT60X0542811101000000123456"
+                    placeholder={t(
+                      'billing.supplierModal.bank.ibanPlaceholder'
+                    )}
                     maxLength={34}
                   />
                   <Form.Text className="text-muted">
-                    Coordinate bancarie per pagamenti al fornitore
+                    {t('billing.supplierModal.bank.ibanHelp')}
                   </Form.Text>
                 </Form.Group>
 
                 <Form.Group className="mb-3">
-                  <Form.Label>BIC/SWIFT</Form.Label>
+                  <Form.Label>
+                    {t('billing.supplierModal.bank.bicLabel')}
+                  </Form.Label>
                   <Form.Control
                     type="text"
                     name="bic"
                     value={formData.bic}
                     onChange={handleChange}
-                    placeholder="es. BCITITMM"
+                    placeholder={t('billing.supplierModal.bank.bicPlaceholder')}
                     maxLength={11}
                   />
                 </Form.Group>
@@ -543,16 +618,16 @@ const SupplierModal: React.FC<SupplierModalProps> = ({
             onClick={handleClose}
             disabled={isLoading}
           >
-            Annulla
+            {t('billing.supplierModal.actions.cancel')}
           </Button>
           <Button variant="primary" type="submit" disabled={isLoading}>
             {isLoading
               ? isEditMode
-                ? 'Salvataggio...'
-                : 'Creazione...'
+                ? t('billing.supplierModal.actions.saving')
+                : t('billing.supplierModal.actions.creating')
               : isEditMode
-                ? 'Salva Modifiche'
-                : 'Crea Fornitore'}
+                ? t('billing.supplierModal.actions.save')
+                : t('billing.supplierModal.actions.create')}
           </Button>
         </Modal.Footer>
       </Form>
