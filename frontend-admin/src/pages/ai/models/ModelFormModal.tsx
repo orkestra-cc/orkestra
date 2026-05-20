@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react';
 import { Modal, Row, Col, Form, Button, Spinner } from 'react-bootstrap';
+import { useTranslation } from 'react-i18next';
 import {
   useCreateAIModelMutation,
   useUpdateAIModelMutation,
@@ -60,6 +61,7 @@ const ModelFormModal: React.FC<ModelFormModalProps> = ({
   editingModel,
   defaultProvider
 }) => {
+  const { t } = useTranslation();
   const [form, setForm] = useState<CreateAIModelRequest>({ ...emptyForm });
   const [isActive, setIsActive] = useState(true);
   const [availableModels, setAvailableModels] = useState<AvailableModel[]>([]);
@@ -190,40 +192,58 @@ const ModelFormModal: React.FC<ModelFormModalProps> = ({
   return (
     <Modal show={show} onHide={onHide} onEnter={handleEnter} size="lg">
       <Modal.Header closeButton>
-        <Modal.Title>{isEditing ? 'Edit Model' : 'Add AI Model'}</Modal.Title>
+        <Modal.Title>
+          {isEditing
+            ? t('aiModels.form.titleEdit')
+            : t('aiModels.form.titleCreate')}
+        </Modal.Title>
       </Modal.Header>
       <Modal.Body>
         <Row className="g-3">
           <Col md={6}>
             <Form.Group>
-              <Form.Label className="small">Display Name</Form.Label>
+              <Form.Label className="small">
+                {t('aiModels.form.displayNameLabel')}
+              </Form.Label>
               <Form.Control
                 size="sm"
                 value={form.name}
                 onChange={e => updateForm('name', e.target.value)}
-                placeholder="My Embedding Model"
+                placeholder={t('aiModels.form.displayNamePlaceholder')}
               />
             </Form.Group>
           </Col>
           <Col md={3}>
             <Form.Group>
-              <Form.Label className="small">Provider</Form.Label>
+              <Form.Label className="small">
+                {t('aiModels.form.providerLabel')}
+              </Form.Label>
               <Form.Select
                 size="sm"
                 value={form.provider}
                 onChange={e => handleProviderChange(e.target.value as Provider)}
                 disabled={isEditing}
               >
-                <option value="openai">OpenAI / Compatible</option>
-                <option value="ollama">Ollama</option>
-                <option value="anthropic">Anthropic (Claude)</option>
-                <option value="gemini">Google (Gemini)</option>
+                <option value="openai">
+                  {t('aiModels.form.providerOpenai')}
+                </option>
+                <option value="ollama">
+                  {t('aiModels.form.providerOllama')}
+                </option>
+                <option value="anthropic">
+                  {t('aiModels.form.providerAnthropic')}
+                </option>
+                <option value="gemini">
+                  {t('aiModels.form.providerGemini')}
+                </option>
               </Form.Select>
             </Form.Group>
           </Col>
           <Col md={3}>
             <Form.Group>
-              <Form.Label className="small">Type</Form.Label>
+              <Form.Label className="small">
+                {t('aiModels.form.typeLabel')}
+              </Form.Label>
               <Form.Select
                 size="sm"
                 value={form.modelType}
@@ -238,9 +258,9 @@ const ModelFormModal: React.FC<ModelFormModalProps> = ({
                   value="embedding"
                   disabled={form.provider === 'anthropic'}
                 >
-                  Embedding
+                  {t('aiModels.form.typeEmbedding')}
                 </option>
-                <option value="llm">LLM</option>
+                <option value="llm">{t('aiModels.form.typeLlm')}</option>
               </Form.Select>
             </Form.Group>
           </Col>
@@ -248,7 +268,9 @@ const ModelFormModal: React.FC<ModelFormModalProps> = ({
           {showBaseUrlField(form.provider) && (
             <Col md={6}>
               <Form.Group>
-                <Form.Label className="small">Base URL</Form.Label>
+                <Form.Label className="small">
+                  {t('aiModels.form.baseUrlLabel')}
+                </Form.Label>
                 <div className="d-flex gap-2">
                   <Form.Control
                     size="sm"
@@ -263,11 +285,17 @@ const ModelFormModal: React.FC<ModelFormModalProps> = ({
                     disabled={fetching || !form.baseUrl}
                     style={{ whiteSpace: 'nowrap' }}
                   >
-                    {fetching ? <Spinner size="sm" /> : 'Fetch Models'}
+                    {fetching ? (
+                      <Spinner size="sm" />
+                    ) : (
+                      t('aiModels.form.fetchModels')
+                    )}
                   </Button>
                 </div>
                 <Form.Text className="text-muted">
-                  {PROVIDER_HELP[form.provider]}
+                  {t(`aiModels.form.help.${form.provider}`, {
+                    defaultValue: PROVIDER_HELP[form.provider]
+                  })}
                 </Form.Text>
               </Form.Group>
             </Col>
@@ -275,7 +303,9 @@ const ModelFormModal: React.FC<ModelFormModalProps> = ({
 
           <Col md={6}>
             <Form.Group>
-              <Form.Label className="small">Model Name</Form.Label>
+              <Form.Label className="small">
+                {t('aiModels.form.modelNameLabel')}
+              </Form.Label>
               {availableModels.length > 0 ? (
                 <div className="d-flex gap-2">
                   <Form.Select
@@ -284,7 +314,9 @@ const ModelFormModal: React.FC<ModelFormModalProps> = ({
                     onChange={e => updateForm('modelName', e.target.value)}
                     disabled={isEditing}
                   >
-                    <option value="">Select a model...</option>
+                    <option value="">
+                      {t('aiModels.form.modelSelectPlaceholder')}
+                    </option>
                     {availableModels
                       .filter(m => {
                         if (!m.capabilities) return true;
@@ -295,8 +327,12 @@ const ModelFormModal: React.FC<ModelFormModalProps> = ({
                       })
                       .map(m => (
                         <option key={m.id} value={m.id}>
-                          {m.id}
-                          {m.ownedBy ? ` (${m.ownedBy})` : ''}
+                          {m.ownedBy
+                            ? t('aiModels.form.modelSelectWithOwner', {
+                                id: m.id,
+                                owner: m.ownedBy
+                              })
+                            : m.id}
                         </option>
                       ))}
                   </Form.Select>
@@ -308,7 +344,11 @@ const ModelFormModal: React.FC<ModelFormModalProps> = ({
                       disabled={fetching || !form.apiKey}
                       style={{ whiteSpace: 'nowrap' }}
                     >
-                      {fetching ? <Spinner size="sm" /> : 'Refresh'}
+                      {fetching ? (
+                        <Spinner size="sm" />
+                      ) : (
+                        t('aiModels.form.refresh')
+                      )}
                     </Button>
                   )}
                 </div>
@@ -321,10 +361,10 @@ const ModelFormModal: React.FC<ModelFormModalProps> = ({
                     disabled={isEditing}
                     placeholder={
                       showBaseUrlField(form.provider)
-                        ? 'Enter model name or click Fetch Models'
+                        ? t('aiModels.form.modelNamePlaceholderBase')
                         : fetching
-                          ? 'Loading models...'
-                          : 'Enter API key first, then Fetch Models'
+                          ? t('aiModels.form.modelNamePlaceholderLoading')
+                          : t('aiModels.form.modelNamePlaceholderNeedKey')
                     }
                   />
                   {!isEditing && isCloudProvider(form.provider) && (
@@ -335,15 +375,18 @@ const ModelFormModal: React.FC<ModelFormModalProps> = ({
                       disabled={fetching || !form.apiKey}
                       style={{ whiteSpace: 'nowrap' }}
                     >
-                      {fetching ? <Spinner size="sm" /> : 'Fetch Models'}
+                      {fetching ? (
+                        <Spinner size="sm" />
+                      ) : (
+                        t('aiModels.form.fetchModels')
+                      )}
                     </Button>
                   )}
                 </div>
               )}
               {showBaseUrlField(form.provider) && (
                 <Form.Text className="text-muted">
-                  Enter a base URL and click "Fetch Models" to see available
-                  models
+                  {t('aiModels.form.fetchModelsHint')}
                 </Form.Text>
               )}
             </Form.Group>
@@ -351,24 +394,28 @@ const ModelFormModal: React.FC<ModelFormModalProps> = ({
 
           <Col md={6}>
             <Form.Group>
-              <Form.Label className="small">API Key</Form.Label>
+              <Form.Label className="small">
+                {t('aiModels.form.apiKeyLabel')}
+              </Form.Label>
               <Form.Control
                 size="sm"
                 type="password"
                 value={form.apiKey}
                 onChange={e => updateForm('apiKey', e.target.value)}
                 placeholder={
-                  isEditing ? '(unchanged)' : 'sk-... or leave empty for local'
+                  isEditing
+                    ? t('aiModels.form.apiKeyPlaceholderEdit')
+                    : t('aiModels.form.apiKeyPlaceholderNew')
                 }
               />
               <Form.Text className="text-muted">
                 {form.provider === 'ollama'
-                  ? 'Not needed for local Ollama instances.'
+                  ? t('aiModels.form.apiKeyHelpOllama')
                   : form.provider === 'anthropic'
-                    ? 'Required for Anthropic API access.'
+                    ? t('aiModels.form.apiKeyHelpAnthropic')
                     : form.provider === 'gemini'
-                      ? 'Required for Google Gemini API access.'
-                      : 'Required for OpenAI cloud. Not needed for local servers (llama.cpp, Ollama).'}
+                      ? t('aiModels.form.apiKeyHelpGemini')
+                      : t('aiModels.form.apiKeyHelpOpenai')}
               </Form.Text>
             </Form.Group>
           </Col>
@@ -376,7 +423,9 @@ const ModelFormModal: React.FC<ModelFormModalProps> = ({
           {form.modelType === 'embedding' && (
             <Col md={6}>
               <Form.Group>
-                <Form.Label className="small">Dimensions</Form.Label>
+                <Form.Label className="small">
+                  {t('aiModels.form.dimensionsLabel')}
+                </Form.Label>
                 <Form.Control
                   size="sm"
                   type="number"
@@ -386,7 +435,7 @@ const ModelFormModal: React.FC<ModelFormModalProps> = ({
                   }
                 />
                 <Form.Text className="text-muted">
-                  Vector size output by the model
+                  {t('aiModels.form.dimensionsHelp')}
                 </Form.Text>
               </Form.Group>
             </Col>
@@ -396,7 +445,9 @@ const ModelFormModal: React.FC<ModelFormModalProps> = ({
             <>
               <Col md={3}>
                 <Form.Group>
-                  <Form.Label className="small">Temperature</Form.Label>
+                  <Form.Label className="small">
+                    {t('aiModels.form.temperatureLabel')}
+                  </Form.Label>
                   <Form.Control
                     size="sm"
                     type="number"
@@ -412,7 +463,9 @@ const ModelFormModal: React.FC<ModelFormModalProps> = ({
               </Col>
               <Col md={3}>
                 <Form.Group>
-                  <Form.Label className="small">Max Tokens</Form.Label>
+                  <Form.Label className="small">
+                    {t('aiModels.form.maxTokensLabel')}
+                  </Form.Label>
                   <Form.Control
                     size="sm"
                     type="number"
@@ -428,13 +481,19 @@ const ModelFormModal: React.FC<ModelFormModalProps> = ({
           {isEditing && (
             <Col md={6}>
               <Form.Group>
-                <Form.Label className="small">Status</Form.Label>
+                <Form.Label className="small">
+                  {t('aiModels.form.statusLabel')}
+                </Form.Label>
                 <Form.Check
                   type="switch"
                   id="model-is-active"
                   checked={isActive}
                   onChange={e => setIsActive(e.target.checked)}
-                  label={isActive ? 'Active' : 'Inactive'}
+                  label={
+                    isActive
+                      ? t('aiModels.form.statusActive')
+                      : t('aiModels.form.statusInactive')
+                  }
                 />
               </Form.Group>
             </Col>
@@ -443,7 +502,7 @@ const ModelFormModal: React.FC<ModelFormModalProps> = ({
       </Modal.Body>
       <Modal.Footer>
         <Button variant="secondary" size="sm" onClick={onHide}>
-          Cancel
+          {t('aiModels.form.cancel')}
         </Button>
         <Button
           variant="primary"
@@ -454,9 +513,9 @@ const ModelFormModal: React.FC<ModelFormModalProps> = ({
           {saving ? (
             <Spinner size="sm" />
           ) : isEditing ? (
-            'Save Changes'
+            t('aiModels.form.saveChanges')
           ) : (
-            'Create'
+            t('aiModels.form.create')
           )}
         </Button>
       </Modal.Footer>
