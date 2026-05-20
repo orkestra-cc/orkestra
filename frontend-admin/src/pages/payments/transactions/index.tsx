@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Badge, Button, Card, Form, Modal, Table } from 'react-bootstrap';
-import { useTranslation } from 'react-i18next';
+import { Trans, useTranslation } from 'react-i18next';
 import PageHeader from 'components/common/PageHeader';
 import IconButton from 'components/common/IconButton';
 import Flex from 'components/common/Flex';
@@ -79,12 +79,22 @@ const TransactionsListPage: React.FC = () => {
             onChange={e => setStatusFilter(e.target.value)}
             style={{ maxWidth: 260 }}
           >
-            <option value="">Tutti gli stati</option>
-            <option value="succeeded">Succeeded</option>
-            <option value="failed">Failed</option>
-            <option value="requires_action">Requires action</option>
-            <option value="refunded">Refunded</option>
-            <option value="partially_refunded">Partially refunded</option>
+            <option value="">{t('payments.transactions.filters.all')}</option>
+            <option value="succeeded">
+              {t('payments.transactions.filters.succeeded')}
+            </option>
+            <option value="failed">
+              {t('payments.transactions.filters.failed')}
+            </option>
+            <option value="requires_action">
+              {t('payments.transactions.filters.requires_action')}
+            </option>
+            <option value="refunded">
+              {t('payments.transactions.filters.refunded')}
+            </option>
+            <option value="partially_refunded">
+              {t('payments.transactions.filters.partially_refunded')}
+            </option>
           </Form.Select>
         </Card.Body>
       </Card>
@@ -92,22 +102,24 @@ const TransactionsListPage: React.FC = () => {
       <Card>
         <Card.Body className="p-0">
           {isLoading ? (
-            <div className="p-4">Caricamento...</div>
+            <div className="p-4">{t('payments.transactions.loading')}</div>
           ) : !data?.items.length ? (
             <div className="p-4 text-muted text-center">
-              Nessuna transazione.
+              {t('payments.transactions.empty')}
             </div>
           ) : (
             <Table responsive hover className="mb-0">
               <thead className="bg-200">
                 <tr>
-                  <th>Provider</th>
-                  <th>ID</th>
-                  <th>Importo</th>
-                  <th>Stato</th>
-                  <th>Fattura</th>
-                  <th>Data</th>
-                  <th className="text-end">Azioni</th>
+                  <th>{t('payments.transactions.columns.provider')}</th>
+                  <th>{t('payments.transactions.columns.id')}</th>
+                  <th>{t('payments.transactions.columns.amount')}</th>
+                  <th>{t('payments.transactions.columns.status')}</th>
+                  <th>{t('payments.transactions.columns.invoice')}</th>
+                  <th>{t('payments.transactions.columns.date')}</th>
+                  <th className="text-end">
+                    {t('payments.transactions.columns.actions')}
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -117,7 +129,9 @@ const TransactionsListPage: React.FC = () => {
                       <Badge bg="dark">{tx.provider}</Badge>
                     </td>
                     <td>
-                      <code className="fs--2">{tx.providerTxID || '—'}</code>
+                      <code className="fs--2">
+                        {tx.providerTxID || t('payments.transactions.dash')}
+                      </code>
                     </td>
                     <td>
                       {formatMoney(tx.amountCents, tx.currency)}
@@ -125,7 +139,7 @@ const TransactionsListPage: React.FC = () => {
                         <div>
                           <small className="text-info">
                             -{formatMoney(tx.refundedCents, tx.currency)}{' '}
-                            rimborsato
+                            {t('payments.transactions.refundedSuffix')}
                           </small>
                         </div>
                       ) : null}
@@ -144,7 +158,7 @@ const TransactionsListPage: React.FC = () => {
                           {tx.invoiceUUID.slice(0, 8)}
                         </code>
                       ) : (
-                        '—'
+                        t('payments.transactions.dash')
                       )}
                     </td>
                     <td>{new Date(tx.createdAt).toLocaleString('it-IT')}</td>
@@ -158,7 +172,7 @@ const TransactionsListPage: React.FC = () => {
                             className="text-warning"
                             onClick={() => openRefund(tx)}
                           >
-                            Rimborsa
+                            {t('payments.transactions.refundButton')}
                           </Button>
                         )}
                     </td>
@@ -172,21 +186,27 @@ const TransactionsListPage: React.FC = () => {
 
       <Modal show={showRefund} onHide={() => setShowRefund(false)}>
         <Modal.Header closeButton>
-          <Modal.Title>Rimborso</Modal.Title>
+          <Modal.Title>
+            {t('payments.transactions.refundModal.title')}
+          </Modal.Title>
         </Modal.Header>
         <Modal.Body>
           {target && (
             <>
               <p>
-                Transazione <code>{target.providerTxID}</code> — originale{' '}
-                <strong>
-                  {formatMoney(target.amountCents, target.currency)}
-                </strong>
+                <Trans
+                  i18nKey="payments.transactions.refundModal.intro"
+                  values={{
+                    providerTxID: target.providerTxID,
+                    amount: formatMoney(target.amountCents, target.currency)
+                  }}
+                  components={{ code: <code />, strong: <strong /> }}
+                />
               </p>
               <Form>
                 <Form.Group className="mb-3">
                   <Form.Label>
-                    Importo (centesimi — 0 per rimborso completo)
+                    {t('payments.transactions.refundModal.amountLabel')}
                   </Form.Label>
                   <Form.Control
                     type="number"
@@ -195,7 +215,9 @@ const TransactionsListPage: React.FC = () => {
                   />
                 </Form.Group>
                 <Form.Group>
-                  <Form.Label>Motivo (facoltativo)</Form.Label>
+                  <Form.Label>
+                    {t('payments.transactions.refundModal.reasonLabel')}
+                  </Form.Label>
                   <Form.Control
                     value={refundReason}
                     onChange={e => setRefundReason(e.target.value)}
@@ -207,10 +229,10 @@ const TransactionsListPage: React.FC = () => {
         </Modal.Body>
         <Modal.Footer>
           <Button variant="secondary" onClick={() => setShowRefund(false)}>
-            Annulla
+            {t('payments.transactions.refundModal.cancel')}
           </Button>
           <Button variant="warning" onClick={submitRefund}>
-            Conferma rimborso
+            {t('payments.transactions.refundModal.confirm')}
           </Button>
         </Modal.Footer>
       </Modal>

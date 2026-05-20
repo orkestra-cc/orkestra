@@ -577,7 +577,69 @@
       "delete": "Elimina",
       "deleteConfirm": "Eliminare \"{{name}}\"?",
       "modalEditTitle": "Modifica servizio",
-      "modalNewTitle": "Nuovo servizio"
+      "modalNewTitle": "Nuovo servizio",
+      "modal": {
+        "codeLabel": "Code (SKU)",
+        "codePlaceholder": "es. n8n-workflow-pro",
+        "nameLabel": "Nome",
+        "categoryLabel": "Categoria",
+        "categoryWorkflow": "Workflow",
+        "categoryDatabase": "Database",
+        "categoryAgent": "Agent",
+        "categoryHosting": "Hosting",
+        "categoryCustom": "Custom",
+        "setupFeeLabel": "Setup fee (cents)",
+        "descriptionLabel": "Descrizione",
+        "activeLabel": "Attivo",
+        "pricingTiersHeading": "Tier di prezzo",
+        "addTier": "+ Tier",
+        "tierCodePlaceholder": "code",
+        "tierAmountPlaceholder": "amount (cents)",
+        "tierCurrencyPlaceholder": "EUR",
+        "cycleMonthly": "Monthly",
+        "cycleQuarterly": "Quarterly",
+        "cycleAnnual": "Annual",
+        "cancel": "Annulla",
+        "save": "Salva"
+      }
+    },
+    "detail": {
+      "loading": "Caricamento…",
+      "title": "Sottoscrizione {{id}}",
+      "description": "Ciclo: {{start}} → {{end}}",
+      "cancelAtPeriodEnd": "Cancella a fine periodo",
+      "cancelConfirm": "Cancellare a fine periodo?",
+      "retryCharge": "Riprova addebito",
+      "reactivate": "Riattiva",
+      "tabs": {
+        "overview": "Overview",
+        "invoices": "Fatture ({{count}})",
+        "activity": "Attività ({{count}})"
+      },
+      "overview": {
+        "tenantUuid": "Cliente UUID",
+        "serviceUuid": "Servizio UUID",
+        "tier": "Tier",
+        "created": "Creata",
+        "started": "Iniziata",
+        "nextBilling": "Prossimo addebito",
+        "failedAttempts": "Tentativi falliti",
+        "cancelAtPeriodEndLabel": "Cancella a fine periodo",
+        "yes": "Sì"
+      },
+      "invoices": {
+        "empty": "Nessuna fattura generata.",
+        "colNumber": "Numero",
+        "colPeriod": "Periodo",
+        "colTotal": "Totale",
+        "colStatus": "Stato",
+        "colIssued": "Emessa",
+        "colPaid": "Pagata",
+        "dash": "—"
+      },
+      "activity": {
+        "empty": "Nessun evento registrato."
+      }
     },
     "list": {
       "title": "Sottoscrizioni",
@@ -629,7 +691,37 @@
     "transactions": {
       "title": "Transazioni",
       "description": "Storico addebiti, rimborsi e dispute Stripe",
-      "refresh": "Aggiorna"
+      "refresh": "Aggiorna",
+      "filters": {
+        "all": "Tutti gli stati",
+        "succeeded": "Succeeded",
+        "failed": "Failed",
+        "requires_action": "Requires action",
+        "refunded": "Refunded",
+        "partially_refunded": "Partially refunded"
+      },
+      "loading": "Caricamento...",
+      "empty": "Nessuna transazione.",
+      "columns": {
+        "provider": "Provider",
+        "id": "ID",
+        "amount": "Importo",
+        "status": "Stato",
+        "invoice": "Fattura",
+        "date": "Data",
+        "actions": "Azioni"
+      },
+      "refundedSuffix": "rimborsato",
+      "dash": "—",
+      "refundButton": "Rimborsa",
+      "refundModal": {
+        "title": "Rimborso",
+        "intro": "Transazione <code>{{providerTxID}}</code> — originale <strong>{{amount}}</strong>",
+        "amountLabel": "Importo (centesimi — 0 per rimborso completo)",
+        "reasonLabel": "Motivo (facoltativo)",
+        "cancel": "Annulla",
+        "confirm": "Conferma rimborso"
+      }
     },
     "webhooks": {
       "title": "Eventi webhook",

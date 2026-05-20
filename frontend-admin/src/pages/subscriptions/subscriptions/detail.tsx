@@ -1,5 +1,6 @@
 import { Badge, Card, Nav, Tab, Table } from 'react-bootstrap';
 import { useParams, useSearchParams } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import PageHeader from 'components/common/PageHeader';
 import IconButton from 'components/common/IconButton';
 import Flex from 'components/common/Flex';
@@ -36,6 +37,7 @@ const formatMoney = (cents: number, currency = 'EUR') =>
   );
 
 const SubscriptionDetailPage: React.FC = () => {
+  const { t } = useTranslation();
   const { id } = useParams<{ id: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
   const activeTab = searchParams.get('tab') || 'overview';
@@ -53,7 +55,7 @@ const SubscriptionDetailPage: React.FC = () => {
   const [reactivate] = useReactivateSubscriptionMutation();
   const [retry] = useRetryChargeMutation();
 
-  if (!sub?.body) return <div>Caricamento…</div>;
+  if (!sub?.body) return <div>{t('subscriptions.detail.loading')}</div>;
   const s = sub.body;
 
   const setTab = (key: string) => {
@@ -64,8 +66,11 @@ const SubscriptionDetailPage: React.FC = () => {
   return (
     <>
       <PageHeader
-        title={`Sottoscrizione ${s.uuid.slice(0, 8)}`}
-        description={`Ciclo: ${new Date(s.currentPeriodStart).toLocaleDateString('it-IT')} → ${new Date(s.currentPeriodEnd).toLocaleDateString('it-IT')}`}
+        title={t('subscriptions.detail.title', { id: s.uuid.slice(0, 8) })}
+        description={t('subscriptions.detail.description', {
+          start: new Date(s.currentPeriodStart).toLocaleDateString('it-IT'),
+          end: new Date(s.currentPeriodEnd).toLocaleDateString('it-IT')
+        })}
         className="mb-3"
       >
         <Flex className="gap-2 mt-3 align-items-center">
@@ -78,12 +83,12 @@ const SubscriptionDetailPage: React.FC = () => {
               variant="orkestra-warning"
               size="sm"
               onClick={async () => {
-                if (confirm('Cancellare a fine periodo?')) {
+                if (confirm(t('subscriptions.detail.cancelConfirm'))) {
                   await cancel({ id: s.uuid, atPeriodEnd: true }).unwrap();
                 }
               }}
             >
-              Cancella a fine periodo
+              {t('subscriptions.detail.cancelAtPeriodEnd')}
             </IconButton>
           )}
           {(s.status === 'past_due' || s.status === 'suspended') && (
@@ -94,7 +99,7 @@ const SubscriptionDetailPage: React.FC = () => {
                 size="sm"
                 onClick={() => retry(s.uuid).unwrap()}
               >
-                Riprova addebito
+                {t('subscriptions.detail.retryCharge')}
               </IconButton>
               <IconButton
                 icon="play"
@@ -102,7 +107,7 @@ const SubscriptionDetailPage: React.FC = () => {
                 size="sm"
                 onClick={() => reactivate(s.uuid).unwrap()}
               >
-                Riattiva
+                {t('subscriptions.detail.reactivate')}
               </IconButton>
             </>
           )}
@@ -114,16 +119,22 @@ const SubscriptionDetailPage: React.FC = () => {
           <Card.Header className="py-0 bg-light">
             <Nav variant="tabs" className="border-0">
               <Nav.Item>
-                <Nav.Link eventKey="overview">Overview</Nav.Link>
+                <Nav.Link eventKey="overview">
+                  {t('subscriptions.detail.tabs.overview')}
+                </Nav.Link>
               </Nav.Item>
               <Nav.Item>
                 <Nav.Link eventKey="invoices">
-                  Fatture ({invoices?.total ?? 0})
+                  {t('subscriptions.detail.tabs.invoices', {
+                    count: invoices?.total ?? 0
+                  })}
                 </Nav.Link>
               </Nav.Item>
               <Nav.Item>
                 <Nav.Link eventKey="activity">
-                  Attività ({activity?.total ?? 0})
+                  {t('subscriptions.detail.tabs.activity', {
+                    count: activity?.total ?? 0
+                  })}
                 </Nav.Link>
               </Nav.Item>
             </Nav>
@@ -135,36 +146,56 @@ const SubscriptionDetailPage: React.FC = () => {
             <Card>
               <Card.Body>
                 <dl className="row mb-0">
-                  <dt className="col-sm-3">Cliente UUID</dt>
+                  <dt className="col-sm-3">
+                    {t('subscriptions.detail.overview.tenantUuid')}
+                  </dt>
                   <dd className="col-sm-9">
                     <code>{s.tenantUUID}</code>
                   </dd>
-                  <dt className="col-sm-3">Servizio UUID</dt>
+                  <dt className="col-sm-3">
+                    {t('subscriptions.detail.overview.serviceUuid')}
+                  </dt>
                   <dd className="col-sm-9">
                     <code>{s.serviceUUID}</code>
                   </dd>
-                  <dt className="col-sm-3">Tier</dt>
+                  <dt className="col-sm-3">
+                    {t('subscriptions.detail.overview.tier')}
+                  </dt>
                   <dd className="col-sm-9">
                     <code>{s.tierCode}</code>
                   </dd>
-                  <dt className="col-sm-3">Creata</dt>
+                  <dt className="col-sm-3">
+                    {t('subscriptions.detail.overview.created')}
+                  </dt>
                   <dd className="col-sm-9">
                     {new Date(s.createdAt).toLocaleString('it-IT')}
                   </dd>
-                  <dt className="col-sm-3">Iniziata</dt>
+                  <dt className="col-sm-3">
+                    {t('subscriptions.detail.overview.started')}
+                  </dt>
                   <dd className="col-sm-9">
                     {new Date(s.startedAt).toLocaleString('it-IT')}
                   </dd>
-                  <dt className="col-sm-3">Prossimo addebito</dt>
+                  <dt className="col-sm-3">
+                    {t('subscriptions.detail.overview.nextBilling')}
+                  </dt>
                   <dd className="col-sm-9">
                     {new Date(s.nextBillingAt).toLocaleString('it-IT')}
                   </dd>
-                  <dt className="col-sm-3">Tentativi falliti</dt>
+                  <dt className="col-sm-3">
+                    {t('subscriptions.detail.overview.failedAttempts')}
+                  </dt>
                   <dd className="col-sm-9">{s.failedChargeCount}</dd>
                   {s.cancelAtPeriodEnd && (
                     <>
-                      <dt className="col-sm-3">Cancella a fine periodo</dt>
-                      <dd className="col-sm-9 text-warning">Sì</dd>
+                      <dt className="col-sm-3">
+                        {t(
+                          'subscriptions.detail.overview.cancelAtPeriodEndLabel'
+                        )}
+                      </dt>
+                      <dd className="col-sm-9 text-warning">
+                        {t('subscriptions.detail.overview.yes')}
+                      </dd>
                     </>
                   )}
                 </dl>
@@ -177,18 +208,18 @@ const SubscriptionDetailPage: React.FC = () => {
               <Card.Body className="p-0">
                 {!invoices?.items.length ? (
                   <div className="p-4 text-muted text-center">
-                    Nessuna fattura generata.
+                    {t('subscriptions.detail.invoices.empty')}
                   </div>
                 ) : (
                   <Table responsive hover className="mb-0">
                     <thead className="bg-200">
                       <tr>
-                        <th>Numero</th>
-                        <th>Periodo</th>
-                        <th>Totale</th>
-                        <th>Stato</th>
-                        <th>Emessa</th>
-                        <th>Pagata</th>
+                        <th>{t('subscriptions.detail.invoices.colNumber')}</th>
+                        <th>{t('subscriptions.detail.invoices.colPeriod')}</th>
+                        <th>{t('subscriptions.detail.invoices.colTotal')}</th>
+                        <th>{t('subscriptions.detail.invoices.colStatus')}</th>
+                        <th>{t('subscriptions.detail.invoices.colIssued')}</th>
+                        <th>{t('subscriptions.detail.invoices.colPaid')}</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -218,7 +249,7 @@ const SubscriptionDetailPage: React.FC = () => {
                           <td>
                             {inv.paidAt
                               ? new Date(inv.paidAt).toLocaleDateString('it-IT')
-                              : '—'}
+                              : t('subscriptions.detail.invoices.dash')}
                           </td>
                         </tr>
                       ))}
@@ -234,7 +265,7 @@ const SubscriptionDetailPage: React.FC = () => {
               <Card.Body>
                 {!activity?.items.length ? (
                   <div className="p-4 text-muted text-center">
-                    Nessun evento registrato.
+                    {t('subscriptions.detail.activity.empty')}
                   </div>
                 ) : (
                   <ul className="list-unstyled mb-0">

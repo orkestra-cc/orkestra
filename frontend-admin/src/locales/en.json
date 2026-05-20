@@ -577,7 +577,69 @@
       "delete": "Delete",
       "deleteConfirm": "Delete \"{{name}}\"?",
       "modalEditTitle": "Edit service",
-      "modalNewTitle": "New service"
+      "modalNewTitle": "New service",
+      "modal": {
+        "codeLabel": "Code (SKU)",
+        "codePlaceholder": "e.g. n8n-workflow-pro",
+        "nameLabel": "Name",
+        "categoryLabel": "Category",
+        "categoryWorkflow": "Workflow",
+        "categoryDatabase": "Database",
+        "categoryAgent": "Agent",
+        "categoryHosting": "Hosting",
+        "categoryCustom": "Custom",
+        "setupFeeLabel": "Setup fee (cents)",
+        "descriptionLabel": "Description",
+        "activeLabel": "Active",
+        "pricingTiersHeading": "Pricing tiers",
+        "addTier": "+ Tier",
+        "tierCodePlaceholder": "code",
+        "tierAmountPlaceholder": "amount (cents)",
+        "tierCurrencyPlaceholder": "EUR",
+        "cycleMonthly": "Monthly",
+        "cycleQuarterly": "Quarterly",
+        "cycleAnnual": "Annual",
+        "cancel": "Cancel",
+        "save": "Save"
+      }
+    },
+    "detail": {
+      "loading": "Loading…",
+      "title": "Subscription {{id}}",
+      "description": "Cycle: {{start}} → {{end}}",
+      "cancelAtPeriodEnd": "Cancel at period end",
+      "cancelConfirm": "Cancel at period end?",
+      "retryCharge": "Retry charge",
+      "reactivate": "Reactivate",
+      "tabs": {
+        "overview": "Overview",
+        "invoices": "Invoices ({{count}})",
+        "activity": "Activity ({{count}})"
+      },
+      "overview": {
+        "tenantUuid": "Tenant UUID",
+        "serviceUuid": "Service UUID",
+        "tier": "Tier",
+        "created": "Created",
+        "started": "Started",
+        "nextBilling": "Next billing",
+        "failedAttempts": "Failed attempts",
+        "cancelAtPeriodEndLabel": "Cancel at period end",
+        "yes": "Yes"
+      },
+      "invoices": {
+        "empty": "No invoices generated.",
+        "colNumber": "Number",
+        "colPeriod": "Period",
+        "colTotal": "Total",
+        "colStatus": "Status",
+        "colIssued": "Issued",
+        "colPaid": "Paid",
+        "dash": "—"
+      },
+      "activity": {
+        "empty": "No events recorded."
+      }
     },
     "list": {
       "title": "Subscriptions",
@@ -629,7 +691,37 @@
     "transactions": {
       "title": "Transactions",
       "description": "Stripe charges, refunds, and dispute history",
-      "refresh": "Refresh"
+      "refresh": "Refresh",
+      "filters": {
+        "all": "All statuses",
+        "succeeded": "Succeeded",
+        "failed": "Failed",
+        "requires_action": "Requires action",
+        "refunded": "Refunded",
+        "partially_refunded": "Partially refunded"
+      },
+      "loading": "Loading…",
+      "empty": "No transactions.",
+      "columns": {
+        "provider": "Provider",
+        "id": "ID",
+        "amount": "Amount",
+        "status": "Status",
+        "invoice": "Invoice",
+        "date": "Date",
+        "actions": "Actions"
+      },
+      "refundedSuffix": "refunded",
+      "dash": "—",
+      "refundButton": "Refund",
+      "refundModal": {
+        "title": "Refund",
+        "intro": "Transaction <code>{{providerTxID}}</code> — original <strong>{{amount}}</strong>",
+        "amountLabel": "Amount (cents — 0 for full refund)",
+        "reasonLabel": "Reason (optional)",
+        "cancel": "Cancel",
+        "confirm": "Confirm refund"
+      }
     },
     "webhooks": {
       "title": "Webhook events",

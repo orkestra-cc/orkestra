@@ -208,18 +208,24 @@ const ServicesListPage: React.FC = () => {
             <div className="row g-3">
               <div className="col-md-4">
                 <Form.Group>
-                  <Form.Label>Code (SKU)</Form.Label>
+                  <Form.Label>
+                    {t('subscriptions.services.modal.codeLabel')}
+                  </Form.Label>
                   <Form.Control
                     value={form.code}
                     disabled={!!editing}
                     onChange={e => setForm({ ...form, code: e.target.value })}
-                    placeholder="es. n8n-workflow-pro"
+                    placeholder={t(
+                      'subscriptions.services.modal.codePlaceholder'
+                    )}
                   />
                 </Form.Group>
               </div>
               <div className="col-md-8">
                 <Form.Group>
-                  <Form.Label>Nome</Form.Label>
+                  <Form.Label>
+                    {t('subscriptions.services.modal.nameLabel')}
+                  </Form.Label>
                   <Form.Control
                     value={form.name}
                     onChange={e => setForm({ ...form, name: e.target.value })}
@@ -228,24 +234,38 @@ const ServicesListPage: React.FC = () => {
               </div>
               <div className="col-md-6">
                 <Form.Group>
-                  <Form.Label>Categoria</Form.Label>
+                  <Form.Label>
+                    {t('subscriptions.services.modal.categoryLabel')}
+                  </Form.Label>
                   <Form.Select
                     value={form.category}
                     onChange={e =>
                       setForm({ ...form, category: e.target.value })
                     }
                   >
-                    <option value="workflow">Workflow</option>
-                    <option value="database">Database</option>
-                    <option value="agent">Agent</option>
-                    <option value="hosting">Hosting</option>
-                    <option value="custom">Custom</option>
+                    <option value="workflow">
+                      {t('subscriptions.services.modal.categoryWorkflow')}
+                    </option>
+                    <option value="database">
+                      {t('subscriptions.services.modal.categoryDatabase')}
+                    </option>
+                    <option value="agent">
+                      {t('subscriptions.services.modal.categoryAgent')}
+                    </option>
+                    <option value="hosting">
+                      {t('subscriptions.services.modal.categoryHosting')}
+                    </option>
+                    <option value="custom">
+                      {t('subscriptions.services.modal.categoryCustom')}
+                    </option>
                   </Form.Select>
                 </Form.Group>
               </div>
               <div className="col-md-6">
                 <Form.Group>
-                  <Form.Label>Setup fee (cents)</Form.Label>
+                  <Form.Label>
+                    {t('subscriptions.services.modal.setupFeeLabel')}
+                  </Form.Label>
                   <Form.Control
                     type="number"
                     value={form.setupFeeCents ?? 0}
@@ -260,7 +280,9 @@ const ServicesListPage: React.FC = () => {
               </div>
               <div className="col-12">
                 <Form.Group>
-                  <Form.Label>Descrizione</Form.Label>
+                  <Form.Label>
+                    {t('subscriptions.services.modal.descriptionLabel')}
+                  </Form.Label>
                   <Form.Control
                     as="textarea"
                     rows={2}
@@ -274,7 +296,7 @@ const ServicesListPage: React.FC = () => {
               <div className="col-12">
                 <Form.Check
                   type="switch"
-                  label="Attivo"
+                  label={t('subscriptions.services.modal.activeLabel')}
                   checked={form.active}
                   onChange={e => setForm({ ...form, active: e.target.checked })}
                 />
@@ -283,39 +305,51 @@ const ServicesListPage: React.FC = () => {
 
             <hr />
             <Flex justifyContent="between" alignItems="center" className="mb-2">
-              <strong>Tier di prezzo</strong>
+              <strong>
+                {t('subscriptions.services.modal.pricingTiersHeading')}
+              </strong>
               <Button size="sm" variant="orkestra-default" onClick={addTier}>
-                + Tier
+                {t('subscriptions.services.modal.addTier')}
               </Button>
             </Flex>
-            {form.pricingTiers.map((t, i) => (
+            {form.pricingTiers.map((tier, i) => (
               <div className="row g-2 mb-2" key={i}>
                 <div className="col-md-3">
                   <Form.Control
-                    placeholder="code"
-                    value={t.code}
+                    placeholder={t(
+                      'subscriptions.services.modal.tierCodePlaceholder'
+                    )}
+                    value={tier.code}
                     onChange={e => updateTier(i, { code: e.target.value })}
                   />
                 </div>
                 <div className="col-md-3">
                   <Form.Select
-                    value={t.cycle}
+                    value={tier.cycle}
                     onChange={e =>
                       updateTier(i, {
                         cycle: e.target.value as PricingTier['cycle']
                       })
                     }
                   >
-                    <option value="monthly">Monthly</option>
-                    <option value="quarterly">Quarterly</option>
-                    <option value="annual">Annual</option>
+                    <option value="monthly">
+                      {t('subscriptions.services.modal.cycleMonthly')}
+                    </option>
+                    <option value="quarterly">
+                      {t('subscriptions.services.modal.cycleQuarterly')}
+                    </option>
+                    <option value="annual">
+                      {t('subscriptions.services.modal.cycleAnnual')}
+                    </option>
                   </Form.Select>
                 </div>
                 <div className="col-md-3">
                   <Form.Control
                     type="number"
-                    placeholder="amount (cents)"
-                    value={t.amountCents}
+                    placeholder={t(
+                      'subscriptions.services.modal.tierAmountPlaceholder'
+                    )}
+                    value={tier.amountCents}
                     onChange={e =>
                       updateTier(i, { amountCents: Number(e.target.value) })
                     }
@@ -323,8 +357,10 @@ const ServicesListPage: React.FC = () => {
                 </div>
                 <div className="col-md-2">
                   <Form.Control
-                    placeholder="EUR"
-                    value={t.currency}
+                    placeholder={t(
+                      'subscriptions.services.modal.tierCurrencyPlaceholder'
+                    )}
+                    value={tier.currency}
                     onChange={e => updateTier(i, { currency: e.target.value })}
                   />
                 </div>
@@ -344,10 +380,10 @@ const ServicesListPage: React.FC = () => {
         </Modal.Body>
         <Modal.Footer>
           <Button variant="secondary" onClick={() => setShowModal(false)}>
-            Annulla
+            {t('subscriptions.services.modal.cancel')}
           </Button>
           <Button variant="primary" onClick={submit}>
-            Salva
+            {t('subscriptions.services.modal.save')}
           </Button>
         </Modal.Footer>
       </Modal>
