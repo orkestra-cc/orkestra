@@ -3607,6 +3607,9 @@
           "isActive": {
             "type": "boolean"
           },
+          "language": {
+            "type": "string"
+          },
           "lastLogin": {
             "format": "date-time",
             "type": "string"
@@ -15752,6 +15755,28 @@
         },
         "type": "object"
       },
+      "UpdateCurrentUserInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/UpdateCurrentUserInputBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "language": {
+            "enum": [
+              "en",
+              "it"
+            ],
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "UpdateDocumentRequestBody": {
         "additionalProperties": false,
         "properties": {
@@ -16422,6 +16447,13 @@
           "isActive": {
             "type": "boolean"
           },
+          "language": {
+            "enum": [
+              "en",
+              "it"
+            ],
+            "type": "string"
+          },
           "phone": {
             "type": "string"
           },
@@ -16517,6 +16549,9 @@
           },
           "isActive": {
             "type": "boolean"
+          },
+          "language": {
+            "type": "string"
           },
           "lastLogin": {
             "format": "date-time",
@@ -21963,6 +21998,52 @@
         "tags": [
           "Authentication"
         ]
+      },
+      "patch": {
+        "description": "Self-service preference update for the calling user. Currently exposes only the `language` field (BCP-47 tag, allowlisted to `en`/`it`); the response mirrors GET /me so the SPA can replace its cached user document with the response.",
+        "operationId": "client-update-current-user",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateCurrentUserInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CurrentUserResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Update current user preferences",
+        "tags": [
+          "Authentication",
+          "Self-Service"
+        ]
       }
     },
     "/v1/auth/client/me/devices/trust": {
@@ -23417,6 +23498,52 @@
         "summary": "Get current user",
         "tags": [
           "Authentication"
+        ]
+      },
+      "patch": {
+        "description": "Self-service preference update for the calling user. Currently exposes only the `language` field (BCP-47 tag, allowlisted to `en`/`it`); the response mirrors GET /me so the SPA can replace its cached user document with the response.",
+        "operationId": "operator-update-current-user",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateCurrentUserInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CurrentUserResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Update current user preferences",
+        "tags": [
+          "Authentication",
+          "Self-Service"
         ]
       }
     },

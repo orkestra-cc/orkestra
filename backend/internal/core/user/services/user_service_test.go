@@ -278,6 +278,9 @@ func (r *fakeUserRepo) ExistsByUUID(_ context.Context, id string) (bool, error) 
 	return ok, nil
 }
 func (r *fakeUserRepo) ExistsByUsername(_ context.Context, _ string) (bool, error) { return false, nil }
+func (r *fakeUserRepo) BackfillDefaultLanguage(_ context.Context, _ string) (int64, error) {
+	return 0, nil
+}
 
 // fakeOAuthProviderRepo implements authRepository.OAuthProviderRepository
 // with the minimum surface needed by the userService's enrichment path —

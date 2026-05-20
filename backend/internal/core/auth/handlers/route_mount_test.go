@@ -72,6 +72,16 @@ func TestRouteMountsRegisterDistinctPaths(t *testing.T) {
 		}
 	}
 
+	// PATCH /me is the self-service preference surface (Phase 1 of the
+	// i18n plan). Both verbs share the same path item, so verify the
+	// operation lands as a sibling of GET.
+	for _, p := range []string{"/v1/auth/operator/me", "/v1/auth/client/me"} {
+		item, ok := spec.Paths[p]
+		if !ok || item.Patch == nil {
+			t.Errorf("expected PATCH on %q, got nothing", p)
+		}
+	}
+
 	// /v1/admin/users/{userId}/mfa/reset is operator-only by design;
 	// the admin-reset surface deliberately does not take a RouteMount
 	// and must be present exactly once.

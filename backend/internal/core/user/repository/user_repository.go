@@ -89,6 +89,12 @@ type UserRepository interface {
 	ExistsByEmail(ctx context.Context, email string) (bool, error)
 	ExistsByUUID(ctx context.Context, uuid string) (bool, error)
 	ExistsByUsername(ctx context.Context, username string) (bool, error)
+	// BackfillDefaultLanguage sets language=DefaultLanguage on every row
+	// whose language field is missing or empty. Returns the modified
+	// count. Idempotent — subsequent calls find no rows to update.
+	// Called once on module Init so pre-language users get a sane value
+	// without a release-coupled migration step.
+	BackfillDefaultLanguage(ctx context.Context, defaultLanguage string) (int64, error)
 }
 
 type mongoUserRepository struct {
@@ -224,6 +230,9 @@ func (r *mongoUserRepository) Update(ctx context.Context, id string, input *mode
 	}
 	if input.IsActive != nil {
 		update["$set"].(bson.M)["isActive"] = *input.IsActive
+	}
+	if input.Language != "" {
+		update["$set"].(bson.M)["language"] = input.Language
 	}
 
 	filter := bson.M{
@@ -1025,4 +1034,24 @@ func (r *mongoUserRepository) ExistsByUsername(ctx context.Context, username str
 	}
 
 	return count > 0, nil
+}
+
+// BackfillDefaultLanguage stamps the supplied language on every row
+// whose `language` field is missing or empty. Soft-deleted rows are
+// updated too so a reactivation does not race with a parallel backfill.
+// Idempotent: the next call matches nothing.
+func (r *mongoUserRepository) BackfillDefaultLanguage(ctx context.Context, defaultLanguage string) (int64, error) {
+	filter := bson.M{
+		"$or": []bson.M{
+			{"language": bson.M{"$exists": false}},
+			{"language": ""},
+		},
+	}
+	update := bson.M{"$set": bson.M{"language": defaultLanguage}}
+	//tenantscope:allow user collections (operator_users / client_users) are tier-scoped, not org-scoped — the backfill is a one-shot global migration of the preference field.
+	res, err := r.collection.UpdateMany(ctx, filter, update)
+	if err != nil {
+		return 0, fmt.Errorf("failed to backfill default language: %w", err)
+	}
+	return res.ModifiedCount, nil
 }

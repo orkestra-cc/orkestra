@@ -88,6 +88,12 @@ type AuthService interface {
 	UpdateUserByUUID(ctx context.Context, uuid string, update *userModels.User) error
 	UpdateLastLoginByUUID(ctx context.Context, uuid string) error
 	DeleteUserByUUID(ctx context.Context, uuid string) error
+	// UpdateLanguageByUUID writes the user's preferred BCP-47 language
+	// tag. Self-service surface — callers MUST validate the tag against
+	// the supported-language allowlist before invoking; the underlying
+	// UpdateUserInput re-validates via struct tags, but the service trusts
+	// the caller has already rejected the unknown values.
+	UpdateLanguageByUUID(ctx context.Context, uuid, language string) error
 
 	// OAuth Link Management
 	AddOAuthLink(ctx context.Context, userUUID string, link models.LinkOAuthProviderInput) error
@@ -305,6 +311,11 @@ func (s *authService) UpdateUserByUUID(ctx context.Context, uuid string, update 
 
 func (s *authService) UpdateLastLoginByUUID(ctx context.Context, uuid string) error {
 	return s.userService.UpdateUserLastLogin(ctx, uuid)
+}
+
+func (s *authService) UpdateLanguageByUUID(ctx context.Context, uuid, language string) error {
+	_, err := s.userService.UpdateUser(ctx, uuid, &userModels.UpdateUserInput{Language: language})
+	return err
 }
 
 func (s *authService) DeleteUserByUUID(ctx context.Context, uuid string) error {

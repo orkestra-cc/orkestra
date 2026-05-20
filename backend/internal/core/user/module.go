@@ -1,6 +1,8 @@
 package user
 
 import (
+	"context"
+
 	"github.com/danielgtaylor/huma/v2/adapters/humachi"
 	"github.com/go-chi/chi/v5"
 	"github.com/orkestra-cc/orkestra-sdk/iface"
@@ -91,6 +93,19 @@ func (m *UserModule) Init(deps *module.Dependencies) error {
 	// compliance infrastructure — tolerate and skip.
 	if reg, ok := module.GetTyped[*iface.PIIProducerRegistry](deps.Services, module.ServicePIIProducerRegistry); ok {
 		reg.Register(services.NewPIIProducer(canonicalRepo))
+	}
+
+	// Backfill the language field on accounts that predate it so /me
+	// can always return a stable BCP-47 tag. Idempotent: the filter
+	// matches only rows missing or with an empty language. Boot-time
+	// cost is one indexed-or-collscan UpdateMany per tier — sub-second
+	// on realistic operator+client populations.
+	ctx := context.Background()
+	if _, err := operatorRepo.BackfillDefaultLanguage(ctx, iface.DefaultLanguage); err != nil {
+		deps.Logger.Warn("user language backfill (operator) failed", "err", err)
+	}
+	if _, err := clientRepo.BackfillDefaultLanguage(ctx, iface.DefaultLanguage); err != nil {
+		deps.Logger.Warn("user language backfill (client) failed", "err", err)
 	}
 	return nil
 }

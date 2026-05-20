@@ -1,6 +1,6 @@
 # Plan — Multi-language support for `frontend-admin` (EN + IT)
 
-**Status:** Phase 0 ✅ docs landed 2026-05-20 — key convention in `frontend-admin/CLAUDE.md`, error-code convention in `backend/CLAUDE.md`. IT reviewer assignment still open (flagged to owner). Phase 1 next.
+**Status:** Phase 0 ✅ (2026-05-20). Phase 1 ✅ — `user.Language` field added to SDK iface with `en`/`it` allowlist, repo Update whitelist + backfill on module Init, PATCH `/v1/auth/{tier}/me` self-service endpoint, OpenAPI dump regenerated, tenantscope baseline rebased. IT reviewer assignment still open (flagged to owner). Phase 2 (error-code contract setup PR) next.
 **Owner:** Salvatore
 **Scope:** `frontend-admin/` primary. Thin backend slice for persisting `user.language` and an error-code contract for admin-facing handlers.
 **Default language:** English. Italian ships alongside on day 1 (existing IT strings in JSX are the source of truth).

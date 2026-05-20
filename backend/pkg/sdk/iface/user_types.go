@@ -30,6 +30,13 @@ const (
 	TierClient   = "client"
 )
 
+// DefaultLanguage is the BCP-47 code stamped on new users by NewUser and
+// used as the backfill value for accounts that predate the language
+// field. Adding a new SPA-supported language means adding it to the
+// oneof in UpdateUserInput.Language alongside `en` and `it`, not
+// changing this default.
+const DefaultLanguage = "en"
+
 // OAuthProvider represents the supported OAuth providers.
 type OAuthProvider string
 
@@ -117,6 +124,12 @@ type User struct {
 	CreatedAt     time.Time  `bson:"createdAt" json:"createdAt"`
 	UpdatedAt     time.Time  `bson:"updatedAt" json:"updatedAt"`
 	DeletedAt     *time.Time `bson:"deletedAt,omitempty" json:"-"`
+
+	// Language is the user's preferred BCP-47 language tag (e.g. "en",
+	// "it"). Read by the frontend on /me to drive react-i18next. Empty
+	// on documents that predate the field; the user module backfills
+	// DefaultLanguage on Start so the in-memory user always has a value.
+	Language string `bson:"language,omitempty" json:"language,omitempty"`
 }
 
 // CreateUserInput represents input for creating a new user.
@@ -150,6 +163,11 @@ type UpdateUserInput struct {
 	PIN      string `json:"pin,omitempty" validate:"omitempty,len=4,numeric"`
 	Role     string `json:"role,omitempty" validate:"omitempty,oneof=super_admin administrator developer manager operator guest"`
 	IsActive *bool  `json:"isActive,omitempty"`
+	// Language is the user's preferred BCP-47 language tag. The oneof
+	// list is the source of truth for which languages the SPA ships
+	// translations for — extend the validate and Huma enum tags in
+	// lockstep with the SPA's locale files when adding a locale.
+	Language string `json:"language,omitempty" enum:"en,it" validate:"omitempty,oneof=en it"`
 }
 
 // UserManagementResponse represents the user data returned in API responses.
@@ -167,6 +185,7 @@ type UserManagementResponse struct {
 	LastLogin     *time.Time              `json:"lastLogin,omitempty"`
 	CreatedAt     time.Time               `json:"createdAt"`
 	UpdatedAt     time.Time               `json:"updatedAt"`
+	Language      string                  `json:"language,omitempty"`
 }
 
 // UserManagementListResponse represents paginated user list response.
@@ -256,6 +275,7 @@ func (u *User) ToResponse() *UserManagementResponse {
 		LastLogin:     u.LastLogin,
 		CreatedAt:     u.CreatedAt,
 		UpdatedAt:     u.UpdatedAt,
+		Language:      u.Language,
 	}
 }
 
@@ -267,6 +287,7 @@ func NewUser() *User {
 		IsActive:      true,
 		EmailVerified: false,
 		Role:          "operator",
+		Language:      DefaultLanguage,
 		CreatedAt:     now,
 		UpdatedAt:     now,
 		OAuthLinks:    make([]OAuthLink, 0),
