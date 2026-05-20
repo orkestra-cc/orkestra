@@ -751,6 +751,196 @@
     "companies": {
       "title": "Aziende Emittenti",
       "newCompany": "Nuova Azienda"
+    },
+    "issuedDetail": {
+      "loading": "Caricamento...",
+      "loadError": "Errore durante il caricamento della fattura. Riprova più tardi.",
+      "notFound": "Fattura non trovata.",
+      "header": {
+        "title": "Fattura {{number}}",
+        "subtitle": "{{type}} - {{status}}",
+        "subtitleWithSdi": "{{type}} - {{status}} ({{sdiStatus}})",
+        "backToList": "Torna alla lista",
+        "preview": "Anteprima",
+        "viewXml": "Visualizza XML",
+        "downloadXml": "Scarica XML",
+        "downloadPdf": "Scarica PDF",
+        "creditNote": "Nota di Credito",
+        "edit": "Modifica"
+      },
+      "summary": {
+        "title": "Riepilogo Fattura",
+        "number": "Numero",
+        "date": "Data",
+        "documentType": "Tipo Documento",
+        "customer": "Cliente",
+        "taxable": "Imponibile",
+        "vat": "IVA",
+        "total": "Totale",
+        "sdiId": "ID SDI",
+        "causale": "Causale",
+        "notAvailable": "N/D"
+      },
+      "linesCard": {
+        "titleEdit": "Modifica Fattura",
+        "titleView": "Dettaglio Righe"
+      },
+      "tabs": {
+        "document": "Documento",
+        "lines": "Righe ({{count}})",
+        "ritenute": "Ritenute e Contributi",
+        "payment": "Pagamento",
+        "options": "Opzioni"
+      },
+      "documentTab": {
+        "documentTypeLabel": "Tipo Documento",
+        "documentTypeHelp": "Il tipo documento non può essere modificato",
+        "numberLabel": "Numero Fattura",
+        "numberPlaceholder": "es. 2026/001",
+        "dateLabel": "Data",
+        "customerLabel": "Cliente",
+        "customerHelp": "Il cliente non può essere modificato",
+        "causaleLabel": "Causale / Descrizione",
+        "causalePlaceholder": "es. Consulenza informatica mese di gennaio 2026",
+        "addCausale": "Aggiungi riga causale"
+      },
+      "linesTab": {
+        "colDescription": "Descrizione *",
+        "colCode": "Codice",
+        "colQuantity": "Qtà *",
+        "colUnit": "U.M.",
+        "colUnitPrice": "Prezzo Unit.",
+        "colVat": "IVA %",
+        "colNature": "Natura",
+        "colTotal": "Totale",
+        "descrPlaceholder": "Descrizione",
+        "codePlaceholder": "Codice",
+        "selectNature": "Seleziona...",
+        "addLine": "Aggiungi Riga",
+        "altriDati": "Altri Dati Gestionali",
+        "altriDatiAdd": "Aggiungi",
+        "altriDatiTipoPlaceholder": "Tipo Dato*",
+        "altriDatiRifTesto": "Rif. Testo",
+        "altriDatiRifNumero": "Rif. Numero"
+      },
+      "totals": {
+        "taxable": "Imponibile",
+        "vat": "IVA",
+        "total": "Totale"
+      },
+      "ritenute": {
+        "ritenutaSwitch": "Ritenuta d'Acconto",
+        "ritenutaTipo": "Tipo Ritenuta",
+        "ritenutaAliquota": "Aliquota %",
+        "ritenutaImporto": "Importo",
+        "ritenutaCausale": "Causale",
+        "ritenutaCausalePlaceholder": "A",
+        "bolloSwitch": "Bollo Virtuale",
+        "bolloImporto": "Importo Bollo",
+        "bolloHint": "Solitamente €2.00 per fatture esenti IVA > €77.47",
+        "cassaSwitch": "Cassa Previdenziale",
+        "cassaTipo": "Tipo Cassa",
+        "cassaAliquota": "Aliquota %",
+        "cassaImporto": "Importo",
+        "cassaAliquotaIva": "Aliquota IVA %"
+      },
+      "paymentTab": {
+        "prefillTitle": "Precompila dati bancari",
+        "prefillSelectLabel": "Seleziona azienda per precompilare",
+        "prefillPlaceholder": "-- Seleziona per precompilare i dati --",
+        "prefillNoBank": "(Dati bancari non configurati)",
+        "prefillHelp": "I campi sottostanti verranno compilati automaticamente.",
+        "conditionLabel": "Condizione di Pagamento",
+        "methodLabel": "Metodo di Pagamento",
+        "beneficiarioLabel": "Beneficiario",
+        "beneficiarioPlaceholder": "Nome del beneficiario",
+        "istitutoLabel": "Istituto Finanziario",
+        "istitutoPlaceholder": "Nome della banca",
+        "ibanLabel": "IBAN",
+        "ibanPlaceholder": "es. IT60X0542811101000000123456",
+        "bicLabel": "BIC/SWIFT",
+        "bicPlaceholder": "es. BCITITMM",
+        "abiLabel": "ABI",
+        "abiPlaceholder": "es. 03069",
+        "cabLabel": "CAB",
+        "cabPlaceholder": "es. 05000",
+        "dueDateLabel": "Scadenza Pagamento"
+      },
+      "optionsTab": {
+        "internalNotesLabel": "Note Interne",
+        "internalNotesPlaceholder": "Note visibili solo internamente (non inviate al SDI)",
+        "signatureLabel": "Firma Digitale:",
+        "storageLabel": "Conservazione Sostitutiva:",
+        "enabled": "Abilitata",
+        "disabled": "Disabilitata"
+      },
+      "linesView": {
+        "colNumber": "#",
+        "colDescription": "Descrizione",
+        "colQuantity": "Qtà",
+        "colUnit": "U.M.",
+        "colUnitPrice": "Prezzo Unit.",
+        "colVat": "IVA %",
+        "colNature": "Natura",
+        "colTotal": "Totale",
+        "footerTaxable": "Imponibile:",
+        "footerVat": "IVA:",
+        "footerTotal": "Totale:"
+      },
+      "ritenuteView": {
+        "title": "Ritenute e Contributi",
+        "ritenutaTitle": "Ritenuta d'Acconto",
+        "bolloTitle": "Bollo Virtuale",
+        "cassaTitle": "Cassa Previdenziale",
+        "tipo": "Tipo",
+        "aliquota": "Aliquota",
+        "importo": "Importo",
+        "causale": "Causale",
+        "aliquotaIva": "Aliquota IVA"
+      },
+      "paymentView": {
+        "title": "Termini di Pagamento",
+        "condition": "Condizione",
+        "method": "Metodo",
+        "dueDate": "Scadenza",
+        "beneficiario": "Beneficiario",
+        "istituto": "Istituto Finanziario",
+        "iban": "IBAN",
+        "bic": "BIC/SWIFT",
+        "abi": "ABI",
+        "cab": "CAB"
+      },
+      "actions": {
+        "cancel": "Annulla",
+        "save": "Salva Modifiche",
+        "saving": "Salvataggio...",
+        "delete": "Elimina",
+        "sendSdi": "Invia al SDI",
+        "sending": "Invio..."
+      },
+      "validation": {
+        "numberRequired": "Il numero fattura è obbligatorio",
+        "atLeastOneLine": "Aggiungere almeno una riga",
+        "lineDescription": "Riga {{index}}: la descrizione è obbligatoria",
+        "lineQuantity": "Riga {{index}}: la quantità deve essere maggiore di zero",
+        "lineNature": "Riga {{index}}: selezionare la natura IVA per aliquota 0%"
+      },
+      "confirm": {
+        "sendSdi": "Sei sicuro di voler inviare questa fattura al SDI? Una volta inviata non potrà più essere modificata.",
+        "delete": "Sei sicuro di voler eliminare questa fattura? L'operazione non può essere annullata."
+      },
+      "toasts": {
+        "saveSuccess": "Fattura aggiornata con successo",
+        "saveError": "Errore durante il salvataggio della fattura",
+        "sendSuccess": "Fattura inviata al SDI con successo",
+        "sendError": "Errore durante l'invio della fattura al SDI",
+        "deleteSuccess": "Fattura eliminata con successo",
+        "deleteError": "Errore durante l'eliminazione della fattura",
+        "xmlLoadError": "Errore durante il caricamento del file XML",
+        "xmlDownloadError": "Errore durante il download del file XML",
+        "htmlPreviewError": "Errore durante il caricamento dell'anteprima",
+        "pdfDownloadError": "Errore durante il download del PDF"
+      }
     }
   },
   "company": {

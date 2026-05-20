@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router';
+import { useTranslation } from 'react-i18next';
 import {
   Card,
   Form,
@@ -170,6 +171,7 @@ const createEmptyAltriDati = (): AltriDatiGestionali => ({
 });
 
 const IssuedInvoiceDetail: React.FC = () => {
+  const { t } = useTranslation();
   const { invoiceId } = useParams<{ invoiceId: string }>();
   const navigate = useNavigate();
 
@@ -430,13 +432,13 @@ const IssuedInvoiceDetail: React.FC = () => {
   // Validation
   const validate = (): boolean => {
     if (!number.trim()) {
-      setError('Il numero fattura è obbligatorio');
+      setError(t('billing.issuedDetail.validation.numberRequired'));
       setActiveTab('document');
       return false;
     }
 
     if (lines.length === 0) {
-      setError('Aggiungere almeno una riga');
+      setError(t('billing.issuedDetail.validation.atLeastOneLine'));
       setActiveTab('lines');
       return false;
     }
@@ -444,17 +446,25 @@ const IssuedInvoiceDetail: React.FC = () => {
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
       if (!line.description.trim()) {
-        setError(`Riga ${i + 1}: la descrizione è obbligatoria`);
+        setError(
+          t('billing.issuedDetail.validation.lineDescription', {
+            index: i + 1
+          })
+        );
         setActiveTab('lines');
         return false;
       }
       if (line.quantity <= 0) {
-        setError(`Riga ${i + 1}: la quantità deve essere maggiore di zero`);
+        setError(
+          t('billing.issuedDetail.validation.lineQuantity', { index: i + 1 })
+        );
         setActiveTab('lines');
         return false;
       }
       if (line.vatRate === 0 && !line.vatNature) {
-        setError(`Riga ${i + 1}: selezionare la natura IVA per aliquota 0%`);
+        setError(
+          t('billing.issuedDetail.validation.lineNature', { index: i + 1 })
+        );
         setActiveTab('lines');
         return false;
       }
@@ -505,7 +515,7 @@ const IssuedInvoiceDetail: React.FC = () => {
     try {
       const input = buildUpdateInput();
       await updateInvoice({ id: invoiceId!, data: input }).unwrap();
-      setSuccess('Fattura aggiornata con successo');
+      setSuccess(t('billing.issuedDetail.toasts.saveSuccess'));
       setIsEditMode(false);
       refetch();
     } catch (err: unknown) {
@@ -513,7 +523,7 @@ const IssuedInvoiceDetail: React.FC = () => {
         err && typeof err === 'object' && 'data' in err
           ? (err as { data?: { message?: string } }).data?.message
           : undefined;
-      setError(errorMessage || 'Errore durante il salvataggio della fattura');
+      setError(errorMessage || t('billing.issuedDetail.toasts.saveError'));
     }
   };
 
@@ -522,24 +532,20 @@ const IssuedInvoiceDetail: React.FC = () => {
     setError('');
     setSuccess('');
 
-    if (
-      !window.confirm(
-        'Sei sicuro di voler inviare questa fattura al SDI? Una volta inviata non potrà più essere modificata.'
-      )
-    ) {
+    if (!window.confirm(t('billing.issuedDetail.confirm.sendSdi'))) {
       return;
     }
 
     try {
       await sendInvoice(invoiceId!).unwrap();
-      setSuccess('Fattura inviata al SDI con successo');
+      setSuccess(t('billing.issuedDetail.toasts.sendSuccess'));
       refetch();
     } catch (err: unknown) {
       const errorMessage =
         err && typeof err === 'object' && 'data' in err
           ? (err as { data?: { message?: string } }).data?.message
           : undefined;
-      setError(errorMessage || "Errore durante l'invio della fattura al SDI");
+      setError(errorMessage || t('billing.issuedDetail.toasts.sendError'));
     }
   };
 
@@ -548,24 +554,20 @@ const IssuedInvoiceDetail: React.FC = () => {
     setError('');
     setSuccess('');
 
-    if (
-      !window.confirm(
-        "Sei sicuro di voler eliminare questa fattura? L'operazione non può essere annullata."
-      )
-    ) {
+    if (!window.confirm(t('billing.issuedDetail.confirm.delete'))) {
       return;
     }
 
     try {
       await deleteInvoice(invoiceId!).unwrap();
-      setSuccess('Fattura eliminata con successo');
+      setSuccess(t('billing.issuedDetail.toasts.deleteSuccess'));
       setTimeout(() => navigate('/billing/invoices/issued'), 1500);
     } catch (err: unknown) {
       const errorMessage =
         err && typeof err === 'object' && 'data' in err
           ? (err as { data?: { message?: string } }).data?.message
           : undefined;
-      setError(errorMessage || "Errore durante l'eliminazione della fattura");
+      setError(errorMessage || t('billing.issuedDetail.toasts.deleteError'));
     }
   };
 
@@ -582,7 +584,7 @@ const IssuedInvoiceDetail: React.FC = () => {
       const url = window.URL.createObjectURL(blob);
       window.open(url, '_blank');
     } catch {
-      setError('Errore durante il caricamento del file XML');
+      setError(t('billing.issuedDetail.toasts.xmlLoadError'));
     }
   };
 
@@ -629,7 +631,7 @@ const IssuedInvoiceDetail: React.FC = () => {
       document.body.removeChild(link);
       window.URL.revokeObjectURL(url);
     } catch {
-      setError('Errore durante il download del file XML');
+      setError(t('billing.issuedDetail.toasts.xmlDownloadError'));
     }
   };
 
@@ -641,7 +643,7 @@ const IssuedInvoiceDetail: React.FC = () => {
       const url = window.URL.createObjectURL(blob);
       window.open(url, '_blank');
     } catch {
-      setError("Errore durante il caricamento dell'anteprima");
+      setError(t('billing.issuedDetail.toasts.htmlPreviewError'));
     }
   };
 
@@ -657,10 +659,11 @@ const IssuedInvoiceDetail: React.FC = () => {
       return `fattura_${invoiceNumber}.pdf`;
     }
     const countryCode = cedente.fiscalIdCountry || 'IT';
+    const digitsFromNumber = String(invoice?.number).replace(/\D/g, '');
     const progressive =
       invoice?.progressivoInvio ||
       invoiceId?.slice(-5) ||
-      String(invoice?.number).replace(/\D/g, '').slice(-5).padStart(5, '0') ||
+      digitsFromNumber.slice(-5).padStart(5, '0') ||
       '00001';
     return `${countryCode}${fiscalCode}_${progressive}.pdf`;
   };
@@ -673,7 +676,7 @@ const IssuedInvoiceDetail: React.FC = () => {
         filename: generatePdfFilename()
       }).unwrap();
     } catch {
-      setError('Errore durante il download del PDF');
+      setError(t('billing.issuedDetail.toasts.pdfDownloadError'));
     }
   };
 
@@ -762,7 +765,9 @@ const IssuedInvoiceDetail: React.FC = () => {
         style={{ minHeight: '400px' }}
       >
         <Spinner animation="border" role="status">
-          <span className="visually-hidden">Caricamento...</span>
+          <span className="visually-hidden">
+            {t('billing.issuedDetail.loading')}
+          </span>
         </Spinner>
       </div>
     );
@@ -771,15 +776,15 @@ const IssuedInvoiceDetail: React.FC = () => {
   // Error state
   if (loadError) {
     return (
-      <Alert variant="danger">
-        Errore durante il caricamento della fattura. Riprova più tardi.
-      </Alert>
+      <Alert variant="danger">{t('billing.issuedDetail.loadError')}</Alert>
     );
   }
 
   // Not found state
   if (!invoice) {
-    return <Alert variant="warning">Fattura non trovata.</Alert>;
+    return (
+      <Alert variant="warning">{t('billing.issuedDetail.notFound')}</Alert>
+    );
   }
 
   // Debug: Check invoice structure - can be removed after fixing
@@ -793,13 +798,26 @@ const IssuedInvoiceDetail: React.FC = () => {
   // Get customer display name
   const customerName = invoice.cessionarioCommittente
     ? getPartyDisplayName(invoice.cessionarioCommittente)
-    : 'N/A';
+    : t('billing.issuedDetail.summary.notAvailable');
+
+  const headerSubtitle = invoice.sdiStatus
+    ? t('billing.issuedDetail.header.subtitleWithSdi', {
+        type: DOCUMENT_TYPE_LABELS[invoice.documentType],
+        status: INVOICE_STATUS_LABELS[invoice.status],
+        sdiStatus: SDI_STATUS_LABELS[invoice.sdiStatus]
+      })
+    : t('billing.issuedDetail.header.subtitle', {
+        type: DOCUMENT_TYPE_LABELS[invoice.documentType],
+        status: INVOICE_STATUS_LABELS[invoice.status]
+      });
 
   return (
     <>
       <PageHeader
-        title={`Fattura ${invoice.number}`}
-        description={`${DOCUMENT_TYPE_LABELS[invoice.documentType]} - ${INVOICE_STATUS_LABELS[invoice.status]}${invoice.sdiStatus ? ` (${SDI_STATUS_LABELS[invoice.sdiStatus]})` : ''}`}
+        title={t('billing.issuedDetail.header.title', {
+          number: invoice.number
+        })}
+        description={headerSubtitle}
         className="mb-3"
       >
         <Button
@@ -809,7 +827,7 @@ const IssuedInvoiceDetail: React.FC = () => {
           onClick={() => navigate('/billing/invoices/issued')}
         >
           <FontAwesomeIcon icon={faArrowLeft} className="me-1" />
-          Torna alla lista
+          {t('billing.issuedDetail.header.backToList')}
         </Button>
         {!isEditMode && (
           <>
@@ -820,10 +838,10 @@ const IssuedInvoiceDetail: React.FC = () => {
                   size="sm"
                   className="me-2"
                   onClick={handleViewHtml}
-                  title="Anteprima"
+                  title={t('billing.issuedDetail.header.preview')}
                 >
                   <FontAwesomeIcon icon={faEye} className="me-1" />
-                  Anteprima
+                  {t('billing.issuedDetail.header.preview')}
                 </Button>
               )}
             <Button
@@ -831,7 +849,7 @@ const IssuedInvoiceDetail: React.FC = () => {
               size="sm"
               className="me-2"
               onClick={handleViewXml}
-              title="Visualizza XML"
+              title={t('billing.issuedDetail.header.viewXml')}
             >
               <FontAwesomeIcon icon={faFileCode} className="me-1" />
               XML
@@ -841,7 +859,7 @@ const IssuedInvoiceDetail: React.FC = () => {
               size="sm"
               className="me-2"
               onClick={handleDownloadXml}
-              title="Scarica XML"
+              title={t('billing.issuedDetail.header.downloadXml')}
             >
               <FontAwesomeIcon icon={faDownload} className="me-1" />
               XML
@@ -851,7 +869,7 @@ const IssuedInvoiceDetail: React.FC = () => {
               size="sm"
               className="me-2"
               onClick={handleDownloadPdf}
-              title="Scarica PDF"
+              title={t('billing.issuedDetail.header.downloadPdf')}
             >
               <FontAwesomeIcon icon={faFilePdf} className="me-1" />
               PDF
@@ -870,10 +888,10 @@ const IssuedInvoiceDetail: React.FC = () => {
                       `/billing/invoices/issued/new?fromInvoice=${invoiceId}`
                     )
                   }
-                  title="Crea Nota di Credito"
+                  title={t('billing.issuedDetail.header.creditNote')}
                 >
                   <FontAwesomeIcon icon={faRotateLeft} className="me-1" />
-                  Nota di Credito
+                  {t('billing.issuedDetail.header.creditNote')}
                 </Button>
               )}
             {canEdit && (
@@ -883,7 +901,7 @@ const IssuedInvoiceDetail: React.FC = () => {
                 onClick={() => setIsEditMode(true)}
               >
                 <FontAwesomeIcon icon={faEdit} className="me-1" />
-                Modifica
+                {t('billing.issuedDetail.header.edit')}
               </Button>
             )}
           </>
@@ -905,18 +923,25 @@ const IssuedInvoiceDetail: React.FC = () => {
       {/* Invoice Info Summary (Read-only) */}
       {!isEditMode && (
         <Card className="mb-3">
-          <OrkestraCardHeader title="Riepilogo Fattura" light={false} />
+          <OrkestraCardHeader
+            title={t('billing.issuedDetail.summary.title')}
+            light={false}
+          />
           <Card.Body>
             <Row>
               <Col md={3}>
                 <div className="mb-3">
-                  <small className="text-muted">Numero</small>
+                  <small className="text-muted">
+                    {t('billing.issuedDetail.summary.number')}
+                  </small>
                   <div className="fw-bold">{invoice.number}</div>
                 </div>
               </Col>
               <Col md={3}>
                 <div className="mb-3">
-                  <small className="text-muted">Data</small>
+                  <small className="text-muted">
+                    {t('billing.issuedDetail.summary.date')}
+                  </small>
                   <div className="fw-bold">
                     {formatItalianDate(invoice.date)}
                   </div>
@@ -924,7 +949,9 @@ const IssuedInvoiceDetail: React.FC = () => {
               </Col>
               <Col md={3}>
                 <div className="mb-3">
-                  <small className="text-muted">Tipo Documento</small>
+                  <small className="text-muted">
+                    {t('billing.issuedDetail.summary.documentType')}
+                  </small>
                   <div className="fw-bold">
                     {DOCUMENT_TYPE_LABELS[invoice.documentType]}
                   </div>
@@ -932,7 +959,9 @@ const IssuedInvoiceDetail: React.FC = () => {
               </Col>
               <Col md={3}>
                 <div className="mb-3">
-                  <small className="text-muted">Cliente</small>
+                  <small className="text-muted">
+                    {t('billing.issuedDetail.summary.customer')}
+                  </small>
                   <div className="fw-bold">{customerName}</div>
                 </div>
               </Col>
@@ -940,7 +969,9 @@ const IssuedInvoiceDetail: React.FC = () => {
             <Row>
               <Col md={3}>
                 <div className="mb-3">
-                  <small className="text-muted">Imponibile</small>
+                  <small className="text-muted">
+                    {t('billing.issuedDetail.summary.taxable')}
+                  </small>
                   <div className="fw-bold">
                     {formatCurrency(invoice.totalTaxableAmount)}
                   </div>
@@ -948,7 +979,9 @@ const IssuedInvoiceDetail: React.FC = () => {
               </Col>
               <Col md={3}>
                 <div className="mb-3">
-                  <small className="text-muted">IVA</small>
+                  <small className="text-muted">
+                    {t('billing.issuedDetail.summary.vat')}
+                  </small>
                   <div className="fw-bold">
                     {formatCurrency(invoice.totalVatAmount)}
                   </div>
@@ -956,7 +989,9 @@ const IssuedInvoiceDetail: React.FC = () => {
               </Col>
               <Col md={3}>
                 <div className="mb-3">
-                  <small className="text-muted">Totale</small>
+                  <small className="text-muted">
+                    {t('billing.issuedDetail.summary.total')}
+                  </small>
                   <div className="fw-bold fs-5 text-primary">
                     {formatCurrency(invoice.totalAmount)}
                   </div>
@@ -965,7 +1000,9 @@ const IssuedInvoiceDetail: React.FC = () => {
               <Col md={3}>
                 {invoice.sdiIdentifier && (
                   <div className="mb-3">
-                    <small className="text-muted">ID SDI</small>
+                    <small className="text-muted">
+                      {t('billing.issuedDetail.summary.sdiId')}
+                    </small>
                     <div className="fw-bold">{invoice.sdiIdentifier}</div>
                   </div>
                 )}
@@ -974,7 +1011,9 @@ const IssuedInvoiceDetail: React.FC = () => {
             {invoice.causale && invoice.causale.length > 0 && (
               <Row>
                 <Col>
-                  <small className="text-muted">Causale</small>
+                  <small className="text-muted">
+                    {t('billing.issuedDetail.summary.causale')}
+                  </small>
                   {invoice.causale.map((c, idx) => (
                     <div key={idx}>{c}</div>
                   ))}
@@ -988,7 +1027,11 @@ const IssuedInvoiceDetail: React.FC = () => {
       {/* Invoice Lines (Read-only view or Edit form) */}
       <Card className="mb-3">
         <OrkestraCardHeader
-          title={isEditMode ? 'Modifica Fattura' : 'Dettaglio Righe'}
+          title={
+            isEditMode
+              ? t('billing.issuedDetail.linesCard.titleEdit')
+              : t('billing.issuedDetail.linesCard.titleView')
+          }
           light={false}
         />
         <Card.Body>
@@ -1002,19 +1045,31 @@ const IssuedInvoiceDetail: React.FC = () => {
             >
               <Nav variant="tabs" className="mb-3">
                 <Nav.Item>
-                  <Nav.Link eventKey="document">Documento</Nav.Link>
+                  <Nav.Link eventKey="document">
+                    {t('billing.issuedDetail.tabs.document')}
+                  </Nav.Link>
                 </Nav.Item>
                 <Nav.Item>
-                  <Nav.Link eventKey="lines">Righe ({lines.length})</Nav.Link>
+                  <Nav.Link eventKey="lines">
+                    {t('billing.issuedDetail.tabs.lines', {
+                      count: lines.length
+                    })}
+                  </Nav.Link>
                 </Nav.Item>
                 <Nav.Item>
-                  <Nav.Link eventKey="ritenute">Ritenute e Contributi</Nav.Link>
+                  <Nav.Link eventKey="ritenute">
+                    {t('billing.issuedDetail.tabs.ritenute')}
+                  </Nav.Link>
                 </Nav.Item>
                 <Nav.Item>
-                  <Nav.Link eventKey="payment">Pagamento</Nav.Link>
+                  <Nav.Link eventKey="payment">
+                    {t('billing.issuedDetail.tabs.payment')}
+                  </Nav.Link>
                 </Nav.Item>
                 <Nav.Item>
-                  <Nav.Link eventKey="options">Opzioni</Nav.Link>
+                  <Nav.Link eventKey="options">
+                    {t('billing.issuedDetail.tabs.options')}
+                  </Nav.Link>
                 </Nav.Item>
               </Nav>
 
@@ -1024,34 +1079,44 @@ const IssuedInvoiceDetail: React.FC = () => {
                   <Row>
                     <Col md={4}>
                       <Form.Group className="mb-3">
-                        <Form.Label>Tipo Documento</Form.Label>
+                        <Form.Label>
+                          {t(
+                            'billing.issuedDetail.documentTab.documentTypeLabel'
+                          )}
+                        </Form.Label>
                         <Form.Control
                           type="text"
                           value={DOCUMENT_TYPE_LABELS[invoice.documentType]}
                           disabled
                         />
                         <Form.Text className="text-muted">
-                          Il tipo documento non può essere modificato
+                          {t(
+                            'billing.issuedDetail.documentTab.documentTypeHelp'
+                          )}
                         </Form.Text>
                       </Form.Group>
                     </Col>
                     <Col md={4}>
                       <Form.Group className="mb-3">
                         <Form.Label>
-                          Numero Fattura <span className="text-danger">*</span>
+                          {t('billing.issuedDetail.documentTab.numberLabel')}{' '}
+                          <span className="text-danger">*</span>
                         </Form.Label>
                         <Form.Control
                           type="text"
                           value={number}
                           onChange={e => setNumber(e.target.value)}
-                          placeholder="es. 2026/001"
+                          placeholder={t(
+                            'billing.issuedDetail.documentTab.numberPlaceholder'
+                          )}
                         />
                       </Form.Group>
                     </Col>
                     <Col md={4}>
                       <Form.Group className="mb-3">
                         <Form.Label>
-                          Data <span className="text-danger">*</span>
+                          {t('billing.issuedDetail.documentTab.dateLabel')}{' '}
+                          <span className="text-danger">*</span>
                         </Form.Label>
                         <Form.Control
                           type="date"
@@ -1065,21 +1130,25 @@ const IssuedInvoiceDetail: React.FC = () => {
                   <Row>
                     <Col md={12}>
                       <Form.Group className="mb-3">
-                        <Form.Label>Cliente</Form.Label>
+                        <Form.Label>
+                          {t('billing.issuedDetail.documentTab.customerLabel')}
+                        </Form.Label>
                         <Form.Control
                           type="text"
                           value={customerName}
                           disabled
                         />
                         <Form.Text className="text-muted">
-                          Il cliente non può essere modificato
+                          {t('billing.issuedDetail.documentTab.customerHelp')}
                         </Form.Text>
                       </Form.Group>
                     </Col>
                   </Row>
 
                   <Form.Group className="mb-3">
-                    <Form.Label>Causale / Descrizione</Form.Label>
+                    <Form.Label>
+                      {t('billing.issuedDetail.documentTab.causaleLabel')}
+                    </Form.Label>
                     {causale.map((c, index) => (
                       <InputGroup className="mb-2" key={index}>
                         <Form.Control
@@ -1088,7 +1157,9 @@ const IssuedInvoiceDetail: React.FC = () => {
                           onChange={e =>
                             handleCausaleChange(index, e.target.value)
                           }
-                          placeholder="es. Consulenza informatica mese di gennaio 2026"
+                          placeholder={t(
+                            'billing.issuedDetail.documentTab.causalePlaceholder'
+                          )}
                           maxLength={200}
                         />
                         {causale.length > 1 && (
@@ -1103,7 +1174,7 @@ const IssuedInvoiceDetail: React.FC = () => {
                     ))}
                     <Button variant="link" size="sm" onClick={handleAddCausale}>
                       <FontAwesomeIcon icon={faPlus} className="me-1" />
-                      Aggiungi riga causale
+                      {t('billing.issuedDetail.documentTab.addCausale')}
                     </Button>
                   </Form.Group>
                 </Tab.Pane>
@@ -1114,14 +1185,30 @@ const IssuedInvoiceDetail: React.FC = () => {
                     <Table bordered hover size="sm">
                       <thead className="bg-body-tertiary">
                         <tr>
-                          <th style={{ width: '25%' }}>Descrizione *</th>
-                          <th style={{ width: '10%' }}>Codice</th>
-                          <th style={{ width: '7%' }}>Qtà *</th>
-                          <th style={{ width: '8%' }}>U.M.</th>
-                          <th style={{ width: '10%' }}>Prezzo Unit.</th>
-                          <th style={{ width: '7%' }}>IVA %</th>
-                          <th style={{ width: '13%' }}>Natura</th>
-                          <th style={{ width: '10%' }}>Totale</th>
+                          <th style={{ width: '25%' }}>
+                            {t('billing.issuedDetail.linesTab.colDescription')}
+                          </th>
+                          <th style={{ width: '10%' }}>
+                            {t('billing.issuedDetail.linesTab.colCode')}
+                          </th>
+                          <th style={{ width: '7%' }}>
+                            {t('billing.issuedDetail.linesTab.colQuantity')}
+                          </th>
+                          <th style={{ width: '8%' }}>
+                            {t('billing.issuedDetail.linesTab.colUnit')}
+                          </th>
+                          <th style={{ width: '10%' }}>
+                            {t('billing.issuedDetail.linesTab.colUnitPrice')}
+                          </th>
+                          <th style={{ width: '7%' }}>
+                            {t('billing.issuedDetail.linesTab.colVat')}
+                          </th>
+                          <th style={{ width: '13%' }}>
+                            {t('billing.issuedDetail.linesTab.colNature')}
+                          </th>
+                          <th style={{ width: '10%' }}>
+                            {t('billing.issuedDetail.linesTab.colTotal')}
+                          </th>
                           <th style={{ width: '5%' }}></th>
                         </tr>
                       </thead>
@@ -1143,7 +1230,9 @@ const IssuedInvoiceDetail: React.FC = () => {
                                         e.target.value
                                       )
                                     }
-                                    placeholder="Descrizione"
+                                    placeholder={t(
+                                      'billing.issuedDetail.linesTab.descrPlaceholder'
+                                    )}
                                   />
                                 </td>
                                 <td>
@@ -1159,7 +1248,9 @@ const IssuedInvoiceDetail: React.FC = () => {
                                         e.target.value
                                       )
                                     }
-                                    placeholder="Codice"
+                                    placeholder={t(
+                                      'billing.issuedDetail.linesTab.codePlaceholder'
+                                    )}
                                   />
                                 </td>
                                 <td>
@@ -1247,7 +1338,11 @@ const IssuedInvoiceDetail: React.FC = () => {
                                         )
                                       }
                                     >
-                                      <option value="">Seleziona...</option>
+                                      <option value="">
+                                        {t(
+                                          'billing.issuedDetail.linesTab.selectNature'
+                                        )}
+                                      </option>
                                       {VAT_NATURES.map(n => (
                                         <option key={n.value} value={n.value}>
                                           {n.value}
@@ -1277,7 +1372,9 @@ const IssuedInvoiceDetail: React.FC = () => {
                                 <td colSpan={10} className="bg-light p-2">
                                   <div className="d-flex align-items-center gap-2 mb-2">
                                     <small className="text-muted fw-bold">
-                                      Altri Dati Gestionali
+                                      {t(
+                                        'billing.issuedDetail.linesTab.altriDati'
+                                      )}
                                     </small>
                                     <Button
                                       variant="outline-primary"
@@ -1288,7 +1385,9 @@ const IssuedInvoiceDetail: React.FC = () => {
                                         icon={faPlus}
                                         className="me-1"
                                       />
-                                      Aggiungi
+                                      {t(
+                                        'billing.issuedDetail.linesTab.altriDatiAdd'
+                                      )}
                                     </Button>
                                   </div>
                                   {(line.altriDatiGestionali || []).length >
@@ -1305,7 +1404,9 @@ const IssuedInvoiceDetail: React.FC = () => {
                                                 size="sm"
                                                 type="text"
                                                 maxLength={10}
-                                                placeholder="Tipo Dato*"
+                                                placeholder={t(
+                                                  'billing.issuedDetail.linesTab.altriDatiTipoPlaceholder'
+                                                )}
                                                 value={adg.tipoDato || ''}
                                                 onChange={e =>
                                                   handleAltriDatiChange(
@@ -1322,7 +1423,9 @@ const IssuedInvoiceDetail: React.FC = () => {
                                                 size="sm"
                                                 type="text"
                                                 maxLength={60}
-                                                placeholder="Rif. Testo"
+                                                placeholder={t(
+                                                  'billing.issuedDetail.linesTab.altriDatiRifTesto'
+                                                )}
                                                 value={
                                                   adg.riferimentoTesto || ''
                                                 }
@@ -1341,7 +1444,9 @@ const IssuedInvoiceDetail: React.FC = () => {
                                                 size="sm"
                                                 type="number"
                                                 step="0.01"
-                                                placeholder="Rif. Numero"
+                                                placeholder={t(
+                                                  'billing.issuedDetail.linesTab.altriDatiRifNumero'
+                                                )}
                                                 value={
                                                   adg.riferimentoNumero ?? ''
                                                 }
@@ -1412,7 +1517,7 @@ const IssuedInvoiceDetail: React.FC = () => {
                               onClick={handleAddLine}
                             >
                               <FontAwesomeIcon icon={faPlus} className="me-1" />
-                              Aggiungi Riga
+                              {t('billing.issuedDetail.linesTab.addLine')}
                             </Button>
                           </td>
                         </tr>
@@ -1426,19 +1531,19 @@ const IssuedInvoiceDetail: React.FC = () => {
                       <Table size="sm" className="border">
                         <tbody>
                           <tr>
-                            <td>Imponibile</td>
+                            <td>{t('billing.issuedDetail.totals.taxable')}</td>
                             <td className="text-end">
                               {formatCurrency(totals.taxable)}
                             </td>
                           </tr>
                           <tr>
-                            <td>IVA</td>
+                            <td>{t('billing.issuedDetail.totals.vat')}</td>
                             <td className="text-end">
                               {formatCurrency(totals.vat)}
                             </td>
                           </tr>
                           <tr className="fw-bold">
-                            <td>Totale</td>
+                            <td>{t('billing.issuedDetail.totals.total')}</td>
                             <td className="text-end">
                               {formatCurrency(totals.total)}
                             </td>
@@ -1457,7 +1562,9 @@ const IssuedInvoiceDetail: React.FC = () => {
                       <Form.Check
                         type="switch"
                         id="enableRitenuta"
-                        label="Ritenuta d'Acconto"
+                        label={t(
+                          'billing.issuedDetail.ritenute.ritenutaSwitch'
+                        )}
                         checked={enableRitenuta}
                         onChange={e => setEnableRitenuta(e.target.checked)}
                         className="mb-0"
@@ -1468,7 +1575,11 @@ const IssuedInvoiceDetail: React.FC = () => {
                         <Row>
                           <Col md={4}>
                             <Form.Group className="mb-3">
-                              <Form.Label>Tipo Ritenuta</Form.Label>
+                              <Form.Label>
+                                {t(
+                                  'billing.issuedDetail.ritenute.ritenutaTipo'
+                                )}
+                              </Form.Label>
                               <Form.Select
                                 value={datiRitenuta.tipoRitenuta}
                                 onChange={e =>
@@ -1488,7 +1599,11 @@ const IssuedInvoiceDetail: React.FC = () => {
                           </Col>
                           <Col md={3}>
                             <Form.Group className="mb-3">
-                              <Form.Label>Aliquota %</Form.Label>
+                              <Form.Label>
+                                {t(
+                                  'billing.issuedDetail.ritenute.ritenutaAliquota'
+                                )}
+                              </Form.Label>
                               <Form.Control
                                 type="number"
                                 min="0"
@@ -1507,7 +1622,11 @@ const IssuedInvoiceDetail: React.FC = () => {
                           </Col>
                           <Col md={3}>
                             <Form.Group className="mb-3">
-                              <Form.Label>Importo</Form.Label>
+                              <Form.Label>
+                                {t(
+                                  'billing.issuedDetail.ritenute.ritenutaImporto'
+                                )}
+                              </Form.Label>
                               <Form.Control
                                 type="number"
                                 min="0"
@@ -1525,7 +1644,11 @@ const IssuedInvoiceDetail: React.FC = () => {
                           </Col>
                           <Col md={2}>
                             <Form.Group className="mb-3">
-                              <Form.Label>Causale</Form.Label>
+                              <Form.Label>
+                                {t(
+                                  'billing.issuedDetail.ritenute.ritenutaCausale'
+                                )}
+                              </Form.Label>
                               <Form.Control
                                 type="text"
                                 value={datiRitenuta.causalePagamento || ''}
@@ -1537,7 +1660,9 @@ const IssuedInvoiceDetail: React.FC = () => {
                                   })
                                 }
                                 maxLength={2}
-                                placeholder="A"
+                                placeholder={t(
+                                  'billing.issuedDetail.ritenute.ritenutaCausalePlaceholder'
+                                )}
                               />
                             </Form.Group>
                           </Col>
@@ -1552,7 +1677,7 @@ const IssuedInvoiceDetail: React.FC = () => {
                       <Form.Check
                         type="switch"
                         id="enableBollo"
-                        label="Bollo Virtuale"
+                        label={t('billing.issuedDetail.ritenute.bolloSwitch')}
                         checked={enableBollo}
                         onChange={e => setEnableBollo(e.target.checked)}
                         className="mb-0"
@@ -1563,7 +1688,11 @@ const IssuedInvoiceDetail: React.FC = () => {
                         <Row>
                           <Col md={4}>
                             <Form.Group className="mb-3">
-                              <Form.Label>Importo Bollo</Form.Label>
+                              <Form.Label>
+                                {t(
+                                  'billing.issuedDetail.ritenute.bolloImporto'
+                                )}
+                              </Form.Label>
                               <Form.Control
                                 type="number"
                                 min="0"
@@ -1578,8 +1707,7 @@ const IssuedInvoiceDetail: React.FC = () => {
                                 }
                               />
                               <Form.Text className="text-muted">
-                                Solitamente €2.00 per fatture esenti IVA &gt;
-                                €77.47
+                                {t('billing.issuedDetail.ritenute.bolloHint')}
                               </Form.Text>
                             </Form.Group>
                           </Col>
@@ -1594,7 +1722,7 @@ const IssuedInvoiceDetail: React.FC = () => {
                       <Form.Check
                         type="switch"
                         id="enableCassa"
-                        label="Cassa Previdenziale"
+                        label={t('billing.issuedDetail.ritenute.cassaSwitch')}
                         checked={enableCassa}
                         onChange={e => setEnableCassa(e.target.checked)}
                         className="mb-0"
@@ -1605,7 +1733,9 @@ const IssuedInvoiceDetail: React.FC = () => {
                         <Row>
                           <Col md={4}>
                             <Form.Group className="mb-3">
-                              <Form.Label>Tipo Cassa</Form.Label>
+                              <Form.Label>
+                                {t('billing.issuedDetail.ritenute.cassaTipo')}
+                              </Form.Label>
                               <Form.Select
                                 value={datiCassa.tipoCassa}
                                 onChange={e =>
@@ -1625,7 +1755,11 @@ const IssuedInvoiceDetail: React.FC = () => {
                           </Col>
                           <Col md={2}>
                             <Form.Group className="mb-3">
-                              <Form.Label>Aliquota %</Form.Label>
+                              <Form.Label>
+                                {t(
+                                  'billing.issuedDetail.ritenute.cassaAliquota'
+                                )}
+                              </Form.Label>
                               <Form.Control
                                 type="number"
                                 min="0"
@@ -1643,7 +1777,11 @@ const IssuedInvoiceDetail: React.FC = () => {
                           </Col>
                           <Col md={3}>
                             <Form.Group className="mb-3">
-                              <Form.Label>Importo</Form.Label>
+                              <Form.Label>
+                                {t(
+                                  'billing.issuedDetail.ritenute.cassaImporto'
+                                )}
+                              </Form.Label>
                               <Form.Control
                                 type="number"
                                 min="0"
@@ -1661,7 +1799,11 @@ const IssuedInvoiceDetail: React.FC = () => {
                           </Col>
                           <Col md={3}>
                             <Form.Group className="mb-3">
-                              <Form.Label>Aliquota IVA %</Form.Label>
+                              <Form.Label>
+                                {t(
+                                  'billing.issuedDetail.ritenute.cassaAliquotaIva'
+                                )}
+                              </Form.Label>
                               <Form.Select
                                 value={datiCassa.aliquotaIVA}
                                 onChange={e =>
@@ -1690,12 +1832,16 @@ const IssuedInvoiceDetail: React.FC = () => {
                   {/* Company payment data auto-fill */}
                   <Card className="mb-3 border-info">
                     <Card.Header className="bg-body-tertiary">
-                      <strong>Precompila dati bancari</strong>
+                      <strong>
+                        {t('billing.issuedDetail.paymentTab.prefillTitle')}
+                      </strong>
                     </Card.Header>
                     <Card.Body>
                       <Form.Group>
                         <Form.Label>
-                          Seleziona azienda per precompilare
+                          {t(
+                            'billing.issuedDetail.paymentTab.prefillSelectLabel'
+                          )}
                         </Form.Label>
                         <Form.Select
                           value={selectedPaymentCompanyId}
@@ -1704,7 +1850,9 @@ const IssuedInvoiceDetail: React.FC = () => {
                           }
                         >
                           <option value="">
-                            -- Seleziona per precompilare i dati --
+                            {t(
+                              'billing.issuedDetail.paymentTab.prefillPlaceholder'
+                            )}
                           </option>
                           {companiesData?.companies
                             ?.filter(c => c.isActive)
@@ -1712,14 +1860,18 @@ const IssuedInvoiceDetail: React.FC = () => {
                               <option key={company.id} value={company.id}>
                                 {company.denomination}
                                 {company.iban
-                                  ? ` - ${company.iban.slice(0, 4)}...${company.iban.slice(-4)}`
-                                  : ' (Dati bancari non configurati)'}
+                                  ? ` - ${company.iban.slice(
+                                      0,
+                                      4
+                                    )}...${company.iban.slice(-4)}`
+                                  : ` ${t(
+                                      'billing.issuedDetail.paymentTab.prefillNoBank'
+                                    )}`}
                               </option>
                             ))}
                         </Form.Select>
                         <Form.Text className="text-muted">
-                          I campi sottostanti verranno compilati
-                          automaticamente.
+                          {t('billing.issuedDetail.paymentTab.prefillHelp')}
                         </Form.Text>
                       </Form.Group>
                     </Card.Body>
@@ -1728,7 +1880,9 @@ const IssuedInvoiceDetail: React.FC = () => {
                   <Row>
                     <Col md={6}>
                       <Form.Group className="mb-3">
-                        <Form.Label>Condizione di Pagamento</Form.Label>
+                        <Form.Label>
+                          {t('billing.issuedDetail.paymentTab.conditionLabel')}
+                        </Form.Label>
                         <Form.Select
                           value={paymentCondition}
                           onChange={e =>
@@ -1747,7 +1901,9 @@ const IssuedInvoiceDetail: React.FC = () => {
                     </Col>
                     <Col md={6}>
                       <Form.Group className="mb-3">
-                        <Form.Label>Metodo di Pagamento</Form.Label>
+                        <Form.Label>
+                          {t('billing.issuedDetail.paymentTab.methodLabel')}
+                        </Form.Label>
                         <Form.Select
                           value={paymentMethod}
                           onChange={e =>
@@ -1767,23 +1923,33 @@ const IssuedInvoiceDetail: React.FC = () => {
                   <Row>
                     <Col md={6}>
                       <Form.Group className="mb-3">
-                        <Form.Label>Beneficiario</Form.Label>
+                        <Form.Label>
+                          {t(
+                            'billing.issuedDetail.paymentTab.beneficiarioLabel'
+                          )}
+                        </Form.Label>
                         <Form.Control
                           type="text"
                           value={paymentBeneficiario}
                           onChange={e => setPaymentBeneficiario(e.target.value)}
-                          placeholder="Nome del beneficiario"
+                          placeholder={t(
+                            'billing.issuedDetail.paymentTab.beneficiarioPlaceholder'
+                          )}
                         />
                       </Form.Group>
                     </Col>
                     <Col md={6}>
                       <Form.Group className="mb-3">
-                        <Form.Label>Istituto Finanziario</Form.Label>
+                        <Form.Label>
+                          {t('billing.issuedDetail.paymentTab.istitutoLabel')}
+                        </Form.Label>
                         <Form.Control
                           type="text"
                           value={paymentIstituto}
                           onChange={e => setPaymentIstituto(e.target.value)}
-                          placeholder="Nome della banca"
+                          placeholder={t(
+                            'billing.issuedDetail.paymentTab.istitutoPlaceholder'
+                          )}
                         />
                       </Form.Group>
                     </Col>
@@ -1792,28 +1958,36 @@ const IssuedInvoiceDetail: React.FC = () => {
                   <Row>
                     <Col md={6}>
                       <Form.Group className="mb-3">
-                        <Form.Label>IBAN</Form.Label>
+                        <Form.Label>
+                          {t('billing.issuedDetail.paymentTab.ibanLabel')}
+                        </Form.Label>
                         <Form.Control
                           type="text"
                           value={paymentIban}
                           onChange={e =>
                             setPaymentIban(e.target.value.toUpperCase())
                           }
-                          placeholder="es. IT60X0542811101000000123456"
+                          placeholder={t(
+                            'billing.issuedDetail.paymentTab.ibanPlaceholder'
+                          )}
                           maxLength={34}
                         />
                       </Form.Group>
                     </Col>
                     <Col md={6}>
                       <Form.Group className="mb-3">
-                        <Form.Label>BIC/SWIFT</Form.Label>
+                        <Form.Label>
+                          {t('billing.issuedDetail.paymentTab.bicLabel')}
+                        </Form.Label>
                         <Form.Control
                           type="text"
                           value={paymentBic}
                           onChange={e =>
                             setPaymentBic(e.target.value.toUpperCase())
                           }
-                          placeholder="es. BCITITMM"
+                          placeholder={t(
+                            'billing.issuedDetail.paymentTab.bicPlaceholder'
+                          )}
                           maxLength={11}
                         />
                       </Form.Group>
@@ -1823,31 +1997,41 @@ const IssuedInvoiceDetail: React.FC = () => {
                   <Row>
                     <Col md={3}>
                       <Form.Group className="mb-3">
-                        <Form.Label>ABI</Form.Label>
+                        <Form.Label>
+                          {t('billing.issuedDetail.paymentTab.abiLabel')}
+                        </Form.Label>
                         <Form.Control
                           type="text"
                           value={paymentAbi}
                           onChange={e => setPaymentAbi(e.target.value)}
-                          placeholder="es. 03069"
+                          placeholder={t(
+                            'billing.issuedDetail.paymentTab.abiPlaceholder'
+                          )}
                           maxLength={5}
                         />
                       </Form.Group>
                     </Col>
                     <Col md={3}>
                       <Form.Group className="mb-3">
-                        <Form.Label>CAB</Form.Label>
+                        <Form.Label>
+                          {t('billing.issuedDetail.paymentTab.cabLabel')}
+                        </Form.Label>
                         <Form.Control
                           type="text"
                           value={paymentCab}
                           onChange={e => setPaymentCab(e.target.value)}
-                          placeholder="es. 05000"
+                          placeholder={t(
+                            'billing.issuedDetail.paymentTab.cabPlaceholder'
+                          )}
                           maxLength={5}
                         />
                       </Form.Group>
                     </Col>
                     <Col md={6}>
                       <Form.Group className="mb-3">
-                        <Form.Label>Scadenza Pagamento</Form.Label>
+                        <Form.Label>
+                          {t('billing.issuedDetail.paymentTab.dueDateLabel')}
+                        </Form.Label>
                         <Form.Control
                           type="date"
                           value={paymentDueDate}
@@ -1861,26 +2045,36 @@ const IssuedInvoiceDetail: React.FC = () => {
                 {/* Options Tab */}
                 <Tab.Pane eventKey="options">
                   <Form.Group className="mb-3">
-                    <Form.Label>Note Interne</Form.Label>
+                    <Form.Label>
+                      {t('billing.issuedDetail.optionsTab.internalNotesLabel')}
+                    </Form.Label>
                     <Form.Control
                       as="textarea"
                       rows={3}
                       value={internalNotes}
                       onChange={e => setInternalNotes(e.target.value)}
-                      placeholder="Note visibili solo internamente (non inviate al SDI)"
+                      placeholder={t(
+                        'billing.issuedDetail.optionsTab.internalNotesPlaceholder'
+                      )}
                     />
                   </Form.Group>
 
                   <div className="text-muted">
                     <p>
-                      <strong>Firma Digitale:</strong>{' '}
-                      {invoice.signatureEnabled ? 'Abilitata' : 'Disabilitata'}
+                      <strong>
+                        {t('billing.issuedDetail.optionsTab.signatureLabel')}
+                      </strong>{' '}
+                      {invoice.signatureEnabled
+                        ? t('billing.issuedDetail.optionsTab.enabled')
+                        : t('billing.issuedDetail.optionsTab.disabled')}
                     </p>
                     <p>
-                      <strong>Conservazione Sostitutiva:</strong>{' '}
+                      <strong>
+                        {t('billing.issuedDetail.optionsTab.storageLabel')}
+                      </strong>{' '}
                       {invoice.legalStorageEnabled
-                        ? 'Abilitata'
-                        : 'Disabilitata'}
+                        ? t('billing.issuedDetail.optionsTab.enabled')
+                        : t('billing.issuedDetail.optionsTab.disabled')}
                     </p>
                   </div>
                 </Tab.Pane>
@@ -1892,14 +2086,24 @@ const IssuedInvoiceDetail: React.FC = () => {
               <Table bordered hover size="sm">
                 <thead className="bg-body-tertiary">
                   <tr>
-                    <th>#</th>
-                    <th>Descrizione</th>
-                    <th className="text-end">Qtà</th>
-                    <th>U.M.</th>
-                    <th className="text-end">Prezzo Unit.</th>
-                    <th className="text-end">IVA %</th>
-                    <th>Natura</th>
-                    <th className="text-end">Totale</th>
+                    <th>{t('billing.issuedDetail.linesView.colNumber')}</th>
+                    <th>
+                      {t('billing.issuedDetail.linesView.colDescription')}
+                    </th>
+                    <th className="text-end">
+                      {t('billing.issuedDetail.linesView.colQuantity')}
+                    </th>
+                    <th>{t('billing.issuedDetail.linesView.colUnit')}</th>
+                    <th className="text-end">
+                      {t('billing.issuedDetail.linesView.colUnitPrice')}
+                    </th>
+                    <th className="text-end">
+                      {t('billing.issuedDetail.linesView.colVat')}
+                    </th>
+                    <th>{t('billing.issuedDetail.linesView.colNature')}</th>
+                    <th className="text-end">
+                      {t('billing.issuedDetail.linesView.colTotal')}
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1927,7 +2131,7 @@ const IssuedInvoiceDetail: React.FC = () => {
                 <tfoot className="bg-body-tertiary">
                   <tr>
                     <td colSpan={7} className="text-end">
-                      Imponibile:
+                      {t('billing.issuedDetail.linesView.footerTaxable')}
                     </td>
                     <td className="text-end">
                       {formatCurrency(invoice.totalTaxableAmount)}
@@ -1935,7 +2139,7 @@ const IssuedInvoiceDetail: React.FC = () => {
                   </tr>
                   <tr>
                     <td colSpan={7} className="text-end">
-                      IVA:
+                      {t('billing.issuedDetail.linesView.footerVat')}
                     </td>
                     <td className="text-end">
                       {formatCurrency(invoice.totalVatAmount)}
@@ -1943,7 +2147,7 @@ const IssuedInvoiceDetail: React.FC = () => {
                   </tr>
                   <tr className="fw-bold">
                     <td colSpan={7} className="text-end">
-                      Totale:
+                      {t('billing.issuedDetail.linesView.footerTotal')}
                     </td>
                     <td className="text-end">
                       {formatCurrency(invoice.totalAmount)}
@@ -1962,32 +2166,45 @@ const IssuedInvoiceDetail: React.FC = () => {
           invoice.datiBollo ||
           invoice.datiCassaPrevidenziale?.length) && (
           <Card className="mb-3">
-            <OrkestraCardHeader title="Ritenute e Contributi" light={false} />
+            <OrkestraCardHeader
+              title={t('billing.issuedDetail.ritenuteView.title')}
+              light={false}
+            />
             <Card.Body>
               {/* Ritenuta d'Acconto */}
               {invoice.datiRitenuta && invoice.datiRitenuta.length > 0 && (
                 <div className="mb-3">
-                  <h6 className="text-primary mb-2">Ritenuta d'Acconto</h6>
+                  <h6 className="text-primary mb-2">
+                    {t('billing.issuedDetail.ritenuteView.ritenutaTitle')}
+                  </h6>
                   {invoice.datiRitenuta.map((ritenuta, idx) => (
                     <Row key={idx}>
                       <Col md={3}>
-                        <small className="text-muted">Tipo</small>
+                        <small className="text-muted">
+                          {t('billing.issuedDetail.ritenuteView.tipo')}
+                        </small>
                         <div>
                           {ritenuta.tipoRitenuta} -{' '}
                           {TIPO_RITENUTA_LABELS[ritenuta.tipoRitenuta]}
                         </div>
                       </Col>
                       <Col md={3}>
-                        <small className="text-muted">Aliquota</small>
+                        <small className="text-muted">
+                          {t('billing.issuedDetail.ritenuteView.aliquota')}
+                        </small>
                         <div>{ritenuta.aliquotaRitenuta}%</div>
                       </Col>
                       <Col md={3}>
-                        <small className="text-muted">Importo</small>
+                        <small className="text-muted">
+                          {t('billing.issuedDetail.ritenuteView.importo')}
+                        </small>
                         <div>{formatCurrency(ritenuta.importoRitenuta)}</div>
                       </Col>
                       {ritenuta.causalePagamento && (
                         <Col md={3}>
-                          <small className="text-muted">Causale</small>
+                          <small className="text-muted">
+                            {t('billing.issuedDetail.ritenuteView.causale')}
+                          </small>
                           <div>{ritenuta.causalePagamento}</div>
                         </Col>
                       )}
@@ -1999,10 +2216,14 @@ const IssuedInvoiceDetail: React.FC = () => {
               {/* Bollo Virtuale */}
               {invoice.datiBollo && (
                 <div className="mb-3">
-                  <h6 className="text-primary mb-2">Bollo Virtuale</h6>
+                  <h6 className="text-primary mb-2">
+                    {t('billing.issuedDetail.ritenuteView.bolloTitle')}
+                  </h6>
                   <Row>
                     <Col md={3}>
-                      <small className="text-muted">Importo</small>
+                      <small className="text-muted">
+                        {t('billing.issuedDetail.ritenuteView.importo')}
+                      </small>
                       <div>
                         {formatCurrency(invoice.datiBollo.importoBollo)}
                       </div>
@@ -2015,28 +2236,38 @@ const IssuedInvoiceDetail: React.FC = () => {
               {invoice.datiCassaPrevidenziale &&
                 invoice.datiCassaPrevidenziale.length > 0 && (
                   <div>
-                    <h6 className="text-primary mb-2">Cassa Previdenziale</h6>
+                    <h6 className="text-primary mb-2">
+                      {t('billing.issuedDetail.ritenuteView.cassaTitle')}
+                    </h6>
                     {invoice.datiCassaPrevidenziale.map((cassa, idx) => (
                       <Row key={idx}>
                         <Col md={3}>
-                          <small className="text-muted">Tipo</small>
+                          <small className="text-muted">
+                            {t('billing.issuedDetail.ritenuteView.tipo')}
+                          </small>
                           <div>
                             {cassa.tipoCassa} -{' '}
                             {TIPO_CASSA_LABELS[cassa.tipoCassa]}
                           </div>
                         </Col>
                         <Col md={2}>
-                          <small className="text-muted">Aliquota</small>
+                          <small className="text-muted">
+                            {t('billing.issuedDetail.ritenuteView.aliquota')}
+                          </small>
                           <div>{cassa.alCassa}%</div>
                         </Col>
                         <Col md={3}>
-                          <small className="text-muted">Importo</small>
+                          <small className="text-muted">
+                            {t('billing.issuedDetail.ritenuteView.importo')}
+                          </small>
                           <div>
                             {formatCurrency(cassa.importoContributoCassa)}
                           </div>
                         </Col>
                         <Col md={2}>
-                          <small className="text-muted">Aliquota IVA</small>
+                          <small className="text-muted">
+                            {t('billing.issuedDetail.ritenuteView.aliquotaIva')}
+                          </small>
                           <div>{cassa.aliquotaIVA}%</div>
                         </Col>
                       </Row>
@@ -2050,30 +2281,41 @@ const IssuedInvoiceDetail: React.FC = () => {
       {/* Payment Terms (Read-only) */}
       {!isEditMode && invoice.paymentTerms && (
         <Card className="mb-3">
-          <OrkestraCardHeader title="Termini di Pagamento" light={false} />
+          <OrkestraCardHeader
+            title={t('billing.issuedDetail.paymentView.title')}
+            light={false}
+          />
           <Card.Body>
             <Row>
               <Col md={3}>
-                <small className="text-muted">Condizione</small>
+                <small className="text-muted">
+                  {t('billing.issuedDetail.paymentView.condition')}
+                </small>
                 <div>
                   {PAYMENT_CONDITION_LABELS[invoice.paymentTerms.condition]}
                 </div>
               </Col>
               <Col md={3}>
-                <small className="text-muted">Metodo</small>
+                <small className="text-muted">
+                  {t('billing.issuedDetail.paymentView.method')}
+                </small>
                 <div>
                   {PAYMENT_METHOD_LABELS[invoice.paymentTerms.paymentMethod]}
                 </div>
               </Col>
               {invoice.paymentTerms.dueDate && (
                 <Col md={3}>
-                  <small className="text-muted">Scadenza</small>
+                  <small className="text-muted">
+                    {t('billing.issuedDetail.paymentView.dueDate')}
+                  </small>
                   <div>{formatItalianDate(invoice.paymentTerms.dueDate)}</div>
                 </Col>
               )}
               {invoice.paymentTerms.beneficiario && (
                 <Col md={3}>
-                  <small className="text-muted">Beneficiario</small>
+                  <small className="text-muted">
+                    {t('billing.issuedDetail.paymentView.beneficiario')}
+                  </small>
                   <div>{invoice.paymentTerms.beneficiario}</div>
                 </Col>
               )}
@@ -2084,31 +2326,41 @@ const IssuedInvoiceDetail: React.FC = () => {
               <Row className="mt-3">
                 {invoice.paymentTerms.istitutoFinanziario && (
                   <Col md={3}>
-                    <small className="text-muted">Istituto Finanziario</small>
+                    <small className="text-muted">
+                      {t('billing.issuedDetail.paymentView.istituto')}
+                    </small>
                     <div>{invoice.paymentTerms.istitutoFinanziario}</div>
                   </Col>
                 )}
                 {invoice.paymentTerms.iban && (
                   <Col md={4}>
-                    <small className="text-muted">IBAN</small>
+                    <small className="text-muted">
+                      {t('billing.issuedDetail.paymentView.iban')}
+                    </small>
                     <div>{invoice.paymentTerms.iban}</div>
                   </Col>
                 )}
                 {invoice.paymentTerms.bic && (
                   <Col md={2}>
-                    <small className="text-muted">BIC/SWIFT</small>
+                    <small className="text-muted">
+                      {t('billing.issuedDetail.paymentView.bic')}
+                    </small>
                     <div>{invoice.paymentTerms.bic}</div>
                   </Col>
                 )}
                 {invoice.paymentTerms.abi && (
                   <Col md={1}>
-                    <small className="text-muted">ABI</small>
+                    <small className="text-muted">
+                      {t('billing.issuedDetail.paymentView.abi')}
+                    </small>
                     <div>{invoice.paymentTerms.abi}</div>
                   </Col>
                 )}
                 {invoice.paymentTerms.cab && (
                   <Col md={1}>
-                    <small className="text-muted">CAB</small>
+                    <small className="text-muted">
+                      {t('billing.issuedDetail.paymentView.cab')}
+                    </small>
                     <div>{invoice.paymentTerms.cab}</div>
                   </Col>
                 )}
@@ -2128,7 +2380,7 @@ const IssuedInvoiceDetail: React.FC = () => {
                 onClick={handleCancelEdit}
                 disabled={isLoading}
               >
-                Annulla
+                {t('billing.issuedDetail.actions.cancel')}
               </Button>
               <div>
                 <Button
@@ -2137,7 +2389,9 @@ const IssuedInvoiceDetail: React.FC = () => {
                   disabled={isLoading}
                 >
                   <FontAwesomeIcon icon={faSave} className="me-1" />
-                  {isUpdating ? 'Salvataggio...' : 'Salva Modifiche'}
+                  {isUpdating
+                    ? t('billing.issuedDetail.actions.saving')
+                    : t('billing.issuedDetail.actions.save')}
                 </Button>
               </div>
             </>
@@ -2151,7 +2405,7 @@ const IssuedInvoiceDetail: React.FC = () => {
                     disabled={isLoading}
                   >
                     <FontAwesomeIcon icon={faTrash} className="me-1" />
-                    Elimina
+                    {t('billing.issuedDetail.actions.delete')}
                   </Button>
                 )}
               </div>
@@ -2163,7 +2417,9 @@ const IssuedInvoiceDetail: React.FC = () => {
                     disabled={isLoading}
                   >
                     <FontAwesomeIcon icon={faPaperPlane} className="me-1" />
-                    {isSending ? 'Invio...' : 'Invia al SDI'}
+                    {isSending
+                      ? t('billing.issuedDetail.actions.sending')
+                      : t('billing.issuedDetail.actions.sendSdi')}
                   </Button>
                 )}
               </div>

@@ -751,6 +751,196 @@
     "companies": {
       "title": "Issuing Companies",
       "newCompany": "New company"
+    },
+    "issuedDetail": {
+      "loading": "Loading…",
+      "loadError": "Error loading the invoice. Please try again later.",
+      "notFound": "Invoice not found.",
+      "header": {
+        "title": "Invoice {{number}}",
+        "subtitle": "{{type}} - {{status}}",
+        "subtitleWithSdi": "{{type}} - {{status}} ({{sdiStatus}})",
+        "backToList": "Back to list",
+        "preview": "Preview",
+        "viewXml": "View XML",
+        "downloadXml": "Download XML",
+        "downloadPdf": "Download PDF",
+        "creditNote": "Credit Note",
+        "edit": "Edit"
+      },
+      "summary": {
+        "title": "Invoice Summary",
+        "number": "Number",
+        "date": "Date",
+        "documentType": "Document Type",
+        "customer": "Customer",
+        "taxable": "Taxable",
+        "vat": "VAT",
+        "total": "Total",
+        "sdiId": "SDI ID",
+        "causale": "Description",
+        "notAvailable": "N/A"
+      },
+      "linesCard": {
+        "titleEdit": "Edit Invoice",
+        "titleView": "Line Details"
+      },
+      "tabs": {
+        "document": "Document",
+        "lines": "Lines ({{count}})",
+        "ritenute": "Withholdings & Contributions",
+        "payment": "Payment",
+        "options": "Options"
+      },
+      "documentTab": {
+        "documentTypeLabel": "Document Type",
+        "documentTypeHelp": "Document type cannot be changed",
+        "numberLabel": "Invoice Number",
+        "numberPlaceholder": "e.g. 2026/001",
+        "dateLabel": "Date",
+        "customerLabel": "Customer",
+        "customerHelp": "Customer cannot be changed",
+        "causaleLabel": "Description / Reason",
+        "causalePlaceholder": "e.g. IT consulting for January 2026",
+        "addCausale": "Add description line"
+      },
+      "linesTab": {
+        "colDescription": "Description *",
+        "colCode": "Code",
+        "colQuantity": "Qty *",
+        "colUnit": "U.M.",
+        "colUnitPrice": "Unit Price",
+        "colVat": "VAT %",
+        "colNature": "Nature",
+        "colTotal": "Total",
+        "descrPlaceholder": "Description",
+        "codePlaceholder": "Code",
+        "selectNature": "Select…",
+        "addLine": "Add Line",
+        "altriDati": "Other Management Data",
+        "altriDatiAdd": "Add",
+        "altriDatiTipoPlaceholder": "Data Type*",
+        "altriDatiRifTesto": "Text Ref.",
+        "altriDatiRifNumero": "Number Ref."
+      },
+      "totals": {
+        "taxable": "Taxable",
+        "vat": "VAT",
+        "total": "Total"
+      },
+      "ritenute": {
+        "ritenutaSwitch": "Withholding Tax",
+        "ritenutaTipo": "Withholding Type",
+        "ritenutaAliquota": "Rate %",
+        "ritenutaImporto": "Amount",
+        "ritenutaCausale": "Reason",
+        "ritenutaCausalePlaceholder": "A",
+        "bolloSwitch": "Virtual Stamp",
+        "bolloImporto": "Stamp Amount",
+        "bolloHint": "Usually €2.00 for VAT-exempt invoices > €77.47",
+        "cassaSwitch": "Social Security Fund",
+        "cassaTipo": "Fund Type",
+        "cassaAliquota": "Rate %",
+        "cassaImporto": "Amount",
+        "cassaAliquotaIva": "VAT Rate %"
+      },
+      "paymentTab": {
+        "prefillTitle": "Prefill bank details",
+        "prefillSelectLabel": "Select a company to prefill",
+        "prefillPlaceholder": "-- Select to prefill the fields --",
+        "prefillNoBank": "(Bank details not configured)",
+        "prefillHelp": "The fields below will be filled automatically.",
+        "conditionLabel": "Payment Condition",
+        "methodLabel": "Payment Method",
+        "beneficiarioLabel": "Beneficiary",
+        "beneficiarioPlaceholder": "Beneficiary name",
+        "istitutoLabel": "Financial Institution",
+        "istitutoPlaceholder": "Bank name",
+        "ibanLabel": "IBAN",
+        "ibanPlaceholder": "e.g. IT60X0542811101000000123456",
+        "bicLabel": "BIC/SWIFT",
+        "bicPlaceholder": "e.g. BCITITMM",
+        "abiLabel": "ABI",
+        "abiPlaceholder": "e.g. 03069",
+        "cabLabel": "CAB",
+        "cabPlaceholder": "e.g. 05000",
+        "dueDateLabel": "Due Date"
+      },
+      "optionsTab": {
+        "internalNotesLabel": "Internal Notes",
+        "internalNotesPlaceholder": "Notes visible only internally (not sent to SDI)",
+        "signatureLabel": "Digital Signature:",
+        "storageLabel": "Legal Storage:",
+        "enabled": "Enabled",
+        "disabled": "Disabled"
+      },
+      "linesView": {
+        "colNumber": "#",
+        "colDescription": "Description",
+        "colQuantity": "Qty",
+        "colUnit": "U.M.",
+        "colUnitPrice": "Unit Price",
+        "colVat": "VAT %",
+        "colNature": "Nature",
+        "colTotal": "Total",
+        "footerTaxable": "Taxable:",
+        "footerVat": "VAT:",
+        "footerTotal": "Total:"
+      },
+      "ritenuteView": {
+        "title": "Withholdings & Contributions",
+        "ritenutaTitle": "Withholding Tax",
+        "bolloTitle": "Virtual Stamp",
+        "cassaTitle": "Social Security Fund",
+        "tipo": "Type",
+        "aliquota": "Rate",
+        "importo": "Amount",
+        "causale": "Reason",
+        "aliquotaIva": "VAT Rate"
+      },
+      "paymentView": {
+        "title": "Payment Terms",
+        "condition": "Condition",
+        "method": "Method",
+        "dueDate": "Due Date",
+        "beneficiario": "Beneficiary",
+        "istituto": "Financial Institution",
+        "iban": "IBAN",
+        "bic": "BIC/SWIFT",
+        "abi": "ABI",
+        "cab": "CAB"
+      },
+      "actions": {
+        "cancel": "Cancel",
+        "save": "Save Changes",
+        "saving": "Saving…",
+        "delete": "Delete",
+        "sendSdi": "Send to SDI",
+        "sending": "Sending…"
+      },
+      "validation": {
+        "numberRequired": "Invoice number is required",
+        "atLeastOneLine": "Add at least one line",
+        "lineDescription": "Line {{index}}: description is required",
+        "lineQuantity": "Line {{index}}: quantity must be greater than zero",
+        "lineNature": "Line {{index}}: select VAT nature for 0% rate"
+      },
+      "confirm": {
+        "sendSdi": "Are you sure you want to send this invoice to SDI? Once sent it cannot be modified.",
+        "delete": "Are you sure you want to delete this invoice? This action cannot be undone."
+      },
+      "toasts": {
+        "saveSuccess": "Invoice updated successfully",
+        "saveError": "Error while saving the invoice",
+        "sendSuccess": "Invoice sent to SDI successfully",
+        "sendError": "Error while sending the invoice to SDI",
+        "deleteSuccess": "Invoice deleted successfully",
+        "deleteError": "Error while deleting the invoice",
+        "xmlLoadError": "Error loading the XML file",
+        "xmlDownloadError": "Error downloading the XML file",
+        "htmlPreviewError": "Error loading the preview",
+        "pdfDownloadError": "Error downloading the PDF"
+      }
     }
   },
   "company": {

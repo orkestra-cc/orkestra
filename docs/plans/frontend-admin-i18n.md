@@ -27,7 +27,7 @@
 **Still deferred (truly deep-form internals)** — these all live inside larger pages whose chrome is now extracted; the remaining work is the deep CRUD/configuration form bodies, which benefit from focused per-form review:
 
 - Item 7 `/admin/auth-policy` tab bodies (inside the auth module detail config form — `ModuleConfigSection` / `ModuleConfigFields`)
-- Item 10 Billing detail forms: `IssuedInvoiceDetail` (2178 lines), `NewIssuedInvoice` (1910), `ReceivedInvoiceDetail` (559), `ImportXMLModal` (384), `SupplierModal` (563), `CompanyModal` (918), `BillingStatCards`, `InvoiceTrendChart`, `RecentInvoices`, `PendingActions`, `SDINotificationsSummary` — SDI/FatturaPA-specific field labels
+- Item 10 Billing detail forms: ~~`IssuedInvoiceDetail` (2178 lines)~~ ✅ extracted (`billing.issuedDetail.*` ~180 keys), `NewIssuedInvoice` (1910), `ReceivedInvoiceDetail` (559), `ImportXMLModal` (384), `SupplierModal` (563), `CompanyModal` (918), `BillingStatCards`, `InvoiceTrendChart`, `RecentInvoices`, `PendingActions`, `SDINotificationsSummary` — SDI/FatturaPA-specific field labels. The shared FatturaPA label constants in `types/billing.ts` (PAYMENT_METHOD_LABELS, TIPO_RITENUTA_LABELS, etc.) remain Italian in both locales for now — they're SDI standard terminology and a cross-cutting glossary translation deserves its own focused PR.
 - Item 11 Documents (`/documents/templates`) — template editor body
 - Item 13 Subscriptions modal forms (pricing tier editor) and payments transaction refund modal
 - Item 14 Compliance SOC2 deep card content (~120 evidence rows), Identity `IdPConfigForm` + `ScimTokenSection`, Marketing import wizard steps, Sales settings prompt template editor, AI/Graph addon page bodies
