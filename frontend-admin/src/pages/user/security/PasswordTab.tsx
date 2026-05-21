@@ -1,5 +1,6 @@
 import { useState, FormEvent } from 'react';
 import { Alert, Button, Card, Form, Spinner } from 'react-bootstrap';
+import { useTranslation } from 'react-i18next';
 import {
   useChangePasswordMutation,
   useGetAuthPolicyQuery
@@ -13,6 +14,7 @@ import { useGetSelfAuthMethodsQuery } from 'store/api/authApi';
 // (min/max length, complexity, HIBP) — we display the minimum length
 // up-front so the user knows what they're targeting.
 const PasswordTab = () => {
+  const { t } = useTranslation();
   const { data: policy } = useGetAuthPolicyQuery();
   const { data: authMethods } = useGetSelfAuthMethodsQuery();
   const [changePassword, { isLoading }] = useChangePasswordMutation();
@@ -31,11 +33,13 @@ const PasswordTab = () => {
     setError(null);
     setSuccess(null);
     if (newPassword !== confirmPassword) {
-      setError('New password and confirmation do not match.');
+      setError(t('userSecurity.passwordTab.errorMismatch'));
       return;
     }
     if (newPassword.length < minLength) {
-      setError(`New password must be at least ${minLength} characters.`);
+      setError(
+        t('userSecurity.passwordTab.errorTooShort', { count: minLength })
+      );
       return;
     }
     try {
@@ -43,14 +47,18 @@ const PasswordTab = () => {
         currentPassword: oldPassword,
         newPassword
       }).unwrap();
-      setSuccess('Password updated. Other sessions have been signed out.');
+      setSuccess(t('userSecurity.passwordTab.successToast'));
       setOldPassword('');
       setNewPassword('');
       setConfirmPassword('');
     } catch (err: unknown) {
       const data = (err as { data?: { detail?: string; title?: string } })
         ?.data;
-      setError(data?.detail || data?.title || 'Failed to update password.');
+      setError(
+        data?.detail ||
+          data?.title ||
+          t('userSecurity.passwordTab.errorGeneric')
+      );
     }
   };
 
@@ -58,14 +66,13 @@ const PasswordTab = () => {
     <Card className="shadow-none border">
       <Card.Header>
         <Card.Title as="h5" className="mb-0">
-          Change password
+          {t('userSecurity.passwordTab.title')}
         </Card.Title>
       </Card.Header>
       <Card.Body>
         {!hasPassword && (
           <Alert variant="info" className="fs-10">
-            Your account uses a single sign-on provider only. Set a password
-            here to add a second login method.
+            {t('userSecurity.passwordTab.ssoOnlyHint')}
           </Alert>
         )}
         {success && (
@@ -80,7 +87,9 @@ const PasswordTab = () => {
         )}
         <Form onSubmit={handleSubmit} noValidate>
           <Form.Group className="mb-3" controlId="self-old-password">
-            <Form.Label>Current password</Form.Label>
+            <Form.Label>
+              {t('userSecurity.passwordTab.labelCurrent')}
+            </Form.Label>
             <Form.Control
               type="password"
               autoComplete="current-password"
@@ -91,7 +100,7 @@ const PasswordTab = () => {
             />
           </Form.Group>
           <Form.Group className="mb-3" controlId="self-new-password">
-            <Form.Label>New password</Form.Label>
+            <Form.Label>{t('userSecurity.passwordTab.labelNew')}</Form.Label>
             <Form.Control
               type="password"
               autoComplete="new-password"
@@ -102,12 +111,15 @@ const PasswordTab = () => {
               minLength={minLength}
             />
             <Form.Text className="text-muted">
-              At least {minLength} characters. Avoid passwords that have
-              appeared in known breaches.
+              {t('userSecurity.passwordTab.minLengthHelp', {
+                count: minLength
+              })}
             </Form.Text>
           </Form.Group>
           <Form.Group className="mb-4" controlId="self-confirm-password">
-            <Form.Label>Confirm new password</Form.Label>
+            <Form.Label>
+              {t('userSecurity.passwordTab.labelConfirm')}
+            </Form.Label>
             <Form.Control
               type="password"
               autoComplete="new-password"
@@ -122,10 +134,10 @@ const PasswordTab = () => {
             {isLoading ? (
               <>
                 <Spinner animation="border" size="sm" className="me-2" />
-                Updating…
+                {t('userSecurity.passwordTab.submitting')}
               </>
             ) : (
-              'Update password'
+              t('userSecurity.passwordTab.submit')
             )}
           </Button>
         </Form>

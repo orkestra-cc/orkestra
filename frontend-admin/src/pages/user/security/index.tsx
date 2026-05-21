@@ -1,6 +1,7 @@
 import { Suspense, lazy } from 'react';
 import { useSearchParams } from 'react-router';
 import { Card, Nav, Spinner, Tab } from 'react-bootstrap';
+import { useTranslation } from 'react-i18next';
 
 const PasswordTab = lazy(() => import('./PasswordTab'));
 const MfaTab = lazy(() => import('./MfaTab'));
@@ -30,6 +31,7 @@ function readTab(param: string | null): TabKey {
 }
 
 const SecurityPage = () => {
+  const { t } = useTranslation();
   const [searchParams, setSearchParams] = useSearchParams();
   const tab = readTab(searchParams.get('tab'));
 
@@ -44,9 +46,9 @@ const SecurityPage = () => {
   return (
     <>
       <div className="mb-3">
-        <h3 className="fw-normal mb-1">Account security</h3>
+        <h3 className="fw-normal mb-1">{t('userSecurity.pageTitle')}</h3>
         <p className="fs-10 text-muted mb-0">
-          Manage your password, second factors, and active sessions.
+          {t('userSecurity.pageSubtitle')}
         </p>
       </div>
 
@@ -55,22 +57,32 @@ const SecurityPage = () => {
           <Card.Header className="border-bottom border-200">
             <Nav variant="tabs" className="card-header-tabs fs-10">
               <Nav.Item>
-                <Nav.Link eventKey="password">Password</Nav.Link>
+                <Nav.Link eventKey="password">
+                  {t('userSecurity.tabs.password')}
+                </Nav.Link>
               </Nav.Item>
               <Nav.Item>
-                <Nav.Link eventKey="mfa">Two-factor</Nav.Link>
+                <Nav.Link eventKey="mfa">{t('userSecurity.tabs.mfa')}</Nav.Link>
               </Nav.Item>
               <Nav.Item>
-                <Nav.Link eventKey="oauth">Linked sign-ins</Nav.Link>
+                <Nav.Link eventKey="oauth">
+                  {t('userSecurity.tabs.oauth')}
+                </Nav.Link>
               </Nav.Item>
               <Nav.Item>
-                <Nav.Link eventKey="sessions">Sessions</Nav.Link>
+                <Nav.Link eventKey="sessions">
+                  {t('userSecurity.tabs.sessions')}
+                </Nav.Link>
               </Nav.Item>
               <Nav.Item>
-                <Nav.Link eventKey="devices">Trusted devices</Nav.Link>
+                <Nav.Link eventKey="devices">
+                  {t('userSecurity.tabs.devices')}
+                </Nav.Link>
               </Nav.Item>
               <Nav.Item>
-                <Nav.Link eventKey="backup-codes">Backup codes</Nav.Link>
+                <Nav.Link eventKey="backup-codes">
+                  {t('userSecurity.tabs.backupCodes')}
+                </Nav.Link>
               </Nav.Item>
             </Nav>
           </Card.Header>

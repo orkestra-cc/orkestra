@@ -3427,6 +3427,32 @@
       }
     }
   },
+  "userSecurity": {
+    "pageTitle": "Account security",
+    "pageSubtitle": "Manage your password, second factors, and active sessions.",
+    "tabs": {
+      "password": "Password",
+      "mfa": "Two-factor",
+      "oauth": "Linked sign-ins",
+      "sessions": "Sessions",
+      "devices": "Trusted devices",
+      "backupCodes": "Backup codes"
+    },
+    "passwordTab": {
+      "title": "Change password",
+      "ssoOnlyHint": "Your account uses a single sign-on provider only. Set a password here to add a second login method.",
+      "labelCurrent": "Current password",
+      "labelNew": "New password",
+      "labelConfirm": "Confirm new password",
+      "minLengthHelp": "At least {{count}} characters. Avoid passwords that have appeared in known breaches.",
+      "submit": "Update password",
+      "submitting": "Updating…",
+      "successToast": "Password updated. Other sessions have been signed out.",
+      "errorMismatch": "New password and confirmation do not match.",
+      "errorTooShort": "New password must be at least {{count}} characters.",
+      "errorGeneric": "Failed to update password."
+    }
+  },
   "profileShared": {
     "loadingAria": "Loading...",
     "errorLoad": "Error loading user data. Please try again later.",

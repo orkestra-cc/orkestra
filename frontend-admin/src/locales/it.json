@@ -3427,6 +3427,32 @@
       }
     }
   },
+  "userSecurity": {
+    "pageTitle": "Sicurezza account",
+    "pageSubtitle": "Gestisci password, secondi fattori e sessioni attive.",
+    "tabs": {
+      "password": "Password",
+      "mfa": "Due fattori",
+      "oauth": "Accessi collegati",
+      "sessions": "Sessioni",
+      "devices": "Dispositivi attendibili",
+      "backupCodes": "Codici di backup"
+    },
+    "passwordTab": {
+      "title": "Cambia password",
+      "ssoOnlyHint": "Il tuo account usa solo un provider SSO. Imposta una password qui per aggiungere un secondo metodo di login.",
+      "labelCurrent": "Password attuale",
+      "labelNew": "Nuova password",
+      "labelConfirm": "Conferma nuova password",
+      "minLengthHelp": "Almeno {{count}} caratteri. Evita password apparse in violazioni note.",
+      "submit": "Aggiorna password",
+      "submitting": "Aggiornamento…",
+      "successToast": "Password aggiornata. Le altre sessioni sono state chiuse.",
+      "errorMismatch": "La nuova password e la conferma non corrispondono.",
+      "errorTooShort": "La nuova password deve avere almeno {{count}} caratteri.",
+      "errorGeneric": "Aggiornamento della password non riuscito."
+    }
+  },
   "profileShared": {
     "loadingAria": "Caricamento…",
     "errorLoad": "Errore nel caricamento dei dati utente. Riprova più tardi.",
