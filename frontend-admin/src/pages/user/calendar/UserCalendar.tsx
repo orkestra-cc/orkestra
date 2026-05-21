@@ -1,13 +1,15 @@
 import { Card, Col, Row } from 'react-bootstrap';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { useTranslation } from 'react-i18next';
 import PageHeader from 'components/common/PageHeader';
 
 const UserCalendar = () => {
+  const { t } = useTranslation();
   return (
     <>
       <PageHeader
-        title="Calendar"
-        description="View and manage your schedule"
+        title={t('userScaffold.calendar.pageTitle')}
+        description={t('userScaffold.calendar.pageDescription')}
         className="mb-3"
       />
       <Row className="g-3">
@@ -19,10 +21,11 @@ const UserCalendar = () => {
                 className="text-400 mb-3"
                 style={{ fontSize: '3rem' }}
               />
-              <h4 className="text-700">Calendar Coming Soon</h4>
+              <h4 className="text-700">
+                {t('userScaffold.calendar.comingSoonTitle')}
+              </h4>
               <p className="text-500 mb-0">
-                Your personal calendar with schedules, events, and reminders
-                will be available here.
+                {t('userScaffold.calendar.comingSoonBody')}
               </p>
             </Card.Body>
           </Card>

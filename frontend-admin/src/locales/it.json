@@ -3427,6 +3427,36 @@
       }
     }
   },
+  "userScaffold": {
+    "dashboard": {
+      "pageTitle": "Dashboard",
+      "pageDescription": "La tua panoramica personale e il riepilogo attività",
+      "comingSoonTitle": "Dashboard in arrivo",
+      "comingSoonBody": "La tua dashboard personale con riepiloghi attività e azioni rapide sarà disponibile qui."
+    },
+    "calendar": {
+      "pageTitle": "Calendario",
+      "pageDescription": "Visualizza e gestisci la tua agenda",
+      "comingSoonTitle": "Calendario in arrivo",
+      "comingSoonBody": "Il tuo calendario personale con agenda, eventi e promemoria sarà disponibile qui."
+    },
+    "profileSettings": {
+      "cardTitle": "Impostazioni profilo",
+      "labelFirstName": "Nome",
+      "placeholderFirstName": "Nome",
+      "labelLastName": "Cognome",
+      "placeholderLastName": "Cognome",
+      "labelEmail": "Email",
+      "placeholderEmail": "Email",
+      "labelPhone": "Telefono",
+      "placeholderPhone": "Telefono",
+      "labelHeading": "Titolo",
+      "placeholderHeading": "Titolo",
+      "labelIntro": "Introduzione",
+      "placeholderIntro": "Introduzione",
+      "submit": "Aggiorna"
+    }
+  },
   "userPrivacy": {
     "intro": {
       "title": "Privacy e tuoi dati",

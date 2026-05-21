@@ -3427,6 +3427,36 @@
       }
     }
   },
+  "userScaffold": {
+    "dashboard": {
+      "pageTitle": "Dashboard",
+      "pageDescription": "Your personal overview and activity summary",
+      "comingSoonTitle": "Dashboard Coming Soon",
+      "comingSoonBody": "Your personal dashboard with activity summaries and quick actions will be available here."
+    },
+    "calendar": {
+      "pageTitle": "Calendar",
+      "pageDescription": "View and manage your schedule",
+      "comingSoonTitle": "Calendar Coming Soon",
+      "comingSoonBody": "Your personal calendar with schedules, events, and reminders will be available here."
+    },
+    "profileSettings": {
+      "cardTitle": "Profile Settings",
+      "labelFirstName": "First Name",
+      "placeholderFirstName": "First Name",
+      "labelLastName": "Last Name",
+      "placeholderLastName": "Last Name",
+      "labelEmail": "Email",
+      "placeholderEmail": "Email",
+      "labelPhone": "Phone",
+      "placeholderPhone": "Phone",
+      "labelHeading": "Heading",
+      "placeholderHeading": "Heading",
+      "labelIntro": "Intro",
+      "placeholderIntro": "Intro",
+      "submit": "Update"
+    }
+  },
   "userPrivacy": {
     "intro": {
       "title": "Privacy & your data",
