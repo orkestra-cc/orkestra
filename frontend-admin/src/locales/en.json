@@ -3516,6 +3516,40 @@
       "errorOne": "Failed to revoke trust.",
       "errorAll": "Failed to revoke trusts.",
       "dash": "—"
+    },
+    "linkedProvidersTab": {
+      "title": "Linked sign-in providers",
+      "linkButton": "Link a sign-in",
+      "linkButtonStarting": "Starting…",
+      "emptyNoLinked": "No sign-in providers linked.",
+      "emptyHasMore": "Use the “Link a sign-in” button above to add one.",
+      "emptyAllLinked": "All supported providers have been linked.",
+      "onlyCredentialWarning": "This is your only login method. Unlinking it would lock you out — set a password first.",
+      "colProvider": "Provider",
+      "colEmail": "Email",
+      "colLinked": "Linked",
+      "colActions": "Actions",
+      "primaryBadge": "primary",
+      "rowUnlink": "Unlink",
+      "bannerSuccessProvider": "{{provider}} sign-in linked.",
+      "bannerSuccessGeneric": "Sign-in provider linked.",
+      "bannerFailureGeneric": "Linking did not complete. Please try again.",
+      "linkFailures": {
+        "already_linked": "That account is already linked to another user.",
+        "duplicate_provider": "You already have a provider of this kind linked.",
+        "invalid_userinfo": "The provider returned incomplete profile data.",
+        "internal": "Something went wrong while linking. Try again."
+      },
+      "errorStartFlow": "Failed to start linking flow.",
+      "errorMfaRequiredLink": "Your role requires MFA. Enroll a second factor in Security settings before linking a new provider.",
+      "errorMfaRequiredUnlink": "Your role requires MFA. Enroll a second factor in Security settings before unlinking a provider.",
+      "errorLastCredential": "You have no other login method. Set a password before unlinking this provider.",
+      "errorUnlinkGeneric": "Failed to unlink provider.",
+      "modalTitle": "Unlink {{provider}}",
+      "modalBody": "Remove the {{provider}} sign-in method? You can re-link it later from the login screen.",
+      "modalCancel": "Cancel",
+      "modalSubmit": "Unlink",
+      "modalSubmitting": "Unlinking…"
     }
   },
   "profileShared": {

@@ -3516,6 +3516,40 @@
       "errorOne": "Revoca della fiducia non riuscita.",
       "errorAll": "Revoca delle fiducie non riuscita.",
       "dash": "—"
+    },
+    "linkedProvidersTab": {
+      "title": "Provider di accesso collegati",
+      "linkButton": "Collega un accesso",
+      "linkButtonStarting": "Avvio…",
+      "emptyNoLinked": "Nessun provider di accesso collegato.",
+      "emptyHasMore": "Usa il pulsante “Collega un accesso” sopra per aggiungerne uno.",
+      "emptyAllLinked": "Tutti i provider supportati sono già collegati.",
+      "onlyCredentialWarning": "Questo è il tuo unico metodo di login. Scollegarlo ti bloccherebbe fuori — imposta prima una password.",
+      "colProvider": "Provider",
+      "colEmail": "Email",
+      "colLinked": "Collegato",
+      "colActions": "Azioni",
+      "primaryBadge": "primario",
+      "rowUnlink": "Scollega",
+      "bannerSuccessProvider": "Accesso {{provider}} collegato.",
+      "bannerSuccessGeneric": "Provider di accesso collegato.",
+      "bannerFailureGeneric": "Il collegamento non è andato a buon fine. Riprova.",
+      "linkFailures": {
+        "already_linked": "Questo account è già collegato a un altro utente.",
+        "duplicate_provider": "Hai già un provider di questo tipo collegato.",
+        "invalid_userinfo": "Il provider ha restituito dati di profilo incompleti.",
+        "internal": "Qualcosa è andato storto durante il collegamento. Riprova."
+      },
+      "errorStartFlow": "Avvio del flusso di collegamento non riuscito.",
+      "errorMfaRequiredLink": "Il tuo ruolo richiede MFA. Configura un secondo fattore in Impostazioni di sicurezza prima di collegare un nuovo provider.",
+      "errorMfaRequiredUnlink": "Il tuo ruolo richiede MFA. Configura un secondo fattore in Impostazioni di sicurezza prima di scollegare un provider.",
+      "errorLastCredential": "Non hai altri metodi di login. Imposta una password prima di scollegare questo provider.",
+      "errorUnlinkGeneric": "Scollegamento del provider non riuscito.",
+      "modalTitle": "Scollega {{provider}}",
+      "modalBody": "Rimuovere il metodo di accesso {{provider}}? Potrai ricollegarlo più tardi dalla schermata di login.",
+      "modalCancel": "Annulla",
+      "modalSubmit": "Scollega",
+      "modalSubmitting": "Scollegamento…"
     }
   },
   "profileShared": {

@@ -11,6 +11,7 @@ import {
   Spinner,
   Table
 } from 'react-bootstrap';
+import { useTranslation } from 'react-i18next';
 import {
   useGetSelfAuthMethodsQuery,
   useInitiateOauthLinkSelfMutation,
@@ -19,6 +20,7 @@ import {
   type SelfAuthOAuthProvider
 } from 'store/api/authApi';
 
+// Provider brand names — proper nouns, intentionally not translated.
 const PROVIDER_LABELS: Record<OAuthProvider, string> = {
   google: 'Google',
   apple: 'Apple',
@@ -28,18 +30,24 @@ const PROVIDER_LABELS: Record<OAuthProvider, string> = {
 
 const ALL_PROVIDERS: OAuthProvider[] = ['google', 'apple', 'github', 'discord'];
 
-const LINK_FAILURE_MESSAGES: Record<string, string> = {
-  already_linked: 'That account is already linked to another user.',
-  duplicate_provider: 'You already have a provider of this kind linked.',
-  invalid_userinfo: 'The provider returned incomplete profile data.',
-  internal: 'Something went wrong while linking. Try again.'
-};
+const LINK_FAILURE_CODES = [
+  'already_linked',
+  'duplicate_provider',
+  'invalid_userinfo',
+  'internal'
+] as const;
+type LinkFailureCode = (typeof LINK_FAILURE_CODES)[number];
+
+function isKnownFailure(code: string | undefined): code is LinkFailureCode {
+  return !!code && (LINK_FAILURE_CODES as readonly string[]).includes(code);
+}
 
 // LinkedProvidersTab lists the OAuth identities the user has linked
 // and exposes a per-row Unlink action. The unlink endpoint is gated
 // server-side by RequireStepUp(5m); the global StepUpModal pauses
 // the request, drives the user through /mfa/verify, and replays.
 const LinkedProvidersTab = () => {
+  const { t } = useTranslation();
   const { data, isLoading, isFetching, refetch } = useGetSelfAuthMethodsQuery();
   const [unlink, { isLoading: unlinkPending }] = useUnlinkOauthSelfMutation();
   const [initiateLink, { isLoading: linkPending }] =
@@ -114,13 +122,13 @@ const LinkedProvidersTab = () => {
       if (e?.data?.code === 'step_up_required') return; // StepUpModal handles
       if (e?.data?.code === 'password_confirm_required') return; // PasswordConfirmModal handles
       if (e?.data?.code === 'mfa_enrollment_required') {
-        setError(
-          'Your role requires MFA. Enroll a second factor in Security settings before linking a new provider.'
-        );
+        setError(t('userSecurity.linkedProvidersTab.errorMfaRequiredLink'));
         return;
       }
       setError(
-        e?.data?.detail || e?.data?.title || 'Failed to start linking flow.'
+        e?.data?.detail ||
+          e?.data?.title ||
+          t('userSecurity.linkedProvidersTab.errorStartFlow')
       );
     }
   };
@@ -137,9 +145,7 @@ const LinkedProvidersTab = () => {
       };
       const code = e?.data?.code;
       if (code === 'last_credential') {
-        setError(
-          'You have no other login method. Set a password before unlinking this provider.'
-        );
+        setError(t('userSecurity.linkedProvidersTab.errorLastCredential'));
       } else if (
         code === 'step_up_required' ||
         code === 'password_confirm_required'
@@ -150,12 +156,12 @@ const LinkedProvidersTab = () => {
         setTarget(null);
       } else if (code === 'mfa_enrollment_required') {
         setTarget(null);
-        setError(
-          'Your role requires MFA. Enroll a second factor in Security settings before unlinking a provider.'
-        );
+        setError(t('userSecurity.linkedProvidersTab.errorMfaRequiredUnlink'));
       } else {
         setError(
-          e?.data?.detail || e?.data?.title || 'Failed to unlink provider.'
+          e?.data?.detail ||
+            e?.data?.title ||
+            t('userSecurity.linkedProvidersTab.errorUnlinkGeneric')
         );
       }
     }
@@ -166,7 +172,7 @@ const LinkedProvidersTab = () => {
       <Card className="shadow-none border">
         <Card.Header className="d-flex justify-content-between align-items-center flex-wrap gap-2">
           <Card.Title as="h5" className="mb-0">
-            Linked sign-in providers
+            {t('userSecurity.linkedProvidersTab.title')}
           </Card.Title>
           {availableProviders.length > 0 && (
             <Dropdown as={ButtonGroup}>
@@ -175,7 +181,9 @@ const LinkedProvidersTab = () => {
                 size="sm"
                 disabled={linkPending}
               >
-                {linkPending ? 'Starting…' : 'Link a sign-in'}
+                {linkPending
+                  ? t('userSecurity.linkedProvidersTab.linkButtonStarting')
+                  : t('userSecurity.linkedProvidersTab.linkButton')}
               </Dropdown.Toggle>
               <Dropdown.Menu align="end">
                 {availableProviders.map(p => (
@@ -196,8 +204,12 @@ const LinkedProvidersTab = () => {
               className="fs-10"
             >
               {linkBanner.provider
-                ? `${PROVIDER_LABELS[linkBanner.provider as OAuthProvider] ?? linkBanner.provider} sign-in linked.`
-                : 'Sign-in provider linked.'}
+                ? t('userSecurity.linkedProvidersTab.bannerSuccessProvider', {
+                    provider:
+                      PROVIDER_LABELS[linkBanner.provider as OAuthProvider] ??
+                      linkBanner.provider
+                  })
+                : t('userSecurity.linkedProvidersTab.bannerSuccessGeneric')}
             </Alert>
           )}
           {linkBanner?.kind === 'failed' && (
@@ -207,9 +219,11 @@ const LinkedProvidersTab = () => {
               onClose={() => setLinkBanner(null)}
               className="fs-10"
             >
-              {linkBanner.code && LINK_FAILURE_MESSAGES[linkBanner.code]
-                ? LINK_FAILURE_MESSAGES[linkBanner.code]
-                : 'Linking did not complete. Please try again.'}
+              {isKnownFailure(linkBanner.code)
+                ? t(
+                    `userSecurity.linkedProvidersTab.linkFailures.${linkBanner.code}`
+                  )
+                : t('userSecurity.linkedProvidersTab.bannerFailureGeneric')}
             </Alert>
           )}
           {error && (
@@ -219,26 +233,27 @@ const LinkedProvidersTab = () => {
           )}
           {providers.length === 0 ? (
             <p className="fs-10 text-muted mb-0">
-              No sign-in providers linked.{' '}
+              {t('userSecurity.linkedProvidersTab.emptyNoLinked')}{' '}
               {availableProviders.length > 0
-                ? 'Use the “Link a sign-in” button above to add one.'
-                : 'All supported providers have been linked.'}
+                ? t('userSecurity.linkedProvidersTab.emptyHasMore')
+                : t('userSecurity.linkedProvidersTab.emptyAllLinked')}
             </p>
           ) : (
             <>
               {onlyCredential && (
                 <Alert variant="warning" className="fs-10">
-                  This is your only login method. Unlinking it would lock you
-                  out — set a password first.
+                  {t('userSecurity.linkedProvidersTab.onlyCredentialWarning')}
                 </Alert>
               )}
               <Table responsive size="sm" className="mb-0 align-middle">
                 <thead>
                   <tr>
-                    <th>Provider</th>
-                    <th>Email</th>
-                    <th>Linked</th>
-                    <th className="text-end">Actions</th>
+                    <th>{t('userSecurity.linkedProvidersTab.colProvider')}</th>
+                    <th>{t('userSecurity.linkedProvidersTab.colEmail')}</th>
+                    <th>{t('userSecurity.linkedProvidersTab.colLinked')}</th>
+                    <th className="text-end">
+                      {t('userSecurity.linkedProvidersTab.colActions')}
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -248,7 +263,7 @@ const LinkedProvidersTab = () => {
                         {PROVIDER_LABELS[p.provider]}
                         {p.isPrimary && (
                           <Badge bg="primary" className="ms-2">
-                            primary
+                            {t('userSecurity.linkedProvidersTab.primaryBadge')}
                           </Badge>
                         )}
                       </td>
@@ -263,7 +278,7 @@ const LinkedProvidersTab = () => {
                           disabled={onlyCredential || isFetching}
                           onClick={() => setTarget(p)}
                         >
-                          Unlink
+                          {t('userSecurity.linkedProvidersTab.rowUnlink')}
                         </Button>
                       </td>
                     </tr>
@@ -278,7 +293,9 @@ const LinkedProvidersTab = () => {
       <Modal show={!!target} onHide={() => setTarget(null)} centered>
         <Modal.Header closeButton>
           <Modal.Title>
-            Unlink {target ? PROVIDER_LABELS[target.provider] : ''}
+            {t('userSecurity.linkedProvidersTab.modalTitle', {
+              provider: target ? PROVIDER_LABELS[target.provider] : ''
+            })}
           </Modal.Title>
         </Modal.Header>
         <Modal.Body>
@@ -288,20 +305,23 @@ const LinkedProvidersTab = () => {
             </Alert>
           )}
           <p className="mb-0">
-            Remove the {target ? PROVIDER_LABELS[target.provider] : ''} sign-in
-            method? You can re-link it later from the login screen.
+            {t('userSecurity.linkedProvidersTab.modalBody', {
+              provider: target ? PROVIDER_LABELS[target.provider] : ''
+            })}
           </p>
         </Modal.Body>
         <Modal.Footer>
           <Button variant="secondary" onClick={() => setTarget(null)}>
-            Cancel
+            {t('userSecurity.linkedProvidersTab.modalCancel')}
           </Button>
           <Button
             variant="danger"
             onClick={onConfirmUnlink}
             disabled={unlinkPending}
           >
-            {unlinkPending ? 'Unlinking…' : 'Unlink'}
+            {unlinkPending
+              ? t('userSecurity.linkedProvidersTab.modalSubmitting')
+              : t('userSecurity.linkedProvidersTab.modalSubmit')}
           </Button>
         </Modal.Footer>
       </Modal>
