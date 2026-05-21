@@ -213,6 +213,92 @@ func (m *MarketingModule) Collections() []module.CollectionSpec {
 				{Field: "status", Direction: 1},
 			}},
 		}},
+		// Phase 2 — Storicizzazione & scoring.
+		//
+		// marketing_activities: append-only event log. Indexes optimise
+		// for the timeline read (per-person + per-org chronological),
+		// the score-engine read (per-kind chronological), the dedup
+		// invariant, the per-ref analytics queries (campaign / event /
+		// card), and the per-source audit query.
+		{Name: models.ActivitiesCollection, Indexes: []module.IndexSpec{
+			{Keys: map[string]int{"uuid": 1}, Unique: true},
+			{OrderedKeys: []module.IndexKey{
+				{Field: "tenantId", Direction: 1},
+				{Field: "personUuid", Direction: 1},
+				{Field: "occurredAt", Direction: -1},
+			}},
+			{OrderedKeys: []module.IndexKey{
+				{Field: "tenantId", Direction: 1},
+				{Field: "orgUuid", Direction: 1},
+				{Field: "occurredAt", Direction: -1},
+			}, Sparse: true},
+			{OrderedKeys: []module.IndexKey{
+				{Field: "tenantId", Direction: 1},
+				{Field: "kind", Direction: 1},
+				{Field: "occurredAt", Direction: -1},
+			}},
+			// dedupKey is unique across the whole collection (the
+			// hash already incorporates personUuid). The Phase 2
+			// plan §2.2 calls this out as the idempotence gate.
+			{Keys: map[string]int{"dedupKey": 1}, Unique: true},
+			{OrderedKeys: []module.IndexKey{
+				{Field: "tenantId", Direction: 1},
+				{Field: "refs.campaignUuid", Direction: 1},
+			}, Sparse: true},
+			{OrderedKeys: []module.IndexKey{
+				{Field: "tenantId", Direction: 1},
+				{Field: "refs.eventUuid", Direction: 1},
+			}, Sparse: true},
+			{OrderedKeys: []module.IndexKey{
+				{Field: "tenantId", Direction: 1},
+				{Field: "refs.cardUuid", Direction: 1},
+			}, Sparse: true},
+			{OrderedKeys: []module.IndexKey{
+				{Field: "tenantId", Direction: 1},
+				{Field: "source", Direction: 1},
+				{Field: "recordedAt", Direction: -1},
+			}},
+		}},
+		// marketing_score_profiles: small collection (1-10 rows per
+		// tenant), reads dominated by the admin UI + the score
+		// engine's per-tick active-profile fetch.
+		{Name: models.ScoreProfilesCollection, Indexes: []module.IndexSpec{
+			{Keys: map[string]int{"uuid": 1}, Unique: true},
+			{OrderedKeys: []module.IndexKey{
+				{Field: "tenantId", Direction: 1},
+				{Field: "name", Direction: 1},
+			}, Unique: true},
+			{OrderedKeys: []module.IndexKey{
+				{Field: "tenantId", Direction: 1},
+				{Field: "active", Direction: 1},
+			}},
+		}},
+		// marketing_score_snapshots: cache rebuildable from the
+		// activity log. The (tenant, person, profile) unique index is
+		// the upsert key — concurrent eager + nightly recomputers
+		// converge deterministically on the same document.
+		{Name: models.ScoreSnapshotsCollection, Indexes: []module.IndexSpec{
+			{Keys: map[string]int{"uuid": 1}, Unique: true},
+			{OrderedKeys: []module.IndexKey{
+				{Field: "tenantId", Direction: 1},
+				{Field: "personUuid", Direction: 1},
+				{Field: "profileUuid", Direction: 1},
+			}, Unique: true},
+			{OrderedKeys: []module.IndexKey{
+				{Field: "tenantId", Direction: 1},
+				{Field: "profileUuid", Direction: 1},
+				{Field: "value", Direction: -1},
+			}},
+			{OrderedKeys: []module.IndexKey{
+				{Field: "tenantId", Direction: 1},
+				{Field: "profileUuid", Direction: 1},
+				{Field: "stale", Direction: 1},
+			}},
+			{OrderedKeys: []module.IndexKey{
+				{Field: "tenantId", Direction: 1},
+				{Field: "personUuid", Direction: 1},
+			}},
+		}},
 	}
 }
 
