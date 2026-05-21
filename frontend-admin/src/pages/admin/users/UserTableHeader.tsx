@@ -1,5 +1,6 @@
 import { Button, Col, Dropdown, Form, Row } from 'react-bootstrap';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { useTranslation } from 'react-i18next';
 import { useAdvanceTableContext } from 'providers/AdvanceTableProvider';
 import IconButton from 'components/common/IconButton';
 import AdvanceTableSearchBox from 'components/common/advance-table/AdvanceTableSearchBox';
@@ -13,20 +14,28 @@ import {
 import { User } from 'store/api/userApi';
 import CreateUserModal from './CreateUserModal';
 
+const ROLE_FILTER_VALUES = [
+  'super_admin',
+  'administrator',
+  'developer',
+  'manager',
+  'operator',
+  'guest'
+] as const;
+
 const UserTableHeader = () => {
+  const { t } = useTranslation();
   const { getSelectedRowModel, setColumnFilters, getFilteredRowModel } =
     useAdvanceTableContext();
   const [selectedRole, setSelectedRole] = useState<string>('All');
   const [showCreateModal, setShowCreateModal] = useState(false);
 
-  const roleFilters: { label: string; value: string }[] = [
-    { label: 'All', value: 'All' },
-    { label: 'Super Admin', value: 'super_admin' },
-    { label: 'Administrator', value: 'administrator' },
-    { label: 'Developer', value: 'developer' },
-    { label: 'Manager', value: 'manager' },
-    { label: 'Operator', value: 'operator' },
-    { label: 'Guest', value: 'guest' }
+  const roleFilters = [
+    { label: t('adminUsers.tableHeader.filterAll'), value: 'All' },
+    ...ROLE_FILTER_VALUES.map(value => ({
+      label: t(`adminUsers.roles.${value}`),
+      value
+    }))
   ];
 
   const handleRoleFilter = (value: string) => {
@@ -42,39 +51,44 @@ const UserTableHeader = () => {
     // Get filtered rows from the table
     const filteredRows = getFilteredRowModel().rows;
 
-    // Map role values to English labels
-    const roleLabels: Record<string, string> = {
-      super_admin: 'Super Admin',
-      administrator: 'Administrator',
-      developer: 'Developer',
-      manager: 'Manager',
-      operator: 'Operator',
-      guest: 'Guest'
-    };
+    // Map role values to localized labels
+    const roleLabels: Record<string, string> = Object.fromEntries(
+      ROLE_FILTER_VALUES.map(value => [value, t(`adminUsers.roles.${value}`)])
+    );
+
+    const headerFullName = t('adminUsers.tableHeader.csv.fullName');
+    const headerEmail = t('adminUsers.tableHeader.csv.email');
+    const headerUsername = t('adminUsers.tableHeader.csv.username');
+    const headerRole = t('adminUsers.tableHeader.csv.role');
+    const headerStatus = t('adminUsers.tableHeader.csv.status');
+    const headerLastLogin = t('adminUsers.tableHeader.csv.lastLogin');
+    const headerCreatedAt = t('adminUsers.tableHeader.csv.createdAt');
+    const statusActive = t('adminUsers.tableHeader.csv.active');
+    const statusInactive = t('adminUsers.tableHeader.csv.inactive');
 
     // Transform data for CSV export
     const csvData = filteredRows.map((row: any) => {
       const user = row.original as User;
       return {
-        'Full Name': user.fullName,
-        Email: user.email,
-        Username: user.username,
-        Role: roleLabels[user.role] || user.role,
-        Status: user.isActive ? 'Active' : 'Inactive',
-        'Last Login': formatDateForCSV(user.lastLogin),
-        'Created At': formatDateForCSV(user.createdAt)
+        [headerFullName]: user.fullName,
+        [headerEmail]: user.email,
+        [headerUsername]: user.username,
+        [headerRole]: roleLabels[user.role] || user.role,
+        [headerStatus]: user.isActive ? statusActive : statusInactive,
+        [headerLastLogin]: formatDateForCSV(user.lastLogin),
+        [headerCreatedAt]: formatDateForCSV(user.createdAt)
       };
     });
 
     // Define headers
     const headers = [
-      'Full Name',
-      'Email',
-      'Username',
-      'Role',
-      'Status',
-      'Last Login',
-      'Created At'
+      headerFullName,
+      headerEmail,
+      headerUsername,
+      headerRole,
+      headerStatus,
+      headerLastLogin,
+      headerCreatedAt
     ];
 
     // Generate CSV
@@ -89,12 +103,12 @@ const UserTableHeader = () => {
     <div className="d-lg-flex justify-content-between">
       <Row className="flex-between-center gy-2 px-x1">
         <Col xs="auto" className="pe-0">
-          <h6 className="mb-0">User Management</h6>
+          <h6 className="mb-0">{t('adminUsers.tableHeader.title')}</h6>
         </Col>
         <Col xs="auto">
           <AdvanceTableSearchBox
             className="input-search-width"
-            placeholder="Search by name/email"
+            placeholder={t('adminUsers.tableHeader.searchPlaceholder')}
           />
         </Col>
       </Row>
@@ -141,11 +155,22 @@ const UserTableHeader = () => {
         ></div>
         {getSelectedRowModel().rows.length > 0 ? (
           <div className="d-flex">
-            <Form.Select size="sm" aria-label="Bulk actions">
-              <option>Bulk actions</option>
-              <option value="activate">Activate</option>
-              <option value="deactivate">Deactivate</option>
-              <option value="delete">Delete</option>
+            <Form.Select
+              size="sm"
+              aria-label={t('adminUsers.tableHeader.bulkActionsPlaceholder')}
+            >
+              <option>
+                {t('adminUsers.tableHeader.bulkActionsPlaceholder')}
+              </option>
+              <option value="activate">
+                {t('adminUsers.tableHeader.bulkActivate')}
+              </option>
+              <option value="deactivate">
+                {t('adminUsers.tableHeader.bulkDeactivate')}
+              </option>
+              <option value="delete">
+                {t('adminUsers.tableHeader.bulkDelete')}
+              </option>
             </Form.Select>
             <Button
               type="button"
@@ -153,7 +178,7 @@ const UserTableHeader = () => {
               size="sm"
               className="ms-2"
             >
-              Apply
+              {t('adminUsers.tableHeader.bulkApply')}
             </Button>
           </div>
         ) : (
@@ -167,7 +192,7 @@ const UserTableHeader = () => {
               onClick={() => setShowCreateModal(true)}
             >
               <span className="d-none d-sm-inline-block d-xl-none d-xxl-inline-block ms-1">
-                New User
+                {t('adminUsers.tableHeader.newUser')}
               </span>
             </IconButton>
             <IconButton
@@ -180,7 +205,7 @@ const UserTableHeader = () => {
               onClick={handleExportCSV}
             >
               <span className="d-none d-sm-inline-block d-xl-none d-xxl-inline-block ms-1">
-                Export
+                {t('adminUsers.tableHeader.export')}
               </span>
             </IconButton>
             <Dropdown align="end" className="btn-reveal-trigger d-inline-block">
@@ -191,13 +216,17 @@ const UserTableHeader = () => {
               <Dropdown.Menu className="border py-0">
                 <div className="py-2">
                   <Dropdown.Item as="button" type="button">
-                    View All
+                    {t('adminUsers.tableHeader.viewAll')}
                   </Dropdown.Item>
-                  <Dropdown.Item>Export</Dropdown.Item>
-                  <Dropdown.Item>Import</Dropdown.Item>
+                  <Dropdown.Item>
+                    {t('adminUsers.tableHeader.export')}
+                  </Dropdown.Item>
+                  <Dropdown.Item>
+                    {t('adminUsers.tableHeader.import')}
+                  </Dropdown.Item>
                   <Dropdown.Divider />
                   <Dropdown.Item className="text-danger">
-                    Delete All
+                    {t('adminUsers.tableHeader.deleteAll')}
                   </Dropdown.Item>
                 </div>
               </Dropdown.Menu>
