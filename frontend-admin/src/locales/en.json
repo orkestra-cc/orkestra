@@ -3451,6 +3451,30 @@
       "errorMismatch": "New password and confirmation do not match.",
       "errorTooShort": "New password must be at least {{count}} characters.",
       "errorGeneric": "Failed to update password."
+    },
+    "backupCodesTab": {
+      "title": "Backup codes",
+      "noEnrollment": "Enroll an authenticator app first — backup codes are issued at enrollment and can only be regenerated for an enrolled factor.",
+      "freshHeading": "New backup codes",
+      "remainingOne": "You have <strong>{{count}}</strong> unused backup code. Each code works exactly once and is meant for emergency sign-in if you lose your authenticator.",
+      "remainingOther": "You have <strong>{{count}}</strong> unused backup codes. Each code works exactly once and is meant for emergency sign-in if you lose your authenticator.",
+      "regenerateButton": "Regenerate backup codes",
+      "modalTitle": "Regenerate backup codes",
+      "modalBody": "Your existing backup codes will stop working immediately. Make sure you save the new codes — they are shown exactly once.",
+      "modalCancel": "Cancel",
+      "modalSubmit": "Regenerate",
+      "modalSubmitting": "Regenerating…",
+      "errorGeneric": "Failed to regenerate backup codes."
+    },
+    "backupCodesDisplay": {
+      "savePrefix": "Save these backup codes now.",
+      "saveBody": "They are the only way to sign in if you lose access to your authenticator. Each code works once.",
+      "defaultHeading": "Backup codes",
+      "copy": "Copy codes",
+      "download": "Download",
+      "downloadFilename": "orkestra-backup-codes.txt",
+      "ackLabel": "I have saved these backup codes somewhere safe.",
+      "done": "Done"
     }
   },
   "profileShared": {

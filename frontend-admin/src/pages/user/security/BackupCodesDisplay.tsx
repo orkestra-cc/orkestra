@@ -1,5 +1,6 @@
 import { Alert, Button, Form } from 'react-bootstrap';
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
 interface Props {
   codes: string[];
@@ -10,8 +11,8 @@ interface Props {
   // backup-codes tab and doesn't need a Done button — pass false.
   ackRequired?: boolean;
   onDone?: () => void;
-  // Heading text — defaults to "Backup codes". Override when the
-  // surrounding context already establishes the heading.
+  // Heading text — defaults to the localized "Backup codes". Override
+  // when the surrounding context already establishes the heading.
   heading?: string;
 }
 
@@ -23,16 +24,19 @@ const BackupCodesDisplay = ({
   codes,
   ackRequired = false,
   onDone,
-  heading = 'Backup codes'
+  heading
 }: Props) => {
+  const { t } = useTranslation();
   const [ack, setAck] = useState(false);
+  const resolvedHeading =
+    heading ?? t('userSecurity.backupCodesDisplay.defaultHeading');
   return (
     <>
       <Alert variant="warning" className="mb-3">
-        <strong>Save these backup codes now.</strong> They are the only way to
-        sign in if you lose access to your authenticator. Each code works once.
+        <strong>{t('userSecurity.backupCodesDisplay.savePrefix')}</strong>{' '}
+        {t('userSecurity.backupCodesDisplay.saveBody')}
       </Alert>
-      {heading && <h6 className="mb-2">{heading}</h6>}
+      {resolvedHeading && <h6 className="mb-2">{resolvedHeading}</h6>}
       <div className="bg-body-tertiary p-3 rounded font-monospace mb-3">
         <div className="row g-2">
           {codes.map(c => (
@@ -50,7 +54,7 @@ const BackupCodesDisplay = ({
             navigator.clipboard.writeText(codes.join('\n'));
           }}
         >
-          Copy codes
+          {t('userSecurity.backupCodesDisplay.copy')}
         </Button>
         <Button
           variant="outline-secondary"
@@ -60,12 +64,12 @@ const BackupCodesDisplay = ({
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            a.download = 'orkestra-backup-codes.txt';
+            a.download = t('userSecurity.backupCodesDisplay.downloadFilename');
             a.click();
             URL.revokeObjectURL(url);
           }}
         >
-          Download
+          {t('userSecurity.backupCodesDisplay.download')}
         </Button>
       </div>
       {ackRequired && (
@@ -73,13 +77,13 @@ const BackupCodesDisplay = ({
           <Form.Check
             type="checkbox"
             id="backup-codes-ack"
-            label="I have saved these backup codes somewhere safe."
+            label={t('userSecurity.backupCodesDisplay.ackLabel')}
             checked={ack}
             onChange={e => setAck(e.target.checked)}
           />
           <div className="d-flex justify-content-end mt-3">
             <Button variant="primary" disabled={!ack} onClick={onDone}>
-              Done
+              {t('userSecurity.backupCodesDisplay.done')}
             </Button>
           </div>
         </>

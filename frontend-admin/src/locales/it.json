@@ -3451,6 +3451,30 @@
       "errorMismatch": "La nuova password e la conferma non corrispondono.",
       "errorTooShort": "La nuova password deve avere almeno {{count}} caratteri.",
       "errorGeneric": "Aggiornamento della password non riuscito."
+    },
+    "backupCodesTab": {
+      "title": "Codici di backup",
+      "noEnrollment": "Configura prima un'app autenticatore — i codici di backup vengono emessi all'iscrizione e si possono rigenerare solo per un fattore già configurato.",
+      "freshHeading": "Nuovi codici di backup",
+      "remainingOne": "Hai <strong>{{count}}</strong> codice di backup non usato. Ogni codice funziona una sola volta ed è pensato per l'accesso di emergenza se perdi l'autenticatore.",
+      "remainingOther": "Hai <strong>{{count}}</strong> codici di backup non usati. Ogni codice funziona una sola volta ed è pensato per l'accesso di emergenza se perdi l'autenticatore.",
+      "regenerateButton": "Rigenera codici di backup",
+      "modalTitle": "Rigenera codici di backup",
+      "modalBody": "I codici di backup esistenti smetteranno di funzionare immediatamente. Assicurati di salvare i nuovi codici — vengono mostrati una sola volta.",
+      "modalCancel": "Annulla",
+      "modalSubmit": "Rigenera",
+      "modalSubmitting": "Rigenerazione…",
+      "errorGeneric": "Rigenerazione dei codici di backup non riuscita."
+    },
+    "backupCodesDisplay": {
+      "savePrefix": "Salva subito questi codici di backup.",
+      "saveBody": "Sono l'unico modo per accedere se perdi l'autenticatore. Ogni codice funziona una sola volta.",
+      "defaultHeading": "Codici di backup",
+      "copy": "Copia codici",
+      "download": "Scarica",
+      "downloadFilename": "orkestra-codici-backup.txt",
+      "ackLabel": "Ho salvato questi codici di backup in un posto sicuro.",
+      "done": "Fatto"
     }
   },
   "profileShared": {
