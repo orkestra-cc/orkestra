@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Button, Col, Form, Row } from 'react-bootstrap';
+import { useTranslation } from 'react-i18next';
 import type { AuditOutcome, ListAuditEventsParams } from 'types/compliance';
 
 interface Props {
@@ -13,20 +14,23 @@ interface Props {
 
 // The action-family vocabulary we surface as a quick prefix filter. Matches
 // the families the backend currently emits (see
-// backend/internal/addons/compliance/models/audit_event.go).
-const ACTION_FAMILIES: { label: string; value: string }[] = [
-  { label: 'All families', value: '' },
-  { label: 'Authentication (auth.*)', value: 'auth.' },
-  { label: 'Tenant lifecycle (tenant.*)', value: 'tenant.' },
-  { label: 'Identity / IdP / SCIM (identity.*)', value: 'identity.' },
-  { label: 'Subscriptions (subscription.*)', value: 'subscription.' },
-  { label: 'Onboarding (onboarding.*)', value: 'onboarding.' },
-  { label: 'GDPR DSR (gdpr.*)', value: 'gdpr.' }
+// backend/internal/addons/compliance/models/audit_event.go). The labels are
+// resolved via i18n inside the component (see `actionFamilies` below) so the
+// dropdown re-renders when the language changes.
+const ACTION_FAMILY_VALUES: { key: string; value: string }[] = [
+  { key: 'all', value: '' },
+  { key: 'auth', value: 'auth.' },
+  { key: 'tenant', value: 'tenant.' },
+  { key: 'identity', value: 'identity.' },
+  { key: 'subscription', value: 'subscription.' },
+  { key: 'onboarding', value: 'onboarding.' },
+  { key: 'gdpr', value: 'gdpr.' }
 ];
 
 const OUTCOMES: AuditOutcome[] = ['success', 'failure', 'denied'];
 
 const AuditEventsFilters: React.FC<Props> = ({ value, onApply, onReset }) => {
+  const { t } = useTranslation();
   const [draft, setDraft] = useState<ListAuditEventsParams>(value);
 
   // Keep the draft in sync when the parent resets filters programmatically
@@ -48,11 +52,18 @@ const AuditEventsFilters: React.FC<Props> = ({ value, onApply, onReset }) => {
     onApply({ ...draft, offset: 0 });
   };
 
+  const actionFamilies = ACTION_FAMILY_VALUES.map(f => ({
+    value: f.value,
+    label: t(`audit.filters.families.${f.key}`)
+  }));
+
   return (
     <Form onSubmit={submit} className="fs-10">
       <Row className="g-2 align-items-end">
         <Col md={6} lg={3}>
-          <Form.Label className="mb-1">Action family</Form.Label>
+          <Form.Label className="mb-1">
+            {t('audit.filters.actionFamilyLabel')}
+          </Form.Label>
           <Form.Select
             size="sm"
             value={draft.actionPrefix ?? ''}
@@ -60,7 +71,7 @@ const AuditEventsFilters: React.FC<Props> = ({ value, onApply, onReset }) => {
               handleChange({ actionPrefix: e.target.value || undefined })
             }
           >
-            {ACTION_FAMILIES.map(f => (
+            {actionFamilies.map(f => (
               <option key={f.value} value={f.value}>
                 {f.label}
               </option>
@@ -68,11 +79,13 @@ const AuditEventsFilters: React.FC<Props> = ({ value, onApply, onReset }) => {
           </Form.Select>
         </Col>
         <Col md={6} lg={3}>
-          <Form.Label className="mb-1">Exact action</Form.Label>
+          <Form.Label className="mb-1">
+            {t('audit.filters.exactActionLabel')}
+          </Form.Label>
           <Form.Control
             size="sm"
             type="text"
-            placeholder="auth.login.succeeded"
+            placeholder={t('audit.filters.exactActionPlaceholder')}
             value={draft.action ?? ''}
             onChange={e =>
               handleChange({ action: e.target.value || undefined })
@@ -80,7 +93,9 @@ const AuditEventsFilters: React.FC<Props> = ({ value, onApply, onReset }) => {
           />
         </Col>
         <Col md={6} lg={2}>
-          <Form.Label className="mb-1">Outcome</Form.Label>
+          <Form.Label className="mb-1">
+            {t('audit.filters.outcomeLabel')}
+          </Form.Label>
           <Form.Select
             size="sm"
             value={draft.outcome ?? ''}
@@ -92,20 +107,22 @@ const AuditEventsFilters: React.FC<Props> = ({ value, onApply, onReset }) => {
               })
             }
           >
-            <option value="">Any outcome</option>
+            <option value="">{t('audit.filters.outcomeAny')}</option>
             {OUTCOMES.map(o => (
               <option key={o} value={o}>
-                {o}
+                {t(`audit.filters.outcomes.${o}`)}
               </option>
             ))}
           </Form.Select>
         </Col>
         <Col md={6} lg={2}>
-          <Form.Label className="mb-1">Tenant ID</Form.Label>
+          <Form.Label className="mb-1">
+            {t('audit.filters.tenantIdLabel')}
+          </Form.Label>
           <Form.Control
             size="sm"
             type="text"
-            placeholder="UUID"
+            placeholder={t('audit.filters.tenantIdPlaceholder')}
             value={draft.tenantId ?? ''}
             onChange={e =>
               handleChange({ tenantId: e.target.value || undefined })
@@ -113,11 +130,13 @@ const AuditEventsFilters: React.FC<Props> = ({ value, onApply, onReset }) => {
           />
         </Col>
         <Col md={6} lg={2}>
-          <Form.Label className="mb-1">Actor user ID</Form.Label>
+          <Form.Label className="mb-1">
+            {t('audit.filters.actorUserIdLabel')}
+          </Form.Label>
           <Form.Control
             size="sm"
             type="text"
-            placeholder="UUID"
+            placeholder={t('audit.filters.actorUserIdPlaceholder')}
             value={draft.actorUserId ?? ''}
             onChange={e =>
               handleChange({ actorUserId: e.target.value || undefined })
@@ -126,7 +145,9 @@ const AuditEventsFilters: React.FC<Props> = ({ value, onApply, onReset }) => {
         </Col>
 
         <Col md={6} lg={3}>
-          <Form.Label className="mb-1">Since</Form.Label>
+          <Form.Label className="mb-1">
+            {t('audit.filters.sinceLabel')}
+          </Form.Label>
           <Form.Control
             size="sm"
             type="datetime-local"
@@ -137,7 +158,9 @@ const AuditEventsFilters: React.FC<Props> = ({ value, onApply, onReset }) => {
           />
         </Col>
         <Col md={6} lg={3}>
-          <Form.Label className="mb-1">Until</Form.Label>
+          <Form.Label className="mb-1">
+            {t('audit.filters.untilLabel')}
+          </Form.Label>
           <Form.Control
             size="sm"
             type="datetime-local"
@@ -148,7 +171,9 @@ const AuditEventsFilters: React.FC<Props> = ({ value, onApply, onReset }) => {
           />
         </Col>
         <Col md={6} lg={2}>
-          <Form.Label className="mb-1">Page size</Form.Label>
+          <Form.Label className="mb-1">
+            {t('audit.filters.pageSizeLabel')}
+          </Form.Label>
           <Form.Select
             size="sm"
             value={draft.limit ?? 50}
@@ -168,7 +193,7 @@ const AuditEventsFilters: React.FC<Props> = ({ value, onApply, onReset }) => {
             size="sm"
             className="flex-grow-1"
           >
-            Apply filters
+            {t('audit.filters.apply')}
           </Button>
           <Button
             type="button"
@@ -179,7 +204,7 @@ const AuditEventsFilters: React.FC<Props> = ({ value, onApply, onReset }) => {
               onReset();
             }}
           >
-            Reset
+            {t('audit.filters.reset')}
           </Button>
         </Col>
       </Row>

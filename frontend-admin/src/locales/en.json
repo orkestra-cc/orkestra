@@ -533,6 +533,58 @@
       "metadata": "Metadata",
       "dash": "—",
       "close": "Close"
+    },
+    "filters": {
+      "actionFamilyLabel": "Action family",
+      "exactActionLabel": "Exact action",
+      "exactActionPlaceholder": "auth.login.succeeded",
+      "outcomeLabel": "Outcome",
+      "outcomeAny": "Any outcome",
+      "outcomes": {
+        "success": "success",
+        "failure": "failure",
+        "denied": "denied"
+      },
+      "tenantIdLabel": "Tenant ID",
+      "tenantIdPlaceholder": "UUID",
+      "actorUserIdLabel": "Actor user ID",
+      "actorUserIdPlaceholder": "UUID",
+      "sinceLabel": "Since",
+      "untilLabel": "Until",
+      "pageSizeLabel": "Page size",
+      "apply": "Apply filters",
+      "reset": "Reset",
+      "families": {
+        "all": "All families",
+        "auth": "Authentication (auth.*)",
+        "tenant": "Tenant lifecycle (tenant.*)",
+        "identity": "Identity / IdP / SCIM (identity.*)",
+        "subscription": "Subscriptions (subscription.*)",
+        "onboarding": "Onboarding (onboarding.*)",
+        "gdpr": "GDPR DSR (gdpr.*)"
+      }
+    },
+    "table": {
+      "errorLoadIntro": "Failed to load audit events. You need the <code>system.compliance.audit.read</code> permission to view this page.",
+      "colTimestamp": "Timestamp",
+      "colAction": "Action",
+      "colActor": "Actor",
+      "colResource": "Resource",
+      "colTenant": "Tenant",
+      "colOutcome": "Outcome",
+      "colMetadata": "Metadata",
+      "actors": {
+        "user": "user",
+        "system": "system",
+        "anonymous": "anonymous"
+      },
+      "outcomes": {
+        "success": "success",
+        "failure": "failure",
+        "denied": "denied"
+      },
+      "empty": "No audit events match the current filters.",
+      "dash": "—"
     }
   },
   "compliance": {

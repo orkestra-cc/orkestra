@@ -533,6 +533,58 @@
       "metadata": "Metadata",
       "dash": "—",
       "close": "Chiudi"
+    },
+    "filters": {
+      "actionFamilyLabel": "Famiglia di azioni",
+      "exactActionLabel": "Azione esatta",
+      "exactActionPlaceholder": "auth.login.succeeded",
+      "outcomeLabel": "Esito",
+      "outcomeAny": "Qualsiasi esito",
+      "outcomes": {
+        "success": "successo",
+        "failure": "fallito",
+        "denied": "negato"
+      },
+      "tenantIdLabel": "ID tenant",
+      "tenantIdPlaceholder": "UUID",
+      "actorUserIdLabel": "ID utente attore",
+      "actorUserIdPlaceholder": "UUID",
+      "sinceLabel": "Da",
+      "untilLabel": "A",
+      "pageSizeLabel": "Risultati per pagina",
+      "apply": "Applica filtri",
+      "reset": "Reimposta",
+      "families": {
+        "all": "Tutte le famiglie",
+        "auth": "Autenticazione (auth.*)",
+        "tenant": "Ciclo di vita tenant (tenant.*)",
+        "identity": "Identità / IdP / SCIM (identity.*)",
+        "subscription": "Sottoscrizioni (subscription.*)",
+        "onboarding": "Onboarding (onboarding.*)",
+        "gdpr": "GDPR DSR (gdpr.*)"
+      }
+    },
+    "table": {
+      "errorLoadIntro": "Caricamento degli eventi audit non riuscito. È richiesto il permesso <code>system.compliance.audit.read</code> per visualizzare questa pagina.",
+      "colTimestamp": "Timestamp",
+      "colAction": "Azione",
+      "colActor": "Attore",
+      "colResource": "Risorsa",
+      "colTenant": "Tenant",
+      "colOutcome": "Esito",
+      "colMetadata": "Metadata",
+      "actors": {
+        "user": "utente",
+        "system": "sistema",
+        "anonymous": "anonimo"
+      },
+      "outcomes": {
+        "success": "successo",
+        "failure": "fallito",
+        "denied": "negato"
+      },
+      "empty": "Nessun evento audit corrisponde ai filtri attuali.",
+      "dash": "—"
     }
   },
   "compliance": {
