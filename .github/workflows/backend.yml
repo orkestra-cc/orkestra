@@ -55,13 +55,13 @@ jobs:
           awk -v p="$PCT" -v t="$COVERAGE_THRESHOLD" 'BEGIN { exit !(p+0 >= t+0) }' \
             || { echo "::error::Coverage ${PCT}% is below ${COVERAGE_THRESHOLD}% threshold"; exit 1; }
       - name: Upload coverage
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: backend-coverage
           path: backend/coverage.out
       - name: Upload policy coverage report
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: policy-coverage-report
           path: |
