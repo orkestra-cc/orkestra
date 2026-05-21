@@ -3124,7 +3124,7 @@
       }
     }
   },
-  "operatorProfile": {
+  "profileShared": {
     "loadingAria": "Caricamento…",
     "errorLoad": "Errore nel caricamento dei dati utente. Riprova più tardi.",
     "userNotFound": "Utente non trovato.",
@@ -3335,6 +3335,31 @@
       "overrideInherits": "eredita globale",
       "noModules": "Nessun modulo registrato.",
       "revert": "Ripristina"
+    }
+  },
+  "adminUserProfile": {
+    "loadingMetricsAria": "Caricamento metriche…",
+    "metrics": {
+      "errorNoData": "Nessuna metrica utente",
+      "noMetricsAvailable": "Nessuna metrica disponibile per questo utente",
+      "performanceTitle": "Metriche di performance",
+      "systemUsageTitle": "Utilizzo sistema",
+      "quickStatsTitle": "Statistiche rapide",
+      "tasksCompleted": "Attività completate",
+      "onTimeDeliveries": "Consegne puntuali",
+      "performanceRating": "Valutazione performance",
+      "teamCollaboration": "Collaborazione team",
+      "ratingValue": "{{value}}/5",
+      "percent": "{{value}}%",
+      "featureDashboard": "Dashboard",
+      "featureReports": "Report",
+      "featureSettings": "Impostazioni",
+      "featureHelpDesk": "Help desk",
+      "statLogins": "Accessi",
+      "statOnlineTime": "Tempo online",
+      "statOnlineTimeHours": "{{hours}}h",
+      "statActiveTasks": "Attività attive",
+      "statOverdue": "In ritardo"
     }
   },
   "adminUsers": {

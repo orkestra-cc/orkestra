@@ -3,12 +3,14 @@ import { useGetUserByIdQuery } from 'store/api/userApi';
 import AdminBanner from './AdminBanner';
 import AdminProfileIntro from './AdminProfileIntro';
 import { Col, Row, Alert, Spinner } from 'react-bootstrap';
+import { useTranslation } from 'react-i18next';
 
 import AdminUserActions from './AdminUserActions';
 import AdminUserMetrics from './AdminUserMetrics';
 import AdminAuthMethodsCard from './AdminAuthMethodsCard';
 
 const AdminUserProfile: React.FC = () => {
+  const { t } = useTranslation();
   const { userId } = useParams<{ userId: string }>();
 
   const {
@@ -26,22 +28,20 @@ const AdminUserProfile: React.FC = () => {
         style={{ minHeight: '400px' }}
       >
         <Spinner animation="border" role="status">
-          <span className="visually-hidden">Loading...</span>
+          <span className="visually-hidden">
+            {t('profileShared.loadingAria')}
+          </span>
         </Spinner>
       </div>
     );
   }
 
   if (error) {
-    return (
-      <Alert variant="danger">
-        Error loading user data. Please try again later.
-      </Alert>
-    );
+    return <Alert variant="danger">{t('profileShared.errorLoad')}</Alert>;
   }
 
   if (!user) {
-    return <Alert variant="warning">User not found.</Alert>;
+    return <Alert variant="warning">{t('profileShared.userNotFound')}</Alert>;
   }
 
   return (

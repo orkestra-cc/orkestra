@@ -38,14 +38,14 @@ const OperatorProfileIntro: React.FC<OperatorProfileIntroProps> = ({
   return (
     <Card className="mb-3">
       <Card.Header className="bg-body-tertiary">
-        <h5 className="mb-0">{t('operatorProfile.intro.title')}</h5>
+        <h5 className="mb-0">{t('profileShared.intro.title')}</h5>
       </Card.Header>
 
       <Card.Body className="text-1000">
         {user.providers && user.providers.length > 0 && (
           <div className="mb-3">
             <small className="text-700 d-block mb-2">
-              {t('operatorProfile.intro.socialLoginLabel')}
+              {t('profileShared.intro.socialLoginLabel')}
             </small>
             <div>
               {user.providers.map((provider, index) => (
@@ -53,7 +53,7 @@ const OperatorProfileIntro: React.FC<OperatorProfileIntroProps> = ({
                   {provider.avatar ? (
                     <img
                       src={provider.avatar}
-                      alt={t('operatorProfile.intro.providerAvatarAlt', {
+                      alt={t('profileShared.intro.providerAvatarAlt', {
                         provider: provider.provider
                       })}
                       className="rounded-circle me-2"
@@ -108,35 +108,35 @@ const OperatorProfileIntro: React.FC<OperatorProfileIntroProps> = ({
             <Row className="mb-3">
               <Col md={6}>
                 <small className="text-700 d-block mb-1">
-                  {t('operatorProfile.intro.accountCreatedLabel')}
+                  {t('profileShared.intro.accountCreatedLabel')}
                 </small>
                 <p className="mb-2">{formatDateTime(user.createdAt)}</p>
               </Col>
               <Col md={6}>
                 <small className="text-700 d-block mb-1">
-                  {t('operatorProfile.intro.lastUpdatedLabel')}
+                  {t('profileShared.intro.lastUpdatedLabel')}
                 </small>
                 <p className="mb-2">{formatDateTime(user.updatedAt)}</p>
               </Col>
               <Col md={6}>
                 <small className="text-700 d-block mb-1">
-                  {t('operatorProfile.intro.lastLoginCardLabel')}
+                  {t('profileShared.intro.lastLoginCardLabel')}
                 </small>
                 <p className="mb-2">
                   {user.lastLogin
                     ? formatDateTime(user.lastLogin)
-                    : t('operatorProfile.intro.lastLoginNever')}
+                    : t('profileShared.intro.lastLoginNever')}
                 </p>
               </Col>
               <Col md={6}>
                 <small className="text-700 d-block mb-1">
-                  {t('operatorProfile.intro.emailVerificationLabel')}
+                  {t('profileShared.intro.emailVerificationLabel')}
                 </small>
                 <p className="mb-2">
                   <Badge bg={user.emailVerified ? 'success' : 'warning'}>
                     {user.emailVerified
-                      ? t('operatorProfile.intro.emailVerifiedBadge')
-                      : t('operatorProfile.intro.emailNotVerifiedBadge')}
+                      ? t('profileShared.intro.emailVerifiedBadge')
+                      : t('profileShared.intro.emailNotVerifiedBadge')}
                   </Badge>
                 </p>
               </Col>
@@ -144,19 +144,19 @@ const OperatorProfileIntro: React.FC<OperatorProfileIntroProps> = ({
 
             <div className="mb-3">
               <small className="text-700 d-block mb-1">
-                {t('operatorProfile.intro.systemNotesLabel')}
+                {t('profileShared.intro.systemNotesLabel')}
               </small>
               <p className="text-600 fst-italic">
-                {t('operatorProfile.intro.systemNotesAccountCreated', {
+                {t('profileShared.intro.systemNotesAccountCreated', {
                   role: user.role,
                   date: formatDate(user.createdAt)
                 })}
                 {user.emailVerified
-                  ? t('operatorProfile.intro.systemNotesEmailVerified')
-                  : t('operatorProfile.intro.systemNotesEmailNotVerified')}
+                  ? t('profileShared.intro.systemNotesEmailVerified')
+                  : t('profileShared.intro.systemNotesEmailNotVerified')}
                 {user.isActive
-                  ? t('operatorProfile.intro.systemNotesActive')
-                  : t('operatorProfile.intro.systemNotesDisabled')}
+                  ? t('profileShared.intro.systemNotesActive')
+                  : t('profileShared.intro.systemNotesDisabled')}
               </p>
             </div>
           </div>
@@ -166,8 +166,8 @@ const OperatorProfileIntro: React.FC<OperatorProfileIntroProps> = ({
       <Card.Footer className="bg-body-tertiary p-0 border-top d-grid">
         <Button variant="link" onClick={() => setCollapsed(!collapsed)}>
           {collapsed
-            ? t('operatorProfile.intro.showLess')
-            : t('operatorProfile.intro.showMore')}
+            ? t('profileShared.intro.showLess')
+            : t('profileShared.intro.showMore')}
           <FontAwesomeIcon
             icon="chevron-down"
             className="ms-2 fs-11"

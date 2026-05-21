@@ -1,4 +1,5 @@
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { useTranslation } from 'react-i18next';
 import coverSrc from 'assets/img/generic/bg-1.jpg';
 import defaultAvatar from 'assets/img/team/2.jpg';
 import Flex from 'components/common/Flex';
@@ -13,6 +14,8 @@ interface AdminBannerProps {
 }
 
 const AdminBanner: React.FC<AdminBannerProps> = ({ user }) => {
+  const { t } = useTranslation();
+
   // Helper function to format date
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleDateString('en-GB', {
@@ -24,7 +27,7 @@ const AdminBanner: React.FC<AdminBannerProps> = ({ user }) => {
 
   // Helper function to format last login
   const formatLastLogin = (lastLogin?: string) => {
-    if (!lastLogin) return 'Never';
+    if (!lastLogin) return t('profileShared.lastLoginNever');
 
     const loginDate = new Date(lastLogin);
     const now = new Date();
@@ -32,21 +35,23 @@ const AdminBanner: React.FC<AdminBannerProps> = ({ user }) => {
       (now.getTime() - loginDate.getTime()) / (1000 * 60 * 60)
     );
 
-    if (diffInHours < 1) return 'Less than an hour ago';
-    if (diffInHours < 24) return `${diffInHours} hours ago`;
-    if (diffInHours < 48) return '1 day ago';
-    return `${Math.floor(diffInHours / 24)} days ago`;
+    if (diffInHours < 1) return t('profileShared.lastLoginUnderHour');
+    if (diffInHours < 24)
+      return t(
+        diffInHours === 1
+          ? 'profileShared.lastLoginHoursAgoOne'
+          : 'profileShared.lastLoginHoursAgoOther',
+        { count: diffInHours }
+      );
+    if (diffInHours < 48) return t('profileShared.lastLoginOneDayAgo');
+    return t('profileShared.lastLoginDaysAgoOther', {
+      count: Math.floor(diffInHours / 24)
+    });
   };
 
-  // Role labels
-  const roleLabels: Record<string, string> = {
-    super_admin: 'Super Admin',
-    administrator: 'Administrator',
-    developer: 'Developer',
-    manager: 'Manager',
-    operator: 'Operator',
-    guest: 'Guest'
-  };
+  const roleLabel = t(`adminUsers.roles.${user.role}`, {
+    defaultValue: user.role
+  });
 
   return (
     <ProfileBanner>
@@ -62,22 +67,28 @@ const AdminBanner: React.FC<AdminBannerProps> = ({ user }) => {
                 {user.fullName} {user.emailVerified && <VerifiedBadge />}
               </h4>
               <Badge bg={user.isActive ? 'success' : 'danger'} className="ms-2">
-                {user.isActive ? 'Active' : 'Inactive'}
+                {user.isActive
+                  ? t('profileShared.statusActive')
+                  : t('profileShared.statusInactive')}
               </Badge>
             </Flex>
             <h5 className="fs-9 fw-normal">{user.email}</h5>
             <Flex className="mb-3 mt-2">
               <small className="text-700 me-3">
                 <FontAwesomeIcon icon="calendar-alt" className="me-1" />
-                Registered: {formatDate(user.createdAt)}
+                {t('profileShared.registeredLabel', {
+                  date: formatDate(user.createdAt)
+                })}
               </small>
               <small className="text-700 me-3">
                 <FontAwesomeIcon icon="clock" className="me-1" />
-                Last Login: {formatLastLogin(user.lastLogin)}
+                {t('profileShared.lastLoginLabel', {
+                  when: formatLastLogin(user.lastLogin)
+                })}
               </small>
               <small className="text-700">
                 <FontAwesomeIcon icon="shield-alt" className="me-1" />
-                Role: {roleLabels[user.role] || user.role}
+                {t('profileShared.roleLabel', { role: roleLabel })}
               </small>
             </Flex>
             {/* <Button variant="primary" size="sm" className="px-3 me-2">

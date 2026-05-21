@@ -17,7 +17,7 @@ const OperatorProfile: React.FC = () => {
       >
         <Spinner animation="border" role="status">
           <span className="visually-hidden">
-            {t('operatorProfile.loadingAria')}
+            {t('profileShared.loadingAria')}
           </span>
         </Spinner>
       </div>
@@ -25,11 +25,11 @@ const OperatorProfile: React.FC = () => {
   }
 
   if (error) {
-    return <Alert variant="danger">{t('operatorProfile.errorLoad')}</Alert>;
+    return <Alert variant="danger">{t('profileShared.errorLoad')}</Alert>;
   }
 
   if (!backendUser) {
-    return <Alert variant="warning">{t('operatorProfile.userNotFound')}</Alert>;
+    return <Alert variant="warning">{t('profileShared.userNotFound')}</Alert>;
   }
 
   const user: User = {
