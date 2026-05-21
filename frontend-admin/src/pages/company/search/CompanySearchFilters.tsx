@@ -10,6 +10,7 @@ import {
   Spinner
 } from 'react-bootstrap';
 import { FaChevronDown, FaChevronRight } from 'react-icons/fa';
+import { useTranslation } from 'react-i18next';
 import { useLazySearchCompaniesQuery } from 'store/api/companyApi';
 import type {
   CompanySearchApiParams,
@@ -21,6 +22,7 @@ interface CompanySearchFiltersProps {
 }
 
 const CompanySearchFilters = ({ onResults }: CompanySearchFiltersProps) => {
+  const { t } = useTranslation();
   // Main filters
   const [companyName, setCompanyName] = useState('');
   const [province, setProvince] = useState('');
@@ -172,7 +174,7 @@ const CompanySearchFilters = ({ onResults }: CompanySearchFiltersProps) => {
   return (
     <Card>
       <Card.Header>
-        <h6 className="mb-0">Filtri di Ricerca</h6>
+        <h6 className="mb-0">{t('company.search.filters.cardTitle')}</h6>
       </Card.Header>
       <Card.Body>
         <Form onSubmit={handleSubmit}>
@@ -180,10 +182,14 @@ const CompanySearchFilters = ({ onResults }: CompanySearchFiltersProps) => {
           <Row className="g-3 mb-3">
             <Col sm={6} md={4}>
               <Form.Group>
-                <Form.Label className="fs-9">Nome Azienda</Form.Label>
+                <Form.Label className="fs-9">
+                  {t('company.search.filters.labelCompanyName')}
+                </Form.Label>
                 <Form.Control
                   type="text"
-                  placeholder="Es. Mario Rossi SRL"
+                  placeholder={t(
+                    'company.search.filters.placeholderCompanyName'
+                  )}
                   value={companyName}
                   onChange={e => setCompanyName(e.target.value)}
                 />
@@ -191,10 +197,12 @@ const CompanySearchFilters = ({ onResults }: CompanySearchFiltersProps) => {
             </Col>
             <Col sm={6} md={4}>
               <Form.Group>
-                <Form.Label className="fs-9">Provincia</Form.Label>
+                <Form.Label className="fs-9">
+                  {t('company.search.filters.labelProvince')}
+                </Form.Label>
                 <Form.Control
                   type="text"
-                  placeholder="Es. RM, MI"
+                  placeholder={t('company.search.filters.placeholderProvince')}
                   value={province}
                   onChange={e => setProvince(e.target.value)}
                   maxLength={2}
@@ -204,15 +212,25 @@ const CompanySearchFilters = ({ onResults }: CompanySearchFiltersProps) => {
             </Col>
             <Col sm={6} md={4}>
               <Form.Group>
-                <Form.Label className="fs-9">Stato Attività</Form.Label>
+                <Form.Label className="fs-9">
+                  {t('company.search.filters.labelActivityStatus')}
+                </Form.Label>
                 <Form.Select
                   value={activityStatus}
                   onChange={e => setActivityStatus(e.target.value)}
                 >
-                  <option value="">Tutti</option>
-                  <option value="ATTIVA">Attiva</option>
-                  <option value="CESSATA">Cessata</option>
-                  <option value="SOSPESA">Sospesa</option>
+                  <option value="">
+                    {t('company.search.filters.activityAll')}
+                  </option>
+                  <option value="ATTIVA">
+                    {t('company.search.filters.activityActive')}
+                  </option>
+                  <option value="CESSATA">
+                    {t('company.search.filters.activityCeased')}
+                  </option>
+                  <option value="SOSPESA">
+                    {t('company.search.filters.activitySuspended')}
+                  </option>
                 </Form.Select>
               </Form.Group>
             </Col>
@@ -221,7 +239,7 @@ const CompanySearchFilters = ({ onResults }: CompanySearchFiltersProps) => {
           {/* Industry & Registry */}
           <hr className="my-2" />
           <SectionToggle
-            label="Industria & Registro"
+            label={t('company.search.filters.sectionIndustry')}
             open={showIndustry}
             onToggle={() => setShowIndustry(!showIndustry)}
           />
@@ -230,10 +248,12 @@ const CompanySearchFilters = ({ onResults }: CompanySearchFiltersProps) => {
               <Row className="g-3 mb-3">
                 <Col sm={6} md={4}>
                   <Form.Group>
-                    <Form.Label className="fs-9">Codice ATECO</Form.Label>
+                    <Form.Label className="fs-9">
+                      {t('company.search.filters.labelAteco')}
+                    </Form.Label>
                     <Form.Control
                       type="text"
-                      placeholder="Es. 62.01"
+                      placeholder={t('company.search.filters.placeholderAteco')}
                       value={atecoCode}
                       onChange={e => setAtecoCode(e.target.value)}
                     />
@@ -241,10 +261,12 @@ const CompanySearchFilters = ({ onResults }: CompanySearchFiltersProps) => {
                 </Col>
                 <Col sm={6} md={4}>
                   <Form.Group>
-                    <Form.Label className="fs-9">CCIAA</Form.Label>
+                    <Form.Label className="fs-9">
+                      {t('company.search.filters.labelCciaa')}
+                    </Form.Label>
                     <Form.Control
                       type="text"
-                      placeholder="Es. RM"
+                      placeholder={t('company.search.filters.placeholderCciaa')}
                       value={cciaa}
                       onChange={e => setCciaa(e.target.value)}
                     />
@@ -252,10 +274,14 @@ const CompanySearchFilters = ({ onResults }: CompanySearchFiltersProps) => {
                 </Col>
                 <Col sm={6} md={4}>
                   <Form.Group>
-                    <Form.Label className="fs-9">Codice REA</Form.Label>
+                    <Form.Label className="fs-9">
+                      {t('company.search.filters.labelReaCode')}
+                    </Form.Label>
                     <Form.Control
                       type="text"
-                      placeholder="Es. 1234567"
+                      placeholder={t(
+                        'company.search.filters.placeholderReaCode'
+                      )}
                       value={reaCode}
                       onChange={e => setReaCode(e.target.value)}
                     />
@@ -263,10 +289,14 @@ const CompanySearchFilters = ({ onResults }: CompanySearchFiltersProps) => {
                 </Col>
                 <Col sm={6} md={4}>
                   <Form.Group>
-                    <Form.Label className="fs-9">Forma Giuridica</Form.Label>
+                    <Form.Label className="fs-9">
+                      {t('company.search.filters.labelLegalForm')}
+                    </Form.Label>
                     <Form.Control
                       type="text"
-                      placeholder="Es. SR"
+                      placeholder={t(
+                        'company.search.filters.placeholderLegalForm'
+                      )}
                       value={legalFormCode}
                       onChange={e => setLegalFormCode(e.target.value)}
                     />
@@ -274,10 +304,14 @@ const CompanySearchFilters = ({ onResults }: CompanySearchFiltersProps) => {
                 </Col>
                 <Col sm={6} md={4}>
                   <Form.Group>
-                    <Form.Label className="fs-9">Codice SDI</Form.Label>
+                    <Form.Label className="fs-9">
+                      {t('company.search.filters.labelSdiCode')}
+                    </Form.Label>
                     <Form.Control
                       type="text"
-                      placeholder="Es. M5UXCR1"
+                      placeholder={t(
+                        'company.search.filters.placeholderSdiCode'
+                      )}
                       value={sdiCode}
                       onChange={e => setSdiCode(e.target.value)}
                       className="font-monospace"
@@ -286,10 +320,12 @@ const CompanySearchFilters = ({ onResults }: CompanySearchFiltersProps) => {
                 </Col>
                 <Col sm={6} md={4}>
                   <Form.Group>
-                    <Form.Label className="fs-9">PEC</Form.Label>
+                    <Form.Label className="fs-9">
+                      {t('company.search.filters.labelPec')}
+                    </Form.Label>
                     <Form.Control
                       type="email"
-                      placeholder="Es. azienda@pec.it"
+                      placeholder={t('company.search.filters.placeholderPec')}
                       value={pec}
                       onChange={e => setPec(e.target.value)}
                     />
@@ -302,7 +338,7 @@ const CompanySearchFilters = ({ onResults }: CompanySearchFiltersProps) => {
           {/* Financial */}
           <hr className="my-2" />
           <SectionToggle
-            label="Dati Finanziari"
+            label={t('company.search.filters.sectionFinancial')}
             open={showFinancial}
             onToggle={() => setShowFinancial(!showFinancial)}
           />
@@ -311,7 +347,9 @@ const CompanySearchFilters = ({ onResults }: CompanySearchFiltersProps) => {
               <Row className="g-3 mb-3">
                 <Col sm={6} md={3}>
                   <Form.Group>
-                    <Form.Label className="fs-9">Fatturato Min (€)</Form.Label>
+                    <Form.Label className="fs-9">
+                      {t('company.search.filters.labelMinTurnover')}
+                    </Form.Label>
                     <Form.Control
                       type="number"
                       placeholder="0"
@@ -322,7 +360,9 @@ const CompanySearchFilters = ({ onResults }: CompanySearchFiltersProps) => {
                 </Col>
                 <Col sm={6} md={3}>
                   <Form.Group>
-                    <Form.Label className="fs-9">Fatturato Max (€)</Form.Label>
+                    <Form.Label className="fs-9">
+                      {t('company.search.filters.labelMaxTurnover')}
+                    </Form.Label>
                     <Form.Control
                       type="number"
                       placeholder="∞"
@@ -333,7 +373,9 @@ const CompanySearchFilters = ({ onResults }: CompanySearchFiltersProps) => {
                 </Col>
                 <Col sm={6} md={3}>
                   <Form.Group>
-                    <Form.Label className="fs-9">Dipendenti Min</Form.Label>
+                    <Form.Label className="fs-9">
+                      {t('company.search.filters.labelMinEmployees')}
+                    </Form.Label>
                     <Form.Control
                       type="number"
                       placeholder="0"
@@ -344,7 +386,9 @@ const CompanySearchFilters = ({ onResults }: CompanySearchFiltersProps) => {
                 </Col>
                 <Col sm={6} md={3}>
                   <Form.Group>
-                    <Form.Label className="fs-9">Dipendenti Max</Form.Label>
+                    <Form.Label className="fs-9">
+                      {t('company.search.filters.labelMaxEmployees')}
+                    </Form.Label>
                     <Form.Control
                       type="number"
                       placeholder="∞"
@@ -360,7 +404,7 @@ const CompanySearchFilters = ({ onResults }: CompanySearchFiltersProps) => {
           {/* Geo */}
           <hr className="my-2" />
           <SectionToggle
-            label="Geolocalizzazione"
+            label={t('company.search.filters.sectionGeo')}
             open={showGeo}
             onToggle={() => setShowGeo(!showGeo)}
           />
@@ -369,11 +413,15 @@ const CompanySearchFilters = ({ onResults }: CompanySearchFiltersProps) => {
               <Row className="g-3 mb-3">
                 <Col sm={6} md={3}>
                   <Form.Group>
-                    <Form.Label className="fs-9">Latitudine</Form.Label>
+                    <Form.Label className="fs-9">
+                      {t('company.search.filters.labelLatitude')}
+                    </Form.Label>
                     <Form.Control
                       type="number"
                       step="any"
-                      placeholder="Es. 41.9028"
+                      placeholder={t(
+                        'company.search.filters.placeholderLatitude'
+                      )}
                       value={lat}
                       onChange={e => setLat(e.target.value)}
                     />
@@ -381,11 +429,15 @@ const CompanySearchFilters = ({ onResults }: CompanySearchFiltersProps) => {
                 </Col>
                 <Col sm={6} md={3}>
                   <Form.Group>
-                    <Form.Label className="fs-9">Longitudine</Form.Label>
+                    <Form.Label className="fs-9">
+                      {t('company.search.filters.labelLongitude')}
+                    </Form.Label>
                     <Form.Control
                       type="number"
                       step="any"
-                      placeholder="Es. 12.4964"
+                      placeholder={t(
+                        'company.search.filters.placeholderLongitude'
+                      )}
                       value={long}
                       onChange={e => setLong(e.target.value)}
                     />
@@ -393,10 +445,14 @@ const CompanySearchFilters = ({ onResults }: CompanySearchFiltersProps) => {
                 </Col>
                 <Col sm={6} md={3}>
                   <Form.Group>
-                    <Form.Label className="fs-9">Raggio (km)</Form.Label>
+                    <Form.Label className="fs-9">
+                      {t('company.search.filters.labelRadius')}
+                    </Form.Label>
                     <Form.Control
                       type="number"
-                      placeholder="Es. 50"
+                      placeholder={t(
+                        'company.search.filters.placeholderRadius'
+                      )}
                       value={radius}
                       onChange={e => setRadius(e.target.value)}
                     />
@@ -404,10 +460,14 @@ const CompanySearchFilters = ({ onResults }: CompanySearchFiltersProps) => {
                 </Col>
                 <Col sm={6} md={3}>
                   <Form.Group>
-                    <Form.Label className="fs-9">Codice Comune</Form.Label>
+                    <Form.Label className="fs-9">
+                      {t('company.search.filters.labelTownCode')}
+                    </Form.Label>
                     <Form.Control
                       type="text"
-                      placeholder="Es. H501"
+                      placeholder={t(
+                        'company.search.filters.placeholderTownCode'
+                      )}
                       value={townCode}
                       onChange={e => setTownCode(e.target.value)}
                     />
@@ -420,7 +480,7 @@ const CompanySearchFilters = ({ onResults }: CompanySearchFiltersProps) => {
           {/* Advanced */}
           <hr className="my-2" />
           <SectionToggle
-            label="Avanzato"
+            label={t('company.search.filters.sectionAdvanced')}
             open={showAdvanced}
             onToggle={() => setShowAdvanced(!showAdvanced)}
           />
@@ -429,10 +489,14 @@ const CompanySearchFilters = ({ onResults }: CompanySearchFiltersProps) => {
               <Row className="g-3 mb-3">
                 <Col sm={6} md={4}>
                   <Form.Group>
-                    <Form.Label className="fs-9">CF Socio</Form.Label>
+                    <Form.Label className="fs-9">
+                      {t('company.search.filters.labelShareHolderTaxCode')}
+                    </Form.Label>
                     <Form.Control
                       type="text"
-                      placeholder="Codice Fiscale socio"
+                      placeholder={t(
+                        'company.search.filters.placeholderShareHolderTaxCode'
+                      )}
                       value={shareHolderTaxCode}
                       onChange={e =>
                         setShareHolderTaxCode(e.target.value.toUpperCase())
@@ -445,19 +509,33 @@ const CompanySearchFilters = ({ onResults }: CompanySearchFiltersProps) => {
                 <Col sm={6} md={4}>
                   <Form.Group>
                     <Form.Label className="fs-9">
-                      Livello Arricchimento
+                      {t('company.search.filters.labelDataEnrichment')}
                     </Form.Label>
                     <Form.Select
                       value={dataEnrichment}
                       onChange={e => setDataEnrichment(e.target.value)}
                     >
-                      <option value="">Default (start)</option>
-                      <option value="name">Nome</option>
-                      <option value="start">Start</option>
-                      <option value="advanced">Avanzato</option>
-                      <option value="pec">PEC</option>
-                      <option value="address">Indirizzo</option>
-                      <option value="shareholders">Soci</option>
+                      <option value="">
+                        {t('company.search.filters.enrichmentDefault')}
+                      </option>
+                      <option value="name">
+                        {t('company.search.filters.enrichmentName')}
+                      </option>
+                      <option value="start">
+                        {t('company.search.filters.enrichmentStart')}
+                      </option>
+                      <option value="advanced">
+                        {t('company.search.filters.enrichmentAdvanced')}
+                      </option>
+                      <option value="pec">
+                        {t('company.search.filters.enrichmentPec')}
+                      </option>
+                      <option value="address">
+                        {t('company.search.filters.enrichmentAddress')}
+                      </option>
+                      <option value="shareholders">
+                        {t('company.search.filters.enrichmentShareholders')}
+                      </option>
                     </Form.Select>
                   </Form.Group>
                 </Col>
@@ -465,7 +543,7 @@ const CompanySearchFilters = ({ onResults }: CompanySearchFiltersProps) => {
                   <Form.Check
                     type="checkbox"
                     id="dryRun"
-                    label="Dry Run (solo conteggio)"
+                    label={t('company.search.filters.labelDryRun')}
                     checked={dryRun}
                     onChange={e => setDryRun(e.target.checked)}
                   />
@@ -485,10 +563,10 @@ const CompanySearchFilters = ({ onResults }: CompanySearchFiltersProps) => {
               {isFetching ? (
                 <>
                   <Spinner size="sm" className="me-2" />
-                  Ricerca...
+                  {t('company.search.filters.submitting')}
                 </>
               ) : (
-                'Cerca'
+                t('company.search.filters.submit')
               )}
             </Button>
             <Button
@@ -497,14 +575,14 @@ const CompanySearchFilters = ({ onResults }: CompanySearchFiltersProps) => {
               onClick={handleReset}
               disabled={isFetching}
             >
-              Reset
+              {t('company.search.filters.reset')}
             </Button>
           </div>
         </Form>
 
         {error && (
           <Alert variant="warning" className="mt-3 mb-0">
-            Errore durante la ricerca. Riprova più tardi.
+            {t('company.search.filters.errorGeneric')}
           </Alert>
         )}
       </Card.Body>
