@@ -33,7 +33,12 @@ import type {
   ScoreProfile,
   ScoreProfilePayload,
   ScoreSnapshot,
-  LeaderboardEntry
+  LeaderboardEntry,
+  ConflictReview,
+  ConflictReviewStatus,
+  ConflictTargetKind,
+  ResolveConflictPayload,
+  DismissConflictPayload
 } from '../../types/marketing';
 
 const buildQS = (params: Record<string, unknown>): string => {
@@ -504,6 +509,87 @@ export const marketingApi = baseApi.injectEndpoints({
     getScoreSnapshot: builder.query<ScoreSnapshot, string>({
       query: id => `/v1/marketing/score-snapshots/${id}`,
       providesTags: (_r, _e, id) => [{ type: 'MarketingScoreSnapshot', id }]
+    }),
+
+    // --- Phase 3: Conflict review queue --------------------------------
+
+    listConflictReviews: builder.query<
+      PaginatedItems<ConflictReview>,
+      | {
+          status?: ConflictReviewStatus;
+          targetKind?: ConflictTargetKind;
+          importJobUuid?: string;
+          existingUuid?: string;
+          limit?: number;
+          skip?: number;
+        }
+      | undefined
+    >({
+      query: params =>
+        `/v1/marketing/conflict-reviews${params ? buildQS(params) : ''}`,
+      providesTags: result =>
+        result?.items
+          ? [
+              ...result.items.map(({ uuid }) => ({
+                type: 'MarketingConflictReview' as const,
+                id: uuid
+              })),
+              { type: 'MarketingConflictReview', id: 'LIST' }
+            ]
+          : [{ type: 'MarketingConflictReview', id: 'LIST' }]
+    }),
+    getConflictReview: builder.query<ConflictReview, string>({
+      query: id => `/v1/marketing/conflict-reviews/${id}`,
+      providesTags: (_r, _e, id) => [{ type: 'MarketingConflictReview', id }]
+    }),
+    resolveConflictReview: builder.mutation<
+      ConflictReview,
+      { id: string; body: ResolveConflictPayload; importJobUuid?: string }
+    >({
+      query: ({ id, body }) => ({
+        url: `/v1/marketing/conflict-reviews/${id}/resolve`,
+        method: 'POST',
+        body
+      }),
+      // Resolving may transition the parent job from
+      // paused_for_review → done; invalidate the import-job entry too
+      // so the imports list refreshes the badge column.
+      invalidatesTags: (_r, _e, { id, importJobUuid }) => {
+        const tags: Array<
+          | { type: 'MarketingConflictReview'; id: string }
+          | { type: 'MarketingImport'; id: string }
+        > = [
+          { type: 'MarketingConflictReview', id },
+          { type: 'MarketingConflictReview', id: 'LIST' }
+        ];
+        if (importJobUuid) {
+          tags.push({ type: 'MarketingImport', id: importJobUuid });
+        }
+        return tags;
+      }
+    }),
+    dismissConflictReview: builder.mutation<
+      ConflictReview,
+      { id: string; body: DismissConflictPayload; importJobUuid?: string }
+    >({
+      query: ({ id, body }) => ({
+        url: `/v1/marketing/conflict-reviews/${id}/dismiss`,
+        method: 'POST',
+        body
+      }),
+      invalidatesTags: (_r, _e, { id, importJobUuid }) => {
+        const tags: Array<
+          | { type: 'MarketingConflictReview'; id: string }
+          | { type: 'MarketingImport'; id: string }
+        > = [
+          { type: 'MarketingConflictReview', id },
+          { type: 'MarketingConflictReview', id: 'LIST' }
+        ];
+        if (importJobUuid) {
+          tags.push({ type: 'MarketingImport', id: importJobUuid });
+        }
+        return tags;
+      }
     })
   })
 });
@@ -544,5 +630,10 @@ export const {
   useDeleteScoreProfileMutation,
   useGetProfileLeaderboardQuery,
   useListPersonScoresQuery,
-  useGetScoreSnapshotQuery
+  useGetScoreSnapshotQuery,
+  // Phase 3 — conflict review queue
+  useListConflictReviewsQuery,
+  useGetConflictReviewQuery,
+  useResolveConflictReviewMutation,
+  useDismissConflictReviewMutation
 } = marketingApi;

@@ -11,6 +11,7 @@ import type { ImportJobStatus } from 'types/marketing';
 const statusVariant: Record<ImportJobStatus, string> = {
   queued: 'secondary',
   running: 'info',
+  paused_for_review: 'warning',
   done: 'success',
   failed: 'danger'
 };
@@ -62,6 +63,7 @@ const ImportsPage: React.FC = () => {
                   <th>{t('marketing.imports.list.colSource')}</th>
                   <th>{t('marketing.imports.list.colAdapter')}</th>
                   <th>{t('marketing.imports.list.colStatus')}</th>
+                  <th>{t('marketing.imports.list.colReviews')}</th>
                   <th>{t('marketing.imports.list.colRows')}</th>
                   <th>{t('marketing.imports.list.colCreated')}</th>
                   <th>{t('marketing.imports.list.colCreatedMerged')}</th>
@@ -89,6 +91,23 @@ const ImportsPage: React.FC = () => {
                       <Badge bg={statusVariant[j.status]}>{j.status}</Badge>
                       {j.error && (
                         <div className="text-danger fs-10 mt-1">{j.error}</div>
+                      )}
+                    </td>
+                    <td>
+                      {j.conflictReviewUuids &&
+                      j.conflictReviewUuids.length > 0 ? (
+                        <Link
+                          to={`/marketing/reviews?importJobUuid=${j.uuid}`}
+                          className="text-decoration-none"
+                        >
+                          <Badge bg="warning" text="dark">
+                            {t('marketing.imports.list.reviewsBadge', {
+                              count: j.conflictReviewUuids.length
+                            })}
+                          </Badge>
+                        </Link>
+                      ) : (
+                        <span className="text-muted">—</span>
                       )}
                     </td>
                     <td>

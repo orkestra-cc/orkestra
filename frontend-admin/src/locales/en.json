@@ -1575,7 +1575,7 @@
     "imports": {
       "title": "Imports",
       "list": {
-        "subtitle": "Audit log of every contact-base import. Phase 1 ships CSV; Excel + Odoo adapters arrive in Phase 3.",
+        "subtitle": "Audit log of every contact-base import. Adapters: CSV, Excel, Odoo (JSON-2).",
         "refresh": "Refresh",
         "newImport": "New import",
         "loading": "Loading…",
@@ -1583,42 +1583,122 @@
         "colSource": "Source",
         "colAdapter": "Adapter",
         "colStatus": "Status",
+        "colReviews": "Reviews",
         "colRows": "Rows",
         "colCreated": "Created",
         "colCreatedMerged": "Created · Merged",
         "unnamed": "(unnamed)",
         "rowsFailedSuffix": " ({{count}} failed)",
         "conflictsSuffix": " ({{count}} conflicts)",
+        "reviewsBadge": "{{count}} pending",
         "orgsLine": "Orgs: {{created}} · {{merged}}",
         "personsLine": "Persons: {{created}} · {{merged}}"
       },
+      "adapter": {
+        "label": "Import adapter",
+        "csv": "CSV",
+        "excel": "Excel (.xlsx)",
+        "odoo": "Odoo 19 (JSON-2)",
+        "csvHelp": "Upload a CSV file with a column mapping. Engagement columns (email_opened, email_clicked…) emit activities when paired with a person key.",
+        "excelHelp": "Upload a .xlsx workbook. Choose the sheet name in the mapping options when the file has more than one.",
+        "odooHelp": "Connect to an Odoo 19 tenant via its External JSON-2 API. The adapter pulls res.partner rows in pages of 200."
+      },
+      "odoo": {
+        "heading": "Odoo connection",
+        "baseUrl": "Base URL",
+        "database": "Database name",
+        "apiKey": "API key",
+        "pageSize": "Page size",
+        "includeEngagement": "Pull mail.message engagement (last 90 days)",
+        "help": "Credentials are sent as headers on every request and are NEVER stored client-side. The backend persists them encrypted in the module's per-environment config when reused."
+      },
       "wizard": {
         "heading": "New import",
-        "subtitle": "Upload a CSV and supply a column mapping. The pipeline runs synchronously — keep the tab open until the result panel appears.",
+        "subtitle": "Pick an adapter, supply the payload + mapping, and submit. The runner queues the job and the imports list shows the live status.",
         "allImports": "← All imports",
-        "fileLabel": "CSV file",
+        "fileLabel": "File",
         "fileHelp": "In-memory parse: files up to 32 MB stay in RAM; larger files spill to a temp directory.",
         "sourceNameLabel": "Source name",
         "sourceNamePlaceholder": "Defaults to the uploaded filename",
         "mappingLabel": "Column mapping (JSON)",
         "mappingHelp": "Recognised canonical keys: {{keys}}",
-        "errorNoFile": "Pick a CSV file first.",
+        "mappingHelpOdoo": "Mapping is currently ignored by the Odoo adapter — res.partner has a fixed schema. Leave the placeholder JSON in place.",
+        "errorNoFile": "Pick a file first.",
+        "errorOdooMissingFields": "Base URL, database, and API key are all required.",
         "errorInvalidJson": "Mapping is not valid JSON: {{message}}",
-        "progressLabel": "Pipeline is running… do not close the tab.",
+        "progressLabel": "Submitting to the runner…",
         "runImport": "Run import",
         "result": {
-          "headingDone": "Import completed",
-          "headingFinished": "Import finished",
+          "headingQueued": "Import queued",
+          "queuedSubtitle": "The worker picks up the job in a moment. Open the imports list to watch the status transition.",
           "jobLabel": "Job",
-          "rowsRead": "Rows read: {{count}}",
-          "rowsFailed": "Rows failed: {{count}}",
-          "organizations": "Organizations: {{created}} created, {{merged}} merged",
-          "persons": "Persons: {{created}} created, {{merged}} merged",
-          "membershipsLinked": "Memberships linked: {{count}}",
-          "conflictsSkipped": "Conflicts skipped: {{count}}",
-          "conflictsNote": "(dedup-key disagreements — Phase 3 review queue will route these for resolution)",
+          "statusLabel": "Status",
           "backToList": "Back to imports list",
           "runAnother": "Run another"
+        }
+      }
+    },
+    "reviews": {
+      "title": "Conflict reviews",
+      "subtitle": "Importer-flagged dedup conflicts awaiting resolution. Park reasons: a dedup-key field disagreed (blocking) or a soft-match helper flagged a near-duplicate.",
+      "refresh": "Refresh",
+      "loading": "Loading reviews…",
+      "empty": "No reviews match the current filters.",
+      "filter": {
+        "status": "Status",
+        "targetKind": "Target kind",
+        "importJob": "Import job UUID",
+        "importJobPlaceholder": "Filter to a single import",
+        "all": "All"
+      },
+      "status": {
+        "pending": "Pending",
+        "resolved": "Resolved",
+        "dismissed": "Dismissed"
+      },
+      "target": {
+        "person": "Person",
+        "organization": "Organization"
+      },
+      "col": {
+        "created": "Created",
+        "targetKind": "Target",
+        "conflicts": "Conflicts",
+        "importJob": "Import job",
+        "status": "Status",
+        "actions": "Actions"
+      },
+      "action": {
+        "resolve": "Resolve",
+        "view": "View"
+      },
+      "modal": {
+        "title": "Resolve conflict",
+        "importJob": "Import job:",
+        "existingUuid": "Existing:",
+        "conflicts": "Conflict fields",
+        "field": "Field",
+        "existing": "Existing",
+        "incoming": "Incoming",
+        "choose": "Choose",
+        "keep": "Keep existing",
+        "take": "Take incoming",
+        "softMatch": "soft match",
+        "notes": "Notes (optional)",
+        "notesPlaceholder": "Audit context for this resolution",
+        "dismiss": "Dismiss (discard incoming)",
+        "keepAll": "Keep all existing",
+        "takeAll": "Take all incoming",
+        "applyManual": "Apply manual merge",
+        "useKeepAllHint": "Every field is set to keep — use \"Keep all existing\" instead.",
+        "useTakeAllHint": "Every field is set to take — use \"Take all incoming\" instead.",
+        "resolvedWith": "Resolved with action",
+        "by": "by",
+        "toast": {
+          "resolved": "Review resolved.",
+          "dismissed": "Review dismissed.",
+          "resolveFailed": "Resolve failed. {{message}}",
+          "dismissFailed": "Dismiss failed. {{message}}"
         }
       }
     },

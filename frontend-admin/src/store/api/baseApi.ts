@@ -433,7 +433,11 @@ export const baseApi = createApi({
     // so a profile edit invalidates the right leaderboard rows.
     'MarketingActivity',
     'MarketingScoreProfile',
-    'MarketingScoreSnapshot'
+    'MarketingScoreSnapshot',
+    // Marketing module — Phase 3 conflict-review queue. Reviews are
+    // queried both by uuid (resolver modal) and by importJobUuid
+    // (imports-list deep link), so the slice tags both ways.
+    'MarketingConflictReview'
   ],
   // Keep cache for 5 minutes by default
   keepUnusedDataFor: 300,
@@ -563,7 +567,8 @@ export const TENANT_SCOPED_TAGS = [
   'MarketingImport',
   'MarketingActivity',
   'MarketingScoreProfile',
-  'MarketingScoreSnapshot'
+  'MarketingScoreSnapshot',
+  'MarketingConflictReview'
 ] as const;
 
 export default baseApi;

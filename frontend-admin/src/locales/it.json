@@ -1575,7 +1575,7 @@
     "imports": {
       "title": "Importazioni",
       "list": {
-        "subtitle": "Log audit di tutte le importazioni nella contact base. La Fase 1 supporta CSV; gli adapter Excel + Odoo arrivano in Fase 3.",
+        "subtitle": "Log audit di tutte le importazioni nella contact base. Adapter: CSV, Excel, Odoo (JSON-2).",
         "refresh": "Aggiorna",
         "newImport": "Nuova importazione",
         "loading": "Caricamento…",
@@ -1583,42 +1583,122 @@
         "colSource": "Sorgente",
         "colAdapter": "Adapter",
         "colStatus": "Stato",
+        "colReviews": "Review",
         "colRows": "Righe",
         "colCreated": "Creato",
         "colCreatedMerged": "Creati · Uniti",
         "unnamed": "(senza nome)",
         "rowsFailedSuffix": " ({{count}} falliti)",
         "conflictsSuffix": " ({{count}} conflitti)",
+        "reviewsBadge": "{{count}} in attesa",
         "orgsLine": "Org: {{created}} · {{merged}}",
         "personsLine": "Persone: {{created}} · {{merged}}"
       },
+      "adapter": {
+        "label": "Adapter di importazione",
+        "csv": "CSV",
+        "excel": "Excel (.xlsx)",
+        "odoo": "Odoo 19 (JSON-2)",
+        "csvHelp": "Carica un file CSV con un mapping di colonne. Le colonne di engagement (email_opened, email_clicked…) emettono attività quando abbinate a una chiave persona.",
+        "excelHelp": "Carica una cartella di lavoro .xlsx. Scegli il nome del foglio nelle opzioni del mapping quando il file ha più sheet.",
+        "odooHelp": "Connettiti a un tenant Odoo 19 via la sua External JSON-2 API. L'adapter scarica res.partner in pagine da 200."
+      },
+      "odoo": {
+        "heading": "Connessione Odoo",
+        "baseUrl": "URL base",
+        "database": "Nome database",
+        "apiKey": "API key",
+        "pageSize": "Dimensione pagina",
+        "includeEngagement": "Importa engagement da mail.message (ultimi 90 giorni)",
+        "help": "Le credenziali sono inviate come header su ogni richiesta e NON sono mai salvate lato client. Il backend le persiste cifrate nella config per ambiente del modulo quando vengono riutilizzate."
+      },
       "wizard": {
         "heading": "Nuova importazione",
-        "subtitle": "Carica un CSV e fornisci un mapping di colonne. La pipeline viene eseguita in modo sincrono — tieni la tab aperta finché non appare il pannello dei risultati.",
+        "subtitle": "Scegli un adapter, fornisci payload + mapping e invia. Il runner accoda il job e la lista delle importazioni mostra lo stato in tempo reale.",
         "allImports": "← Tutte le importazioni",
-        "fileLabel": "File CSV",
+        "fileLabel": "File",
         "fileHelp": "Parsing in memoria: file fino a 32 MB restano in RAM; file più grandi vengono salvati su una cartella temporanea.",
         "sourceNameLabel": "Nome sorgente",
         "sourceNamePlaceholder": "Default: nome del file caricato",
         "mappingLabel": "Mapping colonne (JSON)",
         "mappingHelp": "Chiavi canoniche riconosciute: {{keys}}",
-        "errorNoFile": "Seleziona prima un file CSV.",
+        "mappingHelpOdoo": "Il mapping è attualmente ignorato dall'adapter Odoo — res.partner ha uno schema fisso. Lascia il JSON placeholder.",
+        "errorNoFile": "Seleziona prima un file.",
+        "errorOdooMissingFields": "URL base, database e API key sono tutti richiesti.",
         "errorInvalidJson": "Il mapping non è JSON valido: {{message}}",
-        "progressLabel": "La pipeline è in esecuzione… non chiudere la tab.",
+        "progressLabel": "Invio al runner…",
         "runImport": "Esegui importazione",
         "result": {
-          "headingDone": "Importazione completata",
-          "headingFinished": "Importazione terminata",
+          "headingQueued": "Importazione in coda",
+          "queuedSubtitle": "Il worker raccoglie il job tra un momento. Apri la lista importazioni per seguire la transizione di stato.",
           "jobLabel": "Job",
-          "rowsRead": "Righe lette: {{count}}",
-          "rowsFailed": "Righe fallite: {{count}}",
-          "organizations": "Organizzazioni: {{created}} create, {{merged}} unite",
-          "persons": "Persone: {{created}} create, {{merged}} unite",
-          "membershipsLinked": "Membership collegate: {{count}}",
-          "conflictsSkipped": "Conflitti saltati: {{count}}",
-          "conflictsNote": "(dedup-key in disaccordo — la coda di review di Fase 3 le instraderà per la risoluzione)",
+          "statusLabel": "Stato",
           "backToList": "Torna alla lista importazioni",
           "runAnother": "Esegui un'altra"
+        }
+      }
+    },
+    "reviews": {
+      "title": "Review dei conflitti",
+      "subtitle": "Conflitti di deduplica segnalati dall'importer in attesa di risoluzione. Motivo del parking: un campo dedup-key in disaccordo (bloccante) o un soft-match che ha segnalato un possibile duplicato.",
+      "refresh": "Aggiorna",
+      "loading": "Caricamento review…",
+      "empty": "Nessuna review corrisponde ai filtri correnti.",
+      "filter": {
+        "status": "Stato",
+        "targetKind": "Tipo target",
+        "importJob": "UUID del job",
+        "importJobPlaceholder": "Filtra a un singolo import",
+        "all": "Tutti"
+      },
+      "status": {
+        "pending": "In attesa",
+        "resolved": "Risolta",
+        "dismissed": "Scartata"
+      },
+      "target": {
+        "person": "Persona",
+        "organization": "Organizzazione"
+      },
+      "col": {
+        "created": "Creata",
+        "targetKind": "Target",
+        "conflicts": "Conflitti",
+        "importJob": "Import",
+        "status": "Stato",
+        "actions": "Azioni"
+      },
+      "action": {
+        "resolve": "Risolvi",
+        "view": "Vedi"
+      },
+      "modal": {
+        "title": "Risolvi conflitto",
+        "importJob": "Job:",
+        "existingUuid": "Esistente:",
+        "conflicts": "Campi in conflitto",
+        "field": "Campo",
+        "existing": "Esistente",
+        "incoming": "In arrivo",
+        "choose": "Scelta",
+        "keep": "Mantieni esistente",
+        "take": "Prendi in arrivo",
+        "softMatch": "soft match",
+        "notes": "Note (opzionali)",
+        "notesPlaceholder": "Contesto di audit per questa risoluzione",
+        "dismiss": "Scarta (scarta in arrivo)",
+        "keepAll": "Mantieni tutti gli esistenti",
+        "takeAll": "Prendi tutti gli in arrivo",
+        "applyManual": "Applica merge manuale",
+        "useKeepAllHint": "Ogni campo è impostato su mantieni — usa \"Mantieni tutti gli esistenti\" invece.",
+        "useTakeAllHint": "Ogni campo è impostato su prendi — usa \"Prendi tutti gli in arrivo\" invece.",
+        "resolvedWith": "Risolta con azione",
+        "by": "da",
+        "toast": {
+          "resolved": "Review risolta.",
+          "dismissed": "Review scartata.",
+          "resolveFailed": "Risoluzione fallita. {{message}}",
+          "dismissFailed": "Scarto fallito. {{message}}"
         }
       }
     },

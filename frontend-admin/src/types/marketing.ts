@@ -233,7 +233,17 @@ export interface CustomFieldSchemaPayload {
 
 // --- Import job ---
 
-export type ImportJobStatus = 'queued' | 'running' | 'done' | 'failed';
+// ImportJobStatus mirrors backend models/import_job.go. Phase 3 added
+// `paused_for_review` for the conflict-queue branch — the worker
+// transitions a job to that state when the first blocking conflict is
+// parked, and back to `running` (then `done`) once every pending
+// review is resolved or dismissed.
+export type ImportJobStatus =
+  | 'queued'
+  | 'running'
+  | 'paused_for_review'
+  | 'done'
+  | 'failed';
 
 export interface ImportJobStats {
   rowsRead: number;
@@ -254,6 +264,10 @@ export interface ImportJob {
   status: ImportJobStatus;
   stats: ImportJobStats;
   error?: string;
+  // Phase 3 — idempotency dedup key (sha256 of body + mapping) and
+  // back-references to every conflict_review the job parked.
+  idempotencyKey?: string;
+  conflictReviewUuids?: string[];
   createdAt: string;
   startedAt?: string;
   completedAt?: string;
@@ -263,6 +277,84 @@ export interface ImportJob {
 export interface ColumnMapping {
   columns: Record<string, string>;
   options?: Record<string, string>;
+}
+
+// --- Phase 3: conflict-review queue + adapter capabilities ---
+
+// ConflictTargetKind identifies which contact collection the review
+// row is attached to.
+export type ConflictTargetKind = 'person' | 'organization';
+
+// ConflictReviewStatus tracks the lifecycle of a review.
+export type ConflictReviewStatus = 'pending' | 'resolved' | 'dismissed';
+
+// ConflictAction is the operator's choice at close time.
+//   keep_existing — discard incoming conflicting fields.
+//   take_incoming — overwrite existing with incoming on those fields.
+//   manual_merge  — apply fieldOverrides per-key.
+//   dismiss       — drop the incoming row entirely.
+export type ConflictAction =
+  | 'keep_existing'
+  | 'take_incoming'
+  | 'manual_merge'
+  | 'dismiss';
+
+// ConflictSeverity tags a conflict as dedup-key blocking (the row is
+// parked pending resolution) or as a soft-match hit (strict-match
+// missed but the soft-match helper flagged a similar record).
+export type ConflictSeverity = 'blocking' | 'soft';
+
+export interface ConflictField {
+  field: string;
+  existingValue?: unknown;
+  incomingValue?: unknown;
+  severity: ConflictSeverity;
+}
+
+export interface ConflictResolution {
+  action: ConflictAction;
+  fieldOverrides?: Record<string, unknown>;
+}
+
+export interface ConflictReview {
+  uuid: string;
+  importJobUuid: string;
+  targetKind: ConflictTargetKind;
+  existingUuid: string;
+  existingSnapshot?: Record<string, unknown>;
+  incomingPayload: Record<string, unknown>;
+  incomingActivities?: Array<Record<string, unknown>>;
+  conflicts: ConflictField[];
+  status: ConflictReviewStatus;
+  resolution?: ConflictResolution;
+  resolvedAt?: string;
+  resolvedBy?: string;
+  resolvedNotes?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ResolveConflictPayload {
+  action: ConflictAction;
+  fieldOverrides?: Record<string, unknown>;
+  notes?: string;
+}
+
+export interface DismissConflictPayload {
+  notes?: string;
+}
+
+// OdooImportConfig mirrors the backend's importers/odoo/adapter.go
+// ImportConfig struct. The wizard's Odoo connection form serialises
+// this as the multipart `file` field when the operator picks the
+// odoo adapter.
+export interface OdooImportConfig {
+  baseUrl: string;
+  database: string;
+  apiKey: string;
+  pageSize?: number;
+  includeEngagement?: boolean;
+  engagementSinceDays?: number;
 }
 
 // --- Phase 2: activities + scoring ---
