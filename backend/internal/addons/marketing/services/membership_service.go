@@ -128,6 +128,7 @@ func (s *MembershipService) Update(ctx context.Context, uuid string, patch map[s
 			return nil, err
 		}
 	}
+	_ = existing
 	return s.repo.GetByUUID(ctx, uuid)
 }
 

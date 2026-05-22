@@ -2382,6 +2382,129 @@
         ],
         "type": "object"
       },
+      "ConflictFieldView": {
+        "additionalProperties": false,
+        "properties": {
+          "existingValue": {},
+          "field": {
+            "type": "string"
+          },
+          "incomingValue": {},
+          "severity": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "field",
+          "severity"
+        ],
+        "type": "object"
+      },
+      "ConflictResolutionView": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "fieldOverrides": {
+            "additionalProperties": {},
+            "type": "object"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "type": "object"
+      },
+      "ConflictReviewView": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/ConflictReviewView.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "conflicts": {
+            "items": {
+              "$ref": "#/components/schemas/ConflictFieldView"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "existingSnapshot": {
+            "additionalProperties": {},
+            "type": "object"
+          },
+          "existingUuid": {
+            "type": "string"
+          },
+          "importJobUuid": {
+            "type": "string"
+          },
+          "incomingActivities": {
+            "items": {
+              "additionalProperties": {},
+              "type": "object"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "incomingPayload": {
+            "additionalProperties": {},
+            "type": "object"
+          },
+          "resolution": {
+            "$ref": "#/components/schemas/ConflictResolutionView"
+          },
+          "resolvedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "resolvedBy": {
+            "type": "string"
+          },
+          "resolvedNotes": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "targetKind": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "uuid": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "uuid",
+          "importJobUuid",
+          "targetKind",
+          "existingUuid",
+          "incomingPayload",
+          "conflicts",
+          "status",
+          "createdAt",
+          "updatedAt"
+        ],
+        "type": "object"
+      },
       "Consent": {
         "additionalProperties": false,
         "properties": {
@@ -4369,6 +4492,24 @@
         "required": [
           "message"
         ],
+        "type": "object"
+      },
+      "DismissConflictPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/DismissConflictPayload.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "notes": {
+            "type": "string"
+          }
+        },
         "type": "object"
       },
       "DivisionListOutputBody": {
@@ -8084,6 +8225,37 @@
           "total",
           "page",
           "pageSize"
+        ],
+        "type": "object"
+      },
+      "ListReviewsResponseBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/ListReviewsResponseBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ConflictReviewView"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ListMeta"
+          }
+        },
+        "required": [
+          "items",
+          "meta"
         ],
         "type": "object"
       },
@@ -11852,6 +12024,9 @@
       "ProvenanceSource": {
         "additionalProperties": false,
         "properties": {
+          "conflictReviewUuid": {
+            "type": "string"
+          },
           "externalId": {
             "type": "string"
           },
@@ -13064,6 +13239,36 @@
         "required": [
           "token",
           "newPassword"
+        ],
+        "type": "object"
+      },
+      "ResolveConflictPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/ResolveConflictPayload.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "action": {
+            "description": "One of: keep_existing, take_incoming, manual_merge, dismiss",
+            "type": "string"
+          },
+          "fieldOverrides": {
+            "additionalProperties": {},
+            "description": "Required when action=manual_merge. Per-field overrides applied to the existing record.",
+            "type": "object"
+          },
+          "notes": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "action"
         ],
         "type": "object"
       },
@@ -30816,6 +31021,242 @@
         "summary": "Insert a corrected_by row that supersedes the activity",
         "tags": [
           "Marketing - Activities"
+        ]
+      }
+    },
+    "/v1/marketing/conflict-reviews": {
+      "get": {
+        "operationId": "marketing-list-conflict-reviews",
+        "parameters": [
+          {
+            "description": "Filter by review status: pending | resolved | dismissed",
+            "explode": false,
+            "in": "query",
+            "name": "status",
+            "schema": {
+              "description": "Filter by review status: pending | resolved | dismissed",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter by target kind: person | organization",
+            "explode": false,
+            "in": "query",
+            "name": "targetKind",
+            "schema": {
+              "description": "Filter by target kind: person | organization",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter to reviews from a single import job",
+            "explode": false,
+            "in": "query",
+            "name": "importJobUuid",
+            "schema": {
+              "description": "Filter to reviews from a single import job",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter to reviews attached to a single existing record",
+            "explode": false,
+            "in": "query",
+            "name": "existingUuid",
+            "schema": {
+              "description": "Filter to reviews attached to a single existing record",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size, default 50, capped at 500",
+            "explode": false,
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "description": "Page size, default 50, capped at 500",
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "skip",
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListReviewsResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "List conflict reviews",
+        "tags": [
+          "Marketing - Conflict Reviews"
+        ]
+      }
+    },
+    "/v1/marketing/conflict-reviews/{id}": {
+      "get": {
+        "operationId": "marketing-get-conflict-review",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConflictReviewView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Get a conflict review",
+        "tags": [
+          "Marketing - Conflict Reviews"
+        ]
+      }
+    },
+    "/v1/marketing/conflict-reviews/{id}/dismiss": {
+      "post": {
+        "operationId": "marketing-dismiss-conflict-review",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DismissConflictPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConflictReviewView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Dismiss a pending conflict review (incoming row discarded)",
+        "tags": [
+          "Marketing - Conflict Reviews"
+        ]
+      }
+    },
+    "/v1/marketing/conflict-reviews/{id}/resolve": {
+      "post": {
+        "operationId": "marketing-resolve-conflict-review",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResolveConflictPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConflictReviewView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Resolve a pending conflict review",
+        "tags": [
+          "Marketing - Conflict Reviews"
         ]
       }
     },

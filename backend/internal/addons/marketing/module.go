@@ -89,10 +89,13 @@ type MarketingModule struct {
 	// subscriptions pattern (see jobs/renewal_job.go select loop).
 	recomputeCancel context.CancelFunc
 
-	// Phase 3 — async import runner.
-	conflictReviewRepo *repository.ConflictReviewRepository
-	importWorker       *importers.Worker
-	workerCancel       context.CancelFunc
+	// Phase 3 — async import runner + conflict review queue + auto-emission.
+	conflictReviewRepo    *repository.ConflictReviewRepository
+	conflictReviewSvc     *services.ConflictReviewService
+	conflictReviewHandler *handlers.ConflictReviewHandler
+	importWorker          *importers.Worker
+	workerCancel          context.CancelFunc
+	activityEmitter       *services.ActivityEmitter
 }
 
 // NewModule returns a new instance. The registry calls this once per
@@ -563,6 +566,32 @@ func (m *MarketingModule) Init(deps *module.Dependencies) error {
 	// indirection.
 	m.activitySvc.RegisterListener(m.scoreSvc.OnActivityInserted)
 
+	// Phase 3 — auto-emission. ActivityEmitter wraps ActivityService
+	// for the system-source emissions (tag_added/_removed via the
+	// PersonService update listener, imported direct from the importer
+	// pipeline, merged direct from ConflictReviewService.Resolve).
+	m.activityEmitter = services.NewActivityEmitter(m.activitySvc, deps.Logger)
+	personSvc.RegisterUpdateListener(m.activityEmitter.OnPersonUpdated)
+
+	// Phase 3 — conflict review queue.
+	m.conflictReviewSvc = services.NewConflictReviewService(
+		m.conflictReviewRepo,
+		personRepo,
+		orgRepo,
+		jobRepo,
+		m.activitySvc,
+		m.activityEmitter,
+		deps.Logger,
+	)
+	m.conflictReviewHandler = handlers.NewConflictReviewHandler(m.conflictReviewSvc)
+
+	// Late-wire the worker's optional collaborators now that the
+	// ConflictReviewService + ActivityEmitter exist. The worker was
+	// constructed earlier (before the services that depend on the
+	// pipeline-adjacent repos) so the late hook is the simplest way
+	// to break the build order without forcing two-phase Init.
+	m.importWorker.WireServices(m.conflictReviewSvc, m.activityEmitter)
+
 	m.recomputeJob = jobs.NewRecomputeJob(m.scoreSvc, settings.ScoreRecomputeInterval, deps.Logger)
 
 	m.activityHandler = handlers.NewActivityHandler(m.activitySvc)
@@ -668,6 +697,7 @@ func (m *MarketingModule) RegisterRoutes(ri *module.RouteInfo) {
 			handlers.RegisterActivityReadRoutes(api, m.activityHandler)
 			handlers.RegisterScoreProfileReadRoutes(api, m.profileHandler)
 			handlers.RegisterSnapshotReadRoutes(api, m.snapshotHandler)
+			handlers.RegisterConflictReviewReadRoutes(api, m.conflictReviewHandler)
 		})
 
 		// IMPORT bucket — separate gate so import access can be
@@ -725,6 +755,18 @@ func (m *MarketingModule) RegisterRoutes(ri *module.RouteInfo) {
 			r.Use(ri.Operator.AuthMW.RequirePermission("marketing.score_profile.write"))
 			api := humachi.New(r, ri.APIConfig)
 			handlers.RegisterScoreProfileWriteRoutes(api, m.profileHandler)
+		})
+
+		// CONFLICT RESOLVE bucket — review-queue resolution. Distinct
+		// from contact.write because operators may be granted
+		// queue-management authority without full record-edit access
+		// (e.g. import operators who triage but don't curate contacts
+		// outside of imports).
+		gated.Group(func(r chi.Router) {
+			r.Use(ri.Operator.AuthMW.RequireInternalTenant())
+			r.Use(ri.Operator.AuthMW.RequirePermission("marketing.conflict.resolve"))
+			api := humachi.New(r, ri.APIConfig)
+			handlers.RegisterConflictReviewWriteRoutes(api, m.conflictReviewHandler)
 		})
 	})
 }

@@ -15,19 +15,23 @@ import (
 
 // Pipeline is the adapter-independent half of the import flow. It
 // reads CanonicalRecord values from a Source, dedups against the
-// existing tenant data, applies the Phase-1 auto-merge / conflict-
-// skip policy, and writes the result to the marketing collections.
+// existing tenant data, applies the auto-merge policy, and writes
+// the result to the marketing collections.
 //
-// Phase 1 scope:
+// Behavior:
 //   - Person dedup primary key: primary_email
 //   - Organization dedup primary key: vat → taxCode fallback
 //   - Auto-merge: fill empty fields, set-union additive arrays
-//     (tags, sources). Conflicts on the dedup-key fields (primary
-//     email, vat, taxCode) are SKIPPED — the field is left alone
-//     and Stats.ConflictsSkipped increments. Phase 3 will route
-//     these to a review queue instead.
+//     (tags, sources).
+//   - Conflicts on the dedup-key fields (primary email, vat,
+//     taxCode): Phase 3 parks the row in marketing_conflict_reviews
+//     when ReviewParker is wired; Phase 1 behavior (increment
+//     Stats.ConflictsSkipped) remains the fallback for tests or
+//     setups that haven't wired the parker.
 //   - Memberships are created (or reactivated) whenever a row
 //     carries both an organization and a person identity.
+//   - When ActivityEmitter is wired, every committed Person row
+//     emits an `imported` Activity (idempotent via dedupKey).
 type Pipeline struct {
 	orgs       *repository.OrganizationRepository
 	persons    *repository.PersonRepository
@@ -37,6 +41,40 @@ type Pipeline struct {
 	importer   string
 	stats      models.ImportJobStats
 	tagSlugMap map[string]string // slug → tag UUID, lazy-cached
+
+	// Optional Phase-3 collaborators. Pipeline accepts nil values for
+	// both so the older NewPipeline signature (used by unit tests +
+	// the Phase-1 path before the worker) keeps working.
+	reviewParker ReviewParker
+	emitter      ActivityEmitter
+}
+
+// ReviewParker is the narrow seam the pipeline uses to write a
+// conflict-review row. Implemented by services.ConflictReviewService —
+// kept abstract so the importers package doesn't reach back into
+// services (which would create a cycle).
+type ReviewParker interface {
+	Park(ctx context.Context, in ParkInput) error
+}
+
+// ActivityEmitter is the narrow seam for the auto-emission helpers.
+// Implemented by services.ActivityEmitter.
+type ActivityEmitter interface {
+	EmitImported(ctx context.Context, personUUID, orgUUID, importJobUUID string)
+}
+
+// ParkInput mirrors services.ParkInput on the wire so the pipeline
+// can issue a Park call without importing the services package. The
+// service-layer type is the canonical one; this declaration only
+// exists to break the import cycle.
+type ParkInput struct {
+	ImportJobUUID      string
+	TargetKind         models.ConflictTargetKind
+	ExistingUUID       string
+	ExistingSnapshot   map[string]any
+	IncomingPayload    map[string]any
+	IncomingActivities []map[string]any
+	Conflicts          []models.ConflictField
 }
 
 // NewPipeline binds a pipeline to a job + the live repositories.
@@ -57,6 +95,20 @@ func NewPipeline(
 		importer:   importerName,
 		tagSlugMap: make(map[string]string),
 	}
+}
+
+// WithReviewParker wires the optional conflict-review Park hook.
+// Returns the pipeline so callers can chain at construction.
+func (p *Pipeline) WithReviewParker(rp ReviewParker) *Pipeline {
+	p.reviewParker = rp
+	return p
+}
+
+// WithActivityEmitter wires the optional auto-emission hook for
+// `imported` Activities.
+func (p *Pipeline) WithActivityEmitter(e ActivityEmitter) *Pipeline {
+	p.emitter = e
+	return p
 }
 
 // Run consumes every record the source yields and returns the
@@ -157,8 +209,7 @@ func (p *Pipeline) upsertOrganization(ctx context.Context, rec CanonicalRecord, 
 	}
 
 	if existing != nil {
-		patch, conflicts := orgMergePatch(existing, rec, tagUUIDs)
-		p.stats.ConflictsSkipped += conflicts
+		patch, conflictFields := orgMergePatchWithDetail(existing, rec, tagUUIDs)
 		if len(patch) > 0 {
 			if err := p.orgs.Update(ctx, existing.UUID, patch); err != nil {
 				return "", err
@@ -168,6 +219,26 @@ func (p *Pipeline) upsertOrganization(ctx context.Context, rec CanonicalRecord, 
 			return "", err
 		}
 		p.stats.OrgsMerged++
+		// Park blocking conflicts (if any) for operator resolution.
+		if len(conflictFields) > 0 {
+			if p.reviewParker != nil {
+				if err := p.reviewParker.Park(ctx, ParkInput{
+					ImportJobUUID:    p.jobUUID,
+					TargetKind:       models.ConflictTargetOrganization,
+					ExistingUUID:     existing.UUID,
+					ExistingSnapshot: orgSnapshotMap(existing),
+					IncomingPayload:  orgIncomingMap(rec),
+					Conflicts:        conflictFields,
+				}); err != nil {
+					// Non-fatal — auto-merge already landed. Bump the
+					// legacy counter so ops still sees the conflict
+					// surface in stats even when parking failed.
+					p.stats.ConflictsSkipped += len(conflictFields)
+				}
+			} else {
+				p.stats.ConflictsSkipped += len(conflictFields)
+			}
+		}
 		return existing.UUID, nil
 	}
 
@@ -196,6 +267,192 @@ func (p *Pipeline) upsertOrganization(ctx context.Context, rec CanonicalRecord, 
 	}
 	p.stats.OrgsCreated++
 	return org.UUID, nil
+}
+
+// orgMergePatchWithDetail is the Phase-3 variant — same auto-merge
+// policy as orgMergePatch, but returns the dedup-key disagreements as
+// a []models.ConflictField slice the pipeline forwards to
+// ConflictReviewService.Park. The legacy orgMergePatch wrapper
+// preserves the Phase-1 (count int) signature for tests that haven't
+// migrated yet.
+func orgMergePatchWithDetail(existing *models.Organization, rec CanonicalRecord, tagUUIDs []string) (bson.M, []models.ConflictField) {
+	patch := bson.M{}
+	conflicts := make([]models.ConflictField, 0)
+
+	if existing.LegalName == "" && rec.OrgLegalName != "" {
+		patch["legalName"] = rec.OrgLegalName
+	}
+	if existing.Website == "" && rec.OrgWebsite != "" {
+		patch["website"] = rec.OrgWebsite
+	}
+	if existing.Kind == "" && rec.OrgKind != "" {
+		patch["kind"] = deriveOrgKind(rec.OrgKind)
+	}
+
+	normalVAT := repository.NormalizeVAT(rec.OrgVAT)
+	if normalVAT != "" {
+		if existing.VAT == "" {
+			patch["vat"] = normalVAT
+		} else if existing.VAT != normalVAT {
+			conflicts = append(conflicts, models.ConflictField{
+				Field:         "vat",
+				ExistingValue: existing.VAT,
+				IncomingValue: normalVAT,
+				Severity:      models.ConflictSeverityBlocking,
+			})
+		}
+	}
+	normalTax := repository.NormalizeTaxCode(rec.OrgTaxCode)
+	if normalTax != "" {
+		if existing.TaxCode == "" {
+			patch["taxCode"] = normalTax
+		} else if existing.TaxCode != normalTax {
+			conflicts = append(conflicts, models.ConflictField{
+				Field:         "taxCode",
+				ExistingValue: existing.TaxCode,
+				IncomingValue: normalTax,
+				Severity:      models.ConflictSeverityBlocking,
+			})
+		}
+	}
+
+	if newTags := mergeStringSet(existing.Tags, tagUUIDs); len(newTags) != len(existing.Tags) {
+		patch["tags"] = newTags
+	}
+	if rec.OrgEmail != "" {
+		emails := mergeEmails(existing.Emails, models.EmailEntry{Address: repository.NormalizeEmail(rec.OrgEmail)})
+		if len(emails) != len(existing.Emails) {
+			patch["emails"] = emails
+		}
+	}
+	if rec.OrgPhone != "" {
+		phones := mergePhones(existing.Phones, models.PhoneEntry{Number: rec.OrgPhone})
+		if len(phones) != len(existing.Phones) {
+			patch["phones"] = phones
+		}
+	}
+	return patch, conflicts
+}
+
+// personMergePatchWithDetail is the Person counterpart of
+// orgMergePatchWithDetail. Returns the patch + a slice of
+// ConflictField for the dedup-key disagreement (today: a different
+// primary email).
+func personMergePatchWithDetail(existing *models.Person, rec CanonicalRecord, tagUUIDs []string) (bson.M, []models.ConflictField) {
+	patch := bson.M{}
+	conflicts := make([]models.ConflictField, 0)
+
+	if existing.FirstName == "" && rec.PersonFirstName != "" {
+		patch["firstName"] = rec.PersonFirstName
+	}
+	if existing.LastName == "" && rec.PersonLastName != "" {
+		patch["lastName"] = rec.PersonLastName
+	}
+	if existing.Title == "" && rec.PersonTitle != "" {
+		patch["title"] = rec.PersonTitle
+	}
+	if existing.Language == "" && rec.PersonLanguage != "" {
+		patch["language"] = rec.PersonLanguage
+	}
+
+	incomingEmail := repository.NormalizeEmail(rec.PersonEmail)
+	if incomingEmail != "" {
+		primaryExisting := primaryEmail(existing.Emails)
+		switch {
+		case primaryExisting == "":
+			patch["emails"] = mergeEmails(existing.Emails, models.EmailEntry{Address: incomingEmail, Primary: true})
+		case primaryExisting == incomingEmail:
+			// no-op
+		default:
+			emails := mergeEmails(existing.Emails, models.EmailEntry{Address: incomingEmail})
+			if len(emails) != len(existing.Emails) {
+				patch["emails"] = emails
+			}
+			conflicts = append(conflicts, models.ConflictField{
+				Field:         "primaryEmail",
+				ExistingValue: primaryExisting,
+				IncomingValue: incomingEmail,
+				Severity:      models.ConflictSeverityBlocking,
+			})
+		}
+	}
+
+	if rec.PersonPhone != "" {
+		phones := mergePhones(existing.Phones, models.PhoneEntry{Number: rec.PersonPhone})
+		if len(phones) != len(existing.Phones) {
+			patch["phones"] = phones
+		}
+	}
+	if newTags := mergeStringSet(existing.Tags, tagUUIDs); len(newTags) != len(existing.Tags) {
+		patch["tags"] = newTags
+	}
+	return patch, conflicts
+}
+
+// orgSnapshotMap turns the existing org into a map suitable for the
+// review row's ExistingSnapshot field. Only the fields the resolver
+// UI surfaces — keep payload size small.
+func orgSnapshotMap(o *models.Organization) map[string]any {
+	if o == nil {
+		return nil
+	}
+	return map[string]any{
+		"uuid":      o.UUID,
+		"legalName": o.LegalName,
+		"vat":       o.VAT,
+		"taxCode":   o.TaxCode,
+		"kind":      o.Kind,
+		"website":   o.Website,
+		"emails":    o.Emails,
+		"phones":    o.Phones,
+		"tags":      o.Tags,
+	}
+}
+
+// orgIncomingMap turns the canonical incoming row into the same
+// snapshot shape so the resolver UI can render existing-vs-incoming
+// side-by-side without per-field branching.
+func orgIncomingMap(rec CanonicalRecord) map[string]any {
+	return map[string]any{
+		"legalName": rec.OrgLegalName,
+		"vat":       repository.NormalizeVAT(rec.OrgVAT),
+		"taxCode":   repository.NormalizeTaxCode(rec.OrgTaxCode),
+		"kind":      rec.OrgKind,
+		"website":   rec.OrgWebsite,
+		"email":     rec.OrgEmail,
+		"phone":     rec.OrgPhone,
+		"tags":      rec.TagSlugs,
+	}
+}
+
+// personSnapshotMap mirrors orgSnapshotMap for Person.
+func personSnapshotMap(p *models.Person) map[string]any {
+	if p == nil {
+		return nil
+	}
+	return map[string]any{
+		"uuid":      p.UUID,
+		"firstName": p.FirstName,
+		"lastName":  p.LastName,
+		"title":     p.Title,
+		"language":  p.Language,
+		"emails":    p.Emails,
+		"phones":    p.Phones,
+		"tags":      p.Tags,
+	}
+}
+
+// personIncomingMap mirrors orgIncomingMap for Person.
+func personIncomingMap(rec CanonicalRecord) map[string]any {
+	return map[string]any{
+		"firstName": rec.PersonFirstName,
+		"lastName":  rec.PersonLastName,
+		"email":     repository.NormalizeEmail(rec.PersonEmail),
+		"phone":     rec.PersonPhone,
+		"title":     rec.PersonTitle,
+		"language":  rec.PersonLanguage,
+		"tags":      rec.TagSlugs,
+	}
 }
 
 // orgMergePatch composes the $set patch for an existing organization
@@ -267,8 +524,7 @@ func (p *Pipeline) upsertPerson(ctx context.Context, rec CanonicalRecord, tagUUI
 	}
 
 	if existing != nil {
-		patch, conflicts := personMergePatch(existing, rec, tagUUIDs)
-		p.stats.ConflictsSkipped += conflicts
+		patch, conflictFields := personMergePatchWithDetail(existing, rec, tagUUIDs)
 		if len(patch) > 0 {
 			if err := p.persons.Update(ctx, existing.UUID, patch); err != nil {
 				return "", err
@@ -278,6 +534,25 @@ func (p *Pipeline) upsertPerson(ctx context.Context, rec CanonicalRecord, tagUUI
 			return "", err
 		}
 		p.stats.PersonsMerged++
+		if len(conflictFields) > 0 {
+			if p.reviewParker != nil {
+				if err := p.reviewParker.Park(ctx, ParkInput{
+					ImportJobUUID:    p.jobUUID,
+					TargetKind:       models.ConflictTargetPerson,
+					ExistingUUID:     existing.UUID,
+					ExistingSnapshot: personSnapshotMap(existing),
+					IncomingPayload:  personIncomingMap(rec),
+					Conflicts:        conflictFields,
+				}); err != nil {
+					p.stats.ConflictsSkipped += len(conflictFields)
+				}
+			} else {
+				p.stats.ConflictsSkipped += len(conflictFields)
+			}
+		}
+		if p.emitter != nil {
+			p.emitter.EmitImported(ctx, existing.UUID, "", p.jobUUID)
+		}
 		return existing.UUID, nil
 	}
 
@@ -307,6 +582,9 @@ func (p *Pipeline) upsertPerson(ctx context.Context, rec CanonicalRecord, tagUUI
 		return "", err
 	}
 	p.stats.PersonsCreated++
+	if p.emitter != nil {
+		p.emitter.EmitImported(ctx, per.UUID, "", p.jobUUID)
+	}
 	return per.UUID, nil
 }
 

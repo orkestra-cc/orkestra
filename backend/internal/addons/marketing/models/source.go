@@ -33,6 +33,13 @@ type ProvenanceSource struct {
 	// source, when the deployment elects to archive raw imports. Empty
 	// when raw archival is not configured.
 	RawPayloadRef string `bson:"rawPayloadRef,omitempty" json:"rawPayloadRef,omitempty"`
+
+	// ConflictReviewUUID points at the marketing_conflict_reviews row
+	// whose resolution produced this source entry (Phase 3). Empty for
+	// rows that did not flow through the review queue. The auto-emission
+	// layer reads this on Membership updates to decide whether to fire
+	// a `merged` Activity.
+	ConflictReviewUUID string `bson:"conflictReviewUuid,omitempty" json:"conflictReviewUuid,omitempty"`
 }
 
 // EmailEntry models one email address attached to an Organization or

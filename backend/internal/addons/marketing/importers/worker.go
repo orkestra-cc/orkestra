@@ -33,18 +33,25 @@ var ErrShutdownTimeout = errors.New("marketing: import worker shutdown timed out
 // crash + restart can resume queued work without needing the
 // original HTTP request to still be alive.
 type WorkerDeps struct {
-	Logger      *slog.Logger
-	JobRepo     *repository.ImportJobRepository
-	OrgRepo     *repository.OrganizationRepository
-	PersonRepo  *repository.PersonRepository
-	MshipRepo   *repository.MembershipRepository
-	TagRepo     *repository.TagRepository
-	Catalog     map[string]Importer
-	SpoolDir    string
-	Concurrency int
-	QueueBuffer int
-	// GracefulStopTimeout caps how long Stop waits for running jobs.
+	Logger              *slog.Logger
+	JobRepo             *repository.ImportJobRepository
+	OrgRepo             *repository.OrganizationRepository
+	PersonRepo          *repository.PersonRepository
+	MshipRepo           *repository.MembershipRepository
+	TagRepo             *repository.TagRepository
+	Catalog             map[string]Importer
+	SpoolDir            string
+	Concurrency         int
+	QueueBuffer         int
 	GracefulStopTimeout time.Duration
+
+	// Phase 3 — optional. ReviewParker is invoked by the pipeline on
+	// blocking dedup conflicts; ActivityEmitter fires the auto-emission
+	// hooks. Both may be nil during boot if the module's Init order
+	// builds the worker before the services — in that case the
+	// services should call Worker.WireServices once available.
+	ReviewParker    ReviewParker
+	ActivityEmitter ActivityEmitter
 }
 
 // WorkerJob is the unit of work the worker pulls off its queue. The
@@ -70,6 +77,19 @@ type Worker struct {
 	queue chan WorkerJob
 	wg    sync.WaitGroup
 	once  sync.Once
+	mu    sync.RWMutex // guards lateWiring fields
+}
+
+// WireServices is the late-wiring hook for the optional Phase-3
+// collaborators (ReviewParker, ActivityEmitter). Module.Init has a
+// boot-order dependency — the worker is built before the services
+// because the services need the worker's catalog reference for tests.
+// Calling WireServices once after both exist completes the wiring.
+func (w *Worker) WireServices(rp ReviewParker, ae ActivityEmitter) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.deps.ReviewParker = rp
+	w.deps.ActivityEmitter = ae
 }
 
 // NewWorker builds a Worker with the given deps. The queue channel is
@@ -246,6 +266,16 @@ func (w *Worker) runPipeline(ctx context.Context, job WorkerJob) (models.ImportJ
 
 	pipe := NewPipeline(job.JobUUID, job.Importer,
 		w.deps.OrgRepo, w.deps.PersonRepo, w.deps.MshipRepo, w.deps.TagRepo)
+	w.mu.RLock()
+	parker := w.deps.ReviewParker
+	emitter := w.deps.ActivityEmitter
+	w.mu.RUnlock()
+	if parker != nil {
+		pipe = pipe.WithReviewParker(parker)
+	}
+	if emitter != nil {
+		pipe = pipe.WithActivityEmitter(emitter)
+	}
 	stats, runErr := pipe.Run(ctx, src)
 	return stats, runErr
 }
