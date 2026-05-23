@@ -142,7 +142,7 @@ replace github.com/orkestra-cc/orkestra-addon-rag => ./internal/addons/rag
 replace github.com/orkestra-cc/orkestra-addon-marketing => ./internal/addons/marketing
 
 require (
-	github.com/alicebob/miniredis/v2 v2.37.0
+	github.com/alicebob/miniredis/v2 v2.38.0
 	github.com/cedar-policy/cedar-go v1.6.0
 	github.com/danielgtaylor/huma/v2 v2.34.1
 	github.com/docker/docker v28.5.2+incompatible
