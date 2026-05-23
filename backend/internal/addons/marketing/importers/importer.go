@@ -19,7 +19,27 @@ package importers
 import (
 	"encoding/json"
 	"io"
+	"time"
+
+	"github.com/orkestra-cc/orkestra-addon-marketing/models"
 )
+
+// EngagementSignal is the per-row engagement event the adapter
+// extracts when the operator opts into "engagement mode" (Phase 4 —
+// closes one of the three Phase-3 leftovers). The pipeline turns each
+// signal into a marketing_activities row after the Person upsert
+// resolves a personUuid; the resulting Activity's ExternalID
+// (engagement:<jobUuid>:<personUuid>:<kind>:<unixNano>) keeps
+// re-imports idempotent at the dedupKey unique index.
+type EngagementSignal struct {
+	Kind       models.ActivityKind
+	OccurredAt time.Time
+	// FallbackOccurredAt is set when the row's occurred_at cell was
+	// missing or unparseable and the adapter substituted time.Now() at
+	// extract time. Bumps Stats.EngagementOccurredAtFallback so
+	// operators can see how much fidelity the import sacrificed.
+	FallbackOccurredAt bool
+}
 
 // DecodeMapping deserializes a persisted ColumnMapping JSON blob.
 // Empty / nil input yields an empty (non-nil) ColumnMapping so the
@@ -101,6 +121,13 @@ type CanonicalRecord struct {
 	TagSlugs     []string
 	CustomFields map[string]any
 	Notes        string
+
+	// EngagementSignals carries engagement-CSV / engagement-Odoo
+	// events the adapter extracted from this row. Empty when engagement
+	// mode is off or the row had no truthy engagement cells. The
+	// pipeline consumes the slice after upsertPerson succeeds, emitting
+	// one Activity per signal via ActivityEmitter.EmitEngagement.
+	EngagementSignals []EngagementSignal
 }
 
 // Source is the adapter-yielded iterator the pipeline consumes. Implementations

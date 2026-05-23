@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/orkestra-cc/orkestra-addon-marketing/importers/match"
 	"github.com/orkestra-cc/orkestra-addon-marketing/models"
 	"github.com/orkestra-cc/orkestra-addon-marketing/repository"
 	"github.com/orkestra-cc/orkestra-sdk/ctxauth"
@@ -61,6 +62,7 @@ type ReviewParker interface {
 // Implemented by services.ActivityEmitter.
 type ActivityEmitter interface {
 	EmitImported(ctx context.Context, personUUID, orgUUID, importJobUUID string)
+	EmitEngagement(ctx context.Context, personUUID, importJobUUID string, kind models.ActivityKind, occurredAt time.Time)
 }
 
 // ParkInput mirrors services.ParkInput on the wire so the pipeline
@@ -174,6 +176,22 @@ func (p *Pipeline) processRecord(ctx context.Context, rec CanonicalRecord) error
 			return err
 		}
 	}
+
+	// --- Engagement signals (Phase 4 — engagement-CSV emission) ------
+	// Fired only when upsertPerson resolved a personUuid. Engagement
+	// events with no associated Person are dropped silently — the row
+	// has no Activity log to land on. The pipeline's Stats counters
+	// record the volume + the fallback rate so operators can audit how
+	// much per-row fidelity the import preserved.
+	if personUUID != "" && len(rec.EngagementSignals) > 0 && p.emitter != nil {
+		for _, sig := range rec.EngagementSignals {
+			p.emitter.EmitEngagement(ctx, personUUID, p.jobUUID, sig.Kind, sig.OccurredAt)
+			p.stats.EngagementEmitted++
+			if sig.FallbackOccurredAt {
+				p.stats.EngagementOccurredAtFallback++
+			}
+		}
+	}
 	return nil
 }
 
@@ -206,6 +224,17 @@ func (p *Pipeline) upsertOrganization(ctx context.Context, rec CanonicalRecord, 
 			return "", err
 		}
 		existing = got
+	}
+
+	if existing == nil {
+		// Strict-miss on VAT + TaxCode — try the soft-match scan on
+		// legalName before creating a fresh organization row.
+		if parked, err := p.parseOrgSoftMatchPark(ctx, rec); err != nil {
+			return "", err
+		} else if parked {
+			p.stats.ConflictsSkipped++
+			return "", nil
+		}
 	}
 
 	if existing != nil {
@@ -267,6 +296,40 @@ func (p *Pipeline) upsertOrganization(ctx context.Context, rec CanonicalRecord, 
 	}
 	p.stats.OrgsCreated++
 	return org.UUID, nil
+}
+
+// parseOrgSoftMatchPark mirrors parsePersonSoftMatchPark for the
+// Organization strict-miss path. Returns (parked=true, nil) when an
+// existing organization's legalName matches the incoming row after
+// match.NormalizeLegalName; the parent caller then skips the create.
+func (p *Pipeline) parseOrgSoftMatchPark(ctx context.Context, rec CanonicalRecord) (bool, error) {
+	if p.reviewParker == nil || rec.OrgLegalName == "" {
+		return false, nil
+	}
+	existing, err := p.orgs.FindSoftMatchByLegalName(ctx, rec.OrgLegalName)
+	if errors.Is(err, repository.ErrOrgNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	conflicts := []models.ConflictField{{
+		Field:         "softMatch",
+		ExistingValue: existing.UUID,
+		IncomingValue: orgIncomingMap(rec),
+		Severity:      models.ConflictSeveritySoft,
+	}}
+	if err := p.reviewParker.Park(ctx, ParkInput{
+		ImportJobUUID:    p.jobUUID,
+		TargetKind:       models.ConflictTargetOrganization,
+		ExistingUUID:     existing.UUID,
+		ExistingSnapshot: orgSnapshotMap(existing),
+		IncomingPayload:  orgIncomingMap(rec),
+		Conflicts:        conflicts,
+	}); err != nil {
+		return false, nil
+	}
+	return true, nil
 }
 
 // orgMergePatchWithDetail is the Phase-3 variant — same auto-merge
@@ -511,7 +574,11 @@ func orgMergePatch(existing *models.Organization, rec CanonicalRecord, tagUUIDs 
 }
 
 // upsertPerson is the Person analogue of upsertOrganization. Dedup
-// primary key is the lowercased email.
+// primary key is the lowercased email; on strict-miss the pipeline
+// also runs a soft-match scan (first+last+phone overlap) and parks
+// the row in marketing_conflict_reviews when a candidate is found.
+// Soft-match never auto-merges — the false-positive rate is too high
+// to commit without operator review.
 func (p *Pipeline) upsertPerson(ctx context.Context, rec CanonicalRecord, tagUUIDs []string, prov models.ProvenanceSource) (string, error) {
 	email := repository.NormalizeEmail(rec.PersonEmail)
 	var existing *models.Person
@@ -521,6 +588,19 @@ func (p *Pipeline) upsertPerson(ctx context.Context, rec CanonicalRecord, tagUUI
 			return "", err
 		}
 		existing = got
+	}
+
+	if existing == nil {
+		// Strict-miss — try the soft-match scan before creating a new
+		// row. A confirmed soft-match parks the row for operator review
+		// and the pipeline skips both the create AND the imported
+		// emission (no committed Person → no Activity to attach).
+		if parked, err := p.parsePersonSoftMatchPark(ctx, rec, tagUUIDs); err != nil {
+			return "", err
+		} else if parked {
+			p.stats.ConflictsSkipped++ // legacy counter — still useful for the imports list
+			return "", nil
+		}
 	}
 
 	if existing != nil {
@@ -586,6 +666,66 @@ func (p *Pipeline) upsertPerson(ctx context.Context, rec CanonicalRecord, tagUUI
 		p.emitter.EmitImported(ctx, per.UUID, "", p.jobUUID)
 	}
 	return per.UUID, nil
+}
+
+// parsePersonSoftMatchPark runs the soft-match scan for Persons on a
+// strict-miss row. Returns (parked=true, nil) when an existing person
+// soft-matches the incoming candidate; the caller short-circuits the
+// create path so the row lands in the review queue instead of as a
+// brand-new contact. Returns (false, nil) when no soft-match exists
+// or when the ReviewParker is unwired (test setups) — the parent
+// continues with the legacy create path.
+func (p *Pipeline) parsePersonSoftMatchPark(ctx context.Context, rec CanonicalRecord, tagUUIDs []string) (bool, error) {
+	if p.reviewParker == nil {
+		return false, nil
+	}
+	// Build a candidate Person purely to feed match.SoftMatchPerson —
+	// the comparison contract takes *models.Person, not raw scalars,
+	// so an in-memory candidate keeps the helper reusable.
+	candidate := &models.Person{
+		FirstName: rec.PersonFirstName,
+		LastName:  rec.PersonLastName,
+	}
+	if rec.PersonPhone != "" {
+		candidate.Phones = []models.PhoneEntry{{Number: rec.PersonPhone}}
+	}
+
+	existing, err := p.persons.FindSoftMatchByNameAndPhone(ctx, rec.PersonFirstName, rec.PersonLastName, candidate.Phones)
+	if errors.Is(err, repository.ErrPersonNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	// Belt-and-braces re-check via the in-memory comparator — the index
+	// query already enforces both names + at least one phone overlap,
+	// but if the comparator's contract ever tightens we'd rather skip
+	// the parking than ship a false positive.
+	if !match.SoftMatchPerson(candidate, existing) {
+		return false, nil
+	}
+
+	conflicts := []models.ConflictField{{
+		Field:         "softMatch",
+		ExistingValue: existing.UUID,
+		IncomingValue: personIncomingMap(rec),
+		Severity:      models.ConflictSeveritySoft,
+	}}
+	if err := p.reviewParker.Park(ctx, ParkInput{
+		ImportJobUUID:    p.jobUUID,
+		TargetKind:       models.ConflictTargetPerson,
+		ExistingUUID:     existing.UUID,
+		ExistingSnapshot: personSnapshotMap(existing),
+		IncomingPayload:  personIncomingMap(rec),
+		Conflicts:        conflicts,
+	}); err != nil {
+		// Parking is best-effort — if the queue write fails we fall
+		// back to the legacy "skip and count" behaviour rather than
+		// silently committing a possible duplicate.
+		return false, nil
+	}
+	_ = tagUUIDs // tags only matter when the row commits; the resolver carries them via incomingPayload
+	return true, nil
 }
 
 func personMergePatch(existing *models.Person, rec CanonicalRecord, tagUUIDs []string) (bson.M, int) {

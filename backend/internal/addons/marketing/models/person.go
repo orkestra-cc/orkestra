@@ -73,6 +73,26 @@ type Person struct {
 	// does not need a write-blocking rebuild.
 	ActiveCardUUIDs []string `bson:"activeCardUuids,omitempty" json:"activeCardUuids,omitempty"`
 
+	// Soft-match denormalisation — populated by the repository on every
+	// Create / Update so the importer's strict-miss pass can query
+	// indexed candidates instead of full-collection scans. Never
+	// surfaced to operators directly; the JSON tag is intentionally
+	// `-` so admin/contact responses keep the shape they had before
+	// the Phase-4 PR-4 leftover landed.
+	//
+	// FirstNameLower / LastNameLower are the case-folded names; the
+	// pipeline gate also requires a phone overlap, so the index is
+	// (tenantId, firstNameLower, lastNameLower) and the second-pass
+	// soft-match still runs match.SoftMatchPerson on each candidate to
+	// confirm phone overlap.
+	//
+	// PhoneLast10 is a multikey of the last-10-digits of every phone in
+	// Phones[], computed via match.NormalizePhone — empty strings are
+	// dropped so the multikey index stays compact.
+	FirstNameLower string   `bson:"firstNameLower,omitempty" json:"-"`
+	LastNameLower  string   `bson:"lastNameLower,omitempty" json:"-"`
+	PhoneLast10    []string `bson:"phoneLast10,omitempty" json:"-"`
+
 	Sources []ProvenanceSource `bson:"sources,omitempty" json:"sources,omitempty"`
 	Notes   string             `bson:"notes,omitempty" json:"notes,omitempty"`
 

@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"log/slog"
+	"strconv"
 	"time"
 
 	"github.com/orkestra-cc/orkestra-addon-marketing/models"
@@ -80,6 +81,39 @@ func (e *ActivityEmitter) EmitImported(ctx context.Context, personUUID, orgUUID,
 		OccurredAt: time.Now().UTC(),
 		Source:     models.ActivitySourceImporter,
 		ExternalID: "imported:" + importJobUUID + ":" + personUUID,
+		Payload:    map[string]any{"importJobUuid": importJobUUID},
+		Refs:       models.ActivityRefs{ImportJobUUID: importJobUUID},
+	})
+}
+
+// EmitEngagement is the direct emission hook the importer pipeline
+// calls for each per-row engagement signal extracted from the source
+// (engagement-CSV columns today; engagement-Odoo mail.message pulls
+// in a future phase). ExternalID anchors the dedupKey on
+// (jobUuid, personUuid, kind, occurredAt.UnixNano) so re-imports of
+// the same payload are no-ops at the dedupKey unique index.
+//
+// Source is "importer" — the activity carries the same provenance as
+// the auto-emitted `imported` row, so timeline filters that segment
+// by source stay coherent.
+func (e *ActivityEmitter) EmitEngagement(ctx context.Context, personUUID, importJobUUID string, kind models.ActivityKind, occurredAt time.Time) {
+	if personUUID == "" || kind == "" {
+		return
+	}
+	if occurredAt.IsZero() {
+		occurredAt = time.Now().UTC()
+	}
+	jobPart := importJobUUID
+	if jobPart == "" {
+		jobPart = "ad-hoc"
+	}
+	external := "engagement:" + jobPart + ":" + personUUID + ":" + string(kind) + ":" + strconv.FormatInt(occurredAt.UTC().UnixNano(), 10)
+	e.emit(ctx, &models.Activity{
+		PersonUUID: personUUID,
+		Kind:       kind,
+		OccurredAt: occurredAt.UTC(),
+		Source:     models.ActivitySourceImporter,
+		ExternalID: external,
 		Payload:    map[string]any{"importJobUuid": importJobUUID},
 		Refs:       models.ActivityRefs{ImportJobUUID: importJobUUID},
 	})

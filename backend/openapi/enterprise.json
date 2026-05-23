@@ -2967,6 +2967,30 @@
         },
         "type": "object"
       },
+      "CorrectionEntryView": {
+        "additionalProperties": false,
+        "properties": {
+          "correctingActivityUuid": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "recordedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "recordedBy": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "correctingActivityUuid",
+          "recordedAt",
+          "reason"
+        ],
+        "type": "object"
+      },
       "CorrectionPayload": {
         "additionalProperties": false,
         "properties": {
@@ -6522,6 +6546,14 @@
             "format": "int64",
             "type": "integer"
           },
+          "engagementEmitted": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "engagementOccurredAtFallback": {
+            "format": "int64",
+            "type": "integer"
+          },
           "membershipsLinked": {
             "format": "int64",
             "type": "integer"
@@ -7953,6 +7985,33 @@
         "required": [
           "conversations",
           "total"
+        ],
+        "type": "object"
+      },
+      "ListCorrectionsResponseBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/ListCorrectionsResponseBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/CorrectionEntryView"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items"
         ],
         "type": "object"
       },
@@ -31425,6 +31484,47 @@
           }
         },
         "summary": "Insert a corrected_by row that supersedes the activity",
+        "tags": [
+          "Marketing - Activities"
+        ]
+      }
+    },
+    "/v1/marketing/activities/{id}/corrections": {
+      "get": {
+        "operationId": "marketing-list-activity-corrections",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListCorrectionsResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "List corrected_by rows superseding the activity, oldest-first",
         "tags": [
           "Marketing - Activities"
         ]

@@ -167,3 +167,80 @@ func drain(src importers.Source) []importers.CanonicalRecord {
 	}
 	return out
 }
+
+// TestAdapterEngagementMode pins the Phase-4 engagement-CSV path:
+//   - engagementMode option flips signal extraction on
+//   - one signal per truthy engagement cell per row, kind from the
+//     header's canonical map
+//   - occurred_at cell parses to the signal's OccurredAt (no fallback)
+//   - falsy cells (0/false/empty) produce no signal
+//   - engagementMode off → no signals even when columns are present
+func TestAdapterEngagementMode(t *testing.T) {
+	csv := strings.Join([]string{
+		"email,email_opened,email_clicked,occurred_at",
+		"jane@example.com,1,true,2026-05-01T10:00:00Z",
+		"john@example.com,0,,2026-05-02 11:30:00",
+		"alice@example.com,yes,1,not-a-timestamp",
+	}, "\n")
+
+	src, err := New().Parse(strings.NewReader(csv), importers.ColumnMapping{
+		Columns: map[string]string{"email": "person.email"},
+		Options: map[string]string{"engagementMode": "true"},
+	})
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	defer src.Close()
+
+	recs := drain(src)
+	if len(recs) != 3 {
+		t.Fatalf("len(records) = %d, want 3", len(recs))
+	}
+
+	// Row 0 — both engagement cells truthy, occurred_at parses.
+	if len(recs[0].EngagementSignals) != 2 {
+		t.Fatalf("rec0 signals = %d, want 2", len(recs[0].EngagementSignals))
+	}
+	if recs[0].EngagementSignals[0].FallbackOccurredAt {
+		t.Errorf("rec0 sig0 should not be fallback (occurred_at parses cleanly)")
+	}
+	if recs[0].EngagementSignals[0].OccurredAt.IsZero() {
+		t.Errorf("rec0 sig0 occurredAt is zero, want parsed value")
+	}
+
+	// Row 1 — only one engagement cell truthy ("0" + ""), occurred_at
+	// "2006-01-02 15:04:05" layout still parses.
+	if len(recs[1].EngagementSignals) != 0 {
+		t.Errorf("rec1 signals = %d, want 0 (both cells falsy)", len(recs[1].EngagementSignals))
+	}
+
+	// Row 2 — both engagement cells truthy, occurred_at unparseable →
+	// fallback.
+	if len(recs[2].EngagementSignals) != 2 {
+		t.Fatalf("rec2 signals = %d, want 2", len(recs[2].EngagementSignals))
+	}
+	for i, sig := range recs[2].EngagementSignals {
+		if !sig.FallbackOccurredAt {
+			t.Errorf("rec2 sig%d FallbackOccurredAt = false, want true (unparseable cell)", i)
+		}
+	}
+}
+
+// TestAdapterEngagementModeOff confirms the option-flag gate: even
+// when the header carries engagement columns, signals are not emitted
+// unless the operator opted in.
+func TestAdapterEngagementModeOff(t *testing.T) {
+	csv := "email,email_opened\njane@example.com,1\n"
+	src, err := New().Parse(strings.NewReader(csv), importers.ColumnMapping{
+		Columns: map[string]string{"email": "person.email"},
+		// engagementMode option not set — should NOT extract signals.
+	})
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	defer src.Close()
+	recs := drain(src)
+	if len(recs[0].EngagementSignals) != 0 {
+		t.Errorf("engagement-mode-off rec.EngagementSignals = %d, want 0", len(recs[0].EngagementSignals))
+	}
+}

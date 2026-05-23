@@ -150,6 +150,27 @@ type CorrectActivityResponse struct {
 	Body ActivityView
 }
 
+// ListCorrectionsInput is the request shape of GET /v1/marketing/activities/{id}/corrections.
+type ListCorrectionsInput struct {
+	ID string `path:"id"`
+}
+
+// CorrectionEntryView mirrors services.CorrectionEntry on the wire.
+// Kept distinct from the service type so OpenAPI rendering stays
+// inside the handlers package.
+type CorrectionEntryView struct {
+	CorrectingActivityUUID string    `json:"correctingActivityUuid"`
+	RecordedAt             time.Time `json:"recordedAt"`
+	RecordedBy             string    `json:"recordedBy,omitempty"`
+	Reason                 string    `json:"reason"`
+}
+
+type ListCorrectionsResponse struct {
+	Body struct {
+		Items []CorrectionEntryView `json:"items"`
+	}
+}
+
 // --- Handler methods ---
 
 // ListForPerson serves GET /v1/marketing/persons/{personId}/activities.
@@ -242,6 +263,30 @@ func (h *ActivityHandler) CreateManual(ctx context.Context, in *CreateActivityIn
 	return &CreateActivityResponse{Body: toActivityView(got)}, nil
 }
 
+// ListCorrections serves GET /v1/marketing/activities/{id}/corrections.
+// Returns every corrected_by row that supersedes the activity,
+// ordered oldest-first. Powers the Timeline tab's "↻ corrected"
+// expander; folds under the same marketing.contact.read gate as the
+// timeline list itself (no separate permission needed).
+func (h *ActivityHandler) ListCorrections(ctx context.Context, in *ListCorrectionsInput) (*ListCorrectionsResponse, error) {
+	got, err := h.svc.ListCorrectionsForActivity(ctx, in.ID)
+	if err != nil {
+		return nil, huma.Error500InternalServerError(err.Error())
+	}
+	items := make([]CorrectionEntryView, 0, len(got))
+	for _, e := range got {
+		items = append(items, CorrectionEntryView{
+			CorrectingActivityUUID: e.CorrectingActivityUUID,
+			RecordedAt:             e.RecordedAt,
+			RecordedBy:             e.RecordedBy,
+			Reason:                 e.Reason,
+		})
+	}
+	resp := &ListCorrectionsResponse{}
+	resp.Body.Items = items
+	return resp, nil
+}
+
 // Correct serves POST /v1/marketing/activities/{id}/correct.
 // Inserts a KindCorrectedBy row pointing at the original via
 // refs.correctsActivityUuid; the next eager + nightly recompute
@@ -271,6 +316,12 @@ func RegisterActivityReadRoutes(api huma.API, h *ActivityHandler) {
 		Method:      http.MethodGet, Path: "/v1/marketing/persons/{personId}/activities",
 		Summary: "List activities for a person", Tags: []string{"Marketing - Activities"},
 	}, h.ListForPerson)
+	huma.Register(api, huma.Operation{
+		OperationID: "marketing-list-activity-corrections",
+		Method:      http.MethodGet, Path: "/v1/marketing/activities/{id}/corrections",
+		Summary: "List corrected_by rows superseding the activity, oldest-first",
+		Tags:    []string{"Marketing - Activities"},
+	}, h.ListCorrections)
 }
 
 // RegisterActivityWriteRoutes — gate with `marketing.activity.write`.

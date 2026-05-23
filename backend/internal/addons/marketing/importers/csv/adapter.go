@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	"github.com/orkestra-cc/orkestra-addon-marketing/importers"
 )
@@ -34,6 +35,16 @@ func (a *Adapter) Name() string { return "csv" }
 //   - "hasHeaderRow": "false" disables the first-row skip + header-
 //     based column lookup (the mapping then must use 0-based column
 //     indexes as keys: "0", "1", "2"…). Default true.
+//   - "engagementMode": "true" enables per-row engagement-signal
+//     extraction (Phase 4 PR-4). The CSV header is scanned for
+//     canonical engagement columns (email_opened, email_clicked,
+//     email_bounced, email_unsubscribed, email_complained,
+//     form_submitted, page_visited, event_attended) and each row's
+//     truthy cells populate CanonicalRecord.EngagementSignals with
+//     the OccurredAt from the row's occurred_at cell (falling back
+//     to time.Now() when missing or unparseable). The pipeline then
+//     emits one marketing_activities row per signal after the
+//     Person upsert resolves a personUuid. Default false.
 func (a *Adapter) Parse(reader io.Reader, mapping importers.ColumnMapping) (importers.Source, error) {
 	delim := ','
 	if d, ok := mapping.Options["delimiter"]; ok && d != "" {
@@ -47,14 +58,21 @@ func (a *Adapter) Parse(reader io.Reader, mapping importers.ColumnMapping) (impo
 		hasHeader = false
 	}
 
+	engagementMode := false
+	if v, ok := mapping.Options["engagementMode"]; ok && strings.EqualFold(v, "true") {
+		engagementMode = true
+	}
+
 	csvReader := csv.NewReader(reader)
 	csvReader.Comma = delim
 	csvReader.FieldsPerRecord = -1 // tolerate uneven row widths
 
 	src := &source{
-		csv:     csvReader,
-		mapping: mapping.Columns,
-		records: make(chan importers.CanonicalRecord, 64),
+		csv:            csvReader,
+		mapping:        mapping.Columns,
+		records:        make(chan importers.CanonicalRecord, 64),
+		engagementMode: engagementMode,
+		occurredAtCol:  -1,
 	}
 
 	// Resolve header → canonical-key index lookup up front.
@@ -67,12 +85,17 @@ func (a *Adapter) Parse(reader io.Reader, mapping importers.ColumnMapping) (impo
 		if len(src.fieldIdx) == 0 {
 			return nil, errors.New("csv: none of the mapping columns matched the header row")
 		}
+		if src.engagementMode {
+			src.engagementCols, src.occurredAtCol, _ = DetectEngagementColumns(header)
+		}
 	} else {
 		// Numeric-key mapping. Keys are "0", "1", …
 		src.fieldIdx = buildNumericFieldIndex(mapping.Columns)
 		if len(src.fieldIdx) == 0 {
 			return nil, errors.New("csv: mapping is empty and hasHeaderRow=false leaves no columns to read")
 		}
+		// Engagement detection requires a header row to match column
+		// names against the canonical engagement column set.
 	}
 
 	go src.run()
@@ -86,6 +109,11 @@ type source struct {
 	records  chan importers.CanonicalRecord
 	err      error
 	closed   bool
+
+	// Engagement-mode state (Phase 4 — closes the Phase-3 leftover).
+	engagementMode bool
+	engagementCols []EngagementColumn
+	occurredAtCol  int // -1 when the header does not carry occurred_at
 }
 
 func (s *source) Records() <-chan importers.CanonicalRecord { return s.records }
@@ -134,7 +162,92 @@ func (s *source) rowToRecord(row []string, rowIdx int) importers.CanonicalRecord
 		}
 		assignCanonical(&rec, canonical, val)
 	}
+	if s.engagementMode && len(s.engagementCols) > 0 {
+		rec.EngagementSignals = s.extractEngagement(row)
+	}
 	return rec
+}
+
+// extractEngagement walks the detected engagement columns and emits
+// one signal per truthy cell. Truthy is permissive — "1", "true",
+// "yes", "y", or any non-empty non-falsy value (the operator's CSV
+// export shapes vary too much to lock to a single convention).
+//
+// OccurredAt comes from the row's occurred_at cell when present and
+// parseable; the fallback is time.Now().UTC() with FallbackOccurredAt=true
+// so the pipeline can bump a fidelity counter the operator surfaces in
+// the imports list.
+func (s *source) extractEngagement(row []string) []importers.EngagementSignal {
+	occurredAt, fallback := s.rowOccurredAt(row)
+	out := make([]importers.EngagementSignal, 0, len(s.engagementCols))
+	for _, col := range s.engagementCols {
+		if col.ColumnIndex >= len(row) {
+			continue
+		}
+		if !isTruthy(row[col.ColumnIndex]) {
+			continue
+		}
+		out = append(out, importers.EngagementSignal{
+			Kind:               col.Kind,
+			OccurredAt:         occurredAt,
+			FallbackOccurredAt: fallback,
+		})
+	}
+	return out
+}
+
+// rowOccurredAt reads the row's occurred_at cell, returning the parsed
+// time + a fallback flag. When the column is absent, the cell is
+// empty, or the value cannot be parsed by any of the supported layouts,
+// returns (time.Now().UTC(), true).
+func (s *source) rowOccurredAt(row []string) (time.Time, bool) {
+	now := time.Now().UTC()
+	if s.occurredAtCol < 0 || s.occurredAtCol >= len(row) {
+		return now, true
+	}
+	raw := strings.TrimSpace(row[s.occurredAtCol])
+	if raw == "" {
+		return now, true
+	}
+	if t, ok := parseOccurredAt(raw); ok {
+		return t, false
+	}
+	return now, true
+}
+
+// parseOccurredAt is the permissive timestamp parser used by the
+// engagement-CSV extractor. The accepted layouts cover the formats
+// the dominant CSV exporters emit:
+//
+//   - RFC3339 / RFC3339Nano — ISO-8601 with timezone.
+//   - "2006-01-02 15:04:05" — common SQL-style export.
+//   - "2006-01-02" — date-only; clamps to midnight UTC.
+//
+// Anything else falls through to "" → caller substitutes time.Now().
+func parseOccurredAt(raw string) (time.Time, bool) {
+	for _, layout := range []string{
+		time.RFC3339Nano,
+		time.RFC3339,
+		"2006-01-02 15:04:05",
+		"2006-01-02",
+	} {
+		if t, err := time.Parse(layout, raw); err == nil {
+			return t.UTC(), true
+		}
+	}
+	return time.Time{}, false
+}
+
+func isTruthy(raw string) bool {
+	v := strings.ToLower(strings.TrimSpace(raw))
+	if v == "" {
+		return false
+	}
+	switch v {
+	case "0", "false", "no", "n", "off":
+		return false
+	}
+	return true
 }
 
 // assignCanonical routes one canonical-key value into the right

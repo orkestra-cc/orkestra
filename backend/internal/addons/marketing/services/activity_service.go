@@ -213,3 +213,47 @@ func (s *ActivityService) ListForPerson(ctx context.Context, personUUID string, 
 	f.PersonUUID = personUUID
 	return s.repo.List(ctx, f)
 }
+
+// CorrectionEntry is the per-correction projection the contact-detail
+// Timeline expander renders against a `corrected_by`-chained activity.
+// Each entry refers to one correcting Activity (Kind == KindCorrectedBy
+// with refs.correctsActivityUuid pointing back at the original) and
+// surfaces just the fields the UI sidebar needs — keep the shape
+// stable so the React renderer doesn't have to walk Activity.Payload
+// blindly.
+type CorrectionEntry struct {
+	CorrectingActivityUUID string    `json:"correctingActivityUuid"`
+	RecordedAt             time.Time `json:"recordedAt"`
+	RecordedBy             string    `json:"recordedBy,omitempty"`
+	Reason                 string    `json:"reason"`
+}
+
+// ListCorrectionsForActivity returns every CorrectionEntry that
+// supersedes the original activity, ordered oldest-first. The
+// scoring engine already excludes the original via the
+// refs.correctsActivityUuid index; this helper is purely for the
+// audit-trail surface in the Timeline UI.
+//
+// A missing reason in the payload surfaces as an empty string — the
+// API contract requires a reason on Correct() but Phase 2 rows from
+// before the requirement may carry an empty value; the caller can
+// render "(no reason recorded)" rather than have this method reject.
+func (s *ActivityService) ListCorrectionsForActivity(ctx context.Context, originalUUID string) ([]CorrectionEntry, error) {
+	rows, err := s.repo.ListCorrectionsForActivity(ctx, originalUUID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]CorrectionEntry, 0, len(rows))
+	for i := range rows {
+		entry := CorrectionEntry{
+			CorrectingActivityUUID: rows[i].UUID,
+			RecordedAt:             rows[i].RecordedAt,
+			RecordedBy:             rows[i].CreatedBy,
+		}
+		if reason, ok := rows[i].Payload["reason"].(string); ok {
+			entry.Reason = reason
+		}
+		out = append(out, entry)
+	}
+	return out, nil
+}

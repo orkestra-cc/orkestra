@@ -54,6 +54,21 @@ type ImportJobStats struct {
 	// taxCode, the field is left alone and this counter increments).
 	// Phase 3 replaces this with a routed-to-review-queue flow.
 	ConflictsSkipped int `bson:"conflictsSkipped,omitempty" json:"conflictsSkipped,omitempty"`
+
+	// EngagementEmitted counts the marketing_activities rows the
+	// importer auto-emitted from per-row engagement signals
+	// (Phase 4 engagement-CSV flow). The Activity collection's
+	// dedupKey unique index makes a re-import of the same payload
+	// a no-op at the write boundary; this counter reflects the
+	// *intent* (one bump per signal), not the post-dedup write count.
+	EngagementEmitted int `bson:"engagementEmitted,omitempty" json:"engagementEmitted,omitempty"`
+
+	// EngagementOccurredAtFallback counts engagement signals where
+	// the row's occurred_at cell was missing or unparseable and the
+	// adapter substituted time.Now() at extract time. Useful for
+	// operators auditing the import — a high ratio means the source
+	// data lost the original event timestamps.
+	EngagementOccurredAtFallback int `bson:"engagementOccurredAtFallback,omitempty" json:"engagementOccurredAtFallback,omitempty"`
 }
 
 // ImportJob is the persisted audit record of one import run. Sources[]

@@ -59,6 +59,13 @@ type Organization struct {
 	Sources []ProvenanceSource `bson:"sources,omitempty" json:"sources,omitempty"`
 	Notes   string             `bson:"notes,omitempty" json:"notes,omitempty"`
 
+	// LegalNameNormalized is the lower-cased + whitespace-collapsed
+	// form of LegalName, populated by the repository on every Create /
+	// Update. Backs the soft-match dedup pass that runs after VAT /
+	// TaxCode strict-miss; the importer never auto-merges on this
+	// signal — every soft-match hit parks in marketing_conflict_reviews.
+	LegalNameNormalized string `bson:"legalNameNormalized,omitempty" json:"-"`
+
 	CreatedAt time.Time `bson:"createdAt" json:"createdAt"`
 	UpdatedAt time.Time `bson:"updatedAt" json:"updatedAt"`
 	CreatedBy string    `bson:"createdBy,omitempty" json:"createdBy,omitempty"`

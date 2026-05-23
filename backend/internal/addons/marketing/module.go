@@ -190,6 +190,16 @@ func (m *MarketingModule) Collections() []module.CollectionSpec {
 				{Field: "tenantId", Direction: 1},
 				{Field: "tags", Direction: 1},
 			}},
+			// Phase 4 (PR-4 soft-match leftover) — backs
+			// OrganizationRepository.FindSoftMatchByLegalName. Sparse
+			// so legacy rows without the denorm don't perturb the
+			// index size; the unique constraint is intentionally not
+			// applied because two different legal entities can share a
+			// canonicalized name (e.g. "ACME SRL" in two regions).
+			{OrderedKeys: []module.IndexKey{
+				{Field: "tenantId", Direction: 1},
+				{Field: "legalNameNormalized", Direction: 1},
+			}, Sparse: true},
 			{OrderedKeys: []module.IndexKey{
 				{Field: "tenantId", Direction: 1},
 				{Field: "updatedAt", Direction: -1},
@@ -213,6 +223,21 @@ func (m *MarketingModule) Collections() []module.CollectionSpec {
 			{OrderedKeys: []module.IndexKey{
 				{Field: "tenantId", Direction: 1},
 				{Field: "activeCardUuids", Direction: 1},
+			}, Sparse: true},
+			// Phase 4 (PR-4 soft-match leftover) — back the
+			// PersonRepository.FindSoftMatchByNameAndPhone path. The
+			// (firstNameLower, lastNameLower) compound carries the
+			// names; the multikey phoneLast10 narrows to candidates
+			// sharing a normalized number. Both are sparse so legacy
+			// rows without the denorm don't bloat the index.
+			{OrderedKeys: []module.IndexKey{
+				{Field: "tenantId", Direction: 1},
+				{Field: "firstNameLower", Direction: 1},
+				{Field: "lastNameLower", Direction: 1},
+			}, Sparse: true},
+			{OrderedKeys: []module.IndexKey{
+				{Field: "tenantId", Direction: 1},
+				{Field: "phoneLast10", Direction: 1},
 			}, Sparse: true},
 			{OrderedKeys: []module.IndexKey{
 				{Field: "tenantId", Direction: 1},

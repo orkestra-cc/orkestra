@@ -147,6 +147,39 @@ func (r *ActivityRepository) List(ctx context.Context, f ActivityListFilter) ([]
 	return out, nil
 }
 
+// ListCorrectionsForActivity returns every corrected_by row that
+// points at originalUUID via refs.correctsActivityUuid, ordered by
+// recordedAt ascending (oldest first → the UI walks the chain from
+// the original out to the most recent correction). The sparse index
+// on `refs.correctsActivityUuid` serves the read; no fallback scan
+// path needed.
+//
+// Powers the contact-detail Timeline's "↻ corrected · view note"
+// expander (Phase 4 PR-5 surface) — the operator clicks the badge
+// and the modal lists every reason payload in order.
+func (r *ActivityRepository) ListCorrectionsForActivity(ctx context.Context, originalUUID string) ([]models.Activity, error) {
+	if originalUUID == "" {
+		return nil, nil
+	}
+	filter, err := tenantrepo.Scope(ctx, bson.M{
+		"refs.correctsActivityUuid": originalUUID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	opts := options.Find().SetSort(bson.D{{Key: "recordedAt", Value: 1}})
+	cur, err := r.coll.Find(ctx, filter, opts)
+	if err != nil {
+		return nil, err
+	}
+	defer cur.Close(ctx)
+	out := make([]models.Activity, 0)
+	if err := cur.All(ctx, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ListAllForPerson returns every activity for the person, ordered by
 // OccurredAt ascending. Used by ScoreService.recomputeOne for a
 // from-scratch recompute against the full timeline. No limit — the

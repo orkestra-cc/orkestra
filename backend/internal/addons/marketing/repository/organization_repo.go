@@ -5,6 +5,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/orkestra-cc/orkestra-addon-marketing/importers/match"
 	"github.com/orkestra-cc/orkestra-addon-marketing/models"
 	"github.com/orkestra-cc/orkestra-sdk/tenantrepo"
 	"go.mongodb.org/mongo-driver/bson"
@@ -45,6 +46,7 @@ func (r *OrganizationRepository) Create(ctx context.Context, org *models.Organiz
 	org.TenantID = tenantID
 	org.VAT = NormalizeVAT(org.VAT)
 	org.TaxCode = NormalizeTaxCode(org.TaxCode)
+	org.LegalNameNormalized = match.NormalizeLegalName(org.LegalName)
 	now := time.Now().UTC()
 	org.CreatedAt = now
 	org.UpdatedAt = now
@@ -101,6 +103,31 @@ func (r *OrganizationRepository) LookupByTaxCode(ctx context.Context, taxCode st
 		return nil, ErrOrgNotFound
 	}
 	filter, err := tenantrepo.Scope(ctx, bson.M{"taxCode": taxCode})
+	if err != nil {
+		return nil, err
+	}
+	var out models.Organization
+	if err := r.coll.FindOne(ctx, filter).Decode(&out); err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return nil, ErrOrgNotFound
+		}
+		return nil, err
+	}
+	return &out, nil
+}
+
+// FindSoftMatchByLegalName backs the soft-match dedup pass for
+// organizations. The pipeline calls it after VAT + TaxCode strict
+// miss; an exact match on legalNameNormalized routes the row to the
+// review queue rather than auto-merging (the legal-name signal is too
+// noisy to commit without operator review). Returns ErrOrgNotFound
+// when no candidate matches.
+func (r *OrganizationRepository) FindSoftMatchByLegalName(ctx context.Context, legalName string) (*models.Organization, error) {
+	n := match.NormalizeLegalName(legalName)
+	if n == "" {
+		return nil, ErrOrgNotFound
+	}
+	filter, err := tenantrepo.Scope(ctx, bson.M{"legalNameNormalized": n})
 	if err != nil {
 		return nil, err
 	}
@@ -181,6 +208,11 @@ func (r *OrganizationRepository) Update(ctx context.Context, uuid string, patch 
 	}
 	if v, ok := patch["taxCode"].(string); ok {
 		patch["taxCode"] = NormalizeTaxCode(v)
+	}
+	// Soft-match denorm: keep legalNameNormalized in lock-step with
+	// the source-of-truth legalName field.
+	if v, ok := patch["legalName"].(string); ok {
+		patch["legalNameNormalized"] = match.NormalizeLegalName(v)
 	}
 	patch["updatedAt"] = time.Now().UTC()
 	filter, err := tenantrepo.Scope(ctx, bson.M{"uuid": uuid})
