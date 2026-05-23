@@ -66,11 +66,13 @@ For VMs that should run a specific addon SKU (no source build, no Chainguard reg
 | `saas` | `ghcr.io/orkestra-cc/orkestra/backend:saas` | subscriptions, payments, compliance, identity |
 | `enterprise` | `ghcr.io/orkestra-cc/orkestra/backend:enterprise` (alias of `:latest`) | every addon |
 
+> 🇮🇹 **`billing` and `company` are Italy-only.** They speak FatturaPA / SDI and the Italian business registry. Outside Italy, start from the `starter` or `saas` profile — `billing` will boot but the addon endpoints are useless without an Italian fiscal context.
+
 ```bash
 make init                                                          # first time only — scaffolds docker/.env + JWT keys
 cd docker
 docker compose -f docker-compose.infra.yml up -d                   # mongodb + redis
-docker compose -f docker-compose.billing.yml --env-file .env up -d # any profile name
+docker compose -f docker-compose.starter.yml --env-file .env up -d # or billing | ai | saas | enterprise
 
 # Generate an administrator dev token to log in (from the repo root):
 cd .. && ORKESTRA_API_URL=http://localhost:3000 ./scripts/devtoken.sh administrator
@@ -78,7 +80,27 @@ cd .. && ORKESTRA_API_URL=http://localhost:3000 ./scripts/devtoken.sh administra
 
 `make init` is idempotent — re-runs leave existing secrets alone. It also creates the `orkestra-network` Docker bridge so you don't need to do it manually. The same operations are wrapped by `./orkestra.sh profile <name> <op>`; see [Managing the stack](#managing-the-stack).
 
-**OAuth, SMTP, Stripe, AI keys are optional.** Email/password login works out of the box. Add the rest at `/admin/modules` after first login, or pre-seed by uncommenting the relevant lines in `docker/.env` before `docker compose up`.
+**OAuth, SMTP, Stripe, AI keys are optional.** Email/password login works out of the box. Add the rest at `/admin/modules` after first login (see [OAuth setup guide](docs/site/operating/oauth-providers.mdx) for provider-specific instructions on Google, Apple, GitHub, Discord), or pre-seed by uncommenting the relevant lines in `docker/.env` before `docker compose up`.
+
+### Forking the image registry
+
+The compose files default to `ghcr.io/orkestra-cc/orkestra/backend:<sku>`. To run images built from your own fork (private registry, internal CI, air-gapped deploy), override at the shell:
+
+```bash
+BACKEND_IMAGE_REPO=ghcr.io/your-org/orkestra \
+FRONTEND_IMAGE_REPO=ghcr.io/your-org/orkestra \
+docker compose -f docker-compose.starter.yml --env-file .env up -d
+```
+
+To build the images yourself first (matching the `enterprise` SKU that ships every addon):
+
+```bash
+cd backend && make build-enterprise              # produces ./bin/orkestra-enterprise
+docker build -f Dockerfile -t ghcr.io/your-org/orkestra/backend:enterprise .
+docker push ghcr.io/your-org/orkestra/backend:enterprise
+```
+
+The five published SKUs (`starter` / `billing` / `ai` / `saas` / `enterprise`) are produced by the `.github/workflows/backend.yml` matrix on every push to `dev` / `main` — see that workflow for the canonical recipe and reuse it in your fork.
 
 ## Full development stack
 
@@ -133,9 +155,9 @@ Run `./orkestra.sh --help` for the full command surface.
 
 | Module | Purpose |
 | --- | --- |
-| `billing` | Italian electronic invoicing (FatturaPA/SDI) |
+| `billing` 🇮🇹 | Italian electronic invoicing (FatturaPA/SDI) — IT-only, useless outside Italy |
 | `documents` | PDF generation via Gotenberg |
-| `company` | Italian business-registry lookup |
+| `company` 🇮🇹 | Italian business-registry lookup — IT-only, useless outside Italy |
 | `graph` | Memgraph knowledge graph |
 | `aimodels` | Multi-provider AI model management (Ollama, OpenAI, Anthropic) |
 | `rag` | Document ingestion + retrieval-augmented generation |
