@@ -1,0 +1,254 @@
+---
+title: Troubleshooting
+sidebar_position: 9
+description: Symptoms, diagnoses, and fixes for the most common Orkestra deployment problems.
+---
+
+# Troubleshooting
+
+A catalog of symptoms and their fixes, indexed by what you'll actually see in the log / browser / curl output. If you hit something not on this list, open a [GitHub issue](https://github.com/orkestra-cc/orkestra/issues) and we'll add it.
+
+## Backend won't start
+
+### Symptom: container exits immediately, log says `JWT_PRIVATE_KEY_PATH: file not found`
+
+The JWT key pair wasn't generated. From a fresh checkout, this happens if you ran `docker compose up` without first running `make init`.
+
+```bash
+make init                 # generates docker/keys/jwt-{private,public}.pem
+sudo systemctl restart orkestra.service     # or docker compose up -d
+```
+
+### Symptom: `panic: open /app/keys/jwt-private.pem: permission denied`
+
+The host file's owner doesn't match the container user (UID 1000). Common after `make init --force` run as root.
+
+```bash
+sudo chown -R 1000:1000 docker/keys
+sudo chmod 600 docker/keys/jwt-private.pem
+sudo chmod 644 docker/keys/jwt-public.pem
+```
+
+### Symptom: `failed to connect to MongoDB: server selection timeout`
+
+Three sub-cases:
+
+1. **Infra not started.** Run `docker compose -f docker-compose.infra.yml --env-file .env up -d` first.
+2. **Password mismatch.** The infra compose seeded Mongo with a different password than what's in `docker/.env` now. Wipe Mongo data with `docker compose -f docker-compose.infra.yml down -v` (destructive!) and re-init.
+3. **First-boot SCRAM race.** Mongo accepts TCP before SCRAM user provisioning completes. The backend retries with backoff (up to 20 attempts, 500ms→5s — see [shared/database/NewMongoConnection](https://github.com/orkestra-cc/orkestra/blob/main/backend/internal/shared/database/)) — give it 30 s. If it still fails after 30 s, look at infra logs (`docker logs orkestra-mongodb`).
+
+### Symptom: `failed to connect to Redis: AUTH failed`
+
+Same root cause as the Mongo case (password mismatch between `.env` and what Redis was seeded with). Fix:
+
+```bash
+docker compose -f docker-compose.infra.yml down
+docker volume rm orkestra-infra_orkestra-redis-data
+docker compose -f docker-compose.infra.yml --env-file .env up -d
+```
+
+### Symptom: `bind: address already in use`
+
+Another process holds port 3000 (default backend) or 8080 (default frontend). Either stop it:
+
+```bash
+sudo ss -lntp | grep :3000
+sudo kill <pid>
+```
+
+Or override in `docker/.env`:
+
+```bash
+BACKEND_PORT=3100
+FRONTEND_PORT=8181
+```
+
+## Login fails
+
+### Symptom: login returns 200 but the next request is 401
+
+The browser is silently dropping your cookie. Almost always `COOKIE_SECURE=true` over plain HTTP (insecure cookies on HTTP, secure cookies are HTTPS-only).
+
+For dev:
+
+```bash
+# docker/.env
+COOKIE_SECURE=false
+```
+
+For production, the right fix is HTTPS, not `COOKIE_SECURE=false`. See [Reverse-proxy with Caddy](./deployment/reverse-proxy-caddy).
+
+### Symptom: `401 audience_mismatch`
+
+You're hitting the wrong audience host with a token minted for the other audience. E.g. operator token on `api.example.com`. Mint a token for the right audience:
+
+```bash
+./scripts/devtoken.sh administrator --audience client    # for api.* surface
+./scripts/devtoken.sh administrator                       # for console.* surface (default)
+```
+
+See [ADR-0003 host split](/adrs/three-audience-host-split) for the full audience model.
+
+### Symptom: OAuth callback returns `redirect_uri_mismatch`
+
+The redirect URI you registered with the OAuth provider doesn't match what the backend computed. Two sub-cases:
+
+1. **Wrong host registered.** Provider expects `http://console.localhost:3000/v1/auth/oauth/google/callback`, you registered `http://localhost:3000/...`. Re-register with the operator host.
+2. **HTTP vs HTTPS mismatch.** Production registers `https://...`, backend redirected with `http://...`. Set `BACKEND_URL=https://console.example.com` in `docker/.env`.
+
+See [OAuth Providers](./oauth-providers) for the per-provider walkthroughs.
+
+### Symptom: login works, then logout immediately re-logs you in
+
+Two backends share a Mongo database but issue different JWT signing keys. The cookie from backend A is rejected by backend B (which then asks the browser to re-auth), but A's session is still good.
+
+Standardize on one JWT key pair across every replica. In K8s, mount the same `Secret` into every Pod (see [Kubernetes overview](./deployment/kubernetes-overview)).
+
+## Frontend issues
+
+### Symptom: blank page, browser console says `Failed to load module script: Expected a JavaScript module script`
+
+Vite dev server is serving an HTML page where JS was expected — usually a 404 served via the SPA fallback. Two sub-cases:
+
+1. **Vite hasn't started yet.** First boot of `npm install && npm run dev` takes 30–60 s. Watch with `docker compose logs -f orkestra-frontend-admin`.
+2. **`VITE_API_URL` points at a host the browser can't reach.** The browser fetches Vite-built bundles from the API URL; if it's set to a Docker-internal hostname, the browser fails. Set `VITE_API_URL=http://localhost:3000` (or your public hostname) in `docker/.env`.
+
+### Symptom: 404 dev-token page
+
+The `dev` addon isn't compiled into your SKU, or `ENV=production` disables the dev token endpoint.
+
+- For local: use the `starter` SKU (or any other) — they all include the `dev` addon.
+- For staging-like: keep `ENV=development` or `staging`, NOT `production`.
+- For production: the dev addon is correctly disabled. Use OAuth or password login.
+
+### Symptom: CORS error in browser console
+
+The browser blocked the request because the API origin isn't in the backend's allowlist. Two checks:
+
+1. The hostname the browser hits is in `OPERATOR_CORS_ORIGINS` (operator surface) or `CLIENT_CORS_ORIGINS` (client surface), comma-separated.
+2. Both vars fall back to the legacy `CORS_ORIGINS` when empty — but the per-audience vars take priority.
+
+```bash
+# docker/.env
+OPERATOR_CORS_ORIGINS=https://console.example.com
+CLIENT_CORS_ORIGINS=https://client.example.com
+```
+
+Restart the backend after editing.
+
+## Module / admin UI issues
+
+### Symptom: an addon I expected isn't in `/admin/modules`
+
+The addon isn't compiled into your SKU. Check the SKU compose file you launched:
+
+```bash
+docker exec orkestra-backend-starter env | grep ORKESTRA_PROFILE
+# ORKESTRA_PROFILE=starter   → no optional addons compiled in
+```
+
+Switch to a SKU that includes the addon (see the [Backend module map](https://github.com/orkestra-cc/orkestra/blob/main/backend/CLAUDE.md#module-system) for which SKU ships which addon), or build your own image with the right `BUILD_TAGS`.
+
+### Symptom: enabling an addon at `/admin/modules` returns 409
+
+Dependency conflict — you're trying to enable an addon whose dependency isn't enabled. The error body lists which one.
+
+Enable the dependency first, then re-enable the dependent addon. The registry auto-resolves transitive deps when you start from the top, but enforces them strictly on individual toggle.
+
+### Symptom: addon-managed container (`orkestra-hindsight`, `orkestra-memgraph`) isn't visible in `docker compose ps`
+
+By design. Addon-owned infrastructure containers are managed by the backend via the host Docker socket, not by Compose. Discover them with:
+
+```bash
+docker ps --filter label=orkestra.managed=true
+```
+
+See [docker/CLAUDE.md "Backend-managed Containers"](https://github.com/orkestra-cc/orkestra/blob/main/docker/CLAUDE.md#backend-managed-containers-not-visible-to-compose) for the full lifecycle.
+
+### Symptom: backend can't start the addon container — `permission denied on /var/run/docker.sock`
+
+The backend container isn't in the host's `docker` group. Check `DOCKER_GID` in `docker/.env`:
+
+```bash
+getent group docker | cut -d: -f3    # on the host
+```
+
+Match that value in `docker/.env`, restart the backend. Common values: 999 (Debian), 1001 (Ubuntu / WSL2).
+
+Alternatively, set `CONTAINER_CONTROL_ENABLED=false` to disable backend-managed containers entirely (you'll have to start Hindsight / Memgraph manually).
+
+## Deploy / CI issues
+
+### Symptom: pre-commit `end-of-file-fixer` keeps adding a newline to badge SVGs, blocks the push
+
+Recurring drift — the CI coverage-badge bot writes SVGs without a final newline, the local hook adds one. Workaround: small hygiene commit:
+
+```bash
+git add .github/badges/*.svg
+git commit -m "chore(badges): trailing newline on coverage svg"
+git push origin dev
+```
+
+The real fix (patch the badge bot to emit a newline) is on the backlog.
+
+### Symptom: `make ci` red but `make ci-backend` green
+
+A different surface is broken. Check which:
+
+```bash
+make ci         # shows what changed and what ran
+```
+
+`ci-frontend-admin` or `ci-frontend-client` failures are usually a stale `npm run typecheck` — run `cd frontend-admin && npm ci` to refresh `node_modules`.
+
+### Symptom: tenantscope analyzer fires on a new core module's Mongo write
+
+You added a new core module (`internal/core/<name>/`) with a Mongo repo that doesn't derive its filter from `tenantrepo.Scope`. Two options:
+
+1. **The collection IS tenant-scoped.** Use `tenantrepo.MustScope(ctx)` to derive the filter.
+2. **The collection is global (system-config, sentinel, etc.).** Add `//tenantscope:allow <reason>` on the offending line — see [project_ci_release_blockers](https://github.com/orkestra-cc/orkestra/blob/main/.claude/memory) for prior examples (the logging module's `log_levels` collection is a worked case).
+
+### Symptom: openapi-check fails on dev tip
+
+You added / renamed / removed a Huma route and didn't regenerate `backend/openapi/enterprise.json`. Fix:
+
+```bash
+cd backend
+make openapi-dump
+git add openapi/enterprise.json
+git commit -m "chore(backend): regenerate openapi spec"
+```
+
+## WSL2-specific
+
+### Symptom: AIR doesn't reload when I save a Go file
+
+The Windows filesystem mounted into WSL2 doesn't fire inotify events reliably. Two workarounds:
+
+1. **Keep the source on the WSL2 native filesystem** (`/home/<user>/...`, not `/mnt/c/...`). The dev compose's bind-mount picks up changes correctly when the source is on ext4.
+2. **Manual rebuild** when AIR misses an event:
+   ```bash
+   docker exec orkestra-backend-dev go build -o /app/tmp/main ./cmd/server
+   docker restart orkestra-backend-dev
+   ```
+
+## Observability
+
+### Symptom: `OTEL exporter error: connect: connection refused`
+
+`OTEL_EXPORTER_OTLP_ENDPOINT` points at a collector that isn't running. Either bring up the observability stack:
+
+```bash
+./orkestra.sh observability up
+```
+
+Or set `OTEL_TRACES_ENABLED=false` and `OTEL_LOGS_ENABLED=false` to silence the exporter (the SDK falls back to no-op).
+
+### Symptom: Loki labels exceed cardinality
+
+Per [ADR-0002](/adrs/metrics-label-schema), the route label uses Chi route templates (`/v1/users/{id}`), never the raw path. If you see unbounded route cardinality in Prometheus, a custom handler is registering routes outside the Chi router — fix the registration to use `chi.Mux.Method()` / `huma.Register()` so the template is captured.
+
+## Still stuck?
+
+- **Search existing issues:** [github.com/orkestra-cc/orkestra/issues](https://github.com/orkestra-cc/orkestra/issues)
+- **Open a new one** with: the exact error message, the SKU you're using, the output of `docker compose -f <your-compose>.yml --env-file .env ps`, and the last 50 lines of `docker compose logs backend`.

@@ -1,0 +1,48 @@
+---
+title: Deployment
+sidebar_position: 1
+description: Three deployment shapes for Orkestra — single-VM with Compose, behind a Caddy reverse-proxy, or on Kubernetes.
+---
+
+# Deployment
+
+Orkestra ships as a Go binary plus a React SPA. Three deployment shapes are documented in this section, in increasing order of operational complexity:
+
+| Shape | When to use | Guide |
+| --- | --- | --- |
+| **Single VM, Docker Compose** | Solo operator, small team, internal tooling, evaluation | [Single VM](./single-vm) |
+| **VM + Caddy reverse-proxy** | Same as above but with TLS, automatic Let's Encrypt, and the per-audience host split (ADR-0003) wired correctly | [Reverse-proxy with Caddy](./reverse-proxy-caddy) |
+| **Kubernetes** | Multi-replica, autoscaling, integration with existing K8s tooling | [Kubernetes overview](./kubernetes-overview) |
+
+Orkestra does **not** ship a Helm chart today — see the [Kubernetes overview](./kubernetes-overview) for the YAML you'd write and the roadmap.
+
+## Compose-file inventory
+
+Regardless of shape, you'll be reading one or more of these compose files. They live in [`docker/`](https://github.com/orkestra-cc/orkestra/tree/main/docker):
+
+| File | Purpose |
+| --- | --- |
+| `docker-compose.infra.yml` | Always-on infra: MongoDB, Redis (and conditional Gotenberg / Memgraph / Hindsight under `manual-only` profile) |
+| `docker-compose.starter.yml` … `docker-compose.enterprise.yml` | One per SKU — pulls a pre-built image from GHCR (`ghcr.io/orkestra-cc/orkestra/backend:<sku>`) |
+| `docker-compose.dev-public.yml` | Source-build + AIR hot reload on public Alpine images |
+| `docker-compose.dev.yml` | Same as above, on Chainguard `dhi.io/*` hardened images (opt-in) |
+| `docker-compose.staging.yml` | Staging-like behavior + AIR hot reload — long-lived dev VMs |
+| `docker-compose.prod.yml` | Optimized production stack |
+| `docker-compose.ai-sidecar.yml` | Optional: split AI module chain into a separate binary |
+| `docker-compose.observability.yml` | Optional: self-hosted Tempo + Prometheus + Loki + Grafana |
+
+## What lives in `.env` vs `/admin/modules`
+
+**Process-scoped infrastructure** (Mongo URI, Redis URL, JWT keys, cookies, encryption keys) lives in `docker/.env`, read by the backend at boot.
+
+**Module configuration** (OAuth credentials, OpenAPI tokens, Stripe keys, SMTP, AI provider keys, per-module enable flags) lives in MongoDB (`module_configs` collection) and is edited at `/admin/modules`. Secrets are AES-256-GCM-encrypted at rest.
+
+A module's `ConfigSchema().EnvVar` is consulted **only on first-boot seeding** — env-var changes after that boot have no effect. The single source of truth is the admin UI. See [docker/CLAUDE.md "What belongs in .env / compose vs /admin/modules"](https://github.com/orkestra-cc/orkestra/blob/main/docker/CLAUDE.md) for the full bucket split.
+
+## Related guides
+
+- [Backup and restore](/operating/backup-and-restore)
+- [Cookie hardening across tiers](/operating/cookie-hardening-cross-tier)
+- [Troubleshooting](/operating/troubleshooting)
+- [OAuth Providers](/operating/oauth-providers) — provider-specific setup
+- [Stripe & Payments](/operating/payments-stripe)

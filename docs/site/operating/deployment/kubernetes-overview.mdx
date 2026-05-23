@@ -1,0 +1,306 @@
+---
+title: Kubernetes overview
+sidebar_position: 4
+description: Deploying Orkestra on Kubernetes — Deployment + Service + Ingress YAML, plus what's missing today.
+---
+
+# Kubernetes overview
+
+Orkestra does **not** ship a Helm chart today. If you want to run Orkestra on Kubernetes, this guide walks through the minimum YAML you'd write to get the backend + MongoDB + Redis up behind an nginx Ingress.
+
+If you'd benefit from a maintained Helm chart, open an issue on the [monorepo](https://github.com/orkestra-cc/orkestra/issues) — it's a documented item on the [ROADMAP](https://github.com/orkestra-cc/orkestra/blob/main/ROADMAP.md) but not yet started.
+
+## Architectural assumptions
+
+- **Single namespace** named `orkestra`. Multi-tenant separation happens inside the application (org-scoped data), not at the Kubernetes layer.
+- **Stateless backend** — the Go binary holds no in-memory session state. Refresh tokens live in Redis, primary data in Mongo. Horizontal scaling works as-is.
+- **Managed DBs preferred in production** — MongoDB and Redis run great in Kubernetes but operating stateful workloads at scale is its own discipline. Most operators will plug in MongoDB Atlas / DocumentDB / Cosmos for the primary DB and a managed Redis (ElastiCache, Memorystore, Upstash) for the cache. The YAML below shows an in-cluster MongoDB / Redis as the starting point.
+
+## Step 1 — Namespace + secrets
+
+```yaml
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: orkestra
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: orkestra-secrets
+  namespace: orkestra
+type: Opaque
+stringData:
+  COOKIE_SECRET: <openssl rand -hex 32>
+  OAUTH_TOKEN_ENCRYPTION_KEY: <openssl rand -hex 32>
+  ORKESTRA_KMS_MASTER_KEY: <openssl rand -hex 32>
+  MONGO_ROOT_PASSWORD: <openssl rand -hex 16>
+  REDIS_PASSWORD: <openssl rand -hex 16>
+  JWT_PRIVATE_KEY: |
+    -----BEGIN RSA PRIVATE KEY-----
+    <paste contents of docker/keys/jwt-private.pem here>
+    -----END RSA PRIVATE KEY-----
+  JWT_PUBLIC_KEY: |
+    -----BEGIN PUBLIC KEY-----
+    <paste contents of docker/keys/jwt-public.pem here>
+    -----END PUBLIC KEY-----
+```
+
+Generate fresh secrets locally with `make init` then copy them in, or use `sealed-secrets` / `external-secrets-operator` / a real secret manager.
+
+## Step 2 — MongoDB + Redis (single-replica, in-cluster)
+
+```yaml
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mongodb
+  namespace: orkestra
+spec:
+  serviceName: mongodb
+  replicas: 1
+  selector:
+    matchLabels: {app: mongodb}
+  template:
+    metadata:
+      labels: {app: mongodb}
+    spec:
+      containers:
+      - name: mongodb
+        image: mongo:8.0
+        ports: [{containerPort: 27017}]
+        env:
+        - name: MONGO_INITDB_ROOT_USERNAME
+          value: admin
+        - name: MONGO_INITDB_ROOT_PASSWORD
+          valueFrom:
+            secretKeyRef: {name: orkestra-secrets, key: MONGO_ROOT_PASSWORD}
+        volumeMounts:
+        - name: data
+          mountPath: /data/db
+  volumeClaimTemplates:
+  - metadata: {name: data}
+    spec:
+      accessModes: [ReadWriteOnce]
+      resources:
+        requests: {storage: 20Gi}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: mongodb, namespace: orkestra}
+spec:
+  selector: {app: mongodb}
+  ports: [{port: 27017, targetPort: 27017}]
+  clusterIP: None    # Headless — StatefulSet pods get stable DNS
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata: {name: redis, namespace: orkestra}
+spec:
+  serviceName: redis
+  replicas: 1
+  selector: {matchLabels: {app: redis}}
+  template:
+    metadata: {labels: {app: redis}}
+    spec:
+      containers:
+      - name: redis
+        image: redis:8.2-alpine
+        args:
+        - sh
+        - -c
+        - "exec redis-server --requirepass \"$REDIS_PASSWORD\""
+        ports: [{containerPort: 6379}]
+        env:
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef: {name: orkestra-secrets, key: REDIS_PASSWORD}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: redis, namespace: orkestra}
+spec:
+  selector: {app: redis}
+  ports: [{port: 6379, targetPort: 6379}]
+```
+
+## Step 3 — Backend Deployment + Service
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: orkestra-backend, namespace: orkestra}
+spec:
+  replicas: 2
+  selector: {matchLabels: {app: orkestra-backend}}
+  template:
+    metadata: {labels: {app: orkestra-backend}}
+    spec:
+      containers:
+      - name: backend
+        image: ghcr.io/orkestra-cc/orkestra/backend:enterprise
+        ports: [{containerPort: 3000}]
+        env:
+        - name: ENV
+          value: production
+        - name: PORT
+          value: "3000"
+        - name: MONGO_URI
+          value: mongodb://admin:$(MONGO_ROOT_PASSWORD)@mongodb:27017/orkestra?authSource=admin
+        - name: MONGO_ROOT_PASSWORD
+          valueFrom: {secretKeyRef: {name: orkestra-secrets, key: MONGO_ROOT_PASSWORD}}
+        - name: REDIS_URL
+          value: redis://:$(REDIS_PASSWORD)@redis:6379/0
+        - name: REDIS_PASSWORD
+          valueFrom: {secretKeyRef: {name: orkestra-secrets, key: REDIS_PASSWORD}}
+        - name: COOKIE_SECRET
+          valueFrom: {secretKeyRef: {name: orkestra-secrets, key: COOKIE_SECRET}}
+        - name: OAUTH_TOKEN_ENCRYPTION_KEY
+          valueFrom: {secretKeyRef: {name: orkestra-secrets, key: OAUTH_TOKEN_ENCRYPTION_KEY}}
+        - name: ORKESTRA_KMS_MASTER_KEY
+          valueFrom: {secretKeyRef: {name: orkestra-secrets, key: ORKESTRA_KMS_MASTER_KEY}}
+        - name: JWT_PRIVATE_KEY_PATH
+          value: /app/keys/jwt-private.pem
+        - name: JWT_PUBLIC_KEY_PATH
+          value: /app/keys/jwt-public.pem
+        - name: BACKEND_URL
+          value: https://console.example.com
+        - name: FRONTEND_URL
+          value: https://console.example.com
+        - name: CONSOLE_HOST
+          value: console.example.com
+        - name: CLIENT_API_HOST
+          value: api.example.com
+        - name: COOKIE_SECURE
+          value: "true"
+        - name: COOKIE_SAME_SITE
+          value: strict
+        - name: OPERATOR_COOKIE_DOMAIN
+          value: console.example.com
+        - name: CLIENT_COOKIE_DOMAIN
+          value: api.example.com
+        - name: OPERATOR_CORS_ORIGINS
+          value: https://console.example.com
+        - name: CLIENT_CORS_ORIGINS
+          value: https://client.example.com
+        - name: CONTAINER_CONTROL_ENABLED
+          value: "false"    # K8s manages container lifecycle, not the backend
+        - name: LOG_LEVEL
+          value: info
+        - name: PRETTY_LOGS
+          value: "false"    # structured JSON logs to stdout
+        volumeMounts:
+        - name: jwt-keys
+          mountPath: /app/keys
+          readOnly: true
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 3000
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 3000
+          initialDelaySeconds: 30
+          periodSeconds: 30
+        resources:
+          requests: {cpu: 100m, memory: 256Mi}
+          limits: {cpu: 1000m, memory: 1Gi}
+      volumes:
+      - name: jwt-keys
+        projected:
+          sources:
+          - secret:
+              name: orkestra-secrets
+              items:
+              - key: JWT_PRIVATE_KEY
+                path: jwt-private.pem
+              - key: JWT_PUBLIC_KEY
+                path: jwt-public.pem
+---
+apiVersion: v1
+kind: Service
+metadata: {name: orkestra-backend, namespace: orkestra}
+spec:
+  selector: {app: orkestra-backend}
+  ports: [{port: 80, targetPort: 3000}]
+```
+
+## Step 4 — Ingress (nginx-ingress-controller)
+
+Per-audience host split — two Ingress objects, one for the operator console, one for the client API.
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: orkestra-operator
+  namespace: orkestra
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/proxy-body-size: 50m
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      more_set_headers "Strict-Transport-Security: max-age=31536000; includeSubDomains; preload";
+spec:
+  ingressClassName: nginx
+  tls:
+  - hosts: [console.example.com]
+    secretName: orkestra-operator-tls
+  rules:
+  - host: console.example.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service: {name: orkestra-backend, port: {number: 80}}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: orkestra-client-api
+  namespace: orkestra
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+spec:
+  ingressClassName: nginx
+  tls:
+  - hosts: [api.example.com]
+    secretName: orkestra-client-api-tls
+  rules:
+  - host: api.example.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service: {name: orkestra-backend, port: {number: 80}}
+```
+
+cert-manager will provision Let's Encrypt certs automatically. The two Ingress objects share the same backend Service — the host mux inside the Go binary dispatches by `Host` header (ADR-0003).
+
+## Step 5 — Smoke tests
+
+```bash
+kubectl -n orkestra get pods
+# orkestra-backend-...     2/2     Running
+# mongodb-0                1/1     Running
+# redis-0                  1/1     Running
+
+curl -fsS https://console.example.com/health
+curl -fsS https://api.example.com/health
+```
+
+## What's missing today
+
+- **Helm chart** — not yet authored. The YAML above is hand-written for clarity.
+- **HorizontalPodAutoscaler examples** — pattern is `target: 70% CPU on backend Deployment`.
+- **NetworkPolicy** — Mongo / Redis pods should only accept traffic from the backend Pod. Add `NetworkPolicy` objects per your CNI's capability.
+- **Module-owned infrastructure containers** (`orkestra-hindsight`, `orkestra-memgraph`) — these are managed by the backend via the host Docker socket in Compose deployments. On K8s, set `CONTAINER_CONTROL_ENABLED=false` and run Hindsight / Memgraph as separate Deployments inside the same namespace. The backend will discover them by service name (`HINDSIGHT_URL=http://hindsight.orkestra.svc.cluster.local:8888`, `GRAPH_URI=bolt://memgraph.orkestra.svc.cluster.local:7687`).
+- **AI sidecar split** — set `AI_SERVICE_URL` to a separate Service that points at the `ghcr.io/orkestra-cc/orkestra/ai-service:enterprise` image; see [backend/CLAUDE.md AI Service Sidecar](https://github.com/orkestra-cc/orkestra/blob/main/CLAUDE.md#ai-service-sidecar-optional-split).
+
+## Want a Helm chart?
+
+[Open an issue](https://github.com/orkestra-cc/orkestra/issues/new) so we can size demand. The chart structure would be straightforward: one `values.yaml` for the env-var bucket, one `templates/` directory mirroring the YAML above. PRs welcome — see [CONTRIBUTING.md](https://github.com/orkestra-cc/orkestra/blob/main/CONTRIBUTING.md).
