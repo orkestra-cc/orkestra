@@ -894,6 +894,18 @@ set_env_config() {
 }
 
 fullstack_init_env() {
+    if [ ! -f "$ENV_FILE" ]; then
+        p_warn "docker/.env not found — looks like a fresh checkout."
+        if [ -t 0 ] && [ -t 1 ]; then
+            if ask_yes_no "Run scripts/init.sh now to scaffold .env + JWT keys?" "y"; then
+                bash "$SCRIPT_DIR/scripts/init.sh" || die "init failed — fix the error above and retry"
+            else
+                die "Cannot proceed without docker/.env. Run: make init (or scripts/init.sh)"
+            fi
+        else
+            die "docker/.env missing. Non-interactive shell — run: make init (or scripts/init.sh) first."
+        fi
+    fi
     if ! detect_environment > /dev/null 2>&1; then
         die "Cannot detect ENV. Set ENV=development|staging|production in docker/.env or as a shell variable."
     fi
@@ -1828,6 +1840,11 @@ ${c_bold}USAGE${c_reset}
   ./orkestra.sh                    ${c_muted}# interactive TUI (profile menu)${c_reset}
   ./orkestra.sh <command> [args]   ${c_muted}# non-interactive CLI${c_reset}
 
+${c_bold}FIRST-TIME SETUP${c_reset}
+  ${c_accent}init${c_reset} [--force] [--yes]            Scaffold docker/.env (random secrets) +
+                                   RS256 JWT keys. Idempotent — preserves
+                                   existing files unless --force.
+
 ${c_bold}SKU PROFILE${c_reset} ${c_muted}(pulls published image from GHCR)${c_reset}
   ${c_accent}profile <name> deploy${c_reset} [--pull]    Start SKU stack (--pull refreshes the image)
   ${c_accent}profile <name> stop${c_reset}               Stop containers (volumes kept)
@@ -1894,6 +1911,12 @@ cli_dispatch() {
         -v | --version | version)
             show_version
             exit 0
+            ;;
+
+        init)
+            # Delegate to scripts/init.sh. Forwards every flag so
+            # `./orkestra.sh init --force` works the same as `make init-force`.
+            exec bash "$SCRIPT_DIR/scripts/init.sh" "$@"
             ;;
 
         profile)

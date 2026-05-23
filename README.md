@@ -67,19 +67,25 @@ For VMs that should run a specific addon SKU (no source build, no Chainguard reg
 | `enterprise` | `ghcr.io/orkestra-cc/orkestra/backend:enterprise` (alias of `:latest`) | every addon |
 
 ```bash
+make init                                                          # first time only — scaffolds docker/.env + JWT keys
 cd docker
-docker network create orkestra-network                              # first time only
-docker compose -f docker-compose.infra.yml up -d                    # mongodb + redis
-docker compose -f docker-compose.billing.yml --env-file .env up -d  # any profile name
+docker compose -f docker-compose.infra.yml up -d                   # mongodb + redis
+docker compose -f docker-compose.billing.yml --env-file .env up -d # any profile name
+
+# Generate an administrator dev token to log in (from the repo root):
+cd .. && ORKESTRA_API_URL=http://localhost:3000 ./scripts/devtoken.sh administrator
 ```
 
-The same operations are wrapped by `./orkestra.sh profile <name> <op>`. See [Managing the stack](#managing-the-stack) below.
+`make init` is idempotent — re-runs leave existing secrets alone. It also creates the `orkestra-network` Docker bridge so you don't need to do it manually. The same operations are wrapped by `./orkestra.sh profile <name> <op>`; see [Managing the stack](#managing-the-stack).
+
+**OAuth, SMTP, Stripe, AI keys are optional.** Email/password login works out of the box. Add the rest at `/admin/modules` after first login, or pre-seed by uncommenting the relevant lines in `docker/.env` before `docker compose up`.
 
 ## Full development stack
 
-For hot-reload Go development with AIR and the full addon fleet (Gotenberg, Hindsight, etc.), use the dev compose. Note that this stack uses Chainguard hardened images (`dhi.io/*`) and requires registry access.
+For hot-reload Go development with AIR and the full addon fleet (Gotenberg, Hindsight, etc.), use the dev compose. Note that this stack currently uses Chainguard hardened images (`dhi.io/*`) and requires registry access — a public-image variant is on the roadmap (fork-readiness Phase 3).
 
 ```bash
+make init                                       # first time only
 ./orkestra.sh                                   # interactive TUI; pick "Full stack"
 # or manually:
 cd docker

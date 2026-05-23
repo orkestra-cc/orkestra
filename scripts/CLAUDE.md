@@ -63,9 +63,10 @@ The following scripts used to exist and have been folded into `./orkestra.sh`:
 
 These are called by `orkestra.sh` or used directly during development:
 
+- **init.sh**: Bootstrap a fresh checkout — copy `docker/.env.example` → `docker/.env`, fill `REPLACE_WITH_RANDOM_HEX_*` placeholders with `openssl rand -hex N`, generate RS256 JWT keys, ensure `orkestra-network` docker bridge. Idempotent (preserves existing files unless `--force`). Invoked by `make init`, `./orkestra.sh init`, and auto-prompted by `fullstack_init_env()` when `.env` is missing. POSIX-bash safe (`[ ]` / `case`, no `[[ ]]` or `<<<`).
 - **env-detect.sh**: Sourced by `orkestra.sh` to detect ENV from `docker/.env`
 - **env-validate.sh**: Validates environment files (`./scripts/env-validate.sh all`)
-- **generate-jwt-keys.sh**: Generates the RS256 JWT key pair
+- **generate-jwt-keys.sh**: Generates the RS256 JWT key pair (called by `init.sh`)
 - **install-air.sh**: Installs AIR hot-reload tool
 - **devtoken.sh**: Generates dev JWT tokens for testing (`ORKESTRA_API_URL=... ./scripts/devtoken.sh administrator`). Pass `--audience client` (or `-a client`) to mint an `aud=client` token that satisfies the `api.*` surface; default is `operator` (ADR-0003 PR-D D-10).
 - **refresh-coverage-badge.sh**: Refreshes a coverage badge SVG under `.github/badges/` from a project's coverage artifact. Called by the `coverage-badge` job in `.github/workflows/{backend,frontend-admin,mobile}.yml` on push to dev/main. Usage: `scripts/refresh-coverage-badge.sh <backend|frontend-admin|mobile>`. Project-aware: parses `go tool cover` (backend), `coverage-summary.json` via `jq` (admin), or `lcov.info` via awk (mobile).

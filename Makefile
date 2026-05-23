@@ -22,6 +22,10 @@
 help:
 	@echo "Orkestra — common make targets:"
 	@echo ""
+	@echo "First-time setup:"
+	@echo "  make init                - Scaffold docker/.env with random secrets + RS256 JWT keys"
+	@echo "  make init-force          - Re-init even if .env / keys exist (invalidates tokens)"
+	@echo ""
 	@echo "Stack lifecycle (wrappers over ./orkestra.sh):"
 	@echo "  make up                  - Launch the interactive TUI to deploy a stack"
 	@echo "  make down                - Stop application services + infra (volumes kept)"
@@ -300,6 +304,16 @@ install:
 
 install-hooks:
 	@pre-commit install --install-hooks
+
+# Bootstrap docker/.env (random secrets) + JWT keys for a fresh checkout.
+# Idempotent — preserves existing files unless --force is passed.
+# Implementation lives in scripts/init.sh so orkestra.sh can call the
+# same logic via `./orkestra.sh init`.
+init:
+	@bash scripts/init.sh
+
+init-force:
+	@bash scripts/init.sh --force
 
 # ---- Top-level CI dispatch ----
 

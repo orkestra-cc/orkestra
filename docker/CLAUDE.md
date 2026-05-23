@@ -195,16 +195,16 @@ Separate infrastructure from applications. One infra compose, three full-stack c
 ### Prerequisites
 
 ```bash
-# Create external network (required for all environments)
-docker network create orkestra-network
-
-# Copy environment template and configure (first time only)
-cd docker
-cp .env.example .env.development
-cp .env.example .env.staging
-cp .env.example .env.production
-# Edit each file with appropriate values
+# First-time setup — scaffolds docker/.env with random secrets, generates RS256
+# JWT keys under docker/keys/, and creates the orkestra-network bridge.
+# Idempotent: re-runs preserve existing files unless --force.
+make init                # from the repo root
+# equivalently:
+./orkestra.sh init       # same script, via the TUI entry point
+bash scripts/init.sh     # direct invocation
 ```
+
+For a multi-environment setup (separate `.env.development` / `.env.staging` / `.env.production`), copy the generated `docker/.env` to per-env files after `make init` and tweak each. See [Three-Stage Environment Workflow](#three-stage-environment-workflow) above.
 
 ### Using orkestra.sh (Recommended)
 
