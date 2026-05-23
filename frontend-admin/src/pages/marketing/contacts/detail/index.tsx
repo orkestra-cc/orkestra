@@ -22,14 +22,22 @@ import {
 } from 'store/api/marketingApi';
 import TimelineTab from './TimelineTab';
 import ScoresTab from './ScoresTab';
+import CardsTab from './CardsTab';
 
-type TabKey = 'overview' | 'memberships' | 'timeline' | 'scores' | 'sources';
+type TabKey =
+  | 'overview'
+  | 'memberships'
+  | 'timeline'
+  | 'scores'
+  | 'cards'
+  | 'sources';
 const DEFAULT_TAB: TabKey = 'overview';
 
 const readTab = (raw: string | null | undefined): TabKey => {
   if (raw === 'memberships') return 'memberships';
   if (raw === 'timeline') return 'timeline';
   if (raw === 'scores') return 'scores';
+  if (raw === 'cards') return 'cards';
   if (raw === 'sources') return 'sources';
   return 'overview';
 };
@@ -133,6 +141,16 @@ const ContactDetailPage: React.FC = () => {
               <Nav.Item>
                 <Nav.Link eventKey="scores">
                   {t('marketing.contacts.detail.tabs.scores')}
+                </Nav.Link>
+              </Nav.Item>
+              <Nav.Item>
+                <Nav.Link eventKey="cards">
+                  {t('marketing.contacts.detail.tabs.cards')}{' '}
+                  {person.activeCardUuids?.length ? (
+                    <Badge bg="secondary" pill>
+                      {person.activeCardUuids.length}
+                    </Badge>
+                  ) : null}
                 </Nav.Link>
               </Nav.Item>
               <Nav.Item>
@@ -339,6 +357,10 @@ const ContactDetailPage: React.FC = () => {
 
               <Tab.Pane eventKey="scores" mountOnEnter unmountOnExit>
                 <ScoresTab personId={id} />
+              </Tab.Pane>
+
+              <Tab.Pane eventKey="cards" mountOnEnter unmountOnExit>
+                <CardsTab personId={id} />
               </Tab.Pane>
 
               <Tab.Pane eventKey="sources">

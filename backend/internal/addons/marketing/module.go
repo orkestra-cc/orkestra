@@ -511,6 +511,7 @@ func (m *MarketingModule) NavItems() []module.NavItemSpec {
 			{Name: "Custom Fields", Icon: "list-check", Path: "/marketing/custom-fields", Active: true},
 			{Name: "Imports", Icon: "file-import", Path: "/marketing/imports", Active: true},
 			{Name: "Reviews", Icon: "balance-scale", Path: "/marketing/reviews", Active: true},
+			{Name: "Card Types", Icon: "id-card", Path: "/marketing/card-types", Active: true},
 			{Name: "Scoring", Icon: "chart-line", Path: "/marketing/scoring", Active: true},
 		},
 	}}

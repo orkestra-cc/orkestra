@@ -1470,6 +1470,7 @@
           "memberships": "Memberships",
           "timeline": "Timeline",
           "scores": "Scores",
+          "cards": "Cards",
           "sources": "Sources"
         },
         "emailsHeader": "Emails",
@@ -1628,6 +1629,11 @@
         "errorInvalidJson": "Mapping is not valid JSON: {{message}}",
         "progressLabel": "Submitting to the runner…",
         "runImport": "Run import",
+        "engagementMode": {
+          "label": "Engagement mode",
+          "help": "Treat email_opened / email_clicked / email_bounced / email_unsubscribed / email_complained / form_submitted / page_visited / event_attended columns as engagement events. Each truthy cell becomes an Activity with the row's occurred_at timestamp.",
+          "detected": "Engagement columns detected ({{columns}}). Enable Engagement mode to log them as Activities."
+        },
         "result": {
           "headingQueued": "Import queued",
           "queuedSubtitle": "The worker picks up the job in a moment. Open the imports list to watch the status transition.",
@@ -1797,6 +1803,120 @@
         "colPerson": "Person",
         "colValue": "Value",
         "colActivities": "Activities"
+      }
+    },
+    "cardTypes": {
+      "title": "Card Types",
+      "subtitle": "Templates for the cards your operators can issue to contacts. The {seq:N} placeholder is filled server-side.",
+      "listHeader": "Types",
+      "new": "+ New",
+      "loading": "Loading card types…",
+      "empty": "No card types yet. Create one to start issuing cards.",
+      "badgeActive": "active",
+      "badgeInactive": "inactive",
+      "allowMultipleShort": "multi-issue",
+      "selectPrompt": "Pick a card type on the left, or create a new one.",
+      "confirmDelete": "Delete card type \"{{name}}\"? Only allowed when no cards of this type exist.",
+      "form": {
+        "newTitle": "New card type",
+        "editTitle": "Edit {{name}}",
+        "keyLabel": "Key",
+        "keyHelp": "Slug-like identifier, unique per tenant. Immutable once saved.",
+        "displayNameLabel": "Display name",
+        "descriptionLabel": "Description",
+        "codeFormatLabel": "Code format",
+        "codeFormatHelp": "Placeholders: {YYYY} {YY} {MM} {DD} {seq:N} {rand:N}. Preview:",
+        "tiersLabel": "Tiers (comma-separated)",
+        "tiersHelp": "Optional. Card.tier must be one of these.",
+        "benefitsLabel": "Default benefits (comma-separated)",
+        "allowMultipleLabel": "Allow multiple cards of this type per person",
+        "allowMultipleHelp": "Disable to enforce at-most-one active card per (person, type) at the service layer.",
+        "activeLabel": "Active (operators can issue cards of this type)",
+        "save": "Save",
+        "saving": "Saving…",
+        "delete": "Delete type",
+        "saveError": "Could not save the card type. Check the code format grammar."
+      }
+    },
+    "cards": {
+      "loading": "Loading cards…",
+      "empty": "No cards issued to this contact.",
+      "actionError": "Action failed. Try again or refresh the page.",
+      "cancel": "Cancel",
+      "submitting": "Working…",
+      "col": {
+        "code": "Code",
+        "type": "Type",
+        "tier": "Tier",
+        "status": "Status",
+        "issuedAt": "Issued",
+        "expiresAt": "Expires"
+      },
+      "status": {
+        "active": "active",
+        "suspended": "suspended",
+        "revoked": "revoked"
+      },
+      "actions": {
+        "issue": "Issue card",
+        "suspend": "Suspend",
+        "reinstate": "Reinstate",
+        "revoke": "Revoke"
+      },
+      "issue": {
+        "title": "Issue a card",
+        "error": "Could not issue the card. The backend rejected the request.",
+        "typeLabel": "Card type",
+        "typePlaceholder": "Select a type…",
+        "tierLabel": "Tier",
+        "tierPlaceholder": "Select a tier…",
+        "benefitsLabel": "Benefits (comma-separated)",
+        "benefitsHelp": "Pre-filled from the type's default benefits — edit to override per instance.",
+        "expiresLabel": "Expires at (optional)",
+        "notesLabel": "Notes (optional)",
+        "cancel": "Cancel",
+        "submit": "Issue card",
+        "submitting": "Issuing…"
+      },
+      "suspend": {
+        "title": "Suspend card {{code}}",
+        "body": "Suspending temporarily disables the card. The operator can reinstate it later from this same tab.",
+        "reasonLabel": "Reason",
+        "submit": "Suspend card"
+      },
+      "reinstate": {
+        "title": "Reinstate card {{code}}",
+        "body": "Reinstating restores the card to active status. The original suspend reason is cleared.",
+        "submit": "Reinstate card"
+      },
+      "revoke": {
+        "title": "Revoke card {{code}}",
+        "warning": "Revoking is irreversible. The card cannot be reinstated and is removed from the contact's active cards list.",
+        "reasonLabel": "Reason",
+        "confirmCodeLabel": "Retype the card code ({{code}}) to confirm",
+        "submit": "Revoke card"
+      }
+    },
+    "corrections": {
+      "rowAction": "Correct",
+      "badge": {
+        "label": "corrected",
+        "title": "View the correction chain for this activity"
+      },
+      "modal": {
+        "title": "Correct activity",
+        "body": "Insert a corrected_by row that supersedes the {{kind}} entry from {{when}}. The next score recompute will exclude the original.",
+        "reasonLabel": "Reason",
+        "reasonHelp": "Free-form. Stored on the corrected_by row's payload and shown in the timeline expander.",
+        "submit": "Submit correction",
+        "submitting": "Submitting…",
+        "cancel": "Cancel",
+        "error": "Could not submit the correction. Try again."
+      },
+      "expander": {
+        "loading": "Loading corrections…",
+        "empty": "No corrections recorded for this activity.",
+        "noReason": "(no reason recorded)"
       }
     }
   },

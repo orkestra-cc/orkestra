@@ -82,6 +82,57 @@ const acceptForAdapter = (a: Adapter): string => {
   }
 };
 
+// CANONICAL_ENGAGEMENT_COLUMNS mirrors the backend's
+// engagementColumnKinds map in importers/csv/engagement.go. Used by
+// the wizard's auto-detect hint to nudge the operator toward
+// engagement mode when their CSV header carries any of these names.
+const CANONICAL_ENGAGEMENT_COLUMNS = [
+  'email_opened',
+  'email_clicked',
+  'email_bounced',
+  'email_unsubscribed',
+  'email_complained',
+  'form_submitted',
+  'page_visited',
+  'event_attended'
+];
+
+// applyEngagementMode flips the `options.engagementMode` key on the
+// mapping JSON to match the checkbox state. Surgical edit — the rest
+// of the mapping text round-trips unchanged so operators don't lose
+// their column edits when toggling.
+const applyEngagementMode = (raw: string, on: boolean): string => {
+  let parsed: {
+    columns?: Record<string, string>;
+    options?: Record<string, string>;
+  };
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return raw; // unparseable — leave the textarea alone, the submit handler will surface the error
+  }
+  const next = { ...parsed };
+  next.options = { ...(parsed.options ?? {}) };
+  if (on) {
+    next.options.engagementMode = 'true';
+  } else {
+    delete next.options.engagementMode;
+  }
+  if (Object.keys(next.options).length === 0) {
+    delete next.options;
+  }
+  return JSON.stringify(next, null, 2);
+};
+
+const readEngagementMode = (raw: string): boolean => {
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed?.options?.engagementMode === 'true';
+  } catch {
+    return false;
+  }
+};
+
 const ImportWizardPage: React.FC = () => {
   const { t } = useTranslation();
   const dispatch = useAppDispatch();
@@ -92,6 +143,9 @@ const ImportWizardPage: React.FC = () => {
   const [file, setFile] = useState<File | null>(null);
   const [mapping, setMapping] = useState(SAMPLE_MAPPING);
   const [sourceName, setSourceName] = useState('');
+  // Detected engagement columns in the first row of the uploaded CSV.
+  // Populated only when adapter==='csv' and a file is selected.
+  const [detectedEngagement, setDetectedEngagement] = useState<string[]>([]);
   const [odoo, setOdoo] = useState<OdooImportConfig>({
     baseUrl: '',
     database: '',
@@ -239,16 +293,59 @@ const ImportWizardPage: React.FC = () => {
                 <Form.Control
                   type="file"
                   accept={acceptForAdapter(adapter)}
-                  onChange={e => {
+                  onChange={async e => {
                     const f = (e.target as HTMLInputElement).files?.[0] ?? null;
                     setFile(f);
                     if (f && !sourceName) setSourceName(f.name);
+                    if (f && adapter === 'csv') {
+                      // Read just the header row to drive the engagement
+                      // auto-detect hint. Bounded by a 4 KB slice so a
+                      // 100 MB CSV doesn't lock the browser tab.
+                      const headerBytes = await f.slice(0, 4096).text();
+                      const headerLine = headerBytes.split(/\r?\n/)[0] ?? '';
+                      const headers = headerLine
+                        .split(',')
+                        .map(h => h.trim().toLowerCase().replace(/^"|"$/g, ''));
+                      setDetectedEngagement(
+                        CANONICAL_ENGAGEMENT_COLUMNS.filter(c =>
+                          headers.includes(c)
+                        )
+                      );
+                    } else {
+                      setDetectedEngagement([]);
+                    }
                   }}
                   disabled={running}
                 />
                 <Form.Text className="text-muted">
                   {t('marketing.imports.wizard.fileHelp')}
                 </Form.Text>
+              </Form.Group>
+            )}
+
+            {adapter === 'csv' && (
+              <Form.Group className="mb-3">
+                <Form.Check
+                  type="checkbox"
+                  id="csv-engagement-mode"
+                  label={t('marketing.imports.wizard.engagementMode.label')}
+                  checked={readEngagementMode(mapping)}
+                  onChange={e =>
+                    setMapping(applyEngagementMode(mapping, e.target.checked))
+                  }
+                  disabled={running}
+                />
+                <Form.Text className="text-muted">
+                  {t('marketing.imports.wizard.engagementMode.help')}
+                </Form.Text>
+                {detectedEngagement.length > 0 &&
+                  !readEngagementMode(mapping) && (
+                    <Alert variant="info" className="mt-2 py-2 px-3 fs-10 mb-0">
+                      {t('marketing.imports.wizard.engagementMode.detected', {
+                        columns: detectedEngagement.join(', ')
+                      })}
+                    </Alert>
+                  )}
               </Form.Group>
             )}
 

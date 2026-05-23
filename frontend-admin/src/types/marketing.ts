@@ -254,6 +254,9 @@ export interface ImportJobStats {
   personsMerged?: number;
   membershipsLinked?: number;
   conflictsSkipped?: number;
+  // Phase 4 (PR-4) — engagement-CSV emission counters.
+  engagementEmitted?: number;
+  engagementOccurredAtFallback?: number;
 }
 
 export interface ImportJob {
@@ -540,6 +543,96 @@ export interface LeaderboardEntry {
   lastActivityAt?: string;
   asOf: string;
   computedAt: string;
+}
+
+// --- Phase 4: card lifecycle ------------------------------------------
+
+// CardStatus is the lifecycle state of a card instance. Mirrors
+// backend models/card_status.go.
+//   active    — issued and usable.
+//   suspended — temporarily disabled, reversible via reinstate.
+//   revoked   — terminal; reinstate is rejected. Also the state the
+//               expiration scheduler lands on when expires_at passes.
+export type CardStatus = 'active' | 'suspended' | 'revoked';
+
+// CardType is a per-tenant template. Schema mirrors
+// backend/internal/addons/marketing/models/card_type.go.
+export interface CardType {
+  uuid: string;
+  tenantId: string;
+  key: string; // operator-facing slug, unique per tenant
+  displayName: string;
+  description?: string;
+  codeFormat: string; // grammar in services/card_code_format.go
+  tiers?: string[];
+  defaultBenefits?: string[];
+  allowMultiplePerPerson: boolean;
+  active: boolean;
+  createdAt: string;
+  updatedAt: string;
+  createdBy?: string;
+  updatedBy?: string;
+}
+
+export interface CardTypePayload {
+  key: string;
+  displayName: string;
+  description?: string;
+  codeFormat: string;
+  tiers?: string[];
+  defaultBenefits?: string[];
+  allowMultiplePerPerson?: boolean;
+  active?: boolean;
+}
+
+// Card is a card instance issued to a Person.
+export interface Card {
+  uuid: string;
+  tenantId: string;
+  cardTypeUuid: string;
+  cardTypeKey?: string;
+  personUuid: string;
+  code: string;
+  tier?: string;
+  benefits?: string[];
+  status: CardStatus;
+  issuedAt: string;
+  issuedBy?: string;
+  expiresAt?: string;
+  suspendedAt?: string;
+  suspendedBy?: string;
+  suspendReason?: string;
+  revokedAt?: string;
+  revokedBy?: string;
+  revokeReason?: string;
+  notes?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface IssueCardPayload {
+  cardTypeUuid: string;
+  tier?: string;
+  benefits?: string[];
+  expiresAt?: string;
+  notes?: string;
+}
+
+export interface SuspendCardPayload {
+  reason: string;
+}
+
+export interface RevokeCardPayload {
+  reason: string;
+}
+
+// CorrectionEntry mirrors the backend's services/activity_service.go
+// CorrectionEntry. Returned by GET /v1/marketing/activities/{id}/corrections.
+export interface CorrectionEntry {
+  correctingActivityUuid: string;
+  recordedAt: string;
+  recordedBy?: string;
+  reason: string;
 }
 
 // --- List envelopes ---

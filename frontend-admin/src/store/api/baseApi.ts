@@ -437,7 +437,17 @@ export const baseApi = createApi({
     // Marketing module — Phase 3 conflict-review queue. Reviews are
     // queried both by uuid (resolver modal) and by importJobUuid
     // (imports-list deep link), so the slice tags both ways.
-    'MarketingConflictReview'
+    'MarketingConflictReview',
+    // Marketing module — Phase 4 card lifecycle. Card types are
+    // queried by uuid for the edit form + the LIST id for the admin
+    // list page; cards keep the same LIST tag + per-person grouping
+    // (`person:<uuid>`) so the contact-detail Cards tab refreshes
+    // after an Issue/Suspend/Reinstate/Revoke action. CorrectionEntry
+    // tagged per source activity uuid so the Timeline corrections
+    // expander invalidates on every Correct mutation.
+    'MarketingCardType',
+    'MarketingCard',
+    'MarketingCorrection'
   ],
   // Keep cache for 5 minutes by default
   keepUnusedDataFor: 300,

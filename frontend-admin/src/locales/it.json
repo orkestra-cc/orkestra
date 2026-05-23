@@ -1470,6 +1470,7 @@
           "memberships": "Appartenenze",
           "timeline": "Cronologia",
           "scores": "Score",
+          "cards": "Card",
           "sources": "Origini"
         },
         "emailsHeader": "Email",
@@ -1628,6 +1629,11 @@
         "errorInvalidJson": "Il mapping non è JSON valido: {{message}}",
         "progressLabel": "Invio al runner…",
         "runImport": "Esegui importazione",
+        "engagementMode": {
+          "label": "Modalità engagement",
+          "help": "Considera le colonne email_opened / email_clicked / email_bounced / email_unsubscribed / email_complained / form_submitted / page_visited / event_attended come eventi di engagement. Ogni cella truthy diventa un'Activity con il timestamp dalla colonna occurred_at della riga.",
+          "detected": "Colonne engagement rilevate ({{columns}}). Abilita la Modalità engagement per registrarle come Activity."
+        },
         "result": {
           "headingQueued": "Importazione in coda",
           "queuedSubtitle": "Il worker raccoglie il job tra un momento. Apri la lista importazioni per seguire la transizione di stato.",
@@ -1797,6 +1803,120 @@
         "colPerson": "Persona",
         "colValue": "Valore",
         "colActivities": "Attività"
+      }
+    },
+    "cardTypes": {
+      "title": "Tipi di Card",
+      "subtitle": "Template per le card che gli operatori possono emettere. Il placeholder {seq:N} viene compilato lato server.",
+      "listHeader": "Tipi",
+      "new": "+ Nuovo",
+      "loading": "Caricamento tipi di card…",
+      "empty": "Nessun tipo di card. Creane uno per iniziare a emettere card.",
+      "badgeActive": "attivo",
+      "badgeInactive": "inattivo",
+      "allowMultipleShort": "multi-emissione",
+      "selectPrompt": "Seleziona un tipo di card a sinistra, o creane uno nuovo.",
+      "confirmDelete": "Eliminare il tipo \"{{name}}\"? Consentito solo se non esistono card di questo tipo.",
+      "form": {
+        "newTitle": "Nuovo tipo di card",
+        "editTitle": "Modifica {{name}}",
+        "keyLabel": "Chiave",
+        "keyHelp": "Identificatore tipo slug, unico per tenant. Immutabile dopo il salvataggio.",
+        "displayNameLabel": "Nome visualizzato",
+        "descriptionLabel": "Descrizione",
+        "codeFormatLabel": "Formato codice",
+        "codeFormatHelp": "Placeholder: {YYYY} {YY} {MM} {DD} {seq:N} {rand:N}. Anteprima:",
+        "tiersLabel": "Livelli (separati da virgola)",
+        "tiersHelp": "Opzionale. Card.tier deve essere uno di questi.",
+        "benefitsLabel": "Benefit predefiniti (separati da virgola)",
+        "allowMultipleLabel": "Consenti più card di questo tipo per persona",
+        "allowMultipleHelp": "Disabilita per imporre una sola card attiva per (persona, tipo) a livello servizio.",
+        "activeLabel": "Attivo (gli operatori possono emettere card di questo tipo)",
+        "save": "Salva",
+        "saving": "Salvataggio…",
+        "delete": "Elimina tipo",
+        "saveError": "Impossibile salvare il tipo di card. Verifica la grammatica del formato codice."
+      }
+    },
+    "cards": {
+      "loading": "Caricamento card…",
+      "empty": "Nessuna card emessa per questo contatto.",
+      "actionError": "Azione fallita. Riprova o ricarica la pagina.",
+      "cancel": "Annulla",
+      "submitting": "In corso…",
+      "col": {
+        "code": "Codice",
+        "type": "Tipo",
+        "tier": "Livello",
+        "status": "Stato",
+        "issuedAt": "Emessa",
+        "expiresAt": "Scade"
+      },
+      "status": {
+        "active": "attiva",
+        "suspended": "sospesa",
+        "revoked": "revocata"
+      },
+      "actions": {
+        "issue": "Emetti card",
+        "suspend": "Sospendi",
+        "reinstate": "Riattiva",
+        "revoke": "Revoca"
+      },
+      "issue": {
+        "title": "Emetti una card",
+        "error": "Impossibile emettere la card. La richiesta è stata rifiutata dal backend.",
+        "typeLabel": "Tipo di card",
+        "typePlaceholder": "Seleziona un tipo…",
+        "tierLabel": "Livello",
+        "tierPlaceholder": "Seleziona un livello…",
+        "benefitsLabel": "Benefit (separati da virgola)",
+        "benefitsHelp": "Precompilati dai benefit predefiniti del tipo — modifica per personalizzarli.",
+        "expiresLabel": "Scadenza (opzionale)",
+        "notesLabel": "Note (opzionale)",
+        "cancel": "Annulla",
+        "submit": "Emetti card",
+        "submitting": "Emissione…"
+      },
+      "suspend": {
+        "title": "Sospendi card {{code}}",
+        "body": "La sospensione disabilita temporaneamente la card. L'operatore potrà riattivarla in seguito da questa stessa scheda.",
+        "reasonLabel": "Motivo",
+        "submit": "Sospendi card"
+      },
+      "reinstate": {
+        "title": "Riattiva card {{code}}",
+        "body": "La riattivazione riporta la card allo stato attivo. Il motivo di sospensione originale viene cancellato.",
+        "submit": "Riattiva card"
+      },
+      "revoke": {
+        "title": "Revoca card {{code}}",
+        "warning": "La revoca è irreversibile. La card non potrà essere riattivata ed è rimossa dall'elenco delle card attive del contatto.",
+        "reasonLabel": "Motivo",
+        "confirmCodeLabel": "Riscrivi il codice card ({{code}}) per confermare",
+        "submit": "Revoca card"
+      }
+    },
+    "corrections": {
+      "rowAction": "Correggi",
+      "badge": {
+        "label": "corretta",
+        "title": "Visualizza la cronologia delle correzioni per questa attività"
+      },
+      "modal": {
+        "title": "Correggi attività",
+        "body": "Inserisce una riga corrected_by che sostituisce la voce {{kind}} del {{when}}. Il prossimo ricalcolo dello score escluderà l'originale.",
+        "reasonLabel": "Motivo",
+        "reasonHelp": "Testo libero. Salvato nel payload della riga corrected_by e mostrato nell'expander della timeline.",
+        "submit": "Invia correzione",
+        "submitting": "Invio…",
+        "cancel": "Annulla",
+        "error": "Impossibile inviare la correzione. Riprova."
+      },
+      "expander": {
+        "loading": "Caricamento correzioni…",
+        "empty": "Nessuna correzione registrata per questa attività.",
+        "noReason": "(nessun motivo registrato)"
       }
     }
   },

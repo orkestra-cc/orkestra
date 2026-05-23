@@ -38,7 +38,14 @@ import type {
   ConflictReviewStatus,
   ConflictTargetKind,
   ResolveConflictPayload,
-  DismissConflictPayload
+  DismissConflictPayload,
+  CardType,
+  CardTypePayload,
+  Card,
+  IssueCardPayload,
+  SuspendCardPayload,
+  RevokeCardPayload,
+  CorrectionEntry
 } from '../../types/marketing';
 
 const buildQS = (params: Record<string, unknown>): string => {
@@ -131,6 +138,10 @@ export const marketingApi = baseApi.injectEndpoints({
           tag?: string[];
           hasEmail?: boolean;
           source?: string;
+          // Phase 4 (PR-3) card-aware filters layered on
+          // marketing_persons.activeCardUuids.
+          hasActiveCard?: boolean;
+          activeCardOfType?: string;
           limit?: number;
           skip?: number;
         }
@@ -413,9 +424,13 @@ export const marketingApi = baseApi.injectEndpoints({
         method: 'POST',
         body: { reason }
       }),
-      invalidatesTags: (_r, _e, { personUuid }) => [
+      invalidatesTags: (_r, _e, { id, personUuid }) => [
         { type: 'MarketingActivity', id: `person:${personUuid}` },
-        { type: 'MarketingScoreSnapshot', id: `person:${personUuid}` }
+        { type: 'MarketingScoreSnapshot', id: `person:${personUuid}` },
+        // Phase 4 (PR-4) — the corrections list for the original
+        // activity gains a new entry; invalidate so the Timeline
+        // expander re-fetches.
+        { type: 'MarketingCorrection', id }
       ]
     }),
 
@@ -590,6 +605,154 @@ export const marketingApi = baseApi.injectEndpoints({
         }
         return tags;
       }
+    }),
+
+    // --- Phase 4: card types ------------------------------------------
+
+    listCardTypes: builder.query<
+      SimpleItems<CardType>,
+      { activeOnly?: boolean } | undefined
+    >({
+      query: params =>
+        `/v1/marketing/card-types${params ? buildQS(params) : ''}`,
+      providesTags: result =>
+        result?.items
+          ? [
+              ...result.items.map(({ uuid }) => ({
+                type: 'MarketingCardType' as const,
+                id: uuid
+              })),
+              { type: 'MarketingCardType', id: 'LIST' }
+            ]
+          : [{ type: 'MarketingCardType', id: 'LIST' }]
+    }),
+    getCardType: builder.query<CardType, string>({
+      query: id => `/v1/marketing/card-types/${id}`,
+      providesTags: (_r, _e, id) => [{ type: 'MarketingCardType', id }]
+    }),
+    createCardType: builder.mutation<CardType, CardTypePayload>({
+      query: body => ({
+        url: '/v1/marketing/card-types',
+        method: 'POST',
+        body
+      }),
+      invalidatesTags: [{ type: 'MarketingCardType', id: 'LIST' }]
+    }),
+    updateCardType: builder.mutation<
+      CardType,
+      { id: string; patch: Partial<CardTypePayload> }
+    >({
+      query: ({ id, patch }) => ({
+        url: `/v1/marketing/card-types/${id}`,
+        method: 'PATCH',
+        body: patch
+      }),
+      invalidatesTags: (_r, _e, { id }) => [
+        { type: 'MarketingCardType', id },
+        { type: 'MarketingCardType', id: 'LIST' }
+      ]
+    }),
+    deleteCardType: builder.mutation<void, string>({
+      query: id => ({
+        url: `/v1/marketing/card-types/${id}`,
+        method: 'DELETE'
+      }),
+      invalidatesTags: (_r, _e, id) => [
+        { type: 'MarketingCardType', id },
+        { type: 'MarketingCardType', id: 'LIST' }
+      ]
+    }),
+
+    // --- Phase 4: card instances ---------------------------------------
+
+    listPersonCards: builder.query<SimpleItems<Card>, string>({
+      query: personId => `/v1/marketing/persons/${personId}/cards`,
+      providesTags: (result, _e, personId) =>
+        result?.items
+          ? [
+              ...result.items.map(({ uuid }) => ({
+                type: 'MarketingCard' as const,
+                id: uuid
+              })),
+              { type: 'MarketingCard', id: `person:${personId}` }
+            ]
+          : [{ type: 'MarketingCard', id: `person:${personId}` }]
+    }),
+    getCard: builder.query<Card, string>({
+      query: id => `/v1/marketing/cards/${id}`,
+      providesTags: (_r, _e, id) => [{ type: 'MarketingCard', id }]
+    }),
+    issueCard: builder.mutation<
+      Card,
+      { personId: string; body: IssueCardPayload }
+    >({
+      query: ({ personId, body }) => ({
+        url: `/v1/marketing/persons/${personId}/cards`,
+        method: 'POST',
+        body
+      }),
+      invalidatesTags: (_r, _e, { personId }) => [
+        { type: 'MarketingCard', id: `person:${personId}` },
+        { type: 'MarketingPerson', id: personId },
+        { type: 'MarketingActivity', id: `person:${personId}` }
+      ]
+    }),
+    suspendCard: builder.mutation<
+      Card,
+      { id: string; body: SuspendCardPayload; personUuid: string }
+    >({
+      query: ({ id, body }) => ({
+        url: `/v1/marketing/cards/${id}/suspend`,
+        method: 'POST',
+        body
+      }),
+      invalidatesTags: (_r, _e, { id, personUuid }) => [
+        { type: 'MarketingCard', id },
+        { type: 'MarketingCard', id: `person:${personUuid}` },
+        { type: 'MarketingActivity', id: `person:${personUuid}` }
+      ]
+    }),
+    reinstateCard: builder.mutation<Card, { id: string; personUuid: string }>({
+      query: ({ id }) => ({
+        url: `/v1/marketing/cards/${id}/reinstate`,
+        method: 'POST'
+      }),
+      invalidatesTags: (_r, _e, { id, personUuid }) => [
+        { type: 'MarketingCard', id },
+        { type: 'MarketingCard', id: `person:${personUuid}` },
+        { type: 'MarketingActivity', id: `person:${personUuid}` }
+      ]
+    }),
+    revokeCard: builder.mutation<
+      Card,
+      { id: string; body: RevokeCardPayload; personUuid: string }
+    >({
+      query: ({ id, body }) => ({
+        url: `/v1/marketing/cards/${id}/revoke`,
+        method: 'POST',
+        body
+      }),
+      // Revoke removes the card from Person.activeCardUuids on the
+      // backend, so invalidate the Person tag too (the contact-detail
+      // header may render the card count).
+      invalidatesTags: (_r, _e, { id, personUuid }) => [
+        { type: 'MarketingCard', id },
+        { type: 'MarketingCard', id: `person:${personUuid}` },
+        { type: 'MarketingPerson', id: personUuid },
+        { type: 'MarketingActivity', id: `person:${personUuid}` }
+      ]
+    }),
+
+    // --- Phase 4 (PR-4): activity corrections list --------------------
+
+    listActivityCorrections: builder.query<
+      SimpleItems<CorrectionEntry>,
+      string
+    >({
+      query: activityId => `/v1/marketing/activities/${activityId}/corrections`,
+      providesTags: (_r, _e, activityId) => [
+        { type: 'MarketingCorrection', id: activityId }
+      ]
     })
   })
 });
@@ -635,5 +798,19 @@ export const {
   useListConflictReviewsQuery,
   useGetConflictReviewQuery,
   useResolveConflictReviewMutation,
-  useDismissConflictReviewMutation
+  useDismissConflictReviewMutation,
+  // Phase 4 — card lifecycle
+  useListCardTypesQuery,
+  useGetCardTypeQuery,
+  useCreateCardTypeMutation,
+  useUpdateCardTypeMutation,
+  useDeleteCardTypeMutation,
+  useListPersonCardsQuery,
+  useGetCardQuery,
+  useIssueCardMutation,
+  useSuspendCardMutation,
+  useReinstateCardMutation,
+  useRevokeCardMutation,
+  // Phase 4 (PR-4) — activity corrections
+  useListActivityCorrectionsQuery
 } = marketingApi;
