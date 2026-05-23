@@ -1,0 +1,121 @@
+---
+title: Cookie hardening across tiers
+sidebar_position: 8
+description: Why OPERATOR_COOKIE_DOMAIN and CLIENT_COOKIE_DOMAIN must not share a parent domain in production.
+---
+
+# Cookie hardening across tiers
+
+Orkestra's [ADR-0003 host split](/adrs/three-audience-host-split) serves two audiences from one Go binary, dispatched by `Host` header:
+
+- **Operator surface** — Tier-1 admin console at `console.example.com` (JWT `aud=operator`)
+- **Client surface** — Tier-2 external clients at `api.example.com` (JWT `aud=client`)
+
+Both surfaces issue session refresh cookies. **The cookies for each surface must be scoped to a domain that the other surface cannot read.** PR-D D-9 of the same ADR introduced the two env vars that control this:
+
+- `OPERATOR_COOKIE_DOMAIN`
+- `CLIENT_COOKIE_DOMAIN`
+
+This page explains what goes wrong if you leave them on the legacy `COOKIE_DOMAIN` fallback, and what the right values look like for the common deployment shapes.
+
+## The threat model
+
+Without the per-audience split, a session cookie minted for one tier is sent by the browser to the other tier's hostname (if they share a parent domain). A few attack shapes this enables:
+
+1. **Stolen operator cookie used to query the client API.** An exfiltrated `console.example.com` refresh cookie hits `api.example.com` — both share `Domain=.example.com` if you set `COOKIE_DOMAIN=.example.com`. The `RequireAudience` middleware rejects the JWT because `aud=operator` doesn't match the client surface — but the cookie is exposed, the attacker can probe other audiences with it.
+2. **Subdomain XSS escalates across tiers.** A Tier-2 client's app at `client.example.com` runs untrusted JS (per design — clients build their own UIs). If `client.example.com` shares a parent domain with the operator cookie, that JS reads the operator's refresh token.
+3. **Browser bug + permissive `Domain=` leaks across origins.** Browsers have had cookie-jar bugs before. Tightening the `Domain=` attribute is defence in depth — the smaller the blast radius, the less a bug costs.
+
+The audience JWT gate (`RequireAudience` middleware, see [shared/middleware/audience.go](https://github.com/orkestra-cc/orkestra/blob/main/backend/internal/shared/middleware/audience.go)) catches misuse at the API layer. The cookie-domain split catches it one step earlier, at the browser.
+
+## What to set
+
+### Dev (single host, browser-relaxed cookies)
+
+```bash
+# docker/.env — what `make init` produces.
+COOKIE_DOMAIN=localhost
+OPERATOR_COOKIE_DOMAIN=console.localhost
+CLIENT_COOKIE_DOMAIN=api.localhost
+COOKIE_SECURE=false
+COOKIE_SAME_SITE=lax
+ALLOW_LOCALHOST_REDIRECTS=true
+```
+
+You'll need `/etc/hosts` entries (`127.0.0.1 console.localhost api.localhost client.localhost`) so the host mux can dispatch correctly. The browser treats `localhost` and `*.localhost` as the same eTLD+1 for the public-suffix list, so cookie scoping isn't enforced strictly — that's why dev is permissive. **Do not ship this configuration to production.**
+
+### Production — single domain, separate subdomains
+
+The most common shape. Operator on `console.example.com`, clients on `api.example.com`.
+
+```bash
+COOKIE_DOMAIN=               # leave empty — per-audience overrides cover everything
+OPERATOR_COOKIE_DOMAIN=console.example.com
+CLIENT_COOKIE_DOMAIN=api.example.com
+COOKIE_SECURE=true
+COOKIE_SAME_SITE=strict
+ALLOW_LOCALHOST_REDIRECTS=false
+```
+
+Each cookie is scoped to a single hostname (no leading dot, no parent-domain match). The browser will NOT send the operator cookie to `api.example.com` and vice versa.
+
+### Production — different domains entirely (preferred for highest isolation)
+
+If your Tier-2 clients run on a different domain entirely (e.g. `orkestra-app.io`), use that.
+
+```bash
+COOKIE_DOMAIN=
+OPERATOR_COOKIE_DOMAIN=console.example.com
+CLIENT_COOKIE_DOMAIN=api.orkestra-app.io
+COOKIE_SECURE=true
+COOKIE_SAME_SITE=strict
+```
+
+Completely separate cookie jars in the browser. No cross-tier leakage is possible even if SameSite gets bypassed.
+
+### What NOT to do
+
+```bash
+# ❌ shared parent domain — both cookies sent to both hosts.
+COOKIE_DOMAIN=.example.com
+OPERATOR_COOKIE_DOMAIN=
+CLIENT_COOKIE_DOMAIN=
+```
+
+If you set `COOKIE_DOMAIN=.example.com` and leave the audience-specific vars empty, both cookies fall back to the parent domain — defeating the host split.
+
+The validator in [`backend/internal/shared/config/config.go`](https://github.com/orkestra-cc/orkestra/blob/main/backend/internal/shared/config/config.go) doesn't currently reject this combination. **Treat it as a deployment-time review item** until a hard gate lands (tracked in the [ADR-0003 follow-ups](/adrs/three-audience-host-split)).
+
+## Verifying
+
+After deploying, inspect the cookies in a browser dev-tools session. Look at the `Domain=` attribute on the refresh cookie:
+
+```text
+# Operator console:
+console.example.com → set-cookie: orkestra_cookie_refresh=...; Domain=console.example.com; Path=/; Secure; HttpOnly; SameSite=Strict
+
+# Client API:
+api.example.com → set-cookie: orkestra_cookie_refresh=...; Domain=api.example.com; Path=/; Secure; HttpOnly; SameSite=Strict
+```
+
+If you see `Domain=.example.com` on either, the per-audience env vars aren't being read. Confirm with:
+
+```bash
+docker exec orkestra-backend env | grep COOKIE_DOMAIN
+# OPERATOR_COOKIE_DOMAIN=console.example.com
+# CLIENT_COOKIE_DOMAIN=api.example.com
+```
+
+And confirm the audience gate is also working:
+
+```bash
+TOKEN=$(./scripts/devtoken.sh administrator --quiet)   # aud=operator
+curl -fsS -H "Authorization: Bearer $TOKEN" https://api.example.com/v1/admin/modules
+# Expected: 401 {"code":"audience_mismatch", ...}
+```
+
+## See also
+
+- [ADR-0003: Three-audience API host split](/adrs/three-audience-host-split) — the canonical decision record
+- [Reverse-proxy with Caddy](./deployment/reverse-proxy-caddy) — Caddyfile that wires per-audience hostnames
+- [Kubernetes overview](./deployment/kubernetes-overview) — Ingress objects per audience

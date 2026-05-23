@@ -153,10 +153,11 @@ Vars **deleted as dead code** during the cleanup (do not re-add): `MODULES`, `BA
 Separate infrastructure from applications. One infra compose, three full-stack composes (dev/staging/prod), five SKU-pull composes:
 
 1. **`docker-compose.infra.yml`** - Infrastructure services only (MongoDB, Redis, Gotenberg, Hindsight)
-2. **`docker-compose.dev.yml`** - Application services in development mode with hot reload
-3. **`docker-compose.staging.yml`** - Application services in staging mode (staging-like env + AIR/Vite hot reload)
-4. **`docker-compose.prod.yml`** - Application services in production mode with optimizations
-5. **`docker-compose.{starter,billing,ai,saas,enterprise}.yml`** - SKU profiles pulling a pre-built backend image from GHCR (layer on `docker-compose.infra.yml`)
+2. **`docker-compose.dev-public.yml`** - Application services in development mode with hot reload, on public Alpine images (default, fork-friendly)
+3. **`docker-compose.dev.yml`** - Same as dev-public but on Chainguard `dhi.io/*` hardened images (opt-in via `DEV_COMPOSE_VARIANT=chainguard` — requires a Chainguard subscription)
+4. **`docker-compose.staging.yml`** - Application services in staging mode (staging-like env + AIR/Vite hot reload)
+5. **`docker-compose.prod.yml`** - Application services in production mode with optimizations
+6. **`docker-compose.{starter,billing,ai,saas,enterprise}.yml`** - SKU profiles pulling a pre-built backend image from GHCR (layer on `docker-compose.infra.yml`)
 
 ### File Organization
 
@@ -195,16 +196,16 @@ Separate infrastructure from applications. One infra compose, three full-stack c
 ### Prerequisites
 
 ```bash
-# Create external network (required for all environments)
-docker network create orkestra-network
-
-# Copy environment template and configure (first time only)
-cd docker
-cp .env.example .env.development
-cp .env.example .env.staging
-cp .env.example .env.production
-# Edit each file with appropriate values
+# First-time setup — scaffolds docker/.env with random secrets, generates RS256
+# JWT keys under docker/keys/, and creates the orkestra-network bridge.
+# Idempotent: re-runs preserve existing files unless --force.
+make init                # from the repo root
+# equivalently:
+./orkestra.sh init       # same script, via the TUI entry point
+bash scripts/init.sh     # direct invocation
 ```
+
+For a multi-environment setup (separate `.env.development` / `.env.staging` / `.env.production`), copy the generated `docker/.env` to per-env files after `make init` and tweak each. See [Three-Stage Environment Workflow](#three-stage-environment-workflow) above.
 
 ### Using orkestra.sh (Recommended)
 

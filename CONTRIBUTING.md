@@ -125,9 +125,41 @@ The repo ships a `.actrc` with the recommended runner image.
 
 ## Reporting issues
 
-- **Security**: email <salvatore.balestrino@gmail.com> — do **not** open a public issue. We respond within 72 hours.
+- **Security**: email <salvatore.balestrino@gmail.com> — do **not** open a public issue. We respond within 72 hours. See [`SECURITY.md`](SECURITY.md) for the full disclosure policy.
 - **Bugs / features**: GitHub Issues with the appropriate area label (`backend`, `frontend-admin`, `frontend-client`, `mobile`, `docs`, `ci`).
-- **Architecture discussions**: open a `docs(rfc): <title>` PR with the proposal under `docs/rfcs/` before writing code.
+- **Architecture discussions**: open an ADR PR under `docs/adr/NNNN-<slug>.md` following the [RFC process in GOVERNANCE.md](GOVERNANCE.md#rfc-process). Existing ADRs in `docs/adr/0001-...` through `docs/adr/0005-...` are the style reference.
+
+## Community channels
+
+- **GitHub Discussions** at [github.com/orkestra-cc/orkestra/discussions](https://github.com/orkestra-cc/orkestra/discussions) — the asynchronous home for design discussion, RFC chatter, and Q&A. Categories:
+  - **Announcements** — release notes, breaking changes, maintainer posts
+  - **Q&A** — operator and contributor questions
+  - **Ideas** — feature proposals before they become ADRs / issues
+  - **Show and tell** — what you've built on top of Orkestra
+  - **Polls** — when the BDFL wants community input on a near-tied call
+
+  > Discussions must be enabled by a repo admin (Settings → General → Features → Discussions). If the link 404s, that hasn't happened yet — open an issue and we'll prioritize it.
+
+- **Issues** for actionable bugs and concrete feature requests.
+- **PRs** for code, docs, ADRs.
+- **Email the BDFL** at <salvatore.balestrino@gmail.com> for governance, security, code-of-conduct reports, and anything that doesn't belong in public channels.
+
+There is no Slack / Discord / Matrix yet. Discussions covers what those would, with a public record. We may revisit if asynchronous-only stops scaling.
+
+## AI assistant integration
+
+The repo contains configuration for several AI coding assistants. All of it is **optional** — you don't need any of these tools to contribute. They live in tool-mandated locations (each tool hardcodes where it looks):
+
+| Path | Tool | What it does |
+| --- | --- | --- |
+| `CLAUDE.md` (root + per-module) | [Claude Code](https://claude.ai/code) | Project- and module-specific assistant guidance. Read by the CLI on every prompt. |
+| `.claude/` | Claude Code | Per-project skills, hooks, slash commands, permissions. Per-developer customizations under `.claude/settings.local.json` are gitignored. |
+| `.clinerules` | [Cline](https://cline.bot/) (VS Code) | Commit-message and other workflow rules. |
+| `.gemini/commands/` | [Gemini CLI](https://github.com/google-gemini/gemini-cli) | Slash-command definitions. |
+
+GitHub linguist marks these as `linguist-documentation` in `.gitattributes` so they don't pollute the repo's language stats. If you don't use any of these tools, ignore the files — they're inert without their respective CLIs.
+
+If you use a different assistant (Cursor, Continue, GitHub Copilot, JetBrains AI, etc.), most read `CLAUDE.md` directly or auto-discover the per-module CLAUDE.md files. No additional config required.
 
 ## License
 

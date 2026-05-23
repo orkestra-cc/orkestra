@@ -66,26 +66,63 @@ For VMs that should run a specific addon SKU (no source build, no Chainguard reg
 | `saas` | `ghcr.io/orkestra-cc/orkestra/backend:saas` | subscriptions, payments, compliance, identity |
 | `enterprise` | `ghcr.io/orkestra-cc/orkestra/backend:enterprise` (alias of `:latest`) | every addon |
 
+> 🇮🇹 **`billing` and `company` are Italy-only.** They speak FatturaPA / SDI and the Italian business registry. Outside Italy, start from the `starter` or `saas` profile — `billing` will boot but the addon endpoints are useless without an Italian fiscal context.
+
 ```bash
+make init                                                          # first time only — scaffolds docker/.env + JWT keys
 cd docker
-docker network create orkestra-network                              # first time only
-docker compose -f docker-compose.infra.yml up -d                    # mongodb + redis
-docker compose -f docker-compose.billing.yml --env-file .env up -d  # any profile name
+docker compose -f docker-compose.infra.yml up -d                   # mongodb + redis
+docker compose -f docker-compose.starter.yml --env-file .env up -d # or billing | ai | saas | enterprise
+
+# Generate an administrator dev token to log in (from the repo root):
+cd .. && ORKESTRA_API_URL=http://localhost:3000 ./scripts/devtoken.sh administrator
 ```
 
-The same operations are wrapped by `./orkestra.sh profile <name> <op>`. See [Managing the stack](#managing-the-stack) below.
+`make init` is idempotent — re-runs leave existing secrets alone. It also creates the `orkestra-network` Docker bridge so you don't need to do it manually. The same operations are wrapped by `./orkestra.sh profile <name> <op>`; see [Managing the stack](#managing-the-stack).
+
+**OAuth, SMTP, Stripe, AI keys are optional.** Email/password login works out of the box. Add the rest at `/admin/modules` after first login (see [OAuth setup guide](docs/site/operating/oauth-providers.mdx) for provider-specific instructions on Google, Apple, GitHub, Discord), or pre-seed by uncommenting the relevant lines in `docker/.env` before `docker compose up`.
+
+### Forking the image registry
+
+The compose files default to `ghcr.io/orkestra-cc/orkestra/backend:<sku>`. To run images built from your own fork (private registry, internal CI, air-gapped deploy), override at the shell:
+
+```bash
+BACKEND_IMAGE_REPO=ghcr.io/your-org/orkestra \
+FRONTEND_IMAGE_REPO=ghcr.io/your-org/orkestra \
+docker compose -f docker-compose.starter.yml --env-file .env up -d
+```
+
+To build the images yourself first (matching the `enterprise` SKU that ships every addon):
+
+```bash
+cd backend && make build-enterprise              # produces ./bin/orkestra-enterprise
+docker build -f Dockerfile -t ghcr.io/your-org/orkestra/backend:enterprise .
+docker push ghcr.io/your-org/orkestra/backend:enterprise
+```
+
+The five published SKUs (`starter` / `billing` / `ai` / `saas` / `enterprise`) are produced by the `.github/workflows/backend.yml` matrix on every push to `dev` / `main` — see that workflow for the canonical recipe and reuse it in your fork.
 
 ## Full development stack
 
-For hot-reload Go development with AIR and the full addon fleet (Gotenberg, Hindsight, etc.), use the dev compose. Note that this stack uses Chainguard hardened images (`dhi.io/*`) and requires registry access.
+For hot-reload Go development with AIR and the full addon fleet (Gotenberg, Hindsight, etc.), use the dev compose. Two flavors:
+
+| File | Base images | Audience |
+| --- | --- | --- |
+| **`docker-compose.dev-public.yml`** (default) | `golang:1.25.10-alpine`, `node:24-alpine` | Forkers, contributors, anyone without a [Chainguard](https://www.chainguard.dev) subscription |
+| `docker-compose.dev.yml` | `dhi.io/golang:1`, `dhi.io/node:24-dev` | Operators with a `dhi.io` enterprise subscription (smaller attack surface, faster security patches) |
+
+Behavior is identical (same env-vars, ports, volumes, hot-reload, AIR / Vite HMR). See [docs.orkestra.cc/architecture/dev-images](https://docs.orkestra.cc/architecture/dev-images) for the trade-offs.
 
 ```bash
-./orkestra.sh                                   # interactive TUI; pick "Full stack"
+make init                                       # first time only
+./orkestra.sh                                   # interactive TUI; pick "Full stack" (uses public images by default)
 # or manually:
 cd docker
 docker compose -f docker-compose.infra.yml up -d
-docker compose -f docker-compose.dev.yml up -d
+docker compose -f docker-compose.dev-public.yml up -d
 ```
+
+To opt back into the Chainguard variant (only if you have `dhi.io` access), set `DEV_COMPOSE_VARIANT=chainguard` in `docker/.env` (or as a shell env var) — `orkestra.sh` will switch to `docker-compose.dev.yml` automatically.
 
 ## Managing the stack
 
@@ -127,9 +164,9 @@ Run `./orkestra.sh --help` for the full command surface.
 
 | Module | Purpose |
 | --- | --- |
-| `billing` | Italian electronic invoicing (FatturaPA/SDI) |
+| `billing` 🇮🇹 | Italian electronic invoicing (FatturaPA/SDI) — IT-only, useless outside Italy |
 | `documents` | PDF generation via Gotenberg |
-| `company` | Italian business-registry lookup |
+| `company` 🇮🇹 | Italian business-registry lookup — IT-only, useless outside Italy |
 | `graph` | Memgraph knowledge graph |
 | `aimodels` | Multi-provider AI model management (Ollama, OpenAI, Anthropic) |
 | `rag` | Document ingestion + retrieval-augmented generation |

@@ -1,6 +1,0 @@
-Always read and follow these files before taking any action:
-
-1. /CLAUDE.md - Main project overview and rules
-2. ./[current_directory]/CLAUDE.md - Directory-specific guidelines
-
-Do not proceed with any code changes until confirming understanding of these documents.

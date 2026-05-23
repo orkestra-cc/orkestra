@@ -1,0 +1,92 @@
+---
+title: Mobile app
+sidebar_position: 10
+description: Tier-1 operator's view of the Flutter mobile client — how forkers point the app at their own backend, status of platform scaffolds, deploy-to-store stub.
+---
+
+# Mobile app
+
+Orkestra ships a Flutter cross-platform mobile client under [`mobile/`](https://github.com/orkestra-cc/orkestra/tree/main/mobile). This page is for **Tier-1 operators forking Orkestra** — i.e. you've forked the monorepo, you want the mobile app to talk to your backend (not orkestra.cc's). For end-user docs, the app's in-product help / your published support docs are the right surface.
+
+:::caution Early stage
+The mobile app currently boots, picks an environment, and renders the active backend URL. Real product surfaces are in active development. Release builds today sign with the **debug keystore** — fine for CI artifacts, **never** ship to users without a real signing config.
+:::
+
+## Platform support
+
+| Platform | Scaffolded | Builds in CI |
+| --- | --- | --- |
+| Android | ✅ | ✅ `flutter build apk` |
+| iOS | ❌ | ❌ |
+| Web | ❌ | ❌ |
+| macOS / Linux / Windows desktop | ❌ | ❌ |
+
+Adding a platform is a one-liner:
+
+```bash
+cd mobile
+flutter create --platforms=ios .          # or web, macos, linux, windows
+git add ios/                               # commit the scaffold
+```
+
+## How forkers point the app at their backend
+
+The app picks one of three `EnvironmentConfig` constants at build time, depending on which entry point you launch:
+
+| Entry point | Default API URL | When to use |
+| --- | --- | --- |
+| `lib/main_development.dart` | `http://localhost:3000` | Local backend |
+| `lib/main_staging.dart` | `https://staging-api.orkestra.cc` | Pre-prod environment |
+| `lib/main_production.dart` | `https://api.orkestra.cc` | Real users |
+
+The constants use `String.fromEnvironment('ORKESTRA_API_URL', defaultValue: ...)` so forkers can override via `--dart-define` at build/run time without editing source.
+
+Per-device hostname cheatsheet:
+
+| Device | API hostname to use |
+| --- | --- |
+| iOS simulator | `http://localhost:3000` (default — no override needed) |
+| Android emulator | `http://10.0.2.2:3000` (the emulator's host loopback) |
+| Physical device on LAN | `http://<host-machine-IP>:3000` |
+
+The recommended pattern is `--dart-define-from-file`:
+
+```bash
+cd mobile
+cp dart_define/example.json dart_define/dev.json
+# Edit dart_define/dev.json with your URLs
+flutter run -t lib/main_development.dart --dart-define-from-file=dart_define/dev.json
+```
+
+`dart_define/*.json` (except `example.json`) is gitignored — these files typically contain operator-specific URLs and, as the mobile app's surface grows, API keys.
+
+The home screen of the running app displays the active environment + API URL + debug flag, so you can verify the override is taking effect.
+
+## Available `--dart-define` keys
+
+| Key | Default | Purpose |
+| --- | --- | --- |
+| `ORKESTRA_API_URL` | per-env, see above | Backend HTTP base URL |
+| `ORKESTRA_WS_URL` | per-env (mirror of API with `ws:` / `wss:`) | Backend WebSocket base URL |
+
+OAuth client IDs / Stripe publishable keys are **not yet wired** into the mobile app — the SDK dependencies aren't in `pubspec.yaml` yet. As features land, new dart-define keys will be added.
+
+## Deploying to your store
+
+This page intentionally does **not** cover store-deploy procedure. Play Store + App Store onboarding is its own discipline and changes too often for a docs page to track. Start here:
+
+- [Flutter: Build and release an Android app](https://docs.flutter.dev/deployment/android)
+- [Flutter: Build and release an iOS app](https://docs.flutter.dev/deployment/ios)
+- [Codemagic](https://codemagic.io/) / [Bitrise](https://www.bitrise.io/) for CI-driven release pipelines
+
+Before your first store submission you'll need at minimum:
+
+- A real Android signing keystore (NOT the debug keystore).
+- An iOS scaffold + an Apple Developer account.
+- App icons, splash screens, store listings.
+
+## See also
+
+- [`mobile/README.md`](https://github.com/orkestra-cc/orkestra/blob/main/mobile/README.md) — fork-onboarding for the mobile app
+- [`mobile/CLAUDE.md`](https://github.com/orkestra-cc/orkestra/blob/main/mobile/CLAUDE.md) — AI-assistant module guide
+- [I just forked Orkestra](/getting-started/forking) — backend bootstrap on a fork

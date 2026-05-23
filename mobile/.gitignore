@@ -43,3 +43,10 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# dart-define-from-file payloads (per-environment). example.json is the
+# committed template; copies (dev.json, staging.json, production.json,
+# user-named) are gitignored because they typically contain operator-
+# specific URLs / API keys.
+/dart_define/*.json
+!/dart_define/example.json

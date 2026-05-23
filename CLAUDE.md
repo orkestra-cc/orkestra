@@ -201,8 +201,9 @@ Adds Gotenberg (PDF), optionally Memgraph/Hindsight, and uses the Chainguard har
 
 # Or manually:
 cd docker
-docker compose -f docker-compose.infra.yml up -d   # MongoDB, Redis, Gotenberg, Hindsight
-docker compose -f docker-compose.dev.yml up -d      # Backend (AIR) + Frontend (Vite)
+docker compose -f docker-compose.infra.yml up -d        # MongoDB, Redis, Gotenberg, Hindsight
+docker compose -f docker-compose.dev-public.yml up -d   # Backend (AIR) + Frontend (Vite) on public Alpine images
+# For Chainguard hardened images (requires dhi.io subscription) use docker-compose.dev.yml instead.
 
 # Optional: run AI modules as a separate service
 docker compose -f docker-compose.ai-sidecar.yml up -d  # AI Service (port 3100)

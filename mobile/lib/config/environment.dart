@@ -39,28 +39,62 @@ class EnvironmentConfig {
   bool get isProductionLike => isProduction || isStaging;
 
   /// Development environment configuration.
+  ///
+  /// Defaults to `http://localhost:3000` (works for iOS simulator + most
+  /// desktops). Android emulator + physical-device users must override:
+  ///   flutter run -t lib/main_development.dart \
+  ///     --dart-define=ORKESTRA_API_URL=http://10.0.2.2:3000 \
+  ///     --dart-define=ORKESTRA_WS_URL=ws://10.0.2.2:3000/ws
+  /// or use --dart-define-from-file=dart_define/dev.json (see
+  /// mobile/dart_define/example.json for the template).
   static const EnvironmentConfig development = EnvironmentConfig(
     environment: Environment.development,
-    apiBaseUrl: 'http://localhost:3000',
-    wsBaseUrl: 'ws://localhost:3000/ws',
+    apiBaseUrl: String.fromEnvironment(
+      'ORKESTRA_API_URL',
+      defaultValue: 'http://localhost:3000',
+    ),
+    wsBaseUrl: String.fromEnvironment(
+      'ORKESTRA_WS_URL',
+      defaultValue: 'ws://localhost:3000/ws',
+    ),
     debug: true,
     appName: 'Orkestra Dev',
   );
 
   /// Staging environment configuration.
+  ///
+  /// The hardcoded defaults below point at the canonical Orkestra
+  /// staging environment. Forkers running their own staging must
+  /// override via --dart-define-from-file=dart_define/staging.json.
   static const EnvironmentConfig staging = EnvironmentConfig(
     environment: Environment.staging,
-    apiBaseUrl: 'https://staging-api.orkestra.cc',
-    wsBaseUrl: 'wss://staging-api.orkestra.cc/ws',
+    apiBaseUrl: String.fromEnvironment(
+      'ORKESTRA_API_URL',
+      defaultValue: 'https://staging-api.orkestra.cc',
+    ),
+    wsBaseUrl: String.fromEnvironment(
+      'ORKESTRA_WS_URL',
+      defaultValue: 'wss://staging-api.orkestra.cc/ws',
+    ),
     debug: false,
     appName: 'Orkestra Staging',
   );
 
   /// Production environment configuration.
+  ///
+  /// The hardcoded defaults below point at the canonical Orkestra
+  /// production environment. Forkers shipping to their own users must
+  /// override via --dart-define-from-file=dart_define/production.json.
   static const EnvironmentConfig production = EnvironmentConfig(
     environment: Environment.production,
-    apiBaseUrl: 'https://api.orkestra.cc',
-    wsBaseUrl: 'wss://api.orkestra.cc/ws',
+    apiBaseUrl: String.fromEnvironment(
+      'ORKESTRA_API_URL',
+      defaultValue: 'https://api.orkestra.cc',
+    ),
+    wsBaseUrl: String.fromEnvironment(
+      'ORKESTRA_WS_URL',
+      defaultValue: 'wss://api.orkestra.cc/ws',
+    ),
     debug: false,
     appName: 'Orkestra',
   );

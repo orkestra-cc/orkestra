@@ -63,3 +63,13 @@ go.sum                                  linguist-generated=true
 **/pubspec.lock                         linguist-generated=true
 frontend-client/src/api/openapi.gen.ts  linguist-generated=true
 docs/openapi/*.json                     linguist-generated=true
+
+# AI assistant configuration — kept in tool-mandated locations (Claude
+# Code reads CLAUDE.md, Cline reads .clinerules, Gemini reads .gemini/).
+# Mark as documentation so they don't pollute GitHub's language stats.
+# See CONTRIBUTING.md "AI assistant integration" for what each enables.
+CLAUDE.md       linguist-documentation
+**/CLAUDE.md    linguist-documentation
+.clinerules     linguist-documentation
+.gemini/**      linguist-documentation
+.claude/**      linguist-documentation

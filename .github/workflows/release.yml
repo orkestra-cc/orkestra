@@ -1,0 +1,98 @@
+name: Release
+
+# Triggered when an annotated tag matching `vX.Y.Z` is pushed.
+# Manual flow:
+#   1. Bump version in CHANGELOG locally if you want to preview:
+#        git-cliff --tag v0.2.0 -o CHANGELOG.md && git commit -am "chore(release): v0.2.0 changelog"
+#   2. Tag and push:
+#        git tag -a v0.2.0 -m "v0.2.0"
+#        git push --tags
+#   3. This workflow generates the per-tag changelog body, opens a
+#      GitHub Release with it, and (re-)commits the full CHANGELOG.md.
+#
+# No version-bump automation today (no release-please) — tagging is
+# deliberate. See GOVERNANCE.md "Releases" for the cadence policy.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to (re-)release (e.g. v0.2.0)'
+        required: true
+        type: string
+
+permissions:
+  contents: write   # required to commit CHANGELOG + create Release
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Release ${{ github.ref_name }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0   # git-cliff needs full history
+
+      - uses: jdx/mise-action@v4
+        with:
+          install: true
+
+      - name: Resolve tag
+        id: tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "tag=${{ github.event.inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Generate full CHANGELOG.md (all history through this tag)
+        run: git-cliff --tag "${{ steps.tag.outputs.tag }}" -o CHANGELOG.md
+
+      - name: Generate release body (commits since last tag → this tag)
+        id: body
+        run: |
+          # --latest emits only the most recent release section, which is
+          # exactly what the Release body should show.
+          BODY=$(git-cliff --tag "${{ steps.tag.outputs.tag }}" --latest --strip header)
+          # Multi-line output to $GITHUB_OUTPUT requires the delimiter
+          # heredoc syntax.
+          {
+            echo 'body<<RELEASE_BODY_EOF'
+            echo "$BODY"
+            echo 'RELEASE_BODY_EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Commit refreshed CHANGELOG.md (if changed)
+        # Only commits when the generated file differs from what's in main.
+        # Tagging from a release branch where CHANGELOG.md is already
+        # current is a no-op.
+        run: |
+          if ! git diff --quiet CHANGELOG.md; then
+            git config user.name  "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git fetch origin main
+            git checkout main
+            git checkout - -- CHANGELOG.md   # restore the generated one
+            git add CHANGELOG.md
+            git commit -m "chore(release): refresh CHANGELOG.md for ${{ steps.tag.outputs.tag }}"
+            git push origin main
+          else
+            echo "CHANGELOG.md unchanged — nothing to commit."
+          fi
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: ${{ steps.tag.outputs.tag }}
+          body: ${{ steps.body.outputs.body }}
+          draft: false
+          prerelease: ${{ contains(steps.tag.outputs.tag, '-') }}

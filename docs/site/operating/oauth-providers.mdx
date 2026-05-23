@@ -1,23 +1,317 @@
 ---
 title: OAuth Providers
 sidebar_position: 5
+description: Register OAuth 2.0 / OpenID Connect apps for Google, Apple, GitHub, and Discord and wire them into Orkestra.
 ---
 
 # OAuth Providers
 
-Orkestra supports OAuth 2.1 login with Google, Apple, GitHub, and Discord out of the box. Each provider is configured via the `auth` module at `/admin/modules`.
+This guide walks through registering OAuth 2.0 / OpenID Connect apps for the four providers Orkestra supports out of the box: **Google, Apple, GitHub, and Discord**. Email/password login works without any of these — OAuth is opt-in.
 
-:::note 🚧 Draft
-Per-provider OAuth app setup (redirect URIs, scopes, secrets) needs walkthroughs.
+:::info Where credentials live
+As of the auth-module ConfigService refactor (PR-C), OAuth client IDs, secrets, and redirect URLs are **runtime configuration** owned by the `auth` module. The recommended workflow:
+
+1. (Optional) Seed env vars on a fresh install — the auth module reads `OAUTH_<PROVIDER>_*` on first boot and writes them into `module_configs` in MongoDB.
+2. Manage them from then on at `/admin/modules/auth` in the operator console. Secrets are AES-256-GCM encrypted at rest.
+
+Env-var names follow the convention `OAUTH_<PROVIDER>_<FIELD>` (e.g. `OAUTH_GOOGLE_CLIENT_ID`). Older docs that show `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` without the `OAUTH_` prefix are stale.
+
+See [`backend/internal/core/auth/CLAUDE.md`](https://github.com/orkestra-cc/orkestra/blob/main/backend/internal/core/auth/CLAUDE.md) for the canonical field-by-field schema.
 :::
 
-## What you'll need per provider
+## Prerequisites
 
-- Client ID
-- Client secret
-- Redirect URI pointing at your Orkestra instance: `https://<your-host>/api/v1/auth/oauth/<provider>/callback`
-- For Apple: a service ID, a private key, and a team ID.
+- Access to the respective provider developer portals (Google Cloud Console, Apple Developer, GitHub, Discord)
+- Orkestra backend running and reachable at your operator and client hosts. Set `ALLOW_LOCALHOST_REDIRECTS=true` in `docker/.env` for development; do not ship that to production.
 
-## Localhost redirects in dev
+## Google OAuth setup
 
-Set `ALLOW_LOCALHOST_REDIRECTS=true` in `docker/.env` for development. Don't ship this to production.
+### Step 1: access Google Cloud Console
+
+1. Go to [Google Cloud Console](https://console.cloud.google.com/).
+2. Sign in with your Google account.
+3. Create a new project or select an existing one.
+
+### Step 2: enable required APIs
+
+1. Navigate to **APIs & Services** → **Library**.
+2. Search for and enable:
+   - Google+ API
+   - Google Identity Toolkit API
+
+### Step 3: configure OAuth consent screen
+
+1. Go to **APIs & Services** → **OAuth consent screen**.
+2. Choose **External** user type (unless for internal organization).
+3. Fill in the required information:
+   - **App name**: Orkestra
+   - **User support email**: your support email
+   - **App logo**: upload your logo (optional)
+   - **Application home page**: `https://yourdomain.com`
+   - **Authorized domains**: add your domain(s)
+   - **Developer contact information**: your email
+4. Add scopes: `openid`, `email`, `profile`.
+5. Save and continue.
+
+### Step 4: create OAuth 2.0 credentials
+
+1. Navigate to **APIs & Services** → **Credentials**.
+2. Click **Create Credentials** → **OAuth client ID**.
+3. Select **Web application** as the application type.
+4. Configure:
+   - **Name**: Orkestra Web Client
+   - **Authorized JavaScript origins**:
+     - `https://console.orkestra.com` (operator, prod)
+     - `https://api.orkestra.com` (client, prod)
+     - `http://console.localhost:8080` (dev, operator)
+     - `http://client.localhost:8081` (dev, client)
+   - **Authorized redirect URIs** (callbacks land on the **backend**, not the frontend):
+     - `https://console.orkestra.com/v1/auth/oauth/google/callback`
+     - `https://api.orkestra.com/v1/auth/oauth/google/callback`
+     - `http://console.localhost:3000/v1/auth/oauth/google/callback` (dev, operator)
+     - `http://api.localhost:3000/v1/auth/oauth/google/callback` (dev, client)
+5. Click **Create**.
+6. Save the **Client ID** and **Client Secret** — paste them into `/admin/modules/auth` under the **Google** group (or set `OAUTH_GOOGLE_CLIENT_ID` / `OAUTH_GOOGLE_CLIENT_SECRET` as seed env vars on first boot).
+
+### Step 5: mobile app configuration (if needed)
+
+1. Create another OAuth client ID.
+2. Select **iOS** or **Android** as the application type.
+3. For iOS: enter your Bundle ID.
+4. For Android: enter your Package name and your SHA-1 certificate fingerprint.
+5. Save the configuration.
+
+## Apple Sign In setup
+
+### Step 1: access Apple Developer account
+
+1. Go to [Apple Developer](https://developer.apple.com/).
+2. Sign in with your Apple ID.
+3. Ensure you have an active Developer Program membership.
+
+### Step 2: register App ID
+
+1. Navigate to **Certificates, Identifiers & Profiles**.
+2. Click **Identifiers** → **+** button.
+3. Select **App IDs** and click **Continue**.
+4. Select **App** and click **Continue**.
+5. Fill in:
+   - **Description**: Orkestra
+   - **Bundle ID**: Choose **Explicit** and enter `com.yourdomain.orkestra`
+6. Under **Capabilities**, enable **Sign In with Apple**.
+7. Click **Continue** and **Register**.
+
+### Step 3: create Service ID (for Web)
+
+1. In **Identifiers**, click **+** button.
+2. Select **Services IDs** and click **Continue**.
+3. Fill in:
+   - **Description**: Orkestra Web Service
+   - **Identifier**: `com.yourdomain.orkestra.web`
+4. Click **Continue** and **Register**.
+5. Click on the created Service ID to configure.
+6. Enable **Sign In with Apple**.
+7. Click **Configure** next to Sign In with Apple.
+8. Set:
+   - **Primary App ID**: select your App ID from Step 2.
+   - **Domains and Subdomains**: add your operator + client hosts (e.g. `console.orkestra.com`, `api.orkestra.com`). Apple does not accept `localhost`; use ngrok for local development.
+   - **Return URLs** (callbacks land on the backend):
+     - `https://console.orkestra.com/v1/auth/oauth/apple/callback`
+     - `https://api.orkestra.com/v1/auth/oauth/apple/callback`
+9. Click **Next**, **Done**, and **Continue**.
+10. Click **Save**.
+
+### Step 4: create private key
+
+1. Navigate to **Keys** → **+** button.
+2. Enter a **Key Name**: Orkestra Auth Key.
+3. Enable **Sign In with Apple**.
+4. Click **Continue** and **Register**.
+5. **Download the private key** (`.p8` file).
+   - **IMPORTANT**: save this file securely — you can't download it again.
+6. Note the **Key ID** shown on the page.
+
+### Step 5: gather required information
+
+You'll need:
+
+- **Team ID**: found in your Apple Developer account (top right corner).
+- **Service ID**: the identifier created in Step 3 (e.g. `com.yourdomain.orkestra.web`).
+- **Key ID**: from Step 4.
+- **Private Key**: the `.p8` file downloaded in Step 4.
+
+## GitHub OAuth setup
+
+1. Go to [GitHub Developer Settings → OAuth Apps](https://github.com/settings/developers).
+2. Click **New OAuth App** and fill in:
+   - **Application name**: Orkestra
+   - **Homepage URL**: `https://console.orkestra.com` (or your operator host)
+   - **Authorization callback URL**: `https://console.orkestra.com/v1/auth/oauth/github/callback`
+3. Register the app, then click **Generate a new client secret**.
+4. Save the **Client ID** and **Client Secret** — paste them into `/admin/modules/auth` under the **GitHub** group (or use `OAUTH_GITHUB_CLIENT_ID` / `OAUTH_GITHUB_CLIENT_SECRET` as seed env vars).
+5. To support both operator and client tiers, repeat with the client host (`https://api.orkestra.com/...`) — GitHub only allows one callback per app, so you typically register **two GitHub OAuth apps** (one per tier) and switch credentials by audience.
+
+## Discord OAuth setup
+
+1. Go to the [Discord Developer Portal](https://discord.com/developers/applications) and create a **New Application**.
+2. Open **OAuth2 → General**. Add redirects:
+   - `https://console.orkestra.com/v1/auth/oauth/discord/callback`
+   - `https://api.orkestra.com/v1/auth/oauth/discord/callback`
+   - `http://console.localhost:3000/v1/auth/oauth/discord/callback` (dev)
+3. Click **Reset Secret** to generate a client secret.
+4. Save the **Client ID** and **Client Secret** — paste them into `/admin/modules/auth` under the **Discord** group (or `OAUTH_DISCORD_CLIENT_ID` / `OAUTH_DISCORD_CLIENT_SECRET`).
+5. Required scopes Orkestra requests: `identify email`.
+
+## Environment configuration
+
+### Backend (seed env vars, optional)
+
+These env vars are read **only on first boot** of a fresh install to seed `module_configs`. After that, manage values from `/admin/modules/auth`. Secrets are AES-256-GCM encrypted at rest by `ConfigService`.
+
+```bash
+# Google OAuth
+OAUTH_GOOGLE_CLIENT_ID=your-google-client-id.apps.googleusercontent.com
+OAUTH_GOOGLE_CLIENT_SECRET=your-google-client-secret
+OAUTH_GOOGLE_REDIRECT_URL=https://console.orkestra.com/v1/auth/oauth/google/callback
+
+# Apple Sign In
+OAUTH_APPLE_TEAM_ID=your-team-id
+OAUTH_APPLE_CLIENT_ID=com.yourdomain.orkestra.web      # Apple Service ID
+OAUTH_APPLE_KEY_ID=your-key-id
+OAUTH_APPLE_PRIVATE_KEY=-----BEGIN PRIVATE KEY-----\n...   # inline PEM (preferred)
+OAUTH_APPLE_PRIVATE_KEY_PATH=/app/keys/AuthKey_XXXXXX.p8   # OR file fallback
+OAUTH_APPLE_REDIRECT_URL=https://console.orkestra.com/v1/auth/oauth/apple/callback
+
+# GitHub
+OAUTH_GITHUB_CLIENT_ID=your-github-client-id
+OAUTH_GITHUB_CLIENT_SECRET=your-github-client-secret
+OAUTH_GITHUB_REDIRECT_URL=https://console.orkestra.com/v1/auth/oauth/github/callback
+
+# Discord
+OAUTH_DISCORD_CLIENT_ID=your-discord-client-id
+OAUTH_DISCORD_CLIENT_SECRET=your-discord-client-secret
+OAUTH_DISCORD_REDIRECT_URL=https://console.orkestra.com/v1/auth/oauth/discord/callback
+
+# JWT — Orkestra uses RS256 (asymmetric), NOT a shared HMAC secret.
+# `make init` generates these for you under docker/keys/ — see init.sh.
+JWT_PRIVATE_KEY_PATH=/app/keys/jwt-private.pem
+JWT_PUBLIC_KEY_PATH=/app/keys/jwt-public.pem
+```
+
+### Frontend
+
+The browser never talks to OAuth providers directly — it redirects to the backend endpoint at `/v1/auth/oauth/<provider>/login`, which crafts the provider authorization URL with state, scopes, and the correct redirect URL. So the frontend does not need provider client IDs.
+
+```bash
+# frontend-admin (operator console) — .env.production
+VITE_API_URL=https://console.orkestra.com
+
+# frontend-client (Tier-2 client SPA) — .env.production
+VITE_API_BASE=https://api.orkestra.com
+```
+
+### Mobile
+
+For the Flutter mobile app, update:
+
+**iOS** — `ios/Runner/Info.plist`:
+
+```xml
+<key>CFBundleURLTypes</key>
+<array>
+    <dict>
+        <key>CFBundleURLSchemes</key>
+        <array>
+            <string>com.googleusercontent.apps.YOUR_GOOGLE_IOS_CLIENT_ID</string>
+        </array>
+    </dict>
+</array>
+```
+
+**Android** — add the Google services configuration file to `android/app/google-services.json`.
+
+## Testing OAuth integration
+
+### Local development
+
+1. Ensure your backend is running and reachable as both `http://console.localhost:3000` (operator) and `http://api.localhost:3000` (client) — the host mux dispatches on `Host`. Add entries to `/etc/hosts` if needed:
+
+   ```text
+   127.0.0.1 console.localhost api.localhost client.localhost
+   ```
+
+2. Start the frontends — operator on `http://console.localhost:8080`, client SPA on `http://client.localhost:8081`.
+3. From the operator login page, click **Sign in with Google** (or GitHub / Discord / Apple via ngrok). The browser is redirected to `http://console.localhost:3000/v1/auth/oauth/google/login`, then to Google, then back to `/v1/auth/oauth/google/callback`, which sets the operator refresh cookie and redirects to the dashboard.
+4. Repeat from the client SPA to verify the client-tier flow lands the refresh cookie on the `api.*` host with `aud=client` in the JWT.
+
+### Production
+
+1. Deploy your application to your domain.
+2. Ensure HTTPS is properly configured.
+3. Test both authentication flows (operator + client).
+4. Verify tokens are properly generated and stored.
+
+## Security best practices
+
+1. **Never commit secrets** to version control.
+2. **Use environment variables** (or, better, ConfigService) for all sensitive configuration.
+3. **Implement HTTPS** for production deployments.
+4. **Rotate keys periodically**.
+5. **Implement rate limiting** on authentication endpoints (built in — `RATE_LIMIT_REQUESTS_PER_MINUTE` / `RATE_LIMIT_BURST`).
+6. **Log authentication attempts** for security monitoring (built in — see `compliance` addon).
+7. **Use secure session management** with JWT tokens (built in — RS256, refresh-token rotation).
+8. **Implement refresh token rotation** (built in — see `backend/internal/core/auth/`).
+
+## Troubleshooting
+
+### Common Google OAuth issues
+
+**Error: `redirect_uri_mismatch`**
+
+- Ensure the redirect URI in your request matches exactly with configured URIs.
+- Check for trailing slashes and protocol (`http` vs `https`).
+
+**Error: `invalid_client`**
+
+- Verify Client ID and Client Secret are correct.
+- Check if the OAuth consent screen is properly configured.
+
+### Common Apple Sign In issues
+
+**Error: `invalid_grant`**
+
+- Ensure the authorization code is used only once.
+- Verify the redirect URI matches exactly.
+
+**Error: `invalid_client`**
+
+- Check Team ID, Service ID, and Key ID are correct.
+- Verify the private key file is accessible and valid.
+
+**JWT token issues**
+
+- Ensure the private key file has correct permissions.
+- Verify the key hasn't expired.
+- Check the algorithm matches (ES256 for Apple).
+
+## Support
+
+- Google OAuth: [Google Identity Platform documentation](https://developers.google.com/identity)
+- Apple Sign In: [Sign in with Apple documentation](https://developer.apple.com/sign-in-with-apple/)
+- Orkestra issues: open one on [the monorepo](https://github.com/orkestra-cc/orkestra/issues)
+
+## Pre-production checklist
+
+- [ ] Google OAuth credentials created and configured (operator + client hosts)
+- [ ] Apple Sign In credentials created and configured (operator + client hosts; ngrok used for local)
+- [ ] GitHub OAuth app(s) created — one per tier if you need both
+- [ ] Discord OAuth credentials created and configured
+- [ ] Credentials stored in `/admin/modules/auth` (ConfigService), not in plain `.env` in prod
+- [ ] Redirect URIs registered for production hosts (`console.orkestra.com`, `api.orkestra.com`)
+- [ ] RS256 keys (`jwt-private.pem` / `jwt-public.pem`) generated and `JWT_PRIVATE_KEY_PATH` / `JWT_PUBLIC_KEY_PATH` set
+- [ ] HTTPS enabled on production
+- [ ] OAuth tested in development environment (both operator and client tiers)
+- [ ] OAuth tested in production environment
+- [ ] Security best practices implemented
+- [ ] Monitoring and logging configured
+- [ ] Documentation shared with team

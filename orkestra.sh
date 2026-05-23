@@ -861,13 +861,28 @@ profile_info() {
 # ---------------------------------------------------------------------------
 
 # Map detected ENV to compose file, branch, DB, URLs, env-chip color.
+# DEV_COMPOSE_VARIANT controls which dev compose file gets used:
+#   public     — docker-compose.dev-public.yml (default; public Alpine images)
+#   chainguard — docker-compose.dev.yml         (requires dhi.io subscription)
+# Set in docker/.env or as a shell env var. See README "Full development
+# stack" for the rationale of the public default.
 set_env_config() {
     case "$ENV" in
         development)
             ENV_CHIP_COLOR=$c_success
             ENV_ICON="$ic_dot"
             BRANCH="any"
-            COMPOSE_FILE="$DOCKER_DIR/docker-compose.dev.yml"
+            local variant="${DEV_COMPOSE_VARIANT:-public}"
+            case "$variant" in
+                public)     COMPOSE_FILE="$DOCKER_DIR/docker-compose.dev-public.yml" ;;
+                chainguard) COMPOSE_FILE="$DOCKER_DIR/docker-compose.dev.yml" ;;
+                *)
+                    p_warn "Unknown DEV_COMPOSE_VARIANT '$variant' — falling back to 'public'"
+                    COMPOSE_FILE="$DOCKER_DIR/docker-compose.dev-public.yml"
+                    variant="public"
+                    ;;
+            esac
+            ENV_DEV_VARIANT="$variant"
             DB_NAME="orkestra_dev"
             FRONTEND_URL="http://localhost:8080"
             BACKEND_URL="http://localhost:3000"
@@ -894,6 +909,18 @@ set_env_config() {
 }
 
 fullstack_init_env() {
+    if [ ! -f "$ENV_FILE" ]; then
+        p_warn "docker/.env not found — looks like a fresh checkout."
+        if [ -t 0 ] && [ -t 1 ]; then
+            if ask_yes_no "Run scripts/init.sh now to scaffold .env + JWT keys?" "y"; then
+                bash "$SCRIPT_DIR/scripts/init.sh" || die "init failed — fix the error above and retry"
+            else
+                die "Cannot proceed without docker/.env. Run: make init (or scripts/init.sh)"
+            fi
+        else
+            die "docker/.env missing. Non-interactive shell — run: make init (or scripts/init.sh) first."
+        fi
+    fi
     if ! detect_environment > /dev/null 2>&1; then
         die "Cannot detect ENV. Set ENV=development|staging|production in docker/.env or as a shell variable."
     fi
@@ -903,9 +930,14 @@ fullstack_init_env() {
 }
 
 show_deploy_summary() {
+    local variant_line=""
+    if [ "$ENV" = "development" ] && [ -n "${ENV_DEV_VARIANT:-}" ]; then
+        variant_line="  Images       ${ENV_DEV_VARIANT} ($(basename "$COMPOSE_FILE"))"
+    fi
     draw_box "Summary" \
         "" \
         "  Environment  ${ENV_CHIP_COLOR}${ic_dot}${c_reset} $(echo "$ENV" | tr '[:lower:]' '[:upper:]')" \
+        ${variant_line:+"$variant_line"} \
         "  Operation    Deploy" \
         "  Branch       ${BRANCH:-any}" \
         "  Scope        ${DEPLOY_SCOPE:-all}" \
@@ -1828,6 +1860,11 @@ ${c_bold}USAGE${c_reset}
   ./orkestra.sh                    ${c_muted}# interactive TUI (profile menu)${c_reset}
   ./orkestra.sh <command> [args]   ${c_muted}# non-interactive CLI${c_reset}
 
+${c_bold}FIRST-TIME SETUP${c_reset}
+  ${c_accent}init${c_reset} [--force] [--yes]            Scaffold docker/.env (random secrets) +
+                                   RS256 JWT keys. Idempotent — preserves
+                                   existing files unless --force.
+
 ${c_bold}SKU PROFILE${c_reset} ${c_muted}(pulls published image from GHCR)${c_reset}
   ${c_accent}profile <name> deploy${c_reset} [--pull]    Start SKU stack (--pull refreshes the image)
   ${c_accent}profile <name> stop${c_reset}               Stop containers (volumes kept)
@@ -1894,6 +1931,12 @@ cli_dispatch() {
         -v | --version | version)
             show_version
             exit 0
+            ;;
+
+        init)
+            # Delegate to scripts/init.sh. Forwards every flag so
+            # `./orkestra.sh init --force` works the same as `make init-force`.
+            exec bash "$SCRIPT_DIR/scripts/init.sh" "$@"
             ;;
 
         profile)

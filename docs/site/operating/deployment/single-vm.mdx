@@ -1,0 +1,199 @@
+---
+title: Single VM with Docker Compose
+sidebar_position: 2
+description: Production Orkestra on one Ubuntu/Debian VM — Compose files, systemd unit, log rotation, smoke tests.
+---
+
+# Single VM with Docker Compose
+
+This is the simplest production-shape deployment of Orkestra: one VM (Ubuntu 24.04 or Debian 12), Docker Compose, the SKU-image compose files, and a systemd unit that keeps the stack alive across reboots. No Kubernetes, no load balancer, no remote DB — everything on one host.
+
+It's the right shape for:
+
+- Solo operators self-hosting Orkestra for their own use
+- Internal-tools deployments where a single VM is enough
+- Pre-production environments before a multi-replica K8s deployment
+
+For TLS termination and the per-audience host split (`console.*` + `api.*`), add the Caddy reverse-proxy from [the next guide](./reverse-proxy-caddy).
+
+## Sizing
+
+| Resource | Minimum | Recommended (small team, ~50 users) |
+| --- | --- | --- |
+| vCPU | 2 | 4 |
+| RAM | 4 GB | 8 GB |
+| Disk | 40 GB SSD | 100 GB SSD |
+| Network | 100 Mbps | 1 Gbps |
+
+The AI addons (`graph`, `aimodels`, `rag`, `agents`) push memory hard if enabled. Add 4 GB per active AI workload. Hindsight (the agents runtime) wants 2 GB on its own.
+
+## Step 1 — Prepare the VM
+
+```bash
+# As root or via sudo
+apt-get update && apt-get install -y \
+  ca-certificates curl gnupg lsb-release git \
+  unattended-upgrades
+```
+
+Install Docker per the [official guide](https://docs.docker.com/engine/install/ubuntu/) — `apt-get install docker-ce docker-ce-cli containerd.io docker-compose-plugin`. Add your deploy user to the `docker` group and re-login.
+
+Configure unattended security upgrades:
+
+```bash
+dpkg-reconfigure unattended-upgrades   # Yes
+```
+
+## Step 2 — Clone and init
+
+As your deploy user (NOT root):
+
+```bash
+cd /opt
+sudo mkdir orkestra && sudo chown $USER:$USER orkestra
+cd orkestra
+git clone https://github.com/<your-org>/orkestra.git .
+make init
+```
+
+`make init` will scaffold `docker/.env` (with random secrets), generate RS256 JWT keys, and create the `orkestra-network` Docker bridge. See [I just forked Orkestra](/getting-started/forking) for what each step does.
+
+Edit `docker/.env`:
+
+- Set `ENV=production`.
+- Set `BACKEND_URL`, `FRONTEND_URL`, `OPERATOR_FRONTEND_URL`, `CLIENT_FRONTEND_URL`, `CONSOLE_HOST`, `CLIENT_API_HOST` to your real hostnames.
+- Set `COOKIE_SECURE=true` and `COOKIE_SAME_SITE=strict`.
+- Set `ALLOW_LOCALHOST_REDIRECTS=false`.
+- Set `OPERATOR_COOKIE_DOMAIN` and `CLIENT_COOKIE_DOMAIN` to non-overlapping hosts — see [Cookie hardening](/operating/cookie-hardening-cross-tier).
+- (Optional) Set `LOG_LEVEL=info` and `PRETTY_LOGS=false` for JSON logs that ship to Loki / Datadog / Honeycomb cleanly.
+
+## Step 3 — Start the stack
+
+```bash
+cd /opt/orkestra/docker
+docker compose -f docker-compose.infra.yml up -d
+docker compose -f docker-compose.enterprise.yml --env-file .env up -d
+```
+
+Replace `enterprise` with `starter` / `billing` / `ai` / `saas` if you want a smaller SKU.
+
+Verify:
+
+```bash
+docker compose -f docker-compose.enterprise.yml --env-file .env ps
+curl -s http://localhost:3000/health
+```
+
+## Step 4 — systemd unit for auto-restart on reboot
+
+Create `/etc/systemd/system/orkestra.service`:
+
+```ini
+[Unit]
+Description=Orkestra stack
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/opt/orkestra/docker
+User=deploy
+Group=docker
+EnvironmentFile=/opt/orkestra/docker/.env
+ExecStart=/usr/bin/docker compose -f docker-compose.infra.yml -f docker-compose.enterprise.yml --env-file .env up -d
+ExecStop=/usr/bin/docker compose -f docker-compose.infra.yml -f docker-compose.enterprise.yml --env-file .env down
+TimeoutStartSec=300
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Replace `deploy` with your actual deploy user, and `enterprise` with your chosen SKU. Then:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable orkestra.service
+sudo systemctl start orkestra.service
+sudo systemctl status orkestra.service
+```
+
+On VM reboot, Docker comes up, then orkestra.service brings the stack up automatically.
+
+## Step 5 — First admin login
+
+```bash
+# Generate a one-time administrator token to create the real admin account:
+cd /opt/orkestra
+ORKESTRA_API_URL=http://localhost:3000 ./scripts/devtoken.sh administrator
+```
+
+The `dev` addon must be compiled into your SKU for this to work. `starter` / `billing` / `ai` / `saas` / `enterprise` all include it. Use the token to log into `/admin/users` and create a real (non-synthetic) administrator account, then **disable the `dev` addon at `/admin/modules`** before opening the site to the public. The dev token issuer is also auto-disabled when `ENV=production`.
+
+## Step 6 — Log rotation
+
+Docker's default JSON log driver grows unbounded. Configure rotation in `/etc/docker/daemon.json`:
+
+```json
+{
+  "log-driver": "json-file",
+  "log-opts": {
+    "max-size": "100m",
+    "max-file": "5"
+  }
+}
+```
+
+Restart the daemon (`systemctl restart docker`) — existing containers keep their old config until next recreate, so re-run `docker compose up -d`.
+
+For structured JSON logs shipping straight to Loki, use [the observability stack](https://github.com/orkestra-cc/orkestra/blob/main/docker/CLAUDE.md#self-hosted-otel-stack-docker-composeobservabilityyml):
+
+```bash
+docker compose -f docker-compose.observability.yml --env-file .env up -d
+```
+
+Promtail tails Docker stdout, JSON-parses, ships to Loki. Grafana is at `http://localhost:3010` (admin/admin by default — change immediately).
+
+## Step 7 — Backups
+
+See [Backup and restore](/operating/backup-and-restore) for `mongodump` cron recipes and restore-test cadence. Redis is ephemeral (caches and sessions) — losing it logs everyone out but doesn't lose data.
+
+## Step 8 — Smoke tests
+
+After every deploy and after every restart, run:
+
+```bash
+# Backend health (process + DB connectivity)
+curl -fsS http://localhost:3000/health | jq .
+
+# Admin modules list (should return JSON)
+TOKEN=$(./scripts/devtoken.sh administrator --quiet)
+curl -fsS -H "Authorization: Bearer $TOKEN" http://localhost:3000/v1/admin/modules | jq '.modules | length'
+
+# OpenAPI spec count
+curl -fsS http://localhost:3000/openapi.json | jq '.paths | keys | length'
+```
+
+If any of these fail, check `docker compose -f docker-compose.enterprise.yml --env-file .env logs backend --tail 100`.
+
+## Upgrade procedure
+
+```bash
+cd /opt/orkestra
+git pull
+docker compose -f docker/docker-compose.enterprise.yml --env-file docker/.env pull
+sudo systemctl restart orkestra.service
+```
+
+The infra services (Mongo, Redis) are pinned to specific image versions in the compose file — they don't update on `pull`. To upgrade them, edit the compose file, then `docker compose up -d`.
+
+Mongo upgrades across major versions need attention — read the [Mongo upgrade docs](https://www.mongodb.com/docs/manual/release-notes/) before bumping. Orkestra ships with Mongo 8.0; the schema is forward-compatible to whatever 8.x lands.
+
+## What's missing
+
+This guide is intentionally single-VM. For multi-host setups:
+
+- **Multi-replica backend** — read [the K8s overview](./kubernetes-overview); the Go binary is stateless, so horizontal scaling works as long as sticky sessions or shared Redis sessions are configured.
+- **Managed databases** — set `MONGO_URI` and `REDIS_URL` to your managed-DB connection strings; remove the `mongodb` and `redis` services from `docker-compose.infra.yml`.
+- **Object storage** — Orkestra doesn't ship a built-in object store today; the `documents` addon uses Gotenberg for PDF rendering, output streams back to the client. For long-term storage, integrate S3-compatible storage at the application layer.

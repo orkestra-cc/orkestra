@@ -1,0 +1,269 @@
+---
+title: Reverse-proxy with Caddy
+sidebar_position: 3
+description: Caddy in front of Orkestra — automatic TLS via Let's Encrypt, per-audience host split, security headers, rate limiting.
+---
+
+# Reverse-proxy with Caddy
+
+[Caddy](https://caddyserver.com/) is the simplest path from "Orkestra runs on `localhost:3000`" to "Orkestra runs on `https://console.example.com` and `https://api.example.com` with a green padlock". This guide assumes you've already done [Single VM](./single-vm) — backend is healthy on `localhost:3000`, infra is up.
+
+Why Caddy:
+
+- **Automatic TLS via Let's Encrypt.** Zero config beyond DNS pointing at your VM.
+- **HTTP/2 + HTTP/3** by default.
+- **Single binary**, two-line Caddyfile gets you 80% of the way.
+- **Per-audience host split** (ADR-0003) maps cleanly to two `server` blocks.
+
+Other proxies (nginx, Traefik) work too — pattern is the same, syntax different.
+
+## Step 1 — DNS
+
+Point both hostnames at your VM's public IP. Two A records is the simplest:
+
+```
+console.example.com.   A   203.0.113.42
+api.example.com.       A   203.0.113.42
+```
+
+Wait for propagation (usually a few minutes). Verify with `dig +short console.example.com api.example.com`.
+
+If you also serve the Tier-2 client SPA from a separate hostname, add it too:
+
+```
+client.example.com.    A   203.0.113.42
+```
+
+## Step 2 — Install Caddy
+
+Add the Caddy apt repo and install:
+
+```bash
+sudo apt-get install -y debian-keyring debian-archive-keyring apt-transport-https
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo tee /etc/apt/sources.list.d/caddy-stable.list
+sudo apt-get update
+sudo apt-get install -y caddy
+```
+
+`caddy` installs as a systemd unit. We won't enable it yet — we'll edit `/etc/caddy/Caddyfile` first.
+
+## Step 3 — Caddyfile
+
+Replace `/etc/caddy/Caddyfile` with the following. Substitute `console.example.com` / `api.example.com` / `client.example.com` and `your-email@example.com` with your real values.
+
+```caddyfile
+{
+    # Global options
+    email your-email@example.com
+}
+
+# Operator console — Tier-1 admin UI + backend.
+console.example.com {
+    # Serve the React SPA build under / (operator console).
+    # If you're using the SKU compose, the frontend-admin container exposes
+    # port 80 internally. Replace with the actual host:port if you run the
+    # frontend elsewhere.
+    handle_path /api/* {
+        # /api/* paths are the operator-tier backend surface.
+        reverse_proxy localhost:3000
+    }
+    handle / {
+        # Static SPA fallback.
+        reverse_proxy localhost:8080
+    }
+    handle /v1/* {
+        # Direct backend API (no /api prefix) — used by the SPA's JS client.
+        reverse_proxy localhost:3000
+    }
+    handle /openapi.json {
+        reverse_proxy localhost:3000
+    }
+    handle /health /ready /metrics {
+        reverse_proxy localhost:3000
+    }
+
+    # Force HTTPS, HSTS, security headers.
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        Permissions-Policy "geolocation=(), camera=(), microphone=()"
+        # Remove the server identifier.
+        -Server
+    }
+
+    # Rate limit at the proxy. The backend also has its own rate limiter
+    # (RATE_LIMIT_REQUESTS_PER_MINUTE, RATE_LIMIT_BURST), but a front-line
+    # bound prevents abusive traffic from reaching it.
+    # Requires the caddy-ratelimit module — see https://caddyserver.com/docs/modules/http.handlers.rate_limit
+    # If you don't want to add a module, delete this block.
+    # rate_limit {
+    #     zone operator_global {
+    #         key {client_ip}
+    #         events 600
+    #         window 1m
+    #     }
+    # }
+
+    encode gzip zstd
+
+    # Structured access logs.
+    log {
+        output file /var/log/caddy/console-access.log {
+            roll_size 100mb
+            roll_keep 10
+        }
+        format json
+    }
+}
+
+# Tier-2 client API surface — separate hostname for cookie isolation
+# (ADR-0003 PR-D D-9). Refresh-cookie domain must NOT overlap the
+# operator domain in production.
+api.example.com {
+    reverse_proxy localhost:3000
+
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        # No client UI is served from this host — only the API. CORS is
+        # enforced by the backend's CLIENT_CORS_ORIGINS.
+        -Server
+    }
+
+    encode gzip zstd
+
+    log {
+        output file /var/log/caddy/api-access.log {
+            roll_size 100mb
+            roll_keep 10
+        }
+        format json
+    }
+}
+
+# Tier-2 client SPA — the React app users land on. Optional; skip this
+# block if you don't have the Tier-2 demo SPA deployed.
+client.example.com {
+    reverse_proxy localhost:8081
+
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        Permissions-Policy "geolocation=(), camera=(), microphone=()"
+        -Server
+    }
+
+    encode gzip zstd
+
+    log {
+        output file /var/log/caddy/client-access.log {
+            roll_size 100mb
+            roll_keep 10
+        }
+        format json
+    }
+}
+```
+
+Validate the Caddyfile syntax:
+
+```bash
+sudo caddy validate --config /etc/caddy/Caddyfile
+```
+
+If it prints `Valid configuration`, enable and start:
+
+```bash
+sudo systemctl enable --now caddy
+sudo systemctl status caddy
+```
+
+Caddy will request Let's Encrypt certs for each hostname on first request. Watch the logs:
+
+```bash
+sudo journalctl -u caddy -f
+```
+
+## Step 4 — Update Orkestra's `docker/.env` to match
+
+Now that Caddy fronts the backend on those public hostnames, the backend needs to know:
+
+```bash
+BACKEND_URL=https://console.example.com
+FRONTEND_URL=https://console.example.com
+OPERATOR_FRONTEND_URL=https://console.example.com
+CLIENT_FRONTEND_URL=https://client.example.com
+
+CONSOLE_HOST=console.example.com
+CLIENT_API_HOST=api.example.com
+
+OPERATOR_CORS_ORIGINS=https://console.example.com
+CLIENT_CORS_ORIGINS=https://client.example.com
+
+# Per-audience cookie domain split — critical for security (ADR-0003 PR-D D-9).
+# See operating/cookie-hardening-cross-tier for the full rationale.
+COOKIE_SECURE=true
+COOKIE_SAME_SITE=strict
+OPERATOR_COOKIE_DOMAIN=console.example.com
+CLIENT_COOKIE_DOMAIN=api.example.com
+
+ALLOW_LOCALHOST_REDIRECTS=false
+```
+
+Restart the backend so it picks up the new env:
+
+```bash
+sudo systemctl restart orkestra.service
+```
+
+## Step 5 — Verify
+
+```bash
+# Should 200 with a green padlock in the browser
+curl -fsSI https://console.example.com/health
+curl -fsSI https://api.example.com/health
+
+# Audience gate — operator-tier token on the client host should 401
+TOKEN=$(./scripts/devtoken.sh administrator --quiet)
+curl -fsS -H "Authorization: Bearer $TOKEN" https://api.example.com/v1/admin/modules
+# Expected: 401 with body { "code": "audience_mismatch", ... }
+```
+
+## Step 6 — Backend on private network
+
+For defence in depth, bind the backend to the loopback interface only so Caddy is the only path in:
+
+In `docker/docker-compose.enterprise.yml` (or whichever SKU you use), edit the `backend` port mapping:
+
+```yaml
+ports:
+  - "127.0.0.1:3000:3000"   # was: "${BACKEND_PORT:-3000}:3000"
+```
+
+Apply with `docker compose up -d`. Verify the public port is gone:
+
+```bash
+# Should fail — port 3000 not externally reachable
+curl -fsS http://203.0.113.42:3000/health
+```
+
+The same change in `docker/docker-compose.infra.yml` for `mongodb` and `redis` (they bind on `27027` / `6387` by default — bind them to `127.0.0.1` so only the backend container can reach them).
+
+## What's deliberately not here
+
+- **Multi-VM TLS termination** (Caddy on a dedicated reverse-proxy VM separate from the backend VM) — same Caddyfile, just point `reverse_proxy` at the backend VM's private IP.
+- **mTLS to upstream** — supported by Caddy via the `tls_internal` directive, but Orkestra's HTTP server doesn't currently terminate client certs.
+- **WAF rules** — Caddy + the [caddy-waf](https://github.com/corazawaf/coraza-caddy) module can run ModSecurity rule sets in front of the backend. Out of scope here.
+
+## See also
+
+- [Cookie hardening across tiers](/operating/cookie-hardening-cross-tier) — why `OPERATOR_COOKIE_DOMAIN` and `CLIENT_COOKIE_DOMAIN` must not overlap
+- [Single VM with Docker Compose](./single-vm) — the layer below this
+- [Caddy documentation](https://caddyserver.com/docs/)

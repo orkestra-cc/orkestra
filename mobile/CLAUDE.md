@@ -40,8 +40,17 @@ The mobile app supports three environments with separate entry points:
 ### Running Different Environments
 
 ```bash
-# Development
+# Development — iOS sim / desktop. Override for Android emulator (10.0.2.2)
+# or a physical device (host LAN IP) via --dart-define-from-file. See README.md.
 flutter run -t lib/main_development.dart
+
+# Override example for Android emulator:
+flutter run -t lib/main_development.dart \
+  --dart-define=ORKESTRA_API_URL=http://10.0.2.2:3000 \
+  --dart-define=ORKESTRA_WS_URL=ws://10.0.2.2:3000/ws
+
+# Or via a file (template at dart_define/example.json, copies gitignored):
+flutter run -t lib/main_development.dart --dart-define-from-file=dart_define/dev.json
 
 # Staging
 flutter run -t lib/main_staging.dart
@@ -50,11 +59,13 @@ flutter run -t lib/main_staging.dart
 flutter run -t lib/main_production.dart
 
 # Build APK for production
-flutter build apk -t lib/main_production.dart
+flutter build apk -t lib/main_production.dart --dart-define-from-file=dart_define/production.json
 
 # Build iOS for production
-flutter build ios -t lib/main_production.dart
+flutter build ios -t lib/main_production.dart --dart-define-from-file=dart_define/production.json
 ```
+
+`String.fromEnvironment('ORKESTRA_API_URL', defaultValue: ...)` is the override mechanism — see `lib/config/environment.dart`. Available keys: `ORKESTRA_API_URL`, `ORKESTRA_WS_URL`. Per-environment defaults preserved so the orkestra.cc canonical instance keeps working without overrides; forkers override per environment via dart-define.
 
 ### Environment Configuration Files
 

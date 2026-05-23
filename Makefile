@@ -22,6 +22,11 @@
 help:
 	@echo "Orkestra — common make targets:"
 	@echo ""
+	@echo "First-time setup:"
+	@echo "  make init                - Scaffold docker/.env with random secrets + RS256 JWT keys"
+	@echo "  make init-force          - Re-init even if .env / keys exist (invalidates tokens)"
+	@echo "  make init-yes            - Non-interactive init for CI / scripted environments"
+	@echo ""
 	@echo "Stack lifecycle (wrappers over ./orkestra.sh):"
 	@echo "  make up                  - Launch the interactive TUI to deploy a stack"
 	@echo "  make down                - Stop application services + infra (volumes kept)"
@@ -300,6 +305,22 @@ install:
 
 install-hooks:
 	@pre-commit install --install-hooks
+
+# Bootstrap docker/.env (random secrets) + JWT keys for a fresh checkout.
+# Idempotent — preserves existing files unless --force is passed.
+# Implementation lives in scripts/init.sh so orkestra.sh can call the
+# same logic via `./orkestra.sh init`.
+init:
+	@bash scripts/init.sh
+
+init-force:
+	@bash scripts/init.sh --force
+
+# CI-friendly init — answers "yes" to every prompt (no overwrite of existing
+# files unless paired with --force, just suppresses the interactive prompt
+# when stdin isn't a TTY). Equivalent to `bash scripts/init.sh --yes`.
+init-yes:
+	@bash scripts/init.sh --yes
 
 # ---- Top-level CI dispatch ----
 

@@ -1,0 +1,82 @@
+---
+title: Dev container images — public vs Chainguard
+sidebar_position: 6
+description: Why two flavors of docker-compose.dev*.yml exist, when to use which, and what's different between them.
+---
+
+# Dev container images
+
+Orkestra ships two parallel docker-compose files for the full development stack. They are functionally identical — same env-vars, same ports, same volumes, same AIR / Vite HMR hot-reload — but use different base images.
+
+| File | Backend image | Frontend-admin image | Default? |
+| --- | --- | --- | --- |
+| `docker-compose.dev-public.yml` | `golang:1.25.10-alpine` | `node:24-alpine` | ✅ yes — what `orkestra.sh` and the README quick-start use |
+| `docker-compose.dev.yml` | `dhi.io/golang:1` | `dhi.io/node:24-dev` | no — opt-in via `DEV_COMPOSE_VARIANT=chainguard` |
+
+The Tier-2 client SPA (`orkestra-client-frontend`) already runs on `node:24-alpine` in both files — no Chainguard variant exists for it.
+
+## Why two flavors
+
+[Chainguard](https://www.chainguard.dev) `dhi.io/*` images are hardened, minimal, and patched faster than upstream Alpine. They're the operator-grade choice for an Orkestra deployment that has a Chainguard subscription. But forkers, contributors, and anyone running Orkestra on a clean dev box without a `dhi.io` enterprise contract can't pull them — `docker compose pull` fails with `unauthorized`.
+
+The public variant unblocks that audience without giving up anything for those who do have Chainguard access — they keep getting `docker-compose.dev.yml` by setting one env var.
+
+## Choosing your variant
+
+The `orkestra.sh` TUI and CLI both honour `DEV_COMPOSE_VARIANT` (read from `docker/.env` or your shell):
+
+| `DEV_COMPOSE_VARIANT` | Compose file resolved | Notes |
+| --- | --- | --- |
+| unset (default) | `docker-compose.dev-public.yml` | Public Alpine images, zero registry auth needed |
+| `public` | `docker-compose.dev-public.yml` | Same as default — explicit form |
+| `chainguard` | `docker-compose.dev.yml` | Requires a logged-in `dhi.io` registry session |
+
+Switch at any time:
+
+```bash
+# In docker/.env:
+DEV_COMPOSE_VARIANT=chainguard
+
+# Or one-off:
+DEV_COMPOSE_VARIANT=chainguard ./orkestra.sh deploy --scope all --yes
+```
+
+The TUI's deploy summary box prints which variant + compose file is active, so you always see what's going up.
+
+## What's different between the images
+
+| Concern | `golang:1.25.10-alpine` (public) | `dhi.io/golang:1` (Chainguard) |
+| --- | --- | --- |
+| Base distro | Alpine 3.21 (musl libc) | Wolfi (musl libc, Chainguard's distro) |
+| Pre-installed tooling | go, ca-certs | go, git, build-base, ca-certs, tzdata |
+| CVE patching cadence | Alpine community pace (days–weeks) | Chainguard SLA (hours–days) |
+| Image size | ~250 MB | ~180 MB (zero-CVE target) |
+| Registry auth | none — public Docker Hub | `dhi.io` login required |
+| SBOM included | no | yes (in-toto SLSA attestations) |
+
+The public variant `command:` runs `apk add --no-cache git build-base` at container start to install the build-essential packages that Chainguard's `dev` images ship pre-baked. First boot is ~10 s slower because of that apk install; subsequent restarts are instant (apk cache is in the image layer).
+
+## What is identical
+
+- Every env-var, port mapping, volume, command, dns, healthcheck
+- AIR hot-reload behaviour (same `air@latest` install path)
+- Vite HMR on the frontend
+- Volume mounts for `.go-mod-cache`, `.go-build-cache`, `marketing-spool-dev`
+- Docker socket bind-mount for module-managed infrastructure containers (`orkestra-hindsight`, `orkestra-memgraph`)
+- DNS resolvers (8.8.8.8, 8.8.4.4)
+
+A side-by-side `docker compose config` of both files shows differences only on the `image:` and `command:` keys for the two affected services.
+
+## Staging and production
+
+Both `docker-compose.staging.yml` and `docker-compose.prod.yml` still pull `dhi.io/*` images by default. They're not part of this split because:
+
+1. Staging/prod operators are typically the ones who have (or should have) a Chainguard subscription.
+2. A staging-public variant would proliferate compose files without solving a real fork-readiness problem — the SKU profile compose files already cover "I just want to pull a published image and run it".
+
+If you do need a public-image staging or prod compose, copy `docker-compose.staging.yml` and swap the two `image:` lines the same way `docker-compose.dev-public.yml` does. The pattern is mechanical.
+
+## See also
+
+- [`docker/CLAUDE.md`](https://github.com/orkestra-cc/orkestra/blob/main/docker/CLAUDE.md) — full Docker module guide
+- [Forking the image registry](/getting-started) — README quick-start section on overriding `BACKEND_IMAGE_REPO`

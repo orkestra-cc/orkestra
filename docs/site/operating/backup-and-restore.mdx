@@ -1,0 +1,162 @@
+---
+title: Backup and restore
+sidebar_position: 7
+description: mongodump / mongorestore recipes, retention, restore-test cadence, and what's safe to lose.
+---
+
+# Backup and restore
+
+Orkestra's stateful surfaces are:
+
+| What | Where | Backup needed? |
+| --- | --- | --- |
+| **Primary data** (users, tenants, modules, billing, marketing, etc.) | MongoDB | ✅ yes, daily minimum |
+| **AES-256-GCM-encrypted secrets** (`module_configs`) | MongoDB | ✅ yes — but recovery also requires `OAUTH_TOKEN_ENCRYPTION_KEY` from `docker/.env` |
+| **Per-tenant DEKs** (compliance) | MongoDB | ✅ yes — recovery requires `ORKESTRA_KMS_MASTER_KEY` from `docker/.env` |
+| **Audit events** (`audit_events`) | MongoDB | ✅ yes — never sample, never delete |
+| **Sessions / refresh tokens / rate-limit counters** | Redis | ❌ no — losing logs everyone out, doesn't lose data |
+| **HTTP request logs** | Loki / Datadog / stdout | optional — your retention policy |
+| **OpenTelemetry traces / metrics** | Tempo / Prometheus / vendor | optional — your retention policy |
+| **Object content** (PDF outputs, marketing imports) | filesystem (`MARKETING_IMPORT_SPOOL_DIR`) | ✅ yes if you need it long-term |
+| **JWT keys** (`docker/keys/`) | filesystem | ✅ yes — losing invalidates every issued token |
+
+**Bottom line:** back up MongoDB nightly and the contents of `docker/.env` + `docker/keys/` once. Skip Redis. Decide on the spool directory based on how much your importers matter.
+
+## MongoDB backup
+
+`mongodump` is the operator-friendly path — produces BSON dumps that `mongorestore` reads. It does **not** lock the database; it's safe on a live system, though large dumps spike I/O.
+
+### Daily backup script
+
+Save as `/opt/orkestra/scripts/backup.sh` on the production VM:
+
+```bash
+#!/bin/bash
+# /opt/orkestra/scripts/backup.sh
+set -euo pipefail
+
+TIMESTAMP=$(date -u +%Y-%m-%dT%H-%M-%SZ)
+BACKUP_DIR="/var/backups/orkestra"
+RETENTION_DAYS=30
+
+mkdir -p "$BACKUP_DIR"
+
+# Source the env to get MONGO_ROOT_PASSWORD
+set -a
+. /opt/orkestra/docker/.env
+set +a
+
+# Dump into a tarball
+docker exec orkestra-mongodb mongodump \
+  --username "${MONGO_ROOT_USERNAME:-admin}" \
+  --password "${MONGO_ROOT_PASSWORD}" \
+  --authenticationDatabase admin \
+  --archive --gzip > "${BACKUP_DIR}/orkestra-${TIMESTAMP}.archive.gz"
+
+# Prune older than retention
+find "$BACKUP_DIR" -name "orkestra-*.archive.gz" -mtime "+${RETENTION_DAYS}" -delete
+
+# Optional: ship to S3 / GCS / Azure Blob
+# aws s3 cp "${BACKUP_DIR}/orkestra-${TIMESTAMP}.archive.gz" s3://your-bucket/orkestra/
+```
+
+Make executable and schedule:
+
+```bash
+sudo chmod +x /opt/orkestra/scripts/backup.sh
+
+# /etc/cron.d/orkestra-backup
+0 3 * * * deploy /opt/orkestra/scripts/backup.sh >> /var/log/orkestra-backup.log 2>&1
+```
+
+3 AM UTC daily, kept for 30 days. Adjust to your timezone / retention policy.
+
+### Verify the backup is sane
+
+A backup file you can't restore is not a backup. Test monthly (or at least quarterly) — see "Restore-test cadence" below.
+
+For a quick sanity check that the archive isn't corrupt:
+
+```bash
+zcat /var/backups/orkestra/orkestra-2026-05-23T03-00-00Z.archive.gz | head -c 1024 | file -
+# Should report: BSON / Binary JSON
+```
+
+## MongoDB restore
+
+```bash
+# Stop the application services so nothing writes during restore.
+sudo systemctl stop orkestra.service
+
+# Restore from a specific archive.
+zcat /var/backups/orkestra/orkestra-2026-05-23T03-00-00Z.archive.gz | \
+  docker exec -i orkestra-mongodb mongorestore \
+    --username admin \
+    --password "$(grep MONGO_ROOT_PASSWORD /opt/orkestra/docker/.env | cut -d= -f2)" \
+    --authenticationDatabase admin \
+    --archive --gzip --drop
+
+# Bring the application back.
+sudo systemctl start orkestra.service
+```
+
+`--drop` removes target collections before restoring — guarantees the restore matches the dump exactly. Without `--drop`, restored documents merge with whatever's currently in the DB.
+
+If the restore is for an entirely different deployment (e.g. clone production into staging), you'll also need:
+
+- The original `docker/.env` `OAUTH_TOKEN_ENCRYPTION_KEY` — without it every encrypted secret in `module_configs` is unrecoverable.
+- The original `docker/.env` `ORKESTRA_KMS_MASTER_KEY` — without it every per-tenant DEK in the `compliance` addon is unrecoverable.
+- The original `docker/keys/jwt-*.pem` (if you want existing sessions to keep working) OR a fresh key pair (in which case all issued tokens are invalidated and users have to log in again).
+
+## Restore-test cadence
+
+Run the restore drill at least quarterly. Easiest path: spin up a staging stack, restore the latest production backup into it, verify a known canary (a specific user, a specific module config) is intact. Three things almost always work on the way out (you've automated them) and break on the way back (you haven't tested them):
+
+- **Encryption key rotation** — if you've rotated `OAUTH_TOKEN_ENCRYPTION_KEY` since the dump was taken, the restore is useless without the old key. Keep a key archive separate from the DB backup.
+- **Schema migrations** — Orkestra's collection schemas evolve. Restoring a 6-month-old dump into a current binary may produce documents whose shape the current code rejects. The `make backend-test` suite + `docker compose -f docker-compose.<sku>.yml --env-file .env up -d` smoke is the test.
+- **Index recreation** — `--drop` removes indexes too. The module registry's `ensureCollection` recreates the declared indexes on next boot, but background index builds take time on large collections — expect slow queries for a few minutes post-restore.
+
+Document the runbook on whatever wiki / Notion / GDoc your ops team reads. The dry-run is no good if no one knows where the dump archives live when the production VM is on fire.
+
+## What `--drop` does NOT touch
+
+- The `admin` database (Mongo's own — system users, roles).
+- Collections present in the live DB but not in the dump (e.g. new collections introduced by a module enabled after the dump).
+- Anything outside MongoDB — Redis, filesystem, env vars.
+
+## Redis
+
+Redis stores ephemeral state — refresh tokens, rate-limit counters, ConfigService cache (30s TTL). On restore:
+
+- Refresh tokens are gone → every user has to log in again (operator UX hit but no data loss).
+- Rate-limit counters are gone → first-request burst is permitted from every IP for one window.
+- ConfigService cache is gone → first request to each module config endpoint hits MongoDB (cold-start latency for ~30 s).
+
+If your operational priority is "zero session loss across restores", run Redis with AOF persistence and back up the AOF file. Most operators don't bother — the UX cost is small.
+
+## Filesystem state
+
+| Path | Used by | Action |
+| --- | --- | --- |
+| `docker/keys/jwt-private.pem`, `jwt-public.pem` | `auth` core module | Back up once. Treat as a long-lived secret. |
+| `docker/keys/apple.p8` (if Apple Sign In configured) | `auth` core module | Back up once. |
+| `docker/.env` | every module | Back up once after `make init`, then again after any edit. |
+| `docker/marketing-spool-*` (bind mount) | `marketing` addon | Optional. Imports that haven't been processed yet live here. Losing this loses in-flight imports but not anything already committed to MongoDB. |
+| `docker/mongo-init/` | `mongodb` infra service | In-repo, gitignored copy is fine. |
+
+A reasonable one-liner for the "everything outside Mongo" tarball:
+
+```bash
+sudo tar czf /var/backups/orkestra/files-$(date -u +%Y-%m-%dT%H-%M-%SZ).tar.gz \
+  /opt/orkestra/docker/.env \
+  /opt/orkestra/docker/keys
+sudo chmod 600 /var/backups/orkestra/files-*.tar.gz
+```
+
+Treat these as secrets — anyone with read access to a backup tarball has the encryption key that decrypts every secret in `module_configs`.
+
+## See also
+
+- [Single VM with Docker Compose](./deployment/single-vm) — backup script slot
+- [Cookie hardening across tiers](./cookie-hardening-cross-tier) — the audience split's recovery implications
+- [Compliance audit log](https://github.com/orkestra-cc/orkestra/blob/main/backend/internal/addons/compliance/CLAUDE.md) — `audit_events` retention is separate from operational logs

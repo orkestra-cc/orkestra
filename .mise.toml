@@ -22,6 +22,7 @@ jq            = "1.7"
 
 # Go tools, installed via mise's go: backend (kept out of $GOPATH/bin).
 "go:golang.org/x/vuln/cmd/govulncheck" = "latest"
+git-cliff = "2.13.1"
 
 [env]
 # So `backend/bin/server-*` profile binaries built by `make build-*` are

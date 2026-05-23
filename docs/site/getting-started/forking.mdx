@@ -1,0 +1,188 @@
+---
+title: I just forked Orkestra — now what?
+sidebar_position: 5
+description: Step-by-step from `git clone` to a logged-in admin console on a fresh fork.
+---
+
+# I just forked Orkestra — now what?
+
+This page assumes you've just clicked **Fork** on [github.com/orkestra-cc/orkestra](https://github.com/orkestra-cc/orkestra) (or you're following the project as a contributor on a clean machine). It walks you from `git clone` to a logged-in admin console in about ten minutes.
+
+If you only need to **evaluate Orkestra**, the README quick-start is shorter — it skips the dev tooling and pulls a pre-built SKU image from GHCR. Come back here when you want to modify the codebase.
+
+## What you'll need
+
+- **Docker 24+ with Compose v2.** Linux/macOS/WSL2. Docker Desktop is fine.
+- **`openssl`** on your PATH (every distro has it).
+- **`make`** on your PATH.
+- About **2 GB of disk** for images + first-boot caches.
+- ~10 minutes.
+
+Optional (for backend development, not for just running the stack):
+- [`mise`](https://mise.jdx.dev/) for the pinned Go / Node / Flutter toolchains (see [CONTRIBUTING.md](https://github.com/orkestra-cc/orkestra/blob/main/CONTRIBUTING.md)).
+
+## Step 1 — Clone
+
+```bash
+git clone https://github.com/<your-org>/orkestra.git
+cd orkestra
+```
+
+Throughout this guide, replace `<your-org>` with your GitHub user or organization name.
+
+## Step 2 — Bootstrap secrets and JWT keys
+
+```bash
+make init
+```
+
+`make init` (defined in the Makefile, implemented in [`scripts/init.sh`](https://github.com/orkestra-cc/orkestra/blob/main/scripts/init.sh)) is idempotent and does three things:
+
+1. Copies `docker/.env.example` → `docker/.env`.
+2. Fills five `REPLACE_WITH_RANDOM_HEX_*` placeholders with `openssl rand` output: `COOKIE_SECRET`, `OAUTH_TOKEN_ENCRYPTION_KEY`, `ORKESTRA_KMS_MASTER_KEY`, `MONGO_ROOT_PASSWORD`, `REDIS_PASSWORD`.
+3. Runs [`scripts/generate-jwt-keys.sh`](https://github.com/orkestra-cc/orkestra/blob/main/scripts/generate-jwt-keys.sh) to produce an RS256 key pair under `docker/keys/`.
+4. Creates the `orkestra-network` Docker bridge.
+
+The output prints the four next steps with copy-paste-ready commands.
+
+Re-running `make init` is safe — existing files are preserved. Pass `--force` if you want to regenerate everything from scratch (this will invalidate every issued JWT).
+
+:::tip
+Both `docker/.env` and `docker/keys/jwt-private.pem` are gitignored. Don't commit them. If you ever need to share secrets across machines, use a real secret manager.
+:::
+
+## Step 3 — Start infrastructure
+
+```bash
+cd docker
+docker compose -f docker-compose.infra.yml up -d
+```
+
+This boots MongoDB (port 27027 on host) and Redis (port 6387 on host). It does **not** start Gotenberg, Memgraph, or Hindsight — those are infrastructure for specific addons and are managed by the backend on demand (see [docker/CLAUDE.md](https://github.com/orkestra-cc/orkestra/blob/main/docker/CLAUDE.md) for the lifecycle).
+
+Verify with:
+
+```bash
+docker compose -f docker-compose.infra.yml ps
+# orkestra-mongodb   Up X seconds   (healthy)
+# orkestra-redis     Up X seconds   (healthy)
+```
+
+## Step 4 — Pick a profile and start the backend
+
+You have two choices:
+
+### Option A — Pre-built image (fastest)
+
+Pull the `starter` profile image from GHCR (or `billing` / `ai` / `saas` / `enterprise`):
+
+```bash
+# Still in docker/
+docker compose -f docker-compose.starter.yml --env-file .env up -d
+```
+
+This pulls `ghcr.io/orkestra-cc/orkestra/backend:starter` (~70 MB) and boots the backend on `localhost:3000`. No source build. No `dhi.io` registry needed.
+
+If you've forked and pushed your own image to a private registry, override `BACKEND_IMAGE_REPO`:
+
+```bash
+BACKEND_IMAGE_REPO=ghcr.io/<your-org>/orkestra \
+docker compose -f docker-compose.starter.yml --env-file .env up -d
+```
+
+See the README "Forking the image registry" section for the full recipe.
+
+### Option B — Full dev stack with hot reload
+
+If you'll be editing Go code, you want the AIR hot-reload dev stack. From the **repo root**:
+
+```bash
+./orkestra.sh
+# pick "Full stack" from the menu
+```
+
+By default this uses `docker-compose.dev-public.yml`, which runs on `golang:1.25.10-alpine` + `node:24-alpine` (no Chainguard subscription required). If you have a `dhi.io` enterprise contract and want the hardened Chainguard variant, set `DEV_COMPOSE_VARIANT=chainguard` in `docker/.env` — see [dev-images](/architecture/dev-images) for the trade-offs.
+
+First boot takes ~30 s while it pulls images and runs `apk add git build-base && go mod download && go install air@latest`. Subsequent restarts are instant.
+
+## Step 5 — Verify the backend is healthy
+
+```bash
+curl -s http://localhost:3000/health
+# {"checks":{"mongodb":"up","redis":"up"},"status":"healthy","time":"...","version":"1.0.0"}
+```
+
+If you see `mongodb:"down"` or `redis:"down"`, the infra compose didn't start cleanly — check `docker compose -f docker-compose.infra.yml logs`.
+
+## Step 6 — Mint an admin dev token and log in
+
+```bash
+# From the repo root:
+ORKESTRA_API_URL=http://localhost:3000 ./scripts/devtoken.sh administrator
+```
+
+This prints a JWT. Open `http://localhost:3000` (or `http://localhost:8080` if you used the full dev stack with the frontend). Use the **Sign in with dev token** option on the login page (only available when the `dev` addon is compiled in — which it is for the `starter` SKU and the dev stack).
+
+Roles, highest to lowest: `super_admin` → `administrator` → `developer` → `manager` → `operator` → `guest`.
+
+The dev token endpoint is **disabled in production** (gated by `ENV=development|staging`). Don't ship a build with it enabled.
+
+## Step 7 — Enable modules
+
+Once logged in, navigate to `/admin/modules`. You'll see the seven core modules (always loaded) and every optional addon compiled into your SKU. Toggle each addon on or off — the registry hot-reloads without a restart and auto-resolves dependencies.
+
+For the `starter` SKU, no optional addons are compiled in — you'll see only the core seven. To get more, switch to a different SKU compose file (or build your own from the enterprise binary).
+
+See [Enabling Modules](/getting-started/enabling-modules) for the per-module configuration UI.
+
+## Step 8 — (Optional) Configure OAuth providers
+
+Email/password login works out of the box. To add Google / Apple / GitHub / Discord SSO, follow [OAuth Providers](/operating/oauth-providers).
+
+For local development, also set `ALLOW_LOCALHOST_REDIRECTS=true` in `docker/.env` so the OAuth callback flow accepts `http://localhost`.
+
+## What's next
+
+You now have a running Orkestra. Common next steps:
+
+- **Customize the operator UI** → see [`frontend-admin/CLAUDE.md`](https://github.com/orkestra-cc/orkestra/blob/main/frontend-admin/CLAUDE.md) for the React patterns
+- **Add a new addon module** → see [Build your first addon](/sdk/build-your-first-addon)
+- **Deploy to a real server** → see [Operating Orkestra](/operating) — single-VM Compose, Caddy reverse-proxy with TLS, K8s overview
+- **Wire observability** → see [docker/CLAUDE.md "Self-hosted OTEL stack"](https://github.com/orkestra-cc/orkestra/blob/main/docker/CLAUDE.md#self-hosted-otel-stack-docker-composeobservabilityyml) — `./orkestra.sh observability up` brings up Grafana + Tempo + Loki + Prometheus pre-configured
+
+## Common first-fork gotchas
+
+### "Permission denied" on docker.sock
+
+The backend mounts `/var/run/docker.sock` to manage module-owned infrastructure containers (`orkestra-hindsight`, `orkestra-memgraph`). The container needs to be in the host's `docker` group to read the socket.
+
+Default GID is 1001 (Ubuntu/WSL2). On Debian it's 999. Confirm with:
+
+```bash
+getent group docker | cut -d: -f3
+```
+
+If different, edit `DOCKER_GID` in `docker/.env`.
+
+Alternatively, set `CONTAINER_CONTROL_ENABLED=false` to skip module-owned container management entirely — you'll need to start Hindsight/Memgraph yourself if you enable those addons.
+
+### Port 3000 already in use
+
+Another process owns the port. Either stop it, or override `BACKEND_PORT=3100` in `docker/.env` and re-run `docker compose up`.
+
+### `make init` says "openssl: command not found"
+
+You're on a stripped-down distro. `apt install openssl` or equivalent.
+
+### Container exits immediately
+
+```bash
+docker compose -f docker-compose.starter.yml logs --tail 50 backend
+```
+
+Most-common causes:
+
+- JWT keys missing in `docker/keys/` → re-run `make init`.
+- Mongo / Redis password mismatch between `docker/.env` and what the infra compose used → `docker compose -f docker-compose.infra.yml down -v` (wipes data!) + re-init.
+
+See [Troubleshooting](/operating/troubleshooting) for the full catalog.
