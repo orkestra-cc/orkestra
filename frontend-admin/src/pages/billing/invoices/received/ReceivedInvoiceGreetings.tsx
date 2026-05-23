@@ -8,6 +8,7 @@ import {
   faArrowLeft
 } from '@fortawesome/free-solid-svg-icons';
 import { Link } from 'react-router';
+import { useTranslation } from 'react-i18next';
 import OrkestraCardHeader from 'components/common/OrkestraCardHeader';
 import Flex from 'components/common/Flex';
 import { useGetBillingStatsQuery } from 'store/api/billingApi';
@@ -19,31 +20,32 @@ import { formatCurrency } from 'types/billing';
 const STATS_FROM_DATE_ALL_TIME = '2000-01-01';
 
 const ReceivedInvoiceGreetings = () => {
+  const { t } = useTranslation();
   const { data: stats } = useGetBillingStatsQuery({
     fromDate: STATS_FROM_DATE_ALL_TIME
   });
 
   const statItems = [
     {
-      title: 'Totale Ricevute',
+      title: t('billing.received.stats.total'),
       value: stats?.receivedTotal || 0,
       color: 'success',
       icon: faFileImport
     },
     {
-      title: 'In Attesa',
+      title: t('billing.received.stats.pending'),
       value: stats?.receivedPending || 0,
       color: 'warning',
       icon: faClock
     },
     {
-      title: 'Accettate',
+      title: t('billing.received.stats.accepted'),
       value: stats?.receivedAccepted || 0,
       color: 'primary',
       icon: faCheck
     },
     {
-      title: 'Rifiutate',
+      title: t('billing.received.stats.rejected'),
       value: stats?.receivedRejected || 0,
       color: 'danger',
       icon: faTimes
@@ -55,10 +57,14 @@ const ReceivedInvoiceGreetings = () => {
       <OrkestraCardHeader
         title={
           <Flex alignItems="center">
-            <Link to="/billing/dashboard" className="text-body-tertiary me-2">
+            <Link
+              to="/billing/dashboard"
+              className="text-body-tertiary me-2"
+              title={t('billing.common.backToDashboard')}
+            >
               <FontAwesomeIcon icon={faArrowLeft} />
             </Link>
-            Fatture Ricevute
+            {t('billing.received.title')}
           </Flex>
         }
         titleTag="h5"
@@ -67,7 +73,7 @@ const ReceivedInvoiceGreetings = () => {
         endEl={
           stats && (
             <span className="text-body-tertiary fs-10">
-              Volume:{' '}
+              {t('billing.common.volumeLabel')}{' '}
               <span className="fw-medium text-success">
                 {formatCurrency(stats.receivedAmount)}
               </span>

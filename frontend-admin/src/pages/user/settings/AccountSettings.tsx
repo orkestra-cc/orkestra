@@ -2,8 +2,10 @@ import OrkestraCardHeader from 'components/common/OrkestraCardHeader';
 import TooltipBadge from 'components/common/TooltipBadge';
 import React, { useState } from 'react';
 import { Card, Form } from 'react-bootstrap';
+import { useTranslation } from 'react-i18next';
 
 const AccountSettings: React.FC = () => {
+  const { t } = useTranslation();
   const [formData, setFormData] = useState({
     viewProfile: 'my-followers',
     tagSettings: 'group-members',
@@ -30,13 +32,13 @@ const AccountSettings: React.FC = () => {
 
   return (
     <Card className="mb-3">
-      <OrkestraCardHeader title="Account Settings" />
+      <OrkestraCardHeader title={t('settings.account.title')} />
       <Card.Body className="bg-body-tertiary">
         <div>
           <h6 className="fw-bold">
-            Who can see your profile ?
+            {t('settings.account.whoSeeProfile')}
             <TooltipBadge
-              tooltip="Only The group of selected people can see your profile"
+              tooltip={t('settings.account.whoSeeProfileTooltip')}
               icon="question-circle"
             />
           </h6>
@@ -44,7 +46,7 @@ const AccountSettings: React.FC = () => {
             <Form.Check
               type="radio"
               id="profile-everyone"
-              label="Everyone"
+              label={t('settings.account.everyone')}
               className="form-label-nogutter"
               value="everyone"
               name="viewProfile"
@@ -54,7 +56,7 @@ const AccountSettings: React.FC = () => {
             <Form.Check
               type="radio"
               id="profile-followers"
-              label="My Followers"
+              label={t('settings.account.myFollowers')}
               className="form-label-nogutter"
               value="my-followers"
               name="viewProfile"
@@ -64,7 +66,7 @@ const AccountSettings: React.FC = () => {
             <Form.Check
               type="radio"
               id="profile-members"
-              label="Only Me"
+              label={t('settings.account.onlyMe')}
               className="form-label-nogutter"
               value="only-me"
               name="viewProfile"
@@ -76,9 +78,9 @@ const AccountSettings: React.FC = () => {
 
         <div>
           <h6 className="fw-bold">
-            Who can tag you ?
+            {t('settings.account.whoCanTag')}
             <TooltipBadge
-              tooltip="Only The group of selected people can tag your"
+              tooltip={t('settings.account.whoCanTagTooltip')}
               icon="question-circle"
             />
           </h6>
@@ -86,7 +88,7 @@ const AccountSettings: React.FC = () => {
             <Form.Check
               type="radio"
               id="tag-everyone"
-              label="Everyone"
+              label={t('settings.account.everyone')}
               className="form-label-nogutter"
               value="everyone"
               name="tagSettings"
@@ -96,7 +98,7 @@ const AccountSettings: React.FC = () => {
             <Form.Check
               type="radio"
               id="tag-members"
-              label="Group Members"
+              label={t('settings.account.groupMembers')}
               className="form-label-nogutter"
               value="group-members"
               name="tagSettings"
@@ -112,7 +114,7 @@ const AccountSettings: React.FC = () => {
           <Form.Check
             type="checkbox"
             id="show-followers"
-            label="Allow users to show your followers"
+            label={t('settings.account.showFollowers')}
             className="form-label-nogutter"
             name="showFollowers"
             onChange={handleChange}
@@ -121,7 +123,7 @@ const AccountSettings: React.FC = () => {
           <Form.Check
             type="checkbox"
             id="show-email"
-            label="Allow users to show your email"
+            label={t('settings.account.showEmail')}
             className="form-label-nogutter"
             name="showEmail"
             onChange={handleChange}
@@ -130,7 +132,7 @@ const AccountSettings: React.FC = () => {
           <Form.Check
             type="checkbox"
             id="show-experience"
-            label="Allow users to show your experiences"
+            label={t('settings.account.showExperience')}
             className="form-label-nogutter"
             name="showExperience"
             onChange={handleChange}
@@ -143,8 +145,8 @@ const AccountSettings: React.FC = () => {
         <div className="ps-2">
           <Form.Check
             type="switch"
-            id="custom-switch"
-            label="Make your phone number visible"
+            id="custom-switch-phone"
+            label={t('settings.account.showPhone')}
             className="form-label-nogutter"
             name="numberVisibility"
             onChange={handleChange}
@@ -152,8 +154,8 @@ const AccountSettings: React.FC = () => {
           />
           <Form.Check
             type="switch"
-            id="custom-switch"
-            label="Allow user to follow you"
+            id="custom-switch-follow"
+            label={t('settings.account.allowFollow')}
             className="form-label-nogutter"
             name="allowFollow"
             onChange={handleChange}

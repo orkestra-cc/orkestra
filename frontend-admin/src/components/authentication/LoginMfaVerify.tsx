@@ -1,6 +1,7 @@
 import { useEffect, useState, FormEvent } from 'react';
 import { Alert, Button, Card, Form } from 'react-bootstrap';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import AuthCardLayout from 'layouts/AuthCardLayout';
 import { useAppDispatch } from 'store/hooks';
 import {
@@ -32,6 +33,7 @@ interface LocationState {
  * downstream consumers don't care which factor satisfied the partial.
  */
 const LoginMfaVerify = () => {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const dispatch = useAppDispatch();
   const location = useLocation();
@@ -58,7 +60,7 @@ const LoginMfaVerify = () => {
     event.preventDefault();
     setLocalError(null);
     if (!code.trim()) {
-      setLocalError('Enter the code shown in your authenticator app.');
+      setLocalError(t('auth.mfa.errors.missingCode'));
       return;
     }
     if (!state.challengeId) return;
@@ -74,13 +76,11 @@ const LoginMfaVerify = () => {
     } catch (err: unknown) {
       const anyErr = err as { status?: number; data?: { detail?: string } };
       if (anyErr?.status === 401) {
-        setLocalError('Incorrect code. Please try again.');
+        setLocalError(t('auth.mfa.errors.incorrectCode'));
       } else if (anyErr?.status === 429) {
-        setLocalError('Too many attempts. Sign in again from the login page.');
+        setLocalError(t('auth.mfa.errors.tooMany'));
       } else {
-        setLocalError(
-          anyErr?.data?.detail ?? 'Unable to verify the code. Please try again.'
-        );
+        setLocalError(anyErr?.data?.detail ?? t('auth.mfa.errors.generic'));
       }
     }
   };
@@ -115,14 +115,12 @@ const LoginMfaVerify = () => {
         data?: { detail?: string };
       };
       if (anyErr?.name === 'NotAllowedError') {
-        setLocalError('The passkey prompt was cancelled or timed out.');
+        setLocalError(t('auth.mfa.errors.passkeyCancelled'));
       } else if (anyErr?.status === 401) {
-        setLocalError(
-          'Passkey verification failed. Try again or use your authenticator app.'
-        );
+        setLocalError(t('auth.mfa.errors.passkeyFailed'));
       } else {
         setLocalError(
-          anyErr?.data?.detail ?? 'Could not complete passkey sign-in.'
+          anyErr?.data?.detail ?? t('auth.mfa.errors.passkeyGeneric')
         );
       }
       setPasskeyBusy(false);
@@ -134,11 +132,11 @@ const LoginMfaVerify = () => {
       <Card>
         <Card.Body className="p-4 p-sm-5">
           <div className="text-center mb-4">
-            <h3 className="mb-2">Two-factor verification</h3>
+            <h3 className="mb-2">{t('auth.mfa.title')}</h3>
             <p className="text-muted mb-0">
               {state.email
-                ? `Enter the code from your authenticator for ${state.email}.`
-                : 'Enter the code from your authenticator.'}
+                ? t('auth.mfa.promptForEmail', { email: state.email })
+                : t('auth.mfa.promptDefault')}
             </p>
           </div>
 
@@ -161,16 +159,22 @@ const LoginMfaVerify = () => {
                 disabled={passkeyBusy}
                 onClick={handlePasskey}
               >
-                {passkeyBusy ? 'Waiting for passkey…' : 'Use a passkey'}
+                {passkeyBusy
+                  ? t('auth.mfa.passkeyWaiting')
+                  : t('auth.mfa.passkeyButton')}
               </Button>
-              <div className="text-center text-muted fs-10 mt-2">or</div>
+              <div className="text-center text-muted fs-10 mt-2">
+                {t('auth.mfa.passkeyOr')}
+              </div>
             </div>
           )}
 
           <Form onSubmit={handleSubmit} noValidate>
             <Form.Group className="mb-3">
               <Form.Label>
-                {useBackup ? 'Backup code' : 'Authenticator code'}
+                {useBackup
+                  ? t('auth.mfa.backupCode')
+                  : t('auth.mfa.authenticatorCode')}
               </Form.Label>
               <Form.Control
                 type="text"
@@ -179,7 +183,11 @@ const LoginMfaVerify = () => {
                 autoFocus
                 value={code}
                 onChange={e => setCode(e.target.value)}
-                placeholder={useBackup ? 'XXXX-XXXX' : '123 456'}
+                placeholder={
+                  useBackup
+                    ? t('auth.mfa.backupPlaceholder')
+                    : t('auth.mfa.authenticatorPlaceholder')
+                }
                 required
               />
             </Form.Group>
@@ -191,7 +199,7 @@ const LoginMfaVerify = () => {
                 size="lg"
                 disabled={isLoading}
               >
-                {isLoading ? 'Verifying…' : 'Verify and sign in'}
+                {isLoading ? t('auth.mfa.submitting') : t('auth.mfa.submit')}
               </Button>
             </div>
 
@@ -205,10 +213,10 @@ const LoginMfaVerify = () => {
                 }}
               >
                 {useBackup
-                  ? 'Use authenticator app instead'
-                  : 'Use a backup code instead'}
+                  ? t('auth.mfa.useAuthenticator')
+                  : t('auth.mfa.useBackup')}
               </button>
-              <Link to="/login">Back to sign in</Link>
+              <Link to="/login">{t('auth.mfa.back')}</Link>
             </div>
           </Form>
         </Card.Body>

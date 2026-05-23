@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Button, Form, Modal, Spinner } from 'react-bootstrap';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { toast } from 'react-toastify';
+import { useTranslation } from 'react-i18next';
 import { useCreateRoleMutation } from 'store/api/tenantApi';
 import PermissionPicker from './PermissionPicker';
 
@@ -17,6 +18,7 @@ interface Props {
  * only owns name, description, and the save mutation.
  */
 const CreateRoleModal: React.FC<Props> = ({ tenantId, show, onHide }) => {
+  const { t } = useTranslation();
   const [createRole, { isLoading: isSaving }] = useCreateRoleMutation();
 
   const [name, setName] = useState('');
@@ -43,10 +45,16 @@ const CreateRoleModal: React.FC<Props> = ({ tenantId, show, onHide }) => {
           permissions: Array.from(selected)
         }
       }).unwrap();
-      toast.success(`Custom role "${name.trim()}" created`);
+      toast.success(
+        t('adminRoles.createModal.successToast', { name: name.trim() })
+      );
       onHide();
     } catch (err: unknown) {
-      toast.error('Create failed: ' + extractError(err));
+      toast.error(
+        t('adminRoles.createModal.errorToast', {
+          message: extractError(err, t('adminRoles.createModal.unknownError'))
+        })
+      );
     }
   };
 
@@ -55,29 +63,35 @@ const CreateRoleModal: React.FC<Props> = ({ tenantId, show, onHide }) => {
       <Modal.Header closeButton>
         <Modal.Title>
           <FontAwesomeIcon icon="user-plus" className="text-primary me-2" />
-          Create custom role
+          {t('adminRoles.createModal.title')}
         </Modal.Title>
       </Modal.Header>
       <Modal.Body>
         <Form>
           <div className="row g-3 mb-4">
             <Form.Group className="col-md-5">
-              <Form.Label className="fw-semibold">Name</Form.Label>
+              <Form.Label className="fw-semibold">
+                {t('adminRoles.createModal.nameLabel')}
+              </Form.Label>
               <Form.Control
                 type="text"
-                placeholder="e.g. finance_viewer"
+                placeholder={t('adminRoles.createModal.namePlaceholder')}
                 value={name}
                 onChange={e => setName(e.target.value)}
                 maxLength={80}
                 autoFocus
               />
-              <Form.Text muted>Used when binding users to the role.</Form.Text>
+              <Form.Text muted>
+                {t('adminRoles.createModal.nameHelp')}
+              </Form.Text>
             </Form.Group>
             <Form.Group className="col-md-7">
-              <Form.Label className="fw-semibold">Description</Form.Label>
+              <Form.Label className="fw-semibold">
+                {t('adminRoles.createModal.descriptionLabel')}
+              </Form.Label>
               <Form.Control
                 type="text"
-                placeholder="Short summary shown in the role list"
+                placeholder={t('adminRoles.createModal.descriptionPlaceholder')}
                 value={description}
                 onChange={e => setDescription(e.target.value)}
               />
@@ -89,16 +103,16 @@ const CreateRoleModal: React.FC<Props> = ({ tenantId, show, onHide }) => {
       </Modal.Body>
       <Modal.Footer>
         <Button variant="secondary" onClick={onHide} disabled={isSaving}>
-          Cancel
+          {t('adminRoles.createModal.cancel')}
         </Button>
         <Button variant="primary" onClick={onSave} disabled={!canSave}>
           {isSaving ? (
             <>
               <Spinner size="sm" animation="border" className="me-2" />{' '}
-              Creating…
+              {t('adminRoles.createModal.creating')}
             </>
           ) : (
-            <>Create role</>
+            t('adminRoles.createModal.create')
           )}
         </Button>
       </Modal.Footer>
@@ -106,10 +120,10 @@ const CreateRoleModal: React.FC<Props> = ({ tenantId, show, onHide }) => {
   );
 };
 
-function extractError(err: unknown): string {
+function extractError(err: unknown, fallback: string): string {
   if (err && typeof err === 'object' && 'data' in err) {
     const data = (err as { data?: { detail?: string; title?: string } }).data;
-    return data?.detail || data?.title || 'unknown error';
+    return data?.detail || data?.title || fallback;
   }
   return String(err);
 }

@@ -1,0 +1,39 @@
+---
+title: Module Catalog
+description: Every module Orkestra ships, what it does, what it depends on.
+sidebar_position: 1
+---
+
+# Module Catalog
+
+Orkestra ships **6 core modules** (always loaded) and **13 optional addons** (toggled at `/admin/modules`). The optional addons live in their own public repos and are pulled in as Go modules.
+
+## Core modules
+
+Always loaded. Topologically sorted by their `Dependencies()`:
+
+`user` → `notification` → `tenant` → `authz` → `auth` → `navigation`
+
+See [Core modules](/modules/core/user) and the rest under that section.
+
+## Optional addons
+
+| Addon         | Depends on        | Repo                                      |
+| ------------- | ----------------- | ----------------------------------------- |
+| billing       | documents         | `orkestra-cc/orkestra-billing`            |
+| documents     | —                 | `orkestra-cc/orkestra-documents`          |
+| company       | —                 | `orkestra-cc/orkestra-company`            |
+| graph         | —                 | `orkestra-cc/orkestra-graph`              |
+| aimodels      | —                 | `orkestra-cc/orkestra-aimodels`           |
+| rag           | graph, aimodels   | `orkestra-cc/orkestra-rag`                |
+| agents        | auth, aimodels    | `orkestra-cc/orkestra-agents`             |
+| sales         | aimodels          | `orkestra-cc/orkestra-sales`              |
+| subscriptions | —                 | `orkestra-cc/orkestra-subscriptions`      |
+| payments      | —                 | `orkestra-cc/orkestra-payments`           |
+| compliance    | —                 | `orkestra-cc/orkestra-compliance`         |
+| identity      | tenant, authz     | `orkestra-cc/orkestra-identity`           |
+| dev           | auth              | `orkestra-cc/orkestra-dev`                |
+
+:::info Auto-synced
+Pages for each addon are auto-generated from the addon's `README.md` at build time (and re-synced nightly). See [the sync architecture](/contributing).
+:::

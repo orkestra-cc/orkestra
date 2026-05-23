@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Alert, Button, Form, Row, Col, Spinner } from 'react-bootstrap';
+import { Trans, useTranslation } from 'react-i18next';
 import { toast } from 'react-toastify';
 import SubtleBadge from 'components/common/SubtleBadge';
 import type {
@@ -87,10 +88,10 @@ function buildPatch(form: FormState): SetBillingIdentityInput {
   };
 }
 
-function extractError(err: unknown): string {
+function extractError(err: unknown, unknownLabel: string): string {
   if (err && typeof err === 'object' && 'data' in err) {
     const data = (err as { data?: { detail?: string; title?: string } }).data;
-    return data?.detail || data?.title || 'unknown error';
+    return data?.detail || data?.title || unknownLabel;
   }
   return String(err);
 }
@@ -103,6 +104,7 @@ function extractError(err: unknown): string {
  * routing precondition can be enforced server-side.
  */
 const BillingIdentityTab: React.FC<Props> = ({ org }) => {
+  const { t } = useTranslation();
   const [form, setForm] = useState<FormState>(() => orgToForm(org));
   const [patch, { isLoading: isSaving }] =
     useSetTenantBillingIdentityAdminMutation();
@@ -119,12 +121,18 @@ const BillingIdentityTab: React.FC<Props> = ({ org }) => {
     !!form.fatturaPA.codiceDestinatario.trim() ||
     !!form.fatturaPA.pecDestinatario.trim();
 
+  const unknownErr = t('adminClients.billingIdentity.errorUnknown');
+
   const onSave = async () => {
     try {
       await patch({ tenantId: org.id, body: buildPatch(form) }).unwrap();
-      toast.success('Billing identity saved');
+      toast.success(t('adminClients.billingIdentity.toastSaved'));
     } catch (err) {
-      toast.error('Save failed: ' + extractError(err));
+      toast.error(
+        t('adminClients.billingIdentity.toastSaveFailed', {
+          error: extractError(err, unknownErr)
+        })
+      );
     }
   };
 
@@ -133,33 +141,39 @@ const BillingIdentityTab: React.FC<Props> = ({ org }) => {
       await toggleItalianBillable({ tenantId: org.id, enabled: next }).unwrap();
       toast.success(
         next
-          ? 'Italian billable mode enabled'
-          : 'Italian billable mode disabled'
+          ? t('adminClients.billingIdentity.toastBillableEnabled')
+          : t('adminClients.billingIdentity.toastBillableDisabled')
       );
     } catch (err) {
-      toast.error('Toggle failed: ' + extractError(err));
+      toast.error(
+        t('adminClients.billingIdentity.toastToggleFailed', {
+          error: extractError(err, unknownErr)
+        })
+      );
     }
   };
 
   return (
     <Form>
       <Alert variant="info" className="fs-10 py-2">
-        These fields populate the FatturaPA recipient party at invoice send
-        time. Either <code>CodiceDestinatario</code> (7-char SDI code) or{' '}
-        <code>PECDestinatario</code> is required to enable Italian billable
-        mode.
+        <Trans
+          i18nKey="adminClients.billingIdentity.intro"
+          components={{ code: <code /> }}
+        />
       </Alert>
 
       <div className="d-flex justify-content-between align-items-center mb-3">
         <div>
-          <span className="fw-semibold me-2">Italian billable</span>
+          <span className="fw-semibold me-2">
+            {t('adminClients.billingIdentity.italianBillable')}
+          </span>
           {org.isItalianBillable ? (
             <SubtleBadge bg="success" pill>
-              enabled
+              {t('adminClients.billingIdentity.enabledBadge')}
             </SubtleBadge>
           ) : (
             <SubtleBadge bg="secondary" pill>
-              disabled
+              {t('adminClients.billingIdentity.disabledBadge')}
             </SubtleBadge>
           )}
         </div>
@@ -170,28 +184,34 @@ const BillingIdentityTab: React.FC<Props> = ({ org }) => {
           onClick={() => onToggleBillable(!org.isItalianBillable)}
         >
           {isToggling
-            ? 'Saving…'
+            ? t('adminClients.billingIdentity.saving')
             : org.isItalianBillable
-              ? 'Disable'
-              : 'Enable'}
+              ? t('adminClients.billingIdentity.disable')
+              : t('adminClients.billingIdentity.enable')}
         </Button>
       </div>
       {!org.isItalianBillable && !hasRouting && (
         <Form.Text className="text-muted d-block mb-3">
-          Add a <code>CodiceDestinatario</code> or <code>PECDestinatario</code>{' '}
-          and save before enabling.
+          <Trans
+            i18nKey="adminClients.billingIdentity.routingMissing"
+            components={{ code: <code /> }}
+          />
         </Form.Text>
       )}
 
       <Row>
         <Col md={6}>
           <Form.Group className="mb-3">
-            <Form.Label className="fw-semibold fs-10">Legal entity</Form.Label>
+            <Form.Label className="fw-semibold fs-10">
+              {t('adminClients.billingIdentity.labelLegalEntity')}
+            </Form.Label>
             <Form.Check
               type="switch"
               id="isCompany"
               label={
-                form.isCompany ? 'Company' : 'Natural person / sole proprietor'
+                form.isCompany
+                  ? t('adminClients.billingIdentity.switchCompany')
+                  : t('adminClients.billingIdentity.switchPerson')
               }
               checked={form.isCompany}
               onChange={e =>
@@ -202,13 +222,21 @@ const BillingIdentityTab: React.FC<Props> = ({ org }) => {
         </Col>
         <Col md={6}>
           <Form.Group className="mb-3">
-            <Form.Label className="fw-semibold fs-10">Legal name</Form.Label>
+            <Form.Label className="fw-semibold fs-10">
+              {t('adminClients.billingIdentity.labelLegalName')}
+            </Form.Label>
             <Form.Control
               value={form.legalName}
               onChange={e =>
                 setForm(s => ({ ...s, legalName: e.target.value }))
               }
-              placeholder={form.isCompany ? 'Acme S.r.l.' : 'Mario Rossi'}
+              placeholder={
+                form.isCompany
+                  ? t(
+                      'adminClients.billingIdentity.placeholderLegalNameCompany'
+                    )
+                  : t('adminClients.billingIdentity.placeholderLegalNamePerson')
+              }
             />
           </Form.Group>
         </Col>
@@ -217,36 +245,44 @@ const BillingIdentityTab: React.FC<Props> = ({ org }) => {
       <Row>
         <Col md={6}>
           <Form.Group className="mb-3">
-            <Form.Label className="fw-semibold fs-10">VAT number</Form.Label>
+            <Form.Label className="fw-semibold fs-10">
+              {t('adminClients.billingIdentity.labelVatNumber')}
+            </Form.Label>
             <Form.Control
               value={form.vatNumber}
               onChange={e =>
                 setForm(s => ({ ...s, vatNumber: e.target.value }))
               }
-              placeholder="IT12345678901"
+              placeholder={t('adminClients.billingIdentity.placeholderVat')}
             />
           </Form.Group>
         </Col>
         <Col md={6}>
           <Form.Group className="mb-3">
-            <Form.Label className="fw-semibold fs-10">Fiscal code</Form.Label>
+            <Form.Label className="fw-semibold fs-10">
+              {t('adminClients.billingIdentity.labelFiscalCode')}
+            </Form.Label>
             <Form.Control
               value={form.fiscalCode}
               onChange={e =>
                 setForm(s => ({ ...s, fiscalCode: e.target.value }))
               }
-              placeholder="RSSMRA80A01H501T"
+              placeholder={t(
+                'adminClients.billingIdentity.placeholderFiscalCode'
+              )}
             />
           </Form.Group>
         </Col>
       </Row>
 
-      <h6 className="fw-semibold fs-9 mt-4">Billing address</h6>
+      <h6 className="fw-semibold fs-9 mt-4">
+        {t('adminClients.billingIdentity.addressHeading')}
+      </h6>
       <Row>
         <Col md={8}>
           <Form.Group className="mb-3">
             <Form.Label className="fw-semibold fs-10">
-              Address line 1
+              {t('adminClients.billingIdentity.labelLine1')}
             </Form.Label>
             <Form.Control
               value={form.billingAddress.line1}
@@ -262,7 +298,7 @@ const BillingIdentityTab: React.FC<Props> = ({ org }) => {
         <Col md={4}>
           <Form.Group className="mb-3">
             <Form.Label className="fw-semibold fs-10">
-              Address line 2
+              {t('adminClients.billingIdentity.labelLine2')}
             </Form.Label>
             <Form.Control
               value={form.billingAddress.line2}
@@ -279,7 +315,9 @@ const BillingIdentityTab: React.FC<Props> = ({ org }) => {
       <Row>
         <Col md={4}>
           <Form.Group className="mb-3">
-            <Form.Label className="fw-semibold fs-10">City</Form.Label>
+            <Form.Label className="fw-semibold fs-10">
+              {t('adminClients.billingIdentity.labelCity')}
+            </Form.Label>
             <Form.Control
               value={form.billingAddress.city}
               onChange={e =>
@@ -293,7 +331,9 @@ const BillingIdentityTab: React.FC<Props> = ({ org }) => {
         </Col>
         <Col md={2}>
           <Form.Group className="mb-3">
-            <Form.Label className="fw-semibold fs-10">Province</Form.Label>
+            <Form.Label className="fw-semibold fs-10">
+              {t('adminClients.billingIdentity.labelProvince')}
+            </Form.Label>
             <Form.Control
               value={form.billingAddress.province}
               onChange={e =>
@@ -310,7 +350,9 @@ const BillingIdentityTab: React.FC<Props> = ({ org }) => {
         </Col>
         <Col md={3}>
           <Form.Group className="mb-3">
-            <Form.Label className="fw-semibold fs-10">Postal code</Form.Label>
+            <Form.Label className="fw-semibold fs-10">
+              {t('adminClients.billingIdentity.labelPostalCode')}
+            </Form.Label>
             <Form.Control
               value={form.billingAddress.postalCode}
               onChange={e =>
@@ -327,7 +369,9 @@ const BillingIdentityTab: React.FC<Props> = ({ org }) => {
         </Col>
         <Col md={3}>
           <Form.Group className="mb-3">
-            <Form.Label className="fw-semibold fs-10">Country</Form.Label>
+            <Form.Label className="fw-semibold fs-10">
+              {t('adminClients.billingIdentity.labelCountry')}
+            </Form.Label>
             <Form.Control
               value={form.billingAddress.country}
               onChange={e =>
@@ -339,19 +383,21 @@ const BillingIdentityTab: React.FC<Props> = ({ org }) => {
                   }
                 }))
               }
-              placeholder="IT"
+              placeholder={t('adminClients.billingIdentity.placeholderCountry')}
               maxLength={2}
             />
           </Form.Group>
         </Col>
       </Row>
 
-      <h6 className="fw-semibold fs-9 mt-4">FatturaPA routing</h6>
+      <h6 className="fw-semibold fs-9 mt-4">
+        {t('adminClients.billingIdentity.fatturaPaHeading')}
+      </h6>
       <Row>
         <Col md={6}>
           <Form.Group className="mb-3">
             <Form.Label className="fw-semibold fs-10">
-              Codice Destinatario (SDI)
+              {t('adminClients.billingIdentity.labelCodiceDestinatario')}
             </Form.Label>
             <Form.Control
               className="font-monospace"
@@ -365,7 +411,9 @@ const BillingIdentityTab: React.FC<Props> = ({ org }) => {
                   }
                 }))
               }
-              placeholder="ABC1234"
+              placeholder={t(
+                'adminClients.billingIdentity.placeholderCodiceDestinatario'
+              )}
               maxLength={7}
             />
           </Form.Group>
@@ -373,7 +421,7 @@ const BillingIdentityTab: React.FC<Props> = ({ org }) => {
         <Col md={6}>
           <Form.Group className="mb-3">
             <Form.Label className="fw-semibold fs-10">
-              PEC Destinatario
+              {t('adminClients.billingIdentity.labelPecDestinatario')}
             </Form.Label>
             <Form.Control
               type="email"
@@ -384,7 +432,7 @@ const BillingIdentityTab: React.FC<Props> = ({ org }) => {
                   fatturaPA: { ...s.fatturaPA, pecDestinatario: e.target.value }
                 }))
               }
-              placeholder="fatture@pec.example.it"
+              placeholder={t('adminClients.billingIdentity.placeholderPec')}
             />
           </Form.Group>
         </Col>
@@ -394,7 +442,7 @@ const BillingIdentityTab: React.FC<Props> = ({ org }) => {
         <Form.Check
           type="switch"
           id="isPA"
-          label="Public administration (FatturaPA-PA)"
+          label={t('adminClients.billingIdentity.switchIsPA')}
           checked={form.fatturaPA.isPA}
           onChange={e =>
             setForm(s => ({
@@ -410,7 +458,7 @@ const BillingIdentityTab: React.FC<Props> = ({ org }) => {
           <Col md={4}>
             <Form.Group className="mb-3">
               <Form.Label className="fw-semibold fs-10">
-                Codice Ufficio
+                {t('adminClients.billingIdentity.labelCodiceUfficio')}
               </Form.Label>
               <Form.Control
                 value={form.fatturaPA.codiceUfficio}
@@ -426,7 +474,7 @@ const BillingIdentityTab: React.FC<Props> = ({ org }) => {
           <Col md={4}>
             <Form.Group className="mb-3">
               <Form.Label className="fw-semibold fs-10">
-                Riferimento Amministrativo
+                {t('adminClients.billingIdentity.labelRiferimentoAmm')}
               </Form.Label>
               <Form.Control
                 value={form.fatturaPA.riferimentoAmm}
@@ -445,7 +493,7 @@ const BillingIdentityTab: React.FC<Props> = ({ org }) => {
           <Col md={4}>
             <Form.Group className="mb-3">
               <Form.Label className="fw-semibold fs-10">
-                Convenzione N°
+                {t('adminClients.billingIdentity.labelConvenzioneNumero')}
               </Form.Label>
               <Form.Control
                 value={form.fatturaPA.convenzioneNumero}
@@ -469,10 +517,10 @@ const BillingIdentityTab: React.FC<Props> = ({ org }) => {
           {isSaving ? (
             <>
               <Spinner size="sm" animation="border" className="me-2" />
-              Saving…
+              {t('adminClients.billingIdentity.saving')}
             </>
           ) : (
-            'Save billing identity'
+            t('adminClients.billingIdentity.save')
           )}
         </Button>
       </div>

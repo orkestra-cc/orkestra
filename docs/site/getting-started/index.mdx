@@ -1,0 +1,44 @@
+---
+title: Getting Started
+description: Boot Orkestra locally in five minutes.
+sidebar_position: 1
+---
+
+# Getting Started
+
+The fastest way to try Orkestra is the **starter SKU** — core modules only, pulled from GHCR, layered on top of MongoDB and Redis.
+
+```bash
+cd docker
+docker network create orkestra-network                              # first time only
+docker compose -f docker-compose.infra.yml up -d                    # mongodb + redis
+docker compose -f docker-compose.starter.yml --env-file .env up -d
+
+# Backend API: http://localhost:3000
+# API docs:    http://localhost:3000/docs
+
+# Generate an administrator token for first login (from repo root):
+ORKESTRA_API_URL=http://localhost:3000 ./scripts/devtoken.sh administrator
+```
+
+Once you're in, head to `/admin/modules` to enable additional addons. The registry hot-reloads — no restart required.
+
+## Pick a SKU
+
+Five SKUs are published per push to `main`:
+
+| SKU          | What it includes                                                                    |
+| ------------ | ----------------------------------------------------------------------------------- |
+| `starter`    | Core modules only — smallest surface, fastest boot.                                 |
+| `billing`    | Core + billing, documents, company. Italian e-invoicing (FatturaPA/SDI).            |
+| `ai`         | Core + graph, aimodels, rag, agents, sales. Knowledge graph + RAG-backed AI.        |
+| `saas`       | Core + subscriptions, payments, compliance, identity. Stripe-backed SaaS plumbing.  |
+| `enterprise` | Every non-dev addon. The kitchen sink.                                              |
+
+Read more in **[Architecture › Module Lifecycle](/architecture/module-lifecycle)** for the build-time vs runtime distinction that makes SKUs work.
+
+## Next steps
+
+- [Installation in depth](/getting-started/installation)
+- [First admin login](/getting-started/first-admin-login)
+- [Enabling modules at runtime](/getting-started/enabling-modules)

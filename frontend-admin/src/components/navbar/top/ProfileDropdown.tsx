@@ -1,11 +1,13 @@
 import { Link } from 'react-router';
 import { Dropdown } from 'react-bootstrap';
+import { useTranslation } from 'react-i18next';
 import team3 from 'assets/img/team/3.jpg';
 import Avatar from 'components/common/Avatar';
 import paths from 'routes/paths';
 import { useAuthContext } from 'providers/AuthProvider';
 
 const ProfileDropdown = () => {
+  const { t } = useTranslation();
   const auth = useAuthContext();
   const user = auth.user;
 
@@ -49,20 +51,22 @@ const ProfileDropdown = () => {
             <span>Go Pro</span>
           </Dropdown.Item> */}
 
-          <Dropdown.Item href="/login">Login</Dropdown.Item>
+          <Dropdown.Item href="/login">{t('nav.profile.login')}</Dropdown.Item>
           <Dropdown.Divider />
           <Dropdown.Item as={Link} to={paths.userProfile}>
-            Profile &amp; account
+            {t('nav.profile.profileAndAccount')}
           </Dropdown.Item>
 
           <Dropdown.Item as={Link} to={paths.userSettings}>
-            Settings
+            {t('nav.profile.settings')}
           </Dropdown.Item>
           <Dropdown.Item as={Link} to={paths.userSecurity}>
-            Security
+            {t('nav.profile.security')}
           </Dropdown.Item>
           <Dropdown.Divider />
-          <Dropdown.Item onClick={handleLogout}>Logout</Dropdown.Item>
+          <Dropdown.Item onClick={handleLogout}>
+            {t('nav.profile.logout')}
+          </Dropdown.Item>
         </div>
       </Dropdown.Menu>
     </Dropdown>

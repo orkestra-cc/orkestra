@@ -1,0 +1,23 @@
+---
+title: OAuth Providers
+sidebar_position: 5
+---
+
+# OAuth Providers
+
+Orkestra supports OAuth 2.1 login with Google, Apple, GitHub, and Discord out of the box. Each provider is configured via the `auth` module at `/admin/modules`.
+
+:::note 🚧 Draft
+Per-provider OAuth app setup (redirect URIs, scopes, secrets) needs walkthroughs.
+:::
+
+## What you'll need per provider
+
+- Client ID
+- Client secret
+- Redirect URI pointing at your Orkestra instance: `https://<your-host>/api/v1/auth/oauth/<provider>/callback`
+- For Apple: a service ID, a private key, and a team ID.
+
+## Localhost redirects in dev
+
+Set `ALLOW_LOCALHOST_REDIRECTS=true` in `docker/.env` for development. Don't ship this to production.

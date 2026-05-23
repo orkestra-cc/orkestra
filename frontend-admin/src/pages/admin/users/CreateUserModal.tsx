@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Modal, Button, Form, Alert } from 'react-bootstrap';
+import { useTranslation } from 'react-i18next';
 import { useCreateUserMutation, CreateUserInput } from 'store/api/userApi';
 import OrkestraCloseButton from 'components/common/OrkestraCloseButton';
 
@@ -9,11 +10,21 @@ interface CreateUserModalProps {
   onSuccess?: () => void;
 }
 
+const ROLE_VALUES = [
+  'super_admin',
+  'administrator',
+  'developer',
+  'manager',
+  'operator',
+  'guest'
+] as const;
+
 const CreateUserModal: React.FC<CreateUserModalProps> = ({
   show,
   onHide,
   onSuccess
 }) => {
+  const { t } = useTranslation();
   const [createUser, { isLoading }] = useCreateUserMutation();
   const [error, setError] = useState<string>('');
   const [formData, setFormData] = useState<CreateUserInput>({
@@ -24,15 +35,6 @@ const CreateUserModal: React.FC<CreateUserModalProps> = ({
     pin: '',
     role: 'operator'
   });
-
-  const roles = [
-    { value: 'super_admin', label: 'Super Admin' },
-    { value: 'administrator', label: 'Administrator' },
-    { value: 'developer', label: 'Developer' },
-    { value: 'manager', label: 'Manager' },
-    { value: 'operator', label: 'Operator' },
-    { value: 'guest', label: 'Guest' }
-  ];
 
   const handleChange = (
     e: React.ChangeEvent<
@@ -50,30 +52,18 @@ const CreateUserModal: React.FC<CreateUserModalProps> = ({
 
     // Validation
     if (!formData.fullName.trim()) {
-      setError('Full name is required');
+      setError(t('adminUsers.createModal.errorFullNameRequired'));
       return;
     }
     if (!formData.email.trim()) {
-      setError('Email is required');
+      setError(t('adminUsers.createModal.errorEmailRequired'));
       return;
     }
 
     if (!formData.phone.trim()) {
-      setError('Phone number is required');
+      setError(t('adminUsers.createModal.errorPhoneRequired'));
       return;
     }
-    // if (!formData.username.trim()) {
-    //   setError("L'username è obbligatorio");
-    //   return;
-    // }
-    // if (!formData.pin.trim()) {
-    //   setError('Il PIN è obbligatorio');
-    //   return;
-    // }
-    // if (!/^\d{5}$/.test(formData.pin)) {
-    //   setError('Il PIN deve essere un numero di 5 cifre');
-    //   return;
-    // }
 
     try {
       await createUser(formData).unwrap();
@@ -89,7 +79,7 @@ const CreateUserModal: React.FC<CreateUserModalProps> = ({
       onHide();
       if (onSuccess) onSuccess();
     } catch (err: any) {
-      setError(err?.data?.message || 'Error creating user');
+      setError(err?.data?.message || t('adminUsers.createModal.errorGeneric'));
     }
   };
 
@@ -106,10 +96,16 @@ const CreateUserModal: React.FC<CreateUserModalProps> = ({
     onHide();
   };
 
+  const requiredMark = (
+    <span className="text-danger">
+      {t('adminUsers.createModal.requiredMark')}
+    </span>
+  );
+
   return (
     <Modal show={show} onHide={handleClose} centered size="lg">
       <Modal.Header>
-        <Modal.Title>New User</Modal.Title>
+        <Modal.Title>{t('adminUsers.createModal.title')}</Modal.Title>
         <OrkestraCloseButton onClick={handleClose} />
       </Modal.Header>
       <Form onSubmit={handleSubmit}>
@@ -122,79 +118,79 @@ const CreateUserModal: React.FC<CreateUserModalProps> = ({
 
           <Form.Group className="mb-3">
             <Form.Label>
-              Full Name <span className="text-danger">*</span>
+              {t('adminUsers.createModal.labelFullName')} {requiredMark}
             </Form.Label>
             <Form.Control
               type="text"
               name="fullName"
               value={formData.fullName}
               onChange={handleChange}
-              placeholder="e.g. John Smith"
+              placeholder={t('adminUsers.createModal.placeholderFullName')}
               required
             />
           </Form.Group>
 
           <Form.Group className="mb-3">
             <Form.Label>
-              Email <span className="text-danger">*</span>
+              {t('adminUsers.createModal.labelEmail')} {requiredMark}
             </Form.Label>
             <Form.Control
               type="email"
               name="email"
               value={formData.email}
               onChange={handleChange}
-              placeholder="john.smith@example.com"
+              placeholder={t('adminUsers.createModal.placeholderEmail')}
               required
             />
           </Form.Group>
 
           <Form.Group className="mb-3">
             <Form.Label>
-              Phone <span className="text-danger">*</span>
+              {t('adminUsers.createModal.labelPhone')} {requiredMark}
             </Form.Label>
             <Form.Control
               type="tel"
               name="phone"
               value={formData.phone}
               onChange={handleChange}
-              placeholder="+1 555 1234567"
+              placeholder={t('adminUsers.createModal.placeholderPhone')}
               required
             />
           </Form.Group>
 
           <Form.Group className="mb-3">
-            <Form.Label>Username</Form.Label>
+            <Form.Label>{t('adminUsers.createModal.labelUsername')}</Form.Label>
             <Form.Control
               type="text"
               name="username"
               value={formData.username}
               onChange={handleChange}
-              placeholder="johnsmith"
+              placeholder={t('adminUsers.createModal.placeholderUsername')}
             />
             <Form.Text className="text-muted">
-              Username will be used for system login
+              {t('adminUsers.createModal.helpUsername')}
             </Form.Text>
           </Form.Group>
 
           <Form.Group className="mb-3">
-            <Form.Label>PIN</Form.Label>
+            <Form.Label>{t('adminUsers.createModal.labelPin')}</Form.Label>
             <Form.Control
               type="text"
               name="pin"
               value={formData.pin}
               onChange={handleChange}
-              placeholder="12345"
+              placeholder={t('adminUsers.createModal.placeholderPin')}
               pattern="\d{5}"
               maxLength={5}
             />
             <Form.Text className="text-muted">
-              5-digit numeric code for access
+              {t('adminUsers.createModal.helpPin')}
             </Form.Text>
           </Form.Group>
 
           <Form.Group className="mb-3">
             <Form.Label>
-              Role <span className="text-danger">*</span>
+              {t('adminUsers.createModal.labelRole')} {requiredMark}
             </Form.Label>
             <Form.Select
               name="role"
@@ -202,9 +198,9 @@ const CreateUserModal: React.FC<CreateUserModalProps> = ({
               onChange={handleChange}
               required
             >
-              {roles.map(role => (
-                <option key={role.value} value={role.value}>
-                  {role.label}
+              {ROLE_VALUES.map(value => (
+                <option key={value} value={value}>
+                  {t(`adminUsers.roles.${value}`)}
                 </option>
               ))}
             </Form.Select>
@@ -216,10 +212,12 @@ const CreateUserModal: React.FC<CreateUserModalProps> = ({
             onClick={handleClose}
             disabled={isLoading}
           >
-            Cancel
+            {t('adminUsers.createModal.cancel')}
           </Button>
           <Button variant="primary" type="submit" disabled={isLoading}>
-            {isLoading ? 'Creating...' : 'Create User'}
+            {isLoading
+              ? t('adminUsers.createModal.submitting')
+              : t('adminUsers.createModal.submit')}
           </Button>
         </Modal.Footer>
       </Form>

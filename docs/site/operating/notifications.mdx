@@ -1,0 +1,20 @@
+---
+title: Notifications & SMTP
+sidebar_position: 4
+---
+
+# Notifications & SMTP
+
+The `notification` module boots in **`noop` mode** by default — verification and password-reset emails are logged to backend stdout rather than delivered.
+
+To send real mail:
+
+1. Open `/admin/modules`.
+2. Find **Notification** and click into its config.
+3. Switch the driver from `noop` to `smtp`.
+4. Fill in SMTP host, port, credentials, from-address.
+5. Save. The change takes effect immediately — no restart.
+
+:::note 🚧 Draft
+Per-provider SMTP setup walkthroughs (SES, SendGrid, Postmark, Resend) belong here.
+:::

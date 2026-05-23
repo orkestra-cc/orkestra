@@ -1,5 +1,6 @@
 import { Card, ProgressBar, Row, Col, Alert, Spinner } from 'react-bootstrap';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { useTranslation } from 'react-i18next';
 import Flex from 'components/common/Flex';
 import { useGetUserMetricsQuery } from 'store/api/userApi';
 
@@ -8,6 +9,7 @@ interface AdminUserMetricsProps {
 }
 
 const AdminUserMetrics: React.FC<AdminUserMetricsProps> = ({ userId }) => {
+  const { t } = useTranslation();
   const {
     data: metricsData,
     isLoading,
@@ -21,7 +23,9 @@ const AdminUserMetrics: React.FC<AdminUserMetricsProps> = ({ userId }) => {
         style={{ minHeight: '200px' }}
       >
         <Spinner animation="border" role="status">
-          <span className="visually-hidden">Loading metrics...</span>
+          <span className="visually-hidden">
+            {t('adminUserProfile.loadingMetricsAria')}
+          </span>
         </Spinner>
       </div>
     );
@@ -29,18 +33,26 @@ const AdminUserMetrics: React.FC<AdminUserMetricsProps> = ({ userId }) => {
 
   // If error, show error message
   if (error) {
-    return <Alert variant="danger">No user metrics</Alert>;
+    return (
+      <Alert variant="danger">
+        {t('adminUserProfile.metrics.errorNoData')}
+      </Alert>
+    );
   }
 
   // If no data, use default values
   if (!metricsData) {
-    return <Alert variant="warning">No metrics available for this user</Alert>;
+    return (
+      <Alert variant="warning">
+        {t('adminUserProfile.metrics.noMetricsAvailable')}
+      </Alert>
+    );
   }
 
   const metrics = [
     {
       icon: 'calendar-check',
-      label: 'Tasks Completed',
+      label: t('adminUserProfile.metrics.tasksCompleted'),
       value: `${metricsData.tasksCompleted}`,
       total: `${metricsData.totalTasks}`,
       percentage: Math.round(
@@ -50,22 +62,28 @@ const AdminUserMetrics: React.FC<AdminUserMetricsProps> = ({ userId }) => {
     },
     {
       icon: 'clock',
-      label: 'On-Time Deliveries',
-      value: `${Math.round(metricsData.onTimeDeliveryRate)}%`,
+      label: t('adminUserProfile.metrics.onTimeDeliveries'),
+      value: t('adminUserProfile.metrics.percent', {
+        value: Math.round(metricsData.onTimeDeliveryRate)
+      }),
       percentage: Math.round(metricsData.onTimeDeliveryRate),
       variant: 'info'
     },
     {
       icon: 'star',
-      label: 'Performance Rating',
-      value: `${metricsData.performanceRating.toFixed(1)}/5`,
+      label: t('adminUserProfile.metrics.performanceRating'),
+      value: t('adminUserProfile.metrics.ratingValue', {
+        value: metricsData.performanceRating.toFixed(1)
+      }),
       percentage: Math.round((metricsData.performanceRating / 5) * 100),
       variant: 'warning'
     },
     {
       icon: 'users',
-      label: 'Team Collaboration',
-      value: `${Math.round(metricsData.teamCollaboration)}%`,
+      label: t('adminUserProfile.metrics.teamCollaboration'),
+      value: t('adminUserProfile.metrics.percent', {
+        value: Math.round(metricsData.teamCollaboration)
+      }),
       percentage: Math.round(metricsData.teamCollaboration),
       variant: 'primary'
     }
@@ -73,22 +91,22 @@ const AdminUserMetrics: React.FC<AdminUserMetricsProps> = ({ userId }) => {
 
   const systemUsage = [
     {
-      feature: 'Dashboard',
+      feature: t('adminUserProfile.metrics.featureDashboard'),
       usage: metricsData.systemUsage.dashboard,
       color: 'primary'
     },
     {
-      feature: 'Reports',
+      feature: t('adminUserProfile.metrics.featureReports'),
       usage: metricsData.systemUsage.reports,
       color: 'success'
     },
     {
-      feature: 'Settings',
+      feature: t('adminUserProfile.metrics.featureSettings'),
       usage: metricsData.systemUsage.settings,
       color: 'warning'
     },
     {
-      feature: 'Help Desk',
+      feature: t('adminUserProfile.metrics.featureHelpDesk'),
       usage: metricsData.systemUsage.helpDesk,
       color: 'secondary'
     }
@@ -100,7 +118,7 @@ const AdminUserMetrics: React.FC<AdminUserMetricsProps> = ({ userId }) => {
         <Card.Header className="bg-body-tertiary">
           <h5 className="mb-0">
             <FontAwesomeIcon icon="chart-bar" className="me-2" />
-            Performance Metrics
+            {t('adminUserProfile.metrics.performanceTitle')}
           </h5>
         </Card.Header>
         <Card.Body>
@@ -137,7 +155,7 @@ const AdminUserMetrics: React.FC<AdminUserMetricsProps> = ({ userId }) => {
         <Card.Header className="bg-body-tertiary">
           <h5 className="mb-0">
             <FontAwesomeIcon icon="chart-pie" className="me-2" />
-            System Usage
+            {t('adminUserProfile.metrics.systemUsageTitle')}
           </h5>
         </Card.Header>
         <Card.Body>
@@ -148,7 +166,9 @@ const AdminUserMetrics: React.FC<AdminUserMetricsProps> = ({ userId }) => {
             >
               <Flex justifyContent="between" className="mb-1">
                 <small className="text-700">{item.feature}</small>
-                <small className="fw-bold">{item.usage}%</small>
+                <small className="fw-bold">
+                  {t('adminUserProfile.metrics.percent', { value: item.usage })}
+                </small>
               </Flex>
               <ProgressBar
                 variant={item.color}
@@ -164,7 +184,7 @@ const AdminUserMetrics: React.FC<AdminUserMetricsProps> = ({ userId }) => {
         <Card.Header className="bg-body-tertiary">
           <h5 className="mb-0">
             <FontAwesomeIcon icon="info-circle" className="me-2" />
-            Quick Stats
+            {t('adminUserProfile.metrics.quickStatsTitle')}
           </h5>
         </Card.Header>
         <Card.Body>
@@ -174,15 +194,21 @@ const AdminUserMetrics: React.FC<AdminUserMetricsProps> = ({ userId }) => {
                 <div className="fw-bold text-primary fs-7">
                   {metricsData.quickStats.loginCount}
                 </div>
-                <small className="text-600">Logins</small>
+                <small className="text-600">
+                  {t('adminUserProfile.metrics.statLogins')}
+                </small>
               </div>
             </Col>
             <Col xs={6}>
               <div className="text-center p-2 bg-success bg-opacity-10 rounded">
                 <div className="fw-bold text-success fs-7">
-                  {metricsData.quickStats.onlineTimeHours}h
+                  {t('adminUserProfile.metrics.statOnlineTimeHours', {
+                    hours: metricsData.quickStats.onlineTimeHours
+                  })}
                 </div>
-                <small className="text-600">Online Time</small>
+                <small className="text-600">
+                  {t('adminUserProfile.metrics.statOnlineTime')}
+                </small>
               </div>
             </Col>
             <Col xs={6}>
@@ -190,7 +216,9 @@ const AdminUserMetrics: React.FC<AdminUserMetricsProps> = ({ userId }) => {
                 <div className="fw-bold text-info fs-7">
                   {metricsData.quickStats.activeTasks}
                 </div>
-                <small className="text-600">Active Tasks</small>
+                <small className="text-600">
+                  {t('adminUserProfile.metrics.statActiveTasks')}
+                </small>
               </div>
             </Col>
             <Col xs={6}>
@@ -198,7 +226,9 @@ const AdminUserMetrics: React.FC<AdminUserMetricsProps> = ({ userId }) => {
                 <div className="fw-bold text-warning fs-7">
                   {metricsData.quickStats.overdueTasks}
                 </div>
-                <small className="text-600">Overdue</small>
+                <small className="text-600">
+                  {t('adminUserProfile.metrics.statOverdue')}
+                </small>
               </div>
             </Col>
           </Row>

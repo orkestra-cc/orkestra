@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   Modal,
   Button,
@@ -37,6 +38,7 @@ const CompanyModal: React.FC<CompanyModalProps> = ({
   company,
   onSuccess
 }) => {
+  const { t } = useTranslation();
   const isEditMode = !!company;
   const [createCompany, { isLoading: isCreating }] = useCreateCompanyMutation();
   const [updateCompany, { isLoading: isUpdating }] = useUpdateCompanyMutation();
@@ -180,7 +182,7 @@ const CompanyModal: React.FC<CompanyModalProps> = ({
 
     const email = formData.email || formData.pec;
     if (!email || !email.includes('@')) {
-      setOpenApiError('Email o PEC richiesta per la registrazione OpenAPI');
+      setOpenApiError(t('billing.companyModal.toasts.emailRequiredOpenApi'));
       return;
     }
 
@@ -194,12 +196,15 @@ const CompanyModal: React.FC<CompanyModalProps> = ({
 
       if (result.success) {
         setOpenApiSuccess(
-          result.message || 'Registrazione su OpenAPI SDI completata'
+          result.message || t('billing.companyModal.toasts.registerSuccess')
         );
         // Refresh config
         getBusinessRegistryConfig(company.fiscalIdCode);
       } else {
-        setOpenApiError(result.message || 'Errore durante la registrazione');
+        setOpenApiError(
+          result.message ||
+            t('billing.companyModal.toasts.registerErrorGeneric')
+        );
       }
     } catch (err: unknown) {
       const apiError = err as {
@@ -216,7 +221,7 @@ const CompanyModal: React.FC<CompanyModalProps> = ({
         apiError?.data?.title ||
         apiError?.data?.message ||
         (err instanceof Error ? err.message : null) ||
-        'Errore durante la registrazione su OpenAPI SDI';
+        t('billing.companyModal.toasts.registerError');
 
       setOpenApiError(errorMessage);
     }
@@ -228,13 +233,13 @@ const CompanyModal: React.FC<CompanyModalProps> = ({
 
     // Validation
     if (!formData.fiscalIdCode.trim()) {
-      setError('La Partita IVA è obbligatoria');
+      setError(t('billing.companyModal.validation.vatRequired'));
       setActiveTab('general');
       return;
     }
 
     if (!formData.denomination?.trim()) {
-      setError('La Ragione Sociale è obbligatoria');
+      setError(t('billing.companyModal.validation.denominationRequired'));
       setActiveTab('general');
       return;
     }
@@ -244,7 +249,7 @@ const CompanyModal: React.FC<CompanyModalProps> = ({
       !formData.city.trim() ||
       !formData.postalCode.trim()
     ) {
-      setError('Indirizzo, Città e CAP sono obbligatori');
+      setError(t('billing.companyModal.validation.addressRequired'));
       setActiveTab('address');
       return;
     }
@@ -290,7 +295,9 @@ const CompanyModal: React.FC<CompanyModalProps> = ({
     } catch (err: any) {
       setError(
         err?.data?.message ||
-          `Errore durante ${isEditMode ? 'il salvataggio' : 'la creazione'} dell'azienda`
+          (isEditMode
+            ? t('billing.companyModal.toasts.saveErrorEdit')
+            : t('billing.companyModal.toasts.saveErrorCreate'))
       );
     }
   };
@@ -311,7 +318,9 @@ const CompanyModal: React.FC<CompanyModalProps> = ({
     <Modal show={show} onHide={handleClose} centered size="lg">
       <Modal.Header>
         <Modal.Title>
-          {isEditMode ? 'Modifica Azienda' : 'Nuova Azienda'}
+          {isEditMode
+            ? t('billing.companyModal.title.edit')
+            : t('billing.companyModal.title.create')}
         </Modal.Title>
         <OrkestraCloseButton onClick={handleClose} />
       </Modal.Header>
@@ -329,22 +338,34 @@ const CompanyModal: React.FC<CompanyModalProps> = ({
           >
             <Nav variant="tabs" className="mb-3">
               <Nav.Item>
-                <Nav.Link eventKey="general">Dati Generali</Nav.Link>
+                <Nav.Link eventKey="general">
+                  {t('billing.companyModal.tabs.general')}
+                </Nav.Link>
               </Nav.Item>
               <Nav.Item>
-                <Nav.Link eventKey="address">Indirizzo</Nav.Link>
+                <Nav.Link eventKey="address">
+                  {t('billing.companyModal.tabs.address')}
+                </Nav.Link>
               </Nav.Item>
               <Nav.Item>
-                <Nav.Link eventKey="rea">REA</Nav.Link>
+                <Nav.Link eventKey="rea">
+                  {t('billing.companyModal.tabs.rea')}
+                </Nav.Link>
               </Nav.Item>
               <Nav.Item>
-                <Nav.Link eventKey="contact">Contatti</Nav.Link>
+                <Nav.Link eventKey="contact">
+                  {t('billing.companyModal.tabs.contact')}
+                </Nav.Link>
               </Nav.Item>
               <Nav.Item>
-                <Nav.Link eventKey="bank">Banca</Nav.Link>
+                <Nav.Link eventKey="bank">
+                  {t('billing.companyModal.tabs.bank')}
+                </Nav.Link>
               </Nav.Item>
               <Nav.Item>
-                <Nav.Link eventKey="openapi">OpenAPI SDI</Nav.Link>
+                <Nav.Link eventKey="openapi">
+                  {t('billing.companyModal.tabs.openapi')}
+                </Nav.Link>
               </Nav.Item>
             </Nav>
 
@@ -353,14 +374,17 @@ const CompanyModal: React.FC<CompanyModalProps> = ({
               <Tab.Pane eventKey="general">
                 <Form.Group className="mb-3">
                   <Form.Label>
-                    Ragione Sociale <span className="text-danger">*</span>
+                    {t('billing.companyModal.general.denominationLabel')}{' '}
+                    <span className="text-danger">*</span>
                   </Form.Label>
                   <Form.Control
                     type="text"
                     name="denomination"
                     value={formData.denomination}
                     onChange={handleChange}
-                    placeholder="es. Acme S.r.l."
+                    placeholder={t(
+                      'billing.companyModal.general.denominationPlaceholder'
+                    )}
                     required
                   />
                 </Form.Group>
@@ -368,7 +392,9 @@ const CompanyModal: React.FC<CompanyModalProps> = ({
                 <Row>
                   <Col md={2}>
                     <Form.Group className="mb-3">
-                      <Form.Label>Paese</Form.Label>
+                      <Form.Label>
+                        {t('billing.companyModal.general.countryLabel')}
+                      </Form.Label>
                       <Form.Control
                         type="text"
                         name="fiscalIdCountry"
@@ -382,14 +408,17 @@ const CompanyModal: React.FC<CompanyModalProps> = ({
                   <Col md={5}>
                     <Form.Group className="mb-3">
                       <Form.Label>
-                        Partita IVA <span className="text-danger">*</span>
+                        {t('billing.companyModal.general.vatLabel')}{' '}
+                        <span className="text-danger">*</span>
                       </Form.Label>
                       <Form.Control
                         type="text"
                         name="fiscalIdCode"
                         value={formData.fiscalIdCode}
                         onChange={handleChange}
-                        placeholder="es. 12345678901"
+                        placeholder={t(
+                          'billing.companyModal.general.vatPlaceholder'
+                        )}
                         maxLength={11}
                         disabled={isEditMode}
                         required
@@ -398,18 +427,22 @@ const CompanyModal: React.FC<CompanyModalProps> = ({
                   </Col>
                   <Col md={5}>
                     <Form.Group className="mb-3">
-                      <Form.Label>Codice Fiscale</Form.Label>
+                      <Form.Label>
+                        {t('billing.companyModal.general.codiceFiscaleLabel')}
+                      </Form.Label>
                       <Form.Control
                         type="text"
                         name="codiceFiscale"
                         value={formData.codiceFiscale}
                         onChange={handleChange}
-                        placeholder="es. RSSMRA80A01H501Z"
+                        placeholder={t(
+                          'billing.companyModal.general.codiceFiscalePlaceholder'
+                        )}
                         maxLength={16}
                         disabled={isEditMode}
                       />
                       <Form.Text className="text-muted">
-                        Solo se diverso dalla P.IVA
+                        {t('billing.companyModal.general.codiceFiscaleHelp')}
                       </Form.Text>
                     </Form.Group>
                   </Col>
@@ -417,7 +450,8 @@ const CompanyModal: React.FC<CompanyModalProps> = ({
 
                 <Form.Group className="mb-3">
                   <Form.Label>
-                    Regime Fiscale <span className="text-danger">*</span>
+                    {t('billing.companyModal.general.regimeFiscaleLabel')}{' '}
+                    <span className="text-danger">*</span>
                   </Form.Label>
                   <Form.Select
                     name="regimeFiscale"
@@ -439,14 +473,14 @@ const CompanyModal: React.FC<CompanyModalProps> = ({
                       type="switch"
                       id="isProfessional"
                       name="isProfessional"
-                      label="Professionista"
+                      label={t(
+                        'billing.companyModal.general.professionalLabel'
+                      )}
                       checked={formData.isProfessional || false}
                       onChange={handleChange}
                     />
                     <Form.Text className="text-muted">
-                      Attiva per professionisti in regime forfettario:
-                      disabilita ritenuta d'acconto e pre-compila la cassa
-                      previdenziale in fattura
+                      {t('billing.companyModal.general.professionalHelp')}
                     </Form.Text>
                   </Form.Group>
                 )}
@@ -458,27 +492,34 @@ const CompanyModal: React.FC<CompanyModalProps> = ({
                   <Col md={9}>
                     <Form.Group className="mb-3">
                       <Form.Label>
-                        Indirizzo <span className="text-danger">*</span>
+                        {t('billing.companyModal.address.addressLabel')}{' '}
+                        <span className="text-danger">*</span>
                       </Form.Label>
                       <Form.Control
                         type="text"
                         name="address"
                         value={formData.address}
                         onChange={handleChange}
-                        placeholder="es. Via Roma"
+                        placeholder={t(
+                          'billing.companyModal.address.addressPlaceholder'
+                        )}
                         required
                       />
                     </Form.Group>
                   </Col>
                   <Col md={3}>
                     <Form.Group className="mb-3">
-                      <Form.Label>N. Civico</Form.Label>
+                      <Form.Label>
+                        {t('billing.companyModal.address.numeroCivicoLabel')}
+                      </Form.Label>
                       <Form.Control
                         type="text"
                         name="numeroCivico"
                         value={formData.numeroCivico}
                         onChange={handleChange}
-                        placeholder="123"
+                        placeholder={t(
+                          'billing.companyModal.address.numeroCivicoPlaceholder'
+                        )}
                         maxLength={10}
                       />
                     </Form.Group>
@@ -489,27 +530,34 @@ const CompanyModal: React.FC<CompanyModalProps> = ({
                   <Col md={6}>
                     <Form.Group className="mb-3">
                       <Form.Label>
-                        Città <span className="text-danger">*</span>
+                        {t('billing.companyModal.address.cityLabel')}{' '}
+                        <span className="text-danger">*</span>
                       </Form.Label>
                       <Form.Control
                         type="text"
                         name="city"
                         value={formData.city}
                         onChange={handleChange}
-                        placeholder="es. Roma"
+                        placeholder={t(
+                          'billing.companyModal.address.cityPlaceholder'
+                        )}
                         required
                       />
                     </Form.Group>
                   </Col>
                   <Col md={2}>
                     <Form.Group className="mb-3">
-                      <Form.Label>Prov.</Form.Label>
+                      <Form.Label>
+                        {t('billing.companyModal.address.provinceLabel')}
+                      </Form.Label>
                       <Form.Control
                         type="text"
                         name="province"
                         value={formData.province}
                         onChange={handleChange}
-                        placeholder="RM"
+                        placeholder={t(
+                          'billing.companyModal.address.provincePlaceholder'
+                        )}
                         maxLength={2}
                       />
                     </Form.Group>
@@ -517,14 +565,17 @@ const CompanyModal: React.FC<CompanyModalProps> = ({
                   <Col md={2}>
                     <Form.Group className="mb-3">
                       <Form.Label>
-                        CAP <span className="text-danger">*</span>
+                        {t('billing.companyModal.address.postalCodeLabel')}{' '}
+                        <span className="text-danger">*</span>
                       </Form.Label>
                       <Form.Control
                         type="text"
                         name="postalCode"
                         value={formData.postalCode}
                         onChange={handleChange}
-                        placeholder="00100"
+                        placeholder={t(
+                          'billing.companyModal.address.postalCodePlaceholder'
+                        )}
                         maxLength={5}
                         required
                       />
@@ -532,7 +583,9 @@ const CompanyModal: React.FC<CompanyModalProps> = ({
                   </Col>
                   <Col md={2}>
                     <Form.Group className="mb-3">
-                      <Form.Label>Nazione</Form.Label>
+                      <Form.Label>
+                        {t('billing.companyModal.address.countryLabel')}
+                      </Form.Label>
                       <Form.Control
                         type="text"
                         name="country"
@@ -550,42 +603,54 @@ const CompanyModal: React.FC<CompanyModalProps> = ({
                 <Row>
                   <Col md={3}>
                     <Form.Group className="mb-3">
-                      <Form.Label>Ufficio REA</Form.Label>
+                      <Form.Label>
+                        {t('billing.companyModal.rea.officeLabel')}
+                      </Form.Label>
                       <Form.Control
                         type="text"
                         name="reaOffice"
                         value={formData.reaOffice}
                         onChange={handleChange}
-                        placeholder="es. RM"
+                        placeholder={t(
+                          'billing.companyModal.rea.officePlaceholder'
+                        )}
                         maxLength={2}
                       />
                       <Form.Text className="text-muted">
-                        Sigla provincia
+                        {t('billing.companyModal.rea.officeHelp')}
                       </Form.Text>
                     </Form.Group>
                   </Col>
                   <Col md={5}>
                     <Form.Group className="mb-3">
-                      <Form.Label>Numero REA</Form.Label>
+                      <Form.Label>
+                        {t('billing.companyModal.rea.numberLabel')}
+                      </Form.Label>
                       <Form.Control
                         type="text"
                         name="reaNumber"
                         value={formData.reaNumber}
                         onChange={handleChange}
-                        placeholder="es. 123456"
+                        placeholder={t(
+                          'billing.companyModal.rea.numberPlaceholder'
+                        )}
                         maxLength={20}
                       />
                     </Form.Group>
                   </Col>
                   <Col md={4}>
                     <Form.Group className="mb-3">
-                      <Form.Label>Capitale Sociale</Form.Label>
+                      <Form.Label>
+                        {t('billing.companyModal.rea.capitaleSocialeLabel')}
+                      </Form.Label>
                       <Form.Control
                         type="number"
                         name="capitaleSociale"
                         value={formData.capitaleSociale || ''}
                         onChange={handleNumberChange}
-                        placeholder="es. 10000.00"
+                        placeholder={t(
+                          'billing.companyModal.rea.capitaleSocialePlaceholder'
+                        )}
                         step="0.01"
                         min="0"
                       />
@@ -596,89 +661,115 @@ const CompanyModal: React.FC<CompanyModalProps> = ({
                 <Row>
                   <Col md={6}>
                     <Form.Group className="mb-3">
-                      <Form.Label>Socio Unico</Form.Label>
+                      <Form.Label>
+                        {t('billing.companyModal.rea.socioUnicoLabel')}
+                      </Form.Label>
                       <Form.Select
                         name="socioUnico"
                         value={formData.socioUnico || ''}
                         onChange={handleChange}
                       >
-                        <option value="">Non specificato</option>
-                        <option value="SU">SU - Socio Unico</option>
-                        <option value="SM">SM - Più Soci</option>
+                        <option value="">
+                          {t('billing.companyModal.rea.socioUnicoNotSpecified')}
+                        </option>
+                        <option value="SU">
+                          {t('billing.companyModal.rea.socioUnicoSU')}
+                        </option>
+                        <option value="SM">
+                          {t('billing.companyModal.rea.socioUnicoSM')}
+                        </option>
                       </Form.Select>
                     </Form.Group>
                   </Col>
                   <Col md={6}>
                     <Form.Group className="mb-3">
-                      <Form.Label>Stato Liquidazione</Form.Label>
+                      <Form.Label>
+                        {t('billing.companyModal.rea.statoLiquidazioneLabel')}
+                      </Form.Label>
                       <Form.Select
                         name="statoLiquidazione"
                         value={formData.statoLiquidazione || 'LN'}
                         onChange={handleChange}
                       >
-                        <option value="LN">LN - Non in liquidazione</option>
-                        <option value="LS">LS - In liquidazione</option>
+                        <option value="LN">
+                          {t('billing.companyModal.rea.statoLiquidazioneLN')}
+                        </option>
+                        <option value="LS">
+                          {t('billing.companyModal.rea.statoLiquidazioneLS')}
+                        </option>
                       </Form.Select>
                     </Form.Group>
                   </Col>
                 </Row>
 
                 <Alert variant="info" className="mt-3">
-                  <small>
-                    I dati REA (Repertorio Economico Amministrativo) sono
-                    obbligatori per le società di capitali e cooperative
-                    iscritte al Registro Imprese.
-                  </small>
+                  <small>{t('billing.companyModal.rea.infoAlert')}</small>
                 </Alert>
               </Tab.Pane>
 
               {/* Contact Tab */}
               <Tab.Pane eventKey="contact">
                 <Form.Group className="mb-3">
-                  <Form.Label>Email</Form.Label>
+                  <Form.Label>
+                    {t('billing.companyModal.contact.emailLabel')}
+                  </Form.Label>
                   <Form.Control
                     type="email"
                     name="email"
                     value={formData.email}
                     onChange={handleChange}
-                    placeholder="es. info@azienda.it"
+                    placeholder={t(
+                      'billing.companyModal.contact.emailPlaceholder'
+                    )}
                   />
                 </Form.Group>
 
                 <Form.Group className="mb-3">
-                  <Form.Label>PEC</Form.Label>
+                  <Form.Label>
+                    {t('billing.companyModal.contact.pecLabel')}
+                  </Form.Label>
                   <Form.Control
                     type="email"
                     name="pec"
                     value={formData.pec}
                     onChange={handleChange}
-                    placeholder="es. azienda@pec.it"
+                    placeholder={t(
+                      'billing.companyModal.contact.pecPlaceholder'
+                    )}
                   />
                   <Form.Text className="text-muted">
-                    Posta Elettronica Certificata
+                    {t('billing.companyModal.contact.pecHelp')}
                   </Form.Text>
                 </Form.Group>
 
                 <Form.Group className="mb-3">
-                  <Form.Label>Telefono</Form.Label>
+                  <Form.Label>
+                    {t('billing.companyModal.contact.phoneLabel')}
+                  </Form.Label>
                   <Form.Control
                     type="tel"
                     name="phone"
                     value={formData.phone}
                     onChange={handleChange}
-                    placeholder="es. +39 06 1234567"
+                    placeholder={t(
+                      'billing.companyModal.contact.phonePlaceholder'
+                    )}
                   />
                 </Form.Group>
 
                 <Form.Group className="mb-3">
-                  <Form.Label>Note</Form.Label>
+                  <Form.Label>
+                    {t('billing.companyModal.contact.notesLabel')}
+                  </Form.Label>
                   <Form.Control
                     as="textarea"
                     rows={3}
                     name="notes"
                     value={formData.notes}
                     onChange={handleChange}
-                    placeholder="Note interne..."
+                    placeholder={t(
+                      'billing.companyModal.contact.notesPlaceholder'
+                    )}
                   />
                 </Form.Group>
               </Tab.Pane>
@@ -686,13 +777,15 @@ const CompanyModal: React.FC<CompanyModalProps> = ({
               {/* Bank Tab */}
               <Tab.Pane eventKey="bank">
                 <Form.Group className="mb-3">
-                  <Form.Label>IBAN</Form.Label>
+                  <Form.Label>
+                    {t('billing.companyModal.bank.ibanLabel')}
+                  </Form.Label>
                   <Form.Control
                     type="text"
                     name="iban"
                     value={formData.iban}
                     onChange={handleChange}
-                    placeholder="es. IT60X0542811101000000123456"
+                    placeholder={t('billing.companyModal.bank.ibanPlaceholder')}
                     maxLength={34}
                   />
                 </Form.Group>
@@ -700,39 +793,51 @@ const CompanyModal: React.FC<CompanyModalProps> = ({
                 <Row>
                   <Col md={4}>
                     <Form.Group className="mb-3">
-                      <Form.Label>BIC/SWIFT</Form.Label>
+                      <Form.Label>
+                        {t('billing.companyModal.bank.bicLabel')}
+                      </Form.Label>
                       <Form.Control
                         type="text"
                         name="bic"
                         value={formData.bic}
                         onChange={handleChange}
-                        placeholder="es. BLOPIT22"
+                        placeholder={t(
+                          'billing.companyModal.bank.bicPlaceholder'
+                        )}
                         maxLength={11}
                       />
                     </Form.Group>
                   </Col>
                   <Col md={4}>
                     <Form.Group className="mb-3">
-                      <Form.Label>ABI</Form.Label>
+                      <Form.Label>
+                        {t('billing.companyModal.bank.abiLabel')}
+                      </Form.Label>
                       <Form.Control
                         type="text"
                         name="abi"
                         value={formData.abi}
                         onChange={handleChange}
-                        placeholder="es. 05428"
+                        placeholder={t(
+                          'billing.companyModal.bank.abiPlaceholder'
+                        )}
                         maxLength={5}
                       />
                     </Form.Group>
                   </Col>
                   <Col md={4}>
                     <Form.Group className="mb-3">
-                      <Form.Label>CAB</Form.Label>
+                      <Form.Label>
+                        {t('billing.companyModal.bank.cabLabel')}
+                      </Form.Label>
                       <Form.Control
                         type="text"
                         name="cab"
                         value={formData.cab}
                         onChange={handleChange}
-                        placeholder="es. 11101"
+                        placeholder={t(
+                          'billing.companyModal.bank.cabPlaceholder'
+                        )}
                         maxLength={5}
                       />
                     </Form.Group>
@@ -740,27 +845,35 @@ const CompanyModal: React.FC<CompanyModalProps> = ({
                 </Row>
 
                 <Form.Group className="mb-3">
-                  <Form.Label>Beneficiario</Form.Label>
+                  <Form.Label>
+                    {t('billing.companyModal.bank.beneficiarioLabel')}
+                  </Form.Label>
                   <Form.Control
                     type="text"
                     name="beneficiario"
                     value={formData.beneficiario}
                     onChange={handleChange}
-                    placeholder="es. Acme S.r.l."
+                    placeholder={t(
+                      'billing.companyModal.bank.beneficiarioPlaceholder'
+                    )}
                   />
                   <Form.Text className="text-muted">
-                    Intestatario del conto corrente
+                    {t('billing.companyModal.bank.beneficiarioHelp')}
                   </Form.Text>
                 </Form.Group>
 
                 <Form.Group className="mb-3">
-                  <Form.Label>Istituto Finanziario</Form.Label>
+                  <Form.Label>
+                    {t('billing.companyModal.bank.istitutoLabel')}
+                  </Form.Label>
                   <Form.Control
                     type="text"
                     name="istitutoFinanziario"
                     value={formData.istitutoFinanziario}
                     onChange={handleChange}
-                    placeholder="es. Banca XYZ S.p.A."
+                    placeholder={t(
+                      'billing.companyModal.bank.istitutoPlaceholder'
+                    )}
                   />
                 </Form.Group>
               </Tab.Pane>
@@ -790,31 +903,40 @@ const CompanyModal: React.FC<CompanyModalProps> = ({
                   <>
                     <Alert variant="info" className="mb-3">
                       <strong>
-                        Registrazione Business Registry OpenAPI SDI
+                        {t('billing.companyModal.openapi.infoTitle')}
                       </strong>
                       <p className="mb-0 mt-1">
-                        Prima di poter inviare fatture elettroniche tramite
-                        OpenAPI SDI, è necessario registrare l'anagrafica
-                        aziendale.
+                        {t('billing.companyModal.openapi.infoBody')}
                       </p>
                     </Alert>
 
                     {businessRegistryConfig?.active && (
                       <Alert variant="success" className="mb-3">
-                        <strong>Stato: Registrato</strong>
+                        <strong>
+                          {t(
+                            'billing.companyModal.openapi.statusRegisteredTitle'
+                          )}
+                        </strong>
                         <ul className="mb-0 mt-2">
-                          <li>Email: {businessRegistryConfig.email}</li>
                           <li>
-                            Firma digitale:{' '}
-                            {businessRegistryConfig.applySignature
-                              ? 'Attiva'
-                              : 'Non attiva'}
+                            {t('billing.companyModal.openapi.statusEmail')}{' '}
+                            {businessRegistryConfig.email}
                           </li>
                           <li>
-                            Conservazione:{' '}
+                            {t('billing.companyModal.openapi.statusSignature')}{' '}
+                            {businessRegistryConfig.applySignature
+                              ? t('billing.companyModal.openapi.statusActive')
+                              : t(
+                                  'billing.companyModal.openapi.statusInactive'
+                                )}
+                          </li>
+                          <li>
+                            {t('billing.companyModal.openapi.statusStorage')}{' '}
                             {businessRegistryConfig.applyLegalStorage
-                              ? 'Attiva'
-                              : 'Non attiva'}
+                              ? t('billing.companyModal.openapi.statusActive')
+                              : t(
+                                  'billing.companyModal.openapi.statusInactive'
+                                )}
                           </li>
                         </ul>
                       </Alert>
@@ -825,38 +947,44 @@ const CompanyModal: React.FC<CompanyModalProps> = ({
                         <Form.Check
                           type="switch"
                           id="applySignature"
-                          label="Applica firma digitale"
+                          label={t(
+                            'billing.companyModal.openapi.signatureSwitch'
+                          )}
                           checked={applySignature}
                           onChange={e => setApplySignature(e.target.checked)}
                         />
                         <Form.Text className="text-muted d-block mt-1">
-                          Firma digitalmente le fatture prima dell'invio
+                          {t('billing.companyModal.openapi.signatureHelp')}
                         </Form.Text>
                       </Col>
                       <Col md={6}>
                         <Form.Check
                           type="switch"
                           id="applyLegalStorage"
-                          label="Conservazione sostitutiva"
+                          label={t(
+                            'billing.companyModal.openapi.storageSwitch'
+                          )}
                           checked={applyLegalStorage}
                           onChange={e => setApplyLegalStorage(e.target.checked)}
                         />
                         <Form.Text className="text-muted d-block mt-1">
-                          Archivia le fatture in conservazione a norma
+                          {t('billing.companyModal.openapi.storageHelp')}
                         </Form.Text>
                       </Col>
                     </Row>
 
                     <Alert variant="secondary" className="mb-3">
                       <small>
-                        L'email per le notifiche SDI sarà:{' '}
+                        {t('billing.companyModal.openapi.emailNoteIntro')}{' '}
                         <strong>
                           {formData.email ||
                             formData.pec ||
-                            '(non configurata)'}
+                            t(
+                              'billing.companyModal.openapi.emailNotConfigured'
+                            )}
                         </strong>
                         <br />
-                        Per modificarla, vai alla tab "Contatti".
+                        {t('billing.companyModal.openapi.emailNoteOutro')}
                       </small>
                     </Alert>
 
@@ -869,22 +997,23 @@ const CompanyModal: React.FC<CompanyModalProps> = ({
                         {isConfiguringRegistry ? (
                           <>
                             <Spinner size="sm" className="me-2" />
-                            Registrazione...
+                            {t('billing.companyModal.openapi.registering')}
                           </>
                         ) : businessRegistryConfig?.active ? (
-                          'Aggiorna configurazione OpenAPI SDI'
+                          t('billing.companyModal.openapi.updateButton')
                         ) : (
-                          'Registra su OpenAPI SDI'
+                          t('billing.companyModal.openapi.registerButton')
                         )}
                       </Button>
                     </div>
                   </>
                 ) : (
                   <Alert variant="warning">
-                    <strong>Azienda non ancora salvata</strong>
+                    <strong>
+                      {t('billing.companyModal.openapi.notSavedTitle')}
+                    </strong>
                     <p className="mb-0 mt-1">
-                      Salva prima l'azienda per poterla registrare su OpenAPI
-                      SDI.
+                      {t('billing.companyModal.openapi.notSavedBody')}
                     </p>
                   </Alert>
                 )}
@@ -898,16 +1027,16 @@ const CompanyModal: React.FC<CompanyModalProps> = ({
             onClick={handleClose}
             disabled={isLoading}
           >
-            Annulla
+            {t('billing.companyModal.actions.cancel')}
           </Button>
           <Button variant="primary" type="submit" disabled={isLoading}>
             {isLoading
               ? isEditMode
-                ? 'Salvataggio...'
-                : 'Creazione...'
+                ? t('billing.companyModal.actions.saving')
+                : t('billing.companyModal.actions.creating')
               : isEditMode
-                ? 'Salva Modifiche'
-                : 'Crea Azienda'}
+                ? t('billing.companyModal.actions.save')
+                : t('billing.companyModal.actions.create')}
           </Button>
         </Modal.Footer>
       </Form>

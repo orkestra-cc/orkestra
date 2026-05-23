@@ -1,4 +1,5 @@
 import { Button, Modal } from 'react-bootstrap';
+import { useTranslation } from 'react-i18next';
 import SubtleBadge from 'components/common/SubtleBadge';
 import type { BadgeColor } from 'components/common/SubtleBadge';
 import type { AuditEvent, AuditOutcome } from 'types/compliance';
@@ -19,6 +20,7 @@ const outcomeColor: Record<AuditOutcome, BadgeColor> = {
 // metadata a caller emitted without dropping into the Mongo shell. Read-only
 // by design — audit events are append-only on the backend.
 const AuditEventDetailModal: React.FC<Props> = ({ event, show, onHide }) => {
+  const { t } = useTranslation();
   if (!event) return null;
   return (
     <Modal show={show} onHide={onHide} size="lg" centered>
@@ -32,17 +34,23 @@ const AuditEventDetailModal: React.FC<Props> = ({ event, show, onHide }) => {
       </Modal.Header>
       <Modal.Body className="fs-10">
         <dl className="row mb-0">
-          <dt className="col-sm-3 text-body-secondary">UUID</dt>
+          <dt className="col-sm-3 text-body-secondary">
+            {t('audit.eventModal.uuid')}
+          </dt>
           <dd className="col-sm-9">
             <code className="fs-11">{event.uuid}</code>
           </dd>
 
-          <dt className="col-sm-3 text-body-secondary">Timestamp</dt>
+          <dt className="col-sm-3 text-body-secondary">
+            {t('audit.eventModal.timestamp')}
+          </dt>
           <dd className="col-sm-9">
             {new Date(event.timestamp).toISOString()}
           </dd>
 
-          <dt className="col-sm-3 text-body-secondary">Actor</dt>
+          <dt className="col-sm-3 text-body-secondary">
+            {t('audit.eventModal.actor')}
+          </dt>
           <dd className="col-sm-9">
             <SubtleBadge bg="info" pill className="me-2">
               {event.actorType}
@@ -56,11 +64,15 @@ const AuditEventDetailModal: React.FC<Props> = ({ event, show, onHide }) => {
               </code>
             )}
             {!event.actorEmail && !event.actorUserId && (
-              <span className="text-body-tertiary">—</span>
+              <span className="text-body-tertiary">
+                {t('audit.eventModal.dash')}
+              </span>
             )}
           </dd>
 
-          <dt className="col-sm-3 text-body-secondary">Tenant</dt>
+          <dt className="col-sm-3 text-body-secondary">
+            {t('audit.eventModal.tenant')}
+          </dt>
           <dd className="col-sm-9">
             {event.tenantId ? (
               <>
@@ -72,11 +84,15 @@ const AuditEventDetailModal: React.FC<Props> = ({ event, show, onHide }) => {
                 )}
               </>
             ) : (
-              <span className="text-body-tertiary">—</span>
+              <span className="text-body-tertiary">
+                {t('audit.eventModal.dash')}
+              </span>
             )}
           </dd>
 
-          <dt className="col-sm-3 text-body-secondary">Resource</dt>
+          <dt className="col-sm-3 text-body-secondary">
+            {t('audit.eventModal.resource')}
+          </dt>
           <dd className="col-sm-9">
             {event.resourceType ? (
               <>
@@ -88,17 +104,23 @@ const AuditEventDetailModal: React.FC<Props> = ({ event, show, onHide }) => {
                 )}
               </>
             ) : (
-              <span className="text-body-tertiary">—</span>
+              <span className="text-body-tertiary">
+                {t('audit.eventModal.dash')}
+              </span>
             )}
           </dd>
 
-          <dt className="col-sm-3 text-body-secondary">IP / UA</dt>
+          <dt className="col-sm-3 text-body-secondary">
+            {t('audit.eventModal.ipUa')}
+          </dt>
           <dd className="col-sm-9 text-body-tertiary fs-11">
-            {event.ipAddress ?? '—'}
+            {event.ipAddress ?? t('audit.eventModal.dash')}
             {event.userAgent ? ` · ${event.userAgent}` : ''}
           </dd>
 
-          <dt className="col-sm-3 text-body-secondary">Metadata</dt>
+          <dt className="col-sm-3 text-body-secondary">
+            {t('audit.eventModal.metadata')}
+          </dt>
           <dd className="col-sm-9">
             {event.metadata && Object.keys(event.metadata).length > 0 ? (
               <pre
@@ -108,14 +130,16 @@ const AuditEventDetailModal: React.FC<Props> = ({ event, show, onHide }) => {
                 {JSON.stringify(event.metadata, null, 2)}
               </pre>
             ) : (
-              <span className="text-body-tertiary">—</span>
+              <span className="text-body-tertiary">
+                {t('audit.eventModal.dash')}
+              </span>
             )}
           </dd>
         </dl>
       </Modal.Body>
       <Modal.Footer>
         <Button variant="outline-secondary" size="sm" onClick={onHide}>
-          Close
+          {t('audit.eventModal.close')}
         </Button>
       </Modal.Footer>
     </Modal>

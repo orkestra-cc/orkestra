@@ -2,6 +2,7 @@ import { Alert, Form, Spinner } from 'react-bootstrap';
 import { Link } from 'react-router';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faArrowLeft } from '@fortawesome/free-solid-svg-icons';
+import { useTranslation } from 'react-i18next';
 import SubtleBadge from 'components/common/SubtleBadge';
 import type { BadgeColor } from 'components/common/SubtleBadge';
 import type { ModuleConfig } from 'store/api/moduleApi';
@@ -28,6 +29,7 @@ interface ModuleDetailHeaderProps {
 const ModuleDetailHeader: React.FC<ModuleDetailHeaderProps> = ({
   module: mod
 }) => {
+  const { t } = useTranslation();
   const [updateModule] = useUpdateModuleMutation();
   const [toggling, setToggling] = useState(false);
 
@@ -56,7 +58,7 @@ const ModuleDetailHeader: React.FC<ModuleDetailHeaderProps> = ({
         className="text-decoration-none fs-10 text-600 mb-2 d-inline-block"
       >
         <FontAwesomeIcon icon={faArrowLeft} className="me-1" />
-        Back to Modules
+        {t('adminModules.detail.back')}
       </Link>
 
       <div className="d-flex align-items-center justify-content-between flex-wrap gap-2">
@@ -87,7 +89,11 @@ const ModuleDetailHeader: React.FC<ModuleDetailHeaderProps> = ({
             <Form.Check
               type="switch"
               id="module-detail-toggle"
-              label={mod.enabled ? 'Enabled' : 'Disabled'}
+              label={
+                mod.enabled
+                  ? t('adminModules.detail.enabled')
+                  : t('adminModules.detail.disabledLabel')
+              }
               checked={mod.enabled}
               disabled={isCore}
               onChange={handleToggle}
@@ -99,13 +105,15 @@ const ModuleDetailHeader: React.FC<ModuleDetailHeaderProps> = ({
 
       {mod.status === 'failed' && mod.error && (
         <Alert variant="danger" className="mt-2 py-2 fs-10 mb-0">
-          <strong>Init Error:</strong> {mod.error}
+          <strong>{t('adminModules.detail.initErrorLabel')}</strong> {mod.error}
         </Alert>
       )}
 
       {mod.infraContainers && mod.infraContainers.length > 0 && (
         <div className="mt-2 fs-11 text-600">
-          <strong className="text-900">Managed infrastructure: </strong>
+          <strong className="text-900">
+            {t('adminModules.detail.managedInfra')}{' '}
+          </strong>
           {mod.infraContainers.map((c, idx) => {
             const dot = c.error
               ? 'bg-danger'
@@ -122,10 +130,10 @@ const ModuleDetailHeader: React.FC<ModuleDetailHeaderProps> = ({
                 <code className="text-700">{c.name}</code>
                 <span className="ms-1">
                   {c.error
-                    ? `error: ${c.error}`
+                    ? t('adminModules.detail.infraError', { message: c.error })
                     : c.running
-                      ? 'running'
-                      : 'stopped'}
+                      ? t('adminModules.detail.infraRunning')
+                      : t('adminModules.detail.infraStopped')}
                 </span>
               </span>
             );

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Button, Form, Modal, Spinner } from 'react-bootstrap';
 import { toast } from 'react-toastify';
+import { Trans, useTranslation } from 'react-i18next';
 import {
   useCreateBindingMutation,
   useListRolesQuery
@@ -18,6 +19,7 @@ interface Props {
  * authz_bindings auto-reaps expired entries.
  */
 const CreateBindingModal: React.FC<Props> = ({ tenantId, show, onHide }) => {
+  const { t } = useTranslation();
   const { data: rolesData, isLoading: rolesLoading } = useListRolesQuery(
     tenantId,
     {
@@ -51,63 +53,84 @@ const CreateBindingModal: React.FC<Props> = ({ tenantId, show, onHide }) => {
           expiresAt: expiresAt ? new Date(expiresAt).toISOString() : undefined
         }
       }).unwrap();
-      toast.success('Role granted');
+      toast.success(t('adminRoles.bindingModal.successToast'));
       onHide();
     } catch (err: unknown) {
-      toast.error('Grant failed: ' + extractError(err));
+      toast.error(
+        t('adminRoles.bindingModal.errorToast', {
+          message: extractError(err, t('adminRoles.bindingModal.unknownError'))
+        })
+      );
     }
   };
 
   return (
     <Modal show={show} onHide={onHide} backdrop="static">
       <Modal.Header closeButton>
-        <Modal.Title>Grant role to user</Modal.Title>
+        <Modal.Title>{t('adminRoles.bindingModal.title')}</Modal.Title>
       </Modal.Header>
       <Modal.Body>
         <Form>
           <Form.Group className="mb-3">
-            <Form.Label>User UUID</Form.Label>
+            <Form.Label>
+              {t('adminRoles.bindingModal.userUuidLabel')}
+            </Form.Label>
             <Form.Control
               type="text"
-              placeholder="019bc6a4-fe55-7cf5-aea7-bfb8142d2b4e"
+              placeholder={t('adminRoles.bindingModal.userUuidPlaceholder')}
               value={userUUID}
               onChange={e => setUserUUID(e.target.value)}
               autoFocus
             />
             <Form.Text muted>
-              The global user UUID (from <code>/v1/admin/users</code> or the
-              user profile page). A proper user picker is planned.
+              <Trans
+                i18nKey="adminRoles.bindingModal.userUuidHelp"
+                components={{ code: <code /> }}
+              />
             </Form.Text>
           </Form.Group>
 
           <Form.Group className="mb-3">
-            <Form.Label>Role</Form.Label>
+            <Form.Label>{t('adminRoles.bindingModal.roleLabel')}</Form.Label>
             {rolesLoading ? (
               <div>
-                <Spinner animation="border" size="sm" /> Loading roles…
+                <Spinner animation="border" size="sm" />{' '}
+                {t('adminRoles.bindingModal.loadingRoles')}
               </div>
             ) : (
               <Form.Select
                 value={roleId}
                 onChange={e => setRoleId(e.target.value)}
               >
-                <option value="">— Select a role —</option>
-                <optgroup label="System roles">
+                <option value="">
+                  {t('adminRoles.bindingModal.rolePlaceholder')}
+                </option>
+                <optgroup label={t('adminRoles.bindingModal.systemRolesGroup')}>
                   {roles
                     .filter(r => r.isSystem)
                     .map(r => (
                       <option key={r.id} value={r.id}>
-                        {r.name} ({r.permissions.length} perms)
+                        {r.name} (
+                        {t('adminRoles.bindingModal.rolePermsCount', {
+                          count: r.permissions.length
+                        })}
+                        )
                       </option>
                     ))}
                 </optgroup>
                 {roles.some(r => !r.isSystem) && (
-                  <optgroup label="Custom roles">
+                  <optgroup
+                    label={t('adminRoles.bindingModal.customRolesGroup')}
+                  >
                     {roles
                       .filter(r => !r.isSystem)
                       .map(r => (
                         <option key={r.id} value={r.id}>
-                          {r.name} ({r.permissions.length} perms)
+                          {r.name} (
+                          {t('adminRoles.bindingModal.rolePermsCount', {
+                            count: r.permissions.length
+                          })}
+                          )
                         </option>
                       ))}
                   </optgroup>
@@ -117,38 +140,37 @@ const CreateBindingModal: React.FC<Props> = ({ tenantId, show, onHide }) => {
           </Form.Group>
 
           <Form.Group className="mb-3">
-            <Form.Label>Expires at (optional)</Form.Label>
+            <Form.Label>{t('adminRoles.bindingModal.expiresLabel')}</Form.Label>
             <Form.Control
               type="datetime-local"
               value={expiresAt}
               onChange={e => setExpiresAt(e.target.value)}
             />
             <Form.Text muted>
-              Leave empty for permanent grants. Use this for contractor access,
-              temporary elevations, or trial memberships.
+              {t('adminRoles.bindingModal.expiresHelp')}
             </Form.Text>
           </Form.Group>
         </Form>
       </Modal.Body>
       <Modal.Footer>
         <Button variant="secondary" onClick={onHide} disabled={isSaving}>
-          Cancel
+          {t('adminRoles.bindingModal.cancel')}
         </Button>
         <Button variant="primary" onClick={onSave} disabled={!canSave}>
           {isSaving ? (
             <Spinner size="sm" animation="border" className="me-2" />
           ) : null}
-          Grant role
+          {t('adminRoles.bindingModal.grant')}
         </Button>
       </Modal.Footer>
     </Modal>
   );
 };
 
-function extractError(err: unknown): string {
+function extractError(err: unknown, fallback: string): string {
   if (err && typeof err === 'object' && 'data' in err) {
     const data = (err as { data?: { detail?: string; title?: string } }).data;
-    return data?.detail || data?.title || 'unknown error';
+    return data?.detail || data?.title || fallback;
   }
   return String(err);
 }

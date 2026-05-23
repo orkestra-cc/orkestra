@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Badge, Button, Card, Form, Modal, Table } from 'react-bootstrap';
 import { Link } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import PageHeader from 'components/common/PageHeader';
 import IconButton from 'components/common/IconButton';
 import Flex from 'components/common/Flex';
@@ -21,6 +22,7 @@ const statusColor: Record<SubStatus, string> = {
 };
 
 const SubscriptionsListPage: React.FC = () => {
+  const { t } = useTranslation();
   const [statusFilter, setStatusFilter] = useState<string>('');
   const { data, isLoading, refetch } = useListSubscriptionsQuery({
     status: statusFilter || undefined
@@ -38,7 +40,7 @@ const SubscriptionsListPage: React.FC = () => {
 
   const tenantById = useMemo(() => {
     const m = new Map<string, string>();
-    tenantsData?.tenants.forEach(t => m.set(t.id, t.name));
+    tenantsData?.tenants.forEach(tenant => m.set(tenant.id, tenant.name));
     return m;
   }, [tenantsData]);
   const serviceById = useMemo(() => {
@@ -60,8 +62,8 @@ const SubscriptionsListPage: React.FC = () => {
   return (
     <>
       <PageHeader
-        title="Sottoscrizioni"
-        description="Clienti × servizi con ciclo di rinnovo automatico"
+        title={t('subscriptions.list.title')}
+        description={t('subscriptions.list.description')}
         className="mb-3"
       >
         <Flex className="gap-2 mt-3">
@@ -71,14 +73,14 @@ const SubscriptionsListPage: React.FC = () => {
             onClick={() => setShowModal(true)}
             disabled={!tenantsData?.tenants.length || !services?.items.length}
           >
-            Nuova sottoscrizione
+            {t('subscriptions.list.newSubscription')}
           </IconButton>
           <IconButton
             icon="sync-alt"
             variant="orkestra-default"
             onClick={() => refetch()}
           >
-            Aggiorna
+            {t('subscriptions.list.refresh')}
           </IconButton>
         </Flex>
       </PageHeader>
@@ -90,12 +92,22 @@ const SubscriptionsListPage: React.FC = () => {
             onChange={e => setStatusFilter(e.target.value)}
             style={{ maxWidth: 220 }}
           >
-            <option value="">Tutti gli stati</option>
-            <option value="active">Attive</option>
-            <option value="past_due">In ritardo</option>
-            <option value="suspended">Sospese</option>
-            <option value="cancelled">Cancellate</option>
-            <option value="expired">Scadute</option>
+            <option value="">{t('subscriptions.list.filters.all')}</option>
+            <option value="active">
+              {t('subscriptions.list.filters.active')}
+            </option>
+            <option value="past_due">
+              {t('subscriptions.list.filters.past_due')}
+            </option>
+            <option value="suspended">
+              {t('subscriptions.list.filters.suspended')}
+            </option>
+            <option value="cancelled">
+              {t('subscriptions.list.filters.cancelled')}
+            </option>
+            <option value="expired">
+              {t('subscriptions.list.filters.expired')}
+            </option>
           </Form.Select>
         </Card.Body>
       </Card>
@@ -103,22 +115,24 @@ const SubscriptionsListPage: React.FC = () => {
       <Card>
         <Card.Body className="p-0">
           {isLoading ? (
-            <div className="p-4">Caricamento...</div>
+            <div className="p-4">{t('subscriptions.list.loading')}</div>
           ) : !data?.items.length ? (
             <div className="p-4 text-muted text-center">
-              Nessuna sottoscrizione.
+              {t('subscriptions.list.empty')}
             </div>
           ) : (
             <Table responsive hover className="mb-0">
               <thead className="bg-200">
                 <tr>
-                  <th>Cliente</th>
-                  <th>Servizio</th>
-                  <th>Tier</th>
-                  <th>Stato</th>
-                  <th>Prossimo addebito</th>
-                  <th>Tentativi falliti</th>
-                  <th className="text-end">Azioni</th>
+                  <th>{t('subscriptions.list.columns.client')}</th>
+                  <th>{t('subscriptions.list.columns.service')}</th>
+                  <th>{t('subscriptions.list.columns.tier')}</th>
+                  <th>{t('subscriptions.list.columns.status')}</th>
+                  <th>{t('subscriptions.list.columns.nextBilling')}</th>
+                  <th>{t('subscriptions.list.columns.failedAttempts')}</th>
+                  <th className="text-end">
+                    {t('subscriptions.list.columns.actions')}
+                  </th>
                 </tr>
               </thead>
               <tbody>

@@ -1,4 +1,5 @@
 import { Alert, Spinner, Table } from 'react-bootstrap';
+import { useTranslation } from 'react-i18next';
 import SubtleBadge from 'components/common/SubtleBadge';
 import type { BadgeColor } from 'components/common/SubtleBadge';
 import type { Org } from 'store/api/tenantApi';
@@ -17,6 +18,7 @@ const statusColors: Record<string, BadgeColor> = {
 };
 
 const SubscriptionsTab: React.FC<Props> = ({ org }) => {
+  const { t } = useTranslation();
   const { data, isLoading, error } = useListTenantSubscriptionsAdminQuery(
     org.id
   );
@@ -31,8 +33,7 @@ const SubscriptionsTab: React.FC<Props> = ({ org }) => {
   if (error) {
     return (
       <Alert variant="danger" className="fs-10">
-        Failed to load subscriptions. This may mean the subscriptions module is
-        disabled.
+        {t('adminClients.subscriptions.loadFailed')}
       </Alert>
     );
   }
@@ -45,8 +46,7 @@ const SubscriptionsTab: React.FC<Props> = ({ org }) => {
         variant="light"
         className="fs-10 py-3 border text-center text-muted"
       >
-        No subscriptions for this client yet. When one lands, it will appear
-        here — the entitlement syncer grants capabilities on activation.
+        {t('adminClients.subscriptions.empty')}
       </Alert>
     );
   }
@@ -55,11 +55,11 @@ const SubscriptionsTab: React.FC<Props> = ({ org }) => {
     <Table size="sm" className="fs-10 mb-0">
       <thead className="bg-body-tertiary">
         <tr>
-          <th>Tier</th>
-          <th>Status</th>
-          <th>Period</th>
-          <th>Next billing</th>
-          <th>Created</th>
+          <th>{t('adminClients.subscriptions.colTier')}</th>
+          <th>{t('adminClients.subscriptions.colStatus')}</th>
+          <th>{t('adminClients.subscriptions.colPeriod')}</th>
+          <th>{t('adminClients.subscriptions.colNextBilling')}</th>
+          <th>{t('adminClients.subscriptions.colCreated')}</th>
         </tr>
       </thead>
       <tbody>

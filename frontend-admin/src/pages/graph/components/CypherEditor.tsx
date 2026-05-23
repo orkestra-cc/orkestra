@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { Card, Button, Form, Collapse, Dropdown, Badge } from 'react-bootstrap';
+import { useTranslation } from 'react-i18next';
 
 const HISTORY_KEY = 'orkestra:cypher-history';
 const MAX_HISTORY = 20;
@@ -44,6 +45,7 @@ const CypherEditor = ({
   defaultValue = '',
   externalQuery
 }: CypherEditorProps) => {
+  const { t } = useTranslation();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [query, setQuery] = useState(defaultValue);
   const [showParams, setShowParams] = useState(false);
@@ -61,7 +63,7 @@ const CypherEditor = ({
         params = JSON.parse(paramsText);
         setParamsError('');
       } catch {
-        setParamsError('Invalid JSON parameters');
+        setParamsError(t('graph.cypher.errorInvalidJson'));
         return;
       }
     }
@@ -69,7 +71,7 @@ const CypherEditor = ({
     pushToHistory(cypher);
     setHistory(loadHistory());
     onExecute(cypher, params);
-  }, [query, isLoading, showParams, paramsText, onExecute]);
+  }, [query, isLoading, showParams, paramsText, onExecute, t]);
 
   const handleClear = useCallback(() => {
     setQuery('');
@@ -112,9 +114,9 @@ const CypherEditor = ({
   return (
     <Card className="mb-0">
       <Card.Header className="bg-body-tertiary py-2 d-flex align-items-center justify-content-between">
-        <h6 className="mb-0">Cypher Query</h6>
+        <h6 className="mb-0">{t('graph.cypher.cardTitle')}</h6>
         <span className="text-muted fs-10 d-none d-md-inline">
-          Ctrl+Enter to execute
+          {t('graph.cypher.ctrlEnterHint')}
         </span>
       </Card.Header>
       <Card.Body className="p-3">
@@ -136,7 +138,7 @@ const CypherEditor = ({
             color: '#e6edf3',
             border: '1px solid #30363d'
           }}
-          placeholder="MATCH (n) RETURN n LIMIT 25"
+          placeholder={t('graph.cypher.queryPlaceholder')}
           spellCheck={false}
         />
 
@@ -154,24 +156,26 @@ const CypherEditor = ({
                   className="spinner-border spinner-border-sm me-1"
                   role="status"
                 />
-                Running...
+                {t('graph.cypher.running')}
               </>
             ) : (
-              <>{'\u25B6'} Execute</>
+              <>
+                {'\u25B6'} {t('graph.cypher.execute')}
+              </>
             )}
           </Button>
 
           <Form.Check
             type="switch"
             id="cypher-readonly-toggle"
-            label="Read Only"
+            label={t('graph.cypher.readOnly')}
             className="mb-0 ms-1"
             checked={readOnly}
             onChange={e => onReadOnlyChange?.(e.target.checked)}
           />
 
           <Button variant="outline-secondary" size="sm" onClick={handleClear}>
-            Clear
+            {t('graph.cypher.clear')}
           </Button>
 
           <Button
@@ -180,12 +184,12 @@ const CypherEditor = ({
             onClick={() => setShowParams(p => !p)}
             className="d-flex align-items-center gap-1"
           >
-            Parameters
+            {t('graph.cypher.parameters')}
             {showParams &&
               paramsText.trim() !== '{}' &&
               paramsText.trim() !== '' && (
                 <Badge bg="info" pill className="ms-1">
-                  set
+                  {t('graph.cypher.paramsSetBadge')}
                 </Badge>
               )}
           </Button>
@@ -197,7 +201,7 @@ const CypherEditor = ({
                 size="sm"
                 id="cypher-history-dropdown"
               >
-                History
+                {t('graph.cypher.history')}
                 <Badge bg="secondary" pill className="ms-1">
                   {history.length}
                 </Badge>
@@ -225,7 +229,7 @@ const CypherEditor = ({
           <div>
             <div className="mt-2">
               <Form.Label className="fs-10 mb-1">
-                Query Parameters (JSON)
+                {t('graph.cypher.paramsLabel')}
               </Form.Label>
               <Form.Control
                 as="textarea"
@@ -237,7 +241,7 @@ const CypherEditor = ({
                 }}
                 className="font-monospace"
                 style={{ fontSize: '0.8rem' }}
-                placeholder='{ "name": "value" }'
+                placeholder={t('graph.cypher.paramsPlaceholder')}
               />
               {paramsError && (
                 <Form.Text className="text-danger">{paramsError}</Form.Text>

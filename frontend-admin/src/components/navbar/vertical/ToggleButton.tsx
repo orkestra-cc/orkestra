@@ -1,17 +1,19 @@
 import { Button, OverlayTrigger, Tooltip, TooltipProps } from 'react-bootstrap';
+import { useTranslation } from 'react-i18next';
 import { useAppContext } from 'providers/AppProvider';
 
-const renderTooltip = (props: TooltipProps) => (
-  <Tooltip style={{ position: 'fixed' }} id="button-tooltip" {...props}>
-    Toggle Navigation
-  </Tooltip>
-);
-
 const ToggleButton = () => {
+  const { t } = useTranslation();
   const {
     config: { isNavbarVerticalCollapsed, isFluid, isRTL },
     setConfig
   } = useAppContext();
+
+  const renderTooltip = (props: TooltipProps) => (
+    <Tooltip style={{ position: 'fixed' }} id="button-tooltip" {...props}>
+      {t('nav.toggleNavigation')}
+    </Tooltip>
+  );
 
   const handleClick = () => {
     document

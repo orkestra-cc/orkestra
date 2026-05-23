@@ -7,6 +7,7 @@ import AdvanceTableSearchBox from 'components/common/advance-table/AdvanceTableS
 import { useState } from 'react';
 import { Link } from 'react-router';
 import { toast } from 'react-toastify';
+import { useTranslation } from 'react-i18next';
 import {
   arrayToCSV,
   downloadCSV,
@@ -22,29 +23,32 @@ import {
 import { useSyncInvoicesMutation } from 'store/api/billingApi';
 
 const IssuedInvoiceTableHeader = () => {
+  const { t } = useTranslation();
   const { getSelectedRowModel, setColumnFilters, getFilteredRowModel } =
     useAdvanceTableContext();
-  const [selectedStatus, setSelectedStatus] = useState<string>('Tutti');
+  const [selectedStatus, setSelectedStatus] = useState<string>(
+    t('billing.issued.filters.all')
+  );
   const [syncInvoices, { isLoading: isSyncing }] = useSyncInvoicesMutation();
 
   const handleSync = async () => {
     try {
       await syncInvoices().unwrap();
-      toast.success('Sincronizzazione completata');
+      toast.success(t('billing.issued.syncSuccess'));
     } catch {
-      toast.error('Errore durante la sincronizzazione');
+      toast.error(t('billing.issued.syncError'));
     }
   };
 
   const statusFilters: { label: string; value: InvoiceStatus | 'all' }[] = [
-    { label: 'Tutti', value: 'all' },
-    { label: 'Bozza', value: 'draft' },
-    { label: 'In Attesa', value: 'pending' },
-    { label: 'Inviata', value: 'sent' },
-    { label: 'Consegnata', value: 'delivered' },
-    { label: 'Rifiutata', value: 'rejected' },
-    { label: 'Accettata', value: 'accepted' },
-    { label: 'Pagata', value: 'paid' }
+    { label: t('billing.issued.filters.all'), value: 'all' },
+    { label: t('billing.issued.filters.draft'), value: 'draft' },
+    { label: t('billing.issued.filters.pending'), value: 'pending' },
+    { label: t('billing.issued.filters.sent'), value: 'sent' },
+    { label: t('billing.issued.filters.delivered'), value: 'delivered' },
+    { label: t('billing.issued.filters.rejected'), value: 'rejected' },
+    { label: t('billing.issued.filters.accepted'), value: 'accepted' },
+    { label: t('billing.issued.filters.paid'), value: 'paid' }
   ];
 
   const handleStatusFilter = (filter: {
@@ -97,12 +101,12 @@ const IssuedInvoiceTableHeader = () => {
     <div className="d-lg-flex justify-content-between">
       <Row className="flex-between-center gy-2 px-x1">
         <Col xs="auto" className="pe-0">
-          <h6 className="mb-0">Elenco Fatture Emesse</h6>
+          <h6 className="mb-0">{t('billing.issued.tableTitle')}</h6>
         </Col>
         <Col xs="auto">
           <AdvanceTableSearchBox
             className="input-search-width"
-            placeholder="Cerca per numero o cliente"
+            placeholder={t('billing.issued.searchPlaceholder')}
           />
         </Col>
       </Row>
@@ -146,10 +150,10 @@ const IssuedInvoiceTableHeader = () => {
         ></div>
         {getSelectedRowModel().rows.length > 0 ? (
           <div className="d-flex">
-            <Form.Select size="sm" aria-label="Azioni di massa">
-              <option>Azioni di massa</option>
-              <option value="send">Invia a SDI</option>
-              <option value="delete">Elimina</option>
+            <Form.Select size="sm" aria-label={t('billing.issued.bulkActions')}>
+              <option>{t('billing.issued.bulkActions')}</option>
+              <option value="send">{t('billing.issued.bulkSend')}</option>
+              <option value="delete">{t('billing.issued.bulkDelete')}</option>
             </Form.Select>
             <Button
               type="button"
@@ -157,7 +161,7 @@ const IssuedInvoiceTableHeader = () => {
               size="sm"
               className="ms-2"
             >
-              Applica
+              {t('billing.issued.apply')}
             </Button>
           </div>
         ) : (
@@ -172,7 +176,7 @@ const IssuedInvoiceTableHeader = () => {
               iconAlign="middle"
             >
               <span className="d-none d-sm-inline-block d-xl-none d-xxl-inline-block ms-1">
-                Nuova Fattura
+                {t('billing.issued.newInvoice')}
               </span>
             </IconButton>
             <IconButton
@@ -185,7 +189,7 @@ const IssuedInvoiceTableHeader = () => {
               onClick={handleExportCSV}
             >
               <span className="d-none d-sm-inline-block d-xl-none d-xxl-inline-block ms-1">
-                Esporta
+                {t('billing.issued.export')}
               </span>
             </IconButton>
             <Dropdown align="end" className="btn-reveal-trigger d-inline-block">
@@ -196,21 +200,23 @@ const IssuedInvoiceTableHeader = () => {
               <Dropdown.Menu className="border py-0">
                 <div className="py-2">
                   <Dropdown.Item as={Link} to="/billing/invoices/issued">
-                    Visualizza Tutti
+                    {t('billing.issued.viewAll')}
                   </Dropdown.Item>
-                  <Dropdown.Item>Esporta XML</Dropdown.Item>
-                  <Dropdown.Item>Importa da XML</Dropdown.Item>
+                  <Dropdown.Item>{t('billing.issued.exportXml')}</Dropdown.Item>
+                  <Dropdown.Item>
+                    {t('billing.issued.importFromXml')}
+                  </Dropdown.Item>
                   <Dropdown.Divider />
                   <Dropdown.Item onClick={handleSync} disabled={isSyncing}>
                     <FontAwesomeIcon
                       icon={faSync}
                       className={`me-2 ${isSyncing ? 'fa-spin' : ''}`}
                     />
-                    Sincronizza con SDI
+                    {t('billing.issued.syncWithSdi')}
                   </Dropdown.Item>
                   <Dropdown.Divider />
                   <Dropdown.Item className="text-danger">
-                    Elimina Selezionate
+                    {t('billing.issued.deleteSelected')}
                   </Dropdown.Item>
                 </div>
               </Dropdown.Menu>

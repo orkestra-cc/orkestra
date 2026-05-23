@@ -6,6 +6,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/orkestra/backend/internal/core/user/models"
 	"github.com/orkestra/backend/internal/core/user/services"
+	"github.com/orkestra/backend/internal/shared/errcode"
 )
 
 // UserHandler handles user HTTP requests
@@ -36,7 +37,7 @@ func (h *UserHandler) CreateUser(ctx context.Context, req *CreateUserRequest) (*
 	if err != nil {
 		switch err {
 		case services.ErrEmailNotUnique:
-			return nil, huma.Error409Conflict("Email already in use", err)
+			return nil, errcode.Conflict(errcode.AuthEmailInUse, "Email already in use")
 		case services.ErrInvalidInput:
 			return nil, huma.Error400BadRequest("Invalid input data", err)
 		default:
@@ -93,7 +94,7 @@ func (h *UserHandler) UpdateUser(ctx context.Context, req *UpdateUserRequest) (*
 		case services.ErrUserNotFound:
 			return nil, huma.Error404NotFound("User not found", err)
 		case services.ErrEmailNotUnique:
-			return nil, huma.Error409Conflict("Email already in use", err)
+			return nil, errcode.Conflict(errcode.AuthEmailInUse, "Email already in use")
 		case services.ErrInvalidInput:
 			return nil, huma.Error400BadRequest("Invalid input data", err)
 		default:

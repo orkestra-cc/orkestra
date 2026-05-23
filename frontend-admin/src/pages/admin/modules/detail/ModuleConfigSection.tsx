@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useBlocker } from 'react-router';
 import { Alert, Button, Card, Modal, Nav, Spinner } from 'react-bootstrap';
+import { useTranslation } from 'react-i18next';
 import { OrkestraCardHeader } from 'components/common';
 import type {
   ModuleConfig,
@@ -22,6 +23,7 @@ const ModuleConfigSection: React.FC<ModuleConfigSectionProps> = ({
   module: mod,
   selectedEnvironment
 }) => {
+  const { t } = useTranslation();
   const { data: envConfig, isLoading: envLoading } =
     useGetModuleEnvironmentQuery(
       { name: mod.moduleName, environment: selectedEnvironment },
@@ -123,9 +125,9 @@ const ModuleConfigSection: React.FC<ModuleConfigSectionProps> = ({
         err && typeof err === 'object' && 'data' in err
           ? String(
               (err as { data: { detail?: string } }).data?.detail ||
-                'Update failed'
+                t('adminModules.detail.configCard.updateFailed')
             )
-          : 'Update failed';
+          : t('adminModules.detail.configCard.updateFailed');
       setError(message);
     }
   };
@@ -140,9 +142,12 @@ const ModuleConfigSection: React.FC<ModuleConfigSectionProps> = ({
   if (schema.length === 0) {
     return (
       <Card className="mb-3">
-        <OrkestraCardHeader title="Configuration" light={false} />
+        <OrkestraCardHeader
+          title={t('adminModules.detail.cards.configuration')}
+          light={false}
+        />
         <Card.Body className="text-muted text-center py-4 fs-10">
-          This module has no configurable settings.
+          {t('adminModules.detail.configCard.noSettings')}
         </Card.Body>
       </Card>
     );
@@ -169,11 +174,12 @@ const ModuleConfigSection: React.FC<ModuleConfigSectionProps> = ({
       {blocker.state === 'blocked' && (
         <Modal show centered onHide={() => blocker.reset()}>
           <Modal.Header closeButton>
-            <Modal.Title className="fs-8">Unsaved Changes</Modal.Title>
+            <Modal.Title className="fs-8">
+              {t('adminModules.detail.configCard.unsavedTitle')}
+            </Modal.Title>
           </Modal.Header>
           <Modal.Body className="fs-10">
-            You have unsaved configuration changes. Are you sure you want to
-            leave?
+            {t('adminModules.detail.configCard.unsavedBody')}
           </Modal.Body>
           <Modal.Footer>
             <Button
@@ -181,14 +187,14 @@ const ModuleConfigSection: React.FC<ModuleConfigSectionProps> = ({
               size="sm"
               onClick={() => blocker.reset()}
             >
-              Stay
+              {t('adminModules.detail.configCard.stay')}
             </Button>
             <Button
               variant="danger"
               size="sm"
               onClick={() => blocker.proceed()}
             >
-              Leave
+              {t('adminModules.detail.configCard.leave')}
             </Button>
           </Modal.Footer>
         </Modal>
@@ -196,7 +202,7 @@ const ModuleConfigSection: React.FC<ModuleConfigSectionProps> = ({
 
       <Card className="mb-3">
         <OrkestraCardHeader
-          title="Configuration"
+          title={t('adminModules.detail.cards.configuration')}
           light={false}
           endEl={
             envLoading ? <Spinner animation="border" size="sm" /> : undefined
@@ -215,7 +221,7 @@ const ModuleConfigSection: React.FC<ModuleConfigSectionProps> = ({
           )}
           {success && (
             <Alert variant="success" className="fs-10">
-              Configuration saved successfully.
+              {t('adminModules.detail.configCard.saved')}
             </Alert>
           )}
 
@@ -250,7 +256,7 @@ const ModuleConfigSection: React.FC<ModuleConfigSectionProps> = ({
                 size="sm"
                 onClick={handleDiscard}
               >
-                Discard
+                {t('adminModules.detail.configCard.discard')}
               </Button>
             )}
             <Button
@@ -262,7 +268,7 @@ const ModuleConfigSection: React.FC<ModuleConfigSectionProps> = ({
               {saving ? (
                 <Spinner animation="border" size="sm" />
               ) : (
-                'Save Changes'
+                t('adminModules.detail.configCard.saveChanges')
               )}
             </Button>
           </div>

@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Card, Spinner, Alert } from 'react-bootstrap';
+import { useTranslation } from 'react-i18next';
 import { useAppDispatch } from '../../store/hooks';
 import { baseApi } from '../../store/api/baseApi';
 import AuthCardLayout from 'layouts/AuthCardLayout';
 
 const SocialAuthCallback = () => {
+  const { t } = useTranslation();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const dispatch = useAppDispatch();
@@ -28,7 +30,9 @@ const SocialAuthCallback = () => {
           searchParams.get('webauthnAvailable') === 'true';
 
         if (error) {
-          throw new Error(`OAuth error: ${error}`);
+          throw new Error(
+            `${t('auth.social.callback.oauthErrorPrefix')}: ${error}`
+          );
         }
 
         // OAuth-resolved user is privileged + MFA-enrolled — backend
@@ -45,11 +49,13 @@ const SocialAuthCallback = () => {
         }
 
         if (success !== 'true') {
-          throw new Error('Authentication failed');
+          throw new Error(t('auth.social.callback.genericFailure'));
         }
 
         console.log(
-          `${provider || 'Social'} login successful, invalidating auth cache...`,
+          `${
+            provider || 'Social'
+          } login successful, invalidating auth cache...`,
           {
             provider,
             timestamp: new Date().toISOString()
@@ -77,7 +83,11 @@ const SocialAuthCallback = () => {
         }, 1500);
       } catch (err) {
         console.error('Social OAuth callback error:', err);
-        setError(err instanceof Error ? err.message : 'Authentication failed');
+        setError(
+          err instanceof Error
+            ? err.message
+            : t('auth.social.callback.genericFailure')
+        );
         setStatus('error');
 
         // Redirect to login page after error
@@ -88,7 +98,7 @@ const SocialAuthCallback = () => {
     };
 
     processCallback();
-  }, [searchParams, navigate, dispatch]);
+  }, [searchParams, navigate, dispatch, t]);
 
   return (
     <AuthCardLayout>
@@ -97,9 +107,9 @@ const SocialAuthCallback = () => {
           {status === 'loading' && (
             <>
               <Spinner animation="border" variant="primary" className="mb-3" />
-              <h5>Completamento autenticazione...</h5>
+              <h5>{t('auth.social.callback.completing')}</h5>
               <p className="text-muted">
-                Attendere mentre effettuiamo l'accesso.
+                {t('auth.social.callback.waitMessage')}
               </p>
             </>
           )}
@@ -109,19 +119,23 @@ const SocialAuthCallback = () => {
               <div className="text-success mb-3">
                 <i className="fas fa-check-circle fa-3x"></i>
               </div>
-              <h5 className="text-success">Autenticazione riuscita!</h5>
-              <p className="text-muted">Reindirizzamento alla dashboard...</p>
+              <h5 className="text-success">
+                {t('auth.social.callback.successTitle')}
+              </h5>
+              <p className="text-muted">
+                {t('auth.social.callback.successDetail')}
+              </p>
             </>
           )}
 
           {status === 'error' && (
             <>
               <Alert variant="danger" className="mb-3">
-                <h6>Autenticazione fallita</h6>
+                <h6>{t('auth.social.callback.failureTitle')}</h6>
                 <p className="mb-0">{error}</p>
               </Alert>
               <p className="text-muted">
-                Reindirizzamento alla pagina di accesso...
+                {t('auth.social.callback.redirectingToLogin')}
               </p>
             </>
           )}

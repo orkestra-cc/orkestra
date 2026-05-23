@@ -149,6 +149,16 @@ services:
       # running under Kubernetes or when infra is managed externally.
       CONTAINER_CONTROL_ENABLED: ${CONTAINER_CONTROL_ENABLED:-true}
 
+      # Marketing import spool — async-import payloads persist here between
+      # Enqueue and worker pickup. The schema default
+      # (/var/lib/orkestra/marketing/spool) is not writable by the
+      # non-root container user; override to a path we own + back with a
+      # named volume so spool survives restarts. First-boot seed only —
+      # for an existing install change `importSpoolDir` at
+      # /admin/modules/marketing instead (module_configs is authoritative
+      # after the first boot).
+      MARKETING_IMPORT_SPOOL_DIR: /app/marketing-spool
+
       # Module config (OAuth, OpenAPI billing/company tokens, Stripe keys,
       # SMTP, Hindsight URL, Memgraph URI, Gotenberg URL, AI provider keys,
       # per-module enable flags) is owned by ConfigService and edited at
@@ -160,6 +170,13 @@ services:
       - ./keys:/app/keys
       - orkestra-backend-logs-staging:/app/logs
       - orkestra-backend-uploads-staging:/app/uploads
+      # Marketing import spool — bind mount instead of named volume so
+      # the host dir's ownership (uid 1000) carries through. With
+      # userns_mode: "host" the container's uid 1000 IS host uid 1000,
+      # so the worker writes without a one-shot chown. Named volumes
+      # get created with root ownership (uid 100000 under the daemon's
+      # userns-remap) and would block the worker.
+      - ./marketing-spool-staging:/app/marketing-spool
       # Enables the agents module to manage the orkestra-hindsight container
       # lifecycle. For stricter isolation in staging, front the socket with
       # tecnativa/docker-socket-proxy exposing only containers endpoints.
@@ -218,7 +235,36 @@ services:
       - orkestra-network
     depends_on:
       - backend
-    command: ["sh", "-c", "npm install && npm run dev -- --host 0.0.0.0"]
+    # Regenerate public/config.js from the VITE_* env vars BEFORE `npm run
+    # dev` starts. Vite serves files under public/ as-is, and the SPA reads
+    # `window.__ORKESTRA_CONFIG__` from /config.js at boot — so without
+    # this overwrite the staging container would serve whatever it found
+    # bind-mounted from the host (or 404 on a clean checkout), and the
+    # priority order in src/config/environment.ts puts runtime config
+    # ahead of import.meta.env.VITE_API_URL.
+    #
+    # This is the dev-image equivalent of the production nginx entrypoint
+    # at frontend-admin/Dockerfile:/docker-entrypoint.d/10-write-config.sh.
+    # public/config.js is gitignored (see frontend-admin/.gitignore), so
+    # the /app bind mount's leak back to the host no longer dirties
+    # `git status`. The dev-default template at public/config.example.js
+    # remains tracked as the fallback for hosts running `npm run dev`
+    # outside Docker.
+    command:
+      - sh
+      - -c
+      - |
+        cat > /app/public/config.js <<EOF
+        // Generated at container start by docker-compose.staging.yml.
+        // public/config.js is gitignored — see frontend-admin/CLAUDE.md.
+        window.__ORKESTRA_CONFIG__ = {
+          apiUrl: "$${VITE_API_URL}",
+          wsUrl: "$${VITE_WS_URL}",
+          env: "$${VITE_ENV}",
+          debug: $${VITE_DEBUG}
+        };
+        EOF
+        npm install && npm run dev -- --host 0.0.0.0
 
   # Tier-2 (external client) demo SPA — consumes the ADR-0003 client
   # API surface (staging-api.orkestra.cc, JWT aud=client). Sibling app

@@ -1,6 +1,7 @@
 import { Card, Table, Spinner, Badge } from 'react-bootstrap';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faFileInvoice, faFileImport } from '@fortawesome/free-solid-svg-icons';
+import { useTranslation } from 'react-i18next';
 import OrkestraCardHeader from 'components/common/OrkestraCardHeader';
 import { Link } from 'react-router';
 import { useGetInvoicesQuery } from 'store/api/billingApi';
@@ -27,6 +28,7 @@ const getStatusBadge = (status: InvoiceStatus) => {
 };
 
 const RecentInvoices = () => {
+  const { t } = useTranslation();
   const lastYear = lastYearRange();
   const { data: issuedData, isLoading: issuedLoading } = useGetInvoicesQuery({
     direction: 'issued',
@@ -48,7 +50,11 @@ const RecentInvoices = () => {
   if (isLoading) {
     return (
       <Card className="h-100">
-        <OrkestraCardHeader title="Fatture Recenti" titleTag="h6" light />
+        <OrkestraCardHeader
+          title={t('billing.dashboard.recentInvoices.title')}
+          titleTag="h6"
+          light
+        />
         <Card.Body
           className="d-flex align-items-center justify-content-center"
           style={{ minHeight: 250 }}
@@ -80,7 +86,7 @@ const RecentInvoices = () => {
   return (
     <Card className="h-100">
       <OrkestraCardHeader
-        title="Fatture Recenti"
+        title={t('billing.dashboard.recentInvoices.title')}
         titleTag="h6"
         light
         endEl={
@@ -89,14 +95,14 @@ const RecentInvoices = () => {
               to="/billing/invoices/issued"
               className="fs-10 text-decoration-none"
             >
-              Emesse
+              {t('billing.dashboard.recentInvoices.linkIssued')}
             </Link>
             <span className="text-body-tertiary">|</span>
             <Link
               to="/billing/invoices/received"
               className="fs-10 text-decoration-none"
             >
-              Ricevute
+              {t('billing.dashboard.recentInvoices.linkReceived')}
             </Link>
           </div>
         }
@@ -108,18 +114,32 @@ const RecentInvoices = () => {
               icon={faFileInvoice}
               className="fs-3 mb-2 d-block"
             />
-            <span className="fs-10">Nessuna fattura presente</span>
+            <span className="fs-10">
+              {t('billing.dashboard.recentInvoices.empty')}
+            </span>
           </div>
         ) : (
           <Table responsive className="fs-10 mb-0">
             <thead className="bg-body-tertiary">
               <tr>
-                <th className="border-0 ps-x1">Tipo</th>
-                <th className="border-0">Numero</th>
-                <th className="border-0">Cliente/Fornitore</th>
-                <th className="border-0">Data</th>
-                <th className="border-0 text-end">Importo</th>
-                <th className="border-0 text-center">Stato</th>
+                <th className="border-0 ps-x1">
+                  {t('billing.dashboard.recentInvoices.colType')}
+                </th>
+                <th className="border-0">
+                  {t('billing.dashboard.recentInvoices.colNumber')}
+                </th>
+                <th className="border-0">
+                  {t('billing.dashboard.recentInvoices.colCustomer')}
+                </th>
+                <th className="border-0">
+                  {t('billing.dashboard.recentInvoices.colDate')}
+                </th>
+                <th className="border-0 text-end">
+                  {t('billing.dashboard.recentInvoices.colAmount')}
+                </th>
+                <th className="border-0 text-center">
+                  {t('billing.dashboard.recentInvoices.colStatus')}
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -138,7 +158,9 @@ const RecentInvoices = () => {
                           : 'text-success'
                       }
                       title={
-                        invoice.direction === 'issued' ? 'Emessa' : 'Ricevuta'
+                        invoice.direction === 'issued'
+                          ? t('billing.dashboard.recentInvoices.typeIssued')
+                          : t('billing.dashboard.recentInvoices.typeReceived')
                       }
                     />
                   </td>

@@ -11,6 +11,7 @@ import {
   Spinner,
   Table
 } from 'react-bootstrap';
+import { useTranslation } from 'react-i18next';
 import { OrkestraCardHeader } from 'components/common';
 import type {
   ModuleConfig,
@@ -50,6 +51,7 @@ const AIModelsConfigSection: React.FC<AIModelsConfigSectionProps> = ({
   module: mod,
   selectedEnvironment
 }) => {
+  const { t } = useTranslation();
   // --- URL-synced tab ---
   const [searchParams, setSearchParams] = useSearchParams();
   const activeTab = (searchParams.get('tab') as Provider) || 'ollama';
@@ -149,13 +151,13 @@ const AIModelsConfigSection: React.FC<AIModelsConfigSectionProps> = ({
       setSecretValues({});
       setTimeout(() => setConfigSuccess(false), 3000);
     } catch (err: unknown) {
+      const fallback = t('adminModules.aiModelsSection.updateFailed');
       const message =
         err && typeof err === 'object' && 'data' in err
           ? String(
-              (err as { data: { detail?: string } }).data?.detail ||
-                'Update failed'
+              (err as { data: { detail?: string } }).data?.detail || fallback
             )
-          : 'Update failed';
+          : fallback;
       setConfigError(message);
     }
   };
@@ -185,7 +187,10 @@ const AIModelsConfigSection: React.FC<AIModelsConfigSectionProps> = ({
     async (uuid: string) => {
       setTestResults(prev => ({
         ...prev,
-        [uuid]: { status: 'testing', message: 'Testing...' }
+        [uuid]: {
+          status: 'testing',
+          message: t('adminModules.aiModelsSection.testing')
+        }
       }));
       try {
         const result = await testModel(uuid).unwrap();
@@ -193,11 +198,14 @@ const AIModelsConfigSection: React.FC<AIModelsConfigSectionProps> = ({
       } catch {
         setTestResults(prev => ({
           ...prev,
-          [uuid]: { status: 'error', message: 'Test failed' }
+          [uuid]: {
+            status: 'error',
+            message: t('adminModules.aiModelsSection.testFailed')
+          }
         }));
       }
     },
-    [testModel]
+    [testModel, t]
   );
 
   const handleToggleActive = useCallback(
@@ -227,14 +235,14 @@ const AIModelsConfigSection: React.FC<AIModelsConfigSectionProps> = ({
 
   const handleDelete = useCallback(
     async (uuid: string) => {
-      if (!confirm('Delete this model configuration?')) return;
+      if (!confirm(t('adminModules.aiModelsSection.deleteConfirm'))) return;
       try {
         await deleteModel(uuid).unwrap();
       } catch {
         // handled by RTK Query
       }
     },
-    [deleteModel]
+    [deleteModel, t]
   );
 
   const openCreate = () => {
@@ -254,13 +262,24 @@ const AIModelsConfigSection: React.FC<AIModelsConfigSectionProps> = ({
 
   const getDetailsText = (model: AIModelConfig): string => {
     if (model.modelType === 'embedding' && model.dimensions) {
-      return `${model.dimensions}d`;
+      return t('adminModules.aiModelsSection.detailsDimensions', {
+        dimensions: model.dimensions
+      });
     }
     if (model.modelType === 'llm') {
       const parts: string[] = [];
       if (model.temperature !== undefined)
-        parts.push(`temp: ${model.temperature}`);
-      if (model.maxTokens !== undefined) parts.push(`max: ${model.maxTokens}`);
+        parts.push(
+          t('adminModules.aiModelsSection.detailsTemp', {
+            value: model.temperature
+          })
+        );
+      if (model.maxTokens !== undefined)
+        parts.push(
+          t('adminModules.aiModelsSection.detailsMax', {
+            value: model.maxTokens
+          })
+        );
       return parts.join(', ');
     }
     return '';
@@ -285,14 +304,14 @@ const AIModelsConfigSection: React.FC<AIModelsConfigSectionProps> = ({
     if (model.lastTestStatus === 'ok') {
       return (
         <Badge bg="success" className="bg-opacity-25 text-body">
-          tested ok
+          {t('adminModules.aiModelsSection.testedOk')}
         </Badge>
       );
     }
     if (model.lastTestStatus === 'error') {
       return (
         <Badge bg="danger" className="bg-opacity-25 text-body">
-          test failed
+          {t('adminModules.aiModelsSection.testedFailed')}
         </Badge>
       );
     }
@@ -305,11 +324,12 @@ const AIModelsConfigSection: React.FC<AIModelsConfigSectionProps> = ({
       {blocker.state === 'blocked' && (
         <Modal show centered onHide={() => blocker.reset()}>
           <Modal.Header closeButton>
-            <Modal.Title className="fs-8">Unsaved Changes</Modal.Title>
+            <Modal.Title className="fs-8">
+              {t('adminModules.aiModelsSection.unsavedTitle')}
+            </Modal.Title>
           </Modal.Header>
           <Modal.Body className="fs-10">
-            You have unsaved configuration changes. Are you sure you want to
-            leave?
+            {t('adminModules.aiModelsSection.unsavedBody')}
           </Modal.Body>
           <Modal.Footer>
             <Button
@@ -317,14 +337,14 @@ const AIModelsConfigSection: React.FC<AIModelsConfigSectionProps> = ({
               size="sm"
               onClick={() => blocker.reset()}
             >
-              Stay
+              {t('adminModules.aiModelsSection.unsavedStay')}
             </Button>
             <Button
               variant="danger"
               size="sm"
               onClick={() => blocker.proceed()}
             >
-              Leave
+              {t('adminModules.aiModelsSection.unsavedLeave')}
             </Button>
           </Modal.Footer>
         </Modal>
@@ -332,7 +352,7 @@ const AIModelsConfigSection: React.FC<AIModelsConfigSectionProps> = ({
 
       <Card className="mb-3">
         <OrkestraCardHeader
-          title="AI Provider Configuration"
+          title={t('adminModules.aiModelsSection.title')}
           light={false}
           endEl={
             envLoading ? <Spinner animation="border" size="sm" /> : undefined
@@ -368,14 +388,14 @@ const AIModelsConfigSection: React.FC<AIModelsConfigSectionProps> = ({
           )}
           {configSuccess && (
             <Alert variant="success" className="fs-10">
-              Configuration saved successfully.
+              {t('adminModules.aiModelsSection.savedToast')}
             </Alert>
           )}
 
           {/* Provider config fields */}
           <div className="mb-3">
             <h6 className="fs-10 text-uppercase text-600 mb-2">
-              Provider Settings
+              {t('adminModules.aiModelsSection.providerSettingsHeading')}
             </h6>
             <ModuleConfigFields
               schema={schema}
@@ -397,7 +417,7 @@ const AIModelsConfigSection: React.FC<AIModelsConfigSectionProps> = ({
                   size="sm"
                   onClick={handleDiscardConfig}
                 >
-                  Discard
+                  {t('adminModules.aiModelsSection.discard')}
                 </Button>
               )}
               <Button
@@ -409,7 +429,7 @@ const AIModelsConfigSection: React.FC<AIModelsConfigSectionProps> = ({
                 {saving ? (
                   <Spinner animation="border" size="sm" />
                 ) : (
-                  'Save Changes'
+                  t('adminModules.aiModelsSection.save')
                 )}
               </Button>
             </div>
@@ -418,9 +438,11 @@ const AIModelsConfigSection: React.FC<AIModelsConfigSectionProps> = ({
           {/* Models table */}
           <div className="border-top pt-3">
             <div className="d-flex align-items-center justify-content-between mb-2">
-              <h6 className="fs-10 text-uppercase text-600 mb-0">Models</h6>
+              <h6 className="fs-10 text-uppercase text-600 mb-0">
+                {t('adminModules.aiModelsSection.modelsHeading')}
+              </h6>
               <Button size="sm" variant="primary" onClick={openCreate}>
-                Add Model
+                {t('adminModules.aiModelsSection.addModel')}
               </Button>
             </div>
 
@@ -430,18 +452,19 @@ const AIModelsConfigSection: React.FC<AIModelsConfigSectionProps> = ({
               </div>
             ) : models.length === 0 ? (
               <p className="text-muted fs-10 mb-0">
-                No models configured for {PROVIDER_INFO[activeTab].label}. Click
-                "Add Model" to get started.
+                {t('adminModules.aiModelsSection.emptyModels', {
+                  provider: PROVIDER_INFO[activeTab].label
+                })}
               </p>
             ) : (
               <Table size="sm" hover responsive className="mb-0 fs-10">
                 <thead>
                   <tr>
-                    <th>Name</th>
-                    <th>Model</th>
-                    <th>Type</th>
-                    <th>Details</th>
-                    <th>Status</th>
+                    <th>{t('adminModules.aiModelsSection.colName')}</th>
+                    <th>{t('adminModules.aiModelsSection.colModel')}</th>
+                    <th>{t('adminModules.aiModelsSection.colType')}</th>
+                    <th>{t('adminModules.aiModelsSection.colDetails')}</th>
+                    <th>{t('adminModules.aiModelsSection.colStatus')}</th>
                     <th></th>
                   </tr>
                 </thead>
@@ -452,7 +475,7 @@ const AIModelsConfigSection: React.FC<AIModelsConfigSectionProps> = ({
                         {m.name}
                         {m.isDefault && (
                           <Badge bg="success" className="ms-1">
-                            Default
+                            {t('adminModules.aiModelsSection.defaultBadge')}
                           </Badge>
                         )}
                       </td>
@@ -470,7 +493,11 @@ const AIModelsConfigSection: React.FC<AIModelsConfigSectionProps> = ({
                             id={`toggle-active-${m.uuid}`}
                             checked={m.isActive}
                             onChange={() => handleToggleActive(m)}
-                            label={m.isActive ? 'Active' : 'Inactive'}
+                            label={
+                              m.isActive
+                                ? t('adminModules.aiModelsSection.active')
+                                : t('adminModules.aiModelsSection.inactive')
+                            }
                             className="mb-0"
                           />
                         )}
@@ -482,14 +509,14 @@ const AIModelsConfigSection: React.FC<AIModelsConfigSectionProps> = ({
                             size="sm"
                             onClick={() => handleTest(m.uuid)}
                           >
-                            Test
+                            {t('adminModules.aiModelsSection.test')}
                           </Button>
                           <Button
                             variant="outline-secondary"
                             size="sm"
                             onClick={() => openEdit(m)}
                           >
-                            Edit
+                            {t('adminModules.aiModelsSection.edit')}
                           </Button>
                           {!m.isDefault && (
                             <Button
@@ -497,7 +524,7 @@ const AIModelsConfigSection: React.FC<AIModelsConfigSectionProps> = ({
                               size="sm"
                               onClick={() => handleSetDefault(m.uuid)}
                             >
-                              Default
+                              {t('adminModules.aiModelsSection.makeDefault')}
                             </Button>
                           )}
                           <Button
@@ -505,7 +532,7 @@ const AIModelsConfigSection: React.FC<AIModelsConfigSectionProps> = ({
                             size="sm"
                             onClick={() => handleDelete(m.uuid)}
                           >
-                            Delete
+                            {t('adminModules.aiModelsSection.delete')}
                           </Button>
                         </div>
                       </td>

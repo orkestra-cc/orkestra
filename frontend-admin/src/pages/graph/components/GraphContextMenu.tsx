@@ -1,5 +1,6 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { ListGroup } from 'react-bootstrap';
+import { useTranslation } from 'react-i18next';
 import type { GraphNode, GraphRelationship } from '../../../types/graph';
 
 export interface ContextMenuState {
@@ -26,6 +27,7 @@ export function GraphContextMenu({
   onDeleteNode,
   onDeleteRelationship
 }: GraphContextMenuProps) {
+  const { t } = useTranslation();
   const ref = useRef<HTMLDivElement>(null);
 
   const handleClickOutside = useCallback(
@@ -90,7 +92,7 @@ export function GraphContextMenu({
                 onClose();
               }}
             >
-              Expand Neighbors
+              {t('graph.contextMenu.expandNeighbors')}
             </ListGroup.Item>
             <ListGroup.Item
               action
@@ -100,7 +102,7 @@ export function GraphContextMenu({
                 onClose();
               }}
             >
-              Delete Node
+              {t('graph.contextMenu.deleteNode')}
             </ListGroup.Item>
           </>
         )}
@@ -113,7 +115,7 @@ export function GraphContextMenu({
               onClose();
             }}
           >
-            Delete Relationship
+            {t('graph.contextMenu.deleteRelationship')}
           </ListGroup.Item>
         )}
       </ListGroup>

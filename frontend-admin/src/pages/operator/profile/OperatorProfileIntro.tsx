@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { Button, Card, Collapse, Row, Col, Badge } from 'react-bootstrap';
+import { useTranslation } from 'react-i18next';
 import { User } from 'store/api/userApi';
 
 interface OperatorProfileIntroProps {
@@ -10,6 +11,8 @@ interface OperatorProfileIntroProps {
 const OperatorProfileIntro: React.FC<OperatorProfileIntroProps> = ({
   user
 }) => {
+  const { t } = useTranslation();
+
   // Helper function to format date with time
   const formatDateTime = (dateString: string) => {
     return new Date(dateString).toLocaleString('en-GB', {
@@ -35,20 +38,24 @@ const OperatorProfileIntro: React.FC<OperatorProfileIntroProps> = ({
   return (
     <Card className="mb-3">
       <Card.Header className="bg-body-tertiary">
-        <h5 className="mb-0">User Information</h5>
+        <h5 className="mb-0">{t('profileShared.intro.title')}</h5>
       </Card.Header>
 
       <Card.Body className="text-1000">
         {user.providers && user.providers.length > 0 && (
           <div className="mb-3">
-            <small className="text-700 d-block mb-2">Social Login</small>
+            <small className="text-700 d-block mb-2">
+              {t('profileShared.intro.socialLoginLabel')}
+            </small>
             <div>
               {user.providers.map((provider, index) => (
                 <div key={index} className="d-flex align-items-center mb-2">
                   {provider.avatar ? (
                     <img
                       src={provider.avatar}
-                      alt={`${provider.provider} avatar`}
+                      alt={t('profileShared.intro.providerAvatarAlt', {
+                        provider: provider.provider
+                      })}
                       className="rounded-circle me-2"
                       style={{ width: '32px', height: '32px' }}
                     />
@@ -100,39 +107,56 @@ const OperatorProfileIntro: React.FC<OperatorProfileIntroProps> = ({
           <div>
             <Row className="mb-3">
               <Col md={6}>
-                <small className="text-700 d-block mb-1">Account Created</small>
+                <small className="text-700 d-block mb-1">
+                  {t('profileShared.intro.accountCreatedLabel')}
+                </small>
                 <p className="mb-2">{formatDateTime(user.createdAt)}</p>
               </Col>
               <Col md={6}>
-                <small className="text-700 d-block mb-1">Last Updated</small>
+                <small className="text-700 d-block mb-1">
+                  {t('profileShared.intro.lastUpdatedLabel')}
+                </small>
                 <p className="mb-2">{formatDateTime(user.updatedAt)}</p>
               </Col>
               <Col md={6}>
-                <small className="text-700 d-block mb-1">Last Login</small>
+                <small className="text-700 d-block mb-1">
+                  {t('profileShared.intro.lastLoginCardLabel')}
+                </small>
                 <p className="mb-2">
-                  {user.lastLogin ? formatDateTime(user.lastLogin) : 'Never'}
+                  {user.lastLogin
+                    ? formatDateTime(user.lastLogin)
+                    : t('profileShared.intro.lastLoginNever')}
                 </p>
               </Col>
               <Col md={6}>
                 <small className="text-700 d-block mb-1">
-                  Email Verification
+                  {t('profileShared.intro.emailVerificationLabel')}
                 </small>
                 <p className="mb-2">
                   <Badge bg={user.emailVerified ? 'success' : 'warning'}>
-                    {user.emailVerified ? 'Verified' : 'Not Verified'}
+                    {user.emailVerified
+                      ? t('profileShared.intro.emailVerifiedBadge')
+                      : t('profileShared.intro.emailNotVerifiedBadge')}
                   </Badge>
                 </p>
               </Col>
             </Row>
 
             <div className="mb-3">
-              <small className="text-700 d-block mb-1">System Notes</small>
+              <small className="text-700 d-block mb-1">
+                {t('profileShared.intro.systemNotesLabel')}
+              </small>
               <p className="text-600 fst-italic">
-                Account {user.role} created on {formatDate(user.createdAt)}.
+                {t('profileShared.intro.systemNotesAccountCreated', {
+                  role: user.role,
+                  date: formatDate(user.createdAt)
+                })}
                 {user.emailVerified
-                  ? ' Email verified.'
-                  : ' Email not yet verified.'}
-                {user.isActive ? ' Account active.' : ' Account disabled.'}
+                  ? t('profileShared.intro.systemNotesEmailVerified')
+                  : t('profileShared.intro.systemNotesEmailNotVerified')}
+                {user.isActive
+                  ? t('profileShared.intro.systemNotesActive')
+                  : t('profileShared.intro.systemNotesDisabled')}
               </p>
             </div>
           </div>
@@ -141,7 +165,9 @@ const OperatorProfileIntro: React.FC<OperatorProfileIntroProps> = ({
 
       <Card.Footer className="bg-body-tertiary p-0 border-top d-grid">
         <Button variant="link" onClick={() => setCollapsed(!collapsed)}>
-          Show {collapsed ? 'less' : 'more'} details
+          {collapsed
+            ? t('profileShared.intro.showLess')
+            : t('profileShared.intro.showMore')}
           <FontAwesomeIcon
             icon="chevron-down"
             className="ms-2 fs-11"

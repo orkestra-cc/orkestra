@@ -1,5 +1,6 @@
 import { useEffect, useState, FormEvent } from 'react';
 import { Alert, Button, Form, Modal } from 'react-bootstrap';
+import { useTranslation } from 'react-i18next';
 import {
   useGetMfaStatusQuery,
   useVerifyMfaMutation,
@@ -26,6 +27,7 @@ import { subscribeStepUp, completeStepUp } from 'store/stepUp';
  * via completeStepUp(true) so they replay with the fresh bearer.
  */
 const StepUpModal = () => {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [code, setCode] = useState('');
   const [useBackup, setUseBackup] = useState(false);
@@ -60,7 +62,7 @@ const StepUpModal = () => {
     event.preventDefault();
     setError(null);
     if (!code.trim()) {
-      setError('Enter the code from your authenticator.');
+      setError(t('auth.stepUp.errors.missingCode'));
       return;
     }
     try {
@@ -71,13 +73,11 @@ const StepUpModal = () => {
     } catch (err: unknown) {
       const anyErr = err as { status?: number; data?: { detail?: string } };
       if (anyErr?.status === 401) {
-        setError('Incorrect code. Please try again.');
+        setError(t('auth.stepUp.errors.incorrectCode'));
       } else if (anyErr?.status === 429) {
-        setError('Too many attempts. Please wait a moment and try again.');
+        setError(t('auth.stepUp.errors.tooMany'));
       } else {
-        setError(
-          anyErr?.data?.detail ?? 'Could not verify the code. Please try again.'
-        );
+        setError(anyErr?.data?.detail ?? t('auth.stepUp.errors.generic'));
       }
     }
   };
@@ -107,14 +107,12 @@ const StepUpModal = () => {
         data?: { detail?: string };
       };
       if (anyErr?.name === 'NotAllowedError') {
-        setError('The passkey prompt was cancelled or timed out.');
+        setError(t('auth.stepUp.errors.passkeyCancelled'));
       } else if (anyErr?.status === 401) {
-        setError(
-          'Passkey verification failed. Try the authenticator app instead.'
-        );
+        setError(t('auth.stepUp.errors.passkeyFailed'));
       } else {
         setError(
-          anyErr?.data?.detail ?? 'Could not complete passkey verification.'
+          anyErr?.data?.detail ?? t('auth.stepUp.errors.passkeyGeneric')
         );
       }
       setPasskeyBusy(false);
@@ -129,13 +127,11 @@ const StepUpModal = () => {
   return (
     <Modal show={open} onHide={handleCancel} backdrop="static" centered>
       <Modal.Header closeButton={!isLoading && !passkeyBusy}>
-        <Modal.Title>Confirm this action</Modal.Title>
+        <Modal.Title>{t('auth.stepUp.title')}</Modal.Title>
       </Modal.Header>
       <Form onSubmit={handleSubmit} noValidate>
         <Modal.Body>
-          <p className="fs-10 mb-3">
-            For your security, re-verify with your second factor to continue.
-          </p>
+          <p className="fs-10 mb-3">{t('auth.stepUp.intro')}</p>
 
           {error && (
             <Alert
@@ -156,17 +152,21 @@ const StepUpModal = () => {
                 disabled={passkeyBusy || isLoading}
                 onClick={handlePasskey}
               >
-                {passkeyBusy ? 'Waiting for passkey…' : 'Use a passkey'}
+                {passkeyBusy
+                  ? t('auth.stepUp.passkeyWaiting')
+                  : t('auth.stepUp.passkeyButton')}
               </Button>
               <div className="text-center text-muted fs-10 mt-2">
-                or enter a code
+                {t('auth.stepUp.passkeyOrCode')}
               </div>
             </div>
           )}
 
           <Form.Group className="mb-2">
             <Form.Label>
-              {useBackup ? 'Backup code' : 'Authenticator code'}
+              {useBackup
+                ? t('auth.stepUp.backupCode')
+                : t('auth.stepUp.authenticatorCode')}
             </Form.Label>
             <Form.Control
               type="text"
@@ -175,7 +175,11 @@ const StepUpModal = () => {
               autoFocus
               value={code}
               onChange={e => setCode(e.target.value)}
-              placeholder={useBackup ? 'XXXX-XXXX' : '123 456'}
+              placeholder={
+                useBackup
+                  ? t('auth.stepUp.backupPlaceholder')
+                  : t('auth.stepUp.authenticatorPlaceholder')
+              }
               required
             />
           </Form.Group>
@@ -188,8 +192,8 @@ const StepUpModal = () => {
             }}
           >
             {useBackup
-              ? 'Use authenticator app instead'
-              : 'Use a backup code instead'}
+              ? t('auth.stepUp.useAuthenticator')
+              : t('auth.stepUp.useBackup')}
           </button>
         </Modal.Body>
         <Modal.Footer>
@@ -198,14 +202,14 @@ const StepUpModal = () => {
             onClick={handleCancel}
             disabled={isLoading || passkeyBusy}
           >
-            Cancel
+            {t('auth.stepUp.cancel')}
           </Button>
           <Button
             type="submit"
             variant="primary"
             disabled={isLoading || passkeyBusy}
           >
-            {isLoading ? 'Verifying…' : 'Verify and continue'}
+            {isLoading ? t('auth.stepUp.submitting') : t('auth.stepUp.submit')}
           </Button>
         </Modal.Footer>
       </Form>

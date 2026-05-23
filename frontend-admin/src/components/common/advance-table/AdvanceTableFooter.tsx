@@ -2,6 +2,7 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import classNames from 'classnames';
 import { useState } from 'react';
 import { Button, Form } from 'react-bootstrap';
+import { useTranslation } from 'react-i18next';
 import Flex from '../Flex';
 import { useAdvanceTableContext } from 'providers/AdvanceTableProvider';
 
@@ -22,6 +23,7 @@ export const AdvanceTableFooter = ({
   rowsPerPageSelection,
   rowsPerPageOptions = [5, 10, 15]
 }: AdvanceTableFooterProps) => {
+  const { t } = useTranslation();
   const {
     setPageSize,
     previousPage,
@@ -50,9 +52,11 @@ export const AdvanceTableFooter = ({
         {rowInfo && (
           <p className="mb-0">
             <span className="d-none d-sm-inline-block me-2">
-              {pageSize * pageIndex + 1} to{' '}
-              {pageSize * pageIndex + getPaginationRowModel().rows.length} of{' '}
-              {getPrePaginationRowModel().rows.length}
+              {t('table.rowsCount', {
+                from: pageSize * pageIndex + 1,
+                to: pageSize * pageIndex + getPaginationRowModel().rows.length,
+                total: getPrePaginationRowModel().rows.length
+              })}
             </span>
             {viewAllBtn && (
               <>
@@ -70,7 +74,7 @@ export const AdvanceTableFooter = ({
                     );
                   }}
                 >
-                  View {isAllVisible ? 'less' : 'all'}
+                  {isAllVisible ? t('table.viewLess') : t('table.viewAll')}
                   <FontAwesomeIcon
                     icon="chevron-right"
                     className="ms-1 fs-11"
@@ -82,7 +86,7 @@ export const AdvanceTableFooter = ({
         )}
         {rowsPerPageSelection && (
           <>
-            <p className="mb-0 mx-2">Rows per page:</p>
+            <p className="mb-0 mx-2">{t('table.rowsPerPage')}</p>
             <Form.Select
               size="sm"
               className="w-auto"
@@ -106,7 +110,7 @@ export const AdvanceTableFooter = ({
             onClick={() => previousPage()}
             className={classNames({ disabled: !getCanPreviousPage() })}
           >
-            Previous
+            {t('table.previous')}
           </Button>
           <Button
             size="sm"
@@ -116,7 +120,7 @@ export const AdvanceTableFooter = ({
             })}
             onClick={() => nextPage()}
           >
-            Next
+            {t('table.next')}
           </Button>
         </Flex>
       )}

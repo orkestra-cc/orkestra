@@ -1,5 +1,6 @@
 import { Button } from 'react-bootstrap';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { Trans, useTranslation } from 'react-i18next';
 
 interface WelcomeStepProps {
   onNext: () => void;
@@ -10,6 +11,7 @@ interface WelcomeStepProps {
  * the operator is about to do. Purely informational — no form state.
  */
 const WelcomeStep = ({ onNext }: WelcomeStepProps) => {
+  const { t } = useTranslation();
   return (
     <div className="text-center">
       <div className="wizard-lottie-wrapper mb-3">
@@ -19,40 +21,41 @@ const WelcomeStep = ({ onNext }: WelcomeStepProps) => {
           style={{ fontSize: '3rem' }}
         />
       </div>
-      <h4 className="mb-2">Welcome to Orkestra</h4>
-      <p className="text-muted mb-4">
-        Let&apos;s get your deployment ready. This will take about a minute and
-        needs to happen exactly once per install.
-      </p>
+      <h4 className="mb-2">{t('setup.welcome.title')}</h4>
+      <p className="text-muted mb-4">{t('setup.welcome.intro')}</p>
 
       <div className="text-start mx-auto" style={{ maxWidth: 460 }}>
         <ol className="ps-3 mb-4">
           <li className="mb-2">
-            <strong>Create an administrator account.</strong> The first user
-            becomes the root <code>developer</code> and can manage everything
-            else from the admin UI.
+            <Trans
+              i18nKey="setup.welcome.step1"
+              components={{ strong: <strong />, code: <code /> }}
+            />
           </li>
           <li className="mb-2">
-            <strong>Create your first organization.</strong> Orkestra is
-            multi-tenant — every feature lives inside an organization, and
-            you&apos;ll be enrolled as the owner.
+            <Trans
+              i18nKey="setup.welcome.step2"
+              components={{ strong: <strong /> }}
+            />
           </li>
           <li className="mb-2">
-            <strong>Configure outbound email.</strong> Password resets and
-            verification links need a working SMTP relay. You can skip this step
-            and configure it later, but those flows will silently drop mail
-            until you do.
+            <Trans
+              i18nKey="setup.welcome.step3"
+              components={{ strong: <strong /> }}
+            />
           </li>
           <li>
-            <strong>You&apos;re done.</strong> The wizard won&apos;t reappear on
-            the next boot.
+            <Trans
+              i18nKey="setup.welcome.step4"
+              components={{ strong: <strong /> }}
+            />
           </li>
         </ol>
       </div>
 
       <div className="d-grid gap-2 d-md-block">
         <Button variant="primary" size="lg" onClick={onNext}>
-          Get started
+          {t('setup.welcome.getStarted')}
         </Button>
       </div>
     </div>

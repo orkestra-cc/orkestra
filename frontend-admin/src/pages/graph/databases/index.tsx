@@ -1,4 +1,5 @@
 import { Row, Col, Card, Table, Badge, Spinner, Alert } from 'react-bootstrap';
+import { useTranslation } from 'react-i18next';
 import {
   useListDatabasesQuery,
   useGraphHealthQuery,
@@ -6,6 +7,7 @@ import {
 } from '../../../store/api/graphApi';
 
 const GraphDatabases: React.FC = () => {
+  const { t } = useTranslation();
   const {
     data: healthData,
     isLoading: healthLoading,
@@ -17,7 +19,7 @@ const GraphDatabases: React.FC = () => {
     <>
       <Row className="g-3 mb-3">
         <Col>
-          <h5 className="mb-0">Graph Databases</h5>
+          <h5 className="mb-0">{t('graph.databases.pageTitle')}</h5>
         </Col>
       </Row>
 
@@ -26,15 +28,19 @@ const GraphDatabases: React.FC = () => {
         <Col md={6} lg={4}>
           <Card>
             <Card.Body>
-              <h6 className="text-muted mb-2">Connection Status</h6>
+              <h6 className="text-muted mb-2">
+                {t('graph.databases.connection.title')}
+              </h6>
               {healthLoading ? (
                 <Spinner size="sm" />
               ) : healthError ? (
-                <Badge bg="danger">Disconnected</Badge>
+                <Badge bg="danger">
+                  {t('graph.databases.connection.disconnected')}
+                </Badge>
               ) : (
                 <>
                   <Badge bg="success" className="me-2">
-                    Connected
+                    {t('graph.databases.connection.connected')}
                   </Badge>
                   <small className="text-muted">{healthData?.uri}</small>
                 </>
@@ -45,7 +51,9 @@ const GraphDatabases: React.FC = () => {
         <Col md={6} lg={4}>
           <Card>
             <Card.Body>
-              <h6 className="text-muted mb-2">Databases</h6>
+              <h6 className="text-muted mb-2">
+                {t('graph.databases.online.title')}
+              </h6>
               {dbLoading ? (
                 <Spinner size="sm" />
               ) : (
@@ -54,7 +62,9 @@ const GraphDatabases: React.FC = () => {
                     .length ?? 0}
                 </span>
               )}
-              <small className="text-muted ms-2">online</small>
+              <small className="text-muted ms-2">
+                {t('graph.databases.online.suffix')}
+              </small>
             </Card.Body>
           </Card>
         </Col>
@@ -65,7 +75,7 @@ const GraphDatabases: React.FC = () => {
         <Col>
           <Card>
             <Card.Header>
-              <h6 className="mb-0">Available Databases</h6>
+              <h6 className="mb-0">{t('graph.databases.list.title')}</h6>
             </Card.Header>
             <Card.Body className="p-0">
               {dbLoading ? (
@@ -74,17 +84,17 @@ const GraphDatabases: React.FC = () => {
                 </div>
               ) : !dbData?.databases?.length ? (
                 <Alert variant="info" className="m-3">
-                  No databases found
+                  {t('graph.databases.list.empty')}
                 </Alert>
               ) : (
                 <Table striped hover responsive className="mb-0">
                   <thead>
                     <tr>
-                      <th>Name</th>
-                      <th>Status</th>
-                      <th>Address</th>
-                      <th>Default</th>
-                      <th>Home</th>
+                      <th>{t('graph.databases.list.cols.name')}</th>
+                      <th>{t('graph.databases.list.cols.status')}</th>
+                      <th>{t('graph.databases.list.cols.address')}</th>
+                      <th>{t('graph.databases.list.cols.default')}</th>
+                      <th>{t('graph.databases.list.cols.home')}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -109,12 +119,22 @@ const GraphDatabases: React.FC = () => {
                         </td>
                         <td>
                           {db.default ? (
-                            <Badge bg="primary">Default</Badge>
+                            <Badge bg="primary">
+                              {t('graph.databases.list.defaultBadge')}
+                            </Badge>
                           ) : (
                             '-'
                           )}
                         </td>
-                        <td>{db.home ? <Badge bg="info">Home</Badge> : '-'}</td>
+                        <td>
+                          {db.home ? (
+                            <Badge bg="info">
+                              {t('graph.databases.list.homeBadge')}
+                            </Badge>
+                          ) : (
+                            '-'
+                          )}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -140,20 +160,25 @@ const GraphDatabases: React.FC = () => {
 };
 
 const DatabaseSchemaCard: React.FC<{ database: string }> = ({ database }) => {
+  const { t } = useTranslation();
   const { data: schema, isLoading } = useGetSchemaQuery({ database });
 
   return (
     <Card>
       <Card.Header>
         <div className="d-flex align-items-center justify-content-between">
-          <h6 className="mb-0">Schema: {database}</h6>
+          <h6 className="mb-0">
+            {t('graph.databases.schema.title', { database })}
+          </h6>
           {schema && (
             <div>
               <Badge bg="primary" className="me-2">
-                {schema.nodeCount} nodes
+                {t('graph.databases.schema.nodes', { count: schema.nodeCount })}
               </Badge>
               <Badge bg="warning" text="dark">
-                {schema.relationshipCount} relationships
+                {t('graph.databases.schema.relationships', {
+                  count: schema.relationshipCount
+                })}
               </Badge>
             </div>
           )}
@@ -165,12 +190,16 @@ const DatabaseSchemaCard: React.FC<{ database: string }> = ({ database }) => {
             <Spinner size="sm" />
           </div>
         ) : !schema ? (
-          <small className="text-muted">Unable to fetch schema</small>
+          <small className="text-muted">
+            {t('graph.databases.schema.unavailable')}
+          </small>
         ) : (
           <Row>
             <Col md={4}>
               <h6 className="text-muted small">
-                Labels ({schema.labels?.length ?? 0})
+                {t('graph.databases.schema.labelsHeading', {
+                  count: schema.labels?.length ?? 0
+                })}
               </h6>
               {schema.labels?.map(l => (
                 <div key={l.name} className="mb-1">
@@ -183,7 +212,9 @@ const DatabaseSchemaCard: React.FC<{ database: string }> = ({ database }) => {
             </Col>
             <Col md={4}>
               <h6 className="text-muted small">
-                Relationship Types ({schema.relationshipTypes?.length ?? 0})
+                {t('graph.databases.schema.relTypesHeading', {
+                  count: schema.relationshipTypes?.length ?? 0
+                })}
               </h6>
               {schema.relationshipTypes?.map(r => (
                 <div key={r.name} className="mb-1">
@@ -196,7 +227,9 @@ const DatabaseSchemaCard: React.FC<{ database: string }> = ({ database }) => {
             </Col>
             <Col md={4}>
               <h6 className="text-muted small">
-                Indexes ({schema.indexes?.length ?? 0})
+                {t('graph.databases.schema.indexesHeading', {
+                  count: schema.indexes?.length ?? 0
+                })}
               </h6>
               {schema.indexes?.map(i => (
                 <div key={i.name} className="mb-1">

@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Badge, Button, Card, Modal, Form, Table } from 'react-bootstrap';
+import { useTranslation } from 'react-i18next';
 import PageHeader from 'components/common/PageHeader';
 import IconButton from 'components/common/IconButton';
 import Flex from 'components/common/Flex';
@@ -33,6 +34,7 @@ const formatMoney = (cents: number, currency = 'EUR') =>
   );
 
 const ServicesListPage: React.FC = () => {
+  const { t } = useTranslation();
   const { data, isLoading, refetch } =
     useListSubscriptionServicesQuery(undefined);
   const [create] = useCreateSubscriptionServiceMutation();
@@ -93,20 +95,20 @@ const ServicesListPage: React.FC = () => {
   return (
     <>
       <PageHeader
-        title="Servizi"
-        description="Catalogo dei servizi AI offerti con prezzi ricorrenti"
+        title={t('subscriptions.services.title')}
+        description={t('subscriptions.services.description')}
         className="mb-3"
       >
         <Flex className="gap-2 mt-3">
           <IconButton icon="plus" variant="primary" onClick={openNew}>
-            Nuovo servizio
+            {t('subscriptions.services.new')}
           </IconButton>
           <IconButton
             icon="sync-alt"
             variant="orkestra-default"
             onClick={() => refetch()}
           >
-            Aggiorna
+            {t('subscriptions.services.refresh')}
           </IconButton>
         </Flex>
       </PageHeader>
@@ -114,21 +116,23 @@ const ServicesListPage: React.FC = () => {
       <Card>
         <Card.Body className="p-0">
           {isLoading ? (
-            <div className="p-4">Caricamento...</div>
+            <div className="p-4">{t('subscriptions.services.loading')}</div>
           ) : !data?.items.length ? (
             <div className="p-4 text-muted text-center">
-              Nessun servizio in catalogo. Creane uno per iniziare.
+              {t('subscriptions.services.empty')}
             </div>
           ) : (
             <Table responsive hover className="mb-0">
               <thead className="bg-200">
                 <tr>
-                  <th>Code</th>
-                  <th>Nome</th>
-                  <th>Categoria</th>
-                  <th>Prezzi</th>
-                  <th>Stato</th>
-                  <th className="text-end">Azioni</th>
+                  <th>{t('subscriptions.services.columns.code')}</th>
+                  <th>{t('subscriptions.services.columns.name')}</th>
+                  <th>{t('subscriptions.services.columns.category')}</th>
+                  <th>{t('subscriptions.services.columns.pricing')}</th>
+                  <th>{t('subscriptions.services.columns.status')}</th>
+                  <th className="text-end">
+                    {t('subscriptions.services.columns.actions')}
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -140,18 +144,20 @@ const ServicesListPage: React.FC = () => {
                     <td>{s.name}</td>
                     <td>{s.category}</td>
                     <td>
-                      {s.pricingTiers.map(t => (
-                        <div key={t.code}>
+                      {s.pricingTiers.map(pt => (
+                        <div key={pt.code}>
                           <small>
-                            <strong>{t.cycle}</strong>:{' '}
-                            {formatMoney(t.amountCents, t.currency)}
+                            <strong>{pt.cycle}</strong>:{' '}
+                            {formatMoney(pt.amountCents, pt.currency)}
                           </small>
                         </div>
                       ))}
                     </td>
                     <td>
                       <Badge bg={s.active ? 'success' : 'secondary'}>
-                        {s.active ? 'Attivo' : 'Inattivo'}
+                        {s.active
+                          ? t('subscriptions.services.statusActive')
+                          : t('subscriptions.services.statusInactive')}
                       </Badge>
                     </td>
                     <td className="text-end">
@@ -160,19 +166,25 @@ const ServicesListPage: React.FC = () => {
                         variant="link"
                         onClick={() => openEdit(s)}
                       >
-                        Modifica
+                        {t('subscriptions.services.edit')}
                       </Button>
                       <Button
                         size="sm"
                         variant="link"
                         className="text-danger"
                         onClick={async () => {
-                          if (confirm(`Eliminare "${s.name}"?`)) {
+                          if (
+                            confirm(
+                              t('subscriptions.services.deleteConfirm', {
+                                name: s.name
+                              })
+                            )
+                          ) {
                             await del(s.uuid).unwrap();
                           }
                         }}
                       >
-                        Elimina
+                        {t('subscriptions.services.delete')}
                       </Button>
                     </td>
                   </tr>
@@ -186,7 +198,9 @@ const ServicesListPage: React.FC = () => {
       <Modal show={showModal} onHide={() => setShowModal(false)} size="lg">
         <Modal.Header closeButton>
           <Modal.Title>
-            {editing ? 'Modifica servizio' : 'Nuovo servizio'}
+            {editing
+              ? t('subscriptions.services.modalEditTitle')
+              : t('subscriptions.services.modalNewTitle')}
           </Modal.Title>
         </Modal.Header>
         <Modal.Body>
@@ -194,18 +208,24 @@ const ServicesListPage: React.FC = () => {
             <div className="row g-3">
               <div className="col-md-4">
                 <Form.Group>
-                  <Form.Label>Code (SKU)</Form.Label>
+                  <Form.Label>
+                    {t('subscriptions.services.modal.codeLabel')}
+                  </Form.Label>
                   <Form.Control
                     value={form.code}
                     disabled={!!editing}
                     onChange={e => setForm({ ...form, code: e.target.value })}
-                    placeholder="es. n8n-workflow-pro"
+                    placeholder={t(
+                      'subscriptions.services.modal.codePlaceholder'
+                    )}
                   />
                 </Form.Group>
               </div>
               <div className="col-md-8">
                 <Form.Group>
-                  <Form.Label>Nome</Form.Label>
+                  <Form.Label>
+                    {t('subscriptions.services.modal.nameLabel')}
+                  </Form.Label>
                   <Form.Control
                     value={form.name}
                     onChange={e => setForm({ ...form, name: e.target.value })}
@@ -214,24 +234,38 @@ const ServicesListPage: React.FC = () => {
               </div>
               <div className="col-md-6">
                 <Form.Group>
-                  <Form.Label>Categoria</Form.Label>
+                  <Form.Label>
+                    {t('subscriptions.services.modal.categoryLabel')}
+                  </Form.Label>
                   <Form.Select
                     value={form.category}
                     onChange={e =>
                       setForm({ ...form, category: e.target.value })
                     }
                   >
-                    <option value="workflow">Workflow</option>
-                    <option value="database">Database</option>
-                    <option value="agent">Agent</option>
-                    <option value="hosting">Hosting</option>
-                    <option value="custom">Custom</option>
+                    <option value="workflow">
+                      {t('subscriptions.services.modal.categoryWorkflow')}
+                    </option>
+                    <option value="database">
+                      {t('subscriptions.services.modal.categoryDatabase')}
+                    </option>
+                    <option value="agent">
+                      {t('subscriptions.services.modal.categoryAgent')}
+                    </option>
+                    <option value="hosting">
+                      {t('subscriptions.services.modal.categoryHosting')}
+                    </option>
+                    <option value="custom">
+                      {t('subscriptions.services.modal.categoryCustom')}
+                    </option>
                   </Form.Select>
                 </Form.Group>
               </div>
               <div className="col-md-6">
                 <Form.Group>
-                  <Form.Label>Setup fee (cents)</Form.Label>
+                  <Form.Label>
+                    {t('subscriptions.services.modal.setupFeeLabel')}
+                  </Form.Label>
                   <Form.Control
                     type="number"
                     value={form.setupFeeCents ?? 0}
@@ -246,7 +280,9 @@ const ServicesListPage: React.FC = () => {
               </div>
               <div className="col-12">
                 <Form.Group>
-                  <Form.Label>Descrizione</Form.Label>
+                  <Form.Label>
+                    {t('subscriptions.services.modal.descriptionLabel')}
+                  </Form.Label>
                   <Form.Control
                     as="textarea"
                     rows={2}
@@ -260,7 +296,7 @@ const ServicesListPage: React.FC = () => {
               <div className="col-12">
                 <Form.Check
                   type="switch"
-                  label="Attivo"
+                  label={t('subscriptions.services.modal.activeLabel')}
                   checked={form.active}
                   onChange={e => setForm({ ...form, active: e.target.checked })}
                 />
@@ -269,39 +305,51 @@ const ServicesListPage: React.FC = () => {
 
             <hr />
             <Flex justifyContent="between" alignItems="center" className="mb-2">
-              <strong>Tier di prezzo</strong>
+              <strong>
+                {t('subscriptions.services.modal.pricingTiersHeading')}
+              </strong>
               <Button size="sm" variant="orkestra-default" onClick={addTier}>
-                + Tier
+                {t('subscriptions.services.modal.addTier')}
               </Button>
             </Flex>
-            {form.pricingTiers.map((t, i) => (
+            {form.pricingTiers.map((tier, i) => (
               <div className="row g-2 mb-2" key={i}>
                 <div className="col-md-3">
                   <Form.Control
-                    placeholder="code"
-                    value={t.code}
+                    placeholder={t(
+                      'subscriptions.services.modal.tierCodePlaceholder'
+                    )}
+                    value={tier.code}
                     onChange={e => updateTier(i, { code: e.target.value })}
                   />
                 </div>
                 <div className="col-md-3">
                   <Form.Select
-                    value={t.cycle}
+                    value={tier.cycle}
                     onChange={e =>
                       updateTier(i, {
                         cycle: e.target.value as PricingTier['cycle']
                       })
                     }
                   >
-                    <option value="monthly">Monthly</option>
-                    <option value="quarterly">Quarterly</option>
-                    <option value="annual">Annual</option>
+                    <option value="monthly">
+                      {t('subscriptions.services.modal.cycleMonthly')}
+                    </option>
+                    <option value="quarterly">
+                      {t('subscriptions.services.modal.cycleQuarterly')}
+                    </option>
+                    <option value="annual">
+                      {t('subscriptions.services.modal.cycleAnnual')}
+                    </option>
                   </Form.Select>
                 </div>
                 <div className="col-md-3">
                   <Form.Control
                     type="number"
-                    placeholder="amount (cents)"
-                    value={t.amountCents}
+                    placeholder={t(
+                      'subscriptions.services.modal.tierAmountPlaceholder'
+                    )}
+                    value={tier.amountCents}
                     onChange={e =>
                       updateTier(i, { amountCents: Number(e.target.value) })
                     }
@@ -309,8 +357,10 @@ const ServicesListPage: React.FC = () => {
                 </div>
                 <div className="col-md-2">
                   <Form.Control
-                    placeholder="EUR"
-                    value={t.currency}
+                    placeholder={t(
+                      'subscriptions.services.modal.tierCurrencyPlaceholder'
+                    )}
+                    value={tier.currency}
                     onChange={e => updateTier(i, { currency: e.target.value })}
                   />
                 </div>
@@ -330,10 +380,10 @@ const ServicesListPage: React.FC = () => {
         </Modal.Body>
         <Modal.Footer>
           <Button variant="secondary" onClick={() => setShowModal(false)}>
-            Annulla
+            {t('subscriptions.services.modal.cancel')}
           </Button>
           <Button variant="primary" onClick={submit}>
-            Salva
+            {t('subscriptions.services.modal.save')}
           </Button>
         </Modal.Footer>
       </Modal>

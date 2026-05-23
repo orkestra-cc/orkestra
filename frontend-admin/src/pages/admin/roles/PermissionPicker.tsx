@@ -8,6 +8,7 @@ import {
   Spinner
 } from 'react-bootstrap';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { Trans, useTranslation } from 'react-i18next';
 import { useListPermissionsQuery, type Permission } from 'store/api/tenantApi';
 
 interface Props {
@@ -35,6 +36,7 @@ const PermissionPicker: React.FC<Props> = ({
   onChange,
   readOnly
 }) => {
+  const { t } = useTranslation();
   const { data, isLoading } = useListPermissionsQuery();
   const [query, setQuery] = useState('');
 
@@ -103,13 +105,18 @@ const PermissionPicker: React.FC<Props> = ({
     <>
       <div className="d-flex justify-content-between align-items-center mb-2">
         <div className="fw-semibold">
-          Permissions{' '}
+          {t('adminRoles.permissionPicker.heading')}{' '}
           <Badge bg="primary" className="ms-1">
-            {selectedCount} selected
+            {t('adminRoles.permissionPicker.selectedBadge', {
+              count: selectedCount
+            })}
           </Badge>
           {q && (
             <span className="text-muted small ms-2">
-              · {visibleCount} of {totalCount} match
+              {t('adminRoles.permissionPicker.filterSummary', {
+                visible: visibleCount,
+                total: totalCount
+              })}
             </span>
           )}
         </div>
@@ -120,7 +127,7 @@ const PermissionPicker: React.FC<Props> = ({
             className="text-danger p-0"
             onClick={() => onChange(new Set())}
           >
-            Clear selection
+            {t('adminRoles.permissionPicker.clearSelection')}
           </Button>
         )}
       </div>
@@ -131,26 +138,31 @@ const PermissionPicker: React.FC<Props> = ({
         </InputGroup.Text>
         <Form.Control
           type="search"
-          placeholder="Filter permissions by key, description or module…"
+          placeholder={t('adminRoles.permissionPicker.searchPlaceholder')}
           value={query}
           onChange={e => setQuery(e.target.value)}
-          aria-label="Filter permissions"
+          aria-label={t('adminRoles.permissionPicker.searchAriaLabel')}
         />
         {query && (
           <Button variant="outline-secondary" onClick={() => setQuery('')}>
-            Clear
+            {t('adminRoles.permissionPicker.clearSearch')}
           </Button>
         )}
       </InputGroup>
 
       {isLoading ? (
         <div className="text-center py-4">
-          <Spinner animation="border" size="sm" /> Loading catalog…
+          <Spinner animation="border" size="sm" />{' '}
+          {t('adminRoles.permissionPicker.loading')}
         </div>
       ) : sortedMods.length === 0 ? (
         <div className="text-center text-muted py-4 fs-10">
           <FontAwesomeIcon icon="filter" className="me-1" />
-          No permissions match <code>{query}</code>.
+          <Trans
+            i18nKey="adminRoles.permissionPicker.noMatch"
+            values={{ query }}
+            components={{ code: <code /> }}
+          />
         </div>
       ) : (
         <Accordion alwaysOpen activeKey={q ? openKeys : undefined}>
@@ -165,8 +177,12 @@ const PermissionPicker: React.FC<Props> = ({
                     <span>
                       <strong>{mod}</strong>{' '}
                       <span className="text-muted small">
-                        ({perms.length} permission
-                        {perms.length === 1 ? '' : 's'})
+                        {t(
+                          perms.length === 1
+                            ? 'adminRoles.permissionPicker.permsCountOne'
+                            : 'adminRoles.permissionPicker.permsCountOther',
+                          { count: perms.length }
+                        )}
                       </span>
                     </span>
                     {selectedInMod > 0 && (
@@ -186,7 +202,12 @@ const PermissionPicker: React.FC<Props> = ({
                     className="mb-2 fw-semibold"
                     label={
                       <span className="text-muted">
-                        {allSelected ? 'Deselect' : 'Select'} all {mod}
+                        {t(
+                          allSelected
+                            ? 'adminRoles.permissionPicker.deselectAll'
+                            : 'adminRoles.permissionPicker.selectAll',
+                          { module: mod }
+                        )}
                       </span>
                     }
                     checked={allSelected}
@@ -208,7 +229,7 @@ const PermissionPicker: React.FC<Props> = ({
                           <code className="me-2">{p.key}</code>
                           {p.system && (
                             <Badge bg="warning" text="dark" className="me-2">
-                              system
+                              {t('adminRoles.permissionPicker.systemBadge')}
                             </Badge>
                           )}
                           <span className="text-muted small">

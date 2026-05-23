@@ -1,9 +1,11 @@
 import { Card } from 'react-bootstrap';
 import { FaUsers } from 'react-icons/fa';
+import { useTranslation } from 'react-i18next';
 import Background from 'components/common/Background';
 import greetingsBg from 'assets/img/illustrations/ticket-greetings-bg.png';
 
 function UserGreetings() {
+  const { t } = useTranslation();
   return (
     <Card className="bg-body-tertiary dark__bg-opacity-50 shadow-none h-100">
       <Background image={greetingsBg} className="bg-card d-none d-sm-block" />
@@ -12,10 +14,12 @@ function UserGreetings() {
           <FaUsers className="text-white" size={32} />
         </div>
         <div className="ms-3">
-          <h6 className="mb-1 text-primary">Welcome to</h6>
+          <h6 className="mb-1 text-primary">{t('adminUsers.welcomeKicker')}</h6>
           <h4 className="mb-0 text-primary fw-bold">
-            User
-            <span className="text-info fw-medium"> Management</span>
+            {t('adminUsers.welcomeTitle')}
+            <span className="text-info fw-medium">
+              {t('adminUsers.welcomeTitleAccent')}
+            </span>
           </h4>
         </div>
       </Card.Header>

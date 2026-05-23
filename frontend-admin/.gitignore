@@ -35,6 +35,12 @@ yarn-error.log*
 # TinyMCE
 public/tinymce
 
+# Runtime config — generated per-environment at container start by the
+# docker-compose `command:` step (dev/staging) or by the nginx entrypoint
+# (prod image). Dev defaults template lives at public/config.example.js;
+# see frontend-admin/CLAUDE.md → "Runtime config" for the recipe.
+public/config.js
+
 # IDE files
 .vscode/
 .idea/

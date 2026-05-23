@@ -168,6 +168,96 @@
         ],
         "type": "object"
       },
+      "ActivityRefsView": {
+        "additionalProperties": false,
+        "properties": {
+          "campaignUuid": {
+            "type": "string"
+          },
+          "cardUuid": {
+            "type": "string"
+          },
+          "contentUuid": {
+            "type": "string"
+          },
+          "correctsActivityUuid": {
+            "type": "string"
+          },
+          "eventUuid": {
+            "type": "string"
+          },
+          "formUuid": {
+            "type": "string"
+          },
+          "importJobUuid": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ActivityView": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/ActivityView.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "createdBy": {
+            "type": "string"
+          },
+          "externalId": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "occurredAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "orgUuid": {
+            "type": "string"
+          },
+          "payload": {
+            "additionalProperties": {},
+            "type": "object"
+          },
+          "personUuid": {
+            "type": "string"
+          },
+          "recordedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "refs": {
+            "$ref": "#/components/schemas/ActivityRefsView"
+          },
+          "source": {
+            "type": "string"
+          },
+          "tenantId": {
+            "type": "string"
+          },
+          "uuid": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "uuid",
+          "tenantId",
+          "personUuid",
+          "kind",
+          "occurredAt",
+          "recordedAt",
+          "source"
+        ],
+        "type": "object"
+      },
       "AddDocumentsRequestBody": {
         "additionalProperties": false,
         "properties": {
@@ -1557,6 +1647,47 @@
         },
         "type": "object"
       },
+      "BreakdownEntryView": {
+        "additionalProperties": false,
+        "properties": {
+          "activityKind": {
+            "type": "string"
+          },
+          "activityUuid": {
+            "type": "string"
+          },
+          "appliedDecay": {
+            "format": "double",
+            "type": "number"
+          },
+          "occurredAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "pointsContributed": {
+            "format": "double",
+            "type": "number"
+          },
+          "rawPoints": {
+            "format": "double",
+            "type": "number"
+          },
+          "ruleIndex": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "activityUuid",
+          "activityKind",
+          "occurredAt",
+          "ruleIndex",
+          "rawPoints",
+          "appliedDecay",
+          "pointsContributed"
+        ],
+        "type": "object"
+      },
       "BusinessRegistryConfigOutput": {
         "additionalProperties": false,
         "properties": {
@@ -1661,6 +1792,275 @@
         },
         "required": [
           "atPeriodEnd"
+        ],
+        "type": "object"
+      },
+      "CardTypePayload": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/CardTypePayload.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "allowMultiplePerPerson": {
+            "type": "boolean"
+          },
+          "codeFormat": {
+            "description": "Template — supports {YYYY}/{YY}/{MM}/{DD}, {seq:N}, {rand:N}",
+            "type": "string"
+          },
+          "defaultBenefits": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "description": {
+            "description": "Markdown blurb",
+            "type": "string"
+          },
+          "displayName": {
+            "description": "Operator-facing name",
+            "type": "string"
+          },
+          "key": {
+            "description": "Lowercase slug, unique per tenant (e.g. premium_member)",
+            "type": "string"
+          },
+          "tiers": {
+            "description": "Allowed tier strings; empty = type carries no tier",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "key",
+          "displayName",
+          "codeFormat",
+          "allowMultiplePerPerson"
+        ],
+        "type": "object"
+      },
+      "CardTypeUpdatePayload": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/CardTypeUpdatePayload.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "active": {
+            "type": "boolean"
+          },
+          "allowMultiplePerPerson": {
+            "type": "boolean"
+          },
+          "codeFormat": {
+            "type": "string"
+          },
+          "defaultBenefits": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "description": {
+            "type": "string"
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "tiers": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "CardTypeView": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/CardTypeView.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "active": {
+            "type": "boolean"
+          },
+          "allowMultiplePerPerson": {
+            "type": "boolean"
+          },
+          "codeFormat": {
+            "type": "string"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "createdBy": {
+            "type": "string"
+          },
+          "defaultBenefits": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "description": {
+            "type": "string"
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string"
+          },
+          "tiers": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "updatedBy": {
+            "type": "string"
+          },
+          "uuid": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "uuid",
+          "key",
+          "displayName",
+          "codeFormat",
+          "allowMultiplePerPerson",
+          "active",
+          "createdAt",
+          "updatedAt"
+        ],
+        "type": "object"
+      },
+      "CardView": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/CardView.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "benefits": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "cardTypeUuid": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string"
+          },
+          "expiresAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "issuedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "issuedBy": {
+            "type": "string"
+          },
+          "notes": {
+            "type": "string"
+          },
+          "personUuid": {
+            "type": "string"
+          },
+          "revokeReason": {
+            "type": "string"
+          },
+          "revokedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "revokedBy": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "suspendReason": {
+            "type": "string"
+          },
+          "suspendedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "suspendedBy": {
+            "type": "string"
+          },
+          "tier": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "uuid": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "uuid",
+          "cardTypeUuid",
+          "code",
+          "personUuid",
+          "status",
+          "issuedAt",
+          "issuedBy",
+          "updatedAt"
         ],
         "type": "object"
       },
@@ -2251,6 +2651,170 @@
         ],
         "type": "object"
       },
+      "ConflictFieldView": {
+        "additionalProperties": false,
+        "properties": {
+          "existingValue": {},
+          "field": {
+            "type": "string"
+          },
+          "incomingValue": {},
+          "severity": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "field",
+          "severity"
+        ],
+        "type": "object"
+      },
+      "ConflictResolutionView": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "fieldOverrides": {
+            "additionalProperties": {},
+            "type": "object"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "type": "object"
+      },
+      "ConflictReviewView": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/ConflictReviewView.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "conflicts": {
+            "items": {
+              "$ref": "#/components/schemas/ConflictFieldView"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "existingSnapshot": {
+            "additionalProperties": {},
+            "type": "object"
+          },
+          "existingUuid": {
+            "type": "string"
+          },
+          "importJobUuid": {
+            "type": "string"
+          },
+          "incomingActivities": {
+            "items": {
+              "additionalProperties": {},
+              "type": "object"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "incomingPayload": {
+            "additionalProperties": {},
+            "type": "object"
+          },
+          "resolution": {
+            "$ref": "#/components/schemas/ConflictResolutionView"
+          },
+          "resolvedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "resolvedBy": {
+            "type": "string"
+          },
+          "resolvedNotes": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "targetKind": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "uuid": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "uuid",
+          "importJobUuid",
+          "targetKind",
+          "existingUuid",
+          "incomingPayload",
+          "conflicts",
+          "status",
+          "createdAt",
+          "updatedAt"
+        ],
+        "type": "object"
+      },
+      "Consent": {
+        "additionalProperties": false,
+        "properties": {
+          "marketingEmail": {
+            "$ref": "#/components/schemas/ConsentRecord"
+          },
+          "marketingPhone": {
+            "$ref": "#/components/schemas/ConsentRecord"
+          },
+          "profiling": {
+            "$ref": "#/components/schemas/ConsentRecord"
+          }
+        },
+        "type": "object"
+      },
+      "ConsentRecord": {
+        "additionalProperties": false,
+        "properties": {
+          "basis": {
+            "type": "string"
+          },
+          "given": {
+            "type": "boolean"
+          },
+          "givenAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "revokedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "given"
+        ],
+        "type": "object"
+      },
       "ConstraintInfo": {
         "additionalProperties": false,
         "properties": {
@@ -2401,6 +2965,52 @@
             "$ref": "#/components/schemas/NationalParentCompany"
           }
         },
+        "type": "object"
+      },
+      "CorrectionEntryView": {
+        "additionalProperties": false,
+        "properties": {
+          "correctingActivityUuid": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "recordedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "recordedBy": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "correctingActivityUuid",
+          "recordedAt",
+          "reason"
+        ],
+        "type": "object"
+      },
+      "CorrectionPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/CorrectionPayload.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "reason": {
+            "description": "Human-readable explanation; required.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ],
         "type": "object"
       },
       "CreateAdminRequestBody": {
@@ -3566,6 +4176,9 @@
           "isActive": {
             "type": "boolean"
           },
+          "language": {
+            "type": "string"
+          },
           "lastLogin": {
             "format": "date-time",
             "type": "string"
@@ -3613,6 +4226,89 @@
           "emailVerified",
           "createdAt",
           "updatedAt"
+        ],
+        "type": "object"
+      },
+      "CustomFieldSchemaPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/CustomFieldSchemaPayload.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "allowUnknownFields": {
+            "type": "boolean"
+          },
+          "fields": {
+            "items": {
+              "$ref": "#/components/schemas/FieldDef"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "targetCollection": {
+            "description": "persons | organizations",
+            "type": "string"
+          }
+        },
+        "required": [
+          "targetCollection",
+          "fields"
+        ],
+        "type": "object"
+      },
+      "CustomFieldSchemaView": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/CustomFieldSchemaView.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "allowUnknownFields": {
+            "type": "boolean"
+          },
+          "fields": {
+            "items": {
+              "$ref": "#/components/schemas/FieldDef"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "targetCollection": {
+            "type": "string"
+          },
+          "tenantId": {
+            "type": "string"
+          },
+          "uuid": {
+            "type": "string"
+          },
+          "version": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "uuid",
+          "tenantId",
+          "targetCollection",
+          "fields",
+          "allowUnknownFields",
+          "version"
         ],
         "type": "object"
       },
@@ -3737,6 +4433,29 @@
             "type": "number"
           }
         },
+        "type": "object"
+      },
+      "DecayView": {
+        "additionalProperties": false,
+        "properties": {
+          "fn": {
+            "description": "One of: none, linear, exponential",
+            "type": "string"
+          },
+          "halfLifeDays": {
+            "description": "exponential: contribution halves every N days",
+            "format": "int64",
+            "type": "integer"
+          },
+          "windowDays": {
+            "description": "linear: contribution drops to 0 after N days",
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "fn"
+        ],
         "type": "object"
       },
       "DeleteClientUserAdminResponseBody": {
@@ -4068,6 +4787,24 @@
         ],
         "type": "object"
       },
+      "DismissConflictPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/DismissConflictPayload.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "notes": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "DivisionListOutputBody": {
         "additionalProperties": false,
         "properties": {
@@ -4226,6 +4963,37 @@
           "tenantId",
           "permissions",
           "systemRole"
+        ],
+        "type": "object"
+      },
+      "EmailEntry": {
+        "additionalProperties": false,
+        "properties": {
+          "address": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "optIn": {
+            "type": "boolean"
+          },
+          "optInAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "optInSource": {
+            "type": "string"
+          },
+          "primary": {
+            "type": "boolean"
+          },
+          "verified": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "address"
         ],
         "type": "object"
       },
@@ -4776,6 +5544,84 @@
         "required": [
           "models"
         ],
+        "type": "object"
+      },
+      "FieldDef": {
+        "additionalProperties": false,
+        "properties": {
+          "default": {},
+          "description": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "options": {
+            "items": {
+              "$ref": "#/components/schemas/FieldOption"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "required": {
+            "type": "boolean"
+          },
+          "type": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "type"
+        ],
+        "type": "object"
+      },
+      "FieldOption": {
+        "additionalProperties": false,
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "value"
+        ],
+        "type": "object"
+      },
+      "FilterView": {
+        "additionalProperties": false,
+        "properties": {
+          "customFieldFilters": {
+            "additionalProperties": {},
+            "type": "object"
+          },
+          "tagsExclude": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "tagsInclude": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
         "type": "object"
       },
       "ForeignTradeData": {
@@ -5693,6 +6539,126 @@
         ],
         "type": "object"
       },
+      "ImportJobStats": {
+        "additionalProperties": false,
+        "properties": {
+          "conflictsSkipped": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "engagementEmitted": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "engagementOccurredAtFallback": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "membershipsLinked": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "orgsCreated": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "orgsMerged": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "personsCreated": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "personsMerged": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "rowsFailed": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "rowsRead": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "rowsRead"
+        ],
+        "type": "object"
+      },
+      "ImportJobView": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/ImportJobView.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "completedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "conflictReviewUuids": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "createdBy": {
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          },
+          "idempotencyKey": {
+            "type": "string"
+          },
+          "importer": {
+            "type": "string"
+          },
+          "sourceName": {
+            "type": "string"
+          },
+          "startedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "stats": {
+            "$ref": "#/components/schemas/ImportJobStats"
+          },
+          "status": {
+            "type": "string"
+          },
+          "tenantId": {
+            "type": "string"
+          },
+          "uuid": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "uuid",
+          "tenantId",
+          "importer",
+          "status",
+          "stats",
+          "createdAt"
+        ],
+        "type": "object"
+      },
       "ImportXMLInput": {
         "additionalProperties": false,
         "properties": {
@@ -6461,6 +7427,49 @@
         ],
         "type": "object"
       },
+      "IssueCardPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/IssueCardPayload.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "benefits": {
+            "description": "Override the type's defaultBenefits for this instance",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "cardTypeUuid": {
+            "description": "Card type to emit",
+            "type": "string"
+          },
+          "expiresAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "notes": {
+            "type": "string"
+          },
+          "tier": {
+            "description": "Required when the type's tiers list is non-empty",
+            "type": "string"
+          }
+        },
+        "required": [
+          "cardTypeUuid"
+        ],
+        "type": "object"
+      },
       "Job": {
         "additionalProperties": false,
         "properties": {
@@ -6665,6 +7674,94 @@
         ],
         "type": "object"
       },
+      "LeaderboardEntryView": {
+        "additionalProperties": false,
+        "properties": {
+          "activityCount": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "applicable": {
+            "type": "boolean"
+          },
+          "asOf": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "computedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "lastActivityAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "personUuid": {
+            "type": "string"
+          },
+          "profileUuid": {
+            "type": "string"
+          },
+          "profileVersion": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "stale": {
+            "type": "boolean"
+          },
+          "uuid": {
+            "type": "string"
+          },
+          "value": {
+            "format": "double",
+            "type": "number"
+          }
+        },
+        "required": [
+          "uuid",
+          "personUuid",
+          "profileUuid",
+          "profileVersion",
+          "value",
+          "applicable",
+          "stale",
+          "activityCount",
+          "asOf",
+          "computedAt"
+        ],
+        "type": "object"
+      },
+      "LeaderboardResponseBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/LeaderboardResponseBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/LeaderboardEntryView"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ListMeta"
+          }
+        },
+        "required": [
+          "items",
+          "meta"
+        ],
+        "type": "object"
+      },
       "LegalFormDetail": {
         "additionalProperties": false,
         "properties": {
@@ -6694,6 +7791,37 @@
         },
         "required": [
           "type"
+        ],
+        "type": "object"
+      },
+      "ListActivitiesResponseBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/ListActivitiesResponseBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ActivityView"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ListMeta"
+          }
+        },
+        "required": [
+          "items",
+          "meta"
         ],
         "type": "object"
       },
@@ -6799,6 +7927,33 @@
         ],
         "type": "object"
       },
+      "ListCardTypesResponseBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/ListCardTypesResponseBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/CardTypeView"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
       "ListConversationsResponseBody": {
         "additionalProperties": false,
         "properties": {
@@ -6830,6 +7985,33 @@
         "required": [
           "conversations",
           "total"
+        ],
+        "type": "object"
+      },
+      "ListCorrectionsResponseBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/ListCorrectionsResponseBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/CorrectionEntryView"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items"
         ],
         "type": "object"
       },
@@ -6920,6 +8102,37 @@
         ],
         "type": "object"
       },
+      "ListImportsResponseBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/ListImportsResponseBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ImportJobView"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ListMeta"
+          }
+        },
+        "required": [
+          "items",
+          "meta"
+        ],
+        "type": "object"
+      },
       "ListInvoicesResponseBody": {
         "additionalProperties": false,
         "properties": {
@@ -6949,6 +8162,30 @@
         "required": [
           "items",
           "total"
+        ],
+        "type": "object"
+      },
+      "ListMeta": {
+        "additionalProperties": false,
+        "properties": {
+          "count": {
+            "description": "Number of items in this page",
+            "format": "int64",
+            "type": "integer"
+          },
+          "limit": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "skip": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "limit",
+          "skip",
+          "count"
         ],
         "type": "object"
       },
@@ -7089,6 +8326,37 @@
         ],
         "type": "object"
       },
+      "ListOrgsResponseBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/ListOrgsResponseBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/OrganizationView"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ListMeta"
+          }
+        },
+        "required": [
+          "items",
+          "meta"
+        ],
+        "type": "object"
+      },
       "ListPaymentMethodsResponseBody": {
         "additionalProperties": false,
         "properties": {
@@ -7118,6 +8386,118 @@
         "required": [
           "items",
           "total"
+        ],
+        "type": "object"
+      },
+      "ListPersonCardsResponseBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/ListPersonCardsResponseBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/CardView"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "ListPersonMembershipsResponseBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/ListPersonMembershipsResponseBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/MembershipView"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "ListPersonScoresResponseBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/ListPersonScoresResponseBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SnapshotView"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "ListPersonsResponseBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/ListPersonsResponseBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PersonView"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ListMeta"
+          }
+        },
+        "required": [
+          "items",
+          "meta"
         ],
         "type": "object"
       },
@@ -7273,6 +8653,37 @@
         ],
         "type": "object"
       },
+      "ListReviewsResponseBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/ListReviewsResponseBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ConflictReviewView"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ListMeta"
+          }
+        },
+        "required": [
+          "items",
+          "meta"
+        ],
+        "type": "object"
+      },
       "ListSDINotificationsResponseBody": {
         "additionalProperties": false,
         "properties": {
@@ -7322,6 +8733,60 @@
           "page",
           "pageSize",
           "totalPages"
+        ],
+        "type": "object"
+      },
+      "ListSchemasResponseBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/ListSchemasResponseBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/CustomFieldSchemaView"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "ListScoreProfilesResponseBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/ListScoreProfilesResponseBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ScoreProfileView"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items"
         ],
         "type": "object"
       },
@@ -7386,6 +8851,33 @@
         "required": [
           "items",
           "total"
+        ],
+        "type": "object"
+      },
+      "ListTagsResponseBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/ListTagsResponseBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/TagView"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items"
         ],
         "type": "object"
       },
@@ -8034,6 +9526,50 @@
         },
         "type": "object"
       },
+      "ManualActivityPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/ManualActivityPayload.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "externalId": {
+            "description": "Optional dedup key for integrations replaying manual rows; if empty the service mints one",
+            "type": "string"
+          },
+          "kind": {
+            "description": "One of: call_made, meeting_held, note_added, corrected_by",
+            "type": "string"
+          },
+          "occurredAt": {
+            "description": "When the event happened. Defaults to now when omitted.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "payload": {
+            "additionalProperties": {},
+            "description": "Kind-specific free-form details (notes, duration, location, ...)",
+            "type": "object"
+          },
+          "personUuid": {
+            "description": "UUID of the person the activity is logged against",
+            "type": "string"
+          },
+          "refs": {
+            "$ref": "#/components/schemas/ActivityRefsView"
+          }
+        },
+        "required": [
+          "personUuid",
+          "kind"
+        ],
+        "type": "object"
+      },
       "MarkProcessedResponseBody": {
         "additionalProperties": false,
         "properties": {
@@ -8351,6 +9887,50 @@
         ],
         "type": "object"
       },
+      "MembershipPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/MembershipPayload.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "department": {
+            "type": "string"
+          },
+          "notes": {
+            "type": "string"
+          },
+          "orgUuid": {
+            "description": "UUID of the organization this person belongs to",
+            "type": "string"
+          },
+          "primary": {
+            "description": "Mark this membership as the person's primary affiliation. Demotes any other active-primary in the same person.",
+            "type": "boolean"
+          },
+          "role": {
+            "type": "string"
+          },
+          "since": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "until": {
+            "description": "Set to a date to close the membership immediately; null while active",
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "orgUuid"
+        ],
+        "type": "object"
+      },
       "MembershipRow": {
         "additionalProperties": false,
         "properties": {
@@ -8400,6 +9980,64 @@
           "roles",
           "isOwner",
           "joinedAt"
+        ],
+        "type": "object"
+      },
+      "MembershipView": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/MembershipView.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "active": {
+            "type": "boolean"
+          },
+          "department": {
+            "type": "string"
+          },
+          "notes": {
+            "type": "string"
+          },
+          "orgUuid": {
+            "type": "string"
+          },
+          "personUuid": {
+            "type": "string"
+          },
+          "primary": {
+            "type": "boolean"
+          },
+          "role": {
+            "type": "string"
+          },
+          "since": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "tenantId": {
+            "type": "string"
+          },
+          "until": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "uuid": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "uuid",
+          "tenantId",
+          "personUuid",
+          "orgUuid",
+          "active",
+          "primary"
         ],
         "type": "object"
       },
@@ -9376,6 +11014,184 @@
         },
         "type": "object"
       },
+      "OrganizationPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/OrganizationPayload.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "addresses": {
+            "items": {
+              "$ref": "#/components/schemas/PostalAddress"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "customFields": {
+            "additionalProperties": {},
+            "type": "object"
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "emails": {
+            "items": {
+              "$ref": "#/components/schemas/EmailEntry"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "kind": {
+            "description": "company | public_administration | foundation | association | other (defaults to company)",
+            "type": "string"
+          },
+          "legalName": {
+            "description": "Official institution name",
+            "type": "string"
+          },
+          "notes": {
+            "type": "string"
+          },
+          "phones": {
+            "items": {
+              "$ref": "#/components/schemas/PhoneEntry"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "taxCode": {
+            "type": "string"
+          },
+          "vat": {
+            "type": "string"
+          },
+          "website": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "legalName"
+        ],
+        "type": "object"
+      },
+      "OrganizationView": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/OrganizationView.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "addresses": {
+            "items": {
+              "$ref": "#/components/schemas/PostalAddress"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "customFields": {
+            "additionalProperties": {},
+            "type": "object"
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "emails": {
+            "items": {
+              "$ref": "#/components/schemas/EmailEntry"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "kind": {
+            "type": "string"
+          },
+          "legalName": {
+            "type": "string"
+          },
+          "notes": {
+            "type": "string"
+          },
+          "phones": {
+            "items": {
+              "$ref": "#/components/schemas/PhoneEntry"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/ProvenanceSource"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "taxCode": {
+            "type": "string"
+          },
+          "tenantId": {
+            "type": "string"
+          },
+          "uuid": {
+            "type": "string"
+          },
+          "vat": {
+            "type": "string"
+          },
+          "website": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "uuid",
+          "tenantId",
+          "legalName",
+          "kind"
+        ],
+        "type": "object"
+      },
       "PageMargins": {
         "additionalProperties": false,
         "properties": {
@@ -9789,6 +11605,171 @@
         ],
         "type": "object"
       },
+      "PersonPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/PersonPayload.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "birthdate": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "consent": {
+            "$ref": "#/components/schemas/Consent"
+          },
+          "customFields": {
+            "additionalProperties": {},
+            "type": "object"
+          },
+          "emails": {
+            "items": {
+              "$ref": "#/components/schemas/EmailEntry"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "firstName": {
+            "type": "string"
+          },
+          "language": {
+            "description": "BCP-47 tag (e.g. en, it, it-IT)",
+            "type": "string"
+          },
+          "lastName": {
+            "type": "string"
+          },
+          "notes": {
+            "type": "string"
+          },
+          "phones": {
+            "items": {
+              "$ref": "#/components/schemas/PhoneEntry"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "PersonView": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/PersonView.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "activeCardUuids": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "birthdate": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "consent": {
+            "$ref": "#/components/schemas/Consent"
+          },
+          "customFields": {
+            "additionalProperties": {},
+            "type": "object"
+          },
+          "emails": {
+            "items": {
+              "$ref": "#/components/schemas/EmailEntry"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "firstName": {
+            "type": "string"
+          },
+          "language": {
+            "type": "string"
+          },
+          "lastName": {
+            "type": "string"
+          },
+          "notes": {
+            "type": "string"
+          },
+          "phones": {
+            "items": {
+              "$ref": "#/components/schemas/PhoneEntry"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/ProvenanceSource"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "tenantId": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "uuid": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "uuid",
+          "tenantId"
+        ],
+        "type": "object"
+      },
       "PersonalAddDocumentsRequestBody": {
         "additionalProperties": false,
         "properties": {
@@ -10068,6 +12049,51 @@
         },
         "type": "object"
       },
+      "PhoneEntry": {
+        "additionalProperties": false,
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "number": {
+            "type": "string"
+          },
+          "primary": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "number"
+        ],
+        "type": "object"
+      },
+      "PostalAddress": {
+        "additionalProperties": false,
+        "properties": {
+          "city": {
+            "type": "string"
+          },
+          "country": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "postalCode": {
+            "type": "string"
+          },
+          "primary": {
+            "type": "boolean"
+          },
+          "province": {
+            "type": "string"
+          },
+          "street": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "PreferenceDoc": {
         "additionalProperties": false,
         "properties": {
@@ -10139,6 +12165,27 @@
         "required": [
           "uuid",
           "status"
+        ],
+        "type": "object"
+      },
+      "PreviewCodeResponseBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/PreviewCodeResponseBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "code": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "code"
         ],
         "type": "object"
       },
@@ -10417,6 +12464,35 @@
         "required": [
           "jobId",
           "streamUrl"
+        ],
+        "type": "object"
+      },
+      "ProvenanceSource": {
+        "additionalProperties": false,
+        "properties": {
+          "conflictReviewUuid": {
+            "type": "string"
+          },
+          "externalId": {
+            "type": "string"
+          },
+          "importedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "importer": {
+            "type": "string"
+          },
+          "jobUuid": {
+            "type": "string"
+          },
+          "rawPayloadRef": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "importer",
+          "importedAt"
         ],
         "type": "object"
       },
@@ -11112,6 +13188,25 @@
         ],
         "type": "object"
       },
+      "ReasonPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/ReasonPayload.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "reason": {
+            "description": "Operator-supplied free-text reason recorded on the audit activity",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "RefundRequestBody": {
         "additionalProperties": false,
         "properties": {
@@ -11612,6 +13707,36 @@
         ],
         "type": "object"
       },
+      "ResolveConflictPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/ResolveConflictPayload.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "action": {
+            "description": "One of: keep_existing, take_incoming, manual_merge, dismiss",
+            "type": "string"
+          },
+          "fieldOverrides": {
+            "additionalProperties": {},
+            "description": "Required when action=manual_merge. Per-field overrides applied to the existing record.",
+            "type": "object"
+          },
+          "notes": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "type": "object"
+      },
       "Role": {
         "additionalProperties": false,
         "properties": {
@@ -11756,6 +13881,38 @@
         "required": [
           "label",
           "children"
+        ],
+        "type": "object"
+      },
+      "RuleView": {
+        "additionalProperties": false,
+        "properties": {
+          "activityKind": {
+            "description": "string, []string, or '*' wildcard"
+          },
+          "cap": {
+            "format": "double",
+            "type": "number"
+          },
+          "decay": {
+            "$ref": "#/components/schemas/DecayView"
+          },
+          "matchPayload": {
+            "additionalProperties": {},
+            "type": "object"
+          },
+          "points": {
+            "format": "double",
+            "type": "number"
+          },
+          "windowDays": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "activityKind",
+          "points"
         ],
         "type": "object"
       },
@@ -12129,6 +14286,124 @@
         },
         "required": [
           "exists"
+        ],
+        "type": "object"
+      },
+      "ScoreProfilePayload": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/ScoreProfilePayload.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "active": {
+            "type": "boolean"
+          },
+          "defaultDecay": {
+            "$ref": "#/components/schemas/DecayView"
+          },
+          "description": {
+            "type": "string"
+          },
+          "filters": {
+            "$ref": "#/components/schemas/FilterView"
+          },
+          "name": {
+            "description": "Slug-like identifier, unique per tenant",
+            "type": "string"
+          },
+          "rules": {
+            "items": {
+              "$ref": "#/components/schemas/RuleView"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "name",
+          "active",
+          "rules"
+        ],
+        "type": "object"
+      },
+      "ScoreProfileView": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/ScoreProfileView.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "active": {
+            "type": "boolean"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "createdBy": {
+            "type": "string"
+          },
+          "defaultDecay": {
+            "$ref": "#/components/schemas/DecayView"
+          },
+          "description": {
+            "type": "string"
+          },
+          "filters": {
+            "$ref": "#/components/schemas/FilterView"
+          },
+          "name": {
+            "type": "string"
+          },
+          "rules": {
+            "items": {
+              "$ref": "#/components/schemas/RuleView"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "tenantId": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "updatedBy": {
+            "type": "string"
+          },
+          "uuid": {
+            "type": "string"
+          },
+          "version": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "uuid",
+          "tenantId",
+          "name",
+          "active",
+          "rules",
+          "version",
+          "createdAt",
+          "updatedAt"
         ],
         "type": "object"
       },
@@ -12925,6 +15200,85 @@
         ],
         "type": "object"
       },
+      "SnapshotView": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/SnapshotView.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "activityCount": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "applicable": {
+            "type": "boolean"
+          },
+          "asOf": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "breakdown": {
+            "items": {
+              "$ref": "#/components/schemas/BreakdownEntryView"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "computedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "lastActivityAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "personUuid": {
+            "type": "string"
+          },
+          "profileUuid": {
+            "type": "string"
+          },
+          "profileVersion": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "stale": {
+            "type": "boolean"
+          },
+          "tenantId": {
+            "type": "string"
+          },
+          "uuid": {
+            "type": "string"
+          },
+          "value": {
+            "format": "double",
+            "type": "number"
+          }
+        },
+        "required": [
+          "uuid",
+          "tenantId",
+          "personUuid",
+          "profileUuid",
+          "profileVersion",
+          "value",
+          "asOf",
+          "computedAt",
+          "applicable",
+          "stale",
+          "activityCount"
+        ],
+        "type": "object"
+      },
       "Source": {
         "additionalProperties": false,
         "properties": {
@@ -13321,6 +15675,27 @@
         },
         "type": "object"
       },
+      "SuccessResponseBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/SuccessResponseBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "success": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "success"
+        ],
+        "type": "object"
+      },
       "Supplier": {
         "additionalProperties": false,
         "properties": {
@@ -13529,6 +15904,87 @@
         "required": [
           "success",
           "message"
+        ],
+        "type": "object"
+      },
+      "TagPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/TagPayload.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "color": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "parentUuid": {
+            "description": "UUID of the parent tag; empty for root tags",
+            "type": "string"
+          },
+          "slug": {
+            "description": "Stable machine identifier; auto-derived from name when omitted",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      },
+      "TagView": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/TagView.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "color": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "parentUuid": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "tenantId": {
+            "type": "string"
+          },
+          "uuid": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "uuid",
+          "tenantId",
+          "name",
+          "slug",
+          "path"
         ],
         "type": "object"
       },
@@ -14631,6 +17087,28 @@
         },
         "type": "object"
       },
+      "UpdateCurrentUserInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/UpdateCurrentUserInputBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "language": {
+            "enum": [
+              "en",
+              "it"
+            ],
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "UpdateDocumentRequestBody": {
         "additionalProperties": false,
         "properties": {
@@ -15301,6 +17779,13 @@
           "isActive": {
             "type": "boolean"
           },
+          "language": {
+            "enum": [
+              "en",
+              "it"
+            ],
+            "type": "string"
+          },
           "phone": {
             "type": "string"
           },
@@ -15396,6 +17881,9 @@
           },
           "isActive": {
             "type": "boolean"
+          },
+          "language": {
+            "type": "string"
           },
           "lastLogin": {
             "format": "date-time",
@@ -20842,6 +23330,52 @@
         "tags": [
           "Authentication"
         ]
+      },
+      "patch": {
+        "description": "Self-service preference update for the calling user. Currently exposes only the `language` field (BCP-47 tag, allowlisted to `en`/`it`); the response mirrors GET /me so the SPA can replace its cached user document with the response.",
+        "operationId": "client-update-current-user",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateCurrentUserInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CurrentUserResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Update current user preferences",
+        "tags": [
+          "Authentication",
+          "Self-Service"
+        ]
       }
     },
     "/v1/auth/client/me/devices/trust": {
@@ -22296,6 +24830,52 @@
         "summary": "Get current user",
         "tags": [
           "Authentication"
+        ]
+      },
+      "patch": {
+        "description": "Self-service preference update for the calling user. Currently exposes only the `language` field (BCP-47 tag, allowlisted to `en`/`it`); the response mirrors GET /me so the SPA can replace its cached user document with the response.",
+        "operationId": "operator-update-current-user",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateCurrentUserInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CurrentUserResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Update current user preferences",
+        "tags": [
+          "Authentication",
+          "Self-Service"
         ]
       }
     },
@@ -28814,6 +31394,2579 @@
         "summary": "RAG query (internal)",
         "tags": [
           "Internal RAG"
+        ]
+      }
+    },
+    "/v1/marketing/activities": {
+      "post": {
+        "operationId": "marketing-create-activity",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ManualActivityPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActivityView"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Log a manual activity (call, meeting, note, correction)",
+        "tags": [
+          "Marketing - Activities"
+        ]
+      }
+    },
+    "/v1/marketing/activities/{id}/correct": {
+      "post": {
+        "operationId": "marketing-correct-activity",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CorrectionPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActivityView"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Insert a corrected_by row that supersedes the activity",
+        "tags": [
+          "Marketing - Activities"
+        ]
+      }
+    },
+    "/v1/marketing/activities/{id}/corrections": {
+      "get": {
+        "operationId": "marketing-list-activity-corrections",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListCorrectionsResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "List corrected_by rows superseding the activity, oldest-first",
+        "tags": [
+          "Marketing - Activities"
+        ]
+      }
+    },
+    "/v1/marketing/card-types": {
+      "get": {
+        "operationId": "marketing-list-card-types",
+        "parameters": [
+          {
+            "description": "When true, return only active card types",
+            "explode": false,
+            "in": "query",
+            "name": "activeOnly",
+            "schema": {
+              "description": "When true, return only active card types",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListCardTypesResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "List card types",
+        "tags": [
+          "Marketing - Card Types"
+        ]
+      },
+      "post": {
+        "operationId": "marketing-create-card-type",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CardTypePayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CardTypeView"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Create a card type",
+        "tags": [
+          "Marketing - Card Types"
+        ]
+      }
+    },
+    "/v1/marketing/card-types/preview-code": {
+      "get": {
+        "operationId": "marketing-preview-card-code",
+        "parameters": [
+          {
+            "description": "Template to render",
+            "explode": false,
+            "in": "query",
+            "name": "format",
+            "schema": {
+              "description": "Template to render",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Sequence value used when the template carries {seq:N}; defaults to 0",
+            "explode": false,
+            "in": "query",
+            "name": "seq",
+            "schema": {
+              "description": "Sequence value used when the template carries {seq:N}; defaults to 0",
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PreviewCodeResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Preview a card code from a template",
+        "tags": [
+          "Marketing - Card Types"
+        ]
+      }
+    },
+    "/v1/marketing/card-types/{id}": {
+      "delete": {
+        "operationId": "marketing-delete-card-type",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Delete a card type (only when no cards exist)",
+        "tags": [
+          "Marketing - Card Types"
+        ]
+      },
+      "get": {
+        "operationId": "marketing-get-card-type",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CardTypeView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Get a card type",
+        "tags": [
+          "Marketing - Card Types"
+        ]
+      },
+      "patch": {
+        "operationId": "marketing-update-card-type",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CardTypeUpdatePayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CardTypeView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Update a card type",
+        "tags": [
+          "Marketing - Card Types"
+        ]
+      }
+    },
+    "/v1/marketing/cards/{id}": {
+      "get": {
+        "operationId": "marketing-get-card",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CardView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Get a card",
+        "tags": [
+          "Marketing - Cards"
+        ]
+      }
+    },
+    "/v1/marketing/cards/{id}/reinstate": {
+      "post": {
+        "operationId": "marketing-reinstate-card",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CardView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Reinstate a suspended card",
+        "tags": [
+          "Marketing - Cards"
+        ]
+      }
+    },
+    "/v1/marketing/cards/{id}/revoke": {
+      "post": {
+        "operationId": "marketing-revoke-card",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReasonPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CardView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Revoke a card (terminal)",
+        "tags": [
+          "Marketing - Cards"
+        ]
+      }
+    },
+    "/v1/marketing/cards/{id}/suspend": {
+      "post": {
+        "operationId": "marketing-suspend-card",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReasonPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CardView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Suspend an active card",
+        "tags": [
+          "Marketing - Cards"
+        ]
+      }
+    },
+    "/v1/marketing/conflict-reviews": {
+      "get": {
+        "operationId": "marketing-list-conflict-reviews",
+        "parameters": [
+          {
+            "description": "Filter by review status: pending | resolved | dismissed",
+            "explode": false,
+            "in": "query",
+            "name": "status",
+            "schema": {
+              "description": "Filter by review status: pending | resolved | dismissed",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter by target kind: person | organization",
+            "explode": false,
+            "in": "query",
+            "name": "targetKind",
+            "schema": {
+              "description": "Filter by target kind: person | organization",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter to reviews from a single import job",
+            "explode": false,
+            "in": "query",
+            "name": "importJobUuid",
+            "schema": {
+              "description": "Filter to reviews from a single import job",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter to reviews attached to a single existing record",
+            "explode": false,
+            "in": "query",
+            "name": "existingUuid",
+            "schema": {
+              "description": "Filter to reviews attached to a single existing record",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size, default 50, capped at 500",
+            "explode": false,
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "description": "Page size, default 50, capped at 500",
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "skip",
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListReviewsResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "List conflict reviews",
+        "tags": [
+          "Marketing - Conflict Reviews"
+        ]
+      }
+    },
+    "/v1/marketing/conflict-reviews/{id}": {
+      "get": {
+        "operationId": "marketing-get-conflict-review",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConflictReviewView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Get a conflict review",
+        "tags": [
+          "Marketing - Conflict Reviews"
+        ]
+      }
+    },
+    "/v1/marketing/conflict-reviews/{id}/dismiss": {
+      "post": {
+        "operationId": "marketing-dismiss-conflict-review",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DismissConflictPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConflictReviewView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Dismiss a pending conflict review (incoming row discarded)",
+        "tags": [
+          "Marketing - Conflict Reviews"
+        ]
+      }
+    },
+    "/v1/marketing/conflict-reviews/{id}/resolve": {
+      "post": {
+        "operationId": "marketing-resolve-conflict-review",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResolveConflictPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConflictReviewView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Resolve a pending conflict review",
+        "tags": [
+          "Marketing - Conflict Reviews"
+        ]
+      }
+    },
+    "/v1/marketing/custom-field-schemas": {
+      "get": {
+        "operationId": "marketing-list-custom-field-schemas",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListSchemasResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "List custom-field schemas",
+        "tags": [
+          "Marketing - Custom Fields"
+        ]
+      },
+      "put": {
+        "operationId": "marketing-upsert-custom-field-schema",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CustomFieldSchemaPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomFieldSchemaView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Create or replace the schema for a target collection",
+        "tags": [
+          "Marketing - Custom Fields"
+        ]
+      }
+    },
+    "/v1/marketing/custom-field-schemas/{target}": {
+      "delete": {
+        "operationId": "marketing-delete-custom-field-schema",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "target",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Delete the schema for a target collection",
+        "tags": [
+          "Marketing - Custom Fields"
+        ]
+      },
+      "get": {
+        "operationId": "marketing-get-custom-field-schema",
+        "parameters": [
+          {
+            "description": "persons | organizations",
+            "in": "path",
+            "name": "target",
+            "required": true,
+            "schema": {
+              "description": "persons | organizations",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomFieldSchemaView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Get the custom-field schema for a target collection",
+        "tags": [
+          "Marketing - Custom Fields"
+        ]
+      }
+    },
+    "/v1/marketing/imports": {
+      "get": {
+        "operationId": "marketing-list-imports",
+        "parameters": [
+          {
+            "description": "Page size, defaults to 50, capped at 500",
+            "explode": false,
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "description": "Page size, defaults to 50, capped at 500",
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Number of items to skip",
+            "explode": false,
+            "in": "query",
+            "name": "skip",
+            "schema": {
+              "description": "Number of items to skip",
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListImportsResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "List import jobs",
+        "tags": [
+          "Marketing - Imports"
+        ]
+      },
+      "post": {
+        "description": "Upload a CSV/Excel/Odoo payload with a column mapping JSON; the import runs asynchronously in the background worker. Returns 202 Accepted with the queued job UUID. Multipart fields: file (required), mapping (required, JSON ColumnMapping), importer (optional, defaults to csv), sourceName (optional, defaults to filename). Optional Idempotency-Key request header dedups identical submissions within 24h.",
+        "operationId": "marketing-run-import",
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportJobView"
+                }
+              }
+            },
+            "description": "Accepted",
+            "headers": {
+              "Location": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Enqueue an import job",
+        "tags": [
+          "Marketing - Imports"
+        ]
+      }
+    },
+    "/v1/marketing/imports/{id}": {
+      "get": {
+        "operationId": "marketing-get-import",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportJobView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Get an import job",
+        "tags": [
+          "Marketing - Imports"
+        ]
+      }
+    },
+    "/v1/marketing/memberships/{id}": {
+      "delete": {
+        "operationId": "marketing-delete-membership",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Delete a membership",
+        "tags": [
+          "Marketing - Memberships"
+        ]
+      },
+      "patch": {
+        "operationId": "marketing-update-membership",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": {},
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MembershipView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Update a membership",
+        "tags": [
+          "Marketing - Memberships"
+        ]
+      }
+    },
+    "/v1/marketing/organizations": {
+      "get": {
+        "operationId": "marketing-list-organizations",
+        "parameters": [
+          {
+            "description": "Page size, defaults to 50, capped at 500",
+            "explode": false,
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "description": "Page size, defaults to 50, capped at 500",
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Number of items to skip",
+            "explode": false,
+            "in": "query",
+            "name": "skip",
+            "schema": {
+              "description": "Number of items to skip",
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "kind",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "tag",
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "type": [
+                "array",
+                "null"
+              ]
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "source",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListOrgsResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "List organizations",
+        "tags": [
+          "Marketing - Organizations"
+        ]
+      },
+      "post": {
+        "operationId": "marketing-create-organization",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrganizationPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationView"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Create an organization",
+        "tags": [
+          "Marketing - Organizations"
+        ]
+      }
+    },
+    "/v1/marketing/organizations/{id}": {
+      "delete": {
+        "operationId": "marketing-delete-organization",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Delete an organization",
+        "tags": [
+          "Marketing - Organizations"
+        ]
+      },
+      "get": {
+        "operationId": "marketing-get-organization",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Get an organization",
+        "tags": [
+          "Marketing - Organizations"
+        ]
+      },
+      "patch": {
+        "operationId": "marketing-update-organization",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": {},
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Update an organization",
+        "tags": [
+          "Marketing - Organizations"
+        ]
+      }
+    },
+    "/v1/marketing/persons": {
+      "get": {
+        "operationId": "marketing-list-persons",
+        "parameters": [
+          {
+            "description": "Page size, defaults to 50, capped at 500",
+            "explode": false,
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "description": "Page size, defaults to 50, capped at 500",
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Number of items to skip",
+            "explode": false,
+            "in": "query",
+            "name": "skip",
+            "schema": {
+              "description": "Number of items to skip",
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "tag",
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "type": [
+                "array",
+                "null"
+              ]
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "hasEmail",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "source",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Pass true or false to filter on activeCardUuids presence; omit to ignore",
+            "explode": false,
+            "in": "query",
+            "name": "hasActiveCard",
+            "schema": {
+              "description": "Pass true or false to filter on activeCardUuids presence; omit to ignore",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Card type UUID — returns only persons holding an active card of this type",
+            "explode": false,
+            "in": "query",
+            "name": "activeCardOfType",
+            "schema": {
+              "description": "Card type UUID — returns only persons holding an active card of this type",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListPersonsResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "List persons",
+        "tags": [
+          "Marketing - Persons"
+        ]
+      },
+      "post": {
+        "operationId": "marketing-create-person",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PersonPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PersonView"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Create a person",
+        "tags": [
+          "Marketing - Persons"
+        ]
+      }
+    },
+    "/v1/marketing/persons/{id}": {
+      "delete": {
+        "operationId": "marketing-delete-person",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Delete a person",
+        "tags": [
+          "Marketing - Persons"
+        ]
+      },
+      "get": {
+        "operationId": "marketing-get-person",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PersonView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Get a person",
+        "tags": [
+          "Marketing - Persons"
+        ]
+      },
+      "patch": {
+        "operationId": "marketing-update-person",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": {},
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PersonView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Update a person",
+        "tags": [
+          "Marketing - Persons"
+        ]
+      }
+    },
+    "/v1/marketing/persons/{id}/memberships": {
+      "get": {
+        "operationId": "marketing-list-person-memberships",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListPersonMembershipsResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "List a person's memberships",
+        "tags": [
+          "Marketing - Memberships"
+        ]
+      },
+      "post": {
+        "operationId": "marketing-create-person-membership",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MembershipPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MembershipView"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Add a membership to a person",
+        "tags": [
+          "Marketing - Memberships"
+        ]
+      }
+    },
+    "/v1/marketing/persons/{personId}/activities": {
+      "get": {
+        "operationId": "marketing-list-person-activities",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "personId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter by activity kind; repeat the param for multiple.",
+            "explode": false,
+            "in": "query",
+            "name": "kind",
+            "schema": {
+              "description": "Filter by activity kind; repeat the param for multiple.",
+              "items": {
+                "type": "string"
+              },
+              "type": [
+                "array",
+                "null"
+              ]
+            }
+          },
+          {
+            "description": "Filter by source: importer | campaign_engine | webhook | manual | system",
+            "explode": false,
+            "in": "query",
+            "name": "source",
+            "schema": {
+              "description": "Filter by source: importer | campaign_engine | webhook | manual | system",
+              "type": "string"
+            }
+          },
+          {
+            "description": "ISO-8601 timestamp; activities with occurredAt \u003e= since are returned",
+            "explode": false,
+            "in": "query",
+            "name": "since",
+            "schema": {
+              "description": "ISO-8601 timestamp; activities with occurredAt \u003e= since are returned",
+              "type": "string"
+            }
+          },
+          {
+            "description": "ISO-8601 timestamp; activities with occurredAt \u003c until are returned",
+            "explode": false,
+            "in": "query",
+            "name": "until",
+            "schema": {
+              "description": "ISO-8601 timestamp; activities with occurredAt \u003c until are returned",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size, default 100, capped at 1000",
+            "explode": false,
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "description": "Page size, default 100, capped at 1000",
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "skip",
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListActivitiesResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "List activities for a person",
+        "tags": [
+          "Marketing - Activities"
+        ]
+      }
+    },
+    "/v1/marketing/persons/{personId}/cards": {
+      "get": {
+        "operationId": "marketing-list-person-cards",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "personId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListPersonCardsResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "List cards held by a person",
+        "tags": [
+          "Marketing - Cards"
+        ]
+      },
+      "post": {
+        "operationId": "marketing-issue-card",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "personId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IssueCardPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CardView"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Issue a card to a person",
+        "tags": [
+          "Marketing - Cards"
+        ]
+      }
+    },
+    "/v1/marketing/persons/{personId}/scores": {
+      "get": {
+        "operationId": "marketing-list-person-scores",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "personId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListPersonScoresResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "List all score snapshots for a person across profiles",
+        "tags": [
+          "Marketing - Scoring"
+        ]
+      }
+    },
+    "/v1/marketing/score-profiles": {
+      "get": {
+        "operationId": "marketing-list-score-profiles",
+        "parameters": [
+          {
+            "description": "When true, only profiles with active=true are returned",
+            "explode": false,
+            "in": "query",
+            "name": "activeOnly",
+            "schema": {
+              "description": "When true, only profiles with active=true are returned",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListScoreProfilesResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "List score profiles",
+        "tags": [
+          "Marketing - Scoring"
+        ]
+      },
+      "post": {
+        "operationId": "marketing-create-score-profile",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScoreProfilePayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScoreProfileView"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Create a score profile",
+        "tags": [
+          "Marketing - Scoring"
+        ]
+      }
+    },
+    "/v1/marketing/score-profiles/{id}": {
+      "delete": {
+        "operationId": "marketing-delete-score-profile",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Delete a score profile and cascade-delete its snapshots",
+        "tags": [
+          "Marketing - Scoring"
+        ]
+      },
+      "get": {
+        "operationId": "marketing-get-score-profile",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScoreProfileView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Get a score profile",
+        "tags": [
+          "Marketing - Scoring"
+        ]
+      },
+      "patch": {
+        "operationId": "marketing-replace-score-profile",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScoreProfilePayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScoreProfileView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Replace a score profile (full-body); bumps version and invalidates snapshots",
+        "tags": [
+          "Marketing - Scoring"
+        ]
+      }
+    },
+    "/v1/marketing/score-profiles/{id}/leaderboard": {
+      "get": {
+        "operationId": "marketing-score-profile-leaderboard",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Skip rows where the person fails the profile filter (applicable=false). Default false.",
+            "explode": false,
+            "in": "query",
+            "name": "applicableOnly",
+            "schema": {
+              "description": "Skip rows where the person fails the profile filter (applicable=false). Default false.",
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "Default 50, capped at 500",
+            "explode": false,
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "description": "Default 50, capped at 500",
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "skip",
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LeaderboardResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Top-scoring persons for a profile, ordered by value descending",
+        "tags": [
+          "Marketing - Scoring"
+        ]
+      }
+    },
+    "/v1/marketing/score-snapshots/{id}": {
+      "get": {
+        "operationId": "marketing-get-score-snapshot",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SnapshotView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Get a single score snapshot with full breakdown",
+        "tags": [
+          "Marketing - Scoring"
+        ]
+      }
+    },
+    "/v1/marketing/tags": {
+      "get": {
+        "operationId": "marketing-list-tags",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListTagsResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "List tags",
+        "tags": [
+          "Marketing - Tags"
+        ]
+      },
+      "post": {
+        "operationId": "marketing-create-tag",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TagPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TagView"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Create a tag",
+        "tags": [
+          "Marketing - Tags"
+        ]
+      }
+    },
+    "/v1/marketing/tags/{id}": {
+      "delete": {
+        "operationId": "marketing-delete-tag",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Delete a tag",
+        "tags": [
+          "Marketing - Tags"
+        ]
+      },
+      "get": {
+        "operationId": "marketing-get-tag",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TagView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Get a tag",
+        "tags": [
+          "Marketing - Tags"
+        ]
+      },
+      "patch": {
+        "operationId": "marketing-update-tag",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": {},
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TagView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Update a tag",
+        "tags": [
+          "Marketing - Tags"
         ]
       }
     },

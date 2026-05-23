@@ -1,5 +1,6 @@
 import { useSearchParams } from 'react-router-dom';
 import { Card, Col, Row, Tab, Tabs, Alert } from 'react-bootstrap';
+import { Trans, useTranslation } from 'react-i18next';
 import { useAppSelector } from 'store/hooks';
 import {
   selectCurrentOrgId,
@@ -14,6 +15,7 @@ import BindingsTable from './BindingsTable';
  * have selected a tenant in the top navbar before opening this page.
  */
 const RoleManagementPage: React.FC = () => {
+  const { t } = useTranslation();
   const [searchParams, setSearchParams] = useSearchParams();
   const tab = searchParams.get('tab') || 'roles';
   const currentOrgId = useAppSelector(selectCurrentOrgId);
@@ -24,11 +26,8 @@ const RoleManagementPage: React.FC = () => {
       <Row className="g-3">
         <Col xxl={12}>
           <Alert variant="warning">
-            <Alert.Heading>No organization selected</Alert.Heading>
-            <p className="mb-0">
-              Role management is scoped to a single organization. Select or
-              create one from the top-right org switcher to continue.
-            </p>
+            <Alert.Heading>{t('adminTenants.noOrgSelected')}</Alert.Heading>
+            <p className="mb-0">{t('adminTenants.rolesNeedOrg')}</p>
           </Alert>
         </Col>
       </Row>
@@ -42,12 +41,15 @@ const RoleManagementPage: React.FC = () => {
           <Card.Header>
             <Row className="align-items-center">
               <Col>
-                <h5 className="mb-1">Role Management</h5>
+                <h5 className="mb-1">{t('adminRoles.pageTitle')}</h5>
                 <p className="text-muted small mb-0">
-                  Manage roles and bindings for{' '}
-                  <strong>{currentMembership?.name ?? currentOrgId}</strong>.
-                  System roles are read-only; custom roles can be created by
-                  picking permissions from the catalog.
+                  <Trans
+                    i18nKey="adminRoles.intro"
+                    values={{
+                      tenant: currentMembership?.name ?? currentOrgId
+                    }}
+                    components={{ strong: <strong /> }}
+                  />
                 </p>
               </Col>
             </Row>
@@ -68,10 +70,10 @@ const RoleManagementPage: React.FC = () => {
               }}
               className="mb-3"
             >
-              <Tab eventKey="roles" title="Roles">
+              <Tab eventKey="roles" title={t('adminRoles.tabs.roles')}>
                 <RolesTable tenantId={currentOrgId} />
               </Tab>
-              <Tab eventKey="bindings" title="Role Bindings">
+              <Tab eventKey="bindings" title={t('adminRoles.tabs.bindings')}>
                 <BindingsTable tenantId={currentOrgId} />
               </Tab>
             </Tabs>

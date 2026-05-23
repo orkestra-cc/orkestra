@@ -5,14 +5,18 @@ import educationData from 'data/educations';
 import experiences from 'data/experiences';
 import React, { useState } from 'react';
 import { Card, Collapse } from 'react-bootstrap';
+import { useTranslation } from 'react-i18next';
 import EducationItem from '../EducationItem';
 import EducationForm from './EducationForm';
 
 const EducationSettings: React.FC = () => {
+  const { t } = useTranslation();
   const [collapsed, setCollapsed] = useState(false);
   return (
     <Card className="mt-3">
-      <OrkestraCardHeader title="Education" />
+      <OrkestraCardHeader
+        title={t('userProfileScaffold.education.cardTitle')}
+      />
       <Card.Body className="fs-10 bg-body-tertiary">
         <div>
           <Flex
@@ -25,7 +29,9 @@ const EducationSettings: React.FC = () => {
             <span className="circle-dashed">
               <FontAwesomeIcon icon="plus" />
             </span>
-            <span className="ms-3">Add new education</span>
+            <span className="ms-3">
+              {t('userProfileScaffold.education.addNew')}
+            </span>
           </Flex>
           <Collapse in={collapsed}>
             <div>

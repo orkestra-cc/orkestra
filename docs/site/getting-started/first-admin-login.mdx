@@ -1,0 +1,24 @@
+---
+title: First Admin Login
+sidebar_position: 3
+---
+
+# First Admin Login
+
+On a brand-new install there are no users yet. The `dev` module ships a token-minting endpoint that lets you generate an administrator JWT without going through registration.
+
+```bash
+ORKESTRA_API_URL=http://localhost:3000 ./scripts/devtoken.sh administrator
+```
+
+The script prints a `Bearer` token. Paste it into the admin UI's login form (or any API client) to access the platform with the `administrator` role.
+
+:::warning Production
+The `dev` module is automatically disabled in production builds. Never expose it on a public-facing instance.
+:::
+
+## What to do next
+
+1. Configure SMTP at `/admin/modules` so verification and password-reset emails are delivered (the default `noop` driver logs them to stdout).
+2. Create your real administrator user via the standard registration flow.
+3. Disable the `dev` module once you're done with the bootstrap.

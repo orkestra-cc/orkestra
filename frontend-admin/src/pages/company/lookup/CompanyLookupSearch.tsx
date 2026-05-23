@@ -9,6 +9,7 @@ import {
   Spinner,
   CloseButton
 } from 'react-bootstrap';
+import { useTranslation } from 'react-i18next';
 import { useLazyLookupCompanyQuery } from 'store/api/companyApi';
 import SubtleBadge from 'components/common/SubtleBadge';
 import type { BadgeColor } from 'components/common/SubtleBadge';
@@ -18,6 +19,7 @@ import { formatItalianDate } from 'types/billing';
 import { EnrichmentPanel } from './CompanyEnrichment';
 
 const CompanyLookupSearch = () => {
+  const { t } = useTranslation();
   const [taxCode, setTaxCode] = useState('');
   const [displayResult, setDisplayResult] = useState<CompanyLookup | null>(
     null
@@ -46,33 +48,36 @@ const CompanyLookupSearch = () => {
   const getErrorMessage = () => {
     if (!error) return null;
     if ('status' in error && error.status === 404) {
-      return 'Azienda non trovata. Verifica il codice fiscale o la partita IVA inserita.';
+      return t('company.lookup.search.errorNotFound');
     }
     if ('status' in error && error.status === 502) {
-      return "Servizio aziende non configurato correttamente. Contattare l'amministratore per aggiornare il token API.";
+      return t('company.lookup.search.errorServiceConfig');
     }
     if ('status' in error && error.status === 503) {
-      return 'Servizio aziende temporaneamente non disponibile. Riprova tra qualche minuto.';
+      return t('company.lookup.search.errorServiceDown');
     }
-    return 'Errore durante la ricerca. Riprova più tardi.';
+    return t('company.lookup.search.errorGeneric');
   };
 
   const result = displayResult;
+  const dash = t('company.lookup.fields.dash');
 
   return (
     <Card>
       <Card.Header>
-        <h6 className="mb-0">Cerca Azienda per Codice Fiscale o Partita IVA</h6>
+        <h6 className="mb-0">{t('company.lookup.searchTitle')}</h6>
       </Card.Header>
       <Card.Body>
         <Form onSubmit={handleSubmit}>
           <Row className="align-items-end g-3">
             <Col sm={8} md={6} lg={4}>
               <Form.Group>
-                <Form.Label className="fs-9">Codice Fiscale / P.IVA</Form.Label>
+                <Form.Label className="fs-9">
+                  {t('company.lookup.search.formLabel')}
+                </Form.Label>
                 <Form.Control
                   type="text"
-                  placeholder="Es. 12485671007"
+                  placeholder={t('company.lookup.search.formPlaceholder')}
                   value={taxCode}
                   onChange={e => setTaxCode(e.target.value.toUpperCase())}
                   className="font-monospace"
@@ -89,10 +94,10 @@ const CompanyLookupSearch = () => {
                 {isFetching ? (
                   <>
                     <Spinner size="sm" className="me-2" />
-                    Ricerca...
+                    {t('company.lookup.search.submitting')}
                   </>
                 ) : (
-                  'Cerca'
+                  t('company.lookup.search.submit')
                 )}
               </Button>
             </Col>
@@ -131,7 +136,9 @@ const CompanyLookupSearch = () => {
               <Row className="g-3">
                 <Col sm={6} md={4}>
                   <div className="mb-2">
-                    <small className="text-muted d-block">Codice Fiscale</small>
+                    <small className="text-muted d-block">
+                      {t('company.lookup.fields.taxCode')}
+                    </small>
                     <span className="font-monospace fw-semibold">
                       {result.taxCode}
                     </span>
@@ -139,7 +146,9 @@ const CompanyLookupSearch = () => {
                 </Col>
                 <Col sm={6} md={4}>
                   <div className="mb-2">
-                    <small className="text-muted d-block">Partita IVA</small>
+                    <small className="text-muted d-block">
+                      {t('company.lookup.fields.vatCode')}
+                    </small>
                     <span className="font-monospace fw-semibold">
                       {result.vatCode}
                     </span>
@@ -147,15 +156,19 @@ const CompanyLookupSearch = () => {
                 </Col>
                 <Col sm={6} md={4}>
                   <div className="mb-2">
-                    <small className="text-muted d-block">Codice SDI</small>
+                    <small className="text-muted d-block">
+                      {t('company.lookup.fields.sdiCode')}
+                    </small>
                     <span className="font-monospace fw-semibold">
-                      {result.sdiCode || '-'}
+                      {result.sdiCode || dash}
                     </span>
                   </div>
                 </Col>
                 <Col sm={6} md={4}>
                   <div className="mb-2">
-                    <small className="text-muted d-block">Indirizzo</small>
+                    <small className="text-muted d-block">
+                      {t('company.lookup.fields.address')}
+                    </small>
                     <span>
                       {result.address.street}
                       {result.address.streetNumber
@@ -166,7 +179,9 @@ const CompanyLookupSearch = () => {
                 </Col>
                 <Col sm={6} md={4}>
                   <div className="mb-2">
-                    <small className="text-muted d-block">Sede</small>
+                    <small className="text-muted d-block">
+                      {t('company.lookup.fields.headquarters')}
+                    </small>
                     <span>
                       {result.address.zipCode} {result.address.town}
                       {result.address.province
@@ -178,12 +193,12 @@ const CompanyLookupSearch = () => {
                 <Col sm={6} md={4}>
                   <div className="mb-2">
                     <small className="text-muted d-block">
-                      Data Registrazione
+                      {t('company.lookup.fields.registrationDate')}
                     </small>
                     <span>
                       {result.registrationDate
                         ? formatItalianDate(result.registrationDate)
-                        : '-'}
+                        : dash}
                     </span>
                   </div>
                 </Col>

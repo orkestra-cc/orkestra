@@ -3,6 +3,7 @@ import Notification from 'components/notification/Notification';
 import classNames from 'classnames';
 import Flex from 'components/common/Flex';
 import { Link } from 'react-router';
+import { useTranslation } from 'react-i18next';
 import paths from 'routes/paths';
 
 interface ActivityLogProps {
@@ -11,13 +12,16 @@ interface ActivityLogProps {
 }
 
 const ActivityLog = ({ activities, ...rest }: ActivityLogProps) => {
+  const { t } = useTranslation();
   return (
     <Card {...rest}>
       <Card.Header className="bg-body-tertiary">
         <Flex justifyContent="between">
-          <h5 className="mb-1 mb-md-0">Activity log</h5>
+          <h5 className="mb-1 mb-md-0">
+            {t('userProfileScaffold.activityLog.title')}
+          </h5>
           <Link to={paths.activityLog} className="font-sans-serif">
-            All logs
+            {t('userProfileScaffold.activityLog.allLogs')}
           </Link>
         </Flex>
       </Card.Header>

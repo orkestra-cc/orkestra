@@ -1,8 +1,10 @@
 import React, { useState } from 'react';
 import { Button, Card, Col, Form, Row } from 'react-bootstrap';
+import { useTranslation } from 'react-i18next';
 import OrkestraCardHeader from 'components/common/OrkestraCardHeader';
 
 const ProfileSettings: React.FC = () => {
+  const { t } = useTranslation();
   const [formData, setFormData] = useState({
     firstName: 'Anthony',
     lastName: 'Hopkins',
@@ -28,15 +30,19 @@ const ProfileSettings: React.FC = () => {
 
   return (
     <Card>
-      <OrkestraCardHeader title="Profile Settings" />
+      <OrkestraCardHeader title={t('userScaffold.profileSettings.cardTitle')} />
       <Card.Body className="bg-body-tertiary">
         <Form onSubmit={handleSubmit}>
           <Row className="mb-3 g-3">
             <Form.Group as={Col} lg={6} controlId="firstName">
-              <Form.Label>First Name</Form.Label>
+              <Form.Label>
+                {t('userScaffold.profileSettings.labelFirstName')}
+              </Form.Label>
               <Form.Control
                 type="text"
-                placeholder="First Name"
+                placeholder={t(
+                  'userScaffold.profileSettings.placeholderFirstName'
+                )}
                 value={formData.firstName}
                 name="firstName"
                 onChange={handleChange}
@@ -44,10 +50,14 @@ const ProfileSettings: React.FC = () => {
             </Form.Group>
 
             <Form.Group as={Col} lg={6} controlId="lastName">
-              <Form.Label>Last Name</Form.Label>
+              <Form.Label>
+                {t('userScaffold.profileSettings.labelLastName')}
+              </Form.Label>
               <Form.Control
                 type="text"
-                placeholder="Last Name"
+                placeholder={t(
+                  'userScaffold.profileSettings.placeholderLastName'
+                )}
                 value={formData.lastName}
                 name="lastName"
                 onChange={handleChange}
@@ -56,10 +66,12 @@ const ProfileSettings: React.FC = () => {
           </Row>
           <Row className="mb-3 g-3">
             <Form.Group as={Col} lg={6} controlId="email">
-              <Form.Label>Email</Form.Label>
+              <Form.Label>
+                {t('userScaffold.profileSettings.labelEmail')}
+              </Form.Label>
               <Form.Control
                 type="email"
-                placeholder="Email"
+                placeholder={t('userScaffold.profileSettings.placeholderEmail')}
                 value={formData.email}
                 name="email"
                 onChange={handleChange}
@@ -67,10 +79,12 @@ const ProfileSettings: React.FC = () => {
             </Form.Group>
 
             <Form.Group as={Col} lg={6} controlId="phone">
-              <Form.Label>Phone</Form.Label>
+              <Form.Label>
+                {t('userScaffold.profileSettings.labelPhone')}
+              </Form.Label>
               <Form.Control
                 type="text"
-                placeholder="Phone"
+                placeholder={t('userScaffold.profileSettings.placeholderPhone')}
                 value={formData.phone}
                 name="phone"
                 onChange={handleChange}
@@ -79,10 +93,12 @@ const ProfileSettings: React.FC = () => {
           </Row>
 
           <Form.Group className="mb-3" controlId="heading">
-            <Form.Label>Heading</Form.Label>
+            <Form.Label>
+              {t('userScaffold.profileSettings.labelHeading')}
+            </Form.Label>
             <Form.Control
               type="text"
-              placeholder="Heading"
+              placeholder={t('userScaffold.profileSettings.placeholderHeading')}
               value={formData.heading}
               name="heading"
               onChange={handleChange}
@@ -90,11 +106,13 @@ const ProfileSettings: React.FC = () => {
           </Form.Group>
 
           <Form.Group className="mb-3" controlId="intro">
-            <Form.Label>Intro</Form.Label>
+            <Form.Label>
+              {t('userScaffold.profileSettings.labelIntro')}
+            </Form.Label>
             <Form.Control
               as="textarea"
               rows={13}
-              placeholder="Intro"
+              placeholder={t('userScaffold.profileSettings.placeholderIntro')}
               value={formData.intro}
               name="intro"
               onChange={handleChange}
@@ -102,7 +120,7 @@ const ProfileSettings: React.FC = () => {
           </Form.Group>
           <div className="text-end">
             <Button variant="primary" type="submit">
-              Update
+              {t('userScaffold.profileSettings.submit')}
             </Button>
           </div>
         </Form>

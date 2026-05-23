@@ -1,6 +1,7 @@
 import { ReactNode, useEffect } from 'react';
 import { Alert, Button } from 'react-bootstrap';
 import { Navigate, useLocation } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import OrkestraLoader from 'components/common/OrkestraLoader';
 import { useGetSetupStatusQuery } from 'store/api/setupApi';
 import { useAppDispatch } from 'store/hooks';
@@ -27,6 +28,7 @@ interface SetupGateProps {
  *    under /setup to /setup.
  */
 const SetupGate = ({ children }: SetupGateProps) => {
+  const { t } = useTranslation();
   const location = useLocation();
   const dispatch = useAppDispatch();
   const { data, isLoading, isError, error, refetch } = useGetSetupStatusQuery();
@@ -49,20 +51,15 @@ const SetupGate = ({ children }: SetupGateProps) => {
   if (isError || !data) {
     const detail =
       (error as { data?: { detail?: string }; status?: number } | undefined)
-        ?.data?.detail ||
-      'The setup probe at /v1/setup/status did not respond.';
+        ?.data?.detail || t('setup.gate.errorDefaultDetail');
     return (
       <div className="container py-6" style={{ maxWidth: 640 }}>
         <Alert variant="danger">
-          <Alert.Heading>Cannot reach the Orkestra backend</Alert.Heading>
-          <p className="mb-2">
-            The frontend could not contact the backend to check whether the
-            initial setup wizard should run. Make sure the backend container is
-            up and reachable from your browser, then retry.
-          </p>
+          <Alert.Heading>{t('setup.gate.errorTitle')}</Alert.Heading>
+          <p className="mb-2">{t('setup.gate.errorBody')}</p>
           <p className="fs-10 text-muted mb-3">{detail}</p>
           <Button variant="outline-danger" size="sm" onClick={() => refetch()}>
-            Retry
+            {t('setup.gate.retry')}
           </Button>
         </Alert>
       </div>

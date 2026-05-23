@@ -11,6 +11,7 @@ import {
   Spinner
 } from 'react-bootstrap';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { useTranslation } from 'react-i18next';
 import {
   faTimes,
   faCode,
@@ -51,6 +52,7 @@ const TemplateModal: React.FC<TemplateModalProps> = ({
   template,
   onSuccess
 }) => {
+  const { t } = useTranslation();
   const isEditMode = !!template;
   const [activeTab, setActiveTab] = useState('general');
   const [error, setError] = useState<string>('');
@@ -148,7 +150,7 @@ const TemplateModal: React.FC<TemplateModalProps> = ({
 
   const handlePreview = async () => {
     if (!formData.htmlContent) {
-      setError("Inserisci il contenuto HTML prima di visualizzare l'anteprima");
+      setError(t('documents.templates.modal.errors.previewMissingHtml'));
       setActiveTab('html');
       return;
     }
@@ -162,7 +164,7 @@ const TemplateModal: React.FC<TemplateModalProps> = ({
       setPreviewHtml(html);
       setActiveTab('preview');
     } catch (err) {
-      setError("Errore durante la generazione dell'anteprima");
+      setError(t('documents.templates.modal.errors.previewFailed'));
     }
   };
 
@@ -172,12 +174,12 @@ const TemplateModal: React.FC<TemplateModalProps> = ({
 
     // Validation
     if (!formData.name.trim()) {
-      setError('Il nome è obbligatorio');
+      setError(t('documents.templates.modal.errors.nameRequired'));
       setActiveTab('general');
       return;
     }
     if (!formData.htmlContent.trim()) {
-      setError('Il contenuto HTML è obbligatorio');
+      setError(t('documents.templates.modal.errors.htmlRequired'));
       setActiveTab('html');
       return;
     }
@@ -203,7 +205,7 @@ const TemplateModal: React.FC<TemplateModalProps> = ({
       onHide();
     } catch (err: any) {
       setError(
-        err?.data?.error || 'Errore durante il salvataggio del template'
+        err?.data?.error || t('documents.templates.modal.errors.saveFailed')
       );
     }
   };
@@ -212,7 +214,9 @@ const TemplateModal: React.FC<TemplateModalProps> = ({
     <Modal show={show} onHide={onHide} size="xl" centered>
       <Modal.Header>
         <Modal.Title>
-          {isEditMode ? 'Modifica Template' : 'Nuovo Template'}
+          {isEditMode
+            ? t('documents.templates.modal.editTitle')
+            : t('documents.templates.modal.createTitle')}
         </Modal.Title>
         <Button
           variant="link"
@@ -244,25 +248,25 @@ const TemplateModal: React.FC<TemplateModalProps> = ({
                 <Nav.Item>
                   <Nav.Link eventKey="general">
                     <FontAwesomeIcon icon={faCog} className="me-1" />
-                    Generale
+                    {t('documents.templates.modal.tabs.general')}
                   </Nav.Link>
                 </Nav.Item>
                 <Nav.Item>
                   <Nav.Link eventKey="html">
                     <FontAwesomeIcon icon={faCode} className="me-1" />
-                    HTML
+                    {t('documents.templates.modal.tabs.html')}
                   </Nav.Link>
                 </Nav.Item>
                 <Nav.Item>
                   <Nav.Link eventKey="css">
                     <FontAwesomeIcon icon={faPaintBrush} className="me-1" />
-                    CSS
+                    {t('documents.templates.modal.tabs.css')}
                   </Nav.Link>
                 </Nav.Item>
                 <Nav.Item>
                   <Nav.Link eventKey="preview">
                     <FontAwesomeIcon icon={faEye} className="me-1" />
-                    Anteprima
+                    {t('documents.templates.modal.tabs.preview')}
                   </Nav.Link>
                 </Nav.Item>
               </Nav>
@@ -273,20 +277,26 @@ const TemplateModal: React.FC<TemplateModalProps> = ({
                   <Row className="g-3">
                     <Col md={6}>
                       <Form.Group>
-                        <Form.Label>Nome *</Form.Label>
+                        <Form.Label>
+                          {t('documents.templates.modal.general.nameLabel')}
+                        </Form.Label>
                         <Form.Control
                           type="text"
                           name="name"
                           value={formData.name}
                           onChange={handleChange}
-                          placeholder="Es: Fattura Standard"
+                          placeholder={t(
+                            'documents.templates.modal.general.namePlaceholder'
+                          )}
                           required
                         />
                       </Form.Group>
                     </Col>
                     <Col md={6}>
                       <Form.Group>
-                        <Form.Label>Tipo *</Form.Label>
+                        <Form.Label>
+                          {t('documents.templates.modal.general.typeLabel')}
+                        </Form.Label>
                         <Form.Select
                           name="type"
                           value={formData.type}
@@ -305,20 +315,28 @@ const TemplateModal: React.FC<TemplateModalProps> = ({
                     </Col>
                     <Col md={12}>
                       <Form.Group>
-                        <Form.Label>Descrizione</Form.Label>
+                        <Form.Label>
+                          {t(
+                            'documents.templates.modal.general.descriptionLabel'
+                          )}
+                        </Form.Label>
                         <Form.Control
                           as="textarea"
                           rows={2}
                           name="description"
                           value={formData.description}
                           onChange={handleChange}
-                          placeholder="Breve descrizione del template..."
+                          placeholder={t(
+                            'documents.templates.modal.general.descriptionPlaceholder'
+                          )}
                         />
                       </Form.Group>
                     </Col>
                     <Col md={4}>
                       <Form.Group>
-                        <Form.Label>Formato pagina</Form.Label>
+                        <Form.Label>
+                          {t('documents.templates.modal.general.pageSizeLabel')}
+                        </Form.Label>
                         <Form.Select
                           name="pageSize"
                           value={formData.pageSize}
@@ -336,7 +354,11 @@ const TemplateModal: React.FC<TemplateModalProps> = ({
                     </Col>
                     <Col md={4}>
                       <Form.Group>
-                        <Form.Label>Orientamento</Form.Label>
+                        <Form.Label>
+                          {t(
+                            'documents.templates.modal.general.orientationLabel'
+                          )}
+                        </Form.Label>
                         <Form.Select
                           name="orientation"
                           value={formData.orientation}
@@ -355,12 +377,14 @@ const TemplateModal: React.FC<TemplateModalProps> = ({
                   </Row>
                   <Row className="g-3 mt-2">
                     <Col xs={12}>
-                      <Form.Label>Margini (mm)</Form.Label>
+                      <Form.Label>
+                        {t('documents.templates.modal.general.marginsLabel')}
+                      </Form.Label>
                     </Col>
                     <Col md={3}>
                       <Form.Group>
                         <Form.Label className="small text-muted">
-                          Sopra
+                          {t('documents.templates.modal.general.marginTop')}
                         </Form.Label>
                         <Form.Control
                           type="number"
@@ -376,7 +400,7 @@ const TemplateModal: React.FC<TemplateModalProps> = ({
                     <Col md={3}>
                       <Form.Group>
                         <Form.Label className="small text-muted">
-                          Sotto
+                          {t('documents.templates.modal.general.marginBottom')}
                         </Form.Label>
                         <Form.Control
                           type="number"
@@ -392,7 +416,7 @@ const TemplateModal: React.FC<TemplateModalProps> = ({
                     <Col md={3}>
                       <Form.Group>
                         <Form.Label className="small text-muted">
-                          Sinistra
+                          {t('documents.templates.modal.general.marginLeft')}
                         </Form.Label>
                         <Form.Control
                           type="number"
@@ -408,7 +432,7 @@ const TemplateModal: React.FC<TemplateModalProps> = ({
                     <Col md={3}>
                       <Form.Group>
                         <Form.Label className="small text-muted">
-                          Destra
+                          {t('documents.templates.modal.general.marginRight')}
                         </Form.Label>
                         <Form.Control
                           type="number"
@@ -427,20 +451,23 @@ const TemplateModal: React.FC<TemplateModalProps> = ({
                 {/* HTML Tab */}
                 <Tab.Pane eventKey="html">
                   <Form.Group>
-                    <Form.Label>Contenuto HTML *</Form.Label>
+                    <Form.Label>
+                      {t('documents.templates.modal.html.label')}
+                    </Form.Label>
                     <Form.Control
                       as="textarea"
                       rows={20}
                       name="htmlContent"
                       value={formData.htmlContent}
                       onChange={handleChange}
-                      placeholder="<!DOCTYPE html>&#10;<html>&#10;<head>...</head>&#10;<body>...</body>&#10;</html>"
+                      placeholder={t(
+                        'documents.templates.modal.html.placeholder'
+                      )}
                       style={{ fontFamily: 'monospace', fontSize: '13px' }}
                       required
                     />
                     <Form.Text className="text-muted">
-                      Usa le variabili Go template come {'{{.number}}'},{' '}
-                      {'{{.seller.name}}'}, {'{{range .lines}}...{{end}}'}
+                      {t('documents.templates.modal.html.help')}
                     </Form.Text>
                   </Form.Group>
                 </Tab.Pane>
@@ -448,19 +475,22 @@ const TemplateModal: React.FC<TemplateModalProps> = ({
                 {/* CSS Tab */}
                 <Tab.Pane eventKey="css">
                   <Form.Group>
-                    <Form.Label>Stili CSS</Form.Label>
+                    <Form.Label>
+                      {t('documents.templates.modal.css.label')}
+                    </Form.Label>
                     <Form.Control
                       as="textarea"
                       rows={20}
                       name="cssContent"
                       value={formData.cssContent}
                       onChange={handleChange}
-                      placeholder="body { font-family: Arial, sans-serif; }&#10;.header { ... }"
+                      placeholder={t(
+                        'documents.templates.modal.css.placeholder'
+                      )}
                       style={{ fontFamily: 'monospace', fontSize: '13px' }}
                     />
                     <Form.Text className="text-muted">
-                      Gli stili CSS verranno inclusi automaticamente nel
-                      documento
+                      {t('documents.templates.modal.css.help')}
                     </Form.Text>
                   </Form.Group>
                 </Tab.Pane>
@@ -469,7 +499,7 @@ const TemplateModal: React.FC<TemplateModalProps> = ({
                 <Tab.Pane eventKey="preview">
                   <div className="d-flex justify-content-between align-items-center mb-3">
                     <span className="text-muted">
-                      Anteprima con dati di esempio
+                      {t('documents.templates.modal.preview.subtitle')}
                     </span>
                     <Button
                       variant="outline-primary"
@@ -486,7 +516,7 @@ const TemplateModal: React.FC<TemplateModalProps> = ({
                       ) : (
                         <FontAwesomeIcon icon={faEye} className="me-1" />
                       )}
-                      Aggiorna anteprima
+                      {t('documents.templates.modal.preview.refreshButton')}
                     </Button>
                   </div>
                   {previewHtml ? (
@@ -511,9 +541,7 @@ const TemplateModal: React.FC<TemplateModalProps> = ({
                         size="3x"
                         className="mb-3"
                       />
-                      <p>
-                        Clicca "Aggiorna anteprima" per visualizzare il template
-                      </p>
+                      <p>{t('documents.templates.modal.preview.empty')}</p>
                     </div>
                   )}
                 </Tab.Pane>
@@ -525,13 +553,15 @@ const TemplateModal: React.FC<TemplateModalProps> = ({
 
       <Modal.Footer>
         <Button variant="secondary" onClick={onHide}>
-          Annulla
+          {t('documents.templates.modal.cancel')}
         </Button>
         <Button variant="primary" onClick={handleSubmit} disabled={isLoading}>
           {isLoading ? (
             <Spinner animation="border" size="sm" className="me-1" />
           ) : null}
-          {isEditMode ? 'Salva modifiche' : 'Crea template'}
+          {isEditMode
+            ? t('documents.templates.modal.saveChanges')
+            : t('documents.templates.modal.create')}
         </Button>
       </Modal.Footer>
     </Modal>

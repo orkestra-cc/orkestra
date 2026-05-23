@@ -175,13 +175,13 @@ const tenantSlice = createSlice({
      * tab closes.
      *
      * We intentionally do NOT clear permissions/features here. The caller
-     * (AdminTenantSwitcher) follows up with invalidateTags(...) which
-     * triggers useGetEffectivePermissionsQuery to refetch against the
+     * (NineDotMenu / ImpersonateButton) follows up with invalidateTags(...)
+     * which triggers useGetEffectivePermissionsQuery to refetch against the
      * impersonated target; the resulting useEffect in useTenantBootstrap
      * overwrites this slice with the impersonated permissions. Clearing
-     * eagerly would produce a render window where AdminTenantSwitcher's
-     * own gate (hasPermission('system.tenants.admin')) returns false,
-     * hiding the switcher mid-flow.
+     * eagerly would produce a render window where the caller's own gate
+     * (hasPermission('system.tenants.admin')) returns false, hiding the
+     * switcher mid-flow.
      */
     startImpersonation: (
       state,

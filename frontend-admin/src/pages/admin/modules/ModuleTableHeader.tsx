@@ -1,4 +1,5 @@
 import { Col, Form, Row } from 'react-bootstrap';
+import { useTranslation } from 'react-i18next';
 
 interface ModuleTableHeaderProps {
   title?: string;
@@ -12,33 +13,39 @@ interface ModuleTableHeaderProps {
   onStatusChange: (value: string) => void;
 }
 
-const defaultCategoryOptions = [
-  { value: '', label: 'All Categories' },
-  { value: 'core', label: 'Core' },
-  { value: 'toggleable', label: 'Toggleable' },
-  { value: 'external', label: 'External' }
-];
-
 const ModuleTableHeader: React.FC<ModuleTableHeaderProps> = ({
-  title = 'Module Management',
+  title,
   searchTerm,
   onSearchChange,
   categoryFilter,
   onCategoryChange,
-  categoryOptions = defaultCategoryOptions,
+  categoryOptions,
   hideCategoryFilter = false,
   statusFilter,
   onStatusChange
 }) => {
+  const { t } = useTranslation();
+  // Default category options are built from translations so the dropdown
+  // tracks the active locale rather than being seeded at module load.
+  const effectiveCategoryOptions = categoryOptions ?? [
+    { value: '', label: t('adminModules.filters.allCategories') },
+    { value: 'core', label: t('adminModules.filters.categoryCore') },
+    {
+      value: 'toggleable',
+      label: t('adminModules.filters.categoryToggleable')
+    },
+    { value: 'external', label: t('adminModules.filters.categoryExternal') }
+  ];
+  const effectiveTitle = title ?? t('adminModules.pageTitle');
   return (
     <Row className="align-items-center g-3">
       <Col xs="auto">
-        <h5 className="mb-0">{title}</h5>
+        <h5 className="mb-0">{effectiveTitle}</h5>
       </Col>
       <Col>
         <Form.Control
           type="search"
-          placeholder="Search modules..."
+          placeholder={t('adminModules.filters.searchPlaceholder')}
           size="sm"
           autoComplete="off"
           value={searchTerm}
@@ -52,7 +59,7 @@ const ModuleTableHeader: React.FC<ModuleTableHeaderProps> = ({
             value={categoryFilter}
             onChange={e => onCategoryChange(e.target.value)}
           >
-            {categoryOptions.map(opt => (
+            {effectiveCategoryOptions.map(opt => (
               <option key={opt.value} value={opt.value}>
                 {opt.label}
               </option>
@@ -66,11 +73,19 @@ const ModuleTableHeader: React.FC<ModuleTableHeaderProps> = ({
           value={statusFilter}
           onChange={e => onStatusChange(e.target.value)}
         >
-          <option value="">All Statuses</option>
-          <option value="running">Running</option>
-          <option value="failed">Failed</option>
-          <option value="disabled">Disabled</option>
-          <option value="stopped">Stopped</option>
+          <option value="">{t('adminModules.filters.allStatuses')}</option>
+          <option value="running">
+            {t('adminModules.filters.statusRunning')}
+          </option>
+          <option value="failed">
+            {t('adminModules.filters.statusFailed')}
+          </option>
+          <option value="disabled">
+            {t('adminModules.filters.statusDisabled')}
+          </option>
+          <option value="stopped">
+            {t('adminModules.filters.statusStopped')}
+          </option>
         </Form.Select>
       </Col>
     </Row>

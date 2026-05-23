@@ -1,8 +1,10 @@
 import React, { useState } from 'react';
 import { Button, Col, Form, Row } from 'react-bootstrap';
+import { useTranslation } from 'react-i18next';
 import InputField from '../InputField';
 
 const EducationForm: React.FC = () => {
+  const { t } = useTranslation();
   const [formData, setFormData] = useState({
     school: '',
     degree: '',
@@ -28,19 +30,19 @@ const EducationForm: React.FC = () => {
     <Form onSubmit={handleSubmit}>
       <InputField
         value={formData.school}
-        label="School"
+        label={t('userProfileScaffold.education.labelSchool')}
         name="school"
         handleChange={handleChange}
       />
       <InputField
         value={formData.degree}
-        label="Degree"
+        label={t('userProfileScaffold.education.labelDegree')}
         name="degree"
         handleChange={handleChange}
       />
       <InputField
         value={formData.field}
-        label="Field"
+        label={t('userProfileScaffold.education.labelField')}
         name="field"
         handleChange={handleChange}
       />
@@ -48,7 +50,7 @@ const EducationForm: React.FC = () => {
       <InputField
         type="date"
         value={formData.from}
-        label="From"
+        label={t('userProfileScaffold.education.labelFrom')}
         name="from"
         onChange={value => {
           setFormData({ ...formData, from: value });
@@ -58,7 +60,7 @@ const EducationForm: React.FC = () => {
       <InputField
         type="date"
         value={formData.to}
-        label="To"
+        label={t('userProfileScaffold.education.labelTo')}
         name="to"
         onChange={value => {
           setFormData({ ...formData, to: value });
@@ -67,7 +69,9 @@ const EducationForm: React.FC = () => {
 
       <Form.Group as={Row} className="mb-3">
         <Col sm={{ span: 10, offset: 3 }}>
-          <Button type="submit">Save</Button>
+          <Button type="submit">
+            {t('userProfileScaffold.education.save')}
+          </Button>
         </Col>
       </Form.Group>
     </Form>

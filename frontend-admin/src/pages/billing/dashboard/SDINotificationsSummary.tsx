@@ -7,6 +7,7 @@ import {
   faExclamationTriangle,
   faClock
 } from '@fortawesome/free-solid-svg-icons';
+import { useTranslation } from 'react-i18next';
 import OrkestraCardHeader from 'components/common/OrkestraCardHeader';
 import { Link } from 'react-router';
 import { useGetNotificationSummaryQuery } from 'store/api/billingApi';
@@ -34,6 +35,7 @@ const getNotificationIcon = (type: NotificationType) => {
 };
 
 const SDINotificationsSummary = () => {
+  const { t } = useTranslation();
   const {
     data: summary,
     isLoading,
@@ -43,7 +45,11 @@ const SDINotificationsSummary = () => {
   if (isLoading) {
     return (
       <Card className="h-100">
-        <OrkestraCardHeader title="Notifiche SDI" titleTag="h6" light />
+        <OrkestraCardHeader
+          title={t('billing.dashboard.sdiNotifications.title')}
+          titleTag="h6"
+          light
+        />
         <Card.Body
           className="d-flex align-items-center justify-content-center"
           style={{ minHeight: 200 }}
@@ -57,7 +63,11 @@ const SDINotificationsSummary = () => {
   if (error || !summary) {
     return (
       <Card className="h-100">
-        <OrkestraCardHeader title="Notifiche SDI" titleTag="h6" light />
+        <OrkestraCardHeader
+          title={t('billing.dashboard.sdiNotifications.title')}
+          titleTag="h6"
+          light
+        />
         <Card.Body
           className="d-flex align-items-center justify-content-center text-warning"
           style={{ minHeight: 200 }}
@@ -67,7 +77,9 @@ const SDINotificationsSummary = () => {
               icon={faExclamationTriangle}
               className="fs-3 mb-2 d-block"
             />
-            <span className="fs-10">Impossibile caricare</span>
+            <span className="fs-10">
+              {t('billing.dashboard.sdiNotifications.loadError')}
+            </span>
           </div>
         </Card.Body>
       </Card>
@@ -91,13 +103,15 @@ const SDINotificationsSummary = () => {
   return (
     <Card className="h-100">
       <OrkestraCardHeader
-        title="Notifiche SDI"
+        title={t('billing.dashboard.sdiNotifications.title')}
         titleTag="h6"
         light
         endEl={
           totalUnprocessed > 0 && (
             <span className="badge bg-warning rounded-pill fs-10">
-              {totalUnprocessed} da gestire
+              {t('billing.dashboard.sdiNotifications.toHandleBadge', {
+                count: totalUnprocessed
+              })}
             </span>
           )
         }
@@ -109,7 +123,9 @@ const SDINotificationsSummary = () => {
               icon={faCheck}
               className="fs-3 mb-2 d-block text-success"
             />
-            <span className="fs-10">Nessuna notifica recente</span>
+            <span className="fs-10">
+              {t('billing.dashboard.sdiNotifications.empty')}
+            </span>
           </div>
         ) : (
           <ListGroup variant="flush">
@@ -141,7 +157,7 @@ const SDINotificationsSummary = () => {
       </Card.Body>
       <Card.Footer className="bg-body-tertiary py-2">
         <Link to="/billing/notifications" className="fw-semibold fs-10">
-          Vedi tutte le notifiche
+          {t('billing.dashboard.sdiNotifications.viewAll')}
           <FontAwesomeIcon
             icon="angle-right"
             className="ms-1"

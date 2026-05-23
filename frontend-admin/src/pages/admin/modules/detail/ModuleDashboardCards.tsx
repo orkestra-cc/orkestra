@@ -6,6 +6,7 @@ import {
   faSitemap,
   faClock
 } from '@fortawesome/free-solid-svg-icons';
+import { useTranslation } from 'react-i18next';
 import SubtleBadge from 'components/common/SubtleBadge';
 import type { ModuleConfig, ModuleHealthStatus } from 'store/api/moduleApi';
 import { configCompleteness } from '../utils';
@@ -33,6 +34,7 @@ const ModuleDashboardCards: React.FC<ModuleDashboardCardsProps> = ({
   health,
   allModules
 }) => {
+  const { t } = useTranslation();
   const healthStatus = health?.status || (mod.enabled ? 'healthy' : 'disabled');
   const healthColor =
     {
@@ -62,7 +64,9 @@ const ModuleDashboardCards: React.FC<ModuleDashboardCardsProps> = ({
           <Card.Body className="py-3 px-4">
             <div className="d-flex align-items-center mb-2">
               <FontAwesomeIcon icon={faHeartPulse} className="text-400 me-2" />
-              <span className="fs-10 text-600 fw-semibold">Health</span>
+              <span className="fs-10 text-600 fw-semibold">
+                {t('adminModules.detail.cards.health')}
+              </span>
             </div>
             <SubtleBadge
               bg={healthColor as 'success' | 'danger' | 'secondary'}
@@ -86,13 +90,17 @@ const ModuleDashboardCards: React.FC<ModuleDashboardCardsProps> = ({
           <Card.Body className="py-3 px-4">
             <div className="d-flex align-items-center mb-2">
               <FontAwesomeIcon icon={faGear} className="text-400 me-2" />
-              <span className="fs-10 text-600 fw-semibold">Configuration</span>
+              <span className="fs-10 text-600 fw-semibold">
+                {t('adminModules.detail.cards.configuration')}
+              </span>
             </div>
             <div className="fs-8 fw-bold text-900">
               {total > 0 ? `${filled}/${total}` : '\u2014'}
             </div>
             <div className="text-muted fs-11">
-              {total > 0 ? 'required fields set' : 'no required fields'}
+              {total > 0
+                ? t('adminModules.detail.cards.requiredFieldsSet')
+                : t('adminModules.detail.cards.noRequiredFields')}
             </div>
             {total > 0 && (
               <div className="progress mt-2" style={{ height: '4px' }}>
@@ -113,13 +121,17 @@ const ModuleDashboardCards: React.FC<ModuleDashboardCardsProps> = ({
           <Card.Body className="py-3 px-4">
             <div className="d-flex align-items-center mb-2">
               <FontAwesomeIcon icon={faSitemap} className="text-400 me-2" />
-              <span className="fs-10 text-600 fw-semibold">Dependencies</span>
+              <span className="fs-10 text-600 fw-semibold">
+                {t('adminModules.detail.cards.dependenciesCount')}
+              </span>
             </div>
             <div className="fs-8 fw-bold text-900">
               {depCount > 0 ? `${depsHealthy}/${depCount}` : '\u2014'}
             </div>
             <div className="text-muted fs-11">
-              {depCount > 0 ? 'dependencies running' : 'no dependencies'}
+              {depCount > 0
+                ? t('adminModules.detail.cards.dependenciesRunning')
+                : t('adminModules.detail.cards.noDependencies')}
             </div>
           </Card.Body>
         </Card>
@@ -130,7 +142,9 @@ const ModuleDashboardCards: React.FC<ModuleDashboardCardsProps> = ({
           <Card.Body className="py-3 px-4">
             <div className="d-flex align-items-center mb-2">
               <FontAwesomeIcon icon={faClock} className="text-400 me-2" />
-              <span className="fs-10 text-600 fw-semibold">Last Modified</span>
+              <span className="fs-10 text-600 fw-semibold">
+                {t('adminModules.detail.cards.lastModified')}
+              </span>
             </div>
             <div className="fs-8 fw-bold text-900">
               {formatRelativeTime(mod.updatedAt)}

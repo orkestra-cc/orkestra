@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Alert, Button, Card, Col, Form, Row, Spinner } from 'react-bootstrap';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { toast } from 'react-toastify';
+import { Trans, useTranslation } from 'react-i18next';
 import {
   useDeleteIdPConfigMutation,
   useGetIdPConfigQuery,
@@ -24,6 +25,7 @@ const emptyDraft: IdPConfigPayload = {
 };
 
 const IdPConfigForm: React.FC = () => {
+  const { t } = useTranslation();
   const { data, isLoading, error } = useGetIdPConfigQuery();
   const [putConfig, { isLoading: isSaving }] = usePutIdPConfigMutation();
   const [deleteConfig, { isLoading: isDeleting }] =
@@ -80,20 +82,28 @@ const IdPConfigForm: React.FC = () => {
         clientSecret: secretTouched ? draft.clientSecret : ''
       };
       await putConfig(payload).unwrap();
-      toast.success('IdP configuration saved');
+      toast.success(t('auth.identity.idpConfig.toastSaved'));
       setSecretTouched(false);
     } catch (err: unknown) {
-      toast.error('Save failed: ' + extractError(err));
+      toast.error(
+        t('auth.identity.idpConfig.toastSaveFailed', {
+          message: extractError(err, t('auth.identity.idpConfig.errorUnknown'))
+        })
+      );
     }
   };
 
   const handleDelete = async () => {
-    if (!confirm('Remove the OIDC configuration for this tenant?')) return;
+    if (!confirm(t('auth.identity.idpConfig.removeConfirm'))) return;
     try {
       await deleteConfig().unwrap();
-      toast.success('IdP configuration removed');
+      toast.success(t('auth.identity.idpConfig.toastRemoved'));
     } catch (err: unknown) {
-      toast.error('Delete failed: ' + extractError(err));
+      toast.error(
+        t('auth.identity.idpConfig.toastRemoveFailed', {
+          message: extractError(err, t('auth.identity.idpConfig.errorUnknown'))
+        })
+      );
     }
   };
 
@@ -106,11 +116,10 @@ const IdPConfigForm: React.FC = () => {
         <div>
           <h6 className="mb-1">
             <FontAwesomeIcon icon="key" className="me-2 text-primary" />
-            OpenID Connect (BYO IdP)
+            {t('auth.identity.idpConfig.headerTitle')}
           </h6>
           <p className="fs-11 mb-0 text-body-tertiary">
-            Point users at your own IdP (Okta, Entra, Auth0, …). Orkestra
-            redeems the ID token and mints its own session.
+            {t('auth.identity.idpConfig.headerDescription')}
           </p>
         </div>
         {existing && (
@@ -120,7 +129,9 @@ const IdPConfigForm: React.FC = () => {
             onClick={handleDelete}
             disabled={isDeleting}
           >
-            {isDeleting ? 'Removing…' : 'Remove configuration'}
+            {isDeleting
+              ? t('auth.identity.idpConfig.removingButton')
+              : t('auth.identity.idpConfig.removeButton')}
           </Button>
         )}
       </Card.Header>
@@ -132,9 +143,10 @@ const IdPConfigForm: React.FC = () => {
         )}
         {!isLoading && realError && (
           <Alert variant="danger" className="fs-10 mb-0">
-            Failed to load IdP configuration. You need the{' '}
-            <code>tenant.update</code> permission on the current tenant to view
-            or edit this page.
+            <Trans
+              i18nKey="auth.identity.idpConfig.loadError"
+              components={{ code: <code /> }}
+            />
           </Alert>
         )}
         {!isLoading && !realError && (
@@ -142,13 +154,15 @@ const IdPConfigForm: React.FC = () => {
             <Row className="g-3">
               <Col md={6}>
                 <Form.Label className="fs-10 fw-semibold">
-                  Display name
+                  {t('auth.identity.idpConfig.displayNameLabel')}
                 </Form.Label>
                 <Form.Control
                   size="sm"
                   value={draft.displayName}
                   onChange={e => update({ displayName: e.target.value })}
-                  placeholder="Sign in with Acme Corp"
+                  placeholder={t(
+                    'auth.identity.idpConfig.displayNamePlaceholder'
+                  )}
                 />
               </Col>
               <Col md={6} className="d-flex align-items-end">
@@ -157,8 +171,8 @@ const IdPConfigForm: React.FC = () => {
                   id="identity-idp-enabled"
                   label={
                     draft.enabled
-                      ? 'Enabled — users can sign in via this IdP'
-                      : 'Disabled — public /start endpoint returns 404'
+                      ? t('auth.identity.idpConfig.enabledOn')
+                      : t('auth.identity.idpConfig.enabledOff')
                   }
                   checked={draft.enabled}
                   onChange={e => update({ enabled: e.target.checked })}
@@ -167,27 +181,28 @@ const IdPConfigForm: React.FC = () => {
 
               <Col md={12}>
                 <Form.Label className="fs-10 fw-semibold">
-                  Issuer URL <span className="text-danger">*</span>
+                  {t('auth.identity.idpConfig.issuerLabel')}{' '}
+                  <span className="text-danger">*</span>
                 </Form.Label>
                 <Form.Control
                   size="sm"
                   required
                   value={draft.issuerURL}
                   onChange={e => update({ issuerURL: e.target.value })}
-                  placeholder="https://auth.example.com"
+                  placeholder={t('auth.identity.idpConfig.issuerPlaceholder')}
                 />
                 <Form.Text muted>
-                  OIDC discovery base URL — no trailing slash. Orkestra appends
-                  <code className="mx-1">
-                    /.well-known/openid-configuration
-                  </code>
-                  at login time.
+                  <Trans
+                    i18nKey="auth.identity.idpConfig.issuerHint"
+                    components={{ code: <code className="mx-1" /> }}
+                  />
                 </Form.Text>
               </Col>
 
               <Col md={6}>
                 <Form.Label className="fs-10 fw-semibold">
-                  Client ID <span className="text-danger">*</span>
+                  {t('auth.identity.idpConfig.clientIdLabel')}{' '}
+                  <span className="text-danger">*</span>
                 </Form.Label>
                 <Form.Control
                   size="sm"
@@ -198,7 +213,7 @@ const IdPConfigForm: React.FC = () => {
               </Col>
               <Col md={6}>
                 <Form.Label className="fs-10 fw-semibold">
-                  Client secret{' '}
+                  {t('auth.identity.idpConfig.clientSecretLabel')}{' '}
                   {!hasSecret && <span className="text-danger">*</span>}
                 </Form.Label>
                 <Form.Control
@@ -212,36 +227,40 @@ const IdPConfigForm: React.FC = () => {
                   }}
                   placeholder={
                     hasSecret
-                      ? 'Leave empty to keep the stored value'
-                      : 'Paste the client secret registered at the IdP'
+                      ? t('auth.identity.idpConfig.clientSecretKeepPlaceholder')
+                      : t('auth.identity.idpConfig.clientSecretNewPlaceholder')
                   }
                 />
                 {hasSecret && (
                   <Form.Text muted>
-                    A secret is already stored. Typing in this field replaces
-                    it; leaving it empty preserves the current value.
+                    {t('auth.identity.idpConfig.clientSecretReplaceHint')}
                   </Form.Text>
                 )}
               </Col>
 
               <Col md={12}>
                 <Form.Label className="fs-10 fw-semibold">
-                  Redirect URL <span className="text-danger">*</span>
+                  {t('auth.identity.idpConfig.redirectUrlLabel')}{' '}
+                  <span className="text-danger">*</span>
                 </Form.Label>
                 <Form.Control
                   size="sm"
                   required
                   value={draft.redirectURL}
                   onChange={e => update({ redirectURL: e.target.value })}
-                  placeholder="https://app.orkestra.example/v1/identity/oidc/callback"
+                  placeholder={t(
+                    'auth.identity.idpConfig.redirectUrlPlaceholder'
+                  )}
                 />
                 <Form.Text muted>
-                  Must match the callback URL you registered at the IdP exactly.
+                  {t('auth.identity.idpConfig.redirectUrlHint')}
                 </Form.Text>
               </Col>
 
               <Col md={12}>
-                <Form.Label className="fs-10 fw-semibold">Scopes</Form.Label>
+                <Form.Label className="fs-10 fw-semibold">
+                  {t('auth.identity.idpConfig.scopesLabel')}
+                </Form.Label>
                 <Form.Control
                   size="sm"
                   value={(draft.scopes ?? []).join(' ')}
@@ -253,45 +272,51 @@ const IdPConfigForm: React.FC = () => {
                         .filter(Boolean)
                     })
                   }
-                  placeholder="openid email profile"
+                  placeholder={t('auth.identity.idpConfig.scopesPlaceholder')}
                 />
                 <Form.Text muted>
-                  Space-separated. Defaults to <code>openid email profile</code>
-                  .
+                  <Trans
+                    i18nKey="auth.identity.idpConfig.scopesHint"
+                    components={{ code: <code /> }}
+                  />
                 </Form.Text>
               </Col>
 
               <Col md={4}>
                 <Form.Label className="fs-10 fw-semibold">
-                  Subject claim
+                  {t('auth.identity.idpConfig.subClaimLabel')}
                 </Form.Label>
                 <Form.Control
                   size="sm"
                   value={draft.subClaim ?? ''}
                   onChange={e => update({ subClaim: e.target.value })}
-                  placeholder="sub"
+                  placeholder={t('auth.identity.idpConfig.subClaimPlaceholder')}
                 />
               </Col>
               <Col md={4}>
                 <Form.Label className="fs-10 fw-semibold">
-                  Email claim
+                  {t('auth.identity.idpConfig.emailClaimLabel')}
                 </Form.Label>
                 <Form.Control
                   size="sm"
                   value={draft.emailClaim ?? ''}
                   onChange={e => update({ emailClaim: e.target.value })}
-                  placeholder="email"
+                  placeholder={t(
+                    'auth.identity.idpConfig.emailClaimPlaceholder'
+                  )}
                 />
               </Col>
               <Col md={4}>
                 <Form.Label className="fs-10 fw-semibold">
-                  Name claim
+                  {t('auth.identity.idpConfig.nameClaimLabel')}
                 </Form.Label>
                 <Form.Control
                   size="sm"
                   value={draft.nameClaim ?? ''}
                   onChange={e => update({ nameClaim: e.target.value })}
-                  placeholder="name"
+                  placeholder={t(
+                    'auth.identity.idpConfig.nameClaimPlaceholder'
+                  )}
                 />
               </Col>
             </Row>
@@ -306,12 +331,12 @@ const IdPConfigForm: React.FC = () => {
                 {isSaving ? (
                   <>
                     <Spinner animation="border" size="sm" className="me-2" />
-                    Saving…
+                    {t('auth.identity.idpConfig.submitSaving')}
                   </>
                 ) : existing ? (
-                  'Save changes'
+                  t('auth.identity.idpConfig.submitSave')
                 ) : (
-                  'Create configuration'
+                  t('auth.identity.idpConfig.submitCreate')
                 )}
               </Button>
             </div>
@@ -322,10 +347,10 @@ const IdPConfigForm: React.FC = () => {
   );
 };
 
-function extractError(err: unknown): string {
+function extractError(err: unknown, fallback: string): string {
   if (err && typeof err === 'object' && 'data' in err) {
     const data = (err as { data?: { detail?: string; title?: string } }).data;
-    return data?.detail || data?.title || 'unknown error';
+    return data?.detail || data?.title || fallback;
   }
   return String(err);
 }

@@ -2,6 +2,7 @@ import { Suspense, lazy, useMemo } from 'react';
 import { Link, Navigate, useParams, useSearchParams } from 'react-router';
 import { Alert, Breadcrumb, Card, Nav, Spinner, Tab } from 'react-bootstrap';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { useTranslation } from 'react-i18next';
 import SubtleBadge from 'components/common/SubtleBadge';
 import type { BadgeColor } from 'components/common/SubtleBadge';
 import { useGetOrgAdminQuery } from 'store/api/tenantApi';
@@ -53,6 +54,7 @@ function isHttpError(err: unknown, status: number): boolean {
 }
 
 const ClientDetailPage: React.FC = () => {
+  const { t } = useTranslation();
   const { tenantUUID } = useParams<{ tenantUUID: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
   const tab = readTab(searchParams.get('tab'));
@@ -78,15 +80,30 @@ const ClientDetailPage: React.FC = () => {
   const statusBadge = useMemo(() => {
     if (!org) return null;
     if (org.status === 'purged')
-      return { bg: 'dark' as BadgeColor, label: 'purged' };
+      return {
+        bg: 'dark' as BadgeColor,
+        label: t('adminClients.detail.statusPurged')
+      };
     if (org.status === 'archived' || org.archivedAt)
-      return { bg: 'danger' as BadgeColor, label: 'archived' };
+      return {
+        bg: 'danger' as BadgeColor,
+        label: t('adminClients.detail.statusArchived')
+      };
     if (org.status === 'suspended')
-      return { bg: 'warning' as BadgeColor, label: 'suspended' };
+      return {
+        bg: 'warning' as BadgeColor,
+        label: t('adminClients.detail.statusSuspended')
+      };
     if (org.status === 'provisioning')
-      return { bg: 'info' as BadgeColor, label: 'provisioning' };
-    return { bg: 'success' as BadgeColor, label: 'active' };
-  }, [org]);
+      return {
+        bg: 'info' as BadgeColor,
+        label: t('adminClients.detail.statusProvisioning')
+      };
+    return {
+      bg: 'success' as BadgeColor,
+      label: t('adminClients.detail.statusActive')
+    };
+  }, [org, t]);
 
   if (!tenantUUID) {
     return <Navigate to="/admin/clients" replace />;
@@ -110,8 +127,10 @@ const ClientDetailPage: React.FC = () => {
     }
     return (
       <Alert variant="warning">
-        This Tier-2 user has no client tenant yet.{' '}
-        <Link to="/admin/clients">Back to clients</Link>
+        {t('adminClients.detail.noTenantForUser')}{' '}
+        <Link to="/admin/clients">
+          {t('adminClients.detail.backToClients')}
+        </Link>
       </Alert>
     );
   }
@@ -119,8 +138,10 @@ const ClientDetailPage: React.FC = () => {
   if (error || !org) {
     return (
       <Alert variant="danger">
-        Client not found or you lack permission to view it.{' '}
-        <Link to="/admin/clients">Back to clients</Link>
+        {t('adminClients.detail.notFound')}{' '}
+        <Link to="/admin/clients">
+          {t('adminClients.detail.backToClients')}
+        </Link>
       </Alert>
     );
   }
@@ -144,7 +165,7 @@ const ClientDetailPage: React.FC = () => {
     <>
       <Breadcrumb className="mb-3 fs-10">
         <Breadcrumb.Item linkAs={Link} linkProps={{ to: '/admin/clients' }}>
-          Clients
+          {t('adminClients.detail.breadcrumbClients')}
         </Breadcrumb.Item>
         <Breadcrumb.Item active>{org.name}</Breadcrumb.Item>
       </Breadcrumb>
@@ -167,11 +188,11 @@ const ClientDetailPage: React.FC = () => {
                 {org.plan}
               </SubtleBadge>
               <SubtleBadge bg="info" pill>
-                external
+                {t('adminClients.detail.tierBadge')}
               </SubtleBadge>
               {org.isItalianBillable && (
                 <SubtleBadge bg="success" pill>
-                  FatturaPA
+                  {t('adminClients.detail.fatturaPaBadge')}
                 </SubtleBadge>
               )}
             </div>
@@ -180,10 +201,12 @@ const ClientDetailPage: React.FC = () => {
             <ImpersonateButton org={org} />
             <div className="fs-10 text-muted text-end">
               <div>
-                ID: <code className="fs-11">{org.id}</code>
+                {t('adminClients.detail.idLabel')}{' '}
+                <code className="fs-11">{org.id}</code>
               </div>
               <div>
-                Owner: <code className="fs-11">{org.ownerUserUUID || '—'}</code>
+                {t('adminClients.detail.ownerLabel')}{' '}
+                <code className="fs-11">{org.ownerUserUUID || '—'}</code>
               </div>
             </div>
           </div>
@@ -195,25 +218,39 @@ const ClientDetailPage: React.FC = () => {
           <Card.Header className="border-bottom border-200">
             <Nav variant="tabs" className="card-header-tabs fs-10">
               <Nav.Item>
-                <Nav.Link eventKey="overview">Overview</Nav.Link>
+                <Nav.Link eventKey="overview">
+                  {t('adminClients.detail.tabs.overview')}
+                </Nav.Link>
               </Nav.Item>
               <Nav.Item>
-                <Nav.Link eventKey="members">Members</Nav.Link>
+                <Nav.Link eventKey="members">
+                  {t('adminClients.detail.tabs.members')}
+                </Nav.Link>
               </Nav.Item>
               <Nav.Item>
-                <Nav.Link eventKey="divisions">Divisions</Nav.Link>
+                <Nav.Link eventKey="divisions">
+                  {t('adminClients.detail.tabs.divisions')}
+                </Nav.Link>
               </Nav.Item>
               <Nav.Item>
-                <Nav.Link eventKey="subscriptions">Subscriptions</Nav.Link>
+                <Nav.Link eventKey="subscriptions">
+                  {t('adminClients.detail.tabs.subscriptions')}
+                </Nav.Link>
               </Nav.Item>
               <Nav.Item>
-                <Nav.Link eventKey="payments">Payments</Nav.Link>
+                <Nav.Link eventKey="payments">
+                  {t('adminClients.detail.tabs.payments')}
+                </Nav.Link>
               </Nav.Item>
               <Nav.Item>
-                <Nav.Link eventKey="billing">Billing identity</Nav.Link>
+                <Nav.Link eventKey="billing">
+                  {t('adminClients.detail.tabs.billing')}
+                </Nav.Link>
               </Nav.Item>
               <Nav.Item>
-                <Nav.Link eventKey="activity">Activity</Nav.Link>
+                <Nav.Link eventKey="activity">
+                  {t('adminClients.detail.tabs.activity')}
+                </Nav.Link>
               </Nav.Item>
             </Nav>
           </Card.Header>

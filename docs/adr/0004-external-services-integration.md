@@ -1,3 +1,9 @@
+---
+title: ADR-0004 — External services integration framework
+status: proposed
+public: true
+---
+
 # ADR-0004 — External services integration framework
 
 | Field | Value |

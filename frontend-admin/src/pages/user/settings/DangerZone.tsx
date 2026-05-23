@@ -2,24 +2,23 @@ import OrkestraCardHeader from 'components/common/OrkestraCardHeader';
 
 import { Button, Card } from 'react-bootstrap';
 import { Link } from 'react-router';
+import { useTranslation } from 'react-i18next';
 
 const DangerZone: React.FC = () => {
+  const { t } = useTranslation();
   return (
     <Card>
-      <OrkestraCardHeader title="Danger Zone" />
+      <OrkestraCardHeader title={t('settings.danger.title')} />
       <Card.Body className="bg-body-tertiary">
-        <h5 className="mb-0">Privacy & your data</h5>
-        <p className="fs-10">
-          Download a copy of the personal data we hold for your account, or
-          exercise your GDPR right to erasure.
-        </p>
+        <h5 className="mb-0">{t('settings.danger.privacyHeading')}</h5>
+        <p className="fs-10">{t('settings.danger.privacyDescription')}</p>
         <Button
           as={Link as any}
           to="/user/privacy"
           variant="orkestra-danger"
           className="w-100"
         >
-          Manage privacy
+          {t('settings.danger.managePrivacy')}
         </Button>
       </Card.Body>
     </Card>

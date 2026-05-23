@@ -11,3 +11,7 @@ keys/
 *.p8
 *.pem
 *.key
+
+# Marketing import spool — bind-mounted per-env runtime dirs created
+# by the operator on first boot (see docker-compose.{dev,staging}.yml).
+marketing-spool-*/

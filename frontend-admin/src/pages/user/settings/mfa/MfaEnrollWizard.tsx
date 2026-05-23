@@ -1,6 +1,7 @@
 import { useEffect, useState, FormEvent } from 'react';
 import { Alert, Button, Form, Modal, Spinner } from 'react-bootstrap';
 import { QRCodeSVG } from 'qrcode.react';
+import { useTranslation } from 'react-i18next';
 import {
   useEnrollMfaBeginMutation,
   useEnrollMfaConfirmMutation
@@ -24,6 +25,7 @@ interface Props {
  * button is gated behind an acknowledgment checkbox.
  */
 const MfaEnrollWizard = ({ show, onHide }: Props) => {
+  const { t } = useTranslation();
   const [step, setStep] = useState<Step>('qr');
   const [challengeId, setChallengeId] = useState('');
   const [secret, setSecret] = useState('');
@@ -55,17 +57,15 @@ const MfaEnrollWizard = ({ show, onHide }: Props) => {
         setProvisioningUri(res.provisioningUri);
       })
       .catch((err: { data?: { detail?: string } }) => {
-        setError(
-          err?.data?.detail ?? 'Could not start enrollment. Please try again.'
-        );
+        setError(err?.data?.detail ?? t('userMfa.enrollWizard.beginError'));
       });
-  }, [show, begin]);
+  }, [show, begin, t]);
 
   const handleConfirm = async (event: FormEvent) => {
     event.preventDefault();
     setError(null);
     if (!code.trim()) {
-      setError('Enter the 6-digit code shown in your authenticator.');
+      setError(t('userMfa.enrollWizard.confirmEmptyError'));
       return;
     }
     try {
@@ -75,11 +75,10 @@ const MfaEnrollWizard = ({ show, onHide }: Props) => {
     } catch (err: unknown) {
       const anyErr = err as { status?: number; data?: { detail?: string } };
       if (anyErr?.status === 401 || anyErr?.status === 400) {
-        setError('Incorrect code. Double-check the digits and try again.');
+        setError(t('userMfa.enrollWizard.confirmIncorrectError'));
       } else {
         setError(
-          anyErr?.data?.detail ??
-            'Could not confirm the code. Please try again.'
+          anyErr?.data?.detail ?? t('userMfa.enrollWizard.confirmGenericError')
         );
       }
     }
@@ -103,7 +102,7 @@ const MfaEnrollWizard = ({ show, onHide }: Props) => {
   return (
     <Modal show={show} onHide={handleClose} backdrop="static" centered>
       <Modal.Header closeButton={step !== 'backup' || ack}>
-        <Modal.Title>Set up two-factor authentication</Modal.Title>
+        <Modal.Title>{t('userMfa.enrollWizard.modalTitle')}</Modal.Title>
       </Modal.Header>
       <Modal.Body>
         {error && (
@@ -127,8 +126,7 @@ const MfaEnrollWizard = ({ show, onHide }: Props) => {
             {provisioningUri && (
               <>
                 <p className="fs-10 mb-2">
-                  Scan this code with your authenticator app (Google
-                  Authenticator, Authy, 1Password…).
+                  {t('userMfa.enrollWizard.qrIntro')}
                 </p>
                 <div className="d-flex justify-content-center my-3">
                   <div className="p-3 bg-white rounded border">
@@ -136,7 +134,7 @@ const MfaEnrollWizard = ({ show, onHide }: Props) => {
                   </div>
                 </div>
                 <p className="fs-10 text-muted mb-1">
-                  Can&apos;t scan? Enter this secret manually:
+                  {t('userMfa.enrollWizard.qrManualHint')}
                 </p>
                 <code className="d-block bg-body-tertiary p-2 rounded small text-break">
                   {secret}
@@ -149,7 +147,7 @@ const MfaEnrollWizard = ({ show, onHide }: Props) => {
                       setError(null);
                     }}
                   >
-                    I&apos;ve added it — continue
+                    {t('userMfa.enrollWizard.qrContinue')}
                   </Button>
                 </div>
               </>
@@ -160,10 +158,10 @@ const MfaEnrollWizard = ({ show, onHide }: Props) => {
         {step === 'confirm' && (
           <Form onSubmit={handleConfirm} noValidate>
             <p className="fs-10 mb-3">
-              Enter the 6-digit code your authenticator is showing right now.
+              {t('userMfa.enrollWizard.confirmIntro')}
             </p>
             <Form.Group className="mb-3">
-              <Form.Label>Authenticator code</Form.Label>
+              <Form.Label>{t('userMfa.enrollWizard.codeLabel')}</Form.Label>
               <Form.Control
                 type="text"
                 inputMode="numeric"
@@ -171,16 +169,18 @@ const MfaEnrollWizard = ({ show, onHide }: Props) => {
                 autoFocus
                 value={code}
                 onChange={e => setCode(e.target.value)}
-                placeholder="123 456"
+                placeholder={t('userMfa.enrollWizard.codePlaceholder')}
                 required
               />
             </Form.Group>
             <div className="d-flex justify-content-between">
               <Button variant="outline-secondary" onClick={() => setStep('qr')}>
-                Back
+                {t('userMfa.enrollWizard.back')}
               </Button>
               <Button type="submit" variant="primary" disabled={confirmLoading}>
-                {confirmLoading ? 'Verifying…' : 'Verify and enable'}
+                {confirmLoading
+                  ? t('userMfa.enrollWizard.verifying')
+                  : t('userMfa.enrollWizard.confirmConfirmButton')}
               </Button>
             </div>
           </Form>
@@ -189,9 +189,8 @@ const MfaEnrollWizard = ({ show, onHide }: Props) => {
         {step === 'backup' && (
           <>
             <Alert variant="warning" className="mb-3">
-              <strong>Save these backup codes now.</strong> They are the only
-              way to sign in if you lose access to your authenticator. Each code
-              works once.
+              <strong>{t('userMfa.enrollWizard.backupHeading')}</strong>{' '}
+              {t('userMfa.enrollWizard.backupBody')}
             </Alert>
             <div className="bg-body-tertiary p-3 rounded font-monospace mb-3">
               <div className="row g-2">
@@ -204,7 +203,7 @@ const MfaEnrollWizard = ({ show, onHide }: Props) => {
             </div>
             <div className="d-flex justify-content-between mb-3">
               <Button variant="outline-secondary" size="sm" onClick={copyCodes}>
-                Copy codes
+                {t('userMfa.enrollWizard.backupCopyButton')}
               </Button>
               <Button
                 variant="outline-secondary"
@@ -221,19 +220,19 @@ const MfaEnrollWizard = ({ show, onHide }: Props) => {
                   URL.revokeObjectURL(url);
                 }}
               >
-                Download
+                {t('userMfa.enrollWizard.backupDownloadButton')}
               </Button>
             </div>
             <Form.Check
               type="checkbox"
               id="mfa-backup-ack"
-              label="I have saved these backup codes somewhere safe."
+              label={t('userMfa.enrollWizard.backupAckLabel')}
               checked={ack}
               onChange={e => setAck(e.target.checked)}
             />
             <div className="d-flex justify-content-end mt-3">
               <Button variant="primary" disabled={!ack} onClick={onHide}>
-                Done
+                {t('userMfa.enrollWizard.done')}
               </Button>
             </div>
           </>

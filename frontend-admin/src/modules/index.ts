@@ -10,6 +10,7 @@ import { subscriptionsManifest } from './subscriptions';
 import { paymentsManifest } from './payments';
 import { complianceManifest } from './compliance';
 import { identityManifest } from './identity';
+import { marketingManifest } from './marketing';
 
 /** All optional module manifests, keyed by backend module name */
 export const moduleCatalog: Record<string, ModuleManifest> = {
@@ -23,7 +24,8 @@ export const moduleCatalog: Record<string, ModuleManifest> = {
   subscriptions: subscriptionsManifest,
   payments: paymentsManifest,
   compliance: complianceManifest,
-  identity: identityManifest
+  identity: identityManifest,
+  marketing: marketingManifest
 };
 
 export type { ModuleManifest } from './types';

@@ -1,11 +1,13 @@
 import { useState, FormEvent } from 'react';
 import { Alert, Button, Form } from 'react-bootstrap';
 import { Link, useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { useAppDispatch } from 'store/hooks';
 import { useGetAuthPolicyQuery, useLoginMutation } from 'store/api/authApi';
 import { login as loginAction } from 'store/slices/authSlice';
 
 const EmailPasswordForm = () => {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const dispatch = useAppDispatch();
   const [email, setEmail] = useState('');
@@ -25,7 +27,7 @@ const EmailPasswordForm = () => {
     setLocalError(null);
 
     if (!email || !password) {
-      setLocalError('Please enter both email and password.');
+      setLocalError(t('auth.errors.missingFields'));
       return;
     }
 
@@ -46,7 +48,7 @@ const EmailPasswordForm = () => {
       }
 
       if (!result.user) {
-        setLocalError('Unable to sign in. Please try again.');
+        setLocalError(t('auth.errors.unableToSignIn'));
         return;
       }
       dispatch(loginAction({ userData: result.user }));
@@ -55,17 +57,15 @@ const EmailPasswordForm = () => {
     } catch (err: unknown) {
       const anyErr = err as { data?: { detail?: string }; status?: number };
       if (anyErr?.status === 401) {
-        setLocalError('Invalid email or password.');
+        setLocalError(t('auth.errors.invalidCredentials'));
       } else if (anyErr?.status === 403) {
         setLocalError(
-          anyErr?.data?.detail || 'Your email has not been verified.'
+          anyErr?.data?.detail || t('auth.errors.emailNotVerified')
         );
       } else if (anyErr?.status === 429) {
-        setLocalError('Too many failed attempts. Please try again later.');
+        setLocalError(t('auth.errors.tooManyAttempts'));
       } else {
-        setLocalError(
-          anyErr?.data?.detail || 'Unable to sign in. Please try again.'
-        );
+        setLocalError(anyErr?.data?.detail || t('auth.errors.unableToSignIn'));
       }
     }
   };
@@ -74,8 +74,7 @@ const EmailPasswordForm = () => {
     <Form onSubmit={handleSubmit}>
       {!loginEnabled && (
         <Alert variant="warning" className="mb-3">
-          Login is temporarily disabled by an administrator. Please try again
-          later.
+          {t('auth.loginDisabled')}
         </Alert>
       )}
       {localError && (
@@ -90,11 +89,11 @@ const EmailPasswordForm = () => {
       )}
 
       <Form.Group className="mb-3" controlId="login-email">
-        <Form.Label>Email</Form.Label>
+        <Form.Label>{t('auth.email')}</Form.Label>
         <Form.Control
           type="email"
           name="email"
-          placeholder="you@example.com"
+          placeholder={t('auth.emailPlaceholder')}
           value={email}
           onChange={e => setEmail(e.target.value)}
           autoComplete="email"
@@ -104,15 +103,15 @@ const EmailPasswordForm = () => {
 
       <Form.Group className="mb-3" controlId="login-password">
         <div className="d-flex justify-content-between">
-          <Form.Label>Password</Form.Label>
+          <Form.Label>{t('auth.password')}</Form.Label>
           <Link to="/forgot-password" className="fs--1">
-            Forgot password?
+            {t('auth.forgotPassword')}
           </Link>
         </div>
         <Form.Control
           type="password"
           name="password"
-          placeholder="••••••••"
+          placeholder={t('auth.passwordPlaceholder')}
           value={password}
           onChange={e => setPassword(e.target.value)}
           autoComplete="current-password"
@@ -127,14 +126,15 @@ const EmailPasswordForm = () => {
           size="lg"
           disabled={isLoading || !loginEnabled}
         >
-          {isLoading ? 'Signing in…' : 'Sign in'}
+          {isLoading ? t('auth.signingIn') : t('auth.signIn')}
         </Button>
       </div>
 
       {registrationEnabled && (
         <div className="text-center">
           <small className="text-muted">
-            Don&apos;t have an account? <Link to="/register">Create one</Link>
+            {t('auth.noAccount')}{' '}
+            <Link to="/register">{t('auth.createOne')}</Link>
           </small>
         </div>
       )}

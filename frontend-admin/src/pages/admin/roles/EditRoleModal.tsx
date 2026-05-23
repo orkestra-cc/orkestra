@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Alert, Badge, Button, Form, Modal, Spinner } from 'react-bootstrap';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { toast } from 'react-toastify';
+import { useTranslation } from 'react-i18next';
 import {
   useUpdateRoleMutation,
   type Role,
@@ -27,6 +28,7 @@ interface Props {
  * vs the role snapshot at open time.
  */
 const EditRoleModal: React.FC<Props> = ({ tenantId, role, show, onHide }) => {
+  const { t } = useTranslation();
   const [updateRole, { isLoading: isSaving }] = useUpdateRoleMutation();
 
   const [name, setName] = useState('');
@@ -86,10 +88,16 @@ const EditRoleModal: React.FC<Props> = ({ tenantId, role, show, onHide }) => {
     }
     try {
       await updateRole({ tenantId, roleId: role.id, body: patch }).unwrap();
-      toast.success(`Role "${role.name}" updated`);
+      toast.success(
+        t('adminRoles.editModal.successToast', { name: role.name })
+      );
       onHide();
     } catch (err: unknown) {
-      toast.error('Update failed: ' + extractError(err));
+      toast.error(
+        t('adminRoles.editModal.errorToast', {
+          message: extractError(err, t('adminRoles.editModal.unknownError'))
+        })
+      );
     }
   };
 
@@ -98,14 +106,15 @@ const EditRoleModal: React.FC<Props> = ({ tenantId, role, show, onHide }) => {
       <Modal.Header closeButton>
         <Modal.Title className="d-flex align-items-center gap-2">
           <FontAwesomeIcon icon="pencil-alt" className="text-primary" />
-          Edit role: <code className="fs-9">{role.name}</code>
+          {t('adminRoles.editModal.titlePrefix')}{' '}
+          <code className="fs-9">{role.name}</code>
           {role.isSystem ? (
             <Badge bg="secondary">
               <FontAwesomeIcon icon="lock" className="me-1" />
-              system
+              {t('adminRoles.editModal.badgeSystem')}
             </Badge>
           ) : (
-            <Badge bg="info">custom</Badge>
+            <Badge bg="info">{t('adminRoles.editModal.badgeCustom')}</Badge>
           )}
         </Modal.Title>
       </Modal.Header>
@@ -113,10 +122,7 @@ const EditRoleModal: React.FC<Props> = ({ tenantId, role, show, onHide }) => {
         {readOnly && (
           <Alert variant="info" className="mb-3 fs-10">
             <FontAwesomeIcon icon="info-circle" className="me-2" />
-            System roles come from code. Their name, description, and
-            permissions are re-seeded on every boot, so they're read-only here.
-            You can still disable this role to prevent it from being granted to
-            users.
+            {t('adminRoles.editModal.systemInfo')}
           </Alert>
         )}
 
@@ -130,10 +136,11 @@ const EditRoleModal: React.FC<Props> = ({ tenantId, role, show, onHide }) => {
             onChange={e => setIsActive(e.target.checked)}
             label={
               <span>
-                <strong className="d-block">Active</strong>
+                <strong className="d-block">
+                  {t('adminRoles.editModal.activeLabel')}
+                </strong>
                 <span className="text-muted small">
-                  When off, existing bindings stop granting this role's
-                  permissions and new bindings cannot be created.
+                  {t('adminRoles.editModal.activeHelp')}
                 </span>
               </span>
             }
@@ -143,7 +150,9 @@ const EditRoleModal: React.FC<Props> = ({ tenantId, role, show, onHide }) => {
         <Form>
           <div className="row g-3 mb-4">
             <Form.Group className="col-md-5">
-              <Form.Label className="fw-semibold">Name</Form.Label>
+              <Form.Label className="fw-semibold">
+                {t('adminRoles.editModal.nameLabel')}
+              </Form.Label>
               <Form.Control
                 type="text"
                 value={name}
@@ -153,7 +162,9 @@ const EditRoleModal: React.FC<Props> = ({ tenantId, role, show, onHide }) => {
               />
             </Form.Group>
             <Form.Group className="col-md-7">
-              <Form.Label className="fw-semibold">Description</Form.Label>
+              <Form.Label className="fw-semibold">
+                {t('adminRoles.editModal.descriptionLabel')}
+              </Form.Label>
               <Form.Control
                 type="text"
                 value={description}
@@ -172,15 +183,16 @@ const EditRoleModal: React.FC<Props> = ({ tenantId, role, show, onHide }) => {
       </Modal.Body>
       <Modal.Footer>
         <Button variant="secondary" onClick={onHide} disabled={isSaving}>
-          Cancel
+          {t('adminRoles.editModal.cancel')}
         </Button>
         <Button variant="primary" onClick={onSave} disabled={!canSave}>
           {isSaving ? (
             <>
-              <Spinner size="sm" animation="border" className="me-2" /> Saving…
+              <Spinner size="sm" animation="border" className="me-2" />{' '}
+              {t('adminRoles.editModal.saving')}
             </>
           ) : (
-            <>Save changes</>
+            t('adminRoles.editModal.save')
           )}
         </Button>
       </Modal.Footer>
@@ -188,10 +200,10 @@ const EditRoleModal: React.FC<Props> = ({ tenantId, role, show, onHide }) => {
   );
 };
 
-function extractError(err: unknown): string {
+function extractError(err: unknown, fallback: string): string {
   if (err && typeof err === 'object' && 'data' in err) {
     const data = (err as { data?: { detail?: string; title?: string } }).data;
-    return data?.detail || data?.title || 'unknown error';
+    return data?.detail || data?.title || fallback;
   }
   return String(err);
 }

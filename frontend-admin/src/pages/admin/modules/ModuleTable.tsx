@@ -3,6 +3,7 @@ import { Link } from 'react-router';
 import { Card, Form, Spinner, Table } from 'react-bootstrap';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faChevronRight } from '@fortawesome/free-solid-svg-icons';
+import { useTranslation } from 'react-i18next';
 import SubtleBadge from 'components/common/SubtleBadge';
 import type { BadgeColor } from 'components/common/SubtleBadge';
 import ModuleTableHeader from './ModuleTableHeader';
@@ -43,6 +44,7 @@ const healthDotColors: Record<string, string> = {
 };
 
 const ModuleTable: React.FC<ModuleTableProps> = ({ scope, title }) => {
+  const { t } = useTranslation();
   const { data: modules, isLoading, error } = useGetModulesQuery();
   const { data: healthData } = useGetModulesHealthQuery();
   const [updateModule] = useUpdateModuleMutation();
@@ -150,13 +152,17 @@ const ModuleTable: React.FC<ModuleTableProps> = ({ scope, title }) => {
             <Table responsive size="sm" className="fs-10 mb-0 overflow-hidden">
               <thead className="bg-body-tertiary">
                 <tr>
-                  <th className="pe-4 ps-3">Module</th>
-                  <th>Category</th>
-                  <th>Status</th>
-                  <th>Environment</th>
-                  <th>Dependencies</th>
-                  <th>Updated</th>
-                  <th className="text-end pe-4">Actions</th>
+                  <th className="pe-4 ps-3">
+                    {t('adminModules.columns.module')}
+                  </th>
+                  <th>{t('adminModules.columns.category')}</th>
+                  <th>{t('adminModules.columns.status')}</th>
+                  <th>{t('adminModules.columns.environment')}</th>
+                  <th>{t('adminModules.columns.dependencies')}</th>
+                  <th>{t('adminModules.columns.updated')}</th>
+                  <th className="text-end pe-4">
+                    {t('adminModules.columns.actions')}
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -239,17 +245,17 @@ const ModuleTable: React.FC<ModuleTableProps> = ({ scope, title }) => {
                             onChange={() => handleToggle(mod)}
                             title={
                               mod.category === 'core'
-                                ? 'Core modules cannot be disabled'
+                                ? t('adminModules.toggleTitles.coreLocked')
                                 : mod.enabled
-                                  ? 'Disable module'
-                                  : 'Enable module'
+                                  ? t('adminModules.toggleTitles.disable')
+                                  : t('adminModules.toggleTitles.enable')
                             }
                           />
                         )}
                         <Link
                           to={`/admin/modules/${mod.moduleName}`}
                           className="text-500 px-1"
-                          title="Configure"
+                          title={t('adminModules.actions.configure')}
                         >
                           <FontAwesomeIcon
                             icon={faChevronRight}
@@ -263,7 +269,7 @@ const ModuleTable: React.FC<ModuleTableProps> = ({ scope, title }) => {
                 {filteredModules.length === 0 && (
                   <tr>
                     <td colSpan={6} className="text-center text-muted py-4">
-                      No modules match the current filters.
+                      {t('adminModules.noMatch')}
                     </td>
                   </tr>
                 )}

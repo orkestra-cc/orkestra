@@ -1,5 +1,6 @@
 import { useState, useEffect, FormEvent } from 'react';
 import { Alert, Button, Form, Spinner } from 'react-bootstrap';
+import { Trans, useTranslation } from 'react-i18next';
 import {
   useGetModuleQuery,
   useUpdateModuleMutation
@@ -34,6 +35,7 @@ const SMTP_FIELD_KEYS = [
  * mode and auth mail logs to stdout.
  */
 const SmtpStep = ({ onNext, onSkip }: SmtpStepProps) => {
+  const { t } = useTranslation();
   const { data: mod, isLoading: isLoadingModule } =
     useGetModuleQuery('notification');
   const [updateModule, { isLoading: isSaving }] = useUpdateModuleMutation();
@@ -63,15 +65,11 @@ const SmtpStep = ({ onNext, onSkip }: SmtpStepProps) => {
     const provider = (configValues['email.provider'] || '').trim();
     if (provider && provider !== 'noop') {
       if (!configValues['email.smtp.host']) {
-        setError(
-          'SMTP host is required when the provider is not set to "noop".'
-        );
+        setError(t('setup.smtp.errorHostRequired'));
         return;
       }
       if (!configValues['email.from_address']) {
-        setError(
-          'From address is required when the provider is not set to "noop".'
-        );
+        setError(t('setup.smtp.errorFromRequired'));
         return;
       }
     }
@@ -107,10 +105,7 @@ const SmtpStep = ({ onNext, onSkip }: SmtpStepProps) => {
       onNext();
     } catch (err: unknown) {
       const anyErr = err as { data?: { detail?: string } };
-      setError(
-        anyErr?.data?.detail ||
-          'Could not save SMTP settings. Please check the values and try again.'
-      );
+      setError(anyErr?.data?.detail || t('setup.smtp.errorGeneric'));
     }
   };
 
@@ -125,11 +120,9 @@ const SmtpStep = ({ onNext, onSkip }: SmtpStepProps) => {
   return (
     <Form onSubmit={handleSubmit} noValidate>
       <div className="mb-4">
-        <h5 className="mb-1">Configure email delivery</h5>
+        <h5 className="mb-1">{t('setup.smtp.title')}</h5>
         <p className="text-muted fs-10 mb-0">
-          Orkestra uses these settings to send verification and password-reset
-          email. Leave the provider on <code>noop</code> to skip entirely — you
-          can configure SMTP later under <code>/admin/modules</code>.
+          <Trans i18nKey="setup.smtp.intro" components={{ code: <code /> }} />
         </p>
       </div>
 
@@ -145,10 +138,10 @@ const SmtpStep = ({ onNext, onSkip }: SmtpStepProps) => {
       )}
 
       <Alert variant="warning" className="fs-10 mb-3">
-        <strong>Note:</strong> while the provider is <code>noop</code>,
-        password-reset and email-verification mail is logged to the backend
-        stdout instead of being delivered. Anyone who forgets their password
-        will need a backend operator to recover the link from the logs.
+        <Trans
+          i18nKey="setup.smtp.noopNotice"
+          components={{ strong: <strong />, code: <code /> }}
+        />
       </Alert>
 
       <ModuleConfigFields
@@ -171,16 +164,16 @@ const SmtpStep = ({ onNext, onSkip }: SmtpStepProps) => {
           onClick={onSkip}
           disabled={isSaving}
         >
-          Skip for now
+          {t('setup.smtp.skip')}
         </Button>
         <Button type="submit" variant="primary" disabled={isSaving}>
           {isSaving ? (
             <>
               <Spinner animation="border" size="sm" className="me-2" />
-              Saving...
+              {t('setup.smtp.submitting')}
             </>
           ) : (
-            'Save and continue'
+            t('setup.smtp.submit')
           )}
         </Button>
       </div>

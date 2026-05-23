@@ -1,5 +1,6 @@
 import { Dropdown } from 'react-bootstrap';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { useTranslation } from 'react-i18next';
 import { themeVariants, ThemeVariant } from 'config';
 import { useAppContext } from 'providers/AppProvider';
 
@@ -12,6 +13,7 @@ const ThemeControlDropdown = ({
   dropdownClassName = '',
   iconClassName = 'fs-8'
 }: ThemeControlDropdownProps) => {
+  const { t } = useTranslation();
   const {
     config: { theme },
     changeTheme
@@ -57,7 +59,7 @@ const ThemeControlDropdown = ({
                       : 'adjust'
                 }
               />
-              {colorMode.charAt(0).toUpperCase() + colorMode.slice(1)}
+              {t(`nav.theme.${colorMode}` as const)}
               {theme === colorMode && (
                 <FontAwesomeIcon icon="check" className="ms-auto text-600" />
               )}

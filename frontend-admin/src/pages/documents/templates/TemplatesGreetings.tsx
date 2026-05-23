@@ -5,9 +5,11 @@ import {
   faCheck,
   faExclamationTriangle
 } from '@fortawesome/free-solid-svg-icons';
+import { useTranslation } from 'react-i18next';
 import { useGetDocumentsServiceStatusQuery } from '../../../store/api/documentsApi';
 
 const TemplatesGreetings: React.FC = () => {
+  const { t } = useTranslation();
   const { data: serviceStatus, isLoading } =
     useGetDocumentsServiceStatusQuery();
 
@@ -27,11 +29,10 @@ const TemplatesGreetings: React.FC = () => {
             <Row className="align-items-center">
               <Col>
                 <h5 className="mb-0 text-primary fw-semi-bold">
-                  Template Documenti
+                  {t('documents.templates.greetings.title')}
                 </h5>
                 <p className="mb-0 fs-10 text-600">
-                  Gestisci i template per la generazione di PDF (fatture,
-                  preventivi, documenti)
+                  {t('documents.templates.greetings.subtitle')}
                 </p>
               </Col>
               <Col xs="auto">
@@ -49,8 +50,8 @@ const TemplatesGreetings: React.FC = () => {
                       className="fs-11"
                     />
                     {serviceStatus?.available
-                      ? 'Servizio attivo'
-                      : 'Servizio non disponibile'}
+                      ? t('documents.templates.greetings.serviceActive')
+                      : t('documents.templates.greetings.serviceUnavailable')}
                   </Badge>
                 )}
               </Col>

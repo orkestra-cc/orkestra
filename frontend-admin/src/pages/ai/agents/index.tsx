@@ -25,6 +25,7 @@ import {
   faFileAlt,
   faSlidersH
 } from '@fortawesome/free-solid-svg-icons';
+import { Trans, useTranslation } from 'react-i18next';
 import Background from 'components/common/Background';
 import greetingsBg from 'assets/img/illustrations/ticket-greetings-bg.png';
 import {
@@ -50,6 +51,7 @@ import type {
 // ---------------------------------------------------------------------------
 
 function AgentProjectsGreetings() {
+  const { t } = useTranslation();
   return (
     <Card className="bg-body-tertiary dark__bg-opacity-50 shadow-none h-100">
       <Background image={greetingsBg} className="bg-card d-none d-sm-block" />
@@ -58,14 +60,17 @@ function AgentProjectsGreetings() {
           <FontAwesomeIcon icon={faRobot} className="text-white" size="2x" />
         </div>
         <div className="ms-3">
-          <h6 className="mb-1 text-primary">AI Agents</h6>
+          <h6 className="mb-1 text-primary">
+            {t('aiAgents.greetings.kicker')}
+          </h6>
           <h4 className="mb-0 text-primary fw-bold">
-            Agent
-            <span className="text-info fw-medium"> Projects</span>
+            {t('aiAgents.greetings.title')}
+            <span className="text-info fw-medium">
+              {t('aiAgents.greetings.titleAccent')}
+            </span>
           </h4>
           <p className="mb-0 mt-1 text-muted small">
-            Manage AI agent projects with scoped RAG documents and Hindsight
-            memory banks
+            {t('aiAgents.greetings.subtitle')}
           </p>
         </div>
       </Card.Header>
@@ -88,6 +93,7 @@ function ProjectFormModal({
   onHide,
   editingProject
 }: ProjectFormModalProps) {
+  const { t } = useTranslation();
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [status, setStatus] = useState<'active' | 'archived'>('active');
@@ -140,46 +146,60 @@ function ProjectFormModal({
   return (
     <Modal show={show} onHide={onHide} onEnter={handleEnter}>
       <Modal.Header closeButton>
-        <Modal.Title>{isEditing ? 'Edit Project' : 'New Project'}</Modal.Title>
+        <Modal.Title>
+          {isEditing
+            ? t('aiAgents.projectForm.titleEdit')
+            : t('aiAgents.projectForm.titleCreate')}
+        </Modal.Title>
       </Modal.Header>
       <Modal.Body>
         <Form.Group className="mb-3">
-          <Form.Label className="small">Name</Form.Label>
+          <Form.Label className="small">
+            {t('aiAgents.projectForm.nameLabel')}
+          </Form.Label>
           <Form.Control
             size="sm"
             value={name}
             onChange={e => setName(e.target.value)}
-            placeholder="e.g. ISO 9001 Compliance Agent"
+            placeholder={t('aiAgents.projectForm.namePlaceholder')}
           />
         </Form.Group>
         <Form.Group className="mb-3">
-          <Form.Label className="small">Description</Form.Label>
+          <Form.Label className="small">
+            {t('aiAgents.projectForm.descriptionLabel')}
+          </Form.Label>
           <Form.Control
             as="textarea"
             rows={3}
             size="sm"
             value={description}
             onChange={e => setDescription(e.target.value)}
-            placeholder="Describe the purpose and scope of this agent project..."
+            placeholder={t('aiAgents.projectForm.descriptionPlaceholder')}
           />
         </Form.Group>
         {isEditing && (
           <Form.Group>
-            <Form.Label className="small">Status</Form.Label>
+            <Form.Label className="small">
+              {t('aiAgents.projectForm.statusLabel')}
+            </Form.Label>
             <Form.Select
               size="sm"
               value={status}
               onChange={e => setStatus(e.target.value as 'active' | 'archived')}
             >
-              <option value="active">Active</option>
-              <option value="archived">Archived</option>
+              <option value="active">
+                {t('aiAgents.projectForm.statusActive')}
+              </option>
+              <option value="archived">
+                {t('aiAgents.projectForm.statusArchived')}
+              </option>
             </Form.Select>
           </Form.Group>
         )}
       </Modal.Body>
       <Modal.Footer>
         <Button variant="secondary" size="sm" onClick={onHide}>
-          Cancel
+          {t('aiAgents.projectForm.cancel')}
         </Button>
         <Button
           variant="primary"
@@ -190,9 +210,9 @@ function ProjectFormModal({
           {saving ? (
             <Spinner size="sm" />
           ) : isEditing ? (
-            'Save Changes'
+            t('aiAgents.projectForm.saveChanges')
           ) : (
-            'Create'
+            t('aiAgents.projectForm.create')
           )}
         </Button>
       </Modal.Footer>
@@ -215,6 +235,7 @@ function DeleteProjectModal({
   onHide,
   project
 }: DeleteProjectModalProps) {
+  const { t } = useTranslation();
   const [deleteProject, { isLoading }] = useDeleteProjectMutation();
 
   const handleConfirm = useCallback(async () => {
@@ -232,16 +253,19 @@ function DeleteProjectModal({
       <Modal.Header>
         <Modal.Title className="text-danger">
           <FontAwesomeIcon icon={faExclamationTriangle} className="me-2" />
-          Delete Project
+          {t('aiAgents.deleteModal.title')}
         </Modal.Title>
       </Modal.Header>
       <Modal.Body>
         <p>
-          Are you sure you want to delete <strong>{project?.name}</strong>?
+          <Trans
+            i18nKey="aiAgents.deleteModal.body"
+            values={{ name: project?.name }}
+            components={{ strong: <strong /> }}
+          />
           <br />
           <span className="text-muted">
-            This will remove the project, its Hindsight memory bank, and all
-            conversations. This action cannot be undone.
+            {t('aiAgents.deleteModal.warning')}
           </span>
         </p>
       </Modal.Body>
@@ -252,7 +276,7 @@ function DeleteProjectModal({
           onClick={onHide}
           disabled={isLoading}
         >
-          Cancel
+          {t('aiAgents.deleteModal.cancel')}
         </Button>
         <Button
           variant="danger"
@@ -261,7 +285,7 @@ function DeleteProjectModal({
           disabled={isLoading}
         >
           {isLoading ? <Spinner size="sm" className="me-1" /> : null}
-          Delete
+          {t('aiAgents.deleteModal.confirm')}
         </Button>
       </Modal.Footer>
     </Modal>
@@ -283,6 +307,7 @@ function ManageDocumentsModal({
   onHide,
   project
 }: ManageDocumentsModalProps) {
+  const { t } = useTranslation();
   const { data: ragData, isLoading: loadingDocs } = useListDocumentsQuery(
     { status: 'completed' },
     { skip: !show }
@@ -323,28 +348,29 @@ function ManageDocumentsModal({
       <Modal.Header closeButton>
         <Modal.Title>
           <FontAwesomeIcon icon={faFileAlt} className="me-2 text-primary" />
-          Documents &mdash; {project?.name}
+          {t('aiAgents.documentsModal.title', { name: project?.name ?? '' })}
         </Modal.Title>
       </Modal.Header>
       <Modal.Body style={{ maxHeight: 400, overflowY: 'auto' }}>
         {loadingDocs ? (
           <div className="text-center py-4">
             <Spinner size="sm" />
-            <span className="ms-2 text-muted">Loading documents...</span>
+            <span className="ms-2 text-muted">
+              {t('aiAgents.documentsModal.loading')}
+            </span>
           </div>
         ) : allDocs.length === 0 ? (
           <p className="text-muted text-center py-3">
-            No completed RAG documents found. Ingest documents first under AI
-            &rarr; Documents.
+            {t('aiAgents.documentsModal.empty')}
           </p>
         ) : (
           <Table hover size="sm" className="mb-0">
             <thead className="bg-body-tertiary">
               <tr>
                 <th style={{ width: 40 }}></th>
-                <th>Document</th>
-                <th>Standard</th>
-                <th>Chunks</th>
+                <th>{t('aiAgents.documentsModal.colDocument')}</th>
+                <th>{t('aiAgents.documentsModal.colStandard')}</th>
+                <th>{t('aiAgents.documentsModal.colChunks')}</th>
               </tr>
             </thead>
             <tbody>
@@ -368,7 +394,7 @@ function ManageDocumentsModal({
                     </td>
                     <td className="fw-semibold">{doc.title}</td>
                     <td className="text-muted small">
-                      {doc.isoStandard || '-'}
+                      {doc.isoStandard || t('aiAgents.documentsModal.dash')}
                     </td>
                     <td>
                       <Badge bg="secondary" className="bg-opacity-25 text-body">
@@ -384,11 +410,12 @@ function ManageDocumentsModal({
       </Modal.Body>
       <Modal.Footer>
         <span className="me-auto text-muted small">
-          {assignedIds.size} document{assignedIds.size !== 1 ? 's' : ''}{' '}
-          assigned
+          {t('aiAgents.documentsModal.assignedCount', {
+            count: assignedIds.size
+          })}
         </span>
         <Button variant="primary" size="sm" onClick={onHide}>
-          Done
+          {t('aiAgents.documentsModal.done')}
         </Button>
       </Modal.Footer>
     </Modal>
@@ -405,13 +432,24 @@ interface SettingsPanelProps {
   project: AgentProject | null;
 }
 
-const DISPOSITION_LABELS: Record<string, { low: string; high: string }> = {
-  skepticism: { low: 'Trusting', high: 'Strict to docs' },
-  literalism: { low: 'Creative', high: 'Literal' },
-  empathy: { low: 'Detached', high: 'Helpful / warm' }
-};
-
 function SettingsPanel({ show, onHide, project }: SettingsPanelProps) {
+  const { t } = useTranslation();
+
+  const dispositionLabels: Record<string, { low: string; high: string }> = {
+    skepticism: {
+      low: t('aiAgents.settings.dispositionLabels.skepticismLow'),
+      high: t('aiAgents.settings.dispositionLabels.skepticismHigh')
+    },
+    literalism: {
+      low: t('aiAgents.settings.dispositionLabels.literalismLow'),
+      high: t('aiAgents.settings.dispositionLabels.literalismHigh')
+    },
+    empathy: {
+      low: t('aiAgents.settings.dispositionLabels.empathyLow'),
+      high: t('aiAgents.settings.dispositionLabels.empathyHigh')
+    }
+  };
+
   const { data } = useGetProjectSettingsQuery(project?.uuid ?? '', {
     skip: !show || !project
   });
@@ -491,7 +529,9 @@ function SettingsPanel({ show, onHide, project }: SettingsPanelProps) {
     <Form.Group className="mb-3" key={key}>
       <div className="d-flex justify-content-between">
         <Form.Label className="small mb-1">{label}</Form.Label>
-        <small className="text-muted">{value === 0 ? 'Default' : value}</small>
+        <small className="text-muted">
+          {value === 0 ? t('aiAgents.settings.sliderDefault') : value}
+        </small>
       </div>
       <Form.Range
         min={0}
@@ -501,8 +541,8 @@ function SettingsPanel({ show, onHide, project }: SettingsPanelProps) {
         onChange={e => setter(Number(e.target.value))}
       />
       <div className="d-flex justify-content-between">
-        <small className="text-muted">{DISPOSITION_LABELS[key]?.low}</small>
-        <small className="text-muted">{DISPOSITION_LABELS[key]?.high}</small>
+        <small className="text-muted">{dispositionLabels[key]?.low}</small>
+        <small className="text-muted">{dispositionLabels[key]?.high}</small>
       </div>
     </Form.Group>
   );
@@ -517,28 +557,30 @@ function SettingsPanel({ show, onHide, project }: SettingsPanelProps) {
       <Offcanvas.Header closeButton>
         <Offcanvas.Title>
           <FontAwesomeIcon icon={faSlidersH} className="me-2" />
-          Agent Settings — {project?.name}
+          {t('aiAgents.settings.title', { name: project?.name ?? '' })}
         </Offcanvas.Title>
       </Offcanvas.Header>
       <Offcanvas.Body>
         <Form.Group className="mb-3">
-          <Form.Label className="small fw-semibold">System Prompt</Form.Label>
+          <Form.Label className="small fw-semibold">
+            {t('aiAgents.settings.systemPromptLabel')}
+          </Form.Label>
           <Form.Control
             as="textarea"
             rows={3}
             size="sm"
             value={systemPrompt}
             onChange={e => setSystemPrompt(e.target.value)}
-            placeholder="Custom instructions prepended to every query..."
+            placeholder={t('aiAgents.settings.systemPromptPlaceholder')}
           />
           <Form.Text className="text-muted">
-            Overrides the persona's default context
+            {t('aiAgents.settings.systemPromptHelp')}
           </Form.Text>
         </Form.Group>
 
         <Form.Group className="mb-3">
           <Form.Label className="small fw-semibold">
-            Extra Directives
+            {t('aiAgents.settings.directivesLabel')}
           </Form.Label>
           <Form.Control
             as="textarea"
@@ -546,53 +588,76 @@ function SettingsPanel({ show, onHide, project }: SettingsPanelProps) {
             size="sm"
             value={directives}
             onChange={e => setDirectives(e.target.value)}
-            placeholder="One directive per line..."
+            placeholder={t('aiAgents.settings.directivesPlaceholder')}
           />
           <Form.Text className="text-muted">
-            Added on top of persona directives
+            {t('aiAgents.settings.directivesHelp')}
           </Form.Text>
         </Form.Group>
 
         <hr />
         <p className="small fw-semibold mb-2">
-          Disposition (0 = use persona default)
+          {t('aiAgents.settings.dispositionHeading')}
         </p>
-        {renderSlider('Skepticism', skepticism, setSkepticism, 'skepticism')}
-        {renderSlider('Literalism', literalism, setLiteralism, 'literalism')}
-        {renderSlider('Empathy', empathy, setEmpathy, 'empathy')}
+        {renderSlider(
+          t('aiAgents.settings.sliderSkepticism'),
+          skepticism,
+          setSkepticism,
+          'skepticism'
+        )}
+        {renderSlider(
+          t('aiAgents.settings.sliderLiteralism'),
+          literalism,
+          setLiteralism,
+          'literalism'
+        )}
+        {renderSlider(
+          t('aiAgents.settings.sliderEmpathy'),
+          empathy,
+          setEmpathy,
+          'empathy'
+        )}
 
         <hr />
         <Form.Group className="mb-3">
-          <Form.Label className="small fw-semibold">Response Style</Form.Label>
+          <Form.Label className="small fw-semibold">
+            {t('aiAgents.settings.temperatureLabel')}
+          </Form.Label>
           <Form.Select
             size="sm"
             value={temperature}
             onChange={e => setTemperature(e.target.value)}
           >
-            <option value="">Persona default</option>
-            <option value="precise">Precise — factual, no speculation</option>
-            <option value="balanced">Balanced</option>
+            <option value="">
+              {t('aiAgents.settings.temperaturePersona')}
+            </option>
+            <option value="precise">
+              {t('aiAgents.settings.temperaturePrecise')}
+            </option>
+            <option value="balanced">
+              {t('aiAgents.settings.temperatureBalanced')}
+            </option>
             <option value="creative">
-              Creative — exploratory, suggests alternatives
+              {t('aiAgents.settings.temperatureCreative')}
             </option>
           </Form.Select>
         </Form.Group>
 
         <Form.Group className="mb-3">
           <Form.Label className="small fw-semibold">
-            Response Language
+            {t('aiAgents.settings.languageLabel')}
           </Form.Label>
           <Form.Select
             size="sm"
             value={language}
             onChange={e => setLanguage(e.target.value)}
           >
-            <option value="">Auto (follow query language)</option>
-            <option value="en">English</option>
-            <option value="it">Italiano</option>
-            <option value="es">Espanol</option>
-            <option value="de">Deutsch</option>
-            <option value="fr">Francais</option>
+            <option value="">{t('aiAgents.settings.languageAuto')}</option>
+            <option value="en">{t('aiAgents.settings.languageEn')}</option>
+            <option value="it">{t('aiAgents.settings.languageIt')}</option>
+            <option value="es">{t('aiAgents.settings.languageEs')}</option>
+            <option value="de">{t('aiAgents.settings.languageDe')}</option>
+            <option value="fr">{t('aiAgents.settings.languageFr')}</option>
           </Form.Select>
         </Form.Group>
 
@@ -603,7 +668,7 @@ function SettingsPanel({ show, onHide, project }: SettingsPanelProps) {
           disabled={saving}
         >
           {saving ? <Spinner size="sm" className="me-1" /> : null}
-          Save Settings
+          {t('aiAgents.settings.save')}
         </Button>
       </Offcanvas.Body>
     </Offcanvas>
@@ -615,6 +680,7 @@ function SettingsPanel({ show, onHide, project }: SettingsPanelProps) {
 // ---------------------------------------------------------------------------
 
 function ProjectsTable() {
+  const { t } = useTranslation();
   const [statusFilter, setStatusFilter] = useState<string>('');
   const [showFormModal, setShowFormModal] = useState(false);
   const [editingProject, setEditingProject] = useState<AgentProject | null>(
@@ -674,14 +740,18 @@ function ProjectsTable() {
                 onChange={e => setStatusFilter(e.target.value)}
                 style={{ width: 150 }}
               >
-                <option value="">All statuses</option>
-                <option value="active">Active</option>
-                <option value="archived">Archived</option>
+                <option value="">{t('aiAgents.table.filterAll')}</option>
+                <option value="active">
+                  {t('aiAgents.table.filterActive')}
+                </option>
+                <option value="archived">
+                  {t('aiAgents.table.filterArchived')}
+                </option>
               </Form.Select>
             </div>
             <Button size="sm" variant="primary" onClick={openCreate}>
               <FontAwesomeIcon icon={faPlus} className="me-1" />
-              New Project
+              {t('aiAgents.table.newProject')}
             </Button>
           </div>
         </Card.Header>
@@ -690,7 +760,9 @@ function ProjectsTable() {
           {isLoading ? (
             <div className="text-center py-5">
               <Spinner animation="border" variant="primary" />
-              <p className="mt-2 text-muted">Loading projects...</p>
+              <p className="mt-2 text-muted">
+                {t('aiAgents.table.loadingProjects')}
+              </p>
             </div>
           ) : projects.length === 0 ? (
             <div className="text-center py-5">
@@ -699,9 +771,9 @@ function ProjectsTable() {
                 className="text-muted mb-3"
                 size="3x"
               />
-              <p className="text-muted">No projects found</p>
+              <p className="text-muted">{t('aiAgents.table.empty')}</p>
               <Button variant="outline-primary" size="sm" onClick={openCreate}>
-                Create your first project
+                {t('aiAgents.table.createFirst')}
               </Button>
             </div>
           ) : (
@@ -709,12 +781,14 @@ function ProjectsTable() {
               <Table hover className="mb-0">
                 <thead className="bg-body-tertiary">
                   <tr>
-                    <th>Name</th>
-                    <th>Description</th>
-                    <th>Status</th>
-                    <th>Documents</th>
-                    <th>Created</th>
-                    <th className="text-end">Actions</th>
+                    <th>{t('aiAgents.table.colName')}</th>
+                    <th>{t('aiAgents.table.colDescription')}</th>
+                    <th>{t('aiAgents.table.colStatus')}</th>
+                    <th>{t('aiAgents.table.colDocuments')}</th>
+                    <th>{t('aiAgents.table.colCreated')}</th>
+                    <th className="text-end">
+                      {t('aiAgents.table.colActions')}
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -772,7 +846,7 @@ function ProjectsTable() {
                                 icon={faFileAlt}
                                 className="me-2"
                               />
-                              Documents
+                              {t('aiAgents.table.actionDocuments')}
                             </Dropdown.Item>
                             <Dropdown.Item
                               onClick={() => setSettingsProject(project)}
@@ -781,11 +855,11 @@ function ProjectsTable() {
                                 icon={faSlidersH}
                                 className="me-2"
                               />
-                              Settings
+                              {t('aiAgents.table.actionSettings')}
                             </Dropdown.Item>
                             <Dropdown.Item onClick={() => openEdit(project)}>
                               <FontAwesomeIcon icon={faEdit} className="me-2" />
-                              Edit
+                              {t('aiAgents.table.actionEdit')}
                             </Dropdown.Item>
                             <Dropdown.Divider />
                             <Dropdown.Item
@@ -796,7 +870,7 @@ function ProjectsTable() {
                                 icon={faTrash}
                                 className="me-2"
                               />
-                              Delete
+                              {t('aiAgents.table.actionDelete')}
                             </Dropdown.Item>
                           </Dropdown.Menu>
                         </Dropdown>

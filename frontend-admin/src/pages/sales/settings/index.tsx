@@ -12,6 +12,7 @@ import {
   Badge
 } from 'react-bootstrap';
 import { Link, useSearchParams } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
   faCog,
@@ -46,19 +47,25 @@ function PromptTable({
   prompts: SalesPromptConfig[];
   onEdit: (id: string) => void;
 }) {
+  const { t } = useTranslation();
+
   if (prompts.length === 0) {
-    return <div className="text-center text-muted py-4">No prompts found</div>;
+    return (
+      <div className="text-center text-muted py-4">
+        {t('sales.settings.promptList.empty')}
+      </div>
+    );
   }
 
   return (
     <Table hover responsive className="mb-0">
       <thead>
         <tr>
-          <th>Name</th>
-          <th>Description</th>
-          <th>Status</th>
-          <th>Size</th>
-          <th>Updated</th>
+          <th>{t('sales.settings.promptList.colName')}</th>
+          <th>{t('sales.settings.promptList.colDescription')}</th>
+          <th>{t('sales.settings.promptList.colStatus')}</th>
+          <th>{t('sales.settings.promptList.colSize')}</th>
+          <th>{t('sales.settings.promptList.colUpdated')}</th>
           <th></th>
         </tr>
       </thead>
@@ -79,13 +86,21 @@ function PromptTable({
             </td>
             <td>
               {p.isCustom ? (
-                <Badge bg="warning">Customized</Badge>
+                <Badge bg="warning">
+                  {t('sales.settings.promptList.badgeCustomized')}
+                </Badge>
               ) : (
-                <Badge bg="secondary">Default</Badge>
+                <Badge bg="secondary">
+                  {t('sales.settings.promptList.badgeDefault')}
+                </Badge>
               )}
             </td>
             <td>
-              <small>{p.content?.length || 0} chars</small>
+              <small>
+                {t('sales.settings.promptList.sizeChars', {
+                  count: p.content?.length || 0
+                })}
+              </small>
             </td>
             <td>
               <small>{new Date(p.updatedAt).toLocaleDateString()}</small>
@@ -127,6 +142,7 @@ function PromptEditor({
   promptId: string;
   onBack: () => void;
 }) {
+  const { t } = useTranslation();
   const { data: prompt, isLoading } = useGetSalesPromptQuery(promptId);
   const [updatePrompt, { isLoading: saving }] = useUpdateSalesPromptMutation();
   const [resetPrompt, { isLoading: resetting }] = useResetSalesPromptMutation();
@@ -170,12 +186,7 @@ function PromptEditor({
   };
 
   const handleReset = async () => {
-    if (
-      !window.confirm(
-        'Reset this prompt to the built-in default? Your custom edits will be lost.'
-      )
-    )
-      return;
+    if (!window.confirm(t('sales.settings.promptEditor.resetConfirm'))) return;
     const result = await resetPrompt(prompt.uuid).unwrap();
     setContent(result.content);
     setDirty(false);
@@ -209,11 +220,19 @@ function PromptEditor({
                 </div>
               </div>
               <div className="d-flex align-items-center gap-2">
-                {prompt.isCustom && <Badge bg="warning">Customized</Badge>}
-                {dirty && <Badge bg="secondary">Unsaved changes</Badge>}
+                {prompt.isCustom && (
+                  <Badge bg="warning">
+                    {t('sales.settings.promptList.badgeCustomized')}
+                  </Badge>
+                )}
+                {dirty && (
+                  <Badge bg="secondary">
+                    {t('sales.settings.promptEditor.unsavedChanges')}
+                  </Badge>
+                )}
                 {saved && (
                   <Alert variant="success" className="mb-0 py-1 px-3 d-inline">
-                    Saved!
+                    {t('sales.settings.promptEditor.savedToast')}
                   </Alert>
                 )}
                 <Button
@@ -227,7 +246,7 @@ function PromptEditor({
                   ) : (
                     <FontAwesomeIcon icon={faUndo} className="me-1" />
                   )}
-                  Reset Default
+                  {t('sales.settings.promptEditor.resetButton')}
                 </Button>
                 <Button
                   variant="primary"
@@ -240,7 +259,7 @@ function PromptEditor({
                   ) : (
                     <FontAwesomeIcon icon={faSave} className="me-1" />
                   )}
-                  Save
+                  {t('sales.settings.promptEditor.saveButton')}
                 </Button>
               </div>
             </Card.Header>
@@ -252,9 +271,12 @@ function PromptEditor({
         <Col lg={8}>
           <Card>
             <Card.Header className="d-flex justify-content-between align-items-center">
-              <h6 className="mb-0">Prompt Template</h6>
+              <h6 className="mb-0">{t('sales.settings.promptTemplate')}</h6>
               <small className="text-muted">
-                {content.length} chars | {content.split('\n').length} lines
+                {t('sales.settings.promptEditor.promptStats', {
+                  chars: content.length,
+                  lines: content.split('\n').length
+                })}
               </small>
             </Card.Header>
             <Card.Body className="p-0">
@@ -282,11 +304,13 @@ function PromptEditor({
         <Col lg={4}>
           <Card className="mb-3">
             <Card.Header>
-              <h6 className="mb-0">Prompt Info</h6>
+              <h6 className="mb-0">{t('sales.settings.promptInfo')}</h6>
             </Card.Header>
             <Card.Body>
               <Form.Group className="mb-3">
-                <Form.Label className="fw-semibold">Display Name</Form.Label>
+                <Form.Label className="fw-semibold">
+                  {t('sales.settings.promptEditor.displayNameLabel')}
+                </Form.Label>
                 <Form.Control
                   value={displayName}
                   onChange={e => {
@@ -296,7 +320,9 @@ function PromptEditor({
                 />
               </Form.Group>
               <Form.Group className="mb-3">
-                <Form.Label className="fw-semibold">Description</Form.Label>
+                <Form.Label className="fw-semibold">
+                  {t('sales.settings.promptEditor.descriptionLabel')}
+                </Form.Label>
                 <Form.Control
                   as="textarea"
                   rows={2}
@@ -308,15 +334,15 @@ function PromptEditor({
                 />
               </Form.Group>
               <dl className="mb-0 small">
-                <dt>Category</dt>
+                <dt>{t('sales.settings.promptEditor.categoryLabel')}</dt>
                 <dd>
                   <Badge bg={CATEGORY_COLORS[prompt.category] || 'secondary'}>
                     {prompt.category}
                   </Badge>
                 </dd>
-                <dt>Internal Name</dt>
+                <dt>{t('sales.settings.promptEditor.internalNameLabel')}</dt>
                 <dd className="font-monospace">{prompt.name}</dd>
-                <dt>Last Updated</dt>
+                <dt>{t('sales.settings.promptEditor.lastUpdatedLabel')}</dt>
                 <dd>{new Date(prompt.updatedAt).toLocaleString()}</dd>
               </dl>
             </Card.Body>
@@ -324,7 +350,7 @@ function PromptEditor({
 
           <Card>
             <Card.Header>
-              <h6 className="mb-0">Template Variables</h6>
+              <h6 className="mb-0">{t('sales.settings.templateVariables')}</h6>
             </Card.Header>
             <Card.Body>
               {templateVars.length > 0 ? (
@@ -344,18 +370,18 @@ function PromptEditor({
                 </div>
               ) : (
                 <small className="text-muted">
-                  No template variables detected
+                  {t('sales.settings.promptEditor.noTemplateVars')}
                 </small>
               )}
               <hr />
               <small className="text-muted">
-                Available variables: <code>URL</code>, <code>Locale</code>,{' '}
-                <code>CompanyName</code>, <code>Industry</code>,{' '}
-                <code>Description</code>, <code>RawText</code>,{' '}
-                <code>TechStack</code>, <code>TeamMembers</code>,{' '}
-                <code>SocialLinks</code>, <code>ContactInfo</code>,{' '}
-                <code>AboutText</code>, <code>RegistryData</code>,{' '}
-                <code>Context</code>
+                {t('sales.settings.promptEditor.availableVarsHeading')}{' '}
+                <code>URL</code>, <code>Locale</code>, <code>CompanyName</code>,{' '}
+                <code>Industry</code>, <code>Description</code>,{' '}
+                <code>RawText</code>, <code>TechStack</code>,{' '}
+                <code>TeamMembers</code>, <code>SocialLinks</code>,{' '}
+                <code>ContactInfo</code>, <code>AboutText</code>,{' '}
+                <code>RegistryData</code>, <code>Context</code>
               </small>
             </Card.Body>
           </Card>
@@ -376,6 +402,7 @@ function PromptListTab({
   icon: any;
   subtitle: string;
 }) {
+  const { t } = useTranslation();
   const [editingId, setEditingId] = useState<string | null>(null);
   const { data, isLoading } = useListSalesPromptsQuery({});
   const prompts = (data?.prompts || []).filter(p => p.category === category);
@@ -394,9 +421,13 @@ function PromptListTab({
             <h5 className="mb-0">
               <FontAwesomeIcon
                 icon={icon}
-                className={`text-${category === 'agents' ? 'primary' : 'info'} me-2`}
+                className={`text-${
+                  category === 'agents' ? 'primary' : 'info'
+                } me-2`}
               />
-              {category === 'agents' ? 'Agent Prompts' : 'Skill Prompts'}
+              {category === 'agents'
+                ? t('sales.settings.promptList.agentsTitle')
+                : t('sales.settings.promptList.skillsTitle')}
               <small className="text-muted fw-normal ms-2">— {subtitle}</small>
             </h5>
           </Card.Header>
@@ -418,6 +449,7 @@ function PromptListTab({
 // ─── LLM Configuration Tab ───
 
 function LLMConfigTab() {
+  const { t } = useTranslation();
   const { data: settings, isLoading: settingsLoading } =
     useGetSalesSettingsQuery();
   const { data: modelsData, isLoading: modelsLoading } = useListAIModelsQuery({
@@ -474,35 +506,44 @@ function LLMConfigTab() {
       <Col lg={8}>
         <Card>
           <Card.Header>
-            <h5 className="mb-0">LLM Configuration</h5>
+            <h5 className="mb-0">{t('sales.settings.llm.title')}</h5>
           </Card.Header>
           <Card.Body>
             <Form>
               <Form.Group className="mb-4">
-                <Form.Label className="fw-semibold">AI Model</Form.Label>
+                <Form.Label className="fw-semibold">
+                  {t('sales.settings.llm.modelLabel')}
+                </Form.Label>
                 <Form.Select
                   value={modelUuid}
                   onChange={e => setModelUuid(e.target.value)}
                 >
                   <option value="">
-                    System Default
+                    {t('sales.settings.llm.modelDefaultOption')}
                     {defaultModel
-                      ? ` (${defaultModel.name} — ${defaultModel.modelName})`
+                      ? t('sales.settings.llm.modelDefaultSuffix', {
+                          name: defaultModel.name,
+                          modelName: defaultModel.modelName
+                        })
                       : ''}
                   </option>
                   {models.map((m: any) => (
                     <option key={m.uuid} value={m.uuid}>
                       {m.name} — {m.modelName}
                       {m.provider !== 'ollama' ? ` (${m.provider})` : ''}
-                      {m.isDefault ? ' ★' : ''}
-                      {!m.isActive ? ' [disabled]' : ''}
+                      {m.isDefault
+                        ? t('sales.settings.llm.modelDefaultStar')
+                        : ''}
+                      {!m.isActive
+                        ? t('sales.settings.llm.modelDisabledSuffix')
+                        : ''}
                     </option>
                   ))}
                 </Form.Select>
                 <Form.Text className="text-muted">
-                  Select which LLM to use for prospect analysis and skills.{' '}
+                  {t('sales.settings.llm.modelHelpIntro')}{' '}
                   <Link to="/admin/modules/aimodels">
-                    Manage models{' '}
+                    {t('sales.settings.llm.manageModelsLink')}{' '}
                     <FontAwesomeIcon icon={faExternalLinkAlt} size="xs" />
                   </Link>
                 </Form.Text>
@@ -510,8 +551,12 @@ function LLMConfigTab() {
 
               <Form.Group className="mb-4">
                 <Form.Label className="fw-semibold">
-                  Temperature:{' '}
-                  {temperature > 0 ? temperature.toFixed(2) : 'Model default'}
+                  {t('sales.settings.llm.temperatureLabel', {
+                    value:
+                      temperature > 0
+                        ? temperature.toFixed(2)
+                        : t('sales.settings.llm.temperatureModelDefault')
+                  })}
                 </Form.Label>
                 <Form.Range
                   min={0}
@@ -521,14 +566,13 @@ function LLMConfigTab() {
                   onChange={e => setTemperature(parseFloat(e.target.value))}
                 />
                 <Form.Text className="text-muted">
-                  0 = use model default. Lower = more focused/deterministic.
-                  Higher = more creative.
+                  {t('sales.settings.llm.temperatureHelp')}
                 </Form.Text>
               </Form.Group>
 
               <Form.Group className="mb-4">
                 <Form.Label className="fw-semibold">
-                  Max Output Tokens
+                  {t('sales.settings.llm.maxTokensLabel')}
                 </Form.Label>
                 <Form.Control
                   type="number"
@@ -537,26 +581,33 @@ function LLMConfigTab() {
                   step={256}
                   value={maxTokens}
                   onChange={e => setMaxTokens(parseInt(e.target.value) || 0)}
-                  placeholder="0 = model default (4096)"
+                  placeholder={t('sales.settings.llm.maxTokensPlaceholder')}
                 />
                 <Form.Text className="text-muted">
-                  Maximum tokens in LLM responses. 0 uses the default (4096).
+                  {t('sales.settings.llm.maxTokensHelp')}
                 </Form.Text>
               </Form.Group>
 
               <Form.Group className="mb-4">
-                <Form.Label className="fw-semibold">Default Locale</Form.Label>
+                <Form.Label className="fw-semibold">
+                  {t('sales.settings.llm.localeLabel')}
+                </Form.Label>
                 <Form.Select
                   value={locale}
                   onChange={e => setLocale(e.target.value)}
                 >
-                  <option value="">System default (Italian)</option>
-                  <option value="it">Italian</option>
-                  <option value="en">English</option>
+                  <option value="">
+                    {t('sales.settings.llm.localeSystemDefault')}
+                  </option>
+                  <option value="it">
+                    {t('sales.settings.llm.localeItalian')}
+                  </option>
+                  <option value="en">
+                    {t('sales.settings.llm.localeEnglish')}
+                  </option>
                 </Form.Select>
                 <Form.Text className="text-muted">
-                  Controls prompt language and cultural adaptation for outreach,
-                  proposals, and qualification.
+                  {t('sales.settings.llm.localeHelp')}
                 </Form.Text>
               </Form.Group>
 
@@ -564,15 +615,12 @@ function LLMConfigTab() {
                 <Form.Check
                   type="switch"
                   id="batchMode"
-                  label="Batch Mode (50% cost savings)"
+                  label={t('sales.settings.llm.batchModeLabel')}
                   checked={batchMode}
                   onChange={e => setBatchMode(e.target.checked)}
                 />
                 <Form.Text className="text-muted">
-                  Submit prospect analysis as a batch job via the provider's
-                  batch API. Results typically arrive within 1 hour. Only works
-                  with cloud LLMs (OpenAI, Anthropic, Gemini). Local models
-                  always use standard mode.
+                  {t('sales.settings.llm.batchModeHelp')}
                 </Form.Text>
               </Form.Group>
 
@@ -587,11 +635,11 @@ function LLMConfigTab() {
                   ) : (
                     <FontAwesomeIcon icon={faSave} className="me-1" />
                   )}
-                  Save Settings
+                  {t('sales.settings.llm.saveButton')}
                 </Button>
                 {saved && (
                   <Alert variant="success" className="mb-0 py-1 px-3">
-                    Saved!
+                    {t('sales.settings.llm.savedToast')}
                   </Alert>
                 )}
               </div>
@@ -603,42 +651,59 @@ function LLMConfigTab() {
       <Col lg={4}>
         <Card>
           <Card.Header>
-            <h5 className="mb-0">Active Configuration</h5>
+            <h5 className="mb-0">{t('sales.settings.activeConfiguration')}</h5>
           </Card.Header>
           <Card.Body>
             <dl className="mb-0">
-              <dt>Model</dt>
+              <dt>{t('sales.settings.activeConfig.modelLabel')}</dt>
               <dd className="text-muted">
                 {selectedModel
-                  ? `${selectedModel.name} (${selectedModel.modelName})`
+                  ? t('sales.settings.activeConfig.modelSelected', {
+                      name: selectedModel.name,
+                      modelName: selectedModel.modelName
+                    })
                   : defaultModel
-                    ? `${defaultModel.name} (${defaultModel.modelName}) — system default`
-                    : 'No LLM configured'}
+                    ? `${t('sales.settings.activeConfig.modelSelected', {
+                        name: defaultModel.name,
+                        modelName: defaultModel.modelName
+                      })}${t(
+                        'sales.settings.activeConfig.modelSystemDefaultSuffix'
+                      )}`
+                    : t('sales.settings.activeConfig.modelNone')}
               </dd>
-              <dt>Provider</dt>
+              <dt>{t('sales.settings.activeConfig.providerLabel')}</dt>
               <dd className="text-muted">
-                {(selectedModel || defaultModel)?.provider || '—'}
+                {(selectedModel || defaultModel)?.provider ||
+                  t('sales.settings.activeConfig.providerDash')}
                 {(selectedModel || defaultModel)?.providerCategory === 'local'
-                  ? ' (local)'
-                  : ' (cloud)'}
+                  ? t('sales.settings.activeConfig.providerLocal')
+                  : t('sales.settings.activeConfig.providerCloud')}
               </dd>
-              <dt>Temperature</dt>
+              <dt>{t('sales.settings.activeConfig.temperatureLabel')}</dt>
               <dd className="text-muted">
                 {temperature > 0
                   ? temperature.toFixed(2)
-                  : `Model default (${(selectedModel || defaultModel)?.temperature || 0.1})`}
+                  : t('sales.settings.activeConfig.temperatureModelDefault', {
+                      value: (selectedModel || defaultModel)?.temperature || 0.1
+                    })}
               </dd>
-              <dt>Max Tokens</dt>
+              <dt>{t('sales.settings.activeConfig.maxTokensLabel')}</dt>
               <dd className="text-muted">
                 {maxTokens > 0
                   ? maxTokens
-                  : `Default (${(selectedModel || defaultModel)?.maxTokens || 4096})`}
+                  : t('sales.settings.activeConfig.maxTokensDefault', {
+                      value: (selectedModel || defaultModel)?.maxTokens || 4096
+                    })}
               </dd>
-              <dt>Locale</dt>
-              <dd className="text-muted">{locale || 'Italian (default)'}</dd>
-              <dt>Batch Mode</dt>
+              <dt>{t('sales.settings.activeConfig.localeLabel')}</dt>
               <dd className="text-muted">
-                {batchMode ? 'Enabled (50% savings)' : 'Disabled (real-time)'}
+                {locale || t('sales.settings.activeConfig.localeDefault')}
+              </dd>
+              <dt>{t('sales.settings.activeConfig.batchModeLabel')}</dt>
+              <dd className="text-muted">
+                {batchMode
+                  ? t('sales.settings.activeConfig.batchModeEnabled')
+                  : t('sales.settings.activeConfig.batchModeDisabled')}
               </dd>
             </dl>
           </Card.Body>
@@ -651,6 +716,7 @@ function LLMConfigTab() {
 // ─── Main Settings Page ───
 
 const SalesSettingsPage = () => {
+  const { t } = useTranslation();
   const [searchParams, setSearchParams] = useSearchParams();
   const activeTab = searchParams.get('tab') || 'llm';
 
@@ -672,8 +738,10 @@ const SalesSettingsPage = () => {
                 />
               </div>
               <div className="ms-3">
-                <h6 className="mb-1 text-primary">Sales Intelligence</h6>
-                <h4 className="mb-0 text-primary fw-bold">Settings</h4>
+                <h6 className="mb-1 text-primary">{t('sales.kicker')}</h6>
+                <h4 className="mb-0 text-primary fw-bold">
+                  {t('sales.settings.title')}
+                </h4>
               </div>
             </Card.Header>
           </Card>
@@ -697,17 +765,20 @@ const SalesSettingsPage = () => {
       >
         <Nav.Item>
           <Nav.Link eventKey="llm">
-            <FontAwesomeIcon icon={faCog} className="me-1" /> LLM Configuration
+            <FontAwesomeIcon icon={faCog} className="me-1" />{' '}
+            {t('sales.settings.tabs.llm')}
           </Nav.Link>
         </Nav.Item>
         <Nav.Item>
           <Nav.Link eventKey="agents">
-            <FontAwesomeIcon icon={faRobot} className="me-1" /> Agent Prompts
+            <FontAwesomeIcon icon={faRobot} className="me-1" />{' '}
+            {t('sales.settings.tabs.agents')}
           </Nav.Link>
         </Nav.Item>
         <Nav.Item>
           <Nav.Link eventKey="skills">
-            <FontAwesomeIcon icon={faMagic} className="me-1" /> Skill Prompts
+            <FontAwesomeIcon icon={faMagic} className="me-1" />{' '}
+            {t('sales.settings.tabs.skills')}
           </Nav.Link>
         </Nav.Item>
       </Nav>
@@ -717,14 +788,14 @@ const SalesSettingsPage = () => {
         <PromptListTab
           category="agents"
           icon={faRobot}
-          subtitle="Used during the 5-agent parallel prospect analysis"
+          subtitle={t('sales.settings.promptList.agentsSubtitle')}
         />
       )}
       {activeTab === 'skills' && (
         <PromptListTab
           category="skills"
           icon={faMagic}
-          subtitle="Used by individual skill endpoints"
+          subtitle={t('sales.settings.promptList.skillsSubtitle')}
         />
       )}
     </>

@@ -1,5 +1,6 @@
 import { useState, FormEvent } from 'react';
 import { Alert, Button, Form, Modal } from 'react-bootstrap';
+import { useTranslation } from 'react-i18next';
 import {
   useWebAuthnRegisterBeginMutation,
   useWebAuthnRegisterFinishMutation
@@ -25,6 +26,7 @@ interface Props {
  *   - server rejects the attestation — surfaces with detail in `data`.
  */
 const WebAuthnEnrollDialog = ({ show, onHide }: Props) => {
+  const { t } = useTranslation();
   const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -48,9 +50,7 @@ const WebAuthnEnrollDialog = ({ show, onHide }: Props) => {
     event.preventDefault();
     setError(null);
     if (!browserSupportsWebAuthn()) {
-      setError(
-        'This browser does not support passkeys. Try Chrome, Safari, or Firefox over HTTPS.'
-      );
+      setError(t('userMfa.webauthn.enroll.errors.unsupported'));
       return;
     }
     const trimmed = name.trim() || 'Passkey';
@@ -62,7 +62,7 @@ const WebAuthnEnrollDialog = ({ show, onHide }: Props) => {
         publicKey: opts
       })) as PublicKeyCredential | null;
       if (!cred) {
-        setError('Enrollment was cancelled. Try again when you are ready.');
+        setError(t('userMfa.webauthn.enroll.errors.cancelled'));
         setBusy(false);
         return;
       }
@@ -83,16 +83,16 @@ const WebAuthnEnrollDialog = ({ show, onHide }: Props) => {
       // DOMException from navigator.credentials.create — typically the
       // user cancelled the prompt or the authenticator timed out.
       if (anyErr?.name === 'NotAllowedError') {
-        setError('The enrollment was cancelled or timed out. Try again.');
+        setError(t('userMfa.webauthn.enroll.errors.cancelledOrTimedOut'));
       } else if (anyErr?.name === 'InvalidStateError') {
-        setError('This authenticator is already registered on your account.');
+        setError(t('userMfa.webauthn.enroll.errors.alreadyRegistered'));
       } else if (anyErr?.status === 401) {
-        setError('Could not verify the attestation. Please try again.');
+        setError(t('userMfa.webauthn.enroll.errors.attestationFailed'));
       } else {
         setError(
           anyErr?.data?.detail ??
             anyErr?.message ??
-            'Could not register the passkey.'
+            t('userMfa.webauthn.enroll.errors.generic')
         );
       }
       setBusy(false);
@@ -102,15 +102,11 @@ const WebAuthnEnrollDialog = ({ show, onHide }: Props) => {
   return (
     <Modal show={show} onHide={handleClose} backdrop="static" centered>
       <Modal.Header closeButton={!busy}>
-        <Modal.Title>Add a passkey</Modal.Title>
+        <Modal.Title>{t('userMfa.webauthn.enroll.title')}</Modal.Title>
       </Modal.Header>
       <Form onSubmit={handleSubmit} noValidate>
         <Modal.Body>
-          <p className="fs-10 mb-3">
-            A passkey replaces the authenticator-app code with a tap or
-            biometric prompt. You can use a built-in fingerprint reader, Face
-            ID, or a hardware security key.
-          </p>
+          <p className="fs-10 mb-3">{t('userMfa.webauthn.enroll.intro')}</p>
 
           {error && (
             <Alert
@@ -124,19 +120,16 @@ const WebAuthnEnrollDialog = ({ show, onHide }: Props) => {
           )}
 
           <Form.Group className="mb-2">
-            <Form.Label>Name</Form.Label>
+            <Form.Label>{t('userMfa.webauthn.enroll.nameLabel')}</Form.Label>
             <Form.Control
               type="text"
               autoFocus
               value={name}
               onChange={e => setName(e.target.value)}
-              placeholder="e.g. Yubikey 5C, iPhone Touch ID"
+              placeholder={t('userMfa.webauthn.enroll.namePlaceholder')}
               maxLength={60}
             />
-            <Form.Text muted>
-              A label so you can recognise this passkey later in the settings
-              list.
-            </Form.Text>
+            <Form.Text muted>{t('userMfa.webauthn.enroll.nameHint')}</Form.Text>
           </Form.Group>
         </Modal.Body>
         <Modal.Footer>
@@ -145,10 +138,12 @@ const WebAuthnEnrollDialog = ({ show, onHide }: Props) => {
             onClick={handleClose}
             disabled={busy}
           >
-            Cancel
+            {t('userMfa.webauthn.enroll.cancel')}
           </Button>
           <Button type="submit" variant="primary" disabled={busy}>
-            {busy ? 'Waiting for authenticator…' : 'Register passkey'}
+            {busy
+              ? t('userMfa.webauthn.enroll.registering')
+              : t('userMfa.webauthn.enroll.register')}
           </Button>
         </Modal.Footer>
       </Form>

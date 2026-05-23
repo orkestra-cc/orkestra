@@ -1,5 +1,6 @@
 import { useState, useMemo, FormEvent } from 'react';
 import { Alert, Button, Form, Spinner } from 'react-bootstrap';
+import { useTranslation } from 'react-i18next';
 import { useCreateOrgMutation } from 'store/api/tenantApi';
 import { useAppDispatch } from 'store/hooks';
 import { setMemberships } from 'store/slices/tenantSlice';
@@ -42,13 +43,15 @@ const slugify = (input: string): string =>
  * an env-var-driven default.
  */
 const OrgStep = ({ adminFullName, onNext }: OrgStepProps) => {
+  const { t } = useTranslation();
   const dispatch = useAppDispatch();
   const [createOrg, { isLoading }] = useCreateOrgMutation();
 
   const defaultName = useMemo(() => {
-    const firstName = adminFullName.trim().split(/\s+/)[0] || 'Default';
-    return `${firstName}'s Workspace`;
-  }, [adminFullName]);
+    const firstName =
+      adminFullName.trim().split(/\s+/)[0] || t('setup.org.defaultFirstName');
+    return t('setup.org.defaultName', { firstName });
+  }, [adminFullName, t]);
 
   const [name, setName] = useState(defaultName);
   const [slug, setSlug] = useState(slugify(defaultName));
@@ -70,13 +73,11 @@ const OrgStep = ({ adminFullName, onNext }: OrgStepProps) => {
 
     const trimmedName = name.trim();
     if (!trimmedName) {
-      setError('Organization name is required.');
+      setError(t('setup.org.errorNameRequired'));
       return;
     }
     if (!slug || !/^[a-z0-9-]+$/.test(slug)) {
-      setError(
-        'Slug must contain only lowercase letters, digits, and hyphens.'
-      );
+      setError(t('setup.org.errorSlugInvalid'));
       return;
     }
 
@@ -108,14 +109,10 @@ const OrgStep = ({ adminFullName, onNext }: OrgStepProps) => {
       const anyErr = err as { status?: number; data?: { detail?: string } };
       if (anyErr?.status === 409) {
         setError(
-          anyErr?.data?.detail ||
-            `An organization with slug "${slug}" already exists. Pick a different slug.`
+          anyErr?.data?.detail || t('setup.org.errorSlugConflict', { slug })
         );
       } else {
-        setError(
-          anyErr?.data?.detail ||
-            'Could not create the organization. Please try again.'
-        );
+        setError(anyErr?.data?.detail || t('setup.org.errorGeneric'));
       }
     }
   };
@@ -123,12 +120,8 @@ const OrgStep = ({ adminFullName, onNext }: OrgStepProps) => {
   return (
     <Form onSubmit={handleSubmit} noValidate>
       <div className="mb-4">
-        <h5 className="mb-1">Create your first organization</h5>
-        <p className="text-muted fs-10 mb-0">
-          Orkestra is multi-tenant — every feature lives inside an organization.
-          We&apos;ll create one now and enroll you as the owner. You can rename
-          it or add more organizations later from the admin UI.
-        </p>
+        <h5 className="mb-1">{t('setup.org.title')}</h5>
+        <p className="text-muted fs-10 mb-0">{t('setup.org.intro')}</p>
       </div>
 
       {error && (
@@ -143,20 +136,18 @@ const OrgStep = ({ adminFullName, onNext }: OrgStepProps) => {
       )}
 
       <Form.Group className="mb-3">
-        <Form.Label>Organization name</Form.Label>
+        <Form.Label>{t('setup.org.labelName')}</Form.Label>
         <Form.Control
           type="text"
           value={name}
           onChange={e => handleNameChange(e.target.value)}
           required
         />
-        <Form.Text className="text-muted">
-          Human-readable label shown throughout the admin UI.
-        </Form.Text>
+        <Form.Text className="text-muted">{t('setup.org.nameHelp')}</Form.Text>
       </Form.Group>
 
       <Form.Group className="mb-4">
-        <Form.Label>Slug</Form.Label>
+        <Form.Label>{t('setup.org.labelSlug')}</Form.Label>
         <Form.Control
           type="text"
           value={slug}
@@ -166,10 +157,7 @@ const OrgStep = ({ adminFullName, onNext }: OrgStepProps) => {
           }}
           required
         />
-        <Form.Text className="text-muted">
-          URL-safe identifier. Auto-derived from the name until you edit it.
-          Lowercase letters, digits, and hyphens only.
-        </Form.Text>
+        <Form.Text className="text-muted">{t('setup.org.slugHelp')}</Form.Text>
       </Form.Group>
 
       <div className="d-flex justify-content-end">
@@ -177,10 +165,10 @@ const OrgStep = ({ adminFullName, onNext }: OrgStepProps) => {
           {isLoading ? (
             <>
               <Spinner animation="border" size="sm" className="me-2" />
-              Creating...
+              {t('setup.org.submitting')}
             </>
           ) : (
-            'Create organization'
+            t('setup.org.submit')
           )}
         </Button>
       </div>

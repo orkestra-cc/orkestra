@@ -113,6 +113,16 @@ services:
       # infra containers externally.
       CONTAINER_CONTROL_ENABLED: ${CONTAINER_CONTROL_ENABLED:-true}
 
+      # Marketing import spool — async-import payloads are persisted here
+      # between Enqueue and worker pickup. The schema default
+      # (/var/lib/orkestra/marketing/spool) is not writable by the
+      # non-root container user; override to a path we own + back with a
+      # named volume so spool survives restarts. First-boot seed only —
+      # for an existing install change `importSpoolDir` at
+      # /admin/modules/marketing instead (module_configs is authoritative
+      # after the first boot).
+      MARKETING_IMPORT_SPOOL_DIR: /app/marketing-spool
+
       # Hot reload
       AIR_BUILD_CMD: go build -o ./tmp/main ./cmd/server
       AIR_BIN: ./tmp/main
@@ -126,6 +136,13 @@ services:
     volumes:
       - ../backend:/app
       - ./keys:/app/keys
+      # Marketing import spool — bind mount instead of named volume so
+      # the host dir's ownership (uid 1000 = tore) carries through.
+      # With userns_mode: "host" the container's uid 1000 IS host uid
+      # 1000, so the worker can mkdir/write without a one-shot chown.
+      # Named volumes get created with root ownership (uid 100000 under
+      # the daemon's userns-remap) and would block the worker.
+      - ./marketing-spool-dev:/app/marketing-spool
       # Bind-mount the host Docker socket so the backend can manage module
       # infrastructure containers (e.g. orkestra-hindsight for the agents
       # module). Hardening for staging/prod: front with tecnativa/docker-socket-proxy.
@@ -160,7 +177,27 @@ services:
       - ../frontend-admin/.vite-cache:/app/.vite
     networks:
       - orkestra-network
-    command: ["sh", "-c", "npm install && npm run dev -- --host 0.0.0.0"]
+    # Regenerate public/config.js from the VITE_* env vars BEFORE
+    # `npm run dev` starts. public/config.js is gitignored (see
+    # frontend-admin/.gitignore + frontend-admin/CLAUDE.md → "Runtime
+    # config"); each environment writes its own. The dev-default template
+    # at public/config.example.js is the fallback when this script can't
+    # run (e.g. `npm run dev` directly on the host).
+    command:
+      - sh
+      - -c
+      - |
+        cat > /app/public/config.js <<EOF
+        // Generated at container start by docker-compose.dev.yml.
+        // Gitignored — do not commit. See frontend-admin/CLAUDE.md.
+        window.__ORKESTRA_CONFIG__ = {
+          apiUrl: "$${VITE_API_URL}",
+          wsUrl: "$${VITE_WS_URL}",
+          env: "$${VITE_ENV}",
+          debug: $${VITE_DEBUG}
+        };
+        EOF
+        npm install && npm run dev -- --host 0.0.0.0
 
   # Tier-2 (external client) demo SPA — consumes the ADR-0003 client API
   # surface (api.localhost:3000, JWT aud=client). Sibling app to the

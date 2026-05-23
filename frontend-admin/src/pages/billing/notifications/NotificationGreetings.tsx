@@ -8,35 +8,37 @@ import {
   faArrowLeft
 } from '@fortawesome/free-solid-svg-icons';
 import { Link } from 'react-router';
+import { useTranslation } from 'react-i18next';
 import OrkestraCardHeader from 'components/common/OrkestraCardHeader';
 import Flex from 'components/common/Flex';
 import { useGetNotificationSummaryQuery } from 'store/api/billingApi';
 import CountUp from 'react-countup';
 
 const NotificationGreetings = () => {
+  const { t } = useTranslation();
   const { data: summary } = useGetNotificationSummaryQuery(undefined);
 
   const statItems = [
     {
-      title: 'Totale',
+      title: t('billing.notifications.stats.total'),
       value: summary?.total || 0,
       color: 'primary',
       icon: faBell
     },
     {
-      title: 'Da Processare',
+      title: t('billing.notifications.stats.unprocessed'),
       value: summary?.unprocessed || 0,
       color: 'warning',
       icon: faClock
     },
     {
-      title: 'Positive (RC)',
+      title: t('billing.notifications.stats.positive'),
       value: summary?.RC || 0,
       color: 'success',
       icon: faCheck
     },
     {
-      title: 'Negative (NS)',
+      title: t('billing.notifications.stats.negative'),
       value: summary?.NS || 0,
       color: 'danger',
       icon: faTimes
@@ -48,10 +50,14 @@ const NotificationGreetings = () => {
       <OrkestraCardHeader
         title={
           <Flex alignItems="center">
-            <Link to="/billing/dashboard" className="text-body-tertiary me-2">
+            <Link
+              to="/billing/dashboard"
+              className="text-body-tertiary me-2"
+              title={t('billing.common.backToDashboard')}
+            >
               <FontAwesomeIcon icon={faArrowLeft} />
             </Link>
-            Notifiche SDI
+            {t('billing.notifications.title')}
           </Flex>
         }
         titleTag="h5"
@@ -61,7 +67,9 @@ const NotificationGreetings = () => {
           summary &&
           summary.unprocessed > 0 && (
             <span className="badge bg-warning rounded-pill">
-              {summary.unprocessed} da gestire
+              {t('billing.notifications.unprocessedBadge', {
+                count: summary.unprocessed
+              })}
             </span>
           )
         }

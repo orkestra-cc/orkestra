@@ -1,5 +1,6 @@
 import { useState, FormEvent } from 'react';
 import { Alert, Button, Form, Modal } from 'react-bootstrap';
+import { useTranslation } from 'react-i18next';
 import { useRemoveMfaMutation, useVerifyMfaMutation } from 'store/api/mfaApi';
 
 interface Props {
@@ -15,6 +16,7 @@ interface Props {
  * when the user has not verified recently.
  */
 const MfaRemoveModal = ({ show, onHide }: Props) => {
+  const { t } = useTranslation();
   const [code, setCode] = useState('');
   const [useBackup, setUseBackup] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -27,7 +29,7 @@ const MfaRemoveModal = ({ show, onHide }: Props) => {
     event.preventDefault();
     setError(null);
     if (!code.trim()) {
-      setError('Enter the code from your authenticator (or a backup code).');
+      setError(t('userMfa.remove.errors.missingCode'));
       return;
     }
     try {
@@ -41,12 +43,9 @@ const MfaRemoveModal = ({ show, onHide }: Props) => {
         data?: { detail?: string; code?: string };
       };
       if (anyErr?.status === 401 && anyErr?.data?.code !== 'step_up_required') {
-        setError('Incorrect code. Please try again.');
+        setError(t('userMfa.remove.errors.incorrectCode'));
       } else {
-        setError(
-          anyErr?.data?.detail ??
-            'Could not remove the factor. Please try again.'
-        );
+        setError(anyErr?.data?.detail ?? t('userMfa.remove.errors.generic'));
       }
     }
   };
@@ -61,14 +60,12 @@ const MfaRemoveModal = ({ show, onHide }: Props) => {
   return (
     <Modal show={show} onHide={handleClose} centered>
       <Modal.Header closeButton={!busy}>
-        <Modal.Title>Remove two-factor authentication</Modal.Title>
+        <Modal.Title>{t('userMfa.remove.title')}</Modal.Title>
       </Modal.Header>
       <Form onSubmit={handleSubmit} noValidate>
         <Modal.Body>
           <Alert variant="warning" className="mb-3">
-            Removing your second factor leaves only your password protecting the
-            account. If your role requires MFA, you will be prompted to enroll
-            again on your next sign-in.
+            {t('userMfa.remove.warning')}
           </Alert>
 
           {error && (
@@ -84,7 +81,9 @@ const MfaRemoveModal = ({ show, onHide }: Props) => {
 
           <Form.Group className="mb-2">
             <Form.Label>
-              {useBackup ? 'Backup code' : 'Authenticator code'}
+              {useBackup
+                ? t('userMfa.remove.backupCode')
+                : t('userMfa.remove.authenticatorCode')}
             </Form.Label>
             <Form.Control
               type="text"
@@ -93,7 +92,11 @@ const MfaRemoveModal = ({ show, onHide }: Props) => {
               autoFocus
               value={code}
               onChange={e => setCode(e.target.value)}
-              placeholder={useBackup ? 'XXXX-XXXX' : '123 456'}
+              placeholder={
+                useBackup
+                  ? t('userMfa.remove.backupPlaceholder')
+                  : t('userMfa.remove.authenticatorPlaceholder')
+              }
               required
             />
           </Form.Group>
@@ -106,8 +109,8 @@ const MfaRemoveModal = ({ show, onHide }: Props) => {
             }}
           >
             {useBackup
-              ? 'Use authenticator app instead'
-              : 'Use a backup code instead'}
+              ? t('userMfa.remove.useAuthenticator')
+              : t('userMfa.remove.useBackup')}
           </button>
         </Modal.Body>
         <Modal.Footer>
@@ -116,10 +119,10 @@ const MfaRemoveModal = ({ show, onHide }: Props) => {
             onClick={handleClose}
             disabled={busy}
           >
-            Cancel
+            {t('userMfa.remove.cancel')}
           </Button>
           <Button type="submit" variant="danger" disabled={busy}>
-            {busy ? 'Removing…' : 'Remove factor'}
+            {busy ? t('userMfa.remove.removing') : t('userMfa.remove.remove')}
           </Button>
         </Modal.Footer>
       </Form>

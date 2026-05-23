@@ -4,6 +4,7 @@ import { Navigate, useNavigate } from 'react-router-dom';
 import classNames from 'classnames';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { IconProp } from '@fortawesome/fontawesome-svg-core';
+import { Trans, useTranslation } from 'react-i18next';
 import IconButton from 'components/common/IconButton';
 import Flex from 'components/common/Flex';
 import OrkestraLoader from 'components/common/OrkestraLoader';
@@ -14,12 +15,12 @@ import OrgStep from './steps/OrgStep';
 import SmtpStep from './steps/SmtpStep';
 import FinishStep from './steps/FinishStep';
 
-const STEPS: { icon: string; label: string }[] = [
-  { icon: 'hand-holding-heart', label: 'Welcome' },
-  { icon: 'user-shield', label: 'Administrator' },
-  { icon: 'building', label: 'Organization' },
-  { icon: 'envelope', label: 'Email delivery' },
-  { icon: 'check', label: 'Done' }
+const STEPS: { icon: string; labelKey: string }[] = [
+  { icon: 'hand-holding-heart', labelKey: 'setup.wizard.stepWelcome' },
+  { icon: 'user-shield', labelKey: 'setup.wizard.stepAdmin' },
+  { icon: 'building', labelKey: 'setup.wizard.stepOrg' },
+  { icon: 'envelope', labelKey: 'setup.wizard.stepSmtp' },
+  { icon: 'check', labelKey: 'setup.wizard.stepDone' }
 ];
 
 const TOTAL = STEPS.length;
@@ -32,6 +33,7 @@ const TOTAL = STEPS.length;
  * template's hardcoded account-creation forms.
  */
 const SetupWizard = () => {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const { data: status, isLoading, error, refetch } = useGetSetupStatusQuery();
   const [step, setStep] = useState<number>(1);
@@ -55,14 +57,15 @@ const SetupWizard = () => {
     return (
       <div className="container py-6">
         <Alert variant="danger">
-          <Alert.Heading>Cannot reach the Orkestra backend</Alert.Heading>
+          <Alert.Heading>{t('setup.wizard.errorTitle')}</Alert.Heading>
           <p className="mb-2">
-            The setup wizard could not contact the backend at{' '}
-            <code>/v1/setup/status</code>. Make sure the backend container is
-            running and reachable, then retry.
+            <Trans
+              i18nKey="setup.wizard.errorBody"
+              components={{ code: <code /> }}
+            />
           </p>
           <Button variant="outline-danger" size="sm" onClick={() => refetch()}>
-            Retry
+            {t('setup.wizard.retry')}
           </Button>
         </Alert>
       </div>
@@ -134,11 +137,11 @@ const SetupWizard = () => {
           <Nav className="justify-content-center">
             {STEPS.map((item, index) => (
               <StepNavItem
-                key={item.label}
+                key={item.labelKey}
                 index={index + 1}
                 step={step}
                 icon={item.icon}
-                label={item.label}
+                label={t(item.labelKey)}
               />
             ))}
           </Nav>
@@ -157,7 +160,7 @@ const SetupWizard = () => {
               })}
               onClick={handlePrev}
             >
-              Back
+              {t('setup.wizard.back')}
             </IconButton>
             {/* The primary advance button is rendered by each step component
                 because only the step knows whether its form is valid and

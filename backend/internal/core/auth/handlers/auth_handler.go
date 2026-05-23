@@ -2217,6 +2217,45 @@ type CurrentUserResponse struct {
 	OAuthProviders []models.OAuthProviderInfo `json:"oauthProviders,omitempty"`
 }
 
+// UpdateCurrentUserInput is the request body for PATCH /v1/auth/{tier}/me.
+// Self-service preference surface — strictly allowlisted: only the
+// language field is accepted today. Adding a new mutable preference
+// (theme, notification opt-ins, …) means adding a field here AND
+// honoring it explicitly in UpdateCurrentUser; the underlying
+// UpdateUserInput shape is wider but is NOT pass-through.
+type UpdateCurrentUserInput struct {
+	Body struct {
+		// Language is the user's preferred BCP-47 language tag. The
+		// allowlist mirrors UpdateUserInput.Language in the SDK iface —
+		// extend the enum and validate tags in lockstep when adding a
+		// new locale.
+		Language string `json:"language,omitempty" enum:"en,it" validate:"omitempty,oneof=en it"`
+	}
+}
+
+// UpdateCurrentUser writes self-service preferences for the calling
+// user. Currently exposes only `language`; the response shape matches
+// GET /v1/auth/{tier}/me so the SPA can replace its cached user
+// document with the response without an extra round-trip.
+func (h *AuthHandler) UpdateCurrentUser(ctx context.Context, in *UpdateCurrentUserInput) (*GetCurrentUserResponse, error) {
+	userUUIDValue := ctx.Value("userUUID")
+	if userUUIDValue == nil {
+		return nil, huma.Error401Unauthorized("Authentication required", nil)
+	}
+	userUUID, ok := userUUIDValue.(string)
+	if !ok {
+		return nil, huma.Error401Unauthorized("Invalid authentication context", nil)
+	}
+
+	if in.Body.Language != "" {
+		if err := h.authService.UpdateLanguageByUUID(ctx, userUUID, in.Body.Language); err != nil {
+			return nil, huma.Error500InternalServerError("Failed to update preferences", err)
+		}
+	}
+
+	return h.GetCurrentUser(ctx, &struct{}{})
+}
+
 // GetCurrentUser returns the current authenticated user
 func (h *AuthHandler) GetCurrentUser(ctx context.Context, _ *struct{}) (*GetCurrentUserResponse, error) {
 	userUUIDValue := ctx.Value("userUUID")
@@ -2258,6 +2297,7 @@ func (h *AuthHandler) GetCurrentUser(ctx context.Context, _ *struct{}) (*GetCurr
 				LastLogin:     user.LastLogin,
 				CreatedAt:     user.CreatedAt,
 				UpdatedAt:     user.UpdatedAt,
+				Language:      user.Language,
 			},
 			OAuthProviders: oauthProvidersInfo,
 		},
@@ -2394,6 +2434,18 @@ func (h *AuthHandler) RegisterTierMountableRoutes(publicAPI huma.API, protectedA
 			{"bearerAuth": {}},
 		},
 	}, h.GetCurrentUser)
+
+	huma.Register(protectedAPI, huma.Operation{
+		OperationID: mount.OpIDPrefix + "update-current-user",
+		Method:      http.MethodPatch,
+		Path:        "/v1/auth" + mount.PathPrefix + "/me",
+		Summary:     "Update current user preferences",
+		Description: "Self-service preference update for the calling user. Currently exposes only the `language` field (BCP-47 tag, allowlisted to `en`/`it`); the response mirrors GET /me so the SPA can replace its cached user document with the response.",
+		Tags:        []string{"Authentication", "Self-Service"},
+		Security: []map[string][]string{
+			{"bearerAuth": {}},
+		},
+	}, h.UpdateCurrentUser)
 }
 
 // writeRefreshErr writes a JSON 401 for a refresh-flow error, distinguishing

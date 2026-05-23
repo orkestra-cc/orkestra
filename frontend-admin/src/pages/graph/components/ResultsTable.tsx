@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { Table, Badge, Spinner, Alert } from 'react-bootstrap';
+import { useTranslation } from 'react-i18next';
 import type { QueryResult, QueryMetadata } from '../../../types/graph';
 
 interface ResultsTableProps {
@@ -37,9 +38,9 @@ function isRelationship(
   );
 }
 
-function renderCell(value: unknown): React.ReactNode {
+function renderCell(value: unknown, nullLabel: string): React.ReactNode {
   if (value === null || value === undefined) {
-    return <span className="text-muted fst-italic">null</span>;
+    return <span className="text-muted fst-italic">{nullLabel}</span>;
   }
 
   if (isNode(value)) {
@@ -69,7 +70,7 @@ function renderCell(value: unknown): React.ReactNode {
         {value.map((item, i) => (
           <span key={i}>
             {i > 0 && ', '}
-            {renderCell(item)}
+            {renderCell(item, nullLabel)}
           </span>
         ))}
         ]
@@ -106,36 +107,57 @@ function MetadataBar({
   metadata: QueryMetadata;
   hasGraph: boolean;
 }) {
+  const { t } = useTranslation();
   const stats = useMemo(() => {
     const items: { label: string; value: number }[] = [];
     if (metadata.nodesCreated)
-      items.push({ label: 'Nodes created', value: metadata.nodesCreated });
+      items.push({
+        label: t('graph.results.metadata.nodesCreated'),
+        value: metadata.nodesCreated
+      });
     if (metadata.nodesDeleted)
-      items.push({ label: 'Nodes deleted', value: metadata.nodesDeleted });
+      items.push({
+        label: t('graph.results.metadata.nodesDeleted'),
+        value: metadata.nodesDeleted
+      });
     if (metadata.relationshipsCreated)
       items.push({
-        label: 'Rels created',
+        label: t('graph.results.metadata.relsCreated'),
         value: metadata.relationshipsCreated
       });
     if (metadata.relationshipsDeleted)
       items.push({
-        label: 'Rels deleted',
+        label: t('graph.results.metadata.relsDeleted'),
         value: metadata.relationshipsDeleted
       });
     if (metadata.propertiesSet)
-      items.push({ label: 'Props set', value: metadata.propertiesSet });
+      items.push({
+        label: t('graph.results.metadata.propsSet'),
+        value: metadata.propertiesSet
+      });
     if (metadata.labelsAdded)
-      items.push({ label: 'Labels added', value: metadata.labelsAdded });
+      items.push({
+        label: t('graph.results.metadata.labelsAdded'),
+        value: metadata.labelsAdded
+      });
     if (metadata.labelsRemoved)
-      items.push({ label: 'Labels removed', value: metadata.labelsRemoved });
+      items.push({
+        label: t('graph.results.metadata.labelsRemoved'),
+        value: metadata.labelsRemoved
+      });
     return items;
-  }, [metadata]);
+  }, [metadata, t]);
 
   return (
     <div className="d-flex flex-wrap align-items-center gap-2 px-3 py-2 bg-body-tertiary border-top fs-10">
       <Badge bg="secondary">{formatDuration(metadata.executionTimeMs)}</Badge>
       <Badge bg="primary">
-        {metadata.resultCount} {metadata.resultCount === 1 ? 'row' : 'rows'}
+        {t(
+          metadata.resultCount === 1
+            ? 'graph.results.rowsOne'
+            : 'graph.results.rowsOther',
+          { count: metadata.resultCount }
+        )}
       </Badge>
       {stats.map(({ label, value }) => (
         <Badge key={label} bg="success">
@@ -145,7 +167,7 @@ function MetadataBar({
       {hasGraph && (
         <Badge bg="info">
           <i className="fas fa-project-diagram me-1" />
-          Graph data available
+          {t('graph.results.graphAvailableBadge')}
         </Badge>
       )}
     </div>
@@ -153,6 +175,7 @@ function MetadataBar({
 }
 
 const ResultsTable = ({ result, isLoading }: ResultsTableProps) => {
+  const { t } = useTranslation();
   if (isLoading) {
     return (
       <div className="d-flex justify-content-center align-items-center py-5">
@@ -162,7 +185,7 @@ const ResultsTable = ({ result, isLoading }: ResultsTableProps) => {
           size="sm"
           className="me-2"
         />
-        <span className="text-muted">Running query...</span>
+        <span className="text-muted">{t('graph.results.loading')}</span>
       </div>
     );
   }
@@ -178,15 +201,19 @@ const ResultsTable = ({ result, isLoading }: ResultsTableProps) => {
           variant="info"
           className="mb-0 rounded-0 border-start-0 border-end-0"
         >
-          <span className="fw-semibold">No results.</span>{' '}
+          <span className="fw-semibold">
+            {t('graph.results.noResultsTitle')}
+          </span>{' '}
           {result.metadata.containsUpdates
-            ? 'Query executed successfully with updates.'
-            : 'The query returned an empty result set.'}
+            ? t('graph.results.noResultsUpdates')
+            : t('graph.results.noResultsEmpty')}
         </Alert>
         <MetadataBar metadata={result.metadata} hasGraph={!!result.graph} />
       </div>
     );
   }
+
+  const nullLabel = t('graph.results.nullCell');
 
   return (
     <div>
@@ -206,7 +233,7 @@ const ResultsTable = ({ result, isLoading }: ResultsTableProps) => {
               <tr key={rowIndex}>
                 {(result.columns ?? []).map(col => (
                   <td key={col} className="px-3 py-2 align-middle">
-                    {renderCell(row[col])}
+                    {renderCell(row[col], nullLabel)}
                   </td>
                 ))}
               </tr>

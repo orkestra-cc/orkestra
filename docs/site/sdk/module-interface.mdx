@@ -1,0 +1,29 @@
+---
+title: Module Interface
+sidebar_position: 2
+---
+
+# The `Module` interface
+
+Every Orkestra module implements the same lifecycle interface. The registry resolves load order from each module's `Dependencies()` declaration via topological sort.
+
+```go
+type Module interface {
+    Name() string
+    Dependencies() []string
+
+    Init(ctx context.Context, registry ServiceRegistry, cfg ConfigService) error
+    RegisterRoutes(api huma.API, mw RoleMiddleware)
+    Start(ctx context.Context) error
+    Stop(ctx context.Context) error
+    HealthCheck(ctx context.Context) HealthStatus
+
+    NavItems() []NavItem
+    ConfigSchema() ConfigSchema
+    Collections() []CollectionSpec
+}
+```
+
+:::note 🚧 Draft
+Full method-by-method breakdown — when each is called, what to do in each, common pitfalls.
+:::

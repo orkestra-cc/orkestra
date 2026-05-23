@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Alert, Button, Card, Spinner } from 'react-bootstrap';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { toast } from 'react-toastify';
+import { Trans, useTranslation } from 'react-i18next';
 import SubtleBadge from 'components/common/SubtleBadge';
 import {
   useGetScimTokenStatusQuery,
@@ -14,6 +15,7 @@ import type { ScimTokenRotated } from 'types/identity';
 // state only until the operator closes the reveal banner, at which point
 // it is stripped and the only recovery path is another rotation.
 const ScimTokenSection: React.FC = () => {
+  const { t } = useTranslation();
   const { data, isLoading, error } = useGetScimTokenStatusQuery();
   const [rotate, { isLoading: isRotating }] = useRotateScimTokenMutation();
   const [fresh, setFresh] = useState<ScimTokenRotated | null>(null);
@@ -24,16 +26,20 @@ const ScimTokenSection: React.FC = () => {
     try {
       const res = await rotate().unwrap();
       setFresh(res);
-      toast.success('SCIM token rotated');
+      toast.success(t('auth.identity.scimToken.toastRotated'));
     } catch (err: unknown) {
-      toast.error('Rotate failed: ' + extractError(err));
+      toast.error(
+        t('auth.identity.scimToken.toastRotateFailed', {
+          message: extractError(err, t('auth.identity.scimToken.errorUnknown'))
+        })
+      );
     }
   };
 
   const copyToken = () => {
     if (!fresh?.token) return;
     navigator.clipboard.writeText(fresh.token);
-    toast.success('Token copied to clipboard');
+    toast.success(t('auth.identity.scimToken.toastCopied'));
   };
 
   const exists = !!data?.exists;
@@ -47,11 +53,13 @@ const ScimTokenSection: React.FC = () => {
               icon="exchange-alt"
               className="me-2 text-primary"
             />
-            SCIM 2.0 bearer token
+            {t('auth.identity.scimToken.headerTitle')}
           </h6>
           <p className="fs-11 mb-0 text-body-tertiary">
-            The IdP uses this token to call <code>/scim/v2/*</code> for user
-            provisioning. Rotating reveals a fresh value exactly once.
+            <Trans
+              i18nKey="auth.identity.scimToken.headerDescription"
+              components={{ code: <code /> }}
+            />
           </p>
         </div>
         {!confirming ? (
@@ -61,7 +69,9 @@ const ScimTokenSection: React.FC = () => {
             onClick={() => setConfirming(true)}
             disabled={isRotating}
           >
-            {exists ? 'Rotate token' : 'Generate token'}
+            {exists
+              ? t('auth.identity.scimToken.rotateButton')
+              : t('auth.identity.scimToken.generateButton')}
           </Button>
         ) : (
           <div className="d-flex gap-2">
@@ -71,7 +81,7 @@ const ScimTokenSection: React.FC = () => {
               onClick={() => setConfirming(false)}
               disabled={isRotating}
             >
-              Cancel
+              {t('auth.identity.scimToken.cancelButton')}
             </Button>
             <Button
               variant="danger"
@@ -82,12 +92,12 @@ const ScimTokenSection: React.FC = () => {
               {isRotating ? (
                 <>
                   <Spinner animation="border" size="sm" className="me-2" />
-                  Rotating…
+                  {t('auth.identity.scimToken.rotatingButton')}
                 </>
               ) : exists ? (
-                'Revoke & rotate'
+                t('auth.identity.scimToken.confirmRotateExisting')
               ) : (
-                'Confirm generate'
+                t('auth.identity.scimToken.confirmGenerate')
               )}
             </Button>
           </div>
@@ -101,21 +111,20 @@ const ScimTokenSection: React.FC = () => {
             onClose={() => setFresh(null)}
             className="fs-10"
           >
-            <strong>Copy this token now — it cannot be shown again.</strong>
+            <strong>{t('auth.identity.scimToken.revealHeading')}</strong>
             <div className="d-flex align-items-center gap-2 mt-2">
               <code className="flex-grow-1 fs-11 text-break">
                 {fresh.token}
               </code>
               <Button size="sm" variant="outline-dark" onClick={copyToken}>
                 <FontAwesomeIcon icon="copy" className="me-1" />
-                Copy
+                {t('auth.identity.scimToken.copyButton')}
               </Button>
             </div>
             <div className="fs-11 text-body-tertiary mt-2">
-              Rotated at {new Date(fresh.createdAt).toLocaleString()}. Store it
-              in the IdP's SCIM configuration. Closing this alert strips the
-              value from the browser — another rotation is the only recovery
-              path.
+              {t('auth.identity.scimToken.revealFooter', {
+                date: new Date(fresh.createdAt).toLocaleString()
+              })}
             </div>
           </Alert>
         )}
@@ -128,7 +137,7 @@ const ScimTokenSection: React.FC = () => {
 
         {!isLoading && error && (
           <Alert variant="danger" className="fs-10 mb-0">
-            Failed to load SCIM token status.
+            {t('auth.identity.scimToken.loadError')}
           </Alert>
         )}
 
@@ -137,25 +146,31 @@ const ScimTokenSection: React.FC = () => {
             {exists ? (
               <>
                 <SubtleBadge bg="success" pill className="me-2">
-                  active
+                  {t('auth.identity.scimToken.statusActive')}
                 </SubtleBadge>
                 <span className="text-body-secondary">
-                  Token <code className="fs-11">{data?.uuid}</code> created at{' '}
-                  {data?.createdAt
-                    ? new Date(data.createdAt).toLocaleString()
-                    : '—'}
-                  . The raw value is no longer recoverable — rotate to mint a
-                  new one.
+                  <Trans
+                    i18nKey="auth.identity.scimToken.statusActiveText"
+                    values={{
+                      uuid: data?.uuid ?? '',
+                      date: data?.createdAt
+                        ? new Date(data.createdAt).toLocaleString()
+                        : t('auth.identity.scimToken.createdAtUnknown')
+                    }}
+                    components={{ code: <code className="fs-11" /> }}
+                  />
                 </span>
               </>
             ) : (
               <>
                 <SubtleBadge bg="secondary" pill className="me-2">
-                  none
+                  {t('auth.identity.scimToken.statusNone')}
                 </SubtleBadge>
                 <span className="text-body-secondary">
-                  No SCIM token configured for this tenant. Generate one to
-                  allow the IdP to call <code>/scim/v2/*</code>.
+                  <Trans
+                    i18nKey="auth.identity.scimToken.statusNoneText"
+                    components={{ code: <code /> }}
+                  />
                 </span>
               </>
             )}
@@ -166,10 +181,10 @@ const ScimTokenSection: React.FC = () => {
   );
 };
 
-function extractError(err: unknown): string {
+function extractError(err: unknown, fallback: string): string {
   if (err && typeof err === 'object' && 'data' in err) {
     const data = (err as { data?: { detail?: string; title?: string } }).data;
-    return data?.detail || data?.title || 'unknown error';
+    return data?.detail || data?.title || fallback;
   }
   return String(err);
 }

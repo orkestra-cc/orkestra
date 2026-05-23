@@ -11,6 +11,7 @@ import {
 } from 'react-bootstrap';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { toast } from 'react-toastify';
+import { Trans, useTranslation } from 'react-i18next';
 import SubtleBadge from 'components/common/SubtleBadge';
 import type { BadgeColor } from 'components/common/SubtleBadge';
 import {
@@ -66,6 +67,7 @@ const TenantDetailModal: React.FC<Props> = ({
   onDelete,
   onPurge
 }) => {
+  const { t } = useTranslation();
   const [tab, setTab] = useState<TenantTabKey>('overview');
 
   useEffect(() => {
@@ -85,11 +87,11 @@ const TenantDetailModal: React.FC<Props> = ({
           </SubtleBadge>
           {org.status === 'purged' ? (
             <SubtleBadge bg="dark" pill>
-              purged
+              {t('adminTenants.detailModal.badgePurged')}
             </SubtleBadge>
           ) : org.deletedAt || org.status === 'archived' ? (
             <SubtleBadge bg="danger" pill>
-              deleted
+              {t('adminTenants.detailModal.badgeDeleted')}
             </SubtleBadge>
           ) : null}
         </Modal.Title>
@@ -101,16 +103,27 @@ const TenantDetailModal: React.FC<Props> = ({
           onSelect={k => setTab((k as TenantTabKey) || 'overview')}
           className="mb-3"
         >
-          <Tab eventKey="overview" title="Overview">
+          <Tab
+            eventKey="overview"
+            title={t('adminTenants.detailModal.tabs.overview')}
+          >
             <OverviewTab org={org} />
           </Tab>
-          <Tab eventKey="plan" title="Plan">
+          <Tab eventKey="plan" title={t('adminTenants.detailModal.tabs.plan')}>
             <PlanTab org={org} />
           </Tab>
-          <Tab eventKey="members" title={`Members (${org.memberCount})`}>
+          <Tab
+            eventKey="members"
+            title={t('adminTenants.detailModal.tabs.members', {
+              count: org.memberCount
+            })}
+          >
             <MembersTab org={org} />
           </Tab>
-          <Tab eventKey="invites" title="Invites">
+          <Tab
+            eventKey="invites"
+            title={t('adminTenants.detailModal.tabs.invites')}
+          >
             <InvitesTab org={org} />
           </Tab>
         </Tabs>
@@ -124,29 +137,32 @@ const TenantDetailModal: React.FC<Props> = ({
               onClick={() => onDelete(org)}
             >
               <FontAwesomeIcon icon="trash" className="me-1" />
-              Delete tenant
+              {t('adminTenants.detailModal.deleteButton')}
             </Button>
           )}
           {org.status !== 'purged' && (
             <Button variant="danger" size="sm" onClick={() => onPurge(org)}>
               <FontAwesomeIcon icon="exclamation-triangle" className="me-1" />
-              Purge (crypto-shred)
+              {t('adminTenants.detailModal.purgeButton')}
             </Button>
           )}
           {org.status === 'purged' && org.purgedAt && (
             <span className="text-muted fs-10">
-              Purged on {new Date(org.purgedAt).toLocaleString()} — key
-              shredded.
+              {t('adminTenants.detailModal.purgedFootnote', {
+                date: new Date(org.purgedAt).toLocaleString()
+              })}
             </span>
           )}
           {org.status !== 'purged' && org.deletedAt && (
             <span className="text-muted fs-10">
-              Soft-deleted on {new Date(org.deletedAt).toLocaleString()}
+              {t('adminTenants.detailModal.deletedFootnote', {
+                date: new Date(org.deletedAt).toLocaleString()
+              })}
             </span>
           )}
         </div>
         <Button variant="secondary" onClick={onHide}>
-          Close
+          {t('adminTenants.detailModal.close')}
         </Button>
       </Modal.Footer>
     </Modal>
@@ -156,6 +172,7 @@ const TenantDetailModal: React.FC<Props> = ({
 // --- Overview tab ---
 
 const OverviewTab: React.FC<{ org: AdminOrgListItem }> = ({ org }) => {
+  const { t } = useTranslation();
   const [updateOrg, { isLoading }] = useUpdateOrgAdminMutation();
   const [name, setName] = useState(org.name);
   const [slug, setSlug] = useState(org.slug);
@@ -176,16 +193,25 @@ const OverviewTab: React.FC<{ org: AdminOrgListItem }> = ({ org }) => {
           slug: slug !== org.slug ? slug : undefined
         }
       }).unwrap();
-      toast.success('Tenant updated');
+      toast.success(t('adminTenants.detailModal.overview.successToast'));
     } catch (err: unknown) {
-      toast.error('Update failed: ' + extractError(err));
+      toast.error(
+        t('adminTenants.detailModal.overview.errorToast', {
+          message: extractError(
+            err,
+            t('adminTenants.detailModal.overview.unknownError')
+          )
+        })
+      );
     }
   };
 
   return (
     <Form className="px-1">
       <Form.Group className="mb-3">
-        <Form.Label className="fw-semibold fs-10">Tenant ID</Form.Label>
+        <Form.Label className="fw-semibold fs-10">
+          {t('adminTenants.detailModal.overview.tenantIdLabel')}
+        </Form.Label>
         <Form.Control
           readOnly
           value={org.id}
@@ -193,18 +219,27 @@ const OverviewTab: React.FC<{ org: AdminOrgListItem }> = ({ org }) => {
         />
       </Form.Group>
       <Form.Group className="mb-3">
-        <Form.Label className="fw-semibold fs-10">Name</Form.Label>
+        <Form.Label className="fw-semibold fs-10">
+          {t('adminTenants.detailModal.overview.nameLabel')}
+        </Form.Label>
         <Form.Control value={name} onChange={e => setName(e.target.value)} />
       </Form.Group>
       <Form.Group className="mb-3">
-        <Form.Label className="fw-semibold fs-10">Slug</Form.Label>
+        <Form.Label className="fw-semibold fs-10">
+          {t('adminTenants.detailModal.overview.slugLabel')}
+        </Form.Label>
         <Form.Control value={slug} onChange={e => setSlug(e.target.value)} />
       </Form.Group>
       <Form.Group className="mb-3">
-        <Form.Label className="fw-semibold fs-10">Owner</Form.Label>
+        <Form.Label className="fw-semibold fs-10">
+          {t('adminTenants.detailModal.overview.ownerLabel')}
+        </Form.Label>
         <Form.Control
           readOnly
-          value={org.ownerUserUUID || '—'}
+          value={
+            org.ownerUserUUID ||
+            t('adminTenants.detailModal.overview.ownerDash')
+          }
           className="fs-11 font-monospace"
         />
       </Form.Group>
@@ -215,7 +250,9 @@ const OverviewTab: React.FC<{ org: AdminOrgListItem }> = ({ org }) => {
           disabled={!dirty || isLoading}
           onClick={onSave}
         >
-          {isLoading ? 'Saving…' : 'Save changes'}
+          {isLoading
+            ? t('adminTenants.detailModal.overview.saving')
+            : t('adminTenants.detailModal.overview.save')}
         </Button>
       </div>
     </Form>
@@ -225,6 +262,7 @@ const OverviewTab: React.FC<{ org: AdminOrgListItem }> = ({ org }) => {
 // --- Plan tab ---
 
 const PlanTab: React.FC<{ org: AdminOrgListItem }> = ({ org }) => {
+  const { t } = useTranslation();
   const [updatePlan, { isLoading }] = useUpdateOrgPlanAdminMutation();
   const [plan, setPlan] = useState(org.plan);
   const [features, setFeatures] = useState<string[]>(org.features ?? []);
@@ -250,9 +288,16 @@ const PlanTab: React.FC<{ org: AdminOrgListItem }> = ({ org }) => {
   const onSave = async () => {
     try {
       await updatePlan({ tenantId: org.id, body: { plan, features } }).unwrap();
-      toast.success('Plan updated');
+      toast.success(t('adminTenants.detailModal.plan.successToast'));
     } catch (err: unknown) {
-      toast.error('Plan update failed: ' + extractError(err));
+      toast.error(
+        t('adminTenants.detailModal.plan.errorToast', {
+          message: extractError(
+            err,
+            t('adminTenants.detailModal.plan.unknownError')
+          )
+        })
+      );
     }
   };
 
@@ -261,27 +306,38 @@ const PlanTab: React.FC<{ org: AdminOrgListItem }> = ({ org }) => {
   return (
     <Form className="px-1">
       <Form.Group className="mb-3">
-        <Form.Label className="fw-semibold fs-10">Plan</Form.Label>
+        <Form.Label className="fw-semibold fs-10">
+          {t('adminTenants.detailModal.plan.planLabel')}
+        </Form.Label>
         <Form.Select
           value={plan}
           onChange={e => handlePlanChange(e.target.value)}
         >
-          <option value="free">Free</option>
-          <option value="pro">Pro</option>
-          <option value="enterprise">Enterprise</option>
+          <option value="free">
+            {t('adminTenants.detailModal.plan.planFree')}
+          </option>
+          <option value="pro">
+            {t('adminTenants.detailModal.plan.planPro')}
+          </option>
+          <option value="enterprise">
+            {t('adminTenants.detailModal.plan.planEnterprise')}
+          </option>
         </Form.Select>
         <Form.Text muted>
-          Changing the plan pre-fills the features checklist with that plan's
-          defaults. You can override individual features before saving.
+          {t('adminTenants.detailModal.plan.planHelp')}
         </Form.Text>
       </Form.Group>
 
       <Form.Group className="mb-3">
-        <Form.Label className="fw-semibold fs-10">Features</Form.Label>
+        <Form.Label className="fw-semibold fs-10">
+          {t('adminTenants.detailModal.plan.featuresLabel')}
+        </Form.Label>
         {hasWildcard && (
           <Alert variant="info" className="fs-10 py-2">
-            The <code>*</code> wildcard grants every feature — individual
-            checkboxes have no effect while it is present.
+            <Trans
+              i18nKey="adminTenants.detailModal.plan.wildcardInfo"
+              components={{ code: <code /> }}
+            />
           </Alert>
         )}
         <div className="d-flex flex-wrap gap-3">
@@ -306,7 +362,9 @@ const PlanTab: React.FC<{ org: AdminOrgListItem }> = ({ org }) => {
           disabled={isLoading}
           onClick={onSave}
         >
-          {isLoading ? 'Saving…' : 'Save plan'}
+          {isLoading
+            ? t('adminTenants.detailModal.plan.saving')
+            : t('adminTenants.detailModal.plan.save')}
         </Button>
       </div>
     </Form>
@@ -316,15 +374,23 @@ const PlanTab: React.FC<{ org: AdminOrgListItem }> = ({ org }) => {
 // --- Members tab ---
 
 const MembersTab: React.FC<{ org: AdminOrgListItem }> = ({ org }) => {
+  const { t } = useTranslation();
   const { data, isLoading, error } = useListOrgMembersAdminQuery(org.id);
   const [removeMember] = useRemoveOrgMemberAdminMutation();
 
   const onRemove = async (userUUID: string) => {
     try {
       await removeMember({ tenantId: org.id, userUUID }).unwrap();
-      toast.success('Member removed');
+      toast.success(t('adminTenants.detailModal.members.successToast'));
     } catch (err: unknown) {
-      toast.error('Remove failed: ' + extractError(err));
+      toast.error(
+        t('adminTenants.detailModal.members.errorToast', {
+          message: extractError(
+            err,
+            t('adminTenants.detailModal.members.unknownError')
+          )
+        })
+      );
     }
   };
 
@@ -339,7 +405,7 @@ const MembersTab: React.FC<{ org: AdminOrgListItem }> = ({ org }) => {
   if (error) {
     return (
       <Alert variant="danger" className="fs-10">
-        Failed to load members.
+        {t('adminTenants.detailModal.members.loadError')}
       </Alert>
     );
   }
@@ -349,32 +415,40 @@ const MembersTab: React.FC<{ org: AdminOrgListItem }> = ({ org }) => {
   return (
     <>
       <Alert variant="info" className="fs-10 py-2">
-        Role assignments for each member are managed on the{' '}
-        <a href="/admin/roles">Role Management page</a>. This tab only shows
-        current memberships and lets you remove them.
+        <Trans
+          i18nKey="adminTenants.detailModal.members.rolesPageHint"
+          components={{ a: <a href="/admin/roles" /> }}
+        />
       </Alert>
       <Table size="sm" className="fs-10 mb-0">
         <thead className="bg-body-tertiary">
           <tr>
-            <th>User UUID</th>
-            <th>Roles</th>
-            <th>Joined</th>
-            <th>Owner</th>
-            <th className="text-end">Actions</th>
+            <th>{t('adminTenants.detailModal.members.colUserUuid')}</th>
+            <th>{t('adminTenants.detailModal.members.colRoles')}</th>
+            <th>{t('adminTenants.detailModal.members.colJoined')}</th>
+            <th>{t('adminTenants.detailModal.members.colOwner')}</th>
+            <th className="text-end">
+              {t('adminTenants.detailModal.members.colActions')}
+            </th>
           </tr>
         </thead>
         <tbody>
           {members.map(m => (
             <tr key={m.id} className="align-middle">
               <td className="font-monospace fs-11">{m.userUUID}</td>
-              <td>{m.roles.join(', ') || '—'}</td>
+              <td>
+                {m.roles.join(', ') ||
+                  t('adminTenants.detailModal.members.dash')}
+              </td>
               <td className="text-muted">
-                {m.joinedAt ? new Date(m.joinedAt).toLocaleDateString() : '—'}
+                {m.joinedAt
+                  ? new Date(m.joinedAt).toLocaleDateString()
+                  : t('adminTenants.detailModal.members.dash')}
               </td>
               <td>
                 {m.isOwner && (
                   <SubtleBadge bg="primary" pill>
-                    owner
+                    {t('adminTenants.detailModal.members.ownerBadge')}
                   </SubtleBadge>
                 )}
               </td>
@@ -386,7 +460,7 @@ const MembersTab: React.FC<{ org: AdminOrgListItem }> = ({ org }) => {
                     className="p-0 text-danger text-decoration-none"
                     onClick={() => onRemove(m.userUUID)}
                   >
-                    Remove
+                    {t('adminTenants.detailModal.members.remove')}
                   </Button>
                 )}
               </td>
@@ -395,7 +469,7 @@ const MembersTab: React.FC<{ org: AdminOrgListItem }> = ({ org }) => {
           {members.length === 0 && (
             <tr>
               <td colSpan={5} className="text-center text-muted py-3">
-                No members yet.
+                {t('adminTenants.detailModal.members.empty')}
               </td>
             </tr>
           )}
@@ -408,6 +482,7 @@ const MembersTab: React.FC<{ org: AdminOrgListItem }> = ({ org }) => {
 // --- Invites tab ---
 
 const InvitesTab: React.FC<{ org: AdminOrgListItem }> = ({ org }) => {
+  const { t } = useTranslation();
   const { data, isLoading, error } = useListOrgInvitesAdminQuery({
     tenantId: org.id
   });
@@ -425,7 +500,7 @@ const InvitesTab: React.FC<{ org: AdminOrgListItem }> = ({ org }) => {
       .map(r => r.trim())
       .filter(Boolean);
     if (!email || roles.length === 0) {
-      toast.error('Email and at least one role are required');
+      toast.error(t('adminTenants.detailModal.invites.validationRequired'));
       return;
     }
     try {
@@ -435,25 +510,39 @@ const InvitesTab: React.FC<{ org: AdminOrgListItem }> = ({ org }) => {
       }).unwrap();
       setFreshInvite(inv);
       setEmail('');
-      toast.success('Invite created');
+      toast.success(t('adminTenants.detailModal.invites.createSuccessToast'));
     } catch (err: unknown) {
-      toast.error('Invite failed: ' + extractError(err));
+      toast.error(
+        t('adminTenants.detailModal.invites.createErrorToast', {
+          message: extractError(
+            err,
+            t('adminTenants.detailModal.invites.unknownError')
+          )
+        })
+      );
     }
   };
 
   const onRevoke = async (inviteId: string) => {
     try {
       await revokeInvite({ tenantId: org.id, inviteId }).unwrap();
-      toast.success('Invite revoked');
+      toast.success(t('adminTenants.detailModal.invites.revokeSuccessToast'));
     } catch (err: unknown) {
-      toast.error('Revoke failed: ' + extractError(err));
+      toast.error(
+        t('adminTenants.detailModal.invites.revokeErrorToast', {
+          message: extractError(
+            err,
+            t('adminTenants.detailModal.invites.unknownError')
+          )
+        })
+      );
     }
   };
 
   const copyToken = () => {
     if (!freshInvite?.token) return;
     navigator.clipboard.writeText(freshInvite.token);
-    toast.success('Invite token copied');
+    toast.success(t('adminTenants.detailModal.invites.copySuccessToast'));
   };
 
   const invites = data?.invites ?? [];
@@ -467,14 +556,16 @@ const InvitesTab: React.FC<{ org: AdminOrgListItem }> = ({ org }) => {
           dismissible
           onClose={() => setFreshInvite(null)}
         >
-          <strong>Copy this token now — it cannot be shown again.</strong>
+          <strong>
+            {t('adminTenants.detailModal.invites.revealTokenIntro')}
+          </strong>
           <div className="d-flex align-items-center gap-2 mt-2">
             <code className="flex-grow-1 fs-11 text-break">
               {freshInvite.token}
             </code>
             <Button size="sm" variant="outline-dark" onClick={copyToken}>
               <FontAwesomeIcon icon="copy" className="me-1" />
-              Copy
+              {t('adminTenants.detailModal.invites.copyButton')}
             </Button>
           </div>
         </Alert>
@@ -483,18 +574,22 @@ const InvitesTab: React.FC<{ org: AdminOrgListItem }> = ({ org }) => {
       <Form className="mb-4">
         <div className="row g-2 align-items-end">
           <Form.Group className="col-md-5">
-            <Form.Label className="fw-semibold fs-10">Email</Form.Label>
+            <Form.Label className="fw-semibold fs-10">
+              {t('adminTenants.detailModal.invites.emailLabel')}
+            </Form.Label>
             <Form.Control
               type="email"
               size="sm"
-              placeholder="user@example.com"
+              placeholder={t(
+                'adminTenants.detailModal.invites.emailPlaceholder'
+              )}
               value={email}
               onChange={e => setEmail(e.target.value)}
             />
           </Form.Group>
           <Form.Group className="col-md-5">
             <Form.Label className="fw-semibold fs-10">
-              Roles (comma-separated)
+              {t('adminTenants.detailModal.invites.rolesLabel')}
             </Form.Label>
             <Form.Control
               type="text"
@@ -511,7 +606,9 @@ const InvitesTab: React.FC<{ org: AdminOrgListItem }> = ({ org }) => {
               disabled={isCreating}
               onClick={onCreate}
             >
-              {isCreating ? 'Creating…' : 'Invite'}
+              {isCreating
+                ? t('adminTenants.detailModal.invites.creating')
+                : t('adminTenants.detailModal.invites.createButton')}
             </Button>
           </Form.Group>
         </div>
@@ -523,17 +620,19 @@ const InvitesTab: React.FC<{ org: AdminOrgListItem }> = ({ org }) => {
         </div>
       ) : error ? (
         <Alert variant="danger" className="fs-10">
-          Failed to load invites.
+          {t('adminTenants.detailModal.invites.loadError')}
         </Alert>
       ) : (
         <Table size="sm" className="fs-10 mb-0">
           <thead className="bg-body-tertiary">
             <tr>
-              <th>Email</th>
-              <th>Roles</th>
-              <th>Created</th>
-              <th>Expires</th>
-              <th className="text-end">Actions</th>
+              <th>{t('adminTenants.detailModal.invites.colEmail')}</th>
+              <th>{t('adminTenants.detailModal.invites.colRoles')}</th>
+              <th>{t('adminTenants.detailModal.invites.colCreated')}</th>
+              <th>{t('adminTenants.detailModal.invites.colExpires')}</th>
+              <th className="text-end">
+                {t('adminTenants.detailModal.invites.colActions')}
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -554,7 +653,7 @@ const InvitesTab: React.FC<{ org: AdminOrgListItem }> = ({ org }) => {
                     className="p-0 text-danger text-decoration-none"
                     onClick={() => onRevoke(inv.id)}
                   >
-                    Revoke
+                    {t('adminTenants.detailModal.invites.revoke')}
                   </Button>
                 </td>
               </tr>
@@ -562,7 +661,7 @@ const InvitesTab: React.FC<{ org: AdminOrgListItem }> = ({ org }) => {
             {invites.length === 0 && (
               <tr>
                 <td colSpan={5} className="text-center text-muted py-3">
-                  No pending invites.
+                  {t('adminTenants.detailModal.invites.empty')}
                 </td>
               </tr>
             )}
@@ -573,10 +672,10 @@ const InvitesTab: React.FC<{ org: AdminOrgListItem }> = ({ org }) => {
   );
 };
 
-function extractError(err: unknown): string {
+function extractError(err: unknown, fallback: string): string {
   if (err && typeof err === 'object' && 'data' in err) {
     const data = (err as { data?: { detail?: string; title?: string } }).data;
-    return data?.detail || data?.title || 'unknown error';
+    return data?.detail || data?.title || fallback;
   }
   return String(err);
 }

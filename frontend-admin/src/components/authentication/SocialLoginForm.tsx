@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Button, Form, Alert } from 'react-bootstrap';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faGoogle, faApple } from '@fortawesome/free-brands-svg-icons';
+import { useTranslation } from 'react-i18next';
 import { initiateSocialLogin, SocialProvider } from 'utils/socialAuthUtils';
 
 import runtimeConfig from 'config/environment';
@@ -15,10 +16,18 @@ const SocialLoginForm = ({
   backendUrl = runtimeConfig.apiUrl,
   onError
 }: SocialLoginFormProps) => {
+  const { t } = useTranslation();
   const [loadingProvider, setLoadingProvider] = useState<SocialProvider | null>(
     null
   );
   const [error, setError] = useState<string>('');
+
+  const providerLabel = (provider: SocialProvider) =>
+    provider === 'google'
+      ? 'Google'
+      : provider === 'apple'
+        ? 'Apple'
+        : provider;
 
   const handleSocialLogin = async (provider: SocialProvider) => {
     setLoadingProvider(provider);
@@ -30,7 +39,9 @@ const SocialLoginForm = ({
       const errorMessage =
         err instanceof Error
           ? err.message
-          : `Failed to initiate ${provider} login`;
+          : t('auth.social.initiateFailed', {
+              provider: providerLabel(provider)
+            });
       setError(errorMessage);
       if (onError) onError(err instanceof Error ? err : new Error(String(err)));
     } finally {
@@ -38,34 +49,35 @@ const SocialLoginForm = ({
     }
   };
 
-  const socialProviders = [
+  const socialProviders: Array<{
+    provider: SocialProvider;
+    icon: typeof faGoogle;
+    label: string;
+    variant: string;
+  }> = [
     {
-      provider: 'google' as SocialProvider,
+      provider: 'google',
       icon: faGoogle,
       label: 'Google',
-      variant: 'success',
-      loadingText: 'Redirecting to Google...'
+      variant: 'success'
     },
     {
-      provider: 'apple' as SocialProvider,
+      provider: 'apple',
       icon: faApple,
       label: 'Apple',
-      variant: 'danger',
-      loadingText: 'Redirecting to Apple...'
+      variant: 'danger'
     }
     // {
     //   provider: 'github' as SocialProvider,
     //   icon: faGithub,
     //   label: 'GitHub',
-    //   variant: 'secondary',
-    //   loadingText: 'Redirecting to GitHub...'
+    //   variant: 'secondary'
     // },
     // {
     //   provider: 'discord' as SocialProvider,
     //   icon: faDiscord,
     //   label: 'Discord',
-    //   variant: 'primary',
-    //   loadingText: 'Redirecting to Discord...'
+    //   variant: 'primary'
     // }
   ];
 
@@ -88,27 +100,24 @@ const SocialLoginForm = ({
       )}
 
       <div className="d-grid gap-3">
-        {socialProviders.map(
-          ({ provider, icon, label, variant, loadingText }) => (
-            <Button
-              key={provider}
-              onClick={() => handleSocialLogin(provider)}
-              disabled={loadingProvider !== null}
-              variant={variant}
-              size="lg"
-            >
-              <FontAwesomeIcon icon={icon} className="me-2" />
-              {loadingProvider === provider ? loadingText : label}
-            </Button>
-          )
-        )}
+        {socialProviders.map(({ provider, icon, label, variant }) => (
+          <Button
+            key={provider}
+            onClick={() => handleSocialLogin(provider)}
+            disabled={loadingProvider !== null}
+            variant={variant}
+            size="lg"
+          >
+            <FontAwesomeIcon icon={icon} className="me-2" />
+            {loadingProvider === provider
+              ? t('auth.social.redirectingTo', { provider: label })
+              : label}
+          </Button>
+        ))}
       </div>
 
       <div className="text-center mt-4">
-        <small className="text-muted">
-          Accedendo, accetti i nostri Termini di servizio e l’Informativa sulla
-          privacy.
-        </small>
+        <small className="text-muted">{t('auth.social.acceptingTerms')}</small>
       </div>
     </Form>
   );

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Alert, Dropdown, Spinner, Table } from 'react-bootstrap';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { Trans, useTranslation } from 'react-i18next';
 import { toast } from 'react-toastify';
 import SubtleBadge from 'components/common/SubtleBadge';
 import type { Org } from 'store/api/tenantApi';
@@ -36,6 +37,7 @@ interface MfaTarget {
  * user without leaving the tenant.
  */
 const MembersTab: React.FC<Props> = ({ org }) => {
+  const { t } = useTranslation();
   const { data, isLoading, error } = useListOrgMembersAdminQuery(org.id);
   const [removeMember] = useRemoveOrgMemberAdminMutation();
   const [resendVerification] = useResendVerificationClientUserAdminMutation();
@@ -43,30 +45,44 @@ const MembersTab: React.FC<Props> = ({ org }) => {
   const [attachOpen, setAttachOpen] = useState(false);
   const [mfaTarget, setMfaTarget] = useState<MfaTarget | null>(null);
 
+  const unknownErr = t('adminClients.members.errorUnknown');
+
   const onRemove = async (userUUID: string) => {
     try {
       await removeMember({ tenantId: org.id, userUUID }).unwrap();
-      toast.success('Member removed');
+      toast.success(t('adminClients.members.toastRemoved'));
     } catch (err: unknown) {
-      toast.error('Remove failed: ' + extractError(err));
+      toast.error(
+        t('adminClients.members.toastRemoveFailed', {
+          error: extractError(err, unknownErr)
+        })
+      );
     }
   };
 
   const onResendVerification = async (userUUID: string) => {
     try {
       await resendVerification(userUUID).unwrap();
-      toast.success('Verification email sent');
+      toast.success(t('adminClients.members.toastVerificationSent'));
     } catch (err: unknown) {
-      toast.error('Resend failed: ' + extractError(err));
+      toast.error(
+        t('adminClients.members.toastResendFailed', {
+          error: extractError(err, unknownErr)
+        })
+      );
     }
   };
 
   const onSendPasswordReset = async (userUUID: string) => {
     try {
       await sendPasswordReset(userUUID).unwrap();
-      toast.success('Password-reset email sent');
+      toast.success(t('adminClients.members.toastPasswordResetSent'));
     } catch (err: unknown) {
-      toast.error('Send failed: ' + extractError(err));
+      toast.error(
+        t('adminClients.members.toastSendFailed', {
+          error: extractError(err, unknownErr)
+        })
+      );
     }
   };
 
@@ -80,7 +96,7 @@ const MembersTab: React.FC<Props> = ({ org }) => {
   if (error) {
     return (
       <Alert variant="danger" className="fs-10">
-        Failed to load members.
+        {t('adminClients.members.loadFailed')}
       </Alert>
     );
   }
@@ -91,9 +107,10 @@ const MembersTab: React.FC<Props> = ({ org }) => {
     <>
       <div className="d-flex justify-content-between align-items-start mb-2 gap-3">
         <Alert variant="info" className="fs-10 py-2 mb-0 flex-grow-1">
-          Direct-attach a user as a member, or remove non-owner rows. Custom
-          role assignments still live on the{' '}
-          <a href="/admin/roles">Role Management page</a>.
+          <Trans
+            i18nKey="adminClients.members.intro"
+            components={{ link: <a href="/admin/roles" /> }}
+          />
         </Alert>
         <Button
           variant="primary"
@@ -101,18 +118,18 @@ const MembersTab: React.FC<Props> = ({ org }) => {
           onClick={() => setAttachOpen(true)}
           className="flex-shrink-0"
         >
-          Attach Member
+          {t('adminClients.members.attachButton')}
         </Button>
       </div>
       <Table size="sm" className="fs-10 mb-0">
         <thead className="bg-body-tertiary">
           <tr>
-            <th>Email</th>
-            <th>User UUID</th>
-            <th>Roles</th>
-            <th>Joined</th>
-            <th>Owner</th>
-            <th className="text-end">Actions</th>
+            <th>{t('adminClients.members.colEmail')}</th>
+            <th>{t('adminClients.members.colUserUUID')}</th>
+            <th>{t('adminClients.members.colRoles')}</th>
+            <th>{t('adminClients.members.colJoined')}</th>
+            <th>{t('adminClients.members.colOwner')}</th>
+            <th className="text-end">{t('adminClients.members.colActions')}</th>
           </tr>
         </thead>
         <tbody>
@@ -127,7 +144,7 @@ const MembersTab: React.FC<Props> = ({ org }) => {
               <td>
                 {m.isOwner && (
                   <SubtleBadge bg="primary" pill>
-                    owner
+                    {t('adminClients.members.ownerBadge')}
                   </SubtleBadge>
                 )}
               </td>
@@ -148,7 +165,7 @@ const MembersTab: React.FC<Props> = ({ org }) => {
                         onClick={() => onResendVerification(m.userUUID)}
                       >
                         <FontAwesomeIcon icon="envelope" className="me-2" />
-                        Resend verification
+                        {t('adminClients.members.actionResendVerification')}
                       </Dropdown.Item>
                       <Dropdown.Item
                         as="button"
@@ -156,7 +173,7 @@ const MembersTab: React.FC<Props> = ({ org }) => {
                         onClick={() => onSendPasswordReset(m.userUUID)}
                       >
                         <FontAwesomeIcon icon="key" className="me-2" />
-                        Send password reset
+                        {t('adminClients.members.actionSendPasswordReset')}
                       </Dropdown.Item>
                       <Dropdown.Item
                         as="button"
@@ -169,7 +186,7 @@ const MembersTab: React.FC<Props> = ({ org }) => {
                         }
                       >
                         <FontAwesomeIcon icon="shield-alt" className="me-2" />
-                        Reset MFA…
+                        {t('adminClients.members.actionResetMfa')}
                       </Dropdown.Item>
                       {!m.isOwner && (
                         <>
@@ -184,7 +201,7 @@ const MembersTab: React.FC<Props> = ({ org }) => {
                               icon="trash-alt"
                               className="me-2"
                             />
-                            Remove from tenant
+                            {t('adminClients.members.actionRemove')}
                           </Dropdown.Item>
                         </>
                       )}
@@ -197,7 +214,7 @@ const MembersTab: React.FC<Props> = ({ org }) => {
           {members.length === 0 && (
             <tr>
               <td colSpan={6} className="text-center text-muted py-3">
-                No members yet.
+                {t('adminClients.members.empty')}
               </td>
             </tr>
           )}
@@ -218,10 +235,10 @@ const MembersTab: React.FC<Props> = ({ org }) => {
   );
 };
 
-function extractError(err: unknown): string {
+function extractError(err: unknown, unknownLabel: string): string {
   if (err && typeof err === 'object' && 'data' in err) {
     const data = (err as { data?: { detail?: string; title?: string } }).data;
-    return data?.detail || data?.title || 'unknown error';
+    return data?.detail || data?.title || unknownLabel;
   }
   return String(err);
 }

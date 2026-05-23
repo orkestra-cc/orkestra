@@ -4,6 +4,7 @@ import { Form, Dropdown } from 'react-bootstrap';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import Fuse from 'fuse.js';
 import { Link } from 'react-router';
+import { useTranslation } from 'react-i18next';
 import Avatar from 'components/common/Avatar';
 import { isIterableArray } from 'helpers/utils';
 import Flex from 'components/common/Flex';
@@ -60,6 +61,7 @@ interface SearchBoxProps {
 }
 
 const SearchBox = ({ autoCompleteItem }: SearchBoxProps) => {
+  const { t } = useTranslation();
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [searchInputValue, setSearchInputValue] = useState('');
   const [resultItem, setResultItem] = useState<SearchItem[]>(autoCompleteItem);
@@ -110,8 +112,8 @@ const SearchBox = ({ autoCompleteItem }: SearchBoxProps) => {
             type="search"
             name="navbar-search"
             id="navbar-search"
-            placeholder="Search..."
-            aria-label="Search"
+            placeholder={t('nav.search.placeholder')}
+            aria-label={t('nav.search.placeholder')}
             className="rounded-pill search-input"
             value={searchInputValue}
             onChange={({ target }) => setSearchInputValue(target.value)}
@@ -140,7 +142,7 @@ const SearchBox = ({ autoCompleteItem }: SearchBoxProps) => {
           {isIterableArray(recentlyBrowsedItems) && (
             <>
               <Dropdown.Header as="h6" className="px-x1 pt-0 pb-2 fw-medium">
-                Recently Browsed
+                {t('nav.search.recentlyBrowsed')}
               </Dropdown.Header>
               {recentlyBrowsedItems.map(item => (
                 <Dropdown.Item
@@ -185,7 +187,7 @@ const SearchBox = ({ autoCompleteItem }: SearchBoxProps) => {
           {isIterableArray(suggestedFilters) && (
             <>
               <Dropdown.Header as="h6" className="px-x1 pt-0 pb-2 fw-medium">
-                Suggested Filter
+                {t('nav.search.suggestedFilter')}
               </Dropdown.Header>
               {suggestedFilters.map(item => (
                 <Dropdown.Item
@@ -215,7 +217,7 @@ const SearchBox = ({ autoCompleteItem }: SearchBoxProps) => {
           {isIterableArray(suggestionFiles) && (
             <>
               <Dropdown.Header as="h6" className="px-x1 pt-0 pb-2 fw-medium">
-                Files
+                {t('nav.search.files')}
               </Dropdown.Header>
               {suggestionFiles.map(item => (
                 <MediaSearchContent item={item} key={item.id} />
@@ -229,7 +231,7 @@ const SearchBox = ({ autoCompleteItem }: SearchBoxProps) => {
           {isIterableArray(suggestionMembers) && (
             <>
               <Dropdown.Header as="h6" className="px-x1 pt-0 pb-2 fw-medium">
-                Members
+                {t('nav.search.members')}
               </Dropdown.Header>
               {suggestionMembers.map(item => (
                 <MediaSearchContent item={item} key={item.id} />
@@ -243,7 +245,7 @@ const SearchBox = ({ autoCompleteItem }: SearchBoxProps) => {
               'd-none': resultItem.length > 0
             })}
           >
-            No Result Found.
+            {t('nav.search.noResults')}
           </p>
         </div>
       </Dropdown.Menu>

@@ -15,8 +15,38 @@ import (
 	"github.com/orkestra/backend/internal/core/tenant/services"
 )
 
+// tenantSvc is the consumer-side view of *services.Service that the
+// handler depends on. Defined here (not in services/) so the handler
+// owns its narrow surface and tests can fake it without round-tripping
+// through Mongo. *services.Service satisfies this via structural
+// typing — the constructor still accepts the concrete pointer that
+// module.go threads through.
+type tenantSvc interface {
+	GetTenant(ctx context.Context, tenantUUID string) (*iface.Tenant, error)
+	GetTenantModel(ctx context.Context, tenantUUID string) (*models.Tenant, error)
+	ListUserMemberships(ctx context.Context, userUUID string) ([]iface.TenantMembership, error)
+	CreateTenant(ctx context.Context, ownerUUID string, input models.CreateTenantInput) (*models.Tenant, error)
+	UpdateTenant(ctx context.Context, tenantUUID string, input models.UpdateTenantInput) error
+	DeleteTenant(ctx context.Context, tenantUUID string) error
+	PurgeTenant(ctx context.Context, tenantUUID string) error
+	UpdatePlan(ctx context.Context, tenantUUID string, input models.UpdatePlanInput) error
+	ListMembers(ctx context.Context, tenantUUID string) ([]models.TenantMembership, error)
+	RemoveMember(ctx context.Context, tenantUUID, userUUID string) error
+	AttachMember(ctx context.Context, tenantUUID, userUUID, roleName string, isOwner bool) (*models.TenantMembership, error)
+	CreateInvite(ctx context.Context, tenantUUID, invitedBy string, input models.InviteInput) (*models.TenantInvite, error)
+	ListInvites(ctx context.Context, tenantUUID string, onlyPending bool) ([]models.TenantInvite, error)
+	RevokeInvite(ctx context.Context, tenantUUID, inviteUUID string) error
+	AcceptInvite(ctx context.Context, userUUID, token string) (*models.Tenant, error)
+	ListAllTenantsFiltered(ctx context.Context, filter repository.TenantListFilter) ([]services.TenantAdminView, error)
+	ListDivisions(ctx context.Context, parentUUID string) ([]models.Tenant, error)
+	CreateDivision(ctx context.Context, parentUUID, ownerUUID, name, slug string) (*models.Tenant, error)
+	SetBillingIdentity(ctx context.Context, tenantUUID string, in services.SetBillingIdentityInput) error
+	SetItalianBillable(ctx context.Context, tenantUUID string, on bool) error
+	EnsureTenantForUser(ctx context.Context, userUUID string) (*iface.Tenant, error)
+}
+
 type Handler struct {
-	svc *services.Service
+	svc tenantSvc
 	// registry is used at request time to resolve the optional aggregator
 	// providers (subscriptions, payments). Looked up lazily because those
 	// addons init after core/tenant; capturing the typed interfaces at
@@ -25,8 +55,10 @@ type Handler struct {
 }
 
 // New wires a handler to the tenant service. The registry is optional;
-// when nil the aggregator endpoints degrade to empty results.
-func New(svc *services.Service, registry *module.ServiceRegistry) *Handler {
+// when nil the aggregator endpoints degrade to empty results. The svc
+// parameter is the concrete *services.Service at boot — declared as an
+// interface in tests to swap in a fake without touching Mongo.
+func New(svc tenantSvc, registry *module.ServiceRegistry) *Handler {
 	return &Handler{svc: svc, registry: registry}
 }
 

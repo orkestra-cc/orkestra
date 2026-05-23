@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom';
 import { Row, Col, Card, Form, Button, Spinner, Badge } from 'react-bootstrap';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faMagic, faPaperPlane } from '@fortawesome/free-solid-svg-icons';
+import { useTranslation } from 'react-i18next';
 import Background from 'components/common/Background';
 import greetingsBg from 'assets/img/illustrations/ticket-greetings-bg.png';
 import {
@@ -10,45 +11,30 @@ import {
   useLazyPollSkillTaskQuery
 } from '../../../store/api/salesApi';
 
-const SKILL_META: Record<string, { title: string; description: string }> = {
-  research: {
-    title: 'Company Research',
-    description: 'Firmographic analysis and business profiling'
-  },
-  qualify: {
-    title: 'Lead Qualification',
-    description: 'BANT + MEDDIC scoring framework'
-  },
-  contacts: {
-    title: 'Contact Finder',
-    description: 'Identify decision makers and stakeholders'
-  },
-  outreach: { title: 'Outreach', description: 'Generate cold email sequences' },
-  prep: {
-    title: 'Meeting Prep',
-    description: 'Pre-meeting intelligence brief'
-  },
-  proposal: { title: 'Proposal', description: 'Generate client proposals' },
-  competitors: {
-    title: 'Competitors',
-    description: 'Competitive landscape analysis'
-  },
-  followup: { title: 'Follow-up', description: 'Generate follow-up sequences' },
-  objections: {
-    title: 'Objections',
-    description: 'Objection handling playbook'
-  },
-  icp: {
-    title: 'ICP Builder',
-    description: 'Ideal Customer Profile generation'
-  }
-};
+const SKILL_KEYS = [
+  'research',
+  'qualify',
+  'contacts',
+  'outreach',
+  'prep',
+  'proposal',
+  'competitors',
+  'followup',
+  'objections',
+  'icp'
+] as const;
 
 const POLL_INTERVAL = 2000;
 
 const SkillPage = () => {
+  const { t } = useTranslation();
   const { skill } = useParams<{ skill: string }>();
-  const meta = SKILL_META[skill || ''] || { title: skill, description: '' };
+  const meta = (SKILL_KEYS as readonly string[]).includes(skill || '')
+    ? {
+        title: t(`sales.skills.meta.${skill}Title`),
+        description: t(`sales.skills.meta.${skill}Description`)
+      }
+    : { title: skill || '', description: '' };
 
   const [url, setUrl] = useState('');
   const [context, setContext] = useState('');
@@ -98,18 +84,22 @@ const SkillPage = () => {
           } else if (data.status === 'failed') {
             stopPolling();
             setRunning(false);
-            setResult({ error: data.error || 'Skill execution failed' });
+            setResult({
+              error: data.error || t('sales.skills.errors.executionFailed')
+            });
           }
         } catch {
           stopPolling();
           setRunning(false);
-          setResult({ error: 'Failed to poll task status' });
+          setResult({ error: t('sales.skills.errors.pollFailed') });
         }
       }, POLL_INTERVAL);
     } catch (err: any) {
       setRunning(false);
       const detail = err?.data?.detail || err?.data?.errors?.[0]?.message;
-      setResult({ error: detail || err?.message || 'Failed to submit skill' });
+      setResult({
+        error: detail || err?.message || t('sales.skills.errors.submitFailed')
+      });
     }
   };
 
@@ -131,7 +121,9 @@ const SkillPage = () => {
                 />
               </div>
               <div className="ms-3">
-                <h6 className="mb-1 text-primary">Sales Skill</h6>
+                <h6 className="mb-1 text-primary">
+                  {t('sales.skills.kicker')}
+                </h6>
                 <h4 className="mb-0 text-primary fw-bold">
                   {meta.title}
                   {meta.description && (
@@ -159,10 +151,10 @@ const SkillPage = () => {
                 <Row className="g-3">
                   <Col md={5}>
                     <Form.Group>
-                      <Form.Label>Company URL</Form.Label>
+                      <Form.Label>{t('sales.skills.urlLabel')}</Form.Label>
                       <Form.Control
                         type="url"
-                        placeholder="https://example.com"
+                        placeholder={t('sales.skills.urlPlaceholder')}
                         value={url}
                         onChange={e => setUrl(e.target.value)}
                         required
@@ -171,25 +163,31 @@ const SkillPage = () => {
                   </Col>
                   <Col md={2}>
                     <Form.Group>
-                      <Form.Label>Locale</Form.Label>
+                      <Form.Label>{t('sales.skills.localeLabel')}</Form.Label>
                       <Form.Select
                         value={locale}
                         onChange={e => setLocale(e.target.value)}
                       >
-                        <option value="it">Italian</option>
-                        <option value="en">English</option>
+                        <option value="it">
+                          {t('sales.skills.localeItalian')}
+                        </option>
+                        <option value="en">
+                          {t('sales.skills.localeEnglish')}
+                        </option>
                       </Form.Select>
                     </Form.Group>
                   </Col>
                   <Col md={5}>
                     <Form.Group>
                       <Form.Label>
-                        Extra Context{' '}
-                        <span className="text-muted">(optional)</span>
+                        {t('sales.skills.contextLabel')}{' '}
+                        <span className="text-muted">
+                          {t('sales.skills.contextOptional')}
+                        </span>
                       </Form.Label>
                       <Form.Control
                         type="text"
-                        placeholder="e.g. We sell ERP software to manufacturing"
+                        placeholder={t('sales.skills.contextPlaceholder')}
                         value={context}
                         onChange={e => setContext(e.target.value)}
                       />
@@ -207,7 +205,9 @@ const SkillPage = () => {
                   ) : (
                     <FontAwesomeIcon icon={faPaperPlane} className="me-1" />
                   )}
-                  {running ? 'Processing...' : `Run ${meta.title}`}
+                  {running
+                    ? t('sales.skills.processing')
+                    : t('sales.skills.runButton', { title: meta.title })}
                 </Button>
               </Form>
             </Card.Body>
@@ -220,23 +220,29 @@ const SkillPage = () => {
           <Col lg={12}>
             <Card>
               <Card.Header className="d-flex justify-content-between align-items-center">
-                <h5 className="mb-0">Result</h5>
+                <h5 className="mb-0">{t('sales.skills.resultTitle')}</h5>
                 <div className="d-flex gap-2">
                   {result.inputTokens !== undefined && (
                     <Badge bg="secondary">
-                      Tokens: {result.inputTokens} in / {result.outputTokens}{' '}
-                      out
+                      {t('sales.skills.tokensBadge', {
+                        input: result.inputTokens,
+                        output: result.outputTokens
+                      })}
                     </Badge>
                   )}
                   {result.latencyMs !== undefined && (
                     <Badge bg="info">
-                      {(result.latencyMs / 1000).toFixed(1)}s
+                      {t('sales.skills.latencyBadge', {
+                        seconds: (result.latencyMs / 1000).toFixed(1)
+                      })}
                     </Badge>
                   )}
                   {result.modelUsed && (
                     <Badge bg="dark">{result.modelUsed}</Badge>
                   )}
-                  {result.error && <Badge bg="danger">Error</Badge>}
+                  {result.error && (
+                    <Badge bg="danger">{t('sales.skills.errorBadge')}</Badge>
+                  )}
                 </div>
               </Card.Header>
               <Card.Body>

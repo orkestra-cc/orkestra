@@ -1,8 +1,10 @@
 import OrkestraCardHeader from 'components/common/OrkestraCardHeader';
 import React, { useState } from 'react';
 import { Button, Card, Form } from 'react-bootstrap';
+import { useTranslation } from 'react-i18next';
 
 const ChangePassword: React.FC = () => {
+  const { t } = useTranslation();
   const [formData, setFormData] = useState({
     oldPassword: '',
     newPassword: '',
@@ -22,11 +24,11 @@ const ChangePassword: React.FC = () => {
 
   return (
     <Card className="mb-3">
-      <OrkestraCardHeader title="Change Password" />
+      <OrkestraCardHeader title={t('settings.changePassword.title')} />
       <Card.Body className="bg-body-tertiary">
         <Form onSubmit={handleSubmit}>
           <Form.Group className="mb-3" controlId="oldPassword">
-            <Form.Label>Old Password</Form.Label>
+            <Form.Label>{t('settings.changePassword.oldPassword')}</Form.Label>
             <Form.Control
               type="text"
               value={formData.oldPassword}
@@ -35,7 +37,7 @@ const ChangePassword: React.FC = () => {
             />
           </Form.Group>
           <Form.Group className="mb-3" controlId="newPassword">
-            <Form.Label>New Password</Form.Label>
+            <Form.Label>{t('settings.changePassword.newPassword')}</Form.Label>
             <Form.Control
               type="text"
               value={formData.newPassword}
@@ -44,7 +46,9 @@ const ChangePassword: React.FC = () => {
             />
           </Form.Group>
           <Form.Group className="mb-3" controlId="confirmPassword">
-            <Form.Label>Confirm Password</Form.Label>
+            <Form.Label>
+              {t('settings.changePassword.confirmPassword')}
+            </Form.Label>
             <Form.Control
               type="text"
               value={formData.confirmPassword}
@@ -53,7 +57,7 @@ const ChangePassword: React.FC = () => {
             />
           </Form.Group>
           <Button className="w-100" type="submit">
-            Update Password
+            {t('settings.changePassword.submit')}
           </Button>
         </Form>
       </Card.Body>

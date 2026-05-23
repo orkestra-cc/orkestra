@@ -1,4 +1,5 @@
 import { Card, Spinner, Table } from 'react-bootstrap';
+import { Trans, useTranslation } from 'react-i18next';
 import SubtleBadge from 'components/common/SubtleBadge';
 import type { BadgeColor } from 'components/common/SubtleBadge';
 import type { AuditEvent, AuditOutcome } from 'types/compliance';
@@ -28,13 +29,17 @@ const AuditEventsTable: React.FC<Props> = ({
   error,
   onRowClick
 }) => {
+  const { t } = useTranslation();
+  const dash = t('audit.table.dash');
+
   if (error) {
     return (
       <Card>
         <Card.Body className="text-center text-danger py-5">
-          Failed to load audit events. You need the{' '}
-          <code>system.compliance.audit.read</code> permission to view this
-          page.
+          <Trans
+            i18nKey="audit.table.errorLoadIntro"
+            components={{ code: <code /> }}
+          />
         </Card.Body>
       </Card>
     );
@@ -51,13 +56,13 @@ const AuditEventsTable: React.FC<Props> = ({
           <Table responsive size="sm" className="fs-10 mb-0">
             <thead className="bg-body-tertiary">
               <tr>
-                <th className="ps-3">Timestamp</th>
-                <th>Action</th>
-                <th>Actor</th>
-                <th>Resource</th>
-                <th>Tenant</th>
-                <th>Outcome</th>
-                <th className="pe-3">Metadata</th>
+                <th className="ps-3">{t('audit.table.colTimestamp')}</th>
+                <th>{t('audit.table.colAction')}</th>
+                <th>{t('audit.table.colActor')}</th>
+                <th>{t('audit.table.colResource')}</th>
+                <th>{t('audit.table.colTenant')}</th>
+                <th>{t('audit.table.colOutcome')}</th>
+                <th className="pe-3">{t('audit.table.colMetadata')}</th>
               </tr>
             </thead>
             <tbody>
@@ -81,7 +86,9 @@ const AuditEventsTable: React.FC<Props> = ({
                         pill
                         className="align-self-start mb-1"
                       >
-                        {ev.actorType}
+                        {t(`audit.table.actors.${ev.actorType}`, {
+                          defaultValue: ev.actorType
+                        })}
                       </SubtleBadge>
                       {ev.actorEmail && (
                         <span className="fs-11 text-body-secondary">
@@ -106,7 +113,7 @@ const AuditEventsTable: React.FC<Props> = ({
                         )}
                       </div>
                     ) : (
-                      <span className="text-body-tertiary">—</span>
+                      <span className="text-body-tertiary">{dash}</span>
                     )}
                   </td>
                   <td>
@@ -115,23 +122,23 @@ const AuditEventsTable: React.FC<Props> = ({
                         {shorten(ev.tenantId)}
                       </code>
                     ) : (
-                      <span className="text-body-tertiary">—</span>
+                      <span className="text-body-tertiary">{dash}</span>
                     )}
                   </td>
                   <td>
                     <SubtleBadge bg={outcomeColor[ev.outcome]} pill>
-                      {ev.outcome}
+                      {t(`audit.table.outcomes.${ev.outcome}`)}
                     </SubtleBadge>
                   </td>
                   <td className="pe-3 text-body-tertiary fs-11">
-                    {metadataPreview(ev.metadata)}
+                    {metadataPreview(ev.metadata, dash)}
                   </td>
                 </tr>
               ))}
               {events.length === 0 && (
                 <tr>
                   <td colSpan={7} className="text-center text-muted py-4">
-                    No audit events match the current filters.
+                    {t('audit.table.empty')}
                   </td>
                 </tr>
               )}
@@ -161,10 +168,13 @@ function shorten(id: string): string {
   return `${id.slice(0, 8)}…`;
 }
 
-function metadataPreview(metadata?: Record<string, unknown>): string {
-  if (!metadata) return '—';
+function metadataPreview(
+  metadata: Record<string, unknown> | undefined,
+  dash: string
+): string {
+  if (!metadata) return dash;
   const entries = Object.entries(metadata);
-  if (entries.length === 0) return '—';
+  if (entries.length === 0) return dash;
   // Show at most the first two scalar entries so the row stays single-line.
   const preview = entries
     .slice(0, 2)

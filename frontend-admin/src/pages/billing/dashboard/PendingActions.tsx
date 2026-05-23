@@ -7,6 +7,7 @@ import {
   faCheckCircle,
   faArrowRight
 } from '@fortawesome/free-solid-svg-icons';
+import { useTranslation } from 'react-i18next';
 import OrkestraCardHeader from 'components/common/OrkestraCardHeader';
 import { Link } from 'react-router';
 import {
@@ -26,6 +27,7 @@ interface PendingAction {
 }
 
 const PendingActions = () => {
+  const { t } = useTranslation();
   const lastYear = lastYearRange();
   const { data: stats, isLoading: statsLoading } =
     useGetBillingStatsQuery(lastYear);
@@ -41,7 +43,11 @@ const PendingActions = () => {
   if (isLoading) {
     return (
       <Card className="h-100">
-        <OrkestraCardHeader title="Azioni Richieste" titleTag="h6" light />
+        <OrkestraCardHeader
+          title={t('billing.dashboard.pendingActions.title')}
+          titleTag="h6"
+          light
+        />
         <Card.Body
           className="d-flex align-items-center justify-content-center"
           style={{ minHeight: 200 }}
@@ -58,8 +64,10 @@ const PendingActions = () => {
   if (stats && stats.issuedDraft > 0) {
     actions.push({
       id: 'drafts',
-      title: 'Fatture in Bozza',
-      description: `${stats.issuedDraft} fatture da completare`,
+      title: t('billing.dashboard.pendingActions.drafts.title'),
+      description: t('billing.dashboard.pendingActions.drafts.description', {
+        count: stats.issuedDraft
+      }),
       icon: faFileInvoice,
       iconColor: 'text-warning',
       link: '/billing/invoices/issued?status=draft',
@@ -71,8 +79,10 @@ const PendingActions = () => {
   if (stats && stats.issuedRejected > 0) {
     actions.push({
       id: 'rejected',
-      title: 'Fatture Rifiutate',
-      description: `${stats.issuedRejected} fatture da correggere`,
+      title: t('billing.dashboard.pendingActions.rejected.title'),
+      description: t('billing.dashboard.pendingActions.rejected.description', {
+        count: stats.issuedRejected
+      }),
       icon: faExclamationCircle,
       iconColor: 'text-danger',
       link: '/billing/invoices/issued?status=rejected',
@@ -84,8 +94,11 @@ const PendingActions = () => {
   if (stats && stats.receivedPending > 0) {
     actions.push({
       id: 'receivedPending',
-      title: 'Fatture da Registrare',
-      description: `${stats.receivedPending} fatture ricevute da gestire`,
+      title: t('billing.dashboard.pendingActions.receivedPending.title'),
+      description: t(
+        'billing.dashboard.pendingActions.receivedPending.description',
+        { count: stats.receivedPending }
+      ),
       icon: faFileInvoice,
       iconColor: 'text-info',
       link: '/billing/invoices/received?status=pending',
@@ -97,8 +110,11 @@ const PendingActions = () => {
   if (stats && stats.unprocessedNotifications > 0) {
     actions.push({
       id: 'notifications',
-      title: 'Notifiche SDI',
-      description: `${stats.unprocessedNotifications} notifiche da processare`,
+      title: t('billing.dashboard.pendingActions.notifications.title'),
+      description: t(
+        'billing.dashboard.pendingActions.notifications.description',
+        { count: stats.unprocessedNotifications }
+      ),
       icon: faBell,
       iconColor: 'text-warning',
       link: '/billing/notifications?processed=false',
@@ -115,19 +131,19 @@ const PendingActions = () => {
       case 'high':
         return (
           <Badge bg="danger" className="fs-11">
-            Urgente
+            {t('billing.dashboard.pendingActions.priority.high')}
           </Badge>
         );
       case 'medium':
         return (
           <Badge bg="warning" className="fs-11">
-            Medio
+            {t('billing.dashboard.pendingActions.priority.medium')}
           </Badge>
         );
       case 'low':
         return (
           <Badge bg="secondary" className="fs-11">
-            Basso
+            {t('billing.dashboard.pendingActions.priority.low')}
           </Badge>
         );
     }
@@ -136,7 +152,7 @@ const PendingActions = () => {
   return (
     <Card className="h-100">
       <OrkestraCardHeader
-        title="Azioni Richieste"
+        title={t('billing.dashboard.pendingActions.title')}
         titleTag="h6"
         light
         endEl={
@@ -155,9 +171,11 @@ const PendingActions = () => {
               className="fs-3 mb-2 d-block text-success"
             />
             <p className="text-success fs-10 mb-0 fw-medium">
-              Nessuna azione pendente
+              {t('billing.dashboard.pendingActions.empty')}
             </p>
-            <p className="text-body-tertiary fs-11 mb-0">Tutto in ordine!</p>
+            <p className="text-body-tertiary fs-11 mb-0">
+              {t('billing.dashboard.pendingActions.emptySubtitle')}
+            </p>
           </div>
         ) : (
           <ListGroup variant="flush">

@@ -32,6 +32,15 @@ RUN npm ci --ignore-scripts
 # Copy source code
 COPY . .
 
+# Seed public/config.js from the example template so `npm run build`
+# always finds a runtime-config file to ship into dist/. The file is
+# gitignored (each env regenerates its own), so build contexts produced
+# from a clean checkout — including CI — would otherwise be missing it.
+# The nginx entrypoint at /docker-entrypoint.d/10-write-config.sh
+# overwrites this baked default at container start, so dev defaults never
+# leak into a running staging/prod container.
+RUN cp -n public/config.example.js public/config.js
+
 # Build the application
 RUN npm run build
 

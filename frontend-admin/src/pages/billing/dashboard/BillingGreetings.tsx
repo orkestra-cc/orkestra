@@ -7,31 +7,33 @@ import {
   faTruck,
   faBell
 } from '@fortawesome/free-solid-svg-icons';
+import { useTranslation } from 'react-i18next';
 import OrkestraCardHeader from 'components/common/OrkestraCardHeader';
 import Flex from 'components/common/Flex';
 
 const BillingGreetings = () => {
+  const { t } = useTranslation();
   const quickLinks = [
     {
-      title: 'Nuova Fattura',
+      titleKey: 'billing.greetings.quickLinks.newInvoice',
       icon: faFileInvoiceDollar,
       to: '/billing/invoices/issued/new',
       color: 'primary'
     },
     {
-      title: 'Clienti',
+      titleKey: 'billing.greetings.quickLinks.clients',
       icon: faBuilding,
       to: '/admin/clients',
       color: 'info'
     },
     {
-      title: 'Fornitori',
+      titleKey: 'billing.greetings.quickLinks.suppliers',
       icon: faTruck,
       to: '/billing/suppliers',
       color: 'success'
     },
     {
-      title: 'Notifiche SDI',
+      titleKey: 'billing.greetings.quickLinks.sdiNotifications',
       icon: faBell,
       to: '/billing/notifications',
       color: 'warning'
@@ -41,7 +43,7 @@ const BillingGreetings = () => {
   return (
     <Card>
       <OrkestraCardHeader
-        title="Fatturazione Elettronica"
+        title={t('billing.greetings.cardTitle')}
         titleTag="h5"
         className="py-2"
         light
@@ -49,14 +51,14 @@ const BillingGreetings = () => {
       <Card.Body className="py-3">
         <Row className="g-3">
           {quickLinks.map(link => (
-            <Col key={link.title} sm={6} lg={3}>
+            <Col key={link.titleKey} sm={6} lg={3}>
               <Link to={link.to} className="text-decoration-none">
                 <Flex
                   alignItems="center"
                   className={`p-3 rounded bg-${link.color}-subtle text-${link.color} hover-shadow transition-all`}
                 >
                   <FontAwesomeIcon icon={link.icon} className="fs-4 me-3" />
-                  <span className="fw-medium">{link.title}</span>
+                  <span className="fw-medium">{t(link.titleKey)}</span>
                 </Flex>
               </Link>
             </Col>

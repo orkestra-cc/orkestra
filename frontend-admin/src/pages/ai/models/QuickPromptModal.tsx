@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react';
 import { Modal, Form, Button, Spinner, Alert } from 'react-bootstrap';
+import { useTranslation } from 'react-i18next';
 import { useQuickPromptAIModelMutation } from '../../../store/api/aiModelsApi';
 import type { AIModelConfig } from '../../../types/aiModels';
 
@@ -12,6 +13,7 @@ const QuickPromptModal: React.FC<QuickPromptModalProps> = ({
   model,
   onHide
 }) => {
+  const { t } = useTranslation();
   const [prompt, setPrompt] = useState('');
   const [response, setResponse] = useState('');
   const [timeMs, setTimeMs] = useState<number | null>(null);
@@ -38,9 +40,9 @@ const QuickPromptModal: React.FC<QuickPromptModalProps> = ({
       setResponse(result.response);
       setTimeMs(result.timeMs);
     } catch {
-      setError('Failed to get a response. Check that the model is reachable.');
+      setError(t('aiModels.quickPrompt.error'));
     }
-  }, [sendPrompt, model, prompt]);
+  }, [sendPrompt, model, prompt, t]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && e.ctrlKey) {
@@ -52,13 +54,19 @@ const QuickPromptModal: React.FC<QuickPromptModalProps> = ({
     <Modal show={!!model} onHide={onHide} onEnter={handleEnter} size="lg">
       <Modal.Header closeButton>
         <Modal.Title className="fs-6">
-          Quick Prompt &mdash; {model?.name}
-          <span className="text-muted ms-2 small">({model?.modelName})</span>
+          {t('aiModels.quickPrompt.title', { name: model?.name ?? '' })}
+          <span className="text-muted ms-2 small">
+            {t('aiModels.quickPrompt.modelNameSuffix', {
+              modelName: model?.modelName ?? ''
+            })}
+          </span>
         </Modal.Title>
       </Modal.Header>
       <Modal.Body>
         <Form.Group className="mb-3">
-          <Form.Label className="small">Prompt</Form.Label>
+          <Form.Label className="small">
+            {t('aiModels.quickPrompt.promptLabel')}
+          </Form.Label>
           <Form.Control
             as="textarea"
             rows={3}
@@ -66,7 +74,7 @@ const QuickPromptModal: React.FC<QuickPromptModalProps> = ({
             value={prompt}
             onChange={e => setPrompt(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Type your prompt here... (Ctrl+Enter to send)"
+            placeholder={t('aiModels.quickPrompt.promptPlaceholder')}
             disabled={isLoading}
           />
         </Form.Group>
@@ -80,14 +88,17 @@ const QuickPromptModal: React.FC<QuickPromptModalProps> = ({
           >
             {isLoading ? (
               <>
-                <Spinner size="sm" className="me-1" /> Sending...
+                <Spinner size="sm" className="me-1" />{' '}
+                {t('aiModels.quickPrompt.sending')}
               </>
             ) : (
-              'Send'
+              t('aiModels.quickPrompt.send')
             )}
           </Button>
           {timeMs !== null && (
-            <span className="text-muted small">{timeMs} ms</span>
+            <span className="text-muted small">
+              {t('aiModels.quickPrompt.latencyMs', { ms: timeMs })}
+            </span>
           )}
         </div>
 
@@ -110,7 +121,7 @@ const QuickPromptModal: React.FC<QuickPromptModalProps> = ({
       </Modal.Body>
       <Modal.Footer>
         <Button variant="secondary" size="sm" onClick={onHide}>
-          Close
+          {t('aiModels.quickPrompt.close')}
         </Button>
       </Modal.Footer>
     </Modal>

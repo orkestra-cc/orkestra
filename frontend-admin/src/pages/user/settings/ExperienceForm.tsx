@@ -2,6 +2,7 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import Flex from 'components/common/Flex';
 import React, { useState } from 'react';
 import { Button, Col, Collapse, Form, Row } from 'react-bootstrap';
+import { useTranslation } from 'react-i18next';
 import InputField from '../InputField';
 
 // Types for Experience Form
@@ -24,6 +25,7 @@ const ExperienceForm: React.FC<ExperienceFormProps> = ({
   collapsed,
   setCollapsed
 }) => {
+  const { t } = useTranslation();
   const [formData, setFormData] = useState<ExperienceFormData>({
     company: '',
     position: '',
@@ -59,7 +61,9 @@ const ExperienceForm: React.FC<ExperienceFormProps> = ({
         <span className="circle-dashed">
           <FontAwesomeIcon icon="plus" />
         </span>
-        <span className="ms-3">Add new experience</span>
+        <span className="ms-3">
+          {t('userProfileScaffold.experiences.addNew')}
+        </span>
       </Flex>
       <Collapse in={!collapsed}>
         <div>
@@ -67,25 +71,25 @@ const ExperienceForm: React.FC<ExperienceFormProps> = ({
           <Form onSubmit={handleSubmit}>
             <InputField
               value={formData.company}
-              label="Company"
+              label={t('userProfileScaffold.experiences.labelCompany')}
               name="company"
               handleChange={handleChange}
             />
             <InputField
               value={formData.position}
-              label="Position"
+              label={t('userProfileScaffold.experiences.labelPosition')}
               name="position"
               handleChange={handleChange}
             />
             <InputField
               value={formData.position}
-              label="City"
+              label={t('userProfileScaffold.experiences.labelCity')}
               name="city"
               handleChange={handleChange}
             />
             <InputField
               value={formData.description}
-              label="Description"
+              label={t('userProfileScaffold.experiences.labelDescription')}
               name="description"
               handleChange={handleChange}
               as="textarea"
@@ -96,7 +100,9 @@ const ExperienceForm: React.FC<ExperienceFormProps> = ({
               <Col sm={{ offset: 3 }}>
                 <Form.Check
                   type="checkbox"
-                  label="I currently work here"
+                  label={t(
+                    'userProfileScaffold.experiences.labelCurrentlyWork'
+                  )}
                   checked={formData.currentlyWork}
                   onChange={({ target }) =>
                     setFormData({ ...formData, currentlyWork: target.checked })
@@ -108,7 +114,7 @@ const ExperienceForm: React.FC<ExperienceFormProps> = ({
             <InputField
               type="date"
               value={formData.from}
-              label="From"
+              label={t('userProfileScaffold.experiences.labelFrom')}
               name="from"
               onChange={(value: string) => {
                 setFormData({ ...formData, from: value });
@@ -118,7 +124,7 @@ const ExperienceForm: React.FC<ExperienceFormProps> = ({
             <InputField
               type="date"
               value={formData.to}
-              label="To"
+              label={t('userProfileScaffold.experiences.labelTo')}
               name="to"
               onChange={(value: string) => {
                 setFormData({ ...formData, to: value });
@@ -127,7 +133,9 @@ const ExperienceForm: React.FC<ExperienceFormProps> = ({
 
             <Form.Group as={Row} className="mb-3">
               <Col sm={{ offset: 3 }}>
-                <Button type="submit">Save</Button>
+                <Button type="submit">
+                  {t('userProfileScaffold.experiences.save')}
+                </Button>
               </Col>
             </Form.Group>
           </Form>

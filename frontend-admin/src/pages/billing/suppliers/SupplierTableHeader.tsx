@@ -4,6 +4,7 @@ import { useAdvanceTableContext } from 'providers/AdvanceTableProvider';
 import IconButton from 'components/common/IconButton';
 import AdvanceTableSearchBox from 'components/common/advance-table/AdvanceTableSearchBox';
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   arrayToCSV,
   downloadCSV,
@@ -15,20 +16,29 @@ import { getPartyDisplayName, REGIME_FISCALE_LABELS } from 'types/billing';
 import SupplierModal from './SupplierModal';
 
 const SupplierTableHeader = () => {
+  const { t } = useTranslation();
   const { getSelectedRowModel, setColumnFilters, getFilteredRowModel } =
     useAdvanceTableContext();
-  const [selectedStatus, setSelectedStatus] = useState<string>('Tutti');
+  // statusFilters carry stable keys so the filter logic can switch on the
+  // semantic value rather than the translated label.
+  const statusFilters: { key: 'all' | 'active' | 'inactive'; label: string }[] =
+    [
+      { key: 'all', label: t('billing.suppliers.filters.all') },
+      { key: 'active', label: t('billing.suppliers.filters.active') },
+      { key: 'inactive', label: t('billing.suppliers.filters.inactive') }
+    ];
+  const [selectedStatus, setSelectedStatus] = useState<string>(
+    statusFilters[0].label
+  );
   const [showCreateModal, setShowCreateModal] = useState(false);
 
-  const statusFilters = ['Tutti', 'Attivi', 'Inattivi'];
-
-  const handleStatusFilter = (status: string) => {
-    setSelectedStatus(status);
-    switch (status) {
-      case 'Attivi':
+  const handleStatusFilter = (filter: { key: string; label: string }) => {
+    setSelectedStatus(filter.label);
+    switch (filter.key) {
+      case 'active':
         setColumnFilters([{ id: 'isActive', value: true }]);
         break;
-      case 'Inattivi':
+      case 'inactive':
         setColumnFilters([{ id: 'isActive', value: false }]);
         break;
       default:
@@ -89,12 +99,12 @@ const SupplierTableHeader = () => {
     <div className="d-lg-flex justify-content-between">
       <Row className="flex-between-center gy-2 px-x1">
         <Col xs="auto" className="pe-0">
-          <h6 className="mb-0">Gestione Fornitori</h6>
+          <h6 className="mb-0">{t('billing.suppliers.tableTitle')}</h6>
         </Col>
         <Col xs="auto">
           <AdvanceTableSearchBox
             className="input-search-width"
-            placeholder="Cerca per nome o P.IVA"
+            placeholder={t('billing.suppliers.searchPlaceholder')}
           />
         </Col>
       </Row>
@@ -114,14 +124,14 @@ const SupplierTableHeader = () => {
             <span className="d-none d-sm-inline-block">{selectedStatus}</span>
           </Dropdown.Toggle>
           <Dropdown.Menu className="border py-2">
-            {statusFilters.map(status => (
+            {statusFilters.map(filter => (
               <Dropdown.Item
-                key={status}
-                onClick={() => handleStatusFilter(status)}
-                className={selectedStatus === status ? 'active' : ''}
+                key={filter.key}
+                onClick={() => handleStatusFilter(filter)}
+                className={selectedStatus === filter.label ? 'active' : ''}
               >
-                {status}
-                {selectedStatus === status && (
+                {filter.label}
+                {selectedStatus === filter.label && (
                   <FontAwesomeIcon
                     icon="check"
                     transform="down-4 shrink-4"
@@ -138,11 +148,20 @@ const SupplierTableHeader = () => {
         ></div>
         {getSelectedRowModel().rows.length > 0 ? (
           <div className="d-flex">
-            <Form.Select size="sm" aria-label="Azioni di massa">
-              <option>Azioni di massa</option>
-              <option value="activate">Attiva</option>
-              <option value="deactivate">Disattiva</option>
-              <option value="delete">Elimina</option>
+            <Form.Select
+              size="sm"
+              aria-label={t('billing.suppliers.bulkActions')}
+            >
+              <option>{t('billing.suppliers.bulkActions')}</option>
+              <option value="activate">
+                {t('billing.suppliers.bulkActivate')}
+              </option>
+              <option value="deactivate">
+                {t('billing.suppliers.bulkDeactivate')}
+              </option>
+              <option value="delete">
+                {t('billing.suppliers.bulkDelete')}
+              </option>
             </Form.Select>
             <Button
               type="button"
@@ -150,7 +169,7 @@ const SupplierTableHeader = () => {
               size="sm"
               className="ms-2"
             >
-              Applica
+              {t('billing.suppliers.apply')}
             </Button>
           </div>
         ) : (
@@ -164,7 +183,7 @@ const SupplierTableHeader = () => {
               onClick={() => setShowCreateModal(true)}
             >
               <span className="d-none d-sm-inline-block d-xl-none d-xxl-inline-block ms-1">
-                Nuovo Fornitore
+                {t('billing.suppliers.newSupplier')}
               </span>
             </IconButton>
             <IconButton
@@ -177,7 +196,7 @@ const SupplierTableHeader = () => {
               onClick={handleExportCSV}
             >
               <span className="d-none d-sm-inline-block d-xl-none d-xxl-inline-block ms-1">
-                Esporta
+                {t('billing.suppliers.export')}
               </span>
             </IconButton>
             <Dropdown align="end" className="btn-reveal-trigger d-inline-block">
@@ -188,13 +207,13 @@ const SupplierTableHeader = () => {
               <Dropdown.Menu className="border py-0">
                 <div className="py-2">
                   <Dropdown.Item as="button" type="button">
-                    Visualizza Tutti
+                    {t('billing.suppliers.viewAll')}
                   </Dropdown.Item>
-                  <Dropdown.Item>Esporta</Dropdown.Item>
-                  <Dropdown.Item>Importa</Dropdown.Item>
+                  <Dropdown.Item>{t('billing.suppliers.export')}</Dropdown.Item>
+                  <Dropdown.Item>{t('billing.suppliers.import')}</Dropdown.Item>
                   <Dropdown.Divider />
                   <Dropdown.Item className="text-danger">
-                    Elimina Tutti
+                    {t('billing.suppliers.deleteAll')}
                   </Dropdown.Item>
                 </div>
               </Dropdown.Menu>

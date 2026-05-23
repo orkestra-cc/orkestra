@@ -2,9 +2,11 @@ import { useGetCurrentUserQuery } from 'store/api/authApi';
 import OperatorBanner from './OperatorBanner';
 import OperatorProfileIntro from './OperatorProfileIntro';
 import { Col, Row, Alert, Spinner } from 'react-bootstrap';
+import { useTranslation } from 'react-i18next';
 import type { User } from 'store/api/userApi';
 
 const OperatorProfile: React.FC = () => {
+  const { t } = useTranslation();
   const { data: backendUser, isLoading, error } = useGetCurrentUserQuery();
 
   if (isLoading) {
@@ -14,22 +16,20 @@ const OperatorProfile: React.FC = () => {
         style={{ minHeight: '400px' }}
       >
         <Spinner animation="border" role="status">
-          <span className="visually-hidden">Loading...</span>
+          <span className="visually-hidden">
+            {t('profileShared.loadingAria')}
+          </span>
         </Spinner>
       </div>
     );
   }
 
   if (error) {
-    return (
-      <Alert variant="danger">
-        Error loading user data. Please try again later.
-      </Alert>
-    );
+    return <Alert variant="danger">{t('profileShared.errorLoad')}</Alert>;
   }
 
   if (!backendUser) {
-    return <Alert variant="warning">User not found.</Alert>;
+    return <Alert variant="warning">{t('profileShared.userNotFound')}</Alert>;
   }
 
   const user: User = {

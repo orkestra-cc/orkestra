@@ -1,0 +1,39 @@
+---
+title: Welcome to Orkestra
+description: The SaaS plumbing every product rebuilds — already done.
+slug: /
+sidebar_position: 0
+---
+
+# Welcome to Orkestra
+
+**Orkestra is the SaaS plumbing every product rebuilds — users, auth, RBAC, multi-tenancy, billing — already done.**
+
+Six core modules supply the baseline on day one. A catalog of optional addons (invoicing, payments, subscriptions, RAG, AI agents, documents, identity, compliance, …) sits on top and is toggled per internal tenant at `/admin/modules`.
+
+## Where to next
+
+- **[Getting Started](/getting-started)** — boot Orkestra locally in under five minutes.
+- **[Architecture](/architecture)** — the two-tier tenancy model, plugin loading, AI sidecar split.
+- **[Operating Orkestra](/operating)** — deployment, module configuration, SMTP/OAuth/Stripe.
+- **[Module Catalog](/modules)** — every core and optional module, what it does, what it depends on.
+- **[SDK Reference](/sdk)** — the `Module` interface, `ServiceRegistry`, building an addon.
+- **[ADRs](/adrs)** — architectural decisions that shape the platform.
+
+## Who this is for
+
+These docs are for **operators self-hosting Orkestra** and **developers building on the SDK or contributing addons**. End-customer documentation (Tier-2 client onboarding, subscription management) lives elsewhere.
+
+## Tech stack at a glance
+
+| Layer        | Technology                                                     |
+| ------------ | -------------------------------------------------------------- |
+| Backend      | Go 1.25, Huma v2 (OpenAPI-first), 6 core + 13 optional modules |
+| Frontend     | React 19, TypeScript 5.9, Vite 7                               |
+| Mobile       | Flutter 3.35+                                                  |
+| Database     | MongoDB 8.0, Redis 8.2                                         |
+| Auth         | Email/password (argon2id) + OAuth 2.1, RS256 JWT, 6-role RBAC  |
+
+:::info Status
+These docs are a work in progress. Sections marked **🚧 Draft** still need fleshing out — PRs welcome at [`orkestra-cc/orkestra-docs`](https://github.com/orkestra-cc/orkestra-docs).
+:::

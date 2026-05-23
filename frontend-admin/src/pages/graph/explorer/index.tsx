@@ -1,5 +1,6 @@
 import { useState, useCallback, useMemo, useEffect } from 'react';
 import { Card, Button, ButtonGroup } from 'react-bootstrap';
+import { useTranslation } from 'react-i18next';
 import { CytoscapeViewer } from '../components/CytoscapeViewer';
 import CypherEditor from '../components/CypherEditor';
 import ResultsTable from '../components/ResultsTable';
@@ -30,6 +31,7 @@ const SIDEBAR_STORAGE_KEY = 'orkestra:graph-explorer-sidebar-open';
 const SPLIT_HEIGHT_STORAGE_KEY = 'orkestra:graph-explorer-split-height';
 
 const GraphExplorer: React.FC = () => {
+  const { t } = useTranslation();
   const [database, setDatabase] = useState<string>('');
   const [selectedDocumentUuid, setSelectedDocumentUuid] = useState<string>('');
   const [result, setResult] = useState<QueryResult | null>(null);
@@ -211,7 +213,7 @@ const GraphExplorer: React.FC = () => {
       const labels = node.labels.join(', ');
       if (
         !window.confirm(
-          `Delete node ${node.id} (:${labels})?\nThis will also remove all connected relationships.`
+          t('graph.explorer.deleteNodeConfirm', { id: node.id, labels })
         )
       )
         return;
@@ -237,12 +239,16 @@ const GraphExplorer: React.FC = () => {
         // Error handled by RTK Query
       }
     },
-    [deleteNodeMutation, database, result, selectedNode]
+    [deleteNodeMutation, database, result, selectedNode, t]
   );
 
   const handleDeleteRelationship = useCallback(
     async (rel: GraphRelationship) => {
-      if (!window.confirm(`Delete relationship ${rel.id} (:${rel.type})?`))
+      if (
+        !window.confirm(
+          t('graph.explorer.deleteRelConfirm', { id: rel.id, type: rel.type })
+        )
+      )
         return;
 
       try {
@@ -265,7 +271,7 @@ const GraphExplorer: React.FC = () => {
         // Error handled by RTK Query
       }
     },
-    [deleteRelationshipMutation, database, result]
+    [deleteRelationshipMutation, database, result, t]
   );
 
   const graphNodes = useMemo(() => result?.graph?.nodes ?? [], [result]);
@@ -280,7 +286,7 @@ const GraphExplorer: React.FC = () => {
     <>
       {/* Page Header */}
       <div className="d-flex align-items-center justify-content-between mb-3">
-        <h5 className="mb-0">Graph Explorer</h5>
+        <h5 className="mb-0">{t('graph.explorer.pageTitle')}</h5>
         <div className="d-flex gap-2 align-items-center">
           {result && (
             <ButtonGroup size="sm">
@@ -289,19 +295,19 @@ const GraphExplorer: React.FC = () => {
                 onClick={() => setViewMode('graph')}
                 disabled={!hasGraph}
               >
-                Graph
+                {t('graph.explorer.view.graph')}
               </Button>
               <Button
                 variant={viewMode === 'split' ? 'primary' : 'outline-primary'}
                 onClick={() => setViewMode('split')}
               >
-                Split
+                {t('graph.explorer.view.split')}
               </Button>
               <Button
                 variant={viewMode === 'table' ? 'primary' : 'outline-primary'}
                 onClick={() => setViewMode('table')}
               >
-                Table
+                {t('graph.explorer.view.table')}
               </Button>
             </ButtonGroup>
           )}
@@ -323,13 +329,13 @@ const GraphExplorer: React.FC = () => {
               }}
             >
               <Card.Header className="bg-body-tertiary py-2 d-flex align-items-center justify-content-between">
-                <h6 className="mb-0">Database Schema</h6>
+                <h6 className="mb-0">{t('graph.explorer.sidebar.title')}</h6>
                 <Button
                   variant="link"
                   size="sm"
                   className="p-0 text-muted"
                   onClick={() => setSidebarOpen(false)}
-                  title="Collapse sidebar"
+                  title={t('graph.explorer.sidebar.collapse')}
                 >
                   <i className="fas fa-chevron-left" />
                 </Button>
@@ -349,7 +355,7 @@ const GraphExplorer: React.FC = () => {
             <div
               className="graph-sidebar-toggle"
               onClick={() => setSidebarOpen(true)}
-              title="Expand Schema"
+              title={t('graph.explorer.sidebar.expand')}
             >
               <span className="toggle-icon">
                 <i className="fas fa-chevron-right" />
@@ -416,12 +422,18 @@ const GraphExplorer: React.FC = () => {
                 <Card style={{ height: '100%' }}>
                   <Card.Header className="bg-body-tertiary py-2">
                     <h6 className="mb-0">
-                      Results
+                      {t('graph.explorer.results.title')}
                       {result && (
                         <small className="text-muted fw-normal ms-2">
-                          {result.metadata.resultCount} row
-                          {result.metadata.resultCount !== 1 ? 's' : ''} in{' '}
-                          {result.metadata.executionTimeMs}ms
+                          {t(
+                            result.metadata.resultCount === 1
+                              ? 'graph.explorer.results.rowsOne'
+                              : 'graph.explorer.results.rowsOther',
+                            {
+                              count: result.metadata.resultCount,
+                              ms: result.metadata.executionTimeMs
+                            }
+                          )}
                         </small>
                       )}
                     </h6>
@@ -433,8 +445,7 @@ const GraphExplorer: React.FC = () => {
                       <ResultsTable result={null} isLoading={true} />
                     ) : (
                       <p className="text-muted mb-0">
-                        Run a query to see results here. Click a label in the
-                        schema to browse nodes.
+                        {t('graph.explorer.results.emptyHint')}
                       </p>
                     )}
                   </Card.Body>
@@ -482,12 +493,18 @@ const GraphExplorer: React.FC = () => {
                 <Card className="mt-3">
                   <Card.Header className="bg-body-tertiary py-2">
                     <h6 className="mb-0">
-                      Results
+                      {t('graph.explorer.results.title')}
                       {result && (
                         <small className="text-muted fw-normal ms-2">
-                          {result.metadata.resultCount} row
-                          {result.metadata.resultCount !== 1 ? 's' : ''} in{' '}
-                          {result.metadata.executionTimeMs}ms
+                          {t(
+                            result.metadata.resultCount === 1
+                              ? 'graph.explorer.results.rowsOne'
+                              : 'graph.explorer.results.rowsOther',
+                            {
+                              count: result.metadata.resultCount,
+                              ms: result.metadata.executionTimeMs
+                            }
+                          )}
                         </small>
                       )}
                     </h6>
@@ -499,8 +516,7 @@ const GraphExplorer: React.FC = () => {
                       <ResultsTable result={null} isLoading={true} />
                     ) : (
                       <p className="text-muted mb-0">
-                        Run a query to see results here. Click a label in the
-                        schema to browse nodes.
+                        {t('graph.explorer.results.emptyHint')}
                       </p>
                     )}
                   </Card.Body>
@@ -530,6 +546,7 @@ function SelectedNodeCard({
   node: GraphNode;
   onClose: () => void;
 }) {
+  const { t } = useTranslation();
   const {
     size: cardHeight,
     isDragging,
@@ -548,7 +565,9 @@ function SelectedNodeCard({
         <Card.Header className="py-2 px-3 bg-body-tertiary">
           <div className="d-flex align-items-center justify-content-between">
             <div>
-              <small className="text-muted me-2">Node {node.id}</small>
+              <small className="text-muted me-2">
+                {t('graph.explorer.node.labelPrefix', { id: node.id })}
+              </small>
               {(node.labels ?? []).map(l => (
                 <span key={l} className="badge bg-primary me-1">
                   :{l}
@@ -561,7 +580,7 @@ function SelectedNodeCard({
               className="p-0 text-muted"
               onClick={onClose}
             >
-              Close
+              {t('graph.explorer.node.close')}
             </Button>
           </div>
         </Card.Header>

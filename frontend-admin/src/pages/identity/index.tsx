@@ -1,5 +1,6 @@
 import { Card, Col, Row } from 'react-bootstrap';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { Trans, useTranslation } from 'react-i18next';
 import IdPConfigForm from './IdPConfigForm';
 import ScimTokenSection from './ScimTokenSection';
 
@@ -8,6 +9,7 @@ import ScimTokenSection from './ScimTokenSection';
 // tenants via the tenant switcher first. Gated by tenant.update on the
 // backend (see identity/module.go::RegisterRoutes).
 const IdentityAdminPage: React.FC = () => {
+  const { t } = useTranslation();
   return (
     <>
       <Row className="g-3 mb-3">
@@ -16,13 +18,13 @@ const IdentityAdminPage: React.FC = () => {
             <Card.Body>
               <h5 className="mb-1">
                 <FontAwesomeIcon icon="id-card" className="me-2 text-primary" />
-                Identity (IdP + SCIM)
+                {t('identityAddon.title')}
               </h5>
               <p className="fs-10 mb-0 text-body-secondary">
-                Configure per-tenant OIDC sign-in and provision the SCIM 2.0
-                bearer token the IdP uses to push user lifecycle events. Changes
-                apply to the <strong>currently selected tenant</strong>; switch
-                tenants to configure a different one.
+                <Trans
+                  i18nKey="identityAddon.description"
+                  components={{ strong: <strong /> }}
+                />
               </p>
             </Card.Body>
           </Card>

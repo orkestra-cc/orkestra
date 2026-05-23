@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Button, Card, Col, Row } from 'react-bootstrap';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { useTranslation } from 'react-i18next';
 import { useListAuditEventsQuery } from 'store/api/complianceApi';
 import type { AuditEvent, ListAuditEventsParams } from 'types/compliance';
 import AuditEventsFilters from './AuditEventsFilters';
@@ -10,6 +11,7 @@ import AuditEventDetailModal from './AuditEventDetailModal';
 const DEFAULT_LIMIT = 50;
 
 const AuditEventsPage: React.FC = () => {
+  const { t } = useTranslation();
   // Filter + pagination state. Filter changes always reset offset=0 (see
   // AuditEventsFilters.onApply); paging-only changes mutate offset alone.
   const [params, setParams] = useState<ListAuditEventsParams>({
@@ -57,20 +59,20 @@ const AuditEventsPage: React.FC = () => {
                     icon="clipboard-list"
                     className="me-2 text-primary"
                   />
-                  Audit Events
+                  {t('audit.title')}
                 </h5>
                 <p className="fs-10 mb-0 text-body-secondary">
-                  Append-only trail of security-relevant actions across every
-                  tenant. Retention: 2 years (TTL-enforced on MongoDB).
+                  {t('audit.description')}
                 </p>
               </div>
               <div className="text-end">
-                <div className="fs-10 text-body-tertiary">Total matches</div>
+                <div className="fs-10 text-body-tertiary">
+                  {t('audit.totalMatches')}
+                </div>
                 <div className="fs-5">{total.toLocaleString()}</div>
                 {activeFilterCount > 0 && (
                   <div className="fs-11 text-body-tertiary">
-                    {activeFilterCount} filter
-                    {activeFilterCount === 1 ? '' : 's'} active
+                    {t('audit.filtersActive', { count: activeFilterCount })}
                   </div>
                 )}
               </div>
@@ -99,8 +101,12 @@ const AuditEventsPage: React.FC = () => {
       <div className="d-flex justify-content-between align-items-center mt-2 fs-10">
         <span className="text-body-tertiary">
           {total === 0
-            ? 'No events'
-            : `Showing ${showingFrom.toLocaleString()}–${showingTo.toLocaleString()} of ${total.toLocaleString()}`}
+            ? t('audit.noEvents')
+            : t('audit.showingRange', {
+                from: showingFrom.toLocaleString(),
+                to: showingTo.toLocaleString(),
+                total: total.toLocaleString()
+              })}
         </span>
         <div className="d-flex gap-2">
           <Button
@@ -117,7 +123,7 @@ const AuditEventsPage: React.FC = () => {
               }))
             }
           >
-            Previous
+            {t('audit.previous')}
           </Button>
           <Button
             size="sm"
@@ -130,7 +136,7 @@ const AuditEventsPage: React.FC = () => {
               }))
             }
           >
-            Next
+            {t('audit.next')}
           </Button>
         </div>
       </div>

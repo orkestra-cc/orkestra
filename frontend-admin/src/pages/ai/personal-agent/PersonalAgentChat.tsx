@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import Markdown from 'react-markdown';
+import { useTranslation } from 'react-i18next';
 import {
   Card,
   Row,
@@ -63,6 +64,7 @@ interface MessageBubbleProps {
 }
 
 function MessageBubble({ message, isLoading }: MessageBubbleProps) {
+  const { t } = useTranslation();
   const isUser = message.role === 'user';
 
   return (
@@ -82,7 +84,9 @@ function MessageBubble({ message, isLoading }: MessageBubbleProps) {
             />
           )}
           <small className="text-muted">
-            {isUser ? 'You' : 'Assistant'}
+            {isUser
+              ? t('aiAgents.chat.messageBubble.user')
+              : t('aiAgents.chat.messageBubble.assistant')}
             {message.createdAt && (
               <span className="ms-2">{dayjs(message.createdAt).fromNow()}</span>
             )}
@@ -101,7 +105,9 @@ function MessageBubble({ message, isLoading }: MessageBubbleProps) {
           {isLoading ? (
             <div className="d-flex align-items-center gap-2">
               <Spinner size="sm" animation="border" />
-              <span className="text-muted">Thinking...</span>
+              <span className="text-muted">
+                {t('aiAgents.chat.messageBubble.thinking')}
+              </span>
             </div>
           ) : isUser ? (
             <p className="mb-0 white-space-pre-line">{message.content}</p>
@@ -117,14 +123,21 @@ function MessageBubble({ message, isLoading }: MessageBubbleProps) {
           <div className="mt-1 d-flex gap-3 flex-wrap">
             <small className="text-muted">
               <FontAwesomeIcon icon={faClock} className="me-1" size="xs" />
-              {(message.metadata.totalTimeMs / 1000).toFixed(1)}s
+              {t('aiAgents.chat.messageBubble.latencySeconds', {
+                seconds: (message.metadata.totalTimeMs / 1000).toFixed(1)
+              })}
             </small>
             {message.metadata.totalTokens ? (
               <small className="text-muted">
-                {message.metadata.totalTokens} tokens
+                {t('aiAgents.chat.messageBubble.tokens', {
+                  count: message.metadata.totalTokens
+                })}
                 <span className="ms-1 text-muted-50">
-                  ({message.metadata.inputTokens} in /{' '}
-                  {message.metadata.outputTokens} out)
+                  {' '}
+                  {t('aiAgents.chat.messageBubble.tokensBreakdown', {
+                    input: message.metadata.inputTokens,
+                    output: message.metadata.outputTokens
+                  })}
                 </span>
               </small>
             ) : null}
@@ -141,8 +154,12 @@ function MessageBubble({ message, isLoading }: MessageBubbleProps) {
               <Accordion.Header>
                 <small>
                   <FontAwesomeIcon icon={faFileAlt} className="me-1" />
-                  {message.sources.length} source
-                  {message.sources.length > 1 ? 's' : ''}
+                  {t(
+                    message.sources.length === 1
+                      ? 'aiAgents.chat.messageBubble.sources_one'
+                      : 'aiAgents.chat.messageBubble.sources_other',
+                    { count: message.sources.length }
+                  )}
                 </small>
               </Accordion.Header>
               <Accordion.Body className="p-2">
@@ -211,6 +228,7 @@ function ConversationSidebar({
   onDelete,
   isDeleting
 }: ConversationSidebarProps) {
+  const { t } = useTranslation();
   return (
     <ListGroup
       variant="flush"
@@ -220,7 +238,7 @@ function ConversationSidebar({
       {conversations.length === 0 && (
         <div className="text-center text-muted py-4">
           <FontAwesomeIcon icon={faComments} className="mb-2" size="2x" />
-          <p className="small mb-0">No conversations yet</p>
+          <p className="small mb-0">{t('aiAgents.chat.sidebarEmpty')}</p>
         </div>
       )}
       {conversations.map(conv => (
@@ -233,7 +251,7 @@ function ConversationSidebar({
         >
           <div className="text-truncate me-2">
             <div className="fw-semibold small text-truncate">
-              {conv.title || 'Untitled conversation'}
+              {conv.title || t('aiAgents.chat.untitled')}
             </div>
             <small
               className={classNames({
@@ -241,7 +259,10 @@ function ConversationSidebar({
                 'text-muted': conv.uuid !== activeId
               })}
             >
-              {PERSONA_LABELS[conv.persona as PersonaType] ?? conv.persona}
+              {t(`aiAgents.chat.personaLabels.${conv.persona}`, {
+                defaultValue:
+                  PERSONA_LABELS[conv.persona as PersonaType] ?? conv.persona
+              })}
               {' \u00b7 '}
               {dayjs(conv.updatedAt).fromNow()}
             </small>
@@ -288,6 +309,7 @@ function DocumentPicker({
   onAdd,
   onRemove
 }: DocumentPickerProps) {
+  const { t } = useTranslation();
   const handleToggle = (doc: RagDocument) => {
     if (selectedUuids.includes(doc.uuid)) {
       onRemove([doc.uuid]);
@@ -301,13 +323,13 @@ function DocumentPicker({
       <Offcanvas.Header closeButton>
         <Offcanvas.Title>
           <FontAwesomeIcon icon={faFileAlt} className="me-2" />
-          Documents
+          {t('aiAgents.personal.documentsTitle')}
         </Offcanvas.Title>
       </Offcanvas.Header>
       <Offcanvas.Body>
         {documents.length === 0 && (
           <p className="text-muted text-center py-4">
-            No completed documents available.
+            {t('aiAgents.personal.documentsEmpty')}
           </p>
         )}
         <ListGroup variant="flush">
@@ -336,7 +358,9 @@ function DocumentPicker({
                     </Badge>
                   )}
                   <Badge bg="light" text="dark" className="fw-normal">
-                    {doc.chunkCount} chunks
+                    {t('aiAgents.personal.chunkCount', {
+                      count: doc.chunkCount
+                    })}
                   </Badge>
                 </div>
               </div>
@@ -354,13 +378,15 @@ function DocumentPicker({
 
 const TEMPERATURE_OPTIONS: {
   value: AgentSettings['temperature'];
-  label: string;
+  labelKey: string;
 }[] = [
-  { value: 'precise', label: 'Precise' },
-  { value: 'balanced', label: 'Balanced' },
-  { value: 'creative', label: 'Creative' }
+  { value: 'precise', labelKey: 'aiAgents.personal.temperaturePrecise' },
+  { value: 'balanced', labelKey: 'aiAgents.personal.temperatureBalanced' },
+  { value: 'creative', labelKey: 'aiAgents.personal.temperatureCreative' }
 ];
 
+// English/Italiano are proper-noun language names — left as literals
+// (matches the convention used in the Agent Settings form).
 const LANGUAGE_OPTIONS = [
   { value: 'en', label: 'English' },
   { value: 'it', label: 'Italiano' }
@@ -379,6 +405,7 @@ function SettingsOffcanvas({
   settings,
   onSave
 }: SettingsOffcanvasProps) {
+  const { t } = useTranslation();
   const [language, setLanguage] = useState(settings.language ?? 'en');
   const [temperature, setTemperature] = useState<AgentSettings['temperature']>(
     settings.temperature ?? 'balanced'
@@ -406,13 +433,15 @@ function SettingsOffcanvas({
       <Offcanvas.Header closeButton>
         <Offcanvas.Title>
           <FontAwesomeIcon icon={faCog} className="me-2" />
-          Agent Settings
+          {t('aiAgents.personal.settingsTitle')}
         </Offcanvas.Title>
       </Offcanvas.Header>
       <Offcanvas.Body>
         {/* Language */}
         <Form.Group className="mb-4">
-          <Form.Label className="fw-semibold">Language</Form.Label>
+          <Form.Label className="fw-semibold">
+            {t('aiAgents.personal.settingsLanguage')}
+          </Form.Label>
           <Form.Select
             value={language}
             onChange={e => setLanguage(e.target.value)}
@@ -427,13 +456,15 @@ function SettingsOffcanvas({
 
         {/* Temperature */}
         <Form.Group className="mb-4">
-          <Form.Label className="fw-semibold">Temperature</Form.Label>
+          <Form.Label className="fw-semibold">
+            {t('aiAgents.personal.settingsTemperature')}
+          </Form.Label>
           <div className="d-flex gap-3">
             {TEMPERATURE_OPTIONS.map(opt => (
               <Form.Check
                 key={opt.value}
                 type="radio"
-                label={opt.label}
+                label={t(opt.labelKey)}
                 name="temperature"
                 checked={temperature === opt.value}
                 onChange={() => setTemperature(opt.value)}
@@ -445,7 +476,8 @@ function SettingsOffcanvas({
         {/* Skepticism */}
         <Form.Group className="mb-3">
           <Form.Label className="fw-semibold">
-            Skepticism <Badge bg="secondary">{skepticism}</Badge>
+            {t('aiAgents.personal.settingsSkepticism')}{' '}
+            <Badge bg="secondary">{skepticism}</Badge>
           </Form.Label>
           <Form.Range
             min={1}
@@ -458,7 +490,8 @@ function SettingsOffcanvas({
         {/* Literalism */}
         <Form.Group className="mb-3">
           <Form.Label className="fw-semibold">
-            Literalism <Badge bg="secondary">{literalism}</Badge>
+            {t('aiAgents.personal.settingsLiteralism')}{' '}
+            <Badge bg="secondary">{literalism}</Badge>
           </Form.Label>
           <Form.Range
             min={1}
@@ -471,7 +504,8 @@ function SettingsOffcanvas({
         {/* Empathy */}
         <Form.Group className="mb-4">
           <Form.Label className="fw-semibold">
-            Empathy <Badge bg="secondary">{empathy}</Badge>
+            {t('aiAgents.personal.settingsEmpathy')}{' '}
+            <Badge bg="secondary">{empathy}</Badge>
           </Form.Label>
           <Form.Range
             min={1}
@@ -482,7 +516,7 @@ function SettingsOffcanvas({
         </Form.Group>
 
         <Button variant="primary" className="w-100" onClick={handleSave}>
-          Save Settings
+          {t('aiAgents.personal.settingsSave')}
         </Button>
       </Offcanvas.Body>
     </Offcanvas>
@@ -494,6 +528,7 @@ function SettingsOffcanvas({
 // ---------------------------------------------------------------------------
 
 const PersonalAgentChat: React.FC = () => {
+  const { t } = useTranslation();
   // Auto-provision the personal agent project on mount
   const {
     data: personalProject,
@@ -546,9 +581,13 @@ const PersonalAgentChat: React.FC = () => {
   const selectedDocUuids = personalProject?.documentUuids ?? [];
   const currentSettings: AgentSettings = personalProject?.settings ?? {};
 
+  // Pulled into a temp to dodge the prettier-version-drift loop on
+  // `a?.b ?? c` inside a ternary tail (see project_precommit_prettier_drift).
+  const conversationMessages: AgentMessage[] =
+    activeConversation?.messages ?? localMessages;
   const displayedMessages: AgentMessage[] = isWaitingForResponse
     ? localMessages
-    : (activeConversation?.messages ?? localMessages);
+    : conversationMessages;
 
   // Auto-scroll to bottom when messages change.
   // Necessary because new messages arrive outside the render cycle (via mutation responses).
@@ -713,7 +752,7 @@ const PersonalAgentChat: React.FC = () => {
       >
         <div className="text-center">
           <Spinner animation="border" className="mb-3" />
-          <p className="text-muted mb-0">Setting up your personal agent...</p>
+          <p className="text-muted mb-0">{t('aiAgents.personal.loading')}</p>
         </div>
       </div>
     );
@@ -727,9 +766,7 @@ const PersonalAgentChat: React.FC = () => {
       >
         <div className="text-center text-danger">
           <FontAwesomeIcon icon={faRobot} size="3x" className="mb-3" />
-          <p className="mb-0">
-            Failed to load personal agent. Please try again later.
-          </p>
+          <p className="mb-0">{t('aiAgents.personal.errorLoad')}</p>
         </div>
       </div>
     );
@@ -753,13 +790,15 @@ const PersonalAgentChat: React.FC = () => {
               <FontAwesomeIcon icon={sidebarOpen ? faChevronLeft : faBars} />
             </Button>
             <FontAwesomeIcon icon={faRobot} className="text-primary" />
-            <h6 className="mb-0">Personal Agent</h6>
+            <h6 className="mb-0">{t('aiAgents.personal.header')}</h6>
           </div>
           <div className="d-flex align-items-center gap-2">
             <Dropdown>
               <Dropdown.Toggle variant="orkestra-default" size="sm">
                 <FontAwesomeIcon icon={faUser} className="me-1" />
-                {PERSONA_LABELS[persona]}
+                {t(`aiAgents.chat.personaLabels.${persona}`, {
+                  defaultValue: PERSONA_LABELS[persona]
+                })}
               </Dropdown.Toggle>
               <Dropdown.Menu>
                 {(Object.keys(PERSONA_LABELS) as PersonaType[]).map(key => (
@@ -768,10 +807,16 @@ const PersonalAgentChat: React.FC = () => {
                     active={key === persona}
                     onClick={() => setPersona(key)}
                   >
-                    <span className="fw-semibold">{PERSONA_LABELS[key]}</span>
+                    <span className="fw-semibold">
+                      {t(`aiAgents.chat.personaLabels.${key}`, {
+                        defaultValue: PERSONA_LABELS[key]
+                      })}
+                    </span>
                     <br />
                     <small className="text-muted">
-                      {PERSONA_DESCRIPTIONS[key]}
+                      {t(`aiAgents.chat.personaDescriptions.${key}`, {
+                        defaultValue: PERSONA_DESCRIPTIONS[key]
+                      })}
                     </small>
                   </Dropdown.Item>
                 ))}
@@ -781,7 +826,7 @@ const PersonalAgentChat: React.FC = () => {
               variant="orkestra-default"
               size="sm"
               onClick={() => setShowSettings(true)}
-              title="Agent settings"
+              title={t('aiAgents.personal.buttonSettingsTitle')}
             >
               <FontAwesomeIcon icon={faCog} />
             </Button>
@@ -789,13 +834,13 @@ const PersonalAgentChat: React.FC = () => {
               variant="orkestra-default"
               size="sm"
               onClick={() => setShowDocuments(true)}
-              title="Manage documents"
+              title={t('aiAgents.personal.buttonDocumentsTitle')}
             >
               <FontAwesomeIcon icon={faFileAlt} />
             </Button>
             <Button variant="primary" size="sm" onClick={handleNewConversation}>
               <FontAwesomeIcon icon={faPlus} className="me-1" />
-              New Conversation
+              {t('aiAgents.chat.newConversation')}
             </Button>
           </div>
         </Card.Header>
@@ -810,7 +855,7 @@ const PersonalAgentChat: React.FC = () => {
             >
               <div className="p-2 border-bottom">
                 <small className="fw-semibold text-muted text-uppercase">
-                  Conversations
+                  {t('aiAgents.chat.conversationsHeading')}
                 </small>
                 <Badge bg="secondary" className="ms-2">
                   {conversations.length}
@@ -837,8 +882,8 @@ const PersonalAgentChat: React.FC = () => {
                     size="3x"
                     className="mb-3 text-300"
                   />
-                  <p className="mb-1">No messages yet</p>
-                  <small>Ask a question to get started</small>
+                  <p className="mb-1">{t('aiAgents.chat.emptyTitle')}</p>
+                  <small>{t('aiAgents.chat.emptySubtitle')}</small>
                 </div>
               )}
 
@@ -868,7 +913,7 @@ const PersonalAgentChat: React.FC = () => {
                     value={inputValue}
                     onChange={e => setInputValue(e.target.value)}
                     onKeyDown={handleKeyDown}
-                    placeholder="Type a message... (Shift+Enter for newline)"
+                    placeholder={t('aiAgents.chat.inputPlaceholder')}
                     disabled={isWaitingForResponse}
                     style={{
                       resize: 'none',

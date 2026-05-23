@@ -1,5 +1,6 @@
 import { useEffect, useState, FormEvent } from 'react';
 import { Alert, Button, Form, Modal } from 'react-bootstrap';
+import { useTranslation } from 'react-i18next';
 import { useConfirmPasswordMutation } from 'store/api/authApi';
 import {
   subscribePasswordConfirm,
@@ -20,6 +21,7 @@ import {
  * replays with the stepped-up bearer.
  */
 const PasswordConfirmModal = () => {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -39,7 +41,7 @@ const PasswordConfirmModal = () => {
     event.preventDefault();
     setError(null);
     if (!password) {
-      setError('Enter your current password.');
+      setError(t('auth.passwordConfirm.errors.missing'));
       return;
     }
     try {
@@ -53,17 +55,14 @@ const PasswordConfirmModal = () => {
         data?: { detail?: string; code?: string };
       };
       if (anyErr?.status === 401) {
-        setError('Incorrect password. Please try again.');
+        setError(t('auth.passwordConfirm.errors.incorrect'));
       } else if (anyErr?.data?.code === 'password_confirm_unavailable') {
-        setError(
-          'Password reconfirm is unavailable for this account. Use your second factor or sign in again.'
-        );
+        setError(t('auth.passwordConfirm.errors.unavailable'));
       } else if (anyErr?.status === 429) {
-        setError('Too many attempts. Please wait a moment and try again.');
+        setError(t('auth.passwordConfirm.errors.tooMany'));
       } else {
         setError(
-          anyErr?.data?.detail ??
-            'Could not verify the password. Please try again.'
+          anyErr?.data?.detail ?? t('auth.passwordConfirm.errors.generic')
         );
       }
     }
@@ -77,13 +76,11 @@ const PasswordConfirmModal = () => {
   return (
     <Modal show={open} onHide={handleCancel} backdrop="static" centered>
       <Modal.Header closeButton={!isLoading}>
-        <Modal.Title>Confirm your password</Modal.Title>
+        <Modal.Title>{t('auth.passwordConfirm.title')}</Modal.Title>
       </Modal.Header>
       <Form onSubmit={handleSubmit} noValidate>
         <Modal.Body>
-          <p className="fs-10 mb-3">
-            For your security, re-enter your password to continue this action.
-          </p>
+          <p className="fs-10 mb-3">{t('auth.passwordConfirm.intro')}</p>
 
           {error && (
             <Alert
@@ -97,7 +94,7 @@ const PasswordConfirmModal = () => {
           )}
 
           <Form.Group className="mb-2">
-            <Form.Label>Password</Form.Label>
+            <Form.Label>{t('auth.passwordConfirm.field')}</Form.Label>
             <Form.Control
               type="password"
               autoComplete="current-password"
@@ -114,10 +111,12 @@ const PasswordConfirmModal = () => {
             onClick={handleCancel}
             disabled={isLoading}
           >
-            Cancel
+            {t('auth.passwordConfirm.cancel')}
           </Button>
           <Button type="submit" variant="primary" disabled={isLoading}>
-            {isLoading ? 'Verifying…' : 'Confirm and continue'}
+            {isLoading
+              ? t('auth.passwordConfirm.submitting')
+              : t('auth.passwordConfirm.submit')}
           </Button>
         </Modal.Footer>
       </Form>

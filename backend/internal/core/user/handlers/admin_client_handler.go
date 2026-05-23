@@ -10,6 +10,7 @@ import (
 	"github.com/orkestra-cc/orkestra-sdk/module"
 	"github.com/orkestra/backend/internal/core/user/models"
 	"github.com/orkestra/backend/internal/core/user/services"
+	"github.com/orkestra/backend/internal/shared/errcode"
 )
 
 // AdminClientUserHandler powers the admin "Clients" page — a list of
@@ -238,7 +239,7 @@ func (h *AdminClientUserHandler) UpdateClientUserAdmin(ctx context.Context, req 
 		case errors.Is(err, services.ErrUserNotFound):
 			return nil, huma.Error404NotFound("Client user not found", err)
 		case errors.Is(err, services.ErrEmailNotUnique):
-			return nil, huma.Error409Conflict("Email already in use", err)
+			return nil, errcode.Conflict(errcode.AuthEmailInUse, "Email already in use")
 		case errors.Is(err, services.ErrInvalidInput):
 			return nil, huma.Error400BadRequest("Invalid input", err)
 		default:
@@ -330,7 +331,7 @@ func (h *AdminClientUserHandler) CreateClientUserAdmin(ctx context.Context, req 
 	if err != nil {
 		switch {
 		case errors.Is(err, services.ErrEmailNotUnique):
-			return nil, huma.Error409Conflict("Email already in use", err)
+			return nil, errcode.Conflict(errcode.AuthEmailInUse, "Email already in use")
 		case errors.Is(err, services.ErrInvalidInput):
 			return nil, huma.Error400BadRequest("Invalid input", err)
 		default:
@@ -401,7 +402,7 @@ func (h *AdminClientUserHandler) InviteClientUserAdmin(ctx context.Context, req 
 	if err != nil {
 		switch {
 		case errors.Is(err, services.ErrEmailNotUnique):
-			return nil, huma.Error409Conflict("Email already in use", err)
+			return nil, errcode.Conflict(errcode.AuthEmailInUse, "Email already in use")
 		case errors.Is(err, services.ErrInvalidInput):
 			return nil, huma.Error400BadRequest("Invalid input", err)
 		default:

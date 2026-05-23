@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Badge, Button, Card, ListGroup, Spinner } from 'react-bootstrap';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faShieldHalved, faKey } from '@fortawesome/free-solid-svg-icons';
+import { useTranslation } from 'react-i18next';
 import {
   useGetMfaStatusQuery,
   useWebAuthnListQuery,
@@ -22,6 +23,7 @@ import WebAuthnEnrollDialog from './WebAuthnEnrollDialog';
  * (`/v1/auth/operator/me/mfa`) so the cards stay in sync without separate fetches.
  */
 const MfaSettings = () => {
+  const { t } = useTranslation();
   const { data, isLoading, refetch } = useGetMfaStatusQuery();
   const [showEnroll, setShowEnroll] = useState(false);
   const [showRemove, setShowRemove] = useState(false);
@@ -42,7 +44,7 @@ const MfaSettings = () => {
               className="me-2 text-primary"
             />
             <Card.Title as="h5" className="mb-0">
-              Authenticator app
+              {t('userMfa.settings.totp.cardTitle')}
             </Card.Title>
           </div>
         </Card.Header>
@@ -55,54 +57,52 @@ const MfaSettings = () => {
             <div>
               <div className="d-flex align-items-center mb-2">
                 <Badge bg="success" className="me-2">
-                  Enabled
+                  {t('userMfa.settings.totp.enabledBadge')}
                 </Badge>
                 <span className="text-muted fs-10">
-                  TOTP · {data?.backupCodesRemaining ?? 0} backup codes
-                  remaining
+                  {t('userMfa.settings.totp.enabledStatus', {
+                    count: data?.backupCodesRemaining ?? 0
+                  })}
                 </span>
               </div>
               <p className="fs-10 text-muted mb-3">
-                A one-time code from your authenticator is required each time
-                you sign in.
+                {t('userMfa.settings.totp.enabledDescription')}
               </p>
               <Button
                 variant="outline-danger"
                 size="sm"
                 onClick={() => setShowRemove(true)}
               >
-                Remove factor
+                {t('userMfa.settings.removeFactor')}
               </Button>
             </div>
           ) : totpPending ? (
             <div>
               <Badge bg="warning" className="mb-2">
-                Enrollment in progress
+                {t('userMfa.settings.totp.pendingBadge')}
               </Badge>
               <p className="fs-10 text-muted mb-3">
-                Your authenticator is registered but never confirmed. Complete
-                or restart enrollment below.
+                {t('userMfa.settings.totp.pendingDescription')}
               </p>
               <Button
                 variant="primary"
                 size="sm"
                 onClick={() => setShowEnroll(true)}
               >
-                Resume enrollment
+                {t('userMfa.settings.totp.resumeButton')}
               </Button>
             </div>
           ) : (
             <div>
               <p className="fs-10 text-muted mb-3">
-                Add a code from an authenticator app such as Google
-                Authenticator, Authy, or 1Password.
+                {t('userMfa.settings.totp.notEnrolledDescription')}
               </p>
               <Button
                 variant="primary"
                 size="sm"
                 onClick={() => setShowEnroll(true)}
               >
-                Set up
+                {t('userMfa.settings.totp.setupButton')}
               </Button>
             </div>
           )}
@@ -157,18 +157,14 @@ const PasskeysCard = ({
   onEnroll,
   onRemoved
 }: PasskeysCardProps) => {
+  const { t } = useTranslation();
   const { data: list, refetch } = useWebAuthnListQuery(undefined, {
     skip: count === 0
   });
   const [remove, { isLoading: removing }] = useWebAuthnRemoveMutation();
 
   const handleRemove = async (credentialId: string) => {
-    if (
-      !confirm(
-        'Remove this passkey? You will need to register it again to use it.'
-      )
-    )
-      return;
+    if (!confirm(t('userMfa.settings.passkeys.removeConfirm'))) return;
     try {
       await remove({ credentialId }).unwrap();
       refetch();
@@ -185,22 +181,19 @@ const PasskeysCard = ({
         <div className="d-flex align-items-center">
           <FontAwesomeIcon icon={faKey} className="me-2 text-primary" />
           <Card.Title as="h5" className="mb-0">
-            Passkeys
+            {t('userMfa.settings.passkeys.cardTitle')}
           </Card.Title>
         </div>
       </Card.Header>
       <Card.Body>
         {!supports && (
           <p className="fs-10 text-muted mb-3">
-            This browser does not support passkeys. Try Chrome, Safari, or
-            Firefox over HTTPS to use this feature.
+            {t('userMfa.settings.passkeys.unsupported')}
           </p>
         )}
         {count === 0 ? (
           <p className="fs-10 text-muted mb-3">
-            Passkeys let you sign in with a fingerprint, Face ID, or a hardware
-            key — no codes to type. They can be used as a second factor
-            alongside the authenticator app, or on their own.
+            {t('userMfa.settings.passkeys.introEmpty')}
           </p>
         ) : (
           <ListGroup variant="flush" className="mb-3">
@@ -212,10 +205,15 @@ const PasskeysCard = ({
                 <div>
                   <div className="fw-semibold">{c.name}</div>
                   <div className="text-muted fs-10">
-                    Added {new Date(c.createdAt).toLocaleDateString()}
+                    {t('userMfa.settings.passkeys.addedAt', {
+                      date: new Date(c.createdAt).toLocaleDateString()
+                    })}
                     {c.lastUsedAt &&
-                      ` · Last used ${new Date(c.lastUsedAt).toLocaleDateString()}`}
-                    {c.cloneWarning && ' · ⚠ clone warning'}
+                      t('userMfa.settings.passkeys.lastUsedSuffix', {
+                        date: new Date(c.lastUsedAt).toLocaleDateString()
+                      })}
+                    {c.cloneWarning &&
+                      t('userMfa.settings.passkeys.cloneWarningSuffix')}
                   </div>
                 </div>
                 <Button
@@ -224,7 +222,7 @@ const PasskeysCard = ({
                   disabled={removing}
                   onClick={() => handleRemove(c.credentialId)}
                 >
-                  Remove
+                  {t('userMfa.settings.passkeys.removeButton')}
                 </Button>
               </ListGroup.Item>
             ))}
@@ -236,7 +234,7 @@ const PasskeysCard = ({
           disabled={!supports}
           onClick={onEnroll}
         >
-          Add passkey
+          {t('userMfa.settings.passkeys.addButton')}
         </Button>
       </Card.Body>
     </Card>

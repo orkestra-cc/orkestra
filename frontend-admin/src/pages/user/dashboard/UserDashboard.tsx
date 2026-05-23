@@ -1,13 +1,15 @@
 import { Card, Col, Row } from 'react-bootstrap';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { useTranslation } from 'react-i18next';
 import PageHeader from 'components/common/PageHeader';
 
 const UserDashboard = () => {
+  const { t } = useTranslation();
   return (
     <>
       <PageHeader
-        title="Dashboard"
-        description="Your personal overview and activity summary"
+        title={t('userScaffold.dashboard.pageTitle')}
+        description={t('userScaffold.dashboard.pageDescription')}
         className="mb-3"
       />
       <Row className="g-3">
@@ -19,10 +21,11 @@ const UserDashboard = () => {
                 className="text-400 mb-3"
                 style={{ fontSize: '3rem' }}
               />
-              <h4 className="text-700">Dashboard Coming Soon</h4>
+              <h4 className="text-700">
+                {t('userScaffold.dashboard.comingSoonTitle')}
+              </h4>
               <p className="text-500 mb-0">
-                Your personal dashboard with activity summaries and quick
-                actions will be available here.
+                {t('userScaffold.dashboard.comingSoonBody')}
               </p>
             </Card.Body>
           </Card>

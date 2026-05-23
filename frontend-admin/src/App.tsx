@@ -7,12 +7,14 @@ import { useAppContext } from 'providers/AppProvider';
 import AuthProvider from 'providers/AuthProvider';
 import SetupGate from 'pages/setup/SetupGate';
 import { useModuleApiInjection } from 'modules/useModuleApi';
+import { useLanguageSync } from 'hooks/useLanguageSync';
 import 'react-datepicker/dist/react-datepicker.css';
 import 'react-toastify/dist/ReactToastify.css';
 import 'simplebar-react/dist/simplebar.min.css';
 
 const App = () => {
   useModuleApiInjection();
+  useLanguageSync();
 
   const HTMLClassList = document.getElementsByTagName('html')[0].classList;
   const {

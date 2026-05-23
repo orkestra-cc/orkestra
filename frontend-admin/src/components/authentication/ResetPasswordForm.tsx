@@ -1,9 +1,13 @@
 import { useState, FormEvent } from 'react';
 import { Alert, Button, Form } from 'react-bootstrap';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { useResetPasswordMutation } from 'store/api/authApi';
 
+const PASSWORD_MIN_LENGTH = 10;
+
 const ResetPasswordForm = () => {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const token = searchParams.get('token') || '';
@@ -17,17 +21,17 @@ const ResetPasswordForm = () => {
     setLocalError(null);
 
     if (!token) {
+      setLocalError(t('auth.reset.missingToken'));
+      return;
+    }
+    if (password.length < PASSWORD_MIN_LENGTH) {
       setLocalError(
-        'Missing reset token. Please use the link from your email.'
+        t('auth.errors.passwordTooShort', { count: PASSWORD_MIN_LENGTH })
       );
       return;
     }
-    if (password.length < 10) {
-      setLocalError('Password must be at least 10 characters.');
-      return;
-    }
     if (password !== confirm) {
-      setLocalError('Passwords do not match.');
+      setLocalError(t('auth.errors.passwordMismatch'));
       return;
     }
 
@@ -36,19 +40,12 @@ const ResetPasswordForm = () => {
       setTimeout(() => navigate('/login?reset=1'), 1500);
     } catch (err: unknown) {
       const anyErr = err as { data?: { detail?: string }; status?: number };
-      setLocalError(
-        anyErr?.data?.detail ||
-          'Unable to reset password. The link may have expired.'
-      );
+      setLocalError(anyErr?.data?.detail || t('auth.reset.failed'));
     }
   };
 
   if (isSuccess) {
-    return (
-      <Alert variant="success">
-        Password updated. Redirecting you to the sign-in page…
-      </Alert>
-    );
+    return <Alert variant="success">{t('auth.reset.success')}</Alert>;
   }
 
   return (
@@ -64,25 +61,25 @@ const ResetPasswordForm = () => {
         </Alert>
       )}
 
-      <p className="text-muted mb-4">Pick a new password for your account.</p>
+      <p className="text-muted mb-4">{t('auth.reset.intro')}</p>
 
       <Form.Group className="mb-3">
-        <Form.Label>New password</Form.Label>
+        <Form.Label>{t('auth.reset.newPassword')}</Form.Label>
         <Form.Control
           type="password"
           value={password}
           onChange={e => setPassword(e.target.value)}
           autoComplete="new-password"
-          minLength={10}
+          minLength={PASSWORD_MIN_LENGTH}
           required
         />
         <Form.Text className="text-muted">
-          Use at least 10 characters.
+          {t('auth.passwordMinHint', { count: PASSWORD_MIN_LENGTH })}
         </Form.Text>
       </Form.Group>
 
       <Form.Group className="mb-3">
-        <Form.Label>Confirm new password</Form.Label>
+        <Form.Label>{t('auth.reset.confirmNewPassword')}</Form.Label>
         <Form.Control
           type="password"
           value={confirm}
@@ -94,13 +91,13 @@ const ResetPasswordForm = () => {
 
       <div className="d-grid mb-3">
         <Button type="submit" variant="primary" size="lg" disabled={isLoading}>
-          {isLoading ? 'Saving…' : 'Update password'}
+          {isLoading ? t('auth.reset.submitting') : t('auth.reset.submit')}
         </Button>
       </div>
 
       <div className="text-center">
         <small className="text-muted">
-          <Link to="/login">Back to sign in</Link>
+          <Link to="/login">{t('auth.reset.back')}</Link>
         </small>
       </div>
     </Form>

@@ -1,13 +1,15 @@
 import React, { useState } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { Button, Card, Collapse } from 'react-bootstrap';
+import { useTranslation } from 'react-i18next';
 
 const ProfileIntro: React.FC = () => {
+  const { t } = useTranslation();
   const [collapsed, setCollapsed] = useState(true);
   return (
     <Card className="mb-3">
       <Card.Header className="bg-body-tertiary">
-        <h5 className="mb-0">Intro</h5>
+        <h5 className="mb-0">{t('userProfileScaffold.intro.title')}</h5>
       </Card.Header>
 
       <Card.Body className="text-1000">
@@ -50,7 +52,9 @@ const ProfileIntro: React.FC = () => {
           // className="me-2 mb-1"
           onClick={() => setCollapsed(!collapsed)}
         >
-          Show {collapsed ? 'less' : 'more'}
+          {collapsed
+            ? t('userProfileScaffold.intro.showLess')
+            : t('userProfileScaffold.intro.showMore')}
           <FontAwesomeIcon
             icon="chevron-down"
             className="ms-2 fs-11"

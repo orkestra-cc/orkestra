@@ -7,6 +7,7 @@ import {
   faArrowLeft
 } from '@fortawesome/free-solid-svg-icons';
 import { Link } from 'react-router';
+import { useTranslation } from 'react-i18next';
 import OrkestraCardHeader from 'components/common/OrkestraCardHeader';
 import Flex from 'components/common/Flex';
 import { useGetBillingStatsQuery } from 'store/api/billingApi';
@@ -18,31 +19,32 @@ import { formatCurrency } from 'types/billing';
 const STATS_FROM_DATE_ALL_TIME = '2000-01-01';
 
 const IssuedInvoiceGreetings = () => {
+  const { t } = useTranslation();
   const { data: stats } = useGetBillingStatsQuery({
     fromDate: STATS_FROM_DATE_ALL_TIME
   });
 
   const statItems = [
     {
-      title: 'Totale Emesse',
+      title: t('billing.issued.stats.total'),
       value: stats?.issuedTotal || 0,
       color: 'primary',
       icon: faFileInvoiceDollar
     },
     {
-      title: 'In Bozza',
+      title: t('billing.issued.stats.draft'),
       value: stats?.issuedDraft || 0,
       color: 'warning',
       icon: faFileInvoiceDollar
     },
     {
-      title: 'Inviate',
+      title: t('billing.issued.stats.sent'),
       value: stats?.issuedSent || 0,
       color: 'info',
       icon: faChartLine
     },
     {
-      title: 'Consegnate',
+      title: t('billing.issued.stats.delivered'),
       value: stats?.issuedDelivered || 0,
       color: 'success',
       icon: faUsers
@@ -54,10 +56,14 @@ const IssuedInvoiceGreetings = () => {
       <OrkestraCardHeader
         title={
           <Flex alignItems="center">
-            <Link to="/billing/dashboard" className="text-body-tertiary me-2">
+            <Link
+              to="/billing/dashboard"
+              className="text-body-tertiary me-2"
+              title={t('billing.common.backToDashboard')}
+            >
               <FontAwesomeIcon icon={faArrowLeft} />
             </Link>
-            Fatture Emesse
+            {t('billing.issued.title')}
           </Flex>
         }
         titleTag="h5"
@@ -66,7 +72,7 @@ const IssuedInvoiceGreetings = () => {
         endEl={
           stats && (
             <span className="text-body-tertiary fs-10">
-              Volume:{' '}
+              {t('billing.common.volumeLabel')}{' '}
               <span className="fw-medium text-primary">
                 {formatCurrency(stats.issuedAmount)}
               </span>

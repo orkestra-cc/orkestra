@@ -10,6 +10,7 @@ import {
   faLayerGroup
 } from '@fortawesome/free-solid-svg-icons';
 import CountUp from 'react-countup';
+import { useTranslation } from 'react-i18next';
 import SubtleBadge from 'components/common/SubtleBadge';
 import type { BadgeColor } from 'components/common/SubtleBadge';
 import {
@@ -117,6 +118,7 @@ const TenantManagementPage: React.FC<TenantAdminPageProps> = ({
   labels,
   detailPathPrefix
 }) => {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const [includeDeleted, setIncludeDeleted] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
@@ -202,45 +204,57 @@ const TenantManagementPage: React.FC<TenantAdminPageProps> = ({
       <Row className="g-3 mb-4">
         <Col md={6} xl={3}>
           <StatCard
-            title={labels?.totalTitle ?? 'Total tenants'}
+            title={labels?.totalTitle ?? t('adminTenants.totalTitle')}
             value={stats.total}
             icon={faBuilding}
             accent="primary"
             footnote={
               stats.deleted > 0
-                ? `${stats.active} active · ${stats.deleted} soft-deleted`
-                : (labels?.emptyFootnote ?? 'All tenants are active')
+                ? t('adminTenants.softDeletedBreakdown', {
+                    active: stats.active,
+                    deleted: stats.deleted
+                  })
+                : (labels?.emptyFootnote ?? t('adminTenants.emptyFootnote'))
             }
           />
         </Col>
         <Col md={6} xl={3}>
           <StatCard
-            title="Active"
+            title={t('adminTenants.active')}
             value={stats.active}
             icon={faCircleCheck}
             accent="success"
             badge={
               stats.deleted > 0
-                ? { text: `${stats.deleted} deleted`, bg: 'warning' }
+                ? {
+                    text: t('adminTenants.deletedSuffix', {
+                      count: stats.deleted
+                    }),
+                    bg: 'warning'
+                  }
                 : undefined
             }
             footnote={
               stats.total > 0
-                ? `${Math.round((stats.active / stats.total) * 100)}% of total`
+                ? t('adminTenants.percentOfTotal', {
+                    percent: Math.round((stats.active / stats.total) * 100)
+                  })
                 : '—'
             }
           />
         </Col>
         <Col md={6} xl={3}>
           <StatCard
-            title="Members"
+            title={t('adminTenants.members')}
             value={stats.totalMembers}
             icon={faUsers}
             accent="info"
             footnote={
               stats.active > 0
-                ? `${(stats.totalMembers / stats.active).toFixed(1)} avg per tenant`
-                : 'No tenants yet'
+                ? t('adminTenants.averagePerTenant', {
+                    avg: (stats.totalMembers / stats.active).toFixed(1)
+                  })
+                : t('adminTenants.noTenantsYet')
             }
           />
         </Col>
@@ -250,14 +264,14 @@ const TenantManagementPage: React.FC<TenantAdminPageProps> = ({
               <div className="d-flex justify-content-between align-items-start">
                 <div>
                   <h6 className="text-body-tertiary fs-10 text-uppercase mb-2">
-                    Plan mix
+                    {t('adminTenants.planMix')}
                   </h6>
                   <h3 className="fw-normal text-body mb-0">
                     {Object.keys(stats.planBreakdown).length || '—'}
                     <span className="fs-9 text-body-tertiary fw-normal ms-2">
                       {Object.keys(stats.planBreakdown).length === 1
-                        ? 'plan'
-                        : 'plans'}
+                        ? t('adminTenants.plan')
+                        : t('adminTenants.plans')}
                     </span>
                   </h3>
                 </div>
@@ -274,7 +288,7 @@ const TenantManagementPage: React.FC<TenantAdminPageProps> = ({
               <div className="d-flex flex-wrap gap-1 mt-3">
                 {Object.entries(stats.planBreakdown).length === 0 ? (
                   <span className="fs-10 text-body-tertiary">
-                    No active tenants
+                    {t('adminTenants.noActiveTenants')}
                   </span>
                 ) : (
                   Object.entries(stats.planBreakdown)

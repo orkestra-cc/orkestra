@@ -10,6 +10,7 @@ import {
   Spinner,
   Alert
 } from 'react-bootstrap';
+import { useTranslation } from 'react-i18next';
 import {
   useListVectorIndexesQuery,
   useCreateVectorIndexMutation,
@@ -20,6 +21,7 @@ import ResultsTable from '../components/ResultsTable';
 import type { QueryResult } from '../../../types/graph';
 
 const VectorSearch: React.FC = () => {
+  const { t } = useTranslation();
   const [database, setDatabase] = useState('');
   const [searchResult, setSearchResult] = useState<QueryResult | null>(null);
 
@@ -109,15 +111,15 @@ const VectorSearch: React.FC = () => {
       <Row className="g-3 mb-3">
         <Col>
           <div className="d-flex align-items-center justify-content-between">
-            <h5 className="mb-0">Vector Search</h5>
+            <h5 className="mb-0">{t('graph.vector.pageTitle')}</h5>
             <Form.Group className="d-flex align-items-center gap-2">
               <Form.Label className="mb-0 small text-muted">
-                Database:
+                {t('graph.vector.databaseLabel')}
               </Form.Label>
               <Form.Control
                 size="sm"
                 type="text"
-                placeholder="default"
+                placeholder={t('graph.vector.databasePlaceholder')}
                 value={database}
                 onChange={e => setDatabase(e.target.value)}
                 style={{ width: 150 }}
@@ -133,7 +135,7 @@ const VectorSearch: React.FC = () => {
           <Card className="h-100">
             <Card.Header>
               <div className="d-flex align-items-center justify-content-between">
-                <h6 className="mb-0">Vector Indexes</h6>
+                <h6 className="mb-0">{t('graph.vector.indexes.title')}</h6>
                 <Badge bg="secondary">{indexes.length}</Badge>
               </div>
             </Card.Header>
@@ -144,18 +146,18 @@ const VectorSearch: React.FC = () => {
                 </div>
               ) : indexes.length === 0 ? (
                 <Alert variant="info" className="mb-3">
-                  No vector indexes found.
+                  {t('graph.vector.indexes.empty')}
                 </Alert>
               ) : (
                 <Table size="sm" hover className="mb-3">
                   <thead>
                     <tr>
-                      <th>Name</th>
-                      <th>Label</th>
-                      <th>Property</th>
-                      <th>Dims</th>
-                      <th>Similarity</th>
-                      <th>State</th>
+                      <th>{t('graph.vector.indexes.cols.name')}</th>
+                      <th>{t('graph.vector.indexes.cols.label')}</th>
+                      <th>{t('graph.vector.indexes.cols.property')}</th>
+                      <th>{t('graph.vector.indexes.cols.dimensions')}</th>
+                      <th>{t('graph.vector.indexes.cols.similarity')}</th>
+                      <th>{t('graph.vector.indexes.cols.state')}</th>
                       <th></th>
                     </tr>
                   </thead>
@@ -190,7 +192,7 @@ const VectorSearch: React.FC = () => {
                             size="sm"
                             onClick={() => handleDropIndex(idx.name)}
                           >
-                            Drop
+                            {t('graph.vector.indexes.drop')}
                           </Button>
                         </td>
                       </tr>
@@ -202,13 +204,13 @@ const VectorSearch: React.FC = () => {
               {/* Create Index Form */}
               <div className="border rounded p-2">
                 <small className="text-muted fw-semibold d-block mb-2">
-                  Create Vector Index
+                  {t('graph.vector.create.title')}
                 </small>
                 <Row className="g-2 mb-2">
                   <Col xs={6}>
                     <Form.Control
                       size="sm"
-                      placeholder="Index name"
+                      placeholder={t('graph.vector.create.namePlaceholder')}
                       value={newName}
                       onChange={e => setNewName(e.target.value)}
                     />
@@ -216,7 +218,7 @@ const VectorSearch: React.FC = () => {
                   <Col xs={6}>
                     <Form.Control
                       size="sm"
-                      placeholder="Label"
+                      placeholder={t('graph.vector.create.labelPlaceholder')}
                       value={newLabel}
                       onChange={e => setNewLabel(e.target.value)}
                     />
@@ -226,7 +228,7 @@ const VectorSearch: React.FC = () => {
                   <Col>
                     <Form.Control
                       size="sm"
-                      placeholder="Property"
+                      placeholder={t('graph.vector.create.propertyPlaceholder')}
                       value={newProperty}
                       onChange={e => setNewProperty(e.target.value)}
                     />
@@ -235,7 +237,9 @@ const VectorSearch: React.FC = () => {
                     <Form.Control
                       size="sm"
                       type="number"
-                      placeholder="Dims"
+                      placeholder={t(
+                        'graph.vector.create.dimensionsPlaceholder'
+                      )}
                       value={newDimensions}
                       onChange={e => setNewDimensions(Number(e.target.value))}
                     />
@@ -250,9 +254,15 @@ const VectorSearch: React.FC = () => {
                         )
                       }
                     >
-                      <option value="cos">Cosine</option>
-                      <option value="l2sq">Euclidean (L2)</option>
-                      <option value="ip">Inner Product</option>
+                      <option value="cos">
+                        {t('graph.vector.create.similarity.cos')}
+                      </option>
+                      <option value="l2sq">
+                        {t('graph.vector.create.similarity.l2sq')}
+                      </option>
+                      <option value="ip">
+                        {t('graph.vector.create.similarity.ip')}
+                      </option>
                     </Form.Select>
                   </Col>
                 </Row>
@@ -262,7 +272,11 @@ const VectorSearch: React.FC = () => {
                   onClick={handleCreateIndex}
                   disabled={creating || !newName || !newLabel || !newProperty}
                 >
-                  {creating ? <Spinner size="sm" /> : 'Create Index'}
+                  {creating ? (
+                    <Spinner size="sm" />
+                  ) : (
+                    t('graph.vector.create.submit')
+                  )}
                 </Button>
               </div>
             </Card.Body>
@@ -273,20 +287,28 @@ const VectorSearch: React.FC = () => {
         <Col lg={6}>
           <Card className="h-100">
             <Card.Header>
-              <h6 className="mb-0">Similarity Search</h6>
+              <h6 className="mb-0">{t('graph.vector.search.title')}</h6>
             </Card.Header>
             <Card.Body>
               <Form.Group className="mb-2">
-                <Form.Label className="small">Index</Form.Label>
+                <Form.Label className="small">
+                  {t('graph.vector.search.indexLabel')}
+                </Form.Label>
                 <Form.Select
                   size="sm"
                   value={searchIndex}
                   onChange={e => setSearchIndex(e.target.value)}
                 >
-                  <option value="">Select index...</option>
+                  <option value="">
+                    {t('graph.vector.search.indexPlaceholder')}
+                  </option>
                   {indexes.map(idx => (
                     <option key={idx.name} value={idx.name}>
-                      {idx.name} ({idx.dimensions}d, {idx.similarity})
+                      {t('graph.vector.search.indexOption', {
+                        name: idx.name,
+                        dimensions: idx.dimensions,
+                        similarity: idx.similarity
+                      })}
                     </option>
                   ))}
                 </Form.Select>
@@ -294,14 +316,14 @@ const VectorSearch: React.FC = () => {
 
               <Form.Group className="mb-2">
                 <Form.Label className="small">
-                  Query Vector (JSON array)
+                  {t('graph.vector.search.vectorLabel')}
                 </Form.Label>
                 <Form.Control
                   as="textarea"
                   rows={3}
                   size="sm"
                   className="font-monospace"
-                  placeholder="[0.1, 0.2, 0.3, ...]"
+                  placeholder={t('graph.vector.search.vectorPlaceholder')}
                   value={vectorInput}
                   onChange={e => setVectorInput(e.target.value)}
                 />
@@ -310,7 +332,9 @@ const VectorSearch: React.FC = () => {
               <Row className="g-2 mb-3">
                 <Col>
                   <Form.Group>
-                    <Form.Label className="small">Top K</Form.Label>
+                    <Form.Label className="small">
+                      {t('graph.vector.search.topKLabel')}
+                    </Form.Label>
                     <Form.Control
                       size="sm"
                       type="number"
@@ -323,7 +347,9 @@ const VectorSearch: React.FC = () => {
                 </Col>
                 <Col>
                   <Form.Group>
-                    <Form.Label className="small">Min Score</Form.Label>
+                    <Form.Label className="small">
+                      {t('graph.vector.search.minScoreLabel')}
+                    </Form.Label>
                     <Form.Control
                       size="sm"
                       type="number"
@@ -345,10 +371,11 @@ const VectorSearch: React.FC = () => {
               >
                 {searching ? (
                   <>
-                    <Spinner size="sm" className="me-1" /> Searching...
+                    <Spinner size="sm" className="me-1" />{' '}
+                    {t('graph.vector.search.searching')}
                   </>
                 ) : (
-                  'Search'
+                  t('graph.vector.search.submit')
                 )}
               </Button>
             </Card.Body>

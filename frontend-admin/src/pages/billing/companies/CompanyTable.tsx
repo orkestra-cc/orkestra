@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Card, Button } from 'react-bootstrap';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { useTranslation } from 'react-i18next';
 import AdvanceTableProvider from 'providers/AdvanceTableProvider';
 import AdvanceTable from 'components/common/advance-table/AdvanceTable';
 import AdvanceTableFooter from 'components/common/advance-table/AdvanceTableFooter';
@@ -9,6 +10,7 @@ import CompanyModal from './CompanyModal';
 import type { Company } from 'types/billing';
 
 const CompanyTable = () => {
+  const { t } = useTranslation();
   const [showModal, setShowModal] = useState(false);
   const [editingCompany, setEditingCompany] = useState<Company | null>(null);
 
@@ -36,14 +38,14 @@ const CompanyTable = () => {
       <AdvanceTableProvider {...table}>
         <Card>
           <Card.Header className="border-bottom border-200 d-flex justify-content-between align-items-center">
-            <h5 className="mb-0">Aziende Emittenti</h5>
+            <h5 className="mb-0">{t('billing.companies.title')}</h5>
             <Button
               variant="primary"
               size="sm"
               onClick={() => setShowModal(true)}
             >
               <FontAwesomeIcon icon="plus" className="me-1" />
-              Nuova Azienda
+              {t('billing.companies.newCompany')}
             </Button>
           </Card.Header>
           <Card.Body className="p-0">

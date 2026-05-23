@@ -9,14 +9,25 @@ import {
   Alert
 } from 'react-bootstrap';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { Trans, useTranslation } from 'react-i18next';
 import { User, useUpdateUserMutation } from 'store/api/userApi';
 import { toast } from 'react-toastify';
+
+const ROLE_VALUES = [
+  'guest',
+  'operator',
+  'manager',
+  'developer',
+  'administrator',
+  'super_admin'
+] as const;
 
 interface AdminUserActionsProps {
   user: User;
 }
 
 const AdminUserActions: React.FC<AdminUserActionsProps> = ({ user }) => {
+  const { t } = useTranslation();
   const [updateUser, { isLoading: isUpdating }] = useUpdateUserMutation();
   const [showRoleModal, setShowRoleModal] = useState(false);
   const [showProfileModal, setShowProfileModal] = useState(false);
@@ -29,38 +40,11 @@ const AdminUserActions: React.FC<AdminUserActionsProps> = ({ user }) => {
     phone: user.phone || ''
   });
 
-  const roles = [
-    {
-      value: 'guest',
-      label: 'Guest',
-      description: 'Read-only access'
-    },
-    {
-      value: 'operator',
-      label: 'Operator',
-      description: 'Read + self-service'
-    },
-    {
-      value: 'manager',
-      label: 'Manager',
-      description: 'Read/write without delete or admin'
-    },
-    {
-      value: 'developer',
-      label: 'Developer',
-      description: 'Technical power user — cannot manage admin/super_admin'
-    },
-    {
-      value: 'administrator',
-      label: 'Administrator',
-      description: 'Organization administrator — cannot elevate peers to admin'
-    },
-    {
-      value: 'super_admin',
-      label: 'Super Admin',
-      description: 'Full power, wildcard permission'
-    }
-  ];
+  const roles = ROLE_VALUES.map(value => ({
+    value,
+    label: t(`adminUsers.roles.${value}`),
+    description: t(`adminUserProfile.userActions.roleDescriptions.${value}`)
+  }));
 
   const handleToggleAccountLock = async () => {
     try {
@@ -72,14 +56,16 @@ const AdminUserActions: React.FC<AdminUserActionsProps> = ({ user }) => {
       }).unwrap();
       toast.success(
         newStatus
-          ? 'Account unlocked successfully'
-          : 'Account locked successfully'
+          ? t('adminUserProfile.userActions.lockModal.toastUnlocked')
+          : t('adminUserProfile.userActions.lockModal.toastLocked')
       );
       setShowLockModal(false);
     } catch (error: any) {
-      const errorMessage = error?.data?.message || 'Error during operation';
+      const errorMessage =
+        error?.data?.message ||
+        t('adminUserProfile.userActions.lockModal.errorGeneric');
       setUpdateError(errorMessage);
-      toast.error('Unable to modify account status');
+      toast.error(t('adminUserProfile.userActions.lockModal.toastFailure'));
     }
   };
 
@@ -89,7 +75,7 @@ const AdminUserActions: React.FC<AdminUserActionsProps> = ({ user }) => {
         <Card.Header className="bg-body-tertiary">
           <h5 className="mb-0">
             <FontAwesomeIcon icon="tools" className="me-2" />
-            Quick Actions
+            {t('adminUserProfile.userActions.quickTitle')}
           </h5>
         </Card.Header>
         <Card.Body>
@@ -108,7 +94,7 @@ const AdminUserActions: React.FC<AdminUserActionsProps> = ({ user }) => {
               }}
             >
               <FontAwesomeIcon icon="edit" className="me-2" />
-              Edit Profile
+              {t('adminUserProfile.userActions.editProfile')}
             </Button>
 
             <Button
@@ -121,36 +107,31 @@ const AdminUserActions: React.FC<AdminUserActionsProps> = ({ user }) => {
               }}
             >
               <FontAwesomeIcon icon="users" className="me-2" />
-              Change Role
+              {t('adminUserProfile.userActions.changeRole')}
             </Button>
-
-            {/* <Button variant="warning" size="sm">
-              <FontAwesomeIcon icon="key" className="me-2" />
-              Reimposta Password
-            </Button> */}
 
             <Dropdown>
               <Dropdown.Toggle variant="secondary" size="sm" className="w-100">
                 <FontAwesomeIcon icon="cog" className="me-2" />
-                Account Settings
+                {t('adminUserProfile.userActions.accountSettings')}
               </Dropdown.Toggle>
               <Dropdown.Menu className="w-100">
                 <Dropdown.Item>
                   <FontAwesomeIcon icon="shield-alt" className="me-2" />
-                  Security Settings
+                  {t('adminUserProfile.userActions.menuSecuritySettings')}
                 </Dropdown.Item>
                 <Dropdown.Item>
                   <FontAwesomeIcon icon="bell" className="me-2" />
-                  Notification Preferences
+                  {t('adminUserProfile.userActions.menuNotificationPrefs')}
                 </Dropdown.Item>
                 <Dropdown.Item>
                   <FontAwesomeIcon icon="clock" className="me-2" />
-                  Login History
+                  {t('adminUserProfile.userActions.menuLoginHistory')}
                 </Dropdown.Item>
                 <Dropdown.Divider />
                 <Dropdown.Item>
                   <FontAwesomeIcon icon="download" className="me-2" />
-                  Export User Data
+                  {t('adminUserProfile.userActions.menuExportData')}
                 </Dropdown.Item>
               </Dropdown.Menu>
             </Dropdown>
@@ -162,7 +143,7 @@ const AdminUserActions: React.FC<AdminUserActionsProps> = ({ user }) => {
         <Card.Header className="bg-body-tertiary">
           <h5 className="mb-0">
             <FontAwesomeIcon icon="exclamation-triangle" className="me-2" />
-            Security Actions
+            {t('adminUserProfile.userActions.securityTitle')}
           </h5>
         </Card.Header>
         <Card.Body>
@@ -179,22 +160,24 @@ const AdminUserActions: React.FC<AdminUserActionsProps> = ({ user }) => {
                 icon={user.isActive ? 'lock' : 'unlock'}
                 className="me-2"
               />
-              {user.isActive ? 'Lock Account' : 'Unlock Account'}
+              {user.isActive
+                ? t('adminUserProfile.userActions.lockAccount')
+                : t('adminUserProfile.userActions.unlockAccount')}
             </Button>
 
             <Button variant="outline-danger" size="sm">
               <FontAwesomeIcon icon="ban" className="me-2" />
-              Suspend User
+              {t('adminUserProfile.userActions.suspendUser')}
             </Button>
 
             <Button variant="outline-info" size="sm">
               <FontAwesomeIcon icon="sign-out-alt" className="me-2" />
-              Force Logout
+              {t('adminUserProfile.userActions.forceLogout')}
             </Button>
 
             <Button variant="outline-secondary" size="sm">
               <FontAwesomeIcon icon="mobile" className="me-2" />
-              Reset 2FA
+              {t('adminUserProfile.userActions.reset2fa')}
             </Button>
           </div>
         </Card.Body>
@@ -202,7 +185,9 @@ const AdminUserActions: React.FC<AdminUserActionsProps> = ({ user }) => {
 
       <Modal show={showRoleModal} onHide={() => setShowRoleModal(false)}>
         <Modal.Header closeButton>
-          <Modal.Title>Change User Role</Modal.Title>
+          <Modal.Title>
+            {t('adminUserProfile.userActions.roleModal.title')}
+          </Modal.Title>
         </Modal.Header>
         <Modal.Body>
           {updateError && (
@@ -216,7 +201,9 @@ const AdminUserActions: React.FC<AdminUserActionsProps> = ({ user }) => {
           )}
           <Form>
             <Form.Group className="mb-3">
-              <Form.Label>Select New Role</Form.Label>
+              <Form.Label>
+                {t('adminUserProfile.userActions.roleModal.selectLabel')}
+              </Form.Label>
               {roles.map(role => (
                 <Form.Check
                   key={role.value}
@@ -248,7 +235,7 @@ const AdminUserActions: React.FC<AdminUserActionsProps> = ({ user }) => {
             }}
             disabled={isUpdating}
           >
-            Cancel
+            {t('adminUserProfile.userActions.roleModal.cancel')}
           </Button>
           <Button
             variant="primary"
@@ -259,11 +246,22 @@ const AdminUserActions: React.FC<AdminUserActionsProps> = ({ user }) => {
                   id: user.id,
                   data: { role: selectedRole }
                 }).unwrap();
-                toast.success(`Role successfully updated to ${selectedRole}`);
+                toast.success(
+                  t('adminUserProfile.userActions.roleModal.toastSuccess', {
+                    role: t(`adminUsers.roles.${selectedRole}`, {
+                      defaultValue: selectedRole
+                    })
+                  })
+                );
                 setShowRoleModal(false);
               } catch (error: any) {
-                setUpdateError(error?.data?.message || 'Error updating role');
-                toast.error('Unable to update role');
+                setUpdateError(
+                  error?.data?.message ||
+                    t('adminUserProfile.userActions.roleModal.errorUpdate')
+                );
+                toast.error(
+                  t('adminUserProfile.userActions.roleModal.toastFailure')
+                );
               }
             }}
             disabled={isUpdating || selectedRole === user.role}
@@ -271,10 +269,10 @@ const AdminUserActions: React.FC<AdminUserActionsProps> = ({ user }) => {
             {isUpdating ? (
               <>
                 <Spinner size="sm" animation="border" className="me-2" />
-                Updating...
+                {t('adminUserProfile.userActions.roleModal.submitting')}
               </>
             ) : (
-              'Update Role'
+              t('adminUserProfile.userActions.roleModal.submit')
             )}
           </Button>
         </Modal.Footer>
@@ -282,7 +280,9 @@ const AdminUserActions: React.FC<AdminUserActionsProps> = ({ user }) => {
 
       <Modal show={showProfileModal} onHide={() => setShowProfileModal(false)}>
         <Modal.Header closeButton>
-          <Modal.Title>Edit User Profile</Modal.Title>
+          <Modal.Title>
+            {t('adminUserProfile.userActions.profileModal.title')}
+          </Modal.Title>
         </Modal.Header>
         <Modal.Body>
           {updateError && (
@@ -296,7 +296,9 @@ const AdminUserActions: React.FC<AdminUserActionsProps> = ({ user }) => {
           )}
           <Form>
             <Form.Group className="mb-3">
-              <Form.Label>Email</Form.Label>
+              <Form.Label>
+                {t('adminUserProfile.userActions.profileModal.labelEmail')}
+              </Form.Label>
               <Form.Control
                 type="email"
                 value={profileFormData.email}
@@ -306,12 +308,16 @@ const AdminUserActions: React.FC<AdminUserActionsProps> = ({ user }) => {
                     email: e.target.value
                   }))
                 }
-                placeholder="Enter email"
+                placeholder={t(
+                  'adminUserProfile.userActions.profileModal.placeholderEmail'
+                )}
               />
             </Form.Group>
 
             <Form.Group className="mb-3">
-              <Form.Label>Full Name</Form.Label>
+              <Form.Label>
+                {t('adminUserProfile.userActions.profileModal.labelFullName')}
+              </Form.Label>
               <Form.Control
                 type="text"
                 value={profileFormData.fullName}
@@ -321,12 +327,16 @@ const AdminUserActions: React.FC<AdminUserActionsProps> = ({ user }) => {
                     fullName: e.target.value
                   }))
                 }
-                placeholder="Enter full name"
+                placeholder={t(
+                  'adminUserProfile.userActions.profileModal.placeholderFullName'
+                )}
               />
             </Form.Group>
 
             <Form.Group className="mb-3">
-              <Form.Label>Phone</Form.Label>
+              <Form.Label>
+                {t('adminUserProfile.userActions.profileModal.labelPhone')}
+              </Form.Label>
               <Form.Control
                 type="tel"
                 value={profileFormData.phone}
@@ -336,7 +346,9 @@ const AdminUserActions: React.FC<AdminUserActionsProps> = ({ user }) => {
                     phone: e.target.value
                   }))
                 }
-                placeholder="Enter phone number"
+                placeholder={t(
+                  'adminUserProfile.userActions.profileModal.placeholderPhone'
+                )}
               />
             </Form.Group>
           </Form>
@@ -355,7 +367,7 @@ const AdminUserActions: React.FC<AdminUserActionsProps> = ({ user }) => {
             }}
             disabled={isUpdating}
           >
-            Cancel
+            {t('adminUserProfile.userActions.profileModal.cancel')}
           </Button>
           <Button
             variant="primary"
@@ -392,22 +404,30 @@ const AdminUserActions: React.FC<AdminUserActionsProps> = ({ user }) => {
                   id: user.id,
                   data: updatedFields
                 }).unwrap();
-                toast.success('Profile updated successfully');
+                toast.success(
+                  t('adminUserProfile.userActions.profileModal.toastSuccess')
+                );
                 setShowProfileModal(false);
               } catch (error: any) {
                 const errorMessage =
                   error?.data?.detail ||
                   error?.data?.message ||
-                  'Error updating profile';
+                  t('adminUserProfile.userActions.profileModal.errorUpdate');
                 setUpdateError(errorMessage);
 
                 if (
                   error?.status === 409 ||
                   errorMessage.includes('already in use')
                 ) {
-                  toast.error('Email already in use by another user');
+                  toast.error(
+                    t(
+                      'adminUserProfile.userActions.profileModal.toastEmailInUse'
+                    )
+                  );
                 } else {
-                  toast.error('Unable to update profile');
+                  toast.error(
+                    t('adminUserProfile.userActions.profileModal.toastFailure')
+                  );
                 }
               }
             }}
@@ -416,10 +436,10 @@ const AdminUserActions: React.FC<AdminUserActionsProps> = ({ user }) => {
             {isUpdating ? (
               <>
                 <Spinner size="sm" animation="border" className="me-2" />
-                Updating...
+                {t('adminUserProfile.userActions.profileModal.submitting')}
               </>
             ) : (
-              'Update Profile'
+              t('adminUserProfile.userActions.profileModal.submit')
             )}
           </Button>
         </Modal.Footer>
@@ -432,7 +452,9 @@ const AdminUserActions: React.FC<AdminUserActionsProps> = ({ user }) => {
       >
         <Modal.Header closeButton>
           <Modal.Title>
-            {user.isActive ? 'Lock Account' : 'Unlock Account'}
+            {user.isActive
+              ? t('adminUserProfile.userActions.lockModal.titleLock')
+              : t('adminUserProfile.userActions.lockModal.titleUnlock')}
           </Modal.Title>
         </Modal.Header>
         <Modal.Body>
@@ -446,17 +468,23 @@ const AdminUserActions: React.FC<AdminUserActionsProps> = ({ user }) => {
             </Alert>
           )}
           <p>
-            Are you sure you want to {user.isActive ? 'lock' : 'unlock'} the
-            account of <strong>{user.fullName}</strong>?
+            <Trans
+              i18nKey={
+                user.isActive
+                  ? 'adminUserProfile.userActions.lockModal.confirmLock'
+                  : 'adminUserProfile.userActions.lockModal.confirmUnlock'
+              }
+              values={{ name: user.fullName }}
+              components={{ strong: <strong /> }}
+            />
           </p>
           {user.isActive ? (
             <p className="text-warning mb-0">
-              The user will no longer be able to access the system until the
-              account is unlocked.
+              {t('adminUserProfile.userActions.lockModal.warningLock')}
             </p>
           ) : (
             <p className="text-success mb-0">
-              The user will be able to access the system again.
+              {t('adminUserProfile.userActions.lockModal.warningUnlock')}
             </p>
           )}
         </Modal.Body>
@@ -469,7 +497,7 @@ const AdminUserActions: React.FC<AdminUserActionsProps> = ({ user }) => {
             }}
             disabled={isUpdating}
           >
-            Cancel
+            {t('adminUserProfile.userActions.lockModal.cancel')}
           </Button>
           <Button
             variant={user.isActive ? 'warning' : 'success'}
@@ -479,12 +507,12 @@ const AdminUserActions: React.FC<AdminUserActionsProps> = ({ user }) => {
             {isUpdating ? (
               <>
                 <Spinner size="sm" animation="border" className="me-2" />
-                Please wait...
+                {t('adminUserProfile.userActions.lockModal.submitting')}
               </>
             ) : user.isActive ? (
-              'Lock'
+              t('adminUserProfile.userActions.lockModal.submitLock')
             ) : (
-              'Unlock'
+              t('adminUserProfile.userActions.lockModal.submitUnlock')
             )}
           </Button>
         </Modal.Footer>

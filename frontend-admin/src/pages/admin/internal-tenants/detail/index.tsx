@@ -2,6 +2,7 @@ import { Suspense, lazy, useMemo } from 'react';
 import { Link, Navigate, useParams, useSearchParams } from 'react-router';
 import { Alert, Breadcrumb, Card, Nav, Spinner, Tab } from 'react-bootstrap';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { useTranslation } from 'react-i18next';
 import SubtleBadge from 'components/common/SubtleBadge';
 import type { BadgeColor } from 'components/common/SubtleBadge';
 import { useGetOrgAdminQuery } from 'store/api/tenantApi';
@@ -31,6 +32,7 @@ const planColors: Record<string, BadgeColor> = {
 };
 
 const InternalTenantDetailPage: React.FC = () => {
+  const { t } = useTranslation();
   const { tenantId } = useParams<{ tenantId: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
   const tab = readTab(searchParams.get('tab'));
@@ -46,15 +48,30 @@ const InternalTenantDetailPage: React.FC = () => {
   const statusBadge = useMemo(() => {
     if (!org) return null;
     if (org.status === 'purged')
-      return { bg: 'dark' as BadgeColor, label: 'purged' };
+      return {
+        bg: 'dark' as BadgeColor,
+        label: t('adminInternalTenants.detail.statusPurged')
+      };
     if (org.status === 'archived' || org.archivedAt)
-      return { bg: 'danger' as BadgeColor, label: 'archived' };
+      return {
+        bg: 'danger' as BadgeColor,
+        label: t('adminInternalTenants.detail.statusArchived')
+      };
     if (org.status === 'suspended')
-      return { bg: 'warning' as BadgeColor, label: 'suspended' };
+      return {
+        bg: 'warning' as BadgeColor,
+        label: t('adminInternalTenants.detail.statusSuspended')
+      };
     if (org.status === 'provisioning')
-      return { bg: 'info' as BadgeColor, label: 'provisioning' };
-    return { bg: 'success' as BadgeColor, label: 'active' };
-  }, [org]);
+      return {
+        bg: 'info' as BadgeColor,
+        label: t('adminInternalTenants.detail.statusProvisioning')
+      };
+    return {
+      bg: 'success' as BadgeColor,
+      label: t('adminInternalTenants.detail.statusActive')
+    };
+  }, [org, t]);
 
   if (!tenantId) {
     return <Navigate to="/admin/internal/tenants" replace />;
@@ -71,8 +88,10 @@ const InternalTenantDetailPage: React.FC = () => {
   if (error || !org) {
     return (
       <Alert variant="danger">
-        Tenant not found or you lack permission to view it.{' '}
-        <Link to="/admin/internal/tenants">Back to internal tenants</Link>
+        {t('adminInternalTenants.detail.notFound')}{' '}
+        <Link to="/admin/internal/tenants">
+          {t('adminInternalTenants.detail.backToList')}
+        </Link>
       </Alert>
     );
   }
@@ -98,7 +117,7 @@ const InternalTenantDetailPage: React.FC = () => {
           linkAs={Link}
           linkProps={{ to: '/admin/internal/tenants' }}
         >
-          Internal Tenants
+          {t('adminInternalTenants.detail.breadcrumbList')}
         </Breadcrumb.Item>
         <Breadcrumb.Item active>{org.name}</Breadcrumb.Item>
       </Breadcrumb>
@@ -121,16 +140,18 @@ const InternalTenantDetailPage: React.FC = () => {
                 {org.plan}
               </SubtleBadge>
               <SubtleBadge bg="primary" pill>
-                internal
+                {t('adminInternalTenants.detail.tierBadge')}
               </SubtleBadge>
             </div>
           </div>
           <div className="fs-10 text-muted">
             <div>
-              ID: <code className="fs-11">{org.id}</code>
+              {t('adminInternalTenants.detail.idLabel')}{' '}
+              <code className="fs-11">{org.id}</code>
             </div>
             <div>
-              Owner: <code className="fs-11">{org.ownerUserUUID || '—'}</code>
+              {t('adminInternalTenants.detail.ownerLabel')}{' '}
+              <code className="fs-11">{org.ownerUserUUID || '—'}</code>
             </div>
           </div>
         </Card.Body>
@@ -141,10 +162,14 @@ const InternalTenantDetailPage: React.FC = () => {
           <Card.Header className="border-bottom border-200">
             <Nav variant="tabs" className="card-header-tabs fs-10">
               <Nav.Item>
-                <Nav.Link eventKey="overview">Overview</Nav.Link>
+                <Nav.Link eventKey="overview">
+                  {t('adminInternalTenants.detail.tabs.overview')}
+                </Nav.Link>
               </Nav.Item>
               <Nav.Item>
-                <Nav.Link eventKey="members">Members</Nav.Link>
+                <Nav.Link eventKey="members">
+                  {t('adminInternalTenants.detail.tabs.members')}
+                </Nav.Link>
               </Nav.Item>
             </Nav>
           </Card.Header>

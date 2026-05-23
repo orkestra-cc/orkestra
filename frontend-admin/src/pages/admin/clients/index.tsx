@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import TenantManagementPage from 'pages/admin/tenants';
 
 /**
@@ -11,21 +12,24 @@ import TenantManagementPage from 'pages/admin/tenants';
  * primary resource and surfaces members, divisions, subscriptions, payments,
  * and billing identity from there.
  */
-const ClientManagementPage: React.FC = () => (
-  <TenantManagementPage
-    kind="external"
-    detailPathPrefix="/admin/clients"
-    labels={{
-      toolbarTitle: 'Clients',
-      totalTitle: 'Clients',
-      activeTitle: 'Active',
-      membersTitle: 'Client members',
-      createLabel: 'New client',
-      createTitle: 'Create client',
-      createSubmitLabel: 'Create client',
-      emptyFootnote: 'All clients are active'
-    }}
-  />
-);
+const ClientManagementPage: React.FC = () => {
+  const { t } = useTranslation();
+  return (
+    <TenantManagementPage
+      kind="external"
+      detailPathPrefix="/admin/clients"
+      labels={{
+        toolbarTitle: t('adminTenants.wrappers.clientsToolbarTitle'),
+        totalTitle: t('adminTenants.wrappers.clientsTotalTitle'),
+        activeTitle: t('adminTenants.active'),
+        membersTitle: t('adminTenants.wrappers.clientsMembersTitle'),
+        createLabel: t('adminTenants.wrappers.clientsCreateLabel'),
+        createTitle: t('adminTenants.wrappers.clientsCreateTitle'),
+        createSubmitLabel: t('adminTenants.wrappers.clientsCreateSubmit'),
+        emptyFootnote: t('adminTenants.clientsEmptyFootnote')
+      }}
+    />
+  );
+};
 
 export default ClientManagementPage;

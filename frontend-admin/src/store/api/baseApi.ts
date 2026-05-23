@@ -144,9 +144,10 @@ const baseQueryWithRetry: BaseQueryFn<
   FetchBaseQueryError
 > = async (args, api, extraOptions) => {
   // Inject X-Tenant-ID for every tenant-scoped request. Impersonation (set
-  // by AdminTenantSwitcher for system.tenants.admin holders) takes
-  // precedence over the user's own currentOrgId — the backend middleware
-  // honors the header only for admin callers and 403s everyone else.
+  // by NineDotMenu / ImpersonateButton for system.tenants.admin holders)
+  // takes precedence over the user's own currentOrgId — the backend
+  // middleware honors the header only for admin callers and 403s everyone
+  // else.
   const state = api.getState() as RootState;
   const effectiveTenantId =
     state.tenant?.impersonatedTenantId ?? state.tenant?.currentOrgId;
@@ -417,7 +418,36 @@ export const baseApi = createApi({
     'IdentityIdP',
     'IdentityScim',
     // Observability — ADR-0005 Phase F runtime log-level mutation
-    'LogLevels'
+    'LogLevels',
+    // Marketing module — Phase 1 contact base + importer surface
+    'MarketingOrg',
+    'MarketingPerson',
+    'MarketingMembership',
+    'MarketingTag',
+    'MarketingCustomFieldSchema',
+    'MarketingImport',
+    // Marketing module — Phase 2 activity log + scoring surfaces.
+    // ScoreSnapshot tags are keyed two ways: by uuid for single-row
+    // reads from the breakdown drawer, and by `person:<uuid>` /
+    // `profile:<uuid>` for the per-person and per-profile listings
+    // so a profile edit invalidates the right leaderboard rows.
+    'MarketingActivity',
+    'MarketingScoreProfile',
+    'MarketingScoreSnapshot',
+    // Marketing module — Phase 3 conflict-review queue. Reviews are
+    // queried both by uuid (resolver modal) and by importJobUuid
+    // (imports-list deep link), so the slice tags both ways.
+    'MarketingConflictReview',
+    // Marketing module — Phase 4 card lifecycle. Card types are
+    // queried by uuid for the edit form + the LIST id for the admin
+    // list page; cards keep the same LIST tag + per-person grouping
+    // (`person:<uuid>`) so the contact-detail Cards tab refreshes
+    // after an Issue/Suspend/Reinstate/Revoke action. CorrectionEntry
+    // tagged per source activity uuid so the Timeline corrections
+    // expander invalidates on every Correct mutation.
+    'MarketingCardType',
+    'MarketingCard',
+    'MarketingCorrection'
   ],
   // Keep cache for 5 minutes by default
   keepUnusedDataFor: 300,
@@ -538,7 +568,17 @@ export const TENANT_SCOPED_TAGS = [
   'AuditEvent',
   'Soc2Evidence',
   'IdentityIdP',
-  'IdentityScim'
+  'IdentityScim',
+  'MarketingOrg',
+  'MarketingPerson',
+  'MarketingMembership',
+  'MarketingTag',
+  'MarketingCustomFieldSchema',
+  'MarketingImport',
+  'MarketingActivity',
+  'MarketingScoreProfile',
+  'MarketingScoreSnapshot',
+  'MarketingConflictReview'
 ] as const;
 
 export default baseApi;

@@ -10,6 +10,7 @@ import {
   Spinner,
   Accordion
 } from 'react-bootstrap';
+import { useTranslation } from 'react-i18next';
 import {
   useRunAlgorithmMutation,
   useListAlgorithmsQuery
@@ -18,6 +19,7 @@ import ResultsTable from '../components/ResultsTable';
 import type { QueryResult } from '../../../types/graph';
 
 const GraphAlgorithms: React.FC = () => {
+  const { t } = useTranslation();
   const [database, setDatabase] = useState('');
   const [algorithmResult, setAlgorithmResult] = useState<QueryResult | null>(
     null
@@ -67,15 +69,15 @@ const GraphAlgorithms: React.FC = () => {
       <Row className="g-3 mb-3">
         <Col>
           <div className="d-flex align-items-center justify-content-between">
-            <h5 className="mb-0">Graph Algorithms</h5>
+            <h5 className="mb-0">{t('graph.algorithms.pageTitle')}</h5>
             <Form.Group className="d-flex align-items-center gap-2">
               <Form.Label className="mb-0 small text-muted">
-                Database:
+                {t('graph.algorithms.databaseLabel')}
               </Form.Label>
               <Form.Control
                 size="sm"
                 type="text"
-                placeholder="default"
+                placeholder={t('graph.algorithms.databasePlaceholder')}
                 value={database}
                 onChange={e => setDatabase(e.target.value)}
                 style={{ width: 150 }}
@@ -91,7 +93,9 @@ const GraphAlgorithms: React.FC = () => {
           <Card className="h-100">
             <Card.Header>
               <div className="d-flex align-items-center justify-content-between">
-                <h6 className="mb-0">Available Algorithms (MAGE)</h6>
+                <h6 className="mb-0">
+                  {t('graph.algorithms.available.title')}
+                </h6>
                 <Badge bg="secondary">
                   {algoData?.algorithms?.length ?? 0}
                 </Badge>
@@ -101,9 +105,9 @@ const GraphAlgorithms: React.FC = () => {
               <Table size="sm" hover className="mb-0">
                 <thead>
                   <tr>
-                    <th>Name</th>
-                    <th>Category</th>
-                    <th>Procedure</th>
+                    <th>{t('graph.algorithms.available.cols.name')}</th>
+                    <th>{t('graph.algorithms.available.cols.category')}</th>
+                    <th>{t('graph.algorithms.available.cols.procedure')}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -135,17 +139,21 @@ const GraphAlgorithms: React.FC = () => {
         <Col lg={7}>
           <Card className="h-100">
             <Card.Header>
-              <h6 className="mb-0">Run Algorithm</h6>
+              <h6 className="mb-0">{t('graph.algorithms.run.title')}</h6>
             </Card.Header>
             <Card.Body>
               <Form.Group className="mb-3">
-                <Form.Label className="small">Algorithm</Form.Label>
+                <Form.Label className="small">
+                  {t('graph.algorithms.run.algorithmLabel')}
+                </Form.Label>
                 <Form.Select
                   size="sm"
                   value={selectedAlgo}
                   onChange={e => setSelectedAlgo(e.target.value)}
                 >
-                  <option value="">Select algorithm...</option>
+                  <option value="">
+                    {t('graph.algorithms.run.selectPlaceholder')}
+                  </option>
                   {Object.entries(algosByCategory).map(([category, algos]) => (
                     <optgroup
                       key={category}
@@ -166,7 +174,7 @@ const GraphAlgorithms: React.FC = () => {
               <Accordion className="mb-3">
                 <Accordion.Item eventKey="0">
                   <Accordion.Header>
-                    <small>Algorithm Configuration (JSON)</small>
+                    <small>{t('graph.algorithms.run.configHeading')}</small>
                   </Accordion.Header>
                   <Accordion.Body className="p-2">
                     <Form.Control
@@ -176,7 +184,7 @@ const GraphAlgorithms: React.FC = () => {
                       className="font-monospace"
                       value={algoConfig}
                       onChange={e => setAlgoConfig(e.target.value)}
-                      placeholder="{}"
+                      placeholder={t('graph.algorithms.run.configPlaceholder')}
                     />
                   </Accordion.Body>
                 </Accordion.Item>
@@ -190,10 +198,11 @@ const GraphAlgorithms: React.FC = () => {
               >
                 {running ? (
                   <>
-                    <Spinner size="sm" className="me-1" /> Running...
+                    <Spinner size="sm" className="me-1" />{' '}
+                    {t('graph.algorithms.run.running')}
                   </>
                 ) : (
-                  'Run Algorithm'
+                  t('graph.algorithms.run.submit')
                 )}
               </Button>
             </Card.Body>

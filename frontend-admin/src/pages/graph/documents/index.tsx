@@ -23,6 +23,7 @@ import {
   faFileAlt,
   faSearch
 } from '@fortawesome/free-solid-svg-icons';
+import { Trans, useTranslation } from 'react-i18next';
 import {
   useListDocumentsQuery,
   useUploadDocumentMutation,
@@ -54,6 +55,7 @@ interface UploadModalProps {
 }
 
 const UploadModal: React.FC<UploadModalProps> = ({ show, onHide }) => {
+  const { t } = useTranslation();
   const fileRef = useRef<HTMLInputElement>(null);
   const [title, setTitle] = useState('');
   const [iso, setIso] = useState('');
@@ -83,7 +85,7 @@ const UploadModal: React.FC<UploadModalProps> = ({ show, onHide }) => {
   const handleSubmit = async () => {
     const file = fileRef.current?.files?.[0];
     if (!file) {
-      setError('Please select a file');
+      setError(t('graph.documents.uploadModal.errorNoFile'));
       return;
     }
 
@@ -100,14 +102,16 @@ const UploadModal: React.FC<UploadModalProps> = ({ show, onHide }) => {
       handleClose();
     } catch (err: unknown) {
       const msg = (err as { data?: { message?: string } })?.data?.message;
-      setError(msg || 'Upload failed');
+      setError(msg || t('graph.documents.uploadModal.errorGeneric'));
     }
   };
 
   return (
     <Modal show={show} onHide={handleClose} centered backdrop="static">
       <Modal.Header closeButton>
-        <Modal.Title className="fs-9">Upload Document</Modal.Title>
+        <Modal.Title className="fs-9">
+          {t('graph.documents.uploadModal.title')}
+        </Modal.Title>
       </Modal.Header>
       <Modal.Body>
         {error && (
@@ -122,7 +126,8 @@ const UploadModal: React.FC<UploadModalProps> = ({ show, onHide }) => {
         )}
         <Form.Group className="mb-3">
           <Form.Label className="small">
-            File (PDF or Text) <span className="text-danger">*</span>
+            {t('graph.documents.uploadModal.fileLabel')}{' '}
+            <span className="text-danger">*</span>
           </Form.Label>
           <Form.Control
             type="file"
@@ -132,70 +137,98 @@ const UploadModal: React.FC<UploadModalProps> = ({ show, onHide }) => {
           />
         </Form.Group>
         <Form.Group className="mb-3">
-          <Form.Label className="small">Title</Form.Label>
+          <Form.Label className="small">
+            {t('graph.documents.uploadModal.titleLabel')}
+          </Form.Label>
           <Form.Control
             size="sm"
             value={title}
             onChange={e => setTitle(e.target.value)}
-            placeholder="Leave empty to use filename"
+            placeholder={t('graph.documents.uploadModal.titlePlaceholder')}
           />
         </Form.Group>
         <Row className="g-2 mb-3">
           <Col>
             <Form.Group>
-              <Form.Label className="small">ISO Standard</Form.Label>
+              <Form.Label className="small">
+                {t('graph.documents.uploadModal.isoLabel')}
+              </Form.Label>
               <Form.Control
                 size="sm"
                 value={iso}
                 onChange={e => setIso(e.target.value)}
-                placeholder="e.g. ISO 9001"
+                placeholder={t('graph.documents.uploadModal.isoPlaceholder')}
               />
             </Form.Group>
           </Col>
           <Col>
             <Form.Group>
-              <Form.Label className="small">Version</Form.Label>
+              <Form.Label className="small">
+                {t('graph.documents.uploadModal.versionLabel')}
+              </Form.Label>
               <Form.Control
                 size="sm"
                 value={version}
                 onChange={e => setVersion(e.target.value)}
-                placeholder="e.g. 2015"
+                placeholder={t(
+                  'graph.documents.uploadModal.versionPlaceholder'
+                )}
               />
             </Form.Group>
           </Col>
         </Row>
         <Form.Group className="mb-3">
-          <Form.Label className="small">Document Category</Form.Label>
+          <Form.Label className="small">
+            {t('graph.documents.uploadModal.categoryLabel')}
+          </Form.Label>
           <Form.Select
             size="sm"
             value={category}
             onChange={e => setCategory(e.target.value)}
           >
-            <option value="">Auto-detect</option>
-            <option value="iso">ISO Standard</option>
-            <option value="law">Law / Legal Act</option>
-            <option value="regulation">Regulation</option>
-            <option value="generic">Generic Document</option>
+            <option value="">
+              {t('graph.documents.uploadModal.category.auto')}
+            </option>
+            <option value="iso">
+              {t('graph.documents.uploadModal.category.iso')}
+            </option>
+            <option value="law">
+              {t('graph.documents.uploadModal.category.law')}
+            </option>
+            <option value="regulation">
+              {t('graph.documents.uploadModal.category.regulation')}
+            </option>
+            <option value="generic">
+              {t('graph.documents.uploadModal.category.generic')}
+            </option>
           </Form.Select>
         </Form.Group>
         <Form.Group>
           <Form.Label className="small">
-            LLM for Contextual Enrichment
+            {t('graph.documents.uploadModal.llmLabel')}
           </Form.Label>
           <Form.Select
             size="sm"
             value={llmModel}
             onChange={e => setLlmModel(e.target.value)}
           >
-            <option value="">Default model</option>
+            <option value="">
+              {t('graph.documents.uploadModal.llmDefaultOption')}
+            </option>
             {llmModels.map(m => (
               <option key={m.uuid} value={m.uuid}>
-                {m.name} ({m.modelName}){m.isDefault ? ' - default' : ''}
+                {t('graph.documents.uploadModal.llmOption', {
+                  name: m.name,
+                  modelName: m.modelName
+                })}
+                {m.isDefault
+                  ? t('graph.documents.uploadModal.llmDefaultSuffix')
+                  : ''}
               </option>
             ))}
           </Form.Select>
           <Form.Text className="text-muted">
-            Used to generate context prefixes for each chunk before embedding
+            {t('graph.documents.uploadModal.llmHelp')}
           </Form.Text>
         </Form.Group>
       </Modal.Body>
@@ -206,7 +239,7 @@ const UploadModal: React.FC<UploadModalProps> = ({ show, onHide }) => {
           onClick={handleClose}
           disabled={isLoading}
         >
-          Cancel
+          {t('graph.documents.uploadModal.cancel')}
         </Button>
         <Button
           variant="primary"
@@ -216,10 +249,11 @@ const UploadModal: React.FC<UploadModalProps> = ({ show, onHide }) => {
         >
           {isLoading ? (
             <>
-              <Spinner size="sm" className="me-1" /> Uploading...
+              <Spinner size="sm" className="me-1" />{' '}
+              {t('graph.documents.uploadModal.submitting')}
             </>
           ) : (
-            'Upload & Ingest'
+            t('graph.documents.uploadModal.submit')
           )}
         </Button>
       </Modal.Footer>
@@ -236,6 +270,7 @@ interface EditModalProps {
 }
 
 const EditModal: React.FC<EditModalProps> = ({ show, onHide, document }) => {
+  const { t } = useTranslation();
   const [title, setTitle] = useState('');
   const [iso, setIso] = useState('');
   const [version, setVersion] = useState('');
@@ -259,7 +294,7 @@ const EditModal: React.FC<EditModalProps> = ({ show, onHide, document }) => {
   const handleSubmit = async () => {
     if (!document) return;
     if (!title.trim()) {
-      setError('Title is required');
+      setError(t('graph.documents.editModal.errorTitleRequired'));
       return;
     }
 
@@ -275,14 +310,16 @@ const EditModal: React.FC<EditModalProps> = ({ show, onHide, document }) => {
       handleClose();
     } catch (err: unknown) {
       const msg = (err as { data?: { message?: string } })?.data?.message;
-      setError(msg || 'Update failed');
+      setError(msg || t('graph.documents.editModal.errorGeneric'));
     }
   };
 
   return (
     <Modal show={show} onHide={handleClose} centered>
       <Modal.Header closeButton>
-        <Modal.Title className="fs-9">Edit Document</Modal.Title>
+        <Modal.Title className="fs-9">
+          {t('graph.documents.editModal.title')}
+        </Modal.Title>
       </Modal.Header>
       <Modal.Body>
         {error && (
@@ -297,7 +334,8 @@ const EditModal: React.FC<EditModalProps> = ({ show, onHide, document }) => {
         )}
         <Form.Group className="mb-3">
           <Form.Label className="small">
-            Title <span className="text-danger">*</span>
+            {t('graph.documents.editModal.titleLabel')}{' '}
+            <span className="text-danger">*</span>
           </Form.Label>
           <Form.Control
             size="sm"
@@ -308,23 +346,27 @@ const EditModal: React.FC<EditModalProps> = ({ show, onHide, document }) => {
         <Row className="g-2">
           <Col>
             <Form.Group>
-              <Form.Label className="small">ISO Standard</Form.Label>
+              <Form.Label className="small">
+                {t('graph.documents.editModal.isoLabel')}
+              </Form.Label>
               <Form.Control
                 size="sm"
                 value={iso}
                 onChange={e => setIso(e.target.value)}
-                placeholder="e.g. ISO 9001"
+                placeholder={t('graph.documents.editModal.isoPlaceholder')}
               />
             </Form.Group>
           </Col>
           <Col>
             <Form.Group>
-              <Form.Label className="small">Version</Form.Label>
+              <Form.Label className="small">
+                {t('graph.documents.editModal.versionLabel')}
+              </Form.Label>
               <Form.Control
                 size="sm"
                 value={version}
                 onChange={e => setVersion(e.target.value)}
-                placeholder="e.g. 2015"
+                placeholder={t('graph.documents.editModal.versionPlaceholder')}
               />
             </Form.Group>
           </Col>
@@ -337,7 +379,7 @@ const EditModal: React.FC<EditModalProps> = ({ show, onHide, document }) => {
           onClick={handleClose}
           disabled={isLoading}
         >
-          Cancel
+          {t('graph.documents.editModal.cancel')}
         </Button>
         <Button
           variant="primary"
@@ -345,7 +387,9 @@ const EditModal: React.FC<EditModalProps> = ({ show, onHide, document }) => {
           onClick={handleSubmit}
           disabled={isLoading}
         >
-          {isLoading ? 'Saving...' : 'Save Changes'}
+          {isLoading
+            ? t('graph.documents.editModal.saving')
+            : t('graph.documents.editModal.save')}
         </Button>
       </Modal.Footer>
     </Modal>
@@ -365,6 +409,7 @@ const ContentViewer: React.FC<ContentViewerProps> = ({
   onHide,
   document
 }) => {
+  const { t } = useTranslation();
   const [search, setSearch] = useState('');
   const { data, isLoading } = useGetDocumentChunksQuery(document?.uuid ?? '', {
     skip: !document || !show
@@ -408,10 +453,16 @@ const ContentViewer: React.FC<ContentViewerProps> = ({
             )}
             {document?.version && (
               <Badge bg="secondary" className="ms-1">
-                v{document.version}
+                {t('graph.documents.versionPrefix', {
+                  version: document.version
+                })}
               </Badge>
             )}
-            <span className="ms-2">{chunks.length} chunks</span>
+            <span className="ms-2">
+              {t('graph.documents.viewer.chunksSummary', {
+                count: chunks.length
+              })}
+            </span>
           </div>
         </div>
       </Modal.Header>
@@ -420,7 +471,7 @@ const ContentViewer: React.FC<ContentViewerProps> = ({
           <div className="position-relative">
             <Form.Control
               size="sm"
-              placeholder="Search in document content..."
+              placeholder={t('graph.documents.viewer.searchPlaceholder')}
               value={search}
               onChange={e => setSearch(e.target.value)}
               className="ps-4"
@@ -438,21 +489,26 @@ const ContentViewer: React.FC<ContentViewerProps> = ({
           </div>
           {search && (
             <small className="text-muted">
-              {filtered.length} of {chunks.length} chunks match
+              {t('graph.documents.viewer.matchSummary', {
+                matched: filtered.length,
+                total: chunks.length
+              })}
             </small>
           )}
         </div>
 
         {isLoading ? (
           <div className="text-center p-4">
-            <Spinner size="sm" /> Loading content...
+            <Spinner size="sm" /> {t('graph.documents.viewer.loading')}
           </div>
         ) : chunks.length === 0 ? (
           <Alert variant="info">
-            No chunks available. The document may still be processing.
+            {t('graph.documents.viewer.emptyChunks')}
           </Alert>
         ) : filtered.length === 0 ? (
-          <Alert variant="warning">No chunks match your search.</Alert>
+          <Alert variant="warning">
+            {t('graph.documents.viewer.noMatches')}
+          </Alert>
         ) : (
           <Accordion defaultActiveKey={['0']} alwaysOpen>
             {filtered.map((chunk, i) => (
@@ -478,7 +534,9 @@ const ContentViewer: React.FC<ContentViewerProps> = ({
                       </Badge>
                     )}
                     <small className="text-muted ms-auto flex-shrink-0">
-                      {chunk.text.length} chars
+                      {t('graph.documents.viewer.charsSuffix', {
+                        count: chunk.text.length
+                      })}
                     </small>
                   </div>
                 </Accordion.Header>
@@ -501,7 +559,7 @@ const ContentViewer: React.FC<ContentViewerProps> = ({
       </Modal.Body>
       <Modal.Footer>
         <Button variant="secondary" size="sm" onClick={onHide}>
-          Close
+          {t('graph.documents.viewer.close')}
         </Button>
       </Modal.Footer>
     </Modal>
@@ -511,6 +569,7 @@ const ContentViewer: React.FC<ContentViewerProps> = ({
 // ── Main Page ────────────────────────────────────────────────────────────────
 
 const GraphDocuments: React.FC = () => {
+  const { t } = useTranslation();
   const [statusFilter, setStatusFilter] = useState('');
   const [isoFilter, setIsoFilter] = useState('');
   const [showUpload, setShowUpload] = useState(false);
@@ -537,11 +596,7 @@ const GraphDocuments: React.FC = () => {
 
   const handleDelete = useCallback(
     async (doc: RagDocument) => {
-      if (
-        !confirm(
-          `Delete "${doc.title}" and all its chunks from the knowledge graph?`
-        )
-      )
+      if (!confirm(t('graph.documents.deleteConfirm', { title: doc.title })))
         return;
       try {
         await deleteDocument(doc.uuid).unwrap();
@@ -549,7 +604,7 @@ const GraphDocuments: React.FC = () => {
         // Handled by RTK Query
       }
     },
-    [deleteDocument]
+    [deleteDocument, t]
   );
 
   return (
@@ -558,7 +613,7 @@ const GraphDocuments: React.FC = () => {
       <Row className="g-3 mb-3">
         <Col>
           <div className="d-flex align-items-center justify-content-between">
-            <h5 className="mb-0">Documents</h5>
+            <h5 className="mb-0">{t('graph.documents.pageTitle')}</h5>
             <div className="d-flex gap-2">
               <Form.Select
                 size="sm"
@@ -566,15 +621,25 @@ const GraphDocuments: React.FC = () => {
                 onChange={e => setStatusFilter(e.target.value)}
                 style={{ width: 130 }}
               >
-                <option value="">All status</option>
-                <option value="pending">Pending</option>
-                <option value="processing">Processing</option>
-                <option value="completed">Completed</option>
-                <option value="failed">Failed</option>
+                <option value="">
+                  {t('graph.documents.statusFilter.all')}
+                </option>
+                <option value="pending">
+                  {t('graph.documents.statusFilter.pending')}
+                </option>
+                <option value="processing">
+                  {t('graph.documents.statusFilter.processing')}
+                </option>
+                <option value="completed">
+                  {t('graph.documents.statusFilter.completed')}
+                </option>
+                <option value="failed">
+                  {t('graph.documents.statusFilter.failed')}
+                </option>
               </Form.Select>
               <Form.Control
                 size="sm"
-                placeholder="ISO filter..."
+                placeholder={t('graph.documents.isoFilterPlaceholder')}
                 value={isoFilter}
                 onChange={e => setIsoFilter(e.target.value)}
                 style={{ width: 130 }}
@@ -585,7 +650,7 @@ const GraphDocuments: React.FC = () => {
                 onClick={() => setShowUpload(true)}
               >
                 <FontAwesomeIcon icon={faUpload} className="me-1" />
-                Upload
+                {t('graph.documents.uploadButton')}
               </Button>
             </div>
           </div>
@@ -603,20 +668,24 @@ const GraphDocuments: React.FC = () => {
                 </div>
               ) : documents.length === 0 ? (
                 <Alert variant="info" className="m-3 mb-0">
-                  No documents ingested yet. Upload one to get started.
+                  {t('graph.documents.empty')}
                 </Alert>
               ) : (
                 <Table size="sm" hover responsive className="mb-0 fs-10">
                   <thead className="bg-body-tertiary">
                     <tr>
-                      <th>Title</th>
-                      <th>File</th>
-                      <th>ISO</th>
-                      <th>LLM</th>
-                      <th>Status</th>
-                      <th className="text-end">Chunks</th>
-                      <th className="text-end">Size</th>
-                      <th>Date</th>
+                      <th>{t('graph.documents.cols.title')}</th>
+                      <th>{t('graph.documents.cols.file')}</th>
+                      <th>{t('graph.documents.cols.iso')}</th>
+                      <th>{t('graph.documents.cols.llm')}</th>
+                      <th>{t('graph.documents.cols.status')}</th>
+                      <th className="text-end">
+                        {t('graph.documents.cols.chunks')}
+                      </th>
+                      <th className="text-end">
+                        {t('graph.documents.cols.size')}
+                      </th>
+                      <th>{t('graph.documents.cols.date')}</th>
                       <th className="text-end" style={{ width: 50 }}></th>
                     </tr>
                   </thead>
@@ -639,7 +708,9 @@ const GraphDocuments: React.FC = () => {
                           </span>
                           {d.version && (
                             <small className="text-muted ms-1">
-                              v{d.version}
+                              {t('graph.documents.versionPrefix', {
+                                version: d.version
+                              })}
                             </small>
                           )}
                         </td>
@@ -659,7 +730,9 @@ const GraphDocuments: React.FC = () => {
                             {d.status === 'processing' && (
                               <Spinner size="sm" className="me-1" />
                             )}
-                            {d.status}
+                            {t(`graph.documents.statusLabels.${d.status}`, {
+                              defaultValue: d.status
+                            })}
                           </Badge>
                           {d.error && (
                             <small
@@ -697,7 +770,7 @@ const GraphDocuments: React.FC = () => {
                                     className="me-2"
                                     fixedWidth
                                   />
-                                  View Content
+                                  {t('graph.documents.menu.viewContent')}
                                 </Dropdown.Item>
                               )}
                               <Dropdown.Item
@@ -709,7 +782,7 @@ const GraphDocuments: React.FC = () => {
                                   className="me-2"
                                   fixedWidth
                                 />
-                                Edit
+                                {t('graph.documents.menu.edit')}
                               </Dropdown.Item>
                               <Dropdown.Divider className="my-1" />
                               <Dropdown.Item
@@ -721,7 +794,7 @@ const GraphDocuments: React.FC = () => {
                                   className="me-2"
                                   fixedWidth
                                 />
-                                Delete
+                                {t('graph.documents.menu.delete')}
                               </Dropdown.Item>
                             </Dropdown.Menu>
                           </Dropdown>
@@ -743,80 +816,75 @@ const GraphDocuments: React.FC = () => {
             <Card.Body className="py-3 px-4">
               <h6 className="mb-3">
                 <i className="fas fa-info-circle text-info me-2" />
-                What happens after upload?
+                {t('graph.documents.pipeline.heading')}
               </h6>
               <p className="small text-muted mb-2">
-                When a document is uploaded, the backend runs an asynchronous
-                ingestion pipeline that transforms it into a searchable
-                knowledge graph. Here are the steps:
+                {t('graph.documents.pipeline.intro')}
               </p>
               <ol
                 className="small text-muted mb-0 ps-3"
                 style={{ lineHeight: 1.9 }}
               >
                 <li>
-                  <strong>Text Extraction</strong> &mdash;
-                  <code>text_extractor.go</code> extracts raw text (Gotenberg
-                  for PDFs, pass-through for .txt/.md)
+                  <Trans
+                    i18nKey="graph.documents.pipeline.step1"
+                    components={{ strong: <strong />, code: <code /> }}
+                  />
                 </li>
                 <li>
-                  <strong>Structural Parsing</strong> &mdash;
-                  <code>structural_parser.go</code> (PDF/TXT) or{' '}
-                  <code>markdown_parser.go</code> (.md) builds a hierarchical
-                  tree of sections, clauses, and articles. Cleans OCR
-                  boilerplate, promotes numbered sub-clauses (e.g. 4.4.1) to
-                  proper nodes, and detects requirement levels (SHALL / SHOULD /
-                  MAY)
+                  <Trans
+                    i18nKey="graph.documents.pipeline.step2"
+                    components={{ strong: <strong />, code: <code /> }}
+                  />
                 </li>
                 <li>
-                  <strong>Chunking</strong> &mdash;
-                  <code>chunker.go</code> splits the tree into chunks respecting
-                  structural boundaries. Each chunk inherits metadata: full
-                  path, numbering, node type, requirement level. Lists are kept
-                  together with their introductory clause when possible
+                  <Trans
+                    i18nKey="graph.documents.pipeline.step3"
+                    components={{ strong: <strong />, code: <code /> }}
+                  />
                 </li>
                 <li>
-                  <strong>Contextual Enrichment</strong> &mdash;
-                  <code>contextual_enrichment.go</code> calls the LLM to
-                  generate a short context prefix for each chunk (Contextual
-                  Retrieval). The prefix is prepended before embedding so
-                  vectors capture broader document context
+                  <Trans
+                    i18nKey="graph.documents.pipeline.step4"
+                    components={{ strong: <strong />, code: <code /> }}
+                  />
                 </li>
                 <li>
-                  <strong>Embedding</strong> &mdash; Each chunk is embedded into
-                  a vector via the configured embedding model. The embedding
-                  uses the contextualized text (prefix + chunk) for better
-                  retrieval
+                  <Trans
+                    i18nKey="graph.documents.pipeline.step5"
+                    components={{ strong: <strong />, code: <code /> }}
+                  />
                 </li>
                 <li>
-                  <strong>Graph Node Creation</strong> &mdash;
-                  <code>ingestion_service.go</code> creates{' '}
-                  <code>:RagDocument</code>, <code>:RagSection</code>, and{' '}
-                  <code>:RagChunk</code> nodes in Memgraph
+                  <Trans
+                    i18nKey="graph.documents.pipeline.step6"
+                    components={{ strong: <strong />, code: <code /> }}
+                  />
                 </li>
                 <li>
-                  <strong>Structural Relationships</strong> &mdash;
-                  <code>ingestion_service.go</code> creates{' '}
-                  <code>HAS_SECTION</code>, <code>CONTAINS</code>,
-                  <code>NEXT_SECTION</code>, and <code>NEXT</code> edges to
-                  encode hierarchy and reading order
+                  <Trans
+                    i18nKey="graph.documents.pipeline.step7"
+                    components={{ strong: <strong />, code: <code /> }}
+                  />
                 </li>
                 <li>
-                  <strong>Semantic Relationships</strong> &mdash;
-                  <code>relationship_extractor.go</code> extracts definitions (
-                  <code>DEFINES</code>), cross-references (
-                  <code>REFERENCES</code>), and computes similarity edges (
-                  <code>SIMILAR_TO</code>, cosine &ge; 0.85)
+                  <Trans
+                    i18nKey="graph.documents.pipeline.step8"
+                    components={{ strong: <strong />, code: <code /> }}
+                  />
                 </li>
                 <li>
-                  <strong>Indexing</strong> &mdash; Vector indexes and property
-                  indexes are created for fast retrieval
+                  <Trans
+                    i18nKey="graph.documents.pipeline.step9"
+                    components={{ strong: <strong />, code: <code /> }}
+                  />
                 </li>
               </ol>
               <p className="small text-muted mt-2 mb-0">
-                All files are located in{' '}
-                <code>backend/internal/rag/services/</code>. The pipeline is
-                orchestrated by <code>ingestion_service.go</code>.
+                <Trans
+                  i18nKey="graph.documents.pipeline.footer"
+                  components={{ code: <code /> }}
+                />
               </p>
             </Card.Body>
           </Card>

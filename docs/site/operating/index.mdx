@@ -1,0 +1,22 @@
+---
+title: Operating Orkestra
+description: Deployment, configuration, and day-2 operations.
+sidebar_position: 1
+---
+
+# Operating Orkestra
+
+Once you have Orkestra running, the operator-side surface is mostly:
+
+1. **Deployment topology** — single binary, AI sidecar, or fully split.
+2. **Module configuration** — env vars, encrypted secrets, per-environment profiles (sandbox / production).
+3. **Integrations** — SMTP for email, OAuth providers, Stripe for payments, Gotenberg for PDF generation.
+4. **Observability** — health checks, audit logs, structured logging.
+
+## Pages
+
+- [Deployment](/operating/deployment) — Docker Compose profiles, environment variables.
+- [Module configuration](/operating/module-configuration) — `/admin/modules`, encrypted secrets, environment profiles.
+- [Notifications & SMTP](/operating/notifications) — wiring real email delivery.
+- [OAuth providers](/operating/oauth-providers) — Google, Apple, GitHub, Discord.
+- [Stripe & payments](/operating/payments-stripe) — webhooks, products, subscriptions.

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Alert, Button, Card, Spinner } from 'react-bootstrap';
 import { Link, useSearchParams } from 'react-router-dom';
+import { Trans, useTranslation } from 'react-i18next';
 import AuthCardLayout from 'layouts/AuthCardLayout';
 import {
   useVerifyEmailMutation,
@@ -10,6 +11,7 @@ import {
 type Status = 'pending' | 'verifying' | 'success' | 'error';
 
 const VerifyEmailPage = () => {
+  const { t } = useTranslation();
   const [searchParams] = useSearchParams();
   const token = searchParams.get('token');
   const pendingEmail = searchParams.get('pending');
@@ -27,15 +29,12 @@ const VerifyEmailPage = () => {
         setStatus('success');
       } catch (err: unknown) {
         const anyErr = err as { data?: { detail?: string } };
-        setErrorMessage(
-          anyErr?.data?.detail ||
-            'The verification link is invalid or has expired.'
-        );
+        setErrorMessage(anyErr?.data?.detail || t('auth.verify.failed'));
         setStatus('error');
       }
     };
     void run();
-  }, [token, verifyEmail]);
+  }, [token, verifyEmail, t]);
 
   const handleResend = async () => {
     if (!pendingEmail) return;
@@ -51,15 +50,17 @@ const VerifyEmailPage = () => {
       <Card>
         <Card.Body className="p-4 p-sm-5">
           <div className="text-center mb-4">
-            <h3 className="mb-3">Email verification</h3>
+            <h3 className="mb-3">{t('auth.verify.title')}</h3>
           </div>
 
           {status === 'pending' && pendingEmail && (
             <>
               <Alert variant="info">
-                We&apos;ve sent a verification email to{' '}
-                <strong>{pendingEmail}</strong>. Click the link in that email to
-                activate your account.
+                <Trans
+                  i18nKey="auth.verify.pendingPrompt"
+                  values={{ email: pendingEmail }}
+                  components={{ strong: <strong /> }}
+                />
               </Alert>
               <div className="text-center mt-3">
                 <Button
@@ -68,37 +69,32 @@ const VerifyEmailPage = () => {
                   disabled={resending || resent}
                 >
                   {resent
-                    ? 'Email sent'
+                    ? t('auth.verify.resent')
                     : resending
-                      ? 'Sending…'
-                      : 'Resend verification email'}
+                      ? t('auth.verify.resending')
+                      : t('auth.verify.resend')}
                 </Button>
               </div>
             </>
           )}
 
           {status === 'pending' && !pendingEmail && (
-            <Alert variant="warning">
-              No verification token was provided. Check your email for a
-              verification link.
-            </Alert>
+            <Alert variant="warning">{t('auth.verify.noToken')}</Alert>
           )}
 
           {status === 'verifying' && (
             <div className="text-center">
               <Spinner animation="border" />
-              <p className="mt-3 text-muted">Verifying your email…</p>
+              <p className="mt-3 text-muted">{t('auth.verify.verifying')}</p>
             </div>
           )}
 
           {status === 'success' && (
             <>
-              <Alert variant="success">
-                Your email has been verified. You can now sign in.
-              </Alert>
+              <Alert variant="success">{t('auth.verify.success')}</Alert>
               <div className="d-grid">
                 <Link to="/login" className="btn btn-primary btn-lg">
-                  Sign in
+                  {t('auth.verify.goToLogin')}
                 </Link>
               </div>
             </>
@@ -108,7 +104,7 @@ const VerifyEmailPage = () => {
             <>
               <Alert variant="danger">{errorMessage}</Alert>
               <div className="text-center">
-                <Link to="/login">Back to sign in</Link>
+                <Link to="/login">{t('auth.verify.back')}</Link>
               </div>
             </>
           )}

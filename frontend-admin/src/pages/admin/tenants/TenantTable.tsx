@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Button, Card, Form, Spinner, Table } from 'react-bootstrap';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { Trans, useTranslation } from 'react-i18next';
 import SubtleBadge from 'components/common/SubtleBadge';
 import type { BadgeColor } from 'components/common/SubtleBadge';
 import type { AdminOrgListItem } from 'store/api/tenantApi';
@@ -54,6 +55,7 @@ const TenantTable: React.FC<Props> = ({
   title,
   createLabel
 }) => {
+  const { t } = useTranslation();
   const [planFilter, setPlanFilter] = useState('');
 
   // Plan filter stays client-side — the server-side `q` already narrows the
@@ -80,8 +82,10 @@ const TenantTable: React.FC<Props> = ({
     return (
       <Card>
         <Card.Body className="text-center text-danger py-5">
-          Failed to load tenants. You need the <code>system.tenants.admin</code>{' '}
-          permission to view this page.
+          <Trans
+            i18nKey="adminTenants.table.errorLoadIntro"
+            components={{ code: <code /> }}
+          />
         </Card.Body>
       </Card>
     );
@@ -114,13 +118,17 @@ const TenantTable: React.FC<Props> = ({
           <Table responsive size="sm" className="fs-10 mb-0 overflow-hidden">
             <thead className="bg-body-tertiary">
               <tr>
-                <th className="pe-4 ps-3">Name</th>
-                <th>Slug</th>
-                <th>Plan</th>
-                <th className="text-end">Members</th>
-                <th>Created</th>
-                <th>Status</th>
-                <th className="text-end pe-4">Actions</th>
+                <th className="pe-4 ps-3">{t('adminTenants.table.colName')}</th>
+                <th>{t('adminTenants.table.colSlug')}</th>
+                <th>{t('adminTenants.table.colPlan')}</th>
+                <th className="text-end">
+                  {t('adminTenants.table.colMembers')}
+                </th>
+                <th>{t('adminTenants.table.colCreated')}</th>
+                <th>{t('adminTenants.table.colStatus')}</th>
+                <th className="text-end pe-4">
+                  {t('adminTenants.table.colActions')}
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -129,10 +137,19 @@ const TenantTable: React.FC<Props> = ({
                 const deleted =
                   !purged && (!!org.deletedAt || org.status === 'archived');
                 const statusBadge = purged
-                  ? { bg: 'dark' as BadgeColor, label: 'purged' }
+                  ? {
+                      bg: 'dark' as BadgeColor,
+                      label: t('adminTenants.table.statusPurged')
+                    }
                   : deleted
-                    ? { bg: 'danger' as BadgeColor, label: 'deleted' }
-                    : { bg: 'success' as BadgeColor, label: 'active' };
+                    ? {
+                        bg: 'danger' as BadgeColor,
+                        label: t('adminTenants.table.statusDeleted')
+                      }
+                    : {
+                        bg: 'success' as BadgeColor,
+                        label: t('adminTenants.table.statusActive')
+                      };
                 return (
                   <tr
                     key={org.id}
@@ -200,7 +217,7 @@ const TenantTable: React.FC<Props> = ({
                         className="p-0 me-3 text-decoration-none"
                         onClick={() => onRowClick(org)}
                       >
-                        Manage
+                        {t('adminTenants.table.manage')}
                       </Button>
                       {!deleted && !purged && (
                         <Button
@@ -208,7 +225,7 @@ const TenantTable: React.FC<Props> = ({
                           size="sm"
                           className="p-0 text-danger text-decoration-none"
                           onClick={() => onDeleteClick(org)}
-                          title="Archive (soft-delete)"
+                          title={t('adminTenants.table.archiveTitle')}
                         >
                           <FontAwesomeIcon icon="trash" />
                         </Button>
@@ -220,7 +237,7 @@ const TenantTable: React.FC<Props> = ({
               {filtered.length === 0 && (
                 <tr>
                   <td colSpan={7} className="text-center text-muted py-4">
-                    No tenants match the current filters.
+                    {t('adminTenants.table.empty')}
                   </td>
                 </tr>
               )}
@@ -230,12 +247,17 @@ const TenantTable: React.FC<Props> = ({
       </Card.Body>
       <Card.Footer className="fs-10 text-muted d-flex justify-content-between">
         <span>
-          {orgs.length} tenants total &middot; showing {filtered.length}
+          {t(
+            orgs.length === 1
+              ? 'adminTenants.table.totalOne'
+              : 'adminTenants.table.totalOther',
+            { count: orgs.length, shown: filtered.length }
+          )}
         </span>
         <Form.Check
           type="switch"
           id="tenant-include-deleted"
-          label="Include soft-deleted"
+          label={t('adminTenants.table.includeSoftDeleted')}
           checked={includeDeleted}
           onChange={e => onIncludeDeletedChange(e.target.checked)}
         />

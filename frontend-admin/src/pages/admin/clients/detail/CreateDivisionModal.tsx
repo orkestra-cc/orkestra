@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Button, Form, Modal, Spinner } from 'react-bootstrap';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { useTranslation } from 'react-i18next';
 import { toast } from 'react-toastify';
 import { useCreateTenantDivisionAdminMutation } from 'store/api/tenantApi';
 
@@ -27,6 +28,7 @@ const CreateDivisionModal: React.FC<Props> = ({
   show,
   onHide
 }) => {
+  const { t } = useTranslation();
   const [createDivision, { isLoading }] =
     useCreateTenantDivisionAdminMutation();
   const [name, setName] = useState('');
@@ -49,16 +51,27 @@ const CreateDivisionModal: React.FC<Props> = ({
   const canSave =
     name.trim().length > 0 && slug.trim().length > 0 && !isLoading;
 
+  const unknownErr = t('adminClients.createDivision.errorUnknown');
+
   const onSave = async () => {
     try {
       await createDivision({
         tenantId: parentId,
         body: { name: name.trim(), slug: slug.trim() || undefined }
       }).unwrap();
-      toast.success(`Division "${name.trim()}" created under ${parentName}`);
+      toast.success(
+        t('adminClients.createDivision.toastCreated', {
+          name: name.trim(),
+          parent: parentName
+        })
+      );
       onHide();
     } catch (err: unknown) {
-      toast.error('Create failed: ' + extractError(err));
+      toast.error(
+        t('adminClients.createDivision.toastFailed', {
+          error: extractError(err, unknownErr)
+        })
+      );
     }
   };
 
@@ -67,16 +80,18 @@ const CreateDivisionModal: React.FC<Props> = ({
       <Modal.Header closeButton>
         <Modal.Title>
           <FontAwesomeIcon icon="plus" className="text-primary me-2" />
-          Add division to {parentName}
+          {t('adminClients.createDivision.title', { parent: parentName })}
         </Modal.Title>
       </Modal.Header>
       <Modal.Body>
         <Form>
           <Form.Group className="mb-3">
-            <Form.Label className="fw-semibold">Name</Form.Label>
+            <Form.Label className="fw-semibold">
+              {t('adminClients.createDivision.labelName')}
+            </Form.Label>
             <Form.Control
               type="text"
-              placeholder="e.g. Acme EU"
+              placeholder={t('adminClients.createDivision.placeholderName')}
               value={name}
               maxLength={120}
               onChange={e => onNameChange(e.target.value)}
@@ -84,10 +99,12 @@ const CreateDivisionModal: React.FC<Props> = ({
             />
           </Form.Group>
           <Form.Group className="mb-0">
-            <Form.Label className="fw-semibold">Slug</Form.Label>
+            <Form.Label className="fw-semibold">
+              {t('adminClients.createDivision.labelSlug')}
+            </Form.Label>
             <Form.Control
               type="text"
-              placeholder="acme-eu"
+              placeholder={t('adminClients.createDivision.placeholderSlug')}
               value={slug}
               maxLength={80}
               onChange={e => {
@@ -96,23 +113,23 @@ const CreateDivisionModal: React.FC<Props> = ({
               }}
             />
             <Form.Text muted>
-              Auto-derived from the name unless you override it.
+              {t('adminClients.createDivision.slugHelp')}
             </Form.Text>
           </Form.Group>
         </Form>
       </Modal.Body>
       <Modal.Footer>
         <Button variant="secondary" onClick={onHide} disabled={isLoading}>
-          Cancel
+          {t('adminClients.createDivision.cancel')}
         </Button>
         <Button variant="primary" onClick={onSave} disabled={!canSave}>
           {isLoading ? (
             <>
               <Spinner size="sm" animation="border" className="me-2" />{' '}
-              Creating…
+              {t('adminClients.createDivision.submitting')}
             </>
           ) : (
-            <>Create division</>
+            <>{t('adminClients.createDivision.submit')}</>
           )}
         </Button>
       </Modal.Footer>
@@ -120,10 +137,10 @@ const CreateDivisionModal: React.FC<Props> = ({
   );
 };
 
-function extractError(err: unknown): string {
+function extractError(err: unknown, unknownLabel: string): string {
   if (err && typeof err === 'object' && 'data' in err) {
     const data = (err as { data?: { detail?: string; title?: string } }).data;
-    return data?.detail || data?.title || 'unknown error';
+    return data?.detail || data?.title || unknownLabel;
   }
   return String(err);
 }

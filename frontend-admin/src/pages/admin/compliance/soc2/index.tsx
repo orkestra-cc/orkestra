@@ -3,6 +3,9 @@ import { Button, Card, Col, Row, Spinner, Table } from 'react-bootstrap';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import type { IconProp } from '@fortawesome/fontawesome-svg-core';
 import { useDispatch } from 'react-redux';
+import { Trans, useTranslation } from 'react-i18next';
+
+type TFunction = ReturnType<typeof useTranslation>['t'];
 import SubtleBadge from 'components/common/SubtleBadge';
 import type { BadgeColor } from 'components/common/SubtleBadge';
 import {
@@ -73,32 +76,35 @@ const ControlRow: React.FC<ControlRowProps> = ({
   name,
   status,
   payload
-}) => (
-  <tr>
-    <td className="ps-3 fw-semibold">
-      <code className="fs-11 me-2">{id}</code>
-      {name}
-    </td>
-    <td>
-      <SubtleBadge bg={status.color} pill>
-        {status.label}
-      </SubtleBadge>
-    </td>
-    <td className="pe-3 fs-11">
-      <details>
-        <summary className="text-primary" style={{ cursor: 'pointer' }}>
-          Show payload
-        </summary>
-        <pre
-          className="bg-body-tertiary rounded p-2 mt-2 mb-0 fs-11"
-          style={{ maxHeight: 240, overflow: 'auto' }}
-        >
-          {JSON.stringify(payload, null, 2)}
-        </pre>
-      </details>
-    </td>
-  </tr>
-);
+}) => {
+  const { t } = useTranslation();
+  return (
+    <tr>
+      <td className="ps-3 fw-semibold">
+        <code className="fs-11 me-2">{id}</code>
+        {name}
+      </td>
+      <td>
+        <SubtleBadge bg={status.color} pill>
+          {status.label}
+        </SubtleBadge>
+      </td>
+      <td className="pe-3 fs-11">
+        <details>
+          <summary className="text-primary" style={{ cursor: 'pointer' }}>
+            {t('compliance.soc2.showPayload')}
+          </summary>
+          <pre
+            className="bg-body-tertiary rounded p-2 mt-2 mb-0 fs-11"
+            style={{ maxHeight: 240, overflow: 'auto' }}
+          >
+            {JSON.stringify(payload, null, 2)}
+          </pre>
+        </details>
+      </td>
+    </tr>
+  );
+};
 
 // --- control-level status heuristics ---------------------------------------
 // Light-weight thresholds that translate the raw payload into a Pass/Warn/
@@ -113,13 +119,6 @@ const statusColor: Record<StatusKey, BadgeColor> = {
   warn: 'warning',
   alert: 'danger',
   unknown: 'secondary'
-};
-
-const statusLabel: Record<StatusKey, string> = {
-  pass: 'Healthy',
-  warn: 'Attention',
-  alert: 'Critical',
-  unknown: 'No data'
 };
 
 interface ControlViewModel {
@@ -163,28 +162,50 @@ function classifyControl(id: string, payload: unknown): StatusKey {
   }
 }
 
-const CONTROL_NAMES: Record<string, string> = {
-  'CC6.1_logical_access': 'Logical access — privileged accounts',
-  'CC6.6_account_management': 'Account management — MFA coverage',
-  'CC6.8_data_protection': 'Data protection — KMS key lifecycle',
-  'CC7.2_monitoring': 'Monitoring — failed-login trend',
-  'CC7.2_audit_coverage': 'Monitoring — audit trail coverage'
+// Mirrors backend SOC2 control IDs → i18n key segments. Dots in the source
+// IDs are flattened to underscores so the keys nest cleanly under
+// compliance.soc2.controlNames.*.
+const CONTROL_NAME_KEYS: Record<string, string> = {
+  'CC6.1_logical_access': 'CC6_1_logical_access',
+  'CC6.6_account_management': 'CC6_6_account_management',
+  'CC6.8_data_protection': 'CC6_8_data_protection',
+  'CC7.2_monitoring': 'CC7_2_monitoring',
+  'CC7.2_audit_coverage': 'CC7_2_audit_coverage'
 };
 
-function buildControlViewModels(ev?: Soc2Evidence): ControlViewModel[] {
+function buildControlViewModels(
+  ev: Soc2Evidence | undefined,
+  t: TFunction
+): ControlViewModel[] {
   if (!ev?.controls) return [];
-  return Object.entries(ev.controls).map(([id, payload]) => ({
-    id,
-    name: CONTROL_NAMES[id] ?? id,
-    status: classifyControl(id, payload),
-    payload
-  }));
+  return Object.entries(ev.controls).map(([id, payload]) => {
+    const nameKey = CONTROL_NAME_KEYS[id];
+    return {
+      id,
+      name: nameKey
+        ? t(`compliance.soc2.controlNames.${nameKey}`, { defaultValue: id })
+        : id,
+      status: classifyControl(id, payload),
+      payload
+    };
+  });
 }
 
 const Soc2EvidencePage: React.FC = () => {
+  const { t } = useTranslation();
   const dispatch = useDispatch();
   const { data, isFetching, error, refetch } = useGetSoc2EvidenceQuery();
-  const controls = useMemo(() => buildControlViewModels(data), [data]);
+  const controls = useMemo(() => buildControlViewModels(data, t), [data, t]);
+
+  const statusLabel = useMemo<Record<StatusKey, string>>(
+    () => ({
+      pass: t('compliance.soc2.statusLabels.pass'),
+      warn: t('compliance.soc2.statusLabels.warn'),
+      alert: t('compliance.soc2.statusLabels.alert'),
+      unknown: t('compliance.soc2.statusLabels.unknown')
+    }),
+    [t]
+  );
 
   const summary = data?.summary ?? {};
   const privileged = summary.privileged_users ?? 0;
@@ -202,9 +223,10 @@ const Soc2EvidencePage: React.FC = () => {
     return (
       <Card>
         <Card.Body className="text-center text-danger py-5">
-          Failed to load SOC2 evidence. You need the{' '}
-          <code>system.compliance.audit.read</code> permission to view this
-          page.
+          <Trans
+            i18nKey="compliance.soc2.loadError"
+            components={{ code: <code /> }}
+          />
         </Card.Body>
       </Card>
     );
@@ -222,17 +244,16 @@ const Soc2EvidencePage: React.FC = () => {
                     icon="shield-alt"
                     className="me-2 text-primary"
                   />
-                  SOC2 Evidence
+                  {t('compliance.soc2.title')}
                 </h5>
                 <p className="fs-10 mb-0 text-body-secondary">
-                  Point-in-time aggregate of the CC-class controls auditors
-                  commonly sample. Every refresh recomputes from source — two
-                  auditors hitting this one minute apart see the same answer
-                  when state hasn't changed.
+                  {t('compliance.soc2.description')}
                 </p>
                 {data?.generatedAt && (
                   <p className="fs-11 mb-0 text-body-tertiary mt-1">
-                    Generated at {new Date(data.generatedAt).toLocaleString()}
+                    {t('compliance.soc2.generatedAt', {
+                      date: new Date(data.generatedAt).toLocaleString()
+                    })}
                   </p>
                 )}
               </div>
@@ -254,11 +275,12 @@ const Soc2EvidencePage: React.FC = () => {
                 {isFetching ? (
                   <>
                     <Spinner animation="border" size="sm" className="me-2" />{' '}
-                    Regenerating…
+                    {t('compliance.soc2.regenerating')}
                   </>
                 ) : (
                   <>
-                    <FontAwesomeIcon icon="redo" className="me-2" /> Regenerate
+                    <FontAwesomeIcon icon="redo" className="me-2" />{' '}
+                    {t('compliance.soc2.regenerate')}
                   </>
                 )}
               </Button>
@@ -270,73 +292,83 @@ const Soc2EvidencePage: React.FC = () => {
       <Row className="g-3 mb-3">
         <Col md={6} xl={4}>
           <StatCard
-            title="Privileged users"
+            title={t('compliance.soc2.stats.privileged')}
             value={privileged}
             icon="user-shield"
             accent="primary"
-            footnote="super_admin + administrator + developer roles"
+            footnote={t('compliance.soc2.stats.privilegedFootnote')}
           />
         </Col>
         <Col md={6} xl={4}>
           <StatCard
-            title="Privileged with MFA"
-            value={`${privMFA} / ${privileged}`}
+            title={t('compliance.soc2.stats.privilegedWithMfa')}
+            value={t('compliance.soc2.mfaCoverageFraction', {
+              covered: privMFA,
+              total: privileged
+            })}
             icon="key"
             accent={coverageBadge}
             badge={
               privileged > 0
-                ? { text: `${coveragePct}%`, bg: coverageBadge }
+                ? {
+                    text: t('compliance.soc2.coveragePercentBadge', {
+                      percent: coveragePct
+                    }),
+                    bg: coverageBadge
+                  }
                 : undefined
             }
             footnote={
               privileged === 0
-                ? 'No privileged users to evaluate'
+                ? t('compliance.soc2.stats.noPrivToEvaluate')
                 : coveragePct === 100
-                  ? '100% — target met'
-                  : `${privileged - privMFA} account${privileged - privMFA === 1 ? '' : 's'} missing a second factor`
+                  ? t('compliance.soc2.stats.targetMet')
+                  : t('compliance.soc2.stats.missingSecondFactor', {
+                      count: privileged - privMFA
+                    })
             }
           />
         </Col>
         <Col md={6} xl={4}>
           <StatCard
-            title="Failed logins (24h)"
+            title={t('compliance.soc2.stats.failedLogins24h')}
             value={failed24}
             icon="bell"
             accent={
               failed24 < 50 ? 'success' : failed24 < 500 ? 'warning' : 'danger'
             }
-            footnote="CC7.2 — spikes indicate credential stuffing or integration drift"
+            footnote={t('compliance.soc2.stats.failedLoginsFootnote')}
           />
         </Col>
         <Col md={6} xl={4}>
           <StatCard
-            title="Audit rows (24h)"
+            title={t('compliance.soc2.stats.auditRows24h')}
             value={auditRows}
             icon="clipboard-list"
             accent={auditRows > 0 ? 'success' : 'danger'}
             footnote={
               auditRows === 0
-                ? 'No events in the last 24 hours — pipeline may be unhealthy'
-                : 'Audit pipeline actively capturing events'
+                ? t('compliance.soc2.stats.auditEmptyFootnote')
+                : t('compliance.soc2.stats.auditActiveFootnote')
             }
           />
         </Col>
         <Col md={6} xl={4}>
           <StatCard
-            title="KMS keys active"
+            title={t('compliance.soc2.stats.kmsActive')}
             value={kmsActive}
             icon="key"
             accent={kmsActive > 0 ? 'success' : 'secondary'}
-            footnote="Per-tenant envelopes ready for crypto-shred on purge"
+            footnote={t('compliance.soc2.stats.kmsActiveFootnote')}
           />
         </Col>
         <Col md={6} xl={4}>
           <StatCard
-            title="KMS keys shredded"
+            title={t('compliance.soc2.stats.kmsShredded')}
             value={kmsShredded}
             icon="trash"
             accent="secondary"
-            footnote="Tenants purged via crypto-shred (unrecoverable by design)"
+            footnote={t('compliance.soc2.stats.kmsShreddedFootnote')}
           />
         </Col>
       </Row>
@@ -345,10 +377,9 @@ const Soc2EvidencePage: React.FC = () => {
         <Card.Header className="border-bottom border-200 px-4 py-3">
           <div className="d-flex justify-content-between align-items-center">
             <div>
-              <h6 className="mb-0">Controls</h6>
+              <h6 className="mb-0">{t('compliance.soc2.controlsHeading')}</h6>
               <p className="fs-11 mb-0 text-body-tertiary">
-                Status heuristics are conservative — the payload panel is the
-                source of truth for auditors.
+                {t('compliance.soc2.controlsSubtitle')}
               </p>
             </div>
           </div>
@@ -362,9 +393,9 @@ const Soc2EvidencePage: React.FC = () => {
             <Table responsive size="sm" className="fs-10 mb-0">
               <thead className="bg-body-tertiary">
                 <tr>
-                  <th className="ps-3">Control</th>
-                  <th>Status</th>
-                  <th className="pe-3">Payload</th>
+                  <th className="ps-3">{t('compliance.soc2.colControl')}</th>
+                  <th>{t('compliance.soc2.colStatus')}</th>
+                  <th className="pe-3">{t('compliance.soc2.colPayload')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -383,7 +414,7 @@ const Soc2EvidencePage: React.FC = () => {
                 {controls.length === 0 && (
                   <tr>
                     <td colSpan={3} className="text-center text-muted py-4">
-                      No controls reported.
+                      {t('compliance.soc2.controlsEmpty')}
                     </td>
                   </tr>
                 )}

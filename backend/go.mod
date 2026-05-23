@@ -133,6 +133,14 @@ replace github.com/orkestra-cc/orkestra-addon-identity => ./internal/addons/iden
 // package).
 replace github.com/orkestra-cc/orkestra-addon-rag => ./internal/addons/rag
 
+// Marketing addon (Phase 1 — Fondazione anagrafica MVP): contact base,
+// importer pipeline, and (in future phases) immutable activity log,
+// scoring engine, card lifecycle. Hosted in-tree at
+// backend/internal/addons/marketing/ as its own Go module, mirrored to
+// orkestra-cc/orkestra-addon-marketing from v0.1.0 once Phase 1 stabilizes.
+// Design + per-phase plan at docs/plans/marketing-addon/ in this repo.
+replace github.com/orkestra-cc/orkestra-addon-marketing => ./internal/addons/marketing
+
 require (
 	github.com/alicebob/miniredis/v2 v2.37.0
 	github.com/cedar-policy/cedar-go v1.6.0
@@ -154,6 +162,7 @@ require (
 	github.com/orkestra-cc/orkestra-addon-documents v0.1.0
 	github.com/orkestra-cc/orkestra-addon-graph v0.1.1
 	github.com/orkestra-cc/orkestra-addon-identity v0.1.1
+	github.com/orkestra-cc/orkestra-addon-marketing v0.1.0
 	github.com/orkestra-cc/orkestra-addon-payments v0.1.0
 	github.com/orkestra-cc/orkestra-addon-rag v0.1.0
 	github.com/orkestra-cc/orkestra-addon-sales v0.1.0
@@ -171,7 +180,7 @@ require (
 	go.opentelemetry.io/otel/sdk v1.43.0
 	go.opentelemetry.io/otel/sdk/log v0.19.0
 	go.opentelemetry.io/otel/trace v1.43.0
-	golang.org/x/crypto v0.51.0
+	golang.org/x/crypto v0.52.0
 	golang.org/x/tools v0.44.0
 )
 
@@ -231,15 +240,21 @@ require (
 	github.com/prometheus/client_model v0.6.2 // indirect
 	github.com/prometheus/common v0.66.1 // indirect
 	github.com/prometheus/procfs v0.16.1 // indirect
+	github.com/richardlehane/mscfb v1.0.6 // indirect
+	github.com/richardlehane/msoleps v1.0.6 // indirect
 	github.com/saintfish/chardet v0.0.0-20230101081208-5e3ef4b5456d // indirect
 	github.com/sashabaranov/go-openai v1.41.2 // indirect
 	github.com/stripe/stripe-go/v76 v76.25.0 // indirect
 	github.com/temoto/robotstxt v1.1.2 // indirect
+	github.com/tiendc/go-deepcopy v1.7.2 // indirect
 	github.com/tinylib/msgp v1.6.4 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	github.com/xdg-go/pbkdf2 v1.0.0 // indirect
 	github.com/xdg-go/scram v1.1.2 // indirect
 	github.com/xdg-go/stringprep v1.0.4 // indirect
+	github.com/xuri/efp v0.0.1 // indirect
+	github.com/xuri/excelize/v2 v2.10.1 // indirect
+	github.com/xuri/nfp v0.0.2-0.20250530014748-2ddeb826f9a9 // indirect
 	github.com/youmark/pkcs8 v0.0.0-20240726163527-a2c0da244d78 // indirect
 	github.com/yuin/goldmark v1.7.17 // indirect
 	github.com/yuin/gopher-lua v1.1.1 // indirect
@@ -251,10 +266,10 @@ require (
 	go.yaml.in/yaml/v2 v2.4.2 // indirect
 	golang.org/x/exp v0.0.0-20220921023135-46d9e7742f1e // indirect
 	golang.org/x/mod v0.35.0 // indirect
-	golang.org/x/net v0.54.0 // indirect
+	golang.org/x/net v0.55.0 // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect
 	golang.org/x/sync v0.20.0 // indirect
-	golang.org/x/sys v0.44.0 // indirect
+	golang.org/x/sys v0.45.0 // indirect
 	golang.org/x/text v0.37.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
 	google.golang.org/appengine v1.6.8 // indirect

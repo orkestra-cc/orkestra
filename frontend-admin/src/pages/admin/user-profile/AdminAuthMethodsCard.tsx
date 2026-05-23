@@ -10,6 +10,8 @@ import {
   Tooltip
 } from 'react-bootstrap';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 import { toast } from 'react-toastify';
 import { useAppSelector } from 'store/hooks';
 import { selectUser } from 'store/slices/authSlice';
@@ -45,6 +47,7 @@ interface AdminAuthMethodsCardProps {
 const AdminAuthMethodsCard: React.FC<AdminAuthMethodsCardProps> = ({
   user
 }) => {
+  const { t } = useTranslation();
   const currentAdmin = useAppSelector(selectUser);
   const isSelf = currentAdmin?.id === user.id;
 
@@ -63,28 +66,40 @@ const AdminAuthMethodsCard: React.FC<AdminAuthMethodsCardProps> = ({
   const [confirmUnlink, setConfirmUnlink] =
     useState<AdminAuthOAuthProvider | null>(null);
 
+  const unknownErr = t('adminUserProfile.authMethods.errorUnknown');
+
   const handleSendReset = async () => {
     try {
       await sendPasswordReset(user.id).unwrap();
-      toast.success('Password-reset email sent');
+      toast.success(t('adminUserProfile.authMethods.toastPasswordResetSent'));
     } catch (err) {
-      toast.error('Could not send password reset: ' + extractError(err));
+      toast.error(
+        t('adminUserProfile.authMethods.toastPasswordResetFailed', {
+          error: extractError(err, unknownErr)
+        })
+      );
     }
   };
 
   const handleResendVerification = async () => {
     try {
       await resendVerification(user.id).unwrap();
-      toast.success('Verification email re-sent');
+      toast.success(t('adminUserProfile.authMethods.toastVerificationResent'));
     } catch (err) {
-      toast.error('Could not resend verification: ' + extractError(err));
+      toast.error(
+        t('adminUserProfile.authMethods.toastVerificationResendFailed', {
+          error: extractError(err, unknownErr)
+        })
+      );
     }
   };
 
   const handleUnlink = async (provider: OAuthProviderName) => {
     try {
       await unlinkOAuth({ id: user.id, provider }).unwrap();
-      toast.success(`Unlinked ${provider}`);
+      toast.success(
+        t('adminUserProfile.authMethods.toastUnlinked', { provider })
+      );
       setConfirmUnlink(null);
     } catch (err) {
       // Surface the typed last-credential / self-action codes if the
@@ -93,14 +108,16 @@ const AdminAuthMethodsCard: React.FC<AdminAuthMethodsCardProps> = ({
         ?.title;
       if (code === 'last_credential') {
         toast.error(
-          'User has no other login method — send a password-reset first.'
+          t('adminUserProfile.authMethods.toastUnlinkLastCredential')
         );
       } else if (code === 'self_action') {
-        toast.error(
-          'You cannot unlink your own OAuth identity from the admin surface.'
-        );
+        toast.error(t('adminUserProfile.authMethods.toastUnlinkSelfAction'));
       } else {
-        toast.error('Unlink failed: ' + extractError(err));
+        toast.error(
+          t('adminUserProfile.authMethods.toastUnlinkFailed', {
+            error: extractError(err, unknownErr)
+          })
+        );
       }
       setConfirmUnlink(null);
     }
@@ -112,7 +129,7 @@ const AdminAuthMethodsCard: React.FC<AdminAuthMethodsCardProps> = ({
         <Card.Header className="bg-body-tertiary">
           <h5 className="mb-0">
             <FontAwesomeIcon icon="shield-alt" className="me-2" />
-            Authentication Methods
+            {t('adminUserProfile.authMethods.cardTitle')}
           </h5>
         </Card.Header>
         <Card.Body className="text-center py-4">
@@ -128,14 +145,14 @@ const AdminAuthMethodsCard: React.FC<AdminAuthMethodsCardProps> = ({
         <Card.Header className="bg-body-tertiary">
           <h5 className="mb-0">
             <FontAwesomeIcon icon="shield-alt" className="me-2" />
-            Authentication Methods
+            {t('adminUserProfile.authMethods.cardTitle')}
           </h5>
         </Card.Header>
         <Card.Body>
           <Alert variant="warning" className="mb-0">
-            Could not load auth methods.{' '}
+            {t('adminUserProfile.authMethods.loadError')}{' '}
             <Button variant="link" className="p-0" onClick={() => refetch()}>
-              Retry
+              {t('adminUserProfile.authMethods.retry')}
             </Button>
           </Alert>
         </Card.Body>
@@ -149,25 +166,31 @@ const AdminAuthMethodsCard: React.FC<AdminAuthMethodsCardProps> = ({
         <Card.Header className="bg-body-tertiary">
           <h5 className="mb-0">
             <FontAwesomeIcon icon="shield-alt" className="me-2" />
-            Authentication Methods
+            {t('adminUserProfile.authMethods.cardTitle')}
           </h5>
         </Card.Header>
         <Card.Body>
           {/* Password */}
           <Section
             icon="key"
-            title="Password"
+            title={t('adminUserProfile.authMethods.passwordTitle')}
             badge={
               data.hasUsablePassword ? (
-                <Badge bg="success">Set</Badge>
+                <Badge bg="success">
+                  {t('adminUserProfile.authMethods.passwordBadgeSet')}
+                </Badge>
               ) : (
-                <Badge bg="secondary">Not set</Badge>
+                <Badge bg="secondary">
+                  {t('adminUserProfile.authMethods.passwordBadgeNotSet')}
+                </Badge>
               )
             }
             sub={
               data.hasUsablePassword && data.passwordUpdatedAt
-                ? `Last changed ${formatDate(data.passwordUpdatedAt)}`
-                : 'No password set — user signs in via OAuth only.'
+                ? t('adminUserProfile.authMethods.passwordLastChanged', {
+                    date: formatDate(data.passwordUpdatedAt)
+                  })
+                : t('adminUserProfile.authMethods.passwordOauthOnly')
             }
             action={
               <Button
@@ -179,7 +202,7 @@ const AdminAuthMethodsCard: React.FC<AdminAuthMethodsCardProps> = ({
                 {pwBusy ? (
                   <Spinner size="sm" animation="border" />
                 ) : (
-                  'Send password-reset email'
+                  t('adminUserProfile.authMethods.passwordSendResetButton')
                 )}
               </Button>
             }
@@ -188,20 +211,22 @@ const AdminAuthMethodsCard: React.FC<AdminAuthMethodsCardProps> = ({
           {/* Email verification */}
           <Section
             icon="envelope"
-            title="Email verification"
+            title={t('adminUserProfile.authMethods.emailTitle')}
             badge={
               data.emailVerified ? (
-                <Badge bg="success">Verified</Badge>
+                <Badge bg="success">
+                  {t('adminUserProfile.authMethods.emailBadgeVerified')}
+                </Badge>
               ) : (
                 <Badge bg="warning" text="dark">
-                  Unverified
+                  {t('adminUserProfile.authMethods.emailBadgeUnverified')}
                 </Badge>
               )
             }
             sub={
               data.emailVerified
-                ? 'The user has confirmed their email address.'
-                : 'The user has not yet confirmed their email address.'
+                ? t('adminUserProfile.authMethods.emailConfirmed')
+                : t('adminUserProfile.authMethods.emailNotConfirmed')
             }
             action={
               !data.emailVerified ? (
@@ -214,7 +239,7 @@ const AdminAuthMethodsCard: React.FC<AdminAuthMethodsCardProps> = ({
                   {verifyBusy ? (
                     <Spinner size="sm" animation="border" />
                   ) : (
-                    'Resend verification'
+                    t('adminUserProfile.authMethods.emailResendButton')
                   )}
                 </Button>
               ) : null
@@ -224,15 +249,19 @@ const AdminAuthMethodsCard: React.FC<AdminAuthMethodsCardProps> = ({
           {/* MFA */}
           <Section
             icon="lock"
-            title="Multi-factor authentication"
+            title={t('adminUserProfile.authMethods.mfaTitle')}
             badge={
               data.mfaRequired ? (
-                <Badge bg="primary">Required</Badge>
+                <Badge bg="primary">
+                  {t('adminUserProfile.authMethods.mfaBadgeRequired')}
+                </Badge>
               ) : (
-                <Badge bg="secondary">Optional</Badge>
+                <Badge bg="secondary">
+                  {t('adminUserProfile.authMethods.mfaBadgeOptional')}
+                </Badge>
               )
             }
-            sub={describeMfa(data)}
+            sub={describeMfa(data, t)}
             action={
               data.mfaFactors.length > 0 && !isSelf ? (
                 <Button
@@ -240,20 +269,20 @@ const AdminAuthMethodsCard: React.FC<AdminAuthMethodsCardProps> = ({
                   size="sm"
                   onClick={() => setShowMfaModal(true)}
                 >
-                  Reset MFA
+                  {t('adminUserProfile.authMethods.mfaResetButton')}
                 </Button>
               ) : data.mfaFactors.length > 0 && isSelf ? (
                 <OverlayTrigger
                   placement="left"
                   overlay={
                     <Tooltip>
-                      Use the self-service flow on your own account.
+                      {t('adminUserProfile.authMethods.mfaResetSelfTooltip')}
                     </Tooltip>
                   }
                 >
                   <span className="d-inline-block">
                     <Button variant="outline-warning" size="sm" disabled>
-                      Reset MFA
+                      {t('adminUserProfile.authMethods.mfaResetButton')}
                     </Button>
                   </span>
                 </OverlayTrigger>
@@ -263,7 +292,7 @@ const AdminAuthMethodsCard: React.FC<AdminAuthMethodsCardProps> = ({
             {data.mfaFactors.length > 0 && (
               <ul className="list-unstyled mb-0 mt-2 ms-4 small text-body-secondary">
                 {data.mfaFactors.map(f => (
-                  <li key={f.type}>{describeFactor(f)}</li>
+                  <li key={f.type}>{describeFactor(f, t)}</li>
                 ))}
               </ul>
             )}
@@ -273,14 +302,16 @@ const AdminAuthMethodsCard: React.FC<AdminAuthMethodsCardProps> = ({
           <div className="pt-3">
             <div className="d-flex align-items-center mb-2">
               <FontAwesomeIcon icon="link" className="me-2 text-700" />
-              <strong>OAuth identities</strong>
+              <strong>{t('adminUserProfile.authMethods.oauthHeading')}</strong>
               <span className="ms-2 text-body-secondary small">
-                ({data.oauthProviders.length})
+                {t('adminUserProfile.authMethods.oauthCount', {
+                  count: data.oauthProviders.length
+                })}
               </span>
             </div>
             {data.oauthProviders.length === 0 ? (
               <p className="small text-body-secondary mb-0 ms-4">
-                No OAuth identities are linked to this account.
+                {t('adminUserProfile.authMethods.oauthEmpty')}
               </p>
             ) : (
               <ul className="list-unstyled mb-0 ms-4">
@@ -288,9 +319,11 @@ const AdminAuthMethodsCard: React.FC<AdminAuthMethodsCardProps> = ({
                   const onlyCredential =
                     !data.hasUsablePassword && data.oauthProviders.length === 1;
                   const blockReason = isSelf
-                    ? 'You cannot unlink your own OAuth identity from the admin surface.'
+                    ? t('adminUserProfile.authMethods.oauthBlockSelf')
                     : onlyCredential
-                      ? 'Send a password-reset first to keep the account accessible.'
+                      ? t(
+                          'adminUserProfile.authMethods.oauthBlockOnlyCredential'
+                        )
                       : null;
                   return (
                     <li
@@ -306,11 +339,15 @@ const AdminAuthMethodsCard: React.FC<AdminAuthMethodsCardProps> = ({
                         </span>
                         {p.isPrimary && (
                           <Badge bg="info" className="ms-2">
-                            Primary
+                            {t(
+                              'adminUserProfile.authMethods.oauthPrimaryBadge'
+                            )}
                           </Badge>
                         )}
                         <span className="ms-2 small text-body-secondary">
-                          linked {formatDate(p.linkedAt)}
+                          {t('adminUserProfile.authMethods.oauthLinkedAt', {
+                            date: formatDate(p.linkedAt)
+                          })}
                         </span>
                       </span>
                       <ProviderActions
@@ -347,10 +384,13 @@ const AdminAuthMethodsCard: React.FC<AdminAuthMethodsCardProps> = ({
           className="position-fixed bottom-0 end-0 m-3"
           style={{ zIndex: 1080, maxWidth: 380 }}
         >
-          <strong>Unlink {confirmUnlink.provider}?</strong>
+          <strong>
+            {t('adminUserProfile.authMethods.unlinkConfirmTitle', {
+              provider: confirmUnlink.provider
+            })}
+          </strong>
           <p className="mb-2 small">
-            The user will lose this login method. They can re-link from their
-            account settings later.
+            {t('adminUserProfile.authMethods.unlinkConfirmBody')}
           </p>
           <div className="d-flex gap-2 justify-content-end">
             <Button
@@ -359,7 +399,7 @@ const AdminAuthMethodsCard: React.FC<AdminAuthMethodsCardProps> = ({
               onClick={() => setConfirmUnlink(null)}
               disabled={unlinkBusy}
             >
-              Cancel
+              {t('adminUserProfile.authMethods.unlinkConfirmCancel')}
             </Button>
             <Button
               size="sm"
@@ -367,7 +407,11 @@ const AdminAuthMethodsCard: React.FC<AdminAuthMethodsCardProps> = ({
               onClick={() => handleUnlink(confirmUnlink.provider)}
               disabled={unlinkBusy}
             >
-              {unlinkBusy ? <Spinner size="sm" animation="border" /> : 'Unlink'}
+              {unlinkBusy ? (
+                <Spinner size="sm" animation="border" />
+              ) : (
+                t('adminUserProfile.authMethods.unlinkConfirmSubmit')
+              )}
             </Button>
           </div>
         </Alert>
@@ -424,6 +468,7 @@ const ProviderActions: React.FC<ProviderActionsProps> = ({
   unlinkBusy,
   onUnlinkClick
 }) => {
+  const { t } = useTranslation();
   if (blockReason) {
     return (
       <OverlayTrigger
@@ -449,41 +494,61 @@ const ProviderActions: React.FC<ProviderActionsProps> = ({
         variant="orkestra-default"
         size="sm"
         disabled={unlinkBusy}
-        aria-label={`actions for ${provider.provider}`}
+        aria-label={t('adminUserProfile.authMethods.oauthActionsAria', {
+          provider: provider.provider
+        })}
       >
         <FontAwesomeIcon icon="ellipsis-h" />
       </Dropdown.Toggle>
       <Dropdown.Menu className="border py-0">
         <Dropdown.Item onClick={onUnlinkClick} className="text-warning">
           <FontAwesomeIcon icon="unlink" className="me-2" />
-          Unlink…
+          {t('adminUserProfile.authMethods.oauthUnlinkMenuItem')}
         </Dropdown.Item>
       </Dropdown.Menu>
     </Dropdown>
   );
 };
 
-function describeMfa(data: AdminAuthMethods): string {
+function describeMfa(data: AdminAuthMethods, t: TFunction): string {
   if (data.mfaFactors.length === 0) {
     if (data.mfaRequired) {
       if (data.mfaGraceExpiresAt) {
-        return `Required, no factor enrolled. Grace period ends ${formatDate(data.mfaGraceExpiresAt)}.`;
+        return t('adminUserProfile.authMethods.mfaRequiredGrace', {
+          date: formatDate(data.mfaGraceExpiresAt)
+        });
       }
-      return 'Required for this role; no factor enrolled yet.';
+      return t('adminUserProfile.authMethods.mfaRequiredNoFactor');
     }
-    return 'Not enrolled.';
+    return t('adminUserProfile.authMethods.mfaNotEnrolled');
   }
-  return `${data.mfaFactors.length} factor${data.mfaFactors.length === 1 ? '' : 's'} enrolled.`;
+  return t(
+    data.mfaFactors.length === 1
+      ? 'adminUserProfile.authMethods.mfaFactorsCountOne'
+      : 'adminUserProfile.authMethods.mfaFactorsCountOther',
+    { count: data.mfaFactors.length }
+  );
 }
 
-function describeFactor(f: AdminAuthMfaFactor): string {
+function describeFactor(f: AdminAuthMfaFactor, t: TFunction): string {
   if (f.type === 'totp') {
-    const enrolled = f.enrolledAt ? formatDate(f.enrolledAt) : 'unknown';
+    const enrolled = f.enrolledAt
+      ? formatDate(f.enrolledAt)
+      : t('adminUserProfile.authMethods.mfaFactorTotpEnrolledUnknown');
     const codes =
       typeof f.backupCodesRemaining === 'number'
-        ? `, ${f.backupCodesRemaining} backup code${f.backupCodesRemaining === 1 ? '' : 's'} remaining`
+        ? t(
+            f.backupCodesRemaining === 1
+              ? 'adminUserProfile.authMethods.mfaFactorTotpBackupCodesOne'
+              : 'adminUserProfile.authMethods.mfaFactorTotpBackupCodesOther',
+            { count: f.backupCodesRemaining }
+          )
         : '';
-    return `TOTP authenticator app — enrolled ${enrolled}${codes}`;
+    return (
+      t('adminUserProfile.authMethods.mfaFactorTotpEnrolled', {
+        date: enrolled
+      }) + codes
+    );
   }
   if (f.type === 'webauthn') {
     const n = f.credentials?.length ?? 0;
@@ -491,7 +556,18 @@ function describeFactor(f: AdminAuthMfaFactor): string {
       .map(c => c.name)
       .filter(Boolean)
       .join(', ');
-    return `${n} passkey${n === 1 ? '' : 's'}${names ? ` (${names})` : ''}`;
+    const count = t(
+      n === 1
+        ? 'adminUserProfile.authMethods.mfaFactorWebauthnCountOne'
+        : 'adminUserProfile.authMethods.mfaFactorWebauthnCountOther',
+      { count: n }
+    );
+    const suffix = names
+      ? t('adminUserProfile.authMethods.mfaFactorWebauthnNamesSuffix', {
+          names
+        })
+      : '';
+    return count + suffix;
   }
   return f.type;
 }
@@ -508,10 +584,10 @@ function formatDate(iso: string): string {
   }
 }
 
-function extractError(err: unknown): string {
+function extractError(err: unknown, unknownLabel: string): string {
   if (err && typeof err === 'object' && 'data' in err) {
     const data = (err as { data?: { detail?: string; title?: string } }).data;
-    return data?.detail || data?.title || 'unknown error';
+    return data?.detail || data?.title || unknownLabel;
   }
   return String(err);
 }

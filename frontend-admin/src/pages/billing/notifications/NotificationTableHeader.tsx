@@ -4,6 +4,7 @@ import { useAdvanceTableContext } from 'providers/AdvanceTableProvider';
 import IconButton from 'components/common/IconButton';
 import AdvanceTableSearchBox from 'components/common/advance-table/AdvanceTableSearchBox';
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   arrayToCSV,
   downloadCSV,
@@ -14,22 +15,28 @@ import type { SDINotification, NotificationType } from 'types/billing';
 import { NOTIFICATION_TYPE_LABELS } from 'types/billing';
 
 const NotificationTableHeader = () => {
+  const { t } = useTranslation();
   const { getSelectedRowModel, setColumnFilters, getFilteredRowModel } =
     useAdvanceTableContext();
-  const [selectedFilter, setSelectedFilter] = useState<string>('Tutti');
+  const [selectedFilter, setSelectedFilter] = useState<string>(
+    t('billing.notifications.filters.all')
+  );
 
   const filters: {
     label: string;
     value: NotificationType | 'all' | 'unprocessed';
   }[] = [
-    { label: 'Tutti', value: 'all' },
-    { label: 'Da Processare', value: 'unprocessed' },
-    { label: 'Ricevuta Consegna (RC)', value: 'RC' },
-    { label: 'Notifica Scarto (NS)', value: 'NS' },
-    { label: 'Mancata Consegna (MC)', value: 'MC' },
-    { label: 'Notifica Esito (NE)', value: 'NE' },
-    { label: 'Decorrenza Termini (DT)', value: 'DT' },
-    { label: 'Attestazione (AT)', value: 'AT' }
+    { label: t('billing.notifications.filters.all'), value: 'all' },
+    {
+      label: t('billing.notifications.filters.unprocessed'),
+      value: 'unprocessed'
+    },
+    { label: t('billing.notifications.filters.RC'), value: 'RC' },
+    { label: t('billing.notifications.filters.NS'), value: 'NS' },
+    { label: t('billing.notifications.filters.MC'), value: 'MC' },
+    { label: t('billing.notifications.filters.NE'), value: 'NE' },
+    { label: t('billing.notifications.filters.DT'), value: 'DT' },
+    { label: t('billing.notifications.filters.AT'), value: 'AT' }
   ];
 
   const handleFilter = (filter: {
@@ -87,12 +94,12 @@ const NotificationTableHeader = () => {
     <div className="d-lg-flex justify-content-between">
       <Row className="flex-between-center gy-2 px-x1">
         <Col xs="auto" className="pe-0">
-          <h6 className="mb-0">Elenco Notifiche SDI</h6>
+          <h6 className="mb-0">{t('billing.notifications.tableTitle')}</h6>
         </Col>
         <Col xs="auto">
           <AdvanceTableSearchBox
             className="input-search-width"
-            placeholder="Cerca per ID SDI o progressivo"
+            placeholder={t('billing.notifications.searchPlaceholder')}
           />
         </Col>
       </Row>
@@ -136,9 +143,14 @@ const NotificationTableHeader = () => {
         ></div>
         {getSelectedRowModel().rows.length > 0 ? (
           <div className="d-flex">
-            <Form.Select size="sm" aria-label="Azioni di massa">
-              <option>Azioni di massa</option>
-              <option value="markProcessed">Marca come processato</option>
+            <Form.Select
+              size="sm"
+              aria-label={t('billing.notifications.bulkActions')}
+            >
+              <option>{t('billing.notifications.bulkActions')}</option>
+              <option value="markProcessed">
+                {t('billing.notifications.bulkMarkProcessed')}
+              </option>
             </Form.Select>
             <Button
               type="button"
@@ -146,7 +158,7 @@ const NotificationTableHeader = () => {
               size="sm"
               className="ms-2"
             >
-              Applica
+              {t('billing.notifications.apply')}
             </Button>
           </div>
         ) : (
@@ -160,7 +172,7 @@ const NotificationTableHeader = () => {
               onClick={handleExportCSV}
             >
               <span className="d-none d-sm-inline-block d-xl-none d-xxl-inline-block ms-1">
-                Esporta
+                {t('billing.notifications.export')}
               </span>
             </IconButton>
             <Dropdown
@@ -173,10 +185,16 @@ const NotificationTableHeader = () => {
 
               <Dropdown.Menu className="border py-0">
                 <div className="py-2">
-                  <Dropdown.Item>Visualizza Tutti</Dropdown.Item>
-                  <Dropdown.Item>Marca tutte come lette</Dropdown.Item>
+                  <Dropdown.Item>
+                    {t('billing.notifications.viewAll')}
+                  </Dropdown.Item>
+                  <Dropdown.Item>
+                    {t('billing.notifications.markAllRead')}
+                  </Dropdown.Item>
                   <Dropdown.Divider />
-                  <Dropdown.Item>Sincronizza con SDI</Dropdown.Item>
+                  <Dropdown.Item>
+                    {t('billing.notifications.syncWithSdi')}
+                  </Dropdown.Item>
                 </div>
               </Dropdown.Menu>
             </Dropdown>

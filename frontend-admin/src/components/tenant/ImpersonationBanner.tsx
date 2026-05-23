@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import { useAppDispatch, useAppSelector } from 'store/hooks';
 import {
   selectImpersonation,
@@ -8,11 +9,12 @@ import { baseApi, TENANT_SCOPED_TAGS } from 'store/api/baseApi';
 
 /**
  * Thin warning bar that renders only while an operator admin is
- * impersonating another tenant via AdminTenantSwitcher. Visible on every
- * authenticated page so the admin cannot forget they're acting inside
- * someone else's scope.
+ * impersonating another tenant via NineDotMenu / ImpersonateButton. Visible
+ * on every authenticated page so the admin cannot forget they're acting
+ * inside someone else's scope.
  */
 export default function ImpersonationBanner() {
+  const { t } = useTranslation();
   const dispatch = useAppDispatch();
   const isImpersonating = useAppSelector(selectIsImpersonating);
   const { tenantId, tenantName } = useAppSelector(selectImpersonation);
@@ -39,16 +41,21 @@ export default function ImpersonationBanner() {
       }}
     >
       <span>
-        <strong>⚠ Impersonating {tenantName ?? 'tenant'}</strong>
+        <strong>
+          ⚠{' '}
+          {t('banner.impersonation.text', {
+            tenant: tenantName ?? t('banner.impersonation.fallback')
+          })}
+        </strong>
         <span className="text-muted ms-2">({tenantId})</span>
-        <span className="ms-2">— all actions are audited.</span>
+        <span className="ms-2">{t('banner.impersonation.audit')}</span>
       </span>
       <button
         type="button"
         className="btn btn-sm btn-outline-dark"
         onClick={onStop}
       >
-        Stop impersonating
+        {t('banner.impersonation.stop')}
       </button>
     </div>
   );

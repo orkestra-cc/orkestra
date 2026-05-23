@@ -1,5 +1,7 @@
+import { useMemo } from 'react';
 import { Link } from 'react-router';
 import { Card, Alert } from 'react-bootstrap';
+import { Trans, useTranslation } from 'react-i18next';
 import AdvanceTableProvider from 'providers/AdvanceTableProvider';
 import AdvanceTable from 'components/common/advance-table/AdvanceTable';
 import AdvanceTableFooter from 'components/common/advance-table/AdvanceTableFooter';
@@ -13,87 +15,100 @@ interface CompanySearchResultsProps {
   result: CompanySearchResult;
 }
 
-const columns = [
-  {
-    accessorKey: 'companyName',
-    header: 'Azienda',
-    meta: {
-      headerProps: { className: 'ps-2 text-900', style: { height: '46px' } },
-      cellProps: { className: 'py-2 white-space-nowrap pe-3 pe-xxl-4 ps-2' }
-    },
-    cell: ({ row: { original } }: { row: { original: CompanyLookup } }) => (
-      <div>
-        <Link
-          to={`/company/lookup/${original.uuid}`}
-          className="fw-semibold text-900"
-        >
-          <h6 className="mb-0 text-primary">{original.companyName}</h6>
-        </Link>
-        <small className="text-muted font-monospace">{original.vatCode}</small>
-      </div>
-    )
-  },
-  {
-    accessorKey: 'taxCode',
-    header: 'Codice Fiscale',
-    meta: {
-      headerProps: { className: 'text-900' },
-      cellProps: { className: 'py-2 pe-4' }
-    },
-    cell: ({ row: { original } }: { row: { original: CompanyLookup } }) => (
-      <span className="font-monospace text-900">{original.taxCode}</span>
-    )
-  },
-  {
-    accessorKey: 'address.town',
-    header: 'Sede',
-    meta: {
-      headerProps: { className: 'text-900' },
-      cellProps: { className: 'py-2 pe-4' }
-    },
-    cell: ({ row: { original } }: { row: { original: CompanyLookup } }) => (
-      <div>
-        <div className="text-900">{original.address.town}</div>
-        {original.address.province && (
-          <small className="text-muted">({original.address.province})</small>
-        )}
-      </div>
-    )
-  },
-  {
-    accessorKey: 'activityStatus',
-    header: 'Stato',
-    meta: {
-      headerProps: { className: 'text-900' },
-      cellProps: { className: 'fs-9 pe-4' }
-    },
-    cell: ({ row: { original } }: { row: { original: CompanyLookup } }) => {
-      const color = (ACTIVITY_STATUS_COLORS[original.activityStatus] ||
-        'secondary') as BadgeColor;
-      const label =
-        ACTIVITY_STATUS_LABELS[original.activityStatus] ||
-        original.activityStatus;
-      return <SubtleBadge bg={color}>{label}</SubtleBadge>;
-    }
-  },
-  {
-    accessorKey: 'sdiCode',
-    header: 'Codice SDI',
-    meta: {
-      headerProps: { className: 'text-900' },
-      cellProps: { className: 'py-2 pe-4' }
-    },
-    cell: ({ row: { original } }: { row: { original: CompanyLookup } }) =>
-      original.sdiCode ? (
-        <span className="font-monospace text-900">{original.sdiCode}</span>
-      ) : (
-        <span className="text-muted">-</span>
-      )
-  }
-];
-
 const CompanySearchResults = ({ result }: CompanySearchResultsProps) => {
+  const { t } = useTranslation();
   const { companies, totalResults, dryRun } = result;
+
+  const dash = t('company.search.results.dash');
+
+  const columns = useMemo(
+    () => [
+      {
+        accessorKey: 'companyName',
+        header: t('company.search.results.colCompany'),
+        meta: {
+          headerProps: {
+            className: 'ps-2 text-900',
+            style: { height: '46px' }
+          },
+          cellProps: { className: 'py-2 white-space-nowrap pe-3 pe-xxl-4 ps-2' }
+        },
+        cell: ({ row: { original } }: { row: { original: CompanyLookup } }) => (
+          <div>
+            <Link
+              to={`/company/lookup/${original.uuid}`}
+              className="fw-semibold text-900"
+            >
+              <h6 className="mb-0 text-primary">{original.companyName}</h6>
+            </Link>
+            <small className="text-muted font-monospace">
+              {original.vatCode}
+            </small>
+          </div>
+        )
+      },
+      {
+        accessorKey: 'taxCode',
+        header: t('company.search.results.colTaxCode'),
+        meta: {
+          headerProps: { className: 'text-900' },
+          cellProps: { className: 'py-2 pe-4' }
+        },
+        cell: ({ row: { original } }: { row: { original: CompanyLookup } }) => (
+          <span className="font-monospace text-900">{original.taxCode}</span>
+        )
+      },
+      {
+        accessorKey: 'address.town',
+        header: t('company.search.results.colTown'),
+        meta: {
+          headerProps: { className: 'text-900' },
+          cellProps: { className: 'py-2 pe-4' }
+        },
+        cell: ({ row: { original } }: { row: { original: CompanyLookup } }) => (
+          <div>
+            <div className="text-900">{original.address.town}</div>
+            {original.address.province && (
+              <small className="text-muted">
+                ({original.address.province})
+              </small>
+            )}
+          </div>
+        )
+      },
+      {
+        accessorKey: 'activityStatus',
+        header: t('company.search.results.colStatus'),
+        meta: {
+          headerProps: { className: 'text-900' },
+          cellProps: { className: 'fs-9 pe-4' }
+        },
+        cell: ({ row: { original } }: { row: { original: CompanyLookup } }) => {
+          const color = (ACTIVITY_STATUS_COLORS[original.activityStatus] ||
+            'secondary') as BadgeColor;
+          const label =
+            ACTIVITY_STATUS_LABELS[original.activityStatus] ||
+            original.activityStatus;
+          return <SubtleBadge bg={color}>{label}</SubtleBadge>;
+        }
+      },
+      {
+        accessorKey: 'sdiCode',
+        header: t('company.search.results.colSdiCode'),
+        meta: {
+          headerProps: { className: 'text-900' },
+          cellProps: { className: 'py-2 pe-4' }
+        },
+        cell: ({ row: { original } }: { row: { original: CompanyLookup } }) =>
+          original.sdiCode ? (
+            <span className="font-monospace text-900">{original.sdiCode}</span>
+          ) : (
+            <span className="text-muted">{dash}</span>
+          )
+      }
+    ],
+    [t, dash]
+  );
 
   const table = useAdvanceTable({
     columns,
@@ -108,9 +123,11 @@ const CompanySearchResults = ({ result }: CompanySearchResultsProps) => {
       <Card>
         <Card.Body>
           <Alert variant="info" className="mb-0">
-            <strong>Dry Run:</strong> Trovate{' '}
-            <strong>{totalResults ?? 0}</strong> aziende corrispondenti ai
-            filtri. Disattiva &quot;Dry Run&quot; per visualizzare i risultati.
+            <Trans
+              i18nKey="company.search.results.dryRunIntro"
+              values={{ count: totalResults ?? 0 }}
+              components={{ strong: <strong /> }}
+            />
           </Alert>
         </Card.Body>
       </Card>
@@ -122,7 +139,7 @@ const CompanySearchResults = ({ result }: CompanySearchResultsProps) => {
       <Card>
         <Card.Body>
           <Alert variant="warning" className="mb-0">
-            Nessuna azienda trovata con i filtri selezionati.
+            {t('company.search.results.empty')}
           </Alert>
         </Card.Body>
       </Card>
@@ -134,10 +151,12 @@ const CompanySearchResults = ({ result }: CompanySearchResultsProps) => {
       <Card>
         <Card.Header className="border-bottom border-200 px-0">
           <div className="d-flex align-items-center px-3">
-            <h6 className="mb-0">Risultati</h6>
+            <h6 className="mb-0">{t('company.search.results.title')}</h6>
             {totalResults != null && (
               <SubtleBadge bg="primary" className="ms-2">
-                {totalResults} trovate
+                {t('company.search.results.countBadge', {
+                  count: totalResults
+                })}
               </SubtleBadge>
             )}
           </div>

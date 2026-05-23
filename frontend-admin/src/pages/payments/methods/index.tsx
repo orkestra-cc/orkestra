@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Badge, Card, Form, Table } from 'react-bootstrap';
+import { useTranslation } from 'react-i18next';
 import PageHeader from 'components/common/PageHeader';
 import IconButton from 'components/common/IconButton';
 import Flex from 'components/common/Flex';
@@ -7,6 +8,7 @@ import { useListPaymentMethodsQuery } from 'store/api/paymentsApi';
 import { useListAllOrgsAdminQuery } from 'store/api/tenantApi';
 
 const PaymentMethodsPage: React.FC = () => {
+  const { t } = useTranslation();
   const [tenantUUID, setTenantUUID] = useState('');
   const { data: tenantsData } = useListAllOrgsAdminQuery({ kind: 'external' });
   const { data, isLoading, refetch } = useListPaymentMethodsQuery(tenantUUID, {
@@ -16,8 +18,8 @@ const PaymentMethodsPage: React.FC = () => {
   return (
     <>
       <PageHeader
-        title="Metodi di pagamento"
-        description="Carte e metodi salvati per cliente"
+        title={t('payments.methods.title')}
+        description={t('payments.methods.description')}
         className="mb-3"
       >
         <Flex className="gap-2 mt-3">
@@ -26,22 +28,22 @@ const PaymentMethodsPage: React.FC = () => {
             variant="orkestra-default"
             onClick={() => refetch()}
           >
-            Aggiorna
+            {t('payments.methods.refresh')}
           </IconButton>
         </Flex>
       </PageHeader>
 
       <Card className="mb-3">
         <Card.Body>
-          <Form.Label>Seleziona tenant esterno</Form.Label>
+          <Form.Label>{t('payments.methods.selectTenant')}</Form.Label>
           <Form.Select
             value={tenantUUID}
             onChange={e => setTenantUUID(e.target.value)}
           >
             <option value="">—</option>
-            {tenantsData?.tenants.map(t => (
-              <option key={t.id} value={t.id}>
-                {t.name} ({t.slug})
+            {tenantsData?.tenants.map(tenant => (
+              <option key={tenant.id} value={tenant.id}>
+                {tenant.name} ({tenant.slug})
               </option>
             ))}
           </Form.Select>
@@ -52,24 +54,24 @@ const PaymentMethodsPage: React.FC = () => {
         <Card.Body className="p-0">
           {!tenantUUID ? (
             <div className="p-4 text-muted text-center">
-              Seleziona un tenant esterno per visualizzare i metodi salvati.
+              {t('payments.methods.selectTenantHint')}
             </div>
           ) : isLoading ? (
-            <div className="p-4">Caricamento...</div>
+            <div className="p-4">{t('payments.methods.loading')}</div>
           ) : !data?.items.length ? (
             <div className="p-4 text-muted text-center">
-              Nessun metodo salvato per questo cliente.
+              {t('payments.methods.empty')}
             </div>
           ) : (
             <Table responsive hover className="mb-0">
               <thead className="bg-200">
                 <tr>
-                  <th>Provider</th>
-                  <th>Brand</th>
-                  <th>Ultime 4</th>
-                  <th>Scadenza</th>
-                  <th>Default</th>
-                  <th>Creato</th>
+                  <th>{t('payments.methods.columns.provider')}</th>
+                  <th>{t('payments.methods.columns.brand')}</th>
+                  <th>{t('payments.methods.columns.last4')}</th>
+                  <th>{t('payments.methods.columns.expiry')}</th>
+                  <th>{t('payments.methods.columns.default')}</th>
+                  <th>{t('payments.methods.columns.created')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -86,7 +88,13 @@ const PaymentMethodsPage: React.FC = () => {
                         : '—'}
                     </td>
                     <td>
-                      {pm.isDefault ? <Badge bg="success">default</Badge> : '—'}
+                      {pm.isDefault ? (
+                        <Badge bg="success">
+                          {t('payments.methods.defaultBadge')}
+                        </Badge>
+                      ) : (
+                        '—'
+                      )}
                     </td>
                     <td>
                       {new Date(pm.createdAt).toLocaleDateString('it-IT')}

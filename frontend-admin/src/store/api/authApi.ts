@@ -38,6 +38,10 @@ export interface BackendUser {
   lastLogin?: string; // ISO date string
   createdAt: string; // ISO date string
   updatedAt: string; // ISO date string
+  // BCP-47 language tag. Backend backfills 'en' for accounts that
+  // predate the field; useLanguageSync drives i18n.changeLanguage off
+  // this on login.
+  language?: string;
 }
 
 export interface LogoutResponse {
@@ -229,6 +233,39 @@ export const authApi = baseApi.injectEndpoints({
       },
       // Check auth status frequently
       keepUnusedDataFor: 30 // 30 seconds
+    }),
+
+    // Self-service preference patch — currently only `language`. Backend
+    // mirrors GET /me on success so the SPA can replace its cached user
+    // doc with the response. We seed both authApi caches (`getCurrentUser`
+    // + `getSession`) so subscribers re-render against the new value
+    // without an extra round-trip; the failure path is the caller's
+    // problem (LanguageSettings reverts i18n + cookie + toasts).
+    updateCurrentUser: builder.mutation<BackendUser, { language?: string }>({
+      query: body => ({
+        url: 'v1/auth/operator/me',
+        method: 'PATCH',
+        body
+      }),
+      async onQueryStarted(_arg, { dispatch, queryFulfilled }) {
+        try {
+          const { data: user } = await queryFulfilled;
+          dispatch(
+            authApi.util.updateQueryData('getCurrentUser', undefined, draft =>
+              draft ? Object.assign(draft, user) : user
+            )
+          );
+          dispatch(
+            authApi.util.updateQueryData('getSession', undefined, draft => {
+              if (draft && draft.user) {
+                Object.assign(draft.user, user);
+              }
+            })
+          );
+        } catch {
+          // Surfaced to the caller via the mutation result.
+        }
+      }
     }),
 
     // Email/password login — returns access token + user
@@ -571,6 +608,7 @@ export const authApi = baseApi.injectEndpoints({
 export const {
   useGetAuthPolicyQuery,
   useGetCurrentUserQuery,
+  useUpdateCurrentUserMutation,
   useLoginMutation,
   useRegisterMutation,
   useVerifyEmailMutation,

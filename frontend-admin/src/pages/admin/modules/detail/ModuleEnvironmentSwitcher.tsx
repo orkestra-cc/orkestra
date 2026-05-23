@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Button, ButtonGroup, Spinner } from 'react-bootstrap';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faCheck } from '@fortawesome/free-solid-svg-icons';
+import { useTranslation } from 'react-i18next';
 import SubtleBadge from 'components/common/SubtleBadge';
 import { useSetActiveEnvironmentMutation } from 'store/api/moduleApi';
 
@@ -20,6 +21,7 @@ const ModuleEnvironmentSwitcher: React.FC<ModuleEnvironmentSwitcherProps> = ({
   selectedEnvironment,
   onSelect
 }) => {
+  const { t } = useTranslation();
   const [setActive, { isLoading }] = useSetActiveEnvironmentMutation();
   const [error, setError] = useState<string | null>(null);
 
@@ -36,16 +38,18 @@ const ModuleEnvironmentSwitcher: React.FC<ModuleEnvironmentSwitcherProps> = ({
         err && typeof err === 'object' && 'data' in err
           ? String(
               (err as { data: { detail?: string } }).data?.detail ||
-                'Failed to switch environment'
+                t('adminModules.detail.switchFailed')
             )
-          : 'Failed to switch environment';
+          : t('adminModules.detail.switchFailed');
       setError(message);
     }
   };
 
   return (
     <div className="d-flex align-items-center gap-3 mb-3 flex-wrap">
-      <span className="fs-10 fw-semibold text-600">Environment:</span>
+      <span className="fs-10 fw-semibold text-600">
+        {t('adminModules.detail.environmentLabel')}
+      </span>
       <ButtonGroup size="sm">
         {availableEnvironments.map(env => (
           <Button
@@ -59,7 +63,7 @@ const ModuleEnvironmentSwitcher: React.FC<ModuleEnvironmentSwitcherProps> = ({
             {env}
             {env === activeEnvironment && (
               <SubtleBadge bg="success" pill className="ms-1 fs-11">
-                active
+                {t('adminModules.detail.activeBadge')}
               </SubtleBadge>
             )}
           </Button>
@@ -78,7 +82,7 @@ const ModuleEnvironmentSwitcher: React.FC<ModuleEnvironmentSwitcherProps> = ({
           ) : (
             <>
               <FontAwesomeIcon icon={faCheck} className="me-1" />
-              Set as Active
+              {t('adminModules.detail.setAsActive')}
             </>
           )}
         </Button>

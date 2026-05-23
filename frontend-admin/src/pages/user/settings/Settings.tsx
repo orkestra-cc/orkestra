@@ -1,11 +1,13 @@
 import { Link } from 'react-router';
 import { Card, Col, Row } from 'react-bootstrap';
+import { useTranslation } from 'react-i18next';
 import ProfileBanner from '../ProfileBanner';
 import coverSrc from 'assets/img/generic/4.jpg';
 import avatar from 'assets/img/team/2.jpg';
 import ProfileSettings from './ProfileSettings';
 import ExperiencesSettings from './ExperiencesSettings';
 import EducationSettings from './EducationSettings';
+import LanguageSettings from './LanguageSettings';
 import AccountSettings from './AccountSettings';
 import BillingSettings from './BillingSettings';
 import DangerZone from './DangerZone';
@@ -16,6 +18,7 @@ import paths from 'routes/paths';
 // suspicious-login email's deep link is unambiguous and the page
 // stays focused on profile / preferences).
 const Settings: React.FC = () => {
+  const { t } = useTranslation();
   return (
     <>
       <ProfileBanner>
@@ -33,20 +36,20 @@ const Settings: React.FC = () => {
         </Col>
         <Col lg={4}>
           <div className="sticky-sidebar">
+            <LanguageSettings />
             <AccountSettings />
             <BillingSettings />
             <Card className="mb-3">
               <Card.Body>
-                <h5 className="mb-2">Account security</h5>
+                <h5 className="mb-2">{t('settings.security.title')}</h5>
                 <p className="fs-10 text-muted mb-3">
-                  Password, two-factor, sessions, and trusted devices live on
-                  their own page now.
+                  {t('settings.security.description')}
                 </p>
                 <Link
                   to={paths.userSecurity}
                   className="btn btn-outline-primary btn-sm"
                 >
-                  Manage security
+                  {t('settings.security.manage')}
                 </Link>
               </Card.Body>
             </Card>

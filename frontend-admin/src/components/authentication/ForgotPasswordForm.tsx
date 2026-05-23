@@ -1,9 +1,11 @@
 import { useState, FormEvent } from 'react';
 import { Alert, Button, Form } from 'react-bootstrap';
 import { Link } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { useForgotPasswordMutation } from 'store/api/authApi';
 
 const ForgotPasswordForm = () => {
+  const { t } = useTranslation();
   const [email, setEmail] = useState('');
   const [submitted, setSubmitted] = useState(false);
   const [forgotPassword, { isLoading }] = useForgotPasswordMutation();
@@ -23,11 +25,10 @@ const ForgotPasswordForm = () => {
     return (
       <>
         <Alert variant="success" className="mb-3">
-          If an account with that email exists, a password reset email has been
-          sent. Please check your inbox.
+          {t('auth.forgot.sent')}
         </Alert>
         <div className="text-center">
-          <Link to="/login">Back to sign in</Link>
+          <Link to="/login">{t('auth.forgot.back')}</Link>
         </div>
       </>
     );
@@ -35,12 +36,9 @@ const ForgotPasswordForm = () => {
 
   return (
     <Form onSubmit={handleSubmit}>
-      <p className="text-muted mb-4">
-        Enter your email address and we&apos;ll send you a link to reset your
-        password.
-      </p>
+      <p className="text-muted mb-4">{t('auth.forgot.description')}</p>
       <Form.Group className="mb-3">
-        <Form.Label>Email</Form.Label>
+        <Form.Label>{t('auth.email')}</Form.Label>
         <Form.Control
           type="email"
           value={email}
@@ -52,13 +50,14 @@ const ForgotPasswordForm = () => {
 
       <div className="d-grid mb-3">
         <Button type="submit" variant="primary" size="lg" disabled={isLoading}>
-          {isLoading ? 'Sending…' : 'Send reset link'}
+          {isLoading ? t('auth.forgot.submitting') : t('auth.forgot.submit')}
         </Button>
       </div>
 
       <div className="text-center">
         <small className="text-muted">
-          Remembered your password? <Link to="/login">Sign in</Link>
+          {t('auth.forgot.rememberedPrompt')}{' '}
+          <Link to="/login">{t('auth.loginHere')}</Link>
         </small>
       </div>
     </Form>

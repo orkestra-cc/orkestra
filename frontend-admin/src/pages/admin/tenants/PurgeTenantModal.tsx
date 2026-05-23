@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Alert, Button, Form, Modal, Spinner } from 'react-bootstrap';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { toast } from 'react-toastify';
+import { Trans, useTranslation } from 'react-i18next';
 import {
   usePurgeOrgAdminMutation,
   type AdminOrgListItem
@@ -25,6 +26,7 @@ interface Props {
 type Stage = 'warn' | 'type-slug';
 
 const PurgeTenantModal: React.FC<Props> = ({ org, show, onHide, onPurged }) => {
+  const { t } = useTranslation();
   const [purgeOrg, { isLoading }] = usePurgeOrgAdminMutation();
   const [stage, setStage] = useState<Stage>('warn');
   const [typed, setTyped] = useState('');
@@ -48,11 +50,17 @@ const PurgeTenantModal: React.FC<Props> = ({ org, show, onHide, onPurged }) => {
   const onConfirm = async () => {
     try {
       await purgeOrg(org.id).unwrap();
-      toast.success(`Tenant "${org.name}" purged — KMS key shredded.`);
+      toast.success(
+        t('adminTenants.purgeModal.successToast', { name: org.name })
+      );
       onPurged?.();
       onHide();
     } catch (err: unknown) {
-      toast.error('Purge failed: ' + extractError(err));
+      toast.error(
+        t('adminTenants.purgeModal.errorToast', {
+          message: extractError(err, t)
+        })
+      );
     }
   };
 
@@ -66,7 +74,7 @@ const PurgeTenantModal: React.FC<Props> = ({ org, show, onHide, onPurged }) => {
       <Modal.Header closeButton={!isLoading} className="bg-danger-subtle">
         <Modal.Title className="fs-8 text-danger">
           <FontAwesomeIcon icon="exclamation-triangle" className="me-2" />
-          Purge tenant
+          {t('adminTenants.purgeModal.title')}
         </Modal.Title>
       </Modal.Header>
 
@@ -74,38 +82,38 @@ const PurgeTenantModal: React.FC<Props> = ({ org, show, onHide, onPurged }) => {
         <>
           <Modal.Body className="fs-10">
             <Alert variant="danger" className="fs-10 mb-3">
-              <strong>Irreversible — cryptographically unrecoverable.</strong>
+              <strong>{t('adminTenants.purgeModal.alertHeading')}</strong>
               <br />
-              Purging crypto-shreds the tenant's KMS key. Every ciphertext
-              sealed with that key becomes mathematically unrecoverable even if
-              the rows themselves are restored from a backup.
+              {t('adminTenants.purgeModal.alertBody')}
             </Alert>
             <p className="mb-2">
-              You are about to purge tenant{' '}
-              <code className="fs-9">{org.name}</code>{' '}
-              <span className="text-body-tertiary">
-                (<code className="fs-11">{org.slug}</code>)
-              </span>
-              .
+              <Trans
+                i18nKey="adminTenants.purgeModal.aboutToPurge"
+                values={{ name: org.name, slug: org.slug }}
+                components={{
+                  code: <code className="fs-9" />,
+                  muted: <span className="text-body-tertiary" />
+                }}
+              />
             </p>
             <ul className="mb-0">
               <li>
-                Tenant status flips to <code>purged</code>.
+                <Trans
+                  i18nKey="adminTenants.purgeModal.consequenceStatus"
+                  components={{ code: <code /> }}
+                />
               </li>
-              <li>The wrapped data-encryption key is deleted from KMS.</li>
-              <li>No undo, no grace period, no recovery path.</li>
-              <li>
-                Audit-trail rows referencing the tenant are retained for
-                regulatory reasons; the data they describe stays sealed.
-              </li>
+              <li>{t('adminTenants.purgeModal.consequenceKms')}</li>
+              <li>{t('adminTenants.purgeModal.consequenceNoUndo')}</li>
+              <li>{t('adminTenants.purgeModal.consequenceAudit')}</li>
             </ul>
           </Modal.Body>
           <Modal.Footer>
             <Button variant="outline-secondary" onClick={handleClose}>
-              Cancel
+              {t('adminTenants.purgeModal.cancel')}
             </Button>
             <Button variant="danger" onClick={() => setStage('type-slug')}>
-              I understand — continue
+              {t('adminTenants.purgeModal.iUnderstand')}
             </Button>
           </Modal.Footer>
         </>
@@ -114,9 +122,7 @@ const PurgeTenantModal: React.FC<Props> = ({ org, show, onHide, onPurged }) => {
       {stage === 'type-slug' && (
         <>
           <Modal.Body className="fs-10">
-            <p className="mb-2">
-              Type the tenant slug below to enable the purge button:
-            </p>
+            <p className="mb-2">{t('adminTenants.purgeModal.typePrompt')}</p>
             <p className="fs-11 text-body-tertiary mb-3">
               <code>{org.slug}</code>
             </p>
@@ -130,7 +136,7 @@ const PurgeTenantModal: React.FC<Props> = ({ org, show, onHide, onPurged }) => {
               isValid={slugMatches}
             />
             <Form.Control.Feedback type="invalid">
-              Slug does not match.
+              {t('adminTenants.purgeModal.slugMismatch')}
             </Form.Control.Feedback>
           </Modal.Body>
           <Modal.Footer>
@@ -139,7 +145,7 @@ const PurgeTenantModal: React.FC<Props> = ({ org, show, onHide, onPurged }) => {
               onClick={handleClose}
               disabled={isLoading}
             >
-              Cancel
+              {t('adminTenants.purgeModal.cancel')}
             </Button>
             <Button
               variant="danger"
@@ -149,10 +155,10 @@ const PurgeTenantModal: React.FC<Props> = ({ org, show, onHide, onPurged }) => {
               {isLoading ? (
                 <>
                   <Spinner animation="border" size="sm" className="me-2" />
-                  Purging…
+                  {t('adminTenants.purgeModal.purging')}
                 </>
               ) : (
-                <>Purge tenant</>
+                <>{t('adminTenants.purgeModal.purge')}</>
               )}
             </Button>
           </Modal.Footer>
@@ -162,10 +168,12 @@ const PurgeTenantModal: React.FC<Props> = ({ org, show, onHide, onPurged }) => {
   );
 };
 
-function extractError(err: unknown): string {
+function extractError(err: unknown, t: (key: string) => string): string {
   if (err && typeof err === 'object' && 'data' in err) {
     const data = (err as { data?: { detail?: string; title?: string } }).data;
-    return data?.detail || data?.title || 'unknown error';
+    return (
+      data?.detail || data?.title || t('adminTenants.purgeModal.unknownError')
+    );
   }
   return String(err);
 }

@@ -1,5 +1,6 @@
 import { Button, Col, Form, Row } from 'react-bootstrap';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { useTranslation } from 'react-i18next';
 
 interface Props {
   searchTerm: string;
@@ -15,11 +16,13 @@ interface Props {
   includeDeleted: boolean;
   onIncludeDeletedChange: (value: boolean) => void;
   onCreateClick: () => void;
-  /** Heading shown at the left of the toolbar. Defaults to "Tenant
-   * Management" for backwards compatibility with the legacy /admin/tenants
-   * route; the Phase 3 split passes "Internal Tenants" / "Clients". */
+  /** Heading shown at the left of the toolbar. Falls back to the localized
+   * default ("Tenant Management" / "Gestione tenant") for the legacy
+   * /admin/tenants route; the Phase 3 split passes "Internal Tenants" /
+   * "Clients" via the wrapper. */
   title?: string;
-  /** Label on the "New …" button. Defaults to "New Tenant". */
+  /** Label on the "New …" button. Falls back to the localized default
+   * ("New Tenant"). */
   createLabel?: string;
 }
 
@@ -32,19 +35,23 @@ const TenantTableHeader: React.FC<Props> = ({
   planFilter,
   onPlanChange,
   onCreateClick,
-  title = 'Tenant Management',
-  createLabel = 'New Tenant'
+  title,
+  createLabel
 }) => {
+  const { t } = useTranslation();
+  const resolvedTitle = title ?? t('adminTenants.tableHeader.defaultTitle');
+  const resolvedCreateLabel =
+    createLabel ?? t('adminTenants.tableHeader.defaultCreateLabel');
   return (
     <Row className="align-items-center g-3">
       <Col xs="auto">
-        <h5 className="mb-0">{title}</h5>
+        <h5 className="mb-0">{resolvedTitle}</h5>
       </Col>
       <Col>
         <Form.Control
           type="search"
           size="sm"
-          placeholder="Search by name, slug, member email, or surname..."
+          placeholder={t('adminTenants.tableHeader.searchPlaceholder')}
           value={searchTerm}
           onChange={e => onSearchChange(e.target.value)}
         />
@@ -52,7 +59,7 @@ const TenantTableHeader: React.FC<Props> = ({
           <Form.Check
             type="switch"
             id="tenant-search-include-deleted-users"
-            label="Include soft-deleted users in member matches"
+            label={t('adminTenants.tableHeader.includeDeletedUsersToggle')}
             checked={includeDeletedUsers}
             onChange={e => onIncludeDeletedUsersChange(e.target.checked)}
             className="fs-11 text-muted mt-1"
@@ -65,16 +72,18 @@ const TenantTableHeader: React.FC<Props> = ({
           value={planFilter}
           onChange={e => onPlanChange(e.target.value)}
         >
-          <option value="">All Plans</option>
-          <option value="free">Free</option>
-          <option value="pro">Pro</option>
-          <option value="enterprise">Enterprise</option>
+          <option value="">{t('adminTenants.tableHeader.planAll')}</option>
+          <option value="free">{t('adminTenants.tableHeader.planFree')}</option>
+          <option value="pro">{t('adminTenants.tableHeader.planPro')}</option>
+          <option value="enterprise">
+            {t('adminTenants.tableHeader.planEnterprise')}
+          </option>
         </Form.Select>
       </Col>
       <Col xs="auto">
         <Button variant="primary" size="sm" onClick={onCreateClick}>
           <FontAwesomeIcon icon="plus" className="me-1" />
-          {createLabel}
+          {resolvedCreateLabel}
         </Button>
       </Col>
     </Row>

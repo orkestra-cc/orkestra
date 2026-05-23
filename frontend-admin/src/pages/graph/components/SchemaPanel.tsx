@@ -6,6 +6,7 @@ import {
   Spinner,
   Alert
 } from 'react-bootstrap';
+import { useTranslation } from 'react-i18next';
 import {
   useGetSchemaQuery,
   useListDatabasesQuery
@@ -34,6 +35,7 @@ function LabelItem({
   label: LabelInfo;
   onClick?: (name: string) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <Accordion.Item eventKey={`label-${label.name}`}>
       <Accordion.Header>
@@ -46,7 +48,7 @@ function LabelItem({
               e.stopPropagation();
               onClick?.(label.name);
             }}
-            title={`Browse :${label.name} nodes`}
+            title={t('graph.schema.browseLabelTitle', { name: label.name })}
           >
             :{label.name}
           </span>
@@ -66,7 +68,9 @@ function LabelItem({
             ))}
           </ListGroup>
         ) : (
-          <div className="px-3 py-2 text-muted fs-10">No properties</div>
+          <div className="px-3 py-2 text-muted fs-10">
+            {t('graph.schema.noProperties')}
+          </div>
         )}
       </Accordion.Body>
     </Accordion.Item>
@@ -80,6 +84,7 @@ function RelTypeItem({
   rel: RelTypeInfo;
   onClick?: (type: string) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <Accordion.Item eventKey={`rel-${rel.name}`}>
       <Accordion.Header>
@@ -92,7 +97,7 @@ function RelTypeItem({
               e.stopPropagation();
               onClick?.(rel.name);
             }}
-            title={`Browse :${rel.name} relationships`}
+            title={t('graph.schema.browseRelTitle', { name: rel.name })}
           >
             :{rel.name}
           </span>
@@ -112,7 +117,9 @@ function RelTypeItem({
             ))}
           </ListGroup>
         ) : (
-          <div className="px-3 py-2 text-muted fs-10">No properties</div>
+          <div className="px-3 py-2 text-muted fs-10">
+            {t('graph.schema.noProperties')}
+          </div>
         )}
       </Accordion.Body>
     </Accordion.Item>
@@ -120,6 +127,7 @@ function RelTypeItem({
 }
 
 function IndexItem({ index }: { index: IndexInfo }) {
+  const { t } = useTranslation();
   return (
     <ListGroup.Item className="py-2 px-3">
       <div className="d-flex align-items-center justify-content-between">
@@ -133,16 +141,17 @@ function IndexItem({ index }: { index: IndexInfo }) {
       </div>
       <div className="fs-10 text-muted mt-1">
         <span className="me-2">
-          <strong>Type:</strong> {index.type}
+          <strong>{t('graph.schema.indexTypePrefix')}</strong> {index.type}
         </span>
         {(index.labels?.length ?? 0) > 0 && (
           <span className="me-2">
-            <strong>Labels:</strong> {index.labels.join(', ')}
+            <strong>{t('graph.schema.indexLabelsPrefix')}</strong>{' '}
+            {index.labels.join(', ')}
           </span>
         )}
         {(index.properties?.length ?? 0) > 0 && (
           <span>
-            <strong>Props:</strong>{' '}
+            <strong>{t('graph.schema.indexPropsPrefix')}</strong>{' '}
             <span className="font-monospace">
               {index.properties.join(', ')}
             </span>
@@ -154,21 +163,23 @@ function IndexItem({ index }: { index: IndexInfo }) {
 }
 
 function ConstraintItem({ constraint }: { constraint: ConstraintInfo }) {
+  const { t } = useTranslation();
   return (
     <ListGroup.Item className="py-2 px-3">
       <div className="fw-semibold fs-10">{constraint.name}</div>
       <div className="fs-10 text-muted mt-1">
         <span className="me-2">
-          <strong>Type:</strong> {constraint.type}
+          <strong>{t('graph.schema.indexTypePrefix')}</strong> {constraint.type}
         </span>
         {(constraint.labels?.length ?? 0) > 0 && (
           <span className="me-2">
-            <strong>Labels:</strong> {constraint.labels.join(', ')}
+            <strong>{t('graph.schema.indexLabelsPrefix')}</strong>{' '}
+            {constraint.labels.join(', ')}
           </span>
         )}
         {(constraint.properties?.length ?? 0) > 0 && (
           <span>
-            <strong>Props:</strong>{' '}
+            <strong>{t('graph.schema.indexPropsPrefix')}</strong>{' '}
             <span className="font-monospace">
               {constraint.properties.join(', ')}
             </span>
@@ -187,6 +198,7 @@ const SchemaPanel = ({
   onDatabaseChange,
   onDocumentChange
 }: SchemaPanelProps) => {
+  const { t } = useTranslation();
   const {
     data: schema,
     isLoading,
@@ -207,7 +219,7 @@ const SchemaPanel = ({
           size="sm"
           className="me-2"
         />
-        <span className="text-muted fs-10">Loading schema...</span>
+        <span className="text-muted fs-10">{t('graph.schema.loading')}</span>
       </div>
     );
   }
@@ -215,7 +227,7 @@ const SchemaPanel = ({
   if (error) {
     return (
       <Alert variant="danger" className="m-2 fs-10">
-        Failed to load schema. Check the graph database connection.
+        {t('graph.schema.error')}
       </Alert>
     );
   }
@@ -223,7 +235,7 @@ const SchemaPanel = ({
   if (!schema) {
     return (
       <div className="d-flex justify-content-center align-items-center py-5">
-        <span className="text-muted fs-10">No schema data available</span>
+        <span className="text-muted fs-10">{t('graph.schema.empty')}</span>
       </div>
     );
   }
@@ -241,12 +253,12 @@ const SchemaPanel = ({
             onChange={e => onDatabaseChange?.(e.target.value)}
             className="fs-10"
           >
-            <option value="">Default database</option>
+            <option value="">{t('graph.schema.databaseDefaultOption')}</option>
             {databases.map(db => (
               <option key={db.name} value={db.name}>
                 {db.name}
-                {db.default ? ' (default)' : ''}
-                {db.home ? ' (home)' : ''}
+                {db.default ? t('graph.schema.databaseDefaultSuffix') : ''}
+                {db.home ? t('graph.schema.databaseHomeSuffix') : ''}
               </option>
             ))}
           </Form.Select>
@@ -256,7 +268,7 @@ const SchemaPanel = ({
       {/* Document filter */}
       <div className="px-3 py-2 border-bottom">
         <Form.Label className="fs-10 mb-1 text-muted">
-          Document scope
+          {t('graph.schema.documentScopeLabel')}
         </Form.Label>
         <Form.Select
           size="sm"
@@ -264,7 +276,7 @@ const SchemaPanel = ({
           onChange={e => onDocumentChange?.(e.target.value)}
           className="fs-10"
         >
-          <option value="">All documents</option>
+          <option value="">{t('graph.schema.documentScopeAll')}</option>
           {completedDocs.map(doc => (
             <option key={doc.uuid} value={doc.uuid}>
               {doc.title}
@@ -279,11 +291,15 @@ const SchemaPanel = ({
       <div className="d-flex gap-2 px-3 py-2 border-bottom">
         <Badge bg="info">
           <i className="fas fa-circle-nodes me-1" />
-          {schema.nodeCount.toLocaleString()} nodes
+          {t('graph.schema.nodesBadge', {
+            count: schema.nodeCount
+          })}
         </Badge>
         <Badge bg="warning" text="dark">
           <i className="fas fa-arrows-left-right me-1" />
-          {schema.relationshipCount.toLocaleString()} rels
+          {t('graph.schema.relsBadge', {
+            count: schema.relationshipCount
+          })}
         </Badge>
       </div>
 
@@ -293,7 +309,9 @@ const SchemaPanel = ({
           {/* Labels section */}
           <Accordion.Item eventKey="labels">
             <Accordion.Header>
-              <span className="fw-bold me-2">Labels</span>
+              <span className="fw-bold me-2">
+                {t('graph.schema.sections.labels')}
+              </span>
               <Badge bg="secondary" pill>
                 {schema.labels?.length ?? 0}
               </Badge>
@@ -311,7 +329,7 @@ const SchemaPanel = ({
                 </Accordion>
               ) : (
                 <div className="px-3 py-2 text-muted fs-10">
-                  No labels found
+                  {t('graph.schema.emptyLabels')}
                 </div>
               )}
             </Accordion.Body>
@@ -320,7 +338,9 @@ const SchemaPanel = ({
           {/* Relationship Types section */}
           <Accordion.Item eventKey="relationships">
             <Accordion.Header>
-              <span className="fw-bold me-2">Relationship Types</span>
+              <span className="fw-bold me-2">
+                {t('graph.schema.sections.relationshipTypes')}
+              </span>
               <Badge bg="secondary" pill>
                 {schema.relationshipTypes?.length ?? 0}
               </Badge>
@@ -338,7 +358,7 @@ const SchemaPanel = ({
                 </Accordion>
               ) : (
                 <div className="px-3 py-2 text-muted fs-10">
-                  No relationship types found
+                  {t('graph.schema.emptyRelTypes')}
                 </div>
               )}
             </Accordion.Body>
@@ -347,7 +367,9 @@ const SchemaPanel = ({
           {/* Indexes section */}
           <Accordion.Item eventKey="indexes">
             <Accordion.Header>
-              <span className="fw-bold me-2">Indexes</span>
+              <span className="fw-bold me-2">
+                {t('graph.schema.sections.indexes')}
+              </span>
               <Badge bg="secondary" pill>
                 {schema.indexes?.length ?? 0}
               </Badge>
@@ -361,7 +383,7 @@ const SchemaPanel = ({
                 </ListGroup>
               ) : (
                 <div className="px-3 py-2 text-muted fs-10">
-                  No indexes found
+                  {t('graph.schema.emptyIndexes')}
                 </div>
               )}
             </Accordion.Body>
@@ -370,7 +392,9 @@ const SchemaPanel = ({
           {/* Constraints section */}
           <Accordion.Item eventKey="constraints">
             <Accordion.Header>
-              <span className="fw-bold me-2">Constraints</span>
+              <span className="fw-bold me-2">
+                {t('graph.schema.sections.constraints')}
+              </span>
               <Badge bg="secondary" pill>
                 {schema.constraints?.length ?? 0}
               </Badge>
@@ -387,7 +411,7 @@ const SchemaPanel = ({
                 </ListGroup>
               ) : (
                 <div className="px-3 py-2 text-muted fs-10">
-                  No constraints found
+                  {t('graph.schema.emptyConstraints')}
                 </div>
               )}
             </Accordion.Body>

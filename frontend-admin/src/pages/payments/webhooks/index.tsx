@@ -1,11 +1,13 @@
 import { useState } from 'react';
 import { Badge, Card, Form, Table } from 'react-bootstrap';
+import { useTranslation } from 'react-i18next';
 import PageHeader from 'components/common/PageHeader';
 import IconButton from 'components/common/IconButton';
 import Flex from 'components/common/Flex';
 import { useListPaymentWebhookEventsQuery } from 'store/api/paymentsApi';
 
 const WebhookEventsPage: React.FC = () => {
+  const { t } = useTranslation();
   const [provider, setProvider] = useState('');
   const { data, isLoading, refetch } = useListPaymentWebhookEventsQuery({
     provider: provider || undefined
@@ -14,8 +16,8 @@ const WebhookEventsPage: React.FC = () => {
   return (
     <>
       <PageHeader
-        title="Webhook events"
-        description="Audit trail dei webhook ricevuti dai gateway"
+        title={t('payments.webhooks.title')}
+        description={t('payments.webhooks.description')}
         className="mb-3"
       >
         <Flex className="gap-2 mt-3">
@@ -24,7 +26,7 @@ const WebhookEventsPage: React.FC = () => {
             variant="orkestra-default"
             onClick={() => refetch()}
           >
-            Aggiorna
+            {t('payments.webhooks.refresh')}
           </IconButton>
         </Flex>
       </PageHeader>
@@ -36,7 +38,7 @@ const WebhookEventsPage: React.FC = () => {
             onChange={e => setProvider(e.target.value)}
             style={{ maxWidth: 200 }}
           >
-            <option value="">Tutti i provider</option>
+            <option value="">{t('payments.webhooks.allProviders')}</option>
             <option value="stripe">Stripe</option>
             <option value="paypal">PayPal</option>
           </Form.Select>
@@ -46,55 +48,61 @@ const WebhookEventsPage: React.FC = () => {
       <Card>
         <Card.Body className="p-0">
           {isLoading ? (
-            <div className="p-4">Caricamento...</div>
+            <div className="p-4">{t('payments.webhooks.loading')}</div>
           ) : !data?.items.length ? (
             <div className="p-4 text-muted text-center">
-              Nessun evento ricevuto.
+              {t('payments.webhooks.empty')}
             </div>
           ) : (
             <Table responsive hover className="mb-0">
               <thead className="bg-200">
                 <tr>
-                  <th>Provider</th>
-                  <th>Event ID</th>
-                  <th>Tipo</th>
-                  <th>Normalizzato</th>
-                  <th>Processato</th>
-                  <th>Ricevuto</th>
+                  <th>{t('payments.webhooks.columns.provider')}</th>
+                  <th>{t('payments.webhooks.columns.eventId')}</th>
+                  <th>{t('payments.webhooks.columns.type')}</th>
+                  <th>{t('payments.webhooks.columns.normalized')}</th>
+                  <th>{t('payments.webhooks.columns.processed')}</th>
+                  <th>{t('payments.webhooks.columns.received')}</th>
                 </tr>
               </thead>
               <tbody>
-                {data.items.map(e => (
-                  <tr key={e.uuid}>
+                {data.items.map(evt => (
+                  <tr key={evt.uuid}>
                     <td>
-                      <Badge bg="dark">{e.provider}</Badge>
+                      <Badge bg="dark">{evt.provider}</Badge>
                     </td>
                     <td>
-                      <code className="fs--2">{e.providerEventID}</code>
+                      <code className="fs--2">{evt.providerEventID}</code>
                     </td>
                     <td>
-                      <code className="fs--2">{e.type}</code>
+                      <code className="fs--2">{evt.type}</code>
                     </td>
                     <td>
-                      {e.normalized || <span className="text-muted">—</span>}
+                      {evt.normalized || <span className="text-muted">—</span>}
                     </td>
                     <td>
-                      {e.processed ? (
-                        <Badge bg="success">ok</Badge>
-                      ) : e.processError ? (
+                      {evt.processed ? (
+                        <Badge bg="success">
+                          {t('payments.webhooks.statusOk')}
+                        </Badge>
+                      ) : evt.processError ? (
                         <span>
-                          <Badge bg="danger">errore</Badge>
+                          <Badge bg="danger">
+                            {t('payments.webhooks.statusError')}
+                          </Badge>
                           <div>
                             <small className="text-danger">
-                              {e.processError}
+                              {evt.processError}
                             </small>
                           </div>
                         </span>
                       ) : (
-                        <Badge bg="secondary">in attesa</Badge>
+                        <Badge bg="secondary">
+                          {t('payments.webhooks.statusPending')}
+                        </Badge>
                       )}
                     </td>
-                    <td>{new Date(e.receivedAt).toLocaleString('it-IT')}</td>
+                    <td>{new Date(evt.receivedAt).toLocaleString('it-IT')}</td>
                   </tr>
                 ))}
               </tbody>

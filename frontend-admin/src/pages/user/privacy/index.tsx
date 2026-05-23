@@ -1,6 +1,7 @@
 import { useCallback, useState } from 'react';
 import { Button, Card, Col, Row, Spinner } from 'react-bootstrap';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { Trans, useTranslation } from 'react-i18next';
 import { toast } from 'react-toastify';
 import { useNavigate } from 'react-router';
 import { useDispatch } from 'react-redux';
@@ -17,6 +18,7 @@ import EraseAccountModal from './EraseAccountModal';
 // backend endpoints enforce userUUID scoping via the JWT. Matching backend:
 // backend/internal/addons/compliance/handlers/me_handler.go.
 const UserPrivacyPage: React.FC = () => {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const dispatch = useDispatch();
   const { currentUser } = useAuth();
@@ -31,7 +33,10 @@ const UserPrivacyPage: React.FC = () => {
   const handleExport = useCallback(async () => {
     try {
       const bundle = await exportData().unwrap();
-      const filename = `orkestra-data-export-${userId}-${Date.now()}.json`;
+      const filename = t('userPrivacy.export.filename', {
+        user: userId,
+        ts: Date.now()
+      });
       const blob = new Blob([JSON.stringify(bundle, null, 2)], {
         type: 'application/json'
       });
@@ -45,24 +50,32 @@ const UserPrivacyPage: React.FC = () => {
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
       toast.success(
-        `Exported data from ${bundle.producers.length} module${bundle.producers.length === 1 ? '' : 's'}.`
+        t(
+          bundle.producers.length === 1
+            ? 'userPrivacy.export.toastSuccessOne'
+            : 'userPrivacy.export.toastSuccessOther',
+          { count: bundle.producers.length }
+        )
       );
       if (bundle.errors && Object.keys(bundle.errors).length > 0) {
-        toast.warn(
-          'Some modules failed to export. Open the file to review the errors section.'
-        );
+        toast.warn(t('userPrivacy.export.toastPartial'));
       }
     } catch (err) {
-      toast.error('Failed to export your data. Please try again later.');
+      toast.error(t('userPrivacy.export.toastFailure'));
       console.error('DSR export failed', err);
     }
-  }, [exportData, userId]);
+  }, [exportData, userId, t]);
 
   const handleErase = useCallback(async () => {
     try {
       const result = await eraseData().unwrap();
       toast.success(
-        `Account erased. ${result.totalRows} row${result.totalRows === 1 ? '' : 's'} removed.`
+        t(
+          result.totalRows === 1
+            ? 'userPrivacy.erase.toastSuccessOne'
+            : 'userPrivacy.erase.toastSuccessOther',
+          { count: result.totalRows }
+        )
       );
       // Wipe the client auth state so the 15-minute access token is not
       // reused by accident, then bounce to /login. The refresh-token path
@@ -71,10 +84,10 @@ const UserPrivacyPage: React.FC = () => {
       setShowEraseModal(false);
       navigate('/login', { replace: true });
     } catch (err) {
-      toast.error('Failed to erase your account. Please try again later.');
+      toast.error(t('userPrivacy.erase.toastFailure'));
       console.error('DSR erase failed', err);
     }
-  }, [dispatch, eraseData, navigate]);
+  }, [dispatch, eraseData, navigate, t]);
 
   return (
     <>
@@ -87,13 +100,13 @@ const UserPrivacyPage: React.FC = () => {
                   icon="user-shield"
                   className="me-2 text-primary"
                 />
-                Privacy & your data
+                {t('userPrivacy.intro.title')}
               </h5>
               <p className="fs-10 mb-0 text-body-secondary">
-                Under the GDPR you have the right to access a copy of your
-                personal data (<em>right of access</em>) and to request its
-                deletion (<em>right to erasure</em>). Both flows run against
-                every module that holds data about you.
+                <Trans
+                  i18nKey="userPrivacy.intro.body"
+                  components={{ em: <em /> }}
+                />
               </p>
             </Card.Body>
           </Card>
@@ -110,12 +123,10 @@ const UserPrivacyPage: React.FC = () => {
                     icon="file-download"
                     className="me-2 text-info"
                   />
-                  Export your data
+                  {t('userPrivacy.export.title')}
                 </h6>
                 <p className="fs-10 mb-0 text-body-secondary">
-                  Downloads a JSON bundle with the personal data every module
-                  holds for your account. Safe to retry — the endpoint is
-                  read-only and does not mutate state.
+                  {t('userPrivacy.export.description')}
                 </p>
               </div>
               <div className="mt-auto">
@@ -128,12 +139,12 @@ const UserPrivacyPage: React.FC = () => {
                   {isExporting ? (
                     <>
                       <Spinner animation="border" size="sm" className="me-2" />
-                      Gathering your data…
+                      {t('userPrivacy.export.submitting')}
                     </>
                   ) : (
                     <>
                       <FontAwesomeIcon icon="file-download" className="me-2" />
-                      Download JSON bundle
+                      {t('userPrivacy.export.button')}
                     </>
                   )}
                 </Button>
@@ -148,12 +159,10 @@ const UserPrivacyPage: React.FC = () => {
               <div className="mb-3">
                 <h6 className="mb-1 text-danger">
                   <FontAwesomeIcon icon="trash" className="me-2" />
-                  Delete your account
+                  {t('userPrivacy.erase.title')}
                 </h6>
                 <p className="fs-10 mb-0 text-body-secondary">
-                  Permanently removes your personal data across every module.
-                  You will be signed out immediately. There is no undo and no
-                  recovery path.
+                  {t('userPrivacy.erase.description')}
                 </p>
               </div>
               <div className="mt-auto">
@@ -166,15 +175,15 @@ const UserPrivacyPage: React.FC = () => {
                   {isErasing ? (
                     <>
                       <Spinner animation="border" size="sm" className="me-2" />
-                      Erasing…
+                      {t('userPrivacy.erase.submitting')}
                     </>
                   ) : (
-                    <>Delete my account</>
+                    <>{t('userPrivacy.erase.button')}</>
                   )}
                 </Button>
                 {!userEmail && (
                   <p className="fs-11 text-body-tertiary mt-2 mb-0">
-                    Loading your profile…
+                    {t('userPrivacy.erase.loadingProfile')}
                   </p>
                 )}
               </div>

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Alert, Button, Card, Spinner, Table } from 'react-bootstrap';
 import { Link } from 'react-router';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { Trans, useTranslation } from 'react-i18next';
 import SubtleBadge from 'components/common/SubtleBadge';
 import type { Org } from 'store/api/tenantApi';
 import { useListTenantDivisionsAdminQuery } from 'store/api/tenantApi';
@@ -19,6 +20,7 @@ interface Props {
  * division gets its own subscription and capability grants.
  */
 const DivisionsTab: React.FC<Props> = ({ org }) => {
+  const { t } = useTranslation();
   const { data, isLoading, error } = useListTenantDivisionsAdminQuery(org.id);
   const [showCreate, setShowCreate] = useState(false);
 
@@ -28,15 +30,21 @@ const DivisionsTab: React.FC<Props> = ({ org }) => {
     <>
       <Alert variant="light" className="fs-10 py-2 border">
         <FontAwesomeIcon icon="info-circle" className="me-2 text-info" />
-        Divisions are organisational: each child is an independent Tier-2 tenant
-        that holds its own subscriptions, entitlements, and members. Adding a
-        division does <strong>not</strong> propagate the parent's subscriptions.
+        <Trans
+          i18nKey="adminClients.divisions.intro"
+          components={{ strong: <strong /> }}
+        />
       </Alert>
 
       <Card className="shadow-none border-0">
         <Card.Header className="d-flex justify-content-between align-items-center px-0 py-2">
           <h5 className="mb-0 fs-9">
-            {divisions.length} division{divisions.length === 1 ? '' : 's'}
+            {t(
+              divisions.length === 1
+                ? 'adminClients.divisions.countOne'
+                : 'adminClients.divisions.countOther',
+              { count: divisions.length }
+            )}
           </h5>
           <Button
             variant="primary"
@@ -44,7 +52,7 @@ const DivisionsTab: React.FC<Props> = ({ org }) => {
             onClick={() => setShowCreate(true)}
           >
             <FontAwesomeIcon icon="plus" className="me-2" />
-            Add division
+            {t('adminClients.divisions.addButton')}
           </Button>
         </Card.Header>
         <Card.Body className="p-0">
@@ -54,17 +62,17 @@ const DivisionsTab: React.FC<Props> = ({ org }) => {
             </div>
           ) : error ? (
             <Alert variant="danger" className="fs-10">
-              Failed to load divisions.
+              {t('adminClients.divisions.loadFailed')}
             </Alert>
           ) : (
             <Table size="sm" className="fs-10 mb-0">
               <thead className="bg-body-tertiary">
                 <tr>
-                  <th>Name</th>
-                  <th>Slug</th>
-                  <th>Plan</th>
-                  <th>Status</th>
-                  <th>Created</th>
+                  <th>{t('adminClients.divisions.colName')}</th>
+                  <th>{t('adminClients.divisions.colSlug')}</th>
+                  <th>{t('adminClients.divisions.colPlan')}</th>
+                  <th>{t('adminClients.divisions.colStatus')}</th>
+                  <th>{t('adminClients.divisions.colCreated')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -83,7 +91,8 @@ const DivisionsTab: React.FC<Props> = ({ org }) => {
                     </td>
                     <td>
                       <SubtleBadge bg="success" pill>
-                        {d.status ?? 'active'}
+                        {d.status ??
+                          t('adminClients.divisions.statusActiveFallback')}
                       </SubtleBadge>
                     </td>
                     <td className="text-muted">
@@ -94,7 +103,7 @@ const DivisionsTab: React.FC<Props> = ({ org }) => {
                 {divisions.length === 0 && (
                   <tr>
                     <td colSpan={5} className="text-center text-muted py-4">
-                      No divisions yet. Add one to model a sub-workspace.
+                      {t('adminClients.divisions.empty')}
                     </td>
                   </tr>
                 )}

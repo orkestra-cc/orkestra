@@ -1,4 +1,5 @@
 import { Alert, Spinner, Table } from 'react-bootstrap';
+import { useTranslation } from 'react-i18next';
 import SubtleBadge from 'components/common/SubtleBadge';
 import type { BadgeColor } from 'components/common/SubtleBadge';
 import type { Org } from 'store/api/tenantApi';
@@ -23,6 +24,7 @@ function formatAmount(cents: number, currency: string): string {
 }
 
 const PaymentsTab: React.FC<Props> = ({ org }) => {
+  const { t } = useTranslation();
   const { data, isLoading, error } = useListTenantPaymentsAdminQuery(org.id);
 
   if (isLoading) {
@@ -35,7 +37,7 @@ const PaymentsTab: React.FC<Props> = ({ org }) => {
   if (error) {
     return (
       <Alert variant="danger" className="fs-10">
-        Failed to load payments. This may mean the payments module is disabled.
+        {t('adminClients.payments.loadFailed')}
       </Alert>
     );
   }
@@ -48,7 +50,7 @@ const PaymentsTab: React.FC<Props> = ({ org }) => {
         variant="light"
         className="fs-10 py-3 border text-center text-muted"
       >
-        No payment transactions for this client yet.
+        {t('adminClients.payments.empty')}
       </Alert>
     );
   }
@@ -57,12 +59,12 @@ const PaymentsTab: React.FC<Props> = ({ org }) => {
     <Table size="sm" className="fs-10 mb-0">
       <thead className="bg-body-tertiary">
         <tr>
-          <th>Provider</th>
-          <th>Reference</th>
-          <th>Amount</th>
-          <th>Status</th>
-          <th>Charged</th>
-          <th>Created</th>
+          <th>{t('adminClients.payments.colProvider')}</th>
+          <th>{t('adminClients.payments.colReference')}</th>
+          <th>{t('adminClients.payments.colAmount')}</th>
+          <th>{t('adminClients.payments.colStatus')}</th>
+          <th>{t('adminClients.payments.colCharged')}</th>
+          <th>{t('adminClients.payments.colCreated')}</th>
         </tr>
       </thead>
       <tbody>
@@ -83,7 +85,9 @@ const PaymentsTab: React.FC<Props> = ({ org }) => {
               </SubtleBadge>
               {p.refundedCents > 0 && (
                 <div className="text-muted fs-11">
-                  refunded {formatAmount(p.refundedCents, p.currency)}
+                  {t('adminClients.payments.refundedSuffix', {
+                    amount: formatAmount(p.refundedCents, p.currency)
+                  })}
                 </div>
               )}
             </td>

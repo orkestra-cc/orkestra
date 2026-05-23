@@ -1,6 +1,7 @@
 import { Card, Col, Row } from 'react-bootstrap';
 import Flex from 'components/common/Flex';
 import { Link } from 'react-router';
+import { useTranslation } from 'react-i18next';
 import Follower from 'reference/app-examples/social/followers/Follower';
 import paths from 'routes/paths';
 
@@ -15,13 +16,18 @@ const Followers = ({
   followers,
   colBreakpoints = { xs: 6, md: 4, lg: 3, xxl: 2 }
 }: FollowersProps) => {
+  const { t } = useTranslation();
   return (
     <Card className="p-0">
       <Card.Header className="bg-body-tertiary">
         <Flex justifyContent="between">
-          <h5 className="mb-0">Followers ({totalFollowers}) </h5>
+          <h5 className="mb-0">
+            {t('userProfileScaffold.followers.title', {
+              count: totalFollowers
+            })}{' '}
+          </h5>
           <Link to={paths.followers} className="font-sans-serif">
-            All Members
+            {t('userProfileScaffold.followers.allMembers')}
           </Link>
         </Flex>
       </Card.Header>

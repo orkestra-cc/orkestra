@@ -1,0 +1,26 @@
+---
+title: Enabling Modules
+sidebar_position: 4
+---
+
+# Enabling Modules at Runtime
+
+Orkestra modules live in two states: **compiled in** (decided at build time, via Go build tags) and **enabled** (decided at runtime, via the admin UI).
+
+Only modules that were compiled in can be enabled. The SKU you chose determines what's available — see [the architecture deep-dive](/architecture/module-lifecycle) for how this works.
+
+## Toggle a module
+
+1. Log in as `administrator`.
+2. Navigate to `/admin/modules`.
+3. Flip the toggle for the module you want to enable.
+
+The registry resolves dependencies automatically:
+- Enabling `billing` will refuse if `documents` is disabled (dependency).
+- Disabling `documents` will refuse if `billing` is currently enabled (dependent).
+
+The change takes effect **immediately** — no container restart required. Background jobs start, routes unlock, and the navigation menu updates on the next page load.
+
+## What persists
+
+Module state lives in the `module_configs` collection in MongoDB. On every subsequent boot, the registry honors what you set here — the `ORKESTRA_PROFILE` env var is only consulted on the **first** boot of a brand-new install.

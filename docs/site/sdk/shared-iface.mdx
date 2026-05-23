@@ -1,0 +1,20 @@
+---
+title: shared/iface
+sidebar_position: 5
+---
+
+# `shared/iface`
+
+The public consumer-facing interfaces. Cross-module imports go **only** through this package — never into another module's `services/` or `repository/` directories.
+
+| Interface           | Provided by      | Consumed by                                |
+| ------------------- | ---------------- | ------------------------------------------ |
+| `UserProvider`      | `user`           | every other module                         |
+| `NotificationSender`| `notification`   | auth, billing, subscriptions, agents       |
+| `PDFProvider`       | `documents`      | billing                                    |
+| `GraphProvider`     | `graph`          | rag                                        |
+| `AIModelProvider`   | `aimodels`       | rag, agents, sales                         |
+| `RAGQueryProvider`  | `rag`            | agents                                     |
+| `JWTProvider`       | `auth`           | identity, any custom auth integration      |
+
+This indirection is what makes the [AI sidecar split](/architecture/ai-sidecar-split) zero-code for consumers: remote HTTP-backed implementations satisfy the same interfaces.

@@ -1,5 +1,6 @@
 import { Button } from 'react-bootstrap';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { useTranslation } from 'react-i18next';
 import { toast } from 'react-toastify';
 import { useAuth } from 'hooks/auth/useAuthRTK';
 import { useAppDispatch, useAppSelector } from 'store/hooks';
@@ -18,10 +19,10 @@ interface Props {
 
 /**
  * Per-tenant "Impersonate" affordance on /admin/clients/:tenantUUID. Same
- * gate + dispatch as AdminTenantSwitcher (system.tenants.admin holders
- * acting in an internal tenant), but contextual to the tenant the operator
- * is already looking at — saves the round-trip through the navbar
- * dropdown's search.
+ * gate + dispatch as the impersonation panel in NineDotMenu
+ * (system.tenants.admin holders acting in an internal tenant), but
+ * contextual to the tenant the operator is already looking at — saves the
+ * round-trip through the navbar dropdown's search.
  *
  * The backend's tryImpersonationBypass enforces the actual permission. If
  * the target is a personal tenant (IsCompany=false + signupChannel=
@@ -29,6 +30,7 @@ interface Props {
  * existing MFA modal handles the prompt — no extra UX needed here.
  */
 const ImpersonateButton: React.FC<Props> = ({ org }) => {
+  const { t } = useTranslation();
   const dispatch = useAppDispatch();
   const { hasPermission } = useAuth();
   const currentMembership = useAppSelector(selectCurrentMembership);
@@ -45,20 +47,20 @@ const ImpersonateButton: React.FC<Props> = ({ org }) => {
   const onImpersonate = () => {
     dispatch(startImpersonation({ tenantId: org.id, tenantName: org.name }));
     dispatch(baseApi.util.invalidateTags([...TENANT_SCOPED_TAGS]));
-    toast.info(`Now impersonating ${org.name}`);
+    toast.info(t('adminClients.impersonate.toastStarted', { name: org.name }));
   };
 
   const onStop = () => {
     dispatch(stopImpersonation());
     dispatch(baseApi.util.invalidateTags([...TENANT_SCOPED_TAGS]));
-    toast.info('Impersonation stopped');
+    toast.info(t('adminClients.impersonate.toastStopped'));
   };
 
   if (isThisTenant) {
     return (
       <Button variant="warning" size="sm" onClick={onStop}>
         <FontAwesomeIcon icon="user-shield" className="me-2" />
-        Stop impersonating
+        {t('adminClients.impersonate.stop')}
       </Button>
     );
   }
@@ -66,7 +68,7 @@ const ImpersonateButton: React.FC<Props> = ({ org }) => {
   return (
     <Button variant="outline-warning" size="sm" onClick={onImpersonate}>
       <FontAwesomeIcon icon="user-shield" className="me-2" />
-      Impersonate
+      {t('adminClients.impersonate.start')}
     </Button>
   );
 };

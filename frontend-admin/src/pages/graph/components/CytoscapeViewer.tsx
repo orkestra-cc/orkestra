@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Badge, Button, Card, Col, Form, Row } from 'react-bootstrap';
+import { useTranslation } from 'react-i18next';
 import cytoscape from 'cytoscape';
 import type { Core, EventObject, StylesheetStyle } from 'cytoscape';
 // @ts-expect-error cytoscape-fcose ships without type declarations
@@ -257,6 +258,7 @@ export function CytoscapeViewer({
   style,
   fillHeight
 }: CytoscapeViewerProps) {
+  const { t } = useTranslation();
   const containerRef = useRef<HTMLDivElement>(null);
   const cyRef = useRef<Core | null>(null);
   const [activeLayout, setActiveLayout] = useState<LayoutName>(layoutProp);
@@ -461,20 +463,24 @@ export function CytoscapeViewer({
               size="sm"
               value={activeLayout}
               onChange={handleLayoutChange}
-              aria-label="Graph layout"
+              aria-label={t('graph.viewer.layoutAriaLabel')}
               style={{ width: 160 }}
             >
-              <option value="fcose">fCoSE</option>
-              <option value="cose">CoSE</option>
-              <option value="circle">Circle</option>
-              <option value="grid">Grid</option>
-              <option value="breadthfirst">Breadthfirst</option>
-              <option value="concentric">Concentric</option>
+              <option value="fcose">{t('graph.viewer.layouts.fcose')}</option>
+              <option value="cose">{t('graph.viewer.layouts.cose')}</option>
+              <option value="circle">{t('graph.viewer.layouts.circle')}</option>
+              <option value="grid">{t('graph.viewer.layouts.grid')}</option>
+              <option value="breadthfirst">
+                {t('graph.viewer.layouts.breadthfirst')}
+              </option>
+              <option value="concentric">
+                {t('graph.viewer.layouts.concentric')}
+              </option>
             </Form.Select>
           </Col>
           <Col xs="auto">
             <Button variant="outline-secondary" size="sm" onClick={handleFit}>
-              Fit
+              {t('graph.viewer.fit')}
             </Button>
           </Col>
           <Col xs="auto">
@@ -483,15 +489,25 @@ export function CytoscapeViewer({
               size="sm"
               onClick={handleExportPng}
             >
-              Export PNG
+              {t('graph.viewer.exportPng')}
             </Button>
           </Col>
           <Col xs="auto" className="ms-auto d-flex gap-2">
             <Badge bg="primary" pill>
-              {nodes.length} node{nodes.length !== 1 && 's'}
+              {t(
+                nodes.length === 1
+                  ? 'graph.viewer.nodesOne'
+                  : 'graph.viewer.nodesOther',
+                { count: nodes.length }
+              )}
             </Badge>
             <Badge bg="secondary" pill>
-              {relationships.length} edge{relationships.length !== 1 && 's'}
+              {t(
+                relationships.length === 1
+                  ? 'graph.viewer.edgesOne'
+                  : 'graph.viewer.edgesOther',
+                { count: relationships.length }
+              )}
             </Badge>
           </Col>
         </Row>
@@ -527,7 +543,7 @@ export function CytoscapeViewer({
             }}
           >
             <div className="fw-semibold mb-1" style={{ color: '#e6edf3' }}>
-              Labels
+              {t('graph.viewer.legendTitle')}
             </div>
             {Array.from(labelColorMap.entries()).map(([label, color]) => (
               <div key={label} className="d-flex align-items-center gap-1 mb-1">

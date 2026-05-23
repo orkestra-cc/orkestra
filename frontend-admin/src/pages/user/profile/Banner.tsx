@@ -9,9 +9,11 @@ import VerifiedBadge from 'components/common/VerifiedBadge';
 import React, { useState } from 'react';
 import { Button, Col, Row } from 'react-bootstrap';
 import { Link } from 'react-router';
+import { useTranslation } from 'react-i18next';
 import ProfileBanner from '../ProfileBanner';
 
 const Banner: React.FC = () => {
+  const { t } = useTranslation();
   const [rightSidedItems] = useState([
     {
       title: 'Google',
@@ -33,17 +35,19 @@ const Banner: React.FC = () => {
         <Row>
           <Col lg={8}>
             <h4 className="mb-1">
-              Anthony Hopkins <VerifiedBadge />
+              {t('userProfileScaffold.banner.userName')} <VerifiedBadge />
             </h4>
             <h5 className="fs-9 fw-normal">
-              Senior Software Engineer at Technext Limited
+              {t('userProfileScaffold.banner.userTitle')}
             </h5>
-            <p className="text-500">New York, USA</p>
+            <p className="text-500">
+              {t('userProfileScaffold.banner.userLocation')}
+            </p>
             <Button variant="orkestra-primary" size="sm" className="px-3">
-              Following
+              {t('userProfileScaffold.banner.following')}
             </Button>
             <Button variant="orkestra-default" size="sm" className="px-3 ms-2">
-              Message
+              {t('userProfileScaffold.banner.message')}
             </Button>
             <div className="border-dashed border-bottom my-4 d-lg-none" />
           </Col>
@@ -56,7 +60,9 @@ const Banner: React.FC = () => {
                   style={{ height: '30px', width: '30px' }}
                 />
                 <div className="flex-1">
-                  <h6 className="mb-0">See followers (330)</h6>
+                  <h6 className="mb-0">
+                    {t('userProfileScaffold.banner.seeFollowersCount')}
+                  </h6>
                 </div>
               </Flex>
             </Link>

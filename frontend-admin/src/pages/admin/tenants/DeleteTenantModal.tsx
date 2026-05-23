@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Alert, Button, Form, Modal, Spinner } from 'react-bootstrap';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { toast } from 'react-toastify';
+import { Trans, useTranslation } from 'react-i18next';
 import {
   useDeleteOrgAdminMutation,
   type AdminOrgListItem
@@ -14,6 +15,7 @@ interface Props {
 }
 
 const DeleteTenantModal: React.FC<Props> = ({ org, show, onHide }) => {
+  const { t } = useTranslation();
   const [deleteOrg, { isLoading }] = useDeleteOrgAdminMutation();
   const [confirmText, setConfirmText] = useState('');
 
@@ -27,10 +29,16 @@ const DeleteTenantModal: React.FC<Props> = ({ org, show, onHide }) => {
     if (!org) return;
     try {
       await deleteOrg(org.id).unwrap();
-      toast.success(`Tenant "${org.name}" deleted`);
+      toast.success(
+        t('adminTenants.deleteModal.successToast', { name: org.name })
+      );
       onHide();
     } catch (err: unknown) {
-      toast.error('Delete failed: ' + extractError(err));
+      toast.error(
+        t('adminTenants.deleteModal.errorToast', {
+          message: extractError(err, t)
+        })
+      );
     }
   };
 
@@ -39,25 +47,30 @@ const DeleteTenantModal: React.FC<Props> = ({ org, show, onHide }) => {
       <Modal.Header closeButton>
         <Modal.Title>
           <FontAwesomeIcon icon="trash" className="text-danger me-2" />
-          Delete tenant
+          {t('adminTenants.deleteModal.title')}
         </Modal.Title>
       </Modal.Header>
       <Modal.Body>
         <p className="mb-3">
-          You are about to soft-delete tenant{' '}
-          <code className="fs-9">{org?.name}</code>. It will stop appearing in
-          the default tenant list and no user will be able to access it. You can
-          still view it with the "Include soft-deleted" toggle.
+          <Trans
+            i18nKey="adminTenants.deleteModal.intro"
+            values={{ name: org?.name }}
+            components={{ code: <code className="fs-9" /> }}
+          />
         </p>
         <Alert variant="warning" className="fs-10 mb-3">
-          <strong>Bindings and memberships remain in place.</strong> If you also
-          need to crypto-shred the tenant's encryption key (GDPR
-          right-to-erasure), open the tenant's detail modal and use the{' '}
-          <em>Purge</em> action instead.
+          <Trans
+            i18nKey="adminTenants.deleteModal.bindingsRemain"
+            components={{ strong: <strong />, em: <em /> }}
+          />
         </Alert>
         <Form.Group>
           <Form.Label className="fw-semibold fs-10">
-            Type <code>{org?.slug}</code> to confirm
+            <Trans
+              i18nKey="adminTenants.deleteModal.typeToConfirm"
+              values={{ slug: org?.slug }}
+              components={{ code: <code /> }}
+            />
           </Form.Label>
           <Form.Control
             type="text"
@@ -69,16 +82,16 @@ const DeleteTenantModal: React.FC<Props> = ({ org, show, onHide }) => {
       </Modal.Body>
       <Modal.Footer>
         <Button variant="secondary" onClick={onHide} disabled={isLoading}>
-          Cancel
+          {t('adminTenants.deleteModal.cancel')}
         </Button>
         <Button variant="danger" onClick={onConfirm} disabled={!canDelete}>
           {isLoading ? (
             <>
               <Spinner size="sm" animation="border" className="me-2" />{' '}
-              Deleting…
+              {t('adminTenants.deleteModal.deleting')}
             </>
           ) : (
-            <>Delete tenant</>
+            <>{t('adminTenants.deleteModal.delete')}</>
           )}
         </Button>
       </Modal.Footer>
@@ -86,10 +99,12 @@ const DeleteTenantModal: React.FC<Props> = ({ org, show, onHide }) => {
   );
 };
 
-function extractError(err: unknown): string {
+function extractError(err: unknown, t: (key: string) => string): string {
   if (err && typeof err === 'object' && 'data' in err) {
     const data = (err as { data?: { detail?: string; title?: string } }).data;
-    return data?.detail || data?.title || 'unknown error';
+    return (
+      data?.detail || data?.title || t('adminTenants.deleteModal.unknownError')
+    );
   }
   return String(err);
 }

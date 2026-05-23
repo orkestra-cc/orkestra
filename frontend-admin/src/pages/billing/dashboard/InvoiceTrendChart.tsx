@@ -8,6 +8,7 @@ import {
 } from 'echarts/components';
 import * as echarts from 'echarts/core';
 import { CanvasRenderer } from 'echarts/renderers';
+import { useTranslation } from 'react-i18next';
 import OrkestraCardHeader from 'components/common/OrkestraCardHeader';
 import ReactEchart from 'components/common/ReactEchart';
 import { useGetBillingStatsQuery } from 'store/api/billingApi';
@@ -23,21 +24,20 @@ echarts.use([
   LegendComponent
 ]);
 
-// Month names in Italian
-const MONTH_NAMES = [
-  'Gen',
-  'Feb',
-  'Mar',
-  'Apr',
-  'Mag',
-  'Giu',
-  'Lug',
-  'Ago',
-  'Set',
-  'Ott',
-  'Nov',
-  'Dic'
-];
+const MONTH_KEYS = [
+  'jan',
+  'feb',
+  'mar',
+  'apr',
+  'may',
+  'jun',
+  'jul',
+  'aug',
+  'sep',
+  'oct',
+  'nov',
+  'dec'
+] as const;
 
 // Get the month for a given ISO week number (approximate)
 // ISO week 1 starts around Jan 4, each month is roughly 4-5 weeks
@@ -78,15 +78,15 @@ const buildWeeklyArrays = (
   return { issuedAmounts, receivedAmounts };
 };
 
-// Generate week labels with month indicators
-const generateWeekLabels = (): string[] => {
+// Generate week labels with month indicators (using translated month names)
+const generateWeekLabels = (monthNames: string[]): string[] => {
   const labels: string[] = [];
   let lastMonth = -1;
 
   for (let week = 1; week <= 53; week++) {
     const month = getMonthForWeek(week);
     if (month !== lastMonth) {
-      labels.push(MONTH_NAMES[month]);
+      labels.push(monthNames[month]);
       lastMonth = month;
     } else {
       labels.push('');
@@ -97,6 +97,7 @@ const generateWeekLabels = (): string[] => {
 };
 
 const InvoiceTrendChart = () => {
+  const { t } = useTranslation();
   const currentYear = new Date().getFullYear();
   const fromDate = `${currentYear}-01-01`;
   const toDate = `${currentYear}-12-31`;
@@ -112,7 +113,16 @@ const InvoiceTrendChart = () => {
     [stats?.weeklyData, currentYear]
   );
 
-  const weekLabels = useMemo(() => generateWeekLabels(), []);
+  const monthNames = useMemo(
+    () =>
+      MONTH_KEYS.map(k => t(`billing.dashboard.trendChart.monthShort.${k}`)),
+    [t]
+  );
+
+  const weekLabels = useMemo(
+    () => generateWeekLabels(monthNames),
+    [monthNames]
+  );
 
   const getChartOptions = () => {
     if (!stats) return {};
@@ -126,25 +136,35 @@ const InvoiceTrendChart = () => {
         formatter: (params: any) => {
           const weekIndex = params[0].dataIndex;
           const weekNum = weekIndex + 1;
-          const month = MONTH_NAMES[getMonthForWeek(weekNum)];
-          let result = `<div class="fw-medium mb-1">Settimana ${weekNum} (${month})</div>`;
+          const month = monthNames[getMonthForWeek(weekNum)];
+          let result = `<div class="fw-medium mb-1">${t(
+            'billing.dashboard.trendChart.tooltipWeek',
+            { week: weekNum, month }
+          )}</div>`;
           params.forEach((param: any) => {
             if (param.value > 0) {
               result += `<div class="d-flex align-items-center">
-                <span class="badge rounded-circle p-1 me-2" style="background-color: ${param.color}"></span>
+                <span class="badge rounded-circle p-1 me-2" style="background-color: ${
+                  param.color
+                }"></span>
                 <span>${param.seriesName}: ${formatCurrency(param.value)}</span>
               </div>`;
             }
           });
           // Show message if no data
           if (params.every((p: any) => p.value === 0)) {
-            result += '<div class="text-muted">Nessuna fattura</div>';
+            result += `<div class="text-muted">${t(
+              'billing.dashboard.trendChart.tooltipNoInvoice'
+            )}</div>`;
           }
           return result;
         }
       },
       legend: {
-        data: ['Fatture Emesse', 'Fatture Ricevute'],
+        data: [
+          t('billing.dashboard.trendChart.seriesIssued'),
+          t('billing.dashboard.trendChart.seriesReceived')
+        ],
         bottom: 0,
         textStyle: {
           color: '#8991a7'
@@ -193,7 +213,7 @@ const InvoiceTrendChart = () => {
       },
       series: [
         {
-          name: 'Fatture Emesse',
+          name: t('billing.dashboard.trendChart.seriesIssued'),
           type: 'bar',
           barGap: '0%',
           barCategoryGap: '40%',
@@ -207,7 +227,7 @@ const InvoiceTrendChart = () => {
           data: issuedAmounts
         },
         {
-          name: 'Fatture Ricevute',
+          name: t('billing.dashboard.trendChart.seriesReceived'),
           type: 'bar',
           emphasis: {
             focus: 'series'
@@ -226,7 +246,7 @@ const InvoiceTrendChart = () => {
     return (
       <Card className="h-100">
         <OrkestraCardHeader
-          title="Andamento Fatturazione"
+          title={t('billing.dashboard.trendChart.title')}
           titleTag="h6"
           light
         />
@@ -244,7 +264,7 @@ const InvoiceTrendChart = () => {
     return (
       <Card className="h-100">
         <OrkestraCardHeader
-          title="Andamento Fatturazione"
+          title={t('billing.dashboard.trendChart.title')}
           titleTag="h6"
           light
         />
@@ -257,7 +277,7 @@ const InvoiceTrendChart = () => {
               icon={faExclamationTriangle}
               className="fs-3 mb-2 d-block mx-auto"
             />
-            <span>Impossibile caricare il grafico</span>
+            <span>{t('billing.dashboard.trendChart.chartError')}</span>
           </div>
         </Card.Body>
       </Card>
@@ -267,19 +287,23 @@ const InvoiceTrendChart = () => {
   return (
     <Card className="h-100">
       <OrkestraCardHeader
-        title="Andamento Fatturazione"
+        title={t('billing.dashboard.trendChart.title')}
         titleTag="h6"
         light
         endEl={
           <div className="d-flex gap-3 fs-10">
             <div>
-              <span className="text-body-tertiary">Emesse: </span>
+              <span className="text-body-tertiary">
+                {t('billing.dashboard.trendChart.footerIssued')}
+              </span>
               <span className="fw-medium text-success">
                 {formatCurrency(stats.issuedAmount)}
               </span>
             </div>
             <div>
-              <span className="text-body-tertiary">Ricevute: </span>
+              <span className="text-body-tertiary">
+                {t('billing.dashboard.trendChart.footerReceived')}
+              </span>
               <span className="fw-medium text-primary">
                 {formatCurrency(stats.receivedAmount)}
               </span>

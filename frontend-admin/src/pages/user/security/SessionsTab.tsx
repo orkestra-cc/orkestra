@@ -8,6 +8,7 @@ import {
   Spinner,
   Table
 } from 'react-bootstrap';
+import { useTranslation } from 'react-i18next';
 import {
   useGetMySessionsQuery,
   useRevokeAllSessionsMutation,
@@ -32,12 +33,14 @@ function deviceLabel(s: SelfSessionInfo): string {
 // confirmation modal because the action terminates work in other
 // browsers / tabs.
 const SessionsTab = () => {
+  const { t } = useTranslation();
   const { data, isLoading, isFetching } = useGetMySessionsQuery();
   const [revokeOne, { isLoading: revokingOne }] = useRevokeSessionMutation();
   const [revokeAll, { isLoading: revokingAll }] =
     useRevokeAllSessionsMutation();
   const [showRevokeAll, setShowRevokeAll] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const dash = t('userSecurity.sessionsTab.dash');
 
   if (isLoading) {
     return (
@@ -61,13 +64,13 @@ const SessionsTab = () => {
       if (e?.data?.code === 'step_up_required') return; // StepUpModal handles
       if (e?.data?.code === 'password_confirm_required') return; // PasswordConfirmModal handles
       if (e?.data?.code === 'mfa_enrollment_required') {
-        setError(
-          'Your role requires MFA. Enroll a second factor in Security settings before revoking sessions.'
-        );
+        setError(t('userSecurity.sessionsTab.errorMfaRequired'));
         return;
       }
       setError(
-        e?.data?.detail || e?.data?.title || 'Failed to revoke session.'
+        e?.data?.detail ||
+          e?.data?.title ||
+          t('userSecurity.sessionsTab.errorOne')
       );
     }
   };
@@ -91,13 +94,13 @@ const SessionsTab = () => {
       }
       if (e?.data?.code === 'mfa_enrollment_required') {
         setShowRevokeAll(false);
-        setError(
-          'Your role requires MFA. Enroll a second factor in Security settings before revoking sessions.'
-        );
+        setError(t('userSecurity.sessionsTab.errorMfaRequired'));
         return;
       }
       setError(
-        e?.data?.detail || e?.data?.title || 'Failed to revoke other sessions.'
+        e?.data?.detail ||
+          e?.data?.title ||
+          t('userSecurity.sessionsTab.errorAll')
       );
     }
   };
@@ -107,7 +110,7 @@ const SessionsTab = () => {
       <Card className="shadow-none border">
         <Card.Header className="d-flex justify-content-between align-items-center flex-wrap gap-2">
           <Card.Title as="h5" className="mb-0">
-            Active sessions
+            {t('userSecurity.sessionsTab.title')}
           </Card.Title>
           <Button
             variant="outline-danger"
@@ -115,7 +118,7 @@ const SessionsTab = () => {
             onClick={() => setShowRevokeAll(true)}
             disabled={otherCount === 0 || revokingAll}
           >
-            Revoke all other sessions
+            {t('userSecurity.sessionsTab.revokeAllButton')}
           </Button>
         </Card.Header>
         <Card.Body>
@@ -125,16 +128,20 @@ const SessionsTab = () => {
             </Alert>
           )}
           {sessions.length === 0 ? (
-            <p className="fs-10 text-muted mb-0">No active sessions.</p>
+            <p className="fs-10 text-muted mb-0">
+              {t('userSecurity.sessionsTab.empty')}
+            </p>
           ) : (
             <Table responsive size="sm" className="mb-0 align-middle">
               <thead>
                 <tr>
-                  <th>Device</th>
-                  <th>IP</th>
-                  <th>Last active</th>
-                  <th>Started</th>
-                  <th className="text-end">Actions</th>
+                  <th>{t('userSecurity.sessionsTab.colDevice')}</th>
+                  <th>{t('userSecurity.sessionsTab.colIp')}</th>
+                  <th>{t('userSecurity.sessionsTab.colLastActive')}</th>
+                  <th>{t('userSecurity.sessionsTab.colStarted')}</th>
+                  <th className="text-end">
+                    {t('userSecurity.sessionsTab.colActions')}
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -144,11 +151,11 @@ const SessionsTab = () => {
                       {deviceLabel(s)}
                       {s.isCurrent && (
                         <Badge bg="success" className="ms-2">
-                          Current
+                          {t('userSecurity.sessionsTab.currentBadge')}
                         </Badge>
                       )}
                     </td>
-                    <td className="fs-10 text-muted">{s.ipAddress || '—'}</td>
+                    <td className="fs-10 text-muted">{s.ipAddress || dash}</td>
                     <td className="fs-10 text-muted">
                       {new Date(s.lastActivity).toLocaleString()}
                     </td>
@@ -162,7 +169,7 @@ const SessionsTab = () => {
                         disabled={s.isCurrent || revokingOne || isFetching}
                         onClick={() => onRevokeOne(s)}
                       >
-                        Revoke
+                        {t('userSecurity.sessionsTab.rowRevoke')}
                       </Button>
                     </td>
                   </tr>
@@ -179,15 +186,12 @@ const SessionsTab = () => {
         centered
       >
         <Modal.Header closeButton>
-          <Modal.Title>Revoke other sessions</Modal.Title>
+          <Modal.Title>{t('userSecurity.sessionsTab.modalTitle')}</Modal.Title>
         </Modal.Header>
-        <Modal.Body>
-          Sign out every device except this one? Other browsers will need to
-          sign in again on the next request.
-        </Modal.Body>
+        <Modal.Body>{t('userSecurity.sessionsTab.modalBody')}</Modal.Body>
         <Modal.Footer>
           <Button variant="secondary" onClick={() => setShowRevokeAll(false)}>
-            Cancel
+            {t('userSecurity.sessionsTab.modalCancel')}
           </Button>
           <Button
             variant="danger"
@@ -195,8 +199,13 @@ const SessionsTab = () => {
             disabled={revokingAll}
           >
             {revokingAll
-              ? 'Revoking…'
-              : `Revoke ${otherCount} session${otherCount === 1 ? '' : 's'}`}
+              ? t('userSecurity.sessionsTab.modalSubmitting')
+              : t(
+                  otherCount === 1
+                    ? 'userSecurity.sessionsTab.modalSubmitOne'
+                    : 'userSecurity.sessionsTab.modalSubmitOther',
+                  { count: otherCount }
+                )}
           </Button>
         </Modal.Footer>
       </Modal>

@@ -8,6 +8,7 @@ import {
   Tab,
   Tabs
 } from 'react-bootstrap';
+import { useTranslation } from 'react-i18next';
 import { OrkestraCloseButton } from 'components/common';
 import type { ModuleConfig } from 'store/api/moduleApi';
 import { useUpdateModuleMutation } from 'store/api/moduleApi';
@@ -25,6 +26,7 @@ const ModuleConfigModal: React.FC<ModuleConfigModalProps> = ({
   show,
   onHide
 }) => {
+  const { t } = useTranslation();
   const [updateModule, { isLoading }] = useUpdateModuleMutation();
   const [configValues, setConfigValues] = useState<Record<string, string>>({});
   const [secretValues, setSecretValues] = useState<Record<string, string>>({});
@@ -91,13 +93,13 @@ const ModuleConfigModal: React.FC<ModuleConfigModalProps> = ({
       setSuccess(true);
       setTimeout(onHide, 800);
     } catch (err: unknown) {
+      const fallback = t('adminModules.configModal.updateFailed');
       const message =
         err && typeof err === 'object' && 'data' in err
           ? String(
-              (err as { data: { detail?: string } }).data?.detail ||
-                'Update failed'
+              (err as { data: { detail?: string } }).data?.detail || fallback
             )
-          : 'Update failed';
+          : fallback;
       setError(message);
     }
   };
@@ -118,7 +120,11 @@ const ModuleConfigModal: React.FC<ModuleConfigModalProps> = ({
       <Modal.Header>
         <Modal.Title className="fs-8">
           {mod.displayName}
-          <span className="text-muted fs-10 ms-2">({mod.moduleName})</span>
+          <span className="text-muted fs-10 ms-2">
+            {t('adminModules.configModal.moduleNameSuffix', {
+              name: mod.moduleName
+            })}
+          </span>
         </Modal.Title>
         <OrkestraCloseButton onClick={onHide} />
       </Modal.Header>
@@ -130,7 +136,7 @@ const ModuleConfigModal: React.FC<ModuleConfigModalProps> = ({
         )}
         {success && (
           <Alert variant="success" className="fs-10">
-            Module updated successfully
+            {t('adminModules.configModal.updatedToast')}
           </Alert>
         )}
 
@@ -138,27 +144,34 @@ const ModuleConfigModal: React.FC<ModuleConfigModalProps> = ({
           <Form.Check
             type="switch"
             id="module-enabled"
-            label={enabled ? 'Enabled' : 'Disabled'}
+            label={
+              enabled
+                ? t('adminModules.configModal.enabledLabel')
+                : t('adminModules.configModal.disabledLabel')
+            }
             checked={enabled}
             disabled={isCore}
             onChange={e => setEnabled(e.target.checked)}
           />
           {isCore && (
             <Form.Text className="text-muted">
-              Core modules cannot be disabled
+              {t('adminModules.configModal.coreLockHint')}
             </Form.Text>
           )}
         </Form.Group>
 
         {mod.status === 'failed' && mod.error && (
           <Alert variant="danger" className="fs-10">
-            <strong>Init Error:</strong> {mod.error}
+            <strong>{t('adminModules.configModal.initErrorPrefix')}</strong>{' '}
+            {mod.error}
           </Alert>
         )}
 
         {hasSchema && (
           <>
-            <h6 className="fs-9 border-bottom pb-2 mb-3">Configuration</h6>
+            <h6 className="fs-9 border-bottom pb-2 mb-3">
+              {t('adminModules.configModal.configHeading')}
+            </h6>
             {showTabs ? (
               <Tabs
                 id={`module-config-tabs-${mod.moduleName}`}
@@ -205,13 +218,14 @@ const ModuleConfigModal: React.FC<ModuleConfigModalProps> = ({
 
         {mod.dependsOn && mod.dependsOn.length > 0 && (
           <div className="mt-3 fs-10 text-muted">
-            <strong>Dependencies:</strong> {mod.dependsOn.join(', ')}
+            <strong>{t('adminModules.configModal.dependsOnPrefix')}</strong>{' '}
+            {mod.dependsOn.join(', ')}
           </div>
         )}
       </Modal.Body>
       <Modal.Footer>
         <Button variant="secondary" size="sm" onClick={onHide}>
-          Cancel
+          {t('adminModules.configModal.cancel')}
         </Button>
         <Button
           variant="primary"
@@ -222,7 +236,7 @@ const ModuleConfigModal: React.FC<ModuleConfigModalProps> = ({
           {isLoading ? (
             <Spinner animation="border" size="sm" />
           ) : (
-            'Save Changes'
+            t('adminModules.configModal.save')
           )}
         </Button>
       </Modal.Footer>

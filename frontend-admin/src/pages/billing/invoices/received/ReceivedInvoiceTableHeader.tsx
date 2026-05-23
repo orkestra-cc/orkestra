@@ -4,6 +4,7 @@ import { useAdvanceTableContext } from 'providers/AdvanceTableProvider';
 import IconButton from 'components/common/IconButton';
 import AdvanceTableSearchBox from 'components/common/advance-table/AdvanceTableSearchBox';
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   arrayToCSV,
   downloadCSV,
@@ -19,17 +20,20 @@ import {
 import ImportXMLModal from './ImportXMLModal';
 
 const ReceivedInvoiceTableHeader = () => {
+  const { t } = useTranslation();
   const { getSelectedRowModel, setColumnFilters, getFilteredRowModel } =
     useAdvanceTableContext();
-  const [selectedStatus, setSelectedStatus] = useState<string>('Tutti');
+  const [selectedStatus, setSelectedStatus] = useState<string>(
+    t('billing.received.filters.all')
+  );
   const [showImportModal, setShowImportModal] = useState(false);
 
   const statusFilters: { label: string; value: InvoiceStatus | 'all' }[] = [
-    { label: 'Tutti', value: 'all' },
-    { label: 'In Attesa', value: 'pending' },
-    { label: 'Accettata', value: 'accepted' },
-    { label: 'Rifiutata', value: 'rejected' },
-    { label: 'Pagata', value: 'paid' }
+    { label: t('billing.received.filters.all'), value: 'all' },
+    { label: t('billing.received.filters.pending'), value: 'pending' },
+    { label: t('billing.received.filters.accepted'), value: 'accepted' },
+    { label: t('billing.received.filters.rejected'), value: 'rejected' },
+    { label: t('billing.received.filters.paid'), value: 'paid' }
   ];
 
   const handleStatusFilter = (filter: {
@@ -82,12 +86,12 @@ const ReceivedInvoiceTableHeader = () => {
     <div className="d-lg-flex justify-content-between">
       <Row className="flex-between-center gy-2 px-x1">
         <Col xs="auto" className="pe-0">
-          <h6 className="mb-0">Elenco Fatture Ricevute</h6>
+          <h6 className="mb-0">{t('billing.received.tableTitle')}</h6>
         </Col>
         <Col xs="auto">
           <AdvanceTableSearchBox
             className="input-search-width"
-            placeholder="Cerca per numero o fornitore"
+            placeholder={t('billing.received.searchPlaceholder')}
           />
         </Col>
       </Row>
@@ -131,10 +135,13 @@ const ReceivedInvoiceTableHeader = () => {
         ></div>
         {getSelectedRowModel().rows.length > 0 ? (
           <div className="d-flex">
-            <Form.Select size="sm" aria-label="Azioni di massa">
-              <option>Azioni di massa</option>
-              <option value="accept">Accetta</option>
-              <option value="reject">Rifiuta</option>
+            <Form.Select
+              size="sm"
+              aria-label={t('billing.received.bulkActions')}
+            >
+              <option>{t('billing.received.bulkActions')}</option>
+              <option value="accept">{t('billing.received.bulkAccept')}</option>
+              <option value="reject">{t('billing.received.bulkReject')}</option>
             </Form.Select>
             <Button
               type="button"
@@ -142,7 +149,7 @@ const ReceivedInvoiceTableHeader = () => {
               size="sm"
               className="ms-2"
             >
-              Applica
+              {t('billing.received.apply')}
             </Button>
           </div>
         ) : (
@@ -156,7 +163,7 @@ const ReceivedInvoiceTableHeader = () => {
               onClick={handleExportCSV}
             >
               <span className="d-none d-sm-inline-block d-xl-none d-xxl-inline-block ms-1">
-                Esporta
+                {t('billing.received.export')}
               </span>
             </IconButton>
             <Dropdown
@@ -169,15 +176,17 @@ const ReceivedInvoiceTableHeader = () => {
 
               <Dropdown.Menu className="border py-0">
                 <div className="py-2">
-                  <Dropdown.Item>Visualizza Tutti</Dropdown.Item>
-                  <Dropdown.Item>Esporta XML</Dropdown.Item>
+                  <Dropdown.Item>{t('billing.received.viewAll')}</Dropdown.Item>
+                  <Dropdown.Item>
+                    {t('billing.received.exportXml')}
+                  </Dropdown.Item>
                   <Dropdown.Divider />
                   <Dropdown.Item onClick={() => setShowImportModal(true)}>
                     <FontAwesomeIcon
                       icon="file-import"
                       className="me-2 text-primary"
                     />
-                    Importa XML
+                    {t('billing.received.importXml')}
                   </Dropdown.Item>
                 </div>
               </Dropdown.Menu>

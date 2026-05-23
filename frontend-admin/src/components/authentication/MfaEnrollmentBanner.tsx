@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { useAppSelector } from 'store/hooks';
 import { selectIsAuthenticated, selectUser } from 'store/slices/authSlice';
 import { useGetMfaStatusQuery } from 'store/api/mfaApi';
@@ -11,6 +12,7 @@ import { useGetMfaStatusQuery } from 'store/api/mfaApi';
  * MFA, users already enrolled, and anonymous visitors.
  */
 export default function MfaEnrollmentBanner() {
+  const { t } = useTranslation();
   const isAuthenticated = useAppSelector(selectIsAuthenticated);
   const user = useAppSelector(selectUser);
   const { data: mfa } = useGetMfaStatusQuery(undefined, {
@@ -20,8 +22,17 @@ export default function MfaEnrollmentBanner() {
   if (!isAuthenticated || !user) return null;
   if (!mfa || !mfa.requiresMfa || mfa.status === 'enrolled') return null;
 
-  const remaining = formatGraceRemaining(mfa.graceExpiresAt);
-  const expired = remaining === 'expired';
+  const grace = gradeRemaining(mfa.graceExpiresAt);
+  const expired = grace.kind === 'expired';
+
+  const remainingLabel =
+    grace.kind === 'days'
+      ? t('banner.mfa.daysLeft', { count: grace.n })
+      : grace.kind === 'hours'
+        ? t('banner.mfa.hoursLeft', { count: grace.n })
+        : grace.kind === 'minutes'
+          ? t('banner.mfa.minutesLeft', { count: grace.n })
+          : '';
 
   return (
     <div
@@ -34,36 +45,42 @@ export default function MfaEnrollmentBanner() {
       }}
     >
       <span>
-        <strong>🔐 Two-factor authentication required</strong>
+        <strong>🔐 {t('banner.mfa.title')}</strong>
         <span className="ms-2">
           {expired
-            ? 'Your grace window has expired. You will be locked out on next sign-in until you enroll.'
-            : remaining
-              ? `Your role requires MFA. ${remaining} to enroll before sign-in is blocked.`
-              : 'Your role requires MFA. Set it up to avoid being locked out of sign-in.'}
+            ? t('banner.mfa.expired')
+            : remainingLabel
+              ? t('banner.mfa.remaining', { remaining: remainingLabel })
+              : t('banner.mfa.required')}
         </span>
       </span>
       <Link to="/user/settings" className="btn btn-sm btn-dark">
-        Set up
+        {t('banner.mfa.setUp')}
       </Link>
     </div>
   );
 }
 
-// Formats the delta between now and graceExpiresAt as a short human string.
-// Returns "" when no deadline is set (grace clock not started), and the
-// literal "expired" when the deadline has passed — the caller uses that
-// sentinel to switch the banner to the red variant.
-function formatGraceRemaining(iso: string | null | undefined): string {
-  if (!iso) return '';
+type GraceState =
+  | { kind: 'none' }
+  | { kind: 'expired' }
+  | { kind: 'days'; n: number }
+  | { kind: 'hours'; n: number }
+  | { kind: 'minutes'; n: number };
+
+// Pure helper — returns a discriminated structure so the renderer picks
+// the matching i18next key + pluralization without the helper needing
+// to know about t().
+function gradeRemaining(iso: string | null | undefined): GraceState {
+  if (!iso) return { kind: 'none' };
   const deadlineMs = new Date(iso).getTime();
-  if (!Number.isFinite(deadlineMs)) return '';
+  if (!Number.isFinite(deadlineMs)) return { kind: 'none' };
   const diff = deadlineMs - Date.now();
-  if (diff <= 0) return 'expired';
+  if (diff <= 0) return { kind: 'expired' };
   const days = Math.floor(diff / (24 * 60 * 60 * 1000));
-  if (days >= 2) return `${days} days left`;
+  if (days >= 2) return { kind: 'days', n: days };
   const hours = Math.floor(diff / (60 * 60 * 1000));
-  if (hours >= 2) return `${hours} hours left`;
+  if (hours >= 2) return { kind: 'hours', n: hours };
   const minutes = Math.max(1, Math.floor(diff / (60 * 1000)));
-  return `${minutes} minutes left`;
+  return { kind: 'minutes', n: minutes };
 }

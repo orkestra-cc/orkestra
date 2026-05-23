@@ -7,6 +7,7 @@ import {
   faShieldAlt,
   faArrowLeft
 } from '@fortawesome/free-solid-svg-icons';
+import { useTranslation } from 'react-i18next';
 import { useAuth } from 'hooks/auth/useAuthRTK';
 
 interface Error401Props {
@@ -20,6 +21,7 @@ const Error401: React.FC<Error401Props> = ({
   userRole,
   message
 }) => {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const location = useLocation();
   const { user } = useAuth();
@@ -37,34 +39,42 @@ const Error401: React.FC<Error401Props> = ({
     window.location.href = '/login';
   };
 
+  const knownRoles = new Set([
+    'super_admin',
+    'administrator',
+    'developer',
+    'manager',
+    'operator',
+    'guest'
+  ]);
+
   const getRoleDisplayName = (role?: string) => {
-    const roleMap: Record<string, string> = {
-      super_admin: 'Super Admin',
-      administrator: 'Administrator',
-      developer: 'Developer',
-      manager: 'Manager',
-      operator: 'Operator',
-      guest: 'Guest'
-    };
-    return role ? roleMap[role] || role : 'Unknown';
+    if (!role) return t('errors.401.roles.unknown');
+    if (knownRoles.has(role)) {
+      return t(`errors.401.roles.${role}` as const);
+    }
+    // Unknown role string — surface the raw value so admins can debug
+    // unexpected JWT claims rather than swallow it under "Unknown".
+    return role;
   };
 
   const getErrorMessage = () => {
     if (message) return message;
     if (accessDeniedReason === 'insufficient_permissions') {
-      return 'Insufficient Permissions';
+      return t('errors.401.insufficientPermissions');
     }
-    return 'Access Denied';
+    return t('errors.401.accessDenied');
   };
 
   const getDetailedMessage = () => {
     const currentUserRole = userRole || user?.role;
 
-    let details =
-      'You do not have the necessary permissions to access this page.';
+    let details = t('errors.401.message');
 
     if (currentUserRole) {
-      details += `\n\nYour current role: ${getRoleDisplayName(currentUserRole)}`;
+      details += `\n\n${t('errors.401.currentRole')} ${getRoleDisplayName(
+        currentUserRole
+      )}`;
     }
 
     if (requiredPermissions && requiredPermissions.length > 0) {
@@ -76,15 +86,17 @@ const Error401: React.FC<Error401Props> = ({
         .map(getRoleDisplayName)
         .join(', ');
 
-      details += `\n\nRequired roles: ${requiredRoleNames}`;
+      details += `\n\n${t('errors.401.requiredRoles')} ${requiredRoleNames}`;
     }
 
     if (requiredRole) {
-      details += `\n\nRequired role: ${getRoleDisplayName(requiredRole)}`;
+      details += `\n\n${t('errors.401.requiredRole')} ${getRoleDisplayName(
+        requiredRole
+      )}`;
     }
 
     if (from?.pathname) {
-      details += `\n\nRequested page: ${from.pathname}`;
+      details += `\n\n${t('errors.401.requestedPage')} ${from.pathname}`;
     }
 
     return details;
@@ -112,22 +124,19 @@ const Error401: React.FC<Error401Props> = ({
             onClick={handleGoBack}
           >
             <FontAwesomeIcon icon={faArrowLeft} className="me-2" />
-            Go Back
+            {t('errors.401.goBack')}
           </Button>
           <Link className="btn btn-primary btn-sm me-2" to="/">
             <FontAwesomeIcon icon={faHome} className="me-2" />
-            Go to Home
+            {t('errors.401.goHome')}
           </Link>
           <Button variant="outline-danger" size="sm" onClick={handleLogout}>
             <FontAwesomeIcon icon={faSignOutAlt} className="me-2" />
-            Logout
+            {t('errors.401.logout')}
           </Button>
         </div>
         <div className="mt-4 pt-3 border-top">
-          <small className="text-500">
-            If you think this is an error, please contact the system
-            administrator.
-          </small>
+          <small className="text-500">{t('errors.401.contactAdmin')}</small>
         </div>
       </Card.Body>
     </Card>

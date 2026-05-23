@@ -3,6 +3,7 @@ import classNames from 'classnames';
 import { useAdvanceTableContext } from 'providers/AdvanceTableProvider';
 import { useState } from 'react';
 import { Button, FormControl, InputGroup } from 'react-bootstrap';
+import { useTranslation } from 'react-i18next';
 
 interface AdvanceTableSearchBoxProps {
   placeholder?: string;
@@ -10,11 +11,13 @@ interface AdvanceTableSearchBoxProps {
 }
 
 const AdvanceTableSearchBox = ({
-  placeholder = 'Search...',
+  placeholder,
   className
 }: AdvanceTableSearchBoxProps) => {
+  const { t } = useTranslation();
   const { globalFilter, setGlobalFilter } = useAdvanceTableContext();
   const [value, setValue] = useState(globalFilter);
+  const effectivePlaceholder = placeholder ?? t('table.searchPlaceholder');
 
   const onChange = (val: string | undefined) =>
     setGlobalFilter(val || undefined);
@@ -30,8 +33,8 @@ const AdvanceTableSearchBox = ({
         size="sm"
         id="search"
         name="search"
-        placeholder={placeholder}
-        aria-label={placeholder}
+        placeholder={effectivePlaceholder}
+        aria-label={effectivePlaceholder}
         type="search"
         className="shadow-none"
       />

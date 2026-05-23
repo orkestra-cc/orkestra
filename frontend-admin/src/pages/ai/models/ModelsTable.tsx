@@ -8,6 +8,7 @@ import {
   Spinner,
   Alert
 } from 'react-bootstrap';
+import { useTranslation } from 'react-i18next';
 import {
   useListAIModelsQuery,
   useDeleteAIModelMutation,
@@ -21,6 +22,7 @@ import ModelFormModal from './ModelFormModal';
 import QuickPromptModal from './QuickPromptModal';
 
 const ModelsTable: React.FC = () => {
+  const { t } = useTranslation();
   const [filterType, setFilterType] = useState<string>('');
   const [filterProvider, setFilterProvider] = useState<string>('');
   const [filterCategory, setFilterCategory] = useState<string>('');
@@ -64,21 +66,21 @@ const ModelsTable: React.FC = () => {
 
   const handleDelete = useCallback(
     async (uuid: string) => {
-      if (!confirm('Delete this model configuration?')) return;
+      if (!confirm(t('aiModels.table.deleteConfirm'))) return;
       try {
         await deleteModel(uuid).unwrap();
       } catch {
         // Handled by RTK Query
       }
     },
-    [deleteModel]
+    [deleteModel, t]
   );
 
   const handleTest = useCallback(
     async (uuid: string) => {
       setTestResults(prev => ({
         ...prev,
-        [uuid]: { status: 'testing', message: 'Testing...' }
+        [uuid]: { status: 'testing', message: t('aiModels.table.testing') }
       }));
       try {
         const result = await testModel(uuid).unwrap();
@@ -86,11 +88,11 @@ const ModelsTable: React.FC = () => {
       } catch {
         setTestResults(prev => ({
           ...prev,
-          [uuid]: { status: 'error', message: 'Test failed' }
+          [uuid]: { status: 'error', message: t('aiModels.table.testFailed') }
         }));
       }
     },
-    [testModel]
+    [testModel, t]
   );
 
   const handleToggleActive = useCallback(
@@ -143,14 +145,14 @@ const ModelsTable: React.FC = () => {
     if (model.lastTestStatus === 'ok') {
       return (
         <Badge bg="success" className="bg-opacity-25 text-body">
-          tested ok
+          {t('aiModels.table.testedOk')}
         </Badge>
       );
     }
     if (model.lastTestStatus === 'error') {
       return (
         <Badge bg="danger" className="bg-opacity-25 text-body">
-          test failed
+          {t('aiModels.table.testedFailed')}
         </Badge>
       );
     }
@@ -160,20 +162,27 @@ const ModelsTable: React.FC = () => {
         bg={model.isActive ? 'success' : 'secondary'}
         className="bg-opacity-25 text-body"
       >
-        {model.isActive ? 'active' : 'inactive'}
+        {model.isActive
+          ? t('aiModels.table.statusActive')
+          : t('aiModels.table.statusInactive')}
       </Badge>
     );
   };
 
   const getDetailsText = (model: AIModelConfig): string => {
     if (model.modelType === 'embedding' && model.dimensions) {
-      return `${model.dimensions}d`;
+      return t('aiModels.table.detailsDimensions', {
+        dimensions: model.dimensions
+      });
     }
     if (model.modelType === 'llm') {
       const parts: string[] = [];
       if (model.temperature !== undefined)
-        parts.push(`temp: ${model.temperature}`);
-      if (model.maxTokens !== undefined) parts.push(`max: ${model.maxTokens}`);
+        parts.push(
+          t('aiModels.table.detailsTemp', { value: model.temperature })
+        );
+      if (model.maxTokens !== undefined)
+        parts.push(t('aiModels.table.detailsMax', { value: model.maxTokens }));
       return parts.join(', ');
     }
     return '';
@@ -191,9 +200,11 @@ const ModelsTable: React.FC = () => {
                 onChange={e => setFilterType(e.target.value)}
                 style={{ width: 140 }}
               >
-                <option value="">All types</option>
-                <option value="embedding">Embedding</option>
-                <option value="llm">LLM</option>
+                <option value="">{t('aiModels.table.filterTypeAll')}</option>
+                <option value="embedding">
+                  {t('aiModels.table.filterTypeEmbedding')}
+                </option>
+                <option value="llm">{t('aiModels.table.filterTypeLlm')}</option>
               </Form.Select>
               <Form.Select
                 size="sm"
@@ -201,11 +212,21 @@ const ModelsTable: React.FC = () => {
                 onChange={e => setFilterProvider(e.target.value)}
                 style={{ width: 180 }}
               >
-                <option value="">All providers</option>
-                <option value="ollama">Ollama</option>
-                <option value="openai">OpenAI / Compatible</option>
-                <option value="anthropic">Anthropic</option>
-                <option value="gemini">Gemini</option>
+                <option value="">
+                  {t('aiModels.table.filterProviderAll')}
+                </option>
+                <option value="ollama">
+                  {t('aiModels.table.filterProviderOllama')}
+                </option>
+                <option value="openai">
+                  {t('aiModels.table.filterProviderOpenai')}
+                </option>
+                <option value="anthropic">
+                  {t('aiModels.table.filterProviderAnthropic')}
+                </option>
+                <option value="gemini">
+                  {t('aiModels.table.filterProviderGemini')}
+                </option>
               </Form.Select>
               <Form.Select
                 size="sm"
@@ -213,13 +234,19 @@ const ModelsTable: React.FC = () => {
                 onChange={e => setFilterCategory(e.target.value)}
                 style={{ width: 140 }}
               >
-                <option value="">All categories</option>
-                <option value="local">Local</option>
-                <option value="cloud">Cloud</option>
+                <option value="">
+                  {t('aiModels.table.filterCategoryAll')}
+                </option>
+                <option value="local">
+                  {t('aiModels.table.filterCategoryLocal')}
+                </option>
+                <option value="cloud">
+                  {t('aiModels.table.filterCategoryCloud')}
+                </option>
               </Form.Select>
             </div>
             <Button size="sm" variant="primary" onClick={openCreate}>
-              Add Model
+              {t('aiModels.table.addModel')}
             </Button>
           </div>
         </Card.Header>
@@ -230,19 +257,19 @@ const ModelsTable: React.FC = () => {
             </div>
           ) : models.length === 0 ? (
             <Alert variant="info" className="m-3 mb-0">
-              No models configured. Add one to get started.
+              {t('aiModels.table.empty')}
             </Alert>
           ) : (
             <Table size="sm" hover responsive className="mb-0">
               <thead>
                 <tr>
-                  <th>Name</th>
-                  <th>Provider</th>
-                  <th>Type</th>
-                  <th>Model</th>
-                  <th>Base URL</th>
-                  <th>Details</th>
-                  <th>Status</th>
+                  <th>{t('aiModels.table.colName')}</th>
+                  <th>{t('aiModels.table.colProvider')}</th>
+                  <th>{t('aiModels.table.colType')}</th>
+                  <th>{t('aiModels.table.colModel')}</th>
+                  <th>{t('aiModels.table.colBaseUrl')}</th>
+                  <th>{t('aiModels.table.colDetails')}</th>
+                  <th>{t('aiModels.table.colStatus')}</th>
                   <th></th>
                 </tr>
               </thead>
@@ -253,7 +280,7 @@ const ModelsTable: React.FC = () => {
                       {m.name}
                       {m.isDefault && (
                         <Badge bg="success" className="ms-2">
-                          Default
+                          {t('aiModels.table.defaultBadge')}
                         </Badge>
                       )}
                     </td>
@@ -277,7 +304,7 @@ const ModelsTable: React.FC = () => {
                         whiteSpace: 'nowrap'
                       }}
                     >
-                      {m.baseUrl || '-'}
+                      {m.baseUrl || t('aiModels.table.baseUrlDash')}
                     </td>
                     <td className="small text-muted">{getDetailsText(m)}</td>
                     <td>
@@ -289,7 +316,11 @@ const ModelsTable: React.FC = () => {
                           id={`toggle-active-${m.uuid}`}
                           checked={m.isActive}
                           onChange={() => handleToggleActive(m)}
-                          label={m.isActive ? 'Active' : 'Inactive'}
+                          label={
+                            m.isActive
+                              ? t('aiModels.table.switchActive')
+                              : t('aiModels.table.switchInactive')
+                          }
                           className="mb-0"
                         />
                       )}
@@ -301,7 +332,7 @@ const ModelsTable: React.FC = () => {
                           size="sm"
                           onClick={() => handleTest(m.uuid)}
                         >
-                          Test
+                          {t('aiModels.table.test')}
                         </Button>
                         {m.modelType === 'llm' && (
                           <Button
@@ -309,7 +340,7 @@ const ModelsTable: React.FC = () => {
                             size="sm"
                             onClick={() => setPromptModel(m)}
                           >
-                            Prompt
+                            {t('aiModels.table.prompt')}
                           </Button>
                         )}
                         <Button
@@ -317,7 +348,7 @@ const ModelsTable: React.FC = () => {
                           size="sm"
                           onClick={() => openEdit(m)}
                         >
-                          Edit
+                          {t('aiModels.table.edit')}
                         </Button>
                         {!m.isDefault && (
                           <Button
@@ -325,7 +356,7 @@ const ModelsTable: React.FC = () => {
                             size="sm"
                             onClick={() => handleSetDefault(m.uuid)}
                           >
-                            Default
+                            {t('aiModels.table.makeDefault')}
                           </Button>
                         )}
                         <Button
@@ -333,7 +364,7 @@ const ModelsTable: React.FC = () => {
                           size="sm"
                           onClick={() => handleDelete(m.uuid)}
                         >
-                          Delete
+                          {t('aiModels.table.delete')}
                         </Button>
                       </div>
                     </td>

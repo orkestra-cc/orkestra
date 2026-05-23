@@ -1,10 +1,12 @@
 import { useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Card, Col, Row, Tab, Tabs } from 'react-bootstrap';
+import { useTranslation } from 'react-i18next';
 import { useGetModulesQuery } from 'store/api/moduleApi';
 import ModuleTable from './ModuleTable';
 
 const ModuleManagementPage: React.FC = () => {
+  const { t } = useTranslation();
   const [searchParams, setSearchParams] = useSearchParams();
   const tab = searchParams.get('tab') || 'core';
   const { data: modules } = useGetModulesQuery();
@@ -27,19 +29,21 @@ const ModuleManagementPage: React.FC = () => {
           <Card.Body className="py-3 px-4">
             <div className="d-flex align-items-center justify-content-between flex-wrap">
               <div>
-                <h5 className="mb-0">Module Management</h5>
+                <h5 className="mb-0">{t('adminModules.pageTitle')}</h5>
               </div>
               {stats && (
                 <div className="d-flex gap-3 fs-10 text-600">
                   <span>
-                    <strong className="text-900">{stats.total}</strong> modules
+                    <strong className="text-900">
+                      {t('adminModules.modulesCount', { count: stats.total })}
+                    </strong>
                   </span>
                   <span>
                     <span
                       className="rounded-circle bg-success d-inline-block me-1"
                       style={{ width: 8, height: 8 }}
                     />
-                    {stats.running} running
+                    {stats.running} {t('adminModules.status.running')}
                   </span>
                   {stats.failed > 0 && (
                     <span>
@@ -47,7 +51,7 @@ const ModuleManagementPage: React.FC = () => {
                         className="rounded-circle bg-danger d-inline-block me-1"
                         style={{ width: 8, height: 8 }}
                       />
-                      {stats.failed} failed
+                      {stats.failed} {t('adminModules.status.failed')}
                     </span>
                   )}
                   {stats.disabled > 0 && (
@@ -56,7 +60,7 @@ const ModuleManagementPage: React.FC = () => {
                         className="rounded-circle bg-400 d-inline-block me-1"
                         style={{ width: 8, height: 8 }}
                       />
-                      {stats.disabled} disabled
+                      {stats.disabled} {t('adminModules.status.disabled')}
                     </span>
                   )}
                   {stats.stopped > 0 && (
@@ -65,7 +69,7 @@ const ModuleManagementPage: React.FC = () => {
                         className="rounded-circle bg-warning d-inline-block me-1"
                         style={{ width: 8, height: 8 }}
                       />
-                      {stats.stopped} stopped
+                      {stats.stopped} {t('adminModules.status.stopped')}
                     </span>
                   )}
                 </div>
@@ -89,11 +93,11 @@ const ModuleManagementPage: React.FC = () => {
           }}
           className="mb-3"
         >
-          <Tab eventKey="core" title="Core Modules">
-            <ModuleTable scope="core" title="Core Modules" />
+          <Tab eventKey="core" title={t('adminModules.tabs.core')}>
+            <ModuleTable scope="core" title={t('adminModules.tabs.core')} />
           </Tab>
-          <Tab eventKey="addons" title="Addons">
-            <ModuleTable scope="addons" title="Addons" />
+          <Tab eventKey="addons" title={t('adminModules.tabs.addons')}>
+            <ModuleTable scope="addons" title={t('adminModules.tabs.addons')} />
           </Tab>
         </Tabs>
       </Col>

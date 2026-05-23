@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { Alert, Badge, Button, Card, Form, Table } from 'react-bootstrap';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { toast } from 'react-toastify';
+import { useTranslation } from 'react-i18next';
 import {
   useGetLogLevelsQuery,
   useSetGlobalLogLevelMutation,
@@ -30,6 +31,7 @@ const levelVariant: Record<LogLevel, string> = {
 };
 
 const LogLevelsPage: React.FC = () => {
+  const { t } = useTranslation();
   const { data, isLoading, error } = useGetLogLevelsQuery();
   const [setGlobal, setGlobalStatus] = useSetGlobalLogLevelMutation();
   const [setModule] = useSetModuleLogLevelMutation();
@@ -48,50 +50,65 @@ const LogLevelsPage: React.FC = () => {
   const handleGlobal = async (level: LogLevel) => {
     try {
       await setGlobal({ level }).unwrap();
-      toast.success(`Global log level set to ${level}`);
+      toast.success(
+        t('adminObservability.logLevels.globalSetToast', { level })
+      );
     } catch {
-      toast.error('Failed to update global log level');
+      toast.error(t('adminObservability.logLevels.globalFailToast'));
     }
   };
 
   const handleModule = async (moduleName: string, level: LogLevel) => {
     try {
       await setModule({ module: moduleName, level }).unwrap();
-      toast.success(`${moduleName} set to ${level}`);
+      toast.success(
+        t('adminObservability.logLevels.moduleSetToast', {
+          module: moduleName,
+          level
+        })
+      );
     } catch {
-      toast.error(`Failed to update ${moduleName}`);
+      toast.error(
+        t('adminObservability.logLevels.moduleFailToast', {
+          module: moduleName
+        })
+      );
     }
   };
 
   const handleRevert = async (moduleName: string) => {
     try {
       await unsetModule({ module: moduleName }).unwrap();
-      toast.success(`${moduleName} reverted to global`);
+      toast.success(
+        t('adminObservability.logLevels.moduleRevertToast', {
+          module: moduleName
+        })
+      );
     } catch {
-      toast.error(`Failed to revert ${moduleName}`);
+      toast.error(
+        t('adminObservability.logLevels.revertFailToast', {
+          module: moduleName
+        })
+      );
     }
   };
 
   const handleResetAll = async () => {
-    if (
-      !window.confirm(
-        'Reset every log level to the env defaults captured at boot? This persists the change.'
-      )
-    ) {
+    if (!window.confirm(t('adminObservability.logLevels.confirmReset'))) {
       return;
     }
     try {
       await resetAll().unwrap();
-      toast.success('Log levels reset to boot defaults');
+      toast.success(t('adminObservability.logLevels.resetDoneToast'));
     } catch {
-      toast.error('Reset failed');
+      toast.error(t('adminObservability.logLevels.resetFailToast'));
     }
   };
 
   if (isLoading) {
     return (
       <Card>
-        <Card.Body>Loading…</Card.Body>
+        <Card.Body>{t('adminObservability.logLevels.loading')}</Card.Body>
       </Card>
     );
   }
@@ -99,8 +116,7 @@ const LogLevelsPage: React.FC = () => {
   if (error || !data) {
     return (
       <Alert variant="danger">
-        Failed to load log levels. The logging module may have failed init —
-        check backend logs.
+        {t('adminObservability.logLevels.loadFailed')}
       </Alert>
     );
   }
@@ -112,22 +128,28 @@ const LogLevelsPage: React.FC = () => {
           <div>
             <h5 className="mb-1">
               <FontAwesomeIcon icon="sliders-h" className="me-2 text-primary" />
-              Log levels
+              {t('adminObservability.logLevels.title')}
             </h5>
             <p className="text-muted mb-0 small">
-              Runtime log-level admin (ADR-0005 Phase F). Per-module overrides
-              take effect immediately — no restart. Stdout + OTLP fanout (Phase
-              E) honor the same threshold.
+              {t('adminObservability.logLevels.description')}
             </p>
             {lastUpdated && (
               <p className="text-muted mb-0 small mt-2">
-                Last updated: {lastUpdated}
-                {data.updatedBy ? ` by ${data.updatedBy}` : ''}
+                {data.updatedBy
+                  ? t('adminObservability.logLevels.lastUpdatedBy', {
+                      date: lastUpdated,
+                      user: data.updatedBy
+                    })
+                  : t('adminObservability.logLevels.lastUpdated', {
+                      date: lastUpdated
+                    })}
               </p>
             )}
           </div>
           <div className="d-flex align-items-center gap-2">
-            <span className="text-muted">Global:</span>
+            <span className="text-muted">
+              {t('adminObservability.logLevels.globalLabel')}
+            </span>
             <Form.Select
               size="sm"
               value={data.global}
@@ -147,7 +169,7 @@ const LogLevelsPage: React.FC = () => {
               onClick={handleResetAll}
               disabled={resetStatus.isLoading}
             >
-              Reset to env
+              {t('adminObservability.logLevels.resetToEnv')}
             </Button>
           </div>
         </Card.Body>
@@ -158,18 +180,22 @@ const LogLevelsPage: React.FC = () => {
           <Table responsive hover className="mb-0">
             <thead>
               <tr>
-                <th>Module</th>
-                <th>Effective level</th>
-                <th>Override</th>
-                <th style={{ width: 220 }}>Set override</th>
-                <th style={{ width: 140 }}>Actions</th>
+                <th>{t('adminObservability.logLevels.columns.module')}</th>
+                <th>{t('adminObservability.logLevels.columns.effective')}</th>
+                <th>{t('adminObservability.logLevels.columns.override')}</th>
+                <th style={{ width: 220 }}>
+                  {t('adminObservability.logLevels.columns.set')}
+                </th>
+                <th style={{ width: 140 }}>
+                  {t('adminObservability.logLevels.columns.actions')}
+                </th>
               </tr>
             </thead>
             <tbody>
               {data.modules.length === 0 && (
                 <tr>
                   <td colSpan={5} className="text-muted text-center py-4">
-                    No modules registered.
+                    {t('adminObservability.logLevels.noModules')}
                   </td>
                 </tr>
               )}
@@ -185,9 +211,13 @@ const LogLevelsPage: React.FC = () => {
                   </td>
                   <td>
                     {entry.hasOverride ? (
-                      <span className="text-success small">explicit</span>
+                      <span className="text-success small">
+                        {t('adminObservability.logLevels.overrideExplicit')}
+                      </span>
                     ) : (
-                      <span className="text-muted small">inherits global</span>
+                      <span className="text-muted small">
+                        {t('adminObservability.logLevels.overrideInherits')}
+                      </span>
                     )}
                   </td>
                   <td>
@@ -212,7 +242,7 @@ const LogLevelsPage: React.FC = () => {
                       disabled={!entry.hasOverride}
                       onClick={() => handleRevert(entry.name)}
                     >
-                      Revert
+                      {t('adminObservability.logLevels.revert')}
                     </Button>
                   </td>
                 </tr>

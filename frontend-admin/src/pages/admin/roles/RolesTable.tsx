@@ -11,6 +11,7 @@ import {
   Tooltip
 } from 'react-bootstrap';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { Trans, useTranslation } from 'react-i18next';
 import { toast } from 'react-toastify';
 import {
   useListRolesQuery,
@@ -59,6 +60,7 @@ const systemRoleRank = (name: string): number => {
  * input that matches against name, description, and permission keys.
  */
 const RolesTable: React.FC<Props> = ({ tenantId }) => {
+  const { t } = useTranslation();
   const { data, isLoading, error } = useListRolesQuery(tenantId);
   const [updateRole] = useUpdateRoleMutation();
   const [showCreate, setShowCreate] = useState(false);
@@ -95,6 +97,8 @@ const RolesTable: React.FC<Props> = ({ tenantId }) => {
   const totalSystem = roles.filter(r => r.isSystem).length;
   const totalCustom = roles.filter(r => !r.isSystem).length;
 
+  const unknownErr = t('adminRoles.rolesTable.errorUnknown');
+
   const onToggleActive = async (role: Role) => {
     try {
       await updateRole({
@@ -104,18 +108,23 @@ const RolesTable: React.FC<Props> = ({ tenantId }) => {
       }).unwrap();
       toast.success(
         role.isActive
-          ? `Role "${role.name}" disabled`
-          : `Role "${role.name}" enabled`
+          ? t('adminRoles.rolesTable.toastDisabled', { name: role.name })
+          : t('adminRoles.rolesTable.toastEnabled', { name: role.name })
       );
     } catch (err: unknown) {
-      toast.error('Toggle failed: ' + extractError(err));
+      toast.error(
+        t('adminRoles.rolesTable.toastToggleFailed', {
+          error: extractError(err, unknownErr)
+        })
+      );
     }
   };
 
   if (isLoading) {
     return (
       <div className="text-center py-5">
-        <Spinner animation="border" size="sm" /> Loading roles…
+        <Spinner animation="border" size="sm" />{' '}
+        {t('adminRoles.rolesTable.loading')}
       </div>
     );
   }
@@ -123,11 +132,14 @@ const RolesTable: React.FC<Props> = ({ tenantId }) => {
   if (error) {
     return (
       <Alert variant="danger">
-        <Alert.Heading className="fs-9">Could not load roles</Alert.Heading>
+        <Alert.Heading className="fs-9">
+          {t('adminRoles.rolesTable.errorTitle')}
+        </Alert.Heading>
         <p className="mb-0 fs-10">
-          Your account needs the <code>authz.role.read</code> permission in this
-          organization. If this is a fresh install and you are the first admin,
-          try signing out and back in to refresh your token.
+          <Trans
+            i18nKey="adminRoles.rolesTable.errorBody"
+            components={{ code: <code /> }}
+          />
         </p>
       </Alert>
     );
@@ -140,11 +152,11 @@ const RolesTable: React.FC<Props> = ({ tenantId }) => {
         <div className="d-flex gap-2 align-items-center">
           <Badge bg="secondary" className="fs-11">
             <FontAwesomeIcon icon="lock" className="me-1" />
-            {totalSystem} system
+            {t('adminRoles.rolesTable.countSystem', { count: totalSystem })}
           </Badge>
           <Badge bg="info" className="fs-11">
             <FontAwesomeIcon icon="users-cog" className="me-1" />
-            {totalCustom} custom
+            {t('adminRoles.rolesTable.countCustom', { count: totalCustom })}
           </Badge>
         </div>
         <div className="d-flex gap-2 align-items-center flex-grow-1 justify-content-end">
@@ -154,10 +166,10 @@ const RolesTable: React.FC<Props> = ({ tenantId }) => {
             </InputGroup.Text>
             <Form.Control
               type="search"
-              placeholder="Search roles or permissions…"
+              placeholder={t('adminRoles.rolesTable.searchPlaceholder')}
               value={query}
               onChange={e => setQuery(e.target.value)}
-              aria-label="Search roles"
+              aria-label={t('adminRoles.rolesTable.searchAriaLabel')}
             />
             {query && (
               <Button variant="outline-secondary" onClick={() => setQuery('')}>
@@ -171,15 +183,15 @@ const RolesTable: React.FC<Props> = ({ tenantId }) => {
             onClick={() => setShowCreate(true)}
           >
             <FontAwesomeIcon icon="plus" className="me-1" />
-            New custom role
+            {t('adminRoles.rolesTable.newCustomRole')}
           </Button>
         </div>
       </div>
 
       {/* System roles section */}
       <RoleSection
-        title="System roles"
-        subtitle="Immutable — ship with Orkestra. You can disable any of them to block new bindings, but name and permissions stay fixed."
+        title={t('adminRoles.rolesTable.sectionSystemTitle')}
+        subtitle={t('adminRoles.rolesTable.sectionSystemSubtitle')}
         icon="shield-alt"
         roles={systemRoles}
         empty={
@@ -187,8 +199,7 @@ const RolesTable: React.FC<Props> = ({ tenantId }) => {
             <EmptyResult query={q} />
           ) : (
             <div className="text-muted fs-10 py-3">
-              No system roles loaded. This should never happen — check backend
-              logs.
+              {t('adminRoles.rolesTable.systemEmpty')}
             </div>
           )
         }
@@ -211,8 +222,8 @@ const RolesTable: React.FC<Props> = ({ tenantId }) => {
       {/* Custom roles section */}
       <div className="mt-4">
         <RoleSection
-          title="Custom roles"
-          subtitle="Scoped to this organization. Edit permissions, disable, or delete them. Deleting cascades every binding that references the role."
+          title={t('adminRoles.rolesTable.sectionCustomTitle')}
+          subtitle={t('adminRoles.rolesTable.sectionCustomSubtitle')}
           icon="users-cog"
           roles={customRoles}
           empty={
@@ -326,6 +337,7 @@ const RoleRow: React.FC<RoleRowProps> = ({
   onDelete,
   onToggleActive
 }) => {
+  const { t } = useTranslation();
   const dimmed = !role.isActive ? 'opacity-75' : '';
   return (
     <div className={`border-bottom ${dimmed}`}>
@@ -336,7 +348,11 @@ const RoleRow: React.FC<RoleRowProps> = ({
           size="sm"
           className="p-0 text-body-tertiary"
           onClick={onToggleExpand}
-          aria-label={expanded ? 'Collapse permissions' : 'Expand permissions'}
+          aria-label={
+            expanded
+              ? t('adminRoles.rolesTable.toggleExpandCollapseAria')
+              : t('adminRoles.rolesTable.toggleExpandAria')
+          }
         >
           <FontAwesomeIcon
             icon={expanded ? 'chevron-down' : 'chevron-right'}
@@ -356,12 +372,12 @@ const RoleRow: React.FC<RoleRowProps> = ({
             {role.isSystem && (
               <Badge bg="secondary" className="fw-normal">
                 <FontAwesomeIcon icon="lock" className="me-1" />
-                system
+                {t('adminRoles.rolesTable.badgeSystem')}
               </Badge>
             )}
             {!role.isActive && (
               <Badge bg="warning" text="dark" className="fw-normal">
-                disabled
+                {t('adminRoles.rolesTable.badgeDisabled')}
               </Badge>
             )}
           </div>
@@ -377,12 +393,19 @@ const RoleRow: React.FC<RoleRowProps> = ({
           {role.permissions[0] === '*' ? (
             <Badge bg="warning" text="dark">
               <span className="me-1">∗</span>
-              all
+              {t('adminRoles.rolesTable.permissionsAll')}
             </Badge>
           ) : (
             <span>
-              <strong>{role.permissions.length}</strong> permission
-              {role.permissions.length === 1 ? '' : 's'}
+              <Trans
+                i18nKey={
+                  role.permissions.length === 1
+                    ? 'adminRoles.rolesTable.permissionsCountOne'
+                    : 'adminRoles.rolesTable.permissionsCountOther'
+                }
+                values={{ count: role.permissions.length }}
+                components={{ strong: <strong /> }}
+              />
             </span>
           )}
         </div>
@@ -393,8 +416,8 @@ const RoleRow: React.FC<RoleRowProps> = ({
           overlay={
             <Tooltip>
               {role.isActive
-                ? 'Disable this role to stop granting its permissions'
-                : 'Re-enable this role'}
+                ? t('adminRoles.rolesTable.tooltipDisable')
+                : t('adminRoles.rolesTable.tooltipEnable')}
             </Tooltip>
           }
         >
@@ -404,7 +427,11 @@ const RoleRow: React.FC<RoleRowProps> = ({
             className="m-0"
             checked={role.isActive}
             onChange={onToggleActive}
-            aria-label={role.isActive ? 'Disable role' : 'Enable role'}
+            aria-label={
+              role.isActive
+                ? t('adminRoles.rolesTable.ariaDisableRole')
+                : t('adminRoles.rolesTable.ariaEnableRole')
+            }
           />
         </OverlayTrigger>
 
@@ -413,7 +440,9 @@ const RoleRow: React.FC<RoleRowProps> = ({
           placement="top"
           overlay={
             <Tooltip>
-              {role.isSystem ? 'Edit (system: disable-only)' : 'Edit role'}
+              {role.isSystem
+                ? t('adminRoles.rolesTable.tooltipEditSystem')
+                : t('adminRoles.rolesTable.tooltipEditCustom')}
             </Tooltip>
           }
         >
@@ -421,7 +450,9 @@ const RoleRow: React.FC<RoleRowProps> = ({
             variant="outline-primary"
             size="sm"
             onClick={onEdit}
-            aria-label={`Edit role ${role.name}`}
+            aria-label={t('adminRoles.rolesTable.ariaEditRole', {
+              name: role.name
+            })}
           >
             <FontAwesomeIcon icon="pencil-alt" />
           </Button>
@@ -431,13 +462,17 @@ const RoleRow: React.FC<RoleRowProps> = ({
         {onDelete ? (
           <OverlayTrigger
             placement="top"
-            overlay={<Tooltip>Delete role</Tooltip>}
+            overlay={
+              <Tooltip>{t('adminRoles.rolesTable.tooltipDeleteRole')}</Tooltip>
+            }
           >
             <Button
               variant="outline-danger"
               size="sm"
               onClick={onDelete}
-              aria-label={`Delete role ${role.name}`}
+              aria-label={t('adminRoles.rolesTable.ariaDeleteRole', {
+                name: role.name
+              })}
             >
               <FontAwesomeIcon icon="trash" />
             </Button>
@@ -463,11 +498,13 @@ const RoleRow: React.FC<RoleRowProps> = ({
 const PermissionChips: React.FC<{ permissions: string[] }> = ({
   permissions
 }) => {
+  const { t } = useTranslation();
   if (permissions.length === 1 && permissions[0] === '*') {
     return (
       <div>
         <Badge bg="warning" text="dark">
-          <span className="me-1">∗</span>— wildcard, grants every permission
+          <span className="me-1">∗</span>
+          {t('adminRoles.rolesTable.wildcardChip')}
         </Badge>
       </div>
     );
@@ -485,7 +522,12 @@ const PermissionChips: React.FC<{ permissions: string[] }> = ({
       {sortedGroups.map(mod => (
         <div key={mod} className="mb-2">
           <div className="text-muted small text-uppercase fw-bold mb-1">
-            {mod} <span className="fw-normal">({groups[mod].length})</span>
+            {mod}{' '}
+            <span className="fw-normal">
+              {t('adminRoles.rolesTable.moduleGroupCount', {
+                count: groups[mod].length
+              })}
+            </span>
           </div>
           <div className="d-flex flex-wrap gap-1">
             {groups[mod].sort().map(p => (
@@ -508,34 +550,42 @@ const PermissionChips: React.FC<{ permissions: string[] }> = ({
 // -------------------------------------------------------------------------
 // Empty states
 // -------------------------------------------------------------------------
-const NoCustomRoles: React.FC<{ onCreate: () => void }> = ({ onCreate }) => (
-  <div className="text-center py-5 text-muted">
-    <div className="mb-2">
-      <FontAwesomeIcon icon="users-cog" className="fs-5 text-body-tertiary" />
+const NoCustomRoles: React.FC<{ onCreate: () => void }> = ({ onCreate }) => {
+  const { t } = useTranslation();
+  return (
+    <div className="text-center py-5 text-muted">
+      <div className="mb-2">
+        <FontAwesomeIcon icon="users-cog" className="fs-5 text-body-tertiary" />
+      </div>
+      <div className="fw-semibold text-body">
+        {t('adminRoles.rolesTable.noCustomRolesTitle')}
+      </div>
+      <div className="fs-10 mb-3">
+        {t('adminRoles.rolesTable.noCustomRolesBody')}
+      </div>
+      <Button size="sm" variant="primary" onClick={onCreate}>
+        <FontAwesomeIcon icon="plus" className="me-1" />{' '}
+        {t('adminRoles.rolesTable.createFirstCustom')}
+      </Button>
     </div>
-    <div className="fw-semibold text-body">No custom roles yet</div>
-    <div className="fs-10 mb-3">
-      System roles usually cover the common cases. Create a custom role when you
-      need a narrow set of permissions for a specific team.
-    </div>
-    <Button size="sm" variant="primary" onClick={onCreate}>
-      <FontAwesomeIcon icon="plus" className="me-1" /> Create your first custom
-      role
-    </Button>
-  </div>
-);
+  );
+};
 
 const EmptyResult: React.FC<{ query: string }> = ({ query }) => (
   <div className="text-center py-4 text-muted fs-10">
     <FontAwesomeIcon icon="filter" className="me-1" />
-    No roles match <code>{query}</code>.
+    <Trans
+      i18nKey="adminRoles.rolesTable.noMatch"
+      values={{ query }}
+      components={{ code: <code /> }}
+    />
   </div>
 );
 
-function extractError(err: unknown): string {
+function extractError(err: unknown, unknownLabel: string): string {
   if (err && typeof err === 'object' && 'data' in err) {
     const data = (err as { data?: { detail?: string; title?: string } }).data;
-    return data?.detail || data?.title || 'unknown error';
+    return data?.detail || data?.title || unknownLabel;
   }
   return String(err);
 }

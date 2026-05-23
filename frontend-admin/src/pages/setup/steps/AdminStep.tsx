@@ -1,5 +1,6 @@
 import { useState, FormEvent } from 'react';
 import { Alert, Button, Form, Spinner } from 'react-bootstrap';
+import { Trans, useTranslation } from 'react-i18next';
 import { useAppDispatch } from 'store/hooks';
 import { login as loginAction, setAccessToken } from 'store/slices/authSlice';
 import { useCreateInitialAdminMutation } from 'store/api/setupApi';
@@ -20,6 +21,7 @@ interface AdminStepProps {
  * remaining steps run authenticated as the freshly-created developer user.
  */
 const AdminStep = ({ onNext }: AdminStepProps) => {
+  const { t } = useTranslation();
   const dispatch = useAppDispatch();
   const [createAdmin, { isLoading }] = useCreateInitialAdminMutation();
 
@@ -34,15 +36,15 @@ const AdminStep = ({ onNext }: AdminStepProps) => {
     setError(null);
 
     if (!fullName.trim() || !email.trim() || !password || !confirmPassword) {
-      setError('All fields are required.');
+      setError(t('setup.admin.errorAllRequired'));
       return;
     }
     if (password.length < 10) {
-      setError('Password must be at least 10 characters.');
+      setError(t('setup.admin.errorPasswordLength'));
       return;
     }
     if (password !== confirmPassword) {
-      setError('Passwords do not match.');
+      setError(t('setup.admin.errorPasswordMismatch'));
       return;
     }
 
@@ -65,16 +67,11 @@ const AdminStep = ({ onNext }: AdminStepProps) => {
     } catch (err: unknown) {
       const anyErr = err as { status?: number; data?: { detail?: string } };
       if (anyErr?.status === 409) {
-        setError(
-          'An administrator already exists. Reload this page to continue to the login screen.'
-        );
+        setError(t('setup.admin.errorConflict'));
       } else if (anyErr?.status === 400 && anyErr?.data?.detail) {
         setError(anyErr.data.detail);
       } else {
-        setError(
-          anyErr?.data?.detail ||
-            'Could not create the administrator account. Please try again.'
-        );
+        setError(anyErr?.data?.detail || t('setup.admin.errorGeneric'));
       }
     }
   };
@@ -82,10 +79,9 @@ const AdminStep = ({ onNext }: AdminStepProps) => {
   return (
     <Form onSubmit={handleSubmit} noValidate>
       <div className="mb-4">
-        <h5 className="mb-1">Create the administrator account</h5>
+        <h5 className="mb-1">{t('setup.admin.title')}</h5>
         <p className="text-muted fs-10 mb-0">
-          This user becomes the platform root with the <code>developer</code>{' '}
-          role. You can add more users later from the admin UI.
+          <Trans i18nKey="setup.admin.intro" components={{ code: <code /> }} />
         </p>
       </div>
 
@@ -101,7 +97,7 @@ const AdminStep = ({ onNext }: AdminStepProps) => {
       )}
 
       <Form.Group className="mb-3">
-        <Form.Label>Full name</Form.Label>
+        <Form.Label>{t('setup.admin.labelFullName')}</Form.Label>
         <Form.Control
           type="text"
           value={fullName}
@@ -112,10 +108,10 @@ const AdminStep = ({ onNext }: AdminStepProps) => {
       </Form.Group>
 
       <Form.Group className="mb-3">
-        <Form.Label>Email</Form.Label>
+        <Form.Label>{t('setup.admin.labelEmail')}</Form.Label>
         <Form.Control
           type="email"
-          placeholder="admin@example.com"
+          placeholder={t('setup.admin.placeholderEmail')}
           value={email}
           onChange={e => setEmail(e.target.value)}
           autoComplete="email"
@@ -124,23 +120,22 @@ const AdminStep = ({ onNext }: AdminStepProps) => {
       </Form.Group>
 
       <Form.Group className="mb-3">
-        <Form.Label>Password</Form.Label>
+        <Form.Label>{t('setup.admin.labelPassword')}</Form.Label>
         <Form.Control
           type="password"
-          placeholder="At least 10 characters"
+          placeholder={t('setup.admin.placeholderPassword')}
           value={password}
           onChange={e => setPassword(e.target.value)}
           autoComplete="new-password"
           required
         />
         <Form.Text className="text-muted">
-          Argon2id-hashed on the backend. Must be at least 10 characters and not
-          contain your email address.
+          {t('setup.admin.passwordHelp')}
         </Form.Text>
       </Form.Group>
 
       <Form.Group className="mb-4">
-        <Form.Label>Confirm password</Form.Label>
+        <Form.Label>{t('setup.admin.labelConfirmPassword')}</Form.Label>
         <Form.Control
           type="password"
           value={confirmPassword}
@@ -155,10 +150,10 @@ const AdminStep = ({ onNext }: AdminStepProps) => {
           {isLoading ? (
             <>
               <Spinner animation="border" size="sm" className="me-2" />
-              Creating...
+              {t('setup.admin.submitting')}
             </>
           ) : (
-            'Create administrator'
+            t('setup.admin.submit')
           )}
         </Button>
       </div>

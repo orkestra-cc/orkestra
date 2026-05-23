@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Button, Form, Modal, Spinner } from 'react-bootstrap';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { toast } from 'react-toastify';
+import { useTranslation } from 'react-i18next';
 import { useCreateOrgMutation } from 'store/api/tenantApi';
 import { baseApi } from 'store/api/baseApi';
 import { useAppDispatch } from 'store/hooks';
@@ -17,9 +18,9 @@ interface Props {
    * pages always pass it explicitly.
    */
   kind?: 'internal' | 'external';
-  /** Modal title override. Defaults to "Create tenant". */
+  /** Modal title override. Defaults to the localized "Create tenant". */
   title?: string;
-  /** Submit button label override. Defaults to "Create tenant". */
+  /** Submit button label override. Defaults to the localized "Create tenant". */
   submitLabel?: string;
 }
 
@@ -40,14 +41,21 @@ const CreateTenantModal: React.FC<Props> = ({
   title,
   submitLabel
 }) => {
+  const { t } = useTranslation();
   const dispatch = useAppDispatch();
   const [createOrg, { isLoading }] = useCreateOrgMutation();
 
   const isExternal = kind === 'external';
   const resolvedTitle =
-    title ?? (isExternal ? 'Create client' : 'Create internal tenant');
+    title ??
+    (isExternal
+      ? t('adminTenants.createModal.titleClient')
+      : t('adminTenants.createModal.titleInternal'));
   const resolvedSubmit =
-    submitLabel ?? (isExternal ? 'Create client' : 'Create tenant');
+    submitLabel ??
+    (isExternal
+      ? t('adminTenants.createModal.submitClient')
+      : t('adminTenants.createModal.submitInternal'));
 
   const [name, setName] = useState('');
   const [slug, setSlug] = useState('');
@@ -82,13 +90,23 @@ const CreateTenantModal: React.FC<Props> = ({
         kind
       }).unwrap();
       toast.success(
-        `${isExternal ? 'Client' : 'Internal tenant'} "${name.trim()}" created`
+        isExternal
+          ? t('adminTenants.createModal.successClientToast', {
+              name: name.trim()
+            })
+          : t('adminTenants.createModal.successInternalToast', {
+              name: name.trim()
+            })
       );
       // Refresh the platform-admin list so the new org appears immediately.
       dispatch(baseApi.util.invalidateTags([{ type: 'AdminOrg', id: 'LIST' }]));
       onHide();
     } catch (err: unknown) {
-      toast.error('Create failed: ' + extractError(err));
+      toast.error(
+        t('adminTenants.createModal.errorToast', {
+          message: extractError(err, t)
+        })
+      );
     }
   };
 
@@ -103,10 +121,12 @@ const CreateTenantModal: React.FC<Props> = ({
       <Modal.Body>
         <Form>
           <Form.Group className="mb-3">
-            <Form.Label className="fw-semibold">Name</Form.Label>
+            <Form.Label className="fw-semibold">
+              {t('adminTenants.createModal.name')}
+            </Form.Label>
             <Form.Control
               type="text"
-              placeholder="e.g. Acme Corp"
+              placeholder={t('adminTenants.createModal.namePlaceholder')}
               value={name}
               maxLength={120}
               onChange={e => handleNameChange(e.target.value)}
@@ -114,10 +134,12 @@ const CreateTenantModal: React.FC<Props> = ({
             />
           </Form.Group>
           <Form.Group className="mb-3">
-            <Form.Label className="fw-semibold">Slug</Form.Label>
+            <Form.Label className="fw-semibold">
+              {t('adminTenants.createModal.slug')}
+            </Form.Label>
             <Form.Control
               type="text"
-              placeholder="acme-corp"
+              placeholder={t('adminTenants.createModal.slugPlaceholder')}
               value={slug}
               maxLength={80}
               onChange={e => {
@@ -126,29 +148,36 @@ const CreateTenantModal: React.FC<Props> = ({
               }}
             />
             <Form.Text muted>
-              Lowercase letters, numbers and dashes. Auto-generated from the
-              name unless you override it.
+              {t('adminTenants.createModal.slugHint')}
             </Form.Text>
           </Form.Group>
           <Form.Group className="mb-0">
-            <Form.Label className="fw-semibold">Plan</Form.Label>
+            <Form.Label className="fw-semibold">
+              {t('adminTenants.createModal.plan')}
+            </Form.Label>
             <Form.Select value={plan} onChange={e => setPlan(e.target.value)}>
-              <option value="free">Free</option>
-              <option value="pro">Pro</option>
-              <option value="enterprise">Enterprise</option>
+              <option value="free">
+                {t('adminTenants.createModal.planFree')}
+              </option>
+              <option value="pro">
+                {t('adminTenants.createModal.planPro')}
+              </option>
+              <option value="enterprise">
+                {t('adminTenants.createModal.planEnterprise')}
+              </option>
             </Form.Select>
           </Form.Group>
         </Form>
       </Modal.Body>
       <Modal.Footer>
         <Button variant="secondary" onClick={onHide} disabled={isLoading}>
-          Cancel
+          {t('adminTenants.createModal.cancel')}
         </Button>
         <Button variant="primary" onClick={onSave} disabled={!canSave}>
           {isLoading ? (
             <>
               <Spinner size="sm" animation="border" className="me-2" />{' '}
-              Creating…
+              {t('adminTenants.createModal.creating')}
             </>
           ) : (
             <>{resolvedSubmit}</>
@@ -159,10 +188,12 @@ const CreateTenantModal: React.FC<Props> = ({
   );
 };
 
-function extractError(err: unknown): string {
+function extractError(err: unknown, t: (key: string) => string): string {
   if (err && typeof err === 'object' && 'data' in err) {
     const data = (err as { data?: { detail?: string; title?: string } }).data;
-    return data?.detail || data?.title || 'unknown error';
+    return (
+      data?.detail || data?.title || t('adminTenants.createModal.unknownError')
+    );
   }
   return String(err);
 }

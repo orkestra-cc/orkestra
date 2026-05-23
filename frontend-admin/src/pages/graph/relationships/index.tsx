@@ -18,6 +18,7 @@ import {
   faTrash,
   faLock
 } from '@fortawesome/free-solid-svg-icons';
+import { useTranslation } from 'react-i18next';
 import {
   useListRelationshipTypesQuery,
   useCreateRelationshipTypeMutation,
@@ -27,12 +28,6 @@ import {
 import type { RelationshipTypeConfig } from '../../../types/rag';
 
 const CATEGORIES = ['iso', 'law', 'regulation', 'generic'] as const;
-const CATEGORY_LABELS: Record<string, string> = {
-  iso: 'ISO',
-  law: 'Law',
-  regulation: 'Regulation',
-  generic: 'Generic'
-};
 const NODE_TYPES = ['RagDocument', 'RagSection', 'RagChunk', 'RagDefinition'];
 
 // ── Add/Edit Modal ───────────────────────────────────────────────────────────
@@ -44,6 +39,7 @@ interface RelModalProps {
 }
 
 const RelModal: React.FC<RelModalProps> = ({ show, onHide, existing }) => {
+  const { t } = useTranslation();
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [fromNode, setFromNode] = useState('RagChunk');
@@ -95,7 +91,7 @@ const RelModal: React.FC<RelModalProps> = ({ show, onHide, existing }) => {
 
   const handleSubmit = async () => {
     if (!isEdit && !name.trim()) {
-      setError('Name is required');
+      setError(t('graph.relationships.modal.errorNameRequired'));
       return;
     }
 
@@ -127,7 +123,7 @@ const RelModal: React.FC<RelModalProps> = ({ show, onHide, existing }) => {
       handleClose();
     } catch (err: unknown) {
       const msg = (err as { data?: { detail?: string } })?.data?.detail;
-      setError(msg || 'Operation failed');
+      setError(msg || t('graph.relationships.modal.errorGeneric'));
     }
   };
 
@@ -135,7 +131,9 @@ const RelModal: React.FC<RelModalProps> = ({ show, onHide, existing }) => {
     <Modal show={show} onHide={handleClose} centered>
       <Modal.Header closeButton>
         <Modal.Title className="fs-9">
-          {isEdit ? 'Edit Relationship Type' : 'Add Relationship Type'}
+          {isEdit
+            ? t('graph.relationships.modal.titleEdit')
+            : t('graph.relationships.modal.titleAdd')}
         </Modal.Title>
       </Modal.Header>
       <Modal.Body>
@@ -152,46 +150,53 @@ const RelModal: React.FC<RelModalProps> = ({ show, onHide, existing }) => {
 
         <Form.Group className="mb-3">
           <Form.Label className="small">
-            Name <span className="text-danger">*</span>
+            {t('graph.relationships.modal.nameLabel')}{' '}
+            <span className="text-danger">*</span>
           </Form.Label>
           <Form.Control
             size="sm"
             value={name}
             onChange={e => setName(e.target.value)}
-            placeholder="e.g. IMPLEMENTS"
+            placeholder={t('graph.relationships.modal.namePlaceholder')}
             disabled={isEdit}
             style={{ textTransform: 'uppercase' }}
           />
           {isEdit && (
-            <Form.Text className="text-muted">Name cannot be changed</Form.Text>
+            <Form.Text className="text-muted">
+              {t('graph.relationships.modal.nameImmutable')}
+            </Form.Text>
           )}
         </Form.Group>
 
         <Form.Group className="mb-3">
-          <Form.Label className="small">Description</Form.Label>
+          <Form.Label className="small">
+            {t('graph.relationships.modal.descriptionLabel')}
+          </Form.Label>
           <Form.Control
             size="sm"
             as="textarea"
             rows={2}
             value={description}
             onChange={e => setDescription(e.target.value)}
-            placeholder="What this relationship represents"
+            placeholder={t('graph.relationships.modal.descriptionPlaceholder')}
           />
         </Form.Group>
 
         <Row className="g-2 mb-3">
           <Col>
             <Form.Group>
-              <Form.Label className="small">From Node</Form.Label>
+              <Form.Label className="small">
+                {t('graph.relationships.modal.fromNodeLabel')}
+              </Form.Label>
               <Form.Select
                 size="sm"
                 value={fromNode}
                 onChange={e => setFromNode(e.target.value)}
                 disabled={isEdit}
               >
-                {NODE_TYPES.map(t => (
-                  <option key={`from-${t}`} value={t}>
-                    {t}
+                {NODE_TYPES.map(nt => (
+                  <option key={`from-${nt}`} value={nt}>
+                    {nt}
                   </option>
                 ))}
               </Form.Select>
@@ -199,16 +204,18 @@ const RelModal: React.FC<RelModalProps> = ({ show, onHide, existing }) => {
           </Col>
           <Col>
             <Form.Group>
-              <Form.Label className="small">To Node</Form.Label>
+              <Form.Label className="small">
+                {t('graph.relationships.modal.toNodeLabel')}
+              </Form.Label>
               <Form.Select
                 size="sm"
                 value={toNode}
                 onChange={e => setToNode(e.target.value)}
                 disabled={isEdit}
               >
-                {NODE_TYPES.map(t => (
-                  <option key={`to-${t}`} value={t}>
-                    {t}
+                {NODE_TYPES.map(nt => (
+                  <option key={`to-${nt}`} value={nt}>
+                    {nt}
                   </option>
                 ))}
               </Form.Select>
@@ -217,24 +224,28 @@ const RelModal: React.FC<RelModalProps> = ({ show, onHide, existing }) => {
         </Row>
 
         <Form.Group className="mb-3">
-          <Form.Label className="small">Properties</Form.Label>
+          <Form.Label className="small">
+            {t('graph.relationships.modal.propertiesLabel')}
+          </Form.Label>
           <Form.Control
             size="sm"
             value={properties}
             onChange={e => setProperties(e.target.value)}
-            placeholder="e.g. similarity, referenceText (comma-separated)"
+            placeholder={t('graph.relationships.modal.propertiesPlaceholder')}
           />
         </Form.Group>
 
         <Form.Group>
-          <Form.Label className="small">Active for Categories</Form.Label>
+          <Form.Label className="small">
+            {t('graph.relationships.modal.categoriesLabel')}
+          </Form.Label>
           <div className="d-flex gap-3">
             {CATEGORIES.map(cat => (
               <Form.Check
                 key={cat}
                 type="switch"
                 id={`cat-${cat}`}
-                label={CATEGORY_LABELS[cat]}
+                label={t(`graph.relationships.categoryLabels.${cat}`)}
                 checked={categories[cat] ?? false}
                 onChange={() => handleToggle(cat)}
               />
@@ -249,7 +260,7 @@ const RelModal: React.FC<RelModalProps> = ({ show, onHide, existing }) => {
           onClick={handleClose}
           disabled={isLoading}
         >
-          Cancel
+          {t('graph.relationships.modal.cancel')}
         </Button>
         <Button
           variant="primary"
@@ -259,12 +270,13 @@ const RelModal: React.FC<RelModalProps> = ({ show, onHide, existing }) => {
         >
           {isLoading ? (
             <>
-              <Spinner size="sm" className="me-1" /> Saving...
+              <Spinner size="sm" className="me-1" />{' '}
+              {t('graph.relationships.modal.saving')}
             </>
           ) : isEdit ? (
-            'Save Changes'
+            t('graph.relationships.modal.save')
           ) : (
-            'Create'
+            t('graph.relationships.modal.create')
           )}
         </Button>
       </Modal.Footer>
@@ -311,6 +323,7 @@ const CategoryToggle: React.FC<CategoryToggleProps> = ({ rel, category }) => {
 // ── Main Page ────────────────────────────────────────────────────────────────
 
 const GraphRelationships: React.FC = () => {
+  const { t } = useTranslation();
   const [showModal, setShowModal] = useState(false);
   const [editRel, setEditRel] = useState<RelationshipTypeConfig | null>(null);
 
@@ -321,14 +334,15 @@ const GraphRelationships: React.FC = () => {
 
   const handleDelete = useCallback(
     async (rel: RelationshipTypeConfig) => {
-      if (!confirm(`Delete relationship type "${rel.name}"?`)) return;
+      if (!confirm(t('graph.relationships.deleteConfirm', { name: rel.name })))
+        return;
       try {
         await deleteRel(rel.uuid).unwrap();
       } catch {
         // RTK Query handles error
       }
     },
-    [deleteRel]
+    [deleteRel, t]
   );
 
   const handleEdit = useCallback((rel: RelationshipTypeConfig) => {
@@ -346,10 +360,10 @@ const GraphRelationships: React.FC = () => {
       <Row className="g-3 mb-3">
         <Col>
           <div className="d-flex align-items-center justify-content-between">
-            <h5 className="mb-0">Relationship Types</h5>
+            <h5 className="mb-0">{t('graph.relationships.pageTitle')}</h5>
             <Button size="sm" variant="primary" onClick={handleAdd}>
               <FontAwesomeIcon icon={faPlus} className="me-1" />
-              Add Relationship
+              {t('graph.relationships.addButton')}
             </Button>
           </div>
         </Col>
@@ -365,27 +379,27 @@ const GraphRelationships: React.FC = () => {
                 </div>
               ) : rels.length === 0 ? (
                 <Alert variant="info" className="m-3 mb-0">
-                  No relationship types configured.
+                  {t('graph.relationships.empty')}
                 </Alert>
               ) : (
                 <Table size="sm" hover responsive className="mb-0 fs-10">
                   <thead className="bg-body-tertiary">
                     <tr>
-                      <th>Name</th>
-                      <th>Description</th>
-                      <th>From → To</th>
-                      <th>Properties</th>
+                      <th>{t('graph.relationships.cols.name')}</th>
+                      <th>{t('graph.relationships.cols.description')}</th>
+                      <th>{t('graph.relationships.cols.fromTo')}</th>
+                      <th>{t('graph.relationships.cols.properties')}</th>
                       {CATEGORIES.map(cat => (
                         <th
                           key={cat}
                           className="text-center"
                           style={{ width: 70 }}
                         >
-                          {CATEGORY_LABELS[cat]}
+                          {t(`graph.relationships.categoryLabels.${cat}`)}
                         </th>
                       ))}
                       <th className="text-end" style={{ width: 80 }}>
-                        Actions
+                        {t('graph.relationships.cols.actions')}
                       </th>
                     </tr>
                   </thead>
@@ -399,7 +413,7 @@ const GraphRelationships: React.FC = () => {
                           {rel.isSystem && (
                             <Badge bg="secondary" className="ms-2">
                               <FontAwesomeIcon icon={faLock} className="me-1" />
-                              System
+                              {t('graph.relationships.systemBadge')}
                             </Badge>
                           )}
                         </td>
@@ -430,7 +444,7 @@ const GraphRelationships: React.FC = () => {
                             size="sm"
                             className="text-muted p-0 me-2"
                             onClick={() => handleEdit(rel)}
-                            title="Edit"
+                            title={t('graph.relationships.editTitle')}
                           >
                             <FontAwesomeIcon icon={faPen} />
                           </Button>
@@ -440,7 +454,7 @@ const GraphRelationships: React.FC = () => {
                               size="sm"
                               className="text-danger p-0"
                               onClick={() => handleDelete(rel)}
-                              title="Delete"
+                              title={t('graph.relationships.deleteTitle')}
                             >
                               <FontAwesomeIcon icon={faTrash} />
                             </Button>

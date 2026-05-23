@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Form, InputGroup, Button } from 'react-bootstrap';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faEye, faEyeSlash } from '@fortawesome/free-solid-svg-icons';
+import { useTranslation } from 'react-i18next';
 import type { ConfigField } from 'store/api/moduleApi';
 
 export interface ModuleConfigFieldsProps {
@@ -37,6 +38,7 @@ const ModuleConfigFields: React.FC<ModuleConfigFieldsProps> = ({
   onConfigChange,
   onSecretChange
 }) => {
+  const { t } = useTranslation();
   const [revealedSecrets, setRevealedSecrets] = useState<
     Record<string, boolean>
   >({});
@@ -65,7 +67,7 @@ const ModuleConfigFields: React.FC<ModuleConfigFieldsProps> = ({
                 {field.label}
                 {alreadySet && (
                   <span className="badge badge-subtle-success ms-2 fs-11">
-                    Set
+                    {t('adminModules.configFields.secretSetBadge')}
                   </span>
                 )}
               </Form.Label>
@@ -73,7 +75,9 @@ const ModuleConfigFields: React.FC<ModuleConfigFieldsProps> = ({
                 <Form.Control
                   type={revealed ? 'text' : 'password'}
                   placeholder={
-                    alreadySet ? 'Leave empty to keep current' : 'Enter value'
+                    alreadySet
+                      ? t('adminModules.configFields.secretKeepPlaceholder')
+                      : t('adminModules.configFields.secretEnterPlaceholder')
                   }
                   value={secretValues[key] || ''}
                   onChange={e => onSecretChange(key, e.target.value)}
@@ -81,7 +85,11 @@ const ModuleConfigFields: React.FC<ModuleConfigFieldsProps> = ({
                 <Button
                   variant="outline-secondary"
                   onClick={() => toggleReveal(key)}
-                  title={revealed ? 'Hide' : 'Show'}
+                  title={
+                    revealed
+                      ? t('adminModules.configFields.secretHide')
+                      : t('adminModules.configFields.secretShow')
+                  }
                 >
                   <FontAwesomeIcon icon={revealed ? faEyeSlash : faEye} />
                 </Button>
@@ -139,7 +147,11 @@ const ModuleConfigFields: React.FC<ModuleConfigFieldsProps> = ({
                 value={enumValue}
                 onChange={e => onConfigChange(key, e.target.value)}
               >
-                {!field.required && <option value="">—</option>}
+                {!field.required && (
+                  <option value="">
+                    {t('adminModules.configFields.enumNonePlaceholder')}
+                  </option>
+                )}
                 {options.map(opt => (
                   <option key={opt} value={opt}>
                     {opt}
@@ -174,7 +186,10 @@ const ModuleConfigFields: React.FC<ModuleConfigFieldsProps> = ({
                 as="textarea"
                 rows={2}
                 size="sm"
-                placeholder={field.default || 'comma,separated,values'}
+                placeholder={
+                  field.default ||
+                  t('adminModules.configFields.stringListPlaceholder')
+                }
                 value={value}
                 onChange={e => onConfigChange(key, e.target.value)}
                 isInvalid={isEmpty}
@@ -191,17 +206,18 @@ const ModuleConfigFields: React.FC<ModuleConfigFieldsProps> = ({
             )}
             {isEmpty && (
               <Form.Control.Feedback type="invalid">
-                This field is required.
+                {t('adminModules.configFields.requiredFeedback')}
               </Form.Control.Feedback>
             )}
             {isDurationInvalid && (
               <Form.Control.Feedback type="invalid">
-                Enter a valid duration (e.g. 30s, 5m, 1h).
+                {t('adminModules.configFields.durationFeedback')}
               </Form.Control.Feedback>
             )}
             {field.envVar && (
               <Form.Text className="text-muted">
-                Env: <code>{field.envVar}</code>
+                {t('adminModules.configFields.envPrefix')}
+                <code>{field.envVar}</code>
                 {field.description ? ` — ${field.description}` : ''}
               </Form.Text>
             )}

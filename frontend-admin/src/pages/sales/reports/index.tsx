@@ -8,6 +8,7 @@ import {
   faEye,
   faTrash
 } from '@fortawesome/free-solid-svg-icons';
+import { useTranslation } from 'react-i18next';
 import Background from 'components/common/Background';
 import greetingsBg from 'assets/img/illustrations/ticket-greetings-bg.png';
 import {
@@ -27,6 +28,7 @@ const GRADE_COLORS: Record<string, string> = {
 };
 
 const ReportsPage = () => {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const [generating, setGenerating] = useState(false);
   const { data, isLoading, refetch } = useListSalesReportsQuery({
@@ -76,9 +78,12 @@ const ReportsPage = () => {
                 />
               </div>
               <div className="ms-3">
-                <h6 className="mb-1 text-primary">Sales Intelligence</h6>
+                <h6 className="mb-1 text-primary">{t('sales.kicker')}</h6>
                 <h4 className="mb-0 text-primary fw-bold">
-                  Prospect<span className="text-info fw-medium"> Reports</span>
+                  {t('sales.reports.title')}
+                  <span className="text-info fw-medium">
+                    {t('sales.reports.titleAccent')}
+                  </span>
                 </h4>
               </div>
             </Card.Header>
@@ -90,7 +95,9 @@ const ReportsPage = () => {
         <Col lg={12}>
           <Card>
             <Card.Header className="d-flex justify-content-between align-items-center">
-              <h5 className="mb-0">Reports ({reports.length})</h5>
+              <h5 className="mb-0">
+                {t('sales.reports.countTitle', { count: reports.length })}
+              </h5>
               <div className="d-flex gap-2">
                 {jobsWithoutReports.length > 0 && (
                   <Button
@@ -104,7 +111,9 @@ const ReportsPage = () => {
                     ) : (
                       <FontAwesomeIcon icon={faFileAlt} className="me-1" />
                     )}
-                    Generate ({jobsWithoutReports.length} missing)
+                    {t('sales.reports.generateMissing', {
+                      count: jobsWithoutReports.length
+                    })}
                   </Button>
                 )}
                 <Button
@@ -118,7 +127,7 @@ const ReportsPage = () => {
                     spin={isLoading}
                     className="me-1"
                   />{' '}
-                  Refresh
+                  {t('sales.reports.refresh')}
                 </Button>
               </div>
             </Card.Header>
@@ -134,20 +143,17 @@ const ReportsPage = () => {
                     size="3x"
                     className="mb-3 opacity-50"
                   />
-                  <h6>No reports yet</h6>
-                  <p>
-                    Reports are generated automatically when a prospect analysis
-                    completes.
-                  </p>
+                  <h6>{t('sales.reports.emptyTitle')}</h6>
+                  <p>{t('sales.reports.emptyBody')}</p>
                 </div>
               ) : (
                 <Table hover responsive className="mb-0">
                   <thead>
                     <tr>
-                      <th>Company</th>
-                      <th>URL</th>
-                      <th>Score</th>
-                      <th>Generated</th>
+                      <th>{t('sales.reports.colCompany')}</th>
+                      <th>{t('sales.reports.colUrl')}</th>
+                      <th>{t('sales.reports.colScore')}</th>
+                      <th>{t('sales.reports.colGenerated')}</th>
                       <th></th>
                     </tr>
                   </thead>
@@ -169,7 +175,10 @@ const ReportsPage = () => {
                         </td>
                         <td>
                           <Badge bg={GRADE_COLORS[report.grade] || 'secondary'}>
-                            {report.score} ({report.grade})
+                            {t('sales.reports.scoreWithGrade', {
+                              score: report.score,
+                              grade: report.grade
+                            })}
                           </Badge>
                         </td>
                         <td>
@@ -194,7 +203,11 @@ const ReportsPage = () => {
                               size="sm"
                               onClick={e => {
                                 e.stopPropagation();
-                                if (window.confirm('Delete this report?'))
+                                if (
+                                  window.confirm(
+                                    t('sales.reports.deleteConfirm')
+                                  )
+                                )
                                   deleteReport(report.uuid);
                               }}
                             >

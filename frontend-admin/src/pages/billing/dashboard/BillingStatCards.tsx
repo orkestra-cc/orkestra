@@ -8,6 +8,7 @@ import {
 } from '@fortawesome/free-solid-svg-icons';
 import { Link } from 'react-router';
 import CountUp from 'react-countup';
+import { useTranslation } from 'react-i18next';
 import { useGetBillingStatsQuery } from 'store/api/billingApi';
 import SubtleBadge from 'components/common/SubtleBadge';
 import { ytdRange, lastYearRange } from './dateRanges';
@@ -92,6 +93,7 @@ const StatCard: React.FC<StatCardProps> = ({
 };
 
 const BillingStatCards = () => {
+  const { t } = useTranslation();
   const ytd = ytdRange();
   const lastYear = lastYearRange();
   const {
@@ -139,7 +141,7 @@ const BillingStatCards = () => {
                 icon={faExclamationTriangle}
                 className="text-warning me-2"
               />
-              Impossibile caricare le statistiche
+              {t('billing.dashboard.statCards.loadError')}
             </Card.Body>
           </Card>
         </Col>
@@ -149,33 +151,43 @@ const BillingStatCards = () => {
 
   const statCards: StatCardProps[] = [
     {
-      title: 'Fatture Emesse (YTD)',
+      title: t('billing.dashboard.statCards.issuedYtd'),
       value: stats.ytd.issuedTotal,
       icon: faFileInvoice,
       iconColor: 'text-primary',
       bgColor: 'bg-primary-subtle',
       link: '/billing/invoices/issued',
-      linkText: 'Vedi tutte',
+      linkText: t('billing.dashboard.statCards.viewAll'),
       badge:
         stats.ytd.issuedDraft > 0
-          ? { text: `${stats.ytd.issuedDraft} bozze`, bg: 'warning' }
+          ? {
+              text: t('billing.dashboard.statCards.draftsBadge', {
+                count: stats.ytd.issuedDraft
+              }),
+              bg: 'warning'
+            }
           : undefined
     },
     {
-      title: 'Fatture Ricevute (YTD)',
+      title: t('billing.dashboard.statCards.receivedYtd'),
       value: stats.ytd.receivedTotal,
       icon: faFileImport,
       iconColor: 'text-info',
       bgColor: 'bg-info-subtle',
       link: '/billing/invoices/received',
-      linkText: 'Vedi tutte',
+      linkText: t('billing.dashboard.statCards.viewAll'),
       badge:
         stats.ytd.receivedPending > 0
-          ? { text: `${stats.ytd.receivedPending} da gestire`, bg: 'info' }
+          ? {
+              text: t('billing.dashboard.statCards.toHandleBadge', {
+                count: stats.ytd.receivedPending
+              }),
+              bg: 'info'
+            }
           : undefined
     },
     {
-      title: 'Notifiche SDI',
+      title: t('billing.dashboard.statCards.sdiNotifications'),
       value: stats.lastYear.unprocessedNotifications,
       icon: faBell,
       iconColor:
@@ -187,14 +199,14 @@ const BillingStatCards = () => {
           ? 'bg-warning-subtle'
           : 'bg-success-subtle',
       link: '/billing/notifications',
-      linkText: 'Gestisci',
+      linkText: t('billing.dashboard.statCards.manage'),
       badge:
         stats.lastYear.unprocessedNotifications > 0
-          ? { text: 'Da processare', bg: 'warning' }
+          ? { text: t('billing.dashboard.statCards.toProcess'), bg: 'warning' }
           : undefined
     },
     {
-      title: 'Azioni Pendenti',
+      title: t('billing.dashboard.statCards.pendingActions'),
       value: stats.lastYear.pendingActions,
       icon: faExclamationTriangle,
       iconColor:
@@ -204,11 +216,11 @@ const BillingStatCards = () => {
           ? 'bg-danger-subtle'
           : 'bg-success-subtle',
       link: '/billing/invoices/issued?status=pending',
-      linkText: 'Risolvi',
+      linkText: t('billing.dashboard.statCards.resolve'),
       badge:
         stats.lastYear.pendingActions > 0
-          ? { text: 'Urgente', bg: 'danger' }
-          : { text: 'Tutto ok', bg: 'success' }
+          ? { text: t('billing.dashboard.statCards.urgent'), bg: 'danger' }
+          : { text: t('billing.dashboard.statCards.allOk'), bg: 'success' }
     }
   ];
 

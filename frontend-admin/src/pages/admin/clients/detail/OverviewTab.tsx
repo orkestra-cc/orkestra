@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Button, Form } from 'react-bootstrap';
+import { useTranslation } from 'react-i18next';
 import { toast } from 'react-toastify';
 import type { Org } from 'store/api/tenantApi';
 import { useUpdateOrgAdminMutation } from 'store/api/tenantApi';
@@ -17,6 +18,7 @@ interface Props {
  * a dedicated form.
  */
 const OverviewTab: React.FC<Props> = ({ org }) => {
+  const { t } = useTranslation();
   const [updateOrg, { isLoading }] = useUpdateOrgAdminMutation();
   const [name, setName] = useState(org.name);
   const [slug, setSlug] = useState(org.slug);
@@ -28,6 +30,8 @@ const OverviewTab: React.FC<Props> = ({ org }) => {
 
   const dirty = name !== org.name || slug !== org.slug;
 
+  const unknownErr = t('adminClients.overview.errorUnknown');
+
   const onSave = async () => {
     try {
       await updateOrg({
@@ -37,9 +41,13 @@ const OverviewTab: React.FC<Props> = ({ org }) => {
           slug: slug !== org.slug ? slug : undefined
         }
       }).unwrap();
-      toast.success('Client updated');
+      toast.success(t('adminClients.overview.toastSaved'));
     } catch (err: unknown) {
-      toast.error('Update failed: ' + extractError(err));
+      toast.error(
+        t('adminClients.overview.toastSaveFailed', {
+          error: extractError(err, unknownErr)
+        })
+      );
     }
   };
 
@@ -47,27 +55,34 @@ const OverviewTab: React.FC<Props> = ({ org }) => {
     <Form className="px-1">
       <div className="row g-3">
         <Form.Group className="col-md-6">
-          <Form.Label className="fw-semibold fs-10">Name</Form.Label>
+          <Form.Label className="fw-semibold fs-10">
+            {t('adminClients.overview.labelName')}
+          </Form.Label>
           <Form.Control value={name} onChange={e => setName(e.target.value)} />
         </Form.Group>
         <Form.Group className="col-md-6">
-          <Form.Label className="fw-semibold fs-10">Slug</Form.Label>
+          <Form.Label className="fw-semibold fs-10">
+            {t('adminClients.overview.labelSlug')}
+          </Form.Label>
           <Form.Control value={slug} onChange={e => setSlug(e.target.value)} />
         </Form.Group>
         <Form.Group className="col-md-6">
-          <Form.Label className="fw-semibold fs-10">Plan</Form.Label>
+          <Form.Label className="fw-semibold fs-10">
+            {t('adminClients.overview.labelPlan')}
+          </Form.Label>
           <Form.Control readOnly value={org.plan} className="fs-11" />
-          <Form.Text muted>
-            Edit plan label from the list page's row menu; entitlements come
-            from subscriptions, not the plan value.
-          </Form.Text>
+          <Form.Text muted>{t('adminClients.overview.planHelp')}</Form.Text>
         </Form.Group>
         <Form.Group className="col-md-6">
-          <Form.Label className="fw-semibold fs-10">Status</Form.Label>
+          <Form.Label className="fw-semibold fs-10">
+            {t('adminClients.overview.labelStatus')}
+          </Form.Label>
           <Form.Control readOnly value={org.status ?? '—'} className="fs-11" />
         </Form.Group>
         <Form.Group className="col-md-6">
-          <Form.Label className="fw-semibold fs-10">Tenant ID</Form.Label>
+          <Form.Label className="fw-semibold fs-10">
+            {t('adminClients.overview.labelTenantId')}
+          </Form.Label>
           <Form.Control
             readOnly
             value={org.id}
@@ -75,7 +90,9 @@ const OverviewTab: React.FC<Props> = ({ org }) => {
           />
         </Form.Group>
         <Form.Group className="col-md-6">
-          <Form.Label className="fw-semibold fs-10">Owner</Form.Label>
+          <Form.Label className="fw-semibold fs-10">
+            {t('adminClients.overview.labelOwner')}
+          </Form.Label>
           <Form.Control
             readOnly
             value={org.ownerUserUUID || '—'}
@@ -83,7 +100,9 @@ const OverviewTab: React.FC<Props> = ({ org }) => {
           />
         </Form.Group>
         <Form.Group className="col-md-6">
-          <Form.Label className="fw-semibold fs-10">Created</Form.Label>
+          <Form.Label className="fw-semibold fs-10">
+            {t('adminClients.overview.labelCreated')}
+          </Form.Label>
           <Form.Control
             readOnly
             value={new Date(org.createdAt).toLocaleString()}
@@ -91,7 +110,9 @@ const OverviewTab: React.FC<Props> = ({ org }) => {
           />
         </Form.Group>
         <Form.Group className="col-md-6">
-          <Form.Label className="fw-semibold fs-10">Updated</Form.Label>
+          <Form.Label className="fw-semibold fs-10">
+            {t('adminClients.overview.labelUpdated')}
+          </Form.Label>
           <Form.Control
             readOnly
             value={new Date(org.updatedAt).toLocaleString()}
@@ -106,17 +127,19 @@ const OverviewTab: React.FC<Props> = ({ org }) => {
           disabled={!dirty || isLoading}
           onClick={onSave}
         >
-          {isLoading ? 'Saving…' : 'Save changes'}
+          {isLoading
+            ? t('adminClients.overview.saving')
+            : t('adminClients.overview.save')}
         </Button>
       </div>
     </Form>
   );
 };
 
-function extractError(err: unknown): string {
+function extractError(err: unknown, unknownLabel: string): string {
   if (err && typeof err === 'object' && 'data' in err) {
     const data = (err as { data?: { detail?: string; title?: string } }).data;
-    return data?.detail || data?.title || 'unknown error';
+    return data?.detail || data?.title || unknownLabel;
   }
   return String(err);
 }

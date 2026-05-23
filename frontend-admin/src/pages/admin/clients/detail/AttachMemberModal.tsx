@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Alert, Button, Form, Modal, Spinner } from 'react-bootstrap';
+import { useTranslation } from 'react-i18next';
 import { toast } from 'react-toastify';
 import { type Org, useAttachOrgMemberAdminMutation } from 'store/api/tenantApi';
 
@@ -13,13 +14,13 @@ interface Props {
 // roles are out of scope for v1 admin-attach — operators wanting a custom
 // role still drive that through the Role Management page after the user is
 // a member.
-const ROLE_OPTIONS = [
-  { value: 'org_member', label: 'Member' },
-  { value: 'org_viewer', label: 'Viewer (read-only)' },
-  { value: 'org_billing', label: 'Billing' },
-  { value: 'org_admin', label: 'Admin' },
-  { value: 'org_owner', label: 'Owner' }
-];
+const ROLE_VALUES = [
+  'org_member',
+  'org_viewer',
+  'org_billing',
+  'org_admin',
+  'org_owner'
+] as const;
 
 /**
  * AttachMemberModal — operator-side direct grant for tenant memberships.
@@ -30,10 +31,11 @@ const ROLE_OPTIONS = [
  * already knows the UUID.
  */
 const AttachMemberModal: React.FC<Props> = ({ org, show, onHide }) => {
+  const { t } = useTranslation();
   const [byUUID, setByUUID] = useState(false);
   const [userEmail, setUserEmail] = useState('');
   const [userUUID, setUserUUID] = useState('');
-  const [role, setRole] = useState('org_member');
+  const [role, setRole] = useState<string>('org_member');
   const [isOwner, setIsOwner] = useState(false);
   const [errMsg, setErrMsg] = useState<string | null>(null);
 
@@ -67,14 +69,14 @@ const AttachMemberModal: React.FC<Props> = ({ org, show, onHide }) => {
     if (byUUID) {
       const v = userUUID.trim();
       if (!v) {
-        setErrMsg('User UUID is required');
+        setErrMsg(t('adminClients.attachMember.errorUserUUIDRequired'));
         return;
       }
       body.userUuid = v;
     } else {
       const v = userEmail.trim();
       if (!v) {
-        setErrMsg('Email is required');
+        setErrMsg(t('adminClients.attachMember.errorEmailRequired'));
         return;
       }
       body.userEmail = v;
@@ -82,11 +84,17 @@ const AttachMemberModal: React.FC<Props> = ({ org, show, onHide }) => {
 
     try {
       await attach({ tenantId: org.id, body }).unwrap();
-      toast.success('Member attached');
+      toast.success(t('adminClients.attachMember.toastAttached'));
       reset();
       onHide();
     } catch (err: unknown) {
-      setErrMsg(extractError(err));
+      setErrMsg(
+        extractError(err, {
+          notFound: t('adminClients.attachMember.errorNotFound'),
+          conflict: t('adminClients.attachMember.errorConflict'),
+          generic: t('adminClients.attachMember.errorGeneric')
+        })
+      );
     }
   };
 
@@ -94,7 +102,9 @@ const AttachMemberModal: React.FC<Props> = ({ org, show, onHide }) => {
     <Modal show={show} onHide={handleHide} centered>
       <Form onSubmit={handleSubmit}>
         <Modal.Header closeButton>
-          <Modal.Title className="fs-9">Attach Member</Modal.Title>
+          <Modal.Title className="fs-9">
+            {t('adminClients.attachMember.title')}
+          </Modal.Title>
         </Modal.Header>
         <Modal.Body>
           {errMsg && (
@@ -107,14 +117,14 @@ const AttachMemberModal: React.FC<Props> = ({ org, show, onHide }) => {
             <Form.Check
               type="radio"
               id="lookup-email"
-              label="By email"
+              label={t('adminClients.attachMember.byEmail')}
               checked={!byUUID}
               onChange={() => setByUUID(false)}
             />
             <Form.Check
               type="radio"
               id="lookup-uuid"
-              label="By user UUID"
+              label={t('adminClients.attachMember.byUUID')}
               checked={byUUID}
               onChange={() => setByUUID(true)}
             />
@@ -122,43 +132,51 @@ const AttachMemberModal: React.FC<Props> = ({ org, show, onHide }) => {
 
           {byUUID ? (
             <Form.Group className="mb-3">
-              <Form.Label className="fs-10">User UUID</Form.Label>
+              <Form.Label className="fs-10">
+                {t('adminClients.attachMember.labelUserUUID')}
+              </Form.Label>
               <Form.Control
                 type="text"
                 value={userUUID}
                 onChange={e => setUserUUID(e.target.value)}
-                placeholder="e.g. 0192-…"
+                placeholder={t('adminClients.attachMember.placeholderUUID')}
                 autoFocus
               />
               <Form.Text className="text-muted fs-11">
-                Use when the user UUID is already known (cross-audience attach,
-                copied from another admin tool).
+                {t('adminClients.attachMember.helpUUID')}
               </Form.Text>
             </Form.Group>
           ) : (
             <Form.Group className="mb-3">
-              <Form.Label className="fs-10">User email</Form.Label>
+              <Form.Label className="fs-10">
+                {t('adminClients.attachMember.labelUserEmail')}
+              </Form.Label>
               <Form.Control
                 type="email"
                 value={userEmail}
                 onChange={e => setUserEmail(e.target.value)}
-                placeholder="user@example.com"
+                placeholder={t('adminClients.attachMember.placeholderEmail')}
                 autoFocus
               />
               <Form.Text className="text-muted fs-11">
-                Resolved against the{' '}
-                {org.kind === 'external' ? 'client' : 'operator'} user
-                collection (matches this tenant&apos;s tier).
+                {org.kind === 'external'
+                  ? t('adminClients.attachMember.helpEmailClient')
+                  : t('adminClients.attachMember.helpEmailOperator')}
               </Form.Text>
             </Form.Group>
           )}
 
           <Form.Group className="mb-3">
-            <Form.Label className="fs-10">Role</Form.Label>
+            <Form.Label className="fs-10">
+              {t('adminClients.attachMember.labelRole')}
+            </Form.Label>
             <Form.Select value={role} onChange={e => setRole(e.target.value)}>
-              {ROLE_OPTIONS.map(r => (
-                <option key={r.value} value={r.value}>
-                  {r.label} ({r.value})
+              {ROLE_VALUES.map(v => (
+                <option key={v} value={v}>
+                  {t('adminClients.attachMember.roleOption', {
+                    label: t(`adminClients.attachMember.roles.${v}`),
+                    value: v
+                  })}
                 </option>
               ))}
             </Form.Select>
@@ -168,28 +186,27 @@ const AttachMemberModal: React.FC<Props> = ({ org, show, onHide }) => {
             <Form.Check
               type="checkbox"
               id="attach-isowner"
-              label="Mark as tenant owner"
+              label={t('adminClients.attachMember.labelIsOwner')}
               checked={isOwner}
               onChange={e => setIsOwner(e.target.checked)}
             />
             <Form.Text className="text-muted fs-11">
-              Stamps the denormalized owner flag on the membership row. Does not
-              change the tenant&apos;s primary owner record.
+              {t('adminClients.attachMember.helpIsOwner')}
             </Form.Text>
           </Form.Group>
         </Modal.Body>
         <Modal.Footer>
           <Button variant="link" onClick={handleHide} disabled={isLoading}>
-            Cancel
+            {t('adminClients.attachMember.cancel')}
           </Button>
           <Button type="submit" variant="primary" disabled={isLoading}>
             {isLoading ? (
               <>
                 <Spinner animation="border" size="sm" className="me-2" />
-                Attaching…
+                {t('adminClients.attachMember.attaching')}
               </>
             ) : (
-              'Attach'
+              t('adminClients.attachMember.attach')
             )}
           </Button>
         </Modal.Footer>
@@ -198,7 +215,13 @@ const AttachMemberModal: React.FC<Props> = ({ org, show, onHide }) => {
   );
 };
 
-function extractError(err: unknown): string {
+interface ErrorLabels {
+  notFound: string;
+  conflict: string;
+  generic: string;
+}
+
+function extractError(err: unknown, labels: ErrorLabels): string {
   if (err && typeof err === 'object' && 'data' in err) {
     const data = (err as { data?: { detail?: string; title?: string } }).data;
     if (data?.detail) return data.detail;
@@ -206,10 +229,10 @@ function extractError(err: unknown): string {
   }
   if (err && typeof err === 'object' && 'status' in err) {
     const status = (err as { status?: number | string }).status;
-    if (status === 404) return 'User or tenant not found.';
-    if (status === 409) return 'User is already a member of this tenant.';
+    if (status === 404) return labels.notFound;
+    if (status === 409) return labels.conflict;
   }
-  return 'Attach failed. Check the input and try again.';
+  return labels.generic;
 }
 
 export default AttachMemberModal;

@@ -2,6 +2,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { Row, Col, Card, Badge, Button, Spinner } from 'react-bootstrap';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faArrowLeft, faDownload } from '@fortawesome/free-solid-svg-icons';
+import { useTranslation } from 'react-i18next';
 import { useGetSalesReportQuery } from '../../../store/api/salesApi';
 
 import runtimeConfig from 'config/environment';
@@ -15,6 +16,7 @@ const GRADE_COLORS: Record<string, string> = {
 };
 
 const SalesReportDetail = () => {
+  const { t } = useTranslation();
   const { uuid } = useParams<{ uuid: string }>();
   const navigate = useNavigate();
   const { data: report, isLoading } = useGetSalesReportQuery(uuid || '');
@@ -57,7 +59,10 @@ const SalesReportDetail = () => {
                 bg={GRADE_COLORS[report.grade] || 'secondary'}
                 className="fs-6"
               >
-                {report.score}/100 ({report.grade})
+                {t('sales.reports.detail.scoreBadge', {
+                  score: report.score,
+                  grade: report.grade
+                })}
               </Badge>
               <a
                 href={`${backendUrl}/v1/sales/reports/${report.uuid}/md`}
@@ -65,7 +70,7 @@ const SalesReportDetail = () => {
                 download
               >
                 <FontAwesomeIcon icon={faDownload} className="me-1" />
-                Download .md
+                {t('sales.reports.detail.downloadMd')}
               </a>
             </div>
           </Card.Header>
@@ -79,8 +84,10 @@ const SalesReportDetail = () => {
           </Card.Body>
           <Card.Footer className="text-muted">
             <small>
-              Generated {new Date(report.createdAt).toLocaleString()} | Job:{' '}
-              {report.jobUuid}
+              {t('sales.reports.detail.footer', {
+                date: new Date(report.createdAt).toLocaleString(),
+                job: report.jobUuid
+              })}
             </small>
           </Card.Footer>
         </Card>

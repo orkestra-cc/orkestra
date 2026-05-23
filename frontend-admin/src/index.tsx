@@ -3,6 +3,7 @@ import { RouterProvider } from 'react-router';
 import ReduxProvider from 'store/ReduxProvider';
 import AppProvider from 'providers/AppProvider';
 import { createAppRouter } from 'routes/createRouter';
+import './i18n';
 import 'helpers/initFA';
 import 'helpers/echartsSetup';
 

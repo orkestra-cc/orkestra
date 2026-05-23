@@ -1,9 +1,11 @@
 import { useState, FormEvent } from 'react';
 import { Alert, Button, Form } from 'react-bootstrap';
 import { Link, useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { useGetAuthPolicyQuery, useRegisterMutation } from 'store/api/authApi';
 
 const RegisterForm = () => {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const [register, { isLoading }] = useRegisterMutation();
   const [fullName, setFullName] = useState('');
@@ -25,21 +27,21 @@ const RegisterForm = () => {
     setLocalError(null);
 
     if (!fullName || !email || !password) {
-      setLocalError('Please fill in all required fields.');
+      setLocalError(t('auth.errors.fillRequiredFields'));
       return;
     }
     if (password.length < passwordMinLength) {
       setLocalError(
-        `Password must be at least ${passwordMinLength} characters.`
+        t('auth.errors.passwordTooShort', { count: passwordMinLength })
       );
       return;
     }
     if (password !== confirm) {
-      setLocalError('Passwords do not match.');
+      setLocalError(t('auth.errors.passwordMismatch'));
       return;
     }
     if (!accepted) {
-      setLocalError('You must accept the terms to continue.');
+      setLocalError(t('auth.errors.acceptTerms'));
       return;
     }
 
@@ -53,12 +55,10 @@ const RegisterForm = () => {
     } catch (err: unknown) {
       const anyErr = err as { data?: { detail?: string }; status?: number };
       if (anyErr?.status === 503) {
-        setLocalError(
-          'Sign-up is temporarily unavailable because email delivery is not configured. Please contact an administrator.'
-        );
+        setLocalError(t('auth.errors.signupUnavailable'));
       } else {
         setLocalError(
-          anyErr?.data?.detail || 'Unable to create account. Please try again.'
+          anyErr?.data?.detail || t('auth.errors.createAccountFailed')
         );
       }
     }
@@ -68,8 +68,7 @@ const RegisterForm = () => {
     <Form onSubmit={handleSubmit}>
       {!registrationEnabled && (
         <Alert variant="warning" className="mb-3">
-          Self-service registration is currently disabled. Please contact an
-          administrator if you need an account.
+          {t('auth.registrationDisabled')}
         </Alert>
       )}
       {localError && (
@@ -84,7 +83,7 @@ const RegisterForm = () => {
       )}
 
       <Form.Group className="mb-3">
-        <Form.Label>Full name</Form.Label>
+        <Form.Label>{t('auth.fullName')}</Form.Label>
         <Form.Control
           type="text"
           value={fullName}
@@ -95,7 +94,7 @@ const RegisterForm = () => {
       </Form.Group>
 
       <Form.Group className="mb-3">
-        <Form.Label>Email</Form.Label>
+        <Form.Label>{t('auth.email')}</Form.Label>
         <Form.Control
           type="email"
           value={email}
@@ -106,7 +105,7 @@ const RegisterForm = () => {
       </Form.Group>
 
       <Form.Group className="mb-3">
-        <Form.Label>Password</Form.Label>
+        <Form.Label>{t('auth.password')}</Form.Label>
         <Form.Control
           type="password"
           value={password}
@@ -116,12 +115,12 @@ const RegisterForm = () => {
           required
         />
         <Form.Text className="text-muted">
-          Use at least {passwordMinLength} characters.
+          {t('auth.passwordMinHint', { count: passwordMinLength })}
         </Form.Text>
       </Form.Group>
 
       <Form.Group className="mb-3">
-        <Form.Label>Confirm password</Form.Label>
+        <Form.Label>{t('auth.confirmPassword')}</Form.Label>
         <Form.Control
           type="password"
           value={confirm}
@@ -139,8 +138,10 @@ const RegisterForm = () => {
           onChange={e => setAccepted(e.target.checked)}
           label={
             <span className="fs--1">
-              I accept the <Link to="/terms">terms of service</Link> and{' '}
-              <Link to="/privacy">privacy policy</Link>
+              {t('auth.terms.acceptPrefix')}{' '}
+              <Link to="/terms">{t('auth.terms.termsLink')}</Link>{' '}
+              {t('auth.terms.and')}{' '}
+              <Link to="/privacy">{t('auth.terms.privacyLink')}</Link>
             </span>
           }
         />
@@ -153,13 +154,13 @@ const RegisterForm = () => {
           size="lg"
           disabled={isLoading || !registrationEnabled}
         >
-          {isLoading ? 'Creating account…' : 'Create account'}
+          {isLoading ? t('auth.registering') : t('auth.createAccount')}
         </Button>
       </div>
 
       <div className="text-center">
         <small className="text-muted">
-          Already have an account? <Link to="/login">Sign in</Link>
+          {t('auth.haveAccount')} <Link to="/login">{t('auth.loginHere')}</Link>
         </small>
       </div>
     </Form>

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Button, Form, Modal, Spinner } from 'react-bootstrap';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { Trans, useTranslation } from 'react-i18next';
 
 interface Props {
   show: boolean;
@@ -22,6 +23,7 @@ const EraseAccountModal: React.FC<Props> = ({
   userEmail,
   isProcessing
 }) => {
+  const { t } = useTranslation();
   const [stage, setStage] = useState<Stage>('warn');
   const [typed, setTyped] = useState('');
 
@@ -50,7 +52,7 @@ const EraseAccountModal: React.FC<Props> = ({
       <Modal.Header closeButton={!isProcessing} className="bg-danger-subtle">
         <Modal.Title className="fs-8 text-danger">
           <FontAwesomeIcon icon="trash" className="me-2" />
-          Delete your account
+          {t('userPrivacy.modal.title')}
         </Modal.Title>
       </Modal.Header>
 
@@ -58,37 +60,35 @@ const EraseAccountModal: React.FC<Props> = ({
         <>
           <Modal.Body className="fs-10">
             <p className="mb-3">
-              You are about to <strong>permanently delete</strong> your account
-              and every record tied to it. This is a GDPR right-to-erasure
-              action — the backend runs every registered PII producer and
-              hard-deletes the matching rows.
+              <Trans
+                i18nKey="userPrivacy.modal.warn.intro"
+                components={{ strong: <strong /> }}
+              />
             </p>
             <ul className="mb-3">
+              <li>{t('userPrivacy.modal.warn.bullet1')}</li>
+              <li>{t('userPrivacy.modal.warn.bullet2')}</li>
               <li>
-                Your user profile, sessions, MFA factors, and OAuth bindings are
-                wiped.
+                <Trans
+                  i18nKey="userPrivacy.modal.warn.bullet3"
+                  components={{ em: <em /> }}
+                />
               </li>
-              <li>
-                All refresh tokens are invalidated — you cannot sign back in.
-              </li>
-              <li>
-                Data you authored <em>about</em> other subjects (shared notes,
-                audit rows, workspace edits) is retained for regulatory and
-                audit-trail reasons.
-              </li>
-              <li>There is no undo, no grace period, and no recovery path.</li>
+              <li>{t('userPrivacy.modal.warn.bullet4')}</li>
             </ul>
             <p className="mb-0 text-body-secondary">
-              If you only want to stop receiving notifications, use{' '}
-              <strong>Account&nbsp;→&nbsp;Notifications</strong> instead.
+              <Trans
+                i18nKey="userPrivacy.modal.warn.stopNotifications"
+                components={{ strong: <strong /> }}
+              />
             </p>
           </Modal.Body>
           <Modal.Footer>
             <Button variant="outline-secondary" onClick={handleClose}>
-              Cancel
+              {t('userPrivacy.modal.cancel')}
             </Button>
             <Button variant="danger" onClick={() => setStage('type-email')}>
-              Continue
+              {t('userPrivacy.modal.continue')}
             </Button>
           </Modal.Footer>
         </>
@@ -97,9 +97,7 @@ const EraseAccountModal: React.FC<Props> = ({
       {stage === 'type-email' && (
         <>
           <Modal.Body className="fs-10">
-            <p className="mb-2">
-              Type your email below to confirm the account you are deleting:
-            </p>
+            <p className="mb-2">{t('userPrivacy.modal.typeEmail.prompt')}</p>
             <p className="fs-11 text-body-tertiary mb-3">
               <code>{userEmail}</code>
             </p>
@@ -108,23 +106,23 @@ const EraseAccountModal: React.FC<Props> = ({
               type="email"
               value={typed}
               onChange={e => setTyped(e.target.value)}
-              placeholder="you@example.com"
+              placeholder={t('userPrivacy.modal.typeEmail.placeholder')}
               isInvalid={typed.length > 0 && !emailMatches}
             />
             <Form.Control.Feedback type="invalid">
-              Email does not match.
+              {t('userPrivacy.modal.typeEmail.feedback')}
             </Form.Control.Feedback>
           </Modal.Body>
           <Modal.Footer>
             <Button variant="outline-secondary" onClick={handleClose}>
-              Cancel
+              {t('userPrivacy.modal.cancel')}
             </Button>
             <Button
               variant="danger"
               disabled={!emailMatches}
               onClick={() => setStage('final')}
             >
-              Continue
+              {t('userPrivacy.modal.continue')}
             </Button>
           </Modal.Footer>
         </>
@@ -135,13 +133,12 @@ const EraseAccountModal: React.FC<Props> = ({
           <Modal.Body className="fs-10">
             <div className="alert alert-danger mb-3">
               <FontAwesomeIcon icon="exclamation-triangle" className="me-2" />
-              This is the final confirmation. Pressing{' '}
-              <strong>Erase my account</strong> runs the deletion immediately.
+              <Trans
+                i18nKey="userPrivacy.modal.finalStep.alert"
+                components={{ strong: <strong /> }}
+              />
             </div>
-            <p className="mb-0">
-              You will be signed out and redirected to the login page. You will
-              not be able to log back in.
-            </p>
+            <p className="mb-0">{t('userPrivacy.modal.finalStep.body')}</p>
           </Modal.Body>
           <Modal.Footer>
             <Button
@@ -149,7 +146,7 @@ const EraseAccountModal: React.FC<Props> = ({
               onClick={handleClose}
               disabled={isProcessing}
             >
-              Cancel
+              {t('userPrivacy.modal.cancel')}
             </Button>
             <Button
               variant="danger"
@@ -159,10 +156,10 @@ const EraseAccountModal: React.FC<Props> = ({
               {isProcessing ? (
                 <>
                   <Spinner animation="border" size="sm" className="me-2" />
-                  Erasing…
+                  {t('userPrivacy.erase.submitting')}
                 </>
               ) : (
-                <>Erase my account</>
+                <>{t('userPrivacy.modal.finalSubmit')}</>
               )}
             </Button>
           </Modal.Footer>

@@ -1,5 +1,6 @@
 import { useState, FormEvent } from 'react';
 import { Alert, Button, Form, Modal } from 'react-bootstrap';
+import { Trans, useTranslation } from 'react-i18next';
 import {
   useAdminResetClientUserMfaMutation,
   useAdminResetUserMfaMutation,
@@ -30,6 +31,7 @@ const AdminResetMfaModal = ({
   onHide,
   tier = 'operator'
 }: Props) => {
+  const { t } = useTranslation();
   const [code, setCode] = useState('');
   const [useBackup, setUseBackup] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -50,7 +52,7 @@ const AdminResetMfaModal = ({
     setError(null);
     if (!user) return;
     if (!code.trim()) {
-      setError('Enter your authenticator code to authorize the reset.');
+      setError(t('adminUsers.mfaReset.errors.missingCode'));
       return;
     }
     try {
@@ -64,13 +66,12 @@ const AdminResetMfaModal = ({
         data?: { detail?: string; code?: string };
       };
       if (anyErr?.status === 401 && anyErr?.data?.code !== 'step_up_required') {
-        setError('Incorrect code. Please try again.');
+        setError(t('adminUsers.mfaReset.errors.incorrectCode'));
       } else if (anyErr?.status === 404) {
-        setError('This user has no MFA factor to reset.');
+        setError(t('adminUsers.mfaReset.errors.noFactor'));
       } else {
         setError(
-          anyErr?.data?.detail ??
-            'Could not reset the factor. Please try again.'
+          anyErr?.data?.detail ?? t('adminUsers.mfaReset.errors.generic')
         );
       }
     }
@@ -88,14 +89,16 @@ const AdminResetMfaModal = ({
   return (
     <Modal show={show} onHide={handleClose} centered>
       <Modal.Header closeButton={!busy}>
-        <Modal.Title>Reset MFA for {user.fullName || user.email}</Modal.Title>
+        <Modal.Title>
+          {t('adminUsers.mfaReset.title', {
+            user: user.fullName || user.email
+          })}
+        </Modal.Title>
       </Modal.Header>
       <Form onSubmit={handleSubmit} noValidate>
         <Modal.Body>
           <Alert variant="warning" className="mb-3">
-            This will delete the user&apos;s registered authenticator and backup
-            codes. They will be forced to enroll a new factor on their next
-            sign-in, subject to the 7-day grace window.
+            {t('adminUsers.mfaReset.warning')}
           </Alert>
 
           {error && (
@@ -110,13 +113,17 @@ const AdminResetMfaModal = ({
           )}
 
           <p className="fs-10 mb-3">
-            Enter <strong>your own</strong> authenticator code to authorize this
-            action.
+            <Trans
+              i18nKey="adminUsers.mfaReset.prompt"
+              components={{ strong: <strong /> }}
+            />
           </p>
 
           <Form.Group className="mb-2">
             <Form.Label>
-              {useBackup ? 'Your backup code' : 'Your authenticator code'}
+              {useBackup
+                ? t('adminUsers.mfaReset.yourBackup')
+                : t('adminUsers.mfaReset.yourCode')}
             </Form.Label>
             <Form.Control
               type="text"
@@ -125,7 +132,11 @@ const AdminResetMfaModal = ({
               autoFocus
               value={code}
               onChange={e => setCode(e.target.value)}
-              placeholder={useBackup ? 'XXXX-XXXX' : '123 456'}
+              placeholder={
+                useBackup
+                  ? t('adminUsers.mfaReset.backupPlaceholder')
+                  : t('adminUsers.mfaReset.authenticatorPlaceholder')
+              }
               required
             />
           </Form.Group>
@@ -138,8 +149,8 @@ const AdminResetMfaModal = ({
             }}
           >
             {useBackup
-              ? 'Use authenticator app instead'
-              : 'Use a backup code instead'}
+              ? t('adminUsers.mfaReset.useAuthenticator')
+              : t('adminUsers.mfaReset.useBackup')}
           </button>
         </Modal.Body>
         <Modal.Footer>
@@ -148,10 +159,12 @@ const AdminResetMfaModal = ({
             onClick={handleClose}
             disabled={busy}
           >
-            Cancel
+            {t('adminUsers.mfaReset.cancel')}
           </Button>
           <Button type="submit" variant="warning" disabled={busy}>
-            {busy ? 'Resetting…' : 'Reset MFA'}
+            {busy
+              ? t('adminUsers.mfaReset.submitting')
+              : t('adminUsers.mfaReset.submit')}
           </Button>
         </Modal.Footer>
       </Form>

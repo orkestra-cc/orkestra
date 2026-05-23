@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router';
 import { Card, Button, Alert, Row, Col, Spinner } from 'react-bootstrap';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faArrowLeft } from '@fortawesome/free-solid-svg-icons';
+import { useTranslation } from 'react-i18next';
 import { useGetCompanyLookupQuery } from 'store/api/companyApi';
 import SubtleBadge from 'components/common/SubtleBadge';
 import type { BadgeColor } from 'components/common/SubtleBadge';
@@ -12,6 +13,7 @@ import { formatItalianDate } from 'types/billing';
 import { EnrichmentPanel } from './CompanyEnrichment';
 
 const CompanyDetail = () => {
+  const { t } = useTranslation();
   const { companyId } = useParams<{ companyId: string }>();
   const navigate = useNavigate();
 
@@ -43,8 +45,8 @@ const CompanyDetail = () => {
     return (
       <Alert variant="warning" className="mt-3">
         {is404
-          ? 'Azienda non trovata.'
-          : 'Errore durante il caricamento. Riprova più tardi.'}
+          ? t('company.lookup.detail.errorNotFound')
+          : t('company.lookup.detail.errorGeneric')}
         <div className="mt-2">
           <Button
             variant="outline-secondary"
@@ -52,7 +54,7 @@ const CompanyDetail = () => {
             onClick={() => navigate('/company/lookup')}
           >
             <FontAwesomeIcon icon={faArrowLeft} className="me-1" />
-            Torna alla lista
+            {t('company.lookup.detail.backToList')}
           </Button>
         </div>
       </Alert>
@@ -62,6 +64,7 @@ const CompanyDetail = () => {
   if (!displayResult) return null;
 
   const result = displayResult;
+  const dash = t('company.lookup.fields.dash');
 
   return (
     <>
@@ -73,7 +76,7 @@ const CompanyDetail = () => {
           onClick={() => navigate('/company/lookup')}
         >
           <FontAwesomeIcon icon={faArrowLeft} className="me-1" />
-          Ricerca Aziende
+          {t('company.lookup.detail.back')}
         </Button>
       </div>
 
@@ -98,13 +101,15 @@ const CompanyDetail = () => {
       {/* Info card */}
       <Card className="mb-3">
         <Card.Header>
-          <h6 className="mb-0">Informazioni</h6>
+          <h6 className="mb-0">{t('company.lookup.detail.infoTitle')}</h6>
         </Card.Header>
         <Card.Body>
           <Row className="g-3">
             <Col sm={6} md={4}>
               <div className="mb-2">
-                <small className="text-muted d-block">Codice Fiscale</small>
+                <small className="text-muted d-block">
+                  {t('company.lookup.fields.taxCode')}
+                </small>
                 <span className="font-monospace fw-semibold">
                   {result.taxCode}
                 </span>
@@ -112,7 +117,9 @@ const CompanyDetail = () => {
             </Col>
             <Col sm={6} md={4}>
               <div className="mb-2">
-                <small className="text-muted d-block">Partita IVA</small>
+                <small className="text-muted d-block">
+                  {t('company.lookup.fields.vatCode')}
+                </small>
                 <span className="font-monospace fw-semibold">
                   {result.vatCode}
                 </span>
@@ -120,15 +127,19 @@ const CompanyDetail = () => {
             </Col>
             <Col sm={6} md={4}>
               <div className="mb-2">
-                <small className="text-muted d-block">Codice SDI</small>
+                <small className="text-muted d-block">
+                  {t('company.lookup.fields.sdiCode')}
+                </small>
                 <span className="font-monospace fw-semibold">
-                  {result.sdiCode || '-'}
+                  {result.sdiCode || dash}
                 </span>
               </div>
             </Col>
             <Col sm={6} md={4}>
               <div className="mb-2">
-                <small className="text-muted d-block">Indirizzo</small>
+                <small className="text-muted d-block">
+                  {t('company.lookup.fields.address')}
+                </small>
                 <span>
                   {result.address.street}
                   {result.address.streetNumber
@@ -139,7 +150,9 @@ const CompanyDetail = () => {
             </Col>
             <Col sm={6} md={4}>
               <div className="mb-2">
-                <small className="text-muted d-block">Sede</small>
+                <small className="text-muted d-block">
+                  {t('company.lookup.fields.headquarters')}
+                </small>
                 <span>
                   {result.address.zipCode} {result.address.town}
                   {result.address.province
@@ -150,11 +163,13 @@ const CompanyDetail = () => {
             </Col>
             <Col sm={6} md={4}>
               <div className="mb-2">
-                <small className="text-muted d-block">Data Registrazione</small>
+                <small className="text-muted d-block">
+                  {t('company.lookup.fields.registrationDate')}
+                </small>
                 <span>
                   {result.registrationDate
                     ? formatItalianDate(result.registrationDate)
-                    : '-'}
+                    : dash}
                 </span>
               </div>
             </Col>
@@ -165,7 +180,7 @@ const CompanyDetail = () => {
       {/* Enrichment card */}
       <Card>
         <Card.Header>
-          <h6 className="mb-0">Arricchimento Dati</h6>
+          <h6 className="mb-0">{t('company.lookup.detail.enrichmentTitle')}</h6>
         </Card.Header>
         <Card.Body>
           <EnrichmentPanel company={result} onEnriched={setDisplayResult} />
