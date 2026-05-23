@@ -1,0 +1,9 @@
+{
+  "label": "Addons",
+  "position": 2,
+  "link": {
+    "type": "generated-index",
+    "title": "Optional addons",
+    "description": "Auto-synced from each addon's public repo README. Toggle these at /admin/modules."
+  }
+}

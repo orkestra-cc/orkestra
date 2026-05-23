@@ -1,0 +1,27 @@
+---
+title: Architecture Decision Records
+description: The architectural decisions that shape Orkestra.
+sidebar_position: 1
+---
+
+# Architecture Decision Records
+
+ADRs live in the [monorepo](https://github.com/orkestra-cc/orkestra/tree/main/docs/adr) under `docs/adr/`. Public ADRs are opt-in: an ADR is synced into this section if its frontmatter contains `public: true`.
+
+:::info Convention
+Authoring new ADRs? Add this to the frontmatter when the ADR is ready to share publicly:
+
+```yaml
+---
+title: ADR-NNNN — Decision title
+status: accepted
+public: true
+---
+```
+
+ADRs without `public: true` stay in the monorepo and don't appear here.
+:::
+
+## Why opt-in?
+
+Some ADRs reference incidents, third-party contracts, or in-flight commercial decisions. The opt-in flag forces a deliberate "OK to share" review without forcing a backfill audit on every existing ADR.

@@ -1,0 +1,30 @@
+---
+title: Module Configuration
+sidebar_position: 3
+---
+
+# Module Configuration
+
+Every optional module exposes a `ConfigSchema()` describing its env vars and secret fields. The `ConfigService` (DB-backed in MongoDB, Redis-cached with a 30 s TTL) stores live config and decrypts AES-256-GCM-encrypted secrets on access.
+
+## The admin UI
+
+`/admin/modules` lists every module compiled into the running binary. For each one you can:
+
+- Toggle it on / off.
+- Edit its config (env vars, secrets).
+- Maintain **per-environment profiles** (e.g. `sandbox` vs `production` — the active environment is the one whose values get loaded).
+- Inspect health.
+
+```http
+GET    /v1/admin/modules
+PATCH  /v1/admin/modules
+GET    /v1/admin/modules/health
+GET    /v1/admin/modules/{name}/environments/{env}
+PATCH  /v1/admin/modules/{name}/environments/{env}
+PUT    /v1/admin/modules/{name}/active-environment
+```
+
+## Secrets
+
+Fields flagged `Secret: true` in a module's schema are stored AES-256-GCM-encrypted in MongoDB and never returned in API responses. They are decrypted only inside the module process at use time.

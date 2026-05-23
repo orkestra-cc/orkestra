@@ -1,0 +1,16 @@
+---
+title: Stripe & Payments
+sidebar_position: 6
+---
+
+# Stripe & Payments
+
+The `payments` module wraps the Stripe gateway. The `subscriptions` module sits on top of it, providing the catalog of services Tier-2 clients can subscribe to.
+
+:::note 🚧 Draft
+Stripe product / price setup, webhook configuration, test card flows.
+:::
+
+## Why these two modules matter architecturally
+
+`payments` and `subscriptions` are **not ordinary feature addons** — they're the mechanism by which Tier-2 (external client) tenants consume Tier-1-hosted services. See [Two-tier tenancy](/architecture/tenancy-model).

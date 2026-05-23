@@ -1,0 +1,27 @@
+---
+title: Installation
+sidebar_position: 2
+---
+
+# Installation
+
+:::note 🚧 Draft
+This page needs fleshing out. The TUI installer (`./orkestra.sh`), full-stack dev compose, and AI sidecar split all deserve their own walkthroughs.
+:::
+
+## Prerequisites
+
+- Docker 24+ with Compose v2
+- A `docker/.env` file (copy from `docker/.env.example` in the monorepo)
+- Network reachability to GHCR (`ghcr.io`) for SKU images
+
+## Three ways to run Orkestra
+
+1. **SKU image (recommended for evaluation)** — pull a pre-built image; see [Getting Started](/getting-started).
+2. **Full development stack** — build from source with AIR hot reload. Requires the Chainguard `dhi.io` registry.
+3. **AI sidecar split** — optional second binary for the AI module chain; toggled by `AI_SERVICE_URL`.
+
+```bash
+# From the monorepo root — interactive TUI menu
+./orkestra.sh
+```

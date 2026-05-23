@@ -1,0 +1,29 @@
+---
+title: ConfigService
+sidebar_position: 4
+---
+
+# `ConfigService`
+
+Stores per-module configuration in MongoDB with a 30-second Redis cache. Secret fields are AES-256-GCM-encrypted at rest and never returned through public API responses.
+
+Each module declares its schema via `ConfigSchema()`:
+
+```go
+func (m *Module) ConfigSchema() module.ConfigSchema {
+    return module.ConfigSchema{
+        Fields: []module.ConfigField{
+            {Key: "SMTP_HOST", EnvVar: "SMTP_HOST"},
+            {Key: "SMTP_PASSWORD", EnvVar: "SMTP_PASSWORD", Secret: true},
+        },
+    }
+}
+```
+
+## Environment profiles
+
+Each module can maintain multiple named environments (e.g. `sandbox`, `production`). The "active" environment is the one whose values get loaded. Switching is a single API call:
+
+```http
+PUT /v1/admin/modules/{name}/active-environment
+```

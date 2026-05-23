@@ -1,0 +1,9 @@
+{
+  "label": "Core modules",
+  "position": 1,
+  "link": {
+    "type": "generated-index",
+    "title": "Core modules",
+    "description": "The 6 modules that always load — user, notification, tenant, authz, auth, navigation."
+  }
+}

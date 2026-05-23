@@ -1,0 +1,26 @@
+---
+title: SDK Reference
+description: The public Go contract every Orkestra module depends on.
+sidebar_position: 1
+---
+
+# SDK Reference
+
+The Orkestra SDK (`github.com/orkestra-cc/orkestra-sdk`) is the **public contract** every module — core or addon — programs against. It defines:
+
+- The [`Module`](/sdk/module-interface) lifecycle interface (`Init`, `RegisterRoutes`, `Start`, `Stop`, `HealthCheck`).
+- The [`ServiceRegistry`](/sdk/service-registry) — a typed key-value store for cross-module service sharing.
+- The [`ConfigService`](/sdk/config-service) — DB-backed + Redis-cached config with AES-256-GCM-encrypted secrets.
+- The [`shared/iface`](/sdk/shared-iface) consumer-facing interfaces (`UserProvider`, `NotificationSender`, `PDFProvider`, `GraphProvider`, `AIModelProvider`, `RAGQueryProvider`, `JWTProvider`) that prevent direct cross-module imports.
+
+## Module status
+
+| Item               | Value                                                 |
+| ------------------ | ----------------------------------------------------- |
+| Module path        | `github.com/orkestra-cc/orkestra-sdk`                 |
+| Latest version     | `v0.4.0`                                              |
+| Repo               | [`orkestra-cc/orkestra-sdk`](https://github.com/orkestra-cc/orkestra-sdk) |
+
+## Build your first addon
+
+See [Build your first addon](/sdk/build-your-first-addon).

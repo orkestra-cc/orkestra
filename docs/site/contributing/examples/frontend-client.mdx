@@ -1,0 +1,23 @@
+---
+title: "Example: frontend-client"
+sidebar_position: 1
+---
+
+# Example: `frontend-client`
+
+`frontend-client/` in the monorepo is a **reference Tier-2 client SPA** — a working consumer of the public client API surface (ADR-0003). If you're building your own customer-facing frontend against Orkestra, this is the cleanest example to read.
+
+## What's interesting
+
+- **API surface**: only the public client endpoints (no `/admin/*`, no internal-only routes).
+- **Auth flow**: standard external-client registration + Stripe-backed subscription onboarding.
+- **i18n from day one**: lives at `app.orkestra.cc` and ships multi-language.
+- **Sibling SPA**: separate Vite app, separate Docker container, shares no build artifacts with the admin console.
+
+## Read it
+
+[`orkestra-cc/orkestra/tree/main/frontend-client/`](https://github.com/orkestra-cc/orkestra/tree/main/frontend-client) — start with `src/api/` for the consumer surface and `src/routes/` for the registration / subscription flows.
+
+:::note
+This page is a **pointer**, not a tutorial. It exists so developers building Tier-2 clients can find a known-good reference. There is no end-customer documentation on this docs site — Tier-2 clients consume the API, they don't read these docs.
+:::

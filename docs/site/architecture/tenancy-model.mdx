@@ -1,0 +1,34 @@
+---
+title: Two-Tier Tenancy Model
+sidebar_position: 2
+---
+
+# Two-Tier Tenancy Model
+
+Orkestra operates on **two distinct tiers of tenants**. This distinction is load-bearing for every design decision — data isolation, RBAC scope, billing, and module activation all depend on which tier a request acts in.
+
+## Tier 1 — Internal tenants (operator side)
+
+The companies that **run Orkestra**. For each internal tenant the platform manages:
+
+- Internal users, roles, and RBAC
+- The internal company's own electronic invoicing (FatturaPA/SDI), billing, documents
+- Which modules / addons are enabled for that tenant
+- Operational admin (module config, audit logs, compliance evidence)
+
+## Tier 2 — External client tenants (customer side)
+
+**External clients register on the platform**, and each external client can itself be a multi-tenant organization (multiple sub-tenants / workspaces under one client). For each external client:
+
+- Client registration and onboarding
+- The client's own users, roles, sub-tenants
+- **Subscriptions to the services Orkestra exposes** (via the `subscriptions` + `payments` modules — Stripe-backed recurring billing)
+- Usage of the subscribed services (AI agents, RAG, document generation, …) scoped to the client's data
+
+The `subscriptions` and `payments` modules are **not ordinary feature addons** — they are the mechanism by which Tier-2 clients consume Tier-1-hosted services. Treat them as architecturally load-bearing.
+
+## Implications for contributors
+
+- Every new endpoint must declare **which tier it serves** (internal operator, external client, or both) and enforce org-scoped RBAC accordingly.
+- Every new collection / table must carry a tenant scope (internal org ID *or* external client org ID) and be indexed / queried with that scope — never cross-tenant by default.
+- Module enable/disable is **per internal tenant**, but service consumption is gated **per external client subscription**. Do not conflate the two.

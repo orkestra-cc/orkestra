@@ -168,6 +168,7 @@ Load order (topologically sorted by `Dependencies()`): `user` → `notification`
 - **[`/mobile/`](mobile/CLAUDE.md)** — Flutter cross-platform app
 - **[`/docker/`](docker/CLAUDE.md)** — Docker Compose configs (dev/staging/prod/infra)
 - **[`/docs/Authentication_flow.md`](docs/Authentication_flow.md)** — Email/password + OAuth 2.1 + RBAC details
+- **[`/docs/site/`](docs/site/README.md)** — Canonical source for [docs.orkestra.cc](https://docs.orkestra.cc) hand-written pages. The Docusaurus repo ([orkestra-cc/orkestra-docs](https://github.com/orkestra-cc/orkestra-docs)) mirrors this tree on every build via `npm run sync:site` — edits live here, not there.
 
 ## Quick Start
 

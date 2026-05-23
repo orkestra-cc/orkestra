@@ -1,0 +1,35 @@
+---
+title: Architecture
+description: How Orkestra is shaped.
+sidebar_position: 1
+---
+
+# Architecture
+
+Orkestra is a **modular monolith** with an optional sidecar split for AI workloads. Three things matter most to understand the design:
+
+1. **[Two-tier tenancy](/architecture/tenancy-model)** — operators run the platform; external clients subscribe to services it exposes. Every endpoint declares which tier it serves.
+2. **[Module lifecycle](/architecture/module-lifecycle)** — two layers decide what runs: build tags (what's *installable*) and runtime config (what's *on*).
+3. **[AI sidecar split](/architecture/ai-sidecar-split)** — the AI module chain can optionally run as a standalone service controlled by a single env var.
+
+```mermaid
+flowchart LR
+  subgraph Tier1["Tier 1 — Internal tenants (operators)"]
+    Admin[Admin UI<br/>/admin/modules]
+    Mods[Modules<br/>billing · documents · ai · …]
+  end
+  subgraph Tier2["Tier 2 — External clients"]
+    Client[Client signup]
+    Subs[Subscriptions<br/>+ Payments]
+  end
+  Admin --> Mods
+  Client --> Subs
+  Subs -.consumes.-> Mods
+```
+
+## Pages
+
+- [Two-tier tenancy model](/architecture/tenancy-model)
+- [Module lifecycle](/architecture/module-lifecycle)
+- [AI sidecar split](/architecture/ai-sidecar-split)
+- [Authentication flow](/architecture/authentication-flow)

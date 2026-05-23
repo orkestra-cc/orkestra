@@ -1,0 +1,18 @@
+---
+title: ServiceRegistry
+sidebar_position: 3
+---
+
+# `ServiceRegistry`
+
+A typed key-value store that lets modules share services without importing each other's internal packages.
+
+```go
+// Publish a service in your module's Init():
+registry.Register("user.UserProvider", myUserProvider)
+
+// Consume it from another module via the typed getter:
+userProvider := module.MustGetTyped[iface.UserProvider](registry, "user.UserProvider")
+```
+
+Combined with the [`shared/iface`](/sdk/shared-iface) interfaces, this is how Orkestra avoids cross-module concrete imports: every consumer programs against an interface, every producer publishes one.

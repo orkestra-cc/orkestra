@@ -1,0 +1,20 @@
+---
+title: Build Your First Addon
+sidebar_position: 6
+---
+
+# Build Your First Addon
+
+:::note 🚧 Draft
+End-to-end walkthrough: create a new repo from the addon template, implement the `Module` interface, declare collections, write a `catalog_<name>.go` in the monorepo, build with the right tags, enable at runtime.
+:::
+
+## High-level steps
+
+1. **Scaffold** — clone `orkestra-cc/orkestra-addon-template` (or copy the structure of a small existing addon like `company`).
+2. **Implement `Module`** — `Init`, `RegisterRoutes`, `Start`, `Stop`, `HealthCheck`, plus the metadata methods.
+3. **Register in the monorepo** — add `cmd/server/catalog_<name>.go` with the build tag `//go:build !no_addons || addon_<name>`.
+4. **Hook into a SKU** — update the relevant `make build-<profile>` target if you want it in a curated SKU.
+5. **Configure at `/admin/modules`** — enable it; the registry hot-loads.
+
+For the architectural reasons behind this shape, see [Module lifecycle](/architecture/module-lifecycle).

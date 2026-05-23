@@ -1,0 +1,26 @@
+---
+title: Contributing
+description: How to contribute to Orkestra and its ecosystem.
+sidebar_position: 1
+---
+
+# Contributing
+
+Orkestra is an OSS ecosystem made up of a **monorepo** (core platform, SDK shims, dev frontends) and a growing set of **addon repos** (`orkestra-cc/orkestra-billing`, `…-documents`, `…-payments`, etc.). Most contribution paths start with the monorepo.
+
+## Pages
+
+- **[CI & make targets](/contributing/ci-and-make)** — local reproduction of CI.
+- **[Adding an addon](/contributing/adding-an-addon)** — full walkthrough.
+- **[Example: frontend-client](/contributing/examples/frontend-client)** — a reference Tier-2 SPA against the client API surface.
+
+## How these docs are structured
+
+| Content                  | Source of truth                              | How it gets here                |
+| ------------------------ | -------------------------------------------- | ------------------------------- |
+| Tutorials, guides, refs  | This repo (hand-written MDX)                 | PR to `orkestra-cc/orkestra-docs` |
+| Addon module pages       | Each addon repo's `README.md`                | `npm run sync:modules` (nightly)|
+| Public ADRs              | Monorepo `docs/adr/*.md` with `public: true` | `npm run sync:adrs` (nightly)   |
+| OpenAPI reference        | `enterprise` SKU's `/openapi.json`           | `npm run sync:openapi` (CI)     |
+
+If you're fixing a typo on a module's page: PR the addon repo's README, not this docs repo.
