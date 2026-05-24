@@ -1,26 +1,27 @@
-import { Route, Routes } from 'react-router-dom';
-import { Layout } from '@/components/Layout';
-import { RequireAuth } from '@/auth/RequireAuth';
-import { HomePage } from '@/pages/HomePage';
-import { CatalogPage } from '@/pages/CatalogPage';
-import { CatalogServicePage } from '@/pages/CatalogServicePage';
-import { SignupPage } from '@/pages/SignupPage';
-import { VerifyEmailPage } from '@/pages/VerifyEmailPage';
-import { LoginPage } from '@/pages/LoginPage';
-import { ForgotPasswordPage } from '@/pages/ForgotPasswordPage';
-import { ResetPasswordPage } from '@/pages/ResetPasswordPage';
-import { AcceptInvitePage } from '@/pages/AcceptInvitePage';
-import { AccountPage } from '@/pages/AccountPage';
-import { AccountSecurityPage } from '@/pages/AccountSecurityPage';
-import { BillingProfilePage } from '@/pages/BillingProfilePage';
-import { MfaEnrolPage } from '@/pages/MfaEnrolPage';
-import { SubscribePage } from '@/pages/SubscribePage';
-import { SubscribeReturnPage } from '@/pages/SubscribeReturnPage';
-import { SubscriptionsPage } from '@/pages/SubscriptionsPage';
-import { SubscriptionDetailPage } from '@/pages/SubscriptionDetailPage';
-import { TransactionsPage } from '@/pages/TransactionsPage';
-import { PaymentMethodsPage } from '@/pages/PaymentMethodsPage';
-import { NotFoundPage } from '@/pages/NotFoundPage';
+import { Route, Routes } from "react-router-dom";
+import { Layout } from "@/components/Layout";
+import { RequireAuth } from "@/auth/RequireAuth";
+import { HomePage } from "@/pages/HomePage";
+import { CatalogPage } from "@/pages/CatalogPage";
+import { CatalogServicePage } from "@/pages/CatalogServicePage";
+import { SignupPage } from "@/pages/SignupPage";
+import { VerifyEmailPage } from "@/pages/VerifyEmailPage";
+import { LoginPage } from "@/pages/LoginPage";
+import { ForgotPasswordPage } from "@/pages/ForgotPasswordPage";
+import { ResetPasswordPage } from "@/pages/ResetPasswordPage";
+import { AcceptInvitePage } from "@/pages/AcceptInvitePage";
+import { AccountPage } from "@/pages/AccountPage";
+import { AccountProfilePage } from "@/pages/AccountProfilePage";
+import { AccountSecurityPage } from "@/pages/AccountSecurityPage";
+import { BillingProfilePage } from "@/pages/BillingProfilePage";
+import { MfaEnrolPage } from "@/pages/MfaEnrolPage";
+import { SubscribePage } from "@/pages/SubscribePage";
+import { SubscribeReturnPage } from "@/pages/SubscribeReturnPage";
+import { SubscriptionsPage } from "@/pages/SubscriptionsPage";
+import { SubscriptionDetailPage } from "@/pages/SubscriptionDetailPage";
+import { TransactionsPage } from "@/pages/TransactionsPage";
+import { PaymentMethodsPage } from "@/pages/PaymentMethodsPage";
+import { NotFoundPage } from "@/pages/NotFoundPage";
 
 export function App() {
   return (
@@ -40,6 +41,14 @@ export function App() {
           element={
             <RequireAuth>
               <AccountPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/account/profile"
+          element={
+            <RequireAuth>
+              <AccountProfilePage />
             </RequireAuth>
           }
         />

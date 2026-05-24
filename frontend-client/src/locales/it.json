@@ -148,6 +148,10 @@
     "verified": "Sì",
     "notVerified": "No",
     "role": "Ruolo",
+    "profile": {
+      "title": "Immagine del profilo",
+      "cta": "Carica un'immagine, scegline una da un account collegato o usa le tue iniziali."
+    },
     "security": {
       "title": "Sicurezza",
       "cta": "Cambia password e gestisci la 2FA"
@@ -409,6 +413,43 @@
     "switch": "Lingua",
     "it": "Italiano",
     "en": "English"
+  },
+  "accountProfile": {
+    "title": "Immagine del profilo",
+    "subtitle": "Carica una tua immagine, scegline una da un account collegato oppure usa le tue iniziali.",
+    "sources": {
+      "initials": "Stai mostrando le tue iniziali",
+      "uploaded": "Stai usando un'immagine caricata",
+      "oauth_google": "Stai usando l'immagine del profilo Google",
+      "oauth_apple": "Stai usando l'immagine del profilo Apple",
+      "oauth_github": "Stai usando l'immagine del profilo GitHub",
+      "oauth_discord": "Stai usando l'immagine del profilo Discord"
+    },
+    "upload": {
+      "label": "Carica un'immagine",
+      "choose": "Scegli un'immagine",
+      "uploading": "Caricamento…",
+      "hint": "PNG, JPEG o WebP — fino a 2 MB. Ritagliamo a quadrato e ridimensioniamo a 512×512 prima del caricamento."
+    },
+    "oauth": {
+      "label": "Usa l'immagine di un account collegato",
+      "appleDisabled": "Apple non condivide le immagini del profilo."
+    },
+    "initials": {
+      "label": "Nessuna immagine",
+      "reset": "Mostra le mie iniziali",
+      "hint": "Rimuove qualsiasi immagine caricata e mostra le tue iniziali su un colore derivato dal tuo account."
+    },
+    "toasts": {
+      "uploaded": "Immagine del profilo aggiornata.",
+      "updated": "Origine dell'avatar modificata."
+    },
+    "errors": {
+      "invalidMime": "Scegli un'immagine PNG, JPEG o WebP.",
+      "tooLarge": "L'immagine supera il limite di 2 MB. Prova con un file più piccolo.",
+      "uploadFailed": "Caricamento non riuscito. Riprova.",
+      "updateFailed": "Impossibile cambiare l'origine dell'avatar."
+    }
   },
   "loading": "Caricamento…",
   "error": {
