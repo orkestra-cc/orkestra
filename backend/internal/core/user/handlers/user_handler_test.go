@@ -149,6 +149,12 @@ func (f *fakeUserService) ValidateUserExists(context.Context, string) (bool, err
 func (f *fakeUserService) ValidateUserActive(context.Context, string) (bool, error) {
 	panic("unused: ValidateUserActive")
 }
+func (f *fakeUserService) SetAvatarSource(context.Context, string, string, string) (string, error) {
+	panic("unused: SetAvatarSource")
+}
+func (f *fakeUserService) UpdateOAuthLinkData(context.Context, string, models.OAuthProvider, string, map[string]interface{}) error {
+	panic("unused: UpdateOAuthLinkData")
+}
 
 // assertStatus pulls the status code out of a huma.StatusError. Fails
 // the test if err isn't a StatusError or the code doesn't match.

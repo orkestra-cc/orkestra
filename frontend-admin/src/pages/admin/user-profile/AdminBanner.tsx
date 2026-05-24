@@ -1,7 +1,6 @@
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { useTranslation } from 'react-i18next';
 import coverSrc from 'assets/img/generic/bg-1.jpg';
-import defaultAvatar from 'assets/img/team/2.jpg';
 import Flex from 'components/common/Flex';
 import VerifiedBadge from 'components/common/VerifiedBadge';
 
@@ -55,10 +54,7 @@ const AdminBanner: React.FC<AdminBannerProps> = ({ user }) => {
 
   return (
     <ProfileBanner>
-      <ProfileBanner.Header
-        avatar={user.avatar || defaultAvatar}
-        coverSrc={coverSrc}
-      />
+      <ProfileBanner.Header user={user} coverSrc={coverSrc} />
       <ProfileBanner.Body>
         <Row>
           <Col lg={8}>

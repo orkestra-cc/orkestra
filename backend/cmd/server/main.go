@@ -23,6 +23,7 @@ import (
 	"github.com/orkestra-cc/orkestra-sdk/module"
 	"github.com/orkestra/backend/internal/core/auth/services"
 	authzServices "github.com/orkestra/backend/internal/core/authz/services"
+	"github.com/orkestra/backend/internal/shared/blob"
 	"github.com/orkestra/backend/internal/shared/config"
 	"github.com/orkestra/backend/internal/shared/container"
 	"github.com/orkestra/backend/internal/shared/database"
@@ -130,6 +131,43 @@ func main() {
 	// register themselves during their own Init; compliance reads it when
 	// servicing DSR requests. See iface.PIIProducerRegistry.
 	svcRegistry.Register(module.ServicePIIProducerRegistry, iface.NewPIIProducerRegistry())
+
+	// Object storage (S3-compatible; defaults to RustFS in dev/staging).
+	// Optional — when access key/secret are empty the backend boots
+	// without ServiceBlobStore registered and the user module's avatar
+	// upload endpoint degrades to 503 storage_unavailable. OAuth-source
+	// and initials avatars still work.
+	if cfg.Storage.AccessKey != "" && cfg.Storage.SecretKey != "" && cfg.Storage.Bucket != "" {
+		storeCtx, storeCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		store, err := blob.NewS3(storeCtx, blob.S3Config{
+			Endpoint:       cfg.Storage.Endpoint,
+			Region:         cfg.Storage.Region,
+			Bucket:         cfg.Storage.Bucket,
+			AccessKey:      cfg.Storage.AccessKey,
+			SecretKey:      cfg.Storage.SecretKey,
+			ForcePathStyle: cfg.Storage.ForcePathStyle,
+			EnsureBucket:   cfg.Storage.EnsureBucket,
+		})
+		storeCancel()
+		if err != nil {
+			logger.Warn("blob storage unavailable — avatar uploads will return 503",
+				slog.String("endpoint", cfg.Storage.Endpoint),
+				slog.String("error", err.Error()))
+		} else {
+			cached := blob.NewCached(store, redisClient, blob.CachedConfig{
+				SignedGetTTL: time.Hour,
+				CacheBuffer:  10 * time.Minute,
+				KeyPrefix:    "blob:url:",
+			})
+			svcRegistry.Register(module.ServiceBlobStore, cached)
+			logger.Info("blob storage ready",
+				slog.String("endpoint", cfg.Storage.Endpoint),
+				slog.String("bucket", cfg.Storage.Bucket))
+		}
+	} else {
+		logger.Info("blob storage not configured (STORAGE_ACCESS_KEY/SECRET empty) — avatar uploads disabled")
+	}
+
 	modRegistry := module.NewModuleRegistry(logger)
 	modRegistry.SetConfigService(configService)
 	modRegistry.SetContainerManager(container.NewManager(logger))

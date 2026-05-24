@@ -111,6 +111,15 @@ services:
       # between Enqueue and worker pickup.
       MARKETING_IMPORT_SPOOL_DIR: /app/marketing-spool
 
+      # Object storage (RustFS — S3-compatible). Backs avatar uploads.
+      STORAGE_ENDPOINT: ${STORAGE_ENDPOINT:-http://orkestra-rustfs:9000}
+      STORAGE_REGION: ${STORAGE_REGION:-us-east-1}
+      STORAGE_BUCKET: ${STORAGE_BUCKET:-orkestra-avatars}
+      STORAGE_ACCESS_KEY: ${STORAGE_ACCESS_KEY:-orkestra}
+      STORAGE_SECRET_KEY: ${STORAGE_SECRET_KEY:-changeme-rustfs}
+      STORAGE_FORCE_PATH_STYLE: ${STORAGE_FORCE_PATH_STYLE:-true}
+      STORAGE_ENSURE_BUCKET: ${STORAGE_ENSURE_BUCKET:-true}
+
       # Hot reload
       AIR_BUILD_CMD: go build -o ./tmp/main ./cmd/server
       AIR_BIN: ./tmp/main

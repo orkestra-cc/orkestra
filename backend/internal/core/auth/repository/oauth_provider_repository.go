@@ -27,6 +27,11 @@ type OAuthProviderRepository interface {
 	SetPrimaryProvider(ctx context.Context, userUUID string, provider models.OAuthProvider) error
 	UpdateRefreshToken(ctx context.Context, uuid string, refreshToken string) error
 	UpdateOAuthTokens(ctx context.Context, uuid string, accessToken, refreshToken string, accessTokenExpiresAt, refreshTokenExpiresAt *time.Time, scopes []string) error
+	// UpdateMetadata replaces the document's metadata map. Used on
+	// OAuth callback link-reuse so the cached `picture` URL refreshes
+	// every time the user signs in via the same provider (the IdP may
+	// have rotated their avatar between sessions).
+	UpdateMetadata(ctx context.Context, uuid string, metadata map[string]interface{}) error
 
 	// Unlink operations
 	UnlinkProvider(ctx context.Context, userUUID string, provider models.OAuthProvider) error
@@ -232,6 +237,32 @@ func (r *oauthProviderRepository) UpdateLastUsed(ctx context.Context, uuid strin
 
 	fmt.Printf("[REPO_DEBUG] Last used timestamp updated successfully - Timestamp: %v\n", now)
 	fmt.Printf("[REPO_DEBUG] <== UpdateLastUsed completed\n")
+	return nil
+}
+
+// UpdateMetadata replaces the metadata document on the provider row.
+// Used by the OAuth callback link-reuse path so the cached `picture`
+// URL refreshes on every login — the IdP may have rotated the user's
+// avatar between sessions and the embedded `User.OAuthLinks` ought to
+// reflect the current value.
+func (r *oauthProviderRepository) UpdateMetadata(ctx context.Context, uuid string, metadata map[string]interface{}) error {
+	if uuid == "" {
+		return fmt.Errorf("uuid is required")
+	}
+	filter := bson.M{"uuid": uuid}
+	update := bson.M{
+		"$set": bson.M{
+			"metadata":  metadata,
+			"updatedAt": time.Now(),
+		},
+	}
+	result, err := r.collection.UpdateOne(ctx, filter, update)
+	if err != nil {
+		return fmt.Errorf("failed to update metadata: %w", err)
+	}
+	if result.MatchedCount == 0 {
+		return fmt.Errorf("OAuth provider not found")
+	}
 	return nil
 }
 

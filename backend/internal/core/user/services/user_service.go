@@ -12,16 +12,19 @@ import (
 	authRepository "github.com/orkestra/backend/internal/core/auth/repository"
 	"github.com/orkestra/backend/internal/core/user/models"
 	"github.com/orkestra/backend/internal/core/user/repository"
+	"github.com/orkestra/backend/internal/shared/blob"
 	"github.com/orkestra/backend/internal/shared/utils"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
 var (
-	ErrUserNotFound      = errors.New("user not found")
-	ErrUserAlreadyExists = errors.New("user already exists")
-	ErrInvalidInput      = errors.New("invalid input")
-	ErrUnauthorized      = errors.New("unauthorized operation")
-	ErrEmailNotUnique    = errors.New("email address already in use")
+	ErrUserNotFound           = errors.New("user not found")
+	ErrUserAlreadyExists      = errors.New("user already exists")
+	ErrInvalidInput           = errors.New("invalid input")
+	ErrUnauthorized           = errors.New("unauthorized operation")
+	ErrEmailNotUnique         = errors.New("email address already in use")
+	ErrOAuthProviderNotLinked = errors.New("oauth provider is not linked to this user")
+	ErrInvalidAvatarSource    = errors.New("invalid avatar source")
 )
 
 // UserService defines the interface for user business logic
@@ -38,6 +41,14 @@ type UserService interface {
 	ClearFailedLogins(ctx context.Context, userUUID string) error
 	UpdateUser(ctx context.Context, id string, input *models.UpdateUserInput) (*models.UserManagementResponse, error)
 	DeleteUser(ctx context.Context, id string) error
+	// SetAvatarSource persists the user's avatar-source preference and the
+	// blob storage handle for an uploaded image. Validates that an OAuth-
+	// backed source is actually linked on the user. Returns the previously
+	// stored objectKey (empty when there was none) so the caller can GC
+	// the orphan blob from object storage. ErrUserNotFound when the user
+	// is missing; ErrOAuthProviderNotLinked when source is oauth_* and
+	// the user has no matching active link.
+	SetAvatarSource(ctx context.Context, userUUID, source, objectKey string) (previousObjectKey string, err error)
 	// SoftDeleteAndAliasEmail soft-deletes the user and renames the
 	// email to a one-shot alias so the unique index no longer collides
 	// with a fresh signup using the original address. Used by the
@@ -63,6 +74,11 @@ type UserService interface {
 	RemoveOAuthLinkFromUser(ctx context.Context, userUUID string, provider models.OAuthProvider, providerID string) error
 	SetPrimaryOAuthLink(ctx context.Context, userUUID string, provider models.OAuthProvider, providerID string) error
 	UpdateOAuthLinkUsage(ctx context.Context, userUUID string, provider models.OAuthProvider, providerID string) error
+	// UpdateOAuthLinkData refreshes the embedded OAuthLink.OAuthData
+	// payload for the matching (provider, providerID). Called from the
+	// auth OAuth callback on every link reuse so the cached `picture`
+	// URL tracks the user's latest IdP avatar.
+	UpdateOAuthLinkData(ctx context.Context, userUUID string, provider models.OAuthProvider, providerID string, data map[string]interface{}) error
 	GetUserOAuthLinks(ctx context.Context, userUUID string) ([]models.OAuthLink, error)
 	UpdateUserLastLogin(ctx context.Context, id string) error
 	UpdateUserLastLoginByObjectID(ctx context.Context, id primitive.ObjectID) error
@@ -74,6 +90,11 @@ type UserService interface {
 type userService struct {
 	userRepo          repository.UserRepository
 	oauthProviderRepo authRepository.OAuthProviderRepository
+	// blobStore is optional — when wired, uploaded-source avatars are
+	// resolved to a fresh presigned GET on every response build. When
+	// nil, uploaded avatars fall back to whatever URL is stored on the
+	// user document (likely stale or empty).
+	blobStore blob.Store
 }
 
 // NewUserService creates a new user service
@@ -82,6 +103,14 @@ func NewUserService(userRepo repository.UserRepository, oauthProviderRepo authRe
 		userRepo:          userRepo,
 		oauthProviderRepo: oauthProviderRepo,
 	}
+}
+
+// SetBlobStore wires the process-wide blob.Store used to mint
+// presigned GET URLs for uploaded avatars. Optional — passing nil
+// (or never calling this) leaves resolution falling back to the
+// stored Avatar field.
+func (s *userService) SetBlobStore(store blob.Store) {
+	s.blobStore = store
 }
 
 // CreateUser creates a new user
@@ -401,7 +430,12 @@ func (s *userService) decryptPIN(encryptedPIN string) (string, error) {
 	return utils.DecryptOAuthToken(encryptedPIN)
 }
 
-// enrichWithOAuthProviders enriches user response with OAuth providers from database
+// enrichWithOAuthProviders enriches user response with OAuth providers
+// from the auth_oauth_providers collection AND rebuilds response.Avatar
+// according to the user's stated AvatarSource preference. Read paths
+// always come through here so the URL stamped on the wire is fresh
+// (presigned for uploaded, current provider picture for oauth_*) and
+// never the stale value the document happens to carry.
 func (s *userService) enrichWithOAuthProviders(ctx context.Context, response *models.UserManagementResponse) error {
 	// Fetch OAuth providers for the user from the oauth_providers collection
 	oauthProviders, err := s.oauthProviderRepo.GetByUserUUID(ctx, response.ID)
@@ -446,8 +480,7 @@ func (s *userService) enrichWithOAuthProviders(ctx context.Context, response *mo
 
 		providers = append(providers, providerInfo)
 
-		// Use primary provider's avatar as fallback if user avatar is empty
-		if provider.IsPrimary && response.Avatar == "" && avatarURL != "" {
+		if provider.IsPrimary && avatarURL != "" {
 			primaryAvatar = avatarURL
 		}
 	}
@@ -455,7 +488,29 @@ func (s *userService) enrichWithOAuthProviders(ctx context.Context, response *mo
 	// Set the providers field
 	response.Providers = providers
 
-	// Use primary OAuth avatar as fallback if user avatar is empty
+	// Resolve Avatar from AvatarSource. The repo-loaded user document
+	// is the source of truth for AvatarObjectKey + OAuthLinks pictures;
+	// fetch it once so blob.ResolveAvatarURL can read both without an
+	// extra per-source lookup. On a miss we fall back to the legacy
+	// "primary OAuth picture when avatar is empty" behaviour so legacy
+	// users without an AvatarSource keep rendering.
+	user, err := s.userRepo.GetByID(ctx, response.ID)
+	if err == nil && user != nil {
+		response.AvatarSource = user.AvatarSource
+		resolved := blob.ResolveAvatarURL(ctx, user, s.blobStore)
+		// Empty resolved + non-empty source = explicit "no avatar"
+		// (initials or unlinked OAuth) — frontend renders initials.
+		// Don't fall back to a stale field.
+		if user.AvatarSource != "" {
+			response.Avatar = resolved
+			return nil
+		}
+		// Legacy user (source unset) — keep the prior fallback.
+		if resolved != "" {
+			response.Avatar = resolved
+			return nil
+		}
+	}
 	if response.Avatar == "" && primaryAvatar != "" {
 		response.Avatar = primaryAvatar
 	}
@@ -646,6 +701,16 @@ func (s *userService) UpdateOAuthLinkUsage(ctx context.Context, userUUID string,
 	return s.userRepo.UpdateOAuthLinkUsage(ctx, userUUID, provider, providerID)
 }
 
+// UpdateOAuthLinkData refreshes the embedded OAuth link's OAuthData
+// payload — currently used to keep the cached `picture` URL in sync
+// with the IdP. Quiet no-op on missing link (legacy accounts).
+func (s *userService) UpdateOAuthLinkData(ctx context.Context, userUUID string, provider models.OAuthProvider, providerID string, data map[string]interface{}) error {
+	if userUUID == "" || providerID == "" {
+		return ErrInvalidInput
+	}
+	return s.userRepo.UpdateOAuthLinkData(ctx, userUUID, provider, providerID, data)
+}
+
 // GetUserOAuthLinks gets all OAuth links for a user
 func (s *userService) GetUserOAuthLinks(ctx context.Context, userUUID string) ([]models.OAuthLink, error) {
 	if userUUID == "" {
@@ -816,6 +881,74 @@ func (s *userService) ClearMFAGrace(ctx context.Context, userUUID string) error 
 		return ErrInvalidInput
 	}
 	return s.userRepo.ClearMFAGraceStartedAt(ctx, userUUID)
+}
+
+// avatarSourceToProvider maps an oauth_* avatar source to its OAuth
+// provider name. Returns ("", false) for non-OAuth sources.
+func avatarSourceToProvider(source string) (models.OAuthProvider, bool) {
+	switch source {
+	case models.AvatarSourceOAuthGoogle:
+		return models.OAuthProviderGoogle, true
+	case models.AvatarSourceOAuthApple:
+		return models.OAuthProviderApple, true
+	case models.AvatarSourceOAuthGitHub:
+		return models.OAuthProviderGitHub, true
+	case models.AvatarSourceOAuthDiscord:
+		return models.OAuthProviderDiscord, true
+	}
+	return "", false
+}
+
+// SetAvatarSource validates the requested source against the user's
+// current OAuth links and persists the new preference. Returns the
+// object key the user had stored *before* the change so the caller can
+// schedule the orphan blob for deletion. The caller is responsible for
+// authorization — this service only verifies the source/link invariant.
+func (s *userService) SetAvatarSource(ctx context.Context, userUUID, source, objectKey string) (string, error) {
+	if userUUID == "" || source == "" {
+		return "", ErrInvalidInput
+	}
+	switch source {
+	case models.AvatarSourceInitials, models.AvatarSourceUploaded,
+		models.AvatarSourceOAuthGoogle, models.AvatarSourceOAuthApple,
+		models.AvatarSourceOAuthGitHub, models.AvatarSourceOAuthDiscord:
+	default:
+		return "", ErrInvalidAvatarSource
+	}
+	if source != models.AvatarSourceUploaded && objectKey != "" {
+		// Defensive — only uploads carry an object key.
+		objectKey = ""
+	}
+	existing, err := s.userRepo.GetByID(ctx, userUUID)
+	if err != nil {
+		if errors.Is(err, repository.ErrUserNotFound) {
+			return "", ErrUserNotFound
+		}
+		return "", fmt.Errorf("get user: %w", err)
+	}
+	// Snapshot the previous object key before the write — the fake-repo
+	// path uses pointer aliasing and the real path's UpdateOne could
+	// race, so capturing here is the safe behaviour everywhere.
+	previousObjectKey := existing.AvatarObjectKey
+	if provider, isOAuth := avatarSourceToProvider(source); isOAuth {
+		linked := false
+		for _, link := range existing.OAuthLinks {
+			if link.Provider == provider && link.IsActive {
+				linked = true
+				break
+			}
+		}
+		if !linked {
+			return "", ErrOAuthProviderNotLinked
+		}
+	}
+	if err := s.userRepo.SetAvatarSource(ctx, userUUID, source, objectKey); err != nil {
+		if errors.Is(err, repository.ErrUserNotFound) {
+			return "", ErrUserNotFound
+		}
+		return "", fmt.Errorf("set avatar source: %w", err)
+	}
+	return previousObjectKey, nil
 }
 
 // ValidateUserActive checks if a user is active

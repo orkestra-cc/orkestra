@@ -68,7 +68,7 @@ frontend-admin/
 │   │   ├── README.md              # Module conventions + backend ↔ frontend map
 │   │   └── _template/             # Copy-paste scaffold for adding a new module
 │   ├── components/
-│   │   ├── common/                # 🎯 UI primitives (Avatar, Card, Flex, IconButton, AdvanceTable, ...) — barrel exported
+│   │   ├── common/                # 🎯 UI primitives (Avatar, UserAvatar, Card, Flex, IconButton, AdvanceTable, ...) — barrel exported
 │   │   ├── authentication/        # Login forms, ProtectedRoute, OAuth callback handlers
 │   │   ├── dashboards/            # Reusable dashboard widgets
 │   │   ├── navbar/                # Sidebar + top navigation
@@ -190,7 +190,7 @@ When asked to build a UI, look for an existing solution in this order:
 
 1. **`src/reference/app-examples/`** — full Orkestra implementations of common apps (calendar, chat, email, kanban, social, support-desk, events). Copy and adapt — don't reinvent.
 2. **`src/reference/components/`** — 60+ Orkestra component samples (forms, tables, navigation, media, charts).
-3. **`src/components/common/`** — UI primitives that the app's pages already use (Avatar, Card, Flex, IconButton, PageHeader, AdvanceTable, OrkestraDropzone, ...).
+3. **`src/components/common/`** — UI primitives that the app's pages already use (Avatar, UserAvatar, Card, Flex, IconButton, PageHeader, AdvanceTable, OrkestraDropzone, ...). For user identities ALWAYS prefer `<UserAvatar user={...}>` over raw `<Avatar src={url}>` — UserAvatar handles the backend's `avatarSource` semantics (resolved URL when present, initials over a deterministic per-user color from `helpers/avatarColor.ts` otherwise).
 4. **`src/components/dashboards/`** — reusable dashboard widgets (WeeklySales, ActiveUsers, ...).
 5. **`react-bootstrap`** — raw primitives for layout (Row, Col, Card, Button, Form).
 

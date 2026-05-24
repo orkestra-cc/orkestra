@@ -45,8 +45,9 @@ Declared in `module.go::Collections()`. Email uniqueness is scoped per collectio
 | `user.update` | Update user profiles |
 | `user.delete` | Delete users |
 | `user.self` | Edit your own profile |
+| `user.avatar.self` | Manage your own avatar (upload, pick from linked OAuth provider, reset to initials) |
 
-These permissions gate the module's own HTTP endpoints. Note that the current `RegisterRoutes` (`module.go:70-74`) actually gates every route behind **`system.users.admin`** (a system permission contributed by authz), so `user.*` permissions are currently granted to managers/operators via system roles but not directly enforceable on the HTTP surface. Future work: wire per-route `RequirePermission("user.read")` etc. and let the authz role matrix do the rest.
+These permissions gate the module's own HTTP endpoints. Note that the current `RegisterRoutes` actually gates every admin route behind **`system.users.admin`** (a system permission contributed by authz), so `user.*` permissions are currently granted to managers/operators via system roles but not directly enforceable on most HTTP surfaces. The avatar endpoints under `/v1/me/avatar/*` are the exception — they're gated by `RequireGlobal()` (any authenticated user) because owner-self is asserted by the handler from the JWT user UUID. Future work: wire per-route `RequirePermission("user.read")` etc. and let the authz role matrix do the rest.
 
 ## Lifecycle
 
@@ -78,7 +79,17 @@ All routes are behind `RequireSystemPermission("system.users.admin")` (`module.g
 | PATCH | `/v1/admin/client-users/{id}` | Update name / username / email / phone / role / isActive on a client user |
 | DELETE | `/v1/admin/client-users/{id}` | Soft-delete + email alias on a client user (reuses `SoftDeleteAndAliasEmail`) |
 
-Full registration in `routes.go`. The `/v1/admin/client-users[/{id}]` family is implemented by `handlers/admin_client_handler.go` (the `AdminClientUserHandler`). It binds to the **client-tier** `UserService` directly, looks up `iface.TenantProvider` lazily from the registry to join memberships, looks up `iface.PasswordHasher` lazily on create so it can hash the supplied password without importing auth's package, and looks up `iface.AdminAuthInviter` (satisfied by the client-tier `*services.PasswordAuthService`) for the invite / resend-verification / send-password-reset endpoints.
+The self-service avatar surface lives outside the admin gate — mounted on **both** operator and client protected routers under `RequireGlobal()`:
+
+| Method | Path | Purpose |
+|---|---|---|
+| POST | `/v1/me/avatar/presign-upload` | Mint a short-lived presigned PUT URL for the SPA to upload directly to S3-compatible storage (RustFS / MinIO / AWS S3). Cap 2 MiB; MIME ∈ {png, jpeg, webp}. Backend chooses the object key `avatars/{tier}/{userUUID}/{uuidv7}.{ext}` |
+| POST | `/v1/me/avatar/commit` | HEAD the freshly-uploaded blob, set `User.AvatarSource=uploaded`, GC the previously-stored object key |
+| PATCH | `/v1/me/avatar/source` | Switch source to `initials` or to a linked OAuth provider's picture (`oauth_google/apple/github/discord`). Validates the OAuth link is active — returns 422 `oauth_provider_not_linked` otherwise |
+
+Backed by `handlers/AvatarHandler` (one instance per tier, bound to that tier's `UserService` and a shared `blob.Store`). The pipeline is three-step so image bytes go directly to storage without proxying through Go — see `internal/shared/blob/CLAUDE-ish.go` (package doc) for the S3-compat contract.
+
+Full admin registration in `routes.go`. The `/v1/admin/client-users[/{id}]` family is implemented by `handlers/admin_client_handler.go` (the `AdminClientUserHandler`). It binds to the **client-tier** `UserService` directly, looks up `iface.TenantProvider` lazily from the registry to join memberships, looks up `iface.PasswordHasher` lazily on create so it can hash the supplied password without importing auth's package, and looks up `iface.AdminAuthInviter` (satisfied by the client-tier `*services.PasswordAuthService`) for the invite / resend-verification / send-password-reset endpoints.
 
 The companion tier-aware MFA reset is mounted by the auth module at `POST /v1/admin/client-users/{userId}/mfa/reset` — see [`../auth/CLAUDE.md`](../auth/CLAUDE.md).
 
@@ -112,7 +123,7 @@ Key method groups:
 - Org membership, "which orgs does this user belong to" → **tenant** module
 - Org-scoped role assignment, permission checks → **authz** module
 - Email delivery (verification, reset, notifications) → **notification** module
-- Avatar image storage and blob management → no dedicated module yet, avatars are URLs stored as strings
+- Object storage of avatar blobs → `internal/shared/blob/` (`blob.Store` interface + S3-compatible impl). This module consumes the store via `module.ServiceBlobStore` and uses `blob.ResolveAvatarURL` for every read path (`enrichWithOAuthProviders`); a missing store leaves uploaded avatars unrendered but OAuth-source + initials keep working.
 
 ## Rules
 

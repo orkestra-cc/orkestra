@@ -281,6 +281,24 @@ func (r *fakeUserRepo) ExistsByUsername(_ context.Context, _ string) (bool, erro
 func (r *fakeUserRepo) BackfillDefaultLanguage(_ context.Context, _ string) (int64, error) {
 	return 0, nil
 }
+func (r *fakeUserRepo) SetAvatarSource(_ context.Context, userUUID, source, objectKey string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	u, ok := r.users[userUUID]
+	if !ok {
+		return repository.ErrUserNotFound
+	}
+	u.AvatarSource = source
+	if objectKey == "" {
+		u.AvatarObjectKey = ""
+	} else {
+		u.AvatarObjectKey = objectKey
+	}
+	return nil
+}
+func (r *fakeUserRepo) UpdateOAuthLinkData(_ context.Context, _ string, _ models.OAuthProvider, _ string, _ map[string]interface{}) error {
+	return nil
+}
 
 // fakeOAuthProviderRepo implements authRepository.OAuthProviderRepository
 // with the minimum surface needed by the userService's enrichment path —
@@ -328,6 +346,9 @@ func (r *fakeOAuthProviderRepo) SetPrimaryProvider(context.Context, string, auth
 	return nil
 }
 func (r *fakeOAuthProviderRepo) UpdateRefreshToken(context.Context, string, string) error {
+	return nil
+}
+func (r *fakeOAuthProviderRepo) UpdateMetadata(context.Context, string, map[string]interface{}) error {
 	return nil
 }
 func (r *fakeOAuthProviderRepo) UpdateOAuthTokens(context.Context, string, string, string, *time.Time, *time.Time, []string) error {

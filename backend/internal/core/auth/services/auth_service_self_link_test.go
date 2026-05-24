@@ -73,6 +73,9 @@ func (r *fakeOAuthProviderRepo) UpdateRefreshToken(context.Context, string, stri
 func (r *fakeOAuthProviderRepo) UpdateOAuthTokens(context.Context, string, string, string, *time.Time, *time.Time, []string) error {
 	panic("unused: UpdateOAuthTokens")
 }
+func (r *fakeOAuthProviderRepo) UpdateMetadata(context.Context, string, map[string]interface{}) error {
+	return nil
+}
 func (r *fakeOAuthProviderRepo) UnlinkProvider(context.Context, string, authModels.OAuthProvider) error {
 	panic("unused: UnlinkProvider")
 }

@@ -333,6 +333,9 @@
           "avatar": {
             "type": "string"
           },
+          "avatarSource": {
+            "type": "string"
+          },
           "createdAt": {
             "format": "date-time",
             "type": "string"
@@ -2101,6 +2104,29 @@
             "type": "string"
           }
         },
+        "type": "object"
+      },
+      "CommitAvatarRequestBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/CommitAvatarRequestBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "key": {
+            "description": "Object key returned by the presign-upload call after the SPA's direct PUT succeeded",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "key"
+        ],
         "type": "object"
       },
       "Company": {
@@ -4155,6 +4181,9 @@
             "type": "string"
           },
           "avatar": {
+            "type": "string"
+          },
+          "avatarSource": {
             "type": "string"
           },
           "createdAt": {
@@ -12168,6 +12197,81 @@
         ],
         "type": "object"
       },
+      "PresignUploadRequestBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/PresignUploadRequestBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "contentType": {
+            "description": "MIME type of the image; one of image/png, image/jpeg, image/webp",
+            "enum": [
+              "image/png",
+              "image/jpeg",
+              "image/webp"
+            ],
+            "type": "string"
+          },
+          "sizeBytes": {
+            "description": "Declared byte length of the upload — used only for the server-side cap check (the signer cannot enforce Content-Length on a presigned PUT)",
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "contentType",
+          "sizeBytes"
+        ],
+        "type": "object"
+      },
+      "PresignUploadResponseBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/PresignUploadResponseBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "expiresAt": {
+            "description": "Hard expiry of the signed URL",
+            "format": "date-time",
+            "type": "string"
+          },
+          "headers": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Headers the SPA must include verbatim on the PUT for the signature to validate",
+            "type": "object"
+          },
+          "key": {
+            "description": "Storage handle the SPA echoes back on the commit call",
+            "type": "string"
+          },
+          "url": {
+            "description": "S3-compatible PUT URL; valid for ~10 minutes",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url",
+          "headers",
+          "key",
+          "expiresAt"
+        ],
+        "type": "object"
+      },
       "PreviewCodeResponseBody": {
         "additionalProperties": false,
         "properties": {
@@ -14812,6 +14916,35 @@
         "required": [
           "activeEnvironment",
           "needsRestart"
+        ],
+        "type": "object"
+      },
+      "SetAvatarSourceRequestBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/SetAvatarSourceRequestBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "source": {
+            "description": "New avatar source. oauth_* requires the matching provider to be linked.",
+            "enum": [
+              "initials",
+              "oauth_google",
+              "oauth_apple",
+              "oauth_github",
+              "oauth_discord"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "source"
         ],
         "type": "object"
       },
@@ -17861,6 +17994,9 @@
             "type": "string"
           },
           "avatar": {
+            "type": "string"
+          },
+          "avatarSource": {
             "type": "string"
           },
           "createdAt": {
@@ -33967,6 +34103,150 @@
         "summary": "Update a tag",
         "tags": [
           "Marketing - Tags"
+        ]
+      }
+    },
+    "/v1/me/avatar/commit": {
+      "post": {
+        "description": "Verifies the object landed in storage, sets AvatarSource=uploaded, and GCs the previous blob. Returns the updated user profile.",
+        "operationId": "client-commit-avatar-upload",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CommitAvatarRequestBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserManagementResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Promote a freshly-uploaded blob to be the user's active avatar",
+        "tags": [
+          "Users",
+          "Self-Service"
+        ]
+      }
+    },
+    "/v1/me/avatar/presign-upload": {
+      "post": {
+        "description": "Returns a URL the SPA PUTs the image directly to S3-compatible storage. Cap 2 MiB; MIME must be image/png|jpeg|webp. The SPA echoes the returned key on the commit call.",
+        "operationId": "client-presign-avatar-upload",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PresignUploadRequestBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PresignUploadResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Mint a short-lived presigned PUT URL for an avatar upload",
+        "tags": [
+          "Users",
+          "Self-Service"
+        ]
+      }
+    },
+    "/v1/me/avatar/source": {
+      "patch": {
+        "description": "oauth_* requires the matching provider to be linked (422 otherwise). Use presign-upload + commit to set source to uploaded.",
+        "operationId": "client-set-avatar-source",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetAvatarSourceRequestBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserManagementResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Switch the avatar to initials or to a linked OAuth provider's picture",
+        "tags": [
+          "Users",
+          "Self-Service"
         ]
       }
     },

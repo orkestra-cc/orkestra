@@ -39,6 +39,41 @@ services:
       timeout: 5s
       retries: 5
 
+  # RustFS — S3-compatible object storage (Apache-2.0, written in Rust).
+  # Default backend for user-uploaded blobs (avatars today, future
+  # attachments). Speaks the AWS S3 API so the same `internal/shared/blob`
+  # store works against RustFS, AWS S3, MinIO, Backblaze B2, etc.
+  #
+  # Status note: RustFS 1.x is in beta — production-grade single-node
+  # mode is fine for avatars (small, regenerable from OAuth fallback);
+  # distributed mode is still under testing. Operators running at scale
+  # should swap STORAGE_ENDPOINT to a managed S3 in production.
+  #
+  # Ports: 9100 (S3 API — bumped off the MinIO/Redis-Insight default
+  # 9000 to avoid host-port collisions), 9101 (admin console).
+  rustfs:
+    image: rustfs/rustfs:latest
+    container_name: orkestra-rustfs
+    restart: unless-stopped
+    ports:
+      - "${RUSTFS_API_PORT:-9100}:9000"
+      - "${RUSTFS_CONSOLE_PORT:-9101}:9001"
+    environment:
+      RUSTFS_ROOT_USER: ${RUSTFS_ROOT_USER:-orkestra}
+      RUSTFS_ROOT_PASSWORD: ${RUSTFS_ROOT_PASSWORD:-changeme-rustfs}
+    volumes:
+      - orkestra-rustfs-data:/data
+    networks:
+      - orkestra-network
+    healthcheck:
+      # /minio/health/live is the canonical S3-compat liveness path RustFS
+      # serves verbatim. A 200 means the API surface is up; bucket access
+      # is checked by the backend's blob.NewS3(EnsureBucket=true) on boot.
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:9000/minio/health/live || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
   gotenberg:
     image: gotenberg/gotenberg:8
     container_name: orkestra-gotenberg
@@ -126,6 +161,13 @@ volumes:
   orkestra-redis-data:
     driver: local
     name: orkestra-redis-data
+  orkestra-rustfs-data:
+    driver: local
+    # Pinned name — same reasoning as the mongodb/redis volumes above:
+    # different compose layerings (infra alone vs infra + a SKU profile)
+    # must address the same underlying volume so uploaded blobs survive
+    # stack reshuffles.
+    name: orkestra-rustfs-data
   orkestra-hindsight-data:
     driver: local
     # Pinned name so the backend's container.Manager and the manual-only

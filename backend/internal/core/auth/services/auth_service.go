@@ -13,6 +13,7 @@ import (
 	"github.com/orkestra/backend/internal/core/auth/models"
 	"github.com/orkestra/backend/internal/core/auth/repository"
 	userModels "github.com/orkestra/backend/internal/core/user/models"
+	"github.com/orkestra/backend/internal/shared/blob"
 	"github.com/orkestra/backend/internal/shared/utils"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
@@ -182,6 +183,13 @@ type AuthService interface {
 	// tokens stay valid until their TTL ticks over.
 	SetSessionRevocation(rev SessionRevocationService)
 
+	// SetBlobStore wires the object-storage handle used to resolve
+	// the uploaded-avatar presigned URL every time the service builds
+	// a UserManagementResponse (login, refresh, session-poll). Without
+	// this, oauth_*/uploaded users see initials in the navbar because
+	// the raw User.Avatar field is empty. Optional.
+	SetBlobStore(store blob.Store)
+
 	// SetPolicy wires the admin-managed policy reader. Optional — the
 	// OAuth login MFA evaluation falls back to legacy hardcoded values
 	// when the receiver is nil.
@@ -244,6 +252,13 @@ type authService struct {
 	// kill (the persisted state still updates, just no immediate
 	// effect on outstanding bearer tokens).
 	sessionRevocation SessionRevocationService
+	// blobStore is consumed every time the service builds a
+	// UserManagementResponse from a raw User — the wire `avatar` field
+	// needs to be the freshly-resolved URL (presigned GET for
+	// uploaded, OAuth provider picture for oauth_*, empty for
+	// initials), NOT the stale value the document happens to carry.
+	// Optional — nil falls back to whatever User.Avatar holds.
+	blobStore blob.Store
 }
 
 // SetWebAuthnAvailability wires the optional checker. Mirrors the same
@@ -269,6 +284,26 @@ func (s *authService) SetAudience(a PolicyAudience) {
 // SetSessionRevocation wires the Redis-backed sid revocation store.
 func (s *authService) SetSessionRevocation(rev SessionRevocationService) {
 	s.sessionRevocation = rev
+}
+
+// SetBlobStore wires the object-storage handle used to resolve
+// uploaded avatars on every response-building path (login, refresh,
+// session-poll). Without this, oauth_*/uploaded users see initials in
+// the navbar because the raw User.Avatar field is empty.
+func (s *authService) SetBlobStore(store blob.Store) {
+	s.blobStore = store
+}
+
+// buildUserResponse converts a raw User into a wire response with
+// Avatar resolved from AvatarSource. Centralizes the resolution so
+// every code path that returns a User to the SPA (login, refresh,
+// session-poll, …) produces the same shape.
+func (s *authService) buildUserResponse(ctx context.Context, user *userModels.User) *userModels.UserManagementResponse {
+	resp := user.ToResponse()
+	if user.AvatarSource != "" {
+		resp.Avatar = blob.ResolveAvatarURL(ctx, user, s.blobStore)
+	}
+	return resp
 }
 
 // NewAuthService creates a new auth service
@@ -1171,8 +1206,10 @@ func (s *authService) GenerateEnhancedTokenPair(ctx context.Context, user *userM
 	// Convert OAuth providers to response format
 	oauthProvidersInfo := models.ConvertOAuthProvidersToInfo(oauthProviders)
 
-	// Create user response
-	userResponse := user.ToResponse()
+	// Create user response — go through buildUserResponse so Avatar
+	// is resolved from AvatarSource (presigned for uploaded, OAuth
+	// link picture for oauth_*).
+	userResponse := s.buildUserResponse(ctx, user)
 
 	tokenResponse := &models.TokenResponse{
 		AccessToken:    accessToken,
@@ -1301,7 +1338,7 @@ func (s *authService) RefreshTokensWithRiskAssessment(ctx context.Context, refre
 		ExpiresIn:      900,
 		SessionID:      newSessionID,
 		DeviceID:       tokenDoc.DeviceID,
-		User:           user.ToResponse(),
+		User:           s.buildUserResponse(ctx, user),
 		OAuthProviders: oauthProvidersInfo,
 	}, nil
 }
@@ -1610,6 +1647,35 @@ func (s *authService) HandleOAuthCallbackWithLinking(ctx context.Context, provid
 		if err != nil {
 			fmt.Printf("[AUTH_DEBUG] WARNING: Failed to update last used: %v\n", err)
 		}
+
+		// Refresh metadata (notably the `picture` URL) on every login.
+		// Two writes — one to auth_oauth_providers.metadata (drives the
+		// UserManagementResponse.Providers[].Avatar field), one to
+		// User.OAuthLinks[i].oauthData (drives ResolveAvatar for
+		// AvatarSource=oauth_*). Stale providers will see the new
+		// picture on next read.
+		picture, _ := userInfo["picture"].(string)
+		locale, _ := userInfo["locale"].(string)
+		freshMeta := make(map[string]interface{})
+		for k, v := range existingProvider.Metadata {
+			freshMeta[k] = v
+		}
+		if picture != "" {
+			freshMeta["picture"] = picture
+		}
+		if locale != "" {
+			freshMeta["locale"] = locale
+		}
+		if len(freshMeta) > 0 {
+			if metaErr := s.oauthProviderRepo.UpdateMetadata(ctx, existingProvider.UUID, freshMeta); metaErr != nil {
+				fmt.Printf("[AUTH_DEBUG] WARNING: Failed to refresh OAuth provider metadata: %v\n", metaErr)
+			}
+			if updater, ok := s.userService.(iface.OAuthLinkDataUpdater); ok {
+				if linkErr := updater.UpdateOAuthLinkData(ctx, user.UUID, iface.OAuthProvider(provider), existingProvider.ProviderID, freshMeta); linkErr != nil {
+					fmt.Printf("[AUTH_DEBUG] WARNING: Failed to refresh embedded OAuth link data: %v\n", linkErr)
+				}
+			}
+		}
 	} else {
 		fmt.Printf("[AUTH_DEBUG] No existing provider link found, creating new link\n")
 
@@ -1811,7 +1877,7 @@ func (s *authService) evaluateMFAForOAuth(ctx context.Context, user *userModels.
 			RequiresMFA:       true,
 			MFAToken:          ch.ID,
 			WebAuthnAvailable: hasWebAuthn,
-			User:              user.ToResponse(),
+			User:              s.buildUserResponse(ctx, user),
 		}, true, nil
 	}
 

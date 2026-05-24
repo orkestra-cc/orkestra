@@ -199,6 +199,16 @@ const (
 	// both interfaces structurally).
 	ServiceLogLevelResolver ServiceKey = "logging.level_resolver"
 
+	// ServiceBlobStore exposes the process-wide blob.Store implementation
+	// (S3-compatible: RustFS by default; AWS S3 / MinIO equally supported)
+	// to producer modules that need to mint presigned upload/download URLs
+	// or delete user-uploaded objects. Registered by main.go after Redis
+	// + S3 endpoints come up. Value: blob.Store from
+	// internal/shared/blob. Consumers degrade gracefully when the key is
+	// missing — a deploy without object storage should still serve the
+	// app, just without upload affordances.
+	ServiceBlobStore ServiceKey = "system.blob_store"
+
 	// ServiceLogLevelModuleNames is the []string of registered
 	// module names. main.go populates it AFTER RegisterAll runs (so
 	// every catalog factory has fired) and BEFORE InitAll runs (so

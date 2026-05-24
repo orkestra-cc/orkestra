@@ -1,8 +1,7 @@
 import { Link } from 'react-router';
 import { Dropdown } from 'react-bootstrap';
 import { useTranslation } from 'react-i18next';
-import team3 from 'assets/img/team/3.jpg';
-import Avatar from 'components/common/Avatar';
+import UserAvatar from 'components/common/UserAvatar';
 import paths from 'routes/paths';
 import { useAuthContext } from 'providers/AuthProvider';
 
@@ -10,15 +9,6 @@ const ProfileDropdown = () => {
   const { t } = useTranslation();
   const auth = useAuthContext();
   const user = auth.user;
-
-  // Get avatar from primary OAuth provider metadata
-  const primaryOAuthProvider = user?.oauthProviders?.find(
-    provider => provider.isPrimary
-  );
-  const oauthAvatar = primaryOAuthProvider?.metadata?.picture as
-    | string
-    | undefined;
-  const avatarSrc = oauthAvatar || user?.avatar || team3;
 
   const handleLogout = () => {
     auth.logout();
@@ -32,7 +22,7 @@ const ProfileDropdown = () => {
         to="#!"
         className="pe-0 ps-2 nav-link"
       >
-        <Avatar src={avatarSrc} name={user?.fullName || user?.email} />
+        <UserAvatar user={user ?? undefined} size="xl" />
       </Dropdown.Toggle>
 
       <Dropdown.Menu className="dropdown-caret dropdown-menu-card  dropdown-menu-end">

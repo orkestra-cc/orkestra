@@ -18,6 +18,7 @@ import (
 	"github.com/orkestra/backend/internal/core/auth/repository"
 	"github.com/orkestra/backend/internal/core/auth/services"
 	userModels "github.com/orkestra/backend/internal/core/user/models"
+	"github.com/orkestra/backend/internal/shared/blob"
 	"github.com/orkestra/backend/internal/shared/config"
 	"github.com/orkestra/backend/internal/shared/middleware"
 	"github.com/orkestra/backend/internal/shared/types"
@@ -76,6 +77,20 @@ type AuthHandler struct {
 	// kill switch on OAuth start endpoints; later phases will plumb
 	// this into MFA / session-limit decisions.
 	policy *services.AuthPolicyService
+
+	// blobStore is consumed by GetCurrentUser to mint fresh presigned
+	// GET URLs for uploaded avatars. Optional — when nil, uploaded
+	// avatars fall back to whatever URL was stored on the user
+	// document (likely empty for fresh uploads).
+	blobStore blob.Store
+}
+
+// SetBlobStore wires the object-storage handle used to mint presigned
+// GET URLs for uploaded avatars on the /me response path. Optional;
+// leaving it nil degrades uploaded avatars to "" (the SPA will render
+// initials).
+func (h *AuthHandler) SetBlobStore(s blob.Store) {
+	h.blobStore = s
 }
 
 // SetSessionRevocation wires the revoked-session store so logout can
@@ -2283,6 +2298,16 @@ func (h *AuthHandler) GetCurrentUser(ctx context.Context, _ *struct{}) (*GetCurr
 	// Convert OAuth providers to response format
 	oauthProvidersInfo := models.ConvertOAuthProvidersToInfo(oauthProviders)
 
+	// Rebuild Avatar via the canonical resolver so /me always returns
+	// a fresh presigned GET for uploaded source (1h TTL, Redis-cached
+	// to ~50min), the current OAuth provider picture for oauth_*, or
+	// "" for initials. Legacy users without an AvatarSource keep
+	// whatever the document carries.
+	avatarURL := user.Avatar
+	if user.AvatarSource != "" {
+		avatarURL = blob.ResolveAvatarURL(ctx, user, h.blobStore)
+	}
+
 	return &GetCurrentUserResponse{
 		Body: CurrentUserResponse{
 			UserManagementResponse: userModels.UserManagementResponse{
@@ -2290,7 +2315,8 @@ func (h *AuthHandler) GetCurrentUser(ctx context.Context, _ *struct{}) (*GetCurr
 				Email:         user.Email,
 				Username:      user.Username,
 				FullName:      user.FullName,
-				Avatar:        user.Avatar,
+				Avatar:        avatarURL,
+				AvatarSource:  user.AvatarSource,
 				Role:          user.Role,
 				IsActive:      user.IsActive,
 				EmailVerified: user.EmailVerified,

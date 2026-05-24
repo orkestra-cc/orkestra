@@ -211,7 +211,7 @@ The OAuth provider callbacks (`/v1/auth/oauth/{google,apple,discord,github}/call
 
 | Method | Path | Gate | Purpose |
 |---|---|---|---|
-| GET | `/v1/auth/{tier}/me` | bearer | Return the current authenticated user |
+| GET | `/v1/auth/{tier}/me` | bearer | Return the current authenticated user. The response `avatar` field is resolved server-side via `blob.ResolveAvatarURL` from `User.AvatarSource`: a fresh presigned GET for `uploaded`, the matching `OAuthLinks[i].OAuthData["picture"]` for `oauth_*`, empty for `initials`. The same resolution runs on every other response builder (login, refresh-cookie session-poll, MFA partial responses) so the SPA sees a stable shape regardless of code path |
 | POST | `/v1/auth/{tier}/change-password` | `RequireGlobal()` | Self-service password change |
 | POST | `/v1/auth/{tier}/mfa/enroll/begin` | `RequireGlobal()` | Start TOTP enrollment — returns `{challengeId, secret, provisioningUri}` |
 | POST | `/v1/auth/{tier}/mfa/enroll/confirm` | `RequireGlobal()` | Confirm enrollment with a TOTP code, receive 10 one-shot backup codes |
@@ -333,6 +333,7 @@ Everything else (`services.AuthService`, `services.JWTService`, `services.Passwo
 - **Session per device.** `AuthSession` binds a session to a `deviceId` + fingerprint. Refresh tokens link back to their session — revoking a session cascades to every token issued from it.
 - **Email token TTL is 24 hours** by default — verification tokens use 24h, password reset tokens 30min, **admin-invite tokens 7 days**. Enforced by the `expiresAt` TTL index on each tier's `*_email_tokens` collection. The service also compares expiry on read in case the TTL sweeper is behind. Token purposes (`EmailTokenPurpose*` in `models/email_token.go`): `verify_email`, `reset_password`, `admin_invite` (the last sets password AND marks email verified on redemption — admin vouched for the inbox by sending the invite).
 - **OAuth state is 10 minutes in Redis.** Validated before code exchange in every provider's callback handler.
+- **OAuth link reuse refreshes the cached `picture` URL.** Every successful OAuth callback updates two places on link reuse (`auth_service.go` ≈ line 1612): the provider doc's `metadata.picture` (drives `UserManagementResponse.Providers[].Avatar`) AND the embedded `User.OAuthLinks[i].OAuthData["picture"]` (drives `blob.ResolveAvatarURL` for `AvatarSource=oauth_*`) via the additive `iface.OAuthLinkDataUpdater` sub-interface. Without this, users who linked Google before the embedded-picture field existed would never see their avatar populate until they manually re-linked.
 - **Rate limiting** lives in `shared/errors.RateLimiter` and is shared across `Register`, `Login`, `ForgotPassword`, `VerifyEmailResend`. Current defaults are hardcoded — when you need to tune them, do it in `password_auth_service.go` and not in the handler.
 - **Notification idempotency.** Verification and reset emails always carry an idempotency key like `verify:<userUUID>:<tokenUUID>` and `reset:<userUUID>:<tokenUUID>` so retries don't dispatch duplicates.
 - **Password policy.** Length bounds, complexity requirements, and the HIBP toggle are admin-managed via the Password Policy tab; defaults match the legacy hardcoded values (10..128 chars, no complexity, HIBP on). The service still rejects `"password has appeared in a known data breach"` — observed in dev when the initial admin used a common test string.
@@ -340,6 +341,7 @@ Everything else (`services.AuthService`, `services.JWTService`, `services.Passwo
 ## What this module does NOT do
 
 - User profile CRUD or the system-role field → **user** module
+- Self-service avatar (upload / OAuth picker / reset to initials) → **user** module's `/v1/me/avatar/*` surface
 - Org membership, invite lifecycle, plan entitlements → **tenant** module
 - Permission evaluation, role bindings, system role seeding → **authz** module
 - Rendering and sending emails → **notification** module (auth just passes `TemplatedNotificationRequest`)

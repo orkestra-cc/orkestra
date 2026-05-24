@@ -513,6 +513,43 @@
       "toastFailed": "Could not save your language preference. Reverted.",
       "errorUnknown": "Unknown error"
     },
+    "avatar": {
+      "title": "Profile picture",
+      "description": "Upload your own image, pick one from a linked sign-in provider, or fall back to your initials.",
+      "sources": {
+        "initials": "Showing your initials",
+        "uploaded": "Using your uploaded image",
+        "oauth_google": "Using your Google profile picture",
+        "oauth_apple": "Using your Apple profile picture",
+        "oauth_github": "Using your GitHub profile picture",
+        "oauth_discord": "Using your Discord profile picture"
+      },
+      "upload": {
+        "label": "Upload an image",
+        "choose": "Choose image",
+        "uploading": "Uploading…",
+        "hint": "PNG, JPEG or WebP, up to 2 MB. We crop to a square and resize to 512×512 before upload."
+      },
+      "oauth": {
+        "label": "Use a linked account's picture",
+        "appleDisabled": "Apple does not share profile pictures."
+      },
+      "initials": {
+        "label": "No picture",
+        "reset": "Show my initials instead",
+        "hint": "Removes any uploaded image and renders your initials over a colour derived from your account."
+      },
+      "toasts": {
+        "uploaded": "Profile picture updated.",
+        "updated": "Avatar source changed."
+      },
+      "errors": {
+        "invalidMime": "Pick a PNG, JPEG, or WebP image.",
+        "tooLarge": "Image exceeds the 2 MB limit. Try a smaller file.",
+        "uploadFailed": "Upload failed. Please try again.",
+        "updateFailed": "Could not change your avatar source."
+      }
+    },
     "changePassword": {
       "title": "Change Password",
       "oldPassword": "Old Password",

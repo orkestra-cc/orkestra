@@ -69,6 +69,23 @@ type UserRepository interface {
 	SetMFAGraceStartedAt(ctx context.Context, userUUID string, when time.Time) error
 	ClearMFAGraceStartedAt(ctx context.Context, userUUID string) error
 
+	// UpdateOAuthLinkData replaces the embedded OAuthLink.OAuthData map
+	// for a matching (provider, providerID) link on the user's row. Used
+	// by the OAuth callback link-reuse path so the cached `picture` URL
+	// refreshes on every login — ResolveAvatar reads this map for
+	// AvatarSource=oauth_* and the SPA expects a current image.
+	UpdateOAuthLinkData(ctx context.Context, userUUID string, provider models.OAuthProvider, providerID string, data map[string]interface{}) error
+
+	// SetAvatarSource overwrites the user's avatar preference. The caller
+	// is responsible for any tier-aware policy (this repo only persists).
+	// When source is "initials" the objectKey arg should be empty and any
+	// existing avatarObjectKey is unset so a future presigned GET cannot
+	// resurrect a stale blob. When source is "uploaded" the caller passes
+	// the freshly-committed S3 object key. For oauth_* the objectKey is
+	// always empty (the URL is resolved from the matching OAuthLink at
+	// read time).
+	SetAvatarSource(ctx context.Context, userUUID, source, objectKey string) error
+
 	// OAuth Operations
 	GetByOAuthID(ctx context.Context, provider models.OAuthProvider, oauthID string) (*models.User, error)
 	GetByOAuthLink(ctx context.Context, provider models.OAuthProvider, providerID string) (*models.User, error)
@@ -813,6 +830,36 @@ func (r *mongoUserRepository) GetOAuthLinks(ctx context.Context, userUUID string
 	return user.OAuthLinks, nil
 }
 
+// UpdateOAuthLinkData replaces the embedded OAuth link's OAuthData
+// map (commonly used to refresh `picture` on every callback). Quiet
+// no-op when the link isn't found — the caller is the OAuth login
+// path which mustn't fail just because a legacy account doesn't have
+// the embedded link yet (the parallel auth_oauth_providers write
+// covers it).
+func (r *mongoUserRepository) UpdateOAuthLinkData(ctx context.Context, userUUID string, provider models.OAuthProvider, providerID string, data map[string]interface{}) error {
+	filter := bson.M{
+		"uuid": userUUID,
+		"oauthLinks": bson.M{
+			"$elemMatch": bson.M{
+				"provider":   provider,
+				"providerId": providerID,
+			},
+		},
+		"deletedAt": bson.M{"$exists": false},
+	}
+	now := time.Now()
+	update := bson.M{
+		"$set": bson.M{
+			"oauthLinks.$.oauthData": data,
+			"updatedAt":              now,
+		},
+	}
+	if _, err := r.collection.UpdateOne(ctx, filter, update); err != nil {
+		return fmt.Errorf("failed to update OAuth link data: %w", err)
+	}
+	return nil
+}
+
 // UpdateOAuthLinkUsage updates the last used timestamp for an OAuth link
 func (r *mongoUserRepository) UpdateOAuthLinkUsage(ctx context.Context, userUUID string, provider models.OAuthProvider, providerID string) error {
 	filter := bson.M{
@@ -1017,6 +1064,38 @@ func (r *mongoUserRepository) ClearMFAGraceStartedAt(ctx context.Context, userUU
 	_, err := r.collection.UpdateOne(ctx, filter, update)
 	if err != nil {
 		return fmt.Errorf("clear mfa grace: %w", err)
+	}
+	return nil
+}
+
+// SetAvatarSource persists the user's avatar source preference and the
+// matching blob storage handle. Pass an empty objectKey when source is
+// anything other than "uploaded" — the helper $unsets avatarObjectKey
+// in that case so a future presigned-URL resolve does not pick up a
+// stale blob from a prior upload. ErrUserNotFound when no live row
+// matches.
+func (r *mongoUserRepository) SetAvatarSource(ctx context.Context, userUUID, source, objectKey string) error {
+	filter := bson.M{
+		"uuid":      userUUID,
+		"deletedAt": bson.M{"$exists": false},
+	}
+	set := bson.M{
+		"avatarSource": source,
+		"updatedAt":    time.Now(),
+	}
+	update := bson.M{}
+	if objectKey == "" {
+		update["$unset"] = bson.M{"avatarObjectKey": ""}
+	} else {
+		set["avatarObjectKey"] = objectKey
+	}
+	update["$set"] = set
+	result, err := r.collection.UpdateOne(ctx, filter, update)
+	if err != nil {
+		return fmt.Errorf("set avatar source: %w", err)
+	}
+	if result.MatchedCount == 0 {
+		return ErrUserNotFound
 	}
 	return nil
 }

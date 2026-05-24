@@ -23,6 +23,18 @@ export interface OAuthProviderInfo {
   scopes?: string[];
 }
 
+// AvatarSource mirrors backend iface.AvatarSource*. Drives which
+// image the SPA renders for the user — uploaded blob, OAuth provider
+// picture, or "initials" sentinel which means render initials
+// client-side.
+export type AvatarSource =
+  | 'initials'
+  | 'uploaded'
+  | 'oauth_google'
+  | 'oauth_apple'
+  | 'oauth_github'
+  | 'oauth_discord';
+
 // Backend User response matching Go UserResponse exactly
 export interface BackendUser {
   id: string;
@@ -30,6 +42,11 @@ export interface BackendUser {
   username: string;
   fullName: string;
   avatar?: string;
+  // Resolved server-side from User.AvatarSource (uploaded → fresh
+  // presigned GET, oauth_* → linked-provider picture, initials → "").
+  // The client uses avatarSource to decide between rendering an <img>
+  // (URL present) and initials over a deterministic color (URL empty).
+  avatarSource?: AvatarSource;
   role: string;
   oauthLinks?: OAuthLink[];
   oauthProviders?: OAuthProviderInfo[];
@@ -42,6 +59,17 @@ export interface BackendUser {
   // predate the field; useLanguageSync drives i18n.changeLanguage off
   // this on login.
   language?: string;
+}
+
+// PresignedAvatarUpload is the response shape for POST /v1/me/avatar/
+// presign-upload. The SPA PUTs the image bytes directly to `url` with
+// `headers` echoed verbatim, then posts `key` back to /commit so the
+// backend can promote the blob to the user's active avatar.
+export interface PresignedAvatarUpload {
+  url: string;
+  headers: Record<string, string>;
+  key: string;
+  expiresAt: string;
 }
 
 export interface LogoutResponse {
@@ -538,6 +566,89 @@ export const authApi = baseApi.injectEndpoints({
       invalidatesTags: ['Sessions']
     }),
 
+    // --- Self-service avatar pipeline ---
+    // The avatar pipeline is split into three calls so the SPA can PUT
+    // image bytes directly to S3-compatible storage without proxying
+    // through the backend:
+    //
+    //   1. presignAvatarUpload → backend mints a short-lived signed
+    //      PUT URL + the object key the user owns.
+    //   2. SPA fetches the URL with method='PUT', headers echoed
+    //      verbatim, body = the image File. This goes DIRECTLY to S3,
+    //      not through RTK Query (no auth header, no JSON wrapping).
+    //   3. commitAvatarUpload → backend HEADs the object to confirm
+    //      it landed, sets AvatarSource=uploaded, GCs the prior blob.
+    //
+    // setAvatarSource is the non-upload path — switch to initials or
+    // to a linked OAuth provider's picture without round-tripping a
+    // file.
+    presignAvatarUpload: builder.mutation<
+      PresignedAvatarUpload,
+      { contentType: string; sizeBytes: number }
+    >({
+      query: body => ({
+        url: 'v1/me/avatar/presign-upload',
+        method: 'POST',
+        body
+      })
+    }),
+
+    commitAvatarUpload: builder.mutation<BackendUser, { key: string }>({
+      query: body => ({
+        url: 'v1/me/avatar/commit',
+        method: 'POST',
+        body
+      }),
+      invalidatesTags: ['Auth', 'User'],
+      async onQueryStarted(_arg, { dispatch, queryFulfilled }) {
+        try {
+          const { data: user } = await queryFulfilled;
+          // Mirror updateCurrentUser's optimistic-cache pattern so the
+          // new avatar shows up in the navbar dropdown the instant the
+          // commit resolves, without waiting for the tag-invalidation
+          // refetch to round-trip.
+          dispatch(
+            authApi.util.updateQueryData('getCurrentUser', undefined, draft =>
+              draft ? Object.assign(draft, user) : user
+            )
+          );
+          dispatch(
+            authApi.util.updateQueryData('getSession', undefined, draft => {
+              if (draft && draft.user) Object.assign(draft.user, user);
+            })
+          );
+        } catch {
+          // Surfaced via the mutation result; caller toasts the error.
+        }
+      }
+    }),
+
+    setAvatarSource: builder.mutation<BackendUser, { source: AvatarSource }>({
+      query: body => ({
+        url: 'v1/me/avatar/source',
+        method: 'PATCH',
+        body
+      }),
+      invalidatesTags: ['Auth', 'User'],
+      async onQueryStarted(_arg, { dispatch, queryFulfilled }) {
+        try {
+          const { data: user } = await queryFulfilled;
+          dispatch(
+            authApi.util.updateQueryData('getCurrentUser', undefined, draft =>
+              draft ? Object.assign(draft, user) : user
+            )
+          );
+          dispatch(
+            authApi.util.updateQueryData('getSession', undefined, draft => {
+              if (draft && draft.user) Object.assign(draft.user, user);
+            })
+          );
+        } catch {
+          // Surfaced via the mutation result.
+        }
+      }
+    }),
+
     // Get session after OAuth callback - retrieves access token using refresh token from cookie
     getSession: builder.query<SessionResponse | null, void>({
       providesTags: ['Auth'],
@@ -630,7 +741,10 @@ export const {
   useUnlinkOauthSelfMutation,
   useInitiateOauthLinkSelfMutation,
   useRevokeSessionMutation,
-  useRevokeAllSessionsMutation
+  useRevokeAllSessionsMutation,
+  usePresignAvatarUploadMutation,
+  useCommitAvatarUploadMutation,
+  useSetAvatarSourceMutation
 } = authApi;
 
 // Export endpoints for manual cache management

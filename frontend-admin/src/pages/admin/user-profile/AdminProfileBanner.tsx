@@ -1,15 +1,20 @@
 import { Card } from 'react-bootstrap';
 import Background from 'components/common/Background';
 import Avatar from 'components/common/Avatar';
+import UserAvatar, { UserAvatarProfile } from 'components/common/UserAvatar';
 import classNames from 'classnames';
 
 interface ProfileBannerHeaderProps {
-  avatar: string;
+  // Pass either `user` (preferred — UserAvatar handles initials +
+  // deterministic color fallback) OR `avatar` URL (legacy).
+  user?: UserAvatarProfile;
+  avatar?: string;
   coverSrc: string;
   className?: string;
 }
 
 const ProfileBannerHeader: React.FC<ProfileBannerHeaderProps> = ({
+  user,
   avatar,
   coverSrc,
   className
@@ -20,12 +25,21 @@ const ProfileBannerHeader: React.FC<ProfileBannerHeaderProps> = ({
       style={{ height: '150px' }}
     >
       <Background image={coverSrc} className="rounded-3 rounded-bottom-0" />
-      <Avatar
-        size="5xl"
-        className="avatar-profile"
-        src={avatar}
-        mediaClass="img-thumbnail shadow-sm"
-      />
+      {user ? (
+        <UserAvatar
+          user={user}
+          size="5xl"
+          className="avatar-profile"
+          mediaClass="img-thumbnail shadow-sm"
+        />
+      ) : (
+        <Avatar
+          size="5xl"
+          className="avatar-profile"
+          src={avatar}
+          mediaClass="img-thumbnail shadow-sm"
+        />
+      )}
     </Card.Header>
   );
 };

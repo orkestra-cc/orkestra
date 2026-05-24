@@ -21,6 +21,7 @@ type Config struct {
 	Redis     RedisConfig
 	Auth      AuthConfig
 	Rate      RateLimitConfig
+	Storage   StorageConfig
 	Billing   BillingConfig
 	Documents DocumentsConfig
 	Company   CompanyConfig
@@ -28,6 +29,23 @@ type Config struct {
 	AIModels  AIModelsConfig
 	Agents    AgentsConfig
 	Features  FeaturesConfig
+}
+
+// StorageConfig holds the S3-compatible object-storage connection
+// parameters consumed by internal/shared/blob. Process-scoped (read
+// once at boot) because rotating credentials at runtime would
+// invalidate every in-flight presigned URL — storage stays out of the
+// admin-UI ConfigService bucket. Default endpoint targets the rustfs
+// service in docker-compose.infra.yml; production deploys swap to AWS
+// S3 / managed equivalent.
+type StorageConfig struct {
+	Endpoint       string // e.g. http://orkestra-rustfs:9000 (empty = AWS S3 default endpoint resolution)
+	Region         string // e.g. us-east-1 — placeholder for RustFS, real region for AWS S3
+	Bucket         string // e.g. orkestra-avatars
+	AccessKey      string
+	SecretKey      string
+	ForcePathStyle bool // true for RustFS / MinIO; false for AWS S3 virtual-hosted style
+	EnsureBucket   bool // true → backend creates the bucket on boot if missing; safe for self-hosted
 }
 
 // FeaturesConfig holds cross-module feature flags driving phased migrations.
@@ -492,6 +510,19 @@ func Load() (*Config, error) {
 	// Cross-module feature flags
 	config.Features = FeaturesConfig{
 		LazyTenantProvisioning: getEnvAsBool("UNIFIED_CLIENTS_LAZY_TENANT_ENABLED", true),
+	}
+
+	// Object storage configuration (RustFS default — S3-compatible).
+	// Defaults below match docker-compose.infra.yml's rustfs service so
+	// `docker compose -f infra.yml up -d` + a fresh boot just works.
+	config.Storage = StorageConfig{
+		Endpoint:       getEnv("STORAGE_ENDPOINT", "http://orkestra-rustfs:9000"),
+		Region:         getEnv("STORAGE_REGION", "us-east-1"),
+		Bucket:         getEnv("STORAGE_BUCKET", "orkestra-avatars"),
+		AccessKey:      getEnv("STORAGE_ACCESS_KEY", ""),
+		SecretKey:      getEnv("STORAGE_SECRET_KEY", ""),
+		ForcePathStyle: getEnvAsBool("STORAGE_FORCE_PATH_STYLE", true),
+		EnsureBucket:   getEnvAsBool("STORAGE_ENSURE_BUCKET", true),
 	}
 
 	// Documents/PDF generation configuration (Gotenberg)

@@ -3,15 +3,16 @@ import { Card, Col, Row } from 'react-bootstrap';
 import { useTranslation } from 'react-i18next';
 import ProfileBanner from '../ProfileBanner';
 import coverSrc from 'assets/img/generic/4.jpg';
-import avatar from 'assets/img/team/2.jpg';
 import ProfileSettings from './ProfileSettings';
 import ExperiencesSettings from './ExperiencesSettings';
 import EducationSettings from './EducationSettings';
 import LanguageSettings from './LanguageSettings';
+import AvatarSettings from './AvatarSettings';
 import AccountSettings from './AccountSettings';
 import BillingSettings from './BillingSettings';
 import DangerZone from './DangerZone';
 import paths from 'routes/paths';
+import { useGetCurrentUserQuery } from 'store/api/authApi';
 
 // Account settings page. Password change and MFA management moved to
 // the dedicated /user/security page (one source of truth so the
@@ -19,12 +20,13 @@ import paths from 'routes/paths';
 // stays focused on profile / preferences).
 const Settings: React.FC = () => {
   const { t } = useTranslation();
+  const { data: currentUser } = useGetCurrentUserQuery();
   return (
     <>
       <ProfileBanner>
         <ProfileBanner.Header
           coverSrc={coverSrc}
-          avatar={avatar}
+          user={currentUser ?? undefined}
           className="mb-8"
         />
       </ProfileBanner>
@@ -36,6 +38,7 @@ const Settings: React.FC = () => {
         </Col>
         <Col lg={4}>
           <div className="sticky-sidebar">
+            <AvatarSettings />
             <LanguageSettings />
             <AccountSettings />
             <BillingSettings />

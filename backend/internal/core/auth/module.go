@@ -20,6 +20,7 @@ import (
 	"github.com/orkestra/backend/internal/core/auth/models"
 	"github.com/orkestra/backend/internal/core/auth/repository"
 	"github.com/orkestra/backend/internal/core/auth/services"
+	"github.com/orkestra/backend/internal/shared/blob"
 	"github.com/orkestra/backend/internal/shared/config"
 	sharederrors "github.com/orkestra/backend/internal/shared/errors"
 	"github.com/orkestra/backend/internal/shared/geoip"
@@ -711,6 +712,17 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 	m.operatorAuthHandler.SetStateSecret(oauthStateSecret)
 	m.operatorAuthHandler.SetTier(services.AudienceOperator)
 	m.operatorAuthHandler.SetPolicy(authPolicy)
+	// Avatar pipeline: hand the blob store so /me + login + refresh +
+	// session-poll resolve uploaded avatars to a fresh presigned GET.
+	// Without this, oauth_*/uploaded users see initials in the navbar
+	// because the raw User.Avatar field is empty. The handler gets it
+	// for GET /v1/auth/operator/me; the service gets it for every code
+	// path that builds a UserManagementResponse for the wire.
+	if store, ok := module.GetTyped[blob.Store](deps.Services, module.ServiceBlobStore); ok {
+		m.operatorAuthHandler.SetBlobStore(store)
+		opBundle.authService.SetBlobStore(store)
+		opBundle.passwordSvc.SetBlobStore(store)
+	}
 
 	// User-security plan Phase 1: hand the revocation store to the
 	// auth service so RevokeUserSession / RevokeAllUserSessionsExcept
@@ -815,6 +827,11 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 	m.clientAuthHandler.SetStateSecret(oauthStateSecret)
 	m.clientAuthHandler.SetTier(services.AudienceClient)
 	m.clientAuthHandler.SetPolicy(authPolicy)
+	if store, ok := module.GetTyped[blob.Store](deps.Services, module.ServiceBlobStore); ok {
+		m.clientAuthHandler.SetBlobStore(store)
+		clBundle.authService.SetBlobStore(store)
+		clBundle.passwordSvc.SetBlobStore(store)
+	}
 	clBundle.authService.SetSessionRevocation(sessionRevocationSvc)
 
 	m.clientMFAHandler = handlers.NewMFAHandler(

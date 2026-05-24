@@ -37,6 +37,22 @@ const (
 // changing this default.
 const DefaultLanguage = "en"
 
+// AvatarSource values describe which logical source feeds User.Avatar
+// at read time. The Avatar URL field is rebuilt on every read path
+// from the source — for `uploaded` the backend mints a fresh
+// presigned GET URL from AvatarObjectKey; for `oauth_*` the URL is
+// copied from the matching OAuthLink.OAuthData["picture"]; for
+// `initials` the URL is empty and the frontend renders initials from
+// the user's name.
+const (
+	AvatarSourceInitials     = "initials"
+	AvatarSourceUploaded     = "uploaded"
+	AvatarSourceOAuthGoogle  = "oauth_google"
+	AvatarSourceOAuthApple   = "oauth_apple"
+	AvatarSourceOAuthGitHub  = "oauth_github"
+	AvatarSourceOAuthDiscord = "oauth_discord"
+)
+
 // OAuthProvider represents the supported OAuth providers.
 type OAuthProvider string
 
@@ -94,10 +110,27 @@ type User struct {
 	Email    string `bson:"email" json:"email" validate:"required,email"`
 	Username string `bson:"username" json:"username"`
 	FullName string `bson:"fullName" json:"fullName"`
-	Avatar   string `bson:"avatar,omitempty" json:"avatar,omitempty"`
-	Phone    string `bson:"phone" json:"phone" validate:"omitempty,e164"`
-	PIN      string `bson:"pin,omitempty" json:"-"` // Encrypted, never exposed
-	Role     string `bson:"role" json:"role" validate:"required,oneof=super_admin administrator developer manager operator guest"`
+	// Avatar is the *resolved* URL the SPA renders — never persisted as
+	//-is for uploaded sources. The user module's read paths
+	// (GetCurrentUser, GetUserByID, ToResponse) rebuild it from the
+	// AvatarSource + AvatarObjectKey + matching OAuthLink picture, so a
+	// stored value here is treated as a cache and overwritten on read.
+	Avatar string `bson:"avatar,omitempty" json:"avatar,omitempty"`
+	// AvatarSource records the user's stated preference for which
+	// logical source feeds Avatar. One of AvatarSource* consts above.
+	// Empty on documents that predate the field; the user module
+	// backfills "initials" on Init so the in-memory user always has a
+	// value.
+	AvatarSource string `bson:"avatarSource,omitempty" json:"avatarSource,omitempty" validate:"omitempty,oneof=uploaded oauth_google oauth_apple oauth_github oauth_discord initials"`
+	// AvatarObjectKey is the storage handle for an uploaded avatar.
+	// Only set when AvatarSource == "uploaded". Never exposed over the
+	// JSON API — the backend mints a presigned GET URL into Avatar on
+	// every read so the stored key can be rotated without rewriting
+	// every user row.
+	AvatarObjectKey string `bson:"avatarObjectKey,omitempty" json:"-"`
+	Phone           string `bson:"phone" json:"phone" validate:"omitempty,e164"`
+	PIN             string `bson:"pin,omitempty" json:"-"` // Encrypted, never exposed
+	Role            string `bson:"role" json:"role" validate:"required,oneof=super_admin administrator developer manager operator guest"`
 
 	// OAuth fields
 	OAuthLinks    []OAuthLink            `bson:"oauthLinks,omitempty" json:"oauthLinks,omitempty"`
@@ -177,6 +210,7 @@ type UserManagementResponse struct {
 	Username      string                  `json:"username"`
 	FullName      string                  `json:"fullName"`
 	Avatar        string                  `json:"avatar,omitempty"`
+	AvatarSource  string                  `json:"avatarSource,omitempty"`
 	Phone         string                  `json:"phone,omitempty"`
 	Role          string                  `json:"role"`
 	Providers     []UserOAuthProviderInfo `json:"providers"`
@@ -221,6 +255,7 @@ type AdminClientUserItem struct {
 	Username      string                  `json:"username,omitempty"`
 	FullName      string                  `json:"fullName,omitempty"`
 	Avatar        string                  `json:"avatar,omitempty"`
+	AvatarSource  string                  `json:"avatarSource,omitempty"`
 	Role          string                  `json:"role"`
 	IsActive      bool                    `json:"isActive"`
 	EmailVerified bool                    `json:"emailVerified"`
@@ -267,6 +302,7 @@ func (u *User) ToResponse() *UserManagementResponse {
 		Username:      u.Username,
 		FullName:      u.FullName,
 		Avatar:        u.Avatar,
+		AvatarSource:  u.AvatarSource,
 		Phone:         u.Phone,
 		Role:          u.Role,
 		Providers:     make([]UserOAuthProviderInfo, 0),
@@ -288,6 +324,7 @@ func NewUser() *User {
 		EmailVerified: false,
 		Role:          "operator",
 		Language:      DefaultLanguage,
+		AvatarSource:  AvatarSourceInitials,
 		CreatedAt:     now,
 		UpdatedAt:     now,
 		OAuthLinks:    make([]OAuthLink, 0),

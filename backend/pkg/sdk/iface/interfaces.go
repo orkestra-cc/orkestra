@@ -73,6 +73,17 @@ type UserProvider interface {
 	ClearMFAGrace(ctx context.Context, userUUID string) error
 }
 
+// OAuthLinkDataUpdater is the additive sub-interface that lets the auth
+// module refresh the embedded OAuthLink.OAuthData map (typically the
+// cached `picture` URL) on every OAuth callback. Adding this method
+// directly to UserProvider would break every external implementor; the
+// auth callback paths type-assert against this interface and gracefully
+// skip the refresh on implementations that don't satisfy it. Satisfied
+// by the canonical user-module UserService.
+type OAuthLinkDataUpdater interface {
+	UpdateOAuthLinkData(ctx context.Context, userUUID string, provider OAuthProvider, providerID string, data map[string]interface{}) error
+}
+
 // ---------------------------------------------------------------------------
 // OperatorUserProvider / ClientUserProvider — ADR-0003 PR-B
 // Tier-aware user-data interfaces. Same surface as UserProvider but each

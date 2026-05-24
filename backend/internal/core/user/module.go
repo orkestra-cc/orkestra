@@ -3,6 +3,7 @@ package user
 import (
 	"context"
 
+	"github.com/danielgtaylor/huma/v2"
 	"github.com/danielgtaylor/huma/v2/adapters/humachi"
 	"github.com/go-chi/chi/v5"
 	"github.com/orkestra-cc/orkestra-sdk/iface"
@@ -11,12 +12,15 @@ import (
 	"github.com/orkestra/backend/internal/core/user/handlers"
 	"github.com/orkestra/backend/internal/core/user/repository"
 	"github.com/orkestra/backend/internal/core/user/services"
+	"github.com/orkestra/backend/internal/shared/blob"
 )
 
 type UserModule struct {
 	module.BaseModule
-	handler            *handlers.UserHandler
-	adminClientHandler *handlers.AdminClientUserHandler
+	handler               *handlers.UserHandler
+	adminClientHandler    *handlers.AdminClientUserHandler
+	operatorAvatarHandler *handlers.AvatarHandler
+	clientAvatarHandler   *handlers.AvatarHandler
 }
 
 func NewModule() *UserModule { return &UserModule{} }
@@ -61,6 +65,7 @@ func (m *UserModule) Permissions() []iface.PermissionSpec {
 		{Key: "user.update", Module: "user", Description: "Update user profiles"},
 		{Key: "user.delete", Module: "user", Description: "Delete users"},
 		{Key: "user.self", Module: "user", Description: "Edit your own profile"},
+		{Key: "user.avatar.self", Module: "user", Description: "Manage your own avatar (upload, pick from linked OAuth provider, reset to initials)"},
 	}
 }
 
@@ -88,6 +93,24 @@ func (m *UserModule) Init(deps *module.Dependencies) error {
 	m.adminClientHandler = handlers.NewAdminClientUserHandler(clientSvc, deps.Services)
 	deps.Services.Register(module.ServiceUserService, canonical)
 
+	// Wire the blob store into both per-tier services so uploaded
+	// avatars get fresh presigned GETs on every read path. Optional —
+	// when the store isn't wired (storage env unset, S3 endpoint down)
+	// uploaded-source avatars fall back to whatever URL the document
+	// happens to carry.
+	var blobStore blob.Store
+	if store, ok := module.GetTyped[blob.Store](deps.Services, module.ServiceBlobStore); ok {
+		blobStore = store
+		operatorSvc.(interface{ SetBlobStore(blob.Store) }).SetBlobStore(store)
+		clientSvc.(interface{ SetBlobStore(blob.Store) }).SetBlobStore(store)
+	}
+
+	// Per-tier avatar handlers — each bound to its own UserService so
+	// SetAvatarSource lands on the right collection. blobStore may be
+	// nil; the handler degrades to 503 for uploads in that case.
+	m.operatorAvatarHandler = handlers.NewAvatarHandler(operatorSvc, blobStore, iface.TierOperator)
+	m.clientAvatarHandler = handlers.NewAvatarHandler(clientSvc, blobStore, iface.TierClient)
+
 	// Register the user PII producer with the DSR registry pre-created in
 	// main.go. Missing registry means the platform was booted without
 	// compliance infrastructure — tolerate and skip.
@@ -110,6 +133,43 @@ func (m *UserModule) Init(deps *module.Dependencies) error {
 	return nil
 }
 
+// registerAvatarRoutes mounts the three self-service avatar endpoints
+// on the given Huma API + handler instance. Path prefix is /v1/me/avatar
+// — outside the /v1/auth namespace because these are user-profile
+// mutations, not auth flows. Caller wraps with RequireGlobal() so any
+// authenticated user can manage their own avatar.
+func registerAvatarRoutes(api huma.API, h *handlers.AvatarHandler, opIDPrefix string) {
+	huma.Register(api, huma.Operation{
+		OperationID: opIDPrefix + "presign-avatar-upload",
+		Method:      "POST",
+		Path:        "/v1/me/avatar/presign-upload",
+		Summary:     "Mint a short-lived presigned PUT URL for an avatar upload",
+		Description: "Returns a URL the SPA PUTs the image directly to S3-compatible storage. Cap 2 MiB; MIME must be image/png|jpeg|webp. The SPA echoes the returned key on the commit call.",
+		Tags:        []string{"Users", "Self-Service"},
+		Security:    []map[string][]string{{"bearerAuth": {}}},
+	}, h.PresignAvatarUpload)
+
+	huma.Register(api, huma.Operation{
+		OperationID: opIDPrefix + "commit-avatar-upload",
+		Method:      "POST",
+		Path:        "/v1/me/avatar/commit",
+		Summary:     "Promote a freshly-uploaded blob to be the user's active avatar",
+		Description: "Verifies the object landed in storage, sets AvatarSource=uploaded, and GCs the previous blob. Returns the updated user profile.",
+		Tags:        []string{"Users", "Self-Service"},
+		Security:    []map[string][]string{{"bearerAuth": {}}},
+	}, h.CommitAvatarUpload)
+
+	huma.Register(api, huma.Operation{
+		OperationID: opIDPrefix + "set-avatar-source",
+		Method:      "PATCH",
+		Path:        "/v1/me/avatar/source",
+		Summary:     "Switch the avatar to initials or to a linked OAuth provider's picture",
+		Description: "oauth_* requires the matching provider to be linked (422 otherwise). Use presign-upload + commit to set source to uploaded.",
+		Tags:        []string{"Users", "Self-Service"},
+		Security:    []map[string][]string{{"bearerAuth": {}}},
+	}, h.SetAvatarSource)
+}
+
 func (m *UserModule) RegisterRoutes(ri *module.RouteInfo) {
 	// User management is a platform-level concern: users are global, so
 	// routes live on the system permission gate (administrators) rather
@@ -120,4 +180,22 @@ func (m *UserModule) RegisterRoutes(ri *module.RouteInfo) {
 		RegisterRoutes(api, m.handler)
 		RegisterAdminClientRoutes(api, m.adminClientHandler)
 	})
+
+	// Self-service avatar surface — mounted on BOTH audiences so a
+	// Tier-2 client can change their own avatar on api.* just like a
+	// Tier-1 operator does on console.*. Gate is RequireGlobal — any
+	// authenticated user manages their own row; the handler enforces
+	// owner-self via the JWT user UUID.
+	ri.Operator.ProtectedRouter.Group(func(r chi.Router) {
+		r.Use(ri.Operator.AuthMW.RequireGlobal())
+		api := humachi.New(r, ri.APIConfig)
+		registerAvatarRoutes(api, m.operatorAvatarHandler, "operator-")
+	})
+	if ri.Client != nil && ri.Client.ProtectedRouter != nil && m.clientAvatarHandler != nil {
+		ri.Client.ProtectedRouter.Group(func(r chi.Router) {
+			r.Use(ri.Client.AuthMW.RequireGlobal())
+			api := humachi.New(r, ri.APIConfig)
+			registerAvatarRoutes(api, m.clientAvatarHandler, "client-")
+		})
+	}
 }

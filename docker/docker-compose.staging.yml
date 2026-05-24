@@ -149,6 +149,18 @@ services:
       # running under Kubernetes or when infra is managed externally.
       CONTAINER_CONTROL_ENABLED: ${CONTAINER_CONTROL_ENABLED:-true}
 
+      # Object storage (RustFS — S3-compatible). Backs avatar uploads.
+      # Defaults below target the rustfs service in docker-compose.infra.yml.
+      # Swap STORAGE_ENDPOINT to an AWS S3 (and set STORAGE_FORCE_PATH_STYLE=false)
+      # for production-grade managed storage.
+      STORAGE_ENDPOINT: ${STORAGE_ENDPOINT:-http://orkestra-rustfs:9000}
+      STORAGE_REGION: ${STORAGE_REGION:-us-east-1}
+      STORAGE_BUCKET: ${STORAGE_BUCKET:-orkestra-avatars}
+      STORAGE_ACCESS_KEY: ${STORAGE_ACCESS_KEY:-orkestra}
+      STORAGE_SECRET_KEY: ${STORAGE_SECRET_KEY:-changeme-rustfs}
+      STORAGE_FORCE_PATH_STYLE: ${STORAGE_FORCE_PATH_STYLE:-true}
+      STORAGE_ENSURE_BUCKET: ${STORAGE_ENSURE_BUCKET:-true}
+
       # Marketing import spool — async-import payloads persist here between
       # Enqueue and worker pickup. The schema default
       # (/var/lib/orkestra/marketing/spool) is not writable by the

@@ -95,6 +95,9 @@ func (orchOAuthRepo) UpdateRefreshToken(context.Context, string, string) error {
 func (orchOAuthRepo) UpdateOAuthTokens(context.Context, string, string, string, *time.Time, *time.Time, []string) error {
 	return nil
 }
+func (orchOAuthRepo) UpdateMetadata(context.Context, string, map[string]interface{}) error {
+	return nil
+}
 func (orchOAuthRepo) UnlinkProvider(context.Context, string, authModels.OAuthProvider) error {
 	return nil
 }

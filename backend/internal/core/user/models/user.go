@@ -31,6 +31,17 @@ const (
 	OAuthProviderGitHub  = iface.OAuthProviderGitHub
 )
 
+// AvatarSource re-exports — call sites use models.AvatarSource* but the
+// canonical strings live in iface.
+const (
+	AvatarSourceInitials     = iface.AvatarSourceInitials
+	AvatarSourceUploaded     = iface.AvatarSourceUploaded
+	AvatarSourceOAuthGoogle  = iface.AvatarSourceOAuthGoogle
+	AvatarSourceOAuthApple   = iface.AvatarSourceOAuthApple
+	AvatarSourceOAuthGitHub  = iface.AvatarSourceOAuthGitHub
+	AvatarSourceOAuthDiscord = iface.AvatarSourceOAuthDiscord
+)
+
 // Type aliases — call sites keep using `models.X` but the canonical
 // definition lives in iface.
 type (

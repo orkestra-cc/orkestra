@@ -18,6 +18,7 @@ import (
 	"github.com/orkestra/backend/internal/core/auth/repository"
 	notifModels "github.com/orkestra/backend/internal/core/notification/models"
 	userModels "github.com/orkestra/backend/internal/core/user/models"
+	"github.com/orkestra/backend/internal/shared/blob"
 	sharederrors "github.com/orkestra/backend/internal/shared/errors"
 	"github.com/orkestra/backend/internal/shared/geoip"
 )
@@ -129,6 +130,11 @@ type PasswordAuthService struct {
 	// post-construction because WebAuthn is built later in the same Init.
 	// Nil when WebAuthn is disabled — completeLogin then reports false.
 	webauthnAvailability HasWebAuthnCredentials
+	// blobStore is consumed by every code path that builds a
+	// UserManagementResponse (login, MFA partial response) so the
+	// wire `avatar` field is the freshly-resolved URL, not the stale
+	// stored value. Optional — nil leaves Avatar unchanged.
+	blobStore blob.Store
 }
 
 // HasWebAuthnCredentials is the narrow contract login flows need from the
@@ -143,6 +149,25 @@ type HasWebAuthnCredentials interface {
 // the first login since both are fully constructed during module Init.
 func (s *PasswordAuthService) SetWebAuthnAvailability(c HasWebAuthnCredentials) {
 	s.webauthnAvailability = c
+}
+
+// SetBlobStore wires the object-storage handle used to resolve the
+// uploaded-avatar presigned URL on every login response. Without
+// this, oauth_*/uploaded users see initials in the navbar because
+// the raw User.Avatar field is empty.
+func (s *PasswordAuthService) SetBlobStore(store blob.Store) {
+	s.blobStore = store
+}
+
+// buildUserResponse converts a raw User to a wire response with
+// Avatar resolved from AvatarSource. Mirrors authService.buildUserResponse
+// — both services need the same shape on the wire.
+func (s *PasswordAuthService) buildUserResponse(ctx context.Context, user *userModels.User) *userModels.UserManagementResponse {
+	resp := user.ToResponse()
+	if user.AvatarSource != "" {
+		resp.Avatar = blob.ResolveAvatarURL(ctx, user, s.blobStore)
+	}
+	return resp
 }
 
 // NewPasswordAuthService builds a new password auth service.
@@ -627,7 +652,7 @@ func (s *PasswordAuthService) completeLogin(ctx context.Context, user *userModel
 			RequiresMFA:       true,
 			MFAToken:          ch.ID,
 			WebAuthnAvailable: hasWebAuthn,
-			User:              user.ToResponse(),
+			User:              s.buildUserResponse(ctx, user),
 		}, nil
 	}
 
@@ -1183,7 +1208,7 @@ func (s *PasswordAuthService) issueTokens(ctx context.Context, user *userModels.
 		ExpiresIn:    900,
 		SessionID:    sessionID,
 		DeviceID:     deviceID,
-		User:         user.ToResponse(),
+		User:         s.buildUserResponse(ctx, user),
 	}, nil
 }
 

@@ -681,6 +681,9 @@ func (oauthRepoStub) UpdateRefreshToken(context.Context, string, string) error {
 func (oauthRepoStub) UpdateOAuthTokens(context.Context, string, string, string, *time.Time, *time.Time, []string) error {
 	return nil
 }
+func (oauthRepoStub) UpdateMetadata(context.Context, string, map[string]interface{}) error {
+	return nil
+}
 func (oauthRepoStub) UnlinkProvider(context.Context, string, authModels.OAuthProvider) error {
 	return nil
 }
