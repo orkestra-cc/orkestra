@@ -4,11 +4,26 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Conventional Commits](https://www.conventionalcommits.org/).
 
-## [0.1.0] - 2026-05-23
+## [0.1.1] - 2026-05-24
 
 ### Bug fixes
 
 - **(release)** Defensive guard when CHANGELOG.md is already current ([d9d9b5f](https://github.com/orkestra-cc/orkestra/commit/d9d9b5fc757040bee67da5a19d7f4d72f6f2e632))
+
+### Dependencies
+
+- **(deps)** Bump actions/upload-artifact from 5 to 7 (#49) ([df49327](https://github.com/orkestra-cc/orkestra/commit/df49327bb31cbfcdd896cf34c433171bead4d22a))
+- **(deps)** Bump actions/checkout from 5 to 6 (#48) ([aafed72](https://github.com/orkestra-cc/orkestra/commit/aafed723d9a01b7260f7f627625f038d082d0026))
+- **(deps)** Bump github.com/cedar-policy/cedar-go in /backend (#39) ([105016a](https://github.com/orkestra-cc/orkestra/commit/105016a418e7b0396ea6101d57cbc6dd034d3061))
+- **(deps)** Bump actions/download-artifact from 5 to 8 (#35) ([7a35304](https://github.com/orkestra-cc/orkestra/commit/7a35304270995d6bad7f0ba7f2ba370243b62cb0))
+- **(deps)** Bump cupertino_icons from 1.0.8 to 1.0.9 in /mobile (#47) ([95be287](https://github.com/orkestra-cc/orkestra/commit/95be28787a2e565752f27975667cb3cb233b8639))
+- **(deps)** Bump emoji-picker-react in /frontend-admin (#44) ([eb12a71](https://github.com/orkestra-cc/orkestra/commit/eb12a7118f1bb70127379cc0df26d610d9b90d37))
+- **(deps)** Bump react-hook-form in /frontend-admin (#41) ([2776e67](https://github.com/orkestra-cc/orkestra/commit/2776e67fc1c14bae7e988ca60223e23309d1b25a))
+- **(deps)** Bump web-vitals from 5.1.0 to 5.2.0 in /frontend-admin (#40) ([1ea970a](https://github.com/orkestra-cc/orkestra/commit/1ea970aedb4e7de04b18274773bb8f6493abbec4))
+- **(deps)** Bump github.com/go-webauthn/webauthn in /backend (#38) ([1f06f49](https://github.com/orkestra-cc/orkestra/commit/1f06f49b70f24f08762c3971a84328cc76a4a78b))
+- **(deps)** Bump github.com/redis/go-redis/v9 in /backend (#37) ([7c3ee11](https://github.com/orkestra-cc/orkestra/commit/7c3ee114e94732ce9ee95f6fcb71ef0e90f658c8))
+- **(deps)** Bump github.com/alicebob/miniredis/v2 in /backend (#36) ([6c81285](https://github.com/orkestra-cc/orkestra/commit/6c81285bb7de29147494d034d7f73b8d98a12d99))
+- **(deps)** Bump golang.org/x/tools from 0.44.0 to 0.45.0 in /backend (#34) ([ab9d3c1](https://github.com/orkestra-cc/orkestra/commit/ab9d3c1a78db74a03ea4c05672941b40f7ffbb04))
 
 ## [0.1.0] - 2026-05-23
 
