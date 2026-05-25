@@ -465,30 +465,22 @@
     }
   },
   "settings": {
-    "account": {
-      "title": "Impostazioni account",
-      "whoSeeProfile": "Chi può vedere il tuo profilo?",
-      "whoSeeProfileTooltip": "Solo il gruppo di persone selezionate può vedere il tuo profilo",
-      "whoCanTag": "Chi può taggarti?",
-      "whoCanTagTooltip": "Solo il gruppo di persone selezionate può taggarti",
-      "everyone": "Tutti",
-      "myFollowers": "I miei follower",
-      "onlyMe": "Solo io",
-      "groupMembers": "Membri del gruppo",
-      "showFollowers": "Consenti agli utenti di vedere i tuoi follower",
-      "showEmail": "Consenti agli utenti di vedere la tua email",
-      "showExperience": "Consenti agli utenti di vedere le tue esperienze",
-      "showPhone": "Rendi visibile il tuo numero di telefono",
-      "allowFollow": "Consenti agli utenti di seguirti"
-    },
-    "billing": {
-      "title": "Impostazioni fatturazione",
-      "plan": "Piano",
-      "developerPlan": "<strong>Developer</strong> - Repository privati illimitati",
-      "updatePlan": "Aggiorna piano",
-      "payment": "Pagamento",
-      "noPayment": "Non hai aggiunto alcun metodo di pagamento.",
-      "addPayment": "Aggiungi pagamento"
+    "profile": {
+      "title": "Profilo",
+      "description": "La tua identità all'interno di Orkestra. Email e ruolo vengono gestiti separatamente: contatta un amministratore se devono cambiare.",
+      "fullNameLabel": "Nome visualizzato",
+      "fullNamePlaceholder": "Come ti chiamiamo?",
+      "fullNameInvalid": "Usa da 1 a 100 caratteri.",
+      "emailLabel": "Email",
+      "emailVerified": "Verificata",
+      "emailUnverified": "Non verificata",
+      "usernameLabel": "Username",
+      "roleLabel": "Ruolo",
+      "memberSinceLabel": "Iscritto dal",
+      "lastLoginLabel": "Ultimo accesso",
+      "submit": "Salva modifiche",
+      "toastSaved": "Profilo aggiornato.",
+      "toastFailed": "Impossibile salvare il profilo. Riprova."
     },
     "danger": {
       "title": "Zona di pericolo",
@@ -499,7 +491,24 @@
     "security": {
       "title": "Sicurezza dell'account",
       "description": "Password, autenticazione a due fattori, sessioni e dispositivi affidabili sono ora nella loro pagina dedicata.",
-      "manage": "Gestisci la sicurezza"
+      "manage": "Gestisci la sicurezza",
+      "summary": {
+        "description": "Riepilogo in tempo reale di come accedi. Usa il centro sicurezza per modificare.",
+        "mfaOn": "Due fattori attivi",
+        "mfaOff": "Due fattori disattivati",
+        "mfaRequired": "Obbligatori",
+        "mfaTotp": "(app di autenticazione)",
+        "mfaPasskey_one": "({{count}} passkey)",
+        "mfaPasskey_other": "({{count}} passkey)",
+        "mfaBoth_one": "(autenticazione + {{count}} passkey)",
+        "mfaBoth_other": "(autenticazione + {{count}} passkey)",
+        "sessions_one": "{{count}} sessione attiva",
+        "sessions_other": "{{count}} sessioni attive",
+        "passwordAgeKnown_one": "Password aggiornata {{count}} giorno fa",
+        "passwordAgeKnown_other": "Password aggiornata {{count}} giorni fa",
+        "passwordAgeUnknown": "Data aggiornamento password non disponibile",
+        "oauthLinked": "Provider di accesso:"
+      }
     },
     "language": {
       "title": "Lingua",
@@ -3969,22 +3978,6 @@
       "pageDescription": "Visualizza e gestisci la tua agenda",
       "comingSoonTitle": "Calendario in arrivo",
       "comingSoonBody": "Il tuo calendario personale con agenda, eventi e promemoria sarà disponibile qui."
-    },
-    "profileSettings": {
-      "cardTitle": "Impostazioni profilo",
-      "labelFirstName": "Nome",
-      "placeholderFirstName": "Nome",
-      "labelLastName": "Cognome",
-      "placeholderLastName": "Cognome",
-      "labelEmail": "Email",
-      "placeholderEmail": "Email",
-      "labelPhone": "Telefono",
-      "placeholderPhone": "Telefono",
-      "labelHeading": "Titolo",
-      "placeholderHeading": "Titolo",
-      "labelIntro": "Introduzione",
-      "placeholderIntro": "Introduzione",
-      "submit": "Aggiorna"
     }
   },
   "userPrivacy": {

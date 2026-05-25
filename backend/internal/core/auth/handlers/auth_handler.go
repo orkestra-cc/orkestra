@@ -2108,10 +2108,10 @@ type CurrentUserResponse struct {
 
 // UpdateCurrentUserInput is the request body for PATCH /v1/auth/{tier}/me.
 // Self-service preference surface — strictly allowlisted: only the
-// language field is accepted today. Adding a new mutable preference
-// (theme, notification opt-ins, …) means adding a field here AND
-// honoring it explicitly in UpdateCurrentUser; the underlying
-// UpdateUserInput shape is wider but is NOT pass-through.
+// fields below are accepted. Adding a new mutable preference (theme,
+// notification opt-ins, …) means adding a field here AND honoring it
+// explicitly in UpdateCurrentUser; the underlying UpdateUserInput
+// shape is wider but is NOT pass-through.
 type UpdateCurrentUserInput struct {
 	Body struct {
 		// Language is the user's preferred BCP-47 language tag. The
@@ -2119,11 +2119,16 @@ type UpdateCurrentUserInput struct {
 		// extend the enum and validate tags in lockstep when adding a
 		// new locale.
 		Language string `json:"language,omitempty" enum:"en,it" validate:"omitempty,oneof=en it"`
+		// FullName is the display name shown across the SPA (profile
+		// banner, header dropdown, audit logs). Bounds match
+		// iface.UpdateUserInput.FullName so the validator on the wider
+		// admin surface stays the single source of truth.
+		FullName string `json:"fullName,omitempty" validate:"omitempty,min=1,max=100"`
 	}
 }
 
 // UpdateCurrentUser writes self-service preferences for the calling
-// user. Currently exposes only `language`; the response shape matches
+// user. Exposes language + fullName today; the response shape matches
 // GET /v1/auth/{tier}/me so the SPA can replace its cached user
 // document with the response without an extra round-trip.
 func (h *AuthHandler) UpdateCurrentUser(ctx context.Context, in *UpdateCurrentUserInput) (*GetCurrentUserResponse, error) {
@@ -2139,6 +2144,12 @@ func (h *AuthHandler) UpdateCurrentUser(ctx context.Context, in *UpdateCurrentUs
 	if in.Body.Language != "" {
 		if err := h.authService.UpdateLanguageByUUID(ctx, userUUID, in.Body.Language); err != nil {
 			return nil, huma.Error500InternalServerError("Failed to update preferences", err)
+		}
+	}
+
+	if in.Body.FullName != "" {
+		if err := h.authService.UpdateFullNameByUUID(ctx, userUUID, in.Body.FullName); err != nil {
+			return nil, huma.Error500InternalServerError("Failed to update profile", err)
 		}
 	}
 

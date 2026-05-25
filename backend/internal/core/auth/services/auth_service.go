@@ -96,6 +96,11 @@ type AuthService interface {
 	// UpdateUserInput re-validates via struct tags, but the service trusts
 	// the caller has already rejected the unknown values.
 	UpdateLanguageByUUID(ctx context.Context, uuid, language string) error
+	// UpdateFullNameByUUID writes the user's display name. Self-service
+	// surface — the handler enforces length bounds via Huma struct tags
+	// (1..100) and the underlying UpdateUserInput re-validates, so the
+	// service treats the value as trusted.
+	UpdateFullNameByUUID(ctx context.Context, uuid, fullName string) error
 
 	// OAuth Link Management. Adding a new identity goes through the
 	// signed-state OAuth flow (POST /v1/auth/{tier}/me/oauth/link/{provider})
@@ -372,6 +377,11 @@ func (s *authService) UpdateLastLoginByUUID(ctx context.Context, uuid string) er
 
 func (s *authService) UpdateLanguageByUUID(ctx context.Context, uuid, language string) error {
 	_, err := s.userService.UpdateUser(ctx, uuid, &userModels.UpdateUserInput{Language: language})
+	return err
+}
+
+func (s *authService) UpdateFullNameByUUID(ctx context.Context, uuid, fullName string) error {
+	_, err := s.userService.UpdateUser(ctx, uuid, &userModels.UpdateUserInput{FullName: fullName})
 	return err
 }
 

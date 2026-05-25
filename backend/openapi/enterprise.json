@@ -17336,6 +17336,9 @@
             "readOnly": true,
             "type": "string"
           },
+          "fullName": {
+            "type": "string"
+          },
           "language": {
             "enum": [
               "en",

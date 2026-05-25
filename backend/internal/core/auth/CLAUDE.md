@@ -212,6 +212,7 @@ The OAuth provider callbacks (`/v1/auth/oauth/{google,apple,discord,github}/call
 | Method | Path | Gate | Purpose |
 |---|---|---|---|
 | GET | `/v1/auth/{tier}/me` | bearer | Return the current authenticated user. The response `avatar` field is resolved server-side via `blob.ResolveAvatarURL` from `User.AvatarSource`: a fresh presigned GET for `uploaded`, the matching `OAuthLinks[i].OAuthData["picture"]` for `oauth_*`, empty for `initials`. The same resolution runs on every other response builder (login, refresh-cookie session-poll, MFA partial responses) so the SPA sees a stable shape regardless of code path |
+| PATCH | `/v1/auth/{tier}/me` | bearer | Self-service preference patch. Strictly allowlisted: `language` (BCP-47, oneof=en/it) and `fullName` (1..100 chars). Response mirrors GET /me so the SPA can replace its cached user document without an extra round-trip. Adding a new mutable preference requires extending `UpdateCurrentUserInput` AND honoring it in `UpdateCurrentUser` — the underlying SDK `UpdateUserInput` shape is wider but NOT pass-through |
 | POST | `/v1/auth/{tier}/change-password` | `RequireGlobal()` | Self-service password change |
 | POST | `/v1/auth/{tier}/mfa/enroll/begin` | `RequireGlobal()` | Start TOTP enrollment — returns `{challengeId, secret, provisioningUri}` |
 | POST | `/v1/auth/{tier}/mfa/enroll/confirm` | `RequireGlobal()` | Confirm enrollment with a TOTP code, receive 10 one-shot backup codes |

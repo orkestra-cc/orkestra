@@ -285,13 +285,17 @@ export const authApi = baseApi.injectEndpoints({
       keepUnusedDataFor: 30 // 30 seconds
     }),
 
-    // Self-service preference patch — currently only `language`. Backend
-    // mirrors GET /me on success so the SPA can replace its cached user
-    // doc with the response. We seed both authApi caches (`getCurrentUser`
-    // + `getSession`) so subscribers re-render against the new value
-    // without an extra round-trip; the failure path is the caller's
-    // problem (LanguageSettings reverts i18n + cookie + toasts).
-    updateCurrentUser: builder.mutation<BackendUser, { language?: string }>({
+    // Self-service preference patch — `language` and `fullName` today.
+    // Backend mirrors GET /me on success so the SPA can replace its
+    // cached user doc with the response. We seed both authApi caches
+    // (`getCurrentUser` + `getSession`) so subscribers re-render
+    // against the new value without an extra round-trip; the failure
+    // path is the caller's problem (LanguageSettings reverts i18n +
+    // cookie + toasts, ProfileSettings reverts its form state).
+    updateCurrentUser: builder.mutation<
+      BackendUser,
+      { language?: string; fullName?: string }
+    >({
       query: body => ({
         url: 'v1/auth/operator/me',
         method: 'PATCH',

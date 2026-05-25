@@ -465,30 +465,22 @@
     }
   },
   "settings": {
-    "account": {
-      "title": "Account Settings",
-      "whoSeeProfile": "Who can see your profile?",
-      "whoSeeProfileTooltip": "Only the group of selected people can see your profile",
-      "whoCanTag": "Who can tag you?",
-      "whoCanTagTooltip": "Only the group of selected people can tag you",
-      "everyone": "Everyone",
-      "myFollowers": "My Followers",
-      "onlyMe": "Only Me",
-      "groupMembers": "Group Members",
-      "showFollowers": "Allow users to show your followers",
-      "showEmail": "Allow users to show your email",
-      "showExperience": "Allow users to show your experiences",
-      "showPhone": "Make your phone number visible",
-      "allowFollow": "Allow users to follow you"
-    },
-    "billing": {
-      "title": "Billing Setting",
-      "plan": "Plan",
-      "developerPlan": "<strong>Developer</strong> - Unlimited private repositories",
-      "updatePlan": "Update Plan",
-      "payment": "Payment",
-      "noPayment": "You have not added any payment.",
-      "addPayment": "Add Payment"
+    "profile": {
+      "title": "Profile",
+      "description": "Your identity inside Orkestra. Email and role are administered separately; reach out to an administrator if either needs to change.",
+      "fullNameLabel": "Display name",
+      "fullNamePlaceholder": "How should we call you?",
+      "fullNameInvalid": "Use between 1 and 100 characters.",
+      "emailLabel": "Email",
+      "emailVerified": "Verified",
+      "emailUnverified": "Unverified",
+      "usernameLabel": "Username",
+      "roleLabel": "Role",
+      "memberSinceLabel": "Member since",
+      "lastLoginLabel": "Last sign-in",
+      "submit": "Save changes",
+      "toastSaved": "Profile updated.",
+      "toastFailed": "Could not save your profile. Try again."
     },
     "danger": {
       "title": "Danger Zone",
@@ -499,7 +491,24 @@
     "security": {
       "title": "Account security",
       "description": "Password, two-factor, sessions, and trusted devices live on their own page now.",
-      "manage": "Manage security"
+      "manage": "Manage security",
+      "summary": {
+        "description": "Live snapshot of how you sign in. Use the security center to make changes.",
+        "mfaOn": "Two-factor on",
+        "mfaOff": "Two-factor off",
+        "mfaRequired": "Required",
+        "mfaTotp": "(authenticator app)",
+        "mfaPasskey_one": "({{count}} passkey)",
+        "mfaPasskey_other": "({{count}} passkeys)",
+        "mfaBoth_one": "(authenticator + {{count}} passkey)",
+        "mfaBoth_other": "(authenticator + {{count}} passkeys)",
+        "sessions_one": "{{count}} active session",
+        "sessions_other": "{{count}} active sessions",
+        "passwordAgeKnown_one": "Password updated {{count}} day ago",
+        "passwordAgeKnown_other": "Password updated {{count}} days ago",
+        "passwordAgeUnknown": "Password update date unknown",
+        "oauthLinked": "Sign-in providers:"
+      }
     },
     "language": {
       "title": "Language",
@@ -3969,22 +3978,6 @@
       "pageDescription": "View and manage your schedule",
       "comingSoonTitle": "Calendar Coming Soon",
       "comingSoonBody": "Your personal calendar with schedules, events, and reminders will be available here."
-    },
-    "profileSettings": {
-      "cardTitle": "Profile Settings",
-      "labelFirstName": "First Name",
-      "placeholderFirstName": "First Name",
-      "labelLastName": "Last Name",
-      "placeholderLastName": "Last Name",
-      "labelEmail": "Email",
-      "placeholderEmail": "Email",
-      "labelPhone": "Phone",
-      "placeholderPhone": "Phone",
-      "labelHeading": "Heading",
-      "placeholderHeading": "Heading",
-      "labelIntro": "Intro",
-      "placeholderIntro": "Intro",
-      "submit": "Update"
     }
   },
   "userPrivacy": {
