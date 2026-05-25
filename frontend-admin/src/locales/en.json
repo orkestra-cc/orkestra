@@ -313,10 +313,6 @@
       "noneAvailable": "No social sign-in providers are currently enabled.",
       "loadError": "Could not load the social sign-in options. Please try again.",
       "callback": {
-        "completing": "Completing authentication...",
-        "waitMessage": "Please wait while we sign you in.",
-        "successTitle": "Authentication successful!",
-        "successDetail": "Redirecting to the dashboard...",
         "failureTitle": "Authentication failed",
         "redirectingToLogin": "Redirecting to the sign-in page...",
         "oauthErrorPrefix": "OAuth error",

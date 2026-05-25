@@ -313,10 +313,6 @@
       "noneAvailable": "Nessun provider di accesso social attualmente abilitato.",
       "loadError": "Impossibile caricare le opzioni di accesso social. Riprova.",
       "callback": {
-        "completing": "Completamento autenticazione...",
-        "waitMessage": "Attendere mentre effettuiamo l'accesso.",
-        "successTitle": "Autenticazione riuscita!",
-        "successDetail": "Reindirizzamento alla dashboard...",
         "failureTitle": "Autenticazione fallita",
         "redirectingToLogin": "Reindirizzamento alla pagina di accesso...",
         "oauthErrorPrefix": "Errore OAuth",
