@@ -69,7 +69,7 @@ frontend-admin/
 │   │   └── _template/             # Copy-paste scaffold for adding a new module
 │   ├── components/
 │   │   ├── common/                # 🎯 UI primitives (Avatar, UserAvatar, Card, Flex, IconButton, AdvanceTable, ...) — barrel exported
-│   │   ├── authentication/        # Login forms, ProtectedRoute, OAuth callback handlers
+│   │   ├── authentication/        # Login forms, ProtectedRoute, OAuth callback handlers. SocialLoginForm renders buttons from the live backend list (`useGetOAuthProvidersQuery` → `GET /v1/auth/operator/providers`) so toggling a provider on `/admin/modules/auth` removes it from the login page within 30s — never hardcode the provider list here.
 │   │   ├── dashboards/            # Reusable dashboard widgets
 │   │   ├── navbar/                # Sidebar + top navigation
 │   │   ├── wizard/                # Form wizard helpers

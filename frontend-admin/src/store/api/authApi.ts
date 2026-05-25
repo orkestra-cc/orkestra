@@ -235,6 +235,28 @@ export const authApi = baseApi.injectEndpoints({
       keepUnusedDataFor: 30
     }),
 
+    // Live list of OAuth providers configured + enabled for the operator
+    // surface. Filtered by the backend against (a) which providers carry
+    // a non-empty client_id in module_configs and (b) the OAuth Providers
+    // toggle tab on /admin/modules/auth (`{provider}EnabledAdmin` keys).
+    // Drives the SocialLoginForm buttons so an admin disabling Apple
+    // here actually removes the Apple button from the login page
+    // (within 30s — ModuleConfigService caches reads in Redis).
+    //
+    // The query surfaces the backend's error verbatim — the UI is fail-
+    // closed by branching on `isError` (alert, no buttons). This is
+    // safer than silently falling back to an empty list because empty
+    // is a legitimate steady-state ("admin disabled all providers")
+    // that deserves a different copy than "we couldn't ask".
+    getOAuthProviders: builder.query<{ providers: string[] }, void>({
+      query: () => 'v1/auth/operator/providers',
+      transformResponse: (body: { providers?: string[] }) => ({
+        providers: Array.isArray(body?.providers) ? body.providers : []
+      }),
+      providesTags: ['OAuthProviders'],
+      keepUnusedDataFor: 30
+    }),
+
     // Check authentication status - returns backend user data directly
     getCurrentUser: builder.query<BackendUser | null, void>({
       providesTags: ['Auth', 'User'],
@@ -718,6 +740,7 @@ export const authApi = baseApi.injectEndpoints({
 // Export hooks
 export const {
   useGetAuthPolicyQuery,
+  useGetOAuthProvidersQuery,
   useGetCurrentUserQuery,
   useUpdateCurrentUserMutation,
   useLoginMutation,

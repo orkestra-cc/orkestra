@@ -309,6 +309,9 @@
       "redirectingTo": "Redirecting to {{provider}}...",
       "initiateFailed": "Failed to initiate {{provider}} login",
       "acceptingTerms": "By signing in, you accept our Terms of Service and Privacy Policy.",
+      "loading": "Loading sign-in options...",
+      "noneAvailable": "No social sign-in providers are currently enabled.",
+      "loadError": "Could not load the social sign-in options. Please try again.",
       "callback": {
         "completing": "Completing authentication...",
         "waitMessage": "Please wait while we sign you in.",

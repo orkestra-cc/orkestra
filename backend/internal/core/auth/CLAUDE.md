@@ -186,7 +186,7 @@ The OAuth provider callbacks (`/v1/auth/oauth/{google,apple,discord,github}/call
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/v1/auth/{tier}/providers` | List OAuth providers currently configured for this audience |
+| GET | `/v1/auth/{tier}/providers` | List OAuth providers currently configured **and** enabled for this audience. Two filters apply: (1) `OAuthConfigResolver.ConfiguredProviders` keeps only providers carrying a non-empty client ID in `module_configs`; (2) `AuthPolicyService.OAuthProviderEnabled` drops anything the admin toggled off on the OAuth Providers tab (`{provider}Enabled{Admin,Client}` keys). The unauthenticated login pages in `frontend-admin` / `frontend-client` drive their social-login buttons off this endpoint — toggling a provider in `/admin/modules/auth` removes the button from the next login render (≤30s, ModuleConfigService Redis cache). |
 | GET | `/v1/auth/{tier}/policy` | Public slice of admin-managed auth policy: `{registrationEnabled, loginEnabled, passwordMinLength}`. Read by the SPA login + signup pages so kill switches hide the CTA instead of surfacing as a 403 on submit |
 | POST | `/v1/auth/{tier}/oauth/login` | Start an OAuth flow. The signed-state JWT carries `tier` so the shared callback dispatches to the matching authService |
 | POST | `/v1/auth/{tier}/google/mobile` | Exchange a Google ID token from a mobile app for an Orkestra session; mints tokens with `aud=tier` |

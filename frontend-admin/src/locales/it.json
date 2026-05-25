@@ -309,6 +309,9 @@
       "redirectingTo": "Reindirizzamento a {{provider}}...",
       "initiateFailed": "Impossibile avviare l'accesso con {{provider}}",
       "acceptingTerms": "Accedendo, accetti i nostri Termini di servizio e l'Informativa sulla privacy.",
+      "loading": "Caricamento opzioni di accesso...",
+      "noneAvailable": "Nessun provider di accesso social attualmente abilitato.",
+      "loadError": "Impossibile caricare le opzioni di accesso social. Riprova.",
       "callback": {
         "completing": "Completamento autenticazione...",
         "waitMessage": "Attendere mentre effettuiamo l'accesso.",

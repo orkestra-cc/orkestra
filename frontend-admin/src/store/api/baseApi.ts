@@ -419,6 +419,11 @@ export const baseApi = createApi({
     'IdentityScim',
     // Observability — ADR-0005 Phase F runtime log-level mutation
     'LogLevels',
+    // OAuth provider availability — the live list /v1/auth/{tier}/providers
+    // returns for the unauthenticated login page. Invalidated implicitly by
+    // RTK Query's 30s default cache + manual invalidation when the
+    // /admin/modules/auth admin tab saves the OAuth Providers toggles.
+    'OAuthProviders',
     // Marketing module — Phase 1 contact base + importer surface
     'MarketingOrg',
     'MarketingPerson',
