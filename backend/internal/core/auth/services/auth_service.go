@@ -166,6 +166,12 @@ type AuthService interface {
 	// Enhanced token management with UUID and risk assessment
 	GenerateEnhancedTokenPair(ctx context.Context, user *userModels.User, deviceInfo *models.DeviceInfo, securityCtx *models.SecurityContext) (*models.TokenResponse, error)
 	RefreshTokensWithRiskAssessment(ctx context.Context, refreshToken string, securityCtx *models.SecurityContext) (*models.TokenResponse, error)
+	// PeekRefreshToken validates a refresh token's JWT structure and
+	// looks up the stored row WITHOUT rotating it or triggering replay
+	// detection. Callers use it to classify cookie candidates before
+	// deciding which one to rotate — a stale parent-domain cookie sent
+	// alongside the current cookie must not nuke the active family.
+	PeekRefreshToken(ctx context.Context, refreshToken string) (*models.RefreshTokenDoc, error)
 	ValidateTokenWithRiskAssessment(ctx context.Context, token string, securityCtx *models.SecurityContext) (*models.TokenValidationResult, error)
 
 	// Risk assessment and security
@@ -1391,6 +1397,26 @@ func (s *authService) RefreshTokensWithRiskAssessment(ctx context.Context, refre
 		User:           s.buildUserResponse(ctx, user),
 		OAuthProviders: oauthProvidersInfo,
 	}, nil
+}
+
+// PeekRefreshToken validates the JWT envelope and looks up the row in
+// the unfiltered repo (so revoked rows are visible). It does not mint
+// new tokens, does not call handleRefreshReplay, and does not touch
+// the family — by design, so the cookie-iteration path can classify
+// every candidate the browser sent before any mutating call.
+func (s *authService) PeekRefreshToken(ctx context.Context, refreshToken string) (*models.RefreshTokenDoc, error) {
+	if _, err := s.jwtService.ValidateRefreshToken(refreshToken); err != nil {
+		return nil, fmt.Errorf("invalid refresh token: %w", err)
+	}
+	hashedToken := utils.HashRefreshToken(refreshToken)
+	doc, err := s.refreshTokenRepo.GetByTokenAny(ctx, hashedToken)
+	if err != nil {
+		return nil, fmt.Errorf("failed to look up refresh token: %w", err)
+	}
+	if doc == nil {
+		return nil, ErrInvalidRefreshToken
+	}
+	return doc, nil
 }
 
 // handleRefreshReplay kills the family and logs a structured warning. The
