@@ -358,3 +358,79 @@ func TestValidateTokenWithRiskAssessment_RejectsTampered(t *testing.T) {
 // suppress unused alias on iface (we don't need it directly here but
 // keep the import explicit so future additions don't pay an import dance).
 var _ iface.UserProvider = (*gateUserFake)(nil)
+
+// ===== PeekRefreshToken =====
+//
+// The picker in the cookie-iteration handlers relies on PeekRefreshToken
+// being a pure read — no rotation, no family revocation, no side
+// effects on the DB. These tests pin that contract.
+
+func TestPeekRefreshToken_ReturnsActiveRowWithoutMutating(t *testing.T) {
+	env := newOrchestrationEnv(t)
+	user := seededUser()
+	env.users.seed(user)
+	rawRefresh, doc := env.issueAndSeedRefresh(user, "fam-peek")
+
+	got, err := env.auth.PeekRefreshToken(context.Background(), rawRefresh)
+	if err != nil {
+		t.Fatalf("PeekRefreshToken: %v", err)
+	}
+	if got == nil || got.UUID != doc.UUID {
+		t.Fatalf("doc identity drift: %+v", got)
+	}
+	if got.IsRevoked {
+		t.Errorf("Peek must not flip IsRevoked on a fresh row")
+	}
+
+	stored, _ := env.refresh.GetByTokenAny(context.Background(), utils.HashRefreshToken(rawRefresh))
+	if stored == nil || stored.IsRevoked {
+		t.Errorf("stored row must remain non-revoked after Peek: %+v", stored)
+	}
+}
+
+func TestPeekRefreshToken_RotatedRow_DoesNotFireReplay(t *testing.T) {
+	env := newOrchestrationEnv(t)
+	user := seededUser()
+	env.users.seed(user)
+	rawRefresh, _ := env.issueAndSeedRefresh(user, "fam-peek-rotated", func(d *authModels.RefreshTokenDoc) {
+		d.IsRevoked = true
+		d.RevokedReason = authModels.RevokeReasonRotated
+	})
+
+	got, err := env.auth.PeekRefreshToken(context.Background(), rawRefresh)
+	if err != nil {
+		t.Fatalf("PeekRefreshToken on rotated row: %v", err)
+	}
+	if got == nil || !got.IsRevoked || got.RevokedReason != authModels.RevokeReasonRotated {
+		t.Fatalf("expected rotated row to surface as IsRevoked + RevokeReasonRotated, got %+v", got)
+	}
+
+	// No sibling rows in the family — Peek must not have invoked
+	// handleRefreshReplay → RevokeFamily, which would have re-stamped
+	// the reason to RevokeReasonReplayDetected.
+	stored, _ := env.refresh.GetByTokenAny(context.Background(), utils.HashRefreshToken(rawRefresh))
+	if stored == nil || stored.RevokedReason != authModels.RevokeReasonRotated {
+		t.Errorf("Peek leaked family-replay side effect: stored reason = %q", stored.RevokedReason)
+	}
+}
+
+func TestPeekRefreshToken_UnknownToken_ReturnsInvalid(t *testing.T) {
+	env := newOrchestrationEnv(t)
+	user := seededUser()
+	tok, err := env.jwt.GenerateRefreshToken(user)
+	if err != nil {
+		t.Fatalf("GenerateRefreshToken: %v", err)
+	}
+	_, err = env.auth.PeekRefreshToken(context.Background(), tok)
+	if !errors.Is(err, ErrInvalidRefreshToken) {
+		t.Fatalf("got %v, want ErrInvalidRefreshToken for unseeded token", err)
+	}
+}
+
+func TestPeekRefreshToken_MalformedJWT_Rejected(t *testing.T) {
+	env := newOrchestrationEnv(t)
+	_, err := env.auth.PeekRefreshToken(context.Background(), "not-a-jwt")
+	if err == nil {
+		t.Fatalf("malformed JWT must error")
+	}
+}

@@ -1428,35 +1428,51 @@ func (h *AuthHandler) RefreshTokensWithHeaderHTTP(w http.ResponseWriter, r *http
 		Timestamp: time.Now(),
 	}
 
-	// Extract refresh token from cookie or request body
-	var refreshToken string
+	// Extract refresh token from cookie or request body. The picker
+	// classifies every cookie candidate before any mutating call so a
+	// stale rotated sibling does not nuke the family behind a valid
+	// one — see pickRefreshCandidate for the rationale.
 	var tokenSource string
-
-	// First, try to get refresh token from cookie (using configured cookie name)
+	var tokenResponse *models.TokenResponse
+	var err error
 	cookieName := h.config.Auth.Cookie.Name
-	if cookieToken, err := utils.GetRefreshTokenFromCookieByName(r, cookieName); err == nil {
-		refreshToken = cookieToken
-		tokenSource = "cookie"
-	} else {
-		// If no token from cookie, try parsing request body
+	candidates := utils.GetAllRefreshTokensFromCookies(r, cookieName)
+	if len(candidates) > 0 {
+		chosen, fallbackRotated := h.pickRefreshCandidate(ctx, candidates)
+		switch {
+		case chosen != "":
+			tokenResponse, err = h.authService.RefreshTokensWithRiskAssessment(ctx, chosen, securityCtx)
+			if tokenResponse != nil {
+				tokenSource = "cookie"
+			}
+		case fallbackRotated != "":
+			_, err = h.authService.RefreshTokensWithRiskAssessment(ctx, fallbackRotated, securityCtx)
+		default:
+			err = services.ErrInvalidRefreshToken
+		}
+	}
+
+	if tokenResponse == nil {
+		// Fall back to body if no cookie path succeeded.
 		var req RefreshTokenRequest
 		if r.Header.Get("Content-Type") == "application/json" {
-			if err := json.NewDecoder(r.Body).Decode(&req); err == nil && req.RefreshToken != "" {
-				refreshToken = req.RefreshToken
-				tokenSource = "request_body"
+			if decodeErr := json.NewDecoder(r.Body).Decode(&req); decodeErr == nil && req.RefreshToken != "" {
+				resp, refreshErr := h.authService.RefreshTokensWithRiskAssessment(ctx, req.RefreshToken, securityCtx)
+				if refreshErr == nil {
+					tokenResponse = resp
+					tokenSource = "request_body"
+				} else {
+					err = refreshErr
+				}
 			}
 		}
 	}
 
-	// If no token found in either place
-	if refreshToken == "" {
-		http.Error(w, "No refresh token provided", http.StatusUnauthorized)
-		return
-	}
-
-	// Validate and refresh tokens with risk assessment
-	tokenResponse, err := h.authService.RefreshTokensWithRiskAssessment(ctx, refreshToken, securityCtx)
-	if err != nil {
+	if tokenResponse == nil {
+		if err == nil {
+			http.Error(w, "No refresh token provided", http.StatusUnauthorized)
+			return
+		}
 		logger.Warn("Token refresh failed", slog.String("error", err.Error()))
 		writeRefreshErr(w, err)
 		return
@@ -1467,6 +1483,9 @@ func (h *AuthHandler) RefreshTokensWithHeaderHTTP(w http.ResponseWriter, r *http
 		cookieDomain := h.cookieDomain
 		isSecure := h.config.Auth.Cookie.Secure
 		utils.SetRefreshTokenCookie(w, cookieName, tokenResponse.RefreshToken, 7*24*3600, cookieDomain, isSecure) // 7 days
+		if len(candidates) > 1 {
+			h.clearStaleParentDomainCookies(w, cookieName)
+		}
 	}
 
 	// Set the access token in the X-New-Access-Token header
@@ -1491,6 +1510,86 @@ func (h *AuthHandler) RefreshTokensWithHeaderHTTP(w http.ResponseWriter, r *http
 	}
 }
 
+// pickRefreshCandidate classifies every cookie candidate the browser
+// sent before any mutating call, so a stale rotated sibling cannot
+// poison a valid family. Returns:
+//   - chosen: a non-revoked, non-expired candidate to refresh with —
+//     empty when no candidate is currently valid.
+//   - fallbackRotated: a rotated candidate to use ONLY when chosen is
+//     empty — calling RefreshTokensWithRiskAssessment on it fires
+//     genuine replay detection (the lone token the browser holds is
+//     already rotated, which is the real theft signature).
+//
+// The two-pass shape is the fix for the PR-D D-9 cookie-domain split
+// regression: deployments that migrate the refresh cookie from a
+// broad parent domain (e.g. `.orkestra.cc`) to a tier-scoped child
+// (e.g. `.staging-api.orkestra.cc`) leave the parent-domain cookie
+// frozen at a rotated value, and the browser sends BOTH on every
+// request. Processing the stale one first must not revoke the family
+// behind the valid sibling.
+func (h *AuthHandler) pickRefreshCandidate(ctx context.Context, candidates []string) (chosen, fallbackRotated string) {
+	return pickRefreshCandidate(ctx, h.authService.PeekRefreshToken, candidates)
+}
+
+// pickRefreshCandidate is the free-function form of the picker, with
+// the Peek dependency injected so unit tests don't need a full
+// AuthService. Behaviour is otherwise identical to the method.
+func pickRefreshCandidate(
+	ctx context.Context,
+	peek func(context.Context, string) (*models.RefreshTokenDoc, error),
+	candidates []string,
+) (chosen, fallbackRotated string) {
+	now := time.Now()
+	for _, c := range candidates {
+		doc, err := peek(ctx, c)
+		if err != nil || doc == nil {
+			continue
+		}
+		if now.After(doc.ExpiresAt) {
+			continue
+		}
+		if doc.IsRevoked {
+			if doc.RevokedReason == models.RevokeReasonRotated && fallbackRotated == "" {
+				fallbackRotated = c
+			}
+			continue
+		}
+		return c, ""
+	}
+	return "", fallbackRotated
+}
+
+// clearStaleParentDomainCookies emits Set-Cookie Max-Age=0 for every
+// meaningful parent of the current cookie domain so a browser carrying
+// a leftover cookie from a prior deployment evicts it on the next
+// response. Only called when the request actually carried multiple
+// candidates, since a single-cookie request gives no signal that a
+// parent-domain leftover exists.
+//
+// "Meaningful parent" = strip one DNS label from the left until ≤2
+// labels remain (a TLD). Browsers reject Set-Cookie with a TLD-only
+// domain, so emitting one for `.cc` is harmless if our walk goes one
+// step too far — but stopping at ≥3 labels keeps the response slim.
+func (h *AuthHandler) clearStaleParentDomainCookies(w http.ResponseWriter, cookieName string) {
+	domain := strings.TrimPrefix(h.cookieDomain, ".")
+	if domain == "" {
+		return
+	}
+	isSecure := h.config.Auth.Cookie.Secure
+	for {
+		idx := strings.Index(domain, ".")
+		if idx < 0 {
+			return
+		}
+		parent := domain[idx+1:]
+		if strings.Count(parent, ".") < 1 {
+			return // parent has ≤1 label → TLD, nothing useful left
+		}
+		utils.ClearRefreshTokenCookie(w, cookieName, "."+parent, isSecure)
+		domain = parent
+	}
+}
+
 // GetSessionHTTP handles session initialization for web clients after OAuth callback
 // It uses the refresh token from cookie to generate a fresh access token
 func (h *AuthHandler) GetSessionHTTP(w http.ResponseWriter, r *http.Request) {
@@ -1506,13 +1605,12 @@ func (h *AuthHandler) GetSessionHTTP(w http.ResponseWriter, r *http.Request) {
 		Timestamp: time.Now(),
 	}
 
-	// Extract refresh token from cookie. Try every candidate the browser
-	// sent under this name — when multiple cookies share the name (e.g. a
-	// stale Path=/auth cookie from a prior deployment plus the current
-	// Path=/ one), `r.Cookie()` returns only the first match which may be
-	// the stale rotated token. Trying each one in order and stopping at
-	// the first that successfully refreshes avoids tripping the
-	// family-replay guard on every page refresh.
+	// Extract refresh token from cookie. The browser may send multiple
+	// cookies under the same name when a prior deployment used a
+	// different Path or Domain (e.g. PR-D D-9 cookie-domain split). The
+	// picker classifies every candidate before any mutating call so a
+	// stale rotated sibling does not nuke the family behind a valid one.
+	// See pickRefreshCandidate for the full rationale.
 	cookieName := h.config.Auth.Cookie.Name
 	candidates := utils.GetAllRefreshTokensFromCookies(r, cookieName)
 	if len(candidates) == 0 {
@@ -1534,15 +1632,16 @@ func (h *AuthHandler) GetSessionHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	chosen, fallbackRotated := h.pickRefreshCandidate(ctx, candidates)
 	var tokenResponse *models.TokenResponse
 	var lastErr error
-	for _, candidate := range candidates {
-		resp, err := h.authService.RefreshTokensWithRiskAssessment(ctx, candidate, securityCtx)
-		if err == nil {
-			tokenResponse = resp
-			break
-		}
-		lastErr = err
+	switch {
+	case chosen != "":
+		tokenResponse, lastErr = h.authService.RefreshTokensWithRiskAssessment(ctx, chosen, securityCtx)
+	case fallbackRotated != "":
+		_, lastErr = h.authService.RefreshTokensWithRiskAssessment(ctx, fallbackRotated, securityCtx)
+	default:
+		lastErr = services.ErrInvalidRefreshToken
 	}
 	if tokenResponse == nil {
 		logger.Warn("Token refresh failed",
@@ -1557,6 +1656,9 @@ func (h *AuthHandler) GetSessionHTTP(w http.ResponseWriter, r *http.Request) {
 	cookieDomain := h.cookieDomain
 	isSecure := h.config.Auth.Cookie.Secure
 	utils.SetRefreshTokenCookie(w, cookieName, tokenResponse.RefreshToken, 7*24*3600, cookieDomain, isSecure) // 7 days
+	if len(candidates) > 1 {
+		h.clearStaleParentDomainCookies(w, cookieName)
+	}
 
 	// Return the access token and user info in the response body for Redux storage
 	w.Header().Set("Content-Type", "application/json")
@@ -1840,23 +1942,30 @@ func (h *AuthHandler) RefreshTokensHTTP(w http.ResponseWriter, r *http.Request) 
 		Timestamp: time.Now(),
 	}
 
-	// Extract refresh token from cookie or request body. Try every cookie
-	// candidate so a stale Path=/auth cookie (from a prior deployment) does
-	// not mask the current Path=/ cookie — see GetSessionHTTP for the full
-	// rationale. Stop at the first candidate that successfully refreshes.
+	// Extract refresh token from cookie or request body. Multiple
+	// cookies may share the name when a prior deployment used a
+	// different Path or Domain (e.g. PR-D D-9 cookie-domain split). The
+	// picker classifies every candidate before any mutating call so a
+	// stale rotated sibling does not nuke the family behind a valid
+	// one. See pickRefreshCandidate for the full rationale.
 	var tokenSource string
 	var tokenResponse *models.TokenResponse
 	var lastErr error
 	cookieName := h.config.Auth.Cookie.Name
 	candidates := utils.GetAllRefreshTokensFromCookies(r, cookieName)
-	for _, candidate := range candidates {
-		resp, err := h.authService.RefreshTokensWithRiskAssessment(ctx, candidate, securityCtx)
-		if err == nil {
-			tokenResponse = resp
-			tokenSource = "cookie"
-			break
+	if len(candidates) > 0 {
+		chosen, fallbackRotated := h.pickRefreshCandidate(ctx, candidates)
+		switch {
+		case chosen != "":
+			tokenResponse, lastErr = h.authService.RefreshTokensWithRiskAssessment(ctx, chosen, securityCtx)
+			if tokenResponse != nil {
+				tokenSource = "cookie"
+			}
+		case fallbackRotated != "":
+			_, lastErr = h.authService.RefreshTokensWithRiskAssessment(ctx, fallbackRotated, securityCtx)
+		default:
+			lastErr = services.ErrInvalidRefreshToken
 		}
-		lastErr = err
 	}
 
 	if tokenResponse == nil {
@@ -1892,6 +2001,9 @@ func (h *AuthHandler) RefreshTokensHTTP(w http.ResponseWriter, r *http.Request) 
 		cookieDomain := h.cookieDomain
 		isSecure := h.config.Auth.Cookie.Secure
 		utils.SetRefreshTokenCookie(w, cookieName, tokenResponse.RefreshToken, 7*24*3600, cookieDomain, isSecure) // 7 days
+		if len(candidates) > 1 {
+			h.clearStaleParentDomainCookies(w, cookieName)
+		}
 	}
 
 	// Return JSON response
