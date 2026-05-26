@@ -8,6 +8,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 
 ### Features
 
+- **(user,auth,compliance)** Security hardening on /admin/users (PR 6) ([2a91160](https://github.com/orkestra-cc/orkestra/commit/2a9116077c6fe7d8dc9078b794ad64e96d9b7a28))
 - **(user,compliance)** Emit lifecycle audit events for admin user actions ([16195fe](https://github.com/orkestra-cc/orkestra/commit/16195fedf0594769ce05c6390ae577993bdfe603))
 - **(frontend-admin/users)** Row + bulk destructive actions on /admin/users ([2fbb60e](https://github.com/orkestra-cc/orkestra/commit/2fbb60e36cadf65c6320c8bfe047d7a30cbac41b))
 - **(user)** Guard destructive operator actions on /admin/users ([60493da](https://github.com/orkestra-cc/orkestra/commit/60493dac6d4757180d51c127045b77ca587594ec))
