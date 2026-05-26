@@ -172,6 +172,15 @@ type AuthService interface {
 	// deciding which one to rotate — a stale parent-domain cookie sent
 	// alongside the current cookie must not nuke the active family.
 	PeekRefreshToken(ctx context.Context, refreshToken string) (*models.RefreshTokenDoc, error)
+	// MintAccessTokenFromRefresh validates the refresh row and mints a
+	// fresh ACCESS token against it — without rotating the refresh
+	// row. Used by session-bootstrap endpoints (e.g. GET /v1/auth/session)
+	// that must not race the refresh-cookie rotation path; an idempotent
+	// /session lets concurrent SPA queries coexist without triggering
+	// replay detection on whichever call lands second. The returned
+	// TokenResponse carries an empty RefreshToken because no rotation
+	// occurred; the caller's existing cookie stays authoritative.
+	MintAccessTokenFromRefresh(ctx context.Context, refreshToken string, securityCtx *models.SecurityContext) (*models.TokenResponse, error)
 	ValidateTokenWithRiskAssessment(ctx context.Context, token string, securityCtx *models.SecurityContext) (*models.TokenValidationResult, error)
 
 	// Risk assessment and security
@@ -1417,6 +1426,62 @@ func (s *authService) PeekRefreshToken(ctx context.Context, refreshToken string)
 		return nil, ErrInvalidRefreshToken
 	}
 	return doc, nil
+}
+
+// MintAccessTokenFromRefresh mints a fresh access token from a valid
+// refresh row WITHOUT rotating it. The refresh row must exist,
+// be non-expired, and non-revoked (any revocation reason is rejected
+// — including "rotated"; that path is reserved for replay detection in
+// RefreshTokensWithRiskAssessment). The returned TokenResponse has an
+// empty RefreshToken on purpose: this call is idempotent and the
+// caller's existing cookie remains authoritative. Used by session
+// endpoints so concurrent SPA queries do not race the rotation path
+// and trigger replay detection on themselves.
+func (s *authService) MintAccessTokenFromRefresh(ctx context.Context, refreshToken string, securityCtx *models.SecurityContext) (*models.TokenResponse, error) {
+	claims, err := s.jwtService.ValidateRefreshToken(refreshToken)
+	if err != nil {
+		return nil, fmt.Errorf("invalid refresh token: %w", err)
+	}
+	hashedToken := utils.HashRefreshToken(refreshToken)
+	doc, err := s.refreshTokenRepo.GetByTokenAny(ctx, hashedToken)
+	if err != nil {
+		return nil, fmt.Errorf("failed to look up refresh token: %w", err)
+	}
+	if doc == nil {
+		return nil, ErrInvalidRefreshToken
+	}
+	if time.Now().After(doc.ExpiresAt) {
+		return nil, ErrInvalidRefreshToken
+	}
+	if doc.IsRevoked {
+		// Any revocation reason — including "rotated" — disqualifies
+		// the row for read-only mint. Replay detection is the rotation
+		// endpoint's job, not session-bootstrap's.
+		return nil, ErrInvalidRefreshToken
+	}
+
+	userModel, err := s.userService.GetUserByID(ctx, claims.UserUUID)
+	if err != nil {
+		return nil, fmt.Errorf("user not found: %w", err)
+	}
+	user := convertUserModelToAuthModel(userModel)
+
+	access, err := s.jwtService.GenerateAccessTokenWithAMR(user, claims.AMR, claims.LastOTPAt)
+	if err != nil {
+		return nil, fmt.Errorf("failed to mint access token: %w", err)
+	}
+
+	oauthProviders, _ := s.oauthProviderRepo.GetByUserUUID(ctx, user.UUID)
+	return &models.TokenResponse{
+		AccessToken:    access,
+		RefreshToken:   "", // no rotation — caller's cookie stays authoritative
+		TokenType:      "Bearer",
+		ExpiresIn:      900,
+		SessionID:      doc.SessionUUID,
+		DeviceID:       doc.DeviceID,
+		User:           s.buildUserResponse(ctx, user),
+		OAuthProviders: models.ConvertOAuthProvidersToInfo(oauthProviders),
+	}, nil
 }
 
 // handleRefreshReplay kills the family and logs a structured warning. The

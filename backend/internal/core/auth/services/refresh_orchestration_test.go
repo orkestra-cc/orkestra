@@ -434,3 +434,154 @@ func TestPeekRefreshToken_MalformedJWT_Rejected(t *testing.T) {
 		t.Fatalf("malformed JWT must error")
 	}
 }
+
+// ===== MintAccessTokenFromRefresh =====
+//
+// Session bootstrap uses this path so concurrent SPA queries (e.g.
+// useGetSessionQuery firing on tab focus while a 401-driven
+// /refresh-cookie call is in flight) do not race the rotation path
+// and trigger replay detection on themselves. The contract: valid
+// row → fresh access token + empty refresh; anything else → reject
+// without mutating state.
+
+func TestMintAccessTokenFromRefresh_ValidRow_MintsAccessWithoutRotation(t *testing.T) {
+	env := newOrchestrationEnv(t)
+	user := seededUser()
+	env.users.seed(user)
+	rawRefresh, doc := env.issueAndSeedRefresh(user, "fam-mint")
+
+	resp, err := env.auth.MintAccessTokenFromRefresh(context.Background(), rawRefresh, &authModels.SecurityContext{})
+	if err != nil {
+		t.Fatalf("MintAccessTokenFromRefresh: %v", err)
+	}
+	if resp.AccessToken == "" {
+		t.Errorf("AccessToken must be populated")
+	}
+	if resp.RefreshToken != "" {
+		t.Errorf("RefreshToken must be empty (no rotation), got %q", resp.RefreshToken)
+	}
+	if resp.SessionID != doc.SessionUUID {
+		t.Errorf("SessionID = %q, want %q (inherited from refresh row)", resp.SessionID, doc.SessionUUID)
+	}
+
+	// Stored row must remain untouched.
+	stored, _ := env.refresh.GetByTokenAny(context.Background(), utils.HashRefreshToken(rawRefresh))
+	if stored == nil || stored.IsRevoked {
+		t.Errorf("refresh row must remain non-revoked after read-only mint: %+v", stored)
+	}
+
+	// Access token validates.
+	claims, err := env.jwt.ValidateAccessToken(resp.AccessToken)
+	if err != nil {
+		t.Errorf("minted access token must validate: %v", err)
+	}
+	if claims.UserUUID != user.UUID {
+		t.Errorf("access token UserUUID = %q, want %q", claims.UserUUID, user.UUID)
+	}
+}
+
+func TestMintAccessTokenFromRefresh_RotatedRow_RejectsWithoutReplay(t *testing.T) {
+	// A rotated row is NOT eligible for read-only mint. The session
+	// path must reject it cleanly (ErrInvalidRefreshToken) without
+	// firing replay — replay is the rotation endpoint's job.
+	env := newOrchestrationEnv(t)
+	user := seededUser()
+	env.users.seed(user)
+	rawRefresh, _ := env.issueAndSeedRefresh(user, "fam-mint-rotated", func(d *authModels.RefreshTokenDoc) {
+		d.IsRevoked = true
+		d.RevokedReason = authModels.RevokeReasonRotated
+	})
+
+	_, err := env.auth.MintAccessTokenFromRefresh(context.Background(), rawRefresh, &authModels.SecurityContext{})
+	if !errors.Is(err, ErrInvalidRefreshToken) {
+		t.Fatalf("got %v, want ErrInvalidRefreshToken for rotated row", err)
+	}
+	if errors.Is(err, ErrRefreshTokenReplay) {
+		t.Fatalf("read-only mint must NEVER fire replay detection")
+	}
+
+	// Family must remain in 'rotated' state — no replay-detected
+	// stamping side effect.
+	stored, _ := env.refresh.GetByTokenAny(context.Background(), utils.HashRefreshToken(rawRefresh))
+	if stored == nil || stored.RevokedReason != authModels.RevokeReasonRotated {
+		t.Errorf("rotated row reason drift: %+v", stored)
+	}
+}
+
+func TestMintAccessTokenFromRefresh_ExpiredRow_ReturnsInvalid(t *testing.T) {
+	env := newOrchestrationEnv(t)
+	user := seededUser()
+	env.users.seed(user)
+	rawRefresh, _ := env.issueAndSeedRefresh(user, "fam-mint-exp", func(d *authModels.RefreshTokenDoc) {
+		d.ExpiresAt = time.Now().Add(-time.Hour)
+	})
+
+	_, err := env.auth.MintAccessTokenFromRefresh(context.Background(), rawRefresh, &authModels.SecurityContext{})
+	if !errors.Is(err, ErrInvalidRefreshToken) {
+		t.Fatalf("got %v, want ErrInvalidRefreshToken for expired row", err)
+	}
+}
+
+func TestMintAccessTokenFromRefresh_RevokedForLogout_ReturnsInvalid(t *testing.T) {
+	env := newOrchestrationEnv(t)
+	user := seededUser()
+	env.users.seed(user)
+	rawRefresh, _ := env.issueAndSeedRefresh(user, "fam-mint-logout", func(d *authModels.RefreshTokenDoc) {
+		d.IsRevoked = true
+		d.RevokedReason = authModels.RevokeReasonLogout
+	})
+
+	_, err := env.auth.MintAccessTokenFromRefresh(context.Background(), rawRefresh, &authModels.SecurityContext{})
+	if !errors.Is(err, ErrInvalidRefreshToken) {
+		t.Fatalf("got %v, want ErrInvalidRefreshToken for logout-revoked row", err)
+	}
+}
+
+func TestMintAccessTokenFromRefresh_UnknownToken_ReturnsInvalid(t *testing.T) {
+	env := newOrchestrationEnv(t)
+	user := seededUser()
+	tok, err := env.jwt.GenerateRefreshToken(user)
+	if err != nil {
+		t.Fatalf("GenerateRefreshToken: %v", err)
+	}
+	_, err = env.auth.MintAccessTokenFromRefresh(context.Background(), tok, &authModels.SecurityContext{})
+	if !errors.Is(err, ErrInvalidRefreshToken) {
+		t.Fatalf("got %v, want ErrInvalidRefreshToken for unseeded token", err)
+	}
+}
+
+func TestMintAccessTokenFromRefresh_MalformedJWT_Rejected(t *testing.T) {
+	env := newOrchestrationEnv(t)
+	_, err := env.auth.MintAccessTokenFromRefresh(context.Background(), "not-a-jwt", &authModels.SecurityContext{})
+	if err == nil {
+		t.Fatalf("malformed JWT must error")
+	}
+}
+
+// TestMintAccessTokenFromRefresh_TwoConcurrentMints_NoFamilyMutation pins
+// the contract that motivates the whole split: two reads of the same
+// row must NOT mutate state. The production race (getSession +
+// performRefresh firing in parallel) would previously corrupt the
+// family; the read-only path keeps the row intact regardless of how
+// many concurrent calls land.
+func TestMintAccessTokenFromRefresh_TwoConcurrentMints_NoFamilyMutation(t *testing.T) {
+	env := newOrchestrationEnv(t)
+	user := seededUser()
+	env.users.seed(user)
+	rawRefresh, _ := env.issueAndSeedRefresh(user, "fam-mint-concurrent")
+
+	for i := 0; i < 3; i++ {
+		resp, err := env.auth.MintAccessTokenFromRefresh(context.Background(), rawRefresh, &authModels.SecurityContext{})
+		if err != nil {
+			t.Fatalf("mint #%d: %v", i, err)
+		}
+		if resp.AccessToken == "" {
+			t.Errorf("mint #%d: empty access token", i)
+		}
+	}
+
+	stored, _ := env.refresh.GetByTokenAny(context.Background(), utils.HashRefreshToken(rawRefresh))
+	if stored == nil || stored.IsRevoked {
+		t.Errorf("refresh row must remain non-revoked after repeated mints: %+v", stored)
+	}
+}

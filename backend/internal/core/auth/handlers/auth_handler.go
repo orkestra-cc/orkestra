@@ -1632,19 +1632,26 @@ func (h *AuthHandler) GetSessionHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	chosen, fallbackRotated := h.pickRefreshCandidate(ctx, candidates)
+	// Session bootstrap is read-only by design: it mints an access
+	// token but does NOT rotate the refresh cookie. The refresh-cookie
+	// endpoint is the single rotation chokepoint. Without this split,
+	// a SPA boot that races a 401-driven /refresh-cookie call against
+	// the /session call would have both attempt rotation; the loser
+	// would land with a now-rotated cookie and trip replay detection,
+	// even though the request came from the legitimate session holder.
+	// Only valid (non-revoked) candidates are usable here — a lone
+	// rotated cookie returns 401 without firing replay (rotation is
+	// reserved for the dedicated endpoint).
+	chosen, _ := h.pickRefreshCandidate(ctx, candidates)
 	var tokenResponse *models.TokenResponse
 	var lastErr error
-	switch {
-	case chosen != "":
-		tokenResponse, lastErr = h.authService.RefreshTokensWithRiskAssessment(ctx, chosen, securityCtx)
-	case fallbackRotated != "":
-		_, lastErr = h.authService.RefreshTokensWithRiskAssessment(ctx, fallbackRotated, securityCtx)
-	default:
+	if chosen != "" {
+		tokenResponse, lastErr = h.authService.MintAccessTokenFromRefresh(ctx, chosen, securityCtx)
+	} else {
 		lastErr = services.ErrInvalidRefreshToken
 	}
 	if tokenResponse == nil {
-		logger.Warn("Token refresh failed",
+		logger.Warn("Session bootstrap failed",
 			slog.String("error", lastErr.Error()),
 			slog.Int("candidatesTried", len(candidates)),
 		)
@@ -1652,10 +1659,10 @@ func (h *AuthHandler) GetSessionHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Set new refresh token as cookie
-	cookieDomain := h.cookieDomain
-	isSecure := h.config.Auth.Cookie.Secure
-	utils.SetRefreshTokenCookie(w, cookieName, tokenResponse.RefreshToken, 7*24*3600, cookieDomain, isSecure) // 7 days
+	// Clear stale parent-domain cookies even on the read-only path —
+	// the browser's leftover cookies cost iteration on every future
+	// request, so evicting them now is pure win. The current-domain
+	// cookie is left untouched (no rotation here).
 	if len(candidates) > 1 {
 		h.clearStaleParentDomainCookies(w, cookieName)
 	}
