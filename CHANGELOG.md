@@ -4,6 +4,12 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.1.5] - 2026-05-26
+
+### Bug fixes
+
+- **(auth)** Pick valid refresh cookie before mutating, clear stale parent domains ([c181fdd](https://github.com/orkestra-cc/orkestra/commit/c181fdd9ed110e4c6c890b2b60e8ba39ffbf1e01))
+
 ## [0.1.4] - 2026-05-26
 
 ### Features
