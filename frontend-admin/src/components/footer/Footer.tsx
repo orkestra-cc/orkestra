@@ -9,7 +9,7 @@ const Footer = () => (
           Thank you for creating with us{' '}
           <span className="d-none d-sm-inline-block">| </span>
           <br className="d-sm-none" /> {new Date().getFullYear()} &copy;{' '}
-          <a href="https://blacklab.cc">blacklab.cc</a>
+          <a href="https://orkestra.cc">orkestra.cc</a>
         </p>
       </Col>
       <Col sm="auto">
