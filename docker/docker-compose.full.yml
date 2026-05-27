@@ -1,31 +1,31 @@
-# Orkestra — SaaS SKU (published image)
+# Orkestra — Full profile (published image)
 #
-# Pulls the saas profile image from GHCR (subscriptions + payments +
-# compliance + identity addons) and runs it against the shared mongodb/redis
-# services from docker-compose.infra.yml. The payments addon expects Stripe
-# credentials configured at /admin/modules.
+# Pulls the standard backend image from GHCR. ORKESTRA_PROFILE=full tells
+# the first-boot seeder to pre-enable every non-dev addon. Same binary as
+# the "minimal" compose; only the seed value differs. Memgraph + Hindsight
+# are managed by the graph + agents modules at /admin/modules.
 #
 # Usage:
 #   cd docker
 #   docker network create orkestra-network                        # once
 #   docker compose -f docker-compose.infra.yml up -d              # mongodb + redis
-#   docker compose -f docker-compose.saas.yml --env-file .env up -d
+#   docker compose -f docker-compose.full.yml --env-file .env up -d
 #
 # Health check: backend `/health` returns 200 once mongo/redis come up.
 
-name: orkestra-saas
+name: orkestra-full
 
 services:
   backend:
-    image: ${BACKEND_IMAGE_REPO:-ghcr.io/orkestra-cc/orkestra}/backend:${BACKEND_IMAGE_TAG:-saas}
-    container_name: orkestra-backend-saas
+    image: ${BACKEND_IMAGE_REPO:-ghcr.io/orkestra-cc/orkestra}/backend:${BACKEND_IMAGE_TAG:-latest}
+    container_name: orkestra-backend-full
     restart: unless-stopped
     ports:
       - "${BACKEND_PORT:-3000}:3000"
     environment:
       ENV: ${ENV:-production}
       PORT: 3000
-      ORKESTRA_PROFILE: saas
+      ORKESTRA_PROFILE: full
 
       MONGO_URI: mongodb://${MONGO_ROOT_USERNAME}:${MONGO_ROOT_PASSWORD}@${MONGO_HOST:-mongodb}:27017/${MONGO_DATABASE}?authSource=admin
       REDIS_URL: redis://:${REDIS_PASSWORD}@${REDIS_HOST:-redis}:6379/${REDIS_DB:-0}
@@ -72,9 +72,11 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-info}
       PRETTY_LOGS: ${PRETTY_LOGS:-false}
 
-      # ADR-0005 — observability env passthrough. Setting
-      # OTEL_EXPORTER_OTLP_ENDPOINT activates trace export to the
-      # docker-compose.observability.yml stack's collector.
+      # ADR-0005 — observability env passthrough. All vars are
+      # safe-to-be-empty; defaults match the Tier-0 zero-config
+      # promise. Setting OTEL_EXPORTER_OTLP_ENDPOINT activates trace
+      # export to the orkestra-otel collector (Phase D self-hosted
+      # observability stack — docker-compose.observability.yml).
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
       OTEL_EXPORTER_OTLP_INSECURE: ${OTEL_EXPORTER_OTLP_INSECURE:-}
       OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-orkestra-backend}
@@ -84,10 +86,21 @@ services:
       LOG_HTTP_SLOW_THRESHOLD_MS: ${LOG_HTTP_SLOW_THRESHOLD_MS:-1000}
       METRICS_ENABLED: ${METRICS_ENABLED:-true}
 
-      # No infra-owning addon in this profile — container control off.
-      CONTAINER_CONTROL_ENABLED: ${CONTAINER_CONTROL_ENABLED:-false}
+      # Gotenberg for RAG/documents addons.
+      GOTENBERG_URL: ${GOTENBERG_URL:-http://orkestra-gotenberg:3000}
+
+      # graph + agents addons can manage their own infra containers
+      # (memgraph + hindsight). Container control is on by default.
+      # Disable with CONTAINER_CONTROL_ENABLED=false on Kubernetes.
+      CONTAINER_CONTROL_ENABLED: ${CONTAINER_CONTROL_ENABLED:-true}
     volumes:
       - ./keys:/app/keys:ro
+      # Required when CONTAINER_CONTROL_ENABLED=true so the backend can
+      # start memgraph/hindsight via the Docker SDK. Front with
+      # tecnativa/docker-socket-proxy in production.
+      - /var/run/docker.sock:/var/run/docker.sock
+    group_add:
+      - "${DOCKER_GID:-1001}"
     networks:
       - orkestra-network
 
@@ -98,7 +111,7 @@ services:
   # to whatever the browser needs to reach the backend.
   frontend-admin:
     image: ${FRONTEND_IMAGE_REPO:-ghcr.io/orkestra-cc/orkestra}/frontend:${FRONTEND_IMAGE_TAG:-latest}
-    container_name: orkestra-frontend-admin-saas
+    container_name: orkestra-frontend-admin-full
     restart: unless-stopped
     ports:
       - "${FRONTEND_PORT:-8080}:80"

@@ -32,7 +32,7 @@ help:
 	@echo "  make down                - Stop application services + infra (volumes kept)"
 	@echo "  make status              - Show containers, /health, and resources"
 	@echo "  make logs SVC=<name>     - Follow logs for a service (e.g. SVC=orkestra-backend-dev)"
-	@echo "  make reset               - Wipe minimal-profile volumes and redeploy"
+	@echo "  make reset               - Wipe minimal stack volumes and redeploy"
 	@echo ""
 	@echo "  For more lifecycle commands (per-profile deploy, scoped rebuilds, etc.)"
 	@echo "  run ./orkestra.sh --help"
@@ -277,7 +277,7 @@ frontend-client-clean:
 
 .PHONY: install install-hooks fmt ci-help
 .PHONY: ci ci-all ci-backend ci-backend-matrix ci-frontend-admin ci-frontend-client ci-mobile
-.PHONY: backend-lint sdk-lint addon-documents-lint addon-aimodels-lint addon-company-lint addon-graph-lint addon-sales-lint addon-subscriptions-lint addon-payments-lint addon-billing-lint addon-dev-lint addon-compliance-lint addon-identity-lint addon-rag-lint openapi-auth-lint backend-test-ci sdk-test-ci addon-documents-test-ci addon-aimodels-test-ci addon-company-test-ci addon-graph-test-ci addon-sales-test-ci addon-subscriptions-test-ci addon-payments-test-ci addon-billing-test-ci addon-dev-test-ci addon-compliance-test-ci addon-identity-test-ci addon-rag-test-ci openapi-auth-test-ci backend-tenantscope backend-policycoverage backend-vulncheck backend-build-enterprise backend-openapi-check
+.PHONY: backend-lint sdk-lint addon-documents-lint addon-aimodels-lint addon-company-lint addon-graph-lint addon-sales-lint addon-subscriptions-lint addon-payments-lint addon-billing-lint addon-dev-lint addon-compliance-lint addon-identity-lint addon-rag-lint openapi-auth-lint backend-test-ci sdk-test-ci addon-documents-test-ci addon-aimodels-test-ci addon-company-test-ci addon-graph-test-ci addon-sales-test-ci addon-subscriptions-test-ci addon-payments-test-ci addon-billing-test-ci addon-dev-test-ci addon-compliance-test-ci addon-identity-test-ci addon-rag-test-ci openapi-auth-test-ci backend-tenantscope backend-policycoverage backend-vulncheck backend-build-ci backend-openapi-check
 .PHONY: admin-typecheck admin-lint admin-test admin-audit admin-build
 .PHONY: client-typecheck client-lint client-build
 .PHONY: mobile-analyze mobile-test
@@ -344,7 +344,7 @@ ci-all: ci-backend ci-frontend-admin ci-frontend-client ci-mobile
 
 # ---- Backend ----
 
-ci-backend: backend-lint sdk-lint openapi-auth-lint addon-documents-lint addon-aimodels-lint addon-company-lint addon-graph-lint addon-sales-lint addon-subscriptions-lint addon-payments-lint addon-billing-lint addon-dev-lint addon-compliance-lint addon-identity-lint addon-rag-lint backend-tenantscope backend-policycoverage backend-vulncheck backend-test-ci backend-build-enterprise backend-openapi-check
+ci-backend: backend-lint sdk-lint openapi-auth-lint addon-documents-lint addon-aimodels-lint addon-company-lint addon-graph-lint addon-sales-lint addon-subscriptions-lint addon-payments-lint addon-billing-lint addon-dev-lint addon-compliance-lint addon-identity-lint addon-rag-lint backend-tenantscope backend-policycoverage backend-vulncheck backend-test-ci backend-build-ci backend-openapi-check
 	@echo "Backend CI: OK"
 
 # backend-openapi-check fails if the committed openapi/enterprise.json drifted
@@ -354,9 +354,6 @@ ci-backend: backend-lint sdk-lint openapi-auth-lint addon-documents-lint addon-a
 .PHONY: backend-openapi-check
 backend-openapi-check:
 	@cd backend && $(MAKE) openapi-check
-
-ci-backend-matrix: ci-backend
-	@cd backend && $(MAKE) build-starter build-minimal build-billing build-ai build-saas build-enterprise
 
 backend-lint:
 	@cd backend && golangci-lint run --config=.golangci.yml
@@ -570,8 +567,8 @@ backend-vulncheck:
 	  echo "All reachable vulnerabilities are on the allowlist."; \
 	}
 
-backend-build-enterprise:
-	@cd backend && $(MAKE) build-enterprise
+backend-build-ci:
+	@cd backend && $(MAKE) build
 
 # ---- Frontend Admin ----
 
@@ -640,8 +637,7 @@ ci-help:
 	@echo "  make ci                    - Run CI checks for changed surfaces only (pre-push)"
 	@echo "  make ci-all                - Run every surface (what CI does on dev/main)"
 	@echo ""
-	@echo "  make ci-backend            - Backend CI (lint + tests + analyzers + vuln + enterprise build)"
-	@echo "  make ci-backend-matrix     - Backend CI + all 6 profile builds"
+	@echo "  make ci-backend            - Backend CI (lint + tests + analyzers + vuln + build)"
 	@echo "  make ci-frontend-admin     - Admin SPA CI (typecheck + lint + tests + build + audit)"
 	@echo "  make ci-frontend-client    - Client SPA CI (typecheck + lint + build)"
 	@echo "  make ci-mobile             - Flutter CI (analyze + test)"

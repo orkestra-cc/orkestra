@@ -1,5 +1,3 @@
-//go:build !no_addons || addon_sales
-
 package main
 
 import (

@@ -12,7 +12,7 @@ This skill ensures correct container operations by **auto-detecting** which comp
 The `.env` file's `ENV=` value labels the **host environment** (`development` / `staging` / `production`). It does **not** uniquely determine the compose file in use:
 
 - A host with `ENV=staging` can run `docker-compose.staging.yml` (which itself bind-mounts source + runs AIR — staging-acts-as-dev pattern on this repo).
-- Multiple compose projects can run side-by-side: `orkestra-infra` (shared MongoDB + Redis) + `orkestra-observability` (Grafana stack) + a profile stack (`orkestra-staging` / `orkestra-enterprise` / etc.) all coexist.
+- Multiple compose projects can run side-by-side: `orkestra-infra` (shared MongoDB + Redis) + `orkestra-observability` (Grafana stack) + a profile stack (`orkestra-staging` / `orkestra-full` / etc.) all coexist.
 - Different SERVICES on the same host may live in different compose files (e.g. `mongodb` from `infra.yml`, `backend` from `staging.yml`).
 
 So: never derive the compose file from `ENV=` alone. Derive it from **container labels** — what was actually launched.
@@ -62,7 +62,7 @@ docker compose -f /home/tore/orkestra/docker/docker-compose.staging.yml --env-fi
 # Multi-file (mongodb / redis / shared infra)
 docker compose \
   -f /home/tore/orkestra/docker/docker-compose.infra.yml \
-  -f /home/tore/orkestra/docker/docker-compose.enterprise.yml \
+  -f /home/tore/orkestra/docker/docker-compose.full.yml \
   --env-file /home/tore/orkestra/docker/.env <cmd> <service>
 ```
 
@@ -74,7 +74,7 @@ When no container exists yet, label-based detection has nothing to read. Fall ba
 
 1. `grep "^ENV=" /home/tore/orkestra/docker/.env` — host environment label.
 2. `ls /home/tore/orkestra/docker/docker-compose.*.yml` — which compose files exist on this host.
-3. Map the desired SKU / mode to its compose file:
+3. Map the desired profile / mode to its compose file:
 
 | Compose file                    | Use case                                            |
 | ------------------------------- | --------------------------------------------------- |
@@ -83,12 +83,8 @@ When no container exists yet, label-based detection has nothing to read. Fall ba
 | `docker-compose.staging.yml`    | Staging — on this repo, also runs AIR + source mount |
 | `docker-compose.prod.yml`       | Production                                          |
 | `docker-compose.infra.yml`      | Shared MongoDB + Redis (+ Gotenberg)                |
-| `docker-compose.starter.yml`    | SKU build: core only (GHCR image)                   |
-| `docker-compose.minimal.yml`    | SKU build: core + dev                               |
-| `docker-compose.billing.yml`    | SKU build: billing/documents/company                |
-| `docker-compose.ai.yml`         | SKU build: graph/aimodels/rag/agents/sales          |
-| `docker-compose.saas.yml`       | SKU build: subscriptions/payments/compliance/identity |
-| `docker-compose.enterprise.yml` | SKU build: every addon                              |
+| `docker-compose.minimal.yml`    | Runtime profile: core only (no addons pre-enabled), GHCR image |
+| `docker-compose.full.yml`       | Runtime profile: every non-dev addon pre-enabled, GHCR image   |
 | `docker-compose.observability.yml` | Grafana + Loki + Tempo + Promtail + Prom + OTel  |
 | `docker-compose.ai-sidecar.yml` | Split AI service (port 3100)                        |
 
@@ -159,4 +155,4 @@ Built-in services likely to appear in `docker ps`:
 - **NEVER** guess the compose file from `ENV=` alone — it's a label, not a routing decision. Use the detection step.
 - **NEVER** omit `--env-file /home/tore/orkestra/docker/.env`. Compose has no automatic `.env` discovery when `-f` points at an absolute path.
 - **NEVER** delete a managed container manually (`docker rm`). Use `docker compose -f ... down <service>`.
-- **NEVER** mix profiles unintentionally — bringing up `docker-compose.enterprise.yml` while `docker-compose.staging.yml` is already running creates two backend instances and port collisions.
+- **NEVER** mix profiles unintentionally — bringing up `docker-compose.full.yml` while `docker-compose.staging.yml` is already running creates two backend instances and port collisions.

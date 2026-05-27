@@ -45,7 +45,7 @@ It runs on a **two-tier tenancy model**: Tier-1 operators manage staff and modul
 
 ## Architecture at a glance
 
-- **Backend.** Go 1.25, [Huma v2](https://huma.rocks) (OpenAPI-first), modular monolith. 7 core modules always load; 13 optional addons are toggled at `/admin/modules` (hot-reload, no restart). Each addon lives behind a `//go:build !no_addons || addon_<name>` tag, so profile builds (`make build-starter|minimal|billing|ai|saas|enterprise`) ship curated subsets. CI builds every profile on every PR. See [backend/CLAUDE.md](backend/CLAUDE.md).
+- **Backend.** Go 1.25, [Huma v2](https://huma.rocks) (OpenAPI-first), modular monolith. 7 core modules always load; 13 optional addons are toggled at `/admin/modules` (hot-reload, no restart). Single binary ships every addon — `ORKESTRA_PROFILE=minimal|full` only decides what's pre-enabled on a fresh install. See [backend/CLAUDE.md](backend/CLAUDE.md).
 - **Frontend (admin).** React 19 + Vite 7 + TypeScript 5.9 strict. Navigation is fetched from `/v1/navigation` so the UI reflects whatever modules the backend has enabled. Cookie-based operator-audience auth. See [frontend-admin/CLAUDE.md](frontend-admin/CLAUDE.md).
 - **Frontend (client).** Tier-2 customer-facing SPA on the same React 19 + Vite 7 stack, separate cookie domain, separate audience JWT. See [frontend-client/CLAUDE.md](frontend-client/CLAUDE.md).
 - **Mobile.** Flutter 3.35 + Riverpod (early-stage).
@@ -54,25 +54,22 @@ It runs on a **two-tier tenancy model**: Tier-1 operators manage staff and modul
 - **Observability.** Structured JSON logs with `trace_id` / `tenant_id` / `user_id` on every line out of the box, OpenTelemetry traces with tenant baggage (ADR-0001), Prometheus HTTP latency histogram with `trace_id` exemplars (one-click jump from a slow bucket to the matching Tempo trace), audit log kept separate from operational log. Zero-config locally; one env var to ship to a self-hosted Tempo + Loki + Grafana stack; one env var to ship to Honeycomb / Datadog / Grafana Cloud / Axiom. See [ADR-0005](docs/adr/0005-observability-logging-tracing-metrics.md).
 - **AI sidecar (optional).** graph + aimodels + rag + agents can run as a separate `cmd/ai-service` binary; the monolith swaps in `RemoteAIModelProvider` / `RemoteRAGQueryProvider` HTTP clients via the `AI_SERVICE_URL` env var. Zero code changes in consumer modules. See `backend/cmd/ai-service/`.
 
-## SKU profiles, pulled from GHCR
+## Runtime profiles, pulled from GHCR
 
-For VMs that should run a specific addon SKU (no source build, no Chainguard registry), the published per-profile images on GHCR are exposed through five compose files. They layer on top of `docker-compose.infra.yml` for MongoDB and Redis.
+Published `ghcr.io/orkestra-cc/orkestra/backend:latest` ships every addon. Two compose files differ only by the `ORKESTRA_PROFILE` env var that seeds first-boot addon enablement; both layer on top of `docker-compose.infra.yml` for MongoDB and Redis.
 
-| Profile | Image tag | Addons |
+| Profile | Image tag | Effect on first boot |
 | --- | --- | --- |
-| `starter` | `ghcr.io/orkestra-cc/orkestra/backend:starter` | core only |
-| `billing` | `ghcr.io/orkestra-cc/orkestra/backend:billing` | billing, documents, company |
-| `ai` | `ghcr.io/orkestra-cc/orkestra/backend:ai` | graph, aimodels, rag, agents, sales |
-| `saas` | `ghcr.io/orkestra-cc/orkestra/backend:saas` | subscriptions, payments, compliance, identity |
-| `enterprise` | `ghcr.io/orkestra-cc/orkestra/backend:enterprise` (alias of `:latest`) | every addon |
+| `minimal` | `ghcr.io/orkestra-cc/orkestra/backend:latest` | Core only, no addons pre-enabled |
+| `full` | `ghcr.io/orkestra-cc/orkestra/backend:latest` | Every non-dev addon pre-enabled |
 
-> 🇮🇹 **`billing` and `company` are Italy-only.** They speak FatturaPA / SDI and the Italian business registry. Outside Italy, start from the `starter` or `saas` profile — `billing` will boot but the addon endpoints are useless without an Italian fiscal context.
+> 🇮🇹 **`billing` and `company` are Italy-only.** They speak FatturaPA / SDI and the Italian business registry. Outside Italy, start from `minimal` and skip them — or pick `full` and disable them at `/admin/modules`.
 
 ```bash
 make init                                                          # first time only — scaffolds docker/.env + JWT keys
 cd docker
 docker compose -f docker-compose.infra.yml up -d                   # mongodb + redis
-docker compose -f docker-compose.starter.yml --env-file .env up -d # or billing | ai | saas | enterprise
+docker compose -f docker-compose.minimal.yml --env-file .env up -d # or full
 
 # Generate an administrator dev token to log in (from the repo root):
 cd .. && ORKESTRA_API_URL=http://localhost:3000 ./scripts/devtoken.sh administrator
@@ -84,23 +81,23 @@ cd .. && ORKESTRA_API_URL=http://localhost:3000 ./scripts/devtoken.sh administra
 
 ### Forking the image registry
 
-The compose files default to `ghcr.io/orkestra-cc/orkestra/backend:<sku>`. To run images built from your own fork (private registry, internal CI, air-gapped deploy), override at the shell:
+The compose files default to `ghcr.io/orkestra-cc/orkestra/backend:latest`. To run images built from your own fork (private registry, internal CI, air-gapped deploy), override at the shell:
 
 ```bash
 BACKEND_IMAGE_REPO=ghcr.io/your-org/orkestra \
 FRONTEND_IMAGE_REPO=ghcr.io/your-org/orkestra \
-docker compose -f docker-compose.starter.yml --env-file .env up -d
+docker compose -f docker-compose.minimal.yml --env-file .env up -d
 ```
 
-To build the images yourself first (matching the `enterprise` SKU that ships every addon):
+To build the image yourself first:
 
 ```bash
-cd backend && make build-enterprise              # produces ./bin/orkestra-enterprise
-docker build -f Dockerfile -t ghcr.io/your-org/orkestra/backend:enterprise .
-docker push ghcr.io/your-org/orkestra/backend:enterprise
+cd backend && make build                          # produces ./bin/server
+docker build -f Dockerfile -t ghcr.io/your-org/orkestra/backend:latest .
+docker push ghcr.io/your-org/orkestra/backend:latest
 ```
 
-The five published SKUs (`starter` / `billing` / `ai` / `saas` / `enterprise`) are produced by the `.github/workflows/backend.yml` matrix on every push to `dev` / `main` — see that workflow for the canonical recipe and reuse it in your fork.
+The published image is produced by `.github/workflows/backend.yml` on every push to `dev` / `main` — a single build, no profile matrix.
 
 ## Full development stack
 
@@ -128,15 +125,15 @@ To opt back into the Chainguard variant (only if you have `dhi.io` access), set 
 
 `orkestra.sh` at the project root is the single entry point for every stack operation. It replaces the old `deploy.sh` and `logs.sh`.
 
-**Interactive TUI.** `./orkestra.sh` launches a profile menu (SKU profile picker / full stack) followed by a per-profile operations menu with deploy, stop, reset, status, logs, and info.
+**Interactive TUI.** `./orkestra.sh` launches a profile menu (runtime profile picker / full stack) followed by a per-profile operations menu with deploy, stop, reset, status, logs, and info.
 
 **CLI mode.** Every operation also works as a non-interactive command for scripting:
 
 ```bash
-# SKU profile, pulled from GHCR (starter | billing | ai | saas | enterprise)
-./orkestra.sh profile billing deploy --pull
-./orkestra.sh profile ai status
-./orkestra.sh profile enterprise logs backend -f
+# Runtime profile, pulled from GHCR (minimal | full)
+./orkestra.sh profile minimal deploy --pull
+./orkestra.sh profile full status
+./orkestra.sh profile full logs backend -f
 
 # Full stack, uses ENV from docker/.env or ENV=... prefix
 ENV=development ./orkestra.sh deploy --scope backend --rebuild --yes
@@ -223,7 +220,7 @@ Request logging is **allowlist-only**: only the enumerated fields (`method`, `pa
 ### Backend
 
 1. Create `backend/internal/addons/<name>/module.go` implementing the `Module` interface.
-2. Create `backend/cmd/server/catalog_<name>.go` with `//go:build !no_addons || addon_<name>` and an `init()` that registers the factory in `optionalModules`.
+2. Create `backend/cmd/server/catalog_<name>.go` with an `init()` that registers the factory in `optionalModules`.
 3. Declare `Collections()`, `NavItems()`, `ConfigSchema()`, `Dependencies()`.
 4. Use `shared/iface` interfaces for cross-module dependencies. Never import another module's `services/` or `repository/` package directly.
 
@@ -266,8 +263,8 @@ Every pull request runs through:
 - **Policy coverage.** `tools/policycoverage` reconciles every declared permission against Cedar policies + route middleware, fails on uncovered drift.
 - **Tests.** `go test -race` with a Mongo + Redis service matrix and a 15 % coverage floor.
 - **Vulnerability check.** `govulncheck` against the latest Go 1.25.x stdlib + module deps, with an allowlist for upstream-unfixed Docker SDK CVEs.
-- **Build matrix.** Every SKU profile (`starter | minimal | billing | ai | saas | enterprise`) is built so a missing tag in `catalog_<addon>.go` surfaces here, not at deploy.
-- **Docker push.** On push to `dev` / `main`, each profile is pushed to GHCR as `ghcr.io/orkestra-cc/orkestra/backend:<profile>` and `:<profile>-<sha>`.
+- **Single binary build.** One build per push validates `cmd/server` compiles cleanly with every addon.
+- **Docker push.** On push to `dev` / `main`, the image is pushed to GHCR as `ghcr.io/orkestra-cc/orkestra/backend:latest` and `:<sha>`.
 
 ### Coverage snapshot
 

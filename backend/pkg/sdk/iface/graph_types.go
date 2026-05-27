@@ -3,8 +3,8 @@ package iface
 // Graph query types live here (rather than in addons/graph/models) so that
 // the iface package — the cross-module contract layer — does not import
 // any addon package. The graph addon imports these from iface like every
-// other consumer; build profiles that omit `addon_graph` no longer keep
-// the addon's models package linked just to satisfy this contract.
+// other consumer; the kernel never has to link the addon's models package
+// just to satisfy this contract.
 
 // GraphNode represents a Memgraph/Neo4j node returned by a Cypher query.
 type GraphNode struct {

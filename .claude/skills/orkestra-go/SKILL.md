@@ -19,7 +19,7 @@ If a module has its own `CLAUDE.md`, **that doc wins** over anything in this ski
 
 ## Architecture in one paragraph
 
-Orkestra is a **plugin-style modular monolith**. A small core (`internal/core/`: user, notification, tenant, authz, auth, navigation) is always linked. Every other capability is an **addon** under `internal/addons/` — addons are wired in via per-addon files at `cmd/server/catalog_<name>.go` behind `//go:build !no_addons || addon_<name>` build tags. The default build pulls every addon (enterprise SKU); curated SKUs (starter, minimal, billing, ai, saas) ship leaner binaries — see the profile table in `backend/CLAUDE.md`. Addons that compile in are **always instantiated and routed** at boot; runtime enable/disable comes from `module_configs` in MongoDB and is hot-reloadable via `/admin/modules`.
+Orkestra is a **plugin-style modular monolith**. A small core (`internal/core/`: user, notification, tenant, authz, auth, navigation) is always linked. Every other capability is an **addon** under `internal/addons/` — addons are wired in via per-addon files at `cmd/server/catalog_<name>.go`. Every binary ships every addon; runtime enable/disable comes from `module_configs` in MongoDB (hot-reloadable via `/admin/modules`). `ORKESTRA_PROFILE=minimal|full` decides first-boot seeded enablement only.
 
 ## Two-tier tenancy (load-bearing)
 
@@ -94,10 +94,8 @@ If you need a type that crosses module boundaries, **put it in `shared/iface/`**
 ## Adding a new module
 
 1. `internal/addons/<name>/module.go` — embed `BaseModule`, implement `Name()` + the methods you actually need.
-2. `cmd/server/catalog_<name>.go` — single `init()` with the build tag:
+2. `cmd/server/catalog_<name>.go` — single `init()`:
    ```go
-   //go:build !no_addons || addon_<name>
-
    package main
 
    import (
@@ -131,9 +129,9 @@ If you need a type that crosses module boundaries, **put it in `shared/iface/`**
 
 `ModuleConfigService` reads `module_configs` (MongoDB) → falls back to env vars → falls back to schema default. Secrets are AES-256-GCM encrypted in MongoDB; never log them or echo them in API responses. Modules with `HotReloadConfig() == true` should read config lazily through `deps.GetConfig` / `deps.GetSecret` so admin-UI changes take effect without a restart.
 
-## Build profiles (developer-facing)
+## Runtime profiles (developer-facing)
 
-`backend/Makefile` defines `make build-{starter|minimal|billing|ai|saas|enterprise}`. Tag sets are closed under `Dependencies()` — picking a profile that omits a transitive dep fails loudly at boot via the registry's topo sort. CI builds the full matrix per PR. Tests always run with the default (no-tag) build so addon test files always compile, regardless of profile.
+Every binary compiles every addon. `ORKESTRA_PROFILE=minimal|full` on a fresh install seeds the `module_configs` document: `minimal` leaves all addons disabled; `full` pre-enables every non-dev addon. Subsequent boots ignore the env var. `backend/Makefile` exposes a single `make build` target — no profile matrix, no CI matrix.
 
 ## AI sidecar split (be aware)
 

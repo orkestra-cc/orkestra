@@ -168,7 +168,7 @@ make sdk-lint       # full lint
 
 CI invokes `ci-backend` which chains all of the above plus
 `backend-tenantscope` (operates on `backend/internal/`, unaffected by
-the SDK split) and the build-profile matrix.
+the SDK split) and a single binary build.
 
 ## Related
 

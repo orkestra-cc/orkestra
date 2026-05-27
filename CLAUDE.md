@@ -56,20 +56,22 @@ The `subscriptions` and `payments` modules are **not ordinary feature addons** �
 - **ConfigService** — DB-backed (MongoDB) + Redis-cached (30s TTL) module configuration with AES-256-GCM encrypted secrets
 - **shared/iface** — consumer-facing interfaces (UserProvider, NotificationSender, PDFProvider, GraphProvider, AIModelProvider, RAGQueryProvider, JWTProvider) that prevent direct cross-module imports
 - **RoleMiddleware** — interface (`module.go`) for RBAC route protection, satisfied by both `AuthMiddleware` (monolith) and `JWTValidator` (AI service)
-- **Module catalog** (`cmd/server/catalog.go` + per-addon `catalog_<name>.go` files, each gated by `//go:build !no_addons || addon_<name>`) — maps module names to factory functions; addons that are compiled in are always instantiated and initialized at boot for runtime enable/disable without restart. Build tags decide what's *installable*; runtime config decides what's *on*. See [`backend/CLAUDE.md`](backend/CLAUDE.md) for the canonical profile recipes.
+- **Module catalog** (`cmd/server/catalog.go` + per-addon `catalog_<name>.go` files) — maps module names to factory functions. Every addon is compiled into every binary and instantiated at boot; runtime config decides what's *enabled*. See [`backend/CLAUDE.md`](backend/CLAUDE.md) for the registry mechanics.
 
 **Admin API**: `GET/PATCH /v1/admin/modules`, `GET /v1/admin/modules/health`, `GET/PATCH /v1/admin/modules/{name}/environments/{env}`, `PUT /v1/admin/modules/{name}/active-environment` — runtime enable/disable (hot-reload), config updates, per-environment config profiles (sandbox/production), health checks. Frontend at `/admin/modules` (list) and `/admin/modules/:name` (detail).
 
 ### Module Loading
 
-Two layers decide what runs:
-
-1. **Build time — which addons are *installable* in this binary.** Each addon's wiring lives in `cmd/server/catalog_<addon>.go` behind `//go:build !no_addons || addon_<name>`. Default builds compile every addon (enterprise SKU); `-tags "no_addons addon_billing addon_documents"` ships a curated subset. The `Makefile` defines named profiles (`make build-starter|minimal|billing|ai|saas|enterprise`) and CI builds the full matrix on every PR. See [`backend/CLAUDE.md`](backend/CLAUDE.md) for the canonical profile table.
-2. **Runtime — which compiled-in addons are *enabled*.** All optional modules that compiled in are always **instantiated, initialized, and routed** at boot — regardless of enabled state. Routes for disabled modules are gated by `ModuleGate` middleware (returns 503). Only enabled modules have their `Start()` method called (background jobs, polling, etc.).
+A single binary contains every addon. All optional modules are **instantiated, initialized, and routed** at boot regardless of enabled state — routes for disabled modules are gated by `ModuleGate` middleware (returns 503), and only enabled modules have their `Start()` method called (background jobs, polling, etc.).
 
 **Enabling/disabling at runtime:** The admin API (`PATCH /v1/admin/modules/{name}`) calls `StartModule()`/`StopModule()` on the registry. The module starts or stops immediately — no restart required. Dependency constraints are enforced: you cannot disable a module that another running module depends on (returns 409).
 
-**Which modules start at boot** is determined by the `module_configs` collection in MongoDB (set via admin UI). On first boot of a brand-new install the document is seeded from each module's `ConfigSchema().EnvVar`; if `ORKESTRA_PROFILE` is set (typically by `docker-compose.<profile>.yml`), the seeder additionally pre-enables the SKU's addons (`billing` → billing/documents/company, `ai` → graph/aimodels/rag/agents/sales, `saas` → subscriptions/payments/compliance/identity, `enterprise` → every non-core, non-dev addon). Subsequent boots ignore `ORKESTRA_PROFILE` — admin-set values are authoritative. See `docker/CLAUDE.md` for the per-bucket split.
+**Which modules start at boot** is determined by the `module_configs` collection in MongoDB (set via admin UI). On first boot of a brand-new install the document is seeded from each module's `ConfigSchema().EnvVar`; if `ORKESTRA_PROFILE` is set (typically by `docker-compose.<profile>.yml`), the seeder pre-enables addons accordingly:
+
+- `ORKESTRA_PROFILE=minimal` — no addons pre-enabled. Operator turns each one on at `/admin/modules`.
+- `ORKESTRA_PROFILE=full` — every non-core, non-dev addon pre-enabled.
+
+Subsequent boots ignore `ORKESTRA_PROFILE` — admin-set values are authoritative. See `docker/CLAUDE.md` for the per-bucket split.
 
 The registry topologically sorts modules by `Dependencies()` so initialization order is always correct.
 
@@ -172,15 +174,18 @@ Load order (topologically sorted by `Dependencies()`): `user` → `notification`
 
 ## Quick Start
 
-### SKU profile (recommended for first boot)
+### Runtime profile (recommended for first boot)
 
-Pull a pre-built image from GHCR and layer it on top of `docker-compose.infra.yml` (MongoDB + Redis). Five SKUs are published per push: `starter`, `billing`, `ai`, `saas`, `enterprise`. Start with `starter` for the smallest surface (core modules only), or `enterprise` for everything.
+Pull the pre-built image from GHCR and layer it on top of `docker-compose.infra.yml` (MongoDB + Redis). One image (`backend:latest`) ships every addon; two compose files differ only by the `ORKESTRA_PROFILE` env var that seeds first-boot addon enablement:
+
+- `docker-compose.minimal.yml` — core only, no addons pre-enabled
+- `docker-compose.full.yml` — every non-dev addon pre-enabled
 
 ```bash
 cd docker
 docker network create orkestra-network                              # first time only
 docker compose -f docker-compose.infra.yml up -d                    # mongodb + redis
-docker compose -f docker-compose.starter.yml --env-file .env up -d  # or billing / ai / saas / enterprise
+docker compose -f docker-compose.minimal.yml --env-file .env up -d  # or full
 
 # Backend API: http://localhost:3000
 # API Docs:    http://localhost:3000/docs
@@ -189,7 +194,7 @@ docker compose -f docker-compose.starter.yml --env-file .env up -d  # or billing
 ORKESTRA_API_URL=http://localhost:3000 ./scripts/devtoken.sh administrator
 ```
 
-Every optional module compiled into the SKU is instantiated and initialized at boot regardless of enabled state. To enable additional addons that were compiled in, log in and toggle them at `/admin/modules` — the registry hot-reloads without a restart and auto-resolves dependencies. The notification module boots in `noop` mode by default — verification and password-reset emails are logged to the backend stdout rather than delivered. To send real mail, configure SMTP at `/admin/modules` after first login.
+Every optional module is instantiated and initialized at boot regardless of enabled state. To enable additional addons, log in and toggle them at `/admin/modules` — the registry hot-reloads without a restart and auto-resolves dependencies. The notification module boots in `noop` mode by default — verification and password-reset emails are logged to the backend stdout rather than delivered. To send real mail, configure SMTP at `/admin/modules` after first login.
 
 ### Full development stack
 
@@ -215,7 +220,7 @@ docker compose -f docker-compose.ai-sidecar.yml up -d  # AI Service (port 3100)
 ### Do
 
 - **Read the module's CLAUDE.md** before modifying any module — each has specific patterns and constraints
-- **Use the module system** when adding new functionality: implement the `Module` interface, add a `cmd/server/catalog_<name>.go` file (build-tagged `//go:build !no_addons || addon_<name>`) that registers the factory in `optionalModules` via `init()`, declare collections/nav/config via the module methods
+- **Use the module system** when adding new functionality: implement the `Module` interface, add a `cmd/server/catalog_<name>.go` file that registers the factory in `optionalModules` via `init()`, declare collections/nav/config via the module methods
 - **Use `shared/iface`** for cross-module dependencies — never import another module's `services/` or `repository/` package from a `module.go` wiring file
 - **Validate and sanitize** all user inputs; implement RBAC on every endpoint (ask for required permissions)
 - **Follow the auth patterns** in [Authentication_flow.md](docs/Authentication_flow.md) for any auth-related changes
@@ -240,7 +245,7 @@ docker restart orkestra-backend-dev
 
 GitHub Actions workflows (`.github/workflows/`) run on PR and push to `dev`/`main`. **CI workflows invoke `make` targets from the repo root — local and CI cannot drift.** Run `make ci-help` for the full list.
 
-- `backend.yml` → `make ci-backend` (lint, tenantscope, policycoverage, vuln, tests, enterprise build, openapi-check) + a profile-build matrix
+- `backend.yml` → `make ci-backend` (lint, tenantscope, policycoverage, vuln, tests, build, openapi-check) + a single Docker image build on push
 - `frontend-admin.yml` → `make ci-frontend-admin` (typecheck, eslint, tests, audit, build)
 - `frontend-client.yml` → `make ci-frontend-client` (typecheck, eslint, build) — no tests yet
 - `mobile.yml` → `make ci-mobile` (flutter analyze, test)

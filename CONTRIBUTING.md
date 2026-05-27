@@ -57,8 +57,7 @@ The same `make` targets are what GitHub Actions runs. If `make ci` is green loca
 |---------|--------------|
 | `make ci` | CI for changed surfaces (default base: `origin/dev`; override with `BASE_REF=origin/main`) |
 | `make ci-all` | Every surface — what CI does on `dev`/`main` |
-| `make ci-backend` | Backend: lint, tenant-scope, policy-coverage, vuln, tests, enterprise build, openapi-check |
-| `make ci-backend-matrix` | Backend + all 6 build profiles (slow; matches the CI matrix) |
+| `make ci-backend` | Backend: lint, tenant-scope, policy-coverage, vuln, tests, build, openapi-check |
 | `make ci-frontend-admin` | Admin SPA: typecheck, lint, tests, audit, build |
 | `make ci-frontend-client` | Client SPA: typecheck, lint, build |
 | `make ci-mobile` | Flutter: analyze, test |

@@ -43,18 +43,12 @@ func coreModules(cfg *config.Config) []func() module.Module {
 }
 
 // optionalModules is the catalog of addons the binary can boot. It is
-// populated at init time by the per-addon catalog_<name>.go files, each
-// gated by `//go:build !no_addons || addon_<name>`:
-//
-//   - default build (no tags): every catalog_<name>.go compiles, every
-//     addon is registered — same behavior as before the split.
-//   - `-tags "no_addons"`: only core modules ship; the addon packages
-//     are unreachable from main and never compiled.
-//   - `-tags "no_addons,addon_billing,addon_documents"`: ship a curated
-//     subset — useful for per-customer SKUs and lean container images.
-//
-// Enabled state at runtime is still controlled by the module_configs
-// collection via /admin/modules; build tags only decide what is *installable*.
+// populated at init time by the per-addon catalog_<name>.go files. Every
+// addon compiles into every binary; runtime enable/disable is owned by
+// the module_configs collection and surfaced at /admin/modules. To run a
+// lean deployment, set ORKESTRA_PROFILE=minimal on first boot so the
+// seeder leaves all addons disabled; ORKESTRA_PROFILE=full pre-enables
+// every non-dev addon.
 var optionalModules = map[string]func() module.Module{}
 
 // allOptionalModuleNames returns the names of all optional modules.

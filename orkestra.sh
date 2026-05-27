@@ -161,11 +161,12 @@ OBSERVABILITY_COMPOSE="$DOCKER_DIR/docker-compose.observability.yml"
 # Profile state — "fullstack", a SKU profile name, or "" (at profile menu)
 PROFILE=""
 
-# SKU profiles published to GHCR. Order matters: it drives the TUI picker.
-SKU_PROFILES=(starter billing ai saas enterprise)
+# Runtime profiles published to GHCR. Order matters: it drives the TUI picker.
+# Single binary; ORKESTRA_PROFILE seeds first-boot addon enablement.
+SKU_PROFILES=(minimal full)
 
 # Per-profile compose file, env file, backend URL, refresh mode, and infra
-# layering. SKU profiles pull a pre-built image from GHCR and expect
+# layering. Both profiles pull the same backend image from GHCR and expect
 # docker-compose.infra.yml to be running first.
 declare -A PROFILE_COMPOSE
 declare -A PROFILE_ENV
@@ -185,11 +186,8 @@ init_profile_configs() {
         PROFILE_REFRESH_MODE[$p]="pull"
         PROFILE_LAYER_INFRA[$p]="yes"
     done
-    PROFILE_DESCRIPTION[starter]="Core only (no addons) — pulled from GHCR"
-    PROFILE_DESCRIPTION[billing]="billing + documents + company addons"
-    PROFILE_DESCRIPTION[ai]="graph + aimodels + rag + agents + sales addons"
-    PROFILE_DESCRIPTION[saas]="subscriptions + payments + compliance + identity addons"
-    PROFILE_DESCRIPTION[enterprise]="Every addon (alias for :latest)"
+    PROFILE_DESCRIPTION[minimal]="Core only (no addons pre-enabled) — operator turns them on at /admin/modules"
+    PROFILE_DESCRIPTION[full]="Every non-dev addon pre-enabled on first boot"
 }
 
 init_profile_configs
@@ -674,8 +672,8 @@ is_service_running() {
         return 0
     fi
     # Fallback: a container with this compose-service label may be running
-    # under a different project (e.g. infra+SKU stacks are merged under one
-    # project name like "orkestra-enterprise", so the bare infra compose
+    # under a different project (e.g. infra+profile stacks are merged under
+    # one project name like "orkestra-full", so the bare infra compose
     # file's project lookup misses them). Match by label instead.
     [ -n "$(docker ps -q \
         --filter "label=com.docker.compose.service=$service" \
@@ -701,9 +699,10 @@ resolve_running_container() {
 # Generic profile operations
 # ---------------------------------------------------------------------------
 #
-# A "profile" here is any entry in PROFILE_COMPOSE — the five SKU profiles
-# (starter/billing/ai/saas/enterprise). Each pulls a pre-built image from
-# GHCR; everything else is the same operation surface
+# A "profile" here is any entry in PROFILE_COMPOSE — the two runtime
+# profiles (minimal/full). Both pull the same image from GHCR; the
+# ORKESTRA_PROFILE env var in each compose file decides first-boot addon
+# enablement. Everything else is the same operation surface
 # (deploy/stop/reset/status/info/logs).
 
 # Echo the docker-compose -f / --env-file argument list for the named profile,
@@ -1816,7 +1815,7 @@ show_profile_menu() {
     draw_box "Orkestra Stack Manager" \
         "" \
         "  ${c_accent}1${c_reset} ${c_bold}Profile${c_reset}                 ${c_muted}(pull published image)${c_reset}" \
-        "     ${c_muted}starter / billing / ai / saas / enterprise${c_reset}" \
+        "     ${c_muted}minimal / full${c_reset}" \
         "" \
         "  ${c_accent}2${c_reset} ${c_bold}Full stack${c_reset}              ${c_muted}(dev / staging / production)${c_reset}" \
         "     ${c_muted}ENV autodetected from docker/.env${c_reset}" \
@@ -1830,14 +1829,11 @@ show_profile_menu() {
 
 show_sku_profile_picker() {
     page_header "Profile picker"
-    draw_box "Select SKU" \
+    draw_box "Select profile" \
         "" \
-        "  ${c_accent}1${c_reset} starter      ${c_muted}core only (no addons)${c_reset}" \
-        "  ${c_accent}2${c_reset} billing      ${c_muted}billing + documents + company${c_reset}" \
-        "  ${c_accent}3${c_reset} ai           ${c_muted}graph + aimodels + rag + agents + sales${c_reset}" \
-        "  ${c_accent}4${c_reset} saas         ${c_muted}subscriptions + payments + compliance + identity${c_reset}" \
-        "  ${c_accent}5${c_reset} enterprise   ${c_muted}every addon${c_reset}" \
-        "  ${c_accent}6${c_reset} Back" \
+        "  ${c_accent}1${c_reset} minimal   ${c_muted}core only (no addons pre-enabled)${c_reset}" \
+        "  ${c_accent}2${c_reset} full      ${c_muted}every non-dev addon pre-enabled${c_reset}" \
+        "  ${c_accent}3${c_reset} Back" \
         ""
 }
 
@@ -1861,16 +1857,13 @@ show_profile_ops_menu() {
 profile_picker_loop() {
     while true; do
         show_sku_profile_picker
-        printf '%s%s Select profile [1-6]: %s' "$c_prompt" "$ic_arrow" "$c_reset"
+        printf '%s%s Select profile [1-3]: %s' "$c_prompt" "$ic_arrow" "$c_reset"
         local choice
         read -r choice
         case "$choice" in
-            1) profile_ops_menu_loop "starter" ;;
-            2) profile_ops_menu_loop "billing" ;;
-            3) profile_ops_menu_loop "ai" ;;
-            4) profile_ops_menu_loop "saas" ;;
-            5) profile_ops_menu_loop "enterprise" ;;
-            6) PROFILE=""; return ;;
+            1) profile_ops_menu_loop "minimal" ;;
+            2) profile_ops_menu_loop "full" ;;
+            3) PROFILE=""; return ;;
             *) p_warn "Invalid selection"; sleep 1 ;;
         esac
     done
@@ -1988,15 +1981,15 @@ ${c_bold}FIRST-TIME SETUP${c_reset}
                                    RS256 JWT keys. Idempotent — preserves
                                    existing files unless --force.
 
-${c_bold}SKU PROFILE${c_reset} ${c_muted}(pulls published image from GHCR)${c_reset}
-  ${c_accent}profile <name> deploy${c_reset} [--pull]    Start SKU stack (--pull refreshes the image)
+${c_bold}PROFILE${c_reset} ${c_muted}(pulls published image from GHCR)${c_reset}
+  ${c_accent}profile <name> deploy${c_reset} [--pull]    Start profile stack (--pull refreshes the image)
   ${c_accent}profile <name> stop${c_reset}               Stop containers (volumes kept)
   ${c_accent}profile <name> reset${c_reset} [--yes]      Wipe volumes and redeploy
   ${c_accent}profile <name> status${c_reset}             Containers + /health + resources
   ${c_accent}profile <name> info${c_reset}               URLs, image, dev-token recipe
-  ${c_accent}profile <name> logs${c_reset} <svc> [flags] View logs for a SKU-stack service
+  ${c_accent}profile <name> logs${c_reset} <svc> [flags] View logs for a profile-stack service
 
-  Available <name>: starter | billing | ai | saas | enterprise
+  Available <name>: minimal | full
   Requires docker-compose.infra.yml to be running first.
 
 ${c_bold}FULL STACK${c_reset} ${c_muted}(uses ENV from docker/.env or ENV=... prefix)${c_reset}
@@ -2027,9 +2020,9 @@ ${c_bold}SHORTCUTS${c_reset}
 
 ${c_bold}EXAMPLES${c_reset}
   ./orkestra.sh
-  ./orkestra.sh profile billing deploy --pull
-  ./orkestra.sh profile ai status
-  ./orkestra.sh profile enterprise logs backend -f
+  ./orkestra.sh profile minimal deploy --pull
+  ./orkestra.sh profile full status
+  ./orkestra.sh profile full logs backend -f
   ENV=development ./orkestra.sh deploy --scope backend --rebuild --yes
   ./orkestra.sh logs orkestra-backend-dev -f
   ./orkestra.sh observability up
@@ -2202,12 +2195,12 @@ main() {
 
     # Always show the top-level menu. We used to auto-route into the
     # full-stack loop when $ENV was set (from shell or docker/.env), but that
-    # silently hid the SKU-profile menu — so users who had deployed e.g.
-    # the `enterprise` profile would be shown the staging service list with
-    # everything marked "stopped" (since each compose file declares its own
-    # `name:`, the staging-project lookup misses orkestra-enterprise's
-    # containers). Force the menu so the user can pick the profile that
-    # matches their running stack.
+    # silently hid the profile menu — so users who had deployed e.g. the
+    # `full` profile would be shown the staging service list with everything
+    # marked "stopped" (since each compose file declares its own `name:`,
+    # the staging-project lookup misses orkestra-full's containers). Force
+    # the menu so the user can pick the profile that matches their running
+    # stack.
     while true; do
         show_profile_menu
         printf '%s%s Select profile [1-4]: %s' "$c_prompt" "$ic_arrow" "$c_reset"

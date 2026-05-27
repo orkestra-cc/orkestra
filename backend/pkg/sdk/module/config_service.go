@@ -10,25 +10,22 @@ import (
 	"time"
 )
 
-// profileAddons maps SKU profile names (set via the ORKESTRA_PROFILE env var
-// in each docker-compose.<profile>.yml) to the addons pre-enabled on first
-// boot. Names match each Module's Name() return value and mirror the build
-// tag sets in backend/Makefile.
+// profileAddons maps the ORKESTRA_PROFILE values accepted by the first-boot
+// seeder to the addons pre-enabled on first boot. Every binary compiles
+// every addon; the profile only decides what is *enabled* on a fresh
+// install.
 //
-// "enterprise" uses the "*" sentinel which expands at runtime to every
-// non-core addon in the binary. The dev addon is intentionally omitted from
-// every profile because forcing it on in a production-tagged compose file
-// would be surprising — dev keeps its own !IsProduction() gate.
+//   - "minimal": no addons pre-enabled. Core-only deployment; the operator
+//     turns on each addon explicitly at /admin/modules.
+//   - "full": the "*" sentinel expands at runtime to every non-core addon
+//     except dev (which keeps its own !IsProduction() gate so it never
+//     auto-enables on a production-tagged compose).
 //
 // On subsequent boots (existing module_configs document found) the override
 // is ignored entirely; admin-set values are authoritative.
 var profileAddons = map[string][]string{
-	"starter":    {},
-	"minimal":    {},
-	"billing":    {"billing", "documents", "company"},
-	"ai":         {"graph", "aimodels", "rag", "agents", "sales"},
-	"saas":       {"subscriptions", "payments", "compliance", "identity"},
-	"enterprise": {"*"},
+	"minimal": {},
+	"full":    {"*"},
 }
 
 // ModuleConfigService manages module configurations in MongoDB with Redis caching.
@@ -224,7 +221,7 @@ func (s *ModuleConfigService) computeProfileOverride(modules []Module) map[strin
 
 	enabled := make(map[string]bool)
 	if len(addons) == 1 && addons[0] == "*" {
-		// "enterprise" sentinel — every non-core addon except dev.
+		// "full" sentinel — every non-core addon except dev.
 		for _, m := range modules {
 			if m.Category() == CategoryCore || m.Name() == "dev" {
 				continue

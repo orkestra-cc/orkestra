@@ -1,5 +1,3 @@
-//go:build !no_addons || addon_identity
-
 package main
 
 import (

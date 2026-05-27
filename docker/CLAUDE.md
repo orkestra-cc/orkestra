@@ -114,7 +114,7 @@ Keep this split when touching `.env*` or `docker-compose.*.yml`:
 | Encryption keys (`OAUTH_TOKEN_ENCRYPTION_KEY`, `ORKESTRA_KMS_MASTER_KEY`, optional `MFA_SECRET_ENCRYPTION_KEY`) | process — bootstraps ConfigService | ✅ yes |
 | Process-scoped auth tunables (`AUTH_REQUIRE_EMAIL_VERIFICATION`, `AUTH_RISK_STEP_UP_THRESHOLD`, `WEBAUTHN_RP_ID`, `AUTH_GEOIP_DB_PATH`, `TENANT_KIND_ENFORCEMENT`, `CEDAR_ENFORCE_ACTIONS`) | process | ✅ yes |
 | `CONTAINER_CONTROL_ENABLED`, `DOCKER_GID`, `AI_SERVICE_URL`, `AI_SERVICE_PORT` | process | ✅ yes |
-| `ORKESTRA_PROFILE` (starter / billing / ai / saas / enterprise) — pre-enables the SKU's addons on first boot only; subsequent boots use the `module_configs` document | process — first-boot seeder | ✅ yes |
+| `ORKESTRA_PROFILE` (minimal / full) — pre-enables addons on first boot only (`minimal` → none, `full` → every non-dev addon); subsequent boots use the `module_configs` document | process — first-boot seeder | ✅ yes |
 | `SALES_*`, `RAG_CHUNK_*` | process — runtime knobs not yet migrated to ConfigSchema | ✅ yes (transitional) |
 | `MARKETING_IMPORT_SPOOL_DIR` | process — first-boot seed for the marketing module's `importSpoolDir`. Dev/staging compose override it to `/app/marketing-spool`, bind-mounted from `docker/marketing-spool-{dev,staging}/` on the host (gitignored). Schema default `/var/lib/orkestra/marketing/spool` is unwritable by the non-root container user. Bind mount (not named volume) so host uid 1000 ownership carries through under `userns_mode: "host"` — a named volume gets created as root and would re-break the worker on every recreate. For an existing install change the value at `/admin/modules/marketing` — `module_configs` is authoritative once seeded. | ✅ yes |
 | `ORKESTRA_VERSION` | process — application version surfaced in the SPA footer (frontend-admin + frontend-client) and embedded in the dev `/health` JSON. `orkestra.sh` auto-exports this from `git describe --tags --always --dirty`, and docker-compose substitutes it into both frontend `environment:` blocks (dev/staging dev-server) and the `args:` block in `docker-compose.prod.yml` (production image build). CI overrides it with `--build-arg ORKESTRA_VERSION=${{ github.ref_name }}` on tag pushes. The container has no git binary and no `.git`, so this host-side env var is the only path that delivers a real version — without it the SPA falls back to `"dev"`. | ✅ yes |
@@ -152,14 +152,14 @@ Vars **deleted as dead code** during the cleanup (do not re-add): `MODULES`, `BA
 
 ### Core Philosophy
 
-Separate infrastructure from applications. One infra compose, three full-stack composes (dev/staging/prod), five SKU-pull composes:
+Separate infrastructure from applications. One infra compose, three full-stack composes (dev/staging/prod), two profile-pull composes:
 
 1. **`docker-compose.infra.yml`** - Infrastructure services only (MongoDB, Redis, Gotenberg, Hindsight)
 2. **`docker-compose.dev-public.yml`** - Application services in development mode with hot reload, on public Alpine images (default, fork-friendly)
 3. **`docker-compose.dev.yml`** - Same as dev-public but on Chainguard `dhi.io/*` hardened images (opt-in via `DEV_COMPOSE_VARIANT=chainguard` — requires a Chainguard subscription)
 4. **`docker-compose.staging.yml`** - Application services in staging mode (staging-like env + AIR/Vite hot reload)
 5. **`docker-compose.prod.yml`** - Application services in production mode with optimizations
-6. **`docker-compose.{starter,billing,ai,saas,enterprise}.yml`** - SKU profiles pulling a pre-built backend image from GHCR (layer on `docker-compose.infra.yml`)
+6. **`docker-compose.{minimal,full}.yml`** - Runtime profiles pulling the pre-built backend image from GHCR (layer on `docker-compose.infra.yml`). Same image; `ORKESTRA_PROFILE` decides first-boot addon enablement
 
 ### File Organization
 
@@ -173,11 +173,8 @@ Separate infrastructure from applications. One infra compose, three full-stack c
     ├── docker-compose.staging.yml # Staging: AIR/Vite hot reload + staging-like env
     ├── docker-compose.prod.yml    # Production: Optimized Backend, Frontend
     ├── docker-compose.ai-sidecar.yml # Optional AI sidecar (graph, rag, agents, aimodels)
-    ├── docker-compose.starter.yml    # Profile pull: starter SKU image from GHCR (layer on infra.yml)
-    ├── docker-compose.billing.yml    # Profile pull: billing/documents/company SKU
-    ├── docker-compose.ai.yml         # Profile pull: graph/aimodels/rag/agents/sales SKU
-    ├── docker-compose.saas.yml       # Profile pull: subscriptions/payments/compliance/identity SKU
-    ├── docker-compose.enterprise.yml # Profile pull: every addon (alias for :latest)
+    ├── docker-compose.minimal.yml    # Profile pull: core only, no addons pre-enabled (layer on infra.yml)
+    ├── docker-compose.full.yml       # Profile pull: every non-dev addon pre-enabled
     ├── .env.example               # Template for environment files
     ├── .env                       # Active env (gitignored) - contains ENV=development|staging|production
     ├── keys/                      # JWT and OAuth keys (gitignored)
@@ -186,7 +183,7 @@ Separate infrastructure from applications. One infra compose, three full-stack c
 
 ### Environment Combinations
 
-- **SKU profile (first-boot, lightest path)**: `docker-compose.infra.yml` + `docker-compose.<sku>.yml` + `.env` — pulls a pre-built backend image (`starter` for core only, up to `enterprise` for every addon)
+- **Runtime profile (first-boot, lightest path)**: `docker-compose.infra.yml` + `docker-compose.{minimal,full}.yml` + `.env` — pulls the pre-built backend image; `ORKESTRA_PROFILE` env var in the compose seeds first-boot addon enablement
 - **Development**: `docker-compose.infra.yml` + `docker-compose.dev.yml` + `.env` (with `ENV=development`)
 - **Staging**: `docker-compose.infra.yml` + `docker-compose.staging.yml` + `.env` (with `ENV=staging`)
 - **Production**: `docker-compose.infra.yml` + `docker-compose.prod.yml` + `.env` (with `ENV=production`)
@@ -211,15 +208,15 @@ For a multi-environment setup (separate `.env.development` / `.env.staging` / `.
 
 ### Using orkestra.sh (Recommended)
 
-`orkestra.sh` is the single entry point for every stack operation. It works as both an interactive TUI and a scriptable CLI, and knows about two deployment shapes: **SKU profile** (pull a per-profile image from GHCR — `starter` / `billing` / `ai` / `saas` / `enterprise`), and **full stack** (dev / staging / prod, auto-detected from `docker/.env`).
+`orkestra.sh` is the single entry point for every stack operation. It works as both an interactive TUI and a scriptable CLI, and knows about two deployment shapes: **runtime profile** (pull the published image from GHCR with first-boot addon enablement via `ORKESTRA_PROFILE` — `minimal` / `full`), and **full stack** (dev / staging / prod, auto-detected from `docker/.env`).
 
 ```bash
 # Interactive TUI — profile menu appears, then a per-profile op menu
 ./orkestra.sh
 
 # The TUI flow:
-# 1. Pick profile: "Profile" (SKU picker) / "Full stack"
-# 2. Profile: pick a SKU (starter / billing / ai / saas / enterprise) → ops menu
+# 1. Pick profile: "Profile" (runtime profile picker) / "Full stack"
+# 2. Profile: pick minimal or full → ops menu
 #    (Deploy [--pull] / Stop / Reset / Status / Logs / Info)
 # 3. Full stack: Deploy (with scope selection) / Stop / Status / Logs / Back
 # 4. ENV is autodetected from docker/.env for the full-stack path
@@ -228,7 +225,7 @@ For a multi-environment setup (separate `.env.development` / `.env.staging` / `.
 **CLI mode** — same operations, non-interactive, suitable for scripting and CI:
 
 ```bash
-# SKU profile (pulled from GHCR; <name> = starter | billing | ai | saas | enterprise)
+# Runtime profile (pulled from GHCR; <name> = minimal | full)
 ./orkestra.sh profile <name> deploy [--pull]
 ./orkestra.sh profile <name> stop
 ./orkestra.sh profile <name> reset [--yes]
@@ -243,7 +240,7 @@ For a multi-environment setup (separate `.env.development` / `.env.staging` / `.
 ./orkestra.sh logs <service> [-f] [-n N] [-t]
 ```
 
-**Interactive TUI always shows the top-level profile menu** (SKU profile vs. full stack), even when `ENV` is set in the shell or in `docker/.env`. Auto-routing into the full-stack loop based on `$ENV` was removed because it hid the SKU-profile picker — e.g. with a running `enterprise` stack and `ENV=staging`, the staging-project log lookup would report every container "stopped" because each compose file declares its own `name:` and the running containers live under `orkestra-enterprise`. CLI usage like `ENV=development ./orkestra.sh deploy --scope backend` is unaffected — the CLI dispatch path never enters the interactive menu.
+**Interactive TUI always shows the top-level profile menu** (runtime profile vs. full stack), even when `ENV` is set in the shell or in `docker/.env`. Auto-routing into the full-stack loop based on `$ENV` was removed because it hid the profile picker — e.g. with a running `full` stack and `ENV=staging`, the staging-project log lookup would report every container "stopped" because each compose file declares its own `name:` and the running containers live under `orkestra-full`. CLI usage like `ENV=development ./orkestra.sh deploy --scope backend` is unaffected — the CLI dispatch path never enters the interactive menu.
 
 ### Manual Docker Compose (Alternative)
 
@@ -262,28 +259,25 @@ docker compose -f docker-compose.prod.yml --env-file .env.production up -d
 
 ## Service Architecture
 
-### SKU profiles (`docker-compose.{starter,billing,ai,saas,enterprise}.yml`)
+### Runtime profiles (`docker-compose.{minimal,full}.yml`)
 
-**Pulls a pre-built backend image from GHCR; layers on `docker-compose.infra.yml`.** Recommended for first boot — no source build, no `dhi.io` registry access required.
+**Pulls the pre-built backend image from GHCR; layers on `docker-compose.infra.yml`.** Recommended for first boot — no source build, no `dhi.io` registry access required.
 
-| SKU | Addons compiled in |
+| Profile | Effect on first boot |
 | --- | --- |
-| `starter` | core only (no addons) |
-| `billing` | billing + documents + company |
-| `ai` | graph + aimodels + rag + agents + sales |
-| `saas` | subscriptions + payments + compliance + identity |
-| `enterprise` | every addon (alias of `:latest`) |
+| `minimal` | Core only, no addons pre-enabled. Operator turns each one on at `/admin/modules` |
+| `full` | Every non-dev addon pre-enabled |
 
-Each compose file pulls `ghcr.io/orkestra-cc/orkestra/backend:<sku>` and starts the backend on host port 3000. Toggle additional compiled-in addons at runtime via `/admin/modules`.
+Both compose files pull `ghcr.io/orkestra-cc/orkestra/backend:latest` and start the backend on host port 3000. The image is the same — they differ only by the `ORKESTRA_PROFILE` env var that seeds the `module_configs` document at first boot.
 
 ```bash
 cd docker
 docker network create orkestra-network                            # once, if it does not exist
 docker compose -f docker-compose.infra.yml up -d                  # MongoDB + Redis
-docker compose -f docker-compose.starter.yml --env-file .env up -d  # or billing / ai / saas / enterprise
+docker compose -f docker-compose.minimal.yml --env-file .env up -d  # or full
 ```
 
-All compiled-in addons are instantiated at boot regardless of enabled state — they sit idle until you toggle them on at `/admin/modules`. The registry auto-resolves transitive dependencies on enable.
+All addons are instantiated at boot regardless of enabled state — disabled ones sit idle until you toggle them on at `/admin/modules`. The registry auto-resolves transitive dependencies on enable.
 
 ### Infrastructure Services (`docker-compose.infra.yml`)
 
@@ -335,7 +329,7 @@ Containers declared by a backend module via `Module.InfraContainers()` — `orke
 
 Interactive (TUI) sessions confirm before reclaiming; CLI sessions (`./orkestra.sh deploy --yes`) reclaim automatically. **Operators should not run `docker rm` or `docker compose down` against Orkestra containers by hand** — `orkestra.sh stop` / `reset` / `deploy` are the supported entry points, and the reclaim path is what keeps successive deploys idempotent.
 
-**Migration from older setups**: users who ran hindsight from compose before this change will have an orphaned `orkestra-infra_orkestra-hindsight-data` volume. To salvage that data into the shared volume:
+**Migration from older setups**: users who ran the legacy SKU profiles (`starter` / `billing` / `ai` / `saas` / `enterprise`) should switch to `minimal` or `full` — the binary is the same, only the seed env var differs. Existing `module_configs` documents are preserved and authoritative; `ORKESTRA_PROFILE` only matters on a fresh install. Users who ran hindsight from compose before this change will have an orphaned `orkestra-infra_orkestra-hindsight-data` volume. To salvage that data into the shared volume:
 
 ```bash
 # 1. Disable agents at /admin/modules (unmounts orkestra-hindsight-data)
@@ -358,7 +352,7 @@ The dev/staging/prod compose files mount `/var/run/docker.sock` into the `orkest
 | Value | Effect |
 |-------|--------|
 | `true` (default in dev/staging/prod) | Backend uses the Docker SDK to manage declared containers |
-| `false` (default in SKU-profile composes) | Container control is a no-op; operators manage infra externally (Kubernetes, systemd, etc.) |
+| `false` (default in the `minimal` profile compose) | Container control is a no-op; operators manage infra externally (Kubernetes, systemd, etc.) |
 
 **Security**: mounting docker.sock gives the backend container effective root on the host. Acceptable on dev workstations; for production or shared hosts, front the socket with `tecnativa/docker-socket-proxy` restricted to `/containers/...` endpoints and point `DOCKER_HOST` at the proxy instead of the raw socket.
 
@@ -465,7 +459,7 @@ curl -i -H 'Host: example.com' http://localhost:3000/health
 Host ports vary per profile so multiple stacks can coexist on the same machine. Container-internal ports stay standard.
 
 ```
-SKU profile (docker-compose.infra.yml + docker-compose.<sku>.yml):
+Runtime profile (docker-compose.infra.yml + docker-compose.{minimal,full}.yml):
 3000  → backend:3000             # API server (image from GHCR)
 27027 → mongodb:27017            # Shared infra mongo
 6387  → redis:6379               # Shared infra redis

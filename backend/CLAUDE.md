@@ -20,20 +20,16 @@ ProvidedServices, RequiredServices, OptionalServices
 Enabled, Init, RegisterRoutes, Start, Stop, HealthCheck
 ```
 
-**Registration** (`cmd/server/catalog.go` + `catalog_<addon>.go`): core modules (user → notification → tenant → authz → auth → navigation → logging) are always loaded — they live in `catalog.go`. Each optional addon lives in its own `cmd/server/catalog_<addon>.go` file, gated by `//go:build !no_addons || addon_<name>`, and registers itself into `optionalModules` via `init()`. The default build (no tags) compiles every addon — same behavior as before. Pass `-tags "no_addons"` for a core-only "starter" binary, or `-tags "no_addons addon_billing addon_documents"` for a curated subset. All optional modules that are compiled in are always instantiated, initialized, and routed at boot — only enabled ones have `Start()` called. The admin API can enable/disable modules at runtime via `StartModule()`/`StopModule()` without restart. The registry topologically sorts by `Dependencies()` so producers init before consumers, auto-creates MongoDB collections with their declared indexes, seeds configs, collects nav items, and gates routes for disabled modules via `ModuleGate` middleware.
+**Registration** (`cmd/server/catalog.go` + `catalog_<addon>.go`): core modules (user → notification → tenant → authz → auth → navigation → logging) are always loaded — they live in `catalog.go`. Each optional addon lives in its own `cmd/server/catalog_<addon>.go` file and registers itself into `optionalModules` via `init()`. Every addon compiles into every binary; runtime enable/disable is owned by the `module_configs` collection edited at `/admin/modules`. All optional modules are always instantiated, initialized, and routed at boot — only enabled ones have `Start()` called. The admin API can enable/disable modules at runtime via `StartModule()`/`StopModule()` without restart. The registry topologically sorts by `Dependencies()` so producers init before consumers, auto-creates MongoDB collections with their declared indexes, seeds configs, collects nav items, and gates routes for disabled modules via `ModuleGate` middleware.
 
-**Profile builds** (Makefile + Dockerfile `BUILD_TAGS` arg): the canonical addon SKUs are defined in `backend/Makefile`. Build-tag sets are closed under module dependencies (see the `Dependencies()` declarations) — picking a profile that omits a transitive dependency fails loudly at boot via the registry's topo sort, not silently at request time.
+**Runtime profiles** (first-boot seed only): the `ORKESTRA_PROFILE` env var on a fresh install decides which addons start enabled. Subsequent boots ignore it; admin-set values in `module_configs` are authoritative.
 
-| Profile      | `make` target          | Tag set                                                                                  |
-| ------------ | ---------------------- | ---------------------------------------------------------------------------------------- |
-| starter      | `make build-starter`   | `no_addons`                                                                              |
-| minimal      | `make build-minimal`   | `no_addons addon_dev`                                                                    |
-| billing      | `make build-billing`   | `no_addons addon_billing addon_documents addon_company addon_dev`                        |
-| ai           | `make build-ai`        | `no_addons addon_graph addon_aimodels addon_rag addon_agents addon_sales addon_dev`      |
-| saas         | `make build-saas`      | `no_addons addon_subscriptions addon_payments addon_compliance addon_identity addon_dev` |
-| enterprise   | `make build`           | (no tags — every addon)                                                                  |
+| Profile | Effect on first boot | Compose file |
+| ------- | -------------------- | ------------ |
+| `minimal` | No addons pre-enabled — operator toggles each at `/admin/modules` | `docker/docker-compose.minimal.yml` |
+| `full` | Every non-core, non-dev addon pre-enabled | `docker/docker-compose.full.yml` |
 
-Container builds: `Dockerfile` accepts `--build-arg BUILD_TAGS="..."` (default empty = enterprise). CI builds every profile on each PR via the matrix in `.github/workflows/backend.yml` — that's how a missing tag in `catalog_<addon>.go` gets caught before merge. On push to `dev`/`main`, the same matrix publishes one image per profile to GHCR: `ghcr.io/<repo>/backend:<profile>` (rolling) and `:<profile>-<sha>` (pinned). `:latest` stays as an alias for `:enterprise` for backward compatibility.
+Container builds: `Dockerfile` produces a single image with every addon. CI builds once per push and publishes `ghcr.io/<repo>/backend:latest` and `ghcr.io/<repo>/backend:<sha>` — no profile matrix, no build tags.
 
 **Cross-module communication**: modules discover each other through the `ServiceRegistry` (typed key-value store). Consumer modules import interfaces from `pkg/sdk/iface/` — never import another module's `services/` or `repository/` package.
 
@@ -102,7 +98,7 @@ Each module follows: `module.go` → `handlers/` → `services/` → `repository
 ## Adding a New Module
 
 1. Create `internal/addons/yourmodule/module.go` implementing the `Module` interface
-2. Create `cmd/server/catalog_yourmodule.go` with build tag `//go:build !no_addons || addon_yourmodule`, a single `init()` that registers `optionalModules["yourmodule"] = func() module.Module { return yourmodule.NewModule() }` (the registry auto-sorts by `Dependencies()`)
+2. Create `cmd/server/catalog_yourmodule.go` with a single `init()` that registers `optionalModules["yourmodule"] = func() module.Module { return yourmodule.NewModule() }` (the registry auto-sorts by `Dependencies()`)
 3. Declare `Collections()` for auto-created MongoDB collections + indexes
 4. Declare `NavItems()` for sidebar entries (group, icon, path, minRole)
 5. Declare `ConfigSchema()` for admin-configurable fields
@@ -110,7 +106,7 @@ Each module follows: `module.go` → `handlers/` → `services/` → `repository
 7. Use `shared/iface` interfaces for cross-module deps — add new interfaces there if needed
 8. Use `deps.Services.Register(key, impl)` to expose services to other modules
 
-Users enable the module via the admin UI at `/admin/modules` (takes effect immediately, no restart needed). For first boot of a fresh install, the module's `ConfigSchema().EnvVar` fields seed the initial `module_configs` document from the host environment — see [docker/CLAUDE.md](../docker/CLAUDE.md) for the env-var-vs-admin-UI split. On first boot only, setting `ORKESTRA_PROFILE` (resolved by `shared/module/config_service.go::computeProfileOverride`) pre-enables the SKU's addons in the seeded document; the dev addon is excluded so it keeps its `!IsProduction()` gate.
+Users enable the module via the admin UI at `/admin/modules` (takes effect immediately, no restart needed). For first boot of a fresh install, the module's `ConfigSchema().EnvVar` fields seed the initial `module_configs` document from the host environment — see [docker/CLAUDE.md](../docker/CLAUDE.md) for the env-var-vs-admin-UI split. On first boot only, setting `ORKESTRA_PROFILE=full` (resolved by `pkg/sdk/module/config_service.go::computeProfileOverride`) pre-enables every non-dev addon in the seeded document; `ORKESTRA_PROFILE=minimal` leaves them all disabled. The dev addon is excluded from the `full` sentinel so it keeps its `!IsProduction()` gate.
 
 ## API Endpoints
 
@@ -186,15 +182,15 @@ docker compose -f docker-compose.dev.yml up -d
 docker compose logs -f orkestra-backend-dev
 ```
 
-**SKU profile stack (pre-built image from GHCR, no source build, no hot reload):**
+**Runtime profile stack (pre-built image from GHCR, no source build, no hot reload):**
 ```bash
 cd docker
 docker compose -f docker-compose.infra.yml up -d                       # MongoDB + Redis
-docker compose -f docker-compose.starter.yml --env-file .env up -d     # or billing / ai / saas / enterprise
-docker compose -f docker-compose.starter.yml logs -f backend
+docker compose -f docker-compose.minimal.yml --env-file .env up -d     # or full
+docker compose -f docker-compose.minimal.yml logs -f backend
 ```
 
-The five SKU compose files (`starter`/`billing`/`ai`/`saas`/`enterprise`) pull `ghcr.io/orkestra-cc/orkestra/backend:<sku>` and layer on `docker-compose.infra.yml`. They're the recommended path when you don't have `dhi.io` registry access or just want a smoke-test-ready backend; the `starter` SKU is the leanest (core modules only, no addons), with `enterprise` covering every addon.
+The two profile compose files (`minimal`/`full`) pull `ghcr.io/orkestra-cc/orkestra/backend:latest` and layer on `docker-compose.infra.yml`. They're the recommended path when you don't have `dhi.io` registry access or just want a smoke-test-ready backend. Both reference the same binary; `ORKESTRA_PROFILE` decides what's enabled on first boot.
 
 **WSL2 caveat**: AIR doesn't detect file changes on Windows mounts. Rebuild manually:
 ```bash
