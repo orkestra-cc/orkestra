@@ -29,13 +29,10 @@
 set -Eeuo pipefail
 IFS=$'\n\t'
 
-# This is the deploy-tooling version (printed in the TUI header), NOT
-# the Orkestra application version. The application version is computed
-# from the git tree near the bottom of the bootstrap block (after
-# SCRIPT_DIR is defined) and exported as `ORKESTRA_VERSION` so
-# docker-compose substitution picks it up — both frontend SPAs read it
-# via Vite's `define`.
-ORKESTRA_TUI_VERSION="1.0.0"
+# Application version (TUI header + every Vite SPA + the backend
+# `/health` response) is computed once below, after SCRIPT_DIR is
+# defined, and exported as `ORKESTRA_VERSION` so docker-compose
+# substitution picks it up.
 
 # ---------------------------------------------------------------------------
 # Capability detection
@@ -412,7 +409,7 @@ draw_status_line() {
     esac
 
     printf '%s%s Orkestra v%s%s   %s   %s\n' \
-        "$c_header" "$c_bold" "$ORKESTRA_TUI_VERSION" "$c_reset" \
+        "$c_header" "$c_bold" "$ORKESTRA_VERSION" "$c_reset" \
         "$profile_chip" "$docker_state"
 }
 
@@ -1973,7 +1970,7 @@ fullstack_menu_loop() {
 # ---------------------------------------------------------------------------
 
 show_version() {
-    printf '%sOrkestra Stack Manager%s v%s\n' "$c_bold" "$c_reset" "$ORKESTRA_TUI_VERSION"
+    printf '%sOrkestra Stack Manager%s v%s\n' "$c_bold" "$c_reset" "$ORKESTRA_VERSION"
     printf '%scapabilities:%s color=%s unicode=%s gum=%s fzf=%s tty=%s\n' \
         "$c_muted" "$c_reset" "$HAS_COLOR" "$HAS_UNICODE" "$HAS_GUM" "$HAS_FZF" "$HAS_TTY"
 }
