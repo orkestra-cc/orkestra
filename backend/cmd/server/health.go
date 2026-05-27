@@ -149,7 +149,7 @@ func registerHealthEndpoints(api huma.API, db *mongo.Database, redisClient *redi
 			}{
 				Status:  status,
 				Time:    time.Now().UTC().Format(time.RFC3339),
-				Version: "1.0.0",
+				Version: Version,
 				Checks:  checks,
 			},
 		}, nil

@@ -100,7 +100,11 @@ jobs:
           tags: |
             ghcr.io/${{ github.repository }}/frontend:${{ github.sha }}
             ghcr.io/${{ github.repository }}/frontend:latest
-          # No env-baking build-args here. window.__ORKESTRA_CONFIG__ is
-          # populated at container start from ORKESTRA_API_URL / ORKESTRA_WS_URL
-          # / ORKESTRA_ENV / ORKESTRA_DEBUG by the nginx entrypoint —
-          # see frontend-admin/Dockerfile and frontend-admin/public/config.js.
+          # window.__ORKESTRA_CONFIG__ (apiUrl/wsUrl/env/debug) is populated
+          # at *container start* from ORKESTRA_API_URL / ORKESTRA_WS_URL /
+          # ORKESTRA_ENV / ORKESTRA_DEBUG by the nginx entrypoint — see
+          # frontend-admin/Dockerfile + frontend-admin/public/config.js. The
+          # only thing baked here is the application version, read by
+          # Vite's `define` and surfaced in the SPA footer + /health.
+          build-args: |
+            ORKESTRA_VERSION=${{ github.ref_type == 'tag' && github.ref_name || github.sha }}

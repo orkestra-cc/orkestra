@@ -47,3 +47,7 @@ interface ImportMetaEnv {
 interface ImportMeta {
   readonly env: ImportMetaEnv;
 }
+
+// Injected by vite.config.js `define`. Derived from the git tag at
+// build time so the footer always matches the released artefact.
+declare const __APP_VERSION__: string;

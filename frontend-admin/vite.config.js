@@ -1,4 +1,5 @@
 import { defineConfig, loadEnv } from 'vite';
+import { execSync } from 'node:child_process';
 import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -7,6 +8,34 @@ import compileSCSS from './compile-scss';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// Single source of truth for the runtime version: the git tag.
+// Priority:
+//   1. GITHUB_REF_NAME (set by GitHub Actions when the workflow ran
+//      from a tag push — strips the leading `v`).
+//   2. ORKESTRA_VERSION (manual override for ad-hoc builds).
+//   3. `git describe --tags --always --dirty` (local dev).
+//   4. "dev" fallback for environments without git (shallow clones,
+//      tarball installs).
+// The footer (`src/config.ts` → `Footer.tsx`) renders whatever this
+// resolves to; package.json#version is intentionally not consulted.
+const resolveAppVersion = () => {
+  const ref = process.env.GITHUB_REF_NAME;
+  if (ref && /^v\d/.test(ref)) return ref.replace(/^v/, '');
+  if (process.env.ORKESTRA_VERSION) return process.env.ORKESTRA_VERSION;
+  try {
+    return execSync('git describe --tags --always --dirty', {
+      stdio: ['ignore', 'pipe', 'ignore'],
+      cwd: __dirname
+    })
+      .toString()
+      .trim()
+      .replace(/^v/, '');
+  } catch {
+    return 'dev';
+  }
+};
+const APP_VERSION = resolveAppVersion();
 
 // LAN liveness probe for HAProxy / k8s. Vite's `server.middlewares` is
 // not a valid config key (the inline middleware that used to live there
@@ -25,7 +54,7 @@ const healthCheckPlugin = () => {
           status: 'healthy',
           service: 'orkestra-frontend',
           timestamp: new Date().toISOString(),
-          version: '0.3.0'
+          version: APP_VERSION
         })
       );
       return;
@@ -167,7 +196,8 @@ export default ({ mode }) => {
       }
     },
     define: {
-      global: 'window'
+      global: 'window',
+      __APP_VERSION__: JSON.stringify(APP_VERSION)
     },
     server: {
       // Pre-transform frequently visited pages on dev server start so the

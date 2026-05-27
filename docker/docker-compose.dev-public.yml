@@ -166,6 +166,9 @@ services:
       VITE_API_URL: ${VITE_API_URL:-http://localhost:3000}
       VITE_BACKEND_URL: ${VITE_BACKEND_URL:-http://localhost:3000}
       VITE_WS_URL: ${VITE_WS_URL:-ws://localhost:3000}
+      # See docker-compose.dev.yml for rationale — host-computed app
+      # version that Vite's `define` reads via process.env.
+      ORKESTRA_VERSION: ${ORKESTRA_VERSION:-dev}
       NODE_OPTIONS: "--max-old-space-size=4096"
     volumes:
       - ../frontend-admin:/app
@@ -207,6 +210,7 @@ services:
       VITE_API_BASE: ${VITE_CLIENT_API_BASE:-http://api.localhost:3000}
       VITE_STRIPE_PUBLISHABLE_KEY: ${VITE_STRIPE_PUBLISHABLE_KEY:-}
       VITE_ALLOWED_HOSTS: ${VITE_CLIENT_ALLOWED_HOSTS:-client.localhost}
+      ORKESTRA_VERSION: ${ORKESTRA_VERSION:-dev}
       NODE_OPTIONS: "--max-old-space-size=4096"
     volumes:
       - ../frontend-client:/app

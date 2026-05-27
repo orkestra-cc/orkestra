@@ -6,7 +6,12 @@ tmp_dir = "tmp"
   args_bin = []
   bin = "./tmp/main"
   cmd = "go build -o ./tmp/main ./cmd/server/"
-  delay = 1000
+  # delay is the debounce window AIR waits after a file change before
+  # kicking off a build. With multiple-file saves the link step (~3s for
+  # this binary) can be cancelled mid-write, leaving a truncated tmp/main
+  # that segfaults on the next run. 2500ms safely coalesces editor-save
+  # bursts and a Ctrl-S → ESLint-autofix double-write into one build.
+  delay = 2500
   exclude_dir = ["assets", "tmp", "vendor", "testdata", "docs"]
   exclude_file = []
   exclude_regex = ["_test.go"]

@@ -21,12 +21,15 @@ import (
 // TestEveryConstSnapshotted fails if a new const is added without a
 // matching row here (so a forgotten snapshot blocks the PR).
 var goldenCodes = map[string]string{
-	"AuthEmailInUse":                 "auth.email_in_use",
-	"MarketingCardCodeCollision":     "marketing.card_code_collision",
-	"MarketingCardInvalidTransition": "marketing.card_invalid_transition",
-	"UserSelfDeleteForbidden":        "user.self_delete_forbidden",
-	"UserLastAdminForbidden":         "user.last_admin_forbidden",
-	"UserRoleEscalationForbidden":    "user.role_escalation_forbidden",
+	"AuthEmailInUse":                   "auth.email_in_use",
+	"MarketingCardCodeCollision":       "marketing.card_code_collision",
+	"MarketingCardInvalidTransition":   "marketing.card_invalid_transition",
+	"NavigationOverrideUnknownParent":  "navigation.override_unknown_parent",
+	"NavigationOverrideChildNotFound":  "navigation.override_child_not_found",
+	"NavigationOverrideDuplicateChild": "navigation.override_duplicate_child",
+	"UserSelfDeleteForbidden":          "user.self_delete_forbidden",
+	"UserLastAdminForbidden":           "user.last_admin_forbidden",
+	"UserRoleEscalationForbidden":      "user.role_escalation_forbidden",
 }
 
 // TestCodesMatchGoldenSnapshot asserts every snapshotted code resolves

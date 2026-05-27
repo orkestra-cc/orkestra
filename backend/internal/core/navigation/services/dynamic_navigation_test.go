@@ -55,7 +55,7 @@ func TestTierFilter_InternalOnlyHiddenFromExternal(t *testing.T) {
 		{Realm: realmPlatform, Section: "Admin", Tier: iface.TenantKindInternal, Name: "Users", Path: "/admin/users", Active: true},
 		{Realm: realmShared, Section: "Tools", Name: "Knowledge Base", Path: "/kb", Active: true},
 	}
-	svc := NewDynamicNavigationService(items, nil)
+	svc := NewDynamicNavigationService(items, nil, nil)
 
 	ctx := withTenantKind(context.Background(), iface.TenantKindExternal)
 	resp, err := svc.GetNavigationForUser(ctx, "administrator")
@@ -92,7 +92,7 @@ func TestTierFilter_ExternalOnlyHiddenFromInternal(t *testing.T) {
 	items := []module.NavItemSpec{
 		{Realm: realmBusiness, Section: "Portal", Tier: iface.TenantKindExternal, Name: "My Subscription", Path: "/my/sub", Active: true},
 	}
-	svc := NewDynamicNavigationService(items, nil)
+	svc := NewDynamicNavigationService(items, nil, nil)
 
 	ctx := withTenantKind(context.Background(), iface.TenantKindInternal)
 	resp, _ := svc.GetNavigationForUser(ctx, "administrator")
@@ -110,7 +110,7 @@ func TestTierFilter_EmptyTierVisibleToAll(t *testing.T) {
 	items := []module.NavItemSpec{
 		{Realm: realmShared, Section: "Tools", Name: "Calendar", Path: "/cal", Active: true},
 	}
-	svc := NewDynamicNavigationService(items, nil)
+	svc := NewDynamicNavigationService(items, nil, nil)
 
 	for _, kind := range []string{iface.TenantKindInternal, iface.TenantKindExternal, ""} {
 		ctx := withTenantKind(context.Background(), kind)
@@ -134,7 +134,7 @@ func TestMinRoleFilter(t *testing.T) {
 		{Realm: realmPlatform, Section: "Admin", MinRole: "administrator", Name: "Modules", Path: "/admin/modules", Active: true},
 		{Realm: realmPersonal, Section: "My workspace", Name: "Dashboard", Path: "/user/dashboard", Active: true},
 	}
-	svc := NewDynamicNavigationService(items, nil)
+	svc := NewDynamicNavigationService(items, nil, nil)
 
 	cases := []struct {
 		role       string
@@ -169,7 +169,7 @@ func TestModuleDisabled_HidesItem(t *testing.T) {
 		{Realm: realmShared, Section: "Tools", ModuleName: "rag", Name: "Knowledge Base", Path: "/kb", Active: true},
 	}
 	checker := &stubEnabled{disabled: map[string]bool{"billing": true}}
-	svc := NewDynamicNavigationService(items, checker)
+	svc := NewDynamicNavigationService(items, checker, nil)
 
 	resp, _ := svc.GetNavigationForUser(context.Background(), "administrator")
 	for _, r := range resp.Realms {
@@ -201,7 +201,7 @@ func TestRealms_CanonicalOrder(t *testing.T) {
 		{Realm: realmPlatform, Section: "Admin", Name: "Users", Path: "/admin/users", Active: true},
 		{Realm: realmPersonal, Section: "My workspace", Name: "Dashboard", Path: "/user/dashboard", Active: true},
 	}
-	svc := NewDynamicNavigationService(items, nil)
+	svc := NewDynamicNavigationService(items, nil, nil)
 
 	resp, _ := svc.GetNavigationForUser(context.Background(), "administrator")
 	got := collectRealmKeys(resp.Realms)
@@ -220,7 +220,7 @@ func TestRealms_LabelsCanonicalized(t *testing.T) {
 	items := []module.NavItemSpec{
 		{Realm: realmPlatform, Section: "Admin", Name: "Users", Path: "/admin/users", Active: true},
 	}
-	svc := NewDynamicNavigationService(items, nil)
+	svc := NewDynamicNavigationService(items, nil, nil)
 
 	resp, _ := svc.GetNavigationForUser(context.Background(), "administrator")
 	if resp.Realms[0].Key != realmPlatform {
@@ -235,7 +235,7 @@ func TestRealms_EmptyRealmFallsBackToShared(t *testing.T) {
 	items := []module.NavItemSpec{
 		{Section: "Tools", Name: "Company", Path: "/company", Active: true}, // no Realm
 	}
-	svc := NewDynamicNavigationService(items, nil)
+	svc := NewDynamicNavigationService(items, nil, nil)
 
 	resp, _ := svc.GetNavigationForUser(context.Background(), "administrator")
 	if len(resp.Realms) != 1 {
@@ -251,7 +251,7 @@ func TestLegacyV1GroupsStillEmitted(t *testing.T) {
 	items := []module.NavItemSpec{
 		{Group: "Administration", Name: "Fatturazione", Path: "/billing", Active: true},
 	}
-	svc := NewDynamicNavigationService(items, nil)
+	svc := NewDynamicNavigationService(items, nil, nil)
 
 	resp, _ := svc.GetNavigationForUser(context.Background(), "administrator")
 	if len(resp.Groups) != 1 || resp.Groups[0].Label != "Administration" {
@@ -280,7 +280,7 @@ func TestParentWithNoLinkAndNoVisibleChildrenCollapses(t *testing.T) {
 			},
 		},
 	}
-	svc := NewDynamicNavigationService(items, nil)
+	svc := NewDynamicNavigationService(items, nil, nil)
 
 	ctx := withTenantKind(context.Background(), iface.TenantKindInternal)
 	resp, _ := svc.GetNavigationForUser(ctx, "administrator")
@@ -299,7 +299,7 @@ func TestParentWithNoLinkAndNoVisibleChildrenCollapses(t *testing.T) {
 // where an empty registry (no module declared NavItems) caused a nil deref in
 // the realm builder. The response must still be non-nil with empty slices.
 func TestEmptyNavItems_ReturnsEmptyResponseWithoutPanic(t *testing.T) {
-	svc := NewDynamicNavigationService(nil, nil)
+	svc := NewDynamicNavigationService(nil, nil, nil)
 
 	resp, err := svc.GetNavigationForUser(context.Background(), "administrator")
 	if err != nil {
@@ -334,7 +334,7 @@ func TestIconAndActiveForwarded(t *testing.T) {
 			Active: false,
 		},
 	}
-	svc := NewDynamicNavigationService(items, nil)
+	svc := NewDynamicNavigationService(items, nil, nil)
 
 	resp, _ := svc.GetNavigationForUser(context.Background(), "administrator")
 	var inbox, archive *models.NavItem
@@ -374,7 +374,7 @@ func TestSectionsPreserveDiscoveryOrderWithinRealm(t *testing.T) {
 		{Realm: realmPlatform, Section: "Alpha", Name: "A1", Path: "/a1", Active: true},
 		{Realm: realmPlatform, Section: "Mu", Name: "M1", Path: "/m1", Active: true},
 	}
-	svc := NewDynamicNavigationService(items, nil)
+	svc := NewDynamicNavigationService(items, nil, nil)
 
 	resp, _ := svc.GetNavigationForUser(context.Background(), "administrator")
 	if len(resp.Realms) != 1 {
@@ -405,7 +405,7 @@ func TestParentWithPathSurvivesAllChildrenFiltered(t *testing.T) {
 			},
 		},
 	}
-	svc := NewDynamicNavigationService(items, nil)
+	svc := NewDynamicNavigationService(items, nil, nil)
 
 	ctx := withTenantKind(context.Background(), iface.TenantKindInternal)
 	resp, _ := svc.GetNavigationForUser(ctx, "administrator")
@@ -434,7 +434,7 @@ func TestEmptyRoleStillFiltersByMinRole(t *testing.T) {
 		{Realm: realmPlatform, Section: "Admin", MinRole: "guest", Name: "PublicHelp", Path: "/help", Active: true},
 		{Realm: realmPlatform, Section: "Admin", MinRole: "administrator", Name: "Secret", Path: "/secret", Active: true},
 	}
-	svc := NewDynamicNavigationService(items, nil)
+	svc := NewDynamicNavigationService(items, nil, nil)
 
 	resp, _ := svc.GetNavigationForUser(context.Background(), "")
 	var sawSecret, sawHelp bool
@@ -465,7 +465,7 @@ func TestUnknownRealmAppendsAfterCanonicalOrder(t *testing.T) {
 		{Realm: realmPlatform, Section: "Admin", Name: "Users", Path: "/admin/users", Active: true},
 		{Realm: "experimental", Section: "Lab", Name: "Beta", Path: "/beta", Active: true},
 	}
-	svc := NewDynamicNavigationService(items, nil)
+	svc := NewDynamicNavigationService(items, nil, nil)
 
 	resp, _ := svc.GetNavigationForUser(context.Background(), "administrator")
 	keys := collectRealmKeys(resp.Realms)
@@ -481,7 +481,7 @@ func TestCacheKey_IncludesTenantKind(t *testing.T) {
 	items := []module.NavItemSpec{
 		{Realm: realmShared, Section: "Tools", Name: "Calendar", Path: "/cal", Active: true},
 	}
-	svc := NewDynamicNavigationService(items, nil)
+	svc := NewDynamicNavigationService(items, nil, nil)
 
 	internal, _ := svc.GetNavigationForUser(withTenantKind(context.Background(), iface.TenantKindInternal), "administrator")
 	external, _ := svc.GetNavigationForUser(withTenantKind(context.Background(), iface.TenantKindExternal), "administrator")

@@ -26,7 +26,7 @@ The registry walks this DAG, constructs each module, auto-creates its MongoDB co
 | **tenant** | Organizations, per-user memberships, plan-based feature entitlements | [tenant/CLAUDE.md](tenant/CLAUDE.md) |
 | **authz** | Permission catalog, roles (system + custom), role bindings, evaluator with Redis cache | [authz/CLAUDE.md](authz/CLAUDE.md) |
 | **auth** | Email/password + OAuth 2.1, JWT issuance, sessions-per-device, refresh rotation | [auth/CLAUDE.md](auth/CLAUDE.md) |
-| **navigation** | Role-filtered sidebar menu aggregated from every module's `NavItems()` | [navigation/CLAUDE.md](navigation/CLAUDE.md) |
+| **navigation** | Role-filtered sidebar aggregated from every module's `NavItems()` + persisted ordering overrides via `/admin/modules/navigation` | [navigation/CLAUDE.md](navigation/CLAUDE.md) |
 | **logging** | Runtime log-level admin (ADR-0005 Phase F): atomic-snapshot `LevelResolver` swap behind `PerModuleLevelHandler` | [logging/CLAUDE.md](logging/CLAUDE.md) |
 
 ## Dependency graph

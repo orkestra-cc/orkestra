@@ -63,3 +63,61 @@ type NavigationResponse struct {
 	CacheKey   string       `json:"cacheKey" doc:"Cache invalidation key"`
 	ExpiresIn  int          `json:"expiresIn" doc:"Cache TTL in seconds"`
 }
+
+// AdminNavItem is the unfiltered, metadata-rich projection of a single
+// NavItemSpec the admin console renders at /admin/modules/navigation.
+// Unlike NavItem (the public sidebar DTO), the admin view exposes every
+// classification field — MinRole, Tier, ModuleName, ModuleEnabled — so
+// operators can audit visibility and reorder items.
+type AdminNavItem struct {
+	ItemKey        string         `json:"itemKey" doc:"Stable identifier; persisted overrides reference this"`
+	Name           string         `json:"name" doc:"Display name"`
+	Path           string         `json:"path,omitempty" doc:"Route the item navigates to"`
+	Icon           string         `json:"icon,omitempty" doc:"Icon identifier"`
+	ModuleName     string         `json:"moduleName" doc:"Owning module"`
+	ModuleEnabled  bool           `json:"moduleEnabled" doc:"Whether the owning module is enabled right now"`
+	Realm          string         `json:"realm,omitempty"`
+	Section        string         `json:"section,omitempty"`
+	Group          string         `json:"group,omitempty" doc:"Legacy v1 group label"`
+	Tier           string         `json:"tier,omitempty" doc:"internal | external | '' (both)"`
+	MinRole        string         `json:"minRole,omitempty" doc:"Lowest system role that sees this item"`
+	Active         bool           `json:"active"`
+	DeclaredOrder  int            `json:"declaredOrder" doc:"Sibling index as declared in the module's NavItems()"`
+	EffectiveOrder int            `json:"effectiveOrder" doc:"Sibling index after applying persisted overrides"`
+	Overridden     bool           `json:"overridden" doc:"True when EffectiveOrder differs from DeclaredOrder"`
+	Children       []AdminNavItem `json:"children,omitempty"`
+}
+
+// AdminNavSection groups items under a section label inside a realm. Mirrors
+// NavSection but carries AdminNavItem.
+type AdminNavSection struct {
+	Label string         `json:"label"`
+	Items []AdminNavItem `json:"items"`
+}
+
+// AdminNavRealm groups sections under a canonical realm key. Mirrors
+// NavRealm but carries AdminNavSection.
+type AdminNavRealm struct {
+	Key      string            `json:"key"`
+	Label    string            `json:"label"`
+	Sections []AdminNavSection `json:"sections"`
+}
+
+// AdminNavigationResponse is what GET /v1/admin/navigation returns. The
+// tree is unfiltered — every item every module declared, regardless of the
+// caller's role or tenant kind. Roles + TenantKinds are echoed so the
+// admin UI can render the visibility matrix without hardcoding them.
+type AdminNavigationResponse struct {
+	Realms      []AdminNavRealm `json:"realms" doc:"Full unfiltered nav tree grouped by realm → section"`
+	Roles       []string        `json:"roles" doc:"System role hierarchy, highest privilege first"`
+	TenantKinds []string        `json:"tenantKinds" doc:"Tenant-kind values used by Tier filtering"`
+	// RealmsParentKey is the synthetic parentKey clients pass to PATCH
+	// /v1/admin/navigation/order to reorder the realm cards themselves.
+	// Constant ("__realms__") but echoed so the frontend doesn't have to
+	// hardcode it.
+	RealmsParentKey string `json:"realmsParentKey" doc:"Synthetic parentKey for reordering the realm cards"`
+	// RealmsOverridden is true when the emitted realms slice differs from
+	// the canonical (personal → platform → business → shared) order. Drives
+	// the "Reset realm order" affordance in the admin UI.
+	RealmsOverridden bool `json:"realmsOverridden" doc:"True when a persisted override changed the realm order"`
+}

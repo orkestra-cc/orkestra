@@ -49,6 +49,13 @@ ENV=development ./orkestra.sh deploy --scope backend --rebuild --yes
 
 `orkestra.sh` handles every docker compose operation for both the SKU profiles (`docker-compose.{starter,billing,ai,saas,enterprise}.yml`) and the full-stack dev/staging/prod profiles (`docker-compose.infra.yml` + `docker-compose.{dev,staging,prod}.yml`). See [docker/CLAUDE.md](../docker/CLAUDE.md) for compose-file details.
 
+### Top-level operational scripts (project root)
+
+Alongside `orkestra.sh` at the repo root:
+
+- **backup.sh** — TUI/CLI tool that bundles every stateful surface (`mongodb`, `redis`, `rustfs`, `memgraph`, `secrets`) into a single tarball under `./backups/`. Scopes `mongodump` to `$MONGO_DATABASE` (default `orkestra`) so the `orkestra_openapi_dump` sandbox DB from `make openapi-dump` is not captured. Run `./backup.sh --help` for flags.
+- **restore.sh** — reverses a bundle produced by `backup.sh`. Reads the archive's `manifest.json` to know which components are available; supports `--dry-run` to preflight the entire restore (uses `mongorestore --dryRun` and `aws s3 sync --dryrun` internally) without mutating any container. Documented in [docs/site/operating/backup-and-restore.mdx](../docs/site/operating/backup-and-restore.mdx).
+
 ### 🚫 Removed / Consolidated Scripts
 
 The following scripts used to exist and have been folded into `./orkestra.sh`:

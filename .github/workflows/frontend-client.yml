@@ -64,3 +64,8 @@ jobs:
           tags: |
             ghcr.io/${{ github.repository }}/frontend-client:${{ github.sha }}
             ghcr.io/${{ github.repository }}/frontend-client:latest
+          # Baked into the JS bundle by Vite's `define` — the only thing
+          # this image needs at build time. Tag pushes bake the semver
+          # (`v0.1.4`); branch pushes bake the commit sha.
+          build-args: |
+            ORKESTRA_VERSION=${{ github.ref_type == 'tag' && github.ref_name || github.sha }}

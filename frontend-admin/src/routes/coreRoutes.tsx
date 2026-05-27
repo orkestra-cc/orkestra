@@ -32,6 +32,7 @@ const SetupWizard = lazy(() => import('pages/setup/SetupWizard'));
 const UserManagement = lazy(() => import('pages/admin/users'));
 const ModuleManagement = lazy(() => import('pages/admin/modules'));
 const ModuleDetail = lazy(() => import('pages/admin/modules/detail'));
+const NavigationAdminPage = lazy(() => import('pages/admin/navigation'));
 // ADR-0005 Phase F — observability admin page (runtime log-level mutation).
 const LogLevelsPage = lazy(
   () => import('pages/admin/observability/log-levels')
@@ -140,6 +141,21 @@ export function buildCoreRoutes(
                         fallback={<OrkestraLoader />}
                       >
                         <ModuleManagement />
+                      </Suspense>
+                    </ProtectedRoute>
+                  )
+                },
+                {
+                  path: 'modules/navigation',
+                  element: (
+                    <ProtectedRoute
+                      requiredPermissions={[['super_admin', 'administrator']]}
+                    >
+                      <Suspense
+                        key="admin-modules-navigation"
+                        fallback={<OrkestraLoader />}
+                      >
+                        <NavigationAdminPage />
                       </Suspense>
                     </ProtectedRoute>
                   )

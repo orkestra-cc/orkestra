@@ -117,6 +117,7 @@ Keep this split when touching `.env*` or `docker-compose.*.yml`:
 | `ORKESTRA_PROFILE` (starter / billing / ai / saas / enterprise) — pre-enables the SKU's addons on first boot only; subsequent boots use the `module_configs` document | process — first-boot seeder | ✅ yes |
 | `SALES_*`, `RAG_CHUNK_*` | process — runtime knobs not yet migrated to ConfigSchema | ✅ yes (transitional) |
 | `MARKETING_IMPORT_SPOOL_DIR` | process — first-boot seed for the marketing module's `importSpoolDir`. Dev/staging compose override it to `/app/marketing-spool`, bind-mounted from `docker/marketing-spool-{dev,staging}/` on the host (gitignored). Schema default `/var/lib/orkestra/marketing/spool` is unwritable by the non-root container user. Bind mount (not named volume) so host uid 1000 ownership carries through under `userns_mode: "host"` — a named volume gets created as root and would re-break the worker on every recreate. For an existing install change the value at `/admin/modules/marketing` — `module_configs` is authoritative once seeded. | ✅ yes |
+| `ORKESTRA_VERSION` | process — application version surfaced in the SPA footer (frontend-admin + frontend-client) and embedded in the dev `/health` JSON. `orkestra.sh` auto-exports this from `git describe --tags --always --dirty`, and docker-compose substitutes it into both frontend `environment:` blocks (dev/staging dev-server) and the `args:` block in `docker-compose.prod.yml` (production image build). CI overrides it with `--build-arg ORKESTRA_VERSION=${{ github.ref_name }}` on tag pushes. The container has no git binary and no `.git`, so this host-side env var is the only path that delivers a real version — without it the SPA falls back to `"dev"`. | ✅ yes |
 | `STORAGE_ENDPOINT` / `STORAGE_REGION` / `STORAGE_BUCKET` / `STORAGE_ACCESS_KEY` / `STORAGE_SECRET_KEY` / `STORAGE_FORCE_PATH_STYLE` / `STORAGE_ENSURE_BUCKET` | process — S3-compatible object storage consumed by `internal/shared/blob` for user-uploaded avatar blobs. Process-scoped because rotating credentials at runtime would invalidate every in-flight presigned URL. Defaults target the `rustfs` service in `docker-compose.infra.yml`. **Endpoint must be browser-reachable** for upload PUTs to succeed — see the RustFS gotcha note in the Infrastructure Services section. | ✅ yes |
 | OAuth provider credentials (`OAUTH_GOOGLE/APPLE/GITHUB/DISCORD_*`) | ConfigService (auth module) | ❌ admin UI |
 | OpenAPI billing / company credentials (`OPENAPI_BILLING_*`, `OPENAPI_COMPANY_*`, `OPENAPI_OAUTH_BASE_URL`, `OPENAPI_SANDBOX_MODE`, `BILLING_WEBHOOK_*`) — `accountEmail` + `apiKey` for the shared OAuth minter, or legacy static `bearerToken` | ConfigService (billing, company modules) | ❌ admin UI |
@@ -322,6 +323,17 @@ Containers declared by a backend module via `Module.InfraContainers()` — `orke
 **Shared volumes**: `orkestra-memgraph-data` and `orkestra-hindsight-data` in `docker-compose.infra.yml` are declared with explicit `name:` directives so they are **not** project-prefixed. Both the backend (when it creates the container at module enable time) and the compose `manual-only` profile reference the exact same Docker volume, so data persists across whichever path started the container first.
 
 **Health probes**: the container manager supports two readiness modes — HTTP GET (`InfraHealthCheck.HTTPPath`, used by hindsight against `/health`) and raw TCP dial (`InfraHealthCheck.TCPPort`, used by memgraph against Bolt port 7687). Pick TCP for services whose native protocol isn't HTTP.
+
+### Orphan-container reclaim (orkestra.sh)
+
+`docker compose up -d` fails with a raw "container name is already in use" error when an existing container has the right `container_name:` but is labelled with a different `com.docker.compose.project` (typical leftover from switching SKU profiles — e.g. running `enterprise` and then trying to bring up `infra` standalone). To prevent the failure, `orkestra.sh` runs a pre-flight reclaim step before every `up -d`:
+
+- Parses each compose file's `name:` and `container_name:` entries.
+- For each declared container that already exists, compares its `com.docker.compose.project` label to the expected project name.
+- Mismatches → stop + `docker rm -f`. Named volumes are never touched, so data persists.
+- Backend-managed containers (`orkestra.managed=true` — Memgraph, Hindsight) are skipped: stop those by disabling the owning module at `/admin/modules`, never via `docker rm`.
+
+Interactive (TUI) sessions confirm before reclaiming; CLI sessions (`./orkestra.sh deploy --yes`) reclaim automatically. **Operators should not run `docker rm` or `docker compose down` against Orkestra containers by hand** — `orkestra.sh stop` / `reset` / `deploy` are the supported entry points, and the reclaim path is what keeps successive deploys idempotent.
 
 **Migration from older setups**: users who ran hindsight from compose before this change will have an orphaned `orkestra-infra_orkestra-hindsight-data` volume. To salvage that data into the shared volume:
 

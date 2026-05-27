@@ -139,6 +139,8 @@ This means:
 
 **Dev-only exception — Developer realm.** When `import.meta.env.DEV` is true (or `VITE_ENABLE_REFERENCE` is set), `NavbarVertical` appends a hardcoded `Developer` realm from `src/reference/navigation/referenceRoutes.ts` (`developerRealm` export) pointing at the dev-only `/reference/*` routes registered by `src/routes/referenceRoutes.tsx`. The gate matches the one on the routes themselves, so nav and routes stay in lockstep. This is the **only** place sidebar entries are hardcoded in the frontend — do not extend the pattern to production features.
 
+**Operator reorder.** `/admin/modules/navigation` (admin-only) renders the full unfiltered tree from `GET /v1/admin/navigation` and lets operators drag-to-reorder items within a parent, sections within a realm, and realm cards themselves. Persisted overrides are PATCHed back per-parent; mutations invalidate both the `NavigationAdmin` and the public `Navigation` RTK Query tags so the live sidebar reflects the new order without a page refresh. See [backend navigation docs](../backend/internal/core/navigation/CLAUDE.md) for the override semantics + self-heal behaviour.
+
 ## How data fetching works
 
 All server state goes through **RTK Query**, not React Query / TanStack Query. Each backend module gets its own slice in `src/store/api/`:
@@ -149,6 +151,7 @@ src/store/api/
 ├── authApi.ts          # core: auth endpoints
 ├── userApi.ts          # core: user endpoints
 ├── navigationApi.ts    # core: /v1/navigation
+├── navigationAdminApi.ts # admin: /v1/admin/navigation tree + ordering overrides
 ├── billingApi.ts       # addon
 ├── companyApi.ts       # addon
 ├── salesApi.ts         # addon
@@ -273,6 +276,19 @@ Who writes `public/config.js` at runtime:
 | CI `npm run build`                             | The Dockerfile's `RUN cp -n public/config.example.js public/config.js` seeds the build context so `dist/config.js` always exists. The runtime entrypoint overwrites it on container start. |
 
 Adding a new field: declare it on `RuntimeConfig` in `src/config/environment.ts`, read it via the `config` singleton, and add the env-var fallback in **all three** generators (dev compose, staging compose, nginx entrypoint). Never reach for `import.meta.env.VITE_*` from new code — those bake at build time and defeat the point.
+
+## Application version
+
+The version string rendered in the footer (`src/components/footer/Footer.tsx` reads it from `src/config.ts`) and embedded in the dev-server `/health` response is derived from the git tag, not `package.json#version`. The chain:
+
+1. `vite.config.js` calls `resolveAppVersion()` at config-evaluation time.
+2. It tries `GITHUB_REF_NAME` (set by CI on tag pushes) → `ORKESTRA_VERSION` (host-side override) → `git describe --tags --always --dirty` → `"dev"` fallback.
+3. The resolved value is injected as `__APP_VERSION__` via Vite's `define` — esbuild does a textual identifier substitution at build/dev-serve time.
+4. `src/config.ts` reads `__APP_VERSION__` through a `typeof` guard, so a misconfigured build degrades to `"dev"` in the footer instead of crashing the SPA.
+
+`package.json#version` is kept in lockstep cosmetically by the release workflow but is **not** consulted at runtime — never trust it for what's actually deployed.
+
+**Containerised runs**: dev/staging/prod containers have no git binary and no `.git` mounted, so the host-side `ORKESTRA_VERSION` env var (or `--build-arg` on the production builder) is the only path. `orkestra.sh` auto-exports it from `git describe` on every invocation; CI passes `--build-arg ORKESTRA_VERSION=${{ github.ref_name }}` on tag pushes. See `docker/CLAUDE.md` for the env-var-flow table.
 
 ## Internationalization (i18n)
 

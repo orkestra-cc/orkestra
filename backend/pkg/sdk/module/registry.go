@@ -169,12 +169,13 @@ func (r *ModuleRegistry) InitAll(deps *Dependencies) error {
 	}
 
 	// Collect ALL NavItems from ALL modules (not just enabled) upfront.
-	// Stamp each item with its owning module name for enabled filtering at request time.
+	// Stamp each item with its owning module name (for enabled filtering at
+	// request time) and with a default ItemKey when the module didn't set one
+	// (so persisted ordering/visibility overrides have a stable handle).
 	var allNavItems []NavItemSpec
 	for _, m := range r.modules {
 		for _, item := range NavItemsOf(m) {
-			item.ModuleName = m.Name()
-			stampChildren(item.Children, m.Name())
+			stampNavItem(&item, m.Name(), "")
 			allNavItems = append(allNavItems, item)
 		}
 	}
@@ -825,12 +826,69 @@ func buildIndexModels(specs []IndexSpec) []mongo.IndexModel {
 	return models
 }
 
-// stampChildren recursively sets ModuleName on child NavItemSpecs.
-func stampChildren(children []NavItemSpec, moduleName string) {
-	for i := range children {
-		children[i].ModuleName = moduleName
-		stampChildren(children[i].Children, moduleName)
+// stampNavItem fills ModuleName + ItemKey on item and its descendants. The
+// owning module name is forced everywhere (it is registry-controlled). The
+// ItemKey is only filled when the module left it empty, so modules can pin a
+// stable key by setting it explicitly. The default key is
+// "<moduleName>.<slug(name)>" for top-level items and
+// "<parentKey>.<slug(name)>" for children — deterministic across boots.
+func stampNavItem(item *NavItemSpec, moduleName, parentKey string) {
+	item.ModuleName = moduleName
+	if item.ItemKey == "" {
+		item.ItemKey = defaultNavItemKey(moduleName, parentKey, item.Name)
 	}
+	for i := range item.Children {
+		stampNavItem(&item.Children[i], moduleName, item.ItemKey)
+	}
+}
+
+// defaultNavItemKey computes the fallback ItemKey for a NavItemSpec that did
+// not declare one. The shape is "<owner>.<slug(name)>" at the root and
+// "<parentKey>.<slug(name)>" for nested items. Two siblings with the same
+// Name collide deliberately — a module that wants stability across renames
+// is expected to set ItemKey itself.
+func defaultNavItemKey(moduleName, parentKey, name string) string {
+	slug := slugifyNavName(name)
+	if slug == "" {
+		slug = "item"
+	}
+	prefix := parentKey
+	if prefix == "" {
+		prefix = moduleName
+		if prefix == "" {
+			prefix = "module"
+		}
+	}
+	return prefix + "." + slug
+}
+
+// slugifyNavName lowercases the input and collapses non-alphanumeric runs to
+// a single "-". Leading/trailing hyphens are trimmed. Pure-ASCII output keeps
+// keys safe to use in URLs, BSON field paths, and admin diff displays.
+func slugifyNavName(s string) string {
+	out := make([]byte, 0, len(s))
+	prevHyphen := false
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case c >= 'A' && c <= 'Z':
+			out = append(out, c+('a'-'A'))
+			prevHyphen = false
+		case (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9'):
+			out = append(out, c)
+			prevHyphen = false
+		default:
+			if !prevHyphen && len(out) > 0 {
+				out = append(out, '-')
+				prevHyphen = true
+			}
+		}
+	}
+	// Trim trailing hyphen left by the loop.
+	if n := len(out); n > 0 && out[n-1] == '-' {
+		out = out[:n-1]
+	}
+	return string(out)
 }
 
 // depsFor returns a shallow copy of deps with Logger pre-decorated with

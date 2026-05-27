@@ -136,7 +136,7 @@ docker compose -f docker-compose.ai-sidecar.yml --env-file .env up -d
 | **tenant**       | Orgs + memberships (two-tier tenancy)                                                                             |
 | **authz**        | Permissions, roles, Cedar policy engine                                                                           |
 | **auth**         | Email/password (argon2id) + OAuth 2.1, JWT, sessions, RBAC                                                        |
-| **navigation**   | Dynamic menu from module NavItems                                                                                 |
+| **navigation**   | Dynamic menu from module NavItems + persisted reorder via `/admin/modules/navigation`                             |
 | **logging**      | Runtime log-level admin (ADR-0005 Phase F): `log_levels` collection + `/admin/observability/log-levels` UI         |
 
 Load order (topologically sorted by `Dependencies()`): `user` → `notification` → `tenant` → `authz` → `auth` → `navigation` → `logging`. Auth depends on notification (optional at runtime) so it can deliver verification and password-reset emails; `logging` has no declared dependencies.

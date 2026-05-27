@@ -180,6 +180,11 @@ services:
       VITE_API_URL: ${VITE_API_URL:-http://localhost:3000}
       VITE_BACKEND_URL: ${VITE_BACKEND_URL:-http://localhost:3000}
       VITE_WS_URL: ${VITE_WS_URL:-ws://localhost:3000}
+      # Application version surfaced in the SPA footer. orkestra.sh exports
+      # this from `git describe`; CI overrides via GITHUB_REF_NAME at
+      # image-build time. The container has no git, so this passthrough
+      # is how the host's tag reaches Vite's `define` substitution.
+      ORKESTRA_VERSION: ${ORKESTRA_VERSION:-dev}
       NODE_OPTIONS: "--max-old-space-size=4096"
     volumes:
       - ../frontend-admin:/app
@@ -232,6 +237,7 @@ services:
       # Hostnames the Vite dev server accepts (DNS-rebinding defence).
       # Localhost is always allowed; add deployed hostnames here.
       VITE_ALLOWED_HOSTS: ${VITE_CLIENT_ALLOWED_HOSTS:-client.localhost}
+      ORKESTRA_VERSION: ${ORKESTRA_VERSION:-dev}
       NODE_OPTIONS: "--max-old-space-size=4096"
     volumes:
       - ../frontend-client:/app

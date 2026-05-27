@@ -19,7 +19,11 @@ export interface AppSettings {
   navbarStyle: NavbarStyle;
 }
 
-export const version: string = '0.0.1';
+// `typeof` guards against the dev server not having been restarted
+// after a vite.config.js change — touching `__APP_VERSION__` directly
+// would throw ReferenceError and crash the entire SPA at module load.
+export const version: string =
+  typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : 'dev';
 export const navbarBreakPoint: string = 'xl'; // Vertical navbar breakpoint
 export const topNavbarBreakpoint: string = 'lg';
 export const themeVariants: readonly ThemeVariant[] = [

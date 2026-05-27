@@ -101,7 +101,7 @@ See [CHANGELOG.md](CHANGELOG.md) for the per-release history. The release cadenc
 - All CI gates are green on `main` (see [the pre-flight checklist](https://github.com/orkestra-cc/orkestra/blob/main/CONTRIBUTING.md#pre-release-pre-flight))
 - The BDFL or a maintainer has time to author the release notes
 
-Tagging is **manual** — push an annotated tag like `v0.2.0`, the [release workflow](.github/workflows/release.yml) takes over: regenerates `CHANGELOG.md` from `cliff.toml`, opens a GitHub Release with the changelog body. No release-please bot, no automatic version bumps.
+Tagging is **manual** — push an annotated tag like `v0.2.0`, the [release workflow](.github/workflows/release.yml) takes over: regenerates `CHANGELOG.md` from `cliff.toml`, syncs `frontend-admin/package.json` + `frontend-client/package.json` to the tag (cosmetic — the runtime version is derived from the git tag at build time, not these files), and opens a GitHub Release with the changelog body. No release-please bot, no automatic version *decisions* — the BDFL still chooses when to tag and which number to use.
 
 [Semantic Versioning](https://semver.org) for the public API:
 

@@ -134,6 +134,9 @@ services:
         VITE_ENV: production
         VITE_DEBUG: "false"
         VITE_SENTRY_DSN: ${SENTRY_DSN_FRONTEND}
+        # Baked into the JS bundle by Vite's `define` at build time.
+        # orkestra.sh exports this from `git describe`.
+        ORKESTRA_VERSION: ${ORKESTRA_VERSION:-dev}
     container_name: orkestra-frontend-admin
     restart: unless-stopped
     ports:

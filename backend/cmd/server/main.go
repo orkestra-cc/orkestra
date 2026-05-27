@@ -37,9 +37,26 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
+// Version, BuildTime, GitCommit are set at build time via
+//
+//	go build -ldflags "-X main.Version=$TAG -X main.BuildTime=$TS -X main.GitCommit=$SHA"
+//
+// The Dockerfile sets these from ARGs; the release workflow forwards the
+// git tag. Default values keep `go run` working without a build wrapper.
+var (
+	Version   = "dev"
+	BuildTime = "unknown"
+	GitCommit = "unknown"
+)
+
 func main() {
 	logger := utils.SetupLogger()
 	slog.SetDefault(logger)
+	logger.Info("orkestra-backend starting",
+		slog.String("version", Version),
+		slog.String("build_time", BuildTime),
+		slog.String("git_commit", GitCommit),
+	)
 
 	cfg, err := config.Load()
 	if err != nil {

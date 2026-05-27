@@ -19,9 +19,14 @@ WORKDIR /app
 # entrypoint in stage 2.
 ARG VITE_PUBLIC_URL=/
 ARG VITE_SENTRY_DSN
+# Application version baked into the JS bundle by Vite's `define`.
+# Default "dev" keeps `docker build` working without a wrapper; CI and
+# orkestra.sh pass the git tag here.
+ARG ORKESTRA_VERSION=dev
 
 ENV VITE_PUBLIC_URL=${VITE_PUBLIC_URL}
 ENV VITE_SENTRY_DSN=${VITE_SENTRY_DSN}
+ENV ORKESTRA_VERSION=${ORKESTRA_VERSION}
 
 # Copy package files first for better caching
 COPY package*.json ./

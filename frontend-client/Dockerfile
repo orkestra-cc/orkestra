@@ -14,6 +14,12 @@ FROM node:24-alpine AS builder
 
 WORKDIR /app
 
+# Application version baked into the JS bundle by Vite's `define`.
+# Default "dev" keeps `docker build` working standalone; CI and
+# orkestra.sh pass the git tag here.
+ARG ORKESTRA_VERSION=dev
+ENV ORKESTRA_VERSION=${ORKESTRA_VERSION}
+
 COPY package*.json ./
 RUN npm ci --ignore-scripts
 

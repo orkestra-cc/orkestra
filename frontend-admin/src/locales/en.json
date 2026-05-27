@@ -4372,6 +4372,53 @@
       "revert": "Revert"
     }
   },
+  "adminNavigation": {
+    "title": "Navigation",
+    "description": "Reorder sidebar items per parent and audit which roles can see each section. Drag to reorder within siblings; click Reset to drop a parent's override.",
+    "loading": "Loading navigation…",
+    "loadFailed": "Failed to load the navigation tree.",
+    "emptyFilters": "No items match the current filters.",
+    "filters": {
+      "search": "Search",
+      "searchPlaceholder": "Label or path…",
+      "allModules": "All modules",
+      "showRoleMatrix": "Show role matrix"
+    },
+    "actions": {
+      "drag": "Drag to reorder",
+      "resetParent": "Reset this group to declared order",
+      "resetRealms": "Reset realm order to defaults"
+    },
+    "badges": {
+      "reordered": "Reordered",
+      "moduleDisabled": "Module disabled"
+    },
+    "matrix": {
+      "visible": "visible",
+      "hidden": "hidden",
+      "tooltip": "{{role}}: {{visibility}}"
+    },
+    "detail": {
+      "empty": "Select an item to see its details.",
+      "itemKey": "Item key",
+      "module": "Module",
+      "realm": "Realm",
+      "section": "Section",
+      "tier": "Tier",
+      "tierBoth": "both",
+      "minRole": "Min role",
+      "everyone": "everyone",
+      "declaredOrder": "Declared order",
+      "effectiveOrder": "Effective order",
+      "visibleTo": "Visible to roles"
+    },
+    "toast": {
+      "orderSaved": "Order saved",
+      "orderFailed": "Failed to save the new order",
+      "overrideCleared": "Override cleared — declared order restored",
+      "clearFailed": "Failed to clear the override"
+    }
+  },
   "adminUserProfile": {
     "loadingMetricsAria": "Loading metrics...",
     "metrics": {

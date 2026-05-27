@@ -81,6 +81,13 @@ type IndexSpec struct {
 //
 // The legacy Group field is kept for back-compat with v1 consumers; new
 // modules should set Realm + Section instead.
+//
+// ItemKey is a stable identifier for the item across renames. The registry
+// fills it in if a module leaves it empty (slugified Name, prefixed with the
+// owning module name and parent key). Persisted override docs reference items
+// by ItemKey, so modules that want stability across label changes should set
+// it explicitly — otherwise renaming `Name` rotates the default key and
+// orphans any existing override.
 type NavItemSpec struct {
 	// Classification (v2) — prefer these for new modules.
 	Realm   string `json:"realm,omitempty"`
@@ -96,5 +103,6 @@ type NavItemSpec struct {
 	MinRole    string        `json:"minRole,omitempty"`
 	Active     bool          `json:"active"`
 	ModuleName string        `json:"moduleName,omitempty"` // stamped by registry
+	ItemKey    string        `json:"itemKey,omitempty"`    // stamped by registry if empty
 	Children   []NavItemSpec `json:"children,omitempty"`
 }

@@ -511,6 +511,198 @@
         ],
         "type": "object"
       },
+      "AdminNavItem": {
+        "additionalProperties": false,
+        "properties": {
+          "active": {
+            "type": "boolean"
+          },
+          "children": {
+            "items": {
+              "$ref": "#/components/schemas/AdminNavItem"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "declaredOrder": {
+            "description": "Sibling index as declared in the module's NavItems()",
+            "format": "int64",
+            "type": "integer"
+          },
+          "effectiveOrder": {
+            "description": "Sibling index after applying persisted overrides",
+            "format": "int64",
+            "type": "integer"
+          },
+          "group": {
+            "description": "Legacy v1 group label",
+            "type": "string"
+          },
+          "icon": {
+            "description": "Icon identifier",
+            "type": "string"
+          },
+          "itemKey": {
+            "description": "Stable identifier; persisted overrides reference this",
+            "type": "string"
+          },
+          "minRole": {
+            "description": "Lowest system role that sees this item",
+            "type": "string"
+          },
+          "moduleEnabled": {
+            "description": "Whether the owning module is enabled right now",
+            "type": "boolean"
+          },
+          "moduleName": {
+            "description": "Owning module",
+            "type": "string"
+          },
+          "name": {
+            "description": "Display name",
+            "type": "string"
+          },
+          "overridden": {
+            "description": "True when EffectiveOrder differs from DeclaredOrder",
+            "type": "boolean"
+          },
+          "path": {
+            "description": "Route the item navigates to",
+            "type": "string"
+          },
+          "realm": {
+            "type": "string"
+          },
+          "section": {
+            "type": "string"
+          },
+          "tier": {
+            "description": "internal | external | '' (both)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "itemKey",
+          "name",
+          "moduleName",
+          "moduleEnabled",
+          "active",
+          "declaredOrder",
+          "effectiveOrder",
+          "overridden"
+        ],
+        "type": "object"
+      },
+      "AdminNavRealm": {
+        "additionalProperties": false,
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "sections": {
+            "items": {
+              "$ref": "#/components/schemas/AdminNavSection"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "sections"
+        ],
+        "type": "object"
+      },
+      "AdminNavSection": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AdminNavItem"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "label": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "label",
+          "items"
+        ],
+        "type": "object"
+      },
+      "AdminNavigationResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/AdminNavigationResponse.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "realms": {
+            "description": "Full unfiltered nav tree grouped by realm → section",
+            "items": {
+              "$ref": "#/components/schemas/AdminNavRealm"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "realmsOverridden": {
+            "description": "True when a persisted override changed the realm order",
+            "type": "boolean"
+          },
+          "realmsParentKey": {
+            "description": "Synthetic parentKey for reordering the realm cards",
+            "type": "string"
+          },
+          "roles": {
+            "description": "System role hierarchy, highest privilege first",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "tenantKinds": {
+            "description": "Tenant-kind values used by Tier filtering",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "realms",
+          "roles",
+          "tenantKinds",
+          "realmsParentKey",
+          "realmsOverridden"
+        ],
+        "type": "object"
+      },
       "AdminSecurityEventsResponseBody": {
         "additionalProperties": false,
         "properties": {
@@ -10622,6 +10814,45 @@
         ],
         "type": "object"
       },
+      "NavOverride": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/NavOverride.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "orderedChildren": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "parentKey": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "updatedBy": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "parentKey",
+          "orderedChildren",
+          "updatedAt"
+        ],
+        "type": "object"
+      },
       "NavRealm": {
         "additionalProperties": false,
         "properties": {
@@ -11492,6 +11723,39 @@
         },
         "required": [
           "success"
+        ],
+        "type": "object"
+      },
+      "PatchOrderRequestBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/PatchOrderRequestBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "orderedChildren": {
+            "description": "Desired sibling order",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "parentKey": {
+            "description": "Parent ItemKey or synthetic root key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "parentKey",
+          "orderedChildren"
         ],
         "type": "object"
       },
@@ -20252,6 +20516,137 @@
         "summary": "Update environment config",
         "tags": [
           "Admin - Modules"
+        ]
+      }
+    },
+    "/v1/admin/navigation": {
+      "get": {
+        "description": "Returns every NavItem every module declared, regardless of the caller's role or tenant kind. Includes MinRole/Tier/ModuleEnabled metadata for the admin visibility matrix and reorder UI.",
+        "operationId": "admin-navigation-get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminNavigationResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [
+              "administrator"
+            ]
+          }
+        ],
+        "summary": "Get the full unfiltered navigation tree",
+        "tags": [
+          "Navigation"
+        ]
+      }
+    },
+    "/v1/admin/navigation/order": {
+      "delete": {
+        "description": "Drops the override document for the given parentKey. Missing-doc is a no-op (idempotent). After clearing, the parent's children render in declared order again.",
+        "operationId": "admin-navigation-delete-order",
+        "parameters": [
+          {
+            "description": "Parent ItemKey or synthetic root key whose override to clear",
+            "explode": false,
+            "in": "query",
+            "name": "parentKey",
+            "required": true,
+            "schema": {
+              "description": "Parent ItemKey or synthetic root key whose override to clear",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [
+              "administrator"
+            ]
+          }
+        ],
+        "summary": "Clear the ordering override for one parent",
+        "tags": [
+          "Navigation"
+        ]
+      },
+      "patch": {
+        "description": "Upserts the ordering override for one parent (either an item's ItemKey or the synthetic '__root.\u003crealm\u003e.\u003csection-slug\u003e' returned in the admin tree). Items present in orderedChildren take the listed position; items missing keep their declared order and append after. Self-heals stale ItemKeys on the next read.",
+        "operationId": "admin-navigation-patch-order",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PatchOrderRequestBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NavOverride"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [
+              "administrator"
+            ]
+          }
+        ],
+        "summary": "Persist sibling ordering for one parent",
+        "tags": [
+          "Navigation"
         ]
       }
     },

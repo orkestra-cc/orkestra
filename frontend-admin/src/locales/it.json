@@ -4372,6 +4372,53 @@
       "revert": "Ripristina"
     }
   },
+  "adminNavigation": {
+    "title": "Navigazione",
+    "description": "Riordina le voci della sidebar per ciascun genitore e verifica quali ruoli vedono ogni sezione. Trascina per riordinare gli elementi adiacenti; clicca Reset per annullare l'override di un gruppo.",
+    "loading": "Caricamento navigazione…",
+    "loadFailed": "Impossibile caricare l'albero di navigazione.",
+    "emptyFilters": "Nessun elemento corrisponde ai filtri attivi.",
+    "filters": {
+      "search": "Cerca",
+      "searchPlaceholder": "Etichetta o path…",
+      "allModules": "Tutti i moduli",
+      "showRoleMatrix": "Mostra matrice ruoli"
+    },
+    "actions": {
+      "drag": "Trascina per riordinare",
+      "resetParent": "Ripristina l'ordine dichiarato per questo gruppo",
+      "resetRealms": "Ripristina l'ordine canonico dei realm"
+    },
+    "badges": {
+      "reordered": "Riordinato",
+      "moduleDisabled": "Modulo disabilitato"
+    },
+    "matrix": {
+      "visible": "visibile",
+      "hidden": "nascosto",
+      "tooltip": "{{role}}: {{visibility}}"
+    },
+    "detail": {
+      "empty": "Seleziona un elemento per vederne i dettagli.",
+      "itemKey": "Item key",
+      "module": "Modulo",
+      "realm": "Realm",
+      "section": "Sezione",
+      "tier": "Tier",
+      "tierBoth": "entrambi",
+      "minRole": "Ruolo minimo",
+      "everyone": "tutti",
+      "declaredOrder": "Ordine dichiarato",
+      "effectiveOrder": "Ordine effettivo",
+      "visibleTo": "Visibile ai ruoli"
+    },
+    "toast": {
+      "orderSaved": "Ordine salvato",
+      "orderFailed": "Impossibile salvare il nuovo ordine",
+      "overrideCleared": "Override rimosso — ordine dichiarato ripristinato",
+      "clearFailed": "Impossibile rimuovere l'override"
+    }
+  },
   "adminUserProfile": {
     "loadingMetricsAria": "Caricamento metriche…",
     "metrics": {

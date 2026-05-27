@@ -1,7 +1,7 @@
 ---
 title: Backup and restore
 sidebar_position: 7
-description: mongodump / mongorestore recipes, retention, restore-test cadence, and what's safe to lose.
+description: Bundled backup.sh / restore.sh scripts, manual mongodump recipes, retention, restore-test cadence, and what's safe to lose.
 ---
 
 # Backup and restore
@@ -17,16 +17,161 @@ Orkestra's stateful surfaces are:
 | **Sessions / refresh tokens / rate-limit counters** | Redis | ❌ no — losing logs everyone out, doesn't lose data |
 | **HTTP request logs** | Loki / Datadog / stdout | optional — your retention policy |
 | **OpenTelemetry traces / metrics** | Tempo / Prometheus / vendor | optional — your retention policy |
+| **Object blobs** (avatars today, attachments tomorrow) | RustFS / S3 | ✅ yes if you have user uploads in flight |
 | **Object content** (PDF outputs, marketing imports) | filesystem (`MARKETING_IMPORT_SPOOL_DIR`) | ✅ yes if you need it long-term |
 | **JWT keys** (`docker/keys/`) | filesystem | ✅ yes — losing invalidates every issued token |
 
 **Bottom line:** back up MongoDB nightly and the contents of `docker/.env` + `docker/keys/` once. Skip Redis. Decide on the spool directory based on how much your importers matter.
 
-## MongoDB backup
+Orkestra ships two paths for this:
+
+- **`./backup.sh` and `./restore.sh`** at the repo root — bundled, opinionated, cover every stateful surface in one tarball. Right for dev, staging, and small single-VM production. See [Bundled scripts](#bundled-scripts) below.
+- **Manual `mongodump` / `mongorestore`** + a separate secrets tarball — finer-grained, the right choice once you start shipping dumps to off-site object storage with their own retention and ACLs. See [Manual recipes](#manual-recipes).
+
+## Bundled scripts
+
+`./backup.sh` and `./restore.sh` live at the repo root alongside `./orkestra.sh`. Both run as a TUI (no args) or via CLI flags, and target the canonical infra container names (`orkestra-mongodb`, `orkestra-redis`, `orkestra-rustfs`, optionally `orkestra-memgraph`).
+
+### What they cover
+
+| Component | Backup mechanism | Restore mechanism |
+| --- | --- | --- |
+| `mongodb` | `mongodump --db $MONGO_DATABASE --archive --gzip` (scoped to the `orkestra` DB — skips `admin`/`local`/`config` system DBs and the throwaway `orkestra_openapi_dump` sandbox that `make openapi-dump` uses) | `mongorestore --drop --archive --gzip`, with automatic `--nsFrom`/`--nsTo` remapping if the archive's source DB name differs from the target's `MONGO_DATABASE` |
+| `redis` | Synchronous `SAVE`, then `docker cp` of `dump.rdb` + the AOF directory from whatever path `CONFIG GET dir` reports (the redis-stack image used in `docker-compose.infra.yml` writes to `/`, not `/data`) | Stop container, copy files back, start container |
+| `rustfs` | Enumerates buckets via `aws-cli` over `orkestra-network` and `s3 sync`s each one out | `s3 mb` (best-effort) + `s3 sync` from the bundle back into each bucket |
+| `memgraph` | Raw `tar czf` of the `orkestra-memgraph-data` volume via a throwaway alpine container — **only if the container is running** (graph module is lifecycle-managed, so memgraph is up only when the addon is enabled) | Stop + wipe + extract + start, via the same alpine helper |
+| `secrets` | Copies `docker/.env` and `docker/keys/*` into the bundle | Writes the files back into `docker/`, prompting before overwriting existing ones |
+
+A `manifest.json` at the tarball root records the schema version, timestamp, environment, host, and which components were actually captured. `restore.sh` reads it to decide which components are available.
+
+:::warning Secrets live in the tarball
+The `secrets` component bundles `docker/.env` (DB passwords, OAuth client secrets, KMS master key, encryption keys) and `docker/keys/*` (JWT private key, Apple p8). Anyone with read access to the tarball has everything they need to decrypt every secret in `module_configs`. Store the resulting file in a secrets-grade location — encrypted volume, vault, or off-site bucket with strict ACLs. For production deployments, prefer the [manual recipes](#manual-recipes) below so secret material is backed up separately from data on its own retention.
+:::
+
+### Quick start
+
+```bash
+# Interactive TUI — pick components from a menu
+./backup.sh
+
+# Non-interactive — back up everything available
+./backup.sh all --yes
+
+# Subset — only some components
+./backup.sh --components mongodb,redis,secrets --yes
+```
+
+Output lands in `./backups/orkestra-backup-<env>-<UTC-timestamp>.tar.gz` by default; override with `--output`.
+
+```bash
+# Interactive TUI — pick a tarball from ./backups/
+./restore.sh
+
+# Restore a specific bundle
+./restore.sh ./backups/orkestra-backup-staging-20260527-071724.tar.gz
+
+# Subset, no prompts (CI / scripted)
+./restore.sh ./backups/<file>.tar.gz --components mongodb --yes
+```
+
+### Dry-run
+
+`restore.sh` has a `--dry-run` flag that reports exactly what *would* happen without mutating anything. It's the safest way to validate an archive end-to-end before committing to the restore:
+
+```bash
+./restore.sh ./backups/<file>.tar.gz --dry-run
+```
+
+What dry-run actually does, per component:
+
+- **`mongodb`** — runs `mongorestore --dryRun` against the live container so the archive is fully parsed, every namespace is listed, and any decompression / format errors surface; reports namespace remapping if source DB differs from target
+- **`redis`** — queries the live container's `CONFIG GET dir/dbfilename/appenddirname` and prints the exact `docker cp` destinations it would use
+- **`rustfs`** — runs `aws s3 sync --dryrun` against the live endpoint so per-object diffs (additions, overwrites, deletions) appear before any byte is moved
+- **`memgraph`** — reports volume name and archive size, plus whether the container would be stopped/restarted
+- **`secrets`** — lists every file in the bundle and flags which targets already exist (would prompt to overwrite) vs which would be new
+
+Dry-run also exercises the preconditions: if a target container isn't running, the dry-run for that component fails the same way the real restore would. That makes it a genuine preflight, not just a print of intent.
+
+### CLI reference
+
+#### `backup.sh`
+
+| Flag | Description |
+| --- | --- |
+| `all` (positional) | Back up every component currently available on the host. |
+| `--components <csv>` / `-c` | Subset, e.g. `--components mongodb,secrets`. |
+| `--output <path>` / `-o` | Write to a specific path instead of `./backups/orkestra-backup-<env>-<timestamp>.tar.gz`. |
+| `--yes` / `-y` | Skip the proceed-prompt. Required for non-interactive shells. |
+| `--help` / `-h` | Print usage. |
+
+#### `restore.sh`
+
+| Flag | Description |
+| --- | --- |
+| `<file>` (positional) | Path to a tarball produced by `backup.sh`. Omit to pick from `./backups/` via the TUI. |
+| `--components <csv>` / `-c` | Restore only some components from the archive. Must be a subset of the manifest. |
+| `--dry-run` / `-n` | Show what would happen, change nothing. Bypasses the destructive-action confirmation and runs without `--yes` in non-interactive shells. |
+| `--yes` / `-y` | Skip the `type 'restore' to confirm` gate. **Destructive** — required for non-interactive shells. |
+| `--help` / `-h` | Print usage. |
+
+### Tarball layout
+
+```
+orkestra-backup-<env>-<timestamp>.tar.gz
+├── manifest.json                         schema, env, timestamp, components included
+├── mongodb/
+│   ├── mongo.archive.gz                  mongodump --archive --gzip output
+│   └── database.txt                      source DB name (for ns-remapping on restore)
+├── redis/
+│   ├── dump.rdb                          RDB snapshot
+│   ├── appendonlydir/                    Redis 7+ AOF folder (manifest + base + incr)
+│   │   └── appendonly.aof.*
+│   └── redis-layout.txt                  live `dir` / `dbfilename` / `appenddirname` at backup time
+├── rustfs/
+│   └── <bucket>/                         one directory per S3 bucket the script could see
+│       └── ...                           full object tree synced via aws s3 sync
+├── memgraph/
+│   └── memgraph-volume.tar.gz            raw snapshot of the orkestra-memgraph-data volume
+└── secrets/
+    ├── .env                              docker/.env verbatim
+    └── keys/
+        ├── jwt-private.pem
+        ├── jwt-public.pem
+        └── apple.p8                      (if Apple Sign In configured)
+```
+
+`manifest.json` schema:
+
+```json
+{
+  "schema": "orkestra-backup/v1",
+  "createdAt": "2026-05-27T07:17:29Z",
+  "environment": "staging",
+  "host": "orkestra-staging-1",
+  "components": ["mongodb", "redis", "rustfs", "secrets"]
+}
+```
+
+### When to fall back to the manual recipes
+
+The bundled scripts are the right default for dev, staging, and single-VM production. Reach for the [manual recipes](#manual-recipes) when:
+
+- **You want secret material on a separate retention from data**. The bundled `secrets` component ships keys and the `.env` in the same tarball as nightly data — fine if the tarball goes to an HSM-grade target, awkward if it goes to a general-purpose S3 bucket.
+- **You want to stream dumps directly to off-site object storage** (`aws s3 cp - s3://...`) instead of round-tripping through a local file.
+- **You want fine-grained cron retention** (e.g. hourly snapshots × 24h + daily × 30 + monthly × 12 — the bundled scripts produce one timestamped file per run; everything else is your job).
+- **You're running Orkestra on a host where Docker isn't available** (the bundled scripts assume `docker`).
+
+## Manual recipes
+
+:::note Two scripts named `backup.sh`
+The bundled tool at the repo root is `./backup.sh`. The production cron recipe below also happens to land at `/opt/orkestra/scripts/backup.sh` on the deployment VM. They are unrelated — the bundled one is a TUI/CLI for dev + small-prod use, the production one is a single-purpose `mongodump` wrapper for nightly cron. Rename the cron script if both will ever live on the same host.
+:::
+
+### MongoDB backup
 
 `mongodump` is the operator-friendly path — produces BSON dumps that `mongorestore` reads. It does **not** lock the database; it's safe on a live system, though large dumps spike I/O.
 
-### Daily backup script
+#### Daily backup script
 
 Save as `/opt/orkestra/scripts/backup.sh` on the production VM:
 
@@ -71,7 +216,7 @@ sudo chmod +x /opt/orkestra/scripts/backup.sh
 
 3 AM UTC daily, kept for 30 days. Adjust to your timezone / retention policy.
 
-### Verify the backup is sane
+#### Verify the backup is sane
 
 A backup file you can't restore is not a backup. Test monthly (or at least quarterly) — see "Restore-test cadence" below.
 
@@ -82,7 +227,7 @@ zcat /var/backups/orkestra/orkestra-2026-05-23T03-00-00Z.archive.gz | head -c 10
 # Should report: BSON / Binary JSON
 ```
 
-## MongoDB restore
+### MongoDB restore
 
 ```bash
 # Stop the application services so nothing writes during restore.
@@ -108,9 +253,32 @@ If the restore is for an entirely different deployment (e.g. clone production in
 - The original `docker/.env` `ORKESTRA_KMS_MASTER_KEY` — without it every per-tenant DEK in the `compliance` addon is unrecoverable.
 - The original `docker/keys/jwt-*.pem` (if you want existing sessions to keep working) OR a fresh key pair (in which case all issued tokens are invalidated and users have to log in again).
 
+### Filesystem state
+
+| Path | Used by | Action |
+| --- | --- | --- |
+| `docker/keys/jwt-private.pem`, `jwt-public.pem` | `auth` core module | Back up once. Treat as a long-lived secret. |
+| `docker/keys/apple.p8` (if Apple Sign In configured) | `auth` core module | Back up once. |
+| `docker/.env` | every module | Back up once after `make init`, then again after any edit. |
+| `docker/marketing-spool-*` (bind mount) | `marketing` addon | Optional. Imports that haven't been processed yet live here. Losing this loses in-flight imports but not anything already committed to MongoDB. |
+| `docker/mongo-init/` | `mongodb` infra service | In-repo, gitignored copy is fine. |
+
+A reasonable one-liner for the "everything outside Mongo" tarball:
+
+```bash
+sudo tar czf /var/backups/orkestra/files-$(date -u +%Y-%m-%dT%H-%M-%SZ).tar.gz \
+  /opt/orkestra/docker/.env \
+  /opt/orkestra/docker/keys
+sudo chmod 600 /var/backups/orkestra/files-*.tar.gz
+```
+
+Treat these as secrets — anyone with read access to a backup tarball has the encryption key that decrypts every secret in `module_configs`.
+
 ## Restore-test cadence
 
-Run the restore drill at least quarterly. Easiest path: spin up a staging stack, restore the latest production backup into it, verify a known canary (a specific user, a specific module config) is intact. Three things almost always work on the way out (you've automated them) and break on the way back (you haven't tested them):
+Run the restore drill at least quarterly, regardless of which path you use. The bundled `./restore.sh --dry-run` is a fast pre-flight (parses the archive end-to-end, validates target containers, lists what would change) but it doesn't substitute for an end-to-end restore against a real staging stack — only that catches encryption-key drift and schema migrations.
+
+Easiest path: spin up a staging stack, restore the latest production backup into it, verify a known canary (a specific user, a specific module config) is intact. Three things almost always work on the way out (you've automated them) and break on the way back (you haven't tested them):
 
 - **Encryption key rotation** — if you've rotated `OAUTH_TOKEN_ENCRYPTION_KEY` since the dump was taken, the restore is useless without the old key. Keep a key archive separate from the DB backup.
 - **Schema migrations** — Orkestra's collection schemas evolve. Restoring a 6-month-old dump into a current binary may produce documents whose shape the current code rejects. The `make backend-test` suite + `docker compose -f docker-compose.<sku>.yml --env-file .env up -d` smoke is the test.
@@ -133,27 +301,6 @@ Redis stores ephemeral state — refresh tokens, rate-limit counters, ConfigServ
 - ConfigService cache is gone → first request to each module config endpoint hits MongoDB (cold-start latency for ~30 s).
 
 If your operational priority is "zero session loss across restores", run Redis with AOF persistence and back up the AOF file. Most operators don't bother — the UX cost is small.
-
-## Filesystem state
-
-| Path | Used by | Action |
-| --- | --- | --- |
-| `docker/keys/jwt-private.pem`, `jwt-public.pem` | `auth` core module | Back up once. Treat as a long-lived secret. |
-| `docker/keys/apple.p8` (if Apple Sign In configured) | `auth` core module | Back up once. |
-| `docker/.env` | every module | Back up once after `make init`, then again after any edit. |
-| `docker/marketing-spool-*` (bind mount) | `marketing` addon | Optional. Imports that haven't been processed yet live here. Losing this loses in-flight imports but not anything already committed to MongoDB. |
-| `docker/mongo-init/` | `mongodb` infra service | In-repo, gitignored copy is fine. |
-
-A reasonable one-liner for the "everything outside Mongo" tarball:
-
-```bash
-sudo tar czf /var/backups/orkestra/files-$(date -u +%Y-%m-%dT%H-%M-%SZ).tar.gz \
-  /opt/orkestra/docker/.env \
-  /opt/orkestra/docker/keys
-sudo chmod 600 /var/backups/orkestra/files-*.tar.gz
-```
-
-Treat these as secrets — anyone with read access to a backup tarball has the encryption key that decrypts every secret in `module_configs`.
 
 ## See also
 

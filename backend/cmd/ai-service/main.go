@@ -41,9 +41,23 @@ import (
 	"github.com/orkestra/backend/internal/shared/utils"
 )
 
+// Version, BuildTime, GitCommit are set at build time via ldflags.
+// See cmd/server/main.go for the canonical declaration; the sidecar
+// mirrors them so both binaries surface the same version triple.
+var (
+	Version   = "dev"
+	BuildTime = "unknown"
+	GitCommit = "unknown"
+)
+
 func main() {
 	logger := utils.SetupLogger()
 	slog.SetDefault(logger)
+	logger.Info("orkestra-ai-service starting",
+		slog.String("version", Version),
+		slog.String("build_time", BuildTime),
+		slog.String("git_commit", GitCommit),
+	)
 
 	cfg, err := config.Load()
 	if err != nil {

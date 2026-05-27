@@ -237,6 +237,10 @@ services:
       VITE_BACKEND_URL: ${VITE_BACKEND_URL:-http://localhost:3000}
       VITE_WS_URL: ${VITE_WS_URL:-ws://localhost:3000}
       VITE_HMR_HOST: staging.orkestra.cc
+      # Host-computed app version surfaced in the SPA footer. orkestra.sh
+      # exports this from `git describe`; the container has no git so
+      # this passthrough is the only path. See docker-compose.dev.yml.
+      ORKESTRA_VERSION: ${ORKESTRA_VERSION:-dev}
       NODE_OPTIONS: "--max-old-space-size=4096"
       npm_config_cache: /app/.npm-cache
     volumes:
@@ -300,6 +304,7 @@ services:
       # Hostnames the Vite dev server accepts (DNS-rebinding defence).
       # Localhost is always allowed; add the deployed hostnames here.
       VITE_ALLOWED_HOSTS: ${VITE_CLIENT_ALLOWED_HOSTS:-app.orkestra.cc}
+      ORKESTRA_VERSION: ${ORKESTRA_VERSION:-dev}
       NODE_OPTIONS: "--max-old-space-size=4096"
       npm_config_cache: /app/.npm-cache
     volumes:

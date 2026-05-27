@@ -419,6 +419,9 @@ export const baseApi = createApi({
     'IdentityScim',
     // Observability — ADR-0005 Phase F runtime log-level mutation
     'LogLevels',
+    // Navigation admin — full unfiltered tree + per-parent ordering
+    // overrides surfaced at /admin/modules/navigation.
+    'NavigationAdmin',
     // OAuth provider availability — the live list /v1/auth/{tier}/providers
     // returns for the unauthenticated login page. Invalidated implicitly by
     // RTK Query's 30s default cache + manual invalidation when the

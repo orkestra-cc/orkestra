@@ -60,3 +60,21 @@ const MarketingCardCodeCollision = "marketing.card_code_collision"
 // docs/plans/marketing-addon/IMPLEMENTATION_PLAN_PHASE_4.md §3.6.
 // 422.
 const MarketingCardInvalidTransition = "marketing.card_invalid_transition"
+
+// --- navigation ---
+
+// NavigationOverrideUnknownParent signals that a PATCH against the
+// navigation ordering admin referenced a parentKey the registry does
+// not recognise — either a stale key for a renamed/removed item or a
+// malformed synthetic root. 404 from the write endpoints; 400 when
+// the field is missing entirely.
+const NavigationOverrideUnknownParent = "navigation.override_unknown_parent"
+
+// NavigationOverrideChildNotFound signals that an entry in the
+// orderedChildren payload is not an actual child of the referenced
+// parentKey. Includes the empty-string sentinel. 422.
+const NavigationOverrideChildNotFound = "navigation.override_child_not_found"
+
+// NavigationOverrideDuplicateChild signals that the same itemKey
+// appeared twice in the orderedChildren list. 400.
+const NavigationOverrideDuplicateChild = "navigation.override_duplicate_child"
