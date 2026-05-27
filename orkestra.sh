@@ -1825,7 +1825,7 @@ show_profile_menu() {
         "     ${c_muted}ENV autodetected from docker/.env${c_reset}" \
         "" \
         "  ${c_accent}3${c_reset} ${c_bold}Observability${c_reset}           ${c_muted}(Loki, Tempo, Prometheus, Grafana)${c_reset}" \
-        "     ${c_muted}ADR-0005 Phase D — runs alongside any app stack${c_reset}" \
+        "     ${c_muted}Self-hosted OTEL stack — runs alongside any app stack${c_reset}" \
         "" \
         "  ${c_accent}4${c_reset} ${c_bold}Quit${c_reset}" \
         ""
@@ -2010,7 +2010,7 @@ ${c_bold}FULL STACK${c_reset} ${c_muted}(uses ENV from docker/.env or ENV=... pr
   ${c_accent}status${c_reset}                            Containers + health + resources
   ${c_accent}logs${c_reset} <service> [flags]            View logs for a full-stack service
 
-${c_bold}OBSERVABILITY${c_reset} ${c_muted}(ADR-0005 Phase D — runs alongside any app stack)${c_reset}
+${c_bold}OBSERVABILITY${c_reset} ${c_muted}(self-hosted OTEL stack — runs alongside any app stack)${c_reset}
   ${c_accent}observability up${c_reset}                  Start Tempo + Prometheus + Loki + Promtail + Grafana
   ${c_accent}observability down${c_reset}                Stop containers (volumes kept)
   ${c_accent}observability reset${c_reset} [--yes]       Wipe volumes (dashboards/metrics/logs erased)
