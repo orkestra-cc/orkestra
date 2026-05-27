@@ -990,8 +990,8 @@ fullstack_deploy_interactive() {
     scope=$(ask_menu "Which services?" \
         "All (full stack)" \
         "Backend only" \
-        "Frontend only" \
-        "Frontend + Backend" \
+        "Admin frontend only" \
+        "Admin frontend + Backend" \
         "Infrastructure only")
 
     case "$scope" in
