@@ -31,7 +31,7 @@
     "@tinymce/tinymce-react": "^6.2.1",
     "@types/cytoscape": "^3.21.9",
     "bootstrap": "^5.3.7",
-    "bowser": "^2.11.0",
+    "bowser": "^2.14.1",
     "classnames": "^2.5.1",
     "cytoscape": "^3.33.1",
     "cytoscape-fcose": "^2.2.0",
