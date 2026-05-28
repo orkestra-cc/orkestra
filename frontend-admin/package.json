@@ -16,7 +16,7 @@
     "@fortawesome/free-solid-svg-icons": "^7.1.0",
     "@fortawesome/react-fontawesome": "^3.1.1",
     "@fullcalendar/bootstrap": "^6.1.18",
-    "@fullcalendar/daygrid": "^6.1.18",
+    "@fullcalendar/daygrid": "^6.1.20",
     "@fullcalendar/interaction": "^6.1.18",
     "@fullcalendar/list": "^6.1.18",
     "@fullcalendar/react": "^6.1.18",
