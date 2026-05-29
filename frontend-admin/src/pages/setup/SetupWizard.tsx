@@ -12,14 +12,12 @@ import { useGetSetupStatusQuery } from 'store/api/setupApi';
 import WelcomeStep from './steps/WelcomeStep';
 import AdminStep from './steps/AdminStep';
 import OrgStep from './steps/OrgStep';
-import SmtpStep from './steps/SmtpStep';
 import FinishStep from './steps/FinishStep';
 
 const STEPS: { icon: string; labelKey: string }[] = [
   { icon: 'hand-holding-heart', labelKey: 'setup.wizard.stepWelcome' },
   { icon: 'user-shield', labelKey: 'setup.wizard.stepAdmin' },
   { icon: 'building', labelKey: 'setup.wizard.stepOrg' },
-  { icon: 'envelope', labelKey: 'setup.wizard.stepSmtp' },
   { icon: 'check', labelKey: 'setup.wizard.stepDone' }
 ];
 
@@ -39,7 +37,6 @@ const SetupWizard = () => {
   const [step, setStep] = useState<number>(1);
   const [adminFullName, setAdminFullName] = useState<string>('');
   const [orgName, setOrgName] = useState<string>('');
-  const [smtpSkipped, setSmtpSkipped] = useState(false);
 
   // If the wizard is re-opened after setup is already done, refuse to run it
   // again — the UI shows a "setup already complete" notice instead.
@@ -106,21 +103,8 @@ const SetupWizard = () => {
         );
       case 4:
         return (
-          <SmtpStep
-            onNext={() => {
-              setSmtpSkipped(false);
-              handleNext();
-            }}
-            onSkip={() => {
-              setSmtpSkipped(true);
-              handleNext();
-            }}
-          />
-        );
-      case 5:
-        return (
           <FinishStep
-            smtpSkipped={smtpSkipped}
+            smtpConfigured={status?.smtpConfigured ?? false}
             orgName={orgName}
             onFinish={() => navigate('/dashboard/analytics')}
           />
@@ -189,7 +173,7 @@ const StepNavItem = ({ index, step, icon, label }: StepNavItemProps) => {
         })}
         // Clicks on step indicators are disabled for the setup wizard —
         // steps must be completed in order because each one depends on
-        // the previous (the SMTP step needs the admin's access token).
+        // the previous (the org step needs the admin's access token).
         onClick={e => e.preventDefault()}
       >
         <Flex alignItems="center" justifyContent="center">

@@ -4882,7 +4882,6 @@
       "stepWelcome": "Benvenuto",
       "stepAdmin": "Amministratore",
       "stepOrg": "Organizzazione",
-      "stepSmtp": "Invio email",
       "stepDone": "Fine"
     },
     "welcome": {
@@ -4890,8 +4889,7 @@
       "intro": "Prepariamo il tuo deployment. Ci vorrà circa un minuto e va eseguito esattamente una volta per installazione.",
       "step1": "<strong>Crea un account amministratore.</strong> Il primo utente diventa il <code>developer</code> root e può gestire tutto il resto dall'interfaccia admin.",
       "step2": "<strong>Crea la tua prima organizzazione.</strong> Orkestra è multi-tenant — ogni funzionalità vive all'interno di un'organizzazione, e verrai registrato come proprietario.",
-      "step3": "<strong>Configura l'invio email.</strong> I reset password e i link di verifica richiedono un relay SMTP funzionante. Puoi saltare questo passo e configurarlo dopo, ma quei flussi scarteranno silenziosamente le email finché non lo farai.",
-      "step4": "<strong>Hai finito.</strong> La procedura non riapparirà al prossimo avvio.",
+      "step3": "<strong>Hai finito.</strong> La procedura non riapparirà al prossimo avvio.",
       "getStarted": "Inizia"
     },
     "admin": {
@@ -4928,22 +4926,11 @@
       "errorSlugConflict": "Un'organizzazione con slug \"{{slug}}\" esiste già. Scegli uno slug diverso.",
       "errorGeneric": "Impossibile creare l'organizzazione. Riprova."
     },
-    "smtp": {
-      "title": "Configura l'invio email",
-      "intro": "Orkestra usa queste impostazioni per inviare email di verifica e reset password. Lascia il provider su <code>noop</code> per saltare completamente — puoi configurare SMTP più tardi da <code>/admin/modules</code>.",
-      "noopNotice": "<strong>Nota:</strong> finché il provider è <code>noop</code>, le email di reset password e verifica vengono loggate sullo stdout del backend invece di essere consegnate. Chiunque dimentichi la password avrà bisogno di un operatore backend per recuperare il link dai log.",
-      "errorHostRequired": "L'host SMTP è obbligatorio quando il provider non è \"noop\".",
-      "errorFromRequired": "L'indirizzo mittente è obbligatorio quando il provider non è \"noop\".",
-      "errorGeneric": "Impossibile salvare le impostazioni SMTP. Controlla i valori e riprova.",
-      "skip": "Salta per ora",
-      "submit": "Salva e continua",
-      "submitting": "Salvataggio…"
-    },
     "finish": {
       "title": "Orkestra è pronta",
       "bodyWithOrg": "Il tuo account amministratore è stato creato, sei autenticato e l'organizzazione <strong>{{orgName}}</strong> è attiva. Potrai rinominarla o creare altre organizzazioni in seguito.",
       "bodyWithoutOrg": "Il tuo account amministratore è stato creato, sei autenticato e la procedura guidata non apparirà più.",
-      "smtpWarning": "<strong>SMTP non è configurato.</strong> Le email di reset password e verifica verranno loggate sullo stdout del backend invece di essere consegnate. Puoi configurarlo in qualsiasi momento da <code>/admin/modules</code> — il modulo notification ha gli stessi campi che hai appena saltato.",
+      "smtpWarning": "<strong>SMTP non è configurato.</strong> Le email di reset password e verifica verranno loggate sullo stdout del backend invece di essere consegnate. Puoi configurarlo in qualsiasi momento da <code>/admin/modules</code> nel modulo notification.",
       "goToDashboard": "Vai alla dashboard"
     }
   },

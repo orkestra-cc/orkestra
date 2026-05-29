@@ -38,15 +38,9 @@ const WelcomeStep = ({ onNext }: WelcomeStepProps) => {
               components={{ strong: <strong /> }}
             />
           </li>
-          <li className="mb-2">
-            <Trans
-              i18nKey="setup.welcome.step3"
-              components={{ strong: <strong /> }}
-            />
-          </li>
           <li>
             <Trans
-              i18nKey="setup.welcome.step4"
+              i18nKey="setup.welcome.step3"
               components={{ strong: <strong /> }}
             />
           </li>
