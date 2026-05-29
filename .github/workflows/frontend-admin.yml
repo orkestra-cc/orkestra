@@ -93,7 +93,7 @@ jobs:
       # tag references in deployment manifests. PR 2 will dual-publish to
       # `frontend-admin:*` for a deprecation window, then drop the legacy
       # name. Do not rename here without coordinating that transition.
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@v7
         with:
           context: ./frontend-admin
           push: true
