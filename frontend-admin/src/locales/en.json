@@ -4882,7 +4882,6 @@
       "stepWelcome": "Welcome",
       "stepAdmin": "Administrator",
       "stepOrg": "Organization",
-      "stepSmtp": "Email delivery",
       "stepDone": "Done"
     },
     "welcome": {
@@ -4890,8 +4889,7 @@
       "intro": "Let's get your deployment ready. This will take about a minute and needs to happen exactly once per install.",
       "step1": "<strong>Create an administrator account.</strong> The first user becomes the root <code>developer</code> and can manage everything else from the admin UI.",
       "step2": "<strong>Create your first organization.</strong> Orkestra is multi-tenant — every feature lives inside an organization, and you'll be enrolled as the owner.",
-      "step3": "<strong>Configure outbound email.</strong> Password resets and verification links need a working SMTP relay. You can skip this step and configure it later, but those flows will silently drop mail until you do.",
-      "step4": "<strong>You're done.</strong> The wizard won't reappear on the next boot.",
+      "step3": "<strong>You're done.</strong> The wizard won't reappear on the next boot.",
       "getStarted": "Get started"
     },
     "admin": {
@@ -4928,22 +4926,11 @@
       "errorSlugConflict": "An organization with slug \"{{slug}}\" already exists. Pick a different slug.",
       "errorGeneric": "Could not create the organization. Please try again."
     },
-    "smtp": {
-      "title": "Configure email delivery",
-      "intro": "Orkestra uses these settings to send verification and password-reset email. Leave the provider on <code>noop</code> to skip entirely — you can configure SMTP later under <code>/admin/modules</code>.",
-      "noopNotice": "<strong>Note:</strong> while the provider is <code>noop</code>, password-reset and email-verification mail is logged to the backend stdout instead of being delivered. Anyone who forgets their password will need a backend operator to recover the link from the logs.",
-      "errorHostRequired": "SMTP host is required when the provider is not set to \"noop\".",
-      "errorFromRequired": "From address is required when the provider is not set to \"noop\".",
-      "errorGeneric": "Could not save SMTP settings. Please check the values and try again.",
-      "skip": "Skip for now",
-      "submit": "Save and continue",
-      "submitting": "Saving…"
-    },
     "finish": {
       "title": "Orkestra is ready",
       "bodyWithOrg": "Your administrator account has been created, you're signed in, and the organization <strong>{{orgName}}</strong> is active. You can rename it or create more organizations later.",
       "bodyWithoutOrg": "Your administrator account has been created, you're signed in, and the setup wizard will not appear again.",
-      "smtpWarning": "<strong>SMTP is not configured.</strong> Password-reset and verification mail will log to the backend stdout instead of being delivered. Configure it any time from <code>/admin/modules</code> — the notification module has the same fields you just skipped.",
+      "smtpWarning": "<strong>SMTP is not configured.</strong> Password-reset and verification mail will log to the backend stdout instead of being delivered. Configure it any time from <code>/admin/modules</code> under the notification module.",
       "goToDashboard": "Go to the dashboard"
     }
   },

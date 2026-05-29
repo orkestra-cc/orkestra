@@ -3,7 +3,7 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { Trans, useTranslation } from 'react-i18next';
 
 interface FinishStepProps {
-  smtpSkipped: boolean;
+  smtpConfigured: boolean;
   orgName: string;
   onFinish: () => void;
 }
@@ -15,7 +15,7 @@ interface FinishStepProps {
  * the previous steps created so the operator knows what state they just
  * landed in.
  */
-const FinishStep = ({ smtpSkipped, orgName, onFinish }: FinishStepProps) => {
+const FinishStep = ({ smtpConfigured, orgName, onFinish }: FinishStepProps) => {
   const { t } = useTranslation();
   return (
     <div className="text-center">
@@ -39,7 +39,7 @@ const FinishStep = ({ smtpSkipped, orgName, onFinish }: FinishStepProps) => {
         )}
       </p>
 
-      {smtpSkipped && (
+      {!smtpConfigured && (
         <Alert
           variant="warning"
           className="fs-10 text-start mx-auto"
