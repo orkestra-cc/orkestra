@@ -8,7 +8,7 @@ description: Step-by-step from `git clone` to a logged-in admin console on a fre
 
 This page assumes you've just clicked **Fork** on [github.com/orkestra-cc/orkestra](https://github.com/orkestra-cc/orkestra) (or you're following the project as a contributor on a clean machine). It walks you from `git clone` to a logged-in admin console in about ten minutes.
 
-If you only need to **evaluate Orkestra**, the README quick-start is shorter — it skips the dev tooling and pulls a pre-built SKU image from GHCR. Come back here when you want to modify the codebase.
+If you only need to **evaluate Orkestra**, the README quick-start is shorter — it pulls a pre-built image from GHCR. Come back here when you want to modify the codebase.
 
 ## What you'll need
 
@@ -58,7 +58,7 @@ cd docker
 docker compose -f docker-compose.infra.yml up -d
 ```
 
-This boots MongoDB (port 27027 on host) and Redis (port 6387 on host). It does **not** start Gotenberg, Memgraph, or Hindsight — those are infrastructure for specific addons and are managed by the backend on demand (see [docker/CLAUDE.md](https://github.com/orkestra-cc/orkestra/blob/main/docker/CLAUDE.md) for the lifecycle).
+This boots MongoDB (port 27027 on host), Redis (port 6387), and RustFS (S3-compatible blob storage). That's the whole infra base — the core-only build needs no addon-specific services.
 
 Verify with:
 
@@ -68,42 +68,19 @@ docker compose -f docker-compose.infra.yml ps
 # orkestra-redis     Up X seconds   (healthy)
 ```
 
-## Step 4 — Pick a profile and start the backend
+## Step 4 — Start the backend (dev stack with hot reload)
 
-You have two choices:
-
-### Option A — Pre-built image (fastest)
-
-Pull the `starter` profile image from GHCR (or `billing` / `ai` / `saas` / `enterprise`):
+From the **repo root**:
 
 ```bash
-# Still in docker/
-docker compose -f docker-compose.starter.yml --env-file .env up -d
+./orkestra.sh        # pick "Full stack" from the menu — or manually:
+cd docker
+docker compose -f docker-compose.dev.yml --env-file .env up -d
 ```
 
-This pulls `ghcr.io/orkestra-cc/orkestra/backend:starter` (~70 MB) and boots the backend on `localhost:3000`. No source build. No `dhi.io` registry needed.
+This builds `docker/Dockerfile.dev-backend` (public `golang:1.25.10-alpine`, AIR pre-baked — no registry auth) and boots the backend (AIR hot-reload) plus both frontends (Vite HMR). First boot takes ~30 s while it builds the image and runs `go mod download`; subsequent restarts are instant. A fork with a Chainguard subscription can swap the base image via the `GO_BASE` build-arg — see [dev-images](/architecture/dev-images).
 
-If you've forked and pushed your own image to a private registry, override `BACKEND_IMAGE_REPO`:
-
-```bash
-BACKEND_IMAGE_REPO=ghcr.io/<your-org>/orkestra \
-docker compose -f docker-compose.starter.yml --env-file .env up -d
-```
-
-See the README "Forking the image registry" section for the full recipe.
-
-### Option B — Full dev stack with hot reload
-
-If you'll be editing Go code, you want the AIR hot-reload dev stack. From the **repo root**:
-
-```bash
-./orkestra.sh
-# pick "Full stack" from the menu
-```
-
-By default this uses `docker-compose.dev-public.yml`, which runs on `golang:1.25.10-alpine` + `node:24-alpine` (no Chainguard subscription required). If you have a `dhi.io` enterprise contract and want the hardened Chainguard variant, set `DEV_COMPOSE_VARIANT=chainguard` in `docker/.env` — see [dev-images](/architecture/dev-images) for the trade-offs.
-
-First boot takes ~30 s while it pulls images and runs `apk add git build-base && go mod download && go install air@latest`. Subsequent restarts are instant.
+If you've pushed your own backend image to a registry, override `BACKEND_IMAGE_REPO` — see the README "Forking the image registry" section.
 
 ## Step 5 — Verify the backend is healthy
 
@@ -114,24 +91,15 @@ curl -s http://localhost:3000/health
 
 If you see `mongodb:"down"` or `redis:"down"`, the infra compose didn't start cleanly — check `docker compose -f docker-compose.infra.yml logs`.
 
-## Step 6 — Mint an admin dev token and log in
+## Step 6 — Create the first administrator and log in
 
-```bash
-# From the repo root:
-ORKESTRA_API_URL=http://localhost:3000 ./scripts/devtoken.sh administrator
-```
-
-This prints a JWT. Open `http://localhost:3000` (or `http://localhost:8080` if you used the full dev stack with the frontend). Use the **Sign in with dev token** option on the login page (only available when the `dev` addon is compiled in — which it is for the `starter` SKU and the dev stack).
+Open the operator console (`http://localhost:8080`). On a fresh install the **setup wizard** prompts you to create the first administrator — it posts to `POST /v1/setup/admin`, which is gated to first-install only (`GET /v1/setup/status` reports whether the system is still uninitialized). After that, log in normally with the credentials you just set.
 
 Roles, highest to lowest: `super_admin` → `administrator` → `developer` → `manager` → `operator` → `guest`.
 
-The dev token endpoint is **disabled in production** (gated by `ENV=development|staging`). Don't ship a build with it enabled.
+## Step 7 — Add and enable modules
 
-## Step 7 — Enable modules
-
-Once logged in, navigate to `/admin/modules`. You'll see the seven core modules (always loaded) and every optional addon compiled into your SKU. Toggle each addon on or off — the registry hot-reloads without a restart and auto-resolves dependencies.
-
-For the `starter` SKU, no optional addons are compiled in — you'll see only the core seven. To get more, switch to a different SKU compose file (or build your own from the enterprise binary).
+Once logged in, navigate to `/admin/modules`. The core-only base ships **only the seven core modules** — there are no optional modules to toggle yet. To add one, create `backend/internal/addons/<name>/` plus a `cmd/server/catalog_<name>.go` in your fork; it appears here and the registry hot-loads it (no restart, transitive dependencies auto-resolved). See [Build your first addon](/sdk/build-your-first-addon).
 
 See [Enabling Modules](/getting-started/enabling-modules) for the per-module configuration UI.
 
@@ -152,20 +120,6 @@ You now have a running Orkestra. Common next steps:
 
 ## Common first-fork gotchas
 
-### "Permission denied" on docker.sock
-
-The backend mounts `/var/run/docker.sock` to manage module-owned infrastructure containers (`orkestra-hindsight`, `orkestra-memgraph`). The container needs to be in the host's `docker` group to read the socket.
-
-Default GID is 1001 (Ubuntu/WSL2). On Debian it's 999. Confirm with:
-
-```bash
-getent group docker | cut -d: -f3
-```
-
-If different, edit `DOCKER_GID` in `docker/.env`.
-
-Alternatively, set `CONTAINER_CONTROL_ENABLED=false` to skip module-owned container management entirely — you'll need to start Hindsight/Memgraph yourself if you enable those addons.
-
 ### Port 3000 already in use
 
 Another process owns the port. Either stop it, or override `BACKEND_PORT=3100` in `docker/.env` and re-run `docker compose up`.
@@ -177,7 +131,7 @@ You're on a stripped-down distro. `apt install openssl` or equivalent.
 ### Container exits immediately
 
 ```bash
-docker compose -f docker-compose.starter.yml logs --tail 50 backend
+docker compose -f docker-compose.dev.yml logs --tail 50 orkestra-backend-dev
 ```
 
 Most-common causes:

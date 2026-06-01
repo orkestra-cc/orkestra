@@ -2,7 +2,7 @@
 
 <img src=".github/assets/orkestra-logo.webp" alt="Orkestra" width="480" />
 
-**The plumbing every SaaS rebuilds — users, auth, RBAC, multi-tenancy, billing — already done. Plus 13 pluggable addons (electronic invoicing, AI sales, RAG, payments, identity, compliance) on a two-tier tenancy model.**
+**The plumbing every SaaS rebuilds — users, auth, RBAC, multi-tenancy, navigation, logging — already done. A core-only base you fork and build your product on top of.**
 
 [![Backend CI](https://github.com/orkestra-cc/orkestra/actions/workflows/backend.yml/badge.svg?branch=dev)](https://github.com/orkestra-cc/orkestra/actions/workflows/backend.yml)
 [![Frontend Admin CI](https://github.com/orkestra-cc/orkestra/actions/workflows/frontend-admin.yml/badge.svg?branch=dev)](https://github.com/orkestra-cc/orkestra/actions/workflows/frontend-admin.yml)
@@ -27,7 +27,7 @@
 [![OpenAPI 3.1](https://img.shields.io/badge/OpenAPI-3.1-6BA539?logo=openapiinitiative&logoColor=white&style=flat-square)](https://www.openapis.org)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg?style=flat-square)](LICENSE)
 
-[Quick Start](#sku-profiles-pulled-from-ghcr) · [Architecture](CLAUDE.md) · [Backend](backend/CLAUDE.md) · [Frontend Admin](frontend-admin/CLAUDE.md) · [Frontend Client](frontend-client/CLAUDE.md) · [Docker](docker/CLAUDE.md)
+[Quick Start](#quick-start) · [Architecture](CLAUDE.md) · [Backend](backend/CLAUDE.md) · [Frontend Admin](frontend-admin/CLAUDE.md) · [Frontend Client](frontend-client/CLAUDE.md) · [Docker](docker/CLAUDE.md)
 
 </div>
 
@@ -39,43 +39,31 @@ Every SaaS reinvents the same wheel: users, roles, password resets, OAuth with f
 
 Orkestra is that plumbing, already done. Seven core modules — `user`, `auth`, `authz`, `tenant`, `notification`, `navigation`, `logging` — always load and give you email/password (argon2id) + OAuth 2.1 (Google, Apple, GitHub, Discord) + TOTP/WebAuthn MFA, RBAC with Cedar policies, orgs + memberships, runtime log-level admin, and audited-everything on day one.
 
-Layered on top: 13 optional addon modules (invoicing, payments, subscriptions, RAG, AI agents, compliance, identity, ...) toggled per tenant at `/admin/modules`, hot-reloaded without a restart. Build your SaaS as the next addon, not as another from-scratch repo.
+Per [ADR-0006](docs/adr/0006-collapse-to-core-only-base.md) Orkestra is a **core-only base**: it ships no addons. The same `Module` extension seam the core is built on is the seam your fork uses to add invoicing, payments, AI, marketing, or whatever your product needs — in-tree, against the in-tree SDK contract, toggled per tenant at `/admin/modules` and hot-reloaded without a restart. Build your SaaS on top of the plumbing, not as another from-scratch repo.
 
-It runs on a **two-tier tenancy model**: Tier-1 operators manage staff and module configuration; Tier-2 external clients register, subscribe via Stripe-backed billing, and consume the addons scoped to their own org. Module enable/disable is per-Tier-1; service consumption is gated per-Tier-2 subscription. See [CLAUDE.md](CLAUDE.md) for the full model.
+It runs on a **two-tier tenancy model**: Tier-1 operators manage staff and module configuration; Tier-2 external clients register and manage their own org, users, and sub-tenants. The two-tier *data* model is built in; the *mechanism* for selling services to Tier-2 clients (catalog → subscribe → Stripe) left with the addons — a fork that needs it rebuilds it. See [CLAUDE.md](CLAUDE.md) for the full model.
 
 ## Architecture at a glance
 
-- **Backend.** Go 1.25, [Huma v2](https://huma.rocks) (OpenAPI-first), modular monolith. 7 core modules always load; 13 optional addons are toggled at `/admin/modules` (hot-reload, no restart). Single binary ships every addon — `ORKESTRA_PROFILE=minimal|full` only decides what's pre-enabled on a fresh install. See [backend/CLAUDE.md](backend/CLAUDE.md).
+- **Backend.** Go 1.25, [Huma v2](https://huma.rocks) (OpenAPI-first), modular monolith, single Go module. 7 core modules always load; the optional-module catalog ships empty — a fork registers its own at `/admin/modules` (hot-reload, no restart). See [backend/CLAUDE.md](backend/CLAUDE.md).
 - **Frontend (admin).** React 19 + Vite 7 + TypeScript 5.9 strict. Navigation is fetched from `/v1/navigation` so the UI reflects whatever modules the backend has enabled. Cookie-based operator-audience auth. See [frontend-admin/CLAUDE.md](frontend-admin/CLAUDE.md).
 - **Frontend (client).** Tier-2 customer-facing SPA on the same React 19 + Vite 7 stack, separate cookie domain, separate audience JWT. See [frontend-client/CLAUDE.md](frontend-client/CLAUDE.md).
 - **Mobile.** Flutter 3.35 + Riverpod (early-stage).
-- **Data.** MongoDB 8 + Redis 8. Optional Memgraph knowledge graph for the RAG / graph modules.
+- **Data.** MongoDB 8 + Redis 8, plus RustFS (S3-compatible) for uploaded blobs.
 - **Auth.** Email + password (argon2id) and OAuth 2.1 (Google, Apple, GitHub, Discord), RS256 JWT, 6-role RBAC, optional TOTP + WebAuthn MFA, per-audience tier split for operator vs. client surfaces.
 - **Observability.** Structured JSON logs with `trace_id` / `tenant_id` / `user_id` on every line out of the box, OpenTelemetry traces with tenant baggage (ADR-0001), Prometheus HTTP latency histogram with `trace_id` exemplars (one-click jump from a slow bucket to the matching Tempo trace), audit log kept separate from operational log. Zero-config locally; one env var to ship to a self-hosted Tempo + Loki + Grafana stack; one env var to ship to Honeycomb / Datadog / Grafana Cloud / Axiom. See [ADR-0005](docs/adr/0005-observability-logging-tracing-metrics.md).
-- **AI sidecar (optional).** graph + aimodels + rag + agents can run as a separate `cmd/ai-service` binary; the monolith swaps in `RemoteAIModelProvider` / `RemoteRAGQueryProvider` HTTP clients via the `AI_SERVICE_URL` env var. Zero code changes in consumer modules. See `backend/cmd/ai-service/`.
+## Quick Start
 
-## Runtime profiles, pulled from GHCR
-
-Published `ghcr.io/orkestra-cc/orkestra/backend:latest` ships every addon. Two compose files differ only by the `ORKESTRA_PROFILE` env var that seeds first-boot addon enablement; both layer on top of `docker-compose.infra.yml` for MongoDB and Redis.
-
-| Profile | Image tag | Effect on first boot |
-| --- | --- | --- |
-| `minimal` | `ghcr.io/orkestra-cc/orkestra/backend:latest` | Core only, no addons pre-enabled |
-| `full` | `ghcr.io/orkestra-cc/orkestra/backend:latest` | Every non-dev addon pre-enabled |
-
-> 🇮🇹 **`billing` and `company` are Italy-only.** They speak FatturaPA / SDI and the Italian business registry. Outside Italy, start from `minimal` and skip them — or pick `full` and disable them at `/admin/modules`.
+One infra base (MongoDB + Redis + RustFS) plus one app file per environment — `docker-compose.{dev,staging,prod}.yml` — with an opt-in `docker-compose.observability.yml` overlay. The dev stack runs on public Alpine images with AIR + Vite hot reload, no registry auth required.
 
 ```bash
-make init                                                          # first time only — scaffolds docker/.env + JWT keys
+make init                                                       # first time only — scaffolds docker/.env + JWT keys + network
 cd docker
-docker compose -f docker-compose.infra.yml up -d                   # mongodb + redis
-docker compose -f docker-compose.minimal.yml --env-file .env up -d # or full
-
-# Generate an administrator dev token to log in (from the repo root):
-cd .. && ORKESTRA_API_URL=http://localhost:3000 ./scripts/devtoken.sh administrator
+docker compose -f docker-compose.infra.yml up -d                # mongodb + redis + rustfs
+docker compose -f docker-compose.dev.yml --env-file .env up -d  # backend (AIR) + both frontends (Vite)
 ```
 
-`make init` is idempotent — re-runs leave existing secrets alone. It also creates the `orkestra-network` Docker bridge so you don't need to do it manually. The same operations are wrapped by `./orkestra.sh profile <name> <op>`; see [Managing the stack](#managing-the-stack).
+Then open the operator console (`http://localhost:8080`) and the first-run **setup wizard** prompts you to create the first administrator (`POST /v1/setup/admin`, gated to first-install only). `make init` is idempotent — re-runs leave existing secrets alone — and creates the `orkestra-network` Docker bridge. The same operations are wrapped by `./orkestra.sh`; see [Managing the stack](#managing-the-stack).
 
 **OAuth, SMTP, Stripe, AI keys are optional.** Email/password login works out of the box. Add the rest at `/admin/modules` after first login (see [OAuth setup guide](docs/site/operating/oauth-providers.mdx) for provider-specific instructions on Google, Apple, GitHub, Discord), or pre-seed by uncommenting the relevant lines in `docker/.env` before `docker compose up`.
 
@@ -86,7 +74,7 @@ The compose files default to `ghcr.io/orkestra-cc/orkestra/backend:latest`. To r
 ```bash
 BACKEND_IMAGE_REPO=ghcr.io/your-org/orkestra \
 FRONTEND_IMAGE_REPO=ghcr.io/your-org/orkestra \
-docker compose -f docker-compose.minimal.yml --env-file .env up -d
+docker compose -f docker-compose.dev.yml --env-file .env up -d
 ```
 
 To build the image yourself first:
@@ -97,48 +85,23 @@ docker build -f Dockerfile -t ghcr.io/your-org/orkestra/backend:latest .
 docker push ghcr.io/your-org/orkestra/backend:latest
 ```
 
-The published image is produced by `.github/workflows/backend.yml` on every push to `dev` / `main` — a single build, no profile matrix.
+The published image is produced by `.github/workflows/backend.yml` on every push to `dev` / `main` — a single build.
 
-## Full development stack
-
-For hot-reload Go development with AIR and the full addon fleet (Gotenberg, Hindsight, etc.), use the dev compose. Two flavors:
-
-| File | Base images | Audience |
-| --- | --- | --- |
-| **`docker-compose.dev-public.yml`** (default) | `golang:1.25.10-alpine`, `node:24-alpine` | Forkers, contributors, anyone without a [Chainguard](https://www.chainguard.dev) subscription |
-| `docker-compose.dev.yml` | `dhi.io/golang:1`, `dhi.io/node:24-dev` | Operators with a `dhi.io` enterprise subscription (smaller attack surface, faster security patches) |
-
-Behavior is identical (same env-vars, ports, volumes, hot-reload, AIR / Vite HMR). See [docs.orkestra.cc/architecture/dev-images](https://docs.orkestra.cc/architecture/dev-images) for the trade-offs.
-
-```bash
-make init                                       # first time only
-./orkestra.sh                                   # interactive TUI; pick "Full stack" (uses public images by default)
-# or manually:
-cd docker
-docker compose -f docker-compose.infra.yml up -d
-docker compose -f docker-compose.dev-public.yml up -d
-```
-
-To opt back into the Chainguard variant (only if you have `dhi.io` access), set `DEV_COMPOSE_VARIANT=chainguard` in `docker/.env` (or as a shell env var) — `orkestra.sh` will switch to `docker-compose.dev.yml` automatically.
+The dev backend builds `docker/Dockerfile.dev-backend` (`golang:1.25.10-alpine`, AIR pre-baked) — no registry auth needed. A fork with a [Chainguard](https://www.chainguard.dev) subscription can swap the base image via the `GO_BASE` build-arg.
 
 ## Managing the stack
 
 `orkestra.sh` at the project root is the single entry point for every stack operation. It replaces the old `deploy.sh` and `logs.sh`.
 
-**Interactive TUI.** `./orkestra.sh` launches a profile menu (runtime profile picker / full stack) followed by a per-profile operations menu with deploy, stop, reset, status, logs, and info.
+**Interactive TUI.** `./orkestra.sh` launches a main menu (full stack / observability) followed by an operations menu with deploy, stop, status, and logs.
 
-**CLI mode.** Every operation also works as a non-interactive command for scripting:
+**CLI mode.** Every operation also works as a non-interactive command for scripting (`ENV` comes from `docker/.env` or an `ENV=...` prefix):
 
 ```bash
-# Runtime profile, pulled from GHCR (minimal | full)
-./orkestra.sh profile minimal deploy --pull
-./orkestra.sh profile full status
-./orkestra.sh profile full logs backend -f
-
-# Full stack, uses ENV from docker/.env or ENV=... prefix
 ENV=development ./orkestra.sh deploy --scope backend --rebuild --yes
 ./orkestra.sh status
 ./orkestra.sh logs orkestra-backend-dev -f
+./orkestra.sh observability up
 ```
 
 Run `./orkestra.sh --help` for the full command surface.
@@ -157,13 +120,18 @@ Run `./orkestra.sh --help` for the full command surface.
 | `navigation` | Dynamic menu aggregated from every module's `NavItems()` |
 | `logging` | Runtime log-level admin (ADR-0005 Phase F): `log_levels` collection + `/admin/observability/log-levels` UI |
 
-### Optional addons (toggled at `/admin/modules`)
+### Optional modules
+
+The base ships **none** ([ADR-0006](docs/adr/0006-collapse-to-core-only-base.md)). A fork adds its own under `backend/internal/addons/<name>/` + `cmd/server/catalog_<name>.go`, and they appear at `/admin/modules`. The verticals Orkestra used to ship (billing/SDI, documents, company, graph, aimodels, rag, agents, sales, subscriptions, payments, compliance, identity, marketing, dev) are preserved as read-only snapshots at `github.com/orkestra-cc/orkestra-addon-*` to crib from. See [Adding an addon](https://docs.orkestra.cc/contributing/adding-an-addon).
+
+<details>
+<summary>Old addon catalog (now archived)</summary>
 
 | Module | Purpose |
 | --- | --- |
-| `billing` 🇮🇹 | Italian electronic invoicing (FatturaPA/SDI) — IT-only, useless outside Italy |
+| `billing` 🇮🇹 | Italian electronic invoicing (FatturaPA/SDI) |
 | `documents` | PDF generation via Gotenberg |
-| `company` 🇮🇹 | Italian business-registry lookup — IT-only, useless outside Italy |
+| `company` 🇮🇹 | Italian business-registry lookup |
 | `graph` | Memgraph knowledge graph |
 | `aimodels` | Multi-provider AI model management (Ollama, OpenAI, Anthropic) |
 | `rag` | Document ingestion + retrieval-augmented generation |
@@ -173,7 +141,10 @@ Run `./orkestra.sh --help` for the full command surface.
 | `payments` | Stripe gateway: charges, refunds, webhooks |
 | `compliance` | Platform audit log; future GDPR DSR pipelines, SOC2 evidence |
 | `identity` | Per-tenant BYO OpenID Connect login + SCIM 2.0 stubs |
+| `marketing` | Contact base + CSV/Excel importer + scoring + card lifecycle |
 | `dev` | Dev token generator (disabled in production) |
+
+</details>
 
 ## Observability, built in
 
@@ -234,17 +205,15 @@ The React app reads enabled modules from `/v1/navigation` at boot and only rende
 
 ```
 orkestra/
-├── backend/                 # Go modular monolith
-│   ├── cmd/
-│   │   ├── server/          # Monolith binary
-│   │   └── ai-service/      # Optional AI sidecar
+├── backend/                 # Go modular monolith — single Go module
+│   ├── cmd/server/          # The binary (catalog.go + empty optionalModules)
 │   ├── internal/
 │   │   ├── core/            # Always loaded: user, notification, tenant, authz, auth, navigation, logging
-│   │   ├── addons/          # Optional: billing, documents, rag, agents, ...
-│   │   └── shared/          # Module interface, config, middleware, interfaces
+│   │   │                    # (internal/addons/ does not exist in the base — a fork adds it)
+│   │   └── shared/          # config, database, middleware, blob, container, …
+│   ├── pkg/sdk/             # In-tree SDK: Module, registry, iface, …
 │   ├── tools/               # tenantscope + policycoverage CI gates
-│   ├── Dockerfile           # Chainguard hardened images (dev + prod)
-│   └── Dockerfile.ai-service # AI sidecar binary
+│   └── Dockerfile           # Multi-stage (dev + prod)
 ├── frontend-admin/          # React 19 + Vite 7, operator console (Tier-1)
 ├── frontend-client/         # React 19 + Vite 7, external client SPA (Tier-2)
 ├── mobile/                  # Flutter 3.35
@@ -264,7 +233,7 @@ Every pull request runs through:
 - **Tests.** `go test -race` with a Mongo + Redis service matrix and a 15 % coverage floor.
 - **Vulnerability check.** `govulncheck` against the latest Go 1.25.x stdlib + module deps, with an allowlist for upstream-unfixed Docker SDK CVEs.
 - **Single binary build.** One build per push validates `cmd/server` compiles cleanly with every addon.
-- **Docker push.** On push to `dev` / `main`, the image is pushed to GHCR as `ghcr.io/orkestra-cc/orkestra/backend:latest` and `:<sha>`. On a release tag push (`vX.Y.Z`) all images additionally get version tags — `:vX.Y.Z`, `:X.Y.Z`, and the floating `:X.Y` — so a deploy can pin an exact release. Applies to all four images (`backend`, `frontend`, `frontend-client`, `ai-service`).
+- **Docker push.** On push to `dev` / `main`, the image is pushed to GHCR as `ghcr.io/orkestra-cc/orkestra/backend:latest` and `:<sha>`. On a release tag push (`vX.Y.Z`) all images additionally get version tags — `:vX.Y.Z`, `:X.Y.Z`, and the floating `:X.Y` — so a deploy can pin an exact release. Applies to all three images (`backend`, `frontend`, `frontend-client`).
 
 ### Coverage snapshot
 

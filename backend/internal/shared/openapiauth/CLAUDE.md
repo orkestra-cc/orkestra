@@ -5,22 +5,16 @@ _Parent: [../../../CLAUDE.md](../../../CLAUDE.md)_
 
 ## Module home
 
-This directory is a **separate Go module**
-(`github.com/orkestra-cc/orkestra-openapi-auth`) since Phase 5c of the
-SDK split. Source lives in-tree at this path for monorepo development;
-the same tree is mirrored to
-[github.com/orkestra-cc/orkestra-openapi-auth](https://github.com/orkestra-cc/orkestra-openapi-auth)
-and tagged starting from `v0.1.0`. Backend's `go.mod` carries a
-`replace` directive pointing at this path so changes here take effect
-without a tag bump during cross-cutting work; CI and external
-consumers fetch the published version through the Go module proxy.
+This is an in-tree package of the single backend Go module, imported as
+`github.com/orkestra/backend/internal/shared/openapiauth`. (ADR-0006 D2
+folded the SDK split back into one module; the brief stint as a separate
+`github.com/orkestra-cc/orkestra-openapi-auth` module is reverted.)
 
-The package was previously `github.com/orkestra/backend/internal/shared/openapiauth`.
-Phase 5c carved it out because the `company` addon (extracted in the
-same phase) needs to import it, and Go's `internal/` rule made that
-impossible across the new module boundary. The `billing` addon (still
-in-tree at the time of writing) also imports the new public path so
-its eventual extraction is unblocked.
+It is the OpenAPI.it OAuth-token minter the removed `billing` and
+`company` addons used. **No module in the core base consumes it** — it is
+kept as a ready-made helper for a fork that re-adds an OpenAPI.it-backed
+vertical (copy from the archived `orkestra-cc/orkestra-addon-billing` /
+`-company` snapshots).
 
 ## What it does
 
