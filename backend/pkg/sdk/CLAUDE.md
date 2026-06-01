@@ -5,25 +5,19 @@ _Parent: [../../CLAUDE.md](../../CLAUDE.md)_
 
 ## What this is
 
-The **public contract layer** between the Orkestra kernel and every module.
-A separate Go module hosted in-tree:
+The **contract layer** between the Orkestra kernel and every module — the
+`Module` interface, registry, `ServiceRegistry`, `ConfigService`, and the
+`iface` consumer interfaces a fork's addon builds against.
 
-```
-module github.com/orkestra-cc/orkestra-sdk
-```
-
-Bound to `backend/` via the repo-root `go.work` plus a `replace` directive
-in `backend/go.mod` pointing at this in-tree path. The same tree is
-mirrored to [github.com/orkestra-cc/orkestra-sdk](https://github.com/orkestra-cc/orkestra-sdk)
-(published since `v0.1.0`); external addons fetch the public version
-through the Go module proxy, monorepo development uses the live source
-here. When cross-cutting churn ends, the `replace` will drop and
-backend becomes a regular module consumer.
+Per [ADR-0006](../../../docs/adr/0006-collapse-to-core-only-base.md) D2 this
+is an **in-tree package** of the single `github.com/orkestra/backend` Go
+module — imported as `github.com/orkestra/backend/pkg/sdk/...`. There is no
+separate `go.mod`, no `go.work`, no `replace`, and nothing published to the
+Go proxy. (The old `github.com/orkestra-cc/orkestra-sdk` published module is
+archived; the multi-repo SDK split was reverted.)
 
 For the conceptual / new-developer walkthrough see
 [../../../docs/onboarding/orkestra-sdk.md](../../../docs/onboarding/orkestra-sdk.md).
-For the multi-phase migration plan see
-[../../../docs/plans/orkestra-sdk-split.md](../../../docs/plans/orkestra-sdk-split.md).
 
 ## Load-bearing invariant: SDK self-containment
 
@@ -95,36 +89,28 @@ When in doubt, ask: **"Could an addon extracted to its own GitHub repo
 import this?"** If yes, it belongs here. If it references config.Config,
 auth's `*models.JWTClaims`, or any backend-private package, it doesn't.
 
-## Module path: choose stably
+## Import path
 
-Every Go file in this tree imports siblings via the public path:
+Every Go file in this tree (and every consumer) imports SDK packages via
+the in-tree module path:
 
 ```go
 import (
-    "github.com/orkestra-cc/orkestra-sdk/iface"
-    "github.com/orkestra-cc/orkestra-sdk/ctxauth"
-    "github.com/orkestra-cc/orkestra-sdk/module"
+    "github.com/orkestra/backend/pkg/sdk/iface"
+    "github.com/orkestra/backend/pkg/sdk/ctxauth"
+    "github.com/orkestra/backend/pkg/sdk/module"
 )
 ```
 
-Never `github.com/orkestra/backend/pkg/sdk/...` — that path doesn't exist
-as a Go module identity. Existing files were rewritten in commit `a2fd7eb`
-(Phase 3); regression checks should grep for `orkestra/backend/pkg/sdk`
-and fail.
+The old `github.com/orkestra-cc/orkestra-sdk` identity no longer exists
+(ADR-0006 D2 folded the SDK back into the single backend module); a
+regression grep for `orkestra-cc/orkestra-sdk` should find nothing.
 
 ## go.mod hygiene
 
-When you add a third-party import inside `pkg/sdk/`:
-
-1. Add it to `pkg/sdk/go.mod` `require` block.
-2. `cd backend/pkg/sdk && go mod tidy`.
-3. If the dep is also used by `backend/`, **align versions**. The repo-
-   root `go.work` resolves both modules to a single copy of each
-   transitive dep at build time; mismatched explicit `require` versions
-   between the two modules cause obscure type errors.
-
-The `Makefile`'s `backend-deps` target tidies both modules; running it
-locally after any dep change keeps the two `go.mod`s in sync.
+`pkg/sdk` has no `go.mod` of its own — it is part of `backend/go.mod`. When
+you add a third-party import inside `pkg/sdk/`, add it to `backend/go.mod`
+and run `cd backend && go mod tidy` (the `backend-deps` make target).
 
 ## Rules
 
@@ -155,34 +141,19 @@ locally after any dep change keeps the two `go.mod`s in sync.
 
 ## CI
 
-`backend-test` and `backend-test-ci` Make targets depend on the SDK
-counterparts (`sdk-test`, `sdk-test-ci`) so the existing CI pipeline
-covers both modules without a separate workflow. The SDK runs the same
-golangci-lint config as `backend/` via the `sdk-lint` target:
-
-```bash
-make sdk-test       # quick test pass
-make sdk-test-ci    # race + coverage
-make sdk-lint       # full lint
-```
-
-CI invokes `ci-backend` which chains all of the above plus
-`backend-tenantscope` (operates on `backend/internal/`, unaffected by
-the SDK split) and a single binary build.
+`pkg/sdk` is part of the backend Go module, so `cd backend && go test ./...`
+(the `backend-test` / `backend-test-ci` targets) and `golangci-lint`
+(`backend-lint`) cover it with no separate target. `ci-backend` runs all of
+the above plus `backend-tenantscope` and a single binary build.
 
 ## Related
 
-- [README.md](README.md) — external-facing intro shipped to the public
-  SDK repo (install, Module contract, hello-world example, versioning
-  policy). Audience: someone discovering the SDK from
-  `github.com/orkestra-cc/orkestra-sdk`. Keep in sync with this file.
+- [README.md](README.md) — external-facing intro (install, Module
+  contract, hello-world example, versioning policy). Keep in sync with
+  this file.
 - [Onboarding doc](../../../docs/onboarding/orkestra-sdk.md) — narrative
   walkthrough aimed at new contributors
-- [SDK split plan](../../../docs/plans/orkestra-sdk-split.md) — multi-
-  phase rollout including the still-pending Phase 4 (repo extraction)
 - [Backend module system](../../CLAUDE.md#module-system) — how the
   registry consumes the SDK at boot
-- [Core modules](../../internal/core/CLAUDE.md) — the six always-loaded
+- [Core modules](../../internal/core/CLAUDE.md) — the seven always-loaded
   modules, all of which implement `module.Module`
-- [Addon catalog](../../internal/addons/) — every directory in here
-  implements `module.Module` and consumes the SDK
