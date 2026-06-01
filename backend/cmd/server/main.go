@@ -24,6 +24,7 @@ import (
 	"github.com/orkestra/backend/internal/shared/config"
 	"github.com/orkestra/backend/internal/shared/container"
 	"github.com/orkestra/backend/internal/shared/database"
+	"github.com/orkestra/backend/internal/shared/devtoken"
 	"github.com/orkestra/backend/internal/shared/errors"
 	authMiddleware "github.com/orkestra/backend/internal/shared/middleware"
 	"github.com/orkestra/backend/internal/shared/setup"
@@ -395,6 +396,21 @@ func main() {
 		logger,
 	)
 	setup.NewHandler(setupSvc, cfg.Auth.Cookie).RegisterRoutes(operatorAPI)
+
+	// Dev-token endpoint (dev/staging only) — synthetic JWTs for first
+	// login + local API testing, used by scripts/devtoken.sh and the
+	// console's "Sign in with dev token" affordance. Re-provided in core
+	// after ADR-0006 removed the dev addon. Mounted as a raw chi route on
+	// the operator root mux (bypasses Huma, hidden from /docs); never on
+	// the client host. No DB writes.
+	if !cfg.IsProduction() {
+		devtoken.NewHandler(
+			module.MustGetTyped[iface.JWTProvider](svcRegistry, module.ServiceOperatorJWTService),
+			module.MustGetTyped[iface.JWTProvider](svcRegistry, module.ServiceClientJWTService),
+			cfg,
+			logger,
+		).RegisterRoutes(operatorMux)
+	}
 
 	// Admin module management routes: platform-level, not per-org. Split
 	// into reads and mutations so Block B can require MFA on the paths
