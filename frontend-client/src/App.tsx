@@ -2,8 +2,6 @@ import { Route, Routes } from "react-router-dom";
 import { Layout } from "@/components/Layout";
 import { RequireAuth } from "@/auth/RequireAuth";
 import { HomePage } from "@/pages/HomePage";
-import { CatalogPage } from "@/pages/CatalogPage";
-import { CatalogServicePage } from "@/pages/CatalogServicePage";
 import { SignupPage } from "@/pages/SignupPage";
 import { VerifyEmailPage } from "@/pages/VerifyEmailPage";
 import { LoginPage } from "@/pages/LoginPage";
@@ -15,12 +13,6 @@ import { AccountProfilePage } from "@/pages/AccountProfilePage";
 import { AccountSecurityPage } from "@/pages/AccountSecurityPage";
 import { BillingProfilePage } from "@/pages/BillingProfilePage";
 import { MfaEnrolPage } from "@/pages/MfaEnrolPage";
-import { SubscribePage } from "@/pages/SubscribePage";
-import { SubscribeReturnPage } from "@/pages/SubscribeReturnPage";
-import { SubscriptionsPage } from "@/pages/SubscriptionsPage";
-import { SubscriptionDetailPage } from "@/pages/SubscriptionDetailPage";
-import { TransactionsPage } from "@/pages/TransactionsPage";
-import { PaymentMethodsPage } from "@/pages/PaymentMethodsPage";
 import { NotFoundPage } from "@/pages/NotFoundPage";
 
 export function App() {
@@ -28,8 +20,6 @@ export function App() {
     <Routes>
       <Route element={<Layout />}>
         <Route path="/" element={<HomePage />} />
-        <Route path="/catalog" element={<CatalogPage />} />
-        <Route path="/catalog/:code" element={<CatalogServicePage />} />
         <Route path="/signup" element={<SignupPage />} />
         <Route path="/verify-email" element={<VerifyEmailPage />} />
         <Route path="/login" element={<LoginPage />} />
@@ -73,54 +63,6 @@ export function App() {
           element={
             <RequireAuth>
               <BillingProfilePage />
-            </RequireAuth>
-          }
-        />
-        <Route
-          path="/account/subscriptions"
-          element={
-            <RequireAuth>
-              <SubscriptionsPage />
-            </RequireAuth>
-          }
-        />
-        <Route
-          path="/account/subscriptions/:id"
-          element={
-            <RequireAuth>
-              <SubscriptionDetailPage />
-            </RequireAuth>
-          }
-        />
-        <Route
-          path="/account/transactions"
-          element={
-            <RequireAuth>
-              <TransactionsPage />
-            </RequireAuth>
-          }
-        />
-        <Route
-          path="/account/payment-methods"
-          element={
-            <RequireAuth>
-              <PaymentMethodsPage />
-            </RequireAuth>
-          }
-        />
-        <Route
-          path="/subscribe"
-          element={
-            <RequireAuth>
-              <SubscribePage />
-            </RequireAuth>
-          }
-        />
-        <Route
-          path="/subscribe/return"
-          element={
-            <RequireAuth>
-              <SubscribeReturnPage />
             </RequireAuth>
           }
         />

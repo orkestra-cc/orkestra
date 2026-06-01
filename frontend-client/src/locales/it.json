@@ -4,7 +4,6 @@
     "tagline": "Servizi gestiti per la tua azienda"
   },
   "nav": {
-    "catalog": "Servizi",
     "signin": "Accedi",
     "signup": "Registrati",
     "account": "Account",
@@ -13,25 +12,7 @@
   "home": {
     "hero": "Scegli i servizi che ti servono. Niente di più.",
     "subhero": "Abbonamenti mensili, fatturazione trasparente, pagamenti sicuri tramite Stripe.",
-    "cta": "Esplora il catalogo"
-  },
-  "catalog": {
-    "title": "Catalogo servizi",
-    "subtitle": "Tutti i servizi attualmente attivi sulla piattaforma.",
-    "empty": "Nessun servizio attivo al momento. Torna a trovarci.",
-    "viewDetail": "Dettagli",
-    "from": "A partire da",
-    "subscribe": "Abbonati",
-    "noPricing": "Prezzi in fase di definizione",
-    "category": "Categoria",
-    "capabilities": "Funzionalità incluse",
-    "setupFee": "Costo di attivazione",
-    "back": "Torna al catalogo"
-  },
-  "cycle": {
-    "monthly": "/ mese",
-    "quarterly": "/ trimestre",
-    "annual": "/ anno"
+    "cta": "Accedi"
   },
   "signup": {
     "title": "Crea il tuo account",
@@ -160,18 +141,6 @@
       "title": "Dati di fatturazione",
       "cta": "L'anagrafica e i dati fiscali che useremo su Stripe e sulle fatture."
     },
-    "subscriptions": {
-      "title": "Abbonamenti",
-      "cta": "Vedi gli abbonamenti attivi, le fatture e l'attività."
-    },
-    "transactions": {
-      "title": "Transazioni",
-      "cta": "Addebiti, rimborsi e cronologia delle transazioni Stripe."
-    },
-    "paymentMethods": {
-      "title": "Metodi di pagamento",
-      "cta": "Carte salvate per i rinnovi e le fatture in sospeso."
-    },
     "changePassword": {
       "title": "Cambia password",
       "subtitle": "Inserisci la password attuale e quella nuova. La sessione attiva verrà invalidata.",
@@ -224,24 +193,6 @@
       "backupContinue": "Ho fatto, continua"
     }
   },
-  "subscribe": {
-    "title": "Conferma il tuo abbonamento",
-    "subtitle": "Controlla il piano e ti porteremo su Stripe per salvare un metodo di pagamento. Il primo addebito avviene all'inizio del ciclo di fatturazione.",
-    "back": "Torna ai dettagli del servizio",
-    "browseCatalog": "Sfoglia il catalogo",
-    "servicePlan": "Servizio",
-    "plusSetup": "Più un costo di attivazione una tantum di {{fee}}.",
-    "ownerLabel": "Fattura questo abbonamento a",
-    "ownerHint": "Per impostazione predefinita la fatturazione è personale. Scegli un'organizzazione se vuoi intestare la fattura a essa.",
-    "ownerPersonal": "Personale (solo io)",
-    "cardNotice": "Ti reindirizzeremo a Stripe Checkout per salvare in sicurezza una carta. Non addebiteremo nulla ora — la prima fattura viene generata all'inizio del ciclo di fatturazione.",
-    "submit": "Vai al pagamento",
-    "submitting": "Apertura checkout…",
-    "cancel": "Non ora",
-    "errorTitle": "Manca qualcosa",
-    "errorMissingTier": "Non riusciamo a trovare il piano che hai scelto. Selezionalo dal catalogo.",
-    "errorTierGone": "Questo piano non è più disponibile. Sfoglia il catalogo per vedere le opzioni attuali."
-  },
   "billing": {
     "title": "Dati di fatturazione",
     "subtitle": "Servono per creare il cliente Stripe e per le fatture che emettiamo.",
@@ -285,129 +236,8 @@
     "submitting": "Salvataggio…",
     "saved": "Dati di fatturazione salvati.",
     "errorLegalName": "La ragione sociale è obbligatoria per intestazioni aziendali.",
-    "errorCountry": "Il paese è obbligatorio."
-  },
-  "subscribeReturn": {
-    "successTitle": "Abbonamento confermato",
-    "successBody": "La tua carta è stata salvata su Stripe e l'abbonamento è attivo.",
-    "cancelTitle": "Checkout annullato",
-    "cancelBody": "Non abbiamo salvato alcun metodo di pagamento. Puoi tornare al catalogo in qualsiasi momento per riprovare.",
-    "errorTitle": "Riferimento mancante",
-    "errorMissing": "Non riusciamo a capire a quale abbonamento si riferisce questo URL di ritorno.",
-    "warnLookup": "Non riusciamo a caricare i dettagli dell'abbonamento. Controlla la pagina account tra qualche istante.",
-    "browseCatalog": "Torna al catalogo",
-    "goAccount": "Vai all'account",
-    "statusLabel": "Stato",
-    "tierLabel": "Piano",
-    "nextBillingLabel": "Prossima fatturazione",
-    "firstChargeNotice": "La prima fattura viene generata all'inizio del ciclo di fatturazione e la carta che hai appena salvato verrà addebitata automaticamente.",
-    "status": {
-      "active": "Attivo",
-      "past_due": "In ritardo",
-      "suspended": "Sospeso",
-      "cancelled": "Annullato",
-      "expired": "Scaduto"
-    }
-  },
-  "ownerScope": {
-    "label": "Visualizza",
-    "all": "Tutti gli account",
-    "personal": "Solo personale",
-    "tenantOption": "Organizzazione · {{id}}"
-  },
-  "dashboard": {
-    "subscriptions": {
-      "title": "Abbonamenti",
-      "subtitle": "Abbonamenti attivi e passati per i tuoi account.",
-      "startNew": "Avvia un nuovo abbonamento",
-      "browseCatalog": "Sfoglia il catalogo",
-      "empty": "Ancora nessun abbonamento. Scegli un servizio per iniziare.",
-      "ownerPersonal": "Personale",
-      "ownerTenant": "Organizzazione · {{id}}",
-      "serviceRef": "Servizio · {{id}}…",
-      "periodStart": "Inizio periodo",
-      "periodEnd": "Fine periodo",
-      "nextBilling": "Prossima fatturazione",
-      "willEnd": "Termina il"
-    },
-    "subscriptionDetail": {
-      "errorMissing": "Non riusciamo a capire a quale abbonamento si riferisce questo link.",
-      "errorLoad": "Impossibile caricare l'abbonamento. Riprova tra poco.",
-      "cancel": "Annulla abbonamento",
-      "cancelPrompt": "Come vuoi annullare? Mantieni l'accesso fino alla fine del periodo o blocca subito?",
-      "cancelAtPeriodEnd": "Termina a fine periodo",
-      "cancelImmediately": "Annulla subito",
-      "cancelKeep": "Mantieni",
-      "reactivate": "Riattiva",
-      "reactivating": "Riattivazione…",
-      "invoicesTitle": "Fatture",
-      "invoicesEmpty": "Ancora nessuna fattura — la prima viene generata all'inizio del ciclo di fatturazione.",
-      "invoicesError": "Impossibile caricare le fatture.",
-      "invoiceNumber": "Numero",
-      "invoicePeriod": "Periodo",
-      "invoiceAmount": "Importo",
-      "invoiceStatus": "Stato",
-      "invoiceIssued": "Emessa",
-      "invoiceStatusValue": {
-        "pending": "In attesa",
-        "paid": "Pagata",
-        "failed": "Fallita",
-        "refunded": "Rimborsata",
-        "void": "Annullata",
-        "awaiting_manual_payment": "In attesa di pagamento manuale"
-      },
-      "payNow": "Paga ora",
-      "paying": "Apertura checkout…",
-      "payNoPending": "Niente da pagare al momento — il prossimo addebito verrà generato automaticamente al rinnovo.",
-      "paySuccess": "Pagamento ricevuto. Lo stato della fattura si aggiornerà appena Stripe lo conferma.",
-      "payCancel": "Checkout annullato. Nessun addebito eseguito.",
-      "activityTitle": "Attività",
-      "activityEmpty": "Nessuna attività registrata.",
-      "activityError": "Impossibile caricare l'attività."
-    },
-    "activity": {
-      "actor": "Da {{actor}}",
-      "type": {
-        "created": "Abbonamento creato",
-        "charged": "Addebito riuscito",
-        "charge_failed": "Addebito fallito",
-        "refunded": "Rimborso eseguito",
-        "cancelled": "Annullato",
-        "reactivated": "Riattivato",
-        "suspended": "Sospeso",
-        "tier_changed": "Piano cambiato",
-        "invoice_issued": "Fattura emessa",
-        "manual_payment_required": "Pagamento manuale richiesto"
-      }
-    },
-    "transactions": {
-      "title": "Transazioni",
-      "subtitle": "Tutti gli addebiti, i tentativi e i rimborsi attribuiti ai tuoi account.",
-      "empty": "Nessuna transazione. Il primo addebito apparirà qui dopo il prossimo ciclo di fatturazione.",
-      "date": "Data",
-      "amount": "Importo",
-      "status": "Stato",
-      "provider": "Gateway",
-      "reference": "Riferimento",
-      "refundedAmount": "({{amount}} rimborsati)",
-      "statusValue": {
-        "pending": "In attesa",
-        "requires_action": "Richiede azione",
-        "succeeded": "Completata",
-        "failed": "Fallita",
-        "refunded": "Rimborsata",
-        "partially_refunded": "Parzialmente rimborsata"
-      }
-    },
-    "paymentMethods": {
-      "title": "Metodi di pagamento",
-      "subtitle": "Carte salvate su Stripe e usate per i rinnovi automatici.",
-      "empty": "Nessun metodo di pagamento salvato. Aggiungi una carta per i rinnovi automatici.",
-      "addCard": "Aggiungi una carta",
-      "adding": "Apertura Stripe…",
-      "defaultBadge": "Predefinita",
-      "expires": "Scade {{date}}"
-    }
+    "errorCountry": "Il paese è obbligatorio.",
+    "cancel": "Annulla"
   },
   "lang": {
     "switch": "Lingua",
