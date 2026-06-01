@@ -5,16 +5,17 @@ sidebar_position: 6
 
 # Build Your First Addon
 
-:::note 🚧 Draft
-End-to-end walkthrough: create a new repo from the addon template, implement the `Module` interface, declare collections, write a `catalog_<name>.go` in the monorepo, build with the right tags, enable at runtime.
+:::note Core-only base
+Per [ADR-0006](/adrs/collapse-to-core-only-base) Orkestra ships **no addons** — it is a core-only base. You add optional modules **in your own fork's tree**, against the in-tree SDK contract, using the same `Module` seam the seven core modules use. There is no separate addon repo, no `go.work`, no `replace`, and no published module to import.
 :::
 
 ## High-level steps
 
-1. **Scaffold** — clone `orkestra-cc/orkestra-addon-template` (or copy the structure of a small existing addon like `company`).
-2. **Implement `Module`** — `Init`, `RegisterRoutes`, `Start`, `Stop`, `HealthCheck`, plus the metadata methods.
-3. **Register in the monorepo** — add `cmd/server/catalog_<name>.go` with the build tag `//go:build !no_addons || addon_<name>`.
-4. **Hook into a SKU** — update the relevant `make build-<profile>` target if you want it in a curated SKU.
-5. **Configure at `/admin/modules`** — enable it; the registry hot-loads.
+1. **Scaffold** — create `backend/internal/addons/<name>/` in your fork (the directory does not exist in the base). Mirror the layout of a core module under `backend/internal/core/`: `module.go` → `handlers/` → `services/` → `repository/` → `models/`.
+2. **Implement `Module`** — `Init`, `RegisterRoutes`, `Start`, `Stop`, `HealthCheck`, plus the metadata methods (`Name`, `Category`, `ConfigSchema`, `Collections`, `NavItems`, `Dependencies`, …). Import the SDK from `github.com/orkestra/backend/pkg/sdk/...`; reach other modules only through `pkg/sdk/iface` + the `ServiceRegistry`.
+3. **Register it** — add `cmd/server/catalog_<name>.go` with a single `init()` that does `optionalModules["<name>"] = func() module.Module { return <name>.NewModule() }`. No build tags — it compiles into the one binary.
+4. **Configure at `/admin/modules`** — enable it; the registry hot-loads (no restart). The admin UI surface is retained for exactly this.
+
+For the archived snapshots of the verticals Orkestra used to ship (billing/SDI, RAG, agents, marketing, …), see the `orkestra-cc/orkestra-addon-*` repos — useful to crib from, not to depend on.
 
 For the architectural reasons behind this shape, see [Module lifecycle](/architecture/module-lifecycle).

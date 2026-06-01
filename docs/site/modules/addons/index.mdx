@@ -1,26 +1,29 @@
 ---
-title: Addons (auto-synced)
+title: Addons
 sidebar_position: 1
 ---
 
 # Addons
 
-The pages in this section are **auto-synced** from each addon's public repo `README.md` at build time (and nightly via cron). They are not edited here directly — to fix a typo or expand content, PR the source repo.
+:::note Core-only base
+Per [ADR-0006](/adrs/collapse-to-core-only-base) Orkestra ships **no addons** — it is a core-only base of seven modules (user, auth, authz, tenant, notification, navigation, logging). A fork adds its own optional modules in-tree; see [Adding an addon](/contributing/adding-an-addon).
+:::
 
-If you don't see an addon listed yet, the sync script may not have run. Re-trigger from `.github/workflows/sync-nightly.yml` or run `npm run sync:modules` locally.
+The verticals Orkestra used to ship were archived as **read-only snapshots** at `github.com/orkestra-cc/orkestra-addon-*`. They are not maintained and are not imported by the base — copy from them into your fork if useful (see [Customizing an archived addon](/contributing/forking-a-core-addon)).
 
-| Addon         | Source                                    |
-| ------------- | ----------------------------------------- |
-| billing       | `orkestra-cc/orkestra-billing`            |
-| documents     | `orkestra-cc/orkestra-documents`          |
-| company       | `orkestra-cc/orkestra-company`            |
-| graph         | `orkestra-cc/orkestra-graph`              |
-| aimodels      | `orkestra-cc/orkestra-aimodels`           |
-| rag           | `orkestra-cc/orkestra-rag`                |
-| agents        | `orkestra-cc/orkestra-agents`             |
-| sales         | `orkestra-cc/orkestra-sales`              |
-| subscriptions | `orkestra-cc/orkestra-subscriptions`      |
-| payments      | `orkestra-cc/orkestra-payments`           |
-| compliance    | `orkestra-cc/orkestra-compliance`         |
-| identity      | `orkestra-cc/orkestra-identity`           |
-| dev           | `orkestra-cc/orkestra-dev`                |
+| Archived vertical | Snapshot repo                              |
+| ----------------- | ------------------------------------------ |
+| billing (FatturaPA/SDI) | `orkestra-cc/orkestra-addon-billing`   |
+| documents (PDF/Gotenberg) | `orkestra-cc/orkestra-addon-documents` |
+| company (registry lookup) | `orkestra-cc/orkestra-addon-company`   |
+| graph (Memgraph)  | `orkestra-cc/orkestra-addon-graph`         |
+| aimodels          | `orkestra-cc/orkestra-addon-aimodels`      |
+| rag               | `orkestra-cc/orkestra-addon-rag`           |
+| agents (Hindsight) | `orkestra-cc/orkestra-addon-agents`       |
+| sales             | `orkestra-cc/orkestra-addon-sales`         |
+| subscriptions     | `orkestra-cc/orkestra-addon-subscriptions` |
+| payments (Stripe) | `orkestra-cc/orkestra-addon-payments`      |
+| compliance        | `orkestra-cc/orkestra-addon-compliance`    |
+| identity (BYO OIDC/SCIM) | `orkestra-cc/orkestra-addon-identity` |
+| marketing         | `orkestra-cc/orkestra-addon-marketing`     |
+| dev               | `orkestra-cc/orkestra-addon-dev`           |

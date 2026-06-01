@@ -1,65 +1,37 @@
 ---
 title: Adding an Addon
 sidebar_position: 3
-description: End-to-end walkthrough for adding a new addon module to an Orkestra fork — in-tree first, public repo later.
+description: End-to-end walkthrough for adding a new optional module to an Orkestra fork — in-tree, single Go module.
 ---
 
 # Adding an Addon
 
-An **addon** is a Go module that implements the [`Module`](/sdk/module-interface) interface. It plugs into the monorepo's catalog, gets toggled per internal tenant at `/admin/modules`, and ships in one or more SKU profiles.
+An **addon** is an optional module that implements the [`Module`](/sdk/module-interface) interface. It lives **in your fork's tree** (`backend/internal/addons/<name>/`), registers into the catalog, and is toggled per internal tenant at `/admin/modules`.
+
+:::note Core-only base
+Per [ADR-0006](/adrs/collapse-to-core-only-base) Orkestra ships **no addons** and the base is a **single Go module**. There is no separate addon `go.mod`, no `go.work`, no `replace` directive, and no published module — an addon is just a package under `backend/internal/addons/` that compiles into the one binary. (The older multi-repo "publish an addon repo" model was reverted.)
+:::
 
 This page is the full walkthrough. For the architectural shape, see [Module lifecycle](/architecture/module-lifecycle). For the SDK boundary rules (what an addon can and can't import), see [Shared interfaces](/sdk/shared-iface).
 
-## Decide where the addon will live
-
-Two homes, same `Module` contract.
-
-| Home                          | When to pick                                                                                      | Replace directive in `backend/go.mod`?                |
-| ----------------------------- | ------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
-| **In-tree, monorepo fork only**| Internal-only addon, no plans to share, single team. Fastest iteration — no tag/release cycle.    | Not needed. `import "github.com/your-org/your-fork/backend/internal/addons/yours"`. |
-| **In-tree + public repo**     | Reusable across forks, distributed as a Go module, semver'd.                                       | Yes — one `replace` line; the in-tree path is the source of truth, the public repo mirrors tags. |
-
-Every extracted core addon (`billing`, `documents`, `aimodels`, …) uses the second pattern today. The replace directive lets monorepo devs edit live in-tree source while CI and external consumers resolve a tagged version through the Go module proxy. See [Forking a core addon](/contributing/forking-a-core-addon) for the inverse direction — customizing an addon you don't own.
-
 ## Step 1 — Scaffold the addon
 
-Either start from the template repo (when public) or copy a small existing addon as a starting point:
+`internal/addons/` doesn't exist in the base — create it. Mirror the layout of a core module under `backend/internal/core/`:
 
 ```bash
-cd backend/internal/addons
-cp -r company youraddon
-cd youraddon
-# Rename Go package, swap collection names, gut the handlers — keep the layout.
+mkdir -p backend/internal/addons/youraddon
+# Copy the shape of e.g. internal/core/logging/ — keep the layout, gut the logic.
 ```
 
-Layout every addon follows:
+Layout every addon follows (no `go.mod` — it's part of `backend/go.mod`):
 
 ```
 internal/addons/youraddon/
-├── go.mod                          # only if you want the public-repo split
 ├── module.go                       # implements Module — Init, RegisterRoutes, Start, Stop, HealthCheck, metadata
 ├── handlers/                       # Huma v2 route handlers
 ├── services/                       # business logic — pure Go, no HTTP
 ├── repository/                     # MongoDB access via shared/tenantrepo
 └── models/                         # request/response DTOs + persisted documents
-```
-
-If you're going public-repo, your `go.mod` looks like:
-
-```
-module github.com/your-org/orkestra-addon-youraddon
-
-go 1.25.10
-
-require github.com/orkestra-cc/orkestra-sdk v0.4.0
-```
-
-The monorepo's `backend/go.mod` then adds:
-
-```
-require github.com/your-org/orkestra-addon-youraddon v0.1.0
-
-replace github.com/your-org/orkestra-addon-youraddon => ./internal/addons/youraddon
 ```
 
 ## Step 2 — Implement the `Module` interface
@@ -72,7 +44,7 @@ package youraddon
 import (
     "context"
 
-    "github.com/orkestra-cc/orkestra-sdk/module"
+    "github.com/orkestra/backend/pkg/sdk/module"
 )
 
 type Module struct {
@@ -186,16 +158,14 @@ func (m *Module) ConfigSchema() module.ConfigSchema {
 
 ## Step 6 — Register in the catalog
 
-Create `backend/cmd/server/catalog_youraddon.go`:
+Create `backend/cmd/server/catalog_youraddon.go` — one `init()`:
 
 ```go
-//go:build !no_addons || addon_youraddon
-
 package main
 
 import (
-    "github.com/your-org/orkestra-addon-youraddon"   // or in-tree import path
-    "github.com/orkestra-cc/orkestra-sdk/module"
+    "github.com/orkestra/backend/internal/addons/youraddon"
+    "github.com/orkestra/backend/pkg/sdk/module"
 )
 
 func init() {
@@ -203,34 +173,15 @@ func init() {
 }
 ```
 
-The build-tag pattern is load-bearing:
+No build tags, no `go.mod` — it compiles into the one binary. The registry topologically sorts at boot by `Dependencies()`, so a module whose transitive dependency isn't registered fails loudly at boot, not at request time.
 
-- **Default build** (no tags): every `catalog_*.go` file compiles → every addon is installable in the binary.
-- **`-tags "no_addons"`**: only core modules ship. Useful for the `starter` SKU.
-- **`-tags "no_addons addon_youraddon addon_billing"`**: ship a curated subset.
-
-The registry topologically sorts at boot by `Dependencies()`, so picking a tag set that omits a transitive dependency fails loudly at boot, not at request time.
-
-## Step 7 — Hook into a SKU profile (optional)
-
-Edit `backend/Makefile` if you want your addon in one of the curated profiles:
-
-```make
-TAGS_BILLING := no_addons addon_billing addon_documents addon_company addon_dev addon_youraddon
-```
-
-CI builds every profile in `.github/workflows/backend.yml`'s matrix on every PR — a missing tag or broken dependency in `catalog_youraddon.go` gets caught before merge. On push to `dev`/`main`, the same matrix publishes one image per profile to GHCR (`ghcr.io/<repo>/backend:<sku>`).
-
-For a fully custom SKU, the canonical recipe table lives in [`backend/Makefile`](https://github.com/orkestra-cc/orkestra/blob/main/backend/Makefile) (search for `TAGS_`) and [`backend/CLAUDE.md`](https://github.com/orkestra-cc/orkestra/blob/main/backend/CLAUDE.md#module-system).
-
-## Step 8 — Run it locally
+## Step 7 — Run it locally
 
 ```bash
-# From repo root
-make build-enterprise          # or build-<your-sku>
-cd docker
+cd backend && go mod tidy      # pull your addon's third-party deps into the module
+cd ../docker
 docker compose -f docker-compose.infra.yml up -d
-docker compose -f docker-compose.dev-public.yml --env-file .env up -d
+docker compose -f docker-compose.dev.yml --env-file .env up -d
 ```
 
 Then enable the addon:
@@ -241,51 +192,13 @@ Then enable the addon:
 
 If `Start()` fails, the toggle returns the error inline and the module stays in `error` state — you don't have to scrape logs.
 
-## Step 9 — Publish (only if going public-repo)
-
-Once stable, mirror the in-tree source to a public repo and tag it:
-
-```bash
-# One-time: create github.com/your-org/orkestra-addon-youraddon
-# Each release: from backend/internal/addons/youraddon/
-git subtree push --prefix backend/internal/addons/youraddon \
-    git@github.com:your-org/orkestra-addon-youraddon.git main
-# In the public repo:
-git tag v0.1.0 && git push --tags
-```
-
-Then bump `backend/go.mod`:
-
-```
-require github.com/your-org/orkestra-addon-youraddon v0.1.0
-```
-
-Keep the `replace` directive while the addon is churning — drop it once cross-cutting changes stop requiring round-trips through the public repo.
-
-:::note
-Automated public-mirror CI is on the roadmap (deferred Phase 6) but not in place today — mirroring is manual. Track the issue tag `phase-6-public-mirror`.
-:::
-
-### Semver expectations
-
-| Change                                                  | Bump  |
-| ------------------------------------------------------- | ----- |
-| Backwards-compatible additions (new routes, new fields) | minor |
-| Bug fix, doc-only, internal refactor                    | patch |
-| Removing or renaming a `Module` method, breaking a public type, removing a route | major |
-| Bumping the required `orkestra-sdk` major version       | major |
-
-Pre-1.0 (the entire current addon catalog) treats `0.x.y` like `1.x.y` informally — minor bumps for additions, patches for fixes. Don't break callers without a major.
-
 ## Checklist before opening the PR
 
 - [ ] `module.go` implements every method on `Module` — `make ci-backend` will compile-check this
-- [ ] All Mongo writes go through `shared/tenantrepo` — `make tenantscope` passes
-- [ ] Every protected route declares an `MinRole` and uses `mw.RequireRole(...)` — `make policycoverage` passes
+- [ ] All Mongo writes go through `shared/tenantrepo` — `make backend-tenantscope` passes
+- [ ] Every protected route declares an `MinRole` and uses `mw.RequireRole(...)` — `make backend-policycoverage` passes
 - [ ] Collections declared in `Collections()` follow the [naming rule](/contributing/ci-and-make)
 - [ ] If new routes were added, regenerate the canonical OpenAPI dump: `(cd backend && make openapi-dump)` and commit `backend/openapi/enterprise.json`
-- [ ] If new permissions were added, update `backend/policycoverage.baseline`
-- [ ] If your addon is in one of the named SKUs, the Makefile's `TAGS_<SKU>` includes it
-- [ ] Module README in `internal/addons/youraddon/README.md` exists (auto-synced to `docs.orkestra.cc` if you go public-repo)
+- [ ] If new cross-module permissions were added, update `backend/tools/policycoverage/baseline.txt`
 
-See also: [Module lifecycle](/architecture/module-lifecycle) · [Forking a core addon](/contributing/forking-a-core-addon) · [Build your first addon (SDK)](/sdk/build-your-first-addon)
+See also: [Module lifecycle](/architecture/module-lifecycle) · [Customizing an archived addon](/contributing/forking-a-core-addon) · [Build your first addon (SDK)](/sdk/build-your-first-addon)
