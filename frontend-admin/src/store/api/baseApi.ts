@@ -352,35 +352,6 @@ export const baseApi = createApi({
     'Weather',
     'Storage',
 
-    // Billing module tags
-    'Customer',
-    'Supplier',
-    'Company',
-    'Invoice',
-    'Notification',
-    'BillingStats',
-    'BusinessRegistry',
-    // Company lookup module tags
-    'CompanyLookup',
-    // Documents module tags
-    'DocumentTemplate',
-    'GeneratedDocument',
-    // Graph database module tags
-    'GraphQuery',
-    'GraphSchema',
-    'VectorIndex',
-    // RAG module tags
-    'RagModel',
-    'RagDocument',
-    'RagRelationship',
-    // AI Models module tags
-    'AIModel',
-    // Agents module tags
-    'AgentProject',
-    'AgentConversation',
-    // Personal Agent tags
-    'PersonalAgent',
-    'PersonalConversation',
     // Admin module management tags
     'Module',
     'ModuleHealth',
@@ -402,21 +373,6 @@ export const baseApi = createApi({
     // Platform-admin tenant management
     'AdminOrg',
     'OrgInvite',
-    // Subscriptions module
-    'SubscriptionService',
-    'Subscription',
-    'SubscriptionInvoice',
-    'SubscriptionActivity',
-    // Payments module
-    'PaymentTransaction',
-    'PaymentMethodRec',
-    'PaymentWebhookEvent',
-    // Compliance module
-    'AuditEvent',
-    'Soc2Evidence',
-    // Identity module
-    'IdentityIdP',
-    'IdentityScim',
     // Observability — ADR-0005 Phase F runtime log-level mutation
     'LogLevels',
     // Navigation admin — full unfiltered tree + per-parent ordering
@@ -426,36 +382,7 @@ export const baseApi = createApi({
     // returns for the unauthenticated login page. Invalidated implicitly by
     // RTK Query's 30s default cache + manual invalidation when the
     // /admin/modules/auth admin tab saves the OAuth Providers toggles.
-    'OAuthProviders',
-    // Marketing module — Phase 1 contact base + importer surface
-    'MarketingOrg',
-    'MarketingPerson',
-    'MarketingMembership',
-    'MarketingTag',
-    'MarketingCustomFieldSchema',
-    'MarketingImport',
-    // Marketing module — Phase 2 activity log + scoring surfaces.
-    // ScoreSnapshot tags are keyed two ways: by uuid for single-row
-    // reads from the breakdown drawer, and by `person:<uuid>` /
-    // `profile:<uuid>` for the per-person and per-profile listings
-    // so a profile edit invalidates the right leaderboard rows.
-    'MarketingActivity',
-    'MarketingScoreProfile',
-    'MarketingScoreSnapshot',
-    // Marketing module — Phase 3 conflict-review queue. Reviews are
-    // queried both by uuid (resolver modal) and by importJobUuid
-    // (imports-list deep link), so the slice tags both ways.
-    'MarketingConflictReview',
-    // Marketing module — Phase 4 card lifecycle. Card types are
-    // queried by uuid for the edit form + the LIST id for the admin
-    // list page; cards keep the same LIST tag + per-person grouping
-    // (`person:<uuid>`) so the contact-detail Cards tab refreshes
-    // after an Issue/Suspend/Reinstate/Revoke action. CorrectionEntry
-    // tagged per source activity uuid so the Timeline corrections
-    // expander invalidates on every Correct mutation.
-    'MarketingCardType',
-    'MarketingCard',
-    'MarketingCorrection'
+    'OAuthProviders'
   ],
   // Keep cache for 5 minutes by default
   keepUnusedDataFor: 300,
@@ -486,27 +413,6 @@ export const invalidateApiTags = (
     | 'SupportTicket'
     | 'Weather'
     | 'Storage'
-    | 'Customer'
-    | 'Supplier'
-    | 'Company'
-    | 'Invoice'
-    | 'Notification'
-    | 'BillingStats'
-    | 'BusinessRegistry'
-    | 'CompanyLookup'
-    | 'DocumentTemplate'
-    | 'GeneratedDocument'
-    | 'GraphQuery'
-    | 'GraphSchema'
-    | 'VectorIndex'
-    | 'RagModel'
-    | 'RagDocument'
-    | 'RagRelationship'
-    | 'AIModel'
-    | 'AgentProject'
-    | 'AgentConversation'
-    | 'PersonalAgent'
-    | 'PersonalConversation'
   >
 ) => {
   return baseApi.util.invalidateTags(tags);
@@ -535,27 +441,6 @@ export const TENANT_SCOPED_TAGS = [
   'SupportTicket',
   'Weather',
   'Storage',
-  'Customer',
-  'Supplier',
-  'Company',
-  'Invoice',
-  'Notification',
-  'BillingStats',
-  'BusinessRegistry',
-  'CompanyLookup',
-  'DocumentTemplate',
-  'GeneratedDocument',
-  'GraphQuery',
-  'GraphSchema',
-  'VectorIndex',
-  'RagModel',
-  'RagDocument',
-  'RagRelationship',
-  'AIModel',
-  'AgentProject',
-  'AgentConversation',
-  'PersonalAgent',
-  'PersonalConversation',
   'Module',
   'ModuleHealth',
   'Org',
@@ -565,28 +450,7 @@ export const TENANT_SCOPED_TAGS = [
   'Permission',
   'EffectivePermissions',
   'AdminOrg',
-  'OrgInvite',
-  'SubscriptionService',
-  'Subscription',
-  'SubscriptionInvoice',
-  'SubscriptionActivity',
-  'PaymentTransaction',
-  'PaymentMethodRec',
-  'PaymentWebhookEvent',
-  'AuditEvent',
-  'Soc2Evidence',
-  'IdentityIdP',
-  'IdentityScim',
-  'MarketingOrg',
-  'MarketingPerson',
-  'MarketingMembership',
-  'MarketingTag',
-  'MarketingCustomFieldSchema',
-  'MarketingImport',
-  'MarketingActivity',
-  'MarketingScoreProfile',
-  'MarketingScoreSnapshot',
-  'MarketingConflictReview'
+  'OrgInvite'
 ] as const;
 
 export default baseApi;

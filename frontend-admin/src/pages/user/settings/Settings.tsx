@@ -5,7 +5,6 @@ import ProfileSettings from './ProfileSettings';
 import LanguageSettings from './LanguageSettings';
 import AvatarSettings from './AvatarSettings';
 import SecuritySummaryCard from './SecuritySummaryCard';
-import DangerZone from './DangerZone';
 import { useGetCurrentUserQuery } from 'store/api/authApi';
 import { avatarColor } from 'helpers/avatarColor';
 
@@ -74,7 +73,6 @@ const Settings: React.FC = () => {
             <AvatarSettings />
             <LanguageSettings />
             <SecuritySummaryCard />
-            <DangerZone />
           </div>
         </Col>
       </Row>
