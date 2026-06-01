@@ -26,7 +26,6 @@ import (
 	"github.com/orkestra/backend/internal/shared/database"
 	"github.com/orkestra/backend/internal/shared/errors"
 	authMiddleware "github.com/orkestra/backend/internal/shared/middleware"
-	"github.com/orkestra/backend/internal/shared/remote"
 	"github.com/orkestra/backend/internal/shared/setup"
 	"github.com/orkestra/backend/internal/shared/systeminit"
 	"github.com/orkestra/backend/internal/shared/telemetry"
@@ -246,24 +245,6 @@ func main() {
 		utils.SwapLevelResolver(r)
 		logger.Info("logging: live level resolver active",
 			slog.String("source", "logging core module"))
-	}
-
-	// AI service sidecar: register remote providers for AI modules
-	// that failed Init locally (e.g. external infra not available).
-	if cfg.Server.AIServiceURL != "" {
-		remoteAI := remote.NewAIModelProvider(cfg.Server.AIServiceURL)
-		remoteRAG := remote.NewRAGQueryProvider(cfg.Server.AIServiceURL)
-
-		failedModules := modRegistry.FailedModules()
-		if _, failed := failedModules["aimodels"]; failed {
-			svcRegistry.Register(module.ServiceAIModelProvider, remoteAI)
-		}
-		if _, failed := failedModules["rag"]; failed {
-			svcRegistry.Register(module.ServiceRAGQuery, remoteRAG)
-		}
-		logger.Info("AI service sidecar configured",
-			slog.String("url", cfg.Server.AIServiceURL),
-		)
 	}
 
 	// Retrieve auth infrastructure for middleware setup
