@@ -1,8 +1,8 @@
 package main
 
 import (
-	"github.com/orkestra-cc/orkestra-addon-aimodels"
-	"github.com/orkestra-cc/orkestra-sdk/module"
+	"github.com/orkestra/backend/internal/addons/aimodels"
+	"github.com/orkestra/backend/pkg/sdk/module"
 )
 
 func init() {

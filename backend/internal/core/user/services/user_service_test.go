@@ -8,8 +8,8 @@ import (
 	"time"
 
 	authModels "github.com/orkestra/backend/internal/core/auth/models"
-	"github.com/orkestra/backend/internal/core/user/models"
 	"github.com/orkestra/backend/internal/core/user/repository"
+	"github.com/orkestra/backend/pkg/sdk/iface"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo/options"
@@ -26,7 +26,7 @@ import (
 // unused approach would force every test to seed unrelated state.
 type fakeUserRepo struct {
 	mu           sync.Mutex
-	users        map[string]*models.User // keyed by UUID
+	users        map[string]*iface.User // keyed by UUID
 	createErr    error
 	getErr       error
 	listErr      error
@@ -38,16 +38,16 @@ type fakeUserRepo struct {
 }
 
 func newFakeUserRepo() *fakeUserRepo {
-	return &fakeUserRepo{users: map[string]*models.User{}}
+	return &fakeUserRepo{users: map[string]*iface.User{}}
 }
 
-func (r *fakeUserRepo) seed(u *models.User) {
+func (r *fakeUserRepo) seed(u *iface.User) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.users[u.UUID] = u
 }
 
-func (r *fakeUserRepo) Create(_ context.Context, user *models.User) error {
+func (r *fakeUserRepo) Create(_ context.Context, user *iface.User) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.createErr != nil {
@@ -65,7 +65,7 @@ func (r *fakeUserRepo) Create(_ context.Context, user *models.User) error {
 	return nil
 }
 
-func (r *fakeUserRepo) GetByID(_ context.Context, id string) (*models.User, error) {
+func (r *fakeUserRepo) GetByID(_ context.Context, id string) (*iface.User, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.getErr != nil {
@@ -77,11 +77,11 @@ func (r *fakeUserRepo) GetByID(_ context.Context, id string) (*models.User, erro
 	return nil, repository.ErrUserNotFound
 }
 
-func (r *fakeUserRepo) GetByObjectID(_ context.Context, _ primitive.ObjectID) (*models.User, error) {
+func (r *fakeUserRepo) GetByObjectID(_ context.Context, _ primitive.ObjectID) (*iface.User, error) {
 	return nil, repository.ErrUserNotFound
 }
 
-func (r *fakeUserRepo) GetByEmail(_ context.Context, email string) (*models.User, error) {
+func (r *fakeUserRepo) GetByEmail(_ context.Context, email string) (*iface.User, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, u := range r.users {
@@ -92,7 +92,7 @@ func (r *fakeUserRepo) GetByEmail(_ context.Context, email string) (*models.User
 	return nil, repository.ErrUserNotFound
 }
 
-func (r *fakeUserRepo) GetByUsername(_ context.Context, username string) (*models.User, error) {
+func (r *fakeUserRepo) GetByUsername(_ context.Context, username string) (*iface.User, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, u := range r.users {
@@ -103,7 +103,7 @@ func (r *fakeUserRepo) GetByUsername(_ context.Context, username string) (*model
 	return nil, repository.ErrUserNotFound
 }
 
-func (r *fakeUserRepo) Update(_ context.Context, id string, input *models.UpdateUserInput) (*models.User, error) {
+func (r *fakeUserRepo) Update(_ context.Context, id string, input *iface.UpdateUserInput) (*iface.User, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.updateCalled = true
@@ -135,7 +135,7 @@ func (r *fakeUserRepo) Update(_ context.Context, id string, input *models.Update
 	return u, nil
 }
 
-func (r *fakeUserRepo) UpdateByObjectID(_ context.Context, _ primitive.ObjectID, _ *models.User) error {
+func (r *fakeUserRepo) UpdateByObjectID(_ context.Context, _ primitive.ObjectID, _ *iface.User) error {
 	return nil
 }
 
@@ -187,13 +187,13 @@ func (r *fakeUserRepo) ClearMFAGraceStartedAt(_ context.Context, id string) erro
 	return nil
 }
 
-func (r *fakeUserRepo) GetByOAuthID(_ context.Context, _ models.OAuthProvider, _ string) (*models.User, error) {
+func (r *fakeUserRepo) GetByOAuthID(_ context.Context, _ iface.OAuthProvider, _ string) (*iface.User, error) {
 	return nil, repository.ErrUserNotFound
 }
-func (r *fakeUserRepo) GetByOAuthLink(_ context.Context, _ models.OAuthProvider, _ string) (*models.User, error) {
+func (r *fakeUserRepo) GetByOAuthLink(_ context.Context, _ iface.OAuthProvider, _ string) (*iface.User, error) {
 	return nil, repository.ErrUserNotFound
 }
-func (r *fakeUserRepo) AddOAuthLink(_ context.Context, userUUID string, link models.OAuthLink) error {
+func (r *fakeUserRepo) AddOAuthLink(_ context.Context, userUUID string, link iface.OAuthLink) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if u, ok := r.users[userUUID]; ok {
@@ -201,33 +201,33 @@ func (r *fakeUserRepo) AddOAuthLink(_ context.Context, userUUID string, link mod
 	}
 	return nil
 }
-func (r *fakeUserRepo) RemoveOAuthLink(_ context.Context, _ string, _ models.OAuthProvider, _ string) error {
+func (r *fakeUserRepo) RemoveOAuthLink(_ context.Context, _ string, _ iface.OAuthProvider, _ string) error {
 	return nil
 }
-func (r *fakeUserRepo) SetPrimaryOAuthLink(_ context.Context, _ string, _ models.OAuthProvider, _ string) error {
+func (r *fakeUserRepo) SetPrimaryOAuthLink(_ context.Context, _ string, _ iface.OAuthProvider, _ string) error {
 	return nil
 }
-func (r *fakeUserRepo) GetOAuthLinks(_ context.Context, userUUID string) ([]models.OAuthLink, error) {
+func (r *fakeUserRepo) GetOAuthLinks(_ context.Context, userUUID string) ([]iface.OAuthLink, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if u, ok := r.users[userUUID]; ok {
-		out := make([]models.OAuthLink, len(u.OAuthLinks))
+		out := make([]iface.OAuthLink, len(u.OAuthLinks))
 		copy(out, u.OAuthLinks)
 		return out, nil
 	}
 	return nil, repository.ErrUserNotFound
 }
-func (r *fakeUserRepo) UpdateOAuthLinkUsage(_ context.Context, _ string, _ models.OAuthProvider, _ string) error {
+func (r *fakeUserRepo) UpdateOAuthLinkUsage(_ context.Context, _ string, _ iface.OAuthProvider, _ string) error {
 	return nil
 }
 
-func (r *fakeUserRepo) List(_ context.Context, _ *models.UserFilters, p *models.PaginationParams) ([]*models.User, int64, error) {
+func (r *fakeUserRepo) List(_ context.Context, _ *iface.UserFilters, p *iface.PaginationParams) ([]*iface.User, int64, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.listErr != nil {
 		return nil, 0, r.listErr
 	}
-	out := make([]*models.User, 0, len(r.users))
+	out := make([]*iface.User, 0, len(r.users))
 	for _, u := range r.users {
 		out = append(out, u)
 	}
@@ -239,13 +239,13 @@ func (r *fakeUserRepo) List(_ context.Context, _ *models.UserFilters, p *models.
 	return out, total, nil
 }
 
-func (r *fakeUserRepo) ListWithOptions(_ context.Context, _ bson.M, _ ...*options.FindOptions) ([]*models.User, error) {
+func (r *fakeUserRepo) ListWithOptions(_ context.Context, _ bson.M, _ ...*options.FindOptions) ([]*iface.User, error) {
 	return nil, nil
 }
-func (r *fakeUserRepo) GetByRole(_ context.Context, role string) ([]*models.User, error) {
+func (r *fakeUserRepo) GetByRole(_ context.Context, role string) ([]*iface.User, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	var out []*models.User
+	var out []*iface.User
 	for _, u := range r.users {
 		if u.Role == role {
 			out = append(out, u)
@@ -254,7 +254,7 @@ func (r *fakeUserRepo) GetByRole(_ context.Context, role string) ([]*models.User
 	return out, nil
 }
 
-func (r *fakeUserRepo) Count(_ context.Context, _ *models.UserFilters) (int64, error) {
+func (r *fakeUserRepo) Count(_ context.Context, _ *iface.UserFilters) (int64, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.countCalls++
@@ -296,7 +296,7 @@ func (r *fakeUserRepo) SetAvatarSource(_ context.Context, userUUID, source, obje
 	}
 	return nil
 }
-func (r *fakeUserRepo) UpdateOAuthLinkData(_ context.Context, _ string, _ models.OAuthProvider, _ string, _ map[string]interface{}) error {
+func (r *fakeUserRepo) UpdateOAuthLinkData(_ context.Context, _ string, _ iface.OAuthProvider, _ string, _ map[string]interface{}) error {
 	return nil
 }
 
@@ -390,11 +390,11 @@ func TestCreateUser_RejectsMissingFields(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
 		name  string
-		input *models.CreateUserInput
+		input *iface.CreateUserInput
 	}{
-		{"missing email", &models.CreateUserInput{FullName: "x", Role: "operator"}},
-		{"missing fullname", &models.CreateUserInput{Email: "a@b.c", Role: "operator"}},
-		{"missing role", &models.CreateUserInput{Email: "a@b.c", FullName: "x"}},
+		{"missing email", &iface.CreateUserInput{FullName: "x", Role: "operator"}},
+		{"missing fullname", &iface.CreateUserInput{Email: "a@b.c", Role: "operator"}},
+		{"missing role", &iface.CreateUserInput{Email: "a@b.c", FullName: "x"}},
 	}
 	for _, c := range cases {
 		c := c
@@ -412,7 +412,7 @@ func TestCreateUser_RejectsMissingFields(t *testing.T) {
 func TestCreateUser_NormalizesEmail(t *testing.T) {
 	t.Parallel()
 	svc, users, _ := newSvcForTest(t)
-	resp, err := svc.CreateUser(context.Background(), &models.CreateUserInput{
+	resp, err := svc.CreateUser(context.Background(), &iface.CreateUserInput{
 		Email:    "  USER@Example.COM  ",
 		FullName: "User",
 		Role:     "operator",
@@ -436,8 +436,8 @@ func TestCreateUser_NormalizesEmail(t *testing.T) {
 func TestCreateUser_RejectsDuplicateEmail(t *testing.T) {
 	t.Parallel()
 	svc, users, _ := newSvcForTest(t)
-	users.seed(&models.User{UUID: "u1", Email: "dup@example.com", Role: "operator"})
-	_, err := svc.CreateUser(context.Background(), &models.CreateUserInput{
+	users.seed(&iface.User{UUID: "u1", Email: "dup@example.com", Role: "operator"})
+	_, err := svc.CreateUser(context.Background(), &iface.CreateUserInput{
 		Email: "dup@example.com", FullName: "x", Role: "operator",
 	})
 	if !errors.Is(err, ErrEmailNotUnique) {
@@ -451,7 +451,7 @@ func TestCreateUser_MapsRepoDuplicateError(t *testing.T) {
 	// the unique-index collision must still surface ErrEmailNotUnique.
 	svc, users, _ := newSvcForTest(t)
 	users.createErr = repository.ErrUserAlreadyExists
-	_, err := svc.CreateUser(context.Background(), &models.CreateUserInput{
+	_, err := svc.CreateUser(context.Background(), &iface.CreateUserInput{
 		Email: "race@example.com", FullName: "x", Role: "operator",
 	})
 	if !errors.Is(err, ErrEmailNotUnique) {
@@ -480,7 +480,7 @@ func TestGetUser_MapsNotFound(t *testing.T) {
 func TestGetUser_ReturnsResponseWithProviders(t *testing.T) {
 	t.Parallel()
 	svc, users, oauth := newSvcForTest(t)
-	users.seed(&models.User{UUID: "u1", Email: "a@b.c", Role: "operator"})
+	users.seed(&iface.User{UUID: "u1", Email: "a@b.c", Role: "operator"})
 	oauth.seed("u1", &authModels.OAuthProviderDoc{
 		UUID:     "p1",
 		UserUUID: "u1",
@@ -503,7 +503,7 @@ func TestGetUser_ReturnsResponseWithProviders(t *testing.T) {
 func TestGetUserByEmail_NormalizesAndMapsNotFound(t *testing.T) {
 	t.Parallel()
 	svc, users, _ := newSvcForTest(t)
-	users.seed(&models.User{UUID: "u1", Email: "a@b.c", Role: "operator"})
+	users.seed(&iface.User{UUID: "u1", Email: "a@b.c", Role: "operator"})
 
 	resp, err := svc.GetUserByEmail(context.Background(), "  A@B.C  ")
 	if err != nil {
@@ -524,7 +524,7 @@ func TestGetUserByEmail_NormalizesAndMapsNotFound(t *testing.T) {
 func TestUpdateUser_RejectsBadInputs(t *testing.T) {
 	t.Parallel()
 	svc, _, _ := newSvcForTest(t)
-	if _, err := svc.UpdateUser(context.Background(), "", &models.UpdateUserInput{}); !errors.Is(err, ErrInvalidInput) {
+	if _, err := svc.UpdateUser(context.Background(), "", &iface.UpdateUserInput{}); !errors.Is(err, ErrInvalidInput) {
 		t.Errorf("empty id err = %v", err)
 	}
 	if _, err := svc.UpdateUser(context.Background(), "id", nil); !errors.Is(err, ErrInvalidInput) {
@@ -535,9 +535,9 @@ func TestUpdateUser_RejectsBadInputs(t *testing.T) {
 func TestUpdateUser_DetectsEmailCollision(t *testing.T) {
 	t.Parallel()
 	svc, users, _ := newSvcForTest(t)
-	users.seed(&models.User{UUID: "u1", Email: "a@b.c", Role: "operator"})
-	users.seed(&models.User{UUID: "u2", Email: "x@y.z", Role: "operator"})
-	_, err := svc.UpdateUser(context.Background(), "u1", &models.UpdateUserInput{Email: "x@y.z"})
+	users.seed(&iface.User{UUID: "u1", Email: "a@b.c", Role: "operator"})
+	users.seed(&iface.User{UUID: "u2", Email: "x@y.z", Role: "operator"})
+	_, err := svc.UpdateUser(context.Background(), "u1", &iface.UpdateUserInput{Email: "x@y.z"})
 	if !errors.Is(err, ErrEmailNotUnique) {
 		t.Errorf("err = %v, want ErrEmailNotUnique (taken by u2)", err)
 	}
@@ -546,8 +546,8 @@ func TestUpdateUser_DetectsEmailCollision(t *testing.T) {
 func TestUpdateUser_AllowsKeepingSameEmail(t *testing.T) {
 	t.Parallel()
 	svc, users, _ := newSvcForTest(t)
-	users.seed(&models.User{UUID: "u1", Email: "a@b.c", Role: "operator"})
-	resp, err := svc.UpdateUser(context.Background(), "u1", &models.UpdateUserInput{Email: "a@b.c", FullName: "Renamed"})
+	users.seed(&iface.User{UUID: "u1", Email: "a@b.c", Role: "operator"})
+	resp, err := svc.UpdateUser(context.Background(), "u1", &iface.UpdateUserInput{Email: "a@b.c", FullName: "Renamed"})
 	if err != nil {
 		t.Fatalf("UpdateUser: %v", err)
 	}
@@ -559,7 +559,7 @@ func TestUpdateUser_AllowsKeepingSameEmail(t *testing.T) {
 func TestUpdateUser_MapsNotFound(t *testing.T) {
 	t.Parallel()
 	svc, _, _ := newSvcForTest(t)
-	_, err := svc.UpdateUser(context.Background(), "missing", &models.UpdateUserInput{FullName: "x"})
+	_, err := svc.UpdateUser(context.Background(), "missing", &iface.UpdateUserInput{FullName: "x"})
 	if !errors.Is(err, ErrUserNotFound) {
 		t.Errorf("err = %v, want ErrUserNotFound", err)
 	}
@@ -574,7 +574,7 @@ func TestDeleteUser_ValidatesAndMapsNotFound(t *testing.T) {
 	if err := svc.DeleteUser(context.Background(), "missing"); !errors.Is(err, ErrUserNotFound) {
 		t.Errorf("missing err = %v", err)
 	}
-	users.seed(&models.User{UUID: "u1", Email: "a@b.c", Role: "operator"})
+	users.seed(&iface.User{UUID: "u1", Email: "a@b.c", Role: "operator"})
 	if err := svc.DeleteUser(context.Background(), "u1"); err != nil {
 		t.Errorf("Delete: %v", err)
 	}
@@ -600,14 +600,14 @@ func TestListUsers_PaginationDefaultsAndClamps(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
 		name         string
-		input        *models.PaginationParams
+		input        *iface.PaginationParams
 		wantPage     int
 		wantPageSize int
 	}{
 		{"nil → defaults", nil, 1, 10},
-		{"page=0 → 1", &models.PaginationParams{Page: 0, PageSize: 5}, 1, 5},
-		{"pageSize=0 → 10", &models.PaginationParams{Page: 2, PageSize: 0}, 2, 10},
-		{"pageSize>100 → 10", &models.PaginationParams{Page: 1, PageSize: 9999}, 1, 10},
+		{"page=0 → 1", &iface.PaginationParams{Page: 0, PageSize: 5}, 1, 5},
+		{"pageSize=0 → 10", &iface.PaginationParams{Page: 2, PageSize: 0}, 2, 10},
+		{"pageSize>100 → 10", &iface.PaginationParams{Page: 1, PageSize: 9999}, 1, 10},
 	}
 	for _, c := range cases {
 		c := c
@@ -632,9 +632,9 @@ func TestListUsers_TotalPagesMath(t *testing.T) {
 	t.Parallel()
 	svc, users, _ := newSvcForTest(t)
 	for i := 0; i < 25; i++ {
-		users.seed(&models.User{UUID: "u" + string(rune('a'+i)), Email: string(rune('a'+i)) + "@x.com", Role: "operator"})
+		users.seed(&iface.User{UUID: "u" + string(rune('a'+i)), Email: string(rune('a'+i)) + "@x.com", Role: "operator"})
 	}
-	out, err := svc.ListUsers(context.Background(), nil, &models.PaginationParams{Page: 1, PageSize: 10})
+	out, err := svc.ListUsers(context.Background(), nil, &iface.PaginationParams{Page: 1, PageSize: 10})
 	if err != nil {
 		t.Fatalf("ListUsers: %v", err)
 	}
@@ -652,8 +652,8 @@ func TestGetUsersByRole_ValidatesAndFilters(t *testing.T) {
 	if _, err := svc.GetUsersByRole(context.Background(), ""); !errors.Is(err, ErrInvalidInput) {
 		t.Errorf("empty role err = %v", err)
 	}
-	users.seed(&models.User{UUID: "u1", Email: "a@b.c", Role: "operator"})
-	users.seed(&models.User{UUID: "u2", Email: "x@y.z", Role: "administrator"})
+	users.seed(&iface.User{UUID: "u1", Email: "a@b.c", Role: "operator"})
+	users.seed(&iface.User{UUID: "u2", Email: "x@y.z", Role: "administrator"})
 	got, err := svc.GetUsersByRole(context.Background(), "administrator")
 	if err != nil {
 		t.Fatalf("GetUsersByRole: %v", err)
@@ -666,7 +666,7 @@ func TestGetUsersByRole_ValidatesAndFilters(t *testing.T) {
 func TestValidateUserRole(t *testing.T) {
 	t.Parallel()
 	svc, users, _ := newSvcForTest(t)
-	users.seed(&models.User{UUID: "u1", Role: "developer"})
+	users.seed(&iface.User{UUID: "u1", Role: "developer"})
 	if err := svc.ValidateUserRole(context.Background(), "u1", []string{"developer", "operator"}); err != nil {
 		t.Errorf("matching role err = %v, want nil", err)
 	}
@@ -681,8 +681,8 @@ func TestValidateUserRole(t *testing.T) {
 func TestGetUserCount_PassesThrough(t *testing.T) {
 	t.Parallel()
 	svc, users, _ := newSvcForTest(t)
-	users.seed(&models.User{UUID: "u1", Email: "a@b.c", Role: "operator"})
-	users.seed(&models.User{UUID: "u2", Email: "x@y.z", Role: "operator"})
+	users.seed(&iface.User{UUID: "u1", Email: "a@b.c", Role: "operator"})
+	users.seed(&iface.User{UUID: "u2", Email: "x@y.z", Role: "operator"})
 	n, err := svc.GetUserCount(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("GetUserCount: %v", err)
@@ -708,7 +708,7 @@ func TestCreateUserWithPassword(t *testing.T) {
 	t.Run("rejects missing role", func(t *testing.T) {
 		t.Parallel()
 		svc, _, _ := newSvcForTest(t)
-		_, err := svc.CreateUserWithPassword(context.Background(), &models.CreateUserInput{Email: "a@b.c", FullName: "x"})
+		_, err := svc.CreateUserWithPassword(context.Background(), &iface.CreateUserInput{Email: "a@b.c", FullName: "x"})
 		if !errors.Is(err, ErrInvalidInput) {
 			t.Errorf("err = %v", err)
 		}
@@ -716,8 +716,8 @@ func TestCreateUserWithPassword(t *testing.T) {
 	t.Run("rejects duplicate email", func(t *testing.T) {
 		t.Parallel()
 		svc, users, _ := newSvcForTest(t)
-		users.seed(&models.User{UUID: "u1", Email: "dup@x.com"})
-		_, err := svc.CreateUserWithPassword(context.Background(), &models.CreateUserInput{
+		users.seed(&iface.User{UUID: "u1", Email: "dup@x.com"})
+		_, err := svc.CreateUserWithPassword(context.Background(), &iface.CreateUserInput{
 			Email: "dup@x.com", FullName: "x", Role: "operator", PasswordHash: "h",
 		})
 		if !errors.Is(err, ErrEmailNotUnique) {
@@ -727,7 +727,7 @@ func TestCreateUserWithPassword(t *testing.T) {
 	t.Run("uses caller-supplied UUID and stamps PasswordUpdatedAt", func(t *testing.T) {
 		t.Parallel()
 		svc, _, _ := newSvcForTest(t)
-		u, err := svc.CreateUserWithPassword(context.Background(), &models.CreateUserInput{
+		u, err := svc.CreateUserWithPassword(context.Background(), &iface.CreateUserInput{
 			UUID:         "preminted-uuid",
 			Email:        "new@x.com",
 			FullName:     "New",
@@ -752,11 +752,11 @@ func TestCreateUserWithPassword(t *testing.T) {
 func TestCreateUserFromOAuth_AddsLink(t *testing.T) {
 	t.Parallel()
 	svc, _, _ := newSvcForTest(t)
-	u, err := svc.CreateUserFromOAuth(context.Background(), &models.CreateUserInput{
+	u, err := svc.CreateUserFromOAuth(context.Background(), &iface.CreateUserInput{
 		Email:         "oauth@x.com",
 		FullName:      "OAuth User",
 		Role:          "operator",
-		OAuthProvider: models.OAuthProviderGoogle,
+		OAuthProvider: iface.OAuthProviderGoogle,
 		OAuthID:       "g-1",
 	})
 	if err != nil {
@@ -766,7 +766,7 @@ func TestCreateUserFromOAuth_AddsLink(t *testing.T) {
 		t.Fatalf("expected one OAuthLink, got %d", len(u.OAuthLinks))
 	}
 	link := u.OAuthLinks[0]
-	if link.Provider != models.OAuthProviderGoogle || link.ProviderID != "g-1" {
+	if link.Provider != iface.OAuthProviderGoogle || link.ProviderID != "g-1" {
 		t.Errorf("link = %+v, want google/g-1", link)
 	}
 	if !link.IsPrimary {
@@ -777,7 +777,7 @@ func TestCreateUserFromOAuth_AddsLink(t *testing.T) {
 func TestCreateUserFromOAuth_RejectsBadInputs(t *testing.T) {
 	t.Parallel()
 	svc, _, _ := newSvcForTest(t)
-	cases := []*models.CreateUserInput{
+	cases := []*iface.CreateUserInput{
 		nil,
 		{FullName: "x", Role: "operator"},  // missing email
 		{Email: "a@b.c", Role: "operator"}, // missing fullname
@@ -793,7 +793,7 @@ func TestCreateUserFromOAuth_RejectsBadInputs(t *testing.T) {
 func TestGetUserForAuth(t *testing.T) {
 	t.Parallel()
 	svc, users, _ := newSvcForTest(t)
-	users.seed(&models.User{UUID: "u1", Email: "a@b.c", Role: "operator", PasswordHash: "secret"})
+	users.seed(&iface.User{UUID: "u1", Email: "a@b.c", Role: "operator", PasswordHash: "secret"})
 
 	t.Run("returns raw user including hash", func(t *testing.T) {
 		t.Parallel()
@@ -830,13 +830,13 @@ func TestEmptyInputGuards(t *testing.T) {
 	}{
 		{"GetUserByID", func() error { _, err := svc.GetUserByID(ctx, ""); return err }},
 		{"GetUserByUsername", func() error { _, err := svc.GetUserByUsername(ctx, ""); return err }},
-		{"GetUserByOAuthID", func() error { _, err := svc.GetUserByOAuthID(ctx, models.OAuthProviderGoogle, ""); return err }},
-		{"GetUserByOAuthLink", func() error { _, err := svc.GetUserByOAuthLink(ctx, models.OAuthProviderGoogle, ""); return err }},
-		{"AddOAuthLinkToUser", func() error { return svc.AddOAuthLinkToUser(ctx, "", models.OAuthLink{}) }},
-		{"RemoveOAuthLinkFromUser empty user", func() error { return svc.RemoveOAuthLinkFromUser(ctx, "", models.OAuthProviderGoogle, "x") }},
-		{"RemoveOAuthLinkFromUser empty providerID", func() error { return svc.RemoveOAuthLinkFromUser(ctx, "u", models.OAuthProviderGoogle, "") }},
-		{"SetPrimaryOAuthLink empty providerID", func() error { return svc.SetPrimaryOAuthLink(ctx, "u", models.OAuthProviderGoogle, "") }},
-		{"UpdateOAuthLinkUsage empty user", func() error { return svc.UpdateOAuthLinkUsage(ctx, "", models.OAuthProviderGoogle, "x") }},
+		{"GetUserByOAuthID", func() error { _, err := svc.GetUserByOAuthID(ctx, iface.OAuthProviderGoogle, ""); return err }},
+		{"GetUserByOAuthLink", func() error { _, err := svc.GetUserByOAuthLink(ctx, iface.OAuthProviderGoogle, ""); return err }},
+		{"AddOAuthLinkToUser", func() error { return svc.AddOAuthLinkToUser(ctx, "", iface.OAuthLink{}) }},
+		{"RemoveOAuthLinkFromUser empty user", func() error { return svc.RemoveOAuthLinkFromUser(ctx, "", iface.OAuthProviderGoogle, "x") }},
+		{"RemoveOAuthLinkFromUser empty providerID", func() error { return svc.RemoveOAuthLinkFromUser(ctx, "u", iface.OAuthProviderGoogle, "") }},
+		{"SetPrimaryOAuthLink empty providerID", func() error { return svc.SetPrimaryOAuthLink(ctx, "u", iface.OAuthProviderGoogle, "") }},
+		{"UpdateOAuthLinkUsage empty user", func() error { return svc.UpdateOAuthLinkUsage(ctx, "", iface.OAuthProviderGoogle, "x") }},
 		{"GetUserOAuthLinks", func() error { _, err := svc.GetUserOAuthLinks(ctx, ""); return err }},
 		{"UpdateUserLastLogin", func() error { return svc.UpdateUserLastLogin(ctx, "") }},
 		{"UpdatePasswordHash empty user", func() error { return svc.UpdatePasswordHash(ctx, "", "h") }},
@@ -866,7 +866,7 @@ func TestStartMFAGraceIfUnset_PreservesExisting(t *testing.T) {
 	t.Parallel()
 	svc, users, _ := newSvcForTest(t)
 	existing := time.Now().Add(-2 * 24 * time.Hour)
-	users.seed(&models.User{UUID: "u1", MFAGraceStartedAt: &existing})
+	users.seed(&iface.User{UUID: "u1", MFAGraceStartedAt: &existing})
 
 	if err := svc.StartMFAGraceIfUnset(context.Background(), "u1"); err != nil {
 		t.Fatalf("StartMFAGraceIfUnset: %v", err)
@@ -880,7 +880,7 @@ func TestStartMFAGraceIfUnset_PreservesExisting(t *testing.T) {
 func TestStartMFAGraceIfUnset_StampsWhenUnset(t *testing.T) {
 	t.Parallel()
 	svc, users, _ := newSvcForTest(t)
-	users.seed(&models.User{UUID: "u1"})
+	users.seed(&iface.User{UUID: "u1"})
 
 	before := time.Now().Add(-time.Second)
 	if err := svc.StartMFAGraceIfUnset(context.Background(), "u1"); err != nil {
@@ -895,8 +895,8 @@ func TestStartMFAGraceIfUnset_StampsWhenUnset(t *testing.T) {
 func TestValidateUserExistsAndActive(t *testing.T) {
 	t.Parallel()
 	svc, users, _ := newSvcForTest(t)
-	users.seed(&models.User{UUID: "active", IsActive: true})
-	users.seed(&models.User{UUID: "inactive", IsActive: false})
+	users.seed(&iface.User{UUID: "active", IsActive: true})
+	users.seed(&iface.User{UUID: "inactive", IsActive: false})
 
 	t.Run("ValidateUserExists hit", func(t *testing.T) {
 		t.Parallel()

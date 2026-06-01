@@ -1,8 +1,8 @@
 package main
 
 import (
-	"github.com/orkestra-cc/orkestra-addon-dev"
-	"github.com/orkestra-cc/orkestra-sdk/module"
+	"github.com/orkestra/backend/internal/addons/dev"
+	"github.com/orkestra/backend/pkg/sdk/module"
 )
 
 func init() {

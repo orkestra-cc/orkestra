@@ -3,7 +3,7 @@ package services
 import (
 	"testing"
 
-	"github.com/orkestra-cc/orkestra-addon-compliance/models"
+	"github.com/orkestra/backend/internal/addons/compliance/models"
 )
 
 // TestDefaultActorType pins the inference rule: if the caller omits ActorType,

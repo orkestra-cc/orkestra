@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 
-	"github.com/orkestra-cc/orkestra-sdk/iface"
+	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
 // SalesAgent defines a parallel prospect analysis agent

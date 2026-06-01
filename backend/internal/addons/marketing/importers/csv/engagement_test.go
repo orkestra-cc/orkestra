@@ -3,7 +3,7 @@ package csv
 import (
 	"testing"
 
-	"github.com/orkestra-cc/orkestra-addon-marketing/models"
+	"github.com/orkestra/backend/internal/addons/marketing/models"
 )
 
 func TestDetectEngagementColumns(t *testing.T) {

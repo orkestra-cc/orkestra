@@ -14,7 +14,7 @@ import (
 
 	"github.com/orkestra/backend/internal/core/auth/models"
 	"github.com/orkestra/backend/internal/core/auth/repository"
-	userModels "github.com/orkestra/backend/internal/core/user/models"
+	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
 // fakeFactorRepo is an in-memory MFAFactorRepository that keeps the tests
@@ -390,6 +390,6 @@ type testUser struct {
 	Email string
 }
 
-func (u *testUser) toUser() *userModels.User {
-	return &userModels.User{UUID: u.UUID, Email: u.Email}
+func (u *testUser) toUser() *iface.User {
+	return &iface.User{UUID: u.UUID, Email: u.Email}
 }

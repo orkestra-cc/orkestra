@@ -1,8 +1,8 @@
 package services
 
 import (
-	"github.com/orkestra-cc/orkestra-addon-marketing/models"
-	"github.com/orkestra-cc/orkestra-addon-marketing/scoring"
+	"github.com/orkestra/backend/internal/addons/marketing/models"
+	"github.com/orkestra/backend/internal/addons/marketing/scoring"
 )
 
 // EvaluatePersonFilter reports whether the person passes the profile

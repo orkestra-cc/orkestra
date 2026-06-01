@@ -1,8 +1,8 @@
 package main
 
 import (
-	"github.com/orkestra-cc/orkestra-addon-graph"
-	"github.com/orkestra-cc/orkestra-sdk/module"
+	"github.com/orkestra/backend/internal/addons/graph"
+	"github.com/orkestra/backend/pkg/sdk/module"
 )
 
 func init() {

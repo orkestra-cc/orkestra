@@ -3,7 +3,7 @@ package odoo
 import (
 	"strings"
 
-	"github.com/orkestra-cc/orkestra-addon-marketing/importers"
+	"github.com/orkestra/backend/internal/addons/marketing/importers"
 )
 
 // ResPartnerFields is the explicit field allow-list the adapter

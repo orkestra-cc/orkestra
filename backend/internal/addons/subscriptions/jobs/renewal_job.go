@@ -5,7 +5,7 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/orkestra-cc/orkestra-addon-subscriptions/services"
+	"github.com/orkestra/backend/internal/addons/subscriptions/services"
 )
 
 // RenewalJob ticks every Interval and processes due subscriptions via

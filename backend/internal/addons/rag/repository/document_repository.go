@@ -10,7 +10,7 @@ import (
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 
-	"github.com/orkestra-cc/orkestra-addon-rag/models"
+	"github.com/orkestra/backend/internal/addons/rag/models"
 )
 
 const documentCollection = "rag_documents"

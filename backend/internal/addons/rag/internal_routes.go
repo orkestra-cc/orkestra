@@ -5,7 +5,7 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
-	"github.com/orkestra-cc/orkestra-addon-rag/handlers"
+	"github.com/orkestra/backend/internal/addons/rag/handlers"
 )
 
 // RegisterInternalRoutes registers service-to-service RAG routes.

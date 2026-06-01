@@ -5,9 +5,9 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/orkestra-cc/orkestra-addon-marketing/repository"
-	"github.com/orkestra-cc/orkestra-addon-marketing/services"
-	"github.com/orkestra-cc/orkestra-sdk/ctxauth"
+	"github.com/orkestra/backend/internal/addons/marketing/repository"
+	"github.com/orkestra/backend/internal/addons/marketing/services"
+	"github.com/orkestra/backend/pkg/sdk/ctxauth"
 )
 
 // CardExpirationJob drains expired-but-still-active cards on an

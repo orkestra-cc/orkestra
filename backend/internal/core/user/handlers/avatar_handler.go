@@ -12,10 +12,10 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/google/uuid"
 
-	"github.com/orkestra-cc/orkestra-sdk/ctxauth"
-	userModels "github.com/orkestra/backend/internal/core/user/models"
 	userServices "github.com/orkestra/backend/internal/core/user/services"
 	"github.com/orkestra/backend/internal/shared/blob"
+	"github.com/orkestra/backend/pkg/sdk/ctxauth"
+	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
 // AvatarHandler hosts the three self-service avatar endpoints under
@@ -163,7 +163,7 @@ type commitAvatarRequest struct {
 }
 
 type commitAvatarResponse struct {
-	Body userModels.UserManagementResponse
+	Body iface.UserManagementResponse
 }
 
 // CommitAvatarUpload promotes a freshly-uploaded blob to be the
@@ -201,7 +201,7 @@ func (h *AvatarHandler) CommitAvatarUpload(ctx context.Context, req *commitAvata
 		return nil, huma.NewError(http.StatusNotFound, "avatar_blob_missing",
 			&huma.ErrorDetail{Message: "uploaded object not found in storage — retry the PUT"})
 	}
-	previousKey, err := h.svc.SetAvatarSource(ctx, userUUID, userModels.AvatarSourceUploaded, key)
+	previousKey, err := h.svc.SetAvatarSource(ctx, userUUID, iface.AvatarSourceUploaded, key)
 	if err != nil {
 		return nil, mapAvatarError(err)
 	}
@@ -234,7 +234,7 @@ type setAvatarSourceRequest struct {
 }
 
 type setAvatarSourceResponse struct {
-	Body userModels.UserManagementResponse
+	Body iface.UserManagementResponse
 }
 
 // SetAvatarSource switches the avatar to initials or to a linked
@@ -249,12 +249,12 @@ func (h *AvatarHandler) SetAvatarSource(ctx context.Context, req *setAvatarSourc
 	}
 	source := strings.TrimSpace(req.Body.Source)
 	switch source {
-	case userModels.AvatarSourceInitials,
-		userModels.AvatarSourceOAuthGoogle,
-		userModels.AvatarSourceOAuthApple,
-		userModels.AvatarSourceOAuthGitHub,
-		userModels.AvatarSourceOAuthDiscord:
-	case userModels.AvatarSourceUploaded:
+	case iface.AvatarSourceInitials,
+		iface.AvatarSourceOAuthGoogle,
+		iface.AvatarSourceOAuthApple,
+		iface.AvatarSourceOAuthGitHub,
+		iface.AvatarSourceOAuthDiscord:
+	case iface.AvatarSourceUploaded:
 		return nil, huma.NewError(http.StatusBadRequest, "avatar_use_commit",
 			&huma.ErrorDetail{Message: "use presign-upload + commit to set source to uploaded"})
 	default:

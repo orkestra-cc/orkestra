@@ -13,7 +13,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/orkestra-cc/orkestra-addon-documents/config"
+	"github.com/orkestra/backend/internal/addons/documents/config"
 )
 
 // Errors for Gotenberg client

@@ -3,7 +3,7 @@ package match
 import (
 	"testing"
 
-	"github.com/orkestra-cc/orkestra-addon-marketing/models"
+	"github.com/orkestra/backend/internal/addons/marketing/models"
 )
 
 func TestSoftMatchPerson(t *testing.T) {

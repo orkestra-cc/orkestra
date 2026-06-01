@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	userModels "github.com/orkestra/backend/internal/core/user/models"
+	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
 // TestAMRClaimRoundTrip verifies that amr and last_otp_at survive the full
@@ -19,7 +19,7 @@ func TestAMRClaimRoundTrip(t *testing.T) {
 	}
 	svc := NewJWTService(priv, &priv.PublicKey, "test", 15*time.Minute, 30*24*time.Hour)
 
-	user := &userModels.User{UUID: "u-1", Email: "alice@example.com", Role: "administrator"}
+	user := &iface.User{UUID: "u-1", Email: "alice@example.com", Role: "administrator"}
 
 	token, err := svc.GenerateAccessTokenWithAMR(user, []string{"pwd", "otp"}, 1_700_000_000)
 	if err != nil {
@@ -51,7 +51,7 @@ func TestAccessTokenTTLHonoursConstructor(t *testing.T) {
 	const want = 42 * time.Minute
 	svc := NewJWTService(priv, &priv.PublicKey, "test", want, 30*24*time.Hour)
 
-	user := &userModels.User{UUID: "u-1", Email: "a@b.com", Role: "administrator"}
+	user := &iface.User{UUID: "u-1", Email: "a@b.com", Role: "administrator"}
 	token, err := svc.GenerateAccessToken(user)
 	if err != nil {
 		t.Fatalf("sign: %v", err)
@@ -74,7 +74,7 @@ func TestAMROmittedWhenEmpty(t *testing.T) {
 		t.Fatalf("keygen: %v", err)
 	}
 	svc := NewJWTService(priv, &priv.PublicKey, "test", 15*time.Minute, 30*24*time.Hour)
-	user := &userModels.User{UUID: "u-1", Email: "a@b.com", Role: "user"}
+	user := &iface.User{UUID: "u-1", Email: "a@b.com", Role: "user"}
 
 	token, err := svc.GenerateAccessToken(user)
 	if err != nil {

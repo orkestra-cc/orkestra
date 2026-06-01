@@ -1,6 +1,6 @@
 // Package repository provides tenant-scoped MongoDB access for the
 // marketing addon. Every query goes through
-// github.com/orkestra-cc/orkestra-sdk/tenantrepo helpers so the
+// github.com/orkestra/backend/pkg/sdk/tenantrepo helpers so the
 // CI tenantscope analyzer stays clean — new marketing code must not
 // land any baseline entries in backend/tools/tenantscope/baseline.txt.
 package repository

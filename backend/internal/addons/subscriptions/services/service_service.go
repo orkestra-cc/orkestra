@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/orkestra-cc/orkestra-addon-subscriptions/models"
-	"github.com/orkestra-cc/orkestra-addon-subscriptions/repository"
+	"github.com/orkestra/backend/internal/addons/subscriptions/models"
+	"github.com/orkestra/backend/internal/addons/subscriptions/repository"
 )
 
 var (

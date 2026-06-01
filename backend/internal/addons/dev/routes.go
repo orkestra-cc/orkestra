@@ -8,7 +8,7 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
-	"github.com/orkestra-cc/orkestra-addon-dev/handlers"
+	"github.com/orkestra/backend/internal/addons/dev/handlers"
 )
 
 // isProductionEnvironment checks if the current environment is production

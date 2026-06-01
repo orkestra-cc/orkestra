@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/orkestra-cc/orkestra-addon-marketing/models"
+	"github.com/orkestra/backend/internal/addons/marketing/models"
 )
 
 // TestValidateTier walks the four branches of the tier policy:

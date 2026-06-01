@@ -3,7 +3,7 @@ package handlers
 import (
 	"context"
 
-	"github.com/orkestra-cc/orkestra-addon-billing/jobs"
+	"github.com/orkestra/backend/internal/addons/billing/jobs"
 )
 
 // SyncHandler handles manual SDI synchronization endpoints

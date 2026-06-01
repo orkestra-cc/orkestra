@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/orkestra-cc/orkestra-addon-marketing/importers"
+	"github.com/orkestra/backend/internal/addons/marketing/importers"
 )
 
 // fakeOdoo stands up a minimal Odoo 19 JSON-2 mock backed by an

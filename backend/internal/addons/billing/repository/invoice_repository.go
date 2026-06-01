@@ -13,7 +13,7 @@ import (
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 
-	"github.com/orkestra-cc/orkestra-addon-billing/models"
+	"github.com/orkestra/backend/internal/addons/billing/models"
 )
 
 // Common errors

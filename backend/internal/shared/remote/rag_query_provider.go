@@ -3,7 +3,7 @@ package remote
 import (
 	"context"
 
-	"github.com/orkestra-cc/orkestra-sdk/iface"
+	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
 // RemoteRAGQueryProvider implements iface.RAGQueryProvider by calling the AI

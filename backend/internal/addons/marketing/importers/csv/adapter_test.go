@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/orkestra-cc/orkestra-addon-marketing/importers"
+	"github.com/orkestra/backend/internal/addons/marketing/importers"
 )
 
 // TestAdapterHappyPath exercises the basic CSV → CanonicalRecord

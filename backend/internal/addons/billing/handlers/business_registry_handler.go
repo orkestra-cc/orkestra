@@ -7,7 +7,7 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
-	"github.com/orkestra-cc/orkestra-addon-billing/services"
+	"github.com/orkestra/backend/internal/addons/billing/services"
 )
 
 // BusinessRegistryHandler handles business registry configuration requests

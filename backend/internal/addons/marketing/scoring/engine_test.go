@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/orkestra-cc/orkestra-addon-marketing/models"
+	"github.com/orkestra/backend/internal/addons/marketing/models"
 )
 
 func f64Ptr(f float64) *float64 { return &f }

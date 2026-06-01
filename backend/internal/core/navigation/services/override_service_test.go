@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/orkestra-cc/orkestra-sdk/module"
 	"github.com/orkestra/backend/internal/core/navigation/models"
 	"github.com/orkestra/backend/internal/core/navigation/repository"
 	"github.com/orkestra/backend/internal/shared/errcode"
+	"github.com/orkestra/backend/pkg/sdk/module"
 )
 
 // fakeOverrideRepo is an in-memory OverrideRepository for unit tests.

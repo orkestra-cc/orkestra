@@ -10,13 +10,13 @@ import (
 	"github.com/danielgtaylor/huma/v2/adapters/humachi"
 	"github.com/go-chi/chi/v5"
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
-	"github.com/orkestra-cc/orkestra-addon-graph/handlers"
-	"github.com/orkestra-cc/orkestra-addon-graph/repository"
-	"github.com/orkestra-cc/orkestra-addon-graph/services"
-	"github.com/orkestra-cc/orkestra-sdk/capability"
-	"github.com/orkestra-cc/orkestra-sdk/iface"
-	"github.com/orkestra-cc/orkestra-sdk/module"
-	"github.com/orkestra-cc/orkestra-sdk/modulegate"
+	"github.com/orkestra/backend/internal/addons/graph/handlers"
+	"github.com/orkestra/backend/internal/addons/graph/repository"
+	"github.com/orkestra/backend/internal/addons/graph/services"
+	"github.com/orkestra/backend/pkg/sdk/capability"
+	"github.com/orkestra/backend/pkg/sdk/iface"
+	"github.com/orkestra/backend/pkg/sdk/module"
+	"github.com/orkestra/backend/pkg/sdk/modulegate"
 )
 
 // Default image reference for the Memgraph container. Overridable via the

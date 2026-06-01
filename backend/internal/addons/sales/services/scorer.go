@@ -1,7 +1,7 @@
 package services
 
 import (
-	"github.com/orkestra-cc/orkestra-addon-sales/models"
+	"github.com/orkestra/backend/internal/addons/sales/models"
 )
 
 // AgentWeights defines the contribution of each agent to the composite score

@@ -10,9 +10,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/orkestra-cc/orkestra-addon-marketing/models"
-	"github.com/orkestra-cc/orkestra-addon-marketing/repository"
-	"github.com/orkestra-cc/orkestra-sdk/ctxauth"
+	"github.com/orkestra/backend/internal/addons/marketing/models"
+	"github.com/orkestra/backend/internal/addons/marketing/repository"
+	"github.com/orkestra/backend/pkg/sdk/ctxauth"
 )
 
 // ErrQueueFull is returned by Enqueue when the bounded queue would

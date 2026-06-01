@@ -5,7 +5,7 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
-	"github.com/orkestra-cc/orkestra-addon-billing/handlers"
+	"github.com/orkestra/backend/internal/addons/billing/handlers"
 )
 
 // RegisterRoutes registers all billing module routes

@@ -6,7 +6,7 @@ import (
 	"time"
 
 	authModels "github.com/orkestra/backend/internal/core/auth/models"
-	userModels "github.com/orkestra/backend/internal/core/user/models"
+	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
 // stubReader satisfies the configValueReader interface used by
@@ -487,7 +487,7 @@ func TestMFAGraceWindow(t *testing.T) {
 }
 
 func TestMFARequired_KillSwitchSuppressesPrivilegedRole(t *testing.T) {
-	admin := &userModels.User{Role: SystemRoleAdministrator}
+	admin := &iface.User{Role: SystemRoleAdministrator}
 	// Sanity: with no policy, privileged role still requires MFA.
 	var nilPolicy *AuthPolicyService
 	if !nilPolicy.MFARequired(admin, nil) {
@@ -509,7 +509,7 @@ func TestMFAGraceExpired_UsesConfiguredWindow(t *testing.T) {
 	now := time.Now()
 	// User started grace 5 days ago.
 	started := now.Add(-5 * 24 * time.Hour)
-	user := &userModels.User{MFAGraceStartedAt: &started}
+	user := &iface.User{MFAGraceStartedAt: &started}
 
 	// Default 7-day window: not expired.
 	var nilPolicy *AuthPolicyService
@@ -533,7 +533,7 @@ func TestMFAGraceExpiresAt_NilUser(t *testing.T) {
 	if got := p.MFAGraceExpiresAt(context.Background(), nil); !got.IsZero() {
 		t.Errorf("nil user must return zero time, got %v", got)
 	}
-	user := &userModels.User{} // no grace start
+	user := &iface.User{} // no grace start
 	if got := p.MFAGraceExpiresAt(context.Background(), user); !got.IsZero() {
 		t.Errorf("user without grace start must return zero time, got %v", got)
 	}
@@ -584,8 +584,8 @@ func TestMFARequired_AdminRoleListExtendsBuiltIn(t *testing.T) {
 	// "manager" is NOT in the built-in privileged list; the admin can
 	// add it via the policy. Existing privileged users (administrator)
 	// stay covered when the list overrides the default.
-	manager := &userModels.User{Role: "manager"}
-	admin := &userModels.User{Role: SystemRoleAdministrator}
+	manager := &iface.User{Role: "manager"}
+	admin := &iface.User{Role: SystemRoleAdministrator}
 
 	// Without the policy override → manager doesn't require MFA.
 	var nilP *AuthPolicyService
@@ -607,8 +607,8 @@ func TestMFARequired_AdminRoleListExtendsBuiltIn(t *testing.T) {
 }
 
 func TestMFARequired_AdminRoleListEmptyFallsBackToBuiltIn(t *testing.T) {
-	admin := &userModels.User{Role: SystemRoleAdministrator}
-	manager := &userModels.User{Role: "manager"}
+	admin := &iface.User{Role: SystemRoleAdministrator}
+	manager := &iface.User{Role: "manager"}
 	// Empty list = "use the built-in (super_admin / administrator / org_*)".
 	p := newPolicy(map[string]string{"mfaRequiredForRoles": ""})
 	if !p.MFARequired(admin, nil) {
@@ -623,7 +623,7 @@ func TestMFARequired_KillSwitchBeatsRoleList(t *testing.T) {
 	// Even with a configured list that names the user's role, the kill
 	// switch wins. Mirrors the existing kill-switch test for the
 	// built-in role list.
-	manager := &userModels.User{Role: "manager"}
+	manager := &iface.User{Role: "manager"}
 	p := newPolicy(map[string]string{
 		"mfaEnabled":          "false",
 		"mfaRequiredForRoles": "manager",
@@ -680,7 +680,7 @@ func TestOAuthAutoLinkByEmail_DefaultsTrue(t *testing.T) {
 // still suppress the requirement — guards against a regression where
 // the kill switch was bypassed via the role-list path.
 func TestMFARequired_OrgRoleHonoursKillSwitch(t *testing.T) {
-	user := &userModels.User{Role: "operator"} // non-privileged system role
+	user := &iface.User{Role: "operator"} // non-privileged system role
 	memberships := []authModels.OrgMembership{
 		{Roles: []string{OrgRoleOwner}},
 	}

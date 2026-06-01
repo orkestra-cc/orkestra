@@ -4,8 +4,8 @@ import (
 	"context"
 
 	"github.com/danielgtaylor/huma/v2"
-	"github.com/orkestra-cc/orkestra-addon-graph/models"
-	"github.com/orkestra-cc/orkestra-addon-graph/services"
+	"github.com/orkestra/backend/internal/addons/graph/models"
+	"github.com/orkestra/backend/internal/addons/graph/services"
 )
 
 // GraphHandler handles all graph-related HTTP requests

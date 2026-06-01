@@ -14,10 +14,10 @@ import (
 	"sync"
 	"time"
 
-	openapiauth "github.com/orkestra-cc/orkestra-openapi-auth"
+	openapiauth "github.com/orkestra/backend/internal/shared/openapiauth"
 
-	"github.com/orkestra-cc/orkestra-addon-billing/config"
-	"github.com/orkestra-cc/orkestra-addon-billing/models"
+	"github.com/orkestra/backend/internal/addons/billing/config"
+	"github.com/orkestra/backend/internal/addons/billing/models"
 )
 
 // Common errors

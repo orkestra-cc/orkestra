@@ -27,18 +27,18 @@ import (
 	chiMiddleware "github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
 
-	"github.com/orkestra-cc/orkestra-addon-aimodels"
-	"github.com/orkestra-cc/orkestra-addon-graph"
-	"github.com/orkestra-cc/orkestra-addon-rag"
-	"github.com/orkestra-cc/orkestra-sdk/metrics"
-	"github.com/orkestra-cc/orkestra-sdk/module"
 	"github.com/orkestra/backend/internal/addons/agents"
+	"github.com/orkestra/backend/internal/addons/aimodels"
+	"github.com/orkestra/backend/internal/addons/graph"
+	"github.com/orkestra/backend/internal/addons/rag"
 	"github.com/orkestra/backend/internal/shared/config"
 	"github.com/orkestra/backend/internal/shared/container"
 	"github.com/orkestra/backend/internal/shared/database"
 	"github.com/orkestra/backend/internal/shared/middleware"
 	"github.com/orkestra/backend/internal/shared/telemetry"
 	"github.com/orkestra/backend/internal/shared/utils"
+	"github.com/orkestra/backend/pkg/sdk/metrics"
+	"github.com/orkestra/backend/pkg/sdk/module"
 )
 
 // Version, BuildTime, GitCommit are set at build time via ldflags.

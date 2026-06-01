@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/orkestra-cc/orkestra-addon-billing/models"
-	"github.com/orkestra-cc/orkestra-addon-billing/repository"
+	"github.com/orkestra/backend/internal/addons/billing/models"
+	"github.com/orkestra/backend/internal/addons/billing/repository"
 )
 
 func discardLogger() *slog.Logger {

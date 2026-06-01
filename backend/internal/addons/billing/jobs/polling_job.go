@@ -9,9 +9,9 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/orkestra-cc/orkestra-addon-billing/models"
-	"github.com/orkestra-cc/orkestra-addon-billing/repository"
-	"github.com/orkestra-cc/orkestra-addon-billing/services"
+	"github.com/orkestra/backend/internal/addons/billing/models"
+	"github.com/orkestra/backend/internal/addons/billing/repository"
+	"github.com/orkestra/backend/internal/addons/billing/services"
 )
 
 // FatturaPayload represents the parsed payload from OpenAPI SDI response

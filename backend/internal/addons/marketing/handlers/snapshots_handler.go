@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
-	"github.com/orkestra-cc/orkestra-addon-marketing/models"
-	"github.com/orkestra-cc/orkestra-addon-marketing/repository"
+	"github.com/orkestra/backend/internal/addons/marketing/models"
+	"github.com/orkestra/backend/internal/addons/marketing/repository"
 )
 
 // SnapshotHandler exposes read-only access to marketing_score_snapshots:

@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/orkestra-cc/orkestra-sdk/iface"
+	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
 // RemoteAIModelProvider implements iface.AIModelProvider by delegating to the

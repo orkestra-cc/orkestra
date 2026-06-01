@@ -6,7 +6,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/orkestra-cc/orkestra-addon-marketing/models"
+	"github.com/orkestra/backend/internal/addons/marketing/models"
 )
 
 // DefaultBreakdownMax is the engine's fallback cap on per-snapshot

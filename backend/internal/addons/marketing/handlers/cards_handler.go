@@ -7,9 +7,9 @@ import (
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
-	"github.com/orkestra-cc/orkestra-addon-marketing/models"
-	"github.com/orkestra-cc/orkestra-addon-marketing/repository"
-	"github.com/orkestra-cc/orkestra-addon-marketing/services"
+	"github.com/orkestra/backend/internal/addons/marketing/models"
+	"github.com/orkestra/backend/internal/addons/marketing/repository"
+	"github.com/orkestra/backend/internal/addons/marketing/services"
 )
 
 // CardHandler exposes the §7 card lifecycle to HTTP. Reads on a card

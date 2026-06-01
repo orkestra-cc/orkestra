@@ -13,10 +13,10 @@ import (
 	"sync"
 	"time"
 
-	openapiauth "github.com/orkestra-cc/orkestra-openapi-auth"
+	openapiauth "github.com/orkestra/backend/internal/shared/openapiauth"
 
-	"github.com/orkestra-cc/orkestra-addon-company/config"
-	"github.com/orkestra-cc/orkestra-addon-company/models"
+	"github.com/orkestra/backend/internal/addons/company/config"
+	"github.com/orkestra/backend/internal/addons/company/models"
 )
 
 // Client errors

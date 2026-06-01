@@ -3,9 +3,9 @@ package services
 import (
 	"context"
 
-	"github.com/orkestra-cc/orkestra-sdk/module"
-	"github.com/orkestra-cc/orkestra-sdk/modulegate"
 	"github.com/orkestra/backend/internal/core/navigation/models"
+	"github.com/orkestra/backend/pkg/sdk/module"
+	"github.com/orkestra/backend/pkg/sdk/modulegate"
 )
 
 // AdminNavigationService returns the full unfiltered nav tree with the

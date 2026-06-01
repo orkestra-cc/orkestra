@@ -3,7 +3,6 @@ package main
 import (
 	"log/slog"
 
-	"github.com/orkestra-cc/orkestra-sdk/module"
 	"github.com/orkestra/backend/internal/core/auth"
 	"github.com/orkestra/backend/internal/core/authz"
 	"github.com/orkestra/backend/internal/core/logging"
@@ -12,6 +11,7 @@ import (
 	"github.com/orkestra/backend/internal/core/tenant"
 	"github.com/orkestra/backend/internal/core/user"
 	"github.com/orkestra/backend/internal/shared/config"
+	"github.com/orkestra/backend/pkg/sdk/module"
 )
 
 // coreModules returns the always-loaded module factories — user,

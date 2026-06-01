@@ -10,15 +10,14 @@ import (
 	"sync"
 	"time"
 
-	"github.com/orkestra-cc/orkestra-sdk/ctxauth"
-	"github.com/orkestra-cc/orkestra-sdk/iface"
-	"github.com/orkestra-cc/orkestra-sdk/metrics"
 	"github.com/orkestra/backend/internal/core/auth/models"
 	"github.com/orkestra/backend/internal/core/auth/services"
-	userModels "github.com/orkestra/backend/internal/core/user/models"
 	"github.com/orkestra/backend/internal/shared/config"
 	"github.com/orkestra/backend/internal/shared/errors"
 	"github.com/orkestra/backend/internal/shared/utils"
+	"github.com/orkestra/backend/pkg/sdk/ctxauth"
+	"github.com/orkestra/backend/pkg/sdk/iface"
+	"github.com/orkestra/backend/pkg/sdk/metrics"
 )
 
 // slogString is a terse wrapper for slog.String so the warn-mode log site
@@ -68,7 +67,7 @@ type MFAEnrollmentLookup func(ctx context.Context, audience, userUUID string) (h
 // substitute a fake. Nil-tolerant: when unset, the gate falls back to the
 // legacy "always emit step_up_required" behaviour.
 type StepUpPolicy interface {
-	MFARequired(user *userModels.User, memberships []models.OrgMembership) bool
+	MFARequired(user *iface.User, memberships []models.OrgMembership) bool
 }
 
 type AuthMiddleware struct {
@@ -1016,7 +1015,7 @@ func (m *AuthMiddleware) roleRequiresMFA(ctx context.Context, claims *models.JWT
 	// Claims-only fallback — synthesize a minimal user from srole. The
 	// policy reader only reads user.Role and the membership roles, so
 	// this is sufficient for the role-based MFA gate.
-	return m.stepUpPolicy.MFARequired(&userModels.User{Role: claims.SystemRole}, claims.Memberships)
+	return m.stepUpPolicy.MFARequired(&iface.User{Role: claims.SystemRole}, claims.Memberships)
 }
 
 // RequireLowRisk blocks the request when the current session's risk

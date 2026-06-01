@@ -6,9 +6,9 @@ import (
 	"fmt"
 
 	"github.com/google/uuid"
-	"github.com/orkestra-cc/orkestra-addon-marketing/models"
-	"github.com/orkestra-cc/orkestra-addon-marketing/repository"
-	"github.com/orkestra-cc/orkestra-sdk/ctxauth"
+	"github.com/orkestra/backend/internal/addons/marketing/models"
+	"github.com/orkestra/backend/internal/addons/marketing/repository"
+	"github.com/orkestra/backend/pkg/sdk/ctxauth"
 )
 
 // ErrInvalidTag wraps caller-error responses on Tag writes — empty

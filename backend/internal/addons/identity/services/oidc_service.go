@@ -31,10 +31,10 @@ import (
 	"github.com/google/uuid"
 	"golang.org/x/oauth2"
 
-	"github.com/orkestra-cc/orkestra-addon-identity/internal/cryptoutil"
-	identityModels "github.com/orkestra-cc/orkestra-addon-identity/models"
-	"github.com/orkestra-cc/orkestra-addon-identity/repository"
-	"github.com/orkestra-cc/orkestra-sdk/iface"
+	"github.com/orkestra/backend/internal/addons/identity/internal/cryptoutil"
+	identityModels "github.com/orkestra/backend/internal/addons/identity/models"
+	"github.com/orkestra/backend/internal/addons/identity/repository"
+	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
 // ErrIdPDisabled signals an attempt to start a login against a config

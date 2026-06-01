@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/orkestra-cc/orkestra-addon-marketing/models"
+	"github.com/orkestra/backend/internal/addons/marketing/models"
 )
 
 // ActivityEmitter centralises the auto-emission helpers. It depends on

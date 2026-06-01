@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/orkestra-cc/orkestra-sdk/ctxauth"
+	"github.com/orkestra/backend/pkg/sdk/ctxauth"
 )
 
 // newCapturingLogger returns a logger writing JSON to a buffer plus a

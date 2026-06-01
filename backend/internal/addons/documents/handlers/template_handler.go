@@ -5,9 +5,9 @@ import (
 	"strings"
 
 	"github.com/danielgtaylor/huma/v2"
-	"github.com/orkestra-cc/orkestra-addon-documents/models"
-	"github.com/orkestra-cc/orkestra-addon-documents/repository"
-	"github.com/orkestra-cc/orkestra-addon-documents/services"
+	"github.com/orkestra/backend/internal/addons/documents/models"
+	"github.com/orkestra/backend/internal/addons/documents/repository"
+	"github.com/orkestra/backend/internal/addons/documents/services"
 )
 
 // stringToBoolPtr converts a query string ("true"/"false") to *bool.

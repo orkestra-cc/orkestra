@@ -5,7 +5,7 @@ import (
 	"net/http"
 
 	"github.com/danielgtaylor/huma/v2"
-	"github.com/orkestra-cc/orkestra-addon-compliance/services"
+	"github.com/orkestra/backend/internal/addons/compliance/services"
 )
 
 // SOC2Handler exposes the platform-admin SOC2 evidence read. No POST

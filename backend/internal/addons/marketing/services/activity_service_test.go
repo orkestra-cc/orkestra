@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/orkestra-cc/orkestra-addon-marketing/models"
+	"github.com/orkestra/backend/internal/addons/marketing/models"
 )
 
 // TestCorrectionEntryFromActivities pins the service-layer projection

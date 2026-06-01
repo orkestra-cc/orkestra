@@ -6,7 +6,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/go-chi/chi/v5"
 
-	"github.com/orkestra-cc/orkestra-addon-rag/handlers"
+	"github.com/orkestra/backend/internal/addons/rag/handlers"
 )
 
 // RegisterModelRoutes registers model management routes

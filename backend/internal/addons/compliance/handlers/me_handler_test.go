@@ -8,9 +8,9 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
-	"github.com/orkestra-cc/orkestra-addon-compliance/services"
-	"github.com/orkestra-cc/orkestra-sdk/ctxauth"
-	"github.com/orkestra-cc/orkestra-sdk/iface"
+	"github.com/orkestra/backend/internal/addons/compliance/services"
+	"github.com/orkestra/backend/pkg/sdk/ctxauth"
+	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
 // authedCtx stamps the SDK ctxauth keys onto ctx the same way

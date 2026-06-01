@@ -6,8 +6,8 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/orkestra-cc/orkestra-addon-billing/jobs"
-	"github.com/orkestra-cc/orkestra-addon-billing/services"
+	"github.com/orkestra/backend/internal/addons/billing/jobs"
+	"github.com/orkestra/backend/internal/addons/billing/services"
 )
 
 // WebhookHandler handles incoming SDI webhook callbacks from OpenAPI.it

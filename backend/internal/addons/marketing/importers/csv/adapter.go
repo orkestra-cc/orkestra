@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/orkestra-cc/orkestra-addon-marketing/importers"
+	"github.com/orkestra/backend/internal/addons/marketing/importers"
 )
 
 // Adapter implements importers.Importer for CSV files.

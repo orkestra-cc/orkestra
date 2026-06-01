@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/orkestra-cc/orkestra-addon-marketing/importers"
+	"github.com/orkestra/backend/internal/addons/marketing/importers"
 	"github.com/xuri/excelize/v2"
 )
 

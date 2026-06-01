@@ -10,7 +10,7 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/orkestra-cc/orkestra-addon-marketing/services"
+	"github.com/orkestra/backend/internal/addons/marketing/services"
 )
 
 // RecomputeJob drains stale score snapshots on an interval. Cloned

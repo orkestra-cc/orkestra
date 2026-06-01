@@ -3,7 +3,7 @@ package scoring
 import (
 	"testing"
 
-	"github.com/orkestra-cc/orkestra-addon-marketing/models"
+	"github.com/orkestra/backend/internal/addons/marketing/models"
 )
 
 // TestBuildCorrectedSetEmpty: nothing to correct.

@@ -17,7 +17,7 @@ import (
 	"time"
 
 	"github.com/orkestra/backend/internal/core/auth/models"
-	userModels "github.com/orkestra/backend/internal/core/user/models"
+	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
 // TestGetOAuthLinks_RequiresMFAFalseWithoutFactor: a user with no enrolled
@@ -26,11 +26,11 @@ import (
 func TestGetOAuthLinks_RequiresMFAFalseWithoutFactor(t *testing.T) {
 	t.Parallel()
 	fake := newAdminUnlinkUserFake()
-	fake.seed(&userModels.User{
+	fake.seed(&iface.User{
 		UUID:         "u-multi",
 		Role:         "administrator",
 		PasswordHash: "x",
-		OAuthLinks: []userModels.OAuthLink{
+		OAuthLinks: []iface.OAuthLink{
 			{Provider: "google", ProviderID: "g-1", Email: "u@x.com", IsActive: true, IsPrimary: true},
 			{Provider: "github", ProviderID: "gh-1", Email: "u@x.com", IsActive: true},
 		},
@@ -57,11 +57,11 @@ func TestGetOAuthLinks_RequiresMFAFalseWithoutFactor(t *testing.T) {
 func TestGetOAuthLinks_RequiresMFATrueWithEnrolledTOTP(t *testing.T) {
 	t.Parallel()
 	fake := newAdminUnlinkUserFake()
-	fake.seed(&userModels.User{
+	fake.seed(&iface.User{
 		UUID:         "u-totp",
 		Role:         "administrator",
 		PasswordHash: "x",
-		OAuthLinks: []userModels.OAuthLink{
+		OAuthLinks: []iface.OAuthLink{
 			{Provider: "google", ProviderID: "g-1", Email: "u@x.com", IsActive: true},
 		},
 	})
@@ -89,11 +89,11 @@ func TestGetOAuthLinks_RequiresMFATrueWithEnrolledTOTP(t *testing.T) {
 func TestGetOAuthLinks_RequiresMFATrueWithWebAuthn(t *testing.T) {
 	t.Parallel()
 	fake := newAdminUnlinkUserFake()
-	fake.seed(&userModels.User{
+	fake.seed(&iface.User{
 		UUID:         "u-wa",
 		Role:         "operator",
 		PasswordHash: "x",
-		OAuthLinks: []userModels.OAuthLink{
+		OAuthLinks: []iface.OAuthLink{
 			{Provider: "google", ProviderID: "g-1", Email: "u@x.com", IsActive: true},
 		},
 	})
@@ -120,11 +120,11 @@ func TestGetOAuthLinks_RequiresMFATrueWithWebAuthn(t *testing.T) {
 func TestGetOAuthLinks_RequiresMFAFalseWithEmptyWebAuthnArray(t *testing.T) {
 	t.Parallel()
 	fake := newAdminUnlinkUserFake()
-	fake.seed(&userModels.User{
+	fake.seed(&iface.User{
 		UUID:         "u-wa-empty",
 		Role:         "operator",
 		PasswordHash: "x",
-		OAuthLinks: []userModels.OAuthLink{
+		OAuthLinks: []iface.OAuthLink{
 			{Provider: "google", ProviderID: "g-1", IsActive: true},
 		},
 	})
@@ -149,9 +149,9 @@ func TestGetOAuthLinks_RequiresMFAFalseWithEmptyWebAuthnArray(t *testing.T) {
 func TestGetOAuthLinks_SingleLinkCannotUnlink(t *testing.T) {
 	t.Parallel()
 	fake := newAdminUnlinkUserFake()
-	fake.seed(&userModels.User{
+	fake.seed(&iface.User{
 		UUID: "u-sole",
-		OAuthLinks: []userModels.OAuthLink{
+		OAuthLinks: []iface.OAuthLink{
 			{Provider: "google", ProviderID: "g-1", Email: "u@x.com", IsActive: true, IsPrimary: true},
 		},
 	})

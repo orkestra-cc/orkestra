@@ -4,7 +4,7 @@ import (
 	"net/http"
 
 	"github.com/danielgtaylor/huma/v2"
-	"github.com/orkestra-cc/orkestra-addon-payments/handlers"
+	"github.com/orkestra/backend/internal/addons/payments/handlers"
 )
 
 // RegisterClientSelfServiceRoutes mounts the Tier-2 self-service payment

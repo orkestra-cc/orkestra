@@ -6,8 +6,8 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/orkestra-cc/orkestra-addon-rag/models"
-	"github.com/orkestra-cc/orkestra-addon-rag/repository"
+	"github.com/orkestra/backend/internal/addons/rag/models"
+	"github.com/orkestra/backend/internal/addons/rag/repository"
 )
 
 // RelationshipTypeService manages relationship type configurations.

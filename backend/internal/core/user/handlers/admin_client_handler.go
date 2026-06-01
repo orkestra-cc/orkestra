@@ -6,11 +6,10 @@ import (
 	"log/slog"
 
 	"github.com/danielgtaylor/huma/v2"
-	"github.com/orkestra-cc/orkestra-sdk/iface"
-	"github.com/orkestra-cc/orkestra-sdk/module"
-	"github.com/orkestra/backend/internal/core/user/models"
 	"github.com/orkestra/backend/internal/core/user/services"
 	"github.com/orkestra/backend/internal/shared/errcode"
+	"github.com/orkestra/backend/pkg/sdk/iface"
+	"github.com/orkestra/backend/pkg/sdk/module"
 )
 
 // AdminClientUserHandler powers the admin "Clients" page — a list of
@@ -65,12 +64,12 @@ type ListClientUsersAdminRequest struct {
 // ListClientUsersAdminResponse wraps the paginated payload in Huma's body
 // envelope.
 type ListClientUsersAdminResponse struct {
-	Body models.AdminClientUserListResponse `json:"body"`
+	Body iface.AdminClientUserListResponse `json:"body"`
 }
 
 // ListClientUsersAdmin handles GET /v1/admin/client-users.
 func (h *AdminClientUserHandler) ListClientUsersAdmin(ctx context.Context, req *ListClientUsersAdminRequest) (*ListClientUsersAdminResponse, error) {
-	filters := &models.UserFilters{
+	filters := &iface.UserFilters{
 		Role:   req.Role,
 		Search: req.Search,
 	}
@@ -83,7 +82,7 @@ func (h *AdminClientUserHandler) ListClientUsersAdmin(ctx context.Context, req *
 		filters.EmailVerified = &v
 	}
 
-	pagination := &models.PaginationParams{Page: req.Page, PageSize: req.PageSize}
+	pagination := &iface.PaginationParams{Page: req.Page, PageSize: req.PageSize}
 
 	page, err := h.clientUserService.ListUsers(ctx, filters, pagination)
 	if err != nil {
@@ -92,10 +91,10 @@ func (h *AdminClientUserHandler) ListClientUsersAdmin(ctx context.Context, req *
 
 	tenantProv, _ := module.GetTyped[iface.TenantProvider](h.services, module.ServiceTenantProvider)
 
-	out := make([]models.AdminClientUserItem, 0, len(page.Users))
+	out := make([]iface.AdminClientUserItem, 0, len(page.Users))
 	for i := range page.Users {
 		u := page.Users[i]
-		item := models.AdminClientUserItem{
+		item := iface.AdminClientUserItem{
 			ID:            u.ID,
 			Email:         u.Email,
 			Username:      u.Username,
@@ -106,7 +105,7 @@ func (h *AdminClientUserHandler) ListClientUsersAdmin(ctx context.Context, req *
 			EmailVerified: u.EmailVerified,
 			LastLogin:     u.LastLogin,
 			CreatedAt:     u.CreatedAt,
-			Memberships:   []models.AdminUserMembership{},
+			Memberships:   []iface.AdminUserMembership{},
 		}
 
 		if tenantProv != nil {
@@ -117,9 +116,9 @@ func (h *AdminClientUserHandler) ListClientUsersAdmin(ctx context.Context, req *
 				slog.WarnContext(ctx, "admin client-users: list memberships failed",
 					"userId", u.ID, "error", mErr)
 			} else {
-				item.Memberships = make([]models.AdminUserMembership, 0, len(memberships))
+				item.Memberships = make([]iface.AdminUserMembership, 0, len(memberships))
 				for _, m := range memberships {
-					item.Memberships = append(item.Memberships, models.AdminUserMembership{
+					item.Memberships = append(item.Memberships, iface.AdminUserMembership{
 						TenantUUID: m.TenantUUID,
 						TenantName: m.TenantName,
 						TenantSlug: m.TenantSlug,
@@ -135,7 +134,7 @@ func (h *AdminClientUserHandler) ListClientUsersAdmin(ctx context.Context, req *
 	}
 
 	return &ListClientUsersAdminResponse{
-		Body: models.AdminClientUserListResponse{
+		Body: iface.AdminClientUserListResponse{
 			Users:      out,
 			Total:      page.Total,
 			Page:       page.Page,
@@ -148,12 +147,12 @@ func (h *AdminClientUserHandler) ListClientUsersAdmin(ctx context.Context, req *
 // buildAdminItem fetches a client user by id and joins its tenant
 // memberships. Shared by GetClientUserAdmin and the create / update
 // response paths so the detail page sees the same shape as the list.
-func (h *AdminClientUserHandler) buildAdminItem(ctx context.Context, id string) (*models.AdminClientUserItem, error) {
+func (h *AdminClientUserHandler) buildAdminItem(ctx context.Context, id string) (*iface.AdminClientUserItem, error) {
 	resp, err := h.clientUserService.GetUser(ctx, id)
 	if err != nil {
 		return nil, err
 	}
-	item := models.AdminClientUserItem{
+	item := iface.AdminClientUserItem{
 		ID:            resp.ID,
 		Email:         resp.Email,
 		Username:      resp.Username,
@@ -164,7 +163,7 @@ func (h *AdminClientUserHandler) buildAdminItem(ctx context.Context, id string) 
 		EmailVerified: resp.EmailVerified,
 		LastLogin:     resp.LastLogin,
 		CreatedAt:     resp.CreatedAt,
-		Memberships:   []models.AdminUserMembership{},
+		Memberships:   []iface.AdminUserMembership{},
 		Providers:     resp.Providers,
 	}
 
@@ -174,9 +173,9 @@ func (h *AdminClientUserHandler) buildAdminItem(ctx context.Context, id string) 
 			slog.WarnContext(ctx, "admin client-user: list memberships failed",
 				"userId", resp.ID, "error", mErr)
 		} else {
-			item.Memberships = make([]models.AdminUserMembership, 0, len(memberships))
+			item.Memberships = make([]iface.AdminUserMembership, 0, len(memberships))
 			for _, m := range memberships {
-				item.Memberships = append(item.Memberships, models.AdminUserMembership{
+				item.Memberships = append(item.Memberships, iface.AdminUserMembership{
 					TenantUUID: m.TenantUUID,
 					TenantName: m.TenantName,
 					TenantSlug: m.TenantSlug,
@@ -197,7 +196,7 @@ type GetClientUserAdminRequest struct {
 
 // GetClientUserAdminResponse wraps a single AdminClientUserItem.
 type GetClientUserAdminResponse struct {
-	Body models.AdminClientUserItem `json:"body"`
+	Body iface.AdminClientUserItem `json:"body"`
 }
 
 // GetClientUserAdmin handles GET /v1/admin/client-users/{id}.
@@ -236,7 +235,7 @@ type UpdateClientUserAdminRequest struct {
 
 // UpdateClientUserAdminResponse echoes the freshly joined item.
 type UpdateClientUserAdminResponse struct {
-	Body models.AdminClientUserItem `json:"body"`
+	Body iface.AdminClientUserItem `json:"body"`
 }
 
 // UpdateClientUserAdmin handles PATCH /v1/admin/client-users/{id}.
@@ -246,7 +245,7 @@ func (h *AdminClientUserHandler) UpdateClientUserAdmin(ctx context.Context, req 
 	// failure is non-fatal; the patch flow surfaces its own 404 below.
 	previous, _ := h.clientUserService.GetUser(ctx, req.ID)
 
-	input := &models.UpdateUserInput{
+	input := &iface.UpdateUserInput{
 		FullName: req.Body.FullName,
 		Username: req.Body.Username,
 		Email:    req.Body.Email,
@@ -365,7 +364,7 @@ type CreateClientUserAdminRequest struct {
 
 // CreateClientUserAdminResponse echoes the created item.
 type CreateClientUserAdminResponse struct {
-	Body models.AdminClientUserItem `json:"body"`
+	Body iface.AdminClientUserItem `json:"body"`
 }
 
 // CreateClientUserAdmin handles POST /v1/admin/client-users. Pre-hashes
@@ -384,7 +383,7 @@ func (h *AdminClientUserHandler) CreateClientUserAdmin(ctx context.Context, req 
 		return nil, huma.Error500InternalServerError("Failed to hash password", err)
 	}
 
-	input := &models.CreateUserInput{
+	input := &iface.CreateUserInput{
 		Email:        req.Body.Email,
 		FullName:     req.Body.FullName,
 		Username:     req.Body.Username,
@@ -443,7 +442,7 @@ type InviteClientUserAdminRequest struct {
 // InviteClientUserAdminResponse echoes the freshly-created item — the
 // admin UI navigates to its detail page after success.
 type InviteClientUserAdminResponse struct {
-	Body models.AdminClientUserItem `json:"body"`
+	Body iface.AdminClientUserItem `json:"body"`
 }
 
 // InviteClientUserAdmin handles POST /v1/admin/client-users/invite. The
@@ -456,7 +455,7 @@ func (h *AdminClientUserHandler) InviteClientUserAdmin(ctx context.Context, req 
 		return nil, huma.Error503ServiceUnavailable("Auth service unavailable — cannot send invite")
 	}
 
-	input := &models.CreateUserInput{
+	input := &iface.CreateUserInput{
 		Email:    req.Body.Email,
 		FullName: req.Body.FullName,
 		Username: req.Body.Username,

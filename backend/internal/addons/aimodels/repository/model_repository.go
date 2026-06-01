@@ -10,7 +10,7 @@ import (
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 
-	"github.com/orkestra-cc/orkestra-addon-aimodels/models"
+	"github.com/orkestra/backend/internal/addons/aimodels/models"
 )
 
 const modelCollection = "ai_models"

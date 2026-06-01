@@ -16,11 +16,10 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/orkestra-cc/orkestra-sdk/iface"
 	authModels "github.com/orkestra/backend/internal/core/auth/models"
 	"github.com/orkestra/backend/internal/core/auth/repository"
-	userModels "github.com/orkestra/backend/internal/core/user/models"
 	"github.com/orkestra/backend/internal/shared/utils"
+	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
 // orchestrationEnv mirrors gatesEnv but wires AuthService instead of
@@ -113,7 +112,7 @@ var _ repository.OAuthProviderRepository = (*orchOAuthRepo)(nil)
 // issueAndSeedRefresh mints a real refresh token via the JWT service
 // and stores the corresponding token-doc in the fake repo so the
 // refresh flow can find it. Returns the raw token + the doc.
-func (e *orchestrationEnv) issueAndSeedRefresh(user *userModels.User, family string, opts ...func(*authModels.RefreshTokenDoc)) (string, *authModels.RefreshTokenDoc) {
+func (e *orchestrationEnv) issueAndSeedRefresh(user *iface.User, family string, opts ...func(*authModels.RefreshTokenDoc)) (string, *authModels.RefreshTokenDoc) {
 	e.t.Helper()
 	token, err := e.jwt.GenerateRefreshToken(user)
 	if err != nil {
@@ -139,7 +138,7 @@ func (e *orchestrationEnv) issueAndSeedRefresh(user *userModels.User, family str
 	return token, doc
 }
 
-func seededUser() *userModels.User {
+func seededUser() *iface.User {
 	return activeUser("alice@example.com", "x")
 }
 

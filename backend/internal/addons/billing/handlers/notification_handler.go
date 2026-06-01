@@ -6,8 +6,8 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
-	"github.com/orkestra-cc/orkestra-addon-billing/models"
-	"github.com/orkestra-cc/orkestra-addon-billing/services"
+	"github.com/orkestra/backend/internal/addons/billing/models"
+	"github.com/orkestra/backend/internal/addons/billing/services"
 )
 
 // NotificationHandler handles notification-related HTTP requests

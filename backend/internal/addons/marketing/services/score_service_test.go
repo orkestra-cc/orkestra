@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/orkestra-cc/orkestra-sdk/ctxauth"
+	"github.com/orkestra/backend/pkg/sdk/ctxauth"
 )
 
 // ctxWithTenant stamps a tenantID onto the background context so

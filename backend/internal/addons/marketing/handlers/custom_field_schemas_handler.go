@@ -6,10 +6,10 @@ import (
 	"net/http"
 
 	"github.com/danielgtaylor/huma/v2"
-	"github.com/orkestra-cc/orkestra-addon-marketing/models"
-	"github.com/orkestra-cc/orkestra-addon-marketing/repository"
-	"github.com/orkestra-cc/orkestra-addon-marketing/services"
-	"github.com/orkestra-cc/orkestra-sdk/ctxauth"
+	"github.com/orkestra/backend/internal/addons/marketing/models"
+	"github.com/orkestra/backend/internal/addons/marketing/repository"
+	"github.com/orkestra/backend/internal/addons/marketing/services"
+	"github.com/orkestra/backend/pkg/sdk/ctxauth"
 )
 
 // CustomFieldSchemaHandler exposes CRUD on

@@ -10,7 +10,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	chiMiddleware "github.com/go-chi/chi/v5/middleware"
-	"github.com/orkestra-cc/orkestra-sdk/ctxauth"
+	"github.com/orkestra/backend/pkg/sdk/ctxauth"
 	"go.opentelemetry.io/otel/trace"
 )
 

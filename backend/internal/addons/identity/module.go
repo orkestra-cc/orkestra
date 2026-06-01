@@ -22,13 +22,13 @@ import (
 	"github.com/danielgtaylor/huma/v2/adapters/humachi"
 	"github.com/go-chi/chi/v5"
 
-	"github.com/orkestra-cc/orkestra-addon-identity/handlers"
-	"github.com/orkestra-cc/orkestra-addon-identity/models"
-	"github.com/orkestra-cc/orkestra-addon-identity/repository"
-	"github.com/orkestra-cc/orkestra-addon-identity/scim"
-	"github.com/orkestra-cc/orkestra-addon-identity/services"
-	"github.com/orkestra-cc/orkestra-sdk/iface"
-	"github.com/orkestra-cc/orkestra-sdk/module"
+	"github.com/orkestra/backend/internal/addons/identity/handlers"
+	"github.com/orkestra/backend/internal/addons/identity/models"
+	"github.com/orkestra/backend/internal/addons/identity/repository"
+	"github.com/orkestra/backend/internal/addons/identity/scim"
+	"github.com/orkestra/backend/internal/addons/identity/services"
+	"github.com/orkestra/backend/pkg/sdk/iface"
+	"github.com/orkestra/backend/pkg/sdk/module"
 )
 
 // Module wires the identity module's handlers + service.

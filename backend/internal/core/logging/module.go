@@ -15,11 +15,11 @@ import (
 	"log/slog"
 
 	"github.com/danielgtaylor/huma/v2/adapters/humachi"
-	"github.com/orkestra-cc/orkestra-sdk/module"
 	"github.com/orkestra/backend/internal/core/logging/handlers"
 	"github.com/orkestra/backend/internal/core/logging/repository"
 	"github.com/orkestra/backend/internal/core/logging/services"
 	"github.com/orkestra/backend/internal/shared/utils"
+	"github.com/orkestra/backend/pkg/sdk/module"
 )
 
 // LoggingModule wires the LogLevelService and exposes its admin

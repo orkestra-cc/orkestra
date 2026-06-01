@@ -8,11 +8,11 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
-	"github.com/orkestra-cc/orkestra-sdk/ctxauth"
 	authModels "github.com/orkestra/backend/internal/core/auth/models"
 	"github.com/orkestra/backend/internal/core/auth/services"
-	userModels "github.com/orkestra/backend/internal/core/user/models"
 	"github.com/orkestra/backend/internal/shared/middleware"
+	"github.com/orkestra/backend/pkg/sdk/ctxauth"
+	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
 // SelfUserAuthHandler hosts the self-service security-center endpoints
@@ -123,7 +123,7 @@ func (h *SelfUserAuthHandler) UnlinkOAuth(ctx context.Context, req *selfUnlinkOA
 	default:
 		return nil, huma.Error400BadRequest("unsupported provider")
 	}
-	if err := h.auth.SelfUnlinkOAuth(ctx, userUUID, userModels.OAuthProvider(provider)); err != nil {
+	if err := h.auth.SelfUnlinkOAuth(ctx, userUUID, iface.OAuthProvider(provider)); err != nil {
 		return nil, mapSelfAuthError(err)
 	}
 	// Audit lane: service layer already emits self_auth_action with

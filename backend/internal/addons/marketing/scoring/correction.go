@@ -1,6 +1,6 @@
 package scoring
 
-import "github.com/orkestra-cc/orkestra-addon-marketing/models"
+import "github.com/orkestra/backend/internal/addons/marketing/models"
 
 // buildCorrectedSet returns the set of activity UUIDs that have been
 // superseded by a correction event (Kind == KindCorrectedBy with a

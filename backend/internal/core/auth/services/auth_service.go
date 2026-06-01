@@ -9,13 +9,12 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/orkestra-cc/orkestra-sdk/ctxauth"
-	"github.com/orkestra-cc/orkestra-sdk/iface"
 	"github.com/orkestra/backend/internal/core/auth/models"
 	"github.com/orkestra/backend/internal/core/auth/repository"
-	userModels "github.com/orkestra/backend/internal/core/user/models"
 	"github.com/orkestra/backend/internal/shared/blob"
 	"github.com/orkestra/backend/internal/shared/utils"
+	"github.com/orkestra/backend/pkg/sdk/ctxauth"
+	"github.com/orkestra/backend/pkg/sdk/iface"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
@@ -86,8 +85,8 @@ var (
 // AuthService extends the basic auth service with UUID support and OAuth linking
 type AuthService interface {
 	// UUID-based user operations
-	GetUserByUUID(ctx context.Context, uuid string) (*userModels.User, error)
-	UpdateUserByUUID(ctx context.Context, uuid string, update *userModels.User) error
+	GetUserByUUID(ctx context.Context, uuid string) (*iface.User, error)
+	UpdateUserByUUID(ctx context.Context, uuid string, update *iface.User) error
 	UpdateLastLoginByUUID(ctx context.Context, uuid string) error
 	DeleteUserByUUID(ctx context.Context, uuid string) error
 	// UpdateLanguageByUUID writes the user's preferred BCP-47 language
@@ -116,14 +115,14 @@ type AuthService interface {
 	// removing the user's only remaining credential (no password +
 	// single OAuth link). Both safeguards live here so any caller —
 	// HTTP handler, future CLI, internal job — gets the same checks.
-	AdminUnlinkOAuth(ctx context.Context, actorUUID, targetUUID string, provider userModels.OAuthProvider) error
+	AdminUnlinkOAuth(ctx context.Context, actorUUID, targetUUID string, provider iface.OAuthProvider) error
 	// SelfUnlinkOAuth removes one OAuth identity from the caller's own
 	// account. Mirrors AdminUnlinkOAuth's last-credential safeguard so
 	// a user cannot accidentally remove their only login method, but
 	// drops the self-action check (self-action IS the point here). The
 	// HTTP handler is gated by RequireStepUp(5m) — credential removal
 	// demands a fresh MFA proof.
-	SelfUnlinkOAuth(ctx context.Context, userUUID string, provider userModels.OAuthProvider) error
+	SelfUnlinkOAuth(ctx context.Context, userUUID string, provider iface.OAuthProvider) error
 	// SelfLinkOAuthFromCallback binds a freshly-completed OAuth flow
 	// to an authenticated user. Called from the OAuth callback when
 	// the signed-state JWT carries Mode=link. Rejects with
@@ -131,7 +130,7 @@ type AuthService interface {
 	// is already attached to a different user; with
 	// ErrOAuthLinkAlreadyExists when the user already has the same
 	// provider linked.
-	SelfLinkOAuthFromCallback(ctx context.Context, userUUID string, provider userModels.OAuthProvider, userInfo map[string]interface{}, oauthTokens *models.OAuthProviderTokens) error
+	SelfLinkOAuthFromCallback(ctx context.Context, userUUID string, provider iface.OAuthProvider, userInfo map[string]interface{}, oauthTokens *models.OAuthProviderTokens) error
 	// GetUserAuthMethods aggregates the user's auth state across the
 	// user record, MFA factor row(s), and linked OAuth providers into
 	// a single view consumed by the admin profile card and by the
@@ -153,8 +152,8 @@ type AuthService interface {
 	RevokeAllUserSessionsExcept(ctx context.Context, userUUID, currentSid string) (int, error)
 
 	// Account consolidation
-	ConsolidateAccountsByEmail(ctx context.Context, email string) (*userModels.User, error)
-	FindAccountsForConsolidation(ctx context.Context, email string) ([]*userModels.User, error)
+	ConsolidateAccountsByEmail(ctx context.Context, email string) (*iface.User, error)
+	FindAccountsForConsolidation(ctx context.Context, email string) ([]*iface.User, error)
 
 	// Enhanced session management (UUID-based)
 	GetUserSessionsByUUID(ctx context.Context, userUUID string) (*models.SessionsResponse, error)
@@ -164,7 +163,7 @@ type AuthService interface {
 	TerminateAllSessionsByUUID(ctx context.Context, userUUID string) error
 
 	// Enhanced token management with UUID and risk assessment
-	GenerateEnhancedTokenPair(ctx context.Context, user *userModels.User, deviceInfo *models.DeviceInfo, securityCtx *models.SecurityContext) (*models.TokenResponse, error)
+	GenerateEnhancedTokenPair(ctx context.Context, user *iface.User, deviceInfo *models.DeviceInfo, securityCtx *models.SecurityContext) (*models.TokenResponse, error)
 	RefreshTokensWithRiskAssessment(ctx context.Context, refreshToken string, securityCtx *models.SecurityContext) (*models.TokenResponse, error)
 	// PeekRefreshToken validates a refresh token's JWT structure and
 	// looks up the stored row WITHOUT rotating it or triggering replay
@@ -198,7 +197,7 @@ type AuthService interface {
 	RecordSelfAuthEvent(ctx context.Context, eventType, userUUID string, fields map[string]interface{})
 
 	// Migration utilities
-	MigrateUserToUUID(ctx context.Context, userID primitive.ObjectID) (*userModels.User, error)
+	MigrateUserToUUID(ctx context.Context, userID primitive.ObjectID) (*iface.User, error)
 	MigrateAllUsersToUUID(ctx context.Context) (int, error)
 	ConvertOAuthLinksToNewFormat(ctx context.Context, userUUID string) error
 
@@ -356,7 +355,7 @@ func (s *authService) SetBlobStore(store blob.Store) {
 // Avatar resolved from AvatarSource. Centralizes the resolution so
 // every code path that returns a User to the SPA (login, refresh,
 // session-poll, …) produces the same shape.
-func (s *authService) buildUserResponse(ctx context.Context, user *userModels.User) *userModels.UserManagementResponse {
+func (s *authService) buildUserResponse(ctx context.Context, user *iface.User) *iface.UserManagementResponse {
 	resp := user.ToResponse()
 	if user.AvatarSource != "" {
 		resp.Avatar = blob.ResolveAvatarURL(ctx, user, s.blobStore)
@@ -383,7 +382,7 @@ func NewAuthService(config *AuthConfig) (AuthService, error) {
 
 // Placeholder implementations for now - to be fully implemented later
 
-func (s *authService) GetUserByUUID(ctx context.Context, uuid string) (*userModels.User, error) {
+func (s *authService) GetUserByUUID(ctx context.Context, uuid string) (*iface.User, error) {
 	userModel, err := s.userService.GetUserByID(ctx, uuid)
 	if err != nil {
 		return nil, err
@@ -392,9 +391,9 @@ func (s *authService) GetUserByUUID(ctx context.Context, uuid string) (*userMode
 	return userModel, nil
 }
 
-func (s *authService) UpdateUserByUUID(ctx context.Context, uuid string, update *userModels.User) error {
+func (s *authService) UpdateUserByUUID(ctx context.Context, uuid string, update *iface.User) error {
 	// Convert user model to update input
-	updateInput := &userModels.UpdateUserInput{
+	updateInput := &iface.UpdateUserInput{
 		FullName: update.FullName,
 		Avatar:   update.Avatar,
 		Role:     update.Role,
@@ -408,12 +407,12 @@ func (s *authService) UpdateLastLoginByUUID(ctx context.Context, uuid string) er
 }
 
 func (s *authService) UpdateLanguageByUUID(ctx context.Context, uuid, language string) error {
-	_, err := s.userService.UpdateUser(ctx, uuid, &userModels.UpdateUserInput{Language: language})
+	_, err := s.userService.UpdateUser(ctx, uuid, &iface.UpdateUserInput{Language: language})
 	return err
 }
 
 func (s *authService) UpdateFullNameByUUID(ctx context.Context, uuid, fullName string) error {
-	_, err := s.userService.UpdateUser(ctx, uuid, &userModels.UpdateUserInput{FullName: fullName})
+	_, err := s.userService.UpdateUser(ctx, uuid, &iface.UpdateUserInput{FullName: fullName})
 	return err
 }
 
@@ -431,7 +430,7 @@ func (s *authService) RemoveOAuthLink(ctx context.Context, userUUID string, inpu
 	// Find the link for this provider
 	var targetProviderID string
 	for _, link := range links {
-		if userModels.OAuthProvider(input.Provider) == link.Provider {
+		if iface.OAuthProvider(input.Provider) == link.Provider {
 			targetProviderID = link.ProviderID
 			break
 		}
@@ -441,7 +440,7 @@ func (s *authService) RemoveOAuthLink(ctx context.Context, userUUID string, inpu
 		return fmt.Errorf("OAuth link for provider %s not found", input.Provider)
 	}
 
-	return s.userService.RemoveOAuthLinkFromUser(ctx, userUUID, userModels.OAuthProvider(input.Provider), targetProviderID)
+	return s.userService.RemoveOAuthLinkFromUser(ctx, userUUID, iface.OAuthProvider(input.Provider), targetProviderID)
 }
 
 func (s *authService) SetPrimaryOAuthLink(ctx context.Context, userUUID string, input models.SetPrimaryOAuthProviderInput) error {
@@ -454,7 +453,7 @@ func (s *authService) SetPrimaryOAuthLink(ctx context.Context, userUUID string, 
 	// Find the link for this provider
 	var targetProviderID string
 	for _, link := range links {
-		if userModels.OAuthProvider(input.Provider) == link.Provider {
+		if iface.OAuthProvider(input.Provider) == link.Provider {
 			targetProviderID = link.ProviderID
 			break
 		}
@@ -464,7 +463,7 @@ func (s *authService) SetPrimaryOAuthLink(ctx context.Context, userUUID string, 
 		return fmt.Errorf("OAuth link for provider %s not found", input.Provider)
 	}
 
-	return s.userService.SetPrimaryOAuthLink(ctx, userUUID, userModels.OAuthProvider(input.Provider), targetProviderID)
+	return s.userService.SetPrimaryOAuthLink(ctx, userUUID, iface.OAuthProvider(input.Provider), targetProviderID)
 }
 
 func (s *authService) GetOAuthLinks(ctx context.Context, userUUID string) (*models.OAuthLinksResponse, error) {
@@ -531,7 +530,7 @@ func (s *authService) userHasEnrolledMFAFactor(ctx context.Context, userUUID str
 // The provider-specific subject ID is resolved from the target's
 // User.OAuthLinks rather than from the OAuth provider repo so this
 // path stays free of tier-specific repo plumbing.
-func (s *authService) AdminUnlinkOAuth(ctx context.Context, actorUUID, targetUUID string, provider userModels.OAuthProvider) error {
+func (s *authService) AdminUnlinkOAuth(ctx context.Context, actorUUID, targetUUID string, provider iface.OAuthProvider) error {
 	if actorUUID == "" || targetUUID == "" {
 		return fmt.Errorf("admin unlink: actorUUID and targetUUID are required")
 	}
@@ -575,7 +574,7 @@ func (s *authService) AdminUnlinkOAuth(ctx context.Context, actorUUID, targetUUI
 // link would leave the user with no usable credential (no password
 // AND single active OAuth link), and a `found` flag distinguishing
 // "provider not linked" (404) from a benign mismatch.
-func wouldLockOutOAuthUnlink(target *userModels.User, links []userModels.OAuthLink, provider userModels.OAuthProvider) (providerID string, locked bool, found bool) {
+func wouldLockOutOAuthUnlink(target *iface.User, links []iface.OAuthLink, provider iface.OAuthProvider) (providerID string, locked bool, found bool) {
 	if target == nil {
 		return "", false, false
 	}
@@ -602,7 +601,7 @@ func wouldLockOutOAuthUnlink(target *userModels.User, links []userModels.OAuthLi
 // guard, since self-action is the entire point. The HTTP handler
 // gates this with RequireStepUp(5m); credential removal demands a
 // fresh MFA proof.
-func (s *authService) SelfUnlinkOAuth(ctx context.Context, userUUID string, provider userModels.OAuthProvider) error {
+func (s *authService) SelfUnlinkOAuth(ctx context.Context, userUUID string, provider iface.OAuthProvider) error {
 	if userUUID == "" {
 		return fmt.Errorf("self unlink: userUUID is required")
 	}
@@ -655,7 +654,7 @@ func (s *authService) SelfUnlinkOAuth(ctx context.Context, userUUID string, prov
 func (s *authService) SelfLinkOAuthFromCallback(
 	ctx context.Context,
 	userUUID string,
-	provider userModels.OAuthProvider,
+	provider iface.OAuthProvider,
 	userInfo map[string]interface{},
 	oauthTokens *models.OAuthProviderTokens,
 ) error {
@@ -713,7 +712,7 @@ func (s *authService) SelfLinkOAuthFromCallback(
 		"email_verified": emailVerified,
 	}
 
-	link := userModels.OAuthLink{
+	link := iface.OAuthLink{
 		Provider:   provider,
 		ProviderID: providerID,
 		Email:      email,
@@ -883,7 +882,7 @@ func encodeCredentialID(b []byte) string {
 	return base64.RawURLEncoding.EncodeToString(b)
 }
 
-func (s *authService) ConsolidateAccountsByEmail(ctx context.Context, email string) (*userModels.User, error) {
+func (s *authService) ConsolidateAccountsByEmail(ctx context.Context, email string) (*iface.User, error) {
 	userResponse, err := s.userService.GetUserByEmail(ctx, email)
 	if err != nil {
 		return nil, err
@@ -893,12 +892,12 @@ func (s *authService) ConsolidateAccountsByEmail(ctx context.Context, email stri
 	return convertUserResponseToAuthModel(userResponse), nil
 }
 
-func (s *authService) FindAccountsForConsolidation(ctx context.Context, email string) ([]*userModels.User, error) {
+func (s *authService) FindAccountsForConsolidation(ctx context.Context, email string) ([]*iface.User, error) {
 	userResponse, err := s.userService.GetUserByEmail(ctx, email)
 	if err != nil {
-		return []*userModels.User{}, nil
+		return []*iface.User{}, nil
 	}
-	return []*userModels.User{convertUserResponseToAuthModel(userResponse)}, nil
+	return []*iface.User{convertUserResponseToAuthModel(userResponse)}, nil
 }
 
 // GetUserSessionsByUUID lists active (isActive && !expired) sessions
@@ -1115,7 +1114,7 @@ func (s *authService) revokeSessionInternal(ctx context.Context, sessionUUID, re
 	return nil
 }
 
-func (s *authService) GenerateEnhancedTokenPair(ctx context.Context, user *userModels.User, deviceInfo *models.DeviceInfo, securityCtx *models.SecurityContext) (*models.TokenResponse, error) {
+func (s *authService) GenerateEnhancedTokenPair(ctx context.Context, user *iface.User, deviceInfo *models.DeviceInfo, securityCtx *models.SecurityContext) (*models.TokenResponse, error) {
 	// MFA gating for OAuth-resolved users. Mirrors the password login path:
 	// privileged users with an enrolled factor receive a partial response
 	// and must call /v1/auth/mfa/login/verify; without a factor, the grace
@@ -1728,7 +1727,7 @@ func ipFromCtx(ctx context.Context) (string, bool) {
 	return ctxauth.GetClientIP(ctx)
 }
 
-func (s *authService) MigrateUserToUUID(ctx context.Context, userID primitive.ObjectID) (*userModels.User, error) {
+func (s *authService) MigrateUserToUUID(ctx context.Context, userID primitive.ObjectID) (*iface.User, error) {
 	return nil, fmt.Errorf("migration not yet implemented")
 }
 
@@ -1770,7 +1769,7 @@ func (s *authService) HandleOAuthCallbackWithLinking(ctx context.Context, provid
 		// Don't fail the auth, just log the error
 	}
 
-	var user *userModels.User
+	var user *iface.User
 
 	if existingProvider != nil {
 		// Provider exists - fetch the user by UserUUID from the provider record
@@ -1843,7 +1842,7 @@ func (s *authService) HandleOAuthCallbackWithLinking(ctx context.Context, provid
 			// userInfoMap from its own verified-email signal. Missing
 			// or false falls through to the standard verification flow.
 			emailVerified, _ := userInfo["email_verified"].(bool)
-			createInput := &userModels.CreateUserInput{
+			createInput := &iface.CreateUserInput{
 				UUID:          newUUID,
 				Email:         email,
 				FullName:      userInfo["name"].(string),
@@ -2102,19 +2101,19 @@ func (s *authService) HandleOAuthCallbackWithLinking(ctx context.Context, provid
 
 // Helper functions for type conversion between user and auth models
 
-// convertUserModelToAuthModel is deprecated - we now use userModels.User directly
+// convertUserModelToAuthModel is deprecated - we now use iface.User directly
 // This function just returns the same user model
-func convertUserModelToAuthModel(userModel *userModels.User) *userModels.User {
+func convertUserModelToAuthModel(userModel *iface.User) *iface.User {
 	return userModel
 }
 
 // convertUserResponseToAuthModel converts a UserManagementResponse to user.User
-func convertUserResponseToAuthModel(userResponse *userModels.UserManagementResponse) *userModels.User {
+func convertUserResponseToAuthModel(userResponse *iface.UserManagementResponse) *iface.User {
 	if userResponse == nil {
 		return nil
 	}
 
-	user := &userModels.User{
+	user := &iface.User{
 		UUID:          userResponse.ID,
 		Email:         userResponse.Email,
 		Username:      userResponse.Username,
@@ -2140,7 +2139,7 @@ func convertUserResponseToAuthModel(userResponse *userModels.UserManagementRespo
 //     GenerateEnhancedTokenPair should return immediately
 //   - handled=false means MFA is not required or not wired; caller proceeds
 //     with the normal full-token issuance path
-func (s *authService) evaluateMFAForOAuth(ctx context.Context, user *userModels.User, deviceInfo *models.DeviceInfo, securityCtx *models.SecurityContext) (*models.TokenResponse, bool, error) {
+func (s *authService) evaluateMFAForOAuth(ctx context.Context, user *iface.User, deviceInfo *models.DeviceInfo, securityCtx *models.SecurityContext) (*models.TokenResponse, bool, error) {
 	if user == nil || s.mfaFactorRepo == nil || s.mfaChallengeService == nil {
 		return nil, false, nil
 	}

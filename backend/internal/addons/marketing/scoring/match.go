@@ -4,7 +4,7 @@ import (
 	"reflect"
 	"time"
 
-	"github.com/orkestra-cc/orkestra-addon-marketing/models"
+	"github.com/orkestra/backend/internal/addons/marketing/models"
 )
 
 // ruleMatches reports whether the rule applies to the activity. Three

@@ -7,11 +7,10 @@ import (
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
-	"github.com/orkestra-cc/orkestra-sdk/ctxauth"
-	"github.com/orkestra-cc/orkestra-sdk/iface"
-	"github.com/orkestra/backend/internal/core/user/models"
 	"github.com/orkestra/backend/internal/core/user/services"
 	"github.com/orkestra/backend/internal/shared/errcode"
+	"github.com/orkestra/backend/pkg/sdk/ctxauth"
+	"github.com/orkestra/backend/pkg/sdk/iface"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
@@ -21,25 +20,25 @@ import (
 // layer only consumes a small slice of the interface — every test sets
 // the one or two fields it needs and leaves the rest panicking.
 type fakeUserService struct {
-	createUserFn             func(ctx context.Context, input *models.CreateUserInput) (*models.UserManagementResponse, error)
-	getUserFn                func(ctx context.Context, id string) (*models.UserManagementResponse, error)
-	getUserByEmailFn         func(ctx context.Context, email string) (*models.UserManagementResponse, error)
-	updateUserFn             func(ctx context.Context, id string, input *models.UpdateUserInput) (*models.UserManagementResponse, error)
+	createUserFn             func(ctx context.Context, input *iface.CreateUserInput) (*iface.UserManagementResponse, error)
+	getUserFn                func(ctx context.Context, id string) (*iface.UserManagementResponse, error)
+	getUserByEmailFn         func(ctx context.Context, email string) (*iface.UserManagementResponse, error)
+	updateUserFn             func(ctx context.Context, id string, input *iface.UpdateUserInput) (*iface.UserManagementResponse, error)
 	deleteUserFn             func(ctx context.Context, id string) error
-	listUsersFn              func(ctx context.Context, filters *models.UserFilters, pagination *models.PaginationParams) (*models.UserManagementListResponse, error)
-	getUsersByRoleFn         func(ctx context.Context, role string) ([]*models.UserManagementResponse, error)
-	getUserCountFn           func(ctx context.Context, filters *models.UserFilters) (int64, error)
+	listUsersFn              func(ctx context.Context, filters *iface.UserFilters, pagination *iface.PaginationParams) (*iface.UserManagementListResponse, error)
+	getUsersByRoleFn         func(ctx context.Context, role string) ([]*iface.UserManagementResponse, error)
+	getUserCountFn           func(ctx context.Context, filters *iface.UserFilters) (int64, error)
 	softDeleteAndAliasFn     func(ctx context.Context, id string) error
-	createUserWithPasswordFn func(ctx context.Context, input *models.CreateUserInput) (*models.User, error)
+	createUserWithPasswordFn func(ctx context.Context, input *iface.CreateUserInput) (*iface.User, error)
 	markEmailVerifiedFn      func(ctx context.Context, userUUID string) error
 	countActiveAdminsFn      func(ctx context.Context, excludeUUID string) (int64, error)
 
 	// last-call snapshots — set by methods that have a function field so
 	// tests can assert pass-through (e.g. ListUsers must forward query
 	// params verbatim).
-	lastListFilters       *models.UserFilters
-	lastListPagination    *models.PaginationParams
-	lastCountFilters      *models.UserFilters
+	lastListFilters       *iface.UserFilters
+	lastListPagination    *iface.PaginationParams
+	lastCountFilters      *iface.UserFilters
 	lastSoftDeleteAliasID string
 	lastDeleteID          string
 
@@ -48,10 +47,10 @@ type fakeUserService struct {
 	sink iface.AuditSink
 }
 
-func (f *fakeUserService) CreateUser(ctx context.Context, input *models.CreateUserInput) (*models.UserManagementResponse, error) {
+func (f *fakeUserService) CreateUser(ctx context.Context, input *iface.CreateUserInput) (*iface.UserManagementResponse, error) {
 	return f.createUserFn(ctx, input)
 }
-func (f *fakeUserService) GetUser(ctx context.Context, id string) (*models.UserManagementResponse, error) {
+func (f *fakeUserService) GetUser(ctx context.Context, id string) (*iface.UserManagementResponse, error) {
 	// Nil-tolerant: handlers now call GetUser for pre-state snapshots
 	// (UpdateUser delta detection, DeleteUser last-admin check). Tests
 	// that don't care about the snapshot can leave getUserFn unset and
@@ -64,10 +63,10 @@ func (f *fakeUserService) GetUser(ctx context.Context, id string) (*models.UserM
 	}
 	return f.getUserFn(ctx, id)
 }
-func (f *fakeUserService) GetUserByEmail(ctx context.Context, email string) (*models.UserManagementResponse, error) {
+func (f *fakeUserService) GetUserByEmail(ctx context.Context, email string) (*iface.UserManagementResponse, error) {
 	return f.getUserByEmailFn(ctx, email)
 }
-func (f *fakeUserService) UpdateUser(ctx context.Context, id string, input *models.UpdateUserInput) (*models.UserManagementResponse, error) {
+func (f *fakeUserService) UpdateUser(ctx context.Context, id string, input *iface.UpdateUserInput) (*iface.UserManagementResponse, error) {
 	return f.updateUserFn(ctx, id, input)
 }
 func (f *fakeUserService) DeleteUser(ctx context.Context, id string) error {
@@ -83,25 +82,25 @@ func (f *fakeUserService) CountActiveAdministrators(ctx context.Context, exclude
 	}
 	panic("unused: CountActiveAdministrators")
 }
-func (f *fakeUserService) ListUsers(ctx context.Context, filters *models.UserFilters, pagination *models.PaginationParams) (*models.UserManagementListResponse, error) {
+func (f *fakeUserService) ListUsers(ctx context.Context, filters *iface.UserFilters, pagination *iface.PaginationParams) (*iface.UserManagementListResponse, error) {
 	f.lastListFilters = filters
 	f.lastListPagination = pagination
 	return f.listUsersFn(ctx, filters, pagination)
 }
-func (f *fakeUserService) GetUsersByRole(ctx context.Context, role string) ([]*models.UserManagementResponse, error) {
+func (f *fakeUserService) GetUsersByRole(ctx context.Context, role string) ([]*iface.UserManagementResponse, error) {
 	return f.getUsersByRoleFn(ctx, role)
 }
-func (f *fakeUserService) GetUserCount(ctx context.Context, filters *models.UserFilters) (int64, error) {
+func (f *fakeUserService) GetUserCount(ctx context.Context, filters *iface.UserFilters) (int64, error) {
 	f.lastCountFilters = filters
 	return f.getUserCountFn(ctx, filters)
 }
 
 // Below: every other UserService method panics. The handler under test
 // must not reach them; if it does, the panic is the regression signal.
-func (f *fakeUserService) GetUserForAuth(context.Context, string) (*models.User, error) {
+func (f *fakeUserService) GetUserForAuth(context.Context, string) (*iface.User, error) {
 	panic("unused: GetUserForAuth")
 }
-func (f *fakeUserService) CreateUserWithPassword(ctx context.Context, input *models.CreateUserInput) (*models.User, error) {
+func (f *fakeUserService) CreateUserWithPassword(ctx context.Context, input *iface.CreateUserInput) (*iface.User, error) {
 	if f.createUserWithPasswordFn != nil {
 		return f.createUserWithPasswordFn(ctx, input)
 	}
@@ -132,37 +131,37 @@ func (f *fakeUserService) SoftDeleteAndAliasEmail(ctx context.Context, id string
 func (f *fakeUserService) ValidateUserRole(context.Context, string, []string) error {
 	panic("unused: ValidateUserRole")
 }
-func (f *fakeUserService) GetUserByID(context.Context, string) (*models.User, error) {
+func (f *fakeUserService) GetUserByID(context.Context, string) (*iface.User, error) {
 	panic("unused: GetUserByID")
 }
-func (f *fakeUserService) GetUserByObjectID(context.Context, primitive.ObjectID) (*models.User, error) {
+func (f *fakeUserService) GetUserByObjectID(context.Context, primitive.ObjectID) (*iface.User, error) {
 	panic("unused: GetUserByObjectID")
 }
-func (f *fakeUserService) GetUserByUsername(context.Context, string) (*models.User, error) {
+func (f *fakeUserService) GetUserByUsername(context.Context, string) (*iface.User, error) {
 	panic("unused: GetUserByUsername")
 }
-func (f *fakeUserService) GetUserByOAuthID(context.Context, models.OAuthProvider, string) (*models.User, error) {
+func (f *fakeUserService) GetUserByOAuthID(context.Context, iface.OAuthProvider, string) (*iface.User, error) {
 	panic("unused: GetUserByOAuthID")
 }
-func (f *fakeUserService) GetUserByOAuthLink(context.Context, models.OAuthProvider, string) (*models.User, error) {
+func (f *fakeUserService) GetUserByOAuthLink(context.Context, iface.OAuthProvider, string) (*iface.User, error) {
 	panic("unused: GetUserByOAuthLink")
 }
-func (f *fakeUserService) CreateUserFromOAuth(context.Context, *models.CreateUserInput) (*models.User, error) {
+func (f *fakeUserService) CreateUserFromOAuth(context.Context, *iface.CreateUserInput) (*iface.User, error) {
 	panic("unused: CreateUserFromOAuth")
 }
-func (f *fakeUserService) AddOAuthLinkToUser(context.Context, string, models.OAuthLink) error {
+func (f *fakeUserService) AddOAuthLinkToUser(context.Context, string, iface.OAuthLink) error {
 	panic("unused: AddOAuthLinkToUser")
 }
-func (f *fakeUserService) RemoveOAuthLinkFromUser(context.Context, string, models.OAuthProvider, string) error {
+func (f *fakeUserService) RemoveOAuthLinkFromUser(context.Context, string, iface.OAuthProvider, string) error {
 	panic("unused: RemoveOAuthLinkFromUser")
 }
-func (f *fakeUserService) SetPrimaryOAuthLink(context.Context, string, models.OAuthProvider, string) error {
+func (f *fakeUserService) SetPrimaryOAuthLink(context.Context, string, iface.OAuthProvider, string) error {
 	panic("unused: SetPrimaryOAuthLink")
 }
-func (f *fakeUserService) UpdateOAuthLinkUsage(context.Context, string, models.OAuthProvider, string) error {
+func (f *fakeUserService) UpdateOAuthLinkUsage(context.Context, string, iface.OAuthProvider, string) error {
 	panic("unused: UpdateOAuthLinkUsage")
 }
-func (f *fakeUserService) GetUserOAuthLinks(context.Context, string) ([]models.OAuthLink, error) {
+func (f *fakeUserService) GetUserOAuthLinks(context.Context, string) ([]iface.OAuthLink, error) {
 	panic("unused: GetUserOAuthLinks")
 }
 func (f *fakeUserService) UpdateUserLastLogin(context.Context, string) error {
@@ -171,7 +170,7 @@ func (f *fakeUserService) UpdateUserLastLogin(context.Context, string) error {
 func (f *fakeUserService) UpdateUserLastLoginByObjectID(context.Context, primitive.ObjectID) error {
 	panic("unused: UpdateUserLastLoginByObjectID")
 }
-func (f *fakeUserService) UpdateUserByObjectID(context.Context, primitive.ObjectID, *models.User) error {
+func (f *fakeUserService) UpdateUserByObjectID(context.Context, primitive.ObjectID, *iface.User) error {
 	panic("unused: UpdateUserByObjectID")
 }
 func (f *fakeUserService) ValidateUserExists(context.Context, string) (bool, error) {
@@ -183,7 +182,7 @@ func (f *fakeUserService) ValidateUserActive(context.Context, string) (bool, err
 func (f *fakeUserService) SetAvatarSource(context.Context, string, string, string) (string, error) {
 	panic("unused: SetAvatarSource")
 }
-func (f *fakeUserService) UpdateOAuthLinkData(context.Context, string, models.OAuthProvider, string, map[string]interface{}) error {
+func (f *fakeUserService) UpdateOAuthLinkData(context.Context, string, iface.OAuthProvider, string, map[string]interface{}) error {
 	panic("unused: UpdateOAuthLinkData")
 }
 
@@ -241,14 +240,14 @@ func TestCreateUserHandler(t *testing.T) {
 
 	cases := []struct {
 		name       string
-		svcResp    *models.UserManagementResponse
+		svcResp    *iface.UserManagementResponse
 		svcErr     error
 		wantStatus int // 0 = success
 		wantBodyID string
 	}{
 		{
 			name:       "happy path",
-			svcResp:    &models.UserManagementResponse{ID: "u1", Email: "a@b.c"},
+			svcResp:    &iface.UserManagementResponse{ID: "u1", Email: "a@b.c"},
 			wantBodyID: "u1",
 		},
 		{name: "duplicate email → 409", svcErr: services.ErrEmailNotUnique, wantStatus: 409},
@@ -260,13 +259,13 @@ func TestCreateUserHandler(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
 			svc := &fakeUserService{
-				createUserFn: func(context.Context, *models.CreateUserInput) (*models.UserManagementResponse, error) {
+				createUserFn: func(context.Context, *iface.CreateUserInput) (*iface.UserManagementResponse, error) {
 					return c.svcResp, c.svcErr
 				},
 			}
 			h := NewUserHandler(svc)
 			resp, err := h.CreateUser(adminCtx(), &CreateUserRequest{
-				Body: models.CreateUserInput{Email: "x@y.z", FullName: "x", Role: "operator"},
+				Body: iface.CreateUserInput{Email: "x@y.z", FullName: "x", Role: "operator"},
 			})
 			if c.wantStatus == 0 {
 				if err != nil {
@@ -286,11 +285,11 @@ func TestGetUserHandler(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
 		name       string
-		svcResp    *models.UserManagementResponse
+		svcResp    *iface.UserManagementResponse
 		svcErr     error
 		wantStatus int
 	}{
-		{name: "happy", svcResp: &models.UserManagementResponse{ID: "u1"}},
+		{name: "happy", svcResp: &iface.UserManagementResponse{ID: "u1"}},
 		{name: "not found → 404", svcErr: services.ErrUserNotFound, wantStatus: 404},
 		{name: "invalid id → 400", svcErr: services.ErrInvalidInput, wantStatus: 400},
 		{name: "unknown → 500", svcErr: errors.New("boom"), wantStatus: 500},
@@ -300,7 +299,7 @@ func TestGetUserHandler(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
 			svc := &fakeUserService{
-				getUserFn: func(context.Context, string) (*models.UserManagementResponse, error) {
+				getUserFn: func(context.Context, string) (*iface.UserManagementResponse, error) {
 					return c.svcResp, c.svcErr
 				},
 			}
@@ -335,17 +334,17 @@ func TestUpdateUserHandler(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
 			svc := &fakeUserService{
-				updateUserFn: func(context.Context, string, *models.UpdateUserInput) (*models.UserManagementResponse, error) {
+				updateUserFn: func(context.Context, string, *iface.UpdateUserInput) (*iface.UserManagementResponse, error) {
 					if c.svcErr != nil {
 						return nil, c.svcErr
 					}
-					return &models.UserManagementResponse{ID: "u1", FullName: "Renamed"}, nil
+					return &iface.UserManagementResponse{ID: "u1", FullName: "Renamed"}, nil
 				},
 			}
 			h := NewUserHandler(svc)
 			resp, err := h.UpdateUser(adminCtx(), &UpdateUserRequest{
 				ID:   "u1",
-				Body: models.UpdateUserInput{FullName: "Renamed"},
+				Body: iface.UpdateUserInput{FullName: "Renamed"},
 			})
 			if c.wantStatus == 0 {
 				if err != nil {
@@ -368,15 +367,15 @@ func TestUpdateUserHandler(t *testing.T) {
 	t.Run("deactivating the last active admin refused", func(t *testing.T) {
 		t.Parallel()
 		svc := &fakeUserService{
-			getUserFn: func(context.Context, string) (*models.UserManagementResponse, error) {
-				return &models.UserManagementResponse{ID: "u1", Role: "administrator", IsActive: true}, nil
+			getUserFn: func(context.Context, string) (*iface.UserManagementResponse, error) {
+				return &iface.UserManagementResponse{ID: "u1", Role: "administrator", IsActive: true}, nil
 			},
 			countActiveAdminsFn: func(context.Context, string) (int64, error) { return 0, nil },
 		}
 		h := NewUserHandler(svc)
 		_, err := h.UpdateUser(adminCtx(), &UpdateUserRequest{
 			ID:   "u1",
-			Body: models.UpdateUserInput{IsActive: boolPtr(false)},
+			Body: iface.UpdateUserInput{IsActive: boolPtr(false)},
 		})
 		assertStatus(t, err, 403)
 		assertErrCode(t, err, errcode.UserLastAdminForbidden)
@@ -385,8 +384,8 @@ func TestUpdateUserHandler(t *testing.T) {
 	t.Run("demoting the last active admin refused", func(t *testing.T) {
 		t.Parallel()
 		svc := &fakeUserService{
-			getUserFn: func(context.Context, string) (*models.UserManagementResponse, error) {
-				return &models.UserManagementResponse{ID: "u1", Role: "super_admin", IsActive: true}, nil
+			getUserFn: func(context.Context, string) (*iface.UserManagementResponse, error) {
+				return &iface.UserManagementResponse{ID: "u1", Role: "super_admin", IsActive: true}, nil
 			},
 			countActiveAdminsFn: func(context.Context, string) (int64, error) { return 0, nil },
 		}
@@ -396,7 +395,7 @@ func TestUpdateUserHandler(t *testing.T) {
 		ctx := context.WithValue(context.Background(), ctxauth.KeySystemRole, "super_admin")
 		_, err := h.UpdateUser(ctx, &UpdateUserRequest{
 			ID:   "u1",
-			Body: models.UpdateUserInput{Role: "operator"},
+			Body: iface.UpdateUserInput{Role: "operator"},
 		})
 		assertStatus(t, err, 403)
 		assertErrCode(t, err, errcode.UserLastAdminForbidden)
@@ -408,15 +407,15 @@ func TestUpdateUserHandler(t *testing.T) {
 		// the handler must NOT consult the admin counter. The panicking
 		// countActiveAdminsFn fallback proves it.
 		svc := &fakeUserService{
-			updateUserFn: func(context.Context, string, *models.UpdateUserInput) (*models.UserManagementResponse, error) {
-				return &models.UserManagementResponse{ID: "u1", FullName: "Renamed"}, nil
+			updateUserFn: func(context.Context, string, *iface.UpdateUserInput) (*iface.UserManagementResponse, error) {
+				return &iface.UserManagementResponse{ID: "u1", FullName: "Renamed"}, nil
 			},
 			// countActiveAdminsFn is nil — would panic if called.
 		}
 		h := NewUserHandler(svc)
 		if _, err := h.UpdateUser(adminCtx(), &UpdateUserRequest{
 			ID:   "u1",
-			Body: models.UpdateUserInput{FullName: "Renamed"},
+			Body: iface.UpdateUserInput{FullName: "Renamed"},
 		}); err != nil {
 			t.Fatalf("err = %v", err)
 		}
@@ -425,8 +424,8 @@ func TestUpdateUserHandler(t *testing.T) {
 	t.Run("promoting to administrator skips the guard", func(t *testing.T) {
 		t.Parallel()
 		svc := &fakeUserService{
-			updateUserFn: func(context.Context, string, *models.UpdateUserInput) (*models.UserManagementResponse, error) {
-				return &models.UserManagementResponse{ID: "u1", Role: "administrator"}, nil
+			updateUserFn: func(context.Context, string, *iface.UpdateUserInput) (*iface.UserManagementResponse, error) {
+				return &iface.UserManagementResponse{ID: "u1", Role: "administrator"}, nil
 			},
 		}
 		h := NewUserHandler(svc)
@@ -435,7 +434,7 @@ func TestUpdateUserHandler(t *testing.T) {
 		// last-admin path isn't triggered (no demotion intent).
 		if _, err := h.UpdateUser(adminCtx(), &UpdateUserRequest{
 			ID:   "u1",
-			Body: models.UpdateUserInput{Role: "administrator"},
+			Body: iface.UpdateUserInput{Role: "administrator"},
 		}); err != nil {
 			t.Fatalf("err = %v", err)
 		}
@@ -454,7 +453,7 @@ func TestUpdateUserHandler(t *testing.T) {
 		ctx = context.WithValue(ctx, ctxauth.KeySystemRole, "administrator")
 		_, err := h.UpdateUser(ctx, &UpdateUserRequest{
 			ID:   "u2",
-			Body: models.UpdateUserInput{Role: "super_admin"},
+			Body: iface.UpdateUserInput{Role: "super_admin"},
 		})
 		assertStatus(t, err, 403)
 		assertErrCode(t, err, errcode.UserRoleEscalationForbidden)
@@ -463,11 +462,11 @@ func TestUpdateUserHandler(t *testing.T) {
 	t.Run("administrator can assign another administrator (equal tier)", func(t *testing.T) {
 		t.Parallel()
 		svc := &fakeUserService{
-			getUserFn: func(context.Context, string) (*models.UserManagementResponse, error) {
-				return &models.UserManagementResponse{ID: "u2", Role: "operator", IsActive: true}, nil
+			getUserFn: func(context.Context, string) (*iface.UserManagementResponse, error) {
+				return &iface.UserManagementResponse{ID: "u2", Role: "operator", IsActive: true}, nil
 			},
-			updateUserFn: func(context.Context, string, *models.UpdateUserInput) (*models.UserManagementResponse, error) {
-				return &models.UserManagementResponse{ID: "u2", Role: "administrator"}, nil
+			updateUserFn: func(context.Context, string, *iface.UpdateUserInput) (*iface.UserManagementResponse, error) {
+				return &iface.UserManagementResponse{ID: "u2", Role: "administrator"}, nil
 			},
 		}
 		h := NewUserHandler(svc)
@@ -475,7 +474,7 @@ func TestUpdateUserHandler(t *testing.T) {
 		ctx = context.WithValue(ctx, ctxauth.KeySystemRole, "administrator")
 		if _, err := h.UpdateUser(ctx, &UpdateUserRequest{
 			ID:   "u2",
-			Body: models.UpdateUserInput{Role: "administrator"},
+			Body: iface.UpdateUserInput{Role: "administrator"},
 		}); err != nil {
 			t.Fatalf("err = %v", err)
 		}
@@ -489,7 +488,7 @@ func TestUpdateUserHandler(t *testing.T) {
 		ctx = context.WithValue(ctx, ctxauth.KeySystemRole, "manager")
 		_, err := h.UpdateUser(ctx, &UpdateUserRequest{
 			ID:   "u2",
-			Body: models.UpdateUserInput{Role: "administrator"},
+			Body: iface.UpdateUserInput{Role: "administrator"},
 		})
 		assertStatus(t, err, 403)
 		assertErrCode(t, err, errcode.UserRoleEscalationForbidden)
@@ -505,7 +504,7 @@ func TestUpdateUserHandler(t *testing.T) {
 		h := NewUserHandler(svc)
 		_, err := h.UpdateUser(context.Background(), &UpdateUserRequest{
 			ID:   "u2",
-			Body: models.UpdateUserInput{Role: "guest"},
+			Body: iface.UpdateUserInput{Role: "guest"},
 		})
 		assertStatus(t, err, 403)
 		assertErrCode(t, err, errcode.UserRoleEscalationForbidden)
@@ -516,14 +515,14 @@ func TestUpdateUserHandler(t *testing.T) {
 		// Empty Role means the guard short-circuits — even a missing
 		// caller role isn't a problem when there's nothing to assign.
 		svc := &fakeUserService{
-			updateUserFn: func(context.Context, string, *models.UpdateUserInput) (*models.UserManagementResponse, error) {
-				return &models.UserManagementResponse{ID: "u2", FullName: "Renamed"}, nil
+			updateUserFn: func(context.Context, string, *iface.UpdateUserInput) (*iface.UserManagementResponse, error) {
+				return &iface.UserManagementResponse{ID: "u2", FullName: "Renamed"}, nil
 			},
 		}
 		h := NewUserHandler(svc)
 		if _, err := h.UpdateUser(context.Background(), &UpdateUserRequest{
 			ID:   "u2",
-			Body: models.UpdateUserInput{FullName: "Renamed"},
+			Body: iface.UpdateUserInput{FullName: "Renamed"},
 		}); err != nil {
 			t.Fatalf("err = %v", err)
 		}
@@ -537,8 +536,8 @@ func TestDeleteUserHandler(t *testing.T) {
 	// operator who isn't part of the platform-administrator pool, so the
 	// last-admin guard short-circuits and the request reaches the service
 	// layer. Used by all happy-path / pass-through cases.
-	targetOperator := func() *models.UserManagementResponse {
-		return &models.UserManagementResponse{ID: "u1", Role: "operator", IsActive: true}
+	targetOperator := func() *iface.UserManagementResponse {
+		return &iface.UserManagementResponse{ID: "u1", Role: "operator", IsActive: true}
 	}
 
 	cases := []struct {
@@ -556,7 +555,7 @@ func TestDeleteUserHandler(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
 			svc := &fakeUserService{
-				getUserFn: func(context.Context, string) (*models.UserManagementResponse, error) {
+				getUserFn: func(context.Context, string) (*iface.UserManagementResponse, error) {
 					return targetOperator(), nil
 				},
 				softDeleteAndAliasFn: func(context.Context, string) error { return c.svcErr },
@@ -601,8 +600,8 @@ func TestDeleteUserHandler(t *testing.T) {
 	t.Run("last active administrator refused with code", func(t *testing.T) {
 		t.Parallel()
 		svc := &fakeUserService{
-			getUserFn: func(context.Context, string) (*models.UserManagementResponse, error) {
-				return &models.UserManagementResponse{ID: "u1", Role: "administrator", IsActive: true}, nil
+			getUserFn: func(context.Context, string) (*iface.UserManagementResponse, error) {
+				return &iface.UserManagementResponse{ID: "u1", Role: "administrator", IsActive: true}, nil
 			},
 			countActiveAdminsFn: func(context.Context, string) (int64, error) {
 				return 0, nil
@@ -621,8 +620,8 @@ func TestDeleteUserHandler(t *testing.T) {
 		t.Parallel()
 		// Two other active admins remain — quorum holds, delete proceeds.
 		svc := &fakeUserService{
-			getUserFn: func(context.Context, string) (*models.UserManagementResponse, error) {
-				return &models.UserManagementResponse{ID: "u1", Role: "administrator", IsActive: true}, nil
+			getUserFn: func(context.Context, string) (*iface.UserManagementResponse, error) {
+				return &iface.UserManagementResponse{ID: "u1", Role: "administrator", IsActive: true}, nil
 			},
 			countActiveAdminsFn: func(context.Context, string) (int64, error) {
 				return 2, nil
@@ -644,8 +643,8 @@ func TestDeleteUserHandler(t *testing.T) {
 		// pool, so removing them cannot strand the platform — quorum
 		// counter must NOT be consulted.
 		svc := &fakeUserService{
-			getUserFn: func(context.Context, string) (*models.UserManagementResponse, error) {
-				return &models.UserManagementResponse{ID: "u1", Role: "administrator", IsActive: false}, nil
+			getUserFn: func(context.Context, string) (*iface.UserManagementResponse, error) {
+				return &iface.UserManagementResponse{ID: "u1", Role: "administrator", IsActive: false}, nil
 			},
 			softDeleteAndAliasFn: func(context.Context, string) error { return nil },
 			// countActiveAdminsFn is intentionally nil — the panicking
@@ -718,8 +717,8 @@ func TestAdminLifecycleAuditEmits(t *testing.T) {
 		sink := &captureSink{}
 		svc := &fakeUserService{
 			sink: sink,
-			getUserFn: func(context.Context, string) (*models.UserManagementResponse, error) {
-				return &models.UserManagementResponse{ID: "u1", Role: "operator", IsActive: true}, nil
+			getUserFn: func(context.Context, string) (*iface.UserManagementResponse, error) {
+				return &iface.UserManagementResponse{ID: "u1", Role: "operator", IsActive: true}, nil
 			},
 			softDeleteAndAliasFn: func(context.Context, string) error { return nil },
 		}
@@ -756,8 +755,8 @@ func TestAdminLifecycleAuditEmits(t *testing.T) {
 		sink := &captureSink{}
 		svc := &fakeUserService{
 			sink: sink,
-			getUserFn: func(context.Context, string) (*models.UserManagementResponse, error) {
-				return &models.UserManagementResponse{ID: "u1", Role: "administrator", IsActive: true}, nil
+			getUserFn: func(context.Context, string) (*iface.UserManagementResponse, error) {
+				return &iface.UserManagementResponse{ID: "u1", Role: "administrator", IsActive: true}, nil
 			},
 			countActiveAdminsFn: func(context.Context, string) (int64, error) { return 0, nil },
 		}
@@ -775,17 +774,17 @@ func TestAdminLifecycleAuditEmits(t *testing.T) {
 		sink := &captureSink{}
 		svc := &fakeUserService{
 			sink: sink,
-			getUserFn: func(context.Context, string) (*models.UserManagementResponse, error) {
-				return &models.UserManagementResponse{ID: "u1", Role: "operator", IsActive: false}, nil
+			getUserFn: func(context.Context, string) (*iface.UserManagementResponse, error) {
+				return &iface.UserManagementResponse{ID: "u1", Role: "operator", IsActive: false}, nil
 			},
-			updateUserFn: func(context.Context, string, *models.UpdateUserInput) (*models.UserManagementResponse, error) {
-				return &models.UserManagementResponse{ID: "u1", Role: "operator", IsActive: true}, nil
+			updateUserFn: func(context.Context, string, *iface.UpdateUserInput) (*iface.UserManagementResponse, error) {
+				return &iface.UserManagementResponse{ID: "u1", Role: "operator", IsActive: true}, nil
 			},
 		}
 		h := NewUserHandler(svc)
 		if _, err := h.UpdateUser(actorCtx(), &UpdateUserRequest{
 			ID:   "u1",
-			Body: models.UpdateUserInput{IsActive: boolPtr(true)},
+			Body: iface.UpdateUserInput{IsActive: boolPtr(true)},
 		}); err != nil {
 			t.Fatalf("err = %v", err)
 		}
@@ -797,18 +796,18 @@ func TestAdminLifecycleAuditEmits(t *testing.T) {
 		sink := &captureSink{}
 		svc := &fakeUserService{
 			sink: sink,
-			getUserFn: func(context.Context, string) (*models.UserManagementResponse, error) {
-				return &models.UserManagementResponse{ID: "u1", Role: "operator", IsActive: true}, nil
+			getUserFn: func(context.Context, string) (*iface.UserManagementResponse, error) {
+				return &iface.UserManagementResponse{ID: "u1", Role: "operator", IsActive: true}, nil
 			},
 			countActiveAdminsFn: func(context.Context, string) (int64, error) { return 1, nil },
-			updateUserFn: func(context.Context, string, *models.UpdateUserInput) (*models.UserManagementResponse, error) {
-				return &models.UserManagementResponse{ID: "u1", Role: "operator", IsActive: false}, nil
+			updateUserFn: func(context.Context, string, *iface.UpdateUserInput) (*iface.UserManagementResponse, error) {
+				return &iface.UserManagementResponse{ID: "u1", Role: "operator", IsActive: false}, nil
 			},
 		}
 		h := NewUserHandler(svc)
 		if _, err := h.UpdateUser(actorCtx(), &UpdateUserRequest{
 			ID:   "u1",
-			Body: models.UpdateUserInput{IsActive: boolPtr(false)},
+			Body: iface.UpdateUserInput{IsActive: boolPtr(false)},
 		}); err != nil {
 			t.Fatalf("err = %v", err)
 		}
@@ -820,18 +819,18 @@ func TestAdminLifecycleAuditEmits(t *testing.T) {
 		sink := &captureSink{}
 		svc := &fakeUserService{
 			sink: sink,
-			getUserFn: func(context.Context, string) (*models.UserManagementResponse, error) {
-				return &models.UserManagementResponse{ID: "u1", Role: "administrator", IsActive: true}, nil
+			getUserFn: func(context.Context, string) (*iface.UserManagementResponse, error) {
+				return &iface.UserManagementResponse{ID: "u1", Role: "administrator", IsActive: true}, nil
 			},
 			countActiveAdminsFn: func(context.Context, string) (int64, error) { return 1, nil },
-			updateUserFn: func(context.Context, string, *models.UpdateUserInput) (*models.UserManagementResponse, error) {
-				return &models.UserManagementResponse{ID: "u1", Role: "operator", IsActive: true}, nil
+			updateUserFn: func(context.Context, string, *iface.UpdateUserInput) (*iface.UserManagementResponse, error) {
+				return &iface.UserManagementResponse{ID: "u1", Role: "operator", IsActive: true}, nil
 			},
 		}
 		h := NewUserHandler(svc)
 		if _, err := h.UpdateUser(actorCtx(), &UpdateUserRequest{
 			ID:   "u1",
-			Body: models.UpdateUserInput{Role: "operator"},
+			Body: iface.UpdateUserInput{Role: "operator"},
 		}); err != nil {
 			t.Fatalf("err = %v", err)
 		}
@@ -849,15 +848,15 @@ func TestAdminLifecycleAuditEmits(t *testing.T) {
 		sink := &captureSink{}
 		svc := &fakeUserService{
 			sink: sink,
-			getUserFn: func(context.Context, string) (*models.UserManagementResponse, error) {
-				return &models.UserManagementResponse{ID: "u1", Role: "super_admin", IsActive: true}, nil
+			getUserFn: func(context.Context, string) (*iface.UserManagementResponse, error) {
+				return &iface.UserManagementResponse{ID: "u1", Role: "super_admin", IsActive: true}, nil
 			},
 			countActiveAdminsFn: func(context.Context, string) (int64, error) { return 0, nil },
 		}
 		h := NewUserHandler(svc)
 		_, err := h.UpdateUser(actorCtx(), &UpdateUserRequest{
 			ID:   "u1",
-			Body: models.UpdateUserInput{Role: "operator"},
+			Body: iface.UpdateUserInput{Role: "operator"},
 		})
 		assertStatus(t, err, 403)
 		ev := assertEvent(t, sink.events, "user.update.refused", "denied")
@@ -872,8 +871,8 @@ func TestAdminLifecycleAuditEmits(t *testing.T) {
 		// happy-path delete still succeeds and the test passes if no
 		// panic and the right HTTP outcome arrives.
 		svc := &fakeUserService{
-			getUserFn: func(context.Context, string) (*models.UserManagementResponse, error) {
-				return &models.UserManagementResponse{ID: "u1", Role: "operator", IsActive: true}, nil
+			getUserFn: func(context.Context, string) (*iface.UserManagementResponse, error) {
+				return &iface.UserManagementResponse{ID: "u1", Role: "operator", IsActive: true}, nil
 			},
 			softDeleteAndAliasFn: func(context.Context, string) error { return nil },
 		}
@@ -890,9 +889,9 @@ func TestListUsersHandler(t *testing.T) {
 	t.Run("forwards filters and pagination", func(t *testing.T) {
 		t.Parallel()
 		svc := &fakeUserService{
-			listUsersFn: func(_ context.Context, _ *models.UserFilters, _ *models.PaginationParams) (*models.UserManagementListResponse, error) {
-				return &models.UserManagementListResponse{
-					Users: []models.UserManagementResponse{{ID: "u1"}},
+			listUsersFn: func(_ context.Context, _ *iface.UserFilters, _ *iface.PaginationParams) (*iface.UserManagementListResponse, error) {
+				return &iface.UserManagementListResponse{
+					Users: []iface.UserManagementResponse{{ID: "u1"}},
 					Total: 1, Page: 2, PageSize: 25, TotalPages: 1,
 				}, nil
 			},
@@ -933,8 +932,8 @@ func TestListUsersHandler(t *testing.T) {
 		// the behaviour so a future refactor that drops the workaround
 		// is intentional.
 		svc := &fakeUserService{
-			listUsersFn: func(context.Context, *models.UserFilters, *models.PaginationParams) (*models.UserManagementListResponse, error) {
-				return &models.UserManagementListResponse{}, nil
+			listUsersFn: func(context.Context, *iface.UserFilters, *iface.PaginationParams) (*iface.UserManagementListResponse, error) {
+				return &iface.UserManagementListResponse{}, nil
 			},
 		}
 		h := NewUserHandler(svc)
@@ -955,7 +954,7 @@ func TestListUsersHandler(t *testing.T) {
 	t.Run("svc error → 500", func(t *testing.T) {
 		t.Parallel()
 		svc := &fakeUserService{
-			listUsersFn: func(context.Context, *models.UserFilters, *models.PaginationParams) (*models.UserManagementListResponse, error) {
+			listUsersFn: func(context.Context, *iface.UserFilters, *iface.PaginationParams) (*iface.UserManagementListResponse, error) {
 				return nil, errors.New("boom")
 			},
 		}
@@ -971,8 +970,8 @@ func TestGetUsersByRoleHandler(t *testing.T) {
 	t.Run("happy", func(t *testing.T) {
 		t.Parallel()
 		svc := &fakeUserService{
-			getUsersByRoleFn: func(context.Context, string) ([]*models.UserManagementResponse, error) {
-				return []*models.UserManagementResponse{{ID: "u1"}, {ID: "u2"}}, nil
+			getUsersByRoleFn: func(context.Context, string) ([]*iface.UserManagementResponse, error) {
+				return []*iface.UserManagementResponse{{ID: "u1"}, {ID: "u2"}}, nil
 			},
 		}
 		h := NewUserHandler(svc)
@@ -988,7 +987,7 @@ func TestGetUsersByRoleHandler(t *testing.T) {
 	t.Run("invalid → 400", func(t *testing.T) {
 		t.Parallel()
 		svc := &fakeUserService{
-			getUsersByRoleFn: func(context.Context, string) ([]*models.UserManagementResponse, error) {
+			getUsersByRoleFn: func(context.Context, string) ([]*iface.UserManagementResponse, error) {
 				return nil, services.ErrInvalidInput
 			},
 		}
@@ -1000,7 +999,7 @@ func TestGetUsersByRoleHandler(t *testing.T) {
 	t.Run("unknown error → 500", func(t *testing.T) {
 		t.Parallel()
 		svc := &fakeUserService{
-			getUsersByRoleFn: func(context.Context, string) ([]*models.UserManagementResponse, error) {
+			getUsersByRoleFn: func(context.Context, string) ([]*iface.UserManagementResponse, error) {
 				return nil, errors.New("boom")
 			},
 		}
@@ -1026,11 +1025,11 @@ func TestGetUserByEmailHandler(t *testing.T) {
 
 	cases := []struct {
 		name       string
-		svcResp    *models.UserManagementResponse
+		svcResp    *iface.UserManagementResponse
 		svcErr     error
 		wantStatus int
 	}{
-		{name: "happy", svcResp: &models.UserManagementResponse{ID: "u1"}},
+		{name: "happy", svcResp: &iface.UserManagementResponse{ID: "u1"}},
 		{name: "not found → 404", svcErr: services.ErrUserNotFound, wantStatus: 404},
 		{name: "invalid → 400", svcErr: services.ErrInvalidInput, wantStatus: 400},
 		{name: "unknown → 500", svcErr: errors.New("boom"), wantStatus: 500},
@@ -1040,7 +1039,7 @@ func TestGetUserByEmailHandler(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
 			svc := &fakeUserService{
-				getUserByEmailFn: func(context.Context, string) (*models.UserManagementResponse, error) {
+				getUserByEmailFn: func(context.Context, string) (*iface.UserManagementResponse, error) {
 					return c.svcResp, c.svcErr
 				},
 			}
@@ -1063,7 +1062,7 @@ func TestGetUserCountHandler(t *testing.T) {
 	t.Run("forwards filters", func(t *testing.T) {
 		t.Parallel()
 		svc := &fakeUserService{
-			getUserCountFn: func(context.Context, *models.UserFilters) (int64, error) { return 42, nil },
+			getUserCountFn: func(context.Context, *iface.UserFilters) (int64, error) { return 42, nil },
 		}
 		h := NewUserHandler(svc)
 		resp, err := h.GetUserCount(context.Background(), &GetUserCountRequest{
@@ -1089,7 +1088,7 @@ func TestGetUserCountHandler(t *testing.T) {
 	t.Run("svc error → 500", func(t *testing.T) {
 		t.Parallel()
 		svc := &fakeUserService{
-			getUserCountFn: func(context.Context, *models.UserFilters) (int64, error) {
+			getUserCountFn: func(context.Context, *iface.UserFilters) (int64, error) {
 				return 0, errors.New("boom")
 			},
 		}

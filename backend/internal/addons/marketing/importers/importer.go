@@ -21,7 +21,7 @@ import (
 	"io"
 	"time"
 
-	"github.com/orkestra-cc/orkestra-addon-marketing/models"
+	"github.com/orkestra/backend/internal/addons/marketing/models"
 )
 
 // EngagementSignal is the per-row engagement event the adapter

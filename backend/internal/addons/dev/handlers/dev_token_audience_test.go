@@ -9,7 +9,7 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 
-	"github.com/orkestra-cc/orkestra-sdk/iface"
+	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
 // stubPlatform is a minimal module.PlatformInfo for tests. The real

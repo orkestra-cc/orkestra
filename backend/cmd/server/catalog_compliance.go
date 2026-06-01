@@ -1,8 +1,8 @@
 package main
 
 import (
-	"github.com/orkestra-cc/orkestra-addon-compliance"
-	"github.com/orkestra-cc/orkestra-sdk/module"
+	"github.com/orkestra/backend/internal/addons/compliance"
+	"github.com/orkestra/backend/pkg/sdk/module"
 )
 
 func init() {

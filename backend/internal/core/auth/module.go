@@ -14,8 +14,6 @@ import (
 	"github.com/danielgtaylor/huma/v2/adapters/humachi"
 	"github.com/go-chi/chi/v5"
 	gowebauthn "github.com/go-webauthn/webauthn/webauthn"
-	"github.com/orkestra-cc/orkestra-sdk/iface"
-	"github.com/orkestra-cc/orkestra-sdk/module"
 	"github.com/orkestra/backend/internal/core/auth/handlers"
 	"github.com/orkestra/backend/internal/core/auth/models"
 	"github.com/orkestra/backend/internal/core/auth/repository"
@@ -25,6 +23,8 @@ import (
 	sharederrors "github.com/orkestra/backend/internal/shared/errors"
 	"github.com/orkestra/backend/internal/shared/geoip"
 	authMiddleware "github.com/orkestra/backend/internal/shared/middleware"
+	"github.com/orkestra/backend/pkg/sdk/iface"
+	"github.com/orkestra/backend/pkg/sdk/module"
 )
 
 type AuthModule struct {

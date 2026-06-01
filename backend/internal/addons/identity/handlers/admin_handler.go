@@ -14,11 +14,11 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/google/uuid"
 
-	"github.com/orkestra-cc/orkestra-addon-identity/internal/cryptoutil"
-	"github.com/orkestra-cc/orkestra-addon-identity/models"
-	"github.com/orkestra-cc/orkestra-addon-identity/repository"
-	"github.com/orkestra-cc/orkestra-sdk/ctxauth"
-	"github.com/orkestra-cc/orkestra-sdk/iface"
+	"github.com/orkestra/backend/internal/addons/identity/internal/cryptoutil"
+	"github.com/orkestra/backend/internal/addons/identity/models"
+	"github.com/orkestra/backend/internal/addons/identity/repository"
+	"github.com/orkestra/backend/pkg/sdk/ctxauth"
+	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
 // AdminHandler exposes tenant-scoped IdP config CRUD to authenticated

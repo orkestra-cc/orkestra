@@ -5,7 +5,7 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/orkestra-cc/orkestra-sdk/iface"
+	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
 // PresignedAvatarGetTTL is the validity window on every presigned GET

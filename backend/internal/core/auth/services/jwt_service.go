@@ -8,9 +8,8 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/orkestra-cc/orkestra-sdk/iface"
 	"github.com/orkestra/backend/internal/core/auth/models"
-	userModels "github.com/orkestra/backend/internal/core/user/models"
+	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
 var (
@@ -29,29 +28,29 @@ var (
 type JWTService interface {
 	IsEnabled() bool
 
-	GenerateAccessToken(user *userModels.User) (string, error)
-	GenerateRefreshToken(user *userModels.User) (string, error)
+	GenerateAccessToken(user *iface.User) (string, error)
+	GenerateRefreshToken(user *iface.User) (string, error)
 	// GenerateAccessTokenWithAMR mints an access token with explicit authn
 	// methods (RFC 8176) and an optional last-OTP timestamp. Used by the MFA
 	// verify endpoint and password/OAuth login paths to record how the user
 	// proved their identity on this request.
-	GenerateAccessTokenWithAMR(user *userModels.User, amr []string, lastOTPAt int64) (string, error)
+	GenerateAccessTokenWithAMR(user *iface.User, amr []string, lastOTPAt int64) (string, error)
 	ValidateAccessToken(tokenString string) (*models.JWTClaims, error)
 	ValidateRefreshToken(tokenString string) (*models.JWTClaims, error)
 	ParseUnverifiedClaims(tokenString string) (*models.JWTClaims, error)
 
-	GenerateEnhancedAccessToken(user *userModels.User, deviceInfo *models.DeviceInfo, securityCtx *models.SecurityContext) (string, error)
-	GenerateEnhancedRefreshToken(user *userModels.User, deviceInfo *models.DeviceInfo, securityCtx *models.SecurityContext) (string, error)
+	GenerateEnhancedAccessToken(user *iface.User, deviceInfo *models.DeviceInfo, securityCtx *models.SecurityContext) (string, error)
+	GenerateEnhancedRefreshToken(user *iface.User, deviceInfo *models.DeviceInfo, securityCtx *models.SecurityContext) (string, error)
 
 	ValidateAccessTokenWithRisk(tokenString string) (*models.JWTClaims, error)
 	ValidateRefreshTokenWithRisk(tokenString string) (*models.JWTClaims, error)
 
-	GenerateTokenPair(user *userModels.User, deviceInfo *models.DeviceInfo, securityCtx *models.SecurityContext) (*models.TokenPair, error)
+	GenerateTokenPair(user *iface.User, deviceInfo *models.DeviceInfo, securityCtx *models.SecurityContext) (*models.TokenPair, error)
 	// GenerateTokenPairWithAMR is identical to GenerateTokenPair but stamps
 	// the access token's amr + last_otp_at claims. Used by the MFA login
 	// verify endpoint and anywhere else that needs to record which factors
 	// were completed for a freshly minted session.
-	GenerateTokenPairWithAMR(user *userModels.User, deviceInfo *models.DeviceInfo, securityCtx *models.SecurityContext, amr []string, lastOTPAt int64) (*models.TokenPair, error)
+	GenerateTokenPairWithAMR(user *iface.User, deviceInfo *models.DeviceInfo, securityCtx *models.SecurityContext, amr []string, lastOTPAt int64) (*models.TokenPair, error)
 
 	// SetTenantProvider allows late wiring of the tenant provider so that
 	// token issuance can embed the user's current memberships in the JWT.
@@ -182,7 +181,7 @@ func (s *jwtService) IsEnabled() bool {
 }
 
 func (s *jwtService) GenerateEnhancedAccessToken(
-	user *userModels.User,
+	user *iface.User,
 	deviceInfo *models.DeviceInfo,
 	securityCtx *models.SecurityContext,
 ) (string, error) {
@@ -279,7 +278,7 @@ func (s *jwtService) loadMemberships(userUUID string) (list []models.TenantMembe
 }
 
 func (s *jwtService) GenerateEnhancedRefreshToken(
-	user *userModels.User,
+	user *iface.User,
 	deviceInfo *models.DeviceInfo,
 	securityCtx *models.SecurityContext,
 ) (string, error) {
@@ -316,7 +315,7 @@ func (s *jwtService) GenerateEnhancedRefreshToken(
 }
 
 func (s *jwtService) GenerateTokenPair(
-	user *userModels.User,
+	user *iface.User,
 	deviceInfo *models.DeviceInfo,
 	securityCtx *models.SecurityContext,
 ) (*models.TokenPair, error) {
@@ -344,7 +343,7 @@ func (s *jwtService) GenerateTokenPair(
 }
 
 func (s *jwtService) GenerateTokenPairWithAMR(
-	user *userModels.User,
+	user *iface.User,
 	deviceInfo *models.DeviceInfo,
 	securityCtx *models.SecurityContext,
 	amr []string,
@@ -561,7 +560,7 @@ func getStr(m map[string]any, k string) string {
 	return v
 }
 
-func (s *jwtService) getPrimaryOAuthProvider(user *userModels.User) models.OAuthProvider {
+func (s *jwtService) getPrimaryOAuthProvider(user *iface.User) models.OAuthProvider {
 	for _, link := range user.OAuthLinks {
 		if link.IsPrimary && link.IsActive {
 			return models.OAuthProvider(link.Provider)
@@ -590,7 +589,7 @@ func interfaceSliceToStringSlice(slice []interface{}) []string {
 
 // Basic JWT interface implementation for compatibility
 
-func (s *jwtService) GenerateAccessToken(user *userModels.User) (string, error) {
+func (s *jwtService) GenerateAccessToken(user *iface.User) (string, error) {
 	deviceInfo := &models.DeviceInfo{
 		DeviceID:   "default",
 		DeviceType: "unknown",
@@ -603,7 +602,7 @@ func (s *jwtService) GenerateAccessToken(user *userModels.User) (string, error) 
 	return s.GenerateEnhancedAccessToken(user, deviceInfo, securityCtx)
 }
 
-func (s *jwtService) GenerateAccessTokenWithAMR(user *userModels.User, amr []string, lastOTPAt int64) (string, error) {
+func (s *jwtService) GenerateAccessTokenWithAMR(user *iface.User, amr []string, lastOTPAt int64) (string, error) {
 	deviceInfo := &models.DeviceInfo{
 		DeviceID:   "default",
 		DeviceType: "unknown",
@@ -618,7 +617,7 @@ func (s *jwtService) GenerateAccessTokenWithAMR(user *userModels.User, amr []str
 	return s.GenerateEnhancedAccessToken(user, deviceInfo, securityCtx)
 }
 
-func (s *jwtService) GenerateRefreshToken(user *userModels.User) (string, error) {
+func (s *jwtService) GenerateRefreshToken(user *iface.User) (string, error) {
 	deviceInfo := &models.DeviceInfo{
 		DeviceID:   "default",
 		DeviceType: "unknown",

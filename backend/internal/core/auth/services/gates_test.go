@@ -13,10 +13,9 @@ import (
 
 	"github.com/pquerna/otp/totp"
 
-	"github.com/orkestra-cc/orkestra-sdk/iface"
 	authModels "github.com/orkestra/backend/internal/core/auth/models"
-	userModels "github.com/orkestra/backend/internal/core/user/models"
 	sharederrors "github.com/orkestra/backend/internal/shared/errors"
+	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
 // totpGenerateNow is a small adapter around totp.GenerateCode so the
@@ -108,7 +107,7 @@ func newGatesEnv(t *testing.T, audience PolicyAudience, policyValues map[string]
 // hashedUser provisions a user with a real argon2id hash so Login() /
 // ChangePassword() can verify the password without faking the
 // PasswordService.
-func (e *gatesEnv) hashedUser(email, password string) *userModels.User {
+func (e *gatesEnv) hashedUser(email, password string) *iface.User {
 	hash, err := e.pwd.Hash(password)
 	if err != nil {
 		e.t.Fatalf("hash: %v", err)

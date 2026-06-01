@@ -8,13 +8,12 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/orkestra-cc/orkestra-sdk/iface"
 	authModels "github.com/orkestra/backend/internal/core/auth/models"
 	authRepository "github.com/orkestra/backend/internal/core/auth/repository"
-	"github.com/orkestra/backend/internal/core/user/models"
 	"github.com/orkestra/backend/internal/core/user/repository"
 	"github.com/orkestra/backend/internal/shared/blob"
 	"github.com/orkestra/backend/internal/shared/utils"
+	"github.com/orkestra/backend/pkg/sdk/iface"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
@@ -32,16 +31,16 @@ var (
 // UserService defines the interface for user business logic
 type UserService interface {
 	// Core CRUD operations
-	CreateUser(ctx context.Context, input *models.CreateUserInput) (*models.UserManagementResponse, error)
-	GetUser(ctx context.Context, id string) (*models.UserManagementResponse, error)
-	GetUserByEmail(ctx context.Context, email string) (*models.UserManagementResponse, error)
-	GetUserForAuth(ctx context.Context, email string) (*models.User, error)
-	CreateUserWithPassword(ctx context.Context, input *models.CreateUserInput) (*models.User, error)
+	CreateUser(ctx context.Context, input *iface.CreateUserInput) (*iface.UserManagementResponse, error)
+	GetUser(ctx context.Context, id string) (*iface.UserManagementResponse, error)
+	GetUserByEmail(ctx context.Context, email string) (*iface.UserManagementResponse, error)
+	GetUserForAuth(ctx context.Context, email string) (*iface.User, error)
+	CreateUserWithPassword(ctx context.Context, input *iface.CreateUserInput) (*iface.User, error)
 	UpdatePasswordHash(ctx context.Context, userUUID, hash string) error
 	MarkEmailVerified(ctx context.Context, userUUID string) error
 	RecordFailedLogin(ctx context.Context, userUUID string, lockUntil *time.Time) error
 	ClearFailedLogins(ctx context.Context, userUUID string) error
-	UpdateUser(ctx context.Context, id string, input *models.UpdateUserInput) (*models.UserManagementResponse, error)
+	UpdateUser(ctx context.Context, id string, input *iface.UpdateUserInput) (*iface.UserManagementResponse, error)
 	DeleteUser(ctx context.Context, id string) error
 	// SetAvatarSource persists the user's avatar-source preference and the
 	// blob storage handle for an uploaded image. Validates that an OAuth-
@@ -58,12 +57,12 @@ type UserService interface {
 	SoftDeleteAndAliasEmail(ctx context.Context, id string) error
 
 	// Query operations
-	ListUsers(ctx context.Context, filters *models.UserFilters, pagination *models.PaginationParams) (*models.UserManagementListResponse, error)
-	GetUsersByRole(ctx context.Context, role string) ([]*models.UserManagementResponse, error)
+	ListUsers(ctx context.Context, filters *iface.UserFilters, pagination *iface.PaginationParams) (*iface.UserManagementListResponse, error)
+	GetUsersByRole(ctx context.Context, role string) ([]*iface.UserManagementResponse, error)
 
 	// Utility operations
 	ValidateUserRole(ctx context.Context, userID string, allowedRoles []string) error
-	GetUserCount(ctx context.Context, filters *models.UserFilters) (int64, error)
+	GetUserCount(ctx context.Context, filters *iface.UserFilters) (int64, error)
 	// CountActiveAdministrators returns the number of live (not-deleted)
 	// users with isActive=true whose system role is super_admin or
 	// administrator, excluding excludeUUID when non-empty. Used by the
@@ -74,25 +73,25 @@ type UserService interface {
 	CountActiveAdministrators(ctx context.Context, excludeUUID string) (int64, error)
 
 	// Methods needed by auth module (raw model returns)
-	GetUserByID(ctx context.Context, id string) (*models.User, error)
-	GetUserByObjectID(ctx context.Context, id primitive.ObjectID) (*models.User, error)
-	GetUserByUsername(ctx context.Context, username string) (*models.User, error)
-	GetUserByOAuthID(ctx context.Context, provider models.OAuthProvider, oauthID string) (*models.User, error)
-	GetUserByOAuthLink(ctx context.Context, provider models.OAuthProvider, providerID string) (*models.User, error)
-	CreateUserFromOAuth(ctx context.Context, input *models.CreateUserInput) (*models.User, error)
-	AddOAuthLinkToUser(ctx context.Context, userUUID string, link models.OAuthLink) error
-	RemoveOAuthLinkFromUser(ctx context.Context, userUUID string, provider models.OAuthProvider, providerID string) error
-	SetPrimaryOAuthLink(ctx context.Context, userUUID string, provider models.OAuthProvider, providerID string) error
-	UpdateOAuthLinkUsage(ctx context.Context, userUUID string, provider models.OAuthProvider, providerID string) error
+	GetUserByID(ctx context.Context, id string) (*iface.User, error)
+	GetUserByObjectID(ctx context.Context, id primitive.ObjectID) (*iface.User, error)
+	GetUserByUsername(ctx context.Context, username string) (*iface.User, error)
+	GetUserByOAuthID(ctx context.Context, provider iface.OAuthProvider, oauthID string) (*iface.User, error)
+	GetUserByOAuthLink(ctx context.Context, provider iface.OAuthProvider, providerID string) (*iface.User, error)
+	CreateUserFromOAuth(ctx context.Context, input *iface.CreateUserInput) (*iface.User, error)
+	AddOAuthLinkToUser(ctx context.Context, userUUID string, link iface.OAuthLink) error
+	RemoveOAuthLinkFromUser(ctx context.Context, userUUID string, provider iface.OAuthProvider, providerID string) error
+	SetPrimaryOAuthLink(ctx context.Context, userUUID string, provider iface.OAuthProvider, providerID string) error
+	UpdateOAuthLinkUsage(ctx context.Context, userUUID string, provider iface.OAuthProvider, providerID string) error
 	// UpdateOAuthLinkData refreshes the embedded OAuthLink.OAuthData
 	// payload for the matching (provider, providerID). Called from the
 	// auth OAuth callback on every link reuse so the cached `picture`
 	// URL tracks the user's latest IdP avatar.
-	UpdateOAuthLinkData(ctx context.Context, userUUID string, provider models.OAuthProvider, providerID string, data map[string]interface{}) error
-	GetUserOAuthLinks(ctx context.Context, userUUID string) ([]models.OAuthLink, error)
+	UpdateOAuthLinkData(ctx context.Context, userUUID string, provider iface.OAuthProvider, providerID string, data map[string]interface{}) error
+	GetUserOAuthLinks(ctx context.Context, userUUID string) ([]iface.OAuthLink, error)
 	UpdateUserLastLogin(ctx context.Context, id string) error
 	UpdateUserLastLoginByObjectID(ctx context.Context, id primitive.ObjectID) error
-	UpdateUserByObjectID(ctx context.Context, id primitive.ObjectID, update *models.User) error
+	UpdateUserByObjectID(ctx context.Context, id primitive.ObjectID, update *iface.User) error
 	ValidateUserExists(ctx context.Context, id string) (bool, error)
 	ValidateUserActive(ctx context.Context, id string) (bool, error)
 }
@@ -146,7 +145,7 @@ func (s *userService) AuditSink() iface.AuditSink {
 }
 
 // CreateUser creates a new user
-func (s *userService) CreateUser(ctx context.Context, input *models.CreateUserInput) (*models.UserManagementResponse, error) {
+func (s *userService) CreateUser(ctx context.Context, input *iface.CreateUserInput) (*iface.UserManagementResponse, error) {
 	if input == nil {
 		return nil, ErrInvalidInput
 	}
@@ -169,7 +168,7 @@ func (s *userService) CreateUser(ctx context.Context, input *models.CreateUserIn
 	}
 
 	// Create user model
-	user := models.NewUser()
+	user := iface.NewUser()
 	user.UUID = uuid.New().String()
 	user.Email = input.Email
 	user.Username = input.Username
@@ -199,7 +198,7 @@ func (s *userService) CreateUser(ctx context.Context, input *models.CreateUserIn
 }
 
 // GetUser retrieves a user by ID
-func (s *userService) GetUser(ctx context.Context, id string) (*models.UserManagementResponse, error) {
+func (s *userService) GetUser(ctx context.Context, id string) (*iface.UserManagementResponse, error) {
 	if id == "" {
 		return nil, ErrInvalidInput
 	}
@@ -224,7 +223,7 @@ func (s *userService) GetUser(ctx context.Context, id string) (*models.UserManag
 }
 
 // GetUserByEmail retrieves a user by email
-func (s *userService) GetUserByEmail(ctx context.Context, email string) (*models.UserManagementResponse, error) {
+func (s *userService) GetUserByEmail(ctx context.Context, email string) (*iface.UserManagementResponse, error) {
 	if email == "" {
 		return nil, ErrInvalidInput
 	}
@@ -250,7 +249,7 @@ func (s *userService) GetUserByEmail(ctx context.Context, email string) (*models
 }
 
 // UpdateUser updates a user
-func (s *userService) UpdateUser(ctx context.Context, id string, input *models.UpdateUserInput) (*models.UserManagementResponse, error) {
+func (s *userService) UpdateUser(ctx context.Context, id string, input *iface.UpdateUserInput) (*iface.UserManagementResponse, error) {
 	if id == "" || input == nil {
 		return nil, ErrInvalidInput
 	}
@@ -340,10 +339,10 @@ func (s *userService) SoftDeleteAndAliasEmail(ctx context.Context, id string) er
 }
 
 // ListUsers retrieves users with filters and pagination
-func (s *userService) ListUsers(ctx context.Context, filters *models.UserFilters, pagination *models.PaginationParams) (*models.UserManagementListResponse, error) {
+func (s *userService) ListUsers(ctx context.Context, filters *iface.UserFilters, pagination *iface.PaginationParams) (*iface.UserManagementListResponse, error) {
 	// Set default pagination if not provided
 	if pagination == nil {
-		pagination = &models.PaginationParams{
+		pagination = &iface.PaginationParams{
 			Page:     1,
 			PageSize: 10,
 		}
@@ -363,7 +362,7 @@ func (s *userService) ListUsers(ctx context.Context, filters *models.UserFilters
 	}
 
 	// Convert to response format
-	userResponses := make([]models.UserManagementResponse, len(users))
+	userResponses := make([]iface.UserManagementResponse, len(users))
 	for i, user := range users {
 		userResponses[i] = *user.ToResponse()
 	}
@@ -380,7 +379,7 @@ func (s *userService) ListUsers(ctx context.Context, filters *models.UserFilters
 		totalPages++
 	}
 
-	return &models.UserManagementListResponse{
+	return &iface.UserManagementListResponse{
 		Users:      userResponses,
 		Total:      total,
 		Page:       pagination.Page,
@@ -390,7 +389,7 @@ func (s *userService) ListUsers(ctx context.Context, filters *models.UserFilters
 }
 
 // GetUsersByRole retrieves users by role
-func (s *userService) GetUsersByRole(ctx context.Context, role string) ([]*models.UserManagementResponse, error) {
+func (s *userService) GetUsersByRole(ctx context.Context, role string) ([]*iface.UserManagementResponse, error) {
 	if role == "" {
 		return nil, ErrInvalidInput
 	}
@@ -400,13 +399,13 @@ func (s *userService) GetUsersByRole(ctx context.Context, role string) ([]*model
 		return nil, fmt.Errorf("failed to get users by role: %w", err)
 	}
 
-	responses := make([]*models.UserManagementResponse, len(users))
+	responses := make([]*iface.UserManagementResponse, len(users))
 	for i, user := range users {
 		responses[i] = user.ToResponse()
 	}
 
 	// Convert to slice for enrichment
-	responseSlice := make([]models.UserManagementResponse, len(responses))
+	responseSlice := make([]iface.UserManagementResponse, len(responses))
 	for i, response := range responses {
 		responseSlice[i] = *response
 	}
@@ -442,7 +441,7 @@ func (s *userService) ValidateUserRole(ctx context.Context, userID string, allow
 }
 
 // GetUserCount returns the total count of users with filters
-func (s *userService) GetUserCount(ctx context.Context, filters *models.UserFilters) (int64, error) {
+func (s *userService) GetUserCount(ctx context.Context, filters *iface.UserFilters) (int64, error) {
 	count, err := s.userRepo.Count(ctx, filters)
 	if err != nil {
 		return 0, fmt.Errorf("failed to count users: %w", err)
@@ -487,7 +486,7 @@ func (s *userService) decryptPIN(encryptedPIN string) (string, error) {
 // always come through here so the URL stamped on the wire is fresh
 // (presigned for uploaded, current provider picture for oauth_*) and
 // never the stale value the document happens to carry.
-func (s *userService) enrichWithOAuthProviders(ctx context.Context, response *models.UserManagementResponse) error {
+func (s *userService) enrichWithOAuthProviders(ctx context.Context, response *iface.UserManagementResponse) error {
 	// Fetch OAuth providers for the user from the oauth_providers collection
 	oauthProviders, err := s.oauthProviderRepo.GetByUserUUID(ctx, response.ID)
 	if err != nil {
@@ -497,7 +496,7 @@ func (s *userService) enrichWithOAuthProviders(ctx context.Context, response *mo
 	}
 
 	// Extract provider info with email and avatar
-	providers := make([]models.UserOAuthProviderInfo, 0, len(oauthProviders))
+	providers := make([]iface.UserOAuthProviderInfo, 0, len(oauthProviders))
 	var primaryAvatar string
 
 	for _, provider := range oauthProviders {
@@ -523,7 +522,7 @@ func (s *userService) enrichWithOAuthProviders(ctx context.Context, response *mo
 		}
 
 		// Create provider info object
-		providerInfo := models.UserOAuthProviderInfo{
+		providerInfo := iface.UserOAuthProviderInfo{
 			Provider: string(provider.Provider),
 			Email:    provider.Email,
 			Avatar:   avatarURL,
@@ -570,7 +569,7 @@ func (s *userService) enrichWithOAuthProviders(ctx context.Context, response *mo
 }
 
 // enrichMultipleWithOAuthData enriches multiple user responses with OAuth providers and avatars
-func (s *userService) enrichMultipleWithOAuthData(ctx context.Context, responses []models.UserManagementResponse) error {
+func (s *userService) enrichMultipleWithOAuthData(ctx context.Context, responses []iface.UserManagementResponse) error {
 	for i := range responses {
 		// Enrich with OAuth providers (includes provider info, email, and avatars)
 		if err := s.enrichWithOAuthProviders(ctx, &responses[i]); err != nil {
@@ -584,7 +583,7 @@ func (s *userService) enrichMultipleWithOAuthData(ctx context.Context, responses
 // Methods for UserServiceForAuth interface (used by auth module)
 
 // GetUserByID retrieves a user by UUID (returns raw model for auth)
-func (s *userService) GetUserByID(ctx context.Context, id string) (*models.User, error) {
+func (s *userService) GetUserByID(ctx context.Context, id string) (*iface.User, error) {
 	if id == "" {
 		return nil, ErrInvalidInput
 	}
@@ -601,7 +600,7 @@ func (s *userService) GetUserByID(ctx context.Context, id string) (*models.User,
 }
 
 // GetUserByObjectID retrieves a user by MongoDB ObjectID (returns raw model for auth)
-func (s *userService) GetUserByObjectID(ctx context.Context, id primitive.ObjectID) (*models.User, error) {
+func (s *userService) GetUserByObjectID(ctx context.Context, id primitive.ObjectID) (*iface.User, error) {
 	user, err := s.userRepo.GetByObjectID(ctx, id)
 	if err != nil {
 		if err == repository.ErrUserNotFound {
@@ -614,7 +613,7 @@ func (s *userService) GetUserByObjectID(ctx context.Context, id primitive.Object
 }
 
 // GetUserByUsername retrieves a user by username (returns raw model for auth)
-func (s *userService) GetUserByUsername(ctx context.Context, username string) (*models.User, error) {
+func (s *userService) GetUserByUsername(ctx context.Context, username string) (*iface.User, error) {
 	if username == "" {
 		return nil, ErrInvalidInput
 	}
@@ -631,7 +630,7 @@ func (s *userService) GetUserByUsername(ctx context.Context, username string) (*
 }
 
 // GetUserByOAuthID retrieves a user by OAuth provider and ID
-func (s *userService) GetUserByOAuthID(ctx context.Context, provider models.OAuthProvider, oauthID string) (*models.User, error) {
+func (s *userService) GetUserByOAuthID(ctx context.Context, provider iface.OAuthProvider, oauthID string) (*iface.User, error) {
 	if oauthID == "" {
 		return nil, ErrInvalidInput
 	}
@@ -648,7 +647,7 @@ func (s *userService) GetUserByOAuthID(ctx context.Context, provider models.OAut
 }
 
 // GetUserByOAuthLink retrieves a user by OAuth link
-func (s *userService) GetUserByOAuthLink(ctx context.Context, provider models.OAuthProvider, providerID string) (*models.User, error) {
+func (s *userService) GetUserByOAuthLink(ctx context.Context, provider iface.OAuthProvider, providerID string) (*iface.User, error) {
 	if providerID == "" {
 		return nil, ErrInvalidInput
 	}
@@ -665,7 +664,7 @@ func (s *userService) GetUserByOAuthLink(ctx context.Context, provider models.OA
 }
 
 // CreateUserFromOAuth creates a new user from OAuth data
-func (s *userService) CreateUserFromOAuth(ctx context.Context, input *models.CreateUserInput) (*models.User, error) {
+func (s *userService) CreateUserFromOAuth(ctx context.Context, input *iface.CreateUserInput) (*iface.User, error) {
 	if input == nil {
 		return nil, ErrInvalidInput
 	}
@@ -688,7 +687,7 @@ func (s *userService) CreateUserFromOAuth(ctx context.Context, input *models.Cre
 	}
 
 	// Create user model
-	user := models.NewUser()
+	user := iface.NewUser()
 	user.Email = input.Email
 	user.Username = input.Username
 	user.FullName = input.FullName
@@ -720,7 +719,7 @@ func (s *userService) CreateUserFromOAuth(ctx context.Context, input *models.Cre
 }
 
 // AddOAuthLinkToUser adds an OAuth link to a user
-func (s *userService) AddOAuthLinkToUser(ctx context.Context, userUUID string, link models.OAuthLink) error {
+func (s *userService) AddOAuthLinkToUser(ctx context.Context, userUUID string, link iface.OAuthLink) error {
 	if userUUID == "" {
 		return ErrInvalidInput
 	}
@@ -729,7 +728,7 @@ func (s *userService) AddOAuthLinkToUser(ctx context.Context, userUUID string, l
 }
 
 // RemoveOAuthLinkFromUser removes an OAuth link from a user
-func (s *userService) RemoveOAuthLinkFromUser(ctx context.Context, userUUID string, provider models.OAuthProvider, providerID string) error {
+func (s *userService) RemoveOAuthLinkFromUser(ctx context.Context, userUUID string, provider iface.OAuthProvider, providerID string) error {
 	if userUUID == "" || providerID == "" {
 		return ErrInvalidInput
 	}
@@ -738,7 +737,7 @@ func (s *userService) RemoveOAuthLinkFromUser(ctx context.Context, userUUID stri
 }
 
 // SetPrimaryOAuthLink sets a specific OAuth link as primary
-func (s *userService) SetPrimaryOAuthLink(ctx context.Context, userUUID string, provider models.OAuthProvider, providerID string) error {
+func (s *userService) SetPrimaryOAuthLink(ctx context.Context, userUUID string, provider iface.OAuthProvider, providerID string) error {
 	if userUUID == "" || providerID == "" {
 		return ErrInvalidInput
 	}
@@ -747,7 +746,7 @@ func (s *userService) SetPrimaryOAuthLink(ctx context.Context, userUUID string, 
 }
 
 // UpdateOAuthLinkUsage updates the last used timestamp for an OAuth link
-func (s *userService) UpdateOAuthLinkUsage(ctx context.Context, userUUID string, provider models.OAuthProvider, providerID string) error {
+func (s *userService) UpdateOAuthLinkUsage(ctx context.Context, userUUID string, provider iface.OAuthProvider, providerID string) error {
 	if userUUID == "" || providerID == "" {
 		return ErrInvalidInput
 	}
@@ -758,7 +757,7 @@ func (s *userService) UpdateOAuthLinkUsage(ctx context.Context, userUUID string,
 // UpdateOAuthLinkData refreshes the embedded OAuth link's OAuthData
 // payload — currently used to keep the cached `picture` URL in sync
 // with the IdP. Quiet no-op on missing link (legacy accounts).
-func (s *userService) UpdateOAuthLinkData(ctx context.Context, userUUID string, provider models.OAuthProvider, providerID string, data map[string]interface{}) error {
+func (s *userService) UpdateOAuthLinkData(ctx context.Context, userUUID string, provider iface.OAuthProvider, providerID string, data map[string]interface{}) error {
 	if userUUID == "" || providerID == "" {
 		return ErrInvalidInput
 	}
@@ -766,7 +765,7 @@ func (s *userService) UpdateOAuthLinkData(ctx context.Context, userUUID string, 
 }
 
 // GetUserOAuthLinks gets all OAuth links for a user
-func (s *userService) GetUserOAuthLinks(ctx context.Context, userUUID string) ([]models.OAuthLink, error) {
+func (s *userService) GetUserOAuthLinks(ctx context.Context, userUUID string) ([]iface.OAuthLink, error) {
 	if userUUID == "" {
 		return nil, ErrInvalidInput
 	}
@@ -789,7 +788,7 @@ func (s *userService) UpdateUserLastLoginByObjectID(ctx context.Context, id prim
 }
 
 // UpdateUserByObjectID updates a user by ObjectID
-func (s *userService) UpdateUserByObjectID(ctx context.Context, id primitive.ObjectID, update *models.User) error {
+func (s *userService) UpdateUserByObjectID(ctx context.Context, id primitive.ObjectID, update *iface.User) error {
 	if update == nil {
 		return ErrInvalidInput
 	}
@@ -809,7 +808,7 @@ func (s *userService) ValidateUserExists(ctx context.Context, id string) (bool, 
 // GetUserForAuth returns the raw user model for authentication flows,
 // including the password hash and lockout fields. Never use this for
 // general user lookups — use GetUserByEmail instead.
-func (s *userService) GetUserForAuth(ctx context.Context, email string) (*models.User, error) {
+func (s *userService) GetUserForAuth(ctx context.Context, email string) (*iface.User, error) {
 	if email == "" {
 		return nil, ErrInvalidInput
 	}
@@ -827,7 +826,7 @@ func (s *userService) GetUserForAuth(ctx context.Context, email string) (*models
 // CreateUserWithPassword creates a new user from a password signup flow.
 // The caller must hash the password before calling — this service does
 // not hash (that lives in the auth module's password service).
-func (s *userService) CreateUserWithPassword(ctx context.Context, input *models.CreateUserInput) (*models.User, error) {
+func (s *userService) CreateUserWithPassword(ctx context.Context, input *iface.CreateUserInput) (*iface.User, error) {
 	if input == nil {
 		return nil, ErrInvalidInput
 	}
@@ -844,7 +843,7 @@ func (s *userService) CreateUserWithPassword(ctx context.Context, input *models.
 		return nil, ErrEmailNotUnique
 	}
 
-	user := models.NewUser()
+	user := iface.NewUser()
 	if input.UUID != "" {
 		// Caller pre-minted the UUID (e.g. the auth module claimed the
 		// system_init sentinel with this value before calling us).
@@ -939,16 +938,16 @@ func (s *userService) ClearMFAGrace(ctx context.Context, userUUID string) error 
 
 // avatarSourceToProvider maps an oauth_* avatar source to its OAuth
 // provider name. Returns ("", false) for non-OAuth sources.
-func avatarSourceToProvider(source string) (models.OAuthProvider, bool) {
+func avatarSourceToProvider(source string) (iface.OAuthProvider, bool) {
 	switch source {
-	case models.AvatarSourceOAuthGoogle:
-		return models.OAuthProviderGoogle, true
-	case models.AvatarSourceOAuthApple:
-		return models.OAuthProviderApple, true
-	case models.AvatarSourceOAuthGitHub:
-		return models.OAuthProviderGitHub, true
-	case models.AvatarSourceOAuthDiscord:
-		return models.OAuthProviderDiscord, true
+	case iface.AvatarSourceOAuthGoogle:
+		return iface.OAuthProviderGoogle, true
+	case iface.AvatarSourceOAuthApple:
+		return iface.OAuthProviderApple, true
+	case iface.AvatarSourceOAuthGitHub:
+		return iface.OAuthProviderGitHub, true
+	case iface.AvatarSourceOAuthDiscord:
+		return iface.OAuthProviderDiscord, true
 	}
 	return "", false
 }
@@ -963,13 +962,13 @@ func (s *userService) SetAvatarSource(ctx context.Context, userUUID, source, obj
 		return "", ErrInvalidInput
 	}
 	switch source {
-	case models.AvatarSourceInitials, models.AvatarSourceUploaded,
-		models.AvatarSourceOAuthGoogle, models.AvatarSourceOAuthApple,
-		models.AvatarSourceOAuthGitHub, models.AvatarSourceOAuthDiscord:
+	case iface.AvatarSourceInitials, iface.AvatarSourceUploaded,
+		iface.AvatarSourceOAuthGoogle, iface.AvatarSourceOAuthApple,
+		iface.AvatarSourceOAuthGitHub, iface.AvatarSourceOAuthDiscord:
 	default:
 		return "", ErrInvalidAvatarSource
 	}
-	if source != models.AvatarSourceUploaded && objectKey != "" {
+	if source != iface.AvatarSourceUploaded && objectKey != "" {
 		// Defensive — only uploads carry an object key.
 		objectKey = ""
 	}

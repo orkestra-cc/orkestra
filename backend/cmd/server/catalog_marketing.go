@@ -1,8 +1,8 @@
 package main
 
 import (
-	marketing "github.com/orkestra-cc/orkestra-addon-marketing"
-	"github.com/orkestra-cc/orkestra-sdk/module"
+	marketing "github.com/orkestra/backend/internal/addons/marketing"
+	"github.com/orkestra/backend/pkg/sdk/module"
 )
 
 func init() {

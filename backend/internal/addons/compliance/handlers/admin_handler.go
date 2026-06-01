@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
-	"github.com/orkestra-cc/orkestra-addon-compliance/models"
-	"github.com/orkestra-cc/orkestra-addon-compliance/repository"
+	"github.com/orkestra/backend/internal/addons/compliance/models"
+	"github.com/orkestra/backend/internal/addons/compliance/repository"
 )
 
 // AdminHandler reads from the audit-events repository. It does not own the

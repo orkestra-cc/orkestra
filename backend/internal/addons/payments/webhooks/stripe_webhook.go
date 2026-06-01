@@ -6,8 +6,8 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/orkestra-cc/orkestra-addon-payments/models"
-	"github.com/orkestra-cc/orkestra-addon-payments/services"
+	"github.com/orkestra/backend/internal/addons/payments/models"
+	"github.com/orkestra/backend/internal/addons/payments/services"
 )
 
 // StripeHandler serves POST /v1/payments/webhooks/stripe.

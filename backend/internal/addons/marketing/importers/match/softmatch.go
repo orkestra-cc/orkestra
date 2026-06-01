@@ -17,7 +17,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/orkestra-cc/orkestra-addon-marketing/models"
+	"github.com/orkestra/backend/internal/addons/marketing/models"
 )
 
 // SoftMatchPerson returns true when the incoming person looks like

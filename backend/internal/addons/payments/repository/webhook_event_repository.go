@@ -5,7 +5,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/orkestra-cc/orkestra-addon-payments/models"
+	"github.com/orkestra/backend/internal/addons/payments/models"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"

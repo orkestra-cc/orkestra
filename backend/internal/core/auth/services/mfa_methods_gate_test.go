@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"testing"
 
-	userModels "github.com/orkestra/backend/internal/core/user/models"
+	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
 // Reuses the newPolicy helper defined in auth_policy_service_test.go.
@@ -25,7 +25,7 @@ func TestBeginEnrollment_RejectedWhenTOTPDisabledByPolicy(t *testing.T) {
 		"mfaMethods": "webauthn", // totp excluded
 	}))
 
-	user := &userModels.User{UUID: "u-1", Email: "alice@example.com"}
+	user := &iface.User{UUID: "u-1", Email: "alice@example.com"}
 	_, err := svc.BeginEnrollment(context.Background(), user)
 	if !errors.Is(err, ErrMFAMethodDisabled) {
 		t.Fatalf("BeginEnrollment err = %v, want ErrMFAMethodDisabled", err)
@@ -45,7 +45,7 @@ func TestBeginEnrollment_AllowedWhenTOTPInPolicy(t *testing.T) {
 		"mfaMethods": "totp,webauthn",
 	}))
 
-	user := &userModels.User{UUID: "u-1", Email: "alice@example.com"}
+	user := &iface.User{UUID: "u-1", Email: "alice@example.com"}
 	begin, err := svc.BeginEnrollment(context.Background(), user)
 	if err != nil {
 		t.Fatalf("BeginEnrollment err = %v, want nil with totp in policy", err)
@@ -68,7 +68,7 @@ func TestBeginEnrollment_AllowedWhenPolicyEmpty(t *testing.T) {
 	svc := NewMFAService(repo, challenges, pw, "Orkestra", slog.Default())
 	svc.SetPolicy(newPolicy(map[string]string{}))
 
-	user := &userModels.User{UUID: "u-1", Email: "alice@example.com"}
+	user := &iface.User{UUID: "u-1", Email: "alice@example.com"}
 	if _, err := svc.BeginEnrollment(context.Background(), user); err != nil {
 		t.Fatalf("BeginEnrollment err = %v, want nil with empty policy", err)
 	}
@@ -85,7 +85,7 @@ func TestBeginEnrollment_AllowedWhenPolicyNil(t *testing.T) {
 	svc := NewMFAService(repo, challenges, pw, "Orkestra", slog.Default())
 	// no SetPolicy
 
-	user := &userModels.User{UUID: "u-1", Email: "alice@example.com"}
+	user := &iface.User{UUID: "u-1", Email: "alice@example.com"}
 	if _, err := svc.BeginEnrollment(context.Background(), user); err != nil {
 		t.Fatalf("BeginEnrollment err = %v, want nil with nil policy", err)
 	}

@@ -8,8 +8,8 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/orkestra-cc/orkestra-addon-billing/models"
-	"github.com/orkestra-cc/orkestra-addon-billing/repository"
+	"github.com/orkestra/backend/internal/addons/billing/models"
+	"github.com/orkestra/backend/internal/addons/billing/repository"
 )
 
 // SupplierService defines the interface for supplier business logic

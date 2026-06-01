@@ -17,7 +17,7 @@ import (
 	"math"
 	"time"
 
-	"github.com/orkestra-cc/orkestra-addon-marketing/models"
+	"github.com/orkestra/backend/internal/addons/marketing/models"
 )
 
 // applyDecay computes the decay coefficient in [0, 1] for an activity
