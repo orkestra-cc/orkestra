@@ -144,8 +144,10 @@ func main() {
 	svcRegistry := module.NewServiceRegistry()
 	svcRegistry.Register(module.ServiceFirstAdminClaimer, firstAdminClaimer)
 	// PII producer registry is pre-created here so producer modules can
-	// register themselves during their own Init; compliance reads it when
-	// servicing DSR requests. See iface.PIIProducerRegistry.
+	// register themselves during their own Init. ADR-0006: the core base
+	// has no in-tree consumer (compliance/DSR left with the addons); the
+	// registry is kept as the seam a fork's DSR module reads from. See
+	// iface.PIIProducerRegistry.
 	svcRegistry.Register(module.ServicePIIProducerRegistry, iface.NewPIIProducerRegistry())
 
 	// Object storage (S3-compatible; defaults to RustFS in dev/staging).
@@ -262,9 +264,10 @@ func main() {
 	authMW.SetTenantProvider(module.MustGetTyped[iface.TenantProvider](svcRegistry, module.ServiceTenantProvider))
 	authMW.SetAccessProvider(module.MustGetTyped[iface.AccessProvider](svcRegistry, module.ServiceAccessProvider))
 	authMW.SetAuthzProvider(module.MustGetTyped[iface.AuthzProvider](svcRegistry, module.ServiceAuthzProvider))
-	if sink, ok := module.GetTyped[iface.AuditSink](svcRegistry, module.ServiceAuditSink); ok {
-		authMW.SetAuditSink(sink)
-	}
+	// ADR-0006: the compliance audit-sink probe was removed with the
+	// addon. The SetAuditSink seam survives on the middleware and core
+	// services, nil by default (usage is nil-guarded) — a fork that adds
+	// an audit/compliance module re-wires it the same way compliance did.
 	if rev, ok := module.GetTyped[services.SessionRevocationService](svcRegistry, module.ServiceSessionRevocation); ok {
 		authMW.SetSessionRevocation(rev)
 	}
