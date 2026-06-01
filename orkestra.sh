@@ -158,116 +158,12 @@ ENV_FILE="$DOCKER_DIR/.env"
 # whichever app stack is up.
 OBSERVABILITY_COMPOSE="$DOCKER_DIR/docker-compose.observability.yml"
 
-# Profile state — "fullstack", a SKU profile name, or "" (at profile menu)
+# Active stack — "fullstack" or "" (at the main menu). ADR-0006 removed the
+# runtime-profile (minimal/full) path — there are no addons to pre-enable.
 PROFILE=""
-
-# Runtime profiles published to GHCR. Order matters: it drives the TUI picker.
-# Single binary; ORKESTRA_PROFILE seeds first-boot addon enablement.
-SKU_PROFILES=(minimal full)
-
-# Per-profile compose file, env file, backend URL, refresh mode, and infra
-# layering. Both profiles pull the same backend image from GHCR and expect
-# docker-compose.infra.yml to be running first.
-declare -A PROFILE_COMPOSE
-declare -A PROFILE_ENV
-declare -A PROFILE_BACKEND_URL
-declare -A PROFILE_FRONTEND_URL
-declare -A PROFILE_REFRESH_MODE      # "pull" or "build"
-declare -A PROFILE_LAYER_INFRA       # "yes" or "no"
-declare -A PROFILE_DESCRIPTION
-
-# Source-mode state (Option C). PROFILE_SOURCE_MODE[<name>]="yes" once a
-# profile has been repointed at a hot-reload source stack; PROFILE_SOURCE_ENV
-# names the ENV that triggered it (development|staging). Both are populated by
-# apply_profile_source_mode(), reset to defaults here so a nounset reference is
-# always safe.
-declare -A PROFILE_SOURCE_MODE
-PROFILE_SOURCE_ENV=""
-
-init_profile_configs() {
-    local p
-    for p in "${SKU_PROFILES[@]}"; do
-        PROFILE_COMPOSE[$p]="$DOCKER_DIR/docker-compose.$p.yml"
-        PROFILE_ENV[$p]="$ENV_FILE"
-        PROFILE_BACKEND_URL[$p]="http://localhost:3000"
-        PROFILE_FRONTEND_URL[$p]=""
-        PROFILE_REFRESH_MODE[$p]="pull"
-        PROFILE_LAYER_INFRA[$p]="yes"
-    done
-    PROFILE_DESCRIPTION[minimal]="Core only (no addons pre-enabled) — operator turns them on at /admin/modules"
-    PROFILE_DESCRIPTION[full]="Every non-dev addon pre-enabled on first boot"
-}
-
-init_profile_configs
-
-is_sku_profile() {
-    local name=$1 p
-    for p in "${SKU_PROFILES[@]}"; do
-        [ "$p" = "$name" ] && return 0
-    done
-    return 1
-}
-
-# Render the SKU profile list as a comma-separated string for error messages.
-# Necessary because the script uses IFS=$'\n\t', so "${SKU_PROFILES[*]}" would
-# join with newlines and break single-line error output.
-sku_profile_list() {
-    local IFS=', '
-    printf '%s' "${SKU_PROFILES[*]}"
-}
 
 # Env-detect utility for full-stack ENV resolution
 source "$PROJECT_ROOT/scripts/env-detect.sh"
-
-# ---------------------------------------------------------------------------
-# Profile source-mode routing (Option C)
-# ---------------------------------------------------------------------------
-#
-# minimal/full normally PULL the published image from GHCR — no source build,
-# no hot reload. But ORKESTRA_PROFILE is just a first-boot addon-enablement
-# seed; it has nothing to do with how code is served. So when ENV=development,
-# picking a profile transparently repoints it at the dev source/hot-reload
-# compose stack and exports ORKESTRA_PROFILE to seed the same addon set.
-# Result: the profile's addons AND live-reloaded local source. staging and
-# production (and an unset/invalid ENV) keep the pull-the-published-image
-# behavior — only development gets hot reload.
-#
-# Call this lazily — AFTER env-detect.sh is sourced and right before entering
-# either the TUI profile picker or the CLI `profile` dispatch — never at
-# sourcing time (init_profile_configs runs before env-detect is available).
-apply_profile_source_mode() {
-    PROFILE_SOURCE_MODE=()
-    PROFILE_SOURCE_ENV=""
-
-    # get_environment_silent prints nothing and returns 1 for no/invalid ENV.
-    local detected
-    detected=$(get_environment_silent) || return 0
-
-    # Only development gets the hot-reload source stack. staging behaves like
-    # production: pull the published GHCR image.
-    [ "$detected" = "development" ] || return 0
-
-    local src_compose src_frontend
-    local variant="${DEV_COMPOSE_VARIANT:-public}"
-    case "$variant" in
-        chainguard) src_compose="$DOCKER_DIR/docker-compose.dev.yml" ;;
-        *)          src_compose="$DOCKER_DIR/docker-compose.dev-public.yml" ;;
-    esac
-    src_frontend="http://localhost:8080"
-
-    [ -f "$src_compose" ] || return 0
-
-    local p
-    for p in "${SKU_PROFILES[@]}"; do
-        PROFILE_COMPOSE[$p]="$src_compose"
-        PROFILE_REFRESH_MODE[$p]="build"
-        PROFILE_FRONTEND_URL[$p]="$src_frontend"
-        PROFILE_SOURCE_MODE[$p]="yes"
-        # PROFILE_LAYER_INFRA stays "yes" — mongo/redis come from infra.yml,
-        # reclaimed into this project by the existing preflight step.
-    done
-    PROFILE_SOURCE_ENV="$detected"
-}
 
 # ---------------------------------------------------------------------------
 # Traps — restore terminal state on exit, handle Ctrl-C gracefully
@@ -799,361 +695,20 @@ resolve_running_container() {
         --filter "label=com.docker.compose.service=$service" \
         --filter "status=running" 2> /dev/null | head -1
 }
-
-# ---------------------------------------------------------------------------
-# Generic profile operations
-# ---------------------------------------------------------------------------
-#
-# A "profile" here is any entry in PROFILE_COMPOSE — the two runtime
-# profiles (minimal/full). Both pull the same image from GHCR; the
-# ORKESTRA_PROFILE env var in each compose file decides first-boot addon
-# enablement. Everything else is the same operation surface
-# (deploy/stop/reset/status/info/logs).
-
-# Echo the docker-compose -f / --env-file argument list for the named profile,
-# one token per line. Capture with: mapfile -t args < <(_profile_compose_args foo)
-_profile_compose_args() {
-    local name=$1
-    if [ "${PROFILE_LAYER_INFRA[$name]:-no}" = "yes" ]; then
-        printf -- '-f\n%s\n' "$DOCKER_DIR/docker-compose.infra.yml"
-    fi
-    printf -- '-f\n%s\n' "${PROFILE_COMPOSE[$name]}"
-    local env_file="${PROFILE_ENV[$name]:-}"
-    if [ -n "$env_file" ] && [ -f "$env_file" ]; then
-        printf -- '--env-file\n%s\n' "$env_file"
-    fi
-}
-
-profile_check_prereqs() {
-    local name=$1
-    check_docker_running
-
-    local compose_file="${PROFILE_COMPOSE[$name]:-}"
-    [ -z "$compose_file" ] && die "Unknown profile: $name"
-    [ ! -f "$compose_file" ] && die "$compose_file not found"
-
-    if [ "${PROFILE_LAYER_INFRA[$name]}" = "yes" ]; then
-        local infra_file="$DOCKER_DIR/docker-compose.infra.yml"
-        [ ! -f "$infra_file" ] && die "$infra_file not found"
-    fi
-
-    local env_file="${PROFILE_ENV[$name]:-}"
-    if [ -n "$env_file" ] && [ ! -f "$env_file" ]; then
-        p_warn "$env_file not found — required secrets must be exported in the shell"
-    fi
-
-    # The minimal/full SKU images run as nonroot (UID 65532), so a 0600
-    # private key owned by the dev UID would be unreadable → auth disabled.
-    ensure_jwt_keys_readable
-
-    ensure_network_exists
-}
-
-# Render the post-deploy access box. GHCR profiles are backend-only; the
-# source-mode (development/staging) stacks also bring up the Vite frontend.
-_profile_show_access_box() {
-    local name=$1
-    local backend_url="${PROFILE_BACKEND_URL[$name]:-http://localhost:3000}"
-    local frontend_url="${PROFILE_FRONTEND_URL[$name]:-}"
-
-    # Source mode: local code is hot-reloaded; ORKESTRA_PROFILE only seeds a
-    # fresh DB, so spell out how to actually switch profiles.
-    if [ "${PROFILE_SOURCE_MODE[$name]:-no}" = "yes" ]; then
-        local -a rows=("" "${name^} addons · hot-reload source stack (ENV=${PROFILE_SOURCE_ENV})" "")
-        [ -n "$frontend_url" ] && rows+=("  Admin frontend ${c_info}${frontend_url}${c_reset}")
-        rows+=(
-            "  Backend API    ${c_info}${backend_url}${c_reset}"
-            "  API docs       ${c_info}${backend_url}/docs${c_reset}"
-            "  Health         ${c_info}${backend_url}/health${c_reset}"
-            ""
-            "  ${c_muted}Local source is bind-mounted — AIR + Vite hot-reload your edits.${c_reset}"
-            "  ${c_muted}ORKESTRA_PROFILE=${name} seeds addons on a FRESH db only; switch${c_reset}"
-            "  ${c_muted}profiles with 'reset' (wipes volumes), or toggle live at /admin/modules.${c_reset}"
-            ""
-            "  ${c_muted}Generate an admin token for first login:${c_reset}"
-            "  ${c_accent}ORKESTRA_API_URL=${backend_url} ./scripts/devtoken.sh administrator${c_reset}"
-            ""
-        )
-        draw_box "${name^} stack is up" "${rows[@]}"
-        return
-    fi
-
-    if [ -n "$frontend_url" ]; then
-        draw_box "${name^} stack is up" \
-            "" \
-            "  Admin frontend ${c_info}${frontend_url}${c_reset}" \
-            "  Backend API    ${c_info}${backend_url}${c_reset}" \
-            "  API docs       ${c_info}${backend_url}/docs${c_reset}" \
-            "  Health         ${c_info}${backend_url}/health${c_reset}" \
-            "" \
-            "  ${c_muted}Generate an admin token for first login:${c_reset}" \
-            "  ${c_accent}ORKESTRA_API_URL=${backend_url} ./scripts/devtoken.sh administrator${c_reset}" \
-            ""
-    else
-        draw_box "${name^} stack is up" \
-            "" \
-            "  Backend API    ${c_info}${backend_url}${c_reset}" \
-            "  API docs       ${c_info}${backend_url}/docs${c_reset}" \
-            "  Health         ${c_info}${backend_url}/health${c_reset}" \
-            "" \
-            "  ${c_muted}Image pulled from GHCR. Toggle addons at /admin/modules.${c_reset}" \
-            "  ${c_muted}Generate an admin token for first login:${c_reset}" \
-            "  ${c_accent}ORKESTRA_API_URL=${backend_url} ./scripts/devtoken.sh administrator${c_reset}" \
-            ""
-    fi
-}
-
-# profile_deploy <name> [refresh=yes|no]
-# refresh=yes: pull the SKU image from GHCR before bringing up. refresh=no: cached.
-profile_deploy() {
-    local name=$1 refresh=${2:-no}
-    PROFILE="$name"
-    # Seed the addon set. Inert on the GHCR path (minimal/full compose hardcode
-    # ORKESTRA_PROFILE); honored by the source stacks via ${ORKESTRA_PROFILE:-…}.
-    export ORKESTRA_PROFILE="$name"
-    local title
-    title=$(echo "${name:0:1}" | tr '[:lower:]' '[:upper:]')${name:1}
-    page_header "${title} · Deploy / Update"
-    profile_check_prereqs "$name"
-    echo
-
-    local -a base_args
-    mapfile -t base_args < <(_profile_compose_args "$name")
-
-    # Pull mode: refresh the image before bringing the stack up.
-    if [ "$refresh" = "yes" ] && [ "${PROFILE_REFRESH_MODE[$name]}" = "pull" ]; then
-        if ! with_spinner "Pulling latest image from GHCR" \
-            docker compose "${base_args[@]}" pull; then
-            die "Image pull failed"
-        fi
-    fi
-
-    # Reclaim any orphan containers (infra + SKU app) so `up -d` doesn't
-    # crash on a foreign-project name collision. Volumes are preserved.
-    if [ "${PROFILE_LAYER_INFRA[$name]:-no}" = "yes" ]; then
-        preflight_reclaim_containers "$DOCKER_DIR/docker-compose.infra.yml"
-    fi
-    preflight_reclaim_containers "${PROFILE_COMPOSE[$name]}"
-
-    local -a up_cmd=(docker compose "${base_args[@]}" up -d)
-    if [ "$refresh" = "yes" ] && [ "${PROFILE_REFRESH_MODE[$name]}" = "build" ]; then
-        up_cmd+=(--build)
-    fi
-
-    local msg="Starting containers"
-    if [ "$refresh" = "yes" ] && [ "${PROFILE_REFRESH_MODE[$name]}" = "build" ]; then
-        msg="Building and starting containers (first run can take several minutes)"
-    fi
-
-    if ! with_spinner "$msg" "${up_cmd[@]}"; then
-        die "Deployment failed"
-    fi
-
-    echo
-    _profile_show_access_box "$name"
-}
-
-profile_stop() {
-    local name=$1
-    PROFILE="$name"
-    local title
-    title=$(echo "${name:0:1}" | tr '[:lower:]' '[:upper:]')${name:1}
-    page_header "${title} · Stop"
-    check_docker_running
-    echo
-
-    local -a base_args
-    mapfile -t base_args < <(_profile_compose_args "$name")
-
-    if ! with_spinner "Stopping containers (volumes kept)" \
-        docker compose "${base_args[@]}" down; then
-        die "Stop failed"
-    fi
-
-    echo
-    p_muted "  Data volumes were NOT removed. Use 'reset' to wipe them."
-}
-
-profile_reset() {
-    local name=$1 confirm=${2:-ask}
-    PROFILE="$name"
-    # Seed the addon set on the fresh DB this reset creates (see profile_deploy).
-    export ORKESTRA_PROFILE="$name"
-    local title
-    title=$(echo "${name:0:1}" | tr '[:lower:]' '[:upper:]')${name:1}
-    page_header "${title} · Reset (wipe volumes)"
-    echo
-    draw_box "Destructive operation" \
-        "" \
-        "  ${c_error}${ic_warn} This will DELETE the ${name} stack's mongo and redis volumes.${c_reset}" \
-        "  ${c_error}   All users, sessions, and module configs will be lost.${c_reset}" \
-        ""
-
-    if [ "$confirm" != "yes" ]; then
-        echo
-        if ! ask_yes_no "Are you sure you want to wipe the ${name} data?" "n"; then
-            p_warn "Reset cancelled."
-            return 0
-        fi
-    fi
-
-    profile_check_prereqs "$name"
-    echo
-
-    local -a base_args
-    mapfile -t base_args < <(_profile_compose_args "$name")
-
-    if ! with_spinner "Removing containers and volumes" \
-        docker compose "${base_args[@]}" down -v; then
-        die "Reset failed during teardown"
-    fi
-
-    local -a up_cmd=(docker compose "${base_args[@]}" up -d)
-    [ "${PROFILE_REFRESH_MODE[$name]}" = "build" ] && up_cmd+=(--build)
-
-    if ! with_spinner "Restarting" "${up_cmd[@]}"; then
-        die "Reset failed during restart"
-    fi
-
-    echo
-    p_ok "${title} stack reset complete"
-    p_muted "  Collections + indexes are recreated on boot by the module registry."
-}
-
-profile_status() {
-    local name=$1
-    PROFILE="$name"
-    local title
-    title=$(echo "${name:0:1}" | tr '[:lower:]' '[:upper:]')${name:1}
-    page_header "${title} · Status"
-    check_docker_running
-    echo
-
-    local -a base_args
-    mapfile -t base_args < <(_profile_compose_args "$name")
-
-    p_section "Containers"
-    docker compose "${base_args[@]}" ps
-    echo
-
-    p_section "Backend /health"
-    local backend_url="${PROFILE_BACKEND_URL[$name]:-http://localhost:3000}"
-    if command -v curl > /dev/null 2>&1; then
-        local health_json
-        if health_json=$(curl -s --max-time 3 "${backend_url}/health" 2>&1); then
-            if command -v jq > /dev/null 2>&1; then
-                echo "$health_json" | jq -r '"  status: \(.status)\n  checks:\n    mongodb: \(.checks.mongodb)\n    redis:   \(.checks.redis)"' 2>/dev/null || printf '  %s\n' "$health_json"
-            else
-                printf '  %s\n' "$health_json"
-            fi
-            if echo "$health_json" | grep -q '"status":"healthy"'; then
-                p_ok "Backend reports healthy"
-            else
-                p_warn "Backend reachable but not healthy"
-            fi
-        else
-            p_err "Backend unreachable at ${backend_url}"
-        fi
-    else
-        p_warn "curl not installed — skipping HTTP health check"
-    fi
-    echo
-
-    p_section "Resource usage"
-    local names
-    names=$(docker ps --filter "name=$name" --format '{{.Names}}' 2>/dev/null || true)
-    if [ -n "$names" ]; then
-        # shellcheck disable=SC2086
-        docker stats --no-stream \
-            --format "table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.NetIO}}" $names
-    else
-        p_warn "No ${name} containers running"
-    fi
-}
-
-# Generic info screen for SKU profiles.
-profile_info() {
-    local name=$1
-    PROFILE="$name"
-    local title
-    title=$(echo "${name:0:1}" | tr '[:lower:]' '[:upper:]')${name:1}
-    page_header "${title} · Profile Info"
-
-    if [ "${PROFILE_SOURCE_MODE[$name]:-no}" = "yes" ]; then
-        draw_box "${title} profile" \
-            "" \
-            "  ${PROFILE_DESCRIPTION[$name]:-}" \
-            "" \
-            "  ${c_warn}Hot-reload source mode (ENV=${PROFILE_SOURCE_ENV})${c_reset}" \
-            "  Source ${c_muted}$(basename "${PROFILE_COMPOSE[$name]}") — local bind-mount, AIR + Vite${c_reset}" \
-            "  Seed   ${c_muted}ORKESTRA_PROFILE=${name} (fresh module_configs doc only)${c_reset}" \
-            ""
-    else
-        draw_box "${title} profile" \
-            "" \
-            "  ${PROFILE_DESCRIPTION[$name]:-}" \
-            "" \
-            "  Image  ${c_info}ghcr.io/orkestra-cc/orkestra/backend:latest${c_reset}" \
-            "  Layer  ${c_muted}docker-compose.infra.yml + docker-compose.${name}.yml${c_reset}" \
-            ""
-    fi
-    echo
-
-    local backend_url="${PROFILE_BACKEND_URL[$name]:-http://localhost:3000}"
-    p_section "Access points"
-    printf '  Backend API    %s%s%s\n' "$c_info" "$backend_url" "$c_reset"
-    printf '  API docs       %s%s/docs%s\n' "$c_info" "$backend_url" "$c_reset"
-    printf '  OpenAPI JSON   %s%s/openapi.json%s\n' "$c_info" "$backend_url" "$c_reset"
-    printf '  Health         %s%s/health%s\n' "$c_info" "$backend_url" "$c_reset"
-    echo
-
-    if [ "${PROFILE_SOURCE_MODE[$name]:-no}" = "yes" ]; then
-        p_section "Rebuild dev image (only after Dockerfile.dev changes)"
-        printf '  %s./orkestra.sh profile %s deploy --pull%s   %s(code edits hot-reload automatically)%s\n' \
-            "$c_accent" "$name" "$c_reset" "$c_muted" "$c_reset"
-    else
-        p_section "Refresh image from GHCR"
-        printf '  %s./orkestra.sh profile %s deploy --pull%s\n' "$c_accent" "$name" "$c_reset"
-    fi
-    echo
-
-    p_section "Generate a dev token for first login"
-    printf '  %sORKESTRA_API_URL=%s ./scripts/devtoken.sh administrator%s\n' \
-        "$c_accent" "$backend_url" "$c_reset"
-    echo
-
-    p_section "Toggle addons"
-    p_muted "  Visit /admin/modules in the operator console to enable/disable addons."
-    p_muted "  Every addon is compiled in; runtime config decides what is on."
-}
-
 # ---------------------------------------------------------------------------
 # Full-stack profile operations
 # ---------------------------------------------------------------------------
 
 # Map detected ENV to compose file, branch, DB, URLs, env-chip color.
-# DEV_COMPOSE_VARIANT controls which dev compose file gets used:
-#   public     — docker-compose.dev-public.yml (default; public Alpine images)
-#   chainguard — docker-compose.dev.yml         (requires dhi.io subscription)
-# Set in docker/.env or as a shell env var. See README "Full development
-# stack" for the rationale of the public default.
+# ADR-0006: dev runs the single docker-compose.dev.yml on public Alpine
+# images (Chainguard via the GO_BASE build-arg on Dockerfile.dev-backend).
 set_env_config() {
     case "$ENV" in
         development)
             ENV_CHIP_COLOR=$c_success
             ENV_ICON="$ic_dot"
             BRANCH="any"
-            local variant="${DEV_COMPOSE_VARIANT:-public}"
-            case "$variant" in
-                public)     COMPOSE_FILE="$DOCKER_DIR/docker-compose.dev-public.yml" ;;
-                chainguard) COMPOSE_FILE="$DOCKER_DIR/docker-compose.dev.yml" ;;
-                *)
-                    p_warn "Unknown DEV_COMPOSE_VARIANT '$variant' — falling back to 'public'"
-                    COMPOSE_FILE="$DOCKER_DIR/docker-compose.dev-public.yml"
-                    variant="public"
-                    ;;
-            esac
-            ENV_DEV_VARIANT="$variant"
+            COMPOSE_FILE="$DOCKER_DIR/docker-compose.dev.yml"
             DB_NAME="orkestra_dev"
             FRONTEND_URL="http://localhost:8080"
             BACKEND_URL="http://localhost:3000"
@@ -1201,14 +756,9 @@ fullstack_init_env() {
 }
 
 show_deploy_summary() {
-    local variant_line=""
-    if [ "$ENV" = "development" ] && [ -n "${ENV_DEV_VARIANT:-}" ]; then
-        variant_line="  Images       ${ENV_DEV_VARIANT} ($(basename "$COMPOSE_FILE"))"
-    fi
     draw_box "Summary" \
         "" \
         "  Environment  ${ENV_CHIP_COLOR}${ic_dot}${c_reset} $(echo "$ENV" | tr '[:lower:]' '[:upper:]')" \
-        ${variant_line:+"$variant_line"} \
         "  Operation    Deploy" \
         "  Branch       ${BRANCH:-any}" \
         "  Scope        ${DEPLOY_SCOPE:-all}" \
@@ -1771,12 +1321,7 @@ list_all_services() {
             files+=("$OBSERVABILITY_COMPOSE")
             ;;
         *)
-            if is_sku_profile "$profile"; then
-                files+=("$DOCKER_DIR/docker-compose.infra.yml")
-                files+=("${PROFILE_COMPOSE[$profile]}")
-            else
-                return 1
-            fi
+            return 1
             ;;
     esac
 
@@ -1962,106 +1507,21 @@ logs_cli() {
 # TUI menus
 # ---------------------------------------------------------------------------
 
-show_profile_menu() {
+show_main_menu() {
     [ "$HAS_TTY" = true ] && clear 2>/dev/null || true
     draw_status_line
     draw_rule
     echo
     draw_box "Orkestra Stack Manager" \
         "" \
-        "  ${c_accent}1${c_reset} ${c_bold}Profile${c_reset}                 ${c_muted}(pull published image)${c_reset}" \
-        "     ${c_muted}minimal / full${c_reset}" \
-        "" \
-        "  ${c_accent}2${c_reset} ${c_bold}Full stack${c_reset}              ${c_muted}(dev / staging / production)${c_reset}" \
+        "  ${c_accent}1${c_reset} ${c_bold}Full stack${c_reset}              ${c_muted}(dev / staging / production)${c_reset}" \
         "     ${c_muted}ENV autodetected from docker/.env${c_reset}" \
         "" \
-        "  ${c_accent}3${c_reset} ${c_bold}Observability${c_reset}           ${c_muted}(Loki, Tempo, Prometheus, Grafana)${c_reset}" \
+        "  ${c_accent}2${c_reset} ${c_bold}Observability${c_reset}           ${c_muted}(Loki, Tempo, Prometheus, Grafana)${c_reset}" \
         "     ${c_muted}Self-hosted OTEL stack — runs alongside any app stack${c_reset}" \
         "" \
-        "  ${c_accent}4${c_reset} ${c_bold}Quit${c_reset}" \
+        "  ${c_accent}3${c_reset} ${c_bold}Quit${c_reset}" \
         ""
-}
-
-show_sku_profile_picker() {
-    page_header "Profile picker"
-    draw_box "Select profile" \
-        "" \
-        "  ${c_accent}1${c_reset} minimal   ${c_muted}core only (no addons pre-enabled)${c_reset}" \
-        "  ${c_accent}2${c_reset} full      ${c_muted}every non-dev addon pre-enabled${c_reset}" \
-        "  ${c_accent}3${c_reset} Back" \
-        ""
-    if [ -n "${PROFILE_SOURCE_ENV:-}" ]; then
-        echo
-        p_muted "  ENV=${PROFILE_SOURCE_ENV} detected → the profile runs the hot-reload source"
-        p_muted "  stack (local code, AIR + Vite), not the published GHCR image."
-    fi
-}
-
-show_profile_ops_menu() {
-    local name=$1
-    local title
-    title=$(echo "${name:0:1}" | tr '[:lower:]' '[:upper:]')${name:1}
-    page_header "${title} profile"
-    local deploy_hint="(up -d [--pull])"
-    [ "${PROFILE_SOURCE_MODE[$name]:-no}" = "yes" ] && deploy_hint="(hot-reload source · ENV=${PROFILE_SOURCE_ENV})"
-    draw_box "Select operation" \
-        "" \
-        "  ${c_accent}1${c_reset}  Deploy / Update    ${c_muted}${deploy_hint}${c_reset}" \
-        "  ${c_accent}2${c_reset}  Stop               ${c_muted}(keeps volumes)${c_reset}" \
-        "  ${c_accent}3${c_reset}  Reset              ${c_muted}(wipes volumes — destructive)${c_reset}" \
-        "  ${c_accent}4${c_reset}  Status             ${c_muted}(ps + /health + stats)${c_reset}" \
-        "  ${c_accent}5${c_reset}  Logs               ${c_muted}(service picker)${c_reset}" \
-        "  ${c_accent}6${c_reset}  Info               ${c_muted}(URLs + dev-token recipe)${c_reset}" \
-        "  ${c_accent}7${c_reset}  Back to profile picker" \
-        ""
-}
-
-profile_picker_loop() {
-    # Decide once, up front, whether the chosen profile pulls the GHCR image
-    # or runs the hot-reload source stack for the detected ENV (Option C).
-    apply_profile_source_mode
-    while true; do
-        show_sku_profile_picker
-        printf '%s%s Select profile [1-3]: %s' "$c_prompt" "$ic_arrow" "$c_reset"
-        local choice
-        read -r choice
-        case "$choice" in
-            1) profile_ops_menu_loop "minimal" ;;
-            2) profile_ops_menu_loop "full" ;;
-            3) PROFILE=""; return ;;
-            *) p_warn "Invalid selection"; sleep 1 ;;
-        esac
-    done
-}
-
-profile_ops_menu_loop() {
-    local name=$1
-    PROFILE="$name"
-    while true; do
-        show_profile_ops_menu "$name"
-        printf '%s%s Select operation [1-7]: %s' "$c_prompt" "$ic_arrow" "$c_reset"
-        local choice
-        read -r choice
-        case "$choice" in
-            1)
-                local refresh="no"
-                if [ "${PROFILE_SOURCE_MODE[$name]:-no}" = "yes" ]; then
-                    ask_yes_no "Rebuild the dev image? (no = start from cached image; code hot-reloads either way)" "n" && refresh="yes"
-                else
-                    ask_yes_no "Pull latest image from GHCR?" "n" && refresh="yes"
-                fi
-                profile_deploy "$name" "$refresh"
-                pause_for_return
-                ;;
-            2) profile_stop "$name"; pause_for_return ;;
-            3) profile_reset "$name" "ask"; pause_for_return ;;
-            4) profile_status "$name"; pause_for_return ;;
-            5) logs_interactive "$name"; pause_for_return ;;
-            6) profile_info "$name"; pause_for_return ;;
-            7) PROFILE=""; return ;;
-            *) p_warn "Invalid selection"; sleep 1 ;;
-        esac
-    done
 }
 
 show_fullstack_menu() {
@@ -2072,7 +1532,7 @@ show_fullstack_menu() {
         "  ${c_accent}2${c_reset}  Stop               ${c_muted}(app + optional infra)${c_reset}" \
         "  ${c_accent}3${c_reset}  Status             ${c_muted}(ps + health + stats)${c_reset}" \
         "  ${c_accent}4${c_reset}  Logs               ${c_muted}(service picker)${c_reset}" \
-        "  ${c_accent}5${c_reset}  Back to profile menu" \
+        "  ${c_accent}5${c_reset}  Back to main menu" \
         ""
 }
 
@@ -2086,7 +1546,7 @@ show_observability_menu() {
         "  ${c_accent}4${c_reset}  Status             ${c_muted}(ps + resource usage)${c_reset}" \
         "  ${c_accent}5${c_reset}  Logs               ${c_muted}(service picker)${c_reset}" \
         "  ${c_accent}6${c_reset}  Info               ${c_muted}(URLs + backend wiring recipe)${c_reset}" \
-        "  ${c_accent}7${c_reset}  Back to profile menu" \
+        "  ${c_accent}7${c_reset}  Back to main menu" \
         ""
 }
 
@@ -2142,29 +1602,13 @@ show_usage() {
 ${c_bold}${c_header}Orkestra — unified stack management${c_reset}
 
 ${c_bold}USAGE${c_reset}
-  ./orkestra.sh                    ${c_muted}# interactive TUI (profile menu)${c_reset}
+  ./orkestra.sh                    ${c_muted}# interactive TUI (main menu)${c_reset}
   ./orkestra.sh <command> [args]   ${c_muted}# non-interactive CLI${c_reset}
 
 ${c_bold}FIRST-TIME SETUP${c_reset}
   ${c_accent}init${c_reset} [--force] [--yes]            Scaffold docker/.env (random secrets) +
                                    RS256 JWT keys. Idempotent — preserves
                                    existing files unless --force.
-
-${c_bold}PROFILE${c_reset} ${c_muted}(pulls published image from GHCR)${c_reset}
-  ${c_accent}profile <name> deploy${c_reset} [--pull]    Start profile stack (--pull refreshes the image)
-  ${c_accent}profile <name> stop${c_reset}               Stop containers (volumes kept)
-  ${c_accent}profile <name> reset${c_reset} [--yes]      Wipe volumes and redeploy
-  ${c_accent}profile <name> status${c_reset}             Containers + /health + resources
-  ${c_accent}profile <name> info${c_reset}               URLs, image, dev-token recipe
-  ${c_accent}profile <name> logs${c_reset} <svc> [flags] View logs for a profile-stack service
-
-  Available <name>: minimal | full
-  Requires docker-compose.infra.yml to be running first.
-
-  ${c_muted}Under ENV=development the profile transparently runs the hot-reload${c_reset}
-  ${c_muted}SOURCE stack (local code, AIR + Vite) and exports ORKESTRA_PROFILE${c_reset}
-  ${c_muted}to seed the same addon set — instead of pulling the published image.${c_reset}
-  ${c_muted}staging and production keep the GHCR pull behavior.${c_reset}
 
 ${c_bold}FULL STACK${c_reset} ${c_muted}(uses ENV from docker/.env or ENV=... prefix)${c_reset}
   ${c_accent}deploy${c_reset} [--scope SCOPE] [--rebuild] [--yes]
@@ -2188,15 +1632,11 @@ ${c_bold}LOG FLAGS${c_reset}
   ${c_accent}-t${c_reset}, ${c_accent}--timestamps${c_reset}       Show timestamps
 
 ${c_bold}SHORTCUTS${c_reset}
-  ${c_muted}ENV=development ./orkestra.sh${c_reset}     Skip profile menu, open full-stack TUI
   ${c_accent}-h${c_reset}, ${c_accent}--help${c_reset}             Show this message
   ${c_accent}-v${c_reset}, ${c_accent}--version${c_reset}          Show version + capabilities
 
 ${c_bold}EXAMPLES${c_reset}
   ./orkestra.sh
-  ./orkestra.sh profile minimal deploy --pull
-  ./orkestra.sh profile full status
-  ./orkestra.sh profile full logs backend -f
   ENV=development ./orkestra.sh deploy --scope backend --rebuild --yes
   ./orkestra.sh logs orkestra-backend-dev -f
   ./orkestra.sh observability up
@@ -2227,54 +1667,6 @@ cli_dispatch() {
             # Delegate to scripts/init.sh. Forwards every flag so
             # `./orkestra.sh init --force` works the same as `make init-force`.
             exec bash "$SCRIPT_DIR/scripts/init.sh" "$@"
-            ;;
-
-        profile)
-            local name=${1:-}
-            [ -n "$name" ] && shift
-            [ -z "$name" ] && die "Usage: ./orkestra.sh profile <name> <subcmd>. Try --help."
-            if ! is_sku_profile "$name"; then
-                die "Unknown profile: $name. Valid: $(sku_profile_list)"
-            fi
-            PROFILE="$name"
-            # Route to the hot-reload source stack when ENV is development/staging
-            # (Option C); otherwise the profile pulls the published GHCR image.
-            apply_profile_source_mode
-            local subcmd=${1:-}
-            [ -n "$subcmd" ] && shift
-            case "$subcmd" in
-                deploy)
-                    local refresh="no"
-                    while [ $# -gt 0 ]; do
-                        case "$1" in
-                            --pull) refresh="yes"; shift ;;
-                            *) die "Unknown flag: $1" ;;
-                        esac
-                    done
-                    profile_deploy "$name" "$refresh"
-                    ;;
-                stop) profile_stop "$name" ;;
-                reset)
-                    local confirm="ask"
-                    while [ $# -gt 0 ]; do
-                        case "$1" in
-                            --yes | -y) confirm="yes"; shift ;;
-                            *) die "Unknown flag: $1" ;;
-                        esac
-                    done
-                    profile_reset "$name" "$confirm"
-                    ;;
-                status) profile_status "$name" ;;
-                info) profile_info "$name" ;;
-                logs)
-                    local service=${1:-}
-                    [ -n "$service" ] && shift
-                    [ -z "$service" ] && die "Usage: ./orkestra.sh profile $name logs <service> [-f] [-n N] [-t]"
-                    logs_cli "$name" "$service" "$@"
-                    ;;
-                "") die "Missing subcommand. Try --help." ;;
-                *) die "Unknown subcommand: $subcmd" ;;
-            esac
             ;;
 
         deploy)
@@ -2370,24 +1762,15 @@ main() {
         exit 0
     fi
 
-    # Always show the top-level menu. We used to auto-route into the
-    # full-stack loop when $ENV was set (from shell or docker/.env), but that
-    # silently hid the profile menu — so users who had deployed e.g. the
-    # `full` profile would be shown the staging service list with everything
-    # marked "stopped" (since each compose file declares its own `name:`,
-    # the staging-project lookup misses orkestra-full's containers). Force
-    # the menu so the user can pick the profile that matches their running
-    # stack.
     while true; do
-        show_profile_menu
-        printf '%s%s Select profile [1-4]: %s' "$c_prompt" "$ic_arrow" "$c_reset"
+        show_main_menu
+        printf '%s%s Select option [1-3]: %s' "$c_prompt" "$ic_arrow" "$c_reset"
         local choice
         read -r choice
         case "$choice" in
-            1) profile_picker_loop ;;
-            2) fullstack_menu_loop ;;
-            3) observability_menu_loop ;;
-            4)
+            1) fullstack_menu_loop ;;
+            2) observability_menu_loop ;;
+            3)
                 echo
                 printf '%s%s Goodbye!%s\n' "$c_success" "$ic_ok" "$c_reset"
                 exit 0

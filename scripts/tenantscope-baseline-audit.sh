@@ -35,7 +35,7 @@ echo "-------------------------------"
 grep -v '^\s*#\|^\s*$' "$BASELINE" \
     | awk -F: '{
         split($1, a, "/");
-        # path is e.g. internal/addons/billing/repository/invoice_repository.go
+        # path is e.g. internal/core/auth/repository/auth_session_repository.go
         # → group by first 3-4 segments to keep module-level granularity.
         pkg = a[1] "/" a[2] "/" a[3];
         if (a[4] != "") pkg = pkg "/" a[4];
