@@ -145,10 +145,6 @@ services:
       RAG_CHUNK_OVERLAP: ${RAG_CHUNK_OVERLAP:-50}
       RAG_DEFAULT_TOP_K: ${RAG_DEFAULT_TOP_K:-10}
 
-      # Module infrastructure containers (hindsight etc.). Disable when
-      # running under Kubernetes or when infra is managed externally.
-      CONTAINER_CONTROL_ENABLED: ${CONTAINER_CONTROL_ENABLED:-true}
-
       # Object storage (RustFS — S3-compatible). Backs avatar uploads.
       # Defaults below target the rustfs service in docker-compose.infra.yml.
       # Swap STORAGE_ENDPOINT to an AWS S3 (and set STORAGE_FORCE_PATH_STYLE=false)
@@ -161,16 +157,6 @@ services:
       STORAGE_FORCE_PATH_STYLE: ${STORAGE_FORCE_PATH_STYLE:-true}
       STORAGE_ENSURE_BUCKET: ${STORAGE_ENSURE_BUCKET:-true}
 
-      # Marketing import spool — async-import payloads persist here between
-      # Enqueue and worker pickup. The schema default
-      # (/var/lib/orkestra/marketing/spool) is not writable by the
-      # non-root container user; override to a path we own + back with a
-      # named volume so spool survives restarts. First-boot seed only —
-      # for an existing install change `importSpoolDir` at
-      # /admin/modules/marketing instead (module_configs is authoritative
-      # after the first boot).
-      MARKETING_IMPORT_SPOOL_DIR: /app/marketing-spool
-
       # Module config (OAuth, OpenAPI billing/company tokens, Stripe keys,
       # SMTP, Hindsight URL, Memgraph URI, Gotenberg URL, AI provider keys,
       # per-module enable flags) is owned by ConfigService and edited at
@@ -182,24 +168,8 @@ services:
       - ./keys:/app/keys
       - orkestra-backend-logs-staging:/app/logs
       - orkestra-backend-uploads-staging:/app/uploads
-      # Marketing import spool — bind mount instead of named volume so
-      # the host dir's ownership (uid 1000) carries through. With
-      # userns_mode: "host" the container's uid 1000 IS host uid 1000,
-      # so the worker writes without a one-shot chown. Named volumes
-      # get created with root ownership (uid 100000 under the daemon's
-      # userns-remap) and would block the worker.
-      - ./marketing-spool-staging:/app/marketing-spool
-      # Enables the agents module to manage the orkestra-hindsight container
-      # lifecycle. For stricter isolation in staging, front the socket with
-      # tecnativa/docker-socket-proxy exposing only containers endpoints.
-      - /var/run/docker.sock:/var/run/docker.sock
-    # Join the host Docker group so the mounted socket is usable. Override
-    # DOCKER_GID in the staging env file if the host uses a different gid.
-    group_add:
-      - "${DOCKER_GID:-1001}"
-    # Required when the Docker daemon runs with userns-remap: without it,
-    # group_add maps to a remapped GID that doesn't match the host docker
-    # group, and the mounted socket stays unreadable.
+    # Required when the Docker daemon runs with userns-remap so the
+    # bind-mounted ../backend source keeps host uid 1000 ownership.
     userns_mode: "host"
     networks:
       - orkestra-network

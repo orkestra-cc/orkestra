@@ -88,28 +88,15 @@ services:
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT}
       OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-orkestra-backend}
 
-      # Module infrastructure containers (hindsight etc.). Set to "false" on
-      # Kubernetes deployments where the orchestrator owns container lifecycle.
-      CONTAINER_CONTROL_ENABLED: ${CONTAINER_CONTROL_ENABLED:-true}
-
-      # Module config (OAuth, OpenAPI billing/company tokens, Stripe keys,
-      # SMTP, Hindsight URL, Memgraph URI, Gotenberg URL, AI provider keys,
-      # per-module enable flags) is owned by ConfigService and edited at
-      # /admin/modules. The module ConfigSchema EnvVar fields seed those
-      # values from the host environment ONLY on first boot of a brand-new
-      # install — after that the module_configs document is authoritative.
+      # Module config (OAuth, SMTP, AI provider keys, per-module enable flags)
+      # is owned by ConfigService and edited at /admin/modules. The module
+      # ConfigSchema EnvVar fields seed those values from the host environment
+      # ONLY on first boot of a brand-new install — after that the
+      # module_configs document is authoritative.
     volumes:
       - ./backend/uploads:/app/uploads
       - ./backend/logs:/app/logs
       - ./keys:/app/keys:ro
-      # Docker socket mount enables runtime container control. In production
-      # Docker Swarm, strongly consider fronting this with
-      # tecnativa/docker-socket-proxy and restricting to container endpoints.
-      - /var/run/docker.sock:/var/run/docker.sock
-    # Join the host Docker group so the mounted socket is usable. Override
-    # DOCKER_GID in the production env file if the host uses a different gid.
-    group_add:
-      - "${DOCKER_GID:-1001}"
     networks:
       - orkestra-network
     # Note: mongodb and redis are in docker-compose.infra.yml

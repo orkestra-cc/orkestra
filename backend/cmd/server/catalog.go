@@ -42,13 +42,11 @@ func coreModules(cfg *config.Config) []func() module.Module {
 	}
 }
 
-// optionalModules is the catalog of addons the binary can boot. It is
-// populated at init time by the per-addon catalog_<name>.go files. Every
-// addon compiles into every binary; runtime enable/disable is owned by
-// the module_configs collection and surfaced at /admin/modules. To run a
-// lean deployment, set ORKESTRA_PROFILE=minimal on first boot so the
-// seeder leaves all addons disabled; ORKESTRA_PROFILE=full pre-enables
-// every non-dev addon.
+// optionalModules is the catalog of optional modules the binary can boot.
+// ADR-0006 collapsed Orkestra to a core-only base, so the catalog ships
+// empty — a fork registers its own optional modules here via per-module
+// catalog_<name>.go files (one init() each), and runtime enable/disable is
+// owned by the module_configs collection surfaced at /admin/modules.
 var optionalModules = map[string]func() module.Module{}
 
 // allOptionalModuleNames returns the names of all optional modules.

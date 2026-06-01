@@ -1,0 +1,20 @@
+# Dev backend image for docker-compose.dev.yml (ADR-0006: the single dev
+# stack standardizes on public Alpine images — no registry auth needed).
+#
+# Extends public golang:alpine with the tools AIR needs for incremental
+# rebuilds: git (module fetches) and build-base (cgo). AIR itself is
+# pre-installed so the container can start as a non-root user (uid 1000)
+# without needing apk at runtime (apk add requires root).
+#
+# A fork with a Chainguard subscription can override the base image:
+#   docker compose -f docker-compose.dev.yml build \
+#     --build-arg GO_BASE=dhi.io/golang:1 orkestra-backend
+# (a non-Alpine base may need the apk line below adapted).
+ARG GO_BASE=golang:1.25.10-alpine
+FROM ${GO_BASE}
+
+RUN apk add --no-cache git build-base \
+ && GOBIN=/usr/local/bin go install github.com/air-verse/air@latest \
+ && rm -rf /root/.cache /go/pkg
+
+WORKDIR /app
