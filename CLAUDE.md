@@ -1,19 +1,18 @@
 # ORKESTRA
 
-**Orkestra is the SaaS plumbing every product rebuilds — users, auth, RBAC, multi-tenancy, billing — already done.** Seven core modules (`user`, `auth`, `authz`, `tenant`, `notification`, `navigation`, `logging`) supply the baseline on day one; a catalog of optional addons (invoicing/SDI, payments, subscriptions, RAG, AI agents, documents, identity, compliance, ...) sits on top and is toggled per internal tenant at `/admin/modules`. Orkestra manages *who* can consume those addons across a **two-tier tenancy model**.
+**Orkestra is the SaaS plumbing every product rebuilds — users, auth, RBAC, multi-tenancy, navigation, logging — already done.** Seven core modules (`user`, `auth`, `authz`, `tenant`, `notification`, `navigation`, `logging`) supply the baseline on day one. Per [ADR-0006](docs/adr/0006-collapse-to-core-only-base.md) Orkestra is a **core-only base**: it ships *no* addons. A fork that needs invoicing, payments, subscriptions, AI, marketing, etc. builds those verticals on top, against the in-tree SDK contract, using the same `Module` extension seam the core itself is built on.
 
 ## Tenancy Model
 
-Orkestra operates on **two distinct tiers of tenants**. Understanding this distinction is load-bearing for every design decision — data isolation, RBAC scope, billing, and module activation all depend on which tier a request is acting in.
+Orkestra operates on **two distinct tiers of tenants**. Understanding this distinction is load-bearing for every design decision — data isolation, RBAC scope, and module activation all depend on which tier a request is acting in.
 
 ### Tier 1 — Internal tenants (operator side)
 
 The companies that **run Orkestra** (one or more of "our" organizations). For each internal tenant the platform manages:
 
 - Internal users, roles, and RBAC
-- The internal company's own electronic invoicing (FatturaPA/SDI), billing, documents
-- Which modules/addons are enabled for that tenant
-- Operational admin (module config, audit logs, compliance evidence)
+- Which optional modules a fork has added are enabled for that tenant
+- Operational admin (module config, audit logs)
 
 ### Tier 2 — External client tenants (customer side)
 
@@ -21,23 +20,20 @@ The companies that **run Orkestra** (one or more of "our" organizations). For ea
 
 - Client registration and onboarding
 - The client's own users, roles, sub-tenants
-- **Subscriptions to the services Orkestra exposes** (via the `subscriptions` + `payments` modules — Stripe-backed recurring billing)
-- Usage of the subscribed services (AI agents, RAG, document generation, etc.) scoped to the client's data
 
-The `subscriptions` and `payments` modules are **not ordinary feature addons** — they are the mechanism by which Tier-2 clients consume Tier-1-hosted services. Treat them as architecturally load-bearing.
+> **ADR-0006 (D1):** the two-tier **data model** survives intact in the `tenant` module (`TenantKind = internal | external`, orgs + memberships). The **mechanism** by which Tier-2 clients *consume* Tier-1 services (catalog → subscribe → Stripe → entitlement) left with the `subscriptions`/`payments` addons. A fork that sells services to external clients rebuilds that layer.
 
 ### Implications for contributors
 
 - Every new endpoint must declare **which tier it serves** (internal operator, external client, or both) and enforce org-scoped RBAC accordingly.
 - Every new collection/table must carry a tenant scope (internal org ID *or* external client org ID) and be indexed/queried with that scope — never cross-tenant by default.
-- Module enable/disable is **per internal tenant**, but service consumption is gated **per external client subscription**. Do not conflate the two.
 - When in doubt about which tier owns a resource, ask before implementing.
 
 ## Tech Stack
 
 | Layer              | Technology                                                         |
 | ------------------ | ------------------------------------------------------------------ |
-| **Backend**        | Go 1.25.1, Huma v2 (OpenAPI-first), 7 core + 14 optional self-contained modules |
+| **Backend**        | Go 1.25.1, Huma v2 (OpenAPI-first), 7 core modules, single Go module |
 | **Frontend**       | React 19, TypeScript 5.9, Vite 7, Redux Toolkit, TanStack Table    |
 | **Mobile**         | Flutter 3.35+, Dart, Riverpod                                      |
 | **Database**       | MongoDB 8.0, Redis 8.2                                             |
@@ -46,7 +42,7 @@ The `subscriptions` and `payments` modules are **not ordinary feature addons** �
 
 ## Architecture
 
-**Plugin architecture**: 7 core modules (user, notification, tenant, authz, auth, navigation, logging) always load. All other modules are **optional** — every optional module is instantiated and initialized at boot, and operators flip individual modules on/off at `/admin/modules` (state persisted in the `module_configs` MongoDB collection). The registry resolves initialization order automatically from each module's `Dependencies()` declaration.
+**Plugin architecture, core-only.** The 7 core modules are themselves implementations of the `Module` contract. The module system that hosts them is **kept by design**: a fork adds its own optional modules through the same clean `Module` + `catalog_<name>.go` + `iface` path the core uses. The `optionalModules` catalog ships **empty** — there is nothing to toggle out of the box, but the `/admin/modules` surface remains for forks that add their own.
 
 **Key components** (`backend/pkg/sdk/module/`):
 
@@ -54,76 +50,21 @@ The `subscriptions` and `payments` modules are **not ordinary feature addons** �
 - **ModuleRegistry** — `RegisterAll()` with topological sort from `Dependencies()`; tracks failures, gates routes for disabled modules
 - **ServiceRegistry** — typed key-value store for cross-module service sharing (`GetTyped[T]`, `MustGetTyped[T]`)
 - **ConfigService** — DB-backed (MongoDB) + Redis-cached (30s TTL) module configuration with AES-256-GCM encrypted secrets
-- **shared/iface** — consumer-facing interfaces (UserProvider, NotificationSender, PDFProvider, GraphProvider, AIModelProvider, RAGQueryProvider, JWTProvider) that prevent direct cross-module imports
-- **RoleMiddleware** — interface (`module.go`) for RBAC route protection, satisfied by both `AuthMiddleware` (monolith) and `JWTValidator` (AI service)
-- **Module catalog** (`cmd/server/catalog.go` + per-addon `catalog_<name>.go` files) — maps module names to factory functions. Every addon is compiled into every binary and instantiated at boot; runtime config decides what's *enabled*. See [`backend/CLAUDE.md`](backend/CLAUDE.md) for the registry mechanics.
+- **pkg/sdk/iface** — consumer-facing interfaces (UserProvider, NotificationSender, TenantProvider, AuthzProvider, JWTProvider, AuditSink, KMSProvider, …) that prevent direct cross-module imports. The `AuditSink`/`KMSProvider` setter seams survive on the core services (nil by default) so a fork's audit/compliance module can wire them the way the removed `compliance` addon did.
+- **RoleMiddleware** — interface (`module.go`) for RBAC route protection, satisfied by `AuthMiddleware`
+- **Module catalog** (`cmd/server/catalog.go` + per-module `catalog_<name>.go` files) — maps module names to factory functions. A fork drops a `catalog_<name>.go` with one `init()` to register its module. See [`backend/CLAUDE.md`](backend/CLAUDE.md) for the registry mechanics.
+
+`pkg/sdk` is an **in-tree package** of the single backend Go module — there is no separate `go.mod`, no `go.work`, no `replace`, and nothing published to the Go proxy (ADR-0006 D2 reverted the multi-repo SDK split).
 
 **Admin API**: `GET/PATCH /v1/admin/modules`, `GET /v1/admin/modules/health`, `GET/PATCH /v1/admin/modules/{name}/environments/{env}`, `PUT /v1/admin/modules/{name}/active-environment` — runtime enable/disable (hot-reload), config updates, per-environment config profiles (sandbox/production), health checks. Frontend at `/admin/modules` (list) and `/admin/modules/:name` (detail).
 
 ### Module Loading
 
-A single binary contains every addon. All optional modules are **instantiated, initialized, and routed** at boot regardless of enabled state — routes for disabled modules are gated by `ModuleGate` middleware (returns 503), and only enabled modules have their `Start()` method called (background jobs, polling, etc.).
+A fork's optional modules are **instantiated, initialized, and routed** at boot regardless of enabled state — routes for disabled modules are gated by `ModuleGate` middleware (returns 503), and only enabled modules have their `Start()` method called (background jobs, polling, etc.).
 
 **Enabling/disabling at runtime:** The admin API (`PATCH /v1/admin/modules/{name}`) calls `StartModule()`/`StopModule()` on the registry. The module starts or stops immediately — no restart required. Dependency constraints are enforced: you cannot disable a module that another running module depends on (returns 409).
 
-**Which modules start at boot** is determined by the `module_configs` collection in MongoDB (set via admin UI). On first boot of a brand-new install the document is seeded from each module's `ConfigSchema().EnvVar`; if `ORKESTRA_PROFILE` is set (typically by `docker-compose.<profile>.yml`), the seeder pre-enables addons accordingly:
-
-- `ORKESTRA_PROFILE=minimal` — no addons pre-enabled. Operator turns each one on at `/admin/modules`.
-- `ORKESTRA_PROFILE=full` — every non-core, non-dev addon pre-enabled.
-
-Subsequent boots ignore `ORKESTRA_PROFILE` — admin-set values are authoritative. See `docker/CLAUDE.md` for the per-bucket split.
-
-The registry topologically sorts modules by `Dependencies()` so initialization order is always correct.
-
-### AI Service Sidecar (Optional Split)
-
-The AI module chain (graph, aimodels, rag, agents) can optionally run as a **standalone sidecar service** (`cmd/ai-service/`) separate from the monolith. Controlled by the `AI_SERVICE_URL` env var on the monolith:
-
-- **Empty (default)**: All modules run in-process in the monolith. No change from baseline.
-- **Set** (e.g., `http://orkestra-ai:3100`): The monolith skips registering graph/aimodels/rag/agents modules and instead registers `RemoteAIModelProvider` + `RemoteRAGQueryProvider` (HTTP clients in `shared/remote/`) under the same `ServiceRegistry` keys. Consumer modules like `sales` use the same `GetTyped` pattern — zero code changes.
-
-**How the split works:**
-
-```
-┌─ Monolith (port 3000) ──────────────┐   ┌─ AI Service (port 3100) ──────────┐
-│ auth, user, navigation, billing,     │   │ graph, aimodels, rag, agents      │
-│ documents, company, sales, dev       │   │                                    │
-│                                      │   │ Same Go module (backend/),         │
-│ sales → RemoteAIModelProvider ───────┼──→│ separate binary (cmd/ai-service/) │
-│         (HTTP to AI service)         │   │                                    │
-│                                      │   │ JWT validated with public key only │
-│                                      │   │ (JWTValidator, no auth module dep) │
-└──────────────────────────────────────┘   └────────────────────────────────────┘
-```
-
-**Key files:**
-
-| File | Purpose |
-|------|---------|
-| `backend/cmd/ai-service/main.go` | AI service entry point — boots 4 modules with `JWTValidator` |
-| `backend/internal/shared/middleware/jwt_validator.go` | Lightweight RS256 JWT validation (public key only) |
-| `backend/internal/shared/remote/` | `RemoteAIModelProvider`, `RemoteRAGQueryProvider`, remote `EmbeddingProvider`/`LLMProvider` |
-| `backend/internal/addons/aimodels/internal_routes.go` | Internal API: `/v1/internal/ai/embed`, `/complete`, `/embedding-info`, `/llm-info` |
-| `backend/internal/addons/rag/internal_routes.go` | Internal API: `/v1/internal/rag/query` (with `documentUUIDs` scoping) |
-| `backend/Dockerfile.ai-service` | Multi-stage build for AI service binary |
-| `docker/docker-compose.ai-sidecar.yml` | Dev container for AI service |
-
-**Running split mode (dev):**
-
-```bash
-cd docker
-docker compose -f docker-compose.infra.yml up -d
-AI_SERVICE_URL=http://orkestra-ai-dev:3100 docker compose -f docker-compose.dev.yml --env-file .env up -d
-docker compose -f docker-compose.ai-sidecar.yml --env-file .env up -d
-```
-
-**Design constraints for the split:**
-
-- Both binaries live in the **same Go module** (`backend/`) — no code duplication, shared `internal/` packages
-- The AI service uses `JWTValidator` (public key only) instead of `AuthMiddleware` (which depends on the auth module). Both satisfy `module.RoleMiddleware`
-- Internal API endpoints (`/v1/internal/*`) are the service-to-service contract. They serialize the `iface.AIModelProvider` and `iface.RAGQueryProvider` method calls as HTTP request/response
-- Streaming (`/v1/rag/query/stream`) goes **directly** from frontend → AI service, never proxied through the monolith
-- The feature flag is fully backward compatible and K8s-ready (service DNS, Ingress routing, separate `Deployment` with independent scaling)
+**Which modules start at boot** is determined by the `module_configs` collection in MongoDB (set via admin UI). On first boot of a brand-new install the document is seeded from each module's `ConfigSchema().EnvVar` and the module's own `EnabledByDefault`. The registry topologically sorts modules by `Dependencies()` so initialization order is always correct.
 
 ## Module Map
 
@@ -143,30 +84,13 @@ docker compose -f docker-compose.ai-sidecar.yml --env-file .env up -d
 
 Load order (topologically sorted by `Dependencies()`): `user` → `notification` → `tenant` → `authz` → `auth` → `navigation` → `logging`. Auth depends on notification (optional at runtime) so it can deliver verification and password-reset emails; `logging` has no declared dependencies.
 
-**Optional (toggled at `/admin/modules`; all instantiated at boot):**
-
-| Module         | Purpose                                                                                                      | Depends on       |
-| -------------- | ------------------------------------------------------------------------------------------------------------ | ---------------- |
-| **billing**    | Italian electronic invoicing (FatturaPA/SDI) — [docs](backend/internal/addons/billing/CLAUDE.md)                    | documents        |
-| **documents**  | PDF generation via Gotenberg — [docs](backend/internal/addons/documents/CLAUDE.md)                                  | —                |
-| **company**    | Italian business registry lookup (OpenAPI) — [docs](backend/internal/addons/company/CLAUDE.md)                      | —                |
-| **graph**      | Memgraph knowledge graph — [docs](backend/internal/addons/graph/CLAUDE.md)                                          | —                |
-| **aimodels**   | Multi-provider AI model management (Ollama, OpenAI, Anthropic) — [docs](backend/internal/addons/aimodels/CLAUDE.md) | —                |
-| **rag**        | Document ingestion + retrieval-augmented generation — [docs](backend/internal/addons/rag/CLAUDE.md)                 | graph, aimodels  |
-| **agents**     | Hindsight AI agents with RAG context — [docs](backend/internal/addons/agents/CLAUDE.md)                             | auth, aimodels   |
-| **sales**      | AI-driven prospect analysis and scoring                                                                      | aimodels         |
-| **subscriptions** | Recurring AI-services catalog, clients, subscriptions, activity log — [docs](backend/internal/addons/subscriptions/CLAUDE.md) | —                |
-| **payments**   | Stripe gateway — charges, refunds, webhooks — [docs](backend/internal/addons/payments/CLAUDE.md)                    | —                |
-| **compliance** | Platform audit log + (future) GDPR DSR pipelines and SOC2 evidence automation                                | —                |
-| **identity**   | Per-tenant BYO OpenID Connect login + SCIM 2.0 provisioning stubs                                            | tenant, authz    |
-| **marketing**  | Contact base (organizations, persons, memberships, tags, custom-field schemas) + CSV importer with email/VAT dedup — [docs](backend/internal/addons/marketing/CLAUDE.md). Phase 1 of the [Phase-1–5 roadmap](docs/plans/marketing-addon/) | —                |
-| **dev**        | Dev token generation (disabled in production)                                                                | auth             |
+**Optional (added by a fork; the base ships none):** `internal/addons/` does not exist in the base. A fork that adds a vertical creates `internal/addons/<name>/` implementing the `Module` interface and a `cmd/server/catalog_<name>.go` to register it — see [`backend/CLAUDE.md`](backend/CLAUDE.md) and the docs-site [addon-authoring guide](docs/site/sdk/build-your-first-addon.mdx). The archived `orkestra-cc/orkestra-addon-*` repos preserve the snapshots of the verticals removed by ADR-0006 (billing/SDI, documents, company, graph, aimodels, rag, agents, sales, subscriptions, payments, compliance, identity, marketing, dev) for forks to crib from.
 
 ### Other Modules
 
-- **[`/backend/pkg/sdk/`](backend/pkg/sdk/CLAUDE.md)** — The public SDK contract module (`github.com/orkestra-cc/orkestra-sdk`) every other module depends on. See also [docs/onboarding/orkestra-sdk.md](docs/onboarding/orkestra-sdk.md) for the new-developer walkthrough.
+- **[`/backend/pkg/sdk/`](backend/pkg/sdk/CLAUDE.md)** — The SDK contract package every module depends on (in-tree, part of the single backend Go module). See also [docs/onboarding/orkestra-sdk.md](docs/onboarding/orkestra-sdk.md) for the new-developer walkthrough.
 - **[`/frontend-admin/`](frontend-admin/CLAUDE.md)** — React 19 operator console / Tier-1 admin dashboard (port 8080, host `console.localhost`)
-- **[`/frontend-client/`](frontend-client/CLAUDE.md)** — React 19 Tier-2 client demo SPA — consumes the ADR-0003 client API surface (port 8081, host `client.localhost`)
+- **[`/frontend-client/`](frontend-client/CLAUDE.md)** — React 19 Tier-2 client demo SPA — a thin login + account + billing-identity skeleton (the subscribe/transactions/payment flows left with the addons)
 - **[`/mobile/`](mobile/CLAUDE.md)** — Flutter cross-platform app
 - **[`/docker/`](docker/CLAUDE.md)** — Docker Compose configs (dev/staging/prod/infra)
 - **[`/docs/Authentication_flow.md`](docs/Authentication_flow.md)** — Email/password + OAuth 2.1 + RBAC details
@@ -174,18 +98,16 @@ Load order (topologically sorted by `Dependencies()`): `user` → `notification`
 
 ## Quick Start
 
-### Runtime profile (recommended for first boot)
-
-Pull the pre-built image from GHCR and layer it on top of `docker-compose.infra.yml` (MongoDB + Redis). One image (`backend:latest`) ships every addon; two compose files differ only by the `ORKESTRA_PROFILE` env var that seeds first-boot addon enablement:
-
-- `docker-compose.minimal.yml` — core only, no addons pre-enabled
-- `docker-compose.full.yml` — every non-dev addon pre-enabled
-
 ```bash
+# From project root — interactive TUI (pick "Full stack")
+./orkestra.sh
+
+# Or manually — infra (MongoDB + Redis + RustFS) then the dev app stack
+# (public Alpine images, AIR + Vite hot reload):
 cd docker
-docker network create orkestra-network                              # first time only
-docker compose -f docker-compose.infra.yml up -d                    # mongodb + redis
-docker compose -f docker-compose.minimal.yml --env-file .env up -d  # or full
+docker network create orkestra-network                  # first time only
+docker compose -f docker-compose.infra.yml up -d
+docker compose -f docker-compose.dev.yml --env-file .env up -d
 
 # Backend API: http://localhost:3000
 # API Docs:    http://localhost:3000/docs
@@ -194,26 +116,7 @@ docker compose -f docker-compose.minimal.yml --env-file .env up -d  # or full
 ORKESTRA_API_URL=http://localhost:3000 ./scripts/devtoken.sh administrator
 ```
 
-Every optional module is instantiated and initialized at boot regardless of enabled state. To enable additional addons, log in and toggle them at `/admin/modules` — the registry hot-reloads without a restart and auto-resolves dependencies. The notification module boots in `noop` mode by default — verification and password-reset emails are logged to the backend stdout rather than delivered. To send real mail, configure SMTP at `/admin/modules` after first login.
-
-### Full development stack
-
-Adds Gotenberg (PDF), optionally Memgraph/Hindsight, and uses the Chainguard hardened images with AIR hot reload for Go development. Requires access to the `dhi.io` registry.
-
-```bash
-# From project root — interactive TUI (pick "Full stack" from the profile menu)
-./orkestra.sh
-
-# Or manually:
-cd docker
-docker compose -f docker-compose.infra.yml up -d        # MongoDB, Redis, Gotenberg, Hindsight
-docker compose -f docker-compose.dev-public.yml up -d   # Backend (AIR) + Frontend (Vite) on public Alpine images
-# For Chainguard hardened images (requires dhi.io subscription) use docker-compose.dev.yml instead.
-
-# Optional: run AI modules as a separate service
-docker compose -f docker-compose.ai-sidecar.yml up -d  # AI Service (port 3100)
-# Set AI_SERVICE_URL=http://orkestra-ai-dev:3100 on the backend to enable split mode
-```
+One infra base + one app file per environment (`docker-compose.{dev,staging,prod}.yml`), plus an opt-in `docker-compose.observability.yml` overlay (ADR-0005). The dev backend builds `docker/Dockerfile.dev-backend` (golang:alpine, AIR pre-baked; override the base via the `GO_BASE` build-arg for a Chainguard image). The notification module boots in `noop` mode by default — verification and password-reset emails are logged to the backend stdout rather than delivered. To send real mail, configure SMTP at `/admin/modules` after first login.
 
 ## Assistant Rules
 
@@ -221,7 +124,7 @@ docker compose -f docker-compose.ai-sidecar.yml up -d  # AI Service (port 3100)
 
 - **Read the module's CLAUDE.md** before modifying any module — each has specific patterns and constraints
 - **Use the module system** when adding new functionality: implement the `Module` interface, add a `cmd/server/catalog_<name>.go` file that registers the factory in `optionalModules` via `init()`, declare collections/nav/config via the module methods
-- **Use `shared/iface`** for cross-module dependencies — never import another module's `services/` or `repository/` package from a `module.go` wiring file
+- **Use `pkg/sdk/iface`** for cross-module dependencies — never import another module's `services/` or `repository/` package from a `module.go` wiring file
 - **Validate and sanitize** all user inputs; implement RBAC on every endpoint (ask for required permissions)
 - **Follow the auth patterns** in [Authentication_flow.md](docs/Authentication_flow.md) for any auth-related changes
 
@@ -229,8 +132,9 @@ docker compose -f docker-compose.ai-sidecar.yml up -d  # AI Service (port 3100)
 
 - **Never start servers manually** — backend and frontend run in Docker with hot reload (AIR + Vite)
 - **Never expose secrets** in logs, API responses, or Git — module secrets use AES-256-GCM encryption via ConfigService
-- **Never import cross-module** service/repository packages in `module.go` — use `shared/iface` interfaces + `ServiceRegistry` typed getters instead
+- **Never import cross-module** service/repository packages in `module.go` — use `pkg/sdk/iface` interfaces + `ServiceRegistry` typed getters instead
 - **Never bypass RBAC** — all admin endpoints require `administrator` role; all protected endpoints require auth middleware
+- **Never re-introduce a satellite `go.mod` / `replace` / `go.work`** (ADR-0006 forbidden pattern). The base is a single Go module; a fork's addons live in-tree.
 
 ### WSL2 Development Caveat
 
