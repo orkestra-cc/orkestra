@@ -9,7 +9,6 @@
 #   - mongodb        (mongorestore --drop --gzip --archive)
 #   - redis          (stop redis, replace dump.rdb, start redis)
 #   - rustfs / S3    (aws s3 sync FROM bundle TO bucket)
-#   - memgraph       (replace volume contents)
 #   - secrets        (write docker/.env and docker/keys/* — prompts for overwrite)
 #
 # Run without arguments for the TUI (lists available backups), or pass a
@@ -38,11 +37,9 @@ BACKUPS_DIR="$REPO_ROOT/backups"
 MONGO_CONTAINER="orkestra-mongodb"
 REDIS_CONTAINER="orkestra-redis"
 RUSTFS_CONTAINER="orkestra-rustfs"
-MEMGRAPH_CONTAINER="orkestra-memgraph"
-MEMGRAPH_VOLUME="orkestra-memgraph-data"
 NETWORK="orkestra-network"
 
-ALL_COMPONENTS=(mongodb redis rustfs memgraph secrets)
+ALL_COMPONENTS=(mongodb redis rustfs secrets)
 
 # ---------------------------------------------------------------------------
 # Output helpers
@@ -459,40 +456,6 @@ restore_rustfs() {
   done
 }
 
-restore_memgraph() {
-  local archive="$STAGE/memgraph/memgraph-volume.tar.gz"
-  if [ ! -f "$archive" ]; then
-    err "memgraph: volume tarball missing at $archive"; return 1
-  fi
-  if [ "$DRY_RUN" = "yes" ]; then
-    step "memgraph: [dry-run] would replace contents of volume $MEMGRAPH_VOLUME"
-    muted "archive size: $(du -h "$archive" | cut -f1)"
-    if container_running "$MEMGRAPH_CONTAINER"; then
-      muted "container $MEMGRAPH_CONTAINER would be stopped, volume wiped + restored, then restarted"
-    else
-      muted "container $MEMGRAPH_CONTAINER is not running — volume would be wiped + restored in place"
-    fi
-    return 0
-  fi
-  step "memgraph: restoring volume $MEMGRAPH_VOLUME"
-  local was_running=no
-  if container_running "$MEMGRAPH_CONTAINER"; then
-    docker stop "$MEMGRAPH_CONTAINER" >/dev/null
-    was_running=yes
-  fi
-  # Wipe + extract — using a throwaway alpine container so we don't depend
-  # on host tar against a docker-managed volume.
-  docker run --rm \
-    -v "$MEMGRAPH_VOLUME":/data \
-    -v "$STAGE/memgraph":/backup:ro \
-    alpine:latest \
-    sh -c 'rm -rf /data/* /data/.[!.]* /data/..?* 2>/dev/null; tar xzf /backup/memgraph-volume.tar.gz -C /data'
-  if [ "$was_running" = "yes" ]; then
-    docker start "$MEMGRAPH_CONTAINER" >/dev/null
-  fi
-  ok "memgraph: volume restored"
-}
-
 restore_secrets() {
   local src="$STAGE/secrets"
   if [ ! -d "$src" ]; then
@@ -558,7 +521,6 @@ for c in "${SELECTED[@]}"; do
     mongodb)  restore_mongodb  || FAILED+=("$c") ;;
     redis)    restore_redis    || FAILED+=("$c") ;;
     rustfs)   restore_rustfs   || FAILED+=("$c") ;;
-    memgraph) restore_memgraph || FAILED+=("$c") ;;
     secrets)  restore_secrets  || FAILED+=("$c") ;;
   esac
 done

@@ -30,7 +30,7 @@ Orkestra ships two paths for this:
 
 ## Bundled scripts
 
-`./backup.sh` and `./restore.sh` live at the repo root alongside `./orkestra.sh`. Both run as a TUI (no args) or via CLI flags, and target the canonical infra container names (`orkestra-mongodb`, `orkestra-redis`, `orkestra-rustfs`, optionally `orkestra-memgraph`).
+`./backup.sh` and `./restore.sh` live at the repo root alongside `./orkestra.sh`. Both run as a TUI (no args) or via CLI flags, and target the canonical infra container names the base ships: `orkestra-mongodb`, `orkestra-redis`, `orkestra-rustfs`. (A fork that adds an addon with its own datastore extends the component list — the archived `graph` addon, for example, snapshotted an `orkestra-memgraph` volume.)
 
 ### What they cover
 
@@ -39,7 +39,6 @@ Orkestra ships two paths for this:
 | `mongodb` | `mongodump --db $MONGO_DATABASE --archive --gzip` (scoped to the `orkestra` DB — skips `admin`/`local`/`config` system DBs and the throwaway `orkestra_openapi_dump` sandbox that `make openapi-dump` uses) | `mongorestore --drop --archive --gzip`, with automatic `--nsFrom`/`--nsTo` remapping if the archive's source DB name differs from the target's `MONGO_DATABASE` |
 | `redis` | Synchronous `SAVE`, then `docker cp` of `dump.rdb` + the AOF directory from whatever path `CONFIG GET dir` reports (the redis-stack image used in `docker-compose.infra.yml` writes to `/`, not `/data`) | Stop container, copy files back, start container |
 | `rustfs` | Enumerates buckets via `aws-cli` over `orkestra-network` and `s3 sync`s each one out | `s3 mb` (best-effort) + `s3 sync` from the bundle back into each bucket |
-| `memgraph` | Raw `tar czf` of the `orkestra-memgraph-data` volume via a throwaway alpine container — **only if the container is running** (graph module is lifecycle-managed, so memgraph is up only when the addon is enabled) | Stop + wipe + extract + start, via the same alpine helper |
 | `secrets` | Copies `docker/.env` and `docker/keys/*` into the bundle | Writes the files back into `docker/`, prompting before overwriting existing ones |
 
 A `manifest.json` at the tarball root records the schema version, timestamp, environment, host, and which components were actually captured. `restore.sh` reads it to decide which components are available.
@@ -87,7 +86,6 @@ What dry-run actually does, per component:
 - **`mongodb`** — runs `mongorestore --dryRun` against the live container so the archive is fully parsed, every namespace is listed, and any decompression / format errors surface; reports namespace remapping if source DB differs from target
 - **`redis`** — queries the live container's `CONFIG GET dir/dbfilename/appenddirname` and prints the exact `docker cp` destinations it would use
 - **`rustfs`** — runs `aws s3 sync --dryrun` against the live endpoint so per-object diffs (additions, overwrites, deletions) appear before any byte is moved
-- **`memgraph`** — reports volume name and archive size, plus whether the container would be stopped/restarted
 - **`secrets`** — lists every file in the bundle and flags which targets already exist (would prompt to overwrite) vs which would be new
 
 Dry-run also exercises the preconditions: if a target container isn't running, the dry-run for that component fails the same way the real restore would. That makes it a genuine preflight, not just a print of intent.
@@ -130,8 +128,6 @@ orkestra-backup-<env>-<timestamp>.tar.gz
 ├── rustfs/
 │   └── <bucket>/                         one directory per S3 bucket the script could see
 │       └── ...                           full object tree synced via aws s3 sync
-├── memgraph/
-│   └── memgraph-volume.tar.gz            raw snapshot of the orkestra-memgraph-data volume
 └── secrets/
     ├── .env                              docker/.env verbatim
     └── keys/

@@ -6,7 +6,6 @@
 #   - MongoDB        (logical dump via mongodump)
 #   - Redis          (RDB snapshot via BGSAVE + docker cp)
 #   - RustFS / S3    (object bucket sync via aws-cli over the orkestra network)
-#   - Memgraph       (raw volume snapshot — only if the container is up)
 #   - Secrets        (docker/.env and docker/keys/*)
 #
 # Run without arguments for an interactive TUI, or pass flags for CLI use.
@@ -34,11 +33,9 @@ BACKUPS_DIR="$REPO_ROOT/backups"
 MONGO_CONTAINER="orkestra-mongodb"
 REDIS_CONTAINER="orkestra-redis"
 RUSTFS_CONTAINER="orkestra-rustfs"
-MEMGRAPH_CONTAINER="orkestra-memgraph"
-MEMGRAPH_VOLUME="orkestra-memgraph-data"
 NETWORK="orkestra-network"
 
-ALL_COMPONENTS=(mongodb redis rustfs memgraph secrets)
+ALL_COMPONENTS=(mongodb redis rustfs secrets)
 
 # ---------------------------------------------------------------------------
 # Output helpers
@@ -115,7 +112,6 @@ available_components() {
   container_running "$MONGO_CONTAINER"   && out+=(mongodb)
   container_running "$REDIS_CONTAINER"   && out+=(redis)
   container_running "$RUSTFS_CONTAINER"  && out+=(rustfs)
-  container_running "$MEMGRAPH_CONTAINER" && out+=(memgraph)
   [ -f "$ENV_FILE" ] || [ -d "$KEYS_DIR" ] && out+=(secrets)
   printf '%s\n' "${out[@]}"
 }
@@ -339,21 +335,6 @@ backup_rustfs() {
   done
 }
 
-backup_memgraph() {
-  if ! container_running "$MEMGRAPH_CONTAINER"; then
-    warn "memgraph: container not running (lifecycle-managed by graph module), skipping"; return 1
-  fi
-  step "memgraph: snapshotting volume $MEMGRAPH_VOLUME"
-  local out="$STAGE/data/memgraph"
-  mkdir -p "$out"
-  docker run --rm \
-    -v "$MEMGRAPH_VOLUME":/data:ro \
-    -v "$out":/backup \
-    alpine:latest \
-    tar czf /backup/memgraph-volume.tar.gz -C /data . 2>/dev/null
-  ok "memgraph: $(du -h "$out/memgraph-volume.tar.gz" | cut -f1) → memgraph/memgraph-volume.tar.gz"
-}
-
 backup_secrets() {
   step "secrets: copying docker/.env and docker/keys/*"
   local out="$STAGE/data/secrets"
@@ -379,7 +360,6 @@ for c in "${SELECTED[@]}"; do
     mongodb)  backup_mongodb  && INCLUDED+=("$c") || true ;;
     redis)    backup_redis    && INCLUDED+=("$c") || true ;;
     rustfs)   backup_rustfs   && INCLUDED+=("$c") || true ;;
-    memgraph) backup_memgraph && INCLUDED+=("$c") || true ;;
     secrets)  backup_secrets  && INCLUDED+=("$c") || true ;;
   esac
 done
