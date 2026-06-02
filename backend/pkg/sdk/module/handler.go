@@ -271,16 +271,9 @@ func (h *ModuleAdminHandler) UpdateModule(ctx context.Context, input *UpdateModu
 	// Update config values
 	configChanged := false
 	if len(input.Body.Config) > 0 || len(input.Body.Secrets) > 0 {
-		// Merge with existing values (don't wipe unset fields)
-		mergedValues := existing.ConfigValues
-		if mergedValues == nil {
-			mergedValues = make(map[string]string)
-		}
-		for k, v := range input.Body.Config {
-			mergedValues[k] = v
-		}
-
-		if err := h.configService.UpdateConfig(ctx, input.Name, mergedValues, input.Body.Secrets); err != nil {
+		// UpdateConfig merges into the stored config — keys the caller omits are
+		// preserved, so a config-only change never wipes the module's secrets.
+		if err := h.configService.UpdateConfig(ctx, input.Name, input.Body.Config, input.Body.Secrets); err != nil {
 			return nil, err
 		}
 		configChanged = true
