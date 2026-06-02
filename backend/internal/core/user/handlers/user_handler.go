@@ -4,11 +4,10 @@ import (
 	"context"
 
 	"github.com/danielgtaylor/huma/v2"
-	"github.com/orkestra-cc/orkestra-sdk/ctxauth"
-	"github.com/orkestra-cc/orkestra-sdk/iface"
-	"github.com/orkestra/backend/internal/core/user/models"
 	"github.com/orkestra/backend/internal/core/user/services"
 	"github.com/orkestra/backend/internal/shared/errcode"
+	"github.com/orkestra/backend/pkg/sdk/ctxauth"
+	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
 // auditEmitter is the narrow capability the handler probes on the
@@ -66,12 +65,12 @@ func actorFromCtx(ctx context.Context) (string, string) {
 
 // Create User Request
 type CreateUserRequest struct {
-	Body models.CreateUserInput `json:"user" doc:"User data to create"`
+	Body iface.CreateUserInput `json:"user" doc:"User data to create"`
 }
 
 // Create User Response
 type CreateUserResponse struct {
-	Body models.UserManagementResponse `json:"user" doc:"Created user data"`
+	Body iface.UserManagementResponse `json:"user" doc:"Created user data"`
 }
 
 // CreateUser handles POST /api/users. The role-escalation guard from
@@ -121,7 +120,7 @@ type GetUserRequest struct {
 
 // Get User Response
 type GetUserResponse struct {
-	Body models.UserManagementResponse `json:"user" doc:"User data"`
+	Body iface.UserManagementResponse `json:"user" doc:"User data"`
 }
 
 // GetUser handles GET /api/users/{id}
@@ -143,13 +142,13 @@ func (h *UserHandler) GetUser(ctx context.Context, req *GetUserRequest) (*GetUse
 
 // Update User Request
 type UpdateUserRequest struct {
-	ID   string                 `path:"id" doc:"User ID (UUID)"`
-	Body models.UpdateUserInput `json:"user" doc:"User data to update"`
+	ID   string                `path:"id" doc:"User ID (UUID)"`
+	Body iface.UpdateUserInput `json:"user" doc:"User data to update"`
 }
 
 // Update User Response
 type UpdateUserResponse struct {
-	Body models.UserManagementResponse `json:"user" doc:"Updated user data"`
+	Body iface.UserManagementResponse `json:"user" doc:"Updated user data"`
 }
 
 // UpdateUser handles PUT /api/users/{id}. Three independent guards
@@ -257,9 +256,9 @@ func (h *UserHandler) UpdateUser(ctx context.Context, req *UpdateUserRequest) (*
 func (h *UserHandler) emitUpdateLifecycleEvents(
 	ctx context.Context,
 	actorUUID, actorEmail string,
-	previous *models.UserManagementResponse,
-	current *models.UserManagementResponse,
-	patch *models.UpdateUserInput,
+	previous *iface.UserManagementResponse,
+	current *iface.UserManagementResponse,
+	patch *iface.UpdateUserInput,
 ) {
 	if current == nil {
 		return
@@ -300,7 +299,7 @@ func (h *UserHandler) emitUpdateLifecycleEvents(
 // update was trying to change, so the SOC2 view can tell a deactivate
 // attempt from a role-demote attempt. Both are denied with the same
 // last_admin_forbidden code but the operator intent differed.
-func updateRefusalMetadata(input *models.UpdateUserInput) map[string]any {
+func updateRefusalMetadata(input *iface.UpdateUserInput) map[string]any {
 	meta := map[string]any{"code": errcode.UserLastAdminForbidden}
 	if input == nil {
 		return meta
@@ -488,7 +487,7 @@ func canAssignRole(callerRole, targetRole string) bool {
 // qualifies; the check is intentionally over-eager — checkLastAdminRemoval
 // re-reads the row and short-circuits when the target wasn't an active
 // administrator to begin with.
-func removesAdminPrivilege(input *models.UpdateUserInput) bool {
+func removesAdminPrivilege(input *iface.UpdateUserInput) bool {
 	if input == nil {
 		return false
 	}
@@ -516,12 +515,12 @@ type ListUsersRequest struct {
 
 // List Users Response
 type ListUsersResponse struct {
-	Body models.UserManagementListResponse `json:"users" doc:"Paginated list of users"`
+	Body iface.UserManagementListResponse `json:"users" doc:"Paginated list of users"`
 }
 
 // ListUsers handles GET /api/users
 func (h *UserHandler) ListUsers(ctx context.Context, req *ListUsersRequest) (*ListUsersResponse, error) {
-	filters := &models.UserFilters{
+	filters := &iface.UserFilters{
 		Role:   req.Role,
 		Search: req.Search,
 	}
@@ -534,7 +533,7 @@ func (h *UserHandler) ListUsers(ctx context.Context, req *ListUsersRequest) (*Li
 		filters.EmailVerified = &req.EmailVerified
 	}
 
-	pagination := &models.PaginationParams{
+	pagination := &iface.PaginationParams{
 		Page:     req.Page,
 		PageSize: req.PageSize,
 	}
@@ -555,8 +554,8 @@ type GetUsersByRoleRequest struct {
 // Get Users by Role Response
 type GetUsersByRoleResponse struct {
 	Body struct {
-		Users []models.UserManagementResponse `json:"users" doc:"List of users with the specified role"`
-		Total int                             `json:"total" doc:"Total number of users"`
+		Users []iface.UserManagementResponse `json:"users" doc:"List of users with the specified role"`
+		Total int                            `json:"total" doc:"Total number of users"`
 	}
 }
 
@@ -573,15 +572,15 @@ func (h *UserHandler) GetUsersByRole(ctx context.Context, req *GetUsersByRoleReq
 	}
 
 	// Convert to response format
-	userResponses := make([]models.UserManagementResponse, len(users))
+	userResponses := make([]iface.UserManagementResponse, len(users))
 	for i, user := range users {
 		userResponses[i] = *user
 	}
 
 	return &GetUsersByRoleResponse{
 		Body: struct {
-			Users []models.UserManagementResponse `json:"users" doc:"List of users with the specified role"`
-			Total int                             `json:"total" doc:"Total number of users"`
+			Users []iface.UserManagementResponse `json:"users" doc:"List of users with the specified role"`
+			Total int                            `json:"total" doc:"Total number of users"`
 		}{
 			Users: userResponses,
 			Total: len(userResponses),
@@ -633,7 +632,7 @@ type GetUserCountResponse struct {
 
 // GetUserCount handles GET /api/users/count
 func (h *UserHandler) GetUserCount(ctx context.Context, req *GetUserCountRequest) (*GetUserCountResponse, error) {
-	filters := &models.UserFilters{
+	filters := &iface.UserFilters{
 		Role:   req.Role,
 		Search: req.Search,
 	}

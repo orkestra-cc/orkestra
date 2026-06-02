@@ -11,6 +11,7 @@ Durable, dated records of architectural decisions that shape Orkestra. One file 
 | [0003](0003-three-audience-host-split.md) | Three-audience API host split (operator / client / service) | Proposed | 2026-04-30 |
 | [0004](0004-external-services-integration.md) | External services integration framework | Proposed | 2026-05-14 |
 | [0005](0005-observability-logging-tracing-metrics.md) | Observability — logging, tracing, metrics as core platform features | Proposed | 2026-05-16 |
+| [0006](0006-collapse-to-core-only-base.md) | Collapse Orkestra to a core-only base; addons become per-fork responsibility | Proposed | 2026-06-01 |
 
 ## Format
 

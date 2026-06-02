@@ -3,7 +3,7 @@ package models
 import (
 	"time"
 
-	userModels "github.com/orkestra/backend/internal/core/user/models"
+	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
 // DeviceInfo contains device-specific information for authentication
@@ -94,14 +94,14 @@ type SecurityEvent struct {
 
 // TokenResponse represents the response containing tokens and session info
 type TokenResponse struct {
-	AccessToken    string                             `json:"accessToken,omitempty"`
-	RefreshToken   string                             `json:"refreshToken,omitempty"` // Not sent for mobile (stored in cookie)
-	TokenType      string                             `json:"tokenType,omitempty"`
-	ExpiresIn      int64                              `json:"expiresIn,omitempty"`
-	User           *userModels.UserManagementResponse `json:"user,omitempty"`
-	OAuthProviders []OAuthProviderInfo                `json:"oauthProviders,omitempty"`
-	SessionID      string                             `json:"sessionId,omitempty"`
-	DeviceID       string                             `json:"deviceId,omitempty"`
+	AccessToken    string                        `json:"accessToken,omitempty"`
+	RefreshToken   string                        `json:"refreshToken,omitempty"` // Not sent for mobile (stored in cookie)
+	TokenType      string                        `json:"tokenType,omitempty"`
+	ExpiresIn      int64                         `json:"expiresIn,omitempty"`
+	User           *iface.UserManagementResponse `json:"user,omitempty"`
+	OAuthProviders []OAuthProviderInfo           `json:"oauthProviders,omitempty"`
+	SessionID      string                        `json:"sessionId,omitempty"`
+	DeviceID       string                        `json:"deviceId,omitempty"`
 	// RequiresMFA is set when the caller presented valid primary credentials
 	// but must complete a second factor before receiving an access token.
 	// AccessToken/RefreshToken are empty in this case; clients exchange

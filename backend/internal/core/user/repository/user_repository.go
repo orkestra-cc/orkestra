@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/orkestra/backend/internal/core/user/models"
 	"github.com/orkestra/backend/internal/shared/utils"
+	"github.com/orkestra/backend/pkg/sdk/iface"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -30,13 +30,13 @@ const (
 
 type UserRepository interface {
 	// Core CRUD Operations
-	Create(ctx context.Context, user *models.User) error
-	GetByID(ctx context.Context, id string) (*models.User, error)
-	GetByObjectID(ctx context.Context, id primitive.ObjectID) (*models.User, error)
-	GetByEmail(ctx context.Context, email string) (*models.User, error)
-	GetByUsername(ctx context.Context, username string) (*models.User, error)
-	Update(ctx context.Context, id string, input *models.UpdateUserInput) (*models.User, error)
-	UpdateByObjectID(ctx context.Context, id primitive.ObjectID, update *models.User) error
+	Create(ctx context.Context, user *iface.User) error
+	GetByID(ctx context.Context, id string) (*iface.User, error)
+	GetByObjectID(ctx context.Context, id primitive.ObjectID) (*iface.User, error)
+	GetByEmail(ctx context.Context, email string) (*iface.User, error)
+	GetByUsername(ctx context.Context, username string) (*iface.User, error)
+	Update(ctx context.Context, id string, input *iface.UpdateUserInput) (*iface.User, error)
+	UpdateByObjectID(ctx context.Context, id primitive.ObjectID, update *iface.User) error
 	UpdateLastLogin(ctx context.Context, id string) error
 	UpdateLastLoginByObjectID(ctx context.Context, id primitive.ObjectID) error
 	Delete(ctx context.Context, id string) error
@@ -74,7 +74,7 @@ type UserRepository interface {
 	// by the OAuth callback link-reuse path so the cached `picture` URL
 	// refreshes on every login — ResolveAvatar reads this map for
 	// AvatarSource=oauth_* and the SPA expects a current image.
-	UpdateOAuthLinkData(ctx context.Context, userUUID string, provider models.OAuthProvider, providerID string, data map[string]interface{}) error
+	UpdateOAuthLinkData(ctx context.Context, userUUID string, provider iface.OAuthProvider, providerID string, data map[string]interface{}) error
 
 	// SetAvatarSource overwrites the user's avatar preference. The caller
 	// is responsible for any tier-aware policy (this repo only persists).
@@ -87,21 +87,21 @@ type UserRepository interface {
 	SetAvatarSource(ctx context.Context, userUUID, source, objectKey string) error
 
 	// OAuth Operations
-	GetByOAuthID(ctx context.Context, provider models.OAuthProvider, oauthID string) (*models.User, error)
-	GetByOAuthLink(ctx context.Context, provider models.OAuthProvider, providerID string) (*models.User, error)
-	AddOAuthLink(ctx context.Context, userUUID string, link models.OAuthLink) error
-	RemoveOAuthLink(ctx context.Context, userUUID string, provider models.OAuthProvider, providerID string) error
-	SetPrimaryOAuthLink(ctx context.Context, userUUID string, provider models.OAuthProvider, providerID string) error
-	GetOAuthLinks(ctx context.Context, userUUID string) ([]models.OAuthLink, error)
-	UpdateOAuthLinkUsage(ctx context.Context, userUUID string, provider models.OAuthProvider, providerID string) error
+	GetByOAuthID(ctx context.Context, provider iface.OAuthProvider, oauthID string) (*iface.User, error)
+	GetByOAuthLink(ctx context.Context, provider iface.OAuthProvider, providerID string) (*iface.User, error)
+	AddOAuthLink(ctx context.Context, userUUID string, link iface.OAuthLink) error
+	RemoveOAuthLink(ctx context.Context, userUUID string, provider iface.OAuthProvider, providerID string) error
+	SetPrimaryOAuthLink(ctx context.Context, userUUID string, provider iface.OAuthProvider, providerID string) error
+	GetOAuthLinks(ctx context.Context, userUUID string) ([]iface.OAuthLink, error)
+	UpdateOAuthLinkUsage(ctx context.Context, userUUID string, provider iface.OAuthProvider, providerID string) error
 
 	// Query Operations
-	List(ctx context.Context, filters *models.UserFilters, pagination *models.PaginationParams) ([]*models.User, int64, error)
-	ListWithOptions(ctx context.Context, filter bson.M, opts ...*options.FindOptions) ([]*models.User, error)
-	GetByRole(ctx context.Context, role string) ([]*models.User, error)
+	List(ctx context.Context, filters *iface.UserFilters, pagination *iface.PaginationParams) ([]*iface.User, int64, error)
+	ListWithOptions(ctx context.Context, filter bson.M, opts ...*options.FindOptions) ([]*iface.User, error)
+	GetByRole(ctx context.Context, role string) ([]*iface.User, error)
 
 	// Utility Operations
-	Count(ctx context.Context, filters *models.UserFilters) (int64, error)
+	Count(ctx context.Context, filters *iface.UserFilters) (int64, error)
 	CountWithFilter(ctx context.Context, filter bson.M) (int64, error)
 	ExistsByEmail(ctx context.Context, email string) (bool, error)
 	ExistsByUUID(ctx context.Context, uuid string) (bool, error)
@@ -130,7 +130,7 @@ type mongoUserRepository struct {
 func NewOperatorUserRepository(db *mongo.Database) UserRepository {
 	return &mongoUserRepository{
 		collection: db.Collection(OperatorUsersCollection),
-		tier:       models.TierOperator,
+		tier:       iface.TierOperator,
 	}
 }
 
@@ -139,12 +139,12 @@ func NewOperatorUserRepository(db *mongo.Database) UserRepository {
 func NewClientUserRepository(db *mongo.Database) UserRepository {
 	return &mongoUserRepository{
 		collection: db.Collection(ClientUsersCollection),
-		tier:       models.TierClient,
+		tier:       iface.TierClient,
 	}
 }
 
 // Create creates a new user
-func (r *mongoUserRepository) Create(ctx context.Context, user *models.User) error {
+func (r *mongoUserRepository) Create(ctx context.Context, user *iface.User) error {
 	// Check if user already exists by email
 	exists, err := r.ExistsByEmail(ctx, user.Email)
 	if err != nil {
@@ -178,8 +178,8 @@ func (r *mongoUserRepository) Create(ctx context.Context, user *models.User) err
 }
 
 // GetByID retrieves a user by UUID
-func (r *mongoUserRepository) GetByID(ctx context.Context, id string) (*models.User, error) {
-	var user models.User
+func (r *mongoUserRepository) GetByID(ctx context.Context, id string) (*iface.User, error) {
+	var user iface.User
 	filter := bson.M{
 		"uuid":      id,
 		"deletedAt": bson.M{"$exists": false},
@@ -197,8 +197,8 @@ func (r *mongoUserRepository) GetByID(ctx context.Context, id string) (*models.U
 }
 
 // GetByEmail retrieves a user by email
-func (r *mongoUserRepository) GetByEmail(ctx context.Context, email string) (*models.User, error) {
-	var user models.User
+func (r *mongoUserRepository) GetByEmail(ctx context.Context, email string) (*iface.User, error) {
+	var user iface.User
 	filter := bson.M{
 		"email":     email,
 		"deletedAt": bson.M{"$exists": false},
@@ -216,7 +216,7 @@ func (r *mongoUserRepository) GetByEmail(ctx context.Context, email string) (*mo
 }
 
 // Update updates a user
-func (r *mongoUserRepository) Update(ctx context.Context, id string, input *models.UpdateUserInput) (*models.User, error) {
+func (r *mongoUserRepository) Update(ctx context.Context, id string, input *iface.UpdateUserInput) (*iface.User, error) {
 	// Build update document
 	update := bson.M{
 		"$set": bson.M{
@@ -258,7 +258,7 @@ func (r *mongoUserRepository) Update(ctx context.Context, id string, input *mode
 	}
 
 	opts := options.FindOneAndUpdate().SetReturnDocument(options.After)
-	var updatedUser models.User
+	var updatedUser iface.User
 
 	err := r.collection.FindOneAndUpdate(ctx, filter, update, opts).Decode(&updatedUser)
 	if err != nil {
@@ -357,7 +357,7 @@ func (r *mongoUserRepository) SoftDeleteAndAliasEmail(ctx context.Context, id st
 }
 
 // List retrieves users with filters and pagination
-func (r *mongoUserRepository) List(ctx context.Context, filters *models.UserFilters, pagination *models.PaginationParams) ([]*models.User, int64, error) {
+func (r *mongoUserRepository) List(ctx context.Context, filters *iface.UserFilters, pagination *iface.PaginationParams) ([]*iface.User, int64, error) {
 	// Build filter
 	filter := r.buildFilter(filters)
 
@@ -384,9 +384,9 @@ func (r *mongoUserRepository) List(ctx context.Context, filters *models.UserFilt
 	}
 	defer cursor.Close(ctx)
 
-	var users []*models.User
+	var users []*iface.User
 	for cursor.Next(ctx) {
-		var user models.User
+		var user iface.User
 		if err := cursor.Decode(&user); err != nil {
 			return nil, 0, fmt.Errorf("failed to decode user: %w", err)
 		}
@@ -401,7 +401,7 @@ func (r *mongoUserRepository) List(ctx context.Context, filters *models.UserFilt
 }
 
 // GetByRole retrieves users by role
-func (r *mongoUserRepository) GetByRole(ctx context.Context, role string) ([]*models.User, error) {
+func (r *mongoUserRepository) GetByRole(ctx context.Context, role string) ([]*iface.User, error) {
 	filter := bson.M{
 		"role":      role,
 		"deletedAt": bson.M{"$exists": false},
@@ -413,9 +413,9 @@ func (r *mongoUserRepository) GetByRole(ctx context.Context, role string) ([]*mo
 	}
 	defer cursor.Close(ctx)
 
-	var users []*models.User
+	var users []*iface.User
 	for cursor.Next(ctx) {
-		var user models.User
+		var user iface.User
 		if err := cursor.Decode(&user); err != nil {
 			return nil, fmt.Errorf("failed to decode user: %w", err)
 		}
@@ -426,7 +426,7 @@ func (r *mongoUserRepository) GetByRole(ctx context.Context, role string) ([]*mo
 }
 
 // Count counts users with filters
-func (r *mongoUserRepository) Count(ctx context.Context, filters *models.UserFilters) (int64, error) {
+func (r *mongoUserRepository) Count(ctx context.Context, filters *iface.UserFilters) (int64, error) {
 	filter := r.buildFilter(filters)
 	count, err := r.collection.CountDocuments(ctx, filter)
 	if err != nil {
@@ -466,7 +466,7 @@ func (r *mongoUserRepository) ExistsByUUID(ctx context.Context, uuid string) (bo
 }
 
 // buildFilter builds MongoDB filter from UserFilters
-func (r *mongoUserRepository) buildFilter(filters *models.UserFilters) bson.M {
+func (r *mongoUserRepository) buildFilter(filters *iface.UserFilters) bson.M {
 	filter := bson.M{
 		"deletedAt": bson.M{"$exists": false},
 	}
@@ -502,8 +502,8 @@ func (r *mongoUserRepository) buildFilter(filters *models.UserFilters) bson.M {
 }
 
 // GetByObjectID retrieves a user by MongoDB ObjectID
-func (r *mongoUserRepository) GetByObjectID(ctx context.Context, id primitive.ObjectID) (*models.User, error) {
-	var user models.User
+func (r *mongoUserRepository) GetByObjectID(ctx context.Context, id primitive.ObjectID) (*iface.User, error) {
+	var user iface.User
 	filter := bson.M{
 		"_id":       id,
 		"deletedAt": bson.M{"$exists": false},
@@ -521,8 +521,8 @@ func (r *mongoUserRepository) GetByObjectID(ctx context.Context, id primitive.Ob
 }
 
 // GetByUsername retrieves a user by username
-func (r *mongoUserRepository) GetByUsername(ctx context.Context, username string) (*models.User, error) {
-	var user models.User
+func (r *mongoUserRepository) GetByUsername(ctx context.Context, username string) (*iface.User, error) {
+	var user iface.User
 	filter := bson.M{
 		"username":  username,
 		"deletedAt": bson.M{"$exists": false},
@@ -540,7 +540,7 @@ func (r *mongoUserRepository) GetByUsername(ctx context.Context, username string
 }
 
 // UpdateByObjectID updates a user by ObjectID
-func (r *mongoUserRepository) UpdateByObjectID(ctx context.Context, id primitive.ObjectID, update *models.User) error {
+func (r *mongoUserRepository) UpdateByObjectID(ctx context.Context, id primitive.ObjectID, update *iface.User) error {
 	filter := bson.M{
 		"_id":       id,
 		"deletedAt": bson.M{"$exists": false},
@@ -663,8 +663,8 @@ func (r *mongoUserRepository) DeleteByObjectID(ctx context.Context, id primitive
 }
 
 // GetByOAuthID retrieves a user by OAuth provider and ID (legacy method)
-func (r *mongoUserRepository) GetByOAuthID(ctx context.Context, provider models.OAuthProvider, oauthID string) (*models.User, error) {
-	var user models.User
+func (r *mongoUserRepository) GetByOAuthID(ctx context.Context, provider iface.OAuthProvider, oauthID string) (*iface.User, error) {
+	var user iface.User
 	filter := bson.M{
 		"oauthProvider": provider,
 		"oauthId":       oauthID,
@@ -683,8 +683,8 @@ func (r *mongoUserRepository) GetByOAuthID(ctx context.Context, provider models.
 }
 
 // GetByOAuthLink retrieves a user by OAuth link
-func (r *mongoUserRepository) GetByOAuthLink(ctx context.Context, provider models.OAuthProvider, providerID string) (*models.User, error) {
-	var user models.User
+func (r *mongoUserRepository) GetByOAuthLink(ctx context.Context, provider iface.OAuthProvider, providerID string) (*iface.User, error) {
+	var user iface.User
 	filter := bson.M{
 		"oauthLinks": bson.M{
 			"$elemMatch": bson.M{
@@ -708,7 +708,7 @@ func (r *mongoUserRepository) GetByOAuthLink(ctx context.Context, provider model
 }
 
 // AddOAuthLink adds a new OAuth link to a user
-func (r *mongoUserRepository) AddOAuthLink(ctx context.Context, userUUID string, link models.OAuthLink) error {
+func (r *mongoUserRepository) AddOAuthLink(ctx context.Context, userUUID string, link iface.OAuthLink) error {
 	filter := bson.M{
 		"uuid":      userUUID,
 		"deletedAt": bson.M{"$exists": false},
@@ -746,7 +746,7 @@ func (r *mongoUserRepository) AddOAuthLink(ctx context.Context, userUUID string,
 }
 
 // RemoveOAuthLink removes an OAuth link from a user
-func (r *mongoUserRepository) RemoveOAuthLink(ctx context.Context, userUUID string, provider models.OAuthProvider, providerID string) error {
+func (r *mongoUserRepository) RemoveOAuthLink(ctx context.Context, userUUID string, provider iface.OAuthProvider, providerID string) error {
 	filter := bson.M{
 		"uuid":      userUUID,
 		"deletedAt": bson.M{"$exists": false},
@@ -775,7 +775,7 @@ func (r *mongoUserRepository) RemoveOAuthLink(ctx context.Context, userUUID stri
 }
 
 // SetPrimaryOAuthLink sets a specific OAuth link as primary
-func (r *mongoUserRepository) SetPrimaryOAuthLink(ctx context.Context, userUUID string, provider models.OAuthProvider, providerID string) error {
+func (r *mongoUserRepository) SetPrimaryOAuthLink(ctx context.Context, userUUID string, provider iface.OAuthProvider, providerID string) error {
 	filter := bson.M{
 		"uuid":      userUUID,
 		"deletedAt": bson.M{"$exists": false},
@@ -821,7 +821,7 @@ func (r *mongoUserRepository) SetPrimaryOAuthLink(ctx context.Context, userUUID 
 }
 
 // GetOAuthLinks gets all OAuth links for a user
-func (r *mongoUserRepository) GetOAuthLinks(ctx context.Context, userUUID string) ([]models.OAuthLink, error) {
+func (r *mongoUserRepository) GetOAuthLinks(ctx context.Context, userUUID string) ([]iface.OAuthLink, error) {
 	user, err := r.GetByID(ctx, userUUID)
 	if err != nil {
 		return nil, err
@@ -836,7 +836,7 @@ func (r *mongoUserRepository) GetOAuthLinks(ctx context.Context, userUUID string
 // path which mustn't fail just because a legacy account doesn't have
 // the embedded link yet (the parallel auth_oauth_providers write
 // covers it).
-func (r *mongoUserRepository) UpdateOAuthLinkData(ctx context.Context, userUUID string, provider models.OAuthProvider, providerID string, data map[string]interface{}) error {
+func (r *mongoUserRepository) UpdateOAuthLinkData(ctx context.Context, userUUID string, provider iface.OAuthProvider, providerID string, data map[string]interface{}) error {
 	filter := bson.M{
 		"uuid": userUUID,
 		"oauthLinks": bson.M{
@@ -861,7 +861,7 @@ func (r *mongoUserRepository) UpdateOAuthLinkData(ctx context.Context, userUUID 
 }
 
 // UpdateOAuthLinkUsage updates the last used timestamp for an OAuth link
-func (r *mongoUserRepository) UpdateOAuthLinkUsage(ctx context.Context, userUUID string, provider models.OAuthProvider, providerID string) error {
+func (r *mongoUserRepository) UpdateOAuthLinkUsage(ctx context.Context, userUUID string, provider iface.OAuthProvider, providerID string) error {
 	filter := bson.M{
 		"uuid": userUUID,
 		"oauthLinks": bson.M{
@@ -894,7 +894,7 @@ func (r *mongoUserRepository) UpdateOAuthLinkUsage(ctx context.Context, userUUID
 }
 
 // ListWithOptions retrieves users with custom filters and options
-func (r *mongoUserRepository) ListWithOptions(ctx context.Context, filter bson.M, opts ...*options.FindOptions) ([]*models.User, error) {
+func (r *mongoUserRepository) ListWithOptions(ctx context.Context, filter bson.M, opts ...*options.FindOptions) ([]*iface.User, error) {
 	// Ensure deletedAt filter
 	if filter == nil {
 		filter = bson.M{}
@@ -907,9 +907,9 @@ func (r *mongoUserRepository) ListWithOptions(ctx context.Context, filter bson.M
 	}
 	defer cursor.Close(ctx)
 
-	var users []*models.User
+	var users []*iface.User
 	for cursor.Next(ctx) {
-		var user models.User
+		var user iface.User
 		if err := cursor.Decode(&user); err != nil {
 			return nil, fmt.Errorf("failed to decode user: %w", err)
 		}

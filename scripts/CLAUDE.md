@@ -36,24 +36,22 @@ This module contains automation scripts, development tools, and utilities for ma
 
 ```bash
 # Single entry point — interactive TUI
-./orkestra.sh                         # Profile menu: runtime profile or full stack
+./orkestra.sh                         # Main menu: full stack or observability
 
 # Same operations via CLI (scriptable)
-./orkestra.sh profile minimal deploy --pull
-./orkestra.sh profile full logs backend -f
-./orkestra.sh profile full reset --yes
 ENV=development ./orkestra.sh deploy --scope backend --rebuild --yes
 ./orkestra.sh logs orkestra-backend-dev -f
+./orkestra.sh observability up
 ./orkestra.sh --help                  # Full command surface
 ```
 
-`orkestra.sh` handles every docker compose operation for both the runtime profiles (`docker-compose.{minimal,full}.yml`) and the full-stack dev/staging/prod profiles (`docker-compose.infra.yml` + `docker-compose.{dev,staging,prod}.yml`). See [docker/CLAUDE.md](../docker/CLAUDE.md) for compose-file details.
+ADR-0006 collapsed Orkestra to a core-only base, removing the runtime-profile (minimal/full) path. `orkestra.sh` handles every docker compose operation for the full-stack dev/staging/prod environments (`docker-compose.infra.yml` + `docker-compose.{dev,staging,prod}.yml`) plus the opt-in observability overlay. See [docker/CLAUDE.md](../docker/CLAUDE.md) for compose-file details.
 
 ### Top-level operational scripts (project root)
 
 Alongside `orkestra.sh` at the repo root:
 
-- **backup.sh** — TUI/CLI tool that bundles every stateful surface (`mongodb`, `redis`, `rustfs`, `memgraph`, `secrets`) into a single tarball under `./backups/`. Scopes `mongodump` to `$MONGO_DATABASE` (default `orkestra`) so the `orkestra_openapi_dump` sandbox DB from `make openapi-dump` is not captured. Run `./backup.sh --help` for flags.
+- **backup.sh** — TUI/CLI tool that bundles every stateful surface (`mongodb`, `redis`, `rustfs`, `secrets`) into a single tarball under `./backups/`. Scopes `mongodump` to `$MONGO_DATABASE` (default `orkestra`) so the `orkestra_openapi_dump` sandbox DB from `make openapi-dump` is not captured. Run `./backup.sh --help` for flags.
 - **restore.sh** — reverses a bundle produced by `backup.sh`. Reads the archive's `manifest.json` to know which components are available; supports `--dry-run` to preflight the entire restore (uses `mongorestore --dryRun` and `aws s3 sync --dryrun` internally) without mutating any container. Documented in [docs/site/operating/backup-and-restore.mdx](../docs/site/operating/backup-and-restore.mdx).
 
 ### 🚫 Removed / Consolidated Scripts

@@ -26,12 +26,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/orkestra-cc/orkestra-sdk/ctxauth"
-	"github.com/orkestra-cc/orkestra-sdk/iface"
 	authModels "github.com/orkestra/backend/internal/core/auth/models"
 	"github.com/orkestra/backend/internal/core/auth/services"
-	userModels "github.com/orkestra/backend/internal/core/user/models"
 	sharederrors "github.com/orkestra/backend/internal/shared/errors"
+	"github.com/orkestra/backend/pkg/sdk/ctxauth"
+	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
 // stubTenant satisfies iface.TenantProvider with the empty-membership
@@ -135,7 +134,7 @@ func (h *downstreamHandler) handler() http.Handler {
 // produce so tests exercise the real validator on the way back in.
 func (f *requireAuthFixture) issueTokenForUser(userUUID, role string) string {
 	f.t.Helper()
-	user := &userModels.User{UUID: userUUID, Email: userUUID + "@example.com", Role: role}
+	user := &iface.User{UUID: userUUID, Email: userUUID + "@example.com", Role: role}
 	tok, err := f.jwt.GenerateAccessToken(user)
 	if err != nil {
 		f.t.Fatalf("GenerateAccessToken: %v", err)
@@ -147,7 +146,7 @@ func (f *requireAuthFixture) issueTokenForUser(userUUID, role string) string {
 // value, so revocation tests can flip a known sid.
 func (f *requireAuthFixture) issueTokenWithSID(userUUID, sid string) string {
 	f.t.Helper()
-	user := &userModels.User{UUID: userUUID, Email: userUUID + "@example.com", Role: "operator"}
+	user := &iface.User{UUID: userUUID, Email: userUUID + "@example.com", Role: "operator"}
 	// GenerateEnhancedAccessToken stamps SessionID from the security ctx.
 	device := &authModels.DeviceInfo{DeviceID: "dev-A"}
 	sec := &authModels.SecurityContext{SessionID: sid}

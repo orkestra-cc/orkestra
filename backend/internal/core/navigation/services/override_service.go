@@ -6,10 +6,10 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/orkestra-cc/orkestra-sdk/module"
 	"github.com/orkestra/backend/internal/core/navigation/models"
 	"github.com/orkestra/backend/internal/core/navigation/repository"
 	"github.com/orkestra/backend/internal/shared/errcode"
+	"github.com/orkestra/backend/pkg/sdk/module"
 )
 
 // NavItemsIndexAccessor exposes the registry's pre-computed parent/child

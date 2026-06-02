@@ -17,11 +17,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/orkestra-cc/orkestra-sdk/iface"
 	authModels "github.com/orkestra/backend/internal/core/auth/models"
 	"github.com/orkestra/backend/internal/core/auth/repository"
-	userModels "github.com/orkestra/backend/internal/core/user/models"
 	"github.com/orkestra/backend/internal/shared/geoip"
+	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
 // gateUserFake is a minimal in-memory iface.UserProvider. Tests pre-
@@ -31,12 +30,12 @@ import (
 // immediately.
 type gateUserFake struct {
 	mu               sync.Mutex
-	byEmail          map[string]*userModels.User
-	byUUID           map[string]*userModels.User
+	byEmail          map[string]*iface.User
+	byUUID           map[string]*iface.User
 	count            int64
-	updateUserCalls  []userModels.UpdateUserInput
+	updateUserCalls  []iface.UpdateUserInput
 	lastLoginTouches []string
-	createdUsers     []*userModels.User
+	createdUsers     []*iface.User
 	createWithPwdErr error
 	// createFromOAuthAbortErr lets a test capture the role assigned at
 	// signup without driving the OAuth flow all the way through token
@@ -48,12 +47,12 @@ type gateUserFake struct {
 
 func newGateUserFake() *gateUserFake {
 	return &gateUserFake{
-		byEmail: map[string]*userModels.User{},
-		byUUID:  map[string]*userModels.User{},
+		byEmail: map[string]*iface.User{},
+		byUUID:  map[string]*iface.User{},
 	}
 }
 
-func (f *gateUserFake) seed(u *userModels.User) {
+func (f *gateUserFake) seed(u *iface.User) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.byEmail[u.Email] = u
@@ -61,7 +60,7 @@ func (f *gateUserFake) seed(u *userModels.User) {
 	f.count++
 }
 
-func (f *gateUserFake) GetUserByID(_ context.Context, id string) (*userModels.User, error) {
+func (f *gateUserFake) GetUserByID(_ context.Context, id string) (*iface.User, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if u, ok := f.byUUID[id]; ok {
@@ -70,7 +69,7 @@ func (f *gateUserFake) GetUserByID(_ context.Context, id string) (*userModels.Us
 	return nil, errNotFound
 }
 
-func (f *gateUserFake) GetUserByEmail(_ context.Context, email string) (*userModels.UserManagementResponse, error) {
+func (f *gateUserFake) GetUserByEmail(_ context.Context, email string) (*iface.UserManagementResponse, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if u, ok := f.byEmail[email]; ok {
@@ -79,7 +78,7 @@ func (f *gateUserFake) GetUserByEmail(_ context.Context, email string) (*userMod
 	return nil, errNotFound
 }
 
-func (f *gateUserFake) GetUserForAuth(_ context.Context, email string) (*userModels.User, error) {
+func (f *gateUserFake) GetUserForAuth(_ context.Context, email string) (*iface.User, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if u, ok := f.byEmail[email]; ok {
@@ -88,7 +87,7 @@ func (f *gateUserFake) GetUserForAuth(_ context.Context, email string) (*userMod
 	return nil, errNotFound
 }
 
-func (f *gateUserFake) CreateUserFromOAuth(_ context.Context, in *userModels.CreateUserInput) (*userModels.User, error) {
+func (f *gateUserFake) CreateUserFromOAuth(_ context.Context, in *iface.CreateUserInput) (*iface.User, error) {
 	u, _ := f.createInternal(in)
 	if f.createFromOAuthAbortErr != nil {
 		return nil, f.createFromOAuthAbortErr
@@ -96,17 +95,17 @@ func (f *gateUserFake) CreateUserFromOAuth(_ context.Context, in *userModels.Cre
 	return u, nil
 }
 
-func (f *gateUserFake) CreateUserWithPassword(_ context.Context, in *userModels.CreateUserInput) (*userModels.User, error) {
+func (f *gateUserFake) CreateUserWithPassword(_ context.Context, in *iface.CreateUserInput) (*iface.User, error) {
 	if f.createWithPwdErr != nil {
 		return nil, f.createWithPwdErr
 	}
 	return f.createInternal(in)
 }
 
-func (f *gateUserFake) createInternal(in *userModels.CreateUserInput) (*userModels.User, error) {
+func (f *gateUserFake) createInternal(in *iface.CreateUserInput) (*iface.User, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	u := &userModels.User{
+	u := &iface.User{
 		UUID:          in.UUID,
 		Email:         in.Email,
 		FullName:      in.FullName,
@@ -165,7 +164,7 @@ func (f *gateUserFake) ClearFailedLogins(_ context.Context, userUUID string) err
 	return nil
 }
 
-func (f *gateUserFake) UpdateUser(_ context.Context, id string, in *userModels.UpdateUserInput) (*userModels.UserManagementResponse, error) {
+func (f *gateUserFake) UpdateUser(_ context.Context, id string, in *iface.UpdateUserInput) (*iface.UserManagementResponse, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.updateUserErr != nil {
@@ -207,19 +206,19 @@ func (f *gateUserFake) DeleteUser(_ context.Context, id string) error {
 
 func (f *gateUserFake) SoftDeleteAndAliasEmail(_ context.Context, _ string) error { return nil }
 
-func (f *gateUserFake) GetUserOAuthLinks(_ context.Context, _ string) ([]userModels.OAuthLink, error) {
+func (f *gateUserFake) GetUserOAuthLinks(_ context.Context, _ string) ([]iface.OAuthLink, error) {
 	return nil, nil
 }
 
-func (f *gateUserFake) RemoveOAuthLinkFromUser(_ context.Context, _ string, _ userModels.OAuthProvider, _ string) error {
+func (f *gateUserFake) RemoveOAuthLinkFromUser(_ context.Context, _ string, _ iface.OAuthProvider, _ string) error {
 	return nil
 }
 
-func (f *gateUserFake) SetPrimaryOAuthLink(_ context.Context, _ string, _ userModels.OAuthProvider, _ string) error {
+func (f *gateUserFake) SetPrimaryOAuthLink(_ context.Context, _ string, _ iface.OAuthProvider, _ string) error {
 	return nil
 }
 
-func (f *gateUserFake) GetUserCount(_ context.Context, _ *userModels.UserFilters) (int64, error) {
+func (f *gateUserFake) GetUserCount(_ context.Context, _ *iface.UserFilters) (int64, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.count, nil
@@ -256,7 +255,7 @@ func (f *gateUserFake) ClearMFAGrace(_ context.Context, userUUID string) error {
 
 // AddOAuthLinkToUser appends to the user's embedded OAuthLinks slice.
 // Used by the SelfLinkOAuth flow tests.
-func (f *gateUserFake) AddOAuthLinkToUser(_ context.Context, userUUID string, link userModels.OAuthLink) error {
+func (f *gateUserFake) AddOAuthLinkToUser(_ context.Context, userUUID string, link iface.OAuthLink) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	u, ok := f.byUUID[userUUID]
@@ -622,8 +621,8 @@ func testRSAKey() *rsa.PrivateKey {
 // activeUser builds a User row whose state is "live and clean" — the
 // caller can mutate the returned pointer for cases that need a
 // stale lastLogin / inactive flag / etc.
-func activeUser(email, hash string) *userModels.User {
-	return &userModels.User{
+func activeUser(email, hash string) *iface.User {
+	return &iface.User{
 		UUID:          uuid.NewString(),
 		Email:         email,
 		FullName:      "Test User",

@@ -8,7 +8,7 @@ import (
 	"time"
 
 	authModels "github.com/orkestra/backend/internal/core/auth/models"
-	userModels "github.com/orkestra/backend/internal/core/user/models"
+	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
 // adminUnlinkUserFake is a tiny iface.UserProvider tailored to the
@@ -24,27 +24,27 @@ import (
 // state explicit.
 type adminUnlinkUserFake struct {
 	mu          sync.Mutex
-	users       map[string]*userModels.User
+	users       map[string]*iface.User
 	removedCall *removedOAuthCall
 }
 
 type removedOAuthCall struct {
 	userUUID   string
-	provider   userModels.OAuthProvider
+	provider   iface.OAuthProvider
 	providerID string
 }
 
 func newAdminUnlinkUserFake() *adminUnlinkUserFake {
-	return &adminUnlinkUserFake{users: map[string]*userModels.User{}}
+	return &adminUnlinkUserFake{users: map[string]*iface.User{}}
 }
 
-func (f *adminUnlinkUserFake) seed(u *userModels.User) {
+func (f *adminUnlinkUserFake) seed(u *iface.User) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.users[u.UUID] = u
 }
 
-func (f *adminUnlinkUserFake) GetUserByID(_ context.Context, id string) (*userModels.User, error) {
+func (f *adminUnlinkUserFake) GetUserByID(_ context.Context, id string) (*iface.User, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if u, ok := f.users[id]; ok {
@@ -53,18 +53,18 @@ func (f *adminUnlinkUserFake) GetUserByID(_ context.Context, id string) (*userMo
 	return nil, errNotFound
 }
 
-func (f *adminUnlinkUserFake) GetUserOAuthLinks(_ context.Context, userUUID string) ([]userModels.OAuthLink, error) {
+func (f *adminUnlinkUserFake) GetUserOAuthLinks(_ context.Context, userUUID string) ([]iface.OAuthLink, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if u, ok := f.users[userUUID]; ok {
-		out := make([]userModels.OAuthLink, len(u.OAuthLinks))
+		out := make([]iface.OAuthLink, len(u.OAuthLinks))
 		copy(out, u.OAuthLinks)
 		return out, nil
 	}
 	return nil, errNotFound
 }
 
-func (f *adminUnlinkUserFake) AddOAuthLinkToUser(_ context.Context, userUUID string, link userModels.OAuthLink) error {
+func (f *adminUnlinkUserFake) AddOAuthLinkToUser(_ context.Context, userUUID string, link iface.OAuthLink) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if u, ok := f.users[userUUID]; ok {
@@ -74,7 +74,7 @@ func (f *adminUnlinkUserFake) AddOAuthLinkToUser(_ context.Context, userUUID str
 	return errNotFound
 }
 
-func (f *adminUnlinkUserFake) RemoveOAuthLinkFromUser(_ context.Context, userUUID string, provider userModels.OAuthProvider, providerID string) error {
+func (f *adminUnlinkUserFake) RemoveOAuthLinkFromUser(_ context.Context, userUUID string, provider iface.OAuthProvider, providerID string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.removedCall = &removedOAuthCall{userUUID: userUUID, provider: provider, providerID: providerID}
@@ -93,16 +93,16 @@ func (f *adminUnlinkUserFake) RemoveOAuthLinkFromUser(_ context.Context, userUUI
 
 // Unused-but-required UserProvider methods. Each panics to surface
 // any unexpected dependency the system under test introduces.
-func (f *adminUnlinkUserFake) GetUserByEmail(context.Context, string) (*userModels.UserManagementResponse, error) {
+func (f *adminUnlinkUserFake) GetUserByEmail(context.Context, string) (*iface.UserManagementResponse, error) {
 	panic("unused: GetUserByEmail")
 }
-func (f *adminUnlinkUserFake) GetUserForAuth(context.Context, string) (*userModels.User, error) {
+func (f *adminUnlinkUserFake) GetUserForAuth(context.Context, string) (*iface.User, error) {
 	panic("unused: GetUserForAuth")
 }
-func (f *adminUnlinkUserFake) CreateUserFromOAuth(context.Context, *userModels.CreateUserInput) (*userModels.User, error) {
+func (f *adminUnlinkUserFake) CreateUserFromOAuth(context.Context, *iface.CreateUserInput) (*iface.User, error) {
 	panic("unused: CreateUserFromOAuth")
 }
-func (f *adminUnlinkUserFake) CreateUserWithPassword(context.Context, *userModels.CreateUserInput) (*userModels.User, error) {
+func (f *adminUnlinkUserFake) CreateUserWithPassword(context.Context, *iface.CreateUserInput) (*iface.User, error) {
 	panic("unused: CreateUserWithPassword")
 }
 func (f *adminUnlinkUserFake) UpdatePasswordHash(context.Context, string, string) error {
@@ -117,7 +117,7 @@ func (f *adminUnlinkUserFake) RecordFailedLogin(context.Context, string, *time.T
 func (f *adminUnlinkUserFake) ClearFailedLogins(context.Context, string) error {
 	panic("unused: ClearFailedLogins")
 }
-func (f *adminUnlinkUserFake) UpdateUser(context.Context, string, *userModels.UpdateUserInput) (*userModels.UserManagementResponse, error) {
+func (f *adminUnlinkUserFake) UpdateUser(context.Context, string, *iface.UpdateUserInput) (*iface.UserManagementResponse, error) {
 	panic("unused: UpdateUser")
 }
 func (f *adminUnlinkUserFake) UpdateUserLastLogin(context.Context, string) error {
@@ -129,10 +129,10 @@ func (f *adminUnlinkUserFake) DeleteUser(context.Context, string) error {
 func (f *adminUnlinkUserFake) SoftDeleteAndAliasEmail(context.Context, string) error {
 	panic("unused: SoftDeleteAndAliasEmail")
 }
-func (f *adminUnlinkUserFake) SetPrimaryOAuthLink(context.Context, string, userModels.OAuthProvider, string) error {
+func (f *adminUnlinkUserFake) SetPrimaryOAuthLink(context.Context, string, iface.OAuthProvider, string) error {
 	panic("unused: SetPrimaryOAuthLink")
 }
-func (f *adminUnlinkUserFake) GetUserCount(context.Context, *userModels.UserFilters) (int64, error) {
+func (f *adminUnlinkUserFake) GetUserCount(context.Context, *iface.UserFilters) (int64, error) {
 	panic("unused: GetUserCount")
 }
 func (f *adminUnlinkUserFake) StartMFAGraceIfUnset(context.Context, string) error {
@@ -156,11 +156,11 @@ func newAdminUnlinkSvc(fake *adminUnlinkUserFake) *authService {
 func TestAdminUnlinkOAuth_Success(t *testing.T) {
 	t.Parallel()
 	fake := newAdminUnlinkUserFake()
-	target := &userModels.User{
+	target := &iface.User{
 		UUID:         "target-uuid",
 		Email:        "target@example.com",
 		PasswordHash: "argon2id$...", // has a usable password
-		OAuthLinks: []userModels.OAuthLink{
+		OAuthLinks: []iface.OAuthLink{
 			{Provider: "google", ProviderID: "g-123", Email: "target@example.com", IsActive: true, IsPrimary: true, LinkedAt: time.Now()},
 			{Provider: "github", ProviderID: "gh-456", Email: "target@example.com", IsActive: true, LinkedAt: time.Now()},
 		},
@@ -185,7 +185,7 @@ func TestAdminUnlinkOAuth_Success(t *testing.T) {
 func TestAdminUnlinkOAuth_SelfAction(t *testing.T) {
 	t.Parallel()
 	fake := newAdminUnlinkUserFake()
-	fake.seed(&userModels.User{UUID: "same-uuid", PasswordHash: "x", OAuthLinks: []userModels.OAuthLink{
+	fake.seed(&iface.User{UUID: "same-uuid", PasswordHash: "x", OAuthLinks: []iface.OAuthLink{
 		{Provider: "google", ProviderID: "g-1", IsActive: true},
 		{Provider: "github", ProviderID: "gh-1", IsActive: true},
 	}})
@@ -204,7 +204,7 @@ func TestAdminUnlinkOAuth_LastCredentialLockout(t *testing.T) {
 	t.Parallel()
 	fake := newAdminUnlinkUserFake()
 	// OAuth-only user with a single link — unlinking would lock them out.
-	fake.seed(&userModels.User{UUID: "only-oauth", PasswordHash: "", OAuthLinks: []userModels.OAuthLink{
+	fake.seed(&iface.User{UUID: "only-oauth", PasswordHash: "", OAuthLinks: []iface.OAuthLink{
 		{Provider: "google", ProviderID: "g-1", Email: "x@y.com", IsActive: true, IsPrimary: true},
 	}})
 	svc := newAdminUnlinkSvc(fake)
@@ -223,7 +223,7 @@ func TestAdminUnlinkOAuth_LastOAuthLinkButPasswordSet(t *testing.T) {
 	// A single OAuth link is fine to unlink IF the user has a password:
 	// they retain a usable login method.
 	fake := newAdminUnlinkUserFake()
-	fake.seed(&userModels.User{UUID: "has-pwd", PasswordHash: "argon2id$...", OAuthLinks: []userModels.OAuthLink{
+	fake.seed(&iface.User{UUID: "has-pwd", PasswordHash: "argon2id$...", OAuthLinks: []iface.OAuthLink{
 		{Provider: "google", ProviderID: "g-1", IsActive: true},
 	}})
 	svc := newAdminUnlinkSvc(fake)
@@ -239,7 +239,7 @@ func TestAdminUnlinkOAuth_LastOAuthLinkButPasswordSet(t *testing.T) {
 func TestAdminUnlinkOAuth_ProviderNotLinked(t *testing.T) {
 	t.Parallel()
 	fake := newAdminUnlinkUserFake()
-	fake.seed(&userModels.User{UUID: "u1", PasswordHash: "x", OAuthLinks: []userModels.OAuthLink{
+	fake.seed(&iface.User{UUID: "u1", PasswordHash: "x", OAuthLinks: []iface.OAuthLink{
 		{Provider: "google", ProviderID: "g-1", IsActive: true},
 	}})
 	svc := newAdminUnlinkSvc(fake)

@@ -13,16 +13,16 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/go-chi/chi/v5"
-	"github.com/orkestra-cc/orkestra-sdk/ctxauth"
 	"github.com/orkestra/backend/internal/core/auth/models"
 	"github.com/orkestra/backend/internal/core/auth/repository"
 	"github.com/orkestra/backend/internal/core/auth/services"
-	userModels "github.com/orkestra/backend/internal/core/user/models"
 	"github.com/orkestra/backend/internal/shared/blob"
 	"github.com/orkestra/backend/internal/shared/config"
 	"github.com/orkestra/backend/internal/shared/middleware"
 	"github.com/orkestra/backend/internal/shared/types"
 	"github.com/orkestra/backend/internal/shared/utils"
+	"github.com/orkestra/backend/pkg/sdk/ctxauth"
+	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
 // AuthHandler handles authentication endpoints
@@ -572,7 +572,7 @@ func (h *AuthHandler) finishOAuthLinkRedirect(
 		http.Redirect(w, r, base, http.StatusFound)
 	}
 
-	if err := target.authService.SelfLinkOAuthFromCallback(r.Context(), linkUserUUID, userModels.OAuthProvider(provider), userInfo, oauthTokens); err != nil {
+	if err := target.authService.SelfLinkOAuthFromCallback(r.Context(), linkUserUUID, iface.OAuthProvider(provider), userInfo, oauthTokens); err != nil {
 		switch {
 		case errors.Is(err, services.ErrOAuthLinkClaimedByOther):
 			logger.Info("oauth link refused: identity already claimed",
@@ -705,7 +705,7 @@ func (h *AuthHandler) resolveOAuthLinkRedirect(
 	}
 	resp := &OAuthCallbackResponse{Status: 302}
 
-	if err := target.authService.SelfLinkOAuthFromCallback(ctx, linkUserUUID, userModels.OAuthProvider(provider), userInfo, oauthTokens); err != nil {
+	if err := target.authService.SelfLinkOAuthFromCallback(ctx, linkUserUUID, iface.OAuthProvider(provider), userInfo, oauthTokens); err != nil {
 		switch {
 		case errors.Is(err, services.ErrOAuthLinkClaimedByOther):
 			resp.Headers.Location = build("failed", "already_linked")
@@ -1670,13 +1670,13 @@ func (h *AuthHandler) GetSessionHTTP(w http.ResponseWriter, r *http.Request) {
 	// Return the access token and user info in the response body for Redux storage
 	w.Header().Set("Content-Type", "application/json")
 	response := struct {
-		AccessToken    string                             `json:"accessToken"`
-		TokenType      string                             `json:"tokenType"`
-		ExpiresIn      int64                              `json:"expiresIn"`
-		User           *userModels.UserManagementResponse `json:"user"`
-		OAuthProviders []models.OAuthProviderInfo         `json:"oauthProviders,omitempty"`
-		Authenticated  bool                               `json:"authenticated"`
-		Success        bool                               `json:"success"`
+		AccessToken    string                        `json:"accessToken"`
+		TokenType      string                        `json:"tokenType"`
+		ExpiresIn      int64                         `json:"expiresIn"`
+		User           *iface.UserManagementResponse `json:"user"`
+		OAuthProviders []models.OAuthProviderInfo    `json:"oauthProviders,omitempty"`
+		Authenticated  bool                          `json:"authenticated"`
+		Success        bool                          `json:"success"`
 	}{
 		AccessToken:    tokenResponse.AccessToken,
 		TokenType:      "Bearer",
@@ -2221,7 +2221,7 @@ type GetCurrentUserResponse struct {
 
 // CurrentUserResponse includes user data with OAuth providers
 type CurrentUserResponse struct {
-	userModels.UserManagementResponse
+	iface.UserManagementResponse
 	OAuthProviders []models.OAuthProviderInfo `json:"oauthProviders,omitempty"`
 }
 
@@ -2314,7 +2314,7 @@ func (h *AuthHandler) GetCurrentUser(ctx context.Context, _ *struct{}) (*GetCurr
 
 	return &GetCurrentUserResponse{
 		Body: CurrentUserResponse{
-			UserManagementResponse: userModels.UserManagementResponse{
+			UserManagementResponse: iface.UserManagementResponse{
 				ID:            user.UUID,
 				Email:         user.Email,
 				Username:      user.Username,

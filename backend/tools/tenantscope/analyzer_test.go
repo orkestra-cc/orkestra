@@ -353,7 +353,7 @@ func TestInScope(t *testing.T) {
 	cases := map[string]bool{
 		// inScope keys off the in-tree filesystem path segments (internal/addons/, etc.),
 		// not the module's import path. After Phase 5h, billing's import path is
-		// `github.com/orkestra-cc/orkestra-addon-billing`, but the in-tree directory
+		// `github.com/orkestra/backend/internal/addons/billing`, but the in-tree directory
 		// `backend/internal/addons/billing/` is still what the analyzer sees when it
 		// walks the source — so this exemplar keeps its pre-extraction shape.
 		"github.com/orkestra/backend/internal/addons/billing":    true,

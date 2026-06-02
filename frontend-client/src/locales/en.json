@@ -4,7 +4,6 @@
     "tagline": "Managed services for your business"
   },
   "nav": {
-    "catalog": "Services",
     "signin": "Sign in",
     "signup": "Sign up",
     "account": "Account",
@@ -13,25 +12,7 @@
   "home": {
     "hero": "Pick the services you need. Nothing more.",
     "subhero": "Monthly subscriptions, transparent invoicing, secure payments via Stripe.",
-    "cta": "Browse the catalog"
-  },
-  "catalog": {
-    "title": "Service catalog",
-    "subtitle": "All services currently available on the platform.",
-    "empty": "No active services right now. Check back soon.",
-    "viewDetail": "View details",
-    "from": "From",
-    "subscribe": "Subscribe",
-    "noPricing": "Pricing coming soon",
-    "category": "Category",
-    "capabilities": "Included capabilities",
-    "setupFee": "Setup fee",
-    "back": "Back to catalog"
-  },
-  "cycle": {
-    "monthly": "/ month",
-    "quarterly": "/ quarter",
-    "annual": "/ year"
+    "cta": "Sign in"
   },
   "signup": {
     "title": "Create your account",
@@ -160,18 +141,6 @@
       "title": "Billing details",
       "cta": "The address and tax info we put on Stripe and on your invoices."
     },
-    "subscriptions": {
-      "title": "Subscriptions",
-      "cta": "View active subscriptions, invoices, and activity."
-    },
-    "transactions": {
-      "title": "Transactions",
-      "cta": "Charges, refunds, and Stripe transaction history."
-    },
-    "paymentMethods": {
-      "title": "Payment methods",
-      "cta": "Saved cards used for renewals and outstanding invoices."
-    },
     "changePassword": {
       "title": "Change password",
       "subtitle": "Enter your current password and a new one. Your active session will be invalidated.",
@@ -224,24 +193,6 @@
       "backupContinue": "Done, continue"
     }
   },
-  "subscribe": {
-    "title": "Confirm your subscription",
-    "subtitle": "Review the plan and we'll take you to Stripe to save a payment method. The first charge happens at the start of your billing cycle.",
-    "back": "Back to service details",
-    "browseCatalog": "Browse the catalog",
-    "servicePlan": "Service",
-    "plusSetup": "Plus a one-time setup fee of {{fee}}.",
-    "ownerLabel": "Bill this subscription to",
-    "ownerHint": "Default is personal billing. Pick an organization if you want to invoice on its behalf.",
-    "ownerPersonal": "Personal (just me)",
-    "cardNotice": "We'll redirect you to Stripe Checkout to securely save a card. We won't charge it now — your first invoice is generated at the start of the billing cycle.",
-    "submit": "Continue to payment",
-    "submitting": "Opening checkout…",
-    "cancel": "Not now",
-    "errorTitle": "Something's missing",
-    "errorMissingTier": "We couldn't find which plan you wanted. Pick one from the catalog.",
-    "errorTierGone": "That plan is no longer available. Browse the catalog for current options."
-  },
   "billing": {
     "title": "Billing details",
     "subtitle": "Used for Stripe customer creation and on the invoices we issue.",
@@ -285,129 +236,8 @@
     "submitting": "Saving…",
     "saved": "Billing details saved.",
     "errorLegalName": "Legal name is required for company billing.",
-    "errorCountry": "Country is required."
-  },
-  "subscribeReturn": {
-    "successTitle": "Subscription confirmed",
-    "successBody": "Your card is saved with Stripe and your subscription is active.",
-    "cancelTitle": "Checkout cancelled",
-    "cancelBody": "We didn't save a payment method. You can return to the catalog anytime to retry.",
-    "errorTitle": "Missing reference",
-    "errorMissing": "We couldn't find which subscription this return URL refers to.",
-    "warnLookup": "We couldn't load the subscription details. Check your account page in a moment.",
-    "browseCatalog": "Back to catalog",
-    "goAccount": "Go to account",
-    "statusLabel": "Status",
-    "tierLabel": "Plan",
-    "nextBillingLabel": "Next billing",
-    "firstChargeNotice": "Your first invoice is generated at the start of your billing cycle and the card you just saved is charged automatically.",
-    "status": {
-      "active": "Active",
-      "past_due": "Past due",
-      "suspended": "Suspended",
-      "cancelled": "Cancelled",
-      "expired": "Expired"
-    }
-  },
-  "ownerScope": {
-    "label": "Showing",
-    "all": "All accounts",
-    "personal": "Personal only",
-    "tenantOption": "Organization · {{id}}"
-  },
-  "dashboard": {
-    "subscriptions": {
-      "title": "Subscriptions",
-      "subtitle": "Active and past subscriptions across your accounts.",
-      "startNew": "Start a new subscription",
-      "browseCatalog": "Browse the catalog",
-      "empty": "No subscriptions yet. Pick a service to get started.",
-      "ownerPersonal": "Personal",
-      "ownerTenant": "Organization · {{id}}",
-      "serviceRef": "Service · {{id}}…",
-      "periodStart": "Period start",
-      "periodEnd": "Period end",
-      "nextBilling": "Next billing",
-      "willEnd": "Ends on"
-    },
-    "subscriptionDetail": {
-      "errorMissing": "We couldn't find which subscription this link refers to.",
-      "errorLoad": "Couldn't load this subscription. Try again in a moment.",
-      "cancel": "Cancel subscription",
-      "cancelPrompt": "How should we cancel? Keep access until the period ends, or stop right away?",
-      "cancelAtPeriodEnd": "End on period end",
-      "cancelImmediately": "Cancel now",
-      "cancelKeep": "Keep it",
-      "reactivate": "Reactivate",
-      "reactivating": "Reactivating…",
-      "invoicesTitle": "Invoices",
-      "invoicesEmpty": "No invoices yet — your first one is generated at the start of the billing cycle.",
-      "invoicesError": "Couldn't load invoices.",
-      "invoiceNumber": "Number",
-      "invoicePeriod": "Period",
-      "invoiceAmount": "Amount",
-      "invoiceStatus": "Status",
-      "invoiceIssued": "Issued",
-      "invoiceStatusValue": {
-        "pending": "Pending",
-        "paid": "Paid",
-        "failed": "Failed",
-        "refunded": "Refunded",
-        "void": "Void",
-        "awaiting_manual_payment": "Awaiting manual payment"
-      },
-      "payNow": "Pay now",
-      "paying": "Opening checkout…",
-      "payNoPending": "Nothing to pay right now — the renewal job will generate the next invoice automatically.",
-      "paySuccess": "Payment received. The invoice status will update once Stripe confirms it.",
-      "payCancel": "Checkout cancelled. Nothing was charged.",
-      "activityTitle": "Activity",
-      "activityEmpty": "No activity recorded yet.",
-      "activityError": "Couldn't load activity."
-    },
-    "activity": {
-      "actor": "By {{actor}}",
-      "type": {
-        "created": "Subscription created",
-        "charged": "Charge succeeded",
-        "charge_failed": "Charge failed",
-        "refunded": "Refunded",
-        "cancelled": "Cancelled",
-        "reactivated": "Reactivated",
-        "suspended": "Suspended",
-        "tier_changed": "Plan changed",
-        "invoice_issued": "Invoice issued",
-        "manual_payment_required": "Manual payment required"
-      }
-    },
-    "transactions": {
-      "title": "Transactions",
-      "subtitle": "Every charge, retry, and refund attributed to your accounts.",
-      "empty": "No transactions yet. Your first charge will appear here after the next billing cycle.",
-      "date": "Date",
-      "amount": "Amount",
-      "status": "Status",
-      "provider": "Gateway",
-      "reference": "Reference",
-      "refundedAmount": "({{amount}} refunded)",
-      "statusValue": {
-        "pending": "Pending",
-        "requires_action": "Awaiting action",
-        "succeeded": "Succeeded",
-        "failed": "Failed",
-        "refunded": "Refunded",
-        "partially_refunded": "Partially refunded"
-      }
-    },
-    "paymentMethods": {
-      "title": "Payment methods",
-      "subtitle": "Cards saved with Stripe and used for off-session renewals.",
-      "empty": "No saved payment methods. Add a card to power automatic renewals.",
-      "addCard": "Add a card",
-      "adding": "Opening Stripe…",
-      "defaultBadge": "Default",
-      "expires": "Expires {{date}}"
-    }
+    "errorCountry": "Country is required.",
+    "cancel": "Cancel"
   },
   "lang": {
     "switch": "Language",

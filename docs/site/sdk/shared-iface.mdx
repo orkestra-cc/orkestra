@@ -17,4 +17,4 @@ The public consumer-facing interfaces. Cross-module imports go **only** through 
 | `RAGQueryProvider`  | `rag`            | agents                                     |
 | `JWTProvider`       | `auth`           | identity, any custom auth integration      |
 
-This indirection is what makes the [AI sidecar split](/architecture/ai-sidecar-split) zero-code for consumers: remote HTTP-backed implementations satisfy the same interfaces.
+This indirection is what keeps consumers decoupled from producers: any implementation — in-process, or a remote HTTP-backed client a fork wires in — satisfies the same interface, so consumer code never changes.

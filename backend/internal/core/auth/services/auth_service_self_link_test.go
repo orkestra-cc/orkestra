@@ -8,7 +8,7 @@ import (
 	"time"
 
 	authModels "github.com/orkestra/backend/internal/core/auth/models"
-	userModels "github.com/orkestra/backend/internal/core/user/models"
+	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
 // fakeOAuthProviderRepo is the minimal shape SelfLinkOAuthFromCallback
@@ -106,11 +106,11 @@ func sampleUserInfo(providerID, email string) map[string]interface{} {
 func TestSelfLinkOAuth_Success(t *testing.T) {
 	t.Parallel()
 	users := newAdminUnlinkUserFake()
-	users.seed(&userModels.User{
+	users.seed(&iface.User{
 		UUID:         "u-1",
 		Email:        "u@example.com",
 		PasswordHash: "argon2id$...",
-		OAuthLinks:   []userModels.OAuthLink{},
+		OAuthLinks:   []iface.OAuthLink{},
 	})
 	repo := newFakeOAuthProviderRepo()
 	svc := newSelfLinkSvc(users, repo)
@@ -140,7 +140,7 @@ func TestSelfLinkOAuth_Success(t *testing.T) {
 func TestSelfLinkOAuth_RejectsClaimedByOther(t *testing.T) {
 	t.Parallel()
 	users := newAdminUnlinkUserFake()
-	users.seed(&userModels.User{UUID: "u-attacker", PasswordHash: "x", OAuthLinks: []userModels.OAuthLink{}})
+	users.seed(&iface.User{UUID: "u-attacker", PasswordHash: "x", OAuthLinks: []iface.OAuthLink{}})
 	repo := newFakeOAuthProviderRepo()
 	repo.seed(&authModels.OAuthProviderDoc{
 		UUID:       "existing",
@@ -173,10 +173,10 @@ func TestSelfLinkOAuth_RejectsClaimedByOther(t *testing.T) {
 func TestSelfLinkOAuth_IdempotentReLink(t *testing.T) {
 	t.Parallel()
 	users := newAdminUnlinkUserFake()
-	users.seed(&userModels.User{
+	users.seed(&iface.User{
 		UUID:         "u-1",
 		PasswordHash: "x",
-		OAuthLinks: []userModels.OAuthLink{
+		OAuthLinks: []iface.OAuthLink{
 			{Provider: "google", ProviderID: "g-123", Email: "u@example.com", IsActive: true, LinkedAt: time.Now()},
 		},
 	})
@@ -210,10 +210,10 @@ func TestSelfLinkOAuth_RejectsDuplicateProvider(t *testing.T) {
 	// A new Google link (different account) must be refused — one user
 	// can only attach one identity per provider in this iteration.
 	users := newAdminUnlinkUserFake()
-	users.seed(&userModels.User{
+	users.seed(&iface.User{
 		UUID:         "u-1",
 		PasswordHash: "x",
-		OAuthLinks: []userModels.OAuthLink{
+		OAuthLinks: []iface.OAuthLink{
 			{Provider: "google", ProviderID: "g-existing", Email: "old@example.com", IsActive: true, LinkedAt: time.Now()},
 		},
 	})
@@ -235,7 +235,7 @@ func TestSelfLinkOAuth_RejectsDuplicateProvider(t *testing.T) {
 func TestSelfLinkOAuth_RejectsIncompleteUserInfo(t *testing.T) {
 	t.Parallel()
 	users := newAdminUnlinkUserFake()
-	users.seed(&userModels.User{UUID: "u-1", PasswordHash: "x"})
+	users.seed(&iface.User{UUID: "u-1", PasswordHash: "x"})
 	repo := newFakeOAuthProviderRepo()
 	svc := newSelfLinkSvc(users, repo)
 

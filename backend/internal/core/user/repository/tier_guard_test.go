@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/orkestra/backend/internal/core/user/models"
+	"github.com/orkestra/backend/pkg/sdk/iface"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
@@ -32,8 +32,8 @@ func TestRepoConstructorsBindCorrectTierAndCollection(t *testing.T) {
 		wantTier string
 		wantColl string
 	}{
-		{"operator", NewOperatorUserRepository, models.TierOperator, OperatorUsersCollection},
-		{"client", NewClientUserRepository, models.TierClient, ClientUsersCollection},
+		{"operator", NewOperatorUserRepository, iface.TierOperator, OperatorUsersCollection},
+		{"client", NewClientUserRepository, iface.TierClient, ClientUsersCollection},
 	}
 	for _, c := range cases {
 		c := c
@@ -71,16 +71,16 @@ func TestTierStampedOnCreate(t *testing.T) {
 		userTier string // pre-existing value, should be overwritten only when repoTier is non-empty
 		want     string
 	}{
-		{models.TierOperator, "", models.TierOperator},
-		{models.TierOperator, "client", models.TierOperator}, // operator repo: stamp regardless of prior value
-		{models.TierClient, "", models.TierClient},
-		{models.TierClient, "operator", models.TierClient},
+		{iface.TierOperator, "", iface.TierOperator},
+		{iface.TierOperator, "client", iface.TierOperator}, // operator repo: stamp regardless of prior value
+		{iface.TierClient, "", iface.TierClient},
+		{iface.TierClient, "operator", iface.TierClient},
 	}
 	for _, c := range cases {
 		c := c
 		t.Run(c.repoTier+"/"+c.userTier, func(t *testing.T) {
 			t.Parallel()
-			u := &models.User{
+			u := &iface.User{
 				UUID:      "u-1",
 				Tier:      c.userTier,
 				Email:     "x@example.com",

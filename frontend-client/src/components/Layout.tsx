@@ -8,14 +8,6 @@ import { UserAvatar } from "@/components/UserAvatar";
 import { useAuth } from "@/auth/useAuth";
 import { useMe } from "@/auth/useMe";
 
-const navLinkClass = ({ isActive }: { isActive: boolean }) =>
-  [
-    "rounded-md px-3 py-2 text-sm font-medium transition-colors",
-    isActive
-      ? "bg-slate-100 text-slate-900"
-      : "text-slate-600 hover:bg-slate-100 hover:text-slate-900",
-  ].join(" ");
-
 export function Layout() {
   const { t } = useTranslation();
   const { isAuthenticated, signOut } = useAuth();
@@ -46,9 +38,6 @@ export function Layout() {
             {t("app.name")}
           </Link>
           <nav className="flex items-center gap-2">
-            <NavLink to="/catalog" className={navLinkClass}>
-              {t("nav.catalog")}
-            </NavLink>
             {isAuthenticated ? (
               <>
                 <NavLink

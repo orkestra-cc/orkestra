@@ -5,9 +5,9 @@ sidebar_position: 4
 
 # Enabling Modules at Runtime
 
-Orkestra modules live in two states: **compiled in** (decided at build time, via Go build tags) and **enabled** (decided at runtime, via the admin UI).
+Every registered module compiles into the single binary. In the core-only base that means the seven core modules — `user`, `notification`, `tenant`, `authz`, `auth`, `navigation`, `logging` — which are always loaded and on. There are no Go build tags and no SKUs; what's available is whatever is registered in the module catalog.
 
-Only modules that were compiled in can be enabled. The SKU you chose determines what's available — see [the architecture deep-dive](/architecture/module-lifecycle) for how this works.
+This page is about the **runtime enable/disable layer**: a fork's optional modules (registered via `internal/addons/<name>/` + a `cmd/server/catalog_<name>.go`) are instantiated at boot but only turned on when an operator enables them at `/admin/modules`. The base ships an empty optional catalog, so out of the box there's nothing optional to toggle — see [the architecture deep-dive](/architecture/module-lifecycle) for how this works.
 
 ## Toggle a module
 
@@ -15,12 +15,12 @@ Only modules that were compiled in can be enabled. The SKU you chose determines 
 2. Navigate to `/admin/modules`.
 3. Flip the toggle for the module you want to enable.
 
-The registry resolves dependencies automatically:
-- Enabling `billing` will refuse if `documents` is disabled (dependency).
-- Disabling `documents` will refuse if `billing` is currently enabled (dependent).
+The registry resolves dependencies automatically — using a fork's modules as an example:
+- Enabling a module will refuse if a module it depends on is disabled.
+- Disabling a module will refuse if another currently-enabled module depends on it.
 
 The change takes effect **immediately** — no container restart required. Background jobs start, routes unlock, and the navigation menu updates on the next page load.
 
 ## What persists
 
-Module state lives in the `module_configs` collection in MongoDB. On every subsequent boot, the registry honors what you set here — the `ORKESTRA_PROFILE` env var is only consulted on the **first** boot of a brand-new install.
+Module state lives in the `module_configs` collection in MongoDB. On every subsequent boot, the registry honors what you set here. On the **first** boot of a brand-new install the document is seeded from each module's `ConfigSchema().EnvVar` and its `EnabledByDefault` value.

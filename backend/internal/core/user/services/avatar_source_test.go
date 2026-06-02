@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/orkestra/backend/internal/core/user/models"
+	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
 // TestSetAvatarSource exercises the source-validation guard: OAuth
@@ -15,7 +15,7 @@ import (
 func TestSetAvatarSource(t *testing.T) {
 	t.Parallel()
 
-	newSvc := func(seed *models.User) (UserService, *fakeUserRepo) {
+	newSvc := func(seed *iface.User) (UserService, *fakeUserRepo) {
 		repo := newFakeUserRepo()
 		if seed != nil {
 			repo.seed(seed)
@@ -25,15 +25,15 @@ func TestSetAvatarSource(t *testing.T) {
 
 	t.Run("initials clears object key and returns previous", func(t *testing.T) {
 		t.Parallel()
-		svc, repo := newSvc(&models.User{
+		svc, repo := newSvc(&iface.User{
 			UUID:            "u-1",
 			Email:           "u@example.com",
 			Role:            "operator",
 			IsActive:        true,
-			AvatarSource:    models.AvatarSourceUploaded,
+			AvatarSource:    iface.AvatarSourceUploaded,
 			AvatarObjectKey: "avatars/operator/u-1/old.png",
 		})
-		prev, err := svc.SetAvatarSource(context.Background(), "u-1", models.AvatarSourceInitials, "")
+		prev, err := svc.SetAvatarSource(context.Background(), "u-1", iface.AvatarSourceInitials, "")
 		if err != nil {
 			t.Fatalf("SetAvatarSource: %v", err)
 		}
@@ -41,7 +41,7 @@ func TestSetAvatarSource(t *testing.T) {
 			t.Fatalf("previous = %q, want avatars/operator/u-1/old.png", prev)
 		}
 		got, _ := repo.GetByID(context.Background(), "u-1")
-		if got.AvatarSource != models.AvatarSourceInitials {
+		if got.AvatarSource != iface.AvatarSourceInitials {
 			t.Fatalf("source = %q, want initials", got.AvatarSource)
 		}
 		if got.AvatarObjectKey != "" {
@@ -51,14 +51,14 @@ func TestSetAvatarSource(t *testing.T) {
 
 	t.Run("oauth source requires active link", func(t *testing.T) {
 		t.Parallel()
-		svc, _ := newSvc(&models.User{
+		svc, _ := newSvc(&iface.User{
 			UUID:     "u-2",
 			Email:    "u@example.com",
 			Role:     "operator",
 			IsActive: true,
 			// No OAuth links → request must be rejected.
 		})
-		_, err := svc.SetAvatarSource(context.Background(), "u-2", models.AvatarSourceOAuthGoogle, "")
+		_, err := svc.SetAvatarSource(context.Background(), "u-2", iface.AvatarSourceOAuthGoogle, "")
 		if !errors.Is(err, ErrOAuthProviderNotLinked) {
 			t.Fatalf("err = %v, want ErrOAuthProviderNotLinked", err)
 		}
@@ -66,16 +66,16 @@ func TestSetAvatarSource(t *testing.T) {
 
 	t.Run("oauth source accepts active link", func(t *testing.T) {
 		t.Parallel()
-		svc, _ := newSvc(&models.User{
+		svc, _ := newSvc(&iface.User{
 			UUID:     "u-3",
 			Email:    "u@example.com",
 			Role:     "operator",
 			IsActive: true,
-			OAuthLinks: []models.OAuthLink{
-				{Provider: models.OAuthProviderGoogle, IsActive: true},
+			OAuthLinks: []iface.OAuthLink{
+				{Provider: iface.OAuthProviderGoogle, IsActive: true},
 			},
 		})
-		_, err := svc.SetAvatarSource(context.Background(), "u-3", models.AvatarSourceOAuthGoogle, "")
+		_, err := svc.SetAvatarSource(context.Background(), "u-3", iface.AvatarSourceOAuthGoogle, "")
 		if err != nil {
 			t.Fatalf("SetAvatarSource: %v", err)
 		}
@@ -83,16 +83,16 @@ func TestSetAvatarSource(t *testing.T) {
 
 	t.Run("oauth source rejects inactive link", func(t *testing.T) {
 		t.Parallel()
-		svc, _ := newSvc(&models.User{
+		svc, _ := newSvc(&iface.User{
 			UUID:     "u-4",
 			Email:    "u@example.com",
 			Role:     "operator",
 			IsActive: true,
-			OAuthLinks: []models.OAuthLink{
-				{Provider: models.OAuthProviderGoogle, IsActive: false},
+			OAuthLinks: []iface.OAuthLink{
+				{Provider: iface.OAuthProviderGoogle, IsActive: false},
 			},
 		})
-		_, err := svc.SetAvatarSource(context.Background(), "u-4", models.AvatarSourceOAuthGoogle, "")
+		_, err := svc.SetAvatarSource(context.Background(), "u-4", iface.AvatarSourceOAuthGoogle, "")
 		if !errors.Is(err, ErrOAuthProviderNotLinked) {
 			t.Fatalf("err = %v, want ErrOAuthProviderNotLinked", err)
 		}
@@ -100,7 +100,7 @@ func TestSetAvatarSource(t *testing.T) {
 
 	t.Run("invalid source rejected without touching repo", func(t *testing.T) {
 		t.Parallel()
-		svc, _ := newSvc(&models.User{UUID: "u-5", Email: "u@example.com", Role: "operator", IsActive: true})
+		svc, _ := newSvc(&iface.User{UUID: "u-5", Email: "u@example.com", Role: "operator", IsActive: true})
 		_, err := svc.SetAvatarSource(context.Background(), "u-5", "junk", "")
 		if !errors.Is(err, ErrInvalidAvatarSource) {
 			t.Fatalf("err = %v, want ErrInvalidAvatarSource", err)
@@ -109,13 +109,13 @@ func TestSetAvatarSource(t *testing.T) {
 
 	t.Run("uploaded with object key writes both fields", func(t *testing.T) {
 		t.Parallel()
-		svc, repo := newSvc(&models.User{
+		svc, repo := newSvc(&iface.User{
 			UUID:     "u-6",
 			Email:    "u@example.com",
 			Role:     "operator",
 			IsActive: true,
 		})
-		prev, err := svc.SetAvatarSource(context.Background(), "u-6", models.AvatarSourceUploaded, "avatars/operator/u-6/new.png")
+		prev, err := svc.SetAvatarSource(context.Background(), "u-6", iface.AvatarSourceUploaded, "avatars/operator/u-6/new.png")
 		if err != nil {
 			t.Fatalf("SetAvatarSource: %v", err)
 		}
@@ -123,7 +123,7 @@ func TestSetAvatarSource(t *testing.T) {
 			t.Fatalf("previous = %q, want empty", prev)
 		}
 		got, _ := repo.GetByID(context.Background(), "u-6")
-		if got.AvatarSource != models.AvatarSourceUploaded {
+		if got.AvatarSource != iface.AvatarSourceUploaded {
 			t.Fatalf("source = %q, want uploaded", got.AvatarSource)
 		}
 		if got.AvatarObjectKey != "avatars/operator/u-6/new.png" {
@@ -134,7 +134,7 @@ func TestSetAvatarSource(t *testing.T) {
 	t.Run("missing user surfaces ErrUserNotFound", func(t *testing.T) {
 		t.Parallel()
 		svc, _ := newSvc(nil)
-		_, err := svc.SetAvatarSource(context.Background(), "missing", models.AvatarSourceInitials, "")
+		_, err := svc.SetAvatarSource(context.Background(), "missing", iface.AvatarSourceInitials, "")
 		if !errors.Is(err, ErrUserNotFound) {
 			t.Fatalf("err = %v, want ErrUserNotFound", err)
 		}

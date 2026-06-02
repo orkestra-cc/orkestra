@@ -1,6 +1,6 @@
 ---
 name: orkestra-go
-description: "Go backend expert for Orkestra modular monolith. Covers module registry patterns, cross-module interfaces, Huma v2 APIs, MongoDB/Redis/Memgraph data layer, two-tier tenancy, build-profile awareness, and the AI sidecar split. Use for any Orkestra backend work."
+description: "Go backend expert for Orkestra modular monolith. Covers module registry patterns, cross-module interfaces, Huma v2 APIs, MongoDB/Redis data layer, two-tier tenancy, the Module extension seam, and the core-only base (ADR-0006). Use for any Orkestra backend work."
 model: opus
 ---
 
@@ -19,7 +19,7 @@ If a module has its own `CLAUDE.md`, **that doc wins** over anything in this ski
 
 ## Architecture in one paragraph
 
-Orkestra is a **plugin-style modular monolith**. A small core (`internal/core/`: user, notification, tenant, authz, auth, navigation) is always linked. Every other capability is an **addon** under `internal/addons/` — addons are wired in via per-addon files at `cmd/server/catalog_<name>.go`. Every binary ships every addon; runtime enable/disable comes from `module_configs` in MongoDB (hot-reloadable via `/admin/modules`). `ORKESTRA_PROFILE=minimal|full` decides first-boot seeded enablement only.
+Orkestra is a **plugin-style modular monolith**, shipped as a **core-only base** (ADR-0006). The core (`internal/core/`: user, notification, tenant, authz, auth, navigation, logging) is always linked; the base ships **no** addons (the `optionalModules` catalog is empty). A fork adds capabilities as **addons** under `internal/addons/<name>/`, wired via per-addon files at `cmd/server/catalog_<name>.go`. Every registered module compiles into the one binary; runtime enable/disable comes from `module_configs` in MongoDB (hot-reloadable via `/admin/modules`).
 
 ## Two-tier tenancy (load-bearing)
 
@@ -129,13 +129,9 @@ If you need a type that crosses module boundaries, **put it in `shared/iface/`**
 
 `ModuleConfigService` reads `module_configs` (MongoDB) → falls back to env vars → falls back to schema default. Secrets are AES-256-GCM encrypted in MongoDB; never log them or echo them in API responses. Modules with `HotReloadConfig() == true` should read config lazily through `deps.GetConfig` / `deps.GetSecret` so admin-UI changes take effect without a restart.
 
-## Runtime profiles (developer-facing)
+## Core-only base (ADR-0006)
 
-Every binary compiles every addon. `ORKESTRA_PROFILE=minimal|full` on a fresh install seeds the `module_configs` document: `minimal` leaves all addons disabled; `full` pre-enables every non-dev addon. Subsequent boots ignore the env var. `backend/Makefile` exposes a single `make build` target — no profile matrix, no CI matrix.
-
-## AI sidecar split (be aware)
-
-The four AI modules (graph, aimodels, rag, agents) can run as a separate `cmd/ai-service/` binary, gated by `AI_SERVICE_URL` on the monolith. When set, the monolith registers `RemoteAIModelProvider` + `RemoteRAGQueryProvider` (HTTP clients in `shared/remote/`) under the same `ServiceKey`s — consumer modules use the same `GetTyped` pattern; zero code change. The split uses lightweight `JWTValidator` (public key only), not full `AuthMiddleware`, to avoid pulling the auth module into the AI binary.
+Single binary, single Go module, single image — `make build` is the only build target (no SKUs, no build tags, no profile/CI matrix). The 7 core modules always load; the `optionalModules` catalog ships **empty**. There is no `ORKESTRA_PROFILE` — on a fresh install `module_configs` is seeded from each module's `ConfigSchema().EnvVar` + its `EnabledByDefault`, and subsequent boots honor admin-set values from `/admin/modules`. A fork adds a vertical in-tree under `internal/addons/<name>/` + `cmd/server/catalog_<name>.go` (same `Module` seam the core uses), against the in-tree `pkg/sdk` package — no satellite `go.mod`/`go.work`/`replace`. The AI sidecar (`cmd/ai-service`, `AI_SERVICE_URL`, `shared/remote/`) and all 14 addons were removed by ADR-0006; their last in-tree state lives in the archived `orkestra-cc/orkestra-addon-*` repos. The `AuditSink`/`KMSProvider` setter seams + the `InfraContainers()` hook survive (nil/unused in the base) for a fork to wire.
 
 ## Conventions
 

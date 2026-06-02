@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	userModels "github.com/orkestra/backend/internal/core/user/models"
+	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
 // SelfUnlinkOAuth shares the lockout helper with AdminUnlinkOAuth, so
@@ -17,11 +17,11 @@ import (
 func TestSelfUnlinkOAuth_Success(t *testing.T) {
 	t.Parallel()
 	fake := newAdminUnlinkUserFake()
-	user := &userModels.User{
+	user := &iface.User{
 		UUID:         "u-1",
 		Email:        "u@example.com",
 		PasswordHash: "argon2id$...",
-		OAuthLinks: []userModels.OAuthLink{
+		OAuthLinks: []iface.OAuthLink{
 			{Provider: "google", ProviderID: "g-1", Email: "u@example.com", IsActive: true, IsPrimary: true, LinkedAt: time.Now()},
 			{Provider: "github", ProviderID: "gh-1", Email: "u@example.com", IsActive: true, LinkedAt: time.Now()},
 		},
@@ -40,7 +40,7 @@ func TestSelfUnlinkOAuth_Success(t *testing.T) {
 func TestSelfUnlinkOAuth_LastCredentialLockout(t *testing.T) {
 	t.Parallel()
 	fake := newAdminUnlinkUserFake()
-	fake.seed(&userModels.User{UUID: "u-2", PasswordHash: "", OAuthLinks: []userModels.OAuthLink{
+	fake.seed(&iface.User{UUID: "u-2", PasswordHash: "", OAuthLinks: []iface.OAuthLink{
 		{Provider: "google", ProviderID: "g-1", IsActive: true, IsPrimary: true},
 	}})
 	svc := newAdminUnlinkSvc(fake)
@@ -57,7 +57,7 @@ func TestSelfUnlinkOAuth_LastCredentialLockout(t *testing.T) {
 func TestSelfUnlinkOAuth_ProviderNotLinked(t *testing.T) {
 	t.Parallel()
 	fake := newAdminUnlinkUserFake()
-	fake.seed(&userModels.User{UUID: "u-3", PasswordHash: "x", OAuthLinks: []userModels.OAuthLink{
+	fake.seed(&iface.User{UUID: "u-3", PasswordHash: "x", OAuthLinks: []iface.OAuthLink{
 		{Provider: "google", ProviderID: "g-1", IsActive: true},
 	}})
 	svc := newAdminUnlinkSvc(fake)
@@ -75,7 +75,7 @@ func TestSelfUnlinkOAuth_ProviderNotLinked(t *testing.T) {
 func TestSelfUnlinkOAuth_SelfActionAllowed(t *testing.T) {
 	t.Parallel()
 	fake := newAdminUnlinkUserFake()
-	fake.seed(&userModels.User{UUID: "u-4", PasswordHash: "x", OAuthLinks: []userModels.OAuthLink{
+	fake.seed(&iface.User{UUID: "u-4", PasswordHash: "x", OAuthLinks: []iface.OAuthLink{
 		{Provider: "google", ProviderID: "g-1", IsActive: true},
 		{Provider: "github", ProviderID: "gh-1", IsActive: true},
 	}})

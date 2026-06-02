@@ -16,19 +16,12 @@ import (
 )
 
 type Config struct {
-	Server    ServerConfig
-	Database  DatabaseConfig
-	Redis     RedisConfig
-	Auth      AuthConfig
-	Rate      RateLimitConfig
-	Storage   StorageConfig
-	Billing   BillingConfig
-	Documents DocumentsConfig
-	Company   CompanyConfig
-	Graph     GraphConfig
-	AIModels  AIModelsConfig
-	Agents    AgentsConfig
-	Features  FeaturesConfig
+	Server   ServerConfig
+	Database DatabaseConfig
+	Redis    RedisConfig
+	Auth     AuthConfig
+	Rate     RateLimitConfig
+	Storage  StorageConfig
 }
 
 // StorageConfig holds the S3-compatible object-storage connection
@@ -48,108 +41,13 @@ type StorageConfig struct {
 	EnsureBucket   bool // true → backend creates the bucket on boot if missing; safe for self-hosted
 }
 
-// FeaturesConfig holds cross-module feature flags driving phased migrations.
-// These are intentionally not module-scoped — they switch behavior in
-// multiple addons at once and are flipped centrally during a refactor.
-type FeaturesConfig struct {
-	// LazyTenantProvisioning gates the Unified Client Aggregate Phase 2
-	// behavior: when true, self-service callers (subscriptions, payments)
-	// resolve their personal tenant via TenantProvider.EnsureTenantForUser
-	// and the entitlement syncer redirects user-owned subscription
-	// activations onto that tenant. Default ON since Phase 3 — the
-	// one-shot 0001_unify_clients migration has folded legacy
-	// clientbilling rows into the matching Tenant, so every self-service
-	// flow now expects the personal tenant to exist (or be lazily
-	// minted). Set UNIFIED_CLIENTS_LAZY_TENANT_ENABLED=false to revert
-	// to the legacy user-owner code path while Phase 4/5 land.
-	LazyTenantProvisioning bool
-}
-
-// AgentsConfig holds configuration for the AI agents module (Hindsight integration)
-type AgentsConfig struct {
-	Enabled            bool   // Module enabled flag (AGENTS_ENABLED)
-	HindsightURL       string // Hindsight API base URL (HINDSIGHT_URL)
-	HindsightNamespace string // Hindsight namespace for bank IDs (HINDSIGHT_NAMESPACE)
-}
-
-// AIModelsConfig holds configuration for the AI models management module
-type AIModelsConfig struct {
-	Enabled       bool   // Module enabled flag (AIMODELS_ENABLED)
-	OllamaBaseURL string // Ollama API base URL (shared with RAG)
-	OpenAIAPIKey  string // OpenAI API key (shared with RAG)
-	AnthropicKey  string // Anthropic API key
-	GeminiKey     string // Google Gemini API key
-}
-
-// GraphConfig holds configuration for the graph database module (Memgraph)
-type GraphConfig struct {
-	Enabled     bool          // Module enabled flag (GRAPH_ENABLED)
-	URI         string        // Bolt URI: bolt://host:7687
-	Username    string        // Database username (empty for no auth)
-	Password    string        // Database password (empty for no auth)
-	Database    string        // Default database name
-	MaxConnPool int           // Connection pool size
-	Encrypted   bool          // TLS/encryption
-	Timeout     time.Duration // Query timeout
-}
-
-// CompanyConfig holds configuration for the company lookup module (OpenAPI Company API)
-type CompanyConfig struct {
-	BaseURL       string        // Base URL: https://company.openapi.com (prod) or https://test.company.openapi.com (sandbox)
-	AccountEmail  string        // OpenAPI.com account email — paired with APIKey to mint JWTs at OAuthBaseURL/token
-	APIKey        string        // Long-lived API key from console.openapi.com (Basic-auth password to OAuth /token)
-	OAuthBaseURL  string        // OAuth host: https://oauth.openapi.it (prod) or https://test.oauth.openapi.it (sandbox)
-	BearerToken   string        // Legacy static JWT — used only when AccountEmail+APIKey are empty
-	Timeout       time.Duration // HTTP client timeout
-	RetryAttempts int           // Number of retry attempts for failed requests
-	CacheTTL      time.Duration // Redis cache TTL for company lookups
-}
-
-// BillingConfig holds configuration for the billing/invoicing module (OpenAPI SDI integration)
-type BillingConfig struct {
-	// OpenAPI SDI configuration
-	OpenAPIBaseURL       string        // Base URL: https://sdi.openapi.it (prod) or https://test.sdi.openapi.it (sandbox)
-	OpenAPIAccountEmail  string        // Account email — paired with OpenAPIAPIKey to mint JWTs at OpenAPIOAuthBaseURL/token
-	OpenAPIAPIKey        string        // Long-lived API key (Basic-auth password to OAuth /token)
-	OpenAPIOAuthBaseURL  string        // OAuth host: https://oauth.openapi.it (prod) or https://test.oauth.openapi.it (sandbox)
-	OpenAPIBearerToken   string        // Legacy static JWT — used only when OpenAPIAccountEmail+APIKey are empty
-	OpenAPIFiscalID      string        // Company fiscal ID (P.IVA with country code, e.g., IT12345678901)
-	OpenAPIRecipientCode string        // SDI recipient code (OpenAPI's code: JKKZDGR)
-	ApplySignature       bool          // Enable digital signature for invoices
-	ApplyStorage         bool          // Enable legal storage (conservazione sostitutiva)
-	Timeout              time.Duration // HTTP client timeout
-	RetryAttempts        int           // Number of retry attempts for failed requests
-	PollingInterval      time.Duration // Interval between polling for notifications
-	PollingEnabled       bool          // Enable automatic SDI polling (default: false to stay under API limits)
-	SandboxMode          bool          // Use sandbox environment
-	WebhookURL           string        // Public URL for receiving SDI webhook callbacks (e.g., https://staging-api.orkestra.cc/v1/billing/webhooks/sdi)
-	WebhookSecret        string        // Secret token for verifying incoming webhook requests
-}
-
-// DocumentsConfig holds configuration for the documents/PDF generation module (Gotenberg integration)
-type DocumentsConfig struct {
-	GotenbergURL   string        // Gotenberg service URL (e.g., http://gotenberg:3000)
-	Timeout        time.Duration // HTTP client timeout for PDF generation
-	RetryAttempts  int           // Number of retry attempts for failed requests
-	DefaultMargins PDFMargins    // Default page margins in millimeters
-}
-
-// PDFMargins defines page margins for PDF generation
-type PDFMargins struct {
-	Top    float64 // Top margin in millimeters
-	Bottom float64 // Bottom margin in millimeters
-	Left   float64 // Left margin in millimeters
-	Right  float64 // Right margin in millimeters
-}
-
 type ServerConfig struct {
-	Port         string
-	Environment  string
-	LogLevel     string
-	FrontendURL  string
-	CORSOrigins  []string // Allowed CORS origins (legacy single-host fallback)
-	MaxBodySize  int64    // Maximum request body size in bytes (default 10MB)
-	AIServiceURL string   // When set, AI modules run in the external AI service sidecar
+	Port        string
+	Environment string
+	LogLevel    string
+	FrontendURL string
+	CORSOrigins []string // Allowed CORS origins (legacy single-host fallback)
+	MaxBodySize int64    // Maximum request body size in bytes (default 10MB)
 
 	// ADR-0003 per-audience host split. Both audiences are served from the
 	// same Go binary, dispatched by Host header at the application layer.
@@ -304,13 +202,12 @@ func Load() (*Config, error) {
 	}
 
 	config.Server = ServerConfig{
-		Port:         getEnv("PORT", "3000"),
-		Environment:  env,
-		LogLevel:     getEnv("LOG_LEVEL", "info"),
-		FrontendURL:  getEnv("FRONTEND_URL", "http://localhost:8080"),
-		CORSOrigins:  corsOrigins,
-		MaxBodySize:  getEnvAsInt64("MAX_BODY_SIZE", 10*1024*1024), // Default 10MB
-		AIServiceURL: getEnv("AI_SERVICE_URL", ""),                 // Empty = local modules, set = remote AI service
+		Port:        getEnv("PORT", "3000"),
+		Environment: env,
+		LogLevel:    getEnv("LOG_LEVEL", "info"),
+		FrontendURL: getEnv("FRONTEND_URL", "http://localhost:8080"),
+		CORSOrigins: corsOrigins,
+		MaxBodySize: getEnvAsInt64("MAX_BODY_SIZE", 10*1024*1024), // Default 10MB
 		Operator: AudienceConfig{
 			Host:        getEnv("CONSOLE_HOST", defaultConsoleHost),
 			CORSOrigins: getEnvAsSlice("OPERATOR_CORS_ORIGINS", nil),
@@ -419,99 +316,6 @@ func Load() (*Config, error) {
 		Burst:             getEnvAsInt("RATE_LIMIT_BURST", 10),
 	}
 
-	// Billing/Invoicing configuration (OpenAPI SDI)
-	sandboxMode := getEnvAsBool("OPENAPI_SANDBOX_MODE", true)
-	defaultBaseURL := "https://test.sdi.openapi.it"
-	if !sandboxMode {
-		defaultBaseURL = "https://sdi.openapi.it"
-	}
-
-	billingDefaultOAuthBaseURL := "https://oauth.openapi.it"
-	if sandboxMode {
-		billingDefaultOAuthBaseURL = "https://test.oauth.openapi.it"
-	}
-
-	config.Billing = BillingConfig{
-		OpenAPIBaseURL:       getEnv("OPENAPI_BILLING_BASE_URL", defaultBaseURL),
-		OpenAPIAccountEmail:  getEnv("OPENAPI_BILLING_ACCOUNT_EMAIL", ""),
-		OpenAPIAPIKey:        getEnv("OPENAPI_BILLING_API_KEY", ""),
-		OpenAPIOAuthBaseURL:  getEnv("OPENAPI_OAUTH_BASE_URL", billingDefaultOAuthBaseURL),
-		OpenAPIBearerToken:   getEnv("OPENAPI_BILLING_BEARER_TOKEN", ""),
-		OpenAPIFiscalID:      getEnv("OPENAPI_BILLING_FISCAL_ID", ""),
-		OpenAPIRecipientCode: getEnv("OPENAPI_BILLING_RECIPIENT_CODE", "JKKZDGR"),
-		ApplySignature:       getEnvAsBool("OPENAPI_BILLING_APPLY_SIGNATURE", true),
-		ApplyStorage:         getEnvAsBool("OPENAPI_BILLING_APPLY_STORAGE", true),
-		Timeout:              getEnvAsDuration("OPENAPI_BILLING_TIMEOUT", "30s"),
-		RetryAttempts:        getEnvAsInt("OPENAPI_BILLING_RETRY_ATTEMPTS", 3),
-		PollingInterval:      getEnvAsDuration("OPENAPI_BILLING_POLLING_INTERVAL", "12h"),
-		PollingEnabled:       getEnvAsBool("OPENAPI_BILLING_POLLING_ENABLED", true),
-		SandboxMode:          sandboxMode,
-		WebhookURL:           getEnv("OPENAPI_BILLING_WEBHOOK_URL", ""),
-		WebhookSecret:        getEnv("OPENAPI_BILLING_WEBHOOK_SECRET", ""),
-	}
-
-	// Company lookup configuration (OpenAPI Company API)
-	// Reuses sandboxMode from billing config
-	defaultCompanyBaseURL := "https://test.company.openapi.com"
-	if !sandboxMode {
-		defaultCompanyBaseURL = "https://company.openapi.com"
-	}
-
-	// Company API token: use dedicated token if set, otherwise fall back to billing token
-	companyToken := getEnv("OPENAPI_COMPANY_BEARER_TOKEN", "")
-	if companyToken == "" {
-		companyToken = config.Billing.OpenAPIBearerToken
-	}
-
-	defaultOAuthBaseURL := "https://oauth.openapi.it"
-	if sandboxMode {
-		defaultOAuthBaseURL = "https://test.oauth.openapi.it"
-	}
-
-	config.Company = CompanyConfig{
-		BaseURL:       getEnv("OPENAPI_COMPANY_BASE_URL", defaultCompanyBaseURL),
-		AccountEmail:  getEnv("OPENAPI_COMPANY_ACCOUNT_EMAIL", ""),
-		APIKey:        getEnv("OPENAPI_COMPANY_API_KEY", ""),
-		OAuthBaseURL:  getEnv("OPENAPI_OAUTH_BASE_URL", defaultOAuthBaseURL),
-		BearerToken:   companyToken,
-		Timeout:       getEnvAsDuration("OPENAPI_COMPANY_TIMEOUT", "15s"),
-		RetryAttempts: getEnvAsInt("OPENAPI_COMPANY_RETRY_ATTEMPTS", 3),
-		CacheTTL:      getEnvAsDuration("OPENAPI_COMPANY_CACHE_TTL", "24h"),
-	}
-
-	// Graph database configuration (Memgraph)
-	config.Graph = GraphConfig{
-		Enabled:     getEnvAsBool("GRAPH_ENABLED", false),
-		URI:         getEnv("GRAPH_URI", "bolt://localhost:7687"),
-		Username:    getEnv("GRAPH_USERNAME", ""),
-		Password:    getEnv("GRAPH_PASSWORD", ""),
-		Database:    getEnv("GRAPH_DATABASE", "memgraph"),
-		MaxConnPool: getEnvAsInt("GRAPH_MAX_CONN_POOL", 25),
-		Encrypted:   getEnvAsBool("GRAPH_ENCRYPTED", false),
-		Timeout:     getEnvAsDuration("GRAPH_TIMEOUT", "30s"),
-	}
-
-	// AI Models management configuration
-	config.AIModels = AIModelsConfig{
-		Enabled:       getEnvAsBool("AIMODELS_ENABLED", false),
-		OllamaBaseURL: getEnv("OLLAMA_BASE_URL", "http://localhost:11434"),
-		OpenAIAPIKey:  getEnv("OPENAI_API_KEY", ""),
-		AnthropicKey:  getEnv("ANTHROPIC_API_KEY", ""),
-		GeminiKey:     getEnv("GEMINI_API_KEY", ""),
-	}
-
-	// Agents / Hindsight configuration
-	config.Agents = AgentsConfig{
-		Enabled:            getEnvAsBool("AGENTS_ENABLED", false),
-		HindsightURL:       getEnv("HINDSIGHT_URL", "http://hindsight:8888"),
-		HindsightNamespace: getEnv("HINDSIGHT_NAMESPACE", "orkestra"),
-	}
-
-	// Cross-module feature flags
-	config.Features = FeaturesConfig{
-		LazyTenantProvisioning: getEnvAsBool("UNIFIED_CLIENTS_LAZY_TENANT_ENABLED", true),
-	}
-
 	// Object storage configuration (RustFS default — S3-compatible).
 	// Defaults below match docker-compose.infra.yml's rustfs service so
 	// `docker compose -f infra.yml up -d` + a fresh boot just works.
@@ -523,19 +327,6 @@ func Load() (*Config, error) {
 		SecretKey:      getEnv("STORAGE_SECRET_KEY", ""),
 		ForcePathStyle: getEnvAsBool("STORAGE_FORCE_PATH_STYLE", true),
 		EnsureBucket:   getEnvAsBool("STORAGE_ENSURE_BUCKET", true),
-	}
-
-	// Documents/PDF generation configuration (Gotenberg)
-	config.Documents = DocumentsConfig{
-		GotenbergURL:  getEnv("GOTENBERG_URL", "http://gotenberg:3000"),
-		Timeout:       getEnvAsDuration("GOTENBERG_TIMEOUT", "60s"),
-		RetryAttempts: getEnvAsInt("GOTENBERG_RETRY_ATTEMPTS", 3),
-		DefaultMargins: PDFMargins{
-			Top:    20.0,
-			Bottom: 20.0,
-			Left:   20.0,
-			Right:  20.0,
-		},
 	}
 
 	if err := config.Validate(); err != nil {

@@ -18,22 +18,22 @@ import (
 	"github.com/danielgtaylor/huma/v2/adapters/humachi"
 	"github.com/go-chi/chi/v5"
 
-	"github.com/orkestra-cc/orkestra-sdk/iface"
-	"github.com/orkestra-cc/orkestra-sdk/metrics"
-	"github.com/orkestra-cc/orkestra-sdk/module"
 	"github.com/orkestra/backend/internal/core/auth/services"
 	authzServices "github.com/orkestra/backend/internal/core/authz/services"
 	"github.com/orkestra/backend/internal/shared/blob"
 	"github.com/orkestra/backend/internal/shared/config"
 	"github.com/orkestra/backend/internal/shared/container"
 	"github.com/orkestra/backend/internal/shared/database"
+	"github.com/orkestra/backend/internal/shared/devtoken"
 	"github.com/orkestra/backend/internal/shared/errors"
 	authMiddleware "github.com/orkestra/backend/internal/shared/middleware"
-	"github.com/orkestra/backend/internal/shared/remote"
 	"github.com/orkestra/backend/internal/shared/setup"
 	"github.com/orkestra/backend/internal/shared/systeminit"
 	"github.com/orkestra/backend/internal/shared/telemetry"
 	"github.com/orkestra/backend/internal/shared/utils"
+	"github.com/orkestra/backend/pkg/sdk/iface"
+	"github.com/orkestra/backend/pkg/sdk/metrics"
+	"github.com/orkestra/backend/pkg/sdk/module"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
@@ -145,8 +145,10 @@ func main() {
 	svcRegistry := module.NewServiceRegistry()
 	svcRegistry.Register(module.ServiceFirstAdminClaimer, firstAdminClaimer)
 	// PII producer registry is pre-created here so producer modules can
-	// register themselves during their own Init; compliance reads it when
-	// servicing DSR requests. See iface.PIIProducerRegistry.
+	// register themselves during their own Init. ADR-0006: the core base
+	// has no in-tree consumer (compliance/DSR left with the addons); the
+	// registry is kept as the seam a fork's DSR module reads from. See
+	// iface.PIIProducerRegistry.
 	svcRegistry.Register(module.ServicePIIProducerRegistry, iface.NewPIIProducerRegistry())
 
 	// Object storage (S3-compatible; defaults to RustFS in dev/staging).
@@ -248,24 +250,6 @@ func main() {
 			slog.String("source", "logging core module"))
 	}
 
-	// AI service sidecar: register remote providers for AI modules
-	// that failed Init locally (e.g. external infra not available).
-	if cfg.Server.AIServiceURL != "" {
-		remoteAI := remote.NewAIModelProvider(cfg.Server.AIServiceURL)
-		remoteRAG := remote.NewRAGQueryProvider(cfg.Server.AIServiceURL)
-
-		failedModules := modRegistry.FailedModules()
-		if _, failed := failedModules["aimodels"]; failed {
-			svcRegistry.Register(module.ServiceAIModelProvider, remoteAI)
-		}
-		if _, failed := failedModules["rag"]; failed {
-			svcRegistry.Register(module.ServiceRAGQuery, remoteRAG)
-		}
-		logger.Info("AI service sidecar configured",
-			slog.String("url", cfg.Server.AIServiceURL),
-		)
-	}
-
 	// Retrieve auth infrastructure for middleware setup
 	jwtService := svcRegistry.MustGet(module.ServiceJWTService).(services.JWTService)
 	authService := svcRegistry.MustGet(module.ServiceAuthService).(services.AuthService)
@@ -281,9 +265,10 @@ func main() {
 	authMW.SetTenantProvider(module.MustGetTyped[iface.TenantProvider](svcRegistry, module.ServiceTenantProvider))
 	authMW.SetAccessProvider(module.MustGetTyped[iface.AccessProvider](svcRegistry, module.ServiceAccessProvider))
 	authMW.SetAuthzProvider(module.MustGetTyped[iface.AuthzProvider](svcRegistry, module.ServiceAuthzProvider))
-	if sink, ok := module.GetTyped[iface.AuditSink](svcRegistry, module.ServiceAuditSink); ok {
-		authMW.SetAuditSink(sink)
-	}
+	// ADR-0006: the compliance audit-sink probe was removed with the
+	// addon. The SetAuditSink seam survives on the middleware and core
+	// services, nil by default (usage is nil-guarded) — a fork that adds
+	// an audit/compliance module re-wires it the same way compliance did.
 	if rev, ok := module.GetTyped[services.SessionRevocationService](svcRegistry, module.ServiceSessionRevocation); ok {
 		authMW.SetSessionRevocation(rev)
 	}
@@ -411,6 +396,21 @@ func main() {
 		logger,
 	)
 	setup.NewHandler(setupSvc, cfg.Auth.Cookie).RegisterRoutes(operatorAPI)
+
+	// Dev-token endpoint (dev/staging only) — synthetic JWTs for first
+	// login + local API testing, used by scripts/devtoken.sh and the
+	// console's "Sign in with dev token" affordance. Re-provided in core
+	// after ADR-0006 removed the dev addon. Mounted as a raw chi route on
+	// the operator root mux (bypasses Huma, hidden from /docs); never on
+	// the client host. No DB writes.
+	if !cfg.IsProduction() {
+		devtoken.NewHandler(
+			module.MustGetTyped[iface.JWTProvider](svcRegistry, module.ServiceOperatorJWTService),
+			module.MustGetTyped[iface.JWTProvider](svcRegistry, module.ServiceClientJWTService),
+			cfg,
+			logger,
+		).RegisterRoutes(operatorMux)
+	}
 
 	// Admin module management routes: platform-level, not per-org. Split
 	// into reads and mutations so Block B can require MFA on the paths

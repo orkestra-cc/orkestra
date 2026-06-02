@@ -74,75 +74,6 @@ services:
       timeout: 5s
       retries: 5
 
-  gotenberg:
-    image: gotenberg/gotenberg:8
-    container_name: orkestra-gotenberg
-    restart: unless-stopped
-    ports:
-      - "${GOTENBERG_PORT:-3030}:3000"
-    command:
-      - "gotenberg"
-      - "--api-timeout=120s"
-      - "--chromium-max-queue-size=20"
-    networks:
-      - orkestra-network
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  # Memgraph is lifecycle-managed by the backend: the graph module boots
-  # this container via the shared/container package when it is enabled in
-  # the admin UI and stops it again when disabled. It lives behind the
-  # "manual-only" profile so `docker compose up -d` does not bring it up
-  # automatically. To run memgraph manually (e.g. to inspect or debug):
-  #   docker compose -f docker-compose.infra.yml --profile manual-only up -d memgraph
-  memgraph:
-    profiles: ["manual-only"]
-    image: memgraph/memgraph-mage:latest
-    container_name: orkestra-memgraph
-    restart: unless-stopped
-    ports:
-      - "${MEMGRAPH_BOLT_PORT:-7687}:7687"
-      - "${MEMGRAPH_MONITORING_PORT:-7444}:7444"
-    volumes:
-      - orkestra-memgraph-data:/var/lib/memgraph
-    networks:
-      - orkestra-network
-    # No healthcheck: Memgraph speaks Bolt (not HTTP) and the stock image
-    # has no TCP-probe binary. The backend's container.Manager does its
-    # own TCP dial on 7687 before marking the module healthy, which is
-    # the authoritative signal anyway.
-
-  # Hindsight is lifecycle-managed by the backend: the agents module boots
-  # this container via the shared/container package when it is enabled in
-  # the admin UI and stops it again when disabled. It lives behind the
-  # "manual-only" profile so `docker compose up -d` no longer brings it up
-  # automatically. To run hindsight manually (e.g. to inspect or debug):
-  #   docker compose -f docker-compose.infra.yml --profile manual-only up -d hindsight
-  hindsight:
-    profiles: ["manual-only"]
-    image: ghcr.io/vectorize-io/hindsight:latest
-    container_name: orkestra-hindsight
-    restart: unless-stopped
-    ports:
-      - "${HINDSIGHT_PORT:-8888}:8888"
-    environment:
-      HINDSIGHT_API_LLM_PROVIDER: ${HINDSIGHT_LLM_PROVIDER:-openai}
-      HINDSIGHT_API_LLM_API_KEY: ${HINDSIGHT_LLM_API_KEY:-}
-      HINDSIGHT_API_LLM_MODEL: ${HINDSIGHT_LLM_MODEL:-gpt-4o-mini}
-      HINDSIGHT_API_LLM_BASE_URL: ${HINDSIGHT_LLM_BASE_URL:-}
-    volumes:
-      - orkestra-hindsight-data:/home/hindsight/.pg0
-    networks:
-      - orkestra-network
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8888/health"]
-      interval: 15s
-      timeout: 5s
-      retries: 5
-
 volumes:
   # All volumes pin their literal Docker name (no project prefix) so the
   # data survives across compose project namespaces — e.g. running
@@ -168,20 +99,6 @@ volumes:
     # must address the same underlying volume so uploaded blobs survive
     # stack reshuffles.
     name: orkestra-rustfs-data
-  orkestra-hindsight-data:
-    driver: local
-    # Pinned name so the backend's container.Manager and the manual-only
-    # compose profile address the same Docker volume. Without this,
-    # compose would prefix the project name (orkestra-infra_...), while
-    # the backend references the literal name — producing two different
-    # volumes with divergent data.
-    name: orkestra-hindsight-data
-  orkestra-memgraph-data:
-    driver: local
-    # Pinned name — same reasoning as orkestra-hindsight-data above. The
-    # graph module creates this volume directly via the Docker API at
-    # container-create time, so the compose-declared name must match.
-    name: orkestra-memgraph-data
 
 networks:
   orkestra-network:

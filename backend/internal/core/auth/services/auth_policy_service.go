@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/orkestra-cc/orkestra-sdk/module"
 	authModels "github.com/orkestra/backend/internal/core/auth/models"
-	userModels "github.com/orkestra/backend/internal/core/user/models"
+	"github.com/orkestra/backend/pkg/sdk/iface"
+	"github.com/orkestra/backend/pkg/sdk/module"
 )
 
 // Defaults applied when the corresponding ConfigSchema key is unset
@@ -392,7 +392,7 @@ func (s *AuthPolicyService) MFAGraceWindow(ctx context.Context) time.Duration {
 // Phase 9: when the admin sets `mfaRequiredForRoles` to a non-empty
 // list, that overrides the built-in (super_admin, administrator,
 // org_owner, org_admin) list. Empty falls back to the built-in.
-func (s *AuthPolicyService) MFARequired(user *userModels.User, memberships []authModels.OrgMembership) bool {
+func (s *AuthPolicyService) MFARequired(user *iface.User, memberships []authModels.OrgMembership) bool {
 	if user == nil {
 		return false
 	}
@@ -417,7 +417,7 @@ func (s *AuthPolicyService) MFARequired(user *userModels.User, memberships []aut
 // Comparison is case-insensitive — the admin list is lowercased on
 // read, and we lowercase the user's roles here so a typo'd casing
 // in the role catalog doesn't silently bypass the gate.
-func userHoldsAnyRole(user *userModels.User, memberships []authModels.OrgMembership, want []string) bool {
+func userHoldsAnyRole(user *iface.User, memberships []authModels.OrgMembership, want []string) bool {
 	if user == nil || len(want) == 0 {
 		return false
 	}
@@ -440,7 +440,7 @@ func userHoldsAnyRole(user *userModels.User, memberships []authModels.OrgMembers
 
 // MFAGraceExpired wraps GraceExpired with the configured grace window.
 // Nil receiver falls back to the legacy 7-day constant.
-func (s *AuthPolicyService) MFAGraceExpired(ctx context.Context, user *userModels.User, now time.Time) bool {
+func (s *AuthPolicyService) MFAGraceExpired(ctx context.Context, user *iface.User, now time.Time) bool {
 	if user == nil || user.MFAGraceStartedAt == nil {
 		return false
 	}
@@ -450,7 +450,7 @@ func (s *AuthPolicyService) MFAGraceExpired(ctx context.Context, user *userModel
 // MFAGraceExpiresAt returns the absolute deadline a user must enroll
 // by, computed against the configured grace window. Zero time when the
 // grace clock hasn't started.
-func (s *AuthPolicyService) MFAGraceExpiresAt(ctx context.Context, user *userModels.User) time.Time {
+func (s *AuthPolicyService) MFAGraceExpiresAt(ctx context.Context, user *iface.User) time.Time {
 	if user == nil || user.MFAGraceStartedAt == nil {
 		return time.Time{}
 	}

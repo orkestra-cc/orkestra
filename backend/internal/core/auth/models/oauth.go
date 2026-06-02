@@ -1,7 +1,7 @@
 package models
 
 import (
-	userModels "github.com/orkestra/backend/internal/core/user/models"
+	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
 type OAuthCallbackRequest struct {
@@ -112,11 +112,11 @@ type GitHubTokenResponse struct {
 }
 
 type AuthCallbackOutputBody struct {
-	AccessToken  string           `json:"accessToken"`
-	RefreshToken string           `json:"refreshToken"`
-	TokenType    string           `json:"tokenType"`
-	ExpiresIn    int              `json:"expiresIn"`
-	User         *userModels.User `json:"user"`
+	AccessToken  string      `json:"accessToken"`
+	RefreshToken string      `json:"refreshToken"`
+	TokenType    string      `json:"tokenType"`
+	ExpiresIn    int         `json:"expiresIn"`
+	User         *iface.User `json:"user"`
 }
 
 // OAuthProviderTokens represents OAuth tokens received from providers

@@ -16,8 +16,8 @@ import (
 
 	"github.com/orkestra/backend/internal/core/auth/models"
 	"github.com/orkestra/backend/internal/core/auth/repository"
-	userModels "github.com/orkestra/backend/internal/core/user/models"
 	"github.com/orkestra/backend/internal/shared/utils"
+	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
 // BackupCodeCount is the number of one-shot recovery codes issued on
@@ -66,7 +66,7 @@ type MFAStatusSnapshot struct {
 // It holds no state of its own — everything lives in Mongo (factor rows)
 // or Redis (short-lived challenges), so horizontal scale is free.
 type MFAService interface {
-	BeginEnrollment(ctx context.Context, user *userModels.User) (*MFAEnrollmentBegin, error)
+	BeginEnrollment(ctx context.Context, user *iface.User) (*MFAEnrollmentBegin, error)
 	ConfirmEnrollment(ctx context.Context, userUUID, challengeID, code string) ([]string, error)
 
 	Verify(ctx context.Context, userUUID, code string) error
@@ -159,7 +159,7 @@ func NewMFAService(
 	}
 }
 
-func (s *mfaService) BeginEnrollment(ctx context.Context, user *userModels.User) (*MFAEnrollmentBegin, error) {
+func (s *mfaService) BeginEnrollment(ctx context.Context, user *iface.User) (*MFAEnrollmentBegin, error) {
 	if user == nil || user.UUID == "" {
 		return nil, fmt.Errorf("user is required")
 	}

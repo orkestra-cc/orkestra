@@ -11,10 +11,10 @@ CI invokes `make` targets from the monorepo root, so local and CI cannot drift. 
 | -------------------- | ----------------------------------------------------------------------- |
 | `make ci`            | Only the surfaces that changed (vs `origin/dev`)                        |
 | `make ci-all`        | Everything CI runs on push to `dev` or `main`                           |
-| `make ci-backend`    | lint, tenantscope, policycoverage, vuln, tests, enterprise build       |
+| `make ci-backend`    | lint, tenantscope, policycoverage, vuln, tests, build                  |
 | `make ci-frontend-admin` | typecheck, eslint, tests, audit, build                              |
 | `make ci-frontend-client`| typecheck, eslint, build                                            |
 | `make ci-mobile`     | flutter analyze, test                                                   |
-| `make build-<sku>`   | Build a specific SKU profile locally (`starter`, `billing`, `ai`, `saas`, `enterprise`) |
+| `make build`         | Build the backend binary / Docker image locally (single binary, no SKUs) |
 
 Toolchain versions live in `.mise.toml`. Running `mise install` gives you exactly the Go/Node/Flutter/golangci-lint versions CI uses.

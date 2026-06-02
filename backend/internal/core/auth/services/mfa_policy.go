@@ -4,7 +4,7 @@ import (
 	"time"
 
 	authModels "github.com/orkestra/backend/internal/core/auth/models"
-	userModels "github.com/orkestra/backend/internal/core/user/models"
+	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
 // MFAEnrollmentGraceWindow is the maximum allowed interval between a user
@@ -30,7 +30,7 @@ const (
 // to read-only, enforced in the authz layer, means a developer token can't
 // cause the damage MFA is there to prevent. Adding a role here is a
 // security-sensitive policy change that should show up in a PR diff.
-func RoleRequiresMFA(user *userModels.User, memberships []authModels.OrgMembership) bool {
+func RoleRequiresMFA(user *iface.User, memberships []authModels.OrgMembership) bool {
 	if user == nil {
 		return false
 	}
@@ -51,7 +51,7 @@ func RoleRequiresMFA(user *userModels.User, memberships []authModels.OrgMembersh
 // GraceExpired reports whether the user's MFA enrollment grace window has
 // lapsed. Nil MFAGraceStartedAt means "not yet started" — grace has not
 // expired in that case because it hasn't even begun.
-func GraceExpired(user *userModels.User, now time.Time) bool {
+func GraceExpired(user *iface.User, now time.Time) bool {
 	if user == nil || user.MFAGraceStartedAt == nil {
 		return false
 	}
@@ -60,7 +60,7 @@ func GraceExpired(user *userModels.User, now time.Time) bool {
 
 // GraceExpiresAt returns the absolute deadline a user must enroll by. Zero
 // time is returned when the grace clock hasn't started.
-func GraceExpiresAt(user *userModels.User) time.Time {
+func GraceExpiresAt(user *iface.User) time.Time {
 	if user == nil || user.MFAGraceStartedAt == nil {
 		return time.Time{}
 	}

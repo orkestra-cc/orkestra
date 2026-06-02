@@ -13,14 +13,13 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/orkestra-cc/orkestra-sdk/iface"
 	authModels "github.com/orkestra/backend/internal/core/auth/models"
 	"github.com/orkestra/backend/internal/core/auth/repository"
 	notifModels "github.com/orkestra/backend/internal/core/notification/models"
-	userModels "github.com/orkestra/backend/internal/core/user/models"
 	"github.com/orkestra/backend/internal/shared/blob"
 	sharederrors "github.com/orkestra/backend/internal/shared/errors"
 	"github.com/orkestra/backend/internal/shared/geoip"
+	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
 var (
@@ -162,7 +161,7 @@ func (s *PasswordAuthService) SetBlobStore(store blob.Store) {
 // buildUserResponse converts a raw User to a wire response with
 // Avatar resolved from AvatarSource. Mirrors authService.buildUserResponse
 // — both services need the same shape on the wire.
-func (s *PasswordAuthService) buildUserResponse(ctx context.Context, user *userModels.User) *userModels.UserManagementResponse {
+func (s *PasswordAuthService) buildUserResponse(ctx context.Context, user *iface.User) *iface.UserManagementResponse {
 	resp := user.ToResponse()
 	if user.AvatarSource != "" {
 		resp.Avatar = blob.ResolveAvatarURL(ctx, user, s.blobStore)
@@ -208,7 +207,7 @@ type RegisterInput struct {
 }
 
 // Register creates a new user with a password and sends a verification email.
-func (s *PasswordAuthService) Register(ctx context.Context, in RegisterInput) (*userModels.User, error) {
+func (s *PasswordAuthService) Register(ctx context.Context, in RegisterInput) (*iface.User, error) {
 	email := strings.ToLower(strings.TrimSpace(in.Email))
 	if email == "" || in.Password == "" || in.FullName == "" {
 		return nil, fmt.Errorf("email, password and name are required")
@@ -278,7 +277,7 @@ func (s *PasswordAuthService) Register(ctx context.Context, in RegisterInput) (*
 		}
 	}
 
-	user, err := s.userService.CreateUserWithPassword(ctx, &userModels.CreateUserInput{
+	user, err := s.userService.CreateUserWithPassword(ctx, &iface.CreateUserInput{
 		UUID:         proposedUUID,
 		Email:        email,
 		FullName:     in.FullName,
@@ -354,7 +353,7 @@ func (s *PasswordAuthService) RegisterInitialAdmin(ctx context.Context, email, p
 		}
 	}
 
-	user, err := s.userService.CreateUserWithPassword(ctx, &userModels.CreateUserInput{
+	user, err := s.userService.CreateUserWithPassword(ctx, &iface.CreateUserInput{
 		UUID:         proposedUUID,
 		Email:        email,
 		FullName:     fullName,
@@ -488,7 +487,7 @@ func (s *PasswordAuthService) Login(ctx context.Context, in LoginInput) (*authMo
 		threshold := time.Now().Add(-time.Duration(days) * 24 * time.Hour)
 		if user.LastLogin.Before(threshold) && user.IsActive {
 			isActive := false
-			if _, uerr := s.userService.UpdateUser(ctx, user.UUID, &userModels.UpdateUserInput{IsActive: &isActive}); uerr == nil {
+			if _, uerr := s.userService.UpdateUser(ctx, user.UUID, &iface.UpdateUserInput{IsActive: &isActive}); uerr == nil {
 				user.IsActive = false
 				s.emitAudit(ctx, iface.AuditEvent{
 					ActorUserID: user.UUID,
@@ -597,7 +596,7 @@ func (s *PasswordAuthService) emitLoginFailed(ctx context.Context, email, userUU
 //   - partial TokenResponse with RequiresMFA=true (factor enrolled, client
 //     must call /v1/auth/mfa/login/verify)
 //   - ErrMFAEnrollmentRequired (privileged user, no factor, grace expired)
-func (s *PasswordAuthService) completeLogin(ctx context.Context, user *userModels.User, in LoginInput, sourceAMR []string) (*authModels.TokenResponse, error) {
+func (s *PasswordAuthService) completeLogin(ctx context.Context, user *iface.User, in LoginInput, sourceAMR []string) (*authModels.TokenResponse, error) {
 	memberships := s.loadMembershipsAsAuthModel(ctx, user.UUID)
 	requires := s.policy.MFARequired(user, memberships)
 	if !requires {
@@ -1058,7 +1057,7 @@ func (s *PasswordAuthService) recordFailed(ctx context.Context, ip, email string
 	s.rateLimiter.RecordFailedAuth(ctx, "email:"+email)
 }
 
-func (s *PasswordAuthService) sendVerificationEmail(ctx context.Context, user *userModels.User, ip string) error {
+func (s *PasswordAuthService) sendVerificationEmail(ctx context.Context, user *iface.User, ip string) error {
 	raw, hash, err := generateEmailToken()
 	if err != nil {
 		return err
@@ -1130,7 +1129,7 @@ func (s *PasswordAuthService) lookupEmailToken(ctx context.Context, raw, purpose
 // currently the MFA login-verify handler, later the refresh rotation path.
 // amr records which factors were completed; lastOTPAt is 0 when no OTP
 // step has happened on this request.
-func (s *PasswordAuthService) IssueLoginTokens(ctx context.Context, user *userModels.User, deviceID, platform, ip string, amr []string, lastOTPAt int64) (*authModels.TokenResponse, error) {
+func (s *PasswordAuthService) IssueLoginTokens(ctx context.Context, user *iface.User, deviceID, platform, ip string, amr []string, lastOTPAt int64) (*authModels.TokenResponse, error) {
 	return s.issueTokens(ctx, user, LoginInput{DeviceID: deviceID, Platform: platform, IP: ip}, amr, lastOTPAt)
 }
 
@@ -1158,7 +1157,7 @@ func (s *PasswordAuthService) IssueLoginTokensExternal(ctx context.Context, user
 	}, nil
 }
 
-func (s *PasswordAuthService) issueTokens(ctx context.Context, user *userModels.User, in LoginInput, amr []string, lastOTPAt int64) (*authModels.TokenResponse, error) {
+func (s *PasswordAuthService) issueTokens(ctx context.Context, user *iface.User, in LoginInput, amr []string, lastOTPAt int64) (*authModels.TokenResponse, error) {
 	deviceID := in.DeviceID
 	if deviceID == "" {
 		deviceID = "password-" + strings.ReplaceAll(uuid.NewString(), "-", "")[:12]
@@ -1224,7 +1223,7 @@ func (s *PasswordAuthService) issueTokens(ctx context.Context, user *userModels.
 	}, nil
 }
 
-func (s *PasswordAuthService) createSessionDoc(ctx context.Context, user *userModels.User, sessionID, deviceID, platform, ip, userAgent string) error {
+func (s *PasswordAuthService) createSessionDoc(ctx context.Context, user *iface.User, sessionID, deviceID, platform, ip, userAgent string) error {
 	if s.authSessionRepo == nil {
 		return nil
 	}
@@ -1362,7 +1361,7 @@ func (s *PasswordAuthService) shouldRevokeOnPasswordChange(ctx context.Context) 
 // same login can't dispatch duplicates.
 func (s *PasswordAuthService) notifyNewDeviceLogin(
 	ctx context.Context,
-	user *userModels.User,
+	user *iface.User,
 	session *authModels.AuthSessionDoc,
 	deviceID, platform, ip, userAgent string,
 ) {

@@ -10,7 +10,7 @@ import (
 	"github.com/go-webauthn/webauthn/webauthn"
 
 	authModels "github.com/orkestra/backend/internal/core/auth/models"
-	userModels "github.com/orkestra/backend/internal/core/user/models"
+	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
 // newTestWebAuthn builds a WebAuthnService against the in-memory factor
@@ -32,10 +32,10 @@ func newTestWebAuthn(t *testing.T) (WebAuthnService, *fakeFactorRepo, MFAChallen
 	return svc, repo, challenges
 }
 
-func testWebAuthnUser() *userModels.User { return testWebAuthnUserDoc() }
+func testWebAuthnUser() *iface.User { return testWebAuthnUserDoc() }
 
-func testWebAuthnUserDoc() *userModels.User {
-	return &userModels.User{
+func testWebAuthnUserDoc() *iface.User {
+	return &iface.User{
 		UUID:     "user-uuid-1",
 		Email:    "passkey-tester@example.com",
 		FullName: "Passkey Tester",

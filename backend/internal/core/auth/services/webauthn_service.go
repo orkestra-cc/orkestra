@@ -13,7 +13,7 @@ import (
 
 	authModels "github.com/orkestra/backend/internal/core/auth/models"
 	"github.com/orkestra/backend/internal/core/auth/repository"
-	userModels "github.com/orkestra/backend/internal/core/user/models"
+	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
 // WebAuthn challenge purposes. Reuses the existing Redis-backed
@@ -40,11 +40,11 @@ var ErrWebAuthnAssertion = errors.New("webauthn assertion failed")
 // are two-step (Begin → Finish) because the browser must call
 // navigator.credentials.create()/get() between the two halves.
 type WebAuthnService interface {
-	BeginRegistration(ctx context.Context, user *userModels.User) (challengeID string, options *protocol.CredentialCreation, err error)
-	FinishRegistration(ctx context.Context, user *userModels.User, challengeID, name string, attestationJSON []byte) (*authModels.WebAuthnCredential, error)
+	BeginRegistration(ctx context.Context, user *iface.User) (challengeID string, options *protocol.CredentialCreation, err error)
+	FinishRegistration(ctx context.Context, user *iface.User, challengeID, name string, attestationJSON []byte) (*authModels.WebAuthnCredential, error)
 
-	BeginAssertion(ctx context.Context, user *userModels.User, purpose MFAChallengePurpose) (challengeID string, options *protocol.CredentialAssertion, err error)
-	FinishAssertion(ctx context.Context, user *userModels.User, challengeID string, expectedPurpose MFAChallengePurpose, assertionJSON []byte) error
+	BeginAssertion(ctx context.Context, user *iface.User, purpose MFAChallengePurpose) (challengeID string, options *protocol.CredentialAssertion, err error)
+	FinishAssertion(ctx context.Context, user *iface.User, challengeID string, expectedPurpose MFAChallengePurpose, assertionJSON []byte) error
 
 	ListCredentials(ctx context.Context, userUUID string) ([]authModels.WebAuthnCredential, error)
 	RemoveCredential(ctx context.Context, userUUID string, credentialID []byte) (bool, error)
@@ -91,7 +91,7 @@ func NewWebAuthnService(
 	}
 }
 
-func (s *webAuthnService) BeginRegistration(ctx context.Context, user *userModels.User) (string, *protocol.CredentialCreation, error) {
+func (s *webAuthnService) BeginRegistration(ctx context.Context, user *iface.User) (string, *protocol.CredentialCreation, error) {
 	if s.wa == nil {
 		return "", nil, errors.New("webauthn not configured")
 	}
@@ -134,7 +134,7 @@ func (s *webAuthnService) BeginRegistration(ctx context.Context, user *userModel
 	return ch.ID, options, nil
 }
 
-func (s *webAuthnService) FinishRegistration(ctx context.Context, user *userModels.User, challengeID, name string, attestationJSON []byte) (*authModels.WebAuthnCredential, error) {
+func (s *webAuthnService) FinishRegistration(ctx context.Context, user *iface.User, challengeID, name string, attestationJSON []byte) (*authModels.WebAuthnCredential, error) {
 	if s.wa == nil {
 		return nil, errors.New("webauthn not configured")
 	}
@@ -208,7 +208,7 @@ func (s *webAuthnService) FinishRegistration(ctx context.Context, user *userMode
 // ceremonies. The purpose discriminates so a verify challenge can't be
 // satisfied by a login response (or vice-versa) — the two paths mint
 // tokens with different shapes downstream.
-func (s *webAuthnService) BeginAssertion(ctx context.Context, user *userModels.User, purpose MFAChallengePurpose) (string, *protocol.CredentialAssertion, error) {
+func (s *webAuthnService) BeginAssertion(ctx context.Context, user *iface.User, purpose MFAChallengePurpose) (string, *protocol.CredentialAssertion, error) {
 	if s.wa == nil {
 		return "", nil, errors.New("webauthn not configured")
 	}
@@ -241,7 +241,7 @@ func (s *webAuthnService) BeginAssertion(ctx context.Context, user *userModels.U
 	return ch.ID, options, nil
 }
 
-func (s *webAuthnService) FinishAssertion(ctx context.Context, user *userModels.User, challengeID string, expectedPurpose MFAChallengePurpose, assertionJSON []byte) error {
+func (s *webAuthnService) FinishAssertion(ctx context.Context, user *iface.User, challengeID string, expectedPurpose MFAChallengePurpose, assertionJSON []byte) error {
 	if s.wa == nil {
 		return errors.New("webauthn not configured")
 	}
@@ -352,12 +352,12 @@ func (s *webAuthnService) loadCredentials(ctx context.Context, userUUID string) 
 
 // --- adapters between our stored shape and the go-webauthn library ---
 
-// webAuthnUser bridges *userModels.User into the webauthn.User interface
+// webAuthnUser bridges *iface.User into the webauthn.User interface
 // the library expects. WebAuthnID must be a stable, opaque user handle —
 // we use the UUID bytes which are already 36 chars (well under the 64-byte
 // max) and never reused across users.
 type webAuthnUser struct {
-	user        *userModels.User
+	user        *iface.User
 	credentials []authModels.WebAuthnCredential
 }
 

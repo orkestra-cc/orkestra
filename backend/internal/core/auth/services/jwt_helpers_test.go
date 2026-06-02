@@ -10,7 +10,7 @@ import (
 	"time"
 
 	authModels "github.com/orkestra/backend/internal/core/auth/models"
-	userModels "github.com/orkestra/backend/internal/core/user/models"
+	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
 func newTestJWT(t *testing.T, audience string) JWTService {
@@ -28,7 +28,7 @@ func newTestJWT(t *testing.T, audience string) JWTService {
 
 func TestGenerateTokenPair_PopulatesEveryField(t *testing.T) {
 	svc := newTestJWT(t, AudienceOperator)
-	user := &userModels.User{UUID: "u-1", Email: "alice@example.com", Role: "operator"}
+	user := &iface.User{UUID: "u-1", Email: "alice@example.com", Role: "operator"}
 	device := &authModels.DeviceInfo{DeviceID: "dev-A", Platform: "web"}
 	sec := &authModels.SecurityContext{SessionID: "sess-A", IPAddress: "1.2.3.4"}
 
@@ -75,7 +75,7 @@ func TestGenerateTokenPair_RefreshIsAcceptedByValidator(t *testing.T) {
 	// must round-trip through ValidateRefreshToken with no surprise
 	// extra fields. Pin it so the issuer + validator stay in sync.
 	svc := newTestJWT(t, AudienceClient)
-	user := &userModels.User{UUID: "u-2", Role: "operator"}
+	user := &iface.User{UUID: "u-2", Role: "operator"}
 	device := &authModels.DeviceInfo{DeviceID: "dev-B"}
 	sec := &authModels.SecurityContext{SessionID: "sess-B"}
 
@@ -102,7 +102,7 @@ func TestGenerateTokenPair_RefreshIsAcceptedByValidator(t *testing.T) {
 
 func TestGenerateTokenPairWithAMR_StampsAMRAndLastOTPOnAccessToken(t *testing.T) {
 	svc := newTestJWT(t, AudienceOperator)
-	user := &userModels.User{UUID: "u-3", Role: "operator"}
+	user := &iface.User{UUID: "u-3", Role: "operator"}
 	device := &authModels.DeviceInfo{DeviceID: "dev-C"}
 	now := time.Now().Unix()
 	sec := &authModels.SecurityContext{SessionID: "sess-C"}

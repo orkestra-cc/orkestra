@@ -5,9 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/orkestra-cc/orkestra-sdk/iface"
 	authModels "github.com/orkestra/backend/internal/core/auth/models"
-	userModels "github.com/orkestra/backend/internal/core/user/models"
+	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
 // stubUsers satisfies iface.UserProvider by embedding a nil interface —
@@ -19,7 +18,7 @@ type stubUsers struct {
 	countErr error
 }
 
-func (s *stubUsers) GetUserCount(_ context.Context, _ *userModels.UserFilters) (int64, error) {
+func (s *stubUsers) GetUserCount(_ context.Context, _ *iface.UserFilters) (int64, error) {
 	return s.count, s.countErr
 }
 

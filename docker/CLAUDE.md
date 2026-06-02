@@ -9,6 +9,9 @@ _Parent: [../CLAUDE.md](../CLAUDE.md)_
 
 <!-- /Navigation -->
 
+> ## ⚠️ ADR-0006 — core-only base
+> This file predates the [core-only collapse](../docs/adr/0006-collapse-to-core-only-base.md) and still contains sections describing **removed** features. The current Docker topology is: **`docker-compose.infra.yml`** (MongoDB + Redis + RustFS) + **one app file per environment** (`docker-compose.{dev,staging,prod}.yml`) + an opt-in **`docker-compose.observability.yml`** overlay. Removed: the `minimal`/`full`/`dev-public`/`ai-sidecar` compose files, `ORKESTRA_PROFILE`, `DEV_COMPOSE_VARIANT`, the `/var/run/docker.sock` mount + `CONTAINER_CONTROL_ENABLED`, and the Gotenberg/Memgraph/Hindsight addon-infra services. Where a section below still describes those, treat it as **a fork's responsibility**, not the base.
+
 ## Module Purpose
 
 The docker module provides **containerized infrastructure and deployment configurations** for the Orkestra system across development and production environments.
@@ -86,13 +89,13 @@ ORKESTRA uses a three-stage DevOps workflow: **Development**, **Staging**, and *
 
 ```bash
 # Interactive TUI — single entry point for every stack operation
-./orkestra.sh                      # Profile menu: SKU profile / full stack
+./orkestra.sh                      # Main menu: full stack / observability
 
 # CLI mode (scriptable, same operations)
-./orkestra.sh profile billing deploy --pull
-./orkestra.sh profile ai status
 ENV=development ./orkestra.sh deploy --scope backend --rebuild --yes
+./orkestra.sh status
 ./orkestra.sh logs orkestra-backend-dev -f
+./orkestra.sh observability up
 ./orkestra.sh --help               # Full command surface
 
 # Validate environment files
@@ -113,20 +116,14 @@ Keep this split when touching `.env*` or `docker-compose.*.yml`:
 | JWT keys, cookies, CORS, rate limits, observability | process | ✅ yes |
 | Encryption keys (`OAUTH_TOKEN_ENCRYPTION_KEY`, `ORKESTRA_KMS_MASTER_KEY`, optional `MFA_SECRET_ENCRYPTION_KEY`) | process — bootstraps ConfigService | ✅ yes |
 | Process-scoped auth tunables (`AUTH_REQUIRE_EMAIL_VERIFICATION`, `AUTH_RISK_STEP_UP_THRESHOLD`, `WEBAUTHN_RP_ID`, `AUTH_GEOIP_DB_PATH`, `TENANT_KIND_ENFORCEMENT`, `CEDAR_ENFORCE_ACTIONS`) | process | ✅ yes |
-| `CONTAINER_CONTROL_ENABLED`, `DOCKER_GID`, `AI_SERVICE_URL`, `AI_SERVICE_PORT` | process | ✅ yes |
-| `ORKESTRA_PROFILE` (minimal / full) — pre-enables addons on first boot only (`minimal` → none, `full` → every non-dev addon); subsequent boots use the `module_configs` document. Also exported by `orkestra.sh` source-mode routing so a runtime profile can run the hot-reload dev/staging stack — see [Source-mode routing](#source-mode-routing-hot-reload-under-a-runtime-profile). | process — first-boot seeder | ✅ yes |
-| `SALES_*`, `RAG_CHUNK_*` | process — runtime knobs not yet migrated to ConfigSchema | ✅ yes (transitional) |
-| `MARKETING_IMPORT_SPOOL_DIR` | process — first-boot seed for the marketing module's `importSpoolDir`. Dev/staging compose override it to `/app/marketing-spool`, bind-mounted from `docker/marketing-spool-{dev,staging}/` on the host (gitignored). Schema default `/var/lib/orkestra/marketing/spool` is unwritable by the non-root container user. Bind mount (not named volume) so host uid 1000 ownership carries through under `userns_mode: "host"` — a named volume gets created as root and would re-break the worker on every recreate. For an existing install change the value at `/admin/modules/marketing` — `module_configs` is authoritative once seeded. | ✅ yes |
 | `ORKESTRA_VERSION` | process — application version surfaced in the SPA footer (frontend-admin + frontend-client) and embedded in the dev `/health` JSON. `orkestra.sh` auto-exports this from `git describe --tags --always --dirty`, and docker-compose substitutes it into both frontend `environment:` blocks (dev/staging dev-server) and the `args:` block in `docker-compose.prod.yml` (production image build). CI overrides it with `--build-arg ORKESTRA_VERSION=${{ github.ref_name }}` on tag pushes. The container has no git binary and no `.git`, so this host-side env var is the only path that delivers a real version — without it the SPA falls back to `"dev"`. | ✅ yes |
 | `STORAGE_ENDPOINT` / `STORAGE_REGION` / `STORAGE_BUCKET` / `STORAGE_ACCESS_KEY` / `STORAGE_SECRET_KEY` / `STORAGE_FORCE_PATH_STYLE` / `STORAGE_ENSURE_BUCKET` | process — S3-compatible object storage consumed by `internal/shared/blob` for user-uploaded avatar blobs. Process-scoped because rotating credentials at runtime would invalidate every in-flight presigned URL. Defaults target the `rustfs` service in `docker-compose.infra.yml`. **Endpoint must be browser-reachable** for upload PUTs to succeed — see the RustFS gotcha note in the Infrastructure Services section. | ✅ yes |
 | OAuth provider credentials (`OAUTH_GOOGLE/APPLE/GITHUB/DISCORD_*`) | ConfigService (auth module) | ❌ admin UI |
-| OpenAPI billing / company credentials (`OPENAPI_BILLING_*`, `OPENAPI_COMPANY_*`, `OPENAPI_OAUTH_BASE_URL`, `OPENAPI_SANDBOX_MODE`, `BILLING_WEBHOOK_*`) — `accountEmail` + `apiKey` for the shared OAuth minter, or legacy static `bearerToken` | ConfigService (billing, company modules) | ❌ admin UI |
-| AI provider keys (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `OLLAMA_BASE_URL`) | ConfigService (aimodels module) | ❌ admin UI |
-| Memgraph / Hindsight URLs and credentials (`GRAPH_*`, `HINDSIGHT_URL`, `HINDSIGHT_NAMESPACE`, `HINDSIGHT_IMAGE`, `GRAPH_IMAGE`) | ConfigService (graph, agents modules) | ❌ admin UI |
-| Gotenberg URL (`GOTENBERG_*`) | ConfigService (documents module) | ❌ admin UI |
-| Stripe keys (`STRIPE_API_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_API_VERSION`) | ConfigService (payments module) | ❌ admin UI |
+| AI provider keys (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `OLLAMA_BASE_URL`) | ConfigService (auth/notification, shared) | ❌ admin UI |
 | SMTP / notification settings (`SMTP_*`, `NOTIFICATION_EMAIL_*`) | ConfigService (notification module) | ❌ admin UI |
 | Per-module enable flags (`*_ENABLED`) | DB (`module_configs.enabled`) flipped at runtime | ❌ admin UI |
+
+> A fork's addon modules add their own ConfigService-managed env (Stripe, OpenAPI/SDI, Gotenberg, graph/agents URLs, …) — those left with the addons (ADR-0006) and are configured at `/admin/modules` in a fork that re-adds them.
 
 For first-boot bootstrap of a fresh deployment without using the admin UI, export the seed env vars in the shell before `docker compose up` — they're listed as commented stubs at the bottom of `docker/.env`. Once the document exists, those env vars become inert.
 
@@ -150,16 +147,17 @@ Vars **deleted as dead code** during the cleanup (do not re-add): `MODULES`, `BA
 
 ## Clean Docker Compose Architecture
 
+> **ADR-0006:** the runtime-profile (`minimal`/`full`) and `dev-public` variant compose files, the AI sidecar, and the addon infra (Gotenberg / Memgraph / Hindsight) were removed when Orkestra collapsed to a core-only base. The topology is now **one infra base + one app file per environment + an opt-in observability overlay**. Sections below that still mention SKU profiles, `ORKESTRA_PROFILE`, `DEV_COMPOSE_VARIANT`, or backend-managed containers describe a fork's responsibility, not the base.
+
 ### Core Philosophy
 
-Separate infrastructure from applications. One infra compose, three full-stack composes (dev/staging/prod), two profile-pull composes:
+Separate infrastructure from applications. One infra compose + one app compose per environment:
 
-1. **`docker-compose.infra.yml`** - Infrastructure services only (MongoDB, Redis, Gotenberg, Hindsight)
-2. **`docker-compose.dev.yml`** - Canonical development stack (hot reload) on Chainguard `dhi.io/*` hardened images. Holds the full service definitions; the public variant overlays it. Used directly when `DEV_COMPOSE_VARIANT=chainguard` (requires a Chainguard subscription).
-3. **`docker-compose.dev-public.yml`** (default, fork-friendly) - Thin **overlay** of `docker-compose.dev.yml` via `include:` — patches only the keys that differ for public Alpine images (backend builds `Dockerfile.dev-public-backend`, `node:24-alpine` frontend, AIR pre-baked so the command skips the runtime `go install`). Edit shared dev config in `docker-compose.dev.yml`; it flows into both variants. Requires Docker Compose v2.20+ (`include:`); no custom merge tags.
-4. **`docker-compose.staging.yml`** - Application services in staging mode (staging-like env + AIR/Vite hot reload)
-5. **`docker-compose.prod.yml`** - Application services in production mode with optimizations
-6. **`docker-compose.{minimal,full}.yml`** - Runtime profiles pulling the pre-built backend image from GHCR (layer on `docker-compose.infra.yml`). Same image; `ORKESTRA_PROFILE` decides first-boot addon enablement
+1. **`docker-compose.infra.yml`** — infrastructure only: MongoDB, Redis, RustFS (S3-compatible blob store). No addon infra.
+2. **`docker-compose.dev.yml`** — development stack (hot reload). The backend builds `Dockerfile.dev-backend` (public `golang:alpine`, AIR pre-baked; `GO_BASE` build-arg for a Chainguard base); frontends use `node:24-alpine`.
+3. **`docker-compose.staging.yml`** — application services in staging mode (staging-like env + AIR/Vite hot reload).
+4. **`docker-compose.prod.yml`** — application services in production mode.
+5. **`docker-compose.observability.yml`** — opt-in OTEL overlay (Tempo, Prometheus, Loki, Promtail, Grafana). Runs alongside any app stack.
 
 ### File Organization
 
@@ -168,14 +166,12 @@ Separate infrastructure from applications. One infra compose, three full-stack c
 ├── README.md
 ├── orkestra.sh                # Unified TUI + CLI for the whole stack (replaces deploy.sh and logs.sh)
 └── docker/
-    ├── docker-compose.infra.yml   # Infrastructure: MongoDB, Redis, Gotenberg, Hindsight
-    ├── docker-compose.dev.yml     # Development base (Chainguard images): Backend, Frontend with hot reload
-    ├── docker-compose.dev-public.yml # Default dev overlay — include:s dev.yml, swaps to public Alpine images
+    ├── docker-compose.infra.yml   # Infrastructure: MongoDB, Redis, RustFS
+    ├── docker-compose.dev.yml     # Development: backend (AIR) + both frontends (Vite), public Alpine
+    ├── Dockerfile.dev-backend     # Dev backend image (golang:alpine + AIR; GO_BASE build-arg)
     ├── docker-compose.staging.yml # Staging: AIR/Vite hot reload + staging-like env
-    ├── docker-compose.prod.yml    # Production: Optimized Backend, Frontend
-    ├── docker-compose.ai-sidecar.yml # Optional AI sidecar (graph, rag, agents, aimodels)
-    ├── docker-compose.minimal.yml    # Profile pull: core only, no addons pre-enabled (layer on infra.yml)
-    ├── docker-compose.full.yml       # Profile pull: every non-dev addon pre-enabled
+    ├── docker-compose.prod.yml    # Production: optimized backend + frontends
+    ├── docker-compose.observability.yml # Opt-in OTEL overlay
     ├── .env.example               # Template for environment files
     ├── .env                       # Active env (gitignored) - contains ENV=development|staging|production
     ├── keys/                      # JWT and OAuth keys (gitignored)
@@ -184,10 +180,10 @@ Separate infrastructure from applications. One infra compose, three full-stack c
 
 ### Environment Combinations
 
-- **Runtime profile (first-boot, lightest path)**: `docker-compose.infra.yml` + `docker-compose.{minimal,full}.yml` + `.env` — pulls the pre-built backend image; `ORKESTRA_PROFILE` env var in the compose seeds first-boot addon enablement
 - **Development**: `docker-compose.infra.yml` + `docker-compose.dev.yml` + `.env` (with `ENV=development`)
 - **Staging**: `docker-compose.infra.yml` + `docker-compose.staging.yml` + `.env` (with `ENV=staging`)
 - **Production**: `docker-compose.infra.yml` + `docker-compose.prod.yml` + `.env` (with `ENV=production`)
+- **+ Observability** (any env): add `-f docker-compose.observability.yml` or `./orkestra.sh observability up`
 
 **IMPORTANT**: All Docker files must remain in `/docker` directory for proper build contexts.
 
@@ -209,39 +205,19 @@ For a multi-environment setup (separate `.env.development` / `.env.staging` / `.
 
 ### Using orkestra.sh (Recommended)
 
-`orkestra.sh` is the single entry point for every stack operation. It works as both an interactive TUI and a scriptable CLI, and knows about two deployment shapes: **runtime profile** (pull the published image from GHCR with first-boot addon enablement via `ORKESTRA_PROFILE` — `minimal` / `full`), and **full stack** (dev / staging / prod, auto-detected from `docker/.env`).
+`orkestra.sh` is the single entry point for every stack operation — interactive TUI and scriptable CLI. The TUI's main menu is **Full stack** (dev / staging / prod, auto-detected from `docker/.env`) or **Observability**.
 
 ```bash
-# Interactive TUI — profile menu appears, then a per-profile op menu
+# Interactive TUI
 ./orkestra.sh
 
-# The TUI flow:
-# 1. Pick profile: "Profile" (runtime profile picker) / "Full stack"
-# 2. Profile: pick minimal or full → ops menu
-#    (Deploy [--pull] / Stop / Reset / Status / Logs / Info)
-# 3. Full stack: Deploy (with scope selection) / Stop / Status / Logs / Back
-# 4. ENV is autodetected from docker/.env for the full-stack path
-```
-
-**CLI mode** — same operations, non-interactive, suitable for scripting and CI:
-
-```bash
-# Runtime profile (pulled from GHCR; <name> = minimal | full)
-./orkestra.sh profile <name> deploy [--pull]
-./orkestra.sh profile <name> stop
-./orkestra.sh profile <name> reset [--yes]
-./orkestra.sh profile <name> status
-./orkestra.sh profile <name> info
-./orkestra.sh profile <name> logs <service> [-f] [-n N] [-t]
-
-# Full stack (uses ENV from docker/.env, or ENV=... prefix)
-./orkestra.sh deploy [--scope all|backend|frontend-admin|frontend-admin+backend|infra] [--rebuild] [--yes]
+# CLI mode (ENV from docker/.env, or ENV=... prefix)
+ENV=development ./orkestra.sh deploy [--scope all|backend|frontend-admin|frontend-admin+backend|infra] [--rebuild] [--yes]
 ./orkestra.sh stop [--with-infra]
 ./orkestra.sh status
 ./orkestra.sh logs <service> [-f] [-n N] [-t]
+./orkestra.sh observability {up|down|reset|status|info|logs}
 ```
-
-**Interactive TUI always shows the top-level profile menu** (runtime profile vs. full stack), even when `ENV` is set in the shell or in `docker/.env`. Auto-routing into the full-stack loop based on `$ENV` was removed because it hid the profile picker — e.g. with a running `full` stack and `ENV=staging`, the staging-project log lookup would report every container "stopped" because each compose file declares its own `name:` and the running containers live under `orkestra-full`. CLI usage like `ENV=development ./orkestra.sh deploy --scope backend` is unaffected — the CLI dispatch path never enters the interactive menu.
 
 ### Manual Docker Compose (Alternative)
 
@@ -260,32 +236,6 @@ docker compose -f docker-compose.prod.yml --env-file .env.production up -d
 
 ## Service Architecture
 
-### Runtime profiles (`docker-compose.{minimal,full}.yml`)
-
-**Pulls the pre-built backend image from GHCR; layers on `docker-compose.infra.yml`.** Recommended for first boot — no source build, no `dhi.io` registry access required.
-
-| Profile | Effect on first boot |
-| --- | --- |
-| `minimal` | Core only, no addons pre-enabled. Operator turns each one on at `/admin/modules` |
-| `full` | Every non-dev addon pre-enabled |
-
-Both compose files pull `ghcr.io/orkestra-cc/orkestra/backend:latest` and start the backend on host port 3000. The image is the same — they differ only by the `ORKESTRA_PROFILE` env var that seeds the `module_configs` document at first boot.
-
-```bash
-cd docker
-docker network create orkestra-network                            # once, if it does not exist
-docker compose -f docker-compose.infra.yml up -d                  # MongoDB + Redis
-docker compose -f docker-compose.minimal.yml --env-file .env up -d  # or full
-```
-
-All addons are instantiated at boot regardless of enabled state — disabled ones sit idle until you toggle them on at `/admin/modules`. The registry auto-resolves transitive dependencies on enable.
-
-#### Source-mode routing (hot reload under a runtime profile)
-
-`ORKESTRA_PROFILE` is **only** a first-boot addon-enablement seed — it is orthogonal to how code is served. To exploit that, `orkestra.sh` does **source-mode routing**: when a runtime profile (`minimal`/`full`) is chosen while `ENV=development`, it does **not** pull `backend:latest` from GHCR. Instead it brings up the dev hot-reload source stack (`docker-compose.dev-public.yml` / `docker-compose.dev.yml` per `DEV_COMPOSE_VARIANT`) with the local source bind-mounted (AIR + Vite), and exports `ORKESTRA_PROFILE=<name>` so the seeded addon set still matches the profile. You get the profile's addons **and** live-reloaded local edits. **Only `development` gets hot reload** — `ENV=staging` and `ENV=production` (and an unset/invalid `ENV`) keep the published-image pull behavior, so staging mirrors production.
-
-The two dev compose files declare `ORKESTRA_PROFILE: ${ORKESTRA_PROFILE:-}` on the backend so the exported value rides the bind-mount (empty default → the plain dev full-stack path keeps each module's own `Enabled()` default); the GHCR `minimal.yml`/`full.yml` hardcode the literal value, so the export is inert on that path. Because the seed only applies to a **fresh** `module_configs` doc, switching profiles in source mode requires `./orkestra.sh profile <name> reset` (wipes volumes) — or just toggle addons live at `/admin/modules`. Implemented by `apply_profile_source_mode()` in `orkestra.sh`.
-
 ### Infrastructure Services (`docker-compose.infra.yml`)
 
 **Shared across dev/staging/prod environments — start once, use everywhere**
@@ -294,80 +244,19 @@ The two dev compose files declare `ORKESTRA_PROFILE: ${ORKESTRA_PROFILE:-}` on t
 | ------------- | ----------- | ------------------- | ---------------- |
 | **mongodb**   | 27027       | Primary database    | mongosh ping     |
 | **redis**     | 6387        | Cache & sessions    | redis-cli ping   |
-| **gotenberg** | 3030        | PDF generation      | curl /health     |
 | **rustfs**    | 9100 / 9101 | S3-compatible object storage for user-uploaded blobs (avatars today) | wget /minio/health/live |
-| **memgraph**  | 7687 / 7444 | Graph database (managed by backend — see note below) | TCP dial on 7687 |
-| **hindsight** | 8888        | AI agents backend (managed by backend — see note below) | curl /health     |
+
+> **ADR-0006:** the Gotenberg / Memgraph / Hindsight addon-infra services, the backend-managed-container wiring (`Module.InfraContainers()` → `shared/container.Manager`), the `/var/run/docker.sock` mount, and `CONTAINER_CONTROL_ENABLED` were all removed with the addons. A fork that adds a module declaring `InfraContainers()` re-adds the socket mount + `CONTAINER_CONTROL_ENABLED=true` and provisions its own infra service. The `shared/container.Manager` seam is kept in the codebase for that purpose.
 
 **RustFS status note**: RustFS 1.x is in beta (`rustfs/rustfs:latest` resolves to `1.0.0-beta.4` at time of writing). Single-node S3-API mode is "available" and fine for avatars; distributed mode is "under testing". Production deploys running at scale should swap `STORAGE_ENDPOINT` to a managed S3 (AWS / Backblaze B2 / etc.) and drop `STORAGE_FORCE_PATH_STYLE`. The backend's `internal/shared/blob` package speaks the S3 API uniformly via AWS SDK v2, so swapping is an env-var change.
 
 **RustFS endpoint reachability gotcha**: the backend uses `STORAGE_ENDPOINT` both internally (HEAD/Delete) AND when minting the signed PUT URLs the **browser** uploads to. The internal default `http://orkestra-rustfs:9000` works for the backend but leaves browser uploads broken unless rustfs is also reachable from the host at the same URL. Local-dev fix: add `127.0.0.1 orkestra-rustfs` to `/etc/hosts` and publish `RUSTFS_API_PORT=9000` (default 9100). Production: terminate rustfs behind a publicly-resolvable hostname or use managed S3. A dual-endpoint (internal + public) split for the backend signer is tracked as a follow-up.
 
-**Memgraph and Hindsight are no longer auto-started.** The `graph` and `agents` backend modules each own their respective container's lifecycle: enabling the module at `/admin/modules` starts `orkestra-memgraph` / `orkestra-hindsight`; disabling stops it. Both services are still declared in `docker-compose.infra.yml` for documentation and volume ownership, but live behind the `manual-only` compose profile. To run them by hand anyway (e.g. to inspect a container without the backend):
-
-```bash
-docker compose -f docker-compose.infra.yml --profile manual-only up -d memgraph hindsight
-```
-
-### Backend-managed Containers (Not Visible to Compose)
-
-Containers declared by a backend module via `Module.InfraContainers()` — `orkestra-memgraph` from the `graph` module and `orkestra-hindsight` from the `agents` module — are created and destroyed by the backend's `shared/container.Manager` directly against the Docker daemon. They are **not** part of any compose project:
-
-- They do NOT appear in `docker compose ls`, `docker compose ps`, or `docker compose -f docker-compose.infra.yml ps`.
-- `docker compose down` on any compose file does **not** stop them. Disable the owning module at `/admin/modules` to stop the container.
-- To discover them from the shell:
-  ```bash
-  docker ps --filter label=orkestra.managed=true
-  ```
-  Every backend-managed container carries `orkestra.managed=true` and `orkestra.module=<name>`.
-
-**Shared volumes**: `orkestra-memgraph-data` and `orkestra-hindsight-data` in `docker-compose.infra.yml` are declared with explicit `name:` directives so they are **not** project-prefixed. Both the backend (when it creates the container at module enable time) and the compose `manual-only` profile reference the exact same Docker volume, so data persists across whichever path started the container first.
-
-**Health probes**: the container manager supports two readiness modes — HTTP GET (`InfraHealthCheck.HTTPPath`, used by hindsight against `/health`) and raw TCP dial (`InfraHealthCheck.TCPPort`, used by memgraph against Bolt port 7687). Pick TCP for services whose native protocol isn't HTTP.
-
-### Orphan-container reclaim (orkestra.sh)
-
-`docker compose up -d` fails with a raw "container name is already in use" error when an existing container has the right `container_name:` but is labelled with a different `com.docker.compose.project` (typical leftover from switching SKU profiles — e.g. running `enterprise` and then trying to bring up `infra` standalone). To prevent the failure, `orkestra.sh` runs a pre-flight reclaim step before every `up -d`:
-
-- Parses each compose file's `name:` and `container_name:` entries.
-- For each declared container that already exists, compares its `com.docker.compose.project` label to the expected project name.
-- Mismatches → stop + `docker rm -f`. Named volumes are never touched, so data persists.
-- Backend-managed containers (`orkestra.managed=true` — Memgraph, Hindsight) are skipped: stop those by disabling the owning module at `/admin/modules`, never via `docker rm`.
-
-Interactive (TUI) sessions confirm before reclaiming; CLI sessions (`./orkestra.sh deploy --yes`) reclaim automatically. **Operators should not run `docker rm` or `docker compose down` against Orkestra containers by hand** — `orkestra.sh stop` / `reset` / `deploy` are the supported entry points, and the reclaim path is what keeps successive deploys idempotent.
-
-**Migration from older setups**: users who ran the legacy SKU profiles (`starter` / `billing` / `ai` / `saas` / `enterprise`) should switch to `minimal` or `full` — the binary is the same, only the seed env var differs. Existing `module_configs` documents are preserved and authoritative; `ORKESTRA_PROFILE` only matters on a fresh install. Users who ran hindsight from compose before this change will have an orphaned `orkestra-infra_orkestra-hindsight-data` volume. To salvage that data into the shared volume:
-
-```bash
-# 1. Disable agents at /admin/modules (unmounts orkestra-hindsight-data)
-# 2. Copy old → new
-docker run --rm \
-  -v orkestra-infra_orkestra-hindsight-data:/from \
-  -v orkestra-hindsight-data:/to \
-  alpine sh -c 'cd /from && cp -a . /to/'
-# 3. Drop the stale volume
-docker volume rm orkestra-infra_orkestra-hindsight-data
-# 4. Re-enable agents
-```
-
-To discard the old data instead, just run step 3 once no container is mounting it.
-
-### Container Lifecycle Control (Docker Socket Mount)
-
-The dev/staging/prod compose files mount `/var/run/docker.sock` into the `orkestra-backend` container so the shared container manager can start/stop module infrastructure (currently hindsight and memgraph; other modules may opt in later by declaring `InfraContainers()`). Toggle behavior with `CONTAINER_CONTROL_ENABLED`:
-
-| Value | Effect |
-|-------|--------|
-| `true` (default in dev/staging/prod) | Backend uses the Docker SDK to manage declared containers |
-| `false` (default in the `minimal` profile compose) | Container control is a no-op; operators manage infra externally (Kubernetes, systemd, etc.) |
-
-**Security**: mounting docker.sock gives the backend container effective root on the host. Acceptable on dev workstations; for production or shared hosts, front the socket with `tecnativa/docker-socket-proxy` restricted to `/containers/...` endpoints and point `DOCKER_HOST` at the proxy instead of the raw socket.
-
 ### Application Services
 
 #### Development (`docker-compose.dev.yml`)
 
-**Lightweight development with hot reload. Uses `dhi.io` Chainguard hardened base images.**
+**Hot-reload dev stack on public Alpine images (Dockerfile.dev-backend; Chainguard via GO_BASE build-arg).**
 
 | Service                  | Host port | Purpose                              | Features                                                       |
 | ------------------------ | --------- | ------------------------------------ | -------------------------------------------------------------- |
@@ -995,5 +884,5 @@ docker compose -f docker-compose.dev.yml restart
 - [Project Overview](../CLAUDE.md) - System architecture and design principles
 - [Backend Containerization](../backend/CLAUDE.md) - Go API server configuration
 - [Frontend Containerization](../frontend-admin/CLAUDE.md) - React application setup
-- [Documents Module](../backend/internal/addons/documents/CLAUDE.md) - PDF generation with Gotenberg
+- [SDK package](../backend/pkg/sdk/CLAUDE.md) - the Module contract a fork builds addons against
 - [Deployment Scripts](../scripts/CLAUDE.md) - Automation and deployment orchestration

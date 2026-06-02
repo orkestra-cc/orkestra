@@ -6,13 +6,13 @@ sidebar_position: 1
 
 # Getting Started
 
-The fastest way to try Orkestra is the **starter SKU** — core modules only, pulled from GHCR, layered on top of MongoDB and Redis.
+The fastest way to try Orkestra is the **dev stack** — the seven core modules, built from source with AIR + Vite hot reload, layered on top of MongoDB, Redis, and RustFS. (For the pre-built image, see [Installation](/getting-started/installation).)
 
 ```bash
 cd docker
 docker network create orkestra-network                              # first time only
-docker compose -f docker-compose.infra.yml up -d                    # mongodb + redis
-docker compose -f docker-compose.starter.yml --env-file .env up -d
+docker compose -f docker-compose.infra.yml up -d                    # mongodb + redis + rustfs
+docker compose -f docker-compose.dev.yml --env-file .env up -d
 
 # Backend API: http://localhost:3000
 # API docs:    http://localhost:3000/docs
@@ -21,21 +21,20 @@ docker compose -f docker-compose.starter.yml --env-file .env up -d
 ORKESTRA_API_URL=http://localhost:3000 ./scripts/devtoken.sh administrator
 ```
 
-Once you're in, head to `/admin/modules` to enable additional addons. The registry hot-reloads — no restart required.
+Once you're in, head to `/admin/modules` to manage modules. The registry hot-reloads — no restart required.
 
-## Pick a SKU
+## One image, core modules only
 
-Five SKUs are published per push to `main`:
+There is a single backend image — there are no SKUs. Per [ADR-0006](/adrs/collapse-to-core-only-base) Orkestra is a **core-only base**: it ships seven always-loaded core modules and **no** addons. CI publishes one image per push to `main`:
 
-| SKU          | What it includes                                                                    |
-| ------------ | ----------------------------------------------------------------------------------- |
-| `starter`    | Core modules only — smallest surface, fastest boot.                                 |
-| `billing`    | Core + billing, documents, company. Italian e-invoicing (FatturaPA/SDI).            |
-| `ai`         | Core + graph, aimodels, rag, agents, sales. Knowledge graph + RAG-backed AI.        |
-| `saas`       | Core + subscriptions, payments, compliance, identity. Stripe-backed SaaS plumbing.  |
-| `enterprise` | Every non-dev addon. The kitchen sink.                                              |
+| Image                                          | What it includes                                          |
+| ---------------------------------------------- | --------------------------------------------------------- |
+| `ghcr.io/orkestra-cc/orkestra/backend:latest`  | The seven core modules — `user`, `notification`, `tenant`, `authz`, `auth`, `navigation`, `logging`. |
+| `ghcr.io/orkestra-cc/orkestra/backend:<sha>`   | The same, pinned to a specific commit.                    |
 
-Read more in **[Architecture › Module Lifecycle](/architecture/module-lifecycle)** for the build-time vs runtime distinction that makes SKUs work.
+The `optionalModules` catalog ships empty. A fork that needs invoicing, payments, AI, etc. adds those verticals in-tree (`internal/addons/<name>/` + a `cmd/server/catalog_<name>.go`) and builds its own image.
+
+Read more in **[Architecture › Module Lifecycle](/architecture/module-lifecycle)** for how modules are registered and enabled.
 
 ## Next steps
 

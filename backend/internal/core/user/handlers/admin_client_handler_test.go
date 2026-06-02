@@ -5,10 +5,9 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/orkestra-cc/orkestra-sdk/iface"
-	"github.com/orkestra-cc/orkestra-sdk/module"
-	"github.com/orkestra/backend/internal/core/user/models"
 	"github.com/orkestra/backend/internal/core/user/services"
+	"github.com/orkestra/backend/pkg/sdk/iface"
+	"github.com/orkestra/backend/pkg/sdk/module"
 )
 
 // fakePasswordHasher implements iface.PasswordHasher for the
@@ -87,9 +86,9 @@ func newAdminHandler(svc services.UserService) (*AdminClientUserHandler, *module
 func TestListClientUsersAdmin_NoTenantProvider(t *testing.T) {
 	t.Parallel()
 	svc := &fakeUserService{
-		listUsersFn: func(context.Context, *models.UserFilters, *models.PaginationParams) (*models.UserManagementListResponse, error) {
-			return &models.UserManagementListResponse{
-				Users: []models.UserManagementResponse{
+		listUsersFn: func(context.Context, *iface.UserFilters, *iface.PaginationParams) (*iface.UserManagementListResponse, error) {
+			return &iface.UserManagementListResponse{
+				Users: []iface.UserManagementResponse{
 					{ID: "u1", Email: "a@b.c"},
 					{ID: "u2", Email: "x@y.z"},
 				},
@@ -120,9 +119,9 @@ func TestListClientUsersAdmin_NoTenantProvider(t *testing.T) {
 func TestListClientUsersAdmin_WithTenantProvider(t *testing.T) {
 	t.Parallel()
 	svc := &fakeUserService{
-		listUsersFn: func(context.Context, *models.UserFilters, *models.PaginationParams) (*models.UserManagementListResponse, error) {
-			return &models.UserManagementListResponse{
-				Users: []models.UserManagementResponse{{ID: "u1"}, {ID: "u2"}},
+		listUsersFn: func(context.Context, *iface.UserFilters, *iface.PaginationParams) (*iface.UserManagementListResponse, error) {
+			return &iface.UserManagementListResponse{
+				Users: []iface.UserManagementResponse{{ID: "u1"}, {ID: "u2"}},
 			}, nil
 		},
 	}
@@ -157,7 +156,7 @@ func TestListClientUsersAdmin_WithTenantProvider(t *testing.T) {
 func TestListClientUsersAdmin_SvcError(t *testing.T) {
 	t.Parallel()
 	svc := &fakeUserService{
-		listUsersFn: func(context.Context, *models.UserFilters, *models.PaginationParams) (*models.UserManagementListResponse, error) {
+		listUsersFn: func(context.Context, *iface.UserFilters, *iface.PaginationParams) (*iface.UserManagementListResponse, error) {
 			return nil, errors.New("boom")
 		},
 	}
@@ -183,11 +182,11 @@ func TestGetClientUserAdmin(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
 			svc := &fakeUserService{
-				getUserFn: func(context.Context, string) (*models.UserManagementResponse, error) {
+				getUserFn: func(context.Context, string) (*iface.UserManagementResponse, error) {
 					if c.svcErr != nil {
 						return nil, c.svcErr
 					}
-					return &models.UserManagementResponse{ID: "u1", Email: "a@b.c"}, nil
+					return &iface.UserManagementResponse{ID: "u1", Email: "a@b.c"}, nil
 				},
 			}
 			h, _ := newAdminHandler(svc)
@@ -227,14 +226,14 @@ func TestUpdateClientUserAdmin(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
 			svc := &fakeUserService{
-				updateUserFn: func(context.Context, string, *models.UpdateUserInput) (*models.UserManagementResponse, error) {
+				updateUserFn: func(context.Context, string, *iface.UpdateUserInput) (*iface.UserManagementResponse, error) {
 					if c.updateErr != nil {
 						return nil, c.updateErr
 					}
-					return &models.UserManagementResponse{ID: "u1", FullName: "Renamed"}, nil
+					return &iface.UserManagementResponse{ID: "u1", FullName: "Renamed"}, nil
 				},
-				getUserFn: func(context.Context, string) (*models.UserManagementResponse, error) {
-					return &models.UserManagementResponse{ID: "u1", FullName: "Renamed"}, nil
+				getUserFn: func(context.Context, string) (*iface.UserManagementResponse, error) {
+					return &iface.UserManagementResponse{ID: "u1", FullName: "Renamed"}, nil
 				},
 			}
 			h, _ := newAdminHandler(svc)
@@ -259,10 +258,10 @@ func TestUpdateClientUserAdmin(t *testing.T) {
 func TestUpdateClientUserAdmin_ReloadFails(t *testing.T) {
 	t.Parallel()
 	svc := &fakeUserService{
-		updateUserFn: func(context.Context, string, *models.UpdateUserInput) (*models.UserManagementResponse, error) {
-			return &models.UserManagementResponse{ID: "u1"}, nil
+		updateUserFn: func(context.Context, string, *iface.UpdateUserInput) (*iface.UserManagementResponse, error) {
+			return &iface.UserManagementResponse{ID: "u1"}, nil
 		},
-		getUserFn: func(context.Context, string) (*models.UserManagementResponse, error) {
+		getUserFn: func(context.Context, string) (*iface.UserManagementResponse, error) {
 			return nil, errors.New("post-update read failed")
 		},
 	}
@@ -362,7 +361,7 @@ func TestCreateClientUserAdmin_ServiceErrors(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
 			svc := &fakeUserService{
-				createUserWithPasswordFn: func(context.Context, *models.CreateUserInput) (*models.User, error) {
+				createUserWithPasswordFn: func(context.Context, *iface.CreateUserInput) (*iface.User, error) {
 					return nil, c.createErr
 				},
 			}
@@ -382,11 +381,11 @@ func TestCreateClientUserAdmin_Happy(t *testing.T) {
 	t.Parallel()
 	markCalled := false
 	svc := &fakeUserService{
-		createUserWithPasswordFn: func(_ context.Context, input *models.CreateUserInput) (*models.User, error) {
+		createUserWithPasswordFn: func(_ context.Context, input *iface.CreateUserInput) (*iface.User, error) {
 			if input.PasswordHash == "" {
 				t.Errorf("PasswordHash not propagated to service")
 			}
-			return &models.User{UUID: "new-uuid", Email: input.Email}, nil
+			return &iface.User{UUID: "new-uuid", Email: input.Email}, nil
 		},
 		markEmailVerifiedFn: func(_ context.Context, userUUID string) error {
 			markCalled = true
@@ -395,8 +394,8 @@ func TestCreateClientUserAdmin_Happy(t *testing.T) {
 			}
 			return nil
 		},
-		getUserFn: func(context.Context, string) (*models.UserManagementResponse, error) {
-			return &models.UserManagementResponse{ID: "new-uuid", Email: "a@b.c", EmailVerified: true}, nil
+		getUserFn: func(context.Context, string) (*iface.UserManagementResponse, error) {
+			return &iface.UserManagementResponse{ID: "new-uuid", Email: "a@b.c", EmailVerified: true}, nil
 		},
 	}
 	h, reg := newAdminHandler(svc)
@@ -422,12 +421,12 @@ func TestCreateClientUserAdmin_MarkVerifiedFailureIsBestEffort(t *testing.T) {
 	// A failure to flip EmailVerified must NOT fail the request — the
 	// row was created successfully and the operator can verify manually.
 	svc := &fakeUserService{
-		createUserWithPasswordFn: func(context.Context, *models.CreateUserInput) (*models.User, error) {
-			return &models.User{UUID: "u1"}, nil
+		createUserWithPasswordFn: func(context.Context, *iface.CreateUserInput) (*iface.User, error) {
+			return &iface.User{UUID: "u1"}, nil
 		},
 		markEmailVerifiedFn: func(context.Context, string) error { return errors.New("mongo down") },
-		getUserFn: func(context.Context, string) (*models.UserManagementResponse, error) {
-			return &models.UserManagementResponse{ID: "u1"}, nil
+		getUserFn: func(context.Context, string) (*iface.UserManagementResponse, error) {
+			return &iface.UserManagementResponse{ID: "u1"}, nil
 		},
 	}
 	h, reg := newAdminHandler(svc)
@@ -457,11 +456,11 @@ func TestInviteClientUserAdmin_NoAuth(t *testing.T) {
 func TestInviteClientUserAdmin_Happy(t *testing.T) {
 	t.Parallel()
 	svc := &fakeUserService{
-		createUserFn: func(_ context.Context, input *models.CreateUserInput) (*models.UserManagementResponse, error) {
-			return &models.UserManagementResponse{ID: "u1", Email: input.Email}, nil
+		createUserFn: func(_ context.Context, input *iface.CreateUserInput) (*iface.UserManagementResponse, error) {
+			return &iface.UserManagementResponse{ID: "u1", Email: input.Email}, nil
 		},
-		getUserFn: func(context.Context, string) (*models.UserManagementResponse, error) {
-			return &models.UserManagementResponse{ID: "u1"}, nil
+		getUserFn: func(context.Context, string) (*iface.UserManagementResponse, error) {
+			return &iface.UserManagementResponse{ID: "u1"}, nil
 		},
 	}
 	inviterCalled := false
@@ -507,7 +506,7 @@ func TestInviteClientUserAdmin_CreateErrors(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
 			svc := &fakeUserService{
-				createUserFn: func(context.Context, *models.CreateUserInput) (*models.UserManagementResponse, error) {
+				createUserFn: func(context.Context, *iface.CreateUserInput) (*iface.UserManagementResponse, error) {
 					return nil, c.err
 				},
 			}
@@ -527,8 +526,8 @@ func TestInviteClientUserAdmin_SendFailureIs502(t *testing.T) {
 	// return 502 (and intentionally NOT roll back the user, so a resend
 	// from the detail page can fix it).
 	svc := &fakeUserService{
-		createUserFn: func(context.Context, *models.CreateUserInput) (*models.UserManagementResponse, error) {
-			return &models.UserManagementResponse{ID: "u1"}, nil
+		createUserFn: func(context.Context, *iface.CreateUserInput) (*iface.UserManagementResponse, error) {
+			return &iface.UserManagementResponse{ID: "u1"}, nil
 		},
 	}
 	h, reg := newAdminHandler(svc)

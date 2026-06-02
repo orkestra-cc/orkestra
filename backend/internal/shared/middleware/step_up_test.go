@@ -9,7 +9,7 @@ import (
 	"time"
 
 	authModels "github.com/orkestra/backend/internal/core/auth/models"
-	userModels "github.com/orkestra/backend/internal/core/user/models"
+	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
 // runStepUp wires a minimal AuthMiddleware, seeds the request context with
@@ -138,7 +138,7 @@ type fakeStepUpPolicy struct {
 	required bool
 }
 
-func (f *fakeStepUpPolicy) MFARequired(_ *userModels.User, _ []authModels.OrgMembership) bool {
+func (f *fakeStepUpPolicy) MFARequired(_ *iface.User, _ []authModels.OrgMembership) bool {
 	return f.required
 }
 

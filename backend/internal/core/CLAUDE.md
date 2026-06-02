@@ -7,7 +7,7 @@ _Parent: [../../CLAUDE.md](../../CLAUDE.md)_
 
 ## What this is
 
-The seven modules under `backend/internal/core/` are the always-loaded kernel of the Orkestra backend. Every deployment boots them — they provide identity, multi-tenancy, permissions, navigation, outbound mail, and runtime log-level admin. Addons under `backend/internal/addons/` are opt-in (toggled at `/admin/modules`); core is not.
+The seven modules under `backend/internal/core/` are the always-loaded kernel of the Orkestra backend. Every deployment boots them — they provide identity, multi-tenancy, permissions, navigation, outbound mail, and runtime log-level admin. Optional modules a fork adds under `backend/internal/addons/` are opt-in (toggled at `/admin/modules`); core is not. Per [ADR-0006](../../../docs/adr/0006-collapse-to-core-only-base.md) the base ships **no** addons.
 
 Load order is topologically sorted from each module's `Dependencies()` by `ModuleRegistry.InitAll` (`shared/module/registry.go:115-217`):
 
@@ -110,7 +110,7 @@ Several pieces of state are written to MongoDB only during `InitAll`. If the col
 | Concern | Answer |
 |---|---|
 | "It's a new cross-cutting capability everyone needs" → core or shared? | Core if it has state and exposes an interface to others (e.g. authz). Shared (`shared/iface`, `shared/middleware`) if it's stateless plumbing. |
-| "It's a product feature that some deployments won't want" | **Addon** under `backend/internal/addons/`, toggled at `/admin/modules`. Examples: billing, rag, graph. |
+| "It's a product feature that some deployments won't want" | **Optional module** a fork adds under `backend/internal/addons/`, toggled at `/admin/modules`. The base ships none (ADR-0006). |
 | "A core module needs something from an addon" | **Don't.** Core must not import addons. Invert the dependency: expose an interface in `shared/iface` and let the addon register as the implementation. |
 
 ## Rules

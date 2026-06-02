@@ -1,158 +1,25 @@
 ---
-title: Forking a Core Addon
+title: Customizing an Archived Addon
 sidebar_position: 4
-description: How to customize one of the extracted core addons (billing, documents, payments…) — staying in-tree with a replace directive, or forking the public repo standalone.
+description: How to reuse one of the archived Orkestra addons (billing, payments, RAG…) in your fork now that the base ships core-only.
 ---
 
-# Forking a Core Addon
+# Customizing an Archived Addon
 
-This page is for when you want to **modify an existing core addon** — say `orkestra-billing` to handle a regional invoicing format upstream doesn't support, or `orkestra-payments` to wire a non-Stripe gateway. For brand-new addons, see [Adding an addon](/contributing/adding-an-addon). For the platform fork itself, see [I just forked Orkestra](/getting-started/forking).
+:::note Core-only base
+Per [ADR-0006](/adrs/collapse-to-core-only-base) Orkestra is a **core-only base**: it no longer ships billing, payments, subscriptions, RAG, agents, marketing, or any other addon. The verticals that used to live in the monorepo were archived as read-only snapshots at `github.com/orkestra-cc/orkestra-addon-*`. There is no longer a published, versioned addon to fork-and-track upstream.
+:::
 
-Pick one of two patterns based on whether you want your changes to flow back upstream or diverge permanently.
+So "forking a core addon" no longer means tracking an upstream repo — it means **copying an archived snapshot into your fork's tree and owning it from there.**
 
-## Pattern A — In-tree fork inside your monorepo (recommended)
+## How to reuse an archived vertical
 
-You forked the monorepo. The addon source already lives at `backend/internal/addons/<name>/`. The `backend/go.mod` has a `replace` directive pointing the public module path at that local directory:
+1. **Fork the platform** first — see [I just forked Orkestra](/getting-started/forking).
+2. **Copy the snapshot** into your fork: drop the archived addon's source under `backend/internal/addons/<name>/`. The archived code targeted the old `github.com/orkestra-cc/orkestra-sdk` import path — rewrite those imports to the in-tree path `github.com/orkestra/backend/pkg/sdk/...` (a single sed pass).
+3. **Register it** — add `cmd/server/catalog_<name>.go` with one `init()` registering the factory into `optionalModules`. No `go.mod`, no `replace`, no build tags — it compiles into the one binary.
+4. **Tidy + build** — `cd backend && go mod tidy && go build ./...` pulls the addon's third-party deps into the single module.
+5. **Enable it** at `/admin/modules`.
 
-```
-require github.com/orkestra-cc/orkestra-addon-billing v0.1.0
+From then on it is **your code**, in your repo. There is no upstream to rebase against — the snapshot is frozen at the point ADR-0006 archived it. You maintain it like any other module in your fork.
 
-replace github.com/orkestra-cc/orkestra-addon-billing => ./internal/addons/billing
-```
-
-**That means you already control the source the binary builds against.** Edit `backend/internal/addons/billing/` and the next `make build-billing` (or AIR hot reload) picks up your changes. The `v0.1.0` require line is a fallback for external consumers and the Go proxy; the replace wins locally.
-
-### When to use this pattern
-
-- Your changes are **company-internal** and you don't intend to publish a separate fork on GitHub.
-- You want to **stay close to upstream** and pull `git merge upstream/main` regularly to absorb fixes.
-- You don't need other repos (a sister mobile app, another fork) to consume your customized addon as a Go module.
-
-### Tracking upstream
-
-The monorepo fork tracks upstream `orkestra-cc/orkestra`; the addon directories are subdirectories of that, so the same `git merge` brings in upstream addon changes:
-
-```bash
-git remote add upstream https://github.com/orkestra-cc/orkestra.git
-git fetch upstream
-git merge upstream/main          # absorbs core + addon updates together
-```
-
-If you've diverged enough that merges always conflict in one addon, that's the signal to switch to Pattern B for **that one addon** while keeping the rest on Pattern A.
-
-### Don't bump the `require` line
-
-Leave `require github.com/orkestra-cc/orkestra-addon-billing v0.1.0` alone unless upstream changes it. The replace directive masks it — bumping it churns `go.sum` without affecting your build. Upstream-merge conflicts on this line resolve to "take upstream."
-
-### Publishing your custom binary
-
-The SKU images in `ghcr.io/orkestra-cc/orkestra/backend:<sku>` ship the upstream addon. To distribute your customized backend:
-
-```bash
-# Tag set must match backend/Makefile's TAGS_BILLING for parity with the upstream SKU.
-docker build -t ghcr.io/your-org/orkestra/backend:billing \
-    --build-arg BUILD_TAGS="no_addons addon_billing addon_documents addon_company addon_dev" \
-    -f backend/Dockerfile backend/
-docker push ghcr.io/your-org/orkestra/backend:billing
-```
-
-Override the image in your compose file:
-
-```yaml
-services:
-  backend:
-    image: ghcr.io/your-org/orkestra/backend:billing
-```
-
-Or set `BACKEND_IMAGE_REPO=ghcr.io/your-org/orkestra` in `docker/.env` to pick up `<repo>/backend:<sku>` everywhere.
-
-## Pattern B — Standalone fork of the addon repo
-
-You want to publish your customized addon as its own Go module — usable from multiple monorepo forks, or distributed to other teams.
-
-### Step 1 — Fork the public addon repo
-
-```bash
-# On GitHub: fork orkestra-cc/orkestra-addon-billing → your-org/orkestra-addon-billing
-git clone https://github.com/your-org/orkestra-addon-billing.git
-cd orkestra-addon-billing
-```
-
-The fork is a standalone Go module — `module github.com/orkestra-cc/orkestra-addon-billing` in `go.mod`. **Do not change the module path** unless you fully sever from upstream; changing it breaks the in-tree replace directive and forces every consumer to rewrite imports.
-
-### Step 2 — Iterate and tag
-
-Make your changes, run the addon's own tests, tag a release:
-
-```bash
-git tag v0.1.0-custom.1
-git push --tags
-```
-
-Pre-release suffixes (`-custom.N`, `-your-org.N`) make it obvious from `go.sum` that this isn't an upstream build.
-
-### Step 3 — Wire your fork into the monorepo
-
-In `backend/go.mod`, replace the upstream import with your fork:
-
-```
-require github.com/orkestra-cc/orkestra-addon-billing v0.1.0-custom.1
-
-replace github.com/orkestra-cc/orkestra-addon-billing => github.com/your-org/orkestra-addon-billing v0.1.0-custom.1
-```
-
-Delete the in-tree directory if you no longer need it (the binary will resolve through the proxy):
-
-```bash
-rm -rf backend/internal/addons/billing
-go mod tidy
-```
-
-…or keep it as a vendored fallback and drop only the local `replace` line.
-
-### Step 4 — Track upstream
-
-The Go module proxy doesn't track forks; you have to merge upstream yourself:
-
-```bash
-# In your fork repo
-git remote add upstream https://github.com/orkestra-cc/orkestra-addon-billing.git
-git fetch upstream
-git merge upstream/main
-# Resolve conflicts, retest, tag a new release
-git tag v0.1.0-custom.2
-git push --tags
-# Bump the require line in the monorepo
-```
-
-### When to use this pattern
-
-- The addon's behavior is **fundamentally divergent** — you've rewritten core handlers, not extended them.
-- Multiple monorepo forks (a sister team, an internal staging fork) need to consume the same customized addon.
-- You're willing to absorb the **merge cost** of tracking upstream out-of-band.
-
-## SDK version compatibility
-
-Every addon declares `require github.com/orkestra-cc/orkestra-sdk vX.Y.Z`. When you fork:
-
-- **The addon's SDK version must be ≤ the monorepo's SDK version**, and within the same major. Today both are on `v0` so any `v0.x` works against any `v0.y`; once the SDK hits `v1`, mixing `v1` and `v2` will fail the build.
-- **Don't pin the addon to a higher SDK than the monorepo ships** unless you're also bumping the monorepo. The addon won't compile.
-- A `replace github.com/orkestra-cc/orkestra-sdk => ./pkg/sdk` line in the monorepo wins for the whole module graph — addons see whatever SDK the monorepo says they see.
-
-If the monorepo replace points the SDK at a local path and your addon fork imports SDK types directly, your CI (without the replace) will resolve against the published tag. Always test your fork against the tagged SDK before publishing — see the [verify external examples](https://github.com/orkestra-cc/orkestra/blob/main/CONTRIBUTING.md) note in the contributor guide.
-
-## What you cannot fork independently
-
-- **The `Module` interface itself.** It lives in `github.com/orkestra-cc/orkestra-sdk/module` and is the contract the registry calls. Adding methods is a major SDK bump and breaks every addon.
-- **The `shared/iface` cross-module interfaces** (`UserProvider`, `NotificationSender`, …). Forking these silently forks the contract every other addon expects. PR upstream instead.
-- **Core modules** (`user`, `auth`, `tenant`, `authz`, `notification`, `navigation`, `logging`). They don't live in addon repos — they live in `backend/internal/core/`. Customize them by editing your monorepo fork directly; merging upstream is the only way to absorb fixes.
-
-## Checklist before shipping a fork to production
-
-- [ ] CI builds the SKU that contains your customized addon — `make build-<sku>` from your fork passes
-- [ ] You have a documented merge cadence with upstream (Pattern A: monthly `git merge`; Pattern B: track addon releases)
-- [ ] Your customized image is published to a registry your deploys can reach
-- [ ] You've subscribed to upstream security advisories — fork or not, a CVE in `orkestra-cc/orkestra` likely affects you too
-- [ ] Your fork's `README.md` clearly states what diverges from upstream, so successor maintainers don't have to bisect
-
-See also: [Adding an addon](/contributing/adding-an-addon) · [I just forked Orkestra](/getting-started/forking) · [Module lifecycle](/architecture/module-lifecycle)
+For brand-new verticals (not cribbed from an archive), see [Adding an addon](/contributing/adding-an-addon).

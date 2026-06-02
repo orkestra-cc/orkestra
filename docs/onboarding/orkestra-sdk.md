@@ -1,32 +1,27 @@
 # Orkestra SDK — Developer Onboarding
 
 _Audience: backend developers writing or modifying Orkestra modules (core or addons)._
-_Last refresh: 2026-05-14, after Phase 5 of the SDK split (all 13 addons extracted, SDK at v0.4.0+)._
+
+> ## ⚠️ Reverted by ADR-0006
+> This doc describes the **multi-repo SDK split** (the SDK + each addon as its own published Go module, bound by `go.work` + `replace`). [ADR-0006](../adr/0006-collapse-to-core-only-base.md) **reverted** all of that and collapsed Orkestra to a core-only base:
+> - `pkg/sdk` is now an **in-tree package** of the single `github.com/orkestra/backend` module — imported as `github.com/orkestra/backend/pkg/sdk/...`. There is **no** separate `go.mod`, no `go.work`, no `replace`, and nothing published to the Go proxy.
+> - The 14 addons were **deleted** from the monorepo and their extracted repos archived. The base ships seven core modules and an empty optional-module catalog.
+>
+> The SDK's *contract* (the `Module` interface, `ServiceRegistry`, `ConfigService`, `iface`, `tenantrepo`, …) is unchanged — only the packaging is. Read the sections below for that contract, but **mentally substitute the in-tree import path** for every `github.com/orkestra-cc/orkestra-sdk/...` and ignore the `go.work` / `replace` / publish / extract machinery. Current source of truth: [`backend/pkg/sdk/CLAUDE.md`](../../backend/pkg/sdk/CLAUDE.md).
 
 ## What the SDK is
 
 The Orkestra SDK is the **contract layer** between the backend kernel and
-every module — the six core modules (`user`, `auth`, `authz`, `tenant`,
-`notification`, `navigation`) plus every optional addon (`billing`,
-`rag`, `payments`, …). It lives at `backend/pkg/sdk/` as its own Go
-module:
+every module — the seven core modules (`user`, `auth`, `authz`, `tenant`,
+`notification`, `navigation`, `logging`) plus any optional module a fork
+adds. It lives at `backend/pkg/sdk/` as an **in-tree package** of the
+single backend Go module, imported as:
 
 ```
-module github.com/orkestra-cc/orkestra-sdk
+github.com/orkestra/backend/pkg/sdk/...
 ```
 
-The SDK is **published** to its own public GitHub repo at
-[`github.com/orkestra-cc/orkestra-sdk`](https://github.com/orkestra-cc/orkestra-sdk)
-and is consumed by the monolith via the workspace (`go.work`) for local
-development and via `go get` once tagged. Every optional addon
-(`documents`, `aimodels`, `openapiauth`, `company`, `graph`, `sales`,
-`subscriptions`, `payments`, `billing`, `dev`, `compliance`, `identity`,
-`rag`) is **also its own Go module** with its own `go.mod` — they're
-listed in the repo-root `go.work` file and each one is also published as
-a standalone repo (`orkestra-cc/orkestra-addon-<name>`). Phase 5 of
-[the split plan][1] completed this on 2026-05-14. Phase 6 candidates
-(drop `replace` directives, externalize re-export shims, public-mirror
-CI) are deferred.
+> The text below (separate `go.mod`, `go.work`, published `orkestra-cc/orkestra-sdk`, per-addon modules) reflects the reverted multi-repo split — see the banner above.
 
 If you're writing a module — **anything that boots, registers routes,
 and owns config or data** — this document is the one to read.

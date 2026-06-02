@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/orkestra/backend/internal/core/auth/models"
-	userModels "github.com/orkestra/backend/internal/core/user/models"
+	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
 // newGetMethodsSvc wires a minimal *authService for the aggregator
@@ -26,7 +26,7 @@ func TestGetUserAuthMethods_PasswordOnly(t *testing.T) {
 	pwTime := time.Now().Add(-30 * 24 * time.Hour)
 	last := time.Now().Add(-1 * time.Hour)
 	fake := newAdminUnlinkUserFake()
-	fake.seed(&userModels.User{
+	fake.seed(&iface.User{
 		UUID:              "u1",
 		Email:             "u1@example.com",
 		Role:              "operator",
@@ -67,7 +67,7 @@ func TestGetUserAuthMethods_PasswordOnly(t *testing.T) {
 func TestGetUserAuthMethods_TOTPEnrolled(t *testing.T) {
 	t.Parallel()
 	fake := newAdminUnlinkUserFake()
-	fake.seed(&userModels.User{UUID: "u-totp", Role: "administrator", PasswordHash: "x"})
+	fake.seed(&iface.User{UUID: "u-totp", Role: "administrator", PasswordHash: "x"})
 
 	enrolled := time.Now().Add(-7 * 24 * time.Hour)
 	used := time.Now().Add(-2 * time.Hour)
@@ -107,7 +107,7 @@ func TestGetUserAuthMethods_TOTPEnrolled(t *testing.T) {
 func TestGetUserAuthMethods_BothFactors(t *testing.T) {
 	t.Parallel()
 	fake := newAdminUnlinkUserFake()
-	fake.seed(&userModels.User{UUID: "u-both", Role: "administrator", PasswordHash: "x"})
+	fake.seed(&iface.User{UUID: "u-both", Role: "administrator", PasswordHash: "x"})
 
 	factors := newFakeFactorRepo()
 	totpEnrolled := time.Now().Add(-30 * 24 * time.Hour)
@@ -165,11 +165,11 @@ func TestGetUserAuthMethods_OAuthOnly(t *testing.T) {
 	t.Parallel()
 	fake := newAdminUnlinkUserFake()
 	linked := time.Now().Add(-90 * 24 * time.Hour)
-	fake.seed(&userModels.User{
+	fake.seed(&iface.User{
 		UUID:         "u-oauth",
 		Role:         "operator",
 		PasswordHash: "", // no password
-		OAuthLinks: []userModels.OAuthLink{
+		OAuthLinks: []iface.OAuthLink{
 			{Provider: "google", ProviderID: "g-1", Email: "u@x.com", IsActive: true, IsPrimary: true, LinkedAt: linked},
 			{Provider: "github", ProviderID: "gh-1", Email: "u@x.com", IsActive: false}, // inactive — should be filtered out
 		},

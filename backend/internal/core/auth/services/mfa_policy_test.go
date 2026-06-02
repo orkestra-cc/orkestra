@@ -5,7 +5,7 @@ import (
 	"time"
 
 	authModels "github.com/orkestra/backend/internal/core/auth/models"
-	userModels "github.com/orkestra/backend/internal/core/user/models"
+	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
 func TestRoleRequiresMFA(t *testing.T) {
@@ -32,9 +32,9 @@ func TestRoleRequiresMFA(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			var user *userModels.User
+			var user *iface.User
 			if tc.role != "" || tc.memberships != nil {
-				user = &userModels.User{Role: tc.role}
+				user = &iface.User{Role: tc.role}
 			}
 			got := RoleRequiresMFA(user, tc.memberships)
 			if got != tc.want {
@@ -50,18 +50,18 @@ func TestGraceExpired(t *testing.T) {
 	past := now.Add(-10 * 24 * time.Hour)
 
 	t.Run("nil stamp never expired", func(t *testing.T) {
-		if GraceExpired(&userModels.User{}, now) {
+		if GraceExpired(&iface.User{}, now) {
 			t.Fatalf("nil stamp should not be expired")
 		}
 	})
 	t.Run("within window", func(t *testing.T) {
-		u := &userModels.User{MFAGraceStartedAt: &within}
+		u := &iface.User{MFAGraceStartedAt: &within}
 		if GraceExpired(u, now) {
 			t.Fatalf("should be within grace")
 		}
 	})
 	t.Run("past window", func(t *testing.T) {
-		u := &userModels.User{MFAGraceStartedAt: &past}
+		u := &iface.User{MFAGraceStartedAt: &past}
 		if !GraceExpired(u, now) {
 			t.Fatalf("should be expired")
 		}
@@ -70,7 +70,7 @@ func TestGraceExpired(t *testing.T) {
 
 func TestGraceExpiresAt(t *testing.T) {
 	start := time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)
-	u := &userModels.User{MFAGraceStartedAt: &start}
+	u := &iface.User{MFAGraceStartedAt: &start}
 	got := GraceExpiresAt(u)
 	want := start.Add(MFAEnrollmentGraceWindow)
 	if !got.Equal(want) {
@@ -78,7 +78,7 @@ func TestGraceExpiresAt(t *testing.T) {
 	}
 
 	// Nil stamp → zero time
-	if v := GraceExpiresAt(&userModels.User{}); !v.IsZero() {
+	if v := GraceExpiresAt(&iface.User{}); !v.IsZero() {
 		t.Fatalf("expected zero time for unset stamp, got %v", v)
 	}
 }

@@ -8,17 +8,16 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
-	"github.com/orkestra-cc/orkestra-sdk/iface"
 	authModels "github.com/orkestra/backend/internal/core/auth/models"
 	"github.com/orkestra/backend/internal/core/auth/services"
-	userModels "github.com/orkestra/backend/internal/core/user/models"
+	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
 // LoginTokenIssuer is the subset of PasswordAuthService the MFA login verify
 // endpoint needs to mint and persist a full token pair. Kept as a local
 // interface so the MFA handler doesn't import the whole password service.
 type LoginTokenIssuer interface {
-	IssueLoginTokens(ctx context.Context, user *userModels.User, deviceID, platform, ip string, amr []string, lastOTPAt int64) (*authModels.TokenResponse, error)
+	IssueLoginTokens(ctx context.Context, user *iface.User, deviceID, platform, ip string, amr []string, lastOTPAt int64) (*authModels.TokenResponse, error)
 }
 
 // adminAuthRecorder is the narrow slice of AuthService MFAHandler needs

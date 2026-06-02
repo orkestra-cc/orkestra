@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/orkestra-cc/orkestra-sdk/module"
 	"github.com/orkestra/backend/internal/core/navigation/models"
+	"github.com/orkestra/backend/pkg/sdk/module"
 )
 
 func adminFindItem(items []models.AdminNavItem, name string) *models.AdminNavItem {

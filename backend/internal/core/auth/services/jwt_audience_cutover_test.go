@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
-	userModels "github.com/orkestra/backend/internal/core/user/models"
+	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
 // TestValidateRejectsTokenWithoutAudience locks in the ADR-0003 PR-D
@@ -59,7 +59,7 @@ func TestRefreshTokenCarriesAudience(t *testing.T) {
 	}
 	svc := NewJWTService(priv, &priv.PublicKey, "test", 15*time.Minute, 30*24*time.Hour)
 
-	user := &userModels.User{UUID: "u-1", Email: "a@b.com", Role: "administrator"}
+	user := &iface.User{UUID: "u-1", Email: "a@b.com", Role: "administrator"}
 	refresh, err := svc.GenerateRefreshToken(user)
 	if err != nil {
 		t.Fatalf("issue refresh: %v", err)
@@ -91,7 +91,7 @@ func TestNewJWTServiceWithAudienceStampsCustomValue(t *testing.T) {
 		t.Fatalf("constructor: %v", err)
 	}
 
-	user := &userModels.User{UUID: "u-1", Email: "a@b.com", Role: "operator"}
+	user := &iface.User{UUID: "u-1", Email: "a@b.com", Role: "operator"}
 	access, err := svc.GenerateAccessToken(user)
 	if err != nil {
 		t.Fatalf("issue access: %v", err)

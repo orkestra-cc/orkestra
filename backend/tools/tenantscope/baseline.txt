@@ -28,16 +28,6 @@
 # Expiry is optional: //tenantscope:allow-until=YYYY-MM-DD <reason>
 # makes the allowance auto-expire once the date passes, so temporary
 # workarounds cannot pile up in perpetuity (Phase 5.4).
-internal/addons/agents/repository/conversation_repository.go:110:Find
-internal/addons/agents/repository/conversation_repository.go:134:UpdateOne
-internal/addons/agents/repository/conversation_repository.go:145:DeleteOne
-internal/addons/agents/repository/conversation_repository.go:68:FindOne
-internal/addons/agents/repository/conversation_repository.go:84:CountDocuments
-internal/addons/agents/repository/project_repository.go:112:Find
-internal/addons/agents/repository/project_repository.go:133:FindOneAndUpdate
-internal/addons/agents/repository/project_repository.go:149:DeleteOne
-internal/addons/agents/repository/project_repository.go:78:FindOne
-internal/addons/agents/repository/project_repository.go:90:FindOne
 internal/core/auth/repository/auth_session_repository.go:101:DeleteMany
 internal/core/auth/repository/auth_session_repository.go:176:FindOne
 internal/core/auth/repository/auth_session_repository.go:199:FindOne

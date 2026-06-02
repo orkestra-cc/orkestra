@@ -9,7 +9,7 @@ package services
 import (
 	"testing"
 
-	userModels "github.com/orkestra/backend/internal/core/user/models"
+	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
 func TestParseUnverifiedClaims_ReturnsClaimsWithoutVerifyingSignature(t *testing.T) {
@@ -20,7 +20,7 @@ func TestParseUnverifiedClaims_ReturnsClaimsWithoutVerifyingSignature(t *testing
 	}
 	svc.SetTenantProvider(gateTenantProvider{})
 
-	user := &userModels.User{UUID: "u-1", Email: "alice@example.com", Role: "operator"}
+	user := &iface.User{UUID: "u-1", Email: "alice@example.com", Role: "operator"}
 	token, err := svc.GenerateAccessToken(user)
 	if err != nil {
 		t.Fatalf("GenerateAccessToken: %v", err)
@@ -66,7 +66,7 @@ func TestParseUnverifiedClaims_TamperedSignatureStillReadsClaims(t *testing.T) {
 	}
 	svc.SetTenantProvider(gateTenantProvider{})
 
-	user := &userModels.User{UUID: "u-2", Email: "bob@example.com", Role: "operator"}
+	user := &iface.User{UUID: "u-2", Email: "bob@example.com", Role: "operator"}
 	token, err := svc.GenerateAccessToken(user)
 	if err != nil {
 		t.Fatalf("GenerateAccessToken: %v", err)

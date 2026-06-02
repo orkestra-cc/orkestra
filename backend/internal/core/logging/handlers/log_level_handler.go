@@ -9,9 +9,9 @@ import (
 	"context"
 
 	"github.com/danielgtaylor/huma/v2"
-	"github.com/orkestra-cc/orkestra-sdk/ctxauth"
 	"github.com/orkestra/backend/internal/core/logging/models"
 	"github.com/orkestra/backend/internal/core/logging/services"
+	"github.com/orkestra/backend/pkg/sdk/ctxauth"
 )
 
 // LogLevelHandler serves the /v1/admin/observability/log-levels surface.
