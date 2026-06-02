@@ -13,25 +13,20 @@ import (
 // cookieDomainForAudience returns the refresh-cookie Domain attribute the
 // middleware should mint for a request acting in the given audience.
 // ADR-0003 PR-D D-9 split: operator requests get cfg.Auth.Cookie.OperatorDomain,
-// client requests get ClientDomain, anything else (legacy single-host or
-// pre-audience routes) falls back to cfg.Auth.Cookie.Domain. An empty
-// per-tier field also falls back so single-host deployments still set the
-// scope they expect.
+// client requests get ClientDomain. Anything else (or an unset per-tier
+// value) returns "" — the cookie is minted without a Domain attribute,
+// scoped to whatever host served the request.
 func cookieDomainForAudience(cfg *config.Config, audience string) string {
 	if cfg == nil {
 		return ""
 	}
 	switch audience {
 	case "operator":
-		if cfg.Auth.Cookie.OperatorDomain != "" {
-			return cfg.Auth.Cookie.OperatorDomain
-		}
+		return cfg.Auth.Cookie.OperatorDomain
 	case "client":
-		if cfg.Auth.Cookie.ClientDomain != "" {
-			return cfg.Auth.Cookie.ClientDomain
-		}
+		return cfg.Auth.Cookie.ClientDomain
 	}
-	return cfg.Auth.Cookie.Domain
+	return ""
 }
 
 // AudienceContextKey holds the resolved JWT audience for the current

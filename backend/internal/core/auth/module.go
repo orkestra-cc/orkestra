@@ -711,17 +711,10 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 	// ADR-0003 PR-D D-9: per-audience refresh-cookie domains. Each
 	// tier's handler trio gets the matching value so refresh cookies are
 	// scoped to the host that minted them — operator tokens stay on
-	// `console.*`, client tokens on `api.*`. Empty per-tier fields fall
-	// back to the legacy single-host `Domain` so single-host deployments
-	// keep working unchanged.
+	// `console.*`, client tokens on `api.*`. An empty value mints the
+	// cookie without a Domain attribute (scoped to the minting host).
 	operatorCookieDomain := cfg.Auth.Cookie.OperatorDomain
-	if operatorCookieDomain == "" {
-		operatorCookieDomain = cfg.Auth.Cookie.Domain
-	}
 	clientCookieDomain := cfg.Auth.Cookie.ClientDomain
-	if clientCookieDomain == "" {
-		clientCookieDomain = cfg.Auth.Cookie.Domain
-	}
 
 	// Operator tier — required after the D-8 cutover. The user module
 	// always registers ServiceOperatorUserProvider, so a missing

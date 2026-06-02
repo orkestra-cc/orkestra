@@ -116,20 +116,16 @@ type JWTConfig struct {
 
 type CookieConfig struct {
 	Secret string
-	Name   string
-	// Domain is the legacy single-tier cookie domain (`COOKIE_DOMAIN`).
-	// Kept as the fallback when the audience-specific values below are
-	// empty so single-host deployments keep working without changes.
-	// Per-audience deployments (ADR-0003 PR-D D-9) should leave this
-	// empty and set OperatorDomain / ClientDomain instead.
-	Domain string
+	// Name is the refresh-token cookie name — the only cookie Orkestra
+	// sets in the browser (the SPA holds the access token in memory, so
+	// there is no access-token cookie). Read from `COOKIE_NAME_REFRESH`,
+	// defaulting to `orkestra_cookie`.
+	Name string
 	// OperatorDomain scopes refresh-token cookies minted on the operator
-	// host (`console.*`) — set via `OPERATOR_COOKIE_DOMAIN`. Empty falls
-	// back to Domain.
+	// host (`console.*`) — set via `OPERATOR_COOKIE_DOMAIN`.
 	OperatorDomain string
 	// ClientDomain scopes refresh-token cookies minted on the client
-	// host (`api.*`) — set via `CLIENT_COOKIE_DOMAIN`. Empty falls back
-	// to Domain.
+	// host (`api.*`) — set via `CLIENT_COOKIE_DOMAIN`.
 	ClientDomain string
 	HttpOnly     bool
 	Secure       bool
@@ -266,14 +262,13 @@ func Load() (*Config, error) {
 		JWT: jwtConfig,
 		Cookie: CookieConfig{
 			Secret: getEnv("COOKIE_SECRET", "default-cookie-secret"),
-			Name:   getEnv("COOKIE_NAME", "orkestra_cookie"),
-			Domain: getEnv("COOKIE_DOMAIN", ""),
+			Name:   getEnv("COOKIE_NAME_REFRESH", "orkestra_cookie"),
 			// ADR-0003 PR-D D-9: per-audience cookie domains. Dev defaults
 			// align with the per-audience host defaults above so the
 			// browser scopes refresh cookies to the matching subdomain
 			// without contributors having to set anything. Prod defaults
-			// are left empty — operators set them explicitly so a stale
-			// COOKIE_DOMAIN does not accidentally cross the audiences.
+			// are left empty — operators set them explicitly so a cookie is
+			// never minted with a domain that crosses both audiences.
 			OperatorDomain: getEnv("OPERATOR_COOKIE_DOMAIN", defaultOperatorCookieDomain(env)),
 			ClientDomain:   getEnv("CLIENT_COOKIE_DOMAIN", defaultClientCookieDomain(env)),
 			HttpOnly:       getEnvAsBool("COOKIE_HTTP_ONLY", true),

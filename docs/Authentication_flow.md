@@ -182,7 +182,7 @@ The refresh token is delivered as an `HttpOnly; Secure; SameSite=Lax` cookie on 
 | Operator (`console.*`) | `OPERATOR_COOKIE_DOMAIN` (default dev: `console.localhost`) |
 | Client (`api.*`)       | `CLIENT_COOKIE_DOMAIN`   (default dev: `api.localhost`) |
 
-Empty per-tier values fall back to the legacy `COOKIE_DOMAIN` for single-host deployments. **In production-like envs operators MUST set both** explicitly — leaving them empty defeats the host split because the legacy `COOKIE_DOMAIN` spans both audiences.
+An empty per-tier value mints the cookie without a `Domain` attribute, so it is scoped to whatever host served the request. **In production-like envs operators MUST set both** explicitly so each tier's cookie is scoped to its own subdomain.
 
 Refresh cookies are scoped narrowly enough that the browser won't send a `console.*` refresh cookie on an `api.*` request and vice versa, so cross-audience replay is structurally impossible at the cookie layer in addition to being rejected at the JWT layer.
 

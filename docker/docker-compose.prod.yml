@@ -40,13 +40,14 @@ services:
 
       # Cookie Configuration (maximum security)
       COOKIE_SECRET: ${COOKIE_SECRET}
-      COOKIE_NAME: ${COOKIE_NAME:-orkestra_cookie}
-      COOKIE_DOMAIN: ${COOKIE_DOMAIN}
+      # Refresh-cookie name — the only cookie set in the browser (the access
+      # token lives in SPA memory, so there is no access-token cookie).
+      COOKIE_NAME_REFRESH: ${COOKIE_NAME_REFRESH:-orkestra_cookie}
       # ADR-0003 PR-D D-9: per-audience refresh-cookie scopes. Operators
-      # MUST set both — leaving them empty falls back to COOKIE_DOMAIN,
-      # which spans both audiences and defeats the host split. The host
-      # mux already rejects unmatched Host headers with 421, but a wide
-      # cookie scope would still let an operator session leak to api.*.
+      # MUST set both — an empty value mints the cookie without a Domain
+      # attribute (scoped to the minting host). The host mux already rejects
+      # unmatched Host headers with 421, but setting these keeps an operator
+      # session from being scoped wider than console.* (and vice-versa).
       OPERATOR_COOKIE_DOMAIN: ${OPERATOR_COOKIE_DOMAIN:-}
       CLIENT_COOKIE_DOMAIN: ${CLIENT_COOKIE_DOMAIN:-}
       COOKIE_HTTP_ONLY: ${COOKIE_HTTP_ONLY:-true}
