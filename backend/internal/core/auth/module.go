@@ -163,16 +163,21 @@ func (m *AuthModule) ConfigSchema() []module.ConfigField {
 
 		// Registration — tier-aware site-wide signup policy. Read at
 		// request time by AuthPolicyService; edits via the admin UI take
-		// effect on the next signup with no restart.
+		// effect on the next signup with no restart. Both surfaces ship
+		// OFF by default: a fresh install must not accept self-service
+		// signups until the super_admin explicitly opens them. The very
+		// first account on a fresh install bypasses this kill switch
+		// (see PasswordAuthService.Register) so the bootstrapping
+		// operator is never locked out.
 		{
 			Key: "registrationEnabledAdmin", Label: "Allow signups on operator console", Group: "Registration",
-			Description: "When off, POST /v1/auth/operator/register returns 403. Operator accounts must be invited or created via /admin.",
-			Type:        module.FieldBool, Default: "true",
+			Description: "OFF by default. When off, POST /v1/auth/operator/register returns 403 — operator accounts must be invited or created via /admin. The super_admin turns this on to allow self-service operator signups. The first account on a fresh install bypasses the switch so bootstrap is never blocked.",
+			Type:        module.FieldBool, Default: "false",
 		},
 		{
 			Key: "registrationEnabledClient", Label: "Allow signups on client app", Group: "Registration",
-			Description: "When off, POST /v1/auth/client/register returns 403. Tier-2 clients can no longer self-register.",
-			Type:        module.FieldBool, Default: "true",
+			Description: "OFF by default. When off, POST /v1/auth/client/register returns 403 — Tier-2 clients cannot self-register until the super_admin enables it.",
+			Type:        module.FieldBool, Default: "false",
 		},
 		{
 			Key: "defaultRoleClient", Label: "Default role for new client signups", Group: "Registration",
@@ -280,52 +285,63 @@ func (m *AuthModule) ConfigSchema() []module.ConfigField {
 		// surfaces that should accept it. A provider that is configured
 		// but disabled for a surface is filtered out of GET
 		// /v1/auth/{tier}/providers and returns 403 oauth_disabled
-		// from the start endpoints.
+		// from the start endpoints. Every toggle ships OFF by default:
+		// a fresh install exposes no social-login button until the
+		// super_admin both configures the provider's credentials AND
+		// flips its surface toggle on. (A provider with no client ID is
+		// already filtered out regardless — this toggle is the explicit
+		// second gate.)
 		{
 			Key: "googleEnabledAdmin", Label: "Google on operator console", Group: "OAuth Providers",
-			Type: module.FieldBool, Default: "true",
+			Type: module.FieldBool, Default: "false",
 		},
 		{
 			Key: "googleEnabledClient", Label: "Google on client app", Group: "OAuth Providers",
-			Type: module.FieldBool, Default: "true",
+			Type: module.FieldBool, Default: "false",
 		},
 		{
 			Key: "appleEnabledAdmin", Label: "Apple on operator console", Group: "OAuth Providers",
-			Type: module.FieldBool, Default: "true",
+			Type: module.FieldBool, Default: "false",
 		},
 		{
 			Key: "appleEnabledClient", Label: "Apple on client app", Group: "OAuth Providers",
-			Type: module.FieldBool, Default: "true",
+			Type: module.FieldBool, Default: "false",
 		},
 		{
 			Key: "githubEnabledAdmin", Label: "GitHub on operator console", Group: "OAuth Providers",
-			Type: module.FieldBool, Default: "true",
+			Type: module.FieldBool, Default: "false",
 		},
 		{
 			Key: "githubEnabledClient", Label: "GitHub on client app", Group: "OAuth Providers",
-			Type: module.FieldBool, Default: "true",
+			Type: module.FieldBool, Default: "false",
 		},
 		{
 			Key: "discordEnabledAdmin", Label: "Discord on operator console", Group: "OAuth Providers",
-			Type: module.FieldBool, Default: "true",
+			Type: module.FieldBool, Default: "false",
 		},
 		{
 			Key: "discordEnabledClient", Label: "Discord on client app", Group: "OAuth Providers",
-			Type: module.FieldBool, Default: "true",
+			Type: module.FieldBool, Default: "false",
 		},
 
 		// MFA — global feature flag + grace window. The privileged-role
 		// list (super_admin / administrator / org_owner / org_admin) is
 		// still hardcoded in services/mfa_policy.go; that's a follow-up
-		// once we agree on UX for editing it. For today, operators can:
-		//   - flip the master switch off in an emergency (existing
-		//     enrollments stay intact; users can still verify
+		// once we agree on UX for editing it. The master switch ships
+		// OFF by default: a fresh install's first account is super_admin
+		// (a privileged role), so seeding mfaEnabled=true would block
+		// that operator from the very config writes needed to finish
+		// setup (e.g. SMTP) with an MFA prompt for a factor they never
+		// enrolled. Operators turn it on once a second factor is
+		// enrolled. For today, operators can:
+		//   - flip the master switch on/off at runtime (existing
+		//     enrollments stay intact; when off, users can still verify
 		//     voluntarily, but RoleRequiresMFA returns false)
 		//   - tune how long a freshly-promoted admin has to enroll
 		{
 			Key: "mfaEnabled", Label: "Require MFA for privileged users", Group: "MFA",
-			Description: "Master switch. When off, RoleRequiresMFA returns false — privileged users can sign in without a second factor. Existing TOTP/passkey enrollments are not deleted; users can still use them.",
-			Type:        module.FieldBool, Default: "true",
+			Description: "Master switch, OFF by default so a fresh install's first super_admin can configure the platform without being blocked by an MFA prompt they never enrolled. Turn this ON only after enrolling a second factor (TOTP/passkey) — otherwise privileged users hit the enrollment grace window on their next login. When off, RoleRequiresMFA returns false; existing enrollments are not deleted and users can still verify voluntarily.",
+			Type:        module.FieldBool, Default: "false",
 		},
 		{
 			Key: "mfaEnrollmentGraceDays", Label: "Enrollment grace period (days)", Group: "MFA",

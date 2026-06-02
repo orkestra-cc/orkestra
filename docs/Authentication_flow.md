@@ -133,8 +133,8 @@ When `GetUserForAuth` finds no user, the password service runs `Verify` against 
 ### Registration
 
 1. `POST /v1/auth/{tier}/register` with `{email, password, fullName}`.
-2. Backend validates policy + HIBP, hashes with argon2id, writes to `{tier}_users`.
-3. **First-user bootstrap**: if `GetUserCount(ctx, nil) == 0` the new account gets `super_admin`. Subsequent accounts default to `operator`.
+2. **Signup kill switch**: `registrationEnabledAdmin/Client` both default to **off** — a fresh install accepts no self-service signups until the super_admin enables them at `/admin/modules/auth`, so a non-first request returns `403 registration_disabled`. The very first account on a fresh install bypasses this switch (see step 3) so bootstrap is never blocked.
+3. Backend validates policy + HIBP, hashes with argon2id, writes to `{tier}_users`. **First-user bootstrap**: if `GetUserCount(ctx, nil) == 0` the new account gets `super_admin` and skips the kill switch. Subsequent accounts default to `operator`.
 4. A 32-byte random verification token is generated, SHA-256-hashed, stored in `{tier}_email_tokens` with a 24h TTL, and the raw token is delivered by `notifier.SendTemplated("auth.verify_email", ...)`.
 5. If `AUTH_REQUIRE_EMAIL_VERIFICATION=true` (production default) and the notifier is missing or unconfigured, registration returns `503 Service Unavailable`. If `false` (dev default), the account is auto-verified and no email is sent.
 
@@ -196,7 +196,7 @@ Manual refresh is also exposed at `POST /v1/auth/{tier}/refresh` (header-supplie
 
 ## 7. MFA + WebAuthn
 
-MFA is **mandatory for privileged roles** — `super_admin`, `administrator`, and any membership carrying `org_owner` / `org_admin`. `developer` is intentionally excluded (its prod downgrade to read-only covers the risk).
+The master switch `mfaEnabled` ships **OFF by default** (a fresh install's first super_admin must be able to finish setup without an MFA prompt for a factor they never enrolled). When an operator turns it on at `/admin/modules/auth`, MFA becomes **mandatory for privileged roles** — `super_admin`, `administrator`, and any membership carrying `org_owner` / `org_admin`. `developer` is intentionally excluded (its prod downgrade to read-only covers the risk). With the switch off, `MFARequired` short-circuits to false and the grace/enrollment machinery below never fires.
 
 A privileged user logging in without an MFA factor has `User.MFAGraceStartedAt` stamped on that login (idempotent via `UserProvider.StartMFAGraceIfUnset`). They get **7 days** to enrol — past the window, login returns `403 mfa_enrollment_required`. Granting a privileged role via `authz.CreateBinding` also eagerly starts the clock so the 7 days begin at promotion, not next login.
 
