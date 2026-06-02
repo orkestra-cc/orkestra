@@ -303,20 +303,28 @@ func (s *ModuleConfigService) GetAllConfigs(ctx context.Context) ([]ModuleConfig
 	if err != nil {
 		return nil, err
 	}
-	// Lazily migrate any documents without environments.
+
+	// Drop orphan documents — modules no longer compiled into this binary
+	// (addons a fork removed, or the ADR-0006 core-only collapse). Their routes
+	// are gated/absent, so surfacing them in the admin UI is misleading. The
+	// documents are left in the collection (non-destructive); they are simply
+	// not returned. When knownModules is empty (service constructed without a
+	// boot seed, e.g. some tooling paths) there is no registry to filter
+	// against, so every document is returned unchanged.
+	var present map[string]bool
+	if len(s.knownModules) > 0 {
+		docs, present = filterKnown(docs, s.knownModules)
+	}
+
+	// Lazily migrate any kept documents without environments.
 	for i := range docs {
 		if err := s.ensureEnvironments(ctx, &docs[i]); err != nil {
 			s.logger.Warn("GetAllConfigs: failed to migrate environments",
 				slog.String("module", docs[i].ModuleName), slog.String("error", err.Error()))
 		}
 	}
-	if len(s.knownModules) == 0 {
-		return docs, nil
-	}
-	present := make(map[string]bool, len(docs))
-	for _, d := range docs {
-		present[d.ModuleName] = true
-	}
+
+	// Lazy-seed any known module missing a document (e.g. after a dev DB wipe).
 	for name := range s.knownModules {
 		if present[name] {
 			continue
@@ -326,6 +334,22 @@ func (s *ModuleConfigService) GetAllConfigs(ctx context.Context) ([]ModuleConfig
 		}
 	}
 	return docs, nil
+}
+
+// filterKnown returns only the configs whose module is registered in known,
+// alongside the set of module names that were present. Documents for modules
+// absent from the binary's catalog (orphans) are dropped. Pure: no I/O.
+func filterKnown(docs []ModuleConfig, known map[string]Module) ([]ModuleConfig, map[string]bool) {
+	out := make([]ModuleConfig, 0, len(docs))
+	present := make(map[string]bool, len(docs))
+	for _, d := range docs {
+		if _, ok := known[d.ModuleName]; !ok {
+			continue
+		}
+		out = append(out, d)
+		present[d.ModuleName] = true
+	}
+	return out, present
 }
 
 // lazySeed rebuilds a single module's config document from its declared
@@ -606,6 +630,11 @@ func (s *ModuleConfigService) ModuleStatusJSON(ctx context.Context) ([]byte, err
 	configs, err := s.repo.FindAll(ctx)
 	if err != nil {
 		return nil, err
+	}
+	// Exclude orphan documents for modules not compiled into this binary —
+	// same rationale as GetAllConfigs. See filterKnown.
+	if len(s.knownModules) > 0 {
+		configs, _ = filterKnown(configs, s.knownModules)
 	}
 
 	infos := make([]ModuleStatusInfo, len(configs))
