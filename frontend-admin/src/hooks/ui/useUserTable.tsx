@@ -1,9 +1,11 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router';
 import { toast } from 'react-toastify';
 import { useTranslation } from 'react-i18next';
+import type { OnChangeFn, PaginationState } from '@tanstack/react-table';
 import paths from 'routes/paths';
 import useAdvanceTable from './useAdvanceTable';
+import useDebounce from 'hooks/useDebounce';
 import Avatar from 'components/common/Avatar';
 import Flex from 'components/common/Flex';
 import SubtleBadge from 'components/common/SubtleBadge';
@@ -131,18 +133,44 @@ const useUserTable = (options?: any) => {
   const [resendVerification] = useResendVerificationUserAdminMutation();
   const [sendPasswordReset] = useSendPasswordResetUserAdminMutation();
 
-  // Fetch users from backend API
+  // Server-side pagination + search state. The backend owns paging and
+  // search (page/pageSize/search → total/totalPages), so the table holds
+  // only the current page and reports the grand total via rowCount.
+  const [pageIndex, setPageIndex] = useState(0);
+  const [pageSize, setPageSize] = useState<number>(options?.perPage || 10);
+  const [globalFilter, setGlobalFilter] = useState('');
+  const debouncedSearch = useDebounce(globalFilter.trim(), 300);
+
+  // A new search term always returns to the first page.
+  useEffect(() => {
+    setPageIndex(0);
+  }, [debouncedSearch]);
+
+  // Fetch the current page from the backend API
   const {
     data: usersResponse,
     isLoading,
     error
   } = useGetUsersQuery({
-    pageSize: options?.perPage || 10,
-    page: 1
+    page: pageIndex + 1,
+    pageSize,
+    search: debouncedSearch || undefined
   });
 
   // Transform the data for the table
   const users = usersResponse?.users || [];
+  const total = usersResponse?.total ?? 0;
+
+  const pagination: PaginationState = { pageIndex, pageSize };
+  const onPaginationChange: OnChangeFn<PaginationState> = updater => {
+    const next = typeof updater === 'function' ? updater(pagination) : updater;
+    if (next.pageSize !== pageSize) {
+      setPageSize(next.pageSize);
+      setPageIndex(0);
+    } else {
+      setPageIndex(next.pageIndex);
+    }
+  };
 
   const displayName = (user: User) => user.fullName || user.email;
   const genericFailure = t('adminUsers.mfaReset.errors.generic');
@@ -526,7 +554,17 @@ const useUserTable = (options?: any) => {
     data: users,
     isLoading,
     error,
-    ...options
+    ...options,
+    // Server-side paging + search. rowCount is the backend grand total so
+    // the footer's page count and "x of N" are correct; manualFiltering
+    // stops the client re-filtering the already-searched page, and the
+    // search box's input is captured via onGlobalFilterChange.
+    manualPagination: true,
+    rowCount: total,
+    manualFiltering: true,
+    state: { pagination, globalFilter },
+    onPaginationChange,
+    onGlobalFilterChange: setGlobalFilter
   });
 
   return {

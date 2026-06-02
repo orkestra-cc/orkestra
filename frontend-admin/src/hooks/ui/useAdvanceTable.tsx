@@ -8,7 +8,9 @@ import {
   Row,
   Table,
   TableState,
-  ColumnFiltersState
+  ColumnFiltersState,
+  OnChangeFn,
+  PaginationState
 } from '@tanstack/react-table';
 import IndeterminateCheckbox from 'components/common/advance-table/IndeterminateCheckbox';
 
@@ -66,6 +68,25 @@ interface UseAdvanceTableOptions<T> {
   pagination?: boolean;
   initialState?: Partial<TableState>;
   perPage?: number;
+  // --- Server-side ("manual") pagination, all optional ---
+  // When `manualPagination` is set the table no longer slices `data`
+  // itself: the caller fetches one page at a time and feeds it in,
+  // supplies `rowCount` (the server's grand total) so getPageCount()/
+  // getCanNextPage() are correct, holds the pagination in controlled
+  // `state.pagination`, and reacts to `onPaginationChange` by refetching.
+  // Omitting all of these keeps the original client-side behaviour, so
+  // every existing caller is unaffected.
+  manualPagination?: boolean;
+  pageCount?: number;
+  rowCount?: number;
+  state?: Partial<TableState>;
+  onPaginationChange?: OnChangeFn<PaginationState>;
+  // When the global search also runs server-side, set `manualFiltering`
+  // (so the client doesn't re-filter the already-filtered page) and
+  // capture the search box's input via `onGlobalFilterChange` to feed
+  // the query. Pass the controlled `globalFilter` through `state`.
+  manualFiltering?: boolean;
+  onGlobalFilterChange?: OnChangeFn<string>;
 }
 
 const useAdvanceTable = <T,>({
@@ -77,7 +98,14 @@ const useAdvanceTable = <T,>({
   selectionHeaderClassname,
   pagination,
   initialState,
-  perPage = 10
+  perPage = 10,
+  manualPagination,
+  pageCount,
+  rowCount,
+  state: controlledState,
+  onPaginationChange,
+  manualFiltering,
+  onGlobalFilterChange
 }: UseAdvanceTableOptions<T>) => {
   const state: Partial<TableState> = {
     pagination: { pageSize: pagination ? perPage : data.length, pageIndex: 0 },
@@ -120,7 +148,14 @@ const useAdvanceTable = <T,>({
     getFilteredRowModel: getFilteredRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
     initialState: state,
-    autoResetPageIndex: false
+    autoResetPageIndex: false,
+    ...(manualPagination ? { manualPagination: true } : {}),
+    ...(manualPagination && pageCount !== undefined ? { pageCount } : {}),
+    ...(manualPagination && rowCount !== undefined ? { rowCount } : {}),
+    ...(onPaginationChange ? { onPaginationChange } : {}),
+    ...(manualFiltering ? { manualFiltering: true } : {}),
+    ...(onGlobalFilterChange ? { onGlobalFilterChange } : {}),
+    ...(controlledState ? { state: controlledState } : {})
   });
 
   return table;
