@@ -115,11 +115,10 @@ Vite dev server is serving an HTML page where JS was expected — usually a 404 
 
 ### Symptom: 404 dev-token page
 
-The `dev` addon isn't compiled into your SKU, or `ENV=production` disables the dev token endpoint.
+The core dev-token endpoint (`POST /dev/token`, in `internal/shared/devtoken`) is gated to non-production environments, so `ENV=production` disables it.
 
-- For local: use the `starter` SKU (or any other) — they all include the `dev` addon.
-- For staging-like: keep `ENV=development` or `staging`, NOT `production`.
-- For production: the dev addon is correctly disabled. Use OAuth or password login.
+- For local / staging-like: keep `ENV=development` or `staging`, NOT `production` — the endpoint is present in any non-production build.
+- For production: the dev token issuer is correctly disabled. Create the first admin via the setup wizard (`/v1/setup/*`), then use OAuth or password login.
 
 ### Symptom: CORS error in browser console
 
@@ -140,14 +139,9 @@ Restart the backend after editing.
 
 ### Symptom: an addon I expected isn't in `/admin/modules`
 
-The addon isn't compiled into your SKU. Check the SKU compose file you launched:
+The base ships **no** optional addons — the `optionalModules` catalog is empty, so a stock Orkestra build only lists the 7 core modules. An addon only appears once a fork has added it in-tree (`internal/addons/<name>/` + a `cmd/server/catalog_<name>.go` that registers its factory). Once registered, it's listed at `/admin/modules` and toggled there at runtime — there are no per-SKU builds or build tags to compile it in.
 
-```bash
-docker exec orkestra-backend-starter env | grep ORKESTRA_PROFILE
-# ORKESTRA_PROFILE=starter   → no optional addons compiled in
-```
-
-Switch to a SKU that includes the addon (see the [Backend module map](https://github.com/orkestra-cc/orkestra/blob/main/backend/CLAUDE.md#module-system) for which SKU ships which addon), or build your own image with the right `BUILD_TAGS`.
+If the addon was registered but still isn't listed, confirm the fork's `catalog_<name>.go` calls the registry in its `init()` and that the binary you launched was built from that fork (see the [Backend module map](https://github.com/orkestra-cc/orkestra/blob/main/backend/CLAUDE.md#module-system)).
 
 ### Symptom: enabling an addon at `/admin/modules` returns 409
 
@@ -251,4 +245,4 @@ Per [ADR-0002](/adrs/metrics-label-schema), the route label uses Chi route templ
 ## Still stuck?
 
 - **Search existing issues:** [github.com/orkestra-cc/orkestra/issues](https://github.com/orkestra-cc/orkestra/issues)
-- **Open a new one** with: the exact error message, the SKU you're using, the output of `docker compose -f <your-compose>.yml --env-file .env ps`, and the last 50 lines of `docker compose logs backend`.
+- **Open a new one** with: the exact error message, the output of `docker compose -f <your-compose>.yml --env-file .env ps`, and the last 50 lines of `docker compose logs backend`.

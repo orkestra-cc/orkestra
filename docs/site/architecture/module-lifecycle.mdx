@@ -5,27 +5,22 @@ sidebar_position: 3
 
 # Module Lifecycle
 
-Two layers decide what runs in any given Orkestra instance.
+Orkestra is a **single binary** built from one Go module. Every registered module — the seven always-loaded core modules and any optional modules a fork adds — compiles in. There is no build-time selection: the only layer that decides what actually runs is **runtime configuration**.
 
-## Layer 1 — Build time
+## What compiles in
 
-Which addons are **installable** in this binary is decided at compile time. Each addon's wiring lives in `cmd/server/catalog_<addon>.go`, gated by a Go build tag:
+Each module's wiring lives in `cmd/server/catalog_<name>.go`. The seven core modules are always registered; a fork adds a vertical by dropping its own `internal/addons/<name>/` package plus a `cmd/server/catalog_<name>.go` that registers the factory in the `optionalModules` catalog via an `init()`. There are no Go build tags, no `BUILD_TAGS`, and no per-SKU build profiles — `make build` is the only build target, producing one binary and one Docker image.
 
-```go
-//go:build !no_addons || addon_<name>
-```
+The base ships an **empty** `optionalModules` catalog, so out of the box there is nothing optional to toggle — but the `/admin/modules` surface remains for forks that add their own.
 
-Default builds compile every addon (enterprise SKU). A targeted build like `-tags "no_addons addon_billing addon_documents"` ships a curated subset. The `Makefile` defines named profiles (`make build-starter|minimal|billing|ai|saas|enterprise`) and CI builds the full matrix on every PR.
-
-## Layer 2 — Runtime
+## Runtime — enabled vs disabled
 
 All optional modules that compiled in are **instantiated, initialized, and routed** at boot — regardless of enabled state. Routes for disabled modules are gated by `ModuleGate` middleware (returns `503 Service Unavailable`). Only **enabled** modules have their `Start()` method called.
 
 ```mermaid
 flowchart TB
-  Build[Go build with -tags ...] --> Binary
-  Binary --> Boot
-  Boot --> Init[Init every compiled-in module]
+  Binary[Single binary - all registered modules compiled in] --> Boot
+  Boot --> Init[Init every module]
   Init --> Routes[Register routes for all of them]
   Routes --> Start{enabled<br/>in module_configs?}
   Start -- yes --> Run[Module.Start - background jobs run]
@@ -38,7 +33,7 @@ The admin API (`PATCH /v1/admin/modules/{name}`) calls `StartModule()` / `StopMo
 
 ## First-boot seeding
 
-On the first boot of a brand-new install, the `module_configs` document is seeded from each module's `ConfigSchema().EnvVar`. If `ORKESTRA_PROFILE` is set (typically by `docker-compose.<profile>.yml`), the seeder additionally pre-enables that SKU's addons. **Subsequent boots ignore `ORKESTRA_PROFILE`** — admin-set values are authoritative.
+On the first boot of a brand-new install, the `module_configs` document is seeded from each module's `ConfigSchema().EnvVar` and the module's own `EnabledByDefault`. With an empty optional catalog there is nothing optional to pre-enable; a fork's optional modules seed from their own `EnabledByDefault`. Subsequent boots honor the admin-set values in `module_configs` (edited at `/admin/modules`) — those are authoritative.
 
 ## Initialization order
 

@@ -9,10 +9,10 @@ slug: /api
 
 Orkestra is **OpenAPI-first** — every endpoint is defined via [Huma v2](https://huma.rocks/), which generates a full OpenAPI 3.1 document at runtime. The pages in this section are auto-generated from that document, per-endpoint, with deep-linkable URLs and inline schemas.
 
-:::info Enterprise surface
-This reference shows the **complete enterprise API surface** — every endpoint every addon exposes. A self-hosted Orkestra instance running a leaner [SKU profile](/architecture/module-lifecycle) (e.g. `starter`, `billing`, `ai`, `saas`) only serves the subset of endpoints whose addons are compiled in, and within those, only the ones currently enabled at `/admin/modules`. Routes for disabled-or-not-compiled modules return `503 Service Unavailable`.
+:::info Core API surface
+This reference shows the **core API surface** — the base ships only the seven core modules, with an empty optional-module catalog. A fork that adds verticals regenerates this spec to include its own routes. Routes for an optional module that is disabled at `/admin/modules` return `503 Service Unavailable` via the module gate.
 
-To find out which SKU includes which endpoints, see the [Module Catalog](/modules) — each addon page lists its routes.
+For what each module contributes, see the [Module Catalog](/modules).
 :::
 
 ## Audience split
@@ -20,7 +20,7 @@ To find out which SKU includes which endpoints, see the [Module Catalog](/module
 Two audiences consume the API:
 
 - **Operator** (Tier-1 self-hosters) — the `/admin/*` surface plus operator-facing module endpoints. Tokens carry `aud=operator`. Served on the console host (e.g. `console.orkestra.cc`).
-- **Client** (Tier-2 external clients) — public signup, the client's own self-service surfaces (subscriptions, payments webhooks). Tokens carry `aud=client`. Served on the client host (e.g. `api.orkestra.cc`).
+- **Client** (Tier-2 external clients) — public signup, login, and the client's own account self-service. Tokens carry `aud=client`. Served on the client host (e.g. `api.orkestra.cc`). (A fork that sells services to external clients adds its consumption surfaces — catalog, subscriptions, payment webhooks — here.)
 
 Both audiences are rendered together in this reference because Huma currently generates a single shared OpenAPI document — the audience separation lives at the host/mux level, not at the spec level. Each route's tag tells you which surface it lives on; routes scoped to internal-tenant or with `aud=operator` security implications belong to the operator surface.
 
@@ -48,10 +48,9 @@ On a running instance, the live spec is served at:
 Use the sidebar to navigate by tag, or jump to a section:
 
 - Authentication, MFA, sessions
-- Users, tenants, RBAC
+- Users, tenants, RBAC (roles, permissions, bindings)
 - Module administration (`/admin/*`)
-- Billing (FatturaPA/SDI invoicing)
-- Documents (PDF generation)
-- AI: models, RAG, agents
-- Subscriptions + payments (Stripe)
-- Compliance + identity
+- Navigation
+- Observability — runtime log-levels (`/admin/observability/*`)
+
+(A fork that adds verticals — invoicing, documents, AI, subscriptions/payments, compliance, identity, … — regenerates the spec, and those tags appear here too.)

@@ -10,22 +10,19 @@ This is the cross-cutting walkthrough of how a request becomes an authenticated 
 
 ## 1. Audience model
 
-Orkestra serves two human-facing audiences from one Go binary, dispatched by `Host` header. A third audience exists for service-to-service calls and is never exposed by ingress.
+Orkestra serves two human-facing audiences from one Go binary, dispatched by `Host` header.
 
 | Audience   | Host (prod)            | JWT `aud`  | What lives here                                                                          |
 | ---------- | ---------------------- | ---------- | ---------------------------------------------------------------------------------------- |
-| `operator` | `console.orkestra.com` | `operator` | Tier-1 operator dashboard — module admin, system config, internal billing/SDI, dev tooling |
-| `client`   | `api.orkestra.com`     | `client`   | Tier-2 external client tenants — onboarding, subscriptions, payments                      |
-| `service`  | _(internal docker net)_ | `service`  | AI sidecar `/v1/internal/*` — never published by ingress                                  |
+| `operator` | `console.orkestra.com` | `operator` | Tier-1 operator dashboard — module admin, system config, dev tooling                     |
+| `client`   | `api.orkestra.com`     | `client`   | Tier-2 external client tenants — onboarding, account                                     |
 
 ```mermaid
 flowchart LR
   user1(["Operator user<br/>Tier-1"]) -- console.orkestra.com --> opMux[Operator mux<br/>RequireAudience: operator]
   user2(["External client user<br/>Tier-2"]) -- api.orkestra.com --> clMux[Client mux<br/>RequireAudience: client]
-  service(["AI sidecar<br/>service-to-service"]) -- internal network --> intMux[Internal mux<br/>RequireAudience: service]
   opMux --> handlers[Same auth module<br/>different collections + cookie domains]
   clMux --> handlers
-  intMux --> handlers
 ```
 
 Each public audience has its own `chi.Mux`, its own `huma.API`, its own CORS allowlist, its own rate-limit policy, and its own `RequireAudience` middleware. **A token issued for one audience is rejected at the edge of the other** with `401 audience_mismatch` — this is defense in depth above per-route RBAC.
@@ -241,7 +238,7 @@ The current flow requires password login first, then offers passkey as the secon
 
 ## 8. Session revocation
 
-Logout, change-password, and admin actions populate a Redis-backed set at `auth:revoked:session:<sid>` with the reason string. Both `AuthMiddleware` (monolith) and `JWTValidator` (AI sidecar) check it on every authenticated request — revocation takes effect within milliseconds instead of waiting for the access-token TTL. Entries auto-expire after `access TTL + 1min`. The revocation check **fails open on Redis errors** — a degraded Redis must not lock every user out.
+Logout, change-password, and admin actions populate a Redis-backed set at `auth:revoked:session:<sid>` with the reason string. Both `AuthMiddleware` and the public-key-only `JWTValidator` check it on every authenticated request — revocation takes effect within milliseconds instead of waiting for the access-token TTL. Entries auto-expire after `access TTL + 1min`. The revocation check **fails open on Redis errors** — a degraded Redis must not lock every user out.
 
 `logout` invalidates the current sid only; logout-all-devices currently relies on revoking every refresh token in the user's family (per-user generation counter is a follow-up).
 
@@ -252,7 +249,7 @@ Roles, in descending privilege:
 | Role            | Scope                                                                                  |
 | --------------- | -------------------------------------------------------------------------------------- |
 | `super_admin`   | Full system access. Assigned to the first user on a fresh install via bootstrap heuristic |
-| `administrator` | Module admin, system config, billing, admin endpoints                                  |
+| `administrator` | Module admin, system config, admin endpoints                                           |
 | `developer`     | Dev tooling, internal endpoints. Prod downgrade keeps read-only access                 |
 | `manager`       | Team / operational oversight                                                           |
 | `operator`      | Default for new users post-bootstrap                                                   |

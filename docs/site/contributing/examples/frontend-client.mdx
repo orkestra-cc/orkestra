@@ -10,13 +10,13 @@ sidebar_position: 1
 ## What's interesting
 
 - **API surface**: only the public client endpoints (no `/admin/*`, no internal-only routes).
-- **Auth flow**: standard external-client registration + Stripe-backed subscription onboarding.
+- **Auth flow**: standard external-client registration, login, and account self-service. Post-[ADR-0006](/adrs/collapse-to-core-only-base) it's a thin login + account + billing-identity skeleton — the subscribe / payment-method / transaction flows left with the addons. A fork that sells services to external clients rebuilds the consumption surface here.
 - **i18n from day one**: lives at `app.orkestra.cc` and ships multi-language.
 - **Sibling SPA**: separate Vite app, separate Docker container, shares no build artifacts with the admin console.
 
 ## Read it
 
-[`orkestra-cc/orkestra/tree/main/frontend-client/`](https://github.com/orkestra-cc/orkestra/tree/main/frontend-client) — start with `src/api/` for the consumer surface and `src/routes/` for the registration / subscription flows.
+[`orkestra-cc/orkestra/tree/main/frontend-client/`](https://github.com/orkestra-cc/orkestra/tree/main/frontend-client) — start with `src/api/` for the consumer surface and `src/routes/` for the registration + account flows.
 
 :::note
 This page is a **pointer**, not a tutorial. It exists so developers building Tier-2 clients can find a known-good reference. There is no end-customer documentation on this docs site — Tier-2 clients consume the API, they don't read these docs.

@@ -281,7 +281,7 @@ Run the restore drill at least quarterly, regardless of which path you use. The 
 Easiest path: spin up a staging stack, restore the latest production backup into it, verify a known canary (a specific user, a specific module config) is intact. Three things almost always work on the way out (you've automated them) and break on the way back (you haven't tested them):
 
 - **Encryption key rotation** — if you've rotated `OAUTH_TOKEN_ENCRYPTION_KEY` since the dump was taken, the restore is useless without the old key. Keep a key archive separate from the DB backup.
-- **Schema migrations** — Orkestra's collection schemas evolve. Restoring a 6-month-old dump into a current binary may produce documents whose shape the current code rejects. The `make backend-test` suite + `docker compose -f docker-compose.<sku>.yml --env-file .env up -d` smoke is the test.
+- **Schema migrations** — Orkestra's collection schemas evolve. Restoring a 6-month-old dump into a current binary may produce documents whose shape the current code rejects. The `make backend-test` suite + `docker compose -f docker-compose.prod.yml --env-file .env up -d` smoke is the test.
 - **Index recreation** — `--drop` removes indexes too. The module registry's `ensureCollection` recreates the declared indexes on next boot, but background index builds take time on large collections — expect slow queries for a few minutes post-restore.
 
 Document the runbook on whatever wiki / Notion / GDoc your ops team reads. The dry-run is no good if no one knows where the dump archives live when the production VM is on fire.

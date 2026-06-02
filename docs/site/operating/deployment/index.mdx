@@ -22,20 +22,17 @@ Regardless of shape, you'll be reading one or more of these compose files. They 
 
 | File | Purpose |
 | --- | --- |
-| `docker-compose.infra.yml` | Always-on infra: MongoDB, Redis (and conditional Gotenberg / Memgraph / Hindsight under `manual-only` profile) |
-| `docker-compose.starter.yml` … `docker-compose.enterprise.yml` | One per SKU — pulls a pre-built image from GHCR (`ghcr.io/orkestra-cc/orkestra/backend:<sku>`) |
-| `docker-compose.dev-public.yml` | Source-build + AIR hot reload on public Alpine images |
-| `docker-compose.dev.yml` | Same as above, on Chainguard `dhi.io/*` hardened images (opt-in) |
+| `docker-compose.infra.yml` | Always-on infra: MongoDB, Redis, RustFS |
+| `docker-compose.dev.yml` | Source-build + AIR hot reload — local development |
 | `docker-compose.staging.yml` | Staging-like behavior + AIR hot reload — long-lived dev VMs |
-| `docker-compose.prod.yml` | Optimized production stack |
-| `docker-compose.ai-sidecar.yml` | Optional: split AI module chain into a separate binary |
+| `docker-compose.prod.yml` | Optimized production stack — pulls a pre-built image from GHCR (`ghcr.io/orkestra-cc/orkestra/backend:latest` or `:<sha>`) |
 | `docker-compose.observability.yml` | Optional: self-hosted Tempo + Prometheus + Loki + Grafana |
 
 ## What lives in `.env` vs `/admin/modules`
 
 **Process-scoped infrastructure** (Mongo URI, Redis URL, JWT keys, cookies, encryption keys) lives in `docker/.env`, read by the backend at boot.
 
-**Module configuration** (OAuth credentials, OpenAPI tokens, Stripe keys, SMTP, AI provider keys, per-module enable flags) lives in MongoDB (`module_configs` collection) and is edited at `/admin/modules`. Secrets are AES-256-GCM-encrypted at rest.
+**Module configuration** (OAuth credentials, SMTP, per-module enable flags — plus whatever config keys a fork's addons declare, e.g. payment or API-provider keys) lives in MongoDB (`module_configs` collection) and is edited at `/admin/modules`. Secrets are AES-256-GCM-encrypted at rest.
 
 A module's `ConfigSchema().EnvVar` is consulted **only on first-boot seeding** — env-var changes after that boot have no effect. The single source of truth is the admin UI. See [docker/CLAUDE.md "What belongs in .env / compose vs /admin/modules"](https://github.com/orkestra-cc/orkestra/blob/main/docker/CLAUDE.md) for the full bucket split.
 
@@ -45,4 +42,3 @@ A module's `ConfigSchema().EnvVar` is consulted **only on first-boot seeding** �
 - [Cookie hardening across tiers](/operating/cookie-hardening-cross-tier)
 - [Troubleshooting](/operating/troubleshooting)
 - [OAuth Providers](/operating/oauth-providers) — provider-specific setup
-- [Stripe & Payments](/operating/payments-stripe)

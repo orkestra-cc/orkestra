@@ -14,15 +14,15 @@ Orkestra is a **modular monolith** shipped as a [core-only base](/adrs/collapse-
 ```mermaid
 flowchart LR
   subgraph Tier1["Tier 1 — Internal tenants (operators)"]
-    Admin[Admin UI<br/>/admin/modules]
-    Core[Core modules<br/>user · auth · authz · tenant · …]
+    Admin["Admin UI<br/>/admin/modules"]
+    Core["Core modules<br/>user, auth, authz, tenant, ..."]
   end
   subgraph Tier2["Tier 2 — External clients"]
-    Client[Client signup<br/>+ account]
+    Client["Client signup<br/>+ account"]
   end
   Admin --> Core
   Client --> Core
-  Core -.empty catalog;<br/>fork adds verticals.-> Addons[(optional<br/>modules)]
+  Core -. "fork adds verticals" .-> Addons[("optional<br/>modules")]
 ```
 
 ## Pages

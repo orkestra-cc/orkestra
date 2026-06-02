@@ -7,28 +7,28 @@ sidebar_position: 0
 
 # Welcome to Orkestra
 
-**Orkestra is the SaaS plumbing every product rebuilds — users, auth, RBAC, multi-tenancy, billing — already done.**
+**Orkestra is the SaaS plumbing every product rebuilds — users, auth, RBAC, multi-tenancy, navigation, logging — already done.**
 
-Six core modules supply the baseline on day one. A catalog of optional addons (invoicing, payments, subscriptions, RAG, AI agents, documents, identity, compliance, …) sits on top and is toggled per internal tenant at `/admin/modules`.
+Seven core modules (`user`, `auth`, `authz`, `tenant`, `notification`, `navigation`, `logging`) supply the baseline on day one. Per [ADR-0006](/adrs/collapse-to-core-only-base) Orkestra is a **core-only base** — it ships no addons. A fork builds its own verticals (invoicing, payments, subscriptions, RAG, AI agents, documents, identity, compliance, …) on top, against the in-tree SDK contract, using the same `Module` seam the core is built on and toggling them at `/admin/modules`.
 
 ## Where to next
 
 - **[Getting Started](/getting-started)** — boot Orkestra locally in under five minutes.
-- **[Architecture](/architecture)** — the two-tier tenancy model, plugin loading, AI sidecar split.
-- **[Operating Orkestra](/operating)** — deployment, module configuration, SMTP/OAuth/Stripe.
-- **[Module Catalog](/modules)** — every core and optional module, what it does, what it depends on.
+- **[Architecture](/architecture)** — the two-tier tenancy model and module lifecycle.
+- **[Operating Orkestra](/operating)** — deployment, module configuration, SMTP/OAuth.
+- **[Module Catalog](/modules)** — the seven core modules, what each does and depends on, plus the seam for a fork's optional modules.
 - **[SDK Reference](/sdk)** — the `Module` interface, `ServiceRegistry`, building an addon.
 - **[ADRs](/adrs)** — architectural decisions that shape the platform.
 
 ## Who this is for
 
-These docs are for **operators self-hosting Orkestra** and **developers building on the SDK or contributing addons**. End-customer documentation (Tier-2 client onboarding, subscription management) lives elsewhere.
+These docs are for **operators self-hosting Orkestra** and **developers building on the SDK or contributing addons**. End-customer documentation (Tier-2 client onboarding) lives elsewhere.
 
 ## Tech stack at a glance
 
 | Layer        | Technology                                                     |
 | ------------ | -------------------------------------------------------------- |
-| Backend      | Go 1.25, Huma v2 (OpenAPI-first), 6 core + 13 optional modules |
+| Backend      | Go 1.25, Huma v2 (OpenAPI-first), 7 core modules (core-only base) |
 | Frontend     | React 19, TypeScript 5.9, Vite 7                               |
 | Mobile       | Flutter 3.35+                                                  |
 | Database     | MongoDB 8.0, Redis 8.2                                         |

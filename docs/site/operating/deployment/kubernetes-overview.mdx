@@ -138,7 +138,7 @@ spec:
     spec:
       containers:
       - name: backend
-        image: ghcr.io/orkestra-cc/orkestra/backend:enterprise
+        image: ghcr.io/orkestra-cc/orkestra/backend:latest
         ports: [{containerPort: 3000}]
         env:
         - name: ENV
@@ -183,8 +183,6 @@ spec:
           value: https://console.example.com
         - name: CLIENT_CORS_ORIGINS
           value: https://client.example.com
-        - name: CONTAINER_CONTROL_ENABLED
-          value: "false"    # K8s manages container lifecycle, not the backend
         - name: LOG_LEVEL
           value: info
         - name: PRETTY_LOGS
@@ -298,8 +296,7 @@ curl -fsS https://api.example.com/health
 - **Helm chart** — not yet authored. The YAML above is hand-written for clarity.
 - **HorizontalPodAutoscaler examples** — pattern is `target: 70% CPU on backend Deployment`.
 - **NetworkPolicy** — Mongo / Redis pods should only accept traffic from the backend Pod. Add `NetworkPolicy` objects per your CNI's capability.
-- **Module-owned infrastructure containers** (`orkestra-hindsight`, `orkestra-memgraph`) — these are managed by the backend via the host Docker socket in Compose deployments. On K8s, set `CONTAINER_CONTROL_ENABLED=false` and run Hindsight / Memgraph as separate Deployments inside the same namespace. The backend will discover them by service name (`HINDSIGHT_URL=http://hindsight.orkestra.svc.cluster.local:8888`, `GRAPH_URI=bolt://memgraph.orkestra.svc.cluster.local:7687`).
-- **AI sidecar split** — set `AI_SERVICE_URL` to a separate Service that points at the `ghcr.io/orkestra-cc/orkestra/ai-service:enterprise` image; see [backend/CLAUDE.md AI Service Sidecar](https://github.com/orkestra-cc/orkestra/blob/main/CLAUDE.md#ai-service-sidecar-optional-split).
+- **A fork's module-owned infrastructure containers** — the base ships no module that declares `InfraContainers()`, so `CONTAINER_CONTROL_ENABLED` isn't set and the backend never controls the host Docker socket. A fork that adds such a module (e.g. an addon that runs its own datastore) should run that infra as separate Deployments inside the same namespace and point the addon at it by service name (e.g. `bolt://<service>.orkestra.svc.cluster.local:7687`), rather than relying on backend-managed containers.
 
 ## Want a Helm chart?
 

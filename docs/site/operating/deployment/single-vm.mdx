@@ -6,7 +6,7 @@ description: Production Orkestra on one Ubuntu/Debian VM — Compose files, syst
 
 # Single VM with Docker Compose
 
-This is the simplest production-shape deployment of Orkestra: one VM (Ubuntu 24.04 or Debian 12), Docker Compose, the SKU-image compose files, and a systemd unit that keeps the stack alive across reboots. No Kubernetes, no load balancer, no remote DB — everything on one host.
+This is the simplest production-shape deployment of Orkestra: one VM (Ubuntu 24.04 or Debian 12), Docker Compose, the `docker-compose.prod.yml` stack, and a systemd unit that keeps the stack alive across reboots. No Kubernetes, no load balancer, no remote DB — everything on one host.
 
 It's the right shape for:
 
@@ -25,7 +25,7 @@ For TLS termination and the per-audience host split (`console.*` + `api.*`), add
 | Disk | 40 GB SSD | 100 GB SSD |
 | Network | 100 Mbps | 1 Gbps |
 
-The AI addons (`graph`, `aimodels`, `rag`, `agents`) push memory hard if enabled. Add 4 GB per active AI workload. Hindsight (the agents runtime) wants 2 GB on its own.
+The base (7 core modules) fits comfortably in the minimum sizing. A fork that adds heavy verticals (AI, graph, document rendering, etc.) should add headroom per workload — budget 4 GB per memory-hungry addon and account for any addon-managed infra containers it runs.
 
 ## Step 1 — Prepare the VM
 
@@ -72,15 +72,15 @@ Edit `docker/.env`:
 ```bash
 cd /opt/orkestra/docker
 docker compose -f docker-compose.infra.yml up -d
-docker compose -f docker-compose.enterprise.yml --env-file .env up -d
+docker compose -f docker-compose.prod.yml --env-file .env up -d
 ```
 
-Replace `enterprise` with `starter` / `billing` / `ai` / `saas` if you want a smaller SKU.
+Orkestra ships as a single image, so there's only one production compose file to launch.
 
 Verify:
 
 ```bash
-docker compose -f docker-compose.enterprise.yml --env-file .env ps
+docker compose -f docker-compose.prod.yml --env-file .env ps
 curl -s http://localhost:3000/health
 ```
 
@@ -102,15 +102,15 @@ WorkingDirectory=/opt/orkestra/docker
 User=deploy
 Group=docker
 EnvironmentFile=/opt/orkestra/docker/.env
-ExecStart=/usr/bin/docker compose -f docker-compose.infra.yml -f docker-compose.enterprise.yml --env-file .env up -d
-ExecStop=/usr/bin/docker compose -f docker-compose.infra.yml -f docker-compose.enterprise.yml --env-file .env down
+ExecStart=/usr/bin/docker compose -f docker-compose.infra.yml -f docker-compose.prod.yml --env-file .env up -d
+ExecStop=/usr/bin/docker compose -f docker-compose.infra.yml -f docker-compose.prod.yml --env-file .env down
 TimeoutStartSec=300
 
 [Install]
 WantedBy=multi-user.target
 ```
 
-Replace `deploy` with your actual deploy user, and `enterprise` with your chosen SKU. Then:
+Replace `deploy` with your actual deploy user. Then:
 
 ```bash
 sudo systemctl daemon-reload
@@ -123,13 +123,16 @@ On VM reboot, Docker comes up, then orkestra.service brings the stack up automat
 
 ## Step 5 — First admin login
 
+The core dev-token issuer (`POST /dev/token`, used by `scripts/devtoken.sh`) is **auto-disabled when `ENV=production`** — so on a real production VM you can't mint an admin token. Create the first administrator through the **setup wizard** instead:
+
 ```bash
-# Generate a one-time administrator token to create the real admin account:
-cd /opt/orkestra
-ORKESTRA_API_URL=http://localhost:3000 ./scripts/devtoken.sh administrator
+# The setup endpoints (/v1/setup/*) bootstrap the first admin on a fresh install.
+curl -fsS http://localhost:3000/v1/setup/status | jq .
 ```
 
-The `dev` addon must be compiled into your SKU for this to work. `starter` / `billing` / `ai` / `saas` / `enterprise` all include it. Use the token to log into `/admin/users` and create a real (non-synthetic) administrator account, then **disable the `dev` addon at `/admin/modules`** before opening the site to the public. The dev token issuer is also auto-disabled when `ENV=production`.
+Follow the wizard (or its UI counterpart) to create the first administrator account, then log into `/admin/users` to manage the rest.
+
+> For a non-production VM (`ENV=development` / `staging`), you can instead mint a one-time token with `ORKESTRA_API_URL=http://localhost:3000 ./scripts/devtoken.sh administrator` — but never leave a non-production env exposed publicly.
 
 ## Step 6 — Log rotation
 
@@ -175,14 +178,14 @@ curl -fsS -H "Authorization: Bearer $TOKEN" http://localhost:3000/v1/admin/modul
 curl -fsS http://localhost:3000/openapi.json | jq '.paths | keys | length'
 ```
 
-If any of these fail, check `docker compose -f docker-compose.enterprise.yml --env-file .env logs backend --tail 100`.
+If any of these fail, check `docker compose -f docker-compose.prod.yml --env-file .env logs backend --tail 100`.
 
 ## Upgrade procedure
 
 ```bash
 cd /opt/orkestra
 git pull
-docker compose -f docker/docker-compose.enterprise.yml --env-file docker/.env pull
+docker compose -f docker/docker-compose.prod.yml --env-file docker/.env pull
 sudo systemctl restart orkestra.service
 ```
 
@@ -196,4 +199,4 @@ This guide is intentionally single-VM. For multi-host setups:
 
 - **Multi-replica backend** — read [the K8s overview](./kubernetes-overview); the Go binary is stateless, so horizontal scaling works as long as sticky sessions or shared Redis sessions are configured.
 - **Managed databases** — set `MONGO_URI` and `REDIS_URL` to your managed-DB connection strings; remove the `mongodb` and `redis` services from `docker-compose.infra.yml`.
-- **Object storage** — Orkestra doesn't ship a built-in object store today; the `documents` addon uses Gotenberg for PDF rendering, output streams back to the client. For long-term storage, integrate S3-compatible storage at the application layer.
+- **Object storage** — the base ships RustFS (in `docker-compose.infra.yml`) for local object storage. A fork that needs S3-compatible storage or PDF rendering wires that at the application layer in its own addon.

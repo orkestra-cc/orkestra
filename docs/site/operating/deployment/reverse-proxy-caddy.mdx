@@ -61,7 +61,7 @@ Replace `/etc/caddy/Caddyfile` with the following. Substitute `console.example.c
 # Operator console — Tier-1 admin UI + backend.
 console.example.com {
     # Serve the React SPA build under / (operator console).
-    # If you're using the SKU compose, the frontend-admin container exposes
+    # If you're using docker-compose.prod.yml, the frontend-admin container exposes
     # port 80 internally. Replace with the actual host:port if you run the
     # frontend elsewhere.
     handle_path /api/* {
@@ -240,7 +240,7 @@ curl -fsS -H "Authorization: Bearer $TOKEN" https://api.example.com/v1/admin/mod
 
 For defence in depth, bind the backend to the loopback interface only so Caddy is the only path in:
 
-In `docker/docker-compose.enterprise.yml` (or whichever SKU you use), edit the `backend` port mapping:
+In `docker/docker-compose.prod.yml`, edit the `backend` port mapping:
 
 ```yaml
 ports:

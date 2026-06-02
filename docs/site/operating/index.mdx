@@ -8,9 +8,9 @@ sidebar_position: 1
 
 Once you have Orkestra running, the operator-side surface is mostly:
 
-1. **Deployment topology** — single binary, AI sidecar, or fully split.
+1. **Deployment topology** — a single binary (one image, one process).
 2. **Module configuration** — env vars, encrypted secrets, per-environment profiles (sandbox / production).
-3. **Integrations** — SMTP for email, OAuth providers, Stripe for payments, Gotenberg for PDF generation.
+3. **Integrations** — SMTP for email, OAuth providers. (A fork's verticals add their own — payments, PDF rendering, and so on.)
 4. **Observability** — health checks, audit logs, structured logging.
 
 ## Pages
@@ -19,6 +19,5 @@ Once you have Orkestra running, the operator-side surface is mostly:
 - [Module configuration](/operating/module-configuration) — `/admin/modules`, encrypted secrets, environment profiles.
 - [Notifications & SMTP](/operating/notifications) — wiring real email delivery.
 - [OAuth providers](/operating/oauth-providers) — Google, Apple, GitHub, Discord.
-- [Stripe & payments](/operating/payments-stripe) — webhooks, products, subscriptions.
 - [Backup and restore](/operating/backup-and-restore) — bundled `./backup.sh` / `./restore.sh`, manual `mongodump` recipes, dry-run drills.
 - [Troubleshooting](/operating/troubleshooting) — symptoms, diagnoses, fixes.
