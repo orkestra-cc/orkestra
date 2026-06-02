@@ -6,39 +6,29 @@ This document moves with the project — see `git log ROADMAP.md` for the change
 
 ## Now (in flight, Q2 2026)
 
+### Core-only base ([ADR-0006](docs/adr/0006-collapse-to-core-only-base.md)) — shipping as v0.3.0
+
+The big one, and what you're reading the output of. Orkestra collapsed to a **core-only base**: the seven core modules (`user`, `auth`, `authz`, `tenant`, `notification`, `navigation`, `logging`) plus the `Module` extension seam they're built on — nothing else. All fourteen verticals (billing, payments, subscriptions, documents, company, graph, aimodels, rag, agents, sales, marketing, compliance, identity, dev) left the monorepo; their last in-tree state is preserved as archived `orkestra-cc/orkestra-addon-*` snapshots for forks to crib from. The multi-repo SDK split was reverted — `pkg/sdk` is back to an **in-tree package** of the single backend Go module (no satellite `go.mod`, no `go.work`, no `replace`). A fork that needs a vertical builds it on top, against the in-tree SDK contract, using the same `Module` + `cmd/server/catalog_<name>.go` path the core itself uses. **v0.3.0 is the first release of the core-only base, and it is breaking.**
+
+**Tracked in:** [ADR-0006](docs/adr/0006-collapse-to-core-only-base.md).
+
 ### Tier-2 client demo SPA (`frontend-client/`)
 
-A sibling React 19 SPA that demonstrates the client-tier surface — Stripe Checkout-backed signup, subscription management, AI services consumption. Lives at `app.orkestra.cc`. Five phases planned, three landed. Active development.
+A sibling React 19 SPA that demonstrates the client-tier surface. Post-ADR-0006 it's a thin **login + account + billing-identity** skeleton — the Stripe Checkout, subscription, and transaction flows left with the addons. The two-tier tenancy *data* model survives in the `tenant` module; a fork that sells services to external clients rebuilds the *consumption* layer (catalog → subscribe → Stripe → entitlement) on top of it.
 
-**Tracked in:** [`frontend-client/`](frontend-client/) + MEMORY entries.
-
-### Marketing addon
-
-Five-phase build-out: contact base + CSV importer (Phase 1) → storicizzazione + scoring (Phase 2) → advanced imports / adapters (Phase 3) → card lifecycle (Phase 4) → engagement triggers (Phase 5). Phases 1–4 are on `dev` awaiting promotion; Phase 5 is the immediate next.
-
-**Tracked in:** [`backend/internal/addons/marketing/CLAUDE.md`](backend/internal/addons/marketing/CLAUDE.md) + per-phase implementation plans in [`docs/plans/marketing-addon/`](docs/plans/marketing-addon/).
-
-### Fork-readiness epic
-
-The work that produced this `ROADMAP.md` itself. Seven phases (most landed): env template + `make init`, public-image dev compose, deployment + onboarding docs, mobile fork-readiness, this governance pass, smoke test. **You're reading the output of Phase 6.**
-
-**Tracked in:** GitHub Discussions thread (link TBD when Discussions are enabled) + the `chore(release)` commit titles in [`CHANGELOG.md`](CHANGELOG.md).
+**Tracked in:** [`frontend-client/`](frontend-client/).
 
 ## Next (committed, not yet started)
 
 ### Helm chart for Kubernetes deployments
 
-[Operating Orkestra → Kubernetes overview](https://docs.orkestra.cc/operating/deployment/kubernetes-overview) ships hand-written YAML today. A maintained Helm chart with sensible `values.yaml` defaults, optional dependencies (cert-manager, ingress-nginx), and parity with the SKU profile pattern is on the list.
+[Operating Orkestra → Kubernetes overview](https://docs.orkestra.cc/operating/deployment/kubernetes-overview) ships hand-written YAML today. A maintained Helm chart with sensible `values.yaml` defaults and optional dependencies (cert-manager, ingress-nginx) is on the list.
 
 **Open call:** if you're already running Orkestra on K8s and have a chart in flight, please open an issue or PR so we can converge.
 
-### AI sidecar production-ready
+### Public production image build path
 
-The AI module chain (`graph`, `aimodels`, `rag`, `agents`) can run as a separate `cmd/ai-service` binary, controlled by `AI_SERVICE_URL` on the monolith (see [backend/CLAUDE.md "AI Service Sidecar"](backend/CLAUDE.md)). The split works end-to-end in dev. Production-readiness items remaining: independent scaling examples, dedicated CI matrix, deploy patterns for both Compose and K8s, staging-environment proof-of-life.
-
-### Public-image build matrix
-
-[Phase 3 of fork-readiness](docs/site/architecture/dev-images.mdx) added a public-image dev compose. The next step is a `backend/Dockerfile.public` so `make build-*` profile-image builds don't require a Chainguard subscription either. Forkers can build their own images locally without `dhi.io` access.
+ADR-0006 already folded dev onto a public `golang:alpine` base ([`docker/Dockerfile.dev-backend`](docker/Dockerfile.dev-backend), with a `GO_BASE` build-arg for forks that have a Chainguard subscription). The remaining step is the same treatment for the **production** `backend/Dockerfile` so a fork without `dhi.io` access can build prod images too. (The old per-SKU `make build-*` matrix is gone — there is a single `make build`.)
 
 ### Algolia DocSearch crawler stabilization
 
@@ -52,17 +42,13 @@ The crawler is configured, runs nightly, but coverage on freshly-deployed pages 
 
 ### Discussions, RFC threads, contributor-day cadence
 
-[GitHub Discussions](https://github.com/orkestra-cc/orkestra/discussions) needs to be enabled (Settings → General → Features → Discussions). Once on, we'll seed categories (Q&A, Ideas, Show and tell, Announcements, Polls), document the conventions in [CONTRIBUTING.md](CONTRIBUTING.md), and use it as the primary surface for asynchronous design discussion.
+[GitHub Discussions](https://github.com/orkestra-cc/orkestra/discussions) is enabled. Remaining: seed categories (Q&A, Ideas, Show and tell, Announcements, Polls), document the conventions in [CONTRIBUTING.md](CONTRIBUTING.md), and use it as the primary surface for asynchronous design discussion.
 
 A recurring (quarterly?) contributor-day Zoom / Meet, with the BDFL + active contributors, is a nice-to-have once contributor headcount warrants it.
 
-### Compliance addon — GDPR DSR pipelines, SOC2 evidence
+### Rebuilding the archived verticals
 
-The `compliance` addon today ships the platform audit log. The next two surfaces are: automated DSR (Data Subject Request) intake + fulfilment pipelines (export-my-data, delete-my-data) and SOC2 evidence collection (per-control evidence, audit-ready packaging).
-
-### Identity addon — per-tenant BYO OIDC + SCIM 2.0
-
-The `identity` addon today ships the stubs (per-tenant OIDC entry, SCIM endpoints). Wiring them to a working flow (test it against Okta, Azure AD, JumpCloud) is on the list.
+ADR-0006 moved the fourteen verticals out of the base, but the seams that let a fork rebuild them stayed: the empty `optionalModules` catalog, the `Module` + `cmd/server/catalog_<name>.go` extension path, and the nil-by-default `AuditSink` / `KMSProvider` setters on the core services (the hooks the old `compliance` addon wired). The archived `orkestra-cc/orkestra-addon-*` snapshots preserve the last in-tree state of each vertical — compliance (platform audit log, GDPR DSR pipelines, SOC2 evidence), identity (per-tenant BYO OIDC + SCIM 2.0), billing/payments/subscriptions, and the rest — for a fork to crib from. The base itself does not carry these on its roadmap; the [addon-authoring guide](docs/site/sdk/build-your-first-addon.mdx) is the entry point.
 
 ## Deferred / consciously not doing
 
@@ -72,7 +58,7 @@ Orkestra is designed for single-region operation. Multi-region (active-active or
 
 ### Built-in object storage
 
-The `documents` addon uses Gotenberg for PDF rendering; output streams back to the client. We don't ship a built-in S3-compatible object store. Operators who need long-term object storage integrate S3 / Spaces / R2 at the application layer.
+The base ships RustFS in [`docker-compose.infra.yml`](docker/docker-compose.infra.yml) as the S3-compatible target for avatars (`internal/shared/blob`), with defaults that swap cleanly to AWS S3 / Spaces / R2 in production. We don't ship a managed object-storage *service* beyond that dev convenience — operators who need durable long-term object storage point `STORAGE_*` at their own bucket.
 
 ### iOS / desktop / web platform scaffolds for mobile
 
