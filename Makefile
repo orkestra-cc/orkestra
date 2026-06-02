@@ -291,7 +291,11 @@ admin-test:
 	@cd frontend-admin && npm run test:coverage
 
 admin-audit:
-	@cd frontend-admin && npm audit --audit-level=high
+	# Audit runtime deps only: the admin SPA ships a static bundle, so dev
+	# tooling (vitest et al.) never reaches users. A dev-only advisory (e.g. the
+	# Vitest-UI-server RCE, only exposed under `vitest --ui` — we run `vitest run`)
+	# must not gate a release. See docs/adr/0006 + project_ci_release_blockers.
+	@cd frontend-admin && npm audit --omit=dev --audit-level=high
 
 admin-build:
 	@cd frontend-admin && npm run build
