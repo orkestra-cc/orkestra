@@ -4,6 +4,17 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.3.1] - 2026-06-02
+
+### Bug fixes
+
+- **(auth)** Honor COOKIE_NAME_REFRESH, drop legacy cookie fallbacks (#77) ([ae9ae01](https://github.com/orkestra-cc/orkestra/commit/ae9ae0167acda2b56141fe82664b0b5c00465922))
+- **(module)** Filter orphan module_configs docs from admin listing (#76) ([5bc5e63](https://github.com/orkestra-cc/orkestra/commit/5bc5e63ab079837abdff9609a62202293440bef9))
+
+### Documentation
+
+- Correct the archived-addon claim (agents/marketing have no repo) ([60960ac](https://github.com/orkestra-cc/orkestra/commit/60960ac422c34c030e39aad1f205ff2055331ef4))
+
 ## [0.3.0] - 2026-06-02
 
 ### ⚠️ Breaking Changes
