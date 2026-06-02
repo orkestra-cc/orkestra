@@ -136,10 +136,18 @@ func TestRequireStepUp_DefaultMaxAgeWhenZero(t *testing.T) {
 // Returns (downstreamRan, status, body) like runStepUp.
 type fakeStepUpPolicy struct {
 	required bool
+	// mfaDisabled flips the master MFA switch off. Defaults false so the
+	// zero value reports the switch ON — every existing step-up test keeps
+	// its behaviour without being updated.
+	mfaDisabled bool
 }
 
 func (f *fakeStepUpPolicy) MFARequired(_ *iface.User, _ []authModels.OrgMembership) bool {
 	return f.required
+}
+
+func (f *fakeStepUpPolicy) MFAEnabled(_ context.Context) bool {
+	return !f.mfaDisabled
 }
 
 func runStepUpWithEnrollment(t *testing.T, claims *authModels.JWTClaims, hasFactor bool, lookupErr error, mfaRequired bool) (bool, int, map[string]any) {
@@ -261,5 +269,90 @@ func TestRequireStepUp_ReauthAMRSatisfiesGate(t *testing.T) {
 	called, status, _ := runStepUp(t, 5*time.Minute, claims)
 	if !called {
 		t.Errorf("reauth proof must pass; status %d", status)
+	}
+}
+
+// runRequireMFA wires a minimal AuthMiddleware, optionally sets a step-up
+// policy (so RequireMFA can consult the master switch), seeds the request
+// with claims, and invokes RequireMFA(). Returns (downstreamRan, status, body).
+func runRequireMFA(t *testing.T, claims *authModels.JWTClaims, policy StepUpPolicy) (bool, int, map[string]any) {
+	t.Helper()
+	m := newTestMiddleware(&fakeAuthz{}, &fakeTenantProvider{}, nil)
+	if policy != nil {
+		m.SetStepUpPolicy(policy)
+	}
+
+	req := httptest.NewRequest(http.MethodPatch, "/v1/admin/modules/marketing", nil)
+	if claims != nil {
+		req = req.WithContext(context.WithValue(req.Context(), ctxClaims, claims))
+	}
+	rec := httptest.NewRecorder()
+
+	called := false
+	handler := m.RequireMFA()(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
+		called = true
+	}))
+	handler.ServeHTTP(rec, req)
+
+	var body map[string]any
+	if rec.Body.Len() > 0 {
+		_ = json.Unmarshal(rec.Body.Bytes(), &body)
+	}
+	return called, rec.Code, body
+}
+
+func TestRequireMFA_NonMFAAmrBlockedWhenSwitchOn(t *testing.T) {
+	// Master switch on (policy reports MFAEnabled=true) and a password-only
+	// token → the gate must block. This is the pre-fix behaviour preserved.
+	claims := &authModels.JWTClaims{UserUUID: "u-1", AMR: []string{"pwd"}}
+	called, status, body := runRequireMFA(t, claims, &fakeStepUpPolicy{})
+	if called {
+		t.Error("password-only token must be blocked when MFA master switch is on")
+	}
+	if status != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401", status)
+	}
+	if code, _ := body["code"].(string); code != "step_up_required" {
+		t.Errorf("body.code = %q, want step_up_required", code)
+	}
+}
+
+func TestRequireMFA_NonMFAAmrPassesWhenSwitchOff(t *testing.T) {
+	// Master switch OFF (policy reports MFAEnabled=false). A never-enrolled
+	// operator with a password-only token must be allowed through — turning
+	// MFA off globally must not wall the operator out of MFA-gated admin
+	// writes (the bug: module enable demanded an MFA proof that can't exist).
+	claims := &authModels.JWTClaims{UserUUID: "u-1", AMR: []string{"pwd"}}
+	called, status, _ := runRequireMFA(t, claims, &fakeStepUpPolicy{mfaDisabled: true})
+	if !called {
+		t.Errorf("master switch off must pass password-only token through; status %d", status)
+	}
+	if status != http.StatusOK {
+		t.Errorf("status = %d, want 200", status)
+	}
+}
+
+func TestRequireMFA_MFAAmrPassesWhenSwitchOn(t *testing.T) {
+	// A token carrying a real second-factor proof passes regardless.
+	claims := &authModels.JWTClaims{UserUUID: "u-1", AMR: []string{"pwd", "otp"}}
+	called, status, _ := runRequireMFA(t, claims, &fakeStepUpPolicy{})
+	if !called {
+		t.Errorf("MFA-proof token must pass when switch on; status %d", status)
+	}
+	if status != http.StatusOK {
+		t.Errorf("status = %d, want 200", status)
+	}
+}
+
+func TestRequireMFA_NoPolicyFallsBackToLegacyGate(t *testing.T) {
+	// When no step-up policy is wired (legacy/degraded), the gate must keep
+	// its original unconditional behaviour: password-only token is blocked.
+	claims := &authModels.JWTClaims{UserUUID: "u-1", AMR: []string{"pwd"}}
+	called, status, _ := runRequireMFA(t, claims, nil)
+	if called {
+		t.Error("with no policy wired, password-only token must still be blocked")
+	}
+	if status != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401", status)
 	}
 }
