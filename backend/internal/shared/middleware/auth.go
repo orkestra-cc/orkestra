@@ -68,6 +68,14 @@ type MFAEnrollmentLookup func(ctx context.Context, audience, userUUID string) (h
 // legacy "always emit step_up_required" behaviour.
 type StepUpPolicy interface {
 	MFARequired(user *iface.User, memberships []models.OrgMembership) bool
+	// MFAEnabled reports the master MFA switch (auth module's mfaEnabled).
+	// When off, the RequireMFA route gate passes through: a deployment that
+	// has globally disabled MFA must still be able to perform MFA-gated
+	// admin writes (module enable/disable, secret writes, role/tenant
+	// mutations) — otherwise a never-enrolled operator can never turn MFA
+	// back on. Mirrors AuthPolicyService.MFARequired, which already
+	// short-circuits to false when the switch is off. Nil-safe on the impl.
+	MFAEnabled(ctx context.Context) bool
 }
 
 type AuthMiddleware struct {
@@ -906,6 +914,17 @@ func (m *AuthMiddleware) RequireMFA() func(http.Handler) http.Handler {
 			if !ok || claims == nil {
 				m.sendErrorResponse(w, r, errors.AuthenticationError("authentication required").
 					WithOperation("require_mfa").Build())
+				return
+			}
+			// Master switch off → no second factor is required to exist, so
+			// demanding an MFA proof here would deadlock a never-enrolled
+			// operator out of the very admin writes (module enable, secret
+			// writes) they'd use to configure the platform — the bootstrap
+			// trap #78 fixed at the policy layer but not at this route gate.
+			// RequireStepUp keeps its stricter fresh-proof requirement; this
+			// only relaxes the session-long RequireMFA gate.
+			if m.stepUpPolicy != nil && !m.stepUpPolicy.MFAEnabled(r.Context()) {
+				next.ServeHTTP(w, r)
 				return
 			}
 			if !amrSatisfiesMFA(claims.AMR) {
