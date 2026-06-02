@@ -4,6 +4,46 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.3.0] - 2026-06-02
+
+### ⚠️ Breaking Changes
+
+- **(ci,docs)** ADR-0006 Phase 6c (part 1) — unblock CI + refresh root docs ([c21c775](https://github.com/orkestra-cc/orkestra/commit/c21c7757fe06bc459e4573bd9db20eefc3e64e8a))
+- **(scripts)** ADR-0006 Phase 6b — strip runtime-profile machinery ([0c7f0f5](https://github.com/orkestra-cc/orkestra/commit/0c7f0f57b88e625db041616451af250b97af3899))
+- **(docker)** ADR-0006 Phase 6a — collapse compose to one app file per env ([7cc0d3e](https://github.com/orkestra-cc/orkestra/commit/7cc0d3e883d5025266f1773adf988b49fb597982))
+- **(frontend-client)** ADR-0006 Phase 5 — strip subscribe/payments surface ([1df40cd](https://github.com/orkestra-cc/orkestra/commit/1df40cdad0d375e162fa95abaf398f914d6b5a14))
+- **(frontend-admin)** ADR-0006 Phase 4 — delete addon UI surface ([5f4fd34](https://github.com/orkestra-cc/orkestra/commit/5f4fd34218db779b601b4c92383a5071e67b3b9c))
+- **(backend)** ADR-0006 Phase 3 — drop compliance injection probe in main.go ([d7f6d8b](https://github.com/orkestra-cc/orkestra/commit/d7f6d8b41254607c27556258c89f20838970e161))
+- **(backend)** ADR-0006 Phase 2 — delete all 14 addons + AI sidecar ([c30654d](https://github.com/orkestra-cc/orkestra/commit/c30654d29dcba7650901daca3180920a6c8cca96))
+- **(backend)** ADR-0006 Phase 1 — fold SDK + addons into one Go module ([23be130](https://github.com/orkestra-cc/orkestra/commit/23be1306bca41633002622bd99d295fa93321954))
+
+### Features
+
+- **(backend)** Re-provide core /dev/token after ADR-0006 removed the dev addon ([75e1cfb](https://github.com/orkestra-cc/orkestra/commit/75e1cfb7760f4389157d44136a47323bdd0137ae))
+
+### Refactor
+
+- **(backup)** Drop memgraph from backup/restore tooling (ADR-0006) ([d46f2f3](https://github.com/orkestra-cc/orkestra/commit/d46f2f306208bf056412871d848776407f0bb843))
+- **(config)** Drop dead addon config structs (ADR-0006 6c leftover) ([0a49ccf](https://github.com/orkestra-cc/orkestra/commit/0a49ccfbf7335e52c352e98b698ea141b8ffe33b))
+
+### Documentation
+
+- **(skills)** Refresh orkestra-go skill for the core-only base (ADR-0006) ([18409cf](https://github.com/orkestra-cc/orkestra/commit/18409cf428ec23d3d5b7176ce039c17a18cb1d52))
+- **(site)** Core-only drift pass — purge SKU/sidecar/addon staleness (ADR-0006) ([a9ece11](https://github.com/orkestra-cc/orkestra/commit/a9ece11c9daf29a0becef1a974be587851482c1d))
+- **(site)** Remove the AI-sidecar-split page (deleted by ADR-0006) ([1b10d28](https://github.com/orkestra-cc/orkestra/commit/1b10d2861eca2f92b109d8149a7bb85ac8a65394))
+- **(roadmap)** Refresh for the core-only base (ADR-0006) ([4349618](https://github.com/orkestra-cc/orkestra/commit/4349618346bdf815883414c13a16d4e2f884ad72))
+- **(onboarding)** ADR-0006 Phase 6c (part 7) — banner on the SDK-split onboarding doc ([a9b741f](https://github.com/orkestra-cc/orkestra/commit/a9b741f8d82256e471c1c95096d736c7b06b7636))
+- **(docker)** ADR-0006 Phase 6c (part 6) — refresh docker/CLAUDE.md ([d67977e](https://github.com/orkestra-cc/orkestra/commit/d67977e88da5b14a7adb0e3708b2dca29db85670))
+- **(frontend)** ADR-0006 Phase 6c (part 5) — refresh frontend CLAUDE.md ([1150ea4](https://github.com/orkestra-cc/orkestra/commit/1150ea49e1d5e8282cfecca935b763fcb5e0b0cd))
+- ADR-0006 Phase 6c (part 4) — refresh README + onboarding/site docs ([383dfac](https://github.com/orkestra-cc/orkestra/commit/383dfac219470fd7b4aa92ea99ce7f5b9791a966))
+- **(site)** ADR-0006 Phase 6c (part 3) — rewrite addon-authoring pages ([8faec60](https://github.com/orkestra-cc/orkestra/commit/8faec6087adcd29b7f08021b9e040680b12e83a9))
+- **(backend)** ADR-0006 Phase 6c (part 2) — refresh backend + SDK CLAUDE.md ([636a234](https://github.com/orkestra-cc/orkestra/commit/636a234d7026f7221bef85e65fc0d9d459d471a6))
+- ADR-0006 collapse Orkestra to a core-only base ([75b5466](https://github.com/orkestra-cc/orkestra/commit/75b5466b97c9952ecec97483ce36a4828f5b0f8c))
+
+### CI
+
+- **(audit)** Scope frontend-admin npm audit to runtime deps ([076631f](https://github.com/orkestra-cc/orkestra/commit/076631f04e0c89977ec1b709bc157a3447179238))
+
 ## [0.2.2] - 2026-05-29
 
 ### Bug fixes
