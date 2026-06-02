@@ -122,7 +122,7 @@ Run `./orkestra.sh --help` for the full command surface.
 
 ### Optional modules
 
-The base ships **none** ([ADR-0006](docs/adr/0006-collapse-to-core-only-base.md)). A fork adds its own under `backend/internal/addons/<name>/` + `cmd/server/catalog_<name>.go`, and they appear at `/admin/modules`. The verticals Orkestra used to ship (billing/SDI, documents, company, graph, aimodels, rag, agents, sales, subscriptions, payments, compliance, identity, marketing, dev) are preserved as read-only snapshots at `github.com/orkestra-cc/orkestra-addon-*` to crib from. See [Adding an addon](https://docs.orkestra.cc/contributing/adding-an-addon).
+The base ships **none** ([ADR-0006](docs/adr/0006-collapse-to-core-only-base.md)). A fork adds its own under `backend/internal/addons/<name>/` + `cmd/server/catalog_<name>.go`, and they appear at `/admin/modules`. Most of the verticals Orkestra used to ship (billing/SDI, documents, company, graph, aimodels, rag, sales, subscriptions, payments, compliance, identity, dev) are preserved as read-only snapshots at `github.com/orkestra-cc/orkestra-addon-<name>` to crib from. (`agents` and `marketing` were never split into standalone repos — their last in-tree state lives in this repo's history before the ADR-0006 removal.) See [Adding an addon](https://docs.orkestra.cc/contributing/adding-an-addon).
 
 <details>
 <summary>Old addon catalog (now archived)</summary>
