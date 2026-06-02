@@ -66,12 +66,13 @@ services:
 
       # Cookie Configuration (production-like)
       COOKIE_SECRET: ${COOKIE_SECRET}
-      COOKIE_NAME: ${COOKIE_NAME:-orkestra_cookie}
-      COOKIE_DOMAIN: ${COOKIE_DOMAIN}
+      # Refresh-cookie name — the only cookie set in the browser (the access
+      # token lives in SPA memory, so there is no access-token cookie).
+      COOKIE_NAME_REFRESH: ${COOKIE_NAME_REFRESH:-orkestra_cookie}
       # ADR-0003 PR-D D-9: per-audience refresh-cookie scopes. Set
       # OPERATOR_COOKIE_DOMAIN to console.<env>.orkestra.cc and
-      # CLIENT_COOKIE_DOMAIN to api.<env>.orkestra.cc. Empty falls back
-      # to COOKIE_DOMAIN (single-host transitional behaviour).
+      # CLIENT_COOKIE_DOMAIN to api.<env>.orkestra.cc. An empty value mints
+      # the cookie without a Domain attribute (scoped to the minting host).
       OPERATOR_COOKIE_DOMAIN: ${OPERATOR_COOKIE_DOMAIN:-}
       CLIENT_COOKIE_DOMAIN: ${CLIENT_COOKIE_DOMAIN:-}
       COOKIE_HTTP_ONLY: ${COOKIE_HTTP_ONLY:-true}

@@ -39,9 +39,10 @@ type AuthHandler struct {
 	// cookieDomain scopes refresh-token cookies minted by this handler
 	// instance — operator-tier handlers carry the operator host's domain
 	// (`console.*`), client-tier handlers carry the client host's
-	// (`api.*`). ADR-0003 PR-D D-9 split: handlers no longer share a
-	// single cfg.Auth.Cookie.Domain — that field is the legacy single-
-	// host fallback, resolved at construction time in module.go.
+	// (`api.*`). ADR-0003 PR-D D-9 split: resolved per tier from
+	// cfg.Auth.Cookie.OperatorDomain / ClientDomain at construction time
+	// in module.go. An empty value mints the cookie without a Domain
+	// attribute (scoped to the minting host).
 	cookieDomain string
 
 	// ADR-0003 PR-D D-6: state-encoded tier dispatch.

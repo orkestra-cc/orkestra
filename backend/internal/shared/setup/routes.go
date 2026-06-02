@@ -22,15 +22,17 @@ type Handler struct {
 
 // NewHandler constructs the HTTP adapter. Cookie settings come from the
 // shared config so the refresh cookie matches what /v1/auth/login would emit.
+// Setup is mounted on the operator host, so the cookie carries the operator
+// refresh-cookie domain (ADR-0003 PR-D D-9).
 func NewHandler(svc *Service, cookieCfg config.CookieConfig) *Handler {
 	name := cookieCfg.Name
 	if name == "" {
-		name = "access_token"
+		name = "orkestra_cookie"
 	}
 	return &Handler{
 		svc:          svc,
 		cookieName:   name,
-		cookieDomain: cookieCfg.Domain,
+		cookieDomain: cookieCfg.OperatorDomain,
 		cookieSecure: cookieCfg.Secure,
 	}
 }
