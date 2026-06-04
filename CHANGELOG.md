@@ -4,6 +4,16 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.3.4] - 2026-06-04
+
+### Bug fixes
+
+- **(auth)** Return to requested deep link after login ([16ab754](https://github.com/orkestra-cc/orkestra/commit/16ab7543592cb97ba3368c735e86ba3bd6edb5f1))
+
+### Chores
+
+- Back-merge origin/main into dev (v0.3.3 — Go 1.25.11 vuln bump, auth/admin-ui fixes) ([71c22e0](https://github.com/orkestra-cc/orkestra/commit/71c22e09852bc155ce90d08d9796cc7edcaf394b))
+
 ## [0.3.3] - 2026-06-04
 
 ### Bug fixes
@@ -21,6 +31,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 ### Bug fixes
 
 - **(sdk)** UpdateConfig merges secrets instead of replacing them (#81) ([61a2903](https://github.com/orkestra-cc/orkestra/commit/61a2903de0bcc143b3ca53950458c6589a600892))
+- **(navigation)** Gate Developer realm menu on developer role ([e3b2cd3](https://github.com/orkestra-cc/orkestra/commit/e3b2cd3001bddb27ba098b44878f91eaa92fd205))
 - **(auth)** RequireMFA honors the mfaEnabled master switch (#79) ([9479754](https://github.com/orkestra-cc/orkestra/commit/94797547754a3a9271f11f9cfb938262c7bc94b3))
 - **(auth)** Ship MFA, signups & OAuth providers off by default (#78) ([548b856](https://github.com/orkestra-cc/orkestra/commit/548b8562b1d9aa59d1c4ee31455172152da6b5c9))
 
