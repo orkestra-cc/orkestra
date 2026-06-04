@@ -1,15 +1,27 @@
 import { useState, FormEvent } from 'react';
 import { Alert, Button, Form } from 'react-bootstrap';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useAppDispatch } from 'store/hooks';
 import { useGetAuthPolicyQuery, useLoginMutation } from 'store/api/authApi';
 import { login as loginAction } from 'store/slices/authSlice';
+import {
+  DEFAULT_POST_LOGIN,
+  locationToReturnTo,
+  sanitizeReturnTo
+} from 'utils/returnTo';
 
 const EmailPasswordForm = () => {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const location = useLocation();
   const dispatch = useAppDispatch();
+  // Where ProtectedRoute wanted to send the user before bouncing them to login.
+  // Sanitised against open-redirect / auth-loop targets; null falls back to the
+  // dashboard. Survives the MFA hop by riding along in /mfa/verify's state.
+  const returnTo = sanitizeReturnTo(
+    locationToReturnTo((location.state as { from?: unknown } | null)?.from)
+  );
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [localError, setLocalError] = useState<string | null>(null);
@@ -41,7 +53,8 @@ const EmailPasswordForm = () => {
           state: {
             challengeId: result.mfaToken,
             email,
-            webauthnAvailable: result.webauthnAvailable ?? false
+            webauthnAvailable: result.webauthnAvailable ?? false,
+            returnTo
           }
         });
         return;
@@ -53,7 +66,7 @@ const EmailPasswordForm = () => {
       }
       dispatch(loginAction({ userData: result.user }));
 
-      navigate('/dashboard/analytics');
+      navigate(returnTo ?? DEFAULT_POST_LOGIN, { replace: true });
     } catch (err: unknown) {
       const anyErr = err as { data?: { detail?: string }; status?: number };
       if (anyErr?.status === 401) {

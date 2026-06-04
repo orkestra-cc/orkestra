@@ -44,10 +44,14 @@ const writeRealmCollapsedMap = (map: Record<string, boolean>) => {
   }
 };
 
-// Show the Developer realm whenever the reference routes are registered.
-// Mirrors the gate in `src/routes/referenceRoutes.tsx` so nav and routes
-// stay in lockstep — they're either both present or both absent.
-const SHOW_DEVELOPER_REALM =
+// The Developer realm only exists when the reference routes are registered —
+// a build-time gate that mirrors `src/routes/referenceRoutes.tsx` so nav and
+// routes stay in lockstep. On top of that we restrict the *menu entry* to the
+// developer role, so non-developers don't see it even in a dev build. NOTE:
+// the `/reference/*` routes themselves are still only build-gated, so this is
+// a cosmetic menu restriction — not an access control. See frontend-admin
+// CLAUDE.md "How navigation works" → Dev-only exception.
+const REFERENCE_ROUTES_REGISTERED =
   import.meta.env.DEV || !!import.meta.env.VITE_ENABLE_REFERENCE;
 
 interface NavbarLabelProps {
@@ -100,8 +104,21 @@ const NavbarVertical = () => {
   } = useAppContext();
 
   // Get navigation from backend API (pre-filtered by role + tenant kind)
-  const { filteredNavigation, realms, isAuthenticated, isLoading, isError } =
-    useRoleBasedNavigation();
+  const {
+    filteredNavigation,
+    realms,
+    isAuthenticated,
+    isLoading,
+    isError,
+    userRole
+  } = useRoleBasedNavigation();
+
+  // Append the Developer realm only when the reference routes exist AND the
+  // signed-in user is a developer (super_admin outranks developer, so it sees
+  // it too). Keeps the dev-only realm out of every other role's sidebar.
+  const showDeveloperRealm =
+    REFERENCE_ROUTES_REGISTERED &&
+    (userRole === 'developer' || userRole === 'super_admin');
 
   const [realmCollapsedMap, setRealmCollapsedMap] = useState<
     Record<string, boolean>
@@ -245,12 +262,12 @@ const NavbarVertical = () => {
         )}
 
         {/* Loaded navigation — prefer v2 realms shape; fall back to v1 flat groups.
-            In dev (or when VITE_ENABLE_REFERENCE is set), append the Developer realm
-            pointing at the dev-only /reference/* routes. */}
+            For developers in a reference-routes build, append the Developer realm
+            pointing at the dev-only /reference/* routes (see showDeveloperRealm). */}
         {!isLoading &&
           !isError &&
           (() => {
-            const renderedRealms = SHOW_DEVELOPER_REALM
+            const renderedRealms = showDeveloperRealm
               ? [...realms, developerRealm]
               : realms;
             return (
