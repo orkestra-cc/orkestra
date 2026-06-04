@@ -4,6 +4,14 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.3.3] - 2026-06-04
+
+### Bug fixes
+
+- **(auth)** Let operator tokens switch acting tenant via X-Tenant-ID (#83) ([3449c8f](https://github.com/orkestra-cc/orkestra/commit/3449c8fa897585be0cdeaf9bdb8b3e6eca9e5547))
+- **(admin-ui)** Stop impersonation when picking a workspace in NineDotMenu (#82) ([f83243a](https://github.com/orkestra-cc/orkestra/commit/f83243a9c3068c37cfbeb867551398d5064e24e5))
+- **(deps)** Bump Go 1.25.10 → 1.25.11 for stdlib advisories (#84) ([42670c7](https://github.com/orkestra-cc/orkestra/commit/42670c728710cf906b119db14546dd5d333b0237))
+
 ## [0.3.2] - 2026-06-02
 
 ### Features
