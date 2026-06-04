@@ -488,14 +488,37 @@ func (m *AuthMiddleware) recordImpersonationAudit(
 // ("internal" | "external" or empty if not known), and ok=false when no
 // tenant can be resolved.
 //
-// Tier resolution order (ADR-0001):
-//  1. claims.ActingTenantID + ActingTenantKind when set by the issuer — the
-//     JWT was minted for a specific tenant, nothing else can override it.
-//  2. X-Tenant-ID header when the user is a member of that tenant.
-//  3. claims.DefaultTenantID.
+// Tier resolution order (ADR-0001, amended):
+//  1. X-Tenant-ID header, for OPERATOR-audience tokens only, when it names a
+//     tenant the user is a member of — this is the operator org switcher.
+//     Operator tokens stamp ActingTenantID = DefaultTenantID merely as a
+//     default, so the header must be free to override it. A header naming a
+//     non-member tenant falls through (admin impersonation is handled by
+//     setUserContext when resolution yields ok=false).
+//  2. claims.ActingTenantID + ActingTenantKind when set by the issuer — a
+//     client-portal token is minted pinned to one tenant; the header cannot
+//     override it, so a Tier-2 session can never hop tenants.
+//  3. X-Tenant-ID header when the user is a member of that tenant.
+//  4. claims.DefaultTenantID.
 func resolveCurrentTenant(r *http.Request, claims *models.JWTClaims) (string, []string, string, bool) {
+	requested := r.Header.Get(TenantIDHeader)
+
+	// Operator org switcher: an operator-audience token may act in any tenant
+	// it belongs to by sending X-Tenant-ID, overriding the default
+	// ActingTenantID the issuer stamped. Client-portal tokens are excluded so
+	// their issuer-pinned ActingTenantID stays authoritative (Phase 3). A
+	// header naming a non-member tenant is left to the flow below / the admin
+	// impersonation bypass, preserving existing behaviour.
+	if requested != "" && claims.Audience == services.AudienceOperator {
+		for _, mbr := range claims.Memberships {
+			if mbr.TenantUUID == requested {
+				return mbr.TenantUUID, mbr.Roles, mbr.TenantKind, true
+			}
+		}
+	}
+
 	// Stamped-in tenant on the JWT itself: client-portal tokens in Phase 3
-	// will always take this path. The header is ignored.
+	// always take this path. The header is ignored for them.
 	if claims.ActingTenantID != "" {
 		for _, mbr := range claims.Memberships {
 			if mbr.TenantUUID == claims.ActingTenantID {
@@ -507,7 +530,6 @@ func resolveCurrentTenant(r *http.Request, claims *models.JWTClaims) (string, []
 			}
 		}
 	}
-	requested := r.Header.Get(TenantIDHeader)
 	if requested != "" {
 		for _, mbr := range claims.Memberships {
 			if mbr.TenantUUID == requested {
