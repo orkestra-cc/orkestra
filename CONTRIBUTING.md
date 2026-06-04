@@ -16,7 +16,7 @@ echo 'eval "$(mise activate bash)"' >> ~/.bashrc
 exec $SHELL                 # reload the shell so the eval takes effect
 
 # 3. Provision the languages at the versions pinned in .mise.toml
-mise install                # Go 1.25.10, Node 22, Flutter 3.35, golangci-lint, pre-commit, ...
+mise install                # Go 1.25.11, Node 22, Flutter 3.35, golangci-lint, pre-commit, ...
 
 # 4. Bootstrap dependencies for the surface(s) you'll touch
 make install                # everything; or scope manually:
