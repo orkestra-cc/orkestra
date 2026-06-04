@@ -812,6 +812,9 @@ func buildIndexModels(specs []IndexSpec) []mongo.IndexModel {
 		if spec.Sparse {
 			opts.SetSparse(true)
 		}
+		if len(spec.PartialFilter) > 0 {
+			opts.SetPartialFilterExpression(spec.PartialFilter)
+		}
 		if spec.TTL > 0 {
 			opts.SetExpireAfterSeconds(int32(spec.TTL.Seconds()))
 		} else if spec.ExpireAt {

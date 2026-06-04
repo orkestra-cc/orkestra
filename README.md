@@ -87,7 +87,7 @@ docker push ghcr.io/your-org/orkestra/backend:latest
 
 The published image is produced by `.github/workflows/backend.yml` on every push to `dev` / `main` — a single build.
 
-The dev backend builds `docker/Dockerfile.dev-backend` (`golang:1.25.10-alpine`, AIR pre-baked) — no registry auth needed. A fork with a [Chainguard](https://www.chainguard.dev) subscription can swap the base image via the `GO_BASE` build-arg.
+The dev backend builds `docker/Dockerfile.dev-backend` (`golang:1.25.11-alpine`, AIR pre-baked) — no registry auth needed. A fork with a [Chainguard](https://www.chainguard.dev) subscription can swap the base image via the `GO_BASE` build-arg.
 
 ## Managing the stack
 

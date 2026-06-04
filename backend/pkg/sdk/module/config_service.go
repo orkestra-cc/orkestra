@@ -382,6 +382,12 @@ func (s *ModuleConfigService) lazySeed(ctx context.Context, name string) (*Modul
 // UpdateConfig updates a module's config values and encrypted secrets for the
 // active environment, then invalidates the Redis cache for immediate propagation.
 // Also keeps the legacy top-level fields in sync for backward compatibility.
+//
+// Incoming values and secrets are MERGED into the module's stored config — keys
+// not present in the call are preserved, never wiped. Pass only the keys you
+// want to add or change. This guard is load-bearing: a config-only update
+// (e.g. flipping a feature toggle) carries no secrets, and replacing rather
+// than merging would blank out every encrypted secret the module holds.
 func (s *ModuleConfigService) UpdateConfig(ctx context.Context, name string, values map[string]string, secrets map[string]string) error {
 	encrypted := make(map[string]string, len(secrets))
 	for k, v := range secrets {
@@ -392,22 +398,57 @@ func (s *ModuleConfigService) UpdateConfig(ctx context.Context, name string, val
 		encrypted[k] = enc
 	}
 
+	// Load the current document so partial updates merge into — not replace —
+	// the stored config. The legacy top-level fields and the active environment
+	// can diverge, so each target is merged against its own existing maps.
+	existing, err := s.repo.FindByName(ctx, name)
+	if err != nil {
+		return err
+	}
+	if existing == nil {
+		return fmt.Errorf("module %q not found", name)
+	}
+
 	// Update legacy top-level fields for backward compat.
-	if err := s.repo.UpdateConfigValues(ctx, name, values, encrypted); err != nil {
+	if err := s.repo.UpdateConfigValues(
+		ctx, name,
+		mergeStringMaps(existing.ConfigValues, values),
+		mergeStringMaps(existing.EncryptedValues, encrypted),
+	); err != nil {
 		return err
 	}
 
 	// Also update the active environment if environments exist.
-	doc, err := s.repo.FindByName(ctx, name)
-	if err == nil && doc != nil && len(doc.Environments) > 0 {
-		activeEnv := doc.ActiveEnv()
-		if err := s.repo.UpdateEnvironmentConfig(ctx, name, activeEnv, values, encrypted); err != nil {
+	if len(existing.Environments) > 0 {
+		activeEnv := existing.ActiveEnv()
+		env := existing.Environments[activeEnv]
+		if err := s.repo.UpdateEnvironmentConfig(
+			ctx, name, activeEnv,
+			mergeStringMaps(env.ConfigValues, values),
+			mergeStringMaps(env.EncryptedValues, encrypted),
+		); err != nil {
 			s.logger.Warn("UpdateConfig: failed to update environment config",
 				slog.String("module", name), slog.String("env", activeEnv), slog.String("error", err.Error()))
 		}
 	}
 
 	return s.InvalidateCache(ctx, name)
+}
+
+// mergeStringMaps returns a new map containing every key in base overlaid with
+// every key in overlay (overlay wins on conflict). base is never mutated and a
+// nil base or overlay is treated as empty. It exists so partial config/secret
+// updates preserve the keys they don't mention instead of replacing the whole
+// map — see UpdateConfig / UpdateEnvironmentConfig.
+func mergeStringMaps(base, overlay map[string]string) map[string]string {
+	out := make(map[string]string, len(base)+len(overlay))
+	for k, v := range base {
+		out[k] = v
+	}
+	for k, v := range overlay {
+		out[k] = v
+	}
+	return out
 }
 
 // UpdateEnvironmentConfig updates config values and secrets for a specific
@@ -429,25 +470,18 @@ func (s *ModuleConfigService) UpdateEnvironmentConfig(ctx context.Context, name,
 
 	// Merge with existing env values (don't wipe unset fields).
 	existingEnv := doc.Environments[envName]
-	mergedValues := existingEnv.ConfigValues
-	if mergedValues == nil {
-		mergedValues = make(map[string]string)
-	}
-	for k, v := range values {
-		mergedValues[k] = v
-	}
 
-	mergedEncrypted := existingEnv.EncryptedValues
-	if mergedEncrypted == nil {
-		mergedEncrypted = make(map[string]string)
-	}
+	encrypted := make(map[string]string, len(secrets))
 	for k, v := range secrets {
 		enc, err := encryptSecret(v)
 		if err != nil {
 			return fmt.Errorf("encrypt secret %q: %w", k, err)
 		}
-		mergedEncrypted[k] = enc
+		encrypted[k] = enc
 	}
+
+	mergedValues := mergeStringMaps(existingEnv.ConfigValues, values)
+	mergedEncrypted := mergeStringMaps(existingEnv.EncryptedValues, encrypted)
 
 	if err := s.repo.UpdateEnvironmentConfig(ctx, name, envName, mergedValues, mergedEncrypted); err != nil {
 		return err

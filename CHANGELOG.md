@@ -4,6 +4,26 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.3.3] - 2026-06-04
+
+### Bug fixes
+
+- **(auth)** Let operator tokens switch acting tenant via X-Tenant-ID (#83) ([3449c8f](https://github.com/orkestra-cc/orkestra/commit/3449c8fa897585be0cdeaf9bdb8b3e6eca9e5547))
+- **(admin-ui)** Stop impersonation when picking a workspace in NineDotMenu (#82) ([f83243a](https://github.com/orkestra-cc/orkestra/commit/f83243a9c3068c37cfbeb867551398d5064e24e5))
+- **(deps)** Bump Go 1.25.10 → 1.25.11 for stdlib advisories (#84) ([42670c7](https://github.com/orkestra-cc/orkestra/commit/42670c728710cf906b119db14546dd5d333b0237))
+
+## [0.3.2] - 2026-06-02
+
+### Features
+
+- **(admin-ui)** Server-side table pagination + SDK partial-filter index (#80) ([ebc2ef7](https://github.com/orkestra-cc/orkestra/commit/ebc2ef7798336d3d90c922774d00c8a8704dd6af))
+
+### Bug fixes
+
+- **(sdk)** UpdateConfig merges secrets instead of replacing them (#81) ([61a2903](https://github.com/orkestra-cc/orkestra/commit/61a2903de0bcc143b3ca53950458c6589a600892))
+- **(auth)** RequireMFA honors the mfaEnabled master switch (#79) ([9479754](https://github.com/orkestra-cc/orkestra/commit/94797547754a3a9271f11f9cfb938262c7bc94b3))
+- **(auth)** Ship MFA, signups & OAuth providers off by default (#78) ([548b856](https://github.com/orkestra-cc/orkestra/commit/548b8562b1d9aa59d1c4ee31455172152da6b5c9))
+
 ## [0.3.1] - 2026-06-02
 
 ### Bug fixes

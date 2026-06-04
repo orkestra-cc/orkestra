@@ -61,6 +61,17 @@ type IndexSpec struct {
 	OrderedKeys []IndexKey     `json:"orderedKeys,omitempty"` // compound indexes with deterministic order
 	Unique      bool           `json:"unique,omitempty"`
 	Sparse      bool           `json:"sparse,omitempty"`
+	// PartialFilter scopes a (usually unique) index to only the documents
+	// matching this filter — the correct replacement for Sparse on a
+	// *compound* unique index. A compound sparse index still indexes a
+	// document when ANY keyed field is present, so a unique index like
+	// (tenantId, vat) over a sometimes-absent `vat` collides on
+	// (tenantId, <missing>) once `tenantId` is always present. A partial
+	// filter such as {"vat": {"$exists": true}} indexes only the docs that
+	// actually carry the field. Mutually exclusive with Sparse (Mongo
+	// rejects both together). Supports the partialFilterExpression operator
+	// subset: equality, $exists:true, $gt/$gte/$lt/$lte, $type, $in, $and.
+	PartialFilter map[string]any `json:"partialFilter,omitempty"`
 	TTL         time.Duration  `json:"ttl,omitempty"`      // reap docs TTL after the indexed timestamp; 0 = no TTL
 	ExpireAt    bool           `json:"expireAt,omitempty"` // reap docs *at* the indexed timestamp (expireAfterSeconds=0). Mutually exclusive with TTL; use for absolute-expiry fields like `expiresAt`.
 	Text        bool           `json:"text,omitempty"`     // text index (overrides Keys)

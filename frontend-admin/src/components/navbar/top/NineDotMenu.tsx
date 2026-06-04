@@ -79,7 +79,16 @@ const NineDotMenu = () => {
     : 'var(--bs-navbar-color, #6C6E71)';
 
   const onPickMembership = (tenantId: string) => {
+    // Picking one of your own workspaces must take precedence over any active
+    // impersonation — otherwise effectiveTenantId (impersonatedTenantId ??
+    // currentOrgId) keeps stamping the impersonated tenant on X-Tenant-ID and
+    // the workspace switch is a silent no-op. Clear impersonation first, then
+    // invalidate tenant-scoped caches so data refetches for the new tenant.
+    if (isImpersonating) {
+      dispatch(stopImpersonation());
+    }
     dispatch(setCurrentOrg(tenantId));
+    dispatch(baseApi.util.invalidateTags([...TENANT_SCOPED_TAGS]));
     setShow(false);
   };
 

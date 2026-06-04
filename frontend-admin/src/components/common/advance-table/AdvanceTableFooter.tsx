@@ -32,7 +32,8 @@ export const AdvanceTableFooter = ({
     getCanPreviousPage,
     getState,
     getPrePaginationRowModel,
-    getPaginationRowModel
+    getPaginationRowModel,
+    getRowCount
   } = useAdvanceTableContext();
 
   const {
@@ -55,7 +56,10 @@ export const AdvanceTableFooter = ({
               {t('table.rowsCount', {
                 from: pageSize * pageIndex + 1,
                 to: pageSize * pageIndex + getPaginationRowModel().rows.length,
-                total: getPrePaginationRowModel().rows.length
+                // getRowCount() returns the manual `rowCount` (server grand
+                // total) when set, else the client-side pre-pagination count
+                // — so this line stays correct for both table modes.
+                total: getRowCount()
               })}
             </span>
             {viewAllBtn && (
