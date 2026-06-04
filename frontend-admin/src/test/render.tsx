@@ -1,7 +1,7 @@
 import { type PropsWithChildren, type ReactElement } from 'react';
 import { configureStore, combineReducers } from '@reduxjs/toolkit';
 import { Provider } from 'react-redux';
-import { MemoryRouter } from 'react-router';
+import { MemoryRouter, type InitialEntry } from 'react-router';
 import {
   render,
   type RenderOptions,
@@ -36,8 +36,10 @@ export const setupStore = (preloadedState?: Partial<TestRootState>) =>
 interface ExtendedRenderOptions extends Omit<RenderOptions, 'queries'> {
   preloadedState?: Partial<TestRootState>;
   store?: TestStore;
-  // Initial URL(s) for the in-memory router. Defaults to "/".
-  routerEntries?: string[];
+  // Initial URL(s) for the in-memory router. Defaults to "/". Accepts
+  // InitialEntry so tests can seed location.state (e.g. ProtectedRoute's
+  // `from`), not just a bare path string.
+  routerEntries?: InitialEntry[];
 }
 
 export interface RenderWithProvidersResult extends RenderResult {

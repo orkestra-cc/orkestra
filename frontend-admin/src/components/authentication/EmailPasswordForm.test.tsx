@@ -31,7 +31,9 @@ const LocationProbe = ({ label }: { label: string }) => {
   );
 };
 
-const renderForm = () =>
+// `from` mirrors what ProtectedRoute stashes in location.state when it bounces
+// an unauthenticated user off a deep link.
+const renderForm = (from?: unknown) =>
   renderWithProviders(
     <Routes>
       <Route path="/login" element={<EmailPasswordForm />} />
@@ -39,9 +41,17 @@ const renderForm = () =>
         path="/dashboard/analytics"
         element={<LocationProbe label="dashboard" />}
       />
+      <Route
+        path="/admin/modules"
+        element={<LocationProbe label="deeplink" />}
+      />
       <Route path="/mfa/verify" element={<LocationProbe label="mfa" />} />
     </Routes>,
-    { routerEntries: ['/login'] }
+    {
+      routerEntries: [
+        from === undefined ? '/login' : { pathname: '/login', state: { from } }
+      ]
+    }
   );
 
 const fillCredentials = async (
@@ -127,6 +137,80 @@ describe('EmailPasswordForm', () => {
     });
     // Auth state must NOT be seeded — the user has not completed MFA yet.
     expect(store.getState().auth.accessToken).toBeFalsy();
+  });
+
+  const okLogin = http.post('*/v1/auth/operator/login', () =>
+    HttpResponse.json({
+      success: true,
+      accessToken: 'access-token-xyz',
+      tokenType: 'Bearer',
+      expiresIn: 900,
+      user: {
+        id: 'u-1',
+        email: 'op@example.com',
+        fullName: 'Op User',
+        isActive: true,
+        roles: ['operator'],
+        createdAt: '2026-01-01T00:00:00Z',
+        updatedAt: '2026-01-01T00:00:00Z'
+      }
+    })
+  );
+
+  it('returns the user to the deep link captured in location.state.from', async () => {
+    server.use(policyOk, okLogin);
+
+    // ProtectedRoute stores a full router Location in state.from.
+    renderForm({ pathname: '/admin/modules', search: '?tab=addons', hash: '' });
+    const user = await fillCredentials();
+    await user.click(screen.getByRole('button', { name: /sign in/i }));
+
+    expect(await screen.findByTestId('deeplink-pathname')).toHaveTextContent(
+      '/admin/modules'
+    );
+    expect(screen.queryByTestId('dashboard-pathname')).toBeNull();
+  });
+
+  it('falls back to the dashboard when from is an off-site open-redirect target', async () => {
+    server.use(policyOk, okLogin);
+
+    renderForm({ pathname: '//evil.com', search: '', hash: '' });
+    const user = await fillCredentials();
+    await user.click(screen.getByRole('button', { name: /sign in/i }));
+
+    expect(await screen.findByTestId('dashboard-pathname')).toHaveTextContent(
+      '/dashboard/analytics'
+    );
+    expect(screen.queryByTestId('deeplink-pathname')).toBeNull();
+  });
+
+  it('forwards the deep link to /mfa/verify as returnTo when MFA is required', async () => {
+    server.use(
+      policyOk,
+      http.post('*/v1/auth/operator/login', () =>
+        HttpResponse.json({
+          success: true,
+          requiresMfa: true,
+          mfaToken: 'challenge-abc',
+          webauthnAvailable: false
+        })
+      )
+    );
+
+    renderForm({ pathname: '/admin/modules', search: '', hash: '' });
+    const user = await fillCredentials();
+    await user.click(screen.getByRole('button', { name: /sign in/i }));
+
+    expect(await screen.findByTestId('mfa-pathname')).toHaveTextContent(
+      '/mfa/verify'
+    );
+    const state = JSON.parse(
+      screen.getByTestId('mfa-state').textContent ?? 'null'
+    );
+    expect(state).toMatchObject({
+      challengeId: 'challenge-abc',
+      returnTo: '/admin/modules'
+    });
   });
 
   it('shows the invalid-credentials message on a 401 response', async () => {

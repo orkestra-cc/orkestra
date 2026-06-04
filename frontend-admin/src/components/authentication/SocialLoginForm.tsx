@@ -9,8 +9,10 @@ import {
 } from '@fortawesome/free-brands-svg-icons';
 import { IconDefinition } from '@fortawesome/fontawesome-svg-core';
 import { useTranslation } from 'react-i18next';
+import { useLocation } from 'react-router-dom';
 import { initiateSocialLogin, SocialProvider } from 'utils/socialAuthUtils';
 import { useGetOAuthProvidersQuery } from 'store/api/authApi';
+import { locationToReturnTo, sanitizeReturnTo } from 'utils/returnTo';
 
 import runtimeConfig from 'config/environment';
 
@@ -42,6 +44,12 @@ const SocialLoginForm = ({
   onError
 }: SocialLoginFormProps) => {
   const { t } = useTranslation();
+  const location = useLocation();
+  // Deep link ProtectedRoute captured before bouncing to login. Stashed into
+  // sessionStorage by initiateSocialLogin so it survives the IdP round-trip.
+  const returnTo = sanitizeReturnTo(
+    locationToReturnTo((location.state as { from?: unknown } | null)?.from)
+  );
   const [loadingProvider, setLoadingProvider] = useState<SocialProvider | null>(
     null
   );
@@ -75,7 +83,7 @@ const SocialLoginForm = ({
     setError('');
 
     try {
-      await initiateSocialLogin(provider, backendUrl);
+      await initiateSocialLogin(provider, backendUrl, returnTo);
     } catch (err) {
       const errorMessage =
         err instanceof Error

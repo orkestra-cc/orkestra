@@ -5,6 +5,8 @@ import { useTranslation } from 'react-i18next';
 import { useAppDispatch } from '../../store/hooks';
 import { baseApi } from '../../store/api/baseApi';
 import AuthCardLayout from 'layouts/AuthCardLayout';
+import { OAUTH_RETURN_TO_KEY } from 'utils/socialAuthUtils';
+import { sanitizeReturnTo } from 'utils/returnTo';
 
 const SocialAuthCallback = () => {
   const { t } = useTranslation();
@@ -27,6 +29,14 @@ const SocialAuthCallback = () => {
         const webauthnAvailable =
           searchParams.get('webauthnAvailable') === 'true';
 
+        // Deep link stashed before the IdP round-trip. Consume it once; both
+        // the MFA-continuation and direct-success branches below decide where
+        // to send the user. Re-sanitised since sessionStorage is client-writable.
+        const returnTo = sanitizeReturnTo(
+          sessionStorage.getItem(OAUTH_RETURN_TO_KEY)
+        );
+        sessionStorage.removeItem(OAUTH_RETURN_TO_KEY);
+
         if (error) {
           throw new Error(
             `${t('auth.social.callback.oauthErrorPrefix')}: ${error}`
@@ -41,7 +51,12 @@ const SocialAuthCallback = () => {
         if (requiresMfa === 'true' && mfaToken) {
           navigate('/mfa/verify', {
             replace: true,
-            state: { challengeId: mfaToken, webauthnAvailable, provider }
+            state: {
+              challengeId: mfaToken,
+              webauthnAvailable,
+              provider,
+              returnTo
+            }
           });
           return;
         }
@@ -74,7 +89,7 @@ const SocialAuthCallback = () => {
           document.title,
           window.location.pathname
         );
-        navigate('/user/profile', { replace: true });
+        navigate(returnTo ?? '/user/profile', { replace: true });
       } catch (err) {
         console.error('Social OAuth callback error:', err);
         setError(

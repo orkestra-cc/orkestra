@@ -15,11 +15,15 @@ import {
   encodeAssertion
 } from 'store/api/webauthnCodec';
 import { login as loginAction } from 'store/slices/authSlice';
+import { DEFAULT_POST_LOGIN, sanitizeReturnTo } from 'utils/returnTo';
 
 interface LocationState {
   challengeId?: string;
   email?: string;
   webauthnAvailable?: boolean;
+  // Deep link captured before login, forwarded by EmailPasswordForm /
+  // SocialAuthCallback so MFA completion lands on the originally-requested page.
+  returnTo?: string;
 }
 
 /**
@@ -39,6 +43,9 @@ const LoginMfaVerify = () => {
   const location = useLocation();
   const state = (location.state ?? {}) as LocationState;
   const passkeyOffered = !!state.webauthnAvailable && browserSupportsWebAuthn();
+  // Re-sanitise defensively even though the source already did — this value may
+  // have round-tripped through sessionStorage on the OAuth path.
+  const returnTo = sanitizeReturnTo(state.returnTo) ?? DEFAULT_POST_LOGIN;
 
   const [code, setCode] = useState('');
   const [useBackup, setUseBackup] = useState(false);
@@ -72,7 +79,7 @@ const LoginMfaVerify = () => {
         useBackup
       }).unwrap();
       dispatch(loginAction({ userData: res.user }));
-      navigate('/dashboard/analytics');
+      navigate(returnTo, { replace: true });
     } catch (err: unknown) {
       const anyErr = err as { status?: number; data?: { detail?: string } };
       if (anyErr?.status === 401) {
@@ -107,7 +114,7 @@ const LoginMfaVerify = () => {
         assertionResponse: encodeAssertion(cred)
       }).unwrap();
       dispatch(loginAction({ userData: finishRes.user }));
-      navigate('/dashboard/analytics');
+      navigate(returnTo, { replace: true });
     } catch (err: unknown) {
       const anyErr = err as {
         name?: string;

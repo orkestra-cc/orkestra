@@ -20,9 +20,15 @@ interface SocialOAuthCallbackResponse {
 
 export type SocialProvider = 'google' | 'apple' | 'github' | 'discord';
 
+// sessionStorage key holding the deep link to return to after the OAuth
+// round-trip completes. Router state can't survive the redirect out to the IdP,
+// so we stash it here and SocialAuthCallback reads it back.
+export const OAUTH_RETURN_TO_KEY = 'oauth_return_to';
+
 export const initiateSocialLogin = async (
   provider: SocialProvider,
-  backendUrl: string = runtimeConfig.apiUrl
+  backendUrl: string = runtimeConfig.apiUrl,
+  returnTo?: string | null
 ): Promise<void> => {
   try {
     if (!backendUrl || backendUrl === 'undefined') {
@@ -57,6 +63,12 @@ export const initiateSocialLogin = async (
 
     sessionStorage.setItem('oauth_state', data.state);
     sessionStorage.setItem('oauth_provider', provider);
+    if (returnTo) {
+      sessionStorage.setItem(OAUTH_RETURN_TO_KEY, returnTo);
+    } else {
+      // Clear any stale value from a previous, abandoned attempt.
+      sessionStorage.removeItem(OAUTH_RETURN_TO_KEY);
+    }
 
     window.location.href = data.authUrl;
   } catch (error) {
