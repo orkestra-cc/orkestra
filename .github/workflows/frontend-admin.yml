@@ -99,7 +99,7 @@ jobs:
       # name. Do not rename here without coordinating that transition.
       - name: Docker metadata
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           # Image name stays `frontend` (see NOTE above) — not `frontend-admin`.
           images: ghcr.io/${{ github.repository }}/frontend
