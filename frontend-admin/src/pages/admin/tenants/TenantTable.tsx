@@ -121,7 +121,7 @@ const TenantTable: React.FC<Props> = ({
                 <th className="pe-4 ps-3">{t('adminTenants.table.colName')}</th>
                 <th>{t('adminTenants.table.colSlug')}</th>
                 <th>{t('adminTenants.table.colPlan')}</th>
-                <th className="text-end">
+                <th className="text-center">
                   {t('adminTenants.table.colMembers')}
                 </th>
                 <th>{t('adminTenants.table.colCreated')}</th>
@@ -160,7 +160,7 @@ const TenantTable: React.FC<Props> = ({
                     }}
                     onClick={() => onRowClick(org)}
                   >
-                    <td className="ps-3 fw-semibold">
+                    <td className="ps-3 fw-semibold text-900">
                       <div>{org.name}</div>
                       {searchActive &&
                         org.matchedMembers &&
@@ -189,7 +189,7 @@ const TenantTable: React.FC<Props> = ({
                           </div>
                         )}
                     </td>
-                    <td className="text-muted">
+                    <td className="text-700">
                       <code className="fs-11">{org.slug}</code>
                     </td>
                     <td>
@@ -200,8 +200,8 @@ const TenantTable: React.FC<Props> = ({
                         {org.plan}
                       </SubtleBadge>
                     </td>
-                    <td className="text-end">{org.memberCount}</td>
-                    <td className="text-muted">{formatDate(org.createdAt)}</td>
+                    <td className="text-center text-900">{org.memberCount}</td>
+                    <td className="text-700">{formatDate(org.createdAt)}</td>
                     <td>
                       <SubtleBadge bg={statusBadge.bg} pill>
                         {statusBadge.label}
