@@ -4,6 +4,12 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.3.5] - 2026-06-08
+
+### Bug fixes
+
+- **(deps)** Bump tinymce to ^8.6.0 to patch high-severity XSS advisories ([98b3446](https://github.com/orkestra-cc/orkestra/commit/98b3446aafec8151835ac47a4d678e86ee293e50))
+
 ## [0.3.4] - 2026-06-04
 
 ### Bug fixes
