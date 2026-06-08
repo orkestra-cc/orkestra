@@ -222,6 +222,24 @@ func (r *Repository) DeleteBindingsByTenant(ctx context.Context, tenantUUID stri
 	return res.DeletedCount, nil
 }
 
+// DeleteBindingsByUserAndTenant removes every binding for a single
+// (user, tenant) pair. Called when a member is removed from a tenant or has
+// their tenant role changed, so the binding never outlives the membership /
+// role that justified it (the dangling-binding bug: attach→remove→re-attach
+// or a role change otherwise accumulates bindings the evaluator unions).
+// Global bindings (tenantId=="") are untouched.
+func (r *Repository) DeleteBindingsByUserAndTenant(ctx context.Context, userUUID, tenantUUID string) (int64, error) {
+	if userUUID == "" || tenantUUID == "" {
+		return 0, nil
+	}
+	//tenantscope:allow authz owns the global authz_bindings registry; the filter pins both userUUID and tenantId explicitly (mirrors DeleteBindingsByTenant). Membership-unbind hook — see backend/internal/core/authz/CLAUDE.md#org-scoping-invariants-system-wide.
+	res, err := r.db.Collection(CollBindings).DeleteMany(ctx, bson.M{"userUUID": userUUID, "tenantId": tenantUUID})
+	if err != nil {
+		return 0, err
+	}
+	return res.DeletedCount, nil
+}
+
 // ListActiveBindingsForUser returns all bindings for (userUUID, tenantID)
 // that have not expired. Pass tenantID="" to fetch global/system bindings.
 func (r *Repository) ListActiveBindingsForUser(ctx context.Context, userUUID, tenantID string) ([]models.Binding, error) {

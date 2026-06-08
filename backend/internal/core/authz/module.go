@@ -244,6 +244,19 @@ func (m *Module) Init(deps *module.Dependencies) error {
 			}
 			return nil
 		})
+		// Member-unbind hook: when a single member is removed from a tenant
+		// or has their tenant role changed, drop that member's tenant-scoped
+		// binding(s). Without it, attach→remove→re-attach (or a role change)
+		// accumulates bindings and GetEffectivePermissions unions them — a
+		// removed or downgraded member keeps the old role's permissions.
+		// Distinct from the tenant-delete cascade above, which clears every
+		// binding for a whole tenant.
+		tenantConcrete.SetMemberUnbinder(func(ctx context.Context, userUUID, tenantUUID string) error {
+			if _, err := svc.RemoveBindingsByUserAndTenant(ctx, userUUID, tenantUUID); err != nil {
+				return fmt.Errorf("authz: unbind member %s on tenant %s: %w", userUUID, tenantUUID, err)
+			}
+			return nil
+		})
 	}
 	return nil
 }

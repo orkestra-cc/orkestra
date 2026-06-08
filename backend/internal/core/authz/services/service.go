@@ -110,6 +110,7 @@ type repoBackend interface {
 	DeleteBinding(ctx context.Context, uuid string) error
 	DeleteBindingsByRoleUUID(ctx context.Context, roleUUID string) (int64, error)
 	DeleteBindingsByTenant(ctx context.Context, tenantUUID string) (int64, error)
+	DeleteBindingsByUserAndTenant(ctx context.Context, userUUID, tenantUUID string) (int64, error)
 	ListActiveBindingsForUser(ctx context.Context, userUUID, tenantID string) ([]models.Binding, error)
 	ListBindingsByTenant(ctx context.Context, tenantID string) ([]models.Binding, error)
 }
@@ -1047,6 +1048,22 @@ func (s *Service) DeleteBinding(ctx context.Context, uuid string) error {
 // service. Returns the number of bindings removed for audit purposes.
 func (s *Service) RemoveBindingsByTenant(ctx context.Context, tenantUUID string) (int64, error) {
 	n, err := s.repo.DeleteBindingsByTenant(ctx, tenantUUID)
+	if err != nil {
+		return 0, err
+	}
+	if n > 0 {
+		s.flushCache(ctx)
+	}
+	return n, nil
+}
+
+// RemoveBindingsByUserAndTenant drops every binding for one (user, tenant)
+// pair and flushes the effective-permission cache. Wired into the tenant
+// module's member-unbind hook (SetMemberUnbinder) so removing a member or
+// changing their tenant role never leaves a stale binding that keeps granting
+// the old role's permissions. Returns the number of bindings removed.
+func (s *Service) RemoveBindingsByUserAndTenant(ctx context.Context, userUUID, tenantUUID string) (int64, error) {
+	n, err := s.repo.DeleteBindingsByUserAndTenant(ctx, userUUID, tenantUUID)
 	if err != nil {
 		return 0, err
 	}

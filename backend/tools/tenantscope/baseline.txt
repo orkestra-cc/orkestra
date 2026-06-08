@@ -126,8 +126,8 @@ internal/core/authz/repository/repository.go:173:DeleteOne
 internal/core/authz/repository/repository.go:192:DeleteOne
 internal/core/authz/repository/repository.go:201:DeleteMany
 internal/core/authz/repository/repository.go:218:DeleteMany
-internal/core/authz/repository/repository.go:237:Find
-internal/core/authz/repository/repository.go:250:Find
+internal/core/authz/repository/repository.go:255:Find
+internal/core/authz/repository/repository.go:268:Find
 internal/core/authz/repository/repository.go:41:UpdateOne
 internal/core/authz/repository/repository.go:54:Find
 internal/core/authz/repository/repository.go:67:Find

@@ -4476,6 +4476,28 @@
         ],
         "type": "object"
       },
+      "SetMemberRoleAdminInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/SetMemberRoleAdminInputBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "role": {
+            "description": "authz role name to set as the member's tenant role (e.g. org_owner, org_admin, org_member, org_viewer)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "role"
+        ],
+        "type": "object"
+      },
       "SetModuleRequestBody": {
         "additionalProperties": false,
         "properties": {
@@ -8177,6 +8199,59 @@
           }
         },
         "summary": "Remove a member from a tenant (platform admin)",
+        "tags": [
+          "Tenants Admin"
+        ]
+      }
+    },
+    "/v1/admin/tenants/{tenantId}/members/{userUUID}/role": {
+      "patch": {
+        "description": "Sets the member's tenant role and re-points their authz binding to match, so the change takes effect immediately. Replaces the remove+re-attach workaround, which left dangling bindings. 404 when the user is not a member.",
+        "operationId": "set-tenant-member-role-admin",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tenantId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "userUUID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetMemberRoleAdminInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Change a member's tenant role (platform admin)",
         "tags": [
           "Tenants Admin"
         ]
