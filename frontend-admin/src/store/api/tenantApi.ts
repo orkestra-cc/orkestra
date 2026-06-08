@@ -687,6 +687,25 @@ export const tenantApi = baseApi.injectEndpoints({
       ]
     }),
 
+    // Atomically change a member's tenant role; the backend re-points the
+    // authz binding so the new role's permissions take effect immediately
+    // (PATCH /v1/admin/tenants/{tenantId}/members/{userUUID}/role).
+    setOrgMemberRoleAdmin: builder.mutation<
+      void,
+      { tenantId: string; userUUID: string; role: string }
+    >({
+      query: ({ tenantId, userUUID, role }) => ({
+        url: `/v1/admin/tenants/${tenantId}/members/${userUUID}/role`,
+        method: 'PATCH',
+        body: { role }
+      }),
+      invalidatesTags: (_, __, { tenantId, userUUID }) => [
+        { type: 'Membership', id: tenantId },
+        { type: 'AdminOrg', id: tenantId },
+        { type: 'User', id: userUUID }
+      ]
+    }),
+
     listOrgInvitesAdmin: builder.query<
       { invites: Invite[] },
       { tenantId: string; includeAccepted?: boolean }
@@ -757,6 +776,7 @@ export const {
   useListOrgMembersAdminQuery,
   useAttachOrgMemberAdminMutation,
   useRemoveOrgMemberAdminMutation,
+  useSetOrgMemberRoleAdminMutation,
   useListOrgInvitesAdminQuery,
   useCreateOrgInviteAdminMutation,
   useRevokeOrgInviteAdminMutation,

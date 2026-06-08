@@ -896,6 +896,8 @@
       "empty": "No members yet.",
       "toastRemoved": "Member removed",
       "toastRemoveFailed": "Remove failed: {{error}}",
+      "toastRoleChanged": "Member role updated",
+      "toastRoleChangeFailed": "Role change failed: {{error}}",
       "toastVerificationSent": "Verification email sent",
       "toastResendFailed": "Resend failed: {{error}}",
       "toastPasswordResetSent": "Password-reset email sent",
