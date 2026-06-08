@@ -1233,6 +1233,16 @@
       "modalSubmitting": "Unlinking…"
     }
   },
+  "operatorProfile": {
+    "memberships": {
+      "title": "Groups",
+      "empty": "You don't belong to any group yet.",
+      "owner": "Owner",
+      "kindInternal": "Internal group",
+      "kindExternal": "External group",
+      "plan": "Plan: {{plan}}"
+    }
+  },
   "profileShared": {
     "loadingAria": "Loading...",
     "errorLoad": "Error loading user data. Please try again later.",

@@ -1,6 +1,7 @@
 import { useGetCurrentUserQuery } from 'store/api/authApi';
 import OperatorBanner from './OperatorBanner';
 import OperatorProfileIntro from './OperatorProfileIntro';
+import OperatorMembershipsCard from './OperatorMembershipsCard';
 import { Col, Row, Alert, Spinner } from 'react-bootstrap';
 import { useTranslation } from 'react-i18next';
 import type { User } from 'store/api/userApi';
@@ -53,6 +54,9 @@ const OperatorProfile: React.FC = () => {
       <Row className="g-3 mb-3">
         <Col lg={12}>
           <OperatorProfileIntro user={user} />
+        </Col>
+        <Col lg={12}>
+          <OperatorMembershipsCard />
         </Col>
       </Row>
     </>
