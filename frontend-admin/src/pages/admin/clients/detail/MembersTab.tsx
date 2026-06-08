@@ -161,9 +161,11 @@ const MembersTab: React.FC<Props> = ({ org }) => {
         <tbody>
           {members.map(m => (
             <tr key={m.id} className="align-middle">
-              <td>{m.email || <span className="text-muted">—</span>}</td>
+              <td className="text-900">
+                {m.email || <span className="text-muted">—</span>}
+              </td>
               <td className="font-monospace fs-11">{m.userUUID}</td>
-              <td>
+              <td className="text-900">
                 {m.isOwner ? (
                   m.roles.join(', ') || '—'
                 ) : (
@@ -171,7 +173,7 @@ const MembersTab: React.FC<Props> = ({ org }) => {
                     <Dropdown.Toggle
                       variant="link"
                       size="sm"
-                      className="text-decoration-none p-0 fs-10 text-700"
+                      className="text-decoration-none p-0 fs-10 text-900"
                     >
                       {m.roles.join(', ') || '—'}
                     </Dropdown.Toggle>
