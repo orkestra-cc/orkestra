@@ -1,7 +1,7 @@
 {
   "homepage": "orkestra.cc",
   "name": "frontend-admin",
-  "version": "0.3.4",
+  "version": "0.3.5",
   "private": true,
   "type": "module",
   "dependencies": {
@@ -84,7 +84,7 @@
     "rtlcss": "^4.3.0",
     "simplebar-react": "^3.3.2",
     "slick-carousel": "^1.8.1",
-    "tinymce": "^8.3.1",
+    "tinymce": "^8.6.0",
     "uuid": "^13.0.0",
     "video.js": "^8.23.7",
     "web-vitals": "^5.2.0",
