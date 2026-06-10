@@ -19,7 +19,7 @@ dependencies:
   flutter_riverpod: ^2.4.9
 
   # Networking
-  dio: ^5.4.0
+  dio: ^5.9.2
   web_socket_channel: ^2.4.0
 
   # Storage
