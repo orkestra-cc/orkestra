@@ -57,7 +57,7 @@
     "react-countup": "^6.5.3",
     "react-datepicker": "^9.1.0",
     "react-dom": "^19.1.0",
-    "react-dropzone": "^14.3.8",
+    "react-dropzone": "^15.0.0",
     "react-error-overlay": "^6.1.0",
     "react-hook-form": "^7.76.1",
     "react-i18next": "^15.7.4",
