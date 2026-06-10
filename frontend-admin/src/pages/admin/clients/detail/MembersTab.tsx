@@ -7,7 +7,8 @@ import SubtleBadge from 'components/common/SubtleBadge';
 import type { Org } from 'store/api/tenantApi';
 import {
   useListOrgMembersAdminQuery,
-  useRemoveOrgMemberAdminMutation
+  useRemoveOrgMemberAdminMutation,
+  useSetOrgMemberRoleAdminMutation
 } from 'store/api/tenantApi';
 import {
   useResendVerificationClientUserAdminMutation,
@@ -27,6 +28,17 @@ interface MfaTarget {
   fullName?: string;
 }
 
+// The five seeded tenant-scoped roles an operator can assign inline. Mirrors
+// AttachMemberModal's list; the backend re-points the authz binding on change
+// so the new role's permissions take effect immediately.
+const ORG_ROLES = [
+  'org_owner',
+  'org_admin',
+  'org_member',
+  'org_viewer',
+  'org_billing'
+] as const;
+
 /**
  * Members tab — mirrors the MembersTab from the legacy TenantDetailModal.
  * Role assignments live on the Role Management page; this tab only shows
@@ -40,6 +52,7 @@ const MembersTab: React.FC<Props> = ({ org }) => {
   const { t } = useTranslation();
   const { data, isLoading, error } = useListOrgMembersAdminQuery(org.id);
   const [removeMember] = useRemoveOrgMemberAdminMutation();
+  const [setMemberRole] = useSetOrgMemberRoleAdminMutation();
   const [resendVerification] = useResendVerificationClientUserAdminMutation();
   const [sendPasswordReset] = useSendPasswordResetClientUserAdminMutation();
   const [attachOpen, setAttachOpen] = useState(false);
@@ -54,6 +67,19 @@ const MembersTab: React.FC<Props> = ({ org }) => {
     } catch (err: unknown) {
       toast.error(
         t('adminClients.members.toastRemoveFailed', {
+          error: extractError(err, unknownErr)
+        })
+      );
+    }
+  };
+
+  const onChangeRole = async (userUUID: string, role: string) => {
+    try {
+      await setMemberRole({ tenantId: org.id, userUUID, role }).unwrap();
+      toast.success(t('adminClients.members.toastRoleChanged'));
+    } catch (err: unknown) {
+      toast.error(
+        t('adminClients.members.toastRoleChangeFailed', {
           error: extractError(err, unknownErr)
         })
       );
@@ -135,9 +161,38 @@ const MembersTab: React.FC<Props> = ({ org }) => {
         <tbody>
           {members.map(m => (
             <tr key={m.id} className="align-middle">
-              <td>{m.email || <span className="text-muted">—</span>}</td>
+              <td className="text-900">
+                {m.email || <span className="text-muted">—</span>}
+              </td>
               <td className="font-monospace fs-11">{m.userUUID}</td>
-              <td>{m.roles.join(', ') || '—'}</td>
+              <td className="text-900">
+                {m.isOwner ? (
+                  m.roles.join(', ') || '—'
+                ) : (
+                  <Dropdown>
+                    <Dropdown.Toggle
+                      variant="link"
+                      size="sm"
+                      className="text-decoration-none p-0 fs-10 text-900"
+                    >
+                      {m.roles.join(', ') || '—'}
+                    </Dropdown.Toggle>
+                    <Dropdown.Menu className="border py-0">
+                      {ORG_ROLES.map(r => (
+                        <Dropdown.Item
+                          key={r}
+                          as="button"
+                          type="button"
+                          active={m.roles.includes(r)}
+                          onClick={() => onChangeRole(m.userUUID, r)}
+                        >
+                          {r}
+                        </Dropdown.Item>
+                      ))}
+                    </Dropdown.Menu>
+                  </Dropdown>
+                )}
+              </td>
               <td className="text-muted">
                 {m.joinedAt ? new Date(m.joinedAt).toLocaleDateString() : '—'}
               </td>

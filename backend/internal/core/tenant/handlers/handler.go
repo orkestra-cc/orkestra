@@ -33,6 +33,7 @@ type tenantSvc interface {
 	ListMembers(ctx context.Context, tenantUUID string) ([]models.TenantMembership, error)
 	RemoveMember(ctx context.Context, tenantUUID, userUUID string) error
 	AttachMember(ctx context.Context, tenantUUID, userUUID, roleName string, isOwner bool) (*models.TenantMembership, error)
+	SetMemberRoles(ctx context.Context, tenantUUID, userUUID string, roles []string) error
 	CreateInvite(ctx context.Context, tenantUUID, invitedBy string, input models.InviteInput) (*models.TenantInvite, error)
 	ListInvites(ctx context.Context, tenantUUID string, onlyPending bool) ([]models.TenantInvite, error)
 	RevokeInvite(ctx context.Context, tenantUUID, inviteUUID string) error
@@ -384,6 +385,34 @@ func (h *Handler) removeMember(ctx context.Context, in *removeMemberInput) (*str
 	return &struct{}{}, nil
 }
 
+type setMemberRoleAdminInput struct {
+	TenantID string `path:"tenantId"`
+	UserUUID string `path:"userUUID"`
+	Body     struct {
+		Role string `json:"role" doc:"authz role name to set as the member's tenant role (e.g. org_owner, org_admin, org_member, org_viewer)"`
+	}
+}
+
+// setMemberRoleAdmin changes a member's tenant role and re-points their authz
+// binding to match (see services.SetMemberRoles). This is the clean
+// alternative to remove+re-attach, which left dangling bindings the evaluator
+// would union. 404 when the user is not a member of the tenant.
+func (h *Handler) setMemberRoleAdmin(ctx context.Context, in *setMemberRoleAdminInput) (*struct{}, error) {
+	role := strings.TrimSpace(in.Body.Role)
+	if role == "" {
+		return nil, huma.Error400BadRequest("role is required")
+	}
+	if err := h.svc.SetMemberRoles(ctx, in.TenantID, in.UserUUID, []string{role}); err != nil {
+		switch {
+		case errors.Is(err, repository.ErrNotFound):
+			return nil, huma.Error404NotFound("member not found")
+		default:
+			return nil, huma.Error400BadRequest("set role failed: " + err.Error())
+		}
+	}
+	return &struct{}{}, nil
+}
+
 // attachMemberAdminInput is the wire shape for the admin direct-grant flow.
 // Either UserUUID or UserEmail must be supplied; UserUUID wins when both are
 // provided. Role is the authz role name to grant (typically org_owner /
@@ -627,6 +656,15 @@ func (h *Handler) RegisterAdminRoutes(api huma.API) {
 		Summary:     "Remove a member from a tenant (platform admin)",
 		Tags:        []string{"Tenants Admin"},
 	}, h.removeMember)
+
+	huma.Register(api, huma.Operation{
+		OperationID: "set-tenant-member-role-admin",
+		Method:      http.MethodPatch,
+		Path:        "/v1/admin/tenants/{tenantId}/members/{userUUID}/role",
+		Summary:     "Change a member's tenant role (platform admin)",
+		Description: "Sets the member's tenant role and re-points their authz binding to match, so the change takes effect immediately. Replaces the remove+re-attach workaround, which left dangling bindings. 404 when the user is not a member.",
+		Tags:        []string{"Tenants Admin"},
+	}, h.setMemberRoleAdmin)
 
 	huma.Register(api, huma.Operation{
 		OperationID: "list-tenant-invites-admin",

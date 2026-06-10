@@ -215,6 +215,19 @@ func (r *fakeRepo) DeleteBindingsByTenant(_ context.Context, tenantUUID string) 
 	return n, nil
 }
 
+func (r *fakeRepo) DeleteBindingsByUserAndTenant(_ context.Context, userUUID, tenantUUID string) (int64, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var n int64
+	for k, b := range r.bindings {
+		if b.UserUUID == userUUID && b.TenantID == tenantUUID {
+			delete(r.bindings, k)
+			n++
+		}
+	}
+	return n, nil
+}
+
 func (r *fakeRepo) ListActiveBindingsForUser(_ context.Context, userUUID, tenantID string) ([]models.Binding, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

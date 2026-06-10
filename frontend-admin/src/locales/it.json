@@ -896,6 +896,8 @@
       "empty": "Nessun membro al momento.",
       "toastRemoved": "Membro rimosso",
       "toastRemoveFailed": "Rimozione fallita: {{error}}",
+      "toastRoleChanged": "Ruolo del membro aggiornato",
+      "toastRoleChangeFailed": "Modifica ruolo non riuscita: {{error}}",
       "toastVerificationSent": "Email di verifica inviata",
       "toastResendFailed": "Reinvio fallito: {{error}}",
       "toastPasswordResetSent": "Email di reset password inviata",

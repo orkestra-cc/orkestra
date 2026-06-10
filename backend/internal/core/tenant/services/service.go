@@ -24,6 +24,7 @@ type Service struct {
 	auditSink       iface.AuditSink
 	kms             iface.KMSProvider
 	bindOwner       OwnerRoleBinder
+	unbindMember    MemberUnbinder
 	postDeleteHooks []TenantPostDeleteHook
 	// userDisplay is the lazy lookup the unified-clients refactor (Phase 1)
 	// uses to seed a personal tenant's Name from the owner User's FullName
@@ -44,6 +45,15 @@ type Service struct {
 // the owner cannot do anything meaningful inside their own tenant, so
 // proceeding silently would create an unrecoverable broken state.
 type OwnerRoleBinder func(ctx context.Context, ownerUUID, tenantUUID, roleName string) error
+
+// MemberUnbinder removes every authz binding for a (user, tenant) pair. Wired
+// by the authz module via SetMemberUnbinder — the same authz → tenant
+// inversion as OwnerRoleBinder, so tenant must not import authz directly.
+// Called when a member is removed or has their role changed so the
+// membership's authz binding never outlives the membership/role that
+// justified it. Nil (authz disabled / tests) means the membership row is
+// mutated without touching bindings — the legacy behavior.
+type MemberUnbinder func(ctx context.Context, userUUID, tenantUUID string) error
 
 func New(repo *repository.Repository) *Service {
 	return &Service{repo: repo}
@@ -69,6 +79,12 @@ func (s *Service) SetKMSProvider(kms iface.KMSProvider) { s.kms = kms }
 // inserts the membership without an authz binding — the owner relies
 // on their platform system role to act, which is the legacy behavior.
 func (s *Service) SetOwnerRoleBinder(fn OwnerRoleBinder) { s.bindOwner = fn }
+
+// SetMemberUnbinder wires the hook that drops a member's tenant-scoped authz
+// binding(s) on member removal and on role change. See MemberUnbinder for the
+// nil-hook (legacy) semantics. Wired by the authz module alongside
+// SetOwnerRoleBinder.
+func (s *Service) SetMemberUnbinder(fn MemberUnbinder) { s.unbindMember = fn }
 
 // TenantPostDeleteContext carries the data a cascade hook needs to clean
 // up tenant-adjacent state owned by other modules — authz bindings, the
@@ -757,11 +773,49 @@ func (s *Service) ListMembers(ctx context.Context, tenantUUID string) ([]models.
 }
 
 func (s *Service) RemoveMember(ctx context.Context, tenantUUID, userUUID string) error {
+	// Drop the member's tenant-scoped authz binding(s) first so a removed
+	// member never keeps permissions, and a later re-attach can't union a
+	// stale role. Unbind-before-delete fails toward LESS access: if the
+	// membership delete then fails, the member is left without a binding
+	// rather than with a dangling one. Nil unbinder (authz disabled / tests)
+	// keeps the legacy membership-only delete.
+	if s.unbindMember != nil {
+		if err := s.unbindMember(ctx, userUUID, tenantUUID); err != nil {
+			return fmt.Errorf("tenant: unbind member on remove: %w", err)
+		}
+	}
 	return s.repo.DeleteMembership(ctx, userUUID, tenantUUID)
 }
 
+// SetMemberRoles changes a member's tenant role(s) and re-points their authz
+// binding to match. Membership.Roles is only a denormalized hint; the authz
+// binding is the source of truth for permissions, so the two must move
+// together — updating the denorm alone (the previous behavior) left the old
+// role's binding granting the old permissions, which is how a role "change"
+// via remove+re-attach silently accumulated grants. The first role drives the
+// binding (one tenant-scoped role per membership, mirroring AttachMember);
+// any extra entries are stored on the denorm only. Returns
+// repository.ErrNotFound when the user is not a member of the tenant. Nil
+// hooks (authz disabled / tests) fall back to a denorm-only update.
 func (s *Service) SetMemberRoles(ctx context.Context, tenantUUID, userUUID string, roles []string) error {
-	return s.repo.UpdateMembershipRoles(ctx, userUUID, tenantUUID, roles)
+	if _, err := s.repo.GetMembership(ctx, userUUID, tenantUUID); err != nil {
+		return err
+	}
+	if err := s.repo.UpdateMembershipRoles(ctx, userUUID, tenantUUID, roles); err != nil {
+		return err
+	}
+	if s.unbindMember == nil || s.bindOwner == nil {
+		return nil
+	}
+	if err := s.unbindMember(ctx, userUUID, tenantUUID); err != nil {
+		return fmt.Errorf("tenant: unbind member on role change: %w", err)
+	}
+	if len(roles) > 0 && strings.TrimSpace(roles[0]) != "" {
+		if err := s.bindOwner(ctx, userUUID, tenantUUID, roles[0]); err != nil {
+			return fmt.Errorf("tenant: bind new role on role change: %w", err)
+		}
+	}
+	return nil
 }
 
 // AttachMember binds an existing user to an existing tenant with a single

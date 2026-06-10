@@ -31,6 +31,7 @@ type fakeTenantSvc struct {
 	listMembersFn            func(ctx context.Context, tenantUUID string) ([]models.TenantMembership, error)
 	removeMemberFn           func(ctx context.Context, tenantUUID, userUUID string) error
 	attachMemberFn           func(ctx context.Context, tenantUUID, userUUID, roleName string, isOwner bool) (*models.TenantMembership, error)
+	setMemberRolesFn         func(ctx context.Context, tenantUUID, userUUID string, roles []string) error
 	createInviteFn           func(ctx context.Context, tenantUUID, invitedBy string, input models.InviteInput) (*models.TenantInvite, error)
 	listInvitesFn            func(ctx context.Context, tenantUUID string, onlyPending bool) ([]models.TenantInvite, error)
 	revokeInviteFn           func(ctx context.Context, tenantUUID, inviteUUID string) error
@@ -108,6 +109,12 @@ func (f *fakeTenantSvc) AttachMember(ctx context.Context, t, u, r string, owner 
 		return f.attachMemberFn(ctx, t, u, r, owner)
 	}
 	panic("unused: AttachMember")
+}
+func (f *fakeTenantSvc) SetMemberRoles(ctx context.Context, t, u string, roles []string) error {
+	if f.setMemberRolesFn != nil {
+		return f.setMemberRolesFn(ctx, t, u, roles)
+	}
+	panic("unused: SetMemberRoles")
 }
 func (f *fakeTenantSvc) CreateInvite(ctx context.Context, t, by string, in models.InviteInput) (*models.TenantInvite, error) {
 	if f.createInviteFn != nil {
@@ -605,6 +612,46 @@ func TestRemoveMember(t *testing.T) {
 		h := New(svc, nil)
 		_, err := h.removeMember(context.Background(), &removeMemberInput{TenantID: "t-1", UserUUID: "u-1"})
 		assertStatus(t, err, 400)
+	})
+}
+
+func TestSetMemberRoleAdmin(t *testing.T) {
+	t.Parallel()
+	t.Run("happy → passes the trimmed single role to the service", func(t *testing.T) {
+		t.Parallel()
+		var gotRoles []string
+		svc := &fakeTenantSvc{setMemberRolesFn: func(_ context.Context, _, _ string, roles []string) error {
+			gotRoles = roles
+			return nil
+		}}
+		h := New(svc, nil)
+		in := &setMemberRoleAdminInput{TenantID: "t-1", UserUUID: "u-1"}
+		in.Body.Role = " org_admin "
+		if _, err := h.setMemberRoleAdmin(context.Background(), in); err != nil {
+			t.Fatalf("err = %v", err)
+		}
+		if len(gotRoles) != 1 || gotRoles[0] != "org_admin" {
+			t.Fatalf("roles = %v, want [org_admin] (trimmed)", gotRoles)
+		}
+	})
+	t.Run("empty role → 400 (service not called)", func(t *testing.T) {
+		t.Parallel()
+		h := New(&fakeTenantSvc{}, nil)
+		in := &setMemberRoleAdminInput{TenantID: "t-1", UserUUID: "u-1"}
+		in.Body.Role = "  "
+		_, err := h.setMemberRoleAdmin(context.Background(), in)
+		assertStatus(t, err, 400)
+	})
+	t.Run("not a member → 404", func(t *testing.T) {
+		t.Parallel()
+		svc := &fakeTenantSvc{setMemberRolesFn: func(context.Context, string, string, []string) error {
+			return repository.ErrNotFound
+		}}
+		h := New(svc, nil)
+		in := &setMemberRoleAdminInput{TenantID: "t-1", UserUUID: "u-1"}
+		in.Body.Role = "org_admin"
+		_, err := h.setMemberRoleAdmin(context.Background(), in)
+		assertStatus(t, err, 404)
 	})
 }
 
