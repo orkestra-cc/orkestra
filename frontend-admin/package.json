@@ -37,7 +37,7 @@
     "cytoscape-fcose": "^2.2.0",
     "dayjs": "^1.11.13",
     "dompurify": "^3.2.6",
-    "echarts": "^6.0.0",
+    "echarts": "^6.1.0",
     "echarts-for-react": "^3.0.2",
     "emoji-picker-react": "^4.19.1",
     "fuse.js": "^7.1.0",
