@@ -4,6 +4,20 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.3.8] - 2026-06-14
+
+### Features
+
+- **(devtoken)** Let dev tokens carry an acting tenant ([33ecec5](https://github.com/orkestra-cc/orkestra/commit/33ecec54c3bfc955a4a50c9ac62d398e421eb148))
+
+### Documentation
+
+- **(adr)** Propose ADR-0008 — partition OpenAPI spec per module ([3783a74](https://github.com/orkestra-cc/orkestra/commit/3783a7446dd480dfbc6537f44e33b3a55b105529))
+
+### Chores
+
+- Absorb devtoken-tenant-aware (PR #112) into dev ([c0a7b56](https://github.com/orkestra-cc/orkestra/commit/c0a7b56601caad7ffe64a4a311896cec1d44f47b))
+
 ## [0.3.7] - 2026-06-14
 
 ### Features
