@@ -37,6 +37,9 @@ usage() {
     echo "  -q, --quiet       Output only the token (for piping)"
     echo "  -c, --curl        Output a ready-to-use curl command"
     echo "  -e, --expiry      Token expiry duration (e.g., '15m', '1h', '24h')"
+    echo "  -t, --tenant      Acting tenant UUID to pin on the token (operator tokens"
+    echo "                    default to the first internal tenant so tenant-scoped"
+    echo "                    reads like billing/documents work without this flag)"
     echo "  -a, --audience    JWT audience: operator (default) or client (ADR-0003 PR-D)"
     echo "  -u, --url         API URL (default: $API_URL)"
     echo "  -h, --help        Show this help message"
@@ -117,6 +120,7 @@ QUIET=false
 CURL_OUTPUT=false
 EXPIRY=""
 AUDIENCE="$DEFAULT_AUDIENCE"
+TENANT=""
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -134,6 +138,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         -e|--expiry)
             EXPIRY="$2"
+            shift 2
+            ;;
+        -t|--tenant)
+            TENANT="$2"
             shift 2
             ;;
         -a|--audience)
@@ -184,6 +192,9 @@ fi
 # Build request body
 REQUEST_BODY="{\"role\": \"$ROLE\""
 REQUEST_BODY="$REQUEST_BODY, \"audience\": \"$AUDIENCE\""
+if [ -n "$TENANT" ]; then
+    REQUEST_BODY="$REQUEST_BODY, \"tenantUuid\": \"$TENANT\""
+fi
 if [ -n "$EXPIRY" ]; then
     REQUEST_BODY="$REQUEST_BODY, \"expiry\": \"$EXPIRY\""
 fi

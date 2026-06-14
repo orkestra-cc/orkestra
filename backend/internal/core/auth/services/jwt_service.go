@@ -602,6 +602,57 @@ func (s *jwtService) GenerateAccessToken(user *iface.User) (string, error) {
 	return s.GenerateEnhancedAccessToken(user, deviceInfo, securityCtx)
 }
 
+// GenerateAccessTokenForTenant implements iface.TenantScopedTokenProvider. It
+// mints an access token for a principal with NO database membership (the
+// dev-token endpoint's synthetic user), carrying an explicit acting tenant plus
+// a matching synthetic membership so tenant-scoped reads (billing/documents)
+// resolve a tenant from request context. Self-contained — it does not run
+// loadMemberships — so the normal login path is untouched.
+func (s *jwtService) GenerateAccessTokenForTenant(user *iface.User, tenantUUID, tenantKind string, roles []string) (string, error) {
+	if s.privateKey == nil {
+		return "", ErrJWTKeysNotLoaded
+	}
+	claims := buildTenantScopedClaims(user, tenantUUID, tenantKind, roles, time.Now(),
+		s.accessTokenLifetime(context.Background()), s.issuer, s.audience)
+	token := jwt.NewWithClaims(jwt.SigningMethodRS256, s.claimsToMap(claims))
+	tokenString, err := token.SignedString(s.privateKey)
+	if err != nil {
+		return "", fmt.Errorf("failed to sign tenant-scoped access token: %w", err)
+	}
+	return tokenString, nil
+}
+
+// buildTenantScopedClaims is the pure claims constructor (no signing) for
+// GenerateAccessTokenForTenant, factored out so the tenant injection is
+// unit-testable without RSA keys. An empty kind defaults to internal.
+func buildTenantScopedClaims(user *iface.User, tenantUUID, tenantKind string, roles []string, now time.Time, lifetime time.Duration, issuer, audience string) *models.JWTClaims {
+	if tenantKind == "" {
+		tenantKind = "internal"
+	}
+	return &models.JWTClaims{
+		UserUUID:   user.UUID,
+		Email:      user.Email,
+		SystemRole: user.Role,
+		TokenType:  "access",
+		ExpiresAt:  now.Add(lifetime).Unix(),
+		IssuedAt:   now.Unix(),
+		NotBefore:  now.Unix(),
+		Issuer:     issuer,
+		Audience:   audience,
+
+		Memberships: []models.TenantMembership{
+			{TenantUUID: tenantUUID, TenantKind: tenantKind, Roles: roles},
+		},
+		DefaultTenantID:  tenantUUID,
+		ActingTenantID:   tenantUUID,
+		ActingTenantKind: tenantKind,
+
+		SessionID: fmt.Sprintf("session_%d", now.Unix()),
+		DeviceID:  "default",
+		Scope:     []string{"profile", "email", "api"},
+	}
+}
+
 func (s *jwtService) GenerateAccessTokenWithAMR(user *iface.User, amr []string, lastOTPAt int64) (string, error) {
 	deviceInfo := &models.DeviceInfo{
 		DeviceID:   "default",
