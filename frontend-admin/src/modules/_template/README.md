@@ -20,16 +20,16 @@ Do **not** use it for:
 
 Before scaffolding a new module, understand the conventions already in place:
 
-| Concern | Where it lives | Example |
-|---|---|---|
-| Page components for module `<name>` | `src/pages/<name>/<feature>/index.tsx` | `src/pages/billing/dashboard/index.tsx` |
-| Sub-page components co-located with the page | Same directory as the page | `src/pages/billing/dashboard/RecentInvoices.tsx` |
-| RTK Query slice for module `<name>` | `src/store/api/<name>Api.ts` (single file per module) | `src/store/api/billingApi.ts` |
-| Cache tag types | Added to the `tagTypes` array in `src/store/api/baseApi.ts` | `'Invoice', 'Customer', 'Supplier'` |
-| Type definitions | `src/types/<name>.ts` | `src/types/company.ts` |
-| Module manifest | `src/modules/<name>.tsx` — declares routes + lazy API injection | `src/modules/billing.tsx` |
-| Module catalog | Manifest registered in `src/modules/index.ts` | `billing: billingManifest` |
-| Backend nav entry | `NavItems()` method in the backend module's `module.go` — the React app reads the merged list from `/v1/navigation` via `useRoleBasedNavigation` | `backend/internal/addons/billing/module.go` |
+| Concern                                      | Where it lives                                                                                                                                   | Example                                          |
+| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------ |
+| Page components for module `<name>`          | `src/pages/<name>/<feature>/index.tsx`                                                                                                           | `src/pages/billing/dashboard/index.tsx`          |
+| Sub-page components co-located with the page | Same directory as the page                                                                                                                       | `src/pages/billing/dashboard/RecentInvoices.tsx` |
+| RTK Query slice for module `<name>`          | `src/store/api/<name>Api.ts` (single file per module)                                                                                            | `src/store/api/billingApi.ts`                    |
+| Cache tag types                              | Added to the `tagTypes` array in `src/store/api/baseApi.ts`                                                                                      | `'Invoice', 'Customer', 'Supplier'`              |
+| Type definitions                             | `src/types/<name>.ts`                                                                                                                            | `src/types/company.ts`                           |
+| Module manifest                              | `src/modules/<name>.tsx` — declares routes + lazy API injection                                                                                  | `src/modules/billing.tsx`                        |
+| Module catalog                               | Manifest registered in `src/modules/index.ts`                                                                                                    | `billing: billingManifest`                       |
+| Backend nav entry                            | `NavItems()` method in the backend module's `module.go` — the React app reads the merged list from `/v1/navigation` via `useRoleBasedNavigation` | `backend/internal/addons/billing/module.go`      |
 
 The frontend does **not** define its own navigation. It renders whatever the backend reports. So the link in the sidebar appears the moment the backend module declares a `NavItem` and the user has the required role.
 
@@ -96,28 +96,40 @@ export const widgetsManifest: ModuleManifest = {
       path: 'widgets',
       element: (
         <ModuleGate module="widgets">
-          <ProtectedRoute requiredPermissions={[['super_admin', 'administrator', 'developer', 'operator']]}>
+          <ProtectedRoute
+            requiredPermissions={[
+              ['super_admin', 'administrator', 'developer', 'operator']
+            ]}
+          >
             <Suspense key="widget-list" fallback={<OrkestraLoader />}>
               <WidgetList />
             </Suspense>
           </ProtectedRoute>
         </ModuleGate>
-      ),
+      )
     },
     {
       path: 'widgets/:id',
       element: (
         <ModuleGate module="widgets">
-          <ProtectedRoute requiredPermissions={[['super_admin', 'administrator', 'developer', 'operator']]}>
+          <ProtectedRoute
+            requiredPermissions={[
+              ['super_admin', 'administrator', 'developer', 'operator']
+            ]}
+          >
             <Suspense key="widget-detail" fallback={<OrkestraLoader />}>
               <WidgetDetail />
             </Suspense>
           </ProtectedRoute>
         </ModuleGate>
-      ),
-    },
+      )
+    }
   ],
   injectApi: () => import('store/api/widgetsApi'),
+  injectI18n: async () => ({
+    en: (await import('pages/widgets/locales/en.json')).default,
+    it: (await import('pages/widgets/locales/it.json')).default
+  })
 };
 ```
 
@@ -128,9 +140,29 @@ import { widgetsManifest } from './widgets';
 
 export const moduleCatalog: Record<string, ModuleManifest> = {
   // ...existing modules...
-  widgets: widgetsManifest,
+  widgets: widgetsManifest
 };
 ```
+
+### 6.5. Add translations (ADR-0007)
+
+An addon **never** edits the core `src/locales/{en,it}.json`, `src/i18n-types.d.ts`, or `src/locales/parity.test.ts`. It ships its own translations as a dedicated i18next **namespace named after the module** (here `widgets`). Concretely:
+
+1. **Bundle files** — create `src/pages/widgets/locales/en.json` and `it.json` (copy the scaffold's `_template/locales/`). Ship **every** supported language (`en` + `it` today) so a runtime `changeLanguage` finds the namespace already registered.
+2. **Register them** — add the `injectI18n` field to the manifest (shown in step 6). A boot hook (`useModuleI18nInjection`) registers each catalogued module's bundle under its namespace, ungated by auth/enabled-state.
+3. **Type augmentation** — copy `_template/i18n.d.ts` to `src/pages/widgets/i18n.d.ts`, replacing `widgets` with your module name. This makes `t('widgets:list.title')` typed without touching the core types.
+4. **Consume** — bind the namespace in your pages:
+
+   ```tsx
+   const { t } = useTranslation('widgets');
+   return <h1>{t('list.title')}</h1>; // or t('widgets:list.title')
+   ```
+
+5. **Parity test (recommended)** — copy `_template/parity.example.ts` to `src/pages/widgets/locales/parity.test.ts`. It reuses `locales/parityCheck.ts` to guard EN/IT parity for your namespace only.
+
+Rules: the namespace equals the manifest `name` (so addons never collide); never write keys into the core `translation` namespace; adding a brand-new **language** (e.g. `fr`) is a core change to `src/i18n.ts`, not an addon operation.
+
+**Backend error codes.** To localize your addon's error codes, ship them as `errors.<rest>` inside your namespace bundle (e.g. `billing` code `billing.invoice_overdue` → key `errors.invoice_overdue`) and render with `helpers/resolveErrorMessage(err, fallback?)`, which tries `<module>:errors.<rest>` → core `errors.<code>` → the backend's English `detail`. No keys go into the core `errors.*`.
 
 ### 7. Verify
 
@@ -138,13 +170,16 @@ Run `npm run typecheck` and `npm run build` from `frontend/`. Boot the backend w
 
 ## Files in this scaffold
 
-| File | Purpose |
-|---|---|
-| `api.ts` | Example RTK Query slice extending `baseApi` — copy to `src/store/api/<name>Api.ts` |
-| `pages/ExamplePage.tsx` | Example page component using `react-bootstrap` and `components/common` — copy to `src/pages/<name>/<feature>/index.tsx` |
-| `components/ExampleCard.tsx` | Example sub-component — co-locate in the page directory after copying |
-| `routes.example.tsx` | Example lazy-route definitions — pattern for the manifest file |
-| `types.ts` | Example shared types — copy to `src/types/<name>.ts` |
-| `README.md` | This file |
+| File                         | Purpose                                                                                                                 |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `api.ts`                     | Example RTK Query slice extending `baseApi` — copy to `src/store/api/<name>Api.ts`                                      |
+| `locales/{en,it}.json`       | Example translation bundles for the addon's i18next namespace — copy to `src/pages/<name>/locales/` (ADR-0007)          |
+| `i18n.d.ts`                  | Example type augmentation for the namespace — copy to `src/pages/<name>/i18n.d.ts`, rename `widgets`                    |
+| `parity.example.ts`          | Example EN/IT parity test — copy to `src/pages/<name>/locales/parity.test.ts`                                           |
+| `pages/ExamplePage.tsx`      | Example page component using `react-bootstrap` and `components/common` — copy to `src/pages/<name>/<feature>/index.tsx` |
+| `components/ExampleCard.tsx` | Example sub-component — co-locate in the page directory after copying                                                   |
+| `routes.example.tsx`         | Example lazy-route definitions — pattern for the manifest file                                                          |
+| `types.ts`                   | Example shared types — copy to `src/types/<name>.ts`                                                                    |
+| `README.md`                  | This file                                                                                                               |
 
 Nothing in `_template` is imported by the running app. Vite ignores files that no `import` statement references, so this directory has zero runtime cost.
