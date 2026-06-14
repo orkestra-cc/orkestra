@@ -4,6 +4,42 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.3.6] - 2026-06-14
+
+### Features
+
+- **(profile)** Show the user's group (tenant) memberships on their profile (#101) ([e6516f4](https://github.com/orkestra-cc/orkestra/commit/e6516f474f47b003323de71e0ca256701a96e4d4))
+- **(tenant)** Sync authz bindings on member remove/role change + inline role editing (#99) ([7660964](https://github.com/orkestra-cc/orkestra/commit/766096428745c25dce9f405583491a00d442003c))
+
+### Bug fixes
+
+- **(admin)** Improve tenants-table readability (#100) ([b23e7d9](https://github.com/orkestra-cc/orkestra/commit/b23e7d97dd8fe46f67da5e2739ddd12f16990918))
+
+### Dependencies
+
+- **(deps)** Bump github.com/aws/aws-sdk-go-v2/credentials in /backend (#108) ([b1caaaf](https://github.com/orkestra-cc/orkestra/commit/b1caaaf9432251f0b3f4c1126f816d63cf9d13aa))
+- **(deps)** Bump github.com/aws/aws-sdk-go-v2 in /backend (#107) ([8b20c38](https://github.com/orkestra-cc/orkestra/commit/8b20c386f9651772827556ee233374ced4f5723c))
+- **(deps)** Bump golang.org/x/crypto from 0.52.0 to 0.53.0 in /backend (#103) ([5ce2cb8](https://github.com/orkestra-cc/orkestra/commit/5ce2cb866517d4b4d47f1ef6850c7e0482c1adc5))
+- **(deps)** Bump echarts from 6.0.0 to 6.1.0 in /frontend-admin (#105) ([ba30925](https://github.com/orkestra-cc/orkestra/commit/ba30925708222f314f0e7edafe11b183b6782de2))
+- **(deps)** Bump github.com/aws/smithy-go in /backend (#102) ([c728c5e](https://github.com/orkestra-cc/orkestra/commit/c728c5eac6c9cdb89d8c34eff067e7bbc0348354))
+- **(deps)** Bump github.com/go-playground/validator/v10 in /backend (#109) ([694bc48](https://github.com/orkestra-cc/orkestra/commit/694bc4806df673082ee8aca39c99928dac9a942b))
+- **(deps)** Bump react-dropzone in /frontend-admin (#86) ([98f319b](https://github.com/orkestra-cc/orkestra/commit/98f319bd8b102b867c43395201d2c39e6c9d2bbc))
+- **(deps)** Bump flutter_lints from 3.0.2 to 6.0.0 in /mobile (#94) ([c6770c0](https://github.com/orkestra-cc/orkestra/commit/c6770c0a876581c5dc8069ac486f264e59eadaa1))
+- **(deps)** Bump dio from 5.9.0 to 5.9.2 in /mobile (#92) ([d2a8e4f](https://github.com/orkestra-cc/orkestra/commit/d2a8e4fef49ac1fc078f271330e87de8afd3a1f2))
+- **(deps)** Bump github.com/cedar-policy/cedar-go in /backend (#93) ([710b372](https://github.com/orkestra-cc/orkestra/commit/710b372fc20703ddb246d8cb3bd587c90ad5c768))
+- **(deps)** Bump github.com/go-chi/chi/v5 in /backend (#97) ([2d3c9a7](https://github.com/orkestra-cc/orkestra/commit/2d3c9a73bf6c949aaaaaea726a72ed96c70e15af))
+- **(deps)** Bump go.opentelemetry.io/contrib/bridges/otelslog (#98) ([4323cf8](https://github.com/orkestra-cc/orkestra/commit/4323cf8b854c39c3195e4975c0ee780b1fc80ecd))
+- **(deps)** Bump github.com/aws/aws-sdk-go-v2 in /backend (#96) ([aeb2123](https://github.com/orkestra-cc/orkestra/commit/aeb212396891df8c227685120284bbb1cd935e35))
+- **(deps)** Bump github.com/redis/go-redis/v9 in /backend (#90) ([4443336](https://github.com/orkestra-cc/orkestra/commit/44433367c91ff1468e5f8c4833759b50dad5d1ba))
+- **(deps)** Bump web-vitals from 5.2.0 to 5.3.0 in /frontend-admin (#88) ([0d2b544](https://github.com/orkestra-cc/orkestra/commit/0d2b544dbe1bd6b4deef1708232a0ba7fa655bcf))
+- **(deps)** Bump docker/metadata-action from 5 to 6 (#85) ([56db54f](https://github.com/orkestra-cc/orkestra/commit/56db54fb06caa1a31c0a817b1a582421007c06ca))
+
+### Chores
+
+- **(deps-dev)** Bump prettier from 3.7.4 to 3.8.4 in /frontend-admin (#106) ([9b31608](https://github.com/orkestra-cc/orkestra/commit/9b316086810c46d04e1e0b12d75d2fb14f92a059))
+- **(deps-dev)** Bump msw from 2.14.5 to 2.14.6 in /frontend-admin (#104) ([a71345d](https://github.com/orkestra-cc/orkestra/commit/a71345d8bda1ff1da077c6ce9dbfd879c794d205))
+- **(deps-dev)** Bump @typescript-eslint/parser in /frontend-admin (#89) ([e061d72](https://github.com/orkestra-cc/orkestra/commit/e061d72da93ef66eaf611d72fcf1c2582b05ecb6))
+
 ## [0.3.5] - 2026-06-08
 
 ### Bug fixes
