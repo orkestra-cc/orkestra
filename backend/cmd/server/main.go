@@ -20,6 +20,9 @@ import (
 
 	"github.com/orkestra/backend/internal/core/auth/services"
 	authzServices "github.com/orkestra/backend/internal/core/authz/services"
+	tenantModels "github.com/orkestra/backend/internal/core/tenant/models"
+	tenantRepo "github.com/orkestra/backend/internal/core/tenant/repository"
+	tenantServices "github.com/orkestra/backend/internal/core/tenant/services"
 	"github.com/orkestra/backend/internal/shared/blob"
 	"github.com/orkestra/backend/internal/shared/config"
 	"github.com/orkestra/backend/internal/shared/container"
@@ -404,10 +407,25 @@ func main() {
 	// the operator root mux (bypasses Huma, hidden from /docs); never on
 	// the client host. No DB writes.
 	if !cfg.IsProduction() {
+		// Resolver: when an operator dev token doesn't pin a tenant, default it
+		// to the first internal tenant so the token satisfies tenant-scoped
+		// reads (billing/documents). Nil-safe — falls back to a tenant-less
+		// token when the tenant service is absent or no internal tenant exists.
+		var devTenantResolver devtoken.DefaultTenantResolver
+		if tenantSvc, ok := module.GetTyped[*tenantServices.Service](svcRegistry, module.ServiceTenantService); ok && tenantSvc != nil {
+			devTenantResolver = func(ctx context.Context) (string, string) {
+				views, err := tenantSvc.ListAllTenantsFiltered(ctx, tenantRepo.TenantListFilter{Kind: tenantModels.TenantKindInternal})
+				if err != nil || len(views) == 0 || views[0].Tenant == nil {
+					return "", ""
+				}
+				return views[0].Tenant.UUID, "internal"
+			}
+		}
 		devtoken.NewHandler(
 			module.MustGetTyped[iface.JWTProvider](svcRegistry, module.ServiceOperatorJWTService),
 			module.MustGetTyped[iface.JWTProvider](svcRegistry, module.ServiceClientJWTService),
 			cfg,
+			devTenantResolver,
 			logger,
 		).RegisterRoutes(operatorMux)
 	}

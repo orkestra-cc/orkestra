@@ -119,6 +119,19 @@ type JWTProvider interface {
 	GenerateAccessToken(user *User) (string, error)
 }
 
+// TenantScopedTokenProvider is an OPTIONAL extension a JWTProvider may also
+// implement. It mints an access token carrying an explicit acting tenant plus a
+// synthetic membership, for principals that have no database membership — the
+// dev-token endpoint's synthetic user. This lets a dev token satisfy
+// tenant-scoped reads (billing/documents) that fail closed without an acting
+// tenant. Declared as a new interface (not a method on JWTProvider) per the
+// SDK additive-only rule; consumers type-assert for it.
+//
+// Consumed by: dev-token endpoint. Implemented by: auth jwtService.
+type TenantScopedTokenProvider interface {
+	GenerateAccessTokenForTenant(user *User, tenantUUID, tenantKind string, roles []string) (string, error)
+}
+
 // ---------------------------------------------------------------------------
 // PasswordHasher — consumed by: user (admin-direct client-user create)
 // Slim view of auth.PasswordService for callers that only need to hash
