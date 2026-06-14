@@ -147,6 +147,7 @@ When you add a new page:
 - **Locale files**: `src/locales/{en,it}.json`. Add new keys to **both** files in the same PR — there is no missing-key fallback to "show the key" in production builds.
 - **Language switcher**: `src/components/LanguageSwitcher.tsx`. Persists choice via the language detector's localStorage cache.
 - **Currency / dates**: use `src/lib/format.ts::formatPrice` for money, `Intl.DateTimeFormat` for dates. Don't hand-format with `${amount}€`.
+- **Addons (ADR-0007)**: this SPA has no module/manifest system today, so all strings live in the core `src/locales/{en,it}.json`. When/if a fork gives the client an addon seam (as `frontend-admin` has), addon strings must follow [ADR-0007](../docs/adr/0007-per-addon-i18n-namespaces.md): a per-addon i18next namespace registered via `i18n.addResourceBundle(lng, '<name>', bundle)`, never appended to the core locale files. Mirror `frontend-admin/src/modules/useModuleI18n.ts` when that day comes.
 
 ## Stripe Checkout
 

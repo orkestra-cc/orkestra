@@ -70,9 +70,9 @@ Unlike `injectApi` — gated on the admin-only `GET /v1/admin/modules` query —
 - The addon ships its own `i18n.d.ts` that augments react-i18next's `CustomTypeOptions['resources']` with its namespace. Module augmentation merges, so the addon's keys become typed **without touching core `i18n-types.d.ts`**.
 - The core's `parity.test.ts` flatten/compare logic is extracted into a reusable `src/locales/parityCheck.ts`. Each addon ships its own parity test that calls the shared helper over its own bundles. The core parity test stays scoped to core EN/IT.
 
-### D5 — Backend error codes are out of scope (for now)
+### D5 — Backend error codes: an opt-in namespaced resolver
 
-Addon backend error codes still resolve under the core `errors.<code>` namespace. Until a follow-up makes the error-rendering helper resolve `<module>:errors.<code>` with a fallback, an addon either accepts the backend's English `detail` fallback or routes its codes through its own namespace manually. The 80% of value — addon **page** strings — is delivered by D1–D4; error-code isolation is a deferred, optional second step.
+A backend error carries `{ code, detail }` and core call sites resolve it inline with `t('errors.<code>')`, falling back to the English `detail`. Rather than sweep those decentralized sites (a behaviour-change risk in core auth/user flows for marginal gain), the seam ships an **opt-in** helper `helpers/resolveErrorMessage(err, fallback?)` whose resolution order is: addon namespace `<module>:errors.<rest>` (for a dotted code `<module>.<rest>`) → core `errors.<code>` → backend `detail` → explicit fallback / raw code. An addon that wants localized error messages ships the keys in its own namespace bundle and renders through this helper — no keys are added to the core `errors.*`. Existing core sites keep their inline logic; they may adopt the helper later. The 80% of value — addon **page** strings — is delivered by D1–D4; this closes error-code isolation without a risky refactor.
 
 ## Consequences
 
@@ -93,7 +93,7 @@ Addon backend error codes still resolve under the core `errors.<code>` namespace
 - Two ways to localize now coexist: the core monolith (`translation` ns) and per-addon namespaces. Core strings stay in the monolith — we explicitly do **not** retrofit core into namespaces (no payoff, large churn).
 - Addon authors must learn one extra convention (bind `useTranslation('<name>')`, ship `{ en, it }`). Documented in `_template/README.md` and `frontend-admin/CLAUDE.md`.
 - Adding a brand-new **language** (e.g. `fr`) remains a core change (`i18n.ts` `resources`/`supportedLngs`), not an addon operation — unchanged from today.
-- Backend addon error codes remain coupled to core `errors.*` until the optional D5 follow-up.
+- The D5 error-code resolver is opt-in: core call sites keep their inline `t('errors.<code>')` logic, so two error-resolution styles coexist until/unless a fork consolidates them.
 
 **Scope**
 

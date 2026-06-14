@@ -162,6 +162,8 @@ An addon **never** edits the core `src/locales/{en,it}.json`, `src/i18n-types.d.
 
 Rules: the namespace equals the manifest `name` (so addons never collide); never write keys into the core `translation` namespace; adding a brand-new **language** (e.g. `fr`) is a core change to `src/i18n.ts`, not an addon operation.
 
+**Backend error codes.** To localize your addon's error codes, ship them as `errors.<rest>` inside your namespace bundle (e.g. `billing` code `billing.invoice_overdue` → key `errors.invoice_overdue`) and render with `helpers/resolveErrorMessage(err, fallback?)`, which tries `<module>:errors.<rest>` → core `errors.<code>` → the backend's English `detail`. No keys go into the core `errors.*`.
+
 ### 7. Verify
 
 Run `npm run typecheck` and `npm run build` from `frontend/`. Boot the backend with the widgets module enabled (e.g. `MODULES=widgets` in your env file). Log in, and the "Widgets" entry should appear in the sidebar automatically because the navigation comes from the backend.
