@@ -7,6 +7,8 @@ description: Execute Docker container operations with correct environment detect
 
 This skill ensures correct container operations by **auto-detecting** which compose file owns each service, instead of guessing from a single env var.
 
+> **Prefer the `orkestra-stack` skill for full-stack lifecycle** (deploy / rebuild / restart / stop a whole app via `orkestra.sh`). It injects `ORKESTRA_VERSION` and runs preflight — a raw `docker compose up` here does NOT, which leaves the frontend footer version stale. Use *this* skill only for low-level, per-service surgery: AIR force-rebuild, infra-only ops, and compose-file detection.
+
 ## Why detection is non-trivial
 
 The `.env` file's `ENV=` value labels the **host environment** (`development` / `staging` / `production`). It does **not** uniquely determine the compose file in use:
