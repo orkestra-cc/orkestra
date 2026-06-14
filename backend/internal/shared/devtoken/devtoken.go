@@ -10,10 +10,12 @@
 package devtoken
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -21,6 +23,12 @@ import (
 	"github.com/orkestra/backend/pkg/sdk/iface"
 	"github.com/orkestra/backend/pkg/sdk/module"
 )
+
+// DefaultTenantResolver returns an internal operator tenant to stamp onto a
+// dev token when the caller doesn't specify one, so dev tokens satisfy
+// tenant-scoped reads (billing/documents). Returns ("", "") when none is
+// available — the token is then minted without a tenant (legacy behavior).
+type DefaultTenantResolver func(ctx context.Context) (tenantUUID, tenantKind string)
 
 // ValidRoles are the system roles a dev token may carry (highest → lowest).
 var ValidRoles = []string{"super_admin", "administrator", "developer", "manager", "operator", "guest"}
@@ -35,20 +43,25 @@ const DefaultAudience = "operator"
 // Handler mints synthetic dev tokens. It holds one JWTProvider per tier
 // and dispatches by the request's `audience` field.
 type Handler struct {
-	operatorJWT iface.JWTProvider
-	clientJWT   iface.JWTProvider
-	platform    module.PlatformInfo
-	logger      *slog.Logger
+	operatorJWT   iface.JWTProvider
+	clientJWT     iface.JWTProvider
+	platform      module.PlatformInfo
+	defaultTenant DefaultTenantResolver
+	logger        *slog.Logger
 }
 
 // NewHandler builds a dev-token handler. Both JWT providers are required —
 // operator is the back-compat default when the request omits `audience`.
-func NewHandler(operatorJWT, clientJWT iface.JWTProvider, platform module.PlatformInfo, logger *slog.Logger) *Handler {
+// defaultTenant may be nil — when set, operator-audience tokens that don't
+// specify a tenant are stamped with the resolved internal tenant so they
+// satisfy tenant-scoped reads (billing/documents).
+func NewHandler(operatorJWT, clientJWT iface.JWTProvider, platform module.PlatformInfo, defaultTenant DefaultTenantResolver, logger *slog.Logger) *Handler {
 	return &Handler{
-		operatorJWT: operatorJWT,
-		clientJWT:   clientJWT,
-		platform:    platform,
-		logger:      logger.With(slog.String("component", "dev_token")),
+		operatorJWT:   operatorJWT,
+		clientJWT:     clientJWT,
+		platform:      platform,
+		defaultTenant: defaultTenant,
+		logger:        logger.With(slog.String("component", "dev_token")),
 	}
 }
 
@@ -94,6 +107,10 @@ type generateTokenRequest struct {
 	Role     string `json:"role"`
 	Audience string `json:"audience,omitempty"`
 	Expiry   string `json:"expiry,omitempty"`
+	// TenantUuid optionally pins the acting tenant on the minted token so it
+	// satisfies tenant-scoped reads. Empty + operator audience falls back to
+	// the server's default internal tenant resolver.
+	TenantUuid string `json:"tenantUuid,omitempty"`
 }
 
 type generateTokenResponse struct {
@@ -101,6 +118,7 @@ type generateTokenResponse struct {
 	Role        string    `json:"role"`
 	Audience    string    `json:"audience"`
 	Email       string    `json:"email"`
+	Tenant      string    `json:"tenant,omitempty"`
 	ExpiresAt   time.Time `json:"expiresAt"`
 	ExpiresIn   int64     `json:"expiresIn"`
 	Curl        string    `json:"curl"`
@@ -162,7 +180,25 @@ func (h *Handler) generateToken(w http.ResponseWriter, r *http.Request) {
 		UpdatedAt:     now,
 	}
 
-	token, err := jwtSvc.GenerateAccessToken(user)
+	// Resolve the acting tenant to stamp on the token. An explicit tenantUuid
+	// wins; otherwise an operator-audience token defaults to the server's
+	// internal tenant so it satisfies tenant-scoped reads (billing/documents).
+	tenantUUID := strings.TrimSpace(req.TenantUuid)
+	tenantKind := "internal"
+	if tenantUUID == "" && audience == DefaultAudience && h.defaultTenant != nil {
+		tenantUUID, tenantKind = h.defaultTenant(r.Context())
+		if tenantKind == "" {
+			tenantKind = "internal"
+		}
+	}
+
+	var token string
+	if tsp, ok := jwtSvc.(iface.TenantScopedTokenProvider); ok && tenantUUID != "" {
+		token, err = tsp.GenerateAccessTokenForTenant(user, tenantUUID, tenantKind, []string{req.Role})
+	} else {
+		tenantUUID = "" // not stamped
+		token, err = jwtSvc.GenerateAccessToken(user)
+	}
 	if err != nil {
 		h.logger.Error("failed to generate dev token", slog.String("error", err.Error()))
 		http.Error(w, `{"error": "failed to generate token"}`, http.StatusInternalServerError)
@@ -183,6 +219,7 @@ func (h *Handler) generateToken(w http.ResponseWriter, r *http.Request) {
 		Role:        req.Role,
 		Audience:    audience,
 		Email:       syntheticEmail,
+		Tenant:      tenantUUID,
 		ExpiresAt:   now.Add(expiry),
 		ExpiresIn:   int64(expiry.Seconds()),
 		Curl:        fmt.Sprintf("curl -H 'Authorization: Bearer %s' http://localhost:3000/v1/users", token),
