@@ -4,6 +4,22 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.3.7] - 2026-06-14
+
+### Features
+
+- **(i18n)** Opt-in namespaced error-code resolver + client/scaffold docs (ADR-0007) ([7e686d0](https://github.com/orkestra-cc/orkestra/commit/7e686d0647698b12593c75a5da3eee8854495996))
+- **(i18n)** Per-addon namespace seam so addon translations never touch core ([6832574](https://github.com/orkestra-cc/orkestra/commit/6832574116febce27c72654a8de1feb15626fbe0))
+
+### Documentation
+
+- **(skills)** Fix orkestra-addon cross-reference link paths ([ec2edfa](https://github.com/orkestra-cc/orkestra/commit/ec2edfa467a1394cd36742d72a5ee57caef16488))
+
+### Chores
+
+- **(skills)** Add orkestra-addon authoring skill (full-stack rules + checklist) ([3d1f3d6](https://github.com/orkestra-cc/orkestra/commit/3d1f3d6951612167d43097a904fb3a62fdb7b670))
+- **(skills)** Add orkestra-stack lifecycle skill, cross-ref from docker ([e063af5](https://github.com/orkestra-cc/orkestra/commit/e063af50b174962d798dfe1b090c2d234cb9844e))
+
 ## [0.3.6] - 2026-06-14
 
 ### Features
