@@ -13,6 +13,7 @@ Durable, dated records of architectural decisions that shape Orkestra. One file 
 | [0005](0005-observability-logging-tracing-metrics.md) | Observability — logging, tracing, metrics as core platform features | Proposed | 2026-05-16 |
 | [0006](0006-collapse-to-core-only-base.md) | Collapse Orkestra to a core-only base; addons become per-fork responsibility | Proposed | 2026-06-01 |
 | [0007](0007-per-addon-i18n-namespaces.md) | Per-addon i18n namespaces; addon translations never touch core locale files | Proposed | 2026-06-14 |
+| [0008](0008-partition-openapi-spec-per-module.md) | Partition the OpenAPI spec per module so a fork's addons never collide with core | Proposed | 2026-06-14 |
 
 ## Format
 
