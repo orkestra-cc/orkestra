@@ -5,7 +5,7 @@ description: "Rules for writing a correct Orkestra addon (optional module) end-t
 
 # Writing an Orkestra Addon
 
-Orkestra is a **core-only base** ([ADR-0006](docs/adr/0006-collapse-to-core-only-base.md)). A fork adds a vertical as an **addon** — an optional module built against the in-tree SDK, through the same `Module` seam the 7 core modules use. The base ships none; you add yours in-tree.
+Orkestra is a **core-only base** ([ADR-0006](../../../docs/adr/0006-collapse-to-core-only-base.md)). A fork adds a vertical as an **addon** — an optional module built against the in-tree SDK, through the same `Module` seam the 7 core modules use. The base ships none; you add yours in-tree.
 
 This skill is the **spine**: the end-to-end recipe + the binding rules unique to addons. For depth, defer to the cross-referenced skills/docs rather than duplicating them — they are the source of truth and must not drift.
 
@@ -35,7 +35,7 @@ If you ever find the addon's name diverging across these (e.g. dir `test` but co
 
 ## Backend rules
 
-Deep reference: **`orkestra-go` skill**, [`backend/CLAUDE.md`](backend/CLAUDE.md), [`backend/pkg/sdk/CLAUDE.md`](backend/pkg/sdk/CLAUDE.md).
+Deep reference: **`orkestra-go` skill**, [`backend/CLAUDE.md`](../../../backend/CLAUDE.md), [`backend/pkg/sdk/CLAUDE.md`](../../../backend/pkg/sdk/CLAUDE.md).
 
 1. **Implement the `Module` interface** (`pkg/sdk/module/module.go` — `Name() / Category() / Init(*Dependencies)`), embedding `module.BaseModule` for defaults. Add the optional sub-interfaces you need: `Routable` (RegisterRoutes), `HasCollections`, `HasNavItems`, `HasConfigSchema`, `HasPermissions`, `HasDependencies`, `Startable`/`Stoppable`, `HealthCheckable`. `Category()` returns `CategoryToggleable` (no external creds) or `CategoryExternal` (needs API keys).
 
@@ -59,7 +59,7 @@ Deep reference: **`orkestra-go` skill**, [`backend/CLAUDE.md`](backend/CLAUDE.md
 
 ## Frontend-admin rules
 
-Deep reference: **`frontend-design` skill**, [`frontend-admin/CLAUDE.md`](frontend-admin/CLAUDE.md), [`frontend-admin/src/modules/_template/README.md`](frontend-admin/src/modules/_template/README.md) (the canonical scaffold — copy it).
+Deep reference: **`frontend-design` skill**, [`frontend-admin/CLAUDE.md`](../../../frontend-admin/CLAUDE.md), [`frontend-admin/src/modules/_template/README.md`](../../../frontend-admin/src/modules/_template/README.md) (the canonical scaffold — copy it).
 
 10. **Module manifest** `src/modules/test.tsx` exporting a `ModuleManifest` with `name: 'test'`, lazy `routes()` each wrapped in `<ModuleGate module="test">` + `<ProtectedRoute>` + `<Suspense>`, `injectApi`, and `injectI18n`. Register it in `src/modules/index.ts` `moduleCatalog`.
 
@@ -67,7 +67,7 @@ Deep reference: **`frontend-design` skill**, [`frontend-admin/CLAUDE.md`](fronte
 
 12. **Navigation comes from the backend** (`NavItems()` → `/v1/navigation`) — never hardcode sidebar entries for addon (production) features.
 
-13. **i18n is a per-addon namespace ([ADR-0007](docs/adr/0007-per-addon-i18n-namespaces.md)).** This is the rule most likely to be violated. An addon **must not** edit the core `src/locales/{en,it}.json`, `src/i18n-types.d.ts`, or `src/locales/parity.test.ts`. Instead:
+13. **i18n is a per-addon namespace ([ADR-0007](../../../docs/adr/0007-per-addon-i18n-namespaces.md)).** This is the rule most likely to be violated. An addon **must not** edit the core `src/locales/{en,it}.json`, `src/i18n-types.d.ts`, or `src/locales/parity.test.ts`. Instead:
     - Ship `src/pages/test/locales/{en,it}.json` (all supported languages).
     - Register them via the manifest's `injectI18n` (the boot hook `useModuleI18nInjection` does `addResourceBundle(lng, 'test', …)` ungated by auth/enabled-state).
     - Add `src/pages/test/i18n.d.ts` augmenting `CustomTypeOptions['resources']` with the `test` namespace (typed `t()` without touching core types).
@@ -120,5 +120,5 @@ Deep reference: **`frontend-design` skill**, [`frontend-admin/CLAUDE.md`](fronte
 - **`mongo-collection-naming`** — the `test_` prefix rule (authoritative)
 - **`frontend-design`** — frontend-admin components/pages/forms/tables (authoritative for UI)
 - **`url-tabs`** — URL-synced tabs
-- [ADR-0006](docs/adr/0006-collapse-to-core-only-base.md) (core-only base), [ADR-0007](docs/adr/0007-per-addon-i18n-namespaces.md) (per-addon i18n)
-- [`frontend-admin/src/modules/_template/README.md`](frontend-admin/src/modules/_template/README.md) — copy-paste scaffold (the worked `widgets` example)
+- [ADR-0006](../../../docs/adr/0006-collapse-to-core-only-base.md) (core-only base), [ADR-0007](../../../docs/adr/0007-per-addon-i18n-namespaces.md) (per-addon i18n)
+- [`frontend-admin/src/modules/_template/README.md`](../../../frontend-admin/src/modules/_template/README.md) — copy-paste scaffold (the worked `widgets` example)
