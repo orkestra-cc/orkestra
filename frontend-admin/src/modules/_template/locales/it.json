@@ -1,0 +1,11 @@
+{
+  "list": {
+    "title": "Widget",
+    "empty": "Nessun widget",
+    "createButton": "Nuovo widget"
+  },
+  "detail": {
+    "title": "Dettaglio widget",
+    "status": "Stato"
+  }
+}
