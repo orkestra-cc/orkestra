@@ -1155,6 +1155,12 @@ func (h *Handler) resolveCallerTenant(ctx context.Context) (*models.Tenant, erro
 	}
 	personal, err := h.svc.EnsureTenantForUser(ctx, userUUID)
 	if err != nil {
+		// With external provisioning set to manual, a Tier-2 caller with no
+		// admin-assigned tenant is not auto-provisioned — surface a clean 409
+		// instead of a 500 so the client UI can prompt "contact your operator".
+		if errors.Is(err, services.ErrProvisioningLocked) {
+			return nil, huma.Error409Conflict("no tenant is provisioned for this account; an administrator must create and assign one")
+		}
 		return nil, huma.Error500InternalServerError("failed to resolve personal tenant", err)
 	}
 	t, err := h.svc.GetTenantModel(ctx, personal.UUID)

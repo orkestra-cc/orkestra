@@ -41,8 +41,24 @@ func (s *stubAdmin) RegisterInitialAdmin(_ context.Context, email, _, fullName, 
 	return s.resp, s.err
 }
 
+// stubSeeder records EnsureInternalTenant calls for the bootstrap tests.
+type stubSeeder struct {
+	calledOwner string
+	calledName  string
+	callCount   int
+	uuid        string
+	err         error
+}
+
+func (s *stubSeeder) EnsureInternalTenant(_ context.Context, ownerUUID, name string) (string, error) {
+	s.callCount++
+	s.calledOwner = ownerUUID
+	s.calledName = name
+	return s.uuid, s.err
+}
+
 func TestStatus_EmptyDB(t *testing.T) {
-	svc := NewService(&stubUsers{count: 0}, &stubAdmin{}, nil, nil)
+	svc := NewService(&stubUsers{count: 0}, &stubAdmin{}, nil, nil, nil)
 
 	st := svc.Status(context.Background())
 	if st.SetupCompleted {
@@ -54,7 +70,7 @@ func TestStatus_EmptyDB(t *testing.T) {
 }
 
 func TestStatus_WithUsers(t *testing.T) {
-	svc := NewService(&stubUsers{count: 3}, &stubAdmin{}, nil, nil)
+	svc := NewService(&stubUsers{count: 3}, &stubAdmin{}, nil, nil, nil)
 
 	st := svc.Status(context.Background())
 	if !st.SetupCompleted {
@@ -66,7 +82,7 @@ func TestStatus_DBError_FailsOpen(t *testing.T) {
 	// A DB error must not lock the operator out of the wizard — the
 	// response should report setupCompleted=false so the frontend still
 	// offers a path forward.
-	svc := NewService(&stubUsers{countErr: errors.New("mongo down")}, &stubAdmin{}, nil, nil)
+	svc := NewService(&stubUsers{countErr: errors.New("mongo down")}, &stubAdmin{}, nil, nil, nil)
 
 	st := svc.Status(context.Background())
 	if st.SetupCompleted {
@@ -82,7 +98,7 @@ func TestCreateInitialAdmin_EmptyDB_Succeeds(t *testing.T) {
 		SessionID:   "session-abc",
 	}
 	admin := &stubAdmin{resp: expected}
-	svc := NewService(&stubUsers{count: 0}, admin, nil, nil)
+	svc := NewService(&stubUsers{count: 0}, admin, nil, nil, nil)
 
 	tokens, err := svc.CreateInitialAdmin(context.Background(), "root@example.com", "verysecretpw!", "Root Admin", "10.0.0.1")
 	if err != nil {
@@ -99,9 +115,67 @@ func TestCreateInitialAdmin_EmptyDB_Succeeds(t *testing.T) {
 	}
 }
 
+func TestCreateInitialAdmin_BootstrapsInternalTenant(t *testing.T) {
+	expected := &authModels.TokenResponse{
+		AccessToken: "access-xyz",
+		User:        &iface.UserManagementResponse{ID: "user-1", Email: "root@acme.com"},
+	}
+	admin := &stubAdmin{resp: expected}
+	seeder := &stubSeeder{uuid: "tenant-1"}
+	svc := NewService(&stubUsers{count: 0}, admin, seeder, nil, nil)
+
+	if _, err := svc.CreateInitialAdmin(context.Background(), "root@acme.com", "verysecretpw!", "Root Admin", "10.0.0.1"); err != nil {
+		t.Fatalf("expected success, got error: %v", err)
+	}
+	if seeder.callCount != 1 {
+		t.Fatalf("expected EnsureInternalTenant called once, got %d", seeder.callCount)
+	}
+	if seeder.calledOwner != "user-1" {
+		t.Errorf("owner: got %q, want user-1", seeder.calledOwner)
+	}
+	if seeder.calledName != "Acme" {
+		t.Errorf("name: got %q, want Acme (derived from email domain)", seeder.calledName)
+	}
+}
+
+func TestCreateInitialAdmin_BootstrapFailure_StillSucceeds(t *testing.T) {
+	// The internal-tenant bootstrap is best-effort: a seeder error must not
+	// fail admin creation.
+	expected := &authModels.TokenResponse{
+		AccessToken: "access-xyz",
+		User:        &iface.UserManagementResponse{ID: "user-1", Email: "root@acme.com"},
+	}
+	admin := &stubAdmin{resp: expected}
+	seeder := &stubSeeder{err: errors.New("mongo down")}
+	svc := NewService(&stubUsers{count: 0}, admin, seeder, nil, nil)
+
+	tokens, err := svc.CreateInitialAdmin(context.Background(), "root@acme.com", "verysecretpw!", "Root Admin", "10.0.0.1")
+	if err != nil {
+		t.Fatalf("bootstrap failure must not abort admin creation, got error: %v", err)
+	}
+	if tokens != expected {
+		t.Errorf("expected token response to pass through unchanged")
+	}
+}
+
+func TestInternalTenantNameFromEmail(t *testing.T) {
+	cases := map[string]string{
+		"root@acme.com":        "Acme",
+		"admin@sub.example.io": "Sub",
+		"no-domain":            "Internal",
+		"trailing@":            "Internal",
+		"x@acme":               "Acme",
+	}
+	for in, want := range cases {
+		if got := internalTenantNameFromEmail(in); got != want {
+			t.Errorf("internalTenantNameFromEmail(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 func TestCreateInitialAdmin_NonEmptyDB_Refuses(t *testing.T) {
 	admin := &stubAdmin{}
-	svc := NewService(&stubUsers{count: 1}, admin, nil, nil)
+	svc := NewService(&stubUsers{count: 1}, admin, nil, nil, nil)
 
 	_, err := svc.CreateInitialAdmin(context.Background(), "root@example.com", "verysecretpw!", "Root Admin", "10.0.0.1")
 	if !errors.Is(err, ErrAlreadyCompleted) {
@@ -116,7 +190,7 @@ func TestCreateInitialAdmin_CountError_Refuses(t *testing.T) {
 	// If we can't tell whether users exist, we must NOT create one —
 	// blindly writing could duplicate a developer role on a populated DB.
 	admin := &stubAdmin{}
-	svc := NewService(&stubUsers{countErr: errors.New("mongo down")}, admin, nil, nil)
+	svc := NewService(&stubUsers{countErr: errors.New("mongo down")}, admin, nil, nil, nil)
 
 	_, err := svc.CreateInitialAdmin(context.Background(), "root@example.com", "verysecretpw!", "Root Admin", "10.0.0.1")
 	if err == nil {

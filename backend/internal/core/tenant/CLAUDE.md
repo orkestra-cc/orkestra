@@ -59,27 +59,31 @@ Collection name constants live in `repository/repository.go` as `CollOrgs`, `Col
 
 - **Init**: constructs the repository, builds the service, creates the handler, registers the service as `iface.TenantProvider` in the registry, and wires the `ProvisioningModeResolver` (a closure over `deps.ConfigService` reading the `provisioning.{internal,external}.mode` keys live).
 - **Start / Stop / HealthCheck**: inherit from `BaseModule` (no-op).
-- **Seeding**: none. Orgs are created by users via the setup wizard or `POST /v1/orgs`.
+- **Seeding**: the first-install setup flow bootstraps a single internal tenant for the initial admin via `Service.EnsureInternalTenant` (idempotent, best-effort — see [Provisioning policy](#provisioning-policy-admin-managed)). Beyond that, tenants are created deliberately (admin-only by default, since both provisioning modes default to `manual`).
 - **GDPR/DSR** (`services/pii_producer.go`): registers an `iface.PIIProducer` (subject `"tenant"`) on `ServicePIIProducerRegistry` at Init. The subject's personal data here is their **tenant memberships** (which orgs, what roles) — the orgs/tenants themselves are not the subject's data and are left intact. Export returns the membership rows; purge deletes them (`tenant_memberships`) under **both** erase modes, since a membership row IS the user→org linkage with no anonymizable residue. Consumed by the [compliance module](../compliance/CLAUDE.md)'s DSR pipeline (ADR-0009).
 
 ## Provisioning policy (admin-managed)
 
-`module.go::ConfigSchema()` exposes two enum config keys that govern **who may create tenants**, per tier. Read at request time by the service's `ProvisioningModeResolver` (a closure over `ModuleConfigService`, 30s Redis cache) — edits at `/admin/modules/tenant` take effect on the next creation with **no restart**. Both default to `open`, so an existing install keeps the legacy "any authenticated user may create" behaviour.
+`module.go::ConfigSchema()` exposes two enum config keys that govern **who may create tenants**, per tier. Read at request time by the service's `ProvisioningModeResolver` (a closure over `ModuleConfigService`, 30s Redis cache) — edits at `/admin/modules/tenant` take effect on the next creation with **no restart**.
 
-| Key | Tier | Values | EnvVar (first-boot seed) |
-|---|---|---|---|
-| `provisioning.internal.mode` | internal | `open` · `manual` · `single` | `TENANT_PROVISIONING_INTERNAL_MODE` |
-| `provisioning.external.mode` | external | `open` · `manual` | `TENANT_PROVISIONING_EXTERNAL_MODE` |
+| Key | Tier | Values | Default | EnvVar (first-boot seed) |
+|---|---|---|---|---|
+| `provisioning.internal.mode` | internal | `open` · `manual` · `single` | **`manual`** | `TENANT_PROVISIONING_INTERNAL_MODE` |
+| `provisioning.external.mode` | external | `open` · `manual` | **`manual`** | `TENANT_PROVISIONING_EXTERNAL_MODE` |
 
-- **open** — legacy: any authenticated user may create.
-- **manual** — only holders of `system.tenants.admin` may create.
+- **open** — any authenticated user may create.
+- **manual** (default both tiers) — only holders of `system.tenants.admin` may create.
 - **single** — at most one active (non-deleted) tenant of that tier may exist (internal-only intent: lock the platform to a single internal org).
+
+**Default posture (both `manual`):** a fresh install accepts no self-service tenant creation. The first internal tenant is **bootstrapped automatically** at install for the initial admin (see below); afterwards an operator creates further internal tenants deliberately. External clients are **never auto-provisioned** and **cannot self-create** a tenant — only a platform admin creates a client tenant and assigns it to a Tier-2 user.
+
+**Install bootstrap.** The setup flow (`internal/shared/setup`) calls `Service.EnsureInternalTenant(ownerUUID, name)` right after `RegisterInitialAdmin`, creating the single internal tenant owned by the first admin (name derived from the admin's email domain, e.g. `admin@acme.com` → "Acme"; rename in the UI). It is **idempotent** (no-op once an internal tenant exists), **best-effort** (a failure logs a warning but never aborts admin creation — the super_admin can create it from the UI), and bypasses the `manual` handler gate by construction (server-side call) while still honouring the `single` count invariant in `CreateTenant`.
 
 **Two-layer enforcement** (so every creation path is covered without scattering checks):
 
-1. **`single` is a data invariant in the service.** `Service.CreateTenant` (`services/service.go`) counts active tenants of the kind via `repository.CountActiveByKind` and returns the sentinel `services.ErrProvisioningLocked` when one already exists. This covers **all** paths — `POST /v1/tenants`, divisions, and lazy provisioning — automatically. The first tenant on a fresh install counts 0 and passes, so bootstrap is never blocked (the setup wizard creates only the user, not the tenant).
+1. **`single` is a data invariant in the service.** `Service.CreateTenant` (`services/service.go`) counts active tenants of the kind via `repository.CountActiveByKind` and returns the sentinel `services.ErrProvisioningLocked` when one already exists. This covers **all** paths — `POST /v1/tenants`, divisions, and lazy provisioning — automatically. The first tenant on a fresh install counts 0 and passes.
 2. **`manual` is a permission gate in the handlers.** `createTenant` / `createDivision` call `Handler.enforceManualGate`, which resolves `iface.AuthzProvider` from the registry and checks `system.tenants.admin` (empty org = system grant). Non-admins get 403; the admin `CreateTenantModal` hits the same `POST /v1/tenants` and passes. The admin division route already requires the permission at the route group, so the shared handler body is a no-op gate for it.
-3. **Lazy provisioning honours `external.mode`.** `EnsureTenantForUser` (`services/billing.go`) returns an existing personal tenant unchanged but **refuses to auto-create** one (returns `ErrProvisioningLocked`) when `external.mode != open` — a manual policy means an admin assigns the tenant instead of a self-serve signup silently minting it.
+3. **Lazy provisioning honours `external.mode`.** `EnsureTenantForUser` (`services/billing.go`) returns an existing personal tenant unchanged but **refuses to auto-create** one (returns `ErrProvisioningLocked`) when `external.mode != open` — which is the default. A Tier-2 caller with no admin-assigned tenant therefore hits `resolveCallerTenant`, which maps the sentinel to **409** ("an administrator must create and assign one") rather than silently minting a tenant.
 
 Handlers map `ErrProvisioningLocked` → 409. The read-only `GET /v1/admin/tenants/provisioning-policy` reports both modes + active counts and backs the policy card on the tenant management pages (the modes themselves are edited at `/admin/modules/tenant`).
 
@@ -208,7 +212,7 @@ Typical consumers:
 
 ## Key invariants
 
-- **Tenant creation obeys the provisioning policy.** Every creation path funnels through `Service.CreateTenant`, which enforces the `single` count invariant as a data rule (so divisions and lazy provisioning are covered, not just `POST /v1/tenants`). The `manual` permission gate lives at the handler boundary. Defaults are `open`/`open`. Full semantics in [Provisioning policy](#provisioning-policy-admin-managed).
+- **Tenant creation obeys the provisioning policy.** Every creation path funnels through `Service.CreateTenant`, which enforces the `single` count invariant as a data rule (so divisions and lazy provisioning are covered, not just `POST /v1/tenants`). The `manual` permission gate lives at the handler boundary. **Both tiers default to `manual`** (admin-only); the single internal tenant is bootstrapped for the first admin at install. Full semantics in [Provisioning policy](#provisioning-policy-admin-managed).
 - **Plan names** (`models/tenant.go`): `free` (default), `pro`, `enterprise`. Plan is an **informational label only** — admin UI display, reporting. It does **not** drive feature access.
 - **Capability entitlements drive access, not plan.** `RequireCapability(capID)` consults the `tenant_entitlements` projection via `AccessProvider.HasCapability`. The `subscriptions` module populates entitlements through the entitlement syncer on every lifecycle transition. Entitlement rows are keyed by polymorphic `(ownerKind, ownerUUID, capabilityID)` so a self-registered user holds capabilities directly without a tenant.
 - **Internal-tenant bypass.** `HasCapability` short-circuits to `true` for `Owner{Kind:"tenant"}` whose tenant is `Kind == internal`. User-owned entitlements always consult the projection (no operator user is granted capabilities by tier). Internal (operator) tenants host the platform and don't consume via subscriptions — the capability gate is the external-client monetization seam.
