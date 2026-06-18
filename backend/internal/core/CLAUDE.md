@@ -7,12 +7,12 @@ _Parent: [../../CLAUDE.md](../../CLAUDE.md)_
 
 ## What this is
 
-The seven modules under `backend/internal/core/` are the always-loaded kernel of the Orkestra backend. Every deployment boots them — they provide identity, multi-tenancy, permissions, navigation, outbound mail, and runtime log-level admin. Optional modules a fork adds under `backend/internal/addons/` are opt-in (toggled at `/admin/modules`); core is not. Per [ADR-0006](../../../docs/adr/0006-collapse-to-core-only-base.md) the base ships **no** addons.
+The eight modules under `backend/internal/core/` are the always-loaded kernel of the Orkestra backend. Every deployment boots them — they provide identity, multi-tenancy, permissions, navigation, outbound mail, runtime log-level admin, and the compliance plane (audit + GDPR DSR). Optional modules a fork adds under `backend/internal/addons/` are opt-in (toggled at `/admin/modules`); core is not. Per [ADR-0006](../../../docs/adr/0006-collapse-to-core-only-base.md) the base ships **no** addons.
 
 Load order is topologically sorted from each module's `Dependencies()` by `ModuleRegistry.InitAll` (`shared/module/registry.go:115-217`):
 
 ```
-user → notification → tenant → authz → auth → navigation → logging
+user → notification → tenant → authz → auth → navigation → logging → compliance
 ```
 
 The registry walks this DAG, constructs each module, auto-creates its MongoDB collections, seeds its module_configs document, collects its nav items, wires its services into the registry, and registers its routes behind a gate (core routes are not gated — the gate only applies to optional addons).
@@ -28,6 +28,7 @@ The registry walks this DAG, constructs each module, auto-creates its MongoDB co
 | **auth** | Email/password + OAuth 2.1, JWT issuance, sessions-per-device, refresh rotation | [auth/CLAUDE.md](auth/CLAUDE.md) |
 | **navigation** | Role-filtered sidebar aggregated from every module's `NavItems()` + persisted ordering overrides via `/admin/modules/navigation` | [navigation/CLAUDE.md](navigation/CLAUDE.md) |
 | **logging** | Runtime log-level admin (ADR-0005 Phase F): atomic-snapshot `LevelResolver` swap behind `PerModuleLevelHandler` | [logging/CLAUDE.md](logging/CLAUDE.md) |
+| **compliance** | Audit trail (`iface.AuditSink`) + GDPR DSR (`iface.PIIProducer` export/erasure), per-tenant KMS crypto-shred, legal hold, retention, SOC2 evidence (ADR-0009, always-on) | [compliance/CLAUDE.md](compliance/CLAUDE.md) |
 
 ## Dependency graph
 

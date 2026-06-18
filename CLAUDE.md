@@ -1,6 +1,6 @@
 # ORKESTRA
 
-**Orkestra is the SaaS plumbing every product rebuilds — users, auth, RBAC, multi-tenancy, navigation, logging — already done.** Seven core modules (`user`, `auth`, `authz`, `tenant`, `notification`, `navigation`, `logging`) supply the baseline on day one. Per [ADR-0006](docs/adr/0006-collapse-to-core-only-base.md) Orkestra is a **core-only base**: it ships *no* addons. A fork that needs invoicing, payments, subscriptions, AI, marketing, etc. builds those verticals on top, against the in-tree SDK contract, using the same `Module` extension seam the core itself is built on.
+**Orkestra is the SaaS plumbing every product rebuilds — users, auth, RBAC, multi-tenancy, navigation, logging — already done.** Eight core modules (`user`, `auth`, `authz`, `tenant`, `notification`, `navigation`, `logging`, `compliance`) supply the baseline on day one. Per [ADR-0006](docs/adr/0006-collapse-to-core-only-base.md) Orkestra is a **core-only base**: it ships *no* addons. A fork that needs invoicing, payments, subscriptions, AI, marketing, etc. builds those verticals on top, against the in-tree SDK contract, using the same `Module` extension seam the core itself is built on.
 
 ## Tenancy Model
 
@@ -33,7 +33,7 @@ The companies that **run Orkestra** (one or more of "our" organizations). For ea
 
 | Layer              | Technology                                                         |
 | ------------------ | ------------------------------------------------------------------ |
-| **Backend**        | Go 1.25.1, Huma v2 (OpenAPI-first), 7 core modules, single Go module |
+| **Backend**        | Go 1.25.1, Huma v2 (OpenAPI-first), 8 core modules, single Go module |
 | **Frontend**       | React 19, TypeScript 5.9, Vite 7, Redux Toolkit, TanStack Table    |
 | **Mobile**         | Flutter 3.35+, Dart, Riverpod                                      |
 | **Database**       | MongoDB 8.0, Redis 8.2                                             |
@@ -42,7 +42,7 @@ The companies that **run Orkestra** (one or more of "our" organizations). For ea
 
 ## Architecture
 
-**Plugin architecture, core-only.** The 7 core modules are themselves implementations of the `Module` contract. The module system that hosts them is **kept by design**: a fork adds its own optional modules through the same clean `Module` + `catalog_<name>.go` + `iface` path the core uses. The `optionalModules` catalog ships **empty** — there is nothing to toggle out of the box, but the `/admin/modules` surface remains for forks that add their own.
+**Plugin architecture, core-only.** The 8 core modules are themselves implementations of the `Module` contract. The module system that hosts them is **kept by design**: a fork adds its own optional modules through the same clean `Module` + `catalog_<name>.go` + `iface` path the core uses. The `optionalModules` catalog ships **empty** — there is nothing to toggle out of the box, but the `/admin/modules` surface remains for forks that add their own.
 
 **Key components** (`backend/pkg/sdk/module/`):
 
@@ -81,8 +81,9 @@ A fork's optional modules are **instantiated, initialized, and routed** at boot 
 | **auth**         | Email/password (argon2id) + OAuth 2.1, JWT, sessions, RBAC                                                        |
 | **navigation**   | Dynamic menu from module NavItems + persisted reorder via `/admin/modules/navigation`                             |
 | **logging**      | Runtime log-level admin (ADR-0005 Phase F): `log_levels` collection + `/admin/observability/log-levels` UI         |
+| **compliance**   | Audit trail + GDPR DSR (export/erasure), per-tenant KMS crypto-shred, legal hold, retention, SOC2 evidence (ADR-0009) — [docs](backend/internal/core/compliance/CLAUDE.md) |
 
-Load order (topologically sorted by `Dependencies()`): `user` → `notification` → `tenant` → `authz` → `auth` → `navigation` → `logging`. Auth depends on notification (optional at runtime) so it can deliver verification and password-reset emails; `logging` has no declared dependencies.
+Load order (topologically sorted by `Dependencies()`): `user` → `notification` → `tenant` → `authz` → `auth` → `navigation` → `logging` → `compliance`. Auth depends on notification (optional at runtime) so it can deliver verification and password-reset emails; `logging` has no declared dependencies; `compliance` (ADR-0009, always-on) depends on `user`/`auth`/`tenant` so it resolves the PII-producer registry + audit sink after they init.
 
 **Optional (added by a fork; the base ships none):** `internal/addons/` does not exist in the base. A fork that adds a vertical creates `internal/addons/<name>/` implementing the `Module` interface and a `cmd/server/catalog_<name>.go` to register it — see [`backend/CLAUDE.md`](backend/CLAUDE.md) and the docs-site [addon-authoring guide](docs/site/sdk/build-your-first-addon.mdx). The archived `orkestra-cc/orkestra-addon-<name>` repos preserve snapshots of most verticals removed by ADR-0006 (billing/SDI, documents, company, graph, aimodels, rag, sales, subscriptions, payments, compliance, identity, dev) for forks to crib from. Two verticals — `agents` and `marketing` — were never split out into standalone repos, so their last in-tree state lives in this repo's own history, in the commits before the ADR-0006 removal.
 

@@ -1,0 +1,32 @@
+---
+title: compliance
+sidebar_position: 8
+---
+
+# compliance
+
+Platform **audit trail** + **GDPR data-subject rights**. Re-homed from a removed addon back into the always-loaded core by [ADR-0009](/adrs/core-compliance-module) — the personal data it acts on (user, auth, tenant) is core-owned, so the compliance plane ships on day one.
+
+## What it owns
+
+- **Audit trail** — an append-only `compliance_audit_events` collection. Every other module emits events through the `iface.AuditSink` seam without importing this package; the sink write is fire-and-forget so it never blocks a hot path.
+- **GDPR DSR pipeline** — right-of-access **export** and right-to-erasure over the `iface.PIIProducer` seam. The pipeline walks every registered producer (`user`, `auth`, `tenant`, `authz`, `notification`) at request time, so adding a producer needs no change here.
+- **Per-tenant KMS** — envelope encryption + crypto-shred of a tenant's data-encryption key.
+- **Legal hold** — an active hold on a subject blocks erasure platform-wide (DSR erase + retention auto-cleanup return `409`).
+- **Retention auto-cleanup** — a daily job that hard-deletes anonymized user tombstones past the retention window. **Off by default.**
+- **Mediated erasure-request workflow** — a subject lodges a request; an operator reviews, then executes or rejects it.
+- **SOC2 evidence** — a point-in-time controls snapshot. **Gated off by default** (`soc2_enabled`).
+
+## Routes
+
+- **Self-service** (authenticated subject): `POST /v1/me/dsr/{export,erase,erasure-request}`.
+- **Admin reads** (`system.compliance.audit.read`): `GET /v1/admin/audit-events`, `…/compliance/legal-holds`, `…/compliance/retention/preview`, `…/compliance/erasure-requests`, and `…/compliance/soc2` (when enabled).
+- **Admin writes** (step-up gated): place/release legal holds (`system.compliance.legalhold.manage`), execute/reject erasure requests (`system.compliance.dsr.manage`).
+
+## Config
+
+`soc2_enabled` (default `false`) · `auto_cleanup_enabled` (default `false`) · `retention_years` (default `5`) · `export_retention_days` (default `30`).
+
+:::note Always-on
+Unlike a fork's optional modules, the audit log + GDPR DSR pipeline cannot be disabled — that is the point of making compliance core. Only the SOC2-evidence and retention-auto-cleanup sub-features are gated.
+:::

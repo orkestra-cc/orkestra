@@ -6,19 +6,21 @@ sidebar_position: 1
 
 # Module Catalog
 
-Orkestra ships **6 core modules** (always loaded) and **13 optional addons** (toggled at `/admin/modules`). The optional addons live in their own public repos and are pulled in as Go modules.
+Orkestra ships **8 core modules** (always loaded) and an **empty optional-addon catalog** — per [ADR-0006](/adrs/collapse-to-core-only-base) the base is **core-only**. A fork adds its own verticals in-tree through the same `Module` seam the core uses. The table further down lists the verticals the core-only pivot removed; their archived `orkestra-cc/orkestra-<name>` repos are kept for forks to crib from.
 
 ## Core modules
 
 Always loaded. Topologically sorted by their `Dependencies()`:
 
-`user` → `notification` → `tenant` → `authz` → `auth` → `navigation`
+`user` → `notification` → `tenant` → `authz` → `auth` → `navigation` → `logging` → `compliance`
 
-See [Core modules](/modules/core/user) and the rest under that section.
+See [Core modules](/modules/core/user) and the rest under that section. ([compliance](/modules/core/compliance) was re-homed from an addon back into core by [ADR-0009](/adrs/core-compliance-module).)
 
-## Optional addons
+## Archived verticals (fork crib material)
 
-| Addon         | Depends on        | Repo                                      |
+The base ships none of these. They are snapshots of the verticals the [core-only pivot](/adrs/collapse-to-core-only-base) removed, preserved in public archive repos for a fork to crib from when rebuilding the equivalent in-tree.
+
+| Vertical      | Depends on        | Archived repo                             |
 | ------------- | ----------------- | ----------------------------------------- |
 | billing       | documents         | `orkestra-cc/orkestra-billing`            |
 | documents     | —                 | `orkestra-cc/orkestra-documents`          |
@@ -30,10 +32,13 @@ See [Core modules](/modules/core/user) and the rest under that section.
 | sales         | aimodels          | `orkestra-cc/orkestra-sales`              |
 | subscriptions | —                 | `orkestra-cc/orkestra-subscriptions`      |
 | payments      | —                 | `orkestra-cc/orkestra-payments`           |
-| compliance    | —                 | `orkestra-cc/orkestra-compliance`         |
 | identity      | tenant, authz     | `orkestra-cc/orkestra-identity`           |
 | dev           | auth              | `orkestra-cc/orkestra-dev`                |
 
-:::info Auto-synced
-Pages for each addon are auto-generated from the addon's `README.md` at build time (and re-synced nightly). See [the sync architecture](/contributing).
+:::note compliance moved to core
+The removed `compliance` addon is **not** in this list — [ADR-0009](/adrs/core-compliance-module) brought audit + GDPR DSR back into the always-loaded core. See [compliance](/modules/core/compliance).
+:::
+
+:::info Auto-synced (forks)
+A fork's addon pages are auto-generated from each addon's `README.md` at build time (and re-synced nightly). The base catalog is empty, so no addon pages are generated here. See [the sync architecture](/contributing).
 :::
