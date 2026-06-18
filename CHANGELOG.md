@@ -4,6 +4,26 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.3.9] - 2026-06-18
+
+### Features
+
+- **(piiscan)** CI gate for subject-PII collections without a PIIProducer ([dcef19d](https://github.com/orkestra-cc/orkestra/commit/dcef19dfa766adc6d535116ca854ec1e856e704e))
+- **(blob)** Add server-side Put to the blob.Store seam ([e1bf96a](https://github.com/orkestra-cc/orkestra/commit/e1bf96af64431a05695908195edcdb38963f968b))
+- **(compliance)** Core GDPR data-subject-rights module (audit, DSR, legal hold, retention) ([8a948f3](https://github.com/orkestra-cc/orkestra/commit/8a948f3fb236eb44830f251430af2c70edb7c45b))
+
+### Bug fixes
+
+- **(authz)** Cedar-cover compliance system.*.manage permissions ([43dc34f](https://github.com/orkestra-cc/orkestra/commit/43dc34f3baed27df7b2b6b035f113dc893db5711))
+
+### Documentation
+
+- **(compliance)** Document PIIProducer registration in the 4 producing modules ([210d9e6](https://github.com/orkestra-cc/orkestra/commit/210d9e6985172bae2b89dd6269dc184a528e9b61))
+
+### Tests
+
+- **(compliance)** Cover services, handlers, repository, and frontend ([1ab1ddf](https://github.com/orkestra-cc/orkestra/commit/1ab1ddfa2baee4af7be50f19511a63df5f5d0fc6))
+
 ## [0.3.8] - 2026-06-14
 
 ### Features
