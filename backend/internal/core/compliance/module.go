@@ -42,7 +42,6 @@ type Module struct {
 	retentionSvc *services.RetentionService
 	erasureReq   *handlers.ErasureRequestHandler
 	stopCh       chan struct{}
-	soc2Enabled  bool
 	logger       *slog.Logger
 }
 
@@ -90,14 +89,15 @@ func (m *Module) ProvidedServices() []module.ServiceKey {
 // require the system.compliance.audit.read permission, which super_admin /
 // administrator / developer inherit via the system-role seed.
 func (m *Module) NavItems() []module.NavItemSpec {
-	items := []module.NavItemSpec{
+	return []module.NavItemSpec{
 		{Realm: "platform", Tier: "internal", Section: "System Administration", Name: "Compliance", Icon: "shield-halved", Path: "/admin/compliance", MinRole: "administrator", Active: true},
+		// SOC2 page is emitted unconditionally but gated on the
+		// compliance.soc2_enabled config flag, evaluated per request by the
+		// navigation filter — so toggling it at /admin/modules surfaces (or
+		// hides) the link on the next nav fetch without a restart. NavItems()
+		// runs before Init, so it can't read the resolved flag itself.
+		{Realm: "platform", Tier: "internal", Section: "System Administration", Name: "SOC2 Evidence", Icon: "shield-alt", Path: "/admin/compliance/soc2", MinRole: "administrator", Active: true, RequiresConfig: "soc2_enabled"},
 	}
-	// SOC2 page only when the evidence sub-feature is turned on.
-	if m.soc2Enabled {
-		items = append(items, module.NavItemSpec{Realm: "platform", Tier: "internal", Section: "System Administration", Name: "SOC2 Evidence", Icon: "shield-alt", Path: "/admin/compliance/soc2", MinRole: "administrator", Active: true})
-	}
-	return items
 }
 
 // Permissions contributes the system-level read gate used by the admin
@@ -234,15 +234,16 @@ func (m *Module) Init(deps *module.Dependencies) error {
 		m.erasureReq = handlers.NewErasureRequestHandler(erasureReqSvc)
 	}
 
-	// SOC2 evidence service — gated behind compliance.soc2_enabled (default
-	// false): SOC2 isn't pursued by every deployment, so the evidence page +
-	// API stay dormant unless explicitly enabled. Reads from users, mfa
-	// factors, audit events, kms keys (read-only aggregation, no cross-module
-	// contract).
-	m.soc2Enabled = deps.GetConfigBool("compliance", "soc2_enabled", false)
-	if m.soc2Enabled {
-		m.soc2 = handlers.NewSOC2Handler(services.NewSOC2EvidenceService(deps.DB))
+	// SOC2 evidence — gated behind compliance.soc2_enabled (default false):
+	// SOC2 isn't pursued by every deployment. The handler + route are wired
+	// unconditionally so the toggle works at runtime (no restart); the gate is
+	// enforced per request via the soc2Enabled closure (and the nav link is
+	// gated the same way via NavItemSpec.RequiresConfig). Reads from users,
+	// mfa factors, audit events, kms keys (read-only aggregation).
+	soc2Enabled := func(context.Context) bool {
+		return deps.GetConfigBool("compliance", "soc2_enabled", false)
 	}
+	m.soc2 = handlers.NewSOC2Handler(services.NewSOC2EvidenceService(deps.DB), soc2Enabled)
 
 	// Push the sink into known core consumer services. Each receiver is
 	// optional — missing services (out of init order) are ignored so

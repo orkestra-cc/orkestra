@@ -31,6 +31,7 @@ import LoginMfaVerify from 'components/authentication/LoginMfaVerify';
 const SetupWizard = lazy(() => import('pages/setup/SetupWizard'));
 const UserManagement = lazy(() => import('pages/admin/users'));
 const CompliancePage = lazy(() => import('pages/admin/compliance'));
+const SOC2EvidencePage = lazy(() => import('pages/admin/compliance/soc2'));
 const ModuleManagement = lazy(() => import('pages/admin/modules'));
 const ModuleDetail = lazy(() => import('pages/admin/modules/detail'));
 const NavigationAdminPage = lazy(() => import('pages/admin/navigation'));
@@ -142,6 +143,23 @@ export function buildCoreRoutes(
                         fallback={<OrkestraLoader />}
                       >
                         <CompliancePage />
+                      </Suspense>
+                    </ProtectedRoute>
+                  )
+                },
+                {
+                  path: 'compliance/soc2',
+                  element: (
+                    <ProtectedRoute
+                      requiredPermissions={[
+                        ['super_admin', 'administrator', 'developer']
+                      ]}
+                    >
+                      <Suspense
+                        key="admin-compliance-soc2"
+                        fallback={<OrkestraLoader />}
+                      >
+                        <SOC2EvidencePage />
                       </Suspense>
                     </ProtectedRoute>
                   )

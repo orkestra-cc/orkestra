@@ -55,6 +55,17 @@ export interface RetentionPreview {
   userUuids: string[];
 }
 
+// SOC2Evidence is the point-in-time control snapshot from
+// GET /v1/admin/compliance/soc2/evidence. `summary` is a flat metric→count
+// map; `controls` keys are SOC2 CC codes (e.g. "CC6.1_logical_access") whose
+// values are nested attribute objects. Both are open maps — the page renders
+// known keys with friendly labels and falls back to the raw key otherwise.
+export interface SOC2Evidence {
+  generatedAt: string;
+  summary: Record<string, number>;
+  controls: Record<string, Record<string, unknown>>;
+}
+
 export const complianceApi = baseApi.injectEndpoints({
   endpoints: builder => ({
     listAuditEvents: builder.query<
@@ -86,7 +97,9 @@ export const complianceApi = baseApi.injectEndpoints({
       { id: string; mode: string }
     >({
       query: ({ id, mode }) => ({
-        url: `/v1/admin/compliance/erasure-requests/${encodeURIComponent(id)}/execute`,
+        url: `/v1/admin/compliance/erasure-requests/${encodeURIComponent(
+          id
+        )}/execute`,
         method: 'POST',
         body: { mode }
       }),
@@ -95,7 +108,9 @@ export const complianceApi = baseApi.injectEndpoints({
     rejectErasureRequest: builder.mutation<void, { id: string; note?: string }>(
       {
         query: ({ id, note }) => ({
-          url: `/v1/admin/compliance/erasure-requests/${encodeURIComponent(id)}/reject`,
+          url: `/v1/admin/compliance/erasure-requests/${encodeURIComponent(
+            id
+          )}/reject`,
           method: 'POST',
           body: { note }
         }),
@@ -135,6 +150,15 @@ export const complianceApi = baseApi.injectEndpoints({
         url: '/v1/admin/compliance/retention/preview',
         method: 'GET'
       })
+    }),
+
+    // SOC2 evidence snapshot — recomputed server-side on each call (idempotent).
+    // 404s when the compliance.soc2_enabled sub-feature is off.
+    soc2Evidence: builder.query<SOC2Evidence, void>({
+      query: () => ({
+        url: '/v1/admin/compliance/soc2/evidence',
+        method: 'GET'
+      })
     })
   })
 });
@@ -147,5 +171,6 @@ export const {
   useListLegalHoldsQuery,
   usePlaceLegalHoldMutation,
   useReleaseLegalHoldMutation,
-  useRetentionPreviewQuery
+  useRetentionPreviewQuery,
+  useSoc2EvidenceQuery
 } = complianceApi;

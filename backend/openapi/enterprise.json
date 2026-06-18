@@ -1879,6 +1879,41 @@
         },
         "type": "object"
       },
+      "Evidence": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/Evidence.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "controls": {
+            "additionalProperties": {},
+            "type": "object"
+          },
+          "generatedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "summary": {
+            "additionalProperties": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "type": "object"
+          }
+        },
+        "required": [
+          "generatedAt",
+          "controls",
+          "summary"
+        ],
+        "type": "object"
+      },
       "ExecuteErasureRequestInputBody": {
         "additionalProperties": false,
         "properties": {
@@ -7821,6 +7856,39 @@
         "summary": "Preview retention auto-cleanup candidates (dry run)",
         "tags": [
           "Compliance"
+        ]
+      }
+    },
+    "/v1/admin/compliance/soc2/evidence": {
+      "get": {
+        "description": "Returns a point-in-time aggregate of CC-class controls — privileged user count, MFA coverage, failed-login trends, KMS lifecycle, audit-trail health. Idempotent; each call recomputes from source.",
+        "operationId": "compliance-soc2-evidence",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Evidence"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Generate a SOC2 evidence snapshot",
+        "tags": [
+          "Compliance",
+          "SOC2"
         ]
       }
     },

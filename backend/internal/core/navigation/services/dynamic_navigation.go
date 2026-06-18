@@ -32,6 +32,20 @@ type dynamicNavigationService struct {
 	navItemsIndex  navItemsIndex   // pre-computed parent/child key sets for self-heal
 }
 
+// configValueReader is the optional capability the navigation filter probes
+// for on its enabled-checker so it can evaluate NavItemSpec.RequiresConfig at
+// request time. The concrete checker (*module.ModuleConfigService) satisfies
+// it; when the checker doesn't, config-gated items fall through as visible.
+type configValueReader interface {
+	GetValue(ctx context.Context, moduleName, key string) string
+}
+
+// configTruthy mirrors module.Dependencies.GetConfigBool's parsing so a
+// nav-item gate reads the same as the owning module's own config read.
+func configTruthy(v string) bool {
+	return v == "true" || v == "1" || v == "yes"
+}
+
 // NewDynamicNavigationService creates a navigation service that derives its
 // menu from module NavItemSpec declarations. overrides may be nil — in
 // which case the menu always renders in declared order.
@@ -337,6 +351,16 @@ func (s *dynamicNavigationService) convert(ctx context.Context, spec module.NavI
 	if spec.ModuleName != "" && s.enabledChecker != nil {
 		if !s.enabledChecker.IsEnabled(ctx, spec.ModuleName) {
 			return models.NavItem{}, false
+		}
+	}
+	// Per-request config gate: hide an item whose owning module has its
+	// RequiresConfig flag turned off. Evaluated live so a /admin/modules
+	// toggle reflects on the next nav fetch without a restart.
+	if spec.RequiresConfig != "" && spec.ModuleName != "" {
+		if cr, ok := s.enabledChecker.(configValueReader); ok {
+			if !configTruthy(cr.GetValue(ctx, spec.ModuleName, spec.RequiresConfig)) {
+				return models.NavItem{}, false
+			}
 		}
 	}
 	if !tierAllows(spec.Tier, tenantKind) {
