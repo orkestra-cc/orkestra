@@ -90,13 +90,13 @@ func (m *Module) ProvidedServices() []module.ServiceKey {
 // administrator / developer inherit via the system-role seed.
 func (m *Module) NavItems() []module.NavItemSpec {
 	return []module.NavItemSpec{
-		{Realm: "platform", Tier: "internal", Section: "System Administration", Name: "Compliance", Icon: "shield-halved", Path: "/admin/compliance", MinRole: "administrator", Active: true},
+		{Realm: "platform", Tier: "internal", Name: "Compliance", Icon: "shield-halved", Path: "/admin/compliance", MinRole: "administrator", Active: true},
 		// SOC2 page is emitted unconditionally but gated on the
 		// compliance.soc2_enabled config flag, evaluated per request by the
 		// navigation filter — so toggling it at /admin/modules surfaces (or
 		// hides) the link on the next nav fetch without a restart. NavItems()
 		// runs before Init, so it can't read the resolved flag itself.
-		{Realm: "platform", Tier: "internal", Section: "System Administration", Name: "SOC2 Evidence", Icon: "shield-alt", Path: "/admin/compliance/soc2", MinRole: "administrator", Active: true, RequiresConfig: "soc2_enabled"},
+		{Realm: "platform", Tier: "internal", Name: "SOC2 Evidence", Icon: "shield-alt", Path: "/admin/compliance/soc2", MinRole: "administrator", Active: true, RequiresConfig: "soc2_enabled"},
 	}
 }
 

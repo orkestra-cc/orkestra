@@ -527,7 +527,7 @@ func findInRealms(realms []models.NavRealm, name string) *models.NavItem {
 // without re-collecting NavItems. This is the SOC2-Evidence nav gate.
 func TestConfigGate_RequiresConfigTogglesVisibility(t *testing.T) {
 	items := []module.NavItemSpec{
-		{Realm: realmPlatform, Section: "System Administration", Name: "SOC2 Evidence", Path: "/admin/compliance/soc2", MinRole: "administrator", Active: true, ModuleName: "compliance", RequiresConfig: "soc2_enabled"},
+		{Realm: realmPlatform, Name: "SOC2 Evidence", Path: "/admin/compliance/soc2", MinRole: "administrator", Active: true, ModuleName: "compliance", RequiresConfig: "soc2_enabled"},
 	}
 
 	off := NewDynamicNavigationService(items, &stubEnabledConfig{values: map[string]string{}}, nil)
