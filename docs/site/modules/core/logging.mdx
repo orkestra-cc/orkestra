@@ -1,0 +1,36 @@
+---
+title: logging
+sidebar_position: 7
+---
+
+# logging
+
+Runtime **log-level administration** for the `slog` pipeline ([ADR-0005](/adrs/observability-logging-tracing-metrics) Phase F). Operators flip the global threshold and per-module overrides at `/admin/observability/log-levels` and every existing module logger picks up the change **instantly** — no restart, no env-var edit, no image re-pull.
+
+## How it works
+
+`logging` is intentionally a **leaf** in the dependency graph (no `Dependencies()`), so the registry inits it **last**. By then every other module has already taken its `deps.Logger` clone — but those clones share a `resolverBox` atomic pointer behind `PerModuleLevelHandler`, so swapping the resolver reaches them all retroactively.
+
+At boot the service is seeded from the env snapshot (`LOG_LEVEL` + `LOG_LEVEL_<MODULE>`), then loads the persisted document (if any) into an `atomic.Pointer` snapshot. `main.go` calls `utils.SwapLevelResolver` after `InitAll` to replace the static boot resolver with this DB-backed live one. Reads (every log call) consult the snapshot lock-free; writes are mutex-serialized and **persist before they publish** — if the Mongo upsert fails, the in-memory view is left untouched.
+
+## Routes
+
+All under `/v1/admin/observability/log-levels`, gated by the `administrator` system role:
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/` | Global level + one row per registered module (`AdminView`) |
+| PUT | `/global` | Set the global threshold |
+| PUT | `/{module}` | Set a per-module override |
+| DELETE | `/{module}` | Remove an override (falls back to global) |
+| POST | `/reset` | Revert global + every override to the boot env defaults |
+
+Mutations return the fresh `AdminView`, so the UI re-renders without a second fetch.
+
+## Storage
+
+A single `log_levels` document (`_id="default"`, `global` + `perModule` map) — replaced wholesale on every write so concurrent writers can't produce two rows. No declared indexes; `_id` is the only filter.
+
+:::note Scope
+This module sets thresholds, not destinations. Live log tailing lives in Grafana, and per-tenant filtering happens at query time in Loki via the `tenant_id` field already stamped on every line — not here. Levels are global-per-module, not per-tenant.
+:::
