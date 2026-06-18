@@ -53,4 +53,5 @@ All three are `System: true`. `audit.read` is Cedar-covered by the `read` suffix
 ## Follow-ups
 
 - **Export → blob (partly unblocked):** the inline `/me/dsr/export` returns the full bundle and satisfies Art. 15. The blob+TTL variant for large payloads was blocked on `blob.Store` having no server-side write — that seam now exists (`blob.Store.Put(ctx, key, contentType, io.Reader)`, added as a follow-up). Remaining work: wire a `blob.Store` into the compliance module and add an export-to-blob path that stores the bundle then hands the subject a short-lived `PresignGet` URL. See the plan.
-- Per-subject crypto-shred (today KMS is per-tenant); a static lint flagging a `userUUID`-owning collection without a `PIIProducer`.
+- Per-subject crypto-shred (today KMS is per-tenant).
+- ✅ **Static lint shipped:** `tools/piiscan` (CI gate `make backend-piiscan`) flags any module whose persisted model carries a data-subject `bson` field but registers no `iface.PIIProducer`, so new PII can't silently escape the DSR sweep. The compliance module itself is baselined (`tools/piiscan/baseline.txt`) — its erasure-request / legal-hold / audit rows reference the subject but are retained by design, not self-erased.

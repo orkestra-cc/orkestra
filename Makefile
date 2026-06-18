@@ -149,7 +149,7 @@ frontend-client-clean:
 
 .PHONY: install install-hooks fmt ci-help
 .PHONY: ci ci-all ci-backend ci-frontend-admin ci-frontend-client ci-mobile
-.PHONY: backend-lint backend-test-ci backend-tenantscope backend-policycoverage backend-vulncheck backend-build-ci backend-openapi-check
+.PHONY: backend-lint backend-test-ci backend-tenantscope backend-policycoverage backend-piiscan backend-vulncheck backend-build-ci backend-openapi-check
 .PHONY: admin-typecheck admin-lint admin-test admin-audit admin-build
 .PHONY: client-typecheck client-lint client-build
 .PHONY: mobile-analyze mobile-test
@@ -216,7 +216,7 @@ ci-all: ci-backend ci-frontend-admin ci-frontend-client ci-mobile
 
 # ---- Backend ----
 
-ci-backend: backend-lint backend-tenantscope backend-policycoverage backend-vulncheck backend-test-ci backend-build-ci backend-openapi-check
+ci-backend: backend-lint backend-tenantscope backend-policycoverage backend-piiscan backend-vulncheck backend-test-ci backend-build-ci backend-openapi-check
 	@echo "Backend CI: OK"
 
 # backend-openapi-check fails if the committed openapi/enterprise.json drifted
@@ -247,6 +247,15 @@ backend-policycoverage:
 	@cd backend && go run ./tools/policycoverage/cmd/policycoverage \
 	  -baseline=tools/policycoverage/baseline.txt \
 	  -cedar=internal/core/authz/cedar/policies ./internal/...
+
+# backend-piiscan flags modules that persist data-subject PII (a userUUID-style
+# bson field) but register no iface.PIIProducer, so personal data can't silently
+# escape the GDPR DSR export/erase sweep (ADR-0009). Baseline carries the
+# retained-by-design exceptions (compliance audit/erasure/legal-hold rows).
+backend-piiscan:
+	@cd backend && go test ./tools/piiscan/...
+	@cd backend && go run ./tools/piiscan/cmd/piiscan \
+	  -baseline=tools/piiscan/baseline.txt ./internal/...
 
 # Reads OSV IDs (one per line, '#'-comments) from backend/.vulncheck-allowlist.txt.
 # Fails only if a reachable vulnerability is NOT on the allowlist.

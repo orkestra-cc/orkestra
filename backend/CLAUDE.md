@@ -69,7 +69,9 @@ backend/
 ├── pkg/
 │   └── sdk/                        # In-tree SDK package (Module, registry, iface, …)
 ├── tools/
-│   └── tenantscope/                # Static analyzer: enforces tenantrepo use (CI gate)
+│   ├── tenantscope/                # Static analyzer: enforces tenantrepo use (CI gate)
+│   ├── policycoverage/             # Static analyzer: permission ↔ route ↔ Cedar coverage (CI gate)
+│   └── piiscan/                    # Static analyzer: subject-PII collection ⇒ PIIProducer (CI gate, ADR-0009)
 ├── openapi/enterprise.json         # Committed OpenAPI spec (make openapi-dump)
 ├── Dockerfile                      # Multi-stage: dev (AIR) / production
 └── go.mod                          # Single module — pkg/sdk + everything else
