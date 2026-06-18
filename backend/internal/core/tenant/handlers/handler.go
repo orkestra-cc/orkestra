@@ -44,6 +44,8 @@ type tenantSvc interface {
 	SetBillingIdentity(ctx context.Context, tenantUUID string, in services.SetBillingIdentityInput) error
 	SetItalianBillable(ctx context.Context, tenantUUID string, on bool) error
 	EnsureTenantForUser(ctx context.Context, userUUID string) (*iface.Tenant, error)
+	ProvisioningMode(ctx context.Context, kind models.TenantKind) string
+	CountActiveByKind(ctx context.Context, kind models.TenantKind) (int64, error)
 }
 
 type Handler struct {
@@ -274,11 +276,55 @@ func (h *Handler) createTenant(ctx context.Context, in *createTenantInput) (*ten
 	if !ok {
 		return nil, huma.Error401Unauthorized("not authenticated")
 	}
+	kind := in.Body.Kind
+	if !kind.Valid() {
+		kind = models.TenantKindInternal
+	}
+	if err := h.enforceManualGate(ctx, kind); err != nil {
+		return nil, err
+	}
 	t, err := h.svc.CreateTenant(ctx, userUUID, in.Body)
 	if err != nil {
+		if errors.Is(err, services.ErrProvisioningLocked) {
+			return nil, huma.Error409Conflict("tenant creation is locked: the system is configured for a single tenant of this tier")
+		}
 		return nil, huma.Error400BadRequest("failed to create tenant: " + err.Error())
 	}
 	return &tenantOutput{Body: t}, nil
+}
+
+// enforceManualGate rejects the request when the tier's provisioning mode is
+// `manual` and the caller does not hold system.tenants.admin. In `open` /
+// `single` mode it is a no-op (single is enforced as a data invariant in the
+// service). Centralised so POST /v1/tenants and the division create paths share
+// one rule.
+func (h *Handler) enforceManualGate(ctx context.Context, kind models.TenantKind) error {
+	if h.svc.ProvisioningMode(ctx, kind) != models.ProvisioningModeManual {
+		return nil
+	}
+	if h.callerIsTenantAdmin(ctx) {
+		return nil
+	}
+	return huma.Error403Forbidden("tenant creation is restricted to platform administrators")
+}
+
+// callerIsTenantAdmin resolves the authz provider lazily (the authz module is
+// in the registry by request time) and checks the system.tenants.admin grant.
+// Fails closed: any missing provider or lookup error denies.
+func (h *Handler) callerIsTenantAdmin(ctx context.Context) bool {
+	userUUID, ok := ctxauth.GetUserUUID(ctx)
+	if !ok || userUUID == "" {
+		return false
+	}
+	if h.registry == nil {
+		return false
+	}
+	authz, ok := module.GetTyped[iface.AuthzProvider](h.registry, module.ServiceAuthzProvider)
+	if !ok || authz == nil {
+		return false
+	}
+	allowed, err := authz.HasPermission(ctx, userUUID, "", "system.tenants.admin")
+	return err == nil && allowed
 }
 
 func (h *Handler) getTenant(ctx context.Context, in *tenantIDPath) (*tenantOutput, error) {
@@ -747,6 +793,39 @@ func (h *Handler) RegisterAdminRoutes(api huma.API) {
 		Description: "Flips Tenant.IsItalianBillable. Enabling requires a FatturaPA profile with at least one routing handle (CodiceDestinatario or PECDestinatario) — 422 otherwise. Disabling is unconditional.",
 		Tags:        []string{"Tenants Admin"},
 	}, h.setTenantItalianBillableAdmin)
+
+	huma.Register(api, huma.Operation{
+		OperationID: "get-tenant-provisioning-policy-admin",
+		Method:      http.MethodGet,
+		Path:        "/v1/admin/tenants/provisioning-policy",
+		Summary:     "Read the per-tier tenant-creation policy (platform admin)",
+		Description: "Returns the active provisioning mode for each tier (open | manual | single) plus the current active-tenant count per tier. The mode itself is edited at /admin/modules/tenant; this endpoint backs the read-only policy card on the tenant management pages.",
+		Tags:        []string{"Tenants Admin"},
+	}, h.getProvisioningPolicy)
+}
+
+type provisioningPolicyOutput struct {
+	Body struct {
+		Internal      string `json:"internal" doc:"Provisioning mode for internal tenants: open | manual | single"`
+		External      string `json:"external" doc:"Provisioning mode for external tenants: open | manual"`
+		InternalCount int64  `json:"internalCount" doc:"Number of active (non-deleted) internal tenants"`
+		ExternalCount int64  `json:"externalCount" doc:"Number of active (non-deleted) external tenants"`
+	}
+}
+
+// getProvisioningPolicy reports the active per-tier provisioning policy and the
+// current tenant counts. Read-only; the modes are managed at /admin/modules/tenant.
+func (h *Handler) getProvisioningPolicy(ctx context.Context, _ *struct{}) (*provisioningPolicyOutput, error) {
+	out := &provisioningPolicyOutput{}
+	out.Body.Internal = h.svc.ProvisioningMode(ctx, models.TenantKindInternal)
+	out.Body.External = h.svc.ProvisioningMode(ctx, models.TenantKindExternal)
+	if n, err := h.svc.CountActiveByKind(ctx, models.TenantKindInternal); err == nil {
+		out.Body.InternalCount = n
+	}
+	if n, err := h.svc.CountActiveByKind(ctx, models.TenantKindExternal); err == nil {
+		out.Body.ExternalCount = n
+	}
+	return out, nil
 }
 
 // --- Unified Client Aggregate (Phase 1) handlers ---
@@ -919,8 +998,17 @@ func (h *Handler) createDivision(ctx context.Context, in *createDivisionInput) (
 	if !ok || userUUID == "" {
 		return nil, huma.Error401Unauthorized("not authenticated")
 	}
+	// Divisions are external sub-tenants — honour the external provisioning
+	// policy. The admin variant shares this body but always passes the gate
+	// since the admin route group already requires system.tenants.admin.
+	if err := h.enforceManualGate(ctx, models.TenantKindExternal); err != nil {
+		return nil, err
+	}
 	t, err := h.svc.CreateDivision(ctx, in.TenantID, userUUID, in.Body.Name, in.Body.Slug)
 	if err != nil {
+		if errors.Is(err, services.ErrProvisioningLocked) {
+			return nil, huma.Error409Conflict("tenant creation is locked by the provisioning policy")
+		}
 		return nil, huma.Error400BadRequest("division create failed: " + err.Error())
 	}
 	return &tenantOutput{Body: t}, nil
@@ -1067,6 +1155,12 @@ func (h *Handler) resolveCallerTenant(ctx context.Context) (*models.Tenant, erro
 	}
 	personal, err := h.svc.EnsureTenantForUser(ctx, userUUID)
 	if err != nil {
+		// With external provisioning set to manual, a Tier-2 caller with no
+		// admin-assigned tenant is not auto-provisioned — surface a clean 409
+		// instead of a 500 so the client UI can prompt "contact your operator".
+		if errors.Is(err, services.ErrProvisioningLocked) {
+			return nil, huma.Error409Conflict("no tenant is provisioned for this account; an administrator must create and assign one")
+		}
 		return nil, huma.Error500InternalServerError("failed to resolve personal tenant", err)
 	}
 	t, err := h.svc.GetTenantModel(ctx, personal.UUID)

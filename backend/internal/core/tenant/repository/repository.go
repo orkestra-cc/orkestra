@@ -137,6 +137,17 @@ func (r *Repository) ListTenantsByKind(ctx context.Context, kind models.TenantKi
 	return out, nil
 }
 
+// CountActiveByKind returns the number of non-deleted tenants of the given
+// tier. Backs the `single` provisioning-mode invariant (at most one active
+// internal tenant) and the admin provisioning-policy read.
+func (r *Repository) CountActiveByKind(ctx context.Context, kind models.TenantKind) (int64, error) {
+	//tenantscope:allow tenant registry — counting tenants by tier is inherently cross-tenant (mirrors ListTenantsByKind)
+	return r.db.Collection(CollTenants).CountDocuments(ctx, bson.M{
+		"kind":      string(kind),
+		"deletedAt": nil,
+	})
+}
+
 // TenantListFilter narrows platform-admin tenant lookups. All fields are
 // optional; zero values mean "no filter on that axis". Used by the admin list
 // endpoint to back the split between Internal Operations and Client

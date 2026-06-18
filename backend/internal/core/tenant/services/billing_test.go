@@ -45,6 +45,38 @@ func TestEnsureTenantForUser_EmptyUserUUID(t *testing.T) {
 	}
 }
 
+func TestProvisioningMode_DefaultsToOpen(t *testing.T) {
+	t.Parallel()
+	s := New(nil) // no resolver wired
+	if got := s.ProvisioningMode(context.Background(), models.TenantKindInternal); got != models.ProvisioningModeOpen {
+		t.Fatalf("nil resolver: got %q, want open", got)
+	}
+}
+
+func TestProvisioningMode_ResolverValuesAndNormalisation(t *testing.T) {
+	t.Parallel()
+	s := New(nil)
+	s.SetProvisioningModeResolver(func(_ context.Context, kind models.TenantKind) string {
+		if kind == models.TenantKindExternal {
+			return "manual"
+		}
+		return "single"
+	})
+	if got := s.ProvisioningMode(context.Background(), models.TenantKindInternal); got != models.ProvisioningModeSingle {
+		t.Errorf("internal: got %q, want single", got)
+	}
+	if got := s.ProvisioningMode(context.Background(), models.TenantKindExternal); got != models.ProvisioningModeManual {
+		t.Errorf("external: got %q, want manual", got)
+	}
+
+	// Unknown / empty values normalise to open so a misconfigured doc never
+	// blocks creation.
+	s.SetProvisioningModeResolver(func(context.Context, models.TenantKind) string { return "bogus" })
+	if got := s.ProvisioningMode(context.Background(), models.TenantKindInternal); got != models.ProvisioningModeOpen {
+		t.Errorf("bogus value: got %q, want open", got)
+	}
+}
+
 // TestFatturaPAProfile_HasRouting locks the predicate that gates
 // SetItalianBillable: a profile is "routable" iff at least one of
 // CodiceDestinatario or PECDestinatario is non-empty (whitespace doesn't

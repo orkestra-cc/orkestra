@@ -33,6 +33,15 @@ type AdminCreator interface {
 	RegisterInitialAdmin(ctx context.Context, email, password, fullName, ip string) (*authModels.TokenResponse, error)
 }
 
+// InternalTenantSeeder bootstraps the platform's single internal tenant at
+// first install, owned by the initial admin. *tenant/services.Service
+// satisfies it via EnsureInternalTenant (idempotent — a no-op once an internal
+// tenant exists). Primitive-only signature so shared/setup stays free of any
+// tenant-package import. Optional: a nil seeder skips the bootstrap.
+type InternalTenantSeeder interface {
+	EnsureInternalTenant(ctx context.Context, ownerUUID, name string) (string, error)
+}
+
 // Status is the payload returned by GET /v1/setup/status.
 type Status struct {
 	SetupCompleted bool `json:"setupCompleted"`
@@ -41,22 +50,26 @@ type Status struct {
 
 // Service owns the two setup endpoints' business logic.
 type Service struct {
-	users         iface.UserProvider
-	admin         AdminCreator
-	configService *module.ModuleConfigService
-	logger        *slog.Logger
+	users          iface.UserProvider
+	admin          AdminCreator
+	internalTenant InternalTenantSeeder
+	configService  *module.ModuleConfigService
+	logger         *slog.Logger
 }
 
-// NewService wires the setup service. All three dependencies are required.
-func NewService(users iface.UserProvider, admin AdminCreator, cfg *module.ModuleConfigService, logger *slog.Logger) *Service {
+// NewService wires the setup service. users, admin, cfg and logger are
+// required; internalTenant is optional (nil skips the internal-tenant
+// bootstrap).
+func NewService(users iface.UserProvider, admin AdminCreator, internalTenant InternalTenantSeeder, cfg *module.ModuleConfigService, logger *slog.Logger) *Service {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	return &Service{
-		users:         users,
-		admin:         admin,
-		configService: cfg,
-		logger:        logger,
+		users:          users,
+		admin:          admin,
+		internalTenant: internalTenant,
+		configService:  cfg,
+		logger:         logger,
 	}
 }
 
@@ -109,5 +122,45 @@ func (s *Service) CreateInitialAdmin(ctx context.Context, email, password, fullN
 	if count > 0 {
 		return nil, ErrAlreadyCompleted
 	}
-	return s.admin.RegisterInitialAdmin(ctx, email, password, fullName, ip)
+	tokens, err := s.admin.RegisterInitialAdmin(ctx, email, password, fullName, ip)
+	if err != nil {
+		return nil, err
+	}
+
+	// Bootstrap the platform's single internal tenant, owned by the initial
+	// admin. Best-effort: a failure here must not abort admin creation — the
+	// admin is a super_admin and can create the tenant from the UI afterwards.
+	// The default internal provisioning mode is `manual`, so without this the
+	// fresh platform would have zero tenants until the operator made one by
+	// hand. EnsureInternalTenant is idempotent and bypasses the manual gate
+	// (server-side call), but still honours the single-count invariant.
+	if s.internalTenant != nil && tokens != nil && tokens.User != nil {
+		name := internalTenantNameFromEmail(email)
+		if _, terr := s.internalTenant.EnsureInternalTenant(ctx, tokens.User.ID, name); terr != nil {
+			s.logger.Warn("setup: internal tenant bootstrap failed (admin created, create the tenant from the UI)",
+				slog.String("error", terr.Error()))
+		}
+	}
+	return tokens, nil
+}
+
+// internalTenantNameFromEmail derives a friendly default name for the
+// bootstrapped internal tenant from the admin's email domain
+// (e.g. admin@acme.com → "Acme"), falling back to "Internal" when the address
+// has no usable domain label. Operators can rename it from the admin UI.
+func internalTenantNameFromEmail(email string) string {
+	at := strings.LastIndex(email, "@")
+	if at < 0 || at == len(email)-1 {
+		return "Internal"
+	}
+	domain := email[at+1:]
+	label := domain
+	if dot := strings.Index(domain, "."); dot > 0 {
+		label = domain[:dot]
+	}
+	label = strings.TrimSpace(label)
+	if label == "" {
+		return "Internal"
+	}
+	return strings.ToUpper(label[:1]) + label[1:]
 }

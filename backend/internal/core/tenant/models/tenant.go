@@ -37,6 +37,22 @@ func (k TenantKind) Valid() bool {
 	return false
 }
 
+// ProvisioningMode is the admin-managed policy that governs how new tenants of
+// a given tier may be created. Read at request time from the tenant module's
+// config (`provisioning.internal.mode` / `provisioning.external.mode`).
+//
+//   - open   — any authenticated user may create (legacy behaviour, default).
+//   - manual — only holders of system.tenants.admin may create.
+//   - single — at most one active tenant of that tier may exist (internal only).
+//
+// An empty/unknown value is treated as ProvisioningModeOpen so a missing config
+// document never blocks creation.
+const (
+	ProvisioningModeOpen   = "open"
+	ProvisioningModeManual = "manual"
+	ProvisioningModeSingle = "single"
+)
+
 // TenantStatus drives the tenant lifecycle.
 //
 //	provisioning → active ↔ suspended
