@@ -962,6 +962,24 @@ type ClientSelfDeletionGate interface {
 // file or streamed to the DSR requester.
 type PersonalDataBundle = map[string]any
 
+// EraseMode selects how a PIIProducer satisfies a right-to-erasure request.
+// Producers branch on it: hard-delete removes rows outright; anonymize strips
+// PII in place where a tombstone must survive for referential integrity (the
+// canonical user identity row), falling back to hard-delete for satellite
+// rows that carry no anonymizable residue.
+type EraseMode int
+
+const (
+	// EraseHardDelete removes every matching row outright — the default,
+	// strongest erasure.
+	EraseHardDelete EraseMode = iota
+	// EraseAnonymize strips personal data in place but keeps the row where
+	// referential integrity requires it (e.g. the user identity row keeps
+	// its UUID, with the email aliased and profile fields blanked). The
+	// retention job later hard-deletes the anonymized tombstone.
+	EraseAnonymize
+)
+
 // PurgeResult summarizes the data a single producer erased. Bundled into
 // the DSR audit event so auditors can reconstruct exactly what was wiped
 // without reading the now-deleted rows.
@@ -987,12 +1005,11 @@ type PIIProducer interface {
 	// include partial results or abort.
 	ExportPersonalData(ctx context.Context, userUUID string) (any, error)
 
-	// PurgePersonalData deletes or anonymizes every record the producer
-	// holds for userUUID. GDPR right-to-erasure semantics apply: a row
-	// that merely sets a deleted-at flag is not erased. Returns a
-	// summary so the DSR audit log can record what was wiped without
-	// re-reading the now-deleted rows.
-	PurgePersonalData(ctx context.Context, userUUID string) (PurgeResult, error)
+	// PurgePersonalData erases every record the producer holds for userUUID
+	// per the requested EraseMode (hard-delete or anonymize). GDPR
+	// right-to-erasure semantics apply. Returns a summary so the DSR audit
+	// log can record what was wiped without re-reading the rows.
+	PurgePersonalData(ctx context.Context, userUUID string, mode EraseMode) (PurgeResult, error)
 }
 
 // PIIProducerRegistry is the boot-time catalog of registered producers.

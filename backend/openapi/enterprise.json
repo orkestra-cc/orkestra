@@ -821,6 +821,63 @@
         ],
         "type": "object"
       },
+      "AuditEvent": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "actorEmail": {
+            "type": "string"
+          },
+          "actorType": {
+            "type": "string"
+          },
+          "actorUserId": {
+            "type": "string"
+          },
+          "ipAddress": {
+            "type": "string"
+          },
+          "metadata": {
+            "additionalProperties": {},
+            "type": "object"
+          },
+          "outcome": {
+            "type": "string"
+          },
+          "resourceId": {
+            "type": "string"
+          },
+          "resourceType": {
+            "type": "string"
+          },
+          "tenantId": {
+            "type": "string"
+          },
+          "tenantKind": {
+            "type": "string"
+          },
+          "timestamp": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "userAgent": {
+            "type": "string"
+          },
+          "uuid": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "uuid",
+          "actorType",
+          "action",
+          "outcome",
+          "timestamp"
+        ],
+        "type": "object"
+      },
       "AuthMethodsView": {
         "additionalProperties": false,
         "properties": {
@@ -1653,6 +1710,94 @@
         ],
         "type": "object"
       },
+      "EraseOutputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/EraseOutputBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "errors": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "purged": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/PurgeResult"
+            },
+            "type": "object"
+          },
+          "totalRows": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "purged",
+          "totalRows"
+        ],
+        "type": "object"
+      },
+      "ErasureRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/ErasureRequest.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "requestedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "resolutionNote": {
+            "type": "string"
+          },
+          "resolvedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "resolvedBy": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "tenantId": {
+            "type": "string"
+          },
+          "userUuid": {
+            "type": "string"
+          },
+          "uuid": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "uuid",
+          "userUuid",
+          "status",
+          "requestedAt"
+        ],
+        "type": "object"
+      },
       "ErrorDetail": {
         "additionalProperties": false,
         "properties": {
@@ -1732,6 +1877,92 @@
             "type": "string"
           }
         },
+        "type": "object"
+      },
+      "ExecuteErasureRequestInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/ExecuteErasureRequestInputBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "mode": {
+            "default": "hard_delete",
+            "description": "Erasure mode",
+            "enum": [
+              "hard_delete",
+              "anonymize"
+            ],
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ExecuteErasureRequestOutputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/ExecuteErasureRequestOutputBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "purged": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/PurgeResult"
+            },
+            "type": "object"
+          }
+        },
+        "required": [
+          "purged"
+        ],
+        "type": "object"
+      },
+      "ExportOutputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/ExportOutputBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "bundle": {
+            "additionalProperties": {},
+            "type": "object"
+          },
+          "errors": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "producers": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "bundle",
+          "producers"
+        ],
         "type": "object"
       },
       "FatturaPAProfile": {
@@ -2061,6 +2292,106 @@
         ],
         "type": "object"
       },
+      "LegalHold": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/LegalHold.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "active": {
+            "type": "boolean"
+          },
+          "caseRef": {
+            "type": "string"
+          },
+          "placedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "placedBy": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "releaseReason": {
+            "type": "string"
+          },
+          "releasedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "releasedBy": {
+            "type": "string"
+          },
+          "tenantId": {
+            "type": "string"
+          },
+          "userUuid": {
+            "type": "string"
+          },
+          "uuid": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "uuid",
+          "userUuid",
+          "reason",
+          "placedBy",
+          "placedAt",
+          "active"
+        ],
+        "type": "object"
+      },
+      "ListAuditEventsOutputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/ListAuditEventsOutputBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AuditEvent"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "limit": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "offset": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "total": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "limit",
+          "offset"
+        ],
+        "type": "object"
+      },
       "ListEnvironmentsOutputBody": {
         "additionalProperties": false,
         "properties": {
@@ -2089,6 +2420,60 @@
         "required": [
           "activeEnvironment",
           "environments"
+        ],
+        "type": "object"
+      },
+      "ListErasureRequestsOutputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/ListErasureRequestsOutputBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ErasureRequest"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "ListLegalHoldsOutputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/ListLegalHoldsOutputBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/LegalHold"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items"
         ],
         "type": "object"
       },
@@ -2303,6 +2688,25 @@
             "type": "number"
           },
           "timezone": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "LodgeErasureRequestInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/LodgeErasureRequestInputBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "reason": {
+            "description": "Optional reason for the request",
             "type": "string"
           }
         },
@@ -3740,6 +4144,37 @@
         ],
         "type": "object"
       },
+      "PlaceLegalHoldInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/PlaceLegalHoldInputBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "caseRef": {
+            "description": "Optional external case reference",
+            "type": "string"
+          },
+          "reason": {
+            "description": "Why the hold is placed (litigation, investigation, ...)",
+            "type": "string"
+          },
+          "userUuid": {
+            "description": "Subject the hold applies to",
+            "type": "string"
+          }
+        },
+        "required": [
+          "userUuid",
+          "reason"
+        ],
+        "type": "object"
+      },
       "PreferenceDoc": {
         "additionalProperties": false,
         "properties": {
@@ -3844,6 +4279,33 @@
         ],
         "type": "object"
       },
+      "PurgeResult": {
+        "additionalProperties": false,
+        "properties": {
+          "collections": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "rowsAnonymized": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "rowsDeleted": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "rowsDeleted",
+          "rowsAnonymized"
+        ],
+        "type": "object"
+      },
       "Readiness-checkResponse": {
         "additionalProperties": false,
         "properties": {
@@ -3931,6 +4393,47 @@
         ],
         "type": "object"
       },
+      "RejectErasureRequestInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/RejectErasureRequestInputBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "note": {
+            "description": "Why the request is rejected",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ReleaseLegalHoldInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/ReleaseLegalHoldInputBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "releaseReason": {
+            "description": "Why the hold is released",
+            "type": "string"
+          }
+        },
+        "required": [
+          "releaseReason"
+        ],
+        "type": "object"
+      },
       "ResendInviteClientUserAdminRequestBody": {
         "additionalProperties": false,
         "properties": {
@@ -3996,6 +4499,44 @@
         "required": [
           "token",
           "newPassword"
+        ],
+        "type": "object"
+      },
+      "RetentionPreviewOutputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/RetentionPreviewOutputBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "count": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "cutoff": {
+            "description": "Tombstones with deletedAt before this are eligible for cleanup",
+            "format": "date-time",
+            "type": "string"
+          },
+          "userUuids": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "cutoff",
+          "count",
+          "userUuids"
         ],
         "type": "object"
       },
@@ -6198,6 +6739,150 @@
         ]
       }
     },
+    "/v1/admin/audit-events": {
+      "get": {
+        "description": "Platform admin read over the compliance audit trail. Supports filtering by tenant, actor, action, resource, outcome, and time range.",
+        "operationId": "compliance-audit-events-list",
+        "parameters": [
+          {
+            "description": "Filter to a specific tenant",
+            "explode": false,
+            "in": "query",
+            "name": "tenantId",
+            "schema": {
+              "description": "Filter to a specific tenant",
+              "type": "string"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "actorUserId",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Exact action match (e.g. auth.login.succeeded)",
+            "explode": false,
+            "in": "query",
+            "name": "action",
+            "schema": {
+              "description": "Exact action match (e.g. auth.login.succeeded)",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Action family prefix (e.g. auth. to match all auth.* events)",
+            "explode": false,
+            "in": "query",
+            "name": "actionPrefix",
+            "schema": {
+              "description": "Action family prefix (e.g. auth. to match all auth.* events)",
+              "type": "string"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "resourceType",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "resourceId",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "outcome",
+            "schema": {
+              "enum": [
+                "success",
+                "failure",
+                "denied"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "RFC3339 lower bound (inclusive)",
+            "explode": false,
+            "in": "query",
+            "name": "since",
+            "schema": {
+              "description": "RFC3339 lower bound (inclusive)",
+              "type": "string"
+            }
+          },
+          {
+            "description": "RFC3339 upper bound (inclusive)",
+            "explode": false,
+            "in": "query",
+            "name": "until",
+            "schema": {
+              "description": "RFC3339 upper bound (inclusive)",
+              "type": "string"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 50,
+              "format": "int64",
+              "maximum": 500,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "offset",
+            "schema": {
+              "default": 0,
+              "format": "int64",
+              "minimum": 0,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListAuditEventsOutputBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "List platform audit events",
+        "tags": [
+          "Compliance"
+        ]
+      }
+    },
     "/v1/admin/client-users": {
       "get": {
         "description": "Returns every client_users row joined with tenant memberships. Self-registered users with no memberships are included with an empty memberships array.",
@@ -6852,6 +7537,290 @@
         "summary": "Toggle a tenant's Italian-billable flag (platform admin)",
         "tags": [
           "Tenants Admin"
+        ]
+      }
+    },
+    "/v1/admin/compliance/erasure-requests": {
+      "get": {
+        "operationId": "compliance-erasure-requests-list",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListErasureRequestsOutputBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "List pending right-to-erasure requests",
+        "tags": [
+          "Compliance"
+        ]
+      }
+    },
+    "/v1/admin/compliance/erasure-requests/{id}/execute": {
+      "post": {
+        "operationId": "compliance-erasure-request-execute",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExecuteErasureRequestInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExecuteErasureRequestOutputBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Execute a right-to-erasure request (runs the DSR erase)",
+        "tags": [
+          "Compliance"
+        ]
+      }
+    },
+    "/v1/admin/compliance/erasure-requests/{id}/reject": {
+      "post": {
+        "operationId": "compliance-erasure-request-reject",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RejectErasureRequestInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Reject a right-to-erasure request",
+        "tags": [
+          "Compliance"
+        ]
+      }
+    },
+    "/v1/admin/compliance/legal-holds": {
+      "get": {
+        "operationId": "compliance-legal-hold-list",
+        "parameters": [
+          {
+            "description": "Filter to one subject",
+            "explode": false,
+            "in": "query",
+            "name": "userUuid",
+            "schema": {
+              "description": "Filter to one subject",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListLegalHoldsOutputBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "List active legal holds",
+        "tags": [
+          "Compliance"
+        ]
+      },
+      "post": {
+        "operationId": "compliance-legal-hold-place",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlaceLegalHoldInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LegalHold"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Place a legal hold on a data subject (blocks GDPR erasure)",
+        "tags": [
+          "Compliance"
+        ]
+      }
+    },
+    "/v1/admin/compliance/legal-holds/{id}": {
+      "delete": {
+        "operationId": "compliance-legal-hold-release",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReleaseLegalHoldInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Release a legal hold",
+        "tags": [
+          "Compliance"
+        ]
+      }
+    },
+    "/v1/admin/compliance/retention/preview": {
+      "get": {
+        "description": "Lists anonymized user tombstones past the retention window that the auto-cleanup job would hard-delete. Mutates nothing; safe to retry.",
+        "operationId": "compliance-retention-preview",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RetentionPreviewOutputBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Preview retention auto-cleanup candidates (dry run)",
+        "tags": [
+          "Compliance"
         ]
       }
     },
@@ -12238,6 +13207,115 @@
         "summary": "Update the caller's billing identity",
         "tags": [
           "Tenants"
+        ]
+      }
+    },
+    "/v1/me/dsr/erase": {
+      "post": {
+        "description": "Irreversibly deletes the caller's personal data across every registered PII producer. After erasure the caller's access token keeps validating until it expires; subsequent refresh fails because the refresh-token rows are wiped.",
+        "operationId": "compliance-me-dsr-erase",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EraseOutputBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Erase the caller's personal data (GDPR right to erasure)",
+        "tags": [
+          "Compliance",
+          "DSR"
+        ]
+      }
+    },
+    "/v1/me/dsr/erasure-request": {
+      "post": {
+        "description": "Records a pending erasure request. Unlike /v1/me/dsr/erase (immediate), this is the mediated workflow — an operator reviews and executes it.",
+        "operationId": "compliance-me-erasure-request",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LodgeErasureRequestInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErasureRequest"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Lodge a right-to-erasure request for operator review",
+        "tags": [
+          "Compliance",
+          "DSR"
+        ]
+      }
+    },
+    "/v1/me/dsr/export": {
+      "post": {
+        "description": "Synchronously collects the caller's personal data across every registered PII producer and returns it inline. Safe to retry — read-only.",
+        "operationId": "compliance-me-dsr-export",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExportOutputBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Export the caller's personal data (GDPR right of access)",
+        "tags": [
+          "Compliance",
+          "DSR"
         ]
       }
     },

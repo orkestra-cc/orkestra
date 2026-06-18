@@ -511,6 +511,22 @@ func (r *Repository) DeleteMembershipsByTenant(ctx context.Context, tenantUUID s
 	return res.DeletedCount, nil
 }
 
+// DeleteMembershipsByUser hard-deletes every membership row for a user across
+// all tenants. Used by the compliance DSR erase pipeline (right to erasure) —
+// removes the data subject from every org they belonged to. Mirrors
+// DeleteMembershipsByTenant on the user axis.
+func (r *Repository) DeleteMembershipsByUser(ctx context.Context, userUUID string) (int64, error) {
+	if userUUID == "" {
+		return 0, nil
+	}
+	//tenantscope:allow DSR erase is cross-tenant by data-subject; the filter pins userUUID explicitly (mirrors DeleteMembershipsByTenant).
+	res, err := r.db.Collection(CollMemberships).DeleteMany(ctx, bson.M{"userUUID": userUUID})
+	if err != nil {
+		return 0, err
+	}
+	return res.DeletedCount, nil
+}
+
 func (r *Repository) ListMembershipsByUser(ctx context.Context, userUUID string) ([]models.TenantMembership, error) {
 	cur, err := r.db.Collection(CollMemberships).Find(ctx, bson.M{
 		"userUUID": userUUID,
