@@ -38,6 +38,13 @@ func (r *inMemoryKMSRepo) GetByUUID(_ context.Context, uuid string) (*models.KMS
 	}
 	return k, nil
 }
+func (r *inMemoryKMSRepo) GetByTenant(_ context.Context, tenantUUID string) (*models.KMSKey, error) {
+	uuid, ok := r.byTenant[tenantUUID]
+	if !ok {
+		return nil, iface.ErrKMSKeyNotFound
+	}
+	return r.byUUID[uuid], nil
+}
 func (r *inMemoryKMSRepo) Shred(_ context.Context, uuid string) error {
 	k, ok := r.byUUID[uuid]
 	if !ok {
@@ -165,6 +172,99 @@ func TestShredMissingKeyIsNotFound(t *testing.T) {
 	repo := newInMemoryKMSRepo()
 	err := repo.Shred(context.Background(), "nonexistent")
 	if !stderrors.Is(err, iface.ErrKMSKeyNotFound) {
+		t.Fatalf("expected ErrKMSKeyNotFound, got %v", err)
+	}
+}
+
+// newTestKMS builds a LocalKMS over the in-memory repo with a deterministic
+// 32-byte master key — exercises CreateKey/Encrypt/Decrypt/DeleteKey end to
+// end without env vars or MongoDB.
+func newTestKMS() *LocalKMS {
+	return &LocalKMS{repo: newInMemoryKMSRepo(), masterKey: bytes32(0x3a)}
+}
+
+// TestCreateKeyIsIdempotent pins that a second CreateKey for the same tenant
+// returns the existing key rather than minting (and persisting) a second one.
+func TestCreateKeyIsIdempotent(t *testing.T) {
+	t.Parallel()
+	kms := newTestKMS()
+	ctx := context.Background()
+
+	id1, err := kms.CreateKey(ctx, "t-1")
+	if err != nil {
+		t.Fatalf("CreateKey #1: %v", err)
+	}
+	id2, err := kms.CreateKey(ctx, "t-1")
+	if err != nil {
+		t.Fatalf("CreateKey #2: %v", err)
+	}
+	if id1 != id2 {
+		t.Fatalf("CreateKey not idempotent: %q != %q", id1, id2)
+	}
+	repo := kms.repo.(*inMemoryKMSRepo)
+	if len(repo.byUUID) != 1 {
+		t.Fatalf("expected exactly one persisted key, got %d", len(repo.byUUID))
+	}
+}
+
+// TestEncryptDecryptRoundTrip pins that ciphertext sealed under a tenant's DEK
+// decrypts back to the original plaintext through the full envelope path.
+func TestEncryptDecryptRoundTrip(t *testing.T) {
+	t.Parallel()
+	kms := newTestKMS()
+	ctx := context.Background()
+
+	keyID, err := kms.CreateKey(ctx, "t-1")
+	if err != nil {
+		t.Fatalf("CreateKey: %v", err)
+	}
+	plaintext := []byte("subject PII payload")
+	ct, err := kms.Encrypt(ctx, keyID, plaintext)
+	if err != nil {
+		t.Fatalf("Encrypt: %v", err)
+	}
+	if string(ct) == string(plaintext) {
+		t.Fatal("ciphertext must not equal plaintext")
+	}
+	got, err := kms.Decrypt(ctx, keyID, ct)
+	if err != nil {
+		t.Fatalf("Decrypt: %v", err)
+	}
+	if string(got) != string(plaintext) {
+		t.Fatalf("round-trip mismatch: got %q want %q", got, plaintext)
+	}
+}
+
+// TestDecryptAfterShredFails pins the crypto-shred contract: once the DEK is
+// shredded, previously-valid ciphertext can no longer be opened —
+// ErrKMSKeyDeleted is the signal callers rely on to notice the data is gone.
+func TestDecryptAfterShredFails(t *testing.T) {
+	t.Parallel()
+	kms := newTestKMS()
+	ctx := context.Background()
+
+	keyID, err := kms.CreateKey(ctx, "t-1")
+	if err != nil {
+		t.Fatalf("CreateKey: %v", err)
+	}
+	ct, err := kms.Encrypt(ctx, keyID, []byte("secret"))
+	if err != nil {
+		t.Fatalf("Encrypt: %v", err)
+	}
+	if err := kms.DeleteKey(ctx, keyID); err != nil {
+		t.Fatalf("DeleteKey: %v", err)
+	}
+	if _, err := kms.Decrypt(ctx, keyID, ct); !stderrors.Is(err, iface.ErrKMSKeyDeleted) {
+		t.Fatalf("expected ErrKMSKeyDeleted after shred, got %v", err)
+	}
+}
+
+// TestEncryptMissingKeyIsNotFound pins that encrypting under an unknown keyID
+// surfaces ErrKMSKeyNotFound rather than panicking on a nil row.
+func TestEncryptMissingKeyIsNotFound(t *testing.T) {
+	t.Parallel()
+	kms := newTestKMS()
+	if _, err := kms.Encrypt(context.Background(), "nonexistent", []byte("x")); !stderrors.Is(err, iface.ErrKMSKeyNotFound) {
 		t.Fatalf("expected ErrKMSKeyNotFound, got %v", err)
 	}
 }

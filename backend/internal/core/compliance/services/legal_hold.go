@@ -6,17 +6,26 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/orkestra/backend/internal/core/compliance/models"
-	"github.com/orkestra/backend/internal/core/compliance/repository"
 )
+
+// legalHoldRepo is the persistence seam the service depends on. Satisfied by
+// *repository.LegalHoldRepository in production; a fake stands in for unit
+// tests so the service logic is exercised without MongoDB.
+type legalHoldRepo interface {
+	Insert(ctx context.Context, h *models.LegalHold) error
+	Release(ctx context.Context, uuid, releasedBy, reason string) error
+	ListActive(ctx context.Context, userUUID string) ([]models.LegalHold, error)
+	IsHeld(ctx context.Context, userUUID string) (bool, error)
+}
 
 // LegalHoldService manages litigation/investigation holds and answers the
 // DSR pipeline's IsHeld check — it satisfies DSRService's LegalHoldChecker.
 type LegalHoldService struct {
-	repo *repository.LegalHoldRepository
+	repo legalHoldRepo
 }
 
 // NewLegalHoldService binds the service to its repository.
-func NewLegalHoldService(repo *repository.LegalHoldRepository) *LegalHoldService {
+func NewLegalHoldService(repo legalHoldRepo) *LegalHoldService {
 	return &LegalHoldService{repo: repo}
 }
 

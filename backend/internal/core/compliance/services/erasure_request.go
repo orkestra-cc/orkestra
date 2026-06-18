@@ -10,17 +10,27 @@ import (
 	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
+// erasureRequestRepo is the persistence seam the service depends on. Satisfied
+// by *repository.ErasureRequestRepository in production; a fake stands in for
+// unit tests so the workflow logic is exercised without MongoDB.
+type erasureRequestRepo interface {
+	Insert(ctx context.Context, req *models.ErasureRequest) error
+	Get(ctx context.Context, uuid string) (*models.ErasureRequest, error)
+	ListByStatus(ctx context.Context, status string) ([]models.ErasureRequest, error)
+	Resolve(ctx context.Context, uuid, status, resolvedBy, mode, note string) error
+}
+
 // ErasureRequestService runs the mediated right-to-erasure workflow: data
 // subjects lodge requests; operators review, then execute (running the DSR
 // erase) or reject. Distinct from the immediate /me/dsr/erase path.
 type ErasureRequestService struct {
-	repo *repository.ErasureRequestRepository
+	repo erasureRequestRepo
 	dsr  *DSRService
 }
 
 // NewErasureRequestService wires the workflow service to its repo + the DSR
 // pipeline used at execution time.
-func NewErasureRequestService(repo *repository.ErasureRequestRepository, dsr *DSRService) *ErasureRequestService {
+func NewErasureRequestService(repo erasureRequestRepo, dsr *DSRService) *ErasureRequestService {
 	return &ErasureRequestService{repo: repo, dsr: dsr}
 }
 

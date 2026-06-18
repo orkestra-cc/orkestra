@@ -34,6 +34,21 @@ func (s *stubProducer) PurgePersonalData(ctx context.Context, userUUID string, _
 	return s.purgeResult, s.purgeErr
 }
 
+// fakeHoldChecker is a test double for LegalHoldChecker. Lets erase tests
+// pin the legal-hold gate without the legal-hold subsystem.
+type fakeHoldChecker struct {
+	held     bool
+	err      error
+	calls    int
+	lastUUID string
+}
+
+func (f *fakeHoldChecker) IsHeld(_ context.Context, userUUID string) (bool, error) {
+	f.calls++
+	f.lastUUID = userUUID
+	return f.held, f.err
+}
+
 // capturingAuditSink records every audit event for assertion. Satisfies
 // iface.AuditSink.
 type capturingAuditSink struct {
@@ -175,5 +190,114 @@ func TestEraseAggregatesPurgeResults(t *testing.T) {
 	meta, ok := sink.events[0].Metadata["totalRows"].(int)
 	if !ok || meta != 6 {
 		t.Fatalf("erase audit metadata.totalRows = %v; want 6", sink.events[0].Metadata["totalRows"])
+	}
+}
+
+// TestEraseBlockedByLegalHold pins the legal-hold gate: when the subject is
+// held, Erase returns ErrLegalHoldActive, runs no producer, and emits no
+// "erased" audit row (the blocked attempt is the caller's to log).
+func TestEraseBlockedByLegalHold(t *testing.T) {
+	t.Parallel()
+
+	user := &stubProducer{subject: "user"}
+	svc, sink := newDSRService(user)
+	svc.SetLegalHoldChecker(&fakeHoldChecker{held: true})
+
+	_, err := svc.Erase(context.Background(), "u-held", iface.EraseHardDelete)
+	if !errors.Is(err, ErrLegalHoldActive) {
+		t.Fatalf("expected ErrLegalHoldActive, got %v", err)
+	}
+	if user.purgeCalls != 0 {
+		t.Fatalf("no producer should run when the subject is held; got %d calls", user.purgeCalls)
+	}
+	if len(sink.events) != 0 {
+		t.Fatalf("no audit row should be emitted on a blocked erase; got %+v", sink.events)
+	}
+}
+
+// TestEraseProceedsWhenNotHeld pins that an inactive hold lets the pipeline
+// run and the checker is consulted with the right subject.
+func TestEraseProceedsWhenNotHeld(t *testing.T) {
+	t.Parallel()
+
+	user := &stubProducer{subject: "user", purgeResult: iface.PurgeResult{RowsDeleted: 1}}
+	svc, sink := newDSRService(user)
+	checker := &fakeHoldChecker{held: false}
+	svc.SetLegalHoldChecker(checker)
+
+	if _, err := svc.Erase(context.Background(), "u-ok", iface.EraseHardDelete); err != nil {
+		t.Fatalf("Erase returned error: %v", err)
+	}
+	if checker.calls != 1 || checker.lastUUID != "u-ok" {
+		t.Fatalf("hold checker should be called once with u-ok; calls=%d uuid=%q", checker.calls, checker.lastUUID)
+	}
+	if user.purgeCalls != 1 {
+		t.Fatalf("producer should run when not held; got %d calls", user.purgeCalls)
+	}
+	if len(sink.events) != 1 {
+		t.Fatalf("expected one erased audit row; got %+v", sink.events)
+	}
+}
+
+// TestErasePropagatesHoldCheckerError pins that a checker failure aborts
+// erasure with the underlying error rather than silently erasing.
+func TestErasePropagatesHoldCheckerError(t *testing.T) {
+	t.Parallel()
+
+	user := &stubProducer{subject: "user"}
+	svc, _ := newDSRService(user)
+	boom := errors.New("mongo down")
+	svc.SetLegalHoldChecker(&fakeHoldChecker{err: boom})
+
+	_, err := svc.Erase(context.Background(), "u-1", iface.EraseHardDelete)
+	if !errors.Is(err, boom) {
+		t.Fatalf("expected the hold-checker error to propagate, got %v", err)
+	}
+	if user.purgeCalls != 0 {
+		t.Fatalf("no producer should run when the hold check errors; got %d", user.purgeCalls)
+	}
+}
+
+// TestEraseModeLabelInAudit pins that the erase mode is rendered into the
+// audit metadata so SOC2 review can tell anonymize from hard-delete.
+func TestEraseModeLabelInAudit(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		mode iface.EraseMode
+		want string
+	}{
+		{iface.EraseAnonymize, "anonymize"},
+		{iface.EraseHardDelete, "hard_delete"},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.want, func(t *testing.T) {
+			t.Parallel()
+			svc, sink := newDSRService(&stubProducer{subject: "user"})
+			if _, err := svc.Erase(context.Background(), "u-1", tc.mode); err != nil {
+				t.Fatalf("Erase: %v", err)
+			}
+			if got := sink.events[0].Metadata["mode"]; got != tc.want {
+				t.Fatalf("audit metadata.mode = %v; want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestEraseNilSinkIsSafe pins the nil-sink contract: a DSR service wired
+// without an audit sink must still erase without panicking.
+func TestEraseNilSinkIsSafe(t *testing.T) {
+	t.Parallel()
+
+	reg := iface.NewPIIProducerRegistry()
+	reg.Register(&stubProducer{subject: "user"})
+	svc := NewDSRService(reg, nil, slog.Default())
+
+	if _, err := svc.Erase(context.Background(), "u-1", iface.EraseHardDelete); err != nil {
+		t.Fatalf("Erase with nil sink should not error: %v", err)
+	}
+	if _, err := svc.Export(context.Background(), "u-1"); err != nil {
+		t.Fatalf("Export with nil sink should not error: %v", err)
 	}
 }

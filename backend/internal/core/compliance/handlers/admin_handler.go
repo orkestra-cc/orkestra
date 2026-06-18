@@ -13,15 +13,23 @@ import (
 	"github.com/orkestra/backend/internal/core/compliance/repository"
 )
 
+// auditLister is the read seam the admin handler depends on. Satisfied by
+// *repository.AuditEventRepository in production; a fake stands in for unit
+// tests so the filter-mapping + date-parsing logic is exercised without
+// MongoDB.
+type auditLister interface {
+	List(ctx context.Context, f repository.Filter) ([]models.AuditEvent, int64, error)
+}
+
 // AdminHandler reads from the audit-events repository. It does not own the
 // sink — consumers register audit events through iface.AuditSink, the sink
 // persists them, and this handler queries the same collection.
 type AdminHandler struct {
-	repo *repository.AuditEventRepository
+	repo auditLister
 }
 
 // New returns a handler bound to repo.
-func New(repo *repository.AuditEventRepository) *AdminHandler {
+func New(repo auditLister) *AdminHandler {
 	return &AdminHandler{repo: repo}
 }
 

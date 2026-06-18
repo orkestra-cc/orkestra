@@ -38,8 +38,19 @@ import (
 //     re-derived from anything else, so every ciphertext wrapped
 //     with it is cryptographically unrecoverable.
 type LocalKMS struct {
-	repo      *repository.KMSKeyRepository
+	repo      kmsRepo
 	masterKey []byte // 32 bytes
+}
+
+// kmsRepo is the persistence seam LocalKMS depends on. Satisfied by
+// *repository.KMSKeyRepository in production; an in-memory fake stands in
+// for unit tests so the envelope/crypto-shred logic is exercised without
+// booting MongoDB.
+type kmsRepo interface {
+	Insert(ctx context.Context, key *models.KMSKey) error
+	GetByTenant(ctx context.Context, tenantUUID string) (*models.KMSKey, error)
+	GetByUUID(ctx context.Context, keyUUID string) (*models.KMSKey, error)
+	Shred(ctx context.Context, keyUUID string) error
 }
 
 // NewLocalKMS reads the master key from env and builds a provider.
