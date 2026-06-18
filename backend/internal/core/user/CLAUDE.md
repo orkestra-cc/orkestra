@@ -54,6 +54,7 @@ These permissions gate the module's own HTTP endpoints. Note that the current ad
 - **Init**: constructs both per-tier user repositories and matching OAuth provider repositories (operator + client) from the auth package, wires the per-tier `UserService` instances, and registers each under `ServiceOperatorUserProvider` / `ServiceClientUserProvider`. The operator-tier provider is also registered under the canonical `ServiceUserService` key — that's what unaware consumers (setup wizard, dev token generator) get by default; audience-aware consumers (onboarding) request the per-tier key directly.
 - **Start / Stop / HealthCheck**: inherit the no-op from `BaseModule`.
 - **Seeding**: none. Users are created by the auth module's registration flows or the setup wizard.
+- **GDPR/DSR** (`services/pii_producer.go`): registers an `iface.PIIProducer` (subject `"user"`) on `ServicePIIProducerRegistry` at Init. Exports the profile projection (email, username, name, phone, avatar, role, OAuth links — **never** the password hash or PIN, which are server secrets, not portable personal data). Purge **anonymizes** the identity row under `EraseAnonymize` (keeps the UUID so foreign references stay valid, aliases the email, blanks the profile → the canonical tombstone the retention job later hard-deletes) and removes it outright under `EraseHardDelete`. Consumed by the [compliance module](../compliance/CLAUDE.md)'s DSR pipeline (ADR-0009).
 
 ## HTTP endpoints
 
