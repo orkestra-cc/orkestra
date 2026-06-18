@@ -52,5 +52,5 @@ All three are `System: true`. `audit.read` is Cedar-covered by the `read` suffix
 
 ## Follow-ups
 
-- **Export → blob (deferred):** the inline `/me/dsr/export` returns the full bundle and satisfies Art. 15. A blob+TTL variant for large payloads is blocked on `blob.Store` exposing only client-driven `PresignPut` (no server-side `Put`). See the plan.
+- **Export → blob (partly unblocked):** the inline `/me/dsr/export` returns the full bundle and satisfies Art. 15. The blob+TTL variant for large payloads was blocked on `blob.Store` having no server-side write — that seam now exists (`blob.Store.Put(ctx, key, contentType, io.Reader)`, added as a follow-up). Remaining work: wire a `blob.Store` into the compliance module and add an export-to-blob path that stores the bundle then hands the subject a short-lived `PresignGet` URL. See the plan.
 - Per-subject crypto-shred (today KMS is per-tenant); a static lint flagging a `userUUID`-owning collection without a `PIIProducer`.

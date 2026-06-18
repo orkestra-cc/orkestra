@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -162,6 +163,31 @@ func (s *s3Store) PresignPut(ctx context.Context, key, contentType string, ttl t
 		Key:       key,
 		ExpiresAt: time.Now().Add(ttl),
 	}, nil
+}
+
+// Put streams body to the bucket under key, overwriting any existing
+// object. ContentType is pinned on the stored object so a later
+// PresignGet serves it with the right mime. A non-seekable body is
+// buffered by the SDK to compute the request signature.
+func (s *s3Store) Put(ctx context.Context, key, contentType string, body io.Reader) error {
+	if key == "" {
+		return errors.New("blob: key is required")
+	}
+	if contentType == "" {
+		return errors.New("blob: contentType is required")
+	}
+	if body == nil {
+		return errors.New("blob: body is required")
+	}
+	if _, err := s.client.PutObject(ctx, &s3.PutObjectInput{
+		Bucket:      aws.String(s.bucket),
+		Key:         aws.String(key),
+		ContentType: aws.String(contentType),
+		Body:        body,
+	}); err != nil {
+		return fmt.Errorf("blob: put: %w", err)
+	}
+	return nil
 }
 
 func (s *s3Store) PresignGet(ctx context.Context, key string, ttl time.Duration) (string, error) {

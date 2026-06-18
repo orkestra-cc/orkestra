@@ -3,6 +3,7 @@ package blob
 import (
 	"context"
 	"errors"
+	"io"
 	"testing"
 	"time"
 
@@ -22,8 +23,9 @@ func (f *fakeStore) PresignPut(context.Context, string, string, time.Duration) (
 func (f *fakeStore) PresignGet(_ context.Context, _ string, _ time.Duration) (string, error) {
 	return f.presignURL, f.presignErr
 }
-func (f *fakeStore) Delete(context.Context, string) error         { return nil }
-func (f *fakeStore) Exists(context.Context, string) (bool, error) { return true, nil }
+func (f *fakeStore) Put(context.Context, string, string, io.Reader) error { return nil }
+func (f *fakeStore) Delete(context.Context, string) error                 { return nil }
+func (f *fakeStore) Exists(context.Context, string) (bool, error)         { return true, nil }
 
 func TestResolveAvatarURL(t *testing.T) {
 	t.Parallel()
