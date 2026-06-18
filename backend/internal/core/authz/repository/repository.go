@@ -240,6 +240,40 @@ func (r *Repository) DeleteBindingsByUserAndTenant(ctx context.Context, userUUID
 	return res.DeletedCount, nil
 }
 
+// ListBindingsByUser returns every binding for a user across all tenants
+// (and global bindings, tenantId==""). Used by the compliance DSR export
+// pipeline (right of access) — a data subject's role grants are their data.
+func (r *Repository) ListBindingsByUser(ctx context.Context, userUUID string) ([]models.Binding, error) {
+	if userUUID == "" {
+		return nil, nil
+	}
+	//tenantscope:allow DSR export is cross-tenant by data-subject; the filter pins userUUID explicitly.
+	cur, err := r.db.Collection(CollBindings).Find(ctx, bson.M{"userUUID": userUUID})
+	if err != nil {
+		return nil, err
+	}
+	defer cur.Close(ctx)
+	var out []models.Binding
+	if err := cur.All(ctx, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// DeleteBindingsByUser removes every binding for a user across all tenants
+// (and global bindings). Used by the compliance DSR erase pipeline.
+func (r *Repository) DeleteBindingsByUser(ctx context.Context, userUUID string) (int64, error) {
+	if userUUID == "" {
+		return 0, nil
+	}
+	//tenantscope:allow DSR erase is cross-tenant by data-subject; the filter pins userUUID explicitly (mirrors DeleteBindingsByUserAndTenant).
+	res, err := r.db.Collection(CollBindings).DeleteMany(ctx, bson.M{"userUUID": userUUID})
+	if err != nil {
+		return 0, err
+	}
+	return res.DeletedCount, nil
+}
+
 // ListActiveBindingsForUser returns all bindings for (userUUID, tenantID)
 // that have not expired. Pass tenantID="" to fetch global/system bindings.
 func (r *Repository) ListActiveBindingsForUser(ctx context.Context, userUUID, tenantID string) ([]models.Binding, error) {

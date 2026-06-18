@@ -124,6 +124,7 @@ export interface AppPaths {
   moduleManagement: string;
   roleManagement: string;
   tenantManagement: string;
+  compliance: string;
   adminUserProfile: string;
 
   operatorProfile: string;
@@ -449,6 +450,7 @@ const paths: AppPaths = {
   moduleManagement: `/${rootPaths.adminRoot}/modules`,
   roleManagement: `/${rootPaths.adminRoot}/roles`,
   tenantManagement: `/${rootPaths.adminRoot}/tenants`,
+  compliance: `/${rootPaths.adminRoot}/compliance`,
   adminUserProfile: `/${rootPaths.adminRoot}/user/profile/:userId`,
 
   operatorProfile: `/${rootPaths.adminRoot}/operator/profile/:operatorId`,

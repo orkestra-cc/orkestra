@@ -59,6 +59,7 @@ Collection name constants live in `repository/repository.go` as `CollOrgs`, `Col
 - **Init** (`module.go:70-76`): constructs the repository, builds the service, creates the handler, and registers the service as `iface.TenantProvider` in the registry.
 - **Start / Stop / HealthCheck**: inherit from `BaseModule` (no-op).
 - **Seeding**: none. Orgs are created by users via the setup wizard or `POST /v1/orgs`.
+- **GDPR/DSR** (`services/pii_producer.go`): registers an `iface.PIIProducer` (subject `"tenant"`) on `ServicePIIProducerRegistry` at Init. The subject's personal data here is their **tenant memberships** (which orgs, what roles) — the orgs/tenants themselves are not the subject's data and are left intact. Export returns the membership rows; purge deletes them (`tenant_memberships`) under **both** erase modes, since a membership row IS the user→org linkage with no anonymizable residue. Consumed by the [compliance module](../compliance/CLAUDE.md)'s DSR pipeline (ADR-0009).
 
 ## HTTP endpoints
 

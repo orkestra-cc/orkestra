@@ -5,8 +5,10 @@
 // be promoted to pkg/sdk/iface so external addons can satisfy it.
 //
 // The package is intentionally tiny: a pre-signed PUT + GET surface,
-// a Delete, and a HEAD-style Exists. Anything richer (multi-part
-// upload, server-side resize, range reads) belongs in a higher layer.
+// a server-side Put (for payloads the backend assembles itself, e.g.
+// a GDPR DSR export bundle), a Delete, and a HEAD-style Exists.
+// Anything richer (multi-part upload, server-side resize, range
+// reads) belongs in a higher layer.
 //
 // Production default backend is RustFS (Apache-2.0, S3-compatible),
 // declared in docker-compose.infra.yml. Any S3-API-compatible target
@@ -17,6 +19,7 @@ package blob
 import (
 	"context"
 	"errors"
+	"io"
 	"time"
 )
 
@@ -46,6 +49,14 @@ type Store interface {
 	// the caller's responsibility (the signer typically cannot enforce
 	// Content-Length on a presigned PUT).
 	PresignPut(ctx context.Context, key, contentType string, ttl time.Duration) (*PresignedPut, error)
+	// Put streams body to the backend server-side, bypassing the
+	// presigned-URL dance. Use it when the payload originates on the
+	// server and the client never holds it — e.g. a GDPR DSR export
+	// bundle the backend assembles, stores, then hands the subject a
+	// short-lived PresignGet URL for. PresignPut is for the opposite
+	// case (the SPA uploads directly). Overwrites an existing key; a
+	// non-seekable reader may be buffered to compute the signature.
+	Put(ctx context.Context, key, contentType string, body io.Reader) error
 	// PresignGet returns a short-lived URL the SPA can GET to render
 	// the blob. Callers should refresh on every read path so the URL
 	// in flight is never close to expiry; a Redis-cached wrapper lives

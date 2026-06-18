@@ -52,12 +52,22 @@ func (p *piiProducer) ExportPersonalData(ctx context.Context, userUUID string) (
 	}, nil
 }
 
-// PurgePersonalData hard-deletes the user row. The DSR service is the
-// only caller — it runs producers in order, and the audit sink records
-// the pre-erase export before any producer runs.
-func (p *piiProducer) PurgePersonalData(ctx context.Context, userUUID string) (iface.PurgeResult, error) {
-	err := p.userRepo.HardDelete(ctx, userUUID)
-	if err != nil {
+// PurgePersonalData erases the user identity row. The user row is the one
+// place anonymize is meaningfully different from hard-delete: anonymize keeps
+// the UUID (so foreign references stay valid) while aliasing the email and
+// blanking the profile — the canonical tombstone the retention job later
+// hard-deletes. Hard-delete removes the row outright.
+func (p *piiProducer) PurgePersonalData(ctx context.Context, userUUID string, mode iface.EraseMode) (iface.PurgeResult, error) {
+	if mode == iface.EraseAnonymize {
+		if err := p.userRepo.SoftDeleteAndAliasEmail(ctx, userUUID); err != nil {
+			if stderrors.Is(err, repository.ErrUserNotFound) {
+				return iface.PurgeResult{}, nil
+			}
+			return iface.PurgeResult{}, err
+		}
+		return iface.PurgeResult{RowsAnonymized: 1, Collections: []string{"users"}}, nil
+	}
+	if err := p.userRepo.HardDelete(ctx, userUUID); err != nil {
 		if stderrors.Is(err, repository.ErrUserNotFound) {
 			return iface.PurgeResult{}, nil
 		}

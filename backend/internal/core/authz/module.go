@@ -119,6 +119,13 @@ func (m *Module) Permissions() []iface.PermissionSpec {
 func (m *Module) Init(deps *module.Dependencies) error {
 	repo := repository.New(deps.DB)
 
+	// Register the authz PII producer with the DSR registry (created in
+	// main.go before InitAll) so the compliance DSR pipeline exports / erases
+	// a data subject's role bindings across tenants.
+	if reg, ok := module.GetTyped[*iface.PIIProducerRegistry](deps.Services, module.ServicePIIProducerRegistry); ok {
+		reg.Register(services.NewPIIProducer(repo))
+	}
+
 	// Optional TenantProvider handle: used by the Cedar shadow-mode
 	// evaluator to stamp Principal.Capabilities so capability_grants.cedar
 	// has something to reason about when a caller opts into capability

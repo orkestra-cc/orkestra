@@ -155,7 +155,10 @@ func (p *piiProducer) ExportPersonalData(ctx context.Context, userUUID string) (
 // canonical instance is operator-tier). The collection labels reflect
 // the tier's storage so an operator-tier purge reports
 // operator_refresh_tokens, etc.
-func (p *piiProducer) PurgePersonalData(ctx context.Context, userUUID string) (iface.PurgeResult, error) {
+// Mode-agnostic: credentials, tokens, sessions and MFA factors carry no
+// anonymizable residue — deleting them IS the privacy-preserving action — so
+// both EraseHardDelete and EraseAnonymize wipe the rows.
+func (p *piiProducer) PurgePersonalData(ctx context.Context, userUUID string, _ iface.EraseMode) (iface.PurgeResult, error) {
 	var rows int64
 	collections := make([]string, 0, 5)
 

@@ -1,0 +1,21 @@
+# piiscan baseline — modules that own data-subject PII but intentionally
+# register no PIIProducer. Each line exempts one module from the
+# pii.subject_collection.no_producer gate.
+#
+# CI fails if piiscan flags any module NOT listed here, so a new module (or
+# addon) that adds a userUUID-bearing collection without a PIIProducer is
+# caught — while the accepted cases below stay green.
+#
+# Format: <category>:<module>
+#
+# To see what the scanner flags, run from backend/:
+#   go run ./tools/piiscan/cmd/piiscan ./internal/...
+#
+# ---------------------------------------------------------------------------
+# compliance — the DSR machinery's own bookkeeping. ErasureRequest.UserUUID
+# and LegalHold.UserUUID reference the data subject, but these rows ARE the
+# right-to-erasure workflow: an erasure request is the DSR record itself, and
+# a legal hold deliberately BLOCKS erasure. They are retained by design and
+# governed by the retention / legal-hold policy, not by a self-erasing
+# PIIProducer. (audit_events likewise are an append-only, retained trail.)
+pii.subject_collection.no_producer:compliance

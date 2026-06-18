@@ -11,6 +11,7 @@ import { AcceptInvitePage } from "@/pages/AcceptInvitePage";
 import { AccountPage } from "@/pages/AccountPage";
 import { AccountProfilePage } from "@/pages/AccountProfilePage";
 import { AccountSecurityPage } from "@/pages/AccountSecurityPage";
+import { AccountDsrPage } from "@/pages/AccountDsrPage";
 import { BillingProfilePage } from "@/pages/BillingProfilePage";
 import { MfaEnrolPage } from "@/pages/MfaEnrolPage";
 import { NotFoundPage } from "@/pages/NotFoundPage";
@@ -47,6 +48,14 @@ export function App() {
           element={
             <RequireAuth>
               <AccountSecurityPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/account/dsr"
+          element={
+            <RequireAuth>
+              <AccountDsrPage />
             </RequireAuth>
           }
         />

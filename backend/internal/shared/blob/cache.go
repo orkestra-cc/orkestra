@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -68,6 +69,17 @@ func NewCached(inner Store, rdb *redis.Client, cfg CachedConfig) Store {
 
 func (c *CachedStore) PresignPut(ctx context.Context, key, contentType string, ttl time.Duration) (*PresignedPut, error) {
 	return c.inner.PresignPut(ctx, key, contentType, ttl)
+}
+
+// Put is a pass-through that also drops any cached presigned-GET URL
+// for the key — the object's content just changed underneath it, so a
+// cached URL would still resolve but the invalidation keeps the cache
+// honest on key reuse. Best-effort, mirroring Delete.
+func (c *CachedStore) Put(ctx context.Context, key, contentType string, body io.Reader) error {
+	if err := c.redis.Del(ctx, c.cacheFn(key)).Err(); err != nil && !errors.Is(err, redis.Nil) {
+		_ = err
+	}
+	return c.inner.Put(ctx, key, contentType, body)
 }
 
 func (c *CachedStore) PresignGet(ctx context.Context, key string, ttl time.Duration) (string, error) {
