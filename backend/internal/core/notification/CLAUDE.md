@@ -45,6 +45,7 @@ Declared in `module.go::Collections()` and auto-created on boot:
 - **Init**: constructs repositories, loads email settings via a closure over `ConfigService` (so admin UI changes propagate without restart), wires the `NotificationService` and registers it as `ServiceNotificationSender`.
 - **Start**: calls `TemplateService.SeedDefaults(ctx)` which inserts every `auth.*` system template (`verify_email`, `reset_password`, `suspicious_login`, `new_device_login`, `admin_suspicious_login`, `admin_invite`) into the DB if they are missing. Source strings live in `services/default_templates.go` as Go constants.
 - **Stop / HealthCheck**: inherit base no-op from `BaseModule`.
+- **GDPR/DSR** (`services/pii_producer.go`): registers an `iface.PIIProducer` (subject `"notification"`) on `ServicePIIProducerRegistry` at Init. Exports the subject's delivered-message history (`notification_messages`) + per-category delivery preferences (`notification_preferences`); purge deletes both under **either** erase mode. Suppressions are keyed by email address (not `userUUID`), so they ride the auth/email erasure path rather than this producer. Consumed by the [compliance module](../compliance/CLAUDE.md)'s DSR pipeline (ADR-0009).
 
 ## Settings (loaded lazily per send)
 
