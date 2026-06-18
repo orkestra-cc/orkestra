@@ -86,8 +86,8 @@ describe('CompliancePage', () => {
     // The other panes are mounted too, so their data is present.
     expect(await screen.findByText('Litigation hold')).toBeInTheDocument();
     expect(await screen.findByText('auth.login.succeeded')).toBeInTheDocument();
-    // Retention candidate count badge.
-    expect(await screen.findByText('2')).toBeInTheDocument();
+    // Retention preview lists the subjects past the retention window.
+    expect(await screen.findByText('u-old-1')).toBeInTheDocument();
   });
 
   it('shows empty states when every endpoint returns nothing', async () => {

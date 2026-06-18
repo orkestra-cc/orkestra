@@ -1,295 +1,159 @@
-import { useState, type FormEvent } from 'react';
+import { Col, Nav, Row, Tab } from 'react-bootstrap';
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
-  Badge,
-  Button,
-  Card,
-  Form,
-  Spinner,
-  Tab,
-  Table,
-  Tabs
-} from 'react-bootstrap';
-import { toast } from 'react-toastify';
+  faClipboardList,
+  faClockRotateLeft,
+  faGavel,
+  faShieldHalved,
+  faUserSlash
+} from '@fortawesome/free-solid-svg-icons';
+import { useSearchParams } from 'react-router-dom';
 import {
-  useExecuteErasureRequestMutation,
   useListAuditEventsQuery,
   useListErasureRequestsQuery,
   useListLegalHoldsQuery,
-  usePlaceLegalHoldMutation,
-  useRejectErasureRequestMutation,
-  useReleaseLegalHoldMutation,
   useRetentionPreviewQuery
 } from 'store/api/complianceApi';
+import AuditEventsTab from './AuditEventsTab';
+import ComplianceStatCard from './ComplianceStatCard';
+import ErasureRequestsTab from './ErasureRequestsTab';
+import LegalHoldsTab from './LegalHoldsTab';
+import RetentionTab from './RetentionTab';
 
 // CompliancePage is the operator-facing GDPR/compliance dashboard (ADR-0009):
-// review and resolve erasure requests, manage legal holds, preview retention
-// cleanup, and read the audit trail. Destructive actions are step-up-gated on
-// the backend — the global StepUpModal handles the 401 + replay transparently.
+// a summary KPI row, then tabbed surfaces to review and resolve erasure
+// requests, manage legal holds, preview retention cleanup, and read the audit
+// trail. Destructive actions are step-up-gated on the backend — the global
+// StepUpModal handles the 401 + replay transparently. The active tab is synced
+// to the `?tab=` query param so the view is shareable and survives a refresh.
 
-const ErasureRequestsTab = () => {
-  const { data, isLoading } = useListErasureRequestsQuery();
-  const [execute] = useExecuteErasureRequestMutation();
-  const [reject] = useRejectErasureRequestMutation();
+const TABS = [
+  { key: 'requests', label: 'Erasure Requests', icon: faUserSlash },
+  { key: 'holds', label: 'Legal Holds', icon: faGavel },
+  { key: 'retention', label: 'Retention', icon: faClockRotateLeft },
+  { key: 'audit', label: 'Audit Events', icon: faClipboardList }
+] as const;
 
-  const onExecute = async (id: string) => {
-    try {
-      await execute({ id, mode: 'hard_delete' }).unwrap();
-      toast.success('Erasure executed');
-    } catch {
-      toast.error('Execute failed (or blocked by a legal hold)');
-    }
-  };
-  const onReject = async (id: string) => {
-    try {
-      await reject({ id }).unwrap();
-      toast.success('Request rejected');
-    } catch {
-      toast.error('Reject failed');
-    }
-  };
+const CompliancePage = () => {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeTab = searchParams.get('tab') || 'requests';
 
-  if (isLoading) return <Spinner animation="border" size="sm" />;
-  const items = data?.items ?? [];
-  if (items.length === 0)
-    return <p className="text-muted mb-0">No pending erasure requests.</p>;
-
-  return (
-    <Table responsive size="sm" className="mb-0">
-      <thead>
-        <tr>
-          <th>Subject</th>
-          <th>Reason</th>
-          <th>Requested</th>
-          <th className="text-end">Actions</th>
-        </tr>
-      </thead>
-      <tbody>
-        {items.map(r => (
-          <tr key={r.uuid}>
-            <td className="font-monospace small">{r.userUuid}</td>
-            <td>{r.reason || '—'}</td>
-            <td>{new Date(r.requestedAt).toLocaleString()}</td>
-            <td className="text-end">
-              <Button
-                size="sm"
-                variant="outline-danger"
-                className="me-2"
-                onClick={() => onExecute(r.uuid)}
-              >
-                Execute
-              </Button>
-              <Button
-                size="sm"
-                variant="outline-secondary"
-                onClick={() => onReject(r.uuid)}
-              >
-                Reject
-              </Button>
-            </td>
-          </tr>
-        ))}
-      </tbody>
-    </Table>
-  );
-};
-
-const LegalHoldsTab = () => {
-  const { data, isLoading } = useListLegalHoldsQuery();
-  const [place] = usePlaceLegalHoldMutation();
-  const [release] = useReleaseLegalHoldMutation();
-  const [userUuid, setUserUuid] = useState('');
-  const [reason, setReason] = useState('');
-
-  const onPlace = async (e: FormEvent) => {
-    e.preventDefault();
-    if (!userUuid || !reason) return;
-    try {
-      await place({ userUuid, reason }).unwrap();
-      toast.success('Legal hold placed');
-      setUserUuid('');
-      setReason('');
-    } catch {
-      toast.error('Place failed');
-    }
-  };
-  const onRelease = async (id: string) => {
-    try {
-      await release({
-        id,
-        releaseReason: 'released via admin console'
-      }).unwrap();
-      toast.success('Legal hold released');
-    } catch {
-      toast.error('Release failed');
-    }
+  const handleTabSelect = (key: string | null) => {
+    if (!key) return;
+    setSearchParams(
+      prev => {
+        prev.set('tab', key);
+        return prev;
+      },
+      { replace: true }
+    );
   };
 
-  const items = data?.items ?? [];
+  // The summary cards share the same RTK Query caches the tabs read, so there
+  // is no extra network cost — RTK Query dedupes the in-flight requests.
+  const erasures = useListErasureRequestsQuery();
+  const holds = useListLegalHoldsQuery();
+  const retention = useRetentionPreviewQuery();
+  const audit = useListAuditEventsQuery({ limit: 50 });
+
+  const pendingErasures = erasures.data?.items?.length ?? 0;
+  const activeHolds = (holds.data?.items ?? []).filter(h => h.active).length;
+  const retentionCandidates = retention.data?.count ?? 0;
+
   return (
     <>
-      <Form className="d-flex gap-2 mb-3" onSubmit={onPlace}>
-        <Form.Control
-          size="sm"
-          placeholder="Subject userUuid"
-          value={userUuid}
-          onChange={e => setUserUuid(e.target.value)}
-        />
-        <Form.Control
-          size="sm"
-          placeholder="Reason"
-          value={reason}
-          onChange={e => setReason(e.target.value)}
-        />
-        <Button
-          size="sm"
-          type="submit"
-          variant="primary"
-          className="text-nowrap"
-        >
-          Place hold
-        </Button>
-      </Form>
-      {isLoading ? (
-        <Spinner animation="border" size="sm" />
-      ) : items.length === 0 ? (
-        <p className="text-muted mb-0">No active legal holds.</p>
-      ) : (
-        <Table responsive size="sm" className="mb-0">
-          <thead>
-            <tr>
-              <th>Subject</th>
-              <th>Reason</th>
-              <th>Case</th>
-              <th>Placed</th>
-              <th className="text-end">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {items.map(h => (
-              <tr key={h.uuid}>
-                <td className="font-monospace small">{h.userUuid}</td>
-                <td>{h.reason}</td>
-                <td>{h.caseRef || '—'}</td>
-                <td>{new Date(h.placedAt).toLocaleString()}</td>
-                <td className="text-end">
-                  <Button
-                    size="sm"
-                    variant="outline-secondary"
-                    onClick={() => onRelease(h.uuid)}
-                  >
-                    Release
-                  </Button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </Table>
-      )}
-    </>
-  );
-};
+      <div className="mb-3">
+        <h2 className="mb-1">
+          <FontAwesomeIcon
+            icon={faShieldHalved}
+            className="me-2 text-primary"
+          />
+          Compliance
+        </h2>
+        <p className="text-muted mb-0">
+          Audit trail &amp; GDPR data-subject rights — review erasure requests,
+          manage legal holds, preview retention cleanup, and read the audit log.
+        </p>
+      </div>
 
-const RetentionTab = () => {
-  const { data, isLoading } = useRetentionPreviewQuery();
-  if (isLoading) return <Spinner animation="border" size="sm" />;
-  return (
-    <>
-      <p className="mb-2">
-        Anonymized tombstones past the retention window that auto-cleanup would
-        hard-delete (dry run — nothing is deleted here).
-      </p>
-      <p className="text-muted small">
-        Cutoff: {data ? new Date(data.cutoff).toLocaleString() : '—'} ·
-        Candidates: <Badge bg="secondary">{data?.count ?? 0}</Badge>
-      </p>
-      {data && data.count > 0 && (
-        <ul className="small font-monospace">
-          {data.userUuids.map(u => (
-            <li key={u}>{u}</li>
+      <Row className="g-3 mb-3">
+        <Col md={6} lg={3}>
+          <ComplianceStatCard
+            title="Pending Erasures"
+            value={pendingErasures}
+            icon={faUserSlash}
+            color="warning"
+            subtitle="Awaiting review"
+            badgeText={pendingErasures > 0 ? 'Needs attention' : undefined}
+            loading={erasures.isLoading}
+          />
+        </Col>
+        <Col md={6} lg={3}>
+          <ComplianceStatCard
+            title="Active Legal Holds"
+            value={activeHolds}
+            icon={faGavel}
+            color="danger"
+            subtitle="Blocking erasure"
+            badgeText={activeHolds > 0 ? 'Erasure blocked' : undefined}
+            loading={holds.isLoading}
+          />
+        </Col>
+        <Col md={6} lg={3}>
+          <ComplianceStatCard
+            title="Retention Candidates"
+            value={retentionCandidates}
+            icon={faClockRotateLeft}
+            color="info"
+            subtitle="Past retention window"
+            badgeText={
+              retentionCandidates > 0
+                ? `${retentionCandidates} subjects`
+                : undefined
+            }
+            loading={retention.isLoading}
+          />
+        </Col>
+        <Col md={6} lg={3}>
+          <ComplianceStatCard
+            title="Audit Events"
+            value={audit.data?.total ?? 0}
+            icon={faClipboardList}
+            color="primary"
+            subtitle="Recorded total"
+            loading={audit.isLoading}
+          />
+        </Col>
+      </Row>
+
+      <Tab.Container activeKey={activeTab} onSelect={handleTabSelect}>
+        <Nav variant="pills" className="mb-3 flex-wrap gap-2">
+          {TABS.map(tab => (
+            <Nav.Item key={tab.key}>
+              <Nav.Link eventKey={tab.key} className="text-nowrap">
+                <FontAwesomeIcon icon={tab.icon} className="me-2" />
+                {tab.label}
+              </Nav.Link>
+            </Nav.Item>
           ))}
-        </ul>
-      )}
+        </Nav>
+        <Tab.Content>
+          <Tab.Pane eventKey="requests">
+            <ErasureRequestsTab />
+          </Tab.Pane>
+          <Tab.Pane eventKey="holds">
+            <LegalHoldsTab />
+          </Tab.Pane>
+          <Tab.Pane eventKey="retention">
+            <RetentionTab />
+          </Tab.Pane>
+          <Tab.Pane eventKey="audit">
+            <AuditEventsTab />
+          </Tab.Pane>
+        </Tab.Content>
+      </Tab.Container>
     </>
   );
 };
-
-const AuditEventsTab = () => {
-  const { data, isLoading } = useListAuditEventsQuery({ limit: 50 });
-  if (isLoading) return <Spinner animation="border" size="sm" />;
-  const items = data?.items ?? [];
-  if (items.length === 0)
-    return <p className="text-muted mb-0">No audit events.</p>;
-  return (
-    <Table responsive size="sm" className="mb-0">
-      <thead>
-        <tr>
-          <th>Time</th>
-          <th>Action</th>
-          <th>Actor</th>
-          <th>Resource</th>
-          <th>Outcome</th>
-        </tr>
-      </thead>
-      <tbody>
-        {items.map(e => (
-          <tr key={e.uuid}>
-            <td>{new Date(e.timestamp).toLocaleString()}</td>
-            <td className="font-monospace small">{e.action}</td>
-            <td className="small">
-              {e.actorEmail || e.actorUserId || e.actorType}
-            </td>
-            <td className="small">
-              {e.resourceType}
-              {e.resourceId ? `/${e.resourceId}` : ''}
-            </td>
-            <td>
-              <Badge
-                bg={
-                  e.outcome === 'success'
-                    ? 'success'
-                    : e.outcome === 'denied'
-                      ? 'warning'
-                      : 'danger'
-                }
-              >
-                {e.outcome}
-              </Badge>
-            </td>
-          </tr>
-        ))}
-      </tbody>
-    </Table>
-  );
-};
-
-const CompliancePage = () => (
-  <>
-    <div className="mb-3">
-      <h4 className="mb-1">Compliance</h4>
-      <p className="text-muted mb-0">
-        Audit trail &amp; GDPR data-subject rights (erasure requests, legal
-        holds, retention).
-      </p>
-    </div>
-    <Card>
-      <Card.Body>
-        <Tabs defaultActiveKey="requests" className="mb-3">
-          <Tab eventKey="requests" title="Erasure Requests">
-            <ErasureRequestsTab />
-          </Tab>
-          <Tab eventKey="holds" title="Legal Holds">
-            <LegalHoldsTab />
-          </Tab>
-          <Tab eventKey="retention" title="Retention">
-            <RetentionTab />
-          </Tab>
-          <Tab eventKey="audit" title="Audit Events">
-            <AuditEventsTab />
-          </Tab>
-        </Tabs>
-      </Card.Body>
-    </Card>
-  </>
-);
 
 export default CompliancePage;
