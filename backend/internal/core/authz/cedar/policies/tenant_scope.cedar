@@ -96,6 +96,32 @@ forbid (
     resource.kind == "external"
 };
 
+// system.compliance.legalhold.manage is operator-side (admin places or
+// releases a legal hold that blocks GDPR erasure).
+@id("tenant_scope.system_compliance_legalhold_manage_internal_only")
+forbid (
+    principal,
+    action == Action::"system.compliance.legalhold.manage",
+    resource
+) when {
+    resource is Orkestra::Tenant &&
+    resource has kind &&
+    resource.kind == "external"
+};
+
+// system.compliance.dsr.manage is operator-side (admin executes or rejects
+// a right-to-erasure request on behalf of a data subject).
+@id("tenant_scope.system_compliance_dsr_manage_internal_only")
+forbid (
+    principal,
+    action == Action::"system.compliance.dsr.manage",
+    resource
+) when {
+    resource is Orkestra::Tenant &&
+    resource has kind &&
+    resource.kind == "external"
+};
+
 // Suspended / archived / purged tenants reject every non-read action. A
 // tenant that's been suspended by the operator console should surface as
 // read-only until it's reactivated.

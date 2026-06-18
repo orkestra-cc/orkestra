@@ -38,6 +38,8 @@ models/                           audit_event, legal_hold, erasure_request, kms_
 - `system.compliance.legalhold.manage` — place/release holds (+ step-up).
 - `system.compliance.dsr.manage` — execute/reject erasure requests (+ step-up).
 
+All three are `System: true`. `audit.read` is Cedar-covered by the `read` suffix clause; the two `.manage` keys are named as operator-only tier-aware forbids in [`authz/cedar/policies/tenant_scope.cedar`](../authz/cedar/policies/tenant_scope.cedar) (vetoed against `external` tenants) — that literal is also what satisfies the `policycoverage` CI gate. A new `system.compliance.*` permission with an uncovered suffix must add its own Cedar reference there or CI fails with `permission.cedar.unreferenced`.
+
 ## Config (`ConfigSchema`)
 
 `soc2_enabled` (bool, false) · `auto_cleanup_enabled` (bool, false) · `retention_years` (int, 5) · `export_retention_days` (int, 30).
