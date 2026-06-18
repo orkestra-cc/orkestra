@@ -80,7 +80,7 @@ A fork's optional modules are **instantiated, initialized, and routed** at boot 
 | **authz**        | Permissions, roles, Cedar policy engine                                                                           |
 | **auth**         | Email/password (argon2id) + OAuth 2.1, JWT, sessions, RBAC                                                        |
 | **navigation**   | Dynamic menu from module NavItems + persisted reorder via `/admin/modules/navigation`                             |
-| **logging**      | Runtime log-level admin (ADR-0005 Phase F): `log_levels` collection + `/admin/observability/log-levels` UI         |
+| **logging**      | Runtime log-level admin (ADR-0005 Phase F): `log_levels` collection + `/admin/observability/log-levels` UI — [docs](backend/internal/core/logging/CLAUDE.md) |
 | **compliance**   | Audit trail + GDPR DSR (export/erasure), per-tenant KMS crypto-shred, legal hold, retention, SOC2 evidence (ADR-0009) — [docs](backend/internal/core/compliance/CLAUDE.md) |
 
 Load order (topologically sorted by `Dependencies()`): `user` → `notification` → `tenant` → `authz` → `auth` → `navigation` → `logging` → `compliance`. Auth depends on notification (optional at runtime) so it can deliver verification and password-reset emails; `logging` has no declared dependencies; `compliance` (ADR-0009, always-on) depends on `user`/`auth`/`tenant` so it resolves the PII-producer registry + audit sink after they init.
