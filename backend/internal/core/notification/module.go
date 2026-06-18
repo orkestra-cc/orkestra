@@ -136,6 +136,13 @@ func (m *NotificationModule) Init(deps *module.Dependencies) error {
 	prefRepo := repository.NewPreferenceRepository(deps.DB)
 	unsubRepo := repository.NewUnsubscribeRepository(deps.DB)
 
+	// Register the notification PII producer with the DSR registry (created in
+	// main.go before InitAll) so the compliance DSR pipeline exports / erases a
+	// data subject's message history + delivery preferences.
+	if reg, ok := module.GetTyped[*iface.PIIProducerRegistry](deps.Services, module.ServicePIIProducerRegistry); ok {
+		reg.Register(services.NewPIIProducer(deps.DB))
+	}
+
 	tmplService := services.NewTemplateService(tmplRepo, deps.Logger)
 	prefService := services.NewPreferenceService(prefRepo)
 	unsubService := services.NewUnsubscribeService(unsubRepo)

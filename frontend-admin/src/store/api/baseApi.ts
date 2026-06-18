@@ -382,7 +382,11 @@ export const baseApi = createApi({
     // returns for the unauthenticated login page. Invalidated implicitly by
     // RTK Query's 30s default cache + manual invalidation when the
     // /admin/modules/auth admin tab saves the OAuth Providers toggles.
-    'OAuthProviders'
+    'OAuthProviders',
+    // Compliance — audit trail + GDPR DSR (ADR-0009)
+    'AuditEvent',
+    'ErasureRequest',
+    'LegalHold'
   ],
   // Keep cache for 5 minutes by default
   keepUnusedDataFor: 300,

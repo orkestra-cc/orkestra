@@ -127,6 +127,14 @@ func (m *Module) Init(deps *module.Dependencies) error {
 	repo := repository.New(deps.DB)
 	m.svc = services.New(repo)
 	m.handler = handlers.New(m.svc, deps.Services)
+
+	// Register the tenant PII producer with the DSR registry (created in
+	// main.go before InitAll). The compliance module's DSR pipeline runs it to
+	// export / erase a data subject's tenant memberships.
+	if reg, ok := module.GetTyped[*iface.PIIProducerRegistry](deps.Services, module.ServicePIIProducerRegistry); ok {
+		reg.Register(services.NewPIIProducer(repo))
+	}
+
 	deps.Services.Register(module.ServiceTenantProvider, iface.TenantProvider(m.svc))
 	// Polymorphic-owner capability surface lives on the same concrete
 	// Service so the entitlement projection has one writer.
