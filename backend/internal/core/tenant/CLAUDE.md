@@ -15,12 +15,12 @@ Does not own org-scoped roles or permissions — those are authz role bindings. 
 
 | File | Purpose |
 |---|---|
-| `module.go` | Module registration, collections, permissions, service wire-up |
-| `handlers/handler.go` | HTTP handlers for org and membership CRUD + invites |
-| `services/service.go` | Org lifecycle, membership sync, invite token issuance, `iface.TenantProvider` implementation |
-| `services/billing.go` | Unified-clients (Phase 1) — `SetItalianBillable`, `SetBillingIdentity`, `ResolveBillingParty`, `EnsureTenantForUser`, `iface.BillingTenantProvider` implementation |
+| `module.go` | Module registration, collections, permissions, `ConfigSchema()` (provisioning policy), service wire-up |
+| `handlers/handler.go` | HTTP handlers for org and membership CRUD + invites; provisioning manual-gate (`enforceManualGate`/`callerIsTenantAdmin`) + provisioning-policy read |
+| `services/service.go` | Org lifecycle, membership sync, invite token issuance, provisioning policy (`ProvisioningMode`/`CountActiveByKind`/`ErrProvisioningLocked`), `iface.TenantProvider` implementation |
+| `services/billing.go` | Unified-clients (Phase 1) — `SetItalianBillable`, `SetBillingIdentity`, `ResolveBillingParty`, `EnsureTenantForUser` (honours external provisioning mode), `iface.BillingTenantProvider` implementation |
 | `services/entitlements.go` | Capability-entitlement projection (`iface.AccessProvider`) |
-| `repository/repository.go` | MongoDB CRUD for orgs, memberships, invites; personal-tenant predicate lookup |
+| `repository/repository.go` | MongoDB CRUD for orgs, memberships, invites; personal-tenant predicate lookup; `CountActiveByKind` (single-mode invariant) |
 | `models/org.go` | `Org`, `Membership`, `Invite`, `FatturaPAProfile` structs + plan/feature constants |
 
 ## MongoDB collections
@@ -39,8 +39,9 @@ Collection name constants live in `repository/repository.go` as `CollOrgs`, `Col
 
 - **Modules**: `user` (`module.go:29`) — so user profiles exist before memberships reference them.
 - **Required services**: none (the service does not currently look up users via the provider, it trusts the caller's auth context).
-- **Optional services**: none.
+- **Optional services**: none. At request time the handler resolves `iface.AuthzProvider` lazily from the registry to enforce the provisioning `manual` gate (see [Provisioning policy](#provisioning-policy-admin-managed)).
 - **Provides**: `ServiceTenantProvider` → `iface.TenantProvider` (`module.go:31-33`).
+- **Config** (`ConfigSchema()`): `provisioning.internal.mode` + `provisioning.external.mode` — admin-managed tenant-creation policy. See [Provisioning policy](#provisioning-policy-admin-managed).
 - **Permissions contributed** (`module.go:58-68`):
 
 | Key | System? | Purpose |
@@ -56,10 +57,31 @@ Collection name constants live in `repository/repository.go` as `CollOrgs`, `Col
 
 ## Lifecycle
 
-- **Init** (`module.go:70-76`): constructs the repository, builds the service, creates the handler, and registers the service as `iface.TenantProvider` in the registry.
+- **Init**: constructs the repository, builds the service, creates the handler, registers the service as `iface.TenantProvider` in the registry, and wires the `ProvisioningModeResolver` (a closure over `deps.ConfigService` reading the `provisioning.{internal,external}.mode` keys live).
 - **Start / Stop / HealthCheck**: inherit from `BaseModule` (no-op).
 - **Seeding**: none. Orgs are created by users via the setup wizard or `POST /v1/orgs`.
 - **GDPR/DSR** (`services/pii_producer.go`): registers an `iface.PIIProducer` (subject `"tenant"`) on `ServicePIIProducerRegistry` at Init. The subject's personal data here is their **tenant memberships** (which orgs, what roles) — the orgs/tenants themselves are not the subject's data and are left intact. Export returns the membership rows; purge deletes them (`tenant_memberships`) under **both** erase modes, since a membership row IS the user→org linkage with no anonymizable residue. Consumed by the [compliance module](../compliance/CLAUDE.md)'s DSR pipeline (ADR-0009).
+
+## Provisioning policy (admin-managed)
+
+`module.go::ConfigSchema()` exposes two enum config keys that govern **who may create tenants**, per tier. Read at request time by the service's `ProvisioningModeResolver` (a closure over `ModuleConfigService`, 30s Redis cache) — edits at `/admin/modules/tenant` take effect on the next creation with **no restart**. Both default to `open`, so an existing install keeps the legacy "any authenticated user may create" behaviour.
+
+| Key | Tier | Values | EnvVar (first-boot seed) |
+|---|---|---|---|
+| `provisioning.internal.mode` | internal | `open` · `manual` · `single` | `TENANT_PROVISIONING_INTERNAL_MODE` |
+| `provisioning.external.mode` | external | `open` · `manual` | `TENANT_PROVISIONING_EXTERNAL_MODE` |
+
+- **open** — legacy: any authenticated user may create.
+- **manual** — only holders of `system.tenants.admin` may create.
+- **single** — at most one active (non-deleted) tenant of that tier may exist (internal-only intent: lock the platform to a single internal org).
+
+**Two-layer enforcement** (so every creation path is covered without scattering checks):
+
+1. **`single` is a data invariant in the service.** `Service.CreateTenant` (`services/service.go`) counts active tenants of the kind via `repository.CountActiveByKind` and returns the sentinel `services.ErrProvisioningLocked` when one already exists. This covers **all** paths — `POST /v1/tenants`, divisions, and lazy provisioning — automatically. The first tenant on a fresh install counts 0 and passes, so bootstrap is never blocked (the setup wizard creates only the user, not the tenant).
+2. **`manual` is a permission gate in the handlers.** `createTenant` / `createDivision` call `Handler.enforceManualGate`, which resolves `iface.AuthzProvider` from the registry and checks `system.tenants.admin` (empty org = system grant). Non-admins get 403; the admin `CreateTenantModal` hits the same `POST /v1/tenants` and passes. The admin division route already requires the permission at the route group, so the shared handler body is a no-op gate for it.
+3. **Lazy provisioning honours `external.mode`.** `EnsureTenantForUser` (`services/billing.go`) returns an existing personal tenant unchanged but **refuses to auto-create** one (returns `ErrProvisioningLocked`) when `external.mode != open` — a manual policy means an admin assigns the tenant instead of a self-serve signup silently minting it.
+
+Handlers map `ErrProvisioningLocked` → 409. The read-only `GET /v1/admin/tenants/provisioning-policy` reports both modes + active counts and backs the policy card on the tenant management pages (the modes themselves are edited at `/admin/modules/tenant`).
 
 ## HTTP endpoints
 
@@ -115,6 +137,7 @@ Gated globally by a system permission, not by per-org membership, so platform op
 | GET | `/v1/admin/tenants/{tenantId}/payments` | Aggregator — proxies to `iface.TenantPaymentProvider`. Returns `[]` when the payments addon is disabled. |
 | PATCH | `/v1/admin/clients/{tenantId}/billing-identity` | Unified-clients — sets `IsCompany`, `LegalName`, VAT/fiscal codes, billing address, and the FatturaPA routing sub-document on a Tier-2 tenant. All body fields optional; nil leaves the existing value. The data this endpoint writes is what `iface.BillingTenantProvider.ResolveBillingParty` reads at invoice-send time (replaces the deleted `billing.Customer` row). |
 | POST | `/v1/admin/clients/{tenantId}/italian-billable` | Unified-clients Phase 1 — flips `Tenant.IsItalianBillable`. Enabling requires a FatturaPA profile carrying `CodiceDestinatario` or `PECDestinatario` (422 otherwise); disabling is unconditional. Send-time validation enforces the same invariant a second time, so the toggle on its own is not load-bearing. |
+| GET | `/v1/admin/tenants/provisioning-policy` | Read-only per-tier provisioning policy (`open`/`manual`/`single`) + active-tenant counts. Backs the policy card on the tenant pages; the modes are edited at `/admin/modules/tenant`. See [Provisioning policy](#provisioning-policy-admin-managed). |
 
 ### Tier-2 self-service — Client surface, `RequireGlobal()`
 
@@ -185,6 +208,7 @@ Typical consumers:
 
 ## Key invariants
 
+- **Tenant creation obeys the provisioning policy.** Every creation path funnels through `Service.CreateTenant`, which enforces the `single` count invariant as a data rule (so divisions and lazy provisioning are covered, not just `POST /v1/tenants`). The `manual` permission gate lives at the handler boundary. Defaults are `open`/`open`. Full semantics in [Provisioning policy](#provisioning-policy-admin-managed).
 - **Plan names** (`models/tenant.go`): `free` (default), `pro`, `enterprise`. Plan is an **informational label only** — admin UI display, reporting. It does **not** drive feature access.
 - **Capability entitlements drive access, not plan.** `RequireCapability(capID)` consults the `tenant_entitlements` projection via `AccessProvider.HasCapability`. The `subscriptions` module populates entitlements through the entitlement syncer on every lifecycle transition. Entitlement rows are keyed by polymorphic `(ownerKind, ownerUUID, capabilityID)` so a self-registered user holds capabilities directly without a tenant.
 - **Internal-tenant bypass.** `HasCapability` short-circuits to `true` for `Owner{Kind:"tenant"}` whose tenant is `Kind == internal`. User-owned entitlements always consult the projection (no operator user is granted capabilities by tier). Internal (operator) tenants host the platform and don't consume via subscriptions — the capability gate is the external-client monetization seam.

@@ -18,6 +18,7 @@ import {
   type AdminOrgListItem
 } from 'store/api/tenantApi';
 import TenantTable from './TenantTable';
+import ProvisioningPolicyCard from './ProvisioningPolicyCard';
 import TenantDetailModal from './TenantDetailModal';
 import CreateTenantModal from './CreateTenantModal';
 import DeleteTenantModal from './DeleteTenantModal';
@@ -308,6 +309,11 @@ const TenantManagementPage: React.FC<TenantAdminPageProps> = ({
             </Card.Body>
           </Card>
         </Col>
+        {kind && (
+          <Col md={6} xl={3}>
+            <ProvisioningPolicyCard tier={kind} />
+          </Col>
+        )}
       </Row>
 
       <TenantTable

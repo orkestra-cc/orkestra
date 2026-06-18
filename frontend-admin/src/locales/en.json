@@ -651,6 +651,16 @@
     "plan": "plan",
     "plans": "plans",
     "noActiveTenants": "No active tenants",
+    "provisioning": {
+      "title": "Tenant creation",
+      "mode": {
+        "open": "Open",
+        "manual": "Manual only",
+        "single": "Single tenant"
+      },
+      "activeCount": "{{count}} active",
+      "manage": "Manage policy"
+    },
     "noOrgSelected": "No organization selected",
     "rolesNeedOrg": "Role management is scoped to a single organization. Select or create one from the top-right org switcher to continue.",
     "deleteModal": {

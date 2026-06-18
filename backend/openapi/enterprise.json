@@ -4314,6 +4314,45 @@
         ],
         "type": "object"
       },
+      "ProvisioningPolicyOutputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/ProvisioningPolicyOutputBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "external": {
+            "description": "Provisioning mode for external tenants: open | manual",
+            "type": "string"
+          },
+          "externalCount": {
+            "description": "Number of active (non-deleted) external tenants",
+            "format": "int64",
+            "type": "integer"
+          },
+          "internal": {
+            "description": "Provisioning mode for internal tenants: open | manual | single",
+            "type": "string"
+          },
+          "internalCount": {
+            "description": "Number of active (non-deleted) internal tenants",
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "internal",
+          "external",
+          "internalCount",
+          "externalCount"
+        ],
+        "type": "object"
+      },
       "PurgeResult": {
         "additionalProperties": false,
         "properties": {
@@ -8749,6 +8788,38 @@
           }
         },
         "summary": "List every tenant (platform admin)",
+        "tags": [
+          "Tenants Admin"
+        ]
+      }
+    },
+    "/v1/admin/tenants/provisioning-policy": {
+      "get": {
+        "description": "Returns the active provisioning mode for each tier (open | manual | single) plus the current active-tenant count per tier. The mode itself is edited at /admin/modules/tenant; this endpoint backs the read-only policy card on the tenant management pages.",
+        "operationId": "get-tenant-provisioning-policy-admin",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProvisioningPolicyOutputBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Read the per-tier tenant-creation policy (platform admin)",
         "tags": [
           "Tenants Admin"
         ]
