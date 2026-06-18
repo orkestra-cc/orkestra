@@ -21,28 +21,31 @@ Does not own org-scoped roles or permissions — those are authz role bindings. 
 | `services/billing.go` | Unified-clients (Phase 1) — `SetItalianBillable`, `SetBillingIdentity`, `ResolveBillingParty`, `EnsureTenantForUser` (honours external provisioning mode), `iface.BillingTenantProvider` implementation |
 | `services/entitlements.go` | Capability-entitlement projection (`iface.AccessProvider`) |
 | `repository/repository.go` | MongoDB CRUD for orgs, memberships, invites; personal-tenant predicate lookup; `CountActiveByKind` (single-mode invariant) |
-| `models/org.go` | `Org`, `Membership`, `Invite`, `FatturaPAProfile` structs + plan/feature constants |
+| `models/tenant.go` | `Tenant`, `TenantMembership`, `TenantInvite`, `TenantAncestor`, `FatturaPAProfile` structs + `TenantKind`/`TenantStatus`/plan/`ProvisioningMode*` constants |
+| `models/entitlement.go` | Capability-entitlement projection row |
 
 ## MongoDB collections
 
-Declared in `module.go:35-55`.
+Declared in `module.go::Collections()` (`module.go:77`).
 
 | Collection | Indexes | TTL |
 |---|---|---|
-| `tenant_orgs` | `uuid` unique, `slug` unique sparse, `ownerUserUUID` | — |
-| `tenant_memberships` | compound `(userUUID, orgId)` unique, `orgId` | — |
-| `tenant_org_invites` | `tokenHash` unique, `orgId`, `expiresAt` TTL(ExpireAt) | `expiresAt` is a TTL index with `expireAfterSeconds=0` so Mongo reaps the doc the moment the timestamp passes. |
+| `tenants` | `uuid` unique, `slug` unique sparse, `ownerUserUUID`, `kind`, `status`, `parentTenantUUID` sparse | — |
+| `tenant_memberships` | compound `(userUUID, tenantId)` unique, `tenantId` | — |
+| `tenant_invites` | `tokenHash` unique sparse, `tenantId`, `expiresAt` TTL(ExpireAt) | `expiresAt` is a TTL index with `expireAfterSeconds=0` so Mongo reaps the doc the moment the timestamp passes. |
+| `tenant_ancestors` | compound `(descendantUUID, ancestorUUID)` unique, `ancestorUUID` | — — closure table for the tenant hierarchy (ADR-0001) |
+| `tenant_entitlements` | `uuid` unique sparse, compound `(tenantUUID, capabilityId)`, `capabilityId`, `expiresAt` sparse | — — capability projection (at most one active row per capability, enforced in the service) |
 
-Collection name constants live in `repository/repository.go` as `CollOrgs`, `CollMemberships`, `CollInvites`.
+Collection name constants live in `repository/repository.go` (`CollTenants`, `CollMemberships`, `CollInvites`, `CollAncestors`) and `repository/entitlements.go` (`CollEntitlements`).
 
 ## Dependencies
 
-- **Modules**: `user` (`module.go:29`) — so user profiles exist before memberships reference them.
+- **Modules**: `user` (`module.go::Dependencies`) — so user profiles exist before memberships reference them.
 - **Required services**: none (the service does not currently look up users via the provider, it trusts the caller's auth context).
 - **Optional services**: none. At request time the handler resolves `iface.AuthzProvider` lazily from the registry to enforce the provisioning `manual` gate (see [Provisioning policy](#provisioning-policy-admin-managed)).
-- **Provides**: `ServiceTenantProvider` → `iface.TenantProvider` (`module.go:31-33`).
+- **Provides** (`module.go::ProvidedServices`): `ServiceTenantProvider` → `iface.TenantProvider`, `ServiceAccessProvider` → `iface.AccessProvider`, `ServiceTenantService` (concrete), `ServiceBillingTenantProvider` → `iface.BillingTenantProvider`.
 - **Config** (`ConfigSchema()`): `provisioning.internal.mode` + `provisioning.external.mode` — admin-managed tenant-creation policy. See [Provisioning policy](#provisioning-policy-admin-managed).
-- **Permissions contributed** (`module.go:58-68`):
+- **Permissions contributed** (`module.go::Permissions`):
 
 | Key | System? | Purpose |
 |---|---|---|
@@ -53,7 +56,7 @@ Collection name constants live in `repository/repository.go` as `CollOrgs`, `Col
 | `tenant.member.read` | no | List tenant members |
 | `tenant.member.invite` | no | Invite new members |
 | `tenant.member.remove` | no | Remove members from the tenant |
-| `system.tenants.admin` | **yes** | Administer every tenant platform-wide (powers `/v1/admin/orgs/*`) |
+| `system.tenants.admin` | **yes** | Administer every tenant platform-wide (powers `/v1/admin/tenants/*`) |
 
 ## Lifecycle
 
@@ -95,28 +98,30 @@ Three route groups, each with a different gate:
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/v1/orgs` | List the orgs the caller is a member of |
-| POST | `/v1/orgs` | Create a new org — caller becomes owner + administrator |
-| POST | `/v1/orgs/accept-invite` | Redeem an invite token and join the target org |
+| GET | `/v1/tenants` | List the tenants the caller is a member of |
+| POST | `/v1/tenants` | Create a new tenant — caller becomes owner (`org_owner`). Subject to the provisioning policy (see above): in `manual` mode a non-admin caller gets 403; in `single` mode a second tenant of that tier gets 409. |
+| POST | `/v1/tenants/accept-invite` | Redeem an invite token and join the target tenant |
 
-### Per-org — read (`RequirePermission("tenant.read")`)
-
-| Method | Path | Purpose |
-|---|---|---|
-| GET | `/v1/orgs/{orgId}` | Get org by id |
-| GET | `/v1/orgs/{orgId}/members` | List members |
-
-### Per-org — mutation (`RequirePermission("tenant.read")` + `RequireMFA()`)
-
-Block B gates every tenant mutation behind an MFA step-up. Each can transfer ownership-adjacent data, change plan entitlements, or destroy the org — a pwd-only token fails with 401 `step_up_required` and the client steps up via `/v1/auth/mfa/verify` before retrying.
+### Per-tenant — read (`RequirePermission("tenant.read")`)
 
 | Method | Path | Purpose |
 |---|---|---|
-| PATCH | `/v1/orgs/{orgId}` | Update org name, slug, or settings |
-| DELETE | `/v1/orgs/{orgId}` | Soft-delete (owner only) |
-| PATCH | `/v1/orgs/{orgId}/plan` | Change plan and recompute features |
-| DELETE | `/v1/orgs/{orgId}/members/{userUUID}` | Remove a member |
-| POST | `/v1/orgs/{orgId}/invites` | Create an invite token |
+| GET | `/v1/tenants/{tenantId}` | Get tenant by id |
+| GET | `/v1/tenants/{tenantId}/members` | List members |
+| GET | `/v1/tenants/{tenantId}/divisions` | List direct children (depth=1) |
+
+### Per-tenant — mutation (`RequirePermission("tenant.read")` + `RequireMFA()`)
+
+Block B gates every tenant mutation behind an MFA step-up. Each can transfer ownership-adjacent data, change plan entitlements, or destroy the tenant — a pwd-only token fails with 401 `step_up_required` and the client steps up via `/v1/auth/mfa/verify` before retrying.
+
+| Method | Path | Purpose |
+|---|---|---|
+| PATCH | `/v1/tenants/{tenantId}` | Update tenant name, slug, or settings |
+| DELETE | `/v1/tenants/{tenantId}` | Soft-delete (owner only) |
+| PATCH | `/v1/tenants/{tenantId}/plan` | Change plan and recompute features |
+| DELETE | `/v1/tenants/{tenantId}/members/{userUUID}` | Remove a member |
+| POST | `/v1/tenants/{tenantId}/invites` | Create an invite token |
+| POST | `/v1/tenants/{tenantId}/divisions` | Create a division under this external tenant (also honours the external provisioning gate) |
 
 ### Platform admin — `RequireSystemPermission("system.tenants.admin")`
 
@@ -153,8 +158,6 @@ Mounted on `ri.Client.ProtectedRouter` so frontend-client tokens (`aud=client`) 
 | PATCH | `/v1/me/billing-identity` | Update the caller's billing identity. All fields optional; nil leaves the existing value. FatturaPA is wholesale-replaced when present. |
 | POST | `/v1/me/italian-billable` | Toggle `IsItalianBillable` on the caller's personal tenant. Same FatturaPA-routing precondition as the admin endpoint. |
 
-The tenant-scoped mutation group additionally exposes `POST /v1/tenants/{tenantId}/divisions` + `GET /v1/tenants/{tenantId}/divisions` for members with `tenant.read` on the parent.
-
 Route registration and handler implementations in `handlers/handler.go`. The permission itself (`system.tenants.admin`) is declared with `System: true` in `module.go::Permissions()`, so `super_admin` / `administrator` / `developer` inherit it automatically via authz's system-role seeding — no bindings required.
 
 ## Navigation
@@ -175,11 +178,11 @@ Path:    /admin/clients
 MinRole: administrator
 ```
 
-Frontend routes: `/admin/internal/tenants` (+ `/:tenantId`) renders `frontend/src/pages/admin/internal-tenants/`, `/admin/clients` (+ `/:clientId`) renders `frontend/src/pages/admin/clients/`. Both are gated by `ProtectedRoute` with `super_admin | administrator | developer`. The legacy `/admin/tenants` route 301-redirects to `/admin/clients` since most historical traffic there was client-leaning.
+Frontend routes: `/admin/internal/tenants` (+ `/:tenantId`) renders `frontend-admin/src/pages/admin/internal-tenants/`, `/admin/clients` (+ `/:clientId`) renders `frontend-admin/src/pages/admin/clients/`. Both are gated by `ProtectedRoute` with `super_admin | administrator | developer`. The legacy `/admin/tenants` route 301-redirects to `/admin/clients` since most historical traffic there was client-leaning.
 
 ## Service contract
 
-`iface.TenantProvider` (`shared/iface/interfaces.go`):
+`iface.TenantProvider` (`pkg/sdk/iface/interfaces.go`):
 
 ```go
 GetTenant(ctx, tenantUUID) (*Tenant, error)
@@ -187,6 +190,7 @@ ListUserMemberships(ctx, userUUID) ([]TenantMembership, error)
 IsMember(ctx, userUUID, tenantUUID) (bool, error)
 ActivateTenant(ctx, tenantUUID) error
 SetTenantStripeCustomerID(ctx, tenantUUID, stripeCustomerID) error
+EnsureTenantForUser(ctx, userUUID) (*Tenant, error)
 ```
 
 `iface.AccessProvider` (same file) — capability surface keyed by tenant UUID. The same concrete `*tenant/services.Service` implements both interfaces; registered separately under `module.ServiceAccessProvider` so consumers ask for the capability surface without the tenant CRUD surface:
@@ -204,7 +208,7 @@ The `tenant_entitlements` collection is keyed by `(tenantUUID, capabilityID)`. S
 
 Typical consumers:
 - **auth** — `ListUserMemberships` during JWT issuance so memberships are embedded in the access token's `memberships` claim (frontend reads them to build the org switcher without an extra round trip).
-- **middleware** — `IsMember` on every protected request that resolves an `X-Org-ID` header; `RequireCapability` consumes `AccessProvider.HasCapability` against the request's resolved tenant UUID (`X-Tenant-ID`) and returns 402 on a miss. Capability gating without a tenant context is undefined post-Unified-Client-Aggregate.
+- **middleware** — `IsMember` on every protected request that resolves an `X-Tenant-ID` header; `RequireCapability` consumes `AccessProvider.HasCapability` against the request's resolved tenant UUID (`X-Tenant-ID`) and returns 402 on a miss. Capability gating without a tenant context is undefined post-Unified-Client-Aggregate.
 - **authz (Cedar shadow evaluator)** — `AccessProvider.ListCapabilityIDs(tenantUUID)` populates `cedar.Principal.Capabilities` so the `capability_grants.cedar` forbid-unless-entitled rule can reason about entitlements.
 - **subscriptions (entitlement syncer)** — `AccessProvider.GrantCapability/RevokeCapability` on every subscription lifecycle transition; the syncer hands `sub.TenantUUID` directly.
 - **client signup (`/v1/auth/client/register`)** — creates a user only; the personal tenant is materialized lazily by `EnsureTenantForUser` on the first tenant-requiring action.
@@ -217,8 +221,8 @@ Typical consumers:
 - **Capability entitlements drive access, not plan.** `RequireCapability(capID)` consults the `tenant_entitlements` projection via `AccessProvider.HasCapability`. The `subscriptions` module populates entitlements through the entitlement syncer on every lifecycle transition. Entitlement rows are keyed by polymorphic `(ownerKind, ownerUUID, capabilityID)` so a self-registered user holds capabilities directly without a tenant.
 - **Internal-tenant bypass.** `HasCapability` short-circuits to `true` for `Owner{Kind:"tenant"}` whose tenant is `Kind == internal`. User-owned entitlements always consult the projection (no operator user is granted capabilities by tier). Internal (operator) tenants host the platform and don't consume via subscriptions — the capability gate is the external-client monetization seam.
 - **Owner is auto-enrolled as `org_owner`** on tenant creation (`services/service.go::CreateTenant`) — the first membership is inserted with `Roles: ["org_owner"]` and `IsOwner: true`. The post-membership `OwnerRoleBinder` hook (wired by the authz module) creates a tenant-scoped authz binding so the owner has actual permissions. The org_owner role's permission set excludes everything tagged `System=true`, so the owner cannot manage modules, other tenants, or platform users via this binding. Pre-2026-04-24 tenants whose Roles still says `["administrator"]` are not auto-migrated — operators need a one-shot script that updates those memberships and creates the missing `org_owner` binding.
-- **Slug uniqueness + auto-generation**. Unique sparse index on `slug`. `CreateOrg` falls back to `slugify(input.Name)` when no slug is provided (`services/service.go:88-94`); the slugifier is in `services/service.go:238-255`.
-- **Soft delete only on the tenant row.** `DeleteOrg` sets a `deletedAt` timestamp. Every read query filters these out at the Mongo layer unless `includeDeleted` is explicitly requested (admin list only). The plain `DeleteOrg` has no owner-check today — the platform-admin path reuses it directly.
+- **Slug uniqueness + auto-generation**. Unique sparse index on `slug`. `CreateTenant` falls back to `slugify(input.Name)` when no slug is provided (`services/service.go::CreateTenant`); the slugifier is `slugify` in `services/service.go` (~`:1080`).
+- **Soft delete only on the tenant row.** `DeleteTenant` sets a `deletedAt` timestamp. Every read query filters these out at the Mongo layer unless `includeDeleted` is explicitly requested (admin list only). The plain `DeleteTenant` has no owner-check today — the platform-admin path reuses it directly.
 - **Cascade-delete fans out via `RegisterPostDeleteHook`.** `DeleteTenant` and `PurgeTenant` build a `TenantPostDeleteContext` (kind, owner, "owner-has-other-tenants" flag, hard/soft) before mutation, then **hard-delete** memberships + closure-table rows (those have no soft-delete pattern), then run registered hooks best-effort. Today the authz module wires a hook that drops every tenant-scoped binding and flushes the permission cache, and the tenant module itself wires a hook that calls `iface.ClientUserProvider.SoftDeleteAndAliasEmail` for external owners with no other live memberships — so a Tier-2 self-serve user can re-register with the same email after their only org is deleted. Hook errors are logged via the audit sink (`tenant.cascade.hook_failed`) but do not abort subsequent hooks.
 - **Invite tokens are stored as SHA-256 hashes, never plaintext.** `generateInviteToken` (services/service.go) produces 32 bytes of randomness → base64url → SHA-256 hex. The raw token is populated on `models.Invite.Token` (a `bson:"-"` transient field) and returned once on the create response; the database only holds `tokenHash`. `AcceptInvite` hashes the supplied token and looks up by `tokenHash`. This mirrors the email-token pattern in the auth module. Expired invites are auto-reaped by the `expiresAt` TTL index (`expireAfterSeconds=0`).
 - **`Membership.Roles` is a denormalization.** It's an array of authz role names. When authz bindings change, the tenant service is **not automatically kept in sync** — there's no event hook yet. If you see a divergence between authz bindings and the tenant membership's `Roles`, the authz bindings are the source of truth.
@@ -233,7 +237,7 @@ Typical consumers:
 
 ## Rules
 
-- **Platform-admin delete bypasses ownership.** The `/v1/admin/orgs/{orgId}` DELETE route is gated by `system.tenants.admin` (system roles only). The plain per-org DELETE route at `/v1/orgs/{orgId}` has no owner check today; adding one is pending the "transfer ownership" flow.
+- **Platform-admin delete bypasses ownership.** The `/v1/admin/tenants/{tenantId}` DELETE route is gated by `system.tenants.admin` (system roles only). The plain per-tenant DELETE route at `/v1/tenants/{tenantId}` has no owner check today; adding one is pending the "transfer ownership" flow.
 - **Never store a plaintext invite token.** Enforced: `models.Invite.Token` is `bson:"-"`; only `TokenHash` is persisted. If you add a second invite-like flow (e.g. a public "share link"), use the same pattern and never add a plaintext field to the document.
 - **When you add a new paid capability**, declare it in the owning module's `Capabilities()` method and gate the relevant routes with `RequireCapability(capID)`. Wire a subscription tier that grants it via `PricingTier.Capabilities` so the entitlement syncer hands it out on checkout. Plan names are informational — do not scatter plan-name logic through the codebase.
 - **If you add a new permission**, put it in `module.go::Permissions()` and gate the relevant handler in `module.go::RegisterRoutes` — don't scatter `RequirePermission` calls across the handlers package, keep them at the route-group boundary.
@@ -243,14 +247,14 @@ Typical consumers:
 
 The system-wide invariants that govern tenant isolation live in [`../authz/CLAUDE.md`](../authz/CLAUDE.md#org-scoping-invariants-system-wide). Three of them are directly owned by this module:
 
-- **Invariant #1** — every addon `collection.Find/Update/Delete/Aggregate` must derive its filter from `shared/tenantrepo.Scope*`. Enforced at dev time by panic in the helper; CI-enforced in Phase 0 by the `tools/tenantscope` analyzer.
+- **Invariant #1** — every addon `collection.Find/Update/Delete/Aggregate` must derive its filter from `pkg/sdk/tenantrepo.Scope*`. Enforced at dev time by panic in the helper; CI-enforced in Phase 0 by the `tools/tenantscope` analyzer.
 - **Invariant #2** — `X-Tenant-ID` header must match a membership in the JWT. Already enforced in `shared/middleware/auth.go::resolveCurrentTenant`, with one exception: holders of `system.tenants.admin` bypass the check via `tryImpersonationBypass` (operator admins can act in any tenant). Every impersonation emits an `admin.tenant.impersonate.{personal,business}` audit event through `iface.AuditSink` — split by the target's IsCompany+SignupChannel shape so SOC2 review can tell apart sensitive personal-tenant access from routine operator work. Personal targets (IsCompany=false + SignupChannel=self_serve) additionally require a fresh MFA-satisfied session: a pwd-only operator hits the standard 401 `step_up_required` envelope before the bypass applies. Handlers that want to refuse destructive self-targeted actions while impersonating can read `middleware.IsImpersonating(ctx)`.
-- **Invariant #6** — `tenant_orgs.ownerUserUUID` is immutable without a two-step owner-transfer flow. **Not yet enforced** — Phase 2 work. Until then, platform admins changing `ownerUserUUID` directly is a known gap.
+- **Invariant #6** — `tenants.ownerUserUUID` is immutable without a two-step owner-transfer flow. **Not yet enforced** — Phase 2 work. Until then, platform admins changing `ownerUserUUID` directly is a known gap.
 
 ## Related
 
 - [`../user/CLAUDE.md`](../user/CLAUDE.md) — hard dep; user accounts must exist before memberships
 - [`../authz/CLAUDE.md`](../authz/CLAUDE.md) — provides the role-name vocabulary this module stores in `Membership.Roles`; owns the **Org-scoping invariants** table
 - [`../auth/CLAUDE.md`](../auth/CLAUDE.md) — embeds memberships in JWT claims via `TenantProvider.ListUserMemberships`
-- [`../../shared/iface/interfaces.go:175-196`](../../shared/iface/interfaces.go) — `TenantProvider` interface definition
-- [`../../shared/tenantrepo/`](../../shared/tenantrepo) — helpers for other modules that need to scope queries by org
+- [`../../../pkg/sdk/iface/interfaces.go`](../../../pkg/sdk/iface/interfaces.go) — `TenantProvider` interface definition (`type TenantProvider interface` ~`:366`)
+- [`../../../pkg/sdk/tenantrepo/`](../../../pkg/sdk/tenantrepo) — helpers for other modules that need to scope queries by tenant
