@@ -1,7 +1,14 @@
 import { Card } from 'react-bootstrap';
 import { useTranslation } from 'react-i18next';
+import classNames from 'classnames';
 import SubtleBadge from 'components/common/SubtleBadge';
-import type { AdminNavItem } from 'types/navigation';
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import {
+  visibilityCell,
+  type AdminNavItem,
+  type NavVisibilityCell,
+  type TenantKind
+} from 'types/navigation';
 
 interface Props {
   item: AdminNavItem | null;
@@ -18,6 +25,8 @@ const Row: React.FC<{ label: string; children: React.ReactNode }> = ({
   </div>
 );
 
+const TENANT_KINDS: TenantKind[] = ['internal', 'external'];
+
 const NavigationDetailPanel: React.FC<Props> = ({ item, roles }) => {
   const { t } = useTranslation();
   if (!item) {
@@ -29,6 +38,28 @@ const NavigationDetailPanel: React.FC<Props> = ({ item, roles }) => {
       </Card>
     );
   }
+
+  // One visibility cell rendered as a check (visible) or a dash carrying the
+  // hidden-reason in its tooltip. Mirrors the tree-row tri-state colouring.
+  const Cell: React.FC<{ cell: NavVisibilityCell }> = ({ cell }) => {
+    if (cell.visible) {
+      return (
+        <FontAwesomeIcon
+          icon="check"
+          className="text-success"
+          title={t('adminNavigation.matrix.reason.role_below_min')}
+        />
+      );
+    }
+    const amber = cell.reason !== 'role_below_min';
+    return (
+      <FontAwesomeIcon
+        icon={amber ? 'exclamation-triangle' : 'minus'}
+        className={classNames(amber ? 'text-warning' : 'text-400')}
+        title={t(`adminNavigation.matrix.reason.${cell.reason}`)}
+      />
+    );
+  };
 
   return (
     <Card className="shadow-none border">
@@ -58,6 +89,19 @@ const NavigationDetailPanel: React.FC<Props> = ({ item, roles }) => {
         <Row label={t('adminNavigation.detail.minRole')}>
           {item.minRole || t('adminNavigation.detail.everyone')}
         </Row>
+        {item.requiresConfig && (
+          <Row label={t('adminNavigation.detail.configGate')}>
+            <code>{item.requiresConfig}</code>
+            <SubtleBadge
+              bg={item.configSatisfied ? 'success' : 'warning'}
+              className="ms-2"
+            >
+              {item.configSatisfied
+                ? t('adminNavigation.detail.configOn')
+                : t('adminNavigation.detail.configOff')}
+            </SubtleBadge>
+          </Row>
+        )}
         <Row label={t('adminNavigation.detail.declaredOrder')}>
           #{item.declaredOrder}
         </Row>
@@ -71,34 +115,52 @@ const NavigationDetailPanel: React.FC<Props> = ({ item, roles }) => {
         </Row>
 
         <div className="mt-3">
-          <div className="text-muted small mb-1">
-            {t('adminNavigation.detail.visibleTo')}
+          <div className="text-700 small fw-semibold">
+            {t('adminNavigation.detail.visibility')}
           </div>
-          <div className="d-flex flex-wrap gap-1">
-            {roles.map(role => {
-              const visible = roleSees(role, item.minRole);
-              return (
-                <SubtleBadge key={role} bg={visible ? 'success' : 'secondary'}>
-                  {role}
-                </SubtleBadge>
-              );
-            })}
+          <div className="text-muted mb-2" style={{ fontSize: '0.7rem' }}>
+            {t('adminNavigation.detail.visibilityHint')}
           </div>
+          <table className="table table-sm align-middle mb-0 small">
+            <thead>
+              <tr className="text-muted">
+                <th className="fw-normal" />
+                <th className="fw-normal text-center">
+                  {t('adminNavigation.detail.tenantInternal')}
+                </th>
+                <th className="fw-normal text-center">
+                  {t('adminNavigation.detail.tenantExternal')}
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {roles.map(role => (
+                <tr key={role}>
+                  <td className="text-900">{role}</td>
+                  {TENANT_KINDS.map(kind => (
+                    <td key={kind} className="text-center">
+                      <Cell cell={visibilityCell(item, role, kind)} />
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
+
+        {item.requiresConfig && (
+          <p className="text-muted mt-2 mb-0" style={{ fontSize: '0.7rem' }}>
+            {t('adminNavigation.detail.configHint', {
+              module: item.moduleName
+            })}
+          </p>
+        )}
+        <p className="text-muted mt-2 mb-0" style={{ fontSize: '0.7rem' }}>
+          {t('adminNavigation.detail.perOrgNote')}
+        </p>
       </Card.Body>
     </Card>
   );
 };
-
-const ROLE_RANK: Record<string, number> = {
-  super_admin: 6,
-  administrator: 5,
-  developer: 4,
-  manager: 3,
-  operator: 2,
-  guest: 1
-};
-const roleSees = (role: string, minRole?: string) =>
-  !minRole || (ROLE_RANK[role] ?? 0) >= (ROLE_RANK[minRole] ?? 0);
 
 export default NavigationDetailPanel;

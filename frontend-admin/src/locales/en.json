@@ -1448,11 +1448,21 @@
     "loading": "Loading navigation…",
     "loadFailed": "Failed to load the navigation tree.",
     "emptyFilters": "No items match the current filters.",
+    "emptySimulation": "Nothing is visible to {{role}} in {{tenant}} tenants.",
     "filters": {
       "search": "Search",
       "searchPlaceholder": "Label or path…",
       "allModules": "All modules",
-      "showRoleMatrix": "Show role matrix"
+      "showRoleMatrix": "Show role matrix",
+      "tenantKind": "Tenant",
+      "tenantInternal": "Internal",
+      "tenantExternal": "External"
+    },
+    "viewAs": {
+      "label": "View as",
+      "off": "Off",
+      "banner": "Previewing the sidebar as {{role}} in an {{tenant}} tenant — items hidden from this persona are not shown, and reordering is disabled.",
+      "clear": "Exit preview"
     },
     "actions": {
       "drag": "Drag to reorder",
@@ -1461,12 +1471,20 @@
     },
     "badges": {
       "reordered": "Reordered",
-      "moduleDisabled": "Module disabled"
+      "moduleDisabled": "Module disabled",
+      "configGate": "Gated by {{key}}",
+      "configGateOff": "Hidden now: {{key}} is off"
     },
     "matrix": {
-      "visible": "visible",
-      "hidden": "hidden",
-      "tooltip": "{{role}}: {{visibility}}"
+      "cellVisible": "{{role}}: visible",
+      "cellHidden": "{{role}}: hidden — {{reason}}",
+      "reason": {
+        "module_disabled": "owning module disabled",
+        "config_off": "config gate off",
+        "tier_mismatch": "wrong tenant tier",
+        "role_below_min": "role below minimum",
+        "parent_collapsed": "no visible child items"
+      }
     },
     "detail": {
       "empty": "Select an item to see its details.",
@@ -1480,7 +1498,15 @@
       "everyone": "everyone",
       "declaredOrder": "Declared order",
       "effectiveOrder": "Effective order",
-      "visibleTo": "Visible to roles"
+      "visibility": "Effective visibility",
+      "visibilityHint": "Whether each role would actually see this item in the live sidebar, per tenant kind.",
+      "tenantInternal": "Internal",
+      "tenantExternal": "External",
+      "configGate": "Config gate",
+      "configOn": "on",
+      "configOff": "off",
+      "configHint": "Toggle at Modules → {{module}}.",
+      "perOrgNote": "Per-organization permissions are not reflected here — this matrix covers system role and tenant kind only."
     },
     "toast": {
       "orderSaved": "Order saved",

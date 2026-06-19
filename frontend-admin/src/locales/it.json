@@ -1448,11 +1448,21 @@
     "loading": "Caricamento navigazione…",
     "loadFailed": "Impossibile caricare l'albero di navigazione.",
     "emptyFilters": "Nessun elemento corrisponde ai filtri attivi.",
+    "emptySimulation": "Nessun elemento è visibile a {{role}} nei tenant {{tenant}}.",
     "filters": {
       "search": "Cerca",
       "searchPlaceholder": "Etichetta o path…",
       "allModules": "Tutti i moduli",
-      "showRoleMatrix": "Mostra matrice ruoli"
+      "showRoleMatrix": "Mostra matrice ruoli",
+      "tenantKind": "Tenant",
+      "tenantInternal": "Interno",
+      "tenantExternal": "Esterno"
+    },
+    "viewAs": {
+      "label": "Visualizza come",
+      "off": "No",
+      "banner": "Anteprima della sidebar come {{role}} in un tenant {{tenant}} — gli elementi nascosti a questo profilo non vengono mostrati e il riordino è disabilitato.",
+      "clear": "Esci dall'anteprima"
     },
     "actions": {
       "drag": "Trascina per riordinare",
@@ -1461,12 +1471,20 @@
     },
     "badges": {
       "reordered": "Riordinato",
-      "moduleDisabled": "Modulo disabilitato"
+      "moduleDisabled": "Modulo disabilitato",
+      "configGate": "Vincolato da {{key}}",
+      "configGateOff": "Ora nascosto: {{key}} è disattivato"
     },
     "matrix": {
-      "visible": "visibile",
-      "hidden": "nascosto",
-      "tooltip": "{{role}}: {{visibility}}"
+      "cellVisible": "{{role}}: visibile",
+      "cellHidden": "{{role}}: nascosto — {{reason}}",
+      "reason": {
+        "module_disabled": "modulo proprietario disabilitato",
+        "config_off": "gate di configurazione disattivato",
+        "tier_mismatch": "tier del tenant non corrispondente",
+        "role_below_min": "ruolo sotto il minimo",
+        "parent_collapsed": "nessuna voce figlia visibile"
+      }
     },
     "detail": {
       "empty": "Seleziona un elemento per vederne i dettagli.",
@@ -1480,7 +1498,15 @@
       "everyone": "tutti",
       "declaredOrder": "Ordine dichiarato",
       "effectiveOrder": "Ordine effettivo",
-      "visibleTo": "Visibile ai ruoli"
+      "visibility": "Visibilità effettiva",
+      "visibilityHint": "Se ciascun ruolo vedrebbe davvero questo elemento nella sidebar, per tipo di tenant.",
+      "tenantInternal": "Interno",
+      "tenantExternal": "Esterno",
+      "configGate": "Gate di configurazione",
+      "configOn": "attivo",
+      "configOff": "disattivato",
+      "configHint": "Modificalo in Moduli → {{module}}.",
+      "perOrgNote": "Le autorizzazioni per organizzazione non sono riflesse qui — questa matrice considera solo ruolo di sistema e tipo di tenant."
     },
     "toast": {
       "orderSaved": "Ordine salvato",

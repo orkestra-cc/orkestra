@@ -257,6 +257,10 @@
               "null"
             ]
           },
+          "configSatisfied": {
+            "description": "Whether the RequiresConfig gate is currently truthy",
+            "type": "boolean"
+          },
           "declaredOrder": {
             "description": "Sibling index as declared in the module's NavItems()",
             "format": "int64",
@@ -306,12 +310,23 @@
           "realm": {
             "type": "string"
           },
+          "requiresConfig": {
+            "description": "Module config key that must be truthy for this item to appear",
+            "type": "string"
+          },
           "section": {
             "type": "string"
           },
           "tier": {
             "description": "internal | external | '' (both)",
             "type": "string"
+          },
+          "visibility": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/NavRoleVisibility"
+            },
+            "description": "Effective visibility per role, split by tenant kind",
+            "type": "object"
           }
         },
         "required": [
@@ -322,7 +337,8 @@
           "active",
           "declaredOrder",
           "effectiveOrder",
-          "overridden"
+          "overridden",
+          "configSatisfied"
         ],
         "type": "object"
       },
@@ -3680,6 +3696,22 @@
         ],
         "type": "object"
       },
+      "NavRoleVisibility": {
+        "additionalProperties": false,
+        "properties": {
+          "external": {
+            "$ref": "#/components/schemas/NavVisibilityCell"
+          },
+          "internal": {
+            "$ref": "#/components/schemas/NavVisibilityCell"
+          }
+        },
+        "required": [
+          "internal",
+          "external"
+        ],
+        "type": "object"
+      },
       "NavSection": {
         "additionalProperties": false,
         "properties": {
@@ -3701,6 +3733,22 @@
         "required": [
           "label",
           "children"
+        ],
+        "type": "object"
+      },
+      "NavVisibilityCell": {
+        "additionalProperties": false,
+        "properties": {
+          "reason": {
+            "description": "Why hidden: module_disabled | config_off | tier_mismatch | role_below_min | parent_collapsed",
+            "type": "string"
+          },
+          "visible": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "visible"
         ],
         "type": "object"
       },
