@@ -50,7 +50,7 @@ func (r *templateRepository) GetByID(ctx context.Context, templateID, locale str
 }
 
 func (r *templateRepository) List(ctx context.Context) ([]*models.TemplateDoc, error) {
-	cursor, err := r.coll.Find(ctx, bson.M{}, options.Find().SetSort(bson.M{"templateId": 1, "locale": 1}))
+	cursor, err := r.coll.Find(ctx, bson.M{}, options.Find().SetSort(bson.D{{Key: "templateId", Value: 1}, {Key: "locale", Value: 1}}))
 	if err != nil {
 		return nil, err
 	}
