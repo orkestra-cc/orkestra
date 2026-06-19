@@ -1,6 +1,6 @@
 # Backend — Go Modular Server
 
-Single Go binary, single Go module. 7 core modules (always loaded) and an **empty optional-module catalog** ([ADR-0006](../docs/adr/0006-collapse-to-core-only-base.md): core-only base — a fork adds its own optional modules in-tree). Slim `cmd/server/main.go` that wires infrastructure and delegates everything else to the module registry. Port 3000 inside the container.
+Single Go binary, single Go module. 8 core modules (always loaded) and an **empty optional-module catalog** ([ADR-0006](../docs/adr/0006-collapse-to-core-only-base.md): core-only base — a fork adds its own optional modules in-tree). Slim `cmd/server/main.go` that wires infrastructure and delegates everything else to the module registry. Port 3000 inside the container.
 
 ## Stack
 
@@ -137,7 +137,7 @@ Examples:
 - `billing.invoice_not_found` — SDI invoice UUID lookup miss (404). Future.
 - `authz.permission_denied` — Cedar policy refused the action (403). Future.
 
-See [`../docs/plans/frontend-admin-i18n.md`](../docs/plans/frontend-admin-i18n.md) (Phase 2) for the rollout. Until a handler is migrated, do not invent a code for it from the frontend — read it off the response or fall back to `detail`.
+See [`../docs/archive/frontend-admin-i18n.md`](../docs/archive/frontend-admin-i18n.md) (Phase 2) for the rollout. Until a handler is migrated, do not invent a code for it from the frontend — read it off the response or fall back to `detail`.
 
 ## Dev Tokens (Dev/Staging Only)
 

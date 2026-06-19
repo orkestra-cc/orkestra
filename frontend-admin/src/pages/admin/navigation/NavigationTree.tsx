@@ -22,8 +22,8 @@ import {
   usePatchNavigationOrderMutation,
   useDeleteNavigationOrderMutation
 } from 'store/api/navigationAdminApi';
-import type { AdminNavItem, AdminNavRealm } from 'types/navigation';
-import { sectionRootKey } from 'types/navigation';
+import type { AdminNavItem, AdminNavRealm, TenantKind } from 'types/navigation';
+import { sectionRootKey, visibilityCell } from 'types/navigation';
 import NavigationTreeRow from './NavigationTreeRow';
 
 interface Props {
@@ -32,6 +32,9 @@ interface Props {
   realmsOverridden: boolean;
   roles: string[];
   showRoleMatrix: boolean;
+  tenantKind: TenantKind;
+  /** When set, the tree is filtered to what this role would see (preview). */
+  simulateRole: string | null;
   moduleFilter: string;
   search: string;
   selectedKey: string | null;
@@ -107,6 +110,8 @@ const NavigationTree: React.FC<Props> = ({
   realmsOverridden,
   roles,
   showRoleMatrix,
+  tenantKind,
+  simulateRole,
   moduleFilter,
   search,
   selectedKey,
@@ -116,27 +121,57 @@ const NavigationTree: React.FC<Props> = ({
   const [patchOrder] = usePatchNavigationOrderMutation();
   const [deleteOrder] = useDeleteNavigationOrderMutation();
 
+  // In preview ("View as") mode the tree is filtered to a persona, so
+  // reordering is disabled — a drag would otherwise persist an order computed
+  // from a partial sibling list.
+  const simulating = simulateRole !== null;
+
   const sensors = useSensors(
     // 5px activation distance — prevents clicks from triggering drags.
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
   );
 
   const filteredRealms = useMemo(() => {
-    if (!moduleFilter && !search) return realms;
+    if (!moduleFilter && !search && !simulateRole) return realms;
+    // Recursively keep an item when it (or a descendant) matches the
+    // module/search filters AND, in preview mode, when it would actually
+    // render for the simulated (role × tenant-kind) — the same server-computed
+    // visibility the live sidebar uses, so this preview matches reality.
+    const keepItem = (item: AdminNavItem): AdminNavItem | null => {
+      if (
+        (moduleFilter || search) &&
+        !itemMatchesFilters(item, moduleFilter, search)
+      ) {
+        return null;
+      }
+      if (
+        simulateRole &&
+        !visibilityCell(item, simulateRole, tenantKind).visible
+      ) {
+        return null;
+      }
+      let children = item.children;
+      if (children && children.length) {
+        children = children
+          .map(keepItem)
+          .filter((c): c is AdminNavItem => c !== null);
+      }
+      return { ...item, children };
+    };
     return realms
       .map(r => ({
         ...r,
         sections: r.sections
           .map(s => ({
             ...s,
-            items: s.items.filter(it =>
-              itemMatchesFilters(it, moduleFilter, search)
-            )
+            items: s.items
+              .map(keepItem)
+              .filter((it): it is AdminNavItem => it !== null)
           }))
           .filter(s => s.items.length > 0)
       }))
       .filter(r => r.sections.length > 0);
-  }, [realms, moduleFilter, search]);
+  }, [realms, moduleFilter, search, simulateRole, tenantKind]);
 
   const persistOrder = async (parentKey: string, orderedChildren: string[]) => {
     try {
@@ -160,6 +195,7 @@ const NavigationTree: React.FC<Props> = ({
   // sibling list passed in, then reorder + PATCH.
   const makeHandleDragEnd =
     (parentKey: string, siblings: AdminNavItem[]) => (e: DragEndEvent) => {
+      if (simulating) return;
       const { active, over } = e;
       if (!over || active.id === over.id) return;
       const oldIndex = siblings.findIndex(s => s.itemKey === active.id);
@@ -194,6 +230,8 @@ const NavigationTree: React.FC<Props> = ({
                   item={item}
                   roles={roles}
                   showRoleMatrix={showRoleMatrix}
+                  tenantKind={tenantKind}
+                  readOnly={simulating}
                   selected={item.itemKey === selectedKey}
                   onSelect={onSelect}
                 />
@@ -211,7 +249,7 @@ const NavigationTree: React.FC<Props> = ({
           </ul>
         </SortableContext>
       </DndContext>
-      {anyOverridden && (
+      {anyOverridden && !simulating && (
         <div className="mt-2">
           <Button
             variant="link"
@@ -229,7 +267,16 @@ const NavigationTree: React.FC<Props> = ({
   if (filteredRealms.length === 0) {
     return (
       <p className="text-muted mb-0 small">
-        {t('adminNavigation.emptyFilters')}
+        {simulateRole
+          ? t('adminNavigation.emptySimulation', {
+              role: simulateRole,
+              tenant: t(
+                `adminNavigation.filters.tenant${
+                  tenantKind === 'external' ? 'External' : 'Internal'
+                }`
+              )
+            })
+          : t('adminNavigation.emptyFilters')}
       </p>
     );
   }
@@ -238,6 +285,7 @@ const NavigationTree: React.FC<Props> = ({
   // PATCH with parentKey = realmsParentKey (the "__realms__" sentinel
   // the server echoed). Self-heals if a realm key vanishes.
   const handleRealmDragEnd = (e: DragEndEvent) => {
+    if (simulating) return;
     const { active, over } = e;
     if (!over || active.id === over.id) return;
     const oldIndex = filteredRealms.findIndex(r => r.key === active.id);
@@ -266,9 +314,23 @@ const NavigationTree: React.FC<Props> = ({
               {realm.sections.map(section => {
                 const parentKey = sectionRootKey(realm.key, section.label);
                 const anyOverridden = section.items.some(it => it.overridden);
+                // Hide the section header for the unnamed "Other" fallback
+                // bucket (items declared with no Section) and when the label
+                // just echoes the realm label — both would render a redundant
+                // heading. Mirrors the guard in NavbarVertical for the live
+                // sidebar. The bucket itself (and its override parentKey) stays
+                // intact so reorder still works.
+                const showLabel =
+                  !!section.label &&
+                  section.label !== 'Other' &&
+                  section.label !== realm.label;
                 return (
                   <div key={section.label} className="mb-3">
-                    <div className="small text-muted mb-1">{section.label}</div>
+                    {showLabel && (
+                      <div className="small text-muted mb-1">
+                        {section.label}
+                      </div>
+                    )}
                     {renderSiblings(parentKey, section.items, anyOverridden)}
                   </div>
                 );
@@ -278,7 +340,7 @@ const NavigationTree: React.FC<Props> = ({
         </SortableContext>
       </DndContext>
 
-      {realmsOverridden && (
+      {realmsOverridden && !simulating && (
         <div>
           <Button
             variant="link"

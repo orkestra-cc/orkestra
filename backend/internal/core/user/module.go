@@ -52,9 +52,13 @@ func (m *UserModule) Collections() []module.CollectionSpec {
 
 func (m *UserModule) NavItems() []module.NavItemSpec {
 	return []module.NavItemSpec{
-		{Realm: "personal", Section: "My workspace", Name: "Dashboard", Icon: "chart-pie", Path: "/user/dashboard", Active: true},
-		{Realm: "personal", Section: "My workspace", Name: "Profile", Icon: "user", Path: "/user/profile", Active: true},
-		{Realm: "personal", Section: "My workspace", Name: "Calendar", Icon: "calendar-alt", Path: "/user/calendar", Active: true},
+		// No Section: these live directly under the "personal" realm whose
+		// canonical label is already "My workspace" (see realmLabel in
+		// navigation/services/dynamic_navigation.go). Setting a section equal
+		// to the realm label rendered a duplicate "My workspace" header.
+		{Realm: "personal", Name: "Dashboard", Icon: "chart-pie", Path: "/user/dashboard", Active: true},
+		{Realm: "personal", Name: "Profile", Icon: "user", Path: "/user/profile", Active: true},
+		{Realm: "personal", Name: "Calendar", Icon: "calendar-alt", Path: "/user/calendar", Active: true},
 		{Realm: "platform", Tier: "internal", Name: "User Management", Icon: "users-cog", Path: "/admin/users", MinRole: "administrator", Active: true},
 		{Realm: "platform", Tier: "internal", Name: "Module Management", Icon: "puzzle-piece", Path: "/admin/modules", MinRole: "administrator", Active: true},
 	}

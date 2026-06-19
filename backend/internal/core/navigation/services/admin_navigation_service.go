@@ -185,29 +185,16 @@ func (s *adminNavigationService) GetAdminTree(ctx context.Context) (*models.Admi
 // parent's ItemKey); EffectiveOrder + Overridden are stamped post-reorder
 // so the UI can render the "moved" indicator on each row.
 func (s *adminNavigationService) toAdminItem(ctx context.Context, spec module.NavItemSpec, declaredOrder int, overrideMap map[string][]string) models.AdminNavItem {
-	enabled := true
-	if spec.ModuleName != "" && s.enabledChecker != nil {
-		enabled = s.enabledChecker.IsEnabled(ctx, spec.ModuleName)
-	}
+	// Resolve the two role/tenant-independent gates once, sharing the exact
+	// logic the public sidebar uses (resolveGates), so the role-matrix and the
+	// live menu never disagree.
+	moduleEnabled, configSatisfied := resolveGates(ctx, s.enabledChecker, spec)
 
-	out := models.AdminNavItem{
-		ItemKey:        spec.ItemKey,
-		Name:           spec.Name,
-		Path:           spec.Path,
-		Icon:           spec.Icon,
-		ModuleName:     spec.ModuleName,
-		ModuleEnabled:  enabled,
-		Realm:          spec.Realm,
-		Section:        spec.Section,
-		Group:          spec.Group,
-		Tier:           spec.Tier,
-		MinRole:        spec.MinRole,
-		Active:         spec.Active,
-		DeclaredOrder:  declaredOrder,
-		EffectiveOrder: declaredOrder, // overwritten below if reordered
-	}
+	// Build children first — the parent-collapse leg of the visibility table
+	// reads each child's computed cells.
+	var children []models.AdminNavItem
 	if len(spec.Children) > 0 {
-		children := make([]models.AdminNavItem, 0, len(spec.Children))
+		children = make([]models.AdminNavItem, 0, len(spec.Children))
 		for i, child := range spec.Children {
 			children = append(children, s.toAdminItem(ctx, child, i, overrideMap))
 		}
@@ -216,9 +203,64 @@ func (s *adminNavigationService) toAdminItem(ctx context.Context, spec module.Na
 			children[i].EffectiveOrder = i
 			children[i].Overridden = children[i].DeclaredOrder != i
 		}
-		out.Children = children
 	}
-	return out
+
+	return models.AdminNavItem{
+		ItemKey:         spec.ItemKey,
+		Name:            spec.Name,
+		Path:            spec.Path,
+		Icon:            spec.Icon,
+		ModuleName:      spec.ModuleName,
+		ModuleEnabled:   moduleEnabled,
+		Realm:           spec.Realm,
+		Section:         spec.Section,
+		Group:           spec.Group,
+		Tier:            spec.Tier,
+		MinRole:         spec.MinRole,
+		Active:          spec.Active,
+		DeclaredOrder:   declaredOrder,
+		EffectiveOrder:  declaredOrder, // overwritten by the caller if reordered
+		RequiresConfig:  spec.RequiresConfig,
+		ConfigSatisfied: configSatisfied,
+		Visibility:      s.computeVisibility(spec, moduleEnabled, configSatisfied, children),
+		Children:        children,
+	}
+}
+
+// computeVisibility builds the per-role × tenant-kind truth table for one item.
+// Each cell is the shared self-gate result (evalSelfVisible) with parent-collapse
+// layered on: a no-path group item is hidden (reason parent_collapsed) for a
+// (role, kind) when none of its children are visible there — mirroring the
+// collapse rule in dynamicNavigationService.convert.
+func (s *adminNavigationService) computeVisibility(spec module.NavItemSpec, moduleEnabled, configSatisfied bool, children []models.AdminNavItem) map[string]models.NavRoleVisibility {
+	vis := make(map[string]models.NavRoleVisibility, len(systemRoles))
+	for _, role := range systemRoles {
+		var rv models.NavRoleVisibility
+		for _, kind := range tenantKinds {
+			visible, reason := evalSelfVisible(moduleEnabled, configSatisfied, spec.Tier, role, spec.MinRole, kind)
+			if visible && spec.Path == "" {
+				anyChild := false
+				for _, ch := range children {
+					if cellFor(ch.Visibility[role], kind).Visible {
+						anyChild = true
+						break
+					}
+				}
+				if !anyChild {
+					visible = false
+					reason = ReasonParentCollapsed
+				}
+			}
+			cell := models.NavVisibilityCell{Visible: visible, Reason: reason}
+			if kind == "external" {
+				rv.External = cell
+			} else {
+				rv.Internal = cell
+			}
+		}
+		vis[role] = rv
+	}
+	return vis
 }
 
 // realmKeyOf returns the realm key shared by every item in a section

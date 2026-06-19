@@ -5,6 +5,28 @@
 // backend/internal/core/navigation/models/navigation.go and
 // .../models/override.go).
 
+/** Why an item is hidden in a given (role × tenant-kind) cell. Empty/absent =
+ * visible. Mirrors the backend reason codes in
+ * backend/internal/core/navigation/services/visibility.go. */
+export type NavVisibilityReason =
+  | 'module_disabled'
+  | 'config_off'
+  | 'tier_mismatch'
+  | 'role_below_min'
+  | 'parent_collapsed';
+
+export interface NavVisibilityCell {
+  visible: boolean;
+  reason?: NavVisibilityReason;
+}
+
+export interface NavRoleVisibility {
+  internal: NavVisibilityCell;
+  external: NavVisibilityCell;
+}
+
+export type TenantKind = 'internal' | 'external';
+
 export interface AdminNavItem {
   itemKey: string;
   name: string;
@@ -21,6 +43,13 @@ export interface AdminNavItem {
   declaredOrder: number;
   effectiveOrder: number;
   overridden: boolean;
+  /** Module config key gating this item in the live sidebar (absent = ungated). */
+  requiresConfig?: string;
+  /** Live value of the requiresConfig gate now (true when ungated). */
+  configSatisfied: boolean;
+  /** Effective visibility truth table, keyed by system role. Server-computed
+   * with the same gates as the public sidebar, so it never drifts. */
+  visibility?: Record<string, NavRoleVisibility>;
   children?: AdminNavItem[];
 }
 
@@ -49,6 +78,19 @@ export interface AdminNavigationResponse {
   realmsParentKey: string;
   /** True when a persisted override changed the realm order. */
   realmsOverridden: boolean;
+}
+
+/** Reads the effective-visibility cell for one (role × tenant-kind) from an
+ * item's server-computed truth table. Fails open (visible) when the map is
+ * absent so a missing field never blanks the whole tree. */
+export function visibilityCell(
+  item: AdminNavItem,
+  role: string,
+  kind: TenantKind
+): NavVisibilityCell {
+  const rv = item.visibility?.[role];
+  if (!rv) return { visible: true };
+  return kind === 'external' ? rv.external : rv.internal;
 }
 
 export interface NavOverride {

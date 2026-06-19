@@ -756,24 +756,6 @@ func (h *Handler) RegisterAdminRoutes(api huma.API) {
 		Tags:        []string{"Tenants Admin"},
 	}, h.createDivisionAdmin)
 
-	huma.Register(api, huma.Operation{
-		OperationID: "list-tenant-subscriptions-admin",
-		Method:      http.MethodGet,
-		Path:        "/v1/admin/tenants/{tenantId}/subscriptions",
-		Summary:     "List a tenant's subscriptions (platform admin)",
-		Description: "Aggregator over the subscriptions module. Returns an empty list when the subscriptions addon is disabled.",
-		Tags:        []string{"Tenants Admin"},
-	}, h.listTenantSubscriptionsAdmin)
-
-	huma.Register(api, huma.Operation{
-		OperationID: "list-tenant-payments-admin",
-		Method:      http.MethodGet,
-		Path:        "/v1/admin/tenants/{tenantId}/payments",
-		Summary:     "List a tenant's payment transactions (platform admin)",
-		Description: "Aggregator over the payments module. Returns an empty list when the payments addon is disabled.",
-		Tags:        []string{"Tenants Admin"},
-	}, h.listTenantPaymentsAdmin)
-
 	// --- Unified Client Aggregate (Phase 1) — billing-identity sub-document ---
 
 	huma.Register(api, huma.Operation{
@@ -1019,61 +1001,6 @@ func (h *Handler) createDivision(ctx context.Context, in *createDivisionInput) (
 // transfers ownership.
 func (h *Handler) createDivisionAdmin(ctx context.Context, in *createDivisionInput) (*tenantOutput, error) {
 	return h.createDivision(ctx, in)
-}
-
-// --- Cross-module aggregators (Phase 2) ---
-
-type tenantSubscriptionsOutput struct {
-	Body struct {
-		Subscriptions []iface.TenantSubscription `json:"subscriptions"`
-	}
-}
-
-type tenantPaymentsOutput struct {
-	Body struct {
-		Payments []iface.TenantPayment `json:"payments"`
-	}
-}
-
-// listTenantSubscriptionsAdmin proxies to the subscriptions module via the
-// TenantSubscriptionProvider iface. When the addon is disabled (nil
-// registry lookup) the endpoint returns an empty list rather than 500 —
-// the admin dashboard can render an empty "Subscriptions" tab cleanly.
-func (h *Handler) listTenantSubscriptionsAdmin(ctx context.Context, in *tenantIDPath) (*tenantSubscriptionsOutput, error) {
-	out := &tenantSubscriptionsOutput{}
-	out.Body.Subscriptions = []iface.TenantSubscription{}
-	if h.registry == nil {
-		return out, nil
-	}
-	provider, ok := module.GetTyped[iface.TenantSubscriptionProvider](h.registry, module.ServiceTenantSubscriptionProvider)
-	if !ok || provider == nil {
-		return out, nil
-	}
-	rows, err := provider.ListByTenant(ctx, in.TenantID)
-	if err != nil {
-		return nil, huma.Error500InternalServerError("failed to list tenant subscriptions", err)
-	}
-	out.Body.Subscriptions = rows
-	return out, nil
-}
-
-// listTenantPaymentsAdmin mirrors listTenantSubscriptionsAdmin for payments.
-func (h *Handler) listTenantPaymentsAdmin(ctx context.Context, in *tenantIDPath) (*tenantPaymentsOutput, error) {
-	out := &tenantPaymentsOutput{}
-	out.Body.Payments = []iface.TenantPayment{}
-	if h.registry == nil {
-		return out, nil
-	}
-	provider, ok := module.GetTyped[iface.TenantPaymentProvider](h.registry, module.ServiceTenantPaymentProvider)
-	if !ok || provider == nil {
-		return out, nil
-	}
-	rows, err := provider.ListByTenant(ctx, in.TenantID)
-	if err != nil {
-		return nil, huma.Error500InternalServerError("failed to list tenant payments", err)
-	}
-	out.Body.Payments = rows
-	return out, nil
 }
 
 // --- Unified Client Aggregate (Phase 6) — Tier-2 self-service ---

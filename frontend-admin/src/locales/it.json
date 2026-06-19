@@ -66,7 +66,7 @@
       "moduleManagement": "Gestione moduli",
       "roleManagement": "Gestione ruoli",
       "internalTenants": "Tenant interni",
-      "clients": "Clienti",
+      "externalTenants": "Tenant esterni",
       "auditEvents": "Eventi di audit",
       "soc2Evidence": "Evidenze SOC2",
       "logLevels": "Livelli di log",
@@ -860,10 +860,7 @@
         "overview": "Panoramica",
         "members": "Membri",
         "divisions": "Divisioni",
-        "subscriptions": "Sottoscrizioni",
-        "payments": "Pagamenti",
-        "billing": "Identità di fatturazione",
-        "activity": "Attività"
+        "billing": "Identità di fatturazione"
       }
     },
     "overview": {
@@ -973,29 +970,6 @@
       "toastCreated": "Divisione \"{{name}}\" creata sotto {{parent}}",
       "toastFailed": "Creazione fallita: {{error}}",
       "errorUnknown": "errore sconosciuto"
-    },
-    "subscriptions": {
-      "loadFailed": "Caricamento delle sottoscrizioni non riuscito. Il modulo subscriptions potrebbe essere disabilitato.",
-      "empty": "Nessuna sottoscrizione per questo cliente. Quando ne arriverà una, comparirà qui — il syncer degli entitlement assegna le capability all'attivazione.",
-      "colTier": "Livello",
-      "colStatus": "Stato",
-      "colPeriod": "Periodo",
-      "colNextBilling": "Prossima fatturazione",
-      "colCreated": "Creato"
-    },
-    "payments": {
-      "loadFailed": "Caricamento dei pagamenti non riuscito. Il modulo payments potrebbe essere disabilitato.",
-      "empty": "Nessuna transazione di pagamento per questo cliente.",
-      "colProvider": "Provider",
-      "colReference": "Riferimento",
-      "colAmount": "Importo",
-      "colStatus": "Stato",
-      "colCharged": "Addebitato",
-      "colCreated": "Creato",
-      "refundedSuffix": "rimborsato {{amount}}"
-    },
-    "activity": {
-      "placeholder": "Il log attività per tenant arriverà in un follow-up. Nel frattempo i log a livello di modulo (<code>compliance_audit_events</code>, <code>subscriptions_activity</code>) mantengono la storia per risorsa."
     },
     "billingIdentity": {
       "intro": "Questi campi popolano il destinatario FatturaPA al momento dell'invio della fattura. Per abilitare la modalità Italian billable è richiesto <code>CodiceDestinatario</code> (codice SDI di 7 caratteri) oppure <code>PECDestinatario</code>.",
@@ -1474,11 +1448,21 @@
     "loading": "Caricamento navigazione…",
     "loadFailed": "Impossibile caricare l'albero di navigazione.",
     "emptyFilters": "Nessun elemento corrisponde ai filtri attivi.",
+    "emptySimulation": "Nessun elemento è visibile a {{role}} nei tenant {{tenant}}.",
     "filters": {
       "search": "Cerca",
       "searchPlaceholder": "Etichetta o path…",
       "allModules": "Tutti i moduli",
-      "showRoleMatrix": "Mostra matrice ruoli"
+      "showRoleMatrix": "Mostra matrice ruoli",
+      "tenantKind": "Tenant",
+      "tenantInternal": "Interno",
+      "tenantExternal": "Esterno"
+    },
+    "viewAs": {
+      "label": "Visualizza come",
+      "off": "No",
+      "banner": "Anteprima della sidebar come {{role}} in un tenant {{tenant}} — gli elementi nascosti a questo profilo non vengono mostrati e il riordino è disabilitato.",
+      "clear": "Esci dall'anteprima"
     },
     "actions": {
       "drag": "Trascina per riordinare",
@@ -1487,12 +1471,20 @@
     },
     "badges": {
       "reordered": "Riordinato",
-      "moduleDisabled": "Modulo disabilitato"
+      "moduleDisabled": "Modulo disabilitato",
+      "configGate": "Vincolato da {{key}}",
+      "configGateOff": "Ora nascosto: {{key}} è disattivato"
     },
     "matrix": {
-      "visible": "visibile",
-      "hidden": "nascosto",
-      "tooltip": "{{role}}: {{visibility}}"
+      "cellVisible": "{{role}}: visibile",
+      "cellHidden": "{{role}}: nascosto — {{reason}}",
+      "reason": {
+        "module_disabled": "modulo proprietario disabilitato",
+        "config_off": "gate di configurazione disattivato",
+        "tier_mismatch": "tier del tenant non corrispondente",
+        "role_below_min": "ruolo sotto il minimo",
+        "parent_collapsed": "nessuna voce figlia visibile"
+      }
     },
     "detail": {
       "empty": "Seleziona un elemento per vederne i dettagli.",
@@ -1506,7 +1498,15 @@
       "everyone": "tutti",
       "declaredOrder": "Ordine dichiarato",
       "effectiveOrder": "Ordine effettivo",
-      "visibleTo": "Visibile ai ruoli"
+      "visibility": "Visibilità effettiva",
+      "visibilityHint": "Se ciascun ruolo vedrebbe davvero questo elemento nella sidebar, per tipo di tenant.",
+      "tenantInternal": "Interno",
+      "tenantExternal": "Esterno",
+      "configGate": "Gate di configurazione",
+      "configOn": "attivo",
+      "configOff": "disattivato",
+      "configHint": "Modificalo in Moduli → {{module}}.",
+      "perOrgNote": "Le autorizzazioni per organizzazione non sono riflesse qui — questa matrice considera solo ruolo di sistema e tipo di tenant."
     },
     "toast": {
       "orderSaved": "Ordine salvato",

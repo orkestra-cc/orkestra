@@ -142,8 +142,6 @@ Gated globally by a system permission, not by per-org membership, so platform op
 | DELETE | `/v1/admin/tenants/{tenantId}/invites/{inviteId}` | Revoke a pending invite |
 | GET | `/v1/admin/tenants/{tenantId}/divisions` | List direct children (depth=1) of an external tenant |
 | POST | `/v1/admin/tenants/{tenantId}/divisions` | Create a division (Kind=external, ParentTenantUUID=this). Refuses internal parents. |
-| GET | `/v1/admin/tenants/{tenantId}/subscriptions` | Aggregator — proxies to `iface.TenantSubscriptionProvider`. Returns `[]` when the subscriptions addon is disabled. |
-| GET | `/v1/admin/tenants/{tenantId}/payments` | Aggregator — proxies to `iface.TenantPaymentProvider`. Returns `[]` when the payments addon is disabled. |
 | PATCH | `/v1/admin/clients/{tenantId}/billing-identity` | Unified-clients — sets `IsCompany`, `LegalName`, VAT/fiscal codes, billing address, and the FatturaPA routing sub-document on a Tier-2 tenant. All body fields optional; nil leaves the existing value. The data this endpoint writes is what `iface.BillingTenantProvider.ResolveBillingParty` reads at invoice-send time (replaces the deleted `billing.Customer` row). |
 | POST | `/v1/admin/clients/{tenantId}/italian-billable` | Unified-clients Phase 1 — flips `Tenant.IsItalianBillable`. Enabling requires a FatturaPA profile carrying `CodiceDestinatario` or `PECDestinatario` (422 otherwise); disabling is unconditional. Send-time validation enforces the same invariant a second time, so the toggle on its own is not load-bearing. |
 | GET | `/v1/admin/tenants/provisioning-policy` | Read-only per-tier provisioning policy (`open`/`manual`/`single`) + active-tenant counts. Backs the policy card on the tenant pages; the modes are edited at `/admin/modules/tenant`. See [Provisioning policy](#provisioning-policy-admin-managed). |
@@ -173,7 +171,7 @@ MinRole: administrator
 
 Realm:   business   (renders under "Business")
 Tier:    internal
-Name:    Clients
+Name:    External Tenants
 Path:    /admin/clients
 MinRole: administrator
 ```

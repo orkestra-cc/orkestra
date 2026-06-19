@@ -70,22 +70,47 @@ type NavigationResponse struct {
 // classification field — MinRole, Tier, ModuleName, ModuleEnabled — so
 // operators can audit visibility and reorder items.
 type AdminNavItem struct {
-	ItemKey        string         `json:"itemKey" doc:"Stable identifier; persisted overrides reference this"`
-	Name           string         `json:"name" doc:"Display name"`
-	Path           string         `json:"path,omitempty" doc:"Route the item navigates to"`
-	Icon           string         `json:"icon,omitempty" doc:"Icon identifier"`
-	ModuleName     string         `json:"moduleName" doc:"Owning module"`
-	ModuleEnabled  bool           `json:"moduleEnabled" doc:"Whether the owning module is enabled right now"`
-	Realm          string         `json:"realm,omitempty"`
-	Section        string         `json:"section,omitempty"`
-	Group          string         `json:"group,omitempty" doc:"Legacy v1 group label"`
-	Tier           string         `json:"tier,omitempty" doc:"internal | external | '' (both)"`
-	MinRole        string         `json:"minRole,omitempty" doc:"Lowest system role that sees this item"`
-	Active         bool           `json:"active"`
-	DeclaredOrder  int            `json:"declaredOrder" doc:"Sibling index as declared in the module's NavItems()"`
-	EffectiveOrder int            `json:"effectiveOrder" doc:"Sibling index after applying persisted overrides"`
-	Overridden     bool           `json:"overridden" doc:"True when EffectiveOrder differs from DeclaredOrder"`
-	Children       []AdminNavItem `json:"children,omitempty"`
+	ItemKey        string `json:"itemKey" doc:"Stable identifier; persisted overrides reference this"`
+	Name           string `json:"name" doc:"Display name"`
+	Path           string `json:"path,omitempty" doc:"Route the item navigates to"`
+	Icon           string `json:"icon,omitempty" doc:"Icon identifier"`
+	ModuleName     string `json:"moduleName" doc:"Owning module"`
+	ModuleEnabled  bool   `json:"moduleEnabled" doc:"Whether the owning module is enabled right now"`
+	Realm          string `json:"realm,omitempty"`
+	Section        string `json:"section,omitempty"`
+	Group          string `json:"group,omitempty" doc:"Legacy v1 group label"`
+	Tier           string `json:"tier,omitempty" doc:"internal | external | '' (both)"`
+	MinRole        string `json:"minRole,omitempty" doc:"Lowest system role that sees this item"`
+	Active         bool   `json:"active"`
+	DeclaredOrder  int    `json:"declaredOrder" doc:"Sibling index as declared in the module's NavItems()"`
+	EffectiveOrder int    `json:"effectiveOrder" doc:"Sibling index after applying persisted overrides"`
+	Overridden     bool   `json:"overridden" doc:"True when EffectiveOrder differs from DeclaredOrder"`
+	// RequiresConfig is the boolean module-config key that gates this item in
+	// the live sidebar (empty when ungated). Surfaced so the admin console can
+	// explain a config-driven hide instead of leaving it invisible.
+	RequiresConfig string `json:"requiresConfig,omitempty" doc:"Module config key that must be truthy for this item to appear"`
+	// ConfigSatisfied is the live value of the RequiresConfig gate right now
+	// (always true when RequiresConfig is empty).
+	ConfigSatisfied bool `json:"configSatisfied" doc:"Whether the RequiresConfig gate is currently truthy"`
+	// Visibility is the per-role × tenant-kind truth table — whether this item
+	// (after module-enabled, config, tier, role and parent-collapse gates) would
+	// actually render in the sidebar, plus a reason code when hidden. Keyed by
+	// system role; each entry carries the internal and external tenant-kind cells.
+	Visibility map[string]NavRoleVisibility `json:"visibility,omitempty" doc:"Effective visibility per role, split by tenant kind"`
+	Children   []AdminNavItem               `json:"children,omitempty"`
+}
+
+// NavVisibilityCell is one cell of the visibility truth table: whether the item
+// renders, and (when it does not) the reason code explaining which gate hid it.
+type NavVisibilityCell struct {
+	Visible bool   `json:"visible"`
+	Reason  string `json:"reason,omitempty" doc:"Why hidden: module_disabled | config_off | tier_mismatch | role_below_min | parent_collapsed"`
+}
+
+// NavRoleVisibility holds the two tenant-kind cells for a single role.
+type NavRoleVisibility struct {
+	Internal NavVisibilityCell `json:"internal"`
+	External NavVisibilityCell `json:"external"`
 }
 
 // AdminNavSection groups items under a section label inside a realm. Mirrors

@@ -348,25 +348,12 @@ func indexChildren(idx *navItemsIndex, spec module.NavItemSpec) {
 // convert applies the visibility filters and returns the rendered NavItem.
 // Returns ok=false when the item (or all its children) should be hidden.
 func (s *dynamicNavigationService) convert(ctx context.Context, spec module.NavItemSpec, userRole, tenantKind string) (models.NavItem, bool) {
-	if spec.ModuleName != "" && s.enabledChecker != nil {
-		if !s.enabledChecker.IsEnabled(ctx, spec.ModuleName) {
-			return models.NavItem{}, false
-		}
-	}
-	// Per-request config gate: hide an item whose owning module has its
-	// RequiresConfig flag turned off. Evaluated live so a /admin/modules
-	// toggle reflects on the next nav fetch without a restart.
-	if spec.RequiresConfig != "" && spec.ModuleName != "" {
-		if cr, ok := s.enabledChecker.(configValueReader); ok {
-			if !configTruthy(cr.GetValue(ctx, spec.ModuleName, spec.RequiresConfig)) {
-				return models.NavItem{}, false
-			}
-		}
-	}
-	if !tierAllows(spec.Tier, tenantKind) {
-		return models.NavItem{}, false
-	}
-	if !meetsMinRole(userRole, spec.MinRole) {
+	// Self-gates (module-enabled, RequiresConfig, tier, role) go through the
+	// shared evalSelfVisible so this live filter and the admin role-matrix can
+	// never disagree about what a user sees. The config gate is evaluated live
+	// so a /admin/modules toggle reflects on the next nav fetch without a restart.
+	moduleEnabled, configSatisfied := resolveGates(ctx, s.enabledChecker, spec)
+	if visible, _ := evalSelfVisible(moduleEnabled, configSatisfied, spec.Tier, userRole, spec.MinRole, tenantKind); !visible {
 		return models.NavItem{}, false
 	}
 

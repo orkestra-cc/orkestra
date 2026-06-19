@@ -155,5 +155,5 @@ the above plus `backend-tenantscope` and a single binary build.
   walkthrough aimed at new contributors
 - [Backend module system](../../CLAUDE.md#module-system) — how the
   registry consumes the SDK at boot
-- [Core modules](../../internal/core/CLAUDE.md) — the seven always-loaded
+- [Core modules](../../internal/core/CLAUDE.md) — the eight always-loaded
   modules, all of which implement `module.Module`

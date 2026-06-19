@@ -5,11 +5,11 @@ sidebar_position: 3
 
 # Module Lifecycle
 
-Orkestra is a **single binary** built from one Go module. Every registered module — the seven always-loaded core modules and any optional modules a fork adds — compiles in. There is no build-time selection: the only layer that decides what actually runs is **runtime configuration**.
+Orkestra is a **single binary** built from one Go module. Every registered module — the eight always-loaded core modules and any optional modules a fork adds — compiles in. There is no build-time selection: the only layer that decides what actually runs is **runtime configuration**.
 
 ## What compiles in
 
-Each module's wiring lives in `cmd/server/catalog_<name>.go`. The seven core modules are always registered; a fork adds a vertical by dropping its own `internal/addons/<name>/` package plus a `cmd/server/catalog_<name>.go` that registers the factory in the `optionalModules` catalog via an `init()`. There are no Go build tags, no `BUILD_TAGS`, and no per-SKU build profiles — `make build` is the only build target, producing one binary and one Docker image.
+Each module's wiring lives in `cmd/server/catalog_<name>.go`. The eight core modules are always registered; a fork adds a vertical by dropping its own `internal/addons/<name>/` package plus a `cmd/server/catalog_<name>.go` that registers the factory in the `optionalModules` catalog via an `init()`. There are no Go build tags, no `BUILD_TAGS`, and no per-SKU build profiles — `make build` is the only build target, producing one binary and one Docker image.
 
 The base ships an **empty** `optionalModules` catalog, so out of the box there is nothing optional to toggle — but the `/admin/modules` surface remains for forks that add their own.
 

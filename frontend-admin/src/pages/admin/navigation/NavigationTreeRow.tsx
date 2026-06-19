@@ -4,37 +4,29 @@ import classNames from 'classnames';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { useTranslation } from 'react-i18next';
 import SubtleBadge from 'components/common/SubtleBadge';
-import type { AdminNavItem } from 'types/navigation';
+import {
+  visibilityCell,
+  type AdminNavItem,
+  type TenantKind
+} from 'types/navigation';
 
 interface Props {
   item: AdminNavItem;
   roles: string[];
   showRoleMatrix: boolean;
+  tenantKind: TenantKind;
+  /** When true, drag-to-reorder is suppressed (preview/simulation mode). */
+  readOnly?: boolean;
   selected: boolean;
   onSelect: (item: AdminNavItem) => void;
 }
-
-// roleHierarchy ranks system roles highest privilege first. Mirrors the
-// backend's roleRank in navigation services/dynamic_navigation.go and
-// the frontend's ROLE_HIERARCHY constant.
-const ROLE_RANK: Record<string, number> = {
-  super_admin: 6,
-  administrator: 5,
-  developer: 4,
-  manager: 3,
-  operator: 2,
-  guest: 1
-};
-
-const roleSees = (role: string, minRole: string | undefined): boolean => {
-  if (!minRole) return true;
-  return (ROLE_RANK[role] ?? 0) >= (ROLE_RANK[minRole] ?? 0);
-};
 
 const NavigationTreeRow: React.FC<Props> = ({
   item,
   roles,
   showRoleMatrix,
+  tenantKind,
+  readOnly = false,
   selected,
   onSelect
 }) => {
@@ -46,7 +38,7 @@ const NavigationTreeRow: React.FC<Props> = ({
     transform,
     transition,
     isDragging
-  } = useSortable({ id: item.itemKey });
+  } = useSortable({ id: item.itemKey, disabled: readOnly });
 
   const style: React.CSSProperties = {
     transform: CSS.Transform.toString(transform),
@@ -76,7 +68,7 @@ const NavigationTreeRow: React.FC<Props> = ({
   return (
     <div
       ref={setNodeRef}
-      style={{ ...style, cursor: 'grab' }}
+      style={{ ...style, cursor: readOnly ? 'pointer' : 'grab' }}
       className={classNames(
         'd-flex align-items-center gap-2 py-1 px-2 rounded user-select-none',
         {
@@ -85,55 +77,99 @@ const NavigationTreeRow: React.FC<Props> = ({
         }
       )}
       onClick={handleRowClick}
-      aria-label={t('adminNavigation.actions.drag')}
+      aria-label={readOnly ? undefined : t('adminNavigation.actions.drag')}
       {...attributes}
       {...listeners}
     >
-      <FontAwesomeIcon
-        icon="grip-lines"
-        className="text-500 me-1"
-        aria-hidden
-      />
-      <span className="fw-semibold text-900">{item.name}</span>
-      {item.path && <code className="ms-1 small text-muted">{item.path}</code>}
-      {item.overridden && (
-        <SubtleBadge bg="warning" className="ms-2">
-          {t('adminNavigation.badges.reordered')}
-        </SubtleBadge>
-      )}
-      {!item.moduleEnabled && (
-        <SubtleBadge bg="secondary" className="ms-2">
-          {t('adminNavigation.badges.moduleDisabled')}
-        </SubtleBadge>
-      )}
-      {item.tier && (
-        <SubtleBadge
-          bg={item.tier === 'internal' ? 'info' : 'success'}
-          className="ms-2"
-        >
-          {item.tier}
-        </SubtleBadge>
-      )}
+      {/* Left cluster: grows and clips (min-w-0) so a long name/path
+          truncates with an ellipsis instead of wrapping or shoving the
+          right-hand module name + role matrix off the card. */}
+      <div className="d-flex align-items-center gap-2 flex-grow-1 min-w-0">
+        <FontAwesomeIcon
+          icon="grip-lines"
+          className={classNames(
+            'flex-shrink-0',
+            readOnly ? 'text-300' : 'text-500'
+          )}
+          aria-hidden
+        />
+        <span className="fw-semibold text-900 flex-shrink-0">{item.name}</span>
+        {item.path && (
+          <code className="small text-muted text-truncate d-none d-lg-inline">
+            {item.path}
+          </code>
+        )}
+        {item.overridden && (
+          <SubtleBadge bg="warning" className="flex-shrink-0">
+            {t('adminNavigation.badges.reordered')}
+          </SubtleBadge>
+        )}
+        {!item.moduleEnabled && (
+          <SubtleBadge bg="secondary" className="flex-shrink-0">
+            {t('adminNavigation.badges.moduleDisabled')}
+          </SubtleBadge>
+        )}
+        {item.tier && (
+          <SubtleBadge
+            bg={item.tier === 'internal' ? 'info' : 'success'}
+            className="flex-shrink-0"
+          >
+            {item.tier}
+          </SubtleBadge>
+        )}
+        {item.requiresConfig && (
+          <span
+            className="flex-shrink-0 d-inline-flex"
+            title={
+              item.configSatisfied
+                ? t('adminNavigation.badges.configGate', {
+                    key: item.requiresConfig
+                  })
+                : t('adminNavigation.badges.configGateOff', {
+                    key: item.requiresConfig
+                  })
+            }
+          >
+            <SubtleBadge bg={item.configSatisfied ? 'info' : 'warning'}>
+              <FontAwesomeIcon
+                icon="sliders-h"
+                aria-label={item.requiresConfig}
+              />
+            </SubtleBadge>
+          </span>
+        )}
+      </div>
 
-      <span className="small text-muted ms-auto">{item.moduleName}</span>
+      {/* Right cluster: module name + role matrix, pinned and never shrunk. */}
+      <span className="small text-muted flex-shrink-0">{item.moduleName}</span>
 
       {showRoleMatrix && (
-        <div className="d-flex gap-1 ms-2">
+        <div className="d-flex gap-1 flex-shrink-0">
           {roles.map(role => {
-            const visible = roleSees(role, item.minRole);
+            const cell = visibilityCell(item, role, tenantKind);
+            // Tri-state: visible → green; hidden purely because the role rank
+            // is too low → muted gray (expected, low-signal); hidden by any
+            // OTHER gate (module/config/tier/parent) → amber, because the role
+            // WOULD qualify but something else hides it — the actionable case.
+            const chipClass = cell.visible
+              ? 'bg-success'
+              : cell.reason === 'role_below_min'
+                ? 'bg-200'
+                : 'bg-warning';
+            const title = cell.visible
+              ? t('adminNavigation.matrix.cellVisible', { role })
+              : t('adminNavigation.matrix.cellHidden', {
+                  role,
+                  reason: t(`adminNavigation.matrix.reason.${cell.reason}`)
+                });
             return (
               <span
                 key={role}
                 data-matrix-chip
-                title={t('adminNavigation.matrix.tooltip', {
-                  role,
-                  visibility: visible
-                    ? t('adminNavigation.matrix.visible')
-                    : t('adminNavigation.matrix.hidden')
-                })}
+                title={title}
                 className={classNames(
                   'd-inline-block rounded-circle',
-                  visible ? 'bg-success' : 'bg-200'
+                  chipClass
                 )}
                 style={{ width: 10, height: 10 }}
               />

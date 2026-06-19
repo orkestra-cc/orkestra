@@ -5,7 +5,7 @@ sidebar_position: 4
 
 # Enabling Modules at Runtime
 
-Every registered module compiles into the single binary. In the core-only base that means the seven core modules — `user`, `notification`, `tenant`, `authz`, `auth`, `navigation`, `logging` — which are always loaded and on. There are no Go build tags and no SKUs; what's available is whatever is registered in the module catalog.
+Every registered module compiles into the single binary. In the core-only base that means the eight core modules — `user`, `notification`, `tenant`, `authz`, `auth`, `navigation`, `logging`, `compliance` — which are always loaded and on. There are no Go build tags and no SKUs; what's available is whatever is registered in the module catalog.
 
 This page is about the **runtime enable/disable layer**: a fork's optional modules (registered via `internal/addons/<name>/` + a `cmd/server/catalog_<name>.go`) are instantiated at boot but only turned on when an operator enables them at `/admin/modules`. The base ships an empty optional catalog, so out of the box there's nothing optional to toggle — see [the architecture deep-dive](/architecture/module-lifecycle) for how this works.
 

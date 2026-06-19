@@ -113,6 +113,89 @@ func TestAdminNavigationService_DeclaredOrderMatchesSiblingIndex(t *testing.T) {
 	}
 }
 
+// TestAdminNavigationService_VisibilityTruthTable exercises every gate the
+// per-role × tenant-kind visibility map reflects: role floor, tenant tier,
+// disabled module, config gate, and parent-collapse. The map must agree with
+// what dynamicNavigationService.convert would render (shared evalSelfVisible).
+func TestAdminNavigationService_VisibilityTruthTable(t *testing.T) {
+	specs := []module.NavItemSpec{
+		// administrator-only, untiered → operator/guest blocked by role.
+		{Realm: "platform", Name: "Modules", Path: "/admin/modules", MinRole: "administrator", ModuleName: "navigation", ItemKey: "navigation.modules"},
+		// internal-tier, no role floor → hidden for external tenants.
+		{Realm: "business", Tier: "internal", Name: "Clients", Path: "/admin/clients", ModuleName: "tenant", ItemKey: "tenant.clients"},
+		// disabled module → hidden for everyone, every kind.
+		{Realm: "shared", Name: "Dead", Path: "/dead", ModuleName: "billing", ItemKey: "billing.dead"},
+		// config-gated, gate OFF → hidden for everyone, every kind.
+		{Realm: "platform", Name: "SOC2", Path: "/admin/compliance/soc2", MinRole: "administrator", RequiresConfig: "soc2_enabled", ModuleName: "compliance", ItemKey: "compliance.soc2"},
+		// no-path group whose only child is administrator-only → parent collapses
+		// for roles below administrator even though the group itself has no floor.
+		{Realm: "shared", Name: "Group", ModuleName: "navigation", ItemKey: "navigation.group", Children: []module.NavItemSpec{
+			{Name: "Child", Path: "/group/child", MinRole: "administrator", ModuleName: "navigation", ItemKey: "navigation.group.child"},
+		}},
+	}
+	checker := &stubEnabledConfig{disabled: map[string]bool{"billing": true}, values: map[string]string{}}
+	svc := NewAdminNavigationService(specs, checker, nil)
+	resp, err := svc.GetAdminTree(context.Background())
+	if err != nil {
+		t.Fatalf("GetAdminTree: %v", err)
+	}
+	all := func() []models.AdminNavItem {
+		var out []models.AdminNavItem
+		for _, r := range resp.Realms {
+			for _, s := range r.Sections {
+				out = append(out, s.Items...)
+			}
+		}
+		return out
+	}()
+
+	cell := func(name, role, kind string) models.NavVisibilityCell {
+		it := adminFindItem(all, name)
+		if it == nil {
+			t.Fatalf("item %q missing", name)
+		}
+		return cellFor(it.Visibility[role], kind)
+	}
+
+	// Role floor: administrator sees Modules, operator does not.
+	if c := cell("Modules", "administrator", "internal"); !c.Visible {
+		t.Errorf("Modules/administrator should be visible, got %+v", c)
+	}
+	if c := cell("Modules", "operator", "internal"); c.Visible || c.Reason != ReasonRoleBelowMin {
+		t.Errorf("Modules/operator want hidden role_below_min, got %+v", c)
+	}
+
+	// Tier: Clients visible internal, hidden external (tier_mismatch).
+	if c := cell("Clients", "administrator", "internal"); !c.Visible {
+		t.Errorf("Clients/internal should be visible, got %+v", c)
+	}
+	if c := cell("Clients", "administrator", "external"); c.Visible || c.Reason != ReasonTierMismatch {
+		t.Errorf("Clients/external want hidden tier_mismatch, got %+v", c)
+	}
+
+	// Disabled module: hidden everywhere.
+	if c := cell("Dead", "super_admin", "internal"); c.Visible || c.Reason != ReasonModuleDisabled {
+		t.Errorf("Dead want hidden module_disabled, got %+v", c)
+	}
+
+	// Config gate OFF: hidden everywhere; the gate state is surfaced.
+	if c := cell("SOC2", "administrator", "internal"); c.Visible || c.Reason != ReasonConfigOff {
+		t.Errorf("SOC2 want hidden config_off, got %+v", c)
+	}
+	if soc2 := adminFindItem(all, "SOC2"); soc2.RequiresConfig != "soc2_enabled" || soc2.ConfigSatisfied {
+		t.Errorf("SOC2 RequiresConfig/ConfigSatisfied not surfaced: %q / %v", soc2.RequiresConfig, soc2.ConfigSatisfied)
+	}
+
+	// Parent-collapse: the no-path Group is visible to administrator (its child
+	// passes) but collapses for operator (child blocked by role).
+	if c := cell("Group", "administrator", "internal"); !c.Visible {
+		t.Errorf("Group/administrator should be visible (child passes), got %+v", c)
+	}
+	if c := cell("Group", "operator", "internal"); c.Visible || c.Reason != ReasonParentCollapsed {
+		t.Errorf("Group/operator want hidden parent_collapsed, got %+v", c)
+	}
+}
+
 func TestAdminNavigationService_EchoesRolesAndTenantKinds(t *testing.T) {
 	svc := NewAdminNavigationService(nil, nil, nil)
 	resp, err := svc.GetAdminTree(context.Background())
