@@ -4,6 +4,21 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.3.11] - 2026-06-19
+
+### Features
+
+- **(navigation)** Truthful role-matrix audit + fix duplicate headers ([bae6278](https://github.com/orkestra-cc/orkestra/commit/bae627880896f126b16ddd5a7568626de5cee3f2))
+
+### Refactor
+
+- **(tenant)** Rename Clients nav to External Tenants, drop addon-only client tabs ([e7b3804](https://github.com/orkestra-cc/orkestra/commit/e7b38047be29ee1f0dbed37a63464b284444217a))
+
+### Documentation
+
+- Reflect compliance as the 8th core module ([bc46381](https://github.com/orkestra-cc/orkestra/commit/bc46381b4a5f6a07faf198ffd06715e67ce53f98))
+- Refresh ADR statuses, archive shipped plans, fix stale refs ([f6b838b](https://github.com/orkestra-cc/orkestra/commit/f6b838b658086f08e24deab98611282b15abf7fa))
+
 ## [0.3.10] - 2026-06-19
 
 ### Features
