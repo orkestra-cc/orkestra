@@ -141,14 +141,15 @@ func (m *Module) Permissions() []iface.PermissionSpec {
 }
 
 func (m *Module) NavItems() []module.NavItemSpec {
-	// Two-tier split (ADR-0001 Phase 3): operator admins see two clearly
-	// separated sidebar groups so "our own companies" (internal) and
-	// "customers on the platform" (external clients) never mix. Both
-	// entries require the administrator role and the system.tenants.admin
+	// Two-tier split (ADR-0001 Phase 3): operator admins see "our own
+	// companies" (internal) and "customers on the platform" (external
+	// clients) as two adjacent entries under the Administration (platform)
+	// realm — Internal Tenants first, External Tenants directly below it.
+	// Both entries require the administrator role and the system.tenants.admin
 	// permission (enforced at the route layer).
 	return []module.NavItemSpec{
 		{Realm: "platform", Tier: "internal", Name: "Internal Tenants", Icon: "building", Path: "/admin/internal/tenants", MinRole: "administrator", Active: true},
-		{Realm: "business", Tier: "internal", Name: "External Tenants", Icon: "users", Path: "/admin/clients", MinRole: "administrator", Active: true},
+		{Realm: "platform", Tier: "internal", Name: "External Tenants", Icon: "users", Path: "/admin/clients", MinRole: "administrator", Active: true},
 	}
 }
 
