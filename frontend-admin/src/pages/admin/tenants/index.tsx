@@ -2,15 +2,14 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { Card, Col, Row } from 'react-bootstrap';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import type { IconProp } from '@fortawesome/fontawesome-svg-core';
 import {
   faBuilding,
   faCircleCheck,
   faUsers,
   faLayerGroup
 } from '@fortawesome/free-solid-svg-icons';
-import CountUp from 'react-countup';
 import { useTranslation } from 'react-i18next';
+import StatCard from 'components/common/StatCard';
 import SubtleBadge from 'components/common/SubtleBadge';
 import type { BadgeColor } from 'components/common/SubtleBadge';
 import {
@@ -18,60 +17,11 @@ import {
   type AdminOrgListItem
 } from 'store/api/tenantApi';
 import TenantTable from './TenantTable';
+import ProvisioningPolicyCard from './ProvisioningPolicyCard';
 import TenantDetailModal from './TenantDetailModal';
 import CreateTenantModal from './CreateTenantModal';
 import DeleteTenantModal from './DeleteTenantModal';
 import PurgeTenantModal from './PurgeTenantModal';
-
-// Subtle "Apple-style" stat card: muted label, big animated number, one
-// colorful icon chip on the right, optional badge + footnote beneath the
-// value. Matches the BillingStatCards pattern used on /billing/dashboard.
-interface StatCardProps {
-  title: string;
-  value: number;
-  icon: IconProp;
-  accent: 'primary' | 'success' | 'info' | 'warning';
-  footnote?: React.ReactNode;
-  badge?: { text: string; bg: BadgeColor };
-}
-
-const StatCard: React.FC<StatCardProps> = ({
-  title,
-  value,
-  icon,
-  accent,
-  footnote,
-  badge
-}) => (
-  <Card className="h-100 shadow-none border">
-    <Card.Body>
-      <div className="d-flex justify-content-between align-items-start">
-        <div>
-          <h6 className="text-body-tertiary fs-10 text-uppercase mb-2">
-            {title}
-            {badge && (
-              <SubtleBadge bg={badge.bg} pill className="ms-2 fs-11">
-                {badge.text}
-              </SubtleBadge>
-            )}
-          </h6>
-          <h3 className="fw-normal text-body mb-0">
-            <CountUp start={0} end={value} duration={1.5} separator="," />
-          </h3>
-        </div>
-        <div
-          className={`d-flex align-items-center justify-content-center rounded-circle bg-${accent}-subtle`}
-          style={{ width: 48, height: 48 }}
-        >
-          <FontAwesomeIcon icon={icon} className={`fs-5 text-${accent}`} />
-        </div>
-      </div>
-      {footnote && (
-        <div className="fs-10 text-body-tertiary mt-3">{footnote}</div>
-      )}
-    </Card.Body>
-  </Card>
-);
 
 const planAccent: Record<string, BadgeColor> = {
   free: 'secondary',
@@ -207,8 +157,8 @@ const TenantManagementPage: React.FC<TenantAdminPageProps> = ({
             title={labels?.totalTitle ?? t('adminTenants.totalTitle')}
             value={stats.total}
             icon={faBuilding}
-            accent="primary"
-            footnote={
+            color="primary"
+            subtitle={
               stats.deleted > 0
                 ? t('adminTenants.softDeletedBreakdown', {
                     active: stats.active,
@@ -223,7 +173,7 @@ const TenantManagementPage: React.FC<TenantAdminPageProps> = ({
             title={t('adminTenants.active')}
             value={stats.active}
             icon={faCircleCheck}
-            accent="success"
+            color="success"
             badge={
               stats.deleted > 0
                 ? {
@@ -234,7 +184,7 @@ const TenantManagementPage: React.FC<TenantAdminPageProps> = ({
                   }
                 : undefined
             }
-            footnote={
+            subtitle={
               stats.total > 0
                 ? t('adminTenants.percentOfTotal', {
                     percent: Math.round((stats.active / stats.total) * 100)
@@ -248,8 +198,8 @@ const TenantManagementPage: React.FC<TenantAdminPageProps> = ({
             title={t('adminTenants.members')}
             value={stats.totalMembers}
             icon={faUsers}
-            accent="info"
-            footnote={
+            color="info"
+            subtitle={
               stats.active > 0
                 ? t('adminTenants.averagePerTenant', {
                     avg: (stats.totalMembers / stats.active).toFixed(1)
@@ -308,6 +258,11 @@ const TenantManagementPage: React.FC<TenantAdminPageProps> = ({
             </Card.Body>
           </Card>
         </Col>
+        {kind && (
+          <Col md={6} xl={3}>
+            <ProvisioningPolicyCard tier={kind} />
+          </Col>
+        )}
       </Row>
 
       <TenantTable

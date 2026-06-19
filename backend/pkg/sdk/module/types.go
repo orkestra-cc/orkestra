@@ -72,9 +72,9 @@ type IndexSpec struct {
 	// rejects both together). Supports the partialFilterExpression operator
 	// subset: equality, $exists:true, $gt/$gte/$lt/$lte, $type, $in, $and.
 	PartialFilter map[string]any `json:"partialFilter,omitempty"`
-	TTL         time.Duration  `json:"ttl,omitempty"`      // reap docs TTL after the indexed timestamp; 0 = no TTL
-	ExpireAt    bool           `json:"expireAt,omitempty"` // reap docs *at* the indexed timestamp (expireAfterSeconds=0). Mutually exclusive with TTL; use for absolute-expiry fields like `expiresAt`.
-	Text        bool           `json:"text,omitempty"`     // text index (overrides Keys)
+	TTL           time.Duration  `json:"ttl,omitempty"`      // reap docs TTL after the indexed timestamp; 0 = no TTL
+	ExpireAt      bool           `json:"expireAt,omitempty"` // reap docs *at* the indexed timestamp (expireAfterSeconds=0). Mutually exclusive with TTL; use for absolute-expiry fields like `expiresAt`.
+	Text          bool           `json:"text,omitempty"`     // text index (overrides Keys)
 }
 
 // NavItemSpec declares a navigation menu entry that a module contributes.
@@ -108,11 +108,21 @@ type NavItemSpec struct {
 	// Legacy grouping (v1) — deprecated; kept so v1 clients still work.
 	Group string `json:"group,omitempty"`
 
-	Name       string        `json:"name"`
-	Icon       string        `json:"icon,omitempty"`
-	Path       string        `json:"path,omitempty"`
-	MinRole    string        `json:"minRole,omitempty"`
-	Active     bool          `json:"active"`
+	Name    string `json:"name"`
+	Icon    string `json:"icon,omitempty"`
+	Path    string `json:"path,omitempty"`
+	MinRole string `json:"minRole,omitempty"`
+	Active  bool   `json:"active"`
+
+	// RequiresConfig gates the item on a boolean config value of its OWN
+	// module, evaluated per request by the navigation filter — so a runtime
+	// toggle at /admin/modules takes effect on the next nav fetch, no restart.
+	// The value is the config key (e.g. "soc2_enabled"); the owning module is
+	// taken from ModuleName. Empty = always visible. Emit the item
+	// unconditionally and set this rather than gating inside NavItems() on
+	// Init-set state — NavItems() is collected before any module's Init runs.
+	RequiresConfig string `json:"requiresConfig,omitempty"`
+
 	ModuleName string        `json:"moduleName,omitempty"` // stamped by registry
 	ItemKey    string        `json:"itemKey,omitempty"`    // stamped by registry if empty
 	Children   []NavItemSpec `json:"children,omitempty"`

@@ -42,6 +42,8 @@ type fakeTenantSvc struct {
 	setBillingIdentityFn     func(ctx context.Context, tenantUUID string, in services.SetBillingIdentityInput) error
 	setItalianBillableFn     func(ctx context.Context, tenantUUID string, on bool) error
 	ensureTenantForUserFn    func(ctx context.Context, userUUID string) (*iface.Tenant, error)
+	provisioningModeFn       func(ctx context.Context, kind models.TenantKind) string
+	countActiveByKindFn      func(ctx context.Context, kind models.TenantKind) (int64, error)
 }
 
 func (f *fakeTenantSvc) GetTenant(ctx context.Context, t string) (*iface.Tenant, error) {
@@ -175,6 +177,22 @@ func (f *fakeTenantSvc) EnsureTenantForUser(ctx context.Context, u string) (*ifa
 		return f.ensureTenantForUserFn(ctx, u)
 	}
 	panic("unused: EnsureTenantForUser")
+}
+
+// ProvisioningMode and CountActiveByKind default to the legacy "open" /
+// zero-count behaviour so existing handler tests that don't exercise the
+// provisioning policy keep passing without wiring a stub.
+func (f *fakeTenantSvc) ProvisioningMode(ctx context.Context, kind models.TenantKind) string {
+	if f.provisioningModeFn != nil {
+		return f.provisioningModeFn(ctx, kind)
+	}
+	return models.ProvisioningModeOpen
+}
+func (f *fakeTenantSvc) CountActiveByKind(ctx context.Context, kind models.TenantKind) (int64, error) {
+	if f.countActiveByKindFn != nil {
+		return f.countActiveByKindFn(ctx, kind)
+	}
+	return 0, nil
 }
 
 // fakeTenantUserProvider stubs iface.UserProvider for the handler's
@@ -374,6 +392,74 @@ func TestCreateTenant_SvcError400(t *testing.T) {
 	h := New(svc, nil)
 	_, err := h.createTenant(authedCtx("u1"), &createTenantInput{Body: models.CreateTenantInput{Name: "x"}})
 	assertStatus(t, err, 400)
+}
+
+// fakeAuthzProvider stubs iface.AuthzProvider for the provisioning manual-gate
+// tests. Only HasPermission is exercised.
+type fakeAuthzProvider struct {
+	hasPermission bool
+}
+
+func (f *fakeAuthzProvider) HasPermission(_ context.Context, _, _, _ string) (bool, error) {
+	return f.hasPermission, nil
+}
+func (f *fakeAuthzProvider) GetEffectivePermissions(context.Context, string, string) ([]string, error) {
+	return nil, nil
+}
+func (f *fakeAuthzProvider) RegisterPermissions(context.Context, []iface.PermissionSpec) error {
+	return nil
+}
+
+func TestCreateTenant_ManualMode_NonAdmin403(t *testing.T) {
+	t.Parallel()
+	svc := &fakeTenantSvc{
+		provisioningModeFn: func(context.Context, models.TenantKind) string {
+			return models.ProvisioningModeManual
+		},
+		createTenantFn: func(context.Context, string, models.CreateTenantInput) (*models.Tenant, error) {
+			t.Fatal("CreateTenant must not be called when the manual gate denies")
+			return nil, nil
+		},
+	}
+	reg := module.NewServiceRegistry()
+	reg.Register(module.ServiceAuthzProvider, iface.AuthzProvider(&fakeAuthzProvider{hasPermission: false}))
+	h := New(svc, reg)
+	_, err := h.createTenant(authedCtx("u1"), &createTenantInput{Body: models.CreateTenantInput{Name: "x"}})
+	assertStatus(t, err, 403)
+}
+
+func TestCreateTenant_ManualMode_AdminAllowed(t *testing.T) {
+	t.Parallel()
+	svc := &fakeTenantSvc{
+		provisioningModeFn: func(context.Context, models.TenantKind) string {
+			return models.ProvisioningModeManual
+		},
+		createTenantFn: func(_ context.Context, owner string, _ models.CreateTenantInput) (*models.Tenant, error) {
+			return &models.Tenant{UUID: "t-1", Name: "Acme"}, nil
+		},
+	}
+	reg := module.NewServiceRegistry()
+	reg.Register(module.ServiceAuthzProvider, iface.AuthzProvider(&fakeAuthzProvider{hasPermission: true}))
+	h := New(svc, reg)
+	out, err := h.createTenant(authedCtx("u1"), &createTenantInput{Body: models.CreateTenantInput{Name: "Acme"}})
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if out.Body.UUID != "t-1" {
+		t.Errorf("UUID = %q", out.Body.UUID)
+	}
+}
+
+func TestCreateTenant_ProvisioningLocked409(t *testing.T) {
+	t.Parallel()
+	svc := &fakeTenantSvc{
+		createTenantFn: func(context.Context, string, models.CreateTenantInput) (*models.Tenant, error) {
+			return nil, services.ErrProvisioningLocked
+		},
+	}
+	h := New(svc, nil)
+	_, err := h.createTenant(authedCtx("u1"), &createTenantInput{Body: models.CreateTenantInput{Name: "x"}})
+	assertStatus(t, err, 409)
 }
 
 // --- getTenant / updateTenant / deleteTenant / purgeTenant / updatePlan ---

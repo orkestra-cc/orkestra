@@ -243,6 +243,15 @@ export interface AdminMatchedMember {
   username?: string;
 }
 
+/** Per-tier tenant-creation policy + current active-tenant counts. */
+export type ProvisioningMode = 'open' | 'manual' | 'single';
+export interface ProvisioningPolicy {
+  internal: ProvisioningMode;
+  external: ProvisioningMode;
+  internalCount: number;
+  externalCount: number;
+}
+
 export interface MembershipRecord {
   id: string;
   userUUID: string;
@@ -745,6 +754,17 @@ export const tenantApi = baseApi.injectEndpoints({
       invalidatesTags: (_, __, { tenantId }) => [
         { type: 'OrgInvite', id: tenantId }
       ]
+    }),
+
+    // Read-only per-tier provisioning policy (open | manual | single) plus the
+    // current active-tenant counts. Backs the ProvisioningPolicyCard on the
+    // tenant management pages; the mode itself is edited at /admin/modules/tenant.
+    getProvisioningPolicy: builder.query<ProvisioningPolicy, void>({
+      query: () => ({
+        url: '/v1/admin/tenants/provisioning-policy',
+        method: 'GET'
+      }),
+      providesTags: [{ type: 'AdminOrg', id: 'PROVISIONING' }]
     })
   }),
   overrideExisting: false
@@ -785,5 +805,6 @@ export const {
   useListTenantSubscriptionsAdminQuery,
   useListTenantPaymentsAdminQuery,
   useSetTenantBillingIdentityAdminMutation,
-  useSetTenantItalianBillableAdminMutation
+  useSetTenantItalianBillableAdminMutation,
+  useGetProvisioningPolicyQuery
 } = tenantApi;

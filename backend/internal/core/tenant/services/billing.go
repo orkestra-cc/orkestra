@@ -253,6 +253,14 @@ func (s *Service) ensureTenantForUserModel(ctx context.Context, userUUID string)
 		return existing, nil
 	}
 
+	// Respect the external provisioning policy. When external tenants are not
+	// freely creatable (manual mode), lazy-provisioning must not silently mint
+	// a personal tenant — an admin assigns/creates the tenant instead. Existing
+	// personal tenants still resolve above; only first-time creation is gated.
+	if s.ProvisioningMode(ctx, models.TenantKindExternal) != models.ProvisioningModeOpen {
+		return nil, ErrProvisioningLocked
+	}
+
 	name, _ := s.resolveUserDisplay(ctx, userUUID)
 	name = strings.TrimSpace(name)
 	if name == "" {

@@ -32,7 +32,25 @@ type Service struct {
 	// party name for sole-proprietor tenants (ResolveBillingParty). Wired by
 	// the tenant module's Init from the registered ClientUserProvider.
 	userDisplay UserDisplayResolver
+	// provisioningMode reads the admin-managed per-tier tenant-creation policy
+	// (open | manual | single) from the tenant module config at request time.
+	// Wired by the tenant module's Init from the ModuleConfigService; nil
+	// (tests, config service missing) is tolerated and treated as "open" so
+	// behaviour is unchanged.
+	provisioningMode ProvisioningModeResolver
 }
+
+// ProvisioningModeResolver returns the configured provisioning mode for a tenant
+// tier. Implemented as a closure over ModuleConfigService so admin edits at
+// /admin/modules/tenant take effect on the next call (30s Redis cache). An
+// empty return is treated as models.ProvisioningModeOpen.
+type ProvisioningModeResolver func(ctx context.Context, kind models.TenantKind) string
+
+// ErrProvisioningLocked is returned by CreateTenant (and EnsureTenantForUser)
+// when the active provisioning policy forbids creating another tenant of that
+// tier — `single` mode with one already present, or `manual`/`single` blocking
+// lazy provisioning of an external personal tenant. Handlers map it to 409.
+var ErrProvisioningLocked = errors.New("tenant: provisioning locked by policy")
 
 // OwnerRoleBinder is invoked from CreateTenant after the owner membership
 // is inserted, to grant the org_owner authz binding so the new tenant's
@@ -85,6 +103,37 @@ func (s *Service) SetOwnerRoleBinder(fn OwnerRoleBinder) { s.bindOwner = fn }
 // nil-hook (legacy) semantics. Wired by the authz module alongside
 // SetOwnerRoleBinder.
 func (s *Service) SetMemberUnbinder(fn MemberUnbinder) { s.unbindMember = fn }
+
+// SetProvisioningModeResolver wires the per-tier tenant-creation policy reader.
+// Wired by the tenant module's Init from the ModuleConfigService. Nil keeps the
+// legacy "open" behaviour (any authenticated user may create).
+func (s *Service) SetProvisioningModeResolver(fn ProvisioningModeResolver) { s.provisioningMode = fn }
+
+// ProvisioningMode returns the active provisioning policy for a tier, defaulting
+// to models.ProvisioningModeOpen when no resolver is wired or the config value
+// is empty/unknown. An invalid kind is normalised to internal.
+func (s *Service) ProvisioningMode(ctx context.Context, kind models.TenantKind) string {
+	if !kind.Valid() {
+		kind = models.TenantKindInternal
+	}
+	if s.provisioningMode == nil {
+		return models.ProvisioningModeOpen
+	}
+	mode := strings.TrimSpace(s.provisioningMode(ctx, kind))
+	switch mode {
+	case models.ProvisioningModeManual, models.ProvisioningModeSingle:
+		return mode
+	default:
+		return models.ProvisioningModeOpen
+	}
+}
+
+// CountActiveByKind returns the number of non-deleted tenants of a tier. Exposed
+// so handlers can render the provisioning-policy surface; also used internally
+// by the `single`-mode invariant.
+func (s *Service) CountActiveByKind(ctx context.Context, kind models.TenantKind) (int64, error) {
+	return s.repo.CountActiveByKind(ctx, kind)
+}
 
 // TenantPostDeleteContext carries the data a cascade hook needs to clean
 // up tenant-adjacent state owned by other modules — authz bindings, the
@@ -264,6 +313,21 @@ func (s *Service) CreateTenant(ctx context.Context, ownerUUID string, input mode
 		kind = models.TenantKindInternal
 	}
 
+	// Provisioning policy backstop: in `single` mode a tier may hold at most
+	// one active tenant. Enforced here (not just at the handler) so every
+	// creation path — POST /v1/tenants, divisions, lazy provisioning — is
+	// covered. The first tenant on a fresh install has count 0 and passes,
+	// so bootstrap is never blocked.
+	if s.ProvisioningMode(ctx, kind) == models.ProvisioningModeSingle {
+		n, err := s.repo.CountActiveByKind(ctx, kind)
+		if err != nil {
+			return nil, fmt.Errorf("tenant: count tenants for single-mode check: %w", err)
+		}
+		if n > 0 {
+			return nil, ErrProvisioningLocked
+		}
+	}
+
 	var parent *string
 	if input.ParentTenantUUID != nil && *input.ParentTenantUUID != "" {
 		if kind != models.TenantKindExternal {
@@ -359,6 +423,48 @@ func (s *Service) CreateTenant(ctx context.Context, ownerUUID string, input mode
 		}
 	}
 	return t, nil
+}
+
+// EnsureInternalTenant bootstraps the platform's single internal tenant at
+// first install. It creates one internal tenant owned by ownerUUID when no
+// active internal tenant exists yet, and is a no-op once one does (idempotent).
+//
+// Returns the tenant UUID (created or pre-existing), or empty string when it
+// could not resolve one. Called server-side by the setup flow, so it bypasses
+// the handler-level `manual` provisioning gate by construction — but it still
+// goes through CreateTenant, which enforces the `single` count invariant, so
+// it can never produce a second internal tenant. The signature uses only
+// primitives so the setup package can depend on it without importing
+// tenant/models.
+func (s *Service) EnsureInternalTenant(ctx context.Context, ownerUUID, name string) (string, error) {
+	if strings.TrimSpace(ownerUUID) == "" {
+		return "", errors.New("tenant: EnsureInternalTenant requires ownerUUID")
+	}
+	n, err := s.repo.CountActiveByKind(ctx, models.TenantKindInternal)
+	if err != nil {
+		return "", err
+	}
+	if n > 0 {
+		// Already bootstrapped — return the existing internal tenant so the
+		// caller has a UUID to log/attach against.
+		existing, err := s.repo.ListTenantsByKind(ctx, models.TenantKindInternal, false)
+		if err != nil || len(existing) == 0 {
+			return "", err
+		}
+		return existing[0].UUID, nil
+	}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		name = "Internal"
+	}
+	t, err := s.CreateTenant(ctx, ownerUUID, models.CreateTenantInput{
+		Name: name,
+		Kind: models.TenantKindInternal,
+	})
+	if err != nil {
+		return "", err
+	}
+	return t.UUID, nil
 }
 
 // CreateExternalTenant is the dedicated factory for Tier-2 tenants (external

@@ -173,6 +173,7 @@ export interface AppPaths {
   buttons: string;
   calendarExample: string;
   cards: string;
+  statCards: string;
   bootstrapCarousel: string;
   slickCarousel: string;
   collapse: string;
@@ -279,6 +280,7 @@ export interface AppPaths {
   refComponentsButtons: string;
   refComponentsCalendar: string;
   refComponentsCards: string;
+  refComponentsStatCards: string;
   refComponentsCarouselBootstrap: string;
   refComponentsCarouselSlick: string;
   refComponentsCollapse: string;
@@ -499,6 +501,7 @@ const paths: AppPaths = {
   buttons: `/${rootPaths.componentsRoot}/buttons`,
   calendarExample: `/${rootPaths.componentsRoot}/calendar`,
   cards: `/${rootPaths.componentsRoot}/cards`,
+  statCards: `/${rootPaths.componentsRoot}/stat-cards`,
   bootstrapCarousel: `/${rootPaths.componentsRoot}/${rootPaths.carouselRoot}/bootstrap`,
   slickCarousel: `/${rootPaths.componentsRoot}/${rootPaths.carouselRoot}/slick`,
   collapse: `/${rootPaths.componentsRoot}/collapse`,
@@ -606,6 +609,7 @@ const paths: AppPaths = {
   refComponentsButtons: `/${rootPaths.referenceRoot}/components/buttons`,
   refComponentsCalendar: `/${rootPaths.referenceRoot}/components/calendar`,
   refComponentsCards: `/${rootPaths.referenceRoot}/components/cards`,
+  refComponentsStatCards: `/${rootPaths.referenceRoot}/components/stat-cards`,
   refComponentsCarouselBootstrap: `/${rootPaths.referenceRoot}/components/carousel/bootstrap`,
   refComponentsCarouselSlick: `/${rootPaths.referenceRoot}/components/carousel/slick`,
   refComponentsCollapse: `/${rootPaths.referenceRoot}/components/collapse`,

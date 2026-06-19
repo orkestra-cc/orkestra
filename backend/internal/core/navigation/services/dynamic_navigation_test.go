@@ -494,3 +494,49 @@ func TestCacheKey_IncludesTenantKind(t *testing.T) {
 		t.Fatalf("expected untiered cache key to omit kind: got %q", untiered.CacheKey)
 	}
 }
+
+// stubEnabledConfig implements both modulegate.ModuleEnabledChecker and the
+// (unexported) configValueReader the filter probes for, so a test can drive
+// NavItemSpec.RequiresConfig gating. values is keyed "module.key".
+type stubEnabledConfig struct {
+	disabled map[string]bool
+	values   map[string]string
+}
+
+func (s *stubEnabledConfig) IsEnabled(_ context.Context, moduleName string) bool {
+	return !s.disabled[moduleName]
+}
+
+func (s *stubEnabledConfig) GetValue(_ context.Context, moduleName, key string) string {
+	return s.values[moduleName+"."+key]
+}
+
+func findInRealms(realms []models.NavRealm, name string) *models.NavItem {
+	for _, r := range realms {
+		for i := range r.Sections {
+			if it := findItem(r.Sections[i].Children, name); it != nil {
+				return it
+			}
+		}
+	}
+	return nil
+}
+
+// A RequiresConfig item is hidden when the owning module's flag is off and
+// shown when it's on — evaluated per request, so a runtime toggle reflects
+// without re-collecting NavItems. This is the SOC2-Evidence nav gate.
+func TestConfigGate_RequiresConfigTogglesVisibility(t *testing.T) {
+	items := []module.NavItemSpec{
+		{Realm: realmPlatform, Name: "SOC2 Evidence", Path: "/admin/compliance/soc2", MinRole: "administrator", Active: true, ModuleName: "compliance", RequiresConfig: "soc2_enabled"},
+	}
+
+	off := NewDynamicNavigationService(items, &stubEnabledConfig{values: map[string]string{}}, nil)
+	if resp, _ := off.GetNavigationForUser(context.Background(), "administrator"); findInRealms(resp.Realms, "SOC2 Evidence") != nil {
+		t.Fatalf("SOC2 item must be hidden when soc2_enabled is off")
+	}
+
+	on := NewDynamicNavigationService(items, &stubEnabledConfig{values: map[string]string{"compliance.soc2_enabled": "true"}}, nil)
+	if resp, _ := on.GetNavigationForUser(context.Background(), "administrator"); findInRealms(resp.Realms, "SOC2 Evidence") == nil {
+		t.Fatalf("SOC2 item must be visible when soc2_enabled is true")
+	}
+}

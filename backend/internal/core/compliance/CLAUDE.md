@@ -28,7 +28,7 @@ models/                           audit_event, legal_hold, erasure_request, kms_
 - **Audit is fire-and-forget + nil-safe.** `sink.Emit` never returns an error and writes on a detached context so a cancelled request can't abort the insert. Other core modules consume the sink via `SetAuditSink` and nil-check it; this module provides it.
 - **Legal hold blocks erasure platform-wide.** `DSRService.Erase` (and therefore retention + the workflow's execute) returns `ErrLegalHoldActive` → `409` when any active hold exists for the subject.
 - **Retention is OFF by default** (`auto_cleanup_enabled=false`) and reads config fresh each run. The ticker is launched by `Start()` but `RunOnce` no-ops while disabled. It hard-erases through the DSR, so the legal-hold gate applies.
-- **SOC2 is gated** behind `compliance.soc2_enabled` (default false): handler, routes, and nav item stay dormant unless enabled. Audit + DSR are ungated.
+- **SOC2 is gated** behind `compliance.soc2_enabled` (default false) — but **at request time, not boot time**, so the toggle works without a restart. The handler + route (`GET /v1/admin/compliance/soc2/evidence`) are mounted unconditionally; the handler 404s when the flag is off (`SOC2Handler.enabled` closure, read live via `deps.GetConfigBool`). The `SOC2 Evidence` nav item is emitted unconditionally with `NavItemSpec.RequiresConfig: "soc2_enabled"` and hidden by the navigation filter when off — **don't** gate it inside `NavItems()` on an Init-set bool: `NavItems()` is collected before `Init` runs, so the flag is always false there. Audit + DSR are ungated.
 - **Cross-module collection names are inlined as string constants** (`operator_users`, `client_users`, `operator_mfa_factors`) in `services/soc2.go` and `services/retention.go` — compliance must NOT import other modules' packages. Keep these in lock-step with the owning module if it renames a collection.
 - **`//tenantscope:allow` on DSR-by-user queries**: erasure/export/legal-hold/retention scan by data-subject and are deliberately cross-tenant (a hold blocks erasure platform-wide; retention scans all tenants). Each such query is annotated.
 
@@ -47,7 +47,7 @@ All three are `System: true`. `audit.read` is Cedar-covered by the `read` suffix
 ## Routes
 
 - Self-service: `POST /v1/me/dsr/{export,erase,erasure-request}`.
-- Admin reads (audit.read): `GET /v1/admin/audit-events`, `…/compliance/legal-holds`, `…/compliance/retention/preview`, `…/compliance/erasure-requests`; SOC2 `…/compliance/soc2` (when enabled).
+- Admin reads (audit.read): `GET /v1/admin/audit-events`, `…/compliance/legal-holds`, `…/compliance/retention/preview`, `…/compliance/erasure-requests`; SOC2 `GET …/compliance/soc2/evidence` (always mounted; 404 when `soc2_enabled` is off).
 - Admin writes (step-up): `POST/DELETE …/compliance/legal-holds[/{id}]` (legalhold.manage); `POST …/compliance/erasure-requests/{id}/{execute,reject}` (dsr.manage).
 
 ## Follow-ups

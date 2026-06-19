@@ -25,6 +25,7 @@ const CalendarExample = lazy(
   () => import('reference/components/misc/CalendarExample')
 );
 const Cards = lazy(() => import('reference/components/ui/Cards'));
+const StatCards = lazy(() => import('reference/components/ui/StatCards'));
 const Dropdowns = lazy(() => import('reference/components/ui/Dropdowns'));
 const ListGroups = lazy(() => import('reference/components/ui/ListGroups'));
 const Modals = lazy(() => import('reference/components/ui/Modals'));
@@ -569,6 +570,7 @@ export function getReferenceRoutes(): RouteObject[] {
           )
         },
         { path: paths.cards, element: <Cards /> },
+        { path: paths.statCards, element: <StatCards /> },
         {
           path: rootPaths.carouselRoot,
           children: [
@@ -861,6 +863,7 @@ export function getReferenceRoutes(): RouteObject[] {
               )
             },
             { path: 'cards', element: <Cards /> },
+            { path: 'stat-cards', element: <StatCards /> },
             {
               path: 'carousel',
               children: [

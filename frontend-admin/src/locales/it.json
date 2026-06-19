@@ -651,6 +651,16 @@
     "plan": "piano",
     "plans": "piani",
     "noActiveTenants": "Nessun tenant attivo",
+    "provisioning": {
+      "title": "Creazione tenant",
+      "mode": {
+        "open": "Aperta",
+        "manual": "Solo manuale",
+        "single": "Tenant singolo"
+      },
+      "activeCount": "{{count}} attivi",
+      "manage": "Gestisci policy"
+    },
     "noOrgSelected": "Nessuna organizzazione selezionata",
     "rolesNeedOrg": "La gestione ruoli è limitata a una singola organizzazione. Selezionane o creane una dallo switcher in alto a destra per continuare.",
     "deleteModal": {

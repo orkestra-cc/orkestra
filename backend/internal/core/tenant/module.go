@@ -14,6 +14,7 @@ import (
 	"github.com/danielgtaylor/huma/v2/adapters/humachi"
 	"github.com/go-chi/chi/v5"
 	"github.com/orkestra/backend/internal/core/tenant/handlers"
+	"github.com/orkestra/backend/internal/core/tenant/models"
 	"github.com/orkestra/backend/internal/core/tenant/repository"
 	"github.com/orkestra/backend/internal/core/tenant/services"
 	"github.com/orkestra/backend/pkg/sdk/iface"
@@ -35,6 +36,34 @@ func (m *Module) Description() string {
 }
 
 func (m *Module) Dependencies() []string { return []string{"user"} }
+
+// ConfigSchema exposes the per-tier tenant-provisioning policy as admin-managed
+// config. Read at request time by the service's ProvisioningModeResolver — edits
+// at /admin/modules/tenant take effect on the next creation with no restart.
+//
+// Both default to "manual" (admin-only creation): a fresh install bootstraps a
+// single internal tenant for the first admin (see setup flow) and otherwise
+// expects an operator to create tenants deliberately. External clients are
+// never auto-provisioned and cannot self-create a tenant — only a platform
+// admin creates a client tenant and assigns it to a Tier-2 user.
+func (m *Module) ConfigSchema() []module.ConfigField {
+	return []module.ConfigField{
+		{
+			Key: "provisioning.internal.mode", Label: "Internal tenant creation", Group: "Provisioning",
+			Description: "Who may create internal (operator-tier) tenants. open: any authenticated user. manual (default): only platform administrators (system.tenants.admin). single: lock the platform to one internal tenant — once one exists, creation is blocked. A fresh install auto-creates the first internal tenant for the initial admin regardless of this setting.",
+			Type:        module.FieldEnum, Default: models.ProvisioningModeManual,
+			Options: []string{models.ProvisioningModeOpen, models.ProvisioningModeManual, models.ProvisioningModeSingle},
+			EnvVar:  "TENANT_PROVISIONING_INTERNAL_MODE",
+		},
+		{
+			Key: "provisioning.external.mode", Label: "External tenant creation", Group: "Provisioning",
+			Description: "Who may create external (client-tier) tenants. open: self-serve clients are provisioned automatically. manual (default): only platform administrators create client tenants and assign them to a Tier-2 user — self-serve signup never auto-provisions a tenant and external users cannot create one themselves.",
+			Type:        module.FieldEnum, Default: models.ProvisioningModeManual,
+			Options: []string{models.ProvisioningModeOpen, models.ProvisioningModeManual},
+			EnvVar:  "TENANT_PROVISIONING_EXTERNAL_MODE",
+		},
+	}
+}
 
 func (m *Module) ProvidedServices() []module.ServiceKey {
 	return []module.ServiceKey{
@@ -127,6 +156,22 @@ func (m *Module) Init(deps *module.Dependencies) error {
 	repo := repository.New(deps.DB)
 	m.svc = services.New(repo)
 	m.handler = handlers.New(m.svc, deps.Services)
+
+	// Wire the per-tier provisioning policy reader. Reads the admin-managed
+	// `provisioning.{internal,external}.mode` keys from this module's config
+	// (ModuleConfigService, 30s Redis cache) on every call so an edit at
+	// /admin/modules/tenant takes effect without a restart. Nil ConfigService
+	// (tests) leaves the resolver returning "" → the service treats it as open.
+	m.svc.SetProvisioningModeResolver(func(ctx context.Context, kind models.TenantKind) string {
+		if deps.ConfigService == nil {
+			return ""
+		}
+		key := "provisioning.internal.mode"
+		if kind == models.TenantKindExternal {
+			key = "provisioning.external.mode"
+		}
+		return deps.ConfigService.GetValue(ctx, "tenant", key)
+	})
 
 	// Register the tenant PII producer with the DSR registry (created in
 	// main.go before InitAll). The compliance module's DSR pipeline runs it to
