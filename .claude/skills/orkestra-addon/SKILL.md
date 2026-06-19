@@ -5,7 +5,7 @@ description: "Rules for writing a correct Orkestra addon (optional module) end-t
 
 # Writing an Orkestra Addon
 
-Orkestra is a **core-only base** ([ADR-0006](../../../docs/adr/0006-collapse-to-core-only-base.md)). A fork adds a vertical as an **addon** — an optional module built against the in-tree SDK, through the same `Module` seam the 7 core modules use. The base ships none; you add yours in-tree.
+Orkestra is a **core-only base** ([ADR-0006](../../../docs/adr/0006-collapse-to-core-only-base.md)). A fork adds a vertical as an **addon** — an optional module built against the in-tree SDK, through the same `Module` seam the 8 core modules use. The base ships none; you add yours in-tree.
 
 This skill is the **spine**: the end-to-end recipe + the binding rules unique to addons. For depth, defer to the cross-referenced skills/docs rather than duplicating them — they are the source of truth and must not drift.
 

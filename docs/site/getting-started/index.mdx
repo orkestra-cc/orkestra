@@ -6,7 +6,7 @@ sidebar_position: 1
 
 # Getting Started
 
-The fastest way to try Orkestra is the **dev stack** — the seven core modules, built from source with AIR + Vite hot reload, layered on top of MongoDB, Redis, and RustFS. (For the pre-built image, see [Installation](/getting-started/installation).)
+The fastest way to try Orkestra is the **dev stack** — the eight core modules, built from source with AIR + Vite hot reload, layered on top of MongoDB, Redis, and RustFS. (For the pre-built image, see [Installation](/getting-started/installation).)
 
 ```bash
 cd docker
@@ -25,11 +25,11 @@ Once you're in, head to `/admin/modules` to manage modules. The registry hot-rel
 
 ## One image, core modules only
 
-There is a single backend image — there are no SKUs. Per [ADR-0006](/adrs/collapse-to-core-only-base) Orkestra is a **core-only base**: it ships seven always-loaded core modules and **no** addons. CI publishes one image per push to `main`:
+There is a single backend image — there are no SKUs. Per [ADR-0006](/adrs/collapse-to-core-only-base) Orkestra is a **core-only base**: it ships eight always-loaded core modules and **no** addons. CI publishes one image per push to `main`:
 
 | Image                                          | What it includes                                          |
 | ---------------------------------------------- | --------------------------------------------------------- |
-| `ghcr.io/orkestra-cc/orkestra/backend:latest`  | The seven core modules — `user`, `notification`, `tenant`, `authz`, `auth`, `navigation`, `logging`. |
+| `ghcr.io/orkestra-cc/orkestra/backend:latest`  | The eight core modules — `user`, `notification`, `tenant`, `authz`, `auth`, `navigation`, `logging`, `compliance`. |
 | `ghcr.io/orkestra-cc/orkestra/backend:<sha>`   | The same, pinned to a specific commit.                    |
 
 The `optionalModules` catalog ships empty. A fork that needs invoicing, payments, AI, etc. adds those verticals in-tree (`internal/addons/<name>/` + a `cmd/server/catalog_<name>.go`) and builds its own image.

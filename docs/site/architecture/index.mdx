@@ -6,7 +6,7 @@ sidebar_position: 1
 
 # Architecture
 
-Orkestra is a **modular monolith** shipped as a [core-only base](/adrs/collapse-to-core-only-base): seven always-loaded core modules and the `Module` extension seam they're built on. Two things matter most to understand the design:
+Orkestra is a **modular monolith** shipped as a [core-only base](/adrs/collapse-to-core-only-base): eight always-loaded core modules and the `Module` extension seam they're built on. Two things matter most to understand the design:
 
 1. **[Two-tier tenancy](/architecture/tenancy-model)** — operators run the platform; external clients register against it. The two-tier *data* model is core; the consumption layer a fork builds on top. Every endpoint declares which tier it serves.
 2. **[Module lifecycle](/architecture/module-lifecycle)** — every registered module compiles into the single binary; runtime config decides what's *on*. The base ships an empty optional-module catalog — a fork adds verticals through the same seam the core uses.

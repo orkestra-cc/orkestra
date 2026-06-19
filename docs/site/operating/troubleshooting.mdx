@@ -139,7 +139,7 @@ Restart the backend after editing.
 
 ### Symptom: an addon I expected isn't in `/admin/modules`
 
-The base ships **no** optional addons — the `optionalModules` catalog is empty, so a stock Orkestra build only lists the 7 core modules. An addon only appears once a fork has added it in-tree (`internal/addons/<name>/` + a `cmd/server/catalog_<name>.go` that registers its factory). Once registered, it's listed at `/admin/modules` and toggled there at runtime — there are no per-SKU builds or build tags to compile it in.
+The base ships **no** optional addons — the `optionalModules` catalog is empty, so a stock Orkestra build only lists the 8 core modules. An addon only appears once a fork has added it in-tree (`internal/addons/<name>/` + a `cmd/server/catalog_<name>.go` that registers its factory). Once registered, it's listed at `/admin/modules` and toggled there at runtime — there are no per-SKU builds or build tags to compile it in.
 
 If the addon was registered but still isn't listed, confirm the fork's `catalog_<name>.go` calls the registry in its `init()` and that the binary you launched was built from that fork (see the [Backend module map](https://github.com/orkestra-cc/orkestra/blob/main/backend/CLAUDE.md#module-system)).
 
