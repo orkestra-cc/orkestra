@@ -144,15 +144,6 @@ const (
 	// payments' point of view — when absent, the route returns 503.
 	ServiceSelfServiceCheckoutPlanner ServiceKey = "subscriptions.checkout_planner"
 
-	// ServiceTenantSubscriptionProvider / ServiceTenantPaymentProvider expose
-	// per-tenant read-only listings consumed by the Phase 2 admin aggregator
-	// endpoints under /v1/admin/tenants/{id}/{subscriptions,payments}. Core
-	// cannot import addons; these keys let the tenant module ask for the
-	// view without violating the import rule. Missing registration means
-	// the addon is disabled — aggregator returns an empty list, not 500.
-	ServiceTenantSubscriptionProvider ServiceKey = "subscriptions.tenant_provider"
-	ServiceTenantPaymentProvider      ServiceKey = "payments.tenant_provider"
-
 	// ServiceAuditSink is the platform-wide append-only audit trail sink
 	// provided by the compliance module. Consumers resolve it via
 	// module.GetTyped[iface.AuditSink] and call Emit on hot paths — the

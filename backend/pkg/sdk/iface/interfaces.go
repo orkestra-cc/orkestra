@@ -730,34 +730,6 @@ type SubscriptionReconciler interface {
 }
 
 // ---------------------------------------------------------------------------
-// TenantSubscriptionProvider — consumed by: core/tenant admin aggregator
-//
-// Exposes a read-only view of a tenant's subscriptions so the Phase 2
-// endpoint GET /v1/admin/tenants/{id}/subscriptions can return data without
-// importing the subscriptions addon from the core package. The returned
-// shape is intentionally flat (no Service/Tier joins) — the aggregator
-// trusts the caller to fetch richer details through the subscriptions API.
-// ---------------------------------------------------------------------------
-
-type TenantSubscription struct {
-	UUID               string
-	TenantUUID         string
-	ServiceUUID        string
-	TierCode           string
-	Status             string
-	CurrentPeriodStart time.Time
-	CurrentPeriodEnd   time.Time
-	NextBillingAt      time.Time
-	CreatedAt          time.Time
-}
-
-type TenantSubscriptionProvider interface {
-	// ListByTenant returns every subscription bound to the tenant via
-	// Subscription.TenantUUID. Sorted by createdAt desc.
-	ListByTenant(ctx context.Context, tenantUUID string) ([]TenantSubscription, error)
-}
-
-// ---------------------------------------------------------------------------
 // SelfServiceCheckoutPlanner — consumed by: payments self-service handler.
 //
 // Resolves a subscription UUID into the snapshot the payments module needs
@@ -800,35 +772,6 @@ type SelfServiceCheckoutPlanner interface {
 // this to a 409 response so the SPA can guide the user to wait for the
 // next renewal tick or trigger a retry-charge first.
 var ErrCheckoutNoPendingInvoice = errors.New("self-service checkout: no pending invoice for subscription")
-
-// ---------------------------------------------------------------------------
-// TenantPaymentProvider — consumed by: core/tenant admin aggregator
-//
-// Parallels TenantSubscriptionProvider for payments. Flattened to the
-// subset the aggregator endpoint needs.
-// ---------------------------------------------------------------------------
-
-type TenantPayment struct {
-	UUID             string
-	TenantUUID       string
-	SubscriptionUUID string
-	InvoiceUUID      string
-	Provider         string
-	ProviderTxID     string
-	Status           string
-	AmountCents      int64
-	Currency         string
-	RefundedCents    int64
-	ChargedAt        *time.Time
-	RefundedAt       *time.Time
-	CreatedAt        time.Time
-}
-
-type TenantPaymentProvider interface {
-	// ListByTenant returns every transaction bound to the tenant via
-	// Transaction.TenantUUID. Sorted by createdAt desc.
-	ListByTenant(ctx context.Context, tenantUUID string) ([]TenantPayment, error)
-}
 
 // ---------------------------------------------------------------------------
 // AuditSink — consumed by: every module that performs a security-sensitive

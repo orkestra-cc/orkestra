@@ -148,7 +148,7 @@ func (m *Module) NavItems() []module.NavItemSpec {
 	// permission (enforced at the route layer).
 	return []module.NavItemSpec{
 		{Realm: "platform", Tier: "internal", Name: "Internal Tenants", Icon: "building", Path: "/admin/internal/tenants", MinRole: "administrator", Active: true},
-		{Realm: "business", Tier: "internal", Name: "Clients", Icon: "users", Path: "/admin/clients", MinRole: "administrator", Active: true},
+		{Realm: "business", Tier: "internal", Name: "External Tenants", Icon: "users", Path: "/admin/clients", MinRole: "administrator", Active: true},
 	}
 }
 

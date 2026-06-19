@@ -13,20 +13,9 @@ import ImpersonateButton from './ImpersonateButton';
 const OverviewTab = lazy(() => import('./OverviewTab'));
 const MembersTab = lazy(() => import('./MembersTab'));
 const DivisionsTab = lazy(() => import('./DivisionsTab'));
-const SubscriptionsTab = lazy(() => import('./SubscriptionsTab'));
-const PaymentsTab = lazy(() => import('./PaymentsTab'));
-const ActivityTab = lazy(() => import('./ActivityTab'));
 const BillingIdentityTab = lazy(() => import('./BillingIdentityTab'));
 
-const TAB_KEYS = [
-  'overview',
-  'members',
-  'divisions',
-  'subscriptions',
-  'payments',
-  'billing',
-  'activity'
-] as const;
+const TAB_KEYS = ['overview', 'members', 'divisions', 'billing'] as const;
 type TabKey = (typeof TAB_KEYS)[number];
 
 const DEFAULT_TAB: TabKey = 'overview';
@@ -147,8 +136,8 @@ const ClientDetailPage: React.FC = () => {
   }
 
   // Defence-in-depth: an internal tenant deep-linked into the external
-  // detail route renders the wrong tabs (Divisions, Subscriptions,
-  // Payments). Bounce to the operator-side page.
+  // detail route renders the wrong tabs (Divisions). Bounce to the
+  // operator-side page.
   if (org.kind === 'internal') {
     return <Navigate to={`/admin/internal/tenants/${tenantUUID}`} replace />;
   }
@@ -233,23 +222,8 @@ const ClientDetailPage: React.FC = () => {
                 </Nav.Link>
               </Nav.Item>
               <Nav.Item>
-                <Nav.Link eventKey="subscriptions">
-                  {t('adminClients.detail.tabs.subscriptions')}
-                </Nav.Link>
-              </Nav.Item>
-              <Nav.Item>
-                <Nav.Link eventKey="payments">
-                  {t('adminClients.detail.tabs.payments')}
-                </Nav.Link>
-              </Nav.Item>
-              <Nav.Item>
                 <Nav.Link eventKey="billing">
                   {t('adminClients.detail.tabs.billing')}
-                </Nav.Link>
-              </Nav.Item>
-              <Nav.Item>
-                <Nav.Link eventKey="activity">
-                  {t('adminClients.detail.tabs.activity')}
                 </Nav.Link>
               </Nav.Item>
             </Nav>
@@ -272,17 +246,8 @@ const ClientDetailPage: React.FC = () => {
                 <Tab.Pane eventKey="divisions">
                   <DivisionsTab org={org} />
                 </Tab.Pane>
-                <Tab.Pane eventKey="subscriptions">
-                  <SubscriptionsTab org={org} />
-                </Tab.Pane>
-                <Tab.Pane eventKey="payments">
-                  <PaymentsTab org={org} />
-                </Tab.Pane>
                 <Tab.Pane eventKey="billing">
                   <BillingIdentityTab org={org} />
-                </Tab.Pane>
-                <Tab.Pane eventKey="activity">
-                  <ActivityTab />
                 </Tab.Pane>
               </Tab.Content>
             </Suspense>

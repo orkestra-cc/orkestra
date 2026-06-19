@@ -66,7 +66,7 @@
       "moduleManagement": "Module Management",
       "roleManagement": "Role Management",
       "internalTenants": "Internal Tenants",
-      "clients": "Clients",
+      "externalTenants": "External Tenants",
       "auditEvents": "Audit Events",
       "soc2Evidence": "SOC2 Evidence",
       "logLevels": "Log levels",
@@ -860,10 +860,7 @@
         "overview": "Overview",
         "members": "Members",
         "divisions": "Divisions",
-        "subscriptions": "Subscriptions",
-        "payments": "Payments",
-        "billing": "Billing identity",
-        "activity": "Activity"
+        "billing": "Billing identity"
       }
     },
     "overview": {
@@ -973,29 +970,6 @@
       "toastCreated": "Division \"{{name}}\" created under {{parent}}",
       "toastFailed": "Create failed: {{error}}",
       "errorUnknown": "unknown error"
-    },
-    "subscriptions": {
-      "loadFailed": "Failed to load subscriptions. This may mean the subscriptions module is disabled.",
-      "empty": "No subscriptions for this client yet. When one lands, it will appear here — the entitlement syncer grants capabilities on activation.",
-      "colTier": "Tier",
-      "colStatus": "Status",
-      "colPeriod": "Period",
-      "colNextBilling": "Next billing",
-      "colCreated": "Created"
-    },
-    "payments": {
-      "loadFailed": "Failed to load payments. This may mean the payments module is disabled.",
-      "empty": "No payment transactions for this client yet.",
-      "colProvider": "Provider",
-      "colReference": "Reference",
-      "colAmount": "Amount",
-      "colStatus": "Status",
-      "colCharged": "Charged",
-      "colCreated": "Created",
-      "refundedSuffix": "refunded {{amount}}"
-    },
-    "activity": {
-      "placeholder": "Per-tenant activity log lands in a follow-up. Until then, module-level audit trails (<code>compliance_audit_events</code>, <code>subscriptions_activity</code>) carry the per-resource history."
     },
     "billingIdentity": {
       "intro": "These fields populate the FatturaPA recipient party at invoice send time. Either <code>CodiceDestinatario</code> (7-char SDI code) or <code>PECDestinatario</code> is required to enable Italian billable mode.",

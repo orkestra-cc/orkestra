@@ -66,7 +66,7 @@
       "moduleManagement": "Gestione moduli",
       "roleManagement": "Gestione ruoli",
       "internalTenants": "Tenant interni",
-      "clients": "Clienti",
+      "externalTenants": "Tenant esterni",
       "auditEvents": "Eventi di audit",
       "soc2Evidence": "Evidenze SOC2",
       "logLevels": "Livelli di log",
@@ -860,10 +860,7 @@
         "overview": "Panoramica",
         "members": "Membri",
         "divisions": "Divisioni",
-        "subscriptions": "Sottoscrizioni",
-        "payments": "Pagamenti",
-        "billing": "Identità di fatturazione",
-        "activity": "Attività"
+        "billing": "Identità di fatturazione"
       }
     },
     "overview": {
@@ -973,29 +970,6 @@
       "toastCreated": "Divisione \"{{name}}\" creata sotto {{parent}}",
       "toastFailed": "Creazione fallita: {{error}}",
       "errorUnknown": "errore sconosciuto"
-    },
-    "subscriptions": {
-      "loadFailed": "Caricamento delle sottoscrizioni non riuscito. Il modulo subscriptions potrebbe essere disabilitato.",
-      "empty": "Nessuna sottoscrizione per questo cliente. Quando ne arriverà una, comparirà qui — il syncer degli entitlement assegna le capability all'attivazione.",
-      "colTier": "Livello",
-      "colStatus": "Stato",
-      "colPeriod": "Periodo",
-      "colNextBilling": "Prossima fatturazione",
-      "colCreated": "Creato"
-    },
-    "payments": {
-      "loadFailed": "Caricamento dei pagamenti non riuscito. Il modulo payments potrebbe essere disabilitato.",
-      "empty": "Nessuna transazione di pagamento per questo cliente.",
-      "colProvider": "Provider",
-      "colReference": "Riferimento",
-      "colAmount": "Importo",
-      "colStatus": "Stato",
-      "colCharged": "Addebitato",
-      "colCreated": "Creato",
-      "refundedSuffix": "rimborsato {{amount}}"
-    },
-    "activity": {
-      "placeholder": "Il log attività per tenant arriverà in un follow-up. Nel frattempo i log a livello di modulo (<code>compliance_audit_events</code>, <code>subscriptions_activity</code>) mantengono la storia per risorsa."
     },
     "billingIdentity": {
       "intro": "Questi campi popolano il destinatario FatturaPA al momento dell'invio della fattura. Per abilitare la modalità Italian billable è richiesto <code>CodiceDestinatario</code> (codice SDI di 7 caratteri) oppure <code>PECDestinatario</code>.",

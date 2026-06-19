@@ -1393,69 +1393,6 @@ func TestSetMyItalianBillable(t *testing.T) {
 	})
 }
 
-// --- aggregators (subscriptions + payments) — happy + svc error paths ---
-
-type fakeSubProvider struct {
-	rows []iface.TenantSubscription
-	err  error
-}
-
-func (f *fakeSubProvider) ListByTenant(context.Context, string) ([]iface.TenantSubscription, error) {
-	return f.rows, f.err
-}
-
-type fakePayProvider struct {
-	rows []iface.TenantPayment
-	err  error
-}
-
-func (f *fakePayProvider) ListByTenant(context.Context, string) ([]iface.TenantPayment, error) {
-	return f.rows, f.err
-}
-
-func TestListTenantSubscriptionsAdmin_WithProvider(t *testing.T) {
-	t.Parallel()
-	t.Run("happy", func(t *testing.T) {
-		t.Parallel()
-		reg := module.NewServiceRegistry()
-		reg.Register(module.ServiceTenantSubscriptionProvider, &fakeSubProvider{
-			rows: []iface.TenantSubscription{{UUID: "sub-1"}},
-		})
-		h := New(&fakeTenantSvc{}, reg)
-		out, err := h.listTenantSubscriptionsAdmin(context.Background(), &tenantIDPath{TenantID: "t-1"})
-		if err != nil {
-			t.Fatalf("err = %v", err)
-		}
-		if len(out.Body.Subscriptions) != 1 {
-			t.Errorf("subscriptions = %+v", out.Body.Subscriptions)
-		}
-	})
-	t.Run("provider error → 500", func(t *testing.T) {
-		t.Parallel()
-		reg := module.NewServiceRegistry()
-		reg.Register(module.ServiceTenantSubscriptionProvider, &fakeSubProvider{err: errors.New("boom")})
-		h := New(&fakeTenantSvc{}, reg)
-		_, err := h.listTenantSubscriptionsAdmin(context.Background(), &tenantIDPath{TenantID: "t-1"})
-		assertStatus(t, err, 500)
-	})
-}
-
-func TestListTenantPaymentsAdmin_WithProvider(t *testing.T) {
-	t.Parallel()
-	reg := module.NewServiceRegistry()
-	reg.Register(module.ServiceTenantPaymentProvider, &fakePayProvider{
-		rows: []iface.TenantPayment{{UUID: "pay-1"}},
-	})
-	h := New(&fakeTenantSvc{}, reg)
-	out, err := h.listTenantPaymentsAdmin(context.Background(), &tenantIDPath{TenantID: "t-1"})
-	if err != nil {
-		t.Fatalf("err = %v", err)
-	}
-	if len(out.Body.Payments) != 1 {
-		t.Errorf("payments = %+v", out.Body.Payments)
-	}
-}
-
 // --- thin admin delegates (one-line alias to scoped handlers) ---
 
 func TestListDivisionsAdmin_DelegatesToScoped(t *testing.T) {

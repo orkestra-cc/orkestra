@@ -67,41 +67,6 @@ export interface CreateDivisionInput {
 }
 
 /**
- * Flat read-only projection of a tenant's subscription, as served by
- * GET /v1/admin/tenants/{id}/subscriptions. The full Subscription shape
- * lives under the subscriptions module; this DTO is what the tenant
- * aggregator returns.
- */
-export interface TenantSubscription {
-  uuid: string;
-  tenantUUID: string;
-  serviceUUID: string;
-  tierCode: string;
-  status: string;
-  currentPeriodStart: string;
-  currentPeriodEnd: string;
-  nextBillingAt: string;
-  createdAt: string;
-}
-
-/** Flat read-only projection of a tenant's payment transaction. */
-export interface TenantPayment {
-  uuid: string;
-  tenantUUID: string;
-  subscriptionUUID: string;
-  invoiceUUID: string;
-  provider: string;
-  providerTxID: string;
-  status: string;
-  amountCents: number;
-  currency: string;
-  refundedCents: number;
-  chargedAt?: string | null;
-  refundedAt?: string | null;
-  createdAt: string;
-}
-
-/**
  * Italian-billable address sub-document. Keep in lockstep with the backend
  * `models.TenantAddress`.
  */
@@ -510,32 +475,6 @@ export const tenantApi = baseApi.injectEndpoints({
       ]
     }),
 
-    listTenantSubscriptionsAdmin: builder.query<
-      { subscriptions: TenantSubscription[] },
-      string
-    >({
-      query: tenantId => ({
-        url: `/v1/admin/tenants/${tenantId}/subscriptions`,
-        method: 'GET'
-      }),
-      providesTags: (_, __, tenantId) => [
-        { type: 'AdminOrg', id: `${tenantId}:subs` }
-      ]
-    }),
-
-    listTenantPaymentsAdmin: builder.query<
-      { payments: TenantPayment[] },
-      string
-    >({
-      query: tenantId => ({
-        url: `/v1/admin/tenants/${tenantId}/payments`,
-        method: 'GET'
-      }),
-      providesTags: (_, __, tenantId) => [
-        { type: 'AdminOrg', id: `${tenantId}:payments` }
-      ]
-    }),
-
     // Unified Client Aggregate (Phase 1) — admin-side billing-identity writes.
     // Mirror the self-service /v1/me/billing-identity surface that
     // frontend-client uses, but gated by system.tenants.admin so platform
@@ -802,8 +741,6 @@ export const {
   useRevokeOrgInviteAdminMutation,
   useListTenantDivisionsAdminQuery,
   useCreateTenantDivisionAdminMutation,
-  useListTenantSubscriptionsAdminQuery,
-  useListTenantPaymentsAdminQuery,
   useSetTenantBillingIdentityAdminMutation,
   useSetTenantItalianBillableAdminMutation,
   useGetProvisioningPolicyQuery
