@@ -1,6 +1,6 @@
 ---
 title: ADR-0009 — Re-home the compliance plane (audit + GDPR DSR) to core
-status: proposed
+status: accepted
 public: true
 ---
 
@@ -8,8 +8,8 @@ public: true
 
 | Field | Value |
 |---|---|
-| **Status** | 🟡 Proposed |
-| **Date** | 2026-06-18 (proposed) |
+| **Status** | ✅ Accepted — Phases 1–4 shipped in v0.3.9 (2026-06-18); Phases 5–6 planned |
+| **Date** | 2026-06-18 |
 | **Amends** | [ADR-0006](0006-collapse-to-core-only-base.md) — **partially reverses** the compliance-addon removal. ADR-0006 carved compliance into its own Go module and dropped it from the base; this ADR brings the audit + DSR + KMS plane back as a **core** module (SOC2 rides along, gated off). The data it governs is core-owned, so it fails ADR-0006's "is this a domain vertical?" test. |
 | **Uses** | [ADR-0001](0001-unified-tenant-model.md) (DSR is tenant-aware via `tenantrepo`), [ADR-0003](0003-three-audience-host-split.md) (admin on operator, self-service on client). [ADR-0005](0005-observability-logging-tracing-metrics.md) — the audit trail is **separate** from operational logs. |
 

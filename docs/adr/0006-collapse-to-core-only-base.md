@@ -1,6 +1,6 @@
 ---
 title: ADR-0006 — Collapse Orkestra to a core-only base; addons become per-fork responsibility
-status: proposed
+status: accepted
 public: true
 ---
 
@@ -8,8 +8,8 @@ public: true
 
 | Field | Value |
 |---|---|
-| **Status** | 🟡 Proposed |
-| **Date** | 2026-06-01 (proposed) |
+| **Status** | ✅ Accepted — shipped in v0.3.0 (2026-06-02); partially amended by [ADR-0009](0009-core-compliance-module.md) (compliance re-homed to core) |
+| **Date** | 2026-06-01 |
 | **Authors** | @salvatore.balestrino |
 | **Supersedes** | Reverses the multi-repo extraction track (SDK split "Phase 5", addon repo extraction). Partially supersedes [ADR-0003](0003-three-audience-host-split.md) (the `client` audience is emptied of subscriptions/payments/onboarding). |
 | **Related** | [ADR-0001](0001-unified-tenant-model.md) (two-tier *data* model survives, two-tier *consumption* mechanism removed), [ADR-0003](0003-three-audience-host-split.md), [ADR-0004](0004-external-services-integration.md) |

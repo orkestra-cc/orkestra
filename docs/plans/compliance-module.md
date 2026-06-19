@@ -1,6 +1,6 @@
 # Plan — Core `compliance` module (audit + GDPR DSR)
 
-**Status:** 🟡 In progress — implements [ADR-0009](../adr/0009-core-compliance-module.md). Phases 1–4 shipped (recover + port + core wiring + SOC2 gate + 5-module producer coverage + erase modes); phases 5–6 (grafts + frontend) planned. Source: the pre-ADR-0006 `compliance` addon recovered from git (`git show e9d703f5:backend/internal/addons/compliance/...`), re-homed and completed.
+**Status:** 🟡 In progress — implements [ADR-0009](../adr/0009-core-compliance-module.md). Phases 1–5 shipped in v0.3.9 (recover + port + core wiring + SOC2 gate + 5-module producer coverage + erase modes + legal-hold/retention grafts + frontend); phase 6 (remaining frontend docs + openapi regen) in progress. Source: the pre-ADR-0006 `compliance` addon recovered from git (`git show e9d703f5:backend/internal/addons/compliance/...`), re-homed and completed.
 
 ## Context
 

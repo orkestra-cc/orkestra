@@ -181,7 +181,7 @@ Rejected outright. That *is* today's design. It is precisely what the 2026-04-18
 ## Rollout
 
 1. Land this ADR (current commit).
-2. Phase 0 implementation (per [plan](../../../../../home/tore/.claude/projects/-mnt-c-Users-tore-orkestra/memory/project_tenancy_plan_v2.md)): new `Tenant` model, closure table, `tenantUUID` propagation, JWT redesign, `tenantscope` upgrade, legacy removal.
+2. Phase 0 implementation: new `Tenant` model, closure table, `tenantUUID` propagation, JWT redesign, `tenantscope` upgrade, legacy removal.
 3. Verify: all modules build, integration tests pass, dev docker stack boots.
 4. Phase 1+ proceed on top of the new foundation.
 

@@ -137,7 +137,7 @@ Examples:
 - `billing.invoice_not_found` — SDI invoice UUID lookup miss (404). Future.
 - `authz.permission_denied` — Cedar policy refused the action (403). Future.
 
-See [`../docs/plans/frontend-admin-i18n.md`](../docs/plans/frontend-admin-i18n.md) (Phase 2) for the rollout. Until a handler is migrated, do not invent a code for it from the frontend — read it off the response or fall back to `detail`.
+See [`../docs/archive/frontend-admin-i18n.md`](../docs/archive/frontend-admin-i18n.md) (Phase 2) for the rollout. Until a handler is migrated, do not invent a code for it from the frontend — read it off the response or fall back to `detail`.
 
 ## Dev Tokens (Dev/Staging Only)
 

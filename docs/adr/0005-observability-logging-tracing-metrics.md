@@ -1,6 +1,6 @@
 ---
 title: ADR-0005 — Observability — logging, tracing, metrics as core platform features
-status: proposed
+status: accepted
 public: true
 ---
 
@@ -8,7 +8,7 @@ public: true
 
 | Field | Value |
 |---|---|
-| **Status** | Proposed |
+| **Status** | Accepted — all phases (A–F) shipped 2026-05-16 |
 | **Date** | 2026-05-16 |
 | **Authors** | @salvatore.balestrino |
 | **Supersedes** | — |

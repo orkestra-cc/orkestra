@@ -287,7 +287,7 @@ Examples:
 - `adminUsers.bulk.deleteConfirm` — the confirm copy on the bulk-delete modal in `/admin/users`.
 - `errors.auth.email_in_use` — the user-facing message for the `auth.email_in_use` error code returned by `POST /v1/users`.
 
-See [`../docs/plans/frontend-admin-i18n.md`](../docs/plans/frontend-admin-i18n.md) for the rollout plan and phase status.
+See [`../docs/archive/frontend-admin-i18n.md`](../docs/archive/frontend-admin-i18n.md) for the rollout plan and phase status (shipped; archived).
 
 **Addon translations (ADR-0007).** Core strings live in the monolithic `translation` namespace (`src/locales/{en,it}.json`). A fork's addon **must not** edit those files — it ships its own bundles under `src/pages/<name>/locales/{en,it}.json`, registered at boot as a dedicated i18next namespace named after the module via the manifest's `injectI18n` seam (mirrors `injectApi`; the `useModuleI18nInjection` hook in `App.tsx` does the registration, ungated by auth/enabled-state). Consume with `useTranslation('<name>')` / `t('<name>:key')`. Type augmentation and the EN/IT parity test live in the addon's own files (parity primitives are shared via `src/locales/parityCheck.ts`). See [`src/modules/_template/README.md`](src/modules/_template/README.md) step 6.5 for the author recipe.
 
