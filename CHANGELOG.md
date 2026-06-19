@@ -4,6 +4,35 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.3.10] - 2026-06-19
+
+### Features
+
+- **(frontend-admin)** Render StatCard attention flag as a corner ribbon ([b8804ff](https://github.com/orkestra-cc/orkestra/commit/b8804ff7b0106f6b8be193715c75069d62fd8368))
+- **(frontend-admin)** Share StatCard/SectionCard design-system primitives ([ca082f1](https://github.com/orkestra-cc/orkestra/commit/ca082f1585cf259bb13a1afd503ef36a74e37198))
+- **(tenant)** Merge per-tier provisioning policy (manual default + install bootstrap) ([e4c28eb](https://github.com/orkestra-cc/orkestra/commit/e4c28ebce59c4d9b669d559978402cd50e99b0de))
+- **(tenant)** Default provisioning to manual + bootstrap internal tenant at install ([c4075f9](https://github.com/orkestra-cc/orkestra/commit/c4075f92cc8aa35589bfbceb95815456fd8b1ddb))
+- **(tenant)** Admin-managed per-tier provisioning policy ([7310f15](https://github.com/orkestra-cc/orkestra/commit/7310f15385c4a961420a7c591f520f2d8d3ed989))
+- **(compliance)** Surface SOC2 evidence (nav gate + admin page) ([6b7408a](https://github.com/orkestra-cc/orkestra/commit/6b7408a8d9050980047731bde3646f624ef561dd))
+- **(compliance)** Redesign the admin GDPR/compliance page UI ([357eb2a](https://github.com/orkestra-cc/orkestra/commit/357eb2a8abc7c05dc0bb1ac5f477a4801c36c618))
+
+### Bug fixes
+
+- **(notification)** Use bson.D for multi-key template list sort (#127) ([26e7d73](https://github.com/orkestra-cc/orkestra/commit/26e7d73c263e094d88bc0e07e0032e52437abd71))
+- **(compliance)** Drop redundant nav section on admin items ([c2fcdef](https://github.com/orkestra-cc/orkestra/commit/c2fcdef95d31e5e3db94c1e0ba118918e57be20c))
+
+### Documentation
+
+- **(tenant)** Fix pre-existing inaccuracies in module CLAUDE.md ([475d768](https://github.com/orkestra-cc/orkestra/commit/475d768b6ab3a8d8b82dd7682a61776500ac5c57))
+- **(claude)** Link the logging module's CLAUDE.md from the root module map ([d5dd7d2](https://github.com/orkestra-cc/orkestra/commit/d5dd7d25b3620254ae7f5ff2e4f0882fe3278343))
+- **(logging)** Document the core logging module (ADR-0005 Phase F) ([8a60f5a](https://github.com/orkestra-cc/orkestra/commit/8a60f5a282a78033a0988bf8e427fcfaf0d38bea))
+- **(compliance)** Document the core compliance module + fix stale module counts ([ab69423](https://github.com/orkestra-cc/orkestra/commit/ab6942310638b097cbbfcb699608812a41ffaf9c))
+
+### Chores
+
+- Merge main (#127 notification sort hotfix) into dev before v0.3.10 ([add7ad5](https://github.com/orkestra-cc/orkestra/commit/add7ad51422e6dd692e26da188afceff17e79114))
+- **(docs)** Absorb logging module page + badge refresh into main ([f0d5838](https://github.com/orkestra-cc/orkestra/commit/f0d5838912afd062092dca25099defb12e28d5a3))
+
 ## [0.3.9] - 2026-06-18
 
 ### Features
