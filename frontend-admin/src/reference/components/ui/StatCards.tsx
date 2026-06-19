@@ -16,10 +16,10 @@ import SectionCard from 'components/common/SectionCard';
 import { Col, Row, Table } from 'react-bootstrap';
 
 // StatCards is the Orkestra reference showcase for the shared ERP-style KPI
-// tile (StatCard) and its companion titled panel (SectionCard). These are the
-// canonical summary-row + section primitives used across admin dashboards
-// (/admin/compliance, /admin/compliance/soc2, /admin/tenants). Prefer them
-// over a bespoke per-page stat card so every dashboard's KPI row matches.
+// tile (StatCard) and its companion titled panel (SectionCard) — the canonical
+// summary-row + section primitives used across admin dashboards
+// (/admin/compliance, /admin/compliance/soc2, /admin/tenants). Prefer them over
+// a bespoke per-page stat card so every dashboard's KPI row matches.
 
 const colorVariantsCode = `
 <Row className="g-3">
@@ -43,7 +43,7 @@ const colorVariantsCode = `
 </Row>
 `;
 
-const subtitleBadgeCode = `
+const ribbonCode = `
 <Row className="g-3">
   <Col md={6} lg={4}>
     <StatCard
@@ -52,7 +52,7 @@ const subtitleBadgeCode = `
       icon={faUserSlash}
       color="warning"
       subtitle="Awaiting review"
-      badge={{ text: 'Needs attention' }}
+      badge={{ text: 'Review' }}
     />
   </Col>
   <Col md={6} lg={4}>
@@ -62,7 +62,7 @@ const subtitleBadgeCode = `
       icon={faGavel}
       color="danger"
       subtitle="Blocking erasure"
-      badge={{ text: 'Erasure blocked' }}
+      badge={{ text: 'Blocked' }}
     />
   </Col>
   <Col md={6} lg={4}>
@@ -72,7 +72,7 @@ const subtitleBadgeCode = `
       icon={faClockRotateLeft}
       color="info"
       subtitle="Past retention window"
-      badge={{ text: '12 subjects', bg: 'secondary' }}
+      badge={{ text: 'Overdue', bg: 'secondary' }}
     />
   </Col>
 </Row>
@@ -117,15 +117,15 @@ const StatCards = () => {
     <>
       <PageHeader
         title="Stat Cards"
-        description="The Orkestra ERP-style KPI tile (StatCard) and its companion titled panel (SectionCard) — the canonical summary-row and section primitives for admin dashboards. A full 4px color-accented border, a large faded 3x icon, a big headline value, an optional subtitle, and an attention badge that only shows when it matters."
+        description="The Orkestra ERP-style KPI tile (StatCard) and its companion titled panel (SectionCard) — the canonical summary-row and section primitives for admin dashboards. A full 4px color-accented border, a large faded 3x icon, a big headline value, an optional subtitle, and an attention flag rendered as a diagonal corner ribbon."
         className="mb-3"
       />
 
       <OrkestraComponentCard>
         <OrkestraComponentCard.Header title="Color variants" light={false}>
           <p className="mb-0">
-            The <code>color</code> prop drives the border, icon, and badge tint.
-            It accepts any <code>BadgeColor</code> (<code>primary</code>,{' '}
+            The <code>color</code> prop drives the border, icon, and ribbon
+            tint. It accepts any <code>BadgeColor</code> (<code>primary</code>,{' '}
             <code>success</code>, <code>info</code>, <code>warning</code>,{' '}
             <code>danger</code>, <code>secondary</code>, …).
           </p>
@@ -148,17 +148,18 @@ const StatCards = () => {
 
       <OrkestraComponentCard>
         <OrkestraComponentCard.Header
-          title="Subtitle + attention badge"
+          title="Subtitle + corner ribbon"
           light={false}
         >
           <p className="mb-0">
             Pass <code>subtitle</code> for a muted caption under the value, and{' '}
-            <code>badge</code> (<code>{'{ text, bg? }'}</code>) to flag a metric
-            that needs attention — render it only when the condition is true.
+            <code>badge</code> (<code>{'{ text, bg? }'}</code>) to raise a
+            corner ribbon flag — render it only when the metric needs attention.
+            Keep the ribbon text short (one word reads best).
           </p>
         </OrkestraComponentCard.Header>
         <OrkestraComponentCard.Body
-          code={subtitleBadgeCode}
+          code={ribbonCode}
           language="jsx"
           scope={{
             StatCard,

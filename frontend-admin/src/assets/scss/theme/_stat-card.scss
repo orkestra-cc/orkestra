@@ -1,0 +1,44 @@
+/* -------------------------------------------------------------------------- */
+/*                       StatCard — corner attention ribbon                   */
+/* -------------------------------------------------------------------------- */
+
+// A diagonal corner ribbon tucked into the top-right corner of a StatCard: a
+// colored band carrying the flag text, clipped flush to the two card edges by
+// the card's own overflow-hidden. Colour comes from the `.stat-ribbon-{color}`
+// modifier.
+
+.stat-ribbon {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  width: 78px;
+  height: 78px;
+  overflow: hidden;
+  pointer-events: none;
+
+  // the colored band carrying the text
+  > span {
+    position: absolute;
+    top: 18px;
+    left: -12px;
+    width: 120px;
+    padding: 3px 0;
+    transform: rotate(45deg);
+    text-align: center;
+    color: $white;
+    font-weight: 700;
+    font-size: 0.55rem;
+    line-height: 1.5;
+    letter-spacing: 0.6px;
+    text-transform: uppercase;
+    box-shadow: 0 2px 5px rgba($black, 0.25);
+    text-shadow: 0 1px 1px rgba($black, 0.2);
+  }
+}
+
+// Colour variants: band in the theme colour.
+@each $name, $value in $theme-colors {
+  .stat-ribbon-#{$name} > span {
+    background-color: $value;
+  }
+}
