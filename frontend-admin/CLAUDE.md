@@ -65,7 +65,7 @@ frontend-admin/
 │   │   ├── wizard/                # Form wizard helpers
 │   │   ├── errors/                # 404, 500 pages
 │   │   └── notification/          # Toast and banner notifications
-│   ├── reference/                 # 📚 Orkestra template library (READ-ONLY) — 7 example apps + 60+ samples
+│   ├── reference/                 # 📚 Orkestra design-reference library (editable, Orkestra-owned) — 7 example apps + 60+ samples + our own showcases
 │   │   ├── app-examples/          # calendar, chat, email, events, kanban, social, support-desk
 │   │   ├── components/            # UI showcase (forms, tables, navigation, media, etc.)
 │   │   ├── charts/                # ECharts examples only (chartjs/d3js removed — unresolved imports)
@@ -304,7 +304,7 @@ See [`../docs/plans/frontend-admin-i18n.md`](../docs/plans/frontend-admin-i18n.m
 
 - Don't invent a parallel data-fetching layer (axios, custom fetch helpers). Every endpoint goes through an RTK Query slice that extends `baseApi`.
 - Don't hardcode sidebar entries **for production features** — navigation comes from the backend. The dev-only Developer realm (see "How navigation works") is the single documented exception.
-- Don't move things out of `src/reference/` — it's a read-only template library. Copy from it.
+- `src/reference/` is an Orkestra-owned design-reference library, **not** read-only falcon material — copy from it, and add new Orkestra showcases under `src/reference/<subfolder>/` (register them in `src/routes/referenceRoutes.tsx` + `src/reference/navigation/referenceRoutes.ts`). Promote a pattern to `components/common/` once a production page consumes it; keep the live showcase in `reference/` (e.g. `reference/components/ui/StatCards.tsx` documents `components/common/StatCard` + `SectionCard`).
 - Don't import from `src/modules/_template/` at runtime. It's a scaffold, not runtime code.
 - Don't add new top-level directories under `src/`. The current layout is stable.
 

@@ -1,32 +1,34 @@
+import { ReactNode } from 'react';
 import { Badge, Card, Spinner } from 'react-bootstrap';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { IconProp } from '@fortawesome/fontawesome-svg-core';
 import { BadgeColor } from 'components/common/SubtleBadge';
 
-// ComplianceStatCard is the compact KPI tile used in the page summary row
-// (pending erasures, active holds, retention candidates, audit volume): a
-// color-accented left border, a large faded icon, the headline value, and an
-// optional status badge that only shows when the metric needs attention.
-interface ComplianceStatCardProps {
+// StatCard is the Orkestra ERP-style KPI tile and the canonical summary-row
+// card for admin dashboards: a full 4px color-accented border, a large faded
+// 3x icon, the headline value, an optional subtitle, and an optional status
+// badge that only renders when the metric needs attention. Prefer it over
+// bespoke per-page stat cards so every dashboard's KPI row looks the same.
+export interface StatCardProps {
   title: string;
   value: number | string;
   icon: IconProp;
   color: BadgeColor;
-  subtitle?: string;
-  badgeText?: string;
+  subtitle?: ReactNode;
+  badge?: { text: string; bg?: BadgeColor };
   loading?: boolean;
 }
 
-const ComplianceStatCard = ({
+const StatCard = ({
   title,
   value,
   icon,
   color,
   subtitle,
-  badgeText,
+  badge,
   loading
-}: ComplianceStatCardProps) => (
-  <Card className={`h-100 border-start border-4 border-${color}`}>
+}: StatCardProps) => (
+  <Card className={`h-100 border-4 border-${color}`}>
     <Card.Body>
       <div className="d-flex align-items-center justify-content-between">
         <div>
@@ -40,13 +42,13 @@ const ComplianceStatCard = ({
           <FontAwesomeIcon icon={icon} size="3x" className="opacity-75" />
         </div>
       </div>
-      {badgeText && (
+      {badge && (
         <div className="mt-3">
-          <Badge bg={color}>{badgeText}</Badge>
+          <Badge bg={badge.bg ?? color}>{badge.text}</Badge>
         </div>
       )}
     </Card.Body>
   </Card>
 );
 
-export default ComplianceStatCard;
+export default StatCard;

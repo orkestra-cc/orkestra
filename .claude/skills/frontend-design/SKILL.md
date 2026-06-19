@@ -246,7 +246,7 @@ If the request is to add a new feature module (not just a page), use the canonic
 - ❌ Hardcode user-visible strings — go through `t()` (i18n).
 - ❌ Hardcode sidebar entries on the frontend for production features — `NavItems()` is on the backend.
 - ❌ Use `useState` for active tab — sync with URL (`useSearchParams`). See `url-tabs` skill.
-- ❌ Move or edit anything under `src/reference/` — it is read-only template material.
+- ✅ `src/reference/` is an Orkestra-owned **design-reference** library (no longer read-only falcon material). Copy from it, and add new Orkestra showcases under `src/reference/<subfolder>/` (register in `src/routes/referenceRoutes.tsx` + `src/reference/navigation/referenceRoutes.ts`). When you build a reusable primitive, put it in `components/common/` and document it with a live showcase in `reference/` (e.g. `reference/components/ui/StatCards.tsx` → `components/common/StatCard` + `SectionCard`).
 - ❌ Import from `src/modules/_template/` at runtime — it is a scaffold only.
 - ❌ Use class components or `.js` (non-TS) files.
 - ❌ Add `@/` prefix to imports or use long relative climbs — use bare path aliases.

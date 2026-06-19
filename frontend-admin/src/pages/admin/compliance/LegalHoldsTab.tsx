@@ -12,7 +12,7 @@ import {
   type LegalHold
 } from 'store/api/complianceApi';
 import ComplianceEmptyState from './ComplianceEmptyState';
-import ComplianceSection from './ComplianceSection';
+import SectionCard from 'components/common/SectionCard';
 import ComplianceTable from './ComplianceTable';
 import { formatDateTime } from './complianceFormat';
 
@@ -117,7 +117,7 @@ const LegalHoldsTab = () => {
   const items = data?.items ?? [];
 
   return (
-    <ComplianceSection icon={faGavel} iconColor="danger" title="Legal Holds">
+    <SectionCard icon={faGavel} iconColor="danger" title="Legal Holds">
       <Card className="bg-body-tertiary border shadow-none mb-4">
         <Card.Body className="py-3">
           <Form onSubmit={onPlace}>
@@ -185,7 +185,7 @@ const LegalHoldsTab = () => {
           searchPlaceholder="Search by subject, reason or case"
         />
       )}
-    </ComplianceSection>
+    </SectionCard>
   );
 };
 

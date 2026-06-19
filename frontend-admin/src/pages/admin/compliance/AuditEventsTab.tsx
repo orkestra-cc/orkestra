@@ -7,7 +7,7 @@ import {
   type AuditEvent
 } from 'store/api/complianceApi';
 import ComplianceEmptyState from './ComplianceEmptyState';
-import ComplianceSection from './ComplianceSection';
+import SectionCard from 'components/common/SectionCard';
 import ComplianceTable from './ComplianceTable';
 import { formatDateTime, outcomeColor } from './complianceFormat';
 
@@ -67,7 +67,7 @@ const AuditEventsTab = () => {
   const items = data?.items ?? [];
 
   return (
-    <ComplianceSection
+    <SectionCard
       icon={faClipboardList}
       iconColor="primary"
       title="Audit Events"
@@ -87,7 +87,7 @@ const AuditEventsTab = () => {
           searchPlaceholder="Search by action, actor or resource"
         />
       )}
-    </ComplianceSection>
+    </SectionCard>
   );
 };
 

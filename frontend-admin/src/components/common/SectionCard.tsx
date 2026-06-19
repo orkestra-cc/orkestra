@@ -3,10 +3,11 @@ import { Card } from 'react-bootstrap';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { IconProp } from '@fortawesome/fontawesome-svg-core';
 
-// ComplianceSection is the carded shell each tab renders into: a tinted header
-// with an icon + title (and an optional right-aligned slot for actions), mirroring
-// the ERP GDPR panel's section styling.
-interface ComplianceSectionProps {
+// SectionCard is the carded shell for a titled content panel: a tinted header
+// with an icon + title and an optional right-aligned actions slot, over a
+// plain body. It pairs with StatCard — StatCard for the KPI summary row,
+// SectionCard for the panels beneath it.
+export interface SectionCardProps {
   icon: IconProp;
   iconColor?: string;
   title: string;
@@ -14,13 +15,13 @@ interface ComplianceSectionProps {
   children: ReactNode;
 }
 
-const ComplianceSection = ({
+const SectionCard = ({
   icon,
   iconColor = 'primary',
   title,
   headerEnd,
   children
-}: ComplianceSectionProps) => (
+}: SectionCardProps) => (
   <Card>
     <Card.Header className="bg-body-tertiary d-flex align-items-center justify-content-between">
       <h5 className="mb-0">
@@ -33,4 +34,4 @@ const ComplianceSection = ({
   </Card>
 );
 
-export default ComplianceSection;
+export default SectionCard;

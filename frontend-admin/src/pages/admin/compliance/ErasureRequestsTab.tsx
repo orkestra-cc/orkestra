@@ -11,7 +11,7 @@ import {
   type ErasureRequest
 } from 'store/api/complianceApi';
 import ComplianceEmptyState from './ComplianceEmptyState';
-import ComplianceSection from './ComplianceSection';
+import SectionCard from 'components/common/SectionCard';
 import ComplianceTable from './ComplianceTable';
 import { erasureStatusColor, formatDateTime } from './complianceFormat';
 
@@ -108,7 +108,7 @@ const ErasureRequestsTab = () => {
   const items = data?.items ?? [];
 
   return (
-    <ComplianceSection
+    <SectionCard
       icon={faUserSlash}
       iconColor="warning"
       title="Erasure Requests"
@@ -128,7 +128,7 @@ const ErasureRequestsTab = () => {
           searchPlaceholder="Search by subject or reason"
         />
       )}
-    </ComplianceSection>
+    </SectionCard>
   );
 };
 

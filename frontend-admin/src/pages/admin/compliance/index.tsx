@@ -14,8 +14,8 @@ import {
   useListLegalHoldsQuery,
   useRetentionPreviewQuery
 } from 'store/api/complianceApi';
+import StatCard from 'components/common/StatCard';
 import AuditEventsTab from './AuditEventsTab';
-import ComplianceStatCard from './ComplianceStatCard';
 import ErasureRequestsTab from './ErasureRequestsTab';
 import LegalHoldsTab from './LegalHoldsTab';
 import RetentionTab from './RetentionTab';
@@ -78,44 +78,46 @@ const CompliancePage = () => {
 
       <Row className="g-3 mb-3">
         <Col md={6} lg={3}>
-          <ComplianceStatCard
+          <StatCard
             title="Pending Erasures"
             value={pendingErasures}
             icon={faUserSlash}
             color="warning"
             subtitle="Awaiting review"
-            badgeText={pendingErasures > 0 ? 'Needs attention' : undefined}
+            badge={
+              pendingErasures > 0 ? { text: 'Needs attention' } : undefined
+            }
             loading={erasures.isLoading}
           />
         </Col>
         <Col md={6} lg={3}>
-          <ComplianceStatCard
+          <StatCard
             title="Active Legal Holds"
             value={activeHolds}
             icon={faGavel}
             color="danger"
             subtitle="Blocking erasure"
-            badgeText={activeHolds > 0 ? 'Erasure blocked' : undefined}
+            badge={activeHolds > 0 ? { text: 'Erasure blocked' } : undefined}
             loading={holds.isLoading}
           />
         </Col>
         <Col md={6} lg={3}>
-          <ComplianceStatCard
+          <StatCard
             title="Retention Candidates"
             value={retentionCandidates}
             icon={faClockRotateLeft}
             color="info"
             subtitle="Past retention window"
-            badgeText={
+            badge={
               retentionCandidates > 0
-                ? `${retentionCandidates} subjects`
+                ? { text: `${retentionCandidates} subjects` }
                 : undefined
             }
             loading={retention.isLoading}
           />
         </Col>
         <Col md={6} lg={3}>
-          <ComplianceStatCard
+          <StatCard
             title="Audit Events"
             value={audit.data?.total ?? 0}
             icon={faClipboardList}

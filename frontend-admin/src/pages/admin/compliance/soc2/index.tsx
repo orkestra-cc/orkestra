@@ -10,8 +10,8 @@ import {
   faUserShield
 } from '@fortawesome/free-solid-svg-icons';
 import type { IconProp } from '@fortawesome/fontawesome-svg-core';
-import ComplianceStatCard from 'pages/admin/compliance/ComplianceStatCard';
-import ComplianceSection from 'pages/admin/compliance/ComplianceSection';
+import StatCard from 'components/common/StatCard';
+import SectionCard from 'components/common/SectionCard';
 import type { BadgeColor } from 'components/common/SubtleBadge';
 import { useSoc2EvidenceQuery } from 'store/api/complianceApi';
 
@@ -144,7 +144,7 @@ const SOC2EvidencePage = () => {
               const meta = SUMMARY_META[key];
               return (
                 <Col md={6} lg={3} key={key}>
-                  <ComplianceStatCard
+                  <StatCard
                     title={meta?.label ?? humanize(key)}
                     value={value}
                     icon={meta?.icon ?? faShieldHalved}
@@ -158,10 +158,7 @@ const SOC2EvidencePage = () => {
           <Row className="g-3">
             {Object.entries(data.controls).map(([key, attrs]) => (
               <Col lg={6} key={key}>
-                <ComplianceSection
-                  icon={faShieldHalved}
-                  title={controlTitle(key)}
-                >
+                <SectionCard icon={faShieldHalved} title={controlTitle(key)}>
                   <Table size="sm" className="mb-0 fs-10">
                     <tbody>
                       {Object.entries(attrs).map(([attr, value]) => (
@@ -174,7 +171,7 @@ const SOC2EvidencePage = () => {
                       ))}
                     </tbody>
                   </Table>
-                </ComplianceSection>
+                </SectionCard>
               </Col>
             ))}
           </Row>
