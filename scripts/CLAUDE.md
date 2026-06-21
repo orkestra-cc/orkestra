@@ -75,6 +75,7 @@ These are called by `orkestra.sh` or used directly during development:
 - **install-air.sh**: Installs AIR hot-reload tool
 - **devtoken.sh**: Generates dev JWT tokens for testing (`ORKESTRA_API_URL=... ./scripts/devtoken.sh administrator`). Pass `--audience client` (or `-a client`) to mint an `aud=client` token that satisfies the `api.*` surface; default is `operator` (ADR-0003 PR-D D-10).
 - **refresh-coverage-badge.sh**: Refreshes a coverage badge SVG under `.github/badges/` from a project's coverage artifact. Called by the `coverage-badge` job in `.github/workflows/{backend,frontend-admin,mobile}.yml` on push to dev/main. Usage: `scripts/refresh-coverage-badge.sh <backend|frontend-admin|mobile>`. Project-aware: parses `go tool cover` (backend), `coverage-summary.json` via `jq` (admin), or `lcov.info` via awk (mobile).
+- **commit-coverage-badge.sh**: Commits + pushes the refreshed badge SVG (the step after `refresh-coverage-badge.sh` in the `coverage-badge` job). Resilient to the badge-push race between the backend and frontend-admin workflows: each push attempt resets to the latest remote tip, re-applies the badge, commits and pushes, so a concurrent sibling push costs a retry instead of a non-fast-forward failure. Usage: `scripts/commit-coverage-badge.sh <backend|frontend-admin|mobile>` (reads `GITHUB_REF_NAME`; CI-only).
 - **health-check.sh** *(if present)*: Called by `orkestra.sh deploy` post-deployment
 
 ## Script Categories

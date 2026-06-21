@@ -9,6 +9,7 @@ on:
       - 'Makefile'
       - '.mise.toml'
       - 'scripts/refresh-coverage-badge.sh'
+      - 'scripts/commit-coverage-badge.sh'
   push:
     branches: [dev, main]
     # Release tags (vX.Y.Z) build versioned images. paths filters do not
@@ -21,6 +22,7 @@ on:
       - 'Makefile'
       - '.mise.toml'
       - 'scripts/refresh-coverage-badge.sh'
+      - 'scripts/commit-coverage-badge.sh'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -95,11 +97,8 @@ jobs:
           path: backend/
       - name: Refresh badge SVG
         run: scripts/refresh-coverage-badge.sh backend
-      - name: Commit refreshed badge
-        uses: stefanzweifel/git-auto-commit-action@v7
-        with:
-          commit_message: "chore(badges): refresh backend coverage [skip ci]"
-          file_pattern: .github/badges/backend-coverage.svg
+      - name: Commit & push refreshed badge
+        run: scripts/commit-coverage-badge.sh backend
 
   docker:
     name: Docker Build
