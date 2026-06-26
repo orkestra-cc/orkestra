@@ -1,9 +1,11 @@
-// Package container provides a thin abstraction over the Docker Engine API
-// used by the module registry to start/stop containers declared by modules
-// via Module.InfraContainers(). Construction is fail-soft: if the Docker
-// socket is unreachable or CONTAINER_CONTROL_ENABLED is false, NewManager
-// returns a no-op implementation so module toggling still works (operators
-// are expected to manage infrastructure externally in that case).
+//go:build docker_infra
+
+// This file is the Docker Engine API implementation of the container Manager
+// (the interface lives in container.go). It is compiled ONLY with
+// `-tags docker_infra`; the default build uses the no-op manager
+// (manager_default.go) and imports no Docker SDK. Construction is fail-soft:
+// if the Docker socket is unreachable or CONTAINER_CONTROL_ENABLED is false,
+// NewManager returns the no-op implementation so module toggling still works.
 package container
 
 import (
@@ -27,24 +29,6 @@ import (
 
 	"github.com/orkestra/backend/pkg/sdk/module"
 )
-
-// Manager is the interface consumed by the module registry.
-type Manager interface {
-	// EnsureStarted creates the container if missing, starts it if stopped,
-	// and blocks until the health check passes (or ReadyTimeout elapses).
-	// A nil return means the container is ready to serve.
-	EnsureStarted(ctx context.Context, spec module.InfraContainerSpec) error
-
-	// EnsureStopped stops the container if it's running. No-op otherwise.
-	EnsureStopped(ctx context.Context, name string, timeout time.Duration) error
-
-	// IsRunning returns whether a container with the given name is currently up.
-	IsRunning(ctx context.Context, name string) (bool, error)
-
-	// Available reports whether the manager can actually control Docker.
-	// Returns false for the no-op manager.
-	Available() bool
-}
 
 type dockerManager struct {
 	cli    *client.Client
