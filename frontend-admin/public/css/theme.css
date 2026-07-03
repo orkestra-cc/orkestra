@@ -23223,7 +23223,7 @@ h5, .h5 {
 }
 @media (min-width: 1540px) {
   .navbar-vertical.navbar-expand-xxl {
-    max-width: 12.625rem;
+    max-width: 11.75rem;
     top: 0;
     height: 100vh;
     margin: 0;
@@ -23240,10 +23240,10 @@ h5, .h5 {
     transition: width 0.2s ease;
     transition-property: width, box-shadow;
     display: inline-block !important;
-    width: 12.625rem;
+    width: 11.75rem;
   }
   .navbar-vertical.navbar-expand-xxl .navbar-vertical-content {
-    width: 12.625rem;
+    width: 11.75rem;
     height: calc(100vh - var(--orkestra-top-nav-height));
     padding: 0.5rem 0 0 0;
   }
@@ -23271,7 +23271,7 @@ h5, .h5 {
     margin-left: 15.625rem;
   }
   .navbar-vertical.navbar-expand-xxl + .content {
-    margin-left: 15.625rem;
+    margin-left: 13.25rem;
   }
   .navbar-vertical.navbar-expand-xxl + .content .navbar-top {
     position: sticky;
@@ -23283,11 +23283,11 @@ h5, .h5 {
   }
   .navbar-vertical-collapsed .navbar-vertical.navbar-expand-xxl {
     z-index: 1030;
-    width: 3.125rem;
+    width: 2.75rem;
     height: 100vh;
   }
   .navbar-vertical-collapsed .navbar-vertical.navbar-expand-xxl .navbar-collapse {
-    width: 3.125rem !important;
+    width: 2.75rem !important;
     margin-left: -1rem;
     overflow: hidden;
   }
@@ -23315,10 +23315,10 @@ h5, .h5 {
     width: 50%;
   }
   .navbar-vertical-collapsed .navbar-vertical.navbar-expand-xxl + .content {
-    margin-left: 3.125rem;
+    margin-left: 2.75rem;
   }
   .navbar-vertical-collapsed .navbar-vertical.navbar-expand-xxl + .content .navbar-top {
-    padding-left: 13.5rem;
+    padding-left: 13rem;
   }
   .navbar-vertical-collapsed .navbar-vertical.navbar-expand-xxl.navbar-card, .navbar-vertical-collapsed .navbar-vertical.navbar-expand-xxl.navbar-vibrant, .navbar-vertical-collapsed .navbar-vertical.navbar-expand-xxl.navbar-inverted {
     width: 4.125rem;
@@ -23343,11 +23343,26 @@ h5, .h5 {
   .navbar-vertical-collapsed:not(.navbar-vertical-collapsed-hover) .navbar-vertical.navbar-expand-xxl .navbar-vertical-divider {
     max-width: 2rem;
   }
+  .navbar-vertical-collapsed:not(.navbar-vertical-collapsed-hover) .navbar-vertical.navbar-expand-xxl .navbar-collapse {
+    margin-left: -0.5rem;
+  }
+  .navbar-vertical-collapsed:not(.navbar-vertical-collapsed-hover) .navbar-vertical.navbar-expand-xxl .navbar-vertical-content {
+    width: 2.75rem;
+    padding-left: 0;
+    padding-right: 0;
+  }
+  .navbar-vertical-collapsed:not(.navbar-vertical-collapsed-hover) .navbar-vertical.navbar-expand-xxl .nav-link {
+    padding-left: 0;
+    padding-right: 0 !important;
+  }
+  .navbar-vertical-collapsed:not(.navbar-vertical-collapsed-hover) .navbar-vertical.navbar-expand-xxl .nav-link > .d-flex {
+    justify-content: center;
+  }
   .navbar-vertical-collapsed-hover .navbar-vertical.navbar-expand-xxl {
-    width: 12.625rem;
+    width: 11.75rem;
   }
   .navbar-vertical-collapsed-hover .navbar-vertical.navbar-expand-xxl .navbar-collapse {
-    width: 12.625rem !important;
+    width: 11.75rem !important;
   }
   .navbar-vertical-collapsed-hover .navbar-vertical.navbar-expand-xxl .navbar-collapse {
     box-shadow: 0.625rem 0 0.625rem -0.5625rem rgba(0, 0, 0, 0.2);
@@ -23373,7 +23388,7 @@ h5, .h5 {
 }
 @media (min-width: 1200px) {
   .navbar-vertical.navbar-expand-xl {
-    max-width: 12.625rem;
+    max-width: 11.75rem;
     top: 0;
     height: 100vh;
     margin: 0;
@@ -23390,10 +23405,10 @@ h5, .h5 {
     transition: width 0.2s ease;
     transition-property: width, box-shadow;
     display: inline-block !important;
-    width: 12.625rem;
+    width: 11.75rem;
   }
   .navbar-vertical.navbar-expand-xl .navbar-vertical-content {
-    width: 12.625rem;
+    width: 11.75rem;
     height: calc(100vh - var(--orkestra-top-nav-height));
     padding: 0.5rem 0 0 0;
   }
@@ -23421,7 +23436,7 @@ h5, .h5 {
     margin-left: 15.625rem;
   }
   .navbar-vertical.navbar-expand-xl + .content {
-    margin-left: 15.625rem;
+    margin-left: 13.25rem;
   }
   .navbar-vertical.navbar-expand-xl + .content .navbar-top {
     position: sticky;
@@ -23433,11 +23448,11 @@ h5, .h5 {
   }
   .navbar-vertical-collapsed .navbar-vertical.navbar-expand-xl {
     z-index: 1030;
-    width: 3.125rem;
+    width: 2.75rem;
     height: 100vh;
   }
   .navbar-vertical-collapsed .navbar-vertical.navbar-expand-xl .navbar-collapse {
-    width: 3.125rem !important;
+    width: 2.75rem !important;
     margin-left: -1rem;
     overflow: hidden;
   }
@@ -23465,10 +23480,10 @@ h5, .h5 {
     width: 50%;
   }
   .navbar-vertical-collapsed .navbar-vertical.navbar-expand-xl + .content {
-    margin-left: 3.125rem;
+    margin-left: 2.75rem;
   }
   .navbar-vertical-collapsed .navbar-vertical.navbar-expand-xl + .content .navbar-top {
-    padding-left: 13.5rem;
+    padding-left: 13rem;
   }
   .navbar-vertical-collapsed .navbar-vertical.navbar-expand-xl.navbar-card, .navbar-vertical-collapsed .navbar-vertical.navbar-expand-xl.navbar-vibrant, .navbar-vertical-collapsed .navbar-vertical.navbar-expand-xl.navbar-inverted {
     width: 4.125rem;
@@ -23493,11 +23508,26 @@ h5, .h5 {
   .navbar-vertical-collapsed:not(.navbar-vertical-collapsed-hover) .navbar-vertical.navbar-expand-xl .navbar-vertical-divider {
     max-width: 2rem;
   }
+  .navbar-vertical-collapsed:not(.navbar-vertical-collapsed-hover) .navbar-vertical.navbar-expand-xl .navbar-collapse {
+    margin-left: -0.5rem;
+  }
+  .navbar-vertical-collapsed:not(.navbar-vertical-collapsed-hover) .navbar-vertical.navbar-expand-xl .navbar-vertical-content {
+    width: 2.75rem;
+    padding-left: 0;
+    padding-right: 0;
+  }
+  .navbar-vertical-collapsed:not(.navbar-vertical-collapsed-hover) .navbar-vertical.navbar-expand-xl .nav-link {
+    padding-left: 0;
+    padding-right: 0 !important;
+  }
+  .navbar-vertical-collapsed:not(.navbar-vertical-collapsed-hover) .navbar-vertical.navbar-expand-xl .nav-link > .d-flex {
+    justify-content: center;
+  }
   .navbar-vertical-collapsed-hover .navbar-vertical.navbar-expand-xl {
-    width: 12.625rem;
+    width: 11.75rem;
   }
   .navbar-vertical-collapsed-hover .navbar-vertical.navbar-expand-xl .navbar-collapse {
-    width: 12.625rem !important;
+    width: 11.75rem !important;
   }
   .navbar-vertical-collapsed-hover .navbar-vertical.navbar-expand-xl .navbar-collapse {
     box-shadow: 0.625rem 0 0.625rem -0.5625rem rgba(0, 0, 0, 0.2);
@@ -23523,7 +23553,7 @@ h5, .h5 {
 }
 @media (min-width: 992px) {
   .navbar-vertical.navbar-expand-lg {
-    max-width: 12.625rem;
+    max-width: 11.75rem;
     top: 0;
     height: 100vh;
     margin: 0;
@@ -23540,10 +23570,10 @@ h5, .h5 {
     transition: width 0.2s ease;
     transition-property: width, box-shadow;
     display: inline-block !important;
-    width: 12.625rem;
+    width: 11.75rem;
   }
   .navbar-vertical.navbar-expand-lg .navbar-vertical-content {
-    width: 12.625rem;
+    width: 11.75rem;
     height: calc(100vh - var(--orkestra-top-nav-height));
     padding: 0.5rem 0 0 0;
   }
@@ -23571,7 +23601,7 @@ h5, .h5 {
     margin-left: 15.625rem;
   }
   .navbar-vertical.navbar-expand-lg + .content {
-    margin-left: 15.625rem;
+    margin-left: 13.25rem;
   }
   .navbar-vertical.navbar-expand-lg + .content .navbar-top {
     position: sticky;
@@ -23583,11 +23613,11 @@ h5, .h5 {
   }
   .navbar-vertical-collapsed .navbar-vertical.navbar-expand-lg {
     z-index: 1030;
-    width: 3.125rem;
+    width: 2.75rem;
     height: 100vh;
   }
   .navbar-vertical-collapsed .navbar-vertical.navbar-expand-lg .navbar-collapse {
-    width: 3.125rem !important;
+    width: 2.75rem !important;
     margin-left: -1rem;
     overflow: hidden;
   }
@@ -23615,10 +23645,10 @@ h5, .h5 {
     width: 50%;
   }
   .navbar-vertical-collapsed .navbar-vertical.navbar-expand-lg + .content {
-    margin-left: 3.125rem;
+    margin-left: 2.75rem;
   }
   .navbar-vertical-collapsed .navbar-vertical.navbar-expand-lg + .content .navbar-top {
-    padding-left: 13.5rem;
+    padding-left: 13rem;
   }
   .navbar-vertical-collapsed .navbar-vertical.navbar-expand-lg.navbar-card, .navbar-vertical-collapsed .navbar-vertical.navbar-expand-lg.navbar-vibrant, .navbar-vertical-collapsed .navbar-vertical.navbar-expand-lg.navbar-inverted {
     width: 4.125rem;
@@ -23643,11 +23673,26 @@ h5, .h5 {
   .navbar-vertical-collapsed:not(.navbar-vertical-collapsed-hover) .navbar-vertical.navbar-expand-lg .navbar-vertical-divider {
     max-width: 2rem;
   }
+  .navbar-vertical-collapsed:not(.navbar-vertical-collapsed-hover) .navbar-vertical.navbar-expand-lg .navbar-collapse {
+    margin-left: -0.5rem;
+  }
+  .navbar-vertical-collapsed:not(.navbar-vertical-collapsed-hover) .navbar-vertical.navbar-expand-lg .navbar-vertical-content {
+    width: 2.75rem;
+    padding-left: 0;
+    padding-right: 0;
+  }
+  .navbar-vertical-collapsed:not(.navbar-vertical-collapsed-hover) .navbar-vertical.navbar-expand-lg .nav-link {
+    padding-left: 0;
+    padding-right: 0 !important;
+  }
+  .navbar-vertical-collapsed:not(.navbar-vertical-collapsed-hover) .navbar-vertical.navbar-expand-lg .nav-link > .d-flex {
+    justify-content: center;
+  }
   .navbar-vertical-collapsed-hover .navbar-vertical.navbar-expand-lg {
-    width: 12.625rem;
+    width: 11.75rem;
   }
   .navbar-vertical-collapsed-hover .navbar-vertical.navbar-expand-lg .navbar-collapse {
-    width: 12.625rem !important;
+    width: 11.75rem !important;
   }
   .navbar-vertical-collapsed-hover .navbar-vertical.navbar-expand-lg .navbar-collapse {
     box-shadow: 0.625rem 0 0.625rem -0.5625rem rgba(0, 0, 0, 0.2);
@@ -23673,7 +23718,7 @@ h5, .h5 {
 }
 @media (min-width: 768px) {
   .navbar-vertical.navbar-expand-md {
-    max-width: 12.625rem;
+    max-width: 11.75rem;
     top: 0;
     height: 100vh;
     margin: 0;
@@ -23690,10 +23735,10 @@ h5, .h5 {
     transition: width 0.2s ease;
     transition-property: width, box-shadow;
     display: inline-block !important;
-    width: 12.625rem;
+    width: 11.75rem;
   }
   .navbar-vertical.navbar-expand-md .navbar-vertical-content {
-    width: 12.625rem;
+    width: 11.75rem;
     height: calc(100vh - var(--orkestra-top-nav-height));
     padding: 0.5rem 0 0 0;
   }
@@ -23721,7 +23766,7 @@ h5, .h5 {
     margin-left: 15.625rem;
   }
   .navbar-vertical.navbar-expand-md + .content {
-    margin-left: 15.625rem;
+    margin-left: 13.25rem;
   }
   .navbar-vertical.navbar-expand-md + .content .navbar-top {
     position: sticky;
@@ -23733,11 +23778,11 @@ h5, .h5 {
   }
   .navbar-vertical-collapsed .navbar-vertical.navbar-expand-md {
     z-index: 1030;
-    width: 3.125rem;
+    width: 2.75rem;
     height: 100vh;
   }
   .navbar-vertical-collapsed .navbar-vertical.navbar-expand-md .navbar-collapse {
-    width: 3.125rem !important;
+    width: 2.75rem !important;
     margin-left: -1rem;
     overflow: hidden;
   }
@@ -23765,10 +23810,10 @@ h5, .h5 {
     width: 50%;
   }
   .navbar-vertical-collapsed .navbar-vertical.navbar-expand-md + .content {
-    margin-left: 3.125rem;
+    margin-left: 2.75rem;
   }
   .navbar-vertical-collapsed .navbar-vertical.navbar-expand-md + .content .navbar-top {
-    padding-left: 13.5rem;
+    padding-left: 13rem;
   }
   .navbar-vertical-collapsed .navbar-vertical.navbar-expand-md.navbar-card, .navbar-vertical-collapsed .navbar-vertical.navbar-expand-md.navbar-vibrant, .navbar-vertical-collapsed .navbar-vertical.navbar-expand-md.navbar-inverted {
     width: 4.125rem;
@@ -23793,11 +23838,26 @@ h5, .h5 {
   .navbar-vertical-collapsed:not(.navbar-vertical-collapsed-hover) .navbar-vertical.navbar-expand-md .navbar-vertical-divider {
     max-width: 2rem;
   }
+  .navbar-vertical-collapsed:not(.navbar-vertical-collapsed-hover) .navbar-vertical.navbar-expand-md .navbar-collapse {
+    margin-left: -0.5rem;
+  }
+  .navbar-vertical-collapsed:not(.navbar-vertical-collapsed-hover) .navbar-vertical.navbar-expand-md .navbar-vertical-content {
+    width: 2.75rem;
+    padding-left: 0;
+    padding-right: 0;
+  }
+  .navbar-vertical-collapsed:not(.navbar-vertical-collapsed-hover) .navbar-vertical.navbar-expand-md .nav-link {
+    padding-left: 0;
+    padding-right: 0 !important;
+  }
+  .navbar-vertical-collapsed:not(.navbar-vertical-collapsed-hover) .navbar-vertical.navbar-expand-md .nav-link > .d-flex {
+    justify-content: center;
+  }
   .navbar-vertical-collapsed-hover .navbar-vertical.navbar-expand-md {
-    width: 12.625rem;
+    width: 11.75rem;
   }
   .navbar-vertical-collapsed-hover .navbar-vertical.navbar-expand-md .navbar-collapse {
-    width: 12.625rem !important;
+    width: 11.75rem !important;
   }
   .navbar-vertical-collapsed-hover .navbar-vertical.navbar-expand-md .navbar-collapse {
     box-shadow: 0.625rem 0 0.625rem -0.5625rem rgba(0, 0, 0, 0.2);
@@ -23823,7 +23883,7 @@ h5, .h5 {
 }
 @media (min-width: 576px) {
   .navbar-vertical.navbar-expand-sm {
-    max-width: 12.625rem;
+    max-width: 11.75rem;
     top: 0;
     height: 100vh;
     margin: 0;
@@ -23840,10 +23900,10 @@ h5, .h5 {
     transition: width 0.2s ease;
     transition-property: width, box-shadow;
     display: inline-block !important;
-    width: 12.625rem;
+    width: 11.75rem;
   }
   .navbar-vertical.navbar-expand-sm .navbar-vertical-content {
-    width: 12.625rem;
+    width: 11.75rem;
     height: calc(100vh - var(--orkestra-top-nav-height));
     padding: 0.5rem 0 0 0;
   }
@@ -23871,7 +23931,7 @@ h5, .h5 {
     margin-left: 15.625rem;
   }
   .navbar-vertical.navbar-expand-sm + .content {
-    margin-left: 15.625rem;
+    margin-left: 13.25rem;
   }
   .navbar-vertical.navbar-expand-sm + .content .navbar-top {
     position: sticky;
@@ -23883,11 +23943,11 @@ h5, .h5 {
   }
   .navbar-vertical-collapsed .navbar-vertical.navbar-expand-sm {
     z-index: 1030;
-    width: 3.125rem;
+    width: 2.75rem;
     height: 100vh;
   }
   .navbar-vertical-collapsed .navbar-vertical.navbar-expand-sm .navbar-collapse {
-    width: 3.125rem !important;
+    width: 2.75rem !important;
     margin-left: -1rem;
     overflow: hidden;
   }
@@ -23915,10 +23975,10 @@ h5, .h5 {
     width: 50%;
   }
   .navbar-vertical-collapsed .navbar-vertical.navbar-expand-sm + .content {
-    margin-left: 3.125rem;
+    margin-left: 2.75rem;
   }
   .navbar-vertical-collapsed .navbar-vertical.navbar-expand-sm + .content .navbar-top {
-    padding-left: 13.5rem;
+    padding-left: 13rem;
   }
   .navbar-vertical-collapsed .navbar-vertical.navbar-expand-sm.navbar-card, .navbar-vertical-collapsed .navbar-vertical.navbar-expand-sm.navbar-vibrant, .navbar-vertical-collapsed .navbar-vertical.navbar-expand-sm.navbar-inverted {
     width: 4.125rem;
@@ -23943,11 +24003,26 @@ h5, .h5 {
   .navbar-vertical-collapsed:not(.navbar-vertical-collapsed-hover) .navbar-vertical.navbar-expand-sm .navbar-vertical-divider {
     max-width: 2rem;
   }
+  .navbar-vertical-collapsed:not(.navbar-vertical-collapsed-hover) .navbar-vertical.navbar-expand-sm .navbar-collapse {
+    margin-left: -0.5rem;
+  }
+  .navbar-vertical-collapsed:not(.navbar-vertical-collapsed-hover) .navbar-vertical.navbar-expand-sm .navbar-vertical-content {
+    width: 2.75rem;
+    padding-left: 0;
+    padding-right: 0;
+  }
+  .navbar-vertical-collapsed:not(.navbar-vertical-collapsed-hover) .navbar-vertical.navbar-expand-sm .nav-link {
+    padding-left: 0;
+    padding-right: 0 !important;
+  }
+  .navbar-vertical-collapsed:not(.navbar-vertical-collapsed-hover) .navbar-vertical.navbar-expand-sm .nav-link > .d-flex {
+    justify-content: center;
+  }
   .navbar-vertical-collapsed-hover .navbar-vertical.navbar-expand-sm {
-    width: 12.625rem;
+    width: 11.75rem;
   }
   .navbar-vertical-collapsed-hover .navbar-vertical.navbar-expand-sm .navbar-collapse {
-    width: 12.625rem !important;
+    width: 11.75rem !important;
   }
   .navbar-vertical-collapsed-hover .navbar-vertical.navbar-expand-sm .navbar-collapse {
     box-shadow: 0.625rem 0 0.625rem -0.5625rem rgba(0, 0, 0, 0.2);
@@ -23972,7 +24047,7 @@ h5, .h5 {
   }
 }
 .navbar-vertical.navbar-expand-xs {
-  max-width: 12.625rem;
+  max-width: 11.75rem;
   top: 0;
   height: 100vh;
   margin: 0;
@@ -23989,10 +24064,10 @@ h5, .h5 {
   transition: width 0.2s ease;
   transition-property: width, box-shadow;
   display: inline-block !important;
-  width: 12.625rem;
+  width: 11.75rem;
 }
 .navbar-vertical.navbar-expand-xs .navbar-vertical-content {
-  width: 12.625rem;
+  width: 11.75rem;
   height: calc(100vh - var(--orkestra-top-nav-height));
   padding: 0.5rem 0 0 0;
 }
@@ -24020,7 +24095,7 @@ h5, .h5 {
   margin-left: 15.625rem;
 }
 .navbar-vertical.navbar-expand-xs + .content {
-  margin-left: 15.625rem;
+  margin-left: 13.25rem;
 }
 .navbar-vertical.navbar-expand-xs + .content .navbar-top {
   position: sticky;
@@ -24033,11 +24108,11 @@ h5, .h5 {
 
 .navbar-vertical-collapsed .navbar-vertical.navbar-expand-xs {
   z-index: 1030;
-  width: 3.125rem;
+  width: 2.75rem;
   height: 100vh;
 }
 .navbar-vertical-collapsed .navbar-vertical.navbar-expand-xs .navbar-collapse {
-  width: 3.125rem !important;
+  width: 2.75rem !important;
   margin-left: -1rem;
   overflow: hidden;
 }
@@ -24065,10 +24140,10 @@ h5, .h5 {
   width: 50%;
 }
 .navbar-vertical-collapsed .navbar-vertical.navbar-expand-xs + .content {
-  margin-left: 3.125rem;
+  margin-left: 2.75rem;
 }
 .navbar-vertical-collapsed .navbar-vertical.navbar-expand-xs + .content .navbar-top {
-  padding-left: 13.5rem;
+  padding-left: 13rem;
 }
 .navbar-vertical-collapsed .navbar-vertical.navbar-expand-xs.navbar-card, .navbar-vertical-collapsed .navbar-vertical.navbar-expand-xs.navbar-vibrant, .navbar-vertical-collapsed .navbar-vertical.navbar-expand-xs.navbar-inverted {
   width: 4.125rem;
@@ -24093,12 +24168,27 @@ h5, .h5 {
 .navbar-vertical-collapsed:not(.navbar-vertical-collapsed-hover) .navbar-vertical.navbar-expand-xs .navbar-vertical-divider {
   max-width: 2rem;
 }
+.navbar-vertical-collapsed:not(.navbar-vertical-collapsed-hover) .navbar-vertical.navbar-expand-xs .navbar-collapse {
+  margin-left: -0.5rem;
+}
+.navbar-vertical-collapsed:not(.navbar-vertical-collapsed-hover) .navbar-vertical.navbar-expand-xs .navbar-vertical-content {
+  width: 2.75rem;
+  padding-left: 0;
+  padding-right: 0;
+}
+.navbar-vertical-collapsed:not(.navbar-vertical-collapsed-hover) .navbar-vertical.navbar-expand-xs .nav-link {
+  padding-left: 0;
+  padding-right: 0 !important;
+}
+.navbar-vertical-collapsed:not(.navbar-vertical-collapsed-hover) .navbar-vertical.navbar-expand-xs .nav-link > .d-flex {
+  justify-content: center;
+}
 
 .navbar-vertical-collapsed-hover .navbar-vertical.navbar-expand-xs {
-  width: 12.625rem;
+  width: 11.75rem;
 }
 .navbar-vertical-collapsed-hover .navbar-vertical.navbar-expand-xs .navbar-collapse {
-  width: 12.625rem !important;
+  width: 11.75rem !important;
 }
 .navbar-vertical-collapsed-hover .navbar-vertical.navbar-expand-xs .navbar-collapse {
   box-shadow: 0.625rem 0 0.625rem -0.5625rem rgba(0, 0, 0, 0.2);

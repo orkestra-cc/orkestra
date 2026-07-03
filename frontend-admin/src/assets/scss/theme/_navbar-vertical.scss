@@ -216,7 +216,7 @@
       }
 
       & + .content {
-        margin-left: $navbar-vertical-width + 3;
+        margin-left: $navbar-vertical-width + 1.5;
         .navbar-top {
           position: sticky;
           top: 0;
@@ -298,6 +298,28 @@
           }
           .navbar-vertical-divider {
             max-width: 2rem;
+          }
+          // Tighten the collapsed icon-only rail and centre its icons. The rail
+          // background is the same navy as the page body, so the visible band
+          // runs from the viewport edge to the content — half the container
+          // gutter (-#{map-get($spacers, 2)}) pulls the icons to the optical
+          // centre of that band instead of the collapse box's own centre.
+          .navbar-collapse {
+            margin-left: -#{map-get($spacers, 2)};
+          }
+          .navbar-vertical-content {
+            width: $navbar-vertical-collapsed-width;
+            padding-left: 0;
+            padding-right: 0;
+          }
+          .nav-link {
+            padding-left: 0;
+            // Override .dropdown-indicator's !important caret gutter (its caret
+            // is hidden while collapsed) so submenu icons centre like leaf ones.
+            padding-right: 0 !important;
+            > .d-flex {
+              justify-content: center;
+            }
           }
         }
       }
