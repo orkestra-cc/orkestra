@@ -1,6 +1,6 @@
 {
   "name": "orkestra-client",
-  "version": "0.3.11",
+  "version": "0.3.12",
   "private": true,
   "type": "module",
   "description": "Tier-2 (external client) demo SPA — consumes the ADR-0003 client API surface (api.orkestra.com / api.localhost:3000)",

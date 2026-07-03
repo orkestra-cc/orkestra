@@ -1141,6 +1141,7 @@ export const referenceRoutes: RouteGroup = {
         {
           name: 'Email',
           active: true,
+          icon: 'envelope',
           children: [
             { name: 'Inbox', to: paths.refAppEmailInbox, active: true },
             { name: 'Compose', to: paths.refAppEmailCompose, active: true },
@@ -1150,6 +1151,7 @@ export const referenceRoutes: RouteGroup = {
         {
           name: 'Events',
           active: true,
+          icon: 'calendar-alt',
           children: [
             { name: 'Create', to: paths.refAppEventsCreate, active: true },
             { name: 'List', to: paths.refAppEventsList, active: true },
@@ -1159,6 +1161,7 @@ export const referenceRoutes: RouteGroup = {
         {
           name: 'Social',
           active: true,
+          icon: 'share-alt',
           children: [
             { name: 'Feed', to: paths.refAppSocialFeed, active: true },
             {
@@ -1177,6 +1180,7 @@ export const referenceRoutes: RouteGroup = {
         {
           name: 'Support Desk',
           active: true,
+          icon: 'headphones',
           children: [
             {
               name: 'Table View',
@@ -1248,6 +1252,7 @@ export const referenceRoutes: RouteGroup = {
         {
           name: 'Carousel',
           active: true,
+          icon: 'play-circle',
           children: [
             {
               name: 'Bootstrap',
@@ -1276,6 +1281,7 @@ export const referenceRoutes: RouteGroup = {
         {
           name: 'Navs & Tabs',
           active: true,
+          icon: 'sitemap',
           children: [
             { name: 'Navs', to: paths.refComponentsNavs, active: true },
             { name: 'Navbar', to: paths.refComponentsNavbar, active: true },
@@ -1305,6 +1311,7 @@ export const referenceRoutes: RouteGroup = {
         {
           name: 'Pictures',
           active: true,
+          icon: 'image',
           children: [
             { name: 'Avatar', to: paths.refComponentsAvatar, active: true },
             { name: 'Images', to: paths.refComponentsImages, active: true },
@@ -1336,6 +1343,7 @@ export const referenceRoutes: RouteGroup = {
         {
           name: 'Videos',
           active: true,
+          icon: 'video',
           children: [
             { name: 'Embed', to: paths.refComponentsVideoEmbed, active: true },
             {
@@ -1356,6 +1364,7 @@ export const referenceRoutes: RouteGroup = {
         {
           name: 'Basic',
           active: true,
+          icon: 'pencil-alt',
           children: [
             {
               name: 'Form Control',
@@ -1372,6 +1381,7 @@ export const referenceRoutes: RouteGroup = {
         {
           name: 'Advance',
           active: true,
+          icon: 'sliders-h',
           children: [
             {
               name: 'Advance Select',
@@ -1451,6 +1461,7 @@ export const referenceRoutes: RouteGroup = {
         {
           name: 'ECharts',
           active: true,
+          icon: 'chart-bar',
           children: [
             {
               name: 'How to Use',
@@ -1537,6 +1548,7 @@ export const referenceRoutes: RouteGroup = {
         {
           name: 'Pricing',
           active: true,
+          icon: 'dollar-sign',
           children: [
             { name: 'Default', to: paths.refPagesPricingDefault, active: true },
             { name: 'Alt', to: paths.refPagesPricingAlt, active: true }
@@ -1545,6 +1557,7 @@ export const referenceRoutes: RouteGroup = {
         {
           name: 'FAQ',
           active: true,
+          icon: 'question-circle',
           children: [
             { name: 'Basic', to: paths.refPagesFaqBasic, active: true },
             { name: 'Alt', to: paths.refPagesFaqAlt, active: true },
@@ -1554,6 +1567,7 @@ export const referenceRoutes: RouteGroup = {
         {
           name: 'Miscellaneous',
           active: true,
+          icon: 'ellipsis-h',
           children: [
             {
               name: 'Associations',
@@ -1575,6 +1589,7 @@ export const referenceRoutes: RouteGroup = {
         {
           name: 'Layouts',
           active: true,
+          icon: 'columns',
           children: [
             {
               name: 'Vertical Nav',

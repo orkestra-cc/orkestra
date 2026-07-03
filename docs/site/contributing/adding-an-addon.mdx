@@ -99,7 +99,7 @@ Rules the registry enforces:
 func (m *Module) Collections() []module.CollectionSpec {
     return []module.CollectionSpec{
         {
-            Name: "youraddon_widgets",                  // see mongo-collection-naming
+            Name: "youraddon_widgets",                  // see orkestra-mongo-collection-naming
             Indexes: []module.IndexSpec{
                 {Keys: bson.D{{"orgId", 1}, {"createdAt", -1}}},
                 {Keys: bson.D{{"orgId", 1}, {"slug", 1}}, Unique: true},

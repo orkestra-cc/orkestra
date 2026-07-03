@@ -45,7 +45,7 @@ Deep reference: **`orkestra-go` skill**, [`backend/CLAUDE.md`](../../../backend/
 
 4. **Tenant-scope every Mongo query.** Use `tenantrepo.Scope` / `MustScope` / `StampInsert(M)` / `ScopeAggregate` (`pkg/sdk/tenantrepo/scope.go`) — never a raw `bson.M` filter. Legitimate exceptions carry an inline `//tenantscope:allow <reason>` (or `//tenantscope:allow-until=YYYY-MM-DD`). Failure: CI `tenantscope` job fails; dev panics, prod 403. See `backend/internal/<module>/CLAUDE.md` org-scoping invariants.
 
-5. **Collection naming.** A module owning ≥2 collections prefixes every one with `test_`. Single-collection modules may keep any name. → **`mongo-collection-naming` skill** is the authority.
+5. **Collection naming.** A module owning ≥2 collections prefixes every one with `test_`. Single-collection modules may keep any name. → **`orkestra-mongo-collection-naming` skill** is the authority.
 
 6. **RBAC on every endpoint + declare the tier.** In `RegisterRoutes`, mount on `ri.Operator` (Tier-1) and/or `ri.Client` (Tier-2, may be nil — check). Gate every authed route with the audience's `AuthMW` (`RequirePermission` / `RequireSystemPermission` / `RequireCapability` / `RequireStepUp` …). Declare the permission catalog in `Permissions()` (`iface.PermissionSpec`). Tier filtering of routes/nav is via `Tier: "internal" | "external" | ""`. Non-core routes are auto-wrapped in `ModuleGate` → **503** (`module_disabled`) when disabled. Every new endpoint must state which tier it serves (CLAUDE.md mandate).
 
@@ -59,7 +59,7 @@ Deep reference: **`orkestra-go` skill**, [`backend/CLAUDE.md`](../../../backend/
 
 ## Frontend-admin rules
 
-Deep reference: **`frontend-design` skill**, [`frontend-admin/CLAUDE.md`](../../../frontend-admin/CLAUDE.md), [`frontend-admin/src/modules/_template/README.md`](../../../frontend-admin/src/modules/_template/README.md) (the canonical scaffold — copy it).
+Deep reference: **`orkestra-frontend-admin` skill**, [`frontend-admin/CLAUDE.md`](../../../frontend-admin/CLAUDE.md), [`frontend-admin/src/modules/_template/README.md`](../../../frontend-admin/src/modules/_template/README.md) (the canonical scaffold — copy it).
 
 10. **Module manifest** `src/modules/test.tsx` exporting a `ModuleManifest` with `name: 'test'`, lazy `routes()` each wrapped in `<ModuleGate module="test">` + `<ProtectedRoute>` + `<Suspense>`, `injectApi`, and `injectI18n`. Register it in `src/modules/index.ts` `moduleCatalog`.
 
@@ -117,8 +117,8 @@ Deep reference: **`frontend-design` skill**, [`frontend-admin/CLAUDE.md`](../../
 ## Cross-references
 
 - **`orkestra-go`** — backend module mechanics, iface, tenancy, Huma APIs (authoritative for Go)
-- **`mongo-collection-naming`** — the `test_` prefix rule (authoritative)
-- **`frontend-design`** — frontend-admin components/pages/forms/tables (authoritative for UI)
+- **`orkestra-mongo-collection-naming`** — the `test_` prefix rule (authoritative)
+- **`orkestra-frontend-admin`** — frontend-admin components/pages/forms/tables (authoritative for UI)
 - **`url-tabs`** — URL-synced tabs
 - [ADR-0006](../../../docs/adr/0006-collapse-to-core-only-base.md) (core-only base), [ADR-0007](../../../docs/adr/0007-per-addon-i18n-namespaces.md) (per-addon i18n)
 - [`frontend-admin/src/modules/_template/README.md`](../../../frontend-admin/src/modules/_template/README.md) — copy-paste scaffold (the worked `widgets` example)

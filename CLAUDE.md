@@ -128,6 +128,7 @@ One infra base + one app file per environment (`docker-compose.{dev,staging,prod
 - **Use `pkg/sdk/iface`** for cross-module dependencies — never import another module's `services/` or `repository/` package from a `module.go` wiring file
 - **Validate and sanitize** all user inputs; implement RBAC on every endpoint (ask for required permissions)
 - **Follow the auth patterns** in [Authentication_flow.md](docs/Authentication_flow.md) for any auth-related changes
+- **Invoke the `orkestra-frontend-admin` skill before any `frontend-admin/` UI work** — including full-stack features whose UI lands in the operator console. Invoke it while planning the feature, not when you reach the JSX; it enforces the reference-first workflow (`src/reference/*.tsx` + production-page precedent)
 
 ### Do Not
 

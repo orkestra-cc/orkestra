@@ -25,7 +25,7 @@ export interface AppSettings {
 // computes the value and assigns it to process.env.VITE_APP_VERSION
 // before Vite's loadEnv runs.
 export const version: string = import.meta.env.VITE_APP_VERSION || 'dev';
-export const navbarBreakPoint: string = 'xl'; // Vertical navbar breakpoint
+export const navbarBreakPoint: string = 'md'; // Vertical navbar breakpoint
 export const topNavbarBreakpoint: string = 'lg';
 export const themeVariants: readonly ThemeVariant[] = [
   'light',

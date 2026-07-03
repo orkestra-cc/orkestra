@@ -453,10 +453,10 @@ $nav-tabs-link-hover-border-color: $gray-200 $gray-200 $nav-tabs-border-color !d
 //
 // scss-docs-start navbar-vertical-variables
 $navbar-vertical-breakpoints: mapReverse($grid-breakpoints) !default;
-$navbar-vertical-width: 12.625rem !default;
+$navbar-vertical-width: 11.75rem !default;
 $navbar-vertical-icon-width: 1.5rem !default;
-$navbar-vertical-collapsed-width: 3.125rem !default;
-$navbar-vertical-hover-width: 12.625rem !default;
+$navbar-vertical-collapsed-width: 2.75rem !default;
+$navbar-vertical-hover-width: 11.75rem !default;
 $navbar-vertical-variation-width: 14.625rem !default;
 $navbar-vertical-variation-collapsed-width: 4.125rem !default;
 $navbar-vertical-link-font-size: $font-size-sm !default;

@@ -34,7 +34,7 @@
   .toggle-icon-wrapper {
     margin-left: -0.75rem;
     padding-left: 0.125rem;
-    margin-right: 1.25rem;
+    margin-right: 0.75rem;
   }
   .navbar-collapse {
     overflow: hidden;
@@ -87,7 +87,7 @@
       font-size: $navbar-vertical-dropdown-font-size;
       .nav-item {
         .nav-link {
-          padding: 0.2rem 0.2rem 0.2rem $navbar-vertical-icon-width;
+          padding: 0.2rem 0.2rem 0.2rem 1.25rem;
         }
         &:last-child {
           margin-bottom: 0.35rem;
@@ -95,15 +95,15 @@
       }
       .nav {
         .nav-item .nav-link {
-          padding-left: $navbar-vertical-icon-width * 1.75;
+          padding-left: 2.25rem;
         }
         .nav {
           .nav-item .nav-link {
-            padding-left: $navbar-vertical-icon-width * 2.75;
+            padding-left: 3.25rem;
           }
           .nav {
             .nav-item .nav-link {
-              padding-left: $navbar-vertical-icon-width * 3.75;
+              padding-left: 4.25rem;
             }
           }
         }
@@ -216,7 +216,7 @@
       }
 
       & + .content {
-        margin-left: $navbar-vertical-width + 3;
+        margin-left: $navbar-vertical-width + 1.5;
         .navbar-top {
           position: sticky;
           top: 0;
@@ -298,6 +298,28 @@
           }
           .navbar-vertical-divider {
             max-width: 2rem;
+          }
+          // Tighten the collapsed icon-only rail and centre its icons. The rail
+          // background is the same navy as the page body, so the visible band
+          // runs from the viewport edge to the content — half the container
+          // gutter (-#{map-get($spacers, 2)}) pulls the icons to the optical
+          // centre of that band instead of the collapse box's own centre.
+          .navbar-collapse {
+            margin-left: -#{map-get($spacers, 2)};
+          }
+          .navbar-vertical-content {
+            width: $navbar-vertical-collapsed-width;
+            padding-left: 0;
+            padding-right: 0;
+          }
+          .nav-link {
+            padding-left: 0;
+            // Override .dropdown-indicator's !important caret gutter (its caret
+            // is hidden while collapsed) so submenu icons centre like leaf ones.
+            padding-right: 0 !important;
+            > .d-flex {
+              justify-content: center;
+            }
           }
         }
       }

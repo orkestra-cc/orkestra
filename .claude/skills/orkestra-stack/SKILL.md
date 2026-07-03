@@ -5,7 +5,7 @@ description: Deploy, rebuild, restart, stop, and inspect the Orkestra stack via 
 
 # Orkestra Stack Lifecycle (orkestra.sh)
 
-`/home/tore/orkestra/orkestra.sh` is the **sanctioned** way to deploy / restart / stop / inspect the stack. The project rule *"never start servers manually"* means: do not hand-roll `docker run` / `docker compose up`; drive lifecycle through `orkestra.sh`. For low-level, per-service compose surgery (force-rebuilding the AIR binary, infra-only ops, label detection) drop down to the **`docker`** skill instead.
+`orkestra.sh` is the **sanctioned** way to deploy / restart / stop / inspect the stack. The project rule *"never start servers manually"* means: do not hand-roll `docker run` / `docker compose up`; drive lifecycle through `orkestra.sh`. For low-level, per-service compose surgery (force-rebuilding the AIR binary, infra-only ops, label detection) drop down to the **`orkestra-docker`** skill instead.
 
 ## Golden rule: use orkestra.sh, not raw `docker compose up`, for deploys
 
@@ -27,7 +27,7 @@ description: Deploy, rebuild, restart, stop, and inspect the Orkestra stack via 
 Always check the target environment before deploying:
 
 ```bash
-grep "^ENV=" /home/tore/orkestra/docker/.env    # development | staging | production
+grep "^ENV=" docker/.env    # development | staging | production
 ```
 
 `--yes` makes it non-interactive (required when driving from an agent). Run deploys in the background — they can take minutes — and read the output file when notified.
@@ -72,7 +72,7 @@ Notes:
 - After a **frontend** redeploy the browser still serves the cached bundle — tell the user to **hard-refresh (Ctrl+Shift+R)** to see the new footer version.
 - `build-errors.log` inside the backend container can be a stale file — check its mtime before treating "exit status 1" lines as current failures.
 
-## When to use the `docker` skill instead
+## When to use the `orkestra-docker` skill instead
 
 - Force-rebuilding the Go binary when AIR misses a change: `docker exec orkestra-backend go build -o /app/tmp/main ./cmd/server/ && docker compose ... restart backend`.
 - Infra-only ops, multi-compose detection, inspecting which compose file owns a service.

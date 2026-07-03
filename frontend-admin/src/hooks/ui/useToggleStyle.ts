@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { version } from 'config';
 
 const useToggleStylesheet = (isRTL: boolean, isDark: boolean) => {
   const [isLoaded, setIsLoaded] = useState(false);
@@ -9,14 +10,21 @@ const useToggleStylesheet = (isRTL: boolean, isDark: boolean) => {
     Array.from(document.getElementsByClassName('theme-stylesheet')).forEach(
       link => link.remove()
     );
+    const isLocalOrDirty =
+      import.meta.env.DEV ||
+      version === 'dev' ||
+      version.includes('dirty') ||
+      version.includes('dev');
+    const cacheBuster = isLocalOrDirty ? new Date().getTime() : version;
+
     const link = document.createElement('link');
-    link.href = `${publicUrl}css/theme${isRTL ? '.rtl' : ''}.css`;
+    link.href = `${publicUrl}css/theme${isRTL ? '.rtl' : ''}.css?v=${cacheBuster}`;
     link.type = 'text/css';
     link.rel = 'stylesheet';
     link.className = 'theme-stylesheet';
 
     const userLink = document.createElement('link');
-    userLink.href = `${publicUrl}css/user${isRTL ? '.rtl' : ''}.css`;
+    userLink.href = `${publicUrl}css/user${isRTL ? '.rtl' : ''}.css?v=${cacheBuster}`;
     userLink.type = 'text/css';
     userLink.rel = 'stylesheet';
     userLink.className = 'theme-stylesheet';
