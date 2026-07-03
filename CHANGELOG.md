@@ -4,6 +4,60 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.3.12] - 2026-07-03
+
+### Features
+
+- **(frontend-admin)** Add icons to Developer realm submenu groups ([bf397d3](https://github.com/orkestra-cc/orkestra/commit/bf397d3f32fbbf7f3ca57c4d52392e90be35f392))
+- **(i18n)** Rename Internal/External Tenants to Gruppi interni/esterni (IT) ([29c1ae0](https://github.com/orkestra-cc/orkestra/commit/29c1ae036ec814c09e5afaf7ffc0c773cc1bae1d))
+- **(tenant)** Group External Tenants under the Administration realm ([4b2e40b](https://github.com/orkestra-cc/orkestra/commit/4b2e40b63ac19b1af4d49a84f09d4fcbe9ddcfb2))
+
+### Bug fixes
+
+- **(frontend-admin)** Cache-bust theme CSS and tune vertical navbar ([1eaf114](https://github.com/orkestra-cc/orkestra/commit/1eaf11477c5ef964ba9fa40ea8e2c6305c1b8e64))
+- **(container)** Build-tag the Docker infra manager off by default (#137) ([9fbf48f](https://github.com/orkestra-cc/orkestra/commit/9fbf48f71be23147e764d9140b21b05ad40e7a1a))
+
+### Style
+
+- **(frontend-admin)** Tighten vertical navbar spacing and icon rail ([cb3f174](https://github.com/orkestra-cc/orkestra/commit/cb3f174fc00304512952334ceaacde74dbe698ef))
+- **(frontend-admin)** Tighten sidebar toggle→logo gap to 0.75rem ([492a19d](https://github.com/orkestra-cc/orkestra/commit/492a19d29a32fd6e27ff9bb2ba39de6e5d5e3391))
+- **(frontend-admin)** Trim trailing whitespace in theme CSS ([ff24e07](https://github.com/orkestra-cc/orkestra/commit/ff24e07bead35c2db6f44cc4f7c091ead3764774))
+- **(theme)** Recompile CSS for RTL stat-ribbon parity ([1aa3490](https://github.com/orkestra-cc/orkestra/commit/1aa3490cd6985c4bbb5faaae8f6d18bf32e2e9fd))
+
+### Documentation
+
+- **(skills)** Rename and rewrite api-test + docker skills ([c0f2d97](https://github.com/orkestra-cc/orkestra/commit/c0f2d97e4a56fe236d7413516b07120c8db56580))
+- **(skills)** Rename frontend-design skill to orkestra-frontend-admin ([808eef7](https://github.com/orkestra-cc/orkestra/commit/808eef7802d176a3bfeec7c78c26de6413712d9c))
+- **(skills)** Rename and refresh mongo-collection-naming skill ([51cda8a](https://github.com/orkestra-cc/orkestra/commit/51cda8a3c37a23b9074162bc498e2d02ec411a79))
+- **(frontend-design-skill)** Fix trigger and enforce pre-flight reads ([2bb9c62](https://github.com/orkestra-cc/orkestra/commit/2bb9c628029bca4c71ab047d64702fdc11177292))
+
+### CI
+
+- Make coverage-badge push race-proof (reset-to-remote + retry) (#129) ([60a3e56](https://github.com/orkestra-cc/orkestra/commit/60a3e5673cc6606e4bffaaa0d270c628bd79d33f))
+
+### Dependencies
+
+- **(deps)** Bump github.com/aws/aws-sdk-go-v2/credentials in /backend (#141) ([3f721c7](https://github.com/orkestra-cc/orkestra/commit/3f721c7616bbf63743eee6fc4d63ad88290669e0))
+- **(deps)** Bump golang.org/x/tools from 0.45.0 to 0.47.0 in /backend (#142) ([f1d675c](https://github.com/orkestra-cc/orkestra/commit/f1d675c96f9b2b99ba0f27a92a127cbd4465ee10))
+- **(deps)** Bump github.com/aws/aws-sdk-go-v2/service/s3 in /backend (#139) ([2514308](https://github.com/orkestra-cc/orkestra/commit/251430834093f9b56e9f677fbc5faedc47db3bad))
+- **(deps)** Bump dio from 5.9.2 to 5.10.0 in /mobile (#138) ([4c1f096](https://github.com/orkestra-cc/orkestra/commit/4c1f096b09d9fdc1163f0066a5a87f834f891b15))
+- **(deps)** Bump @testing-library/react in /frontend-admin (#136) ([bb36392](https://github.com/orkestra-cc/orkestra/commit/bb36392036cb2cc46cb7bb776a74bf7e2444cc28))
+- **(deps)** Bump @fortawesome/react-fontawesome in /frontend-admin (#134) ([49d6519](https://github.com/orkestra-cc/orkestra/commit/49d65196c20dd8053d4388b599465153b9d3dbde))
+- **(deps)** Bump react-dom from 19.2.3 to 19.2.7 in /frontend-admin (#133) ([35b6041](https://github.com/orkestra-cc/orkestra/commit/35b6041483a4470ec2e24245d02633b9f3d095e7))
+- **(deps)** Bump @fullcalendar/list in /frontend-admin (#132) ([7651cb1](https://github.com/orkestra-cc/orkestra/commit/7651cb1a53895b151de34d4ddbb8a7c81a8fcd76))
+- **(deps)** Bump github.com/redis/go-redis/v9 in /backend (#130) ([b6a0fad](https://github.com/orkestra-cc/orkestra/commit/b6a0fad244a785e1b21601d343f1ba54e3f91287))
+- **(deps)** Bump github.com/aws/aws-sdk-go-v2/service/s3 in /backend ([6bcd50a](https://github.com/orkestra-cc/orkestra/commit/6bcd50a913cf8f626a6a80ff6ca275dac30027d8))
+- **(deps)** Bump @fullcalendar/bootstrap in /frontend-admin ([87d59e2](https://github.com/orkestra-cc/orkestra/commit/87d59e2f39fa0e9f6b97d16d0af68aff4ff7f6a1))
+- **(deps)** Bump react-router-dom in /frontend-admin ([4326b0d](https://github.com/orkestra-cc/orkestra/commit/4326b0d37edb3b65869174d40fd301b1db8c38ed))
+- **(deps)** Bump @rollup/rollup-win32-x64-msvc in /frontend-admin ([25cd006](https://github.com/orkestra-cc/orkestra/commit/25cd00660919acd683dd2e3699f5c9ac464d95a5))
+- **(deps)** Bump @fullcalendar/daygrid in /frontend-admin ([5dfa0a6](https://github.com/orkestra-cc/orkestra/commit/5dfa0a6d104362c35228b4936d5948dfab144731))
+- **(deps)** Bump go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp ([c71b365](https://github.com/orkestra-cc/orkestra/commit/c71b365a314263ff0bd51d7dc77f98cccfdeaf90))
+- **(deps)** Bump github.com/redis/go-redis/v9 in /backend ([0134487](https://github.com/orkestra-cc/orkestra/commit/013448728324d23aacd56fa827c94fadbf8443de))
+- **(deps)** Bump github.com/aws/aws-sdk-go-v2/config in /backend ([5e134f7](https://github.com/orkestra-cc/orkestra/commit/5e134f7fb914fe3ccb98e023662e184c21a56579))
+- **(deps)** Bump github.com/go-webauthn/webauthn in /backend ([f481ab3](https://github.com/orkestra-cc/orkestra/commit/f481ab3135dd74d6e82dcd4144611a0634662a47))
+- **(deps)** Bump flutter_riverpod, freezed_annotation, json_serializable, build_runner and freezed ([5e46886](https://github.com/orkestra-cc/orkestra/commit/5e46886088d86239bec90f2af17f10593ed766ba))
+- **(deps)** Bump actions/checkout from 6 to 7 ([e932fa0](https://github.com/orkestra-cc/orkestra/commit/e932fa0c2027a556fde70d17affd9bf84148acae))
+
 ## [0.3.11] - 2026-06-19
 
 ### Features
