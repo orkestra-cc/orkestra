@@ -6,7 +6,7 @@ import PageHeader from 'components/common/PageHeader';
 import { version } from 'config';
 
 const configCode = `export const version = '${version}';
-export const navbarBreakPoint = 'xl'; // Vertical navbar breakpoint
+export const navbarBreakPoint = 'md'; // Vertical navbar breakpoint
 export const topNavbarBreakpoint = 'lg';
 export const settings = {
   isFluid: false,

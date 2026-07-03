@@ -87,7 +87,7 @@
       font-size: $navbar-vertical-dropdown-font-size;
       .nav-item {
         .nav-link {
-          padding: 0.2rem 0.2rem 0.2rem $navbar-vertical-icon-width;
+          padding: 0.2rem 0.2rem 0.2rem 1.25rem;
         }
         &:last-child {
           margin-bottom: 0.35rem;
@@ -95,15 +95,15 @@
       }
       .nav {
         .nav-item .nav-link {
-          padding-left: $navbar-vertical-icon-width * 1.75;
+          padding-left: 2.25rem;
         }
         .nav {
           .nav-item .nav-link {
-            padding-left: $navbar-vertical-icon-width * 2.75;
+            padding-left: 3.25rem;
           }
           .nav {
             .nav-item .nav-link {
-              padding-left: $navbar-vertical-icon-width * 3.75;
+              padding-left: 4.25rem;
             }
           }
         }

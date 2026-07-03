@@ -22986,19 +22986,19 @@ h5, .h5 {
   font-size: 0.8333333333rem;
 }
 .navbar-vertical .navbar-nav .nav .nav-item .nav-link {
-  padding: 0.2rem 1.5rem 0.2rem 0.2rem;
+  padding: 0.2rem 1.25rem 0.2rem 0.2rem;
 }
 .navbar-vertical .navbar-nav .nav .nav-item:last-child {
   margin-bottom: 0.35rem;
 }
 .navbar-vertical .navbar-nav .nav .nav .nav-item .nav-link {
-  padding-right: 2.625rem;
+  padding-right: 2.25rem;
 }
 .navbar-vertical .navbar-nav .nav .nav .nav .nav-item .nav-link {
-  padding-right: 4.125rem;
+  padding-right: 3.25rem;
 }
 .navbar-vertical .navbar-nav .nav .nav .nav .nav .nav-item .nav-link {
-  padding-right: 5.625rem;
+  padding-right: 4.25rem;
 }
 .navbar-vertical.navbar-card, .navbar-vertical.navbar-vibrant, .navbar-vertical.navbar-inverted {
   padding-right: 1rem;
