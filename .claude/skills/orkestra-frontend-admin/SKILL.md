@@ -1,9 +1,9 @@
 ---
-name: frontend-design
+name: orkestra-frontend-admin
 description: Use when creating or modifying ANY UI in frontend-admin/ (the Tier-1 operator console) — pages, components, tables, forms, modals, cards, KPI/stat rows, dashboards, charts, tabs. Also use when a request implies admin UI without naming it — "create a feature", "add a screen", "let operators/admins manage X", or full-stack work whose UI lands in frontend-admin. Invoke at the START of such a feature (while planning routes and pages), not when you reach the JSX. NOT for frontend-client/ — that SPA has its own stack and conventions.
 ---
 
-# Frontend design — frontend-admin
+# Orkestra frontend-admin design
 
 Mandatory for all UI work in `frontend-admin/` (the Tier-1 operator console).
 

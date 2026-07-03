@@ -59,7 +59,7 @@ Deep reference: **`orkestra-go` skill**, [`backend/CLAUDE.md`](../../../backend/
 
 ## Frontend-admin rules
 
-Deep reference: **`frontend-design` skill**, [`frontend-admin/CLAUDE.md`](../../../frontend-admin/CLAUDE.md), [`frontend-admin/src/modules/_template/README.md`](../../../frontend-admin/src/modules/_template/README.md) (the canonical scaffold — copy it).
+Deep reference: **`orkestra-frontend-admin` skill**, [`frontend-admin/CLAUDE.md`](../../../frontend-admin/CLAUDE.md), [`frontend-admin/src/modules/_template/README.md`](../../../frontend-admin/src/modules/_template/README.md) (the canonical scaffold — copy it).
 
 10. **Module manifest** `src/modules/test.tsx` exporting a `ModuleManifest` with `name: 'test'`, lazy `routes()` each wrapped in `<ModuleGate module="test">` + `<ProtectedRoute>` + `<Suspense>`, `injectApi`, and `injectI18n`. Register it in `src/modules/index.ts` `moduleCatalog`.
 
@@ -118,7 +118,7 @@ Deep reference: **`frontend-design` skill**, [`frontend-admin/CLAUDE.md`](../../
 
 - **`orkestra-go`** — backend module mechanics, iface, tenancy, Huma APIs (authoritative for Go)
 - **`orkestra-mongo-collection-naming`** — the `test_` prefix rule (authoritative)
-- **`frontend-design`** — frontend-admin components/pages/forms/tables (authoritative for UI)
+- **`orkestra-frontend-admin`** — frontend-admin components/pages/forms/tables (authoritative for UI)
 - **`url-tabs`** — URL-synced tabs
 - [ADR-0006](../../../docs/adr/0006-collapse-to-core-only-base.md) (core-only base), [ADR-0007](../../../docs/adr/0007-per-addon-i18n-namespaces.md) (per-addon i18n)
 - [`frontend-admin/src/modules/_template/README.md`](../../../frontend-admin/src/modules/_template/README.md) — copy-paste scaffold (the worked `widgets` example)

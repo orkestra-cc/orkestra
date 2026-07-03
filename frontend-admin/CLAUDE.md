@@ -7,7 +7,7 @@ _Parent: [../CLAUDE.md](../CLAUDE.md)_
 
 React 19 + Vite 7 + TypeScript 5.9 operator console for Orkestra — the **Tier-1 admin dashboard** used by internal staff. Cookie-based auth with the Go backend (operator audience), dynamic navigation driven by `/v1/navigation`, per-module RTK Query slices, Orkestra design system + Bootstrap 5. Sibling to [`../frontend-client`](../frontend-client/CLAUDE.md), the Tier-2 customer-facing SPA — different audience, different cookie domain, different stack.
 
-> **Before writing any UI code here, invoke the `frontend-design` skill** (`.claude/skills/frontend-design/SKILL.md`). It enforces the reference-first workflow: read the matching `src/reference/*.tsx` showcase and a production-page precedent before any JSX.
+> **Before writing any UI code here, invoke the `orkestra-frontend-admin` skill** (`.claude/skills/orkestra-frontend-admin/SKILL.md`). It enforces the reference-first workflow: read the matching `src/reference/*.tsx` showcase and a production-page precedent before any JSX.
 
 ## Tech stack
 
