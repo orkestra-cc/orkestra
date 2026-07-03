@@ -1,7 +1,7 @@
 {
   "homepage": "orkestra.cc",
   "name": "frontend-admin",
-  "version": "0.3.11",
+  "version": "0.3.12",
   "private": true,
   "type": "module",
   "dependencies": {
