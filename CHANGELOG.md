@@ -4,6 +4,12 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.3.13] - 2026-07-04
+
+### Documentation
+
+- **(adr)** Add ADR-0010 commons fork chain + private-forks guide ([529b8fd](https://github.com/orkestra-cc/orkestra/commit/529b8fd37b41c9817cd2d98e50d0f7194d82d5e1))
+
 ## [0.3.12] - 2026-07-03
 
 ### Features
