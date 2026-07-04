@@ -80,9 +80,10 @@ Deep reference: **`orkestra-frontend-admin` skill**, [`frontend-admin/CLAUDE.md`
 
 ---
 
-## Forbidden (ADR-0006 / ADR-0007)
+## Forbidden (ADR-0006 / ADR-0007 / ADR-0010)
 
 - ❌ A satellite `go.mod`, `go.work`, or `replace` directive. The backend is one Go module; the addon lives in-tree under `internal/addons/<name>/`.
+- ❌ Merging or pushing a private fork/commons branch toward the **public** upstream — it drags the whole private history (addon code) into the open, irreversibly. A generic core fix goes upstream as a single cherry-pick on a clean upstream-based branch ([ADR-0010](../../../docs/adr/0010-commons-fork-chain.md) D4).
 - ❌ A core module importing anything under `internal/addons/`. Dependencies point inward only (addon → core via `iface`).
 - ❌ An addon writing keys into the core frontend locale files / `i18n-types.d.ts` / `parity.test.ts`.
 - ❌ Hardcoding addon sidebar entries in the frontend.
@@ -113,6 +114,7 @@ Deep reference: **`orkestra-frontend-admin` skill**, [`frontend-admin/CLAUDE.md`
 **Cross-cutting**
 - [ ] No `go.mod`/`replace`/`go.work`; no core→addon import
 - [ ] Adding **and removing** the addon touches only addon files (zero diff to any core file)
+- [ ] Addon commits scoped — no product-customization changes mixed into addon commits, so an [ADR-0010](../../../docs/adr/0010-commons-fork-chain.md) promotion to a shared fork stays a clean cherry-pick
 
 ## Cross-references
 
@@ -120,5 +122,5 @@ Deep reference: **`orkestra-frontend-admin` skill**, [`frontend-admin/CLAUDE.md`
 - **`orkestra-mongo-collection-naming`** — the `test_` prefix rule (authoritative)
 - **`orkestra-frontend-admin`** — frontend-admin components/pages/forms/tables (authoritative for UI)
 - **`url-tabs`** — URL-synced tabs
-- [ADR-0006](../../../docs/adr/0006-collapse-to-core-only-base.md) (core-only base), [ADR-0007](../../../docs/adr/0007-per-addon-i18n-namespaces.md) (per-addon i18n)
+- [ADR-0006](../../../docs/adr/0006-collapse-to-core-only-base.md) (core-only base), [ADR-0007](../../../docs/adr/0007-per-addon-i18n-namespaces.md) (per-addon i18n), [ADR-0010](../../../docs/adr/0010-commons-fork-chain.md) (commons fork chain — where a reusable addon lives across forks)
 - [`frontend-admin/src/modules/_template/README.md`](../../../frontend-admin/src/modules/_template/README.md) — copy-paste scaffold (the worked `widgets` example)
