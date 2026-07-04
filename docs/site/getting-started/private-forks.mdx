@@ -1,0 +1,111 @@
+---
+title: Private forks & the commons chain
+sidebar_position: 6
+description: How to run Orkestra as a private fork, and how to share addons across several products with a two-level fork chain.
+---
+
+# Private forks & the commons chain
+
+[The forking guide](/getting-started/forking) gets you from the **Fork** button to a running console. This page covers the two questions that come after it, once Orkestra is your product base rather than an experiment:
+
+1. **How do I make my fork private?** (The Fork button can't.)
+2. **I run several products on Orkestra — how do I reuse an addon across them?**
+
+The second answer is the *commons chain*, the fork topology formalized in [ADR-0010](https://github.com/orkestra-cc/orkestra/blob/main/docs/adr/0010-commons-fork-chain.md).
+
+## Making a private fork
+
+GitHub forks of a public repository **cannot be made private** — the fork network forces the fork's visibility. A private fork is therefore a *mirror-clone*: a fresh private repo that carries Orkestra's full history and treats the public repo as a plain git remote.
+
+```bash
+# 1. Create the empty private repo
+gh repo create <your-org>/<your-fork> --private
+
+# 2. Clone Orkestra with full history
+git clone https://github.com/orkestra-cc/orkestra.git <your-fork>
+cd <your-fork>
+
+# 3. Rewire the remotes: upstream = public Orkestra, origin = your private repo
+git remote rename origin upstream
+git remote add origin https://github.com/<your-org>/<your-fork>.git
+
+# 4. Push everything — history, branches you care about, tags
+git push origin --all
+git push origin --tags
+
+# 5. Fix branch tracking (after the rename, main still tracks upstream)
+git branch --set-upstream-to=origin/main main
+git checkout -b dev upstream/dev
+git push -u origin dev
+```
+
+The result behaves exactly like a fork — `git fetch upstream` sees every new release — without any platform-level fork relationship. Everything in [ADR-0006](https://github.com/orkestra-cc/orkestra/blob/main/docs/adr/0006-collapse-to-core-only-base.md) applies unchanged: your addons live in-tree under `backend/internal/addons/<name>/`, the repo stays a single Go module, and nothing needs publishing.
+
+## Staying in sync with upstream
+
+Pulling a new Orkestra release into your fork is a merge:
+
+```bash
+git fetch upstream
+git checkout dev
+git merge upstream/dev        # or a release tag, e.g. v0.3.12
+```
+
+The conflict surface is small and always the same files. The recipe:
+
+| File | Resolution |
+|---|---|
+| `backend/go.mod` / `go.sum` | Take upstream's (`--theirs`), then `go mod tidy` — it re-derives your addons' dependencies from their imports. |
+| `backend/openapi/enterprise.json` | Generated file — **regenerate** (`make openapi-dump` with local infra up), never hand-merge. |
+| `frontend-admin/src/store/api/baseApi.ts` | **Union** upstream's new `tagTypes` with your addons' tags. |
+| `package.json` / `CHANGELOG.md` / badges | Keep yours if your fork versions independently; otherwise upstream's. |
+
+:::warning Always build after a sync
+Finish **every** sync with `go build ./...` (and the frontend typecheck). A merge that reports *no conflicts* can still silently drop fork-only additions to `pkg/sdk` when upstream rewrote nearby lines — the build is what catches it, not git.
+:::
+
+If you run **one** product, that's the whole story: one private fork, one merge per release. The rest of this page is for the moment you have more than one.
+
+## Several products: the commons chain
+
+Say you build products (or client projects) A, B, and C, each on its own private fork, and an addon written for A turns out to be useful for B. Cherry-picking it across is easy once — but now every bugfix needs manual propagation to every fork that adopted it, and no copy is authoritative.
+
+The fix is one more level in the fork chain: a private **commons** fork that owns the reusable addons, sitting between upstream and your product forks.
+
+```
+orkestra (upstream, public, core-only)
+   │  merge, once per release
+   ▼
+<your-org>/orkestra-commons   (private: core + your reusable addons)
+   │  merge, same recipe as above
+   ├──▶ product fork A  (+ addons only A needs)
+   ├──▶ product fork B  (+ addons only B needs)
+   └──▶ product fork C  (…)
+```
+
+Product forks point their `upstream` remote at commons instead of the public repo. Upstream releases flow *through* commons: you merge each release into commons once, then into each product — the same number of per-product syncs you were already doing, except each one now also delivers shared-addon updates.
+
+### The rules that make it work
+
+- **An addon is born in the product fork that pays for it.** Commons starts empty; nothing is written there speculatively.
+- **Promotion happens on second use.** When another product needs the addon, cherry-pick its commits to commons. From then on the addon is maintained in commons, and fixes reach every adopter through the ordinary syncs.
+- **Keep addon commits scoped.** Addon changes in commits separate from product-specific customization — that's what makes the promotion cherry-pick clean instead of surgical. Orkestra's addon conventions help: a well-formed addon touches almost nothing outside `internal/addons/<name>/`, `catalog_<name>.go`, and `pages/<name>/` (see [Build your first addon](/sdk/build-your-first-addon)).
+- **Nothing flows upward with addon code in it.** Found a generic core bug in a product fork? Cherry-pick the fix onto a clean branch based on the public upstream and open a normal PR. Never merge a private branch toward upstream.
+
+:::danger The one irreversible mistake
+A merge — or a stray `git push upstream` — from commons or a product fork toward the **public** upstream drags your entire private history with it, addon code included. The moment those commits reach a public branch or PR they are published: closing the PR does not unpublish them, and a revert does not unpublish them either. If your account has write access to the public repo, disarm the accident in every private clone:
+
+```bash
+git remote set-url --push upstream DISABLED
+```
+
+`git fetch upstream` keeps working (syncs are unaffected); pushing toward upstream now always fails. To upstream a core fix, work from a clean clone of the public repo: cherry-pick the single commit onto an upstream-based branch and open a normal PR.
+:::
+
+### Trade-offs
+
+You gain addon reuse with zero publishing machinery — no private Go module, no npm package, no version negotiation (see ADR-0010's *Alternatives considered* for why those routes lose). You pay with one extra repo to keep green: commons needs a CI pass per sync, and a broken commons blocks every downstream product's sync.
+
+## The reference instance
+
+The pattern's reference instance is **`orkestra-cc/orkestra-commons`**, running since v0.3.12. The repository is **private** — the mechanism is fully public (this page and ADR-0010), the addon code isn't. If you're interested in access, contact the maintainer.

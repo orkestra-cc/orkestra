@@ -15,6 +15,7 @@ Durable, dated records of architectural decisions that shape Orkestra. One file 
 | [0007](0007-per-addon-i18n-namespaces.md) | Per-addon i18n namespaces; addon translations never touch core locale files | Proposed | 2026-06-14 |
 | [0008](0008-partition-openapi-spec-per-module.md) | Partition the OpenAPI spec per module so a fork's addons never collide with core | Proposed | 2026-06-14 |
 | [0009](0009-core-compliance-module.md) | Re-home the compliance plane (audit + GDPR DSR) to core | Accepted (Phases 1–4 shipped) | 2026-06-18 |
+| [0010](0010-commons-fork-chain.md) | Two-level fork chain for multi-product operators (the commons pattern) | Accepted | 2026-07-04 |
 
 ## Format
 
