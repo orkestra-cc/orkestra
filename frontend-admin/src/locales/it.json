@@ -2017,6 +2017,8 @@
       "defaultFirstName": "Default",
       "submit": "Crea organizzazione",
       "submitting": "Creazione…",
+      "skip": "Salta per ora",
+      "skipHint": "Preferisci configurarlo più tardi? Puoi creare un'organizzazione in qualsiasi momento da Amministrazione → Tenant interni.",
       "errorNameRequired": "Il nome organizzazione è obbligatorio.",
       "errorSlugInvalid": "Lo slug può contenere solo lettere minuscole, numeri e trattini.",
       "errorSlugConflict": "Un'organizzazione con slug \"{{slug}}\" esiste già. Scegli uno slug diverso.",

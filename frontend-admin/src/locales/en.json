@@ -2017,6 +2017,8 @@
       "defaultFirstName": "Default",
       "submit": "Create organization",
       "submitting": "Creating…",
+      "skip": "Skip for now",
+      "skipHint": "Prefer to set this up later? You can create an organization any time from Administration → Internal Tenants.",
       "errorNameRequired": "Organization name is required.",
       "errorSlugInvalid": "Slug must contain only lowercase letters, digits, and hyphens.",
       "errorSlugConflict": "An organization with slug \"{{slug}}\" already exists. Pick a different slug.",
