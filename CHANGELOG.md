@@ -4,6 +4,12 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.3.14] - 2026-07-06
+
+### Core
+
+- Catch up to commons dev — multi-stack isolation + env-setup-wizard + storage-endpoint fix (#143) ([dde83ef](https://github.com/orkestra-cc/orkestra/commit/dde83ef3630b1105e7604214061cdac551a82edd))
+
 ## [0.3.13] - 2026-07-04
 
 ### Documentation
