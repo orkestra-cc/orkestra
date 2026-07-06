@@ -87,10 +87,10 @@ validate_env_file() {
     for var in "${REQUIRED_VARS[@]}"; do
         if ! grep -q "^${var}=" "$ENV_FILE"; then
             print_error "Missing required variable: $var"
-            ((errors++))
+            errors=$((errors + 1))
         elif grep -q "^${var}=$" "$ENV_FILE" || grep -q "^${var}=GENERATE" "$ENV_FILE" || grep -q "^${var}=your_" "$ENV_FILE"; then
             print_warning "Variable needs value: $var"
-            ((warnings++))
+            warnings=$((warnings + 1))
         else
             print_success "$var is set"
         fi
@@ -104,7 +104,7 @@ validate_env_file() {
         for var in "${PRODUCTION_VARS[@]}"; do
             if ! grep -q "^${var}=" "$ENV_FILE" || grep -q "^${var}=$" "$ENV_FILE"; then
                 print_warning "Production variable missing or empty: $var"
-                ((warnings++))
+                warnings=$((warnings + 1))
             else
                 print_success "$var is set"
             fi
@@ -117,7 +117,7 @@ validate_env_file() {
         print_info "Checking for development/placeholder values..."
         if grep -qE "dev_|_dev|localhost|changeme|GENERATE" "$ENV_FILE"; then
             print_warning "Production file may contain development/placeholder values"
-            ((warnings++))
+            warnings=$((warnings + 1))
         else
             print_success "No obvious placeholder values found"
         fi
@@ -130,14 +130,14 @@ validate_env_file() {
 
         if grep -q "COOKIE_SECURE=false" "$ENV_FILE"; then
             print_error "COOKIE_SECURE should be true for $env_name"
-            ((errors++))
+            errors=$((errors + 1))
         else
             print_success "COOKIE_SECURE is properly configured"
         fi
 
         if grep -q "COOKIE_SAME_SITE=lax" "$ENV_FILE" && [[ "$env_name" == "production" ]]; then
             print_warning "COOKIE_SAME_SITE should be 'strict' for production"
-            ((warnings++))
+            warnings=$((warnings + 1))
         else
             print_success "COOKIE_SAME_SITE is properly configured"
         fi

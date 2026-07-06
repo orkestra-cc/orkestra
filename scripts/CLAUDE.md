@@ -40,7 +40,7 @@ This module contains automation scripts, development tools, and utilities for ma
 
 # Same operations via CLI (scriptable)
 ENV=development ./orkestra.sh deploy --scope backend --rebuild --yes
-./orkestra.sh logs orkestra-backend-dev -f
+./orkestra.sh logs backend -f
 ./orkestra.sh observability up
 ./orkestra.sh --help                  # Full command surface
 ```
@@ -68,7 +68,7 @@ The following scripts used to exist and have been folded into `./orkestra.sh`:
 
 These are called by `orkestra.sh` or used directly during development:
 
-- **init.sh**: Bootstrap a fresh checkout — copy `docker/.env.example` → `docker/.env`, fill `REPLACE_WITH_RANDOM_HEX_*` placeholders with `openssl rand -hex N`, generate RS256 JWT keys, ensure `orkestra-network` docker bridge. Idempotent (preserves existing files unless `--force`). Invoked by `make init`, `./orkestra.sh init`, and auto-prompted by `fullstack_init_env()` when `.env` is missing. POSIX-bash safe (`[ ]` / `case`, no `[[ ]]` or `<<<`).
+- **init.sh**: Bootstrap a fresh checkout — copy `docker/.env.example` → `docker/.env`, fill `REPLACE_WITH_RANDOM_HEX_*` placeholders with `openssl rand -hex N`, generate RS256 JWT keys, seed a non-colliding block of host ports (per-`ENV` base + free-port scan). Every stack is namespaced by `APP_NAME`+`ENV` — there is no shared `orkestra-network` bridge to create (removed; see [docker/CLAUDE.md](../docker/CLAUDE.md#multi-stack-model)). Idempotent (preserves existing files unless `--force`). `make init` invokes it directly (non-interactive, CI path); `./orkestra.sh init` on a TTY — and the fresh-clone missing-`.env` path via `fullstack_init_env()` — now launch the guided `env_wizard` instead, which calls init.sh under the hood for scaffolding, while flags/`--quick`/non-TTY runs still delegate straight to init.sh. POSIX-bash safe (`[ ]` / `case`, no `[[ ]]` or `<<<`).
 - **env-detect.sh**: Sourced by `orkestra.sh` to detect ENV from `docker/.env`
 - **env-validate.sh**: Validates environment files (`./scripts/env-validate.sh all`)
 - **generate-jwt-keys.sh**: Generates the RS256 JWT key pair (called by `init.sh`)

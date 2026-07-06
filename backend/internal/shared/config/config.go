@@ -32,7 +32,7 @@ type Config struct {
 // service in docker-compose.infra.yml; production deploys swap to AWS
 // S3 / managed equivalent.
 type StorageConfig struct {
-	Endpoint       string // e.g. http://orkestra-rustfs:9000 (empty = AWS S3 default endpoint resolution)
+	Endpoint       string // e.g. http://rustfs:9000 (compose SERVICE name, stable across stacks; empty = AWS S3 default endpoint resolution)
 	Region         string // e.g. us-east-1 — placeholder for RustFS, real region for AWS S3
 	Bucket         string // e.g. orkestra-avatars
 	AccessKey      string
@@ -313,9 +313,12 @@ func Load() (*Config, error) {
 
 	// Object storage configuration (RustFS default — S3-compatible).
 	// Defaults below match docker-compose.infra.yml's rustfs service so
-	// `docker compose -f infra.yml up -d` + a fresh boot just works.
+	// `docker compose -f infra.yml up -d` + a fresh boot just works. Uses the
+	// `rustfs` compose SERVICE name (stable across stacks) rather than the
+	// old namespaced container-name default, which stopped resolving once
+	// containers became per-stack (`${APP_NAME}-rustfs-${ENV}`).
 	config.Storage = StorageConfig{
-		Endpoint:       getEnv("STORAGE_ENDPOINT", "http://orkestra-rustfs:9000"),
+		Endpoint:       getEnv("STORAGE_ENDPOINT", "http://rustfs:9000"),
 		Region:         getEnv("STORAGE_REGION", "us-east-1"),
 		Bucket:         getEnv("STORAGE_BUCKET", "orkestra-avatars"),
 		AccessKey:      getEnv("STORAGE_ACCESS_KEY", ""),

@@ -12,6 +12,19 @@ _Parent: [../CLAUDE.md](../CLAUDE.md)_
 > ## ⚠️ ADR-0006 — core-only base
 > This file predates the [core-only collapse](../docs/adr/0006-collapse-to-core-only-base.md) and still contains sections describing **removed** features. The current Docker topology is: **`docker-compose.infra.yml`** (MongoDB + Redis + RustFS) + **one app file per environment** (`docker-compose.{dev,staging,prod}.yml`) + an opt-in **`docker-compose.observability.yml`** overlay. Removed: the `minimal`/`full`/`dev-public`/`ai-sidecar` compose files, `ORKESTRA_PROFILE`, `DEV_COMPOSE_VARIANT`, the `/var/run/docker.sock` mount + `CONTAINER_CONTROL_ENABLED`, and the Gotenberg/Memgraph/Hindsight addon-infra services. Where a section below still describes those, treat it as **a fork's responsibility**, not the base.
 
+## Multi-Stack Model
+
+Every checkout × environment combination is **one Compose project**: `STACK=${APP_NAME}-${ENV}` (e.g. `orkestra-commons-development`). Everything the stack owns is namespaced under that identity, so any number of stacks coexist on one host with zero overlap:
+
+- **Containers**: `${APP_NAME}-<svc>-${ENV}` — e.g. `orkestra-commons-backend-development` for the `backend` service of this checkout's dev stack.
+- **Volumes**: `${STACK}_<vol>` — Compose auto-prefixes them (no pinned `name:` anymore).
+- **Network**: `${STACK}_default` — Compose's own per-project default network. There is no shared `orkestra-network` bridge to create; nothing joins another stack's network.
+- **Ports**: explicit values in `docker/.env`, seeded non-colliding by `scripts/init.sh` on first run (no arithmetic or shared defaults baked into compose).
+- **Observability**: a per-stack overlay (`docker-compose.observability.yml`) layered **into** the same `${STACK}` project when opted in (`./orkestra.sh observability up`) — not a separate `orkestra-observability` project.
+- **Service names** (`backend`, `frontend-admin`, `client-frontend`, `mongodb`, `redis`, `rustfs`, plus the observability services) are uniform across dev/staging/prod — only the container/volume/network layer is stack-namespaced. `docker compose ... <cmd> <service>` always takes the bare service name; `docker exec`/`docker inspect`/`docker logs` on a raw container need the full `${APP_NAME}-<svc>-${ENV}` name.
+
+Full design rationale and migration notes: [`docs/superpowers/specs/2026-07-05-multi-stack-isolation-design.md`](../docs/superpowers/specs/2026-07-05-multi-stack-isolation-design.md).
+
 ## Module Purpose
 
 The docker module provides **containerized infrastructure and deployment configurations** for the Orkestra system across development and production environments.
@@ -94,7 +107,7 @@ ORKESTRA uses a three-stage DevOps workflow: **Development**, **Staging**, and *
 # CLI mode (scriptable, same operations)
 ENV=development ./orkestra.sh deploy --scope backend --rebuild --yes
 ./orkestra.sh status
-./orkestra.sh logs orkestra-backend-dev -f
+./orkestra.sh logs backend -f
 ./orkestra.sh observability up
 ./orkestra.sh --help               # Full command surface
 
@@ -193,7 +206,7 @@ Separate infrastructure from applications. One infra compose + one app compose p
 
 ```bash
 # First-time setup — scaffolds docker/.env with random secrets, generates RS256
-# JWT keys under docker/keys/, and creates the orkestra-network bridge.
+# JWT keys under docker/keys/, and seeds a non-colliding block of host ports.
 # Idempotent: re-runs preserve existing files unless --force.
 make init                # from the repo root
 # equivalently:
@@ -250,7 +263,7 @@ docker compose -f docker-compose.prod.yml --env-file .env.production up -d
 
 **RustFS status note**: RustFS 1.x is in beta (`rustfs/rustfs:latest` resolves to `1.0.0-beta.4` at time of writing). Single-node S3-API mode is "available" and fine for avatars; distributed mode is "under testing". Production deploys running at scale should swap `STORAGE_ENDPOINT` to a managed S3 (AWS / Backblaze B2 / etc.) and drop `STORAGE_FORCE_PATH_STYLE`. The backend's `internal/shared/blob` package speaks the S3 API uniformly via AWS SDK v2, so swapping is an env-var change.
 
-**RustFS endpoint reachability gotcha**: the backend uses `STORAGE_ENDPOINT` both internally (HEAD/Delete) AND when minting the signed PUT URLs the **browser** uploads to. The internal default `http://orkestra-rustfs:9000` works for the backend but leaves browser uploads broken unless rustfs is also reachable from the host at the same URL. Local-dev fix: add `127.0.0.1 orkestra-rustfs` to `/etc/hosts` and publish `RUSTFS_API_PORT=9000` (default 9100). Production: terminate rustfs behind a publicly-resolvable hostname or use managed S3. A dual-endpoint (internal + public) split for the backend signer is tracked as a follow-up.
+**RustFS endpoint reachability gotcha**: the backend uses `STORAGE_ENDPOINT` both internally (HEAD/Delete) AND when minting the signed PUT URLs the **browser** uploads to. The internal default `http://rustfs:9000` (the compose **service** name — stable across stacks; not the stack-namespaced container name) works for the backend but leaves browser uploads broken unless rustfs is also reachable from the host at the same URL. Local-dev fix: add `127.0.0.1 rustfs` to `/etc/hosts` and publish `RUSTFS_API_PORT=9000` (default 9100). Production: terminate rustfs behind a publicly-resolvable hostname or use managed S3. A dual-endpoint (internal + public) split for the backend signer is tracked as a follow-up.
 
 ### Application Services
 
@@ -270,9 +283,11 @@ docker compose -f docker-compose.prod.yml --env-file .env.production up -d
 
 | Service                      | Host port | Purpose                              | Features                                                        |
 | ---------------------------- | --------- | ------------------------------------ | --------------------------------------------------------------- |
-| **orkestra-backend**         | 3000      | Go API server                        | Hot reload (AIR), staging-like env, RS256 JWT                   |
-| **orkestra-frontend-admin**        | 8080      | Operator console (Tier-1)            | Vite dev server, HMR; host `staging.orkestra.cc`                |
-| **orkestra-client-frontend** | 8081      | Tier-2 client demo SPA               | Vite dev server, HMR; host `app.orkestra.cc`; consumes `staging-api.*` |
+| **backend**                  | 3000      | Go API server                        | Hot reload (AIR), staging-like env, RS256 JWT                   |
+| **frontend-admin**           | 8080      | Operator console (Tier-1)            | Vite dev server, HMR; host `staging.orkestra.cc`                |
+| **client-frontend**          | 8081      | Tier-2 client demo SPA               | Vite dev server, HMR; host `app.orkestra.cc`; consumes `staging-api.*` |
+
+Service names are uniform across dev/staging/prod (`backend`/`frontend-admin`/`client-frontend`); only the `container_name:` is stack-namespaced (`${APP_NAME}-<svc>-${ENV}`), e.g. `orkestra-commons-backend-development` for this checkout's dev stack.
 
 The backend mounts `../backend:/app` and runs AIR from the bind mount — no image rebuild on code change. AIR and the Go module/build cache live under `backend/.go-bin/` and `backend/.go-mod-cache/` (gitignored), pre-installed by the host. To bootstrap on a fresh machine:
 
@@ -297,10 +312,10 @@ GOBIN=$PWD/.go-bin GOMODCACHE=$PWD/.go-mod-cache go install github.com/air-verse
 
 ### Internal Communication
 
-- **Network**: `orkestra-network` (external bridge network)
-- **Service Discovery**: Docker internal DNS resolution
-- **Security**: Isolated container network, no external access to internal services
-- **Subnet**: 172.20.0.0/16 (configured in docker-compose.yml)
+- **Network**: `${STACK}_default` — Compose's own per-project default network (no `name:`/`external:` pin; see [Multi-Stack Model](#multi-stack-model)). Each stack gets its own network; nothing is shared across stacks.
+- **Service Discovery**: Docker internal DNS resolution by **service name** (`backend`, `mongodb`, `otel-collector`, …) — stable across stacks since only the container/network layer is namespaced.
+- **Security**: Isolated per-stack container network, no external access to internal services
+- **Subnet**: Docker-assigned per project (no fixed subnet pinned in compose)
 
 ### Host split (ADR-0003)
 
@@ -521,22 +536,21 @@ Boot it alongside the dev stack. Easiest path via `orkestra.sh`:
 ./orkestra.sh                       # TUI → option 3 "Observability"
 ```
 
-Or directly via docker compose:
+Or directly via docker compose — one project spanning all three files, named to match what `orkestra.sh` would use (`${APP_NAME}-${ENV}` from `docker/.env`, e.g. `orkestra-commons-development`):
 
 ```bash
 cd docker
-docker network create orkestra-network   # first time only
-docker compose -f docker-compose.infra.yml up -d
-docker compose -f docker-compose.dev.yml  up -d
-docker compose -f docker-compose.observability.yml up -d
+export COMPOSE_PROJECT_NAME="${APP_NAME}-${ENV}"   # match docker/.env's APP_NAME + ENV
+docker compose -f docker-compose.infra.yml -f docker-compose.dev.yml --env-file .env up -d
+docker compose -f docker-compose.infra.yml -f docker-compose.dev.yml -f docker-compose.observability.yml --env-file .env up -d
 ```
 
-The orkestra.sh launcher also exposes `observability {down,reset,status,info,logs}`. The observability stack uses its own compose project name (`orkestra-observability`) so stopping the app stack never accidentally takes Grafana down.
+The orkestra.sh launcher also exposes `observability {down,reset,status,info,logs}`. Observability is a **per-stack overlay** layered into the same `${STACK}` project (see [Multi-Stack Model](#multi-stack-model)) — `docker-compose.observability.yml` is just one more `-f` file added to the stack's own compose invocation, not a separate `orkestra-observability` project. `orkestra.sh stop` (app-only) never touches it; `orkestra.sh observability down` removes only the overlay's own services.
 
 Point the backend at the collector by setting in `docker/.env`:
 
 ```bash
-OTEL_EXPORTER_OTLP_ENDPOINT=http://orkestra-otel:4318
+OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
 OTEL_TRACES_ENABLED=true
 ```
 
@@ -560,7 +574,7 @@ Six pre-provisioned dashboards ship under the `Orkestra/` folder in Grafana (`do
 
 All six cross-link by `trace_id` — clicking a span jumps to filtered Loki logs, and clicking `trace_id` in any log line jumps back to Tempo. Backing evidence: `backend/internal/shared/middleware/tenant_baggage.go`, `backend/internal/shared/middleware/request_logger.go` (ADR-0005 Phase A), and `backend/internal/shared/utils/per_module_level_handler.go` (ADR-0005 Phase C).
 
-Phase 5.3 landed `/metrics` on the backend (`GET http://backend:3000/metrics`), scraped automatically by Prometheus. The handler is mounted on both the operator mux (for in-product browsing under the audience host) AND on the `lanOpsHandler` so a scrape against `orkestra-backend:3000` works without spoofing a Host header — Prometheus has no per-scrape Host override. The hostMux `opsPaths` allowlist (`/health`, `/ready`, `/metrics`) is the single source of truth for paths that escape the audience gate; the client mux still does not mount `/metrics`, so a browser hitting `api.orkestra.com/metrics` continues to 404 through the reverse proxy. Four metric families ship today — Cedar shadow divergence, capability denial, entitlement projection lag, and (ADR-0005 Phase B) `orkestra_http_request_duration_seconds` — with the label schema frozen in [ADR-0002](../docs/adr/0002-metrics-label-schema.md). Disable the endpoint by setting `METRICS_ENABLED=false`.
+Phase 5.3 landed `/metrics` on the backend (`GET http://backend:3000/metrics`), scraped automatically by Prometheus. The handler is mounted on both the operator mux (for in-product browsing under the audience host) AND on the `lanOpsHandler` so a scrape against the `backend` service (`backend:3000` by service-name DNS within the stack's network) works without spoofing a Host header — Prometheus has no per-scrape Host override. The hostMux `opsPaths` allowlist (`/health`, `/ready`, `/metrics`) is the single source of truth for paths that escape the audience gate; the client mux still does not mount `/metrics`, so a browser hitting `api.orkestra.com/metrics` continues to 404 through the reverse proxy. Four metric families ship today — Cedar shadow divergence, capability denial, entitlement projection lag, and (ADR-0005 Phase B) `orkestra_http_request_duration_seconds` — with the label schema frozen in [ADR-0002](../docs/adr/0002-metrics-label-schema.md). Disable the endpoint by setting `METRICS_ENABLED=false`.
 
 Prometheus scrapes two endpoints on the OTel collector — `:8889` (the Prometheus exporter for OTLP-received customer metrics, populated only when a sender sets `OTEL_METRICS_ENABLED=true`) and `:8888` (the collector's own self-telemetry — `otelcol_receiver_*`, `otelcol_exporter_*`, `otelcol_processor_dropped_*`). The latter is what the Pipeline Health dashboard reads to surface drops, failures, and signal-throughput regressions.
 
@@ -588,12 +602,14 @@ For production environments, consider managed services instead of (or in additio
 
 ### Basic Health Checks
 
+Container names below use the worked example for this checkout's dev stack (`APP_NAME=orkestra-commons`, `ENV=development`) — substitute your own `${APP_NAME}-<svc>-${ENV}`.
+
 ```bash
 # Check MongoDB health
-docker exec orkestra-mongodb mongosh --eval "db.adminCommand('ping')"
+docker exec orkestra-commons-mongodb-development mongosh --eval "db.adminCommand('ping')"
 
 # Check Redis health
-docker exec orkestra-redis redis-cli ping
+docker exec orkestra-commons-redis-development redis-cli ping
 
 # Check Gotenberg health (PDF service)
 curl http://localhost:3030/health
@@ -604,6 +620,8 @@ curl http://localhost:8080         # Frontend availability
 ```
 
 ## Backup & Restore
+
+**Prefer `./backup.sh` / `./restore.sh` at the repo root** (documented in [scripts/CLAUDE.md](../scripts/CLAUDE.md) and [docs/site/operating/backup-and-restore.mdx](../docs/site/operating/backup-and-restore.mdx)) — they resolve the current stack's container/network names from `docker/.env` automatically. The manual snippets below are illustrative only; container names again use the `orkestra-commons`/`development` worked example — substitute your own `${APP_NAME}-<svc>-${ENV}`.
 
 ### Manual Backup Commands
 
@@ -616,13 +634,13 @@ TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 BACKUP_DIR="./backups/mongo_${TIMESTAMP}"
 
 # Run mongodump
-docker exec orkestra-mongodb mongodump \
+docker exec orkestra-commons-mongodb-development mongodump \
   --uri="mongodb://admin:changeme@localhost:27017" \
   --out=/tmp/backup \
   --gzip
 
 # Copy to host
-docker cp orkestra-mongodb:/tmp/backup ${BACKUP_DIR}
+docker cp orkestra-commons-mongodb-development:/tmp/backup ${BACKUP_DIR}
 
 # Upload to S3 (optional)
 # aws s3 cp ${BACKUP_DIR} s3://orkestra-backups/mongo/${TIMESTAMP}/ --recursive
@@ -633,12 +651,12 @@ docker cp orkestra-mongodb:/tmp/backup ${BACKUP_DIR}
 ```bash
 #!/bin/bash
 # Force Redis to save current dataset
-docker exec orkestra-redis redis-cli --pass changeme BGSAVE
+docker exec orkestra-commons-redis-development redis-cli --pass changeme BGSAVE
 sleep 5
 
 # Copy RDB file
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-docker cp orkestra-redis:/data/dump.rdb ./backups/redis_${TIMESTAMP}.rdb
+docker cp orkestra-commons-redis-development:/data/dump.rdb ./backups/redis_${TIMESTAMP}.rdb
 ```
 
 ### Restore Procedures
@@ -651,7 +669,7 @@ docker compose -f docker-compose.dev.yml down    # Or prod.yml
 docker compose -f docker-compose.prod.yml down
 
 # Restore from backup
-docker exec orkestra-mongodb mongorestore \
+docker exec orkestra-commons-mongodb-development mongorestore \
   --uri="mongodb://admin:changeme@localhost:27017" \
   --gzip \
   /path/to/backup/directory
@@ -668,7 +686,7 @@ docker compose -f docker-compose.prod.yml up -d
 docker compose stop redis
 
 # Copy backup file
-docker cp ./backups/redis_backup.rdb orkestra-redis:/data/dump.rdb
+docker cp ./backups/redis_backup.rdb orkestra-commons-redis-development:/data/dump.rdb
 
 # Start Redis
 docker compose start redis
@@ -682,7 +700,7 @@ docker compose start redis
 # Navigate to docker directory first
 cd docker
 
-# Start infrastructure only (shared by all environments)
+# Start infrastructure only (its own instance per stack — see Multi-Stack Model)
 docker compose -f docker-compose.infra.yml up -d
 
 # Start development environment
@@ -692,10 +710,10 @@ docker compose -f docker-compose.dev.yml up -d
 docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
 
 # View logs for specific services
-docker compose -f docker-compose.dev.yml logs -f orkestra-backend orkestra-frontend-admin
+docker compose -f docker-compose.dev.yml logs -f backend frontend-admin
 
 # Restart a specific service
-docker compose -f docker-compose.dev.yml restart orkestra-backend
+docker compose -f docker-compose.dev.yml restart backend
 
 # Scale production backend
 docker compose -f docker-compose.prod.yml up -d --scale backend=3
@@ -717,12 +735,13 @@ docker compose ps
 # View detailed logs
 docker compose logs --tail=100 backend
 
-# Execute commands in containers
-docker exec -it orkestra-backend sh
-docker exec -it orkestra-mongodb mongosh
+# Execute commands in containers (container names are stack-namespaced —
+# ${APP_NAME}-<svc>-${ENV}; worked example below is orkestra-commons/development)
+docker exec -it orkestra-commons-backend-development sh
+docker exec -it orkestra-commons-mongodb-development mongosh
 
-# Check network connectivity
-docker network inspect orkestra-network
+# Check network connectivity (${STACK}_default, e.g.:)
+docker network inspect orkestra-commons-development_default
 
 # Monitor resource usage
 docker stats
@@ -829,11 +848,12 @@ docker compose restart backend
 # Rebuild service after Dockerfile changes
 docker compose up -d --build backend
 
-# View complete container information
-docker inspect orkestra-backend-dev
+# View complete container information (stack-namespaced name — worked
+# example for this checkout's dev stack, orkestra-commons/development)
+docker inspect orkestra-commons-backend-development
 
 # Access container shell for debugging (emergency only)
-docker exec -it orkestra-backend-dev sh
+docker exec -it orkestra-commons-backend-development sh
 docker compose -f docker-compose.dev.yml up -d --build
 
 # Quick restart of application services (keep infrastructure running)

@@ -150,6 +150,11 @@ fi
 export ORKESTRA_VERSION
 DOCKER_DIR="$PROJECT_ROOT/docker"
 
+# Infra compose file — layered alongside the per-ENV app compose file (and,
+# when active, the observability overlay) into ONE Compose project per
+# stack (COMPOSE_PROJECT_NAME=${APP_NAME}-${ENV}; see resolve_stack_identity).
+INFRA_COMPOSE="$DOCKER_DIR/docker-compose.infra.yml"
+
 ENV_FILE="$DOCKER_DIR/.env"
 
 # ADR-0005 Phase D — self-hosted observability stack (Loki, Tempo,
@@ -162,8 +167,18 @@ OBSERVABILITY_COMPOSE="$DOCKER_DIR/docker-compose.observability.yml"
 # runtime-profile (minimal/full) path — there are no addons to pre-enable.
 PROFILE=""
 
+# Compose service names — uniform across every env file now (dev included;
+# Tasks 2-7 normalized dev's service names to match staging/prod). Shared by
+# fullstack_execute_deploy() and fullstack_stop().
+BACKEND_SERVICE="backend"
+FRONTEND_SERVICE="frontend-admin"
+CLIENT_SERVICE="client-frontend"
+
 # Env-detect utility for full-stack ENV resolution
 source "$PROJECT_ROOT/scripts/env-detect.sh"
+
+# Pure KEY=value read/write helpers (env_get / env_set) for the setup wizard.
+source "$PROJECT_ROOT/scripts/env-file.sh"
 
 # ---------------------------------------------------------------------------
 # Traps — restore terminal state on exit, handle Ctrl-C gracefully
@@ -495,6 +510,24 @@ ask_menu() {
     printf '%s' "${options[$((choice - 1))]}"
 }
 
+# ask_value <label> <default>
+# Prints the chosen value on stdout; empty input returns <default>. The prompt
+# is written to stderr so stdout carries only the value.
+ask_value() {
+    local label=$1 default=${2:-} answer
+    if [ "$HAS_GUM" = true ] && [ "$HAS_TTY" = true ]; then
+        gum input --prompt "$label » " --value "$default"
+        return 0
+    fi
+    if [ -n "$default" ]; then
+        printf '%s%s %s %s[%s]%s: ' "$c_prompt" "$ic_arrow" "$label" "$c_muted" "$default" "$c_reset" >&2
+    else
+        printf '%s%s %s: %s' "$c_prompt" "$ic_arrow" "$label" "$c_reset" >&2
+    fi
+    read -r answer
+    printf '%s' "${answer:-$default}"
+}
+
 # ---------------------------------------------------------------------------
 # Shared infrastructure helpers
 # ---------------------------------------------------------------------------
@@ -502,17 +535,6 @@ ask_menu() {
 check_docker_running() {
     if ! docker info > /dev/null 2>&1; then
         die "Docker daemon is not running"
-    fi
-}
-
-ensure_network_exists() {
-    local network_name="orkestra-network"
-    if ! docker network inspect "$network_name" > /dev/null 2>&1; then
-        p_step "Creating Docker network: $network_name"
-        docker network create "$network_name" > /dev/null
-        p_ok "Network created"
-    else
-        p_ok "Network $network_name exists"
     fi
 }
 
@@ -590,26 +612,24 @@ preflight_reclaim_containers() {
     local compose_file=$1
     [ -f "$compose_file" ] || return 0
 
-    # Effective project name: explicit top-level `name:` in the compose
-    # file wins (that's how compose itself resolves it). Fall back to
-    # the directory name, mirroring compose's own default.
-    local expected_project
-    expected_project=$(grep -E '^name:[[:space:]]*' "$compose_file" \
-        | head -1 \
-        | sed -E 's/^name:[[:space:]]*//; s/^["'"'"']//; s/["'"'"']$//' \
-        | tr -d '[:space:]')
+    # Effective project name: post-namespacing, orkestra.sh drives the
+    # project via COMPOSE_PROJECT_NAME (the compose files no longer carry
+    # a top-level `name:`). Fall back to the directory name to mirror
+    # compose's own default when the var is unset.
+    local expected_project="${COMPOSE_PROJECT_NAME:-}"
     if [ -z "$expected_project" ]; then
         expected_project=$(basename "$(dirname "$compose_file")")
     fi
 
-    # Container names declared in the compose file. `container_name:`
-    # lives at a stable indentation under each service block — grep
-    # is sufficient (no yq/python dependency needed).
+    # Container names for this stack. `container_name:` is now interpolated
+    # (${APP_NAME}-<svc>-${ENV}), so resolve it via `docker compose config`
+    # rather than grepping the raw file (which would yield literal vars).
     local -a wanted=()
     while IFS= read -r line; do
         [ -n "$line" ] && wanted+=("$line")
     done < <(
-        grep -E '^[[:space:]]+container_name:[[:space:]]*' "$compose_file" \
+        docker compose -f "$compose_file" --env-file "$ENV_FILE" config 2> /dev/null \
+            | grep -E '^[[:space:]]+container_name:[[:space:]]*' \
             | sed -E 's/^[[:space:]]+container_name:[[:space:]]*//; s/^["'"'"']//; s/["'"'"']$//'
     )
 
@@ -734,15 +754,22 @@ set_env_config() {
     esac
 }
 
+# Stack identity — one Compose project spans infra + app (+ observability
+# overlay). Compose files carry no top-level `name:` anymore, so
+# COMPOSE_PROJECT_NAME is what names the project. Requires ENV (and
+# therefore COMPOSE_FILE, via set_env_config) to already be resolved.
+resolve_stack_identity() {
+    APP_NAME="$(env_get "$ENV_FILE" APP_NAME)"
+    : "${APP_NAME:=orkestra}"
+    STACK="${APP_NAME}-${ENV}"
+    export COMPOSE_PROJECT_NAME="$STACK"
+}
+
 fullstack_init_env() {
     if [ ! -f "$ENV_FILE" ]; then
         p_warn "docker/.env not found — looks like a fresh checkout."
         if [ -t 0 ] && [ -t 1 ]; then
-            if ask_yes_no "Run scripts/init.sh now to scaffold .env + JWT keys?" "y"; then
-                bash "$SCRIPT_DIR/scripts/init.sh" || die "init failed — fix the error above and retry"
-            else
-                die "Cannot proceed without docker/.env. Run: make init (or scripts/init.sh)"
-            fi
+            env_wizard
         else
             die "docker/.env missing. Non-interactive shell — run: make init (or scripts/init.sh) first."
         fi
@@ -752,7 +779,193 @@ fullstack_init_env() {
     fi
     ENV="$DETECTED_ENV"
     set_env_config
+    resolve_stack_identity
     PROFILE="fullstack"
+}
+
+# ---------------------------------------------------------------------------
+# Guided docker/.env setup wizard — ENV-adaptive, section by section.
+# Reuses scripts/init.sh for mechanical scaffolding (template copy, random
+# secrets, JWT keys, network); this layer collects human-supplied values,
+# applies the ENV security profile, and validates.
+# ---------------------------------------------------------------------------
+
+# apply_env_profile <file> <env> — deterministic values that follow from the
+# chosen ENV (security posture, debug, rate limits). Interactive values (URLs,
+# hosts, storage creds) are collected by the wiz_* sections separately.
+apply_env_profile() {
+    local file=$1 env=$2
+    env_set "$file" ENV "$env"
+    env_set "$file" VITE_ENV "$env"
+    case "$env" in
+        development)
+            env_set "$file" COOKIE_SECURE false
+            env_set "$file" COOKIE_SAME_SITE lax
+            env_set "$file" DEBUG true
+            env_set "$file" PRETTY_LOGS true
+            env_set "$file" RATE_LIMIT_REQUESTS_PER_MINUTE 1000
+            env_set "$file" RATE_LIMIT_BURST 100
+            ;;
+        staging)
+            env_set "$file" COOKIE_SECURE true
+            env_set "$file" COOKIE_SAME_SITE lax
+            env_set "$file" DEBUG false
+            env_set "$file" PRETTY_LOGS false
+            env_set "$file" RATE_LIMIT_REQUESTS_PER_MINUTE 60
+            env_set "$file" RATE_LIMIT_BURST 30
+            ;;
+        production)
+            env_set "$file" COOKIE_SECURE true
+            env_set "$file" COOKIE_SAME_SITE strict
+            env_set "$file" DEBUG false
+            env_set "$file" PRETTY_LOGS false
+            env_set "$file" RATE_LIMIT_REQUESTS_PER_MINUTE 30
+            env_set "$file" RATE_LIMIT_BURST 15
+            ;;
+    esac
+}
+
+# _wiz_default <key> <fallback> — current .env value, or fallback if unset.
+_wiz_default() {
+    local cur; cur=$(env_get "$ENV_FILE" "$1")
+    printf '%s' "${cur:-$2}"
+}
+
+wiz_identity() {
+    p_section "Identity & ports"
+    env_set "$ENV_FILE" APP_NAME      "$(ask_value 'App name'      "$(_wiz_default APP_NAME orkestra)")"
+    env_set "$ENV_FILE" BACKEND_PORT  "$(ask_value 'Backend port'  "$(_wiz_default BACKEND_PORT 3000)")"
+    env_set "$ENV_FILE" FRONTEND_PORT "$(ask_value 'Frontend port' "$(_wiz_default FRONTEND_PORT 8080)")"
+}
+
+wiz_urls() {
+    local env=$1
+    p_section "URLs & hosts"
+    if [ "$env" = "development" ]; then
+        ask_yes_no "Customize dev URLs? (defaults use localhost)" "n" || return 0
+    fi
+    local backend frontend op_front cl_front console_host client_host ws
+    backend=$(ask_value 'Backend URL'                    "$(_wiz_default BACKEND_URL http://localhost:3000)")
+    frontend=$(ask_value 'Frontend URL (operator)'       "$(_wiz_default FRONTEND_URL http://localhost:8080)")
+    op_front=$(ask_value 'Operator frontend URL (email)' "$(_wiz_default OPERATOR_FRONTEND_URL "$frontend")")
+    cl_front=$(ask_value 'Client frontend URL'           "$(_wiz_default CLIENT_FRONTEND_URL http://localhost:8081)")
+    console_host=$(ask_value 'Console host'              "$(_wiz_default CONSOLE_HOST console.localhost)")
+    client_host=$(ask_value 'Client API host'           "$(_wiz_default CLIENT_API_HOST api.localhost)")
+
+    env_set "$ENV_FILE" BACKEND_URL "$backend"
+    env_set "$ENV_FILE" FRONTEND_URL "$frontend"
+    env_set "$ENV_FILE" OPERATOR_FRONTEND_URL "$op_front"
+    env_set "$ENV_FILE" CLIENT_FRONTEND_URL "$cl_front"
+    env_set "$ENV_FILE" CONSOLE_HOST "$console_host"
+    env_set "$ENV_FILE" CLIENT_API_HOST "$client_host"
+
+    # Derived defaults (overridable): ws:// from http://, wss:// from https://.
+    ws=${backend/http/ws}
+    env_set "$ENV_FILE" VITE_API_URL          "$(ask_value 'Vite API URL'          "$(_wiz_default VITE_API_URL "$backend")")"
+    env_set "$ENV_FILE" VITE_BACKEND_URL      "$(ask_value 'Vite backend URL'      "$(_wiz_default VITE_BACKEND_URL "$backend")")"
+    env_set "$ENV_FILE" VITE_WS_URL           "$(ask_value 'Vite WS URL'           "$(_wiz_default VITE_WS_URL "${ws}/ws")")"
+    env_set "$ENV_FILE" CORS_ORIGINS          "$(ask_value 'CORS origins (comma-sep)' "$(_wiz_default CORS_ORIGINS "$frontend,$cl_front")")"
+    env_set "$ENV_FILE" OPERATOR_CORS_ORIGINS "$(ask_value 'Operator CORS origins'  "$(_wiz_default OPERATOR_CORS_ORIGINS "$frontend")")"
+    env_set "$ENV_FILE" CLIENT_CORS_ORIGINS   "$(ask_value 'Client CORS origins'    "$(_wiz_default CLIENT_CORS_ORIGINS "$cl_front")")"
+}
+
+wiz_security() {
+    local env=$1
+    [ "$env" = "development" ] && return 0
+    p_section "Security & cookies ($env)"
+    p_info "COOKIE_SECURE / SameSite / DEBUG / rate limits were set by the $env profile."
+    env_set "$ENV_FILE" OPERATOR_COOKIE_DOMAIN "$(ask_value 'Operator cookie domain' "$(_wiz_default OPERATOR_COOKIE_DOMAIN "$(env_get "$ENV_FILE" CONSOLE_HOST)")")"
+    env_set "$ENV_FILE" CLIENT_COOKIE_DOMAIN   "$(ask_value 'Client cookie domain'   "$(_wiz_default CLIENT_COOKIE_DOMAIN "$(env_get "$ENV_FILE" CLIENT_API_HOST)")")"
+}
+
+wiz_storage() {
+    local env=$1
+    p_section "Object storage"
+    if [ "$env" != "production" ]; then
+        p_info "Using built-in RustFS defaults for $env (configurable later)."
+        return 0
+    fi
+    if ask_yes_no "Use built-in RustFS for production? (No = managed S3)" "n"; then
+        p_info "Keeping RustFS storage defaults."
+        return 0
+    fi
+    env_set "$ENV_FILE" STORAGE_ENDPOINT   "$(ask_value 'S3 endpoint'   "$(_wiz_default STORAGE_ENDPOINT https://s3.amazonaws.com)")"
+    env_set "$ENV_FILE" STORAGE_REGION     "$(ask_value 'S3 region'     "$(_wiz_default STORAGE_REGION us-east-1)")"
+    env_set "$ENV_FILE" STORAGE_BUCKET     "$(ask_value 'S3 bucket'     "$(_wiz_default STORAGE_BUCKET orkestra-avatars)")"
+    env_set "$ENV_FILE" STORAGE_ACCESS_KEY "$(ask_value 'S3 access key' "$(_wiz_default STORAGE_ACCESS_KEY '')")"
+    env_set "$ENV_FILE" STORAGE_SECRET_KEY "$(ask_value 'S3 secret key' "$(_wiz_default STORAGE_SECRET_KEY '')")"
+    env_set "$ENV_FILE" STORAGE_FORCE_PATH_STYLE false
+    env_set "$ENV_FILE" STORAGE_ENSURE_BUCKET false
+}
+
+wiz_seeds() {
+    p_section "Optional first-boot seeds"
+    if ! ask_yes_no "Set up OAuth/SMTP now? (most operators skip — use /admin/modules later)" "n"; then
+        p_info "Skipped — configure providers at /admin/modules after first login."
+        return 0
+    fi
+    if ask_yes_no "Configure Google OAuth?" "y"; then
+        env_set "$ENV_FILE" OAUTH_GOOGLE_CLIENT_ID     "$(ask_value 'Google client ID'     "$(env_get "$ENV_FILE" OAUTH_GOOGLE_CLIENT_ID)")"
+        env_set "$ENV_FILE" OAUTH_GOOGLE_CLIENT_SECRET "$(ask_value 'Google client secret' "$(env_get "$ENV_FILE" OAUTH_GOOGLE_CLIENT_SECRET)")"
+        env_set "$ENV_FILE" OAUTH_GOOGLE_REDIRECT_URL  "$(ask_value 'Google redirect URL'  "$(_wiz_default OAUTH_GOOGLE_REDIRECT_URL "$(env_get "$ENV_FILE" BACKEND_URL)/v1/auth/oauth/google/callback")")"
+    fi
+    if ask_yes_no "Configure SMTP email?" "y"; then
+        env_set "$ENV_FILE" NOTIFICATION_EMAIL_PROVIDER smtp
+        env_set "$ENV_FILE" NOTIFICATION_EMAIL_FROM "$(ask_value 'From address' "$(_wiz_default NOTIFICATION_EMAIL_FROM noreply@example.com)")"
+        env_set "$ENV_FILE" SMTP_HOST     "$(ask_value 'SMTP host'     "$(env_get "$ENV_FILE" SMTP_HOST)")"
+        env_set "$ENV_FILE" SMTP_PORT     "$(ask_value 'SMTP port'     "$(_wiz_default SMTP_PORT 587)")"
+        env_set "$ENV_FILE" SMTP_USERNAME "$(ask_value 'SMTP username' "$(env_get "$ENV_FILE" SMTP_USERNAME)")"
+        env_set "$ENV_FILE" SMTP_PASSWORD "$(ask_value 'SMTP password' "$(env_get "$ENV_FILE" SMTP_PASSWORD)")"
+    fi
+}
+
+# env_wizard — orchestrator. Operates on the global $ENV_FILE.
+env_wizard() {
+    page_header "Guided docker/.env setup"
+
+    # 1. Scaffold if missing (init.sh: template copy, random secrets, JWT, network).
+    if [ ! -f "$ENV_FILE" ]; then
+        p_step "No docker/.env — scaffolding secrets + JWT keys via scripts/init.sh"
+        bash "$SCRIPT_DIR/scripts/init.sh" >/dev/null || die "init.sh failed — see output above"
+        p_ok "Baseline docker/.env created"
+    else
+        p_info "docker/.env exists — reconfigure mode (current values pre-filled)"
+        if ask_yes_no "Regenerate random secrets & JWT keys? (invalidates all tokens)" "n"; then
+            bash "$SCRIPT_DIR/scripts/init.sh" --force >/dev/null || die "init.sh --force failed"
+            p_ok "Secrets & JWT keys regenerated"
+        fi
+    fi
+
+    # 2. ENV selection drives every downstream default.
+    p_section "Target environment"
+    local env
+    env=$(ask_menu "Select environment" development staging production) || env=""
+    [ -z "$env" ] && env="$(_wiz_default ENV development)"
+    p_ok "Environment: $env"
+
+    # 3. Deterministic ENV profile (security, debug, rate limits).
+    apply_env_profile "$ENV_FILE" "$env"
+
+    # 4. Interactive sections.
+    wiz_identity
+    wiz_urls "$env"
+    wiz_security "$env"
+    wiz_storage "$env"
+    wiz_seeds
+
+    # 5. Validate + summary.
+    p_section "Validation"
+    if bash "$SCRIPT_DIR/scripts/env-validate.sh"; then
+        p_ok "docker/.env validated"
+    else
+        p_warn "Validation reported issues (above) — review docker/.env"
+    fi
+    draw_box "Setup complete" \
+        "" \
+        "  docker/.env is ready for ENV=$env." \
+        "  Next: ./orkestra.sh deploy   (or the Full stack menu)" \
+        "  Admin token: ORKESTRA_API_URL=http://localhost:3000 ./scripts/devtoken.sh administrator" \
+        ""
 }
 
 show_deploy_summary() {
@@ -828,17 +1041,13 @@ fullstack_deploy_interactive() {
 # execute_deploy() function verbatim (git ops, version tagging, rolling
 # updates, health checks, smoke tests, deployment metadata log).
 fullstack_execute_deploy() {
-    local TIMESTAMP DEPLOYMENT_ID BACKEND_SERVICE FRONTEND_SERVICE
+    local TIMESTAMP DEPLOYMENT_ID
     TIMESTAMP=$(date +%Y%m%d_%H%M%S)
     DEPLOYMENT_ID="${ENV}_${TIMESTAMP}"
 
-    if [ "$ENV" = "development" ]; then
-        BACKEND_SERVICE="orkestra-backend"
-        FRONTEND_SERVICE="orkestra-frontend-admin"
-    else
-        BACKEND_SERVICE="backend"
-        FRONTEND_SERVICE="frontend-admin"
-    fi
+    # BACKEND_SERVICE / FRONTEND_SERVICE / CLIENT_SERVICE are uniform
+    # constants set once near the top of the script (no ENV-conditional
+    # switch needed — every env file uses the same service names now).
 
     echo
     draw_box "Starting deployment" \
@@ -854,7 +1063,6 @@ fullstack_execute_deploy() {
     check_docker_running
     p_ok "Docker is running"
     ensure_jwt_keys_readable
-    ensure_network_exists
     if [ "$ENV" = "production" ] && [ "$EUID" -eq 0 ]; then
         die "Do not run as root"
     fi
@@ -934,7 +1142,7 @@ fullstack_execute_deploy() {
 
         if [ "$DEPLOY_SCOPE" = "all" ] || [ "$DEPLOY_SCOPE" = "backend" ] || [ "$DEPLOY_SCOPE" = "frontend-admin+backend" ]; then
             with_spinner "Building backend image (no cache)" \
-                docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" build --no-cache \
+                docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE" --env-file "$ENV_FILE" build --no-cache \
                 --build-arg VERSION="$VERSION" \
                 --build-arg BUILD_TIME="$BUILD_TIME" \
                 --build-arg GIT_COMMIT="$GIT_COMMIT" \
@@ -942,7 +1150,7 @@ fullstack_execute_deploy() {
         fi
         if [ "$DEPLOY_SCOPE" = "all" ] || [ "$DEPLOY_SCOPE" = "frontend-admin" ] || [ "$DEPLOY_SCOPE" = "frontend-admin+backend" ]; then
             with_spinner "Building admin frontend image (no cache)" \
-                docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" build --no-cache \
+                docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE" --env-file "$ENV_FILE" build --no-cache \
                 --build-arg VERSION="$VERSION" \
                 --build-arg BUILD_TIME="$BUILD_TIME" \
                 --build-arg GIT_COMMIT="$GIT_COMMIT" \
@@ -955,10 +1163,10 @@ fullstack_execute_deploy() {
     # Reclaim any infra/app containers that exist under a foreign
     # compose project — they would otherwise abort `up -d` with a raw
     # Docker name-collision error. Volumes are preserved.
-    preflight_reclaim_containers "$DOCKER_DIR/docker-compose.infra.yml"
+    preflight_reclaim_containers "$INFRA_COMPOSE"
     preflight_reclaim_containers "$COMPOSE_FILE"
     with_spinner "Ensuring infrastructure services are running" \
-        docker compose -f "$DOCKER_DIR/docker-compose.infra.yml" --env-file "$ENV_FILE" up -d
+        docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d mongodb redis rustfs
     sleep 5
     p_ok "Infrastructure ready"
 
@@ -967,35 +1175,35 @@ fullstack_execute_deploy() {
     elif [ "$ENV" = "production" ]; then
         if [ "$DEPLOY_SCOPE" = "all" ] || [ "$DEPLOY_SCOPE" = "backend" ] || [ "$DEPLOY_SCOPE" = "frontend-admin+backend" ]; then
             with_spinner "Rolling-update backend" \
-                docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d --no-deps "$BACKEND_SERVICE"
+                docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d --no-deps "$BACKEND_SERVICE"
             with_spinner "Waiting for backend to be healthy" sleep 15
         fi
         if [ "$DEPLOY_SCOPE" = "all" ] || [ "$DEPLOY_SCOPE" = "frontend-admin" ] || [ "$DEPLOY_SCOPE" = "frontend-admin+backend" ]; then
             with_spinner "Deploying admin frontend" \
-                docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d --no-deps "$FRONTEND_SERVICE"
+                docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d --no-deps "$FRONTEND_SERVICE"
         fi
         with_spinner "Waiting for services to stabilize" sleep 30
     else
         if [ "$DEPLOY_SCOPE" = "all" ]; then
-            with_spinner "Stopping current services" \
-                docker compose -f "$COMPOSE_FILE" down
-            with_spinner "Starting new services" \
-                docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d
+            # One project, one `up -d` — do NOT `down` first (that would
+            # tear down infra too, since infra is now part of this project).
+            with_spinner "Starting services" \
+                docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d
         else
             if [ "$DEPLOY_SCOPE" = "backend" ]; then
-                docker compose -f "$COMPOSE_FILE" stop "$BACKEND_SERVICE" 2> /dev/null || true
+                docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE" --env-file "$ENV_FILE" stop "$BACKEND_SERVICE" 2> /dev/null || true
                 with_spinner "Restarting backend" \
-                    docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d "$BACKEND_SERVICE"
+                    docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d "$BACKEND_SERVICE"
             fi
             if [ "$DEPLOY_SCOPE" = "frontend-admin" ]; then
-                docker compose -f "$COMPOSE_FILE" stop "$FRONTEND_SERVICE" 2> /dev/null || true
+                docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE" --env-file "$ENV_FILE" stop "$FRONTEND_SERVICE" 2> /dev/null || true
                 with_spinner "Restarting admin frontend" \
-                    docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d "$FRONTEND_SERVICE"
+                    docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d "$FRONTEND_SERVICE"
             fi
             if [ "$DEPLOY_SCOPE" = "frontend-admin+backend" ]; then
-                docker compose -f "$COMPOSE_FILE" stop "$FRONTEND_SERVICE" "$BACKEND_SERVICE" 2> /dev/null || true
+                docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE" --env-file "$ENV_FILE" stop "$FRONTEND_SERVICE" "$BACKEND_SERVICE" 2> /dev/null || true
                 with_spinner "Restarting admin frontend and backend" \
-                    docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d "$FRONTEND_SERVICE" "$BACKEND_SERVICE"
+                    docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d "$FRONTEND_SERVICE" "$BACKEND_SERVICE"
             fi
         fi
         with_spinner "Waiting for services to initialize" sleep 30
@@ -1131,8 +1339,21 @@ fullstack_stop() {
         fi
     fi
 
+    # App-only stop: `stop` the app services (not `down` the whole
+    # project) — infra stays up unless --with-infra is requested below.
+    # Derive the service list from the env's own compose file rather than
+    # hardcoding BACKEND_SERVICE/FRONTEND_SERVICE/CLIENT_SERVICE — prod
+    # defines no client-frontend service, and `docker compose stop` errors
+    # ("no such service") on the whole list before stopping anything.
+    local -a APP_SERVICES=()
+    local svc
+    while IFS= read -r svc; do
+        [ -n "$svc" ] && APP_SERVICES+=("$svc")
+    done < <(get_services "$COMPOSE_FILE")
+
     with_spinner "Stopping application services" \
-        docker compose -f "$COMPOSE_FILE" down
+        docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE" --env-file "$ENV_FILE" stop \
+        "${APP_SERVICES[@]}"
 
     local stop_infra=false
     case "$with_infra" in
@@ -1142,8 +1363,8 @@ fullstack_stop() {
     esac
 
     if [ "$stop_infra" = true ]; then
-        with_spinner "Stopping infrastructure services" \
-            docker compose -f "$DOCKER_DIR/docker-compose.infra.yml" down
+        with_spinner "Stopping the whole stack (app + infrastructure)" \
+            docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE" --env-file "$ENV_FILE" down
     fi
 }
 
@@ -1153,7 +1374,7 @@ fullstack_status() {
     echo
 
     p_section "Containers"
-    docker compose -f "$DOCKER_DIR/docker-compose.infra.yml" -f "$COMPOSE_FILE" ps
+    docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE" --env-file "$ENV_FILE" ps
     echo
 
     if [ "$ENV" != "development" ]; then
@@ -1184,10 +1405,13 @@ fullstack_status() {
 # Orthogonal to the SKU/full-stack split. Operators run this alongside
 # their app stack to get Tempo (traces), Prometheus (metrics), Loki
 # (logs), Grafana (UI), Promtail (log shipper), otel-collector (OTLP
-# ingest). The compose file declares its own `name:` so its containers
-# live in their own project — they're not mixed into the app's
-# `docker compose ps` output and `docker compose down` on the app
-# stack never accidentally takes them down.
+# ingest). The overlay now joins the SAME Compose project as the app
+# stack (COMPOSE_PROJECT_NAME=${APP_NAME}-${ENV} — no more standalone
+# "orkestra-observability" project) via multi-file `-f infra -f app -f
+# observability`. Every action below is still explicitly scoped to
+# observability's OWN service names, so it never starts/stops/removes
+# the app or infra services (or their volumes) that happen to share
+# the project.
 
 observability_check_file() {
     if [ ! -f "$OBSERVABILITY_COMPOSE" ]; then
@@ -1195,15 +1419,44 @@ observability_check_file() {
     fi
 }
 
+# Observability can be started standalone (before any app deploy ever ran
+# in this shell), so resolve ENV/COMPOSE_FILE + the stack identity here —
+# mirrors fullstack_init_env() without the missing-.env wizard prompt.
+observability_init_env() {
+    if [ -z "${ENV:-}" ] || [ -z "${COMPOSE_FILE:-}" ]; then
+        if ! detect_environment > /dev/null 2>&1; then
+            die "Cannot detect ENV. Set ENV=development|staging|production in docker/.env or as a shell variable."
+        fi
+        ENV="$DETECTED_ENV"
+        set_env_config
+    fi
+    resolve_stack_identity
+}
+
+# Populates the global OBS_SERVICES array with observability's own service
+# names (otel-collector, tempo, prometheus, loki, promtail, grafana) so
+# up/down/reset can target just the overlay within the merged project.
+declare -a OBS_SERVICES=()
+observability_list_services() {
+    OBS_SERVICES=()
+    local svc
+    while IFS= read -r svc; do
+        [ -n "$svc" ] && OBS_SERVICES+=("$svc")
+    done < <(get_services "$OBSERVABILITY_COMPOSE")
+}
+
 observability_up() {
     page_header "Observability · Up"
     check_docker_running
     observability_check_file
+    observability_init_env
+    observability_list_services
     echo
     p_muted "Compose: $(basename "$OBSERVABILITY_COMPOSE")"
     echo
     with_spinner "Starting observability stack" \
-        docker compose -f "$OBSERVABILITY_COMPOSE" up -d
+        docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE" -f "$OBSERVABILITY_COMPOSE" --env-file "$ENV_FILE" \
+        up -d "${OBS_SERVICES[@]}"
     echo
     p_ok "Observability stack is up."
     observability_info
@@ -1213,9 +1466,12 @@ observability_down() {
     page_header "Observability · Down"
     check_docker_running
     observability_check_file
+    observability_init_env
+    observability_list_services
     echo
     with_spinner "Stopping observability stack" \
-        docker compose -f "$OBSERVABILITY_COMPOSE" down
+        docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE" -f "$OBSERVABILITY_COMPOSE" --env-file "$ENV_FILE" \
+        down "${OBS_SERVICES[@]}"
     echo
     p_ok "Observability stack stopped (volumes preserved)."
 }
@@ -1225,6 +1481,8 @@ observability_reset() {
     page_header "Observability · Reset"
     check_docker_running
     observability_check_file
+    observability_init_env
+    observability_list_services
     echo
     draw_box "WARNING" "" \
         "  ${c_error}This deletes Loki / Tempo / Prometheus / Grafana data volumes.${c_reset}" \
@@ -1235,7 +1493,8 @@ observability_reset() {
         ask_yes_no "Proceed with reset?" "n" || { p_warn "Operation cancelled."; return; }
     fi
     with_spinner "Removing observability stack and volumes" \
-        docker compose -f "$OBSERVABILITY_COMPOSE" down -v
+        docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE" -f "$OBSERVABILITY_COMPOSE" --env-file "$ENV_FILE" \
+        down -v "${OBS_SERVICES[@]}"
     p_ok "Observability state wiped."
 }
 
@@ -1243,15 +1502,19 @@ observability_status() {
     page_header "Observability · Status"
     check_docker_running
     observability_check_file
+    observability_init_env
+    observability_list_services
     echo
 
     p_section "Containers"
-    docker compose -f "$OBSERVABILITY_COMPOSE" ps
+    docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE" -f "$OBSERVABILITY_COMPOSE" --env-file "$ENV_FILE" \
+        ps "${OBS_SERVICES[@]}"
     echo
 
     p_section "Resource usage"
     local container_ids
-    container_ids=$(docker compose -f "$OBSERVABILITY_COMPOSE" ps -q 2>/dev/null)
+    container_ids=$(docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE" -f "$OBSERVABILITY_COMPOSE" --env-file "$ENV_FILE" \
+        ps -q "${OBS_SERVICES[@]}" 2>/dev/null)
     if [ -z "$container_ids" ]; then
         p_muted "No running containers — start the stack with 'observability up'."
         return
@@ -1282,12 +1545,12 @@ observability_info() {
         "" \
         "  Add to docker/.env:" \
         "" \
-        "    ${c_accent}OTEL_EXPORTER_OTLP_ENDPOINT=http://orkestra-otel:${otel_http}${c_reset}" \
+        "    ${c_accent}OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:${otel_http}${c_reset}" \
         "    ${c_accent}OTEL_TRACES_ENABLED=true${c_reset}" \
         "" \
         "  Then restart the backend:" \
         "" \
-        "    ${c_muted}docker compose -f docker-compose.dev.yml restart backend${c_reset}" \
+        "    ${c_muted}docker compose -f docker-compose.infra.yml -f docker-compose.dev.yml restart backend${c_reset}" \
         ""
     echo
     draw_box "Dashboards" \
@@ -1314,7 +1577,7 @@ list_all_services() {
     local -a files=()
     case "$profile" in
         fullstack)
-            files+=("$DOCKER_DIR/docker-compose.infra.yml")
+            files+=("$INFRA_COMPOSE")
             files+=("$COMPOSE_FILE")
             ;;
         observability)
@@ -1520,7 +1783,9 @@ show_main_menu() {
         "  ${c_accent}2${c_reset} ${c_bold}Observability${c_reset}           ${c_muted}(Loki, Tempo, Prometheus, Grafana)${c_reset}" \
         "     ${c_muted}Self-hosted OTEL stack — runs alongside any app stack${c_reset}" \
         "" \
-        "  ${c_accent}3${c_reset} ${c_bold}Quit${c_reset}" \
+        "  ${c_accent}3${c_reset} ${c_bold}Setup${c_reset}                   ${c_muted}(guided docker/.env configuration)${c_reset}" \
+        "" \
+        "  ${c_accent}4${c_reset} ${c_bold}Quit${c_reset}" \
         ""
 }
 
@@ -1551,6 +1816,7 @@ show_observability_menu() {
 }
 
 observability_menu_loop() {
+    observability_init_env
     while true; do
         show_observability_menu
         printf '%s%s Select operation [1-7]: %s' "$c_prompt" "$ic_arrow" "$c_reset"
@@ -1606,9 +1872,9 @@ ${c_bold}USAGE${c_reset}
   ./orkestra.sh <command> [args]   ${c_muted}# non-interactive CLI${c_reset}
 
 ${c_bold}FIRST-TIME SETUP${c_reset}
-  ${c_accent}init${c_reset} [--force] [--yes]            Scaffold docker/.env (random secrets) +
-                                   RS256 JWT keys. Idempotent — preserves
-                                   existing files unless --force.
+  ${c_accent}init${c_reset} [--quick] [--force] [--yes]   Guided docker/.env setup wizard (interactive).
+                                   --quick / --force / --yes, or a non-TTY, delegate
+                                   to scripts/init.sh (scaffold secrets + JWT, no prompts).
 
 ${c_bold}FULL STACK${c_reset} ${c_muted}(uses ENV from docker/.env or ENV=... prefix)${c_reset}
   ${c_accent}deploy${c_reset} [--scope SCOPE] [--rebuild] [--yes]
@@ -1638,7 +1904,7 @@ ${c_bold}SHORTCUTS${c_reset}
 ${c_bold}EXAMPLES${c_reset}
   ./orkestra.sh
   ENV=development ./orkestra.sh deploy --scope backend --rebuild --yes
-  ./orkestra.sh logs orkestra-backend-dev -f
+  ./orkestra.sh logs backend -f
   ./orkestra.sh observability up
   ./orkestra.sh observability logs grafana -f
 
@@ -1664,9 +1930,22 @@ cli_dispatch() {
             ;;
 
         init)
-            # Delegate to scripts/init.sh. Forwards every flag so
-            # `./orkestra.sh init --force` works the same as `make init-force`.
-            exec bash "$SCRIPT_DIR/scripts/init.sh" "$@"
+            # Guided wizard by default (interactive TTY, no flags). Any flag or a
+            # non-TTY delegates to scripts/init.sh (the fast / CI scaffold path).
+            if [ $# -eq 0 ] && [ -t 0 ] && [ -t 1 ]; then
+                env_wizard
+                exit 0
+            fi
+            # --quick is a wizard-only alias meaning "skip the wizard, plain
+            # scaffold". Drop it before delegating so init.sh sees no unknown flag.
+            local a passthru=()
+            for a in "$@"; do
+                case "$a" in
+                    --quick) : ;;
+                    *) passthru+=("$a") ;;
+                esac
+            done
+            exec bash "$SCRIPT_DIR/scripts/init.sh" ${passthru[@]+"${passthru[@]}"}
             ;;
 
         deploy)
@@ -1734,6 +2013,11 @@ cli_dispatch() {
                     local service=${1:-}
                     [ -n "$service" ] && shift
                     [ -z "$service" ] && die "Usage: ./orkestra.sh observability logs <service> [-f] [-n N] [-t]"
+                    # logs_cli/list_all_services needs ENV/COMPOSE_FILE +
+                    # the stack identity resolved (up/down/reset/status
+                    # resolve it themselves; logs is the one entrypoint
+                    # here that bypasses those functions).
+                    observability_init_env
                     logs_cli "observability" "$service" "$@"
                     ;;
                 "") die "Missing subcommand. Try --help." ;;
@@ -1764,13 +2048,14 @@ main() {
 
     while true; do
         show_main_menu
-        printf '%s%s Select option [1-3]: %s' "$c_prompt" "$ic_arrow" "$c_reset"
+        printf '%s%s Select option [1-4]: %s' "$c_prompt" "$ic_arrow" "$c_reset"
         local choice
         read -r choice
         case "$choice" in
             1) fullstack_menu_loop ;;
             2) observability_menu_loop ;;
-            3)
+            3) env_wizard; pause_for_return ;;
+            4)
                 echo
                 printf '%s%s Goodbye!%s\n' "$c_success" "$ic_ok" "$c_reset"
                 exit 0
@@ -1780,4 +2065,8 @@ main() {
     done
 }
 
-main "$@"
+# Only run the CLI when executed directly — sourcing (e.g. from tests) must not
+# launch the menu/dispatch.
+if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
+    main "$@"
+fi

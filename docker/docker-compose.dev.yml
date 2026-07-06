@@ -1,10 +1,8 @@
 # ORKESTRA Development Environment Docker Compose
 # Local development with hot reload, relaxed security
 
-name: orkestra-dev
-
 services:
-  orkestra-backend:
+  backend:
     # Public Alpine dev image by default (no registry auth). A fork with a
     # Chainguard subscription can override the base via the GO_BASE build-arg
     # on Dockerfile.dev-backend.
@@ -12,7 +10,9 @@ services:
       context: .
       dockerfile: Dockerfile.dev-backend
     image: orkestra/dev-backend:latest
-    container_name: orkestra-backend-dev
+    container_name: ${APP_NAME}-backend-${ENV}
+    labels:
+      orkestra.stack: ${APP_NAME}-${ENV}
     user: "1000:1000"
     userns_mode: "host"
     working_dir: /app
@@ -79,7 +79,7 @@ services:
       CLIENT_API_HOST: ${CLIENT_API_HOST:-api.localhost:3000}
       OPERATOR_CORS_ORIGINS: ${OPERATOR_CORS_ORIGINS:-}
       # Default CLIENT_CORS_ORIGINS allows the new Tier-2 demo SPA at
-      # http://client.localhost:8081 (served by orkestra-client-frontend).
+      # http://client.localhost:8081 (served by client-frontend).
       # Override in .env to add staging/prod origins.
       CLIENT_CORS_ORIGINS: ${CLIENT_CORS_ORIGINS:-http://client.localhost:8081,http://localhost:8081}
 
@@ -106,7 +106,10 @@ services:
       # seed vars in the shell before running `docker compose up`.
 
       # Object storage (RustFS — S3-compatible). Backs avatar uploads.
-      STORAGE_ENDPOINT: ${STORAGE_ENDPOINT:-http://orkestra-rustfs:9000}
+      # Default uses the `rustfs` SERVICE name (resolves on the stack network
+      # regardless of APP_NAME/ENV); the old container-name default
+      # `orkestra-rustfs` broke once containers became namespaced.
+      STORAGE_ENDPOINT: ${STORAGE_ENDPOINT:-http://rustfs:9000}
       STORAGE_REGION: ${STORAGE_REGION:-us-east-1}
       STORAGE_BUCKET: ${STORAGE_BUCKET:-orkestra-avatars}
       STORAGE_ACCESS_KEY: ${STORAGE_ACCESS_KEY:-orkestra}
@@ -127,8 +130,6 @@ services:
     volumes:
       - ../backend:/app
       - ./keys:/app/keys
-    networks:
-      - orkestra-network
     # No explicit dns: — inherit the docker daemon's resolvers (matches
     # staging + the public variant). Hardcoding public resolvers (8.8.8.8)
     # loops on `go mod download` where UDP/53 to them is blocked (corporate,
@@ -137,9 +138,11 @@ services:
     # AIR is pre-baked into Dockerfile.dev-backend, so no runtime `go install`.
     command: ["sh", "-c", "go mod download && air"]
 
-  orkestra-frontend-admin:
+  frontend-admin:
     image: node:24-alpine
-    container_name: orkestra-frontend-admin-dev
+    container_name: ${APP_NAME}-frontend-admin-${ENV}
+    labels:
+      orkestra.stack: ${APP_NAME}-${ENV}
     user: "1000:1000"
     userns_mode: "host"
     working_dir: /app
@@ -154,17 +157,24 @@ services:
       VITE_API_URL: ${VITE_API_URL:-http://localhost:3000}
       VITE_BACKEND_URL: ${VITE_BACKEND_URL:-http://localhost:3000}
       VITE_WS_URL: ${VITE_WS_URL:-ws://localhost:3000}
+      # Extra hosts the Vite dev server accepts (DNS-rebinding defence), for
+      # LAN/Tailscale access via a hostname. Comma-separated; '*' allows any.
+      VITE_ALLOWED_HOSTS: ${VITE_ADMIN_ALLOWED_HOSTS:-}
       # Application version surfaced in the SPA footer. orkestra.sh exports
       # this from `git describe`; CI overrides via GITHUB_REF_NAME at
       # image-build time. The container has no git, so this passthrough
       # is how the host's tag reaches Vite's `define` substitution.
       ORKESTRA_VERSION: ${ORKESTRA_VERSION:-dev}
       NODE_OPTIONS: "--max-old-space-size=4096"
+      # npm's cache defaults to ~/.npm in the image FS, which is unwritable
+      # under a userns-remap daemon + userns_mode:host (image layers are
+      # owned by the remapped range, not the real host UID 1000). Relocate
+      # it onto the writable /app bind mount. Mirrors docker-compose.staging.yml.
+      npm_config_cache: /app/.npm-cache
     volumes:
       - ../frontend-admin:/app
       - ../frontend-admin/.vite-cache:/app/.vite
-    networks:
-      - orkestra-network
+      - ../frontend-admin/.npm-cache:/app/.npm-cache
     # Regenerate public/config.js from the VITE_* env vars BEFORE
     # `npm run dev` starts. public/config.js is gitignored (see
     # frontend-admin/.gitignore + frontend-admin/CLAUDE.md → "Runtime
@@ -194,10 +204,13 @@ services:
   #
   # Add to /etc/hosts for cookie-domain isolation to work end-to-end:
   #   127.0.0.1 console.localhost api.localhost client.localhost
-  orkestra-client-frontend:
+  client-frontend:
     image: node:24-alpine
-    container_name: orkestra-client-frontend-dev
+    container_name: ${APP_NAME}-client-frontend-${ENV}
+    labels:
+      orkestra.stack: ${APP_NAME}-${ENV}
     user: "1000:1000"
+    userns_mode: "host"
     working_dir: /app
     restart: unless-stopped
     ports:
@@ -213,11 +226,15 @@ services:
       VITE_ALLOWED_HOSTS: ${VITE_CLIENT_ALLOWED_HOSTS:-client.localhost}
       ORKESTRA_VERSION: ${ORKESTRA_VERSION:-dev}
       NODE_OPTIONS: "--max-old-space-size=4096"
+      # npm's cache defaults to ~/.npm in the image FS, which is unwritable
+      # under a userns-remap daemon + userns_mode:host (image layers are
+      # owned by the remapped range, not the real host UID 1000). Relocate
+      # it onto the writable /app bind mount. Mirrors docker-compose.staging.yml.
+      npm_config_cache: /app/.npm-cache
     volumes:
       - ../frontend-client:/app
       - ../frontend-client/.vite-cache:/app/.vite
-    networks:
-      - orkestra-network
+      - ../frontend-client/.npm-cache:/app/.npm-cache
     command: ["sh", "-c", "npm install && npm run dev -- --host 0.0.0.0"]
     # Probes the in-process /health endpoint registered by the Vite
     # plugin in frontend-client/vite.config.ts.
@@ -227,7 +244,3 @@ services:
       timeout: 5s
       retries: 3
       start_period: 30s
-
-networks:
-  orkestra-network:
-    external: true

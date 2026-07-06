@@ -182,7 +182,7 @@ This is **different from the operator console** at `../frontend-admin`, which us
 
 ## Build & dev
 
-The SPA runs in a Docker container with Vite hot reload (`orkestra-client-frontend-dev` in `docker-compose.dev.yml`). The host hits it at `http://client.localhost:8081`. See [`README.md`](README.md) for the full quickstart (hosts file, env vars, infra dependencies).
+The SPA runs in a Docker container with Vite hot reload (service `client-frontend` in `docker-compose.dev.yml`; container name is stack-namespaced, `${APP_NAME}-client-frontend-${ENV}`). The host hits it at `http://client.localhost:8081`. See [`README.md`](README.md) for the full quickstart (hosts file, env vars, infra dependencies).
 
 Local commands you'll actually run from your editor:
 
@@ -238,4 +238,4 @@ The base SPA is a **thin auth/account demo**: anonymous home + signup + email ve
 - [Backend auth core](../backend/internal/core/auth/CLAUDE.md) — `/v1/auth/client/*` audience-split routes, JWT claims, refresh-cookie behaviour
 - [Backend tenant core](../backend/internal/core/tenant/CLAUDE.md) — ownership model, why `org_owner` is the proxy used here
 - [Authentication flow doc](../docs/Authentication_flow.md) — wire-level walkthrough of the post-PR-D world
-- [Docker compose](../docker/CLAUDE.md) — `orkestra-client-frontend-dev` container wiring
+- [Docker compose](../docker/CLAUDE.md) — `client-frontend` service / container wiring

@@ -5,7 +5,7 @@
 # Bundles the project's stateful surfaces into a single tarball:
 #   - MongoDB        (logical dump via mongodump)
 #   - Redis          (RDB snapshot via BGSAVE + docker cp)
-#   - RustFS / S3    (object bucket sync via aws-cli over the orkestra network)
+#   - RustFS / S3    (object bucket sync via aws-cli over the stack's own network)
 #   - Secrets        (docker/.env and docker/keys/*)
 #
 # Run without arguments for an interactive TUI, or pass flags for CLI use.
@@ -30,10 +30,12 @@ ENV_FILE="$DOCKER_DIR/.env"
 KEYS_DIR="$DOCKER_DIR/keys"
 BACKUPS_DIR="$REPO_ROOT/backups"
 
-MONGO_CONTAINER="orkestra-mongodb"
-REDIS_CONTAINER="orkestra-redis"
-RUSTFS_CONTAINER="orkestra-rustfs"
-NETWORK="orkestra-network"
+# Container/network names are stack-namespaced (${APP_NAME}-<svc>-${ENV} and
+# ${APP_NAME}-${ENV}_default) — resolved below, once docker/.env is sourced.
+MONGO_CONTAINER=""
+REDIS_CONTAINER=""
+RUSTFS_CONTAINER=""
+NETWORK=""
 
 ALL_COMPONENTS=(mongodb redis rustfs secrets)
 
@@ -102,6 +104,17 @@ fi
 # shellcheck disable=SC1090
 set -a; . "$ENV_FILE"; set +a
 ENV_NAME="${ENV:-development}"
+
+# Every stack is one Compose project named ${APP_NAME}-${ENV}; containers are
+# ${APP_NAME}-<svc>-${ENV} and the project's own default network is
+# ${APP_NAME}-${ENV}_default (the old shared `orkestra-network` bridge was
+# removed — see docs/superpowers/specs/2026-07-05-multi-stack-isolation-design.md).
+: "${APP_NAME:=orkestra}"
+STACK="${APP_NAME}-${ENV_NAME}"
+MONGO_CONTAINER="${APP_NAME}-mongodb-${ENV_NAME}"
+REDIS_CONTAINER="${APP_NAME}-redis-${ENV_NAME}"
+RUSTFS_CONTAINER="${APP_NAME}-rustfs-${ENV_NAME}"
+NETWORK="${STACK}_default"
 
 container_running() {
   docker ps --format '{{.Names}}' 2>/dev/null | grep -qx "$1"

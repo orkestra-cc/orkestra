@@ -37,7 +37,7 @@ processors:
 
 exporters:
   # Traces → Tempo over OTLP/gRPC on Tempo's internal listener (4317
-  # inside the orkestra-network). insecure: true because traffic stays on
+  # on the stack's own network). insecure: true because traffic stays on
   # the internal docker network.
   otlp/tempo:
     endpoint: tempo:4317
@@ -60,7 +60,7 @@ exporters:
   # the JSON body of each line so LogQL `| json | tenant_id="..."`
   # queries work the same way they do for Promtail-shipped logs.
   loki:
-    endpoint: http://orkestra-loki:3100/loki/api/v1/push
+    endpoint: http://loki:3100/loki/api/v1/push
     default_labels_enabled:
       exporter: false  # collapse "exporter=otlp" — not useful
       job: true

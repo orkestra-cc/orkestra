@@ -227,13 +227,19 @@ export default ({ mode }) => {
       open: false,
       port: 5173,
       host: '0.0.0.0',
-      allowedHosts: [
-        'localhost',
-        '127.0.0.1',
-        '192.168.88.53',
-        'orkestra.cc',
-        'staging.orkestra.cc'
-      ],
+      // Base allow-list + any hosts from VITE_ALLOWED_HOSTS (comma-separated,
+      // set per-deployment in docker/.env). Lets the console be reached over
+      // a LAN/Tailscale hostname without editing this file. A '*' entry
+      // disables the DNS-rebinding guard entirely (dev-only convenience).
+      allowedHosts: (() => {
+        const extra = (process.env.VITE_ALLOWED_HOSTS ?? '')
+          .split(',')
+          .map((h) => h.trim())
+          .filter(Boolean);
+        return extra.includes('*')
+          ? true
+          : ['localhost', '127.0.0.1', '192.168.88.53', 'orkestra.cc', 'staging.orkestra.cc', ...extra];
+      })(),
       hmr: process.env.VITE_HMR_HOST
         ? {
             host: process.env.VITE_HMR_HOST,

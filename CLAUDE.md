@@ -106,7 +106,6 @@ Load order (topologically sorted by `Dependencies()`): `user` → `notification`
 # Or manually — infra (MongoDB + Redis + RustFS) then the dev app stack
 # (public Alpine images, AIR + Vite hot reload):
 cd docker
-docker network create orkestra-network                  # first time only
 docker compose -f docker-compose.infra.yml up -d
 docker compose -f docker-compose.dev.yml --env-file .env up -d
 
@@ -140,11 +139,11 @@ One infra base + one app file per environment (`docker-compose.{dev,staging,prod
 
 ### WSL2 Development Caveat
 
-AIR file watcher does not reliably detect changes on the Windows filesystem mounted in WSL2. If backend changes don't take effect after saving, manually rebuild inside the container:
+AIR file watcher does not reliably detect changes on the Windows filesystem mounted in WSL2. If backend changes don't take effect after saving, manually rebuild inside the container (container names are now stack-namespaced — `${APP_NAME}-<svc>-${ENV}`; the example below is this checkout's dev stack, see [docker/CLAUDE.md](docker/CLAUDE.md#multi-stack-model)):
 
 ```bash
-docker exec orkestra-backend-dev go build -o /app/tmp/main ./cmd/server/
-docker restart orkestra-backend-dev
+docker exec orkestra-commons-backend-development go build -o /app/tmp/main ./cmd/server/
+docker restart orkestra-commons-backend-development
 ```
 
 ### CI/CD

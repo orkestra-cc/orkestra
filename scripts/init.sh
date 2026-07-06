@@ -5,8 +5,11 @@
 # What this does, idempotently:
 #   1. Copy docker/.env.example → docker/.env (skip if .env already exists)
 #   2. Fill REPLACE_WITH_RANDOM_HEX_* placeholders with `openssl rand` output
-#   3. Generate RS256 JWT keys via scripts/generate-jwt-keys.sh (skip if present)
-#   4. Ensure the `orkestra-network` Docker bridge exists
+#   3. Seed a non-colliding host-port block (BACKEND_PORT, FRONTEND_PORT,
+#      CLIENT_FRONTEND_PORT, MONGO_PORT, REDIS_PORT, RUSTFS_API_PORT,
+#      RUSTFS_CONSOLE_PORT) based on ENV, so a second stack on the same host
+#      doesn't collide with an already-running one
+#   4. Generate RS256 JWT keys via scripts/generate-jwt-keys.sh (skip if present)
 #   5. Print next steps
 #
 # Re-running is safe — existing files are preserved unless --force is passed.
@@ -16,7 +19,6 @@
 #   scripts/init.sh                # interactive when overwrite needed
 #   scripts/init.sh --force        # overwrite .env and JWT keys without asking
 #   scripts/init.sh --yes          # answer "yes" to every prompt (CI-friendly)
-#   scripts/init.sh --skip-network # don't try to create the docker network
 
 set -eu
 
@@ -37,14 +39,12 @@ JWT_PUB="$KEYS_DIR/jwt-public.pem"
 # ---------------------------------------------------------------------------
 FORCE=no
 ASSUME_YES=no
-SKIP_NETWORK=no
 while [ $# -gt 0 ]; do
   case "$1" in
     --force) FORCE=yes; ASSUME_YES=yes; shift ;;
     --yes|-y) ASSUME_YES=yes; shift ;;
-    --skip-network) SKIP_NETWORK=yes; shift ;;
     -h|--help)
-      sed -n '3,20p' "$0"
+      sed -n '3,22p' "$0"
       exit 0
       ;;
     *) echo "Unknown flag: $1" >&2; exit 2 ;;
@@ -90,6 +90,37 @@ prompt_yes_no() {
 # ---------------------------------------------------------------------------
 require_cmd() {
   command -v "$1" >/dev/null 2>&1 || { err "missing required command: $1 — install it and re-run"; exit 1; }
+}
+
+# ---------------------------------------------------------------------------
+# Port helpers
+# ---------------------------------------------------------------------------
+# Echo $1 if the TCP port is free on the host, else the next free port above
+# it. Lets two Orkestra stacks coexist on one host without colliding.
+#
+# $2 (optional) is a space-separated list of ports to also treat as taken —
+# ports this same init run already claimed for an earlier var. Those aren't
+# actually bound yet (nothing is listening until `docker compose up`), so
+# `ss` alone can't see them; without this, two adjacent-but-both-occupied
+# base ports (e.g. FRONTEND_PORT=8080 / CLIENT_FRONTEND_PORT=8081, both
+# already in use) can each independently "advance" to the SAME free port.
+next_free_port() {
+  p="$1"
+  claimed=" ${2:-} "
+  have_ss=yes
+  command -v ss >/dev/null 2>&1 || have_ss=no
+  while :; do
+    busy=no
+    if [ "$have_ss" = "yes" ] && ss -ltnH "( sport = :$p )" 2>/dev/null | grep -q ":$p"; then
+      busy=yes
+    fi
+    case "$claimed" in
+      *" $p "*) busy=yes ;;
+    esac
+    [ "$busy" = "yes" ] || break
+    p=$((p + 1))
+  done
+  printf '%s' "$p"
 }
 
 step "Checking prerequisites"
@@ -157,6 +188,49 @@ if [ "${SKIP_ENV:-no}" != "yes" ]; then
   chmod 600 "$ENV_FILE"
   ok "filled COOKIE_SECRET / OAUTH_TOKEN_ENCRYPTION_KEY / ORKESTRA_KMS_MASTER_KEY / MONGO_ROOT_PASSWORD / REDIS_PASSWORD"
   muted "chmod 600 applied — .env now contains live secrets"
+
+  # Seed a non-colliding port block so a second Orkestra stack on this host
+  # doesn't fight the first one over BACKEND_PORT/MONGO_PORT/etc. Per-ENV
+  # base ports, bumped to the next free host port via next_free_port().
+  # Observability ports (GRAFANA_PORT, PROMETHEUS_PORT, LOKI_PORT, OTEL_*,
+  # TEMPO_*) are left at their .env.example defaults — that overlay is
+  # opt-in, not part of the port block a fresh stack needs on first boot.
+  step "Seeding non-colliding ports"
+  env_val=$(grep -E '^ENV=' "$ENV_FILE" | head -1 | cut -d= -f2- | tr -d '[:space:]')
+  : "${env_val:=development}"
+
+  case "$env_val" in
+    staging)
+      base_backend=3100; base_frontend=8180; base_client=8181
+      base_mongo=27117;  base_redis=6479;   base_rustfs_api=9200; base_rustfs_console=9201
+      ;;
+    production)
+      base_backend=3200; base_frontend=8280; base_client=8281
+      base_mongo=27217;  base_redis=6579;   base_rustfs_api=9300; base_rustfs_console=9301
+      ;;
+    development|*)
+      base_backend=3000; base_frontend=8080; base_client=8081
+      base_mongo=27017;  base_redis=6379;   base_rustfs_api=9100; base_rustfs_console=9101
+      ;;
+  esac
+
+  port_specs="BACKEND_PORT:$base_backend FRONTEND_PORT:$base_frontend CLIENT_FRONTEND_PORT:$base_client MONGO_PORT:$base_mongo REDIS_PORT:$base_redis RUSTFS_API_PORT:$base_rustfs_api RUSTFS_CONSOLE_PORT:$base_rustfs_console"
+
+  ports_tmp="${ENV_FILE}.ports.tmp.$$"
+  cp "$ENV_FILE" "$ports_tmp"
+  ports_claimed=""
+  for spec in $port_specs; do
+    port_var="${spec%%:*}"
+    port_base="${spec#*:}"
+    port_free=$(next_free_port "$port_base" "$ports_claimed")
+    ports_claimed="$ports_claimed $port_free"
+    sed "s|^${port_var}=.*|${port_var}=${port_free}|" "$ports_tmp" > "${ports_tmp}.next"
+    mv "${ports_tmp}.next" "$ports_tmp"
+    muted "${port_var}=${port_free}"
+  done
+  mv "$ports_tmp" "$ENV_FILE"
+  chmod 600 "$ENV_FILE"
+  ok "seeded non-colliding ports for ENV=${env_val}"
 fi
 
 # ---------------------------------------------------------------------------
@@ -183,22 +257,6 @@ if [ "${SKIP_JWT:-no}" != "yes" ]; then
     bash "$SCRIPT_DIR/generate-jwt-keys.sh" >/dev/null
   fi
   ok "generated jwt-private.pem (chmod 600) + jwt-public.pem"
-fi
-
-# ---------------------------------------------------------------------------
-# Docker network (skippable for CI / offline)
-# ---------------------------------------------------------------------------
-if [ "$SKIP_NETWORK" != "yes" ] && command -v docker >/dev/null 2>&1; then
-  step "Ensuring orkestra-network bridge exists"
-  if docker network inspect orkestra-network >/dev/null 2>&1; then
-    ok "orkestra-network already exists"
-  else
-    if docker network create orkestra-network >/dev/null 2>&1; then
-      ok "created orkestra-network"
-    else
-      warn "couldn't create orkestra-network (docker daemon down? permission issue?) — create manually before `docker compose up`"
-    fi
-  fi
 fi
 
 # ---------------------------------------------------------------------------
