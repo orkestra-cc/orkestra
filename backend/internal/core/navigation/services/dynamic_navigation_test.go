@@ -129,6 +129,46 @@ func TestTierFilter_EmptyTierVisibleToAll(t *testing.T) {
 	}
 }
 
+func TestTierFilter_NoTenantContextSeesInternal(t *testing.T) {
+	// /v1/navigation is operator-only. An operator acting without a resolved
+	// tenant — e.g. a fresh install with zero internal tenants — has an empty
+	// tenantKind. They must still see internal-tier (operator) menus like the
+	// Administration realm; otherwise a zero-tenant super_admin loses the whole
+	// admin sidebar. External-tier items must stay hidden.
+	items := []module.NavItemSpec{
+		{Realm: realmPlatform, Section: "Administration", Tier: iface.TenantKindInternal, Name: "Users", Path: "/admin/users", Active: true},
+		{Realm: realmBusiness, Section: "Portal", Tier: iface.TenantKindExternal, Name: "My Subscription", Path: "/my/sub", Active: true},
+	}
+	svc := NewDynamicNavigationService(items, nil, nil)
+
+	// No tenantKind in context — mirrors a zero-tenant operator.
+	resp, err := svc.GetNavigationForUser(context.Background(), "administrator")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var sawUsers, sawSub bool
+	for _, r := range resp.Realms {
+		for _, s := range r.Sections {
+			if findItem(s.Children, "Users") != nil {
+				sawUsers = true
+			}
+			if findItem(s.Children, "My Subscription") != nil {
+				sawSub = true
+			}
+		}
+	}
+	if !sawUsers {
+		t.Fatalf("zero-tenant operator did not see internal-tier 'Users' (Administration menu missing)")
+	}
+	if sawSub {
+		t.Fatalf("zero-tenant operator saw external-tier 'My Subscription'")
+	}
+	if resp.TenantKind != iface.TenantKindInternal {
+		t.Fatalf("want TenantKind %q for tenant-less operator, got %q", iface.TenantKindInternal, resp.TenantKind)
+	}
+}
+
 func TestMinRoleFilter(t *testing.T) {
 	items := []module.NavItemSpec{
 		{Realm: realmPlatform, Section: "Admin", MinRole: "administrator", Name: "Modules", Path: "/admin/modules", Active: true},
@@ -485,13 +525,16 @@ func TestCacheKey_IncludesTenantKind(t *testing.T) {
 
 	internal, _ := svc.GetNavigationForUser(withTenantKind(context.Background(), iface.TenantKindInternal), "administrator")
 	external, _ := svc.GetNavigationForUser(withTenantKind(context.Background(), iface.TenantKindExternal), "administrator")
-	untiered, _ := svc.GetNavigationForUser(context.Background(), "administrator")
+	// No tenant context: an operator with no acting tenant now resolves to the
+	// internal tier (see GetNavigationForUser), so it shares the internal menu
+	// and therefore the internal cache key.
+	noTenant, _ := svc.GetNavigationForUser(context.Background(), "administrator")
 
 	if internal.CacheKey == external.CacheKey {
 		t.Fatalf("cache key should differ by tenant kind: internal=%q external=%q", internal.CacheKey, external.CacheKey)
 	}
-	if untiered.CacheKey != "nav:administrator" {
-		t.Fatalf("expected untiered cache key to omit kind: got %q", untiered.CacheKey)
+	if noTenant.CacheKey != internal.CacheKey {
+		t.Fatalf("tenant-less operator should share the internal cache key: got %q want %q", noTenant.CacheKey, internal.CacheKey)
 	}
 }
 
