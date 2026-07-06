@@ -2027,7 +2027,7 @@
     "finish": {
       "title": "Orkestra è pronta",
       "bodyWithOrg": "Il tuo account amministratore è stato creato, sei autenticato e l'organizzazione <strong>{{orgName}}</strong> è attiva. Potrai rinominarla o creare altre organizzazioni in seguito.",
-      "bodyWithoutOrg": "Il tuo account amministratore è stato creato, sei autenticato e la procedura guidata non apparirà più.",
+      "bodyWithoutOrg": "Il tuo account amministratore è stato creato e sei autenticato. Nessuna organizzazione è stata creata — puoi aggiungerne una in qualsiasi momento da Amministrazione → Tenant interni. La procedura guidata non apparirà più.",
       "smtpWarning": "<strong>SMTP non è configurato.</strong> Le email di reset password e verifica verranno loggate sullo stdout del backend invece di essere consegnate. Puoi configurarlo in qualsiasi momento da <code>/admin/modules</code> nel modulo notification.",
       "goToDashboard": "Vai alla dashboard"
     }
