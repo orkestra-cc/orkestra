@@ -31,7 +31,6 @@ Then bring the dev stack up:
 
 ```bash
 cd docker
-docker network create orkestra-network    # first time only
 docker compose -f docker-compose.infra.yml up -d
 docker compose -f docker-compose.dev.yml up -d
 ```
@@ -51,8 +50,9 @@ The committed `src/api/openapi.gen.ts` is a stub. Regenerate against the live ba
 cd frontend-client
 VITE_API_BASE=http://api.localhost:3000 npm run codegen
 
-# or from inside the dev container
-docker exec orkestra-client-frontend-dev sh -c "VITE_API_BASE=http://api.localhost:3000 npm run codegen"
+# or from inside the dev container (container name is stack-namespaced —
+# ${APP_NAME}-client-frontend-${ENV}; example below is orkestra-commons/development)
+docker exec orkestra-commons-client-frontend-development sh -c "VITE_API_BASE=http://api.localhost:3000 npm run codegen"
 ```
 
 The result is a single `src/api/openapi.gen.ts` consumed by `src/api/client.ts` via `openapi-fetch`. Commit the regenerated file — CI builds without a live backend, and committing keeps the type contract versioned alongside the SPA.

@@ -57,13 +57,13 @@ It runs on a **two-tier tenancy model**: Tier-1 operators manage staff and modul
 One infra base (MongoDB + Redis + RustFS) plus one app file per environment — `docker-compose.{dev,staging,prod}.yml` — with an opt-in `docker-compose.observability.yml` overlay. The dev stack runs on public Alpine images with AIR + Vite hot reload, no registry auth required.
 
 ```bash
-make init                                                       # first time only — scaffolds docker/.env + JWT keys + network
+make init                                                       # first time only — scaffolds docker/.env + JWT keys + ports
 cd docker
 docker compose -f docker-compose.infra.yml up -d                # mongodb + redis + rustfs
 docker compose -f docker-compose.dev.yml --env-file .env up -d  # backend (AIR) + both frontends (Vite)
 ```
 
-Then open the operator console (`http://localhost:8080`) and the first-run **setup wizard** prompts you to create the first administrator (`POST /v1/setup/admin`, gated to first-install only). `make init` is idempotent — re-runs leave existing secrets alone — and creates the `orkestra-network` Docker bridge. The same operations are wrapped by `./orkestra.sh`; see [Managing the stack](#managing-the-stack).
+Then open the operator console (`http://localhost:8080`) and the first-run **setup wizard** prompts you to create the first administrator (`POST /v1/setup/admin`, gated to first-install only). `make init` is idempotent — re-runs leave existing secrets alone — and seeds a non-colliding block of host ports so multiple stacks (`APP_NAME`+`ENV`) can coexist on one host (see [docker/CLAUDE.md](docker/CLAUDE.md#multi-stack-model)). The same operations are wrapped by `./orkestra.sh`; see [Managing the stack](#managing-the-stack).
 
 **OAuth, SMTP, Stripe, AI keys are optional.** Email/password login works out of the box. Add the rest at `/admin/modules` after first login (see [OAuth setup guide](docs/site/operating/oauth-providers.mdx) for provider-specific instructions on Google, Apple, GitHub, Discord), or pre-seed by uncommenting the relevant lines in `docker/.env` before `docker compose up`.
 
@@ -100,7 +100,7 @@ The dev backend builds `docker/Dockerfile.dev-backend` (`golang:1.25.11-alpine`,
 ```bash
 ENV=development ./orkestra.sh deploy --scope backend --rebuild --yes
 ./orkestra.sh status
-./orkestra.sh logs orkestra-backend-dev -f
+./orkestra.sh logs backend -f
 ./orkestra.sh observability up
 ```
 

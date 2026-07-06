@@ -22,26 +22,23 @@ scrape_configs:
   - job_name: otel-collector
     metrics_path: /metrics
     static_configs:
-      - targets: ["orkestra-otel:8889"]
+      - targets: ["otel-collector:8889"]
         labels:
           service: otel-collector
 
   - job_name: otel-collector-self
     metrics_path: /metrics
     static_configs:
-      - targets: ["orkestra-otel:8888"]
+      - targets: ["otel-collector:8888"]
         labels:
           service: otel-collector-self
 
   - job_name: orkestra-backend
     metrics_path: /metrics
     static_configs:
-      - targets: ["orkestra-backend-dev:3000", "orkestra-backend:3000"]
+      - targets: ["backend:3000"]
         labels:
           service: orkestra-backend
-    # Both dev and prod container names are listed so the same config
-    # file works across profiles; whichever container isn't running just
-    # shows up as "down" in the targets list.
 
   - job_name: prometheus
     static_configs:

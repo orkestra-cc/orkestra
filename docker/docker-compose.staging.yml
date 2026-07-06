@@ -1,8 +1,6 @@
 # ORKESTRA Staging Environment Docker Compose
 # Production-like behavior with staging credentials and URLs
 
-name: orkestra-staging
-
 services:
   backend:
     # Hot reload (AIR) on staging — bind-mounted source, no image build.
@@ -10,7 +8,9 @@ services:
     # but the binary is rebuilt on every save. Switch back to production
     # build by restoring the `build:` block + removing `command:` + bind mount.
     image: dhi.io/golang:1
-    container_name: orkestra-backend
+    container_name: ${APP_NAME}-backend-${ENV}
+    labels:
+      orkestra.stack: ${APP_NAME}-${ENV}
     user: "1000:1000"
     working_dir: /app
     restart: unless-stopped
@@ -150,7 +150,10 @@ services:
       # Defaults below target the rustfs service in docker-compose.infra.yml.
       # Swap STORAGE_ENDPOINT to an AWS S3 (and set STORAGE_FORCE_PATH_STYLE=false)
       # for production-grade managed storage.
-      STORAGE_ENDPOINT: ${STORAGE_ENDPOINT:-http://orkestra-rustfs:9000}
+      # Default uses the `rustfs` SERVICE name (resolves on the stack network
+      # regardless of APP_NAME/ENV); the old container-name default
+      # `orkestra-rustfs` broke once containers became namespaced.
+      STORAGE_ENDPOINT: ${STORAGE_ENDPOINT:-http://rustfs:9000}
       STORAGE_REGION: ${STORAGE_REGION:-us-east-1}
       STORAGE_BUCKET: ${STORAGE_BUCKET:-orkestra-avatars}
       STORAGE_ACCESS_KEY: ${STORAGE_ACCESS_KEY:-orkestra}
@@ -167,13 +170,11 @@ services:
     volumes:
       - ../backend:/app
       - ./keys:/app/keys
-      - orkestra-backend-logs-staging:/app/logs
-      - orkestra-backend-uploads-staging:/app/uploads
+      - backend-logs:/app/logs
+      - backend-uploads:/app/uploads
     # Required when the Docker daemon runs with userns-remap so the
     # bind-mounted ../backend source keeps host uid 1000 ownership.
     userns_mode: "host"
-    networks:
-      - orkestra-network
     # DNS inherits from the Docker daemon (`/etc/docker/daemon.json` →
     # `dns: ["192.168.88.4", ...]`). Don't override here unless this host's
     # firewall blocks the upstream — public resolvers (8.8.8.8, 1.1.1.1)
@@ -192,7 +193,9 @@ services:
 
   frontend-admin:
     image: dhi.io/node:24-dev
-    container_name: orkestra-frontend-admin
+    container_name: ${APP_NAME}-frontend-admin-${ENV}
+    labels:
+      orkestra.stack: ${APP_NAME}-${ENV}
     user: "1000:1000"
     userns_mode: "host"
     working_dir: /app
@@ -218,8 +221,6 @@ services:
       - ../frontend-admin:/app
       - ../frontend-admin/.vite-cache:/app/.vite
       - ../frontend-admin/.npm-cache:/app/.npm-cache
-    networks:
-      - orkestra-network
     depends_on:
       - backend
     # Regenerate public/config.js from the VITE_* env vars BEFORE `npm run
@@ -261,7 +262,9 @@ services:
   # inside the container network.
   client-frontend:
     image: node:24-alpine
-    container_name: orkestra-client-frontend
+    container_name: ${APP_NAME}-client-frontend-${ENV}
+    labels:
+      orkestra.stack: ${APP_NAME}-${ENV}
     user: "1000:1000"
     userns_mode: "host"
     working_dir: /app
@@ -282,8 +285,6 @@ services:
       - ../frontend-client:/app
       - ../frontend-client/.vite-cache:/app/.vite
       - ../frontend-client/.npm-cache:/app/.npm-cache
-    networks:
-      - orkestra-network
     command: ["sh", "-c", "npm install && npm run dev -- --host 0.0.0.0"]
     # Probes the in-process /health endpoint registered by the Vite
     # plugin in frontend-client/vite.config.ts. start_period covers a
@@ -296,11 +297,7 @@ services:
       start_period: 30s
 
 volumes:
-  orkestra-backend-logs-staging:
+  backend-logs:
     driver: local
-  orkestra-backend-uploads-staging:
+  backend-uploads:
     driver: local
-
-networks:
-  orkestra-network:
-    external: true

@@ -28,7 +28,7 @@ positions:
   filename: /tmp/positions.yaml
 
 clients:
-  - url: http://orkestra-loki:3100/loki/api/v1/push
+  - url: http://loki:3100/loki/api/v1/push
     # batch_wait controls latency from log emit → Loki query
     # visibility. 1s is the Promtail default; lowering it makes tail
     # interactive at the cost of more HTTP traffic.
@@ -44,12 +44,15 @@ scrape_configs:
     docker_sd_configs:
       - host: unix:///var/run/docker.sock
         refresh_interval: 5s
-        # Only attach to containers explicitly labelled as part of
-        # this network. The Orkestra compose files all use the
-        # external `orkestra-network` so this filter is reliable.
+        # Only attach to containers belonging to this stack. Each
+        # compose project now runs on its own default network (the
+        # shared `orkestra-network` was removed), so we scope by the
+        # per-stack `orkestra.stack` label instead — this container
+        # runs with `-config.expand-env=true` and a `STACK` env var
+        # (Task 6) so `${STACK}` expands to this stack's identifier.
         filters:
-          - name: network
-            values: ["orkestra-network"]
+          - name: label
+            values: ["orkestra.stack=${STACK}"]
 
     relabel_configs:
       # Map Docker container metadata to Loki labels. Keep cardinality
@@ -70,6 +73,11 @@ scrape_configs:
       # in-payload value when present.
       - source_labels: ["__meta_docker_container_label_com_docker_compose_service"]
         target_label: "service"
+      # Surface which stack this container belongs to as a Loki label,
+      # so lines from multiple concurrently-running stacks (dev/staging/
+      # observability, etc.) can be told apart.
+      - source_labels: ["__meta_docker_container_label_orkestra_stack"]
+        target_label: "stack"
 
     pipeline_stages:
       # Try to parse the line as JSON. If it parses, lift selected

@@ -1,15 +1,15 @@
 # ORKESTRA Production Environment Docker Compose
 # Full security, production credentials
 
-name: orkestra-prod
-
 services:
   backend:
     build:
       context: ../backend
       dockerfile: Dockerfile
       target: production
-    container_name: orkestra-backend
+    container_name: ${APP_NAME}-backend-${ENV}
+    labels:
+      orkestra.stack: ${APP_NAME}-${ENV}
     restart: unless-stopped
     ports:
       - "${BACKEND_PORT:-3000}:3000"
@@ -89,6 +89,13 @@ services:
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT}
       OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-orkestra-backend}
 
+      # Object storage (RustFS — S3-compatible). Backs avatar uploads.
+      # Default uses the `rustfs` SERVICE name (resolves on the stack network
+      # regardless of APP_NAME/ENV); the old container-name default
+      # `orkestra-rustfs` broke once containers became namespaced. Swap to
+      # an AWS S3 endpoint for production-grade managed storage.
+      STORAGE_ENDPOINT: ${STORAGE_ENDPOINT:-http://rustfs:9000}
+
       # Module config (OAuth, SMTP, AI provider keys, per-module enable flags)
       # is owned by ConfigService and edited at /admin/modules. The module
       # ConfigSchema EnvVar fields seed those values from the host environment
@@ -98,8 +105,6 @@ services:
       - ./backend/uploads:/app/uploads
       - ./backend/logs:/app/logs
       - ./keys:/app/keys:ro
-    networks:
-      - orkestra-network
     # Note: mongodb and redis are in docker-compose.infra.yml
     # Ensure infra is running: docker compose -f docker-compose.infra.yml up -d
     healthcheck:
@@ -125,14 +130,14 @@ services:
         # Baked into the JS bundle by Vite's `define` at build time.
         # orkestra.sh exports this from `git describe`.
         ORKESTRA_VERSION: ${ORKESTRA_VERSION:-dev}
-    container_name: orkestra-frontend-admin
+    container_name: ${APP_NAME}-frontend-admin-${ENV}
+    labels:
+      orkestra.stack: ${APP_NAME}-${ENV}
     restart: unless-stopped
     ports:
       - "8080:80"
     volumes:
       - ./frontend-admin/nginx.conf:/etc/nginx/conf.d/default.conf:ro
-    networks:
-      - orkestra-network
     depends_on:
       - backend
     healthcheck:
@@ -140,7 +145,3 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-
-networks:
-  orkestra-network:
-    external: true
