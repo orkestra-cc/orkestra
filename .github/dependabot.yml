@@ -2,6 +2,7 @@ version: 2
 updates:
   - package-ecosystem: gomod
     directory: /backend
+    target-branch: dev
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
@@ -9,6 +10,7 @@ updates:
 
   - package-ecosystem: npm
     directory: /frontend-admin
+    target-branch: dev
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
@@ -16,6 +18,7 @@ updates:
 
   - package-ecosystem: github-actions
     directory: /
+    target-branch: dev
     schedule:
       interval: weekly
     open-pull-requests-limit: 3
@@ -23,6 +26,7 @@ updates:
 
   - package-ecosystem: pub
     directory: /mobile
+    target-branch: dev
     schedule:
       interval: weekly
     open-pull-requests-limit: 3
