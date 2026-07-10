@@ -392,23 +392,28 @@ func printJWTWarning(err error) {
 	fmt.Printf(warning, err)
 }
 
-// defaultOperatorCookieDomain returns the dev fallback for the operator
-// refresh-cookie scope. Empty in non-dev so a misconfigured prod deploy
-// fails closed (the cookie is set without a Domain attribute, scoped to
-// whatever host minted it) rather than silently leaking across hosts.
-func defaultOperatorCookieDomain(env string) string {
-	if env == "development" {
-		return "console.localhost"
-	}
+// defaultOperatorCookieDomain returns the fallback for the operator
+// refresh-cookie scope. Empty everywhere by default so the cookie is
+// host-only (no Domain attribute) — scoped to whatever host minted it.
+//
+// In dev the frontend and backend are co-located on a single host (localhost,
+// a *.localhost alias, OR a LAN IP for multi-device testing), so a host-only
+// cookie round-trips on every access pattern. A fixed "console.localhost"
+// default silently broke LAN-IP / hostname access: a cookie scoped to
+// console.localhost is never sent to 192.168.x.x, and an IP literal cannot be
+// a cookie Domain at all — so the browser dropped the refresh cookie and every
+// page refresh bounced the user to /login. Set OPERATOR_COOKIE_DOMAIN
+// explicitly only for a cross-subdomain deployment (e.g. console.example.com
+// sharing a parent-domain cookie with api.example.com). Non-dev is likewise
+// empty so a misconfigured prod deploy fails closed rather than leaking across
+// hosts.
+func defaultOperatorCookieDomain(_ string) string {
 	return ""
 }
 
 // defaultClientCookieDomain mirrors defaultOperatorCookieDomain for the
 // client surface (api.*).
-func defaultClientCookieDomain(env string) string {
-	if env == "development" {
-		return "api.localhost"
-	}
+func defaultClientCookieDomain(_ string) string {
 	return ""
 }
 

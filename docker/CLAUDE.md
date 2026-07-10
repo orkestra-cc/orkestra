@@ -341,8 +341,8 @@ The host mux ([cmd/server/hostmux.go](../backend/cmd/server/hostmux.go)) strips 
 | `CLIENT_CORS_ORIGINS` | CORS allowlist for client mux | falls back to `CORS_ORIGINS` |
 | `OPERATOR_RATE_LIMIT_REQUESTS_PER_MINUTE` / `_BURST` | Per-audience throttling | falls back to `RATE_LIMIT_*` |
 | `CLIENT_RATE_LIMIT_REQUESTS_PER_MINUTE` / `_BURST` | Per-audience throttling | falls back to `RATE_LIMIT_*` |
-| `OPERATOR_COOKIE_DOMAIN` | Refresh-cookie `Domain=` for operator-tier tokens (ADR-0003 PR-D D-9). | `console.localhost` (dev) / empty (prod, operator-set) |
-| `CLIENT_COOKIE_DOMAIN` | Refresh-cookie `Domain=` for client-tier tokens. | `api.localhost` (dev) / empty (prod, operator-set) |
+| `OPERATOR_COOKIE_DOMAIN` | Refresh-cookie `Domain=` for operator-tier tokens (ADR-0003 PR-D D-9). | **empty / host-only** (dev — works on localhost, *.localhost, AND a LAN IP) / empty (prod, operator-set for cross-subdomain) |
+| `CLIENT_COOKIE_DOMAIN` | Refresh-cookie `Domain=` for client-tier tokens. | **empty / host-only** (dev) / empty (prod, operator-set for cross-subdomain) |
 | `OPERATOR_FRONTEND_URL` | Operator-tier SPA origin (`console.*`) used to build verify-email / reset-password links in transactional email. | falls back to `FRONTEND_URL` |
 | `CLIENT_FRONTEND_URL` | Client-tier SPA origin (`app.*`) used to build verify-email / reset-password links for signups landing on the client API host. | falls back to `FRONTEND_URL` |
 

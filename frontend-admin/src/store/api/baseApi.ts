@@ -457,4 +457,25 @@ export const TENANT_SCOPED_TAGS = [
   'OrgInvite'
 ] as const;
 
+// Addon-owned tenant-scoped tags. An addon declares its RTK Query tags in its
+// OWN slice (via `baseApi.enhanceEndpoints`) and registers them here so the
+// tenant switcher invalidates them on tenant change WITHOUT editing this shared
+// file per addon (the addon self-registration seam). Registration fires when
+// the addon's slice module is imported. The core-only base registers nothing;
+// a fork's slices populate this at import time.
+const addonTenantScopedTags = new Set<string>();
+
+export const registerTenantScopedTags = (tags: readonly string[]): void => {
+  for (const t of tags) addonTenantScopedTags.add(t);
+};
+
+// The exact argument type `baseApi.util.invalidateTags` expects. Addon tags are
+// intentionally NOT in baseApi's static TagType union (they live on each addon's
+// enhanced api), so we assert the runtime-safe shape here once — RTK ignores
+// unknown tags at runtime, and this keeps every call site clean and typed.
+type InvalidateArg = Parameters<typeof baseApi.util.invalidateTags>[0];
+
+export const getTenantScopedTags = (): InvalidateArg =>
+  [...TENANT_SCOPED_TAGS, ...addonTenantScopedTags] as unknown as InvalidateArg;
+
 export default baseApi;

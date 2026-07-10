@@ -9,11 +9,11 @@
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
     "@emotion/styled": "^11.14.1",
-    "@fortawesome/fontawesome-free": "^7.1.0",
-    "@fortawesome/fontawesome-svg-core": "^7.1.0",
-    "@fortawesome/free-brands-svg-icons": "^7.1.0",
-    "@fortawesome/free-regular-svg-icons": "^7.1.0",
-    "@fortawesome/free-solid-svg-icons": "^7.1.0",
+    "@fortawesome/fontawesome-free": "^7.3.0",
+    "@fortawesome/fontawesome-svg-core": "^7.3.0",
+    "@fortawesome/free-brands-svg-icons": "^7.3.0",
+    "@fortawesome/free-regular-svg-icons": "^7.3.0",
+    "@fortawesome/free-solid-svg-icons": "^7.3.0",
     "@fortawesome/react-fontawesome": "^3.3.1",
     "@fullcalendar/bootstrap": "^6.1.21",
     "@fullcalendar/daygrid": "^6.1.21",
@@ -36,12 +36,12 @@
     "cytoscape": "^3.33.1",
     "cytoscape-fcose": "^2.2.0",
     "dayjs": "^1.11.13",
-    "dompurify": "^3.2.6",
+    "dompurify": "^3.4.11",
     "echarts": "^6.1.0",
     "echarts-for-react": "^3.0.2",
     "emoji-picker-react": "^4.19.1",
     "fuse.js": "^7.1.0",
-    "i18next": "^23.16.8",
+    "i18next": "^26.3.6",
     "i18next-browser-languagedetector": "^8.2.1",
     "imask": "^7.6.1",
     "leaflet": "^1.9.4",
@@ -138,6 +138,6 @@
     "vitest": "^3.2.3"
   },
   "optionalDependencies": {
-    "@rollup/rollup-win32-x64-msvc": "^4.62.0"
+    "@rollup/rollup-win32-x64-msvc": "^4.62.2"
   }
 }

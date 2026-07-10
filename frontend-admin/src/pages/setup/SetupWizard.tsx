@@ -99,6 +99,10 @@ const SetupWizard = () => {
               setOrgName(createdName);
               handleNext();
             }}
+            onSkip={() => {
+              setOrgName('');
+              handleNext();
+            }}
           />
         );
       case 4:

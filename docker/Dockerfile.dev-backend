@@ -10,7 +10,7 @@
 #   docker compose -f docker-compose.dev.yml build \
 #     --build-arg GO_BASE=dhi.io/golang:1 orkestra-backend
 # (a non-Alpine base may need the apk line below adapted).
-ARG GO_BASE=golang:1.25.11-alpine
+ARG GO_BASE=golang:1.25.12-alpine
 FROM ${GO_BASE}
 
 RUN apk add --no-cache git build-base \

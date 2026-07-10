@@ -24,20 +24,16 @@ jobs:
 
       - uses: actions/setup-go@v6
         with:
-          go-version: '1.25.11'
+          go-version: '1.25.12'
 
       - name: Install govulncheck
         run: go install golang.org/x/vuln/cmd/govulncheck@latest
 
       - name: Run govulncheck
-        # Allowlist mirrors backend.yml's Vulnerability Check job: keep both
-        # gates in sync so a known-accepted upstream advisory doesn't fail one
-        # workflow while the other lets it through. See backend/CLAUDE.md for
-        # the policy on adding entries.
-        #
-        # GO-2026-4887 — Moby AuthZ plugin bypass on oversized request bodies.
-        # GO-2026-4883 — Moby off-by-one in plugin privilege validation.
-        # Both are daemon-side issues; we consume the SDK only.
+        # Reads the shared allowlist (backend/.vulncheck-allowlist.txt) — the
+        # SAME source of truth as backend.yml's `make backend-vulncheck` — so
+        # the two govulncheck gates can never drift out of sync. See
+        # backend/CLAUDE.md for the policy on adding entries.
         run: |
           set +e
           govulncheck -format=json ./... > /tmp/govuln.json
@@ -49,7 +45,7 @@ jobs:
           echo "Reachable vulnerability IDs:"
           echo "${reachable_ids:-<none>}"
 
-          allowlist="GO-2026-4887 GO-2026-4883"
+          allowlist=$(grep -vE '^[[:space:]]*(#|$)' .vulncheck-allowlist.txt | tr '\n' ' ')
 
           unaccepted=""
           for id in $reachable_ids; do

@@ -2017,6 +2017,8 @@
       "defaultFirstName": "Default",
       "submit": "Create organization",
       "submitting": "Creating…",
+      "skip": "Skip for now",
+      "skipHint": "Prefer to set this up later? You can create an organization any time from Administration → Internal Tenants.",
       "errorNameRequired": "Organization name is required.",
       "errorSlugInvalid": "Slug must contain only lowercase letters, digits, and hyphens.",
       "errorSlugConflict": "An organization with slug \"{{slug}}\" already exists. Pick a different slug.",
@@ -2025,7 +2027,7 @@
     "finish": {
       "title": "Orkestra is ready",
       "bodyWithOrg": "Your administrator account has been created, you're signed in, and the organization <strong>{{orgName}}</strong> is active. You can rename it or create more organizations later.",
-      "bodyWithoutOrg": "Your administrator account has been created, you're signed in, and the setup wizard will not appear again.",
+      "bodyWithoutOrg": "Your administrator account has been created and you're signed in. No organization was created — you can add one any time from Administration → Internal Tenants. The setup wizard won't appear again.",
       "smtpWarning": "<strong>SMTP is not configured.</strong> Password-reset and verification mail will log to the backend stdout instead of being delivered. Configure it any time from <code>/admin/modules</code> under the notification module.",
       "goToDashboard": "Go to the dashboard"
     }
