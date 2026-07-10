@@ -1,6 +1,6 @@
 module github.com/orkestra/backend
 
-go 1.25.11
+go 1.25.12
 
 // ADR-0006 (Phase 1): the SDK (pkg/sdk), the OpenAPI-auth helper
 // (internal/shared/openapiauth), and all addons (internal/addons/*)
