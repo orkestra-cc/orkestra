@@ -69,11 +69,20 @@ jobs:
             )
           done
 
+      # git-cliff's [remote.github] integration enriches entries via the
+      # GitHub API. Without a token those calls are unauthenticated (60/hr)
+      # and a release with many commits exhausts the limit → HTTP 403 →
+      # git-cliff panics (exit 101). Pass the workflow token so the calls
+      # are authenticated (5000/hr). This bit v0.3.15's first attempt.
       - name: Generate full CHANGELOG.md (all history through this tag)
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: git-cliff --tag "${{ steps.tag.outputs.tag }}" -o CHANGELOG.md
 
       - name: Generate release body (commits since last tag → this tag)
         id: body
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           # --latest emits only the most recent release section, which is
           # exactly what the Release body should show.
