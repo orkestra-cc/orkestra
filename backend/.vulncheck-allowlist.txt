@@ -11,3 +11,9 @@ GO-2026-4887
 
 # Moby off-by-one in plugin privilege validation. Same daemon-side scope.
 GO-2026-4883
+
+# x/crypto/openpgp — unmaintained, unsafe-by-design, no upstream fix (all
+# versions affected). Pulled in transitively; not imported by our code
+# directly. Re-evaluate (and drop the offending dep) if a maintained fork
+# becomes reachable instead.
+GO-2026-5932
