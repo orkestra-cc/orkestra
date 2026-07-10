@@ -15,6 +15,13 @@ updates:
       interval: weekly
     open-pull-requests-limit: 5
     labels: [dependencies, npm]
+    # @fortawesome/* packages must move in lockstep — a lone bump (e.g.
+    # free-regular ahead of svg-core) skews IconDefinition types and breaks
+    # `tsc`. Group them so Dependabot always proposes them together.
+    groups:
+      fortawesome:
+        patterns:
+          - '@fortawesome/*'
 
   - package-ecosystem: github-actions
     directory: /
