@@ -15,7 +15,7 @@ import {
 } from 'store/slices/tenantSlice';
 import { useListAllOrgsAdminQuery } from 'store/api/tenantApi';
 import { useAuth } from 'hooks/auth/useAuthRTK';
-import { baseApi, TENANT_SCOPED_TAGS } from 'store/api/baseApi';
+import { baseApi, getTenantScopedTags } from 'store/api/baseApi';
 
 type TierFilter = 'all' | 'internal' | 'external';
 
@@ -88,19 +88,19 @@ const NineDotMenu = () => {
       dispatch(stopImpersonation());
     }
     dispatch(setCurrentOrg(tenantId));
-    dispatch(baseApi.util.invalidateTags([...TENANT_SCOPED_TAGS]));
+    dispatch(baseApi.util.invalidateTags(getTenantScopedTags()));
     setShow(false);
   };
 
   const onImpersonate = (tenantId: string, tenantName: string) => {
     dispatch(startImpersonation({ tenantId, tenantName }));
-    dispatch(baseApi.util.invalidateTags([...TENANT_SCOPED_TAGS]));
+    dispatch(baseApi.util.invalidateTags(getTenantScopedTags()));
     setShow(false);
   };
 
   const onStopImpersonation = () => {
     dispatch(stopImpersonation());
-    dispatch(baseApi.util.invalidateTags([...TENANT_SCOPED_TAGS]));
+    dispatch(baseApi.util.invalidateTags(getTenantScopedTags()));
   };
 
   return (

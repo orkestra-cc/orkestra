@@ -391,16 +391,11 @@ func main() {
 	// Reachable without auth — gated by the "no users exist" invariant
 	// enforced inside setup.Service.CreateInitialAdmin. Operator-only:
 	// the initial admin is a Tier-1 super_admin, so the wizard lives on
-	// the operator host.
-	// The tenant service (core, always present) satisfies InternalTenantSeeder
-	// so the wizard can bootstrap the single internal tenant for the first
-	// admin. Resolved as the interface so main.go stays free of the concrete
-	// tenant/services import; optional so a build without tenant still boots.
-	internalTenantSeeder, _ := module.GetTyped[setup.InternalTenantSeeder](svcRegistry, module.ServiceTenantService)
+	// the operator host. Admin creation does not create a tenant — the
+	// wizard's OrgStep is the explicit (skippable) tenant-creation step.
 	setupSvc := setup.NewService(
 		module.MustGetTyped[iface.UserProvider](svcRegistry, module.ServiceUserService),
 		module.MustGetTyped[setup.AdminCreator](svcRegistry, module.ServicePasswordAuthService),
-		internalTenantSeeder,
 		configService,
 		logger,
 	)

@@ -425,48 +425,6 @@ func (s *Service) CreateTenant(ctx context.Context, ownerUUID string, input mode
 	return t, nil
 }
 
-// EnsureInternalTenant bootstraps the platform's single internal tenant at
-// first install. It creates one internal tenant owned by ownerUUID when no
-// active internal tenant exists yet, and is a no-op once one does (idempotent).
-//
-// Returns the tenant UUID (created or pre-existing), or empty string when it
-// could not resolve one. Called server-side by the setup flow, so it bypasses
-// the handler-level `manual` provisioning gate by construction — but it still
-// goes through CreateTenant, which enforces the `single` count invariant, so
-// it can never produce a second internal tenant. The signature uses only
-// primitives so the setup package can depend on it without importing
-// tenant/models.
-func (s *Service) EnsureInternalTenant(ctx context.Context, ownerUUID, name string) (string, error) {
-	if strings.TrimSpace(ownerUUID) == "" {
-		return "", errors.New("tenant: EnsureInternalTenant requires ownerUUID")
-	}
-	n, err := s.repo.CountActiveByKind(ctx, models.TenantKindInternal)
-	if err != nil {
-		return "", err
-	}
-	if n > 0 {
-		// Already bootstrapped — return the existing internal tenant so the
-		// caller has a UUID to log/attach against.
-		existing, err := s.repo.ListTenantsByKind(ctx, models.TenantKindInternal, false)
-		if err != nil || len(existing) == 0 {
-			return "", err
-		}
-		return existing[0].UUID, nil
-	}
-	name = strings.TrimSpace(name)
-	if name == "" {
-		name = "Internal"
-	}
-	t, err := s.CreateTenant(ctx, ownerUUID, models.CreateTenantInput{
-		Name: name,
-		Kind: models.TenantKindInternal,
-	})
-	if err != nil {
-		return "", err
-	}
-	return t.UUID, nil
-}
-
 // CreateExternalTenant is the dedicated factory for Tier-2 tenants (external
 // clients registering on the platform). The caller is typically the
 // onboarding module (Phase 3). signupChannel distinguishes self-serve

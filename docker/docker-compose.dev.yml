@@ -50,11 +50,15 @@ services:
       # Refresh-cookie name — the only cookie set in the browser (the access
       # token lives in SPA memory, so there is no access-token cookie).
       COOKIE_NAME_REFRESH: ${COOKIE_NAME_REFRESH:-orkestra_cookie}
-      # ADR-0003 PR-D D-9: per-audience refresh-cookie domains. Dev defaults
-      # align with the *.localhost host defaults below. An empty value mints
-      # the cookie without a Domain attribute (scoped to the minting host).
-      OPERATOR_COOKIE_DOMAIN: ${OPERATOR_COOKIE_DOMAIN:-console.localhost}
-      CLIENT_COOKIE_DOMAIN: ${CLIENT_COOKIE_DOMAIN:-api.localhost}
+      # ADR-0003 PR-D D-9: per-audience refresh-cookie domains. Default EMPTY
+      # in dev so the cookie is host-only (no Domain attribute), scoped to
+      # whatever host minted it — which round-trips on localhost, *.localhost,
+      # AND a LAN IP (multi-device testing). A fixed console.localhost/api.localhost
+      # default silently broke LAN-IP access: the cookie was never sent back to
+      # 192.168.x.x, so every refresh bounced to /login. Set these explicitly
+      # only for a cross-subdomain deployment.
+      OPERATOR_COOKIE_DOMAIN: ${OPERATOR_COOKIE_DOMAIN:-}
+      CLIENT_COOKIE_DOMAIN: ${CLIENT_COOKIE_DOMAIN:-}
       COOKIE_HTTP_ONLY: ${COOKIE_HTTP_ONLY:-true}
       COOKIE_SECURE: ${COOKIE_SECURE:-false}
       COOKIE_SAME_SITE: ${COOKIE_SAME_SITE:-lax}

@@ -10,7 +10,7 @@ import {
   startImpersonation,
   stopImpersonation
 } from 'store/slices/tenantSlice';
-import { baseApi, TENANT_SCOPED_TAGS } from 'store/api/baseApi';
+import { baseApi, getTenantScopedTags } from 'store/api/baseApi';
 import type { Org } from 'store/api/tenantApi';
 
 interface Props {
@@ -46,13 +46,13 @@ const ImpersonateButton: React.FC<Props> = ({ org }) => {
 
   const onImpersonate = () => {
     dispatch(startImpersonation({ tenantId: org.id, tenantName: org.name }));
-    dispatch(baseApi.util.invalidateTags([...TENANT_SCOPED_TAGS]));
+    dispatch(baseApi.util.invalidateTags(getTenantScopedTags()));
     toast.info(t('adminClients.impersonate.toastStarted', { name: org.name }));
   };
 
   const onStop = () => {
     dispatch(stopImpersonation());
-    dispatch(baseApi.util.invalidateTags([...TENANT_SCOPED_TAGS]));
+    dispatch(baseApi.util.invalidateTags(getTenantScopedTags()));
     toast.info(t('adminClients.impersonate.toastStopped'));
   };
 

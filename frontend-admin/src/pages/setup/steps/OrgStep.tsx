@@ -13,6 +13,12 @@ interface OrgStepProps {
    */
   adminFullName: string;
   onNext: (orgName: string) => void;
+  /**
+   * Skip creating an organization and advance to the final step. The wizard
+   * finishes with zero tenants; the operator can create one later from
+   * Administration → Internal Tenants.
+   */
+  onSkip: () => void;
 }
 
 /**
@@ -42,7 +48,7 @@ const slugify = (input: string): string =>
  * support a "free tier bootstrap" for a SaaS build, promote this to
  * an env-var-driven default.
  */
-const OrgStep = ({ adminFullName, onNext }: OrgStepProps) => {
+const OrgStep = ({ adminFullName, onNext, onSkip }: OrgStepProps) => {
   const { t } = useTranslation();
   const dispatch = useAppDispatch();
   const [createOrg, { isLoading }] = useCreateOrgMutation();
@@ -160,7 +166,16 @@ const OrgStep = ({ adminFullName, onNext }: OrgStepProps) => {
         <Form.Text className="text-muted">{t('setup.org.slugHelp')}</Form.Text>
       </Form.Group>
 
-      <div className="d-flex justify-content-end">
+      <div className="d-flex justify-content-between align-items-center">
+        <Button
+          type="button"
+          variant="link"
+          className="px-0 text-secondary fw-semibold"
+          onClick={onSkip}
+          disabled={isLoading}
+        >
+          {t('setup.org.skip')}
+        </Button>
         <Button type="submit" variant="primary" disabled={isLoading}>
           {isLoading ? (
             <>
@@ -172,6 +187,7 @@ const OrgStep = ({ adminFullName, onNext }: OrgStepProps) => {
           )}
         </Button>
       </div>
+      <p className="text-muted fs-10 mb-0 mt-2">{t('setup.org.skipHint')}</p>
     </Form>
   );
 };
