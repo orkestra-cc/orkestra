@@ -4,6 +4,51 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.3.15] - 2026-07-10
+
+### Features
+
+- **(setup)** Let the wizard OrgStep be skipped (zero-tenant install) ([d86a50a](https://github.com/orkestra-cc/orkestra/commit/d86a50aa537189927b20e23724743c25d5a3f973))
+- **(setup)** Stop auto-bootstrapping an internal tenant at install ([67c38d8](https://github.com/orkestra-cc/orkestra/commit/67c38d8280e53dc4f03e1a4c4f42e22ab45dc1aa))
+- **(store)** Tenant-scoped-tag registry for addon-owned cache tags ([65f9ff5](https://github.com/orkestra-cc/orkestra/commit/65f9ff5f8014ed9831c9ba328f6e8ac7db86427c))
+
+### Bug fixes
+
+- **(frontend-admin)** Align @fortawesome/* to 7.3 to unbreak tsc ([71e3c97](https://github.com/orkestra-cc/orkestra/commit/71e3c97facc536c565a33e9568bbb4bd70d7f7c6))
+- **(dev)** Host-only refresh cookies so LAN-IP / hostname access persists ([bdcbb7a](https://github.com/orkestra-cc/orkestra/commit/bdcbb7ab121f0d540cd564810f2c4d47dd8e47da))
+- **(navigation)** Show operator menus when acting without a tenant ([575fa7c](https://github.com/orkestra-cc/orkestra/commit/575fa7cf3029c988bd6341bd0353a3076fe985f6))
+
+### Refactor
+
+- **(modules)** Auto-discover addon manifests via glob ([882bf9d](https://github.com/orkestra-cc/orkestra/commit/882bf9d417b4cace59953b8f66e0d7b483242de8))
+
+### Tests
+
+- **(setup)** Cover OrgStep create path; guide skip Finish copy to Internal Tenants ([3297781](https://github.com/orkestra-cc/orkestra/commit/32977810102fe06929f5c638ccaf667dcb515066))
+
+### Build
+
+- **(deps)** Bump Go 1.25.11 → 1.25.12 to clear govulncheck gate ([b3f1702](https://github.com/orkestra-cc/orkestra/commit/b3f1702636d410e9291481f051ceec3d77ffe3f0))
+
+### CI
+
+- **(security)** Read the shared allowlist in the Security Scan gate ([4c90e0d](https://github.com/orkestra-cc/orkestra/commit/4c90e0de8b488afc3c80a4dfbd4bff2cb3a339ce))
+- **(dependabot)** Target the dev integration branch ([469eb54](https://github.com/orkestra-cc/orkestra/commit/469eb5449d9adffc3370c617d8e1fe0d0f468fcd))
+
+### Dependencies
+
+- **(deps)** Bump github.com/aws/aws-sdk-go-v2/config in /backend ([0a4ba44](https://github.com/orkestra-cc/orkestra/commit/0a4ba44748536f86393b17df7bd1ea12c15e9a1e))
+- **(deps)** Bump github.com/aws/aws-sdk-go-v2/service/s3 in /backend ([584cdd3](https://github.com/orkestra-cc/orkestra/commit/584cdd3df5275953c354f3144d283bf2a6336c41))
+- **(deps)** Bump golang.org/x/tools from 0.47.0 to 0.48.0 in /backend ([4ac0e44](https://github.com/orkestra-cc/orkestra/commit/4ac0e441e7a0627c17ec8707535e9da85afe31c6))
+- **(deps)** Bump golang.org/x/crypto from 0.53.0 to 0.54.0 in /backend ([fbc1f07](https://github.com/orkestra-cc/orkestra/commit/fbc1f078762d552eab08ed372a668b4895109f65))
+- **(deps)** Bump github.com/aws/aws-sdk-go-v2/credentials in /backend ([ee02baf](https://github.com/orkestra-cc/orkestra/commit/ee02baf17cf5eaa5f6a9c48067bacc8a84239ca2))
+- **(deps)** Bump @fortawesome/free-regular-svg-icons in /frontend-admin ([72851ae](https://github.com/orkestra-cc/orkestra/commit/72851ae9d010997c962c09d4cd275f00aff4701c))
+- **(deps)** Bump @rollup/rollup-win32-x64-msvc in /frontend-admin ([b3b5e36](https://github.com/orkestra-cc/orkestra/commit/b3b5e36323446804cc46395835bc9bed296ed1a4))
+- **(deps)** Bump dompurify from 3.4.2 to 3.4.11 in /frontend-admin ([ec5e858](https://github.com/orkestra-cc/orkestra/commit/ec5e85847be6d38aaf385593e4d07e110e918733))
+- **(deps)** Bump build_runner from 2.6.1 to 2.15.1 in /mobile ([e64126c](https://github.com/orkestra-cc/orkestra/commit/e64126cd1b7621e016f0c1b7d86599ad1a299065))
+- **(deps)** Bump i18next from 23.16.8 to 26.3.6 in /frontend-admin ([4c08163](https://github.com/orkestra-cc/orkestra/commit/4c0816304cc821ce496aa96d9b120aab9dd0c5e8))
+- **(deps)** Bump uuid from 13.0.2 to 14.0.1 in /frontend-admin ([b18b933](https://github.com/orkestra-cc/orkestra/commit/b18b9336ceb7f50badfa2daf4f6b328d4c6efdc5))
+
 ## [0.3.14] - 2026-07-06
 
 ### Core
