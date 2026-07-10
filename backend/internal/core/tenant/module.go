@@ -41,16 +41,16 @@ func (m *Module) Dependencies() []string { return []string{"user"} }
 // config. Read at request time by the service's ProvisioningModeResolver — edits
 // at /admin/modules/tenant take effect on the next creation with no restart.
 //
-// Both default to "manual" (admin-only creation): a fresh install bootstraps a
-// single internal tenant for the first admin (see setup flow) and otherwise
-// expects an operator to create tenants deliberately. External clients are
-// never auto-provisioned and cannot self-create a tenant — only a platform
-// admin creates a client tenant and assigns it to a Tier-2 user.
+// Both default to "manual" (admin-only creation): a fresh install starts with
+// zero tenants and expects an operator to create them deliberately — the first
+// internal tenant is created from the setup wizard's OrgStep or the admin UI.
+// External clients are never auto-provisioned and cannot self-create a tenant —
+// only a platform admin creates a client tenant and assigns it to a Tier-2 user.
 func (m *Module) ConfigSchema() []module.ConfigField {
 	return []module.ConfigField{
 		{
 			Key: "provisioning.internal.mode", Label: "Internal tenant creation", Group: "Provisioning",
-			Description: "Who may create internal (operator-tier) tenants. open: any authenticated user. manual (default): only platform administrators (system.tenants.admin). single: lock the platform to one internal tenant — once one exists, creation is blocked. A fresh install auto-creates the first internal tenant for the initial admin regardless of this setting.",
+			Description: "Who may create internal (operator-tier) tenants. open: any authenticated user. manual (default): only platform administrators (system.tenants.admin). single: lock the platform to one internal tenant — once one exists, creation is blocked. A fresh install starts with zero internal tenants; the first is created from the setup wizard or the admin UI.",
 			Type:        module.FieldEnum, Default: models.ProvisioningModeManual,
 			Options: []string{models.ProvisioningModeOpen, models.ProvisioningModeManual, models.ProvisioningModeSingle},
 			EnvVar:  "TENANT_PROVISIONING_INTERNAL_MODE",

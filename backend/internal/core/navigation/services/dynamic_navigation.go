@@ -129,6 +129,17 @@ func tierAllows(tier, tenantKind string) bool {
 
 func (s *dynamicNavigationService) GetNavigationForUser(ctx context.Context, userRole string) (*models.NavigationResponse, error) {
 	tenantKind := ctxauth.TenantKindFromContext(ctx)
+	// /v1/navigation is operator-only (registered on ri.Operator.ProtectedRouter).
+	// An operator acting without a resolved tenant — e.g. a fresh install with
+	// zero internal tenants, or before an org is selected — has an empty
+	// tenantKind. Default it to internal so the operator (platform /
+	// Administration) menus still render; otherwise tierAllows drops every
+	// Tier:"internal" item and a zero-tenant super_admin sees only untiered
+	// entries. When the operator IS acting in a tenant (internal, or external
+	// via X-Tenant-ID / impersonation), that resolved kind is used unchanged.
+	if tenantKind == "" {
+		tenantKind = iface.TenantKindInternal
+	}
 
 	// Load persisted ordering overrides up front, self-heal against the
 	// known parent/child key sets. Failure here degrades to declared
