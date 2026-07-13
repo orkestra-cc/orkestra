@@ -169,6 +169,11 @@ services:
       # image-build time. The container has no git, so this passthrough
       # is how the host's tag reaches Vite's `define` substitution.
       ORKESTRA_VERSION: ${ORKESTRA_VERSION:-dev}
+      # Deployment identity surfaced in the SPA footer (bucket A + B).
+      # orkestra.sh computes these on the host; the container has no git.
+      APP_NAME: ${APP_NAME:-orkestra}
+      ORKESTRA_CLONE_VERSION: ${ORKESTRA_CLONE_VERSION:-dev}
+      ORKESTRA_BUILD_COMMIT: ${ORKESTRA_BUILD_COMMIT:-}
       NODE_OPTIONS: "--max-old-space-size=4096"
       # npm's cache defaults to ~/.npm in the image FS, which is unwritable
       # under a userns-remap daemon + userns_mode:host (image layers are
@@ -196,7 +201,12 @@ services:
           apiUrl: "$${VITE_API_URL}",
           wsUrl: "$${VITE_WS_URL}",
           env: "$${VITE_ENV}",
-          debug: $${VITE_DEBUG}
+          debug: $${VITE_DEBUG},
+          version: "$${ORKESTRA_VERSION}",
+          appName: "$${APP_NAME}",
+          cloneVersion: "$${ORKESTRA_CLONE_VERSION}",
+          buildCommit: "$${ORKESTRA_BUILD_COMMIT}",
+          startedAt: "$$(date -u +'%Y-%m-%d %H:%MZ')"
         };
         EOF
         npm install && npm run dev -- --host 0.0.0.0
