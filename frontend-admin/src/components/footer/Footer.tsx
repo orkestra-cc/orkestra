@@ -1,4 +1,3 @@
-import { Col, Row } from 'react-bootstrap';
 import { config } from 'config/environment';
 
 // Deployment fingerprint. Two buckets, deliberately distinct:
@@ -7,7 +6,7 @@ import { config } from 'config/environment';
 // All values arrive via window.__ORKESTRA_CONFIG__ (runtime config.js), so
 // the line reflects the running container, not what was compiled. Fields
 // that aren't meaningfully populated on a fresh checkout are omitted so the
-// line stays clean.
+// line stays clean. Rendered small + monospace so it reads as a build stamp.
 const Footer = () => {
   const { version, appName, cloneVersion, buildCommit, startedAt, env } =
     config;
@@ -24,21 +23,12 @@ const Footer = () => {
 
   return (
     <footer className="footer">
-      <Row className="justify-content-between text-center fs-10 mt-4 mb-3">
-        <Col sm="auto">
-          <p className="mb-0 text-600">
-            Thank you for creating with us{' '}
-            <span className="d-none d-sm-inline-block">| </span>
-            <br className="d-sm-none" /> {new Date().getFullYear()} &copy;{' '}
-            <a href="https://orkestra.cc">orkestra.cc</a>
-          </p>
-        </Col>
-        <Col sm="auto">
-          <p className="mb-0 text-600 text-truncate mw-100" title={fingerprint}>
-            {fingerprint}
-          </p>
-        </Col>
-      </Row>
+      <p
+        className="mb-3 mt-4 text-center text-truncate text-600 fs-11 font-monospace"
+        title={fingerprint}
+      >
+        {fingerprint}
+      </p>
     </footer>
   );
 };
