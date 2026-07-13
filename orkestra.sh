@@ -763,6 +763,36 @@ resolve_stack_identity() {
     : "${APP_NAME:=orkestra}"
     STACK="${APP_NAME}-${ENV}"
     export COMPOSE_PROJECT_NAME="$STACK"
+
+    # Clone identity surfaced in the SPA footer. The container has no git,
+    # so the host computes these and passes them through docker-compose,
+    # mirroring ORKESTRA_VERSION.
+    #
+    #   ORKESTRA_CLONE_VERSION — curated clone release version (bucket A).
+    #     Derived from a clone-specific tag prefix: APP_NAME minus a leading
+    #     "orkestra-" (orkestra-commons -> commons -> tags "commons-v*").
+    #     Falls back to "dev" when this clone has cut no release tag yet
+    #     (a bare SHA would duplicate ORKESTRA_BUILD_COMMIT below).
+    #   ORKESTRA_BUILD_COMMIT — short SHA of the deployed code (bucket B).
+    local clone_name clone_prefix clone_desc
+    clone_name="${APP_NAME#orkestra-}"
+    clone_prefix="${clone_name}-v"
+    if command -v git > /dev/null 2>&1 \
+        && git -C "$PROJECT_ROOT" rev-parse --git-dir > /dev/null 2>&1; then
+        clone_desc=$(git -C "$PROJECT_ROOT" describe --tags \
+            --match "${clone_prefix}*" --dirty 2>/dev/null || true)
+        if [ -n "$clone_desc" ]; then
+            # Strip the "<clone_name>-" prefix, keep the leading "v".
+            ORKESTRA_CLONE_VERSION="${clone_desc#${clone_name}-}"
+        else
+            ORKESTRA_CLONE_VERSION="dev"
+        fi
+        ORKESTRA_BUILD_COMMIT=$(git -C "$PROJECT_ROOT" rev-parse --short HEAD 2>/dev/null || echo "")
+    else
+        ORKESTRA_CLONE_VERSION="dev"
+        ORKESTRA_BUILD_COMMIT=""
+    fi
+    export ORKESTRA_CLONE_VERSION ORKESTRA_BUILD_COMMIT
 }
 
 fullstack_init_env() {
