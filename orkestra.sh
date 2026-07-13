@@ -143,7 +143,10 @@ PROJECT_ROOT="$SCRIPT_DIR"
 if [ -z "${ORKESTRA_VERSION:-}" ]; then
     if command -v git > /dev/null 2>&1 \
         && git -C "$PROJECT_ROOT" rev-parse --git-dir > /dev/null 2>&1; then
-        ORKESTRA_VERSION=$(git -C "$PROJECT_ROOT" describe --tags --always --dirty 2>/dev/null | sed 's/^v//')
+        # --match "v[0-9]*" restricts to UPSTREAM tags — a clone's own
+        # release tags ("<clone>-v*", e.g. commons-v0.1.0) must NOT be
+        # picked up here, or they'd shadow the real base version.
+        ORKESTRA_VERSION=$(git -C "$PROJECT_ROOT" describe --tags --match "v[0-9]*" --always --dirty 2>/dev/null | sed 's/^v//')
     fi
     ORKESTRA_VERSION=${ORKESTRA_VERSION:-dev}
 fi
