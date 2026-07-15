@@ -59,6 +59,18 @@ Nothing is promoted speculatively. A commons with zero adopters per addon is inv
 
 Merges go downstream only. A generic core fix discovered in commons or a product fork is cherry-picked onto a clean branch based on upstream and submitted as an ordinary PR — never merged back wholesale, so addon code cannot leak into the public base.
 
+### D5 — Every commit declares its propagation destination (the `Prop:` trailer)
+
+Each commit made in a chain repo carries a `Prop:` git trailer naming where its content must travel: `upstream` (generic core — cherry-picked to the public base and rides downstream), `private` (fork- or tooling-specific — rides downstream only, never public), or `addon` (a shared addon in commons — rides downstream only). **One category per commit:** a commit that mixes an upstreamable core fix with private customization cannot be cleanly cherry-picked, so the two are committed separately. The upstream candidate set is then derived mechanically —
+
+    git log --format='%(trailers:key=Prop,valueonly)' upstream/dev..commons/dev
+
+— never by re-reading diffs. D5 makes D3's scoped-commit discipline machine-checkable and removes the guesswork that risks the D4 irreversible mistake.
+
+### D6 — Downstream propagation is selective per fork
+
+Everything committed to commons rides downstream through the merge sync, so *which* products receive an update is a **per-sync** decision, not a per-commit one: the operator merges `commons/dev` into the chosen product forks when they choose, not into all of them automatically. A commons change therefore reaches only the forks the operator syncs — per-product isolation and release cadence stay under the operator's control.
+
 ### Reference instance
 
 The pattern's reference instance is **`orkestra-cc/orkestra-commons`** (baseline v0.3.12). The repository is **private**: this ADR and the [docs-site guide](https://docs.orkestra.cc/getting-started/private-forks) document the mechanism fully, but access to the code is granted at the maintainer's discretion.
@@ -76,12 +88,14 @@ The pattern's reference instance is **`orkestra-cc/orkestra-commons`** (baseline
 - **One more repo to keep green.** Commons needs its own CI run per sync; a broken commons blocks every downstream sync.
 - **Promotion is manual.** Cherry-picking and the scoped-commit discipline are human obligations; sloppy mixed commits make promotion a surgery.
 - **Merge conflicts at known hotspots.** The generated OpenAPI spec must be regenerated (never hand-merged), `baseApi.ts` tag arrays are unioned, and **every sync ends with `go build ./...`** — an auto-merge that reports no conflicts can still drop fork-only SDK symbols silently.
+- **A clone can diverge past a clean merge.** A product fork that has drifted far from commons (or was created as a bare snapshot) may need to be *re-baselined* from `commons/dev` — replacing its tree wholesale — rather than absorbing a merge or a stream of cherry-picks. This is a heavier, occasional operation the operator performs deliberately.
 
 ### Forbidden patterns (inherited and extended)
 
 - Everything ADR-0006 forbids, in every repo of the chain.
 - Merging commons or a product branch into an upstream PR branch (D4).
 - Promoting an addon by re-implementing it in commons instead of cherry-picking — the histories must stay connectable.
+- Cherry-picking toward upstream any commit **not** marked `Prop: upstream`, or upstreaming on a guessed classification instead of the declared trailer.
 
 ## Alternatives considered
 
