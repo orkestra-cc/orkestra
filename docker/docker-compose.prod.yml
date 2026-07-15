@@ -130,6 +130,20 @@ services:
         # Baked into the JS bundle by Vite's `define` at build time.
         # orkestra.sh exports this from `git describe`.
         ORKESTRA_VERSION: ${ORKESTRA_VERSION:-dev}
+    # Runtime env consumed by the nginx entrypoint's config.js writer.
+    # Runtime (not build-arg) so a redeploy/restart refreshes these without
+    # rebuilding the image. apiUrl/wsUrl mirror the build-arg source
+    # (VITE_API_URL / VITE_WS_URL) so the runtime config.js — which takes
+    # precedence over the Vite-baked fallback in src/config/environment.ts —
+    # points at the real API, not the entrypoint's localhost dev default.
+    environment:
+      ORKESTRA_ENV: production
+      ORKESTRA_API_URL: ${VITE_API_URL:-https://api.orkestra.cc}
+      ORKESTRA_WS_URL: ${VITE_WS_URL:-wss://api.orkestra.cc/ws}
+      ORKESTRA_VERSION: ${ORKESTRA_VERSION:-dev}
+      ORKESTRA_APP_NAME: ${APP_NAME:-orkestra}
+      ORKESTRA_CLONE_VERSION: ${ORKESTRA_CLONE_VERSION:-dev}
+      ORKESTRA_BUILD_COMMIT: ${ORKESTRA_BUILD_COMMIT:-}
     container_name: ${APP_NAME}-frontend-admin-${ENV}
     labels:
       orkestra.stack: ${APP_NAME}-${ENV}

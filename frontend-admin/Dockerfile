@@ -88,7 +88,12 @@ window.__ORKESTRA_CONFIG__ = {\n\
   apiUrl: "${ORKESTRA_API_URL:-http://console.localhost:3000}",\n\
   wsUrl: "${ORKESTRA_WS_URL:-ws://console.localhost:3000/ws}",\n\
   env: "${ORKESTRA_ENV:-production}",\n\
-  debug: ${ORKESTRA_DEBUG:-false}\n\
+  debug: ${ORKESTRA_DEBUG:-false},\n\
+  version: "${ORKESTRA_VERSION:-dev}",\n\
+  appName: "${ORKESTRA_APP_NAME:-orkestra}",\n\
+  cloneVersion: "${ORKESTRA_CLONE_VERSION:-dev}",\n\
+  buildCommit: "${ORKESTRA_BUILD_COMMIT:-}",\n\
+  startedAt: "$(date -u +'\''%%Y-%%m-%%d %%H:%%MZ'\'')"\n\
 };\n\
 EOF\n\
 ' > /docker-entrypoint.d/10-write-config.sh \

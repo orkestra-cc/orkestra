@@ -20,6 +20,16 @@ interface RuntimeConfig {
   wsUrl?: string;
   env?: Environment | string;
   debug?: boolean;
+  /** Upstream Orkestra base release version, e.g. "0.3.15". */
+  version?: string;
+  /** Deployment name (APP_NAME), e.g. "orkestra-commons". */
+  appName?: string;
+  /** Curated clone release version from CHANGELOG.clone.md, e.g. "v1.2.0". */
+  cloneVersion?: string;
+  /** Short git commit SHA of the deployed code, e.g. "a1b2c3d". */
+  buildCommit?: string;
+  /** UTC instance-start timestamp, e.g. "2026-07-13 10:22Z". */
+  startedAt?: string;
 }
 
 declare global {
@@ -37,6 +47,16 @@ interface EnvironmentConfig {
   wsUrl: string;
   /** Debug mode enabled */
   debug: boolean;
+  /** Upstream Orkestra base release version (e.g. "0.3.15"). */
+  version: string;
+  /** Deployment name (APP_NAME); empty string when unset. */
+  appName: string;
+  /** Clone release version (e.g. "v1.2.0"); "dev" when no clone tag exists. */
+  cloneVersion: string;
+  /** Short git commit SHA of the deployed code; empty string when unset. */
+  buildCommit: string;
+  /** UTC instance-start timestamp; empty string when unset. */
+  startedAt: string;
   /** True if running in production */
   isProduction: boolean;
   /** True if running in staging */
@@ -86,11 +106,23 @@ function createConfig(): EnvironmentConfig {
       ? runtime.debug
       : import.meta.env.VITE_DEBUG === 'true';
 
+  const version =
+    pickString(runtime.version, import.meta.env.VITE_APP_VERSION) ?? 'dev';
+  const appName = pickString(runtime.appName) ?? '';
+  const cloneVersion = pickString(runtime.cloneVersion) ?? 'dev';
+  const buildCommit = pickString(runtime.buildCommit) ?? '';
+  const startedAt = pickString(runtime.startedAt) ?? '';
+
   return {
     env,
     apiUrl,
     wsUrl,
     debug,
+    version,
+    appName,
+    cloneVersion,
+    buildCommit,
+    startedAt,
     isProduction: env === 'production',
     isStaging: env === 'staging',
     isDevelopment: env === 'development',
