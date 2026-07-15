@@ -85,12 +85,26 @@ orkestra (upstream, public, core-only)
 
 Product forks point their `upstream` remote at commons instead of the public repo. Upstream releases flow *through* commons: you merge each release into commons once, then into each product — the same number of per-product syncs you were already doing, except each one now also delivers shared-addon updates.
 
+### What goes where
+
+Working inside commons, four kinds of change route four different ways:
+
+| You changed | `Prop:` trailer | Public upstream? | Product forks? |
+|---|---|---|---|
+| Generic core (reusable by everyone) | `upstream` | Yes — cherry-pick | Yes (merge) |
+| Private core / tooling (branding, release track, config) | `private` | No | Yes (merge) |
+| Shared addon (lives in commons) | `addon` | No | Yes (merge) |
+| Fork-local addon (one product only) | *(not committed to commons)* | No | Only its own fork |
+
+Everything committed to commons rides downstream via the merge sync, so *which* forks receive an update is a per-sync choice. The only per-commit decision that can cause the irreversible mistake is the upward one — which is exactly what the trailer pins down.
+
 ### The rules that make it work
 
 - **An addon is born in the product fork that pays for it.** Commons starts empty; nothing is written there speculatively.
 - **Promotion happens on second use.** When another product needs the addon, cherry-pick its commits to commons. From then on the addon is maintained in commons, and fixes reach every adopter through the ordinary syncs.
 - **Keep addon commits scoped.** Addon changes in commits separate from product-specific customization — that's what makes the promotion cherry-pick clean instead of surgical. Orkestra's addon conventions help: a well-formed addon touches almost nothing outside `internal/addons/<name>/`, `catalog_<name>.go`, and `pages/<name>/` (see [Build your first addon](/sdk/build-your-first-addon)).
 - **Nothing flows upward with addon code in it.** Found a generic core bug in a product fork? Cherry-pick the fix onto a clean branch based on the public upstream and open a normal PR. Never merge a private branch toward upstream.
+- **Tag each commit with its destination.** A `Prop: upstream | private | addon` trailer on every commit lets you derive the exact upstream cherry-pick set with `git log --format='%(trailers:key=Prop,valueonly)' upstream/dev..commons/dev` instead of re-reading diffs — and keeps the irreversible mistake from happening by accident, because only `Prop: upstream` commits are ever cherry-picked up.
 
 :::danger The one irreversible mistake
 A merge — or a stray `git push upstream` — from commons or a product fork toward the **public** upstream drags your entire private history with it, addon code included. The moment those commits reach a public branch or PR they are published: closing the PR does not unpublish them, and a revert does not unpublish them either. If your account has write access to the public repo, disarm the accident in every private clone:
