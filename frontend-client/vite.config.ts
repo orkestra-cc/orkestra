@@ -17,7 +17,9 @@ const resolveAppVersion = (): string => {
   if (ref && /^v\d/.test(ref)) return ref.replace(/^v/, "");
   if (process.env.ORKESTRA_VERSION) return process.env.ORKESTRA_VERSION;
   try {
-    return execSync("git describe --tags --always --dirty", {
+    // --match 'v[0-9]*': UPSTREAM tags only. A clone's own release tags
+    // ("<clone>-v*", e.g. commons-v0.1.0) must not shadow the base version.
+    return execSync("git describe --tags --match 'v[0-9]*' --always --dirty", {
       stdio: ["ignore", "pipe", "ignore"],
       cwd: __dirname,
     })

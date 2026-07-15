@@ -21,5 +21,10 @@ window.__ORKESTRA_CONFIG__ = {
   apiUrl: 'http://console.localhost:3000',
   wsUrl: 'ws://console.localhost:3000/ws',
   env: 'development',
-  debug: true
+  debug: true,
+  version: 'dev',
+  appName: 'orkestra',
+  cloneVersion: 'dev',
+  buildCommit: '',
+  startedAt: ''
 };
