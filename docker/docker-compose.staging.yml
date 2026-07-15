@@ -210,7 +210,8 @@ services:
       VITE_API_URL: ${VITE_API_URL:-http://localhost:3000}
       VITE_BACKEND_URL: ${VITE_BACKEND_URL:-http://localhost:3000}
       VITE_WS_URL: ${VITE_WS_URL:-ws://localhost:3000}
-      VITE_HMR_HOST: staging.orkestra.cc
+      VITE_HMR_HOST: ${VITE_HMR_HOST:-staging.orkestra.cc}
+      VITE_ALLOWED_HOSTS: ${VITE_ALLOWED_HOSTS:-}
       # Host-computed app version surfaced in the SPA footer. orkestra.sh
       # exports this from `git describe`; the container has no git so
       # this passthrough is the only path. See docker-compose.dev.yml.
