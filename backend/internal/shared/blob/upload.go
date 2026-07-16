@@ -35,7 +35,14 @@ type UploadConfig struct {
 	AllowedContentTypes map[string]string // mime -> canonical extension
 	MaxBytes            int64
 	PresignTTL          time.Duration // default 10m
-	KeyBuilder          func(scope UploadScope, ext string) string
+	// KeyBuilder builds the object key from the scope + extension. SAFETY
+	// INVARIANT: put the caller-identifying scope segments (tenant / subject /
+	// entity) BEFORE the final "/" with slash-free values, because the commit
+	// ownership check derives the caller's prefix from KeyBuilder(scope, "")
+	// up to the last "/". A slash-less or misordered key fails CLOSED (every
+	// commit rejected as ErrKeyOutOfScope), never open — but that is a silent
+	// breakage, so follow the <domain>/<scope>/<entity>/<hash>.<ext> convention.
+	KeyBuilder func(scope UploadScope, ext string) string
 	// OnCommit persists the committed key onto the module's entity and
 	// returns the previously-stored key (or "") for the controller to GC.
 	OnCommit func(ctx context.Context, scope UploadScope, key string) (previousKey string, err error)
