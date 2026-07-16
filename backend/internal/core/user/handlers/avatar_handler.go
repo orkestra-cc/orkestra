@@ -42,51 +42,47 @@ import (
 // paths converge on UserService.SetAvatarSource which validates the
 // OAuth-linked invariant.
 type AvatarHandler struct {
-	svc      userServices.UserService
-	store    blob.Store
-	tier     string // "operator" or "client" — embedded in object keys
-	maxBytes int64  // upload cap enforced at presign time
+	svc    userServices.UserService
+	store  blob.Store
+	tier   string // "operator" or "client" — embedded in object keys
+	upload *blob.UploadController
 }
 
-// NewAvatarHandler wires the handler. svc must be the tier's
-// UserService; store may be nil — when nil the upload endpoints
-// return 503 storage_unavailable but the source-switch endpoint
-// (oauth_* / initials) keeps working.
+// NewAvatarHandler wires the handler. svc must be the tier's UserService;
+// store may be nil — when nil the upload endpoints return 503
+// storage_unavailable but the source-switch endpoint (oauth_* / initials)
+// keeps working. The presign/commit flow (mime allowlist, 2 MiB cap,
+// caller-scoped key, commit HEAD-confirm + prior-object GC) is delegated to
+// the shared blob.UploadController.
 func NewAvatarHandler(svc userServices.UserService, store blob.Store, tier string) *AvatarHandler {
 	if tier == "" {
 		tier = "operator"
 	}
-	return &AvatarHandler{
-		svc:      svc,
-		store:    store,
-		tier:     tier,
-		maxBytes: 2 * 1024 * 1024, // 2 MiB
+	h := &AvatarHandler{svc: svc, store: store, tier: tier}
+	if store != nil {
+		h.upload = blob.NewUploadController(blob.UploadConfig{
+			Store: store,
+			// PNG / JPEG / WebP cover every modern browser's
+			// <canvas>.toBlob output. Anything else (SVG XSS vector, a
+			// multi-MB TIFF) is rejected at presign time so the signed URL
+			// itself cannot land it.
+			AllowedContentTypes: map[string]string{
+				"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp",
+			},
+			MaxBytes:   2 * 1024 * 1024, // 2 MiB
+			PresignTTL: 10 * time.Minute,
+			// avatars/<tier>/<userUUID>/<uuidv7>.<ext> — UUIDv7 keeps
+			// concurrent uploads from the same user from colliding and
+			// makes the key unguessable from the userUUID alone.
+			KeyBuilder: func(s blob.UploadScope, ext string) string {
+				return fmt.Sprintf("avatars/%s/%s/%s.%s", tier, s.Subject, uuid.Must(uuid.NewV7()).String(), ext)
+			},
+			OnCommit: func(ctx context.Context, s blob.UploadScope, key string) (string, error) {
+				return svc.SetAvatarSource(ctx, s.Subject, iface.AvatarSourceUploaded, key)
+			},
+		})
 	}
-}
-
-// allowedAvatarMimes enumerates the formats the SPA may upload. PNG /
-// JPEG / WebP cover every modern browser's <canvas>.toBlob output.
-// Anything else is rejected at presign time so the signed URL itself
-// cannot be used to land a SVG (XSS vector) or a multi-MB TIFF.
-var allowedAvatarMimes = map[string]struct{}{
-	"image/png":  {},
-	"image/jpeg": {},
-	"image/webp": {},
-}
-
-// extForMime returns the file extension the backend stamps into the
-// generated key. Used only as a display hint inside the key — the
-// actual content type travels in the signed PUT.
-func extForMime(mime string) string {
-	switch mime {
-	case "image/png":
-		return "png"
-	case "image/jpeg":
-		return "jpg"
-	case "image/webp":
-		return "webp"
-	}
-	return "bin"
+	return h
 }
 
 // --- POST presign-upload ---
@@ -112,7 +108,7 @@ type presignUploadResponse struct {
 // their own avatar). RBAC gate at the route level is RequireGlobal()
 // — no permission check needed for self-action.
 func (h *AvatarHandler) PresignAvatarUpload(ctx context.Context, req *presignUploadRequest) (*presignUploadResponse, error) {
-	if h.store == nil {
+	if h.upload == nil {
 		return nil, huma.NewError(http.StatusServiceUnavailable, "avatar_storage_unavailable",
 			&huma.ErrorDetail{Message: "object storage is not configured on this deployment"})
 	}
@@ -120,27 +116,22 @@ func (h *AvatarHandler) PresignAvatarUpload(ctx context.Context, req *presignUpl
 	if !ok || userUUID == "" {
 		return nil, huma.Error401Unauthorized("authentication required")
 	}
-	ct := strings.ToLower(strings.TrimSpace(req.Body.ContentType))
-	if _, ok := allowedAvatarMimes[ct]; !ok {
-		return nil, huma.NewError(http.StatusBadRequest, "avatar_invalid_content_type",
-			&huma.ErrorDetail{Message: "contentType must be image/png, image/jpeg, or image/webp"})
-	}
+	// Preserve the distinct 400 for a non-positive size (the controller
+	// otherwise folds sizeBytes<=0 into ErrTooLarge).
 	if req.Body.SizeBytes <= 0 {
 		return nil, huma.NewError(http.StatusBadRequest, "avatar_invalid_size",
 			&huma.ErrorDetail{Message: "sizeBytes must be positive"})
 	}
-	if req.Body.SizeBytes > h.maxBytes {
-		return nil, huma.NewError(http.StatusRequestEntityTooLarge, "avatar_too_large",
-			&huma.ErrorDetail{Message: fmt.Sprintf("avatar exceeds the %d byte cap", h.maxBytes)})
-	}
-
-	// UUIDv7 in the key so concurrent uploads from the same user never
-	// collide and so a stable object key isn't guessable from the
-	// userUUID alone (defense in depth — the bucket is private anyway).
-	key := fmt.Sprintf("avatars/%s/%s/%s.%s", h.tier, userUUID, uuid.Must(uuid.NewV7()).String(), extForMime(ct))
-	ttl := 10 * time.Minute
-	presigned, err := h.store.PresignPut(ctx, key, ct, ttl)
+	presigned, err := h.upload.Presign(ctx, blob.UploadScope{Subject: userUUID}, req.Body.ContentType, req.Body.SizeBytes)
 	if err != nil {
+		switch {
+		case errors.Is(err, blob.ErrContentTypeNotAllowed):
+			return nil, huma.NewError(http.StatusBadRequest, "avatar_invalid_content_type",
+				&huma.ErrorDetail{Message: "contentType must be image/png, image/jpeg, or image/webp"})
+		case errors.Is(err, blob.ErrTooLarge):
+			return nil, huma.NewError(http.StatusRequestEntityTooLarge, "avatar_too_large",
+				&huma.ErrorDetail{Message: "avatar exceeds the 2 MiB cap"})
+		}
 		slog.ErrorContext(ctx, "avatar presign failed",
 			slog.String("user_uuid", userUUID),
 			slog.String("error", err.Error()))
@@ -173,7 +164,7 @@ type commitAvatarResponse struct {
 // object key so the bucket doesn't accumulate orphans on every
 // upload.
 func (h *AvatarHandler) CommitAvatarUpload(ctx context.Context, req *commitAvatarRequest) (*commitAvatarResponse, error) {
-	if h.store == nil {
+	if h.upload == nil {
 		return nil, huma.NewError(http.StatusServiceUnavailable, "avatar_storage_unavailable",
 			&huma.ErrorDetail{Message: "object storage is not configured on this deployment"})
 	}
@@ -181,47 +172,26 @@ func (h *AvatarHandler) CommitAvatarUpload(ctx context.Context, req *commitAvata
 	if !ok || userUUID == "" {
 		return nil, huma.Error401Unauthorized("authentication required")
 	}
-	key := strings.TrimSpace(req.Body.Key)
-	if key == "" {
-		return nil, huma.Error400BadRequest("key is required")
-	}
-	// Key namespace guard: a malicious client cannot point us at
-	// somebody else's blob. Match the prefix we generated in
-	// PresignAvatarUpload above.
-	expectedPrefix := fmt.Sprintf("avatars/%s/%s/", h.tier, userUUID)
-	if !strings.HasPrefix(key, expectedPrefix) {
-		return nil, huma.NewError(http.StatusBadRequest, "avatar_key_mismatch",
-			&huma.ErrorDetail{Message: "key does not belong to the calling user"})
-	}
-	exists, err := h.store.Exists(ctx, key)
-	if err != nil {
-		return nil, huma.Error500InternalServerError("failed to verify upload", err)
-	}
-	if !exists {
-		return nil, huma.NewError(http.StatusNotFound, "avatar_blob_missing",
-			&huma.ErrorDetail{Message: "uploaded object not found in storage — retry the PUT"})
-	}
-	previousKey, err := h.svc.SetAvatarSource(ctx, userUUID, iface.AvatarSourceUploaded, key)
-	if err != nil {
-		return nil, mapAvatarError(err)
-	}
-	if previousKey != "" && previousKey != key {
-		if delErr := h.store.Delete(ctx, previousKey); delErr != nil {
-			// Non-fatal — the user's avatar is correct, only a stale
-			// blob remains. Log so the operator can investigate if it
-			// keeps happening.
-			slog.WarnContext(ctx, "failed to delete previous avatar object",
-				slog.String("user_uuid", userUUID),
-				slog.String("key", previousKey),
-				slog.String("error", delErr.Error()))
+	// The controller re-validates the key belongs to this user (prefix
+	// avatars/<tier>/<userUUID>/), HEAD-confirms the object landed, calls
+	// OnCommit (SetAvatarSource → previous key), and GCs the prior object.
+	if err := h.upload.Commit(ctx, blob.UploadScope{Subject: userUUID}, req.Body.Key); err != nil {
+		switch {
+		case errors.Is(err, blob.ErrKeyOutOfScope):
+			return nil, huma.NewError(http.StatusBadRequest, "avatar_key_mismatch",
+				&huma.ErrorDetail{Message: "key does not belong to the calling user"})
+		case errors.Is(err, blob.ErrUploadNotFound):
+			return nil, huma.NewError(http.StatusNotFound, "avatar_blob_missing",
+				&huma.ErrorDetail{Message: "uploaded object not found in storage — retry the PUT"})
 		}
+		return nil, mapAvatarError(err)
 	}
 	resp, err := h.svc.GetUser(ctx, userUUID)
 	if err != nil {
 		return nil, mapAvatarError(err)
 	}
-	// svc.GetUser already pipes through enrichWithOAuthProviders which
-	// rebuilds Avatar from AvatarSource — no extra resolve needed here.
+	// svc.GetUser pipes through enrichWithOAuthProviders which rebuilds
+	// Avatar from AvatarSource — no extra resolve needed here.
 	return &commitAvatarResponse{Body: *resp}, nil
 }
 
