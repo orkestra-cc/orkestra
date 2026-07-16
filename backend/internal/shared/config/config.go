@@ -34,11 +34,12 @@ type Config struct {
 type StorageConfig struct {
 	Endpoint       string // e.g. http://rustfs:9000 (compose SERVICE name, stable across stacks; empty = AWS S3 default endpoint resolution)
 	Region         string // e.g. us-east-1 — placeholder for RustFS, real region for AWS S3
-	Bucket         string // e.g. orkestra-avatars
+	Bucket         string // DEPRECATED single bucket. Superseded by BucketPrefix + per-domain buckets (<prefix>-<domain>). Kept for config compat; honored only to warn on a custom value.
 	AccessKey      string
 	SecretKey      string
-	ForcePathStyle bool // true for RustFS / MinIO; false for AWS S3 virtual-hosted style
-	EnsureBucket   bool // true → backend creates the bucket on boot if missing; safe for self-hosted
+	ForcePathStyle bool   // true for RustFS / MinIO; false for AWS S3 virtual-hosted style
+	EnsureBucket   bool   // true → backend creates the bucket on boot if missing; safe for self-hosted
+	BucketPrefix   string // per-domain bucket namespace; bucket = <BucketPrefix>-<domain> (e.g. orkestra-avatars, orkestra-crm-photos)
 }
 
 type ServerConfig struct {
@@ -325,6 +326,7 @@ func Load() (*Config, error) {
 		SecretKey:      getEnv("STORAGE_SECRET_KEY", ""),
 		ForcePathStyle: getEnvAsBool("STORAGE_FORCE_PATH_STYLE", true),
 		EnsureBucket:   getEnvAsBool("STORAGE_ENSURE_BUCKET", true),
+		BucketPrefix:   getEnv("STORAGE_BUCKET_PREFIX", "orkestra"),
 	}
 
 	if err := config.Validate(); err != nil {
