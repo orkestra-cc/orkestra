@@ -9554,7 +9554,6 @@
           },
           {
             "description": "Max rows to return (clamped to 500, default 100)",
-            "example": 100,
             "explode": false,
             "in": "query",
             "name": "limit",
@@ -9569,7 +9568,6 @@
           },
           {
             "description": "Pagination offset (default 0)",
-            "example": 0,
             "explode": false,
             "in": "query",
             "name": "offset",
@@ -9584,7 +9582,6 @@
           },
           {
             "description": "Restrict to events from the last N days (0 = unbounded)",
-            "example": 30,
             "explode": false,
             "in": "query",
             "name": "sinceDays",
