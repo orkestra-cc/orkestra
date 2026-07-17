@@ -200,6 +200,14 @@ const (
 	// app, just without upload affordances.
 	ServiceBlobStore ServiceKey = "system.blob_store"
 
+	// ServiceObjectStoreProvider exposes the process-wide
+	// iface.ObjectStoreProvider. Domain-aware consumers resolve a
+	// bucket-pinned store via provider.Bucket("<domain>") (e.g.
+	// "avatars", "crm-photos"). Registered by main.go alongside
+	// ServiceBlobStore, which remains the "avatars" bucket for
+	// back-compat. Value: iface.ObjectStoreProvider.
+	ServiceObjectStoreProvider ServiceKey = "system.object_store_provider"
+
 	// ServiceLogLevelModuleNames is the []string of registered
 	// module names. main.go populates it AFTER RegisterAll runs (so
 	// every catalog factory has fired) and BEFORE InitAll runs (so

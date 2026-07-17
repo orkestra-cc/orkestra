@@ -17,10 +17,9 @@
 package blob
 
 import (
-	"context"
 	"errors"
-	"io"
-	"time"
+
+	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
 // ErrObjectNotFound is returned by Exists when the key does not exist
@@ -29,44 +28,12 @@ import (
 // pre-flight check before promoting a stored key should use Exists.
 var ErrObjectNotFound = errors.New("blob: object not found")
 
-// PresignedPut groups the upload URL with any headers the SPA must
-// echo on the PUT for the signature to validate. S3-compatible
-// signers require the Content-Type header to match what was signed,
-// so callers must forward Headers verbatim.
-type PresignedPut struct {
-	URL       string
-	Headers   map[string]string
-	Key       string
-	ExpiresAt time.Time
-}
+// PresignedPut is re-exported from the SDK — the canonical definition
+// lives in iface.PresignedPut. The alias keeps existing in-tree callers
+// stable while addons consume the type through the SDK seam.
+type PresignedPut = iface.PresignedPut
 
-// Store is the minimal blob-storage seam. Implementations are
-// expected to be safe for concurrent use.
-type Store interface {
-	// PresignPut returns a URL the SPA can PUT to directly, bypassing
-	// the backend. The signer pins the content-type so a client can't
-	// upload a different mime than what was signed; size limits are
-	// the caller's responsibility (the signer typically cannot enforce
-	// Content-Length on a presigned PUT).
-	PresignPut(ctx context.Context, key, contentType string, ttl time.Duration) (*PresignedPut, error)
-	// Put streams body to the backend server-side, bypassing the
-	// presigned-URL dance. Use it when the payload originates on the
-	// server and the client never holds it — e.g. a GDPR DSR export
-	// bundle the backend assembles, stores, then hands the subject a
-	// short-lived PresignGet URL for. PresignPut is for the opposite
-	// case (the SPA uploads directly). Overwrites an existing key; a
-	// non-seekable reader may be buffered to compute the signature.
-	Put(ctx context.Context, key, contentType string, body io.Reader) error
-	// PresignGet returns a short-lived URL the SPA can GET to render
-	// the blob. Callers should refresh on every read path so the URL
-	// in flight is never close to expiry; a Redis-cached wrapper lives
-	// in cache.go for hot paths.
-	PresignGet(ctx context.Context, key string, ttl time.Duration) (string, error)
-	// Delete removes an object. Missing keys do not error — Delete
-	// is idempotent so a retry on a half-failed commit is safe.
-	Delete(ctx context.Context, key string) error
-	// Exists is a HEAD-style probe. Returns false / nil when the
-	// object is missing (without raising), or true / nil when it
-	// exists. Network or auth errors propagate.
-	Exists(ctx context.Context, key string) (bool, error)
-}
+// Store is the bucket-pinned blob-storage seam. The canonical definition
+// lives in the SDK (iface.ObjectStore); this alias keeps every existing
+// internal/shared/blob caller compiling unchanged.
+type Store = iface.ObjectStore

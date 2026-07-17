@@ -159,32 +159,66 @@ func main() {
 	// without ServiceBlobStore registered and the user module's avatar
 	// upload endpoint degrades to 503 storage_unavailable. OAuth-source
 	// and initials avatars still work.
-	if cfg.Storage.AccessKey != "" && cfg.Storage.SecretKey != "" && cfg.Storage.Bucket != "" {
-		storeCtx, storeCancel := context.WithTimeout(context.Background(), 30*time.Second)
-		store, err := blob.NewS3(storeCtx, blob.S3Config{
-			Endpoint:       cfg.Storage.Endpoint,
-			Region:         cfg.Storage.Region,
-			Bucket:         cfg.Storage.Bucket,
-			AccessKey:      cfg.Storage.AccessKey,
-			SecretKey:      cfg.Storage.SecretKey,
-			ForcePathStyle: cfg.Storage.ForcePathStyle,
-			EnsureBucket:   cfg.Storage.EnsureBucket,
-		})
-		storeCancel()
-		if err != nil {
-			logger.Warn("blob storage unavailable — avatar uploads will return 503",
-				slog.String("endpoint", cfg.Storage.Endpoint),
-				slog.String("error", err.Error()))
-		} else {
-			cached := blob.NewCached(store, redisClient, blob.CachedConfig{
+	if cfg.Storage.AccessKey != "" && cfg.Storage.SecretKey != "" {
+		provider := blob.NewProvider(blob.ProviderConfig{
+			S3: blob.S3Config{
+				Endpoint:       cfg.Storage.Endpoint,
+				Region:         cfg.Storage.Region,
+				AccessKey:      cfg.Storage.AccessKey,
+				SecretKey:      cfg.Storage.SecretKey,
+				ForcePathStyle: cfg.Storage.ForcePathStyle,
+				EnsureBucket:   cfg.Storage.EnsureBucket,
+			},
+			BucketPrefix: cfg.Storage.BucketPrefix,
+			Redis:        redisClient,
+			Cache: blob.CachedConfig{
 				SignedGetTTL: time.Hour,
 				CacheBuffer:  10 * time.Minute,
 				KeyPrefix:    "blob:url:",
+			},
+		})
+		svcRegistry.Register(module.ServiceObjectStoreProvider, provider)
+
+		// Back-compat: ServiceBlobStore is the "avatars" bucket, so existing
+		// consumers (user avatars, auth DSR export bundles) resolve it
+		// unchanged. For one transition release a CUSTOM STORAGE_BUCKET (not
+		// <prefix>-avatars) is honored as-is so a deployment's existing
+		// avatars aren't orphaned; the default and <prefix>-avatars-shaped
+		// values go through the provider (which ensures the bucket on first use).
+		var avatarStore blob.Store
+		var avatarErr error
+		if legacy := cfg.Storage.Bucket; legacy != "" && legacy != cfg.Storage.BucketPrefix+"-avatars" {
+			logger.Warn("STORAGE_BUCKET is deprecated — honoring it as the avatars bucket for this release; migrate by renaming the bucket to <STORAGE_BUCKET_PREFIX>-avatars, or set STORAGE_BUCKET_PREFIX so <prefix>-avatars equals it",
+				slog.String("legacy_bucket", legacy))
+			sctx, scancel := context.WithTimeout(context.Background(), 30*time.Second)
+			base, err := blob.NewS3(sctx, blob.S3Config{
+				Endpoint:       cfg.Storage.Endpoint,
+				Region:         cfg.Storage.Region,
+				Bucket:         legacy,
+				AccessKey:      cfg.Storage.AccessKey,
+				SecretKey:      cfg.Storage.SecretKey,
+				ForcePathStyle: cfg.Storage.ForcePathStyle,
+				EnsureBucket:   cfg.Storage.EnsureBucket,
 			})
-			svcRegistry.Register(module.ServiceBlobStore, cached)
+			scancel()
+			if err == nil {
+				avatarStore = blob.NewCached(base, redisClient, blob.CachedConfig{
+					SignedGetTTL: time.Hour, CacheBuffer: 10 * time.Minute, KeyPrefix: "blob:url:avatars:",
+				})
+			}
+			avatarErr = err
+		} else {
+			avatarStore, avatarErr = provider.Bucket("avatars")
+		}
+		if avatarErr != nil {
+			logger.Warn("blob storage unavailable — avatar uploads will return 503",
+				slog.String("endpoint", cfg.Storage.Endpoint),
+				slog.String("error", avatarErr.Error()))
+		} else {
+			svcRegistry.Register(module.ServiceBlobStore, avatarStore)
 			logger.Info("blob storage ready",
 				slog.String("endpoint", cfg.Storage.Endpoint),
-				slog.String("bucket", cfg.Storage.Bucket))
+				slog.String("bucket_prefix", cfg.Storage.BucketPrefix))
 		}
 	} else {
 		logger.Info("blob storage not configured (STORAGE_ACCESS_KEY/SECRET empty) — avatar uploads disabled")

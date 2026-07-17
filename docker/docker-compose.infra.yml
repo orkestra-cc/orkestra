@@ -50,7 +50,10 @@ services:
   # Ports: 9100 (S3 API — bumped off the MinIO/Redis-Insight default
   # 9000 to avoid host-port collisions), 9101 (admin console).
   rustfs:
-    image: rustfs/rustfs:latest
+    # Pinned off :latest (which drifted — a newer image 403s on the old
+    # /minio/health/live path, marking the container unhealthy). This digest
+    # is RustFS v1.0.0-beta.4 and serves /health → 200. Bump deliberately.
+    image: rustfs/rustfs@sha256:f7cb98ef492fa3c3ed0dbd65df3ce2dd205c666e24e7d7234d9402c9ed1001f9
     container_name: ${APP_NAME}-rustfs-${ENV}
     labels:
       orkestra.stack: ${APP_NAME}-${ENV}
@@ -64,10 +67,11 @@ services:
     volumes:
       - rustfs-data:/data
     healthcheck:
-      # /minio/health/live is the canonical S3-compat liveness path RustFS
-      # serves verbatim. A 200 means the API surface is up; bucket access
-      # is checked by the backend's blob.NewS3(EnsureBucket=true) on boot.
-      test: ["CMD-SHELL", "wget -q --spider http://localhost:9000/minio/health/live || exit 1"]
+      # /health returns 200 on this RustFS build; the older MinIO-compat
+      # /minio/health/live path now 403s (see the image pin above). A 200
+      # means the HTTP surface is up; bucket access is checked by the
+      # backend's blob provider (EnsureBucket) on first use.
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:9000/health || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 5
