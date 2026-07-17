@@ -492,13 +492,17 @@ func main() {
 	operatorMux.Mount("/", operatorProtected)
 	clientMux.Mount("/", clientProtected)
 
-	// Health, readiness, docs — registered on both surfaces so
-	// orchestrator probes (k8s liveness, ALB target health) can hit
-	// either host. Each audience gets its own /openapi.json so SDK
-	// generators see only that audience's surface.
+	// Health, readiness, docs — served on both surfaces so orchestrator
+	// probes (k8s liveness, ALB target health) can hit either host.
+	// operatorAPI and clientAPI share a single OpenAPI document (both built
+	// from apiConfig), and huma v2.39+ panics on a duplicate operation ID —
+	// so the health/readiness operations are registered via Huma once, on the
+	// operator API (which owns the shared document), and the client host
+	// serves the same probes as raw routes. Both /openapi.json endpoints
+	// still document /health + /ready via the operator registration.
 	registerHealthEndpoints(operatorAPI, db, redisClient)
 	registerDocsEndpoints(operatorMux, operatorAPI)
-	registerHealthEndpoints(clientAPI, db, redisClient)
+	registerHealthProbes(clientMux, db, redisClient)
 	registerDocsEndpoints(clientMux, clientAPI)
 
 	// OPENAPI_DUMP mode (used by `make openapi-dump`): after every module
