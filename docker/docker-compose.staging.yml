@@ -154,6 +154,10 @@ services:
       # regardless of APP_NAME/ENV); the old container-name default
       # `orkestra-rustfs` broke once containers became namespaced.
       STORAGE_ENDPOINT: ${STORAGE_ENDPOINT:-http://rustfs:9000}
+      # Browser-reachable endpoint for presigned URLs when RustFS sits behind a
+      # public proxy the SPA must reach; backend ops keep using STORAGE_ENDPOINT
+      # (ADR-0011 dual-endpoint split). Empty = single-endpoint (presigns use STORAGE_ENDPOINT).
+      STORAGE_PUBLIC_ENDPOINT: ${STORAGE_PUBLIC_ENDPOINT:-}
       STORAGE_REGION: ${STORAGE_REGION:-us-east-1}
       STORAGE_BUCKET: ${STORAGE_BUCKET:-orkestra-avatars}
       STORAGE_ACCESS_KEY: ${STORAGE_ACCESS_KEY:-orkestra}

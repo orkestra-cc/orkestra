@@ -61,7 +61,7 @@ Use this skill whenever a module (core **or** a fork addon under `internal/addon
 ## Deployment & ops
 
 - **RustFS** is the self-hosted default (`docker-compose.infra.yml`), **pinned by digest** — never `:latest` (it drifts). Healthcheck probes `/health`.
-- **`STORAGE_ENDPOINT` must be browser-reachable** for presigned PUTs to succeed (see the RustFS gotcha in `docker/CLAUDE.md`).
+- **The presign endpoint must be browser-reachable** for presigned PUTs to succeed. The browser PUTs to `STORAGE_PUBLIC_ENDPOINT` when set, else `STORAGE_ENDPOINT`. Behind a TLS proxy (Cloudflare/HAProxy), keep `STORAGE_ENDPOINT` internal (`http://rustfs:9000`, for the backend's own HEAD/Delete/Get) and set `STORAGE_PUBLIC_ENDPOINT` to the public host — presigned URLs sign only `host` and survive proxying, but SDK-signed backend ops 403 through the proxy, so they must hit the origin directly (`blob.S3Config.PublicEndpoint`). The proxy must preserve the `Host` header and answer the browser CORS preflight. See the RustFS reachability gotcha in `docker/CLAUDE.md`.
 - **Production / scale**: point `STORAGE_ENDPOINT` at a managed S3, pre-provision the per-domain buckets, set `STORAGE_ENSURE_BUCKET=false` (IAM rarely grants CreateBucket) + `STORAGE_FORCE_PATH_STYLE=false`, and apply per-bucket lifecycle (expire orphaned uncommitted uploads under a `pending/`-style prefix, or unreferenced objects after N days) + backup policies.
 - `STORAGE_BUCKET` is **deprecated** — use `STORAGE_BUCKET_PREFIX`.
 

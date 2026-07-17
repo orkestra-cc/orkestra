@@ -163,6 +163,7 @@ func main() {
 		provider := blob.NewProvider(blob.ProviderConfig{
 			S3: blob.S3Config{
 				Endpoint:       cfg.Storage.Endpoint,
+				PublicEndpoint: cfg.Storage.PublicEndpoint,
 				Region:         cfg.Storage.Region,
 				AccessKey:      cfg.Storage.AccessKey,
 				SecretKey:      cfg.Storage.SecretKey,
@@ -193,6 +194,7 @@ func main() {
 			sctx, scancel := context.WithTimeout(context.Background(), 30*time.Second)
 			base, err := blob.NewS3(sctx, blob.S3Config{
 				Endpoint:       cfg.Storage.Endpoint,
+				PublicEndpoint: cfg.Storage.PublicEndpoint,
 				Region:         cfg.Storage.Region,
 				Bucket:         legacy,
 				AccessKey:      cfg.Storage.AccessKey,

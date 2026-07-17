@@ -42,7 +42,16 @@ func isNotFound(err error) bool {
 // against RustFS / MinIO / Backblaze in addition to AWS S3 — leave
 // Endpoint empty for native AWS.
 type S3Config struct {
-	Endpoint        string
+	Endpoint string
+	// PublicEndpoint, when set, is the browser-reachable endpoint baked into
+	// presigned PUT/GET URLs — leaving Endpoint free to be a docker-internal
+	// host (e.g. http://rustfs:9000) the SPA can't reach. Server-side ops
+	// (Put/Get/Delete/HEAD/ensureBucket) always use Endpoint. This split
+	// matters behind a TLS-terminating proxy (Cloudflare): presigned URLs sign
+	// only `host` and survive proxying, whereas SDK-signed requests sign more
+	// headers and 403 through the proxy — so they must hit the origin directly.
+	// Empty → presigns use Endpoint (single-endpoint deploys, unchanged).
+	PublicEndpoint  string
 	Region          string
 	Bucket          string
 	AccessKey       string
@@ -94,9 +103,21 @@ func NewS3(ctx context.Context, cfg S3Config) (Store, error) {
 		o.UsePathStyle = cfg.ForcePathStyle
 	})
 
+	// The presigner signs against PublicEndpoint when it differs from
+	// Endpoint, so browser-facing URLs point at the public host while the
+	// direct-op client stays on the internal endpoint. Presigning is offline
+	// (no network call), so constructing a second client here is cheap.
+	presignBase := client
+	if cfg.PublicEndpoint != "" && cfg.PublicEndpoint != cfg.Endpoint {
+		presignBase = s3.NewFromConfig(awsCfg, func(o *s3.Options) {
+			o.BaseEndpoint = aws.String(cfg.PublicEndpoint)
+			o.UsePathStyle = cfg.ForcePathStyle
+		})
+	}
+
 	s := &s3Store{
 		client:    client,
-		presigner: s3.NewPresignClient(client),
+		presigner: s3.NewPresignClient(presignBase),
 		bucket:    cfg.Bucket,
 	}
 

@@ -33,6 +33,7 @@ type Config struct {
 // S3 / managed equivalent.
 type StorageConfig struct {
 	Endpoint       string // e.g. http://rustfs:9000 (compose SERVICE name, stable across stacks; empty = AWS S3 default endpoint resolution)
+	PublicEndpoint string // browser-reachable endpoint baked into presigned URLs; empty = use Endpoint. Set when Endpoint is a docker-internal host the SPA can't reach (e.g. RustFS behind a public proxy) — see blob.S3Config.PublicEndpoint
 	Region         string // e.g. us-east-1 — placeholder for RustFS, real region for AWS S3
 	Bucket         string // DEPRECATED single bucket. Superseded by BucketPrefix + per-domain buckets (<prefix>-<domain>). Kept for config compat; honored only to warn on a custom value.
 	AccessKey      string
@@ -320,6 +321,7 @@ func Load() (*Config, error) {
 	// containers became per-stack (`${APP_NAME}-rustfs-${ENV}`).
 	config.Storage = StorageConfig{
 		Endpoint:       getEnv("STORAGE_ENDPOINT", "http://rustfs:9000"),
+		PublicEndpoint: getEnv("STORAGE_PUBLIC_ENDPOINT", ""),
 		Region:         getEnv("STORAGE_REGION", "us-east-1"),
 		Bucket:         getEnv("STORAGE_BUCKET", "orkestra-avatars"),
 		AccessKey:      getEnv("STORAGE_ACCESS_KEY", ""),
