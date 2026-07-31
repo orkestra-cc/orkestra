@@ -231,6 +231,33 @@ func (s *s3Store) PresignGet(ctx context.Context, key string, ttl time.Duration)
 	return req.URL, nil
 }
 
+// PresignGetDownload mints a presigned GET whose response forces an attachment
+// download named downloadAs, via the signed response-content-disposition query
+// parameter (honored by S3-compatible stores incl. RustFS). A blank downloadAs
+// presigns without a disposition — i.e. it behaves like PresignGet.
+func (s *s3Store) PresignGetDownload(ctx context.Context, key, downloadAs string, ttl time.Duration) (string, error) {
+	if key == "" {
+		return "", errors.New("blob: key is required")
+	}
+	if ttl <= 0 {
+		ttl = time.Hour
+	}
+	in := &s3.GetObjectInput{
+		Bucket: aws.String(s.bucket),
+		Key:    aws.String(key),
+	}
+	if cd := contentDispositionAttachment(downloadAs); cd != "" {
+		in.ResponseContentDisposition = aws.String(cd)
+	}
+	req, err := s.presigner.PresignGetObject(ctx, in, func(opts *s3.PresignOptions) {
+		opts.Expires = ttl
+	})
+	if err != nil {
+		return "", fmt.Errorf("blob: presign get download: %w", err)
+	}
+	return req.URL, nil
+}
+
 func (s *s3Store) Delete(ctx context.Context, key string) error {
 	if key == "" {
 		return nil
