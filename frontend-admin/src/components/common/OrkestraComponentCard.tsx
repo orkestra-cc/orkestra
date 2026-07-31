@@ -2,9 +2,7 @@ import { ReactNode } from 'react';
 import { Card, Tab, Row, Col, Nav, Button } from 'react-bootstrap';
 import OrkestraCardBody from './OrkestraCardBody';
 import classNames from 'classnames';
-import { HashLink } from 'react-router-hash-link';
 import Flex from './Flex';
-import { useLocation } from 'react-router';
 import { camelize } from '../../helpers/utils';
 import { useAppContext } from 'providers/AppProvider';
 
@@ -50,7 +48,6 @@ const OrkestraComponentCardHeader = ({
   children,
   noPreview
 }: OrkestraComponentCardHeaderProps) => {
-  const location = useLocation();
   const {
     config: { isRTL }
   } = useAppContext();
@@ -73,25 +70,25 @@ const OrkestraComponentCardHeader = ({
               >
                 {isRTL ? (
                   <>
-                    <HashLink
-                      to={`${location.pathname}#${camelize(title)}`}
+                    <a
+                      href={`#${camelize(title)}`}
                       className="hover-actions ps-2"
                       style={{ top: 0, left: '-25px' }}
                     >
                       #
-                    </HashLink>
+                    </a>
                     {title}
                   </>
                 ) : (
                   <>
                     {title}
-                    <HashLink
-                      to={`${location.pathname}#${camelize(title)}`}
+                    <a
+                      href={`#${camelize(title)}`}
                       className="hover-actions ps-2"
                       style={{ top: 0, right: '-25px' }}
                     >
                       #
-                    </HashLink>
+                    </a>
                   </>
                 )}
               </h5>

@@ -13,7 +13,7 @@ React 19 + Vite 7 + TypeScript 5.9 operator console for Orkestra — the **Tier-
 
 | Layer       | Choice                                                                                                                       |
 | ----------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| Framework   | React 19.1, React Router 7.7                                                                                                 |
+| Framework   | React 19, React Router 8 (single `react-router` package — `react-router-dom` no longer exists)                               |
 | Build       | Vite 7 (dev server + production bundle)                                                                                      |
 | Language    | TypeScript 5.9 strict mode                                                                                                   |
 | State       | Redux Toolkit 2.9 + RTK Query (server state lives in RTK Query, not React Query)                                             |
@@ -85,7 +85,7 @@ frontend-admin/
 ├── Dockerfile                     # Multi-stage: builder (node:24-alpine) → production (nginx:alpine)
 ├── tsconfig.json                  # Path aliases declared here AND in vite.config.js
 ├── vite.config.js                 # Vite config with manualChunks for vendor splitting
-├── vitest.config.ts               # Vitest config — happy-dom env, react-router-dom alias
+├── vitest.config.ts               # Vitest config — happy-dom env
 └── package.json
 ```
 
@@ -243,7 +243,6 @@ expect(store.getState().auth.accessToken).toBe('...');
 
 **Configuration gotchas:**
 
-- `vitest.config.ts` aliases `react-router-dom` → `react-router`. Without this, v7's dual-package layout creates separate `Router` context instances at test time and components mixing the two imports lose their context.
 - `environment: 'happy-dom'` (not jsdom) — jsdom + MSW v2 + Node fetch trip over `RequestInit: Expected signal to be an instance of AbortSignal`.
 
 ## Runtime config

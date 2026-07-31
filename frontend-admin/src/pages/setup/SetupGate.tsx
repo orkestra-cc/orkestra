@@ -1,6 +1,6 @@
 import { ReactNode, useEffect } from 'react';
 import { Alert, Button } from 'react-bootstrap';
-import { Navigate, useLocation } from 'react-router-dom';
+import { Navigate, useLocation } from 'react-router';
 import { useTranslation } from 'react-i18next';
 import OrkestraLoader from 'components/common/OrkestraLoader';
 import { useGetSetupStatusQuery } from 'store/api/setupApi';

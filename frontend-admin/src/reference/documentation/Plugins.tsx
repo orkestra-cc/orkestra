@@ -135,11 +135,6 @@ const Plugins = () => {
       docLink: 'https://github.com/awran5/react-simple-typewriter'
     },
     {
-      title: 'React Router Hash Link',
-      description: `When you click on a link created with <code>react-router-hash-link</code> it will scroll to the element on the page with the <code>id</code> that matches the <code>#hash-fragment</code> in the link.`,
-      docLink: 'https://github.com/rafgraph/react-router-hash-link'
-    },
-    {
       title: 'Lottie React',
       description: `Render After Effects animations natively on Web, Android, and iOS, and React Native.`,
       docLink: 'https://github.com/Gamote/lottie-react'

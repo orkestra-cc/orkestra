@@ -6,7 +6,7 @@
 // unless they are used by more than one page.
 
 import { Badge, Card } from 'react-bootstrap';
-import { Link } from 'react-router-dom';
+import { Link } from 'react-router';
 import type { Widget } from '../types';
 
 interface Props {
