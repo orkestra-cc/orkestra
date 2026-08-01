@@ -4,6 +4,33 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.4.0] - 2026-07-15
+
+### Features
+
+- **(docker)** Write footer identity fields into runtime config.js ([c7bcdcd](https://github.com/orkestra-cc/orkestra/commit/c7bcdcd56778dca775bc698ffd82a4de6bb738df))
+- **(orkestra.sh)** Export ORKESTRA_CLONE_VERSION + ORKESTRA_BUILD_COMMIT ([1befe88](https://github.com/orkestra-cc/orkestra/commit/1befe88ed39107af357e837f0e9a27aacfc1689c))
+- **(frontend-admin)** Render deployment fingerprint in footer ([8716b14](https://github.com/orkestra-cc/orkestra/commit/8716b141215ec5347cfc267ca43192fe40937ff9))
+- **(frontend-admin)** Add footer fields to runtime config ([097ff82](https://github.com/orkestra-cc/orkestra/commit/097ff828fdcfc1c4533409e7597420c8d03362a7))
+
+### Bug fixes
+
+- **(version)** Exclude clone tags from base-version git describe ([c610d64](https://github.com/orkestra-cc/orkestra/commit/c610d6421923ea486eb8eb02fe2104e0f45939b4))
+- **(docker)** Thread real apiUrl/wsUrl into prod runtime config.js ([fd454b6](https://github.com/orkestra-cc/orkestra/commit/fd454b6755e5004b05d773bb13e576147fbf6117))
+- **(mobile)** Revert build_runner to ^2.6.1 (2.15.1 needs Dart 3.10+) ([0f4e953](https://github.com/orkestra-cc/orkestra/commit/0f4e953596ca0b12859caa7e026c8b90c393e967))
+
+### Style
+
+- **(frontend-admin)** Fix prettier formatting in environment.test.ts ([6941f72](https://github.com/orkestra-cc/orkestra/commit/6941f7252e6d844d588e012d618e19576193c273))
+
+### Refactor
+
+- **(frontend-admin)** Slim footer to a small monospace fingerprint ([1d84593](https://github.com/orkestra-cc/orkestra/commit/1d845933638967538f9533b27f4c904feda4efd6))
+
+### CI
+
+- **(release)** Authenticate git-cliff's GitHub API calls ([50ce0e0](https://github.com/orkestra-cc/orkestra/commit/50ce0e0087f80d43bb0d8c8dc2f01f516ad7dc89))
+
 ## [0.3.15] - 2026-07-10
 
 ### Features
