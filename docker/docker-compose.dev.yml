@@ -257,9 +257,13 @@ services:
       - ../frontend-client/.npm-cache:/app/.npm-cache
     command: ["sh", "-c", "npm install && npm run dev -- --host 0.0.0.0"]
     # Probes the in-process /health endpoint registered by the Vite
-    # plugin in frontend-client/vite.config.ts.
+    # plugin in frontend-client/vite.config.ts. Must use 127.0.0.1, NOT
+    # localhost: /etc/hosts maps localhost to ::1 as well, busybox wget
+    # tries IPv6 first and does not fall back, while Vite's --host
+    # 0.0.0.0 binds IPv4 only — so `localhost` yields connection refused
+    # and the container is permanently unhealthy.
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:5173/health || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:5173/health || exit 1"]
       interval: 30s
       timeout: 5s
       retries: 3
