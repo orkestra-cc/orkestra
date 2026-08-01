@@ -251,13 +251,13 @@ docker compose -f docker-compose.prod.yml --env-file .env.production up -d
 
 ### Infrastructure Services (`docker-compose.infra.yml`)
 
-**Shared across dev/staging/prod environments — start once, use everywhere**
+**One instance per stack** — layered into the same `${STACK}` Compose project as the app services, not shared across stacks (see [Multi-Stack Model](#multi-stack-model)). Host ports below are the compose defaults; `docker/.env` overrides them per stack so several stacks coexist.
 
-| Service       | Port        | Purpose             | Health Check     |
+| Service       | Host port (default) | Purpose             | Health Check     |
 | ------------- | ----------- | ------------------- | ---------------- |
-| **mongodb**   | 27027       | Primary database    | mongosh ping     |
-| **redis**     | 6387        | Cache & sessions    | redis-cli ping   |
-| **rustfs**    | 9100 / 9101 | S3-compatible object storage for user-uploaded blobs (avatars today) | wget /minio/health/live |
+| **mongodb**   | 27017       | Primary database    | mongosh ping     |
+| **redis**     | 6379        | Cache & sessions    | redis-cli incr ping |
+| **rustfs**    | 9100 / 9101 | S3-compatible object storage for user-uploaded blobs (avatars today) | wget /health |
 
 > **ADR-0006:** the Gotenberg / Memgraph / Hindsight addon-infra services, the backend-managed-container wiring (`Module.InfraContainers()` → `shared/container.Manager`), the `/var/run/docker.sock` mount, and `CONTAINER_CONTROL_ENABLED` were all removed with the addons. A fork that adds a module declaring `InfraContainers()` re-adds the socket mount + `CONTAINER_CONTROL_ENABLED=true` and provisions its own infra service. The `shared/container.Manager` seam is kept in the codebase for that purpose.
 
@@ -370,27 +370,26 @@ curl -i -H 'Host: example.com' http://localhost:3000/health
 
 ### Port Mapping Strategy
 
-Host ports vary per profile so multiple stacks can coexist on the same machine. Container-internal ports stay standard.
+Every published host port is an `.env` variable with a compose default. `scripts/init.sh` seeds a non-colliding block per stack on first run, so multiple stacks coexist without arithmetic baked into compose. Container-internal ports stay standard.
 
 ```
-Runtime profile (docker-compose.infra.yml + docker-compose.{minimal,full}.yml):
-3000  → backend:3000             # API server (image from GHCR)
-27027 → mongodb:27017            # Shared infra mongo
-6387  → redis:6379               # Shared infra redis
+Infra (docker-compose.infra.yml) — one instance per stack:
+${MONGO_PORT:-27017}        → mongodb:27017
+${REDIS_PORT:-6379}         → redis:6379
+${RUSTFS_API_PORT:-9100}    → rustfs:9000    # S3 API
+${RUSTFS_CONSOLE_PORT:-9101}→ rustfs:9001    # admin console
 
-Dev stack (docker-compose.infra.yml + docker-compose.dev.yml):
-3007  → backend:3000             # API server
-8087  → frontend-admin:5173            # Operator console (host: console.localhost)
-8081  → client-frontend:5173     # Tier-2 client demo SPA (host: client.localhost)
-27027 → mongodb:27017            # Shared infra mongo
-6387  → redis:6379               # Shared infra redis
-3030  → gotenberg:3000           # PDF generation
-8888  → hindsight:8888           # AI agents backend
+App (docker-compose.dev.yml / docker-compose.staging.yml):
+${BACKEND_PORT:-3000}         → backend:3000
+${FRONTEND_PORT:-8080}        → frontend-admin:5173    # operator console (Vite)
+${CLIENT_FRONTEND_PORT:-8081} → client-frontend:5173   # Tier-2 client SPA (Vite)
 
 Production (docker-compose.prod.yml):
-3000  → backend:3000      # API server
-8080  → frontend-admin:80       # Nginx static
+${BACKEND_PORT:-3000} → backend:3000
+8080                  → frontend-admin:80   # Nginx static (fixed, not env-driven)
 ```
+
+The observability overlay publishes its own block (Grafana, Prometheus, Loki, Tempo, OTel) — see the [observability section](#self-hosted-otel-stack-docker-composeobservabilityyml).
 
 ### Security & Secrets Management
 
