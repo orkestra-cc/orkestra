@@ -250,7 +250,7 @@ func (m *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 					// is empty (single-host deployments).
 					cookieDomain := cookieDomainForAudience(m.config, AudienceFromContext(r.Context()))
 					isSecure := m.config.Auth.Cookie.Secure
-					utils.SetRefreshTokenCookie(w, m.cookieName, tokenResponse.RefreshToken, 7*24*3600, cookieDomain, isSecure)
+					utils.SetRefreshTokenCookie(w, m.cookieName, tokenResponse.RefreshToken, int(m.jwtService.RefreshTokenTTL().Seconds()), cookieDomain, isSecure)
 
 					w.Header().Set("X-New-Access-Token", tokenResponse.AccessToken)
 					w.Header().Set("X-Token-Refreshed", "true")

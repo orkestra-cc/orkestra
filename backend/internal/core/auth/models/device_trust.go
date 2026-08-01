@@ -48,6 +48,7 @@ type DeviceTrustDoc struct {
 const (
 	DeviceTrustRevokedByUser           = "user_initiated"
 	DeviceTrustRevokedOnPasswordChange = "password_changed"
+	DeviceTrustRevokedOnPasswordReset  = "password_reset"
 	DeviceTrustRevokedOnMFARemove      = "mfa_factor_removed"
 	DeviceTrustRevokedOnAdminReset     = "admin_mfa_reset"
 	DeviceTrustRevokedReplaced         = "superseded_by_new_grant"

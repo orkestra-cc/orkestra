@@ -124,6 +124,10 @@ type PasswordAuthService struct {
 	// auditSink is wired post-construction via SetAuditSink by the compliance
 	// module. Nil when compliance is disabled — emit* helpers tolerate that.
 	auditSink iface.AuditSink
+	// sessionRevocation pushes revoked sids into Redis so a credential
+	// change invalidates access tokens immediately rather than after
+	// their TTL. Wired post-construction; nil-tolerant.
+	sessionRevocation SessionRevocationService
 	// webauthnAvailability is the narrow checker the login flow consumes
 	// to populate the partial response's WebAuthnAvailable field. Wired
 	// post-construction because WebAuthn is built later in the same Init.
@@ -135,6 +139,14 @@ type PasswordAuthService struct {
 	// stored value. Optional — nil leaves Avatar unchanged.
 	blobStore blob.Store
 }
+
+// AuthSessionRetention is how long a session DOCUMENT is kept, which is
+// deliberately NOT the session's own lifetime. The row is an audit and
+// device-history record — the risk scorer reads it to answer "have I
+// seen this device before?" — and it outlives the credentials it
+// describes on purpose. Access is bounded by the access-token TTL and
+// the refresh-token TTL; nothing authenticates off this row.
+const AuthSessionRetention = 90 * 24 * time.Hour
 
 // HasWebAuthnCredentials is the narrow contract login flows need from the
 // WebAuthn service: a fast yes/no on whether the user has any passkey
@@ -529,9 +541,15 @@ func (s *PasswordAuthService) Login(ctx context.Context, in LoginInput) (*authMo
 	ok, err := s.passwordService.Verify(in.Password, user.PasswordHash)
 	if err != nil || !ok {
 		s.recordFailed(ctx, in.IP, email)
+		// Threshold and duration come from the admin-managed policy —
+		// the same values already plumbed into the rate limiter above.
+		// This branch used to compare against a hardcoded 5, so an
+		// operator who tightened accountLockoutThreshold got the new
+		// value on the in-memory bucket but the old one on the
+		// persisted User.LockedUntil.
 		var lockUntil *time.Time
-		if user.FailedLoginCount+1 >= 5 {
-			t := time.Now().Add(15 * time.Minute)
+		if user.FailedLoginCount+1 >= s.policy.LockoutThreshold(ctx) {
+			t := time.Now().Add(s.policy.LockoutDuration(ctx))
 			lockUntil = &t
 		}
 		_ = s.userService.RecordFailedLogin(ctx, user.UUID, lockUntil)
@@ -715,6 +733,106 @@ func (s *PasswordAuthService) SetAuditSink(sink iface.AuditSink) {
 	s.auditSink = sink
 }
 
+// RefreshTokenTTL surfaces the JWT service's refresh lifetime so the
+// handler can size the refresh cookie to the token it carries instead
+// of a literal.
+func (s *PasswordAuthService) RefreshTokenTTL() time.Duration {
+	if s.jwtService == nil {
+		return 7 * 24 * time.Hour
+	}
+	return s.jwtService.RefreshTokenTTL()
+}
+
+// SetSessionRevocation wires the Redis-backed sid revocation set so a
+// credential change can kill in-flight access tokens instead of waiting
+// out their TTL. Optional — nil degrades revocation to "refresh tokens
+// and session docs only", which still stops new tokens from being
+// minted.
+func (s *PasswordAuthService) SetSessionRevocation(rev SessionRevocationService) {
+	s.sessionRevocation = rev
+}
+
+// revokeSessionsAfterCredentialChange evicts every way the old password
+// could still be in use, sparing only keepSID.
+//
+// A credential change has to close FOUR pathways, and closing three of
+// them is worth very little:
+//
+//  1. refresh tokens — stops new access tokens from being minted;
+//  2. session docs — stops the session showing as live in the UI and
+//     cascades to anything keyed on the session;
+//  3. the Redis sid revocation set — kills access tokens already in
+//     flight, which otherwise stay valid for their full TTL;
+//  4. device-trust grants — otherwise whoever holds the old password
+//     still skips the MFA prompt on their next login, which is exactly
+//     the property a compromised-account reset needs to destroy.
+//
+// keepSID spares one session: ChangePassword passes the caller's own sid
+// because the caller just proved knowledge of the current password, so
+// signing them out of the tab they are sitting in achieves nothing.
+// ResetPassword passes "" — a reset is a recovery action and there is no
+// session worth preserving. With keepSID empty we also sweep by user, so
+// refresh rows that predate session docs (or whose session doc has gone)
+// cannot survive.
+//
+// Best-effort throughout: the password is already changed by the time
+// this runs, and failing the request would leave the caller believing
+// the change did not happen. Failures are logged.
+func (s *PasswordAuthService) revokeSessionsAfterCredentialChange(ctx context.Context, userUUID, reason, keepSID, trustReason string) int {
+	revoked := 0
+
+	if s.authSessionRepo != nil {
+		sessions, err := s.authSessionRepo.GetActiveSessionsByUser(ctx, userUUID)
+		if err != nil && s.logger != nil {
+			s.logger.Warn("auth: could not list sessions for credential-change revocation",
+				slog.String("user_uuid", userUUID),
+				slog.String("error", err.Error()))
+		}
+		for _, sess := range sessions {
+			if sess == nil || sess.UUID == "" || sess.UUID == keepSID {
+				continue
+			}
+			if s.refreshTokenRepo != nil {
+				if err := s.refreshTokenRepo.RevokeTokensBySession(ctx, sess.UUID, reason); err != nil && s.logger != nil {
+					s.logger.Warn("auth: revoke refresh tokens by session failed",
+						slog.String("session_uuid", sess.UUID),
+						slog.String("error", err.Error()))
+				}
+			}
+			if err := s.authSessionRepo.TerminateSession(ctx, sess.UUID); err != nil && s.logger != nil {
+				s.logger.Warn("auth: terminate session doc failed",
+					slog.String("session_uuid", sess.UUID),
+					slog.String("error", err.Error()))
+			}
+			if s.sessionRevocation != nil {
+				_ = s.sessionRevocation.Revoke(ctx, sess.UUID, reason)
+			}
+			revoked++
+		}
+	}
+
+	// Full sweep only when nothing is being spared — RevokeTokensByUser
+	// cannot exclude a session, so running it with a keepSID set would
+	// sign the caller out along with everyone else.
+	if keepSID == "" && s.refreshTokenRepo != nil {
+		if err := s.refreshTokenRepo.RevokeTokensByUser(ctx, userUUID, reason); err != nil && s.logger != nil {
+			s.logger.Warn("auth: revoke refresh tokens by user failed",
+				slog.String("user_uuid", userUUID),
+				slog.String("error", err.Error()))
+		}
+	}
+
+	if s.deviceTrust != nil {
+		if err := s.deviceTrust.RevokeAllByUser(ctx, userUUID, trustReason); err != nil && s.logger != nil {
+			s.logger.Warn("device_trust: revoke on credential change failed",
+				slog.String("user_uuid", userUUID),
+				slog.String("error", err.Error()))
+		}
+	}
+
+	return revoked
+}
+
 // emitAudit is a best-effort wrapper over auditSink.Emit that no-ops when
 // the sink is unwired. Kept terse so callers can sprinkle emits through
 // the login/password flows without noise.
@@ -868,9 +986,18 @@ func (s *PasswordAuthService) ResetPassword(ctx context.Context, rawToken, newPa
 	_ = s.emailTokenRepo.MarkUsed(ctx, doc.TokenHash)
 	_ = s.userService.ClearFailedLogins(ctx, user.UUID)
 
-	// Revoke all refresh tokens — the user re-authenticates everywhere.
-	if s.refreshTokenRepo != nil {
-		_ = s.refreshTokenRepo.RevokeTokensByUser(ctx, user.UUID, "password_reset")
+	// A reset is the recovery action for a compromised account, so it
+	// must evict EVERY session — including the attacker's in-flight
+	// access token and their device-trust grant, which previously
+	// survived a reset and let them keep skipping the MFA prompt.
+	// keepSID is empty: nothing is spared, and the by-user refresh sweep
+	// runs on top of the per-session teardown.
+	revoked := s.revokeSessionsAfterCredentialChange(ctx, user.UUID,
+		"password_reset", "", authModels.DeviceTrustRevokedOnPasswordReset)
+	if s.logger != nil {
+		s.logger.Info("auth: sessions revoked after password reset",
+			slog.String("user_uuid", user.UUID),
+			slog.Int("sessions_revoked", revoked))
 	}
 	s.emitAudit(ctx, iface.AuditEvent{
 		ActorUserID:  user.UUID,
@@ -884,9 +1011,21 @@ func (s *PasswordAuthService) ResetPassword(ctx context.Context, rawToken, newPa
 	return nil
 }
 
+// ChangePasswordInput bundles the arguments for a self-service password
+// change. CurrentSID names the session the caller is making the request
+// from so it can be spared when every other session is evicted — pass ""
+// (no sid on the token) to evict everything.
+type ChangePasswordInput struct {
+	UserUUID   string
+	CurrentSID string
+	Current    string
+	New        string
+}
+
 // ChangePassword updates the password for an authenticated user who
 // supplied the current password.
-func (s *PasswordAuthService) ChangePassword(ctx context.Context, userUUID, current, next string) error {
+func (s *PasswordAuthService) ChangePassword(ctx context.Context, in ChangePasswordInput) error {
+	userUUID, current, next := in.UserUUID, in.Current, in.New
 	user, err := s.userService.GetUserByID(ctx, userUUID)
 	if err != nil {
 		return err
@@ -911,20 +1050,27 @@ func (s *PasswordAuthService) ChangePassword(ctx context.Context, userUUID, curr
 	if err := s.userService.UpdatePasswordHash(ctx, user.UUID, hash); err != nil {
 		return err
 	}
-	// Section C item #3: password change invalidates every active
-	// "remember this device" grant for the user. A stolen password
-	// must not piggyback on a trust row the legitimate owner created
-	// before the breach. Best-effort — revoke failure doesn't roll
-	// the password update back.
+	// A password change signs out every OTHER device — that is the point
+	// of changing a password — and drops every "remember this device"
+	// grant, so a stolen password cannot piggyback on a trust row the
+	// legitimate owner created before the breach (Section C item #3).
+	//
+	// The caller's own session is spared: they just proved knowledge of
+	// the current password, and signing them out of the tab they are
+	// sitting in evicts the one person we know is legitimate. (The
+	// previous behaviour did exactly that — revoked the caller's sid and
+	// left every other device running.)
 	//
 	// Phase 8: gated on the revokeSessionsOnPasswordChange policy toggle
 	// so admins can opt out for staged-rollout / migration workflows.
-	// Default true preserves today's behaviour.
-	if s.shouldRevokeOnPasswordChange(ctx) && s.deviceTrust != nil {
-		if err := s.deviceTrust.RevokeAllByUser(ctx, user.UUID, authModels.DeviceTrustRevokedOnPasswordChange); err != nil && s.logger != nil {
-			s.logger.Warn("device_trust: revoke on password change failed",
+	// Best-effort — a revoke failure doesn't roll the password update back.
+	if s.shouldRevokeOnPasswordChange(ctx) {
+		revoked := s.revokeSessionsAfterCredentialChange(ctx, user.UUID,
+			"password_change", in.CurrentSID, authModels.DeviceTrustRevokedOnPasswordChange)
+		if s.logger != nil {
+			s.logger.Info("auth: sessions revoked after password change",
 				slog.String("user_uuid", user.UUID),
-				slog.String("error", err.Error()))
+				slog.Int("sessions_revoked", revoked))
 		}
 	}
 	s.emitAudit(ctx, iface.AuditEvent{
@@ -1022,7 +1168,7 @@ func (s *PasswordAuthService) ConfirmPassword(ctx context.Context, userUUID, pas
 	return &ConfirmPasswordResult{
 		AccessToken: token,
 		TokenType:   "Bearer",
-		ExpiresIn:   15 * 60,
+		ExpiresIn:   int64(s.jwtService.AccessTokenTTL(ctx).Seconds()),
 	}, nil
 }
 
@@ -1198,7 +1344,7 @@ func (s *PasswordAuthService) issueTokens(ctx context.Context, user *iface.User,
 		IPAddress:    in.IP,
 		RiskScore:    0.1,
 		IssuedAt:     now,
-		ExpiresAt:    now.Add(7 * 24 * time.Hour),
+		ExpiresAt:    now.Add(s.jwtService.RefreshTokenTTL()),
 		LastActivity: now,
 		IsRevoked:    false,
 		CreatedAt:    now,
@@ -1216,7 +1362,7 @@ func (s *PasswordAuthService) issueTokens(ctx context.Context, user *iface.User,
 		AccessToken:  accessToken,
 		RefreshToken: refreshToken,
 		TokenType:    "Bearer",
-		ExpiresIn:    900,
+		ExpiresIn:    int64(s.jwtService.AccessTokenTTL(ctx).Seconds()),
 		SessionID:    sessionID,
 		DeviceID:     deviceID,
 		User:         s.buildUserResponse(ctx, user),
@@ -1280,7 +1426,7 @@ func (s *PasswordAuthService) createSessionDoc(ctx context.Context, user *iface.
 		IsActive:     true,
 		StartedAt:    now,
 		LastActivity: now,
-		ExpiresAt:    now.Add(90 * 24 * time.Hour),
+		ExpiresAt:    now.Add(AuthSessionRetention),
 		LoginMethod:  "password",
 		MFACompleted: false,
 		DeviceInfo: authModels.DeviceInfo{

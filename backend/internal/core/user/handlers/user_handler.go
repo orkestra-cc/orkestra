@@ -2,12 +2,14 @@ package handlers
 
 import (
 	"context"
+	"log/slog"
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/orkestra/backend/internal/core/user/services"
 	"github.com/orkestra/backend/internal/shared/errcode"
 	"github.com/orkestra/backend/pkg/sdk/ctxauth"
 	"github.com/orkestra/backend/pkg/sdk/iface"
+	"github.com/orkestra/backend/pkg/sdk/module"
 )
 
 // auditEmitter is the narrow capability the handler probes on the
@@ -25,12 +27,50 @@ type auditEmitter interface {
 // UserHandler handles user HTTP requests
 type UserHandler struct {
 	userService services.UserService
+	// services resolves cross-module collaborators lazily at request
+	// time. It cannot be a constructor argument resolved eagerly: the
+	// registry sorts user before auth, so auth's services do not exist
+	// yet when this module initialises. Optional — a nil registry means
+	// the optional collaborators simply aren't available.
+	services *module.ServiceRegistry
 }
 
 // NewUserHandler creates a new user handler
 func NewUserHandler(userService services.UserService) *UserHandler {
 	return &UserHandler{
 		userService: userService,
+	}
+}
+
+// SetServiceRegistry wires the module service registry so the handler can
+// resolve later-initialised collaborators (currently the auth module's
+// iface.SessionTerminator) at request time. Called from the user module's
+// Init; safe to leave unset in tests.
+func (h *UserHandler) SetServiceRegistry(reg *module.ServiceRegistry) {
+	h.services = reg
+}
+
+// terminateSessions best-effort evicts every session of a user whose
+// right to be signed in was just revoked (deactivate / delete).
+//
+// Deliberately silent on failure. The state change is already persisted
+// and the auth refresh paths refuse a deactivated user regardless, so the
+// worst case is that in-flight access tokens live out their remaining TTL
+// — the behaviour before this call existed. Failing the operator's
+// request instead would report that the deactivation did not happen,
+// which is both wrong and more dangerous.
+func (h *UserHandler) terminateSessions(ctx context.Context, userUUID string) {
+	if h.services == nil || userUUID == "" {
+		return
+	}
+	terminator, ok := module.GetTyped[iface.SessionTerminator](h.services, module.ServiceAuthService)
+	if !ok || terminator == nil {
+		return
+	}
+	if err := terminator.TerminateAllSessionsByUUID(ctx, userUUID); err != nil {
+		slog.WarnContext(ctx, "user: could not terminate sessions after access revocation",
+			slog.String("user_uuid", userUUID),
+			slog.String("error", err.Error()))
 	}
 }
 
@@ -267,6 +307,10 @@ func (h *UserHandler) emitUpdateLifecycleEvents(
 		action := "user.activated"
 		if !*patch.IsActive {
 			action = "user.deactivated"
+			// Revoking the right to be signed in has to end the
+			// sessions that right produced — otherwise the account is
+			// "disabled" while its live bearers keep working.
+			h.terminateSessions(ctx, current.ID)
 		}
 		h.emitAudit(ctx, iface.AuditEvent{
 			ActorUserID:  actorUUID,
@@ -374,6 +418,11 @@ func (h *UserHandler) DeleteUser(ctx context.Context, req *DeleteUserRequest) (*
 			return nil, huma.Error500InternalServerError("Failed to delete user", err)
 		}
 	}
+
+	// A soft-deleted user is gone from every lookup the auth flows use,
+	// so their refresh attempts already fail — but their in-flight access
+	// tokens would otherwise run out their TTL. End the sessions now.
+	h.terminateSessions(ctx, req.ID)
 
 	h.emitAudit(ctx, iface.AuditEvent{
 		ActorUserID:  actorUUID,

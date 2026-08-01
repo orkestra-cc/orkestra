@@ -14,11 +14,10 @@ import (
 
 // PasswordAuthHandler wraps the PasswordAuthService with HTTP bindings.
 type PasswordAuthHandler struct {
-	svc               *services.PasswordAuthService
-	cookieName        string
-	cookieDomain      string
-	cookieSecure      bool
-	sessionRevocation services.SessionRevocationService
+	svc          *services.PasswordAuthService
+	cookieName   string
+	cookieDomain string
+	cookieSecure bool
 }
 
 func NewPasswordAuthHandler(svc *services.PasswordAuthService, cookieName, cookieDomain string, cookieSecure bool) *PasswordAuthHandler {
@@ -31,13 +30,6 @@ func NewPasswordAuthHandler(svc *services.PasswordAuthService, cookieName, cooki
 		cookieDomain: cookieDomain,
 		cookieSecure: cookieSecure,
 	}
-}
-
-// SetSessionRevocation wires the revoked-session store so change-password
-// can invalidate the current session's access token in addition to the
-// refresh-token wipe the service already performs.
-func (h *PasswordAuthHandler) SetSessionRevocation(s services.SessionRevocationService) {
-	h.sessionRevocation = s
 }
 
 // --- Register ---
@@ -135,7 +127,8 @@ func (h *PasswordAuthHandler) Login(ctx context.Context, req *PasswordLoginReque
 		return resp, nil
 	}
 
-	resp.SetCookie = buildRefreshCookie(h.cookieName, tokens.RefreshToken, h.cookieDomain, h.cookieSecure)
+	resp.SetCookie = buildRefreshCookie(h.cookieName, tokens.RefreshToken, h.cookieDomain, h.cookieSecure,
+		int(h.svc.RefreshTokenTTL().Seconds()))
 	resp.Body.AccessToken = tokens.AccessToken
 	resp.Body.TokenType = tokens.TokenType
 	resp.Body.ExpiresIn = tokens.ExpiresIn
@@ -263,20 +256,20 @@ func (h *PasswordAuthHandler) ChangePassword(ctx context.Context, req *ChangePas
 	if userUUID == "" {
 		return nil, huma.Error401Unauthorized("authentication required")
 	}
-	if err := h.svc.ChangePassword(ctx, userUUID, req.Body.CurrentPassword, req.Body.NewPassword); err != nil {
+	if err := h.svc.ChangePassword(ctx, services.ChangePasswordInput{
+		UserUUID:   userUUID,
+		CurrentSID: currentSessionID(ctx),
+		Current:    req.Body.CurrentPassword,
+		New:        req.Body.NewPassword,
+	}); err != nil {
 		return nil, mapPasswordError(err)
 	}
-	// Phase 8: revoke the caller's session id so the old bearer stops
-	// working immediately instead of staying valid until its 15-minute
-	// TTL. Gated on the live revokeSessionsOnPasswordChange policy so
-	// admins can opt out (e.g. for migration workflows where preserving
-	// existing sessions matters more than the immediate cutover).
-	// Default-on preserves the historical behaviour.
-	if h.sessionRevocation != nil && h.svc.ShouldRevokeOnPasswordChange(ctx) {
-		if sid := currentSessionID(ctx); sid != "" {
-			_ = h.sessionRevocation.Revoke(ctx, sid, "password_change")
-		}
-	}
+	// Session eviction lives in the service (see
+	// revokeSessionsAfterCredentialChange): it signs out every OTHER
+	// device and keeps the caller's own session, still gated on the
+	// revokeSessionsOnPasswordChange policy. This handler used to do the
+	// exact inverse — revoke the caller's own sid and leave every other
+	// device running — so nothing is left to do here.
 	resp := &ForgotPasswordResponse{}
 	resp.Body.Success = true
 	resp.Body.Message = "Password updated."
@@ -364,8 +357,12 @@ func clientIPFromCtx(ctx context.Context) string {
 
 // buildRefreshCookie assembles a Set-Cookie header value for the refresh
 // token cookie with secure defaults.
-func buildRefreshCookie(name, value, domain string, secure bool) string {
-	maxAge := 7 * 24 * 3600
+// maxAgeSeconds must be the refresh token's own TTL — see
+// refreshCookieMaxAge. A cookie that outlives its token strands the
+// browser with a dead credential; one that dies first logs the user out
+// early.
+func buildRefreshCookie(name, value, domain string, secure bool, maxAgeSeconds int) string {
+	maxAge := maxAgeSeconds
 	c := &http.Cookie{
 		Name:     name,
 		Value:    value,

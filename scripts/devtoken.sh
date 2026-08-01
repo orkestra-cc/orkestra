@@ -36,7 +36,6 @@ usage() {
     echo "Options:"
     echo "  -q, --quiet       Output only the token (for piping)"
     echo "  -c, --curl        Output a ready-to-use curl command"
-    echo "  -e, --expiry      Token expiry duration (e.g., '15m', '1h', '24h')"
     echo "  -t, --tenant      Acting tenant UUID to pin on the token (operator tokens"
     echo "                    default to the first internal tenant so tenant-scoped"
     echo "                    reads like billing/documents work without this flag)"
@@ -54,7 +53,6 @@ usage() {
     echo "  $0 administrator                        # Generate admin operator token"
     echo "  $0 manager --quiet                      # Token only (for pbcopy/clipboard)"
     echo "  $0 operator --curl                      # Output curl command"
-    echo "  $0 admin --expiry 1h                    # Token with 1 hour expiry"
     echo "  $0 administrator --audience client      # Mint a client-aud token for api.*"
     echo "  $0 admin -a client -q                   # Quiet client-aud token"
     echo ""
@@ -118,7 +116,6 @@ select_role() {
 ROLE=""
 QUIET=false
 CURL_OUTPUT=false
-EXPIRY=""
 AUDIENCE="$DEFAULT_AUDIENCE"
 TENANT=""
 
@@ -135,10 +132,6 @@ while [[ $# -gt 0 ]]; do
         -c|--curl)
             CURL_OUTPUT=true
             shift
-            ;;
-        -e|--expiry)
-            EXPIRY="$2"
-            shift 2
             ;;
         -t|--tenant)
             TENANT="$2"
@@ -194,9 +187,6 @@ REQUEST_BODY="{\"role\": \"$ROLE\""
 REQUEST_BODY="$REQUEST_BODY, \"audience\": \"$AUDIENCE\""
 if [ -n "$TENANT" ]; then
     REQUEST_BODY="$REQUEST_BODY, \"tenantUuid\": \"$TENANT\""
-fi
-if [ -n "$EXPIRY" ]; then
-    REQUEST_BODY="$REQUEST_BODY, \"expiry\": \"$EXPIRY\""
 fi
 REQUEST_BODY="$REQUEST_BODY}"
 

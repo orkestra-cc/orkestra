@@ -348,6 +348,10 @@ The host mux ([cmd/server/hostmux.go](../backend/cmd/server/hostmux.go)) strips 
 | `CLIENT_COOKIE_DOMAIN` | Refresh-cookie `Domain=` for client-tier tokens. | **empty / host-only** (dev) / empty (prod, operator-set for cross-subdomain) |
 | `OPERATOR_FRONTEND_URL` | Operator-tier SPA origin (`console.*`) used to build verify-email / reset-password links in transactional email. | falls back to `FRONTEND_URL` |
 | `CLIENT_FRONTEND_URL` | Client-tier SPA origin (`app.*`) used to build verify-email / reset-password links for signups landing on the client API host. | falls back to `FRONTEND_URL` |
+| `TRUSTED_PROXY_CIDRS` | Networks your reverse proxies live in. **Preferred** form — survives a topology change without a recount. | empty |
+| `TRUSTED_PROXY_COUNT` | How many proxy hops sit in front of the backend. Used only when `TRUSTED_PROXY_CIDRS` is empty. | `0` (dev) / `2` (staging: Cloudflare → HAProxy) / `0` (prod — **set this before going live**) |
+
+**Trusted proxies are a security control, not a logging nicety.** `X-Forwarded-For` is an ordinary request header, so with no policy configured the backend ignores it entirely and attributes every request to its direct peer. Behind a proxy that means all callers collapse onto the proxy's address — they share one login rate-limit bucket, the operator IP allowlist matches nothing real, and geo-blocking sees the proxy's country. Set one of the two vars in any environment that terminates TLS somewhere other than the Go process. A production-like boot with neither set logs a startup warning; a malformed value is fatal at boot. Details in [backend/CLAUDE.md](../backend/CLAUDE.md#client-ip-resolution-trusted-proxies).
 
 In production-like environments **set both `OPERATOR_COOKIE_DOMAIN` and `CLIENT_COOKIE_DOMAIN` explicitly** — leaving one empty mints that tier's cookie without a `Domain` attribute (scoped to the minting host), so each tier's session is confined to its own subdomain.
 

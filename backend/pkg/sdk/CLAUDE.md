@@ -46,7 +46,7 @@ explicitly yet — the grep is the gate.
 | Package | Purpose | Stability |
 | --- | --- | --- |
 | `module/` | Module interface + 16 optional sub-interfaces, BaseModule, ModuleRegistry, ServiceRegistry, ConfigService, RouteInfo, RedisClient, secrets (AES-256-GCM helpers). The boot kernel. | Required surface frozen at v1 |
-| `iface/` | Cross-module interfaces (UserProvider, TenantProvider, AuthzProvider, NotificationSender, JWTProvider, PDFProvider, AIModelProvider, RAGQueryProvider, AuditSink, BillingTenantProvider, PaymentProvider, …) + their DTOs (User, OAuthLink, Tenant, NotificationRequest, …). | Additive-only |
+| `iface/` | Cross-module interfaces (UserProvider, TenantProvider, AuthzProvider, NotificationSender, JWTProvider, PDFProvider, AIModelProvider, RAGQueryProvider, AuditSink, SessionTerminator, BillingTenantProvider, PaymentProvider, …) + their DTOs (User, OAuthLink, Tenant, NotificationRequest, …). | Additive-only |
 | `ctxauth/` | Request-context getters: `GetUserUUID`, `GetTenantID`, `GetTenantRoles`, `GetClientIP`, `IsImpersonating`, `TenantKindFromContext`. Plus the exported `Key*` string constants the backend AuthMiddleware writes against. | Frozen |
 | `modulegate/` | `ModuleGate(checker, name)` HTTP middleware (503 when disabled) + `ModuleEnabledChecker` interface. | Frozen |
 | `tenantrepo/` | Fail-closed Mongo query helpers (`Scope`, `MustScope`, `StampInsert`, `StampInsertM`, `ScopeAggregate`, `RequireInternalTenant`, `RequireExternalTenant`) + `ErrTenantScopeMissing` / `ErrTenantKindMismatch` sentinels. | Frozen |
@@ -65,6 +65,15 @@ The SDK is on the path to v1.0 publication. Until then:
   `Init`). New module capabilities go behind optional sub-interfaces in
   `module/module.go` — see the existing `HasConfigSchema`,
   `HasNavItems`, `Startable`, … pattern. Never widen `Module`.
+- **`module.RedisClient` is provided TO modules, not implemented BY them.**
+  It is the one SDK interface the backend satisfies on the consumer's
+  behalf (`deps.RedisAdapter`), so widening it does not ripple out to
+  module authors the way widening `iface.UserProvider` would. It gained
+  `Incr` + `Expire` for callers that cap attempts: a read-modify-write
+  counter over `Get`/`Set` loses concurrent increments, which silently
+  turns "N tries" into "N tries per serial caller". A fork that
+  substitutes its own `RedisClient` (a test double, typically) must add
+  the two methods.
 - **DTO field additions** in `iface/` should be optional (pointer types
   or `omitempty`) so older implementations keep compiling. Required
   fields are major-version bumps.

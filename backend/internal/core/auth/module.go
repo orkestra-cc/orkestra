@@ -754,7 +754,6 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 		operatorCookieDomain,
 		cfg.Auth.Cookie.Secure,
 	)
-	m.operatorPasswordHandler.SetSessionRevocation(sessionRevocationSvc)
 
 	m.operatorAuthHandler = handlers.NewAuthHandler(
 		opBundle.authService,
@@ -788,6 +787,10 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 	// authenticated request. Without this, in-flight access tokens
 	// would stay valid until the per-token TTL ticked over.
 	opBundle.authService.SetSessionRevocation(sessionRevocationSvc)
+	// Same store for the password service: ResetPassword / ChangePassword
+	// push every evicted sid so a credential change kills access tokens
+	// already in flight instead of waiting out their TTL.
+	opBundle.passwordSvc.SetSessionRevocation(sessionRevocationSvc)
 
 	m.operatorMFAHandler = handlers.NewMFAHandler(
 		opBundle.mfaSvc,
@@ -872,7 +875,6 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 		clientCookieDomain,
 		cfg.Auth.Cookie.Secure,
 	)
-	m.clientPasswordHandler.SetSessionRevocation(sessionRevocationSvc)
 
 	m.clientAuthHandler = handlers.NewAuthHandler(
 		clBundle.authService,
@@ -894,6 +896,7 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 		clBundle.passwordSvc.SetBlobStore(store)
 	}
 	clBundle.authService.SetSessionRevocation(sessionRevocationSvc)
+	clBundle.passwordSvc.SetSessionRevocation(sessionRevocationSvc)
 
 	m.clientMFAHandler = handlers.NewMFAHandler(
 		clBundle.mfaSvc,

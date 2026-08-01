@@ -116,6 +116,20 @@ func (r *RedisClientAdapter) Del(ctx context.Context, keys ...string) error {
 	return r.client.Del(ctx, keys...).Err()
 }
 
+// Incr implements the RedisClient interface — atomic counter increment.
+func (r *RedisClientAdapter) Incr(ctx context.Context, key string) (int64, error) {
+	result := r.client.Incr(ctx, key)
+	if result.Err() != nil {
+		return 0, result.Err()
+	}
+	return result.Val(), nil
+}
+
+// Expire implements the RedisClient interface.
+func (r *RedisClientAdapter) Expire(ctx context.Context, key string, expiration time.Duration) error {
+	return r.client.Expire(ctx, key, expiration).Err()
+}
+
 // Keys implements the RedisClient interface
 func (r *RedisClientAdapter) Keys(ctx context.Context, pattern string) ([]string, error) {
 	result := r.client.Keys(ctx, pattern)

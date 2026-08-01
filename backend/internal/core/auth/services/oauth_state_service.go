@@ -6,6 +6,8 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"strconv"
+	"sync"
 	"time"
 
 	"github.com/orkestra/backend/internal/core/auth/models"
@@ -78,6 +80,12 @@ type OAuthStateStore interface {
 	Get(ctx context.Context, key string) ([]byte, error)
 	Delete(ctx context.Context, key string) error
 	DeleteByPattern(ctx context.Context, pattern string) error
+	// Incr atomically increments an integer counter and returns the new
+	// value, applying expiry when the counter is first created. Needed
+	// wherever a read-modify-write would lose concurrent updates — the
+	// MFA per-challenge attempt cap is the motivating case: with RMW,
+	// N parallel guesses cost one attempt instead of N.
+	Incr(ctx context.Context, key string, expiry time.Duration) (int64, error)
 }
 
 type oAuthStateService struct {
@@ -198,6 +206,11 @@ type RedisClient interface {
 	Get(ctx context.Context, key string) (string, error)
 	Del(ctx context.Context, keys ...string) error
 	Keys(ctx context.Context, pattern string) ([]string, error)
+	// Incr / Expire back the atomic counter primitive. Split rather than
+	// scripted because the only caller sets the TTL exactly once, on the
+	// increment that creates the key.
+	Incr(ctx context.Context, key string) (int64, error)
+	Expire(ctx context.Context, key string, expiration time.Duration) error
 }
 
 // NewRedisOAuthStateStore creates a Redis-backed OAuth state store
@@ -223,6 +236,21 @@ func (r *RedisOAuthStateStore) Delete(ctx context.Context, key string) error {
 	return r.client.Del(ctx, key)
 }
 
+// Incr increments the counter and stamps the TTL on creation. A counter
+// without a TTL would outlive the flow it belongs to.
+func (r *RedisOAuthStateStore) Incr(ctx context.Context, key string, expiry time.Duration) (int64, error) {
+	n, err := r.client.Incr(ctx, key)
+	if err != nil {
+		return 0, err
+	}
+	if n == 1 && expiry > 0 {
+		if err := r.client.Expire(ctx, key, expiry); err != nil {
+			return n, err
+		}
+	}
+	return n, nil
+}
+
 func (r *RedisOAuthStateStore) DeleteByPattern(ctx context.Context, pattern string) error {
 	keys, err := r.client.Keys(ctx, pattern)
 	if err != nil {
@@ -237,7 +265,12 @@ func (r *RedisOAuthStateStore) DeleteByPattern(ctx context.Context, pattern stri
 }
 
 // Memory implementation for testing
+// MemoryOAuthStateStore is the in-process stand-in used by tests. It is
+// mutex-guarded: the production store is Redis (already atomic per
+// command), and a test double that races would make concurrency tests
+// report the double's bug instead of the code under test.
 type MemoryOAuthStateStore struct {
+	mu     sync.Mutex
 	states map[string][]byte
 	expiry map[string]time.Time
 }
@@ -250,12 +283,16 @@ func NewMemoryOAuthStateStore() OAuthStateStore {
 }
 
 func (m *MemoryOAuthStateStore) Set(ctx context.Context, key string, value []byte, expiry time.Duration) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.states[key] = value
 	m.expiry[key] = time.Now().Add(expiry)
 	return nil
 }
 
 func (m *MemoryOAuthStateStore) Get(ctx context.Context, key string) ([]byte, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	// Check expiry
 	if expTime, exists := m.expiry[key]; exists && time.Now().After(expTime) {
 		delete(m.states, key)
@@ -272,12 +309,16 @@ func (m *MemoryOAuthStateStore) Get(ctx context.Context, key string) ([]byte, er
 }
 
 func (m *MemoryOAuthStateStore) Delete(ctx context.Context, key string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	delete(m.states, key)
 	delete(m.expiry, key)
 	return nil
 }
 
 func (m *MemoryOAuthStateStore) DeleteByPattern(ctx context.Context, pattern string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	// Simple pattern matching (for production use proper pattern matching)
 	for key := range m.states {
 		if key == pattern || (pattern == "oauth:state:*" && len(key) > 12 && key[:12] == "oauth:state:") {
@@ -325,4 +366,29 @@ func ValidateOAuthCallback(stateInfo *OAuthStateInfo, code, state, codeVerifier 
 // GenerateSecureState generates a cryptographically secure OAuth state
 func GenerateSecureState() (string, error) {
 	return utils.SecureRandomString(32)
+}
+
+// Incr atomically increments an in-memory counter stored alongside the
+// regular values, mirroring the Redis semantics (TTL applied on create).
+func (m *MemoryOAuthStateStore) Incr(_ context.Context, key string, expiry time.Duration) (int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if exp, ok := m.expiry[key]; ok && time.Now().After(exp) {
+		delete(m.states, key)
+		delete(m.expiry, key)
+	}
+	var n int64
+	if raw, ok := m.states[key]; ok {
+		parsed, err := strconv.ParseInt(string(raw), 10, 64)
+		if err != nil {
+			return 0, fmt.Errorf("memory store: counter %q is not an integer: %w", key, err)
+		}
+		n = parsed
+	}
+	n++
+	m.states[key] = []byte(strconv.FormatInt(n, 10))
+	if n == 1 && expiry > 0 {
+		m.expiry[key] = time.Now().Add(expiry)
+	}
+	return n, nil
 }

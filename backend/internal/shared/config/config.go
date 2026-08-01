@@ -51,6 +51,23 @@ type ServerConfig struct {
 	CORSOrigins []string // Allowed CORS origins (legacy single-host fallback)
 	MaxBodySize int64    // Maximum request body size in bytes (default 10MB)
 
+	// TrustedProxyCount / TrustedProxyCIDRs describe the reverse proxies
+	// between the internet and this process, and are what makes
+	// X-Forwarded-For believable. See shared/middleware/realip.go.
+	//
+	// Prefer TRUSTED_PROXY_CIDRS (the networks our proxies live in) —
+	// it stays correct if the chain length changes. TRUSTED_PROXY_COUNT
+	// (how many hops sit in front) is the simpler alternative.
+	//
+	// Both unset means "trust no forwarding header": every request is
+	// attributed to its direct peer. That is the safe default but it is
+	// WRONG for any deployment behind a proxy — the IP allowlist, the
+	// login geo-block, and the per-IP rate limiter would all see the
+	// proxy's address for every caller. Set one of these in any
+	// environment that terminates TLS somewhere other than this process.
+	TrustedProxyCount int
+	TrustedProxyCIDRs []string
+
 	// ADR-0003 per-audience host split. Both audiences are served from the
 	// same Go binary, dispatched by Host header at the application layer.
 	// Empty Host disables that audience's mux (the host mux returns 421 for
@@ -206,6 +223,9 @@ func Load() (*Config, error) {
 		FrontendURL: getEnv("FRONTEND_URL", "http://localhost:8080"),
 		CORSOrigins: corsOrigins,
 		MaxBodySize: getEnvAsInt64("MAX_BODY_SIZE", 10*1024*1024), // Default 10MB
+
+		TrustedProxyCount: getEnvAsInt("TRUSTED_PROXY_COUNT", 0),
+		TrustedProxyCIDRs: getEnvAsSlice("TRUSTED_PROXY_CIDRS", nil),
 		Operator: AudienceConfig{
 			Host:        getEnv("CONSOLE_HOST", defaultConsoleHost),
 			CORSOrigins: getEnvAsSlice("OPERATOR_CORS_ORIGINS", nil),

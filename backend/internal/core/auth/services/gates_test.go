@@ -331,7 +331,7 @@ func TestChangePassword_RevokeOnPasswordChangeOff_SkipsDeviceTrustRevoke(t *test
 	dt := &recordingDeviceTrust{}
 	env.auth.deviceTrust = dt
 
-	if err := env.auth.ChangePassword(context.Background(), u.UUID, "correct-horse-battery", "new-correct-horse-pw"); err != nil {
+	if err := env.auth.ChangePassword(context.Background(), ChangePasswordInput{UserUUID: u.UUID, Current: "correct-horse-battery", New: "new-correct-horse-pw"}); err != nil {
 		t.Fatalf("ChangePassword: %v", err)
 	}
 	if dt.revokeCalls != 0 {
@@ -345,7 +345,7 @@ func TestChangePassword_RevokeOnPasswordChangeOn_DefaultRevokes(t *testing.T) {
 	dt := &recordingDeviceTrust{}
 	env.auth.deviceTrust = dt
 
-	if err := env.auth.ChangePassword(context.Background(), u.UUID, "correct-horse-battery", "new-correct-horse-pw"); err != nil {
+	if err := env.auth.ChangePassword(context.Background(), ChangePasswordInput{UserUUID: u.UUID, Current: "correct-horse-battery", New: "new-correct-horse-pw"}); err != nil {
 		t.Fatalf("ChangePassword: %v", err)
 	}
 	if dt.revokeCalls != 1 {

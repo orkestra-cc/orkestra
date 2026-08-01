@@ -15,6 +15,7 @@ import (
 	"errors"
 	"log/slog"
 	"strings"
+	"time"
 
 	authModels "github.com/orkestra/backend/internal/core/auth/models"
 	"github.com/orkestra/backend/pkg/sdk/iface"
@@ -67,6 +68,25 @@ func NewService(users iface.UserProvider, admin AdminCreator, cfg *module.Module
 // On any DB error the method fails open (both flags false) so the wizard
 // can still render and the operator can try again — we'd rather show the
 // wizard redundantly than lock someone out of a deployment they own.
+// refreshTTLProvider is the optional capability the setup handler needs
+// from whatever creates the first admin: the refresh-token lifetime, so
+// the cookie it emits matches the one POST /v1/auth/login emits.
+// Satisfied by *auth/services.PasswordAuthService.
+type refreshTTLProvider interface {
+	RefreshTokenTTL() time.Duration
+}
+
+// RefreshTokenTTL returns the deployment's refresh-token lifetime, or
+// the legacy 7-day default when the creator does not expose one.
+func (s *Service) RefreshTokenTTL() time.Duration {
+	if p, ok := s.admin.(refreshTTLProvider); ok {
+		if d := p.RefreshTokenTTL(); d > 0 {
+			return d
+		}
+	}
+	return 7 * 24 * time.Hour
+}
+
 func (s *Service) Status(ctx context.Context) Status {
 	out := Status{}
 

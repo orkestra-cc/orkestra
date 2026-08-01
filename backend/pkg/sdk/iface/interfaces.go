@@ -815,6 +815,34 @@ type SelfServiceCheckoutPlanner interface {
 var ErrCheckoutNoPendingInvoice = errors.New("self-service checkout: no pending invoice for subscription")
 
 // ---------------------------------------------------------------------------
+// SessionTerminator — consumed by: any module that can revoke a principal's
+// right to be signed in (the user module's deactivate / delete paths).
+// Provided by the auth module; satisfied by *services.AuthService.
+//
+// The auth refresh paths already refuse a user whose account is no longer
+// active, which caps a revoked principal's remaining access at one
+// access-token TTL. This interface closes the rest of that window: it
+// revokes the refresh tokens, flips the session documents, and pushes
+// every sid into the revocation set so bearers already in flight stop
+// working on their next request.
+//
+// Resolve it with module.GetTyped against ServiceAuthService (operator
+// tier) or ServiceClientAuthService (client tier). A nil result means the
+// auth module is not wired — callers must degrade to "the account is
+// disabled and the refresh path will catch it" rather than erroring, so
+// that lifecycle changes never fail on a missing optional collaborator.
+// ---------------------------------------------------------------------------
+
+// SessionTerminator ends every active session belonging to a user.
+type SessionTerminator interface {
+	// TerminateAllSessionsByUUID revokes the user's refresh tokens,
+	// deactivates their session documents, and revokes their session ids.
+	// Callers treat a returned error as advisory: the state change that
+	// prompted the call has already been persisted.
+	TerminateAllSessionsByUUID(ctx context.Context, userUUID string) error
+}
+
+// ---------------------------------------------------------------------------
 // AuditSink — consumed by: every module that performs a security-sensitive
 // or lifecycle-changing action. Provided by the compliance module.
 //

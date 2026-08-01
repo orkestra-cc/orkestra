@@ -95,6 +95,12 @@ func (m *UserModule) Init(deps *module.Dependencies) error {
 	canonical := operatorSvc
 	canonicalRepo := operatorRepo
 	m.handler = handlers.NewUserHandler(canonical)
+	// The auth module initialises after this one (registry topological
+	// order), so its iface.SessionTerminator cannot be resolved here.
+	// Hand the handler the registry instead and let it resolve at
+	// request time — deactivate / delete use it to end the target's
+	// sessions instead of leaving live bearers behind.
+	m.handler.SetServiceRegistry(deps.Services)
 	m.adminClientHandler = handlers.NewAdminClientUserHandler(clientSvc, deps.Services)
 	deps.Services.Register(module.ServiceUserService, canonical)
 

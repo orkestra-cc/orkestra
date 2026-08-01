@@ -13,8 +13,8 @@ ORKESTRA_API_URL=http://localhost:3000 ./scripts/devtoken.sh administrator
 
 The script prints a `Bearer` token. Paste it into the admin UI's login form (or any API client) to access the platform with the `administrator` role.
 
-:::warning Production
-The dev-token endpoint is only available in development and staging — it is automatically disabled in production. Never expose it on a public-facing instance.
+:::warning Local development only
+The dev-token endpoint is available in **development only** — it is automatically disabled in production *and staging*, because it hands a signed `super_admin` token to any caller with no credentials at all. Never expose it on a public-facing instance.
 :::
 
 ## What to do next

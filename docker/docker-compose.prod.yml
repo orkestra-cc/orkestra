@@ -72,6 +72,23 @@ services:
       OPERATOR_CORS_ORIGINS: ${OPERATOR_CORS_ORIGINS:-}
       CLIENT_CORS_ORIGINS: ${CLIENT_CORS_ORIGINS:-}
 
+      # Trusted proxies — what makes X-Forwarded-For believable.
+      #
+      # Everything that depends on the caller's address reads the value
+      # resolved from this policy: the operator IP allow/blocklist, the
+      # login geo-block, the per-IP login rate limiter, and every audited
+      # IP. Leave BOTH unset and forwarding headers are ignored entirely
+      # — every request is attributed to its direct peer (safe, but wrong
+      # behind a proxy: all callers collapse onto the proxy's address and
+      # share one rate-limit bucket).
+      #
+      # Prefer TRUSTED_PROXY_CIDRS (the networks your proxies live in) —
+      # it survives a topology change without a recount. Use
+      # TRUSTED_PROXY_COUNT when you just know how many hops sit in
+      # front. Set this to match YOUR ingress before going live.
+      TRUSTED_PROXY_CIDRS: ${TRUSTED_PROXY_CIDRS:-}
+      TRUSTED_PROXY_COUNT: ${TRUSTED_PROXY_COUNT:-0}
+
       # Security (strict)
       RATE_LIMIT_REQUESTS_PER_MINUTE: ${RATE_LIMIT_REQUESTS_PER_MINUTE:-30}
       RATE_LIMIT_BURST: ${RATE_LIMIT_BURST:-5}

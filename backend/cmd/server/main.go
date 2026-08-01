@@ -362,8 +362,28 @@ func main() {
 		},
 	}
 
+	// Trusted-proxy policy for client-IP resolution. Everything that
+	// depends on knowing who is calling — the operator IP allow/blocklist
+	// mounted just below, the login geo-block, the per-IP rate limiter,
+	// and every audited IP — reads the address this policy produces.
+	// A malformed value is fatal: booting with a policy we could not
+	// parse would silently fall back to trusting nothing, and a
+	// deployment behind a proxy would then attribute every request to
+	// the proxy.
+	trustedProxies, err := authMiddleware.NewTrustedProxyPolicy(
+		cfg.Server.TrustedProxyCount, cfg.Server.TrustedProxyCIDRs)
+	if err != nil {
+		log.Fatalf("Invalid trusted proxy configuration: %v", err)
+	}
+	if cfg.IsProductionLike() && !trustedProxies.Configured() {
+		logger.Warn("no trusted proxy configured — X-Forwarded-For is ignored and every request " +
+			"is attributed to its direct peer. If this deployment sits behind a load balancer or CDN, " +
+			"set TRUSTED_PROXY_CIDRS (preferred) or TRUSTED_PROXY_COUNT, otherwise the IP allowlist, " +
+			"geo-block, and per-IP rate limits all operate on the proxy's address.")
+	}
+
 	operatorMux := chi.NewRouter()
-	setupMiddleware(operatorMux, cfg, errorManager, deviceMW, string(module.AudienceOperator), cfg.Server.Operator, logger)
+	setupMiddleware(operatorMux, cfg, errorManager, deviceMW, string(module.AudienceOperator), cfg.Server.Operator, logger, trustedProxies)
 	// Phase 7: admin-managed IP allow/block gate on the operator host
 	// only. Reads ipAllowlistAdmin / ipBlocklistAdmin live from
 	// AuthPolicyService on every request — admin edits take effect
@@ -381,7 +401,7 @@ func main() {
 	operatorProtected.Use(authMiddleware.TenantBaggage)
 
 	clientMux := chi.NewRouter()
-	setupMiddleware(clientMux, cfg, errorManager, deviceMW, string(module.AudienceClient), cfg.Server.Client, logger)
+	setupMiddleware(clientMux, cfg, errorManager, deviceMW, string(module.AudienceClient), cfg.Server.Client, logger, trustedProxies)
 	clientAPI := humachi.New(clientMux, apiConfig)
 	clientProtected := chi.NewRouter()
 	clientProtected.Use(authMW.RequireAuth)
@@ -437,13 +457,18 @@ func main() {
 	)
 	setup.NewHandler(setupSvc, cfg.Auth.Cookie).RegisterRoutes(operatorAPI)
 
-	// Dev-token endpoint (dev/staging only) — synthetic JWTs for first
-	// login + local API testing, used by scripts/devtoken.sh and the
+	// Dev-token endpoint (LOCAL DEVELOPMENT ONLY) — synthetic JWTs for
+	// first login + local API testing, used by scripts/devtoken.sh and the
 	// console's "Sign in with dev token" affordance. Re-provided in core
 	// after ADR-0006 removed the dev addon. Mounted as a raw chi route on
 	// the operator root mux (bypasses Huma, hidden from /docs); never on
 	// the client host. No DB writes.
-	if !cfg.IsProduction() {
+	//
+	// The gate is IsProductionLike, not IsProduction: the endpoint hands a
+	// signed super_admin token to any anonymous caller, so it must not
+	// exist on staging either — staging is internet-reachable. Handler.
+	// RegisterRoutes enforces the same rule independently.
+	if !cfg.IsProductionLike() {
 		// Resolver: when an operator dev token doesn't pin a tenant, default it
 		// to the first internal tenant so the token satisfies tenant-scoped
 		// reads (billing/documents). Nil-safe — falls back to a tenant-less

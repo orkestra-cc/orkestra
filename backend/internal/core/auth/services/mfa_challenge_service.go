@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -164,9 +166,10 @@ func (s *mfaChallengeService) Peek(ctx context.Context, id string) (*MFAChalleng
 		return nil, fmt.Errorf("unmarshal mfa challenge: %w", err)
 	}
 	if time.Now().After(ch.ExpiresAt) {
-		_ = s.store.Delete(ctx, buildMFAChallengeKey(id))
+		s.destroy(ctx, id)
 		return nil, ErrMFAChallengeNotFound
 	}
+	ch.Attempts = s.attemptsFor(ctx, id)
 	return &ch, nil
 }
 
@@ -175,38 +178,73 @@ func (s *mfaChallengeService) Consume(ctx context.Context, id string) (*MFAChall
 	if err != nil {
 		return nil, err
 	}
-	_ = s.store.Delete(ctx, buildMFAChallengeKey(id))
+	s.destroy(ctx, id)
 	return ch, nil
 }
 
 // IncrementAttempts bumps the counter and returns the new value. When the
 // counter reaches MFAMaxAttempts the challenge is deleted, forcing the
-// client to start over — cheapest rate-limiter for a 6-digit code.
+// client to start over — the cheapest rate limiter for a 6-digit code,
+// and the ONLY one on the login-verify path.
+//
+// The counter lives in its own key and moves via an atomic INCR rather
+// than riding the challenge JSON. Read-modify-write on the JSON (Peek →
+// ++ → Set) meant concurrent verifies all read the same value and all
+// wrote back the same value: N parallel guesses cost one attempt. That
+// turned "5 tries per challenge" into "5 tries for a serial attacker,
+// effectively unbounded for a parallel one" — against a 10^6 keyspace
+// that is the difference between a useless and a useful attack.
 func (s *mfaChallengeService) IncrementAttempts(ctx context.Context, id string) (int, error) {
 	ch, err := s.Peek(ctx, id)
 	if err != nil {
 		return 0, err
 	}
-	ch.Attempts++
-	if ch.Attempts >= MFAMaxAttempts {
-		_ = s.store.Delete(ctx, buildMFAChallengeKey(id))
-		return ch.Attempts, nil
-	}
 	remaining := time.Until(ch.ExpiresAt)
 	if remaining <= 0 {
-		_ = s.store.Delete(ctx, buildMFAChallengeKey(id))
+		s.destroy(ctx, id)
 		return ch.Attempts, ErrMFAChallengeNotFound
 	}
-	payload, err := json.Marshal(ch)
+
+	n, err := s.store.Incr(ctx, buildMFAAttemptsKey(id), remaining)
 	if err != nil {
-		return ch.Attempts, fmt.Errorf("marshal mfa challenge: %w", err)
+		// Fail closed: a counter we cannot advance is a counter that
+		// cannot cap anything, so drop the challenge rather than serve
+		// unlimited guesses against it.
+		s.destroy(ctx, id)
+		return ch.Attempts, fmt.Errorf("increment mfa attempts: %w", err)
 	}
-	if err := s.store.Set(ctx, buildMFAChallengeKey(id), payload, remaining); err != nil {
-		return ch.Attempts, fmt.Errorf("store mfa challenge: %w", err)
+	if int(n) >= MFAMaxAttempts {
+		s.destroy(ctx, id)
 	}
-	return ch.Attempts, nil
+	return int(n), nil
+}
+
+// destroy removes a challenge and its attempt counter together — leaving
+// the counter behind would let a recycled id inherit a used-up budget.
+func (s *mfaChallengeService) destroy(ctx context.Context, id string) {
+	_ = s.store.Delete(ctx, buildMFAChallengeKey(id))
+	_ = s.store.Delete(ctx, buildMFAAttemptsKey(id))
+}
+
+// attemptsFor reads the atomic counter so Peek can report a live value
+// rather than the zero frozen into the challenge JSON at Begin time.
+func (s *mfaChallengeService) attemptsFor(ctx context.Context, id string) int {
+	raw, err := s.store.Get(ctx, buildMFAAttemptsKey(id))
+	if err != nil || len(raw) == 0 {
+		return 0
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(string(raw)))
+	if err != nil {
+		return 0
+	}
+	return n
 }
 
 func buildMFAChallengeKey(id string) string {
 	return fmt.Sprintf("mfa:challenge:%s", id)
+}
+
+// buildMFAAttemptsKey names the atomic attempt counter for a challenge.
+func buildMFAAttemptsKey(id string) string {
+	return fmt.Sprintf("mfa:challenge:%s:attempts", id)
 }

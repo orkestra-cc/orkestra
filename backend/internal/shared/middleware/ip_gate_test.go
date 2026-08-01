@@ -97,12 +97,45 @@ func TestIPGate_BareIPNormalisedToHost(t *testing.T) {
 	}
 }
 
-func TestIPGate_PrefersXForwardedFor(t *testing.T) {
+func TestIPGate_IgnoresSpoofedXForwardedFor(t *testing.T) {
+	// This assertion is inverted from the pre-fix version, which
+	// required the leftmost X-Forwarded-For entry to drive the gate.
+	// That made the allowlist self-service: an outside caller only had
+	// to claim an inside address to get through. Header interpretation
+	// now happens once, in RealIP, under the deployment's trusted-proxy
+	// policy; the gate reads the resolved RemoteAddr.
 	src := func() ([]string, []string) { return []string{"10.0.0.0/8"}, nil }
-	// RemoteAddr is outside, X-Forwarded-For first hop is inside.
-	status, _ := runGate(t, src, newRequest("198.51.100.5:1234", "10.5.6.7, 198.51.100.5", ""))
-	if status != http.StatusOK {
-		t.Fatalf("XFF first hop must drive the gate, got %d", status)
+
+	// RemoteAddr is outside the allowlist, XFF claims an inside address.
+	status, body := runGate(t, src, newRequest("198.51.100.5:1234", "10.5.6.7, 198.51.100.5", ""))
+	if status != http.StatusForbidden {
+		t.Fatalf("a spoofed XFF must not satisfy the allowlist, got %d body %q", status, body)
+	}
+
+	// The blocklist must be equally unforgeable: a blocked peer cannot
+	// wash its address by claiming a clean one in the header.
+	blocked := func() ([]string, []string) { return nil, []string{"198.51.100.0/24"} }
+	status, _ = runGate(t, blocked, newRequest("198.51.100.5:1234", "10.5.6.7", ""))
+	if status != http.StatusForbidden {
+		t.Fatalf("a blocked peer must not escape via XFF, got %d", status)
+	}
+}
+
+func TestIPGate_HonoursIPResolvedByRealIP(t *testing.T) {
+	// End-to-end shape of the production chain: RealIP resolves the
+	// client under the trusted-proxy policy, then the gate matches on
+	// that value. One trusted hop, so the rightmost XFF entry is the
+	// address the proxy observed.
+	src := func() ([]string, []string) { return []string{"10.0.0.0/8"}, nil }
+
+	r := newRequest("172.16.0.9:1234", "1.1.1.1, 10.5.6.7", "")
+	gate := NewIPGate(src)
+	rec := httptest.NewRecorder()
+	chain := RealIP(TrustedProxyPolicy{Count: 1})(gate.Middleware(okHandler()))
+	chain.ServeHTTP(rec, r)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("allowlisted client behind one trusted proxy must pass, got %d body %q", rec.Code, rec.Body.String())
 	}
 }
 

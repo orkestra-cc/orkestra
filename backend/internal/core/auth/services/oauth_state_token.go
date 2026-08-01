@@ -59,6 +59,15 @@ type OAuthStateClaims struct {
 	Mode         string `json:"mode,omitempty"`
 	LinkUserUUID string `json:"linkUserUuid,omitempty"`
 	CSRF         string `json:"csrf"`
+	// StartHost records the host the flow was initiated on so the
+	// callback can tell "this browser should be carrying the state
+	// cookie" from "the cookie could never have reached us". The
+	// operator and client surfaces live on different hosts (ADR-0003)
+	// while every provider callback lands on the operator host, so a
+	// client-tier flow legitimately arrives without its start-host
+	// cookie. Signed, so a caller cannot claim a host to dodge the
+	// binding check.
+	StartHost string `json:"shost,omitempty"`
 	jwt.RegisteredClaims
 }
 
@@ -77,7 +86,7 @@ const (
 // (pre-tier-split) flows; the callback treats an empty tier as "use the
 // callback handler's own authService" so existing /v1/auth/oauth/login
 // requests keep working through the cutover.
-func SignOAuthStateToken(secret []byte, tier, csrf string, ttl time.Duration) (string, error) {
+func SignOAuthStateToken(secret []byte, tier, csrf, startHost string, ttl time.Duration) (string, error) {
 	if len(secret) == 0 {
 		return "", fmt.Errorf("oauth state token: secret is required")
 	}
@@ -89,8 +98,9 @@ func SignOAuthStateToken(secret []byte, tier, csrf string, ttl time.Duration) (s
 	}
 	now := time.Now()
 	claims := OAuthStateClaims{
-		Tier: tier,
-		CSRF: csrf,
+		Tier:      tier,
+		CSRF:      csrf,
+		StartHost: startHost,
 		RegisteredClaims: jwt.RegisteredClaims{
 			IssuedAt:  jwt.NewNumericDate(now),
 			ExpiresAt: jwt.NewNumericDate(now.Add(ttl)),
@@ -108,7 +118,7 @@ func SignOAuthStateToken(secret []byte, tier, csrf string, ttl time.Duration) (s
 // "add a sign-in provider" flow. linkUserUUID is the authenticated
 // user the new identity must be bound to on callback — empty is
 // rejected.
-func SignOAuthLinkStateToken(secret []byte, tier, csrf, linkUserUUID string, ttl time.Duration) (string, error) {
+func SignOAuthLinkStateToken(secret []byte, tier, csrf, linkUserUUID, startHost string, ttl time.Duration) (string, error) {
 	if linkUserUUID == "" {
 		return "", fmt.Errorf("oauth link state token: linkUserUUID is required")
 	}
@@ -127,6 +137,7 @@ func SignOAuthLinkStateToken(secret []byte, tier, csrf, linkUserUUID string, ttl
 		Mode:         OAuthStateModeLink,
 		LinkUserUUID: linkUserUUID,
 		CSRF:         csrf,
+		StartHost:    startHost,
 		RegisteredClaims: jwt.RegisteredClaims{
 			IssuedAt:  jwt.NewNumericDate(now),
 			ExpiresAt: jwt.NewNumericDate(now.Add(ttl)),

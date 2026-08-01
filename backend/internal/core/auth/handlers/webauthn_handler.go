@@ -283,7 +283,7 @@ func (h *WebAuthnHandler) VerifyFinish(ctx context.Context, req *webAuthnVerifyF
 	resp.Body.Success = true
 	resp.Body.AccessToken = token
 	resp.Body.TokenType = "Bearer"
-	resp.Body.ExpiresIn = 15 * 60
+	resp.Body.ExpiresIn = int64(h.jwt.AccessTokenTTL(ctx).Seconds())
 	return resp, nil
 }
 
@@ -410,7 +410,8 @@ func (h *WebAuthnHandler) LoginFinish(ctx context.Context, req *webAuthnLoginFin
 	}
 
 	resp := &webAuthnLoginFinishResponse{}
-	resp.SetCookie = buildRefreshCookie(h.cookieName, tokens.RefreshToken, h.cookieDomain, h.cookieSecure)
+	resp.SetCookie = buildRefreshCookie(h.cookieName, tokens.RefreshToken, h.cookieDomain, h.cookieSecure,
+		int(h.jwt.RefreshTokenTTL().Seconds()))
 	resp.Body.Success = true
 	resp.Body.AccessToken = tokens.AccessToken
 	resp.Body.TokenType = tokens.TokenType

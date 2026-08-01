@@ -76,7 +76,8 @@ func (h *Handler) CreateAdmin(ctx context.Context, req *CreateAdminRequest) (*Cr
 	}
 
 	resp := &CreateAdminResponse{}
-	resp.SetCookie = buildRefreshCookie(h.cookieName, tokens.RefreshToken, h.cookieDomain, h.cookieSecure)
+	resp.SetCookie = buildRefreshCookie(h.cookieName, tokens.RefreshToken, h.cookieDomain, h.cookieSecure,
+		int(h.svc.RefreshTokenTTL().Seconds()))
 	resp.Body.Success = true
 	resp.Body.AccessToken = tokens.AccessToken
 	resp.Body.TokenType = tokens.TokenType
@@ -136,13 +137,13 @@ func clientIPFromCtx(ctx context.Context) string {
 
 // buildRefreshCookie mirrors the helper in auth/handlers/password_handler.go
 // so the cookie emitted by POST /v1/setup/admin matches POST /v1/auth/login.
-func buildRefreshCookie(name, value, domain string, secure bool) string {
+func buildRefreshCookie(name, value, domain string, secure bool, maxAgeSeconds int) string {
 	c := &http.Cookie{
 		Name:     name,
 		Value:    value,
 		Path:     "/",
 		Domain:   domain,
-		MaxAge:   7 * 24 * 3600,
+		MaxAge:   maxAgeSeconds,
 		HttpOnly: true,
 		Secure:   secure,
 		SameSite: http.SameSiteLaxMode,

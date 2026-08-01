@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/orkestra/backend/internal/shared/utils"
 )
 
 // RateLimiter provides rate limiting functionality
@@ -373,30 +375,16 @@ type RateLimitCheck struct {
 	ConfigName string
 }
 
-// getClientIP extracts the client IP address from the request
-// It properly handles X-Forwarded-For by extracting only the first (leftmost) IP
-// which is the original client IP when proxies append their IPs to the right
+// getClientIP returns the address used as the rate-limit bucket key.
+//
+// It reads only what shared/middleware.RealIP already resolved under the
+// deployment's trusted-proxy policy. This used to take the leftmost
+// X-Forwarded-For entry, which let any caller rotate a header value to
+// get a fresh bucket — i.e. opt out of the global API rate limit
+// entirely — while also letting them exhaust another client's bucket by
+// claiming its address.
 func getClientIP(r *http.Request) string {
-	// Check X-Forwarded-For header first
-	// X-Forwarded-For format: "client, proxy1, proxy2" - we want the leftmost IP
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		// Extract the first IP (original client)
-		ip := extractFirstIP(xff)
-		if ip != "" && isValidIP(ip) {
-			return ip
-		}
-	}
-
-	// Check X-Real-IP header (single IP, set by nginx)
-	if xri := r.Header.Get("X-Real-IP"); xri != "" {
-		ip := strings.TrimSpace(xri)
-		if isValidIP(ip) {
-			return ip
-		}
-	}
-
-	// Fall back to RemoteAddr (may include port)
-	return cleanRemoteAddr(r.RemoteAddr)
+	return utils.GetClientIP(r)
 }
 
 // extractFirstIP gets the first IP from a comma-separated list
