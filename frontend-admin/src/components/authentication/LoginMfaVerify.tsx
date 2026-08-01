@@ -1,6 +1,6 @@
 import { useEffect, useState, FormEvent } from 'react';
 import { Alert, Button, Card, Form } from 'react-bootstrap';
-import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router';
 import { useTranslation } from 'react-i18next';
 import AuthCardLayout from 'layouts/AuthCardLayout';
 import { useAppDispatch } from 'store/hooks';

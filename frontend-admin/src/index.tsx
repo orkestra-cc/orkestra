@@ -1,5 +1,5 @@
 import { createRoot } from 'react-dom/client';
-import { RouterProvider } from 'react-router';
+import { RouterProvider } from 'react-router/dom';
 import ReduxProvider from 'store/ReduxProvider';
 import AppProvider from 'providers/AppProvider';
 import { createAppRouter } from 'routes/createRouter';

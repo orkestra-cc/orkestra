@@ -9,7 +9,7 @@ import {
 } from '@fortawesome/free-brands-svg-icons';
 import { IconDefinition } from '@fortawesome/fontawesome-svg-core';
 import { useTranslation } from 'react-i18next';
-import { useLocation } from 'react-router-dom';
+import { useLocation } from 'react-router';
 import { initiateSocialLogin, SocialProvider } from 'utils/socialAuthUtils';
 import { useGetOAuthProvidersQuery } from 'store/api/authApi';
 import { locationToReturnTo, sanitizeReturnTo } from 'utils/returnTo';

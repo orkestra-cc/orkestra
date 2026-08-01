@@ -1,4 +1,4 @@
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router';
 import { Card, Col, Row, Tab, Tabs, Alert } from 'react-bootstrap';
 import { Trans, useTranslation } from 'react-i18next';
 import { useAppSelector } from 'store/hooks';

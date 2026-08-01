@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router';
 import { Card, Alert } from 'react-bootstrap';
 import { useTranslation } from 'react-i18next';
 import { useAppDispatch } from '../../store/hooks';

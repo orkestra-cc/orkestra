@@ -62,7 +62,7 @@ Rules for filling it in:
 | Forms              | `react-hook-form` + `yup` (`@hookform/resolvers/yup`)             | Formik, manual `useState` form handling                            |
 | Tables             | TanStack Table v8 wrapped by `AdvanceTable`                       | Raw `<table>` for anything beyond static demos                     |
 | Charts             | ECharts via `echarts-for-react` / `ReactEchart`                   | Chart.js, D3 (removed from the project)                            |
-| Routing            | React Router 7.7                                                  | Hash routing, custom routers                                       |
+| Routing            | React Router 8 (import from `react-router` — `react-router-dom` no longer exists) | Hash routing, custom routers                                       |
 | Tabs               | `useSearchParams` from react-router (see `url-tabs` skill)        | `useState` for active tab                                          |
 
 Note: button variants are named `variant="falcon-primary"` etc. — that's the **Bootstrap variant string** the theme registers. The design system itself is **Orkestra-branded** (`OrkestraComponentCard`, `OrkestraDropzone`, `OrkestraLightBox`, ...).

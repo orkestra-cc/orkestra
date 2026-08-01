@@ -1,5 +1,5 @@
 import { Card } from 'react-bootstrap';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router';
 import { useTranslation } from 'react-i18next';
 import AuthCardLayout from 'layouts/AuthCardLayout';
 import EmailPasswordForm from 'components/authentication/EmailPasswordForm';

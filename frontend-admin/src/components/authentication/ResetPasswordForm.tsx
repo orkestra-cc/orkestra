@@ -1,6 +1,6 @@
 import { useState, FormEvent } from 'react';
 import { Alert, Button, Form } from 'react-bootstrap';
-import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router';
 import { useTranslation } from 'react-i18next';
 import { useResetPasswordMutation } from 'store/api/authApi';
 

@@ -19,7 +19,7 @@ This SPA only ever speaks to the **client** API audience (`api.localhost:3000` i
 
 | Layer           | Choice                                                                                                       |
 | --------------- | ------------------------------------------------------------------------------------------------------------ |
-| Framework       | React 19, React Router v7                                                                                    |
+| Framework       | React 19, React Router v8 (single `react-router` package — `react-router-dom` no longer exists)              |
 | Build           | Vite 7                                                                                                       |
 | Language        | TypeScript 5.9 strict mode                                                                                   |
 | Styling         | Tailwind v4 (zero-config, design tokens in `src/index.css`) — **not** Bootstrap/Falcon                       |
