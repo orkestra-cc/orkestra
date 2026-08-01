@@ -95,6 +95,10 @@ services:
       # `orkestra-rustfs` broke once containers became namespaced. Swap to
       # an AWS S3 endpoint for production-grade managed storage.
       STORAGE_ENDPOINT: ${STORAGE_ENDPOINT:-http://rustfs:9000}
+      # Browser-reachable endpoint for presigned URLs when object storage sits
+      # behind a public proxy the SPA must reach; backend ops keep using
+      # STORAGE_ENDPOINT (ADR-0011 dual-endpoint split). Empty = single-endpoint.
+      STORAGE_PUBLIC_ENDPOINT: ${STORAGE_PUBLIC_ENDPOINT:-}
 
       # Module config (OAuth, SMTP, AI provider keys, per-module enable flags)
       # is owned by ConfigService and edited at /admin/modules. The module

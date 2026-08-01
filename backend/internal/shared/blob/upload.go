@@ -85,6 +85,31 @@ func (c *UploadController) scopePrefix(scope UploadScope) string {
 	return k
 }
 
+// DeleteObject removes an object by key (GC for a replaced/removed entity blob).
+func (c *UploadController) DeleteObject(ctx context.Context, key string) error {
+	return c.cfg.Store.Delete(ctx, key)
+}
+
+// PresignGetURL mints a short-lived signed GET URL for reading a stored object
+// (operator download/preview). The URL host is the store's public endpoint when
+// configured, so the browser can fetch it directly.
+func (c *UploadController) PresignGetURL(ctx context.Context, key string, ttl time.Duration) (string, error) {
+	return c.cfg.Store.PresignGet(ctx, key, ttl)
+}
+
+// PresignGetDownloadURL mints a short-lived signed GET URL that, when fetched,
+// downloads the object as an attachment named downloadAs (instead of the opaque
+// object-key filename). Falls back to a plain presigned GET when downloadAs is
+// blank or the configured store lacks the download-presign capability.
+func (c *UploadController) PresignGetDownloadURL(ctx context.Context, key, downloadAs string, ttl time.Duration) (string, error) {
+	if downloadAs != "" {
+		if dl, ok := c.cfg.Store.(ObjectDownloadPresigner); ok {
+			return dl.PresignGetDownload(ctx, key, downloadAs, ttl)
+		}
+	}
+	return c.cfg.Store.PresignGet(ctx, key, ttl)
+}
+
 // Commit re-validates the key belongs to the caller, HEAD-confirms the
 // object landed, persists it via OnCommit, and GCs the prior key.
 func (c *UploadController) Commit(ctx context.Context, scope UploadScope, key string) error {

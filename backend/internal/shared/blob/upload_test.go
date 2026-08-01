@@ -88,3 +88,40 @@ func TestCommitScopeAndExistence(t *testing.T) {
 		t.Errorf("prior key not deleted: %v", store.deleted)
 	}
 }
+
+// downloadCapableStore implements iface.ObjectStore AND blob.ObjectDownloadPresigner
+// so PresignGetDownloadURL takes the capability path; PresignGet returns a distinct
+// value so the fallback path is observable.
+type downloadCapableStore struct{ captured string }
+
+func (*downloadCapableStore) PresignPut(context.Context, string, string, time.Duration) (*iface.PresignedPut, error) {
+	return nil, nil
+}
+func (*downloadCapableStore) Put(context.Context, string, string, io.Reader) error { return nil }
+func (*downloadCapableStore) PresignGet(context.Context, string, time.Duration) (string, error) {
+	return "plainGET", nil
+}
+func (s *downloadCapableStore) PresignGetDownload(_ context.Context, _, downloadAs string, _ time.Duration) (string, error) {
+	s.captured = downloadAs
+	return "downloadGET", nil
+}
+func (*downloadCapableStore) Delete(context.Context, string) error         { return nil }
+func (*downloadCapableStore) Exists(context.Context, string) (bool, error) { return false, nil }
+
+func TestPresignGetDownloadURL(t *testing.T) {
+	// Capability present + non-blank name → uses PresignGetDownload with the name.
+	dl := &downloadCapableStore{}
+	c := newCtl(dl, nil)
+	url, err := c.PresignGetDownloadURL(context.Background(), "k", "Atlante.pdf", time.Minute)
+	if err != nil || url != "downloadGET" || dl.captured != "Atlante.pdf" {
+		t.Fatalf("capability path: url=%q captured=%q err=%v", url, dl.captured, err)
+	}
+	// Blank name → falls back to plain PresignGet even when the store is capable.
+	if url, _ := c.PresignGetDownloadURL(context.Background(), "k", "", time.Minute); url != "plainGET" {
+		t.Fatalf("blank name should fall back to PresignGet, got %q", url)
+	}
+	// Store WITHOUT the capability → falls back to plain PresignGet (uploadFakeStore returns "").
+	if url, _ := newCtl(&uploadFakeStore{}, nil).PresignGetDownloadURL(context.Background(), "k", "Atlante.pdf", time.Minute); url != "" {
+		t.Fatalf("no-capability store should fall back to PresignGet, got %q", url)
+	}
+}

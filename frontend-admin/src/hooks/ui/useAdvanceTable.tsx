@@ -108,7 +108,16 @@ const useAdvanceTable = <T,>({
   onGlobalFilterChange
 }: UseAdvanceTableOptions<T>) => {
   const state: Partial<TableState> = {
-    pagination: { pageSize: pagination ? perPage : data.length, pageIndex: 0 },
+    // `pagination: false` means "one page containing every row". Derive the
+    // page size from a large, data-INDEPENDENT constant — NOT data.length.
+    // This object only seeds the one-time `initialState` below, so with async
+    // data (empty on the first render) `data.length` would lock pageSize at 0,
+    // and getPaginationRowModel() would then slice the table to 0 rows and
+    // never recover once the data arrives.
+    pagination: {
+      pageSize: pagination ? perPage : Number.MAX_SAFE_INTEGER,
+      pageIndex: 0
+    },
     columnFilters: [] as ColumnFiltersState,
     ...initialState
   };
