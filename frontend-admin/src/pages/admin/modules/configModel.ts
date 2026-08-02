@@ -124,6 +124,36 @@ export const buildGroupTree = (
 };
 
 /**
+ * Whether `ModuleConfigSection`'s own card-internal rail should show: either
+ * the module explicitly declared `configGroups` (even a lone top-level entry
+ * opts in — it can still have nested children the legacy flat-bucket case
+ * never has), or the legacy heuristic found ≥2 distinct `field.group` labels
+ * to bucket by. This is the permissive, card-scoped formula — see
+ * `hasPageRail` for why the full-page rail needs a stricter one.
+ */
+export const hasCardRail = (
+  groupTree: GroupNode[],
+  configGroups: ConfigGroup[] | null | undefined
+): boolean => groupTree.length >= 2 || Boolean(configGroups?.length);
+
+/**
+ * Whether the full-page rail (Overview / configuration tree / Dependencies /
+ * Environments) should replace today's stacked page. Stricter than
+ * `hasCardRail` on purpose: it requires an *explicit* declared
+ * `configGroups`, not just the legacy heuristic finding ≥2 distinct
+ * `field.group` labels. A legacy module still gets `hasCardRail`'s smaller
+ * card-internal rail — it just isn't promoted to the whole-page framing
+ * (Overview/Dependencies/Environments intermixed with a tree that has no
+ * real declared hierarchy). Every module served today declares no
+ * `configGroups`, so this is `false` for all of them no matter how many
+ * legacy buckets their fields happen to land in.
+ */
+export const hasPageRail = (
+  groupTree: GroupNode[],
+  configGroups: ConfigGroup[] | null | undefined
+): boolean => Boolean(configGroups?.length) && groupTree.length >= 2;
+
+/**
  * Depth-first flattening, parents before their children. Used to resolve a
  * `?section=` value against the tree and to pick the first selectable node.
  */

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
@@ -6,27 +6,26 @@ import { server } from 'test/server';
 import { url } from 'test/handlers';
 import { renderWithProviders } from 'test/render';
 import type { ConfigField, ModuleConfig } from 'store/api/moduleApi';
+import { useModuleConfigController } from '../useModuleConfigController';
 import ModuleConfigSection from './ModuleConfigSection';
 
 // The `availableEnvironments` fixtures below are all empty, which skips
-// useGetModuleEnvironmentQuery (see ModuleConfigSection.tsx) — no HTTP
+// useGetModuleEnvironmentQuery (see useModuleConfigController.ts) — no HTTP
 // request fires for it, so no MSW handler is needed for that GET in most of
 // these tests. The one test that actually clicks Save still needs a handler
 // for the PATCH mutation, which fires regardless of `skip` — see that test.
 
-// ModuleConfigSection calls useBlocker to guard unsaved-changes navigation.
-// useBlocker requires a *data* router (createBrowserRouter/createMemoryRouter
-// + RouterProvider) — it throws under the declarative <MemoryRouter> that
-// `renderWithProviders` uses for every other test in the suite. Blocking
-// behavior itself isn't what these tests exercise, so stub just that hook
-// and leave the rest of the module (MemoryRouter, etc.) real.
-vi.mock('react-router', async importOriginal => {
-  const actual = await importOriginal<typeof import('react-router')>();
-  return {
-    ...actual,
-    useBlocker: () => ({ state: 'unblocked' as const })
-  };
-});
+// ModuleConfigSection no longer owns the form or the blocker — both now live
+// in useModuleConfigController, shared with (and instantiated exactly once
+// by) detail/index.tsx, which is also the only place that registers
+// useBlocker (a router only supports one at a time — see index.tsx). This
+// component test therefore doesn't need to touch react-router at all; a
+// thin host renders the hook's result straight into the component under
+// test, mirroring how detail/index.tsx wires the two together.
+const TestHost: React.FC<{ mod: ModuleConfig }> = ({ mod }) => {
+  const controller = useModuleConfigController(mod, 'production');
+  return <ModuleConfigSection module={mod} controller={controller} />;
+};
 
 const field = (over: Partial<ConfigField> & { key: string }): ConfigField => ({
   label: over.key,
@@ -72,9 +71,7 @@ describe('ModuleConfigSection', () => {
       field({ key: 'a', label: 'Alpha', group: 'Google' }),
       field({ key: 'b', label: 'Beta', group: 'Apple' })
     ]);
-    renderWithProviders(
-      <ModuleConfigSection module={mod} selectedEnvironment="production" />
-    );
+    renderWithProviders(<TestHost mod={mod} />);
     expect(screen.getByRole('button', { name: 'Google' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Apple' })).toBeInTheDocument();
     expect(screen.getByText('Alpha')).toBeInTheDocument();
@@ -93,9 +90,7 @@ describe('ModuleConfigSection', () => {
       field({ key: 'a', label: 'Alpha', group: 'Google' }),
       field({ key: 'b', label: 'Beta', group: 'Apple' })
     ]);
-    renderWithProviders(
-      <ModuleConfigSection module={mod} selectedEnvironment="production" />
-    );
+    renderWithProviders(<TestHost mod={mod} />);
     const tabs = ['Google', 'Apple'].map(name =>
       screen.getByRole('button', { name })
     );
@@ -115,18 +110,12 @@ describe('ModuleConfigSection', () => {
       })
     ];
     const { rerender } = renderWithProviders(
-      <ModuleConfigSection
-        module={moduleWith(schema)}
-        selectedEnvironment="production"
-      />
+      <TestHost mod={moduleWith(schema)} />
     );
     expect(screen.queryByText('Client ID')).not.toBeInTheDocument();
 
     rerender(
-      <ModuleConfigSection
-        module={moduleWith(schema, { configValues: { on: 'true' } })}
-        selectedEnvironment="production"
-      />
+      <TestHost mod={moduleWith(schema, { configValues: { on: 'true' } })} />
     );
     expect(screen.getByText('Client ID')).toBeInTheDocument();
   });
@@ -144,9 +133,7 @@ describe('ModuleConfigSection', () => {
         ]
       }
     );
-    renderWithProviders(
-      <ModuleConfigSection module={mod} selectedEnvironment="production" />
-    );
+    renderWithProviders(<TestHost mod={mod} />);
     expect(
       screen.getByRole('button', { name: 'OAuth Providers' })
     ).toBeInTheDocument();
@@ -168,9 +155,7 @@ describe('ModuleConfigSection', () => {
         ]
       }
     );
-    renderWithProviders(
-      <ModuleConfigSection module={mod} selectedEnvironment="production" />
-    );
+    renderWithProviders(<TestHost mod={mod} />);
 
     // Every group, including the nested child, is reachable from the rail.
     expect(
@@ -204,9 +189,7 @@ describe('ModuleConfigSection', () => {
         ]
       }
     );
-    renderWithProviders(
-      <ModuleConfigSection module={mod} selectedEnvironment="production" />
-    );
+    renderWithProviders(<TestHost mod={mod} />);
     expect(screen.getByText('Plain')).toBeInTheDocument();
     expect(screen.queryByText('Rare')).not.toBeInTheDocument();
 
@@ -225,9 +208,7 @@ describe('ModuleConfigSection', () => {
       field({ key: 'a', label: 'Alpha' }),
       field({ key: 'b', label: 'Beta' })
     ]);
-    renderWithProviders(
-      <ModuleConfigSection module={mod} selectedEnvironment="production" />
-    );
+    renderWithProviders(<TestHost mod={mod} />);
     expect(screen.getByText('Alpha')).toBeInTheDocument();
     expect(screen.getByText('Beta')).toBeInTheDocument();
     // "General" is the label buildGroupTree synthesizes for the lone bucket
@@ -257,20 +238,17 @@ describe('ModuleConfigSection', () => {
         { key: 'g2', label: 'Group Two', order: 2 }
       ]
     });
-    const { rerender } = renderWithProviders(
-      <ModuleConfigSection module={mod} selectedEnvironment="production" />
-    );
+    const { rerender } = renderWithProviders(<TestHost mod={mod} />);
     expect(
       screen.queryByRole('button', { name: /Advanced/ })
     ).not.toBeInTheDocument();
 
     rerender(
-      <ModuleConfigSection
-        module={moduleWith(schema, {
+      <TestHost
+        mod={moduleWith(schema, {
           configGroups: mod.configGroups,
           configValues: { on: 'true' }
         })}
-        selectedEnvironment="production"
       />
     );
     expect(
@@ -294,9 +272,7 @@ describe('ModuleConfigSection', () => {
         ]
       }
     );
-    renderWithProviders(
-      <ModuleConfigSection module={mod} selectedEnvironment="production" />
-    );
+    renderWithProviders(<TestHost mod={mod} />);
 
     await user.type(screen.getByLabelText('Alpha'), 'x');
     await user.click(screen.getByRole('button', { name: 'Group Two' }));
@@ -322,9 +298,7 @@ describe('ModuleConfigSection', () => {
         ]
       }
     );
-    renderWithProviders(
-      <ModuleConfigSection module={mod} selectedEnvironment="production" />
-    );
+    renderWithProviders(<TestHost mod={mod} />);
 
     await user.clear(screen.getByLabelText('Count'));
     await user.type(screen.getByLabelText('Count'), '3');
@@ -373,9 +347,7 @@ describe('ModuleConfigSection', () => {
       )
     );
 
-    renderWithProviders(
-      <ModuleConfigSection module={mod} selectedEnvironment="production" />
-    );
+    renderWithProviders(<TestHost mod={mod} />);
 
     await user.click(screen.getByRole('button', { name: 'Group Two' }));
     await user.clear(screen.getByLabelText('Beta'));
@@ -406,9 +378,7 @@ describe('ModuleConfigSection', () => {
       )
     );
 
-    renderWithProviders(
-      <ModuleConfigSection module={mod} selectedEnvironment="production" />
-    );
+    renderWithProviders(<TestHost mod={mod} />);
 
     await user.type(screen.getByLabelText('API Key'), 'sekret');
     await user.click(screen.getByRole('button', { name: 'Save Changes' }));
@@ -428,9 +398,7 @@ describe('ModuleConfigSection', () => {
     const mod = moduleWith([
       field({ key: 'n', label: 'Count', type: 'int', min: 8 })
     ]);
-    renderWithProviders(
-      <ModuleConfigSection module={mod} selectedEnvironment="production" />
-    );
+    renderWithProviders(<TestHost mod={mod} />);
 
     await user.clear(screen.getByLabelText('Count'));
     await user.type(screen.getByLabelText('Count'), '3');

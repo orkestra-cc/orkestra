@@ -1,10 +1,11 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { screen } from '@testing-library/react';
+import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { Route, Routes, useLocation } from 'react-router';
 import { renderWithProviders } from 'test/render';
 import { server } from 'test/server';
+import { url } from 'test/handlers';
 import type { ConfigField, ModuleConfig } from 'store/api/moduleApi';
 import ModuleDetailPage from './index';
 
@@ -156,6 +157,61 @@ describe('ModuleDetailPage sections', () => {
     expect(await screen.findByText('Enable Google')).toBeInTheDocument();
     expect(
       screen.queryByRole('button', { name: /Overview/ })
+    ).not.toBeInTheDocument();
+  });
+
+  it('saves an edit in one rail group with a payload containing only that key', async () => {
+    // The full-page rail's onSave is a second, page-level copy of the same
+    // save model ModuleConfigSection.tsx owns for the degradation path
+    // (scoped validation, hidden-field exclusion, the {config, secrets}
+    // shape) — the duplicated copy this task's review flagged as untested
+    // in its new home. This is that coverage, against the page rather than
+    // the card: an edit in `password` must not leak `oauth`/`oauth.google`
+    // keys, and the request must fire exactly once.
+    const user = userEvent.setup();
+    let capturedBody: unknown = null;
+    let patchCount = 0;
+    server.use(
+      http.patch(
+        url('/v1/admin/modules/:name/environments/:env'),
+        async ({ request }) => {
+          patchCount += 1;
+          capturedBody = await request.json();
+          return HttpResponse.json({
+            environment: 'production',
+            configValues: { minLen: '10' },
+            secretStatus: {},
+            updatedAt: ''
+          });
+        }
+      )
+    );
+
+    renderAt('?section=password');
+    await user.type(await screen.findByLabelText('Minimum length'), '10');
+    await user.click(screen.getByRole('button', { name: 'Save Changes' }));
+
+    await waitFor(() => expect(capturedBody).not.toBeNull());
+    expect(capturedBody).toEqual({ config: { minLen: '10' } });
+    expect(patchCount).toBe(1);
+  });
+
+  it('rewrites a stale ?section= to the resolved fallback instead of leaving it in the URL', async () => {
+    // A copied link naming a renamed/removed group must not keep
+    // propagating the dead value every time it's shared again.
+    renderAt('?section=this-group-was-renamed');
+    await screen.findByRole('button', { name: /Overview/ });
+    await waitFor(() => expect(currentSearch).toContain('section=__overview'));
+    expect(currentSearch).not.toContain('this-group-was-renamed');
+  });
+
+  it('hides the save bar on Overview when there is nothing to save', async () => {
+    // A permanently-disabled Save button under a panel that isn't a form
+    // reads as broken UI, not as "nothing to do here".
+    renderAt('');
+    await screen.findByRole('button', { name: /Overview/ });
+    expect(
+      screen.queryByRole('button', { name: 'Save Changes' })
     ).not.toBeInTheDocument();
   });
 });

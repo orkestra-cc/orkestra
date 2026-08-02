@@ -11,7 +11,17 @@
   position: sticky;
   bottom: 0;
   z-index: 5;
-  background-color: var(--#{$prefix}card-bg);
+  // `--orkestra-card-bg` is only ever declared inside `.card` — resolvable
+  // when this bar sits in ModuleConfigSection's Card.Body (the value used
+  // there, unchanged), but NOT when detail/index.tsx's full-page rail
+  // layout renders it as a direct child of a bare <Col>. An unresolvable
+  // custom property makes the whole declaration invalid at computed-value
+  // time, so outside a card the bar was fully transparent — sticky hairline
+  // border, scrolling content showing straight through it. The nested
+  // `var()` falls back to the page's own body background the moment the
+  // outer one has nothing to resolve, with zero effect on the card-embedded
+  // case (the outer value always wins there).
+  background-color: var(--#{$prefix}card-bg, var(--#{$prefix}body-bg));
   border-top: var(--#{$prefix}border-width) solid var(--#{$prefix}border-color);
   // No box-shadow: Bootstrap's `$box-shadow` is a *downward* shadow
   // (`0 .5rem 1rem`) — invisible on a bar pinned to the bottom of the

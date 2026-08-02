@@ -5,7 +5,9 @@ import {
   isFieldVisible,
   visibleFields,
   configCompleteness,
-  flattenTree
+  flattenTree,
+  hasCardRail,
+  hasPageRail
 } from './configModel';
 
 const field = (over: Partial<ConfigField> & { key: string }): ConfigField => ({
@@ -202,6 +204,65 @@ describe('flattenTree', () => {
     expect(flattenTree(buildGroupTree(schema, groups)).map(n => n.key)).toEqual(
       ['oauth', 'oauth.google', 'password']
     );
+  });
+});
+
+describe('hasCardRail vs hasPageRail', () => {
+  // The reachable disagreement between the two formulas: a module that
+  // *declares* configGroups but whose tree collapses to a single top-level
+  // root (it can still have nested children — that's the whole point of
+  // opting in). The card gets a rail for it; the page does not, and
+  // degrades to the stacked page with that card inside it.
+  it('declared groups collapsing to one top-level root: card yes, page no', () => {
+    const schema = [
+      field({ key: 'a', group: 'only' }),
+      field({ key: 'b', group: 'only.child' })
+    ];
+    const groups: ConfigGroup[] = [
+      { key: 'only', label: 'Only', order: 1 },
+      { key: 'only.child', label: 'Child', parent: 'only', order: 2 }
+    ];
+    const tree = buildGroupTree(schema, groups);
+    expect(tree.map(n => n.key)).toEqual(['only']);
+    expect(hasCardRail(tree, groups)).toBe(true);
+    expect(hasPageRail(tree, groups)).toBe(false);
+  });
+
+  it('legacy modules (no declared groups) never get the page rail, even with several buckets', () => {
+    // Every module served today is in this state. hasCardRail's legacy
+    // heuristic (≥2 distinct field.group labels) still applies to the card,
+    // but hasPageRail requires an explicit opt-in via declared configGroups.
+    const schema = [
+      field({ key: 'a', group: 'Google' }),
+      field({ key: 'b', group: 'Apple' }),
+      field({ key: 'c', group: 'GitHub' })
+    ];
+    const tree = buildGroupTree(schema, undefined);
+    expect(tree.length).toBeGreaterThanOrEqual(2);
+    expect(hasCardRail(tree, undefined)).toBe(true);
+    expect(hasPageRail(tree, undefined)).toBe(false);
+  });
+
+  it('both agree once ≥2 top-level groups are declared', () => {
+    const schema = [
+      field({ key: 'a', group: 'g1' }),
+      field({ key: 'b', group: 'g2' })
+    ];
+    const groups: ConfigGroup[] = [
+      { key: 'g1', label: 'Group One', order: 1 },
+      { key: 'g2', label: 'Group Two', order: 2 }
+    ];
+    const tree = buildGroupTree(schema, groups);
+    expect(hasCardRail(tree, groups)).toBe(true);
+    expect(hasPageRail(tree, groups)).toBe(true);
+  });
+
+  it('both agree false for a single ungrouped/legacy bucket', () => {
+    const schema = [field({ key: 'a' }), field({ key: 'b' })];
+    const tree = buildGroupTree(schema, undefined);
+    expect(tree.length).toBe(1);
+    expect(hasCardRail(tree, undefined)).toBe(false);
+    expect(hasPageRail(tree, undefined)).toBe(false);
   });
 });
 

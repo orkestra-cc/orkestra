@@ -28119,6 +28119,6 @@ html[data-bs-theme=dark] .bg-priority-low:checked {
   position: sticky;
   bottom: 0;
   z-index: 5;
-  background-color: var(--orkestra-card-bg);
+  background-color: var(--orkestra-card-bg, var(--orkestra-body-bg));
   border-top: var(--orkestra-border-width) solid var(--orkestra-border-color);
 }
