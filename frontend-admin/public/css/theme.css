@@ -25671,7 +25671,7 @@ a[href].bg-200:hover, a[href].bg-200:focus {
   }
 }
 /*-----------------------------------------------
-|  Back to top button
+|  Back to top button   
 -----------------------------------------------*/
 .btn-back-to-top {
   background-color: #0b1727;
@@ -28136,4 +28136,15 @@ html[data-bs-theme=dark] .bg-priority-low:checked {
 
 .stat-ribbon-dark > span {
   background-color: #0b1727;
+}
+
+/* -------------------------------------------------------------------------- */
+/*                Module Save Bar — cross-group save model (Phase 3)          */
+/* -------------------------------------------------------------------------- */
+.module-save-bar {
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+  background-color: var(--orkestra-card-bg);
+  border-top: var(--orkestra-border-width) solid var(--orkestra-border-color);
 }
