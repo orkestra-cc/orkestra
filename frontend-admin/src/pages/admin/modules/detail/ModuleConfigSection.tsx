@@ -22,6 +22,7 @@ import {
 } from 'store/api/moduleApi';
 import ModuleConfigFields from '../ModuleConfigFields';
 import { buildGroupTree, isFieldVisible } from '../configModel';
+import { translateConfigGroup } from 'helpers/configLabel';
 
 interface ModuleConfigSectionProps {
   module: ModuleConfig;
@@ -206,6 +207,7 @@ const ModuleConfigSection: React.FC<ModuleConfigSectionProps> = ({
       configValues={configValues}
       secretValues={secretValues}
       secretStatus={secretStatus}
+      moduleName={mod.moduleName}
       onConfigChange={(key, value) =>
         setConfigValues(prev => ({ ...prev, [key]: value }))
       }
@@ -283,7 +285,7 @@ const ModuleConfigSection: React.FC<ModuleConfigSectionProps> = ({
                 {groupTree.map(node => (
                   <Nav.Item key={node.key}>
                     <Nav.Link eventKey={node.key} as={ReachableTabAnchor}>
-                      {node.label}
+                      {translateConfigGroup(t, mod.moduleName, node)}
                     </Nav.Link>
                   </Nav.Item>
                 ))}

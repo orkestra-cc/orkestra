@@ -5,6 +5,7 @@ import { faEye, faEyeSlash } from '@fortawesome/free-solid-svg-icons';
 import { useTranslation } from 'react-i18next';
 import type { ConfigField } from 'store/api/moduleApi';
 import { isFieldVisible } from './configModel';
+import { translateConfigField } from 'helpers/configLabel';
 
 export interface ModuleConfigFieldsProps {
   schema: ConfigField[];
@@ -20,6 +21,8 @@ export interface ModuleConfigFieldsProps {
    * fields are shown and in this order. Falls back to the full schema order.
    */
   includeKeys?: string[];
+  /** Owning module — selects the i18n namespace the labels resolve against. */
+  moduleName: string;
   onConfigChange: (key: string, value: string) => void;
   onSecretChange: (key: string, value: string) => void;
 }
@@ -36,6 +39,7 @@ const ModuleConfigFields: React.FC<ModuleConfigFieldsProps> = ({
   secretValues,
   secretStatus,
   includeKeys,
+  moduleName,
   onConfigChange,
   onSecretChange
 }) => {
@@ -59,6 +63,8 @@ const ModuleConfigFields: React.FC<ModuleConfigFieldsProps> = ({
     <>
       {fields.map(field => {
         const key = field.key;
+        const label = translateConfigField(t, moduleName, field, 'label');
+        const desc = translateConfigField(t, moduleName, field, 'desc');
 
         if (field.type === 'secret') {
           const alreadySet = Boolean(secretStatus?.[key]);
@@ -66,7 +72,7 @@ const ModuleConfigFields: React.FC<ModuleConfigFieldsProps> = ({
           return (
             <Form.Group key={key} className="mb-3">
               <Form.Label className="fs-10 fw-semibold">
-                {field.label}
+                {label}
                 {alreadySet && (
                   <span className="badge badge-subtle-success ms-2 fs-11">
                     {t('adminModules.configFields.secretSetBadge')}
@@ -97,9 +103,7 @@ const ModuleConfigFields: React.FC<ModuleConfigFieldsProps> = ({
                 </Button>
               </InputGroup>
               {field.description && (
-                <Form.Text className="text-muted">
-                  {field.description}
-                </Form.Text>
+                <Form.Text className="text-muted">{desc}</Form.Text>
               )}
             </Form.Group>
           );
@@ -120,16 +124,14 @@ const ModuleConfigFields: React.FC<ModuleConfigFieldsProps> = ({
             <Form.Group key={key} className="mb-3">
               <Form.Check
                 type="switch"
-                label={field.label}
+                label={label}
                 checked={effective === 'true'}
                 onChange={e =>
                   onConfigChange(key, e.target.checked ? 'true' : 'false')
                 }
               />
               {field.description && (
-                <Form.Text className="text-muted">
-                  {field.description}
-                </Form.Text>
+                <Form.Text className="text-muted">{desc}</Form.Text>
               )}
             </Form.Group>
           );
@@ -141,7 +143,7 @@ const ModuleConfigFields: React.FC<ModuleConfigFieldsProps> = ({
           return (
             <Form.Group key={key} className="mb-3">
               <Form.Label className="fs-10 fw-semibold">
-                {field.label}
+                {label}
                 {field.required && <span className="text-danger ms-1">*</span>}
               </Form.Label>
               <Form.Select
@@ -161,9 +163,7 @@ const ModuleConfigFields: React.FC<ModuleConfigFieldsProps> = ({
                 ))}
               </Form.Select>
               {field.description && (
-                <Form.Text className="text-muted">
-                  {field.description}
-                </Form.Text>
+                <Form.Text className="text-muted">{desc}</Form.Text>
               )}
             </Form.Group>
           );
@@ -180,7 +180,7 @@ const ModuleConfigFields: React.FC<ModuleConfigFieldsProps> = ({
         return (
           <Form.Group key={key} className="mb-3">
             <Form.Label className="fs-10 fw-semibold">
-              {field.label}
+              {label}
               {field.required && <span className="text-danger ms-1">*</span>}
             </Form.Label>
             {isStringList ? (
@@ -220,7 +220,7 @@ const ModuleConfigFields: React.FC<ModuleConfigFieldsProps> = ({
               <Form.Text className="text-muted">
                 {t('adminModules.configFields.envPrefix')}
                 <code>{field.envVar}</code>
-                {field.description ? ` — ${field.description}` : ''}
+                {field.description ? ` — ${desc}` : ''}
               </Form.Text>
             )}
           </Form.Group>
