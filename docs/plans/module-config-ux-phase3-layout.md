@@ -78,8 +78,11 @@ would widen the phase. Health stays inside Overview; the rail's non-config secti
   - `buildYupSchema(schema: ConfigField[]): yup.ObjectSchema<Record<string, unknown>>`
   - `buildDefaults(schema, configValues): Record<string, string>`
   - `collectDiff(schema, values, defaults): { config: Record<string,string>; secrets: Record<string,string> }`
-  - `useModuleConfigForm({ schema, configValues }): { form, diff, dirtyKeys }` where
-    `form` is the `UseFormReturn` and `dirtyKeys` is a `string[]` of changed field keys.
+  - `useModuleConfigForm(schema, configValues): { form, defaults }` — positional
+    arguments; `form` is the `UseFormReturn<ConfigFormValues>` and `defaults` is what the
+    form was seeded with. Callers derive the diff themselves with
+    `collectDiff(schema, form.watch(), defaults)`; the hook deliberately does not compute
+    it, so a consumer that only needs the form does not re-run the diff on every keystroke.
 
 Validation and diffing are extracted as **pure functions tested without a DOM**; the hook
 is a thin wrapper. That keeps the load-bearing logic reviewable and lets Task 3's save bar
