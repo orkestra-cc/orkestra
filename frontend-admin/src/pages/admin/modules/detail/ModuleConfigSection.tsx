@@ -1,15 +1,6 @@
-import { forwardRef, useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useBlocker } from 'react-router';
-import {
-  Alert,
-  Anchor,
-  Button,
-  Card,
-  Modal,
-  Nav,
-  Spinner
-} from 'react-bootstrap';
-import type { AnchorProps } from 'react-bootstrap';
+import { Alert, Button, Card, Modal, Nav, Spinner } from 'react-bootstrap';
 import { useTranslation } from 'react-i18next';
 import { OrkestraCardHeader } from 'components/common';
 import type {
@@ -28,30 +19,6 @@ interface ModuleConfigSectionProps {
   module: ModuleConfig;
   selectedEnvironment: string;
 }
-
-/**
- * Once the tab `<Nav>` below declares `role="tablist"`, `@restart/ui` applies
- * a roving tabIndex — every inactive `Nav.Link` gets `tabIndex={-1}` — which
- * is only correct paired with the ArrowLeft/ArrowRight handler `Nav.js` wires
- * up when it detects a `<Tab.Container>`. This is a bare `<Nav>` (phase 3
- * replaces it with a vertical rail, so adopting `Tab.Container` here would be
- * structural investment thrown away for a "no visual change" task), so
- * without a fix every non-active tab becomes unreachable by keyboard or
- * screen reader: no sequential Tab (tabIndex -1) and no arrow keys (the
- * handler bails out before it runs).
- *
- * Passing `tabIndex={0}` straight on `<Nav.Link>` does **not** work —
- * react-bootstrap's `NavLink` spreads `{...props, ...navItemProps}`, and
- * `navItemProps` (computed *after* ours, with the -1) always wins. Routing
- * through `Nav.Link`'s own default `as` (`Anchor`) ourselves, with an
- * explicit `tabIndex` applied after the incoming props, restores exactly the
- * sequential reachability every tab had before `role="tablist"` was added
- * (previously via `role="button"`'s default `tabIndex={0}`).
- */
-const ReachableTabAnchor = forwardRef<HTMLAnchorElement, AnchorProps>(
-  (props, ref) => <Anchor ref={ref} {...props} tabIndex={0} />
-);
-ReachableTabAnchor.displayName = 'ReachableTabAnchor';
 
 const ModuleConfigSection: React.FC<ModuleConfigSectionProps> = ({
   module: mod,
@@ -275,16 +242,26 @@ const ModuleConfigSection: React.FC<ModuleConfigSectionProps> = ({
 
           {showTabs ? (
             <>
+              {/*
+                Deliberately no `role="tablist"`: @restart/ui only wires the
+                ArrowLeft/ArrowRight handler (and the `aria-controls` /
+                `role="tabpanel"` pairing) inside a `<Tab.Container>`. On a
+                bare `<Nav>` the role buys `role="tab"` + `aria-selected` and
+                nothing else, while its roving tabIndex makes every inactive
+                header unreachable — strictly worse than the plain
+                `role="button"` links below. Phase 3 replaces this rail with a
+                vertical master-detail one, which is where the full tab
+                semantics belong.
+              */}
               <Nav
                 variant="tabs"
-                role="tablist"
                 activeKey={currentTab}
                 onSelect={k => setActiveTab(k || '')}
                 className="mb-3"
               >
                 {groupTree.map(node => (
                   <Nav.Item key={node.key}>
-                    <Nav.Link eventKey={node.key} as={ReachableTabAnchor}>
+                    <Nav.Link eventKey={node.key}>
                       {translateConfigGroup(t, mod.moduleName, node)}
                     </Nav.Link>
                   </Nav.Item>

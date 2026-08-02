@@ -75,19 +75,20 @@ describe('ModuleConfigSection', () => {
     renderWithProviders(
       <ModuleConfigSection module={mod} selectedEnvironment="production" />
     );
-    expect(screen.getByRole('tab', { name: 'Google' })).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: 'Apple' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Google' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Apple' })).toBeInTheDocument();
     expect(screen.getByText('Alpha')).toBeInTheDocument();
   });
 
   it('keeps every tab keyboard-reachable, including the inactive one', () => {
-    // role="tablist" makes @restart/ui apply roving tabIndex=-1 to every
-    // inactive Nav.Link — correct only when paired with the arrow-key
-    // handler Nav.js wires up inside a <Tab.Container>. This is a bare
-    // <Nav>, so without an explicit tabIndex the inactive tab becomes
-    // unreachable by keyboard/screen-reader (no sequential Tab, no arrow
-    // keys). Regression guard for that: every tab header must stay at
-    // tabIndex 0, not just the active one.
+    // The headers are plain <Nav.Link>s (Anchor without href → role="button",
+    // tabIndex 0). Declaring role="tablist" on the <Nav> would make
+    // @restart/ui apply a roving tabIndex=-1 to every inactive one — correct
+    // only when paired with the arrow-key handler Nav.js wires up inside a
+    // <Tab.Container>, which this bare <Nav> is not. That combination left
+    // the inactive tab unreachable by keyboard/screen-reader (no sequential
+    // Tab, no arrow keys). Regression guard for that: every tab header must
+    // stay at tabIndex 0, not just the active one.
     const mod = moduleWith([
       field({ key: 'a', label: 'Alpha', group: 'Google' }),
       field({ key: 'b', label: 'Beta', group: 'Apple' })
@@ -95,7 +96,9 @@ describe('ModuleConfigSection', () => {
     renderWithProviders(
       <ModuleConfigSection module={mod} selectedEnvironment="production" />
     );
-    const tabs = screen.getAllByRole('tab');
+    const tabs = ['Google', 'Apple'].map(name =>
+      screen.getByRole('button', { name })
+    );
     expect(tabs).toHaveLength(2);
     for (const tab of tabs) {
       expect(tab.tabIndex).toBe(0);
@@ -145,7 +148,7 @@ describe('ModuleConfigSection', () => {
       <ModuleConfigSection module={mod} selectedEnvironment="production" />
     );
     expect(
-      screen.getByRole('tab', { name: 'OAuth Providers' })
+      screen.getByRole('button', { name: 'OAuth Providers' })
     ).toBeInTheDocument();
   });
 });
