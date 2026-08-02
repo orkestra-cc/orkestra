@@ -262,6 +262,19 @@ stack mandate. This is not ceremony: the yup schema is generated from the new me
 (`Required`/`Min`/`Max`/`Pattern`/type), `watch()` feeds `dependsOn`, and
 `formState.dirtyFields` feeds both the save-bar counter and the outgoing diff.
 
+**That migration lands in phase 3, not phase 2.** `react-hook-form`, `yup`, and
+`@hookform/resolvers` are all dependencies, but `useForm` appears only in
+`src/reference/` demos and `components/wizard/WizardLayout.tsx` — **no production page
+uses it**; every form under `pages/` is `useState`. So this would be the app's first
+production use of the library, on the hardest possible case: a schema generated at
+runtime, with secrets, conditional visibility, and dirty state spanning groups.
+
+The requirement that actually justifies a form library is aggregating `dirtyFields`
+across groups for the sticky save bar — and that does not exist until phase 3. Doing it
+in phase 2 means designing the integration blind of its only consumer. Phase 2 therefore
+delivers the pure model layer against the existing `useState` form; phase 3 migrates the
+form and the save bar together.
+
 ### 4.4 Save model
 
 One form for the whole module, mounted in `detail/index.tsx`; the rail only selects which
@@ -363,8 +376,8 @@ the whole reason that path exists.
 | # | Phase | Repo | Status |
 | - | ----- | ---- | ------ |
 | 1 | SDK contract: `ConfigGroup`, `ConfigGroupsOf`, `ConfigField` metadata, handler serialisation, schema-integrity test, `openapi-dump` | upstream | ✅ |
-| 2 | Frontend model layer: `configModel`, `configI18n`, field renderer moved to RHF + yup — **no visual change** | upstream | 🔴 |
-| 3 | Frontend layout: rail, panel, save bar, URL sync | upstream | 🔴 |
+| 2 | Frontend model layer: `configModel`, `configI18n`, declarative validation on the existing `useState` form — **no visual change** | upstream | 🔴 |
+| 3 | Frontend layout: rail, panel, save bar, URL sync — **plus** the `ModuleConfigFields` migration to RHF + yup, which the cross-group save bar is what justifies (§4.3) | upstream | 🔴 |
 | 4 | Migrate `auth` (62 fields, OAuth tree, `dependsOn`) + EN/IT keys | upstream | 🔴 |
 | 5 | Migrate `notification` (+ `email.provider` → enum), `tenant`, `compliance` | upstream | 🔴 |
 | 6 | Delete `ModuleConfigModal`, ADR-0012, docs | upstream | 🔴 |
