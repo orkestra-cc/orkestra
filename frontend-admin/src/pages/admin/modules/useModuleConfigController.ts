@@ -118,6 +118,25 @@ export const useModuleConfigController = (
   // very edits the sticky bar exists to accumulate across groups.
   useEffect(() => {
     form.reset(defaults);
+    // The save alerts belong to the baseline that produced them. A "save
+    // failed" banner from `production` still on screen after switching to
+    // `sandbox` reads as a failure against the environment now displayed —
+    // and a lingering success tick is just as misleading once the form
+    // underneath has been re-seeded from a different source.
+    setError(null);
+    setSuccess(false);
+    // Validate the freshly seeded values once, right here. `mode: 'onChange'`
+    // asks react-hook-form to validate a field when *that field* fires a
+    // change; it never validates on mount, so a value the backend already
+    // stores in violation of its own declared `required`/`min`/`max`/
+    // `pattern` would render clean until the operator happened to touch it.
+    // Before the form migration these checks were computed inline on every
+    // render, so an invalid stored value was red on arrival — this restores
+    // that. Deliberately inside the re-seed effect rather than its own
+    // mount-only one: a new baseline (environment switch, refetch) brings new
+    // values that need the same treatment, and gating on the same deps keeps
+    // it from re-running per keystroke.
+    void form.trigger();
   }, [envConfig, mod?.configValues]);
 
   const groupTree = useMemo(

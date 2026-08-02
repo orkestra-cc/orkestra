@@ -64,7 +64,12 @@ const moduleWith = (
   }) as ModuleConfig;
 
 describe('ModuleConfigSection', () => {
-  it('renders legacy group labels as tabs, unchanged', () => {
+  // The controller validates the seeded values once on mount (see the
+  // re-seed effect in useModuleConfigController) — an async state update that
+  // lands after a synchronous render returns. The `findBy*` in each otherwise
+  // synchronous test below is what flushes it inside act(), not an assertion
+  // about timing.
+  it('renders legacy group labels as tabs, unchanged', async () => {
     // Today's shape: no configGroups, `group` is a display label. This is the
     // regression guard for "no visual change".
     const mod = moduleWith([
@@ -72,12 +77,14 @@ describe('ModuleConfigSection', () => {
       field({ key: 'b', label: 'Beta', group: 'Apple' })
     ]);
     renderWithProviders(<TestHost mod={mod} />);
-    expect(screen.getByRole('button', { name: 'Google' })).toBeInTheDocument();
+    expect(
+      await screen.findByRole('button', { name: 'Google' })
+    ).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Apple' })).toBeInTheDocument();
     expect(screen.getByText('Alpha')).toBeInTheDocument();
   });
 
-  it('keeps every tab keyboard-reachable, including the inactive one', () => {
+  it('keeps every tab keyboard-reachable, including the inactive one', async () => {
     // The headers are plain <Nav.Link>s (Anchor without href → role="button",
     // tabIndex 0). Declaring role="tablist" on the <Nav> would make
     // @restart/ui apply a roving tabIndex=-1 to every inactive one — correct
@@ -91,6 +98,7 @@ describe('ModuleConfigSection', () => {
       field({ key: 'b', label: 'Beta', group: 'Apple' })
     ]);
     renderWithProviders(<TestHost mod={mod} />);
+    await screen.findByRole('button', { name: 'Google' });
     const tabs = ['Google', 'Apple'].map(name =>
       screen.getByRole('button', { name })
     );
@@ -100,7 +108,7 @@ describe('ModuleConfigSection', () => {
     }
   });
 
-  it('hides a field whose condition is unmet and shows it once met', () => {
+  it('hides a field whose condition is unmet and shows it once met', async () => {
     const schema = [
       field({ key: 'on', label: 'Enabled', type: 'bool', default: 'false' }),
       field({
@@ -112,15 +120,16 @@ describe('ModuleConfigSection', () => {
     const { rerender } = renderWithProviders(
       <TestHost mod={moduleWith(schema)} />
     );
+    await screen.findByLabelText('Enabled');
     expect(screen.queryByText('Client ID')).not.toBeInTheDocument();
 
     rerender(
       <TestHost mod={moduleWith(schema, { configValues: { on: 'true' } })} />
     );
-    expect(screen.getByText('Client ID')).toBeInTheDocument();
+    expect(await screen.findByText('Client ID')).toBeInTheDocument();
   });
 
-  it('renders a declared group tree', () => {
+  it('renders a declared group tree', async () => {
     const mod = moduleWith(
       [
         field({ key: 'x', label: 'Toggle', group: 'oauth' }),
@@ -135,7 +144,7 @@ describe('ModuleConfigSection', () => {
     );
     renderWithProviders(<TestHost mod={mod} />);
     expect(
-      screen.getByRole('button', { name: 'OAuth Providers' })
+      await screen.findByRole('button', { name: 'OAuth Providers' })
     ).toBeInTheDocument();
   });
 
@@ -197,7 +206,7 @@ describe('ModuleConfigSection', () => {
     expect(screen.getByText('Rare')).toBeInTheDocument();
   });
 
-  it('keeps the true flat form when there is only one settings bucket', () => {
+  it('keeps the true flat form when there is only one settings bucket', async () => {
     // The actual degradation path — fewer than 2 top-level nodes. Every
     // module served today, and every un-migrated fork addon, has either no
     // `group` at all (synthesized into a single trailing "General" bucket,
@@ -209,7 +218,7 @@ describe('ModuleConfigSection', () => {
       field({ key: 'b', label: 'Beta' })
     ]);
     renderWithProviders(<TestHost mod={mod} />);
-    expect(screen.getByText('Alpha')).toBeInTheDocument();
+    expect(await screen.findByText('Alpha')).toBeInTheDocument();
     expect(screen.getByText('Beta')).toBeInTheDocument();
     // "General" is the label buildGroupTree synthesizes for the lone bucket
     // — asserting it never renders as a button proves no rail was drawn at
@@ -388,6 +397,32 @@ describe('ModuleConfigSection', () => {
     await waitFor(() =>
       expect(screen.getByLabelText('API Key')).toHaveValue('')
     );
+  });
+
+  it('flags stored values that violate their declared rules with no interaction at all', async () => {
+    // react-hook-form's `mode: 'onChange'` writes `formState.errors[name]`
+    // only for the field that fired a change, and never validates on mount —
+    // so a value the backend already stores in violation of its own declared
+    // `min`/`required` rendered perfectly clean until the operator happened
+    // to type in that exact field. Before the form migration these checks ran
+    // inline on every render and were red on arrival; the controller's
+    // seed-time `form.trigger()` is what restores that. Nothing below touches
+    // the form.
+    const mod = moduleWith(
+      [
+        field({ key: 'n', label: 'Count', type: 'int', min: 8 }),
+        field({ key: 'req', label: 'Required A', required: true })
+      ],
+      { configValues: { n: '3', req: '' } }
+    );
+    renderWithProviders(<TestHost mod={mod} />);
+
+    expect(await screen.findByText('Minimum is 8')).toBeInTheDocument();
+    expect(screen.getByText('This field is required.')).toBeInTheDocument();
+    expect(screen.getByLabelText('Count')).toHaveClass('is-invalid');
+    // Regex: a required field's label carries a trailing "*" marker, so its
+    // accessible name is "Required A*", not "Required A".
+    expect(screen.getByLabelText(/Required A/)).toHaveClass('is-invalid');
   });
 
   it('shows the aggregate error count but no dead "Go to" button or group chip on the flat degradation path', async () => {
