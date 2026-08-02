@@ -305,6 +305,8 @@ Resolution order per string (mirrors `helpers/navLabel.ts`): the addon's own nam
 
 Two changes here break a fork's addon pages on sync: `ModuleConfigFields` now takes a **required `moduleName` prop** (it selects the namespace above), and `src/pages/admin/modules/utils.ts` was deleted. Its `bucketByGroup` is superseded by `buildGroupTree` and its `configCompleteness` moved verbatim in name — both now live in `src/pages/admin/modules/configModel.ts`, with `configCompleteness` counting only fields currently visible under their `dependsOn` conditions.
 
+`ModuleConfigFields` was later migrated onto react-hook-form (`useModuleConfigForm` in `src/pages/admin/modules/useModuleConfigForm.ts`): its props are now `control`/`register` from a single module-wide form instance, not `configValues`/`secretValues`/`onConfigChange`/`onSecretChange`. `/admin/modules/<name>` is one react-hook-form form spanning every rail group — the rail only selects which slice is _rendered_, edits in an off-screen group stay live — with a single sticky `ModuleSaveBar` (`src/pages/admin/modules/detail/ModuleSaveBar.tsx`) reporting the aggregate unsaved-change count, a per-group breakdown, and a "Go to `<group>`" button per group carrying a validation error, however far the operator has navigated from it.
+
 ## Conventions
 
 - **Cookie auth** — every fetch goes through RTK Query's `baseApi` which sets `credentials: 'include'`. Never call `fetch` directly with custom auth headers.

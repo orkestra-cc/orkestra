@@ -1933,6 +1933,14 @@
         "stay": "Stay",
         "leave": "Leave"
       },
+      "saveBar": {
+        "changes_one": "{{count}} unsaved change",
+        "changes_other": "{{count}} unsaved changes",
+        "perGroup": "{{group}} ({{count}})",
+        "errors_one": "{{count}} field needs attention",
+        "errors_other": "{{count}} fields need attention",
+        "goToError": "Go to {{group}}"
+      },
       "rail": {
         "overview": "Overview",
         "configuration": "Configuration",

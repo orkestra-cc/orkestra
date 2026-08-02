@@ -280,4 +280,61 @@ describe('ModuleConfigSection', () => {
     await user.click(screen.getByRole('button', { name: /Advanced \(1\)/ }));
     expect(screen.getByText('Rare')).toBeInTheDocument();
   });
+
+  it('accumulates unsaved changes across two different groups', async () => {
+    const user = userEvent.setup();
+    const mod = moduleWith(
+      [
+        field({ key: 'a', label: 'Alpha', group: 'g1' }),
+        field({ key: 'b', label: 'Beta', group: 'g2' })
+      ],
+      {
+        configGroups: [
+          { key: 'g1', label: 'Group One', order: 1 },
+          { key: 'g2', label: 'Group Two', order: 2 }
+        ]
+      }
+    );
+    renderWithProviders(
+      <ModuleConfigSection module={mod} selectedEnvironment="production" />
+    );
+
+    await user.type(screen.getByLabelText('Alpha'), 'x');
+    await user.click(screen.getByRole('button', { name: 'Group Two' }));
+    await user.type(screen.getByLabelText('Beta'), 'y');
+
+    // One bar, both groups counted — this is what the per-card form could not do.
+    expect(await screen.findByText(/2 unsaved changes/)).toBeInTheDocument();
+    expect(screen.getByText(/Group One \(1\)/)).toBeInTheDocument();
+    expect(screen.getByText(/Group Two \(1\)/)).toBeInTheDocument();
+  });
+
+  it('surfaces an error from a section that is not on screen', async () => {
+    const user = userEvent.setup();
+    const mod = moduleWith(
+      [
+        field({ key: 'n', label: 'Count', type: 'int', min: 8, group: 'g1' }),
+        field({ key: 'b', label: 'Beta', group: 'g2' })
+      ],
+      {
+        configGroups: [
+          { key: 'g1', label: 'Group One', order: 1 },
+          { key: 'g2', label: 'Group Two', order: 2 }
+        ]
+      }
+    );
+    renderWithProviders(
+      <ModuleConfigSection module={mod} selectedEnvironment="production" />
+    );
+
+    await user.clear(screen.getByLabelText('Count'));
+    await user.type(screen.getByLabelText('Count'), '3');
+    await user.click(screen.getByRole('button', { name: 'Group Two' }));
+
+    // The bad value is in a section the operator is no longer looking at.
+    // Without this, save fails with no indication of where.
+    const link = await screen.findByRole('button', { name: /Go to Group One/ });
+    await user.click(link);
+    expect(screen.getByLabelText('Count')).toBeInTheDocument();
+  });
 });

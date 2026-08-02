@@ -1,0 +1,17 @@
+/* -------------------------------------------------------------------------- */
+/*                Module Save Bar — cross-group save model (Phase 3)          */
+/* -------------------------------------------------------------------------- */
+
+// One react-hook-form instance now spans the whole module config surface —
+// the rail only picks which slice is *rendered*, edits in every group stay
+// live in the same form. This bar is the single save/discard affordance for
+// all of it, pinned to the bottom of the config surface so it stays reachable
+// while the operator scrolls a long settings list or switches rail groups.
+.module-save-bar {
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+  background-color: var(--#{$prefix}card-bg);
+  border-top: var(--#{$prefix}border-width) solid var(--#{$prefix}border-color);
+  box-shadow: var(--#{$prefix}box-shadow);
+}

@@ -1,29 +1,30 @@
 import { useState } from 'react';
 import { Button, Collapse } from 'react-bootstrap';
 import { useTranslation } from 'react-i18next';
+import { useWatch, type Control, type UseFormRegister } from 'react-hook-form';
 import type { ConfigField } from 'store/api/moduleApi';
 import type { GroupNode } from '../configModel';
 import { visibleFields } from '../configModel';
 import { translateConfigGroup } from 'helpers/configLabel';
 import ModuleConfigFields from '../ModuleConfigFields';
-import type { ModuleConfigFieldsProps } from '../ModuleConfigFields';
+import type { ConfigFormValues } from '../useModuleConfigForm';
 
-/** The subset of `ModuleConfigFieldsProps` the panel doesn't compute itself. */
-export type ModuleConfigPanelFieldProps = Omit<
-  ModuleConfigFieldsProps,
-  'schema' | 'moduleName' | 'includeKeys'
->;
-
-export interface ModuleConfigPanelProps extends ModuleConfigPanelFieldProps {
+export interface ModuleConfigPanelProps {
   node: GroupNode;
   moduleName: string;
   schema: ConfigField[];
+  control: Control<ConfigFormValues>;
+  register: UseFormRegister<ConfigFormValues>;
+  secretStatus?: Record<string, boolean>;
 }
 
 /**
  * Renders one group node: translated heading + description, then that
  * node's own fields (`node.fieldKeys` — never the whole schema, so a nested
- * group's fields don't leak into its parent's panel or vice versa).
+ * group's fields don't leak into its parent's panel or vice versa). All
+ * panels share the same `control`/`register` from the module-wide
+ * react-hook-form instance, so switching the active node never remounts the
+ * form — only which slice of it is on screen.
  *
  * Fields carrying `advanced: true` are pulled out of the main list and
  * rendered inside a collapsed section instead, so a rarely-touched setting
@@ -33,11 +34,13 @@ const ModuleConfigPanel: React.FC<ModuleConfigPanelProps> = ({
   node,
   moduleName,
   schema,
-  configValues,
-  ...fieldProps
+  control,
+  register,
+  secretStatus
 }) => {
   const { t } = useTranslation();
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const values = useWatch({ control }) as ConfigFormValues;
 
   const label = translateConfigGroup(t, moduleName, node);
   const description = node.description
@@ -57,7 +60,7 @@ const ModuleConfigPanel: React.FC<ModuleConfigPanelProps> = ({
   // currently hidden has nothing "advanced" on screen for the operator to
   // reveal, so the toggle itself is gated on this count, not on
   // `advancedFieldKeys.length` (schema-declared, ignoring visibility).
-  const visibleAdvancedCount = visibleFields(schema, configValues).filter(f =>
+  const visibleAdvancedCount = visibleFields(schema, values).filter(f =>
     advancedKeys.has(f.key)
   ).length;
 
@@ -69,8 +72,9 @@ const ModuleConfigPanel: React.FC<ModuleConfigPanelProps> = ({
         schema={schema}
         moduleName={moduleName}
         includeKeys={mainKeys}
-        configValues={configValues}
-        {...fieldProps}
+        control={control}
+        register={register}
+        secretStatus={secretStatus}
       />
       {visibleAdvancedCount > 0 && (
         <>
@@ -91,8 +95,9 @@ const ModuleConfigPanel: React.FC<ModuleConfigPanelProps> = ({
                 schema={schema}
                 moduleName={moduleName}
                 includeKeys={advancedFieldKeys}
-                configValues={configValues}
-                {...fieldProps}
+                control={control}
+                register={register}
+                secretStatus={secretStatus}
               />
             </div>
           </Collapse>

@@ -1933,6 +1933,14 @@
         "stay": "Resta",
         "leave": "Esci"
       },
+      "saveBar": {
+        "changes_one": "{{count}} modifica non salvata",
+        "changes_other": "{{count}} modifiche non salvate",
+        "perGroup": "{{group}} ({{count}})",
+        "errors_one": "{{count}} campo da correggere",
+        "errors_other": "{{count}} campi da correggere",
+        "goToError": "Vai a {{group}}"
+      },
       "rail": {
         "overview": "Panoramica",
         "configuration": "Configurazione",
