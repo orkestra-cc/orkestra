@@ -323,16 +323,47 @@ Same commit as the code, per the repo's commit-doc-hygiene rule:
 - `frontend-admin/CLAUDE.md` + `src/modules/_template/README.md` — the
   `config.fields.*` / `config.groups.*` i18n keys for addons.
 
-## 7. Phases
+## 7. Where the work happens
 
-| # | Phase | Status |
-| - | ----- | ------ |
-| 1 | SDK contract: `ConfigGroup`, `ConfigGroupsOf`, `ConfigField` metadata, handler serialisation, schema-integrity test, `openapi-dump` | 🔴 |
-| 2 | Frontend model layer: `configModel`, `configI18n`, field renderer moved to RHF + yup — **no visual change** | 🔴 |
-| 3 | Frontend layout: rail, panel, save bar, URL sync | 🔴 |
-| 4 | Migrate `auth` (62 fields, OAuth tree, `dependsOn`) + EN/IT keys | 🔴 |
-| 5 | Migrate `notification` (+ `email.provider` → enum), `tenant`, `compliance` | 🔴 |
-| 6 | Delete `ModuleConfigModal`, ADR-0012, docs | 🔴 |
+Phases 1–6 are **core** — `pkg/sdk/module`, the four core modules, and
+`frontend-admin/src/pages/admin/modules/`. They land in this repo (upstream) and reach
+the fork chain through the normal two-hop sync (upstream → commons → client forks, per
+[ADR-0010](../adr/0010-commons-fork-chain.md)).
+
+They must **not** be written in `orkestra-commons`. A fork-side change to `pkg/sdk`
+fights every subsequent sync — the ADR-0009 sync recorded auto-merge silently dropping
+fork-only `pkg/sdk` symbols, and the new `ConfigGroup` / `Condition` types are exactly
+that shape.
+
+The payoff is larger downstream than here. `orkestra-commons` carries seven addons whose
+combined configuration is **71 fields with zero groups declared** — more surface than the
+79 core fields, and entirely flat:
+
+| Addon | Fields | Groups |
+| ----- | -----: | -----: |
+| `crm` | 28 | 0 |
+| `billing` | 16 | 0 |
+| `forms` | 11 | 0 |
+| `company` | 7 | 0 |
+| `payments` | 4 | 0 |
+| `documents` | 3 | 0 |
+| `subscriptions` | 2 | 0 |
+
+So phase 7 is commons-only, and runs after the sync brings the contract down. Until then
+those addons keep rendering the flat form through the degradation path in §4.5 — which is
+the whole reason that path exists.
+
+## 8. Phases
+
+| # | Phase | Repo | Status |
+| - | ----- | ---- | ------ |
+| 1 | SDK contract: `ConfigGroup`, `ConfigGroupsOf`, `ConfigField` metadata, handler serialisation, schema-integrity test, `openapi-dump` | upstream | 🔴 |
+| 2 | Frontend model layer: `configModel`, `configI18n`, field renderer moved to RHF + yup — **no visual change** | upstream | 🔴 |
+| 3 | Frontend layout: rail, panel, save bar, URL sync | upstream | 🔴 |
+| 4 | Migrate `auth` (62 fields, OAuth tree, `dependsOn`) + EN/IT keys | upstream | 🔴 |
+| 5 | Migrate `notification` (+ `email.provider` → enum), `tenant`, `compliance` | upstream | 🔴 |
+| 6 | Delete `ModuleConfigModal`, ADR-0012, docs | upstream | 🔴 |
+| 7 | Migrate the seven commons addons (71 fields → groups + `dependsOn` + addon-namespace i18n keys) | commons, post-sync | 🔴 |
 
 Phases 1–2 are shippable on their own with no user-visible change, so a problem in phase
 3 does not leave a half-finished redesign in production.
