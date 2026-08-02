@@ -26,7 +26,14 @@ const resolve = (
     const scoped = t(`${moduleName}:config.${suffix}`, { defaultValue: '' });
     if (scoped) return scoped;
   }
-  return t(`moduleConfig.${moduleName}.${suffix}`, { defaultValue: fallback });
+  // `returnEmptyString` defaults to true in i18next, so a key explicitly
+  // present as `""` resolves to `""` rather than falling through to
+  // `defaultValue` — that only happens for a genuinely *absent* key. Treat
+  // an empty core-bundle entry the same as a missing one so a blank
+  // translation can never blank a label; the literal `fallback` is what
+  // keeps an un-migrated field showing English instead of nothing.
+  const core = t(`moduleConfig.${moduleName}.${suffix}`, { defaultValue: '' });
+  return core || fallback;
 };
 
 export const translateConfigField = (
