@@ -27,6 +27,8 @@ loop. `ConfigField` gains optional metadata fields, all `omitempty`, all additiv
 - `ConfigField` is persisted (`bson:"configSchema"` on `ModuleConfig`), so **every new
   `ConfigField` field needs both a `json` and a `bson` tag**, both `omitempty`.
 - `ConfigGroup` is **not** persisted, so it carries `json` tags only — no `bson` tags.
+- `Condition` **is** persisted (it nests inside `ConfigField.DependsOn`, which lives in the
+  stored `configSchema`), so it carries both `json` and `bson` tags.
 - Route/response shape changes require `make openapi-dump` from `backend/`, with
   `openapi/enterprise.json` committed, or `make backend-openapi-check` fails CI.
 - Go test files in this package use plain `testing` with table-driven `t.Errorf`, package
@@ -60,7 +62,13 @@ Create `backend/pkg/sdk/module/config_groups_test.go`:
 ```go
 package module
 
-import "testing"
+import (
+	"encoding/json"
+	"strings"
+	"testing"
+
+	"go.mongodb.org/mongo-driver/bson"
+)
 
 // groupedModule implements Module + HasConfigGroups. It mirrors the shape
 // core auth will take: a parent group with nested provider children.
@@ -99,29 +107,85 @@ func TestConfigGroupsOf_NotDeclared(t *testing.T) {
 	}
 }
 
-func TestConfigField_CarriesVisibilityAndValidationMetadata(t *testing.T) {
+// TestConfigField_MetadataTagsRoundTrip covers the actual defect surface of
+// the six new fields: their struct tags. Assigning a field and reading it
+// back would only test the compiler.
+func TestConfigField_MetadataTagsRoundTrip(t *testing.T) {
 	min, max := 8, 128
 	f := ConfigField{
-		Key:         "googleClientId",
-		Label:       "Client ID",
-		Group:       "oauth.google",
-		Type:        FieldString,
+		Key:         "passwordMinLength",
+		Label:       "Minimum length",
+		Group:       "password",
+		Type:        FieldInt,
 		Advanced:    true,
-		DependsOn:   []Condition{{Key: "googleEnabledAdmin", In: []string{"true"}}},
+		DependsOn:   []Condition{{Key: "passwordPolicyEnabled", In: []string{"true"}}},
 		Min:         &min,
 		Max:         &max,
-		Pattern:     `^[A-Za-z0-9._-]+$`,
-		Placeholder: "1234-abc.apps.googleusercontent.com",
-		HelpURL:     "https://docs.orkestra.cc/auth/oauth",
+		Pattern:     "^[0-9]+$",
+		Placeholder: "12",
+		HelpURL:     "https://docs.orkestra.cc/auth/password",
 	}
-	if !f.Advanced {
-		t.Error("Advanced did not round-trip")
+
+	// JSON: the admin API is the only consumer, so the wire names are the contract.
+	raw, err := json.Marshal(f)
+	if err != nil {
+		t.Fatalf("json.Marshal = %v", err)
 	}
-	if len(f.DependsOn) != 1 || f.DependsOn[0].Key != "googleEnabledAdmin" {
-		t.Errorf("DependsOn = %+v, want one condition on googleEnabledAdmin", f.DependsOn)
+	for _, want := range []string{
+		`"advanced":true`,
+		`"dependsOn":[{"key":"passwordPolicyEnabled","in":["true"]}]`,
+		`"min":8`,
+		`"max":128`,
+		`"pattern":"^[0-9]+$"`,
+		`"placeholder":"12"`,
+		`"helpUrl":"https://docs.orkestra.cc/auth/password"`,
+	} {
+		if !strings.Contains(string(raw), want) {
+			t.Errorf("json payload %s missing %s", raw, want)
+		}
 	}
-	if f.Min == nil || *f.Min != 8 || f.Max == nil || *f.Max != 128 {
-		t.Errorf("Min/Max = %v/%v, want 8/128", f.Min, f.Max)
+
+	// omitempty: a field declaring none of the new metadata must not bloat
+	// every schema entry of every admin response with empty keys.
+	bare, err := json.Marshal(ConfigField{Key: "k", Type: FieldString})
+	if err != nil {
+		t.Fatalf("json.Marshal bare = %v", err)
+	}
+	for _, absent := range []string{
+		"advanced", "dependsOn", "min", "max", "pattern", "placeholder", "helpUrl",
+	} {
+		if strings.Contains(string(bare), absent) {
+			t.Errorf("bare field payload %s should omit %q", bare, absent)
+		}
+	}
+
+	// BSON: ConfigSchema is persisted into module_configs and rewritten by
+	// RefreshMetadata on every boot. A missing bson tag drops the field
+	// silently — it would serve correctly and then vanish across a restart.
+	encoded, err := bson.Marshal(f)
+	if err != nil {
+		t.Fatalf("bson.Marshal = %v", err)
+	}
+	var back ConfigField
+	if err := bson.Unmarshal(encoded, &back); err != nil {
+		t.Fatalf("bson.Unmarshal = %v", err)
+	}
+	if !back.Advanced {
+		t.Error("Advanced did not survive the bson round-trip")
+	}
+	if back.Min == nil || *back.Min != 8 || back.Max == nil || *back.Max != 128 {
+		t.Errorf("Min/Max after bson round-trip = %v/%v, want 8/128", back.Min, back.Max)
+	}
+	if len(back.DependsOn) != 1 ||
+		back.DependsOn[0].Key != "passwordPolicyEnabled" ||
+		len(back.DependsOn[0].In) != 1 ||
+		back.DependsOn[0].In[0] != "true" {
+		t.Errorf("DependsOn after bson round-trip = %+v", back.DependsOn)
+	}
+	if back.Pattern != "^[0-9]+$" || back.Placeholder != "12" ||
+		back.HelpURL != "https://docs.orkestra.cc/auth/password" {
+		t.Errorf("string metadata after bson round-trip = %q / %q / %q",
+			back.Pattern, back.Placeholder, back.HelpURL)
 	}
 }
 ```
@@ -129,7 +193,7 @@ func TestConfigField_CarriesVisibilityAndValidationMetadata(t *testing.T) {
 - [ ] **Step 2: Run the test to verify it fails**
 
 ```bash
-cd backend && go test ./pkg/sdk/module/ -run 'ConfigGroups|CarriesVisibility' -v
+cd backend && go test ./pkg/sdk/module/ -run 'ConfigGroups|MetadataTags' -v
 ```
 
 Expected: FAIL to **compile** — `undefined: ConfigGroup`, `undefined: HasConfigGroups`,
@@ -167,9 +231,12 @@ type ConfigGroup struct {
 //
 // A struct rather than an expression string on purpose — there is no parser to
 // write, ship, and keep behaviourally identical between Go and TypeScript.
+//
+// Unlike ConfigGroup this IS persisted: it nests inside ConfigField.DependsOn,
+// which is part of the stored configSchema. Hence the bson tags.
 type Condition struct {
-	Key string   `json:"key"` // another field key of the same module
-	In  []string `json:"in"`  // values that satisfy the condition
+	Key string   `json:"key" bson:"key"` // another field key of the same module
+	In  []string `json:"in" bson:"in"`   // values that satisfy the condition
 }
 ```
 
@@ -221,7 +288,7 @@ func ConfigGroupsOf(m Module) []ConfigGroup {
 - [ ] **Step 5: Run the tests to verify they pass**
 
 ```bash
-cd backend && go test ./pkg/sdk/module/ -run 'ConfigGroups|CarriesVisibility' -v
+cd backend && go test ./pkg/sdk/module/ -run 'ConfigGroups|MetadataTags' -v
 ```
 
 Expected: PASS (3 tests).
@@ -574,15 +641,8 @@ func TestModuleConfigResponse_OmitsEmptyConfigGroups(t *testing.T) {
 }
 ```
 
-Add the imports this needs to the top of the file:
-
-```go
-import (
-	"encoding/json"
-	"strings"
-	"testing"
-)
-```
+No import changes: `encoding/json` and `strings` are already in the file's import block
+from Task 1.
 
 - [ ] **Step 2: Run the test to verify it fails**
 
@@ -717,10 +777,12 @@ const coreModuleCount = 8
 // buildAllModules instantiates every module compiled into this binary. The
 // instances are used for reading declarations only — Init is never called —
 // so no infrastructure is needed.
-func buildAllModules() []module.Module {
+func buildAllModules(t *testing.T) []module.Module {
+	t.Helper()
 	factories := coreModules(&config.Config{})
 	if len(factories) != coreModuleCount {
-		panic("coreModules changed size — update coreModuleCount so the gate stays honest")
+		t.Fatalf("coreModules returned %d factories, want %d — update coreModuleCount so the gate stays honest",
+			len(factories), coreModuleCount)
 	}
 	for _, f := range optionalModules {
 		factories = append(factories, f)
@@ -738,7 +800,7 @@ func buildAllModules() []module.Module {
 // catalog is in scope. A fork gets the same coverage for its addons for free,
 // because its catalog_<name>.go registers into the same optionalModules map.
 func TestConfigDeclarationsAreValid(t *testing.T) {
-	for _, m := range buildAllModules() {
+	for _, m := range buildAllModules(t) {
 		t.Run(m.Name(), func(t *testing.T) {
 			if err := module.ValidateConfigDeclarations(
 				module.ConfigSchemaOf(m),
@@ -754,7 +816,7 @@ func TestConfigDeclarationsAreValid(t *testing.T) {
 // ValidateConfigDeclarations: a declared group that nothing points at renders
 // an empty panel in the admin rail.
 func TestEveryGroupHasFields(t *testing.T) {
-	for _, m := range buildAllModules() {
+	for _, m := range buildAllModules(t) {
 		groups := module.ConfigGroupsOf(m)
 		if len(groups) == 0 {
 			continue // flat-form module, nothing to check
