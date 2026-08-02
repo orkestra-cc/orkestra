@@ -4,6 +4,7 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faEye, faEyeSlash } from '@fortawesome/free-solid-svg-icons';
 import { useTranslation } from 'react-i18next';
 import type { ConfigField } from 'store/api/moduleApi';
+import { isFieldVisible } from './configModel';
 
 export interface ModuleConfigFieldsProps {
   schema: ConfigField[];
@@ -47,11 +48,12 @@ const ModuleConfigFields: React.FC<ModuleConfigFieldsProps> = ({
     setRevealedSecrets(prev => ({ ...prev, [key]: !prev[key] }));
   };
 
-  const fields = includeKeys
+  const selected = includeKeys
     ? includeKeys
         .map(key => schema.find(f => f.key === key))
         .filter((f): f is ConfigField => Boolean(f))
     : schema;
+  const fields = selected.filter(f => isFieldVisible(f, configValues, schema));
 
   return (
     <>

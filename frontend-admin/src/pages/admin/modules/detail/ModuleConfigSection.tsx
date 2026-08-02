@@ -12,7 +12,7 @@ import {
   useUpdateModuleEnvironmentMutation
 } from 'store/api/moduleApi';
 import ModuleConfigFields from '../ModuleConfigFields';
-import { bucketByGroup } from '../utils';
+import { buildGroupTree, isFieldVisible } from '../configModel';
 
 interface ModuleConfigSectionProps {
   module: ModuleConfig;
@@ -64,9 +64,20 @@ const ModuleConfigSection: React.FC<ModuleConfigSectionProps> = ({
   }, [envConfig, resetForm]);
 
   const schema = mod.configSchema ?? [];
-  const groupBuckets = useMemo(() => bucketByGroup(schema), [schema]);
-  const showTabs = groupBuckets.length >= 2;
-  const currentTab = activeTab || groupBuckets[0]?.group || '';
+  const groupTree = useMemo(
+    () => buildGroupTree(schema, mod.configGroups),
+    [schema, mod.configGroups]
+  );
+  // Legacy heuristic (no declared groups): only show tabs once there are ≥2
+  // synthesized buckets — a single bucket would be a redundant one-tab rail.
+  // That threshold matched `bucketByGroup`'s caller and must keep matching
+  // it exactly (no module declares groups today, so this is the only branch
+  // any current module hits). A module that *does* declare configGroups
+  // opted into an explicit rail, so it always gets tabs, even a lone one —
+  // its single top-level node can still have nested children (rendered
+  // starting phase 3), which the legacy flat-bucket case never has.
+  const showTabs = groupTree.length >= 2 || Boolean(mod.configGroups?.length);
+  const currentTab = activeTab || groupTree[0]?.key || '';
 
   const secretStatus = envConfig?.secretStatus ?? mod.secretStatus ?? {};
 
@@ -76,6 +87,7 @@ const ModuleConfigSection: React.FC<ModuleConfigSectionProps> = ({
     if (hasSecrets) return true;
     for (const field of schema) {
       if (field.type === 'secret') continue;
+      if (!isFieldVisible(field, configValues, schema)) continue;
       if ((configValues[field.key] || '') !== (loadedValues[field.key] || ''))
         return true;
     }
@@ -90,6 +102,7 @@ const ModuleConfigSection: React.FC<ModuleConfigSectionProps> = ({
       const changedConfig: Record<string, string> = {};
       for (const field of schema) {
         if (field.type === 'secret') continue;
+        if (!isFieldVisible(field, configValues, schema)) continue;
         if (
           (configValues[field.key] || '') !== (loadedValues[field.key] || '')
         ) {
@@ -229,19 +242,20 @@ const ModuleConfigSection: React.FC<ModuleConfigSectionProps> = ({
             <>
               <Nav
                 variant="tabs"
+                role="tablist"
                 activeKey={currentTab}
                 onSelect={k => setActiveTab(k || '')}
                 className="mb-3"
               >
-                {groupBuckets.map(({ group }) => (
-                  <Nav.Item key={group}>
-                    <Nav.Link eventKey={group}>{group}</Nav.Link>
+                {groupTree.map(node => (
+                  <Nav.Item key={node.key}>
+                    <Nav.Link eventKey={node.key}>{node.label}</Nav.Link>
                   </Nav.Item>
                 ))}
               </Nav>
-              {groupBuckets.map(({ group, keys }) =>
-                currentTab === group ? (
-                  <div key={group}>{renderFields(keys)}</div>
+              {groupTree.map(node =>
+                currentTab === node.key ? (
+                  <div key={node.key}>{renderFields(node.fieldKeys)}</div>
                 ) : null
               )}
             </>

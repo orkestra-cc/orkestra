@@ -9,7 +9,7 @@ import {
 import { useTranslation } from 'react-i18next';
 import SubtleBadge from 'components/common/SubtleBadge';
 import type { ModuleConfig, ModuleHealthStatus } from 'store/api/moduleApi';
-import { configCompleteness } from '../utils';
+import { configCompleteness } from '../configModel';
 
 interface ModuleDashboardCardsProps {
   module: ModuleConfig;
@@ -105,7 +105,9 @@ const ModuleDashboardCards: React.FC<ModuleDashboardCardsProps> = ({
             {total > 0 && (
               <div className="progress mt-2" style={{ height: '4px' }}>
                 <div
-                  className={`progress-bar bg-${filled === total ? 'success' : 'warning'}`}
+                  className={`progress-bar bg-${
+                    filled === total ? 'success' : 'warning'
+                  }`}
                   style={{
                     width: `${total > 0 ? (filled / total) * 100 : 0}%`
                   }}
