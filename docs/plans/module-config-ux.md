@@ -367,3 +367,6 @@ the whole reason that path exists.
 
 Phases 1–2 are shippable on their own with no user-visible change, so a problem in phase
 3 does not leave a half-finished redesign in production.
+
+Each phase gets its own task-level plan as it starts. Phase 1:
+[`module-config-ux-phase1-sdk.md`](module-config-ux-phase1-sdk.md).
