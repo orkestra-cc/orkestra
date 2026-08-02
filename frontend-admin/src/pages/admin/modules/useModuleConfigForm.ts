@@ -1,4 +1,5 @@
-import { useForm, type UseFormReturn } from 'react-hook-form';
+import { useMemo } from 'react';
+import { useForm, type Resolver, type UseFormReturn } from 'react-hook-form';
 import { yupResolver } from '@hookform/resolvers/yup';
 import * as yup from 'yup';
 import type { ConfigField } from 'store/api/moduleApi';
@@ -31,6 +32,18 @@ export type ConfigFormValues = Record<string, string>;
  * Seeds the form. A stored value wins over the schema default; a secret always
  * starts empty because the backend never sends secret values to the client —
  * only whether one exists. An empty secret field means "keep what is stored".
+ *
+ * A stored empty string is not the same as nothing stored: `UpdateConfig`
+ * writes `configValues[key] || ''` when an operator clears a field, so `''`
+ * is a real, persisted value. Falling back to the schema default in that case
+ * would render a value the database does not hold, and because the form
+ * wouldn't be dirty, the mismatch would never get corrected by a save. Only a
+ * genuinely absent key falls back to the default — mirrored with `??`, same
+ * as the `enum` branch in `ModuleConfigFields`.
+ *
+ * `bool` is the deliberate exception: a switch has no blank state, so a
+ * stored `''` still collapses to the default, matching the `bool` branch in
+ * `ModuleConfigFields`.
  */
 export const buildDefaults = (
   schema: ConfigField[],
@@ -44,7 +57,11 @@ export const buildDefaults = (
       continue;
     }
     const v = stored[f.key];
-    out[f.key] = v !== undefined && v !== '' ? v : f.default || '';
+    if (f.type === 'bool') {
+      out[f.key] = v !== undefined && v !== '' ? v : f.default || '';
+      continue;
+    }
+    out[f.key] = v ?? f.default ?? '';
   }
   return out;
 };
@@ -150,9 +167,21 @@ export const useModuleConfigForm = (
   configValues: Record<string, string> | undefined
 ): ModuleConfigForm => {
   const defaults = buildDefaults(schema, configValues);
+  // yupResolver validates the whole values object on every call, and
+  // mode: 'onChange' calls it per keystroke — on a large module (auth's 62
+  // fields) rebuilding the yup object from scratch on every render is pure
+  // waste on top of that inherent per-keystroke validation cost. Rebuild
+  // only when the schema itself changes.
+  const resolver = useMemo(
+    () =>
+      yupResolver(
+        buildYupSchema(schema)
+      ) as unknown as Resolver<ConfigFormValues>,
+    [schema]
+  );
   const form = useForm<ConfigFormValues>({
     defaultValues: defaults,
-    resolver: yupResolver(buildYupSchema(schema)) as never,
+    resolver,
     mode: 'onChange'
   });
   return { form, defaults };

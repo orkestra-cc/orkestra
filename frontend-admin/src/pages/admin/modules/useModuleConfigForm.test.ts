@@ -34,6 +34,22 @@ describe('buildDefaults', () => {
     const schema = [field({ key: 's', type: 'secret', default: 'nope' })];
     expect(buildDefaults(schema, { s: 'nope' })).toEqual({ s: '' });
   });
+
+  it('seeds a stored empty string as empty, not the schema default', () => {
+    // UpdateConfig writes configValues[key] || '' when an operator clears a
+    // field, so a stored '' is a real persisted value, not "nothing stored".
+    // Falling back to the default here would show a value the database does
+    // not hold, and because the form wouldn't be dirty, the mismatch would
+    // never get corrected by a save.
+    const schema = [field({ key: 'a', default: 'fallback' })];
+    expect(buildDefaults(schema, { a: '' })).toEqual({ a: '' });
+  });
+
+  it('still collapses a stored empty bool to the schema default', () => {
+    // A switch has no blank state, so bool keeps the previous behavior.
+    const schema = [field({ key: 'on', type: 'bool', default: 'true' })];
+    expect(buildDefaults(schema, { on: '' })).toEqual({ on: 'true' });
+  });
 });
 
 describe('buildYupSchema', () => {
@@ -156,5 +172,16 @@ describe('collectDiff', () => {
     const { config, secrets } = collectDiff(schema, defaults, defaults);
     expect(config).toEqual({});
     expect(secrets).toEqual({});
+  });
+
+  it('round-trips a stored empty string without lying: no edit means no diff', () => {
+    // buildDefaults must seed the same '' that is stored, or the form would
+    // be dirty against a value the operator never touched — and collectDiff
+    // must then see no change and not resend it.
+    const stringSchema = [field({ key: 'a', default: 'fallback' })];
+    const stored = { a: '' };
+    const seeded = buildDefaults(stringSchema, stored);
+    expect(seeded).toEqual({ a: '' });
+    expect(collectDiff(stringSchema, seeded, seeded).config).toEqual({});
   });
 });
