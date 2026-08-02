@@ -48,39 +48,65 @@ type ConfigGroup struct {
 	Order       int    `json:"order,omitempty"`
 }
 
-// Condition gates a field's visibility on the value of another field of the
-// SAME module. Semantics: AND across a field's DependsOn slice, OR within a
-// single condition's In list.
+// FieldCondition gates a field's visibility on the value of another field of
+// the SAME module. Semantics: AND across a field's DependsOn slice, OR within
+// a single condition's In list.
 //
 // A struct rather than an expression string on purpose — there is no parser to
 // write, ship, and keep behaviourally identical between Go and TypeScript.
 //
+// Named FieldCondition rather than Condition because huma derives OpenAPI
+// schema names from the bare Go type name, ignoring the package path, and
+// panics on a duplicate named schema (registry.go). "Condition" is a plausible
+// request/response body name for a fork's addon; a collision would take the
+// server down at boot.
+//
 // Unlike ConfigGroup this IS persisted: it nests inside ConfigField.DependsOn,
 // which is part of the stored configSchema. Hence the bson tags.
-type Condition struct {
+//
+// # Matching contract
+//
+// This is the rule every evaluator — the Go side and the admin UI's
+// TypeScript one — must implement. Matching is TYPE-AWARE, resolved against
+// the Type of the field named by Key, not by raw string equality:
+//
+//   - FieldBool target: both the stored value and each In entry are
+//     interpreted as booleans by the same rule as parseBool
+//     (config_unmarshal.go) — "true", "1", "yes" (case-insensitive,
+//     whitespace-trimmed) are true, everything else is false. So
+//     In: []string{"true"} matches a stored value of "1".
+//   - every other type: case-insensitive, whitespace-trimmed exact string
+//     match.
+//
+// Bool values are not stored normalized: buildInitialConfig seeds a config
+// value as the raw env string, so COMPLIANCE_AUTO_CLEANUP_ENABLED=1 is stored
+// as "1". An exact-match evaluator would leave every field depending on it
+// permanently invisible while the setting itself is on — the failure mode is
+// silent and only visible as missing UI.
+type FieldCondition struct {
 	Key string   `json:"key" bson:"key"` // another field key of the same module
-	In  []string `json:"in" bson:"in"`   // values that satisfy the condition
+	In  []string `json:"in" bson:"in"`   // values that satisfy the condition, matched per the contract above
 }
 
 // ConfigField describes a single configurable setting for a module.
 // The admin UI renders forms from these declarations.
 type ConfigField struct {
-	Key         string          `json:"key" bson:"key"`
-	Label       string          `json:"label" bson:"label"`
-	Group       string          `json:"group,omitempty" bson:"group,omitempty"` // ConfigGroup.Key when the module declares ConfigGroups(); a legacy display label when it does not
-	Description string          `json:"description,omitempty" bson:"description,omitempty"`
-	Type        ConfigFieldType `json:"type" bson:"type"`
-	Required    bool            `json:"required" bson:"required"`
-	Default     string          `json:"default,omitempty" bson:"default,omitempty"`
-	EnvVar      string          `json:"envVar,omitempty" bson:"envVar,omitempty"`   // source env var for seed
-	Options     []string        `json:"options,omitempty" bson:"options,omitempty"` // valid values for FieldEnum (ignored for other types)
-	Advanced    bool            `json:"advanced,omitempty" bson:"advanced,omitempty"`
-	DependsOn   []Condition     `json:"dependsOn,omitempty" bson:"dependsOn,omitempty"`
-	Min         *int            `json:"min,omitempty" bson:"min,omitempty"`
-	Max         *int            `json:"max,omitempty" bson:"max,omitempty"`
-	Pattern     string          `json:"pattern,omitempty" bson:"pattern,omitempty"`
-	Placeholder string          `json:"placeholder,omitempty" bson:"placeholder,omitempty"`
-	HelpURL     string          `json:"helpUrl,omitempty" bson:"helpUrl,omitempty"`
+	Key         string           `json:"key" bson:"key"`
+	Label       string           `json:"label" bson:"label"`
+	Group       string           `json:"group,omitempty" bson:"group,omitempty"` // ConfigGroup.Key when the module declares ConfigGroups(); a legacy display label when it does not
+	Description string           `json:"description,omitempty" bson:"description,omitempty"`
+	Type        ConfigFieldType  `json:"type" bson:"type"`
+	Required    bool             `json:"required" bson:"required"`
+	Default     string           `json:"default,omitempty" bson:"default,omitempty"`
+	EnvVar      string           `json:"envVar,omitempty" bson:"envVar,omitempty"`   // source env var for seed
+	Options     []string         `json:"options,omitempty" bson:"options,omitempty"` // valid values for FieldEnum (ignored for other types)
+	Advanced    bool             `json:"advanced,omitempty" bson:"advanced,omitempty"`
+	DependsOn   []FieldCondition `json:"dependsOn,omitempty" bson:"dependsOn,omitempty"`
+	Min         *int             `json:"min,omitempty" bson:"min,omitempty"`
+	Max         *int             `json:"max,omitempty" bson:"max,omitempty"`
+	Pattern     string           `json:"pattern,omitempty" bson:"pattern,omitempty"`
+	Placeholder string           `json:"placeholder,omitempty" bson:"placeholder,omitempty"`
+	HelpURL     string           `json:"helpUrl,omitempty" bson:"helpUrl,omitempty"`
 }
 
 // CollectionSpec declares a MongoDB collection that a module owns.

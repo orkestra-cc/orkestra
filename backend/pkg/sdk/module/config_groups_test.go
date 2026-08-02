@@ -2,6 +2,9 @@ package module
 
 import (
 	"encoding/json"
+	"io"
+	"log/slog"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -46,7 +49,7 @@ func TestConfigGroupsOf_NotDeclared(t *testing.T) {
 }
 
 // TestConfigField_MetadataTagsRoundTrip covers the actual defect surface of
-// the six new fields: their struct tags. Assigning a field and reading it
+// the seven new fields: their struct tags. Assigning a field and reading it
 // back would only test the compiler.
 func TestConfigField_MetadataTagsRoundTrip(t *testing.T) {
 	min, max := 8, 128
@@ -56,7 +59,7 @@ func TestConfigField_MetadataTagsRoundTrip(t *testing.T) {
 		Group:       "password",
 		Type:        FieldInt,
 		Advanced:    true,
-		DependsOn:   []Condition{{Key: "passwordPolicyEnabled", In: []string{"true"}}},
+		DependsOn:   []FieldCondition{{Key: "passwordPolicyEnabled", In: []string{"true"}}},
 		Min:         &min,
 		Max:         &max,
 		Pattern:     "^[0-9]+$",
@@ -124,6 +127,95 @@ func TestConfigField_MetadataTagsRoundTrip(t *testing.T) {
 		back.HelpURL != "https://docs.orkestra.cc/auth/password" {
 		t.Errorf("string metadata after bson round-trip = %q / %q / %q",
 			back.Pattern, back.Placeholder, back.HelpURL)
+	}
+}
+
+// TestPersistedConfigTypes_TagEveryField is the standing version of the
+// round-trip test above: that one pins today's fields, this one pins the
+// rule. ConfigSchema is persisted into module_configs and rewritten by
+// RefreshMetadata on every boot, so a field added later without a bson tag
+// would serve correctly and then vanish across a restart — the exact failure
+// the round-trip test describes, one field too late to catch.
+func TestPersistedConfigTypes_TagEveryField(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		typ  reflect.Type
+	}{
+		{"ConfigField", reflect.TypeOf(ConfigField{})},
+		{"FieldCondition", reflect.TypeOf(FieldCondition{})},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for i := range tc.typ.NumField() {
+				f := tc.typ.Field(i)
+				if _, ok := f.Tag.Lookup("json"); !ok {
+					t.Errorf("%s.%s has no json tag — the admin API wire name would default to the Go name",
+						tc.name, f.Name)
+				}
+				if _, ok := f.Tag.Lookup("bson"); !ok {
+					t.Errorf("%s.%s has no bson tag — it would silently vanish across a restart",
+						tc.name, f.Name)
+				}
+			}
+		})
+	}
+}
+
+// TestConfigGroup_NeverPersisted is the inverse rule: groups are resolved
+// live from the registry by the admin handler and deliberately never written
+// to module_configs. A bson tag here is the defect — it would invite a
+// snapshot that then goes stale against the running binary.
+func TestConfigGroup_NeverPersisted(t *testing.T) {
+	typ := reflect.TypeOf(ConfigGroup{})
+	for i := range typ.NumField() {
+		f := typ.Field(i)
+		if _, ok := f.Tag.Lookup("json"); !ok {
+			t.Errorf("ConfigGroup.%s has no json tag — the admin API wire name would default to the Go name", f.Name)
+		}
+		if tag, ok := f.Tag.Lookup("bson"); ok {
+			t.Errorf("ConfigGroup.%s carries a bson tag %q — config groups are presentation-only and never persisted",
+				f.Name, tag)
+		}
+	}
+}
+
+// TestToConfigResponse_ResolvesConfigGroupsFromRegistry exercises the one
+// line of wiring this feature adds to the handler. toConfigResponse never
+// touches the config service, and collectInfraStatus early-returns for a
+// module declaring no containers, so a nil config service plus a registry
+// holding the module is the whole fixture.
+func TestToConfigResponse_ResolvesConfigGroupsFromRegistry(t *testing.T) {
+	registry := NewModuleRegistry(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	registry.Register(groupedModule{})
+	h := NewModuleAdminHandler(nil, registry)
+
+	resp := h.toConfigResponse(ModuleConfig{ModuleName: "grouped", Enabled: true})
+	if len(resp.ConfigGroups) != 2 {
+		t.Fatalf("ConfigGroups = %+v, want the 2 groups the live module declares", resp.ConfigGroups)
+	}
+	if resp.ConfigGroups[0].Key != "oauth" || resp.ConfigGroups[1].Parent != "oauth" {
+		t.Errorf("ConfigGroups = %+v, want them resolved from the module, not the stored doc", resp.ConfigGroups)
+	}
+}
+
+func TestToConfigResponse_OrphanDocumentHasNoConfigGroups(t *testing.T) {
+	// An orphan is a module_configs document whose module is no longer
+	// compiled in (an addon a fork dropped). It has no live module to resolve
+	// groups from, so the response must degrade to the flat form rather than
+	// carry an empty key.
+	registry := NewModuleRegistry(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	registry.Register(groupedModule{})
+	h := NewModuleAdminHandler(nil, registry)
+
+	resp := h.toConfigResponse(ModuleConfig{ModuleName: "departed-addon"})
+	if resp.ConfigGroups != nil {
+		t.Fatalf("ConfigGroups = %+v, want nil for a module absent from the registry", resp.ConfigGroups)
+	}
+	raw, err := json.Marshal(resp)
+	if err != nil {
+		t.Fatalf("json.Marshal = %v", err)
+	}
+	if strings.Contains(string(raw), "configGroups") {
+		t.Errorf("payload %s should omit configGroups for an orphan document", raw)
 	}
 }
 

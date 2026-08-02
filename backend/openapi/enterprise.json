@@ -1147,28 +1147,6 @@
         ],
         "type": "object"
       },
-      "Condition": {
-        "additionalProperties": false,
-        "properties": {
-          "in": {
-            "items": {
-              "type": "string"
-            },
-            "type": [
-              "array",
-              "null"
-            ]
-          },
-          "key": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "key",
-          "in"
-        ],
-        "type": "object"
-      },
       "ConfigField": {
         "additionalProperties": false,
         "properties": {
@@ -1180,7 +1158,7 @@
           },
           "dependsOn": {
             "items": {
-              "$ref": "#/components/schemas/Condition"
+              "$ref": "#/components/schemas/FieldCondition"
             },
             "type": [
               "array",
@@ -2118,6 +2096,28 @@
             "type": "string"
           }
         },
+        "type": "object"
+      },
+      "FieldCondition": {
+        "additionalProperties": false,
+        "properties": {
+          "in": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "key": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "in"
+        ],
         "type": "object"
       },
       "ForgotPasswordRequestBody": {

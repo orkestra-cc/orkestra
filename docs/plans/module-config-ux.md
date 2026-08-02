@@ -85,7 +85,7 @@ already does for `RequiredServicesOf(m)`. `RefreshMetadata` is untouched.
 ### 2.3 Per-field metadata
 
 ```go
-type Condition struct {
+type FieldCondition struct {
     Key string   `json:"key"`  // another field key of the SAME module
     In  []string `json:"in"`   // satisfying values
 }
@@ -94,7 +94,7 @@ type ConfigField struct {
     // …existing fields unchanged…
     Group       string      `json:"group,omitempty"`     // now a ConfigGroup.Key
     Advanced    bool        `json:"advanced,omitempty"`  // collapsed under "▸ Advanced"
-    DependsOn   []Condition `json:"dependsOn,omitempty"` // AND across entries, OR within In
+    DependsOn   []FieldCondition `json:"dependsOn,omitempty"` // AND across entries, OR within In
     Min         *int        `json:"min,omitempty"`
     Max         *int        `json:"max,omitempty"`
     Pattern     string      `json:"pattern,omitempty"`
@@ -307,7 +307,7 @@ for anyone who has forked.
 
 **CI**
 
-`make openapi-dump` is mandatory — `ConfigField` gains six fields and the response gains
+`make openapi-dump` is mandatory — `ConfigField` gains seven fields and the response gains
 `configGroups`, so `openapi-check` fails without it. Then `make ci-backend` and
 `make ci-frontend-admin`.
 
@@ -332,7 +332,7 @@ the fork chain through the normal two-hop sync (upstream → commons → client 
 
 They must **not** be written in `orkestra-commons`. A fork-side change to `pkg/sdk`
 fights every subsequent sync — the ADR-0009 sync recorded auto-merge silently dropping
-fork-only `pkg/sdk` symbols, and the new `ConfigGroup` / `Condition` types are exactly
+fork-only `pkg/sdk` symbols, and the new `ConfigGroup` / `FieldCondition` types are exactly
 that shape.
 
 The payoff is larger downstream than here. `orkestra-commons` carries seven addons whose
