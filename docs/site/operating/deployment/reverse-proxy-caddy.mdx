@@ -219,7 +219,12 @@ CLIENT_COOKIE_DOMAIN=api.example.com
 # backend ignores the header and attributes every request to Caddy: all
 # callers share one login rate-limit bucket, and the operator IP
 # allowlist / geo-block match the proxy instead of the client.
-# One hop for Caddy alone; add one per extra proxy (a CDN in front = 2).
+# MEASURE IT rather than counting hops on paper: log in through the real
+# public URL and check which IP the backend recorded. A hop count derived
+# from the diagram was wrong on Orkestra's own staging stack, because the
+# proxy in front forwarded the CDN's X-Forwarded-For without appending
+# itself. Prefer TRUSTED_PROXY_CIDRS (the networks your proxies live in)
+# — it stays correct when a proxy starts or stops appending.
 TRUSTED_PROXY_COUNT=1
 
 ALLOW_LOCALHOST_REDIRECTS=false

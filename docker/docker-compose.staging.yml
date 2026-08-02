@@ -119,9 +119,14 @@ services:
       # Prefer TRUSTED_PROXY_CIDRS (the networks your proxies live in) —
       # it survives a topology change without a recount. Use
       # TRUSTED_PROXY_COUNT when you just know how many hops sit in
-      # front. This stack sits behind Cloudflare → HAProxy, i.e. 2 hops.
+      # front. MEASURE IT — do not guess: send a request through the real
+      # public path and check the IP the backend recorded. A guessed "2"
+      # was wrong on this very stack (the peer turned out to be the LAN
+      # proxy, which forwards Cloudflare's XFF without appending). The
+      # default here trusts nothing, which is safe but attributes every
+      # request to the proxy until you configure it.
       TRUSTED_PROXY_CIDRS: ${TRUSTED_PROXY_CIDRS:-}
-      TRUSTED_PROXY_COUNT: ${TRUSTED_PROXY_COUNT:-2}
+      TRUSTED_PROXY_COUNT: ${TRUSTED_PROXY_COUNT:-0}
 
       # Security (production-like)
       RATE_LIMIT_REQUESTS_PER_MINUTE: ${RATE_LIMIT_REQUESTS_PER_MINUTE:-60}
