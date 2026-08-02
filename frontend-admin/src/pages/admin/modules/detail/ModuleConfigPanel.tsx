@@ -52,7 +52,11 @@ const ModuleConfigPanel: React.FC<ModuleConfigPanelProps> = ({
   const mainKeys = node.fieldKeys.filter(key => !advancedKeys.has(key));
   const advancedFieldKeys = node.fieldKeys.filter(key => advancedKeys.has(key));
   // Only fields currently visible under their own `dependsOn` — a field
-  // hidden by its condition must not inflate the badge on the toggle.
+  // hidden by its condition must not inflate the count on the toggle, and
+  // must not conjure a toggle at all: a group whose only advanced field is
+  // currently hidden has nothing "advanced" on screen for the operator to
+  // reveal, so the toggle itself is gated on this count, not on
+  // `advancedFieldKeys.length` (schema-declared, ignoring visibility).
   const visibleAdvancedCount = visibleFields(schema, configValues).filter(f =>
     advancedKeys.has(f.key)
   ).length;
@@ -68,7 +72,7 @@ const ModuleConfigPanel: React.FC<ModuleConfigPanelProps> = ({
         configValues={configValues}
         {...fieldProps}
       />
-      {advancedFieldKeys.length > 0 && (
+      {visibleAdvancedCount > 0 && (
         <>
           <Button
             variant="link"

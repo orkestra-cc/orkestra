@@ -81,7 +81,12 @@ const ModuleConfigSection: React.FC<ModuleConfigSectionProps> = ({
   const showRail = groupTree.length >= 2 || Boolean(mod.configGroups?.length);
   const flatNodes = useMemo(() => flattenTree(groupTree), [groupTree]);
   const currentKey = activeKey || flatNodes[0]?.key || '';
-  const activeNode = flatNodes.find(node => node.key === currentKey);
+  // A key can survive in state past a structural group change (module
+  // config changed shape) and no longer match anything in the current tree.
+  // Falling back to the first node keeps the rail and panel in sync instead
+  // of silently dropping to the unscoped flat form below.
+  const activeNode =
+    flatNodes.find(node => node.key === currentKey) ?? flatNodes[0];
 
   const secretStatus = envConfig?.secretStatus ?? mod.secretStatus ?? {};
 

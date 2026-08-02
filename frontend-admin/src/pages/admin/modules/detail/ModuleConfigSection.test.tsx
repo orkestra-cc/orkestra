@@ -215,17 +215,69 @@ describe('ModuleConfigSection', () => {
     expect(screen.getByText('Rare')).toBeInTheDocument();
   });
 
-  it('keeps the flat form when the module declares no groups', () => {
-    // The degradation path — every module served today, and every un-migrated
-    // fork addon, takes it.
+  it('keeps the true flat form when there is only one settings bucket', () => {
+    // The actual degradation path — fewer than 2 top-level nodes. Every
+    // module served today, and every un-migrated fork addon, has either no
+    // `group` at all (synthesized into a single trailing "General" bucket,
+    // exercised here) or fields that all share one `group` label, and both
+    // must render exactly like the pre-rail flat form: fields directly, no
+    // rail, no group button anywhere.
     const mod = moduleWith([
-      field({ key: 'a', label: 'Alpha', group: 'Google' }),
-      field({ key: 'b', label: 'Beta', group: 'Apple' })
+      field({ key: 'a', label: 'Alpha' }),
+      field({ key: 'b', label: 'Beta' })
     ]);
     renderWithProviders(
       <ModuleConfigSection module={mod} selectedEnvironment="production" />
     );
-    expect(screen.getByRole('button', { name: 'Google' })).toBeInTheDocument();
     expect(screen.getByText('Alpha')).toBeInTheDocument();
+    expect(screen.getByText('Beta')).toBeInTheDocument();
+    // "General" is the label buildGroupTree synthesizes for the lone bucket
+    // — asserting it never renders as a button proves no rail was drawn at
+    // all (as opposed to the Save/Discard buttons, which always render).
+    expect(
+      screen.queryByRole('button', { name: 'General' })
+    ).not.toBeInTheDocument();
+  });
+
+  it('renders no Advanced toggle when the only advanced field is hidden, and shows it once visible', async () => {
+    const user = userEvent.setup();
+    const schema = [
+      field({ key: 'on', label: 'Enabled', type: 'bool', default: 'false' }),
+      field({
+        key: 'rare',
+        label: 'Rare',
+        group: 'g1',
+        advanced: true,
+        dependsOn: [{ key: 'on', in: ['true'] }]
+      }),
+      field({ key: 'plain', label: 'Plain', group: 'g1' })
+    ];
+    const mod = moduleWith(schema, {
+      configGroups: [
+        { key: 'g1', label: 'Group One', order: 1 },
+        { key: 'g2', label: 'Group Two', order: 2 }
+      ]
+    });
+    const { rerender } = renderWithProviders(
+      <ModuleConfigSection module={mod} selectedEnvironment="production" />
+    );
+    expect(
+      screen.queryByRole('button', { name: /Advanced/ })
+    ).not.toBeInTheDocument();
+
+    rerender(
+      <ModuleConfigSection
+        module={moduleWith(schema, {
+          configGroups: mod.configGroups,
+          configValues: { on: 'true' }
+        })}
+        selectedEnvironment="production"
+      />
+    );
+    expect(
+      screen.getByRole('button', { name: /Advanced \(1\)/ })
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /Advanced \(1\)/ }));
+    expect(screen.getByText('Rare')).toBeInTheDocument();
   });
 });
