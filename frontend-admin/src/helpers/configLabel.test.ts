@@ -145,4 +145,45 @@ describe('translateConfigGroup', () => {
       })
     ).toBe('From core bundle (group)');
   });
+
+  it('resolves a description via the desc part, falling back to the declared description', () => {
+    expect(
+      translateConfigGroup(
+        i18n.t,
+        'unknownmod',
+        {
+          key: 'oauth',
+          label: 'OAuth Providers',
+          description: 'Configure OAuth providers.'
+        },
+        'desc'
+      )
+    ).toBe('Configure OAuth providers.');
+  });
+
+  it("prefers the module's own namespace for a description", () => {
+    i18n.addResourceBundle(
+      'en',
+      'groupaddon',
+      {
+        config: {
+          groups: { oauth: { desc: 'From addon ns (group desc)' } }
+        }
+      },
+      true,
+      true
+    );
+    expect(
+      translateConfigGroup(
+        i18n.t,
+        'groupaddon',
+        {
+          key: 'oauth',
+          label: 'OAuth Providers',
+          description: 'Configure OAuth providers.'
+        },
+        'desc'
+      )
+    ).toBe('From addon ns (group desc)');
+  });
 });

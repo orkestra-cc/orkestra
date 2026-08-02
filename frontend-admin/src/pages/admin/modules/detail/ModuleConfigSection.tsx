@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useBlocker } from 'react-router';
-import { Alert, Button, Card, Modal, Nav, Spinner } from 'react-bootstrap';
+import { Alert, Button, Card, Col, Modal, Row, Spinner } from 'react-bootstrap';
 import { useTranslation } from 'react-i18next';
 import { OrkestraCardHeader } from 'components/common';
 import type {
@@ -12,8 +12,9 @@ import {
   useUpdateModuleEnvironmentMutation
 } from 'store/api/moduleApi';
 import ModuleConfigFields from '../ModuleConfigFields';
-import { buildGroupTree, isFieldVisible } from '../configModel';
-import { translateConfigGroup } from 'helpers/configLabel';
+import { buildGroupTree, flattenTree, isFieldVisible } from '../configModel';
+import ModuleConfigRail from './ModuleConfigRail';
+import ModuleConfigPanel from './ModuleConfigPanel';
 
 interface ModuleConfigSectionProps {
   module: ModuleConfig;
@@ -38,7 +39,7 @@ const ModuleConfigSection: React.FC<ModuleConfigSectionProps> = ({
   const [secretValues, setSecretValues] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
-  const [activeTab, setActiveTab] = useState('');
+  const [activeKey, setActiveKey] = useState('');
 
   // Track the initial loaded values for dirty detection.
   const [loadedValues, setLoadedValues] = useState<Record<string, string>>({});
@@ -69,16 +70,18 @@ const ModuleConfigSection: React.FC<ModuleConfigSectionProps> = ({
     () => buildGroupTree(schema, mod.configGroups),
     [schema, mod.configGroups]
   );
-  // Legacy heuristic (no declared groups): only show tabs once there are ≥2
-  // synthesized buckets — a single bucket would be a redundant one-tab rail.
-  // That threshold matched `bucketByGroup`'s caller and must keep matching
-  // it exactly (no module declares groups today, so this is the only branch
-  // any current module hits). A module that *does* declare configGroups
-  // opted into an explicit rail, so it always gets tabs, even a lone one —
-  // its single top-level node can still have nested children (rendered
-  // starting phase 3), which the legacy flat-bucket case never has.
-  const showTabs = groupTree.length >= 2 || Boolean(mod.configGroups?.length);
-  const currentTab = activeTab || groupTree[0]?.key || '';
+  // Legacy heuristic (no declared groups): only show the rail once there are
+  // ≥2 synthesized buckets — a single bucket would be a redundant one-entry
+  // rail. That threshold matched `bucketByGroup`'s caller and must keep
+  // matching it exactly (no module declares groups today, so this is the
+  // only branch any current module hits). A module that *does* declare
+  // configGroups opted into an explicit rail, so it always gets one, even a
+  // lone top-level entry — that entry can still have nested children, which
+  // the legacy flat-bucket case never has.
+  const showRail = groupTree.length >= 2 || Boolean(mod.configGroups?.length);
+  const flatNodes = useMemo(() => flattenTree(groupTree), [groupTree]);
+  const currentKey = activeKey || flatNodes[0]?.key || '';
+  const activeNode = flatNodes.find(node => node.key === currentKey);
 
   const secretStatus = envConfig?.secretStatus ?? mod.secretStatus ?? {};
 
@@ -240,39 +243,35 @@ const ModuleConfigSection: React.FC<ModuleConfigSectionProps> = ({
             </Alert>
           )}
 
-          {showTabs ? (
-            <>
-              {/*
-                Deliberately no `role="tablist"`: @restart/ui only wires the
-                ArrowLeft/ArrowRight handler (and the `aria-controls` /
-                `role="tabpanel"` pairing) inside a `<Tab.Container>`. On a
-                bare `<Nav>` the role buys `role="tab"` + `aria-selected` and
-                nothing else, while its roving tabIndex makes every inactive
-                header unreachable — strictly worse than the plain
-                `role="button"` links below. Phase 3 replaces this rail with a
-                vertical master-detail one, which is where the full tab
-                semantics belong.
-              */}
-              <Nav
-                variant="tabs"
-                activeKey={currentTab}
-                onSelect={k => setActiveTab(k || '')}
-                className="mb-3"
-              >
-                {groupTree.map(node => (
-                  <Nav.Item key={node.key}>
-                    <Nav.Link eventKey={node.key}>
-                      {translateConfigGroup(t, mod.moduleName, node)}
-                    </Nav.Link>
-                  </Nav.Item>
-                ))}
-              </Nav>
-              {groupTree.map(node =>
-                currentTab === node.key ? (
-                  <div key={node.key}>{renderFields(node.fieldKeys)}</div>
-                ) : null
-              )}
-            </>
+          {showRail && activeNode ? (
+            <Row className="g-3">
+              <Col md={4} lg={3}>
+                <ModuleConfigRail
+                  tree={groupTree}
+                  moduleName={mod.moduleName}
+                  activeKey={activeNode.key}
+                  onSelect={setActiveKey}
+                  statusFor={() => ({ unfilled: 0 })}
+                />
+              </Col>
+              <Col md={8} lg={9}>
+                <ModuleConfigPanel
+                  key={activeNode.key}
+                  node={activeNode}
+                  moduleName={mod.moduleName}
+                  schema={schema}
+                  configValues={configValues}
+                  secretValues={secretValues}
+                  secretStatus={secretStatus}
+                  onConfigChange={(key, value) =>
+                    setConfigValues(prev => ({ ...prev, [key]: value }))
+                  }
+                  onSecretChange={(key, value) =>
+                    setSecretValues(prev => ({ ...prev, [key]: value }))
+                  }
+                />
+              </Col>
+            </Row>
           ) : (
             renderFields()
           )}

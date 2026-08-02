@@ -124,6 +124,22 @@ export const buildGroupTree = (
 };
 
 /**
+ * Depth-first flattening, parents before their children. Used to resolve a
+ * `?section=` value against the tree and to pick the first selectable node.
+ */
+export const flattenTree = (tree: GroupNode[]): GroupNode[] => {
+  const out: GroupNode[] = [];
+  const walk = (nodes: GroupNode[]) => {
+    for (const n of nodes) {
+      out.push(n);
+      walk(n.children);
+    }
+  };
+  walk(tree);
+  return out;
+};
+
+/**
  * Whether a field should be rendered, given the module's current values.
  * AND across the field's conditions, OR within one condition's `in` list.
  * See `FieldCondition` in `store/api/moduleApi` for the matching contract this

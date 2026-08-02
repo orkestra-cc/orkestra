@@ -52,5 +52,12 @@ export const translateConfigField = (
 export const translateConfigGroup = (
   t: TFunction,
   moduleName: string,
-  group: { key: string; label: string }
-): string => resolve(t, moduleName, `groups.${group.key}.label`, group.label);
+  group: { key: string; label: string; description?: string },
+  part: 'label' | 'desc' = 'label'
+): string =>
+  resolve(
+    t,
+    moduleName,
+    `groups.${group.key}.${part}`,
+    part === 'label' ? group.label : group.description || ''
+  );

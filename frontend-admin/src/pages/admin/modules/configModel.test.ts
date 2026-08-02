@@ -4,7 +4,8 @@ import {
   buildGroupTree,
   isFieldVisible,
   visibleFields,
-  configCompleteness
+  configCompleteness,
+  flattenTree
 } from './configModel';
 
 const field = (over: Partial<ConfigField> & { key: string }): ConfigField => ({
@@ -183,6 +184,24 @@ describe('configCompleteness', () => {
 
   it('returns zeroes for a null schema', () => {
     expect(configCompleteness(null, {}, {})).toEqual({ filled: 0, total: 0 });
+  });
+});
+
+describe('flattenTree', () => {
+  it('returns parents before children, depth-first', () => {
+    const schema = [
+      field({ key: 'a', group: 'oauth' }),
+      field({ key: 'b', group: 'oauth.google' }),
+      field({ key: 'c', group: 'password' })
+    ];
+    const groups = [
+      { key: 'oauth', label: 'OAuth', order: 1 },
+      { key: 'oauth.google', label: 'Google', parent: 'oauth', order: 2 },
+      { key: 'password', label: 'Password', order: 3 }
+    ];
+    expect(flattenTree(buildGroupTree(schema, groups)).map(n => n.key)).toEqual(
+      ['oauth', 'oauth.google', 'password']
+    );
   });
 });
 

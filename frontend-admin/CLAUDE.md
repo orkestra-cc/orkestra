@@ -299,6 +299,7 @@ See [`../docs/archive/frontend-admin-i18n.md`](../docs/archive/frontend-admin-i1
 | Field label       | `<module>:config.fields.<fieldKey>.label` |
 | Field description | `<module>:config.fields.<fieldKey>.desc`  |
 | Group label       | `<module>:config.groups.<groupKey>.label` |
+| Group description | `<module>:config.groups.<groupKey>.desc`  |
 
 Resolution order per string (mirrors `helpers/navLabel.ts`): the addon's own namespace → the core bundle's `moduleConfig.<module>.{fields,groups}.…` → the literal `label` / `description` the backend sent. A key that is present but empty (`""`) counts as absent, so a blank translation can never blank a label, and an un-migrated addon keeps showing the backend's English rather than a raw key path. Core modules use the middle tier; an addon uses the first and **never** writes `moduleConfig.*` into the core bundle.
 

@@ -1933,6 +1933,18 @@
         "stay": "Resta",
         "leave": "Esci"
       },
+      "rail": {
+        "overview": "Panoramica",
+        "configuration": "Configurazione",
+        "module": "Modulo",
+        "dependencies": "Dipendenze",
+        "environments": "Ambienti",
+        "advancedToggle_one": "Avanzate ({{count}})",
+        "advancedToggle_other": "Avanzate ({{count}})",
+        "settingsCount_one": "{{count}} impostazione",
+        "settingsCount_other": "{{count}} impostazioni",
+        "incomplete": "{{count}} da compilare"
+      },
       "infraError": "errore: {{message}}",
       "infraRunning": "attivo",
       "infraStopped": "fermo",
