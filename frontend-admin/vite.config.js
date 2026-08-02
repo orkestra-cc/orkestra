@@ -234,11 +234,18 @@ export default ({ mode }) => {
       allowedHosts: (() => {
         const extra = (process.env.VITE_ALLOWED_HOSTS ?? '')
           .split(',')
-          .map((h) => h.trim())
+          .map(h => h.trim())
           .filter(Boolean);
         return extra.includes('*')
           ? true
-          : ['localhost', '127.0.0.1', '192.168.88.53', 'orkestra.cc', 'staging.orkestra.cc', ...extra];
+          : [
+              'localhost',
+              '127.0.0.1',
+              '192.168.88.53',
+              'orkestra.cc',
+              'staging.orkestra.cc',
+              ...extra
+            ];
       })(),
       hmr: process.env.VITE_HMR_HOST
         ? {
