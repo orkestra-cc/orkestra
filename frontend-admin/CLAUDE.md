@@ -292,6 +292,18 @@ See [`../docs/archive/frontend-admin-i18n.md`](../docs/archive/frontend-admin-i1
 
 **Addon translations (ADR-0007).** Core strings live in the monolithic `translation` namespace (`src/locales/{en,it}.json`). A fork's addon **must not** edit those files — it ships its own bundles under `src/pages/<name>/locales/{en,it}.json`, registered at boot as a dedicated i18next namespace named after the module via the manifest's `injectI18n` seam (mirrors `injectApi`; the `useModuleI18nInjection` hook in `App.tsx` does the registration, ungated by auth/enabled-state). Consume with `useTranslation('<name>')` / `t('<name>:key')`. Type augmentation and the EN/IT parity test live in the addon's own files (parity primitives are shared via `src/locales/parityCheck.ts`). See [`src/modules/_template/README.md`](src/modules/_template/README.md) step 6.5 for the author recipe.
 
+**Module config labels.** The `/admin/modules/<name>` settings form resolves every field and group label through `helpers/configLabel.ts`, so an addon translates its backend `configSchema` without the Go side shipping a redundant i18n field. Keys are derived from the backend's own stable `key`:
+
+| Target            | Key                                       |
+| ----------------- | ----------------------------------------- |
+| Field label       | `<module>:config.fields.<fieldKey>.label` |
+| Field description | `<module>:config.fields.<fieldKey>.desc`  |
+| Group label       | `<module>:config.groups.<groupKey>.label` |
+
+Resolution order per string (mirrors `helpers/navLabel.ts`): the addon's own namespace → the core bundle's `moduleConfig.<module>.{fields,groups}.…` → the literal `label` / `description` the backend sent. A key that is present but empty (`""`) counts as absent, so a blank translation can never blank a label, and an un-migrated addon keeps showing the backend's English rather than a raw key path. Core modules use the middle tier; an addon uses the first and **never** writes `moduleConfig.*` into the core bundle.
+
+Two changes here break a fork's addon pages on sync: `ModuleConfigFields` now takes a **required `moduleName` prop** (it selects the namespace above), and `src/pages/admin/modules/utils.ts` was deleted. Its `bucketByGroup` is superseded by `buildGroupTree` and its `configCompleteness` moved verbatim in name — both now live in `src/pages/admin/modules/configModel.ts`, with `configCompleteness` counting only fields currently visible under their `dependsOn` conditions.
+
 ## Conventions
 
 - **Cookie auth** — every fetch goes through RTK Query's `baseApi` which sets `credentials: 'include'`. Never call `fetch` directly with custom auth headers.

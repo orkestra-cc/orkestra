@@ -162,6 +162,24 @@ An addon **never** edits the core `src/locales/{en,it}.json`, `src/i18n-types.d.
 
 Rules: the namespace equals the manifest `name` (so addons never collide); never write keys into the core `translation` namespace; adding a brand-new **language** (e.g. `fr`) is a core change to `src/i18n.ts`, not an addon operation.
 
+**Module config labels.** The backend module's `configSchema` (and `configGroups`) render on `/admin/modules/<name>`, and `helpers/configLabel.ts` resolves each label through your namespace first — so translating the settings form is a bundle edit, no backend change. Keys derive from the backend's own `key`:
+
+```jsonc
+// src/pages/widgets/locales/en.json
+{
+  "config": {
+    "fields": {
+      "apiKey": { "label": "API key", "desc": "Issued in the vendor console." }
+    },
+    "groups": {
+      "credentials": { "label": "Credentials" }
+    }
+  }
+}
+```
+
+Resolution order is `<module>:config.…` → core `moduleConfig.<module>.…` → the literal `label` / `description` the backend sent, and an entry present but empty (`""`) is treated as absent — so a partially translated schema degrades to the backend's English, never to a raw key path.
+
 **Backend error codes.** To localize your addon's error codes, ship them as `errors.<rest>` inside your namespace bundle (e.g. `billing` code `billing.invoice_overdue` → key `errors.invoice_overdue`) and render with `helpers/resolveErrorMessage(err, fallback?)`, which tries `<module>:errors.<rest>` → core `errors.<code>` → the backend's English `detail`. No keys go into the core `errors.*`.
 
 ### 7. Verify

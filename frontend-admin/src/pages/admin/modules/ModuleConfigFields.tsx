@@ -49,10 +49,11 @@ export interface ModuleConfigFieldsProps {
 }
 
 /**
- * Dynamic form renderer for a backend module's `configSchema`. Shared by
- * the admin modules page (edit an arbitrary module) and the first-install
- * onboarding wizard (configure SMTP before any user exists). Handles all
- * four backend field types: string, int, bool, secret.
+ * Dynamic form renderer for a backend module's `configSchema`. Its one
+ * consumer is the admin module detail page's config section — the
+ * first-install wizard only reads a `smtpConfigured` boolean and never
+ * renders a schema. Handles all seven backend field types: string, bool,
+ * int, duration, secret, enum, stringList.
  */
 const ModuleConfigFields: React.FC<ModuleConfigFieldsProps> = ({
   schema,
@@ -92,7 +93,7 @@ const ModuleConfigFields: React.FC<ModuleConfigFieldsProps> = ({
           const revealed = revealedSecrets[key] || false;
           return (
             <Form.Group key={key} className="mb-3">
-              <Form.Label className="fs-10 fw-semibold">
+              <Form.Label className="fs-10 fw-semibold" htmlFor={`cfg-${key}`}>
                 {label}
                 {alreadySet && (
                   <span className="badge badge-subtle-success ms-2 fs-11">
@@ -102,6 +103,7 @@ const ModuleConfigFields: React.FC<ModuleConfigFieldsProps> = ({
               </Form.Label>
               <InputGroup size="sm">
                 <Form.Control
+                  id={`cfg-${key}`}
                   type={revealed ? 'text' : 'password'}
                   placeholder={
                     alreadySet
@@ -123,9 +125,7 @@ const ModuleConfigFields: React.FC<ModuleConfigFieldsProps> = ({
                   <FontAwesomeIcon icon={revealed ? faEyeSlash : faEye} />
                 </Button>
               </InputGroup>
-              {field.description && (
-                <Form.Text className="text-muted">{desc}</Form.Text>
-              )}
+              {desc && <Form.Text className="text-muted">{desc}</Form.Text>}
             </Form.Group>
           );
         }
@@ -144,6 +144,7 @@ const ModuleConfigFields: React.FC<ModuleConfigFieldsProps> = ({
           return (
             <Form.Group key={key} className="mb-3">
               <Form.Check
+                id={`cfg-${key}`}
                 type="switch"
                 label={label}
                 checked={effective === 'true'}
@@ -151,9 +152,7 @@ const ModuleConfigFields: React.FC<ModuleConfigFieldsProps> = ({
                   onConfigChange(key, e.target.checked ? 'true' : 'false')
                 }
               />
-              {field.description && (
-                <Form.Text className="text-muted">{desc}</Form.Text>
-              )}
+              {desc && <Form.Text className="text-muted">{desc}</Form.Text>}
             </Form.Group>
           );
         }
@@ -184,9 +183,7 @@ const ModuleConfigFields: React.FC<ModuleConfigFieldsProps> = ({
                   </option>
                 ))}
               </Form.Select>
-              {field.description && (
-                <Form.Text className="text-muted">{desc}</Form.Text>
-              )}
+              {desc && <Form.Text className="text-muted">{desc}</Form.Text>}
             </Form.Group>
           );
         }
@@ -224,6 +221,7 @@ const ModuleConfigFields: React.FC<ModuleConfigFieldsProps> = ({
                 rows={2}
                 size="sm"
                 placeholder={
+                  field.placeholder ||
                   field.default ||
                   t('adminModules.configFields.stringListPlaceholder')
                 }
@@ -271,7 +269,7 @@ const ModuleConfigFields: React.FC<ModuleConfigFieldsProps> = ({
               <Form.Text className="text-muted">
                 {t('adminModules.configFields.envPrefix')}
                 <code>{field.envVar}</code>
-                {field.description ? ` — ${desc}` : ''}
+                {desc ? ` — ${desc}` : ''}
               </Form.Text>
             )}
           </Form.Group>
