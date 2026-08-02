@@ -1930,6 +1930,8 @@
         "saveChanges": "Salva modifiche",
         "unsavedTitle": "Modifiche non salvate",
         "unsavedBody": "Hai modifiche di configurazione non salvate. Vuoi davvero uscire?",
+        "switchEnvBody": "Hai modifiche di configurazione non salvate. Passando a {{environment}} andranno perse.",
+        "switchEnvConfirm": "Ignora e cambia",
         "stay": "Resta",
         "leave": "Esci"
       },

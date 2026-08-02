@@ -116,7 +116,7 @@ const ModuleConfigRail: React.FC<ModuleConfigRailProps> = ({
     });
 
   return (
-    <Nav className="flex-column module-config-rail">
+    <Nav className="flex-column">
       {leadingItems?.map(renderItem)}
       {treeCaption && (
         <div className="fs-11 fw-semibold text-500 text-uppercase px-2 mt-3 mb-1">

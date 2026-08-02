@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { Route, Routes, useLocation } from 'react-router';
@@ -213,5 +213,104 @@ describe('ModuleDetailPage sections', () => {
     expect(
       screen.queryByRole('button', { name: 'Save Changes' })
     ).not.toBeInTheDocument();
+  });
+
+  it('reports a failed save made from a non-config section', async () => {
+    // The bar follows the operator everywhere once anything is dirty, so the
+    // alerts have to as well. Nested inside the config card, a save fired
+    // from Overview returned 400 and said nothing at all — the operator was
+    // left believing a config that never landed had been written.
+    const user = userEvent.setup();
+    server.use(
+      http.patch(url('/v1/admin/modules/:name/environments/:env'), () =>
+        HttpResponse.json({ detail: 'sandbox is read-only' }, { status: 400 })
+      )
+    );
+
+    renderAt('?section=password');
+    await user.type(await screen.findByLabelText('Minimum length'), '10');
+
+    // Away from the group the edit lives in, onto a panel that is not a form.
+    await user.click(screen.getByRole('button', { name: /Overview/ }));
+    expect(screen.queryByText('Minimum length')).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Save Changes' }));
+    expect(await screen.findByText('sandbox is read-only')).toBeInTheDocument();
+  });
+
+  it('confirms before an environment switch discards unsaved edits', async () => {
+    // Switching environment swaps the query arg behind the whole form and
+    // re-seeds it — useBlocker cannot see it, because nothing navigates. With
+    // edits now accumulating across the entire module, that silent discard
+    // has to be asked for.
+    const user = userEvent.setup();
+    renderAt('?section=password');
+    await user.type(await screen.findByLabelText('Minimum length'), '10');
+
+    await user.click(screen.getByRole('button', { name: /Environments/ }));
+    await user.click(screen.getByRole('button', { name: /sandbox/i }));
+
+    // Declining keeps both the environment and the edit.
+    expect(
+      await screen.findByText(/Switching to sandbox will discard them/)
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Stay' }));
+    await user.click(screen.getByRole('button', { name: 'Password Policy' }));
+    expect(screen.getByLabelText('Minimum length')).toHaveValue('10');
+
+    // Accepting is what actually drops it.
+    await user.click(screen.getByRole('button', { name: /Environments/ }));
+    await user.click(screen.getByRole('button', { name: /sandbox/i }));
+    await user.click(
+      await screen.findByRole('button', { name: 'Discard and switch' })
+    );
+    await user.click(screen.getByRole('button', { name: 'Password Policy' }));
+    expect(screen.getByLabelText('Minimum length')).toHaveValue('');
+  });
+
+  it('renders a fieldless parent group as links to its children, with no save bar', async () => {
+    // The shape phase 4 declares: `oauth` sits over `oauth.google` /
+    // `oauth.apple` and owns no fields itself. Rendering just a heading under
+    // a permanently-disabled Save is the exact "this panel is a form when it
+    // isn't" the save-bar gate exists to avoid.
+    const user = userEvent.setup();
+    stubAll({
+      ...demoModule,
+      configSchema: [
+        field({ key: 'clientId', label: 'Client ID', group: 'oauth.google' }),
+        field({ key: 'appleId', label: 'Apple ID', group: 'oauth.apple' }),
+        field({ key: 'minLen', label: 'Minimum length', group: 'password' })
+      ],
+      configGroups: [
+        { key: 'oauth', label: 'OAuth Providers', order: 1 },
+        { key: 'oauth.google', label: 'Google', parent: 'oauth', order: 2 },
+        { key: 'oauth.apple', label: 'Apple', parent: 'oauth', order: 3 },
+        { key: 'password', label: 'Password Policy', order: 4 }
+      ]
+    } as ModuleConfig);
+
+    renderAt('?section=oauth');
+    const heading = await screen.findByRole('heading', {
+      name: 'OAuth Providers'
+    });
+    expect(
+      screen.queryByRole('button', { name: 'Save Changes' })
+    ).not.toBeInTheDocument();
+
+    // Scoped to the panel card, so these are the panel's own links and not
+    // the rail entries of the same name sitting in the left column.
+    const panel = heading.closest('.card') as HTMLElement;
+    expect(
+      within(panel).getByRole('button', { name: 'Apple' })
+    ).toBeInTheDocument();
+    await user.click(within(panel).getByRole('button', { name: 'Google' }));
+
+    // Selecting a child moves the rail there — and that panel, having fields,
+    // does get a save bar.
+    expect(await screen.findByLabelText('Client ID')).toBeInTheDocument();
+    expect(currentSearch).toContain('section=oauth.google');
+    expect(
+      screen.getByRole('button', { name: 'Save Changes' })
+    ).toBeInTheDocument();
   });
 });

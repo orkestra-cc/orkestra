@@ -149,6 +149,7 @@ const ModuleConfigSection: React.FC<ModuleConfigSectionProps> = ({
                   control={form.control}
                   register={form.register}
                   secretStatus={secretStatus}
+                  onSelectGroup={setActiveKey}
                 />
               </Col>
             </Row>

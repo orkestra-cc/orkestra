@@ -42,6 +42,9 @@ const ModuleDetailPage: React.FC = () => {
   const { data: healthData } = useGetModulesHealthQuery();
 
   const [selectedEnv, setSelectedEnv] = useState<string | null>(null);
+  // The environment the operator asked for while unsaved edits were pending.
+  // Held here until they confirm — see `handleEnvSelect` below.
+  const [pendingEnv, setPendingEnv] = useState<string | null>(null);
   const [searchParams, setSearchParams] = useSearchParams();
 
   const activeEnv = mod?.activeEnvironment || 'production';
@@ -135,6 +138,32 @@ const ModuleDetailPage: React.FC = () => {
       dirtyCount > 0 && currentLocation.pathname !== nextLocation.pathname
   );
 
+  // Picking a different environment changes the query arg behind
+  // `useGetModuleEnvironmentQuery`, which lands a new `envConfig` and re-seeds
+  // the form — silently discarding every unsaved edit across every group.
+  // `useBlocker` cannot cover this: no navigation happens. With one form now
+  // spanning the whole module and the switcher a rail destination one click
+  // from a bar reading "12 unsaved changes", that discard has to be asked for.
+  const handleEnvSelect = (env: string) => {
+    if (env === currentEnv) return;
+    if (dirtyCount > 0) {
+      setPendingEnv(env);
+      return;
+    }
+    setSelectedEnv(env);
+  };
+
+  const confirmEnvSwitch = () => {
+    if (!pendingEnv) return;
+    // Discard explicitly rather than leaning on the re-seed effect to do it
+    // as a side effect: the operator just agreed to lose these edits, and
+    // this way they are gone even if the new environment's payload is
+    // already cached and lands with nothing for the effect to react to.
+    handleDiscard();
+    setSelectedEnv(pendingEnv);
+    setPendingEnv(null);
+  };
+
   if (!moduleName) return <Navigate to="/admin/modules" replace />;
   if (isLoading) {
     return (
@@ -170,6 +199,33 @@ const ModuleDetailPage: React.FC = () => {
     </Modal>
   );
 
+  const envSwitchModal = pendingEnv && (
+    <Modal show centered onHide={() => setPendingEnv(null)}>
+      <Modal.Header closeButton>
+        <Modal.Title className="fs-8">
+          {t('adminModules.detail.configCard.unsavedTitle')}
+        </Modal.Title>
+      </Modal.Header>
+      <Modal.Body className="fs-10">
+        {t('adminModules.detail.configCard.switchEnvBody', {
+          environment: pendingEnv
+        })}
+      </Modal.Body>
+      <Modal.Footer>
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={() => setPendingEnv(null)}
+        >
+          {t('adminModules.detail.configCard.stay')}
+        </Button>
+        <Button variant="danger" size="sm" onClick={confirmEnvSwitch}>
+          {t('adminModules.detail.configCard.switchEnvConfirm')}
+        </Button>
+      </Modal.Footer>
+    </Modal>
+  );
+
   if (!showRail) {
     // Today's stacked page, unchanged: header, KPIs, environment switcher,
     // the config card (with its own, decoupled rail if the legacy heuristic
@@ -180,6 +236,7 @@ const ModuleDetailPage: React.FC = () => {
     return (
       <>
         {blockerModal}
+        {envSwitchModal}
         <Row className="g-3">
           <Col xxl={12}>
             <ModuleDetailHeader module={mod} />
@@ -196,7 +253,7 @@ const ModuleDetailPage: React.FC = () => {
                 activeEnvironment={activeEnv}
                 availableEnvironments={environments}
                 selectedEnvironment={currentEnv}
-                onSelect={setSelectedEnv}
+                onSelect={handleEnvSelect}
               />
             )}
 
@@ -216,12 +273,20 @@ const ModuleDetailPage: React.FC = () => {
   }));
   // A permanently-disabled Save button under Overview/Dependencies/
   // Environments reads as "this panel is a form" when it isn't — only show
-  // the bar once there's something it can actually report or act on.
-  const showSaveBar = dirtyCount > 0 || errorCount > 0 || Boolean(activeNode);
+  // the bar once there's something it can actually report or act on. A
+  // declared parent group with no direct fields of its own (phase 4's `oauth`
+  // over `oauth.google`/`oauth.apple`/…) is exactly the same situation: its
+  // panel is a table of contents, not a form, so it is gated on the node
+  // owning fields rather than on merely being a config node.
+  const showSaveBar =
+    dirtyCount > 0 ||
+    errorCount > 0 ||
+    Boolean(activeNode && activeNode.fieldKeys.length > 0);
 
   return (
     <>
       {blockerModal}
+      {envSwitchModal}
 
       <ModuleDetailHeader module={mod} />
 
@@ -287,7 +352,7 @@ const ModuleDetailPage: React.FC = () => {
                   activeEnvironment={activeEnv}
                   availableEnvironments={environments}
                   selectedEnvironment={currentEnv}
-                  onSelect={setSelectedEnv}
+                  onSelect={handleEnvSelect}
                 />
               </Card.Body>
             </Card>
@@ -305,21 +370,6 @@ const ModuleDetailPage: React.FC = () => {
                 }
               />
               <Card.Body>
-                {saveError && (
-                  <Alert
-                    variant="danger"
-                    className="fs-10"
-                    dismissible
-                    onClose={clearError}
-                  >
-                    {saveError}
-                  </Alert>
-                )}
-                {success && (
-                  <Alert variant="success" className="fs-10">
-                    {t('adminModules.detail.configCard.saved')}
-                  </Alert>
-                )}
                 <div className="pb-4">
                   <ModuleConfigPanel
                     key={activeNode.key}
@@ -329,10 +379,33 @@ const ModuleDetailPage: React.FC = () => {
                     control={form.control}
                     register={form.register}
                     secretStatus={secretStatus}
+                    onSelectGroup={setActive}
                   />
                 </div>
               </Card.Body>
             </Card>
+          )}
+
+          {/* Deliberately outside the config card above: the save bar renders
+              whenever anything is dirty, from any section, so an operator who
+              edits a group, clicks Overview and then Save would otherwise get
+              no feedback at all — neither the 400 that lost their config nor
+              the confirmation that it landed. These belong to the bar, not to
+              the panel, and sit with it. */}
+          {saveError && (
+            <Alert
+              variant="danger"
+              className="fs-10"
+              dismissible
+              onClose={clearError}
+            >
+              {saveError}
+            </Alert>
+          )}
+          {success && (
+            <Alert variant="success" className="fs-10">
+              {t('adminModules.detail.configCard.saved')}
+            </Alert>
           )}
 
           {showSaveBar && (

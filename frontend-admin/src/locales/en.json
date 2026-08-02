@@ -1930,6 +1930,8 @@
         "saveChanges": "Save Changes",
         "unsavedTitle": "Unsaved Changes",
         "unsavedBody": "You have unsaved configuration changes. Are you sure you want to leave?",
+        "switchEnvBody": "You have unsaved configuration changes. Switching to {{environment}} will discard them.",
+        "switchEnvConfirm": "Discard and switch",
         "stay": "Stay",
         "leave": "Leave"
       },
