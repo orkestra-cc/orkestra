@@ -1809,7 +1809,10 @@
       "enumNonePlaceholder": "—",
       "stringListPlaceholder": "valori,separati,da,virgola",
       "requiredFeedback": "Questo campo è obbligatorio.",
-      "durationFeedback": "Inserisci una durata valida (es. 30s, 5m, 1h).",
+      "minFeedback": "Il minimo è {{min}}",
+      "maxFeedback": "Il massimo è {{max}}",
+      "patternFeedback": "Il valore non corrisponde al formato richiesto",
+      "durationFeedback": "Usa una durata Go — es. 30s, 15m, 1h30m, 500ms",
       "envPrefix": "Env: "
     },
     "aiModelsSection": {

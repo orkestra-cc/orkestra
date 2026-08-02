@@ -7,6 +7,27 @@ import type { ConfigField } from 'store/api/moduleApi';
 import { isFieldVisible } from './configModel';
 import { translateConfigField } from 'helpers/configLabel';
 
+/**
+ * Mirrors Go's time.ParseDuration: an optional sign, then one or more
+ * decimal-with-unit segments (ns, us/µs, ms, s, m, h). A bare zero is also
+ * valid. The previous `^\d+[smh]$` rejected 1h30m, 500ms and 1.5h — all of
+ * which the backend accepts, so the console was stricter than the contract.
+ */
+const DURATION_RE =
+  /^[+-]?0$|^[+-]?((\d+(\.\d*)?|\.\d+)(ns|us|µs|μs|ms|s|m|h))+$/;
+
+/** Compiles a schema-declared pattern, or null when it is not usable. */
+const safeRegExp = (pattern?: string): RegExp | null => {
+  if (!pattern) return null;
+  try {
+    return new RegExp(pattern);
+  } catch {
+    // The backend validator rejects an uncompilable pattern; if one still
+    // reaches here, skipping the check beats throwing inside a render.
+    return null;
+  }
+};
+
 export interface ModuleConfigFieldsProps {
   schema: ConfigField[];
   configValues: Record<string, string>;
@@ -142,11 +163,12 @@ const ModuleConfigFields: React.FC<ModuleConfigFieldsProps> = ({
           const options = field.options ?? [];
           return (
             <Form.Group key={key} className="mb-3">
-              <Form.Label className="fs-10 fw-semibold">
+              <Form.Label className="fs-10 fw-semibold" htmlFor={`cfg-${key}`}>
                 {label}
                 {field.required && <span className="text-danger ms-1">*</span>}
               </Form.Label>
               <Form.Select
+                id={`cfg-${key}`}
                 size="sm"
                 value={enumValue}
                 onChange={e => onConfigChange(key, e.target.value)}
@@ -172,19 +194,32 @@ const ModuleConfigFields: React.FC<ModuleConfigFieldsProps> = ({
         const value = configValues[key] || '';
         const isEmpty = field.required && !value;
         const isDurationInvalid =
-          field.type === 'duration' &&
-          value !== '' &&
-          !/^\d+[smh]$/.test(value);
+          field.type === 'duration' && value !== '' && !DURATION_RE.test(value);
+        const numeric = field.type === 'int' ? Number(value) : NaN;
+        const isBelowMin =
+          field.min !== undefined && value !== '' && numeric < field.min;
+        const isAboveMax =
+          field.max !== undefined && value !== '' && numeric > field.max;
+        const patternRe = safeRegExp(field.pattern);
+        const isPatternInvalid =
+          patternRe !== null && value !== '' && !patternRe.test(value);
+        const isInvalid =
+          isEmpty ||
+          isDurationInvalid ||
+          isBelowMin ||
+          isAboveMax ||
+          isPatternInvalid;
         const isStringList = field.type === 'stringList';
 
         return (
           <Form.Group key={key} className="mb-3">
-            <Form.Label className="fs-10 fw-semibold">
+            <Form.Label className="fs-10 fw-semibold" htmlFor={`cfg-${key}`}>
               {label}
               {field.required && <span className="text-danger ms-1">*</span>}
             </Form.Label>
             {isStringList ? (
               <Form.Control
+                id={`cfg-${key}`}
                 as="textarea"
                 rows={2}
                 size="sm"
@@ -194,16 +229,17 @@ const ModuleConfigFields: React.FC<ModuleConfigFieldsProps> = ({
                 }
                 value={value}
                 onChange={e => onConfigChange(key, e.target.value)}
-                isInvalid={isEmpty}
+                isInvalid={isInvalid}
               />
             ) : (
               <Form.Control
+                id={`cfg-${key}`}
                 type={field.type === 'int' ? 'number' : 'text'}
                 size="sm"
-                placeholder={field.default || ''}
+                placeholder={field.placeholder || field.default || ''}
                 value={value}
                 onChange={e => onConfigChange(key, e.target.value)}
-                isInvalid={isEmpty || isDurationInvalid}
+                isInvalid={isInvalid}
               />
             )}
             {isEmpty && (
@@ -214,6 +250,21 @@ const ModuleConfigFields: React.FC<ModuleConfigFieldsProps> = ({
             {isDurationInvalid && (
               <Form.Control.Feedback type="invalid">
                 {t('adminModules.configFields.durationFeedback')}
+              </Form.Control.Feedback>
+            )}
+            {isBelowMin && (
+              <Form.Control.Feedback type="invalid">
+                {t('adminModules.configFields.minFeedback', { min: field.min })}
+              </Form.Control.Feedback>
+            )}
+            {isAboveMax && (
+              <Form.Control.Feedback type="invalid">
+                {t('adminModules.configFields.maxFeedback', { max: field.max })}
+              </Form.Control.Feedback>
+            )}
+            {isPatternInvalid && (
+              <Form.Control.Feedback type="invalid">
+                {t('adminModules.configFields.patternFeedback')}
               </Form.Control.Feedback>
             )}
             {field.envVar && (

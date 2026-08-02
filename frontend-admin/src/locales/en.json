@@ -1809,7 +1809,10 @@
       "enumNonePlaceholder": "—",
       "stringListPlaceholder": "comma,separated,values",
       "requiredFeedback": "This field is required.",
-      "durationFeedback": "Enter a valid duration (e.g. 30s, 5m, 1h).",
+      "minFeedback": "Minimum is {{min}}",
+      "maxFeedback": "Maximum is {{max}}",
+      "patternFeedback": "Value does not match the required format",
+      "durationFeedback": "Use a Go duration — e.g. 30s, 15m, 1h30m, 500ms",
       "envPrefix": "Env: "
     },
     "aiModelsSection": {
