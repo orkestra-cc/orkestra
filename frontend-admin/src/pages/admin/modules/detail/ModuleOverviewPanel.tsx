@@ -11,7 +11,7 @@ import SubtleBadge from 'components/common/SubtleBadge';
 import type { ModuleConfig, ModuleHealthStatus } from 'store/api/moduleApi';
 import { configCompleteness } from '../configModel';
 
-interface ModuleDashboardCardsProps {
+interface ModuleOverviewPanelProps {
   module: ModuleConfig;
   health?: ModuleHealthStatus;
   allModules?: ModuleConfig[];
@@ -29,7 +29,7 @@ const formatRelativeTime = (dateStr: string): string => {
   return `${days}d ago`;
 };
 
-const ModuleDashboardCards: React.FC<ModuleDashboardCardsProps> = ({
+const ModuleOverviewPanel: React.FC<ModuleOverviewPanelProps> = ({
   module: mod,
   health,
   allModules
@@ -167,4 +167,4 @@ const ModuleDashboardCards: React.FC<ModuleDashboardCardsProps> = ({
   );
 };
 
-export default ModuleDashboardCards;
+export default ModuleOverviewPanel;

@@ -10,12 +10,35 @@ export interface ModuleConfigRailStatus {
   unfilled: number;
 }
 
+/** A plain, non-group rail entry — e.g. Overview, Dependencies, Environments. */
+export interface ModuleConfigRailItem {
+  key: string;
+  label: string;
+}
+
 export interface ModuleConfigRailProps {
   tree: GroupNode[];
   moduleName: string;
   activeKey: string;
   onSelect: (key: string) => void;
   statusFor: (node: GroupNode) => ModuleConfigRailStatus;
+  /**
+   * Non-config entries rendered before the tree (e.g. "Overview"). Omitted by
+   * the config-card-only caller (`ModuleConfigSection`), which renders just
+   * the tree with no captions — this keeps that usage byte-for-byte
+   * unchanged. The full-page rail (`detail/index.tsx`) passes it.
+   */
+  leadingItems?: ModuleConfigRailItem[];
+  /**
+   * Caption shown directly above the tree. Only meaningful alongside
+   * `leadingItems`/`trailingItems` — a caller that omits those has nothing
+   * to caption the tree against, so this has no effect on its own.
+   */
+  treeCaption?: string;
+  /** Caption shown above `trailingItems` (e.g. "Module"). */
+  trailingCaption?: string;
+  /** Non-config entries rendered after the tree (e.g. Dependencies, Environments). */
+  trailingItems?: ModuleConfigRailItem[];
 }
 
 /**
@@ -29,15 +52,40 @@ export interface ModuleConfigRailProps {
  * while making every inactive entry unreachable by keyboard. Each entry stays
  * a plain `role="button"` link (the `<Nav.Link>` default for an anchor
  * without `href`), reachable by sequential Tab.
+ *
+ * `leadingItems`/`treeCaption`/`trailingCaption`/`trailingItems` extend the
+ * same rail to span the whole module page (Task 4): Overview above the tree,
+ * a "Configuration" caption over it, then a "Module" caption over
+ * Dependencies/Environments. They render with the identical `Nav.Link`
+ * markup as a tree node — same `role="button"`, same `aria-current` — so the
+ * whole rail is one consistent, fully keyboard-reachable list.
  */
 const ModuleConfigRail: React.FC<ModuleConfigRailProps> = ({
   tree,
   moduleName,
   activeKey,
   onSelect,
-  statusFor
+  statusFor,
+  leadingItems,
+  treeCaption,
+  trailingCaption,
+  trailingItems
 }) => {
   const { t } = useTranslation();
+
+  const renderItem = (item: ModuleConfigRailItem): React.ReactNode => {
+    const isActive = item.key === activeKey;
+    return (
+      <Nav.Link
+        key={item.key}
+        active={isActive}
+        aria-current={isActive ? 'true' : undefined}
+        onClick={() => onSelect(item.key)}
+      >
+        {item.label}
+      </Nav.Link>
+    );
+  };
 
   const renderNodes = (nodes: GroupNode[]): React.ReactNode =>
     nodes.map(node => {
@@ -68,7 +116,21 @@ const ModuleConfigRail: React.FC<ModuleConfigRailProps> = ({
     });
 
   return (
-    <Nav className="flex-column module-config-rail">{renderNodes(tree)}</Nav>
+    <Nav className="flex-column module-config-rail">
+      {leadingItems?.map(renderItem)}
+      {treeCaption && (
+        <div className="fs-11 fw-semibold text-500 text-uppercase px-2 mt-3 mb-1">
+          {treeCaption}
+        </div>
+      )}
+      {renderNodes(tree)}
+      {trailingCaption && (
+        <div className="fs-11 fw-semibold text-500 text-uppercase px-2 mt-3 mb-1">
+          {trailingCaption}
+        </div>
+      )}
+      {trailingItems?.map(renderItem)}
+    </Nav>
   );
 };
 
