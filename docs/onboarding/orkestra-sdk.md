@@ -117,6 +117,7 @@ declared via a sub-interface the registry queries with a type assertion:
 | --- | --- |
 | `HasDisplayInfo` | `DisplayName()` + `Description()` shown in the admin UI |
 | `HasConfigSchema` | `ConfigSchema()` — admin-editable config fields (auto-seeded from env vars on first boot) |
+| `HasConfigGroups` | `ConfigGroups()` — presentation groups that give the admin settings page a sectioned rail instead of one flat form. Purely cosmetic; omit it and the form stays flat |
 | `HasCollections` | `Collections()` — MongoDB collections + indexes the registry auto-creates |
 | `HasNavItems` | `NavItems()` — entries added to the dynamic sidebar |
 | `HasPermissions` | `Permissions()` — declared into the authz catalog |
@@ -132,7 +133,7 @@ declared via a sub-interface the registry queries with a type assertion:
 | `HasInfraContainers` | `InfraContainers()` — Docker containers the registry brings up alongside your module (Memgraph, Hindsight) |
 | `HasPreflight` | `Preflight(ctx) error` — pre-Start validation that can refuse activation |
 
-You won't implement all 16. Most addons embed `BaseModule` (next
+You won't implement all 17. Most addons embed `BaseModule` (next
 section) and override only the ones they actually need.
 
 ### BaseModule — the ergonomic helper
@@ -145,7 +146,12 @@ type MyModule struct {
 ```
 
 `BaseModule` implements every sub-interface with a sensible default
-(empty slices, `nil` errors, `true` for `Enabled`). You override
+(empty slices, `nil` errors, `true` for `Enabled`) — **with one deliberate
+exception: `HasConfigGroups`**. Embedding `BaseModule` must not silently
+opt a module into the sectioned settings rail, because a module that
+declares groups is then expected to place every one of its fields in one;
+leaving `ConfigGroups()` unimplemented keeps the module on the flat-form
+path until it opts in by declaring the method itself. You override
 whichever methods you need; the registry sees the embedded defaults via
 type assertion for everything else. The 14 in-tree modules all use this
 pattern.
