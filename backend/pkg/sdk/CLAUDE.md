@@ -151,6 +151,16 @@ and run `cd backend && go mod tidy` (the `backend-deps` make target).
   is snapshotted into `module_configs` and refreshed by `RefreshMetadata` on
   every boot; `ConfigGroups()` is resolved live from the registry by the admin
   handler. Do not add `bson` tags to `ConfigGroup`.
+- **`ConfigField.Advanced` and `ConfigField.DependsOn` are honoured by the
+  operator console.** `Advanced: true` collapses a field behind an
+  "Advanced (N)" toggle on `/admin/modules/{name}`; `DependsOn`
+  (`[]FieldCondition{{Key, In}}`) hides a field until another field of the
+  *same* module matches — AND across entries, OR within one entry's `In` (see
+  the matching contract documented on `FieldCondition` in `types.go`: a
+  `FieldBool` target compares both sides via the `parseBool` rule, everything
+  else is case-insensitive, whitespace-trimmed string equality). Both ride on
+  the `configSchema` the admin handler already serializes, so an addon that
+  declares them gets the behavior with no frontend code to write.
 
 ## CI
 
