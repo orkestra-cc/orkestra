@@ -377,7 +377,7 @@ the whole reason that path exists.
 | - | ----- | ---- | ------ |
 | 1 | SDK contract: `ConfigGroup`, `ConfigGroupsOf`, `ConfigField` metadata, handler serialisation, schema-integrity test, `openapi-dump` | upstream | ✅ |
 | 2 | Frontend model layer: `configModel`, `configI18n`, declarative validation on the existing `useState` form — **no visual change** | upstream | ✅ |
-| 3 | Frontend layout: rail, panel, save bar, URL sync — **plus** the `ModuleConfigFields` migration to RHF + yup, which the cross-group save bar is what justifies (§4.3) | upstream | 🔴 |
+| 3 | Frontend layout: rail, panel, save bar, URL sync — **plus** the `ModuleConfigFields` migration to RHF + yup, which the cross-group save bar is what justifies (§4.3). Plan: [phase 3](module-config-ux-phase3-layout.md) | upstream | 🔴 |
 | 4 | Migrate `auth` (62 fields, OAuth tree, `dependsOn`) + EN/IT keys | upstream | 🔴 |
 | 5 | Migrate `notification` (+ `email.provider` → enum), `tenant`, `compliance` | upstream | 🔴 |
 | 6 | Delete `ModuleConfigModal`, ADR-0012, docs | upstream | 🔴 |
