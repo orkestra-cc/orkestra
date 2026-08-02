@@ -1,6 +1,6 @@
 # Module configuration UX — grouped schema + master-detail settings page
 
-**Status:** 🔴 Not started
+**Status:** 🟡 In progress
 
 Replaces the single-page module configuration form at `/admin/modules/:name` with a
 master-detail settings surface, and extends the SDK `ConfigField` contract so the
@@ -357,7 +357,7 @@ the whole reason that path exists.
 
 | # | Phase | Repo | Status |
 | - | ----- | ---- | ------ |
-| 1 | SDK contract: `ConfigGroup`, `ConfigGroupsOf`, `ConfigField` metadata, handler serialisation, schema-integrity test, `openapi-dump` | upstream | 🔴 |
+| 1 | SDK contract: `ConfigGroup`, `ConfigGroupsOf`, `ConfigField` metadata, handler serialisation, schema-integrity test, `openapi-dump` | upstream | ✅ |
 | 2 | Frontend model layer: `configModel`, `configI18n`, field renderer moved to RHF + yup — **no visual change** | upstream | 🔴 |
 | 3 | Frontend layout: rail, panel, save bar, URL sync | upstream | 🔴 |
 | 4 | Migrate `auth` (62 fields, OAuth tree, `dependsOn`) + EN/IT keys | upstream | 🔴 |

@@ -45,7 +45,7 @@ explicitly yet — the grep is the gate.
 
 | Package | Purpose | Stability |
 | --- | --- | --- |
-| `module/` | Module interface + 16 optional sub-interfaces, BaseModule, ModuleRegistry, ServiceRegistry, ConfigService, RouteInfo, RedisClient, secrets (AES-256-GCM helpers). The boot kernel. | Required surface frozen at v1 |
+| `module/` | Module interface + 16 optional sub-interfaces, BaseModule, ModuleRegistry, ServiceRegistry, ConfigService, RouteInfo, RedisClient, secrets (AES-256-GCM helpers), `ConfigGroup`, `HasConfigGroups`. The boot kernel. | Required surface frozen at v1 |
 | `iface/` | Cross-module interfaces (UserProvider, TenantProvider, AuthzProvider, NotificationSender, JWTProvider, PDFProvider, AIModelProvider, RAGQueryProvider, AuditSink, SessionTerminator, BillingTenantProvider, PaymentProvider, …) + their DTOs (User, OAuthLink, Tenant, NotificationRequest, …). | Additive-only |
 | `ctxauth/` | Request-context getters: `GetUserUUID`, `GetTenantID`, `GetTenantRoles`, `GetClientIP`, `IsImpersonating`, `TenantKindFromContext`. Plus the exported `Key*` string constants the backend AuthMiddleware writes against. | Frozen |
 | `modulegate/` | `ModuleGate(checker, name)` HTTP middleware (503 when disabled) + `ModuleEnabledChecker` interface. | Frozen |
@@ -147,6 +147,10 @@ and run `cd backend && go mod tidy` (the `backend-deps` make target).
   `cmd/server/catalog.go::coreModules` for the closure-capture pattern.
   Addons should never need this; if you reach for it, write an iface
   contract instead.
+- **Config groups are presentation-only and never persisted.** `ConfigSchema`
+  is snapshotted into `module_configs` and refreshed by `RefreshMetadata` on
+  every boot; `ConfigGroups()` is resolved live from the registry by the admin
+  handler. Do not add `bson` tags to `ConfigGroup`.
 
 ## CI
 

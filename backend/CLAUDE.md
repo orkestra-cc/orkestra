@@ -86,6 +86,9 @@ Each module follows: `module.go` → `handlers/` → `services/` → `repository
 3. Declare `Collections()` for auto-created MongoDB collections + indexes
 4. Declare `NavItems()` for sidebar entries (group, icon, path, minRole)
 5. Declare `ConfigSchema()` for admin-configurable fields
+5b. Optionally declare `ConfigGroups()` to give the admin settings page a
+    sectioned rail instead of one flat form. Omit it and the form stays flat —
+    that is a supported end state, not a gap.
 6. Declare `Dependencies()` if your module needs other modules to init first
 7. Use `shared/iface` interfaces for cross-module deps — add new interfaces there if needed
 8. Use `deps.Services.Register(key, impl)` to expose services to other modules
