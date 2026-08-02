@@ -126,3 +126,32 @@ func TestConfigField_MetadataTagsRoundTrip(t *testing.T) {
 			back.Pattern, back.Placeholder, back.HelpURL)
 	}
 }
+
+func TestModuleConfigResponse_SerialisesConfigGroups(t *testing.T) {
+	resp := ModuleConfigResponse{
+		ModuleName:   "auth",
+		ConfigGroups: []ConfigGroup{{Key: "oauth", Label: "OAuth Providers", Order: 5}},
+	}
+	raw, err := json.Marshal(resp)
+	if err != nil {
+		t.Fatalf("Marshal = %v", err)
+	}
+	got := string(raw)
+	for _, want := range []string{`"configGroups"`, `"key":"oauth"`, `"order":5`} {
+		if !strings.Contains(got, want) {
+			t.Errorf("payload %s missing %s", got, want)
+		}
+	}
+}
+
+func TestModuleConfigResponse_OmitsEmptyConfigGroups(t *testing.T) {
+	// A module without groups must not ship an empty key — the frontend
+	// treats "absent" as the flat-form degradation path.
+	raw, err := json.Marshal(ModuleConfigResponse{ModuleName: "compliance"})
+	if err != nil {
+		t.Fatalf("Marshal = %v", err)
+	}
+	if strings.Contains(string(raw), "configGroups") {
+		t.Errorf("payload %s should omit configGroups when empty", raw)
+	}
+}

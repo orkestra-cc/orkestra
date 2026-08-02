@@ -1147,11 +1147,45 @@
         ],
         "type": "object"
       },
+      "Condition": {
+        "additionalProperties": false,
+        "properties": {
+          "in": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "key": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "in"
+        ],
+        "type": "object"
+      },
       "ConfigField": {
         "additionalProperties": false,
         "properties": {
+          "advanced": {
+            "type": "boolean"
+          },
           "default": {
             "type": "string"
+          },
+          "dependsOn": {
+            "items": {
+              "$ref": "#/components/schemas/Condition"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
           },
           "description": {
             "type": "string"
@@ -1162,11 +1196,22 @@
           "group": {
             "type": "string"
           },
+          "helpUrl": {
+            "type": "string"
+          },
           "key": {
             "type": "string"
           },
           "label": {
             "type": "string"
+          },
+          "max": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "min": {
+            "format": "int64",
+            "type": "integer"
           },
           "options": {
             "items": {
@@ -1176,6 +1221,12 @@
               "array",
               "null"
             ]
+          },
+          "pattern": {
+            "type": "string"
+          },
+          "placeholder": {
+            "type": "string"
           },
           "required": {
             "type": "boolean"
@@ -1189,6 +1240,35 @@
           "label",
           "type",
           "required"
+        ],
+        "type": "object"
+      },
+      "ConfigGroup": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "icon": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "order": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "parent": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "label"
         ],
         "type": "object"
       },
@@ -3414,6 +3494,15 @@
           },
           "category": {
             "type": "string"
+          },
+          "configGroups": {
+            "items": {
+              "$ref": "#/components/schemas/ConfigGroup"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
           },
           "configSchema": {
             "items": {
