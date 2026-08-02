@@ -1162,10 +1162,14 @@ describe('duration validation', () => {
     }
   );
 
-  it.each(['30 s', 'abc', '15x', ''])('rejects %s', value => {
-    if (value === '') return; // empty is "unset", not invalid
+  it.each(['30 s', 'abc', '15x', '1h30', 'ms'])('rejects %s', value => {
     render(schema, { ttl: value });
     expect(screen.getByLabelText('TTL')).toHaveClass('is-invalid');
+  });
+
+  it('treats an empty value as unset, not invalid', () => {
+    render(schema, { ttl: '' });
+    expect(screen.getByLabelText('TTL')).not.toHaveClass('is-invalid');
   });
 });
 
