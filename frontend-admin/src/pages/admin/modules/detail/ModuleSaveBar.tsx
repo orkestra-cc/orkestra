@@ -18,9 +18,23 @@ export interface ModuleSaveBarErrorGroup extends ModuleSaveBarGroupCount {
 export interface ModuleSaveBarProps {
   /** Total unsaved, visible fields across every group — what a per-card form could never report. */
   dirtyCount: number;
-  /** Non-zero groups only, in rail order. */
+  /**
+   * Non-zero groups only, in rail order. Empty when there is no rail to
+   * navigate — a per-group chip would just restate `dirtyCount`.
+   */
   perGroup: ModuleSaveBarGroupCount[];
-  /** Non-zero groups only, in rail order, each wired to jump the rail there. */
+  /**
+   * Total invalid, visible fields — independent of `errors` below, so the
+   * aggregate "N fields need attention" message still renders even when
+   * there's no rail to break it down by group.
+   */
+  errorCount: number;
+  /**
+   * Non-zero groups only, in rail order, each wired to jump the rail there.
+   * Empty when there is no rail — a "Go to <group>" button would have
+   * nowhere useful to navigate, since the field is already the only thing
+   * on screen.
+   */
   errors: ModuleSaveBarErrorGroup[];
   saving: boolean;
   onDiscard: () => void;
@@ -38,13 +52,13 @@ export interface ModuleSaveBarProps {
 const ModuleSaveBar: React.FC<ModuleSaveBarProps> = ({
   dirtyCount,
   perGroup,
+  errorCount,
   errors,
   saving,
   onDiscard,
   onSave
 }) => {
   const { t } = useTranslation();
-  const errorFieldCount = errors.reduce((sum, group) => sum + group.count, 0);
 
   return (
     <div className="module-save-bar d-flex flex-wrap align-items-center justify-content-between gap-2 px-3 py-2 mt-3">
@@ -64,11 +78,9 @@ const ModuleSaveBar: React.FC<ModuleSaveBarProps> = ({
             ))}
           </>
         )}
-        {errorFieldCount > 0 && (
+        {errorCount > 0 && (
           <span className="text-danger fw-semibold ms-md-2">
-            {t('adminModules.detail.saveBar.errors', {
-              count: errorFieldCount
-            })}
+            {t('adminModules.detail.saveBar.errors', { count: errorCount })}
           </span>
         )}
         {errors.map(group => (

@@ -97,7 +97,7 @@ const ModuleConfigSection: React.FC<ModuleConfigSectionProps> = ({
   // different group than the one currently on screen) and for the save
   // bar's cross-group aggregation below.
   const values = useWatch({ control: form.control }) as ConfigFormValues;
-  const { errors, isDirty, dirtyFields } = form.formState;
+  const { errors, dirtyFields } = form.formState;
 
   // Deliberately NOT useMemo here: react-hook-form mutates its `errors`
   // object in place (same reference across renders even as its content
@@ -121,30 +121,54 @@ const ModuleConfigSection: React.FC<ModuleConfigSectionProps> = ({
   // Every field belongs to exactly one node's `fieldKeys` (buildGroupTree
   // assigns by exact `group` match, never to an ancestor), so summing per
   // node reproduces the total with no double-counting.
-  const perGroup = flatNodes
-    .map(node => ({
-      key: node.key,
-      label: translateConfigGroup(t, mod.moduleName, node),
-      count: node.fieldKeys.filter(k => dirtyKeys.has(k)).length
-    }))
-    .filter(g => g.count > 0);
+  //
+  // Both breakdowns are gated on `showRail`: with a single implicit bucket
+  // (the flat/legacy form), a per-group chip only restates the aggregate
+  // count already shown, and a "Go to <group>" button has nowhere useful to
+  // navigate — the field it points at is already the only thing on screen.
+  // The aggregate counts themselves (`dirtyCount`/`errorCount` below) are
+  // NOT gated — they're the real, always-useful signal either way.
+  const perGroup = showRail
+    ? flatNodes
+        .map(node => ({
+          key: node.key,
+          label: translateConfigGroup(t, mod.moduleName, node),
+          count: node.fieldKeys.filter(k => dirtyKeys.has(k)).length
+        }))
+        .filter(g => g.count > 0)
+    : [];
 
-  const saveBarErrors = flatNodes
-    .map(node => ({
-      key: node.key,
-      label: translateConfigGroup(t, mod.moduleName, node),
-      count: node.fieldKeys.filter(k => errorKeys.has(k)).length
-    }))
-    .filter(g => g.count > 0)
-    .map(g => ({ ...g, onSelect: () => setActiveKey(g.key) }));
+  const saveBarErrors = showRail
+    ? flatNodes
+        .map(node => ({
+          key: node.key,
+          label: translateConfigGroup(t, mod.moduleName, node),
+          count: node.fieldKeys.filter(k => errorKeys.has(k)).length
+        }))
+        .filter(g => g.count > 0)
+        .map(g => ({ ...g, onSelect: () => setActiveKey(g.key) }))
+    : [];
 
   const dirtyCount = dirtyKeys.size;
+  const errorCount = errorKeys.size;
 
-  const onSave = form.handleSubmit(async formValues => {
+  const onSave = async () => {
+    const formValues = form.getValues();
     const { config, secrets } = collectDiff(schema, formValues, defaults);
-    if (Object.keys(config).length === 0 && Object.keys(secrets).length === 0) {
-      return;
-    }
+    const keysBeingSaved = [...Object.keys(config), ...Object.keys(secrets)];
+    if (keysBeingSaved.length === 0) return;
+
+    // Validate only the fields actually being sent, not the whole form.
+    // The backend itself accepts a stored '' on a required field
+    // (`UpdateConfig` writes `configValues[key] || ''`), `buildDefaults`
+    // documents it, and `configCompleteness` exists specifically to
+    // *report* that state — so a module can legitimately hold an empty
+    // required field elsewhere, and blocking every save on whole-form
+    // validity would strand an operator editing something unrelated behind
+    // a field they can't even see, with no way to unblock themselves short
+    // of fixing someone else's incomplete setup.
+    const valid = await form.trigger(keysBeingSaved);
+    if (!valid) return;
 
     setError(null);
     setSuccess(false);
@@ -158,11 +182,19 @@ const ModuleConfigSection: React.FC<ModuleConfigSectionProps> = ({
       }).unwrap();
 
       // Clears the bar immediately instead of waiting on the invalidated
-      // query to refetch. Secret fields go along for the ride here (they
-      // hold whatever the operator just typed) but the effect above will
-      // collapse them back to '' the moment the refetch lands, matching
-      // buildDefaults' "a secret always starts empty" rule.
-      form.reset(formValues);
+      // query to refetch. Secret keys are forced back to '' here rather
+      // than resetting with the raw submitted values — otherwise the
+      // plaintext secret the operator just typed would sit in the password
+      // input until the refetch lands, and a save in that window would
+      // read it as a fresh (already-saved) edit and re-send it, matching
+      // buildDefaults' "a secret always starts empty" rule synchronously
+      // instead of waiting on the network.
+      const secretKeys = schema
+        .filter(f => f.type === 'secret')
+        .map(f => f.key);
+      const resetValues: ConfigFormValues = { ...formValues };
+      for (const key of secretKeys) resetValues[key] = '';
+      form.reset(resetValues);
       setSuccess(true);
       setTimeout(() => setSuccess(false), 3000);
     } catch (err: unknown) {
@@ -175,7 +207,7 @@ const ModuleConfigSection: React.FC<ModuleConfigSectionProps> = ({
           : t('adminModules.detail.configCard.updateFailed');
       setError(message);
     }
-  });
+  };
 
   const handleDiscard = () => {
     form.reset(defaults);
@@ -183,8 +215,13 @@ const ModuleConfigSection: React.FC<ModuleConfigSectionProps> = ({
     setSuccess(false);
   };
 
-  // Block navigation when there are unsaved changes.
-  const blocker = useBlocker(isDirty);
+  // Block navigation when there are unsaved *visible* changes — the same
+  // count the save bar reports. Whole-form `formState.isDirty` includes
+  // fields hidden by `dependsOn`; an operator who edits a conditional field
+  // and then reverts the toggle that hides it again would otherwise still
+  // trip the blocker with no on-page way to clear it (Discard doesn't even
+  // render once `dirtyCount` is back to 0).
+  const blocker = useBlocker(dirtyCount > 0);
 
   if (schema.length === 0) {
     return (
@@ -302,6 +339,7 @@ const ModuleConfigSection: React.FC<ModuleConfigSectionProps> = ({
           <ModuleSaveBar
             dirtyCount={dirtyCount}
             perGroup={perGroup}
+            errorCount={errorCount}
             errors={saveBarErrors}
             saving={saving}
             onDiscard={handleDiscard}

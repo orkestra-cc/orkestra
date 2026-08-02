@@ -1,19 +1,18 @@
 import { describe, it, expect, vi } from 'vitest';
-import { screen } from '@testing-library/react';
+import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { http, HttpResponse } from 'msw';
+import { server } from 'test/server';
+import { url } from 'test/handlers';
 import { renderWithProviders } from 'test/render';
 import type { ConfigField, ModuleConfig } from 'store/api/moduleApi';
 import ModuleConfigSection from './ModuleConfigSection';
 
 // The `availableEnvironments` fixtures below are all empty, which skips
 // useGetModuleEnvironmentQuery (see ModuleConfigSection.tsx) — no HTTP
-// request fires, so no MSW handler (and no `server`/`msw` import) is
-// needed here. If a future fixture sets availableEnvironments, add:
-//   import { http, HttpResponse } from 'msw';
-//   import { server } from 'test/server';
-//   server.use(http.get('*/v1/admin/modules/:name/environments/:env', () =>
-//     HttpResponse.json({ environment: 'production', configValues: {}, secretStatus: {}, updatedAt: '' })
-//   ));
+// request fires for it, so no MSW handler is needed for that GET in most of
+// these tests. The one test that actually clicks Save still needs a handler
+// for the PATCH mutation, which fires regardless of `skip` — see that test.
 
 // ModuleConfigSection calls useBlocker to guard unsaved-changes navigation.
 // useBlocker requires a *data* router (createBrowserRouter/createMemoryRouter
@@ -336,5 +335,116 @@ describe('ModuleConfigSection', () => {
     const link = await screen.findByRole('button', { name: /Go to Group One/ });
     await user.click(link);
     expect(screen.getByLabelText('Count')).toBeInTheDocument();
+  });
+
+  it('saves only the fields being edited, leaving an unrelated stored-empty required field alone', async () => {
+    const user = userEvent.setup();
+    // 'req' is required and already stored empty — the backend allows this
+    // (UpdateConfig writes '' for a cleared field) and configCompleteness
+    // exists to *report* that state, not to make the rest of the module
+    // unsavable until someone fills it in.
+    const mod = moduleWith(
+      [
+        field({ key: 'req', label: 'Required A', required: true, group: 'g1' }),
+        field({ key: 'b', label: 'Beta', group: 'g2' })
+      ],
+      {
+        configValues: { req: '', b: 'old' },
+        configGroups: [
+          { key: 'g1', label: 'Group One', order: 1 },
+          { key: 'g2', label: 'Group Two', order: 2 }
+        ]
+      }
+    );
+
+    let capturedBody: unknown = null;
+    server.use(
+      http.patch(
+        url('/v1/admin/modules/:name/environments/:env'),
+        async ({ request }) => {
+          capturedBody = await request.json();
+          return HttpResponse.json({
+            environment: 'production',
+            configValues: { req: '', b: 'new' },
+            secretStatus: {},
+            updatedAt: ''
+          });
+        }
+      )
+    );
+
+    renderWithProviders(
+      <ModuleConfigSection module={mod} selectedEnvironment="production" />
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Group Two' }));
+    await user.clear(screen.getByLabelText('Beta'));
+    await user.type(screen.getByLabelText('Beta'), 'new');
+    await user.click(screen.getByRole('button', { name: 'Save Changes' }));
+
+    // Only the edited key travels — 'req' never got touched, so it's never
+    // validated and never sent, even though it would fail its own
+    // `required` rule if it were.
+    await waitFor(() => expect(capturedBody).not.toBeNull());
+    expect(capturedBody).toEqual({ config: { b: 'new' } });
+  });
+
+  it('clears a typed secret from the form immediately after a successful save', async () => {
+    const user = userEvent.setup();
+    const mod = moduleWith([
+      field({ key: 's', label: 'API Key', type: 'secret' })
+    ]);
+
+    server.use(
+      http.patch(url('/v1/admin/modules/:name/environments/:env'), async () =>
+        HttpResponse.json({
+          environment: 'production',
+          configValues: {},
+          secretStatus: { s: true },
+          updatedAt: ''
+        })
+      )
+    );
+
+    renderWithProviders(
+      <ModuleConfigSection module={mod} selectedEnvironment="production" />
+    );
+
+    await user.type(screen.getByLabelText('API Key'), 'sekret');
+    await user.click(screen.getByRole('button', { name: 'Save Changes' }));
+
+    // Cleared synchronously off the mutation's own success — not left
+    // showing plaintext in the DOM until the invalidated query refetches.
+    await waitFor(() =>
+      expect(screen.getByLabelText('API Key')).toHaveValue('')
+    );
+  });
+
+  it('shows the aggregate error count but no dead "Go to" button or group chip on the flat degradation path', async () => {
+    const user = userEvent.setup();
+    // No configGroups and a single ungrouped field — the same shape as
+    // "keeps the true flat form when there is only one settings bucket"
+    // above, so `showRail` is false here too.
+    const mod = moduleWith([
+      field({ key: 'n', label: 'Count', type: 'int', min: 8 })
+    ]);
+    renderWithProviders(
+      <ModuleConfigSection module={mod} selectedEnvironment="production" />
+    );
+
+    await user.clear(screen.getByLabelText('Count'));
+    await user.type(screen.getByLabelText('Count'), '3');
+
+    // The aggregate message is still useful...
+    expect(
+      await screen.findByText(/1 field needs attention/)
+    ).toBeInTheDocument();
+    // ...but with one implicit bucket, a per-group chip only restates it,
+    // and a "Go to <group>" button has nowhere to navigate — the field is
+    // already the only thing on screen.
+    expect(
+      screen.queryByRole('button', { name: /Go to/ })
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText(/General \(/)).not.toBeInTheDocument();
   });
 });

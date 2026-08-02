@@ -13,5 +13,9 @@
   z-index: 5;
   background-color: var(--#{$prefix}card-bg);
   border-top: var(--#{$prefix}border-width) solid var(--#{$prefix}border-color);
-  box-shadow: var(--#{$prefix}box-shadow);
+  // No box-shadow: Bootstrap's `$box-shadow` is a *downward* shadow
+  // (`0 .5rem 1rem`) — invisible on a bar pinned to the bottom of the
+  // viewport, and it would only double up on the shadow the enclosing
+  // `.card` already casts. The border-top alone is enough separation from
+  // the scrolling content above it.
 }
