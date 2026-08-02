@@ -126,6 +126,15 @@ func PrintDevelopmentWarning(environment string) {
 		hstsLine = "║   • HSTS header is disabled                                                   ║"
 	}
 
+	// The dev-token endpoint is gated on IsProductionLike, so staging does
+	// NOT expose it. A banner that claims otherwise is worse than no
+	// banner: it invites an operator to go looking for a backdoor that
+	// isn't there, and it understates staging's actual posture.
+	devTokenLine := "║   • Dev token endpoints are enabled (/dev/token)                              ║"
+	if isStaging {
+		devTokenLine = "║   • Dev token endpoints are DISABLED (staging is production-like)             ║"
+	}
+
 	warning := `
 ╔═══════════════════════════════════════════════════════════════════════════════╗
 ║                                                                               ║
@@ -141,7 +150,7 @@ func PrintDevelopmentWarning(environment string) {
 ║   Environment: %-12s                                                       ║
 ║                                                                               ║
 ║   The following security features are RELAXED:                                ║
-║   • Dev token endpoints are enabled (/dev/token)                              ║
+%s
 ║   • Verbose error messages are shown                                          ║
 ║   • Localhost OAuth redirects are allowed                                     ║
 %s
@@ -151,5 +160,5 @@ func PrintDevelopmentWarning(environment string) {
 ║                                                                               ║
 ╚═══════════════════════════════════════════════════════════════════════════════╝
 `
-	fmt.Printf(warning, environment, hstsLine)
+	fmt.Printf(warning, environment, devTokenLine, hstsLine)
 }
