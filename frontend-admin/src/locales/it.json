@@ -1812,19 +1812,6 @@
       "durationFeedback": "Inserisci una durata valida (es. 30s, 5m, 1h).",
       "envPrefix": "Env: "
     },
-    "configModal": {
-      "moduleNameSuffix": "({{name}})",
-      "updateFailed": "Aggiornamento non riuscito",
-      "updatedToast": "Modulo aggiornato con successo",
-      "enabledLabel": "Abilitato",
-      "disabledLabel": "Disabilitato",
-      "coreLockHint": "I moduli core non possono essere disabilitati",
-      "initErrorPrefix": "Errore di init:",
-      "configHeading": "Configurazione",
-      "dependsOnPrefix": "Dipendenze:",
-      "cancel": "Annulla",
-      "save": "Salva modifiche"
-    },
     "aiModelsSection": {
       "title": "Configurazione Provider AI",
       "unsavedTitle": "Modifiche non salvate",

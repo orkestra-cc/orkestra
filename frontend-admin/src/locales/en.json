@@ -1812,19 +1812,6 @@
       "durationFeedback": "Enter a valid duration (e.g. 30s, 5m, 1h).",
       "envPrefix": "Env: "
     },
-    "configModal": {
-      "moduleNameSuffix": "({{name}})",
-      "updateFailed": "Update failed",
-      "updatedToast": "Module updated successfully",
-      "enabledLabel": "Enabled",
-      "disabledLabel": "Disabled",
-      "coreLockHint": "Core modules cannot be disabled",
-      "initErrorPrefix": "Init Error:",
-      "configHeading": "Configuration",
-      "dependsOnPrefix": "Dependencies:",
-      "cancel": "Cancel",
-      "save": "Save Changes"
-    },
     "aiModelsSection": {
       "title": "AI Provider Configuration",
       "unsavedTitle": "Unsaved Changes",

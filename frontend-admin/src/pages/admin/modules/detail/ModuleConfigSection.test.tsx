@@ -80,6 +80,28 @@ describe('ModuleConfigSection', () => {
     expect(screen.getByText('Alpha')).toBeInTheDocument();
   });
 
+  it('keeps every tab keyboard-reachable, including the inactive one', () => {
+    // role="tablist" makes @restart/ui apply roving tabIndex=-1 to every
+    // inactive Nav.Link — correct only when paired with the arrow-key
+    // handler Nav.js wires up inside a <Tab.Container>. This is a bare
+    // <Nav>, so without an explicit tabIndex the inactive tab becomes
+    // unreachable by keyboard/screen-reader (no sequential Tab, no arrow
+    // keys). Regression guard for that: every tab header must stay at
+    // tabIndex 0, not just the active one.
+    const mod = moduleWith([
+      field({ key: 'a', label: 'Alpha', group: 'Google' }),
+      field({ key: 'b', label: 'Beta', group: 'Apple' })
+    ]);
+    renderWithProviders(
+      <ModuleConfigSection module={mod} selectedEnvironment="production" />
+    );
+    const tabs = screen.getAllByRole('tab');
+    expect(tabs).toHaveLength(2);
+    for (const tab of tabs) {
+      expect(tab.tabIndex).toBe(0);
+    }
+  });
+
   it('hides a field whose condition is unmet and shows it once met', () => {
     const schema = [
       field({ key: 'on', label: 'Enabled', type: 'bool', default: 'false' }),
