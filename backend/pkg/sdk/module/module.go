@@ -60,6 +60,13 @@ type HasConfigSchema interface {
 	ConfigSchema() []ConfigField
 }
 
+// HasConfigGroups lets a module declare presentation groups for the fields
+// in its ConfigSchema. Purely cosmetic: a module that omits it renders a
+// flat form, which is the degradation path every un-migrated addon takes.
+type HasConfigGroups interface {
+	ConfigGroups() []ConfigGroup
+}
+
 // HasCollections lets a module declare the MongoDB collections it owns.
 // The registry auto-creates them with the requested indexes on boot.
 type HasCollections interface {
@@ -357,6 +364,14 @@ func ProvidedServicesOf(m Module) []ServiceKey {
 func RequiredServicesOf(m Module) []ServiceKey {
 	if s, ok := m.(HasServiceContracts); ok {
 		return s.RequiredServices()
+	}
+	return nil
+}
+
+// ConfigGroupsOf returns the presentation groups m declares, or nil.
+func ConfigGroupsOf(m Module) []ConfigGroup {
+	if g, ok := m.(HasConfigGroups); ok {
+		return g.ConfigGroups()
 	}
 	return nil
 }
