@@ -86,22 +86,27 @@ already does for `RequiredServicesOf(m)`. `RefreshMetadata` is untouched.
 
 ```go
 type FieldCondition struct {
-    Key string   `json:"key"`  // another field key of the SAME module
-    In  []string `json:"in"`   // satisfying values
+    Key string   `json:"key" bson:"key"`  // another field key of the SAME module
+    In  []string `json:"in" bson:"in"`    // satisfying values
 }
 
 type ConfigField struct {
     // …existing fields unchanged…
-    Group       string      `json:"group,omitempty"`     // now a ConfigGroup.Key
-    Advanced    bool        `json:"advanced,omitempty"`  // collapsed under "▸ Advanced"
-    DependsOn   []FieldCondition `json:"dependsOn,omitempty"` // AND across entries, OR within In
-    Min         *int        `json:"min,omitempty"`
-    Max         *int        `json:"max,omitempty"`
-    Pattern     string      `json:"pattern,omitempty"`
-    Placeholder string      `json:"placeholder,omitempty"`
-    HelpURL     string      `json:"helpUrl,omitempty"`
+    Group       string           `json:"group,omitempty" bson:"group,omitempty"`         // now a ConfigGroup.Key
+    Advanced    bool             `json:"advanced,omitempty" bson:"advanced,omitempty"`   // collapsed under "▸ Advanced"
+    DependsOn   []FieldCondition `json:"dependsOn,omitempty" bson:"dependsOn,omitempty"` // AND across entries, OR within In
+    Min         *int             `json:"min,omitempty" bson:"min,omitempty"`
+    Max         *int             `json:"max,omitempty" bson:"max,omitempty"`
+    Pattern     string           `json:"pattern,omitempty" bson:"pattern,omitempty"`
+    Placeholder string           `json:"placeholder,omitempty" bson:"placeholder,omitempty"`
+    HelpURL     string           `json:"helpUrl,omitempty" bson:"helpUrl,omitempty"`
 }
 ```
+
+`ConfigField` is persisted (`bson:"configSchema"` on `ModuleConfig`), so every field —
+including `FieldCondition` nested inside `DependsOn` — carries both `json` and `bson`
+tags, `omitempty`. `ConfigGroup` (§2.1) is the exception: it is never persisted, so it
+carries `json` tags only.
 
 `DependsOn` is a struct list, not an expression string — no parser to write, ship, or
 keep consistent between Go and TypeScript.

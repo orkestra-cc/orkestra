@@ -27,7 +27,7 @@ loop. `ConfigField` gains optional metadata fields, all `omitempty`, all additiv
 - `ConfigField` is persisted (`bson:"configSchema"` on `ModuleConfig`), so **every new
   `ConfigField` field needs both a `json` and a `bson` tag**, both `omitempty`.
 - `ConfigGroup` is **not** persisted, so it carries `json` tags only — no `bson` tags.
-- `Condition` **is** persisted (it nests inside `ConfigField.DependsOn`, which lives in the
+- `FieldCondition` **is** persisted (it nests inside `ConfigField.DependsOn`, which lives in the
   stored `configSchema`), so it carries both `json` and `bson` tags.
 - Route/response shape changes require `make openapi-dump` from `backend/`, with
   `openapi/enterprise.json` committed, or `make backend-openapi-check` fails CI.
@@ -36,11 +36,11 @@ loop. `ConfigField` gains optional metadata fields, all `omitempty`, all additiv
 
 ---
 
-### Task 1: `ConfigGroup`, `Condition`, and the `ConfigGroupsOf` accessor
+### Task 1: `ConfigGroup`, `FieldCondition`, and the `ConfigGroupsOf` accessor
 
 **Files:**
 - Modify: `backend/pkg/sdk/module/types.go:32-43` (the `ConfigField` struct)
-- Modify: `backend/pkg/sdk/module/types.go` (add `ConfigGroup` + `Condition` above `ConfigField`)
+- Modify: `backend/pkg/sdk/module/types.go` (add `ConfigGroup` + `FieldCondition` above `ConfigField`)
 - Modify: `backend/pkg/sdk/module/module.go:56-61` (add `HasConfigGroups` next to `HasConfigSchema`)
 - Modify: `backend/pkg/sdk/module/module.go:356-363` (add `ConfigGroupsOf` next to `RequiredServicesOf`)
 - Test: `backend/pkg/sdk/module/config_groups_test.go`
@@ -49,10 +49,10 @@ loop. `ConfigField` gains optional metadata fields, all `omitempty`, all additiv
 - Consumes: nothing.
 - Produces:
   - `type ConfigGroup struct { Key, Label, Description, Icon, Parent string; Order int }`
-  - `type Condition struct { Key string; In []string }`
+  - `type FieldCondition struct { Key string; In []string }`
   - `type HasConfigGroups interface { ConfigGroups() []ConfigGroup }`
   - `func ConfigGroupsOf(m Module) []ConfigGroup`
-  - `ConfigField` gains `Advanced bool`, `DependsOn []Condition`, `Min *int`, `Max *int`,
+  - `ConfigField` gains `Advanced bool`, `DependsOn []FieldCondition`, `Min *int`, `Max *int`,
     `Pattern string`, `Placeholder string`, `HelpURL string`
 
 - [ ] **Step 1: Write the failing test**
@@ -118,7 +118,7 @@ func TestConfigField_MetadataTagsRoundTrip(t *testing.T) {
 		Group:       "password",
 		Type:        FieldInt,
 		Advanced:    true,
-		DependsOn:   []Condition{{Key: "passwordPolicyEnabled", In: []string{"true"}}},
+		DependsOn:   []FieldCondition{{Key: "passwordPolicyEnabled", In: []string{"true"}}},
 		Min:         &min,
 		Max:         &max,
 		Pattern:     "^[0-9]+$",
@@ -225,7 +225,7 @@ type ConfigGroup struct {
 	Order       int    `json:"order,omitempty"`
 }
 
-// Condition gates a field's visibility on the value of another field of the
+// FieldCondition gates a field's visibility on the value of another field of the
 // SAME module. Semantics: AND across a field's DependsOn slice, OR within a
 // single condition's In list.
 //
@@ -234,7 +234,7 @@ type ConfigGroup struct {
 //
 // Unlike ConfigGroup this IS persisted: it nests inside ConfigField.DependsOn,
 // which is part of the stored configSchema. Hence the bson tags.
-type Condition struct {
+type FieldCondition struct {
 	Key string   `json:"key" bson:"key"` // another field key of the same module
 	In  []string `json:"in" bson:"in"`   // values that satisfy the condition
 }
@@ -243,14 +243,14 @@ type Condition struct {
 Then extend `ConfigField` with the new fields, keeping the existing ones untouched:
 
 ```go
-	Options     []string        `json:"options,omitempty" bson:"options,omitempty"` // valid values for FieldEnum (ignored for other types)
-	Advanced    bool            `json:"advanced,omitempty" bson:"advanced,omitempty"`
-	DependsOn   []Condition     `json:"dependsOn,omitempty" bson:"dependsOn,omitempty"`
-	Min         *int            `json:"min,omitempty" bson:"min,omitempty"`
-	Max         *int            `json:"max,omitempty" bson:"max,omitempty"`
-	Pattern     string          `json:"pattern,omitempty" bson:"pattern,omitempty"`
-	Placeholder string          `json:"placeholder,omitempty" bson:"placeholder,omitempty"`
-	HelpURL     string          `json:"helpUrl,omitempty" bson:"helpUrl,omitempty"`
+	Options     []string         `json:"options,omitempty" bson:"options,omitempty"` // valid values for FieldEnum (ignored for other types)
+	Advanced    bool             `json:"advanced,omitempty" bson:"advanced,omitempty"`
+	DependsOn   []FieldCondition `json:"dependsOn,omitempty" bson:"dependsOn,omitempty"`
+	Min         *int             `json:"min,omitempty" bson:"min,omitempty"`
+	Max         *int             `json:"max,omitempty" bson:"max,omitempty"`
+	Pattern     string           `json:"pattern,omitempty" bson:"pattern,omitempty"`
+	Placeholder string           `json:"placeholder,omitempty" bson:"placeholder,omitempty"`
+	HelpURL     string           `json:"helpUrl,omitempty" bson:"helpUrl,omitempty"`
 ```
 
 Also update the `ConfigField.Group` comment — it now carries a `ConfigGroup.Key`, not a
@@ -311,7 +311,7 @@ Expected: PASS — unchanged.
 ```bash
 git add backend/pkg/sdk/module/types.go backend/pkg/sdk/module/module.go \
         backend/pkg/sdk/module/config_groups_test.go
-git commit -m "feat(sdk): add ConfigGroup, Condition, and per-field config metadata
+git commit -m "feat(sdk): add ConfigGroup, FieldCondition, and per-field config metadata
 
 ConfigField could only be grouped by a bare string with no hierarchy,
 description, icon, or ordering, so a module with 60+ fields had no way to
@@ -339,7 +339,7 @@ This function turns that class of defect into a test failure.
 - Test: `backend/pkg/sdk/module/config_validate_test.go`
 
 **Interfaces:**
-- Consumes: `ConfigField`, `ConfigGroup`, `Condition` from Task 1.
+- Consumes: `ConfigField`, `ConfigGroup`, `FieldCondition` from Task 1.
 - Produces: `func ValidateConfigDeclarations(schema []ConfigField, groups []ConfigGroup) error`
 
 **The backward-compatibility rule that makes this safe:** when a module declares **no**
@@ -368,7 +368,7 @@ func TestValidateConfigDeclarations_Valid(t *testing.T) {
 	schema := []ConfigField{
 		{Key: "googleEnabled", Label: "Enable Google", Group: "oauth", Type: FieldBool},
 		{Key: "googleClientId", Label: "Client ID", Group: "oauth.google", Type: FieldString,
-			DependsOn: []Condition{{Key: "googleEnabled", In: []string{"true"}}}},
+			DependsOn: []FieldCondition{{Key: "googleEnabled", In: []string{"true"}}}},
 	}
 	if err := ValidateConfigDeclarations(schema, groups); err != nil {
 		t.Errorf("ValidateConfigDeclarations = %v, want nil", err)
@@ -404,7 +404,7 @@ func TestValidateConfigDeclarations_UndeclaredGroup(t *testing.T) {
 func TestValidateConfigDeclarations_UndeclaredDependsOnKey(t *testing.T) {
 	schema := []ConfigField{
 		{Key: "googleClientId", Label: "Client ID", Type: FieldString,
-			DependsOn: []Condition{{Key: "googleEnabld", In: []string{"true"}}}},
+			DependsOn: []FieldCondition{{Key: "googleEnabld", In: []string{"true"}}}},
 	}
 	err := ValidateConfigDeclarations(schema, nil)
 	if err == nil {
@@ -420,7 +420,7 @@ func TestValidateConfigDeclarations_EmptyInList(t *testing.T) {
 	// invisible — always a mistake, never an intent.
 	schema := []ConfigField{
 		{Key: "a", Label: "A", Type: FieldBool},
-		{Key: "b", Label: "B", Type: FieldString, DependsOn: []Condition{{Key: "a"}}},
+		{Key: "b", Label: "B", Type: FieldString, DependsOn: []FieldCondition{{Key: "a"}}},
 	}
 	if err := ValidateConfigDeclarations(schema, nil); err == nil {
 		t.Fatal("ValidateConfigDeclarations = nil, want an error for an empty In list")
@@ -860,7 +860,7 @@ Temporarily break one declaration to confirm the test is not vacuous. In
 
 ```go
 		{Key: "canary", Label: "Canary", Type: module.FieldBool,
-			DependsOn: []module.Condition{{Key: "does_not_exist", In: []string{"true"}}}},
+			DependsOn: []module.FieldCondition{{Key: "does_not_exist", In: []string{"true"}}}},
 ```
 
 ```bash
