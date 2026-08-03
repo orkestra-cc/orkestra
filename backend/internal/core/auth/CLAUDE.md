@@ -83,6 +83,48 @@ No seeding — there are no default accounts or default tokens. The first user i
 
 OAuth provider settings are admin-managed through `ConfigSchema()` — stored in `module_configs`, cached in Redis for 30s, secrets encrypted at rest with AES-256-GCM, editable at `/admin/modules`. Env vars are the **seed source** only: on first boot the registry populates the document from the `EnvVar` field on each schema entry, and after that the document is authoritative. Non-OAuth settings (JWT keys, cookies, feature toggles) still live in `cfg *config.Config` because they're process-scoped and must not rotate at runtime.
 
+### Configuration groups (`ConfigGroups()`)
+
+`auth` declares an 11-key group tree via `ConfigGroups()` — 7 top-level groups
+(`registration`, `login`, `password`, `mfa`, `oauth`, `antiabuse`, `sessions`) plus
+`oauth.google` / `oauth.apple` / `oauth.github` / `oauth.discord` nested under `oauth`
+(`Parent: "oauth"`). It is the largest configuration surface in the base — 62
+`ConfigField` entries — and is the first (and so far only) module to actually render
+the settings page's sectioned rail rather than the plain-form degradation path. This is
+the shape a contributor adding a field to `ConfigSchema()` must keep valid:
+
+- Every `ConfigField.Group` must name one of the 11 declared keys. `Group` used to be a
+  human-readable display label; it is now a `ConfigGroup.Key` — the panel heading and
+  description are pulled from the matching `ConfigGroup.Label`/`Description` (and, once
+  resolved through i18n, from `moduleConfig.auth.groups.<key>.label`/`.desc` in the
+  locale bundles).
+- A provider credential field (one of the 19 fields under `oauth.google` / `oauth.apple` /
+  `oauth.github` / `oauth.discord`) needs `DependsOnMatch: "any"` plus a `DependsOn` pair
+  naming that **same** provider's own two toggles — `{provider}EnabledAdmin` and
+  `{provider}EnabledClient` — each with `In: ["true"]`. It must be `"any"`, not the
+  default `"all"`: the field has to appear as soon as *either* audience surface enables
+  the provider, and an AND gate would stay hidden until both toggles are on — wrong the
+  moment an operator enables a provider on only one surface.
+- The 8 provider-enable toggles themselves (`{provider}Enabled{Admin,Client}`) are
+  **never** gated by a `DependsOn` — they live directly in the `oauth` parent group with
+  no conditions. Gating a toggle on anything, including itself, would make that provider
+  permanently unrecoverable through the admin UI: there would be no visible control left
+  to switch it back on.
+- `cmd/server/config_declarations_test.go` runs `module.ValidateConfigDeclarations` over
+  every module compiled into the binary, `auth` included. A `Group` that doesn't resolve
+  to a declared key, a `DependsOn.Key` that doesn't resolve to a field of the same
+  module, an unknown `DependsOnMatch` value, or a `DependsOnMatch` set with no
+  `DependsOn` to combine — all of these **fail the build**, rather than silently
+  rendering a phantom rail entry.
+- `auth`'s own `config_groups_test.go` goes further than "does it validate": it pins the
+  exact field count per group (`TestConfigGroups_FieldCountPerGroup`), the exact
+  `DependsOn` condition set and `DependsOnMatch` on every one of the 19 provider
+  credentials (`TestProviderCredentials_HiddenUntilEitherSurfaceEnabled`), and that all 8
+  toggles stay ungated (`TestProviderToggles_NeverGated`). Moving a field to a different
+  group, or changing its gating, will fail one of these tests by design — update the
+  count map / gating assertions **deliberately** alongside the change, not by
+  reflexively editing numbers until the suite goes green.
+
 ### Admin-managed (ConfigSchema, per-provider)
 
 Schema keys below are what handlers and the resolver look up. The `EnvVar` column is the one-time seed source — once the document exists, editing the env var has no effect without a wipe.
