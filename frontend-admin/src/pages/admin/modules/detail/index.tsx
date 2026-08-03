@@ -88,10 +88,10 @@ const ModuleDetailPage: React.FC = () => {
   // Full-page rail requires the module to have *declared* configGroups — the
   // legacy heuristic (distinct `field.group` labels with no declared
   // metadata) still promotes ModuleConfigSection's own card-internal rail
-  // (`hasCardRail`), but must not promote the whole page: every module
-  // served today declares no configGroups at all, and intermixing Overview/
-  // Dependencies/Environments around a tree that has no real declared
-  // hierarchy would be a bigger change than "no rail" for those modules.
+  // (`hasCardRail`), but must not promote the whole page. `auth` is the only
+  // module in the base that declares a group tree today; for every other one
+  // intermixing Overview/Dependencies/Environments around a tree that has no
+  // real declared hierarchy would be a bigger change than "no rail".
   const showRail = hasPageRail(groupTree, mod?.configGroups);
 
   const selectable = [
@@ -275,9 +275,9 @@ const ModuleDetailPage: React.FC = () => {
   // A permanently-disabled Save button under Overview/Dependencies/
   // Environments reads as "this panel is a form" when it isn't — only show
   // the bar once there's something it can actually report or act on. A
-  // declared parent group with no direct fields of its own (phase 4's `oauth`
-  // over `oauth.google`/`oauth.apple`/…) is exactly the same situation: its
-  // panel is a table of contents, not a form. Gating on `fieldKeys.length`
+  // declared parent group with no direct fields of its own — one that exists
+  // purely to nest children — is exactly the same situation: its panel is a
+  // table of contents, not a form. Gating on `fieldKeys.length`
   // alone isn't enough, though — a leaf node can declare fields that are
   // ALL currently hidden by an unmet `dependsOn` (phase 4's `oauth.google`
   // before either Google enable toggle is on), which is the same "form with

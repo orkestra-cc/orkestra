@@ -1954,7 +1954,9 @@
         "settingsCount_one": "{{count}} impostazione",
         "settingsCount_other": "{{count}} impostazioni",
         "incomplete": "{{count}} da compilare",
-        "emptyUntilDependency": "Queste impostazioni vengono visualizzate quando le opzioni da cui dipendono sono attivate."
+        "emptyUntilDependency": "Queste impostazioni vengono visualizzate quando le opzioni da cui dipendono sono attivate.",
+        "emptyUntilDependencyIn": "Queste impostazioni vengono visualizzate quando le opzioni da cui dipendono sono attivate in {{group}}.",
+        "goToParent": "Vai a {{group}}"
       },
       "infraError": "errore: {{message}}",
       "infraRunning": "attivo",

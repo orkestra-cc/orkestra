@@ -12,6 +12,15 @@ export interface GroupNode {
   icon?: string;
   fieldKeys: string[];
   children: GroupNode[];
+  /**
+   * The declared parent this node nests under, when it has one — key plus
+   * literal label, which is exactly `translateConfigGroup`'s input, so a
+   * panel can name and link back to its parent without being handed the
+   * whole tree. Absent for roots, for legacy (undeclared-group) nodes, and
+   * for a child whose declared parent does not exist (it is promoted to a
+   * root instead of being lost).
+   */
+  parent?: { key: string; label: string };
 }
 
 const GENERAL = 'General';
@@ -110,8 +119,10 @@ export const buildGroupTree = (
     const node = nodes.get(g.key)!;
     // A child whose parent was never declared is promoted rather than lost.
     const parent = g.parent ? nodes.get(g.parent) : undefined;
-    if (parent) parent.children.push(node);
-    else roots.push(node);
+    if (parent) {
+      node.parent = { key: parent.key, label: parent.label };
+      parent.children.push(node);
+    } else roots.push(node);
   }
 
   const orphans = fieldsFor(f => !f.group || !declared.has(f.group));
@@ -148,9 +159,9 @@ export const hasCardRail = (
  * `field.group` labels. A legacy module still gets `hasCardRail`'s smaller
  * card-internal rail — it just isn't promoted to the whole-page framing
  * (Overview/Dependencies/Environments intermixed with a tree that has no
- * real declared hierarchy). Every module served today declares no
- * `configGroups`, so this is `false` for all of them no matter how many
- * legacy buckets their fields happen to land in.
+ * real declared hierarchy). `auth` is the only module in the base that
+ * declares `configGroups` today; for every other one this is `false` no
+ * matter how many legacy buckets their fields happen to land in.
  */
 export const hasPageRail = (
   groupTree: GroupNode[],

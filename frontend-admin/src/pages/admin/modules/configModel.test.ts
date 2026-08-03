@@ -64,6 +64,19 @@ describe('buildGroupTree — declared groups', () => {
     expect(tree[0].children[0].fieldKeys).toEqual(['googleId']);
   });
 
+  it('records the declared parent on a child, and nothing on a root', () => {
+    // `ModuleConfigPanel`'s all-hidden-leaf empty state needs to name its
+    // parent and link back to it without being handed the whole tree, so the
+    // node carries the parent's key + literal label — exactly
+    // `translateConfigGroup`'s input shape.
+    const tree = buildGroupTree(schema, groups);
+    expect(tree[0].parent).toBeUndefined();
+    expect(tree[0].children[0].parent).toEqual({
+      key: 'oauth',
+      label: 'OAuth Providers'
+    });
+  });
+
   it('keeps an ungrouped field reachable instead of dropping it', () => {
     // The backend validator rejects this, but the UI must never make a field
     // unreachable if a non-compliant module slips through.
@@ -77,9 +90,11 @@ describe('buildGroupTree — declared groups', () => {
       [field({ key: 'x', group: 'ghostchild' })],
       [{ key: 'ghostchild', label: 'Ghost child', parent: 'nowhere' }]
     );
-    // Promoted to top level rather than lost.
+    // Promoted to top level rather than lost — and with no `parent`, so the
+    // empty state can't offer a link to a group that does not exist.
     expect(tree.map(n => n.key)).toEqual(['ghostchild']);
     expect(tree[0].fieldKeys).toEqual(['x']);
+    expect(tree[0].parent).toBeUndefined();
   });
 });
 

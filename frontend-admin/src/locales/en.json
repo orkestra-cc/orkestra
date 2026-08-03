@@ -1954,7 +1954,9 @@
         "settingsCount_one": "{{count}} setting",
         "settingsCount_other": "{{count}} settings",
         "incomplete": "{{count}} to fill",
-        "emptyUntilDependency": "These settings appear once the options they depend on are enabled."
+        "emptyUntilDependency": "These settings appear once the options they depend on are enabled.",
+        "emptyUntilDependencyIn": "These settings appear once the options they depend on are enabled in {{group}}.",
+        "goToParent": "Go to {{group}}"
       },
       "infraError": "error: {{message}}",
       "infraRunning": "running",

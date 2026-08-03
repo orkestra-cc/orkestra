@@ -323,6 +323,12 @@ describe('ModuleDetailPage sections', () => {
     // as broken as the fieldless-parent case; and a permanently-disabled
     // Save bar underneath it is the same "form when it isn't" bug the
     // fieldless-parent gate above already avoids.
+    //
+    // "Honest" is not enough on its own, though: a bare "these settings appear
+    // once the options they depend on are enabled" never says *where* those
+    // options are, which on a fresh install is a dead end on every gated leaf
+    // at once. When the node has a parent, the empty state names it and offers
+    // a button that moves the rail there.
     const user = userEvent.setup();
     stubAll({
       ...demoModule,
@@ -347,7 +353,7 @@ describe('ModuleDetailPage sections', () => {
     renderAt('?section=oauth.google');
     expect(
       await screen.findByText(
-        'These settings appear once the options they depend on are enabled.'
+        'These settings appear once the options they depend on are enabled in OAuth Providers.'
       )
     ).toBeInTheDocument();
     expect(screen.queryByText('Client ID')).not.toBeInTheDocument();
@@ -355,9 +361,18 @@ describe('ModuleDetailPage sections', () => {
       screen.queryByRole('button', { name: 'Save Changes' })
     ).not.toBeInTheDocument();
 
+    // The way out of the dead end: the empty state's own button moves the
+    // rail to the parent group that owns the gating toggle.
+    const panel = screen
+      .getByRole('heading', { name: 'Google' })
+      .closest('.card') as HTMLElement;
+    await user.click(
+      within(panel).getByRole('button', { name: 'Go to OAuth Providers' })
+    );
+    expect(currentSearch).toContain('section=oauth');
+
     // Flip the toggle from the parent group — the field appears and the
     // save bar follows it.
-    await user.click(screen.getByRole('button', { name: 'OAuth Providers' }));
     await user.click(screen.getByLabelText('Enable Google'));
     await user.click(screen.getByRole('button', { name: 'Google' }));
 

@@ -17,9 +17,11 @@ export interface ModuleConfigPanelProps {
   register: UseFormRegister<ConfigFormValues>;
   secretStatus?: Record<string, boolean>;
   /**
-   * Moves the surrounding rail to another group. Only consumed by the
+   * Moves the surrounding rail to another group. Consumed by the
    * container-node branch below (a declared parent with no fields of its
-   * own), which renders its children as the panel's content.
+   * own), which renders its children as the panel's content, and by the
+   * all-hidden-leaf empty state, which offers a way back to the parent
+   * group where the gating options live.
    */
   onSelectGroup?: (key: string) => void;
 }
@@ -36,18 +38,23 @@ export interface ModuleConfigPanelProps {
  * rendered inside a collapsed section instead, so a rarely-touched setting
  * doesn't compete for attention with the fields an operator actually needs.
  *
- * A declared parent that owns no fields directly — `oauth` sitting over
- * `oauth.google`/`oauth.apple`/… — has nothing to render as a form, and a
- * heading over an empty body reads as a broken page. Such a node instead
- * renders a table of contents of its children, each entry moving the rail
- * there, which is the only thing that panel could usefully offer.
+ * A declared parent that owns no fields of its own — a group that exists
+ * purely to nest children — has nothing to render as a form, and a heading
+ * over an empty body reads as a broken page. Such a node instead renders a
+ * table of contents of its children, each entry moving the rail there, which
+ * is the only thing that panel could usefully offer. No module in the base
+ * declares a group of that shape today (`auth`'s `oauth` nests the four
+ * providers but also owns 11 fields of its own, so it takes the normal form
+ * branch); the container branch exists for addons that do, and is covered by
+ * fixtures.
  *
  * A *leaf* node can land in the same "heading over an empty body" state for a
  * different reason: it owns fields, but every one of them is currently
  * hidden by an unmet `dependsOn` (phase 4's `oauth.google` before either of
  * Google's two enable toggles is on). It has no children to link to, so the
  * container branch above cannot fire — it needs its own honest empty state
- * instead of silently rendering nothing.
+ * instead of silently rendering nothing, and a way back to wherever the
+ * options it waits on actually live (its parent group).
  */
 const ModuleConfigPanel: React.FC<ModuleConfigPanelProps> = ({
   node,
@@ -128,13 +135,38 @@ const ModuleConfigPanel: React.FC<ModuleConfigPanelProps> = ({
   }
 
   if (!hasVisibleFields) {
+    // "These settings appear once the options they depend on are enabled" is
+    // a dead end on its own — it never says *where* those options are. The
+    // gating toggles are almost always declared one level up (a provider's
+    // enable switches sit on the parent group, its credentials on the leaf),
+    // so when this node has a parent, name it and offer a way there. Stays
+    // generic: any addon can produce this shape, and a node with no parent
+    // still gets the original, unqualified sentence.
+    const parent = node.parent;
+    const parentLabel = parent
+      ? translateConfigGroup(t, moduleName, parent)
+      : '';
     return (
       <div>
         <h5 className="fs-9 fw-semibold mb-1">{label}</h5>
         {description && <p className="text-muted fs-10 mb-3">{description}</p>}
         <p className="text-muted fs-10 mb-0">
-          {t('adminModules.detail.rail.emptyUntilDependency')}
+          {parent
+            ? t('adminModules.detail.rail.emptyUntilDependencyIn', {
+                group: parentLabel
+              })
+            : t('adminModules.detail.rail.emptyUntilDependency')}
         </p>
+        {parent && onSelectGroup && (
+          <Button
+            variant="link"
+            size="sm"
+            className="ps-0 text-decoration-none"
+            onClick={() => onSelectGroup(parent.key)}
+          >
+            {t('adminModules.detail.rail.goToParent', { group: parentLabel })}
+          </Button>
+        )}
       </div>
     );
   }
