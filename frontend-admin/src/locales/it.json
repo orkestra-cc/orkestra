@@ -1981,7 +1981,7 @@
       "groups": {
         "registration": {
           "label": "Registrazione",
-          "desc": "Chi può creare un account, e su quale superficie."
+          "desc": "Chi può creare un account, sulla console operatore o sull'app client."
         },
         "login": {
           "label": "Login e sessioni",
@@ -1997,7 +1997,7 @@
         },
         "oauth": {
           "label": "Provider OAuth",
-          "desc": "Quali provider sono offerti, e su quale superficie. Le credenziali di ciascun provider compaiono quando viene attivato.",
+          "desc": "Quali provider sono offerti, sulla console operatore o sull'app client. Le credenziali di ciascun provider compaiono quando viene attivato.",
           "google": { "label": "Google" },
           "apple": { "label": "Apple" },
           "github": { "label": "GitHub" },
@@ -2051,11 +2051,11 @@
         },
         "allowedEmailDomainsAdmin": {
           "label": "Domini email consentiti (operatore)",
-          "desc": "Elenco consentiti separato da virgole (es. acme.com, ops.acme.com). Vuoto = qualsiasi dominio. Si applica solo a /v1/auth/operator/register."
+          "desc": "Elenco separato da virgole di domini email consentiti (es. acme.com, ops.acme.com). Vuoto = qualsiasi dominio. Si applica solo a /v1/auth/operator/register."
         },
         "allowedEmailDomainsClient": {
           "label": "Domini email consentiti (client)",
-          "desc": "Elenco consentiti separato da virgole, applicato solo a /v1/auth/client/register. Vuoto = qualsiasi dominio."
+          "desc": "Elenco separato da virgole di domini email consentiti, applicato solo a /v1/auth/client/register. Vuoto = qualsiasi dominio."
         },
         "loginEnabledAdmin": {
           "label": "Consenti l'accesso sulla console operatore",
@@ -2146,15 +2146,15 @@
         },
         "inactiveAccountAutoDisableDays": {
           "label": "Disattiva automaticamente gli account inattivi dopo (giorni)",
-          "desc": "Disattiva l'account di un utente quando il suo ultimo accesso è più vecchio del numero di giorni configurato. Il controllo avviene al momento del login, così un account inattivo viene respinto al tentativo successivo senza bisogno di un job periodico. 0 = disattivato."
+          "desc": "Disattiva l'account di un utente quando il suo ultimo accesso è più vecchio del numero di giorni configurato. Il controllo avviene al momento del login, così un account inattivo viene respinto al tentativo successivo senza bisogno di un processo pianificato. 0 = disattivato."
         },
         "revokeSessionsOnPasswordChange": {
           "label": "Revoca le sessioni al cambio password",
           "desc": "Se attivo, una POST /v1/auth/{tier}/change-password riuscita revoca anche l'id di sessione corrente del chiamante e ogni concessione di fiducia del dispositivo per l'utente. Se disattivato, il cambio password lascia attive le sessioni esistenti (usato per migrazioni o rilasci graduali; non consigliato in condizioni normali). Predefinito attivo."
         },
         "selfServiceAccountDeletionClient": {
-          "label": "Consenti agli utenti client di autoeliminarsi (cancellazione GDPR)",
-          "desc": "Se attivo, gli utenti client Tier-2 possono chiamare POST /v1/me/dsr/erase per eliminare in modo irreversibile i propri dati personali da ogni produttore di PII. Se disattivato (predefinito), il livello client restituisce 403 self_service_deletion_disabled e la cancellazione deve essere avviata dalla console operatore. La cancellazione lato operatore non è interessata."
+          "label": "Consenti agli utenti client di eliminare autonomamente il proprio account (cancellazione GDPR)",
+          "desc": "Se attivo, gli utenti client Tier-2 possono chiamare POST /v1/me/dsr/erase per eliminare in modo irreversibile i propri dati personali (PII) presso ogni componente che li tratta. Se disattivato (predefinito), il livello client restituisce 403 self_service_deletion_disabled e la cancellazione deve essere avviata dalla console operatore. La cancellazione lato operatore non è interessata."
         },
         "oauthAllowSignupAdmin": {
           "label": "Consenti registrazioni OAuth sulla console operatore",
