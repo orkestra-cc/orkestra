@@ -16,6 +16,10 @@ Per [ADR-0006](/adrs/collapse-to-core-only-base) Orkestra ships **no addons** �
 3. **Register it** — add `cmd/server/catalog_<name>.go` with a single `init()` that does `optionalModules["<name>"] = func() module.Module { return <name>.NewModule() }`. No build tags — it compiles into the one binary.
 4. **Configure at `/admin/modules`** — enable it; the registry hot-loads (no restart). The admin UI surface is retained for exactly this.
 
+:::tip Optional: a sectioned settings rail
+Declare `ConfigGroups()` ([ADR-0012](/adrs/module-config-group-contract)) to render your `ConfigSchema` as a grouped, master-detail settings page (with `DependsOn` for conditional fields and derived `config.fields.*` / `config.groups.*` i18n keys). **Declaring none is a supported end state** — your module keeps the flat form, no work required.
+:::
+
 For the archived snapshots of the verticals Orkestra used to ship (billing/SDI, RAG, agents, marketing, …), see the `orkestra-cc/orkestra-addon-*` repos — useful to crib from, not to depend on.
 
 For the architectural reasons behind this shape, see [Module lifecycle](/architecture/module-lifecycle).
