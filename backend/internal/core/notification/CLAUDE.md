@@ -65,6 +65,8 @@ All settings live in the `module_configs` collection under the `notification` mo
 | `app.name`                    | `APP_NAME`                     | `Orkestra` |
 | `app.support_email`           | `SUPPORT_EMAIL`                | —         |
 
+`/admin/modules/notification` renders as a three-group rail declared via `ConfigGroups()`: **Delivery** (`email.provider` + the five `email.smtp.*` fields), **Sender** (`email.from_address`, `email.from_name`, `email.reply_to`), **Branding & templates** (`app.name`, `app.support_email`). `email.provider` and `email.smtp.tls_mode` are `FieldEnum` — selects, not free text. The five `email.smtp.*` fields carry `DependsOn: email.provider in [smtp]`, so a default `noop` install shows **one** visible Delivery field (`Email provider`) until it's switched to `smtp`, which reveals the SMTP connection settings.
+
 The `noop` provider logs rendered mail to the backend stdout instead of dialing an SMTP server — use it in dev and CI. The module reports `IsConfigured() = true` for `noop` so consumers can still make send calls without failing.
 
 ## Templates

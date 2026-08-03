@@ -44,6 +44,10 @@ All three are `System: true`. `audit.read` is Cedar-covered by the `read` suffix
 
 `soc2_enabled` (bool, false) · `auto_cleanup_enabled` (bool, false) · `retention_years` (int, 5) · `export_retention_days` (int, 30).
 
+`ConfigGroups()` puts these on the full-page rail as two groups: `soc2` ("SOC2 evidence", just `soc2_enabled`) and `retention` ("Retention & DSR", the other three fields). `retention_years` carries `DependsOn: auto_cleanup_enabled in [true]` — it only matters once the reaper is on, so it stays hidden until then (4 → 3 visible fields at the default).
+
+**`export_retention_days` is deliberately NOT gated on `auto_cleanup_enabled`.** It governs the download TTL of a DSR export — the always-on right-of-access pipeline — which is independent of the retention cleanup job; hiding it behind the cleanup toggle would make an always-relevant setting invisible on a fresh install where auto-cleanup is off. Do not "tidy up" the two `retention` fields into a single `DependsOn` block. `config_groups_test.go` plus this note are the guard rail against that regression.
+
 ## Routes
 
 - Self-service: `POST /v1/me/dsr/{export,erase,erasure-request}`.
