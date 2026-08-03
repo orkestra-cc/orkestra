@@ -2116,7 +2116,7 @@
         "discordEnabledClient": { "label": "Discord sull'app client" },
         "mfaEnabled": {
           "label": "Richiedi MFA per gli utenti privilegiati",
-          "desc": "Interruttore principale, disattivato per impostazione predefinita affinché il primo super_admin di un'installazione nuova possa configurare la piattaforma senza essere bloccato da una richiesta MFA per cui non si è mai iscritto. Attivalo solo dopo aver iscritto un secondo fattore (TOTP/passkey) — altrimenti gli utenti privilegiati incontreranno la finestra di tolleranza per l'iscrizione al login successivo. Se disattivato, RoleRequiresMFA restituisce false; le iscrizioni esistenti non vengono eliminate e gli utenti possono comunque verificarsi volontariamente."
+          "desc": "Interruttore principale, disattivato per impostazione predefinita affinché il primo super_admin di un'installazione nuova possa configurare la piattaforma senza essere bloccato da una richiesta MFA per un fattore che non ha mai iscritto. Attivalo solo dopo aver iscritto un secondo fattore (TOTP/passkey) — altrimenti gli utenti privilegiati incontreranno la finestra di tolleranza per l'iscrizione al login successivo. Se disattivato, RoleRequiresMFA restituisce false; le iscrizioni esistenti non vengono eliminate e gli utenti possono comunque effettuare la verifica volontariamente."
         },
         "mfaEnrollmentGraceDays": {
           "label": "Periodo di tolleranza per l'iscrizione (giorni)",
@@ -2140,7 +2140,7 @@
         },
         "ipBlocklistAdmin": {
           "label": "Elenco IP bloccati (console operatore)",
-          "desc": "Elenco separato da virgole di intervalli CIDR negati sull'host operatore. Valutato dopo l'elenco dei consentiti — una voce bloccata rifiuta la richiesta anche se corrisponde anche all'elenco dei consentiti."
+          "desc": "Elenco separato da virgole di intervalli CIDR negati sull'host operatore. Valutato dopo l'elenco dei consentiti — una voce bloccata rifiuta la richiesta anche se corrisponde all'elenco dei consentiti."
         },
         "geoBlockCountries": {
           "label": "Elenco paesi bloccati",
@@ -2160,11 +2160,11 @@
         },
         "oauthAllowSignupAdmin": {
           "label": "Consenti registrazioni OAuth sulla console operatore",
-          "desc": "Se disattivato, i callback OAuth sull'host operatore che risolvono in un'email sconosciuta restituiscono 403 invece di creare un nuovo account operatore. Gli utenti esistenti possono comunque accedere."
+          "desc": "Se disattivato, i callback OAuth sull'host operatore che puntano a un'email sconosciuta restituiscono 403 invece di creare un nuovo account operatore. Gli utenti esistenti possono comunque accedere."
         },
         "oauthAllowSignupClient": {
           "label": "Consenti registrazioni OAuth sull'app client",
-          "desc": "Se disattivato, i callback OAuth sull'host client che risolvono in un'email sconosciuta restituiscono 403 invece di creare un nuovo account client."
+          "desc": "Se disattivato, i callback OAuth sull'host client che puntano a un'email sconosciuta restituiscono 403 invece di creare un nuovo account client."
         },
         "mfaRequiredForRoles": {
           "label": "Ruoli che richiedono MFA",
