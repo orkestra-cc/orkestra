@@ -313,4 +313,57 @@ describe('ModuleDetailPage sections', () => {
       screen.getByRole('button', { name: 'Save Changes' })
     ).toBeInTheDocument();
   });
+
+  it('renders an honest empty state for a leaf whose only field is hidden by dependsOn, with no save bar — and shows both once the condition is met', async () => {
+    // A leaf node (no children, so the fieldless-parent branch above cannot
+    // fire) can still land in the same "heading over an empty body" state:
+    // it owns a field, but that field is currently hidden by an unmet
+    // dependsOn — phase 4's `oauth.google` before either Google enable
+    // toggle is on. Silently rendering nothing under the heading is exactly
+    // as broken as the fieldless-parent case; and a permanently-disabled
+    // Save bar underneath it is the same "form when it isn't" bug the
+    // fieldless-parent gate above already avoids.
+    const user = userEvent.setup();
+    stubAll({
+      ...demoModule,
+      configSchema: [
+        field({
+          key: 'toggle',
+          label: 'Enable Google',
+          type: 'bool',
+          default: 'false',
+          group: 'oauth'
+        }),
+        field({
+          key: 'clientId',
+          label: 'Client ID',
+          group: 'oauth.google',
+          dependsOn: [{ key: 'toggle', in: ['true'] }]
+        }),
+        field({ key: 'minLen', label: 'Minimum length', group: 'password' })
+      ]
+    } as ModuleConfig);
+
+    renderAt('?section=oauth.google');
+    expect(
+      await screen.findByText(
+        'These settings appear once the options they depend on are enabled.'
+      )
+    ).toBeInTheDocument();
+    expect(screen.queryByText('Client ID')).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Save Changes' })
+    ).not.toBeInTheDocument();
+
+    // Flip the toggle from the parent group — the field appears and the
+    // save bar follows it.
+    await user.click(screen.getByRole('button', { name: 'OAuth Providers' }));
+    await user.click(screen.getByLabelText('Enable Google'));
+    await user.click(screen.getByRole('button', { name: 'Google' }));
+
+    expect(screen.getByText('Client ID')).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Save Changes' })
+    ).toBeInTheDocument();
+  });
 });

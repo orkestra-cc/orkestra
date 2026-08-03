@@ -157,8 +157,8 @@ func (m *AuthModule) ConfigGroups() []module.ConfigGroup {
 // ConfigSchema declares every OAuth provider setting as admin-manageable.
 // Values are seeded from the listed env vars on first boot, then owned by
 // the module_configs document in MongoDB. Secrets are encrypted at rest.
-// The Group field drives the admin modal's tab rendering — fields in the
-// same group land on the same tab, in declaration order.
+// The Group field is a ConfigGroup.Key (see ConfigGroups above) — it drives
+// the admin settings page's nested rail, not a modal or a flat tab strip.
 func (m *AuthModule) ConfigSchema() []module.ConfigField {
 	return []module.ConfigField{
 		// Google — gated on either audience surface being enabled so the

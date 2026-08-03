@@ -1953,7 +1953,8 @@
         "advancedToggle_other": "Avanzate ({{count}})",
         "settingsCount_one": "{{count}} impostazione",
         "settingsCount_other": "{{count}} impostazioni",
-        "incomplete": "{{count}} da compilare"
+        "incomplete": "{{count}} da compilare",
+        "emptyUntilDependency": "Queste impostazioni vengono visualizzate quando le opzioni da cui dipendono sono attivate."
       },
       "infraError": "errore: {{message}}",
       "infraRunning": "attivo",

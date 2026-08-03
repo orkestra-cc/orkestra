@@ -43,6 +43,15 @@ export interface ModuleConfigController {
   secretStatus: Record<string, boolean>;
   envLoading: boolean;
   saving: boolean;
+  /**
+   * Fields of the *whole module* currently visible under their own
+   * `dependsOn` — not scoped to any one rail node. Callers intersect this
+   * with a specific node's `fieldKeys` to ask "does this panel actually have
+   * anything on screen", which `fieldKeys.length` alone cannot answer once a
+   * declared-but-conditionally-hidden field is in play (phase 4's OAuth
+   * provider credentials before either enable toggle is on).
+   */
+  visibleKeys: Set<string>;
   dirtyKeys: Set<string>;
   errorKeys: Set<string>;
   dirtyCount: number;
@@ -259,6 +268,7 @@ export const useModuleConfigController = (
     secretStatus,
     envLoading,
     saving,
+    visibleKeys,
     dirtyKeys,
     errorKeys,
     dirtyCount,

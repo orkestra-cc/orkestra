@@ -41,6 +41,13 @@ export interface ModuleConfigPanelProps {
  * heading over an empty body reads as a broken page. Such a node instead
  * renders a table of contents of its children, each entry moving the rail
  * there, which is the only thing that panel could usefully offer.
+ *
+ * A *leaf* node can land in the same "heading over an empty body" state for a
+ * different reason: it owns fields, but every one of them is currently
+ * hidden by an unmet `dependsOn` (phase 4's `oauth.google` before either of
+ * Google's two enable toggles is on). It has no children to link to, so the
+ * container branch above cannot fire — it needs its own honest empty state
+ * instead of silently rendering nothing.
  */
 const ModuleConfigPanel: React.FC<ModuleConfigPanelProps> = ({
   node,
@@ -67,17 +74,27 @@ const ModuleConfigPanel: React.FC<ModuleConfigPanelProps> = ({
   );
   const mainKeys = node.fieldKeys.filter(key => !advancedKeys.has(key));
   const advancedFieldKeys = node.fieldKeys.filter(key => advancedKeys.has(key));
-  // Only fields currently visible under their own `dependsOn` — a field
-  // hidden by its condition must not inflate the count on the toggle, and
-  // must not conjure a toggle at all: a group whose only advanced field is
-  // currently hidden has nothing "advanced" on screen for the operator to
-  // reveal, so the toggle itself is gated on this count, not on
-  // `advancedFieldKeys.length` (schema-declared, ignoring visibility).
-  const visibleAdvancedCount = visibleFields(schema, values).filter(f =>
+  // Fields of this node currently visible under their own `dependsOn` — a
+  // field hidden by its condition must not inflate the Advanced toggle's
+  // count, must not conjure the toggle at all (a group whose only advanced
+  // field is hidden has nothing "advanced" on screen to reveal), and must
+  // not count toward the node having anything to show at all (see
+  // `hasVisibleFields` below).
+  const visibleNodeFields = visibleFields(schema, values).filter(f =>
+    node.fieldKeys.includes(f.key)
+  );
+  const visibleAdvancedCount = visibleNodeFields.filter(f =>
     advancedKeys.has(f.key)
   ).length;
 
   const isContainer = node.fieldKeys.length === 0 && node.children.length > 0;
+  // A leaf node (no children) can still own zero *visible* fields — every
+  // one of them declared but currently hidden by an unmet `dependsOn`. That
+  // is a real, expected state (phase 4's `oauth.google` before either of
+  // Google's two enable toggles is on) — not a bug — but rendering the main
+  // list below would silently produce nothing under the heading, which is
+  // the same "broken page" the container branch above exists to avoid.
+  const hasVisibleFields = visibleNodeFields.length > 0;
 
   if (isContainer) {
     return (
@@ -106,6 +123,18 @@ const ModuleConfigPanel: React.FC<ModuleConfigPanelProps> = ({
             );
           })}
         </ListGroup>
+      </div>
+    );
+  }
+
+  if (!hasVisibleFields) {
+    return (
+      <div>
+        <h5 className="fs-9 fw-semibold mb-1">{label}</h5>
+        {description && <p className="text-muted fs-10 mb-3">{description}</p>}
+        <p className="text-muted fs-10 mb-0">
+          {t('adminModules.detail.rail.emptyUntilDependency')}
+        </p>
       </div>
     );
   }

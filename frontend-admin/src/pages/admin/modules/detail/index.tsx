@@ -73,6 +73,7 @@ const ModuleDetailPage: React.FC = () => {
     secretStatus,
     envLoading,
     saving,
+    visibleKeys,
     dirtyCount,
     errorCount,
     perGroup,
@@ -276,12 +277,19 @@ const ModuleDetailPage: React.FC = () => {
   // the bar once there's something it can actually report or act on. A
   // declared parent group with no direct fields of its own (phase 4's `oauth`
   // over `oauth.google`/`oauth.apple`/…) is exactly the same situation: its
-  // panel is a table of contents, not a form, so it is gated on the node
-  // owning fields rather than on merely being a config node.
+  // panel is a table of contents, not a form. Gating on `fieldKeys.length`
+  // alone isn't enough, though — a leaf node can declare fields that are
+  // ALL currently hidden by an unmet `dependsOn` (phase 4's `oauth.google`
+  // before either Google enable toggle is on), which is the same "form with
+  // nothing to save" situation. `visibleKeys` (module-wide, not node-scoped)
+  // is what lets this check tell "owns fields" apart from "owns fields
+  // currently on screen".
   const showSaveBar =
     dirtyCount > 0 ||
     errorCount > 0 ||
-    Boolean(activeNode && activeNode.fieldKeys.length > 0);
+    Boolean(
+      activeNode && activeNode.fieldKeys.some(key => visibleKeys.has(key))
+    );
 
   return (
     <>
