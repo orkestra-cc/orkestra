@@ -49,8 +49,11 @@ type ConfigGroup struct {
 }
 
 // FieldCondition gates a field's visibility on the value of another field of
-// the SAME module. Semantics: AND across a field's DependsOn slice, OR within
-// a single condition's In list.
+// the SAME module. How a field's DependsOn slice combines is chosen by
+// ConfigField.DependsOnMatch: AND across entries by default ("" or "all"),
+// OR across them with "any". Either way, a single condition's In list is
+// itself an OR — the condition holds when the target field matches any one
+// of its values.
 //
 // A struct rather than an expression string on purpose — there is no parser to
 // write, ship, and keep behaviourally identical between Go and TypeScript.

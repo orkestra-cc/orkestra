@@ -497,7 +497,7 @@ func (m *AuthModule) ConfigSchema() []module.ConfigField {
 			Type:        module.FieldInt, Default: "7",
 		},
 
-		// Anti-abuse & Notifications — Tab 7. Operational guardrails on
+		// Anti-abuse & Notifications — the "antiabuse" group. Operational guardrails on
 		// top of the per-tier login/registration kill switches: who gets
 		// emailed on suspicious logins, which IPs/countries are
 		// allowed/blocked at the operator host, and when to retire stale
@@ -556,9 +556,10 @@ func (m *AuthModule) ConfigSchema() []module.ConfigField {
 			Type:        module.FieldBool, Default: "false",
 		},
 
-		// OAuth signup allowance — Phase 9 small backlog. The OAuth
-		// provider tabs above gate which buttons appear; this pair gates
-		// what happens when an OAuth login arrives for an unknown email.
+		// OAuth signup allowance — Phase 9 small backlog. The per-provider
+		// enable toggles (the "oauth.<provider>" child groups) gate which
+		// buttons appear; this pair gates what happens when an OAuth login
+		// arrives for an unknown email.
 		// When off, the callback returns 403 oauth_signup_disabled
 		// instead of provisioning a new account — useful when an
 		// operator wants to allow existing users to sign in via OAuth
