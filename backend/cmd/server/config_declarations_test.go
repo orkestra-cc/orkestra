@@ -50,6 +50,60 @@ func TestConfigDeclarationsAreValid(t *testing.T) {
 	}
 }
 
+// railAnchorModule is the module the admin settings rail was first migrated
+// onto (phase 4). It is named individually — rather than this test asserting
+// over a list of "modules that declare groups" — so that phase 5 migrating
+// notification/tenant/compliance keeps it passing untouched. Any module may
+// declare groups; this one must.
+const railAnchorModule = "auth"
+
+// TestConfigGroupsResolveThroughCatalog pins the mechanism that decides
+// whether /admin/modules/{name} renders the settings rail at all.
+//
+// The module's own tests call (&AuthModule{}).ConfigGroups() directly, which
+// proves the declaration exists but not that it is *reachable*: the admin
+// handler reads it through module.ConfigGroupsOf, which type-asserts
+// HasConfigGroups on whatever the catalog factory returned. If a refactor ever
+// made NewModule return a type that failed that assertion (a wrapper, or a
+// value where a pointer receiver was needed), ConfigGroupsOf would return nil,
+// the page would quietly fall back to the flat form, and every existing test
+// would still pass — TestEveryGroupHasFields skips a module with zero groups
+// rather than failing it.
+func TestConfigGroupsResolveThroughCatalog(t *testing.T) {
+	var found bool
+	for _, m := range buildAllModules(t) {
+		if m.Name() != railAnchorModule {
+			continue
+		}
+		found = true
+
+		groups := module.ConfigGroupsOf(m)
+		if len(groups) == 0 {
+			t.Fatalf("%s: ConfigGroupsOf returned no groups through the catalog — the "+
+				"module no longer satisfies module.HasConfigGroups, so /admin/modules/%s "+
+				"silently renders the flat form", railAnchorModule, railAnchorModule)
+		}
+
+		// The frontend only promotes the whole page to the rail layout when the
+		// tree has at least two top-level nodes (`hasPageRail` in
+		// configModel.ts). One root would serialize fine and still degrade to
+		// the stacked page — the same invisible failure in a different guise.
+		roots := 0
+		for _, g := range groups {
+			if g.Parent == "" {
+				roots++
+			}
+		}
+		if roots < 2 {
+			t.Errorf("%s: %d top-level group(s), want >= 2 — the admin page needs two roots "+
+				"to promote to the rail layout", railAnchorModule, roots)
+		}
+	}
+	if !found {
+		t.Fatalf("module %q is not registered in the catalog", railAnchorModule)
+	}
+}
+
 // TestEveryGroupHasFields catches the inverse defect from
 // ValidateConfigDeclarations: a declared group that nothing points at renders
 // an empty panel in the admin rail.
