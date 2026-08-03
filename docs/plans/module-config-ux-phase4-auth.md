@@ -614,13 +614,17 @@ literal.
 - [ ] **Step 1: Add the group labels**
 
 Add a `moduleConfig.auth.groups` object to **both** locale files, one entry per group key
-declared in Task 2 (11 of them), with `desc` for the five that carry a `Description`. The
-resolver looks up `moduleConfig.auth.groups.<groupKey>.label` through `t()`, and
-**`src/i18n.ts` sets no `keySeparator`**, so i18next applies its default `.` and splits
-the key into a path. A group key containing a dot must therefore be written **nested**,
-not as a literal flat key — `oauth.google` becomes `oauth` → `google`. The `oauth` object
-carries the parent's own `label`/`desc` alongside its four children, which is unambiguous:
-`…groups.oauth.label` resolves the parent, `…groups.oauth.google.label` the child.
+declared in Task 2 (11 of them), with `desc` for the six that carry a `Description` — take the count from the Go source, not from this sentence. The
+resolver looks up `moduleConfig.auth.groups.<groupKey>.label` through `t()`. `src/i18n.ts`
+sets no `keySeparator`, so i18next splits on `.` — but its lookup **also** rejoins split
+segments and resolves a literal flat property, so *both* shapes work. (Verified with a
+bare `i18next.init()` carrying one of each: both resolve. An earlier draft of this plan
+claimed the flat form would silently fall back to the backend literal; that was wrong.)
+
+Author the nested shape anyway — it keeps the four providers visibly grouped under their
+parent in the file. The `oauth` object carries the parent's own `label`/`desc` alongside
+its four children: `…groups.oauth.label` resolves the parent, `…groups.oauth.google.label`
+the child.
 
 ```jsonc
 // en.json
@@ -667,10 +671,11 @@ test and assert the child label resolves, so a wrong assumption fails loudly rat
 silently falling back to the English literal (which is exactly what a missing key looks
 like).
 
-> **Note for phase 5.** `auth`'s *field* keys are camelCase and dot-free, so only its group
-> keys are affected. `notification`'s field keys are not: `email.provider`,
-> `email.smtp.host` and friends will each split into a path too. Phase 5 must nest those
-> or configure `keySeparator: false`; deciding that is phase 5's call, not this one's.
+> **Note for phase 5.** `notification`'s *field* keys contain dots (`email.provider`,
+> `email.smtp.host`). Per the check above, either shape resolves, so this is a
+> readability choice rather than a correctness one — but pick one and hold it, because a
+> file mixing `"email.smtp.host": {…}` with a nested `email: { smtp: { host: {…} } }` is
+> the kind of thing that reads as a merge accident later.
 
 - [ ] **Step 2: Add the field labels**
 
