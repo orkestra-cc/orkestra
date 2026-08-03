@@ -1976,6 +1976,209 @@
       "noConfig": "This module has no configurable fields."
     }
   },
+  "moduleConfig": {
+    "auth": {
+      "groups": {
+        "registration": {
+          "label": "Registration",
+          "desc": "Who may create an account, and on which surface."
+        },
+        "login": {
+          "label": "Login & Sessions",
+          "desc": "Sign-in availability, lockout, and token lifetimes."
+        },
+        "password": {
+          "label": "Password Policy",
+          "desc": "Rules enforced on every password change, on both the operator console and the client app."
+        },
+        "mfa": {
+          "label": "MFA",
+          "desc": "Second-factor requirements and enrollment."
+        },
+        "oauth": {
+          "label": "OAuth Providers",
+          "desc": "Which providers are offered, and on which surface. Each provider's credentials appear once it is switched on.",
+          "google": { "label": "Google" },
+          "apple": { "label": "Apple" },
+          "github": { "label": "GitHub" },
+          "discord": { "label": "Discord" }
+        },
+        "antiabuse": {
+          "label": "Anti-abuse & Notifications",
+          "desc": "Rate limiting, IP and country rules, and the alerts they raise."
+        },
+        "sessions": {
+          "label": "Sessions & Account"
+        }
+      },
+      "fields": {
+        "googleClientId": { "label": "Client ID" },
+        "googleClientSecret": { "label": "Client Secret" },
+        "googleRedirectURL": { "label": "Redirect URL" },
+        "googleAndroidClientId": { "label": "Android Client ID" },
+        "googleIOSClientId": { "label": "iOS Client ID" },
+        "appleClientId": { "label": "Client ID" },
+        "appleTeamId": { "label": "Team ID" },
+        "appleKeyId": { "label": "Key ID" },
+        "applePrivateKey": {
+          "label": ".p8 Key (PEM)",
+          "desc": "Inline PEM content of your Apple Sign-In .p8 key"
+        },
+        "applePrivateKeyPath": {
+          "label": ".p8 Key Path",
+          "desc": "Filesystem path fallback if PEM is not inlined"
+        },
+        "appleRedirectURL": { "label": "Redirect URL" },
+        "appleIOSClientId": { "label": "iOS Client ID" },
+        "appleAndroidClientId": { "label": "Android Client ID" },
+        "githubClientId": { "label": "Client ID" },
+        "githubClientSecret": { "label": "Client Secret" },
+        "githubRedirectURL": { "label": "Redirect URL" },
+        "discordClientId": { "label": "Client ID" },
+        "discordClientSecret": { "label": "Client Secret" },
+        "discordRedirectURL": { "label": "Redirect URL" },
+        "registrationEnabledAdmin": {
+          "label": "Allow signups on operator console",
+          "desc": "OFF by default. When off, POST /v1/auth/operator/register returns 403 — operator accounts must be invited or created via /admin. The super_admin turns this on to allow self-service operator signups. The first account on a fresh install bypasses the switch so bootstrap is never blocked."
+        },
+        "registrationEnabledClient": {
+          "label": "Allow signups on client app",
+          "desc": "OFF by default. When off, POST /v1/auth/client/register returns 403 — Tier-2 clients cannot self-register until the super_admin enables it."
+        },
+        "defaultRoleClient": {
+          "label": "Default role for new client signups",
+          "desc": "System role assigned to a Tier-2 client account on signup. Lower-privilege roles are recommended."
+        },
+        "allowedEmailDomainsAdmin": {
+          "label": "Allowed email domains (operator)",
+          "desc": "Comma-separated allowlist (e.g. acme.com, ops.acme.com). Empty = any domain. Applied only to /v1/auth/operator/register."
+        },
+        "allowedEmailDomainsClient": {
+          "label": "Allowed email domains (client)",
+          "desc": "Comma-separated allowlist applied only to /v1/auth/client/register. Empty = any domain."
+        },
+        "loginEnabledAdmin": {
+          "label": "Allow logins on operator console",
+          "desc": "When off, POST /v1/auth/operator/login returns 403. Use during maintenance to lock out the operator console without taking the backend offline."
+        },
+        "loginEnabledClient": {
+          "label": "Allow logins on client app",
+          "desc": "When off, POST /v1/auth/client/login returns 403. Affects /v1/auth/client/* only."
+        },
+        "accountLockoutThreshold": {
+          "label": "Failed login attempts before lockout",
+          "desc": "Number of failed login attempts (per IP and per email) before the account is temporarily locked. Default 5."
+        },
+        "accountLockoutDuration": {
+          "label": "Lockout duration",
+          "desc": "Go duration string (e.g. 15m, 1h) — how long an IP/email stays locked after exceeding the threshold. Default 15m."
+        },
+        "accessTokenTTL": {
+          "label": "Access token lifetime",
+          "desc": "Go duration string — how long an issued access token stays valid. Shorter = tighter security but more refresh round-trips. Default 15m."
+        },
+        "passwordResetTokenTTL": {
+          "label": "Password reset link lifetime",
+          "desc": "Go duration string — how long the link in the reset-password email stays valid. Default 30m."
+        },
+        "mfaMethods": {
+          "label": "Allowed MFA methods",
+          "desc": "Comma-separated list of factor types users may enroll. Empty = all allowed. Valid: totp, webauthn, backup_codes."
+        },
+        "passwordMinLength": {
+          "label": "Minimum length",
+          "desc": "Minimum number of characters in a new password. Default 10. Recommend 12+."
+        },
+        "passwordMaxLength": {
+          "label": "Maximum length",
+          "desc": "Upper bound on password length. Argon2id is not a bottleneck; raise this only if you have a concrete reason."
+        },
+        "passwordRequireUpper": { "label": "Require an uppercase letter" },
+        "passwordRequireLower": { "label": "Require a lowercase letter" },
+        "passwordRequireDigit": { "label": "Require a digit" },
+        "passwordRequireSymbol": {
+          "label": "Require a symbol",
+          "desc": "Any non-alphanumeric character."
+        },
+        "breachedPasswordCheck": {
+          "label": "Reject breached passwords (HIBP)",
+          "desc": "k-anonymity lookup against haveibeenpwned.com — only the first 5 chars of the SHA-1 hash leave the server. Disable for air-gapped deployments."
+        },
+        "googleEnabledAdmin": { "label": "Google on operator console" },
+        "googleEnabledClient": { "label": "Google on client app" },
+        "appleEnabledAdmin": { "label": "Apple on operator console" },
+        "appleEnabledClient": { "label": "Apple on client app" },
+        "githubEnabledAdmin": { "label": "GitHub on operator console" },
+        "githubEnabledClient": { "label": "GitHub on client app" },
+        "discordEnabledAdmin": { "label": "Discord on operator console" },
+        "discordEnabledClient": { "label": "Discord on client app" },
+        "mfaEnabled": {
+          "label": "Require MFA for privileged users",
+          "desc": "Master switch, OFF by default so a fresh install's first super_admin can configure the platform without being blocked by an MFA prompt they never enrolled. Turn this ON only after enrolling a second factor (TOTP/passkey) — otherwise privileged users hit the enrollment grace window on their next login. When off, RoleRequiresMFA returns false; existing enrollments are not deleted and users can still verify voluntarily."
+        },
+        "mfaEnrollmentGraceDays": {
+          "label": "Enrollment grace period (days)",
+          "desc": "How many days a newly privileged user has to enroll a second factor before login returns 403 mfa_enrollment_required. Default 7."
+        },
+        "notifyUserOnNewDeviceLogin": {
+          "label": "Email user on first login from a new device",
+          "desc": "When on, sends an auth.new_device_login transactional email the first time a user logs in from a (deviceId, userUUID) pair the system has not seen before. Helps users notice unauthorised access on the same day it happens."
+        },
+        "notifyAdminOnSuspiciousLogin": {
+          "label": "Email admins on high-risk login",
+          "desc": "When on, every high-risk login (risk score ≥ 0.5) emails each address in the recipients list below in addition to notifying the user. Default off — recipients must be explicitly configured first."
+        },
+        "suspiciousLoginRecipients": {
+          "label": "Suspicious-login admin recipients",
+          "desc": "Comma-separated list of admin email addresses notified on high-risk logins. Empty disables the admin email half regardless of the toggle above."
+        },
+        "ipAllowlistAdmin": {
+          "label": "IP allowlist (operator console)",
+          "desc": "Comma-separated list of CIDR ranges allowed to reach the operator host. Empty = open. Applied only to operator host traffic — the client API is unaffected. Example: 10.0.0.0/8, 192.0.2.5/32."
+        },
+        "ipBlocklistAdmin": {
+          "label": "IP blocklist (operator console)",
+          "desc": "Comma-separated list of CIDR ranges denied at the operator host. Evaluated after the allowlist — a blocked entry rejects the request even if it also matches the allowlist."
+        },
+        "geoBlockCountries": {
+          "label": "Country blocklist",
+          "desc": "Comma-separated ISO-3166-1 alpha-2 country codes (e.g. RU, KP) that cannot complete login on either tier. Requires the GeoIP resolver (AUTH_GEOIP_DB_PATH) — empty when GeoIP is disabled has no effect."
+        },
+        "inactiveAccountAutoDisableDays": {
+          "label": "Auto-disable inactive accounts after (days)",
+          "desc": "Disables a user account when its lastLogin is older than the configured number of days. Checked at login time so a stale account is denied at the next attempt without a periodic job. 0 = disabled."
+        },
+        "revokeSessionsOnPasswordChange": {
+          "label": "Revoke sessions on password change",
+          "desc": "When on, a successful POST /v1/auth/{tier}/change-password also revokes the caller's current session id and every device-trust grant for the user. When off, password change leaves existing sessions alive (used for migrations or staged rollouts; not recommended in steady state). Default on."
+        },
+        "selfServiceAccountDeletionClient": {
+          "label": "Allow client users to self-delete (GDPR erase)",
+          "desc": "When on, Tier-2 client users can call POST /v1/me/dsr/erase to irreversibly wipe their personal data across every PII producer. When off (default), client tier returns 403 self_service_deletion_disabled and erasure must be triggered through the operator console. Operator-side erasure is unaffected."
+        },
+        "oauthAllowSignupAdmin": {
+          "label": "Allow OAuth signups on operator console",
+          "desc": "When off, OAuth callbacks on the operator host that resolve to an unknown email return 403 instead of creating a new operator account. Existing users can still sign in."
+        },
+        "oauthAllowSignupClient": {
+          "label": "Allow OAuth signups on client app",
+          "desc": "When off, OAuth callbacks on the client host that resolve to an unknown email return 403 instead of creating a new client account."
+        },
+        "mfaRequiredForRoles": {
+          "label": "Roles that require MFA",
+          "desc": "Comma-separated list of role names that mandate a second factor. Recognised system roles: super_admin, administrator, developer, manager, operator, guest. Recognised org roles: org_owner, org_admin, org_member. Empty restores the built-in default (super_admin, administrator, org_owner, org_admin)."
+        },
+        "recoveryCodesCount": {
+          "label": "Recovery codes issued on enrollment",
+          "desc": "Number of one-shot backup codes minted when a user confirms TOTP enrollment. Default 10. Range 1–50 — outside that the legacy default (10) is used."
+        },
+        "oauthAutoLinkByEmail": {
+          "label": "Auto-link OAuth provider to existing email account",
+          "desc": "When on (default), an OAuth callback for an existing Orkestra account (matched by email) attaches the provider to that user automatically. When off, the OAuth flow refuses with 403 oauth_link_disabled and the user must initiate linking from their account settings while authenticated. Recommended off for compliance-sensitive deployments."
+        }
+      }
+    }
+  },
   "setup": {
     "gate": {
       "errorTitle": "Cannot reach the Orkestra backend",

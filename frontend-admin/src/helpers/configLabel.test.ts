@@ -186,4 +186,85 @@ describe('translateConfigGroup', () => {
       )
     ).toBe('From addon ns (group desc)');
   });
+
+  // `src/i18n.ts` sets no `keySeparator`, so i18next falls back to its
+  // default `.` and splits every key into a path. auth's four OAuth
+  // sub-group keys contain a dot (`oauth.google`, `oauth.apple`, ...), so
+  // `t('moduleConfig.auth.groups.oauth.google.label')` must walk
+  // groups -> oauth -> google -> label through NESTED objects. This test
+  // proves that shape actually resolves — a wrong assumption here would
+  // fail *silently*, falling back to the backend's English literal, which
+  // is indistinguishable from "key not written yet".
+  it('resolves a nested group key (dotted) from a NESTED bundle — parent and child both resolve', () => {
+    i18n.addResourceBundle(
+      'en',
+      'translation',
+      {
+        moduleConfig: {
+          nestedcore: {
+            groups: {
+              oauth: {
+                label: 'OAuth Providers (parent, from core bundle)',
+                google: { label: 'Google (child, from core bundle)' }
+              }
+            }
+          }
+        }
+      },
+      true,
+      true
+    );
+
+    expect(
+      translateConfigGroup(i18n.t, 'nestedcore', {
+        key: 'oauth',
+        label: 'OAuth Providers'
+      })
+    ).toBe('OAuth Providers (parent, from core bundle)');
+
+    expect(
+      translateConfigGroup(i18n.t, 'nestedcore', {
+        key: 'oauth.google',
+        label: 'Google'
+      })
+    ).toBe('Google (child, from core bundle)');
+  });
+
+  // A literal JS property named "oauth.google" one level deep also
+  // resolves — verified here rather than assumed. i18next's `getPath`
+  // walks the split segments and, on a miss, re-joins trailing segments
+  // with `.` to retry as a single literal key (`getLastOfPath` in
+  // `node_modules/i18next/dist/cjs/i18next.js`), so a flat dotted property
+  // is not the silent-failure trap it might appear to be. This does NOT
+  // change what we author: the brief's nested shape is still correct
+  // (proven above) and is what we actually ship, since `oauth`'s own
+  // `label`/`desc` has to live somewhere and nesting its four children
+  // under it is the natural place — this test just records that the flat
+  // form isn't a load-bearing hazard we got lucky avoiding.
+  it('documents that i18next ALSO resolves a flat dotted-key property (not the trap it looks like)', () => {
+    i18n.addResourceBundle(
+      'en',
+      'translation',
+      {
+        moduleConfig: {
+          flatcore: {
+            groups: {
+              'oauth.google': {
+                label: 'Google (flat property, one level deep)'
+              }
+            }
+          }
+        }
+      },
+      true,
+      true
+    );
+
+    expect(
+      translateConfigGroup(i18n.t, 'flatcore', {
+        key: 'oauth.google',
+        label: 'Google (literal fallback, should not appear)'
+      })
+    ).toBe('Google (flat property, one level deep)');
+  });
 });
