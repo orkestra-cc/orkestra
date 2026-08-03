@@ -214,3 +214,35 @@ func TestValidateConfigDeclarations_UndeclaredParentAndDuplicateKey(t *testing.T
 		}
 	}
 }
+
+func TestValidateConfigDeclarations_DependsOnMatch(t *testing.T) {
+	base := []ConfigField{
+		{Key: "on", Label: "On", Type: FieldBool},
+		{Key: "dep", Label: "Dep", Type: FieldString,
+			DependsOn: []FieldCondition{{Key: "on", In: []string{"true"}}}},
+	}
+
+	for _, ok := range []string{"", "all", "any"} {
+		schema := append([]ConfigField(nil), base...)
+		schema[1].DependsOnMatch = ok
+		if err := ValidateConfigDeclarations(schema, nil); err != nil {
+			t.Errorf("DependsOnMatch %q = %v, want nil", ok, err)
+		}
+	}
+
+	schema := append([]ConfigField(nil), base...)
+	schema[1].DependsOnMatch = "either"
+	err := ValidateConfigDeclarations(schema, nil)
+	if err == nil {
+		t.Fatal("ValidateConfigDeclarations = nil, want an error for an unknown match mode")
+	}
+	if !strings.Contains(err.Error(), "either") {
+		t.Errorf("error %q does not name the offending value", err)
+	}
+
+	// A match mode with no conditions to match is a declaration mistake.
+	lone := []ConfigField{{Key: "a", Label: "A", Type: FieldString, DependsOnMatch: "any"}}
+	if err := ValidateConfigDeclarations(lone, nil); err == nil {
+		t.Fatal("ValidateConfigDeclarations = nil, want an error for a match mode without DependsOn")
+	}
+}

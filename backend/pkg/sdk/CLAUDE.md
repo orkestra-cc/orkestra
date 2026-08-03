@@ -155,11 +155,18 @@ and run `cd backend && go mod tidy` (the `backend-deps` make target).
   operator console.** `Advanced: true` collapses a field behind an
   "Advanced (N)" toggle on `/admin/modules/{name}`; `DependsOn`
   (`[]FieldCondition{{Key, In}}`) hides a field until another field of the
-  *same* module matches — AND across entries, OR within one entry's `In` (see
-  the matching contract documented on `FieldCondition` in `types.go`: a
-  `FieldBool` target compares both sides via the `parseBool` rule, everything
-  else is case-insensitive, whitespace-trimmed string equality). Both ride on
-  the `configSchema` the admin handler already serializes, so an addon that
+  *same* module matches — by default AND across entries, OR within one
+  entry's `In` (see the matching contract documented on `FieldCondition` in
+  `types.go`: a `FieldBool` target compares both sides via the `parseBool`
+  rule, everything else is case-insensitive, whitespace-trimmed string
+  equality). Set `DependsOnMatch: "any"` to OR across entries instead — for a
+  capability with more than one independent enable switch (e.g. an OAuth
+  provider's separate operator-console and client-app toggles), that is the
+  only way to show the field as soon as either is on; AND would require both,
+  and a single entry is wrong for the other switch. `ValidateConfigDeclarations`
+  rejects an unknown `DependsOnMatch` value and a `DependsOnMatch` set without
+  any `DependsOn` to combine. Both `Advanced` and `DependsOn` ride on the
+  `configSchema` the admin handler already serializes, so an addon that
   declares them gets the behavior with no frontend code to write.
 
 ## CI

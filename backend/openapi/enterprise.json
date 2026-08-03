@@ -1165,6 +1165,9 @@
               "null"
             ]
           },
+          "dependsOnMatch": {
+            "type": "string"
+          },
           "description": {
             "type": "string"
           },

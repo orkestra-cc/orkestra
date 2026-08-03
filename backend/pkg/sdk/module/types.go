@@ -102,11 +102,22 @@ type ConfigField struct {
 	Options     []string         `json:"options,omitempty" bson:"options,omitempty"` // valid values for FieldEnum (ignored for other types)
 	Advanced    bool             `json:"advanced,omitempty" bson:"advanced,omitempty"`
 	DependsOn   []FieldCondition `json:"dependsOn,omitempty" bson:"dependsOn,omitempty"`
-	Min         *int             `json:"min,omitempty" bson:"min,omitempty"`
-	Max         *int             `json:"max,omitempty" bson:"max,omitempty"`
-	Pattern     string           `json:"pattern,omitempty" bson:"pattern,omitempty"`
-	Placeholder string           `json:"placeholder,omitempty" bson:"placeholder,omitempty"`
-	HelpURL     string           `json:"helpUrl,omitempty" bson:"helpUrl,omitempty"`
+	// DependsOnMatch selects how the DependsOn conditions combine.
+	// "" and "all" (the default) require every condition to hold; "any"
+	// requires at least one.
+	//
+	// "any" exists because a capability can legitimately be enabled from more
+	// than one independent switch. Every OAuth provider in auth has two —
+	// one per audience surface — and its credentials are needed as soon as
+	// either is on. Without this, the only expressible rules are "both
+	// surfaces" (which strands a client-only deployment) or a single surface
+	// (which is simply wrong for the other).
+	DependsOnMatch string `json:"dependsOnMatch,omitempty" bson:"dependsOnMatch,omitempty"`
+	Min            *int   `json:"min,omitempty" bson:"min,omitempty"`
+	Max            *int   `json:"max,omitempty" bson:"max,omitempty"`
+	Pattern        string `json:"pattern,omitempty" bson:"pattern,omitempty"`
+	Placeholder    string `json:"placeholder,omitempty" bson:"placeholder,omitempty"`
+	HelpURL        string `json:"helpUrl,omitempty" bson:"helpUrl,omitempty"`
 }
 
 // CollectionSpec declares a MongoDB collection that a module owns.

@@ -113,6 +113,19 @@ func ValidateConfigDeclarations(schema []ConfigField, groups []ConfigGroup) erro
 				fmt.Sprintf("field %q has Min %d greater than Max %d", f.Key, *f.Min, *f.Max))
 		}
 
+		switch f.DependsOnMatch {
+		case "", "all", "any":
+		default:
+			problems = append(problems,
+				fmt.Sprintf("field %q has unknown DependsOnMatch %q (want \"all\" or \"any\")",
+					f.Key, f.DependsOnMatch))
+		}
+		if f.DependsOnMatch != "" && len(f.DependsOn) == 0 {
+			problems = append(problems,
+				fmt.Sprintf("field %q sets DependsOnMatch %q but declares no DependsOn",
+					f.Key, f.DependsOnMatch))
+		}
+
 		for _, c := range f.DependsOn {
 			target, known := fieldByKey[c.Key]
 			if !known {

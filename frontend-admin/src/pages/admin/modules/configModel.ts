@@ -1,4 +1,8 @@
-import type { ConfigField, ConfigGroup } from 'store/api/moduleApi';
+import type {
+  ConfigField,
+  ConfigGroup,
+  FieldCondition
+} from 'store/api/moduleApi';
 
 /** A node of the settings rail: one group, its own fields, and its children. */
 export interface GroupNode {
@@ -171,9 +175,11 @@ export const flattenTree = (tree: GroupNode[]): GroupNode[] => {
 
 /**
  * Whether a field should be rendered, given the module's current values.
- * AND across the field's conditions, OR within one condition's `in` list.
- * See `FieldCondition` in `store/api/moduleApi` for the matching contract this
- * implements — it is shared with the Go side and the two must not drift.
+ * How the field's conditions combine is chosen by `dependsOnMatch` — AND by
+ * default (`''`/`'all'`), OR when `'any'`; OR within one condition's `in`
+ * list either way. See `FieldCondition` in `store/api/moduleApi` for the
+ * matching contract this implements — it is shared with the Go side and the
+ * two must not drift.
  */
 export const isFieldVisible = (
   field: ConfigField,
@@ -181,7 +187,7 @@ export const isFieldVisible = (
   schema: ConfigField[]
 ): boolean => {
   if (!field.dependsOn || field.dependsOn.length === 0) return true;
-  return field.dependsOn.every(cond => {
+  const satisfied = (cond: FieldCondition): boolean => {
     const target = schema.find(f => f.key === cond.key);
     if (!target) return false;
     const stored = values[cond.key];
@@ -193,7 +199,10 @@ export const isFieldVisible = (
     }
     const actual = normalize(raw);
     return cond.in.some(v => normalize(v) === actual);
-  });
+  };
+  return field.dependsOnMatch === 'any'
+    ? field.dependsOn.some(satisfied)
+    : field.dependsOn.every(satisfied);
 };
 
 /** The subset of the schema that is currently visible, in schema order. */

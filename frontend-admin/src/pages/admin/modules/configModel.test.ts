@@ -148,6 +148,49 @@ describe('isFieldVisible', () => {
     const f = field({ key: 'dep', dependsOn: [{ key: 'nope', in: ['true'] }] });
     expect(isFieldVisible(f, {}, [f])).toBe(false);
   });
+
+  it("ORs the conditions when dependsOnMatch is 'any'", () => {
+    // Each OAuth provider has one toggle per audience surface, and its
+    // credentials are needed as soon as either is on.
+    const s = [
+      field({ key: 'admin', type: 'bool', default: 'false' }),
+      field({ key: 'client', type: 'bool', default: 'false' }),
+      field({
+        key: 'cred',
+        dependsOnMatch: 'any',
+        dependsOn: [
+          { key: 'admin', in: ['true'] },
+          { key: 'client', in: ['true'] }
+        ]
+      })
+    ];
+    expect(isFieldVisible(s[2], {}, s)).toBe(false);
+    expect(isFieldVisible(s[2], { admin: 'true' }, s)).toBe(true);
+    expect(isFieldVisible(s[2], { client: 'true' }, s)).toBe(true);
+    expect(isFieldVisible(s[2], { admin: 'true', client: 'true' }, s)).toBe(
+      true
+    );
+  });
+
+  it("keeps AND semantics when dependsOnMatch is absent or 'all'", () => {
+    const build = (match?: 'all' | 'any') => [
+      field({ key: 'a', type: 'bool', default: 'false' }),
+      field({ key: 'b', type: 'bool', default: 'false' }),
+      field({
+        key: 'dep',
+        dependsOnMatch: match,
+        dependsOn: [
+          { key: 'a', in: ['true'] },
+          { key: 'b', in: ['true'] }
+        ]
+      })
+    ];
+    for (const match of [undefined, 'all' as const]) {
+      const s = build(match);
+      expect(isFieldVisible(s[2], { a: 'true' }, s)).toBe(false);
+      expect(isFieldVisible(s[2], { a: 'true', b: 'true' }, s)).toBe(true);
+    }
+  });
 });
 
 describe('configCompleteness', () => {

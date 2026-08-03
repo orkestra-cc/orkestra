@@ -4,7 +4,8 @@ import { baseApi } from './baseApi';
 
 /**
  * Gates a field's visibility on the value of another field of the SAME module.
- * AND across a field's `dependsOn` array, OR within one condition's `in` list.
+ * How a field's `dependsOn` array combines is chosen by `dependsOnMatch`: AND
+ * across entries by default, OR within one condition's `in` list either way.
  *
  * Matching is type-aware, resolved against the *referenced* field's `type` —
  * this mirrors the contract documented on the backend's `FieldCondition`, and
@@ -47,6 +48,7 @@ export interface ConfigField {
   options?: string[];
   advanced?: boolean;
   dependsOn?: FieldCondition[];
+  dependsOnMatch?: 'all' | 'any';
   min?: number;
   max?: number;
   pattern?: string;

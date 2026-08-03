@@ -247,3 +247,47 @@ func TestModuleConfigResponse_OmitsEmptyConfigGroups(t *testing.T) {
 		t.Errorf("payload %s should omit configGroups when empty", raw)
 	}
 }
+
+func TestConfigField_DependsOnMatchTag(t *testing.T) {
+	f := ConfigField{
+		Key:            "googleClientId",
+		Label:          "Client ID",
+		Type:           FieldString,
+		DependsOnMatch: "any",
+		DependsOn: []FieldCondition{
+			{Key: "googleEnabledAdmin", In: []string{"true"}},
+			{Key: "googleEnabledClient", In: []string{"true"}},
+		},
+	}
+
+	raw, err := json.Marshal(f)
+	if err != nil {
+		t.Fatalf("json.Marshal = %v", err)
+	}
+	if !strings.Contains(string(raw), `"dependsOnMatch":"any"`) {
+		t.Errorf("json payload %s missing dependsOnMatch", raw)
+	}
+
+	// omitempty: a field using the default AND semantics must not carry the key.
+	bare, err := json.Marshal(ConfigField{Key: "k", Type: FieldString})
+	if err != nil {
+		t.Fatalf("json.Marshal bare = %v", err)
+	}
+	if strings.Contains(string(bare), "dependsOnMatch") {
+		t.Errorf("bare payload %s should omit dependsOnMatch", bare)
+	}
+
+	// bson: ConfigSchema is persisted and rewritten from the binary on every
+	// boot. A missing bson tag serves correctly then vanishes across a restart.
+	encoded, err := bson.Marshal(f)
+	if err != nil {
+		t.Fatalf("bson.Marshal = %v", err)
+	}
+	var back ConfigField
+	if err := bson.Unmarshal(encoded, &back); err != nil {
+		t.Fatalf("bson.Unmarshal = %v", err)
+	}
+	if back.DependsOnMatch != "any" {
+		t.Errorf("DependsOnMatch after bson round-trip = %q, want %q", back.DependsOnMatch, "any")
+	}
+}
