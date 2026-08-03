@@ -49,19 +49,32 @@ func (m *Module) Dependencies() []string { return []string{"user"} }
 func (m *Module) ConfigSchema() []module.ConfigField {
 	return []module.ConfigField{
 		{
-			Key: "provisioning.internal.mode", Label: "Internal tenant creation", Group: "Provisioning",
+			Key: "provisioning.internal.mode", Label: "Internal tenant creation", Group: "provisioning.internal",
 			Description: "Who may create internal (operator-tier) tenants. open: any authenticated user. manual (default): only platform administrators (system.tenants.admin). single: lock the platform to one internal tenant — once one exists, creation is blocked. A fresh install starts with zero internal tenants; the first is created from the setup wizard or the admin UI.",
 			Type:        module.FieldEnum, Default: models.ProvisioningModeManual,
 			Options: []string{models.ProvisioningModeOpen, models.ProvisioningModeManual, models.ProvisioningModeSingle},
 			EnvVar:  "TENANT_PROVISIONING_INTERNAL_MODE",
 		},
 		{
-			Key: "provisioning.external.mode", Label: "External tenant creation", Group: "Provisioning",
+			Key: "provisioning.external.mode", Label: "External tenant creation", Group: "provisioning.external",
 			Description: "Who may create external (client-tier) tenants. open: self-serve clients are provisioned automatically. manual (default): only platform administrators create client tenants and assign them to a Tier-2 user — self-serve signup never auto-provisions a tenant and external users cannot create one themselves.",
 			Type:        module.FieldEnum, Default: models.ProvisioningModeManual,
 			Options: []string{models.ProvisioningModeOpen, models.ProvisioningModeManual},
 			EnvVar:  "TENANT_PROVISIONING_EXTERNAL_MODE",
 		},
+	}
+}
+
+// ConfigGroups splits the two provisioning policies onto the full-page rail by
+// tenant tier — the internal (operator) vs external (client) distinction that
+// governs data isolation everywhere else in the platform. Two top-level groups
+// (one field each) are the minimum that promotes the page to the rail layout.
+func (m *Module) ConfigGroups() []module.ConfigGroup {
+	return []module.ConfigGroup{
+		{Key: "provisioning.internal", Label: "Internal provisioning (Tier-1)", Order: 1,
+			Description: "Who may create internal, operator-tier tenants."},
+		{Key: "provisioning.external", Label: "External provisioning (Tier-2)", Order: 2,
+			Description: "Who may create external, client-tier tenants."},
 	}
 }
 

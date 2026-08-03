@@ -2600,6 +2600,36 @@
           "support_email": { "label": "Email di supporto (nei template)" }
         }
       }
+    },
+    "tenant": {
+      "groups": {
+        "provisioning": {
+          "internal": {
+            "label": "Provisioning interno (Tier-1)",
+            "desc": "Chi può creare tenant interni, di tier operatore."
+          },
+          "external": {
+            "label": "Provisioning esterno (Tier-2)",
+            "desc": "Chi può creare tenant esterni, di tier client."
+          }
+        }
+      },
+      "fields": {
+        "provisioning": {
+          "internal": {
+            "mode": {
+              "label": "Creazione tenant interni",
+              "desc": "Chi può creare tenant interni (tier operatore). open: qualsiasi utente autenticato. manual (default): solo gli amministratori di piattaforma (system.tenants.admin). single: blocca la piattaforma su un unico tenant interno — una volta che ne esiste uno, la creazione è bloccata. Un'installazione nuova parte con zero tenant interni; il primo si crea dal wizard di setup o dall'admin UI."
+            }
+          },
+          "external": {
+            "mode": {
+              "label": "Creazione tenant esterni",
+              "desc": "Chi può creare tenant esterni (tier client). open: i client self-serve sono provisionati automaticamente. manual (default): solo gli amministratori di piattaforma creano tenant client e li assegnano a un utente Tier-2 — la registrazione self-serve non provisiona mai automaticamente un tenant e gli utenti esterni non possono crearne uno."
+            }
+          }
+        }
+      }
     }
   },
   "setup": {
