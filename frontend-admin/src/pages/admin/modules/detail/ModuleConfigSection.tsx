@@ -42,6 +42,7 @@ const ModuleConfigSection: React.FC<ModuleConfigSectionProps> = ({
     groupTree,
     flatNodes,
     form,
+    fieldNames,
     secretStatus,
     envLoading,
     saving,
@@ -94,6 +95,7 @@ const ModuleConfigSection: React.FC<ModuleConfigSectionProps> = ({
       includeKeys={keys}
       control={form.control}
       register={form.register}
+      fieldNames={fieldNames}
       secretStatus={secretStatus}
       moduleName={mod.moduleName}
     />
@@ -148,6 +150,7 @@ const ModuleConfigSection: React.FC<ModuleConfigSectionProps> = ({
                   schema={schema}
                   control={form.control}
                   register={form.register}
+                  fieldNames={fieldNames}
                   secretStatus={secretStatus}
                   onSelectGroup={setActiveKey}
                 />

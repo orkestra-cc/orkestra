@@ -191,6 +191,13 @@ export const flattenTree = (tree: GroupNode[]): GroupNode[] => {
  * list either way. See `FieldCondition` in `store/api/moduleApi` for the
  * matching contract this implements — it is shared with the Go side and the
  * two must not drift.
+ *
+ * `values` is keyed by the backend's schema key, always — that is the one
+ * keying this whole module speaks, and it is what lets the same predicate
+ * serve `configCompleteness` (handed the backend's `configValues` directly)
+ * and the live form. react-hook-form values are keyed by register name
+ * instead (`buildFieldNames`, because RHF parses "." as a path separator);
+ * a form-side caller re-keys with `toSchemaValues` before calling in here.
  */
 export const isFieldVisible = (
   field: ConfigField,

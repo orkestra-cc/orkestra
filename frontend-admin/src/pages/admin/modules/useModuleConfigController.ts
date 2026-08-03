@@ -15,6 +15,7 @@ import {
 import {
   useModuleConfigForm,
   collectDiff,
+  toSchemaValues,
   type ConfigFormValues
 } from './useModuleConfigForm';
 import { translateConfigGroup } from 'helpers/configLabel';
@@ -40,6 +41,16 @@ export interface ModuleConfigController {
   flatNodes: GroupNode[];
   form: UseFormReturn<ConfigFormValues>;
   defaults: ConfigFormValues;
+  /**
+   * Schema key → react-hook-form register name (`buildFieldNames`), built
+   * once per form by `useModuleConfigForm`. Handed down to every renderer
+   * that registers a field, so a dotted key like `email.smtp.host` is never
+   * given to RHF verbatim (it would parse it as a path and hide the edit
+   * from `dirtyFields` and from the save diff). Every other key on this
+   * interface — `visibleKeys`, `dirtyKeys`, `errorKeys`, `perGroup` — is a
+   * schema key, matching `GroupNode.fieldKeys`.
+   */
+  fieldNames: ReadonlyMap<string, string>;
   secretStatus: Record<string, boolean>;
   envLoading: boolean;
   saving: boolean;
@@ -117,7 +128,10 @@ export const useModuleConfigController = (
   // module with no declared environments, which skips the query above) the
   // module-list snapshot is the best available baseline.
   const configSource = envConfig?.configValues ?? mod?.configValues;
-  const { form, defaults } = useModuleConfigForm(schema, configSource);
+  const { form, defaults, fieldNames } = useModuleConfigForm(
+    schema,
+    configSource
+  );
 
   // Re-seed the form whenever the server-known baseline changes: the
   // initial environment fetch resolving, switching environments, or a
@@ -159,7 +173,11 @@ export const useModuleConfigController = (
   // Live values for visibility (dependsOn can reference a field in a
   // different group than the one currently on screen) and for the save
   // bar's cross-group aggregation below.
-  const values = useWatch({ control: form.control }) as ConfigFormValues;
+  const watched = useWatch({ control: form.control }) as ConfigFormValues;
+  // Register names in, schema keys out — everything downstream of here
+  // (`visibleFields`, `GroupNode.fieldKeys`, the save payload) is keyed by
+  // the schema key.
+  const values = toSchemaValues(schema, watched, fieldNames);
   const { errors, dirtyFields } = form.formState;
 
   // Deliberately NOT useMemo here: react-hook-form mutates its `errors`
@@ -167,11 +185,28 @@ export const useModuleConfigController = (
   // changes), so a memo keyed on `[errors, ...]` silently freezes on the
   // first value it ever saw.
   const visibleKeys = new Set(visibleFields(schema, values).map(f => f.key));
+  // Walked schema-first rather than `Object.keys(dirtyFields)`-first: those
+  // keys are register names, and intersecting them with `visibleKeys`
+  // (schema keys) is what silently emptied both sets for every dotted-key
+  // module — `dirtyFields` reported the synthesized `email` branch, which
+  // matches no schema key at all.
   const dirtyKeys = new Set(
-    Object.keys(dirtyFields).filter(key => visibleKeys.has(key))
+    schema
+      .filter(
+        f =>
+          visibleKeys.has(f.key) &&
+          Boolean(dirtyFields[fieldNames.get(f.key) ?? f.key])
+      )
+      .map(f => f.key)
   );
   const errorKeys = new Set(
-    Object.keys(errors).filter(key => visibleKeys.has(key))
+    schema
+      .filter(
+        f =>
+          visibleKeys.has(f.key) &&
+          Boolean(errors[fieldNames.get(f.key) ?? f.key])
+      )
+      .map(f => f.key)
   );
   const dirtyCount = dirtyKeys.size;
   const errorCount = errorKeys.size;
@@ -198,7 +233,12 @@ export const useModuleConfigController = (
   const onSave = async () => {
     if (!mod) return;
     const formValues = form.getValues();
-    const { config, secrets } = collectDiff(schema, formValues, defaults);
+    const { config, secrets } = collectDiff(
+      schema,
+      formValues,
+      defaults,
+      fieldNames
+    );
     const keysBeingSaved = [...Object.keys(config), ...Object.keys(secrets)];
     if (keysBeingSaved.length === 0) return;
 
@@ -211,7 +251,15 @@ export const useModuleConfigController = (
     // validity would strand an operator editing something unrelated behind
     // a field they can't even see, with no way to unblock themselves short
     // of fixing someone else's incomplete setup.
-    const valid = await form.trigger(keysBeingSaved);
+    //
+    // `collectDiff` returns schema keys; `trigger` addresses fields by their
+    // register name, so a dotted key handed straight to it would validate
+    // nothing at all and vacuously report "valid".
+    const valid = await form.trigger(
+      keysBeingSaved
+        .map(key => fieldNames.get(key))
+        .filter((name): name is string => name !== undefined)
+    );
     if (!valid) return;
 
     setError(null);
@@ -233,11 +281,14 @@ export const useModuleConfigController = (
       // read it as a fresh (already-saved) edit and re-send it, matching
       // buildDefaults' "a secret always starts empty" rule synchronously
       // instead of waiting on the network.
-      const secretKeys = schema
+      // Register names, not schema keys — `resetValues` is a form-values
+      // object, so clearing `email.smtp.password` under its schema key would
+      // add a dead property and leave the real field holding the plaintext.
+      const secretNames = schema
         .filter(f => f.type === 'secret')
-        .map(f => f.key);
+        .map(f => fieldNames.get(f.key) ?? f.key);
       const resetValues: ConfigFormValues = { ...formValues };
-      for (const key of secretKeys) resetValues[key] = '';
+      for (const name of secretNames) resetValues[name] = '';
       form.reset(resetValues);
       setSuccess(true);
       setTimeout(() => setSuccess(false), 3000);
@@ -265,6 +316,7 @@ export const useModuleConfigController = (
     flatNodes,
     form,
     defaults,
+    fieldNames,
     secretStatus,
     envLoading,
     saving,

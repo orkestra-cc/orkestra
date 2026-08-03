@@ -4,7 +4,7 @@ import { renderWithProviders } from 'test/render';
 import i18n from '../../../i18n';
 import type { ConfigField } from 'store/api/moduleApi';
 import ModuleConfigFields from './ModuleConfigFields';
-import { useModuleConfigForm } from './useModuleConfigForm';
+import { buildFieldNames, useModuleConfigForm } from './useModuleConfigForm';
 
 const field = (over: Partial<ConfigField> & { key: string }): ConfigField => ({
   label: over.key,
@@ -26,13 +26,14 @@ const Harness: React.FC<{
   includeKeys?: string[];
   secretStatus?: Record<string, boolean>;
 }> = ({ schema, values, includeKeys, secretStatus }) => {
-  const { form } = useModuleConfigForm(schema, values);
+  const { form, fieldNames } = useModuleConfigForm(schema, values);
   return (
     <ModuleConfigFields
       schema={schema}
       moduleName="demo"
       control={form.control}
       register={form.register}
+      fieldNames={fieldNames}
       includeKeys={includeKeys}
       secretStatus={secretStatus}
     />
@@ -57,8 +58,13 @@ const render = (schema: ConfigField[], values: Record<string, string>) => {
   // mount), so a same-value fireEvent is silently swallowed. Detour through
   // a different value first so the second change is a genuine delta and
   // actually reaches the resolver, mirroring what a real edit does.
+  //
+  // The DOM `name` is the register name, not the schema key — they differ the
+  // moment a key contains a "." (see `buildFieldNames`), so this probe has to
+  // resolve through the same mapping the component registers with.
+  const fieldNames = buildFieldNames(schema);
   for (const key of Object.keys(values)) {
-    const el = document.querySelector(`[name="${key}"]`);
+    const el = document.querySelector(`[name="${fieldNames.get(key) ?? key}"]`);
     if (!el) continue;
     fireEvent.change(el, {
       target: { value: `${values[key]}${PROBE_SUFFIX}` }

@@ -187,6 +187,40 @@ describe('isFieldVisible', () => {
     );
   });
 
+  it('resolves a dependsOn target whose key contains dots', () => {
+    // Every fixture in this repo used dot-free keys, which is how the
+    // react-hook-form path-separator bug reached production on `notification`
+    // (11 of 11 keys dotted) and `tenant` (2 of 2). This pins the contract
+    // that keeps `configModel` mapping-free: the values handed in here are
+    // always keyed by the backend's schema key — never by a register name —
+    // so a form-side caller must re-key with `toSchemaValues` first.
+    const s = [
+      field({
+        key: 'email.provider',
+        type: 'enum',
+        default: 'noop',
+        options: ['noop', 'smtp']
+      }),
+      field({
+        key: 'email.smtp.host',
+        dependsOn: [{ key: 'email.provider', in: ['smtp'] }]
+      })
+    ];
+    expect(isFieldVisible(s[1], { 'email.provider': 'smtp' }, s)).toBe(true);
+    expect(isFieldVisible(s[1], { 'email.provider': 'noop' }, s)).toBe(false);
+    // Nothing stored falls back to the target's declared default, as ever.
+    expect(isFieldVisible(s[1], {}, s)).toBe(false);
+    // A nested object — what RHF writes when a dotted name is registered
+    // verbatim — must never satisfy the condition by accident.
+    expect(
+      isFieldVisible(
+        s[1],
+        { email: 'smtp' } as unknown as Record<string, string>,
+        s
+      )
+    ).toBe(false);
+  });
+
   it("keeps AND semantics when dependsOnMatch is absent or 'all'", () => {
     const build = (match?: 'all' | 'any') => [
       field({ key: 'a', type: 'bool', default: 'false' }),

@@ -386,15 +386,24 @@ the whole reason that path exists.
 Phases 1–2 are shippable on their own with no user-visible change, so a problem in phase
 3 does not leave a half-finished redesign in production.
 
-**Phase 5 has a blocker to clear first.** `notification`'s field keys contain dots
+**Phase 5's blocker is cleared.** `notification`'s field keys contain dots
 (`email.provider`, `email.smtp.host`), and react-hook-form treats `.` in a field `name` as
-a path separator while `ModuleConfigFields` registers by `field.key` verbatim — so an edit
-to a dotted key lands at a nested path that `collectDiff`'s flat `values[field.key]`
-lookup never reads, and is silently dropped on save. Verified against the installed
-`react-hook-form@7.76.1`; auth's keys are all dot-free, so phase 4 is unaffected. Phase 5
-must decide how to escape or flatten RHF field names before migrating `notification` —
-see the "Note for phase 5" in [phase 4](module-config-ux-phase4-auth.md) for the
-reproduction and the affected call sites.
+a path separator while `ModuleConfigFields` registered by `field.key` verbatim — so an
+edit to a dotted key landed at a nested path that `collectDiff`'s flat `values[field.key]`
+lookup never read, and was silently dropped on save. This turned out to be worse than
+"dropped on save": `dirtyFields` reported the synthesized `email` branch, which intersects
+no schema key, so the save bar never appeared and Save never enabled — `/admin/modules/notification`
+and `/admin/modules/tenant` were unconfigurable in production, not merely lossy.
+
+Resolved by **escaping at registration**, the first of the three options phase 4 listed:
+`buildFieldNames(schema)` (`useModuleConfigForm.ts`) maps each schema key to a `\w`-only,
+collision-free react-hook-form register name, and `toSchemaValues` re-keys form values
+back at the boundary. Renaming `notification`'s keys was rejected — the key is the
+persisted `module_configs` field name and the env-var seed identity, so renaming would
+have been a data migration for a UI bug. The schema key remains the source of truth for
+the payload, `dependsOn`, group membership, i18n and `configCompleteness`; see
+"Config keys vs form field names" in [`frontend-admin/CLAUDE.md`](../../frontend-admin/CLAUDE.md).
+Phase 5 can migrate `notification`/`tenant`/`compliance` without further form-layer work.
 
 Each phase gets its own task-level plan as it starts. Phase 1:
 [`module-config-ux-phase1-sdk.md`](module-config-ux-phase1-sdk.md).

@@ -695,10 +695,21 @@ like).
 > shape, which is built as `shape[field.key]` — a literal property name, not a path, so
 > RHF's dot-path error keys would not line up with it either.
 >
-> auth is unaffected: all 62 of its keys are dot-free. Phase 5 has to decide how to
+> auth is unaffected: all 62 of its keys are dot-free. Phase 5 had to decide how to
 > reconcile the two — escape the name at registration and unescape in the diff, flatten
 > RHF's values before `collectDiff` reads them, or rename `notification`'s keys — and that
 > decision is independent of, and not settled by, the i18n question above.
+>
+> **✅ Resolved: escape at registration.** `buildFieldNames(schema)`
+> (`useModuleConfigForm.ts`) maps each schema key to a `\w`-only register name, unique by
+> construction, derived once per form and threaded to every consumer that touches form
+> state; `toSchemaValues` re-keys back at the boundary so `configModel.ts` keeps working
+> in schema keys and needs no mapping argument. Renaming the backend keys was rejected —
+> they are the persisted `module_configs` field names. The symptom in production was in
+> fact worse than the "silently dropped on save" predicted here: `dirtyFields` reported
+> the synthesized `email` branch, so the save bar never rendered and Save never enabled at
+> all. See "Config keys vs form field names" in
+> [`frontend-admin/CLAUDE.md`](../../frontend-admin/CLAUDE.md).
 
 - [ ] **Step 2: Add the field labels**
 

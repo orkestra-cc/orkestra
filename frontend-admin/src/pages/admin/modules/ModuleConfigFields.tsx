@@ -14,7 +14,7 @@ import {
 import type { ConfigField } from 'store/api/moduleApi';
 import { isFieldVisible } from './configModel';
 import { translateConfigField } from 'helpers/configLabel';
-import type { ConfigFormValues } from './useModuleConfigForm';
+import { toSchemaValues, type ConfigFormValues } from './useModuleConfigForm';
 
 /**
  * Translates a resolver error code (see `buildYupSchema` in
@@ -50,6 +50,15 @@ export interface ModuleConfigFieldsProps {
   control: Control<ConfigFormValues>;
   register: UseFormRegister<ConfigFormValues>;
   /**
+   * Schema key → react-hook-form register name (`buildFieldNames`). Every
+   * `register`/`Controller`/`errors` lookup below goes through it, because a
+   * key like `email.smtp.host` handed to RHF verbatim is read as a path and
+   * nests the operator's edit out of sight of dirty tracking and the save
+   * diff. Everything else here — `includeKeys`, `dependsOn`, `secretStatus`,
+   * the i18n lookups — still keys by the schema key.
+   */
+  fieldNames: ReadonlyMap<string, string>;
+  /**
    * Map of secret key → whether that secret is already stored on the backend.
    * Controls the "Set" badge and the placeholder hint for password inputs.
    */
@@ -76,6 +85,7 @@ const ModuleConfigFields: React.FC<ModuleConfigFieldsProps> = ({
   schema,
   control,
   register,
+  fieldNames,
   secretStatus,
   includeKeys,
   moduleName
@@ -86,7 +96,9 @@ const ModuleConfigFields: React.FC<ModuleConfigFieldsProps> = ({
   >({});
   // Whole-form watch: a field's visibility can depend on any other field in
   // the schema (dependsOn), not just ones this particular panel renders.
-  const values = useWatch({ control }) as ConfigFormValues;
+  // Re-keyed to schema keys because `dependsOn` targets are schema keys.
+  const watched = useWatch({ control }) as ConfigFormValues;
+  const values = toSchemaValues(schema, watched, fieldNames);
   const { errors } = useFormState({ control });
 
   const toggleReveal = (key: string) => {
@@ -104,16 +116,20 @@ const ModuleConfigFields: React.FC<ModuleConfigFieldsProps> = ({
     <>
       {fields.map(field => {
         const key = field.key;
+        // Everything RHF touches — register, Controller, the errors lookup,
+        // and the DOM id/name that mirror them — goes through `name`.
+        // Everything else stays on `key`.
+        const name = fieldNames.get(key) ?? key;
         const label = translateConfigField(t, moduleName, field, 'label');
         const desc = translateConfigField(t, moduleName, field, 'desc');
-        const fieldError = errors[key]?.message as string | undefined;
+        const fieldError = errors[name]?.message as string | undefined;
 
         if (field.type === 'secret') {
           const alreadySet = Boolean(secretStatus?.[key]);
           const revealed = revealedSecrets[key] || false;
           return (
             <Form.Group key={key} className="mb-3">
-              <Form.Label className="fs-10 fw-semibold" htmlFor={`cfg-${key}`}>
+              <Form.Label className="fs-10 fw-semibold" htmlFor={`cfg-${name}`}>
                 {label}
                 {alreadySet && (
                   <span className="badge badge-subtle-success ms-2 fs-11">
@@ -123,7 +139,7 @@ const ModuleConfigFields: React.FC<ModuleConfigFieldsProps> = ({
               </Form.Label>
               <InputGroup size="sm" hasValidation>
                 <Form.Control
-                  id={`cfg-${key}`}
+                  id={`cfg-${name}`}
                   type={revealed ? 'text' : 'password'}
                   placeholder={
                     alreadySet
@@ -131,7 +147,7 @@ const ModuleConfigFields: React.FC<ModuleConfigFieldsProps> = ({
                       : t('adminModules.configFields.secretEnterPlaceholder')
                   }
                   isInvalid={Boolean(fieldError)}
-                  {...register(key)}
+                  {...register(name)}
                 />
                 <Button
                   variant="outline-secondary"
@@ -159,11 +175,11 @@ const ModuleConfigFields: React.FC<ModuleConfigFieldsProps> = ({
           return (
             <Form.Group key={key} className="mb-3">
               <Controller
-                name={key}
+                name={name}
                 control={control}
                 render={({ field: rhfField }) => (
                   <Form.Check
-                    id={`cfg-${key}`}
+                    id={`cfg-${name}`}
                     type="switch"
                     label={label}
                     name={rhfField.name}
@@ -185,15 +201,15 @@ const ModuleConfigFields: React.FC<ModuleConfigFieldsProps> = ({
           const options = field.options ?? [];
           return (
             <Form.Group key={key} className="mb-3">
-              <Form.Label className="fs-10 fw-semibold" htmlFor={`cfg-${key}`}>
+              <Form.Label className="fs-10 fw-semibold" htmlFor={`cfg-${name}`}>
                 {label}
                 {field.required && <span className="text-danger ms-1">*</span>}
               </Form.Label>
               <Form.Select
-                id={`cfg-${key}`}
+                id={`cfg-${name}`}
                 size="sm"
                 isInvalid={Boolean(fieldError)}
-                {...register(key)}
+                {...register(name)}
               >
                 {!field.required && (
                   <option value="">
@@ -220,13 +236,13 @@ const ModuleConfigFields: React.FC<ModuleConfigFieldsProps> = ({
 
         return (
           <Form.Group key={key} className="mb-3">
-            <Form.Label className="fs-10 fw-semibold" htmlFor={`cfg-${key}`}>
+            <Form.Label className="fs-10 fw-semibold" htmlFor={`cfg-${name}`}>
               {label}
               {field.required && <span className="text-danger ms-1">*</span>}
             </Form.Label>
             {isStringList ? (
               <Form.Control
-                id={`cfg-${key}`}
+                id={`cfg-${name}`}
                 as="textarea"
                 rows={2}
                 size="sm"
@@ -236,16 +252,16 @@ const ModuleConfigFields: React.FC<ModuleConfigFieldsProps> = ({
                   t('adminModules.configFields.stringListPlaceholder')
                 }
                 isInvalid={Boolean(fieldError)}
-                {...register(key)}
+                {...register(name)}
               />
             ) : (
               <Form.Control
-                id={`cfg-${key}`}
+                id={`cfg-${name}`}
                 type={field.type === 'int' ? 'number' : 'text'}
                 size="sm"
                 placeholder={field.placeholder || field.default || ''}
                 isInvalid={Boolean(fieldError)}
-                {...register(key)}
+                {...register(name)}
               />
             )}
             {fieldError && (

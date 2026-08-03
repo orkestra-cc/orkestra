@@ -26,7 +26,87 @@ const safeRegExp = (pattern?: string): RegExp | null => {
   }
 };
 
+/**
+ * Values keyed by the backend's own config key (`ConfigField.key`) — the
+ * currency of the whole model layer: the API payload, `dependsOn`, group
+ * membership, i18n keys and `configCompleteness` are all keyed this way.
+ */
+export type ConfigValues = Record<string, string>;
+
+/**
+ * Values keyed by the name react-hook-form registers the field under (see
+ * `buildFieldNames`). This is what `form.getValues()`, `useWatch`,
+ * `formState.dirtyFields` and `formState.errors` speak — and *only* them.
+ * Re-key with `toSchemaValues` before handing them to anything in
+ * `configModel.ts`.
+ */
 export type ConfigFormValues = Record<string, string>;
+
+/**
+ * Maps each config field key to the name react-hook-form registers it under.
+ *
+ * RHF reads "." in a field name as a path separator, so registering
+ * `email.smtp.host` verbatim writes the edit to {email:{smtp:{host}}} while
+ * every consumer here reads the flat key — the edit is then invisible to
+ * dirty tracking and to the save diff. That made `/admin/modules/notification`
+ * (11 of 11 keys dotted) and `/admin/modules/tenant` (2 of 2) impossible to
+ * configure: the field showed the typed value and Save never enabled.
+ *
+ * The sanitisation target is `\w` rather than "just strip the dots" because
+ * RHF's own `isKey` (`/^\w*$/`) is the test that decides whether a name is
+ * treated as one literal property or parsed as a path — and its path parser
+ * also splits on `[`, `]`, `,` and strips quotes and `|`. Matching `isKey`
+ * exactly is what makes the flat read/write guaranteed rather than merely
+ * likely for whatever key a fork's addon declares.
+ *
+ * Sanitising is not enough on its own: `a.b` and `a_b` collapse onto the same
+ * name, so uniqueness is enforced with a numeric suffix. The result is a pure,
+ * deterministic function of the schema and its declaration order, so any two
+ * callers deriving it from the same schema agree — which is why the argument
+ * is optional everywhere below and passing the memoised instance is only a
+ * performance choice, never a correctness one.
+ *
+ * The schema key stays the source of truth everywhere else. This mapping is a
+ * form-layer detail and must never reach the wire.
+ */
+export const buildFieldNames = (schema: ConfigField[]): Map<string, string> => {
+  const names = new Map<string, string>();
+  const taken = new Set<string>();
+  for (const field of schema) {
+    // A key of nothing but punctuation would sanitise to '' — still a usable
+    // RHF name, but an unreadable one in the DOM and in devtools.
+    const base = field.key.replace(/\W/g, '_') || 'field';
+    let name = base;
+    for (let n = 2; taken.has(name); n++) name = `${base}_${n}`;
+    taken.add(name);
+    names.set(field.key, name);
+  }
+  return names;
+};
+
+/**
+ * Re-keys form values (register names) back to schema keys.
+ *
+ * Translating once at this boundary is why `isFieldVisible`, `visibleFields`
+ * and `configCompleteness` keep working in schema keys and need no mapping
+ * argument — `configCompleteness` is handed the backend's `configValues`
+ * directly, so a shared "sometimes name-keyed, sometimes not" signature there
+ * would be a standing invitation to the same class of bug.
+ *
+ * A missing name yields `''`, which `isFieldVisible` already treats exactly
+ * like an absent key (both fall back to the target's declared default).
+ */
+export const toSchemaValues = (
+  schema: ConfigField[],
+  values: ConfigFormValues,
+  fieldNames: ReadonlyMap<string, string> = buildFieldNames(schema)
+): ConfigValues => {
+  const out: ConfigValues = {};
+  for (const field of schema) {
+    out[field.key] = values[fieldNames.get(field.key) ?? field.key] ?? '';
+  }
+  return out;
+};
 
 /**
  * Seeds the form. A stored value wins over the schema default; a secret always
@@ -44,24 +124,29 @@ export type ConfigFormValues = Record<string, string>;
  * `bool` is the deliberate exception: a switch has no blank state, so a
  * stored `''` still collapses to the default, matching the `bool` branch in
  * `ModuleConfigFields`.
+ *
+ * `configValues` comes off the wire and is keyed by the schema key; the result
+ * seeds react-hook-form and is therefore keyed by the register name.
  */
 export const buildDefaults = (
   schema: ConfigField[],
-  configValues: Record<string, string> | undefined
+  configValues: ConfigValues | undefined,
+  fieldNames: ReadonlyMap<string, string> = buildFieldNames(schema)
 ): ConfigFormValues => {
   const stored = configValues ?? {};
   const out: ConfigFormValues = {};
   for (const f of schema) {
+    const name = fieldNames.get(f.key) ?? f.key;
     if (f.type === 'secret') {
-      out[f.key] = '';
+      out[name] = '';
       continue;
     }
     const v = stored[f.key];
     if (f.type === 'bool') {
-      out[f.key] = v !== undefined && v !== '' ? v : f.default || '';
+      out[name] = v !== undefined && v !== '' ? v : f.default || '';
       continue;
     }
-    out[f.key] = v ?? f.default ?? '';
+    out[name] = v ?? f.default ?? '';
   }
   return out;
 };
@@ -74,7 +159,8 @@ export const buildDefaults = (
  * visible cause — the operator cannot reach the control the error belongs to.
  */
 export const buildYupSchema = (
-  schema: ConfigField[]
+  schema: ConfigField[],
+  fieldNames: ReadonlyMap<string, string> = buildFieldNames(schema)
 ): yup.ObjectSchema<Record<string, unknown>> => {
   const shape: Record<string, yup.StringSchema> = {};
 
@@ -85,7 +171,18 @@ export const buildYupSchema = (
       'orkestra-field',
       'invalid',
       function validateField(value) {
-        const values = (this.parent ?? {}) as ConfigFormValues;
+        // `this.parent` is the register-name-keyed form object, so it has to
+        // be re-keyed before `isFieldVisible` can resolve a `dependsOn`
+        // target. Deliberately per-test rather than cached across the pass:
+        // even auth's 62 fields make this a few thousand map lookups per
+        // keystroke, which is noise next to the 62 yup rules already running,
+        // and a cache keyed on object identity would have to outlive the
+        // validation pass to pay for itself.
+        const values = toSchemaValues(
+          schema,
+          (this.parent ?? {}) as ConfigFormValues,
+          fieldNames
+        );
         if (!isFieldVisible(field, values, schema)) return true;
 
         const raw = (value ?? '').trim();
@@ -118,7 +215,7 @@ export const buildYupSchema = (
       }
     );
 
-    shape[field.key] = rule;
+    shape[fieldNames.get(field.key) ?? field.key] = rule;
   }
 
   return yup.object(shape);
@@ -130,23 +227,34 @@ export const buildYupSchema = (
  * A hidden field is excluded in both directions — its edit is not written back,
  * and its stored value is left alone. Switching an OAuth provider off must not
  * discard its client secret.
+ *
+ * `values` and `defaults` are register-name-keyed (they come straight from
+ * `form.getValues()` and `buildDefaults`); the returned payload is keyed by
+ * the schema key, which is what the backend stores and what the API contract
+ * `{ name, environment, config?, secrets? }` requires.
  */
 export const collectDiff = (
   schema: ConfigField[],
   values: ConfigFormValues,
-  defaults: ConfigFormValues
-): { config: Record<string, string>; secrets: Record<string, string> } => {
-  const config: Record<string, string> = {};
-  const secrets: Record<string, string> = {};
+  defaults: ConfigFormValues,
+  fieldNames: ReadonlyMap<string, string> = buildFieldNames(schema)
+): { config: ConfigValues; secrets: ConfigValues } => {
+  const config: ConfigValues = {};
+  const secrets: ConfigValues = {};
+
+  // Re-keyed once up front so the visibility check, the comparison and the
+  // payload below all speak the schema key.
+  const current = toSchemaValues(schema, values, fieldNames);
+  const baseline = toSchemaValues(schema, defaults, fieldNames);
 
   for (const field of schema) {
-    if (!isFieldVisible(field, values, schema)) continue;
-    const next = values[field.key] ?? '';
+    if (!isFieldVisible(field, current, schema)) continue;
+    const next = current[field.key] ?? '';
     if (field.type === 'secret') {
       if (next.trim() !== '') secrets[field.key] = next;
       continue;
     }
-    if (next !== (defaults[field.key] ?? '')) config[field.key] = next;
+    if (next !== (baseline[field.key] ?? '')) config[field.key] = next;
   }
 
   return { config, secrets };
@@ -155,6 +263,15 @@ export const collectDiff = (
 export interface ModuleConfigForm {
   form: UseFormReturn<ConfigFormValues>;
   defaults: ConfigFormValues;
+  /**
+   * Schema key → react-hook-form register name, derived from the schema
+   * exactly once per form. Every consumer that touches form state — the
+   * field renderer's `register`/`Controller`/`errors` lookups, the
+   * controller's dirty/error tallies, `collectDiff` — threads this same
+   * instance rather than deriving its own, so the mapping is built once no
+   * matter how many panels render.
+   */
+  fieldNames: ReadonlyMap<string, string>;
 }
 
 /**
@@ -164,9 +281,13 @@ export interface ModuleConfigForm {
  */
 export const useModuleConfigForm = (
   schema: ConfigField[],
-  configValues: Record<string, string> | undefined
+  configValues: ConfigValues | undefined
 ): ModuleConfigForm => {
-  const defaults = buildDefaults(schema, configValues);
+  // Memoised on the same `[schema]` identity the resolver keys off — see the
+  // EMPTY_SCHEMA constant in useModuleConfigController for why a `?? []`
+  // fallback anywhere upstream would quietly defeat both.
+  const fieldNames = useMemo(() => buildFieldNames(schema), [schema]);
+  const defaults = buildDefaults(schema, configValues, fieldNames);
   // yupResolver validates the whole values object on every call, and
   // mode: 'onChange' calls it per keystroke — on a large module (auth's 62
   // fields) rebuilding the yup object from scratch on every render is pure
@@ -175,14 +296,14 @@ export const useModuleConfigForm = (
   const resolver = useMemo(
     () =>
       yupResolver(
-        buildYupSchema(schema)
+        buildYupSchema(schema, fieldNames)
       ) as unknown as Resolver<ConfigFormValues>,
-    [schema]
+    [schema, fieldNames]
   );
   const form = useForm<ConfigFormValues>({
     defaultValues: defaults,
     resolver,
     mode: 'onChange'
   });
-  return { form, defaults };
+  return { form, defaults, fieldNames };
 };

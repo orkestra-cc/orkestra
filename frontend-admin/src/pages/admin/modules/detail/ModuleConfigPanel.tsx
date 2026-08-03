@@ -7,7 +7,7 @@ import type { GroupNode } from '../configModel';
 import { visibleFields } from '../configModel';
 import { translateConfigGroup } from 'helpers/configLabel';
 import ModuleConfigFields from '../ModuleConfigFields';
-import type { ConfigFormValues } from '../useModuleConfigForm';
+import { toSchemaValues, type ConfigFormValues } from '../useModuleConfigForm';
 
 export interface ModuleConfigPanelProps {
   node: GroupNode;
@@ -15,6 +15,12 @@ export interface ModuleConfigPanelProps {
   schema: ConfigField[];
   control: Control<ConfigFormValues>;
   register: UseFormRegister<ConfigFormValues>;
+  /**
+   * Schema key → react-hook-form register name (`buildFieldNames`), threaded
+   * straight through to `ModuleConfigFields`. `node.fieldKeys` and everything
+   * else here stay in schema keys.
+   */
+  fieldNames: ReadonlyMap<string, string>;
   secretStatus?: Record<string, boolean>;
   /**
    * Moves the surrounding rail to another group. Consumed by the
@@ -62,12 +68,16 @@ const ModuleConfigPanel: React.FC<ModuleConfigPanelProps> = ({
   schema,
   control,
   register,
+  fieldNames,
   secretStatus,
   onSelectGroup
 }) => {
   const { t } = useTranslation();
   const [showAdvanced, setShowAdvanced] = useState(false);
-  const values = useWatch({ control }) as ConfigFormValues;
+  const watched = useWatch({ control }) as ConfigFormValues;
+  // Register names in, schema keys out — `visibleFields` below resolves
+  // `dependsOn` targets, which are schema keys.
+  const values = toSchemaValues(schema, watched, fieldNames);
 
   const label = translateConfigGroup(t, moduleName, node);
   const description = node.description
@@ -181,6 +191,7 @@ const ModuleConfigPanel: React.FC<ModuleConfigPanelProps> = ({
         includeKeys={mainKeys}
         control={control}
         register={register}
+        fieldNames={fieldNames}
         secretStatus={secretStatus}
       />
       {visibleAdvancedCount > 0 && (
@@ -204,6 +215,7 @@ const ModuleConfigPanel: React.FC<ModuleConfigPanelProps> = ({
                 includeKeys={advancedFieldKeys}
                 control={control}
                 register={register}
+                fieldNames={fieldNames}
                 secretStatus={secretStatus}
               />
             </div>

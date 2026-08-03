@@ -269,9 +269,13 @@ describe('ModuleConfigSection', () => {
 
   it('accumulates unsaved changes across two different groups', async () => {
     const user = userEvent.setup();
+    // `email.smtp.host` deliberately: the per-group breakdown intersects
+    // `GroupNode.fieldKeys` (schema keys) with the dirty set, and the dirty
+    // set is derived from react-hook-form's register names. A dotted key is
+    // the only shape that catches those two drifting apart.
     const mod = moduleWith(
       [
-        field({ key: 'a', label: 'Alpha', group: 'g1' }),
+        field({ key: 'email.smtp.host', label: 'Alpha', group: 'g1' }),
         field({ key: 'b', label: 'Beta', group: 'g2' })
       ],
       {
@@ -368,6 +372,60 @@ describe('ModuleConfigSection', () => {
     // `required` rule if it were.
     await waitFor(() => expect(capturedBody).not.toBeNull());
     expect(capturedBody).toEqual({ config: { b: 'new' } });
+  });
+
+  it('dirty-tracks and saves an edit to a dotted config key', async () => {
+    // react-hook-form reads "." in a field name as a path separator, so
+    // registering `email.smtp.host` verbatim wrote the operator's edit to
+    // {email:{smtp:{host}}} while every consumer here reads the flat key.
+    // The edit was then invisible to `dirtyFields` (which reported the
+    // synthesized "email" branch), so the save bar never appeared, Save never
+    // enabled, and `collectDiff` saw no change even when forced. That made
+    // /admin/modules/notification (11 of 11 keys dotted) and
+    // /admin/modules/tenant (2 of 2) impossible to configure at all. Every
+    // fixture in this repo used dot-free keys, which is why it shipped.
+    const user = userEvent.setup();
+    const mod = moduleWith(
+      [field({ key: 'email.smtp.host', label: 'SMTP host' })],
+      { configValues: { 'email.smtp.host': 'old.example.com' } }
+    );
+
+    let capturedBody: unknown = null;
+    server.use(
+      http.patch(
+        url('/v1/admin/modules/:name/environments/:env'),
+        async ({ request }) => {
+          capturedBody = await request.json();
+          return HttpResponse.json({
+            environment: 'production',
+            configValues: { 'email.smtp.host': 'new.example.com' },
+            secretStatus: {},
+            updatedAt: ''
+          });
+        }
+      )
+    );
+
+    renderWithProviders(<TestHost mod={mod} />);
+
+    await user.clear(await screen.findByLabelText('SMTP host'));
+    await user.type(screen.getByLabelText('SMTP host'), 'new.example.com');
+
+    // The reported symptom: the field shows the new value but the bar never
+    // counts it, so Save stays disabled forever.
+    expect(await screen.findByText(/1 unsaved change/)).toBeInTheDocument();
+    const save = screen.getByRole('button', { name: 'Save Changes' });
+    expect(save).toBeEnabled();
+
+    await user.click(save);
+
+    // The payload must still be keyed by the backend's real schema key —
+    // the register-name mapping is a form-layer detail and must not leak
+    // into the API contract.
+    await waitFor(() => expect(capturedBody).not.toBeNull());
+    expect(capturedBody).toEqual({
+      config: { 'email.smtp.host': 'new.example.com' }
+    });
   });
 
   it('clears a typed secret from the form immediately after a successful save', async () => {

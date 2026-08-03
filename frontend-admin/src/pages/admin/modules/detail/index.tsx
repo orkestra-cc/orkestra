@@ -70,6 +70,7 @@ const ModuleDetailPage: React.FC = () => {
     groupTree,
     flatNodes,
     form,
+    fieldNames,
     secretStatus,
     envLoading,
     saving,
@@ -386,6 +387,7 @@ const ModuleDetailPage: React.FC = () => {
                     schema={schema}
                     control={form.control}
                     register={form.register}
+                    fieldNames={fieldNames}
                     secretStatus={secretStatus}
                     onSelectGroup={setActive}
                   />

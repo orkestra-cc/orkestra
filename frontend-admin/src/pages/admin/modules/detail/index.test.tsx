@@ -45,9 +45,21 @@ const demoModule: ModuleConfig = {
   configValues: {},
   secretStatus: {},
   configSchema: [
-    field({ key: 'toggle', label: 'Enable Google', group: 'oauth' }),
-    field({ key: 'clientId', label: 'Client ID', group: 'oauth.google' }),
-    field({ key: 'minLen', label: 'Minimum length', group: 'password' })
+    field({
+      key: 'oauth.google.enabled',
+      label: 'Enable Google',
+      group: 'oauth'
+    }),
+    field({
+      key: 'oauth.google.client_id',
+      label: 'Client ID',
+      group: 'oauth.google'
+    }),
+    field({
+      key: 'password.min_length',
+      label: 'Minimum length',
+      group: 'password'
+    })
   ],
   configGroups: [
     { key: 'oauth', label: 'OAuth Providers', order: 1 },
@@ -179,7 +191,7 @@ describe('ModuleDetailPage sections', () => {
           capturedBody = await request.json();
           return HttpResponse.json({
             environment: 'production',
-            configValues: { minLen: '10' },
+            configValues: { 'password.min_length': '10' },
             secretStatus: {},
             updatedAt: ''
           });
@@ -192,7 +204,7 @@ describe('ModuleDetailPage sections', () => {
     await user.click(screen.getByRole('button', { name: 'Save Changes' }));
 
     await waitFor(() => expect(capturedBody).not.toBeNull());
-    expect(capturedBody).toEqual({ config: { minLen: '10' } });
+    expect(capturedBody).toEqual({ config: { 'password.min_length': '10' } });
     expect(patchCount).toBe(1);
   });
 
@@ -277,9 +289,17 @@ describe('ModuleDetailPage sections', () => {
     stubAll({
       ...demoModule,
       configSchema: [
-        field({ key: 'clientId', label: 'Client ID', group: 'oauth.google' }),
+        field({
+          key: 'oauth.google.client_id',
+          label: 'Client ID',
+          group: 'oauth.google'
+        }),
         field({ key: 'appleId', label: 'Apple ID', group: 'oauth.apple' }),
-        field({ key: 'minLen', label: 'Minimum length', group: 'password' })
+        field({
+          key: 'password.min_length',
+          label: 'Minimum length',
+          group: 'password'
+        })
       ],
       configGroups: [
         { key: 'oauth', label: 'OAuth Providers', order: 1 },
@@ -334,19 +354,23 @@ describe('ModuleDetailPage sections', () => {
       ...demoModule,
       configSchema: [
         field({
-          key: 'toggle',
+          key: 'oauth.google.enabled',
           label: 'Enable Google',
           type: 'bool',
           default: 'false',
           group: 'oauth'
         }),
         field({
-          key: 'clientId',
+          key: 'oauth.google.client_id',
           label: 'Client ID',
           group: 'oauth.google',
-          dependsOn: [{ key: 'toggle', in: ['true'] }]
+          dependsOn: [{ key: 'oauth.google.enabled', in: ['true'] }]
         }),
-        field({ key: 'minLen', label: 'Minimum length', group: 'password' })
+        field({
+          key: 'password.min_length',
+          label: 'Minimum length',
+          group: 'password'
+        })
       ]
     } as ModuleConfig);
 
@@ -391,17 +415,17 @@ describe('ModuleDetailPage sections', () => {
       ...demoModule,
       configSchema: [
         field({
-          key: 'toggle',
+          key: 'oauth.google.enabled',
           label: 'Enable Google',
           type: 'bool',
           default: 'false',
           group: 'oauth'
         }),
         field({
-          key: 'minLen',
+          key: 'password.min_length',
           label: 'Minimum length',
           group: 'password',
-          dependsOn: [{ key: 'toggle', in: ['true'] }]
+          dependsOn: [{ key: 'oauth.google.enabled', in: ['true'] }]
         })
       ]
     } as ModuleConfig);
