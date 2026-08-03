@@ -381,4 +381,46 @@ describe('ModuleDetailPage sections', () => {
       screen.getByRole('button', { name: 'Save Changes' })
     ).toBeInTheDocument();
   });
+
+  it('falls back to the unqualified empty state for a top-level group with no parent to point at', async () => {
+    // The other half of the branch above. A root group has no parent, so
+    // there is no group to name and nowhere for a "Go to" button to lead —
+    // naming one would be inventing a destination. It gets the plain
+    // sentence and no button, and must still not raise a save bar.
+    stubAll({
+      ...demoModule,
+      configSchema: [
+        field({
+          key: 'toggle',
+          label: 'Enable Google',
+          type: 'bool',
+          default: 'false',
+          group: 'oauth'
+        }),
+        field({
+          key: 'minLen',
+          label: 'Minimum length',
+          group: 'password',
+          dependsOn: [{ key: 'toggle', in: ['true'] }]
+        })
+      ]
+    } as ModuleConfig);
+
+    renderAt('?section=password');
+    expect(
+      await screen.findByText(
+        'These settings appear once the options they depend on are enabled.'
+      )
+    ).toBeInTheDocument();
+    const panel = screen
+      .getByRole('heading', { name: 'Password Policy' })
+      .closest('.card') as HTMLElement;
+    expect(
+      within(panel).queryByRole('button', { name: /^Go to / })
+    ).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Minimum length')).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Save Changes' })
+    ).not.toBeInTheDocument();
+  });
 });

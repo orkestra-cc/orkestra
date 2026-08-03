@@ -556,10 +556,12 @@ func (m *AuthModule) ConfigSchema() []module.ConfigField {
 			Type:        module.FieldBool, Default: "false",
 		},
 
-		// OAuth signup allowance — Phase 9 small backlog. The per-provider
-		// enable toggles (the "oauth.<provider>" child groups) gate which
-		// buttons appear; this pair gates what happens when an OAuth login
-		// arrives for an unknown email.
+		// OAuth signup allowance — Phase 9 small backlog. The eight
+		// per-provider enable toggles live in this same "oauth" parent
+		// group, declared above; they gate which buttons appear, and the
+		// credentials in the "oauth.<provider>" child groups DependsOn
+		// them. This pair is a different axis: it gates what happens when
+		// an OAuth login arrives for an unknown email.
 		// When off, the callback returns 403 oauth_signup_disabled
 		// instead of provisioning a new account — useful when an
 		// operator wants to allow existing users to sign in via OAuth
