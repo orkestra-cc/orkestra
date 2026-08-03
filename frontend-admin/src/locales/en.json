@@ -2566,6 +2566,18 @@
         }
       }
     },
+    "compliance": {
+      "groups": {
+        "soc2": { "label": "SOC2 evidence", "desc": "The SOC2 evidence page and API, off unless you pursue certification." },
+        "retention": { "label": "Retention & DSR", "desc": "How long anonymized tombstones and generated DSR exports are kept." }
+      },
+      "fields": {
+        "soc2_enabled": { "label": "SOC2 evidence", "desc": "Expose the SOC2 evidence admin page and API. Off by default — enable only for deployments pursuing SOC2 certification." },
+        "auto_cleanup_enabled": { "label": "Retention auto-cleanup", "desc": "Run a daily job that hard-deletes anonymized user tombstones past the retention window. OFF by default — this is irreversible bulk deletion." },
+        "retention_years": { "label": "Retention years", "desc": "Years an anonymized tombstone is kept before auto-cleanup may hard-delete it." },
+        "export_retention_days": { "label": "Export retention (days)", "desc": "Days a generated DSR export stays downloadable before it expires." }
+      }
+    },
     "notification": {
       "groups": {
         "delivery": {

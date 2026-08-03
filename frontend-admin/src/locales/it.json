@@ -2566,6 +2566,18 @@
         }
       }
     },
+    "compliance": {
+      "groups": {
+        "soc2": { "label": "Evidenze SOC2", "desc": "La pagina e l'API delle evidenze SOC2, disattivate salvo che tu persegua la certificazione." },
+        "retention": { "label": "Retention e DSR", "desc": "Per quanto tempo sono conservati i tombstone anonimizzati e gli export DSR generati." }
+      },
+      "fields": {
+        "soc2_enabled": { "label": "Evidenze SOC2", "desc": "Espone la pagina admin e l'API delle evidenze SOC2. Disattivato di default — abilitalo solo per deployment che perseguono la certificazione SOC2." },
+        "auto_cleanup_enabled": { "label": "Auto-cleanup retention", "desc": "Esegue un job giornaliero che cancella definitivamente i tombstone anonimizzati oltre la finestra di retention. DISATTIVO di default — è una cancellazione massiva irreversibile." },
+        "retention_years": { "label": "Anni di retention", "desc": "Anni per cui un tombstone anonimizzato è conservato prima che l'auto-cleanup possa cancellarlo definitivamente." },
+        "export_retention_days": { "label": "Retention export (giorni)", "desc": "Giorni per cui un export DSR generato resta scaricabile prima di scadere." }
+      }
+    },
     "notification": {
       "groups": {
         "delivery": {
