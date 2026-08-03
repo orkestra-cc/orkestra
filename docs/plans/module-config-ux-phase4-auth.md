@@ -671,11 +671,34 @@ test and assert the child label resolves, so a wrong assumption fails loudly rat
 silently falling back to the English literal (which is exactly what a missing key looks
 like).
 
-> **Note for phase 5.** `notification`'s *field* keys contain dots (`email.provider`,
-> `email.smtp.host`). Per the check above, either shape resolves, so this is a
-> readability choice rather than a correctness one — but pick one and hold it, because a
-> file mixing `"email.smtp.host": {…}` with a nested `email: { smtp: { host: {…} } }` is
-> the kind of thing that reads as a merge accident later.
+> **Note for phase 5 — dotted field keys are two separate problems, and only one of them
+> is cosmetic.** `notification`'s *field* keys contain dots (`email.provider`,
+> `email.smtp.host`).
+>
+> **i18n: cosmetic.** Per the check above, i18next resolves either shape, so whether the
+> bundle spells the key flat (`"email.smtp.host": {…}`) or nested
+> (`email: { smtp: { host: {…} } }`) is a readability choice — but pick one and hold it,
+> because a file mixing both reads as a merge accident later.
+>
+> **React Hook Form: a correctness bug, and phase 5 must fix it before migrating
+> `notification`.** RHF treats `.` in a field `name` as a **path separator**, and
+> `ModuleConfigFields` registers by `field.key` verbatim (`register(key)` /
+> `Controller name={key}`). Verified against the installed `react-hook-form@7.76.1`:
+> seeding `defaultValues: { 'email.provider': 'smtp' }` and then typing into
+> `register('email.provider')` leaves `getValues()` as
+> `{"email.provider":"smtp","email":{"provider":"ses"}}` — the flat property keeps the
+> *stale seeded* value while the edit lands at the nested path. `collectDiff`
+> (`useModuleConfigForm.ts`) reads `values[field.key]` flat, so it compares the untouched
+> seed against the defaults, finds no change, and **silently drops the operator's edit on
+> save**. The same flat-lookup assumption is baked into `isFieldVisible`/`visibleFields`
+> (a `dependsOn` naming a dotted key would never see the live value) and into the yup
+> shape, which is built as `shape[field.key]` — a literal property name, not a path, so
+> RHF's dot-path error keys would not line up with it either.
+>
+> auth is unaffected: all 62 of its keys are dot-free. Phase 5 has to decide how to
+> reconcile the two — escape the name at registration and unescape in the diff, flatten
+> RHF's values before `collectDiff` reads them, or rename `notification`'s keys — and that
+> decision is independent of, and not settled by, the i18n question above.
 
 - [ ] **Step 2: Add the field labels**
 

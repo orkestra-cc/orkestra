@@ -386,5 +386,15 @@ the whole reason that path exists.
 Phases 1–2 are shippable on their own with no user-visible change, so a problem in phase
 3 does not leave a half-finished redesign in production.
 
+**Phase 5 has a blocker to clear first.** `notification`'s field keys contain dots
+(`email.provider`, `email.smtp.host`), and react-hook-form treats `.` in a field `name` as
+a path separator while `ModuleConfigFields` registers by `field.key` verbatim — so an edit
+to a dotted key lands at a nested path that `collectDiff`'s flat `values[field.key]`
+lookup never reads, and is silently dropped on save. Verified against the installed
+`react-hook-form@7.76.1`; auth's keys are all dot-free, so phase 4 is unaffected. Phase 5
+must decide how to escape or flatten RHF field names before migrating `notification` —
+see the "Note for phase 5" in [phase 4](module-config-ux-phase4-auth.md) for the
+reproduction and the affected call sites.
+
 Each phase gets its own task-level plan as it starts. Phase 1:
 [`module-config-ux-phase1-sdk.md`](module-config-ux-phase1-sdk.md).
