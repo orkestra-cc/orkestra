@@ -73,8 +73,11 @@ export const buildFieldNames = (schema: ConfigField[]): Map<string, string> => {
   const names = new Map<string, string>();
   const taken = new Set<string>();
   for (const field of schema) {
-    // A key of nothing but punctuation would sanitise to '' — still a usable
-    // RHF name, but an unreadable one in the DOM and in devtools.
+    // The `|| 'field'` guards exactly one case: an **empty** key. The replace
+    // is char-for-char, so punctuation never vanishes — `'...'` becomes
+    // `'___'`, not `''` (pinned by a test). An empty key would otherwise
+    // yield `name === ''`, which `register('')` happily accepts as a field
+    // that renders and can never be dirtied. Do not delete this as dead.
     const base = field.key.replace(/\W/g, '_') || 'field';
     let name = base;
     for (let n = 2; taken.has(name); n++) name = `${base}_${n}`;
@@ -82,6 +85,35 @@ export const buildFieldNames = (schema: ConfigField[]): Map<string, string> => {
     names.set(field.key, name);
   }
   return names;
+};
+
+/**
+ * Resolves one field's register name, refusing to guess.
+ *
+ * Every lookup goes through here rather than `fieldNames.get(key) ?? key`.
+ * That fallback is unreachable today — every caller derives the map from the
+ * very schema it is iterating — but it degrades to the **raw dotted key**,
+ * which is precisely the bug this module exists to prevent: a caller that
+ * ever pairs a `fieldNames` with a different `schema` would silently hand
+ * `email.smtp.host` back to react-hook-form, with no error, no type error and
+ * no failing test. Same reasoning that keeps `configModel.ts` from taking an
+ * optional mapping parameter: a silently-wrong default is worse than a loud
+ * failure. This throws, naming the key, in every environment — the state is
+ * structurally impossible, and if it ever happens the whole form is broken
+ * anyway, so a precise message beats a mysterious dead Save button.
+ */
+export const fieldNameOf = (
+  fieldNames: ReadonlyMap<string, string>,
+  key: string
+): string => {
+  const name = fieldNames.get(key);
+  if (name === undefined) {
+    throw new Error(
+      `useModuleConfigForm: no react-hook-form name registered for config key "${key}" — ` +
+        'the fieldNames map was built from a different schema than the one being rendered'
+    );
+  }
+  return name;
 };
 
 /**
@@ -93,8 +125,10 @@ export const buildFieldNames = (schema: ConfigField[]): Map<string, string> => {
  * directly, so a shared "sometimes name-keyed, sometimes not" signature there
  * would be a standing invitation to the same class of bug.
  *
- * A missing name yields `''`, which `isFieldVisible` already treats exactly
- * like an absent key (both fall back to the target's declared default).
+ * A name the form holds no value for yields `''`, which `isFieldVisible`
+ * already treats exactly like an absent key (both fall back to the target's
+ * declared default). A key with no *name* is a different thing entirely and
+ * throws — see `fieldNameOf`.
  */
 export const toSchemaValues = (
   schema: ConfigField[],
@@ -103,7 +137,7 @@ export const toSchemaValues = (
 ): ConfigValues => {
   const out: ConfigValues = {};
   for (const field of schema) {
-    out[field.key] = values[fieldNames.get(field.key) ?? field.key] ?? '';
+    out[field.key] = values[fieldNameOf(fieldNames, field.key)] ?? '';
   }
   return out;
 };
@@ -136,7 +170,7 @@ export const buildDefaults = (
   const stored = configValues ?? {};
   const out: ConfigFormValues = {};
   for (const f of schema) {
-    const name = fieldNames.get(f.key) ?? f.key;
+    const name = fieldNameOf(fieldNames, f.key);
     if (f.type === 'secret') {
       out[name] = '';
       continue;
@@ -173,11 +207,28 @@ export const buildYupSchema = (
       function validateField(value) {
         // `this.parent` is the register-name-keyed form object, so it has to
         // be re-keyed before `isFieldVisible` can resolve a `dependsOn`
-        // target. Deliberately per-test rather than cached across the pass:
-        // even auth's 62 fields make this a few thousand map lookups per
-        // keystroke, which is noise next to the 62 yup rules already running,
-        // and a cache keyed on object identity would have to outlive the
-        // validation pass to pay for itself.
+        // target.
+        //
+        // This is O(n²) in field count — n rules each re-keying n fields — and
+        // it runs on every keystroke, since `mode: 'onChange'` validates the
+        // whole object. Benchmarked on this repo: **62 fields (auth, the
+        // largest module in the base) ≈ 0.8 ms per pass, ~5% of a 16.7 ms
+        // frame** — imperceptible, and the reason this stays as it is. But it
+        // is a real share of the pass rather than noise beside the yup rules,
+        // and it scales roughly quadratically: **250 fields ≈ 9.6 ms, ~58% of
+        // a frame**, which is felt as input lag. A fork addon that large
+        // should re-key once per pass instead of once per rule — see the
+        // staleness constraint below for why that cache is not trivial.
+        //
+        // Not cached, and NOT because a cache would miss — `this.parent` is one
+        // stable reference across every rule in a pass, so a WeakMap would hit
+        // n−1 times immediately. The reason is staleness: RHF mutates its
+        // `_formValues` in place and yup hands back that same reference when
+        // the object is unchanged, so an identity-keyed cache would happily
+        // serve a re-key computed from *last* keystroke's values — silently
+        // resolving `dependsOn` against stale state, which is a correctness
+        // bug traded for 0.47 ms. Any cache here has to be invalidated by
+        // something other than object identity.
         const values = toSchemaValues(
           schema,
           (this.parent ?? {}) as ConfigFormValues,
@@ -215,7 +266,7 @@ export const buildYupSchema = (
       }
     );
 
-    shape[fieldNames.get(field.key) ?? field.key] = rule;
+    shape[fieldNameOf(fieldNames, field.key)] = rule;
   }
 
   return yup.object(shape);

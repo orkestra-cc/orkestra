@@ -15,6 +15,7 @@ import {
 import {
   useModuleConfigForm,
   collectDiff,
+  fieldNameOf,
   toSchemaValues,
   type ConfigFormValues
 } from './useModuleConfigForm';
@@ -195,7 +196,7 @@ export const useModuleConfigController = (
       .filter(
         f =>
           visibleKeys.has(f.key) &&
-          Boolean(dirtyFields[fieldNames.get(f.key) ?? f.key])
+          Boolean(dirtyFields[fieldNameOf(fieldNames, f.key)])
       )
       .map(f => f.key)
   );
@@ -204,7 +205,7 @@ export const useModuleConfigController = (
       .filter(
         f =>
           visibleKeys.has(f.key) &&
-          Boolean(errors[fieldNames.get(f.key) ?? f.key])
+          Boolean(errors[fieldNameOf(fieldNames, f.key)])
       )
       .map(f => f.key)
   );
@@ -256,9 +257,7 @@ export const useModuleConfigController = (
     // register name, so a dotted key handed straight to it would validate
     // nothing at all and vacuously report "valid".
     const valid = await form.trigger(
-      keysBeingSaved
-        .map(key => fieldNames.get(key))
-        .filter((name): name is string => name !== undefined)
+      keysBeingSaved.map(key => fieldNameOf(fieldNames, key))
     );
     if (!valid) return;
 
@@ -286,7 +285,7 @@ export const useModuleConfigController = (
       // add a dead property and leave the real field holding the plaintext.
       const secretNames = schema
         .filter(f => f.type === 'secret')
-        .map(f => fieldNames.get(f.key) ?? f.key);
+        .map(f => fieldNameOf(fieldNames, f.key));
       const resetValues: ConfigFormValues = { ...formValues };
       for (const name of secretNames) resetValues[name] = '';
       form.reset(resetValues);

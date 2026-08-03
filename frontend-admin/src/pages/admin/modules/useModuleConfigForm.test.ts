@@ -5,6 +5,7 @@ import {
   buildDefaults,
   buildFieldNames,
   collectDiff,
+  fieldNameOf,
   toSchemaValues
 } from './useModuleConfigForm';
 
@@ -99,8 +100,38 @@ describe('buildFieldNames', () => {
     for (const name of names.values()) expect(name).toMatch(/^\w+$/);
   });
 
-  it('gives an all-punctuation key a usable name rather than an empty one', () => {
+  it('sanitises punctuation char-for-char rather than dropping it', () => {
+    // Pins what the `|| 'field'` fallback does NOT cover: the replace is
+    // char-for-char, so punctuation becomes underscores and never collapses
+    // to ''. Reading the fallback as "guards all-punctuation keys" would
+    // make it look dead and invite its deletion.
     expect(buildFieldNames([field({ key: '...' })]).get('...')).toBe('___');
+  });
+
+  it('gives an empty key a usable name — the one case the fallback guards', () => {
+    // `register('')` is accepted by RHF as a field that renders and can never
+    // be dirtied, so an empty key must not produce an empty name.
+    expect(buildFieldNames([field({ key: '' })]).get('')).toBe('field');
+  });
+});
+
+describe('fieldNameOf', () => {
+  it('throws, naming the key, rather than degrading to the raw key', () => {
+    // The whole point: `fieldNames.get(key) ?? key` would hand a dotted key
+    // straight back to react-hook-form and reinstate the original bug with
+    // no error, no type error and no failing test.
+    const names = buildFieldNames([field({ key: 'email.smtp.host' })]);
+    expect(fieldNameOf(names, 'email.smtp.host')).toBe('email_smtp_host');
+    expect(() => fieldNameOf(names, 'app.name')).toThrow(/"app\.name"/);
+  });
+
+  it('surfaces a schema/fieldNames mismatch instead of silently mis-saving', () => {
+    // The only way this fires in practice: a caller pairs a map built from
+    // one schema with a different schema beside it.
+    const stale = buildFieldNames([field({ key: 'old.key' })]);
+    expect(() =>
+      toSchemaValues([field({ key: 'new.key' })], {}, stale)
+    ).toThrow(/different schema/);
   });
 });
 

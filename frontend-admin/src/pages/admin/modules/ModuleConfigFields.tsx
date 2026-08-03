@@ -14,7 +14,11 @@ import {
 import type { ConfigField } from 'store/api/moduleApi';
 import { isFieldVisible } from './configModel';
 import { translateConfigField } from 'helpers/configLabel';
-import { toSchemaValues, type ConfigFormValues } from './useModuleConfigForm';
+import {
+  fieldNameOf,
+  toSchemaValues,
+  type ConfigFormValues
+} from './useModuleConfigForm';
 
 /**
  * Translates a resolver error code (see `buildYupSchema` in
@@ -119,7 +123,7 @@ const ModuleConfigFields: React.FC<ModuleConfigFieldsProps> = ({
         // Everything RHF touches — register, Controller, the errors lookup,
         // and the DOM id/name that mirror them — goes through `name`.
         // Everything else stays on `key`.
-        const name = fieldNames.get(key) ?? key;
+        const name = fieldNameOf(fieldNames, key);
         const label = translateConfigField(t, moduleName, field, 'label');
         const desc = translateConfigField(t, moduleName, field, 'desc');
         const fieldError = errors[name]?.message as string | undefined;

@@ -4,7 +4,11 @@ import { renderWithProviders } from 'test/render';
 import i18n from '../../../i18n';
 import type { ConfigField } from 'store/api/moduleApi';
 import ModuleConfigFields from './ModuleConfigFields';
-import { buildFieldNames, useModuleConfigForm } from './useModuleConfigForm';
+import {
+  buildFieldNames,
+  fieldNameOf,
+  useModuleConfigForm
+} from './useModuleConfigForm';
 
 const field = (over: Partial<ConfigField> & { key: string }): ConfigField => ({
   label: over.key,
@@ -62,9 +66,14 @@ const render = (schema: ConfigField[], values: Record<string, string>) => {
   // The DOM `name` is the register name, not the schema key — they differ the
   // moment a key contains a "." (see `buildFieldNames`), so this probe has to
   // resolve through the same mapping the component registers with.
+  // `fieldNameOf` rather than a `?? key` fallback so a test that seeds a value
+  // for a key its own schema doesn't declare fails loudly instead of quietly
+  // probing nothing.
   const fieldNames = buildFieldNames(schema);
   for (const key of Object.keys(values)) {
-    const el = document.querySelector(`[name="${fieldNames.get(key) ?? key}"]`);
+    const el = document.querySelector(
+      `[name="${fieldNameOf(fieldNames, key)}"]`
+    );
     if (!el) continue;
     fireEvent.change(el, {
       target: { value: `${values[key]}${PROBE_SUFFIX}` }
@@ -178,8 +187,12 @@ describe('placeholder', () => {
 describe('label association', () => {
   // getByLabelText only resolves through htmlFor/id (or a wrapping <label>);
   // a label rendered as a bare sibling announces as "edit text, blank".
+  // Both fixtures use dotted keys on purpose — see "dotted keys" below.
   it('associates the label with a secret input', () => {
-    render([field({ key: 'apiKey', label: 'API Key', type: 'secret' })], {});
+    render(
+      [field({ key: 'email.smtp.password', label: 'API Key', type: 'secret' })],
+      {}
+    );
     expect(screen.getByLabelText('API Key')).toHaveAttribute(
       'type',
       'password'
@@ -187,11 +200,66 @@ describe('label association', () => {
   });
 
   it('associates the label with a bool switch', () => {
-    render([field({ key: 'on', label: 'Enabled', type: 'bool' })], {});
+    render(
+      [field({ key: 'email.enabled', label: 'Enabled', type: 'bool' })],
+      {}
+    );
     expect(screen.getByLabelText('Enabled')).toHaveAttribute(
       'type',
       'checkbox'
     );
+  });
+});
+
+describe('dotted keys', () => {
+  // Every fixture in this file was dot-free, so `fieldNames` was the identity
+  // map and the plumbing through it went untested here: a branch that stopped
+  // honouring the prop would still have passed. The `Controller` bool branch
+  // is the likely candidate, since it names the field itself rather than
+  // spreading `register(...)`.
+  const nameOf = (label: string) =>
+    screen.getByLabelText(label).getAttribute('name');
+
+  it('registers every field type under a react-hook-form-safe name', () => {
+    render(
+      [
+        field({ key: 'email.smtp.host', label: 'Host' }),
+        field({ key: 'email.enabled', label: 'Enabled', type: 'bool' }),
+        field({
+          key: 'email.provider',
+          label: 'Provider',
+          type: 'enum',
+          options: ['noop', 'smtp']
+        }),
+        field({ key: 'email.smtp.port', label: 'Port', type: 'int' }),
+        field({ key: 'email.smtp.password', label: 'Secret', type: 'secret' }),
+        field({ key: 'email.origins', label: 'Origins', type: 'stringList' })
+      ],
+      {}
+    );
+    // A "." reaching the DOM `name` is the bug: RHF would parse it as a path
+    // and nest the operator's edit out of sight of dirty tracking.
+    for (const label of [
+      'Host',
+      'Enabled',
+      'Provider',
+      'Port',
+      'Secret',
+      'Origins'
+    ]) {
+      expect(nameOf(label)).toMatch(/^\w+$/);
+    }
+    expect(nameOf('Host')).toBe('email_smtp_host');
+    expect(nameOf('Enabled')).toBe('email_enabled');
+  });
+
+  it('renders a dotted field seeded from its stored value', () => {
+    // Proves the read half too: `buildDefaults` keys by register name, so a
+    // mismatch here would render an empty input over a stored value.
+    render([field({ key: 'email.smtp.host', label: 'Host' })], {
+      'email.smtp.host': 'mail.internal'
+    });
+    expect(screen.getByLabelText('Host')).toHaveValue('mail.internal');
   });
 });
 
