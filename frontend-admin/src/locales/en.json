@@ -2432,6 +2432,41 @@
           "desc": "When on (default), an OAuth callback for an existing Orkestra account (matched by email) attaches the provider to that user automatically. When off, the OAuth flow refuses with 403 oauth_link_disabled and the user must initiate linking from their account settings while authenticated. Recommended off for compliance-sensitive deployments."
         }
       }
+    },
+    "notification": {
+      "groups": {
+        "delivery": {
+          "label": "Delivery",
+          "desc": "How mail leaves the platform. With the default noop provider, rendered mail is logged to the backend instead of sent — set the provider to SMTP to reveal the connection settings."
+        },
+        "sender": {
+          "label": "Sender",
+          "desc": "The addresses recipients see on every message."
+        },
+        "branding": {
+          "label": "Branding & templates",
+          "desc": "Values injected into every templated email."
+        }
+      },
+      "fields": {
+        "email": {
+          "provider": { "label": "Email provider" },
+          "smtp": {
+            "host": { "label": "SMTP host" },
+            "port": { "label": "SMTP port" },
+            "username": { "label": "SMTP username" },
+            "password": { "label": "SMTP password" },
+            "tls_mode": { "label": "TLS mode" }
+          },
+          "from_address": { "label": "From address" },
+          "from_name": { "label": "From name" },
+          "reply_to": { "label": "Reply-To address" }
+        },
+        "app": {
+          "name": { "label": "App name (in templates)" },
+          "support_email": { "label": "Support email (in templates)" }
+        }
+      }
     }
   },
   "setup": {

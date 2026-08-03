@@ -2432,6 +2432,41 @@
           "desc": "Se attivo (predefinito), un callback OAuth per un account Orkestra esistente (individuato tramite email) collega automaticamente il provider a quell'utente. Se disattivato, il flusso OAuth rifiuta con 403 oauth_link_disabled e l'utente deve avviare il collegamento dalle impostazioni del proprio account da autenticato. Consigliato disattivato per installazioni sensibili alla conformità."
         }
       }
+    },
+    "notification": {
+      "groups": {
+        "delivery": {
+          "label": "Consegna",
+          "desc": "Come la posta lascia la piattaforma. Con il provider noop predefinito, la mail renderizzata viene registrata nel backend invece di essere inviata — imposta il provider su SMTP per mostrare le impostazioni di connessione."
+        },
+        "sender": {
+          "label": "Mittente",
+          "desc": "Gli indirizzi che i destinatari vedono su ogni messaggio."
+        },
+        "branding": {
+          "label": "Branding e template",
+          "desc": "Valori iniettati in ogni email da template."
+        }
+      },
+      "fields": {
+        "email": {
+          "provider": { "label": "Provider email" },
+          "smtp": {
+            "host": { "label": "Host SMTP" },
+            "port": { "label": "Porta SMTP" },
+            "username": { "label": "Username SMTP" },
+            "password": { "label": "Password SMTP" },
+            "tls_mode": { "label": "Modalità TLS" }
+          },
+          "from_address": { "label": "Indirizzo mittente" },
+          "from_name": { "label": "Nome mittente" },
+          "reply_to": { "label": "Indirizzo Reply-To" }
+        },
+        "app": {
+          "name": { "label": "Nome app (nei template)" },
+          "support_email": { "label": "Email di supporto (nei template)" }
+        }
+      }
     }
   },
   "setup": {
