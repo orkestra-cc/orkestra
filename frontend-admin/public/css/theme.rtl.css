@@ -171,7 +171,7 @@
   --orkestra-warning-border-subtle: rgb(122.5, 64, 31);
   --orkestra-danger-border-subtle: rgb(115, 27.5, 43.5);
   --orkestra-light-border-subtle: #5e6e82;
-  --orkestra-dark-border-subtle: #333a45;
+  --orkestra-dark-border-subtle: #4d5969;
   --orkestra-heading-color: var(--orkestra-secondary-color);
   --orkestra-link-color: #2c7be5;
   --orkestra-link-hover-color: rgb(35.2, 98.4, 183.2);
@@ -4145,9 +4145,7 @@ fieldset:disabled .tox .tox-dialog__footer .tox-button--secondary,
   --orkestra-btn-disabled-border-color: #f9fafb;
 }
 
-.btn-dark, [data-bs-theme=dark] .btn-tertiary, [data-bs-theme=dark] .tox .tox-menu__footer .tox-button--secondary, .tox .tox-menu__footer [data-bs-theme=dark] .tox-button--secondary,
-[data-bs-theme=dark] .tox .tox-dialog__footer .tox-button--secondary,
-.tox .tox-dialog__footer [data-bs-theme=dark] .tox-button--secondary {
+.btn-dark {
   --orkestra-btn-color: #fff;
   --orkestra-btn-bg: #0f141c;
   --orkestra-btn-border-color: #0f141c;
@@ -5465,11 +5463,11 @@ fieldset:disabled .tox .tox-dialog__footer .tox-button--secondary,
   --orkestra-navbar-brand-color: #fff;
   --orkestra-navbar-brand-hover-color: #fff;
   --orkestra-navbar-toggler-border-color: rgba(255, 255, 255, 0.1);
-  --orkestra-navbar-toggler-icon-bg: url("data:image/svg+xml;charset=utf8,%3Csvg viewBox='0 0 30 30' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath stroke='%2398a1ac' stroke-width='2' stroke-linecap='round' stroke-miterlimit='10' d='M0 6h30M0 14h30M0 22h30'/%3E%3C/svg%3E");
+  --orkestra-navbar-toggler-icon-bg: url("data:image/svg+xml;charset=utf8,%3Csvg viewBox='0 0 30 30' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath stroke='%239da9bb' stroke-width='2' stroke-linecap='round' stroke-miterlimit='10' d='M0 6h30M0 14h30M0 22h30'/%3E%3C/svg%3E");
 }
 
 [data-bs-theme=dark] .navbar-toggler-icon {
-  --orkestra-navbar-toggler-icon-bg: url("data:image/svg+xml;charset=utf8,%3Csvg viewBox='0 0 30 30' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath stroke='%2398a1ac' stroke-width='2' stroke-linecap='round' stroke-miterlimit='10' d='M0 6h30M0 14h30M0 22h30'/%3E%3C/svg%3E");
+  --orkestra-navbar-toggler-icon-bg: url("data:image/svg+xml;charset=utf8,%3Csvg viewBox='0 0 30 30' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath stroke='%239da9bb' stroke-width='2' stroke-linecap='round' stroke-miterlimit='10' d='M0 6h30M0 14h30M0 22h30'/%3E%3C/svg%3E");
 }
 
 .card {
@@ -19789,6 +19787,25 @@ samp {
   box-shadow: var(--orkestra-btn-orkestra-box-shadow) !important;
 }
 
+[data-bs-theme=dark] .btn-tertiary, [data-bs-theme=dark] .tox .tox-menu__footer .tox-button--secondary, .tox .tox-menu__footer [data-bs-theme=dark] .tox-button--secondary,
+[data-bs-theme=dark] .tox .tox-dialog__footer .tox-button--secondary,
+.tox .tox-dialog__footer [data-bs-theme=dark] .tox-button--secondary {
+  --orkestra-btn-color: #fff;
+  --orkestra-btn-bg: #0b1727;
+  --orkestra-btn-border-color: #0b1727;
+  --orkestra-btn-hover-color: #fff;
+  --orkestra-btn-hover-bg: rgb(47.6, 57.8, 71.4);
+  --orkestra-btn-hover-border-color: rgb(35.4, 46.2, 60.6);
+  --orkestra-btn-focus-shadow-rgb: 48, 58, 71;
+  --orkestra-btn-active-color: #fff;
+  --orkestra-btn-active-bg: rgb(59.8, 69.4, 82.2);
+  --orkestra-btn-active-border-color: rgb(35.4, 46.2, 60.6);
+  --orkestra-btn-active-shadow: inset 0 3px 5px rgba(0, 0, 0, 0.125);
+  --orkestra-btn-disabled-color: #fff;
+  --orkestra-btn-disabled-bg: #0b1727;
+  --orkestra-btn-disabled-border-color: #0b1727;
+}
+
 /*-----------------------------------------------
 |   Brand Outline Buttons
 -----------------------------------------------*/
@@ -24481,7 +24498,7 @@ html[dir=rtl] .img-dropdown {
 }
 
 [data-bs-theme=dark] .dropdown-menu .dropdown-item.active {
-  background-color: #0f141c;
+  background-color: #0b1727;
 }
 
 /*-----------------------------------------------
@@ -27042,10 +27059,10 @@ div[data-collapse] + .kanban-item,
   background-color: rgb(18.076, 29.728, 45.264) !important;
 }
 [data-bs-theme=dark] .dark__bg-secondary {
-  background-color: #68707c !important;
+  background-color: #748194 !important;
 }
 [data-bs-theme=dark] .dark__text-secondary {
-  color: #68707c !important;
+  color: #748194 !important;
 }
 [data-bs-theme=dark] .dark__bg-card-dark {
   background-color: rgb(18.076, 29.728, 45.264) !important;
@@ -27087,118 +27104,118 @@ div[data-collapse] + .kanban-item,
   background-color: rgb(18.076, 29.728, 45.264) !important;
 }
 [data-bs-theme=dark] .dark__bg-light {
-  background-color: #f9fafb !important;
+  background-color: #f9fafd !important;
 }
 [data-bs-theme=dark] .dark__text-light {
-  color: #f9fafb !important;
+  color: #f9fafd !important;
 }
 [data-bs-theme=dark] .dark__bg-card-dark {
   background-color: rgb(18.076, 29.728, 45.264) !important;
 }
 [data-bs-theme=dark] .dark__bg-dark {
-  background-color: #0f141c !important;
+  background-color: #0b1727 !important;
 }
 [data-bs-theme=dark] .dark__text-dark {
-  color: #0f141c !important;
+  color: #0b1727 !important;
 }
 [data-bs-theme=dark] .dark__bg-card-dark {
   background-color: rgb(18.076, 29.728, 45.264) !important;
 }
 [data-bs-theme=dark] .dark__bg-100 {
-  background-color: #f9fafb !important;
+  background-color: #f9fafd !important;
 }
 [data-bs-theme=dark] .dark__text-100 {
-  color: #f9fafb !important;
+  color: #f9fafd !important;
 }
 [data-bs-theme=dark] .dark__bg-card-dark {
   background-color: rgb(18.076, 29.728, 45.264) !important;
 }
 [data-bs-theme=dark] .dark__bg-200 {
-  background-color: #f2f4f6 !important;
+  background-color: #edf2f9 !important;
 }
 [data-bs-theme=dark] .dark__text-200 {
-  color: #f2f4f6 !important;
+  color: #edf2f9 !important;
 }
 [data-bs-theme=dark] .dark__bg-card-dark {
   background-color: rgb(18.076, 29.728, 45.264) !important;
 }
 [data-bs-theme=dark] .dark__bg-300 {
-  background-color: #dfe3e8 !important;
+  background-color: #d8e2ef !important;
 }
 [data-bs-theme=dark] .dark__text-300 {
-  color: #dfe3e8 !important;
+  color: #d8e2ef !important;
 }
 [data-bs-theme=dark] .dark__bg-card-dark {
   background-color: rgb(18.076, 29.728, 45.264) !important;
 }
 [data-bs-theme=dark] .dark__bg-400 {
-  background-color: #bcc3cc !important;
+  background-color: #b6c1d2 !important;
 }
 [data-bs-theme=dark] .dark__text-400 {
-  color: #bcc3cc !important;
+  color: #b6c1d2 !important;
 }
 [data-bs-theme=dark] .dark__bg-card-dark {
   background-color: rgb(18.076, 29.728, 45.264) !important;
 }
 [data-bs-theme=dark] .dark__bg-500 {
-  background-color: #98a1ac !important;
+  background-color: #9da9bb !important;
 }
 [data-bs-theme=dark] .dark__text-500 {
-  color: #98a1ac !important;
+  color: #9da9bb !important;
 }
 [data-bs-theme=dark] .dark__bg-card-dark {
   background-color: rgb(18.076, 29.728, 45.264) !important;
 }
 [data-bs-theme=dark] .dark__bg-600 {
-  background-color: #68707c !important;
+  background-color: #748194 !important;
 }
 [data-bs-theme=dark] .dark__text-600 {
-  color: #68707c !important;
+  color: #748194 !important;
 }
 [data-bs-theme=dark] .dark__bg-card-dark {
   background-color: rgb(18.076, 29.728, 45.264) !important;
 }
 [data-bs-theme=dark] .dark__bg-700 {
-  background-color: #454c58 !important;
+  background-color: #5e6e82 !important;
 }
 [data-bs-theme=dark] .dark__text-700 {
-  color: #454c58 !important;
+  color: #5e6e82 !important;
 }
 [data-bs-theme=dark] .dark__bg-card-dark {
   background-color: rgb(18.076, 29.728, 45.264) !important;
 }
 [data-bs-theme=dark] .dark__bg-800 {
-  background-color: #333a45 !important;
+  background-color: #4d5969 !important;
 }
 [data-bs-theme=dark] .dark__text-800 {
-  color: #333a45 !important;
+  color: #4d5969 !important;
 }
 [data-bs-theme=dark] .dark__bg-card-dark {
   background-color: rgb(18.076, 29.728, 45.264) !important;
 }
 [data-bs-theme=dark] .dark__bg-900 {
-  background-color: #252c36 !important;
+  background-color: #344050 !important;
 }
 [data-bs-theme=dark] .dark__text-900 {
-  color: #252c36 !important;
+  color: #344050 !important;
 }
 [data-bs-theme=dark] .dark__bg-card-dark {
   background-color: rgb(18.076, 29.728, 45.264) !important;
 }
 [data-bs-theme=dark] .dark__bg-1000 {
-  background-color: #1a202a !important;
+  background-color: #232e3c !important;
 }
 [data-bs-theme=dark] .dark__text-1000 {
-  color: #1a202a !important;
+  color: #232e3c !important;
 }
 [data-bs-theme=dark] .dark__bg-card-dark {
   background-color: rgb(18.076, 29.728, 45.264) !important;
 }
 [data-bs-theme=dark] .dark__bg-1100 {
-  background-color: #0f141c !important;
+  background-color: #0b1727 !important;
 }
 [data-bs-theme=dark] .dark__text-1100 {
-  color: #0f141c !important;
+  color: #0b1727 !important;
 }
 [data-bs-theme=dark] .dark__bg-card-dark {
   background-color: rgb(18.076, 29.728, 45.264) !important;

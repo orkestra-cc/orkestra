@@ -427,8 +427,14 @@ $navbar-light-toggler-icon-bg: str-replace(
   '%23'
 ) !default;
 
+// Pinned to the pre-retune $gray-500 literal (#9da9bb): bootstrap's own
+// _navbar.scss reuses this same var for BOTH the `.navbar-dark` component
+// variant AND the global `[data-bs-theme=dark] .navbar-toggler-icon` rule
+// (via `@include color-mode(dark)`), and `.navbar-dark`/
+// `.navbar[data-bs-theme="dark"]` is unused in this app (theme is always
+// driven globally), so pinning here only affects the dark-mode toggler icon.
 $navbar-dark-toggler-icon-bg: str-replace(
-  url("data:image/svg+xml;charset=utf8,%3Csvg viewBox='0 0 30 30' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath stroke='#98a1ac' stroke-width='2' stroke-linecap='round' stroke-miterlimit='10' d='M0 6h30M0 14h30M0 22h30'/%3E%3C/svg%3E"),
+  url("data:image/svg+xml;charset=utf8,%3Csvg viewBox='0 0 30 30' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath stroke='#9da9bb' stroke-width='2' stroke-linecap='round' stroke-miterlimit='10' d='M0 6h30M0 14h30M0 22h30'/%3E%3C/svg%3E"),
   '#',
   '%23'
 ) !default;

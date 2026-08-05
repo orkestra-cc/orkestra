@@ -69,7 +69,21 @@ $theme-orkestra-btn-colors: (
 @if $enable-dark-mode {
   @include color-mode(dark, true) {
     .btn-tertiary {
-      @extend .btn-dark;
+      // Not `@extend .btn-dark` — that merges this selector into `.btn-dark`'s
+      // own declaration block, so pinning this color would also pin the
+      // light-mode `.btn-dark` swatch (rendered regardless of theme, e.g.
+      // MfaEnrollmentBanner) to the pre-retune literal. Reproduce `.btn-dark`'s
+      // pre-retune computed output directly instead (mirrors the "dark" branch
+      // of bootstrap's btn-variant loop in _buttons.scss) using the frozen
+      // pre-retune $gray-1100 literal, so only the dark-theme button freezes.
+      @include button-variant(
+        #0b1727,
+        #0b1727,
+        $hover-background: tint-color(#0b1727, $btn-hover-bg-tint-amount),
+        $hover-border: tint-color(#0b1727, $btn-hover-border-tint-amount),
+        $active-background: tint-color(#0b1727, $btn-active-bg-tint-amount),
+        $active-border: tint-color(#0b1727, $btn-active-border-tint-amount)
+      );
     }
   }
 }

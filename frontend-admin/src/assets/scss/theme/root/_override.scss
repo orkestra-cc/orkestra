@@ -2,8 +2,44 @@
 /*                                  Override                                  */
 /* -------------------------------------------------------------------------- */
 @if $enable-dark-mode {
-  @include color-mode(dark, true) { 
-    @each $color, $value in $theme-all-colors {
+  @include color-mode(dark, true) {
+    // Same key set as $theme-all-colors ($theme-colors + $grays +
+    // $brand-colors, see theme/_maps.scss), but with every $gray-ramp-derived
+    // value pinned to its pre-retune literal so `.dark__bg-*` / `.dark__text-*`
+    // keep rendering the frozen dark-mode swatches instead of tracking the
+    // live (retuned) $grays map. $primary/$success/$info/$warning/$danger
+    // aren't ramp-derived so they stay live. This is NOT the same map as
+    // $theme-dark-colors/$dark-grays (theme/_variables-dark.scss) — those
+    // are intentionally value-inverted, for the --orkestra-gray-N custom
+    // properties consumed by root/_dark.scss, and produce wrong values here.
+    $theme-all-colors-frozen: map-merge-multiple(
+      (
+        'primary': $primary,
+        'secondary': #748194,
+        'success': $success,
+        'info': $info,
+        'warning': $warning,
+        'danger': $danger,
+        'light': #f9fafd,
+        'dark': #0b1727
+      ),
+      (
+        '100': #f9fafd,
+        '200': #edf2f9,
+        '300': #d8e2ef,
+        '400': #b6c1d2,
+        '500': #9da9bb,
+        '600': #748194,
+        '700': #5e6e82,
+        '800': #4d5969,
+        '900': #344050,
+        '1000': #232e3c,
+        '1100': #0b1727
+      ),
+      $brand-colors
+    );
+
+    @each $color, $value in $theme-all-colors-frozen {
       .dark__bg-#{$color} {
         background-color: $value !important;
       }
