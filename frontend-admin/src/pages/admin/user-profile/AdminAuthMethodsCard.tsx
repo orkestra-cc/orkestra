@@ -5,10 +5,10 @@ import {
   Dropdown,
   Spinner,
   Alert,
-  Badge,
   OverlayTrigger,
   Tooltip
 } from 'react-bootstrap';
+import SubtleBadge from 'components/common/SubtleBadge';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
@@ -176,13 +176,13 @@ const AdminAuthMethodsCard: React.FC<AdminAuthMethodsCardProps> = ({
             title={t('adminUserProfile.authMethods.passwordTitle')}
             badge={
               data.hasUsablePassword ? (
-                <Badge bg="success">
+                <SubtleBadge bg="success">
                   {t('adminUserProfile.authMethods.passwordBadgeSet')}
-                </Badge>
+                </SubtleBadge>
               ) : (
-                <Badge bg="secondary">
+                <SubtleBadge bg="secondary">
                   {t('adminUserProfile.authMethods.passwordBadgeNotSet')}
-                </Badge>
+                </SubtleBadge>
               )
             }
             sub={
@@ -214,13 +214,13 @@ const AdminAuthMethodsCard: React.FC<AdminAuthMethodsCardProps> = ({
             title={t('adminUserProfile.authMethods.emailTitle')}
             badge={
               data.emailVerified ? (
-                <Badge bg="success">
+                <SubtleBadge bg="success">
                   {t('adminUserProfile.authMethods.emailBadgeVerified')}
-                </Badge>
+                </SubtleBadge>
               ) : (
-                <Badge bg="warning" text="dark">
+                <SubtleBadge bg="warning">
                   {t('adminUserProfile.authMethods.emailBadgeUnverified')}
-                </Badge>
+                </SubtleBadge>
               )
             }
             sub={
@@ -252,13 +252,13 @@ const AdminAuthMethodsCard: React.FC<AdminAuthMethodsCardProps> = ({
             title={t('adminUserProfile.authMethods.mfaTitle')}
             badge={
               data.mfaRequired ? (
-                <Badge bg="primary">
+                <SubtleBadge bg="primary">
                   {t('adminUserProfile.authMethods.mfaBadgeRequired')}
-                </Badge>
+                </SubtleBadge>
               ) : (
-                <Badge bg="secondary">
+                <SubtleBadge bg="secondary">
                   {t('adminUserProfile.authMethods.mfaBadgeOptional')}
-                </Badge>
+                </SubtleBadge>
               )
             }
             sub={describeMfa(data, t)}
@@ -338,11 +338,11 @@ const AdminAuthMethodsCard: React.FC<AdminAuthMethodsCardProps> = ({
                           {p.email}
                         </span>
                         {p.isPrimary && (
-                          <Badge bg="info" className="ms-2">
+                          <SubtleBadge bg="info" className="ms-2">
                             {t(
                               'adminUserProfile.authMethods.oauthPrimaryBadge'
                             )}
-                          </Badge>
+                          </SubtleBadge>
                         )}
                         <span className="ms-2 small text-body-secondary">
                           {t('adminUserProfile.authMethods.oauthLinkedAt', {

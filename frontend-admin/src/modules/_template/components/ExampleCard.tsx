@@ -5,7 +5,8 @@
 // for the convention. They are NOT promoted to `components/common/`
 // unless they are used by more than one page.
 
-import { Badge, Card } from 'react-bootstrap';
+import { Card } from 'react-bootstrap';
+import SubtleBadge from 'components/common/SubtleBadge';
 import { Link } from 'react-router';
 import type { Widget } from '../types';
 
@@ -19,9 +20,11 @@ const ExampleCard: React.FC<Props> = ({ widget }) => {
       <Card.Body>
         <Card.Title className="d-flex justify-content-between align-items-start">
           <span>{widget.name}</span>
-          <Badge bg={widget.status === 'active' ? 'success' : 'secondary'}>
+          <SubtleBadge
+            bg={widget.status === 'active' ? 'success' : 'secondary'}
+          >
             {widget.status}
-          </Badge>
+          </SubtleBadge>
         </Card.Title>
         <Card.Text className="text-muted small">
           {widget.description || 'No description.'}

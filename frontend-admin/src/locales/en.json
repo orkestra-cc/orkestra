@@ -1385,9 +1385,11 @@
       "colRole": "Role",
       "colGranted": "Granted",
       "colExpires": "Expires",
+      "colActions": "Actions",
       "expiresNever": "never",
       "grantedByLine": "by {{actor}}",
       "revokeConfirm": "Revoke {{role}} from {{user}}?",
+      "revokeAria": "Revoke {{role}} from {{user}}",
       "toastRevoked": "Binding revoked",
       "toastRevokeFailed": "Revoke failed: {{error}}",
       "errorUnknown": "unknown error",
@@ -1439,7 +1441,9 @@
       "overrideExplicit": "explicit",
       "overrideInherits": "inherits global",
       "noModules": "No modules registered.",
-      "revert": "Revert"
+      "revert": "Revert",
+      "setAria": "Set log level for {{module}}",
+      "revertAria": "Revert {{module}} to the global log level"
     }
   },
   "adminNavigation": {

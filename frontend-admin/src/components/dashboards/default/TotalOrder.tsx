@@ -1,5 +1,6 @@
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { Badge, Card } from 'react-bootstrap';
+import { Card } from 'react-bootstrap';
+import SubtleBadge from 'components/common/SubtleBadge';
 import Flex from 'components/common/Flex';
 import { rgbaColor } from 'helpers/utils';
 import * as echarts from 'echarts/core';
@@ -92,10 +93,10 @@ const TotalOrder: React.FC<TotalOrderProps> = ({ data }) => {
       >
         <div>
           <h2 className="fw-normal text-700 mb-1 lh-1">58.4K</h2>
-          <Badge pill bg="200" className="text-primary fs-11">
+          <SubtleBadge pill bg="primary" className="fs-11">
             <FontAwesomeIcon icon="caret-up" className="me-1" />
             13.6%
-          </Badge>
+          </SubtleBadge>
         </div>
         <div className="ps-0 mt-n4">
           <BasicECharts

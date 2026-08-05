@@ -1,8 +1,14 @@
-import { useState } from 'react';
-import { Badge, Button, Spinner, Table } from 'react-bootstrap';
+import { useCallback, useMemo, useState } from 'react';
+import { Button, Spinner } from 'react-bootstrap';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { Trans, useTranslation } from 'react-i18next';
 import { toast } from 'react-toastify';
+import { ColumnDef } from '@tanstack/react-table';
+import SubtleBadge from 'components/common/SubtleBadge';
+import AdvanceTable from 'components/common/advance-table/AdvanceTable';
+import AdvanceTableFooter from 'components/common/advance-table/AdvanceTableFooter';
+import useAdvanceTable from 'hooks/ui/useAdvanceTable';
+import AdvanceTableProvider from 'providers/AdvanceTableProvider';
 import {
   useListBindingsQuery,
   useDeleteBindingMutation,
@@ -28,6 +34,121 @@ const BindingsTable: React.FC<Props> = ({ tenantId }) => {
   const dash = t('adminRoles.bindingsTable.dash');
   const unknownErr = t('adminRoles.bindingsTable.errorUnknown');
 
+  const bindings: Binding[] = useMemo(() => data?.bindings ?? [], [data]);
+
+  const onRevoke = useCallback(
+    async (b: Binding) => {
+      if (
+        !window.confirm(
+          t('adminRoles.bindingsTable.revokeConfirm', {
+            role: b.roleName,
+            user: shortUUID(b.userUUID, dash)
+          })
+        )
+      )
+        return;
+      try {
+        await deleteBinding({ tenantId, bindingId: b.id }).unwrap();
+        toast.success(t('adminRoles.bindingsTable.toastRevoked'));
+      } catch (err: unknown) {
+        toast.error(
+          t('adminRoles.bindingsTable.toastRevokeFailed', {
+            error: extractError(err, unknownErr)
+          })
+        );
+      }
+    },
+    [t, dash, deleteBinding, tenantId, unknownErr]
+  );
+
+  const columns = useMemo<ColumnDef<Binding>[]>(
+    () => [
+      {
+        accessorKey: 'userUUID',
+        header: t('adminRoles.bindingsTable.colUser'),
+        cell: ({ row: { original } }) => (
+          <code>{shortUUID(original.userUUID, dash)}</code>
+        )
+      },
+      {
+        accessorKey: 'roleName',
+        header: t('adminRoles.bindingsTable.colRole'),
+        cell: ({ row: { original } }) => (
+          <SubtleBadge bg="info">{original.roleName}</SubtleBadge>
+        )
+      },
+      {
+        accessorKey: 'grantedAt',
+        header: t('adminRoles.bindingsTable.colGranted'),
+        meta: { cellProps: { className: 'text-muted small' } },
+        cell: ({ row: { original } }) => (
+          <>
+            {new Date(original.grantedAt).toLocaleString()}
+            {original.grantedBy && (
+              <div>
+                {t('adminRoles.bindingsTable.grantedByLine', {
+                  actor: shortUUID(original.grantedBy, dash)
+                })}
+              </div>
+            )}
+          </>
+        )
+      },
+      {
+        accessorKey: 'expiresAt',
+        header: t('adminRoles.bindingsTable.colExpires'),
+        cell: ({ row: { original } }) =>
+          original.expiresAt ? (
+            <span className="text-warning small">
+              {new Date(original.expiresAt).toLocaleString()}
+            </span>
+          ) : (
+            <span className="text-muted small">
+              {t('adminRoles.bindingsTable.expiresNever')}
+            </span>
+          )
+      },
+      {
+        id: 'actions',
+        // The column renders icon-only buttons, so the header carries the
+        // only text a screen reader can use to announce it.
+        header: () => (
+          <span className="visually-hidden">
+            {t('adminRoles.bindingsTable.colActions')}
+          </span>
+        ),
+        enableSorting: false,
+        meta: {
+          headerProps: { style: { width: '1%' } },
+          cellProps: { className: 'text-end' }
+        },
+        cell: ({ row: { original } }) => (
+          <Button
+            variant="outline-danger"
+            size="sm"
+            onClick={() => onRevoke(original)}
+            disabled={isDeleting}
+            aria-label={t('adminRoles.bindingsTable.revokeAria', {
+              role: original.roleName,
+              user: shortUUID(original.userUUID, dash)
+            })}
+          >
+            <FontAwesomeIcon icon="times" />
+          </Button>
+        )
+      }
+    ],
+    [t, dash, isDeleting, onRevoke]
+  );
+
+  const table = useAdvanceTable({
+    data: bindings,
+    columns,
+    sortable: true,
+    pagination: true,
+    perPage: 10
+  });
+
   if (isLoading) {
     return (
       <div className="text-center py-4">
@@ -47,30 +168,6 @@ const BindingsTable: React.FC<Props> = ({ tenantId }) => {
       </div>
     );
   }
-
-  const bindings: Binding[] = data?.bindings ?? [];
-
-  const onRevoke = async (b: Binding) => {
-    if (
-      !window.confirm(
-        t('adminRoles.bindingsTable.revokeConfirm', {
-          role: b.roleName,
-          user: shortUUID(b.userUUID, dash)
-        })
-      )
-    )
-      return;
-    try {
-      await deleteBinding({ tenantId, bindingId: b.id }).unwrap();
-      toast.success(t('adminRoles.bindingsTable.toastRevoked'));
-    } catch (err: unknown) {
-      toast.error(
-        t('adminRoles.bindingsTable.toastRevokeFailed', {
-          error: extractError(err, unknownErr)
-        })
-      );
-    }
-  };
 
   return (
     <>
@@ -100,60 +197,20 @@ const BindingsTable: React.FC<Props> = ({ tenantId }) => {
           />
         </div>
       ) : (
-        <Table responsive hover className="mb-0">
-          <thead className="table-light">
-            <tr>
-              <th>{t('adminRoles.bindingsTable.colUser')}</th>
-              <th>{t('adminRoles.bindingsTable.colRole')}</th>
-              <th>{t('adminRoles.bindingsTable.colGranted')}</th>
-              <th>{t('adminRoles.bindingsTable.colExpires')}</th>
-              <th style={{ width: '1%' }}></th>
-            </tr>
-          </thead>
-          <tbody>
-            {bindings.map(b => (
-              <tr key={b.id}>
-                <td>
-                  <code>{shortUUID(b.userUUID, dash)}</code>
-                </td>
-                <td>
-                  <Badge bg="info">{b.roleName}</Badge>
-                </td>
-                <td className="text-muted small">
-                  {new Date(b.grantedAt).toLocaleString()}
-                  {b.grantedBy && (
-                    <div>
-                      {t('adminRoles.bindingsTable.grantedByLine', {
-                        actor: shortUUID(b.grantedBy, dash)
-                      })}
-                    </div>
-                  )}
-                </td>
-                <td>
-                  {b.expiresAt ? (
-                    <span className="text-warning small">
-                      {new Date(b.expiresAt).toLocaleString()}
-                    </span>
-                  ) : (
-                    <span className="text-muted small">
-                      {t('adminRoles.bindingsTable.expiresNever')}
-                    </span>
-                  )}
-                </td>
-                <td className="text-end">
-                  <Button
-                    variant="outline-danger"
-                    size="sm"
-                    onClick={() => onRevoke(b)}
-                    disabled={isDeleting}
-                  >
-                    <FontAwesomeIcon icon="times" />
-                  </Button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </Table>
+        <AdvanceTableProvider {...table}>
+          <AdvanceTable
+            headerClassName="bg-200 text-nowrap align-middle"
+            rowClassName="align-middle"
+            tableProps={{
+              size: 'sm',
+              striped: true,
+              className: 'fs-10 mb-0 overflow-hidden'
+            }}
+          />
+          <div className="mt-3">
+            <AdvanceTableFooter rowsPerPageSelection rowInfo navButtons />
+          </div>
+        </AdvanceTableProvider>
       )}
 
       <CreateBindingModal

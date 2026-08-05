@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { Button, Card, Collapse, Row, Col, Badge } from 'react-bootstrap';
+import { Button, Card, Collapse, Row, Col } from 'react-bootstrap';
+import SubtleBadge from 'components/common/SubtleBadge';
 import { useTranslation } from 'react-i18next';
 import { User } from 'store/api/userApi';
 
@@ -77,7 +78,7 @@ const OperatorProfileIntro: React.FC<OperatorProfileIntroProps> = ({
                   ) : null}
                   <div className="flex-grow-1">
                     <div className="d-flex align-items-center">
-                      <Badge
+                      <SubtleBadge
                         bg={
                           provider.provider === 'google'
                             ? 'danger'
@@ -93,7 +94,7 @@ const OperatorProfileIntro: React.FC<OperatorProfileIntroProps> = ({
                       >
                         {provider.provider.charAt(0).toUpperCase() +
                           provider.provider.slice(1)}
-                      </Badge>
+                      </SubtleBadge>
                       <small className="text-900">{provider.email}</small>
                     </div>
                   </div>
@@ -133,11 +134,11 @@ const OperatorProfileIntro: React.FC<OperatorProfileIntroProps> = ({
                   {t('profileShared.intro.emailVerificationLabel')}
                 </small>
                 <p className="mb-2">
-                  <Badge bg={user.emailVerified ? 'success' : 'warning'}>
+                  <SubtleBadge bg={user.emailVerified ? 'success' : 'warning'}>
                     {user.emailVerified
                       ? t('profileShared.intro.emailVerifiedBadge')
                       : t('profileShared.intro.emailNotVerifiedBadge')}
-                  </Badge>
+                  </SubtleBadge>
                 </p>
               </Col>
             </Row>
