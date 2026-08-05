@@ -42,8 +42,12 @@ RUN printf 'server {\n\
     server_name _;\n\
     root /usr/share/nginx/html;\n\
     index index.html;\n\
+    add_header X-Frame-Options "SAMEORIGIN" always;\n\
+    add_header X-Content-Type-Options "nosniff" always;\n\
+    add_header X-XSS-Protection "0" always;\n\
     location = /config.js {\n\
         add_header Cache-Control "no-store" always;\n\
+        add_header X-Content-Type-Options "nosniff" always;\n\
         try_files $uri =404;\n\
     }\n\
     location /health {\n\
