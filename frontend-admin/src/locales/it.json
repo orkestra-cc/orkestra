@@ -2258,6 +2258,8 @@
     "viewAll": "Mostra tutto",
     "viewLess": "Mostra meno",
     "rowsCount": "{{from}}-{{to}} di {{total}}",
-    "exportCsv": "Esporta CSV"
+    "exportCsv": "Esporta CSV",
+    "selectAllRows": "Seleziona tutte le righe",
+    "selectRow": "Seleziona riga"
   }
 }
