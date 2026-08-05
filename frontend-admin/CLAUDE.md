@@ -9,6 +9,8 @@ React 19 + Vite 7 + TypeScript 5.9 operator console for Orkestra — the **Tier-
 
 > **Before writing any UI code here, invoke the `orkestra-frontend-admin` skill** (`.claude/skills/orkestra-frontend-admin/SKILL.md`). It enforces the reference-first workflow: read the matching `src/reference/*.tsx` showcase and a production-page precedent before any JSX.
 
+The console's **visual design authority** is [`DESIGN.md`](DESIGN.md) — normative token frontmatter (Cool Graphite ramp, Orkestra Blue, type scale) plus named rules such as the frozen-dark invariant — with its machine-readable sidecar `.impeccable/design.json` (rendered component snippets). Both are generated from the SCSS theme and `src/reference/` via `/impeccable document`; keep them in sync with `src/assets/scss/theme/` when the theme changes. Product-level context (audience priority, platform, WCAG 2.2 AA bar, brand commitments) lives in the repo-root `PRODUCT.md`.
+
 ## Tech stack
 
 | Layer       | Choice                                                                                                                       |

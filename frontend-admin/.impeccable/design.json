@@ -1,0 +1,161 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-08-05",
+  "title": "Design System: Orkestra Operator Console",
+  "extensions": {
+    "colorMeta": {
+      "primary": {
+        "role": "primary",
+        "displayName": "Orkestra Blue",
+        "canonical": "#2c7be5",
+        "tonalRamp": ["#0b1f39", "#123566", "#1a4c93", "#2263bf", "#2c7be5", "#5b98eb", "#8ab5f1", "#c8dcf8"]
+      },
+      "success": {
+        "role": "accent",
+        "displayName": "Success Green",
+        "canonical": "#00d27a",
+        "tonalRamp": ["#00351f", "#005934", "#008049", "#00a961", "#00d27a", "#41dd9b", "#84e8bd", "#c4f4e0"]
+      },
+      "warning": {
+        "role": "accent",
+        "displayName": "Warning Amber",
+        "canonical": "#f5803e",
+        "tonalRamp": ["#3d2010", "#66351a", "#934d26", "#c46631", "#f5803e", "#f79c65", "#fabb92", "#fcdcc6"]
+      },
+      "danger": {
+        "role": "accent",
+        "displayName": "Danger Crimson",
+        "canonical": "#e63757",
+        "tonalRamp": ["#390e16", "#601725", "#8a2134", "#b82c46", "#e63757", "#ec6580", "#f295a8", "#f9cad4"]
+      },
+      "info": {
+        "role": "accent",
+        "displayName": "Info Cyan",
+        "canonical": "#27bcfd",
+        "tonalRamp": ["#0a2f3f", "#104f6a", "#177298", "#1e96c9", "#27bcfd", "#5ccbfd", "#91dbfe", "#c8edfe"]
+      },
+      "gray-700": {
+        "role": "neutral",
+        "displayName": "Cool Graphite",
+        "canonical": "#454c58",
+        "tonalRamp": ["#0f141c", "#1a202a", "#252c36", "#333a45", "#454c58", "#68707c", "#98a1ac", "#bcc3cc", "#dfe3e8", "#f2f4f6", "#f9fafb"]
+      },
+      "dark-body-bg": {
+        "role": "neutral",
+        "displayName": "Frozen Dark Canvas",
+        "canonical": "#0b1727",
+        "tonalRamp": ["#0b1727", "#121e2d", "#232e3c", "#344050", "#4d5969", "#5e6e82", "#748194", "#9da9bb", "#b6c1d2", "#d8e2ef", "#f9fafd"]
+      }
+    },
+    "typographyMeta": {
+      "display": { "displayName": "Display (Poppins 500)", "purpose": "Page titles; 1.2 modular scale from 1rem base (fs-4 = 2.488rem)." },
+      "heading": { "displayName": "Headings (Poppins 500)", "purpose": "Section and card titles; heading color = gray-900." },
+      "body": { "displayName": "Body (Open Sans 400)", "purpose": "Prose and form text at 1rem, gray-700 (8.9:1 on white)." },
+      "label": { "displayName": "Dense UI / fs-10", "purpose": "Tables, badges, metadata at 0.833rem — the workhorse size of data surfaces." }
+    },
+    "shadows": [
+      { "name": "card-ambient", "value": "0 7px 14px 0 rgba(50, 58, 70, 0.1), 0 3px 6px 0 rgba(0, 0, 0, 0.07)", "purpose": "Default card float; tint-neutralized, never blue-cast." },
+      { "name": "shadow-sm", "value": "0 0.125rem 0.25rem rgba(0, 0, 0, 0.075)", "purpose": "Dropdowns and popover-scale elements." },
+      { "name": "shadow-lg", "value": "0 1rem 4rem rgba(0, 0, 0, 0.175)", "purpose": "Modals only." },
+      { "name": "btn-orkestra", "value": "0 0 0 1px rgba(43, 45, 80, 0.1), 0 2px 5px 0 rgba(43, 45, 80, 0.08), 0 1px 1.5px 0 rgba(0, 0, 0, 0.07), 0 1px 2px 0 rgba(0, 0, 0, 0.08)", "purpose": "The ring-plus-drop that makes white falcon/orkestra buttons read as raised keys." }
+    ],
+    "breakpoints": [
+      { "name": "sm", "value": "576px" },
+      { "name": "md", "value": "768px" },
+      { "name": "lg", "value": "992px" },
+      { "name": "xl", "value": "1200px" },
+      { "name": "xxl", "value": "1540px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Solid Orkestra Blue — the single main action of a view.",
+      "html": "<button class=\"ds-btn-primary\">Save changes</button>",
+      "css": ".ds-btn-primary { background: var(--orkestra-primary, #2c7be5); color: #fff; font-family: 'Open Sans', sans-serif; font-size: 1rem; font-weight: 500; padding: 0.3125rem 1rem; border: 1px solid var(--orkestra-primary, #2c7be5); border-radius: 0.25rem; transition: background 0.15s ease-in-out; } .ds-btn-primary:hover { background: #2569c3; border-color: #2364b8; } .ds-btn-primary:focus-visible { outline: none; box-shadow: 0 0 0 0.25rem rgba(44, 123, 229, 0.25); }"
+    },
+    {
+      "name": "Orkestra (Falcon) Button",
+      "kind": "button",
+      "refersTo": "button-orkestra",
+      "description": "The signature white raised-key button for secondary and toolbar actions (variant=\"falcon-primary\").",
+      "html": "<button class=\"ds-btn-orkestra\">Export CSV</button>",
+      "css": ".ds-btn-orkestra { background: #fff; color: var(--orkestra-primary, #2c7be5); font-family: 'Open Sans', sans-serif; font-size: 1rem; font-weight: 500; padding: 0.3125rem 1rem; border: none; border-radius: 0.25rem; box-shadow: 0 0 0 1px rgba(43, 45, 80, 0.1), 0 2px 5px 0 rgba(43, 45, 80, 0.08), 0 1px 1.5px 0 rgba(0, 0, 0, 0.07), 0 1px 2px 0 rgba(0, 0, 0, 0.08); transition: color 0.15s, box-shadow 0.15s; } .ds-btn-orkestra:hover { color: #1e63c4; box-shadow: 0 0 0 1px rgba(43, 45, 80, 0.1), 0 2px 5px 0 rgba(43, 45, 80, 0.1), 0 3px 9px 0 rgba(43, 45, 80, 0.08); } .ds-btn-orkestra:focus-visible { outline: none; box-shadow: 0 0 0 0.25rem rgba(44, 123, 229, 0.25); }"
+    },
+    {
+      "name": "Card",
+      "kind": "card",
+      "refersTo": "card",
+      "description": "White surface floating on the gray-200 canvas with the ambient shadow.",
+      "html": "<div class=\"ds-card\"><div class=\"ds-card-header\">Active sessions</div><div class=\"ds-card-body\">One card level, one shadow level — depth beyond this comes from tone, not elevation.</div></div>",
+      "css": ".ds-card { background: #fff; border-radius: 0.375rem; box-shadow: 0 7px 14px 0 rgba(50, 58, 70, 0.1), 0 3px 6px 0 rgba(0, 0, 0, 0.07); overflow: hidden; } .ds-card-header { font-family: Poppins, sans-serif; font-weight: 500; font-size: 1.2rem; color: var(--orkestra-gray-900, #252c36); padding: 1rem 1.25rem; background: var(--orkestra-gray-100, #f9fafb); border-bottom: 1px solid var(--orkestra-gray-300, #dfe3e8); } .ds-card-body { font-family: 'Open Sans', sans-serif; font-size: 1rem; color: var(--orkestra-gray-700, #454c58); padding: 1.25rem; }"
+    },
+    {
+      "name": "Data Table",
+      "kind": "custom",
+      "refersTo": "table-header",
+      "description": "AdvanceTable look: gray-300 header band on th, fs-10 striped rows, 8px vertical density.",
+      "html": "<table class=\"ds-table\"><thead><tr><th>Name</th><th>Role</th><th>Status</th></tr></thead><tbody><tr><td>Ada Lovelace</td><td>administrator</td><td>active</td></tr><tr><td>Grace Hopper</td><td>operator</td><td>active</td></tr><tr><td>Alan Turing</td><td>developer</td><td>invited</td></tr></tbody></table>",
+      "css": ".ds-table { width: 100%; border-collapse: collapse; font-family: 'Open Sans', sans-serif; font-size: 0.833rem; color: var(--orkestra-gray-700, #454c58); } .ds-table th { background: var(--orkestra-table-head-bg, #dfe3e8); color: var(--orkestra-gray-900, #252c36); font-weight: 600; text-align: left; white-space: nowrap; padding: 0.5rem 0.75rem; } .ds-table td { padding: 0.5rem 0.75rem; border-top: 1px solid var(--orkestra-gray-300, #dfe3e8); } .ds-table tbody tr:nth-child(odd) { background: var(--orkestra-gray-100, #f9fafb); } .ds-table tbody tr:hover { background: var(--orkestra-gray-200, #f2f4f6); }"
+    },
+    {
+      "name": "Text Input",
+      "kind": "input",
+      "refersTo": "card",
+      "description": "White field, gray-400 border, blue focus ring — forms stay at body size.",
+      "html": "<label class=\"ds-field\"><span class=\"ds-field-label\">Email address</span><input class=\"ds-input\" type=\"email\" placeholder=\"operator@example.com\" /></label>",
+      "css": ".ds-field { display: block; font-family: 'Open Sans', sans-serif; } .ds-field-label { display: block; font-size: 0.833rem; font-weight: 600; color: var(--orkestra-gray-900, #252c36); margin-bottom: 0.375rem; } .ds-input { width: 100%; font-family: inherit; font-size: 1rem; color: var(--orkestra-gray-700, #454c58); background: #fff; border: 1px solid var(--orkestra-gray-400, #bcc3cc); border-radius: 0.25rem; padding: 0.3125rem 0.75rem; transition: border-color 0.15s, box-shadow 0.15s; } .ds-input::placeholder { color: var(--orkestra-gray-500, #98a1ac); } .ds-input:focus { outline: none; border-color: var(--orkestra-primary, #2c7be5); box-shadow: 0 0 0 0.25rem rgba(44, 123, 229, 0.25); }"
+    },
+    {
+      "name": "Subtle Badge",
+      "kind": "chip",
+      "refersTo": "badge-subtle-primary",
+      "description": "The only sanctioned status pill: subtle tint background, emphasized text of the same hue.",
+      "html": "<span class=\"ds-badge ds-badge-primary\">enabled</span> <span class=\"ds-badge ds-badge-success\">healthy</span> <span class=\"ds-badge ds-badge-danger\">failing</span>",
+      "css": ".ds-badge { display: inline-block; font-family: 'Open Sans', sans-serif; font-size: 0.75rem; font-weight: 600; padding: 0.25em 0.55em; border-radius: 0.25rem; margin-right: 0.25rem; } .ds-badge-primary { background: #d9e7fa; color: #215cac; } .ds-badge-success { background: #c4f4e0; color: #008a50; } .ds-badge-danger { background: #f9cad4; color: #b82c46; }"
+    },
+    {
+      "name": "StatCard with Ribbon",
+      "kind": "custom",
+      "refersTo": "card",
+      "description": "Signature KPI tile: 4px status accent edge, faded oversized icon, big value, corner attention ribbon.",
+      "html": "<div class=\"ds-stat\"><div class=\"ds-stat-ribbon\"><span>attention</span></div><div class=\"ds-stat-label\">Failed logins (24h)</div><div class=\"ds-stat-value\">128</div><svg class=\"ds-stat-icon\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"><path d=\"M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z\"/></svg></div>",
+      "css": ".ds-stat { position: relative; background: #fff; border-radius: 0.375rem; border-left: 4px solid var(--orkestra-warning, #f5803e); box-shadow: 0 7px 14px 0 rgba(50, 58, 70, 0.1), 0 3px 6px 0 rgba(0, 0, 0, 0.07); padding: 1.25rem; overflow: hidden; min-width: 220px; font-family: 'Open Sans', sans-serif; } .ds-stat-label { font-size: 0.833rem; font-weight: 600; color: var(--orkestra-gray-600, #68707c); } .ds-stat-value { font-family: Poppins, sans-serif; font-size: 1.728rem; font-weight: 500; color: var(--orkestra-gray-900, #252c36); } .ds-stat-icon { position: absolute; right: 1rem; bottom: 0.75rem; width: 54px; height: 54px; color: var(--orkestra-warning, #f5803e); opacity: 0.18; } .ds-stat-ribbon { position: absolute; top: -4px; right: -4px; width: 78px; height: 78px; overflow: hidden; pointer-events: none; } .ds-stat-ribbon > span { position: absolute; top: 18px; left: -12px; width: 120px; padding: 3px 0; transform: rotate(45deg); text-align: center; background: var(--orkestra-warning, #f5803e); color: #fff; font-weight: 700; font-size: 0.55rem; line-height: 1.5; letter-spacing: 0.6px; text-transform: uppercase; box-shadow: 0 2px 5px rgba(0, 0, 0, 0.25); text-shadow: 0 1px 1px rgba(0, 0, 0, 0.2); }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Control Room",
+    "overview": "A calm operations floor. Surfaces are quiet, neutral grays — a near-white canvas carrying white cards — and every signal on them is legible at a glance: body text holds an 8.9:1 contrast on white, headings are near-black, and color appears only where something acts or needs attention. The system's personality is calm, clinical, precise: the interface recedes so the operator's data comes forward. The confirmed anti-reference is the console's own past: Falcon's blue-tinted gray ramp. The 2026-08 retune replaced it with a neutral-cool scale in the GitHub-light register, and that neutrality is now an invariant.",
+    "keyCharacteristics": [
+      "Neutral-cool \"Cool Graphite\" gray ramp; never blue-cast, never fully achromatic.",
+      "High contrast as a feature: 8.9:1 body text, headings at gray-900.",
+      "Color is semantic — Orkestra Blue means \"you can act here\"; status colors mean status.",
+      "Operate-mode density: compact fs-10 tables, 8px vertical cell padding, information-first layouts.",
+      "Ambient, discreet elevation: soft shadows separate, tonal layers structure.",
+      "A permanently frozen dark theme, pixel-identical since 2026-08-05."
+    ],
+    "rules": [
+      { "name": "The Frozen Dark Rule", "body": "The dark theme is pixel-frozen and permanently decoupled from the light ramp. Never derive a dark value from $gray-* or the light tokens; dark values are literals. Any future light retune must freeze its dark twins the same way.", "section": "colors" },
+      { "name": "The Acting Blue Rule", "body": "Orkestra Blue appears only where the operator can act or is acting (buttons, links, active/selected/focused states). Large decorative washes of primary are off-system.", "section": "colors" },
+      { "name": "The Utility-Class Rule", "body": "Components never carry hex values. Color reaches JSX through Bootstrap/theme utilities or --orkestra-* CSS variables; charts read live values via getColor().", "section": "colors" },
+      { "name": "The fs-10 Table Rule", "body": "Data tables run at fs-10 (0.833rem): density is a feature of the Control Room, not a compromise. Contrast, not size, does the readability job.", "section": "typography" },
+      { "name": "The Ambient-Only Rule", "body": "Don't invent intermediate shadow tiers or lift elements for emphasis. If something needs more weight, use tone or type, not a bigger shadow.", "section": "elevation" }
+    ],
+    "dos": [
+      "Do reach color through utilities and --orkestra-* variables — text-900, bg-200, border-300 — and through getColor() in charts.",
+      "Do keep tables dense: fs-10, 0.5rem vertical padding, gray-300 header band, striped gray-100 rows.",
+      "Do use the falcon/orkestra white-shadowed button family for secondary actions and keep solid Orkestra Blue for the single primary action of a view.",
+      "Do verify every change in both themes; dark must remain pixel-identical unless a change is explicitly declared both-modes.",
+      "Do meet WCAG 2.2 AA: the ramp's contrast ratios (8.9:1 body, 5.4:1 secondary) are the floor, not the ceiling; focus states visible; target sizes respected."
+    ],
+    "donts": [
+      "Don't derive dark-theme values from the light ramp — dark is frozen literals, permanently (The Frozen Dark Rule).",
+      "Don't reintroduce blue-tinted grays, tinted shadows, or the old Falcon values (#edf2f9, #5e6e82, rgba(65,69,88,…)) anywhere in light mode.",
+      "Don't hardcode hex colors, inline color/spacing styles, or generic fonts in components — the theme provides all three.",
+      "Don't build bespoke primitives where one exists: no raw <table> (AdvanceTable), no hand-rolled KPI tiles (StatCard), no solid status badges (SubtleBadge), no Chart.js/D3 (ECharts via ReactEchart).",
+      "Don't use Orkestra Blue decoratively or add new saturated hues to the system — the palette is closed: one action color, four status colors, graphite."
+    ]
+  }
+}
