@@ -119,7 +119,7 @@ const MyTable: React.FC<{ rows: Row[] }> = ({ rows }) => {
         <Col xs="auto"><AdvanceTableSearchBox /></Col>
       </Row>
       <AdvanceTable
-        headerClassName="bg-200 text-nowrap align-middle"
+        headerClassName="text-nowrap align-middle"
         rowClassName="align-middle white-space-nowrap"
         tableProps={{ size: 'sm', striped: true, className: 'fs-10 mb-0 overflow-hidden' }}
       />

@@ -10,7 +10,8 @@ interface PageHeaderProps extends Omit<CardProps, 'title'> {
   preTitle?: React.ReactNode;
   titleTag?: ElementType;
   description?: string;
-  image?: string;
+  // null renders a plain card surface with no corner illustration
+  image?: string | null;
   col?: ColProps;
 }
 
@@ -25,14 +26,16 @@ const PageHeader = ({
   ...rest
 }: PropsWithChildren<PageHeaderProps>) => (
   <Card {...rest}>
-    <Background
-      image={image}
-      className="bg-card d-none d-sm-block"
-      style={{
-        borderTopRightRadius: '0.375rem',
-        borderBottomRightRadius: '0.375rem'
-      }}
-    />
+    {image && (
+      <Background
+        image={image}
+        className="bg-card d-none d-sm-block"
+        style={{
+          borderTopRightRadius: '0.375rem',
+          borderBottomRightRadius: '0.375rem'
+        }}
+      />
+    )}
     <Card.Body className="position-relative">
       <Row>
         <Col {...col}>

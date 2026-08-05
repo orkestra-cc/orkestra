@@ -74,6 +74,7 @@ const OrkestraComponentCardHeader = ({
                       href={`#${camelize(title)}`}
                       className="hover-actions ps-2"
                       style={{ top: 0, left: '-25px' }}
+                      aria-label={`Link to ${title}`}
                     >
                       #
                     </a>
@@ -86,6 +87,7 @@ const OrkestraComponentCardHeader = ({
                       href={`#${camelize(title)}`}
                       className="hover-actions ps-2"
                       style={{ top: 0, right: '-25px' }}
+                      aria-label={`Link to ${title}`}
                     >
                       #
                     </a>
@@ -115,6 +117,7 @@ interface OrkestraComponentCardProps {
   children: ReactNode;
   multiSections?: boolean;
   noGuttersBottom?: boolean;
+  defaultTab?: 'preview' | 'code';
   [key: string]: any;
 }
 
@@ -122,6 +125,7 @@ const OrkestraComponentCard = ({
   children,
   multiSections,
   noGuttersBottom,
+  defaultTab = 'preview',
   ...rest
 }: OrkestraComponentCardProps) => {
   return (
@@ -129,7 +133,7 @@ const OrkestraComponentCard = ({
       {multiSections ? (
         <>{children}</>
       ) : (
-        <Tab.Container defaultActiveKey="preview">{children}</Tab.Container>
+        <Tab.Container defaultActiveKey={defaultTab}>{children}</Tab.Container>
       )}
     </Card>
   );
