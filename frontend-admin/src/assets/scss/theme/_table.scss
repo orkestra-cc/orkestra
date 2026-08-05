@@ -19,11 +19,14 @@
   .dropend {
     position: static;
   }
-  // Header band: painting the th (not the thead) lets this win over the
-  // bg-200 utility AdvanceTable pages pass as headerClassName, with no page
-  // edits. Transparent in dark (see root/_dark.scss) keeps dark unchanged.
+  // Header band + ink: painting the th (not the thead) lets this win over any
+  // bg-* utility a call site still passes on thead. Both modes resolve the
+  // vars (light gray-300/gray-900, dark frozen #232e3c/#d8e2ef — see
+  // root/_dark.scss). Owning the ink here means a raw <Table> can't drift
+  // from the text-900 header spec.
   thead > tr > th {
     background-color: var(--#{$prefix}table-head-bg);
+    color: var(--#{$prefix}gray-900);
   }
 }
 .white-space-nowrap {

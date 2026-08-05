@@ -185,7 +185,7 @@ Component philosophy: **quiet precision**. Clean white surfaces, discreet shadow
 
 ### Data tables (AdvanceTable)
 - Always `AdvanceTable` + `useAdvanceTable` + `AdvanceTableProvider` — never raw `<table>` for production lists.
-- **Header band:** `gray-300` (#dfe3e8) painted on `th` via `--orkestra-table-head-bg` — in dark it resolves to `transparent`, preserving the frozen dark header (#232e3c). Header text `text-900`, `text-nowrap`.
+- **Header band + ink:** the theme owns both, painted on `th` via `--orkestra-table-head-bg` and `--orkestra-gray-900` — light `gray-300` band with `gray-900` ink, dark the frozen literals `#232e3c` / `#d8e2ef`. Call sites pass no color classes on headers (`text-900` in column meta is redundant but harmless); `text-nowrap` stays.
 - **Body:** `fs-10`, striped `gray-100` rows, 0.5rem/0.75rem cell padding, `align-middle`.
 - **Footer:** `AdvanceTableFooter` with rows-per-page, row info, nav buttons.
 

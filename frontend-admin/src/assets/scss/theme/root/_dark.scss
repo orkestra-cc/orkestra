@@ -246,12 +246,23 @@
     //
     // Table
     //
-    // transparent (not a frozen literal) so AdvanceTables keep showing their
-    // thead.bg-200 (#232e3c, frozen) and basic tables keep no band — dark
-    // stays pixel-identical instead of picking up the light-mode gray-300 band.
-    --#{$prefix}table-head-bg: transparent;
+    // Frozen literal (old dark gray-1000): the theme owns the header band in
+    // BOTH modes now that call sites no longer pass a bg-* utility on thead.
+    // Was `transparent` when AdvanceTables still carried thead.bg-200 — that
+    // premise is gone, and without this pin dark headers render bandless.
+    --#{$prefix}table-head-bg: #232e3c;
 
     //
+    // Plain .table text vars: Bootstrap compiles them from the light
+    // $table-color literal (#454c58), and only .table-<variant> gets a dark
+    // override below — so plain-table text leaks the light ramp onto dark
+    // cards (~1.9:1). Pin to the frozen dark body color; never derive from
+    // $gray-*.
+    .table {
+      --#{$prefix}table-color: #9da9bb;
+      --#{$prefix}table-striped-color: #9da9bb;
+    }
+
     // Table variants
     //
     @each $color, $value in $table-variants-dark {

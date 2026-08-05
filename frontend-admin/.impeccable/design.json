@@ -148,7 +148,7 @@
       "name": "Data Table (dark, frozen)",
       "kind": "custom",
       "refersTo": "table-header",
-      "description": "Dark table: --orkestra-table-head-bg resolves to transparent, so the header keeps its frozen bg-200 (#232e3c); borders #344050, text #9da9bb, striping on the tertiary dark tint.",
+      "description": "Dark table: the theme paints the frozen header band (--orkestra-table-head-bg: #232e3c) and ink (#d8e2ef) on th; borders #344050, text #9da9bb, striping on the tertiary dark tint.",
       "html": "<div class=\"ds-dark-canvas ds-dark-canvas-table\"><table class=\"ds-table-dark\"><thead><tr><th>Name</th><th>Role</th><th>Status</th></tr></thead><tbody><tr><td>Ada Lovelace</td><td>administrator</td><td>active</td></tr><tr><td>Grace Hopper</td><td>operator</td><td>active</td></tr><tr><td>Alan Turing</td><td>developer</td><td>invited</td></tr></tbody></table></div>",
       "css": ".ds-dark-canvas-table { background: #121e2d; padding: 1rem; border-radius: 0.375rem; } .ds-table-dark { width: 100%; border-collapse: collapse; font-family: 'Open Sans', sans-serif; font-size: 0.833rem; color: #9da9bb; } .ds-table-dark th { background: #232e3c; color: #d8e2ef; font-weight: 600; text-align: left; white-space: nowrap; padding: 0.5rem 0.75rem; } .ds-table-dark td { padding: 0.5rem 0.75rem; border-top: 1px solid #344050; } .ds-table-dark tbody tr:nth-child(odd) { background: #162231; } .ds-table-dark tbody tr:hover { background: #232e3c; }"
     },
