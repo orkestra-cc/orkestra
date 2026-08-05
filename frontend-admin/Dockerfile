@@ -67,6 +67,10 @@ RUN echo 'server { \
     server_name localhost; \
     root /usr/share/nginx/html; \
     index index.html; \
+    location = /config.js { \
+        add_header Cache-Control "no-store" always; \
+        try_files $uri =404; \
+    } \
     location / { \
         try_files $uri $uri/ /index.html; \
     } \

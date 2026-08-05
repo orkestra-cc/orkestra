@@ -42,6 +42,10 @@ RUN printf 'server {\n\
     server_name _;\n\
     root /usr/share/nginx/html;\n\
     index index.html;\n\
+    location = /config.js {\n\
+        add_header Cache-Control "no-store" always;\n\
+        try_files $uri =404;\n\
+    }\n\
     location /health {\n\
         access_log off;\n\
         return 200 "healthy";\n\
