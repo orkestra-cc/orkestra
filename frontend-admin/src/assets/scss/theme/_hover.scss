@@ -43,13 +43,37 @@ a[href] {
     text-decoration: none;
   }
 
+  // Keyboard path: inside a trigger the controls hide via opacity (not the
+  // base display:none) so they stay in the tab order — a display:none
+  // control can never receive focus, which would make the :focus-within
+  // reveal below unreachable (WCAG 2.1.1). Absolute positioning means the
+  // swap has no layout impact; pointer-events restores click-through at rest.
+  .hover-actions {
+    display: flex;
+    opacity: 0;
+    pointer-events: none;
+    &.btn {
+      display: inline-block;
+    }
+  }
+
   @include hover-focus {
     .hover-actions {
       z-index: 1;
-      display: flex;
-      &.btn {
-        display: inline-block;
-      }
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .hover-hide {
+      display: none;
+    }
+  }
+
+  &:focus-within {
+    .hover-actions {
+      z-index: 1;
+      opacity: 1;
+      pointer-events: auto;
     }
 
     .hover-hide {

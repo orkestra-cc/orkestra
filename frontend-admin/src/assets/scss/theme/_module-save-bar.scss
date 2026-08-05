@@ -11,17 +11,15 @@
   position: sticky;
   bottom: 0;
   z-index: 5;
-  // `--orkestra-card-bg` is only ever declared inside `.card` — resolvable
-  // when this bar sits in ModuleConfigSection's Card.Body (the value used
-  // there, unchanged), but NOT when detail/index.tsx's full-page rail
-  // layout renders it as a direct child of a bare <Col>. An unresolvable
-  // custom property makes the whole declaration invalid at computed-value
-  // time, so outside a card the bar was fully transparent — sticky hairline
-  // border, scrolling content showing straight through it. The nested
-  // `var()` falls back to the page's own body background the moment the
-  // outer one has nothing to resolve, with zero effect on the card-embedded
-  // case (the outer value always wins there).
-  background-color: var(--#{$prefix}card-bg, var(--#{$prefix}body-bg));
+  // `--orkestra-card-bg` is only ever declared inside `.card`, but
+  // detail/index.tsx's full-page rail layout renders this bar as a direct
+  // child of a bare <Col>, where that variable never resolves — and the
+  // body-bg fallback painted a gray band over the white card the bar
+  // actually sticks over in light mode. `--orkestra-emphasis-bg` is declared
+  // at :root in BOTH themes with the card surface's exact value ($white in
+  // light, $card-bg-dark in dark), so the bar matches the card content it
+  // overlays regardless of whether it sits inside a Card.Body or not.
+  background-color: var(--#{$prefix}emphasis-bg);
   border-top: var(--#{$prefix}border-width) solid var(--#{$prefix}border-color);
   // No box-shadow: Bootstrap's `$box-shadow` is a *downward* shadow
   // (`0 .5rem 1rem`) — invisible on a bar pinned to the bottom of the

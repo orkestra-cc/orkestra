@@ -25,20 +25,44 @@ const AdvanceTable = ({
         <thead className={headerClassName}>
           <tr>
             {getFlatHeaders().map((header: Header<unknown, unknown>) => {
+              const canSort = header.column.getCanSort();
+              const sorted = header.column.getIsSorted();
+              const toggleSort = header.column.getToggleSortingHandler();
               return (
                 <th
                   key={header.id}
+                  scope="col"
                   {...header.column.columnDef.meta?.headerProps}
                   className={classNames(
                     'fs-10',
                     header.column.columnDef.meta?.headerProps?.className,
                     {
-                      sort: header.column.getCanSort(),
-                      desc: header.column.getIsSorted() === 'desc',
-                      asc: header.column.getIsSorted() === 'asc'
+                      sort: canSort,
+                      desc: sorted === 'desc',
+                      asc: sorted === 'asc'
                     }
                   )}
-                  onClick={header.column.getToggleSortingHandler()}
+                  onClick={toggleSort}
+                  tabIndex={canSort ? 0 : undefined}
+                  aria-sort={
+                    canSort
+                      ? sorted === 'asc'
+                        ? 'ascending'
+                        : sorted === 'desc'
+                          ? 'descending'
+                          : 'none'
+                      : undefined
+                  }
+                  onKeyDown={
+                    canSort
+                      ? e => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            toggleSort?.(e);
+                          }
+                        }
+                      : undefined
+                  }
                 >
                   {header.isPlaceholder
                     ? null

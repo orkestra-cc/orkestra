@@ -36,7 +36,7 @@ const IndeterminateCheckbox: FC<IndeterminateCheckboxProps> = ({
     >
       <Form.Check.Input
         type="checkbox"
-        className="mt-0"
+        className="mt-0 advance-table-check-input"
         ref={resolvedRef}
         {...rest}
       />

@@ -40,6 +40,22 @@ td .dropdown-toggle {
   }
 }
 
+// Sortable headers are keyboard-focusable (tabindex=0 in AdvanceTable);
+// reboot strips outlines, so paint one back for keyboard users.
+.table thead > tr > th.sort:focus-visible {
+  outline: 2px solid var(--#{$prefix}primary);
+  outline-offset: -2px;
+}
+
+// Selection checkboxes inside fs-10 tables inherit an em-based ~13px box —
+// below the WCAG 2.2 §2.5.8 target floor. Fix them at 18px (the dense row
+// pitch keeps 24px target circles from intersecting, so the spacing
+// exception holds) without inflating row height.
+.form-check-input.advance-table-check-input {
+  width: 1.125rem;
+  height: 1.125rem;
+}
+
 // .table-responsive {
 //   @extend .scrollbar;
 // }

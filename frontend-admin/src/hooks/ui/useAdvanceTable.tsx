@@ -12,7 +12,42 @@ import {
   OnChangeFn,
   PaginationState
 } from '@tanstack/react-table';
+import { useTranslation } from 'react-i18next';
 import IndeterminateCheckbox from 'components/common/advance-table/IndeterminateCheckbox';
+
+// Rendered by flexRender as components, so hooks are legal here. The labels
+// are what a screen reader announces — without them every selection checkbox
+// is a bare "checkbox" (WCAG 4.1.2).
+const SelectAllRowsCheckbox = <T,>({ table }: { table: Table<T> }) => {
+  const { t } = useTranslation();
+  return (
+    <IndeterminateCheckbox
+      className="form-check mb-0"
+      aria-label={t('table.selectAllRows')}
+      {...{
+        checked: table.getIsAllRowsSelected(),
+        indeterminate: table.getIsSomeRowsSelected(),
+        onChange: table.getToggleAllRowsSelectedHandler()
+      }}
+    />
+  );
+};
+
+const SelectRowCheckbox = <T,>({ row }: { row: Row<T> }) => {
+  const { t } = useTranslation();
+  return (
+    <IndeterminateCheckbox
+      className="form-check mb-0"
+      aria-label={t('table.selectRow')}
+      {...{
+        checked: row.getIsSelected(),
+        disabled: !row.getCanSelect(),
+        indeterminate: row.getIsSomeSelected(),
+        onChange: row.getToggleSelectedHandler()
+      }}
+    />
+  );
+};
 
 const selectionColumn = <T,>(
   selectionColumnWidth?: string | number,
@@ -22,26 +57,9 @@ const selectionColumn = <T,>(
     id: 'selection',
     accessorKey: '',
     header: ({ table }: { table: Table<T> }) => (
-      <IndeterminateCheckbox
-        className="form-check mb-0"
-        {...{
-          checked: table.getIsAllRowsSelected(),
-          indeterminate: table.getIsSomeRowsSelected(),
-          onChange: table.getToggleAllRowsSelectedHandler()
-        }}
-      />
+      <SelectAllRowsCheckbox table={table} />
     ),
-    cell: ({ row }: { row: Row<T> }) => (
-      <IndeterminateCheckbox
-        className="form-check mb-0"
-        {...{
-          checked: row.getIsSelected(),
-          disabled: !row.getCanSelect(),
-          indeterminate: row.getIsSomeSelected(),
-          onChange: row.getToggleSelectedHandler()
-        }}
-      />
-    ),
+    cell: ({ row }: { row: Row<T> }) => <SelectRowCheckbox row={row} />,
     meta: {
       headerProps: {
         className: selectionHeaderClassname,
