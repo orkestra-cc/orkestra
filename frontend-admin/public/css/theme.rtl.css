@@ -28119,6 +28119,22 @@ html[data-bs-theme=dark] .bg-priority-low:checked {
   position: sticky;
   bottom: 0;
   z-index: 5;
-  background-color: var(--orkestra-card-bg, var(--orkestra-body-bg));
+  background-color: var(--orkestra-emphasis-bg);
   border-top: var(--orkestra-border-width) solid var(--orkestra-border-color);
+}
+
+/* -------------------------------------------------------------------------- */
+/*             Module Config Rail — settings navigation (Phase 4)             */
+/* -------------------------------------------------------------------------- */
+.module-config-rail .nav-link {
+  color: var(--orkestra-gray-700);
+  border-radius: var(--orkestra-border-radius);
+}
+.module-config-rail .nav-link:hover, .module-config-rail .nav-link:focus {
+  color: var(--orkestra-gray-1100);
+}
+.module-config-rail .nav-link.active {
+  color: var(--orkestra-primary);
+  background-color: var(--orkestra-primary-bg-subtle);
+  font-weight: 500;
 }
