@@ -54,7 +54,7 @@ const ModuleDetailHeader: React.FC<ModuleDetailHeaderProps> = ({
   return (
     <div className="mb-3">
       <Link
-        to="/admin/modules"
+        to={`/admin/modules?tab=${isCore ? 'core' : 'addons'}`}
         className="text-decoration-none fs-10 text-600 mb-2 d-inline-block"
       >
         <FontAwesomeIcon icon={faArrowLeft} className="me-1" />
