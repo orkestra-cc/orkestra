@@ -43,6 +43,11 @@
 
   --#{$prefix}blockquote-footer-color: #{$gray-600};
 
+  //
+  // Table
+  //
+  --#{$prefix}table-head-bg: #{$gray-300};
+
   --#{$prefix}hr-opacity: 1;
 
   --#{$prefix}mark-bg: #fcf8e3; // Review

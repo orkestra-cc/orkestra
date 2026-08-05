@@ -19,6 +19,12 @@
   .dropend {
     position: static;
   }
+  // Header band: painting the th (not the thead) lets this win over the
+  // bg-200 utility AdvanceTable pages pass as headerClassName, with no page
+  // edits. Transparent in dark (see root/_dark.scss) keeps dark unchanged.
+  thead > tr > th {
+    background-color: var(--#{$prefix}table-head-bg);
+  }
 }
 .white-space-nowrap {
   width: 1px;

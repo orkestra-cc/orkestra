@@ -230,6 +230,7 @@
   --orkestra-emphasis-bg: #fff;
   --orkestra-emphasis-bg-rgb: 255, 255, 255;
   --orkestra-blockquote-footer-color: #68707c;
+  --orkestra-table-head-bg: #dfe3e8;
   --orkestra-hr-opacity: 1;
   --orkestra-mark-bg: #fcf8e3;
   --orkestra-font-base: "Open Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
@@ -663,6 +664,7 @@
   --orkestra-popover-header-bg-global: rgba(35, 46, 60, 0.25);
   --orkestra-toast-bg-global: rgba(52, 64, 80, 0.3);
   --orkestra-toast-header-bg-global: rgba(52, 64, 80, 0.3);
+  --orkestra-table-head-bg: transparent;
 }
 [data-bs-theme=dark] .table-primary {
   --orkestra-table-bg: rgb(8.8, 24.6, 45.8);
@@ -993,8 +995,8 @@ table {
 }
 
 caption {
-  padding-top: 0.75rem;
-  padding-bottom: 0.75rem;
+  padding-top: 0.5rem;
+  padding-bottom: 0.5rem;
   color: #98a1ac;
   text-align: right;
 }
@@ -2852,7 +2854,7 @@ progress {
   border-color: var(--orkestra-table-border-color);
 }
 .table > :not(caption) > * > * {
-  padding: 0.75rem 0.75rem;
+  padding: 0.5rem 0.75rem;
   color: var(--orkestra-table-color-state, var(--orkestra-table-color-type, var(--orkestra-table-color)));
   background-color: var(--orkestra-table-bg);
   border-bottom-width: var(--orkestra-border-width);
@@ -22360,6 +22362,9 @@ html[data-bs-theme=dark] .orkestra-react-range .orkestra-react-range-thumb .orke
 .table .dropstart,
 .table .dropend {
   position: static;
+}
+.table thead > tr > th {
+  background-color: var(--orkestra-table-head-bg);
 }
 
 .white-space-nowrap {

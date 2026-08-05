@@ -244,6 +244,14 @@
     --#{$prefix}toast-header-bg-global: #{rgba(#344050, 0.3)};
 
     //
+    // Table
+    //
+    // transparent (not a frozen literal) so AdvanceTables keep showing their
+    // thead.bg-200 (#232e3c, frozen) and basic tables keep no band — dark
+    // stays pixel-identical instead of picking up the light-mode gray-300 band.
+    --#{$prefix}table-head-bg: transparent;
+
+    //
     // Table variants
     //
     @each $color, $value in $table-variants-dark {
