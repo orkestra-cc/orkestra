@@ -99,13 +99,13 @@
   --orkestra-tertiary-bg: #f9fafb;
   --orkestra-tertiary-bg-rgb: 249, 250, 251;
   --orkestra-heading-color: var(--orkestra-secondary-color);
-  --orkestra-link-color: #2c7be5;
-  --orkestra-link-color-rgb: 44, 123, 229;
+  --orkestra-link-color: rgb(14.6666666667%, 41%, 76.3333333333%);
+  --orkestra-link-color-rgb: 37, 105, 195;
   --orkestra-link-decoration: none;
-  --orkestra-link-hover-color: rgb(13.8039215686%, 38.5882352941%, 71.8431372549%);
-  --orkestra-link-hover-color-rgb: 35, 98, 183;
+  --orkestra-link-hover-color: rgb(11.7333333333%, 32.8%, 61.0666666667%);
+  --orkestra-link-hover-color-rgb: 30, 84, 156;
   --orkestra-link-hover-decoration: underline;
-  --orkestra-code-color: #ff679b;
+  --orkestra-code-color: #c22e64;
   --orkestra-highlight-color: #454c58;
   --orkestra-highlight-bg: rgb(99.2156862745%, 90.0392156863%, 84.862745098%);
   --orkestra-border-width: 1px;
@@ -292,7 +292,7 @@
   --orkestra-btn-orkestra-dark-active-color: rgb(4.8823529412%, 6.5098039216%, 9.1137254902%);
   --orkestra-input-btn-focus-color: rgba(44, 123, 229, 0.25);
   --orkestra-btn-link-color: var(--orkestra-link-color);
-  --orkestra-btn-link-hover-color: rgb(13.8039215686%, 38.5882352941%, 71.8431372549%);
+  --orkestra-btn-link-hover-color: rgb(11.7333333333%, 32.8%, 61.0666666667%);
   --orkestra-btn-disabled-color: #68707c;
   --orkestra-input-focus-border-color-global: rgb(58.6274509804%, 74.1176470588%, 94.9019607843%);
   --orkestra-input-placeholder-color-global: var(--orkestra-gray-400);
@@ -4316,7 +4316,7 @@ fieldset:disabled .tox .tox-dialog__footer .tox-button--secondary,
   --orkestra-btn-disabled-color: #68707c;
   --orkestra-btn-disabled-border-color: transparent;
   --orkestra-btn-box-shadow: 0 0 0 #000;
-  --orkestra-btn-focus-shadow-rgb: 76, 143, 233;
+  --orkestra-btn-focus-shadow-rgb: 70, 127, 204;
   text-decoration: none;
 }
 .btn-link:hover, .btn-link:focus-visible {
@@ -19926,6 +19926,12 @@ samp {
 .tox .tox-dialog__footer .disabled.tox-button:last-child, .tox .tox-menu__footer .disabled.tox-button--secondary,
 .tox .tox-dialog__footer .disabled.tox-button--secondary {
   box-shadow: var(--orkestra-btn-box-shadow);
+}
+
+.btn-primary, .tox .tox-menu__footer .tox-button:last-child,
+.tox .tox-dialog__footer .tox-button:last-child {
+  --orkestra-btn-bg: rgb(15.5294117647%, 43.4117647059%, 80.8235294118%);
+  --orkestra-btn-border-color: rgb(15.5294117647%, 43.4117647059%, 80.8235294118%);
 }
 
 /*-----------------------------------------------

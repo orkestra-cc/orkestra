@@ -3,6 +3,8 @@ name: Orkestra Operator Console
 description: Calm, clinical, high-contrast Tier-1 admin console — The Control Room
 colors:
   primary: "#2c7be5"
+  link-ink: "#2569c3"
+  code-pink: "#c22e64"
   secondary: "#68707c"
   success: "#00d27a"
   info: "#27bcfd"
@@ -48,7 +50,7 @@ spacing:
   table-cell-x: "0.75rem"
 components:
   button-primary:
-    backgroundColor: "{colors.primary}"
+    backgroundColor: "#286fce"
     textColor: "{colors.white}"
     rounded: "{rounded.base}"
   button-orkestra:
@@ -93,7 +95,8 @@ The confirmed anti-reference is the console's own past: Falcon's blue-tinted gra
 A neutral graphite field where the only saturated voices are the action color and the four status colors.
 
 ### Primary
-- **Orkestra Blue** (#2c7be5): the color of action. Primary buttons, links, active nav states, focused inputs, selected rows. It never appears as decoration — if it's blue, the operator can act on it.
+- **Orkestra Blue** (#2c7be5): the color of action. Primary buttons, active nav states, focused inputs, selected rows. It never appears as decoration — if it's blue, the operator can act on it.
+- **Link Ink** (#2569c3, `shade-color($primary, 15%)`): the text color of links and link-buttons — the same hue, darkened to hold ≥4.5:1 on every surface links sit on (white 5.40:1, gray-100 5.17:1, gray-200 4.90:1). Fills and states stay Orkestra Blue; only running link text uses the ink.
 
 ### Secondary
 - **Secondary Gray** (#68707c, = `gray-600`): secondary text, muted actions, `btn-secondary`. A member of the ramp doing double duty, not a separate hue.
@@ -173,7 +176,7 @@ Component philosophy: **quiet precision**. Clean white surfaces, discreet shadow
 
 ### Buttons
 - **Shape:** subtly rounded (0.25rem).
-- **Primary** (`variant="primary"`): Orkestra Blue fill, white text — reserved for the one main action of a view.
+- **Primary** (`variant="primary"`): white text on #286fce (`shade-color($primary, 10%)`, 4.94:1 — the AA-passing button shade of Orkestra Blue) — reserved for the one main action of a view. Hover/active step darker (#2569c3 / #2362b7).
 - **Falcon/Orkestra family** (`variant="falcon-primary"` etc., compiled as `.btn-orkestra-*`): the console's signature button — white surface (`--orkestra-btn-orkestra-background`), colored text, the crisp orkestra shadow ring; hover deepens the text color (−17% shift) and the shadow, background stays put. Use for secondary and toolbar actions.
 - **Hover / Focus:** color shifts and shadow steps, no size or position jumps.
 
@@ -217,4 +220,4 @@ Vertical sidebar rendered from the backend (`/v1/navigation`) — never hardcode
 - **Don't** reintroduce blue-tinted grays, tinted shadows, or the old Falcon values (#edf2f9, #5e6e82, rgba(65,69,88,…)) anywhere in light mode.
 - **Don't** hardcode hex colors, inline color/spacing styles, or generic fonts in components — the theme provides all three.
 - **Don't** build bespoke primitives where one exists: no raw `<table>` (AdvanceTable), no hand-rolled KPI tiles (StatCard), no solid status badges (SubtleBadge), no Chart.js/D3 (ECharts via `ReactEchart`).
-- **Don't** use Orkestra Blue decoratively or add new saturated hues to the system — the palette is closed: one action color, four status colors, graphite.
+- **Don't** use Orkestra Blue decoratively or add new saturated hues to the system — the palette is closed: one action color (with its darker Link Ink), four status colors, graphite, and the single utilitarian code accent (#c22e64, AA on white).

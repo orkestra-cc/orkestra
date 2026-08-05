@@ -139,6 +139,19 @@ $box-shadow-inset: inset 0 1px 2px rgba($black, 0.075) !default;
 $link-decoration: none !default;
 $link-hover-decoration: underline !default;
 $link-shade-percentage: 20% !default;
+// Bootstrap's default ($primary, #2c7be5) is 4.14:1 on white — below the
+// 4.5:1 AA floor for body-size text. A 15% shade (#2569c3) passes on every
+// surface links actually sit on (white 5.40, gray-100 5.17, gray-200 4.90)
+// while staying a derivation of Orkestra Blue. Dark is untouched:
+// $link-color-dark references $primary directly.
+$link-color: shade-color($primary, 15%) !default;
+
+// Code
+//
+// Bootstrap's default ($pink, #ff679b) is 2.74:1 on white — illegible small
+// mono text carrying the docs' key terms. #c22e64 keeps the pink identity at
+// 5.43:1. Dark is untouched: $code-color-dark references $pink directly.
+$code-color: #c22e64 !default;
 
 // Typography
 //

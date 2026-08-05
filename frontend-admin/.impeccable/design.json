@@ -10,6 +10,18 @@
         "canonical": "#2c7be5",
         "tonalRamp": ["#0b1f39", "#123566", "#1a4c93", "#2263bf", "#2c7be5", "#5b98eb", "#8ab5f1", "#c8dcf8"]
       },
+      "link-ink": {
+        "role": "primary",
+        "displayName": "Link Ink",
+        "canonical": "#2569c3",
+        "tonalRamp": ["#1e549c", "#2569c3", "#2c7be5", "#5b98eb"]
+      },
+      "code-pink": {
+        "role": "accent",
+        "displayName": "Code Accent",
+        "canonical": "#c22e64",
+        "tonalRamp": ["#8b2148", "#c22e64", "#e04a82", "#ff679b"]
+      },
       "success": {
         "role": "accent",
         "displayName": "Success Green",
@@ -86,7 +98,7 @@
       "refersTo": "button-primary",
       "description": "Solid Orkestra Blue — the single main action of a view.",
       "html": "<button class=\"ds-btn-primary\">Save changes</button>",
-      "css": ".ds-btn-primary { background: var(--orkestra-primary, #2c7be5); color: #fff; font-family: 'Open Sans', sans-serif; font-size: 1rem; font-weight: 500; padding: 0.3125rem 1rem; border: 1px solid var(--orkestra-primary, #2c7be5); border-radius: 0.25rem; transition: background 0.15s ease-in-out; } .ds-btn-primary:hover { background: #2569c3; border-color: #2364b8; } .ds-btn-primary:focus-visible { outline: none; box-shadow: 0 0 0 0.25rem rgba(44, 123, 229, 0.25); }"
+      "css": ".ds-btn-primary { background: #286fce; color: #fff; font-family: 'Open Sans', sans-serif; font-size: 1rem; font-weight: 500; padding: 0.3125rem 1rem; border: 1px solid #286fce; border-radius: 0.25rem; transition: background 0.15s ease-in-out; } .ds-btn-primary:hover { background: #2569c3; border-color: #2364b8; } .ds-btn-primary:focus-visible { outline: none; box-shadow: 0 0 0 0.25rem rgba(44, 123, 229, 0.25); }"
     },
     {
       "name": "Orkestra (Falcon) Button",
