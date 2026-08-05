@@ -1,5 +1,6 @@
 import { Link } from 'react-router';
-import { Badge, Button, Card, Placeholder } from 'react-bootstrap';
+import { Button, Card, Placeholder } from 'react-bootstrap';
+import SubtleBadge from 'components/common/SubtleBadge';
 import { useTranslation } from 'react-i18next';
 import OrkestraCardHeader from 'components/common/OrkestraCardHeader';
 import paths from 'routes/paths';
@@ -109,9 +110,9 @@ const SecuritySummaryCard: React.FC = () => {
                       {t('settings.security.summary.mfaOff')}
                     </span>
                     {authMethods?.mfaRequired && (
-                      <Badge bg="danger" className="ms-2 fs-11">
+                      <SubtleBadge bg="danger" className="ms-2 fs-11">
                         {t('settings.security.summary.mfaRequired')}
-                      </Badge>
+                      </SubtleBadge>
                     )}
                   </>
                 )}

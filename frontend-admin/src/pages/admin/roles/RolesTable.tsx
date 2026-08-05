@@ -1,7 +1,6 @@
 import { useMemo, useState } from 'react';
 import {
   Alert,
-  Badge,
   Button,
   Card,
   Form,
@@ -10,6 +9,7 @@ import {
   Spinner,
   Tooltip
 } from 'react-bootstrap';
+import SubtleBadge from 'components/common/SubtleBadge';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { Trans, useTranslation } from 'react-i18next';
 import { toast } from 'react-toastify';
@@ -150,14 +150,14 @@ const RolesTable: React.FC<Props> = ({ tenantId }) => {
       {/* Toolbar */}
       <div className="d-flex flex-wrap gap-2 align-items-center justify-content-between mb-3">
         <div className="d-flex gap-2 align-items-center">
-          <Badge bg="secondary" className="fs-11">
+          <SubtleBadge bg="secondary" className="fs-11">
             <FontAwesomeIcon icon="lock" className="me-1" />
             {t('adminRoles.rolesTable.countSystem', { count: totalSystem })}
-          </Badge>
-          <Badge bg="info" className="fs-11">
+          </SubtleBadge>
+          <SubtleBadge bg="info" className="fs-11">
             <FontAwesomeIcon icon="users-cog" className="me-1" />
             {t('adminRoles.rolesTable.countCustom', { count: totalCustom })}
-          </Badge>
+          </SubtleBadge>
         </div>
         <div className="d-flex gap-2 align-items-center flex-grow-1 justify-content-end">
           <InputGroup size="sm" style={{ maxWidth: 320 }}>
@@ -370,15 +370,15 @@ const RoleRow: React.FC<RoleRowProps> = ({
           <div className="d-flex align-items-center gap-2">
             <span className="fw-semibold text-body">{role.name}</span>
             {role.isSystem && (
-              <Badge bg="secondary" className="fw-normal">
+              <SubtleBadge bg="secondary" className="fw-normal">
                 <FontAwesomeIcon icon="lock" className="me-1" />
                 {t('adminRoles.rolesTable.badgeSystem')}
-              </Badge>
+              </SubtleBadge>
             )}
             {!role.isActive && (
-              <Badge bg="warning" text="dark" className="fw-normal">
+              <SubtleBadge bg="warning" className="fw-normal">
                 {t('adminRoles.rolesTable.badgeDisabled')}
-              </Badge>
+              </SubtleBadge>
             )}
           </div>
           {role.description && (
@@ -391,10 +391,10 @@ const RoleRow: React.FC<RoleRowProps> = ({
         {/* Permission count chip */}
         <div className="text-muted small d-none d-md-block text-nowrap">
           {role.permissions[0] === '*' ? (
-            <Badge bg="warning" text="dark">
+            <SubtleBadge bg="warning">
               <span className="me-1">∗</span>
               {t('adminRoles.rolesTable.permissionsAll')}
-            </Badge>
+            </SubtleBadge>
           ) : (
             <span>
               <Trans
@@ -502,10 +502,10 @@ const PermissionChips: React.FC<{ permissions: string[] }> = ({
   if (permissions.length === 1 && permissions[0] === '*') {
     return (
       <div>
-        <Badge bg="warning" text="dark">
+        <SubtleBadge bg="warning">
           <span className="me-1">∗</span>
           {t('adminRoles.rolesTable.wildcardChip')}
-        </Badge>
+        </SubtleBadge>
       </div>
     );
   }
@@ -531,14 +531,9 @@ const PermissionChips: React.FC<{ permissions: string[] }> = ({
           </div>
           <div className="d-flex flex-wrap gap-1">
             {groups[mod].sort().map(p => (
-              <Badge
-                key={p}
-                bg="light"
-                text="dark"
-                className="fw-normal border"
-              >
+              <SubtleBadge key={p} bg="light" className="fw-normal border">
                 {p}
-              </Badge>
+              </SubtleBadge>
             ))}
           </div>
         </div>

@@ -137,7 +137,7 @@ const RegisterForm = () => {
           checked={accepted}
           onChange={e => setAccepted(e.target.checked)}
           label={
-            <span className="fs--1">
+            <span className="fs-10">
               {t('auth.terms.acceptPrefix')}{' '}
               <Link to="/terms">{t('auth.terms.termsLink')}</Link>{' '}
               {t('auth.terms.and')}{' '}

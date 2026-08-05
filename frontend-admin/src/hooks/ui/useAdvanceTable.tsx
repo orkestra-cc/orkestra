@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import {
   useReactTable,
   getCoreRowModel,
@@ -184,6 +185,22 @@ const useAdvanceTable = <T,>({
     ...(onGlobalFilterChange ? { onGlobalFilterChange } : {}),
     ...(controlledState ? { state: controlledState } : {})
   });
+
+  // `autoResetPageIndex: false` above is deliberate — a sort or a filter must
+  // not yank the operator back to page 1. The cost is that the page index also
+  // survives rows being DELETED, so revoking the last row of the last page
+  // leaves pageIndex past the end and renders a blank table while rows remain.
+  // Clamp it back to the final page (0 when the set empties out). Server-side
+  // pagination is excluded: there the caller owns the page and the row count.
+  const resolvedPageCount = table.getPageCount();
+  const { pageIndex } = table.getState().pagination;
+  useEffect(() => {
+    if (manualPagination) return;
+    const lastPage = Math.max(0, resolvedPageCount - 1);
+    if (pageIndex > lastPage) {
+      table.setPageIndex(lastPage);
+    }
+  }, [manualPagination, resolvedPageCount, pageIndex, table]);
 
   return table;
 };

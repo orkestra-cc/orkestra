@@ -1385,9 +1385,11 @@
       "colRole": "Ruolo",
       "colGranted": "Assegnato",
       "colExpires": "Scadenza",
+      "colActions": "Azioni",
       "expiresNever": "mai",
       "grantedByLine": "da {{actor}}",
       "revokeConfirm": "Revocare {{role}} a {{user}}?",
+      "revokeAria": "Revoca {{role}} a {{user}}",
       "toastRevoked": "Binding revocato",
       "toastRevokeFailed": "Revoca non riuscita: {{error}}",
       "errorUnknown": "errore sconosciuto",
@@ -1439,7 +1441,9 @@
       "overrideExplicit": "esplicito",
       "overrideInherits": "eredita globale",
       "noModules": "Nessun modulo registrato.",
-      "revert": "Ripristina"
+      "revert": "Ripristina",
+      "setAria": "Imposta il livello di log per {{module}}",
+      "revertAria": "Ripristina {{module}} al livello di log globale"
     }
   },
   "adminNavigation": {

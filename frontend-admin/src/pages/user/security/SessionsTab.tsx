@@ -1,13 +1,6 @@
 import { useState } from 'react';
-import {
-  Alert,
-  Badge,
-  Button,
-  Card,
-  Modal,
-  Spinner,
-  Table
-} from 'react-bootstrap';
+import { Alert, Button, Card, Modal, Spinner, Table } from 'react-bootstrap';
+import SubtleBadge from 'components/common/SubtleBadge';
 import { useTranslation } from 'react-i18next';
 import {
   useGetMySessionsQuery,
@@ -150,9 +143,9 @@ const SessionsTab = () => {
                     <td>
                       {deviceLabel(s)}
                       {s.isCurrent && (
-                        <Badge bg="success" className="ms-2">
+                        <SubtleBadge bg="success" className="ms-2">
                           {t('userSecurity.sessionsTab.currentBadge')}
-                        </Badge>
+                        </SubtleBadge>
                       )}
                     </td>
                     <td className="fs-10 text-muted">{s.ipAddress || dash}</td>

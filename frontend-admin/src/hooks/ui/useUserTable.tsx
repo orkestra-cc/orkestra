@@ -8,11 +8,10 @@ import useAdvanceTable from './useAdvanceTable';
 import useDebounce from 'hooks/useDebounce';
 import Avatar from 'components/common/Avatar';
 import Flex from 'components/common/Flex';
-import SubtleBadge from 'components/common/SubtleBadge';
+import SubtleBadge, { BadgeColor } from 'components/common/SubtleBadge';
 import AdminResetMfaModal from 'pages/admin/users/AdminResetMfaModal';
 import DeleteUserModal from 'pages/admin/users/DeleteUserModal';
 import {
-  Badge,
   Dropdown,
   Modal,
   Button,
@@ -310,7 +309,7 @@ const useUserTable = (options?: any) => {
           | 'manager'
           | 'operator'
           | 'guest';
-        const roleColors: Record<RoleType, string> = {
+        const roleColors: Record<RoleType, BadgeColor> = {
           super_admin: 'danger',
           administrator: 'warning',
           developer: 'primary',
@@ -327,9 +326,9 @@ const useUserTable = (options?: any) => {
           guest: 'Guest'
         };
         return (
-          <Badge bg={roleColors[role] || 'secondary'}>
+          <SubtleBadge bg={roleColors[role] || 'secondary'}>
             {roleLabels[role] || role}
-          </Badge>
+          </SubtleBadge>
         );
       }
     },

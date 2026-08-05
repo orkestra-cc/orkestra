@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { Badge, Button, Card, Col, Form, Row, Spinner } from 'react-bootstrap';
+import { Button, Card, Col, Form, Row, Spinner } from 'react-bootstrap';
+import SubtleBadge from 'components/common/SubtleBadge';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'react-toastify';
 import OrkestraCardHeader from 'components/common/OrkestraCardHeader';
@@ -104,13 +105,13 @@ const ProfileSettings: React.FC = () => {
               <Form.Label className="fs-9 fw-semibold d-flex align-items-center gap-2">
                 {t('settings.profile.emailLabel')}
                 {user?.emailVerified ? (
-                  <Badge bg="success-subtle" text="success" pill>
+                  <SubtleBadge bg="success" pill>
                     {t('settings.profile.emailVerified')}
-                  </Badge>
+                  </SubtleBadge>
                 ) : (
-                  <Badge bg="warning-subtle" text="warning" pill>
+                  <SubtleBadge bg="warning" pill>
                     {t('settings.profile.emailUnverified')}
-                  </Badge>
+                  </SubtleBadge>
                 )}
               </Form.Label>
               <Form.Control
@@ -141,15 +142,11 @@ const ProfileSettings: React.FC = () => {
                 {t('settings.profile.roleLabel')}
               </Form.Label>
               <div>
-                <Badge
-                  bg="primary-subtle"
-                  text="primary"
-                  className="fs-10 px-2 py-2"
-                >
+                <SubtleBadge bg="primary" className="fs-10 px-2 py-2">
                   {t(`adminUsers.roles.${user?.role ?? 'guest'}`, {
                     defaultValue: user?.role ?? '—'
                   })}
-                </Badge>
+                </SubtleBadge>
               </div>
             </Form.Group>
 

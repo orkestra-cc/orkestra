@@ -4,7 +4,8 @@ import coverSrc from 'assets/img/generic/bg-1.jpg';
 import Flex from 'components/common/Flex';
 import VerifiedBadge from 'components/common/VerifiedBadge';
 
-import { Col, Row, Badge } from 'react-bootstrap';
+import { Col, Row } from 'react-bootstrap';
+import SubtleBadge from 'components/common/SubtleBadge';
 import ProfileBanner from './AdminProfileBanner';
 import { User } from 'store/api/userApi';
 
@@ -62,11 +63,14 @@ const AdminBanner: React.FC<AdminBannerProps> = ({ user }) => {
               <h4 className="mb-0 me-2">
                 {user.fullName} {user.emailVerified && <VerifiedBadge />}
               </h4>
-              <Badge bg={user.isActive ? 'success' : 'danger'} className="ms-2">
+              <SubtleBadge
+                bg={user.isActive ? 'success' : 'danger'}
+                className="ms-2"
+              >
                 {user.isActive
                   ? t('profileShared.statusActive')
                   : t('profileShared.statusInactive')}
-              </Badge>
+              </SubtleBadge>
             </Flex>
             <h5 className="fs-9 fw-normal">{user.email}</h5>
             <Flex className="mb-3 mt-2">
