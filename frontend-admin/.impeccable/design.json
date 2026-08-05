@@ -44,7 +44,19 @@
         "role": "neutral",
         "displayName": "Frozen Dark Canvas",
         "canonical": "#0b1727",
-        "tonalRamp": ["#0b1727", "#121e2d", "#232e3c", "#344050", "#4d5969", "#5e6e82", "#748194", "#9da9bb", "#b6c1d2", "#d8e2ef", "#f9fafd"]
+        "tonalRamp": ["#0b1727", "#232e3c", "#344050", "#4d5969", "#5e6e82", "#748194", "#9da9bb", "#b6c1d2", "#d8e2ef", "#edf2f9", "#f9fafd"]
+      },
+      "dark-card-bg": {
+        "role": "neutral",
+        "displayName": "Frozen Dark Card",
+        "canonical": "#121e2d",
+        "tonalRamp": ["#0b1727", "#121e2d", "#162231", "#232e3c", "#344050"]
+      },
+      "dark-body-color": {
+        "role": "neutral",
+        "displayName": "Frozen Dark Body Text",
+        "canonical": "#9da9bb",
+        "tonalRamp": ["#5e6e82", "#748194", "#9da9bb", "#b6c1d2", "#d8e2ef"]
       }
     },
     "typographyMeta": {
@@ -123,6 +135,38 @@
       "description": "Signature KPI tile: 4px status accent edge, faded oversized icon, big value, corner attention ribbon.",
       "html": "<div class=\"ds-stat\"><div class=\"ds-stat-ribbon\"><span>attention</span></div><div class=\"ds-stat-label\">Failed logins (24h)</div><div class=\"ds-stat-value\">128</div><svg class=\"ds-stat-icon\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"><path d=\"M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z\"/></svg></div>",
       "css": ".ds-stat { position: relative; background: #fff; border-radius: 0.375rem; border-left: 4px solid var(--orkestra-warning, #f5803e); box-shadow: 0 7px 14px 0 rgba(50, 58, 70, 0.1), 0 3px 6px 0 rgba(0, 0, 0, 0.07); padding: 1.25rem; overflow: hidden; min-width: 220px; font-family: 'Open Sans', sans-serif; } .ds-stat-label { font-size: 0.833rem; font-weight: 600; color: var(--orkestra-gray-600, #68707c); } .ds-stat-value { font-family: Poppins, sans-serif; font-size: 1.728rem; font-weight: 500; color: var(--orkestra-gray-900, #252c36); } .ds-stat-icon { position: absolute; right: 1rem; bottom: 0.75rem; width: 54px; height: 54px; color: var(--orkestra-warning, #f5803e); opacity: 0.18; } .ds-stat-ribbon { position: absolute; top: -4px; right: -4px; width: 78px; height: 78px; overflow: hidden; pointer-events: none; } .ds-stat-ribbon > span { position: absolute; top: 18px; left: -12px; width: 120px; padding: 3px 0; transform: rotate(45deg); text-align: center; background: var(--orkestra-warning, #f5803e); color: #fff; font-weight: 700; font-size: 0.55rem; line-height: 1.5; letter-spacing: 0.6px; text-transform: uppercase; box-shadow: 0 2px 5px rgba(0, 0, 0, 0.25); text-shadow: 0 1px 1px rgba(0, 0, 0, 0.2); }"
+    },
+    {
+      "name": "Card (dark, frozen)",
+      "kind": "card",
+      "refersTo": "card",
+      "description": "The frozen dark counterpart: #121e2d card on the #0b1727 canvas. Literal values on purpose — dark never derives from the light ramp (The Frozen Dark Rule).",
+      "html": "<div class=\"ds-dark-canvas\"><div class=\"ds-card-dark\"><div class=\"ds-card-dark-header\">Active sessions</div><div class=\"ds-card-dark-body\">Dark mode is pixel-frozen at the pre-retune palette: canvas #0b1727, card #121e2d, text #9da9bb, headings #d8e2ef.</div></div></div>",
+      "css": ".ds-dark-canvas { background: #0b1727; padding: 1.25rem; border-radius: 0.375rem; } .ds-card-dark { background: #121e2d; border-radius: 0.375rem; box-shadow: 0 7px 14px 0 rgba(0, 0, 0, 0.25), 0 3px 6px 0 rgba(0, 0, 0, 0.2); overflow: hidden; } .ds-card-dark-header { font-family: Poppins, sans-serif; font-weight: 500; font-size: 1.2rem; color: #d8e2ef; padding: 1rem 1.25rem; background: #0b1727; border-bottom: 1px solid #344050; } .ds-card-dark-body { font-family: 'Open Sans', sans-serif; font-size: 1rem; color: #9da9bb; padding: 1.25rem; }"
+    },
+    {
+      "name": "Data Table (dark, frozen)",
+      "kind": "custom",
+      "refersTo": "table-header",
+      "description": "Dark table: --orkestra-table-head-bg resolves to transparent, so the header keeps its frozen bg-200 (#232e3c); borders #344050, text #9da9bb, striping on the tertiary dark tint.",
+      "html": "<div class=\"ds-dark-canvas ds-dark-canvas-table\"><table class=\"ds-table-dark\"><thead><tr><th>Name</th><th>Role</th><th>Status</th></tr></thead><tbody><tr><td>Ada Lovelace</td><td>administrator</td><td>active</td></tr><tr><td>Grace Hopper</td><td>operator</td><td>active</td></tr><tr><td>Alan Turing</td><td>developer</td><td>invited</td></tr></tbody></table></div>",
+      "css": ".ds-dark-canvas-table { background: #121e2d; padding: 1rem; border-radius: 0.375rem; } .ds-table-dark { width: 100%; border-collapse: collapse; font-family: 'Open Sans', sans-serif; font-size: 0.833rem; color: #9da9bb; } .ds-table-dark th { background: #232e3c; color: #d8e2ef; font-weight: 600; text-align: left; white-space: nowrap; padding: 0.5rem 0.75rem; } .ds-table-dark td { padding: 0.5rem 0.75rem; border-top: 1px solid #344050; } .ds-table-dark tbody tr:nth-child(odd) { background: #162231; } .ds-table-dark tbody tr:hover { background: #232e3c; }"
+    },
+    {
+      "name": "Orkestra Button (dark, frozen)",
+      "kind": "button",
+      "refersTo": "button-orkestra",
+      "description": "Dark falcon/orkestra button: background is the frozen dark quaternary (#0b1727, the canvas itself), colored text, hover shifts the text 17% toward white.",
+      "html": "<div class=\"ds-dark-canvas ds-dark-canvas-btn\"><button class=\"ds-btn-orkestra-dark\">Export CSV</button></div>",
+      "css": ".ds-dark-canvas-btn { background: #121e2d; padding: 1.25rem; border-radius: 0.375rem; } .ds-btn-orkestra-dark { background: #0b1727; color: #2c7be5; font-family: 'Open Sans', sans-serif; font-size: 1rem; font-weight: 500; padding: 0.3125rem 1rem; border: none; border-radius: 0.25rem; box-shadow: 0 0 0 1px rgba(43, 45, 80, 0.1), 0 2px 5px 0 rgba(0, 0, 0, 0.25), 0 1px 2px 0 rgba(0, 0, 0, 0.3); transition: color 0.15s, background 0.15s; } .ds-btn-orkestra-dark:hover { color: #5091e9; } .ds-btn-orkestra-dark:active { background: #070e17; } .ds-btn-orkestra-dark:focus-visible { outline: none; box-shadow: 0 0 0 0.25rem rgba(44, 123, 229, 0.25); }"
+    },
+    {
+      "name": "Subtle Badge (dark, frozen)",
+      "kind": "chip",
+      "refersTo": "badge-subtle-primary",
+      "description": "Dark subtle badges: bg-subtle-dark shades (65-70%) of each status color with tinted text emphasis — status stays readable without shouting, same doctrine as light.",
+      "html": "<div class=\"ds-dark-canvas ds-dark-canvas-badges\"><span class=\"ds-badge-dark ds-badge-dark-primary\">enabled</span> <span class=\"ds-badge-dark ds-badge-dark-success\">healthy</span> <span class=\"ds-badge-dark ds-badge-dark-danger\">failing</span></div>",
+      "css": ".ds-dark-canvas-badges { background: #121e2d; padding: 1.25rem; border-radius: 0.375rem; } .ds-badge-dark { display: inline-block; font-family: 'Open Sans', sans-serif; font-size: 0.75rem; font-weight: 600; padding: 0.25em 0.55em; border-radius: 0.25rem; margin-right: 0.25rem; } .ds-badge-dark-primary { background: #0f2b50; color: #abcaf5; } .ds-badge-dark-success { background: #003f25; color: #73e6b6; } .ds-badge-dark-danger { background: #5c1623; color: #f4a5b3; }"
     }
   ],
   "narrative": {
