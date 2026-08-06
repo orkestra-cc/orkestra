@@ -74,6 +74,71 @@ const healthCheckPlugin = () => {
   };
 };
 
+// Vendor bundle grouping, consumed by build.rollupOptions.output.manualChunks
+// below. Kept as data (it used to BE the option value) because Vite 8 bundles
+// with rolldown, which accepts only a function there — the object form rollup
+// took is rejected outright with "Expected Function but received Object".
+const VENDOR_CHUNKS = {
+  // React ecosystem
+  'react-vendor': ['react', 'react-dom', 'react-router'],
+
+  // Bootstrap and UI
+  'ui-vendor': ['react-bootstrap', 'bootstrap', 'classnames'],
+
+  // Charts and visualization
+  'charts-vendor': ['echarts', 'echarts-for-react'],
+
+  // Maps
+  'maps-vendor': ['leaflet', 'react-leaflet', 'react-leaflet-markercluster'],
+
+  // Form handling
+  'forms-vendor': [
+    'react-hook-form',
+    '@hookform/resolvers',
+    'yup',
+    'react-select'
+  ],
+
+  // Icons and media
+  'icons-media-vendor': [
+    '@fortawesome/fontawesome-svg-core',
+    '@fortawesome/free-solid-svg-icons',
+    '@fortawesome/free-regular-svg-icons',
+    '@fortawesome/free-brands-svg-icons',
+    '@fortawesome/react-fontawesome',
+    'react-icons',
+    'lottie-react'
+  ],
+
+  // Calendar and date
+  'calendar-vendor': [
+    '@fullcalendar/react',
+    '@fullcalendar/daygrid',
+    '@fullcalendar/timegrid',
+    '@fullcalendar/list',
+    '@fullcalendar/interaction',
+    '@fullcalendar/bootstrap',
+    'dayjs',
+    'react-datepicker'
+  ],
+
+  // Editor and rich content
+  'editor-vendor': ['@tinymce/tinymce-react', 'tinymce', 'prism-react-renderer'],
+
+  // Utilities
+  'utils-vendor': ['uuid', 'fuse.js', 'imask', 'react-imask']
+};
+
+// The trailing slash in `node_modules/<pkg>/` is load-bearing: without it
+// 'react' would also claim react-dom, react-router and react-bootstrap, and
+// the first matching group wins.
+const manualChunks = id => {
+  if (!id.includes('node_modules')) return;
+  for (const [chunk, packages] of Object.entries(VENDOR_CHUNKS)) {
+    if (packages.some(pkg => id.includes(`node_modules/${pkg}/`))) return chunk;
+  }
+};
+
 export default ({ mode }) => {
   process.env = { ...process.env, ...loadEnv(mode, process.cwd()) };
   // Expose the resolved app version on import.meta.env.VITE_APP_VERSION.
@@ -143,64 +208,7 @@ export default ({ mode }) => {
     build: {
       rollupOptions: {
         output: {
-          manualChunks: {
-            // React ecosystem
-            'react-vendor': ['react', 'react-dom', 'react-router'],
-
-            // Bootstrap and UI
-            'ui-vendor': ['react-bootstrap', 'bootstrap', 'classnames'],
-
-            // Charts and visualization
-            'charts-vendor': ['echarts', 'echarts-for-react'],
-
-            // Maps
-            'maps-vendor': [
-              'leaflet',
-              'react-leaflet',
-              'react-leaflet-markercluster'
-            ],
-
-            // Form handling
-            'forms-vendor': [
-              'react-hook-form',
-              '@hookform/resolvers',
-              'yup',
-              'react-select'
-            ],
-
-            // Icons and media
-            'icons-media-vendor': [
-              '@fortawesome/fontawesome-svg-core',
-              '@fortawesome/free-solid-svg-icons',
-              '@fortawesome/free-regular-svg-icons',
-              '@fortawesome/free-brands-svg-icons',
-              '@fortawesome/react-fontawesome',
-              'react-icons',
-              'lottie-react'
-            ],
-
-            // Calendar and date
-            'calendar-vendor': [
-              '@fullcalendar/react',
-              '@fullcalendar/daygrid',
-              '@fullcalendar/timegrid',
-              '@fullcalendar/list',
-              '@fullcalendar/interaction',
-              '@fullcalendar/bootstrap',
-              'dayjs',
-              'react-datepicker'
-            ],
-
-            // Editor and rich content
-            'editor-vendor': [
-              '@tinymce/tinymce-react',
-              'tinymce',
-              'prism-react-renderer'
-            ],
-
-            // Utilities
-            'utils-vendor': ['uuid', 'fuse.js', 'imask', 'react-imask']
-          }
+          manualChunks
         }
       }
     },
