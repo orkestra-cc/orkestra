@@ -13,7 +13,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/config v1.32.30
 	github.com/aws/aws-sdk-go-v2/credentials v1.19.29
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.106.0
-	github.com/aws/smithy-go v1.27.3
+	github.com/aws/smithy-go v1.27.6
 	github.com/cedar-policy/cedar-go v1.8.0
 	github.com/danielgtaylor/huma/v2 v2.39.0
 	github.com/docker/docker v28.5.2+incompatible
