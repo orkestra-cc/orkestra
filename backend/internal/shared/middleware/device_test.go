@@ -21,7 +21,7 @@ func TestDeviceMiddleware_ExtractDeviceInfo(t *testing.T) {
 	tests := []struct {
 		name             string
 		userAgent        string
-		xForwardedFor    string
+		peerIP           string
 		expectedDevice   string
 		expectedType     string
 		expectedPlatform string
@@ -29,28 +29,28 @@ func TestDeviceMiddleware_ExtractDeviceInfo(t *testing.T) {
 		{
 			name:             "Chrome on Windows",
 			userAgent:        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-			xForwardedFor:    "192.168.1.100",
+			peerIP:           "192.168.1.100",
 			expectedType:     "desktop",
 			expectedPlatform: "windows",
 		},
 		{
 			name:             "iPhone Safari",
 			userAgent:        "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
-			xForwardedFor:    "10.0.0.1",
+			peerIP:           "10.0.0.1",
 			expectedType:     "mobile",
 			expectedPlatform: "ios",
 		},
 		{
 			name:             "Android Chrome",
 			userAgent:        "Mozilla/5.0 (Linux; Android 14; SM-G991B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
-			xForwardedFor:    "172.16.0.1",
+			peerIP:           "172.16.0.1",
 			expectedType:     "mobile",
 			expectedPlatform: "android",
 		},
 		{
 			name:             "iPad Safari",
 			userAgent:        "Mozilla/5.0 (iPad; CPU OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
-			xForwardedFor:    "203.0.113.1",
+			peerIP:           "203.0.113.1",
 			expectedType:     "tablet",
 			expectedPlatform: "ios",
 		},
@@ -61,7 +61,12 @@ func TestDeviceMiddleware_ExtractDeviceInfo(t *testing.T) {
 			// Create request
 			req := httptest.NewRequest(http.MethodGet, "/test", nil)
 			req.Header.Set("User-Agent", tt.userAgent)
-			req.Header.Set("X-Forwarded-For", tt.xForwardedFor)
+			// RemoteAddr is what RealIP leaves behind after applying the
+			// trusted-proxy policy, and is the only address the device
+			// middleware may believe. The spoofed forwarding header below
+			// must have no effect on the recorded IP.
+			req.RemoteAddr = tt.peerIP + ":41234"
+			req.Header.Set("X-Forwarded-For", "203.0.113.254")
 
 			// Create response recorder
 			rr := httptest.NewRecorder()
@@ -94,8 +99,11 @@ func TestDeviceMiddleware_ExtractDeviceInfo(t *testing.T) {
 				t.Errorf("Expected user agent %s, got %s", tt.userAgent, capturedDeviceInfo.UserAgent)
 			}
 
-			if capturedDeviceInfo.IP != tt.xForwardedFor {
-				t.Errorf("Expected IP %s, got %s", tt.xForwardedFor, capturedDeviceInfo.IP)
+			if capturedDeviceInfo.IP != tt.peerIP {
+				t.Errorf("Expected IP %s, got %s", tt.peerIP, capturedDeviceInfo.IP)
+			}
+			if capturedDeviceInfo.IP == "203.0.113.254" {
+				t.Error("device middleware trusted a spoofed X-Forwarded-For header")
 			}
 
 			if capturedDeviceInfo.DeviceID == "" {

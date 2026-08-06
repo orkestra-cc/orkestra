@@ -13,6 +13,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
+	"errors"
 	"sync"
 	"time"
 
@@ -420,6 +421,7 @@ type gateSessionRepo struct {
 	created          []*authModels.AuthSessionDoc
 	deviceHistory    map[string][]*authModels.AuthSessionDoc // key: userUUID|deviceID
 	deviceHistoryErr error
+	terminated       []string // session UUIDs that hit TerminateSession
 }
 
 func newGateSessionRepo() *gateSessionRepo {
@@ -449,8 +451,20 @@ func (r *gateSessionRepo) GetByUUID(context.Context, string) (*authModels.AuthSe
 func (r *gateSessionRepo) GetByUserAndDevice(context.Context, string, string) (*authModels.AuthSessionDoc, error) {
 	panic("not used")
 }
-func (r *gateSessionRepo) GetActiveSessionsByUser(context.Context, string) ([]*authModels.AuthSessionDoc, error) {
-	panic("not used")
+
+// GetActiveSessionsByUser serves the sessions this fake was told about
+// via CreateSession. The credential-change revocation path walks it to
+// tear down one session at a time.
+func (r *gateSessionRepo) GetActiveSessionsByUser(_ context.Context, userUUID string) ([]*authModels.AuthSessionDoc, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := []*authModels.AuthSessionDoc{}
+	for _, d := range r.created {
+		if d.UserUUID == userUUID && d.IsActive {
+			out = append(out, d)
+		}
+	}
+	return out, nil
 }
 func (r *gateSessionRepo) UpdateLastActivity(context.Context, string) error { panic("not used") }
 func (r *gateSessionRepo) UpdateRiskScore(context.Context, string, float64, string) error {
@@ -462,7 +476,18 @@ func (r *gateSessionRepo) AddSecurityEvent(context.Context, string, *authModels.
 func (r *gateSessionRepo) UpdateDeviceInfo(context.Context, string, *authModels.DeviceInfo) error {
 	panic("not used")
 }
-func (r *gateSessionRepo) TerminateSession(context.Context, string) error { panic("not used") }
+func (r *gateSessionRepo) TerminateSession(_ context.Context, uuid string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, d := range r.created {
+		if d.UUID == uuid {
+			d.IsActive = false
+			r.terminated = append(r.terminated, uuid)
+			return nil
+		}
+	}
+	return errors.New("session not found")
+}
 func (r *gateSessionRepo) TerminateSessionByDevice(context.Context, string, string) error {
 	panic("not used")
 }

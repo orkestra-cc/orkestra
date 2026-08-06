@@ -12,6 +12,8 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+
+	"github.com/orkestra/backend/internal/shared/utils"
 )
 
 // IPNetSource is the narrow contract the gate consumes — a function
@@ -182,25 +184,16 @@ func cacheKey(allow, block []string) string {
 	return b.String()
 }
 
-// extractClientIP mirrors the device middleware's logic: X-Forwarded-
-// For (first hop) > X-Real-IP > RemoteAddr (host part). Duplicated
-// here so the gate doesn't depend on the device middleware's lifecycle
-// (the gate runs much earlier in the chain).
+// extractClientIP reads the address RealIP already resolved under the
+// deployment's trusted-proxy policy.
+//
+// This used to parse X-Forwarded-For itself and take the leftmost entry,
+// which meant a single request header was enough to satisfy — or evade —
+// the very allowlist/blocklist this gate exists to enforce. The gate is
+// mounted after RealIP on the operator mux, so RemoteAddr is already the
+// validated client address by the time it runs.
 func extractClientIP(r *http.Request) string {
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		ips := strings.Split(xff, ",")
-		if len(ips) > 0 {
-			return strings.TrimSpace(ips[0])
-		}
-	}
-	if xri := r.Header.Get("X-Real-IP"); xri != "" {
-		return strings.TrimSpace(xri)
-	}
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
-	}
-	return host
+	return utils.GetClientIP(r)
 }
 
 // respondIPGate writes the small JSON 403 body the operator console

@@ -1,6 +1,6 @@
 import { useState, useEffect, ReactNode } from 'react';
 import { Card, Nav, ProgressBar, Alert, Button } from 'react-bootstrap';
-import { Navigate, useNavigate } from 'react-router-dom';
+import { Navigate, useNavigate } from 'react-router';
 import classNames from 'classnames';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { IconProp } from '@fortawesome/fontawesome-svg-core';

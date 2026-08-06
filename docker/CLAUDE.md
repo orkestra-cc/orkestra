@@ -130,7 +130,7 @@ Keep this split when touching `.env*` or `docker-compose.*.yml`:
 | Encryption keys (`OAUTH_TOKEN_ENCRYPTION_KEY`, `ORKESTRA_KMS_MASTER_KEY`, optional `MFA_SECRET_ENCRYPTION_KEY`) | process — bootstraps ConfigService | ✅ yes |
 | Process-scoped auth tunables (`AUTH_REQUIRE_EMAIL_VERIFICATION`, `AUTH_RISK_STEP_UP_THRESHOLD`, `WEBAUTHN_RP_ID`, `AUTH_GEOIP_DB_PATH`, `TENANT_KIND_ENFORCEMENT`, `CEDAR_ENFORCE_ACTIONS`) | process | ✅ yes |
 | `ORKESTRA_VERSION` | process — application version surfaced in the SPA footer (frontend-admin + frontend-client) and embedded in the dev `/health` JSON. `orkestra.sh` auto-exports this from `git describe --tags --always --dirty`, and docker-compose substitutes it into both frontend `environment:` blocks (dev/staging dev-server) and the `args:` block in `docker-compose.prod.yml` (production image build). CI overrides it with `--build-arg ORKESTRA_VERSION=${{ github.ref_name }}` on tag pushes. The container has no git binary and no `.git`, so this host-side env var is the only path that delivers a real version — without it the SPA falls back to `"dev"`. | ✅ yes |
-| `STORAGE_ENDPOINT` / `STORAGE_REGION` / `STORAGE_BUCKET` / `STORAGE_ACCESS_KEY` / `STORAGE_SECRET_KEY` / `STORAGE_FORCE_PATH_STYLE` / `STORAGE_ENSURE_BUCKET` | process — S3-compatible object storage consumed by `internal/shared/blob` for user-uploaded avatar blobs. Process-scoped because rotating credentials at runtime would invalidate every in-flight presigned URL. Defaults target the `rustfs` service in `docker-compose.infra.yml`. **Endpoint must be browser-reachable** for upload PUTs to succeed — see the RustFS gotcha note in the Infrastructure Services section. | ✅ yes |
+| `STORAGE_ENDPOINT` / `STORAGE_PUBLIC_ENDPOINT` / `STORAGE_REGION` / `STORAGE_BUCKET_PREFIX` / `STORAGE_ACCESS_KEY` / `STORAGE_SECRET_KEY` / `STORAGE_FORCE_PATH_STYLE` / `STORAGE_ENSURE_BUCKET` | process — S3-compatible object storage consumed by `internal/shared/blob` for user-uploaded blobs. One connection vends **per-domain buckets** `<STORAGE_BUCKET_PREFIX>-<domain>` (e.g. `orkestra-avatars`, `orkestra-crm-photos`) through `blob.Provider` / `iface.ObjectStoreProvider` (ADR-0011). `STORAGE_ENDPOINT` is the endpoint the backend uses for its own ops; `STORAGE_PUBLIC_ENDPOINT` (optional) is the browser-reachable host baked into presigned PUT/GET URLs — set it when RustFS sits behind a proxy the SPA must reach while the backend keeps using the internal endpoint (see RustFS reachability gotcha). `STORAGE_BUCKET` is **deprecated** (superseded by the prefix; a custom value is ignored with a boot WARN). Process-scoped because rotating credentials at runtime would invalidate every in-flight presigned URL. **The presign endpoint must be browser-reachable** for upload PUTs to succeed (RustFS gotcha in Infrastructure Services). **Production**: point `STORAGE_ENDPOINT` at a managed S3, pre-provision the per-domain buckets, set `STORAGE_ENSURE_BUCKET=false` (IAM rarely grants CreateBucket) + `STORAGE_FORCE_PATH_STYLE=false`, and apply per-bucket lifecycle (expire orphaned uncommitted uploads) + backup policies. | ✅ yes |
 | OAuth provider credentials (`OAUTH_GOOGLE/APPLE/GITHUB/DISCORD_*`) | ConfigService (auth module) | ❌ admin UI |
 | AI provider keys (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `OLLAMA_BASE_URL`) | ConfigService (auth/notification, shared) | ❌ admin UI |
 | SMTP / notification settings (`SMTP_*`, `NOTIFICATION_EMAIL_*`) | ConfigService (notification module) | ❌ admin UI |
@@ -251,19 +251,22 @@ docker compose -f docker-compose.prod.yml --env-file .env.production up -d
 
 ### Infrastructure Services (`docker-compose.infra.yml`)
 
-**Shared across dev/staging/prod environments — start once, use everywhere**
+**One instance per stack** — layered into the same `${STACK}` Compose project as the app services, not shared across stacks (see [Multi-Stack Model](#multi-stack-model)). Host ports below are the compose defaults; `docker/.env` overrides them per stack so several stacks coexist.
 
-| Service       | Port        | Purpose             | Health Check     |
+| Service       | Host port (default) | Purpose             | Health Check     |
 | ------------- | ----------- | ------------------- | ---------------- |
-| **mongodb**   | 27027       | Primary database    | mongosh ping     |
-| **redis**     | 6387        | Cache & sessions    | redis-cli ping   |
-| **rustfs**    | 9100 / 9101 | S3-compatible object storage for user-uploaded blobs (avatars today) | wget /minio/health/live |
+| **mongodb**   | 27017       | Primary database    | mongosh ping     |
+| **redis**     | 6379        | Cache & sessions    | redis-cli incr ping |
+| **rustfs**    | 9100 / 9101 | S3-compatible object storage for user-uploaded blobs (avatars today) | wget /health |
 
 > **ADR-0006:** the Gotenberg / Memgraph / Hindsight addon-infra services, the backend-managed-container wiring (`Module.InfraContainers()` → `shared/container.Manager`), the `/var/run/docker.sock` mount, and `CONTAINER_CONTROL_ENABLED` were all removed with the addons. A fork that adds a module declaring `InfraContainers()` re-adds the socket mount + `CONTAINER_CONTROL_ENABLED=true` and provisions its own infra service. The `shared/container.Manager` seam is kept in the codebase for that purpose.
 
 **RustFS status note**: RustFS 1.x is in beta (`rustfs/rustfs:latest` resolves to `1.0.0-beta.4` at time of writing). Single-node S3-API mode is "available" and fine for avatars; distributed mode is "under testing". Production deploys running at scale should swap `STORAGE_ENDPOINT` to a managed S3 (AWS / Backblaze B2 / etc.) and drop `STORAGE_FORCE_PATH_STYLE`. The backend's `internal/shared/blob` package speaks the S3 API uniformly via AWS SDK v2, so swapping is an env-var change.
 
-**RustFS endpoint reachability gotcha**: the backend uses `STORAGE_ENDPOINT` both internally (HEAD/Delete) AND when minting the signed PUT URLs the **browser** uploads to. The internal default `http://rustfs:9000` (the compose **service** name — stable across stacks; not the stack-namespaced container name) works for the backend but leaves browser uploads broken unless rustfs is also reachable from the host at the same URL. Local-dev fix: add `127.0.0.1 rustfs` to `/etc/hosts` and publish `RUSTFS_API_PORT=9000` (default 9100). Production: terminate rustfs behind a publicly-resolvable hostname or use managed S3. A dual-endpoint (internal + public) split for the backend signer is tracked as a follow-up.
+**RustFS endpoint reachability gotcha**: the backend uses `STORAGE_ENDPOINT` for its own ops (HEAD/Delete/Get). The **browser** uploads to a *presigned* URL, whose host is `STORAGE_PUBLIC_ENDPOINT` when set, else `STORAGE_ENDPOINT`. The internal default `http://rustfs:9000` (the compose **service** name — stable across stacks; not the stack-namespaced container name) works for the backend but leaves browser uploads broken unless rustfs is also reachable from the host at that URL. Two fixes:
+
+- **Single-endpoint (local dev)**: make `STORAGE_ENDPOINT` itself browser-reachable — add `127.0.0.1 rustfs` to `/etc/hosts` and publish `RUSTFS_API_PORT=9000` (default 9100). Works because a plain browser can reach `rustfs:9000` directly with no proxy in between.
+- **Dual-endpoint (behind a TLS proxy, e.g. Cloudflare/HAProxy)**: keep `STORAGE_ENDPOINT=http://rustfs:9000` (internal, for backend ops) and set `STORAGE_PUBLIC_ENDPOINT` to the browser-reachable public host (e.g. `https://storage.example.com`). Only the presigned PUT/GET URLs get the public host; the backend never hairpins through the proxy. **This split is required behind Cloudflare** — presigned URLs sign only `host` and survive proxying, but the backend's SDK-signed HEAD/Delete sign more headers and **403 through the proxy**, so they must hit the origin directly. The proxy must preserve the `Host` header (the presigned signature validates against it) and answer the browser's CORS preflight (`OPTIONS` → 204 + `Access-Control-Allow-Origin: <SPA origin>`, methods `GET,PUT,HEAD,OPTIONS`). Wired via `blob.S3Config.PublicEndpoint` (ADR-0011). Production: terminate rustfs behind a publicly-resolvable hostname or use managed S3 (where endpoint == public endpoint and the split is moot).
 
 ### Application Services
 
@@ -345,6 +348,10 @@ The host mux ([cmd/server/hostmux.go](../backend/cmd/server/hostmux.go)) strips 
 | `CLIENT_COOKIE_DOMAIN` | Refresh-cookie `Domain=` for client-tier tokens. | **empty / host-only** (dev) / empty (prod, operator-set for cross-subdomain) |
 | `OPERATOR_FRONTEND_URL` | Operator-tier SPA origin (`console.*`) used to build verify-email / reset-password links in transactional email. | falls back to `FRONTEND_URL` |
 | `CLIENT_FRONTEND_URL` | Client-tier SPA origin (`app.*`) used to build verify-email / reset-password links for signups landing on the client API host. | falls back to `FRONTEND_URL` |
+| `TRUSTED_PROXY_CIDRS` | Networks your reverse proxies live in. **Preferred** form — survives a topology change without a recount. | empty |
+| `TRUSTED_PROXY_COUNT` | How many proxy hops sit in front of the backend. Used only when `TRUSTED_PROXY_CIDRS` is empty. | `0` (dev) / `2` (staging: Cloudflare → HAProxy) / `0` (prod — **set this before going live**) |
+
+**Trusted proxies are a security control, not a logging nicety.** `X-Forwarded-For` is an ordinary request header, so with no policy configured the backend ignores it entirely and attributes every request to its direct peer. Behind a proxy that means all callers collapse onto the proxy's address — they share one login rate-limit bucket, the operator IP allowlist matches nothing real, and geo-blocking sees the proxy's country. Set one of the two vars in any environment that terminates TLS somewhere other than the Go process. A production-like boot with neither set logs a startup warning; a malformed value is fatal at boot. Details in [backend/CLAUDE.md](../backend/CLAUDE.md#client-ip-resolution-trusted-proxies).
 
 In production-like environments **set both `OPERATOR_COOKIE_DOMAIN` and `CLIENT_COOKIE_DOMAIN` explicitly** — leaving one empty mints that tier's cookie without a `Domain` attribute (scoped to the minting host), so each tier's session is confined to its own subdomain.
 
@@ -367,27 +374,26 @@ curl -i -H 'Host: example.com' http://localhost:3000/health
 
 ### Port Mapping Strategy
 
-Host ports vary per profile so multiple stacks can coexist on the same machine. Container-internal ports stay standard.
+Every published host port is an `.env` variable with a compose default. `scripts/init.sh` seeds a non-colliding block per stack on first run, so multiple stacks coexist without arithmetic baked into compose. Container-internal ports stay standard.
 
 ```
-Runtime profile (docker-compose.infra.yml + docker-compose.{minimal,full}.yml):
-3000  → backend:3000             # API server (image from GHCR)
-27027 → mongodb:27017            # Shared infra mongo
-6387  → redis:6379               # Shared infra redis
+Infra (docker-compose.infra.yml) — one instance per stack:
+${MONGO_PORT:-27017}        → mongodb:27017
+${REDIS_PORT:-6379}         → redis:6379
+${RUSTFS_API_PORT:-9100}    → rustfs:9000    # S3 API
+${RUSTFS_CONSOLE_PORT:-9101}→ rustfs:9001    # admin console
 
-Dev stack (docker-compose.infra.yml + docker-compose.dev.yml):
-3007  → backend:3000             # API server
-8087  → frontend-admin:5173            # Operator console (host: console.localhost)
-8081  → client-frontend:5173     # Tier-2 client demo SPA (host: client.localhost)
-27027 → mongodb:27017            # Shared infra mongo
-6387  → redis:6379               # Shared infra redis
-3030  → gotenberg:3000           # PDF generation
-8888  → hindsight:8888           # AI agents backend
+App (docker-compose.dev.yml / docker-compose.staging.yml):
+${BACKEND_PORT:-3000}         → backend:3000
+${FRONTEND_PORT:-8080}        → frontend-admin:5173    # operator console (Vite)
+${CLIENT_FRONTEND_PORT:-8081} → client-frontend:5173   # Tier-2 client SPA (Vite)
 
 Production (docker-compose.prod.yml):
-3000  → backend:3000      # API server
-8080  → frontend-admin:80       # Nginx static
+${BACKEND_PORT:-3000} → backend:3000
+8080                  → frontend-admin:80   # Nginx static (fixed, not env-driven)
 ```
+
+The observability overlay publishes its own block (Grafana, Prometheus, Loki, Tempo, OTel) — see the [observability section](#self-hosted-otel-stack-docker-composeobservabilityyml).
 
 ### Security & Secrets Management
 

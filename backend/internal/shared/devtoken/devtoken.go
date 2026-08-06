@@ -11,6 +11,7 @@ package devtoken
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -66,11 +67,17 @@ func NewHandler(operatorJWT, clientJWT iface.JWTProvider, platform module.Platfo
 }
 
 // RegisterRoutes mounts POST /dev/token + GET /dev/token/roles on the
-// operator root router. It refuses to register in production as a
-// safety net even if the caller forgets the gate.
+// operator root router. It refuses to register in any production-like
+// environment as a safety net even if the caller forgets the gate.
+//
+// The gate is IsProductionLike, NOT IsProduction: this endpoint mints a
+// signed super_admin token to an anonymous caller, so it must never be
+// reachable from an environment that is exposed to the internet.
+// Staging is exposed, so staging is out.
 func (h *Handler) RegisterRoutes(r chi.Router) {
-	if h.platform.IsProduction() {
-		h.logger.Error("refusing to register dev-token routes in production")
+	if h.platform.IsProductionLike() {
+		h.logger.Error("refusing to register dev-token routes",
+			slog.String("environment", h.platform.GetEnvironment()))
 		return
 	}
 	r.Post("/dev/token", h.generateToken)
@@ -125,8 +132,8 @@ type generateTokenResponse struct {
 }
 
 func (h *Handler) generateToken(w http.ResponseWriter, r *http.Request) {
-	if h.platform.IsProduction() {
-		http.Error(w, `{"error": "dev token generation is disabled in production"}`, http.StatusForbidden)
+	if h.platform.IsProductionLike() {
+		http.Error(w, `{"error": "dev token generation is disabled in production-like environments"}`, http.StatusForbidden)
 		return
 	}
 
@@ -147,23 +154,16 @@ func (h *Handler) generateToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Default 15m, min 1m, max 24h.
-	expiry := 15 * time.Minute
+	// Token lifetime is NOT caller-controlled. The JWTProvider seam mints
+	// with the deployment's configured access-token TTL
+	// (JWT_ACCESS_TOKEN_EXPIRY, or the admin-managed accessTokenTTL
+	// policy) and exposes no per-call override. Previously this field was
+	// parsed, range-checked, and echoed into expiresAt/expiresIn — while
+	// the minted token carried the server TTL regardless. Rather than keep
+	// reporting a lifetime the token does not have, reject the field.
 	if req.Expiry != "" {
-		parsed, err := time.ParseDuration(req.Expiry)
-		if err != nil {
-			http.Error(w, fmt.Sprintf(`{"error": "invalid expiry format: %v. Use formats like '15m', '1h', '24h'"}`, err), http.StatusBadRequest)
-			return
-		}
-		if parsed > 24*time.Hour {
-			http.Error(w, `{"error": "expiry cannot exceed 24 hours"}`, http.StatusBadRequest)
-			return
-		}
-		if parsed < time.Minute {
-			http.Error(w, `{"error": "expiry must be at least 1 minute"}`, http.StatusBadRequest)
-			return
-		}
-		expiry = parsed
+		http.Error(w, `{"error": "expiry is not configurable per request; the token uses the server's access-token TTL (JWT_ACCESS_TOKEN_EXPIRY / admin accessTokenTTL)"}`, http.StatusBadRequest)
+		return
 	}
 
 	// Synthetic user — no database write.
@@ -205,13 +205,10 @@ func (h *Handler) generateToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if h.platform.IsStaging() {
-		h.logger.Info("dev token generated in staging",
-			slog.String("role", req.Role),
-			slog.String("audience", audience),
-			slog.String("expiry", expiry.String()),
-		)
-	}
+	// Report the lifetime the token actually carries by reading its own
+	// exp claim, rather than a number this handler made up. Unparseable
+	// tokens (test doubles) simply report a zero expiry.
+	expiresAt := tokenExpiry(token)
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(generateTokenResponse{
@@ -220,10 +217,31 @@ func (h *Handler) generateToken(w http.ResponseWriter, r *http.Request) {
 		Audience:    audience,
 		Email:       syntheticEmail,
 		Tenant:      tenantUUID,
-		ExpiresAt:   now.Add(expiry),
-		ExpiresIn:   int64(expiry.Seconds()),
+		ExpiresAt:   expiresAt,
+		ExpiresIn:   int64(time.Until(expiresAt).Seconds()),
 		Curl:        fmt.Sprintf("curl -H 'Authorization: Bearer %s' http://localhost:3000/v1/users", token),
 	})
+}
+
+// tokenExpiry reads the exp claim off a freshly minted token. No
+// signature check: we just produced this token ourselves and the value
+// is used only to report the lifetime back to the caller.
+func tokenExpiry(token string) time.Time {
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		return time.Time{}
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return time.Time{}
+	}
+	var claims struct {
+		Exp int64 `json:"exp"`
+	}
+	if err := json.Unmarshal(payload, &claims); err != nil || claims.Exp == 0 {
+		return time.Time{}
+	}
+	return time.Unix(claims.Exp, 0).UTC()
 }
 
 type listRolesResponse struct {
@@ -232,8 +250,8 @@ type listRolesResponse struct {
 }
 
 func (h *Handler) listRoles(w http.ResponseWriter, r *http.Request) {
-	if h.platform.IsProduction() {
-		http.Error(w, `{"error": "dev token generation is disabled in production"}`, http.StatusForbidden)
+	if h.platform.IsProductionLike() {
+		http.Error(w, `{"error": "dev token generation is disabled in production-like environments"}`, http.StatusForbidden)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")

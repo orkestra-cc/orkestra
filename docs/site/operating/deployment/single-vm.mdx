@@ -65,6 +65,7 @@ Edit `docker/.env`:
 - Set `COOKIE_SECURE=true` and `COOKIE_SAME_SITE=strict`.
 - Set `ALLOW_LOCALHOST_REDIRECTS=false`.
 - Set `OPERATOR_COOKIE_DOMAIN` and `CLIENT_COOKIE_DOMAIN` to non-overlapping hosts — see [Cookie hardening](/operating/cookie-hardening-cross-tier).
+- Set `TRUSTED_PROXY_CIDRS` (or `TRUSTED_PROXY_COUNT`) to describe the reverse proxy in front of the backend. Leave both unset and Orkestra ignores `X-Forwarded-For` entirely, attributing every request to the proxy — which collapses all callers into one login rate-limit bucket and makes the operator IP allowlist and geo-block match the proxy instead of the client. With Caddy or nginx on the same VM, `TRUSTED_PROXY_COUNT=1` is correct.
 - (Optional) Set `LOG_LEVEL=info` and `PRETTY_LOGS=false` for JSON logs that ship to Loki / Datadog / Honeycomb cleanly.
 
 ## Step 3 — Start the stack

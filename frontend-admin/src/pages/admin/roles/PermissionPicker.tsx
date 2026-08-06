@@ -1,12 +1,6 @@
 import { useMemo, useState } from 'react';
-import {
-  Accordion,
-  Badge,
-  Button,
-  Form,
-  InputGroup,
-  Spinner
-} from 'react-bootstrap';
+import { Accordion, Button, Form, InputGroup, Spinner } from 'react-bootstrap';
+import SubtleBadge from 'components/common/SubtleBadge';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { Trans, useTranslation } from 'react-i18next';
 import { useListPermissionsQuery, type Permission } from 'store/api/tenantApi';
@@ -106,11 +100,11 @@ const PermissionPicker: React.FC<Props> = ({
       <div className="d-flex justify-content-between align-items-center mb-2">
         <div className="fw-semibold">
           {t('adminRoles.permissionPicker.heading')}{' '}
-          <Badge bg="primary" className="ms-1">
+          <SubtleBadge bg="primary" className="ms-1">
             {t('adminRoles.permissionPicker.selectedBadge', {
               count: selectedCount
             })}
-          </Badge>
+          </SubtleBadge>
           {q && (
             <span className="text-muted small ms-2">
               {t('adminRoles.permissionPicker.filterSummary', {
@@ -186,12 +180,12 @@ const PermissionPicker: React.FC<Props> = ({
                       </span>
                     </span>
                     {selectedInMod > 0 && (
-                      <Badge
+                      <SubtleBadge
                         bg={allSelected ? 'success' : 'primary'}
                         className="ms-2"
                       >
                         {selectedInMod}/{perms.length}
-                      </Badge>
+                      </SubtleBadge>
                     )}
                   </div>
                 </Accordion.Header>
@@ -228,9 +222,9 @@ const PermissionPicker: React.FC<Props> = ({
                         <span>
                           <code className="me-2">{p.key}</code>
                           {p.system && (
-                            <Badge bg="warning" text="dark" className="me-2">
+                            <SubtleBadge bg="warning" className="me-2">
                               {t('adminRoles.permissionPicker.systemBadge')}
-                            </Badge>
+                            </SubtleBadge>
                           )}
                           <span className="text-muted small">
                             {p.description}

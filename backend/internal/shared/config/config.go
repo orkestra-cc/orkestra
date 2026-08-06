@@ -33,12 +33,14 @@ type Config struct {
 // S3 / managed equivalent.
 type StorageConfig struct {
 	Endpoint       string // e.g. http://rustfs:9000 (compose SERVICE name, stable across stacks; empty = AWS S3 default endpoint resolution)
+	PublicEndpoint string // browser-reachable endpoint baked into presigned URLs; empty = use Endpoint. Set when Endpoint is a docker-internal host the SPA can't reach (e.g. RustFS behind a public proxy) — see blob.S3Config.PublicEndpoint
 	Region         string // e.g. us-east-1 — placeholder for RustFS, real region for AWS S3
-	Bucket         string // e.g. orkestra-avatars
+	Bucket         string // DEPRECATED single bucket. Superseded by BucketPrefix + per-domain buckets (<prefix>-<domain>). Kept for config compat; honored only to warn on a custom value.
 	AccessKey      string
 	SecretKey      string
-	ForcePathStyle bool // true for RustFS / MinIO; false for AWS S3 virtual-hosted style
-	EnsureBucket   bool // true → backend creates the bucket on boot if missing; safe for self-hosted
+	ForcePathStyle bool   // true for RustFS / MinIO; false for AWS S3 virtual-hosted style
+	EnsureBucket   bool   // true → backend creates the bucket on boot if missing; safe for self-hosted
+	BucketPrefix   string // per-domain bucket namespace; bucket = <BucketPrefix>-<domain> (e.g. orkestra-avatars, orkestra-crm-photos)
 }
 
 type ServerConfig struct {
@@ -48,6 +50,23 @@ type ServerConfig struct {
 	FrontendURL string
 	CORSOrigins []string // Allowed CORS origins (legacy single-host fallback)
 	MaxBodySize int64    // Maximum request body size in bytes (default 10MB)
+
+	// TrustedProxyCount / TrustedProxyCIDRs describe the reverse proxies
+	// between the internet and this process, and are what makes
+	// X-Forwarded-For believable. See shared/middleware/realip.go.
+	//
+	// Prefer TRUSTED_PROXY_CIDRS (the networks our proxies live in) —
+	// it stays correct if the chain length changes. TRUSTED_PROXY_COUNT
+	// (how many hops sit in front) is the simpler alternative.
+	//
+	// Both unset means "trust no forwarding header": every request is
+	// attributed to its direct peer. That is the safe default but it is
+	// WRONG for any deployment behind a proxy — the IP allowlist, the
+	// login geo-block, and the per-IP rate limiter would all see the
+	// proxy's address for every caller. Set one of these in any
+	// environment that terminates TLS somewhere other than this process.
+	TrustedProxyCount int
+	TrustedProxyCIDRs []string
 
 	// ADR-0003 per-audience host split. Both audiences are served from the
 	// same Go binary, dispatched by Host header at the application layer.
@@ -204,6 +223,9 @@ func Load() (*Config, error) {
 		FrontendURL: getEnv("FRONTEND_URL", "http://localhost:8080"),
 		CORSOrigins: corsOrigins,
 		MaxBodySize: getEnvAsInt64("MAX_BODY_SIZE", 10*1024*1024), // Default 10MB
+
+		TrustedProxyCount: getEnvAsInt("TRUSTED_PROXY_COUNT", 0),
+		TrustedProxyCIDRs: getEnvAsSlice("TRUSTED_PROXY_CIDRS", nil),
 		Operator: AudienceConfig{
 			Host:        getEnv("CONSOLE_HOST", defaultConsoleHost),
 			CORSOrigins: getEnvAsSlice("OPERATOR_CORS_ORIGINS", nil),
@@ -319,12 +341,14 @@ func Load() (*Config, error) {
 	// containers became per-stack (`${APP_NAME}-rustfs-${ENV}`).
 	config.Storage = StorageConfig{
 		Endpoint:       getEnv("STORAGE_ENDPOINT", "http://rustfs:9000"),
+		PublicEndpoint: getEnv("STORAGE_PUBLIC_ENDPOINT", ""),
 		Region:         getEnv("STORAGE_REGION", "us-east-1"),
 		Bucket:         getEnv("STORAGE_BUCKET", "orkestra-avatars"),
 		AccessKey:      getEnv("STORAGE_ACCESS_KEY", ""),
 		SecretKey:      getEnv("STORAGE_SECRET_KEY", ""),
 		ForcePathStyle: getEnvAsBool("STORAGE_FORCE_PATH_STYLE", true),
 		EnsureBucket:   getEnvAsBool("STORAGE_ENSURE_BUCKET", true),
+		BucketPrefix:   getEnv("STORAGE_BUCKET_PREFIX", "orkestra"),
 	}
 
 	if err := config.Validate(); err != nil {
@@ -456,15 +480,48 @@ func getEnvAsInt64(key string, defaultValue int64) int64 {
 	return defaultValue
 }
 
+// getEnvAsDuration reads a Go duration, additionally accepting a "d"
+// (day) suffix that time.ParseDuration does not support.
+//
+// The day suffix is not a convenience — it is what the config actually
+// uses. JWT_REFRESH_TOKEN_EXPIRY is written as "7d"/"30d" in every
+// compose file and in .env.example. Without day support that parsed to
+// an error, the "7d" fallback default hit the same error, and this
+// function returned 0 — which NewJWTService reads as "unset" and
+// replaces with 30 days. The refresh-token lifetime was therefore 30
+// days on every deployment no matter what was configured, and nothing
+// surfaced it because a zero return looks exactly like "not set".
 func getEnvAsDuration(key string, defaultValue string) time.Duration {
-	valueStr := getEnv(key, defaultValue)
-	if value, err := time.ParseDuration(valueStr); err == nil {
+	if value, ok := parseDuration(getEnv(key, defaultValue)); ok {
 		return value
 	}
-	if defaultDuration, err := time.ParseDuration(defaultValue); err == nil {
+	if defaultDuration, ok := parseDuration(defaultValue); ok {
 		return defaultDuration
 	}
 	return 0
+}
+
+// parseDuration accepts everything time.ParseDuration does, plus a
+// trailing "d" for days. Only a bare "<number>d" is special-cased;
+// compound forms ("1d12h") stay unsupported rather than half-supported,
+// so a value either parses exactly or is rejected.
+func parseDuration(raw string) (time.Duration, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 0, false
+	}
+	if days, ok := strings.CutSuffix(raw, "d"); ok {
+		n, err := strconv.ParseFloat(days, 64)
+		if err != nil {
+			return 0, false
+		}
+		return time.Duration(n * float64(24*time.Hour)), true
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil {
+		return 0, false
+	}
+	return d, true
 }
 
 func getEnvAsSlice(key string, defaultValue []string) []string {

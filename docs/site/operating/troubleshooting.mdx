@@ -115,7 +115,7 @@ Vite dev server is serving an HTML page where JS was expected — usually a 404 
 
 ### Symptom: 404 dev-token page
 
-The core dev-token endpoint (`POST /dev/token`, in `internal/shared/devtoken`) is gated to non-production environments, so `ENV=production` disables it.
+The core dev-token endpoint (`POST /dev/token`, in `internal/shared/devtoken`) is gated to non-production-*like* environments: both `ENV=production` and `ENV=staging` disable it. It is unauthenticated and mints a `super_admin` token, so it must never be reachable from an internet-facing host.
 
 - For local / staging-like: keep `ENV=development` or `staging`, NOT `production` — the endpoint is present in any non-production build.
 - For production: the dev token issuer is correctly disabled. Create the first admin via the setup wizard (`/v1/setup/*`), then use OAuth or password login.

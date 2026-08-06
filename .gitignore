@@ -115,3 +115,6 @@ mobile/.dart_tool/
 mobile/.flutter-plugins-dependencies
 mobile/coverage/
 mobile/build/
+
+# Superpowers brainstorming companion (mockups, transient session state)
+.superpowers/

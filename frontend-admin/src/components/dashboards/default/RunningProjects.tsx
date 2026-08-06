@@ -3,7 +3,8 @@ import OrkestraCardFooterLink from 'components/common/OrkestraCardFooterLink';
 import OrkestraCardHeader from 'components/common/OrkestraCardHeader';
 import Flex from 'components/common/Flex';
 
-import { Badge, Card, Col, Form, ProgressBar, Row } from 'react-bootstrap';
+import { Card, Col, Form, ProgressBar, Row } from 'react-bootstrap';
+import SubtleBadge from 'components/common/SubtleBadge';
 
 interface ProjectData {
   id: string | number;
@@ -39,9 +40,9 @@ const Project = ({ project, isLast }: ProjectProps) => {
             <a className="text-800 stretched-link" href="#!">
               {title}
             </a>
-            <Badge pill bg="200" className="ms-2 text-primary">
+            <SubtleBadge pill bg="primary" className="ms-2">
               {progress}%
-            </Badge>
+            </SubtleBadge>
           </Flex>
         </Flex>
       </Col>

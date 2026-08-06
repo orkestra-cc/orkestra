@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router';
 import {
   Alert,
-  Badge,
   Button,
   ButtonGroup,
   Card,
@@ -11,6 +10,7 @@ import {
   Spinner,
   Table
 } from 'react-bootstrap';
+import SubtleBadge from 'components/common/SubtleBadge';
 import { useTranslation } from 'react-i18next';
 import {
   useGetSelfAuthMethodsQuery,
@@ -262,9 +262,9 @@ const LinkedProvidersTab = () => {
                       <td>
                         {PROVIDER_LABELS[p.provider]}
                         {p.isPrimary && (
-                          <Badge bg="primary" className="ms-2">
+                          <SubtleBadge bg="primary" className="ms-2">
                             {t('userSecurity.linkedProvidersTab.primaryBadge')}
-                          </Badge>
+                          </SubtleBadge>
                         )}
                       </td>
                       <td className="fs-10">{p.email}</td>

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { Button, Card, Collapse, Row, Col, Badge } from 'react-bootstrap';
+import { Button, Card, Collapse, Row, Col } from 'react-bootstrap';
+import SubtleBadge from 'components/common/SubtleBadge';
 import { useTranslation } from 'react-i18next';
 import { User } from 'store/api/userApi';
 
@@ -50,7 +51,7 @@ const AdminProfileIntro: React.FC<AdminProfileIntroProps> = ({ user }) => {
           <Col md={6}>
             <small className="text-700 d-block mb-1">Ruolo</small>
             <p className="mb-2">
-              <Badge
+              <SubtleBadge
                 bg={
                   user.role === 'super_admin'
                     ? 'danger'
@@ -66,7 +67,7 @@ const AdminProfileIntro: React.FC<AdminProfileIntroProps> = ({ user }) => {
                 }
               >
                 {roleLabels[user.role] || user.role}
-              </Badge>
+              </SubtleBadge>
             </p>
           </Col>
           <Col md={6}>
@@ -78,12 +79,12 @@ const AdminProfileIntro: React.FC<AdminProfileIntroProps> = ({ user }) => {
         {/* <div className="mb-3">
           <small className="text-700 d-block mb-2">Stato Account</small>
           <div>
-            <Badge bg={user.isActive ? 'success' : 'danger'} className="me-2 mb-1">
+            <SubtleBadge bg={user.isActive ? 'success' : 'danger'} className="me-2 mb-1">
               {user.isActive ? 'Attivo' : 'Inattivo'}
-            </Badge>
-            <Badge bg={user.emailVerified ? 'success' : 'warning'} className="me-2 mb-1">
+            </SubtleBadge>
+            <SubtleBadge bg={user.emailVerified ? 'success' : 'warning'} className="me-2 mb-1">
               Email {user.emailVerified ? 'Verificata' : 'Non Verificata'}
-            </Badge>
+            </SubtleBadge>
           </div>
         </div> */}
 
@@ -122,7 +123,7 @@ const AdminProfileIntro: React.FC<AdminProfileIntroProps> = ({ user }) => {
                   ) : null}
                   <div className="flex-grow-1">
                     <div className="d-flex align-items-center">
-                      <Badge
+                      <SubtleBadge
                         bg={
                           provider.provider === 'google'
                             ? 'danger'
@@ -138,7 +139,7 @@ const AdminProfileIntro: React.FC<AdminProfileIntroProps> = ({ user }) => {
                       >
                         {provider.provider.charAt(0).toUpperCase() +
                           provider.provider.slice(1)}
-                      </Badge>
+                      </SubtleBadge>
                       <small className="text-900">{provider.email}</small>
                     </div>
                   </div>
@@ -178,11 +179,11 @@ const AdminProfileIntro: React.FC<AdminProfileIntroProps> = ({ user }) => {
                   {t('profileShared.intro.emailVerificationLabel')}
                 </small>
                 <p className="mb-2">
-                  <Badge bg={user.emailVerified ? 'success' : 'warning'}>
+                  <SubtleBadge bg={user.emailVerified ? 'success' : 'warning'}>
                     {user.emailVerified
                       ? t('profileShared.intro.emailVerifiedBadge')
                       : t('profileShared.intro.emailNotVerifiedBadge')}
-                  </Badge>
+                  </SubtleBadge>
                 </p>
               </Col>
             </Row>

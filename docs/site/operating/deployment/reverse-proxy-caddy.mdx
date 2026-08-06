@@ -214,6 +214,19 @@ COOKIE_SAME_SITE=strict
 OPERATOR_COOKIE_DOMAIN=console.example.com
 CLIENT_COOKIE_DOMAIN=api.example.com
 
+# Caddy sits in front of the backend, so tell Orkestra how many proxy
+# hops to trust before it will believe X-Forwarded-For. Without this the
+# backend ignores the header and attributes every request to Caddy: all
+# callers share one login rate-limit bucket, and the operator IP
+# allowlist / geo-block match the proxy instead of the client.
+# MEASURE IT rather than counting hops on paper: log in through the real
+# public URL and check which IP the backend recorded. A hop count derived
+# from the diagram was wrong on Orkestra's own staging stack, because the
+# proxy in front forwarded the CDN's X-Forwarded-For without appending
+# itself. Prefer TRUSTED_PROXY_CIDRS (the networks your proxies live in)
+# — it stays correct when a proxy starts or stops appending.
+TRUSTED_PROXY_COUNT=1
+
 ALLOW_LOCALHOST_REDIRECTS=false
 ```
 

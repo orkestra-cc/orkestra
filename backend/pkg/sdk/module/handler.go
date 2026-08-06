@@ -82,6 +82,7 @@ type ModuleConfigResponse struct {
 	ConfigValues          map[string]string      `json:"configValues"`
 	SecretStatus          map[string]bool        `json:"secretStatus"`
 	ConfigSchema          []ConfigField          `json:"configSchema"`
+	ConfigGroups          []ConfigGroup          `json:"configGroups,omitempty"`
 	DependsOn             []string               `json:"dependsOn,omitempty"`
 	ProvidedServices      []string               `json:"providedServices,omitempty"`
 	RequiredServices      []string               `json:"requiredServices,omitempty"`
@@ -501,6 +502,9 @@ func (h *ModuleAdminHandler) toConfigResponse(c ModuleConfig) ModuleConfigRespon
 			resp.OptionalServices = append(resp.OptionalServices, string(k))
 		}
 		resp.InfraContainers = h.collectInfraStatus(m)
+		// Groups are resolved live rather than read from the persisted doc:
+		// they are presentation-only and never written to module_configs.
+		resp.ConfigGroups = ConfigGroupsOf(m)
 		break
 	}
 

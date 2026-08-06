@@ -127,39 +127,187 @@ func (m *AuthModule) Permissions() []iface.PermissionSpec {
 	}
 }
 
+// ConfigGroups gives the admin settings page a sectioned rail instead of one
+// flat list. auth is by far the largest configuration surface in the base —
+// 62 fields — and the four OAuth providers are declared as children of the
+// single "OAuth Providers" node rather than as siblings of it, which is what
+// the old flat Group labels made them look like.
+func (m *AuthModule) ConfigGroups() []module.ConfigGroup {
+	return []module.ConfigGroup{
+		{Key: "registration", Label: "Registration", Order: 1,
+			Description: "Who may create an account, and on which surface."},
+		{Key: "login", Label: "Login & Sessions", Order: 2,
+			Description: "Sign-in availability, lockout, and token lifetimes."},
+		{Key: "password", Label: "Password Policy", Order: 3,
+			Description: "Rules enforced on every password change, on both the operator console and the client app."},
+		{Key: "mfa", Label: "MFA", Order: 4,
+			Description: "Second-factor requirements and enrollment."},
+		{Key: "oauth", Label: "OAuth Providers", Order: 5,
+			Description: "Which providers are offered, and on which surface. Each provider's credentials appear once it is switched on."},
+		{Key: "oauth.google", Label: "Google", Parent: "oauth", Order: 6},
+		{Key: "oauth.apple", Label: "Apple", Parent: "oauth", Order: 7},
+		{Key: "oauth.github", Label: "GitHub", Parent: "oauth", Order: 8},
+		{Key: "oauth.discord", Label: "Discord", Parent: "oauth", Order: 9},
+		{Key: "antiabuse", Label: "Anti-abuse & Notifications", Order: 10,
+			Description: "Rate limiting, IP and country rules, and the alerts they raise."},
+		{Key: "sessions", Label: "Sessions & Account", Order: 11},
+	}
+}
+
 // ConfigSchema declares every OAuth provider setting as admin-manageable.
 // Values are seeded from the listed env vars on first boot, then owned by
 // the module_configs document in MongoDB. Secrets are encrypted at rest.
-// The Group field drives the admin modal's tab rendering — fields in the
-// same group land on the same tab, in declaration order.
+// The Group field is a ConfigGroup.Key (see ConfigGroups above) — it drives
+// the admin settings page's nested rail, not a modal or a flat tab strip.
 func (m *AuthModule) ConfigSchema() []module.ConfigField {
 	return []module.ConfigField{
-		// Google
-		{Key: "googleClientId", Label: "Client ID", Group: "Google", Type: module.FieldString, EnvVar: "OAUTH_GOOGLE_CLIENT_ID"},
-		{Key: "googleClientSecret", Label: "Client Secret", Group: "Google", Type: module.FieldSecret, EnvVar: "OAUTH_GOOGLE_CLIENT_SECRET"},
-		{Key: "googleRedirectURL", Label: "Redirect URL", Group: "Google", Type: module.FieldString, EnvVar: "OAUTH_GOOGLE_REDIRECT_URL"},
-		{Key: "googleAndroidClientId", Label: "Android Client ID", Group: "Google", Type: module.FieldString, EnvVar: "OAUTH_GOOGLE_ANDROID_CLIENT_ID"},
-		{Key: "googleIOSClientId", Label: "iOS Client ID", Group: "Google", Type: module.FieldString, EnvVar: "OAUTH_GOOGLE_IOS_CLIENT_ID"},
+		// Google — gated on either audience surface being enabled so the
+		// credentials are dead weight (and hidden) on installs that don't
+		// use Google sign-in.
+		{Key: "googleClientId", Label: "Client ID", Group: "oauth.google", Type: module.FieldString, EnvVar: "OAUTH_GOOGLE_CLIENT_ID",
+			DependsOnMatch: "any",
+			DependsOn: []module.FieldCondition{
+				{Key: "googleEnabledAdmin", In: []string{"true"}},
+				{Key: "googleEnabledClient", In: []string{"true"}},
+			},
+		},
+		{Key: "googleClientSecret", Label: "Client Secret", Group: "oauth.google", Type: module.FieldSecret, EnvVar: "OAUTH_GOOGLE_CLIENT_SECRET",
+			DependsOnMatch: "any",
+			DependsOn: []module.FieldCondition{
+				{Key: "googleEnabledAdmin", In: []string{"true"}},
+				{Key: "googleEnabledClient", In: []string{"true"}},
+			},
+		},
+		{Key: "googleRedirectURL", Label: "Redirect URL", Group: "oauth.google", Type: module.FieldString, EnvVar: "OAUTH_GOOGLE_REDIRECT_URL",
+			DependsOnMatch: "any",
+			DependsOn: []module.FieldCondition{
+				{Key: "googleEnabledAdmin", In: []string{"true"}},
+				{Key: "googleEnabledClient", In: []string{"true"}},
+			},
+		},
+		{Key: "googleAndroidClientId", Label: "Android Client ID", Group: "oauth.google", Type: module.FieldString, EnvVar: "OAUTH_GOOGLE_ANDROID_CLIENT_ID",
+			Advanced:       true,
+			DependsOnMatch: "any",
+			DependsOn: []module.FieldCondition{
+				{Key: "googleEnabledAdmin", In: []string{"true"}},
+				{Key: "googleEnabledClient", In: []string{"true"}},
+			},
+		},
+		{Key: "googleIOSClientId", Label: "iOS Client ID", Group: "oauth.google", Type: module.FieldString, EnvVar: "OAUTH_GOOGLE_IOS_CLIENT_ID",
+			Advanced:       true,
+			DependsOnMatch: "any",
+			DependsOn: []module.FieldCondition{
+				{Key: "googleEnabledAdmin", In: []string{"true"}},
+				{Key: "googleEnabledClient", In: []string{"true"}},
+			},
+		},
 
-		// Apple
-		{Key: "appleClientId", Label: "Client ID", Group: "Apple", Type: module.FieldString, EnvVar: "OAUTH_APPLE_CLIENT_ID"},
-		{Key: "appleTeamId", Label: "Team ID", Group: "Apple", Type: module.FieldString, EnvVar: "OAUTH_APPLE_TEAM_ID"},
-		{Key: "appleKeyId", Label: "Key ID", Group: "Apple", Type: module.FieldString, EnvVar: "OAUTH_APPLE_KEY_ID"},
-		{Key: "applePrivateKey", Label: ".p8 Key (PEM)", Group: "Apple", Description: "Inline PEM content of your Apple Sign-In .p8 key", Type: module.FieldSecret, EnvVar: "OAUTH_APPLE_PRIVATE_KEY"},
-		{Key: "applePrivateKeyPath", Label: ".p8 Key Path", Group: "Apple", Description: "Filesystem path fallback if PEM is not inlined", Type: module.FieldString, EnvVar: "OAUTH_APPLE_PRIVATE_KEY_PATH"},
-		{Key: "appleRedirectURL", Label: "Redirect URL", Group: "Apple", Type: module.FieldString, EnvVar: "OAUTH_APPLE_REDIRECT_URL"},
-		{Key: "appleIOSClientId", Label: "iOS Client ID", Group: "Apple", Type: module.FieldString, EnvVar: "OAUTH_APPLE_IOS_CLIENT_ID"},
-		{Key: "appleAndroidClientId", Label: "Android Client ID", Group: "Apple", Type: module.FieldString, EnvVar: "OAUTH_APPLE_ANDROID_CLIENT_ID"},
+		// Apple — same gating shape as Google.
+		{Key: "appleClientId", Label: "Client ID", Group: "oauth.apple", Type: module.FieldString, EnvVar: "OAUTH_APPLE_CLIENT_ID",
+			DependsOnMatch: "any",
+			DependsOn: []module.FieldCondition{
+				{Key: "appleEnabledAdmin", In: []string{"true"}},
+				{Key: "appleEnabledClient", In: []string{"true"}},
+			},
+		},
+		{Key: "appleTeamId", Label: "Team ID", Group: "oauth.apple", Type: module.FieldString, EnvVar: "OAUTH_APPLE_TEAM_ID",
+			DependsOnMatch: "any",
+			DependsOn: []module.FieldCondition{
+				{Key: "appleEnabledAdmin", In: []string{"true"}},
+				{Key: "appleEnabledClient", In: []string{"true"}},
+			},
+		},
+		{Key: "appleKeyId", Label: "Key ID", Group: "oauth.apple", Type: module.FieldString, EnvVar: "OAUTH_APPLE_KEY_ID",
+			DependsOnMatch: "any",
+			DependsOn: []module.FieldCondition{
+				{Key: "appleEnabledAdmin", In: []string{"true"}},
+				{Key: "appleEnabledClient", In: []string{"true"}},
+			},
+		},
+		{Key: "applePrivateKey", Label: ".p8 Key (PEM)", Group: "oauth.apple", Description: "Inline PEM content of your Apple Sign-In .p8 key", Type: module.FieldSecret, EnvVar: "OAUTH_APPLE_PRIVATE_KEY",
+			DependsOnMatch: "any",
+			DependsOn: []module.FieldCondition{
+				{Key: "appleEnabledAdmin", In: []string{"true"}},
+				{Key: "appleEnabledClient", In: []string{"true"}},
+			},
+		},
+		{Key: "applePrivateKeyPath", Label: ".p8 Key Path", Group: "oauth.apple", Description: "Filesystem path fallback if PEM is not inlined", Type: module.FieldString, EnvVar: "OAUTH_APPLE_PRIVATE_KEY_PATH",
+			Advanced:       true,
+			DependsOnMatch: "any",
+			DependsOn: []module.FieldCondition{
+				{Key: "appleEnabledAdmin", In: []string{"true"}},
+				{Key: "appleEnabledClient", In: []string{"true"}},
+			},
+		},
+		{Key: "appleRedirectURL", Label: "Redirect URL", Group: "oauth.apple", Type: module.FieldString, EnvVar: "OAUTH_APPLE_REDIRECT_URL",
+			DependsOnMatch: "any",
+			DependsOn: []module.FieldCondition{
+				{Key: "appleEnabledAdmin", In: []string{"true"}},
+				{Key: "appleEnabledClient", In: []string{"true"}},
+			},
+		},
+		{Key: "appleIOSClientId", Label: "iOS Client ID", Group: "oauth.apple", Type: module.FieldString, EnvVar: "OAUTH_APPLE_IOS_CLIENT_ID",
+			Advanced:       true,
+			DependsOnMatch: "any",
+			DependsOn: []module.FieldCondition{
+				{Key: "appleEnabledAdmin", In: []string{"true"}},
+				{Key: "appleEnabledClient", In: []string{"true"}},
+			},
+		},
+		{Key: "appleAndroidClientId", Label: "Android Client ID", Group: "oauth.apple", Type: module.FieldString, EnvVar: "OAUTH_APPLE_ANDROID_CLIENT_ID",
+			Advanced:       true,
+			DependsOnMatch: "any",
+			DependsOn: []module.FieldCondition{
+				{Key: "appleEnabledAdmin", In: []string{"true"}},
+				{Key: "appleEnabledClient", In: []string{"true"}},
+			},
+		},
 
-		// GitHub
-		{Key: "githubClientId", Label: "Client ID", Group: "GitHub", Type: module.FieldString, EnvVar: "OAUTH_GITHUB_CLIENT_ID"},
-		{Key: "githubClientSecret", Label: "Client Secret", Group: "GitHub", Type: module.FieldSecret, EnvVar: "OAUTH_GITHUB_CLIENT_SECRET"},
-		{Key: "githubRedirectURL", Label: "Redirect URL", Group: "GitHub", Type: module.FieldString, EnvVar: "OAUTH_GITHUB_REDIRECT_URL"},
+		// GitHub — same gating shape as Google.
+		{Key: "githubClientId", Label: "Client ID", Group: "oauth.github", Type: module.FieldString, EnvVar: "OAUTH_GITHUB_CLIENT_ID",
+			DependsOnMatch: "any",
+			DependsOn: []module.FieldCondition{
+				{Key: "githubEnabledAdmin", In: []string{"true"}},
+				{Key: "githubEnabledClient", In: []string{"true"}},
+			},
+		},
+		{Key: "githubClientSecret", Label: "Client Secret", Group: "oauth.github", Type: module.FieldSecret, EnvVar: "OAUTH_GITHUB_CLIENT_SECRET",
+			DependsOnMatch: "any",
+			DependsOn: []module.FieldCondition{
+				{Key: "githubEnabledAdmin", In: []string{"true"}},
+				{Key: "githubEnabledClient", In: []string{"true"}},
+			},
+		},
+		{Key: "githubRedirectURL", Label: "Redirect URL", Group: "oauth.github", Type: module.FieldString, EnvVar: "OAUTH_GITHUB_REDIRECT_URL",
+			DependsOnMatch: "any",
+			DependsOn: []module.FieldCondition{
+				{Key: "githubEnabledAdmin", In: []string{"true"}},
+				{Key: "githubEnabledClient", In: []string{"true"}},
+			},
+		},
 
-		// Discord
-		{Key: "discordClientId", Label: "Client ID", Group: "Discord", Type: module.FieldString, EnvVar: "OAUTH_DISCORD_CLIENT_ID"},
-		{Key: "discordClientSecret", Label: "Client Secret", Group: "Discord", Type: module.FieldSecret, EnvVar: "OAUTH_DISCORD_CLIENT_SECRET"},
-		{Key: "discordRedirectURL", Label: "Redirect URL", Group: "Discord", Type: module.FieldString, EnvVar: "OAUTH_DISCORD_REDIRECT_URL"},
+		// Discord — same gating shape as Google.
+		{Key: "discordClientId", Label: "Client ID", Group: "oauth.discord", Type: module.FieldString, EnvVar: "OAUTH_DISCORD_CLIENT_ID",
+			DependsOnMatch: "any",
+			DependsOn: []module.FieldCondition{
+				{Key: "discordEnabledAdmin", In: []string{"true"}},
+				{Key: "discordEnabledClient", In: []string{"true"}},
+			},
+		},
+		{Key: "discordClientSecret", Label: "Client Secret", Group: "oauth.discord", Type: module.FieldSecret, EnvVar: "OAUTH_DISCORD_CLIENT_SECRET",
+			DependsOnMatch: "any",
+			DependsOn: []module.FieldCondition{
+				{Key: "discordEnabledAdmin", In: []string{"true"}},
+				{Key: "discordEnabledClient", In: []string{"true"}},
+			},
+		},
+		{Key: "discordRedirectURL", Label: "Redirect URL", Group: "oauth.discord", Type: module.FieldString, EnvVar: "OAUTH_DISCORD_REDIRECT_URL",
+			DependsOnMatch: "any",
+			DependsOn: []module.FieldCondition{
+				{Key: "discordEnabledAdmin", In: []string{"true"}},
+				{Key: "discordEnabledClient", In: []string{"true"}},
+			},
+		},
 
 		// Registration — tier-aware site-wide signup policy. Read at
 		// request time by AuthPolicyService; edits via the admin UI take
@@ -170,28 +318,28 @@ func (m *AuthModule) ConfigSchema() []module.ConfigField {
 		// (see PasswordAuthService.Register) so the bootstrapping
 		// operator is never locked out.
 		{
-			Key: "registrationEnabledAdmin", Label: "Allow signups on operator console", Group: "Registration",
+			Key: "registrationEnabledAdmin", Label: "Allow signups on operator console", Group: "registration",
 			Description: "OFF by default. When off, POST /v1/auth/operator/register returns 403 — operator accounts must be invited or created via /admin. The super_admin turns this on to allow self-service operator signups. The first account on a fresh install bypasses the switch so bootstrap is never blocked.",
 			Type:        module.FieldBool, Default: "false",
 		},
 		{
-			Key: "registrationEnabledClient", Label: "Allow signups on client app", Group: "Registration",
+			Key: "registrationEnabledClient", Label: "Allow signups on client app", Group: "registration",
 			Description: "OFF by default. When off, POST /v1/auth/client/register returns 403 — Tier-2 clients cannot self-register until the super_admin enables it.",
 			Type:        module.FieldBool, Default: "false",
 		},
 		{
-			Key: "defaultRoleClient", Label: "Default role for new client signups", Group: "Registration",
+			Key: "defaultRoleClient", Label: "Default role for new client signups", Group: "registration",
 			Description: "System role assigned to a Tier-2 client account on signup. Lower-privilege roles are recommended.",
 			Type:        module.FieldEnum, Default: "operator",
 			Options: []string{"operator", "manager", "guest"},
 		},
 		{
-			Key: "allowedEmailDomainsAdmin", Label: "Allowed email domains (operator)", Group: "Registration",
+			Key: "allowedEmailDomainsAdmin", Label: "Allowed email domains (operator)", Group: "registration",
 			Description: "Comma-separated allowlist (e.g. acme.com, ops.acme.com). Empty = any domain. Applied only to /v1/auth/operator/register.",
 			Type:        module.FieldStringList,
 		},
 		{
-			Key: "allowedEmailDomainsClient", Label: "Allowed email domains (client)", Group: "Registration",
+			Key: "allowedEmailDomainsClient", Label: "Allowed email domains (client)", Group: "registration",
 			Description: "Comma-separated allowlist applied only to /v1/auth/client/register. Empty = any domain.",
 			Type:        module.FieldStringList,
 		},
@@ -201,34 +349,34 @@ func (m *AuthModule) ConfigSchema() []module.ConfigField {
 		// into shared/errors.RateLimiter via SetAuthFailedConfig before
 		// each login attempt so admin edits take effect on the next try.
 		{
-			Key: "loginEnabledAdmin", Label: "Allow logins on operator console", Group: "Login & Sessions",
+			Key: "loginEnabledAdmin", Label: "Allow logins on operator console", Group: "login",
 			Description: "When off, POST /v1/auth/operator/login returns 403. Use during maintenance to lock out the operator console without taking the backend offline.",
 			Type:        module.FieldBool, Default: "true",
 		},
 		{
-			Key: "loginEnabledClient", Label: "Allow logins on client app", Group: "Login & Sessions",
+			Key: "loginEnabledClient", Label: "Allow logins on client app", Group: "login",
 			Description: "When off, POST /v1/auth/client/login returns 403. Affects /v1/auth/client/* only.",
 			Type:        module.FieldBool, Default: "true",
 		},
 		{
-			Key: "accountLockoutThreshold", Label: "Failed login attempts before lockout", Group: "Login & Sessions",
+			Key: "accountLockoutThreshold", Label: "Failed login attempts before lockout", Group: "login",
 			Description: "Number of failed login attempts (per IP and per email) before the account is temporarily locked. Default 5.",
 			Type:        module.FieldInt, Default: "5",
 		},
 		{
-			Key: "accountLockoutDuration", Label: "Lockout duration", Group: "Login & Sessions",
+			Key: "accountLockoutDuration", Label: "Lockout duration", Group: "login",
 			Description: "Go duration string (e.g. 15m, 1h) — how long an IP/email stays locked after exceeding the threshold. Default 15m.",
 			Type:        module.FieldDuration, Default: "15m",
 		},
 		// Phase 3.1 — admin-managed token TTLs. Both are read live on
 		// every mint so an admin edit takes effect on the next call.
 		{
-			Key: "accessTokenTTL", Label: "Access token lifetime", Group: "Login & Sessions",
+			Key: "accessTokenTTL", Label: "Access token lifetime", Group: "login",
 			Description: "Go duration string — how long an issued access token stays valid. Shorter = tighter security but more refresh round-trips. Default 15m.",
 			Type:        module.FieldDuration, Default: "15m",
 		},
 		{
-			Key: "passwordResetTokenTTL", Label: "Password reset link lifetime", Group: "Login & Sessions",
+			Key: "passwordResetTokenTTL", Label: "Password reset link lifetime", Group: "login",
 			Description: "Go duration string — how long the link in the reset-password email stays valid. Default 30m.",
 			Type:        module.FieldDuration, Default: "30m",
 		},
@@ -236,7 +384,7 @@ func (m *AuthModule) ConfigSchema() []module.ConfigField {
 		// Empty list = all methods allowed (the legacy default so an
 		// untouched deployment observes no change).
 		{
-			Key: "mfaMethods", Label: "Allowed MFA methods", Group: "MFA",
+			Key: "mfaMethods", Label: "Allowed MFA methods", Group: "mfa",
 			Description: "Comma-separated list of factor types users may enroll. Empty = all allowed. Valid: totp, webauthn, backup_codes.",
 			Type:        module.FieldStringList, Default: "",
 		},
@@ -247,34 +395,34 @@ func (m *AuthModule) ConfigSchema() []module.ConfigField {
 		// complexity, HIBP on) so existing deployments observe no change
 		// after the migration.
 		{
-			Key: "passwordMinLength", Label: "Minimum length", Group: "Password Policy",
+			Key: "passwordMinLength", Label: "Minimum length", Group: "password",
 			Description: "Minimum number of characters in a new password. Default 10. Recommend 12+.",
 			Type:        module.FieldInt, Default: "10",
 		},
 		{
-			Key: "passwordMaxLength", Label: "Maximum length", Group: "Password Policy",
+			Key: "passwordMaxLength", Label: "Maximum length", Group: "password",
 			Description: "Upper bound on password length. Argon2id is not a bottleneck; raise this only if you have a concrete reason.",
 			Type:        module.FieldInt, Default: "128",
 		},
 		{
-			Key: "passwordRequireUpper", Label: "Require an uppercase letter", Group: "Password Policy",
+			Key: "passwordRequireUpper", Label: "Require an uppercase letter", Group: "password",
 			Type: module.FieldBool, Default: "false",
 		},
 		{
-			Key: "passwordRequireLower", Label: "Require a lowercase letter", Group: "Password Policy",
+			Key: "passwordRequireLower", Label: "Require a lowercase letter", Group: "password",
 			Type: module.FieldBool, Default: "false",
 		},
 		{
-			Key: "passwordRequireDigit", Label: "Require a digit", Group: "Password Policy",
+			Key: "passwordRequireDigit", Label: "Require a digit", Group: "password",
 			Type: module.FieldBool, Default: "false",
 		},
 		{
-			Key: "passwordRequireSymbol", Label: "Require a symbol", Group: "Password Policy",
+			Key: "passwordRequireSymbol", Label: "Require a symbol", Group: "password",
 			Description: "Any non-alphanumeric character.",
 			Type:        module.FieldBool, Default: "false",
 		},
 		{
-			Key: "breachedPasswordCheck", Label: "Reject breached passwords (HIBP)", Group: "Password Policy",
+			Key: "breachedPasswordCheck", Label: "Reject breached passwords (HIBP)", Group: "password",
 			Description: "k-anonymity lookup against haveibeenpwned.com — only the first 5 chars of the SHA-1 hash leave the server. Disable for air-gapped deployments.",
 			Type:        module.FieldBool, Default: "true",
 		},
@@ -292,35 +440,35 @@ func (m *AuthModule) ConfigSchema() []module.ConfigField {
 		// already filtered out regardless — this toggle is the explicit
 		// second gate.)
 		{
-			Key: "googleEnabledAdmin", Label: "Google on operator console", Group: "OAuth Providers",
+			Key: "googleEnabledAdmin", Label: "Google on operator console", Group: "oauth",
 			Type: module.FieldBool, Default: "false",
 		},
 		{
-			Key: "googleEnabledClient", Label: "Google on client app", Group: "OAuth Providers",
+			Key: "googleEnabledClient", Label: "Google on client app", Group: "oauth",
 			Type: module.FieldBool, Default: "false",
 		},
 		{
-			Key: "appleEnabledAdmin", Label: "Apple on operator console", Group: "OAuth Providers",
+			Key: "appleEnabledAdmin", Label: "Apple on operator console", Group: "oauth",
 			Type: module.FieldBool, Default: "false",
 		},
 		{
-			Key: "appleEnabledClient", Label: "Apple on client app", Group: "OAuth Providers",
+			Key: "appleEnabledClient", Label: "Apple on client app", Group: "oauth",
 			Type: module.FieldBool, Default: "false",
 		},
 		{
-			Key: "githubEnabledAdmin", Label: "GitHub on operator console", Group: "OAuth Providers",
+			Key: "githubEnabledAdmin", Label: "GitHub on operator console", Group: "oauth",
 			Type: module.FieldBool, Default: "false",
 		},
 		{
-			Key: "githubEnabledClient", Label: "GitHub on client app", Group: "OAuth Providers",
+			Key: "githubEnabledClient", Label: "GitHub on client app", Group: "oauth",
 			Type: module.FieldBool, Default: "false",
 		},
 		{
-			Key: "discordEnabledAdmin", Label: "Discord on operator console", Group: "OAuth Providers",
+			Key: "discordEnabledAdmin", Label: "Discord on operator console", Group: "oauth",
 			Type: module.FieldBool, Default: "false",
 		},
 		{
-			Key: "discordEnabledClient", Label: "Discord on client app", Group: "OAuth Providers",
+			Key: "discordEnabledClient", Label: "Discord on client app", Group: "oauth",
 			Type: module.FieldBool, Default: "false",
 		},
 
@@ -339,17 +487,17 @@ func (m *AuthModule) ConfigSchema() []module.ConfigField {
 		//     voluntarily, but RoleRequiresMFA returns false)
 		//   - tune how long a freshly-promoted admin has to enroll
 		{
-			Key: "mfaEnabled", Label: "Require MFA for privileged users", Group: "MFA",
+			Key: "mfaEnabled", Label: "Require MFA for privileged users", Group: "mfa",
 			Description: "Master switch, OFF by default so a fresh install's first super_admin can configure the platform without being blocked by an MFA prompt they never enrolled. Turn this ON only after enrolling a second factor (TOTP/passkey) — otherwise privileged users hit the enrollment grace window on their next login. When off, RoleRequiresMFA returns false; existing enrollments are not deleted and users can still verify voluntarily.",
 			Type:        module.FieldBool, Default: "false",
 		},
 		{
-			Key: "mfaEnrollmentGraceDays", Label: "Enrollment grace period (days)", Group: "MFA",
+			Key: "mfaEnrollmentGraceDays", Label: "Enrollment grace period (days)", Group: "mfa",
 			Description: "How many days a newly privileged user has to enroll a second factor before login returns 403 mfa_enrollment_required. Default 7.",
 			Type:        module.FieldInt, Default: "7",
 		},
 
-		// Anti-abuse & Notifications — Tab 7. Operational guardrails on
+		// Anti-abuse & Notifications — the "antiabuse" group. Operational guardrails on
 		// top of the per-tier login/registration kill switches: who gets
 		// emailed on suspicious logins, which IPs/countries are
 		// allowed/blocked at the operator host, and when to retire stale
@@ -360,68 +508,71 @@ func (m *AuthModule) ConfigSchema() []module.ConfigField {
 		// customers out, while operator console access is already a
 		// privileged surface where allow/blocklists make sense.
 		{
-			Key: "notifyUserOnNewDeviceLogin", Label: "Email user on first login from a new device", Group: "Anti-abuse & Notifications",
+			Key: "notifyUserOnNewDeviceLogin", Label: "Email user on first login from a new device", Group: "antiabuse",
 			Description: "When on, sends an auth.new_device_login transactional email the first time a user logs in from a (deviceId, userUUID) pair the system has not seen before. Helps users notice unauthorised access on the same day it happens.",
 			Type:        module.FieldBool, Default: "true",
 		},
 		{
-			Key: "notifyAdminOnSuspiciousLogin", Label: "Email admins on high-risk login", Group: "Anti-abuse & Notifications",
+			Key: "notifyAdminOnSuspiciousLogin", Label: "Email admins on high-risk login", Group: "antiabuse",
 			Description: "When on, every high-risk login (risk score ≥ 0.5) emails each address in the recipients list below in addition to notifying the user. Default off — recipients must be explicitly configured first.",
 			Type:        module.FieldBool, Default: "false",
 		},
 		{
-			Key: "suspiciousLoginRecipients", Label: "Suspicious-login admin recipients", Group: "Anti-abuse & Notifications",
+			Key: "suspiciousLoginRecipients", Label: "Suspicious-login admin recipients", Group: "antiabuse",
 			Description: "Comma-separated list of admin email addresses notified on high-risk logins. Empty disables the admin email half regardless of the toggle above.",
 			Type:        module.FieldStringList,
 		},
 		{
-			Key: "ipAllowlistAdmin", Label: "IP allowlist (operator console)", Group: "Anti-abuse & Notifications",
+			Key: "ipAllowlistAdmin", Label: "IP allowlist (operator console)", Group: "antiabuse",
 			Description: "Comma-separated list of CIDR ranges allowed to reach the operator host. Empty = open. Applied only to operator host traffic — the client API is unaffected. Example: 10.0.0.0/8, 192.0.2.5/32.",
 			Type:        module.FieldStringList,
 		},
 		{
-			Key: "ipBlocklistAdmin", Label: "IP blocklist (operator console)", Group: "Anti-abuse & Notifications",
+			Key: "ipBlocklistAdmin", Label: "IP blocklist (operator console)", Group: "antiabuse",
 			Description: "Comma-separated list of CIDR ranges denied at the operator host. Evaluated after the allowlist — a blocked entry rejects the request even if it also matches the allowlist.",
 			Type:        module.FieldStringList,
 		},
 		{
-			Key: "geoBlockCountries", Label: "Country blocklist", Group: "Anti-abuse & Notifications",
+			Key: "geoBlockCountries", Label: "Country blocklist", Group: "antiabuse",
 			Description: "Comma-separated ISO-3166-1 alpha-2 country codes (e.g. RU, KP) that cannot complete login on either tier. Requires the GeoIP resolver (AUTH_GEOIP_DB_PATH) — empty when GeoIP is disabled has no effect.",
 			Type:        module.FieldStringList,
 		},
 		{
-			Key: "inactiveAccountAutoDisableDays", Label: "Auto-disable inactive accounts after (days)", Group: "Anti-abuse & Notifications",
+			Key: "inactiveAccountAutoDisableDays", Label: "Auto-disable inactive accounts after (days)", Group: "antiabuse",
 			Description: "Disables a user account when its lastLogin is older than the configured number of days. Checked at login time so a stale account is denied at the next attempt without a periodic job. 0 = disabled.",
-			Type:        module.FieldInt, Default: "0",
+			Type:        module.FieldInt, Default: "0", Advanced: true,
 		},
 
 		// Sessions & Account — Phase 8 trivial toggles. Two existing
 		// security behaviours surfaced as live-editable knobs.
 		{
-			Key: "revokeSessionsOnPasswordChange", Label: "Revoke sessions on password change", Group: "Sessions & Account",
+			Key: "revokeSessionsOnPasswordChange", Label: "Revoke sessions on password change", Group: "sessions",
 			Description: "When on, a successful POST /v1/auth/{tier}/change-password also revokes the caller's current session id and every device-trust grant for the user. When off, password change leaves existing sessions alive (used for migrations or staged rollouts; not recommended in steady state). Default on.",
 			Type:        module.FieldBool, Default: "true",
 		},
 		{
-			Key: "selfServiceAccountDeletionClient", Label: "Allow client users to self-delete (GDPR erase)", Group: "Sessions & Account",
+			Key: "selfServiceAccountDeletionClient", Label: "Allow client users to self-delete (GDPR erase)", Group: "sessions",
 			Description: "When on, Tier-2 client users can call POST /v1/me/dsr/erase to irreversibly wipe their personal data across every PII producer. When off (default), client tier returns 403 self_service_deletion_disabled and erasure must be triggered through the operator console. Operator-side erasure is unaffected.",
 			Type:        module.FieldBool, Default: "false",
 		},
 
-		// OAuth signup allowance — Phase 9 small backlog. The OAuth
-		// provider tabs above gate which buttons appear; this pair gates
-		// what happens when an OAuth login arrives for an unknown email.
+		// OAuth signup allowance — Phase 9 small backlog. The eight
+		// per-provider enable toggles live in this same "oauth" parent
+		// group, declared above; they gate which buttons appear, and the
+		// credentials in the "oauth.<provider>" child groups DependsOn
+		// them. This pair is a different axis: it gates what happens when
+		// an OAuth login arrives for an unknown email.
 		// When off, the callback returns 403 oauth_signup_disabled
 		// instead of provisioning a new account — useful when an
 		// operator wants to allow existing users to sign in via OAuth
 		// while keeping signups invitation-only.
 		{
-			Key: "oauthAllowSignupAdmin", Label: "Allow OAuth signups on operator console", Group: "OAuth Providers",
+			Key: "oauthAllowSignupAdmin", Label: "Allow OAuth signups on operator console", Group: "oauth",
 			Description: "When off, OAuth callbacks on the operator host that resolve to an unknown email return 403 instead of creating a new operator account. Existing users can still sign in.",
 			Type:        module.FieldBool, Default: "true",
 		},
 		{
-			Key: "oauthAllowSignupClient", Label: "Allow OAuth signups on client app", Group: "OAuth Providers",
+			Key: "oauthAllowSignupClient", Label: "Allow OAuth signups on client app", Group: "oauth",
 			Description: "When off, OAuth callbacks on the client host that resolve to an unknown email return 403 instead of creating a new client account.",
 			Type:        module.FieldBool, Default: "true",
 		},
@@ -432,14 +583,14 @@ func (m *AuthModule) ConfigSchema() []module.ConfigField {
 		// unset value preserves today's behaviour. Adding a role here is
 		// security-sensitive — broaden carefully.
 		{
-			Key: "mfaRequiredForRoles", Label: "Roles that require MFA", Group: "MFA",
+			Key: "mfaRequiredForRoles", Label: "Roles that require MFA", Group: "mfa",
 			Description: "Comma-separated list of role names that mandate a second factor. Recognised system roles: super_admin, administrator, developer, manager, operator, guest. Recognised org roles: org_owner, org_admin, org_member. Empty restores the built-in default (super_admin, administrator, org_owner, org_admin).",
 			Type:        module.FieldStringList,
 		},
 		{
-			Key: "recoveryCodesCount", Label: "Recovery codes issued on enrollment", Group: "MFA",
+			Key: "recoveryCodesCount", Label: "Recovery codes issued on enrollment", Group: "mfa",
 			Description: "Number of one-shot backup codes minted when a user confirms TOTP enrollment. Default 10. Range 1–50 — outside that the legacy default (10) is used.",
-			Type:        module.FieldInt, Default: "10",
+			Type:        module.FieldInt, Default: "10", Advanced: true,
 		},
 
 		// OAuth account linking — Phase 10 of the auth-policy roadmap.
@@ -450,9 +601,9 @@ func (m *AuthModule) ConfigSchema() []module.ConfigField {
 		// password. Operators in higher-assurance deployments turn
 		// this off.
 		{
-			Key: "oauthAutoLinkByEmail", Label: "Auto-link OAuth provider to existing email account", Group: "OAuth Providers",
+			Key: "oauthAutoLinkByEmail", Label: "Auto-link OAuth provider to existing email account", Group: "oauth",
 			Description: "When on (default), an OAuth callback for an existing Orkestra account (matched by email) attaches the provider to that user automatically. When off, the OAuth flow refuses with 403 oauth_link_disabled and the user must initiate linking from their account settings while authenticated. Recommended off for compliance-sensitive deployments.",
-			Type:        module.FieldBool, Default: "true",
+			Type:        module.FieldBool, Default: "true", Advanced: true,
 		},
 	}
 }
@@ -754,7 +905,6 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 		operatorCookieDomain,
 		cfg.Auth.Cookie.Secure,
 	)
-	m.operatorPasswordHandler.SetSessionRevocation(sessionRevocationSvc)
 
 	m.operatorAuthHandler = handlers.NewAuthHandler(
 		opBundle.authService,
@@ -788,6 +938,10 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 	// authenticated request. Without this, in-flight access tokens
 	// would stay valid until the per-token TTL ticked over.
 	opBundle.authService.SetSessionRevocation(sessionRevocationSvc)
+	// Same store for the password service: ResetPassword / ChangePassword
+	// push every evicted sid so a credential change kills access tokens
+	// already in flight instead of waiting out their TTL.
+	opBundle.passwordSvc.SetSessionRevocation(sessionRevocationSvc)
 
 	m.operatorMFAHandler = handlers.NewMFAHandler(
 		opBundle.mfaSvc,
@@ -872,7 +1026,6 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 		clientCookieDomain,
 		cfg.Auth.Cookie.Secure,
 	)
-	m.clientPasswordHandler.SetSessionRevocation(sessionRevocationSvc)
 
 	m.clientAuthHandler = handlers.NewAuthHandler(
 		clBundle.authService,
@@ -894,6 +1047,7 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 		clBundle.passwordSvc.SetBlobStore(store)
 	}
 	clBundle.authService.SetSessionRevocation(sessionRevocationSvc)
+	clBundle.passwordSvc.SetSessionRevocation(sessionRevocationSvc)
 
 	m.clientMFAHandler = handlers.NewMFAHandler(
 		clBundle.mfaSvc,

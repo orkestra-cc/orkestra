@@ -159,32 +159,68 @@ func main() {
 	// without ServiceBlobStore registered and the user module's avatar
 	// upload endpoint degrades to 503 storage_unavailable. OAuth-source
 	// and initials avatars still work.
-	if cfg.Storage.AccessKey != "" && cfg.Storage.SecretKey != "" && cfg.Storage.Bucket != "" {
-		storeCtx, storeCancel := context.WithTimeout(context.Background(), 30*time.Second)
-		store, err := blob.NewS3(storeCtx, blob.S3Config{
-			Endpoint:       cfg.Storage.Endpoint,
-			Region:         cfg.Storage.Region,
-			Bucket:         cfg.Storage.Bucket,
-			AccessKey:      cfg.Storage.AccessKey,
-			SecretKey:      cfg.Storage.SecretKey,
-			ForcePathStyle: cfg.Storage.ForcePathStyle,
-			EnsureBucket:   cfg.Storage.EnsureBucket,
-		})
-		storeCancel()
-		if err != nil {
-			logger.Warn("blob storage unavailable — avatar uploads will return 503",
-				slog.String("endpoint", cfg.Storage.Endpoint),
-				slog.String("error", err.Error()))
-		} else {
-			cached := blob.NewCached(store, redisClient, blob.CachedConfig{
+	if cfg.Storage.AccessKey != "" && cfg.Storage.SecretKey != "" {
+		provider := blob.NewProvider(blob.ProviderConfig{
+			S3: blob.S3Config{
+				Endpoint:       cfg.Storage.Endpoint,
+				PublicEndpoint: cfg.Storage.PublicEndpoint,
+				Region:         cfg.Storage.Region,
+				AccessKey:      cfg.Storage.AccessKey,
+				SecretKey:      cfg.Storage.SecretKey,
+				ForcePathStyle: cfg.Storage.ForcePathStyle,
+				EnsureBucket:   cfg.Storage.EnsureBucket,
+			},
+			BucketPrefix: cfg.Storage.BucketPrefix,
+			Redis:        redisClient,
+			Cache: blob.CachedConfig{
 				SignedGetTTL: time.Hour,
 				CacheBuffer:  10 * time.Minute,
 				KeyPrefix:    "blob:url:",
+			},
+		})
+		svcRegistry.Register(module.ServiceObjectStoreProvider, provider)
+
+		// Back-compat: ServiceBlobStore is the "avatars" bucket, so existing
+		// consumers (user avatars, auth DSR export bundles) resolve it
+		// unchanged. For one transition release a CUSTOM STORAGE_BUCKET (not
+		// <prefix>-avatars) is honored as-is so a deployment's existing
+		// avatars aren't orphaned; the default and <prefix>-avatars-shaped
+		// values go through the provider (which ensures the bucket on first use).
+		var avatarStore blob.Store
+		var avatarErr error
+		if legacy := cfg.Storage.Bucket; legacy != "" && legacy != cfg.Storage.BucketPrefix+"-avatars" {
+			logger.Warn("STORAGE_BUCKET is deprecated — honoring it as the avatars bucket for this release; migrate by renaming the bucket to <STORAGE_BUCKET_PREFIX>-avatars, or set STORAGE_BUCKET_PREFIX so <prefix>-avatars equals it",
+				slog.String("legacy_bucket", legacy))
+			sctx, scancel := context.WithTimeout(context.Background(), 30*time.Second)
+			base, err := blob.NewS3(sctx, blob.S3Config{
+				Endpoint:       cfg.Storage.Endpoint,
+				PublicEndpoint: cfg.Storage.PublicEndpoint,
+				Region:         cfg.Storage.Region,
+				Bucket:         legacy,
+				AccessKey:      cfg.Storage.AccessKey,
+				SecretKey:      cfg.Storage.SecretKey,
+				ForcePathStyle: cfg.Storage.ForcePathStyle,
+				EnsureBucket:   cfg.Storage.EnsureBucket,
 			})
-			svcRegistry.Register(module.ServiceBlobStore, cached)
+			scancel()
+			if err == nil {
+				avatarStore = blob.NewCached(base, redisClient, blob.CachedConfig{
+					SignedGetTTL: time.Hour, CacheBuffer: 10 * time.Minute, KeyPrefix: "blob:url:avatars:",
+				})
+			}
+			avatarErr = err
+		} else {
+			avatarStore, avatarErr = provider.Bucket("avatars")
+		}
+		if avatarErr != nil {
+			logger.Warn("blob storage unavailable — avatar uploads will return 503",
+				slog.String("endpoint", cfg.Storage.Endpoint),
+				slog.String("error", avatarErr.Error()))
+		} else {
+			svcRegistry.Register(module.ServiceBlobStore, avatarStore)
 			logger.Info("blob storage ready",
 				slog.String("endpoint", cfg.Storage.Endpoint),
-				slog.String("bucket", cfg.Storage.Bucket))
+				slog.String("bucket_prefix", cfg.Storage.BucketPrefix))
 		}
 	} else {
 		logger.Info("blob storage not configured (STORAGE_ACCESS_KEY/SECRET empty) — avatar uploads disabled")
@@ -326,8 +362,28 @@ func main() {
 		},
 	}
 
+	// Trusted-proxy policy for client-IP resolution. Everything that
+	// depends on knowing who is calling — the operator IP allow/blocklist
+	// mounted just below, the login geo-block, the per-IP rate limiter,
+	// and every audited IP — reads the address this policy produces.
+	// A malformed value is fatal: booting with a policy we could not
+	// parse would silently fall back to trusting nothing, and a
+	// deployment behind a proxy would then attribute every request to
+	// the proxy.
+	trustedProxies, err := authMiddleware.NewTrustedProxyPolicy(
+		cfg.Server.TrustedProxyCount, cfg.Server.TrustedProxyCIDRs)
+	if err != nil {
+		log.Fatalf("Invalid trusted proxy configuration: %v", err)
+	}
+	if cfg.IsProductionLike() && !trustedProxies.Configured() {
+		logger.Warn("no trusted proxy configured — X-Forwarded-For is ignored and every request " +
+			"is attributed to its direct peer. If this deployment sits behind a load balancer or CDN, " +
+			"set TRUSTED_PROXY_CIDRS (preferred) or TRUSTED_PROXY_COUNT, otherwise the IP allowlist, " +
+			"geo-block, and per-IP rate limits all operate on the proxy's address.")
+	}
+
 	operatorMux := chi.NewRouter()
-	setupMiddleware(operatorMux, cfg, errorManager, deviceMW, string(module.AudienceOperator), cfg.Server.Operator, logger)
+	setupMiddleware(operatorMux, cfg, errorManager, deviceMW, string(module.AudienceOperator), cfg.Server.Operator, logger, trustedProxies)
 	// Phase 7: admin-managed IP allow/block gate on the operator host
 	// only. Reads ipAllowlistAdmin / ipBlocklistAdmin live from
 	// AuthPolicyService on every request — admin edits take effect
@@ -345,7 +401,7 @@ func main() {
 	operatorProtected.Use(authMiddleware.TenantBaggage)
 
 	clientMux := chi.NewRouter()
-	setupMiddleware(clientMux, cfg, errorManager, deviceMW, string(module.AudienceClient), cfg.Server.Client, logger)
+	setupMiddleware(clientMux, cfg, errorManager, deviceMW, string(module.AudienceClient), cfg.Server.Client, logger, trustedProxies)
 	clientAPI := humachi.New(clientMux, apiConfig)
 	clientProtected := chi.NewRouter()
 	clientProtected.Use(authMW.RequireAuth)
@@ -401,13 +457,18 @@ func main() {
 	)
 	setup.NewHandler(setupSvc, cfg.Auth.Cookie).RegisterRoutes(operatorAPI)
 
-	// Dev-token endpoint (dev/staging only) — synthetic JWTs for first
-	// login + local API testing, used by scripts/devtoken.sh and the
+	// Dev-token endpoint (LOCAL DEVELOPMENT ONLY) — synthetic JWTs for
+	// first login + local API testing, used by scripts/devtoken.sh and the
 	// console's "Sign in with dev token" affordance. Re-provided in core
 	// after ADR-0006 removed the dev addon. Mounted as a raw chi route on
 	// the operator root mux (bypasses Huma, hidden from /docs); never on
 	// the client host. No DB writes.
-	if !cfg.IsProduction() {
+	//
+	// The gate is IsProductionLike, not IsProduction: the endpoint hands a
+	// signed super_admin token to any anonymous caller, so it must not
+	// exist on staging either — staging is internet-reachable. Handler.
+	// RegisterRoutes enforces the same rule independently.
+	if !cfg.IsProductionLike() {
 		// Resolver: when an operator dev token doesn't pin a tenant, default it
 		// to the first internal tenant so the token satisfies tenant-scoped
 		// reads (billing/documents). Nil-safe — falls back to a tenant-less
@@ -458,13 +519,17 @@ func main() {
 	operatorMux.Mount("/", operatorProtected)
 	clientMux.Mount("/", clientProtected)
 
-	// Health, readiness, docs — registered on both surfaces so
-	// orchestrator probes (k8s liveness, ALB target health) can hit
-	// either host. Each audience gets its own /openapi.json so SDK
-	// generators see only that audience's surface.
+	// Health, readiness, docs — served on both surfaces so orchestrator
+	// probes (k8s liveness, ALB target health) can hit either host.
+	// operatorAPI and clientAPI share a single OpenAPI document (both built
+	// from apiConfig), and huma v2.39+ panics on a duplicate operation ID —
+	// so the health/readiness operations are registered via Huma once, on the
+	// operator API (which owns the shared document), and the client host
+	// serves the same probes as raw routes. Both /openapi.json endpoints
+	// still document /health + /ready via the operator registration.
 	registerHealthEndpoints(operatorAPI, db, redisClient)
 	registerDocsEndpoints(operatorMux, operatorAPI)
-	registerHealthEndpoints(clientAPI, db, redisClient)
+	registerHealthProbes(clientMux, db, redisClient)
 	registerDocsEndpoints(clientMux, clientAPI)
 
 	// OPENAPI_DUMP mode (used by `make openapi-dump`): after every module

@@ -3,12 +3,65 @@ import { Form, InputGroup, Button } from 'react-bootstrap';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faEye, faEyeSlash } from '@fortawesome/free-solid-svg-icons';
 import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
+import {
+  Controller,
+  useFormState,
+  useWatch,
+  type Control,
+  type UseFormRegister
+} from 'react-hook-form';
 import type { ConfigField } from 'store/api/moduleApi';
+import { isFieldVisible } from './configModel';
+import { translateConfigField } from 'helpers/configLabel';
+import {
+  fieldNameOf,
+  toSchemaValues,
+  type ConfigFormValues
+} from './useModuleConfigForm';
+
+/**
+ * Translates a resolver error code (see `buildYupSchema` in
+ * `useModuleConfigForm.ts`) through the existing `adminModules.configFields.*`
+ * feedback keys instead of adding a parallel set of English strings. The
+ * resolver's single `.test()` rule per field means at most one code is ever
+ * active at once, so this returns one message, not several.
+ *
+ * `notANumber` (an `int` field holding a non-numeric string) reuses
+ * `patternFeedback` — "Value does not match the required format" reads fine
+ * for that case too, and the brief calls for reuse over a parallel key.
+ */
+const feedbackForCode = (t: TFunction, code: string): string => {
+  if (code === 'required')
+    return t('adminModules.configFields.requiredFeedback');
+  if (code === 'duration')
+    return t('adminModules.configFields.durationFeedback');
+  if (code === 'pattern' || code === 'notANumber') {
+    return t('adminModules.configFields.patternFeedback');
+  }
+  if (code.startsWith('min:')) {
+    return t('adminModules.configFields.minFeedback', { min: code.slice(4) });
+  }
+  if (code.startsWith('max:')) {
+    return t('adminModules.configFields.maxFeedback', { max: code.slice(4) });
+  }
+  return code;
+};
 
 export interface ModuleConfigFieldsProps {
   schema: ConfigField[];
-  configValues: Record<string, string>;
-  secretValues: Record<string, string>;
+  /** The single module-wide react-hook-form instance (Task 1's `useModuleConfigForm`). */
+  control: Control<ConfigFormValues>;
+  register: UseFormRegister<ConfigFormValues>;
+  /**
+   * Schema key → react-hook-form register name (`buildFieldNames`). Every
+   * `register`/`Controller`/`errors` lookup below goes through it, because a
+   * key like `email.smtp.host` handed to RHF verbatim is read as a path and
+   * nests the operator's edit out of sight of dirty tracking and the save
+   * diff. Everything else here — `includeKeys`, `dependsOn`, `secretStatus`,
+   * the i18n lookups — still keys by the schema key.
+   */
+  fieldNames: ReadonlyMap<string, string>;
   /**
    * Map of secret key → whether that secret is already stored on the backend.
    * Controls the "Set" badge and the placeholder hint for password inputs.
@@ -19,68 +72,86 @@ export interface ModuleConfigFieldsProps {
    * fields are shown and in this order. Falls back to the full schema order.
    */
   includeKeys?: string[];
-  onConfigChange: (key: string, value: string) => void;
-  onSecretChange: (key: string, value: string) => void;
+  /** Owning module — selects the i18n namespace the labels resolve against. */
+  moduleName: string;
 }
 
 /**
- * Dynamic form renderer for a backend module's `configSchema`. Shared by
- * the admin modules page (edit an arbitrary module) and the first-install
- * onboarding wizard (configure SMTP before any user exists). Handles all
- * four backend field types: string, int, bool, secret.
+ * Dynamic form renderer for a backend module's `configSchema`, registered
+ * against the module-wide react-hook-form instance rather than owning its
+ * own state — so an edit here survives the rail moving to a different group.
+ * Its consumers are the admin module detail page's config section (directly,
+ * for the flat/legacy layout) and `ModuleConfigPanel` (one group at a time).
+ * Handles all seven backend field types: string, bool, int, duration, secret,
+ * enum, stringList.
  */
 const ModuleConfigFields: React.FC<ModuleConfigFieldsProps> = ({
   schema,
-  configValues,
-  secretValues,
+  control,
+  register,
+  fieldNames,
   secretStatus,
   includeKeys,
-  onConfigChange,
-  onSecretChange
+  moduleName
 }) => {
   const { t } = useTranslation();
   const [revealedSecrets, setRevealedSecrets] = useState<
     Record<string, boolean>
   >({});
+  // Whole-form watch: a field's visibility can depend on any other field in
+  // the schema (dependsOn), not just ones this particular panel renders.
+  // Re-keyed to schema keys because `dependsOn` targets are schema keys.
+  const watched = useWatch({ control }) as ConfigFormValues;
+  const values = toSchemaValues(schema, watched, fieldNames);
+  const { errors } = useFormState({ control });
 
   const toggleReveal = (key: string) => {
     setRevealedSecrets(prev => ({ ...prev, [key]: !prev[key] }));
   };
 
-  const fields = includeKeys
+  const selected = includeKeys
     ? includeKeys
         .map(key => schema.find(f => f.key === key))
         .filter((f): f is ConfigField => Boolean(f))
     : schema;
+  const fields = selected.filter(f => isFieldVisible(f, values, schema));
 
   return (
     <>
       {fields.map(field => {
         const key = field.key;
+        // Everything RHF touches — register, Controller, the errors lookup,
+        // and the DOM id/name that mirror them — goes through `name`.
+        // Everything else stays on `key`.
+        const name = fieldNameOf(fieldNames, key);
+        const label = translateConfigField(t, moduleName, field, 'label');
+        const desc = translateConfigField(t, moduleName, field, 'desc');
+        const fieldError = errors[name]?.message as string | undefined;
 
         if (field.type === 'secret') {
           const alreadySet = Boolean(secretStatus?.[key]);
           const revealed = revealedSecrets[key] || false;
           return (
             <Form.Group key={key} className="mb-3">
-              <Form.Label className="fs-10 fw-semibold">
-                {field.label}
+              <Form.Label className="fs-10 fw-semibold" htmlFor={`cfg-${name}`}>
+                {label}
                 {alreadySet && (
                   <span className="badge badge-subtle-success ms-2 fs-11">
                     {t('adminModules.configFields.secretSetBadge')}
                   </span>
                 )}
               </Form.Label>
-              <InputGroup size="sm">
+              <InputGroup size="sm" hasValidation>
                 <Form.Control
+                  id={`cfg-${name}`}
                   type={revealed ? 'text' : 'password'}
                   placeholder={
                     alreadySet
                       ? t('adminModules.configFields.secretKeepPlaceholder')
                       : t('adminModules.configFields.secretEnterPlaceholder')
                   }
-                  value={secretValues[key] || ''}
-                  onChange={e => onSecretChange(key, e.target.value)}
+                  isInvalid={Boolean(fieldError)}
+                  {...register(name)}
                 />
                 <Button
                   variant="outline-secondary"
@@ -93,59 +164,56 @@ const ModuleConfigFields: React.FC<ModuleConfigFieldsProps> = ({
                 >
                   <FontAwesomeIcon icon={revealed ? faEyeSlash : faEye} />
                 </Button>
+                {fieldError && (
+                  <Form.Control.Feedback type="invalid">
+                    {feedbackForCode(t, fieldError)}
+                  </Form.Control.Feedback>
+                )}
               </InputGroup>
-              {field.description && (
-                <Form.Text className="text-muted">
-                  {field.description}
-                </Form.Text>
-              )}
+              {desc && <Form.Text className="text-muted">{desc}</Form.Text>}
             </Form.Group>
           );
         }
 
         if (field.type === 'bool') {
-          // Mirror the enum branch: when no value is stored, fall back
-          // to the schema default so the switch reflects what the
-          // backend will actually enforce. Without this, default-true
-          // toggles render OFF until the user explicitly saves a value
-          // — admins read it as "disabled" and act on a wrong premise.
-          const stored = configValues[key];
-          const effective =
-            stored !== undefined && stored !== ''
-              ? stored
-              : field.default || 'false';
           return (
             <Form.Group key={key} className="mb-3">
-              <Form.Check
-                type="switch"
-                label={field.label}
-                checked={effective === 'true'}
-                onChange={e =>
-                  onConfigChange(key, e.target.checked ? 'true' : 'false')
-                }
+              <Controller
+                name={name}
+                control={control}
+                render={({ field: rhfField }) => (
+                  <Form.Check
+                    id={`cfg-${name}`}
+                    type="switch"
+                    label={label}
+                    name={rhfField.name}
+                    checked={rhfField.value === 'true'}
+                    onChange={e =>
+                      rhfField.onChange(e.target.checked ? 'true' : 'false')
+                    }
+                    onBlur={rhfField.onBlur}
+                    ref={rhfField.ref}
+                  />
+                )}
               />
-              {field.description && (
-                <Form.Text className="text-muted">
-                  {field.description}
-                </Form.Text>
-              )}
+              {desc && <Form.Text className="text-muted">{desc}</Form.Text>}
             </Form.Group>
           );
         }
 
         if (field.type === 'enum') {
-          const enumValue = configValues[key] ?? field.default ?? '';
           const options = field.options ?? [];
           return (
             <Form.Group key={key} className="mb-3">
-              <Form.Label className="fs-10 fw-semibold">
-                {field.label}
+              <Form.Label className="fs-10 fw-semibold" htmlFor={`cfg-${name}`}>
+                {label}
                 {field.required && <span className="text-danger ms-1">*</span>}
               </Form.Label>
               <Form.Select
+                id={`cfg-${name}`}
                 size="sm"
-                value={enumValue}
-                onChange={e => onConfigChange(key, e.target.value)}
+                isInvalid={Boolean(fieldError)}
+                {...register(name)}
               >
                 {!field.required && (
                   <option value="">
@@ -158,67 +226,58 @@ const ModuleConfigFields: React.FC<ModuleConfigFieldsProps> = ({
                   </option>
                 ))}
               </Form.Select>
-              {field.description && (
-                <Form.Text className="text-muted">
-                  {field.description}
-                </Form.Text>
+              {fieldError && (
+                <Form.Control.Feedback type="invalid">
+                  {feedbackForCode(t, fieldError)}
+                </Form.Control.Feedback>
               )}
+              {desc && <Form.Text className="text-muted">{desc}</Form.Text>}
             </Form.Group>
           );
         }
 
-        const value = configValues[key] || '';
-        const isEmpty = field.required && !value;
-        const isDurationInvalid =
-          field.type === 'duration' &&
-          value !== '' &&
-          !/^\d+[smh]$/.test(value);
         const isStringList = field.type === 'stringList';
 
         return (
           <Form.Group key={key} className="mb-3">
-            <Form.Label className="fs-10 fw-semibold">
-              {field.label}
+            <Form.Label className="fs-10 fw-semibold" htmlFor={`cfg-${name}`}>
+              {label}
               {field.required && <span className="text-danger ms-1">*</span>}
             </Form.Label>
             {isStringList ? (
               <Form.Control
+                id={`cfg-${name}`}
                 as="textarea"
                 rows={2}
                 size="sm"
                 placeholder={
+                  field.placeholder ||
                   field.default ||
                   t('adminModules.configFields.stringListPlaceholder')
                 }
-                value={value}
-                onChange={e => onConfigChange(key, e.target.value)}
-                isInvalid={isEmpty}
+                isInvalid={Boolean(fieldError)}
+                {...register(name)}
               />
             ) : (
               <Form.Control
+                id={`cfg-${name}`}
                 type={field.type === 'int' ? 'number' : 'text'}
                 size="sm"
-                placeholder={field.default || ''}
-                value={value}
-                onChange={e => onConfigChange(key, e.target.value)}
-                isInvalid={isEmpty || isDurationInvalid}
+                placeholder={field.placeholder || field.default || ''}
+                isInvalid={Boolean(fieldError)}
+                {...register(name)}
               />
             )}
-            {isEmpty && (
+            {fieldError && (
               <Form.Control.Feedback type="invalid">
-                {t('adminModules.configFields.requiredFeedback')}
-              </Form.Control.Feedback>
-            )}
-            {isDurationInvalid && (
-              <Form.Control.Feedback type="invalid">
-                {t('adminModules.configFields.durationFeedback')}
+                {feedbackForCode(t, fieldError)}
               </Form.Control.Feedback>
             )}
             {field.envVar && (
               <Form.Text className="text-muted">
                 {t('adminModules.configFields.envPrefix')}
                 <code>{field.envVar}</code>
-                {field.description ? ` — ${field.description}` : ''}
+                {desc ? ` — ${desc}` : ''}
               </Form.Text>
             )}
           </Form.Group>

@@ -110,6 +110,20 @@ func (c *CachedStore) PresignGet(ctx context.Context, key string, ttl time.Durat
 	return url, nil
 }
 
+// PresignGetDownload delegates to the inner store's download-presign capability
+// when it has one, else falls back to a plain presigned GET (the object-key
+// filename). Download URLs are NOT cached — they vary by filename and are
+// low-frequency compared to the avatar-preview reads PresignGet caches.
+func (c *CachedStore) PresignGetDownload(ctx context.Context, key, downloadAs string, ttl time.Duration) (string, error) {
+	if ttl <= 0 {
+		ttl = c.getTTL
+	}
+	if dl, ok := c.inner.(ObjectDownloadPresigner); ok {
+		return dl.PresignGetDownload(ctx, key, downloadAs, ttl)
+	}
+	return c.inner.PresignGet(ctx, key, ttl)
+}
+
 func (c *CachedStore) Delete(ctx context.Context, key string) error {
 	if err := c.redis.Del(ctx, c.cacheFn(key)).Err(); err != nil && !errors.Is(err, redis.Nil) {
 		// Best-effort — Mongo is the source of truth for which key is

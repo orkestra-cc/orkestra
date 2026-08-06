@@ -1385,9 +1385,11 @@
       "colRole": "Ruolo",
       "colGranted": "Assegnato",
       "colExpires": "Scadenza",
+      "colActions": "Azioni",
       "expiresNever": "mai",
       "grantedByLine": "da {{actor}}",
       "revokeConfirm": "Revocare {{role}} a {{user}}?",
+      "revokeAria": "Revoca {{role}} a {{user}}",
       "toastRevoked": "Binding revocato",
       "toastRevokeFailed": "Revoca non riuscita: {{error}}",
       "errorUnknown": "errore sconosciuto",
@@ -1439,7 +1441,9 @@
       "overrideExplicit": "esplicito",
       "overrideInherits": "eredita globale",
       "noModules": "Nessun modulo registrato.",
-      "revert": "Ripristina"
+      "revert": "Ripristina",
+      "setAria": "Imposta il livello di log per {{module}}",
+      "revertAria": "Ripristina {{module}} al livello di log globale"
     }
   },
   "adminNavigation": {
@@ -1809,21 +1813,11 @@
       "enumNonePlaceholder": "—",
       "stringListPlaceholder": "valori,separati,da,virgola",
       "requiredFeedback": "Questo campo è obbligatorio.",
-      "durationFeedback": "Inserisci una durata valida (es. 30s, 5m, 1h).",
+      "minFeedback": "Il minimo è {{min}}",
+      "maxFeedback": "Il massimo è {{max}}",
+      "patternFeedback": "Il valore non corrisponde al formato richiesto",
+      "durationFeedback": "Usa una durata Go — es. 30s, 15m, 1h30m, 500ms",
       "envPrefix": "Env: "
-    },
-    "configModal": {
-      "moduleNameSuffix": "({{name}})",
-      "updateFailed": "Aggiornamento non riuscito",
-      "updatedToast": "Modulo aggiornato con successo",
-      "enabledLabel": "Abilitato",
-      "disabledLabel": "Disabilitato",
-      "coreLockHint": "I moduli core non possono essere disabilitati",
-      "initErrorPrefix": "Errore di init:",
-      "configHeading": "Configurazione",
-      "dependsOnPrefix": "Dipendenze:",
-      "cancel": "Annulla",
-      "save": "Salva modifiche"
     },
     "aiModelsSection": {
       "title": "Configurazione Provider AI",
@@ -1940,8 +1934,33 @@
         "saveChanges": "Salva modifiche",
         "unsavedTitle": "Modifiche non salvate",
         "unsavedBody": "Hai modifiche di configurazione non salvate. Vuoi davvero uscire?",
+        "switchEnvBody": "Hai modifiche di configurazione non salvate. Passando a {{environment}} andranno perse.",
+        "switchEnvConfirm": "Ignora e cambia",
         "stay": "Resta",
         "leave": "Esci"
+      },
+      "saveBar": {
+        "changes_one": "{{count}} modifica non salvata",
+        "changes_other": "{{count}} modifiche non salvate",
+        "perGroup": "{{group}} ({{count}})",
+        "errors_one": "{{count}} campo da correggere",
+        "errors_other": "{{count}} campi da correggere",
+        "goToError": "Vai a {{group}}"
+      },
+      "rail": {
+        "overview": "Panoramica",
+        "configuration": "Configurazione",
+        "module": "Modulo",
+        "dependencies": "Dipendenze",
+        "environments": "Ambienti",
+        "advancedToggle_one": "Avanzate ({{count}})",
+        "advancedToggle_other": "Avanzate ({{count}})",
+        "settingsCount_one": "{{count}} impostazione",
+        "settingsCount_other": "{{count}} impostazioni",
+        "incomplete": "{{count}} da compilare",
+        "emptyUntilDependency": "Queste impostazioni vengono visualizzate quando le opzioni da cui dipendono sono attivate.",
+        "emptyUntilDependencyIn": "Queste impostazioni vengono visualizzate quando le opzioni da cui dipendono sono attivate in {{group}}.",
+        "goToParent": "Vai a {{group}}"
       },
       "infraError": "errore: {{message}}",
       "infraRunning": "attivo",
@@ -1961,6 +1980,209 @@
       "saveFailed": "Impossibile salvare la configurazione. Riprova.",
       "config": "Configurazione",
       "noConfig": "Questo modulo non ha campi configurabili."
+    }
+  },
+  "moduleConfig": {
+    "auth": {
+      "groups": {
+        "registration": {
+          "label": "Registrazione",
+          "desc": "Chi può creare un account, sulla console operatore o sull'app client."
+        },
+        "login": {
+          "label": "Login e sessioni",
+          "desc": "Disponibilità dell'accesso, blocco account e durata dei token."
+        },
+        "password": {
+          "label": "Politica delle password",
+          "desc": "Regole applicate a ogni cambio password, sia sulla console operatore che sull'app client."
+        },
+        "mfa": {
+          "label": "MFA",
+          "desc": "Requisiti del secondo fattore e iscrizione."
+        },
+        "oauth": {
+          "label": "Provider OAuth",
+          "desc": "Quali provider sono offerti, sulla console operatore o sull'app client. Le credenziali di ciascun provider compaiono quando viene attivato.",
+          "google": { "label": "Google" },
+          "apple": { "label": "Apple" },
+          "github": { "label": "GitHub" },
+          "discord": { "label": "Discord" }
+        },
+        "antiabuse": {
+          "label": "Anti-abuso e notifiche",
+          "desc": "Limitazione della frequenza delle richieste, regole su IP e paese, e gli avvisi che generano."
+        },
+        "sessions": {
+          "label": "Sessioni e account"
+        }
+      },
+      "fields": {
+        "googleClientId": { "label": "Client ID" },
+        "googleClientSecret": { "label": "Client Secret" },
+        "googleRedirectURL": { "label": "Redirect URL" },
+        "googleAndroidClientId": { "label": "Client ID Android" },
+        "googleIOSClientId": { "label": "Client ID iOS" },
+        "appleClientId": { "label": "Client ID" },
+        "appleTeamId": { "label": "Team ID" },
+        "appleKeyId": { "label": "Key ID" },
+        "applePrivateKey": {
+          "label": "Chiave .p8 (PEM)",
+          "desc": "Contenuto PEM inline della chiave .p8 di Apple Sign-In"
+        },
+        "applePrivateKeyPath": {
+          "label": "Percorso chiave .p8",
+          "desc": "Percorso sul filesystem usato come fallback se il PEM non è inline"
+        },
+        "appleRedirectURL": { "label": "Redirect URL" },
+        "appleIOSClientId": { "label": "Client ID iOS" },
+        "appleAndroidClientId": { "label": "Client ID Android" },
+        "githubClientId": { "label": "Client ID" },
+        "githubClientSecret": { "label": "Client Secret" },
+        "githubRedirectURL": { "label": "Redirect URL" },
+        "discordClientId": { "label": "Client ID" },
+        "discordClientSecret": { "label": "Client Secret" },
+        "discordRedirectURL": { "label": "Redirect URL" },
+        "registrationEnabledAdmin": {
+          "label": "Consenti la registrazione sulla console operatore",
+          "desc": "Disattivato per impostazione predefinita. Se disattivato, POST /v1/auth/operator/register restituisce 403 — gli account operatore devono essere invitati o creati tramite /admin. Il super_admin attiva questa opzione per consentire la registrazione self-service degli operatori. Il primo account su un'installazione nuova ignora l'interruttore, così l'avvio iniziale non viene mai bloccato."
+        },
+        "registrationEnabledClient": {
+          "label": "Consenti la registrazione sull'app client",
+          "desc": "Disattivato per impostazione predefinita. Se disattivato, POST /v1/auth/client/register restituisce 403 — i client Tier-2 non possono autoregistrarsi finché il super_admin non lo abilita."
+        },
+        "defaultRoleClient": {
+          "label": "Ruolo predefinito per le nuove registrazioni client",
+          "desc": "Ruolo di sistema assegnato a un account client Tier-2 al momento della registrazione. Sono consigliati ruoli con privilegi minori."
+        },
+        "allowedEmailDomainsAdmin": {
+          "label": "Domini email consentiti (operatore)",
+          "desc": "Elenco separato da virgole di domini email consentiti (es. acme.com, ops.acme.com). Vuoto = qualsiasi dominio. Si applica solo a /v1/auth/operator/register."
+        },
+        "allowedEmailDomainsClient": {
+          "label": "Domini email consentiti (client)",
+          "desc": "Elenco separato da virgole di domini email consentiti, applicato solo a /v1/auth/client/register. Vuoto = qualsiasi dominio."
+        },
+        "loginEnabledAdmin": {
+          "label": "Consenti l'accesso sulla console operatore",
+          "desc": "Se disattivato, POST /v1/auth/operator/login restituisce 403. Utile durante la manutenzione per bloccare l'accesso alla console operatore senza spegnere il backend."
+        },
+        "loginEnabledClient": {
+          "label": "Consenti l'accesso sull'app client",
+          "desc": "Se disattivato, POST /v1/auth/client/login restituisce 403. Interessa solo /v1/auth/client/*."
+        },
+        "accountLockoutThreshold": {
+          "label": "Tentativi di accesso falliti prima del blocco",
+          "desc": "Numero di tentativi di accesso falliti (per IP e per email) prima che l'account venga bloccato temporaneamente. Predefinito 5."
+        },
+        "accountLockoutDuration": {
+          "label": "Durata del blocco",
+          "desc": "Stringa di durata Go (es. 15m, 1h) — per quanto tempo un IP/email resta bloccato dopo aver superato la soglia. Predefinito 15m."
+        },
+        "accessTokenTTL": {
+          "label": "Durata del token di accesso",
+          "desc": "Stringa di durata Go — per quanto tempo un token di accesso emesso resta valido. Più breve = maggiore sicurezza ma più cicli di refresh. Predefinito 15m."
+        },
+        "passwordResetTokenTTL": {
+          "label": "Durata del link di reset password",
+          "desc": "Stringa di durata Go — per quanto tempo il link nell'email di reset password resta valido. Predefinito 30m."
+        },
+        "mfaMethods": {
+          "label": "Metodi MFA consentiti",
+          "desc": "Elenco separato da virgole dei tipi di fattore che gli utenti possono iscrivere. Vuoto = tutti consentiti. Valori validi: totp, webauthn, backup_codes."
+        },
+        "passwordMinLength": {
+          "label": "Lunghezza minima",
+          "desc": "Numero minimo di caratteri di una nuova password. Predefinito 10. Consigliati 12 o più."
+        },
+        "passwordMaxLength": {
+          "label": "Lunghezza massima",
+          "desc": "Limite massimo alla lunghezza della password. Argon2id non è un collo di bottiglia; aumentalo solo se hai un motivo concreto."
+        },
+        "passwordRequireUpper": { "label": "Richiedi una lettera maiuscola" },
+        "passwordRequireLower": { "label": "Richiedi una lettera minuscola" },
+        "passwordRequireDigit": { "label": "Richiedi una cifra" },
+        "passwordRequireSymbol": {
+          "label": "Richiedi un simbolo",
+          "desc": "Qualsiasi carattere non alfanumerico."
+        },
+        "breachedPasswordCheck": {
+          "label": "Rifiuta password compromesse (HIBP)",
+          "desc": "Verifica k-anonymity su haveibeenpwned.com — solo i primi 5 caratteri dell'hash SHA-1 lasciano il server. Disattiva per installazioni air-gapped."
+        },
+        "googleEnabledAdmin": { "label": "Google sulla console operatore" },
+        "googleEnabledClient": { "label": "Google sull'app client" },
+        "appleEnabledAdmin": { "label": "Apple sulla console operatore" },
+        "appleEnabledClient": { "label": "Apple sull'app client" },
+        "githubEnabledAdmin": { "label": "GitHub sulla console operatore" },
+        "githubEnabledClient": { "label": "GitHub sull'app client" },
+        "discordEnabledAdmin": { "label": "Discord sulla console operatore" },
+        "discordEnabledClient": { "label": "Discord sull'app client" },
+        "mfaEnabled": {
+          "label": "Richiedi MFA per gli utenti privilegiati",
+          "desc": "Interruttore principale, disattivato per impostazione predefinita affinché il primo super_admin di un'installazione nuova possa configurare la piattaforma senza essere bloccato da una richiesta MFA per un fattore che non ha mai iscritto. Attivalo solo dopo aver iscritto un secondo fattore (TOTP/passkey) — altrimenti gli utenti privilegiati incontreranno la finestra di tolleranza per l'iscrizione al login successivo. Se disattivato, RoleRequiresMFA restituisce false; le iscrizioni esistenti non vengono eliminate e gli utenti possono comunque effettuare la verifica volontariamente."
+        },
+        "mfaEnrollmentGraceDays": {
+          "label": "Periodo di tolleranza per l'iscrizione (giorni)",
+          "desc": "Quanti giorni ha un utente appena promosso a un ruolo privilegiato per iscrivere un secondo fattore prima che il login restituisca 403 mfa_enrollment_required. Predefinito 7."
+        },
+        "notifyUserOnNewDeviceLogin": {
+          "label": "Invia email all'utente al primo accesso da un nuovo dispositivo",
+          "desc": "Se attivo, invia l'email transazionale auth.new_device_login la prima volta che un utente accede da una coppia (deviceId, userUUID) che il sistema non ha mai visto. Aiuta gli utenti a notare un accesso non autorizzato lo stesso giorno in cui avviene."
+        },
+        "notifyAdminOnSuspiciousLogin": {
+          "label": "Invia email agli amministratori per accessi ad alto rischio",
+          "desc": "Se attivo, ogni accesso ad alto rischio (punteggio di rischio ≥ 0.5) invia un'email a ciascun indirizzo nell'elenco destinatari sotto, in aggiunta alla notifica all'utente. Disattivato per impostazione predefinita — i destinatari devono prima essere configurati esplicitamente."
+        },
+        "suspiciousLoginRecipients": {
+          "label": "Destinatari amministratori per accessi sospetti",
+          "desc": "Elenco separato da virgole degli indirizzi email degli amministratori da notificare in caso di accessi ad alto rischio. Se vuoto, disattiva la parte di notifica agli amministratori indipendentemente dall'interruttore sopra."
+        },
+        "ipAllowlistAdmin": {
+          "label": "Elenco IP consentiti (console operatore)",
+          "desc": "Elenco separato da virgole di intervalli CIDR autorizzati a raggiungere l'host operatore. Vuoto = aperto a tutti. Si applica solo al traffico verso l'host operatore — l'API client non è interessata. Esempio: 10.0.0.0/8, 192.0.2.5/32."
+        },
+        "ipBlocklistAdmin": {
+          "label": "Elenco IP bloccati (console operatore)",
+          "desc": "Elenco separato da virgole di intervalli CIDR negati sull'host operatore. Valutato dopo l'elenco dei consentiti — una voce bloccata rifiuta la richiesta anche se corrisponde all'elenco dei consentiti."
+        },
+        "geoBlockCountries": {
+          "label": "Elenco paesi bloccati",
+          "desc": "Elenco separato da virgole di codici paese ISO-3166-1 alpha-2 (es. RU, KP) che non possono completare l'accesso su nessuno dei due livelli. Richiede il resolver GeoIP (AUTH_GEOIP_DB_PATH) — se vuoto, o se GeoIP è disattivato, non ha alcun effetto."
+        },
+        "inactiveAccountAutoDisableDays": {
+          "label": "Disattiva automaticamente gli account inattivi dopo (giorni)",
+          "desc": "Disattiva l'account di un utente quando il suo ultimo accesso è più vecchio del numero di giorni configurato. Il controllo avviene al momento del login, così un account inattivo viene respinto al tentativo successivo senza bisogno di un processo pianificato. 0 = disattivato."
+        },
+        "revokeSessionsOnPasswordChange": {
+          "label": "Revoca le sessioni al cambio password",
+          "desc": "Se attivo, una POST /v1/auth/{tier}/change-password riuscita revoca anche l'id di sessione corrente del chiamante e ogni concessione di fiducia del dispositivo per l'utente. Se disattivato, il cambio password lascia attive le sessioni esistenti (usato per migrazioni o rilasci graduali; non consigliato in condizioni normali). Predefinito attivo."
+        },
+        "selfServiceAccountDeletionClient": {
+          "label": "Consenti agli utenti client di eliminare autonomamente il proprio account (cancellazione GDPR)",
+          "desc": "Se attivo, gli utenti client Tier-2 possono chiamare POST /v1/me/dsr/erase per eliminare in modo irreversibile i propri dati personali (PII) presso ogni componente che li tratta. Se disattivato (predefinito), il livello client restituisce 403 self_service_deletion_disabled e la cancellazione deve essere avviata dalla console operatore. La cancellazione lato operatore non è interessata."
+        },
+        "oauthAllowSignupAdmin": {
+          "label": "Consenti registrazioni OAuth sulla console operatore",
+          "desc": "Se disattivato, i callback OAuth sull'host operatore che puntano a un'email sconosciuta restituiscono 403 invece di creare un nuovo account operatore. Gli utenti esistenti possono comunque accedere."
+        },
+        "oauthAllowSignupClient": {
+          "label": "Consenti registrazioni OAuth sull'app client",
+          "desc": "Se disattivato, i callback OAuth sull'host client che puntano a un'email sconosciuta restituiscono 403 invece di creare un nuovo account client."
+        },
+        "mfaRequiredForRoles": {
+          "label": "Ruoli che richiedono MFA",
+          "desc": "Elenco separato da virgole di nomi di ruolo che impongono un secondo fattore. Ruoli di sistema riconosciuti: super_admin, administrator, developer, manager, operator, guest. Ruoli di organizzazione riconosciuti: org_owner, org_admin, org_member. Se vuoto, ripristina il predefinito integrato (super_admin, administrator, org_owner, org_admin)."
+        },
+        "recoveryCodesCount": {
+          "label": "Codici di recupero emessi all'iscrizione",
+          "desc": "Numero di codici di backup a uso singolo generati quando un utente conferma l'iscrizione TOTP. Predefinito 10. Intervallo 1–50 — fuori da questo intervallo viene usato il valore predefinito legacy (10)."
+        },
+        "oauthAutoLinkByEmail": {
+          "label": "Collega automaticamente il provider OAuth a un account con email corrispondente",
+          "desc": "Se attivo (predefinito), un callback OAuth per un account Orkestra esistente (individuato tramite email) collega automaticamente il provider a quell'utente. Se disattivato, il flusso OAuth rifiuta con 403 oauth_link_disabled e l'utente deve avviare il collegamento dalle impostazioni del proprio account da autenticato. Consigliato disattivato per installazioni sensibili alla conformità."
+        }
+      }
     }
   },
   "setup": {
@@ -2040,6 +2262,8 @@
     "viewAll": "Mostra tutto",
     "viewLess": "Mostra meno",
     "rowsCount": "{{from}}-{{to}} di {{total}}",
-    "exportCsv": "Esporta CSV"
+    "exportCsv": "Esporta CSV",
+    "selectAllRows": "Seleziona tutte le righe",
+    "selectRow": "Seleziona riga"
   }
 }

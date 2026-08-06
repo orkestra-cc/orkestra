@@ -7,12 +7,12 @@ description: Enforces URL-synced tabs in React frontend. Every tab component mus
 
 **Rule: Every tab component MUST sync its active tab with URL search parameters.**
 
-Users must be able to share a URL that opens a specific tab. Local `useState` for tab selection is **forbidden** — always use `useSearchParams` from `react-router-dom`.
+Users must be able to share a URL that opens a specific tab. Local `useState` for tab selection is **forbidden** — always use `useSearchParams` from `react-router`.
 
 ## Required Pattern
 
 ```typescript
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router';
 import { Tabs, Tab } from 'react-bootstrap';
 
 const MyPage: React.FC = () => {

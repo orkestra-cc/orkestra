@@ -1,6 +1,6 @@
 import { useState, FormEvent } from 'react';
 import { Alert, Button, Form } from 'react-bootstrap';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router';
 import { useTranslation } from 'react-i18next';
 import { useGetAuthPolicyQuery, useRegisterMutation } from 'store/api/authApi';
 
@@ -137,7 +137,7 @@ const RegisterForm = () => {
           checked={accepted}
           onChange={e => setAccepted(e.target.checked)}
           label={
-            <span className="fs--1">
+            <span className="fs-10">
               {t('auth.terms.acceptPrefix')}{' '}
               <Link to="/terms">{t('auth.terms.termsLink')}</Link>{' '}
               {t('auth.terms.and')}{' '}

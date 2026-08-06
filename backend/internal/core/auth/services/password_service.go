@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"golang.org/x/crypto/argon2"
@@ -201,18 +202,23 @@ func checkCharacterClasses(plaintext string, pol PasswordPolicy) error {
 	var hasUpper, hasLower, hasDigit, hasSymbol bool
 	for _, r := range plaintext {
 		switch {
-		case r >= 'A' && r <= 'Z':
+		case unicode.IsUpper(r):
 			hasUpper = true
-		case r >= 'a' && r <= 'z':
+		case unicode.IsLower(r):
 			hasLower = true
-		case r >= '0' && r <= '9':
+		case unicode.IsDigit(r):
 			hasDigit = true
-		default:
-			// Anything that isn't a letter or digit counts as a
-			// symbol — we deliberately avoid pinning a specific
-			// allowlist so passphrase users with unusual punctuation
-			// still satisfy the requirement.
+		case unicode.IsPunct(r), unicode.IsSymbol(r):
+			// Deliberately no allowlist: passphrase users with unusual
+			// punctuation still satisfy the requirement.
 			hasSymbol = true
+		default:
+			// Whitespace and control runes count as nothing. The old
+			// code classified by ASCII range and put everything else in
+			// the "symbol" bucket, so a plain space satisfied
+			// requireSymbol and any non-ASCII letter (ПАРОЛЬ, passwörd)
+			// satisfied requireSymbol while satisfying neither
+			// requireUpper nor requireLower.
 		}
 	}
 	if pol.RequireUpper && !hasUpper {

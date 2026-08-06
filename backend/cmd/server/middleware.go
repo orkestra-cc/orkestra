@@ -33,14 +33,23 @@ func setupMiddleware(
 	audience string,
 	audCfg config.AudienceConfig,
 	logger *slog.Logger,
+	trustedProxies authMiddleware.TrustedProxyPolicy,
 ) {
 	// ADR-0005 §2 — structured request logger sits as outer as possible
 	// so CORS rejects, body-size rejects, and audience-mismatch rejects
 	// all produce a log line. RequestID + RealIP must run first so the
 	// logger can attach request_id and the real client IP; otherwise the
 	// logger has no way to learn them from r.
+	//
+	// RealIP is OURS, not chi's. chi's version trusts the leftmost
+	// X-Forwarded-For entry unconditionally, which lets any caller pick
+	// their own source address and thereby bypass the operator IP
+	// allow/blocklist, the login geo-block, and the per-IP rate limiter.
+	// Ours applies the deployment's trusted-proxy policy, rewrites
+	// RemoteAddr with the result, and strips the forwarding headers so
+	// nothing downstream can re-derive a spoofed value.
 	router.Use(chiMiddleware.RequestID)
-	router.Use(chiMiddleware.RealIP)
+	router.Use(authMiddleware.RealIP(trustedProxies))
 	logOpts := authMiddleware.NewRequestLoggerOptions()
 	logOpts.Metrics = metrics.Default()
 	logOpts.Audience = audience

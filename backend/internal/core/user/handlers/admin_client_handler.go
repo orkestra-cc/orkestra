@@ -278,6 +278,9 @@ func (h *AdminClientUserHandler) UpdateClientUserAdmin(ctx context.Context, req 
 		action := "user.activated"
 		if !*input.IsActive {
 			action = "user.deactivated"
+			// Same rule as the operator tier: revoking the right to be
+			// signed in has to end the sessions that right produced.
+			h.terminateSessions(ctx, req.ID)
 		}
 		h.emitAudit(ctx, iface.AuditEvent{
 			ActorUserID:  actorUUID,
@@ -332,6 +335,7 @@ func (h *AdminClientUserHandler) DeleteClientUserAdmin(ctx context.Context, req 
 		}
 		return nil, huma.Error500InternalServerError("Failed to delete client user", err)
 	}
+	h.terminateSessions(ctx, req.ID)
 	h.emitAudit(ctx, iface.AuditEvent{
 		ActorUserID:  actorUUID,
 		ActorEmail:   actorEmail,
@@ -585,4 +589,24 @@ func mapInviteErr(err error, generic string) error {
 		return huma.Error503ServiceUnavailable("Notifications disabled", err)
 	}
 	return huma.Error500InternalServerError(generic, err)
+}
+
+// terminateSessions best-effort evicts every session of a client user
+// whose access was just revoked (deactivate / delete). Resolves the
+// client-tier auth service so an operator-tier session is never touched
+// by a client-user lifecycle change. Silent on failure — see the
+// operator handler's counterpart for the rationale.
+func (h *AdminClientUserHandler) terminateSessions(ctx context.Context, userUUID string) {
+	if h.services == nil || userUUID == "" {
+		return
+	}
+	terminator, ok := module.GetTyped[iface.SessionTerminator](h.services, module.ServiceClientAuthService)
+	if !ok || terminator == nil {
+		return
+	}
+	if err := terminator.TerminateAllSessionsByUUID(ctx, userUUID); err != nil {
+		slog.WarnContext(ctx, "user: could not terminate client sessions after access revocation",
+			slog.String("user_uuid", userUUID),
+			slog.String("error", err.Error()))
+	}
 }

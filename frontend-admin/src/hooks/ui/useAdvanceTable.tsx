@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import {
   useReactTable,
   getCoreRowModel,
@@ -12,7 +13,42 @@ import {
   OnChangeFn,
   PaginationState
 } from '@tanstack/react-table';
+import { useTranslation } from 'react-i18next';
 import IndeterminateCheckbox from 'components/common/advance-table/IndeterminateCheckbox';
+
+// Rendered by flexRender as components, so hooks are legal here. The labels
+// are what a screen reader announces — without them every selection checkbox
+// is a bare "checkbox" (WCAG 4.1.2).
+const SelectAllRowsCheckbox = <T,>({ table }: { table: Table<T> }) => {
+  const { t } = useTranslation();
+  return (
+    <IndeterminateCheckbox
+      className="form-check mb-0"
+      aria-label={t('table.selectAllRows')}
+      {...{
+        checked: table.getIsAllRowsSelected(),
+        indeterminate: table.getIsSomeRowsSelected(),
+        onChange: table.getToggleAllRowsSelectedHandler()
+      }}
+    />
+  );
+};
+
+const SelectRowCheckbox = <T,>({ row }: { row: Row<T> }) => {
+  const { t } = useTranslation();
+  return (
+    <IndeterminateCheckbox
+      className="form-check mb-0"
+      aria-label={t('table.selectRow')}
+      {...{
+        checked: row.getIsSelected(),
+        disabled: !row.getCanSelect(),
+        indeterminate: row.getIsSomeSelected(),
+        onChange: row.getToggleSelectedHandler()
+      }}
+    />
+  );
+};
 
 const selectionColumn = <T,>(
   selectionColumnWidth?: string | number,
@@ -22,26 +58,9 @@ const selectionColumn = <T,>(
     id: 'selection',
     accessorKey: '',
     header: ({ table }: { table: Table<T> }) => (
-      <IndeterminateCheckbox
-        className="form-check mb-0"
-        {...{
-          checked: table.getIsAllRowsSelected(),
-          indeterminate: table.getIsSomeRowsSelected(),
-          onChange: table.getToggleAllRowsSelectedHandler()
-        }}
-      />
+      <SelectAllRowsCheckbox table={table} />
     ),
-    cell: ({ row }: { row: Row<T> }) => (
-      <IndeterminateCheckbox
-        className="form-check mb-0"
-        {...{
-          checked: row.getIsSelected(),
-          disabled: !row.getCanSelect(),
-          indeterminate: row.getIsSomeSelected(),
-          onChange: row.getToggleSelectedHandler()
-        }}
-      />
-    ),
+    cell: ({ row }: { row: Row<T> }) => <SelectRowCheckbox row={row} />,
     meta: {
       headerProps: {
         className: selectionHeaderClassname,
@@ -108,7 +127,16 @@ const useAdvanceTable = <T,>({
   onGlobalFilterChange
 }: UseAdvanceTableOptions<T>) => {
   const state: Partial<TableState> = {
-    pagination: { pageSize: pagination ? perPage : data.length, pageIndex: 0 },
+    // `pagination: false` means "one page containing every row". Derive the
+    // page size from a large, data-INDEPENDENT constant — NOT data.length.
+    // This object only seeds the one-time `initialState` below, so with async
+    // data (empty on the first render) `data.length` would lock pageSize at 0,
+    // and getPaginationRowModel() would then slice the table to 0 rows and
+    // never recover once the data arrives.
+    pagination: {
+      pageSize: pagination ? perPage : Number.MAX_SAFE_INTEGER,
+      pageIndex: 0
+    },
     columnFilters: [] as ColumnFiltersState,
     ...initialState
   };
@@ -157,6 +185,22 @@ const useAdvanceTable = <T,>({
     ...(onGlobalFilterChange ? { onGlobalFilterChange } : {}),
     ...(controlledState ? { state: controlledState } : {})
   });
+
+  // `autoResetPageIndex: false` above is deliberate — a sort or a filter must
+  // not yank the operator back to page 1. The cost is that the page index also
+  // survives rows being DELETED, so revoking the last row of the last page
+  // leaves pageIndex past the end and renders a blank table while rows remain.
+  // Clamp it back to the final page (0 when the set empties out). Server-side
+  // pagination is excluded: there the caller owns the page and the row count.
+  const resolvedPageCount = table.getPageCount();
+  const { pageIndex } = table.getState().pagination;
+  useEffect(() => {
+    if (manualPagination) return;
+    const lastPage = Math.max(0, resolvedPageCount - 1);
+    if (pageIndex > lastPage) {
+      table.setPageIndex(lastPage);
+    }
+  }, [manualPagination, resolvedPageCount, pageIndex, table]);
 
   return table;
 };

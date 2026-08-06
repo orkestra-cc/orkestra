@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Alert, Button, Card, Spinner } from 'react-bootstrap';
-import { Link, useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router';
 import { Trans, useTranslation } from 'react-i18next';
 import AuthCardLayout from 'layouts/AuthCardLayout';
 import {

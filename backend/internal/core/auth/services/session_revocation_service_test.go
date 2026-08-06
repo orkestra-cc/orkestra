@@ -15,13 +15,14 @@ import (
 // for missing keys so the service's "not found → not revoked" branch can
 // be exercised without a live Redis.
 type fakeRedisClient struct {
-	mu     sync.Mutex
-	data   map[string]string
-	getErr error
+	mu       sync.Mutex
+	data     map[string]string
+	counters map[string]int64
+	getErr   error
 }
 
 func newFakeRedisClient() *fakeRedisClient {
-	return &fakeRedisClient{data: map[string]string{}}
+	return &fakeRedisClient{data: map[string]string{}, counters: map[string]int64{}}
 }
 
 func (f *fakeRedisClient) Set(_ context.Context, key string, value interface{}, _ time.Duration) error {
@@ -146,3 +147,15 @@ func TestSessionRevocation_DefaultTTLFallback(t *testing.T) {
 		t.Fatal("revocation with default TTL must still be effective")
 	}
 }
+
+// Incr / Expire round out the RedisClient contract. This fake is only
+// used by revocation tests, which never touch the counter primitive.
+func (f *fakeRedisClient) Incr(_ context.Context, key string) (int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	n := f.counters[key] + 1
+	f.counters[key] = n
+	return n, nil
+}
+
+func (f *fakeRedisClient) Expire(context.Context, string, time.Duration) error { return nil }

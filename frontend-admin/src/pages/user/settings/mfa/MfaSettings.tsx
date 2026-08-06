@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { Badge, Button, Card, ListGroup, Spinner } from 'react-bootstrap';
+import { Button, Card, ListGroup, Spinner } from 'react-bootstrap';
+import SubtleBadge from 'components/common/SubtleBadge';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faShieldHalved, faKey } from '@fortawesome/free-solid-svg-icons';
 import { useTranslation } from 'react-i18next';
@@ -56,9 +57,9 @@ const MfaSettings = () => {
           ) : totpStatus ? (
             <div>
               <div className="d-flex align-items-center mb-2">
-                <Badge bg="success" className="me-2">
+                <SubtleBadge bg="success" className="me-2">
                   {t('userMfa.settings.totp.enabledBadge')}
-                </Badge>
+                </SubtleBadge>
                 <span className="text-muted fs-10">
                   {t('userMfa.settings.totp.enabledStatus', {
                     count: data?.backupCodesRemaining ?? 0
@@ -78,9 +79,9 @@ const MfaSettings = () => {
             </div>
           ) : totpPending ? (
             <div>
-              <Badge bg="warning" className="mb-2">
+              <SubtleBadge bg="warning" className="mb-2">
                 {t('userMfa.settings.totp.pendingBadge')}
-              </Badge>
+              </SubtleBadge>
               <p className="fs-10 text-muted mb-3">
                 {t('userMfa.settings.totp.pendingDescription')}
               </p>

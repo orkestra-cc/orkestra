@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
+	"github.com/go-chi/chi/v5"
 	"github.com/redis/go-redis/v9"
 	"go.mongodb.org/mongo-driver/mongo"
 )
@@ -189,5 +190,71 @@ func registerHealthEndpoints(api huma.API, db *mongo.Database, redisClient *redi
 				Ready: ready,
 			},
 		}, nil
+	})
+}
+
+// registerHealthProbes mounts /health and /ready as plain chi routes on the
+// given mux, mirroring the response bodies of the Huma health/readiness
+// operations (always HTTP 200; the payload carries the status).
+//
+// It exists because operatorAPI and clientAPI share a single OpenAPI document
+// (both built from the same huma.Config), and huma v2.39+ panics on a
+// duplicate operation ID. The Huma operations are therefore registered once,
+// on the operator API (which owns the shared document); the client host serves
+// the same probes through these raw routes so orchestrator probes can still
+// hit either host without re-registering the operations. The OpenAPI document
+// already documents /health and /ready via the operator registration.
+func registerHealthProbes(mux *chi.Mux, db *mongo.Database, redisClient *redis.Client) {
+	writeJSON := func(w http.ResponseWriter, status int, body any) {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(status)
+		_ = json.NewEncoder(w).Encode(body)
+	}
+
+	mux.Get("/health", func(w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+		defer cancel()
+
+		checks := map[string]string{}
+		if err := db.Client().Ping(ctx, nil); err != nil {
+			checks["mongodb"] = "down"
+		} else {
+			checks["mongodb"] = "up"
+		}
+		if err := redisClient.Ping(ctx).Err(); err != nil {
+			checks["redis"] = "down"
+		} else {
+			checks["redis"] = "up"
+		}
+
+		status := "healthy"
+		for _, c := range checks {
+			if c == "down" {
+				status = "unhealthy"
+				break
+			}
+		}
+
+		writeJSON(w, http.StatusOK, map[string]any{
+			"status":  status,
+			"time":    time.Now().UTC().Format(time.RFC3339),
+			"version": Version,
+			"checks":  checks,
+		})
+	})
+
+	mux.Get("/ready", func(w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+		defer cancel()
+
+		ready := true
+		if err := db.Client().Ping(ctx, nil); err != nil {
+			ready = false
+		}
+		if err := redisClient.Ping(ctx).Err(); err != nil {
+			ready = false
+		}
+
+		writeJSON(w, http.StatusOK, map[string]any{"ready": ready})
 	})
 }

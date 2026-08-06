@@ -1230,7 +1230,7 @@ func (s *authService) GenerateEnhancedTokenPair(ctx context.Context, user *iface
 		IPAddress:    ipAddress,
 		RiskScore:    0.1, // Low risk for OAuth
 		IssuedAt:     now,
-		ExpiresAt:    now.Add(7 * 24 * time.Hour), // 7 days
+		ExpiresAt:    now.Add(s.jwtService.RefreshTokenTTL()),
 		LastActivity: now,
 		IsRevoked:    false,
 		CreatedAt:    now,
@@ -1279,7 +1279,7 @@ func (s *authService) GenerateEnhancedTokenPair(ctx context.Context, user *iface
 		AccessToken:    accessToken,
 		RefreshToken:   refreshToken,
 		TokenType:      "Bearer",
-		ExpiresIn:      900, // 15 minutes
+		ExpiresIn:      int64(s.jwtService.AccessTokenTTL(ctx).Seconds()),
 		SessionID:      sessionID,
 		DeviceID:       deviceInfo.DeviceID,
 		User:           userResponse,
@@ -1341,6 +1341,16 @@ func (s *authService) RefreshTokensWithRiskAssessment(ctx context.Context, refre
 	}
 	user := convertUserModelToAuthModel(userModel)
 
+	// A deactivated account may not roll its session forward. Login
+	// already refuses inactive users, but an attacker holding a live
+	// refresh token never goes back through login — without this check,
+	// disabling an account (offboarding, compromise response, the
+	// inactiveAccountAutoDisableDays sweep) had no effect until the
+	// refresh row expired.
+	if !user.IsActive {
+		return nil, ErrInvalidRefreshToken
+	}
+
 	// 5. Mint new JWT tokens. The access token carries forward the caller's
 	// prior amr — they haven't completed a new factor, we're just rolling
 	// the session forward. (last_otp_at is not elevated either.)
@@ -1371,7 +1381,7 @@ func (s *authService) RefreshTokensWithRiskAssessment(ctx context.Context, refre
 		IPAddress:    nonEmpty(securityCtxIP(securityCtx), tokenDoc.IPAddress),
 		RiskScore:    tokenDoc.RiskScore,
 		IssuedAt:     now,
-		ExpiresAt:    now.Add(7 * 24 * time.Hour),
+		ExpiresAt:    now.Add(s.jwtService.RefreshTokenTTL()),
 		LastActivity: now,
 		IsRevoked:    false,
 		CreatedAt:    now,
@@ -1399,7 +1409,7 @@ func (s *authService) RefreshTokensWithRiskAssessment(ctx context.Context, refre
 		AccessToken:    newAccess,
 		RefreshToken:   newRefresh,
 		TokenType:      "Bearer",
-		ExpiresIn:      900,
+		ExpiresIn:      int64(s.jwtService.AccessTokenTTL(ctx).Seconds()),
 		SessionID:      newSessionID,
 		DeviceID:       tokenDoc.DeviceID,
 		User:           s.buildUserResponse(ctx, user),
@@ -1465,6 +1475,12 @@ func (s *authService) MintAccessTokenFromRefresh(ctx context.Context, refreshTok
 	}
 	user := convertUserModelToAuthModel(userModel)
 
+	// Same rule as the rotation path: a deactivated account gets no
+	// fresh access token, whichever endpoint asks.
+	if !user.IsActive {
+		return nil, ErrInvalidRefreshToken
+	}
+
 	access, err := s.jwtService.GenerateAccessTokenWithAMR(user, claims.AMR, claims.LastOTPAt)
 	if err != nil {
 		return nil, fmt.Errorf("failed to mint access token: %w", err)
@@ -1475,7 +1491,7 @@ func (s *authService) MintAccessTokenFromRefresh(ctx context.Context, refreshTok
 		AccessToken:    access,
 		RefreshToken:   "", // no rotation — caller's cookie stays authoritative
 		TokenType:      "Bearer",
-		ExpiresIn:      900,
+		ExpiresIn:      int64(s.jwtService.AccessTokenTTL(ctx).Seconds()),
 		SessionID:      doc.SessionUUID,
 		DeviceID:       doc.DeviceID,
 		User:           s.buildUserResponse(ctx, user),

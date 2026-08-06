@@ -27,10 +27,6 @@ type CookieOptions struct {
 
 // SetSecureCookie sets a secure HTTP cookie with recommended security settings
 func SetSecureCookie(w http.ResponseWriter, options *CookieOptions) {
-	fmt.Printf("[COOKIE_DEBUG] ==> SetSecureCookie called\n")
-	fmt.Printf("[COOKIE_DEBUG] Cookie options - Name: %s, Domain: %s, Path: %s, MaxAge: %d, Secure: %v, HttpOnly: %v\n",
-		options.Name, options.Domain, options.Path, options.MaxAge, options.Secure, options.HttpOnly)
-
 	cookie := &http.Cookie{
 		Name:     options.Name,
 		Value:    options.Value,
@@ -45,26 +41,16 @@ func SetSecureCookie(w http.ResponseWriter, options *CookieOptions) {
 	// Set default secure options if not specified
 	if options.Path == "" {
 		cookie.Path = "/"
-		fmt.Printf("[COOKIE_DEBUG] Path defaulted to: /\n")
 	}
 	if options.SameSite == 0 {
 		cookie.SameSite = http.SameSiteStrictMode
-		fmt.Printf("[COOKIE_DEBUG] SameSite defaulted to: StrictMode\n")
 	}
 
-	fmt.Printf("[COOKIE_DEBUG] Final cookie settings - Name: %s, Domain: %s, Path: %s, MaxAge: %d, Secure: %v, HttpOnly: %v, SameSite: %v\n",
-		cookie.Name, cookie.Domain, cookie.Path, cookie.MaxAge, cookie.Secure, cookie.HttpOnly, cookie.SameSite)
-
 	http.SetCookie(w, cookie)
-	fmt.Printf("[COOKIE_DEBUG] Cookie set successfully via http.SetCookie\n")
-	fmt.Printf("[COOKIE_DEBUG] <== SetSecureCookie completed\n")
 }
 
 // SetRefreshTokenCookie sets a secure refresh token cookie
 func SetRefreshTokenCookie(w http.ResponseWriter, cookieName, token string, maxAgeSeconds int, domain string, secure bool) {
-	fmt.Printf("[COOKIE_DEBUG] ==> SetRefreshTokenCookie called\n")
-	fmt.Printf("[COOKIE_DEBUG] RefreshToken parameters - Name: %s, Domain: %s, MaxAge: %d seconds, Secure: %v\n", cookieName, domain, maxAgeSeconds, secure)
-
 	SetSecureCookie(w, &CookieOptions{
 		Name:     cookieName, // Use configured cookie name from environment
 		Value:    token,
@@ -75,13 +61,10 @@ func SetRefreshTokenCookie(w http.ResponseWriter, cookieName, token string, maxA
 		HttpOnly: true,                 // Prevent XSS access
 		SameSite: http.SameSiteLaxMode, // Changed from Strict to Lax to allow OAuth redirects
 	})
-	fmt.Printf("[COOKIE_DEBUG] <== SetRefreshTokenCookie completed\n")
 }
 
 // ClearRefreshTokenCookie clears the refresh token cookie
 func ClearRefreshTokenCookie(w http.ResponseWriter, cookieName, domain string, secure bool) {
-	fmt.Printf("[COOKIE_DEBUG] ==> ClearRefreshTokenCookie called\n")
-	fmt.Printf("[COOKIE_DEBUG] Clear parameters - Name: %s, Domain: %s, Secure: %v\n", cookieName, domain, secure)
 
 	SetSecureCookie(w, &CookieOptions{
 		Name:     cookieName, // Use configured cookie name from environment
@@ -93,8 +76,6 @@ func ClearRefreshTokenCookie(w http.ResponseWriter, cookieName, domain string, s
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode, // Must match SameSite used when setting the cookie
 	})
-
-	fmt.Printf("[COOKIE_DEBUG] <== ClearRefreshTokenCookie completed\n")
 }
 
 // GetRefreshTokenFromCookie extracts refresh token from HTTP cookie using default name
@@ -218,43 +199,28 @@ func ExtractTokenFromRequest(r *http.Request) (string, error) {
 
 // Request parsing utilities
 
-// GetClientIP extracts the real client IP address from request
+// GetClientIP returns the caller's address.
+//
+// It reads r.RemoteAddr and NOTHING else. Interpreting forwarding
+// headers (X-Forwarded-For, X-Real-IP, CF-Connecting-IP, X-Client-IP) is
+// the exclusive job of shared/middleware.RealIP, which applies the
+// deployment's trusted-proxy policy and rewrites RemoteAddr with the
+// result before any handler runs.
+//
+// This function used to consult those headers itself, taking the first
+// value it found. Because any client can set them, that made the source
+// address of every request caller-controlled — which defeated the
+// operator IP allow/blocklist, the login geo-block, and the per-IP login
+// rate limiter, and let an attacker write arbitrary IPs into the audit
+// trail. Do not reintroduce header parsing here: a single chokepoint is
+// what makes the trusted-proxy policy enforceable.
 func GetClientIP(r *http.Request) string {
-	// Check X-Forwarded-For header (most common with load balancers)
-	forwarded := r.Header.Get("X-Forwarded-For")
-	if forwarded != "" {
-		// X-Forwarded-For can contain multiple IPs, use the first one
-		ips := strings.Split(forwarded, ",")
-		ip := strings.TrimSpace(ips[0])
-		if ip != "" && ip != "unknown" {
-			return ip
-		}
-	}
-
-	// Check X-Real-IP header (Nginx)
-	realIP := r.Header.Get("X-Real-IP")
-	if realIP != "" && realIP != "unknown" {
-		return realIP
-	}
-
-	// Check CF-Connecting-IP header (Cloudflare)
-	cfIP := r.Header.Get("CF-Connecting-IP")
-	if cfIP != "" {
-		return cfIP
-	}
-
-	// Check X-Client-IP header
-	clientIP := r.Header.Get("X-Client-IP")
-	if clientIP != "" && clientIP != "unknown" {
-		return clientIP
-	}
-
-	// Fallback to RemoteAddr
 	ip, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
-		return r.RemoteAddr
+		// RealIP rewrites RemoteAddr to a bare address (no port), so
+		// this is the normal path behind the middleware.
+		return strings.Trim(r.RemoteAddr, "[]")
 	}
-
 	return ip
 }
 

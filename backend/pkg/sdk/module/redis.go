@@ -22,4 +22,11 @@ type RedisClient interface {
 	Set(ctx context.Context, key string, value interface{}, expiration time.Duration) error
 	Del(ctx context.Context, keys ...string) error
 	Keys(ctx context.Context, pattern string) ([]string, error)
+	// Incr / Expire provide an atomic counter. Consumers that cap
+	// attempts (MFA challenge verification) need this: a read-modify-
+	// write over Get/Set loses concurrent increments, which turns a
+	// "5 tries" limit into "5 tries per serial attacker, unbounded for
+	// a parallel one".
+	Incr(ctx context.Context, key string) (int64, error)
+	Expire(ctx context.Context, key string, expiration time.Duration) error
 }

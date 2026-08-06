@@ -30,7 +30,7 @@ func TestSignOAuthStateTokenRoundtrip(t *testing.T) {
 			if err != nil {
 				t.Fatalf("GenerateOAuthCSRF: %v", err)
 			}
-			signed, err := SignOAuthStateToken(secret, tc.tier, csrf, 10*time.Minute)
+			signed, err := SignOAuthStateToken(secret, tc.tier, csrf, "console.test", 10*time.Minute)
 			if err != nil {
 				t.Fatalf("SignOAuthStateToken: %v", err)
 			}
@@ -66,7 +66,7 @@ func TestValidateOAuthStateTokenRejectsTamper(t *testing.T) {
 	secretB := []byte("secret-b-32-bytes-bbbbbbbbbbbbbbb")
 
 	csrf, _ := GenerateOAuthCSRF()
-	signed, err := SignOAuthStateToken(secretA, AudienceOperator, csrf, 10*time.Minute)
+	signed, err := SignOAuthStateToken(secretA, AudienceOperator, csrf, "console.test", 10*time.Minute)
 	if err != nil {
 		t.Fatalf("SignOAuthStateToken: %v", err)
 	}
@@ -89,7 +89,7 @@ func TestValidateOAuthStateTokenRejectsExpired(t *testing.T) {
 	// Tiny TTL that elapses before validation. Sub-second TTLs are
 	// not a real-world flow but they exercise the `exp` check
 	// without introducing a longer-running test.
-	signed, err := SignOAuthStateToken(secret, AudienceClient, csrf, 10*time.Millisecond)
+	signed, err := SignOAuthStateToken(secret, AudienceClient, csrf, "console.test", 10*time.Millisecond)
 	if err != nil {
 		t.Fatalf("SignOAuthStateToken: %v", err)
 	}

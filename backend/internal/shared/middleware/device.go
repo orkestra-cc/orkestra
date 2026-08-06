@@ -2,16 +2,41 @@ package middleware
 
 import (
 	"context"
-	"crypto/md5"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"fmt"
-	"net"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/orkestra/backend/internal/shared/errors"
 	"github.com/orkestra/backend/internal/shared/types"
+	"github.com/orkestra/backend/internal/shared/utils"
 )
+
+// DeviceIDCookieName carries the server-minted device identifier.
+//
+// Device identity must not be reproducible from the request. It used to
+// be MD5(User-Agent | IP | Accept-Language | Accept-Encoding | Accept)
+// for every browser — all caller-chosen inputs — so anyone replaying a
+// victim's header signature was, to this system, the victim's device.
+// That id keys the session documents, the refresh rows, the risk
+// scorer's new-device detection (which suppresses the "new device"
+// email and lowers the login risk score), and device-trust grants.
+//
+// It is now 32 bytes of crypto/rand handed back in an HttpOnly cookie:
+// unguessable, not settable by the caller, and stable for a real
+// browser. Native apps keep supplying their own installation id via
+// X-Device-ID.
+const DeviceIDCookieName = "orkestra_did"
+
+// deviceIDCookieMaxAge keeps a browser recognisable for a year. The
+// value is not a credential — it identifies a device, it does not
+// authenticate one — so a long lifetime is what makes new-device
+// detection meaningful rather than a permanent false positive.
+const deviceIDCookieMaxAge = 365 * 24 * 60 * 60
 
 // DeviceMiddleware extracts device information from HTTP requests
 type DeviceMiddleware struct {
@@ -29,9 +54,44 @@ func NewDeviceMiddleware(errorManager *errors.Manager) *DeviceMiddleware {
 func (m *DeviceMiddleware) ExtractDeviceInfo(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		deviceInfo := m.extractDeviceInfo(r)
+		// Mint the cookie only when this request had no device identity
+		// of its own; a returning browser or a native app carries one
+		// already and re-issuing would churn the id on every request.
+		if deviceInfo.DeviceID != "" && !hasDeviceIdentity(r) {
+			http.SetCookie(w, &http.Cookie{
+				Name:     DeviceIDCookieName,
+				Value:    deviceInfo.DeviceID,
+				Path:     "/",
+				MaxAge:   deviceIDCookieMaxAge,
+				HttpOnly: true,
+				Secure:   r.TLS != nil,
+				SameSite: http.SameSiteLaxMode,
+			})
+		}
 		ctx := context.WithValue(r.Context(), "deviceInfo", deviceInfo)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+// hasDeviceIdentity reports whether the caller already presented one.
+func hasDeviceIdentity(r *http.Request) bool {
+	if r.Header.Get("X-Device-ID") != "" {
+		return true
+	}
+	c, err := r.Cookie(DeviceIDCookieName)
+	return err == nil && c.Value != ""
+}
+
+// newDeviceID returns 32 bytes of crypto/rand as base64url. On the
+// (practically impossible) failure of the system RNG we return "" and
+// the caller degrades to an id-less request rather than falling back to
+// something guessable.
+func newDeviceID() string {
+	buf := make([]byte, 32)
+	if _, err := rand.Read(buf); err != nil {
+		return ""
+	}
+	return base64.RawURLEncoding.EncodeToString(buf)
 }
 
 // extractDeviceInfo extracts device information from the HTTP request
@@ -39,10 +99,11 @@ func (m *DeviceMiddleware) extractDeviceInfo(r *http.Request) *types.DeviceInfo 
 	userAgent := r.Header.Get("User-Agent")
 	ip := m.extractClientIP(r)
 
-	// Extract or generate device ID from headers
+	// Device id: caller-presented identity first, then a fresh random
+	// one. NEVER the header fingerprint — see DeviceIDCookieName.
 	deviceID := m.extractDeviceID(r)
 	if deviceID == "" {
-		deviceID = m.generateDeviceFingerprint(userAgent, ip, r)
+		deviceID = newDeviceID()
 	}
 
 	deviceType := m.detectDeviceType(userAgent)
@@ -59,59 +120,46 @@ func (m *DeviceMiddleware) extractDeviceInfo(r *http.Request) *types.DeviceInfo 
 	}
 }
 
-// extractDeviceID attempts to extract device ID from request headers
+// extractDeviceID returns the identity the caller presented, if any.
+//
+// The query-string source that used to sit here ("for OAuth flows") is
+// gone: a device id readable from a URL is a device id an attacker can
+// hand you in a link. The cookie is SameSite=Lax, so it survives the
+// top-level redirect back from the identity provider on its own.
 func (m *DeviceMiddleware) extractDeviceID(r *http.Request) string {
-	// Check for custom device ID header (sent by mobile apps)
+	// Native apps supply a stable installation id.
 	if deviceID := r.Header.Get("X-Device-ID"); deviceID != "" {
 		return deviceID
 	}
-
-	// Check for device ID in query parameters (for OAuth flows)
-	if deviceID := r.URL.Query().Get("device_id"); deviceID != "" {
-		return deviceID
+	// Browsers carry the server-minted cookie.
+	if c, err := r.Cookie(DeviceIDCookieName); err == nil && c.Value != "" {
+		return c.Value
 	}
-
 	return ""
 }
 
-// extractClientIP extracts the real client IP address
+// extractClientIP reads the address RealIP already resolved under the
+// deployment's trusted-proxy policy. Header parsing lives in exactly one
+// place (middleware/realip.go) so a spoofed X-Forwarded-For cannot reach
+// the device fingerprint, the risk score, or the audit trail.
 func (m *DeviceMiddleware) extractClientIP(r *http.Request) string {
-	// Check X-Forwarded-For header first (proxy/load balancer)
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		ips := strings.Split(xff, ",")
-		if len(ips) > 0 {
-			return strings.TrimSpace(ips[0])
-		}
-	}
-
-	// Check X-Real-IP header
-	if xri := r.Header.Get("X-Real-IP"); xri != "" {
-		return xri
-	}
-
-	// Fall back to remote address
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
-	}
-
-	return host
+	return utils.GetClientIP(r)
 }
 
-// generateDeviceFingerprint creates a unique fingerprint for the device
+// generateDeviceFingerprint summarises the browser signature.
+//
+// This is a RISK SIGNAL, not an identity. Every input is caller-chosen,
+// so a match means "looks like the same browser", never "is the same
+// device" — do not key a trust decision on it. SHA-256 rather than MD5:
+// the value is security-adjacent and MD5 has no place in new code.
 func (m *DeviceMiddleware) generateDeviceFingerprint(userAgent, ip string, r *http.Request) string {
-	// Collect fingerprinting data
-	acceptLanguage := r.Header.Get("Accept-Language")
-	acceptEncoding := r.Header.Get("Accept-Encoding")
-	accept := r.Header.Get("Accept")
-
-	// Create a fingerprint string
 	fingerprint := fmt.Sprintf("%s|%s|%s|%s|%s",
-		userAgent, ip, acceptLanguage, acceptEncoding, accept)
-
-	// Generate MD5 hash of the fingerprint
-	hash := md5.Sum([]byte(fingerprint))
-	return fmt.Sprintf("%x", hash)
+		userAgent, ip,
+		r.Header.Get("Accept-Language"),
+		r.Header.Get("Accept-Encoding"),
+		r.Header.Get("Accept"))
+	sum := sha256.Sum256([]byte(fingerprint))
+	return hex.EncodeToString(sum[:])
 }
 
 // detectDeviceType determines the device type from user agent

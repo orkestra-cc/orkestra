@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { Alert, Badge, Button, Form, Modal, Spinner } from 'react-bootstrap';
+import { Alert, Button, Form, Modal, Spinner } from 'react-bootstrap';
+import SubtleBadge from 'components/common/SubtleBadge';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { toast } from 'react-toastify';
 import { useTranslation } from 'react-i18next';
@@ -109,12 +110,14 @@ const EditRoleModal: React.FC<Props> = ({ tenantId, role, show, onHide }) => {
           {t('adminRoles.editModal.titlePrefix')}{' '}
           <code className="fs-9">{role.name}</code>
           {role.isSystem ? (
-            <Badge bg="secondary">
+            <SubtleBadge bg="secondary">
               <FontAwesomeIcon icon="lock" className="me-1" />
               {t('adminRoles.editModal.badgeSystem')}
-            </Badge>
+            </SubtleBadge>
           ) : (
-            <Badge bg="info">{t('adminRoles.editModal.badgeCustom')}</Badge>
+            <SubtleBadge bg="info">
+              {t('adminRoles.editModal.badgeCustom')}
+            </SubtleBadge>
           )}
         </Modal.Title>
       </Modal.Header>

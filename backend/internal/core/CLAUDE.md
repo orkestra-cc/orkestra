@@ -86,12 +86,15 @@ Constants live in `backend/pkg/sdk/module/services.go:13-32`. This is the table 
 | `ServicePasswordService` | auth | `*services.PasswordService` | argon2id hashing |
 | `ServicePasswordAuthService` | auth | `*services.PasswordAuthService` | consumed by setup wizard |
 | `ServiceSessionRevocation` | auth | `services.SessionRevocationService` | Redis-backed revoked-session set; consumed by middleware on every auth'd request |
+| `ServiceAuthService` / `ServiceClientAuthService` **as `iface.SessionTerminator`** | auth | `iface.SessionTerminator` | Consumed by the **user** module's deactivate / delete paths to end a revoked principal's sessions. Resolved *lazily at request time* — user initialises before auth, so it cannot be wired at Init. |
 | `ServiceMFAEnrollmentLookup` | auth | `middleware.MFAEnrollmentLookup` | Per-tier MFA-factor presence resolver; consumed by `RequireStepUp` to split step-up failures into MFA / password-reconfirm / enroll-first |
 | `ServiceOAuthProviderFactory` | auth | `*services.OAuthProviderFactory` | |
 | `ServiceOAuthStateService` | auth | `*services.OAuthStateService` | |
 | `ServiceOAuthProviderRepo` | auth | `*repository.OAuthProviderRepository` | |
 | `ServiceLogLevelModuleNames` | main.go (pre-`InitAll`) | `[]string` | catalog of registered module names; consumed by `logging` to render the admin view's per-module rows |
 | `ServiceLogLevelResolver` | logging | `*services.LogLevelService` (satisfies `utils.LevelResolver`) | DB-backed `LevelResolver`; main.go hot-swaps it onto `PerModuleLevelHandler` via `utils.SwapLevelResolver` after `InitAll` (ADR-0005 Phase F) |
+
+`module.RedisClient` (`pkg/sdk/module/redis.go`) carries `Incr` + `Expire` alongside Get/Set/Del/Keys. They exist because a read-modify-write counter over Get/Set silently loses concurrent increments — the MFA per-challenge attempt cap was built that way, which made "5 guesses" true only for a serial attacker. Any consumer capping attempts must use `Incr`, not Get/Set.
 
 Type-safe accessors: `module.GetTyped[T]` for optional lookups, `module.MustGetTyped[T]` for required ones (panics if missing — only use after the dependent module has already initialized).
 

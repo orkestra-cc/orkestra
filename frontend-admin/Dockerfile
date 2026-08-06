@@ -67,6 +67,14 @@ RUN echo 'server { \
     server_name localhost; \
     root /usr/share/nginx/html; \
     index index.html; \
+    add_header X-Frame-Options "SAMEORIGIN" always; \
+    add_header X-Content-Type-Options "nosniff" always; \
+    add_header X-XSS-Protection "0" always; \
+    location = /config.js { \
+        add_header Cache-Control "no-store" always; \
+        add_header X-Content-Type-Options "nosniff" always; \
+        try_files $uri =404; \
+    } \
     location / { \
         try_files $uri $uri/ /index.html; \
     } \

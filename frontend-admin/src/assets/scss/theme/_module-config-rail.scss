@@ -1,0 +1,27 @@
+/* -------------------------------------------------------------------------- */
+/*             Module Config Rail — settings navigation (Phase 4)             */
+/* -------------------------------------------------------------------------- */
+
+// ModuleConfigRail renders a bare <Nav> (no pills/tabs variant), and outside
+// those variants Bootstrap gives `.nav-link` the global link color and gives
+// `.active` no styling at all — every entry rendered primary blue with the
+// current one indistinguishable. Neutral entries + an explicit active state
+// restore the hierarchy; gray-* and primary-bg-subtle are re-declared by the
+// dark root block, so both themes are covered by the same rules.
+.module-config-rail {
+  .nav-link {
+    color: var(--#{$prefix}gray-700);
+    border-radius: var(--#{$prefix}border-radius);
+
+    &:hover,
+    &:focus {
+      color: var(--#{$prefix}gray-1100);
+    }
+
+    &.active {
+      color: var(--#{$prefix}primary);
+      background-color: var(--#{$prefix}primary-bg-subtle);
+      font-weight: $font-weight-medium;
+    }
+  }
+}

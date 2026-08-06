@@ -351,7 +351,7 @@ func (h *MFAHandler) Verify(ctx context.Context, req *MFAVerifyRequest) (*MFAVer
 	resp.Body.Success = true
 	resp.Body.AccessToken = token
 	resp.Body.TokenType = "Bearer"
-	resp.Body.ExpiresIn = 15 * 60 // mirrors jwtService.accessExpiry
+	resp.Body.ExpiresIn = int64(h.jwt.AccessTokenTTL(ctx).Seconds())
 	return resp, nil
 }
 
@@ -516,7 +516,8 @@ func (h *MFAHandler) LoginVerify(ctx context.Context, req *MFALoginVerifyRequest
 	}
 
 	resp := &MFALoginVerifyResponse{}
-	resp.SetCookie = buildRefreshCookie(h.cookieName, tokens.RefreshToken, h.cookieDomain, h.cookieSecure)
+	resp.SetCookie = buildRefreshCookie(h.cookieName, tokens.RefreshToken, h.cookieDomain, h.cookieSecure,
+		int(h.jwt.RefreshTokenTTL().Seconds()))
 	resp.Body.Success = true
 	resp.Body.AccessToken = tokens.AccessToken
 	resp.Body.TokenType = tokens.TokenType

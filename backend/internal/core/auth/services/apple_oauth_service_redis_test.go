@@ -251,3 +251,9 @@ func TestAppleOAuthService_CacheKeyPatterns(t *testing.T) {
 
 	t.Logf("✅ Cache key patterns test completed successfully")
 }
+
+// Incr / Expire complete the RedisClient contract; the Apple key-cache
+// tests never exercise the counter primitive.
+func (m *MockRedisClient) Incr(context.Context, string) (int64, error) { return 0, nil }
+
+func (m *MockRedisClient) Expire(context.Context, string, time.Duration) error { return nil }

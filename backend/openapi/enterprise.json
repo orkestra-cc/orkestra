@@ -1150,7 +1150,22 @@
       "ConfigField": {
         "additionalProperties": false,
         "properties": {
+          "advanced": {
+            "type": "boolean"
+          },
           "default": {
+            "type": "string"
+          },
+          "dependsOn": {
+            "items": {
+              "$ref": "#/components/schemas/FieldCondition"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "dependsOnMatch": {
             "type": "string"
           },
           "description": {
@@ -1162,11 +1177,22 @@
           "group": {
             "type": "string"
           },
+          "helpUrl": {
+            "type": "string"
+          },
           "key": {
             "type": "string"
           },
           "label": {
             "type": "string"
+          },
+          "max": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "min": {
+            "format": "int64",
+            "type": "integer"
           },
           "options": {
             "items": {
@@ -1176,6 +1202,12 @@
               "array",
               "null"
             ]
+          },
+          "pattern": {
+            "type": "string"
+          },
+          "placeholder": {
+            "type": "string"
           },
           "required": {
             "type": "boolean"
@@ -1189,6 +1221,35 @@
           "label",
           "type",
           "required"
+        ],
+        "type": "object"
+      },
+      "ConfigGroup": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "icon": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "order": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "parent": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "label"
         ],
         "type": "object"
       },
@@ -2038,6 +2099,28 @@
             "type": "string"
           }
         },
+        "type": "object"
+      },
+      "FieldCondition": {
+        "additionalProperties": false,
+        "properties": {
+          "in": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "key": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "in"
+        ],
         "type": "object"
       },
       "ForgotPasswordRequestBody": {
@@ -3414,6 +3497,15 @@
           },
           "category": {
             "type": "string"
+          },
+          "configGroups": {
+            "items": {
+              "$ref": "#/components/schemas/ConfigGroup"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
           },
           "configSchema": {
             "items": {
@@ -9554,7 +9646,6 @@
           },
           {
             "description": "Max rows to return (clamped to 500, default 100)",
-            "example": 100,
             "explode": false,
             "in": "query",
             "name": "limit",
@@ -9569,7 +9660,6 @@
           },
           {
             "description": "Pagination offset (default 0)",
-            "example": 0,
             "explode": false,
             "in": "query",
             "name": "offset",
@@ -9584,7 +9674,6 @@
           },
           {
             "description": "Restrict to events from the last N days (0 = unbounded)",
-            "example": 30,
             "explode": false,
             "in": "query",
             "name": "sinceDays",
@@ -10881,7 +10970,14 @@
                 }
               }
             },
-            "description": "OK"
+            "description": "OK",
+            "headers": {
+              "Set-Cookie": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "default": {
             "content": {
@@ -11920,7 +12016,14 @@
                 }
               }
             },
-            "description": "OK"
+            "description": "OK",
+            "headers": {
+              "Set-Cookie": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "default": {
             "content": {
@@ -12646,7 +12749,14 @@
                 }
               }
             },
-            "description": "OK"
+            "description": "OK",
+            "headers": {
+              "Set-Cookie": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "default": {
             "content": {

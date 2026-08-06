@@ -91,11 +91,9 @@ export default ({ mode }) => {
     base: process.env.VITE_PUBLIC_URL || '/',
     resolve: {
       extensions: ['.mjs', '.js', '.mts', '.ts', '.jsx', '.tsx', '.json'],
-      // react-router-dom v7 re-exports react-router but ships a separate
-      // dist; without dedupe Vite instantiates both as distinct modules,
-      // so a <MemoryRouter> from react-router and a <Routes> from
-      // react-router-dom won't share a Router context.
-      dedupe: ['react-router', 'react-router-dom'],
+      // Keep a single react-router instance so every Router context and
+      // hook resolves to the same module copy.
+      dedupe: ['react-router'],
       alias: {
         App: path.resolve(__dirname, './src/App'),
         components: path.resolve(__dirname, './src/components'),
@@ -236,11 +234,18 @@ export default ({ mode }) => {
       allowedHosts: (() => {
         const extra = (process.env.VITE_ALLOWED_HOSTS ?? '')
           .split(',')
-          .map((h) => h.trim())
+          .map(h => h.trim())
           .filter(Boolean);
         return extra.includes('*')
           ? true
-          : ['localhost', '127.0.0.1', '192.168.88.53', 'orkestra.cc', 'staging.orkestra.cc', ...extra];
+          : [
+              'localhost',
+              '127.0.0.1',
+              '192.168.88.53',
+              'orkestra.cc',
+              'staging.orkestra.cc',
+              ...extra
+            ];
       })(),
       hmr: process.env.VITE_HMR_HOST
         ? {

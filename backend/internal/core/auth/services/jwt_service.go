@@ -57,6 +57,17 @@ type JWTService interface {
 	// Called by the auth module after the tenant module has initialized.
 	SetTenantProvider(tp iface.TenantProvider)
 
+	// AccessTokenTTL is the lifetime a token minted right now would
+	// carry: the admin-managed accessTokenTTL when a policy is wired,
+	// otherwise the env-driven default. Callers report it to clients so
+	// the SPA schedules its refresh against the real expiry rather than
+	// a hardcoded guess.
+	AccessTokenTTL(ctx context.Context) time.Duration
+	// RefreshTokenTTL is the lifetime stamped on refresh tokens. The
+	// persisted refresh row must use the same value, or the row and its
+	// own JWT disagree about when the session ends.
+	RefreshTokenTTL() time.Duration
+
 	// SetPolicy wires the admin-managed AuthPolicyService so the access-
 	// token TTL is read live on every mint. Nil keeps the env-driven
 	// default. Phase 3.1 of the auth-policy roadmap.
@@ -95,6 +106,12 @@ func (s *jwtService) accessTokenLifetime(ctx context.Context) time.Duration {
 	}
 	return s.accessExpiry
 }
+
+func (s *jwtService) AccessTokenTTL(ctx context.Context) time.Duration {
+	return s.accessTokenLifetime(ctx)
+}
+
+func (s *jwtService) RefreshTokenTTL() time.Duration { return s.refreshExpiry }
 
 // NewJWTService builds a JWT issuer/validator with an environment-stamped
 // issuer claim. `env` is the deployment environment (e.g. "production",
@@ -154,6 +171,20 @@ const (
 	AudienceClient   = "client"
 	AudienceService  = "service"
 )
+
+// isIssuedAudience reports whether aud is one of the values this
+// platform stamps on a token. Exact match — no case folding, no
+// trimming: every minter writes one of the constants verbatim, so
+// anything else is either a forgery attempt or a bug, and both deserve
+// a rejection.
+func isIssuedAudience(aud string) bool {
+	switch aud {
+	case AudienceOperator, AudienceClient, AudienceService:
+		return true
+	default:
+		return false
+	}
+}
 
 // LegacyAudienceOperator preserves the pre-PR-D constant name for any
 // remaining external callers; new code should use AudienceOperator.
@@ -404,14 +435,26 @@ func (s *jwtService) validateTokenEnhanced(tokenString string, expectedType stri
 	}
 
 	// ADR-0003 PR-D D-3: aud is mandatory post-cutover. v1 tokens (no
-	// `aud` claim) are rejected here; the host-mux RequireAudience
-	// middleware also blocks them at an earlier stage but defense in
-	// depth at validation time keeps the contract explicit for any
-	// caller that bypasses the audience MW (sidecar internal calls,
-	// future test paths).
+	// `aud` claim) are rejected here, and so is any audience this
+	// platform does not issue — the check used to accept ANY non-empty
+	// string, which made the "defense in depth" this comment promises
+	// purely nominal.
+	//
+	// Note what is deliberately NOT done: pinning aud to s.audience.
+	// A single AuthMiddleware holding a single JWT service guards BOTH
+	// the operator and the client mux (cmd/server/main.go), so equality
+	// with the minting audience would lock one entire tier out. Pinning
+	// a request to its surface is the job of the mux-level
+	// RequireAudience gate, which is non-skippable because it is mounted
+	// with router.Use on each audience mux. This check is the narrower
+	// one it can safely make: the token names an audience we actually
+	// mint.
 	aud, _ := mapClaims["aud"].(string)
 	if aud == "" {
 		return nil, ErrMissingAudience
+	}
+	if !isIssuedAudience(aud) {
+		return nil, ErrInvalidToken
 	}
 
 	claims := s.mapToClaims(mapClaims)

@@ -1,0 +1,29 @@
+/* -------------------------------------------------------------------------- */
+/*                Module Save Bar — cross-group save model (Phase 3)          */
+/* -------------------------------------------------------------------------- */
+
+// One react-hook-form instance now spans the whole module config surface —
+// the rail only picks which slice is *rendered*, edits in every group stay
+// live in the same form. This bar is the single save/discard affordance for
+// all of it, pinned to the bottom of the config surface so it stays reachable
+// while the operator scrolls a long settings list or switches rail groups.
+.module-save-bar {
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+  // `--orkestra-card-bg` is only ever declared inside `.card`, but
+  // detail/index.tsx's full-page rail layout renders this bar as a direct
+  // child of a bare <Col>, where that variable never resolves — and the
+  // body-bg fallback painted a gray band over the white card the bar
+  // actually sticks over in light mode. `--orkestra-emphasis-bg` is declared
+  // at :root in BOTH themes with the card surface's exact value ($white in
+  // light, $card-bg-dark in dark), so the bar matches the card content it
+  // overlays regardless of whether it sits inside a Card.Body or not.
+  background-color: var(--#{$prefix}emphasis-bg);
+  border-top: var(--#{$prefix}border-width) solid var(--#{$prefix}border-color);
+  // No box-shadow: Bootstrap's `$box-shadow` is a *downward* shadow
+  // (`0 .5rem 1rem`) — invisible on a bar pinned to the bottom of the
+  // viewport, and it would only double up on the shadow the enclosing
+  // `.card` already casts. The border-top alone is enough separation from
+  // the scrolling content above it.
+}

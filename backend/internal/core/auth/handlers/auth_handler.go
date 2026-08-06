@@ -207,6 +207,45 @@ func currentSessionID(ctx context.Context) string {
 	return sid
 }
 
+// resolveLogoutIdentity determines which user a logout request acts on.
+//
+// The logout route is mounted on the PUBLIC router (module.go →
+// ri.Router) so no auth middleware ever runs ahead of it: an
+// authenticated caller carries the identity in the request context, and
+// everyone else is identified from the refresh cookie alone. Returns
+// ok=false when neither source yields an identity — the handler then
+// clears the cookie and reports success (logout is idempotent).
+func (h *AuthHandler) resolveLogoutIdentity(ctx context.Context, r *http.Request) (userUUID, deviceID string, ok bool) {
+	if uuid, found := ctxauth.GetUserUUID(ctx); found && uuid != "" {
+		userUUID = uuid
+	} else if legacy, _ := ctx.Value("userID").(string); legacy != "" {
+		userUUID = legacy
+	}
+
+	refreshToken, err := utils.GetRefreshTokenFromCookieByName(r, h.config.Auth.Cookie.Name)
+	if err != nil || refreshToken == "" {
+		return userUUID, "", userUUID != ""
+	}
+
+	// SIGNATURE VERIFICATION IS LOAD-BEARING HERE. This route is public,
+	// so the cookie is the only thing standing between an anonymous
+	// caller and TerminateAllSessionsByUUID. ParseUnverifiedClaims —
+	// which the audience gate uses for cheap routing ahead of a real
+	// verifier — must never be used on this path: it would let anyone
+	// hand-roll a JWT naming any userUUID and sign every session of that
+	// user out. ValidateRefreshToken checks the RS256 signature, the
+	// issuer, the audience claim, and that the token really is a refresh
+	// token (an access token in the cookie slot is rejected).
+	claims, err := h.jwtService.ValidateRefreshToken(refreshToken)
+	if err != nil || claims == nil {
+		return userUUID, "", userUUID != ""
+	}
+	if userUUID == "" {
+		userUUID = claims.UserUUID
+	}
+	return userUUID, claims.DeviceID, userUUID != ""
+}
+
 // oauthSignupDisabled is a thin errors.Is wrapper kept inline so each
 // provider's callback can branch on the policy outcome without
 // duplicating the import. Phase 9 of the auth-policy roadmap.
@@ -333,7 +372,12 @@ type OAuthLoginRequest struct {
 
 // OAuth Login Response
 type OAuthLoginResponse struct {
-	Body struct {
+	// SetCookie drops the per-flow CSRF nonce in an HttpOnly cookie so
+	// the callback can prove the flow is being completed by the browser
+	// that started it. Without it the state alone is transferable and a
+	// third party can hand a victim a ready-made authorize URL.
+	SetCookie string `header:"Set-Cookie"`
+	Body      struct {
 		AuthURL string `json:"authUrl" doc:"URL to redirect the user for OAuth authentication"`
 		State   string `json:"state" doc:"OAuth state parameter for security"`
 	}
@@ -399,7 +443,7 @@ func (h *AuthHandler) InitiateOAuthLogin(ctx context.Context, req *OAuthLoginReq
 		logger.Error("Failed to generate OAuth CSRF nonce", slog.String("error", err.Error()))
 		return nil, huma.Error500InternalServerError("Failed to create OAuth state", err)
 	}
-	signedState, err := services.SignOAuthStateToken(h.stateSecret, h.tier, csrf, 10*time.Minute)
+	signedState, err := services.SignOAuthStateToken(h.stateSecret, h.tier, csrf, requestHost(ctx), oauthStateTTL)
 	if err != nil {
 		logger.Error("Failed to sign OAuth state", slog.String("error", err.Error()))
 		return nil, huma.Error500InternalServerError("Failed to create OAuth state", err)
@@ -434,6 +478,7 @@ func (h *AuthHandler) InitiateOAuthLogin(ctx context.Context, req *OAuthLoginReq
 	authURL := provider.GetAuthURL(signedState, "", backendCallbackURL)
 
 	return &OAuthLoginResponse{
+		SetCookie: buildOAuthStateCookie(csrf, h.config.Auth.Cookie.Secure),
 		Body: struct {
 			AuthURL string `json:"authUrl" doc:"URL to redirect the user for OAuth authentication"`
 			State   string `json:"state" doc:"OAuth state parameter for security"`
@@ -501,7 +546,7 @@ func (h *AuthHandler) InitiateOAuthLink(ctx context.Context, req *OAuthLinkReque
 		logger.Error("Failed to generate OAuth CSRF nonce", slog.String("error", err.Error()))
 		return nil, huma.Error500InternalServerError("Failed to create OAuth state", err)
 	}
-	signedState, err := services.SignOAuthLinkStateToken(h.stateSecret, h.tier, csrf, userUUID, 10*time.Minute)
+	signedState, err := services.SignOAuthLinkStateToken(h.stateSecret, h.tier, csrf, userUUID, requestHost(ctx), oauthStateTTL)
 	if err != nil {
 		logger.Error("Failed to sign OAuth link state", slog.String("error", err.Error()))
 		return nil, huma.Error500InternalServerError("Failed to create OAuth state", err)
@@ -533,6 +578,7 @@ func (h *AuthHandler) InitiateOAuthLink(ctx context.Context, req *OAuthLinkReque
 	authURL := providerSvc.GetAuthURL(signedState, "", backendCallbackURL)
 
 	return &OAuthLoginResponse{
+		SetCookie: buildOAuthStateCookie(csrf, h.config.Auth.Cookie.Secure),
 		Body: struct {
 			AuthURL string `json:"authUrl" doc:"URL to redirect the user for OAuth authentication"`
 			State   string `json:"state" doc:"OAuth state parameter for security"`
@@ -745,6 +791,18 @@ func (h *AuthHandler) resolveStateForCallback(ctx context.Context, raw string) (
 	if err != nil {
 		return nil, nil, fmt.Errorf("invalid OAuth state: %w", err)
 	}
+	// Bind the flow to the browser that started it. A valid signature
+	// only proves WE minted this state; without the cookie check an
+	// attacker can start a flow and have a victim finish it, which lands
+	// the victim in the attacker's session (or, in link mode, binds the
+	// victim's provider identity to the attacker's account).
+	if r, ok := ctx.Value("http_request").(*http.Request); ok && r != nil {
+		if err := verifyOAuthStateBinding(r, claims); err != nil {
+			return nil, nil, err
+		}
+	} else {
+		return nil, nil, fmt.Errorf("%w: no request available to verify against", ErrOAuthStateNotBound)
+	}
 	stateInfo, err := h.oauthStateService.ValidateOAuthState(ctx, claims.CSRF)
 	if err != nil {
 		return nil, nil, fmt.Errorf("OAuth state not found or expired: %w", err)
@@ -822,6 +880,10 @@ func (h *AuthHandler) HandleGoogleCallbackHTTP(w http.ResponseWriter, r *http.Re
 		http.Error(w, "Invalid OAuth state", http.StatusBadRequest)
 		return
 	}
+	// The flow is resolved; evict the nonce so a replayed callback URL
+	// cannot ride the same cookie. (The Redis row is one-shot already —
+	// this keeps the browser tidy.)
+	w.Header().Add("Set-Cookie", clearOAuthStateCookie(h.config.Auth.Cookie.Secure))
 	target := h.dispatchTarget(claims.Tier)
 
 	// Create Google OAuth provider from live admin-panel config.
@@ -906,7 +968,7 @@ func (h *AuthHandler) HandleGoogleCallbackHTTP(w http.ResponseWriter, r *http.Re
 
 	// Set only refresh token in cookie (7 days expiry)
 	// Access token will be sent in the redirect URL for the client to store
-	utils.SetRefreshTokenCookie(w, cookieName, tokenResponse.RefreshToken, 7*24*3600, cookieDomain, isSecure) // 7 days for refresh token
+	utils.SetRefreshTokenCookie(w, cookieName, tokenResponse.RefreshToken, refreshCookieMaxAge(h.jwtService), cookieDomain, isSecure)
 
 	// Redirect to frontend without access token (refresh token is in cookie, access token will be fetched via /auth/session)
 	frontendURL := target.config.Server.FrontendURL
@@ -937,6 +999,10 @@ func (h *AuthHandler) HandleDiscordCallbackHTTP(w http.ResponseWriter, r *http.R
 		http.Error(w, "Invalid OAuth state", http.StatusBadRequest)
 		return
 	}
+	// The flow is resolved; evict the nonce so a replayed callback URL
+	// cannot ride the same cookie. (The Redis row is one-shot already —
+	// this keeps the browser tidy.)
+	w.Header().Add("Set-Cookie", clearOAuthStateCookie(h.config.Auth.Cookie.Secure))
 	target := h.dispatchTarget(claims.Tier)
 
 	// Create Discord OAuth provider from live admin-panel config.
@@ -1005,7 +1071,7 @@ func (h *AuthHandler) HandleDiscordCallbackHTTP(w http.ResponseWriter, r *http.R
 
 	// Set only refresh token in cookie (7 days expiry)
 	// Access token will be sent in the redirect URL for the client to store
-	utils.SetRefreshTokenCookie(w, cookieName, authTokenResponse.RefreshToken, 7*24*3600, cookieDomain, isSecure) // 7 days for refresh token
+	utils.SetRefreshTokenCookie(w, cookieName, authTokenResponse.RefreshToken, refreshCookieMaxAge(h.jwtService), cookieDomain, isSecure)
 
 	// Redirect to frontend without access token (refresh token is in cookie, access token will be fetched via /auth/session)
 	frontendURL := target.config.Server.FrontendURL
@@ -1175,7 +1241,7 @@ func (h *AuthHandler) HandleAppleCallbackHTTP(w http.ResponseWriter, r *http.Req
 
 	// Set only refresh token in cookie (7 days expiry)
 	// Access token will be sent in the redirect URL for the client to store
-	utils.SetRefreshTokenCookie(w, cookieName, tokenResponse.RefreshToken, 7*24*3600, cookieDomain, isSecure) // 7 days for refresh token
+	utils.SetRefreshTokenCookie(w, cookieName, tokenResponse.RefreshToken, refreshCookieMaxAge(h.jwtService), cookieDomain, isSecure)
 
 	// Redirect to frontend without access token (refresh token is in cookie, access token will be fetched via /auth/session)
 	frontendURL := target.config.Server.FrontendURL
@@ -1483,7 +1549,7 @@ func (h *AuthHandler) RefreshTokensWithHeaderHTTP(w http.ResponseWriter, r *http
 	if tokenSource == "cookie" {
 		cookieDomain := h.cookieDomain
 		isSecure := h.config.Auth.Cookie.Secure
-		utils.SetRefreshTokenCookie(w, cookieName, tokenResponse.RefreshToken, 7*24*3600, cookieDomain, isSecure) // 7 days
+		utils.SetRefreshTokenCookie(w, cookieName, tokenResponse.RefreshToken, refreshCookieMaxAge(h.jwtService), cookieDomain, isSecure)
 		if len(candidates) > 1 {
 			h.clearStaleParentDomainCookies(w, cookieName)
 		}
@@ -2008,7 +2074,7 @@ func (h *AuthHandler) RefreshTokensHTTP(w http.ResponseWriter, r *http.Request) 
 	if tokenSource == "cookie" {
 		cookieDomain := h.cookieDomain
 		isSecure := h.config.Auth.Cookie.Secure
-		utils.SetRefreshTokenCookie(w, cookieName, tokenResponse.RefreshToken, 7*24*3600, cookieDomain, isSecure) // 7 days
+		utils.SetRefreshTokenCookie(w, cookieName, tokenResponse.RefreshToken, refreshCookieMaxAge(h.jwtService), cookieDomain, isSecure)
 		if len(candidates) > 1 {
 			h.clearStaleParentDomainCookies(w, cookieName)
 		}
@@ -2037,72 +2103,35 @@ type LogoutResponse struct {
 	}
 }
 
-// LogoutHTTP handles user logout with proper cookie clearing (raw HTTP handler)
+// LogoutHTTP handles user logout with proper cookie clearing (raw HTTP handler).
+//
+// Mounted on the PUBLIC router, so identity comes from
+// resolveLogoutIdentity — which requires a signature-verified refresh
+// cookie whenever the request context is anonymous. An unresolvable
+// request still clears the cookie and reports success: logout is
+// idempotent and must not double as an account-existence oracle.
 func (h *AuthHandler) LogoutHTTP(w http.ResponseWriter, r *http.Request) {
 	logger := slog.Default()
 	ctx := r.Context()
 
-	// Try to get user UUID from context first (if authenticated via middleware)
-	userUUIDVal := ctx.Value("userUUID")
-	if userUUIDVal == nil {
-		// Fallback to userID for backward compatibility
-		userUUIDVal = ctx.Value("userID")
+	cookieName := h.config.Auth.Cookie.Name
+	respondLoggedOut := func() {
+		utils.ClearRefreshTokenCookie(w, cookieName, h.cookieDomain, h.config.Auth.Cookie.Secure)
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(struct {
+			Success bool   `json:"success"`
+			Message string `json:"message"`
+		}{Success: true, Message: "Successfully logged out"}); err != nil {
+			logger.Error("Failed to encode response", slog.String("error", err.Error()))
+		}
 	}
 
-	var userUUID string
-	var ok bool
-
-	// If no user context (likely because auth middleware failed), try to extract from refresh token
-	if userUUIDVal == nil {
-		cookieName := h.config.Auth.Cookie.Name
-		refreshToken, err := utils.GetRefreshTokenFromCookieByName(r, cookieName)
-		if err != nil || refreshToken == "" {
-			// Still clear the cookie even if we can't find it
-			cookieDomain := h.cookieDomain
-			isSecure := h.config.Auth.Cookie.Secure
-			utils.ClearRefreshTokenCookie(w, cookieName, cookieDomain, isSecure)
-
-			// Return success - user is effectively logged out
-			w.Header().Set("Content-Type", "application/json")
-			response := struct {
-				Success bool   `json:"success"`
-				Message string `json:"message"`
-			}{
-				Success: true,
-				Message: "Successfully logged out",
-			}
-			json.NewEncoder(w).Encode(response)
-			return
-		}
-
-		// Parse refresh token to get user UUID
-		refreshClaims, err := h.jwtService.ParseUnverifiedClaims(refreshToken)
-		if err != nil || refreshClaims.UserUUID == "" {
-			// Still clear the cookie
-			cookieDomain := h.cookieDomain
-			isSecure := h.config.Auth.Cookie.Secure
-			utils.ClearRefreshTokenCookie(w, cookieName, cookieDomain, isSecure)
-
-			// Return success
-			w.Header().Set("Content-Type", "application/json")
-			response := struct {
-				Success bool   `json:"success"`
-				Message string `json:"message"`
-			}{
-				Success: true,
-				Message: "Successfully logged out",
-			}
-			json.NewEncoder(w).Encode(response)
-			return
-		}
-
-		userUUID = refreshClaims.UserUUID
-	} else {
-		userUUID, ok = userUUIDVal.(string)
-		if !ok {
-			http.Error(w, "Unauthorized", http.StatusUnauthorized)
-			return
-		}
+	userUUID, deviceID, ok := h.resolveLogoutIdentity(ctx, r)
+	if !ok {
+		// No authenticated context and no verifiable refresh cookie —
+		// there is nothing we may act on. Clear and report success.
+		respondLoggedOut()
+		return
 	}
 
 	// Parse request body for logout options
@@ -2111,11 +2140,9 @@ func (h *AuthHandler) LogoutHTTP(w http.ResponseWriter, r *http.Request) {
 		json.NewDecoder(r.Body).Decode(&req) // Ignore errors, use defaults
 	}
 
-	// Get refresh token from cookie to terminate specific session
-	cookieName := h.config.Auth.Cookie.Name
-	refreshToken, _ := utils.GetRefreshTokenFromCookieByName(r, cookieName)
-
-	// Terminate sessions based on request
+	// Terminate sessions based on request. The deviceID comes from the
+	// verified cookie claims — never from the request body, which no
+	// client populates and which carries no proof of ownership.
 	if req.AllDevices {
 		err := h.authService.TerminateAllSessionsByUUID(ctx, userUUID)
 		if err != nil {
@@ -2123,20 +2150,11 @@ func (h *AuthHandler) LogoutHTTP(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Failed to logout", http.StatusInternalServerError)
 			return
 		}
-	} else {
-		// Terminate current session based on refresh token or device ID
-		if refreshToken != "" {
-			// Parse refresh token to get device ID
-			refreshClaims, err := h.jwtService.ParseUnverifiedClaims(refreshToken)
-			if err == nil && refreshClaims.DeviceID != "" {
-				h.authService.TerminateSessionByUUID(ctx, userUUID, refreshClaims.DeviceID)
-			}
-		} else if req.RefreshToken != "" {
-			// Use refresh token from request body if provided
-			refreshClaims, err := h.jwtService.ParseUnverifiedClaims(req.RefreshToken)
-			if err == nil && refreshClaims.DeviceID != "" {
-				h.authService.TerminateSessionByUUID(ctx, userUUID, refreshClaims.DeviceID)
-			}
+	} else if deviceID != "" {
+		if err := h.authService.TerminateSessionByUUID(ctx, userUUID, deviceID); err != nil {
+			logger.Warn("Failed to terminate session",
+				slog.String("userUUID", userUUID),
+				slog.String("error", err.Error()))
 		}
 	}
 
@@ -2155,32 +2173,20 @@ func (h *AuthHandler) LogoutHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Clear the refresh token cookie
-	cookieDomain := h.cookieDomain
-	isSecure := h.config.Auth.Cookie.Secure
-	utils.ClearRefreshTokenCookie(w, cookieName, cookieDomain, isSecure)
-
-	// Return success response
-	w.Header().Set("Content-Type", "application/json")
-	response := struct {
-		Success bool   `json:"success"`
-		Message string `json:"message"`
-	}{
-		Success: true,
-		Message: "Successfully logged out",
-	}
-
-	if err := json.NewEncoder(w).Encode(response); err != nil {
-		logger.Error("Failed to encode response", slog.String("error", err.Error()))
-		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
-		return
-	}
+	respondLoggedOut()
 }
 
-// Logout handles user logout (Huma handler - deprecated, use LogoutHTTP instead)
+// Logout handles user logout (Huma handler - deprecated, use LogoutHTTP instead).
+//
+// Currently mounted nowhere. Kept signature-verifying anyway so that
+// wiring it up later can never reintroduce the unverified-claims hole
+// that LogoutHTTP had.
 func (h *AuthHandler) Logout(ctx context.Context, req *LogoutRequest) (*LogoutResponse, error) {
 	// Get user from context
-	userUUID := ctx.Value("userUUID").(string)
+	userUUID, _ := ctxauth.GetUserUUID(ctx)
+	if userUUID == "" {
+		return nil, huma.Error401Unauthorized("authentication required")
+	}
 
 	if req.AllDevices {
 		err := h.authService.TerminateAllSessionsByUUID(ctx, userUUID)
@@ -2188,8 +2194,9 @@ func (h *AuthHandler) Logout(ctx context.Context, req *LogoutRequest) (*LogoutRe
 			return nil, huma.Error500InternalServerError("Failed to logout", err)
 		}
 	} else if req.RefreshToken != "" {
-		// Terminate specific session
-		claims, err := h.jwtService.ParseUnverifiedClaims(req.RefreshToken)
+		// Terminate specific session. Signature-verified: a body-supplied
+		// token carries no proof of ownership on its own.
+		claims, err := h.jwtService.ValidateRefreshToken(req.RefreshToken)
 		if err == nil && claims.DeviceID != "" {
 			err = h.authService.TerminateSessionByUUID(ctx, userUUID, claims.DeviceID)
 			if err != nil {

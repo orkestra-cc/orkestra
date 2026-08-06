@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { http, HttpResponse, delay } from 'msw';
-import { Routes, Route, useLocation } from 'react-router-dom';
+import { Routes, Route, useLocation } from 'react-router';
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderWithProviders } from 'test/render';
@@ -18,7 +18,7 @@ const policyOk = http.get('*/v1/auth/operator/policy', () =>
 );
 
 // Surfaces useLocation().state on whatever route mounts it, so tests can
-// assert the payload react-router-dom carried across navigation.
+// assert the payload react-router carried across navigation.
 const LocationProbe = ({ label }: { label: string }) => {
   const location = useLocation();
   return (

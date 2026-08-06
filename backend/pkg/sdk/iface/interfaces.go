@@ -12,9 +12,50 @@ package iface
 import (
 	"context"
 	"errors"
+	"io"
 	"sync"
 	"time"
 )
+
+// ---------------------------------------------------------------------------
+// ObjectStore — S3-compatible object storage (avatars, attachments, …)
+// Promoted from internal/shared/blob so addons can consume it through the
+// SDK seam. internal/shared/blob keeps `type Store = iface.ObjectStore` and
+// `type PresignedPut = iface.PresignedPut` aliases for existing callers.
+// ---------------------------------------------------------------------------
+
+// PresignedPut groups a presigned upload URL with the headers the client
+// must echo verbatim on the PUT for the signature to validate.
+type PresignedPut struct {
+	URL       string
+	Headers   map[string]string
+	Key       string
+	ExpiresAt time.Time
+}
+
+// ObjectStore is a bucket-pinned S3-compatible object-storage handle.
+// Implementations are safe for concurrent use.
+type ObjectStore interface {
+	// PresignPut mints a URL the client PUTs to directly; the signer pins
+	// the content-type. Size limits are the caller's responsibility.
+	PresignPut(ctx context.Context, key, contentType string, ttl time.Duration) (*PresignedPut, error)
+	// Put streams a server-assembled payload to the backend, bypassing the
+	// presigned dance. Overwrites an existing key.
+	Put(ctx context.Context, key, contentType string, body io.Reader) error
+	// PresignGet returns a short-lived URL the client GETs to read the blob.
+	PresignGet(ctx context.Context, key string, ttl time.Duration) (string, error)
+	// Delete removes an object. Missing keys do not error (idempotent).
+	Delete(ctx context.Context, key string) error
+	// Exists is a HEAD-style probe: false/nil when missing, true/nil when
+	// present; network/auth errors propagate.
+	Exists(ctx context.Context, key string) (bool, error)
+}
+
+// ObjectStoreProvider vends a bucket-pinned ObjectStore per logical domain
+// (e.g. "avatars", "crm-photos"). One connection, many buckets.
+type ObjectStoreProvider interface {
+	Bucket(domain string) (ObjectStore, error)
+}
 
 // ---------------------------------------------------------------------------
 // UserProvider — consumed by: auth
@@ -772,6 +813,34 @@ type SelfServiceCheckoutPlanner interface {
 // this to a 409 response so the SPA can guide the user to wait for the
 // next renewal tick or trigger a retry-charge first.
 var ErrCheckoutNoPendingInvoice = errors.New("self-service checkout: no pending invoice for subscription")
+
+// ---------------------------------------------------------------------------
+// SessionTerminator — consumed by: any module that can revoke a principal's
+// right to be signed in (the user module's deactivate / delete paths).
+// Provided by the auth module; satisfied by *services.AuthService.
+//
+// The auth refresh paths already refuse a user whose account is no longer
+// active, which caps a revoked principal's remaining access at one
+// access-token TTL. This interface closes the rest of that window: it
+// revokes the refresh tokens, flips the session documents, and pushes
+// every sid into the revocation set so bearers already in flight stop
+// working on their next request.
+//
+// Resolve it with module.GetTyped against ServiceAuthService (operator
+// tier) or ServiceClientAuthService (client tier). A nil result means the
+// auth module is not wired — callers must degrade to "the account is
+// disabled and the refresh path will catch it" rather than erroring, so
+// that lifecycle changes never fail on a missing optional collaborator.
+// ---------------------------------------------------------------------------
+
+// SessionTerminator ends every active session belonging to a user.
+type SessionTerminator interface {
+	// TerminateAllSessionsByUUID revokes the user's refresh tokens,
+	// deactivates their session documents, and revokes their session ids.
+	// Callers treat a returned error as advisory: the state change that
+	// prompted the call has already been persisted.
+	TerminateAllSessionsByUUID(ctx context.Context, userUUID string) error
+}
 
 // ---------------------------------------------------------------------------
 // AuditSink — consumed by: every module that performs a security-sensitive

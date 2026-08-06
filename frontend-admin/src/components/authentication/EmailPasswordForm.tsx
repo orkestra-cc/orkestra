@@ -1,6 +1,6 @@
 import { useState, FormEvent } from 'react';
 import { Alert, Button, Form } from 'react-bootstrap';
-import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router';
 import { useTranslation } from 'react-i18next';
 import { useAppDispatch } from 'store/hooks';
 import { useGetAuthPolicyQuery, useLoginMutation } from 'store/api/authApi';
@@ -117,7 +117,7 @@ const EmailPasswordForm = () => {
       <Form.Group className="mb-3" controlId="login-password">
         <div className="d-flex justify-content-between">
           <Form.Label>{t('auth.password')}</Form.Label>
-          <Link to="/forgot-password" className="fs--1">
+          <Link to="/forgot-password" className="fs-10">
             {t('auth.forgotPassword')}
           </Link>
         </div>

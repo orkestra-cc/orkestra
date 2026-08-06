@@ -86,6 +86,9 @@ Each module follows: `module.go` → `handlers/` → `services/` → `repository
 3. Declare `Collections()` for auto-created MongoDB collections + indexes
 4. Declare `NavItems()` for sidebar entries (group, icon, path, minRole)
 5. Declare `ConfigSchema()` for admin-configurable fields
+   - Optionally declare `ConfigGroups()` to give the admin settings page a
+     sectioned rail instead of one flat form. Omit it and the form stays flat —
+     that is a supported end state, not a gap.
 6. Declare `Dependencies()` if your module needs other modules to init first
 7. Use `shared/iface` interfaces for cross-module deps — add new interfaces there if needed
 8. Use `deps.Services.Register(key, impl)` to expose services to other modules
@@ -139,7 +142,7 @@ Examples:
 
 See [`../docs/archive/frontend-admin-i18n.md`](../docs/archive/frontend-admin-i18n.md) (Phase 2) for the rollout. Until a handler is migrated, do not invent a code for it from the frontend — read it off the response or fall back to `detail`.
 
-## Dev Tokens (Dev/Staging Only)
+## Dev Tokens (LOCAL DEVELOPMENT ONLY)
 
 ```bash
 ./scripts/devtoken.sh developer                       # Generate operator-aud token
@@ -152,7 +155,36 @@ Roles (highest to lowest): `super_admin` > `administrator` > `developer` > `mana
 
 Audiences (ADR-0003 PR-D D-10): `operator` (default, hits `console.*`) or `client` (hits `api.*`). Both surfaces' `RequireAudience` gates reject cross-audience tokens with `401 audience_mismatch`.
 
-Disabled in production. Creates synthetic users (no DB writes).
+Creates synthetic users (no DB writes).
+
+**`POST /dev/token` is an unauthenticated endpoint that mints a signed `super_admin` JWT to anyone who can reach it.** It is therefore gated on `IsProductionLike()` — it does not exist in **production *or* staging**, only in development. (It used to be gated on `IsProduction()` alone, which left it live and anonymous on internet-reachable staging hosts.) The gate is enforced twice: `cmd/server/main.go` skips the wiring, and `devtoken.Handler.RegisterRoutes` refuses to register regardless of what the caller passes.
+
+Token lifetime is **not** caller-controllable: the `JWTProvider` seam mints with the deployment's access-token TTL (`JWT_ACCESS_TOKEN_EXPIRY`, or the admin-managed `accessTokenTTL`). Sending an `expiry` field returns 400 — previously it was accepted, range-checked, echoed back in `expiresAt`/`expiresIn`, and then ignored, so callers were told a lifetime the token did not have. `scripts/devtoken.sh` no longer has `--expiry`.
+
+## Browser-issued cookies
+
+Orkestra sets three cookies, all HttpOnly. None is readable by script.
+
+| Cookie | Set by | Lifetime | Purpose |
+|---|---|---|---|
+| `orkestra_cookie` (name from `COOKIE_NAME_REFRESH`) | login / refresh | 7d | The refresh token. The only credential cookie; the SPA holds the access token in memory. |
+| `orkestra_did` | `shared/middleware.DeviceMiddleware` on first sight of a browser | 1y | Server-minted random device identifier. **Not a credential** — it identifies a device, it does not authenticate one. Replaces the old MD5-of-headers id, which any caller could reproduce. Native apps send `X-Device-ID` instead. |
+| `orkestra_oauth_state` | OAuth start endpoints | 10m | Per-flow CSRF nonce that binds an OAuth callback to the browser that started it. Cleared on callback. |
+
+## Client IP resolution (trusted proxies)
+
+`X-Forwarded-For` and friends are ordinary request headers — anyone can send them. Header interpretation therefore happens in exactly one place, `shared/middleware.RealIP`, which applies the deployment's trusted-proxy policy, rewrites `r.RemoteAddr` with the result, and deletes the forwarding headers so nothing downstream can re-derive a spoofed value. `utils.GetClientIP(r)` reads `RemoteAddr` and nothing else.
+
+**Do not reintroduce header parsing anywhere else.** The single chokepoint is what makes the policy enforceable; four controls depend on it: the operator IP allow/blocklist (`shared/middleware/ip_gate.go`), the login geo-block (`geoBlockCountries`), the per-IP login rate limiter / lockout bucket, and the IP stamped on every audit + security event.
+
+| Env var | Meaning |
+|---|---|
+| `TRUSTED_PROXY_CIDRS` | Networks our own reverse proxies live in. **Preferred** — survives a topology change without a recount. Hops are skipped right-to-left while they fall inside these networks. |
+| `TRUSTED_PROXY_COUNT` | How many proxy hops sit in front of the backend. Used when `TRUSTED_PROXY_CIDRS` is empty. |
+
+Both unset = **trust nothing**: forwarding headers are ignored and every request is attributed to its direct peer. That is the correct default for local dev and a deliberately fail-closed one elsewhere — but it is *wrong* behind a load balancer or CDN, where it collapses every caller onto the proxy's address and into a single rate-limit bucket. A production-like boot with no policy configured logs a startup warning. A malformed policy is fatal at boot rather than silently degrading to "trust nothing".
+
+Chi's `middleware.RealIP` must **not** be used — it trusts the leftmost XFF entry unconditionally.
 
 ## Development
 

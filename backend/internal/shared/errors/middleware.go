@@ -10,6 +10,8 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/go-chi/chi/v5/middleware"
+
+	"github.com/orkestra/backend/internal/shared/utils"
 )
 
 // ContextKey type for context keys
@@ -322,22 +324,10 @@ func generateCorrelationID() string {
 	return middleware.GetReqID(context.Background())
 }
 
-// getRemoteIP extracts the real remote IP address
+// getRemoteIP returns the address recorded on error reports. Reads only
+// what shared/middleware.RealIP resolved under the trusted-proxy policy
+// — a caller must not be able to write an arbitrary source address into
+// the error log by setting a header.
 func getRemoteIP(r *http.Request) string {
-	// Check X-Forwarded-For header first
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		// Take the first IP in the list
-		ips := strings.Split(xff, ",")
-		if len(ips) > 0 {
-			return strings.TrimSpace(ips[0])
-		}
-	}
-
-	// Check X-Real-IP header
-	if xri := r.Header.Get("X-Real-IP"); xri != "" {
-		return xri
-	}
-
-	// Fall back to RemoteAddr
-	return r.RemoteAddr
+	return utils.GetClientIP(r)
 }

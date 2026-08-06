@@ -22391,6 +22391,16 @@ td .dropdown-toggle:after, td .dropdown-toggle:before {
   border-bottom-width: 1px !important;
 }
 
+.table thead > tr > th.sort:focus-visible {
+  outline: 2px solid var(--orkestra-primary);
+  outline-offset: -2px;
+}
+
+.form-check-input.advance-table-check-input {
+  width: 1.125rem;
+  height: 1.125rem;
+}
+
 /*-----------------------------------------------
 |   Headers
 -----------------------------------------------*/
@@ -25300,22 +25310,32 @@ a[href].bg-200:hover, a[href].bg-200:focus {
   color: inherit;
   text-decoration: none;
 }
-.hover-actions-trigger:hover .hover-actions, .hover-actions-trigger:focus .hover-actions {
-  z-index: 1;
+.hover-actions-trigger .hover-actions {
   display: flex;
+  opacity: 0;
+  pointer-events: none;
 }
-.hover-actions-trigger:hover .hover-actions.btn, .hover-actions-trigger:hover .tox .tox-menu__footer .hover-actions.tox-button--secondary, .tox .tox-menu__footer .hover-actions-trigger:hover .hover-actions.tox-button--secondary,
-.hover-actions-trigger:hover .tox .tox-dialog__footer .hover-actions.tox-button--secondary,
-.tox .tox-dialog__footer .hover-actions-trigger:hover .hover-actions.tox-button--secondary, .hover-actions-trigger:hover .tox .tox-menu__footer .hover-actions.tox-button:last-child, .tox .tox-menu__footer .hover-actions-trigger:hover .hover-actions.tox-button:last-child,
-.hover-actions-trigger:hover .tox .tox-dialog__footer .hover-actions.tox-button:last-child,
-.tox .tox-dialog__footer .hover-actions-trigger:hover .hover-actions.tox-button:last-child, .hover-actions-trigger:focus .hover-actions.btn, .hover-actions-trigger:focus .tox .tox-menu__footer .hover-actions.tox-button--secondary, .tox .tox-menu__footer .hover-actions-trigger:focus .hover-actions.tox-button--secondary,
-.hover-actions-trigger:focus .tox .tox-dialog__footer .hover-actions.tox-button--secondary,
-.tox .tox-dialog__footer .hover-actions-trigger:focus .hover-actions.tox-button--secondary, .hover-actions-trigger:focus .tox .tox-menu__footer .hover-actions.tox-button:last-child, .tox .tox-menu__footer .hover-actions-trigger:focus .hover-actions.tox-button:last-child,
-.hover-actions-trigger:focus .tox .tox-dialog__footer .hover-actions.tox-button:last-child,
-.tox .tox-dialog__footer .hover-actions-trigger:focus .hover-actions.tox-button:last-child {
+.hover-actions-trigger .hover-actions.btn, .hover-actions-trigger .tox .tox-menu__footer .hover-actions.tox-button--secondary, .tox .tox-menu__footer .hover-actions-trigger .hover-actions.tox-button--secondary,
+.hover-actions-trigger .tox .tox-dialog__footer .hover-actions.tox-button--secondary,
+.tox .tox-dialog__footer .hover-actions-trigger .hover-actions.tox-button--secondary, .hover-actions-trigger .tox .tox-menu__footer .hover-actions.tox-button:last-child, .tox .tox-menu__footer .hover-actions-trigger .hover-actions.tox-button:last-child,
+.hover-actions-trigger .tox .tox-dialog__footer .hover-actions.tox-button:last-child,
+.tox .tox-dialog__footer .hover-actions-trigger .hover-actions.tox-button:last-child {
   display: inline-block;
 }
+.hover-actions-trigger:hover .hover-actions, .hover-actions-trigger:focus .hover-actions {
+  z-index: 1;
+  opacity: 1;
+  pointer-events: auto;
+}
 .hover-actions-trigger:hover .hover-hide, .hover-actions-trigger:focus .hover-hide {
+  display: none;
+}
+.hover-actions-trigger:focus-within .hover-actions {
+  z-index: 1;
+  opacity: 1;
+  pointer-events: auto;
+}
+.hover-actions-trigger:focus-within .hover-hide {
   display: none;
 }
 
@@ -28136,4 +28156,31 @@ html[data-bs-theme=dark] .bg-priority-low:checked {
 
 .stat-ribbon-dark > span {
   background-color: #0b1727;
+}
+
+/* -------------------------------------------------------------------------- */
+/*                Module Save Bar — cross-group save model (Phase 3)          */
+/* -------------------------------------------------------------------------- */
+.module-save-bar {
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+  background-color: var(--orkestra-emphasis-bg);
+  border-top: var(--orkestra-border-width) solid var(--orkestra-border-color);
+}
+
+/* -------------------------------------------------------------------------- */
+/*             Module Config Rail — settings navigation (Phase 4)             */
+/* -------------------------------------------------------------------------- */
+.module-config-rail .nav-link {
+  color: var(--orkestra-gray-700);
+  border-radius: var(--orkestra-border-radius);
+}
+.module-config-rail .nav-link:hover, .module-config-rail .nav-link:focus {
+  color: var(--orkestra-gray-1100);
+}
+.module-config-rail .nav-link.active {
+  color: var(--orkestra-primary);
+  background-color: var(--orkestra-primary-bg-subtle);
+  font-weight: 500;
 }

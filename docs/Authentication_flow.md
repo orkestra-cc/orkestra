@@ -273,15 +273,16 @@ Standard middleware:
 
 ## 10. Dev tooling
 
-`scripts/devtoken.sh` mints synthetic-user JWTs for local testing without touching the database. Disabled in production.
+`scripts/devtoken.sh` mints synthetic-user JWTs for local testing without touching the database. **Local development only** — `POST /dev/token` is unauthenticated and mints a signed `super_admin` token to any caller, so it is gated on `IsProductionLike()` and exists in neither production nor staging.
 
 ```bash
 ./scripts/devtoken.sh administrator                       # default — aud=operator
 ./scripts/devtoken.sh administrator --audience client     # aud=client (api.* surface)
 ./scripts/devtoken.sh admin --quiet                       # token only, for piping
 ./scripts/devtoken.sh manager --curl                      # ready-to-use curl command
-./scripts/devtoken.sh operator --expiry 1h                # custom expiry (max 24h)
 ```
+
+Token lifetime follows the deployment's access-token TTL and cannot be set per request.
 
 The audience flag (PR-D D-10) is the difference between "I can hit `console.*`" and "I can hit `api.*`" — without it, dev tokens default to operator and the client mux's `RequireAudience` gate rejects them with `401 audience_mismatch`. The integration smoke at `backend/internal/addons/dev/handlers/dev_token_audience_test.go` locks the dispatch contract.
 

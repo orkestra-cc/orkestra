@@ -2,6 +2,33 @@ import { baseApi } from './baseApi';
 
 // --- Types ---
 
+/**
+ * Gates a field's visibility on the value of another field of the SAME module.
+ * How a field's `dependsOn` array combines is chosen by `dependsOnMatch`: AND
+ * across entries by default, OR within one condition's `in` list either way.
+ *
+ * Matching is type-aware, resolved against the *referenced* field's `type` —
+ * this mirrors the contract documented on the backend's `FieldCondition`, and
+ * the two implementations must not drift:
+ *   - `bool` target: both sides are read as booleans, where `true` / `1` / `yes`
+ *     (case-insensitive, trimmed) are true. So `in: ['true']` matches a stored `'1'`.
+ *   - any other type: case-insensitive, whitespace-trimmed exact string match.
+ */
+export interface FieldCondition {
+  key: string;
+  in: string[];
+}
+
+/** One section of the settings rail. Presentation-only; never persisted. */
+export interface ConfigGroup {
+  key: string;
+  label: string;
+  description?: string;
+  icon?: string;
+  parent?: string;
+  order?: number;
+}
+
 export interface ConfigField {
   key: string;
   label: string;
@@ -19,6 +46,14 @@ export interface ConfigField {
   default: string;
   envVar: string;
   options?: string[];
+  advanced?: boolean;
+  dependsOn?: FieldCondition[];
+  dependsOnMatch?: 'all' | 'any';
+  min?: number;
+  max?: number;
+  pattern?: string;
+  placeholder?: string;
+  helpUrl?: string;
 }
 
 export interface InfraContainerStatus {
@@ -40,6 +75,7 @@ export interface ModuleConfig {
   configValues: Record<string, string>;
   secretStatus: Record<string, boolean>;
   configSchema: ConfigField[];
+  configGroups?: ConfigGroup[];
   dependsOn: string[];
   providedServices: string[];
   requiredServices: string[];
