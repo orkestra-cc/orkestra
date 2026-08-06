@@ -30,7 +30,16 @@ export const setupStore = (preloadedState?: Partial<TestRootState>) =>
   configureStore({
     reducer: rootReducer,
     preloadedState,
-    middleware: gdm => gdm().concat(baseApi.middleware)
+    middleware: gdm => gdm().concat(baseApi.middleware),
+    // Batch store notifications on a microtask instead of RTK's default
+    // animation frame. The raf queue calls the unqualified global
+    // `cancelAnimationFrame` from inside the frame callback, and happy-dom
+    // schedules that callback on a setImmediate — so one queued just before
+    // a test file ends fires after vitest has deleted the window globals,
+    // throwing ReferenceError outside any test and failing the whole run.
+    // A microtask always flushes in the tick that scheduled it, so it can
+    // never outlive its environment. See src/test/setupStore.test.ts.
+    enhancers: gde => gde({ autoBatch: { type: 'tick' } })
   });
 
 interface ExtendedRenderOptions extends Omit<RenderOptions, 'queries'> {
