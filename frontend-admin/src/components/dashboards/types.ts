@@ -28,11 +28,7 @@ export interface EChartsOptions {
 }
 
 export type EChartsSeriesType =
-  | 'line'
-  | 'bar'
-  | 'pie'
-  | 'scatter'
-  | 'candlestick';
+  'line' | 'bar' | 'pie' | 'scatter' | 'candlestick';
 
 // Analytics data interfaces
 export interface AnalyticsData {

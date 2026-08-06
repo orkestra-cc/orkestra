@@ -14,12 +14,7 @@ import rawEmails from 'data/email/emails';
 
 // Type definitions
 type EmailFilter =
-  | 'all'
-  | 'unread'
-  | 'star'
-  | 'attachments'
-  | 'archive'
-  | 'snooze';
+  'all' | 'unread' | 'star' | 'attachments' | 'archive' | 'snooze';
 
 // Extended EmailState with filters array
 interface EmailState extends EmailStateType {

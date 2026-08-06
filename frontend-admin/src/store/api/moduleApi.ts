@@ -35,13 +35,7 @@ export interface ConfigField {
   group?: string;
   description: string;
   type:
-    | 'string'
-    | 'bool'
-    | 'int'
-    | 'duration'
-    | 'secret'
-    | 'enum'
-    | 'stringList';
+    'string' | 'bool' | 'int' | 'duration' | 'secret' | 'enum' | 'stringList';
   required: boolean;
   default: string;
   envVar: string;
