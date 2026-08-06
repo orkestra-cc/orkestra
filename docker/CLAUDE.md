@@ -297,8 +297,10 @@ The backend mounts `../backend:/app` and runs AIR from the bind mount — no ima
 ```bash
 cd backend
 GOMODCACHE=$PWD/.go-mod-cache go mod download
-GOBIN=$PWD/.go-bin GOMODCACHE=$PWD/.go-mod-cache go install github.com/air-verse/air@latest
+GOBIN=$PWD/.go-bin GOMODCACHE=$PWD/.go-mod-cache go install github.com/air-verse/air@v1.67.1
 ```
+
+**AIR is pinned, never `@latest`.** air v1.67.2+ declares `go 1.26.0`, which the project's Go 1.25.12 toolchain (`go.mod`, `.mise.toml`, CI) refuses to build under `GOTOOLCHAIN=local` — `@latest` silently breaks every dev-image build the day upstream tags a release. v1.67.1 is the last release on `go 1.25`. The pin lives in `Dockerfile.dev-backend` (`ARG AIR_VERSION`), `backend/Dockerfile`, and `scripts/install-air.sh`; bump all three together with the Go version.
 
 `userns_mode: "host"` is required when the Docker daemon runs with `userns-remap` (otherwise `group_add` for the docker GID is rewritten and the mounted socket stays unreadable). DNS is inherited from the daemon (`/etc/docker/daemon.json` → `dns: [...]`); the staging compose deliberately does **not** set per-service `dns:`, because public resolvers (8.8.8.8, 1.1.1.1) may be blocked on UDP/53 in restricted networks.
 
