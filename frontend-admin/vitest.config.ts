@@ -27,10 +27,25 @@ export default mergeConfig(
         // Floor set at current numbers (3.25 / 33.16 / 15.22 / 3.25) rounded
         // down a hair so trivial fluctuation doesn't redden CI. Ratchet up
         // when new test files land — never down. Drops force a conversation.
+        // Re-anchored for vitest 4, which makes AST-aware remapping the
+        // default. Nothing about the tests changed — the measurement did.
+        // Proven by running the OLD vitest 3 with
+        // `--coverage.experimentalAstAwareRemapping`, which reproduces the
+        // new figures exactly: branches 73.06% -> 28.5%, lines 35.61% ->
+        // 31.79%. The new numbers are the honest ones; the old provider
+        // credited branches no test ever entered.
+        //
+        // `branches: 33` would now fail against a real 28.5% here. The
+        // floors below are anchored to the WEAKEST suite in the fork chain,
+        // not to this repo's own numbers: this file syncs between the public
+        // base and its forks, and the base runs 294 tests against roughly the
+        // same code the forks cover with 674 (branches 19.69% vs 28.49%).
+        // Per-repo values would make this line conflict on every sync, so one
+        // set that holds everywhere wins over a tighter gate that doesn't.
         thresholds: {
           statements: 3,
-          branches: 33,
-          functions: 15,
+          branches: 17,
+          functions: 12,
           lines: 3
         }
       }
