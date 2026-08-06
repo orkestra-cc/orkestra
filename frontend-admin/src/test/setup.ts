@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom/vitest';
-import { afterAll, afterEach, beforeAll } from 'vitest';
+import { afterAll, afterEach, beforeAll, vi } from 'vitest';
 // Initialize i18n once for the whole test suite so t('...') calls
 // resolve against the real en.json bundle instead of returning raw
 // keys — the existing EmailPasswordForm tests assert on rendered
@@ -16,6 +16,10 @@ beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
 afterEach(() => {
   server.resetHandlers();
   resetCapturedRequests();
+  // happy-dom implements no window.confirm/alert/prompt, so tests that need
+  // one install it with vi.stubGlobal rather than spying on a function that
+  // isn't there. Drop those here so they can't leak between files.
+  vi.unstubAllGlobals();
 });
 
 afterAll(() => server.close());
