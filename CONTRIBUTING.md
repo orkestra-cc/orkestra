@@ -16,7 +16,7 @@ echo 'eval "$(mise activate bash)"' >> ~/.bashrc
 exec $SHELL                 # reload the shell so the eval takes effect
 
 # 3. Provision the languages at the versions pinned in .mise.toml
-mise install                # Go 1.25.11, Node 22, Flutter 3.35, golangci-lint, pre-commit, ...
+mise install                # Go 1.25.11, Node 22, Flutter 3.44, golangci-lint, pre-commit, ...
 
 # 4. Bootstrap dependencies for the surface(s) you'll touch
 make install                # everything; or scope manually:
@@ -72,7 +72,7 @@ The same `make` targets are what GitHub Actions runs. If `make ci` is green loca
 | `backend/` | Go modular monolith — 6 core + 13 optional modules, 6 build profiles | API changes, new modules, AI sidecar |
 | `frontend-admin/` | React 19 operator console (Tier-1, internal users) | Internal admin UI |
 | `frontend-client/` | React 19 customer SPA (Tier-2, external clients) | External-facing client UI |
-| `mobile/` | Flutter 3.35+ cross-platform app | Mobile features |
+| `mobile/` | Flutter 3.44+ cross-platform app | Mobile features |
 | `docker/` | Compose configs (dev/staging/prod/infra) | Local dev orchestration |
 | `docs/` | Architecture, ADRs, plans | Design docs, RFCs |
 

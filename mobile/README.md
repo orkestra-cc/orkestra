@@ -19,7 +19,7 @@ Release builds sign with the debug keystore — fine for CI artifacts, **not** a
 
 If you've forked Orkestra and your backend runs at a different URL than the canonical orkestra.cc instance, override the API + WebSocket URLs via `--dart-define-from-file`.
 
-1. **Install Flutter 3.35+** — [official guide](https://docs.flutter.dev/get-started/install). `mise install` from the repo root also provisions the pinned version (see `.mise.toml`).
+1. **Install Flutter 3.44+** — [official guide](https://docs.flutter.dev/get-started/install). `mise install` from the repo root also provisions the pinned version (see `.mise.toml`).
 
 2. **Bootstrap the backend on your fork.** Follow [I just forked Orkestra](https://docs.orkestra.cc/getting-started/forking) — `make init && docker compose up -d` gets you a backend on `localhost:3000`.
 

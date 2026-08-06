@@ -12,7 +12,7 @@
 # Matches the version in .github/workflows/*.yml. Bump in lockstep.
 go            = "1.25.12"
 node          = "22"
-flutter       = "3.35"
+flutter       = "3.44"
 # Matches what `golangci/golangci-lint-action@v7` resolved `latest` to in
 # the last green run on dev (2026-05-11). Bump deliberately, not lazily —
 # minor-version moves regress on legacy code (G402, prealloc rule scope).
