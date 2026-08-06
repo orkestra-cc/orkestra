@@ -43,8 +43,7 @@ function isAuthEndpoint(url: string): boolean {
 // refresh requests that would rotate the refresh token N times and trip
 // the backend's family-replay guard.
 type RefreshResult =
-  | { ok: true; accessToken: string; expiresIn: number }
-  | { ok: false };
+  { ok: true; accessToken: string; expiresIn: number } | { ok: false };
 let inFlightRefresh: Promise<RefreshResult> | null = null;
 
 async function performRefresh(baseUrl: string): Promise<RefreshResult> {

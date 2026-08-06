@@ -10,11 +10,7 @@ import type { Membership, EffectivePermissions } from '../slices/tenantSlice';
  *                           ↘ archived → purged (terminal, crypto-shred)
  */
 export type TenantStatus =
-  | 'provisioning'
-  | 'active'
-  | 'suspended'
-  | 'archived'
-  | 'purged';
+  'provisioning' | 'active' | 'suspended' | 'archived' | 'purged';
 
 export interface Org {
   id: string;

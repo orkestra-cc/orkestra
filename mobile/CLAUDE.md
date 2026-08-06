@@ -98,7 +98,7 @@ mobile/
 - **State Management**: Provider + Riverpod
 - **Networking**: Dio, WebSocket Channel
 - **Storage**: Shared Preferences, Flutter Secure Storage
-- **Navigation**: Go Router
+- **Navigation**: none yet — `MaterialApp` only. `go_router` was declared but never imported, so it was dropped; reintroduce it at the current version when routing is actually written.
 - **Code Generation**: Freezed, JSON Serializable
 
 ## Quick Start
