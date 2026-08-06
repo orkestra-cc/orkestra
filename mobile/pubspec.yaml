@@ -4,8 +4,12 @@ publish_to: 'none'
 version: 1.0.0+1
 
 environment:
-  sdk: '>=3.0.0 <4.0.0'
-  flutter: '>=3.35.0'
+  # Dart floor is 3.12, not 3.0: flutter_riverpod >=3.4.1 requires it, and the
+  # json_annotation/json_serializable pair pulls dart_style >=3.1.6 which needs
+  # >=3.10. Stating the real floor makes `pub get` fail fast with a version
+  # message instead of resolving to something that breaks at analyze time.
+  sdk: '>=3.12.0 <4.0.0'
+  flutter: '>=3.44.0'
 
 dependencies:
   flutter:
@@ -16,10 +20,10 @@ dependencies:
 
   # State Management
   provider: ^6.1.1
-  flutter_riverpod: ^3.3.2
+  flutter_riverpod: ^3.4.2
 
   # Networking
-  dio: ^5.10.0
+  dio: ^5.11.0
   web_socket_channel: ^2.4.0
 
   # Storage
@@ -39,11 +43,14 @@ dev_dependencies:
   flutter_lints: ^6.0.0
 
   # Code Generation
-  # Pinned to ^2.6.1: build_runner 2.15.1 requires analyzer >=8 (Dart SDK
-  # 3.10+), but we pin Flutter 3.35 (Dart 3.9.2), where `test` caps analyzer
-  # <8 → `flutter pub get` is unresolvable. Dependabot #151 bumped this to
-  # 2.15.1 and broke Mobile CI (path-filtered, so it slipped into v0.3.15).
-  # Bump only alongside a Flutter/Dart 3.10+ toolchain move.
+  # The ^2.6.1 cap existed because build_runner 2.15.1 needs analyzer >=8
+  # (Dart SDK 3.10+) while Flutter was pinned at 3.35 / Dart 3.9.2, where
+  # `test` caps analyzer <8 and `flutter pub get` became unresolvable —
+  # Dependabot #151 bumped it and broke Mobile CI (path-filtered, so it
+  # slipped into v0.3.15). **That reason is gone**: the toolchain moved to
+  # Flutter 3.44 / Dart 3.12.2, so this may be unpinned whenever Dependabot
+  # next proposes it. Left at ^2.6.1 here only to keep the toolchain move
+  # from carrying an unrelated dependency bump.
   build_runner: ^2.6.1
   freezed: ^3.2.3
   json_serializable: ^6.11.2

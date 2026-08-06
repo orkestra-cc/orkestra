@@ -19,7 +19,7 @@
 [![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=white&style=flat-square)](https://react.dev)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.9-3178C6?logo=typescript&logoColor=white&style=flat-square)](https://typescriptlang.org)
 [![Vite](https://img.shields.io/badge/Vite-7-646CFF?logo=vite&logoColor=white&style=flat-square)](https://vite.dev)
-[![Flutter](https://img.shields.io/badge/Flutter-3.35-02569B?logo=flutter&logoColor=white&style=flat-square)](https://flutter.dev)
+[![Flutter](https://img.shields.io/badge/Flutter-3.44-02569B?logo=flutter&logoColor=white&style=flat-square)](https://flutter.dev)
 [![MongoDB](https://img.shields.io/badge/MongoDB-8.0-47A248?logo=mongodb&logoColor=white&style=flat-square)](https://www.mongodb.com)
 [![Redis](https://img.shields.io/badge/Redis-8.2-DC382D?logo=redis&logoColor=white&style=flat-square)](https://redis.io)
 [![Docker](https://img.shields.io/badge/Docker-Ready-2496ED?logo=docker&logoColor=white&style=flat-square)](https://docker.com)
@@ -48,7 +48,7 @@ It runs on a **two-tier tenancy model**: Tier-1 operators manage staff and modul
 - **Backend.** Go 1.25, [Huma v2](https://huma.rocks) (OpenAPI-first), modular monolith, single Go module. 8 core modules always load; the optional-module catalog ships empty — a fork registers its own at `/admin/modules` (hot-reload, no restart). See [backend/CLAUDE.md](backend/CLAUDE.md).
 - **Frontend (admin).** React 19 + Vite 7 + TypeScript 5.9 strict. Navigation is fetched from `/v1/navigation` so the UI reflects whatever modules the backend has enabled. Cookie-based operator-audience auth. See [frontend-admin/CLAUDE.md](frontend-admin/CLAUDE.md).
 - **Frontend (client).** Tier-2 customer-facing SPA on the same React 19 + Vite 7 stack, separate cookie domain, separate audience JWT. See [frontend-client/CLAUDE.md](frontend-client/CLAUDE.md).
-- **Mobile.** Flutter 3.35 + Riverpod (early-stage).
+- **Mobile.** Flutter 3.44 + Riverpod (early-stage).
 - **Data.** MongoDB 8 + Redis 8, plus RustFS (S3-compatible) for uploaded blobs.
 - **Auth.** Email + password (argon2id) and OAuth 2.1 (Google, Apple, GitHub, Discord), RS256 JWT, 6-role RBAC, optional TOTP + WebAuthn MFA, per-audience tier split for operator vs. client surfaces.
 - **Observability.** Structured JSON logs with `trace_id` / `tenant_id` / `user_id` on every line out of the box, OpenTelemetry traces with tenant baggage (ADR-0001), Prometheus HTTP latency histogram with `trace_id` exemplars (one-click jump from a slow bucket to the matching Tempo trace), audit log kept separate from operational log. Zero-config locally; one env var to ship to a self-hosted Tempo + Loki + Grafana stack; one env var to ship to Honeycomb / Datadog / Grafana Cloud / Axiom. See [ADR-0005](docs/adr/0005-observability-logging-tracing-metrics.md).
@@ -218,7 +218,7 @@ orkestra/
 │   └── Dockerfile           # Multi-stage (dev + prod)
 ├── frontend-admin/          # React 19 + Vite 7, operator console (Tier-1)
 ├── frontend-client/         # React 19 + Vite 7, external client SPA (Tier-2)
-├── mobile/                  # Flutter 3.35
+├── mobile/                  # Flutter 3.44
 ├── docker/                  # Compose files + env templates
 ├── docs/                    # Architecture and modernization docs
 ├── .github/workflows/       # Backend, frontend, mobile, security CI

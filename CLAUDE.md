@@ -35,7 +35,7 @@ The companies that **run Orkestra** (one or more of "our" organizations). For ea
 | ------------------ | ------------------------------------------------------------------ |
 | **Backend**        | Go 1.25.12, Huma v2 (OpenAPI-first), 8 core modules, single Go module |
 | **Frontend**       | React 19, TypeScript 5.9, Vite 7, Redux Toolkit, TanStack Table    |
-| **Mobile**         | Flutter 3.35+, Dart, Riverpod                                      |
+| **Mobile**         | Flutter 3.44+, Dart, Riverpod                                      |
 | **Database**       | MongoDB 8.0, Redis 8.2                                             |
 | **Infrastructure** | Docker Compose (dev/staging/prod), GitHub Actions CI               |
 | **Auth**           | Email/password (argon2id) + OAuth 2.1 (Google, Apple, GitHub, Discord), RS256 JWT, 6-role RBAC |
