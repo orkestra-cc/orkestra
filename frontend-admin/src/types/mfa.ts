@@ -3,10 +3,7 @@
 // mfaApi) so UI components can import types without pulling the slice.
 
 export type MfaStatus =
-  | 'not_required'
-  | 'required_pending_enrollment'
-  | 'enrolled'
-  | 'grace';
+  'not_required' | 'required_pending_enrollment' | 'enrolled' | 'grace';
 export type MfaFactorType = 'totp' | 'webauthn' | '';
 
 export interface MfaStatusResponse {

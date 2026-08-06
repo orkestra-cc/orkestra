@@ -30,13 +30,7 @@ const sha256Hex = async (input: string): Promise<string> => {
 };
 
 export type GravatarFallback =
-  | 'identicon'
-  | 'monsterid'
-  | 'wavatar'
-  | 'retro'
-  | 'robohash'
-  | 'mp'
-  | '404';
+  'identicon' | 'monsterid' | 'wavatar' | 'retro' | 'robohash' | 'mp' | '404';
 
 export interface GravatarOptions {
   size?: number;

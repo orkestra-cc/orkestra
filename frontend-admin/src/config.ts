@@ -1,10 +1,6 @@
 export type ThemeVariant = 'light' | 'dark' | 'auto';
 export type NavbarPosition =
-  | 'vertical'
-  | 'horizontal'
-  | 'combo'
-  | 'top'
-  | 'double-top';
+  'vertical' | 'horizontal' | 'combo' | 'top' | 'double-top';
 export type NavbarStyle = 'transparent' | 'card' | 'vibrant';
 
 export interface AppSettings {

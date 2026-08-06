@@ -5,15 +5,7 @@ import Flex from './Flex';
 import classNames from 'classnames';
 
 export type AvatarSize =
-  | 'xs'
-  | 's'
-  | 'm'
-  | 'l'
-  | 'xl'
-  | '2xl'
-  | '3xl'
-  | '4xl'
-  | '5xl';
+  'xs' | 's' | 'm' | 'l' | 'xl' | '2xl' | '3xl' | '4xl' | '5xl';
 export type AvatarRounded =
   | 'circle'
   | '0'
