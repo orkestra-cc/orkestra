@@ -93,7 +93,7 @@ mobile/
 
 ## Technology Stack
 
-- **Framework**: Flutter 3.35+
+- **Framework**: Flutter 3.44+
 - **Language**: Dart 3.0+
 - **State Management**: Provider + Riverpod
 - **Networking**: Dio, WebSocket Channel
@@ -105,7 +105,7 @@ mobile/
 
 ### Prerequisites
 
-- Flutter 3.35+ installed
+- Flutter 3.44+ installed
 - Android Studio or Xcode for platform-specific development
 
 ### Development Setup
