@@ -131,7 +131,7 @@
     "prettier": "^3.9.4",
     "sass": "^1.102.0",
     "typescript": "^5.9.2",
-    "vite": "^7.0.5",
+    "vite": "^8.2.0",
     "vitest": "^3.2.3"
   },
   "optionalDependencies": {
