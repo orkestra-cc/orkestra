@@ -94,7 +94,7 @@ mobile/
 ## Technology Stack
 
 - **Framework**: Flutter 3.44+
-- **Language**: Dart 3.0+
+- **Language**: Dart 3.12+ (the floor `mobile/pubspec.yaml` declares — riverpod and the json_serializable chain both require it)
 - **State Management**: Provider + Riverpod
 - **Networking**: Dio, WebSocket Channel
 - **Storage**: Shared Preferences, Flutter Secure Storage
