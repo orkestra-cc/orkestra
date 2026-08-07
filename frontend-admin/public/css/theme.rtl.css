@@ -23322,8 +23322,9 @@ h5, .h5 {
   .navbar-vertical.navbar-expand-xxl + .content .navbar-top .navbar-brand {
     display: none;
   }
-  .navbar-vertical.navbar-expand-xxl:not(.navbar-card):not(.navbar-vibrant):not(.navbar-inverted) + .content .navbar-top {
+  .navbar-vertical.navbar-expand-xxl:where(:not(.navbar-card):not(.navbar-vibrant):not(.navbar-inverted)) + .content .navbar-top {
     margin-right: -1.5rem;
+    padding-right: 1.5rem;
   }
   .navbar-vertical-collapsed .navbar-vertical.navbar-expand-xxl {
     z-index: 1030;
@@ -23386,6 +23387,7 @@ h5, .h5 {
   }
   .navbar-vertical-collapsed:not(.navbar-vertical-collapsed-hover) .navbar-vertical.navbar-expand-xxl .navbar-vertical-divider {
     max-width: 2rem;
+    margin-inline: auto;
   }
   .navbar-vertical-collapsed:not(.navbar-vertical-collapsed-hover) .navbar-vertical.navbar-expand-xxl .navbar-collapse {
     margin-right: -0.5rem;
@@ -23503,8 +23505,9 @@ h5, .h5 {
   .navbar-vertical.navbar-expand-xl + .content .navbar-top .navbar-brand {
     display: none;
   }
-  .navbar-vertical.navbar-expand-xl:not(.navbar-card):not(.navbar-vibrant):not(.navbar-inverted) + .content .navbar-top {
+  .navbar-vertical.navbar-expand-xl:where(:not(.navbar-card):not(.navbar-vibrant):not(.navbar-inverted)) + .content .navbar-top {
     margin-right: -1.5rem;
+    padding-right: 1.5rem;
   }
   .navbar-vertical-collapsed .navbar-vertical.navbar-expand-xl {
     z-index: 1030;
@@ -23567,6 +23570,7 @@ h5, .h5 {
   }
   .navbar-vertical-collapsed:not(.navbar-vertical-collapsed-hover) .navbar-vertical.navbar-expand-xl .navbar-vertical-divider {
     max-width: 2rem;
+    margin-inline: auto;
   }
   .navbar-vertical-collapsed:not(.navbar-vertical-collapsed-hover) .navbar-vertical.navbar-expand-xl .navbar-collapse {
     margin-right: -0.5rem;
@@ -23684,8 +23688,9 @@ h5, .h5 {
   .navbar-vertical.navbar-expand-lg + .content .navbar-top .navbar-brand {
     display: none;
   }
-  .navbar-vertical.navbar-expand-lg:not(.navbar-card):not(.navbar-vibrant):not(.navbar-inverted) + .content .navbar-top {
+  .navbar-vertical.navbar-expand-lg:where(:not(.navbar-card):not(.navbar-vibrant):not(.navbar-inverted)) + .content .navbar-top {
     margin-right: -1.5rem;
+    padding-right: 1.5rem;
   }
   .navbar-vertical-collapsed .navbar-vertical.navbar-expand-lg {
     z-index: 1030;
@@ -23748,6 +23753,7 @@ h5, .h5 {
   }
   .navbar-vertical-collapsed:not(.navbar-vertical-collapsed-hover) .navbar-vertical.navbar-expand-lg .navbar-vertical-divider {
     max-width: 2rem;
+    margin-inline: auto;
   }
   .navbar-vertical-collapsed:not(.navbar-vertical-collapsed-hover) .navbar-vertical.navbar-expand-lg .navbar-collapse {
     margin-right: -0.5rem;
@@ -23865,8 +23871,9 @@ h5, .h5 {
   .navbar-vertical.navbar-expand-md + .content .navbar-top .navbar-brand {
     display: none;
   }
-  .navbar-vertical.navbar-expand-md:not(.navbar-card):not(.navbar-vibrant):not(.navbar-inverted) + .content .navbar-top {
+  .navbar-vertical.navbar-expand-md:where(:not(.navbar-card):not(.navbar-vibrant):not(.navbar-inverted)) + .content .navbar-top {
     margin-right: -1.5rem;
+    padding-right: 1.5rem;
   }
   .navbar-vertical-collapsed .navbar-vertical.navbar-expand-md {
     z-index: 1030;
@@ -23929,6 +23936,7 @@ h5, .h5 {
   }
   .navbar-vertical-collapsed:not(.navbar-vertical-collapsed-hover) .navbar-vertical.navbar-expand-md .navbar-vertical-divider {
     max-width: 2rem;
+    margin-inline: auto;
   }
   .navbar-vertical-collapsed:not(.navbar-vertical-collapsed-hover) .navbar-vertical.navbar-expand-md .navbar-collapse {
     margin-right: -0.5rem;
@@ -24046,8 +24054,9 @@ h5, .h5 {
   .navbar-vertical.navbar-expand-sm + .content .navbar-top .navbar-brand {
     display: none;
   }
-  .navbar-vertical.navbar-expand-sm:not(.navbar-card):not(.navbar-vibrant):not(.navbar-inverted) + .content .navbar-top {
+  .navbar-vertical.navbar-expand-sm:where(:not(.navbar-card):not(.navbar-vibrant):not(.navbar-inverted)) + .content .navbar-top {
     margin-right: -1.5rem;
+    padding-right: 1.5rem;
   }
   .navbar-vertical-collapsed .navbar-vertical.navbar-expand-sm {
     z-index: 1030;
@@ -24110,6 +24119,7 @@ h5, .h5 {
   }
   .navbar-vertical-collapsed:not(.navbar-vertical-collapsed-hover) .navbar-vertical.navbar-expand-sm .navbar-vertical-divider {
     max-width: 2rem;
+    margin-inline: auto;
   }
   .navbar-vertical-collapsed:not(.navbar-vertical-collapsed-hover) .navbar-vertical.navbar-expand-sm .navbar-collapse {
     margin-right: -0.5rem;
@@ -24226,8 +24236,9 @@ h5, .h5 {
 .navbar-vertical.navbar-expand-xs + .content .navbar-top .navbar-brand {
   display: none;
 }
-.navbar-vertical.navbar-expand-xs:not(.navbar-card):not(.navbar-vibrant):not(.navbar-inverted) + .content .navbar-top {
+.navbar-vertical.navbar-expand-xs:where(:not(.navbar-card):not(.navbar-vibrant):not(.navbar-inverted)) + .content .navbar-top {
   margin-right: -1.5rem;
+  padding-right: 1.5rem;
 }
 
 .navbar-vertical-collapsed .navbar-vertical.navbar-expand-xs {
@@ -24291,6 +24302,7 @@ h5, .h5 {
 }
 .navbar-vertical-collapsed:not(.navbar-vertical-collapsed-hover) .navbar-vertical.navbar-expand-xs .navbar-vertical-divider {
   max-width: 2rem;
+  margin-inline: auto;
 }
 .navbar-vertical-collapsed:not(.navbar-vertical-collapsed-hover) .navbar-vertical.navbar-expand-xs .navbar-collapse {
   margin-right: -0.5rem;

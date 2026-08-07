@@ -257,12 +257,17 @@
       // rail's right edge and the top bar for the whole height of the top
       // band. Pulling the bar's left edge to the rail closes it: the bar's
       // bottom hairline now meets the rail's vertical hairline in a clean
-      // T-junction. In collapsed mode the bar slides under the rail
-      // (z-index 1030 > 1020), which reads the same.
-      &:not(.navbar-card):not(.navbar-vibrant):not(.navbar-inverted)
+      // T-junction, and the padding gives the pulled margin back so the
+      // bar's CONTENT (search box) stays on the content grid, aligned with
+      // the cards below it. `:where()` keeps this at base specificity: in
+      // collapsed mode the bar slides under the higher-z rail and the
+      // collapsed block's own padding-left MUST win — it is the clearance
+      // for the brand logo, which overflows the 44px icon rail by design.
+      &:where(:not(.navbar-card):not(.navbar-vibrant):not(.navbar-inverted))
         + .content
         .navbar-top {
         margin-left: -1.5rem;
+        padding-left: 1.5rem;
       }
     }
 
@@ -336,6 +341,10 @@
           }
           .navbar-vertical-divider {
             max-width: 2rem;
+            // Centered under the icons, not hugging the left padding: on the
+            // white rail a left-aligned 2rem dash read as a stray gray line
+            // rather than as a deliberate realm separator.
+            margin-inline: auto;
           }
           // Tighten the collapsed icon-only rail and centre its icons. The rail
           // background is the same navy as the page body, so the visible band
