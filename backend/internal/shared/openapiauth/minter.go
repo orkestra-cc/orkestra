@@ -231,15 +231,18 @@ func (m *Minter) mint(ctx context.Context) (string, time.Duration, error) {
 	}
 
 	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		// The response body can echo back account/credential details from a
+		// third-party OpenAPI.it product — report status and size, never
+		// the content.
 		m.logger.Error("openapi auth: credentials rejected",
 			"tag", m.cfg.Tag,
 			"status", resp.StatusCode,
-			"body", string(respBody),
+			"bytes", len(respBody),
 		)
-		return "", 0, fmt.Errorf("%w: status %d: %s", ErrUpstreamAuth, resp.StatusCode, truncate(string(respBody), 200))
+		return "", 0, fmt.Errorf("%w: status %d (%d bytes)", ErrUpstreamAuth, resp.StatusCode, len(respBody))
 	}
 	if resp.StatusCode >= 400 {
-		return "", 0, fmt.Errorf("%w: status %d: %s", ErrUpstreamUnreachable, resp.StatusCode, truncate(string(respBody), 200))
+		return "", 0, fmt.Errorf("%w: status %d (%d bytes)", ErrUpstreamUnreachable, resp.StatusCode, len(respBody))
 	}
 
 	var parsed mintResponse
@@ -253,7 +256,7 @@ func (m *Minter) mint(ctx context.Context) (string, time.Duration, error) {
 		ttlSec = parsed.Data.TTL
 	}
 	if tok == "" {
-		return "", 0, fmt.Errorf("%w: empty token in response: %s", ErrUpstreamMalformed, truncate(string(respBody), 200))
+		return "", 0, fmt.Errorf("%w: empty token in response (%d bytes)", ErrUpstreamMalformed, len(respBody))
 	}
 	if ttlSec <= 0 {
 		ttlSec = m.cfg.TTL
@@ -297,11 +300,4 @@ func decodeCachedToken(s string) (string, time.Duration, error) {
 	}
 	rem := time.Until(time.Unix(unix, 0))
 	return tok, rem, nil
-}
-
-func truncate(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n] + "…"
 }
