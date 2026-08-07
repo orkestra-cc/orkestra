@@ -225,7 +225,8 @@ Vitest + React Testing Library + happy-dom + MSW. The infra lives in `src/test/`
 
 | File                   | Purpose                                                                                                                                                                 |
 | ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/test/setup.ts`    | Vitest global setup — jest-dom matchers, MSW lifecycle (`onUnhandledRequest: 'error'` so missing stubs fail loud), `resetCapturedRequests()` between tests              |
+| `src/test/setup.ts`    | Vitest global setup — jest-dom matchers, MSW lifecycle (`onUnhandledRequest: 'error'` so missing stubs fail loud), `resetCapturedRequests()` between tests. `./webStorage` **must stay its first import** — see that row                                              |
+| `src/test/webStorage.ts` | Restores `localStorage` / `sessionStorage` on Node ≥ 25 — see the gotcha below. Guarded, so it no-ops on the pinned Node 24. Imported for its side effect, and first: ES imports are hoisted, so a plain statement in `setup.ts` would run after every other import had had its chance to touch storage |
 | `src/test/server.ts`   | Single shared `setupServer(...defaultHandlers)` reused by every test file                                                                                               |
 | `src/test/handlers.ts` | Default MSW handlers + per-endpoint request capture (`capturedRequests.billingStatsParams` etc.) for tests that need to assert outbound params                          |
 | `src/test/render.tsx`  | `renderWithProviders(ui, { preloadedState, store, routerEntries })` — wraps in a fresh non-persisted Redux store + `MemoryRouter`. Returns `{ store, ...renderResult }` |
@@ -246,6 +247,7 @@ expect(store.getState().auth.accessToken).toBe('...');
 **Configuration gotchas:**
 
 - `environment: 'happy-dom'` (not jsdom) — jsdom + MSW v2 + Node fetch trip over `RequestInit: Expected signal to be an instance of AbortSignal`.
+- **Web Storage is undefined on Node ≥ 25 without a shim.** Node 25 added global `localStorage` / `sessionStorage`, defined on `globalThis` as own accessors that evaluate to `undefined` (with an `ExperimentalWarning`) unless the process was started with `--localstorage-file`. Those own properties pre-empt the ones the happy-dom environment would install, so both globals — and `window.localStorage`, which resolves to the same binding here — read back undefined even though happy-dom implements Web Storage. `src/test/webStorage.ts` puts them back. The repo pins Node 24 (`.mise.toml`), so CI never saw this; a contributor on a newer Node did, as three unrelated red suites. Note the failure is not always legible: code that reads storage inside a reducer surfaces as a *timeout* on an unrelated assertion, not as a `TypeError`.
 
 ## Runtime config
 
