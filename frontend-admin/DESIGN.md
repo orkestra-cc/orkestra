@@ -127,7 +127,7 @@ The **Cool Graphite** ramp — 11 steps, neutral-cool with a whisper of blue, hi
 ### Dark theme (frozen)
 Dark mode keeps the pre-retune Falcon palette as literals: canvas **#0b1727**, cards **#121e2d** (2.9% tint of the canvas), body text **#9da9bb**, with the old blue-tinted ramp inverted for its grays.
 
-**The Frozen Dark Rule.** The dark theme is pixel-frozen and permanently decoupled from the light ramp. Never derive a dark value from `$gray-*` or the light tokens; dark values are literals (see `_variables-dark.scss`, `root/_dark.scss`, and the freeze notes in `docs/superpowers/specs/2026-08-05-light-theme-neutral-grays-design.md`). Any future light retune must freeze its dark twins the same way.
+**The Frozen Dark Rule.** The dark theme is pixel-frozen and permanently decoupled from the light ramp. Never derive a dark value from `$gray-*` or the light tokens; dark values are literals (see `_variables-dark.scss` and `root/_dark.scss`, which carry the freeze notes inline). Any future light retune must freeze its dark twins the same way.
 
 **The Acting Blue Rule.** Orkestra Blue appears only where the operator can act or is acting (buttons, links, active/selected/focused states). Large decorative washes of primary are off-system.
 
