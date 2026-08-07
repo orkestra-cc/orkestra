@@ -1087,13 +1087,43 @@
       "save": "Salva"
     }
   },
-  "userScaffold": {
-    "dashboard": {
-      "pageTitle": "Dashboard",
-      "pageDescription": "La tua panoramica personale e il riepilogo attività",
-      "comingSoonTitle": "Dashboard in arrivo",
-      "comingSoonBody": "La tua dashboard personale con riepiloghi attività e azioni rapide sarà disponibile qui."
+  "userDashboard": {
+    "greeting": "Ciao, {{name}}",
+    "pageTitle": "La tua dashboard",
+    "pageDescription": "Il tuo account e la tua sicurezza a colpo d'occhio.",
+    "stats": {
+      "sessions": {
+        "title": "Sessioni attive"
+      },
+      "devices": {
+        "title": "Dispositivi attendibili"
+      },
+      "mfa": {
+        "title": "Due fattori",
+        "active": "Attiva",
+        "inactive": "Non attiva",
+        "setupBadge": "Da configurare"
+      },
+      "orgs": {
+        "title": "Organizzazioni"
+      }
     },
+    "security": {
+      "title": "Sicurezza account",
+      "open": "Gestisci la sicurezza",
+      "email": "Email",
+      "emailVerified": "Verificata",
+      "emailUnverified": "Non verificata",
+      "mfaRow": "Autenticazione a due fattori",
+      "mfaConfigure": "Configura ora",
+      "backupCodes": "Codici di backup",
+      "backupCodesLeft_one": "{{count}} rimasto",
+      "backupCodesLeft_other": "{{count}} rimasti",
+      "backupCodesRegenerate": "Rigenera",
+      "lastLogin": "Ultimo accesso"
+    }
+  },
+  "userScaffold": {
     "calendar": {
       "pageTitle": "Calendario",
       "pageDescription": "Visualizza e gestisci la tua agenda",

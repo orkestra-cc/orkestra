@@ -1087,13 +1087,43 @@
       "save": "Save"
     }
   },
-  "userScaffold": {
-    "dashboard": {
-      "pageTitle": "Dashboard",
-      "pageDescription": "Your personal overview and activity summary",
-      "comingSoonTitle": "Dashboard Coming Soon",
-      "comingSoonBody": "Your personal dashboard with activity summaries and quick actions will be available here."
+  "userDashboard": {
+    "greeting": "Hi, {{name}}",
+    "pageTitle": "Your dashboard",
+    "pageDescription": "Your account and security at a glance.",
+    "stats": {
+      "sessions": {
+        "title": "Active sessions"
+      },
+      "devices": {
+        "title": "Trusted devices"
+      },
+      "mfa": {
+        "title": "Two-factor",
+        "active": "Active",
+        "inactive": "Off",
+        "setupBadge": "Set up"
+      },
+      "orgs": {
+        "title": "Organizations"
+      }
     },
+    "security": {
+      "title": "Account security",
+      "open": "Manage security",
+      "email": "Email",
+      "emailVerified": "Verified",
+      "emailUnverified": "Not verified",
+      "mfaRow": "Two-factor authentication",
+      "mfaConfigure": "Set up now",
+      "backupCodes": "Backup codes",
+      "backupCodesLeft_one": "{{count}} left",
+      "backupCodesLeft_other": "{{count}} left",
+      "backupCodesRegenerate": "Regenerate",
+      "lastLogin": "Last sign-in"
+    }
+  },
+  "userScaffold": {
     "calendar": {
       "pageTitle": "Calendar",
       "pageDescription": "View and manage your schedule",

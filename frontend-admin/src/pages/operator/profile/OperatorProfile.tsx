@@ -1,7 +1,7 @@
 import { useGetCurrentUserQuery } from 'store/api/authApi';
 import OperatorBanner from './OperatorBanner';
 import OperatorProfileIntro from './OperatorProfileIntro';
-import OperatorMembershipsCard from './OperatorMembershipsCard';
+import OperatorMembershipsCard from 'components/common/OperatorMembershipsCard';
 import { Col, Row, Alert, Spinner } from 'react-bootstrap';
 import { useTranslation } from 'react-i18next';
 import type { User } from 'store/api/userApi';
