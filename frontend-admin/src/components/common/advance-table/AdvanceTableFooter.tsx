@@ -108,21 +108,23 @@ export const AdvanceTableFooter = ({
       </Flex>
       {navButtons && (
         <Flex>
+          {/* Real `disabled` attribute, not just the class: the class-only
+              version stayed focusable and was announced as actionable by
+              screen readers while doing nothing. */}
           <Button
             size="sm"
             variant={getCanPreviousPage() ? 'primary' : 'tertiary'}
             onClick={() => previousPage()}
-            className={classNames({ disabled: !getCanPreviousPage() })}
+            disabled={!getCanPreviousPage()}
           >
             {t('table.previous')}
           </Button>
           <Button
             size="sm"
             variant={getCanNextPage() ? 'primary' : 'tertiary'}
-            className={classNames('px-4 ms-2', {
-              disabled: !getCanNextPage()
-            })}
+            className="px-4 ms-2"
             onClick={() => nextPage()}
+            disabled={!getCanNextPage()}
           >
             {t('table.next')}
           </Button>

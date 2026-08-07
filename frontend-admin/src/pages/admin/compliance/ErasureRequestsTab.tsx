@@ -1,6 +1,7 @@
 import { Spinner } from 'react-bootstrap';
 import { faUserSlash } from '@fortawesome/free-solid-svg-icons';
 import type { CellContext, ColumnDef } from '@tanstack/react-table';
+import { useTranslation } from 'react-i18next';
 import { toast } from 'react-toastify';
 import IconButton from 'components/common/IconButton';
 import SubtleBadge from 'components/common/SubtleBadge';
@@ -19,6 +20,7 @@ import { erasureStatusColor, formatDateTime } from './complianceFormat';
 // a hard delete (step-up-gated on the backend, may be blocked by a legal hold)
 // or reject the request. Destructive 401s are replayed by the global StepUpModal.
 const ErasureRequestsTab = () => {
+  const { t } = useTranslation();
   const { data, isLoading } = useListErasureRequestsQuery();
   const [execute] = useExecuteErasureRequestMutation();
   const [reject] = useRejectErasureRequestMutation();
@@ -26,24 +28,24 @@ const ErasureRequestsTab = () => {
   const onExecute = async (id: string) => {
     try {
       await execute({ id, mode: 'hard_delete' }).unwrap();
-      toast.success('Erasure executed');
+      toast.success(t('adminCompliance.erasure.executeSuccess'));
     } catch {
-      toast.error('Execute failed (or blocked by a legal hold)');
+      toast.error(t('adminCompliance.erasure.executeError'));
     }
   };
   const onReject = async (id: string) => {
     try {
       await reject({ id }).unwrap();
-      toast.success('Request rejected');
+      toast.success(t('adminCompliance.erasure.rejectSuccess'));
     } catch {
-      toast.error('Reject failed');
+      toast.error(t('adminCompliance.erasure.rejectError'));
     }
   };
 
   const columns: ColumnDef<ErasureRequest>[] = [
     {
       accessorKey: 'userUuid',
-      header: 'Subject',
+      header: t('adminCompliance.erasure.columns.subject'),
       meta: { headerProps: { className: 'text-900' } },
       cell: ({ row: { original } }: CellContext<ErasureRequest, unknown>) => (
         <span className="font-monospace small">{original.userUuid}</span>
@@ -51,31 +53,33 @@ const ErasureRequestsTab = () => {
     },
     {
       accessorKey: 'reason',
-      header: 'Reason',
+      header: t('adminCompliance.erasure.columns.reason'),
       meta: { headerProps: { className: 'text-900' } },
       cell: ({ row: { original } }: CellContext<ErasureRequest, unknown>) =>
         original.reason || '—'
     },
     {
       accessorKey: 'status',
-      header: 'Status',
+      header: t('adminCompliance.erasure.columns.status'),
       meta: { headerProps: { className: 'text-900' } },
       cell: ({ row: { original } }: CellContext<ErasureRequest, unknown>) => (
         <SubtleBadge pill bg={erasureStatusColor(original.status)}>
-          {original.status}
+          {t(`adminCompliance.status.${original.status}`, {
+            defaultValue: original.status
+          })}
         </SubtleBadge>
       )
     },
     {
       accessorKey: 'requestedAt',
-      header: 'Requested',
+      header: t('adminCompliance.erasure.columns.requested'),
       meta: { headerProps: { className: 'text-900' } },
       cell: ({ row: { original } }: CellContext<ErasureRequest, unknown>) =>
         formatDateTime(original.requestedAt)
     },
     {
       id: 'actions',
-      header: 'Actions',
+      header: t('adminCompliance.erasure.columns.actions'),
       enableSorting: false,
       meta: {
         headerProps: { className: 'text-end text-900' },
@@ -90,7 +94,7 @@ const ErasureRequestsTab = () => {
             className="me-2"
             onClick={() => onExecute(original.uuid)}
           >
-            Execute
+            {t('adminCompliance.erasure.execute')}
           </IconButton>
           <IconButton
             size="sm"
@@ -98,7 +102,7 @@ const ErasureRequestsTab = () => {
             icon="ban"
             onClick={() => onReject(original.uuid)}
           >
-            Reject
+            {t('adminCompliance.erasure.reject')}
           </IconButton>
         </>
       )
@@ -111,21 +115,21 @@ const ErasureRequestsTab = () => {
     <SectionCard
       icon={faUserSlash}
       iconColor="warning"
-      title="Erasure Requests"
+      title={t('adminCompliance.erasure.sectionTitle')}
     >
       {isLoading ? (
         <Spinner animation="border" size="sm" className="mt-2" />
       ) : items.length === 0 ? (
         <ComplianceEmptyState
           icon={faUserSlash}
-          message="No pending erasure requests."
-          hint="Data-subject erasure requests awaiting review will appear here."
+          message={t('adminCompliance.erasure.emptyMessage')}
+          hint={t('adminCompliance.erasure.emptyHint')}
         />
       ) : (
         <ComplianceTable
           data={items}
           columns={columns}
-          searchPlaceholder="Search by subject or reason"
+          searchPlaceholder={t('adminCompliance.erasure.searchPlaceholder')}
         />
       )}
     </SectionCard>

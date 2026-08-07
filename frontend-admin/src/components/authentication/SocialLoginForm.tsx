@@ -98,6 +98,18 @@ const SocialLoginForm = ({
     }
   };
 
+  // The "or continue with" divider belongs to this component, not the login
+  // page: it only makes sense when a social section actually renders below
+  // the password form.
+  const Divider = () => (
+    <div className="position-relative mt-4 mb-3">
+      <hr className="text-300" />
+      <div className="divider-content-center">
+        {t('auth.pages.loginContinueWith')}
+      </div>
+    </div>
+  );
+
   // Loading: placeholder while the providers query is in flight. We
   // intentionally do NOT render the buttons optimistically — the whole
   // point of this component is to honor the admin's enable/disable
@@ -105,10 +117,13 @@ const SocialLoginForm = ({
   // briefly contradict that.
   if (isLoading) {
     return (
-      <div className="text-center my-3" aria-busy="true">
-        <Spinner animation="border" size="sm" className="me-2" />
-        <small className="text-muted">{t('auth.social.loading')}</small>
-      </div>
+      <>
+        <Divider />
+        <div className="text-center my-3" aria-busy="true">
+          <Spinner animation="border" size="sm" className="me-2" />
+          <small className="text-muted">{t('auth.social.loading')}</small>
+        </div>
+      </>
     );
   }
 
@@ -118,63 +133,67 @@ const SocialLoginForm = ({
   // of the social path until the next refresh.
   if (isError) {
     return (
-      <Alert variant="warning" className="mb-3">
-        {t('auth.social.loadError')}
-      </Alert>
+      <>
+        <Divider />
+        <Alert variant="warning" className="mb-3">
+          {t('auth.social.loadError')}
+        </Alert>
+      </>
     );
   }
 
-  // Empty: configured providers list is empty (either nothing was set
-  // up in /admin/modules/auth or the admin disabled all of them).
-  // Render a muted line so the user knows the section is intentionally
-  // empty rather than broken.
+  // Empty: configured providers list is empty (either nothing was set up in
+  // /admin/modules/auth or the admin disabled all of them). Render nothing:
+  // a sign-in page must not explain operator configuration to visitors, and
+  // without a section there is nothing for the divider to introduce.
   if (socialProviders.length === 0) {
-    return (
-      <div className="text-center my-3">
-        <small className="text-muted">{t('auth.social.noneAvailable')}</small>
-      </div>
-    );
+    return null;
   }
 
   return (
-    <Form>
-      {error && (
-        <Alert variant="danger" className="mb-3">
-          <div className="d-flex justify-content-between align-items-center">
-            <span>{error}</span>
+    <>
+      <Divider />
+      <Form>
+        {error && (
+          <Alert variant="danger" className="mb-3">
+            <div className="d-flex justify-content-between align-items-center">
+              <span>{error}</span>
+              <Button
+                variant="link"
+                size="sm"
+                className="p-0"
+                onClick={() => setError('')}
+              >
+                ×
+              </Button>
+            </div>
+          </Alert>
+        )}
+
+        <div className="d-grid gap-3">
+          {socialProviders.map(({ provider, icon, label, variant }) => (
             <Button
-              variant="link"
-              size="sm"
-              className="p-0"
-              onClick={() => setError('')}
+              key={provider}
+              onClick={() => handleSocialLogin(provider)}
+              disabled={loadingProvider !== null}
+              variant={variant}
+              size="lg"
             >
-              ×
+              <FontAwesomeIcon icon={icon} className="me-2" />
+              {loadingProvider === provider
+                ? t('auth.social.redirectingTo', { provider: label })
+                : label}
             </Button>
-          </div>
-        </Alert>
-      )}
+          ))}
+        </div>
 
-      <div className="d-grid gap-3">
-        {socialProviders.map(({ provider, icon, label, variant }) => (
-          <Button
-            key={provider}
-            onClick={() => handleSocialLogin(provider)}
-            disabled={loadingProvider !== null}
-            variant={variant}
-            size="lg"
-          >
-            <FontAwesomeIcon icon={icon} className="me-2" />
-            {loadingProvider === provider
-              ? t('auth.social.redirectingTo', { provider: label })
-              : label}
-          </Button>
-        ))}
-      </div>
-
-      <div className="text-center mt-4">
-        <small className="text-muted">{t('auth.social.acceptingTerms')}</small>
-      </div>
-    </Form>
+        <div className="text-center mt-4">
+          <small className="text-muted">
+            {t('auth.social.acceptingTerms')}
+          </small>
+        </div>
+      </Form>
+    </>
   );
 };
 

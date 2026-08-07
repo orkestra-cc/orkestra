@@ -8,7 +8,8 @@
 
   .search-box-icon {
     position: absolute;
-    color: var(--#{$prefix}gray-400);
+    // Muted-icon step of the ramp — gray-400 was sub-3:1 on the field.
+    color: var(--#{$prefix}gray-500);
     top: 50%;
     left: 0.9rem;
     transform: translateY(-48%);
@@ -23,8 +24,11 @@
     padding-left: 2rem;
     padding-right: 2rem;
     line-height: 1.7;
-    border-radius: 50rem;
-    box-shadow: none;
+    // Control radius, not a pill: the search field is an instrument like
+    // every other input in the console (Shapes: 0.25rem on controls).
+    // No box-shadow:none here — it suppressed the :focus ring, and focus
+    // must always be visible (WCAG 2.2).
+    border-radius: var(--#{$prefix}border-radius);
 
     &::-webkit-search-cancel-button {
       display: none;

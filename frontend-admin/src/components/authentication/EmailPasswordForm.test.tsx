@@ -6,6 +6,7 @@ import userEvent from '@testing-library/user-event';
 import { renderWithProviders } from 'test/render';
 import { server } from 'test/server';
 import EmailPasswordForm from './EmailPasswordForm';
+import { DEFAULT_POST_LOGIN } from 'utils/returnTo';
 
 // Default policy handler — login + registration enabled. Individual tests
 // that need the kill switch override this.
@@ -38,7 +39,7 @@ const renderForm = (from?: unknown) =>
     <Routes>
       <Route path="/login" element={<EmailPasswordForm />} />
       <Route
-        path="/dashboard/analytics"
+        path={DEFAULT_POST_LOGIN}
         element={<LocationProbe label="dashboard" />}
       />
       <Route
@@ -92,7 +93,7 @@ describe('EmailPasswordForm', () => {
     await user.click(screen.getByRole('button', { name: /sign in/i }));
 
     expect(await screen.findByTestId('dashboard-pathname')).toHaveTextContent(
-      '/dashboard/analytics'
+      DEFAULT_POST_LOGIN
     );
     // Redux auth slice was seeded with the response body. Without this the
     // app would render the dashboard route but every protected query would
@@ -179,7 +180,7 @@ describe('EmailPasswordForm', () => {
     await user.click(screen.getByRole('button', { name: /sign in/i }));
 
     expect(await screen.findByTestId('dashboard-pathname')).toHaveTextContent(
-      '/dashboard/analytics'
+      DEFAULT_POST_LOGIN
     );
     expect(screen.queryByTestId('deeplink-pathname')).toBeNull();
   });

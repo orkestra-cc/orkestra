@@ -37,18 +37,8 @@
   // `.card` already casts. The border-top alone is enough separation from
   // the scrolling content above it.
 
-  // The bar's resting state is a *disabled* Save, so this is the state the
-  // operator sees most, and Bootstrap renders it as the primary fill at
-  // `opacity: .5`. That composites to 1.9-2.4:1 in light — an unreadable
-  // ghost — and to ~2.6-3.1:1 in dark, where it still reads as an enabled
-  // blue button, so a dark-theme operator clicks a no-op. Give it a real
-  // disabled treatment instead: a neutral fill at full opacity, with a label
-  // that clears AA on it (gray-700 on gray-200 = 7.85:1 in light).
-  .btn-primary:disabled,
-  .btn-primary.disabled {
-    opacity: 1;
-    color: var(--#{$prefix}gray-700);
-    background-color: var(--#{$prefix}gray-200);
-    border-color: var(--#{$prefix}gray-400);
-  }
+  // The bar's resting state is a *disabled* Save — the neutral full-opacity
+  // disabled treatment this rule used to carry is now the console-wide
+  // default for every filled variant (see _buttons.scss), so nothing
+  // save-bar-specific remains.
 }

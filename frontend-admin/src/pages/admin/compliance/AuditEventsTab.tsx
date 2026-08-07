@@ -1,6 +1,7 @@
 import { Spinner } from 'react-bootstrap';
 import { faClipboardList } from '@fortawesome/free-solid-svg-icons';
 import type { CellContext, ColumnDef } from '@tanstack/react-table';
+import { useTranslation } from 'react-i18next';
 import SubtleBadge from 'components/common/SubtleBadge';
 import {
   useListAuditEventsQuery,
@@ -13,19 +14,20 @@ import { formatDateTime, outcomeColor } from './complianceFormat';
 
 // AuditEventsTab renders the immutable audit trail (latest 50 events). Read-only.
 const AuditEventsTab = () => {
+  const { t } = useTranslation();
   const { data, isLoading } = useListAuditEventsQuery({ limit: 50 });
 
   const columns: ColumnDef<AuditEvent>[] = [
     {
       accessorKey: 'timestamp',
-      header: 'Time',
+      header: t('adminCompliance.audit.columns.time'),
       meta: { headerProps: { className: 'text-900' } },
       cell: ({ row: { original } }: CellContext<AuditEvent, unknown>) =>
         formatDateTime(original.timestamp)
     },
     {
       accessorKey: 'action',
-      header: 'Action',
+      header: t('adminCompliance.audit.columns.action'),
       meta: { headerProps: { className: 'text-900' } },
       cell: ({ row: { original } }: CellContext<AuditEvent, unknown>) => (
         <span className="font-monospace small">{original.action}</span>
@@ -33,7 +35,7 @@ const AuditEventsTab = () => {
     },
     {
       id: 'actor',
-      header: 'Actor',
+      header: t('adminCompliance.audit.columns.actor'),
       meta: { headerProps: { className: 'text-900' } },
       cell: ({ row: { original } }: CellContext<AuditEvent, unknown>) => (
         <span className="small">
@@ -43,7 +45,7 @@ const AuditEventsTab = () => {
     },
     {
       id: 'resource',
-      header: 'Resource',
+      header: t('adminCompliance.audit.columns.resource'),
       meta: { headerProps: { className: 'text-900' } },
       cell: ({ row: { original } }: CellContext<AuditEvent, unknown>) => (
         <span className="small">
@@ -54,11 +56,13 @@ const AuditEventsTab = () => {
     },
     {
       accessorKey: 'outcome',
-      header: 'Outcome',
+      header: t('adminCompliance.audit.columns.outcome'),
       meta: { headerProps: { className: 'text-900' } },
       cell: ({ row: { original } }: CellContext<AuditEvent, unknown>) => (
         <SubtleBadge pill bg={outcomeColor(original.outcome)}>
-          {original.outcome}
+          {t(`adminCompliance.status.${original.outcome}`, {
+            defaultValue: original.outcome
+          })}
         </SubtleBadge>
       )
     }
@@ -70,21 +74,21 @@ const AuditEventsTab = () => {
     <SectionCard
       icon={faClipboardList}
       iconColor="primary"
-      title="Audit Events"
+      title={t('adminCompliance.audit.sectionTitle')}
     >
       {isLoading ? (
         <Spinner animation="border" size="sm" className="mt-2" />
       ) : items.length === 0 ? (
         <ComplianceEmptyState
           icon={faClipboardList}
-          message="No audit events."
-          hint="Security-relevant actions across the platform are recorded here."
+          message={t('adminCompliance.audit.emptyMessage')}
+          hint={t('adminCompliance.audit.emptyHint')}
         />
       ) : (
         <ComplianceTable
           data={items}
           columns={columns}
-          searchPlaceholder="Search by action, actor or resource"
+          searchPlaceholder={t('adminCompliance.audit.searchPlaceholder')}
         />
       )}
     </SectionCard>

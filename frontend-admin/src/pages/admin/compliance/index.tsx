@@ -1,13 +1,13 @@
-import { Col, Nav, Row, Tab } from 'react-bootstrap';
+import { Card, Col, Nav, Row, Tab } from 'react-bootstrap';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
   faClipboardList,
   faClockRotateLeft,
   faGavel,
-  faShieldHalved,
   faUserSlash
 } from '@fortawesome/free-solid-svg-icons';
 import { useSearchParams } from 'react-router';
+import { useTranslation } from 'react-i18next';
 import {
   useListAuditEventsQuery,
   useListErasureRequestsQuery,
@@ -28,13 +28,26 @@ import RetentionTab from './RetentionTab';
 // to the `?tab=` query param so the view is shareable and survives a refresh.
 
 const TABS = [
-  { key: 'requests', label: 'Erasure Requests', icon: faUserSlash },
-  { key: 'holds', label: 'Legal Holds', icon: faGavel },
-  { key: 'retention', label: 'Retention', icon: faClockRotateLeft },
-  { key: 'audit', label: 'Audit Events', icon: faClipboardList }
+  {
+    key: 'requests',
+    labelKey: 'adminCompliance.tabs.erasureRequests',
+    icon: faUserSlash
+  },
+  { key: 'holds', labelKey: 'adminCompliance.tabs.legalHolds', icon: faGavel },
+  {
+    key: 'retention',
+    labelKey: 'adminCompliance.tabs.retention',
+    icon: faClockRotateLeft
+  },
+  {
+    key: 'audit',
+    labelKey: 'adminCompliance.tabs.auditEvents',
+    icon: faClipboardList
+  }
 ] as const;
 
 const CompliancePage = () => {
+  const { t } = useTranslation();
   const [searchParams, setSearchParams] = useSearchParams();
   const activeTab = searchParams.get('tab') || 'requests';
 
@@ -62,55 +75,64 @@ const CompliancePage = () => {
 
   return (
     <>
-      <div className="mb-3">
-        <h2 className="mb-1">
-          <FontAwesomeIcon
-            icon={faShieldHalved}
-            className="me-2 text-primary"
-          />
-          Compliance
-        </h2>
-        <p className="text-muted mb-0">
-          Audit trail &amp; GDPR data-subject rights — review erasure requests,
-          manage legal holds, preview retention cleanup, and read the audit log.
-        </p>
-      </div>
+      <Card className="mb-3">
+        <Card.Body className="py-3 px-4">
+          {/* h3 = the shared admin page-header genre (see /admin/modules). */}
+          <h3 className="mb-1">{t('adminCompliance.pageTitle')}</h3>
+          <p className="text-muted mb-0 fs-10">
+            {t('adminCompliance.pageSubtitle')}
+          </p>
+        </Card.Body>
+      </Card>
 
       <Row className="g-3 mb-3">
         <Col md={6} lg={3}>
           <StatCard
-            title="Pending Erasures"
+            title={t('adminCompliance.stats.pendingErasures.title')}
             value={pendingErasures}
             icon={faUserSlash}
             color="warning"
-            subtitle="Awaiting review"
+            accent={pendingErasures > 0 ? 'warning' : undefined}
+            subtitle={t('adminCompliance.stats.pendingErasures.subtitle')}
             badge={
-              pendingErasures > 0 ? { text: 'Needs attention' } : undefined
+              pendingErasures > 0
+                ? { text: t('adminCompliance.stats.pendingErasures.badge') }
+                : undefined
             }
             loading={erasures.isLoading}
           />
         </Col>
         <Col md={6} lg={3}>
           <StatCard
-            title="Active Legal Holds"
+            title={t('adminCompliance.stats.activeHolds.title')}
             value={activeHolds}
             icon={faGavel}
             color="danger"
-            subtitle="Blocking erasure"
-            badge={activeHolds > 0 ? { text: 'Erasure blocked' } : undefined}
+            accent={activeHolds > 0 ? 'danger' : undefined}
+            subtitle={t('adminCompliance.stats.activeHolds.subtitle')}
+            badge={
+              activeHolds > 0
+                ? { text: t('adminCompliance.stats.activeHolds.badge') }
+                : undefined
+            }
             loading={holds.isLoading}
           />
         </Col>
         <Col md={6} lg={3}>
           <StatCard
-            title="Retention Candidates"
+            title={t('adminCompliance.stats.retentionCandidates.title')}
             value={retentionCandidates}
             icon={faClockRotateLeft}
             color="info"
-            subtitle="Past retention window"
+            accent={retentionCandidates > 0 ? 'info' : undefined}
+            subtitle={t('adminCompliance.stats.retentionCandidates.subtitle')}
             badge={
               retentionCandidates > 0
-                ? { text: `${retentionCandidates} subjects` }
+                ? {
+                    text: t('adminCompliance.stats.retentionCandidates.badge', {
+                      count: retentionCandidates
+                    })
+                  }
                 : undefined
             }
             loading={retention.isLoading}
@@ -118,11 +140,11 @@ const CompliancePage = () => {
         </Col>
         <Col md={6} lg={3}>
           <StatCard
-            title="Audit Events"
+            title={t('adminCompliance.stats.auditEvents.title')}
             value={audit.data?.total ?? 0}
             icon={faClipboardList}
             color="primary"
-            subtitle="Recorded total"
+            subtitle={t('adminCompliance.stats.auditEvents.subtitle')}
             loading={audit.isLoading}
           />
         </Col>
@@ -134,7 +156,7 @@ const CompliancePage = () => {
             <Nav.Item key={tab.key}>
               <Nav.Link eventKey={tab.key} className="text-nowrap">
                 <FontAwesomeIcon icon={tab.icon} className="me-2" />
-                {tab.label}
+                {t(tab.labelKey)}
               </Nav.Link>
             </Nav.Item>
           ))}

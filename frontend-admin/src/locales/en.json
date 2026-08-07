@@ -314,7 +314,6 @@
       "initiateFailed": "Failed to initiate {{provider}} login",
       "acceptingTerms": "By signing in, you accept our Terms of Service and Privacy Policy.",
       "loading": "Loading sign-in options...",
-      "noneAvailable": "No social sign-in providers are currently enabled.",
       "loadError": "Could not load the social sign-in options. Please try again.",
       "callback": {
         "failureTitle": "Authentication failed",
@@ -348,6 +347,14 @@
       "termsLink": "terms of service",
       "and": "and",
       "privacyLink": "privacy policy"
+    },
+    "cardLayout": {
+      "restrictedNotice": "Restricted access: this console is for internal use only.",
+      "unauthorizedNotice": "Any unauthorized use will be treated as a violation and may entail civil and criminal liability under applicable law.",
+      "termsPrefix": "Read",
+      "termsLink": "the terms",
+      "termsConjunction": "and",
+      "conditionsLink": "the conditions"
     }
   },
   "userMfa": {
@@ -1667,9 +1674,6 @@
     }
   },
   "adminUsers": {
-    "welcomeKicker": "Welcome to",
-    "welcomeTitle": "User",
-    "welcomeTitleAccent": " Management",
     "roles": {
       "super_admin": "Super Admin",
       "administrator": "Administrator",
@@ -1762,7 +1766,8 @@
       "toastPasswordResetSent": "Password reset email sent to {{user}}.",
       "toastPasswordResetFailed": "Could not send password reset: {{error}}",
       "toastDeleted": "{{user}} was deleted.",
-      "toastDeleteFailed": "Could not delete {{user}}: {{error}}"
+      "toastDeleteFailed": "Could not delete {{user}}: {{error}}",
+      "menuLabel": "Actions for {{name}}"
     },
     "deleteModal": {
       "title": "Delete user",
@@ -1801,6 +1806,153 @@
         "deactivate": "deactivate",
         "delete": "delete"
       }
+    },
+    "pageTitle": "User management",
+    "columns": {
+      "user": "User",
+      "role": "Role",
+      "loginWith": "Login with",
+      "status": "Status",
+      "lastLogin": "Last login",
+      "createdOn": "Created on",
+      "actions": "Actions",
+      "never": "Never"
+    },
+    "status": {
+      "active": "Active",
+      "inactive": "Inactive"
+    }
+  },
+  "adminCompliance": {
+    "pageTitle": "Compliance",
+    "pageSubtitle": "Audit trail & GDPR data-subject rights — review erasure requests, manage legal holds, preview retention cleanup, and read the audit log.",
+    "tabs": {
+      "erasureRequests": "Erasure Requests",
+      "legalHolds": "Legal Holds",
+      "retention": "Retention",
+      "auditEvents": "Audit Events"
+    },
+    "stats": {
+      "pendingErasures": {
+        "title": "Pending Erasures",
+        "subtitle": "Awaiting review",
+        "badge": "Needs attention"
+      },
+      "activeHolds": {
+        "title": "Active Legal Holds",
+        "subtitle": "Blocking erasure",
+        "badge": "Erasure blocked"
+      },
+      "retentionCandidates": {
+        "title": "Retention Candidates",
+        "subtitle": "Past retention window",
+        "badge_one": "{{count}} subject",
+        "badge_other": "{{count}} subjects"
+      },
+      "auditEvents": {
+        "title": "Audit Events",
+        "subtitle": "Recorded total"
+      }
+    },
+    "status": {
+      "pending": "Pending",
+      "completed": "Completed",
+      "executed": "Executed",
+      "rejected": "Rejected",
+      "active": "Active",
+      "released": "Released",
+      "success": "Success",
+      "denied": "Denied",
+      "error": "Error"
+    },
+    "erasure": {
+      "sectionTitle": "Erasure Requests",
+      "columns": {
+        "subject": "Subject",
+        "reason": "Reason",
+        "status": "Status",
+        "requested": "Requested",
+        "actions": "Actions"
+      },
+      "execute": "Execute",
+      "reject": "Reject",
+      "executeSuccess": "Erasure executed",
+      "executeError": "Execute failed (or blocked by a legal hold)",
+      "rejectSuccess": "Request rejected",
+      "rejectError": "Reject failed",
+      "emptyMessage": "No pending erasure requests.",
+      "emptyHint": "Data-subject erasure requests awaiting review will appear here.",
+      "searchPlaceholder": "Search by subject or reason"
+    },
+    "holds": {
+      "sectionTitle": "Legal Holds",
+      "columns": {
+        "subject": "Subject",
+        "reason": "Reason",
+        "case": "Case",
+        "status": "Status",
+        "placed": "Placed",
+        "actions": "Actions"
+      },
+      "form": {
+        "subjectLabel": "Subject userUuid",
+        "subjectPlaceholder": "e.g. 7f3c…",
+        "reasonLabel": "Reason",
+        "reasonPlaceholder": "Litigation hold reason",
+        "caseRefLabel": "Case ref",
+        "caseRefPlaceholder": "Optional",
+        "submit": "Place hold"
+      },
+      "release": "Release",
+      "placeSuccess": "Legal hold placed",
+      "placeError": "Place failed",
+      "releaseSuccess": "Legal hold released",
+      "releaseError": "Release failed",
+      "emptyMessage": "No active legal holds.",
+      "emptyHint": "Place a hold above to block erasure of a subject under litigation.",
+      "searchPlaceholder": "Search by subject, reason or case"
+    },
+    "retention": {
+      "sectionTitle": "Retention Preview",
+      "previewTitle": "Retention cleanup preview (dry run)",
+      "previewBody": "Anonymized tombstones past the retention window that the auto-cleanup job would hard-delete. Nothing is deleted from this screen.",
+      "cutoff": "Cutoff",
+      "candidates": "Candidates",
+      "purgeListTitle": "Subjects to be purged",
+      "emptyMessage": "Nothing past the retention window.",
+      "emptyHint": "Anonymized tombstones eligible for hard deletion will be listed here."
+    },
+    "audit": {
+      "sectionTitle": "Audit Events",
+      "columns": {
+        "time": "Time",
+        "action": "Action",
+        "actor": "Actor",
+        "resource": "Resource",
+        "outcome": "Outcome"
+      },
+      "emptyMessage": "No audit events.",
+      "emptyHint": "Security-relevant actions across the platform are recorded here.",
+      "searchPlaceholder": "Search by action, actor or resource"
+    }
+  },
+  "adminComplianceSoc2": {
+    "pageTitle": "SOC2 Evidence",
+    "pageSubtitle": "Point-in-time snapshot of Trust Service Criteria controls — privileged access, MFA coverage, failed-login trends, KMS lifecycle, and audit-trail health. Recomputed on every load.",
+    "refresh": "Refresh",
+    "generatedAt": "Generated {{date}}",
+    "disabled": {
+      "title": "SOC2 evidence is disabled",
+      "body": "Enable the <code>soc2_enabled</code> flag on the <strong>compliance</strong> module at <code>/admin/modules</code> to generate evidence snapshots."
+    },
+    "loadError": "Failed to generate the SOC2 evidence snapshot.",
+    "summary": {
+      "privileged_users": "Privileged Users",
+      "privileged_with_mfa": "Privileged with MFA",
+      "failed_logins_24h": "Failed Logins (24h)",
+      "kms_keys_active": "KMS Keys Active",
+      "kms_keys_shredded": "KMS Keys Shredded",
+      "audit_rows_24h": "Audit Rows (24h)"
     }
   },
   "adminModules": {
@@ -1997,6 +2149,12 @@
         "promoteBody": "This module will immediately start running with the {{environment}} configuration. The {{current}} profile stays saved and can be made active again the same way.",
         "promoteConfirm": "Make active",
         "cancel": "Cancel"
+      },
+      "healthStatus": {
+        "healthy": "Healthy",
+        "unhealthy": "Unhealthy",
+        "disabled": "Disabled",
+        "failed": "Failed"
       }
     },
     "loadError": "Failed to load modules. Check your permissions.",
@@ -2031,10 +2189,18 @@
         "oauth": {
           "label": "OAuth Providers",
           "desc": "Which providers are offered, and on which surface. Each provider's credentials appear once it is switched on.",
-          "google": { "label": "Google" },
-          "apple": { "label": "Apple" },
-          "github": { "label": "GitHub" },
-          "discord": { "label": "Discord" }
+          "google": {
+            "label": "Google"
+          },
+          "apple": {
+            "label": "Apple"
+          },
+          "github": {
+            "label": "GitHub"
+          },
+          "discord": {
+            "label": "Discord"
+          }
         },
         "antiabuse": {
           "label": "Anti-abuse & Notifications",
@@ -2045,14 +2211,30 @@
         }
       },
       "fields": {
-        "googleClientId": { "label": "Client ID" },
-        "googleClientSecret": { "label": "Client Secret" },
-        "googleRedirectURL": { "label": "Redirect URL" },
-        "googleAndroidClientId": { "label": "Android Client ID" },
-        "googleIOSClientId": { "label": "iOS Client ID" },
-        "appleClientId": { "label": "Client ID" },
-        "appleTeamId": { "label": "Team ID" },
-        "appleKeyId": { "label": "Key ID" },
+        "googleClientId": {
+          "label": "Client ID"
+        },
+        "googleClientSecret": {
+          "label": "Client Secret"
+        },
+        "googleRedirectURL": {
+          "label": "Redirect URL"
+        },
+        "googleAndroidClientId": {
+          "label": "Android Client ID"
+        },
+        "googleIOSClientId": {
+          "label": "iOS Client ID"
+        },
+        "appleClientId": {
+          "label": "Client ID"
+        },
+        "appleTeamId": {
+          "label": "Team ID"
+        },
+        "appleKeyId": {
+          "label": "Key ID"
+        },
         "applePrivateKey": {
           "label": ".p8 Key (PEM)",
           "desc": "Inline PEM content of your Apple Sign-In .p8 key"
@@ -2061,15 +2243,33 @@
           "label": ".p8 Key Path",
           "desc": "Filesystem path fallback if PEM is not inlined"
         },
-        "appleRedirectURL": { "label": "Redirect URL" },
-        "appleIOSClientId": { "label": "iOS Client ID" },
-        "appleAndroidClientId": { "label": "Android Client ID" },
-        "githubClientId": { "label": "Client ID" },
-        "githubClientSecret": { "label": "Client Secret" },
-        "githubRedirectURL": { "label": "Redirect URL" },
-        "discordClientId": { "label": "Client ID" },
-        "discordClientSecret": { "label": "Client Secret" },
-        "discordRedirectURL": { "label": "Redirect URL" },
+        "appleRedirectURL": {
+          "label": "Redirect URL"
+        },
+        "appleIOSClientId": {
+          "label": "iOS Client ID"
+        },
+        "appleAndroidClientId": {
+          "label": "Android Client ID"
+        },
+        "githubClientId": {
+          "label": "Client ID"
+        },
+        "githubClientSecret": {
+          "label": "Client Secret"
+        },
+        "githubRedirectURL": {
+          "label": "Redirect URL"
+        },
+        "discordClientId": {
+          "label": "Client ID"
+        },
+        "discordClientSecret": {
+          "label": "Client Secret"
+        },
+        "discordRedirectURL": {
+          "label": "Redirect URL"
+        },
         "registrationEnabledAdmin": {
           "label": "Allow signups on operator console",
           "desc": "OFF by default. When off, POST /v1/auth/operator/register returns 403 — operator accounts must be invited or created via /admin. The super_admin turns this on to allow self-service operator signups. The first account on a fresh install bypasses the switch so bootstrap is never blocked."
@@ -2126,9 +2326,15 @@
           "label": "Maximum length",
           "desc": "Upper bound on password length. Argon2id is not a bottleneck; raise this only if you have a concrete reason."
         },
-        "passwordRequireUpper": { "label": "Require an uppercase letter" },
-        "passwordRequireLower": { "label": "Require a lowercase letter" },
-        "passwordRequireDigit": { "label": "Require a digit" },
+        "passwordRequireUpper": {
+          "label": "Require an uppercase letter"
+        },
+        "passwordRequireLower": {
+          "label": "Require a lowercase letter"
+        },
+        "passwordRequireDigit": {
+          "label": "Require a digit"
+        },
         "passwordRequireSymbol": {
           "label": "Require a symbol",
           "desc": "Any non-alphanumeric character."
@@ -2137,14 +2343,30 @@
           "label": "Reject breached passwords (HIBP)",
           "desc": "k-anonymity lookup against haveibeenpwned.com — only the first 5 chars of the SHA-1 hash leave the server. Disable for air-gapped deployments."
         },
-        "googleEnabledAdmin": { "label": "Google on operator console" },
-        "googleEnabledClient": { "label": "Google on client app" },
-        "appleEnabledAdmin": { "label": "Apple on operator console" },
-        "appleEnabledClient": { "label": "Apple on client app" },
-        "githubEnabledAdmin": { "label": "GitHub on operator console" },
-        "githubEnabledClient": { "label": "GitHub on client app" },
-        "discordEnabledAdmin": { "label": "Discord on operator console" },
-        "discordEnabledClient": { "label": "Discord on client app" },
+        "googleEnabledAdmin": {
+          "label": "Google on operator console"
+        },
+        "googleEnabledClient": {
+          "label": "Google on client app"
+        },
+        "appleEnabledAdmin": {
+          "label": "Apple on operator console"
+        },
+        "appleEnabledClient": {
+          "label": "Apple on client app"
+        },
+        "githubEnabledAdmin": {
+          "label": "GitHub on operator console"
+        },
+        "githubEnabledClient": {
+          "label": "GitHub on client app"
+        },
+        "discordEnabledAdmin": {
+          "label": "Discord on operator console"
+        },
+        "discordEnabledClient": {
+          "label": "Discord on client app"
+        },
         "mfaEnabled": {
           "label": "Require MFA for privileged users",
           "desc": "Master switch, OFF by default so a fresh install's first super_admin can configure the platform without being blocked by an MFA prompt they never enrolled. Turn this ON only after enrolling a second factor (TOTP/passkey) — otherwise privileged users hit the enrollment grace window on their next login. When off, RoleRequiresMFA returns false; existing enrollments are not deleted and users can still verify voluntarily."
@@ -2291,6 +2513,7 @@
     "rowsCount": "{{from}} to {{to}} of {{total}}",
     "exportCsv": "Export CSV",
     "selectAllRows": "Select all rows",
-    "selectRow": "Select row"
+    "selectRow": "Select row",
+    "moreActions": "More actions"
   }
 }

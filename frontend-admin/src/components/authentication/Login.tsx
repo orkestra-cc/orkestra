@@ -33,13 +33,8 @@ const Login = () => {
 
           <EmailPasswordForm />
 
-          <div className="position-relative mt-4 mb-3">
-            <hr className="text-300" />
-            <div className="divider-content-center">
-              {t('auth.pages.loginContinueWith')}
-            </div>
-          </div>
-
+          {/* Renders its own "or continue with" divider, and nothing at all
+              when no provider is enabled. */}
           <SocialLoginForm />
         </Card.Body>
       </Card>

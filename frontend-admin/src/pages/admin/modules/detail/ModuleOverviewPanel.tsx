@@ -11,6 +11,7 @@ import StatCard from 'components/common/StatCard';
 import type { BadgeColor } from 'components/common/SubtleBadge';
 import type { ModuleConfig, ModuleHealthStatus } from 'store/api/moduleApi';
 import { configCompleteness } from '../configModel';
+import { formatDate } from 'helpers/dateFormat';
 
 interface ModuleOverviewPanelProps {
   module: ModuleConfig;
@@ -19,9 +20,9 @@ interface ModuleOverviewPanelProps {
 }
 
 /**
- * This string is the *headline value* of a StatCard, so it was the largest
- * untranslated text on the page \u2014 "11h ago" at 27.65px inside an otherwise
- * Italian console. Routed through `t()` like everything else on screen.
+ * Relative form of the last-modified timestamp, shown as the StatCard
+ * subtitle under the absolute date. Routed through `t()` like everything
+ * else on screen.
  */
 const formatRelativeTime = (t: TFunction, dateStr: string): string => {
   if (!dateStr) return '\u2014';
@@ -50,18 +51,19 @@ const formatRelativeTime = (t: TFunction, dateStr: string): string => {
  * tile recognisable. Same data, same icons, same colors — the difference was
  * purely that this page reimplemented the tile instead of importing it.
  *
- * `color` is the tile's status channel (it paints the 4px accent border), so
- * each card derives it from its own metric rather than picking a decorative
- * hue. The `badge` corner ribbon stays unused here: per DESIGN.md it is
- * reserved for real attention states, and "some dependencies are down" is
- * already carried by the border plus the `n/m` value.
+ * `color` styles the faded icon; the accent edge is passed via `accent` only
+ * when the metric's state earns it (degraded health, incomplete config,
+ * unhealthy dependencies) — a healthy module shows a calm neutral row, not a
+ * green celebration. The `badge` corner ribbon stays unused here: per
+ * DESIGN.md it is reserved for real attention states, and "some dependencies
+ * are down" is already carried by the accent plus the `n/m` value.
  */
 const ModuleOverviewPanel: React.FC<ModuleOverviewPanelProps> = ({
   module: mod,
   health,
   allModules
 }) => {
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
   const healthStatus = health?.status || (mod.enabled ? 'healthy' : 'disabled');
   const healthColor = ({
     healthy: 'success',
@@ -96,9 +98,13 @@ const ModuleOverviewPanel: React.FC<ModuleOverviewPanelProps> = ({
       <Col md={6} xl={3}>
         <StatCard
           title={t('adminModules.detail.cards.health')}
-          value={healthStatus}
+          // Translated label, not the raw enum: "healthy" is API vocabulary.
+          value={t(`adminModules.detail.healthStatus.${healthStatus}`, {
+            defaultValue: healthStatus
+          })}
           icon={faHeartPulse}
           color={healthColor}
+          accent={healthColor === 'danger' ? 'danger' : undefined}
           subtitle={
             health?.error ? (
               <span className="text-danger" title={health.error}>
@@ -117,6 +123,7 @@ const ModuleOverviewPanel: React.FC<ModuleOverviewPanelProps> = ({
           value={total > 0 ? `${filled}/${total}` : '\u2014'}
           icon={faGear}
           color={configColor}
+          accent={configColor === 'warning' ? 'warning' : undefined}
           subtitle={
             <>
               {total > 0
@@ -148,6 +155,7 @@ const ModuleOverviewPanel: React.FC<ModuleOverviewPanelProps> = ({
           value={depCount > 0 ? `${depsHealthy}/${depCount}` : '\u2014'}
           icon={faSitemap}
           color={depColor}
+          accent={depColor === 'warning' ? 'warning' : undefined}
           subtitle={
             depCount > 0
               ? t('adminModules.detail.cards.dependenciesRunning')
@@ -159,19 +167,16 @@ const ModuleOverviewPanel: React.FC<ModuleOverviewPanelProps> = ({
       <Col md={6} xl={3}>
         <StatCard
           title={t('adminModules.detail.cards.lastModified')}
-          value={formatRelativeTime(t, mod.updatedAt)}
+          // The absolute date is the headline; the relative form is context.
+          // "21 hours ago" at display size was the loudest datum on the page
+          // — last-modified is metadata, not a KPI, and never earns an
+          // accent. `secondary`, not `info`: nothing informational is being
+          // signalled, the clock icon is identity only.
+          value={formatDate(mod.updatedAt)}
           icon={faClock}
-          color="info"
+          color="secondary"
           subtitle={
-            mod.updatedAt
-              ? // `i18n.language`, not a pinned 'en-GB': the month abbreviation
-                // is user-visible text and belongs in the operator's locale.
-                new Date(mod.updatedAt).toLocaleDateString(i18n.language, {
-                  day: '2-digit',
-                  month: 'short',
-                  year: 'numeric'
-                })
-              : undefined
+            mod.updatedAt ? formatRelativeTime(t, mod.updatedAt) : undefined
           }
         />
       </Col>

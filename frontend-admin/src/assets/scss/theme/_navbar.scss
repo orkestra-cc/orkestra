@@ -3,7 +3,11 @@
 /* -------------------------------------------------------------------------- */
 
 :root {
-  --#{$prefix}top-nav-height: 4.3125rem;
+  // 3.75rem (60px), down from Falcon's 4.3125rem: a slightly tighter top
+  // band suits the console's density. Everything that hangs off the band
+  // (sidebar offsets, content height calcs, the collapsed-mode logo seat)
+  // reads this token, so it moves as one.
+  --#{$prefix}top-nav-height: 3.75rem;
   @include media-breakpoint-up(lg) {
     &.double-top-nav-layout {
       --#{$prefix}top-nav-height: 8.688rem;
@@ -101,6 +105,12 @@
 }
 .navbar-glass {
   background-color: $bg-navbar-glass;
+}
+// The sticky top bar is a real surface in light; the hairline is its
+// separation from the canvas (transparent in dark — frozen chrome). The
+// scrolled .navbar-glass-shadow state overrides it with its drop shadow.
+.navbar-top.navbar-glass {
+  box-shadow: inset 0 -1px 0 var(--#{$prefix}navbar-hairline-color);
 }
 
 .navbar-brand {
