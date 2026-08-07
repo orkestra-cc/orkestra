@@ -63,23 +63,31 @@ const ModuleDetailHeader: React.FC<ModuleDetailHeaderProps> = ({
 
       <div className="d-flex align-items-center justify-content-between flex-wrap gap-2">
         <div>
-          <h4 className="mb-1">
-            {mod.displayName}
+          {/* h3, matching `PageHeader`'s level and the modules list page —
+              these are both page titles, not card titles.
+
+              The two badges sit OUTSIDE the heading on purpose. Nested inside
+              it, the page's primary heading was announced as one run-on string
+              ("Authenticationcorerunning"), because a screen reader flattens
+              the element's text with no separator. They are status metadata
+              about the module, not part of its name. */}
+          <div className="d-flex align-items-center flex-wrap gap-2 mb-1">
+            <h3 className="mb-0">{mod.displayName}</h3>
             <SubtleBadge
               bg={categoryColors[mod.category] || 'secondary'}
               pill
-              className="ms-2 fs-11"
+              className="fs-11"
             >
               {mod.category}
             </SubtleBadge>
             <SubtleBadge
               bg={statusColors[mod.status] || 'secondary'}
               pill
-              className="ms-2 fs-11"
+              className="fs-11"
             >
               {statusLabel}
             </SubtleBadge>
-          </h4>
+          </div>
           <p className="text-muted fs-10 mb-0">{mod.description}</p>
         </div>
         <div className="d-flex align-items-center gap-3">

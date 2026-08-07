@@ -53,9 +53,9 @@
   --orkestra-dark-rgb: 15, 20, 28;
   --orkestra-primary-text-emphasis: rgb(12.9411764706%, 36.1764705882%, 67.3529411765%);
   --orkestra-secondary-text-emphasis: rgb(32.6274509804%, 35.137254902%, 38.9019607843%);
-  --orkestra-success-text-emphasis: rgb(0%, 53.5294117647%, 31.0980392157%);
-  --orkestra-info-text-emphasis: rgb(9.9411764706%, 47.9215686275%, 64.4901960784%);
-  --orkestra-warning-text-emphasis: rgb(67.2549019608%, 35.137254902%, 17.0196078431%);
+  --orkestra-success-text-emphasis: rgb(0%, 45.2941176471%, 26.3137254902%);
+  --orkestra-info-text-emphasis: rgb(8.4117647059%, 40.5490196078%, 54.568627451%);
+  --orkestra-warning-text-emphasis: rgb(52.8431372549%, 27.6078431373%, 13.3725490196%);
   --orkestra-danger-text-emphasis: rgb(72.1568627451%, 17.2549019608%, 27.2941176471%);
   --orkestra-light-text-emphasis: rgb(39.0588235294%, 39.2156862745%, 39.3725490196%);
   --orkestra-dark-text-emphasis: rgb(57.6470588235%, 58.5294117647%, 59.9411764706%);
@@ -90,15 +90,15 @@
   --orkestra-body-bg-rgb: 242, 244, 246;
   --orkestra-emphasis-color: #000;
   --orkestra-emphasis-color-rgb: 0, 0, 0;
-  --orkestra-secondary-color: #252c36;
-  --orkestra-secondary-color-rgb: 37, 44, 54;
+  --orkestra-secondary-color: #68707c;
+  --orkestra-secondary-color-rgb: 104, 112, 124;
   --orkestra-secondary-bg: #dfe3e8;
   --orkestra-secondary-bg-rgb: 223, 227, 232;
   --orkestra-tertiary-color: #68707c;
   --orkestra-tertiary-color-rgb: 104, 112, 124;
   --orkestra-tertiary-bg: #f9fafb;
   --orkestra-tertiary-bg-rgb: 249, 250, 251;
-  --orkestra-heading-color: var(--orkestra-secondary-color);
+  --orkestra-heading-color: #252c36;
   --orkestra-link-color: rgb(14.6666666667%, 41%, 76.3333333333%);
   --orkestra-link-color-rgb: 37, 105, 195;
   --orkestra-link-decoration: none;
@@ -140,8 +140,8 @@
   --orkestra-body-bg-rgb: 11, 23, 39;
   --orkestra-emphasis-color: #fff;
   --orkestra-emphasis-color-rgb: 255, 255, 255;
-  --orkestra-secondary-color: #d8e2ef;
-  --orkestra-secondary-color-rgb: 216, 226, 239;
+  --orkestra-secondary-color: #8494a8;
+  --orkestra-secondary-color-rgb: 132, 148, 168;
   --orkestra-secondary-bg: #344050;
   --orkestra-secondary-bg-rgb: 52, 64, 80;
   --orkestra-tertiary-color: #748194;
@@ -172,7 +172,7 @@
   --orkestra-danger-border-subtle: rgb(45.0980392157%, 10.7843137255%, 17.0588235294%);
   --orkestra-light-border-subtle: #5e6e82;
   --orkestra-dark-border-subtle: #4d5969;
-  --orkestra-heading-color: var(--orkestra-secondary-color);
+  --orkestra-heading-color: #d8e2ef;
   --orkestra-link-color: #2c7be5;
   --orkestra-link-hover-color: rgb(13.8039215686%, 38.5882352941%, 71.8431372549%);
   --orkestra-link-color-rgb: 44, 123, 229;
@@ -295,7 +295,7 @@
   --orkestra-btn-link-hover-color: rgb(11.7333333333%, 32.8%, 61.0666666667%);
   --orkestra-btn-disabled-color: #68707c;
   --orkestra-input-focus-border-color-global: rgb(58.6274509804%, 74.1176470588%, 94.9019607843%);
-  --orkestra-input-placeholder-color-global: var(--orkestra-gray-400);
+  --orkestra-input-placeholder-color-global: var(--orkestra-gray-600);
   --orkestra-bg-navbar-glass: rgba(242, 244, 246, 0.96);
   --orkestra-navbar-vertical-default-bg-color: var(--orkestra-bg-navbar-glass);
   --orkestra-navbar-vertical-default-link-color: #454c58;
@@ -3088,12 +3088,12 @@ progress {
 .col-form-label-sm {
   padding-top: calc(0.1875rem + var(--orkestra-border-width));
   padding-bottom: calc(0.1875rem + var(--orkestra-border-width));
-  font-size: 0.875rem;
+  font-size: 0.8333333333rem;
 }
 
 .form-text {
   margin-top: 0.25rem;
-  font-size: 75%;
+  font-size: 0.6944444444rem;
   color: #98a1ac;
 }
 
@@ -3108,7 +3108,7 @@ progress {
   appearance: none;
   background-color: var(--orkestra-quaternary-bg);
   background-clip: padding-box;
-  border: var(--orkestra-border-width) solid var(--orkestra-gray-300);
+  border: var(--orkestra-border-width) solid var(--orkestra-gray-600);
   border-radius: var(--orkestra-border-radius);
   box-shadow: var(--orkestra-box-shadow-inset);
   transition: border-color 0.15s ease-in-out, box-shadow 0.15s ease-in-out;
@@ -3193,7 +3193,7 @@ progress {
 .form-control-sm {
   min-height: calc(1.5em + 0.375rem + calc(var(--orkestra-border-width) * 2));
   padding: 0.1875rem 0.75rem;
-  font-size: 0.875rem;
+  font-size: 0.8333333333rem;
   border-radius: var(--orkestra-border-radius-sm);
 }
 .form-control-sm::file-selector-button {
@@ -3262,7 +3262,7 @@ textarea.form-control-lg {
   background-repeat: no-repeat;
   background-position: left 1rem center;
   background-size: 16px 12px;
-  border: var(--orkestra-border-width) solid var(--orkestra-gray-300);
+  border: var(--orkestra-border-width) solid var(--orkestra-gray-600);
   border-radius: var(--orkestra-border-radius);
   box-shadow: var(--orkestra-box-shadow-inset);
   transition: border-color 0.15s ease-in-out, box-shadow 0.15s ease-in-out;
@@ -3293,7 +3293,7 @@ textarea.form-control-lg {
   padding-top: 0.1875rem;
   padding-bottom: 0.1875rem;
   padding-right: 0.75rem;
-  font-size: 0.875rem;
+  font-size: 0.8333333333rem;
   border-radius: var(--orkestra-border-radius-sm);
 }
 
@@ -3344,7 +3344,7 @@ textarea.form-control-lg {
   background-repeat: no-repeat;
   background-position: center;
   background-size: contain;
-  border: 1px solid var(--orkestra-gray-400);
+  border: 1px solid var(--orkestra-gray-600);
   print-color-adjust: exact;
 }
 .form-check-input[type=checkbox] {
@@ -3664,7 +3664,7 @@ textarea.form-control-lg {
   text-align: center;
   white-space: nowrap;
   background-color: var(--orkestra-gray-200);
-  border: var(--orkestra-border-width) solid var(--orkestra-gray-300);
+  border: var(--orkestra-border-width) solid var(--orkestra-gray-600);
   border-radius: var(--orkestra-border-radius);
 }
 
@@ -3690,7 +3690,7 @@ textarea.form-control-lg {
 .tox .tox-menu__footer .input-group-sm > .tox-button--secondary,
 .tox .tox-dialog__footer .input-group-sm > .tox-button--secondary {
   padding: 0.1875rem 0.75rem;
-  font-size: 0.875rem;
+  font-size: 0.8333333333rem;
   border-radius: var(--orkestra-border-radius-sm);
 }
 
@@ -3730,7 +3730,7 @@ textarea.form-control-lg {
   display: none;
   width: 100%;
   margin-top: 0.25rem;
-  font-size: 75%;
+  font-size: 0.6944444444rem;
   color: var(--orkestra-form-valid-color);
 }
 
@@ -3820,7 +3820,7 @@ textarea.form-control-lg {
   display: none;
   width: 100%;
   margin-top: 0.25rem;
-  font-size: 75%;
+  font-size: 0.6944444444rem;
   color: var(--orkestra-form-invalid-color);
 }
 
@@ -5480,7 +5480,7 @@ fieldset:disabled .tox .tox-dialog__footer .tox-button--secondary,
   --orkestra-card-spacer-y: 1.25rem;
   --orkestra-card-spacer-x: 1.25rem;
   --orkestra-card-title-spacer-y: 0.5rem;
-  --orkestra-card-title-color: var(--orkestra-secondary-color);
+  --orkestra-card-title-color: #252c36;
   --orkestra-card-subtitle-color: ;
   --orkestra-card-border-width: 0px;
   --orkestra-card-border-color: rgba(var(--orkestra-emphasis-color-rgb), 0.125);
@@ -6976,7 +6976,7 @@ fieldset:disabled .tox .tox-dialog__footer .tox-button--secondary,
   --orkestra-popover-header-padding-x: 1rem;
   --orkestra-popover-header-padding-y: 0.5rem;
   --orkestra-popover-header-font-size: 1rem;
-  --orkestra-popover-header-color: var(--orkestra-secondary-color);
+  --orkestra-popover-header-color: #252c36;
   --orkestra-popover-header-bg: var(--orkestra-popover-header-bg-global);
   --orkestra-popover-body-padding-x: 1rem;
   --orkestra-popover-body-padding-y: 1rem;
@@ -21722,7 +21722,7 @@ canvas.chartjs-responsive {
 }
 .react-select__control {
   background-color: var(--orkestra-quaternary-bg) !important;
-  border: var(--orkestra-border-width) solid var(--orkestra-gray-300) !important;
+  border: var(--orkestra-border-width) solid var(--orkestra-gray-600) !important;
   box-shadow: var(--orkestra-box-shadow-inset);
 }
 .react-select__control .react-select__value-container {
@@ -25800,6 +25800,10 @@ label {
   line-height: 1.45rem;
 }
 
+.form-text code {
+  font-size: 1em;
+}
+
 .form-label-nogutter {
   margin-bottom: 0;
 }
@@ -26225,7 +26229,7 @@ option:disabled {
 }
 .nav-tabs .nav-link.active,
 .nav-tabs .nav-item.show .nav-link {
-  color: var(--orkestra-primary);
+  color: var(--orkestra-primary-text-emphasis);
   background-color: transparent;
   border-bottom: 2px solid var(--orkestra-primary);
 }
@@ -28165,6 +28169,35 @@ html[data-bs-theme=dark] .bg-priority-low:checked {
   background-color: #0f141c;
 }
 
+.stat-card-progress {
+  height: 4px;
+}
+
+html:not([data-bs-theme=dark]) .card.border-4.border-primary {
+  border-color: var(--orkestra-primary-text-emphasis) !important;
+}
+html:not([data-bs-theme=dark]) .card.border-4.border-secondary {
+  border-color: var(--orkestra-secondary-text-emphasis) !important;
+}
+html:not([data-bs-theme=dark]) .card.border-4.border-success {
+  border-color: var(--orkestra-success-text-emphasis) !important;
+}
+html:not([data-bs-theme=dark]) .card.border-4.border-info {
+  border-color: var(--orkestra-info-text-emphasis) !important;
+}
+html:not([data-bs-theme=dark]) .card.border-4.border-warning {
+  border-color: var(--orkestra-warning-text-emphasis) !important;
+}
+html:not([data-bs-theme=dark]) .card.border-4.border-danger {
+  border-color: var(--orkestra-danger-text-emphasis) !important;
+}
+html:not([data-bs-theme=dark]) .card.border-4.border-light {
+  border-color: var(--orkestra-light-text-emphasis) !important;
+}
+html:not([data-bs-theme=dark]) .card.border-4.border-dark {
+  border-color: var(--orkestra-dark-text-emphasis) !important;
+}
+
 /* -------------------------------------------------------------------------- */
 /*                Module Save Bar — cross-group save model (Phase 3)          */
 /* -------------------------------------------------------------------------- */
@@ -28173,13 +28206,29 @@ html[data-bs-theme=dark] .bg-priority-low:checked {
   bottom: 0;
   z-index: 5;
   background-color: var(--orkestra-emphasis-bg);
-  border-top: var(--orkestra-border-width) solid var(--orkestra-border-color);
+  border-top: var(--orkestra-border-width) solid var(--orkestra-gray-600);
+  border-bottom-right-radius: var(--orkestra-border-radius-lg);
+  border-bottom-left-radius: var(--orkestra-border-radius-lg);
+}
+.module-save-bar .btn-primary:disabled, .module-save-bar .tox .tox-menu__footer .tox-button:disabled:last-child, .tox .tox-menu__footer .module-save-bar .tox-button:disabled:last-child,
+.module-save-bar .tox .tox-dialog__footer .tox-button:disabled:last-child,
+.tox .tox-dialog__footer .module-save-bar .tox-button:disabled:last-child,
+.module-save-bar .btn-primary.disabled,
+.module-save-bar .tox .tox-menu__footer .disabled.tox-button:last-child,
+.tox .tox-menu__footer .module-save-bar .disabled.tox-button:last-child,
+.module-save-bar .tox .tox-dialog__footer .disabled.tox-button:last-child,
+.tox .tox-dialog__footer .module-save-bar .disabled.tox-button:last-child {
+  opacity: 1;
+  color: var(--orkestra-gray-700);
+  background-color: var(--orkestra-gray-200);
+  border-color: var(--orkestra-gray-400);
 }
 
 /* -------------------------------------------------------------------------- */
 /*             Module Config Rail — settings navigation (Phase 4)             */
 /* -------------------------------------------------------------------------- */
 .module-config-rail .nav-link {
+  font-size: 0.8333333333rem;
   color: var(--orkestra-gray-700);
   border-radius: var(--orkestra-border-radius);
 }
@@ -28187,7 +28236,8 @@ html[data-bs-theme=dark] .bg-priority-low:checked {
   color: var(--orkestra-gray-1100);
 }
 .module-config-rail .nav-link.active {
-  color: var(--orkestra-primary);
+  color: var(--orkestra-primary-text-emphasis);
   background-color: var(--orkestra-primary-bg-subtle);
   font-weight: 500;
+  box-shadow: inset -3px 0 0 0 var(--orkestra-primary-text-emphasis);
 }

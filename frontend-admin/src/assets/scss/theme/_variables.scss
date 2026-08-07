@@ -232,7 +232,13 @@ $h6-font-size: map_get($font-sizes, 10) !default;
 
 $headings-font-family: var(--#{$prefix}font-sans-serif) !default;
 $headings-font-weight: $font-weight-medium !default;
-$headings-color: var(--#{$prefix}secondary-color) !default;
+// Resolved through `--#{$prefix}secondary-color` until 2026-08. That
+// indirection is why `$body-secondary-color` had to be `gray-900`: headings
+// needed the darkest ink, and they were reading the *secondary* token to get
+// it — which in turn made `.text-muted` darker than body text everywhere.
+// Point headings at the ink they actually want, so the secondary token is free
+// to be secondary. Same value as before, so headings are unchanged.
+$headings-color: $gray-900 !default;
 
 // scss-docs-start display-headings
 $display-font-sizes: (
@@ -358,7 +364,14 @@ $input-bg: var(--#{$prefix}quaternary-bg) !default;
 $input-disabled-bg: var(--#{$prefix}gray-200) !default;
 
 $input-color: var(--#{$prefix}gray-900) !default;
-$input-border-color: var(--#{$prefix}gray-300) !default;
+// WCAG 2.2 SC 1.4.11 asks 3:1 for the visual boundary of a control. A white
+// field on a white card has nothing but this border to identify it, and
+// `gray-300` gave it 1.29:1 in light / 1.60:1 in dark — a 941px text input
+// with no perceptible edge. `gray-600` is redefined per theme, so this one
+// change lands 5.00:1 in light and 4.55:1 in dark without touching a frozen
+// dark literal. It reads heavier than before; that is the cost of the field
+// being visible at all.
+$input-border-color: var(--#{$prefix}gray-600) !default;
 
 $input-focus-border-color: var(
   --#{$prefix}input-focus-border-color-global
@@ -369,10 +382,28 @@ $input-placeholder-color: var(
 ) !default;
 
 $input-group-addon-bg: var(--#{$prefix}gray-200) !default;
+
+// Bootstrap derives this from `$font-size-sm` (0.875rem = 14px), a value that
+// is not a step of the 1.2-ratio `$font-sizes` scale — so every `size="sm"`
+// control in the console rendered at 14px against a 13.33rem `.form-label`,
+// i.e. the input was *larger* than the label naming it. Pinning it to the
+// scale's `fs-10` puts field text and its label on the same step and keeps
+// dense forms in the same register as dense tables (the fs-10 Table Rule).
+// Set on `$input-font-size-sm` rather than `$input-btn-font-size-sm` on
+// purpose: the latter also drives `$btn-font-size-sm`, and standalone small
+// buttons are not part of this. `.form-select-sm` and `.input-group-sm > .btn`
+// both derive from this one, so they follow without further declarations.
+$input-font-size-sm: map_get($font-sizes, 10) !default;
 // scss-docs-end form-input-variables
 
 // scss-docs-start form-text-variables
 $form-text-color: $gray-500 !default;
+// Decoupled from `$small-font-size` (75% → 12px, also off the scale): field
+// help text is the secondary line under a 13.33px label, so it takes the next
+// step down. This matches the other secondary descriptions the module-config
+// panels already render at `fs-11`, and leaves `<small>`, `code` and
+// `figcaption` on 75% untouched.
+$form-text-font-size: map_get($font-sizes, 11) !default;
 // scss-docs-end form-text-variables
 
 // scss-docs-start form-label-variables
@@ -389,7 +420,12 @@ $form-switch-focus-color: tint-color($component-active-bg, 50%) !default;
 // scss-docs-start form-check-variables
 $form-check-margin-bottom: 0.34375rem !default;
 $form-check-input-bg: transparent !default;
-$form-check-input-border: 1px solid var(--#{$prefix}gray-400) !default;
+// Same 3:1 boundary rule as `$input-border-color`, and this one bites harder:
+// an unchecked switch has a transparent fill, so the border *is* the control.
+// At `gray-400` (1.78:1 light) `/admin/modules/auth?section=oauth` — seven
+// consecutive off switches — read as a column of labels with nothing beside
+// them, and "which providers are on" is the only question that panel answers.
+$form-check-input-border: 1px solid var(--#{$prefix}gray-600) !default;
 // scss-docs-end form-check-variables
 
 // scss-docs-start form-select-variables

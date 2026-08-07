@@ -86,7 +86,18 @@ $dark-border-subtle-dark: #4d5969 !default;
 $body-bg-dark: #0b1727 !default;
 $body-color-dark: #9da9bb !default;
 
-$body-secondary-color-dark: #d8e2ef !default;
+// Dark half of the `.text-muted` inversion (see `_colors.scss`). `#d8e2ef`
+// measured 12.84:1 against the dark card while body text sat at 7.06:1, so
+// "muted" was the brightest ink here too. `#8494a8` is a new frozen-dark
+// literal — hand-picked, NOT derived from the light ramp — landing 5.43:1 on
+// the card and 5.82:1 on the canvas: clearly under body, comfortably over AA.
+// The existing `#748194` was the obvious candidate and was rejected: it
+// measures 4.25:1 on the card, i.e. a fail.
+//
+// This is a deliberate both-modes change under DESIGN.md's Frozen Dark Rule,
+// not a derivation — the rule permits dark to move when the change is declared
+// for both themes, which this one is.
+$body-secondary-color-dark: #8494a8 !default;
 $body-secondary-bg-dark: #344050 !default;
 
 $body-tertiary-color-dark: #748194 !default;
@@ -108,7 +119,11 @@ $link-hover-color-dark: shift-color(
 
 $code-color-dark: $pink !default;
 
-$headings-color-dark: var(--#{$prefix}secondary-color) !default;
+// Pinned to the literal this used to resolve to, for the same reason as
+// `$headings-color` in `_variables.scss`: headings were reaching the brightest
+// ink *through* the secondary token, which is what kept that token from being
+// secondary. Dark headings are unchanged.
+$headings-color-dark: #d8e2ef !default;
 
 //
 // Navbar Vertical

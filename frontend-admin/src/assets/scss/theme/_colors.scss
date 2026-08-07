@@ -91,9 +91,15 @@ $icon-circle-colors: (
 // scss-docs-start theme-text-variables
 $primary-text-emphasis: shade-color($primary, 25%) !default;
 $secondary-text-emphasis: shade-color($secondary, 20%) !default;
-$success-text-emphasis: shade-color($success, 35%) !default;
-$info-text-emphasis: shade-color($info, 35%) !default;
-$warning-text-emphasis: shade-color($warning, 30%) !default;
+// Deepened from 35/35/30%. These are the ink of `.badge-subtle-*`, and at the
+// old shades the three status chips this console shows most — `running`,
+// `production`, `toggleable` — measured 3.96 / 4.11 / 4.17:1 against their own
+// bg-subtle: all short of AA. At 45% they read 5.19 / 5.44 / 5.97:1 and stay
+// recognisably the same hue. Light only; the `*-text-emphasis-dark` twins are
+// separate literals and already sat at 7.7-8.4:1.
+$success-text-emphasis: shade-color($success, 45%) !default;
+$info-text-emphasis: shade-color($info, 45%) !default;
+$warning-text-emphasis: shade-color($warning, 45%) !default;
 $danger-text-emphasis: shade-color($danger, 20%) !default;
 $light-text-emphasis: shade-color($light, 60%) !default;
 $dark-text-emphasis: tint-color($dark, 55%) !default;
@@ -113,7 +119,19 @@ $dark-bg-subtle: shade-color($dark, 30%) !default;
 $body-color: $gray-700 !default;
 $body-bg: $gray-200 !default;
 
-$body-secondary-color: $gray-900 !default;
+// `gray-900` here made `.text-muted` — which reads this token — the
+// *highest*-contrast text in the console: 14.07:1 against a body text of
+// 8.65:1. Every "de-emphasized" string (field help, group descriptions,
+// StatCard captions and subtitles, muted table cells) rendered darker than the
+// text it was meant to sit under, so the whole de-emphasis layer ran backwards
+// and any hierarchy tuned against it was tuned against a lie. `gray-600` is
+// the ramp's designated secondary step: 5.00:1 on a white card, 4.54:1 on the
+// gray-200 canvas — the tightest surface, and still AA.
+//
+// This is only half the fix: `$headings-color` used to resolve *through* this
+// token, which is what forced it near-black in the first place. See
+// `_variables.scss`, where it is now an explicit `$gray-900`.
+$body-secondary-color: $gray-600 !default;
 $body-secondary-bg: $gray-300 !default;
 
 $body-tertiary-color: $gray-600 !default;

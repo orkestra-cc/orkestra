@@ -1979,7 +1979,34 @@
       "savedFlash": "Configurazione salvata.",
       "saveFailed": "Impossibile salvare la configurazione. Riprova.",
       "config": "Configurazione",
-      "noConfig": "Questo modulo non ha campi configurabili."
+      "noConfig": "Questo modulo non ha campi configurabili.",
+      "relative": {
+        "justNow": "adesso",
+        "minutes_one": "{{count}} min fa",
+        "minutes_other": "{{count}} min fa",
+        "hours_one": "{{count}} ora fa",
+        "hours_other": "{{count}} ore fa",
+        "days_one": "{{count}} giorno fa",
+        "days_other": "{{count}} giorni fa"
+      },
+      "env": {
+        "viewingLabel": "Stai vedendo:",
+        "liveBadge": "in uso",
+        "notActiveWarning": "Stai modificando il profilo {{environment}}. Non è quello con cui il modulo sta girando: è {{active}}.",
+        "promoteTitle": "Rendere {{environment}} il profilo attivo?",
+        "promoteBody": "Il modulo passerà subito a girare con la configurazione {{environment}}. Il profilo {{current}} resta salvato e può essere riattivato allo stesso modo.",
+        "promoteConfirm": "Rendi attivo",
+        "cancel": "Annulla"
+      }
+    },
+    "loadError": "Impossibile caricare i moduli. Verifica i permessi.",
+    "footer": {
+      "total_one": "{{count}} modulo in totale",
+      "total_other": "{{count}} moduli in totale",
+      "running": "{{count}} in esecuzione",
+      "failed": "{{count}} in errore",
+      "disabled": "{{count}} disattivati",
+      "stopped": "{{count}} fermi"
     }
   },
   "moduleConfig": {

@@ -10,6 +10,14 @@
 // dark root block, so both themes are covered by the same rules.
 .module-config-rail {
   .nav-link {
+    // Bootstrap declares `.nav-link { font-size: var(--#{$prefix}nav-link-font-size) }`
+    // but only ever *defines* that custom property inside the pill/tab
+    // variants — a bare `<Nav>` leaves it unset, the declaration is invalid
+    // at computed-value time, and font-size falls back to inherit (1rem).
+    // That made every rail entry 16px: larger than the fs-10 labels, values
+    // and descriptions of the panel it drives, and 1.44x its own fs-11
+    // "Configuration"/"Module" captions. Pin it to the workhorse step.
+    font-size: map-get($font-sizes, 10);
     color: var(--#{$prefix}gray-700);
     border-radius: var(--#{$prefix}border-radius);
 
@@ -18,10 +26,23 @@
       color: var(--#{$prefix}gray-1100);
     }
 
+    // The selected entry used to be the *least* legible item in its own list:
+    // raw `--primary` on `--primary-bg-subtle` measures 3.30:1 in light and
+    // 3.42:1 in dark, against inactive siblings at 8.65:1 / 7.06:1. "Where am
+    // I" is this rail's whole job, and it was answering in the hardest text on
+    // the page. `--primary-text-emphasis` is theme-aware — a deepened blue in
+    // light, a light tint in dark — so one declaration lands 5.25:1 and 8.44:1
+    // and neither theme derives its value from the other.
+    //
+    // The left bar carries the same state without relying on hue, so selection
+    // survives greyscale, low vision, and the tinted fill being imperceptible
+    // on a poor display. It is an inset shadow rather than a border precisely
+    // so it costs no layout box — labels stay put as selection moves.
     &.active {
-      color: var(--#{$prefix}primary);
+      color: var(--#{$prefix}primary-text-emphasis);
       background-color: var(--#{$prefix}primary-bg-subtle);
       font-weight: $font-weight-medium;
+      box-shadow: inset 3px 0 0 0 var(--#{$prefix}primary-text-emphasis);
     }
   }
 }

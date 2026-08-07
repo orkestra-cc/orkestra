@@ -121,7 +121,11 @@
       $component-active-bg,
       50%
     )};
-  --#{$prefix}input-placeholder-color-global: var(--#{$prefix}gray-400);
+  // Placeholders are text and owe 4.5:1. `gray-400` gave them 1.78:1 in light
+  // and 2.53:1 in dark, so every search box and every `valori,separati,da,
+  // virgola` hint read as an empty field rather than as a prompt. `gray-600`
+  // is per-theme, landing 5.00:1 / 4.55:1 from this single declaration.
+  --#{$prefix}input-placeholder-color-global: var(--#{$prefix}gray-600);
 
   //
   // Navbar glass
