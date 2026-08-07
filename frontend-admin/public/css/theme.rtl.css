@@ -23385,6 +23385,16 @@ h5, .h5 {
   .navbar-vertical-collapsed:not(.navbar-vertical-collapsed-hover) .navbar-vertical.navbar-expand-xxl .nav-link-text {
     display: none;
   }
+  .navbar-vertical-collapsed:not(.navbar-vertical-collapsed-hover) .navbar-vertical.navbar-expand-xxl .navbar-brand {
+    position: absolute;
+    top: 0;
+    right: calc(2.75rem + 1.5rem);
+    display: flex;
+    align-items: center;
+    height: var(--orkestra-top-nav-height);
+    margin: 0;
+    padding: 0;
+  }
   .navbar-vertical-collapsed:not(.navbar-vertical-collapsed-hover) .navbar-vertical.navbar-expand-xxl .navbar-vertical-divider {
     max-width: 2rem;
     margin-inline: auto;
@@ -23567,6 +23577,16 @@ h5, .h5 {
   .navbar-vertical-collapsed:not(.navbar-vertical-collapsed-hover) .navbar-vertical.navbar-expand-xl .settings,
   .navbar-vertical-collapsed:not(.navbar-vertical-collapsed-hover) .navbar-vertical.navbar-expand-xl .nav-link-text {
     display: none;
+  }
+  .navbar-vertical-collapsed:not(.navbar-vertical-collapsed-hover) .navbar-vertical.navbar-expand-xl .navbar-brand {
+    position: absolute;
+    top: 0;
+    right: calc(2.75rem + 1.5rem);
+    display: flex;
+    align-items: center;
+    height: var(--orkestra-top-nav-height);
+    margin: 0;
+    padding: 0;
   }
   .navbar-vertical-collapsed:not(.navbar-vertical-collapsed-hover) .navbar-vertical.navbar-expand-xl .navbar-vertical-divider {
     max-width: 2rem;
@@ -23751,6 +23771,16 @@ h5, .h5 {
   .navbar-vertical-collapsed:not(.navbar-vertical-collapsed-hover) .navbar-vertical.navbar-expand-lg .nav-link-text {
     display: none;
   }
+  .navbar-vertical-collapsed:not(.navbar-vertical-collapsed-hover) .navbar-vertical.navbar-expand-lg .navbar-brand {
+    position: absolute;
+    top: 0;
+    right: calc(2.75rem + 1.5rem);
+    display: flex;
+    align-items: center;
+    height: var(--orkestra-top-nav-height);
+    margin: 0;
+    padding: 0;
+  }
   .navbar-vertical-collapsed:not(.navbar-vertical-collapsed-hover) .navbar-vertical.navbar-expand-lg .navbar-vertical-divider {
     max-width: 2rem;
     margin-inline: auto;
@@ -23933,6 +23963,16 @@ h5, .h5 {
   .navbar-vertical-collapsed:not(.navbar-vertical-collapsed-hover) .navbar-vertical.navbar-expand-md .settings,
   .navbar-vertical-collapsed:not(.navbar-vertical-collapsed-hover) .navbar-vertical.navbar-expand-md .nav-link-text {
     display: none;
+  }
+  .navbar-vertical-collapsed:not(.navbar-vertical-collapsed-hover) .navbar-vertical.navbar-expand-md .navbar-brand {
+    position: absolute;
+    top: 0;
+    right: calc(2.75rem + 1.5rem);
+    display: flex;
+    align-items: center;
+    height: var(--orkestra-top-nav-height);
+    margin: 0;
+    padding: 0;
   }
   .navbar-vertical-collapsed:not(.navbar-vertical-collapsed-hover) .navbar-vertical.navbar-expand-md .navbar-vertical-divider {
     max-width: 2rem;
@@ -24117,6 +24157,16 @@ h5, .h5 {
   .navbar-vertical-collapsed:not(.navbar-vertical-collapsed-hover) .navbar-vertical.navbar-expand-sm .nav-link-text {
     display: none;
   }
+  .navbar-vertical-collapsed:not(.navbar-vertical-collapsed-hover) .navbar-vertical.navbar-expand-sm .navbar-brand {
+    position: absolute;
+    top: 0;
+    right: calc(2.75rem + 1.5rem);
+    display: flex;
+    align-items: center;
+    height: var(--orkestra-top-nav-height);
+    margin: 0;
+    padding: 0;
+  }
   .navbar-vertical-collapsed:not(.navbar-vertical-collapsed-hover) .navbar-vertical.navbar-expand-sm .navbar-vertical-divider {
     max-width: 2rem;
     margin-inline: auto;
@@ -24299,6 +24349,16 @@ h5, .h5 {
 .navbar-vertical-collapsed:not(.navbar-vertical-collapsed-hover) .navbar-vertical.navbar-expand-xs .settings,
 .navbar-vertical-collapsed:not(.navbar-vertical-collapsed-hover) .navbar-vertical.navbar-expand-xs .nav-link-text {
   display: none;
+}
+.navbar-vertical-collapsed:not(.navbar-vertical-collapsed-hover) .navbar-vertical.navbar-expand-xs .navbar-brand {
+  position: absolute;
+  top: 0;
+  right: calc(2.75rem + 1.5rem);
+  display: flex;
+  align-items: center;
+  height: var(--orkestra-top-nav-height);
+  margin: 0;
+  padding: 0;
 }
 .navbar-vertical-collapsed:not(.navbar-vertical-collapsed-hover) .navbar-vertical.navbar-expand-xs .navbar-vertical-divider {
   max-width: 2rem;

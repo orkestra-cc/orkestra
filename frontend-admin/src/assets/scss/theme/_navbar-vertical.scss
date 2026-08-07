@@ -343,6 +343,20 @@
           .nav-link-text {
             display: none;
           }
+          // The 120px logo cannot fit the 44px icon rail, so in collapsed
+          // mode it moves onto the top band: left edge on the content grid
+          // (rail + the same 24px gap the cards use) and vertically centered
+          // in the band. Hover-expanding the rail puts it back in the flow.
+          .navbar-brand {
+            position: absolute;
+            top: 0;
+            left: calc(#{$navbar-vertical-collapsed-width} + 1.5rem);
+            display: flex;
+            align-items: center;
+            height: $top-nav-height;
+            margin: 0;
+            padding: 0;
+          }
           .navbar-vertical-divider {
             max-width: 2rem;
             // Centered under the icons, not hugging the left padding: on the
