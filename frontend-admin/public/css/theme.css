@@ -23123,9 +23123,6 @@ h5, .h5 {
 .navbar-vertical .navbar-vertical-divider {
   color: var(--orkestra-navbar-vertical-default-hr-color);
 }
-.navbar-vertical:not(.navbar-card):not(.navbar-vibrant):not(.navbar-inverted) .navbar-collapse {
-  box-shadow: inset -1px 0 0 var(--orkestra-navbar-hairline-color);
-}
 .navbar-vertical.navbar-inverted .navbar-collapse {
   background-color: var(--orkestra-navbar-vertical-inverted-bg-color);
 }
@@ -23284,6 +23281,19 @@ h5, .h5 {
     top: 0;
     height: 100vh;
     margin: 0;
+  }
+  .navbar-vertical.navbar-expand-xxl:not(.navbar-card):not(.navbar-vibrant):not(.navbar-inverted) {
+    background-color: var(--orkestra-navbar-vertical-default-bg-color);
+    box-shadow: inset -1px 0 0 var(--orkestra-navbar-hairline-color);
+  }
+  .navbar-vertical.navbar-expand-xxl:not(.navbar-card):not(.navbar-vibrant):not(.navbar-inverted)::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    right: 100%;
+    width: 1rem;
+    background-color: inherit;
   }
   .navbar-vertical.navbar-expand-xxl .nav-link {
     padding: 0.35rem 0;
@@ -23450,6 +23460,19 @@ h5, .h5 {
     height: 100vh;
     margin: 0;
   }
+  .navbar-vertical.navbar-expand-xl:not(.navbar-card):not(.navbar-vibrant):not(.navbar-inverted) {
+    background-color: var(--orkestra-navbar-vertical-default-bg-color);
+    box-shadow: inset -1px 0 0 var(--orkestra-navbar-hairline-color);
+  }
+  .navbar-vertical.navbar-expand-xl:not(.navbar-card):not(.navbar-vibrant):not(.navbar-inverted)::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    right: 100%;
+    width: 1rem;
+    background-color: inherit;
+  }
   .navbar-vertical.navbar-expand-xl .nav-link {
     padding: 0.35rem 0;
   }
@@ -23614,6 +23637,19 @@ h5, .h5 {
     top: 0;
     height: 100vh;
     margin: 0;
+  }
+  .navbar-vertical.navbar-expand-lg:not(.navbar-card):not(.navbar-vibrant):not(.navbar-inverted) {
+    background-color: var(--orkestra-navbar-vertical-default-bg-color);
+    box-shadow: inset -1px 0 0 var(--orkestra-navbar-hairline-color);
+  }
+  .navbar-vertical.navbar-expand-lg:not(.navbar-card):not(.navbar-vibrant):not(.navbar-inverted)::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    right: 100%;
+    width: 1rem;
+    background-color: inherit;
   }
   .navbar-vertical.navbar-expand-lg .nav-link {
     padding: 0.35rem 0;
@@ -23780,6 +23816,19 @@ h5, .h5 {
     height: 100vh;
     margin: 0;
   }
+  .navbar-vertical.navbar-expand-md:not(.navbar-card):not(.navbar-vibrant):not(.navbar-inverted) {
+    background-color: var(--orkestra-navbar-vertical-default-bg-color);
+    box-shadow: inset -1px 0 0 var(--orkestra-navbar-hairline-color);
+  }
+  .navbar-vertical.navbar-expand-md:not(.navbar-card):not(.navbar-vibrant):not(.navbar-inverted)::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    right: 100%;
+    width: 1rem;
+    background-color: inherit;
+  }
   .navbar-vertical.navbar-expand-md .nav-link {
     padding: 0.35rem 0;
   }
@@ -23945,6 +23994,19 @@ h5, .h5 {
     height: 100vh;
     margin: 0;
   }
+  .navbar-vertical.navbar-expand-sm:not(.navbar-card):not(.navbar-vibrant):not(.navbar-inverted) {
+    background-color: var(--orkestra-navbar-vertical-default-bg-color);
+    box-shadow: inset -1px 0 0 var(--orkestra-navbar-hairline-color);
+  }
+  .navbar-vertical.navbar-expand-sm:not(.navbar-card):not(.navbar-vibrant):not(.navbar-inverted)::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    right: 100%;
+    width: 1rem;
+    background-color: inherit;
+  }
   .navbar-vertical.navbar-expand-sm .nav-link {
     padding: 0.35rem 0;
   }
@@ -24108,6 +24170,19 @@ h5, .h5 {
   top: 0;
   height: 100vh;
   margin: 0;
+}
+.navbar-vertical.navbar-expand-xs:not(.navbar-card):not(.navbar-vibrant):not(.navbar-inverted) {
+  background-color: var(--orkestra-navbar-vertical-default-bg-color);
+  box-shadow: inset -1px 0 0 var(--orkestra-navbar-hairline-color);
+}
+.navbar-vertical.navbar-expand-xs:not(.navbar-card):not(.navbar-vibrant):not(.navbar-inverted)::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 100%;
+  width: 1rem;
+  background-color: inherit;
 }
 .navbar-vertical.navbar-expand-xs .nav-link {
   padding: 0.35rem 0;

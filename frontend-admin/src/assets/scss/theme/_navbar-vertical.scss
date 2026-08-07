@@ -130,15 +130,10 @@
     }
   }
   @include navbar-vertical-variant('default', true, false, false);
-  // The default rail is a real surface in light (white on the gray-200
-  // canvas) and needs a 1px separation edge. Painted as an inset shadow so
-  // it never shifts layout; the color var is transparent in dark (frozen)
-  // and the card/vibrant/inverted variants keep their own treatments.
-  &:not(.navbar-card):not(.navbar-vibrant):not(.navbar-inverted) {
-    .navbar-collapse {
-      box-shadow: inset -1px 0 0 var(--#{$prefix}navbar-hairline-color);
-    }
-  }
+  // The default rail's separation hairline lives on the element itself (see
+  // the breakpoint block below), NOT on .navbar-collapse — a collapse-level
+  // shadow would override the collapsed-hover drop shadow that floats the
+  // expanded overlay above the content.
   &.navbar-inverted {
     @include navbar-vertical-variant('inverted', true, false, false);
   }
@@ -181,6 +176,27 @@
       top: 0;
       height: 100vh;
       margin: 0;
+      // The rail surface covers the WHOLE fixed column — brand zone
+      // included. Painting only .navbar-collapse left the logo sitting on
+      // the bare page canvas (a visible seam above y≈67px). Scoped to the
+      // full-height desktop column and to the default variant; in dark this
+      // is a visual no-op, since the glass is the canvas color at .96.
+      &:not(.navbar-card):not(.navbar-vibrant):not(.navbar-inverted) {
+        background-color: var(--#{$prefix}navbar-vertical-default-bg-color);
+        box-shadow: inset -1px 0 0 var(--#{$prefix}navbar-hairline-color);
+        // The fixed column starts at the container gutter (1rem), which left
+        // a canvas-colored strip between the viewport edge and the rail.
+        // Fill it with the same surface so the rail reads flush to the edge.
+        &::before {
+          content: '';
+          position: absolute;
+          top: 0;
+          bottom: 0;
+          right: 100%;
+          width: map-get($spacers, 3);
+          background-color: inherit;
+        }
+      }
       .nav-link {
         padding: 0.35rem 0;
       }
