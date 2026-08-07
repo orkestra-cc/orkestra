@@ -238,7 +238,9 @@ const NavbarVertical = () => {
     >
       <Flex alignItems="center">
         <ToggleButton />
-        <Logo at="navbar-vertical" textClass="text-primary" width={160} />
+        {/* 120, not 160: at 160 the wordmark overflowed the 188px rail and
+            crossed its separation hairline. */}
+        <Logo at="navbar-vertical" textClass="text-primary" width={120} />
       </Flex>
       <Navbar.Collapse
         in={showBurgerMenu}

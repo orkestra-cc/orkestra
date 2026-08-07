@@ -253,6 +253,17 @@
           }
         }
       }
+      // The content gutter left an 8px strip of bare canvas between the
+      // rail's right edge and the top bar for the whole height of the top
+      // band. Pulling the bar's left edge to the rail closes it: the bar's
+      // bottom hairline now meets the rail's vertical hairline in a clean
+      // T-junction. In collapsed mode the bar slides under the rail
+      // (z-index 1030 > 1020), which reads the same.
+      &:not(.navbar-card):not(.navbar-vibrant):not(.navbar-inverted)
+        + .content
+        .navbar-top {
+        margin-left: -1.5rem;
+      }
     }
 
     .navbar-vertical-collapsed {

@@ -23322,6 +23322,9 @@ h5, .h5 {
   .navbar-vertical.navbar-expand-xxl + .content .navbar-top .navbar-brand {
     display: none;
   }
+  .navbar-vertical.navbar-expand-xxl:not(.navbar-card):not(.navbar-vibrant):not(.navbar-inverted) + .content .navbar-top {
+    margin-right: -1.5rem;
+  }
   .navbar-vertical-collapsed .navbar-vertical.navbar-expand-xxl {
     z-index: 1030;
     width: 2.75rem;
@@ -23499,6 +23502,9 @@ h5, .h5 {
   .navbar-vertical.navbar-expand-xl + .content .navbar-top .navbar-toggler,
   .navbar-vertical.navbar-expand-xl + .content .navbar-top .navbar-brand {
     display: none;
+  }
+  .navbar-vertical.navbar-expand-xl:not(.navbar-card):not(.navbar-vibrant):not(.navbar-inverted) + .content .navbar-top {
+    margin-right: -1.5rem;
   }
   .navbar-vertical-collapsed .navbar-vertical.navbar-expand-xl {
     z-index: 1030;
@@ -23678,6 +23684,9 @@ h5, .h5 {
   .navbar-vertical.navbar-expand-lg + .content .navbar-top .navbar-brand {
     display: none;
   }
+  .navbar-vertical.navbar-expand-lg:not(.navbar-card):not(.navbar-vibrant):not(.navbar-inverted) + .content .navbar-top {
+    margin-right: -1.5rem;
+  }
   .navbar-vertical-collapsed .navbar-vertical.navbar-expand-lg {
     z-index: 1030;
     width: 2.75rem;
@@ -23855,6 +23864,9 @@ h5, .h5 {
   .navbar-vertical.navbar-expand-md + .content .navbar-top .navbar-toggler,
   .navbar-vertical.navbar-expand-md + .content .navbar-top .navbar-brand {
     display: none;
+  }
+  .navbar-vertical.navbar-expand-md:not(.navbar-card):not(.navbar-vibrant):not(.navbar-inverted) + .content .navbar-top {
+    margin-right: -1.5rem;
   }
   .navbar-vertical-collapsed .navbar-vertical.navbar-expand-md {
     z-index: 1030;
@@ -24034,6 +24046,9 @@ h5, .h5 {
   .navbar-vertical.navbar-expand-sm + .content .navbar-top .navbar-brand {
     display: none;
   }
+  .navbar-vertical.navbar-expand-sm:not(.navbar-card):not(.navbar-vibrant):not(.navbar-inverted) + .content .navbar-top {
+    margin-right: -1.5rem;
+  }
   .navbar-vertical-collapsed .navbar-vertical.navbar-expand-sm {
     z-index: 1030;
     width: 2.75rem;
@@ -24210,6 +24225,9 @@ h5, .h5 {
 .navbar-vertical.navbar-expand-xs + .content .navbar-top .navbar-toggler,
 .navbar-vertical.navbar-expand-xs + .content .navbar-top .navbar-brand {
   display: none;
+}
+.navbar-vertical.navbar-expand-xs:not(.navbar-card):not(.navbar-vibrant):not(.navbar-inverted) + .content .navbar-top {
+  margin-right: -1.5rem;
 }
 
 .navbar-vertical-collapsed .navbar-vertical.navbar-expand-xs {
