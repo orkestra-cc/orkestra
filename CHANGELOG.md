@@ -4,10 +4,131 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.5.0] - 2026-08-07
+
+### Features
+
+- **(frontend-admin)** Neutral-cool light theme, frozen dark, and the design authority (#220) ([e0990f2](https://github.com/orkestra-cc/orkestra/commit/e0990f2d0abf14155813d043a34e7c4bf42a849f))
+- **(admin)** Name the group that unblocks an empty dependency panel ([1693f6e](https://github.com/orkestra-cc/orkestra/commit/1693f6efc99e5688eaefeef3d400721bbcc43b5a))
+- **(i18n)** Translate the auth module's configuration labels ([d2e23ec](https://github.com/orkestra-cc/orkestra/commit/d2e23eca9ad3bb1561f7f47822a4af32d16fc97e))
+- **(auth)** Declare the configuration group tree ([29d0840](https://github.com/orkestra-cc/orkestra/commit/29d08406b16c19cd68326714162957533bb56bbe))
+- **(sdk)** Let a config field depend on any of its conditions ([15345d7](https://github.com/orkestra-cc/orkestra/commit/15345d787457333fb327619941011f8c80c332cc))
+- **(admin)** Make the rail navigate the whole module page ([5f26dec](https://github.com/orkestra-cc/orkestra/commit/5f26dec6ad4bbefb20fa09390cb6cf77ad63ab03))
+- **(admin)** Save module config across groups from one sticky bar ([0b60d51](https://github.com/orkestra-cc/orkestra/commit/0b60d517572739f75c4cbe1d950943ab74eab214))
+- **(admin)** Navigate module config through a vertical rail ([ae90970](https://github.com/orkestra-cc/orkestra/commit/ae9097025635f5f4a32547a94538bb02aa57521c))
+- **(admin)** Build the module config form from backend metadata ([fb721fb](https://github.com/orkestra-cc/orkestra/commit/fb721fb7f019e6fde72178b6fa8a574bd3c19cf0))
+- **(admin)** Resolve module config labels through i18n ([0feefc3](https://github.com/orkestra-cc/orkestra/commit/0feefc37e3cb184aea8a6d362f8dae61a4309eeb))
+- **(admin)** Render module config from the group tree ([a41cafc](https://github.com/orkestra-cc/orkestra/commit/a41cafc304db818fb85b8830d36709b2c36ef9c4))
+- **(admin)** Model the module config group tree and field visibility ([1ec2d70](https://github.com/orkestra-cc/orkestra/commit/1ec2d70f495f0deccdd5a58069bb369d7f630cb0))
+- **(sdk)** Serve module config groups from the admin API ([3598d0c](https://github.com/orkestra-cc/orkestra/commit/3598d0c0c1d692413d9c5f0766038222ab64ed65))
+- **(sdk)** Validate module config group and dependency declarations ([7bea1a9](https://github.com/orkestra-cc/orkestra/commit/7bea1a98008b858c156f9b352eac4021d711cc0e))
+- **(sdk)** Add ConfigGroup, Condition, and per-field config metadata ([20ae9db](https://github.com/orkestra-cc/orkestra/commit/20ae9dba6ed10f65cc05f2d870df42f861394751))
+
+### Bug fixes
+
+- **(orkestra-sh)** Supply the health-check script the deploy has always called (#227) ([ac1cad4](https://github.com/orkestra-cc/orkestra/commit/ac1cad46595237bea00bf72f7a76ff95adf525d8))
+- **(frontend-admin)** Module-config typography and contrast on scale (#221) ([fb9684e](https://github.com/orkestra-cc/orkestra/commit/fb9684e2c013e59cb591a30338d3a18b27aa9593))
+- **(frontend-admin)** Restore CJS interop broken by the Vite 8 migration (#218) ([6d5d7a1](https://github.com/orkestra-cc/orkestra/commit/6d5d7a1a25a006dd2bb3477faffc60b82d208e51))
+- **(docker)** Pin AIR to v1.67.1 and align Node to 24 (#210) ([77ffc19](https://github.com/orkestra-cc/orkestra/commit/77ffc198af5a806062a699286aa19a92c4d90895))
+- **(frontend-admin)** Stop the test store from batching on an animation frame (#207) ([bd6a9bf](https://github.com/orkestra-cc/orkestra/commit/bd6a9bf75efc5d4c6b0a8bc346a536040e728bab))
+- **(docker)** X-XSS-Protection 0, and security headers in the images' own nginx configs (#199) ([ab4c6cb](https://github.com/orkestra-cc/orkestra/commit/ab4c6cb7aa41d42faa1bf211dcc0bae601ebe6fe))
+- **(docker)** Restore nosniff on static assets, lost to add_header inheritance (#198) ([104dcc7](https://github.com/orkestra-cc/orkestra/commit/104dcc781441a64d92a2bbd85e54146aab350ddf))
+- **(docker)** Never cache config.js — it pinned apiUrl for a year (#197) ([2f0c9ae](https://github.com/orkestra-cc/orkestra/commit/2f0c9aea45ab5d8ae7c0b5974aacd153ff53feef))
+- **(admin)** Table a11y hardening + module-config polish batch (#195) ([ea7c52c](https://github.com/orkestra-cc/orkestra/commit/ea7c52c7866803b002854bd1542383807a8882f3))
+- **(admin-modules)** Register config fields under RHF-safe names ([f86f765](https://github.com/orkestra-cc/orkestra/commit/f86f765ba9268af811940f5fb6bc8be74cee7a1b))
+- **(admin)** Stop the compiled theme drifting against prettier ([fe318c0](https://github.com/orkestra-cc/orkestra/commit/fe318c0200ab931112f790024a458e2d0bbcf8a8))
+- **(auth)** State the oauth group/toggle mapping the right way round ([f312ff7](https://github.com/orkestra-cc/orkestra/commit/f312ff7681e0b8a7a2faa8e0e57d9ed0500eca40))
+- **(i18n)** Correct five Italian slips in the auth config labels ([5d7c799](https://github.com/orkestra-cc/orkestra/commit/5d7c79900675fb3c40589e365c1f6ff9c2135d48))
+- **(i18n)** Correct Italian wording in auth config translations ([77e7a58](https://github.com/orkestra-cc/orkestra/commit/77e7a58fbf6f39a94ecd4629168f48c698dacfbf))
+- **(auth,admin)** Render OAuth provider panels honestly when all-hidden ([616de04](https://github.com/orkestra-cc/orkestra/commit/616de04c4c0c6ef71b76e06ce57a568d6df3b97a))
+- **(admin)** Stop the module detail page losing saves and edits in silence ([b101875](https://github.com/orkestra-cc/orkestra/commit/b1018754db3accc9e891da2ee2c06633d6096a8b))
+- **(admin)** Validate stored module config values on load ([e77f2bb](https://github.com/orkestra-cc/orkestra/commit/e77f2bb31a9ac9e1e43231cf54b2ff738cb4985a))
+- **(admin)** Give the module config blocker exactly one owner ([f7f5972](https://github.com/orkestra-cc/orkestra/commit/f7f5972614a937a1ba0c3d7da913a8b5196710df))
+- **(admin)** Recompile theme.css/theme.rtl.css with the sticky save bar ([6005785](https://github.com/orkestra-cc/orkestra/commit/60057854b6a50ca0cbdb8adcc213fdc9d9b8609d))
+- **(admin)** Validate only the save, clear secrets synchronously, fix blocker/degradation ([5b31e1b](https://github.com/orkestra-cc/orkestra/commit/5b31e1ba499775c6de6567a5e190e74b94fa7e33))
+- **(admin)** Gate the Advanced toggle on visible fields, cover the real degradation path ([b9e9983](https://github.com/orkestra-cc/orkestra/commit/b9e99834b1b025765ac5d1b08f0717e089160a84))
+- **(admin)** Stop the config form seeding a stored empty string as the default ([8c4492c](https://github.com/orkestra-cc/orkestra/commit/8c4492c86ed96953be36d1c730f03eec672f97da))
+- **(admin)** Guard config descriptions on the resolved string, finish label association ([c1579ba](https://github.com/orkestra-cc/orkestra/commit/c1579ba039d81e23d3e2237335dcd5d7964336a9))
+- **(admin)** Drop the half-built config tablist for the DOM it replaced ([4afe536](https://github.com/orkestra-cc/orkestra/commit/4afe536bb83cbc8d1a8658886f6872fcaedd2d92))
+- **(admin)** Stop the console rejecting durations the backend accepts ([c6bdb67](https://github.com/orkestra-cc/orkestra/commit/c6bdb67c236a7bfdb1221bc8d810d742ccb6f564))
+- **(admin)** Treat an explicit empty core-bundle label as not-found ([672989b](https://github.com/orkestra-cc/orkestra/commit/672989b4a52f6db51e2b66572016f3be58944465))
+- **(admin)** Keep every config tab keyboard-reachable, drop dead configModal i18n keys ([39a2550](https://github.com/orkestra-cc/orkestra/commit/39a25507deaa6dd96f0fa9f7cf7ec1fa4d36a67e))
+- **(docker)** Stop shipping a guessed trusted-proxy hop count for staging ([391a2c4](https://github.com/orkestra-cc/orkestra/commit/391a2c4b88ef166eb3450d6894110eb71b704055))
+- **(logging)** Stop the boot banner claiming dev tokens are on in staging ([7e46e68](https://github.com/orkestra-cc/orkestra/commit/7e46e68d38730ea52b419b3dfe83e40dbd7e95af))
+- **(config)** Parse the "d" duration suffix the config actually uses ([4830823](https://github.com/orkestra-cc/orkestra/commit/4830823a4cccc3e8e59596e2047948782739d0ef))
+- **(auth)** Remediate 13 findings from the authentication audit ([f8a6da0](https://github.com/orkestra-cc/orkestra/commit/f8a6da0b4b03b9bec5ed1efe181107f692e65b9e))
+
+### Refactor
+
+- **(frontend-admin)** AdvanceTable + SubtleBadge for the last raw core tables (#196) ([ce2e011](https://github.com/orkestra-cc/orkestra/commit/ce2e01118cc491d784c7a2c882bfef641445d3d1))
+- **(admin-modules)** Fail loudly on a missing register name ([452e5a6](https://github.com/orkestra-cc/orkestra/commit/452e5a603b7cbda3413d06cdfacdf6dc1479eeed))
+- **(sdk)** Rename Condition to FieldCondition and harden config validation ([e1f7a54](https://github.com/orkestra-cc/orkestra/commit/e1f7a5471a3cf7ca6c212ca1d744ae944556a710))
+
+### Documentation
+
+- Repoint prose references to the SDK's post-ADR-0006 home (#229) ([ff95a87](https://github.com/orkestra-cc/orkestra/commit/ff95a87c957cafc6012c22c881ab26f929f5d79b))
+- Repoint broken relative links, mostly ADR-0006 fallout (#228) ([582f4d6](https://github.com/orkestra-cc/orkestra/commit/582f4d65948ba65eb8a77544c077c9b4eec6177e))
+- **(site)** Diagram the fork-chain directions and the push guard (#223) ([8a47e8c](https://github.com/orkestra-cc/orkestra/commit/8a47e8c972366d29baafbd0eec5b454e9eadf6c3))
+- **(mobile)** State the real Dart floor, missed by the toolchain bump (#202) ([6ecd5e8](https://github.com/orkestra-cc/orkestra/commit/6ecd5e8bcc7c4b8302aac76da3613d659d078ac0))
+- **(plans)** Warn phase 5 that RHF reads dotted config keys as paths ([083ac5c](https://github.com/orkestra-cc/orkestra/commit/083ac5c8c9352087a7b2856122a361a6ccdbbd46))
+- **(sdk,auth)** Describe both DependsOnMatch modes where forks are told to look ([dba08da](https://github.com/orkestra-cc/orkestra/commit/dba08da8e9f6743852d4197159c1021ea7626aab))
+- Record auth's config group tree and the any-match rule ([25e1438](https://github.com/orkestra-cc/orkestra/commit/25e1438283eb63a0651a823c883f5e77dd9cc0d9))
+- **(plans)** Correct two wrong claims in the phase-4 plan ([b674a12](https://github.com/orkestra-cc/orkestra/commit/b674a12d65d0c75440e40dc8ce7ed4e4daaca613))
+- **(plans)** Add the phase-4 plan for migrating auth ([d054f77](https://github.com/orkestra-cc/orkestra/commit/d054f77499a2c8c68758c234b88cdce4abc365c9))
+- **(admin)** Record the module detail changes a fork trips over on sync ([3d20c40](https://github.com/orkestra-cc/orkestra/commit/3d20c40b881021fbcb78595b1989ee813e764387))
+- Describe the module settings rail for addon authors ([6f3630a](https://github.com/orkestra-cc/orkestra/commit/6f3630aa753fef264621be47b54c8966ba3655d6))
+- **(plans)** Correct the useModuleConfigForm signature in the phase-3 plan ([3117ea5](https://github.com/orkestra-cc/orkestra/commit/3117ea5426824163666d3a2db7f13c40b099318a))
+- **(plans)** Add the phase-3 plan for the master-detail settings layout ([7e6f257](https://github.com/orkestra-cc/orkestra/commit/7e6f25762b66b1e08b4064406226eb2b736617e9))
+- **(plans)** Drop an early return that would make a phase-2 test vacuous ([cdf5192](https://github.com/orkestra-cc/orkestra/commit/cdf519229cb9d7a3f2e307878bb65ed391530f2f))
+- **(plans)** Add the phase-2 plan and move the RHF migration to phase 3 ([8695333](https://github.com/orkestra-cc/orkestra/commit/86953333b6b8f0c2319707ad570b37e701b1815c))
+- **(plans)** Update Condition references to FieldCondition ([be4847e](https://github.com/orkestra-cc/orkestra/commit/be4847e11643d7333549543c3699f7d009f14e63))
+- **(sdk)** Correct the sub-interface count and the BaseModule exception ([7f41576](https://github.com/orkestra-cc/orkestra/commit/7f41576e63f853b3a27cd20d10b1cecaba4edc60))
+- **(plans)** Tighten phase-1 test design before execution ([808952b](https://github.com/orkestra-cc/orkestra/commit/808952b18bdf9e095697691e329ad2dec44136ff))
+- **(plans)** Add the task-level plan for module-config phase 1 ([3c010fa](https://github.com/orkestra-cc/orkestra/commit/3c010faed1a01dde3f3e0fb87e49bcb73603c3dd))
+- **(plans)** Split module-config work across the fork chain ([6553789](https://github.com/orkestra-cc/orkestra/commit/6553789d732fdbb2531222f1f306ea2465c0c508))
+- **(plans)** Spec grouped module config + master-detail settings page ([de5841c](https://github.com/orkestra-cc/orkestra/commit/de5841c787696c9c836d86ee8cfda5aecc1b75a4))
+
+### Tests
+
+- **(server)** Assert auth's config groups resolve through the catalog ([2209ccd](https://github.com/orkestra-cc/orkestra/commit/2209ccde93e5ac3156bc1265eff0748d716193c8))
+- **(server)** Gate module config declarations across the real catalog ([d5c56c1](https://github.com/orkestra-cc/orkestra/commit/d5c56c116ccc8b39b4cd60bb52d30e31be911a52))
+
+### Build
+
+- **(frontend-admin)** Migrate to Vite 8 (rolldown) with Vitest 4 (#206) ([5ebc9d5](https://github.com/orkestra-cc/orkestra/commit/5ebc9d5e225604a6c643680bf5f8388c2a3968cc))
+
+### CI
+
+- **(docs)** Dispatch docs.orkestra.cc rebuilds from pushes to main (#225) ([11670bd](https://github.com/orkestra-cc/orkestra/commit/11670bdb7c031cee114aaad976e5fe75dd5bb150))
+
+### Dependencies
+
+- **(deps)** Bump flutter_riverpod from 3.3.2 to 3.4.2 in /mobile (#191) ([2b3fbe6](https://github.com/orkestra-cc/orkestra/commit/2b3fbe6e6a5cf206af84836ca4eca2b471a927ba))
+- **(deps)** Bump github.com/aws/aws-sdk-go-v2/config in /backend (#187) ([3aec534](https://github.com/orkestra-cc/orkestra/commit/3aec53494b26353d268abbfca9bd7558f75f7ed4))
+- **(deps)** Bump github.com/aws/smithy-go in /backend (#188) ([976826b](https://github.com/orkestra-cc/orkestra/commit/976826bf8b01bf82ae40aa8a93918761db031edf))
+- **(deps)** Bump dio from 5.10.0 to 5.11.0 in /mobile (#192) ([0123d2f](https://github.com/orkestra-cc/orkestra/commit/0123d2f56671b25cfed8886b8f643126dd254951))
+- **(deps)** Bump @fortawesome/react-fontawesome (#182) ([7460d32](https://github.com/orkestra-cc/orkestra/commit/7460d320c153a5b91384b8900189168f0256f7c1))
+- **(deps)** Bump react-dom from 19.2.7 to 19.2.8 in /frontend-admin (#186) ([58b6c4e](https://github.com/orkestra-cc/orkestra/commit/58b6c4ef2d384340ed7f7fa2e1fe74baeb8dc1d7))
+- **(deps)** Bump github.com/aws/aws-sdk-go-v2 in /backend (#189) ([f450f43](https://github.com/orkestra-cc/orkestra/commit/f450f43032628e043e373d6c724f7f96d595fb0a))
+- **(deps)** Bump github.com/aws/aws-sdk-go-v2/service/s3 in /backend (#190) ([2ab3098](https://github.com/orkestra-cc/orkestra/commit/2ab30983f76c807229d86806d53a3f35bf8b0984))
+- **(deps)** Bump github.com/prometheus/client_golang in /backend (#181) ([9389316](https://github.com/orkestra-cc/orkestra/commit/9389316dfffcf75197e25dfcc5f7e9011a8bd063))
+
+### Chores
+
+- **(frontend-client)** Sync the lockfile version the v0.4.0 bump missed ([6998806](https://github.com/orkestra-cc/orkestra/commit/69988064e09346d731d3cddc2ff30eaea67906c5))
+- Docker/login-action v4, and drop the unused go_router dependency (#205) ([830ecd6](https://github.com/orkestra-cc/orkestra/commit/830ecd6300c0cebe41c9a64974159267ad2cc60c))
+- **(deps-dev)** Prettier 3.8.4 -> 3.9.4 and reformat what it changes (#204) ([d856be1](https://github.com/orkestra-cc/orkestra/commit/d856be1d2a53682e441af069d1351bfa1d0cb94b))
+- **(toolchain)** Flutter 3.35 -> 3.44, unblocking the mobile dependency floor (#201) ([e938997](https://github.com/orkestra-cc/orkestra/commit/e938997255c151bb60f81ef165ccc9e0d5769378))
+- **(deps-dev)** Bump sass from 1.97.1 to 1.102.0 in /frontend-admin (#184) ([ed52a9a](https://github.com/orkestra-cc/orkestra/commit/ed52a9a9b989783fe3b0b05e2a926adcc9c9641b))
+- **(frontend-admin)** Fix eslint/prettier formatting drift in vite.config.js ([b19df08](https://github.com/orkestra-cc/orkestra/commit/b19df0842b4a9e6af0f80d1364a07a7eb97c7d2c))
+- **(frontend-admin)** Sync package-lock to 0.4.0 ([f46bb39](https://github.com/orkestra-cc/orkestra/commit/f46bb39ac7de306cd9da7496444c418504edce21))
+
 ## [0.4.0] - 2026-07-15
 
 ### Features
 
+- **(storage)** Signed-GET download presigner + dual-endpoint split; fix pagination:false tables (#194) ([21a69a2](https://github.com/orkestra-cc/orkestra/commit/21a69a2b3334aaa2540e4f2db8276eb641ff850a))
+- **(storage)** Object-storage foundation — per-domain buckets, presigned upload, SDK seam (ADR-0011) (#179) ([d24d981](https://github.com/orkestra-cc/orkestra/commit/d24d9815c6b4e84af734befd6e17b8bba9a9fd37))
 - **(docker)** Write footer identity fields into runtime config.js ([c7bcdcd](https://github.com/orkestra-cc/orkestra/commit/c7bcdcd56778dca775bc698ffd82a4de6bb738df))
 - **(orkestra.sh)** Export ORKESTRA_CLONE_VERSION + ORKESTRA_BUILD_COMMIT ([1befe88](https://github.com/orkestra-cc/orkestra/commit/1befe88ed39107af357e837f0e9a27aacfc1689c))
 - **(frontend-admin)** Render deployment fingerprint in footer ([8716b14](https://github.com/orkestra-cc/orkestra/commit/8716b141215ec5347cfc267ca43192fe40937ff9))
@@ -15,6 +136,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 
 ### Bug fixes
 
+- **(docker)** Probe client-frontend health on 127.0.0.1, not localhost ([ce2d5f0](https://github.com/orkestra-cc/orkestra/commit/ce2d5f062d65b2c1005f60a33e9eb62a1e7aa6c1))
+- React-router 8 migration (both SPAs) + backend CVE dependency bumps (#193) ([ac766da](https://github.com/orkestra-cc/orkestra/commit/ac766da056e5d1163845e35149ea35936bfdd3d9))
+- **(api)** Register health probes once for huma v2.39 (bump v2.34.1→v2.39.0) (#180) ([d3a9aa8](https://github.com/orkestra-cc/orkestra/commit/d3a9aa8eae0a7e6795a8528e3e3947794e7f7479))
+- **(docker)** Make staging frontend-admin host allowlist env-driven ([4f630a5](https://github.com/orkestra-cc/orkestra/commit/4f630a54e923f00b0d667b3ab681f73eea0d1a59))
 - **(version)** Exclude clone tags from base-version git describe ([c610d64](https://github.com/orkestra-cc/orkestra/commit/c610d6421923ea486eb8eb02fe2104e0f45939b4))
 - **(docker)** Thread real apiUrl/wsUrl into prod runtime config.js ([fd454b6](https://github.com/orkestra-cc/orkestra/commit/fd454b6755e5004b05d773bb13e576147fbf6117))
 - **(mobile)** Revert build_runner to ^2.6.1 (2.15.1 needs Dart 3.10+) ([0f4e953](https://github.com/orkestra-cc/orkestra/commit/0f4e953596ca0b12859caa7e026c8b90c393e967))
@@ -27,9 +152,27 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 
 - **(frontend-admin)** Slim footer to a small monospace fingerprint ([1d84593](https://github.com/orkestra-cc/orkestra/commit/1d845933638967538f9533b27f4c904feda4efd6))
 
+### Documentation
+
+- **(docker)** Correct infra healthcheck, ports, and per-stack framing ([8297ad2](https://github.com/orkestra-cc/orkestra/commit/8297ad22fdbc0adc19cb96b506abff3730a57f0c))
+- **(adr)** ADR-0010 D5 (Prop: trailer) + D6 (selective downstream) ([a6f9671](https://github.com/orkestra-cc/orkestra/commit/a6f96718efe80970216166f5abb3a85322f4d11e))
+
 ### CI
 
 - **(release)** Authenticate git-cliff's GitHub API calls ([50ce0e0](https://github.com/orkestra-cc/orkestra/commit/50ce0e0087f80d43bb0d8c8dc2f01f516ad7dc89))
+
+### Dependencies
+
+- **(deps)** Bump github.com/aws/aws-sdk-go-v2/service/s3 in /backend (#174) ([0b7ffa5](https://github.com/orkestra-cc/orkestra/commit/0b7ffa5338ac5f1084589dae838ac4323ed7c175))
+- **(deps)** Bump github.com/aws/aws-sdk-go-v2/config in /backend (#176) ([28098d0](https://github.com/orkestra-cc/orkestra/commit/28098d096e5f27fc626edc752f33e7f69529e636))
+- **(deps)** Bump actions/setup-go from 6 to 7 (#171) ([fe240ba](https://github.com/orkestra-cc/orkestra/commit/fe240bae0b978e1841ceacf1792d5ad8919c1ea8))
+- **(deps)** Bump actions/setup-node from 6 to 7 (#172) ([79cb4d5](https://github.com/orkestra-cc/orkestra/commit/79cb4d5f73b0ddd005d6bddc23ce08d2dc493875))
+- **(deps)** Bump react-icons from 5.5.0 to 5.7.0 in /frontend-admin (#163) ([999f3ae](https://github.com/orkestra-cc/orkestra/commit/999f3aecf64c3cb504b1d51778eea76c839f9871))
+- **(deps)** Bump @reduxjs/toolkit in /frontend-admin (#164) ([f89f073](https://github.com/orkestra-cc/orkestra/commit/f89f073b85ceb635481ef5c86f423f358da70c7d))
+- **(deps)** Bump fuse.js from 7.1.0 to 7.4.2 in /frontend-admin (#166) ([4b4ef3c](https://github.com/orkestra-cc/orkestra/commit/4b4ef3ce618b343fae2ed75ee146af8bfe055ae8))
+- **(deps)** Bump the fortawesome group across 1 directory with 6 updates (#173) ([fe9104d](https://github.com/orkestra-cc/orkestra/commit/fe9104d9b28636c527608dec4552a9b25af5c0da))
+- **(deps)** Bump github.com/go-chi/chi/v5 in /backend (#161) ([72be338](https://github.com/orkestra-cc/orkestra/commit/72be338a9b5b0c554638e6bede031e5be2170d8e))
+- **(deps)** Bump github.com/aws/aws-sdk-go-v2/credentials in /backend (#178) ([83fd4aa](https://github.com/orkestra-cc/orkestra/commit/83fd4aaad32e4adb19c0d42dd11fd8e3a10ddd94))
 
 ## [0.3.15] - 2026-07-10
 
