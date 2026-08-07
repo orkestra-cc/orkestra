@@ -155,6 +155,7 @@ GitHub Actions workflows (`.github/workflows/`) run on PR and push to `dev`/`mai
 - `frontend-client.yml` → `make ci-frontend-client` (typecheck, eslint, build) — no tests yet
 - `mobile.yml` → `make ci-mobile` (flutter analyze, test)
 - `security.yml` — Trivy/CodeQL scanning, untouched by the make refactor
+- `docs-dispatch.yml` — on push to `main` touching `docs/site/**`, `docs/adr/**`, or `backend/openapi/enterprise.json`, sends the `repository_dispatch` that rebuilds docs.orkestra.cc (fires in the upstream repo only; needs the `DOCS_DISPATCH_TOKEN` secret)
 
 Local reproduction is the same one-liner CI uses:
 

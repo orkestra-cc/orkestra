@@ -46,7 +46,7 @@ What does **not** live here:
 ```
 monorepo/docs/site/*.mdx  ──merge to main──▶  orkestra-cc/orkestra (main)
                                                        │
-                            nightly cron OR repository_dispatch from monorepo CI
+                        docs-dispatch.yml → repository_dispatch (immediate)
                                                        │
                                                        ▼
                                         orkestra-cc/orkestra-docs build
@@ -56,7 +56,7 @@ monorepo/docs/site/*.mdx  ──merge to main──▶  orkestra-cc/orkestra (ma
                                               docs.orkestra.cc
 ```
 
-Lag on the auto path is up to 24 h (nightly cron). To deploy immediately after a doc change merges to monorepo `main`, run:
+The dispatch fires when a push to `main` touches `docs/site/**`, `docs/adr/**`, or `backend/openapi/enterprise.json` (`.github/workflows/docs-dispatch.yml`; it needs the `DOCS_DISPATCH_TOKEN` repo secret — without it the run warns and skips, and the site does **not** rebuild). The site's own nightly cron only resyncs addon READMEs and public ADRs via drift PRs — it does not deploy this tree, and GitHub disables cron schedules after 60 days without repo activity. To deploy manually:
 
 ```bash
 gh workflow run "Build & Deploy" -R orkestra-cc/orkestra-docs --ref main

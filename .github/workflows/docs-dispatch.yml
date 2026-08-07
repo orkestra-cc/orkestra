@@ -1,0 +1,62 @@
+name: Docs Site Dispatch
+
+# The sending half of the docs.orkestra.cc rebuild trigger. The receiving
+# half already exists: orkestra-docs' build.yml listens for
+# repository_dispatch types monorepo-docs-changed / monorepo-openapi-changed
+# and mirrors this repo's docs/site tree at build time. Without this
+# dispatch the site only rebuilds when someone runs its workflow by hand.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/site/**'
+      - 'docs/adr/**'
+      - 'backend/openapi/enterprise.json'
+  # Manual end-to-end test: sends monorepo-docs-changed unconditionally.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  dispatch:
+    name: Trigger docs.orkestra.cc rebuild
+    # Upstream only: private chain forks carry this file but must never fire it.
+    if: github.repository == 'orkestra-cc/orkestra'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dorny/paths-filter@v3
+        id: changed
+        if: github.event_name == 'push'
+        with:
+          filters: |
+            docs:
+              - 'docs/site/**'
+              - 'docs/adr/**'
+            openapi:
+              - 'backend/openapi/enterprise.json'
+
+      - name: Dispatch monorepo-docs-changed
+        if: steps.changed.outputs.docs == 'true' || github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ secrets.DOCS_DISPATCH_TOKEN }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::warning::DOCS_DISPATCH_TOKEN is not set — docs.orkestra.cc will not rebuild automatically. Create a fine-grained PAT scoped to orkestra-docs (Contents: read and write) and add it as a repo secret."
+            exit 0
+          fi
+          gh api repos/orkestra-cc/orkestra-docs/dispatches -f event_type=monorepo-docs-changed
+
+      - name: Dispatch monorepo-openapi-changed
+        if: steps.changed.outputs.openapi == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.DOCS_DISPATCH_TOKEN }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::warning::DOCS_DISPATCH_TOKEN is not set — skipping dispatch."
+            exit 0
+          fi
+          gh api repos/orkestra-cc/orkestra-docs/dispatches -f event_type=monorepo-openapi-changed
