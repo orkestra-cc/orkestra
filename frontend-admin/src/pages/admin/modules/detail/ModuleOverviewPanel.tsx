@@ -128,8 +128,7 @@ const ModuleOverviewPanel: React.FC<ModuleOverviewPanelProps> = ({
                   identically either way. */}
               {total > 0 && (
                 <span
-                  className="progress mt-2"
-                  style={{ height: '4px' }}
+                  className="progress stat-card-progress mt-2"
                   aria-hidden="true"
                 >
                   <span

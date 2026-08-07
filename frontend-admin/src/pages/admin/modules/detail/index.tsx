@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Navigate, useBlocker, useParams, useSearchParams } from 'react-router';
 import { Alert, Button, Card, Col, Modal, Row, Spinner } from 'react-bootstrap';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
@@ -151,22 +151,48 @@ const ModuleDetailPage: React.FC = () => {
     }
   }, [showRail, requested, active]);
 
-  // A boolean would block every ?section= switch too, since setSearchParams
-  // is itself a navigation — only a real navigation (a different pathname)
-  // should ever prompt. Switching sections never trips this. This is the
-  // page's ONLY useBlocker call — see the controller comment above for why
-  // that single-registration property matters.
-  const blocker = useBlocker(
-    ({ currentLocation, nextLocation }) =>
-      dirtyCount > 0 && currentLocation.pathname !== nextLocation.pathname
-  );
+  // Set for exactly one navigation by `confirmEnvSwitch`, which has already
+  // asked and already discarded. A ref, not state: the blocker predicate runs
+  // synchronously during the navigation `setCurrentEnv` triggers, so a state
+  // update queued in the same handler would not be visible yet and the
+  // operator would be asked the same question twice.
+  const envSwitchConfirmed = useRef(false);
+
+  // Two things discard the form, and both have to prompt.
+  //
+  // A different pathname is the obvious one. The second is a change to
+  // `?env=`: it rebinds every field on the page, and — since the environment
+  // moved into the URL — it can now happen without going through the
+  // switcher at all. The browser's Back button is enough: it rewrites the
+  // query string on the same pathname, the query arg behind
+  // `useGetModuleEnvironmentQuery` changes, the form re-seeds, and every
+  // unsaved edit is gone with nothing asked. `?section=` must NOT prompt —
+  // it only picks which slice of one live form is rendered, and
+  // `setSearchParams` is itself a navigation, so a blanket boolean here would
+  // fire on every rail click.
+  //
+  // This is the page's ONLY useBlocker call — see the controller comment
+  // above for why that single-registration property matters.
+  const blocker = useBlocker(({ currentLocation, nextLocation }) => {
+    if (dirtyCount === 0) return false;
+    if (currentLocation.pathname !== nextLocation.pathname) return true;
+    if (envSwitchConfirmed.current) {
+      envSwitchConfirmed.current = false;
+      return false;
+    }
+    const from = new URLSearchParams(currentLocation.search).get('env');
+    const to = new URLSearchParams(nextLocation.search).get('env');
+    return from !== to;
+  });
 
   // Picking a different environment changes the query arg behind
   // `useGetModuleEnvironmentQuery`, which lands a new `envConfig` and re-seeds
   // the form — silently discarding every unsaved edit across every group.
-  // `useBlocker` cannot cover this: no navigation happens. With one form now
-  // spanning the whole module and the switcher a rail destination one click
-  // from a bar reading "12 unsaved changes", that discard has to be asked for.
+  // With one form now spanning the whole module and the switcher a rail
+  // destination one click from a bar reading "12 unsaved changes", that
+  // discard has to be asked for. This handler covers the switcher; the
+  // blocker above covers every other route to the same URL (Back, a pasted
+  // link, anything that rewrites `?env=`).
   const handleEnvSelect = (env: string) => {
     if (env === currentEnv) return;
     if (dirtyCount > 0) {
@@ -183,6 +209,9 @@ const ModuleDetailPage: React.FC = () => {
     // this way they are gone even if the new environment's payload is
     // already cached and lands with nothing for the effect to react to.
     handleDiscard();
+    // The operator has just been asked and agreed; don't ask again when the
+    // navigation below reaches the blocker.
+    envSwitchConfirmed.current = true;
     setCurrentEnv(pendingEnv);
     setPendingEnv(null);
   };

@@ -43,6 +43,14 @@
   }
 }
 
+// A hairline progress track for a StatCard that carries a ratio in its
+// subtitle. Lives here rather than as an inline `height` at the call site:
+// presentation belongs to the theme, so a later density retune moves it in
+// one place. The bar's own `width` stays inline — it is the datum.
+.stat-card-progress {
+  height: 4px;
+}
+
 // The 4px accent edge is StatCard's status channel — it is the tile's only
 // non-textual carrier of "healthy / degraded / neutral" — so it owes the 3:1
 // non-text contrast floor against the canvas behind it. In LIGHT the raw

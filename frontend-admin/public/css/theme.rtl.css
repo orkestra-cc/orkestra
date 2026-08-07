@@ -28169,6 +28169,10 @@ html[data-bs-theme=dark] .bg-priority-low:checked {
   background-color: #0f141c;
 }
 
+.stat-card-progress {
+  height: 4px;
+}
+
 html:not([data-bs-theme=dark]) .card.border-4.border-primary {
   border-color: var(--orkestra-primary-text-emphasis) !important;
 }
