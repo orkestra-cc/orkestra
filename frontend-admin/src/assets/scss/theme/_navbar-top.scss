@@ -9,6 +9,12 @@
   font-weight: $font-weight-semibold;
   margin-left: -1rem;
   margin-right: -1rem;
+  // Breathing room between the top band and the page content. While the bar
+  // was a transparent overlay the gap was implied by its invisible box; now
+  // that it is a real surface with a hairline, content flush against it
+  // reads cramped. One spacer step, matching the g-3 page rhythm. Declared
+  // both-modes 2026-08-07.
+  margin-bottom: map-get($spacers, 3);
   z-index: 1020;
   background-image: none;
   min-height: $top-nav-height;

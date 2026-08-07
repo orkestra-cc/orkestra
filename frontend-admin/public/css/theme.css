@@ -24384,6 +24384,7 @@ h5, .h5 {
   font-weight: 600;
   margin-left: -1rem;
   margin-right: -1rem;
+  margin-bottom: 1rem;
   z-index: 1020;
   background-image: none;
   min-height: var(--orkestra-top-nav-height);
