@@ -56,6 +56,25 @@ func TestSMTPFields_GatedOnProvider(t *testing.T) {
 	}
 }
 
+func TestSMTPHost_RequiredWhenVisible(t *testing.T) {
+	// A host is the one SMTP setting a real send cannot do without, so the
+	// admin UI must flag it once the provider reveals it (required-when-
+	// visible). The other four stay optional: unauthenticated relays are
+	// legitimate and port/tls_mode carry defaults.
+	for _, f := range (&NotificationModule{}).ConfigSchema() {
+		switch f.Key {
+		case "email.smtp.host":
+			if !f.Required {
+				t.Errorf("email.smtp.host must be Required (required-when-visible)")
+			}
+		case "email.smtp.port", "email.smtp.username", "email.smtp.password", "email.smtp.tls_mode":
+			if f.Required {
+				t.Errorf("field %q must not be Required", f.Key)
+			}
+		}
+	}
+}
+
 func TestEnumConversions(t *testing.T) {
 	want := map[string][]string{
 		"email.provider":      {"noop", "smtp"},

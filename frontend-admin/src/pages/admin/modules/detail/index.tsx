@@ -100,6 +100,7 @@ const ModuleDetailPage: React.FC = () => {
     errorCount,
     perGroup,
     saveBarErrors,
+    unfilledByGroup,
     error: saveError,
     success,
     clearError,
@@ -377,7 +378,9 @@ const ModuleDetailPage: React.FC = () => {
                 moduleName={mod.moduleName}
                 activeKey={active}
                 onSelect={setActive}
-                statusFor={() => ({ unfilled: 0 })}
+                statusFor={node => ({
+                  unfilled: unfilledByGroup.get(node.key) ?? 0
+                })}
                 leadingItems={[
                   {
                     key: SECTION_OVERVIEW,

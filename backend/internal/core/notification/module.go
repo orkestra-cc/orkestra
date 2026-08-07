@@ -136,7 +136,10 @@ func (m *NotificationModule) ConfigSchema() []module.ConfigField {
 	smtpOnly := []module.FieldCondition{{Key: "email.provider", In: []string{"smtp"}}}
 	return []module.ConfigField{
 		{Key: "email.provider", Label: "Email provider", Group: "delivery", Type: module.FieldEnum, Options: []string{"noop", "smtp"}, Required: true, Default: "noop", EnvVar: "NOTIFICATION_EMAIL_PROVIDER"},
-		{Key: "email.smtp.host", Label: "SMTP host", Group: "delivery", Type: module.FieldString, DependsOn: smtpOnly, EnvVar: "SMTP_HOST"},
+		// Required composes with DependsOn as required-when-visible: the admin
+		// UI enforces it only while the provider is smtp. Username/password
+		// stay optional (unauthenticated relays), port/tls_mode have defaults.
+		{Key: "email.smtp.host", Label: "SMTP host", Group: "delivery", Type: module.FieldString, Required: true, DependsOn: smtpOnly, EnvVar: "SMTP_HOST"},
 		{Key: "email.smtp.port", Label: "SMTP port", Group: "delivery", Type: module.FieldInt, Default: "587", DependsOn: smtpOnly, EnvVar: "SMTP_PORT"},
 		{Key: "email.smtp.username", Label: "SMTP username", Group: "delivery", Type: module.FieldString, DependsOn: smtpOnly, EnvVar: "SMTP_USERNAME"},
 		{Key: "email.smtp.password", Label: "SMTP password", Group: "delivery", Type: module.FieldSecret, DependsOn: smtpOnly, EnvVar: "SMTP_PASSWORD"},
