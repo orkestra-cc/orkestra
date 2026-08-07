@@ -14,14 +14,36 @@ _Parent: [../CLAUDE.md](../CLAUDE.md)_
 
 ## Multi-Stack Model
 
-Every checkout × environment combination is **one Compose project**: `STACK=${APP_NAME}-${ENV}` (e.g. `orkestra-commons-development`). Everything the stack owns is namespaced under that identity, so any number of stacks coexist on one host with zero overlap:
+Every checkout × environment combination is **one Compose project**: `STACK=${APP_NAME}-${ENV}` (e.g. `orkestra-development`). Everything the stack owns is namespaced under that identity, so any number of stacks coexist on one host with zero overlap:
 
-- **Containers**: `${APP_NAME}-<svc>-${ENV}` — e.g. `orkestra-commons-backend-development` for the `backend` service of this checkout's dev stack.
+- **Containers**: `${APP_NAME}-<svc>-${ENV}` — e.g. `orkestra-backend-development` for the `backend` service of a stack running the `docker/.env.example` defaults (`APP_NAME=orkestra`, `ENV=development`).
 - **Volumes**: `${STACK}_<vol>` — Compose auto-prefixes them (no pinned `name:` anymore).
 - **Network**: `${STACK}_default` — Compose's own per-project default network. There is no shared `orkestra-network` bridge to create; nothing joins another stack's network.
 - **Ports**: explicit values in `docker/.env`, seeded non-colliding by `scripts/init.sh` on first run (no arithmetic or shared defaults baked into compose).
 - **Observability**: a per-stack overlay (`docker-compose.observability.yml`) layered **into** the same `${STACK}` project when opted in (`./orkestra.sh observability up`) — not a separate `orkestra-observability` project.
 - **Service names** (`backend`, `frontend-admin`, `client-frontend`, `mongodb`, `redis`, `rustfs`, plus the observability services) are uniform across dev/staging/prod — only the container/volume/network layer is stack-namespaced. `docker compose ... <cmd> <service>` always takes the bare service name; `docker exec`/`docker inspect`/`docker logs` on a raw container need the full `${APP_NAME}-<svc>-${ENV}` name.
+
+### ⚠️ A running container does not belong to the checkout you are standing in
+
+The names above are **worked examples using the shipped defaults, not a description of
+your machine.** Because every checkout × environment is its own project, one host
+commonly runs several stacks from *different clones* at once — an upstream checkout on
+`staging` and a fork's checkout on `development`, for instance. Nothing in a container's
+name tells you which directory owns it; `APP_NAME` is per-checkout and arbitrary.
+
+Acting on the wrong stack is a real failure mode: a `git pull` in one clone has **zero**
+effect on another clone's containers, so "I updated the code and redeployed" can restart
+a stack built from a completely different repository.
+
+Always resolve ownership from the container's own Compose labels before acting on it:
+
+```bash
+docker inspect <container> \
+  --format '{{index .Config.Labels "com.docker.compose.project.working_dir"}} | {{index .Config.Labels "com.docker.compose.project"}}'
+```
+
+For *this* checkout's identity — which is only ever what its own env file says — read
+`grep -E '^(APP_NAME|ENV)=' docker/.env`.
 
 Full design rationale and migration notes: [`docs/superpowers/specs/2026-07-05-multi-stack-isolation-design.md`](../docs/superpowers/specs/2026-07-05-multi-stack-isolation-design.md).
 
@@ -53,8 +75,8 @@ The docker module provides **containerized infrastructure and deployment configu
 **BEFORE running ANY Docker command, you MUST check the current environment:**
 
 ```bash
-# ALWAYS run this FIRST before any docker operations
-grep "^ENV=" /home/tore/orkestra/docker/.env
+# ALWAYS run this FIRST before any docker operations (run from the repo root)
+grep -E "^(APP_NAME|ENV)=" docker/.env
 ```
 
 **This determines which compose file to use:**
@@ -290,7 +312,7 @@ docker compose -f docker-compose.prod.yml --env-file .env.production up -d
 | **frontend-admin**           | 8080      | Operator console (Tier-1)            | Vite dev server, HMR; host `staging.orkestra.cc`                |
 | **client-frontend**          | 8081      | Tier-2 client demo SPA               | Vite dev server, HMR; host `app.orkestra.cc`; consumes `staging-api.*` |
 
-Service names are uniform across dev/staging/prod (`backend`/`frontend-admin`/`client-frontend`); only the `container_name:` is stack-namespaced (`${APP_NAME}-<svc>-${ENV}`), e.g. `orkestra-commons-backend-development` for this checkout's dev stack.
+Service names are uniform across dev/staging/prod (`backend`/`frontend-admin`/`client-frontend`); only the `container_name:` is stack-namespaced (`${APP_NAME}-<svc>-${ENV}`), e.g. `orkestra-backend-development` on the shipped defaults.
 
 The backend mounts `../backend:/app` and runs AIR from the bind mount — no image rebuild on code change. AIR and the Go module/build cache live under `backend/.go-bin/` and `backend/.go-mod-cache/` (gitignored), pre-installed by the host. To bootstrap on a fresh machine:
 
@@ -544,7 +566,7 @@ Boot it alongside the dev stack. Easiest path via `orkestra.sh`:
 ./orkestra.sh                       # TUI → option 3 "Observability"
 ```
 
-Or directly via docker compose — one project spanning all three files, named to match what `orkestra.sh` would use (`${APP_NAME}-${ENV}` from `docker/.env`, e.g. `orkestra-commons-development`):
+Or directly via docker compose — one project spanning all three files, named to match what `orkestra.sh` would use (`${APP_NAME}-${ENV}` from `docker/.env`, e.g. `orkestra-development`):
 
 ```bash
 cd docker
@@ -610,14 +632,14 @@ For production environments, consider managed services instead of (or in additio
 
 ### Basic Health Checks
 
-Container names below use the worked example for this checkout's dev stack (`APP_NAME=orkestra-commons`, `ENV=development`) — substitute your own `${APP_NAME}-<svc>-${ENV}`.
+Container names below use the shipped defaults (`APP_NAME=orkestra`, `ENV=development`) as a worked example — substitute your own `${APP_NAME}-<svc>-${ENV}`, read from `docker/.env`.
 
 ```bash
 # Check MongoDB health
-docker exec orkestra-commons-mongodb-development mongosh --eval "db.adminCommand('ping')"
+docker exec orkestra-mongodb-development mongosh --eval "db.adminCommand('ping')"
 
 # Check Redis health
-docker exec orkestra-commons-redis-development redis-cli ping
+docker exec orkestra-redis-development redis-cli ping
 
 # Check Gotenberg health (PDF service)
 curl http://localhost:3030/health
@@ -629,7 +651,7 @@ curl http://localhost:8080         # Frontend availability
 
 ## Backup & Restore
 
-**Prefer `./backup.sh` / `./restore.sh` at the repo root** (documented in [scripts/CLAUDE.md](../scripts/CLAUDE.md) and [docs/site/operating/backup-and-restore.mdx](../docs/site/operating/backup-and-restore.mdx)) — they resolve the current stack's container/network names from `docker/.env` automatically. The manual snippets below are illustrative only; container names again use the `orkestra-commons`/`development` worked example — substitute your own `${APP_NAME}-<svc>-${ENV}`.
+**Prefer `./backup.sh` / `./restore.sh` at the repo root** (documented in [scripts/CLAUDE.md](../scripts/CLAUDE.md) and [docs/site/operating/backup-and-restore.mdx](../docs/site/operating/backup-and-restore.mdx)) — they resolve the current stack's container/network names from `docker/.env` automatically. The manual snippets below are illustrative only; container names again use the `orkestra`/`development` worked example — substitute your own `${APP_NAME}-<svc>-${ENV}`.
 
 ### Manual Backup Commands
 
@@ -642,13 +664,13 @@ TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 BACKUP_DIR="./backups/mongo_${TIMESTAMP}"
 
 # Run mongodump
-docker exec orkestra-commons-mongodb-development mongodump \
+docker exec orkestra-mongodb-development mongodump \
   --uri="mongodb://admin:changeme@localhost:27017" \
   --out=/tmp/backup \
   --gzip
 
 # Copy to host
-docker cp orkestra-commons-mongodb-development:/tmp/backup ${BACKUP_DIR}
+docker cp orkestra-mongodb-development:/tmp/backup ${BACKUP_DIR}
 
 # Upload to S3 (optional)
 # aws s3 cp ${BACKUP_DIR} s3://orkestra-backups/mongo/${TIMESTAMP}/ --recursive
@@ -659,12 +681,12 @@ docker cp orkestra-commons-mongodb-development:/tmp/backup ${BACKUP_DIR}
 ```bash
 #!/bin/bash
 # Force Redis to save current dataset
-docker exec orkestra-commons-redis-development redis-cli --pass changeme BGSAVE
+docker exec orkestra-redis-development redis-cli --pass changeme BGSAVE
 sleep 5
 
 # Copy RDB file
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-docker cp orkestra-commons-redis-development:/data/dump.rdb ./backups/redis_${TIMESTAMP}.rdb
+docker cp orkestra-redis-development:/data/dump.rdb ./backups/redis_${TIMESTAMP}.rdb
 ```
 
 ### Restore Procedures
@@ -677,7 +699,7 @@ docker compose -f docker-compose.dev.yml down    # Or prod.yml
 docker compose -f docker-compose.prod.yml down
 
 # Restore from backup
-docker exec orkestra-commons-mongodb-development mongorestore \
+docker exec orkestra-mongodb-development mongorestore \
   --uri="mongodb://admin:changeme@localhost:27017" \
   --gzip \
   /path/to/backup/directory
@@ -694,7 +716,7 @@ docker compose -f docker-compose.prod.yml up -d
 docker compose stop redis
 
 # Copy backup file
-docker cp ./backups/redis_backup.rdb orkestra-commons-redis-development:/data/dump.rdb
+docker cp ./backups/redis_backup.rdb orkestra-redis-development:/data/dump.rdb
 
 # Start Redis
 docker compose start redis
@@ -744,12 +766,12 @@ docker compose ps
 docker compose logs --tail=100 backend
 
 # Execute commands in containers (container names are stack-namespaced —
-# ${APP_NAME}-<svc>-${ENV}; worked example below is orkestra-commons/development)
-docker exec -it orkestra-commons-backend-development sh
-docker exec -it orkestra-commons-mongodb-development mongosh
+# ${APP_NAME}-<svc>-${ENV}; worked example below is orkestra/development)
+docker exec -it orkestra-backend-development sh
+docker exec -it orkestra-mongodb-development mongosh
 
 # Check network connectivity (${STACK}_default, e.g.:)
-docker network inspect orkestra-commons-development_default
+docker network inspect orkestra-development_default
 
 # Monitor resource usage
 docker stats
@@ -857,11 +879,11 @@ docker compose restart backend
 docker compose up -d --build backend
 
 # View complete container information (stack-namespaced name — worked
-# example for this checkout's dev stack, orkestra-commons/development)
-docker inspect orkestra-commons-backend-development
+# example uses the shipped defaults, orkestra/development)
+docker inspect orkestra-backend-development
 
 # Access container shell for debugging (emergency only)
-docker exec -it orkestra-commons-backend-development sh
+docker exec -it orkestra-backend-development sh
 docker compose -f docker-compose.dev.yml up -d --build
 
 # Quick restart of application services (keep infrastructure running)

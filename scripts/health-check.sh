@@ -15,8 +15,8 @@
 #
 # Container names are resolved as ${APP_NAME}-<svc>-${ENV} from docker/.env —
 # never assumed. One machine routinely runs several stacks from different
-# checkouts (e.g. orkestra-public-*-staging and orkestra-commons-*-development),
-# and guessing the name inspects the wrong repository's containers.
+# checkouts (APP_NAME is per-checkout and arbitrary), so a guessed name inspects
+# some other clone's containers and reports health for code nobody deployed.
 
 set -uo pipefail
 

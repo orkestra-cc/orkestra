@@ -11,9 +11,9 @@ Low-level, per-service container surgery on the Orkestra stack. This skill **aut
 
 ## Multi-stack model (read this first)
 
-Every checkout × environment combination is **one Compose project**: `STACK=${APP_NAME}-${ENV}` (e.g. `orkestra-commons-development`), computed from `docker/.env` and exported as `COMPOSE_PROJECT_NAME` by `orkestra.sh`. Full design: [docs/superpowers/specs/2026-07-05-multi-stack-isolation-design.md](../../../docs/superpowers/specs/2026-07-05-multi-stack-isolation-design.md).
+Every checkout × environment combination is **one Compose project**: `STACK=${APP_NAME}-${ENV}` (e.g. `orkestra-development`), computed from `docker/.env` and exported as `COMPOSE_PROJECT_NAME` by `orkestra.sh`. Full design: [docs/superpowers/specs/2026-07-05-multi-stack-isolation-design.md](../../../docs/superpowers/specs/2026-07-05-multi-stack-isolation-design.md).
 
-- **Containers**: `${APP_NAME}-<svc>-${ENV}` — e.g. `orkestra-commons-backend-development`.
+- **Containers**: `${APP_NAME}-<svc>-${ENV}` — e.g. `orkestra-backend-development`.
 - **Network**: `${STACK}_default` — Compose's own per-project default network. There is no shared `orkestra-network` bridge anymore.
 - **Service names are uniform** across dev/staging/prod: `backend`, `frontend-admin`, `client-frontend` (app), `mongodb`, `redis`, `rustfs` (infra), `grafana`/`loki`/`tempo`/`promtail`/`prometheus`/`otel-collector` (observability). There is no dev-only service-name variant anymore.
 - **One project spans multiple files**: a stack's project is `docker-compose.infra.yml` + `docker-compose.{dev,staging,prod}.yml` + (opt-in) `docker-compose.observability.yml`, all under the same `${STACK}` project — not separate `orkestra-infra` / `orkestra-observability` projects.
@@ -34,7 +34,7 @@ So: never derive the compose file or stack identity from `ENV=` alone. Derive bo
 Both are now predictable and uniform in shape, but they are **not interchangeable**:
 
 - **Service name** (`backend`, `mongodb`, …) — same string on dev/staging/prod, same string regardless of `APP_NAME`. Use it with `docker compose ... <cmd> <service>`.
-- **Container name** (`${APP_NAME}-<svc>-${ENV}`, e.g. `orkestra-commons-backend-development`) — stack-namespaced. Use it with a raw `docker exec` / `docker restart` / `docker inspect` / `docker logs` that doesn't go through `docker compose`.
+- **Container name** (`${APP_NAME}-<svc>-${ENV}`, e.g. `orkestra-backend-development`) — stack-namespaced. Use it with a raw `docker exec` / `docker restart` / `docker inspect` / `docker logs` that doesn't go through `docker compose`.
 
 Getting this wrong yields `no such service` (passed a container name to `docker compose`) or `no such container` (passed a bare service name to raw `docker`). The detection step below prints both so you never guess.
 
@@ -104,11 +104,11 @@ docker compose -f "$compose" --env-file docker/.env up -d --build "$svc"
 
 ### Force-rebuild the Go backend when AIR misses a change
 
-dev/staging bind-mount source and run AIR — no image build. When AIR's inotify watcher misses a change (always on WSL2 mounts, occasionally on native Linux across user namespaces) and the running binary lags a code change by more than ~5s, rebuild inside the **container** (use the stack-namespaced container name — worked example below is this checkout's dev stack, `orkestra-commons`/`development`):
+dev/staging bind-mount source and run AIR — no image build. When AIR's inotify watcher misses a change (always on WSL2 mounts, occasionally on native Linux across user namespaces) and the running binary lags a code change by more than ~5s, rebuild inside the **container** (use the stack-namespaced container name — worked example below uses the shipped defaults, `orkestra`/`development`; resolve your own from `docker/.env`):
 
 ```bash
-docker exec orkestra-commons-backend-development go build -o /app/tmp/main ./cmd/server/
-docker restart orkestra-commons-backend-development
+docker exec orkestra-backend-development go build -o /app/tmp/main ./cmd/server/
+docker restart orkestra-backend-development
 ```
 
 ## Service catalog (current repo, ADR-0006 core-only base)

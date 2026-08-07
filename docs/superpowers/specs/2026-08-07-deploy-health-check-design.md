@@ -56,10 +56,11 @@ lives on its own host, not on a `/api` path.
 
 **Stack resolution.** Reads `APP_NAME` from `docker/.env` (default `orkestra`) and
 composes container names as `${APP_NAME}-<svc>-${ENV}`. It never assumes which
-checkout it is inspecting — the same machine runs `orkestra-public-*-staging` from
-`/home/tore/orkestra` and `orkestra-commons-*-development` from
-`/home/tore/orkestra-commons`. Sources `scripts/env-file.sh` for `env_get` rather
-than reimplementing env parsing.
+checkout it is inspecting: one host commonly runs several stacks from different
+clones at once (an upstream checkout on `staging`, a fork's on `development`), and
+`APP_NAME` is per-checkout and arbitrary, so a guessed name inspects the wrong
+repository's containers. Sources `scripts/env-file.sh` for `env_get` rather than
+reimplementing env parsing.
 
 **Checks.**
 
@@ -87,9 +88,9 @@ returns the resolved `version`, which also proves `ORKESTRA_VERSION` was injecte
 Everything outside the scope is still probed, but downgraded to a warning. This
 attributes failures correctly — a backend-only deploy must not fail because of a
 pre-existing, unrelated frontend problem — while still surfacing collateral damage.
-It is not hypothetical: `orkestra-commons-client-frontend-development` has been
-`unhealthy` for 7 days (the known Vite IPv6 healthcheck trap), and a whole-stack
-hard-fail policy would block every deploy on that stack.
+It is not hypothetical: on the machine this was written on, a `client-frontend`
+container had been `unhealthy` for 7 days (the known Vite IPv6 healthcheck trap),
+and a whole-stack hard-fail policy would have blocked every deploy on that stack.
 
 **Retries.** Container state is read once. HTTP probes retry 8 times at 3s intervals
 (~21s), because Vite reports `ready in 12007 ms` on a cold start and a refused
@@ -127,11 +128,15 @@ Per the repo's commit doc-hygiene rule, the same commit updates:
 - the `orkestra-stack` skill — it currently describes health verification that never
   ran, and tells the reader to trust the deploy's success banner.
 
-## Out of scope
+## Out of scope (addressed in a follow-up commit)
 
-The stack-ownership documentation defect — the root `CLAUDE.md` WSL2 section and the
-`orkestra-stack` skill both call `orkestra-commons-backend-development` "this
-checkout's dev stack", which is false for `/home/tore/orkestra`. Tracked separately.
+A separate stack-ownership documentation defect: the docs used a downstream fork's
+container names as the canonical worked example and labelled them "this checkout's
+dev stack" — false for the upstream checkout, false for any fresh clone, and it
+leaked a private fork's identity into the base repo. Fixed immediately after this
+change: names genericised to the `docker/.env.example` defaults, the false claim
+removed, and `docker/CLAUDE.md` gained an explicit warning that a running container
+does not belong to the checkout you are standing in.
 
 ## Testing
 

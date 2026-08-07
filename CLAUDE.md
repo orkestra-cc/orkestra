@@ -139,11 +139,11 @@ One infra base + one app file per environment (`docker-compose.{dev,staging,prod
 
 ### WSL2 Development Caveat
 
-AIR file watcher does not reliably detect changes on the Windows filesystem mounted in WSL2. If backend changes don't take effect after saving, manually rebuild inside the container (container names are now stack-namespaced — `${APP_NAME}-<svc>-${ENV}`; the example below is this checkout's dev stack, see [docker/CLAUDE.md](docker/CLAUDE.md#multi-stack-model)):
+AIR file watcher does not reliably detect changes on the Windows filesystem mounted in WSL2. If backend changes don't take effect after saving, manually rebuild inside the container (container names are now stack-namespaced — `${APP_NAME}-<svc>-${ENV}`; the example below uses the shipped defaults, **not necessarily your stack** — read yours from `docker/.env`, see [docker/CLAUDE.md](docker/CLAUDE.md#multi-stack-model)):
 
 ```bash
-docker exec orkestra-commons-backend-development go build -o /app/tmp/main ./cmd/server/
-docker restart orkestra-commons-backend-development
+docker exec orkestra-backend-development go build -o /app/tmp/main ./cmd/server/
+docker restart orkestra-backend-development
 ```
 
 ### CI/CD

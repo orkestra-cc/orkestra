@@ -200,10 +200,10 @@ docker compose logs -f backend
 
 The dev backend builds `docker/Dockerfile.dev-backend` (golang:alpine, AIR pre-baked; a fork with a Chainguard subscription overrides the base via the `GO_BASE` build-arg). One infra base + one app file per environment (`docker-compose.{dev,staging,prod}.yml`) + an opt-in `docker-compose.observability.yml` — ADR-0006 removed the `minimal`/`full` runtime-profile compose files.
 
-**WSL2 caveat**: AIR doesn't detect file changes on Windows mounts. Rebuild manually (container names are stack-namespaced — `${APP_NAME}-<svc>-${ENV}`; example below is this checkout's dev stack, see [docker/CLAUDE.md](../docker/CLAUDE.md#multi-stack-model)):
+**WSL2 caveat**: AIR doesn't detect file changes on Windows mounts. Rebuild manually (container names are stack-namespaced — `${APP_NAME}-<svc>-${ENV}`; example below uses the shipped defaults, **not necessarily your stack** — read yours from `docker/.env`, see [docker/CLAUDE.md](../docker/CLAUDE.md#multi-stack-model)):
 ```bash
-docker exec orkestra-commons-backend-development go build -o /app/tmp/main ./cmd/server/
-docker restart orkestra-commons-backend-development
+docker exec orkestra-backend-development go build -o /app/tmp/main ./cmd/server/
+docker restart orkestra-backend-development
 ```
 
 **Log level**: controlled by `LOG_LEVEL` env var — `debug` (dev), `info` (staging), `warn` (prod).
