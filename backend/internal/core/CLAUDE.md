@@ -9,7 +9,7 @@ _Parent: [../../CLAUDE.md](../../CLAUDE.md)_
 
 The eight modules under `backend/internal/core/` are the always-loaded kernel of the Orkestra backend. Every deployment boots them — they provide identity, multi-tenancy, permissions, navigation, outbound mail, runtime log-level admin, and the compliance plane (audit + GDPR DSR). Optional modules a fork adds under `backend/internal/addons/` are opt-in (toggled at `/admin/modules`); core is not. Per [ADR-0006](../../../docs/adr/0006-collapse-to-core-only-base.md) the base ships **no** addons.
 
-Load order is topologically sorted from each module's `Dependencies()` by `ModuleRegistry.InitAll` (`shared/module/registry.go:115-217`):
+Load order is topologically sorted from each module's `Dependencies()` by `ModuleRegistry.InitAll` (`pkg/sdk/module/registry.go:115-217`):
 
 ```
 user → notification → tenant → authz → auth → navigation → logging → compliance
@@ -104,7 +104,7 @@ Several pieces of state are written to MongoDB only during `InitAll`. If the col
 
 | Seed | Where | Lazy-heal? |
 |---|---|---|
-| `module_configs` documents | `shared/module/config_service.go::SeedFromModules` | ✅ `GetConfig`/`GetAllConfigs` lazy-rebuild from the in-memory spec cache |
+| `module_configs` documents | `pkg/sdk/module/config_service.go::SeedFromModules` | ✅ `GetConfig`/`GetAllConfigs` lazy-rebuild from the in-memory spec cache |
 | Permissions catalog + system roles | `registry.go:183-211` → `authz.RegisterPermissions` + `authz.SeedSystemRoles` | ✅ `authz.Service.ListRoles`/`ListPermissions` call `ensureSeeded` |
 | Notification templates | `notification` module's `Start` → `TemplateService.SeedDefaults` | ❌ templates re-seed only at next backend restart |
 | Mongo collection auto-creation + index build | registry's `ensureCollections` | ❌ collections are re-created only at next restart |
@@ -113,17 +113,17 @@ Several pieces of state are written to MongoDB only during `InitAll`. If the col
 
 | Concern | Answer |
 |---|---|
-| "It's a new cross-cutting capability everyone needs" → core or shared? | Core if it has state and exposes an interface to others (e.g. authz). Shared (`shared/iface`, `shared/middleware`) if it's stateless plumbing. |
+| "It's a new cross-cutting capability everyone needs" → core or shared? | Core if it has state and exposes an interface to others (e.g. authz). Shared (`pkg/sdk/iface`, `shared/middleware`) if it's stateless plumbing. |
 | "It's a product feature that some deployments won't want" | **Optional module** a fork adds under `backend/internal/addons/`, toggled at `/admin/modules`. The base ships none (ADR-0006). |
-| "A core module needs something from an addon" | **Don't.** Core must not import addons. Invert the dependency: expose an interface in `shared/iface` and let the addon register as the implementation. |
+| "A core module needs something from an addon" | **Don't.** Core must not import addons. Invert the dependency: expose an interface in `pkg/sdk/iface` and let the addon register as the implementation. |
 
 ## Rules
 
 - **Core modules never depend on addons.** The dependency edge always points from addon to core.
-- **Cross-module deps go through `shared/iface`.** Never import another module's `services/` or `repository/` package from a `module.go` wiring file.
-- **Every new core module must implement the full `Module` interface** (`shared/module/module.go:30-70`) including `Collections()`, `Dependencies()`, `Permissions()`, `NavItems()` — no shortcuts via `BaseModule` except for genuinely empty methods.
+- **Cross-module deps go through `pkg/sdk/iface`.** Never import another module's `services/` or `repository/` package from a `module.go` wiring file.
+- **Every new core module must implement the full `Module` interface** (`pkg/sdk/module/module.go:30-70`) including `Collections()`, `Dependencies()`, `Permissions()`, `NavItems()` — no shortcuts via `BaseModule` except for genuinely empty methods.
 - **Seeding code lives inside the module's own `Init` or `Start` method**, not in `cmd/server/main.go`. `main.go` should stay ~240 lines and contain zero domain logic.
-- **If you add a new `ServiceKey` constant**, declare it in `shared/module/services.go`, not in the consuming module. The constants are the lingua franca of the registry.
+- **If you add a new `ServiceKey` constant**, declare it in `pkg/sdk/module/services.go`, not in the consuming module. The constants are the lingua franca of the registry.
 
 ## Related
 

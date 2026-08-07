@@ -11,7 +11,7 @@ The Orkestra SDK (`github.com/orkestra-cc/orkestra-sdk`) is the **public contrac
 - The [`Module`](/sdk/module-interface) lifecycle interface (`Init`, `RegisterRoutes`, `Start`, `Stop`, `HealthCheck`).
 - The [`ServiceRegistry`](/sdk/service-registry) — a typed key-value store for cross-module service sharing.
 - The [`ConfigService`](/sdk/config-service) — DB-backed + Redis-cached config with AES-256-GCM-encrypted secrets.
-- The [`shared/iface`](/sdk/shared-iface) consumer-facing interfaces (`UserProvider`, `NotificationSender`, `PDFProvider`, `GraphProvider`, `AIModelProvider`, `RAGQueryProvider`, `JWTProvider`) that prevent direct cross-module imports.
+- The [`pkg/sdk/iface`](/sdk/shared-iface) consumer-facing interfaces (`UserProvider`, `NotificationSender`, `PDFProvider`, `GraphProvider`, `AIModelProvider`, `RAGQueryProvider`, `JWTProvider`) that prevent direct cross-module imports.
 
 ## Module status
 

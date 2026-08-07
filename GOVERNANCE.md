@@ -58,7 +58,7 @@ This is the default. Tactical decisions about implementation details, dependenci
 A decision is "architectural" if it:
 
 - Changes a load-bearing assumption (tenancy model, auth flow, module boundary)
-- Adds or removes a contract that other code depends on (a `shared/iface` interface, an OpenAPI surface, an event-bus shape)
+- Adds or removes a contract that other code depends on (a `pkg/sdk/iface` interface, an OpenAPI surface, an event-bus shape)
 - Affects how operators deploy or upgrade the system
 - Is hard to reverse later
 

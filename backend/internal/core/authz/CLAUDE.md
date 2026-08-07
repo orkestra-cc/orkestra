@@ -56,7 +56,7 @@ The two `system.*` permissions are contributed here even though they gate other 
 ## Lifecycle
 
 - **Init** (`module.go:87-111`): constructs the repository, builds the user-role lookup closure (calls `UserProvider.GetUserByID` and reads `.Role`), wires the service, registers it as `iface.AuthzProvider`. The lookup has a **dev-token fallback**: when the DB lookup fails, it falls back to the JWT context system role only if all three guards pass — (1) non-production environment, (2) UUID starts with `dev-`, (3) role is in the hardcoded `validDevRoles` allow-list. This lets synthetic dev-token users (which have no DB record) work with the authz evaluator.
-- **Registry post-init** (`shared/module/registry.go:183-211`): after every module has run its `Init`, the registry calls `authz.RegisterPermissions` with the union of every module's `Permissions()`, then calls `authz.SeedSystemRoles` which derives the six roles' permission lists from the now-complete catalog.
+- **Registry post-init** (`pkg/sdk/module/registry.go:183-211`): after every module has run its `Init`, the registry calls `authz.RegisterPermissions` with the union of every module's `Permissions()`, then calls `authz.SeedSystemRoles` which derives the six roles' permission lists from the now-complete catalog.
 - **Start / Stop / HealthCheck**: inherit from `BaseModule`.
 - **Lazy-heal** (`services/service.go::ensureSeeded`): `ListRoles` and `ListPermissions` both call `ensureSeeded` before querying the repo. If the system-role count is zero, the service re-runs `RegisterPermissions` + `SeedSystemRoles` from an in-memory copy of the spec list (`cachedPermSpecs`). This is what makes `/admin/roles` self-heal after a live DB drop without a backend restart. See the notes in [Key invariants](#key-invariants) below — do not remove `cachedPermSpecs` or the `ensureSeeded` calls.
 - **GDPR/DSR** (`services/pii_producer.go`): registers an `iface.PIIProducer` (subject `"authz"`) on `ServicePIIProducerRegistry` at Init. The subject's personal data here is their **role bindings** (which roles, in which tenants, plus global/system bindings) — the role and permission catalogs are platform metadata, not the subject's data, and are left intact. Export returns the binding rows; purge deletes them (`authz_bindings`) under **both** erase modes, since a binding row IS the user→role linkage with no anonymizable residue. Consumed by the [compliance module](../compliance/CLAUDE.md)'s DSR pipeline (ADR-0009).
@@ -95,7 +95,7 @@ Route registration in `handlers/handler.go::RegisterGlobalRoutes`, `::RegisterSc
 
 ## Service contract
 
-`iface.AuthzProvider` (`shared/iface/interfaces.go:216-229`):
+`iface.AuthzProvider` (`pkg/sdk/iface/interfaces.go:216-229`):
 
 ```go
 HasPermission(ctx, userUUID, orgUUID, permission string) (bool, error)
@@ -199,7 +199,7 @@ These invariants apply across **every** module, not just authz. They are the enf
 | 4 | Permission checks always run in a resolved org context unless the route uses `RequireGlobal()` or `RequireSystemPermission()` | ✅ middleware chain | Keep. |
 | 5 | A user cannot grant a role whose permissions they themselves lack | ✅ `CreateBinding` cascade rule (commit C 2026-04-24) returns `ErrInsufficientPermissionsToGrant`. Wildcard `*` (super_admin) bypasses; the literal sentinel granter `"system"` bypasses for platform-issued auto-grants. | Keep. |
 | 6 | Org owner is immutable without a transfer flow (`ownerUserUUID` cannot be directly reassigned) | ❌ — no transfer flow today | **planned (Phase 2)**: two-step `POST /v1/orgs/{id}/transfer-ownership` (initiate → accept); both parties emailed; audit logged. |
-| 7 | All secrets AES-256-GCM encrypted at rest | ✅ `shared/module/config_service.go` | Keep. Phase 5 extends to per-org secrets via `(module, env, orgId)` key. |
+| 7 | All secrets AES-256-GCM encrypted at rest | ✅ `pkg/sdk/module/config_service.go` | Keep. Phase 5 extends to per-org secrets via `(module, env, orgId)` key. |
 | 8 | All mutations audited to an append-only, tamper-evident log | ❌ — only session events logged in `auth_sessions.securityEvents` | **planned (Phase 3)**: `audit_events` collection (hash-chained, insert-only role) → Loki (90d observability) → S3 Object Lock EU (7y WORM) dual-sink. SOC2 requirement. |
 | 9 | Every side effect references both actor (userUUID) and principal (orgID), including background jobs | ❌ — jobs today carry no identity context | **planned (Phase 3)**: audit middleware populates both; background jobs run under a synthetic "system" actor with logged justification. |
 
