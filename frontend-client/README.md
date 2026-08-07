@@ -51,8 +51,8 @@ cd frontend-client
 VITE_API_BASE=http://api.localhost:3000 npm run codegen
 
 # or from inside the dev container (container name is stack-namespaced —
-# ${APP_NAME}-client-frontend-${ENV}; example below is orkestra-commons/development)
-docker exec orkestra-commons-client-frontend-development sh -c "VITE_API_BASE=http://api.localhost:3000 npm run codegen"
+# ${APP_NAME}-client-frontend-${ENV}; example below is orkestra/development)
+docker exec orkestra-client-frontend-development sh -c "VITE_API_BASE=http://api.localhost:3000 npm run codegen"
 ```
 
 The result is a single `src/api/openapi.gen.ts` consumed by `src/api/client.ts` via `openapi-fetch`. Commit the regenerated file — CI builds without a live backend, and committing keeps the type contract versioned alongside the SPA.

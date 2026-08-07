@@ -56,7 +56,25 @@ On this repo `docker-compose.staging.yml` (and dev) **bind-mount the source** an
 
 ## Verifying a deploy
 
-After the deploy reports success — container names are stack-namespaced (`${APP_NAME}-<svc>-${ENV}`, e.g. `orkestra-commons-backend-development` for this checkout's dev stack — see the `orkestra-docker` skill's detect step to read off the exact name), so filter on the `backend` substring or use `docker compose ps`:
+**A deploy now gates on `scripts/health-check.sh`** (container state + an HTTP `/health`
+probe per service), and `orkestra.sh status` runs the same script informationally. Run
+it directly for a fast verdict:
+
+```bash
+scripts/health-check.sh "$(grep -E '^ENV=' docker/.env | cut -d= -f2-)" all   # exit 0 = healthy
+```
+
+Services outside the deploy's `--scope` only warn, so a `--scope backend` deploy stays
+green when an unrelated frontend is already broken — read the warnings, don't just
+trust the exit code.
+
+⚠️ **Before 2026-08-07 that script did not exist**, and the seam in `orkestra.sh`
+printed `Health check script not found, skipping...` on staging and then still reported
+`Deployment successful` — on older checkouts the success banner is *not* evidence of
+health. (The same gap made every production deploy `die` at the health stage.) Verify
+by hand there.
+
+After the deploy reports success — container names are stack-namespaced (`${APP_NAME}-<svc>-${ENV}`, e.g. `orkestra-backend-development` on the shipped defaults; **never assume a running container belongs to this checkout** — several stacks from different clones can share a host, so read the identity from `docker/.env` or the container's own Compose labels, see the `orkestra-docker` skill's detect step), so filter on the `backend` substring or use `docker compose ps`:
 
 ```bash
 # Compute this checkout's stack identity first (${APP_NAME}-${ENV} is not a
@@ -65,7 +83,7 @@ APP_NAME=$(grep -E '^APP_NAME=' docker/.env | cut -d= -f2-); ENV_VAL=$(grep -E '
 
 # Backend healthy + which binary is running
 docker ps --filter name=backend --filter label=orkestra.stack=${APP_NAME}-${ENV_VAL} --format '{{.Names}} {{.Status}}'
-docker exec orkestra-commons-backend-development sh -c 'ls -la --time-style=full-iso /app/tmp/main'   # mtime should be ~now
+docker exec orkestra-backend-development sh -c 'ls -la --time-style=full-iso /app/tmp/main'   # mtime should be ~now
 
 # Frontend resolved version (dev-server /health exposes APP_VERSION)
 curl -s http://localhost:8080/health | jq .       # {"version":"0.3.6-3-g54f9090a", ...}
@@ -78,7 +96,7 @@ Notes:
 
 ## When to use the `orkestra-docker` skill instead
 
-- Force-rebuilding the Go binary when AIR misses a change: `docker exec ${APP_NAME}-backend-${ENV} go build -o /app/tmp/main ./cmd/server/ && docker compose ... restart backend` (compute `APP_NAME`/`ENV_VAL` from `docker/.env` as above). Worked example for this checkout's dev stack: `docker exec orkestra-commons-backend-development go build -o /app/tmp/main ./cmd/server/ && docker compose -f docker-compose.dev.yml restart backend`.
+- Force-rebuilding the Go binary when AIR misses a change: `docker exec ${APP_NAME}-backend-${ENV} go build -o /app/tmp/main ./cmd/server/ && docker compose ... restart backend` (compute `APP_NAME`/`ENV_VAL` from `docker/.env` as above). Worked example on the shipped defaults: `docker exec orkestra-backend-development go build -o /app/tmp/main ./cmd/server/ && docker compose -f docker-compose.dev.yml restart backend`.
 - Infra-only ops, multi-compose detection, inspecting which compose file owns a service.
 - Anything `orkestra.sh` doesn't expose.
 

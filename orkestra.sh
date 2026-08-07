@@ -742,8 +742,8 @@ set_env_config() {
             BRANCH="dev"
             COMPOSE_FILE="$DOCKER_DIR/docker-compose.staging.yml"
             DB_NAME="orkestra_staging"
-            FRONTEND_URL="https://stage.orkestra.com"
-            BACKEND_URL="https://stage.orkestra.com/api"
+            FRONTEND_URL="https://staging.orkestra.cc"
+            BACKEND_URL="https://staging-api.orkestra.cc"
             ;;
         production)
             ENV_CHIP_COLOR=$c_error
@@ -755,6 +755,17 @@ set_env_config() {
             BACKEND_URL="https://api.orkestra.com"
             ;;
     esac
+
+    # docker/.env is the source of truth for where the stack is actually
+    # reachable — the compose files already read FRONTEND_URL/BACKEND_URL from
+    # it (e.g. `${FRONTEND_URL:-https://staging.orkestra.cc}`). The per-env
+    # values above are only the fallback for a checkout that has not set them,
+    # so a deployment that renames its hosts changes .env and nothing else.
+    local env_frontend_url env_backend_url
+    env_frontend_url="$(env_get "$ENV_FILE" FRONTEND_URL)"
+    env_backend_url="$(env_get "$ENV_FILE" BACKEND_URL)"
+    if [ -n "$env_frontend_url" ]; then FRONTEND_URL="$env_frontend_url"; fi
+    if [ -n "$env_backend_url" ]; then BACKEND_URL="$env_backend_url"; fi
 }
 
 # Stack identity — one Compose project spans infra + app (+ observability
@@ -1257,7 +1268,7 @@ fullstack_execute_deploy() {
             for i in $(seq 1 $max_retries); do
                 p_step "Health check attempt $i/$max_retries"
                 if [ -n "$health_script" ]; then
-                    if bash "$health_script" "$ENV" > /tmp/health_check_output.txt 2>&1; then
+                    if bash "$health_script" "$ENV" "$DEPLOY_SCOPE" > /tmp/health_check_output.txt 2>&1; then
                         p_ok "All health checks passed"
                         health_ok=true
                         break
@@ -1271,11 +1282,17 @@ fullstack_execute_deploy() {
                 fi
             done
             if [ "$health_ok" = false ]; then
+                # Show what actually failed — the retry loop captured the output
+                # to a file, and dying without printing it made a failed
+                # production deploy impossible to diagnose from the terminal.
+                if [ -s /tmp/health_check_output.txt ]; then
+                    p_muted "$(cat /tmp/health_check_output.txt)"
+                fi
                 die "Health checks failed after $max_retries attempts — manual intervention required"
             fi
         else
             if [ -n "$health_script" ]; then
-                if bash "$health_script" "$ENV"; then
+                if bash "$health_script" "$ENV" "$DEPLOY_SCOPE"; then
                     p_ok "All health checks passed"
                 else
                     die "Health checks failed"
