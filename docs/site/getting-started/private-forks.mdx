@@ -72,16 +72,25 @@ Say you build products (or client projects) A, B, and C, each on its own private
 
 The fix is one more level in the fork chain: a private **commons** fork that owns the reusable addons, sitting between upstream and your product forks.
 
+```mermaid
+flowchart TB
+  subgraph pub["PUBLIC — visible to everyone"]
+    Upstream["orkestra-cc/orkestra<br/>upstream, core-only"]
+  end
+  subgraph priv["PRIVATE — your org"]
+    Commons["your-org/orkestra-commons<br/>core + your reusable addons<br/>★ day-to-day work happens here"]
+    A["product fork A<br/>+ addons only A needs"]
+    B["product fork B<br/>+ addons only B needs"]
+    C["product fork C<br/>…"]
+  end
+  Upstream -->|"merge upstream/dev<br/>once per release"| Commons
+  Commons -.->|"cherry-pick, only Prop: upstream commits, via PR<br/>never a wholesale merge"| Upstream
+  Commons -->|"merge commons/dev → dev<br/>selective: you pick which forks, when"| A
+  Commons --> B
+  Commons --> C
 ```
-orkestra (upstream, public, core-only)
-   │  merge, once per release
-   ▼
-<your-org>/orkestra-commons   (private: core + your reusable addons)
-   │  merge, same recipe as above
-   ├──▶ product fork A  (+ addons only A needs)
-   ├──▶ product fork B  (+ addons only B needs)
-   └──▶ product fork C  (…)
-```
+
+Code travels **down by merge** and **up only by selective cherry-pick** — never by a merge toward the public repo.
 
 Product forks point their `upstream` remote at commons instead of the public repo. Upstream releases flow *through* commons: you merge each release into commons once, then into each product — the same number of per-product syncs you were already doing, except each one now also delivers shared-addon updates.
 
@@ -115,6 +124,26 @@ git remote set-url --push upstream DISABLED
 
 `git fetch upstream` keeps working (syncs are unaffected); pushing toward upstream now always fails. To upstream a core fix, work from a clean clone of the public repo: cherry-pick the single commit onto an upstream-based branch and open a normal PR.
 :::
+
+### How the push guard works
+
+Git has no "forbid pushing to this remote" flag, so the guard replaces the remote's **push URL** with the literal string `DISABLED` while leaving the fetch URL intact. Syncing keeps working; pushing has no destination and always fails — even as a reflex, even as a tab-completion accident.
+
+```mermaid
+flowchart LR
+  Clone["any private clone<br/>commons or a product fork"]
+  Public["orkestra-cc/orkestra<br/>public upstream"]
+  Public -->|"git fetch upstream ✓<br/>fetch URL: the real repo"| Clone
+  Clone --x|"git push upstream ✗<br/>push URL = DISABLED"| Public
+```
+
+The wording inverts once, deliberately: the guard is **enabled** exactly when the push URL reads **DISABLED**.
+
+```bash
+git remote get-url --push upstream    # must print: DISABLED
+```
+
+Re-verify this before every upstream cherry-pick round, not just once. The guard lives in each clone's `.git/config` — it isn't versioned, doesn't travel with merges, and no CI checks it, so a fresh clone, a new worktree, or a remote-rewiring script resets it silently.
 
 ### Trade-offs
 
