@@ -1,3 +1,6 @@
+// MUST stay the first import: it restores localStorage/sessionStorage on
+// Node >= 25 before anything else can touch them. See webStorage.ts.
+import './webStorage';
 import '@testing-library/jest-dom/vitest';
 import { afterAll, afterEach, beforeAll, vi } from 'vitest';
 // Initialize i18n once for the whole test suite so t('...') calls
