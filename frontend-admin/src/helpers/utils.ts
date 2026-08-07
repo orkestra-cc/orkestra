@@ -154,13 +154,13 @@ interface ThemeColors {
 
 export const themeColors: ThemeColors = {
   primary: '#2c7be5',
-  secondary: '#748194',
+  secondary: '#68707c',
   success: '#00d27a',
   info: '#27bcfd',
   warning: '#f5803e',
   danger: '#e63757',
-  light: '#f9fafd',
-  dark: '#0b1727'
+  light: '#f9fafb',
+  dark: '#0f141c'
 };
 
 interface GrayColors {
@@ -181,17 +181,17 @@ interface GrayColors {
 
 export const grays: GrayColors = {
   white: '#fff',
-  100: '#f9fafd',
-  200: '#edf2f9',
-  300: '#d8e2ef',
-  400: '#b6c1d2',
-  500: '#9da9bb',
-  600: '#748194',
-  700: '#5e6e82',
-  800: '#4d5969',
-  900: '#344050',
-  1000: '#232e3c',
-  1100: '#0b1727',
+  100: '#f9fafb',
+  200: '#f2f4f6',
+  300: '#dfe3e8',
+  400: '#bcc3cc',
+  500: '#98a1ac',
+  600: '#68707c',
+  700: '#454c58',
+  800: '#333a45',
+  900: '#252c36',
+  1000: '#1a202a',
+  1100: '#0f141c',
   black: '#000'
 };
 

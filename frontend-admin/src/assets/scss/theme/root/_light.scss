@@ -43,6 +43,11 @@
 
   --#{$prefix}blockquote-footer-color: #{$gray-600};
 
+  //
+  // Table
+  //
+  --#{$prefix}table-head-bg: #{$gray-300};
+
   --#{$prefix}hr-opacity: 1;
 
   --#{$prefix}mark-bg: #fcf8e3; // Review
@@ -72,7 +77,7 @@
   // Orkestra Button
   //
   --#{$prefix}btn-orkestra-background: var(--#{$prefix}quaternary-bg);
-  --#{$prefix}btn-disabled-color: #4d5969;
+  --#{$prefix}btn-disabled-color: #333a45;
   --#{$prefix}btn-orkestra-box-shadow: #{$btn-orkestra-box-shadow};
   --#{$prefix}btn-orkestra-hover-box-shadow: #{$btn-orkestra-hover-box-shadow};
 

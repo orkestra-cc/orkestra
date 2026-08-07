@@ -22,59 +22,59 @@
   --orkestra-cyan: #27bcfd;
   --orkestra-black: #000;
   --orkestra-white: #fff;
-  --orkestra-gray: #748194;
-  --orkestra-gray-dark: #4d5969;
-  --orkestra-gray-100: #f9fafd;
-  --orkestra-gray-200: #edf2f9;
-  --orkestra-gray-300: #d8e2ef;
-  --orkestra-gray-400: #b6c1d2;
-  --orkestra-gray-500: #9da9bb;
-  --orkestra-gray-600: #748194;
-  --orkestra-gray-700: #5e6e82;
-  --orkestra-gray-800: #4d5969;
-  --orkestra-gray-900: #344050;
-  --orkestra-gray-1000: #232e3c;
-  --orkestra-gray-1100: #0b1727;
+  --orkestra-gray: #68707c;
+  --orkestra-gray-dark: #333a45;
+  --orkestra-gray-100: #f9fafb;
+  --orkestra-gray-200: #f2f4f6;
+  --orkestra-gray-300: #dfe3e8;
+  --orkestra-gray-400: #bcc3cc;
+  --orkestra-gray-500: #98a1ac;
+  --orkestra-gray-600: #68707c;
+  --orkestra-gray-700: #454c58;
+  --orkestra-gray-800: #333a45;
+  --orkestra-gray-900: #252c36;
+  --orkestra-gray-1000: #1a202a;
+  --orkestra-gray-1100: #0f141c;
   --orkestra-primary: #2c7be5;
-  --orkestra-secondary: #748194;
+  --orkestra-secondary: #68707c;
   --orkestra-success: #00d27a;
   --orkestra-info: #27bcfd;
   --orkestra-warning: #f5803e;
   --orkestra-danger: #e63757;
-  --orkestra-light: #f9fafd;
-  --orkestra-dark: #0b1727;
+  --orkestra-light: #f9fafb;
+  --orkestra-dark: #0f141c;
   --orkestra-primary-rgb: 44, 123, 229;
-  --orkestra-secondary-rgb: 116, 129, 148;
+  --orkestra-secondary-rgb: 104, 112, 124;
   --orkestra-success-rgb: 0, 210, 122;
   --orkestra-info-rgb: 39, 188, 253;
   --orkestra-warning-rgb: 245, 128, 62;
   --orkestra-danger-rgb: 230, 55, 87;
-  --orkestra-light-rgb: 249, 250, 253;
-  --orkestra-dark-rgb: 11, 23, 39;
-  --orkestra-primary-text-emphasis: rgb(33, 92.25, 171.75);
-  --orkestra-secondary-text-emphasis: rgb(92.8, 103.2, 118.4);
-  --orkestra-success-text-emphasis: rgb(0, 136.5, 79.3);
-  --orkestra-info-text-emphasis: rgb(25.35, 122.2, 164.45);
-  --orkestra-warning-text-emphasis: rgb(171.5, 89.6, 43.4);
-  --orkestra-danger-text-emphasis: rgb(184, 44, 69.6);
-  --orkestra-light-text-emphasis: rgb(99.6, 100, 101.2);
-  --orkestra-dark-text-emphasis: rgb(145.2, 150.6, 157.8);
-  --orkestra-primary-bg-subtle: rgb(217.02, 231.24, 250.32);
-  --orkestra-secondary-bg-subtle: rgb(229.98, 232.32, 235.74);
-  --orkestra-success-bg-subtle: rgb(216.75, 248.25, 235.05);
-  --orkestra-info-bg-subtle: rgb(216.12, 242.94, 254.64);
-  --orkestra-warning-bg-subtle: rgb(253, 229.6, 216.4);
-  --orkestra-danger-bg-subtle: rgb(250.5, 219, 224.76);
-  --orkestra-light-bg-subtle: rgb(253.2, 253.5, 254.4);
-  --orkestra-dark-bg-subtle: rgb(7.7, 16.1, 27.3);
-  --orkestra-primary-border-subtle: rgb(170.6, 202.2, 244.6);
-  --orkestra-secondary-border-subtle: rgb(199.4, 204.6, 212.2);
-  --orkestra-success-border-subtle: rgb(153, 237, 201.8);
-  --orkestra-info-border-subtle: rgb(168.6, 228.2, 254.2);
-  --orkestra-warning-border-subtle: rgb(251, 204.2, 177.8);
-  --orkestra-danger-border-subtle: rgb(245, 175, 187.8);
-  --orkestra-light-border-subtle: #edf2f9;
-  --orkestra-dark-border-subtle: #9da9bb;
+  --orkestra-light-rgb: 249, 250, 251;
+  --orkestra-dark-rgb: 15, 20, 28;
+  --orkestra-primary-text-emphasis: rgb(12.9411764706%, 36.1764705882%, 67.3529411765%);
+  --orkestra-secondary-text-emphasis: rgb(32.6274509804%, 35.137254902%, 38.9019607843%);
+  --orkestra-success-text-emphasis: rgb(0%, 53.5294117647%, 31.0980392157%);
+  --orkestra-info-text-emphasis: rgb(9.9411764706%, 47.9215686275%, 64.4901960784%);
+  --orkestra-warning-text-emphasis: rgb(67.2549019608%, 35.137254902%, 17.0196078431%);
+  --orkestra-danger-text-emphasis: rgb(72.1568627451%, 17.2549019608%, 27.2941176471%);
+  --orkestra-light-text-emphasis: rgb(39.0588235294%, 39.2156862745%, 39.3725490196%);
+  --orkestra-dark-text-emphasis: rgb(57.6470588235%, 58.5294117647%, 59.9411764706%);
+  --orkestra-primary-bg-subtle: rgb(85.1058823529%, 90.6823529412%, 98.1647058824%);
+  --orkestra-secondary-bg-subtle: rgb(89.3411764706%, 89.9058823529%, 90.7529411765%);
+  --orkestra-success-bg-subtle: rgb(85%, 97.3529411765%, 92.1764705882%);
+  --orkestra-info-bg-subtle: rgb(84.7529411765%, 95.2705882353%, 99.8588235294%);
+  --orkestra-warning-bg-subtle: rgb(99.2156862745%, 90.0392156863%, 84.862745098%);
+  --orkestra-danger-bg-subtle: rgb(98.2352941176%, 85.8823529412%, 88.1411764706%);
+  --orkestra-light-bg-subtle: rgb(99.2941176471%, 99.4117647059%, 99.5294117647%);
+  --orkestra-dark-bg-subtle: rgb(4.1176470588%, 5.4901960784%, 7.6862745098%);
+  --orkestra-primary-border-subtle: rgb(66.9019607843%, 79.2941176471%, 95.9215686275%);
+  --orkestra-secondary-border-subtle: rgb(76.3137254902%, 77.568627451%, 79.4509803922%);
+  --orkestra-success-border-subtle: rgb(60%, 92.9411764706%, 79.137254902%);
+  --orkestra-info-border-subtle: rgb(66.1176470588%, 89.4901960784%, 99.6862745098%);
+  --orkestra-warning-border-subtle: rgb(98.431372549%, 80.0784313725%, 69.7254901961%);
+  --orkestra-danger-border-subtle: rgb(96.0784313725%, 68.6274509804%, 73.6470588235%);
+  --orkestra-light-border-subtle: #f2f4f6;
+  --orkestra-dark-border-subtle: #98a1ac;
   --orkestra-white-rgb: 255, 255, 255;
   --orkestra-black-rgb: 0, 0, 0;
   --orkestra-font-sans-serif: "Poppins", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
@@ -84,33 +84,33 @@
   --orkestra-body-font-size: 1rem;
   --orkestra-body-font-weight: 400;
   --orkestra-body-line-height: 1.5;
-  --orkestra-body-color: #5e6e82;
-  --orkestra-body-color-rgb: 94, 110, 130;
-  --orkestra-body-bg: #edf2f9;
-  --orkestra-body-bg-rgb: 237, 242, 249;
+  --orkestra-body-color: #454c58;
+  --orkestra-body-color-rgb: 69, 76, 88;
+  --orkestra-body-bg: #f2f4f6;
+  --orkestra-body-bg-rgb: 242, 244, 246;
   --orkestra-emphasis-color: #000;
   --orkestra-emphasis-color-rgb: 0, 0, 0;
-  --orkestra-secondary-color: #344050;
-  --orkestra-secondary-color-rgb: 52, 64, 80;
-  --orkestra-secondary-bg: #d8e2ef;
-  --orkestra-secondary-bg-rgb: 216, 226, 239;
-  --orkestra-tertiary-color: #748194;
-  --orkestra-tertiary-color-rgb: 116, 129, 148;
-  --orkestra-tertiary-bg: #f9fafd;
-  --orkestra-tertiary-bg-rgb: 249, 250, 253;
+  --orkestra-secondary-color: #252c36;
+  --orkestra-secondary-color-rgb: 37, 44, 54;
+  --orkestra-secondary-bg: #dfe3e8;
+  --orkestra-secondary-bg-rgb: 223, 227, 232;
+  --orkestra-tertiary-color: #68707c;
+  --orkestra-tertiary-color-rgb: 104, 112, 124;
+  --orkestra-tertiary-bg: #f9fafb;
+  --orkestra-tertiary-bg-rgb: 249, 250, 251;
   --orkestra-heading-color: var(--orkestra-secondary-color);
-  --orkestra-link-color: #2c7be5;
-  --orkestra-link-color-rgb: 44, 123, 229;
+  --orkestra-link-color: rgb(14.6666666667%, 41%, 76.3333333333%);
+  --orkestra-link-color-rgb: 37, 105, 195;
   --orkestra-link-decoration: none;
-  --orkestra-link-hover-color: rgb(35.2, 98.4, 183.2);
-  --orkestra-link-hover-color-rgb: 35, 98, 183;
+  --orkestra-link-hover-color: rgb(11.7333333333%, 32.8%, 61.0666666667%);
+  --orkestra-link-hover-color-rgb: 30, 84, 156;
   --orkestra-link-hover-decoration: underline;
-  --orkestra-code-color: #ff679b;
-  --orkestra-highlight-color: #5e6e82;
-  --orkestra-highlight-bg: rgb(253, 229.6, 216.4);
+  --orkestra-code-color: #c22e64;
+  --orkestra-highlight-color: #454c58;
+  --orkestra-highlight-bg: rgb(99.2156862745%, 90.0392156863%, 84.862745098%);
   --orkestra-border-width: 1px;
   --orkestra-border-style: solid;
-  --orkestra-border-color: #d8e2ef;
+  --orkestra-border-color: #dfe3e8;
   --orkestra-border-color-translucent: rgba(0, 0, 0, 0.175);
   --orkestra-border-radius: 0.25rem;
   --orkestra-border-radius-sm: 0.25rem;
@@ -119,7 +119,7 @@
   --orkestra-border-radius-xxl: 2rem;
   --orkestra-border-radius-2xl: var(--orkestra-border-radius-xxl);
   --orkestra-border-radius-pill: 50rem;
-  --orkestra-box-shadow: 0 7px 14px 0 rgba(65, 69, 88, 0.1), 0 3px 6px 0 rgba(0, 0, 0, 0.07);
+  --orkestra-box-shadow: 0 7px 14px 0 rgba(50, 58, 70, 0.1), 0 3px 6px 0 rgba(0, 0, 0, 0.07);
   --orkestra-box-shadow-sm: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
   --orkestra-box-shadow-lg: 0 1rem 4rem rgba(0, 0, 0, 0.175);
   --orkestra-box-shadow-inset: inset 0 1px 2px rgba(0, 0, 0, 0.075);
@@ -146,45 +146,45 @@
   --orkestra-secondary-bg-rgb: 52, 64, 80;
   --orkestra-tertiary-color: #748194;
   --orkestra-tertiary-color-rgb: 116, 129, 148;
-  --orkestra-tertiary-bg: rgb(22.224, 33.672, 48.936);
+  --orkestra-tertiary-bg: rgb(8.7152941176%, 13.2047058824%, 19.1905882353%);
   --orkestra-tertiary-bg-rgb: 22, 34, 49;
-  --orkestra-primary-text-emphasis: rgb(170.6, 202.2, 244.6);
-  --orkestra-secondary-text-emphasis: rgb(199.4, 204.6, 212.2);
-  --orkestra-success-text-emphasis: rgb(114.75, 230.25, 181.85);
-  --orkestra-info-text-emphasis: rgb(147, 221.5, 254);
-  --orkestra-warning-text-emphasis: rgb(250.5, 197.85, 168.15);
-  --orkestra-danger-text-emphasis: rgb(243.75, 165, 179.4);
-  --orkestra-light-text-emphasis: rgb(99.6, 100, 101.2);
-  --orkestra-dark-text-emphasis: rgb(145.2, 150.6, 157.8);
-  --orkestra-primary-bg-subtle: rgb(15.4, 43.05, 80.15);
-  --orkestra-secondary-bg-subtle: rgb(40.6, 45.15, 51.8);
-  --orkestra-success-bg-subtle: rgb(0, 63, 36.6);
-  --orkestra-info-bg-subtle: rgb(11.7, 56.4, 75.9);
-  --orkestra-warning-bg-subtle: rgb(85.75, 44.8, 21.7);
-  --orkestra-danger-bg-subtle: rgb(92, 22, 34.8);
-  --orkestra-light-bg-subtle: rgb(253.2, 253.5, 254.4);
-  --orkestra-dark-bg-subtle: rgb(7.7, 16.1, 27.3);
-  --orkestra-primary-border-subtle: rgb(22, 61.5, 114.5);
-  --orkestra-secondary-border-subtle: rgb(58, 64.5, 74);
+  --orkestra-primary-text-emphasis: rgb(66.9019607843%, 79.2941176471%, 95.9215686275%);
+  --orkestra-secondary-text-emphasis: rgb(78.1960784314%, 80.2352941176%, 83.2156862745%);
+  --orkestra-success-text-emphasis: rgb(45%, 90.2941176471%, 71.3137254902%);
+  --orkestra-info-text-emphasis: rgb(57.6470588235%, 86.862745098%, 99.6078431373%);
+  --orkestra-warning-text-emphasis: rgb(98.2352941176%, 77.5882352941%, 65.9411764706%);
+  --orkestra-danger-text-emphasis: rgb(95.5882352941%, 64.7058823529%, 70.3529411765%);
+  --orkestra-light-text-emphasis: rgb(39.0588235294%, 39.2156862745%, 39.6862745098%);
+  --orkestra-dark-text-emphasis: rgb(56.9411764706%, 59.0588235294%, 61.8823529412%);
+  --orkestra-primary-bg-subtle: rgb(6.0392156863%, 16.8823529412%, 31.431372549%);
+  --orkestra-secondary-bg-subtle: rgb(15.9215686275%, 17.7058823529%, 20.3137254902%);
+  --orkestra-success-bg-subtle: rgb(0%, 24.7058823529%, 14.3529411765%);
+  --orkestra-info-bg-subtle: rgb(4.5882352941%, 22.1176470588%, 29.7647058824%);
+  --orkestra-warning-bg-subtle: rgb(33.6274509804%, 17.568627451%, 8.5098039216%);
+  --orkestra-danger-bg-subtle: rgb(36.0784313725%, 8.6274509804%, 13.6470588235%);
+  --orkestra-light-bg-subtle: rgb(99.2941176471%, 99.4117647059%, 99.7647058824%);
+  --orkestra-dark-bg-subtle: rgb(3.0196078431%, 6.3137254902%, 10.7058823529%);
+  --orkestra-primary-border-subtle: rgb(8.6274509804%, 24.1176470588%, 44.9019607843%);
+  --orkestra-secondary-border-subtle: rgb(22.7450980392%, 25.2941176471%, 29.0196078431%);
   --orkestra-success-border-subtle: #00693d;
-  --orkestra-info-border-subtle: rgb(19.5, 94, 126.5);
-  --orkestra-warning-border-subtle: rgb(122.5, 64, 31);
-  --orkestra-danger-border-subtle: rgb(115, 27.5, 43.5);
+  --orkestra-info-border-subtle: rgb(7.6470588235%, 36.862745098%, 49.6078431373%);
+  --orkestra-warning-border-subtle: rgb(48.0392156863%, 25.0980392157%, 12.1568627451%);
+  --orkestra-danger-border-subtle: rgb(45.0980392157%, 10.7843137255%, 17.0588235294%);
   --orkestra-light-border-subtle: #5e6e82;
   --orkestra-dark-border-subtle: #4d5969;
   --orkestra-heading-color: var(--orkestra-secondary-color);
   --orkestra-link-color: #2c7be5;
-  --orkestra-link-hover-color: rgb(35.2, 98.4, 183.2);
+  --orkestra-link-hover-color: rgb(13.8039215686%, 38.5882352941%, 71.8431372549%);
   --orkestra-link-color-rgb: 44, 123, 229;
   --orkestra-link-hover-color-rgb: 35, 98, 183;
   --orkestra-code-color: #ff679b;
   --orkestra-highlight-color: #9da9bb;
-  --orkestra-highlight-bg: rgb(98, 51.2, 24.8);
+  --orkestra-highlight-bg: rgb(38.431372549%, 20.0784313725%, 9.7254901961%);
   --orkestra-border-color: rgba(255, 255, 255, 0.05);
   --orkestra-border-color-translucent: rgba(0, 0, 0, 0.175);
-  --orkestra-form-valid-color: rgb(102, 228, 175.2);
+  --orkestra-form-valid-color: rgb(40%, 89.4117647059%, 68.7058823529%);
   --orkestra-form-valid-border-color: #00d27a;
-  --orkestra-form-invalid-color: rgb(240, 135, 154.2);
+  --orkestra-form-invalid-color: rgb(94.1176470588%, 52.9411764706%, 60.4705882353%);
   --orkestra-form-invalid-border-color: #e63757;
 }
 
@@ -196,59 +196,60 @@
   --orkestra-linkedin: #0077b5;
   --orkestra-youtube: #ff0001;
   --orkestra-github: #333333;
-  --orkestra-gray-100-rgb: 249, 250, 253;
-  --orkestra-gray-200-rgb: 237, 242, 249;
-  --orkestra-gray-300-rgb: 216, 226, 239;
-  --orkestra-gray-400-rgb: 182, 193, 210;
-  --orkestra-gray-500-rgb: 157, 169, 187;
-  --orkestra-gray-600-rgb: 116, 129, 148;
-  --orkestra-gray-700-rgb: 94, 110, 130;
-  --orkestra-gray-800-rgb: 77, 89, 105;
-  --orkestra-gray-900-rgb: 52, 64, 80;
-  --orkestra-gray-1000-rgb: 35, 46, 60;
-  --orkestra-gray-1100-rgb: 11, 23, 39;
+  --orkestra-gray-100-rgb: 249, 250, 251;
+  --orkestra-gray-200-rgb: 242, 244, 246;
+  --orkestra-gray-300-rgb: 223, 227, 232;
+  --orkestra-gray-400-rgb: 188, 195, 204;
+  --orkestra-gray-500-rgb: 152, 161, 172;
+  --orkestra-gray-600-rgb: 104, 112, 124;
+  --orkestra-gray-700-rgb: 69, 76, 88;
+  --orkestra-gray-800-rgb: 51, 58, 69;
+  --orkestra-gray-900-rgb: 37, 44, 54;
+  --orkestra-gray-1000-rgb: 26, 32, 42;
+  --orkestra-gray-1100-rgb: 15, 20, 28;
   --orkestra-facebook-rgb: 60, 90, 153;
   --orkestra-google-plus-rgb: 221, 75, 57;
   --orkestra-twitter-rgb: 29, 161, 242;
   --orkestra-linkedin-rgb: 0, 119, 181;
   --orkestra-youtube-rgb: 255, 0, 1;
   --orkestra-github-rgb: 51, 51, 51;
-  --orkestra-gray-link-hover-100: RGBA(250, 251, 253, var(--orkestra-link-opacity, 1)) !important;
-  --orkestra-gray-link-hover-200: RGBA(241, 245, 250, var(--orkestra-link-opacity, 1)) !important;
-  --orkestra-gray-link-hover-300: RGBA(224, 232, 242, var(--orkestra-link-opacity, 1)) !important;
-  --orkestra-gray-link-hover-400: RGBA(197, 205, 219, var(--orkestra-link-opacity, 1)) !important;
-  --orkestra-gray-link-hover-500: RGBA(126, 135, 150, var(--orkestra-link-opacity, 1)) !important;
-  --orkestra-gray-link-hover-600: RGBA(93, 103, 118, var(--orkestra-link-opacity, 1)) !important;
-  --orkestra-gray-link-hover-700: RGBA(75, 88, 104, var(--orkestra-link-opacity, 1)) !important;
-  --orkestra-gray-link-hover-800: RGBA(62, 71, 84, var(--orkestra-link-opacity, 1)) !important;
-  --orkestra-gray-link-hover-900: RGBA(42, 51, 64, var(--orkestra-link-opacity, 1)) !important;
-  --orkestra-gray-link-hover-1000: RGBA(28, 37, 48, var(--orkestra-link-opacity, 1)) !important;
-  --orkestra-gray-link-hover-1100: RGBA(9, 18, 31, var(--orkestra-link-opacity, 1)) !important;
+  --orkestra-gray-link-hover-100: RGBA(250, 251, 252, var(--orkestra-link-opacity, 1)) !important;
+  --orkestra-gray-link-hover-200: RGBA(245, 246, 248, var(--orkestra-link-opacity, 1)) !important;
+  --orkestra-gray-link-hover-300: RGBA(229, 233, 237, var(--orkestra-link-opacity, 1)) !important;
+  --orkestra-gray-link-hover-400: RGBA(201, 207, 214, var(--orkestra-link-opacity, 1)) !important;
+  --orkestra-gray-link-hover-500: RGBA(122, 129, 138, var(--orkestra-link-opacity, 1)) !important;
+  --orkestra-gray-link-hover-600: RGBA(83, 90, 99, var(--orkestra-link-opacity, 1)) !important;
+  --orkestra-gray-link-hover-700: RGBA(55, 61, 70, var(--orkestra-link-opacity, 1)) !important;
+  --orkestra-gray-link-hover-800: RGBA(41, 46, 55, var(--orkestra-link-opacity, 1)) !important;
+  --orkestra-gray-link-hover-900: RGBA(30, 35, 43, var(--orkestra-link-opacity, 1)) !important;
+  --orkestra-gray-link-hover-1000: RGBA(21, 26, 34, var(--orkestra-link-opacity, 1)) !important;
+  --orkestra-gray-link-hover-1100: RGBA(12, 16, 22, var(--orkestra-link-opacity, 1)) !important;
   --em-rgb-background: var(--orkestra-tertiary-bg);
   --orkestra-quaternary-bg: #fff;
   --orkestra-quaternary-bg-rgb: 255, 255, 255;
   --orkestra-emphasis-bg: #fff;
   --orkestra-emphasis-bg-rgb: 255, 255, 255;
-  --orkestra-blockquote-footer-color: #748194;
+  --orkestra-blockquote-footer-color: #68707c;
+  --orkestra-table-head-bg: #dfe3e8;
   --orkestra-hr-opacity: 1;
   --orkestra-mark-bg: #fcf8e3;
   --orkestra-font-base: "Open Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
   --orkestra-btn-disabled-border-color: transparent;
-  --orkestra-btn-reveal-color: #748194;
-  --orkestra-btn-reveal-hover-color: #5e6e82;
-  --orkestra-btn-reveal-focus-bg: rgb(229.5, 229.5, 229.5);
+  --orkestra-btn-reveal-color: #68707c;
+  --orkestra-btn-reveal-hover-color: #454c58;
+  --orkestra-btn-reveal-focus-bg: rgb(90%, 90%, 90%);
   --orkestra-btn-reveal-hover-shadow: 0 0 0 1px rgba(43, 45, 80, 0.1),
     0 2px 5px 0 rgba(43, 45, 80, 0.08), 0 1px 1.5px 0 rgba(0, 0, 0, 0.07),
     0 1px 2px 0 rgba(0, 0, 0, 0.08);
-  --orkestra-btn-reveal-focus-border-color: rgb(223.125, 223.125, 223.125);
+  --orkestra-btn-reveal-focus-border-color: rgb(87.5%, 87.5%, 87.5%);
   --orkestra-btn-orkestra-background: var(--orkestra-quaternary-bg);
-  --orkestra-btn-disabled-color: #4d5969;
+  --orkestra-btn-disabled-color: #333a45;
   --orkestra-btn-orkestra-box-shadow: 0 0 0 1px rgba(43, 45, 80, 0.1), 0 2px 5px 0 rgba(43, 45, 80, 0.08), 0 1px 1.5px 0 rgba(0, 0, 0, 0.07), 0 1px 2px 0 rgba(0, 0, 0, 0.08);
   --orkestra-btn-orkestra-hover-box-shadow: 0 0 0 1px rgba(43, 45, 80, 0.1), 0 2px 5px 0 rgba(43, 45, 80, 0.1), 0 3px 9px 0 rgba(43, 45, 80, 0.08), 0 1px 1.5px 0 rgba(0, 0, 0, 0.08), 0 1px 2px 0 rgba(0, 0, 0, 0.08);
   --orkestra-btn-orkestra-default-color: var(--orkestra-gray-800);
-  --orkestra-btn-orkestra-default-hover-color: rgb(63.91, 73.87, 87.15);
-  --orkestra-btn-orkestra-default-active-background: rgb(229.5, 229.5, 229.5);
-  --orkestra-btn-orkestra-default-active-border: rgb(63.91, 73.87, 87.15);
+  --orkestra-btn-orkestra-default-hover-color: rgb(16.6%, 18.8784313725%, 22.4588235294%);
+  --orkestra-btn-orkestra-default-active-background: rgb(90%, 90%, 90%);
+  --orkestra-btn-orkestra-default-active-border: rgb(16.6%, 18.8784313725%, 22.4588235294%);
   --orkestra-btn-active-border-color: transparent;
 }
 :root [class^=btn-orkestra-].show,
@@ -258,67 +259,67 @@
 :root,
 [data-bs-theme=light] {
   --orkestra-btn-orkestra-primary-color: var(--orkestra-primary);
-  --orkestra-btn-orkestra-primary-hover-color: rgb(36.52, 102.09, 190.07);
-  --orkestra-btn-orkestra-primary-active-background: rgb(212.8, 228.6, 249.8);
-  --orkestra-btn-orkestra-primary-active-color: rgb(36.52, 102.09, 190.07);
+  --orkestra-btn-orkestra-primary-hover-color: rgb(14.3215686275%, 40.0352941176%, 74.537254902%);
+  --orkestra-btn-orkestra-primary-active-background: rgb(83.4509803922%, 89.6470588235%, 97.9607843137%);
+  --orkestra-btn-orkestra-primary-active-color: rgb(14.3215686275%, 40.0352941176%, 74.537254902%);
   --orkestra-btn-orkestra-secondary-color: var(--orkestra-secondary);
-  --orkestra-btn-orkestra-secondary-hover-color: rgb(96.28, 107.07, 122.84);
-  --orkestra-btn-orkestra-secondary-active-background: rgb(227.2, 229.8, 233.6);
-  --orkestra-btn-orkestra-secondary-active-color: rgb(96.28, 107.07, 122.84);
+  --orkestra-btn-orkestra-secondary-hover-color: rgb(33.8509803922%, 36.4549019608%, 40.3607843137%);
+  --orkestra-btn-orkestra-secondary-active-background: rgb(88.1568627451%, 88.7843137255%, 89.7254901961%);
+  --orkestra-btn-orkestra-secondary-active-color: rgb(33.8509803922%, 36.4549019608%, 40.3607843137%);
   --orkestra-btn-orkestra-success-color: var(--orkestra-success);
-  --orkestra-btn-orkestra-success-hover-color: rgb(0, 174.3, 101.26);
-  --orkestra-btn-orkestra-success-active-background: rgb(204, 246, 228.4);
-  --orkestra-btn-orkestra-success-active-color: rgb(0, 174.3, 101.26);
+  --orkestra-btn-orkestra-success-hover-color: rgb(0%, 68.3529411765%, 39.7098039216%);
+  --orkestra-btn-orkestra-success-active-background: rgb(80%, 96.4705882353%, 89.568627451%);
+  --orkestra-btn-orkestra-success-active-color: rgb(0%, 68.3529411765%, 39.7098039216%);
   --orkestra-btn-orkestra-info-color: var(--orkestra-info);
-  --orkestra-btn-orkestra-info-hover-color: rgb(32.37, 156.04, 209.99);
-  --orkestra-btn-orkestra-info-active-background: rgb(211.8, 241.6, 254.6);
-  --orkestra-btn-orkestra-info-active-color: rgb(32.37, 156.04, 209.99);
+  --orkestra-btn-orkestra-info-hover-color: rgb(12.6941176471%, 61.1921568627%, 82.3490196078%);
+  --orkestra-btn-orkestra-info-active-background: rgb(83.0588235294%, 94.7450980392%, 99.8431372549%);
+  --orkestra-btn-orkestra-info-active-color: rgb(12.6941176471%, 61.1921568627%, 82.3490196078%);
   --orkestra-btn-orkestra-warning-color: var(--orkestra-warning);
-  --orkestra-btn-orkestra-warning-hover-color: rgb(203.35, 106.24, 51.46);
-  --orkestra-btn-orkestra-warning-active-background: rgb(253, 229.6, 216.4);
-  --orkestra-btn-orkestra-warning-active-color: rgb(203.35, 106.24, 51.46);
+  --orkestra-btn-orkestra-warning-hover-color: rgb(79.7450980392%, 41.662745098%, 20.1803921569%);
+  --orkestra-btn-orkestra-warning-active-background: rgb(99.2156862745%, 90.0392156863%, 84.862745098%);
+  --orkestra-btn-orkestra-warning-active-color: rgb(79.7450980392%, 41.662745098%, 20.1803921569%);
   --orkestra-btn-orkestra-danger-color: var(--orkestra-danger);
-  --orkestra-btn-orkestra-danger-hover-color: rgb(190.9, 45.65, 72.21);
-  --orkestra-btn-orkestra-danger-active-background: rgb(250, 215, 221.4);
-  --orkestra-btn-orkestra-danger-active-color: rgb(190.9, 45.65, 72.21);
+  --orkestra-btn-orkestra-danger-hover-color: rgb(74.862745098%, 17.9019607843%, 28.3176470588%);
+  --orkestra-btn-orkestra-danger-active-background: rgb(98.0392156863%, 84.3137254902%, 86.8235294118%);
+  --orkestra-btn-orkestra-danger-active-color: rgb(74.862745098%, 17.9019607843%, 28.3176470588%);
   --orkestra-btn-orkestra-light-color: var(--orkestra-light);
-  --orkestra-btn-orkestra-light-hover-color: rgb(206.67, 207.5, 209.99);
-  --orkestra-btn-orkestra-light-active-background: rgb(253.8, 254, 254.6);
-  --orkestra-btn-orkestra-light-active-color: rgb(206.67, 207.5, 209.99);
+  --orkestra-btn-orkestra-light-hover-color: rgb(81.0470588235%, 81.3725490196%, 81.6980392157%);
+  --orkestra-btn-orkestra-light-active-background: rgb(99.5294117647%, 99.6078431373%, 99.6862745098%);
+  --orkestra-btn-orkestra-light-active-color: rgb(81.0470588235%, 81.3725490196%, 81.6980392157%);
   --orkestra-btn-orkestra-dark-color: var(--orkestra-dark);
-  --orkestra-btn-orkestra-dark-hover-color: rgb(9.13, 19.09, 32.37);
-  --orkestra-btn-orkestra-dark-active-background: rgb(206.2, 208.6, 211.8);
-  --orkestra-btn-orkestra-dark-active-color: rgb(9.13, 19.09, 32.37);
+  --orkestra-btn-orkestra-dark-hover-color: rgb(4.8823529412%, 6.5098039216%, 9.1137254902%);
+  --orkestra-btn-orkestra-dark-active-background: rgb(81.1764705882%, 81.568627451%, 82.1960784314%);
+  --orkestra-btn-orkestra-dark-active-color: rgb(4.8823529412%, 6.5098039216%, 9.1137254902%);
   --orkestra-input-btn-focus-color: rgba(44, 123, 229, 0.25);
   --orkestra-btn-link-color: var(--orkestra-link-color);
-  --orkestra-btn-link-hover-color: rgb(35.2, 98.4, 183.2);
-  --orkestra-btn-disabled-color: #748194;
-  --orkestra-input-focus-border-color-global: rgb(149.5, 189, 242);
+  --orkestra-btn-link-hover-color: rgb(11.7333333333%, 32.8%, 61.0666666667%);
+  --orkestra-btn-disabled-color: #68707c;
+  --orkestra-input-focus-border-color-global: rgb(58.6274509804%, 74.1176470588%, 94.9019607843%);
   --orkestra-input-placeholder-color-global: var(--orkestra-gray-400);
-  --orkestra-bg-navbar-glass: rgba(237, 242, 249, 0.96);
+  --orkestra-bg-navbar-glass: rgba(242, 244, 246, 0.96);
   --orkestra-navbar-vertical-default-bg-color: var(--orkestra-bg-navbar-glass);
-  --orkestra-navbar-vertical-default-link-color: #5e6e82;
-  --orkestra-navbar-vertical-default-link-hover-color: #232e3c;
+  --orkestra-navbar-vertical-default-link-color: #454c58;
+  --orkestra-navbar-vertical-default-link-hover-color: #1a202a;
   --orkestra-navbar-vertical-default-link-active-color: #2c7be5;
-  --orkestra-navbar-vertical-default-link-disable-color: #b6c1d2;
+  --orkestra-navbar-vertical-default-link-disable-color: #bcc3cc;
   --orkestra-navbar-vertical-default-hr-color: rgba(0, 0, 0, 0.08);
-  --orkestra-navbar-vertical-default-scrollbar-color: rgba(116, 129, 148, 0.3);
+  --orkestra-navbar-vertical-default-scrollbar-color: rgba(104, 112, 124, 0.3);
   --orkestra-navbar-vertical-default-label-color: var(--orkestra-gray-500);
-  --orkestra-navbar-vertical-inverted-bg-color: #232e3c;
-  --orkestra-navbar-vertical-inverted-link-color: #9da9bb;
-  --orkestra-navbar-vertical-inverted-link-hover-color: #edf2f9;
-  --orkestra-navbar-vertical-inverted-link-active-color: #edf2f9;
-  --orkestra-navbar-vertical-inverted-link-disable-color: #5e6e82;
+  --orkestra-navbar-vertical-inverted-bg-color: #1a202a;
+  --orkestra-navbar-vertical-inverted-link-color: #98a1ac;
+  --orkestra-navbar-vertical-inverted-link-hover-color: #f2f4f6;
+  --orkestra-navbar-vertical-inverted-link-active-color: #f2f4f6;
+  --orkestra-navbar-vertical-inverted-link-disable-color: #454c58;
   --orkestra-navbar-vertical-inverted-hr-color: rgba(255, 255, 255, 0.08);
-  --orkestra-navbar-vertical-inverted-scrollbar-color: #b6c1d2;
-  --orkestra-navbar-vertical-inverted-label-color: #5e6e82;
+  --orkestra-navbar-vertical-inverted-scrollbar-color: #bcc3cc;
+  --orkestra-navbar-vertical-inverted-label-color: #454c58;
   --orkestra-navbar-vertical-vibrant-bg-image: linear-gradient(-45deg, rgba(0, 160, 255, 0.86), #0048a2), url(../img/generic/bg-navbar.png);
   --orkestra-navbar-vertical-vibrant-link-color: rgba(255, 255, 255, 0.75);
   --orkestra-navbar-vertical-vibrant-link-hover-color: #fff;
   --orkestra-navbar-vertical-vibrant-link-active-color: #fff;
   --orkestra-navbar-vertical-vibrant-link-disable-color: rgba(255, 255, 255, 0.45);
   --orkestra-navbar-vertical-vibrant-hr-color: rgba(255, 255, 255, 0.2);
-  --orkestra-navbar-vertical-vibrant-scrollbar-color: #b6c1d2;
+  --orkestra-navbar-vertical-vibrant-scrollbar-color: #bcc3cc;
   --orkestra-navbar-vertical-vibrant-label-color: rgba(255, 255, 255, 0.4);
   --orkestra-navbar-vertical-card-bg-color: #fff;
   --orkestra-navbar-vertical-card-link-color: var(--orkestra-gray-700);
@@ -326,18 +327,18 @@
   --orkestra-navbar-vertical-card-link-active-color: var(--orkestra-primary);
   --orkestra-navbar-vertical-card-link-disable-color: var(--orkestra-gray-400);
   --orkestra-navbar-vertical-card-hr-color: rgba(0, 0, 0, 0.08);
-  --orkestra-navbar-vertical-card-scrollbar-color: rgba(116, 129, 148, 0.3);
+  --orkestra-navbar-vertical-card-scrollbar-color: rgba(104, 112, 124, 0.3);
   --orkestra-navbar-vertical-card-label-color: var(--orkestra-gray-500);
   --orkestra-avatar-status-border-color: var(--orkestra-quaternary-bg);
-  --orkestra-avatar-name-bg: #344050;
+  --orkestra-avatar-name-bg: #252c36;
   --orkestra-avatar-button-bg: var(--orkestra-gray-400);
   --orkestra-avatar-button-hover-bg: var(--orkestra-gray-500);
   --orkestra-notification-bg: var(--orkestra-emphasis-bg);
-  --orkestra-notification-title-bg: #f9fafd;
+  --orkestra-notification-title-bg: #f9fafb;
   --orkestra-notification-unread-bg: var(--orkestra-gray-200);
-  --orkestra-notification-unread-hover-bg: rgb(217.875, 228.1875, 242.625);
+  --orkestra-notification-unread-hover-bg: rgb(88.9928698752%, 90.6862745098%, 92.3796791444%);
   --orkestra-notification-indicator-border-color: var(--orkestra-body-bg);
-  --orkestra-kanban-bg: #f9fafd;
+  --orkestra-kanban-bg: #f9fafb;
   --orkestra-kanban-header-bg: var(--orkestra-kanban-bg);
   --orkestra-kanban-item-bg: #fff;
   --orkestra-kanban-item-color: var(--orkestra-gray-900);
@@ -346,7 +347,7 @@
   --orkestra-kanban-bg-attachment-bg: var(--orkestra-gray-300);
   --orkestra-kanban-footer-color: var(--orkestra-gray-600);
   --orkestra-kanban-nav-link-card-details-color: var(--orkestra-gray-700);
-  --orkestra-kanban-nav-link-card-details-hover-bg: #edf2f9;
+  --orkestra-kanban-nav-link-card-details-hover-bg: #f2f4f6;
   --orkestra-bg-shape-bg: #4695ff;
   --orkestra-bg-shape-bg-ltd: linear-gradient(-45deg, #4695ff, #1970e2);
   --orkestra-bg-shape-bg-dtl: linear-gradient(-45deg, #1970e2, #4695ff);
@@ -357,12 +358,12 @@
   --orkestra-bg-circle-shape-bg: #4695ff;
   --orkestra-modal-shape-header: linear-gradient(-45deg, #1970e2, #4695ff);
   --orkestra-modal-shape-header-bg: #4494ff;
-  --fc-button-bg-color: #344050;
-  --fc-button-border-color: #344050;
-  --fc-button-hover-bg-color: #0b1727;
-  --fc-button-hover-border-color: #0b1727;
-  --fc-button-active-bg-color: #0b1727;
-  --fc-button-active-border-color: #0b1727;
+  --fc-button-bg-color: #252c36;
+  --fc-button-border-color: #252c36;
+  --fc-button-hover-bg-color: #0f141c;
+  --fc-button-hover-border-color: #0f141c;
+  --fc-button-active-bg-color: #0f141c;
+  --fc-button-active-border-color: #0f141c;
   --fc-button-list-day-cushion: var(--orkestra-quaternary-bg);
   --fc-highlight-color: rgba(var(--orkestra-primary-rgb), 0.1);
   --orkestra-flatpickr-calendar-bg: var(--orkestra-quaternary-bg);
@@ -370,14 +371,14 @@
   --orkestra-leaflet-popup-content-wrapper-bg: var(--orkestra-quaternary-bg);
   --orkestra-choices-item-selectable-highlighted-bg: #fff;
   --orkestra-choices-item-has-no-choices-bg: var(--orkestra-quaternary-bg);
-  --orkestra-bg-choices-close-button: #edf2f9;
+  --orkestra-bg-choices-close-button: #f2f4f6;
   --orkestra-thumbnail-bg-global: #fff;
   --orkestra-thumbnail-bg-global: #fff;
   --orkestra-chat-contact-bg: var(--orkestra-emphasis-bg);
   --orkestra-tinymce-bg: var(--orkestra-quaternary-bg);
   --orkestra-slick-arrow-bg: rgba(255, 255, 255, 0.8);
   --orkestra-react-datepicker-bg: #fff;
-  --orkestra-react-datepicker-header-bg: #edf2f9;
+  --orkestra-react-datepicker-header-bg: #f2f4f6;
   --orkestra-star-rating-bg-image: url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAAACXBIWXMAAAsTAAALEwEAmpwYAAAFdElEQVR4nO2aXWxURRTH/2dut58Imho1SgStuit+vBo0BkgkRjDog+VBiJEXqJhKK21x+7EdUu5u2W1Uqi8Qo4YQY6gQDQlRn9RENGoMD0a7RCzGRCJGBLRF9mOOD+waKHe7e2f23mt0f4/zceY/Z2fmzJm7QI0aNWr8j6EgBu3sHG9oXHC2gxQvJ/CUhbpUPD5wMggtwv8hmZrmn3mHmF8G4XEm6s5R/kinlPP91xKAA7YN2A8CeHRW8eLmrOjwWwsQgAMYqs+xnLGls3O8wW89vjqgp1/eDWC1YyXhxqYFvz/ppx7AZwcIsnrmbMDUK6X0V5NfA/VJuRDgdWWa3Tmds1b5IqiAf97OUReAunLNCOx4RniFL/eALimvrs+KnwDMq6yHWJq0Bz/3VFRxJD8GabgY4iqcPABWvd6puRzPV4CUsnEmK6YA3OCiG1tKRRIJecwrXUU8XwHTGbEe7iYPAJQXYqsXeq4YyEvjUkoxkxXfAbhDo/uFOrYWxeMDv1Rb16V4ugJmctYa6E0eABpyItdZTT1OeLwFDEMa02YpZeWHpwaeOaBncOQhMJYamrnmvMdJUtXOgI0bd4daW0+25S0rAoV7iLiHgWqkuDkChjik9ibl8EmAuAo2/8G1A7ZKea24IMJkcQRAmJkiBIQBtAGwqiluNgScU4w0EU2CkWZSk8ycnleP76WUf2nadCYajbfmrfwDxIWJgiMAhQG06k7AQxSAEwAmiTnNRJMEMWkxpePx/lNzrRpHB7wwOLJcMR+Cm9vbv5cZAK81h1S3lFLNrnQ8BBVjF/4bkweAZgDPnc+IJ5wqS0QBDnsoKBAYdLtTubMDCF95qiYAhMUfOpY7FSqlOgCc9lSRjzDR86MjsS+d6hwdMBaX3zCrlQDOeKrMBwiIpnYMvVSqvuRNMBWXXwPiYQB/eKLMBxgY3mnHRudqM+dVOGkPfsEKjwCYrqoyHyAgnrKHRipoV57CveAwgCZjZT7AwFjKHuqr5Npc8VW4r3/7ShAdAuD7xwuXjCftoa5KcwZXuUDv4MgqYn4XQEhLmscw8+5UPPaMm4TJVTqc2jF0GERrAeRcq/MceqOlnje7zRa10uHege3tBHobgXxdvhIm7DuRjjw9MbE277av1gRS9vAEwE8BqGpurgVhf0ud2qAz+YvdDegb3L4BTK+b2DCBgffO/np9+549m7K6NoweMD795KOj9y9bcRsB95rY0SRTp+qW7drV/aeJEeM9TMzvm9rQg48mEv2/mVoxP8RYLDa2oYWor4oVYwuEu6qgQwOOtLfvN36DrEIY4yXmNrRobGv79hZTI0YOKPwCEVMRurBFxqvPyAGLw+lbEWBuoBCwAwhB7f/i+GS8/YwcwBzY/i8S7AoILgIUMY8EZluAzZegIY2Fc0gbbQdc9DwHFgGKCFZGP4K2AwoxuFGz+xkCehFSNxHzKoCO6uowjQRl/7dXCs0YnCXmVwWH7Evu8T9LKT+Yzoj1BNggLHRl0fAc0ncAiyVuHl8INKEI0aQdOz67rvDRcm9394sToabpLhBHAVxVkV02c4D2e0DfwMi+Cv76CoCPKEU9Y4nYZ5Xa7pHyOpEVwwA2oXzKfmHqWKRF90FEewVUkAMcZ/C2lB076PadbkzKUwCejUblK3kSO0FYM0fzhkXh9M0AptyMUcQkDJY6AE8D2NIcUktS9vABk7+0JBJyMhmPPcYKywEu9cGWQ3nrnO4Y2g5gYN+sogyIU5mQakvasXEpZUbX9mxSidjHzSG+jxjrAPx4eS29afIwor0FWkJq9HzOOsvMq5n5B0vx2OioPKFrrxyFg/ItKeXBmazoAGMFQEea6/MlP3zWqFGjRo0y/A3lxcMNXfCjjAAAAABJRU5ErkJggg==");
   --orkestra-theme-wizard-nav-item-circle-bg: var(--orkestra-quaternary-bg);
   --orkestra-toast-bg-global: rgba(255, 255, 255, 0.85);
@@ -386,116 +387,116 @@
   --orkestra-card-span-img-box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
   --orkestra-card-span-img-hover-box-shadow: 0 1rem 4rem rgba(0, 0, 0, 0.175);
   --orkestra-setting-toggle-shadow: 0 -7px 14px 0 rgba(65, 69, 88, 0.1), 0 3px 6px 0 rgba(0, 0, 0, 0.07);
-  --orkestra-scrollbar-bg: rgba(182, 193, 210, 0.55);
-  --orkestra-simplebar-bg: #b6c1d2;
+  --orkestra-scrollbar-bg: rgba(188, 195, 204, 0.55);
+  --orkestra-simplebar-bg: #bcc3cc;
   --orkestra-nav-pills-orkestra-active-bg-color: var(--orkestra-quaternary-bg);
-  --orkestra-btn-disabled-custom-background: rgba(249, 250, 253, 0.55);
-  --orkestra-btn-disabled-custom-color: rgba(11, 23, 39, 0.3);
+  --orkestra-btn-disabled-custom-background: rgba(249, 250, 251, 0.55);
+  --orkestra-btn-disabled-custom-color: rgba(15, 20, 28, 0.3);
   --orkestra-dropdown-bg-global: #fff;
-  --orkestra-dropdown-link-hover-color-global: rgb(41.9545454545, 51.6363636364, 64.5454545455);
-  --orkestra-dropdown-link-hover-bg-global: #f9fafd;
-  --orkestra-popover-header-bg-global: #f9fafd;
+  --orkestra-dropdown-link-hover-color-global: rgb(10.4438698556%, 12.4197371256%, 15.2424046542%);
+  --orkestra-dropdown-link-hover-bg-global: #f9fafb;
+  --orkestra-popover-header-bg-global: #f9fafb;
   --orkestra-toast-bg-global: rgba(255, 255, 255, 0.85);
   --orkestra-toast-header-bg-global: rgba(255, 255, 255, 0.85);
   --orkestra-list-group-bg-global: var(--orkestra-emphasis-bg);
-  --orkestra-accordion-btn-color-global: #5e6e82;
+  --orkestra-accordion-btn-color-global: #454c58;
   --orkestra-alert-link-color: #2c7be5;
 }
 :root .table-primary,
 [data-bs-theme=light] .table-primary {
-  --orkestra-table-bg: rgb(212.8, 228.6, 249.8);
-  --orkestra-table-color: #4d5969;
-  --orkestra-table-hover-bg: rgb(202.615, 218.13, 238.94);
-  --orkestra-table-hover-color: #4d5969;
-  --orkestra-table-striped-bg: rgb(206.01, 221.62, 242.56);
-  --orkestra-table-striped-color: #4d5969;
-  --orkestra-table-active-bg: rgb(199.22, 214.64, 235.32);
-  --orkestra-table-active-color: #4d5969;
-  --orkestra-table-border-color: rgba(185.64, 200.68, 220.84, 0.05);
+  --orkestra-table-bg: rgb(83.4509803922%, 89.6470588235%, 97.9607843137%);
+  --orkestra-table-color: #333a45;
+  --orkestra-table-hover-bg: rgb(78.6921568627%, 84.6294117647%, 92.6431372549%);
+  --orkestra-table-hover-color: #333a45;
+  --orkestra-table-striped-bg: rgb(80.2784313725%, 86.3019607843%, 94.4156862745%);
+  --orkestra-table-striped-color: #333a45;
+  --orkestra-table-active-bg: rgb(77.1058823529%, 82.9568627451%, 90.8705882353%);
+  --orkestra-table-active-color: #333a45;
+  --orkestra-table-border-color: rgba(70.7607843137%, 76.2666666667%, 83.7803921569%, 0.05);
 }
 :root .table-secondary,
 [data-bs-theme=light] .table-secondary {
-  --orkestra-table-bg: rgb(227.2, 229.8, 233.6);
-  --orkestra-table-color: #4d5969;
-  --orkestra-table-hover-bg: rgb(215.935, 219.24, 223.955);
-  --orkestra-table-hover-color: #4d5969;
-  --orkestra-table-striped-bg: rgb(219.69, 222.76, 227.17);
-  --orkestra-table-striped-color: #4d5969;
-  --orkestra-table-active-bg: rgb(212.18, 215.72, 220.74);
-  --orkestra-table-active-color: #4d5969;
-  --orkestra-table-border-color: rgba(197.16, 201.64, 207.88, 0.05);
+  --orkestra-table-bg: rgb(88.1568627451%, 88.7843137255%, 89.7254901961%);
+  --orkestra-table-color: #333a45;
+  --orkestra-table-hover-bg: rgb(83.0450980392%, 83.831372549%, 85.0254901961%);
+  --orkestra-table-hover-color: #333a45;
+  --orkestra-table-striped-bg: rgb(84.7490196078%, 85.4823529412%, 86.5921568627%);
+  --orkestra-table-striped-color: #333a45;
+  --orkestra-table-active-bg: rgb(81.3411764706%, 82.1803921569%, 83.4588235294%);
+  --orkestra-table-active-color: #333a45;
+  --orkestra-table-border-color: rgba(74.5254901961%, 75.5764705882%, 77.1921568627%, 0.05);
 }
 :root .table-success,
 [data-bs-theme=light] .table-success {
-  --orkestra-table-bg: rgb(204, 246, 228.4);
-  --orkestra-table-color: #4d5969;
-  --orkestra-table-hover-bg: rgb(194.475, 234.225, 219.145);
-  --orkestra-table-hover-color: #4d5969;
-  --orkestra-table-striped-bg: rgb(197.65, 238.15, 222.23);
-  --orkestra-table-striped-color: #4d5969;
-  --orkestra-table-active-bg: rgb(191.3, 230.3, 216.06);
-  --orkestra-table-active-color: #4d5969;
-  --orkestra-table-border-color: rgba(178.6, 214.6, 203.72, 0.05);
+  --orkestra-table-bg: rgb(80%, 96.4705882353%, 89.568627451%);
+  --orkestra-table-color: #333a45;
+  --orkestra-table-hover-bg: rgb(75.5%, 90.9411764706%, 84.8803921569%);
+  --orkestra-table-hover-color: #333a45;
+  --orkestra-table-striped-bg: rgb(77%, 92.7843137255%, 86.4431372549%);
+  --orkestra-table-striped-color: #333a45;
+  --orkestra-table-active-bg: rgb(74%, 89.0980392157%, 83.3176470588%);
+  --orkestra-table-active-color: #333a45;
+  --orkestra-table-border-color: rgba(68%, 81.7254901961%, 77.0666666667%, 0.05);
 }
 :root .table-info,
 [data-bs-theme=light] .table-info {
-  --orkestra-table-bg: rgb(211.8, 241.6, 254.6);
-  --orkestra-table-color: #4d5969;
-  --orkestra-table-hover-bg: rgb(201.69, 230.155, 243.38);
-  --orkestra-table-hover-color: #4d5969;
-  --orkestra-table-striped-bg: rgb(205.06, 233.97, 247.12);
-  --orkestra-table-striped-color: #4d5969;
-  --orkestra-table-active-bg: rgb(198.32, 226.34, 239.64);
-  --orkestra-table-active-color: #4d5969;
-  --orkestra-table-border-color: rgba(184.84, 211.08, 224.68, 0.05);
+  --orkestra-table-bg: rgb(83.0588235294%, 94.7450980392%, 99.8431372549%);
+  --orkestra-table-color: #333a45;
+  --orkestra-table-hover-bg: rgb(78.3294117647%, 89.3450980392%, 94.3843137255%);
+  --orkestra-table-hover-color: #333a45;
+  --orkestra-table-striped-bg: rgb(79.9058823529%, 91.1450980392%, 96.2039215686%);
+  --orkestra-table-striped-color: #333a45;
+  --orkestra-table-active-bg: rgb(76.7529411765%, 87.5450980392%, 92.5647058824%);
+  --orkestra-table-active-color: #333a45;
+  --orkestra-table-border-color: rgba(70.4470588235%, 80.3450980392%, 85.2862745098%, 0.05);
 }
 :root .table-warning,
 [data-bs-theme=light] .table-warning {
-  --orkestra-table-bg: rgb(253, 229.6, 216.4);
-  --orkestra-table-color: #4d5969;
-  --orkestra-table-hover-bg: rgb(239.8, 219.055, 208.045);
-  --orkestra-table-hover-color: #4d5969;
-  --orkestra-table-striped-bg: rgb(244.2, 222.57, 210.83);
-  --orkestra-table-striped-color: #4d5969;
-  --orkestra-table-active-bg: rgb(235.4, 215.54, 205.26);
-  --orkestra-table-active-color: #4d5969;
-  --orkestra-table-border-color: rgba(217.8, 201.48, 194.12, 0.05);
+  --orkestra-table-bg: rgb(99.2156862745%, 90.0392156863%, 84.862745098%);
+  --orkestra-table-color: #333a45;
+  --orkestra-table-hover-bg: rgb(93.2745098039%, 84.9921568627%, 80.5274509804%);
+  --orkestra-table-hover-color: #333a45;
+  --orkestra-table-striped-bg: rgb(95.2549019608%, 86.6745098039%, 81.9725490196%);
+  --orkestra-table-striped-color: #333a45;
+  --orkestra-table-active-bg: rgb(91.2941176471%, 83.3098039216%, 79.0823529412%);
+  --orkestra-table-active-color: #333a45;
+  --orkestra-table-border-color: rgba(83.3725490196%, 76.5803921569%, 73.3019607843%, 0.05);
 }
 :root .table-danger,
 [data-bs-theme=light] .table-danger {
-  --orkestra-table-bg: rgb(250, 215, 221.4);
-  --orkestra-table-color: #4d5969;
-  --orkestra-table-hover-bg: rgb(237.025, 205.55, 212.67);
-  --orkestra-table-hover-color: #4d5969;
-  --orkestra-table-striped-bg: rgb(241.35, 208.7, 215.58);
-  --orkestra-table-striped-color: #4d5969;
-  --orkestra-table-active-bg: rgb(232.7, 202.4, 209.76);
-  --orkestra-table-active-color: #4d5969;
-  --orkestra-table-border-color: rgba(215.4, 189.8, 198.12, 0.05);
+  --orkestra-table-bg: rgb(98.0392156863%, 84.3137254902%, 86.8235294118%);
+  --orkestra-table-color: #333a45;
+  --orkestra-table-hover-bg: rgb(92.1862745098%, 79.6960784314%, 82.3411764706%);
+  --orkestra-table-hover-color: #333a45;
+  --orkestra-table-striped-bg: rgb(94.137254902%, 81.2352941176%, 83.8352941176%);
+  --orkestra-table-striped-color: #333a45;
+  --orkestra-table-active-bg: rgb(90.2352941176%, 78.1568627451%, 80.8470588235%);
+  --orkestra-table-active-color: #333a45;
+  --orkestra-table-border-color: rgba(82.431372549%, 72%, 74.8705882353%, 0.05);
 }
 :root .table-light,
 [data-bs-theme=light] .table-light {
-  --orkestra-table-bg: #f9fafd;
-  --orkestra-table-color: #4d5969;
-  --orkestra-table-hover-bg: rgb(236.1, 237.925, 241.9);
-  --orkestra-table-hover-color: #4d5969;
-  --orkestra-table-striped-bg: rgb(240.4, 241.95, 245.6);
-  --orkestra-table-striped-color: #4d5969;
-  --orkestra-table-active-bg: rgb(231.8, 233.9, 238.2);
-  --orkestra-table-active-color: #4d5969;
-  --orkestra-table-border-color: rgba(214.6, 217.8, 223.4, 0.05);
+  --orkestra-table-bg: #f9fafb;
+  --orkestra-table-color: #333a45;
+  --orkestra-table-hover-bg: rgb(91.8235294118%, 92.3921568627%, 93.0784313725%);
+  --orkestra-table-hover-color: #333a45;
+  --orkestra-table-striped-bg: rgb(93.7647058824%, 94.2745098039%, 94.862745098%);
+  --orkestra-table-striped-color: #333a45;
+  --orkestra-table-active-bg: rgb(89.8823529412%, 90.5098039216%, 91.2941176471%);
+  --orkestra-table-active-color: #333a45;
+  --orkestra-table-border-color: rgba(82.1176470588%, 82.9803921569%, 84.1568627451%, 0.05);
 }
 :root .table-dark,
 [data-bs-theme=light] .table-dark {
-  --orkestra-table-bg: #0b1727;
+  --orkestra-table-bg: #0f141c;
   --orkestra-table-color: #fff;
-  --orkestra-table-hover-bg: rgb(29.3, 40.4, 55.2);
+  --orkestra-table-hover-bg: rgb(12.9411764706%, 14.7549019608%, 17.6568627451%);
   --orkestra-table-hover-color: #fff;
-  --orkestra-table-striped-bg: rgb(23.2, 34.6, 49.8);
+  --orkestra-table-striped-bg: rgb(10.5882352941%, 12.4509803922%, 15.431372549%);
   --orkestra-table-striped-color: #fff;
-  --orkestra-table-active-bg: rgb(35.4, 46.2, 60.6);
+  --orkestra-table-active-bg: rgb(15.2941176471%, 17.0588235294%, 19.8823529412%);
   --orkestra-table-active-color: #fff;
-  --orkestra-table-border-color: rgba(59.8, 69.4, 82.2, 0.05);
+  --orkestra-table-border-color: rgba(24.7058823529%, 26.2745098039%, 28.7843137255%, 0.05);
 }
 
 [data-bs-theme=dark] {
@@ -544,49 +545,49 @@
   --orkestra-dark-rgb: 35, 46, 60;
   --orkestra-light-rgb: 249, 250, 253;
   --orkestra-btn-orkestra-primary-color: var(--orkestra-primary);
-  --orkestra-btn-orkestra-primary-hover-color: rgb(79.87, 145.44, 233.42);
-  --orkestra-btn-orkestra-primary-active-background: rgb(6.6, 13.8, 23.4);
-  --orkestra-btn-orkestra-primary-active-color: rgb(79.87, 145.44, 233.42);
+  --orkestra-btn-orkestra-primary-hover-color: rgb(31.3215686275%, 57.0352941176%, 91.537254902%);
+  --orkestra-btn-orkestra-primary-active-background: rgb(2.5882352941%, 5.4117647059%, 9.1764705882%);
+  --orkestra-btn-orkestra-primary-active-color: rgb(31.3215686275%, 57.0352941176%, 91.537254902%);
   --orkestra-btn-orkestra-secondary-color: var(--orkestra-secondary);
-  --orkestra-btn-orkestra-secondary-hover-color: rgb(139.63, 150.42, 166.19);
-  --orkestra-btn-orkestra-secondary-active-background: rgb(6.6, 13.8, 23.4);
-  --orkestra-btn-orkestra-secondary-active-color: rgb(139.63, 150.42, 166.19);
+  --orkestra-btn-orkestra-secondary-hover-color: rgb(54.7568627451%, 58.9882352941%, 65.1725490196%);
+  --orkestra-btn-orkestra-secondary-active-background: rgb(2.5882352941%, 5.4117647059%, 9.1764705882%);
+  --orkestra-btn-orkestra-secondary-active-color: rgb(54.7568627451%, 58.9882352941%, 65.1725490196%);
   --orkestra-btn-orkestra-success-color: var(--orkestra-success);
-  --orkestra-btn-orkestra-success-hover-color: rgb(43.35, 217.65, 144.61);
-  --orkestra-btn-orkestra-success-active-background: rgb(6.6, 13.8, 23.4);
-  --orkestra-btn-orkestra-success-active-color: rgb(43.35, 217.65, 144.61);
+  --orkestra-btn-orkestra-success-hover-color: rgb(17%, 85.3529411765%, 56.7098039216%);
+  --orkestra-btn-orkestra-success-active-background: rgb(2.5882352941%, 5.4117647059%, 9.1764705882%);
+  --orkestra-btn-orkestra-success-active-color: rgb(17%, 85.3529411765%, 56.7098039216%);
   --orkestra-btn-orkestra-info-color: var(--orkestra-info);
-  --orkestra-btn-orkestra-info-hover-color: rgb(75.72, 199.39, 253.34);
-  --orkestra-btn-orkestra-info-active-background: rgb(6.6, 13.8, 23.4);
-  --orkestra-btn-orkestra-info-active-color: rgb(75.72, 199.39, 253.34);
+  --orkestra-btn-orkestra-info-hover-color: rgb(29.6941176471%, 78.1921568627%, 99.3490196078%);
+  --orkestra-btn-orkestra-info-active-background: rgb(2.5882352941%, 5.4117647059%, 9.1764705882%);
+  --orkestra-btn-orkestra-info-active-color: rgb(29.6941176471%, 78.1921568627%, 99.3490196078%);
   --orkestra-btn-orkestra-warning-color: var(--orkestra-warning);
-  --orkestra-btn-orkestra-warning-hover-color: rgb(246.7, 149.59, 94.81);
-  --orkestra-btn-orkestra-warning-active-background: rgb(6.6, 13.8, 23.4);
-  --orkestra-btn-orkestra-warning-active-color: rgb(246.7, 149.59, 94.81);
+  --orkestra-btn-orkestra-warning-hover-color: rgb(96.7450980392%, 58.662745098%, 37.1803921569%);
+  --orkestra-btn-orkestra-warning-active-background: rgb(2.5882352941%, 5.4117647059%, 9.1764705882%);
+  --orkestra-btn-orkestra-warning-active-color: rgb(96.7450980392%, 58.662745098%, 37.1803921569%);
   --orkestra-btn-orkestra-danger-color: var(--orkestra-danger);
-  --orkestra-btn-orkestra-danger-hover-color: rgb(234.25, 89, 115.56);
-  --orkestra-btn-orkestra-danger-active-background: rgb(6.6, 13.8, 23.4);
-  --orkestra-btn-orkestra-danger-active-color: rgb(234.25, 89, 115.56);
+  --orkestra-btn-orkestra-danger-hover-color: rgb(91.862745098%, 34.9019607843%, 45.3176470588%);
+  --orkestra-btn-orkestra-danger-active-background: rgb(2.5882352941%, 5.4117647059%, 9.1764705882%);
+  --orkestra-btn-orkestra-danger-active-color: rgb(91.862745098%, 34.9019607843%, 45.3176470588%);
   --orkestra-btn-orkestra-light-color: var(--orkestra-light);
-  --orkestra-btn-orkestra-light-hover-color: rgb(250.02, 250.85, 253.34);
-  --orkestra-btn-orkestra-light-active-background: rgb(6.6, 13.8, 23.4);
-  --orkestra-btn-orkestra-light-active-color: rgb(250.02, 250.85, 253.34);
+  --orkestra-btn-orkestra-light-hover-color: rgb(98.0470588235%, 98.3725490196%, 99.3490196078%);
+  --orkestra-btn-orkestra-light-active-background: rgb(2.5882352941%, 5.4117647059%, 9.1764705882%);
+  --orkestra-btn-orkestra-light-active-color: rgb(98.0470588235%, 98.3725490196%, 99.3490196078%);
   --orkestra-btn-orkestra-dark-color: var(--orkestra-dark);
-  --orkestra-btn-orkestra-dark-hover-color: rgba(164.603960396, 169.1237623762, 174.8762376238, 0.3775);
-  --orkestra-btn-orkestra-dark-active-background: rgb(6.6, 13.8, 23.4);
-  --orkestra-btn-orkestra-dark-active-color: rgba(164.603960396, 169.1237623762, 174.8762376238, 0.3775);
+  --orkestra-btn-orkestra-dark-hover-color: rgba(64.5505727043%, 66.3230440691%, 68.5789167152%, 0.3775);
+  --orkestra-btn-orkestra-dark-active-background: rgb(2.5882352941%, 5.4117647059%, 9.1764705882%);
+  --orkestra-btn-orkestra-dark-active-color: rgba(64.5505727043%, 66.3230440691%, 68.5789167152%, 0.3775);
   --orkestra-body-color: #9da9bb;
   --orkestra-body-bg: #0b1727;
   --orkestra-quaternary-bg: #0b1727;
   --orkestra-quaternary-bg-rgb: 11, 23, 39;
-  --orkestra-emphasis-bg: rgb(18.076, 29.728, 45.264);
+  --orkestra-emphasis-bg: rgb(7.088627451%, 11.6580392157%, 17.7505882353%);
   --orkestra-emphasis-bg-rgb: 18, 30, 45;
   --orkestra-box-shadow: 0 7px 14px 0 rgba(3, 12, 51, 0.15),
     0 3px 6px 0 rgba(0, 0, 0, 0.2);
   --orkestra-box-shadow-sm: 0 0.125rem 0.25rem rgba($black, 0.075);
   --orkestra-box-shadow-lg: 0 1rem 4rem rgba($black, 0.175);
   --orkestra-box-shadow-inset: inset 0 1px 2px rgba($black, 0.075);
-  --orkestra-input-focus-border-color-global: rgb(22, 61.5, 114.5);
+  --orkestra-input-focus-border-color-global: rgb(8.6274509804%, 24.1176470588%, 44.9019607843%);
   --orkestra-bg-navbar-glass: rgba(11, 23, 39, 0.96);
   --orkestra-navbar-vertical-default-link-color: #9da9bb;
   --orkestra-navbar-vertical-default-link-hover-color: #edf2f9;
@@ -595,25 +596,25 @@
   --orkestra-navbar-vertical-default-hr-color: rgba(255, 255, 255, 0.08);
   --orkestra-navbar-vertical-default-scrollbar-color: rgba(116, 129, 148, 0.3);
   --orkestra-navbar-vertical-card-hr-color: rgba(255, 255, 255, 0.08);
-  --orkestra-navbar-vertical-card-bg-color: rgb(18.076, 29.728, 45.264);
-  --orkestra-btn-reveal-focus-bg: rgb(9.9, 20.7, 35.1);
+  --orkestra-navbar-vertical-card-bg-color: rgb(7.088627451%, 11.6580392157%, 17.7505882353%);
+  --orkestra-btn-reveal-focus-bg: rgb(3.8823529412%, 8.1176470588%, 13.7647058824%);
   --orkestra-btn-reveal-hover-shadow: 0px 1px 2px 0px rgba(0, 0, 0, 0.8),
     0px 1px 1.5px 0px rgba(0, 0, 0, 0.7),
     0px 2px 5px 0px rgba(43, 45, 80, 0.4),
     0px 0px 0px 1px rgba(255, 255, 255, 0.06);
-  --orkestra-btn-reveal-focus-border-color: rgb(9.625, 20.125, 34.125);
+  --orkestra-btn-reveal-focus-border-color: rgb(3.7745098039%, 7.8921568627%, 13.3823529412%);
   --orkestra-btn-orkestra-box-shadow: 0 0 0 1px rgba(0, 8, 19, 0.3),
     0 2px 5px 0 rgba(0, 13, 33, 0.5), 0 1px 1.5px 0 rgba(0, 8, 1, 0.48),
     0 1px 2px 0 rgba(0, 8, 1, 0.4);
   --orkestra-btn-orkestra-hover-box-shadow: 0 0 0 1px rgba(0, 8, 19, 0.3),
     0 3px 7px 0 rgba(0, 13, 33, 0.8), 0 1px 1.5px 0 #000801,
     0 1px 2px 0 #000801;
-  --orkestra-btn-orkestra-default-hover-color: rgb(194.41, 203.54, 217.65);
-  --orkestra-btn-orkestra-default-active-background: rgb(9.9, 20.7, 35.1);
-  --orkestra-btn-orkestra-default-active-border: rgb(194.41, 203.54, 217.65);
+  --orkestra-btn-orkestra-default-hover-color: rgb(76.2392156863%, 79.8196078431%, 85.3529411765%);
+  --orkestra-btn-orkestra-default-active-background: rgb(3.8823529412%, 8.1176470588%, 13.7647058824%);
+  --orkestra-btn-orkestra-default-active-border: rgb(76.2392156863%, 79.8196078431%, 85.3529411765%);
   --orkestra-avatar-name-bg: #4d5969;
   --orkestra-notification-title-bg: #344050;
-  --orkestra-notification-unread-hover-bg: rgb(25.6052631579, 33.6526315789, 43.8947368421);
+  --orkestra-notification-unread-hover-bg: rgb(10.0412796698%, 13.1971104231%, 17.213622291%);
   --orkestra-kanban-bg: rgba(35, 46, 60, 0.25);
   --orkestra-kanban-item-bg: #232e3c;
   --orkestra-kanban-nav-link-card-details-hover-bg: #344050;
@@ -658,99 +659,104 @@
   --orkestra-btn-disabled-custom-background: rgba(11, 23, 39, 0.65);
   --orkestra-btn-disabled-custom-color: rgba(255, 255, 255, 0.2);
   --orkestra-dropdown-bg-global: #232e3c;
-  --orkestra-dropdown-link-hover-color-global: rgb(234.0818181818, 239.4454545455, 246.4181818182);
+  --orkestra-dropdown-link-hover-color-global: rgb(91.7967914439%, 93.9001782531%, 96.6345811052%);
   --orkestra-dropdown-link-hover-bg-global: rgba(11, 23, 39, 0.4);
   --orkestra-popover-header-bg-global: rgba(35, 46, 60, 0.25);
   --orkestra-toast-bg-global: rgba(52, 64, 80, 0.3);
   --orkestra-toast-header-bg-global: rgba(52, 64, 80, 0.3);
+  --orkestra-table-head-bg: #232e3c;
+}
+[data-bs-theme=dark] .table {
+  --orkestra-table-color: #9da9bb;
+  --orkestra-table-striped-color: #9da9bb;
 }
 [data-bs-theme=dark] .table-primary {
-  --orkestra-table-bg: rgb(8.8, 24.6, 45.8);
+  --orkestra-table-bg: rgb(3.4509803922%, 9.6470588235%, 17.9607843137%);
   --orkestra-table-color: #fff;
-  --orkestra-table-hover-bg: rgb(27.265, 41.88, 61.49);
+  --orkestra-table-hover-bg: rgb(10.6921568627%, 16.4235294118%, 24.1137254902%);
   --orkestra-table-hover-color: #fff;
-  --orkestra-table-striped-bg: rgb(21.11, 36.12, 56.26);
+  --orkestra-table-striped-bg: rgb(8.2784313725%, 14.1647058824%, 22.062745098%);
   --orkestra-table-striped-color: #fff;
-  --orkestra-table-active-bg: rgb(33.42, 47.64, 66.72);
+  --orkestra-table-active-bg: rgb(13.1058823529%, 18.6823529412%, 26.1647058824%);
   --orkestra-table-active-color: #fff;
-  --orkestra-table-border-color: rgba(58.04, 70.68, 87.64, 0.05);
+  --orkestra-table-border-color: rgba(22.7607843137%, 27.7176470588%, 34.368627451%, 0.05);
 }
 [data-bs-theme=dark] .table-secondary {
-  --orkestra-table-bg: rgb(23.2, 25.8, 29.6);
+  --orkestra-table-bg: rgb(9.0980392157%, 10.1176470588%, 11.6078431373%);
   --orkestra-table-color: #fff;
-  --orkestra-table-hover-bg: rgb(40.585, 42.99, 46.505);
+  --orkestra-table-hover-bg: rgb(15.9156862745%, 16.8588235294%, 18.237254902%);
   --orkestra-table-hover-color: #fff;
-  --orkestra-table-striped-bg: rgb(34.79, 37.26, 40.87);
+  --orkestra-table-striped-bg: rgb(13.6431372549%, 14.6117647059%, 16.0274509804%);
   --orkestra-table-striped-color: #fff;
-  --orkestra-table-active-bg: rgb(46.38, 48.72, 52.14);
+  --orkestra-table-active-bg: rgb(18.1882352941%, 19.1058823529%, 20.4470588235%);
   --orkestra-table-active-color: #fff;
-  --orkestra-table-border-color: rgba(69.56, 71.64, 74.68, 0.05);
+  --orkestra-table-border-color: rgba(27.2784313725%, 28.0941176471%, 29.2862745098%, 0.05);
 }
 [data-bs-theme=dark] .table-success {
-  --orkestra-table-bg: rgb(0, 42, 24.4);
+  --orkestra-table-bg: rgb(0%, 16.4705882353%, 9.568627451%);
   --orkestra-table-color: #fff;
-  --orkestra-table-hover-bg: rgb(19.125, 57.975, 41.695);
+  --orkestra-table-hover-bg: rgb(7.5%, 22.7352941176%, 16.3509803922%);
   --orkestra-table-hover-color: #fff;
-  --orkestra-table-striped-bg: rgb(12.75, 52.65, 35.93);
+  --orkestra-table-striped-bg: rgb(5%, 20.6470588235%, 14.0901960784%);
   --orkestra-table-striped-color: #fff;
-  --orkestra-table-active-bg: rgb(25.5, 63.3, 47.46);
+  --orkestra-table-active-bg: rgb(10%, 24.8235294118%, 18.6117647059%);
   --orkestra-table-active-color: #fff;
-  --orkestra-table-border-color: rgba(51, 84.6, 70.52, 0.05);
+  --orkestra-table-border-color: rgba(20%, 33.1764705882%, 27.6549019608%, 0.05);
 }
 [data-bs-theme=dark] .table-info {
-  --orkestra-table-bg: rgb(7.8, 37.6, 50.6);
+  --orkestra-table-bg: rgb(3.0588235294%, 14.7450980392%, 19.8431372549%);
   --orkestra-table-color: #fff;
-  --orkestra-table-hover-bg: rgb(26.34, 53.905, 65.93);
+  --orkestra-table-hover-bg: rgb(10.3294117647%, 21.1392156863%, 25.8549019608%);
   --orkestra-table-hover-color: #fff;
-  --orkestra-table-striped-bg: rgb(20.16, 48.47, 60.82);
+  --orkestra-table-striped-bg: rgb(7.9058823529%, 19.0078431373%, 23.8509803922%);
   --orkestra-table-striped-color: #fff;
-  --orkestra-table-active-bg: rgb(32.52, 59.34, 71.04);
+  --orkestra-table-active-bg: rgb(12.7529411765%, 23.2705882353%, 27.8588235294%);
   --orkestra-table-active-color: #fff;
-  --orkestra-table-border-color: rgba(57.24, 81.08, 91.48, 0.05);
+  --orkestra-table-border-color: rgba(22.4470588235%, 31.7960784314%, 35.8745098039%, 0.05);
 }
 [data-bs-theme=dark] .table-warning {
-  --orkestra-table-bg: rgb(49, 25.6, 12.4);
+  --orkestra-table-bg: rgb(19.2156862745%, 10.0392156863%, 4.862745098%);
   --orkestra-table-color: #fff;
-  --orkestra-table-hover-bg: rgb(64.45, 42.805, 30.595);
+  --orkestra-table-hover-bg: rgb(25.2745098039%, 16.7862745098%, 11.9980392157%);
   --orkestra-table-hover-color: #fff;
-  --orkestra-table-striped-bg: rgb(59.3, 37.07, 24.53);
+  --orkestra-table-striped-bg: rgb(23.2549019608%, 14.537254902%, 9.6196078431%);
   --orkestra-table-striped-color: #fff;
-  --orkestra-table-active-bg: rgb(69.6, 48.54, 36.66);
+  --orkestra-table-active-bg: rgb(27.2941176471%, 19.0352941176%, 14.3764705882%);
   --orkestra-table-active-color: #fff;
-  --orkestra-table-border-color: rgba(90.2, 71.48, 60.92, 0.05);
+  --orkestra-table-border-color: rgba(35.3725490196%, 28.031372549%, 23.8901960784%, 0.05);
 }
 [data-bs-theme=dark] .table-danger {
-  --orkestra-table-bg: rgb(46, 11, 17.4);
+  --orkestra-table-bg: rgb(18.0392156863%, 4.3137254902%, 6.8235294118%);
   --orkestra-table-color: #fff;
-  --orkestra-table-hover-bg: rgb(61.675, 29.3, 35.22);
+  --orkestra-table-hover-bg: rgb(24.1862745098%, 11.4901960784%, 13.8117647059%);
   --orkestra-table-hover-color: #fff;
-  --orkestra-table-striped-bg: rgb(56.45, 23.2, 29.28);
+  --orkestra-table-striped-bg: rgb(22.137254902%, 9.0980392157%, 11.4823529412%);
   --orkestra-table-striped-color: #fff;
-  --orkestra-table-active-bg: rgb(66.9, 35.4, 41.16);
+  --orkestra-table-active-bg: rgb(26.2352941176%, 13.8823529412%, 16.1411764706%);
   --orkestra-table-active-color: #fff;
-  --orkestra-table-border-color: rgba(87.8, 59.8, 64.92, 0.05);
+  --orkestra-table-border-color: rgba(34.431372549%, 23.4509803922%, 25.4588235294%, 0.05);
 }
 [data-bs-theme=dark] .table-light {
-  --orkestra-table-bg: rgb(49.8, 50, 50.6);
+  --orkestra-table-bg: rgb(19.5294117647%, 19.6078431373%, 19.8431372549%);
   --orkestra-table-color: #fff;
-  --orkestra-table-hover-bg: rgb(65.19, 65.375, 65.93);
+  --orkestra-table-hover-bg: rgb(25.5647058824%, 25.637254902%, 25.8549019608%);
   --orkestra-table-hover-color: #fff;
-  --orkestra-table-striped-bg: rgb(60.06, 60.25, 60.82);
+  --orkestra-table-striped-bg: rgb(23.5529411765%, 23.6274509804%, 23.8509803922%);
   --orkestra-table-striped-color: #fff;
-  --orkestra-table-active-bg: rgb(70.32, 70.5, 71.04);
+  --orkestra-table-active-bg: rgb(27.5764705882%, 27.6470588235%, 27.8588235294%);
   --orkestra-table-active-color: #fff;
-  --orkestra-table-border-color: rgba(90.84, 91, 91.48, 0.05);
+  --orkestra-table-border-color: rgba(35.6235294118%, 35.6862745098%, 35.8745098039%, 0.05);
 }
 [data-bs-theme=dark] .table-dark {
-  --orkestra-table-bg: rgb(2.2, 4.6, 7.8);
+  --orkestra-table-bg: rgb(0.862745098%, 1.8039215686%, 3.0588235294%);
   --orkestra-table-color: #fff;
-  --orkestra-table-hover-bg: rgb(21.16, 23.38, 26.34);
+  --orkestra-table-hover-bg: rgb(8.2980392157%, 9.168627451%, 10.3294117647%);
   --orkestra-table-hover-color: #fff;
-  --orkestra-table-striped-bg: rgb(14.84, 17.12, 20.16);
+  --orkestra-table-striped-bg: rgb(5.8196078431%, 6.7137254902%, 7.9058823529%);
   --orkestra-table-striped-color: #fff;
-  --orkestra-table-active-bg: rgb(27.48, 29.64, 32.52);
+  --orkestra-table-active-bg: rgb(10.7764705882%, 11.6235294118%, 12.7529411765%);
   --orkestra-table-active-color: #fff;
-  --orkestra-table-border-color: rgba(52.76, 54.68, 57.24, 0.05);
+  --orkestra-table-border-color: rgba(20.6901960784%, 21.4431372549%, 22.4470588235%, 0.05);
 }
 
 /*-----------------------------------------------
@@ -993,9 +999,9 @@ table {
 }
 
 caption {
-  padding-top: 0.75rem;
-  padding-bottom: 0.75rem;
-  color: #9da9bb;
+  padding-top: 0.5rem;
+  padding-bottom: 0.5rem;
+  color: #98a1ac;
   text-align: left;
 }
 
@@ -1274,7 +1280,7 @@ progress {
   margin-top: -1rem;
   margin-bottom: 1rem;
   font-size: 75%;
-  color: #748194;
+  color: #68707c;
 }
 .blockquote-footer::before {
   content: "— ";
@@ -2838,11 +2844,11 @@ progress {
   --orkestra-table-bg-type: initial;
   --orkestra-table-color-state: initial;
   --orkestra-table-bg-state: initial;
-  --orkestra-table-color: #5e6e82;
+  --orkestra-table-color: #454c58;
   --orkestra-table-bg: transparent;
   --orkestra-table-border-color: var(--orkestra-body-bg);
   --orkestra-table-accent-bg: transparent;
-  --orkestra-table-striped-color: #5e6e82;
+  --orkestra-table-striped-color: #454c58;
   --orkestra-table-striped-bg: var(--orkestra-gray-100);
   --orkestra-table-active-color: var(--orkestra-body-color);
   --orkestra-table-active-bg: rgba(var(--orkestra-emphasis-color-rgb), 0.1);
@@ -2854,7 +2860,7 @@ progress {
   border-color: var(--orkestra-table-border-color);
 }
 .table > :not(caption) > * > * {
-  padding: 0.75rem 0.75rem;
+  padding: 0.5rem 0.75rem;
   color: var(--orkestra-table-color-state, var(--orkestra-table-color-type, var(--orkestra-table-color)));
   background-color: var(--orkestra-table-bg);
   border-bottom-width: var(--orkestra-border-width);
@@ -2914,112 +2920,112 @@ progress {
 }
 
 .table-primary {
-  --orkestra-table-color: #4d5969;
-  --orkestra-table-bg: rgb(212.8, 228.6, 249.8);
-  --orkestra-table-border-color: rgb(185.64, 200.68, 220.84);
-  --orkestra-table-striped-bg: rgb(206.01, 221.62, 242.56);
-  --orkestra-table-striped-color: #4d5969;
-  --orkestra-table-active-bg: rgb(199.22, 214.64, 235.32);
-  --orkestra-table-active-color: #4d5969;
-  --orkestra-table-hover-bg: rgb(202.615, 218.13, 238.94);
-  --orkestra-table-hover-color: #4d5969;
+  --orkestra-table-color: #333a45;
+  --orkestra-table-bg: rgb(83.4509803922%, 89.6470588235%, 97.9607843137%);
+  --orkestra-table-border-color: rgb(70.7607843137%, 76.2666666667%, 83.7803921569%);
+  --orkestra-table-striped-bg: rgb(80.2784313725%, 86.3019607843%, 94.4156862745%);
+  --orkestra-table-striped-color: #333a45;
+  --orkestra-table-active-bg: rgb(77.1058823529%, 82.9568627451%, 90.8705882353%);
+  --orkestra-table-active-color: #333a45;
+  --orkestra-table-hover-bg: rgb(78.6921568627%, 84.6294117647%, 92.6431372549%);
+  --orkestra-table-hover-color: #333a45;
   color: var(--orkestra-table-color);
   border-color: var(--orkestra-table-border-color);
 }
 
 .table-secondary {
-  --orkestra-table-color: #4d5969;
-  --orkestra-table-bg: rgb(227.2, 229.8, 233.6);
-  --orkestra-table-border-color: rgb(197.16, 201.64, 207.88);
-  --orkestra-table-striped-bg: rgb(219.69, 222.76, 227.17);
-  --orkestra-table-striped-color: #4d5969;
-  --orkestra-table-active-bg: rgb(212.18, 215.72, 220.74);
-  --orkestra-table-active-color: #4d5969;
-  --orkestra-table-hover-bg: rgb(215.935, 219.24, 223.955);
-  --orkestra-table-hover-color: #4d5969;
+  --orkestra-table-color: #333a45;
+  --orkestra-table-bg: rgb(88.1568627451%, 88.7843137255%, 89.7254901961%);
+  --orkestra-table-border-color: rgb(74.5254901961%, 75.5764705882%, 77.1921568627%);
+  --orkestra-table-striped-bg: rgb(84.7490196078%, 85.4823529412%, 86.5921568627%);
+  --orkestra-table-striped-color: #333a45;
+  --orkestra-table-active-bg: rgb(81.3411764706%, 82.1803921569%, 83.4588235294%);
+  --orkestra-table-active-color: #333a45;
+  --orkestra-table-hover-bg: rgb(83.0450980392%, 83.831372549%, 85.0254901961%);
+  --orkestra-table-hover-color: #333a45;
   color: var(--orkestra-table-color);
   border-color: var(--orkestra-table-border-color);
 }
 
 .table-success {
-  --orkestra-table-color: #4d5969;
-  --orkestra-table-bg: rgb(204, 246, 228.4);
-  --orkestra-table-border-color: rgb(178.6, 214.6, 203.72);
-  --orkestra-table-striped-bg: rgb(197.65, 238.15, 222.23);
-  --orkestra-table-striped-color: #4d5969;
-  --orkestra-table-active-bg: rgb(191.3, 230.3, 216.06);
-  --orkestra-table-active-color: #4d5969;
-  --orkestra-table-hover-bg: rgb(194.475, 234.225, 219.145);
-  --orkestra-table-hover-color: #4d5969;
+  --orkestra-table-color: #333a45;
+  --orkestra-table-bg: rgb(80%, 96.4705882353%, 89.568627451%);
+  --orkestra-table-border-color: rgb(68%, 81.7254901961%, 77.0666666667%);
+  --orkestra-table-striped-bg: rgb(77%, 92.7843137255%, 86.4431372549%);
+  --orkestra-table-striped-color: #333a45;
+  --orkestra-table-active-bg: rgb(74%, 89.0980392157%, 83.3176470588%);
+  --orkestra-table-active-color: #333a45;
+  --orkestra-table-hover-bg: rgb(75.5%, 90.9411764706%, 84.8803921569%);
+  --orkestra-table-hover-color: #333a45;
   color: var(--orkestra-table-color);
   border-color: var(--orkestra-table-border-color);
 }
 
 .table-info {
-  --orkestra-table-color: #4d5969;
-  --orkestra-table-bg: rgb(211.8, 241.6, 254.6);
-  --orkestra-table-border-color: rgb(184.84, 211.08, 224.68);
-  --orkestra-table-striped-bg: rgb(205.06, 233.97, 247.12);
-  --orkestra-table-striped-color: #4d5969;
-  --orkestra-table-active-bg: rgb(198.32, 226.34, 239.64);
-  --orkestra-table-active-color: #4d5969;
-  --orkestra-table-hover-bg: rgb(201.69, 230.155, 243.38);
-  --orkestra-table-hover-color: #4d5969;
+  --orkestra-table-color: #333a45;
+  --orkestra-table-bg: rgb(83.0588235294%, 94.7450980392%, 99.8431372549%);
+  --orkestra-table-border-color: rgb(70.4470588235%, 80.3450980392%, 85.2862745098%);
+  --orkestra-table-striped-bg: rgb(79.9058823529%, 91.1450980392%, 96.2039215686%);
+  --orkestra-table-striped-color: #333a45;
+  --orkestra-table-active-bg: rgb(76.7529411765%, 87.5450980392%, 92.5647058824%);
+  --orkestra-table-active-color: #333a45;
+  --orkestra-table-hover-bg: rgb(78.3294117647%, 89.3450980392%, 94.3843137255%);
+  --orkestra-table-hover-color: #333a45;
   color: var(--orkestra-table-color);
   border-color: var(--orkestra-table-border-color);
 }
 
 .table-warning {
-  --orkestra-table-color: #4d5969;
-  --orkestra-table-bg: rgb(253, 229.6, 216.4);
-  --orkestra-table-border-color: rgb(217.8, 201.48, 194.12);
-  --orkestra-table-striped-bg: rgb(244.2, 222.57, 210.83);
-  --orkestra-table-striped-color: #4d5969;
-  --orkestra-table-active-bg: rgb(235.4, 215.54, 205.26);
-  --orkestra-table-active-color: #4d5969;
-  --orkestra-table-hover-bg: rgb(239.8, 219.055, 208.045);
-  --orkestra-table-hover-color: #4d5969;
+  --orkestra-table-color: #333a45;
+  --orkestra-table-bg: rgb(99.2156862745%, 90.0392156863%, 84.862745098%);
+  --orkestra-table-border-color: rgb(83.3725490196%, 76.5803921569%, 73.3019607843%);
+  --orkestra-table-striped-bg: rgb(95.2549019608%, 86.6745098039%, 81.9725490196%);
+  --orkestra-table-striped-color: #333a45;
+  --orkestra-table-active-bg: rgb(91.2941176471%, 83.3098039216%, 79.0823529412%);
+  --orkestra-table-active-color: #333a45;
+  --orkestra-table-hover-bg: rgb(93.2745098039%, 84.9921568627%, 80.5274509804%);
+  --orkestra-table-hover-color: #333a45;
   color: var(--orkestra-table-color);
   border-color: var(--orkestra-table-border-color);
 }
 
 .table-danger {
-  --orkestra-table-color: #4d5969;
-  --orkestra-table-bg: rgb(250, 215, 221.4);
-  --orkestra-table-border-color: rgb(215.4, 189.8, 198.12);
-  --orkestra-table-striped-bg: rgb(241.35, 208.7, 215.58);
-  --orkestra-table-striped-color: #4d5969;
-  --orkestra-table-active-bg: rgb(232.7, 202.4, 209.76);
-  --orkestra-table-active-color: #4d5969;
-  --orkestra-table-hover-bg: rgb(237.025, 205.55, 212.67);
-  --orkestra-table-hover-color: #4d5969;
+  --orkestra-table-color: #333a45;
+  --orkestra-table-bg: rgb(98.0392156863%, 84.3137254902%, 86.8235294118%);
+  --orkestra-table-border-color: rgb(82.431372549%, 72%, 74.8705882353%);
+  --orkestra-table-striped-bg: rgb(94.137254902%, 81.2352941176%, 83.8352941176%);
+  --orkestra-table-striped-color: #333a45;
+  --orkestra-table-active-bg: rgb(90.2352941176%, 78.1568627451%, 80.8470588235%);
+  --orkestra-table-active-color: #333a45;
+  --orkestra-table-hover-bg: rgb(92.1862745098%, 79.6960784314%, 82.3411764706%);
+  --orkestra-table-hover-color: #333a45;
   color: var(--orkestra-table-color);
   border-color: var(--orkestra-table-border-color);
 }
 
 .table-light {
-  --orkestra-table-color: #4d5969;
-  --orkestra-table-bg: #f9fafd;
-  --orkestra-table-border-color: rgb(214.6, 217.8, 223.4);
-  --orkestra-table-striped-bg: rgb(240.4, 241.95, 245.6);
-  --orkestra-table-striped-color: #4d5969;
-  --orkestra-table-active-bg: rgb(231.8, 233.9, 238.2);
-  --orkestra-table-active-color: #4d5969;
-  --orkestra-table-hover-bg: rgb(236.1, 237.925, 241.9);
-  --orkestra-table-hover-color: #4d5969;
+  --orkestra-table-color: #333a45;
+  --orkestra-table-bg: #f9fafb;
+  --orkestra-table-border-color: rgb(82.1176470588%, 82.9803921569%, 84.1568627451%);
+  --orkestra-table-striped-bg: rgb(93.7647058824%, 94.2745098039%, 94.862745098%);
+  --orkestra-table-striped-color: #333a45;
+  --orkestra-table-active-bg: rgb(89.8823529412%, 90.5098039216%, 91.2941176471%);
+  --orkestra-table-active-color: #333a45;
+  --orkestra-table-hover-bg: rgb(91.8235294118%, 92.3921568627%, 93.0784313725%);
+  --orkestra-table-hover-color: #333a45;
   color: var(--orkestra-table-color);
   border-color: var(--orkestra-table-border-color);
 }
 
 .table-dark {
   --orkestra-table-color: #fff;
-  --orkestra-table-bg: #0b1727;
-  --orkestra-table-border-color: rgb(59.8, 69.4, 82.2);
-  --orkestra-table-striped-bg: rgb(23.2, 34.6, 49.8);
+  --orkestra-table-bg: #0f141c;
+  --orkestra-table-border-color: rgb(24.7058823529%, 26.2745098039%, 28.7843137255%);
+  --orkestra-table-striped-bg: rgb(10.5882352941%, 12.4509803922%, 15.431372549%);
   --orkestra-table-striped-color: #fff;
-  --orkestra-table-active-bg: rgb(35.4, 46.2, 60.6);
+  --orkestra-table-active-bg: rgb(15.2941176471%, 17.0588235294%, 19.8823529412%);
   --orkestra-table-active-color: #fff;
-  --orkestra-table-hover-bg: rgb(29.3, 40.4, 55.2);
+  --orkestra-table-hover-bg: rgb(12.9411764706%, 14.7549019608%, 17.6568627451%);
   --orkestra-table-hover-color: #fff;
   color: var(--orkestra-table-color);
   border-color: var(--orkestra-table-border-color);
@@ -3090,7 +3096,7 @@ progress {
 .form-text {
   margin-top: 0.25rem;
   font-size: 75%;
-  color: #9da9bb;
+  color: #98a1ac;
 }
 
 .form-control, .dropzone-area.is-invalid {
@@ -3148,8 +3154,8 @@ progress {
   padding: 0.3125rem 1rem;
   margin: -0.3125rem -1rem;
   margin-inline-end: 1rem;
-  color: #d8e2ef;
-  background-color: #344050;
+  color: #dfe3e8;
+  background-color: #252c36;
   pointer-events: none;
   border-color: inherit;
   border-style: solid;
@@ -3164,7 +3170,7 @@ progress {
   }
 }
 .form-control:hover:not(:disabled):not([readonly])::file-selector-button, .dropzone-area.is-invalid:hover:not(:disabled):not([readonly])::file-selector-button {
-  background-color: #344050;
+  background-color: #252c36;
 }
 
 .form-control-plaintext {
@@ -3173,7 +3179,7 @@ progress {
   padding: 0.3125rem 0;
   margin-bottom: 0;
   line-height: 1.5;
-  color: #5e6e82;
+  color: #454c58;
   background-color: transparent;
   border: solid transparent;
   border-width: var(--orkestra-border-width) 0;
@@ -3244,7 +3250,7 @@ textarea.form-control-lg {
 }
 
 .form-select {
-  --orkestra-form-select-bg-img: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3e%3cpath fill='none' stroke='%234d5969' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='m2 5 6 6 6-6'/%3e%3c/svg%3e");
+  --orkestra-form-select-bg-img: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3e%3cpath fill='none' stroke='%23333a45' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='m2 5 6 6 6-6'/%3e%3c/svg%3e");
   display: block;
   width: 100%;
   padding: 0.3125rem 3rem 0.3125rem 1rem;
@@ -3386,7 +3392,7 @@ textarea.form-control-lg {
   padding-left: 2.5em;
 }
 .form-switch .form-check-input {
-  --orkestra-form-switch-bg: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='-4 -4 8 8'%3e%3ccircle r='3' fill='%239da9bb'/%3e%3c/svg%3e");
+  --orkestra-form-switch-bg: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='-4 -4 8 8'%3e%3ccircle r='3' fill='%2398a1ac'/%3e%3c/svg%3e");
   width: 2em;
   margin-left: -2.5em;
   background-image: var(--orkestra-form-switch-bg);
@@ -3400,7 +3406,7 @@ textarea.form-control-lg {
   }
 }
 .form-switch .form-check-input:focus {
-  --orkestra-form-switch-bg: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='-4 -4 8 8'%3e%3ccircle r='3' fill='rgb%28149.5, 189, 242%29'/%3e%3c/svg%3e");
+  --orkestra-form-switch-bg: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='-4 -4 8 8'%3e%3ccircle r='3' fill='rgb%2858.6274509804%, 74.1176470588%, 94.9019607843%%29'/%3e%3c/svg%3e");
 }
 .form-switch .form-check-input:checked {
   background-position: right center;
@@ -3450,10 +3456,10 @@ textarea.form-control-lg {
   outline: 0;
 }
 .form-range:focus::-webkit-slider-thumb {
-  box-shadow: 0 0 0 1px #edf2f9, 0 0 0 0.25rem rgba(44, 123, 229, 0.25);
+  box-shadow: 0 0 0 1px #f2f4f6, 0 0 0 0.25rem rgba(44, 123, 229, 0.25);
 }
 .form-range:focus::-moz-range-thumb {
-  box-shadow: 0 0 0 1px #edf2f9, 0 0 0 0.25rem rgba(44, 123, 229, 0.25);
+  box-shadow: 0 0 0 1px #f2f4f6, 0 0 0 0.25rem rgba(44, 123, 229, 0.25);
 }
 .form-range::-moz-focus-outer {
   border: 0;
@@ -3475,7 +3481,7 @@ textarea.form-control-lg {
   }
 }
 .form-range::-webkit-slider-thumb:active {
-  background-color: rgb(202.917721519, 222.417721519, 248.582278481);
+  background-color: rgb(79.5755770663%, 87.2226358898%, 97.4832464631%);
 }
 .form-range::-webkit-slider-runnable-track {
   width: 100%;
@@ -3503,7 +3509,7 @@ textarea.form-control-lg {
   }
 }
 .form-range::-moz-range-thumb:active {
-  background-color: rgb(202.917721519, 222.417721519, 248.582278481);
+  background-color: rgb(79.5755770663%, 87.2226358898%, 97.4832464631%);
 }
 .form-range::-moz-range-track {
   width: 100%;
@@ -3519,10 +3525,10 @@ textarea.form-control-lg {
   pointer-events: none;
 }
 .form-range:disabled::-webkit-slider-thumb {
-  background-color: #9da9bb;
+  background-color: #98a1ac;
 }
 .form-range:disabled::-moz-range-thumb {
-  background-color: #9da9bb;
+  background-color: #98a1ac;
 }
 
 .form-floating {
@@ -3610,7 +3616,7 @@ textarea.form-control-lg {
 }
 .form-floating > :disabled ~ label,
 .form-floating > .form-control:disabled ~ label {
-  color: #748194;
+  color: #68707c;
 }
 
 .input-group {
@@ -3911,7 +3917,7 @@ textarea.form-control-lg {
   --orkestra-btn-font-size: 1rem;
   --orkestra-btn-font-weight: 500;
   --orkestra-btn-line-height: 1.5;
-  --orkestra-btn-color: #5e6e82;
+  --orkestra-btn-color: #454c58;
   --orkestra-btn-bg: transparent;
   --orkestra-btn-border-width: var(--orkestra-border-width);
   --orkestra-btn-border-color: transparent;
@@ -4032,12 +4038,12 @@ fieldset:disabled .tox .tox-dialog__footer .tox-button--secondary,
   --orkestra-btn-bg: #2c7be5;
   --orkestra-btn-border-color: #2c7be5;
   --orkestra-btn-hover-color: #fff;
-  --orkestra-btn-hover-bg: rgb(37.4, 104.55, 194.65);
-  --orkestra-btn-hover-border-color: rgb(35.2, 98.4, 183.2);
+  --orkestra-btn-hover-bg: rgb(14.6666666667%, 41%, 76.3333333333%);
+  --orkestra-btn-hover-border-color: rgb(13.8039215686%, 38.5882352941%, 71.8431372549%);
   --orkestra-btn-focus-shadow-rgb: 76, 143, 233;
   --orkestra-btn-active-color: #fff;
-  --orkestra-btn-active-bg: rgb(35.2, 98.4, 183.2);
-  --orkestra-btn-active-border-color: rgb(33, 92.25, 171.75);
+  --orkestra-btn-active-bg: rgb(13.8039215686%, 38.5882352941%, 71.8431372549%);
+  --orkestra-btn-active-border-color: rgb(12.9411764706%, 36.1764705882%, 67.3529411765%);
   --orkestra-btn-active-shadow: inset 0 3px 5px rgba(0, 0, 0, 0.125);
   --orkestra-btn-disabled-color: #fff;
   --orkestra-btn-disabled-bg: #2c7be5;
@@ -4046,19 +4052,19 @@ fieldset:disabled .tox .tox-dialog__footer .tox-button--secondary,
 
 .btn-secondary {
   --orkestra-btn-color: #fff;
-  --orkestra-btn-bg: #748194;
-  --orkestra-btn-border-color: #748194;
+  --orkestra-btn-bg: #68707c;
+  --orkestra-btn-border-color: #68707c;
   --orkestra-btn-hover-color: #fff;
-  --orkestra-btn-hover-bg: rgb(98.6, 109.65, 125.8);
-  --orkestra-btn-hover-border-color: rgb(92.8, 103.2, 118.4);
-  --orkestra-btn-focus-shadow-rgb: 137, 148, 164;
+  --orkestra-btn-hover-bg: rgb(34.6666666667%, 37.3333333333%, 41.3333333333%);
+  --orkestra-btn-hover-border-color: rgb(32.6274509804%, 35.137254902%, 38.9019607843%);
+  --orkestra-btn-focus-shadow-rgb: 127, 133, 144;
   --orkestra-btn-active-color: #fff;
-  --orkestra-btn-active-bg: rgb(92.8, 103.2, 118.4);
-  --orkestra-btn-active-border-color: rgb(87, 96.75, 111);
+  --orkestra-btn-active-bg: rgb(32.6274509804%, 35.137254902%, 38.9019607843%);
+  --orkestra-btn-active-border-color: #4e545d;
   --orkestra-btn-active-shadow: inset 0 3px 5px rgba(0, 0, 0, 0.125);
   --orkestra-btn-disabled-color: #fff;
-  --orkestra-btn-disabled-bg: #748194;
-  --orkestra-btn-disabled-border-color: #748194;
+  --orkestra-btn-disabled-bg: #68707c;
+  --orkestra-btn-disabled-border-color: #68707c;
 }
 
 .btn-success {
@@ -4066,12 +4072,12 @@ fieldset:disabled .tox .tox-dialog__footer .tox-button--secondary,
   --orkestra-btn-bg: #00d27a;
   --orkestra-btn-border-color: #00d27a;
   --orkestra-btn-hover-color: #fff;
-  --orkestra-btn-hover-bg: rgb(0, 178.5, 103.7);
-  --orkestra-btn-hover-border-color: rgb(0, 168, 97.6);
+  --orkestra-btn-hover-bg: rgb(0%, 70%, 40.6666666667%);
+  --orkestra-btn-hover-border-color: rgb(0%, 65.8823529412%, 38.2745098039%);
   --orkestra-btn-focus-shadow-rgb: 38, 217, 142;
   --orkestra-btn-active-color: #fff;
-  --orkestra-btn-active-bg: rgb(0, 168, 97.6);
-  --orkestra-btn-active-border-color: rgb(0, 157.5, 91.5);
+  --orkestra-btn-active-bg: rgb(0%, 65.8823529412%, 38.2745098039%);
+  --orkestra-btn-active-border-color: rgb(0%, 61.7647058824%, 35.8823529412%);
   --orkestra-btn-active-shadow: inset 0 3px 5px rgba(0, 0, 0, 0.125);
   --orkestra-btn-disabled-color: #fff;
   --orkestra-btn-disabled-bg: #00d27a;
@@ -4083,12 +4089,12 @@ fieldset:disabled .tox .tox-dialog__footer .tox-button--secondary,
   --orkestra-btn-bg: #27bcfd;
   --orkestra-btn-border-color: #27bcfd;
   --orkestra-btn-hover-color: #fff;
-  --orkestra-btn-hover-bg: rgb(33.15, 159.8, 215.05);
-  --orkestra-btn-hover-border-color: rgb(31.2, 150.4, 202.4);
+  --orkestra-btn-hover-bg: rgb(13%, 62.6666666667%, 84.3333333333%);
+  --orkestra-btn-hover-border-color: rgb(12.2352941176%, 58.9803921569%, 79.3725490196%);
   --orkestra-btn-focus-shadow-rgb: 71, 198, 253;
   --orkestra-btn-active-color: #fff;
-  --orkestra-btn-active-bg: rgb(31.2, 150.4, 202.4);
-  --orkestra-btn-active-border-color: rgb(29.25, 141, 189.75);
+  --orkestra-btn-active-bg: rgb(12.2352941176%, 58.9803921569%, 79.3725490196%);
+  --orkestra-btn-active-border-color: rgb(11.4705882353%, 55.2941176471%, 74.4117647059%);
   --orkestra-btn-active-shadow: inset 0 3px 5px rgba(0, 0, 0, 0.125);
   --orkestra-btn-disabled-color: #fff;
   --orkestra-btn-disabled-bg: #27bcfd;
@@ -4100,12 +4106,12 @@ fieldset:disabled .tox .tox-dialog__footer .tox-button--secondary,
   --orkestra-btn-bg: #f5803e;
   --orkestra-btn-border-color: #f5803e;
   --orkestra-btn-hover-color: #fff;
-  --orkestra-btn-hover-bg: rgb(208.25, 108.8, 52.7);
-  --orkestra-btn-hover-border-color: rgb(196, 102.4, 49.6);
+  --orkestra-btn-hover-bg: rgb(81.6666666667%, 42.6666666667%, 20.6666666667%);
+  --orkestra-btn-hover-border-color: rgb(76.862745098%, 40.1568627451%, 19.4509803922%);
   --orkestra-btn-focus-shadow-rgb: 247, 147, 91;
   --orkestra-btn-active-color: #fff;
-  --orkestra-btn-active-bg: rgb(196, 102.4, 49.6);
-  --orkestra-btn-active-border-color: rgb(183.75, 96, 46.5);
+  --orkestra-btn-active-bg: rgb(76.862745098%, 40.1568627451%, 19.4509803922%);
+  --orkestra-btn-active-border-color: rgb(72.0588235294%, 37.6470588235%, 18.2352941176%);
   --orkestra-btn-active-shadow: inset 0 3px 5px rgba(0, 0, 0, 0.125);
   --orkestra-btn-disabled-color: #fff;
   --orkestra-btn-disabled-bg: #f5803e;
@@ -4117,12 +4123,12 @@ fieldset:disabled .tox .tox-dialog__footer .tox-button--secondary,
   --orkestra-btn-bg: #e63757;
   --orkestra-btn-border-color: #e63757;
   --orkestra-btn-hover-color: #fff;
-  --orkestra-btn-hover-bg: rgb(195.5, 46.75, 73.95);
-  --orkestra-btn-hover-border-color: rgb(184, 44, 69.6);
+  --orkestra-btn-hover-bg: rgb(76.6666666667%, 18.3333333333%, 29%);
+  --orkestra-btn-hover-border-color: rgb(72.1568627451%, 17.2549019608%, 27.2941176471%);
   --orkestra-btn-focus-shadow-rgb: 234, 85, 112;
   --orkestra-btn-active-color: #fff;
-  --orkestra-btn-active-bg: rgb(184, 44, 69.6);
-  --orkestra-btn-active-border-color: rgb(172.5, 41.25, 65.25);
+  --orkestra-btn-active-bg: rgb(72.1568627451%, 17.2549019608%, 27.2941176471%);
+  --orkestra-btn-active-border-color: rgb(67.6470588235%, 16.1764705882%, 25.5882352941%);
   --orkestra-btn-active-shadow: inset 0 3px 5px rgba(0, 0, 0, 0.125);
   --orkestra-btn-disabled-color: #fff;
   --orkestra-btn-disabled-bg: #e63757;
@@ -4131,39 +4137,37 @@ fieldset:disabled .tox .tox-dialog__footer .tox-button--secondary,
 
 .btn-light, .btn-tertiary, .tox .tox-menu__footer .tox-button--secondary,
 .tox .tox-dialog__footer .tox-button--secondary {
-  --orkestra-btn-color: #4d5969;
-  --orkestra-btn-bg: #f9fafd;
-  --orkestra-btn-border-color: #f9fafd;
-  --orkestra-btn-hover-color: #4d5969;
-  --orkestra-btn-hover-bg: rgb(211.65, 212.5, 215.05);
-  --orkestra-btn-hover-border-color: rgb(199.2, 200, 202.4);
-  --orkestra-btn-focus-shadow-rgb: 223, 226, 231;
-  --orkestra-btn-active-color: #4d5969;
-  --orkestra-btn-active-bg: rgb(199.2, 200, 202.4);
-  --orkestra-btn-active-border-color: rgb(186.75, 187.5, 189.75);
+  --orkestra-btn-color: #333a45;
+  --orkestra-btn-bg: #f9fafb;
+  --orkestra-btn-border-color: #f9fafb;
+  --orkestra-btn-hover-color: #333a45;
+  --orkestra-btn-hover-bg: rgb(83%, 83.3333333333%, 83.6666666667%);
+  --orkestra-btn-hover-border-color: rgb(78.1176470588%, 78.431372549%, 78.7450980392%);
+  --orkestra-btn-focus-shadow-rgb: 219, 221, 224;
+  --orkestra-btn-active-color: #333a45;
+  --orkestra-btn-active-bg: rgb(78.1176470588%, 78.431372549%, 78.7450980392%);
+  --orkestra-btn-active-border-color: rgb(73.2352941176%, 73.5294117647%, 73.8235294118%);
   --orkestra-btn-active-shadow: inset 0 3px 5px rgba(0, 0, 0, 0.125);
-  --orkestra-btn-disabled-color: #4d5969;
-  --orkestra-btn-disabled-bg: #f9fafd;
-  --orkestra-btn-disabled-border-color: #f9fafd;
+  --orkestra-btn-disabled-color: #333a45;
+  --orkestra-btn-disabled-bg: #f9fafb;
+  --orkestra-btn-disabled-border-color: #f9fafb;
 }
 
-.btn-dark, [data-bs-theme=dark] .btn-tertiary, [data-bs-theme=dark] .tox .tox-menu__footer .tox-button--secondary, .tox .tox-menu__footer [data-bs-theme=dark] .tox-button--secondary,
-[data-bs-theme=dark] .tox .tox-dialog__footer .tox-button--secondary,
-.tox .tox-dialog__footer [data-bs-theme=dark] .tox-button--secondary {
+.btn-dark {
   --orkestra-btn-color: #fff;
-  --orkestra-btn-bg: #0b1727;
-  --orkestra-btn-border-color: #0b1727;
+  --orkestra-btn-bg: #0f141c;
+  --orkestra-btn-border-color: #0f141c;
   --orkestra-btn-hover-color: #fff;
-  --orkestra-btn-hover-bg: rgb(47.6, 57.8, 71.4);
-  --orkestra-btn-hover-border-color: rgb(35.4, 46.2, 60.6);
-  --orkestra-btn-focus-shadow-rgb: 48, 58, 71;
+  --orkestra-btn-hover-bg: rgb(20%, 21.6666666667%, 24.3333333333%);
+  --orkestra-btn-hover-border-color: rgb(15.2941176471%, 17.0588235294%, 19.8823529412%);
+  --orkestra-btn-focus-shadow-rgb: 51, 55, 62;
   --orkestra-btn-active-color: #fff;
-  --orkestra-btn-active-bg: rgb(59.8, 69.4, 82.2);
-  --orkestra-btn-active-border-color: rgb(35.4, 46.2, 60.6);
+  --orkestra-btn-active-bg: rgb(24.7058823529%, 26.2745098039%, 28.7843137255%);
+  --orkestra-btn-active-border-color: rgb(15.2941176471%, 17.0588235294%, 19.8823529412%);
   --orkestra-btn-active-shadow: inset 0 3px 5px rgba(0, 0, 0, 0.125);
   --orkestra-btn-disabled-color: #fff;
-  --orkestra-btn-disabled-bg: #0b1727;
-  --orkestra-btn-disabled-border-color: #0b1727;
+  --orkestra-btn-disabled-bg: #0f141c;
+  --orkestra-btn-disabled-border-color: #0f141c;
 }
 
 .btn-outline-primary {
@@ -4184,19 +4188,19 @@ fieldset:disabled .tox .tox-dialog__footer .tox-button--secondary,
 }
 
 .btn-outline-secondary {
-  --orkestra-btn-color: #748194;
-  --orkestra-btn-border-color: #748194;
+  --orkestra-btn-color: #68707c;
+  --orkestra-btn-border-color: #68707c;
   --orkestra-btn-hover-color: #fff;
-  --orkestra-btn-hover-bg: #748194;
-  --orkestra-btn-hover-border-color: #748194;
-  --orkestra-btn-focus-shadow-rgb: 116, 129, 148;
+  --orkestra-btn-hover-bg: #68707c;
+  --orkestra-btn-hover-border-color: #68707c;
+  --orkestra-btn-focus-shadow-rgb: 104, 112, 124;
   --orkestra-btn-active-color: #fff;
-  --orkestra-btn-active-bg: #748194;
-  --orkestra-btn-active-border-color: #748194;
+  --orkestra-btn-active-bg: #68707c;
+  --orkestra-btn-active-border-color: #68707c;
   --orkestra-btn-active-shadow: inset 0 3px 5px rgba(0, 0, 0, 0.125);
-  --orkestra-btn-disabled-color: #748194;
+  --orkestra-btn-disabled-color: #68707c;
   --orkestra-btn-disabled-bg: transparent;
-  --orkestra-btn-disabled-border-color: #748194;
+  --orkestra-btn-disabled-border-color: #68707c;
   --orkestra-gradient: none;
 }
 
@@ -4269,36 +4273,36 @@ fieldset:disabled .tox .tox-dialog__footer .tox-button--secondary,
 }
 
 .btn-outline-light {
-  --orkestra-btn-color: #f9fafd;
-  --orkestra-btn-border-color: #f9fafd;
-  --orkestra-btn-hover-color: #4d5969;
-  --orkestra-btn-hover-bg: #f9fafd;
-  --orkestra-btn-hover-border-color: #f9fafd;
-  --orkestra-btn-focus-shadow-rgb: 249, 250, 253;
-  --orkestra-btn-active-color: #4d5969;
-  --orkestra-btn-active-bg: #f9fafd;
-  --orkestra-btn-active-border-color: #f9fafd;
+  --orkestra-btn-color: #f9fafb;
+  --orkestra-btn-border-color: #f9fafb;
+  --orkestra-btn-hover-color: #333a45;
+  --orkestra-btn-hover-bg: #f9fafb;
+  --orkestra-btn-hover-border-color: #f9fafb;
+  --orkestra-btn-focus-shadow-rgb: 249, 250, 251;
+  --orkestra-btn-active-color: #333a45;
+  --orkestra-btn-active-bg: #f9fafb;
+  --orkestra-btn-active-border-color: #f9fafb;
   --orkestra-btn-active-shadow: inset 0 3px 5px rgba(0, 0, 0, 0.125);
-  --orkestra-btn-disabled-color: #f9fafd;
+  --orkestra-btn-disabled-color: #f9fafb;
   --orkestra-btn-disabled-bg: transparent;
-  --orkestra-btn-disabled-border-color: #f9fafd;
+  --orkestra-btn-disabled-border-color: #f9fafb;
   --orkestra-gradient: none;
 }
 
 .btn-outline-dark {
-  --orkestra-btn-color: #0b1727;
-  --orkestra-btn-border-color: #0b1727;
+  --orkestra-btn-color: #0f141c;
+  --orkestra-btn-border-color: #0f141c;
   --orkestra-btn-hover-color: #fff;
-  --orkestra-btn-hover-bg: #0b1727;
-  --orkestra-btn-hover-border-color: #0b1727;
-  --orkestra-btn-focus-shadow-rgb: 11, 23, 39;
+  --orkestra-btn-hover-bg: #0f141c;
+  --orkestra-btn-hover-border-color: #0f141c;
+  --orkestra-btn-focus-shadow-rgb: 15, 20, 28;
   --orkestra-btn-active-color: #fff;
-  --orkestra-btn-active-bg: #0b1727;
-  --orkestra-btn-active-border-color: #0b1727;
+  --orkestra-btn-active-bg: #0f141c;
+  --orkestra-btn-active-border-color: #0f141c;
   --orkestra-btn-active-shadow: inset 0 3px 5px rgba(0, 0, 0, 0.125);
-  --orkestra-btn-disabled-color: #0b1727;
+  --orkestra-btn-disabled-color: #0f141c;
   --orkestra-btn-disabled-bg: transparent;
-  --orkestra-btn-disabled-border-color: #0b1727;
+  --orkestra-btn-disabled-border-color: #0f141c;
   --orkestra-gradient: none;
 }
 
@@ -4311,10 +4315,10 @@ fieldset:disabled .tox .tox-dialog__footer .tox-button--secondary,
   --orkestra-btn-hover-border-color: transparent;
   --orkestra-btn-active-color: var(--orkestra-link-hover-color);
   --orkestra-btn-active-border-color: transparent;
-  --orkestra-btn-disabled-color: #748194;
+  --orkestra-btn-disabled-color: #68707c;
   --orkestra-btn-disabled-border-color: transparent;
   --orkestra-btn-box-shadow: 0 0 0 #000;
-  --orkestra-btn-focus-shadow-rgb: 76, 143, 233;
+  --orkestra-btn-focus-shadow-rgb: 70, 127, 204;
   text-decoration: none;
 }
 .btn-link:hover, .btn-link:focus-visible {
@@ -4686,18 +4690,18 @@ fieldset:disabled .tox .tox-dialog__footer .tox-button--secondary,
 }
 
 .dropdown-menu-dark {
-  --orkestra-dropdown-color: #d8e2ef;
-  --orkestra-dropdown-bg: #4d5969;
+  --orkestra-dropdown-color: #dfe3e8;
+  --orkestra-dropdown-bg: #333a45;
   --orkestra-dropdown-border-color: var(--orkestra-border-color);
   --orkestra-dropdown-box-shadow: ;
-  --orkestra-dropdown-link-color: #d8e2ef;
+  --orkestra-dropdown-link-color: #dfe3e8;
   --orkestra-dropdown-link-hover-color: #fff;
   --orkestra-dropdown-divider-bg: var(--orkestra-border-color);
   --orkestra-dropdown-link-hover-bg: rgba(255, 255, 255, 0.15);
   --orkestra-dropdown-link-active-color: #fff;
   --orkestra-dropdown-link-active-bg: #2c7be5;
-  --orkestra-dropdown-link-disabled-color: #9da9bb;
-  --orkestra-dropdown-header-color: #9da9bb;
+  --orkestra-dropdown-link-disabled-color: #98a1ac;
+  --orkestra-dropdown-header-color: #98a1ac;
 }
 
 .btn-group,
@@ -4953,7 +4957,7 @@ fieldset:disabled .tox .tox-dialog__footer .tox-button--secondary,
   --orkestra-nav-tabs-border-width: var(--orkestra-border-width);
   --orkestra-nav-tabs-border-color: var(--orkestra-border-color);
   --orkestra-nav-tabs-border-radius: var(--orkestra-border-radius);
-  --orkestra-nav-tabs-link-hover-border-color: #edf2f9 #edf2f9 var(--orkestra-border-color);
+  --orkestra-nav-tabs-link-hover-border-color: #f2f4f6 #f2f4f6 var(--orkestra-border-color);
   --orkestra-nav-tabs-link-active-color: var(--orkestra-emphasis-color);
   --orkestra-nav-tabs-link-active-bg: var(--orkestra-body-bg);
   --orkestra-nav-tabs-link-active-border-color: var(--orkestra-border-color) var(--orkestra-border-color) var(--orkestra-body-bg);
@@ -5057,7 +5061,7 @@ fieldset:disabled .tox .tox-dialog__footer .tox-button--secondary,
   --orkestra-navbar-toggler-padding-y: 0.25rem;
   --orkestra-navbar-toggler-padding-x: 0.75rem;
   --orkestra-navbar-toggler-font-size: 1.2rem;
-  --orkestra-navbar-toggler-icon-bg: url("data:image/svg+xml;charset=utf8,%3Csvg viewBox='0 0 30 30' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath stroke='%239da9bb' stroke-width='2' stroke-linecap='round' stroke-miterlimit='10' d='M0 6h30M0 14h30M0 22h30'/%3E%3C/svg%3E");
+  --orkestra-navbar-toggler-icon-bg: url("data:image/svg+xml;charset=utf8,%3Csvg viewBox='0 0 30 30' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath stroke='%2398a1ac' stroke-width='2' stroke-linecap='round' stroke-miterlimit='10' d='M0 6h30M0 14h30M0 22h30'/%3E%3C/svg%3E");
   --orkestra-navbar-toggler-border-color: rgba(var(--orkestra-emphasis-color-rgb), 0.1);
   --orkestra-navbar-toggler-border-radius: var(--orkestra-border-radius);
   --orkestra-navbar-toggler-focus-width: 0;
@@ -5677,15 +5681,15 @@ fieldset:disabled .tox .tox-dialog__footer .tox-button--secondary,
   --orkestra-accordion-btn-padding-y: 1rem;
   --orkestra-accordion-btn-color: var(--orkestra-accordion-btn-color-global);
   --orkestra-accordion-btn-bg: var(--orkestra-accordion-bg);
-  --orkestra-accordion-btn-icon: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%235e6e82' stroke-linecap='round' stroke-linejoin='round'%3e%3cpath d='m2 5 6 6 6-6'/%3e%3c/svg%3e");
+  --orkestra-accordion-btn-icon: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23454c58' stroke-linecap='round' stroke-linejoin='round'%3e%3cpath d='m2 5 6 6 6-6'/%3e%3c/svg%3e");
   --orkestra-accordion-btn-icon-width: 1.25rem;
   --orkestra-accordion-btn-icon-transform: rotate(-180deg);
   --orkestra-accordion-btn-icon-transition: transform 0.2s ease-in-out;
-  --orkestra-accordion-btn-active-icon: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%235e6e82' stroke-linecap='round' stroke-linejoin='round'%3e%3cpath d='m2 5 6 6 6-6'/%3e%3c/svg%3e");
+  --orkestra-accordion-btn-active-icon: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23454c58' stroke-linecap='round' stroke-linejoin='round'%3e%3cpath d='m2 5 6 6 6-6'/%3e%3c/svg%3e");
   --orkestra-accordion-btn-focus-box-shadow: 0 0 0 0.25rem rgba(44, 123, 229, 0.25);
   --orkestra-accordion-body-padding-x: 1.25rem;
   --orkestra-accordion-body-padding-y: 1rem;
-  --orkestra-accordion-active-color: rgb(39.6, 110.7, 206.1);
+  --orkestra-accordion-active-color: rgb(15.5294117647%, 43.4117647059%, 80.8235294118%);
   --orkestra-accordion-active-bg: var(--orkestra-emphasis-bg);
 }
 
@@ -5808,9 +5812,9 @@ fieldset:disabled .tox .tox-dialog__footer .tox-button--secondary,
   --orkestra-breadcrumb-margin-bottom: 0;
   --orkestra-breadcrumb-bg: transparent;
   --orkestra-breadcrumb-border-radius: ;
-  --orkestra-breadcrumb-divider-color: #748194;
+  --orkestra-breadcrumb-divider-color: #68707c;
   --orkestra-breadcrumb-item-padding-x: 0.5rem;
-  --orkestra-breadcrumb-item-active-color: #748194;
+  --orkestra-breadcrumb-item-active-color: #68707c;
   display: flex;
   flex-wrap: wrap;
   padding: var(--orkestra-breadcrumb-padding-y) var(--orkestra-breadcrumb-padding-x);
@@ -6986,7 +6990,7 @@ fieldset:disabled .tox .tox-dialog__footer .tox-button--secondary,
   --orkestra-popover-header-bg: var(--orkestra-popover-header-bg-global);
   --orkestra-popover-body-padding-x: 1rem;
   --orkestra-popover-body-padding-y: 1rem;
-  --orkestra-popover-body-color: #5e6e82;
+  --orkestra-popover-body-color: #454c58;
   --orkestra-popover-arrow-width: 1rem;
   --orkestra-popover-arrow-height: 0.5rem;
   --orkestra-popover-arrow-border: var(--orkestra-popover-border-color);
@@ -7985,7 +7989,7 @@ fieldset:disabled .tox .tox-dialog__footer .tox-button--secondary,
 }
 
 .text-bg-light {
-  color: #4d5969 !important;
+  color: #333a45 !important;
   background-color: RGBA(var(--orkestra-light-rgb), var(--orkestra-bg-opacity, 1)) !important;
 }
 
@@ -8008,8 +8012,8 @@ fieldset:disabled .tox .tox-dialog__footer .tox-button--secondary,
   text-decoration-color: RGBA(var(--orkestra-secondary-rgb), var(--orkestra-link-underline-opacity, 1)) !important;
 }
 .link-secondary:hover, .link-secondary:focus {
-  color: RGBA(93, 103, 118, var(--orkestra-link-opacity, 1)) !important;
-  text-decoration-color: RGBA(93, 103, 118, var(--orkestra-link-underline-opacity, 1)) !important;
+  color: RGBA(83, 90, 99, var(--orkestra-link-opacity, 1)) !important;
+  text-decoration-color: RGBA(83, 90, 99, var(--orkestra-link-underline-opacity, 1)) !important;
 }
 
 .link-success {
@@ -8053,8 +8057,8 @@ fieldset:disabled .tox .tox-dialog__footer .tox-button--secondary,
   text-decoration-color: RGBA(var(--orkestra-light-rgb), var(--orkestra-link-underline-opacity, 1)) !important;
 }
 .link-light:hover, .link-light:focus {
-  color: RGBA(250, 251, 253, var(--orkestra-link-opacity, 1)) !important;
-  text-decoration-color: RGBA(250, 251, 253, var(--orkestra-link-underline-opacity, 1)) !important;
+  color: RGBA(250, 251, 252, var(--orkestra-link-opacity, 1)) !important;
+  text-decoration-color: RGBA(250, 251, 252, var(--orkestra-link-underline-opacity, 1)) !important;
 }
 
 .link-dark {
@@ -8062,8 +8066,8 @@ fieldset:disabled .tox .tox-dialog__footer .tox-button--secondary,
   text-decoration-color: RGBA(var(--orkestra-dark-rgb), var(--orkestra-link-underline-opacity, 1)) !important;
 }
 .link-dark:hover, .link-dark:focus {
-  color: RGBA(9, 18, 31, var(--orkestra-link-opacity, 1)) !important;
-  text-decoration-color: RGBA(9, 18, 31, var(--orkestra-link-underline-opacity, 1)) !important;
+  color: RGBA(12, 16, 22, var(--orkestra-link-opacity, 1)) !important;
+  text-decoration-color: RGBA(12, 16, 22, var(--orkestra-link-underline-opacity, 1)) !important;
 }
 
 .link-body-emphasis {
@@ -19815,6 +19819,25 @@ samp {
   box-shadow: var(--orkestra-btn-orkestra-box-shadow) !important;
 }
 
+[data-bs-theme=dark] .btn-tertiary, [data-bs-theme=dark] .tox .tox-menu__footer .tox-button--secondary, .tox .tox-menu__footer [data-bs-theme=dark] .tox-button--secondary,
+[data-bs-theme=dark] .tox .tox-dialog__footer .tox-button--secondary,
+.tox .tox-dialog__footer [data-bs-theme=dark] .tox-button--secondary {
+  --orkestra-btn-color: #fff;
+  --orkestra-btn-bg: #0b1727;
+  --orkestra-btn-border-color: #0b1727;
+  --orkestra-btn-hover-color: #fff;
+  --orkestra-btn-hover-bg: rgb(18.6666666667%, 22.6666666667%, 28%);
+  --orkestra-btn-hover-border-color: rgb(13.8823529412%, 18.1176470588%, 23.7647058824%);
+  --orkestra-btn-focus-shadow-rgb: 48, 58, 71;
+  --orkestra-btn-active-color: #fff;
+  --orkestra-btn-active-bg: rgb(23.4509803922%, 27.2156862745%, 32.2352941176%);
+  --orkestra-btn-active-border-color: rgb(13.8823529412%, 18.1176470588%, 23.7647058824%);
+  --orkestra-btn-active-shadow: inset 0 3px 5px rgba(0, 0, 0, 0.125);
+  --orkestra-btn-disabled-color: #fff;
+  --orkestra-btn-disabled-bg: #0b1727;
+  --orkestra-btn-disabled-border-color: #0b1727;
+}
+
 /*-----------------------------------------------
 |   Brand Outline Buttons
 -----------------------------------------------*/
@@ -19931,6 +19954,12 @@ samp {
   box-shadow: var(--orkestra-btn-box-shadow);
 }
 
+.btn-primary, .tox .tox-menu__footer .tox-button:last-child,
+.tox .tox-dialog__footer .tox-button:last-child {
+  --orkestra-btn-bg: rgb(15.5294117647%, 43.4117647059%, 80.8235294118%);
+  --orkestra-btn-border-color: rgb(15.5294117647%, 43.4117647059%, 80.8235294118%);
+}
+
 /*-----------------------------------------------
 |   Documentation link and Prism
 -----------------------------------------------*/
@@ -19959,7 +19988,7 @@ code.language-html:first-child {
 code[class*=language-],
 pre[class*=language-] {
   color: var(--orkestra-gray-300) !important;
-  background-color: #232e3c !important;
+  background-color: #1a202a !important;
   font-family: "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace !important;
 }
 
@@ -21021,7 +21050,7 @@ canvas.chartjs-responsive {
   background-color: rgb(230, 239, 252);
 }
 .fc .fc-h-event .fc-event-main {
-  color: rgb(24.3544303797, 98.3544303797, 197.6455696203);
+  color: rgb(9.5507570117%, 38.5703648548%, 77.5080665177%);
 }
 .fc .fc-h-event .fc-event-time,
 .fc .fc-h-event .fc-event-title {
@@ -21044,7 +21073,7 @@ canvas.chartjs-responsive {
   color: #fff;
 }
 .fc .fc-day-today:not(.fc-popover) .fc-daygrid-day-number:hover, .fc .fc-day-today:not(.fc-popover) .fc-daygrid-day-number:focus {
-  background-color: rgb(24.3544303797, 98.3544303797, 197.6455696203) !important;
+  background-color: rgb(9.5507570117%, 38.5703648548%, 77.5080665177%) !important;
 }
 .fc.fc-direction-rtl .fc-daygrid-event.fc-event-start, .fc.fc-direction-rtl .fc-daygrid-event.fc-event-end, .fc.fc-direction-ltr .fc-daygrid-event.fc-event-start, .fc.fc-direction-ltr .fc-daygrid-event.fc-event-end {
   margin-left: 0;
@@ -21052,7 +21081,7 @@ canvas.chartjs-responsive {
 }
 .fc .fc-popover {
   border-color: var(--orkestra-border-color);
-  box-shadow: 0 7px 14px 0 rgba(65, 69, 88, 0.1), 0 3px 6px 0 rgba(0, 0, 0, 0.07);
+  box-shadow: 0 7px 14px 0 rgba(50, 58, 70, 0.1), 0 3px 6px 0 rgba(0, 0, 0, 0.07);
   border-radius: var(--orkestra-border-radius-lg);
   z-index: 1050;
 }
@@ -21183,42 +21212,42 @@ canvas.chartjs-responsive {
 }
 
 .bg-primary-subtle .fc-event-main, .fc-timegrid .event-bg-primary-subtle .fc-event-main {
-  color: rgb(24.3544303797, 98.3544303797, 197.6455696203) !important;
+  color: rgb(9.5507570117%, 38.5703648548%, 77.5080665177%) !important;
 }
 .bg-primary-subtle .fc-event-main:after, .fc-timegrid .event-bg-primary-subtle .fc-event-main:after {
-  background-color: rgb(24.3544303797, 98.3544303797, 197.6455696203) !important;
+  background-color: rgb(9.5507570117%, 38.5703648548%, 77.5080665177%) !important;
 }
 .bg-primary-subtle .fc-list-event-time, .fc-timegrid .event-bg-primary-subtle .fc-list-event-time,
 .bg-primary-subtle .fc-list-event-title,
 .fc-timegrid .event-bg-primary-subtle .fc-list-event-title {
-  color: rgb(24.3544303797, 98.3544303797, 197.6455696203) !important;
+  color: rgb(9.5507570117%, 38.5703648548%, 77.5080665177%) !important;
   font-weight: 600 !important;
 }
 .bg-primary-subtle .fc-list-event-dot, .fc-timegrid .event-bg-primary-subtle .fc-list-event-dot {
-  border-color: rgb(24.3544303797, 98.3544303797, 197.6455696203);
+  border-color: rgb(9.5507570117%, 38.5703648548%, 77.5080665177%);
 }
 
 .fc-timegrid .event-bg-secondary-subtle {
   border: 0 !important;
 }
 .fc-timegrid .event-bg-secondary-subtle .fc-event-main:after {
-  background-color: #748194 !important;
+  background-color: #68707c !important;
 }
 
 .bg-secondary-subtle .fc-event-main, .fc-timegrid .event-bg-secondary-subtle .fc-event-main {
-  color: rgb(92.6463414634, 103.9024390244, 120.3536585366) !important;
+  color: rgb(31.6615067079%, 34.0970072239%, 37.7502579979%) !important;
 }
 .bg-secondary-subtle .fc-event-main:after, .fc-timegrid .event-bg-secondary-subtle .fc-event-main:after {
-  background-color: rgb(92.6463414634, 103.9024390244, 120.3536585366) !important;
+  background-color: rgb(31.6615067079%, 34.0970072239%, 37.7502579979%) !important;
 }
 .bg-secondary-subtle .fc-list-event-time, .fc-timegrid .event-bg-secondary-subtle .fc-list-event-time,
 .bg-secondary-subtle .fc-list-event-title,
 .fc-timegrid .event-bg-secondary-subtle .fc-list-event-title {
-  color: rgb(92.6463414634, 103.9024390244, 120.3536585366) !important;
+  color: rgb(31.6615067079%, 34.0970072239%, 37.7502579979%) !important;
   font-weight: 600 !important;
 }
 .bg-secondary-subtle .fc-list-event-dot, .fc-timegrid .event-bg-secondary-subtle .fc-list-event-dot {
-  border-color: rgb(92.6463414634, 103.9024390244, 120.3536585366);
+  border-color: rgb(31.6615067079%, 34.0970072239%, 37.7502579979%);
 }
 
 .fc-timegrid .event-bg-success-subtle {
@@ -21229,19 +21258,19 @@ canvas.chartjs-responsive {
 }
 
 .bg-success-subtle .fc-event-main, .fc-timegrid .event-bg-success-subtle .fc-event-main {
-  color: rgb(0, 159, 92.3714285714) !important;
+  color: rgb(0%, 62.3529411765%, 36.2240896359%) !important;
 }
 .bg-success-subtle .fc-event-main:after, .fc-timegrid .event-bg-success-subtle .fc-event-main:after {
-  background-color: rgb(0, 159, 92.3714285714) !important;
+  background-color: rgb(0%, 62.3529411765%, 36.2240896359%) !important;
 }
 .bg-success-subtle .fc-list-event-time, .fc-timegrid .event-bg-success-subtle .fc-list-event-time,
 .bg-success-subtle .fc-list-event-title,
 .fc-timegrid .event-bg-success-subtle .fc-list-event-title {
-  color: rgb(0, 159, 92.3714285714) !important;
+  color: rgb(0%, 62.3529411765%, 36.2240896359%) !important;
   font-weight: 600 !important;
 }
 .bg-success-subtle .fc-list-event-dot, .fc-timegrid .event-bg-success-subtle .fc-list-event-dot {
-  border-color: rgb(0, 159, 92.3714285714);
+  border-color: rgb(0%, 62.3529411765%, 36.2240896359%);
 }
 
 .fc-timegrid .event-bg-info-subtle {
@@ -21252,19 +21281,19 @@ canvas.chartjs-responsive {
 }
 
 .bg-info-subtle .fc-event-main, .fc-timegrid .event-bg-info-subtle .fc-event-main {
-  color: rgb(2.2110091743, 166.9311926606, 238.7889908257) !important;
+  color: rgb(0.8670624213%, 65.4632128081%, 93.6427415003%) !important;
 }
 .bg-info-subtle .fc-event-main:after, .fc-timegrid .event-bg-info-subtle .fc-event-main:after {
-  background-color: rgb(2.2110091743, 166.9311926606, 238.7889908257) !important;
+  background-color: rgb(0.8670624213%, 65.4632128081%, 93.6427415003%) !important;
 }
 .bg-info-subtle .fc-list-event-time, .fc-timegrid .event-bg-info-subtle .fc-list-event-time,
 .bg-info-subtle .fc-list-event-title,
 .fc-timegrid .event-bg-info-subtle .fc-list-event-title {
-  color: rgb(2.2110091743, 166.9311926606, 238.7889908257) !important;
+  color: rgb(0.8670624213%, 65.4632128081%, 93.6427415003%) !important;
   font-weight: 600 !important;
 }
 .bg-info-subtle .fc-list-event-dot, .fc-timegrid .event-bg-info-subtle .fc-list-event-dot {
-  border-color: rgb(2.2110091743, 166.9311926606, 238.7889908257);
+  border-color: rgb(0.8670624213%, 65.4632128081%, 93.6427415003%);
 }
 
 .fc-timegrid .event-bg-warning-subtle {
@@ -21275,19 +21304,19 @@ canvas.chartjs-responsive {
 }
 
 .bg-warning-subtle .fc-event-main, .fc-timegrid .event-bg-warning-subtle .fc-event-main {
-  color: rgb(242.4876847291, 96.0935960591, 13.5123152709) !important;
+  color: rgb(95.0932096977%, 37.6837631604%, 5.2989471651%) !important;
 }
 .bg-warning-subtle .fc-event-main:after, .fc-timegrid .event-bg-warning-subtle .fc-event-main:after {
-  background-color: rgb(242.4876847291, 96.0935960591, 13.5123152709) !important;
+  background-color: rgb(95.0932096977%, 37.6837631604%, 5.2989471651%) !important;
 }
 .bg-warning-subtle .fc-list-event-time, .fc-timegrid .event-bg-warning-subtle .fc-list-event-time,
 .bg-warning-subtle .fc-list-event-title,
 .fc-timegrid .event-bg-warning-subtle .fc-list-event-title {
-  color: rgb(242.4876847291, 96.0935960591, 13.5123152709) !important;
+  color: rgb(95.0932096977%, 37.6837631604%, 5.2989471651%) !important;
   font-weight: 600 !important;
 }
 .bg-warning-subtle .fc-list-event-dot, .fc-timegrid .event-bg-warning-subtle .fc-list-event-dot {
-  border-color: rgb(242.4876847291, 96.0935960591, 13.5123152709);
+  border-color: rgb(95.0932096977%, 37.6837631604%, 5.2989471651%);
 }
 
 .fc-timegrid .event-bg-danger-subtle {
@@ -21298,49 +21327,49 @@ canvas.chartjs-responsive {
 }
 
 .bg-danger-subtle .fc-event-main, .fc-timegrid .event-bg-danger-subtle .fc-event-main {
-  color: rgb(208, 26, 59.28) !important;
+  color: rgb(81.568627451%, 10.1960784314%, 23.2470588235%) !important;
 }
 .bg-danger-subtle .fc-event-main:after, .fc-timegrid .event-bg-danger-subtle .fc-event-main:after {
-  background-color: rgb(208, 26, 59.28) !important;
+  background-color: rgb(81.568627451%, 10.1960784314%, 23.2470588235%) !important;
 }
 .bg-danger-subtle .fc-list-event-time, .fc-timegrid .event-bg-danger-subtle .fc-list-event-time,
 .bg-danger-subtle .fc-list-event-title,
 .fc-timegrid .event-bg-danger-subtle .fc-list-event-title {
-  color: rgb(208, 26, 59.28) !important;
+  color: rgb(81.568627451%, 10.1960784314%, 23.2470588235%) !important;
   font-weight: 600 !important;
 }
 .bg-danger-subtle .fc-list-event-dot, .fc-timegrid .event-bg-danger-subtle .fc-list-event-dot {
-  border-color: rgb(208, 26, 59.28);
+  border-color: rgb(81.568627451%, 10.1960784314%, 23.2470588235%);
 }
 
 .fc-timegrid .event-bg-light-subtle {
   border: 0 !important;
 }
 .fc-timegrid .event-bg-light-subtle .fc-event-main:after {
-  background-color: #f9fafd !important;
+  background-color: #f9fafb !important;
 }
 
 .bg-light-subtle .fc-event-main, .fc-timegrid .event-bg-light-subtle .fc-event-main {
-  color: rgb(210.75, 218.125, 240.25) !important;
+  color: rgb(85.6470588235%, 88.0392156863%, 90.431372549%) !important;
 }
 .bg-light-subtle .fc-event-main:after, .fc-timegrid .event-bg-light-subtle .fc-event-main:after {
-  background-color: rgb(210.75, 218.125, 240.25) !important;
+  background-color: rgb(85.6470588235%, 88.0392156863%, 90.431372549%) !important;
 }
 .bg-light-subtle .fc-list-event-time, .fc-timegrid .event-bg-light-subtle .fc-list-event-time,
 .bg-light-subtle .fc-list-event-title,
 .fc-timegrid .event-bg-light-subtle .fc-list-event-title {
-  color: rgb(210.75, 218.125, 240.25) !important;
+  color: rgb(85.6470588235%, 88.0392156863%, 90.431372549%) !important;
   font-weight: 600 !important;
 }
 .bg-light-subtle .fc-list-event-dot, .fc-timegrid .event-bg-light-subtle .fc-list-event-dot {
-  border-color: rgb(210.75, 218.125, 240.25);
+  border-color: rgb(85.6470588235%, 88.0392156863%, 90.431372549%);
 }
 
 .fc-timegrid .event-bg-dark-subtle {
   border: 0 !important;
 }
 .fc-timegrid .event-bg-dark-subtle .fc-event-main:after {
-  background-color: #0b1727 !important;
+  background-color: #0f141c !important;
 }
 
 .bg-dark-subtle .fc-event-main, .fc-timegrid .event-bg-dark-subtle .fc-event-main {
@@ -22252,12 +22281,12 @@ button.gm-ui-hover-effect > span {
 .orkestra-react-range .orkestra-react-range-thumb::after, .orkestra-react-range .orkestra-react-range-thumb::before {
   position: absolute;
   content: "";
-  background: #d8e2ef;
+  background: #dfe3e8;
   height: 10px;
   width: 1px;
 }
 .orkestra-react-range .orkestra-react-range-thumb:hover {
-  background: #f9fafd;
+  background: #f9fafb;
 }
 .orkestra-react-range .orkestra-react-range-thumb:hover .orkestra-react-range-tooltip {
   display: block;
@@ -22369,6 +22398,10 @@ html[data-bs-theme=dark] .orkestra-react-range .orkestra-react-range-thumb .orke
 .table .dropstart,
 .table .dropend {
   position: static;
+}
+.table thead > tr > th {
+  background-color: var(--orkestra-table-head-bg);
+  color: var(--orkestra-gray-900);
 }
 
 .white-space-nowrap {
@@ -22928,8 +22961,8 @@ h5, .h5 {
   right: 5px;
   height: 0.4rem;
   width: 0.4rem;
-  border-right: 1px solid #5e6e82;
-  border-bottom: 1px solid #5e6e82;
+  border-right: 1px solid #454c58;
+  border-bottom: 1px solid #454c58;
   top: 50%;
   transform: translateY(-50%) rotate(45deg);
   transition: all 0.2s ease-in-out;
@@ -23111,7 +23144,7 @@ h5, .h5 {
 }
 .navbar-vertical.navbar-card .navbar-collapse {
   background-color: var(--orkestra-navbar-vertical-card-bg-color);
-  box-shadow: 0 7px 14px 0 rgba(65, 69, 88, 0.1), 0 3px 6px 0 rgba(0, 0, 0, 0.07) !important;
+  box-shadow: 0 7px 14px 0 rgba(50, 58, 70, 0.1), 0 3px 6px 0 rgba(0, 0, 0, 0.07) !important;
 }
 .navbar-vertical.navbar-card .navbar-nav .nav-item .navbar-vertical-label-wrapper {
   min-height: 1.125rem;
@@ -24477,14 +24510,14 @@ html[dir=rtl] .img-dropdown {
 }
 .theme-control-dropdown .dropdown-menu .dropdown-item.active {
   color: var(--orkestra-gray-900);
-  background-color: #edf2f9;
+  background-color: #f2f4f6;
 }
 .theme-control-dropdown .dropdown-menu .dropdown-item:not(.active) .dropdown-check-icon {
   display: none;
 }
 
 .navbar-standard .theme-control-dropdown .dropdown-toggle {
-  color: #9da9bb !important;
+  color: #98a1ac !important;
 }
 @media (max-width: 991.98px) {
   .navbar-standard .theme-control-dropdown .dropdown-menu {
@@ -25273,7 +25306,7 @@ html[dir=rtl] .rtl-row-reverse {
   border: 0.125rem solid rgba(var(--orkestra-danger-rgb), 0.3);
   border-top: 0;
   border-radius: 0 0 0.375rem 0.375rem;
-  color: #9da9bb;
+  color: #98a1ac;
   font-weight: 700;
 }
 
@@ -25694,7 +25727,7 @@ a[href].bg-200:hover, a[href].bg-200:focus {
 |  Back to top button
 -----------------------------------------------*/
 .btn-back-to-top {
-  background-color: #0b1727;
+  background-color: #0f141c;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -25832,16 +25865,16 @@ label {
   background-color: #2c7be5;
 }
 .form-check-input-secondary {
-  border-color: #748194 !important;
+  border-color: #68707c !important;
 }
 .form-check-input-secondary:focus {
-  box-shadow: 0 0 0 0.25rem rgba(116, 129, 148, 0.25);
+  box-shadow: 0 0 0 0.25rem rgba(104, 112, 124, 0.25);
 }
 .form-check-input-secondary:checked {
-  background-color: #748194 !important;
+  background-color: #68707c !important;
 }
 .form-check-input-secondary.orkestra-form-check-input {
-  background-color: #748194 !important;
+  background-color: #68707c !important;
 }
 .form-check-input.orkestra-form-check-input {
   background-color: #2c7be5;
@@ -25907,31 +25940,31 @@ label {
   background-color: #2c7be5;
 }
 .form-check-input-light {
-  border-color: #f9fafd !important;
+  border-color: #f9fafb !important;
 }
 .form-check-input-light:focus {
-  box-shadow: 0 0 0 0.25rem rgba(249, 250, 253, 0.25);
+  box-shadow: 0 0 0 0.25rem rgba(249, 250, 251, 0.25);
 }
 .form-check-input-light:checked {
-  background-color: #f9fafd !important;
+  background-color: #f9fafb !important;
 }
 .form-check-input-light.orkestra-form-check-input {
-  background-color: #f9fafd !important;
+  background-color: #f9fafb !important;
 }
 .form-check-input.orkestra-form-check-input {
   background-color: #2c7be5;
 }
 .form-check-input-dark {
-  border-color: #0b1727 !important;
+  border-color: #0f141c !important;
 }
 .form-check-input-dark:focus {
-  box-shadow: 0 0 0 0.25rem rgba(11, 23, 39, 0.25);
+  box-shadow: 0 0 0 0.25rem rgba(15, 20, 28, 0.25);
 }
 .form-check-input-dark:checked {
-  background-color: #0b1727 !important;
+  background-color: #0f141c !important;
 }
 .form-check-input-dark.orkestra-form-check-input {
-  background-color: #0b1727 !important;
+  background-color: #0f141c !important;
 }
 .form-check-input.orkestra-form-check-input {
   background-color: #2c7be5;
@@ -25945,7 +25978,7 @@ label {
   transition: all 0.2s ease-in-out;
 }
 .form-check-line-through:checked + label {
-  color: #9da9bb;
+  color: #98a1ac;
   text-decoration: line-through;
 }
 
@@ -26450,7 +26483,7 @@ option:disabled {
   position: absolute;
   top: 50%;
   transform: translateY(-50%);
-  color: #b6c1d2;
+  color: #bcc3cc;
   font-size: 0.8333333333rem;
   left: 1rem;
 }
@@ -26811,7 +26844,7 @@ button.btn-circle {
   width: 2.5rem;
   height: 2.5rem;
   padding: 0;
-  background-color: #edf2f9;
+  background-color: #f2f4f6;
   text-shadow: none;
   border-radius: 50%;
   box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
@@ -26819,7 +26852,7 @@ button.btn-circle {
 }
 button.btn-circle:hover, button.btn-circle:focus {
   opacity: 1 !important;
-  background-color: #d8e2ef;
+  background-color: #dfe3e8;
 }
 
 .icon-title {
@@ -27065,7 +27098,7 @@ div[data-collapse] + .kanban-item,
   color: #2c7be5 !important;
 }
 [data-bs-theme=dark] .dark__bg-card-dark {
-  background-color: rgb(18.076, 29.728, 45.264) !important;
+  background-color: rgb(7.088627451%, 11.6580392157%, 17.7505882353%) !important;
 }
 [data-bs-theme=dark] .dark__bg-secondary {
   background-color: #748194 !important;
@@ -27074,7 +27107,7 @@ div[data-collapse] + .kanban-item,
   color: #748194 !important;
 }
 [data-bs-theme=dark] .dark__bg-card-dark {
-  background-color: rgb(18.076, 29.728, 45.264) !important;
+  background-color: rgb(7.088627451%, 11.6580392157%, 17.7505882353%) !important;
 }
 [data-bs-theme=dark] .dark__bg-success {
   background-color: #00d27a !important;
@@ -27083,7 +27116,7 @@ div[data-collapse] + .kanban-item,
   color: #00d27a !important;
 }
 [data-bs-theme=dark] .dark__bg-card-dark {
-  background-color: rgb(18.076, 29.728, 45.264) !important;
+  background-color: rgb(7.088627451%, 11.6580392157%, 17.7505882353%) !important;
 }
 [data-bs-theme=dark] .dark__bg-info {
   background-color: #27bcfd !important;
@@ -27092,7 +27125,7 @@ div[data-collapse] + .kanban-item,
   color: #27bcfd !important;
 }
 [data-bs-theme=dark] .dark__bg-card-dark {
-  background-color: rgb(18.076, 29.728, 45.264) !important;
+  background-color: rgb(7.088627451%, 11.6580392157%, 17.7505882353%) !important;
 }
 [data-bs-theme=dark] .dark__bg-warning {
   background-color: #f5803e !important;
@@ -27101,7 +27134,7 @@ div[data-collapse] + .kanban-item,
   color: #f5803e !important;
 }
 [data-bs-theme=dark] .dark__bg-card-dark {
-  background-color: rgb(18.076, 29.728, 45.264) !important;
+  background-color: rgb(7.088627451%, 11.6580392157%, 17.7505882353%) !important;
 }
 [data-bs-theme=dark] .dark__bg-danger {
   background-color: #e63757 !important;
@@ -27110,7 +27143,7 @@ div[data-collapse] + .kanban-item,
   color: #e63757 !important;
 }
 [data-bs-theme=dark] .dark__bg-card-dark {
-  background-color: rgb(18.076, 29.728, 45.264) !important;
+  background-color: rgb(7.088627451%, 11.6580392157%, 17.7505882353%) !important;
 }
 [data-bs-theme=dark] .dark__bg-light {
   background-color: #f9fafd !important;
@@ -27119,7 +27152,7 @@ div[data-collapse] + .kanban-item,
   color: #f9fafd !important;
 }
 [data-bs-theme=dark] .dark__bg-card-dark {
-  background-color: rgb(18.076, 29.728, 45.264) !important;
+  background-color: rgb(7.088627451%, 11.6580392157%, 17.7505882353%) !important;
 }
 [data-bs-theme=dark] .dark__bg-dark {
   background-color: #0b1727 !important;
@@ -27128,7 +27161,7 @@ div[data-collapse] + .kanban-item,
   color: #0b1727 !important;
 }
 [data-bs-theme=dark] .dark__bg-card-dark {
-  background-color: rgb(18.076, 29.728, 45.264) !important;
+  background-color: rgb(7.088627451%, 11.6580392157%, 17.7505882353%) !important;
 }
 [data-bs-theme=dark] .dark__bg-100 {
   background-color: #f9fafd !important;
@@ -27137,7 +27170,7 @@ div[data-collapse] + .kanban-item,
   color: #f9fafd !important;
 }
 [data-bs-theme=dark] .dark__bg-card-dark {
-  background-color: rgb(18.076, 29.728, 45.264) !important;
+  background-color: rgb(7.088627451%, 11.6580392157%, 17.7505882353%) !important;
 }
 [data-bs-theme=dark] .dark__bg-200 {
   background-color: #edf2f9 !important;
@@ -27146,7 +27179,7 @@ div[data-collapse] + .kanban-item,
   color: #edf2f9 !important;
 }
 [data-bs-theme=dark] .dark__bg-card-dark {
-  background-color: rgb(18.076, 29.728, 45.264) !important;
+  background-color: rgb(7.088627451%, 11.6580392157%, 17.7505882353%) !important;
 }
 [data-bs-theme=dark] .dark__bg-300 {
   background-color: #d8e2ef !important;
@@ -27155,7 +27188,7 @@ div[data-collapse] + .kanban-item,
   color: #d8e2ef !important;
 }
 [data-bs-theme=dark] .dark__bg-card-dark {
-  background-color: rgb(18.076, 29.728, 45.264) !important;
+  background-color: rgb(7.088627451%, 11.6580392157%, 17.7505882353%) !important;
 }
 [data-bs-theme=dark] .dark__bg-400 {
   background-color: #b6c1d2 !important;
@@ -27164,7 +27197,7 @@ div[data-collapse] + .kanban-item,
   color: #b6c1d2 !important;
 }
 [data-bs-theme=dark] .dark__bg-card-dark {
-  background-color: rgb(18.076, 29.728, 45.264) !important;
+  background-color: rgb(7.088627451%, 11.6580392157%, 17.7505882353%) !important;
 }
 [data-bs-theme=dark] .dark__bg-500 {
   background-color: #9da9bb !important;
@@ -27173,7 +27206,7 @@ div[data-collapse] + .kanban-item,
   color: #9da9bb !important;
 }
 [data-bs-theme=dark] .dark__bg-card-dark {
-  background-color: rgb(18.076, 29.728, 45.264) !important;
+  background-color: rgb(7.088627451%, 11.6580392157%, 17.7505882353%) !important;
 }
 [data-bs-theme=dark] .dark__bg-600 {
   background-color: #748194 !important;
@@ -27182,7 +27215,7 @@ div[data-collapse] + .kanban-item,
   color: #748194 !important;
 }
 [data-bs-theme=dark] .dark__bg-card-dark {
-  background-color: rgb(18.076, 29.728, 45.264) !important;
+  background-color: rgb(7.088627451%, 11.6580392157%, 17.7505882353%) !important;
 }
 [data-bs-theme=dark] .dark__bg-700 {
   background-color: #5e6e82 !important;
@@ -27191,7 +27224,7 @@ div[data-collapse] + .kanban-item,
   color: #5e6e82 !important;
 }
 [data-bs-theme=dark] .dark__bg-card-dark {
-  background-color: rgb(18.076, 29.728, 45.264) !important;
+  background-color: rgb(7.088627451%, 11.6580392157%, 17.7505882353%) !important;
 }
 [data-bs-theme=dark] .dark__bg-800 {
   background-color: #4d5969 !important;
@@ -27200,7 +27233,7 @@ div[data-collapse] + .kanban-item,
   color: #4d5969 !important;
 }
 [data-bs-theme=dark] .dark__bg-card-dark {
-  background-color: rgb(18.076, 29.728, 45.264) !important;
+  background-color: rgb(7.088627451%, 11.6580392157%, 17.7505882353%) !important;
 }
 [data-bs-theme=dark] .dark__bg-900 {
   background-color: #344050 !important;
@@ -27209,7 +27242,7 @@ div[data-collapse] + .kanban-item,
   color: #344050 !important;
 }
 [data-bs-theme=dark] .dark__bg-card-dark {
-  background-color: rgb(18.076, 29.728, 45.264) !important;
+  background-color: rgb(7.088627451%, 11.6580392157%, 17.7505882353%) !important;
 }
 [data-bs-theme=dark] .dark__bg-1000 {
   background-color: #232e3c !important;
@@ -27218,7 +27251,7 @@ div[data-collapse] + .kanban-item,
   color: #232e3c !important;
 }
 [data-bs-theme=dark] .dark__bg-card-dark {
-  background-color: rgb(18.076, 29.728, 45.264) !important;
+  background-color: rgb(7.088627451%, 11.6580392157%, 17.7505882353%) !important;
 }
 [data-bs-theme=dark] .dark__bg-1100 {
   background-color: #0b1727 !important;
@@ -27227,7 +27260,7 @@ div[data-collapse] + .kanban-item,
   color: #0b1727 !important;
 }
 [data-bs-theme=dark] .dark__bg-card-dark {
-  background-color: rgb(18.076, 29.728, 45.264) !important;
+  background-color: rgb(7.088627451%, 11.6580392157%, 17.7505882353%) !important;
 }
 [data-bs-theme=dark] .dark__bg-facebook {
   background-color: #3c5a99 !important;
@@ -27236,7 +27269,7 @@ div[data-collapse] + .kanban-item,
   color: #3c5a99 !important;
 }
 [data-bs-theme=dark] .dark__bg-card-dark {
-  background-color: rgb(18.076, 29.728, 45.264) !important;
+  background-color: rgb(7.088627451%, 11.6580392157%, 17.7505882353%) !important;
 }
 [data-bs-theme=dark] .dark__bg-google-plus {
   background-color: #dd4b39 !important;
@@ -27245,7 +27278,7 @@ div[data-collapse] + .kanban-item,
   color: #dd4b39 !important;
 }
 [data-bs-theme=dark] .dark__bg-card-dark {
-  background-color: rgb(18.076, 29.728, 45.264) !important;
+  background-color: rgb(7.088627451%, 11.6580392157%, 17.7505882353%) !important;
 }
 [data-bs-theme=dark] .dark__bg-twitter {
   background-color: #1da1f2 !important;
@@ -27254,7 +27287,7 @@ div[data-collapse] + .kanban-item,
   color: #1da1f2 !important;
 }
 [data-bs-theme=dark] .dark__bg-card-dark {
-  background-color: rgb(18.076, 29.728, 45.264) !important;
+  background-color: rgb(7.088627451%, 11.6580392157%, 17.7505882353%) !important;
 }
 [data-bs-theme=dark] .dark__bg-linkedin {
   background-color: #0077b5 !important;
@@ -27263,7 +27296,7 @@ div[data-collapse] + .kanban-item,
   color: #0077b5 !important;
 }
 [data-bs-theme=dark] .dark__bg-card-dark {
-  background-color: rgb(18.076, 29.728, 45.264) !important;
+  background-color: rgb(7.088627451%, 11.6580392157%, 17.7505882353%) !important;
 }
 [data-bs-theme=dark] .dark__bg-youtube {
   background-color: #ff0001 !important;
@@ -27272,7 +27305,7 @@ div[data-collapse] + .kanban-item,
   color: #ff0001 !important;
 }
 [data-bs-theme=dark] .dark__bg-card-dark {
-  background-color: rgb(18.076, 29.728, 45.264) !important;
+  background-color: rgb(7.088627451%, 11.6580392157%, 17.7505882353%) !important;
 }
 [data-bs-theme=dark] .dark__bg-github {
   background-color: #333333 !important;
@@ -27281,7 +27314,7 @@ div[data-collapse] + .kanban-item,
   color: #333333 !important;
 }
 [data-bs-theme=dark] .dark__bg-card-dark {
-  background-color: rgb(18.076, 29.728, 45.264) !important;
+  background-color: rgb(7.088627451%, 11.6580392157%, 17.7505882353%) !important;
 }
 [data-bs-theme=dark] .dark__bg-opacity-0 {
   --orkestra-bg-opacity: 0 !important;
@@ -27340,13 +27373,13 @@ div[data-collapse] + .kanban-item,
   box-shadow: 0 0 0 3px rgba(44, 123, 229, 0.3);
 }
 .recent-activity-timeline-secondary.recent-activity-timeline-past::after, .recent-activity-timeline-secondary.recent-activity-timeline-current::after {
-  background-color: #748194;
-  border-color: #748194;
+  background-color: #68707c;
+  border-color: #68707c;
 }
 .recent-activity-timeline-secondary.recent-activity-timeline-current::after {
   height: 0.5rem;
   width: 0.5rem;
-  box-shadow: 0 0 0 3px rgba(116, 129, 148, 0.3);
+  box-shadow: 0 0 0 3px rgba(104, 112, 124, 0.3);
 }
 .recent-activity-timeline-success.recent-activity-timeline-past::after, .recent-activity-timeline-success.recent-activity-timeline-current::after {
   background-color: #00d27a;
@@ -27385,22 +27418,22 @@ div[data-collapse] + .kanban-item,
   box-shadow: 0 0 0 3px rgba(230, 55, 87, 0.3);
 }
 .recent-activity-timeline-light.recent-activity-timeline-past::after, .recent-activity-timeline-light.recent-activity-timeline-current::after {
-  background-color: #f9fafd;
-  border-color: #f9fafd;
+  background-color: #f9fafb;
+  border-color: #f9fafb;
 }
 .recent-activity-timeline-light.recent-activity-timeline-current::after {
   height: 0.5rem;
   width: 0.5rem;
-  box-shadow: 0 0 0 3px rgba(249, 250, 253, 0.3);
+  box-shadow: 0 0 0 3px rgba(249, 250, 251, 0.3);
 }
 .recent-activity-timeline-dark.recent-activity-timeline-past::after, .recent-activity-timeline-dark.recent-activity-timeline-current::after {
-  background-color: #0b1727;
-  border-color: #0b1727;
+  background-color: #0f141c;
+  border-color: #0f141c;
 }
 .recent-activity-timeline-dark.recent-activity-timeline-current::after {
   height: 0.5rem;
   width: 0.5rem;
-  box-shadow: 0 0 0 3px rgba(11, 23, 39, 0.3);
+  box-shadow: 0 0 0 3px rgba(15, 20, 28, 0.3);
 }
 
 .timeline-simple {
@@ -28131,7 +28164,7 @@ html[data-bs-theme=dark] .bg-priority-low:checked {
 }
 
 .stat-ribbon-secondary > span {
-  background-color: #748194;
+  background-color: #68707c;
 }
 
 .stat-ribbon-success > span {
@@ -28151,11 +28184,11 @@ html[data-bs-theme=dark] .bg-priority-low:checked {
 }
 
 .stat-ribbon-light > span {
-  background-color: #f9fafd;
+  background-color: #f9fafb;
 }
 
 .stat-ribbon-dark > span {
-  background-color: #0b1727;
+  background-color: #0f141c;
 }
 
 /* -------------------------------------------------------------------------- */
