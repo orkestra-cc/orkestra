@@ -109,8 +109,8 @@ Filtering by tenant kind + global system role still can't express per-org scope 
 
 ## Related
 
-- [`../../shared/module/registry.go:146-153`](../../shared/module/registry.go) — where nav items are collected and stamped with owner
-- [`../../shared/module/module.go`](../../shared/module/module.go) — `NavItemSpec` type definition
-- [`../../shared/middleware/module_enabled.go`](../../shared/middleware/module_enabled.go) — `ModuleEnabledChecker` interface
+- [`../../../pkg/sdk/module/registry.go:146-153`](../../../pkg/sdk/module/registry.go) — where nav items are collected and stamped with owner
+- [`../../../pkg/sdk/module/module.go`](../../../pkg/sdk/module/module.go) — `NavItemSpec` type definition
+- [`../../../pkg/sdk/modulegate/modulegate.go`](../../../pkg/sdk/modulegate/modulegate.go) — `ModuleEnabledChecker` interface
 - [`../authz/CLAUDE.md`](../authz/CLAUDE.md) — the provider the filter should eventually consult
 - [`../../../../frontend-admin/CLAUDE.md`](../../../../frontend-admin/CLAUDE.md) — how the frontend consumes `/v1/navigation`

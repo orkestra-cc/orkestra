@@ -127,9 +127,9 @@ Several pieces of state are written to MongoDB only during `InitAll`. If the col
 
 ## Related
 
-- [`../shared/module/registry.go`](../shared/module/registry.go) — `ModuleRegistry.InitAll`, the single place modules get wired up
-- [`../shared/module/module.go`](../shared/module/module.go) — the `Module` interface contract
-- [`../shared/iface/interfaces.go`](../shared/iface/interfaces.go) — every cross-module interface lives in one file
+- [`../../pkg/sdk/module/registry.go`](../../pkg/sdk/module/registry.go) — `ModuleRegistry.InitAll`, the single place modules get wired up
+- [`../../pkg/sdk/module/module.go`](../../pkg/sdk/module/module.go) — the `Module` interface contract
+- [`../../pkg/sdk/iface/interfaces.go`](../../pkg/sdk/iface/interfaces.go) — every cross-module interface lives in one file
 - [`../../cmd/server/catalog.go`](../../cmd/server/catalog.go) — module catalog, core vs optional split
 - [Root CLAUDE.md](../../../CLAUDE.md) — module map and overall architecture
 - [Backend CLAUDE.md](../../CLAUDE.md) — project structure and dev workflow

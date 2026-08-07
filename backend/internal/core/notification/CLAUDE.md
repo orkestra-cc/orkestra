@@ -142,5 +142,5 @@ Get the service via `module.GetTyped[iface.NotificationSender](deps.Services, mo
 ## Related
 
 - [Root CLAUDE.md](../../../../CLAUDE.md) — module map and architecture
-- [`shared/iface/interfaces.go`](../../shared/iface/interfaces.go) — `NotificationSender` interface definition
+- [`pkg/sdk/iface/interfaces.go`](../../../pkg/sdk/iface/interfaces.go) — `NotificationSender` interface definition
 - [`docs/Authentication_flow.md`](../../../../docs/Authentication_flow.md) — how auth consumes this module

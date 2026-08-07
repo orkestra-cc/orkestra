@@ -38,7 +38,7 @@ Drafts are welcome — set status to "Ready for review" when you're done iterati
 - [ ] `make ci` passes locally for every surface touched
 - [ ] Affected `CLAUDE.md` / `README.md` files updated in this PR
 - [ ] New endpoints declare their tenancy tier and enforce org-scoped RBAC
-- [ ] New MongoDB collections follow the [module-prefix naming convention](backend/CLAUDE.md)
+- [ ] New MongoDB collections follow the [module-prefix naming convention](https://github.com/orkestra-cc/orkestra/blob/dev/backend/CLAUDE.md)
 - [ ] No secrets added to code, logs, env examples, or commit messages
 - [ ] If this touches the backend API contract, generated TypeScript clients are regenerated in the same PR
 - [ ] Breaking changes are called out below
