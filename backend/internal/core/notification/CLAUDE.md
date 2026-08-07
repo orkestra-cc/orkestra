@@ -113,7 +113,7 @@ Registered in three groups with different middleware:
 
 ## Service contract for consumers
 
-Consumers depend on `iface.NotificationSender` from `shared/iface`, not on any package inside this module. The interface has three methods:
+Consumers depend on `iface.NotificationSender` from `pkg/sdk/iface`, not on any package inside this module. The interface has three methods:
 
 ```go
 IsConfigured(ctx) bool

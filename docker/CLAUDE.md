@@ -118,7 +118,7 @@ ENV=development ./orkestra.sh deploy --scope backend --rebuild --yes
 
 ### What belongs in `.env` / compose vs `/admin/modules`
 
-After the architecture-modernization refactor, **module-level configuration lives in MongoDB** (`module_configs`), is edited at `/admin/modules`, and secrets are AES-256-GCM-encrypted with `OAUTH_TOKEN_ENCRYPTION_KEY`. The `EnvVar` field on each module's `ConfigSchema()` is consulted **only on first-boot seeding** (`shared/module/config_service.go::buildInitialConfig`); after that the document is authoritative and editing the env var has no effect.
+After the architecture-modernization refactor, **module-level configuration lives in MongoDB** (`module_configs`), is edited at `/admin/modules`, and secrets are AES-256-GCM-encrypted with `OAUTH_TOKEN_ENCRYPTION_KEY`. The `EnvVar` field on each module's `ConfigSchema()` is consulted **only on first-boot seeding** (`pkg/sdk/module/config_service.go::buildInitialConfig`); after that the document is authoritative and editing the env var has no effect.
 
 Keep this split when touching `.env*` or `docker-compose.*.yml`:
 

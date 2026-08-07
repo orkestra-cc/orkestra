@@ -15,4 +15,4 @@ registry.Register("user.UserProvider", myUserProvider)
 userProvider := module.MustGetTyped[iface.UserProvider](registry, "user.UserProvider")
 ```
 
-Combined with the [`shared/iface`](/sdk/shared-iface) interfaces, this is how Orkestra avoids cross-module concrete imports: every consumer programs against an interface, every producer publishes one.
+Combined with the [`pkg/sdk/iface`](/sdk/shared-iface) interfaces, this is how Orkestra avoids cross-module concrete imports: every consumer programs against an interface, every producer publishes one.
