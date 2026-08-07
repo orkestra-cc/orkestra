@@ -13,8 +13,14 @@
 ARG GO_BASE=golang:1.25.12-alpine
 FROM ${GO_BASE}
 
+# AIR is pinned, not @latest: air v1.67.2+ requires go >= 1.26.0, which the
+# Go 1.25.12 base (matching go.mod / .mise.toml / CI) refuses to build under
+# GOTOOLCHAIN=local. v1.67.1 is the last release on `go 1.25`. Bump this
+# together with GO_BASE when the project moves to Go 1.26.
+ARG AIR_VERSION=v1.67.1
+
 RUN apk add --no-cache git build-base \
- && GOBIN=/usr/local/bin go install github.com/air-verse/air@latest \
+ && GOBIN=/usr/local/bin go install github.com/air-verse/air@${AIR_VERSION} \
  && rm -rf /root/.cache /go/pkg
 
 WORKDIR /app
