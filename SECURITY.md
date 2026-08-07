@@ -55,7 +55,7 @@ When triaging, we use the following rough scale:
 
 ## Disclosure
 
-Once a fix is shipped, we credit the reporter (with their consent) in the release notes and in [`SECURITY-ADVISORIES.md`](docs/SECURITY-ADVISORIES.md) — or in the public GitHub Security Advisory, if the issue warranted a CVE.
+Once a fix is shipped, we credit the reporter (with their consent) in the [release notes](https://github.com/orkestra-cc/orkestra/releases) — or in the public [GitHub Security Advisory](https://github.com/orkestra-cc/orkestra/security/advisories), if the issue warranted a CVE.
 
 ## Supported versions
 

@@ -189,7 +189,7 @@ Permission-evaluation rules (`services/service.go:31-44`, implemented in `GetEff
 
 ## Org-scoping invariants (system-wide)
 
-These invariants apply across **every** module, not just authz. They are the enforceable contract the org-scoped RBAC plan ([memory](../../../../../home/tore/.claude/projects/-mnt-c-Users-tore-orkestra/memory/project_org_rbac_plan.md) / PR description) delivers. Where an invariant is not yet enforced, it's marked **planned**; implementation phase is noted.
+These invariants apply across **every** module, not just authz. They are the enforceable contract the org-scoped RBAC plan delivers. Where an invariant is not yet enforced, it's marked **planned**; implementation phase is noted.
 
 | # | Invariant | Enforcement today | Full enforcement |
 |---|---|---|---|
@@ -263,5 +263,5 @@ Section B item #4 of the auth roadmap (2026-04-24) plumbs attribute-based signal
 - [`../user/CLAUDE.md`](../user/CLAUDE.md) — provides the system role lookup
 - [`../tenant/CLAUDE.md`](../tenant/CLAUDE.md) — provides `Membership.Roles`, which is a denormalized view of this module's bindings
 - [`../auth/CLAUDE.md`](../auth/CLAUDE.md) — consumes `HasPermission` via middleware on every protected request
-- [`../../shared/iface/interfaces.go:198-229`](../../shared/iface/interfaces.go) — `AuthzProvider` and `PermissionSpec` definitions
+- [`../../../pkg/sdk/iface/interfaces.go:198-229`](../../../pkg/sdk/iface/interfaces.go) — `AuthzProvider` and `PermissionSpec` definitions
 - [`../../shared/middleware/auth.go`](../../shared/middleware/auth.go) — `RequirePermission`, `RequireSystemPermission`
