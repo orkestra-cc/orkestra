@@ -7,7 +7,6 @@ import {
 } from '@fortawesome/free-solid-svg-icons';
 import { useRetentionPreviewQuery } from 'store/api/complianceApi';
 import ComplianceEmptyState from './ComplianceEmptyState';
-import SectionCard from 'components/common/SectionCard';
 import { formatDateTime } from './complianceFormat';
 
 // RetentionTab is a read-only dry-run: it shows which anonymized tombstones are
@@ -20,11 +19,7 @@ const RetentionTab = () => {
   const count = data?.count ?? 0;
 
   return (
-    <SectionCard
-      icon={faClockRotateLeft}
-      iconColor="info"
-      title={t('adminCompliance.retention.sectionTitle')}
-    >
+    <>
       {isLoading ? (
         <Spinner animation="border" size="sm" className="mt-2" />
       ) : (
@@ -101,7 +96,7 @@ const RetentionTab = () => {
           )}
         </>
       )}
-    </SectionCard>
+    </>
   );
 };
 

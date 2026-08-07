@@ -12,7 +12,6 @@ import {
   type ErasureRequest
 } from 'store/api/complianceApi';
 import ComplianceEmptyState from './ComplianceEmptyState';
-import SectionCard from 'components/common/SectionCard';
 import ComplianceTable from './ComplianceTable';
 import { erasureStatusColor, formatDateTime } from './complianceFormat';
 
@@ -111,28 +110,22 @@ const ErasureRequestsTab = () => {
 
   const items = data?.items ?? [];
 
-  return (
-    <SectionCard
+  // No SectionCard shell: the pane sits under the page's card-header-tabs,
+  // and the active tab already names this section.
+  return isLoading ? (
+    <Spinner animation="border" size="sm" className="mt-2" />
+  ) : items.length === 0 ? (
+    <ComplianceEmptyState
       icon={faUserSlash}
-      iconColor="warning"
-      title={t('adminCompliance.erasure.sectionTitle')}
-    >
-      {isLoading ? (
-        <Spinner animation="border" size="sm" className="mt-2" />
-      ) : items.length === 0 ? (
-        <ComplianceEmptyState
-          icon={faUserSlash}
-          message={t('adminCompliance.erasure.emptyMessage')}
-          hint={t('adminCompliance.erasure.emptyHint')}
-        />
-      ) : (
-        <ComplianceTable
-          data={items}
-          columns={columns}
-          searchPlaceholder={t('adminCompliance.erasure.searchPlaceholder')}
-        />
-      )}
-    </SectionCard>
+      message={t('adminCompliance.erasure.emptyMessage')}
+      hint={t('adminCompliance.erasure.emptyHint')}
+    />
+  ) : (
+    <ComplianceTable
+      data={items}
+      columns={columns}
+      searchPlaceholder={t('adminCompliance.erasure.searchPlaceholder')}
+    />
   );
 };
 

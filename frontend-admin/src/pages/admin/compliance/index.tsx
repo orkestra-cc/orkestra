@@ -150,32 +150,42 @@ const CompliancePage = () => {
         </Col>
       </Row>
 
-      <Tab.Container activeKey={activeTab} onSelect={handleTabSelect}>
-        <Nav variant="pills" className="mb-3 flex-wrap gap-2">
-          {TABS.map(tab => (
-            <Nav.Item key={tab.key}>
-              <Nav.Link eventKey={tab.key} className="text-nowrap">
-                <FontAwesomeIcon icon={tab.icon} className="me-2" />
-                {t(tab.labelKey)}
-              </Nav.Link>
-            </Nav.Item>
-          ))}
-        </Nav>
-        <Tab.Content>
-          <Tab.Pane eventKey="requests">
-            <ErasureRequestsTab />
-          </Tab.Pane>
-          <Tab.Pane eventKey="holds">
-            <LegalHoldsTab />
-          </Tab.Pane>
-          <Tab.Pane eventKey="retention">
-            <RetentionTab />
-          </Tab.Pane>
-          <Tab.Pane eventKey="audit">
-            <AuditEventsTab />
-          </Tab.Pane>
-        </Tab.Content>
-      </Tab.Container>
+      {/* Same card-header-tabs genre as the other tabbed admin pages
+          (clients/detail, internal-tenants/detail, user/security): one tab
+          primitive console-wide. The tab strip names the section, so the
+          panes carry no SectionCard of their own. */}
+      <Card className="shadow-none border">
+        <Tab.Container activeKey={activeTab} onSelect={handleTabSelect}>
+          <Card.Header className="border-bottom border-200">
+            <Nav variant="tabs" className="card-header-tabs fs-10">
+              {TABS.map(tab => (
+                <Nav.Item key={tab.key}>
+                  <Nav.Link eventKey={tab.key} className="text-nowrap">
+                    <FontAwesomeIcon icon={tab.icon} className="me-2" />
+                    {t(tab.labelKey)}
+                  </Nav.Link>
+                </Nav.Item>
+              ))}
+            </Nav>
+          </Card.Header>
+          <Card.Body>
+            <Tab.Content>
+              <Tab.Pane eventKey="requests">
+                <ErasureRequestsTab />
+              </Tab.Pane>
+              <Tab.Pane eventKey="holds">
+                <LegalHoldsTab />
+              </Tab.Pane>
+              <Tab.Pane eventKey="retention">
+                <RetentionTab />
+              </Tab.Pane>
+              <Tab.Pane eventKey="audit">
+                <AuditEventsTab />
+              </Tab.Pane>
+            </Tab.Content>
+          </Card.Body>
+        </Tab.Container>
+      </Card>
     </>
   );
 };

@@ -1896,7 +1896,6 @@
       "error": "Error"
     },
     "erasure": {
-      "sectionTitle": "Erasure Requests",
       "columns": {
         "subject": "Subject",
         "reason": "Reason",
@@ -1915,7 +1914,6 @@
       "searchPlaceholder": "Search by subject or reason"
     },
     "holds": {
-      "sectionTitle": "Legal Holds",
       "columns": {
         "subject": "Subject",
         "reason": "Reason",
@@ -1943,7 +1941,6 @@
       "searchPlaceholder": "Search by subject, reason or case"
     },
     "retention": {
-      "sectionTitle": "Retention Preview",
       "previewTitle": "Retention cleanup preview (dry run)",
       "previewBody": "Anonymized tombstones past the retention window that the auto-cleanup job would hard-delete. Nothing is deleted from this screen.",
       "cutoff": "Cutoff",
@@ -1953,7 +1950,6 @@
       "emptyHint": "Anonymized tombstones eligible for hard deletion will be listed here."
     },
     "audit": {
-      "sectionTitle": "Audit Events",
       "columns": {
         "time": "Time",
         "action": "Action",

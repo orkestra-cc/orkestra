@@ -1896,7 +1896,6 @@
       "error": "Errore"
     },
     "erasure": {
-      "sectionTitle": "Richieste di cancellazione",
       "columns": {
         "subject": "Soggetto",
         "reason": "Motivo",
@@ -1915,7 +1914,6 @@
       "searchPlaceholder": "Cerca per soggetto o motivo"
     },
     "holds": {
-      "sectionTitle": "Vincoli legali",
       "columns": {
         "subject": "Soggetto",
         "reason": "Motivo",
@@ -1943,7 +1941,6 @@
       "searchPlaceholder": "Cerca per soggetto, motivo o caso"
     },
     "retention": {
-      "sectionTitle": "Anteprima conservazione",
       "previewTitle": "Anteprima della pulizia di conservazione (simulazione)",
       "previewBody": "Tombstone anonimizzati oltre la finestra di conservazione che il job di pulizia automatica eliminerebbe definitivamente. Nulla viene eliminato da questa schermata.",
       "cutoff": "Data limite",
@@ -1953,7 +1950,6 @@
       "emptyHint": "I tombstone anonimizzati idonei all'eliminazione definitiva saranno elencati qui."
     },
     "audit": {
-      "sectionTitle": "Eventi di audit",
       "columns": {
         "time": "Data e ora",
         "action": "Azione",
