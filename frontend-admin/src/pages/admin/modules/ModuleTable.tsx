@@ -5,6 +5,7 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faChevronRight } from '@fortawesome/free-solid-svg-icons';
 import { useTranslation } from 'react-i18next';
 import SubtleBadge from 'components/common/SubtleBadge';
+import { formatDateTime } from 'helpers/dateFormat';
 import type { BadgeColor } from 'components/common/SubtleBadge';
 import ModuleTableHeader from './ModuleTableHeader';
 import type { ModuleConfig } from 'store/api/moduleApi';
@@ -14,12 +15,10 @@ import {
   useUpdateModuleMutation
 } from 'store/api/moduleApi';
 
-const categoryColors: Record<string, BadgeColor> = {
-  core: 'primary',
-  toggleable: 'info',
-  external: 'warning'
-};
-
+// Status colors mean status (DESIGN.md): only the runtime-status chip wears
+// a hue. Category (core/toggleable/external) and environment are identity,
+// not state — they render neutral, so a `production` chip can never be
+// mistaken for the green `running` one at scan distance.
 const statusColors: Record<string, BadgeColor> = {
   running: 'success',
   failed: 'danger',
@@ -125,18 +124,6 @@ const ModuleTable: React.FC<ModuleTableProps> = ({ scope, title }) => {
     return healthDotColors[mod.status] || 'bg-400';
   };
 
-  const formatDate = (dateStr: string) => {
-    if (!dateStr) return '\u2014';
-    const date = new Date(dateStr);
-    return date.toLocaleDateString('en-GB', {
-      day: '2-digit',
-      month: 'short',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
-    });
-  };
-
   if (error) {
     return (
       <Card>
@@ -210,10 +197,7 @@ const ModuleTable: React.FC<ModuleTableProps> = ({ scope, title }) => {
                       </div>
                     </td>
                     <td>
-                      <SubtleBadge
-                        bg={categoryColors[mod.category] || 'secondary'}
-                        pill
-                      >
+                      <SubtleBadge bg="secondary" pill>
                         {mod.category}
                       </SubtleBadge>
                     </td>
@@ -236,16 +220,7 @@ const ModuleTable: React.FC<ModuleTableProps> = ({ scope, title }) => {
                       )}
                     </td>
                     <td>
-                      <SubtleBadge
-                        bg={
-                          mod.activeEnvironment === 'production'
-                            ? 'success'
-                            : mod.activeEnvironment === 'sandbox'
-                              ? 'warning'
-                              : 'secondary'
-                        }
-                        pill
-                      >
+                      <SubtleBadge bg="secondary" pill>
                         {mod.activeEnvironment || 'production'}
                       </SubtleBadge>
                     </td>
@@ -254,7 +229,9 @@ const ModuleTable: React.FC<ModuleTableProps> = ({ scope, title }) => {
                         ? mod.dependsOn.join(', ')
                         : '\u2014'}
                     </td>
-                    <td className="text-muted">{formatDate(mod.updatedAt)}</td>
+                    <td className="text-muted">
+                      {formatDateTime(mod.updatedAt)}
+                    </td>
                     <td className="text-end pe-4">
                       <div className="d-flex align-items-center justify-content-end gap-2">
                         {togglingModule === mod.moduleName ? (
@@ -272,6 +249,16 @@ const ModuleTable: React.FC<ModuleTableProps> = ({ scope, title }) => {
                                   ? t('adminModules.toggleTitles.disable')
                                   : t('adminModules.toggleTitles.enable')
                             }
+                            // The switch is the row's highest-stakes control:
+                            // a screen reader must hear WHICH module it is
+                            // about to start or stop, not a bare "switch".
+                            aria-label={`${
+                              mod.category === 'core'
+                                ? t('adminModules.toggleTitles.coreLocked')
+                                : mod.enabled
+                                  ? t('adminModules.toggleTitles.disable')
+                                  : t('adminModules.toggleTitles.enable')
+                            } — ${mod.displayName}`}
                           />
                         )}
                         <Link

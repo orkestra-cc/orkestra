@@ -10,6 +10,8 @@ import {
   faUserShield
 } from '@fortawesome/free-solid-svg-icons';
 import type { IconProp } from '@fortawesome/fontawesome-svg-core';
+import { Trans, useTranslation } from 'react-i18next';
+import { formatDateTime } from 'helpers/dateFormat';
 import StatCard from 'components/common/StatCard';
 import SectionCard from 'components/common/SectionCard';
 import type { BadgeColor } from 'components/common/SubtleBadge';
@@ -74,6 +76,7 @@ const renderValue = (value: unknown): string => {
 };
 
 const SOC2EvidencePage = () => {
+  const { t } = useTranslation();
   const { data, isLoading, isFetching, error, refetch } =
     useSoc2EvidenceQuery();
 
@@ -91,12 +94,10 @@ const SOC2EvidencePage = () => {
               icon={faShieldHalved}
               className="me-2 text-primary"
             />
-            SOC2 Evidence
+            {t('adminComplianceSoc2.pageTitle')}
           </h2>
           <p className="text-muted mb-0">
-            Point-in-time snapshot of Trust Service Criteria controls —
-            privileged access, MFA coverage, failed-login trends, KMS lifecycle,
-            and audit-trail health. Recomputed on every load.
+            {t('adminComplianceSoc2.pageSubtitle')}
           </p>
         </div>
         <Button
@@ -106,7 +107,7 @@ const SOC2EvidencePage = () => {
           disabled={isFetching}
         >
           <FontAwesomeIcon icon={faRotate} className="me-2" spin={isFetching} />
-          Refresh
+          {t('adminComplianceSoc2.refresh')}
         </Button>
       </div>
 
@@ -119,24 +120,27 @@ const SOC2EvidencePage = () => {
           <FontAwesomeIcon icon={faTriangleExclamation} className="me-3 mt-1" />
           <div>
             <Alert.Heading className="h6 mb-1">
-              SOC2 evidence is disabled
+              {t('adminComplianceSoc2.disabled.title')}
             </Alert.Heading>
             <p className="mb-0 small">
-              Enable the <code>soc2_enabled</code> flag on the{' '}
-              <strong>compliance</strong> module at <code>/admin/modules</code>{' '}
-              to generate evidence snapshots.
+              <Trans
+                i18nKey="adminComplianceSoc2.disabled.body"
+                components={{ code: <code />, strong: <strong /> }}
+              />
             </p>
           </div>
         </Alert>
       ) : error || !data ? (
         <Alert variant="danger">
           <FontAwesomeIcon icon={faTriangleExclamation} className="me-2" />
-          Failed to generate the SOC2 evidence snapshot.
+          {t('adminComplianceSoc2.loadError')}
         </Alert>
       ) : (
         <>
           <p className="text-muted fs-11 mb-3">
-            Generated {new Date(data.generatedAt).toLocaleString()}
+            {t('adminComplianceSoc2.generatedAt', {
+              date: formatDateTime(data.generatedAt)
+            })}
           </p>
 
           <Row className="g-3 mb-3">
@@ -145,7 +149,9 @@ const SOC2EvidencePage = () => {
               return (
                 <Col md={6} lg={3} key={key}>
                   <StatCard
-                    title={meta?.label ?? humanize(key)}
+                    title={t(`adminComplianceSoc2.summary.${key}`, {
+                      defaultValue: meta?.label ?? humanize(key)
+                    })}
                     value={value}
                     icon={meta?.icon ?? faShieldHalved}
                     color={meta?.color ?? 'secondary'}

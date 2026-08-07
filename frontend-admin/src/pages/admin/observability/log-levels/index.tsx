@@ -1,8 +1,8 @@
 import { useCallback, useMemo } from 'react';
 import { Alert, Button, Card, Form } from 'react-bootstrap';
-import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { toast } from 'react-toastify';
 import { useTranslation } from 'react-i18next';
+import { formatDateTime } from 'helpers/dateFormat';
 import { ColumnDef } from '@tanstack/react-table';
 import SubtleBadge, { BadgeColor } from 'components/common/SubtleBadge';
 import AdvanceTable from 'components/common/advance-table/AdvanceTable';
@@ -47,13 +47,12 @@ const LogLevelsPage: React.FC = () => {
   const [unsetModule] = useUnsetModuleLogLevelMutation();
   const [resetAll, resetStatus] = useResetLogLevelsMutation();
 
+  // formatDateTime guards Go's zero time — an unset updatedAt used to render
+  // as the raw sentinel "1/1/1, 12:49:56 AM" on the page whose whole job is
+  // truthful signals.
   const lastUpdated = useMemo(() => {
-    if (!data?.updatedAt) return null;
-    try {
-      return new Date(data.updatedAt).toLocaleString();
-    } catch {
-      return data.updatedAt;
-    }
+    const formatted = formatDateTime(data?.updatedAt);
+    return formatted === '—' ? null : formatted;
   }, [data?.updatedAt]);
 
   const handleGlobal = async (level: LogLevel) => {
@@ -227,18 +226,16 @@ const LogLevelsPage: React.FC = () => {
 
   return (
     <>
-      <Card className="shadow-none border mb-3">
-        <Card.Body className="d-flex align-items-center justify-content-between gap-3 flex-wrap">
+      <Card className="mb-3">
+        <Card.Body className="d-flex align-items-center justify-content-between gap-3 flex-wrap py-3 px-4">
           <div>
-            <h5 className="mb-1">
-              <FontAwesomeIcon icon="sliders-h" className="me-2 text-primary" />
-              {t('adminObservability.logLevels.title')}
-            </h5>
-            <p className="text-muted mb-0 small">
+            {/* h3 = the shared admin page-header genre (see /admin/modules). */}
+            <h3 className="mb-1">{t('adminObservability.logLevels.title')}</h3>
+            <p className="text-muted mb-0 fs-10">
               {t('adminObservability.logLevels.description')}
             </p>
             {lastUpdated && (
-              <p className="text-muted mb-0 small mt-2">
+              <p className="text-muted mb-0 fs-10 mt-2">
                 {data.updatedBy
                   ? t('adminObservability.logLevels.lastUpdatedBy', {
                       date: lastUpdated,

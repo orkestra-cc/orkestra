@@ -6,6 +6,7 @@ import userEvent from '@testing-library/user-event';
 import { renderWithProviders } from 'test/render';
 import { server } from 'test/server';
 import LoginMfaVerify from './LoginMfaVerify';
+import { DEFAULT_POST_LOGIN } from 'utils/returnTo';
 
 const Probe = ({ label }: { label: string }) => {
   const location = useLocation();
@@ -31,10 +32,7 @@ const renderMfa = (state: Record<string, unknown>) =>
   renderWithProviders(
     <Routes>
       <Route path="/mfa/verify" element={<LoginMfaVerify />} />
-      <Route
-        path="/dashboard/analytics"
-        element={<Probe label="dashboard" />}
-      />
+      <Route path={DEFAULT_POST_LOGIN} element={<Probe label="dashboard" />} />
       <Route path="/admin/modules" element={<Probe label="deeplink" />} />
       <Route path="/login" element={<Probe label="login" />} />
     </Routes>,
@@ -66,7 +64,7 @@ describe('LoginMfaVerify', () => {
     await submitCode();
 
     expect(await screen.findByTestId('dashboard-pathname')).toHaveTextContent(
-      '/dashboard/analytics'
+      DEFAULT_POST_LOGIN
     );
   });
 
@@ -77,7 +75,7 @@ describe('LoginMfaVerify', () => {
     await submitCode();
 
     expect(await screen.findByTestId('dashboard-pathname')).toHaveTextContent(
-      '/dashboard/analytics'
+      DEFAULT_POST_LOGIN
     );
   });
 });

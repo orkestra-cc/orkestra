@@ -258,7 +258,15 @@ $display-line-height: 1 !default;
 $lead-font-size: $font-size-lg !default;
 $lead-font-weight: $font-weight-normal !default;
 
-$small-font-size: 75% !default;
+// On-scale (The On-Scale Rule): Bootstrap's 75% is context-relative, so a
+// <small> inside an fs-10 table cell rendered at 10px — below the fs-11
+// floor. Absolute fs-11 keeps every small on the ramp regardless of context.
+// Declared both-modes 2026-08-07.
+$small-font-size: map-get($font-sizes, 11) !default;
+
+// Same leak, same fix: badges default to 0.75em, which is 10px inside the
+// fs-10 data surfaces where most badges live ("Super Admin", status pills).
+$badge-font-size: map-get($font-sizes, 11) !default;
 
 $blockquote-font-size: $font-size-lg !default;
 
@@ -350,7 +358,10 @@ $input-plaintext-color: $gray-700 !default;
 
 // scss-docs-start btn-variables
 $btn-font-weight: $font-weight-medium !default;
-$btn-focus-width: 0 !default;
+// WCAG 2.2 focus-appearance: 0 removed every keyboard focus ring on every
+// button in the console. Bootstrap paints this ring on :focus-visible only,
+// so mouse clicks stay quiet. Declared both-modes 2026-08-07.
+$btn-focus-width: 0.25rem !default;
 
 $btn-color: $gray-700 !default;
 
@@ -514,7 +525,10 @@ $navbar-vertical-collapsed-width: 2.75rem !default;
 $navbar-vertical-hover-width: 11.75rem !default;
 $navbar-vertical-variation-width: 14.625rem !default;
 $navbar-vertical-variation-collapsed-width: 4.125rem !default;
-$navbar-vertical-link-font-size: $font-size-sm !default;
+// On-scale (The On-Scale Rule): links and submenu share the fs-10 step the
+// data surfaces already use. `$font-size-sm` (0.875rem = 14px) is off-ramp.
+// Declared both-modes 2026-08-07 with the sidebar-shell polish.
+$navbar-vertical-link-font-size: map-get($font-sizes, 10) !default;
 $navbar-vertical-dropdown-font-size: map-get($font-sizes, 10) !default;
 $navbar-vertical-collapsed-hover-shadow: 0.625rem 0 0.625rem -0.5625rem rgba($black, 0.2) !default;
 // scss-docs-end navbar-vertical-variables
@@ -529,7 +543,10 @@ $navbar-vertical-default-link-active-color: #{$primary} !default;
 $navbar-vertical-default-link-disable-color: #{$gray-400} !default;
 $navbar-vertical-default-hr-color: #{rgba($black, 0.08)} !default;
 $navbar-vertical-default-scrollbar-color: #{rgba($gray-600, 0.3)} !default;
-$navbar-vertical-default-label-color: var(--#{$prefix}gray-500) !default;
+// Realm/section labels are text on the most persistent surface in the console
+// and owe 4.5:1: gray-500 gave them ~2.4:1 on the light rail. Dark pins its
+// own frozen literal (#5e6e82) in root/_dark.scss, so this only moves light.
+$navbar-vertical-default-label-color: var(--#{$prefix}gray-600) !default;
 // scss-docs-end navbar-vertical-default-variables
 
 // scss-docs-start navbar-vertical-inverted-variables

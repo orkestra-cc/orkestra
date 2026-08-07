@@ -130,7 +130,13 @@
   //
   // Navbar glass
   //
-  --#{$prefix}bg-navbar-glass: #{rgba($gray-200, 0.96)};
+  // White, not canvas-tinted: the sidebar rail and the top bar are real
+  // surfaces of the Control Room, not transparent overlays floating on the
+  // gray-200 canvas. The hairline below is what separates them from content.
+  --#{$prefix}bg-navbar-glass: #{rgba($white, 0.97)};
+  // 1px separation edge for the two navbars. Dark pins this to transparent
+  // (root/_dark.scss) so the frozen dark chrome keeps its edge-less look.
+  --#{$prefix}navbar-hairline-color: var(--#{$prefix}gray-300);
 
   // Navbar vertical styles
   //
@@ -212,17 +218,22 @@
   //
   // Gradient Background
   //
-  --#{$prefix}bg-shape-bg: #4695ff;
-  --#{$prefix}bg-shape-bg-ltd: #{linear-gradient(-45deg, #4695ff, #1970e2)};
-  --#{$prefix}bg-shape-bg-dtl: #{linear-gradient(-45deg, #1970e2, #4695ff)};
+  // Legacy decorative-gradient hooks. The old Falcon literals (#4695ff /
+  // #1970e2 — the pre-retune anti-reference) are re-pointed at the system's
+  // own action blues so the remaining demo/reference consumers keep rendering
+  // without reintroducing off-palette hues. Production surfaces must not grow
+  // new uses of these.
+  --#{$prefix}bg-shape-bg: #{$primary};
+  --#{$prefix}bg-shape-bg-ltd: #{linear-gradient(-45deg, $primary, $link-color)};
+  --#{$prefix}bg-shape-bg-dtl: #{linear-gradient(-45deg, $link-color, $primary)};
 
   --#{$prefix}line-chart-gradient: #{linear-gradient(-45deg, #014ba7, #0183d0)};
-  --#{$prefix}card-gradient: #{linear-gradient(-45deg, #1970e2, #4695ff)};
-  --#{$prefix}progress-gradient: #{linear-gradient(-45deg, #1970e2, #4695ff)};
+  --#{$prefix}card-gradient: #{linear-gradient(-45deg, $link-color, $primary)};
+  --#{$prefix}progress-gradient: #{linear-gradient(-45deg, $link-color, $primary)};
   --#{$prefix}bg-circle-shape: none;
-  --#{$prefix}bg-circle-shape-bg: #4695ff;
-  --#{$prefix}modal-shape-header: #{linear-gradient(-45deg, #1970e2, #4695ff)};
-  --#{$prefix}modal-shape-header-bg: #4494ff;
+  --#{$prefix}bg-circle-shape-bg: #{$primary};
+  --#{$prefix}modal-shape-header: #{linear-gradient(-45deg, $link-color, $primary)};
+  --#{$prefix}modal-shape-header-bg: #{$primary};
 
   //
   // Full Calendar

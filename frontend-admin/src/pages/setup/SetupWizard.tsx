@@ -8,6 +8,7 @@ import { Trans, useTranslation } from 'react-i18next';
 import IconButton from 'components/common/IconButton';
 import Flex from 'components/common/Flex';
 import OrkestraLoader from 'components/common/OrkestraLoader';
+import { DEFAULT_POST_LOGIN } from 'utils/returnTo';
 import { useGetSetupStatusQuery } from 'store/api/setupApi';
 import WelcomeStep from './steps/WelcomeStep';
 import AdminStep from './steps/AdminStep';
@@ -72,7 +73,7 @@ const SetupWizard = () => {
   // Setup already done — this page is not reachable through the normal gate,
   // so someone hit /setup manually. Show a short notice and a link home.
   if (status?.setupCompleted && step === 1) {
-    return <Navigate to="/dashboard/analytics" replace />;
+    return <Navigate to={DEFAULT_POST_LOGIN} replace />;
   }
 
   const handlePrev = () => setStep(s => Math.max(1, s - 1));
@@ -110,7 +111,7 @@ const SetupWizard = () => {
           <FinishStep
             smtpConfigured={status?.smtpConfigured ?? false}
             orgName={orgName}
-            onFinish={() => navigate('/dashboard/analytics')}
+            onFinish={() => navigate(DEFAULT_POST_LOGIN)}
           />
         );
       default:

@@ -102,6 +102,12 @@
 .navbar-glass {
   background-color: $bg-navbar-glass;
 }
+// The sticky top bar is a real surface in light; the hairline is its
+// separation from the canvas (transparent in dark — frozen chrome). The
+// scrolled .navbar-glass-shadow state overrides it with its drop shadow.
+.navbar-top.navbar-glass {
+  box-shadow: inset 0 -1px 0 var(--#{$prefix}navbar-hairline-color);
+}
 
 .navbar-brand {
   font-weight: $navbar-brand-font-weight;

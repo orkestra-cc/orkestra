@@ -43,6 +43,31 @@ const colorVariantsCode = `
 </Row>
 `;
 
+const accentCode = `
+<Row className="g-3">
+  {/* At rest: neutral edge. The non-zero counter earns its hue. */}
+  <Col md={6} lg={4}>
+    <StatCard
+      title="Pending Erasures"
+      value={0}
+      icon={faUserSlash}
+      color="warning"
+      subtitle="Awaiting review"
+    />
+  </Col>
+  <Col md={6} lg={4}>
+    <StatCard
+      title="Pending Erasures"
+      value={3}
+      icon={faUserSlash}
+      color="warning"
+      accent="warning"
+      subtitle="Awaiting review"
+    />
+  </Col>
+</Row>
+`;
+
 const ribbonCode = `
 <Row className="g-3">
   <Col md={6} lg={4}>
@@ -51,6 +76,7 @@ const ribbonCode = `
       value={3}
       icon={faUserSlash}
       color="warning"
+      accent="warning"
       subtitle="Awaiting review"
       badge={{ text: 'Review' }}
     />
@@ -61,6 +87,7 @@ const ribbonCode = `
       value={1}
       icon={faGavel}
       color="danger"
+      accent="danger"
       subtitle="Blocking erasure"
       badge={{ text: 'Blocked' }}
     />
@@ -71,6 +98,7 @@ const ribbonCode = `
       value={12}
       icon={faClockRotateLeft}
       color="info"
+      accent="info"
       subtitle="Past retention window"
       badge={{ text: 'Overdue', bg: 'secondary' }}
     />
@@ -117,17 +145,18 @@ const StatCards = () => {
     <>
       <PageHeader
         title="Stat Cards"
-        description="The Orkestra ERP-style KPI tile (StatCard) and its companion titled panel (SectionCard) — the canonical summary-row and section primitives for admin dashboards. A full 4px color-accented border, a large faded 3x icon, a big headline value, an optional subtitle, and an attention flag rendered as a diagonal corner ribbon."
+        description="The Orkestra ERP-style KPI tile (StatCard) and its companion titled panel (SectionCard) — the canonical summary-row and section primitives for admin dashboards. A 4px left accent edge (neutral at rest, colored only when the state earns it), a large faded 3x icon, a big headline value, an optional subtitle, and an attention flag rendered as a diagonal corner ribbon."
         className="mb-3"
       />
 
       <OrkestraComponentCard>
         <OrkestraComponentCard.Header title="Color variants" light={false}>
           <p className="mb-0">
-            The <code>color</code> prop drives the border, icon, and ribbon
-            tint. It accepts any <code>BadgeColor</code> (<code>primary</code>,{' '}
-            <code>success</code>, <code>info</code>, <code>warning</code>,{' '}
-            <code>danger</code>, <code>secondary</code>, …).
+            The <code>color</code> prop tints the faded icon (and is the
+            ribbon's fallback hue). It accepts any <code>BadgeColor</code> (
+            <code>primary</code>, <code>success</code>, <code>info</code>,{' '}
+            <code>warning</code>, <code>danger</code>, <code>secondary</code>,
+            …). The accent edge stays neutral — see the next section.
           </p>
         </OrkestraComponentCard.Header>
         <OrkestraComponentCard.Body
@@ -143,6 +172,26 @@ const StatCards = () => {
             faUserShield,
             faTriangleExclamation
           }}
+        />
+      </OrkestraComponentCard>
+
+      <OrkestraComponentCard>
+        <OrkestraComponentCard.Header
+          title="Status accent — earned by state"
+          light={false}
+        >
+          <p className="mb-0">
+            The 4px left edge is the tile's status channel and is{' '}
+            <strong>neutral at rest</strong>. Pass <code>accent</code> only
+            when the metric's current state earns it — a non-zero pending
+            counter, a degraded health check. Status colors mean status: never
+            use the accent as category identity.
+          </p>
+        </OrkestraComponentCard.Header>
+        <OrkestraComponentCard.Body
+          code={accentCode}
+          language="jsx"
+          scope={{ StatCard, Row, Col, faUserSlash }}
         />
       </OrkestraComponentCard>
 

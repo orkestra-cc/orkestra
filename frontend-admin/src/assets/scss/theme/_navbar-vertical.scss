@@ -6,7 +6,7 @@
   .navbar-vertical {
     .navbar-nav {
       .nav {
-        font-size: 14px;
+        font-size: map-get($font-sizes, 10);
       }
     }
   }
@@ -64,7 +64,9 @@
     margin-top: 0.5625rem;
   }
   .navbar-vertical-label {
-    font-size: 0.75rem;
+    // fs-10, not 12px: labels sit on the type ramp like everything else
+    // (The On-Scale Rule). Declared both-modes 2026-08-07.
+    font-size: map-get($font-sizes, 10);
     color: var(--#{$prefix}navbar-vertical-default-label-color);
   }
   .dropdown-indicator {
@@ -128,6 +130,15 @@
     }
   }
   @include navbar-vertical-variant('default', true, false, false);
+  // The default rail is a real surface in light (white on the gray-200
+  // canvas) and needs a 1px separation edge. Painted as an inset shadow so
+  // it never shifts layout; the color var is transparent in dark (frozen)
+  // and the card/vibrant/inverted variants keep their own treatments.
+  &:not(.navbar-card):not(.navbar-vibrant):not(.navbar-inverted) {
+    .navbar-collapse {
+      box-shadow: inset -1px 0 0 var(--#{$prefix}navbar-hairline-color);
+    }
+  }
   &.navbar-inverted {
     @include navbar-vertical-variant('inverted', true, false, false);
   }

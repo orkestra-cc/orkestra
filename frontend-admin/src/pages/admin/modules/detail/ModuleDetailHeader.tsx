@@ -106,6 +106,15 @@ const ModuleDetailHeader: React.FC<ModuleDetailHeaderProps> = ({
               disabled={isCore}
               onChange={handleToggle}
               className="fs-10"
+              // Names its subject like the list-page switches: the visible
+              // label alone reads "Abilitato" with no module name attached.
+              aria-label={`${
+                isCore
+                  ? t('adminModules.toggleTitles.coreLocked')
+                  : mod.enabled
+                    ? t('adminModules.toggleTitles.disable')
+                    : t('adminModules.toggleTitles.enable')
+              } — ${mod.displayName}`}
             />
           )}
         </div>

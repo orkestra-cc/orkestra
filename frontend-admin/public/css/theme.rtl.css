@@ -296,7 +296,8 @@
   --orkestra-btn-disabled-color: #68707c;
   --orkestra-input-focus-border-color-global: rgb(58.6274509804%, 74.1176470588%, 94.9019607843%);
   --orkestra-input-placeholder-color-global: var(--orkestra-gray-600);
-  --orkestra-bg-navbar-glass: rgba(242, 244, 246, 0.96);
+  --orkestra-bg-navbar-glass: rgba(255, 255, 255, 0.97);
+  --orkestra-navbar-hairline-color: var(--orkestra-gray-300);
   --orkestra-navbar-vertical-default-bg-color: var(--orkestra-bg-navbar-glass);
   --orkestra-navbar-vertical-default-link-color: #454c58;
   --orkestra-navbar-vertical-default-link-hover-color: #1a202a;
@@ -304,7 +305,7 @@
   --orkestra-navbar-vertical-default-link-disable-color: #bcc3cc;
   --orkestra-navbar-vertical-default-hr-color: rgba(0, 0, 0, 0.08);
   --orkestra-navbar-vertical-default-scrollbar-color: rgba(104, 112, 124, 0.3);
-  --orkestra-navbar-vertical-default-label-color: var(--orkestra-gray-500);
+  --orkestra-navbar-vertical-default-label-color: var(--orkestra-gray-600);
   --orkestra-navbar-vertical-inverted-bg-color: #1a202a;
   --orkestra-navbar-vertical-inverted-link-color: #98a1ac;
   --orkestra-navbar-vertical-inverted-link-hover-color: #f2f4f6;
@@ -348,16 +349,16 @@
   --orkestra-kanban-footer-color: var(--orkestra-gray-600);
   --orkestra-kanban-nav-link-card-details-color: var(--orkestra-gray-700);
   --orkestra-kanban-nav-link-card-details-hover-bg: #f2f4f6;
-  --orkestra-bg-shape-bg: #4695ff;
-  --orkestra-bg-shape-bg-ltd: linear-gradient(-45deg, #4695ff, #1970e2);
-  --orkestra-bg-shape-bg-dtl: linear-gradient(-45deg, #1970e2, #4695ff);
+  --orkestra-bg-shape-bg: #2c7be5;
+  --orkestra-bg-shape-bg-ltd: linear-gradient(-45deg, #2c7be5, rgb(14.6666666667%, 41%, 76.3333333333%));
+  --orkestra-bg-shape-bg-dtl: linear-gradient(-45deg, rgb(14.6666666667%, 41%, 76.3333333333%), #2c7be5);
   --orkestra-line-chart-gradient: linear-gradient(-45deg, #014ba7, #0183d0);
-  --orkestra-card-gradient: linear-gradient(-45deg, #1970e2, #4695ff);
-  --orkestra-progress-gradient: linear-gradient(-45deg, #1970e2, #4695ff);
+  --orkestra-card-gradient: linear-gradient(-45deg, rgb(14.6666666667%, 41%, 76.3333333333%), #2c7be5);
+  --orkestra-progress-gradient: linear-gradient(-45deg, rgb(14.6666666667%, 41%, 76.3333333333%), #2c7be5);
   --orkestra-bg-circle-shape: none;
-  --orkestra-bg-circle-shape-bg: #4695ff;
-  --orkestra-modal-shape-header: linear-gradient(-45deg, #1970e2, #4695ff);
-  --orkestra-modal-shape-header-bg: #4494ff;
+  --orkestra-bg-circle-shape-bg: #2c7be5;
+  --orkestra-modal-shape-header: linear-gradient(-45deg, rgb(14.6666666667%, 41%, 76.3333333333%), #2c7be5);
+  --orkestra-modal-shape-header-bg: #2c7be5;
   --fc-button-bg-color: #252c36;
   --fc-button-border-color: #252c36;
   --fc-button-hover-bg-color: #0f141c;
@@ -589,6 +590,8 @@
   --orkestra-box-shadow-inset: inset 0 1px 2px rgba($black, 0.075);
   --orkestra-input-focus-border-color-global: rgb(8.6274509804%, 24.1176470588%, 44.9019607843%);
   --orkestra-bg-navbar-glass: rgba(11, 23, 39, 0.96);
+  --orkestra-navbar-hairline-color: transparent;
+  --orkestra-navbar-vertical-default-label-color: #5e6e82;
   --orkestra-navbar-vertical-default-link-color: #9da9bb;
   --orkestra-navbar-vertical-default-link-hover-color: #edf2f9;
   --orkestra-navbar-vertical-default-link-active-color: #2c7be5;
@@ -903,7 +906,7 @@ strong {
 }
 
 small, .small {
-  font-size: 75%;
+  font-size: 0.6944444444rem;
 }
 
 mark, .mark {
@@ -955,7 +958,7 @@ pre {
   margin-top: 0;
   margin-bottom: 1rem;
   overflow: auto;
-  font-size: 75%;
+  font-size: 0.6944444444rem;
 }
 pre code {
   font-size: inherit;
@@ -964,7 +967,7 @@ pre code {
 }
 
 code {
-  font-size: 75%;
+  font-size: 0.6944444444rem;
   color: var(--orkestra-code-color);
   word-wrap: break-word;
 }
@@ -974,7 +977,7 @@ a > code {
 
 kbd {
   padding: 0.1875rem 0.375rem;
-  font-size: 75%;
+  font-size: 0.6944444444rem;
   color: var(--orkestra-body-bg);
   background-color: var(--orkestra-body-color);
   border-radius: 0.25rem;
@@ -1262,7 +1265,7 @@ progress {
 }
 
 .initialism {
-  font-size: 75%;
+  font-size: 0.6944444444rem;
   text-transform: uppercase;
 }
 
@@ -1277,7 +1280,7 @@ progress {
 .blockquote-footer {
   margin-top: -1rem;
   margin-bottom: 1rem;
-  font-size: 75%;
+  font-size: 0.6944444444rem;
   color: #68707c;
 }
 .blockquote-footer::before {
@@ -1309,7 +1312,7 @@ progress {
 }
 
 .figure-caption {
-  font-size: 75%;
+  font-size: 0.6944444444rem;
   color: var(--orkestra-gray-600);
 }
 
@@ -3923,7 +3926,7 @@ textarea.form-control-lg {
   --orkestra-btn-hover-border-color: transparent;
   --orkestra-btn-box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.15), 0 1px 1px rgba(0, 0, 0, 0.075);
   --orkestra-btn-disabled-opacity: 0.5;
-  --orkestra-btn-focus-box-shadow: 0 0 0 0 rgba(var(--orkestra-btn-focus-shadow-rgb), .5);
+  --orkestra-btn-focus-box-shadow: 0 0 0 0.25rem rgba(var(--orkestra-btn-focus-shadow-rgb), .5);
   display: inline-block;
   padding: var(--orkestra-btn-padding-y) var(--orkestra-btn-padding-x);
   font-family: var(--orkestra-btn-font-family);
@@ -5062,7 +5065,7 @@ fieldset:disabled .tox .tox-dialog__footer .tox-button--secondary,
   --orkestra-navbar-toggler-icon-bg: url("data:image/svg+xml;charset=utf8,%3Csvg viewBox='0 0 30 30' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath stroke='%2398a1ac' stroke-width='2' stroke-linecap='round' stroke-miterlimit='10' d='M0 6h30M0 14h30M0 22h30'/%3E%3C/svg%3E");
   --orkestra-navbar-toggler-border-color: rgba(var(--orkestra-emphasis-color-rgb), 0.1);
   --orkestra-navbar-toggler-border-radius: var(--orkestra-border-radius);
-  --orkestra-navbar-toggler-focus-width: 0;
+  --orkestra-navbar-toggler-focus-width: 0.25rem;
   --orkestra-navbar-toggler-transition: box-shadow 0.15s ease-in-out;
   position: relative;
   display: flex;
@@ -5933,7 +5936,7 @@ fieldset:disabled .tox .tox-dialog__footer .tox-button--secondary,
 .badge {
   --orkestra-badge-padding-x: 0.711111em;
   --orkestra-badge-padding-y: 0.355555em;
-  --orkestra-badge-font-size: 0.75em;
+  --orkestra-badge-font-size: 0.6944444444rem;
   --orkestra-badge-font-weight: 600;
   --orkestra-badge-color: #fff;
   --orkestra-badge-border-radius: var(--orkestra-border-radius);
@@ -19419,6 +19422,10 @@ samp {
   background-color: var(--orkestra-bg-navbar-glass);
 }
 
+.navbar-top.navbar-glass {
+  box-shadow: inset 0 -1px 0 var(--orkestra-navbar-hairline-color);
+}
+
 .navbar-brand {
   font-weight: 800;
 }
@@ -19628,6 +19635,9 @@ samp {
   color: var(--orkestra-btn-orkestra-primary-hover-color);
   box-shadow: var(--orkestra-btn-orkestra-hover-box-shadow);
 }
+.btn-orkestra-primary:focus-visible {
+  box-shadow: var(--orkestra-btn-orkestra-box-shadow), 0 0 0 0.25rem var(--orkestra-input-btn-focus-color);
+}
 .btn-orkestra-primary:active {
   box-shadow: none !important;
   color: var(--orkestra-btn-orkestra-primary-active-color);
@@ -19657,6 +19667,9 @@ samp {
 .btn-orkestra-success:hover:not(.disabled):not(:disabled), .btn-orkestra-success:focus:not(.disabled):not(:disabled) {
   color: var(--orkestra-btn-orkestra-success-hover-color);
   box-shadow: var(--orkestra-btn-orkestra-hover-box-shadow);
+}
+.btn-orkestra-success:focus-visible {
+  box-shadow: var(--orkestra-btn-orkestra-box-shadow), 0 0 0 0.25rem var(--orkestra-input-btn-focus-color);
 }
 .btn-orkestra-success:active {
   box-shadow: none !important;
@@ -19688,6 +19701,9 @@ samp {
   color: var(--orkestra-btn-orkestra-info-hover-color);
   box-shadow: var(--orkestra-btn-orkestra-hover-box-shadow);
 }
+.btn-orkestra-info:focus-visible {
+  box-shadow: var(--orkestra-btn-orkestra-box-shadow), 0 0 0 0.25rem var(--orkestra-input-btn-focus-color);
+}
 .btn-orkestra-info:active {
   box-shadow: none !important;
   color: var(--orkestra-btn-orkestra-info-active-color);
@@ -19717,6 +19733,9 @@ samp {
 .btn-orkestra-warning:hover:not(.disabled):not(:disabled), .btn-orkestra-warning:focus:not(.disabled):not(:disabled) {
   color: var(--orkestra-btn-orkestra-warning-hover-color);
   box-shadow: var(--orkestra-btn-orkestra-hover-box-shadow);
+}
+.btn-orkestra-warning:focus-visible {
+  box-shadow: var(--orkestra-btn-orkestra-box-shadow), 0 0 0 0.25rem var(--orkestra-input-btn-focus-color);
 }
 .btn-orkestra-warning:active {
   box-shadow: none !important;
@@ -19748,6 +19767,9 @@ samp {
   color: var(--orkestra-btn-orkestra-danger-hover-color);
   box-shadow: var(--orkestra-btn-orkestra-hover-box-shadow);
 }
+.btn-orkestra-danger:focus-visible {
+  box-shadow: var(--orkestra-btn-orkestra-box-shadow), 0 0 0 0.25rem var(--orkestra-input-btn-focus-color);
+}
 .btn-orkestra-danger:active {
   box-shadow: none !important;
   color: var(--orkestra-btn-orkestra-danger-active-color);
@@ -19777,6 +19799,9 @@ samp {
 .btn-orkestra-default:hover:not(.disabled):not(:disabled), .btn-orkestra-default:focus:not(.disabled):not(:disabled) {
   color: var(--orkestra-btn-orkestra-default-hover-color);
   box-shadow: var(--orkestra-btn-orkestra-hover-box-shadow);
+}
+.btn-orkestra-default:focus-visible {
+  box-shadow: var(--orkestra-btn-orkestra-box-shadow), 0 0 0 0.25rem var(--orkestra-input-btn-focus-color);
 }
 .btn-orkestra-default:active {
   box-shadow: none !important;
@@ -19926,6 +19951,24 @@ samp {
 .tox .tox-dialog__footer .disabled.tox-button:last-child, .tox .tox-menu__footer .disabled.tox-button--secondary,
 .tox .tox-dialog__footer .disabled.tox-button--secondary {
   box-shadow: var(--orkestra-btn-box-shadow);
+}
+
+.btn:not(.btn-link):not([class*=btn-outline-]):disabled, .tox .tox-menu__footer .tox-button:not(.btn-link):not([class*=btn-outline-]):disabled:last-child,
+.tox .tox-dialog__footer .tox-button:not(.btn-link):not([class*=btn-outline-]):disabled:last-child, .tox .tox-menu__footer .tox-button--secondary:not(.btn-link):not([class*=btn-outline-]):disabled,
+.tox .tox-dialog__footer .tox-button--secondary:not(.btn-link):not([class*=btn-outline-]):disabled, .btn:not(.btn-link):not([class*=btn-outline-]).disabled, .tox .tox-menu__footer .tox-button:not(.btn-link):not([class*=btn-outline-]).disabled:last-child,
+.tox .tox-dialog__footer .tox-button:not(.btn-link):not([class*=btn-outline-]).disabled:last-child, .tox .tox-menu__footer .tox-button--secondary:not(.btn-link):not([class*=btn-outline-]).disabled,
+.tox .tox-dialog__footer .tox-button--secondary:not(.btn-link):not([class*=btn-outline-]).disabled {
+  opacity: 1;
+  color: var(--orkestra-gray-700);
+  background-color: var(--orkestra-gray-200);
+  border-color: var(--orkestra-gray-400);
+}
+
+.btn-link:disabled, .btn-link.disabled,
+[class*=btn-outline-]:disabled,
+[class*=btn-outline-].disabled {
+  opacity: 1;
+  color: var(--orkestra-gray-600);
 }
 
 .btn-primary, .tox .tox-menu__footer .tox-button:last-child,
@@ -22634,38 +22677,6 @@ h5, .h5 {
   background-position: center;
 }
 
-.bg-auth-circle-shape,
-.bg-auth-circle-shape-2 {
-  display: none;
-}
-@media (min-width: 992px) {
-  .bg-auth-circle-shape,
-  .bg-auth-circle-shape-2 {
-    display: block;
-  }
-}
-
-.bg-auth-circle-shape {
-  position: absolute;
-  left: -8.75rem;
-  top: -5.125rem;
-}
-
-.bg-auth-circle-shape-2 {
-  position: absolute;
-  right: -6.25rem;
-  bottom: -2.4375rem;
-}
-
-.bg-auth-card-shape {
-  background-position: 100% 100%;
-}
-@media (min-width: 768px) {
-  .bg-auth-card-shape {
-    background-position: 100% 133%;
-  }
-}
-
 .bg-shape {
   position: relative;
   overflow: hidden;
@@ -22955,7 +22966,7 @@ h5, .h5 {
 /*                               Navbar Vertical                              */
 /* -------------------------------------------------------------------------- */
 .safari .navbar-vertical .navbar-nav .nav {
-  font-size: 14px;
+  font-size: 0.8333333333rem;
 }
 
 .navbar-vertical {
@@ -23005,14 +23016,14 @@ h5, .h5 {
   margin-top: 0.5625rem;
 }
 .navbar-vertical .navbar-vertical-label {
-  font-size: 0.75rem;
+  font-size: 0.8333333333rem;
   color: var(--orkestra-navbar-vertical-default-label-color);
 }
 .navbar-vertical .dropdown-indicator {
   padding-left: 1rem !important;
 }
 .navbar-vertical .navbar-nav {
-  font-size: 0.875rem;
+  font-size: 0.8333333333rem;
   font-weight: 500;
 }
 .navbar-vertical .navbar-nav .nav-link {
@@ -23085,6 +23096,9 @@ h5, .h5 {
 }
 .navbar-vertical .navbar-vertical-divider {
   color: var(--orkestra-navbar-vertical-default-hr-color);
+}
+.navbar-vertical:not(.navbar-card):not(.navbar-vibrant):not(.navbar-inverted) .navbar-collapse {
+  box-shadow: inset 1px 0 0 var(--orkestra-navbar-hairline-color);
 }
 .navbar-vertical.navbar-inverted .navbar-collapse {
   background-color: var(--orkestra-navbar-vertical-inverted-bg-color);
@@ -24527,7 +24541,7 @@ html[dir=rtl] .img-dropdown {
 }
 .search-box .search-box-icon {
   position: absolute;
-  color: var(--orkestra-gray-400);
+  color: var(--orkestra-gray-500);
   top: 50%;
   right: 0.9rem;
   transform: translateY(-48%);
@@ -24542,8 +24556,7 @@ html[dir=rtl] .img-dropdown {
   padding-right: 2rem;
   padding-left: 2rem;
   line-height: 1.7;
-  border-radius: 50rem;
-  box-shadow: none;
+  border-radius: var(--orkestra-border-radius);
 }
 .search-box .search-input::-webkit-search-cancel-button {
   display: none;
@@ -25951,6 +25964,10 @@ label {
 .form-switch .orkestra-form-check-input.form-check-input {
   background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='-4 -4 8 8'%3E%3Ccircle r='3' fill='%23fff'/%3E%3C/svg%3E");
 }
+.form-switch .form-check-input {
+  width: 2.75rem;
+  height: 1.5rem;
+}
 
 .form-check-line-through + label {
   transition: all 0.2s ease-in-out;
@@ -26212,7 +26229,7 @@ option:disabled {
   border: var(--orkestra-border-color);
   color: var(--orkestra-gray-800);
   font-weight: 700;
-  font-size: 0.875rem;
+  font-size: 0.8333333333rem;
   border-top-right-radius: var(--orkestra-border-radius);
   border-top-left-radius: var(--orkestra-border-radius);
 }
@@ -26234,8 +26251,12 @@ option:disabled {
   border-bottom: 2px solid var(--orkestra-primary);
 }
 
+.nav-pills {
+  --orkestra-nav-pills-link-active-bg: rgb(15.5294117647%, 43.4117647059%, 80.8235294118%);
+}
+
 .nav-pills-orkestra {
-  --orkestra-nav-link-font-size: 0.875rem;
+  --orkestra-nav-link-font-size: 0.8333333333rem;
   --orkestra-nav-link-font-weight: 500;
   background-color: var(--orkestra-gray-100);
   border-radius: 0.25rem !important;
@@ -28112,8 +28133,8 @@ html[data-bs-theme=dark] .bg-priority-low:checked {
 /* -------------------------------------------------------------------------- */
 .stat-ribbon {
   position: absolute;
-  top: -4px;
-  left: -4px;
+  top: 0;
+  left: 0;
   width: 78px;
   height: 78px;
   overflow: hidden;
@@ -28173,29 +28194,65 @@ html[data-bs-theme=dark] .bg-priority-low:checked {
   height: 4px;
 }
 
-html:not([data-bs-theme=dark]) .card.border-4.border-primary {
-  border-color: var(--orkestra-primary-text-emphasis) !important;
+.stat-card {
+  border-right: 4px solid var(--orkestra-stat-card-accent, var(--orkestra-gray-300));
 }
-html:not([data-bs-theme=dark]) .card.border-4.border-secondary {
-  border-color: var(--orkestra-secondary-text-emphasis) !important;
+
+.stat-card-accent-primary {
+  --orkestra-stat-card-accent: var(--orkestra-primary);
 }
-html:not([data-bs-theme=dark]) .card.border-4.border-success {
-  border-color: var(--orkestra-success-text-emphasis) !important;
+
+.stat-card-accent-secondary {
+  --orkestra-stat-card-accent: var(--orkestra-secondary);
 }
-html:not([data-bs-theme=dark]) .card.border-4.border-info {
-  border-color: var(--orkestra-info-text-emphasis) !important;
+
+.stat-card-accent-success {
+  --orkestra-stat-card-accent: var(--orkestra-success);
 }
-html:not([data-bs-theme=dark]) .card.border-4.border-warning {
-  border-color: var(--orkestra-warning-text-emphasis) !important;
+
+.stat-card-accent-info {
+  --orkestra-stat-card-accent: var(--orkestra-info);
 }
-html:not([data-bs-theme=dark]) .card.border-4.border-danger {
-  border-color: var(--orkestra-danger-text-emphasis) !important;
+
+.stat-card-accent-warning {
+  --orkestra-stat-card-accent: var(--orkestra-warning);
 }
-html:not([data-bs-theme=dark]) .card.border-4.border-light {
-  border-color: var(--orkestra-light-text-emphasis) !important;
+
+.stat-card-accent-danger {
+  --orkestra-stat-card-accent: var(--orkestra-danger);
 }
-html:not([data-bs-theme=dark]) .card.border-4.border-dark {
-  border-color: var(--orkestra-dark-text-emphasis) !important;
+
+.stat-card-accent-light {
+  --orkestra-stat-card-accent: var(--orkestra-light);
+}
+
+.stat-card-accent-dark {
+  --orkestra-stat-card-accent: var(--orkestra-dark);
+}
+
+html:not([data-bs-theme=dark]) .stat-card-accent-primary {
+  --orkestra-stat-card-accent: var(--orkestra-primary-text-emphasis);
+}
+html:not([data-bs-theme=dark]) .stat-card-accent-secondary {
+  --orkestra-stat-card-accent: var(--orkestra-secondary-text-emphasis);
+}
+html:not([data-bs-theme=dark]) .stat-card-accent-success {
+  --orkestra-stat-card-accent: var(--orkestra-success-text-emphasis);
+}
+html:not([data-bs-theme=dark]) .stat-card-accent-info {
+  --orkestra-stat-card-accent: var(--orkestra-info-text-emphasis);
+}
+html:not([data-bs-theme=dark]) .stat-card-accent-warning {
+  --orkestra-stat-card-accent: var(--orkestra-warning-text-emphasis);
+}
+html:not([data-bs-theme=dark]) .stat-card-accent-danger {
+  --orkestra-stat-card-accent: var(--orkestra-danger-text-emphasis);
+}
+html:not([data-bs-theme=dark]) .stat-card-accent-light {
+  --orkestra-stat-card-accent: var(--orkestra-light-text-emphasis);
+}
+html:not([data-bs-theme=dark]) .stat-card-accent-dark {
+  --orkestra-stat-card-accent: var(--orkestra-dark-text-emphasis);
 }
 
 /* -------------------------------------------------------------------------- */
@@ -28209,19 +28266,6 @@ html:not([data-bs-theme=dark]) .card.border-4.border-dark {
   border-top: var(--orkestra-border-width) solid var(--orkestra-gray-600);
   border-bottom-right-radius: var(--orkestra-border-radius-lg);
   border-bottom-left-radius: var(--orkestra-border-radius-lg);
-}
-.module-save-bar .btn-primary:disabled, .module-save-bar .tox .tox-menu__footer .tox-button:disabled:last-child, .tox .tox-menu__footer .module-save-bar .tox-button:disabled:last-child,
-.module-save-bar .tox .tox-dialog__footer .tox-button:disabled:last-child,
-.tox .tox-dialog__footer .module-save-bar .tox-button:disabled:last-child,
-.module-save-bar .btn-primary.disabled,
-.module-save-bar .tox .tox-menu__footer .disabled.tox-button:last-child,
-.tox .tox-menu__footer .module-save-bar .disabled.tox-button:last-child,
-.module-save-bar .tox .tox-dialog__footer .disabled.tox-button:last-child,
-.tox .tox-dialog__footer .module-save-bar .disabled.tox-button:last-child {
-  opacity: 1;
-  color: var(--orkestra-gray-700);
-  background-color: var(--orkestra-gray-200);
-  border-color: var(--orkestra-gray-400);
 }
 
 /* -------------------------------------------------------------------------- */

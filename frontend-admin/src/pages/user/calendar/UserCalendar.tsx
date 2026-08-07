@@ -24,7 +24,7 @@ const UserCalendar = () => {
               <h4 className="text-700">
                 {t('userScaffold.calendar.comingSoonTitle')}
               </h4>
-              <p className="text-500 mb-0">
+              <p className="text-600 mb-0">
                 {t('userScaffold.calendar.comingSoonBody')}
               </p>
             </Card.Body>

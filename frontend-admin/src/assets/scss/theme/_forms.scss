@@ -73,6 +73,14 @@ label {
   .orkestra-form-check-input.form-check-input {
     background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='-4 -4 8 8'%3E%3Ccircle r='3' fill='%23fff'/%3E%3C/svg%3E");
   }
+  // WCAG 2.2 target-size floor (24px): switches are em-sized by default, so
+  // inside an fs-10 table a start/stop-a-module control shrank to 27×13px.
+  // Fixed rem sizing keeps every switch an adequate target regardless of the
+  // type context it sits in. Declared both-modes 2026-08-07.
+  .form-check-input {
+    width: 2.75rem;
+    height: 1.5rem;
+  }
 }
 
 .form-check-line-through {

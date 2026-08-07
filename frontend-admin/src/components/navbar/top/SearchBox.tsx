@@ -114,13 +114,13 @@ const SearchBox = ({ autoCompleteItem }: SearchBoxProps) => {
             id="navbar-search"
             placeholder={t('nav.search.placeholder')}
             aria-label={t('nav.search.placeholder')}
-            className="rounded-pill search-input"
+            className="search-input"
             value={searchInputValue}
             onChange={({ target }) => setSearchInputValue(target.value)}
           />
           <FontAwesomeIcon
             icon="search"
-            className="position-absolute text-400 search-box-icon"
+            className="position-absolute search-box-icon"
           />
           {(dropdownOpen || searchInputValue) && (
             <div className="search-box-close-btn-container">
