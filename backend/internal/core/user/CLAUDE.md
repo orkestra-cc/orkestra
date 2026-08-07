@@ -96,7 +96,7 @@ The companion tier-aware MFA reset is mounted by the auth module at `POST /v1/ad
 
 ## Service contract
 
-`iface.UserProvider` (`shared/iface/interfaces.go:28-53`) is the boundary. Consumers must go through this, never the concrete `services.UserService`.
+`iface.UserProvider` (`pkg/sdk/iface/interfaces.go:28-53`) is the boundary. Consumers must go through this, never the concrete `services.UserService`.
 
 Key method groups:
 
@@ -133,7 +133,7 @@ Key method groups:
 
 ## Rules
 
-- **Never import another module's `services/` or `repository/` package.** If you need something from auth or tenant, it should come through a `shared/iface` interface or be inverted so that module calls you.
+- **Never import another module's `services/` or `repository/` package.** If you need something from auth or tenant, it should come through a `pkg/sdk/iface` interface or be inverted so that module calls you.
 - **Never hardcode a role string** outside of the validator tags. Use the seeded role names as constants if you add new helpers — future role renames must be a single-grep operation.
 - **Use `GetUserForAuth` only from auth flows.** It returns password hashes — every other path must use `GetUserByID` / `GetUserByEmail` which return the scrubbed response DTO.
 - **Don't extend the HTTP surface for self-service flows** (password change, email verify). Those live on the auth module so the rate limiter and notification dependency are in scope.
@@ -144,5 +144,5 @@ Key method groups:
 - [`../auth/CLAUDE.md`](../auth/CLAUDE.md) — consumes `UserProvider` for every flow
 - [`../authz/CLAUDE.md`](../authz/CLAUDE.md) — reads `User.Role` via the same provider to honor the super_admin/administrator/developer shortcut in permission evaluation
 - [`../tenant/CLAUDE.md`](../tenant/CLAUDE.md) — depends on `user` to verify that invited userUUIDs exist before creating memberships
-- [`../../shared/iface/interfaces.go:28-53`](../../shared/iface/interfaces.go) — `UserProvider` interface definition
+- [`../../../pkg/sdk/iface/interfaces.go:28-53`](../../../pkg/sdk/iface/interfaces.go) — `UserProvider` interface definition
 - [Authentication flow](../../../../docs/Authentication_flow.md) — how `User.Role` threads through JWT claims and middleware

@@ -113,7 +113,7 @@ Registered in three groups with different middleware:
 
 ## Service contract for consumers
 
-Consumers depend on `iface.NotificationSender` from `shared/iface`, not on any package inside this module. The interface has three methods:
+Consumers depend on `iface.NotificationSender` from `pkg/sdk/iface`, not on any package inside this module. The interface has three methods:
 
 ```go
 IsConfigured(ctx) bool
@@ -142,5 +142,5 @@ Get the service via `module.GetTyped[iface.NotificationSender](deps.Services, mo
 ## Related
 
 - [Root CLAUDE.md](../../../../CLAUDE.md) — module map and architecture
-- [`shared/iface/interfaces.go`](../../shared/iface/interfaces.go) — `NotificationSender` interface definition
+- [`pkg/sdk/iface/interfaces.go`](../../../pkg/sdk/iface/interfaces.go) — `NotificationSender` interface definition
 - [`docs/Authentication_flow.md`](../../../../docs/Authentication_flow.md) — how auth consumes this module

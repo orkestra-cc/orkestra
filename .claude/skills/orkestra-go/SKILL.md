@@ -85,11 +85,11 @@ type Dependencies struct {
 
 **Modules never import each other's `services/` or `repository/` packages from `module.go`.** Cross-module deps go through:
 
-1. **`shared/iface/` interfaces.** Define the contract here (e.g. `UserProvider`, `AIModelProvider`, `PDFProvider`, `GraphProvider`, `RAGQueryProvider`, `JWTProvider`, `TenantProvider`, `AuthzProvider`, `NotificationSender`).
+1. **`pkg/sdk/iface/` interfaces.** Define the contract here (e.g. `UserProvider`, `AIModelProvider`, `PDFProvider`, `GraphProvider`, `RAGQueryProvider`, `JWTProvider`, `TenantProvider`, `AuthzProvider`, `NotificationSender`).
 2. **`ServiceRegistry` typed getters.** Producers `Register(key, impl)` in `Init`; consumers `MustGetTyped[T]` in their `Init` (or `GetTyped[T]` for soft deps). Service keys are typed constants in `pkg/sdk/module/services.go`.
 3. **`Dependencies()` declaration.** The registry topo-sorts modules so producers init before consumers.
 
-If you need a type that crosses module boundaries, **put it in `shared/iface/`** — not in the consumer's package, and not in the producer's package. The reverse pattern (iface importing addon types) is a smell — it leaks addon code into every build regardless of profile.
+If you need a type that crosses module boundaries, **put it in `pkg/sdk/iface/`** — not in the consumer's package, and not in the producer's package. The reverse pattern (iface importing addon types) is a smell — it leaks addon code into every build regardless of profile.
 
 ## Adding a new module
 
@@ -108,7 +108,7 @@ If you need a type that crosses module boundaries, **put it in `shared/iface/`**
    }
    ```
 3. Declare `Collections()` (registry auto-creates indexes), `NavItems()` (sidebar), `ConfigSchema()` (admin form + first-boot env-var seed), `Dependencies()` (toposort), `Permissions()` (authz catalog).
-4. Use `shared/iface` for cross-module deps. Add new interfaces there if needed.
+4. Use `pkg/sdk/iface` for cross-module deps. Add new interfaces there if needed.
 5. Register provided services with `deps.Services.Register(key, impl)`.
 6. **Add a `CLAUDE.md`** in the module directory if the module has non-obvious patterns.
 

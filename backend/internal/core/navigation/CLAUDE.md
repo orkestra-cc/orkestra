@@ -41,7 +41,7 @@ Both trees are computed per-request from the in-memory `[]NavItemSpec` the regis
 - **Modules**: none declared.
 - **Required services**: none.
 - **Optional services** (read at `Init`):
-  - `ServiceNavItems` — `[]module.NavItemSpec` populated by the registry before any module's `Init` runs (`shared/module/registry.go:153`). Empty slice if no modules declared nav items.
+  - `ServiceNavItems` — `[]module.NavItemSpec` populated by the registry before any module's `Init` runs (`pkg/sdk/module/registry.go:153`). Empty slice if no modules declared nav items.
   - `ServiceConfigService` — `*ModuleConfigService`, used as a `middleware.ModuleEnabledChecker` to skip items from disabled modules at request time.
 - **Provides**: none (no module consumes navigation; the frontend talks to it directly).
 - **Permissions contributed**: none.
@@ -70,7 +70,7 @@ Error codes (see `internal/shared/errcode/codes.go`):
 
 ## Service contract
 
-None. Navigation does not expose anything in `shared/iface` — no other backend module consumes it.
+None. Navigation does not expose anything in `pkg/sdk/iface` — no other backend module consumes it.
 
 ## Key invariants
 
@@ -109,8 +109,8 @@ Filtering by tenant kind + global system role still can't express per-org scope 
 
 ## Related
 
-- [`../../shared/module/registry.go:146-153`](../../shared/module/registry.go) — where nav items are collected and stamped with owner
-- [`../../shared/module/module.go`](../../shared/module/module.go) — `NavItemSpec` type definition
-- [`../../shared/middleware/module_enabled.go`](../../shared/middleware/module_enabled.go) — `ModuleEnabledChecker` interface
+- [`../../../pkg/sdk/module/registry.go:146-153`](../../../pkg/sdk/module/registry.go) — where nav items are collected and stamped with owner
+- [`../../../pkg/sdk/module/module.go`](../../../pkg/sdk/module/module.go) — `NavItemSpec` type definition
+- [`../../../pkg/sdk/modulegate/modulegate.go`](../../../pkg/sdk/modulegate/modulegate.go) — `ModuleEnabledChecker` interface
 - [`../authz/CLAUDE.md`](../authz/CLAUDE.md) — the provider the filter should eventually consult
 - [`../../../../frontend-admin/CLAUDE.md`](../../../../frontend-admin/CLAUDE.md) — how the frontend consumes `/v1/navigation`

@@ -90,7 +90,7 @@ func (m *Module) Enabled() bool { return true } // gated by ModuleConfigService 
 
 Rules the registry enforces:
 
-- **Never import another addon's `services/` or `repository/` package** from `module.go`. Use `shared/iface` interfaces and pull dependencies through `deps.Services.GetTyped[T]`. See [Service registry](/sdk/service-registry).
+- **Never import another addon's `services/` or `repository/` package** from `module.go`. Use `pkg/sdk/iface` interfaces and pull dependencies through `deps.Services.GetTyped[T]`. See [Service registry](/sdk/service-registry).
 - **All Mongo writes go through `shared/tenantrepo`** with an orgId scope. The `tenantscope` static analyzer (`make ci-backend`) fails CI if you bypass it.
 
 ## Step 3 — Declare collections

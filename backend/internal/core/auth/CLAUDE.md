@@ -362,7 +362,7 @@ Each successful action emits three audit lanes in parallel: (1) `slog.Info("auth
 
 No single interface is exposed from this module — its concrete services are consumed from the registry by type. The one published interface is:
 
-- **`iface.JWTProvider`** (`shared/iface/interfaces.go:56-62`) — just `GenerateAccessToken(user *User) (string, error)`. Consumed by the dev module to mint test tokens.
+- **`iface.JWTProvider`** (`pkg/sdk/iface/interfaces.go:56-62`) — just `GenerateAccessToken(user *User) (string, error)`. Consumed by the dev module to mint test tokens.
 
 Everything else (`services.AuthService`, `services.JWTService`, `services.PasswordService`, `services.PasswordAuthService`) is fetched with `MustGetTyped[*services.X]` by `cmd/server/main.go` or by middleware. This is intentional — the surface is too broad to pin as an interface today.
 

@@ -195,7 +195,7 @@ Request logging is **allowlist-only**: only the enumerated fields (`method`, `pa
 1. Create `backend/internal/addons/<name>/module.go` implementing the `Module` interface.
 2. Create `backend/cmd/server/catalog_<name>.go` with an `init()` that registers the factory in `optionalModules`.
 3. Declare `Collections()`, `NavItems()`, `ConfigSchema()`, `Dependencies()`.
-4. Use `shared/iface` interfaces for cross-module dependencies. Never import another module's `services/` or `repository/` package directly.
+4. Use `pkg/sdk/iface` interfaces for cross-module dependencies. Never import another module's `services/` or `repository/` package directly.
 
 See [backend/CLAUDE.md](backend/CLAUDE.md) for the full convention.
 

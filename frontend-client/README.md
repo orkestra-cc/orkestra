@@ -1,6 +1,6 @@
 # orkestra-client
 
-Tier-2 (external client) demo SPA. Consumes the ADR-0003 **client** API surface (`api.orkestra.com` / `api.localhost:3000`, JWT `aud=client`). Sibling to the operator console at [`/frontend`](../frontend) — separate cookie domain, separate OpenAPI surface, distinct visual language.
+Tier-2 (external client) demo SPA. Consumes the ADR-0003 **client** API surface (`api.orkestra.com` / `api.localhost:3000`, JWT `aud=client`). Sibling to the operator console at [`/frontend-admin`](../frontend-admin) — separate cookie domain, separate OpenAPI surface, distinct visual language.
 
 ## Stack
 
@@ -51,8 +51,8 @@ cd frontend-client
 VITE_API_BASE=http://api.localhost:3000 npm run codegen
 
 # or from inside the dev container (container name is stack-namespaced —
-# ${APP_NAME}-client-frontend-${ENV}; example below is orkestra-commons/development)
-docker exec orkestra-commons-client-frontend-development sh -c "VITE_API_BASE=http://api.localhost:3000 npm run codegen"
+# ${APP_NAME}-client-frontend-${ENV}; example below is orkestra/development)
+docker exec orkestra-client-frontend-development sh -c "VITE_API_BASE=http://api.localhost:3000 npm run codegen"
 ```
 
 The result is a single `src/api/openapi.gen.ts` consumed by `src/api/client.ts` via `openapi-fetch`. Commit the regenerated file — CI builds without a live backend, and committing keeps the type contract versioned alongside the SPA.
@@ -90,13 +90,13 @@ src/
 
 ## Roadmap (per the MVP plan)
 
-| Phase | Scope | Status |
-|---|---|---|
-| 1 | Scaffold (Vite + React + auth shell + i18n + Tailwind + dev container) | ✅ done |
-| 2 | Anonymous catalog browse + signup + email verification | ✅ done |
-| 3 | Login / account / profile / password change / MFA enrol | ✅ done |
-| 4 | Self-subscribe + Stripe Checkout (setup mode) + return URL | ✅ done |
-| 5 | Account dashboard — subscriptions list + detail (invoices, activity, cancel/reactivate, pay-outstanding), transactions, payment methods. Polymorphic-owner aware; owner switcher renders only when the caller has at least one owned tenant | ✅ done |
+| Phase | Scope                                                                                                                                                                                                                                       | Status  |
+| ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- |
+| 1     | Scaffold (Vite + React + auth shell + i18n + Tailwind + dev container)                                                                                                                                                                      | ✅ done |
+| 2     | Anonymous catalog browse + signup + email verification                                                                                                                                                                                      | ✅ done |
+| 3     | Login / account / profile / password change / MFA enrol                                                                                                                                                                                     | ✅ done |
+| 4     | Self-subscribe + Stripe Checkout (setup mode) + return URL                                                                                                                                                                                  | ✅ done |
+| 5     | Account dashboard — subscriptions list + detail (invoices, activity, cancel/reactivate, pay-outstanding), transactions, payment methods. Polymorphic-owner aware; owner switcher renders only when the caller has at least one owned tenant | ✅ done |
 
 Phase E AI runtime endpoints (deferred per ADR-0003) stay stubbed — the dashboard renders "Open service" placeholders until those routes land.
 

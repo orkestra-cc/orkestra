@@ -90,7 +90,7 @@ Each module follows: `module.go` → `handlers/` → `services/` → `repository
      sectioned rail instead of one flat form. Omit it and the form stays flat —
      that is a supported end state, not a gap.
 6. Declare `Dependencies()` if your module needs other modules to init first
-7. Use `shared/iface` interfaces for cross-module deps — add new interfaces there if needed
+7. Use `pkg/sdk/iface` interfaces for cross-module deps — add new interfaces there if needed
 8. Use `deps.Services.Register(key, impl)` to expose services to other modules
 
 Users enable the module via the admin UI at `/admin/modules` (takes effect immediately, no restart needed). For first boot of a fresh install, the module's `ConfigSchema().EnvVar` fields seed the initial `module_configs` document from the host environment, and its `EnabledByDefault` decides the initial enabled state — see [docker/CLAUDE.md](../docker/CLAUDE.md) for the env-var-vs-admin-UI split.
@@ -200,10 +200,10 @@ docker compose logs -f backend
 
 The dev backend builds `docker/Dockerfile.dev-backend` (golang:alpine, AIR pre-baked; a fork with a Chainguard subscription overrides the base via the `GO_BASE` build-arg). One infra base + one app file per environment (`docker-compose.{dev,staging,prod}.yml`) + an opt-in `docker-compose.observability.yml` — ADR-0006 removed the `minimal`/`full` runtime-profile compose files.
 
-**WSL2 caveat**: AIR doesn't detect file changes on Windows mounts. Rebuild manually (container names are stack-namespaced — `${APP_NAME}-<svc>-${ENV}`; example below is this checkout's dev stack, see [docker/CLAUDE.md](../docker/CLAUDE.md#multi-stack-model)):
+**WSL2 caveat**: AIR doesn't detect file changes on Windows mounts. Rebuild manually (container names are stack-namespaced — `${APP_NAME}-<svc>-${ENV}`; example below uses the shipped defaults, **not necessarily your stack** — read yours from `docker/.env`, see [docker/CLAUDE.md](../docker/CLAUDE.md#multi-stack-model)):
 ```bash
-docker exec orkestra-commons-backend-development go build -o /app/tmp/main ./cmd/server/
-docker restart orkestra-commons-backend-development
+docker exec orkestra-backend-development go build -o /app/tmp/main ./cmd/server/
+docker restart orkestra-backend-development
 ```
 
 **Log level**: controlled by `LOG_LEVEL` env var — `debug` (dev), `info` (staging), `warn` (prod).
@@ -222,7 +222,7 @@ docker restart orkestra-commons-backend-development
 
 - **Read the module's own CLAUDE.md** before modifying it — each core module (`notification`, `auth`, `authz`, `tenant`, `user`, `navigation`, `logging`) has one under `internal/core/<name>/`
 - **Use the module system** — don't add routes or init logic directly to main.go
-- **Use `shared/iface`** for cross-module deps — never import another module's services package from module.go
+- **Use `pkg/sdk/iface`** for cross-module deps — never import another module's services package from module.go
 - **Validate all inputs**, implement RBAC on every endpoint, never expose secrets in responses
 - **MongoDB indexes** — declare them in `Collections()`, don't create them manually
 - **Vulnerability allowlist** — `backend/.vulncheck-allowlist.txt` lists upstream-unfixed reachable CVEs accepted by `make backend-vulncheck` (and the Backend CI workflow). Each entry must be re-evaluated when the relevant dependency is bumped.
