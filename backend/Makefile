@@ -33,8 +33,12 @@ test:
 clean:
 	rm -rf bin/
 
+# Pinned, not @latest: air v1.67.2+ requires go >= 1.26.0 and this module is on
+# Go 1.25.12. v1.67.1 is the last release on `go 1.25`.
+AIR_VERSION ?= v1.67.1
+
 dev:
-	@which air > /dev/null 2>&1 || (echo "Installing air..." && go install github.com/air-verse/air@latest)
+	@which air > /dev/null 2>&1 || (echo "Installing air..." && go install github.com/air-verse/air@$(AIR_VERSION))
 	@PATH="$${HOME}/go/bin:$${PATH}" air
 
 deps:
