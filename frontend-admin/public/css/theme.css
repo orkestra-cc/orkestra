@@ -23386,7 +23386,7 @@ h5, .h5 {
     width: 50%;
   }
   .navbar-vertical-collapsed .navbar-vertical.navbar-expand-xxl + .content {
-    margin-left: 2.75rem;
+    margin-left: 4.25rem;
   }
   .navbar-vertical-collapsed .navbar-vertical.navbar-expand-xxl + .content .navbar-top {
     padding-left: 13rem;
@@ -23569,7 +23569,7 @@ h5, .h5 {
     width: 50%;
   }
   .navbar-vertical-collapsed .navbar-vertical.navbar-expand-xl + .content {
-    margin-left: 2.75rem;
+    margin-left: 4.25rem;
   }
   .navbar-vertical-collapsed .navbar-vertical.navbar-expand-xl + .content .navbar-top {
     padding-left: 13rem;
@@ -23752,7 +23752,7 @@ h5, .h5 {
     width: 50%;
   }
   .navbar-vertical-collapsed .navbar-vertical.navbar-expand-lg + .content {
-    margin-left: 2.75rem;
+    margin-left: 4.25rem;
   }
   .navbar-vertical-collapsed .navbar-vertical.navbar-expand-lg + .content .navbar-top {
     padding-left: 13rem;
@@ -23935,7 +23935,7 @@ h5, .h5 {
     width: 50%;
   }
   .navbar-vertical-collapsed .navbar-vertical.navbar-expand-md + .content {
-    margin-left: 2.75rem;
+    margin-left: 4.25rem;
   }
   .navbar-vertical-collapsed .navbar-vertical.navbar-expand-md + .content .navbar-top {
     padding-left: 13rem;
@@ -24118,7 +24118,7 @@ h5, .h5 {
     width: 50%;
   }
   .navbar-vertical-collapsed .navbar-vertical.navbar-expand-sm + .content {
-    margin-left: 2.75rem;
+    margin-left: 4.25rem;
   }
   .navbar-vertical-collapsed .navbar-vertical.navbar-expand-sm + .content .navbar-top {
     padding-left: 13rem;
@@ -24301,7 +24301,7 @@ h5, .h5 {
   width: 50%;
 }
 .navbar-vertical-collapsed .navbar-vertical.navbar-expand-xs + .content {
-  margin-left: 2.75rem;
+  margin-left: 4.25rem;
 }
 .navbar-vertical-collapsed .navbar-vertical.navbar-expand-xs + .content .navbar-top {
   padding-left: 13rem;

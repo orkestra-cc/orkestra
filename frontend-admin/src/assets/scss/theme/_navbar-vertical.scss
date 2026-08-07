@@ -306,7 +306,11 @@
         }
 
         + .content {
-          margin-left: $navbar-vertical-collapsed-width;
+          // +1.5rem: the bare collapsed width put the content flush against
+          // the rail's hairline (0px vs the 24px the expanded state has).
+          // With it, the gap matches expanded and the top bar's pulled
+          // margin (-1.5rem) lands its surface exactly on the rail edge.
+          margin-left: $navbar-vertical-collapsed-width + 1.5rem;
           .navbar-top {
             padding-left: $navbar-vertical-width -
               $navbar-vertical-collapsed-width + 4;
