@@ -29,7 +29,11 @@ const ModuleManagementPage: React.FC = () => {
           <Card.Body className="py-3 px-4">
             <div className="d-flex align-items-center justify-content-between flex-wrap">
               <div>
-                <h5 className="mb-0">{t('adminModules.pageTitle')}</h5>
+                {/* h3 = the level `PageHeader` renders, so this page's title
+                    matches its closest sibling (`/admin/modules/navigation`)
+                    and the module detail page instead of sitting two steps
+                    below both at card-title size. */}
+                <h3 className="mb-0">{t('adminModules.pageTitle')}</h3>
               </div>
               {stats && (
                 <div className="d-flex gap-3 fs-10 text-600">

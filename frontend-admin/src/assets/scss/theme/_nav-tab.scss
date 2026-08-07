@@ -27,9 +27,15 @@
     }
   }
 
+  // Same defect as the module config rail: the active tab was raw `--primary`
+  // (3.76:1 light / 4.35:1 dark) while its inactive siblings sat at 10.4:1 /
+  // 9.9:1 — the selected tab was the hardest one to read. The theme-aware
+  // `--primary-text-emphasis` lands 5.97:1 / 10.72:1. The 2px underline stays
+  // on raw `--primary`: it is a graphical boundary, not text, and at 3.76:1 it
+  // already clears the 3:1 floor while keeping the Acting Blue signal.
   .nav-link.active,
   .nav-item.show .nav-link {
-    color: var(--#{$prefix}primary);
+    color: var(--#{$prefix}primary-text-emphasis);
     background-color: transparent;
     border-bottom: 2px solid var(--#{$prefix}primary);
   }

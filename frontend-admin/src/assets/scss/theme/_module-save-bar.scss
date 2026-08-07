@@ -20,10 +20,35 @@
   // light, $card-bg-dark in dark), so the bar matches the card content it
   // overlays regardless of whether it sits inside a Card.Body or not.
   background-color: var(--#{$prefix}emphasis-bg);
-  border-top: var(--#{$prefix}border-width) solid var(--#{$prefix}border-color);
+  // `--border-color` measured 1.29:1 in light and 1.05:1 in dark against the
+  // surface on either side of it, so the bar had, in practice, no edge at all
+  // and content scrolled under it with nothing marking the boundary. This is
+  // the only thing separating a sticky overlay from the form it covers, so it
+  // owes the 3:1 non-text floor; `gray-600` is per-theme and clears it in both.
+  border-top: var(--#{$prefix}border-width) solid var(--#{$prefix}gray-600);
+  // The bar sits flush inside a card whose corners are `$border-radius-lg`;
+  // square corners against a rounded container read as a rendering fault.
+  // Only the bottom pair: the top edge is a seam, not a corner.
+  border-bottom-left-radius: var(--#{$prefix}border-radius-lg);
+  border-bottom-right-radius: var(--#{$prefix}border-radius-lg);
   // No box-shadow: Bootstrap's `$box-shadow` is a *downward* shadow
   // (`0 .5rem 1rem`) — invisible on a bar pinned to the bottom of the
   // viewport, and it would only double up on the shadow the enclosing
   // `.card` already casts. The border-top alone is enough separation from
   // the scrolling content above it.
+
+  // The bar's resting state is a *disabled* Save, so this is the state the
+  // operator sees most, and Bootstrap renders it as the primary fill at
+  // `opacity: .5`. That composites to 1.9-2.4:1 in light — an unreadable
+  // ghost — and to ~2.6-3.1:1 in dark, where it still reads as an enabled
+  // blue button, so a dark-theme operator clicks a no-op. Give it a real
+  // disabled treatment instead: a neutral fill at full opacity, with a label
+  // that clears AA on it (gray-700 on gray-200 = 7.85:1 in light).
+  .btn-primary:disabled,
+  .btn-primary.disabled {
+    opacity: 1;
+    color: var(--#{$prefix}gray-700);
+    background-color: var(--#{$prefix}gray-200);
+    border-color: var(--#{$prefix}gray-400);
+  }
 }

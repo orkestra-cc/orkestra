@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Navigate, useBlocker, useParams, useSearchParams } from 'react-router';
 import { Alert, Button, Card, Col, Modal, Row, Spinner } from 'react-bootstrap';
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { faTriangleExclamation } from '@fortawesome/free-solid-svg-icons';
 import { useTranslation } from 'react-i18next';
 import { OrkestraCardHeader } from 'components/common';
 import {
@@ -41,7 +43,6 @@ const ModuleDetailPage: React.FC = () => {
   const { data: allModules } = useGetModulesQuery();
   const { data: healthData } = useGetModulesHealthQuery();
 
-  const [selectedEnv, setSelectedEnv] = useState<string | null>(null);
   // The environment the operator asked for while unsaved edits were pending.
   // Held here until they confirm — see `handleEnvSelect` below.
   const [pendingEnv, setPendingEnv] = useState<string | null>(null);
@@ -51,7 +52,27 @@ const ModuleDetailPage: React.FC = () => {
   const environments = mod?.availableEnvironments?.length
     ? mod.availableEnvironments
     : ['production', 'sandbox'];
-  const currentEnv = selectedEnv || activeEnv;
+  // Which profile is on screen lives in the URL beside `?section=`, not in
+  // component state. It decides what every field below is bound to, so a link
+  // to this page that omits it is a link to a different page than the one the
+  // sender was looking at — and "which environment was that screenshot from?"
+  // is exactly the question this surface must never leave open. An unknown or
+  // stale value falls back to the active profile rather than binding the form
+  // to a profile that no longer exists.
+  const envParam = searchParams.get('env');
+  const currentEnv =
+    envParam && environments.includes(envParam) ? envParam : activeEnv;
+
+  const setCurrentEnv = (env: string) => {
+    setSearchParams(
+      prev => {
+        const next = new URLSearchParams(prev);
+        next.set('env', env);
+        return next;
+      },
+      { replace: true }
+    );
+  };
 
   // The ONE controller instance for this module's whole config surface.
   // Both branches below — the degradation stacked page (which hands this to
@@ -152,7 +173,7 @@ const ModuleDetailPage: React.FC = () => {
       setPendingEnv(env);
       return;
     }
-    setSelectedEnv(env);
+    setCurrentEnv(env);
   };
 
   const confirmEnvSwitch = () => {
@@ -162,7 +183,7 @@ const ModuleDetailPage: React.FC = () => {
     // this way they are gone even if the new environment's payload is
     // already cached and lands with nothing for the effect to react to.
     handleDiscard();
-    setSelectedEnv(pendingEnv);
+    setCurrentEnv(pendingEnv);
     setPendingEnv(null);
   };
 
@@ -180,10 +201,27 @@ const ModuleDetailPage: React.FC = () => {
 
   const health = healthData?.modules.find(h => h.moduleName === moduleName);
 
+  // A strip, not a badge, and rendered on every section rather than only on
+  // the Environments panel. The badge that used to carry this lives in the
+  // page header, which scrolls out of view after ~700px — so an operator
+  // editing OAuth credentials deep in a long panel had nothing on screen
+  // telling them the profile they were about to save is not the live one.
+  const inactiveEnvNotice = currentEnv !== activeEnv && (
+    <Alert variant="warning" className="fs-10 py-2 mb-3 d-flex gap-2">
+      <FontAwesomeIcon icon={faTriangleExclamation} className="mt-1" />
+      <span>
+        {t('adminModules.detail.env.notActiveWarning', {
+          environment: currentEnv,
+          active: activeEnv
+        })}
+      </span>
+    </Alert>
+  );
+
   const blockerModal = blocker.state === 'blocked' && (
     <Modal show centered onHide={() => blocker.reset()}>
       <Modal.Header closeButton>
-        <Modal.Title className="fs-8">
+        <Modal.Title>
           {t('adminModules.detail.configCard.unsavedTitle')}
         </Modal.Title>
       </Modal.Header>
@@ -204,7 +242,7 @@ const ModuleDetailPage: React.FC = () => {
   const envSwitchModal = pendingEnv && (
     <Modal show centered onHide={() => setPendingEnv(null)}>
       <Modal.Header closeButton>
-        <Modal.Title className="fs-8">
+        <Modal.Title>
           {t('adminModules.detail.configCard.unsavedTitle')}
         </Modal.Title>
       </Modal.Header>
@@ -258,6 +296,8 @@ const ModuleDetailPage: React.FC = () => {
                 onSelect={handleEnvSelect}
               />
             )}
+
+            {inactiveEnvNotice}
 
             <ModuleConfigSection module={mod} controller={controller} />
 
@@ -337,6 +377,8 @@ const ModuleDetailPage: React.FC = () => {
         </Col>
 
         <Col md={8} lg={9}>
+          {inactiveEnvNotice}
+
           {active === SECTION_OVERVIEW && (
             <ModuleOverviewPanel
               module={mod}

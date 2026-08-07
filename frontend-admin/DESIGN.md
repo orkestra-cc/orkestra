@@ -88,7 +88,7 @@ The confirmed anti-reference is the console's own past: Falcon's blue-tinted gra
 - Color is semantic — Orkestra Blue means "you can act here"; status colors mean status.
 - Operate-mode density: compact tables (`fs-10`, 8px vertical cell padding), information-first layouts.
 - Ambient, discreet elevation: soft shadows separate, tonal layers structure.
-- A permanently frozen dark theme, pixel-identical since 2026-08-05.
+- A permanently frozen dark theme, pixel-identical since 2026-08-05 apart from changes explicitly declared both-modes (see the Frozen Dark Rule).
 
 ## Colors
 
@@ -127,7 +127,9 @@ The **Cool Graphite** ramp — 11 steps, neutral-cool with a whisper of blue, hi
 ### Dark theme (frozen)
 Dark mode keeps the pre-retune Falcon palette as literals: canvas **#0b1727**, cards **#121e2d** (2.9% tint of the canvas), body text **#9da9bb**, with the old blue-tinted ramp inverted for its grays.
 
-**The Frozen Dark Rule.** The dark theme is pixel-frozen and permanently decoupled from the light ramp. Never derive a dark value from `$gray-*` or the light tokens; dark values are literals (see `_variables-dark.scss` and `root/_dark.scss`, which carry the freeze notes inline). Any future light retune must freeze its dark twins the same way.
+**The Frozen Dark Rule.** The dark theme is pixel-frozen and permanently decoupled from the light ramp. Never derive a dark value from `$gray-*` or the light tokens; dark values are literals (see `_variables-dark.scss` and `root/_dark.scss`, which carry the freeze notes inline). Any future light retune must freeze its dark twins the same way. Dark moves only for a change **declared both-modes**; on 2026-08-07 that was `$body-secondary-color-dark` (`#d8e2ef` → `#8494a8`, the de-emphasis fix below) and `$headings-color-dark`, pinned to the literal it already resolved to. Both are hand-picked literals, not derivations.
+
+**The Secondary-Is-Secondary Rule.** `--#{$prefix}secondary-color` — which `.text-muted` reads — must sit *below* body text, never above. It held `gray-900` until 2026-08-07 and so rendered every de-emphasized string (field help, group descriptions, `StatCard` captions and subtitles, muted table cells) at 14.07:1 against a body of 8.65:1: the whole de-emphasis layer ran backwards, and any hierarchy tuned against it was tuned against a lie. The trap is indirect — `$headings-color` used to resolve *through* this token, which is what forced it near-black. Headings now name their own ink (`$gray-900` / `#d8e2ef`), leaving secondary free to be secondary: `gray-600` (5.00:1 on a card, 4.54:1 on the canvas) and `#8494a8` in dark (5.43:1). De-emphasize with ink *or* with size, weight and case — but never invert the ramp to do it.
 
 **The Acting Blue Rule.** Orkestra Blue appears only where the operator can act or is acting (buttons, links, active/selected/focused states). Large decorative washes of primary are off-system.
 
@@ -150,6 +152,8 @@ Dark mode keeps the pre-retune Falcon palette as literals: canvas **#0b1727**, c
 
 **The fs-10 Table Rule.** Data tables run at `fs-10` (0.833rem): density is a feature of the Control Room, not a compromise. Don't bump table type up to body size to "improve readability" — contrast, not size, does that job here.
 
+**The On-Scale Rule.** Every size on screen is a step of `$font-sizes` — there is no 14px and no 12px in this console. Bootstrap's own defaults are the usual leak (`$font-size-sm` 0.875rem behind `size="sm"` controls, `$small-font-size` 75% behind `.form-text`, and `.nav-link`'s `--#{$prefix}nav-link-font-size`, which is *declared but never defined* outside the pill/tab variants, so a bare `<Nav>` silently inherits 1rem). Fix those at the token or component-SCSS level so the whole console moves together; adding an `fs-*` class at the call site patches one page and hides the leak everywhere else.
+
 ## Layout
 
 A vertical-navbar console: fixed sidebar (backend-driven navigation), content area on the `gray-200` canvas, content organized as white cards. Grid is Bootstrap 5's 12-column with breakpoints sm 576 / md 768 / lg 992 / xl 1200 / **xxl 1540** (widened for dense admin tables). Spacing uses Bootstrap utility steps (`mb-3`, `g-2`…); cards pad 1.25rem vertically. Density is deliberate: tables at 0.5rem vertical / 0.75rem horizontal cell padding (8px/12px), KPI rows as compact `StatCard` tiles, page headers via `PageHeader`. Layouts must hold at operator-realistic widths — wide tables scroll within their card, never the page.
@@ -168,7 +172,7 @@ Elevation is **ambient and discreet**: shadows separate surfaces from the canvas
 
 ## Shapes
 
-Restrained rounding: **0.25rem** default radius on controls and inputs, **0.375rem** on cards and containers, pill only where Bootstrap defaults it (badges-pill, avatars). Corners say "precision instrument", not "friendly app". Borders are 1px `gray-300` (inputs step down to `gray-400`); no decorative thick borders except the StatCard's 4px accent edge, which is semantic (it colors by status). No clipping tricks or asymmetric silhouettes — the one sanctioned diagonal is the StatCard corner ribbon.
+Restrained rounding: **0.25rem** default radius on controls and inputs, **0.375rem** on cards and containers, pill only where Bootstrap defaults it (badges-pill, avatars). Corners say "precision instrument", not "friendly app". Borders are 1px `gray-300` for dividers and structure; **controls step up to `gray-600`** — an input or a switch has nothing but its border to identify it, so it owes 3:1, which `gray-300`/`gray-400` never met. No decorative thick borders except the StatCard's 4px accent edge, which is semantic (it colors by status). No clipping tricks or asymmetric silhouettes — the one sanctioned diagonal is the StatCard corner ribbon.
 
 ## Components
 
@@ -193,18 +197,21 @@ Component philosophy: **quiet precision**. Clean white surfaces, discreet shadow
 - **Footer:** `AdvanceTableFooter` with rows-per-page, row info, nav buttons.
 
 ### StatCard (signature)
-The ERP-style KPI tile (`components/common/StatCard` + `SectionCard`; showcase at `reference/components/ui/StatCards.tsx`): 4px status-colored accent border, a faded 3×-scale icon, one big value, compact label. Attention states add the **corner ribbon** — a 45° band tucked into the top-right corner (78px box, uppercase 0.55rem/700 white text on a status color). This is the console's one expressive flourish; keep it earned (real attention states only, via the `badge` prop).
+The ERP-style KPI tile (`components/common/StatCard` + `SectionCard`; showcase at `reference/components/ui/StatCards.tsx`): 4px status-colored accent border, a faded 3×-scale icon, one big value, compact label. The accent edge is the tile's only non-textual status carrier, so it owes 3:1 against the canvas — in **light** it uses the `-text-emphasis` step of its hue, because the raw `success` and `info` read 1.81:1 and 1.96:1 there and the encoding simply is not there; dark keeps the raw hues, already at 8–9:1. Attention states add the **corner ribbon** — a 45° band tucked into the top-right corner (78px box, uppercase 0.55rem/700 white text on a status color). This is the console's one expressive flourish; keep it earned (real attention states only, via the `badge` prop).
 
 ### Inputs / Fields
-- **Style:** white field, 1px `gray-400` border, 0.25rem radius, body-size text (forms stay at 1rem even where tables are fs-10).
+- **Style:** white field, 1px `gray-600` border, 0.25rem radius. The border is the *only* thing identifying a white field on a white card, so it carries the 3:1 non-text floor rather than the `gray-400` it used to (1.29:1 light / 1.60:1 dark — a field with no perceptible edge). `gray-600` is redefined per theme, so one token clears both. Default-size controls carry body-size text — forms stay at 1rem even where tables are fs-10. `size="sm"` controls (the dense-form register used across the admin surfaces) sit one step down at **fs-10**, the same step as the `.form-label` above them, with help and validation text at **fs-11**. Both are theme tokens (`$input-font-size-sm`, `$form-text-font-size`), not call-site classes: never spell a font size on a `Form.Label`, `Form.Control` or `Form.Text`.
 - **Focus:** Orkestra Blue border with the standard Bootstrap focus ring (primary at 25% alpha). Focus must always be visible — WCAG 2.2 focus-appearance is a hard requirement.
-- **Error / Disabled:** `danger` border + feedback text via react-hook-form/yup; disabled fields drop to `gray-400` borders and muted text.
+- **Error / Disabled:** `danger` border + feedback text via react-hook-form/yup; disabled fields drop to `gray-400` borders and muted text. A disabled *button* gets a real neutral treatment — `gray-200` fill, `gray-700` label, full opacity — never the enabled fill at `opacity: .5`, which reads as an unreadable ghost in light and as a still-clickable button in dark.
+- **Placeholders** are text and owe 4.5:1: `gray-600`, not the `gray-400` that made every search box read as an empty field.
 
 ### Badges / Status pills
-`SubtleBadge` only: subtle tinted background (≈82% tint of the status color) with dark emphasized text of the same hue — status is readable in both themes without shouting. No solid-fill status badges in data surfaces.
+`SubtleBadge` only: subtle tinted background (≈82% tint of the status color) with dark emphasized text of the same hue — status is readable in both themes without shouting. No solid-fill status badges in data surfaces. The light emphasis shades sit at 45% (`success`/`info`/`warning`), deepened from 35/35/30% where the three chips this console shows most — `running`, `production`, `toggleable` — measured 3.96/4.11/4.17:1 on their own bg-subtle. And status colors mean status: a required dependency in a healthy module is not `warning`.
 
 ### Navigation
-Vertical sidebar rendered from the backend (`/v1/navigation`) — never hardcoded. Labels in body type; active item in Orkestra Blue; realm/section grouping per the navigation module. Dark sidebar colors are part of the frozen dark surface.
+Vertical sidebar rendered from the backend (`/v1/navigation`) — never hardcoded. Labels in body type; realm/section grouping per the navigation module. Dark sidebar colors are part of the frozen dark surface.
+
+**Active-item ink is `--#{$prefix}primary-text-emphasis`, not raw Orkestra Blue.** Blue-on-blue-subtle is the pairing every selected-state defaults to, and it measures 3.30:1 in light / 3.42:1 in dark against inactive siblings at 8.65:1 / 7.06:1 — the selected item ends up the *hardest* thing in its own list to read, which is the one thing a navigation list must never do. The emphasis token is theme-aware (deepened blue in light, light tint in dark) and lands 5.25:1 / 8.44:1. Selection also carries a non-chromatic mark — the module config rail uses a 3px inset left bar, the tab bar a 2px underline — so it survives greyscale and low vision. Fills, focus rings and hovers stay Orkestra Blue; only the *label of a selected item* takes the emphasis ink.
 
 ## Do's and Don'ts
 

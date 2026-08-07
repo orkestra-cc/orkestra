@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-08-05",
+  "generatedAt": "2026-08-07",
   "title": "Design System: Orkestra Operator Console",
   "extensions": {
     "colorMeta": {
@@ -128,9 +128,9 @@
       "name": "Text Input",
       "kind": "input",
       "refersTo": "card",
-      "description": "White field, gray-400 border, blue focus ring — forms stay at body size.",
+      "description": "White field, gray-600 border (controls owe 3:1), blue focus ring — default-size forms stay at body size, size=\"sm\" forms drop to fs-10.",
       "html": "<label class=\"ds-field\"><span class=\"ds-field-label\">Email address</span><input class=\"ds-input\" type=\"email\" placeholder=\"operator@example.com\" /></label>",
-      "css": ".ds-field { display: block; font-family: 'Open Sans', sans-serif; } .ds-field-label { display: block; font-size: 0.833rem; font-weight: 600; color: var(--orkestra-gray-900, #252c36); margin-bottom: 0.375rem; } .ds-input { width: 100%; font-family: inherit; font-size: 1rem; color: var(--orkestra-gray-700, #454c58); background: #fff; border: 1px solid var(--orkestra-gray-400, #bcc3cc); border-radius: 0.25rem; padding: 0.3125rem 0.75rem; transition: border-color 0.15s, box-shadow 0.15s; } .ds-input::placeholder { color: var(--orkestra-gray-500, #98a1ac); } .ds-input:focus { outline: none; border-color: var(--orkestra-primary, #2c7be5); box-shadow: 0 0 0 0.25rem rgba(44, 123, 229, 0.25); }"
+      "css": ".ds-field { display: block; font-family: 'Open Sans', sans-serif; } .ds-field-label { display: block; font-size: 0.833rem; font-weight: 500; color: var(--orkestra-gray-900, #252c36); margin-bottom: 0.375rem; } .ds-input { width: 100%; font-family: inherit; font-size: 1rem; color: var(--orkestra-gray-700, #454c58); background: #fff; border: 1px solid var(--orkestra-gray-600, #68707c); border-radius: 0.25rem; padding: 0.3125rem 0.75rem; transition: border-color 0.15s, box-shadow 0.15s; } .ds-input::placeholder { color: var(--orkestra-gray-600, #68707c); } .ds-input:focus { outline: none; border-color: var(--orkestra-primary, #2c7be5); box-shadow: 0 0 0 0.25rem rgba(44, 123, 229, 0.25); }"
     },
     {
       "name": "Subtle Badge",
@@ -197,7 +197,11 @@
       { "name": "The Acting Blue Rule", "body": "Orkestra Blue appears only where the operator can act or is acting (buttons, links, active/selected/focused states). Large decorative washes of primary are off-system.", "section": "colors" },
       { "name": "The Utility-Class Rule", "body": "Components never carry hex values. Color reaches JSX through Bootstrap/theme utilities or --orkestra-* CSS variables; charts read live values via getColor().", "section": "colors" },
       { "name": "The fs-10 Table Rule", "body": "Data tables run at fs-10 (0.833rem): density is a feature of the Control Room, not a compromise. Contrast, not size, does the readability job.", "section": "typography" },
-      { "name": "The Ambient-Only Rule", "body": "Don't invent intermediate shadow tiers or lift elements for emphasis. If something needs more weight, use tone or type, not a bigger shadow.", "section": "elevation" }
+      { "name": "The Ambient-Only Rule", "body": "Don't invent intermediate shadow tiers or lift elements for emphasis. If something needs more weight, use tone or type, not a bigger shadow.", "section": "elevation" },
+      { "name": "The On-Scale Rule", "body": "Every size on screen is a step of $font-sizes \u2014 there is no 14px and no 12px in this console. Bootstrap defaults are the usual leak ($font-size-sm behind size=\"sm\" controls, $small-font-size behind .form-text, and .nav-link's --orkestra-nav-link-font-size, declared but never defined outside the pill/tab variants, so a bare Nav silently inherits 1rem). Fix those at the token or component-SCSS level, not with an fs-* class at the call site.", "section": "typography" }
+    ,
+      { "name": "The Secondary-Is-Secondary Rule", "body": "--orkestra-secondary-color, which .text-muted reads, must sit below body text, never above. It held gray-900 until 2026-08-07 and rendered every de-emphasized string at 14.07:1 against a body of 8.65:1, inverting the whole hierarchy. Headings now name their own ink so secondary is free to be secondary: gray-600 in light, #8494a8 in dark.", "section": "colors" },
+      { "name": "The Legible-Selection Rule", "body": "The active item in a nav list takes --orkestra-primary-text-emphasis, not raw primary: blue on blue-subtle measures 3.30:1 light / 3.42:1 dark against inactive siblings at 8.65:1 / 7.06:1, making the selected item the hardest to read in its own list. Selection also carries a non-chromatic mark so it survives greyscale.", "section": "colors" }
     ],
     "dos": [
       "Do reach color through utilities and --orkestra-* variables — text-900, bg-200, border-300 — and through getColor() in charts.",

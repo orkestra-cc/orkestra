@@ -11,6 +11,15 @@ label {
   line-height: 1.45rem;
 }
 
+// `$code-font-size` is a percentage of the *root*, so a `<code>` inside help
+// text rendered ~14px against 11.11px of surrounding prose — the env var name
+// came out 26% larger and in saturated pink, making the Go constant the most
+// emphasized thing under every field. Tie it to its container instead; the
+// colour still marks it as code.
+.form-text code {
+  font-size: 1em;
+}
+
 .form-label-nogutter {
   margin-bottom: 0;
   .form-check-label {
