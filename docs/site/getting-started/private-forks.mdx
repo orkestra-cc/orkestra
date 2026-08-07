@@ -143,7 +143,7 @@ The wording inverts once, deliberately: the guard is **enabled** exactly when th
 git remote get-url --push upstream    # must print: DISABLED
 ```
 
-Re-verify this before every upstream cherry-pick round, not just once. The guard lives in each clone's `.git/config` — it isn't versioned, doesn't travel with merges, and no CI checks it, so a fresh clone, a new worktree, or a remote-rewiring script resets it silently.
+Re-verify this before every upstream cherry-pick round, not just once. The guard lives in each clone's `.git/config` — it isn't versioned, doesn't travel with merges, and no CI checks it, so a fresh clone or a remote-rewiring script resets it silently. (Linked worktrees share the clone's config, so the guard does carry over into them.)
 
 ### Trade-offs
 
