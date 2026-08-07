@@ -22,6 +22,14 @@
     .dropdown-menu {
       position: absolute;
     }
+    // Tighter vertical padding on the icon links: their default made the
+    // icon rail 54px tall, so the band's real height was content-driven
+    // (70px) and the $top-nav-height token was a dead letter. With this the
+    // min-height token actually governs the band.
+    .nav-link {
+      padding-top: 0.25rem;
+      padding-bottom: 0.25rem;
+    }
   }
   .navbar-collapse {
     overflow: auto;

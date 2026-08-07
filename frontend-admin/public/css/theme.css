@@ -19349,7 +19349,7 @@ samp {
 /*                                   Navbar                                   */
 /* -------------------------------------------------------------------------- */
 :root {
-  --orkestra-top-nav-height: 4.3125rem;
+  --orkestra-top-nav-height: 3.75rem;
 }
 @media (min-width: 992px) {
   :root.double-top-nav-layout {
@@ -23299,8 +23299,12 @@ h5, .h5 {
     padding: 0.35rem 0;
   }
   .navbar-vertical.navbar-expand-xxl .navbar-brand {
-    display: block;
+    display: flex;
+    align-items: center;
+    height: var(--orkestra-top-nav-height);
     text-align: center;
+    padding: 0;
+    margin: 0;
   }
   .navbar-vertical.navbar-expand-xxl .navbar-collapse {
     margin-top: -0.25rem;
@@ -23492,8 +23496,12 @@ h5, .h5 {
     padding: 0.35rem 0;
   }
   .navbar-vertical.navbar-expand-xl .navbar-brand {
-    display: block;
+    display: flex;
+    align-items: center;
+    height: var(--orkestra-top-nav-height);
     text-align: center;
+    padding: 0;
+    margin: 0;
   }
   .navbar-vertical.navbar-expand-xl .navbar-collapse {
     margin-top: -0.25rem;
@@ -23685,8 +23693,12 @@ h5, .h5 {
     padding: 0.35rem 0;
   }
   .navbar-vertical.navbar-expand-lg .navbar-brand {
-    display: block;
+    display: flex;
+    align-items: center;
+    height: var(--orkestra-top-nav-height);
     text-align: center;
+    padding: 0;
+    margin: 0;
   }
   .navbar-vertical.navbar-expand-lg .navbar-collapse {
     margin-top: -0.25rem;
@@ -23878,8 +23890,12 @@ h5, .h5 {
     padding: 0.35rem 0;
   }
   .navbar-vertical.navbar-expand-md .navbar-brand {
-    display: block;
+    display: flex;
+    align-items: center;
+    height: var(--orkestra-top-nav-height);
     text-align: center;
+    padding: 0;
+    margin: 0;
   }
   .navbar-vertical.navbar-expand-md .navbar-collapse {
     margin-top: -0.25rem;
@@ -24071,8 +24087,12 @@ h5, .h5 {
     padding: 0.35rem 0;
   }
   .navbar-vertical.navbar-expand-sm .navbar-brand {
-    display: block;
+    display: flex;
+    align-items: center;
+    height: var(--orkestra-top-nav-height);
     text-align: center;
+    padding: 0;
+    margin: 0;
   }
   .navbar-vertical.navbar-expand-sm .navbar-collapse {
     margin-top: -0.25rem;
@@ -24263,8 +24283,12 @@ h5, .h5 {
   padding: 0.35rem 0;
 }
 .navbar-vertical.navbar-expand-xs .navbar-brand {
-  display: block;
+  display: flex;
+  align-items: center;
+  height: var(--orkestra-top-nav-height);
   text-align: center;
+  padding: 0;
+  margin: 0;
 }
 .navbar-vertical.navbar-expand-xs .navbar-collapse {
   margin-top: -0.25rem;
@@ -24451,6 +24475,10 @@ h5, .h5 {
 }
 .navbar-top .navbar-nav-icons .dropdown-menu {
   position: absolute;
+}
+.navbar-top .navbar-nav-icons .nav-link {
+  padding-top: 0.25rem;
+  padding-bottom: 0.25rem;
 }
 .navbar-top .navbar-collapse {
   overflow: auto;

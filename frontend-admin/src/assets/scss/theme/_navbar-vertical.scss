@@ -201,8 +201,16 @@
         padding: 0.35rem 0;
       }
       .navbar-brand {
-        display: block;
+        // Flex + the band-height token (was display:block with the inner
+        // py-3 dictating ~71px): the rail's brand zone tracks the top band,
+        // so the logo stays vertically centered on the band's own center
+        // whatever height the token takes.
+        display: flex;
+        align-items: center;
+        height: $top-nav-height;
         text-align: center;
+        padding: 0;
+        margin: 0;
       }
       .navbar-collapse {
         margin-top: -0.25rem;
