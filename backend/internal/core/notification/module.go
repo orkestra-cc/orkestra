@@ -114,19 +114,41 @@ func (m *NotificationModule) Collections() []module.CollectionSpec {
 	}
 }
 
+// ConfigGroups upgrades /admin/modules/notification from one flat card to the
+// full-page rail. Three sections: Delivery (how mail leaves the platform),
+// Sender (the addresses recipients see), Branding (values injected into every
+// templated email). The SMTP connection settings live under Delivery and are
+// hidden until the provider is set to smtp.
+func (m *NotificationModule) ConfigGroups() []module.ConfigGroup {
+	return []module.ConfigGroup{
+		{Key: "delivery", Label: "Delivery", Order: 1,
+			Description: "How mail leaves the platform. With the default noop provider, rendered mail is logged to the backend instead of sent — set the provider to SMTP to reveal the connection settings."},
+		{Key: "sender", Label: "Sender", Order: 2,
+			Description: "The addresses recipients see on every message."},
+		{Key: "branding", Label: "Branding & templates", Order: 3,
+			Description: "Values injected into every templated email."},
+	}
+}
+
 func (m *NotificationModule) ConfigSchema() []module.ConfigField {
+	// The five SMTP connection settings are only meaningful when the provider
+	// dials a real server. Shared read-only condition — never mutated.
+	smtpOnly := []module.FieldCondition{{Key: "email.provider", In: []string{"smtp"}}}
 	return []module.ConfigField{
-		{Key: "email.provider", Label: "Email provider", Type: module.FieldString, Required: true, Default: "noop", EnvVar: "NOTIFICATION_EMAIL_PROVIDER"},
-		{Key: "email.from_address", Label: "From address", Type: module.FieldString, EnvVar: "NOTIFICATION_EMAIL_FROM"},
-		{Key: "email.from_name", Label: "From name", Type: module.FieldString, Default: "Orkestra", EnvVar: "NOTIFICATION_EMAIL_FROM_NAME"},
-		{Key: "email.reply_to", Label: "Reply-To address", Type: module.FieldString, EnvVar: "NOTIFICATION_EMAIL_REPLY_TO"},
-		{Key: "email.smtp.host", Label: "SMTP host", Type: module.FieldString, EnvVar: "SMTP_HOST"},
-		{Key: "email.smtp.port", Label: "SMTP port", Type: module.FieldInt, Default: "587", EnvVar: "SMTP_PORT"},
-		{Key: "email.smtp.username", Label: "SMTP username", Type: module.FieldString, EnvVar: "SMTP_USERNAME"},
-		{Key: "email.smtp.password", Label: "SMTP password", Type: module.FieldSecret, EnvVar: "SMTP_PASSWORD"},
-		{Key: "email.smtp.tls_mode", Label: "TLS mode", Type: module.FieldString, Default: "starttls", EnvVar: "SMTP_TLS_MODE"},
-		{Key: "app.name", Label: "App name (in templates)", Type: module.FieldString, Default: "Orkestra", EnvVar: "APP_NAME"},
-		{Key: "app.support_email", Label: "Support email (in templates)", Type: module.FieldString, EnvVar: "SUPPORT_EMAIL"},
+		{Key: "email.provider", Label: "Email provider", Group: "delivery", Type: module.FieldEnum, Options: []string{"noop", "smtp"}, Required: true, Default: "noop", EnvVar: "NOTIFICATION_EMAIL_PROVIDER"},
+		// Required composes with DependsOn as required-when-visible: the admin
+		// UI enforces it only while the provider is smtp. Username/password
+		// stay optional (unauthenticated relays), port/tls_mode have defaults.
+		{Key: "email.smtp.host", Label: "SMTP host", Group: "delivery", Type: module.FieldString, Required: true, DependsOn: smtpOnly, EnvVar: "SMTP_HOST"},
+		{Key: "email.smtp.port", Label: "SMTP port", Group: "delivery", Type: module.FieldInt, Default: "587", DependsOn: smtpOnly, EnvVar: "SMTP_PORT"},
+		{Key: "email.smtp.username", Label: "SMTP username", Group: "delivery", Type: module.FieldString, DependsOn: smtpOnly, EnvVar: "SMTP_USERNAME"},
+		{Key: "email.smtp.password", Label: "SMTP password", Group: "delivery", Type: module.FieldSecret, DependsOn: smtpOnly, EnvVar: "SMTP_PASSWORD"},
+		{Key: "email.smtp.tls_mode", Label: "TLS mode", Group: "delivery", Type: module.FieldEnum, Options: []string{"starttls", "tls", "none"}, Default: "starttls", DependsOn: smtpOnly, EnvVar: "SMTP_TLS_MODE"},
+		{Key: "email.from_address", Label: "From address", Group: "sender", Type: module.FieldString, EnvVar: "NOTIFICATION_EMAIL_FROM"},
+		{Key: "email.from_name", Label: "From name", Group: "sender", Type: module.FieldString, Default: "Orkestra", EnvVar: "NOTIFICATION_EMAIL_FROM_NAME"},
+		{Key: "email.reply_to", Label: "Reply-To address", Group: "sender", Type: module.FieldString, EnvVar: "NOTIFICATION_EMAIL_REPLY_TO"},
+		{Key: "app.name", Label: "App name (in templates)", Group: "branding", Type: module.FieldString, Default: "Orkestra", EnvVar: "APP_NAME"},
+		{Key: "app.support_email", Label: "Support email (in templates)", Group: "branding", Type: module.FieldString, EnvVar: "SUPPORT_EMAIL"},
 	}
 }
 

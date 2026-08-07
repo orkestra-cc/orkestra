@@ -8,7 +8,6 @@ import {
   type AuditEvent
 } from 'store/api/complianceApi';
 import ComplianceEmptyState from './ComplianceEmptyState';
-import SectionCard from 'components/common/SectionCard';
 import ComplianceTable from './ComplianceTable';
 import { formatDateTime, outcomeColor } from './complianceFormat';
 
@@ -70,28 +69,20 @@ const AuditEventsTab = () => {
 
   const items = data?.items ?? [];
 
-  return (
-    <SectionCard
+  return isLoading ? (
+    <Spinner animation="border" size="sm" className="mt-2" />
+  ) : items.length === 0 ? (
+    <ComplianceEmptyState
       icon={faClipboardList}
-      iconColor="primary"
-      title={t('adminCompliance.audit.sectionTitle')}
-    >
-      {isLoading ? (
-        <Spinner animation="border" size="sm" className="mt-2" />
-      ) : items.length === 0 ? (
-        <ComplianceEmptyState
-          icon={faClipboardList}
-          message={t('adminCompliance.audit.emptyMessage')}
-          hint={t('adminCompliance.audit.emptyHint')}
-        />
-      ) : (
-        <ComplianceTable
-          data={items}
-          columns={columns}
-          searchPlaceholder={t('adminCompliance.audit.searchPlaceholder')}
-        />
-      )}
-    </SectionCard>
+      message={t('adminCompliance.audit.emptyMessage')}
+      hint={t('adminCompliance.audit.emptyHint')}
+    />
+  ) : (
+    <ComplianceTable
+      data={items}
+      columns={columns}
+      searchPlaceholder={t('adminCompliance.audit.searchPlaceholder')}
+    />
   );
 };
 

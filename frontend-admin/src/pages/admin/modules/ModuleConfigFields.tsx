@@ -160,6 +160,10 @@ const ModuleConfigFields: React.FC<ModuleConfigFieldsProps> = ({
                       : t('adminModules.configFields.secretEnterPlaceholder')
                   }
                   isInvalid={Boolean(fieldError)}
+                  aria-invalid={fieldError ? true : undefined}
+                  aria-describedby={
+                    fieldError ? `cfg-${name}-feedback` : undefined
+                  }
                   {...register(name)}
                 />
                 <Button
@@ -174,7 +178,10 @@ const ModuleConfigFields: React.FC<ModuleConfigFieldsProps> = ({
                   <FontAwesomeIcon icon={revealed ? faEyeSlash : faEye} />
                 </Button>
                 {fieldError && (
-                  <Form.Control.Feedback type="invalid">
+                  <Form.Control.Feedback
+                    type="invalid"
+                    id={`cfg-${name}-feedback`}
+                  >
                     {feedbackForCode(t, fieldError)}
                   </Form.Control.Feedback>
                 )}
@@ -216,12 +223,21 @@ const ModuleConfigFields: React.FC<ModuleConfigFieldsProps> = ({
             <Form.Group key={key} className="mb-3">
               <Form.Label htmlFor={`cfg-${name}`}>
                 {label}
-                {field.required && <span className="text-danger ms-1">*</span>}
+                {field.required && (
+                  <span className="text-danger ms-1" aria-hidden="true">
+                    *
+                  </span>
+                )}
               </Form.Label>
               <Form.Select
                 id={`cfg-${name}`}
                 size="sm"
                 isInvalid={Boolean(fieldError)}
+                aria-invalid={fieldError ? true : undefined}
+                aria-describedby={
+                  fieldError ? `cfg-${name}-feedback` : undefined
+                }
+                aria-required={field.required || undefined}
                 {...register(name)}
               >
                 {!field.required && (
@@ -236,7 +252,10 @@ const ModuleConfigFields: React.FC<ModuleConfigFieldsProps> = ({
                 ))}
               </Form.Select>
               {fieldError && (
-                <Form.Control.Feedback type="invalid">
+                <Form.Control.Feedback
+                  type="invalid"
+                  id={`cfg-${name}-feedback`}
+                >
                   {feedbackForCode(t, fieldError)}
                 </Form.Control.Feedback>
               )}
@@ -251,7 +270,11 @@ const ModuleConfigFields: React.FC<ModuleConfigFieldsProps> = ({
           <Form.Group key={key} className="mb-3">
             <Form.Label htmlFor={`cfg-${name}`}>
               {label}
-              {field.required && <span className="text-danger ms-1">*</span>}
+              {field.required && (
+                <span className="text-danger ms-1" aria-hidden="true">
+                  *
+                </span>
+              )}
             </Form.Label>
             {isStringList ? (
               <Form.Control
@@ -265,6 +288,11 @@ const ModuleConfigFields: React.FC<ModuleConfigFieldsProps> = ({
                   t('adminModules.configFields.stringListPlaceholder')
                 }
                 isInvalid={Boolean(fieldError)}
+                aria-invalid={fieldError ? true : undefined}
+                aria-describedby={
+                  fieldError ? `cfg-${name}-feedback` : undefined
+                }
+                aria-required={field.required || undefined}
                 {...register(name)}
               />
             ) : (
@@ -274,11 +302,16 @@ const ModuleConfigFields: React.FC<ModuleConfigFieldsProps> = ({
                 size="sm"
                 placeholder={field.placeholder || field.default || ''}
                 isInvalid={Boolean(fieldError)}
+                aria-invalid={fieldError ? true : undefined}
+                aria-describedby={
+                  fieldError ? `cfg-${name}-feedback` : undefined
+                }
+                aria-required={field.required || undefined}
                 {...register(name)}
               />
             )}
             {fieldError && (
-              <Form.Control.Feedback type="invalid">
+              <Form.Control.Feedback type="invalid" id={`cfg-${name}-feedback`}>
                 {feedbackForCode(t, fieldError)}
               </Form.Control.Feedback>
             )}

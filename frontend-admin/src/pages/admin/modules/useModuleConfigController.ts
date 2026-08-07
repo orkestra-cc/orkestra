@@ -9,6 +9,7 @@ import {
 import {
   buildGroupTree,
   flattenTree,
+  unfilledRequiredKeys,
   visibleFields,
   type GroupNode
 } from './configModel';
@@ -78,6 +79,12 @@ export interface ModuleConfigController {
    */
   perGroup: ModuleConfigControllerGroupCount[];
   saveBarErrors: ModuleConfigControllerGroupCount[];
+  /**
+   * Node key → how many of that node's visible required fields are still
+   * empty, live against the form. Feeds `ModuleConfigRail`'s `statusFor`
+   * so the "to fill" badge tracks edits as the operator types.
+   */
+  unfilledByGroup: ReadonlyMap<string, number>;
   error: string | null;
   success: boolean;
   clearError: () => void;
@@ -231,6 +238,14 @@ export const useModuleConfigController = (
     }))
     .filter(g => g.count > 0);
 
+  const unfilledKeys = unfilledRequiredKeys(schema, values, secretStatus);
+  const unfilledByGroup = new Map<string, number>(
+    flatNodes.map(node => [
+      node.key,
+      node.fieldKeys.filter(k => unfilledKeys.has(k)).length
+    ])
+  );
+
   const onSave = async () => {
     if (!mod) return;
     const formValues = form.getValues();
@@ -326,6 +341,7 @@ export const useModuleConfigController = (
     errorCount,
     perGroup,
     saveBarErrors,
+    unfilledByGroup,
     error,
     success,
     clearError: () => setError(null),

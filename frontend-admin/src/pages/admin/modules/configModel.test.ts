@@ -5,6 +5,7 @@ import {
   isFieldVisible,
   visibleFields,
   configCompleteness,
+  unfilledRequiredKeys,
   flattenTree,
   hasCardRail,
   hasPageRail
@@ -278,6 +279,60 @@ describe('configCompleteness', () => {
 
   it('returns zeroes for a null schema', () => {
     expect(configCompleteness(null, {}, {})).toEqual({ filled: 0, total: 0 });
+  });
+});
+
+describe('unfilledRequiredKeys', () => {
+  it('reports empty visible required fields and skips hidden ones', () => {
+    const schema = [
+      field({
+        key: 'provider',
+        type: 'enum',
+        options: ['noop', 'smtp'],
+        required: true,
+        default: 'noop'
+      }),
+      field({
+        key: 'host',
+        required: true,
+        dependsOn: [{ key: 'provider', in: ['smtp'] }]
+      }),
+      field({ key: 'optional' })
+    ];
+    // Hidden host doesn't count; provider itself is filled.
+    expect(unfilledRequiredKeys(schema, { provider: 'noop' }, {})).toEqual(
+      new Set()
+    );
+    // Switching to smtp reveals host, which is empty → unfilled.
+    expect(unfilledRequiredKeys(schema, { provider: 'smtp' }, {})).toEqual(
+      new Set(['host'])
+    );
+    expect(
+      unfilledRequiredKeys(
+        schema,
+        { provider: 'smtp', host: 'mail.example' },
+        {}
+      )
+    ).toEqual(new Set());
+    // Whitespace-only is not filled.
+    expect(
+      unfilledRequiredKeys(schema, { provider: 'smtp', host: '   ' }, {})
+    ).toEqual(new Set(['host']));
+  });
+
+  it('counts a secret as filled when stored or freshly typed', () => {
+    const schema = [field({ key: 's', type: 'secret', required: true })];
+    expect(unfilledRequiredKeys(schema, {}, { s: true })).toEqual(new Set());
+    expect(
+      unfilledRequiredKeys(schema, { s: 'plaintext' }, { s: false })
+    ).toEqual(new Set());
+    expect(unfilledRequiredKeys(schema, {}, { s: false })).toEqual(
+      new Set(['s'])
+    );
+  });
+
+  it('returns an empty set for a null schema', () => {
+    expect(unfilledRequiredKeys(null, {}, {})).toEqual(new Set());
   });
 });
 
