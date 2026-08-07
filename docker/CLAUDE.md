@@ -45,7 +45,7 @@ docker inspect <container> \
 For *this* checkout's identity — which is only ever what its own env file says — read
 `grep -E '^(APP_NAME|ENV)=' docker/.env`.
 
-Full design rationale and migration notes: [`docs/superpowers/specs/2026-07-05-multi-stack-isolation-design.md`](../docs/superpowers/specs/2026-07-05-multi-stack-isolation-design.md).
+The rules above are the authoritative description; the model arrived in [#143](https://github.com/orkestra-cc/orkestra/pull/143) (`dde83ef3`), whose commit message and diff carry the migration detail.
 
 ## Module Purpose
 

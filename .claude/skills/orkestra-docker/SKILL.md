@@ -11,7 +11,7 @@ Low-level, per-service container surgery on the Orkestra stack. This skill **aut
 
 ## Multi-stack model (read this first)
 
-Every checkout × environment combination is **one Compose project**: `STACK=${APP_NAME}-${ENV}` (e.g. `orkestra-development`), computed from `docker/.env` and exported as `COMPOSE_PROJECT_NAME` by `orkestra.sh`. Full design: [docs/superpowers/specs/2026-07-05-multi-stack-isolation-design.md](../../../docs/superpowers/specs/2026-07-05-multi-stack-isolation-design.md).
+Every checkout × environment combination is **one Compose project**: `STACK=${APP_NAME}-${ENV}` (e.g. `orkestra-development`), computed from `docker/.env` and exported as `COMPOSE_PROJECT_NAME` by `orkestra.sh`. Full design: [`docker/CLAUDE.md` § Multi-Stack Model](../../../docker/CLAUDE.md#multi-stack-model).
 
 - **Containers**: `${APP_NAME}-<svc>-${ENV}` — e.g. `orkestra-backend-development`.
 - **Network**: `${STACK}_default` — Compose's own per-project default network. There is no shared `orkestra-network` bridge anymore.
