@@ -56,6 +56,24 @@ On this repo `docker-compose.staging.yml` (and dev) **bind-mount the source** an
 
 ## Verifying a deploy
 
+**A deploy now gates on `scripts/health-check.sh`** (container state + an HTTP `/health`
+probe per service), and `orkestra.sh status` runs the same script informationally. Run
+it directly for a fast verdict:
+
+```bash
+scripts/health-check.sh "$(grep -E '^ENV=' docker/.env | cut -d= -f2-)" all   # exit 0 = healthy
+```
+
+Services outside the deploy's `--scope` only warn, so a `--scope backend` deploy stays
+green when an unrelated frontend is already broken — read the warnings, don't just
+trust the exit code.
+
+⚠️ **Before 2026-08-07 that script did not exist**, and the seam in `orkestra.sh`
+printed `Health check script not found, skipping...` on staging and then still reported
+`Deployment successful` — on older checkouts the success banner is *not* evidence of
+health. (The same gap made every production deploy `die` at the health stage.) Verify
+by hand there.
+
 After the deploy reports success — container names are stack-namespaced (`${APP_NAME}-<svc>-${ENV}`, e.g. `orkestra-commons-backend-development` for this checkout's dev stack — see the `orkestra-docker` skill's detect step to read off the exact name), so filter on the `backend` substring or use `docker compose ps`:
 
 ```bash
