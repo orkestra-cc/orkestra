@@ -118,14 +118,20 @@ const ModuleConfigRail: React.FC<ModuleConfigRailProps> = ({
   return (
     <Nav className="flex-column module-config-rail">
       {leadingItems?.map(renderItem)}
+      {/* `text-700`, not the `text-500` these captions used to carry (2.62:1
+          light / 3.22:1 dark) nor `text-600`, which still lands 4.25:1 on the
+          dark card — under the 4.5 floor for 11.11px text. They now share the
+          rail entries' ink and separate themselves by size, weight and case
+          instead, which is the honest way round: de-emphasis by ink is what
+          put this console's hierarchy backwards in the first place. */}
       {treeCaption && (
-        <div className="fs-11 fw-semibold text-500 text-uppercase px-2 mt-3 mb-1">
+        <div className="fs-11 fw-semibold text-700 text-uppercase px-2 mt-3 mb-1">
           {treeCaption}
         </div>
       )}
       {renderNodes(tree)}
       {trailingCaption && (
-        <div className="fs-11 fw-semibold text-500 text-uppercase px-2 mt-3 mb-1">
+        <div className="fs-11 fw-semibold text-700 text-uppercase px-2 mt-3 mb-1">
           {trailingCaption}
         </div>
       )}

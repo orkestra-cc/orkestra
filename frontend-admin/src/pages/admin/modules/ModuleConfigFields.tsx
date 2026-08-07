@@ -84,6 +84,15 @@ export interface ModuleConfigFieldsProps {
  * for the flat/legacy layout) and `ModuleConfigPanel` (one group at a time).
  * Handles all seven backend field types: string, bool, int, duration, secret,
  * enum, stringList.
+ *
+ * Field labels below carry **no typography classes on purpose**. The theme
+ * already puts `.form-label` on the scale (`$form-label-font-size: fs-10`,
+ * weight 500), and a `bool` field's label is a `.form-check-label` that
+ * `<Form.Check label=…>` renders for us — there is no prop to hand it the same
+ * classes. Spelling `fs-10 fw-semibold` on the other three types therefore
+ * bought a redundant size and a *divergent* weight (600 vs the switches' 500),
+ * visible as two label weights side by side in one panel. Leave them bare so
+ * every field type resolves to the same rule.
  */
 const ModuleConfigFields: React.FC<ModuleConfigFieldsProps> = ({
   schema,
@@ -133,7 +142,7 @@ const ModuleConfigFields: React.FC<ModuleConfigFieldsProps> = ({
           const revealed = revealedSecrets[key] || false;
           return (
             <Form.Group key={key} className="mb-3">
-              <Form.Label className="fs-10 fw-semibold" htmlFor={`cfg-${name}`}>
+              <Form.Label htmlFor={`cfg-${name}`}>
                 {label}
                 {alreadySet && (
                   <span className="badge badge-subtle-success ms-2 fs-11">
@@ -205,7 +214,7 @@ const ModuleConfigFields: React.FC<ModuleConfigFieldsProps> = ({
           const options = field.options ?? [];
           return (
             <Form.Group key={key} className="mb-3">
-              <Form.Label className="fs-10 fw-semibold" htmlFor={`cfg-${name}`}>
+              <Form.Label htmlFor={`cfg-${name}`}>
                 {label}
                 {field.required && <span className="text-danger ms-1">*</span>}
               </Form.Label>
@@ -240,7 +249,7 @@ const ModuleConfigFields: React.FC<ModuleConfigFieldsProps> = ({
 
         return (
           <Form.Group key={key} className="mb-3">
-            <Form.Label className="fs-10 fw-semibold" htmlFor={`cfg-${name}`}>
+            <Form.Label htmlFor={`cfg-${name}`}>
               {label}
               {field.required && <span className="text-danger ms-1">*</span>}
             </Form.Label>
@@ -273,11 +282,22 @@ const ModuleConfigFields: React.FC<ModuleConfigFieldsProps> = ({
                 {feedbackForCode(t, fieldError)}
               </Form.Control.Feedback>
             )}
-            {field.envVar && (
+            {/* `desc` used to render only *inside* the `field.envVar` guard,
+                so a documented field that declares no env var showed no help
+                at all — while `secret`/`bool`/`enum` rendered theirs
+                unconditionally. The description is the operator-facing half
+                and comes first; the env var is the deployment detail and
+                trails it. */}
+            {(desc || field.envVar) && (
               <Form.Text className="text-muted">
-                {t('adminModules.configFields.envPrefix')}
-                <code>{field.envVar}</code>
-                {desc ? ` — ${desc}` : ''}
+                {desc}
+                {desc && field.envVar && ' — '}
+                {field.envVar && (
+                  <>
+                    {t('adminModules.configFields.envPrefix')}
+                    <code>{field.envVar}</code>
+                  </>
+                )}
               </Form.Text>
             )}
           </Form.Group>

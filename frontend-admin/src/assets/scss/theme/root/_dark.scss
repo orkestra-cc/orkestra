@@ -41,7 +41,7 @@
           -17%
         )};
       --#{$prefix}btn-orkestra-#{$color}-active-background: #{shade-color(
-          $dark,
+          #0b1727,
           40%
         )};
       --#{$prefix}btn-orkestra-#{$color}-active-color: #{shift-color(
@@ -79,7 +79,7 @@
     //
     // Navbar glass
     //
-    --#{$prefix}bg-navbar-glass: #{rgba($gray-1100, 0.96)};
+    --#{$prefix}bg-navbar-glass: #{rgba(#0b1727, 0.96)};
 
     //
     // Navbar Vertical
@@ -101,12 +101,12 @@
     //
     // Reveal Button
     //
-    --#{$prefix}btn-reveal-focus-bg: #{shade-color($dark, 10%)};
+    --#{$prefix}btn-reveal-focus-bg: #{shade-color(#0b1727, 10%)};
     --#{$prefix}btn-reveal-hover-shadow: 0px 1px 2px 0px rgba(0, 0, 0, 0.8),
       0px 1px 1.5px 0px rgba(0, 0, 0, 0.7),
       0px 2px 5px 0px rgba(43, 45, 80, 0.4),
       0px 0px 0px 1px rgba(255, 255, 255, 0.06);
-    --#{$prefix}btn-reveal-focus-border-color: #{shade-color($dark, 12.5%)};
+    --#{$prefix}btn-reveal-focus-border-color: #{shade-color(#0b1727, 12.5%)};
 
     //
     // Orkestra Button
@@ -118,27 +118,27 @@
       0 3px 7px 0 rgba(0, 13, 33, 0.8), 0 1px 1.5px 0 #000801,
       0 1px 2px 0 #000801;
 
-    --#{$prefix}btn-orkestra-default-hover-color: #{shift-color($gray-400, -17%)};
-    --#{$prefix}btn-orkestra-default-active-background: #{shade-color($dark, 10%)};
-    --#{$prefix}btn-orkestra-default-active-border: #{shift-color($gray-400, -17%)};
+    --#{$prefix}btn-orkestra-default-hover-color: #{shift-color(#b6c1d2, -17%)};
+    --#{$prefix}btn-orkestra-default-active-background: #{shade-color(#0b1727, 10%)};
+    --#{$prefix}btn-orkestra-default-active-border: #{shift-color(#b6c1d2, -17%)};
 
     //
     // Avarar
     //
-    --#{$prefix}avatar-name-bg: #{$gray-800};
+    --#{$prefix}avatar-name-bg: #{#4d5969};
 
     //
     // Notification
     //
-    --#{$prefix}notification-title-bg: #{$gray-900};
-    --#{$prefix}notification-unread-hover-bg: #{darken($gray-1000, 5%)};
+    --#{$prefix}notification-title-bg: #{#344050};
+    --#{$prefix}notification-unread-hover-bg: #{darken(#232e3c, 5%)};
 
     //
     // Kanban
     //
-    --#{$prefix}kanban-bg: #{rgba($gray-1000, 0.25)};
-    --#{$prefix}kanban-item-bg: #{$gray-1000};
-    --#{$prefix}kanban-nav-link-card-details-hover-bg: #{$gray-900};
+    --#{$prefix}kanban-bg: #{rgba(#232e3c, 0.25)};
+    --#{$prefix}kanban-item-bg: #{#232e3c};
+    --#{$prefix}kanban-nav-link-card-details-hover-bg: #{#344050};
 
     //
     // Gradient Background
@@ -174,34 +174,34 @@
     //
     // Full Calendar
     //
-    --fc-page-bg-color: #{$dark};
-    --fc-neutral-bg-color: #{$gray-1000};
+    --fc-page-bg-color: #{#0b1727};
+    --fc-neutral-bg-color: #{#232e3c};
 
     //
     // React Slic
     //
-    --#{$prefix}slick-arrow-bg: #{rgba($dark, 0.8)};
+    --#{$prefix}slick-arrow-bg: #{rgba(#0b1727, 0.8)};
 
     //
     // React Datepicker
     //
-    --#{$prefix}react-datepicker-bg: #{$dark};
-    --#{$prefix}react-datepicker-header-bg: #{$gray-900};
+    --#{$prefix}react-datepicker-bg: #{#0b1727};
+    --#{$prefix}react-datepicker-header-bg: #{#344050};
 
     //
     // Leaflet map
     //
-    --#{$prefix}leaflet-bar-bg: #{$gray-900};
+    --#{$prefix}leaflet-bar-bg: #{#344050};
 
     //
     // Choices
     //
-    --#{$prefix}bg-choices-close-button: #{$gray-800};
+    --#{$prefix}bg-choices-close-button: #{#4d5969};
 
     //
     // Thumbnail
     //
-    --#{$prefix}thumbnail-bg-global: #{$gray-1000};
+    --#{$prefix}thumbnail-bg-global: #{#232e3c};
 
     //
     // Card span
@@ -217,78 +217,97 @@
     //
     // Scrollbar
     //
-    --#{$prefix}scrollbar-bg: #{rgba($gray-900, 0.6)};
+    --#{$prefix}scrollbar-bg: #{rgba(#344050, 0.6)};
 
     //
     // Custom disabled button
     //
-    --#{$prefix}btn-disabled-custom-background: #{rgba($dark, 0.65)};
+    --#{$prefix}btn-disabled-custom-background: #{rgba(#0b1727, 0.65)};
     --#{$prefix}btn-disabled-custom-color: #{rgba($white, 0.2)};
 
     //
     // Dropdown
     //
-    --#{$prefix}dropdown-bg-global: #{$gray-1000};
-    --#{$prefix}dropdown-link-hover-color-global: #{lighten($gray-300, 5%)};
-    --#{$prefix}dropdown-link-hover-bg-global: #{rgba($gray-1100, 0.4)};
+    --#{$prefix}dropdown-bg-global: #{#232e3c};
+    --#{$prefix}dropdown-link-hover-color-global: #{lighten(#d8e2ef, 5%)};
+    --#{$prefix}dropdown-link-hover-bg-global: #{rgba(#0b1727, 0.4)};
 
     //
     // Popover
     //
-    --#{$prefix}popover-header-bg-global: #{rgba($gray-1000, 0.25)};
+    --#{$prefix}popover-header-bg-global: #{rgba(#232e3c, 0.25)};
 
     //
     // Toast
     //
-    --#{$prefix}toast-bg-global: #{rgba($gray-900, 0.3)};
-    --#{$prefix}toast-header-bg-global: #{rgba($gray-900, 0.3)};
+    --#{$prefix}toast-bg-global: #{rgba(#344050, 0.3)};
+    --#{$prefix}toast-header-bg-global: #{rgba(#344050, 0.3)};
 
     //
+    // Table
+    //
+    // Frozen literal (old dark gray-1000): the theme owns the header band in
+    // BOTH modes now that call sites no longer pass a bg-* utility on thead.
+    // Was `transparent` when AdvanceTables still carried thead.bg-200 — that
+    // premise is gone, and without this pin dark headers render bandless.
+    --#{$prefix}table-head-bg: #232e3c;
+
+    //
+    // Plain .table text vars: Bootstrap compiles them from the light
+    // $table-color literal (#454c58), and only .table-<variant> gets a dark
+    // override below — so plain-table text leaks the light ramp onto dark
+    // cards (~1.9:1). Pin to the frozen dark body color; never derive from
+    // $gray-*.
+    .table {
+      --#{$prefix}table-color: #9da9bb;
+      --#{$prefix}table-striped-color: #9da9bb;
+    }
+
     // Table variants
     //
     @each $color, $value in $table-variants-dark {
       .table-#{$color} {
         --#{$prefix}table-bg: #{$value};
-        --#{$prefix}table-color: #{color-contrast(opaque($gray-1000, $value))};
+        --#{$prefix}table-color: #{color-contrast(opaque(#232e3c, $value))};
         --#{$prefix}table-hover-bg: #{mix(
-            color-contrast(opaque($gray-1000, $value)),
+            color-contrast(opaque(#232e3c, $value)),
             $value,
             percentage($table-hover-bg-factor)
           )};
         --#{$prefix}table-hover-color: #{color-contrast(
             mix(
-              color-contrast(opaque($gray-1000, $value)),
+              color-contrast(opaque(#232e3c, $value)),
               $value,
               percentage($table-hover-bg-factor)
             )
           )};
         --#{$prefix}table-striped-bg: #{mix(
-            color-contrast(opaque($gray-1000, $value)),
+            color-contrast(opaque(#232e3c, $value)),
             $value,
             percentage($table-striped-bg-factor)
           )};
         --#{$prefix}table-striped-color: #{color-contrast(
             mix(
-              color-contrast(opaque($gray-1000, $value)),
+              color-contrast(opaque(#232e3c, $value)),
               $value,
               percentage($table-striped-bg-factor)
             )
           )};
         --#{$prefix}table-active-bg: #{mix(
-            color-contrast(opaque($gray-1000, $value)),
+            color-contrast(opaque(#232e3c, $value)),
             $value,
             percentage($table-active-bg-factor)
           )};
         --#{$prefix}table-active-color: #{color-contrast(
             mix(
-              color-contrast(opaque($gray-1000, $value)),
+              color-contrast(opaque(#232e3c, $value)),
               $value,
               percentage($table-active-bg-factor)
             )
           )};
         --#{$prefix}table-border-color: #{rgba(
             mix(
-              color-contrast(opaque($gray-1000, $value)),
+              color-contrast(opaque(#232e3c, $value)),
               $value,
               percentage($table-border-factor)
             ),

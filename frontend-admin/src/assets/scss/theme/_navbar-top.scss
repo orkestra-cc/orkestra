@@ -252,7 +252,9 @@
     .dropdown-menu {
       .dropdown-item {
         &.active {
-          background-color: $gray-1100;
+          // Pinned to the pre-retune $gray-1100 literal — $gray-1100 itself
+          // tracks the live (retuned) ramp and isn't dark-mode-frozen.
+          background-color: #0b1727;
         }
       }
     }

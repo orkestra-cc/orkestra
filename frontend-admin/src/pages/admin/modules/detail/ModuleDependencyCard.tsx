@@ -81,9 +81,15 @@ const ModuleDependencyCard: React.FC<ModuleDependencyCardProps> = ({
             <div className="fw-semibold fs-10 text-600 mb-2">
               {t('adminModules.detail.requiredServices')}
             </div>
+            {/* `primary`, not `warning`. Amber means "degraded / caution" in
+                this system, and the required services of a healthy module are
+                neither — the colour was carrying emphasis, not status, which
+                is exactly what SubtleBadge is not for. Required reads as the
+                stronger of the two service lists against `secondary` optional
+                without claiming something is wrong. */}
             <div className="d-flex flex-wrap gap-1">
               {mod.requiredServices!.map(svc => (
-                <SubtleBadge key={svc} bg="warning" pill className="fs-11">
+                <SubtleBadge key={svc} bg="primary" pill className="fs-11">
                   {svc}
                 </SubtleBadge>
               ))}

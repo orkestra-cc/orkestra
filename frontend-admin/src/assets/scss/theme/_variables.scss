@@ -127,7 +127,7 @@ $enable-dark-mode: true !default;
 $component-active-bg: $primary !default;
 
 // scss-docs-start box-shadow-variables
-$box-shadow: 0 7px 14px 0 rgba(65, 69, 88, 0.1), 0 3px 6px 0 rgba(0, 0, 0, 0.07) !default;
+$box-shadow: 0 7px 14px 0 rgba(50, 58, 70, 0.1), 0 3px 6px 0 rgba(0, 0, 0, 0.07) !default;
 $box-shadow-sm: 0 0.125rem 0.25rem rgba($black, 0.075) !default;
 $box-shadow-lg: 0 1rem 4rem rgba($black, 0.175) !default;
 $box-shadow-inset: inset 0 1px 2px rgba($black, 0.075) !default;
@@ -139,6 +139,19 @@ $box-shadow-inset: inset 0 1px 2px rgba($black, 0.075) !default;
 $link-decoration: none !default;
 $link-hover-decoration: underline !default;
 $link-shade-percentage: 20% !default;
+// Bootstrap's default ($primary, #2c7be5) is 4.14:1 on white — below the
+// 4.5:1 AA floor for body-size text. A 15% shade (#2569c3) passes on every
+// surface links actually sit on (white 5.40, gray-100 5.17, gray-200 4.90)
+// while staying a derivation of Orkestra Blue. Dark is untouched:
+// $link-color-dark references $primary directly.
+$link-color: shade-color($primary, 15%) !default;
+
+// Code
+//
+// Bootstrap's default ($pink, #ff679b) is 2.74:1 on white — illegible small
+// mono text carrying the docs' key terms. #c22e64 keeps the pink identity at
+// 5.43:1. Dark is untouched: $code-color-dark references $pink directly.
+$code-color: #c22e64 !default;
 
 // Typography
 //
@@ -219,7 +232,13 @@ $h6-font-size: map_get($font-sizes, 10) !default;
 
 $headings-font-family: var(--#{$prefix}font-sans-serif) !default;
 $headings-font-weight: $font-weight-medium !default;
-$headings-color: var(--#{$prefix}secondary-color) !default;
+// Resolved through `--#{$prefix}secondary-color` until 2026-08. That
+// indirection is why `$body-secondary-color` had to be `gray-900`: headings
+// needed the darkest ink, and they were reading the *secondary* token to get
+// it — which in turn made `.text-muted` darker than body text everywhere.
+// Point headings at the ink they actually want, so the secondary token is free
+// to be secondary. Same value as before, so headings are unchanged.
+$headings-color: $gray-900 !default;
 
 // scss-docs-start display-headings
 $display-font-sizes: (
@@ -259,7 +278,7 @@ $card-cap-bg: rgba($body-emphasis-color, 0) !default;
 $card-cap-padding-y: $spacer !default;
 $card-cap-padding-x: 1.25rem !default;
 $card-bg: $white !default;
-$card-bg-dark: tint-color($gray-1100, 2.9%) !default;
+$card-bg-dark: tint-color(#0b1727, 2.9%) !default;
 $card-title-color: $headings-color !default;
 // scss-docs-end card-variables
 
@@ -282,7 +301,7 @@ $accordion-button-color: var(--#{$prefix}accordion-btn-color-global) !default;
 // Customizes the `.table` component with basic values, each used across all table variations.
 
 // scss-docs-start table-variables
-$table-cell-padding-y: 0.75rem !default;
+$table-cell-padding-y: 0.5rem !default;
 $table-cell-padding-x: 0.75rem !default;
 
 $table-bg: transparent !default;
@@ -345,7 +364,14 @@ $input-bg: var(--#{$prefix}quaternary-bg) !default;
 $input-disabled-bg: var(--#{$prefix}gray-200) !default;
 
 $input-color: var(--#{$prefix}gray-900) !default;
-$input-border-color: var(--#{$prefix}gray-300) !default;
+// WCAG 2.2 SC 1.4.11 asks 3:1 for the visual boundary of a control. A white
+// field on a white card has nothing but this border to identify it, and
+// `gray-300` gave it 1.29:1 in light / 1.60:1 in dark — a 941px text input
+// with no perceptible edge. `gray-600` is redefined per theme, so this one
+// change lands 5.00:1 in light and 4.55:1 in dark without touching a frozen
+// dark literal. It reads heavier than before; that is the cost of the field
+// being visible at all.
+$input-border-color: var(--#{$prefix}gray-600) !default;
 
 $input-focus-border-color: var(
   --#{$prefix}input-focus-border-color-global
@@ -356,10 +382,28 @@ $input-placeholder-color: var(
 ) !default;
 
 $input-group-addon-bg: var(--#{$prefix}gray-200) !default;
+
+// Bootstrap derives this from `$font-size-sm` (0.875rem = 14px), a value that
+// is not a step of the 1.2-ratio `$font-sizes` scale — so every `size="sm"`
+// control in the console rendered at 14px against a 13.33rem `.form-label`,
+// i.e. the input was *larger* than the label naming it. Pinning it to the
+// scale's `fs-10` puts field text and its label on the same step and keeps
+// dense forms in the same register as dense tables (the fs-10 Table Rule).
+// Set on `$input-font-size-sm` rather than `$input-btn-font-size-sm` on
+// purpose: the latter also drives `$btn-font-size-sm`, and standalone small
+// buttons are not part of this. `.form-select-sm` and `.input-group-sm > .btn`
+// both derive from this one, so they follow without further declarations.
+$input-font-size-sm: map_get($font-sizes, 10) !default;
 // scss-docs-end form-input-variables
 
 // scss-docs-start form-text-variables
 $form-text-color: $gray-500 !default;
+// Decoupled from `$small-font-size` (75% → 12px, also off the scale): field
+// help text is the secondary line under a 13.33px label, so it takes the next
+// step down. This matches the other secondary descriptions the module-config
+// panels already render at `fs-11`, and leaves `<small>`, `code` and
+// `figcaption` on 75% untouched.
+$form-text-font-size: map_get($font-sizes, 11) !default;
 // scss-docs-end form-text-variables
 
 // scss-docs-start form-label-variables
@@ -376,7 +420,12 @@ $form-switch-focus-color: tint-color($component-active-bg, 50%) !default;
 // scss-docs-start form-check-variables
 $form-check-margin-bottom: 0.34375rem !default;
 $form-check-input-bg: transparent !default;
-$form-check-input-border: 1px solid var(--#{$prefix}gray-400) !default;
+// Same 3:1 boundary rule as `$input-border-color`, and this one bites harder:
+// an unchecked switch has a transparent fill, so the border *is* the control.
+// At `gray-400` (1.78:1 light) `/admin/modules/auth?section=oauth` — seven
+// consecutive off switches — read as a column of labels with nothing beside
+// them, and "which providers are on" is the only question that panel answers.
+$form-check-input-border: 1px solid var(--#{$prefix}gray-600) !default;
 // scss-docs-end form-check-variables
 
 // scss-docs-start form-select-variables
@@ -422,11 +471,17 @@ $navbar-light-toggler-border-color: #{rgba(
     0.1
   )} !default;
 $navbar-light-toggler-icon-bg: str-replace(
-  url("data:image/svg+xml;charset=utf8,%3Csvg viewBox='0 0 30 30' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath stroke='#9da9bb' stroke-width='2' stroke-linecap='round' stroke-miterlimit='10' d='M0 6h30M0 14h30M0 22h30'/%3E%3C/svg%3E"),
+  url("data:image/svg+xml;charset=utf8,%3Csvg viewBox='0 0 30 30' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath stroke='#98a1ac' stroke-width='2' stroke-linecap='round' stroke-miterlimit='10' d='M0 6h30M0 14h30M0 22h30'/%3E%3C/svg%3E"),
   '#',
   '%23'
 ) !default;
 
+// Pinned to the pre-retune $gray-500 literal (#9da9bb): bootstrap's own
+// _navbar.scss reuses this same var for BOTH the `.navbar-dark` component
+// variant AND the global `[data-bs-theme=dark] .navbar-toggler-icon` rule
+// (via `@include color-mode(dark)`), and `.navbar-dark`/
+// `.navbar[data-bs-theme="dark"]` is unused in this app (theme is always
+// driven globally), so pinning here only affects the dark-mode toggler icon.
 $navbar-dark-toggler-icon-bg: str-replace(
   url("data:image/svg+xml;charset=utf8,%3Csvg viewBox='0 0 30 30' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath stroke='#9da9bb' stroke-width='2' stroke-linecap='round' stroke-miterlimit='10' d='M0 6h30M0 14h30M0 22h30'/%3E%3C/svg%3E"),
   '#',

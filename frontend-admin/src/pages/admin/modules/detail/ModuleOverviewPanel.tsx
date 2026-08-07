@@ -1,5 +1,4 @@
-import { Card, Col, Row } from 'react-bootstrap';
-import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { Col, Row } from 'react-bootstrap';
 import {
   faHeartPulse,
   faGear,
@@ -7,7 +6,9 @@ import {
   faClock
 } from '@fortawesome/free-solid-svg-icons';
 import { useTranslation } from 'react-i18next';
-import SubtleBadge from 'components/common/SubtleBadge';
+import type { TFunction } from 'i18next';
+import StatCard from 'components/common/StatCard';
+import type { BadgeColor } from 'components/common/SubtleBadge';
 import type { ModuleConfig, ModuleHealthStatus } from 'store/api/moduleApi';
 import { configCompleteness } from '../configModel';
 
@@ -17,38 +18,65 @@ interface ModuleOverviewPanelProps {
   allModules?: ModuleConfig[];
 }
 
-const formatRelativeTime = (dateStr: string): string => {
+/**
+ * This string is the *headline value* of a StatCard, so it was the largest
+ * untranslated text on the page \u2014 "11h ago" at 27.65px inside an otherwise
+ * Italian console. Routed through `t()` like everything else on screen.
+ */
+const formatRelativeTime = (t: TFunction, dateStr: string): string => {
   if (!dateStr) return '\u2014';
   const diff = Date.now() - new Date(dateStr).getTime();
   const minutes = Math.floor(diff / 60000);
-  if (minutes < 1) return 'just now';
-  if (minutes < 60) return `${minutes}m ago`;
+  if (minutes < 1) return t('adminModules.detail.relative.justNow');
+  if (minutes < 60)
+    return t('adminModules.detail.relative.minutes', { count: minutes });
   const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
+  if (hours < 24)
+    return t('adminModules.detail.relative.hours', { count: hours });
   const days = Math.floor(hours / 24);
-  return `${days}d ago`;
+  return t('adminModules.detail.relative.days', { count: days });
 };
 
+/**
+ * The module detail page's KPI row, built on the console's `StatCard` tile
+ * rather than on per-page cards.
+ *
+ * It used to hand-roll four `<Card>`s with their own type ramp — an `fs-10`
+ * caption over an `fs-8` (19.2px) value over an `fs-11` note — which made this
+ * the only KPI row in the console rendering its headline value at 19.2px,
+ * while every other summary row (`admin/tenants`, `admin/compliance`, and the
+ * dashboards a fork's addons add) renders at `h3` (27.65px) through
+ * `StatCard`, with the 4px status border and the faded 3x icon that make the
+ * tile recognisable. Same data, same icons, same colors — the difference was
+ * purely that this page reimplemented the tile instead of importing it.
+ *
+ * `color` is the tile's status channel (it paints the 4px accent border), so
+ * each card derives it from its own metric rather than picking a decorative
+ * hue. The `badge` corner ribbon stays unused here: per DESIGN.md it is
+ * reserved for real attention states, and "some dependencies are down" is
+ * already carried by the border plus the `n/m` value.
+ */
 const ModuleOverviewPanel: React.FC<ModuleOverviewPanelProps> = ({
   module: mod,
   health,
   allModules
 }) => {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const healthStatus = health?.status || (mod.enabled ? 'healthy' : 'disabled');
-  const healthColor =
-    {
-      healthy: 'success',
-      unhealthy: 'danger',
-      disabled: 'secondary',
-      failed: 'danger'
-    }[healthStatus] || 'secondary';
+  const healthColor = ({
+    healthy: 'success',
+    unhealthy: 'danger',
+    disabled: 'secondary',
+    failed: 'danger'
+  }[healthStatus] || 'secondary') as BadgeColor;
 
   const { filled, total } = configCompleteness(
     mod.configSchema,
     mod.configValues,
     mod.secretStatus
   );
+  const configColor: BadgeColor =
+    total === 0 ? 'secondary' : filled === total ? 'success' : 'warning';
 
   const depCount = mod.dependsOn?.length || 0;
   const depsHealthy =
@@ -56,112 +84,96 @@ const ModuleOverviewPanel: React.FC<ModuleOverviewPanelProps> = ({
       const depMod = allModules?.find(m => m.moduleName === dep);
       return depMod && depMod.status === 'running';
     }).length || 0;
+  const depColor: BadgeColor =
+    depCount === 0
+      ? 'secondary'
+      : depsHealthy === depCount
+        ? 'success'
+        : 'warning';
 
   return (
     <Row className="g-3 mb-3">
-      <Col sm={6} lg={3}>
-        <Card className="h-100">
-          <Card.Body className="py-3 px-4">
-            <div className="d-flex align-items-center mb-2">
-              <FontAwesomeIcon icon={faHeartPulse} className="text-400 me-2" />
-              <span className="fs-10 text-600 fw-semibold">
-                {t('adminModules.detail.cards.health')}
-              </span>
-            </div>
-            <SubtleBadge
-              bg={healthColor as 'success' | 'danger' | 'secondary'}
-              pill
-            >
-              {healthStatus}
-            </SubtleBadge>
-            {health?.error && (
-              <div className="text-danger fs-11 mt-1" title={health.error}>
+      <Col md={6} xl={3}>
+        <StatCard
+          title={t('adminModules.detail.cards.health')}
+          value={healthStatus}
+          icon={faHeartPulse}
+          color={healthColor}
+          subtitle={
+            health?.error ? (
+              <span className="text-danger" title={health.error}>
                 {health.error.length > 40
                   ? health.error.slice(0, 40) + '...'
                   : health.error}
-              </div>
-            )}
-          </Card.Body>
-        </Card>
+              </span>
+            ) : undefined
+          }
+        />
       </Col>
 
-      <Col sm={6} lg={3}>
-        <Card className="h-100">
-          <Card.Body className="py-3 px-4">
-            <div className="d-flex align-items-center mb-2">
-              <FontAwesomeIcon icon={faGear} className="text-400 me-2" />
-              <span className="fs-10 text-600 fw-semibold">
-                {t('adminModules.detail.cards.configuration')}
-              </span>
-            </div>
-            <div className="fs-8 fw-bold text-900">
-              {total > 0 ? `${filled}/${total}` : '\u2014'}
-            </div>
-            <div className="text-muted fs-11">
+      <Col md={6} xl={3}>
+        <StatCard
+          title={t('adminModules.detail.cards.configuration')}
+          value={total > 0 ? `${filled}/${total}` : '\u2014'}
+          icon={faGear}
+          color={configColor}
+          subtitle={
+            <>
               {total > 0
                 ? t('adminModules.detail.cards.requiredFieldsSet')
                 : t('adminModules.detail.cards.noRequiredFields')}
-            </div>
-            {total > 0 && (
-              <div className="progress mt-2" style={{ height: '4px' }}>
-                <div
-                  className={`progress-bar bg-${
-                    filled === total ? 'success' : 'warning'
-                  }`}
-                  style={{
-                    width: `${total > 0 ? (filled / total) * 100 : 0}%`
-                  }}
-                />
-              </div>
-            )}
-          </Card.Body>
-        </Card>
+              {/* Spans, not divs: `StatCard` renders `subtitle` inside a
+                  `<small>`, which is phrasing content. The progress classes
+                  supply their own `display`, so the elements lay out
+                  identically either way. */}
+              {total > 0 && (
+                <span
+                  className="progress stat-card-progress mt-2"
+                  aria-hidden="true"
+                >
+                  <span
+                    className={`progress-bar bg-${configColor}`}
+                    style={{ width: `${(filled / total) * 100}%` }}
+                  />
+                </span>
+              )}
+            </>
+          }
+        />
       </Col>
 
-      <Col sm={6} lg={3}>
-        <Card className="h-100">
-          <Card.Body className="py-3 px-4">
-            <div className="d-flex align-items-center mb-2">
-              <FontAwesomeIcon icon={faSitemap} className="text-400 me-2" />
-              <span className="fs-10 text-600 fw-semibold">
-                {t('adminModules.detail.cards.dependenciesCount')}
-              </span>
-            </div>
-            <div className="fs-8 fw-bold text-900">
-              {depCount > 0 ? `${depsHealthy}/${depCount}` : '\u2014'}
-            </div>
-            <div className="text-muted fs-11">
-              {depCount > 0
-                ? t('adminModules.detail.cards.dependenciesRunning')
-                : t('adminModules.detail.cards.noDependencies')}
-            </div>
-          </Card.Body>
-        </Card>
+      <Col md={6} xl={3}>
+        <StatCard
+          title={t('adminModules.detail.cards.dependenciesCount')}
+          value={depCount > 0 ? `${depsHealthy}/${depCount}` : '\u2014'}
+          icon={faSitemap}
+          color={depColor}
+          subtitle={
+            depCount > 0
+              ? t('adminModules.detail.cards.dependenciesRunning')
+              : t('adminModules.detail.cards.noDependencies')
+          }
+        />
       </Col>
 
-      <Col sm={6} lg={3}>
-        <Card className="h-100">
-          <Card.Body className="py-3 px-4">
-            <div className="d-flex align-items-center mb-2">
-              <FontAwesomeIcon icon={faClock} className="text-400 me-2" />
-              <span className="fs-10 text-600 fw-semibold">
-                {t('adminModules.detail.cards.lastModified')}
-              </span>
-            </div>
-            <div className="fs-8 fw-bold text-900">
-              {formatRelativeTime(mod.updatedAt)}
-            </div>
-            <div className="text-muted fs-11">
-              {mod.updatedAt
-                ? new Date(mod.updatedAt).toLocaleDateString('en-GB', {
-                    day: '2-digit',
-                    month: 'short',
-                    year: 'numeric'
-                  })
-                : ''}
-            </div>
-          </Card.Body>
-        </Card>
+      <Col md={6} xl={3}>
+        <StatCard
+          title={t('adminModules.detail.cards.lastModified')}
+          value={formatRelativeTime(t, mod.updatedAt)}
+          icon={faClock}
+          color="info"
+          subtitle={
+            mod.updatedAt
+              ? // `i18n.language`, not a pinned 'en-GB': the month abbreviation
+                // is user-visible text and belongs in the operator's locale.
+                new Date(mod.updatedAt).toLocaleDateString(i18n.language, {
+                  day: '2-digit',
+                  month: 'short',
+                  year: 'numeric'
+                })
+              : undefined
+          }
+        />
       </Col>
     </Row>
   );

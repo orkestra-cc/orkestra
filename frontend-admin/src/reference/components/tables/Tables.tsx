@@ -1,7 +1,6 @@
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import team13 from 'assets/img/team/13.jpg';
 import team2 from 'assets/img/team/2.jpg';
-import team3 from 'assets/img/team/3.jpg';
 import team4 from 'assets/img/team/4.jpg';
 import ActionButton from 'components/common/ActionButton';
 import Avatar from 'components/common/Avatar';
@@ -19,14 +18,14 @@ import AdvanceTableProvider, {
   useAdvanceTableContext
 } from 'providers/AdvanceTableProvider';
 
-import { Button, Col, Row, Badge, Dropdown, Form, Table } from 'react-bootstrap';
+import { Button, Col, Nav, Row, Dropdown, Form, Table } from 'react-bootstrap';
 
 /* =============================================================================
    SECTION 1: BASIC BOOTSTRAP TABLES
    ============================================================================= */
 
 const basicTableCode = `
-<Table responsive>
+<Table responsive className="fs-10 mb-0">
   <thead>
     <tr>
       <th scope="col">Name</th>
@@ -56,7 +55,7 @@ const basicTableCode = `
 `;
 
 const stripedTableCode = `
-<Table striped responsive>
+<Table striped responsive className="fs-10 mb-0">
   <thead>
     <tr>
       <th scope="col">Name</th>
@@ -106,7 +105,7 @@ const hoverableCode = `const Actions = () => (
 
 const HoverableActionsExample = () => {
   return (
-    <Table hover responsive>
+    <Table hover responsive className="fs-10 mb-0">
       <thead>
         <tr>
           <th scope="col">Name</th>
@@ -171,7 +170,7 @@ const ResponsiveTableExample = () => {
       avatar: team13,
       email: 'emma@example.com',
       phone: '(212) 228-8403',
-      status: { title: 'Processing', type: 'primary', icon: 'redo' }
+      status: { title: 'Processing', type: 'info', icon: 'redo' }
     },
     {
       name: 'Antony Hopkins',
@@ -183,7 +182,7 @@ const ResponsiveTableExample = () => {
   ];
 
   return (
-    <Table responsive striped hover>
+    <Table responsive striped hover className="fs-10 mb-0">
       <thead>
         <tr>
           <th scope="col">Name</th>
@@ -262,10 +261,9 @@ function AdvanceTableExample() {
   return(
     <AdvanceTableProvider {...table}>
       <AdvanceTable
-        headerClassName="bg-200 text-nowrap align-middle"
+        headerClassName="text-nowrap align-middle"
         rowClassName="align-middle white-space-nowrap"
         tableProps={{
-          bordered: true,
           striped: true,
           className: 'fs-10 mb-0 overflow-hidden'
         }}
@@ -302,10 +300,9 @@ function AdvanceTableExample() {
   return(
     <AdvanceTableProvider {...table}>
       <AdvanceTable
-        headerClassName="bg-200 text-nowrap align-middle"
+        headerClassName="text-nowrap align-middle"
         rowClassName="align-middle white-space-nowrap"
         tableProps={{
-          bordered: true,
           striped: true,
           className: 'fs-10 mb-0 overflow-hidden'
         }}
@@ -343,10 +340,9 @@ function AdvanceTableExample() {
         </Col>
       </Row>
       <AdvanceTable
-        headerClassName="bg-200 text-nowrap align-middle"
+        headerClassName="text-nowrap align-middle"
         rowClassName="align-middle white-space-nowrap"
         tableProps={{
-          bordered: true,
           striped: true,
           className: 'fs-10 mb-0 overflow-hidden'
         }}
@@ -407,11 +403,13 @@ function BulkActions() {
   return (
     <Row className="flex-between-center mb-3">
       <Col xs={4} sm="auto" className="d-flex align-items-center pe-0">
-        <h5 className="fs-9 mb-0 text-nowrap py-2 py-xl-0">
+        <div className="fs-9 fw-semibold mb-0 text-nowrap py-2 py-xl-0">
           {selectedCount > 0
-            ? 'You have selected ' + selectedCount + ' rows'
+            ? 'You have selected ' +
+              selectedCount +
+              (selectedCount === 1 ? ' row' : ' rows')
             : 'Selection Example'}
-        </h5>
+        </div>
       </Col>
       <Col xs={8} sm="auto" className="ms-auto text-end ps-0">
         {selectedCount > 0 ? (
@@ -456,7 +454,7 @@ function AdvanceTableExample() {
     <AdvanceTableProvider {...table}>
       <BulkActions />
       <AdvanceTable
-        headerClassName="bg-200 text-nowrap align-middle"
+        headerClassName="text-nowrap align-middle"
         rowClassName="align-middle white-space-nowrap"
         tableProps={{
           striped: true,
@@ -484,7 +482,8 @@ const customCellCode = `const columns = [
       <div className="d-flex align-items-center">
         <Avatar src={original.avatar} size="l" name={original.name} />
         <div className="ms-2">
-          <h6 className="mb-0">{original.name}</h6>
+          {/* not a heading — one h6 per data row pollutes the SR outline */}
+          <div className="fw-semibold">{original.name}</div>
           <small className="text-muted">{original.email}</small>
         </div>
       </div>
@@ -494,7 +493,8 @@ const customCellCode = `const columns = [
     accessorKey: 'role',
     header: 'Role',
     meta: { headerProps: { className: 'text-900' } },
-    // Custom cell with Badge
+    // Custom cell with SubtleBadge (the only sanctioned status pill —
+    // solid Badge fails WCAG contrast at badge sizes)
     cell: ({ row: { original } }) => {
       const roleColors = {
         admin: 'danger',
@@ -503,9 +503,9 @@ const customCellCode = `const columns = [
         guest: 'secondary'
       };
       return (
-        <Badge bg={roleColors[original.role] || 'secondary'}>
+        <SubtleBadge bg={roleColors[original.role] || 'secondary'}>
           {original.role.charAt(0).toUpperCase() + original.role.slice(1)}
-        </Badge>
+        </SubtleBadge>
       );
     }
   },
@@ -560,7 +560,7 @@ function AdvanceTableExample() {
   return(
     <AdvanceTableProvider {...table}>
       <AdvanceTable
-        headerClassName="bg-200 text-nowrap align-middle"
+        headerClassName="text-nowrap align-middle"
         rowClassName="align-middle white-space-nowrap"
         tableProps={{
           striped: true,
@@ -643,7 +643,7 @@ const TableHeader = () => {
           </Dropdown.Menu>
         </Dropdown>
 
-        <div className="bg-300 mx-3 d-none d-lg-block" style={{ width: '1px', height: '29px' }} />
+        <div className="vr mx-3 d-none d-lg-block align-self-center" />
 
         {/* Conditional: Bulk Actions or Regular Actions */}
         {getSelectedRowModel().rows.length > 0 ? (
@@ -731,8 +731,9 @@ const Tables = () => (
   <>
     <PageHeader
       title="Tables"
-      description="Complete guide to tables - from basic Bootstrap tables to advanced data grids with sorting, filtering, pagination, and production patterns."
+      description="Complete guide to tables — from basic Bootstrap tables to advanced data grids with sorting, filtering, pagination, and production patterns."
       className="mb-3"
+      image={null}
     >
       <Button
         href="https://tanstack.com/table/v8/docs/introduction"
@@ -744,21 +745,52 @@ const Tables = () => (
         TanStack Table Documentation
         <FontAwesomeIcon icon="chevron-right" className="ms-1 fs-11" />
       </Button>
+      <Nav
+        as="nav"
+        aria-label="Page sections"
+        className="flex-wrap gap-3 mt-1 fs-10"
+      >
+        <Nav.Link href="#basic-tables" className="p-0">
+          Basic Tables
+        </Nav.Link>
+        <Nav.Link href="#advance-table" className="p-0">
+          AdvanceTable
+        </Nav.Link>
+        <Nav.Link href="#pagination" className="p-0">
+          Pagination
+        </Nav.Link>
+        <Nav.Link href="#search-filtering" className="p-0">
+          Search & Filtering
+        </Nav.Link>
+        <Nav.Link href="#row-selection" className="p-0">
+          Row Selection
+        </Nav.Link>
+        <Nav.Link href="#custom-cells" className="p-0">
+          Custom Cells
+        </Nav.Link>
+        <Nav.Link href="#production-patterns" className="p-0">
+          Production Patterns
+        </Nav.Link>
+        <Nav.Link href="#hook-options" className="p-0">
+          Hook Options
+        </Nav.Link>
+      </Nav>
     </PageHeader>
 
     {/* ========== BASIC TABLES ========== */}
-    <h5 className="mb-3 mt-4 fw-bold text-primary">
-      <FontAwesomeIcon icon="table" className="me-2" />
+    <h4 id="basic-tables" className="mb-3 mt-4 text-900">
       Basic Bootstrap Tables
-    </h5>
+    </h4>
     <p className="text-muted mb-3">
-      Use React Bootstrap's <code>Table</code> component for simple, static tables.
-      Best for read-only data without sorting, filtering, or pagination needs.
+      Use React Bootstrap's <code>Table</code> component for small, static info
+      tables inside a card — always with <code>fs-10</code>, the console's table
+      density. Production lists must use <code>AdvanceTable</code> (below): raw{' '}
+      <code>Table</code> never ships for data that grows, sorts, or paginates.
     </p>
 
     <Row className="mb-3 g-3">
       <Col lg={6}>
-        <OrkestraComponentCard noGuttersBottom className="h-100">
+        <OrkestraComponentCard noGuttersBottom>
           <OrkestraComponentCard.Header
             title="Basic Table"
             className="border-bottom"
@@ -777,7 +809,7 @@ const Tables = () => (
         </OrkestraComponentCard>
       </Col>
       <Col lg={6}>
-        <OrkestraComponentCard noGuttersBottom className="h-100">
+        <OrkestraComponentCard noGuttersBottom>
           <OrkestraComponentCard.Header
             title="Striped Table with Dropdown"
             className="border-bottom"
@@ -799,13 +831,15 @@ const Tables = () => (
 
     <Row className="mb-3 g-3">
       <Col lg={6}>
-        <OrkestraComponentCard noGuttersBottom className="h-100">
+        <OrkestraComponentCard noGuttersBottom>
           <OrkestraComponentCard.Header
             title="Hoverable Rows with Actions"
             className="border-bottom"
           >
             <p className="mt-2 mb-0">
-              Use <code>hover-actions-trigger</code> class to show actions on row hover.
+              Use <code>hover-actions-trigger</code> class to show actions on row
+              hover. The actions stay keyboard-reachable: <code>:focus-within</code>{' '}
+              reveals them when you Tab into the row's buttons.
             </p>
           </OrkestraComponentCard.Header>
           <OrkestraComponentCard.Body
@@ -819,7 +853,7 @@ const Tables = () => (
         </OrkestraComponentCard>
       </Col>
       <Col lg={6}>
-        <OrkestraComponentCard noGuttersBottom className="h-100">
+        <OrkestraComponentCard noGuttersBottom>
           <OrkestraComponentCard.Header
             title="Responsive Table with Avatars"
             className="border-bottom"
@@ -832,7 +866,7 @@ const Tables = () => (
             code={responsiveTableCode}
             language="jsx"
             scope={{
-              team3, team4, team2, team13, Avatar, FontAwesomeIcon, SubtleBadge, Table
+              team4, team2, team13, Avatar, FontAwesomeIcon, SubtleBadge, Table
             }}
             noLight
             className="p-0"
@@ -843,21 +877,17 @@ const Tables = () => (
     </Row>
 
     {/* ========== ADVANCE TABLE SETUP ========== */}
-    <h5 className="mb-3 mt-5 fw-bold text-primary">
-      <FontAwesomeIcon icon="cogs" className="me-2" />
+    <h4 id="advance-table" className="mb-3 mt-5 text-900">
       AdvanceTable Components
-    </h5>
+    </h4>
     <p className="text-muted mb-3">
-      Use <code>useAdvanceTable</code> hook with <code>AdvanceTableProvider</code> for
-      sortable, filterable, and paginated data tables. Built on TanStack React Table v8.
+      Core pattern: <code>useAdvanceTable</code> →{' '}
+      <code>AdvanceTableProvider</code> → <code>AdvanceTable</code> — sortable,
+      filterable, paginated data tables built on TanStack React Table v8.
     </p>
 
     <OrkestraComponentCard className="mb-3">
-      <OrkestraComponentCard.Header title="Basic AdvanceTable Setup" light={false}>
-        <p className="mt-2 mb-0">
-          Core pattern: <code>useAdvanceTable</code> → <code>AdvanceTableProvider</code> → <code>AdvanceTable</code>
-        </p>
-      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Header title="Basic AdvanceTable Setup" light={false} />
       <OrkestraComponentCard.Body
         code={advanceTableBasicCode}
         scope={{
@@ -870,21 +900,16 @@ const Tables = () => (
     </OrkestraComponentCard>
 
     {/* ========== PAGINATION ========== */}
-    <h5 className="mb-3 mt-5 fw-bold text-primary">
-      <FontAwesomeIcon icon="pager" className="me-2" />
+    <h4 id="pagination" className="mb-3 mt-5 text-900">
       Pagination
-    </h5>
+    </h4>
     <p className="text-muted mb-3">
       Two pagination styles: <code>AdvanceTableFooter</code> (prev/next with row info)
       or <code>AdvanceTablePagination</code> (numbered pages).
     </p>
 
     <OrkestraComponentCard className="mb-3">
-      <OrkestraComponentCard.Header title="Numbered Pagination" light={false}>
-        <p className="mt-2 mb-0">
-          Use <code>AdvanceTablePagination</code> for numbered page navigation.
-        </p>
-      </OrkestraComponentCard.Header>
+      <OrkestraComponentCard.Header title="Numbered Pagination" light={false} />
       <OrkestraComponentCard.Body
         code={paginationNumberingCode}
         scope={{
@@ -897,10 +922,9 @@ const Tables = () => (
     </OrkestraComponentCard>
 
     {/* ========== SEARCH & FILTERING ========== */}
-    <h5 className="mb-3 mt-5 fw-bold text-primary">
-      <FontAwesomeIcon icon="search" className="me-2" />
+    <h4 id="search-filtering" className="mb-3 mt-5 text-900">
       Search & Filtering
-    </h5>
+    </h4>
     <p className="text-muted mb-3">
       Use <code>AdvanceTableSearchBox</code> for global search across all columns.
       For column-specific filters, use <code>setColumnFilters</code> from context.
@@ -911,11 +935,7 @@ const Tables = () => (
         title="Searchable Table"
         light={false}
         className="border-bottom border-200"
-      >
-        <p className="mt-2 mb-0">
-          Global search filters all rows based on any matching cell value.
-        </p>
-      </OrkestraComponentCard.Header>
+      />
       <OrkestraComponentCard.Body
         code={searchableTableCode}
         scope={{
@@ -929,10 +949,9 @@ const Tables = () => (
     </OrkestraComponentCard>
 
     {/* ========== ROW SELECTION ========== */}
-    <h5 className="mb-3 mt-5 fw-bold text-primary">
-      <FontAwesomeIcon icon="check-square" className="me-2" />
+    <h4 id="row-selection" className="mb-3 mt-5 text-900">
       Row Selection & Bulk Actions
-    </h5>
+    </h4>
     <p className="text-muted mb-3">
       Enable <code>selection: true</code> to add checkbox column.
       Use <code>getSelectedRowModel()</code> to access selected rows.
@@ -943,11 +962,7 @@ const Tables = () => (
         title="Selection with Bulk Actions"
         light={false}
         className="border-bottom border-200"
-      >
-        <p className="mt-2 mb-0">
-          Checkbox selection with conditional bulk action dropdown.
-        </p>
-      </OrkestraComponentCard.Header>
+      />
       <OrkestraComponentCard.Body
         code={selectionCode}
         scope={{
@@ -961,10 +976,9 @@ const Tables = () => (
     </OrkestraComponentCard>
 
     {/* ========== CUSTOM CELLS ========== */}
-    <h5 className="mb-3 mt-5 fw-bold text-primary">
-      <FontAwesomeIcon icon="palette" className="me-2" />
+    <h4 id="custom-cells" className="mb-3 mt-5 text-900">
       Custom Cell Rendering
-    </h5>
+    </h4>
     <p className="text-muted mb-3">
       Use the <code>cell</code> property in column definitions to render custom components
       like Avatars, Badges, Dropdowns, and formatted dates.
@@ -975,16 +989,12 @@ const Tables = () => (
         title="Custom Cell Examples"
         light={false}
         className="border-bottom border-200"
-      >
-        <p className="mt-2 mb-0">
-          Avatar cells, Badge roles, Status indicators, and Action dropdowns.
-        </p>
-      </OrkestraComponentCard.Header>
+      />
       <OrkestraComponentCard.Body
         code={customCellCode}
         scope={{
           useAdvanceTable, AdvanceTableProvider, AdvanceTable,
-          Avatar, Badge, SubtleBadge, FontAwesomeIcon, Dropdown,
+          Avatar, SubtleBadge, FontAwesomeIcon, Dropdown,
           team2, team4, team13
         }}
         language="jsx"
@@ -994,20 +1004,21 @@ const Tables = () => (
     </OrkestraComponentCard>
 
     {/* ========== PRODUCTION PATTERNS ========== */}
-    <h5 className="mb-3 mt-5 fw-bold text-primary">
-      <FontAwesomeIcon icon="industry" className="me-2" />
+    <h4 id="production-patterns" className="mb-3 mt-5 text-900">
       Production Patterns
-    </h5>
+    </h4>
     <p className="text-muted mb-3">
       Complete table header pattern with search, filters, conditional bulk actions,
-      and CSV export - as used in production tables like UserTable and VehicleTable.
+      and CSV export — as used in production by the admin Users table
+      (<code>src/pages/admin/users/UserTable.tsx</code>).
     </p>
 
-    <OrkestraComponentCard className="mb-3">
+    <OrkestraComponentCard className="mb-3" defaultTab="code">
       <OrkestraComponentCard.Header
         title="Table Header Pattern"
         light={false}
         className="border-bottom border-200"
+        noPreview
       >
         <p className="mt-2 mb-0">
           Production-ready header with search, filter dropdown, and conditional actions.
@@ -1022,24 +1033,20 @@ const Tables = () => (
     </OrkestraComponentCard>
 
     {/* ========== HOOK OPTIONS ========== */}
-    <h5 className="mb-3 mt-5 fw-bold text-primary">
-      <FontAwesomeIcon icon="sliders-h" className="me-2" />
+    <h4 id="hook-options" className="mb-3 mt-5 text-900">
       Hook Configuration Reference
-    </h5>
+    </h4>
     <p className="text-muted mb-3">
       Complete reference for <code>useAdvanceTable</code> hook options.
     </p>
 
-    <OrkestraComponentCard className="mb-0">
+    <OrkestraComponentCard className="mb-0" defaultTab="code">
       <OrkestraComponentCard.Header
         title="useAdvanceTable Options"
         light={false}
         className="border-bottom border-200"
-      >
-        <p className="mt-2 mb-0">
-          All available configuration options for the useAdvanceTable hook.
-        </p>
-      </OrkestraComponentCard.Header>
+        noPreview
+      />
       <OrkestraComponentCard.Body
         code={hookOptionsCode}
         language="tsx"

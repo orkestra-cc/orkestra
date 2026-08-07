@@ -76,10 +76,17 @@ const ModuleTable: React.FC<ModuleTableProps> = ({ scope, title }) => {
     });
   }, [scopedModules, searchTerm, categoryFilter, statusFilter]);
 
+  // These shadow `ModuleTableHeader`'s own defaults, which are already built
+  // from `t()`. Spelled in English here, they made the Core tab render its
+  // filter in the active locale and the Addons tab render it in English —
+  // side by side, in the same control.
   const addonCategoryOptions = [
-    { value: '', label: 'All Categories' },
-    { value: 'toggleable', label: 'Toggleable' },
-    { value: 'external', label: 'External' }
+    { value: '', label: t('adminModules.filters.allCategories') },
+    {
+      value: 'toggleable',
+      label: t('adminModules.filters.categoryToggleable')
+    },
+    { value: 'external', label: t('adminModules.filters.categoryExternal') }
   ];
 
   const handleToggle = async (mod: ModuleConfig) => {
@@ -96,6 +103,21 @@ const ModuleTable: React.FC<ModuleTableProps> = ({ scope, title }) => {
       setTogglingModule(null);
     }
   };
+
+  // Built from `t()` rather than spelled inline: this whole line used to be
+  // hardcoded English sitting under a table whose headers were translated.
+  // `stopped` is appended only when non-zero, as before.
+  const countBy = (status: string) =>
+    scopedModules.filter(m => m.status === status).length;
+  const footerSummary = [
+    t('adminModules.footer.total', { count: scopedModules.length }),
+    t('adminModules.footer.running', { count: countBy('running') }),
+    t('adminModules.footer.failed', { count: countBy('failed') }),
+    t('adminModules.footer.disabled', { count: countBy('disabled') }),
+    ...(countBy('stopped') > 0
+      ? [t('adminModules.footer.stopped', { count: countBy('stopped') })]
+      : [])
+  ].join(' · ');
 
   const getHealthDot = (mod: ModuleConfig): string => {
     const h = healthData?.modules.find(m => m.moduleName === mod.moduleName);
@@ -119,7 +141,7 @@ const ModuleTable: React.FC<ModuleTableProps> = ({ scope, title }) => {
     return (
       <Card>
         <Card.Body className="text-center text-danger py-5">
-          Failed to load modules. Check your permissions.
+          {t('adminModules.loadError')}
         </Card.Body>
       </Card>
     );
@@ -254,8 +276,9 @@ const ModuleTable: React.FC<ModuleTableProps> = ({ scope, title }) => {
                         )}
                         <Link
                           to={`/admin/modules/${mod.moduleName}`}
-                          className="text-500 px-1"
+                          className="text-600 px-1"
                           title={t('adminModules.actions.configure')}
+                          aria-label={`${t('adminModules.actions.configure')} ${mod.displayName}`}
                         >
                           <FontAwesomeIcon
                             icon={faChevronRight}
@@ -268,7 +291,10 @@ const ModuleTable: React.FC<ModuleTableProps> = ({ scope, title }) => {
                 ))}
                 {filteredModules.length === 0 && (
                   <tr>
-                    <td colSpan={6} className="text-center text-muted py-4">
+                    {/* 7, not 6 — the row has seven columns, and a short
+                        colSpan leaves the empty state announced against a
+                        malformed row. */}
+                    <td colSpan={7} className="text-center text-muted py-4">
                       {t('adminModules.noMatch')}
                     </td>
                   </tr>
@@ -279,19 +305,7 @@ const ModuleTable: React.FC<ModuleTableProps> = ({ scope, title }) => {
         </Card.Body>
         {modules && (
           <Card.Footer className="fs-10 text-muted">
-            {scopedModules.length} modules total &middot;{' '}
-            {scopedModules.filter(m => m.status === 'running').length} running
-            &middot; {scopedModules.filter(m => m.status === 'failed').length}{' '}
-            failed &middot;{' '}
-            {scopedModules.filter(m => m.status === 'disabled').length} disabled
-            {scopedModules.filter(m => m.status === 'stopped').length > 0 && (
-              <>
-                {' '}
-                &middot;{' '}
-                {scopedModules.filter(m => m.status === 'stopped').length}{' '}
-                stopped
-              </>
-            )}
+            {footerSummary}
           </Card.Footer>
         )}
       </Card>

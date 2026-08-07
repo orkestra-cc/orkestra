@@ -1979,7 +1979,34 @@
       "savedFlash": "Configuration saved.",
       "saveFailed": "Could not save configuration. Try again.",
       "config": "Configuration",
-      "noConfig": "This module has no configurable fields."
+      "noConfig": "This module has no configurable fields.",
+      "relative": {
+        "justNow": "just now",
+        "minutes_one": "{{count}} min ago",
+        "minutes_other": "{{count}} min ago",
+        "hours_one": "{{count}} hr ago",
+        "hours_other": "{{count}} hrs ago",
+        "days_one": "{{count}} day ago",
+        "days_other": "{{count}} days ago"
+      },
+      "env": {
+        "viewingLabel": "Viewing:",
+        "liveBadge": "live",
+        "notActiveWarning": "You are editing the {{environment}} profile. It is not the one this module currently runs with — {{active}} is.",
+        "promoteTitle": "Make {{environment}} the active profile?",
+        "promoteBody": "This module will immediately start running with the {{environment}} configuration. The {{current}} profile stays saved and can be made active again the same way.",
+        "promoteConfirm": "Make active",
+        "cancel": "Cancel"
+      }
+    },
+    "loadError": "Failed to load modules. Check your permissions.",
+    "footer": {
+      "total_one": "{{count}} module total",
+      "total_other": "{{count}} modules total",
+      "running": "{{count}} running",
+      "failed": "{{count}} failed",
+      "disabled": "{{count}} disabled",
+      "stopped": "{{count}} stopped"
     }
   },
   "moduleConfig": {
