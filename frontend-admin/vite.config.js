@@ -212,6 +212,27 @@ export default ({ mode }) => {
         }
       }
     },
+    // Vite 8 bundles with rolldown and, because this package is
+    // `"type": "module"`, now applies *Node's* CJS interop rule to every ESM
+    // importer: `import d from 'cjs-pkg'` yields `module.exports` verbatim
+    // instead of unwrapping `__esModule ? .default`. Babel-transpiled CJS deps
+    // therefore arrive double-wrapped as `{ __esModule: true, default: … }`.
+    // That killed the SPA at boot — `store/index.ts` got
+    // `{__esModule, default}` from `redux-persist/lib/storage`, so
+    // `persistStore()` threw `storage.getItem is not a function` at module
+    // scope, `index.tsx` never reached `createRoot`, and every route rendered
+    // a blank `#main`. `echarts-for-react/lib/core` (13 dashboard components)
+    // and `rc-util/lib/raf` have the same shape, so this is not a one-off.
+    // Note CI cannot catch this class of break: it is a runtime error, so
+    // typecheck/build stay green (Vitest doesn't go through this path either).
+    // This is the escape hatch Vite ships for exactly this migration — it
+    // restores the pre-8 esbuild/bundler unwrap in both the dev optimizer and
+    // the production build. It is flagged legacy, so the durable fix is to
+    // unwrap at each call site that default-imports an `__esModule`-flagged
+    // CJS dep, then drop this.
+    legacy: {
+      inconsistentCjsInterop: true
+    },
     define: {
       global: 'window'
     },
