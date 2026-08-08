@@ -74,8 +74,12 @@ const NineDotMenu = () => {
   if (memberships.length === 0) return null;
   if (memberships.length <= 1 && !canImpersonate) return null;
 
+  // The theme compiles Bootstrap with $prefix: 'orkestra-', so --bs-*
+  // tokens don't exist at runtime; an SVG fill referencing a missing var
+  // computes to "none" and the icon vanishes. Always name the real token
+  // and keep a literal fallback.
   const circleFill = isImpersonating
-    ? 'var(--bs-warning)'
+    ? 'var(--orkestra-warning, #f5803e)'
     : 'var(--bs-navbar-color, #6C6E71)';
 
   const onPickMembership = (tenantId: string) => {
