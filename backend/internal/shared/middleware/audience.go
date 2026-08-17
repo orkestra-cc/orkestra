@@ -55,6 +55,7 @@ func AudienceFromContext(ctx context.Context) string {
 //
 // Behaviour (ADR-0003 PR-D D-3 hard cutover — no transition compat):
 //
+//   - Third-party webhook path     → pass through untouched (see below).
 //   - No bearer token              → pass through (public route or
 //     downstream auth middleware will
 //     enforce). Audience is not stamped.
@@ -62,6 +63,15 @@ func AudienceFromContext(ctx context.Context) string {
 //   - Token with no `aud` claim    → 401 with code "audience_mismatch"
 //     (v1 token rejected per PR-D cutover).
 //   - Token with mismatched aud    → 401 with code "audience_mismatch".
+//
+// The webhook carve-out exists because a webhook's Authorization header
+// belongs to the originating service, not to us: the SDI callback sends
+// `Bearer <static webhook secret>`, which is not a JWT and so has no
+// `aud` to match. Gating those paths here 401'd every authentic delivery
+// at the mux, before ModuleGate, the poll throttle, the replay dedup, or
+// the handler's own constant-time secret check ever ran. Those routes
+// are not weakened by skipping this gate — their credential is checked
+// by the handler; this gate could only ever have rejected them.
 //
 // The unverified claim parse here is intentionally cheap (no key, no
 // signature check). The downstream auth middleware (RequireAuth /
@@ -71,6 +81,16 @@ func AudienceFromContext(ctx context.Context) string {
 func RequireAudience(expected string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Fail-closed by construction: only the prefixes
+			// WebhookRoutes names skip the gate — every other path,
+			// including the rest of IsPublicRoute, keeps the hard-cutover
+			// behaviour below. No audience is stamped: a webhook request
+			// has none.
+			if IsWebhookRoute(r.URL.Path) {
+				next.ServeHTTP(w, r)
+				return
+			}
+
 			token := extractBearerForAudience(r)
 			if token == "" {
 				next.ServeHTTP(w, r)
