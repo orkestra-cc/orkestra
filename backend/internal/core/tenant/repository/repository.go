@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"fmt"
 	"regexp"
 	"time"
 
@@ -83,7 +84,32 @@ func (r *Repository) GetTenantBySlug(ctx context.Context, slug string) (*models.
 	return &t, err
 }
 
+// immutableTenantFields can never be changed through the generic UpdateTenant
+// $set path. They define a tenant's identity, ownership, tier, hierarchy and
+// deletion state and each has a dedicated flow (owner-transfer, AttachToParent,
+// SoftDeleteTenant, PurgeTenant). Rejecting them here is defense-in-depth
+// (audit H-7, org-scoping invariant #6): UpdateTenant is fed free-form maps from
+// several callers (settings, billing identity), so a buggy or compromised path
+// must not be able to reassign an owner, flip a tenant's kind, graft a parent,
+// or clear deletedAt to undelete a purged tenant. kmsKeyID and status are
+// deliberately NOT listed — they are set through this method on legitimate
+// provisioning/lifecycle paths.
+var immutableTenantFields = map[string]struct{}{
+	"_id":              {},
+	"uuid":             {},
+	"kind":             {},
+	"ownerUserUUID":    {},
+	"parentTenantUUID": {},
+	"deletedAt":        {},
+	"createdAt":        {},
+}
+
 func (r *Repository) UpdateTenant(ctx context.Context, uuid string, update bson.M) error {
+	for k := range update {
+		if _, blocked := immutableTenantFields[k]; blocked {
+			return fmt.Errorf("tenant: field %q is immutable and cannot be set via UpdateTenant", k)
+		}
+	}
 	update["updatedAt"] = time.Now()
 	res, err := r.db.Collection(CollTenants).UpdateOne(ctx, bson.M{"uuid": uuid}, bson.M{"$set": update})
 	if err != nil {
