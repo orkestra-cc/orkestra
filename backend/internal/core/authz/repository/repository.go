@@ -188,9 +188,20 @@ func (r *Repository) CreateBinding(ctx context.Context, b *models.Binding) error
 	return err
 }
 
-func (r *Repository) DeleteBinding(ctx context.Context, uuid string) error {
-	_, err := r.db.Collection(CollBindings).DeleteOne(ctx, bson.M{"uuid": uuid})
-	return err
+// DeleteBinding removes a binding by UUID scoped to tenantID. The tenantId
+// filter is load-bearing: it stops a member of one tenant from revoking a
+// binding in another by UUID. Returns ErrNotFound when no binding matches both
+// the UUID and the tenant scope (so the handler can 404 rather than silently
+// succeeding on a cross-tenant miss).
+func (r *Repository) DeleteBinding(ctx context.Context, tenantID, uuid string) error {
+	res, err := r.db.Collection(CollBindings).DeleteOne(ctx, bson.M{"uuid": uuid, "tenantId": tenantID})
+	if err != nil {
+		return err
+	}
+	if res.DeletedCount == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // DeleteBindingsByRoleUUID removes every binding pointing at the given role.

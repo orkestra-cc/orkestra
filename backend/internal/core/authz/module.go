@@ -285,19 +285,46 @@ func (m *Module) RegisterRoutes(ri *module.RouteInfo) {
 		api := humachi.New(r, ri.APIConfig)
 		m.handler.RegisterScopedReadRoutes(api)
 	})
+	// Per-org role/binding mutations are split per permission so the declared
+	// fine-grained permissions are actually enforced — previously every mutation
+	// only required authz.role.read (held by org_member/org_viewer). Each group
+	// keeps the MFA step-up and the risk gate (Section C item #2: MFA alone can
+	// be satisfied by a stolen stepped-up token; the risk gate catches a session
+	// showing up in the scorer via new device / rapid IP change — fails open when
+	// the lookup isn't wired). assertTenantScope + the service-side orgId check in
+	// each handler close the cross-tenant tampering IDOR.
+	// Literal permission strings per group (not a loop over a variable) so the
+	// policycoverage CI gate can statically verify each route→permission wiring.
+	riskThreshold := parseRiskStepUpThreshold(os.Getenv("AUTH_RISK_STEP_UP_THRESHOLD"))
 	ri.Operator.ProtectedRouter.Group(func(r chi.Router) {
-		r.Use(ri.Operator.AuthMW.RequirePermission("authz.role.read"))
+		r.Use(ri.Operator.AuthMW.RequirePermission("authz.role.create"))
 		r.Use(ri.Operator.AuthMW.RequireMFA())
-		// Section C item #2: also reject binding writes when the session's
-		// risk score exceeds the configured threshold. MFA alone can be
-		// satisfied by a stolen stepped-up token; the risk gate catches
-		// the case where that token's session also shows up in the
-		// risk scorer (new device / rapid IP change). Fails open when
-		// the lookup isn't wired, so tests and minimal deploys don't
-		// need the scorer plumbed.
-		r.Use(ri.Operator.AuthMW.RequireLowRisk(parseRiskStepUpThreshold(os.Getenv("AUTH_RISK_STEP_UP_THRESHOLD"))))
-		api := humachi.New(r, ri.APIConfig)
-		m.handler.RegisterScopedMutationRoutes(api)
+		r.Use(ri.Operator.AuthMW.RequireLowRisk(riskThreshold))
+		m.handler.RegisterScopedRoleCreateRoutes(humachi.New(r, ri.APIConfig))
+	})
+	ri.Operator.ProtectedRouter.Group(func(r chi.Router) {
+		r.Use(ri.Operator.AuthMW.RequirePermission("authz.role.update"))
+		r.Use(ri.Operator.AuthMW.RequireMFA())
+		r.Use(ri.Operator.AuthMW.RequireLowRisk(riskThreshold))
+		m.handler.RegisterScopedRoleUpdateRoutes(humachi.New(r, ri.APIConfig))
+	})
+	ri.Operator.ProtectedRouter.Group(func(r chi.Router) {
+		r.Use(ri.Operator.AuthMW.RequirePermission("authz.role.delete"))
+		r.Use(ri.Operator.AuthMW.RequireMFA())
+		r.Use(ri.Operator.AuthMW.RequireLowRisk(riskThreshold))
+		m.handler.RegisterScopedRoleDeleteRoutes(humachi.New(r, ri.APIConfig))
+	})
+	ri.Operator.ProtectedRouter.Group(func(r chi.Router) {
+		r.Use(ri.Operator.AuthMW.RequirePermission("authz.binding.create"))
+		r.Use(ri.Operator.AuthMW.RequireMFA())
+		r.Use(ri.Operator.AuthMW.RequireLowRisk(riskThreshold))
+		m.handler.RegisterScopedBindingCreateRoutes(humachi.New(r, ri.APIConfig))
+	})
+	ri.Operator.ProtectedRouter.Group(func(r chi.Router) {
+		r.Use(ri.Operator.AuthMW.RequirePermission("authz.binding.delete"))
+		r.Use(ri.Operator.AuthMW.RequireMFA())
+		r.Use(ri.Operator.AuthMW.RequireLowRisk(riskThreshold))
+		m.handler.RegisterScopedBindingDeleteRoutes(humachi.New(r, ri.APIConfig))
 	})
 }
 

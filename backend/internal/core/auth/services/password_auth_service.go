@@ -225,15 +225,26 @@ func (s *PasswordAuthService) Register(ctx context.Context, in RegisterInput) (*
 		return nil, fmt.Errorf("email, password and name are required")
 	}
 
-	// Admin-managed registration policy. Bypass for the very first
+	// The first-user bootstrap bypass and the super_admin first-admin claim are
+	// OPERATOR-ONLY. The first-admin sentinel is a single global document, but
+	// GetUserCount is tier-scoped (client register counts only client_users), so
+	// without this gate an anonymous POST /v1/auth/client/register on a fresh
+	// install would see zero client users and (a) bypass the client registration
+	// kill switch and (b) win the global super_admin seat — bricking the operator
+	// bootstrap. A Tier-2 client is never the platform's first admin.
+	isOperatorBootstrap := s.audience != PolicyAudienceClient
+
+	// Admin-managed registration policy. Bypass for the very first operator
 	// account on a fresh install — otherwise an operator who flips
-	// "registrationEnabledAdmin=false" before any user exists locks
-	// themselves out. Bypass detection: ask the user count; the
-	// firstAdminClaimer's atomic claim later still races correctly.
+	// "registrationEnabledAdmin=false" before any user exists locks themselves
+	// out. Bypass detection: ask the user count; the firstAdminClaimer's atomic
+	// claim later still races correctly.
 	if s.policy != nil {
 		isFirstUser := false
-		if count, err := s.userService.GetUserCount(ctx, nil); err == nil && count == 0 {
-			isFirstUser = true
+		if isOperatorBootstrap {
+			if count, err := s.userService.GetUserCount(ctx, nil); err == nil && count == 0 {
+				isFirstUser = true
+			}
 		}
 		if !isFirstUser {
 			if !s.policy.RegistrationAllowed(ctx, s.audience) {
@@ -279,7 +290,7 @@ func (s *PasswordAuthService) Register(ctx context.Context, in RegisterInput) (*
 		role = s.policy.DefaultClientRole(ctx)
 	}
 	claimed := false
-	if s.firstAdminClaimer != nil {
+	if isOperatorBootstrap && s.firstAdminClaimer != nil {
 		claimed, err = s.firstAdminClaimer.ClaimFirstAdmin(ctx, proposedUUID)
 		if err != nil {
 			return nil, fmt.Errorf("claim first admin: %w", err)

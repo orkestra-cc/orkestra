@@ -15,6 +15,7 @@ import (
 	"log/slog"
 
 	"github.com/danielgtaylor/huma/v2/adapters/humachi"
+	"github.com/go-chi/chi/v5"
 	"github.com/orkestra/backend/internal/core/logging/handlers"
 	"github.com/orkestra/backend/internal/core/logging/repository"
 	"github.com/orkestra/backend/internal/core/logging/services"
@@ -102,12 +103,19 @@ func (m *LoggingModule) Init(deps *module.Dependencies) error {
 	return nil
 }
 
-// RegisterRoutes mounts the admin endpoints on the operator-protected
-// router. The endpoints are administrator-only by RBAC convention
-// (RequireRole middleware lives upstream of the protected mux).
+// RegisterRoutes mounts the admin endpoints on the operator-protected router
+// behind an explicit system-permission gate. Previously they were mounted with
+// no role middleware at all — the operator-protected mux only enforces
+// RequireAuth, and the OpenAPI `Security:{administrator}` scope on each
+// operation is inert documentation (nothing reads it), so any authenticated
+// operator token could rewrite global log levels. system.modules.admin is a
+// System permission held only by super_admin/administrator/developer.
 func (m *LoggingModule) RegisterRoutes(ri *module.RouteInfo) {
-	api := humachi.New(ri.Operator.ProtectedRouter, ri.APIConfig)
-	RegisterRoutes(api, m.handler)
+	ri.Operator.ProtectedRouter.Group(func(r chi.Router) {
+		r.Use(ri.Operator.AuthMW.RequireSystemPermission("system.modules.admin"))
+		api := humachi.New(r, ri.APIConfig)
+		RegisterRoutes(api, m.handler)
+	})
 }
 
 // NavItems puts a single entry directly under the platform realm

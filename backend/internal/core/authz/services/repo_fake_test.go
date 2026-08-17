@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/orkestra/backend/internal/core/authz/models"
+	"github.com/orkestra/backend/internal/core/authz/repository"
 	"go.mongodb.org/mongo-driver/bson"
 )
 
@@ -182,9 +183,13 @@ func (r *fakeRepo) CreateBinding(_ context.Context, b *models.Binding) error {
 	return nil
 }
 
-func (r *fakeRepo) DeleteBinding(_ context.Context, uuid string) error {
+func (r *fakeRepo) DeleteBinding(_ context.Context, tenantID, uuid string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	b, ok := r.bindings[uuid]
+	if !ok || b.TenantID != tenantID {
+		return repository.ErrNotFound
+	}
 	delete(r.bindings, uuid)
 	return nil
 }
