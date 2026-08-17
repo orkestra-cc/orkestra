@@ -237,7 +237,7 @@ services:
     working_dir: /app
     restart: unless-stopped
     ports:
-      - "${CLIENT_FRONTEND_PORT:-8081}:5173"
+      - "${HOST_BIND_ADDRESS:-0.0.0.0}:${CLIENT_FRONTEND_PORT:-8081}:5173"
     environment:
       NODE_ENV: development
       # The browser hits the backend directly, so this URL must resolve
