@@ -334,8 +334,17 @@ func (s *Service) CreateTenant(ctx context.Context, ownerUUID string, input mode
 			return nil, fmt.Errorf("parentTenantUUID is only allowed for external tenants")
 		}
 		p := *input.ParentTenantUUID
-		if _, err := s.repo.GetTenantByUUID(ctx, p); err != nil {
+		parentTenant, err := s.repo.GetTenantByUUID(ctx, p)
+		if err != nil {
 			return nil, fmt.Errorf("parent tenant not found: %s", p)
+		}
+		// The parent must itself be external. Without this an external tenant
+		// could be grafted onto an internal operator tenant's closure table, and
+		// ResolveBillingParty would then resolve the operator's legal identity
+		// (VAT/fiscal/PEC) as the invoicing party. CreateDivision enforces the
+		// same rule; POST /v1/tenants must not be a weaker second path.
+		if !parentTenant.IsExternal() {
+			return nil, fmt.Errorf("parent tenant must be external")
 		}
 		parent = &p
 	}
@@ -563,8 +572,11 @@ func (s *Service) ArchiveTenant(ctx context.Context, tenantUUID string) error {
 func (s *Service) PurgeTenant(ctx context.Context, tenantUUID string) error {
 	// Fetch first so we know the KMSKeyID (if any) before flipping
 	// status — the row is still readable in purged state but carrying
-	// a live keyID would defeat crypto-shred.
-	existing, lookupErr := s.repo.GetTenantByUUID(ctx, tenantUUID)
+	// a live keyID would defeat crypto-shred. Include soft-deleted rows:
+	// the documented flow is archive/soft-delete → purge, and the plain
+	// getter filters deletedAt:nil, so on that path existing would be nil
+	// and the crypto-shred + authz-binding cascade would silently no-op.
+	existing, lookupErr := s.repo.GetTenantByUUIDIncludingDeleted(ctx, tenantUUID)
 	cascadeCtx := s.buildPostDeleteContext(ctx, existing, true)
 	if err := s.cascadeTenantData(ctx, tenantUUID); err != nil {
 		return err

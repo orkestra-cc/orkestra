@@ -58,6 +58,22 @@ func (r *Repository) GetTenantByUUID(ctx context.Context, uuid string) (*models.
 	return &t, err
 }
 
+// GetTenantByUUIDIncludingDeleted resolves a tenant by UUID without the
+// deletedAt:nil filter. Used by PurgeTenant so the crypto-shred and the
+// cascade context still fire on the documented archive/soft-delete → purge
+// sequence — the plain getter returns nil for a soft-deleted row, which would
+// silently skip the KMS key deletion and the authz-binding cascade while still
+// reporting the purge as successful.
+func (r *Repository) GetTenantByUUIDIncludingDeleted(ctx context.Context, uuid string) (*models.Tenant, error) {
+	var t models.Tenant
+	//tenantscope:allow the tenants collection IS the tenant registry — by-UUID lookup is inherently cross-tenant (mirrors GetTenantByUUID; only the purge/erasure path uses this include-deleted variant)
+	err := r.db.Collection(CollTenants).FindOne(ctx, bson.M{"uuid": uuid}).Decode(&t)
+	if errors.Is(err, mongo.ErrNoDocuments) {
+		return nil, ErrNotFound
+	}
+	return &t, err
+}
+
 func (r *Repository) GetTenantBySlug(ctx context.Context, slug string) (*models.Tenant, error) {
 	var t models.Tenant
 	err := r.db.Collection(CollTenants).FindOne(ctx, bson.M{"slug": slug, "deletedAt": nil}).Decode(&t)
