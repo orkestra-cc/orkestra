@@ -10,11 +10,11 @@
 #   docker compose -f docker-compose.dev.yml build \
 #     --build-arg GO_BASE=dhi.io/golang:1 orkestra-backend
 # (a non-Alpine base may need the apk line below adapted).
-ARG GO_BASE=golang:1.25.12-alpine
+ARG GO_BASE=golang:1.25.13-alpine
 FROM ${GO_BASE}
 
 # AIR is pinned, not @latest: air v1.67.2+ requires go >= 1.26.0, which the
-# Go 1.25.12 base (matching go.mod / .mise.toml / CI) refuses to build under
+# Go 1.25.13 base (matching go.mod / .mise.toml / CI) refuses to build under
 # GOTOOLCHAIN=local. v1.67.1 is the last release on `go 1.25`. Bump this
 # together with GO_BASE when the project moves to Go 1.26.
 ARG AIR_VERSION=v1.67.1
