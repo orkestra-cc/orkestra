@@ -10,7 +10,7 @@
 
 [tools]
 # Matches the version in .github/workflows/*.yml. Bump in lockstep.
-go            = "1.25.12"
+go            = "1.25.13"
 node          = "24"
 flutter       = "3.44"
 # Matches what `golangci/golangci-lint-action@v7` resolved `latest` to in
