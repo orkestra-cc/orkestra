@@ -255,11 +255,41 @@ func (m *Module) RegisterRoutes(ri *module.RouteInfo) {
 		api := humachi.New(r, ri.APIConfig)
 		m.handler.RegisterScopedReadRoutes(api)
 	})
+	// Per-tenant mutations are split per permission so the declared fine-grained
+	// permissions (tenant.update / .delete / .plan.update / .member.*) are
+	// actually enforced — previously every mutation only required tenant.read,
+	// which org_viewer/org_member hold. Every group additionally requires an MFA
+	// step-up (Block B) and every handler asserts the {tenantId} path matches the
+	// caller's resolved tenant (assertTenantScope), closing the cross-tenant IDOR.
 	ri.Operator.ProtectedRouter.Group(func(r chi.Router) {
-		r.Use(ri.Operator.AuthMW.RequirePermission("tenant.read"))
+		r.Use(ri.Operator.AuthMW.RequirePermission("tenant.update"))
 		r.Use(ri.Operator.AuthMW.RequireMFA())
 		api := humachi.New(r, ri.APIConfig)
-		m.handler.RegisterScopedMutationRoutes(api)
+		m.handler.RegisterScopedUpdateRoutes(api)
+	})
+	ri.Operator.ProtectedRouter.Group(func(r chi.Router) {
+		r.Use(ri.Operator.AuthMW.RequirePermission("tenant.plan.update"))
+		r.Use(ri.Operator.AuthMW.RequireMFA())
+		api := humachi.New(r, ri.APIConfig)
+		m.handler.RegisterScopedPlanRoutes(api)
+	})
+	ri.Operator.ProtectedRouter.Group(func(r chi.Router) {
+		r.Use(ri.Operator.AuthMW.RequirePermission("tenant.delete"))
+		r.Use(ri.Operator.AuthMW.RequireMFA())
+		api := humachi.New(r, ri.APIConfig)
+		m.handler.RegisterScopedDeleteRoutes(api)
+	})
+	ri.Operator.ProtectedRouter.Group(func(r chi.Router) {
+		r.Use(ri.Operator.AuthMW.RequirePermission("tenant.member.invite"))
+		r.Use(ri.Operator.AuthMW.RequireMFA())
+		api := humachi.New(r, ri.APIConfig)
+		m.handler.RegisterScopedInviteRoutes(api)
+	})
+	ri.Operator.ProtectedRouter.Group(func(r chi.Router) {
+		r.Use(ri.Operator.AuthMW.RequirePermission("tenant.member.remove"))
+		r.Use(ri.Operator.AuthMW.RequireMFA())
+		api := humachi.New(r, ri.APIConfig)
+		m.handler.RegisterScopedMemberRoutes(api)
 	})
 
 	// Platform-admin routes: visible to super_admin / administrator /

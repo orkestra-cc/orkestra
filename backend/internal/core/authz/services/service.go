@@ -107,7 +107,7 @@ type repoBackend interface {
 	ListRoles(ctx context.Context, tenantID string) ([]models.Role, error)
 	DeleteRole(ctx context.Context, uuid string) error
 	CreateBinding(ctx context.Context, b *models.Binding) error
-	DeleteBinding(ctx context.Context, uuid string) error
+	DeleteBinding(ctx context.Context, tenantID, uuid string) error
 	DeleteBindingsByRoleUUID(ctx context.Context, roleUUID string) (int64, error)
 	DeleteBindingsByTenant(ctx context.Context, tenantUUID string) (int64, error)
 	DeleteBindingsByUserAndTenant(ctx context.Context, userUUID, tenantUUID string) (int64, error)
@@ -831,10 +831,19 @@ func (s *Service) CreateRole(ctx context.Context, tenantID string, input models.
 // change to Name, Description, or Permissions with ErrSystemRoleImmutable —
 // only IsActive can be toggled on them. Custom roles accept all four.
 // The authz cache is flushed because permission membership may change.
-func (s *Service) UpdateRole(ctx context.Context, roleUUID string, input models.UpdateRoleInput) (*models.Role, error) {
+func (s *Service) UpdateRole(ctx context.Context, tenantID, roleUUID string, input models.UpdateRoleInput) (*models.Role, error) {
 	existing, err := s.repo.GetRoleByUUID(ctx, roleUUID)
 	if err != nil {
 		return nil, err
+	}
+
+	// Tenant-scope guard: a custom role may only be edited from within its own
+	// tenant. Without this the {tenantId} path segment was decorative — the role
+	// was resolved by UUID alone, so a member of tenant A could rewrite tenant
+	// B's custom role. System roles (TenantID=="") are global platform config and
+	// keep the immutable-except-IsActive behaviour enforced just below.
+	if !existing.IsSystem && existing.TenantID != tenantID {
+		return nil, repository.ErrNotFound
 	}
 
 	touchesImmutable := input.Name != nil || input.Description != nil || input.Permissions != nil
@@ -936,13 +945,19 @@ func (s *Service) ensureSeeded(ctx context.Context) error {
 // ends up refused (system role), the binding cleanup will have been a
 // no-op because nothing is bound to a system role via this UUID unless an
 // operator did it explicitly, and in that case we'd want them gone anyway.
-func (s *Service) DeleteRole(ctx context.Context, roleUUID string) error {
+func (s *Service) DeleteRole(ctx context.Context, tenantID, roleUUID string) error {
 	existing, err := s.repo.GetRoleByUUID(ctx, roleUUID)
 	if err != nil {
 		return err
 	}
 	if existing.IsSystem {
 		return ErrSystemRoleImmutable
+	}
+	// Tenant-scope guard: only a custom role owned by the acting tenant may be
+	// deleted here — otherwise the {tenantId} path was decorative and a member of
+	// tenant A could delete tenant B's role (cascading B's bindings).
+	if existing.TenantID != tenantID {
+		return repository.ErrNotFound
 	}
 	removed, err := s.repo.DeleteBindingsByRoleUUID(ctx, roleUUID)
 	if err != nil {
@@ -1033,8 +1048,13 @@ func (s *Service) ListBindings(ctx context.Context, tenantID string) ([]models.B
 	return s.repo.ListBindingsByTenant(ctx, tenantID)
 }
 
-func (s *Service) DeleteBinding(ctx context.Context, uuid string) error {
-	if err := s.repo.DeleteBinding(ctx, uuid); err != nil {
+// DeleteBinding removes a role binding, scoped to the acting tenant. The repo
+// filters on (uuid, tenantId) and returns ErrNotFound when nothing matches, so
+// a member of tenant A cannot revoke a binding in tenant B by UUID. Global /
+// system-role bindings (tenantId=="") are not tenant-manageable and never match
+// a non-empty tenant scope.
+func (s *Service) DeleteBinding(ctx context.Context, tenantID, uuid string) error {
+	if err := s.repo.DeleteBinding(ctx, tenantID, uuid); err != nil {
 		return err
 	}
 	s.flushCache(ctx)

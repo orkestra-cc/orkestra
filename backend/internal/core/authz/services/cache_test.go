@@ -250,7 +250,7 @@ func TestDeleteBinding_FlushesEveryAuthzCache(t *testing.T) {
 	svc.cacheSet(context.Background(), "u-1", "tenant-A", []string{"old"})
 	svc.cacheSet(context.Background(), "u-other", "tenant-A", []string{"keep-me-but-flushed"})
 
-	if err := svc.DeleteBinding(context.Background(), "b-1"); err != nil {
+	if err := svc.DeleteBinding(context.Background(), "tenant-A", "b-1"); err != nil {
 		t.Fatalf("DeleteBinding: %v", err)
 	}
 	if _, ok := svc.cacheGet(context.Background(), "u-1", "tenant-A"); ok {
@@ -307,7 +307,7 @@ func TestDeleteRole_FlushesCache(t *testing.T) {
 	repo.seedRole("role-c", "x", false, []string{"x.read"}, "tenant-A")
 	svc.cacheSet(context.Background(), "u-1", "tenant-A", []string{"old"})
 
-	if err := svc.DeleteRole(context.Background(), "role-c"); err != nil {
+	if err := svc.DeleteRole(context.Background(), "tenant-A", "role-c"); err != nil {
 		t.Fatalf("DeleteRole: %v", err)
 	}
 	if _, ok := svc.cacheGet(context.Background(), "u-1", "tenant-A"); ok {
