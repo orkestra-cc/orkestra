@@ -13,14 +13,14 @@ import (
 func TestSeedModuleTemplatesInsertsAndPreserves(t *testing.T) {
 	svc, repo := newTestTemplateService(t)
 	specs := []module.NotificationTemplateSpec{{
-		TemplateID: "subscriptions.renewal.ok", Locale: "en",
+		TemplateID: "widgets.order_shipped", Locale: "en",
 		Subject: "Renewed", BodyText: "text", BodyHTML: "<p>html</p>",
 	}}
 
 	if err := svc.SeedModuleTemplates(context.Background(), specs); err != nil {
 		t.Fatalf("SeedModuleTemplates: %v", err)
 	}
-	got := repo.docs[tplKey("subscriptions.renewal.ok", "en")]
+	got := repo.docs[tplKey("widgets.order_shipped", "en")]
 	if got == nil {
 		t.Fatal("template not seeded")
 	}
@@ -33,7 +33,7 @@ func TestSeedModuleTemplatesInsertsAndPreserves(t *testing.T) {
 	if err := svc.SeedModuleTemplates(context.Background(), specs); err != nil {
 		t.Fatalf("re-seed: %v", err)
 	}
-	if repo.docs[tplKey("subscriptions.renewal.ok", "en")].Subject != "Edited by operator" {
+	if repo.docs[tplKey("widgets.order_shipped", "en")].Subject != "Edited by operator" {
 		t.Error("re-seeding overwrote an operator edit")
 	}
 }

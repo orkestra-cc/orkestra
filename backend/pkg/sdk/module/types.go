@@ -217,7 +217,7 @@ type NavItemSpec struct {
 // A module declares its own templates rather than having them live in the
 // notification module: core must not know which addons exist (ADR-0006).
 type NotificationTemplateSpec struct {
-	TemplateID  string   // "<module>.<event>", e.g. "subscriptions.renewal.ok"
+	TemplateID  string   // "<module>.<event>", e.g. "widgets.order_shipped"
 	Locale      string   // "en", "it"
 	Subject     string
 	BodyText    string
