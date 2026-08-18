@@ -79,6 +79,11 @@ type HasNavItems interface {
 	NavItems() []NavItemSpec
 }
 
+// HasNotificationTemplates lets a module ship default email templates.
+type HasNotificationTemplates interface {
+	NotificationTemplates() []NotificationTemplateSpec
+}
+
 // HasPermissions lets a module register authorization permissions in
 // the central catalog. The registry collects these from every module at
 // boot and upserts them so administrators can bind them to custom roles.
@@ -322,6 +327,15 @@ func CollectionsOf(m Module) []CollectionSpec {
 func NavItemsOf(m Module) []NavItemSpec {
 	if n, ok := m.(HasNavItems); ok {
 		return n.NavItems()
+	}
+	return nil
+}
+
+// NotificationTemplatesOf returns the module's template declarations, or
+// nil when none declared.
+func NotificationTemplatesOf(m Module) []NotificationTemplateSpec {
+	if n, ok := m.(HasNotificationTemplates); ok {
+		return n.NotificationTemplates()
 	}
 	return nil
 }

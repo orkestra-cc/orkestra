@@ -209,3 +209,19 @@ type NavItemSpec struct {
 	ItemKey    string        `json:"itemKey,omitempty"`    // stamped by registry if empty
 	Children   []NavItemSpec `json:"children,omitempty"`
 }
+
+// NotificationTemplateSpec is one email template a module ships as a
+// default. The notification module seeds these on boot, insert-if-absent,
+// so an operator's edits survive a restart.
+//
+// A module declares its own templates rather than having them live in the
+// notification module: core must not know which addons exist (ADR-0006).
+type NotificationTemplateSpec struct {
+	TemplateID  string   // "<module>.<event>", e.g. "subscriptions.renewal.ok"
+	Locale      string   // "en", "it"
+	Subject     string
+	BodyText    string
+	BodyHTML    string
+	Description string
+	Variables   []string // documented variable names, for the admin editor
+}
