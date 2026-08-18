@@ -1324,17 +1324,22 @@ func (s *PasswordAuthService) issueTokens(ctx context.Context, user *iface.User,
 		platform = "web"
 	}
 
-	accessToken, err := s.jwtService.GenerateAccessTokenWithAMR(user, amr, lastOTPAt)
-	if err != nil {
-		return nil, err
-	}
-	refreshToken, err := s.jwtService.GenerateRefreshToken(user)
-	if err != nil {
-		return nil, err
-	}
-
-	sessionID := uuid.New().String()
+	sessionID := uuid.NewString()
 	now := time.Now()
+	device := &authModels.DeviceInfo{
+		DeviceID:   deviceID,
+		DeviceType: "web",
+		Platform:   platform,
+	}
+	security := &authModels.SecurityContext{
+		SessionID: sessionID,
+		IPAddress: in.IP,
+		Timestamp: now,
+	}
+	pair, err := s.jwtService.GenerateTokenPairWithAMR(user, device, security, amr, lastOTPAt)
+	if err != nil {
+		return nil, err
+	}
 
 	// Fresh login → fresh family. The MFA login-verify path also flows
 	// through here (via IssueLoginTokens) so post-MFA token pairs get their
@@ -1342,11 +1347,14 @@ func (s *PasswordAuthService) issueTokens(ctx context.Context, user *iface.User,
 	// issue any refresh token.
 	familyID := uuid.New().String()
 
-	// Store the refresh token for rotation.
-	_ = s.refreshTokenRepo.CreateRefreshToken(ctx, &authModels.RefreshTokenDoc{
+	// Store the refresh token for rotation before returning it to the caller.
+	if s.refreshTokenRepo == nil {
+		return nil, stderrors.New("refresh token persistence is unavailable")
+	}
+	if err := s.refreshTokenRepo.CreateRefreshToken(ctx, &authModels.RefreshTokenDoc{
 		UUID:         authModels.GenerateUUIDv7(),
 		UserUUID:     user.UUID,
-		Token:        refreshToken,
+		Token:        pair.RefreshToken,
 		SessionUUID:  sessionID,
 		DeviceID:     deviceID,
 		DeviceType:   "web",
@@ -1361,17 +1369,26 @@ func (s *PasswordAuthService) issueTokens(ctx context.Context, user *iface.User,
 		CreatedAt:    now,
 		UpdatedAt:    now,
 		FamilyID:     familyID,
-	})
+	}); err != nil {
+		return nil, fmt.Errorf("persist refresh token: %w", err)
+	}
 
-	// Create an auth session doc for audit trail.
-	_ = s.createSessionDoc(ctx, user, sessionID, deviceID, platform, in.IP, in.UserAgent)
+	// Create the auth-session row before returning the pair. If this fails,
+	// revoke the just-created refresh row by its canonical session id so no
+	// usable credential survives without its session record.
+	if err := s.createSessionDoc(ctx, user, sessionID, deviceID, platform, in.IP, in.UserAgent); err != nil {
+		if revokeErr := s.refreshTokenRepo.RevokeTokensBySession(ctx, sessionID, authModels.RevokeReasonManualRevoke); revokeErr != nil && s.logger != nil {
+			s.logger.Error("auth: refresh-token rollback after session persistence failure failed")
+		}
+		return nil, fmt.Errorf("persist auth session: %w", err)
+	}
 
 	// Update the last login timestamp.
 	_ = s.userService.UpdateUserLastLogin(ctx, user.UUID)
 
 	return &authModels.TokenResponse{
-		AccessToken:  accessToken,
-		RefreshToken: refreshToken,
+		AccessToken:  pair.AccessToken,
+		RefreshToken: pair.RefreshToken,
 		TokenType:    "Bearer",
 		ExpiresIn:    int64(s.jwtService.AccessTokenTTL(ctx).Seconds()),
 		SessionID:    sessionID,
@@ -1382,7 +1399,7 @@ func (s *PasswordAuthService) issueTokens(ctx context.Context, user *iface.User,
 
 func (s *PasswordAuthService) createSessionDoc(ctx context.Context, user *iface.User, sessionID, deviceID, platform, ip, userAgent string) error {
 	if s.authSessionRepo == nil {
-		return nil
+		return stderrors.New("auth session persistence is unavailable")
 	}
 	now := time.Now()
 	// Detect a never-before-seen (userUUID, deviceID) pair before
