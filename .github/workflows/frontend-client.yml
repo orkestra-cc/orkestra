@@ -49,7 +49,9 @@ jobs:
   docker:
     name: Docker Build
     needs: ci
-    if: github.event_name == 'push'
+    # Publishes only where the CI_FULL repo variable is true (upstream +
+    # commons). Product forks default to minimal CI — see CLAUDE.md CI/CD.
+    if: github.event_name == 'push' && vars.CI_FULL == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read

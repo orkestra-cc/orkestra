@@ -4,7 +4,9 @@ name: Security Scan
 # published CVEs (vulnerability exposure changes with time and with
 # dependency edits — not with every push). No `push` trigger: a push to
 # dev/main would re-scan the exact dependency set the PR just scanned,
-# and on the private chain forks every run burns paid minutes.
+# and on the private chain forks every run burns paid minutes. The cron
+# additionally runs only where the CI_FULL repo variable is true — the
+# fork chain shares one dependency set, so one weekly scan covers it.
 on:
   pull_request:
     branches: [dev, main]
@@ -50,7 +52,10 @@ jobs:
   go-vulncheck:
     name: Go Vulnerability Check
     needs: changes
-    if: github.event_name != 'pull_request' || needs.changes.outputs.backend == 'true'
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'schedule' && vars.CI_FULL == 'true') ||
+      (github.event_name == 'pull_request' && needs.changes.outputs.backend == 'true')
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -100,7 +105,10 @@ jobs:
   npm-audit:
     name: NPM Security Audit
     needs: changes
-    if: github.event_name != 'pull_request' || needs.changes.outputs.frontend == 'true'
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'schedule' && vars.CI_FULL == 'true') ||
+      (github.event_name == 'pull_request' && needs.changes.outputs.frontend == 'true')
     runs-on: ubuntu-latest
     defaults:
       run:

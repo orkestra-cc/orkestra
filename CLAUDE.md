@@ -148,7 +148,7 @@ docker restart orkestra-backend-development
 
 ### CI/CD
 
-GitHub Actions workflows (`.github/workflows/`) run on PR and push to `dev`/`main` (except where noted below). **CI workflows invoke `make` targets from the repo root — local and CI cannot drift.** Run `make ci-help` for the full list.
+GitHub Actions workflows (`.github/workflows/`) run on PR and push to `dev`/`main` (except where noted below). Non-gating jobs — Docker image publish, coverage-badge refresh, the weekly security cron — additionally require the repo-level Actions variable **`CI_FULL=true`** (set on the public upstream and commons); a product fork defaults to minimal CI and opts in per repo, no file edits. **CI workflows invoke `make` targets from the repo root — local and CI cannot drift.** Run `make ci-help` for the full list.
 
 - `backend.yml` → `make ci-backend` (lint, tenantscope, policycoverage, piiscan, vuln, tests, build, openapi-check) + a single Docker image build on push
 - `frontend-admin.yml` → `make ci-frontend-admin` (typecheck, eslint, tests, audit, build)
