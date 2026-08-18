@@ -65,6 +65,7 @@ jobs:
         with:
           name: backend-coverage
           path: backend/coverage.out
+          retention-days: 7
       - name: Upload policy coverage report
         if: always()
         uses: actions/upload-artifact@v7
@@ -73,6 +74,7 @@ jobs:
           path: |
             backend/policy-coverage-report.md
             backend/policy-coverage-report.json
+          retention-days: 7
         continue-on-error: true
 
   coverage-badge:

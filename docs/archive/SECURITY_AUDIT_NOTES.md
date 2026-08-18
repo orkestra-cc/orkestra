@@ -1,6 +1,6 @@
 # Security Audit Notes
 
-> **ARCHIVED 2026-05-14.** This is a December 2025 snapshot. All five findings below were marked "FIXED" or "PARTIALLY COMPLETE" at the time, and the file paths it references (`backend/internal/auth/handlers/…`, `backend/internal/user/repository/…`) have since moved under `backend/internal/core/auth/` and `backend/internal/core/user/`. Kept as historical evidence of the original audit; **not authoritative for current security posture**. For current security tooling see `.github/workflows/security.yml` (Trivy + CodeQL) and run `/security-review` for a per-branch review.
+> **ARCHIVED 2026-05-14.** This is a December 2025 snapshot. All five findings below were marked "FIXED" or "PARTIALLY COMPLETE" at the time, and the file paths it references (`backend/internal/auth/handlers/…`, `backend/internal/user/repository/…`) have since moved under `backend/internal/core/auth/` and `backend/internal/core/user/`. Kept as historical evidence of the original audit; **not authoritative for current security posture**. For current security tooling see `.github/workflows/security.yml` (govulncheck + npm audit) and run `/security-review` for a per-branch review.
 
 **Audit Date:** 2025-12-20
 **Auditor:** Security Audit Tool

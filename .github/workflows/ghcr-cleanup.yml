@@ -1,0 +1,43 @@
+name: GHCR Cleanup
+
+# Every push to dev/main re-points the `latest` + sha tags at a fresh digest,
+# orphaning the previous image version in GHCR. Package storage for private
+# repos is billed, and every repo in the fork chain publishes three images —
+# the orphans add up. This weekly job deletes untagged versions.
+#
+# Why dataaxiom/ghcr-cleanup-action and not actions/delete-package-versions:
+# the images are pushed by docker/build-push-action with default provenance,
+# so each *tagged* image is an OCI index whose children (image manifest +
+# attestation) are themselves UNTAGGED package versions. A naive
+# "delete everything untagged" would corrupt the tagged images. This action
+# walks the manifests and only deletes versions no tagged image references.
+#
+# Package names are derived from the repo name, so the file works unchanged
+# on every chain fork. On a fresh fork the packages don't exist until the
+# first dev/main push has published images — until then this job fails
+# harmlessly; it heals itself once the packages exist.
+
+on:
+  schedule:
+    - cron: '0 5 * * 1' # Weekly Monday 5 AM UTC
+  workflow_dispatch:
+
+permissions:
+  packages: write
+
+concurrency:
+  group: ghcr-cleanup
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    name: Delete untagged image versions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: dataaxiom/ghcr-cleanup-action@v1
+        with:
+          # The three images the per-surface workflows publish. frontend-admin
+          # publishes as `frontend` — see the NOTE in frontend-admin.yml.
+          packages: ${{ github.event.repository.name }}/backend,${{ github.event.repository.name }}/frontend,${{ github.event.repository.name }}/frontend-client
+          delete-untagged: true
+          validate: true
