@@ -9,8 +9,8 @@ import (
 
 // OAuthConfigResolver builds a per-provider OAuthProviderConfig from the live
 // module_configs document so admin-panel edits take effect without a restart.
-// Reads are served by ModuleConfigService (30s Redis cache in front of Mongo),
-// so calling this on every OAuth request is cheap.
+// ModuleConfigService reads these values from MongoDB on each call; the resolver
+// intentionally keeps no process-local cache so edits are visible immediately.
 type OAuthConfigResolver struct {
 	cs *module.ModuleConfigService
 }

@@ -176,7 +176,7 @@ func TestRefreshTokensWithRiskAssessment_HappyPath_RotatesAndMintsNewPair(t *tes
 	}
 
 	// New row carries the same family.
-	newDoc, _ := env.refresh.GetByTokenAny(context.Background(), resp.RefreshToken)
+	newDoc, _ := env.refresh.GetByTokenAny(context.Background(), utils.HashRefreshToken(resp.RefreshToken))
 	if newDoc == nil {
 		t.Fatalf("new refresh row not seeded under its hash")
 	}
@@ -190,6 +190,62 @@ func TestRefreshTokensWithRiskAssessment_HappyPath_RotatesAndMintsNewPair(t *tes
 	}
 	if claims.UserUUID != user.UUID {
 		t.Errorf("new access token UserUUID = %q, want %q", claims.UserUUID, user.UUID)
+	}
+}
+
+func TestRefreshTokensWithRiskAssessment_PreservesJWTSessionAcrossRotations(t *testing.T) {
+	env := newOrchestrationEnv(t)
+	user := seededUser()
+	env.users.seed(user)
+
+	rawRefresh, oldDoc := env.issueAndSeedRefresh(user, "fam-session")
+	first, err := env.auth.RefreshTokensWithRiskAssessment(context.Background(), rawRefresh, &authModels.SecurityContext{IPAddress: "2.2.2.2"})
+	if err != nil {
+		t.Fatalf("first rotation: %v", err)
+	}
+	firstAccessClaims, err := env.jwt.ValidateAccessToken(first.AccessToken)
+	if err != nil {
+		t.Fatalf("validate first access: %v", err)
+	}
+	firstRefreshClaims, err := env.jwt.ValidateRefreshToken(first.RefreshToken)
+	if err != nil {
+		t.Fatalf("validate first refresh: %v", err)
+	}
+	firstSuccessor, _ := env.refresh.GetByTokenAny(context.Background(), utils.HashRefreshToken(first.RefreshToken))
+	if firstSuccessor == nil {
+		t.Fatal("first successor row not found")
+	}
+
+	second, err := env.auth.RefreshTokensWithRiskAssessment(context.Background(), first.RefreshToken, &authModels.SecurityContext{})
+	if err != nil {
+		t.Fatalf("second rotation: %v", err)
+	}
+	secondAccessClaims, err := env.jwt.ValidateAccessToken(second.AccessToken)
+	if err != nil {
+		t.Fatalf("validate second access: %v", err)
+	}
+	secondRefreshClaims, err := env.jwt.ValidateRefreshToken(second.RefreshToken)
+	if err != nil {
+		t.Fatalf("validate second refresh: %v", err)
+	}
+	secondSuccessor, _ := env.refresh.GetByTokenAny(context.Background(), utils.HashRefreshToken(second.RefreshToken))
+	if secondSuccessor == nil {
+		t.Fatal("second successor row not found")
+	}
+
+	for name, got := range map[string]string{
+		"first access claim":   firstAccessClaims.SessionID,
+		"first refresh claim":  firstRefreshClaims.SessionID,
+		"first response":       first.SessionID,
+		"first successor row":  firstSuccessor.SessionUUID,
+		"second access claim":  secondAccessClaims.SessionID,
+		"second refresh claim": secondRefreshClaims.SessionID,
+		"second response":      second.SessionID,
+		"second successor row": secondSuccessor.SessionUUID,
+	} {
+		if got != oldDoc.SessionUUID {
+			t.Errorf("%s sid = %q, want %q", name, got, oldDoc.SessionUUID)
+		}
 	}
 }
 
@@ -233,6 +289,35 @@ func TestRefreshTokensWithRiskAssessment_ReplayOfRotatedToken_KillsFamily(t *tes
 	env.refresh.mu.Unlock()
 	if !found {
 		t.Errorf("expected at least one family member revoked with replay_detected reason")
+	}
+}
+
+func TestRefreshTokensWithRiskAssessment_ReplayInRotationGapReturnsNoActiveSuccessor(t *testing.T) {
+	env := newOrchestrationEnv(t)
+	user := seededUser()
+	env.users.seed(user)
+	rawRefresh, oldDoc := env.issueAndSeedRefresh(user, "fam-service-gap")
+
+	parentCAS := make(chan struct{})
+	continueInsert := make(chan struct{})
+	env.refresh.setRotationBarrier(parentCAS, continueInsert)
+	firstDone := make(chan error, 1)
+	go func() {
+		_, err := env.auth.RefreshTokensWithRiskAssessment(context.Background(), rawRefresh, &authModels.SecurityContext{})
+		firstDone <- err
+	}()
+
+	<-parentCAS
+	_, replayErr := env.auth.RefreshTokensWithRiskAssessment(context.Background(), rawRefresh, &authModels.SecurityContext{})
+	if !errors.Is(replayErr, ErrRefreshTokenReplay) {
+		t.Fatalf("gap replay = %v, want ErrRefreshTokenReplay", replayErr)
+	}
+	close(continueInsert)
+	if err := <-firstDone; !errors.Is(err, ErrRefreshTokenReplay) {
+		t.Fatalf("winning rotation after compromise = %v, want ErrRefreshTokenReplay", err)
+	}
+	if active := env.refresh.activeFamilyMembers(oldDoc.FamilyID); active != 0 {
+		t.Fatalf("active successors after gap replay = %d, want 0", active)
 	}
 }
 
@@ -476,6 +561,9 @@ func TestMintAccessTokenFromRefresh_ValidRow_MintsAccessWithoutRotation(t *testi
 	}
 	if claims.UserUUID != user.UUID {
 		t.Errorf("access token UserUUID = %q, want %q", claims.UserUUID, user.UUID)
+	}
+	if claims.SessionID != doc.SessionUUID {
+		t.Errorf("access token sid = %q, want %q", claims.SessionID, doc.SessionUUID)
 	}
 }
 

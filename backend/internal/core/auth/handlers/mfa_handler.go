@@ -17,7 +17,7 @@ import (
 // endpoint needs to mint and persist a full token pair. Kept as a local
 // interface so the MFA handler doesn't import the whole password service.
 type LoginTokenIssuer interface {
-	IssueLoginTokens(ctx context.Context, user *iface.User, deviceID, platform, ip string, amr []string, lastOTPAt int64) (*authModels.TokenResponse, error)
+	IssueLoginTokensForSession(ctx context.Context, user *iface.User, in services.LoginTokenContext, amr []string, lastOTPAt int64) (*authModels.TokenResponse, error)
 }
 
 // adminAuthRecorder is the narrow slice of AuthService MFAHandler needs
@@ -324,6 +324,10 @@ func (h *MFAHandler) Verify(ctx context.Context, req *MFAVerifyRequest) (*MFAVer
 	if userUUID == "" {
 		return nil, huma.Error401Unauthorized("authentication required")
 	}
+	device, security, ok := currentSessionSecurity(ctx)
+	if !ok {
+		return nil, huma.Error401Unauthorized("authentication required")
+	}
 
 	if req.Body.UseBackup {
 		if err := h.mfa.VerifyBackupCode(ctx, userUUID, req.Body.Code); err != nil {
@@ -336,13 +340,12 @@ func (h *MFAHandler) Verify(ctx context.Context, req *MFAVerifyRequest) (*MFAVer
 	}
 
 	user, err := h.users.GetUserByID(ctx, userUUID)
-	if err != nil || user == nil {
+	if err != nil || services.ValidateTokenEligibleUser(user) != nil {
 		return nil, huma.Error401Unauthorized("user not found")
 	}
-
 	amr := priorAMRWithOTP(ctx)
 	lastOTPAt := nowUnix()
-	token, err := h.jwt.GenerateAccessTokenWithAMR(user, amr, lastOTPAt)
+	token, err := h.jwt.GenerateAccessTokenForSessionWithAMR(user, device, security, amr, lastOTPAt)
 	if err != nil {
 		return nil, huma.Error500InternalServerError("failed to mint stepped-up token")
 	}
@@ -473,6 +476,9 @@ func (h *MFAHandler) LoginVerify(ctx context.Context, req *MFALoginVerifyRequest
 	if ch.Purpose != services.MFAPurposeLogin {
 		return nil, huma.Error400BadRequest("challenge purpose mismatch")
 	}
+	if ch.SessionID == "" {
+		return nil, huma.Error401Unauthorized("invalid or expired challenge")
+	}
 
 	if req.Body.UseBackup {
 		if err := h.mfa.VerifyBackupCode(ctx, ch.UserUUID, req.Body.Code); err != nil {
@@ -486,16 +492,26 @@ func (h *MFAHandler) LoginVerify(ctx context.Context, req *MFALoginVerifyRequest
 		}
 	}
 
-	// Verified — consume the challenge so it can't be reused.
-	_, _ = h.challenges.Consume(ctx, req.Body.ChallengeID)
+	// Verified — atomically claim the challenge. Concurrent requests may
+	// both verify the same factor, but only the GETDEL winner may mint.
+	ch, err = h.challenges.Consume(ctx, req.Body.ChallengeID)
+	if err != nil {
+		return nil, huma.Error401Unauthorized("invalid or expired challenge")
+	}
 
 	user, err := h.users.GetUserByID(ctx, ch.UserUUID)
-	if err != nil || user == nil {
+	if err != nil || services.ValidateTokenEligibleUser(user) != nil {
 		return nil, huma.Error401Unauthorized("user not found")
 	}
 
 	amr := appendOTP(ch.SourceAMR)
-	tokens, err := h.tokens.IssueLoginTokens(ctx, user, ch.DeviceID, ch.Platform, ch.IPAddress, amr, time.Now().Unix())
+	tokens, err := h.tokens.IssueLoginTokensForSession(ctx, user, services.LoginTokenContext{
+		SessionID: ch.SessionID, DeviceID: ch.DeviceID, DeviceType: ch.DeviceType,
+		Platform: ch.Platform, IPAddress: ch.IPAddress, Fingerprint: ch.Fingerprint,
+		UserAgent: ch.UserAgent, LoginMethod: ch.LoginMethod, RiskScore: ch.RiskScore,
+		RiskFactors: append([]string(nil), ch.RiskFactors...), TrustLevel: ch.TrustLevel,
+		MFACompleted: true,
+	}, amr, time.Now().Unix())
 	if err != nil {
 		return nil, huma.Error500InternalServerError("failed to mint login tokens")
 	}

@@ -17,6 +17,7 @@ import (
 	"time"
 
 	authModels "github.com/orkestra/backend/internal/core/auth/models"
+	"github.com/orkestra/backend/internal/shared/utils"
 	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
@@ -89,7 +90,7 @@ func TestRefresh_NewRowExpiresPerConfiguredRefreshTTL(t *testing.T) {
 
 	// The fake keys rotated rows by the raw token the service handed it
 	// (the real repo hashes on insert).
-	doc, err := env.refresh.GetByTokenAny(context.Background(), resp.RefreshToken)
+	doc, err := env.refresh.GetByTokenAny(context.Background(), utils.HashRefreshToken(resp.RefreshToken))
 	if err != nil || doc == nil {
 		t.Fatalf("rotated row not found: %v", err)
 	}

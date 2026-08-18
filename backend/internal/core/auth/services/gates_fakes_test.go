@@ -21,6 +21,7 @@ import (
 	authModels "github.com/orkestra/backend/internal/core/auth/models"
 	"github.com/orkestra/backend/internal/core/auth/repository"
 	"github.com/orkestra/backend/internal/shared/geoip"
+	"github.com/orkestra/backend/internal/shared/utils"
 	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
@@ -284,16 +285,35 @@ func (*fakeNotFoundErr) Error() string { return "user not found" }
 // methods stay as panics so a refactor that takes a new dependency
 // surfaces immediately.
 type gateRefreshRepo struct {
-	mu      sync.Mutex
-	created []*authModels.RefreshTokenDoc
-	revoked []string // userUUIDs that hit RevokeTokensByUser
+	mu              sync.Mutex
+	created         []*authModels.RefreshTokenDoc
+	revoked         []string // userUUIDs that hit RevokeTokensByUser
+	compromised     map[string]testFamilyRevocation
+	revokeFamilyErr error
+	casReached      chan struct{}
+	allowInsert     chan struct{}
 	// byHash mirrors the production repo's "primary lookup" path.
 	// Tests can pre-seed via seedRefreshDoc for the orchestration paths.
 	byHash map[string]*authModels.RefreshTokenDoc
 }
 
+type testFamilyRevocation struct {
+	at     time.Time
+	reason string
+}
+
 func newGateRefreshRepo() *gateRefreshRepo {
-	return &gateRefreshRepo{byHash: map[string]*authModels.RefreshTokenDoc{}}
+	return &gateRefreshRepo{
+		byHash:      map[string]*authModels.RefreshTokenDoc{},
+		compromised: map[string]testFamilyRevocation{},
+	}
+}
+
+func (r *gateRefreshRepo) setRotationBarrier(reached, release chan struct{}) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.casReached = reached
+	r.allowInsert = release
 }
 
 func (r *gateRefreshRepo) CreateRefreshToken(_ context.Context, doc *authModels.RefreshTokenDoc) error {
@@ -324,6 +344,11 @@ func (r *gateRefreshRepo) GetByTokenAny(_ context.Context, tokenHash string) (*a
 	defer r.mu.Unlock()
 	if d, ok := r.byHash[tokenHash]; ok {
 		c := *d
+		if state, compromised := r.compromised[c.FamilyID]; compromised {
+			c.IsRevoked = true
+			c.RevokedAt = &state.at
+			c.RevokedReason = state.reason
+		}
 		return &c, nil
 	}
 	return nil, nil
@@ -331,9 +356,9 @@ func (r *gateRefreshRepo) GetByTokenAny(_ context.Context, tokenHash string) (*a
 
 func (r *gateRefreshRepo) RotateWithFamily(_ context.Context, oldHash string, newDoc *authModels.RefreshTokenDoc) error {
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	old, ok := r.byHash[oldHash]
 	if !ok || old.IsRevoked {
+		r.mu.Unlock()
 		return repository.ErrTokenAlreadyRotated
 	}
 	now := time.Now()
@@ -341,18 +366,41 @@ func (r *gateRefreshRepo) RotateWithFamily(_ context.Context, oldHash string, ne
 	old.RevokedAt = &now
 	old.RevokedReason = authModels.RevokeReasonRotated
 	old.SucceededBy = newDoc.UUID
+	reached, release := r.casReached, r.allowInsert
+	r.casReached, r.allowInsert = nil, nil
+	r.mu.Unlock()
+	if reached != nil {
+		close(reached)
+		<-release
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	c := *newDoc
-	r.byHash[newDoc.Token] = &c
+	state, compromised := r.compromised[c.FamilyID]
+	if compromised {
+		c.IsRevoked = true
+		c.RevokedAt = &state.at
+		c.RevokedReason = state.reason
+	}
+	r.byHash[utils.HashRefreshToken(newDoc.Token)] = &c
+	if compromised {
+		return repository.ErrTokenAlreadyRotated
+	}
 	return nil
 }
 
 func (r *gateRefreshRepo) RevokeFamily(_ context.Context, familyID, reason string) (int64, error) {
+	if r.revokeFamilyErr != nil {
+		return 0, r.revokeFamilyErr
+	}
 	if familyID == "" {
 		return 0, nil
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	now := time.Now()
+	r.compromised[familyID] = testFamilyRevocation{at: now, reason: reason}
 	var n int64
 	for _, d := range r.byHash {
 		if d.FamilyID == familyID && !d.IsRevoked {
@@ -363,6 +411,18 @@ func (r *gateRefreshRepo) RevokeFamily(_ context.Context, familyID, reason strin
 		}
 	}
 	return n, nil
+}
+
+func (r *gateRefreshRepo) activeFamilyMembers(familyID string) int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	active := 0
+	for _, d := range r.byHash {
+		if d.FamilyID == familyID && !d.IsRevoked {
+			active++
+		}
+	}
+	return active
 }
 
 // Methods we never reach — panic loudly if a refactor crosses the line.

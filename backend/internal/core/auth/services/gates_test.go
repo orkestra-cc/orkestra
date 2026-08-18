@@ -811,7 +811,7 @@ func (f *fakeMFAChallenge) BeginLogin(_ context.Context, in LoginChallengeInput)
 	id := in.UserUUID + "-login"
 	c := &MFAChallenge{
 		ID: id, UserUUID: in.UserUUID, Purpose: MFAPurposeLogin,
-		DeviceID: in.DeviceID, Platform: in.Platform, IPAddress: in.IPAddress,
+		SessionID: in.SessionID, DeviceID: in.DeviceID, Platform: in.Platform, IPAddress: in.IPAddress,
 		Fingerprint: in.Fingerprint, SourceAMR: in.SourceAMR,
 		CreatedAt: time.Now(), ExpiresAt: time.Now().Add(5 * time.Minute),
 	}

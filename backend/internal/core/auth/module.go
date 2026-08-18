@@ -648,6 +648,14 @@ func (m *AuthModule) Collections() []module.CollectionSpec {
 			{Keys: map[string]int{"userUuid": 1}},
 			{Keys: map[string]int{"familyId": 1}},
 		}},
+		{Name: models.OperatorRefreshTokenFamiliesCollection, Indexes: []module.IndexSpec{
+			{Keys: map[string]int{"familyId": 1}, Unique: true},
+			{Keys: map[string]int{"expiresAt": 1}, ExpireAt: true},
+		}},
+		{Name: models.ClientRefreshTokenFamiliesCollection, Indexes: []module.IndexSpec{
+			{Keys: map[string]int{"familyId": 1}, Unique: true},
+			{Keys: map[string]int{"expiresAt": 1}, ExpireAt: true},
+		}},
 		{Name: models.OperatorSessionsCollection, Indexes: []module.IndexSpec{
 			{Keys: map[string]int{"uuid": 1}, Unique: true},
 		}},
@@ -727,7 +735,11 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 	// secret is derived from the JWT private key so every replica
 	// agrees without an extra env var; rotation is implicit when the
 	// JWT key pair rotates.
-	redisStore := services.NewRedisOAuthStateStore(deps.RedisAdapter)
+	atomicRedis, ok := deps.RedisAdapter.(services.AtomicTakeRedisClient)
+	if !ok {
+		return fmt.Errorf("auth: Redis adapter lacks atomic GETDEL support")
+	}
+	redisStore := services.NewRedisOAuthStateStore(atomicRedis)
 	oauthStateService := services.NewOAuthStateService(redisStore)
 	var oauthStateSecret []byte
 	if cfg.Auth.JWT.PrivateKey != nil {

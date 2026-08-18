@@ -131,6 +131,91 @@ func TestGenerateTokenPairWithAMR_StampsAMRAndLastOTPOnAccessToken(t *testing.T)
 	}
 }
 
+func TestGenerateTokenPairWithAMR_PreservesSession(t *testing.T) {
+	svc := newTestJWT(t, AudienceOperator)
+	user := &iface.User{UUID: "u-session", Email: "session@example.com", Role: "operator"}
+	device := &authModels.DeviceInfo{DeviceID: "device-session", Platform: "web"}
+	security := &authModels.SecurityContext{SessionID: "session-canonical"}
+
+	pair, err := svc.GenerateTokenPairWithAMR(user, device, security, []string{"pwd"}, 0)
+	if err != nil {
+		t.Fatalf("GenerateTokenPairWithAMR: %v", err)
+	}
+	accessClaims, err := svc.ValidateAccessToken(pair.AccessToken)
+	if err != nil {
+		t.Fatalf("ValidateAccessToken: %v", err)
+	}
+	refreshClaims, err := svc.ValidateRefreshToken(pair.RefreshToken)
+	if err != nil {
+		t.Fatalf("ValidateRefreshToken: %v", err)
+	}
+	if accessClaims.SessionID != "session-canonical" {
+		t.Errorf("access SessionID = %q, want session-canonical", accessClaims.SessionID)
+	}
+	if refreshClaims.SessionID != accessClaims.SessionID {
+		t.Errorf("refresh SessionID = %q, want %q", refreshClaims.SessionID, accessClaims.SessionID)
+	}
+}
+
+func TestGenerateTokenPairWithAMR_RequiresSession(t *testing.T) {
+	svc := newTestJWT(t, AudienceOperator)
+	user := &iface.User{UUID: "u-required-session", Role: "operator"}
+	device := &authModels.DeviceInfo{DeviceID: "device-required-session"}
+
+	pair, err := svc.GenerateTokenPairWithAMR(user, device, &authModels.SecurityContext{}, []string{"pwd"}, 0)
+	if err == nil {
+		t.Fatalf("GenerateTokenPairWithAMR returned a token pair without a session id: %+v", pair)
+	}
+}
+
+func TestSessionAwareTokenIssuance_RequiresSessionContext(t *testing.T) {
+	svc := newTestJWT(t, AudienceOperator)
+	user := &iface.User{UUID: "u-session-required", Role: "operator"}
+	device := &authModels.DeviceInfo{DeviceID: "device-session-required"}
+
+	for name, security := range map[string]*authModels.SecurityContext{
+		"nil context":   nil,
+		"empty session": {},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if pair, err := svc.GenerateTokenPair(user, device, security); err == nil || pair != nil {
+				t.Fatalf("GenerateTokenPair = %+v, %v; want no pair and an error", pair, err)
+			}
+			if pair, err := svc.GenerateTokenPairWithAMR(user, device, security, []string{"pwd"}, 0); err == nil || pair != nil {
+				t.Fatalf("GenerateTokenPairWithAMR = %+v, %v; want no pair and an error", pair, err)
+			}
+			if token, err := svc.GenerateAccessTokenForSessionWithAMR(user, device, security, []string{"pwd"}, 0); err == nil || token != "" {
+				t.Fatalf("GenerateAccessTokenForSessionWithAMR = %q, %v; want no token and an error", token, err)
+			}
+		})
+	}
+}
+
+func TestGenerateAccessTokenForSessionWithAMR_PreservesSession(t *testing.T) {
+	svc := newTestJWT(t, AudienceOperator)
+	user := &iface.User{UUID: "u-session-access", Role: "operator"}
+	device := &authModels.DeviceInfo{DeviceID: "device-session-access"}
+	security := &authModels.SecurityContext{SessionID: "session-access-canonical", AMR: []string{"oauth"}, LastOTPAt: 11}
+
+	token, err := svc.GenerateAccessTokenForSessionWithAMR(user, device, security, []string{"pwd", "otp"}, 22)
+	if err != nil {
+		t.Fatalf("GenerateAccessTokenForSessionWithAMR: %v", err)
+	}
+	claims, err := svc.ValidateAccessToken(token)
+	if err != nil {
+		t.Fatalf("ValidateAccessToken: %v", err)
+	}
+	if claims.SessionID != "session-access-canonical" {
+		t.Errorf("SessionID = %q, want session-access-canonical", claims.SessionID)
+	}
+	if len(claims.AMR) != 2 || claims.AMR[0] != "pwd" || claims.AMR[1] != "otp" || claims.LastOTPAt != 22 {
+		t.Errorf("claims = %+v, want supplied AMR and last OTP timestamp", claims)
+	}
+	if len(security.AMR) != 1 || security.AMR[0] != "oauth" || security.LastOTPAt != 11 {
+		t.Errorf("caller security context mutated: %+v", security)
+	}
+}
+
 // ===== IsEnabled =====
 
 func TestIsEnabled_TrueOnNormalConstruction(t *testing.T) {

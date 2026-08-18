@@ -88,6 +88,21 @@ type RefreshTokenDoc struct {
 	SucceededBy string `bson:"succeededBy,omitempty" json:"-"`
 }
 
+// RefreshTokenFamilyStateDoc is the durable revocation fence for a token
+// family. RevokeFamily writes this marker before sweeping token rows, so a
+// rotation racing between the parent CAS and successor insert cannot escape
+// the family revocation.
+type RefreshTokenFamilyStateDoc struct {
+	ID            primitive.ObjectID `bson:"_id,omitempty" json:"-"`
+	Tier          string             `bson:"tier" json:"-"`
+	FamilyID      string             `bson:"familyId" json:"-"`
+	RevokedAt     time.Time          `bson:"revokedAt" json:"-"`
+	RevokedReason string             `bson:"revokedReason" json:"-"`
+	CreatedAt     time.Time          `bson:"createdAt" json:"-"`
+	UpdatedAt     time.Time          `bson:"updatedAt" json:"-"`
+	ExpiresAt     time.Time          `bson:"expiresAt" json:"-"`
+}
+
 // Refresh-token revocation reasons. Written to RefreshTokenDoc.RevokedReason
 // when a token is marked revoked. Strings are stable — do not rename, they
 // are read by analytics and by future audit-event filters.
@@ -165,14 +180,16 @@ const (
 	SecurityEventsCollection = "auth_security_events"
 	DeviceTrustCollection    = "auth_device_trust"
 
-	OperatorOAuthProvidersCollection = "operator_oauth_providers"
-	ClientOAuthProvidersCollection   = "client_oauth_providers"
-	OperatorRefreshTokensCollection  = "operator_refresh_tokens"
-	ClientRefreshTokensCollection    = "client_refresh_tokens"
-	OperatorSessionsCollection       = "operator_sessions"
-	ClientSessionsCollection         = "client_sessions"
-	OperatorMFAFactorsCollection     = "operator_mfa_factors"
-	ClientMFAFactorsCollection       = "client_mfa_factors"
+	OperatorOAuthProvidersCollection       = "operator_oauth_providers"
+	ClientOAuthProvidersCollection         = "client_oauth_providers"
+	OperatorRefreshTokensCollection        = "operator_refresh_tokens"
+	ClientRefreshTokensCollection          = "client_refresh_tokens"
+	OperatorRefreshTokenFamiliesCollection = "operator_refresh_token_families"
+	ClientRefreshTokenFamiliesCollection   = "client_refresh_token_families"
+	OperatorSessionsCollection             = "operator_sessions"
+	ClientSessionsCollection               = "client_sessions"
+	OperatorMFAFactorsCollection           = "operator_mfa_factors"
+	ClientMFAFactorsCollection             = "client_mfa_factors"
 )
 
 // Helper function to generate UUIDs

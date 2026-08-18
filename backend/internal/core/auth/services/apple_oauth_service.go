@@ -51,11 +51,8 @@ func NewAppleOAuthService(config *OAuthProviderConfig, redisClient RedisClient) 
 	}
 
 	// Load Apple private key from config - check both direct key and file path
-	fmt.Printf("[APPLE_DEBUG] Config keys available: %+v\n", config.AdditionalConfig)
-
 	if privateKeyPEM, exists := config.AdditionalConfig["private_key"]; exists && privateKeyPEM != "" {
 		// Direct PEM key provided
-		fmt.Printf("[APPLE_DEBUG] Using direct private key, length: %d\n", len(privateKeyPEM))
 		if key, err := service.parsePrivateKey(privateKeyPEM); err != nil {
 			return nil, fmt.Errorf("failed to load apple private key: %w", err)
 		} else {
@@ -63,20 +60,15 @@ func NewAppleOAuthService(config *OAuthProviderConfig, redisClient RedisClient) 
 		}
 	} else if privateKeyPath, exists := config.AdditionalConfig["private_key_path"]; exists && privateKeyPath != "" {
 		// Load from file path
-		fmt.Printf("[APPLE_DEBUG] Using private key file path: %s\n", privateKeyPath)
 		if keyData, err := os.ReadFile(privateKeyPath); err == nil {
-			fmt.Printf("[APPLE_DEBUG] Successfully read key file, length: %d\n", len(keyData))
 			if key, err := service.parsePrivateKey(string(keyData)); err == nil {
 				service.privateKey = key
 			} else {
 				return nil, fmt.Errorf("failed to parse private key from file %s: %w", privateKeyPath, err)
 			}
 		} else {
-			fmt.Printf("[APPLE_DEBUG] Failed to read key file: %v\n", err)
 			return nil, fmt.Errorf("failed to read private key file %s: %w", privateKeyPath, err)
 		}
-	} else {
-		fmt.Printf("[APPLE_DEBUG] No private key or private key path provided\n")
 	}
 
 	return service, nil
@@ -430,16 +422,10 @@ func (s *appleOAuthService) generateClientSecret() (string, error) {
 }
 
 func (s *appleOAuthService) parsePrivateKey(pemData string) (*ecdsa.PrivateKey, error) {
-	fmt.Printf("[APPLE_DEBUG] Parsing private key - length: %d\n", len(pemData))
-	fmt.Printf("[APPLE_DEBUG] First 50 chars: %q\n", pemData[:min(50, len(pemData))])
-	fmt.Printf("[APPLE_DEBUG] Last 50 chars: %q\n", pemData[max(0, len(pemData)-50):])
-
 	block, _ := pem.Decode([]byte(pemData))
 	if block == nil {
-		fmt.Printf("[APPLE_DEBUG] ERROR: PEM decode failed - no block found\n")
 		return nil, fmt.Errorf("failed to decode PEM block containing private key")
 	}
-	fmt.Printf("[APPLE_DEBUG] PEM block type: %s, length: %d\n", block.Type, len(block.Bytes))
 
 	key, err := x509.ParsePKCS8PrivateKey(block.Bytes)
 	if err != nil {
