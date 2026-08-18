@@ -580,6 +580,11 @@ func (r *ModuleRegistry) RetryInit(name string) error {
 	// Re-register permissions to include the newly initialized module.
 	r.registerPermissions()
 
+	// Re-register notification templates for the same reason — a module
+	// retried into service after a failed boot must still get its
+	// templates seeded, not silently skipped for the life of the process.
+	r.registerNotificationTemplates()
+
 	return nil
 }
 
