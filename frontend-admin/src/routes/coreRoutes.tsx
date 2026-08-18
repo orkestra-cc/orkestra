@@ -40,6 +40,10 @@ const LogLevelsPage = lazy(
   () => import('pages/admin/observability/log-levels')
 );
 const RoleManagement = lazy(() => import('pages/admin/roles'));
+const ServiceAccountsPage = lazy(() => import('pages/admin/service-accounts'));
+const ServiceAccountDetail = lazy(
+  () => import('pages/admin/service-accounts/detail')
+);
 const InternalTenants = lazy(() => import('pages/admin/internal-tenants'));
 const InternalTenantDetail = lazy(
   () => import('pages/admin/internal-tenants/detail')
@@ -246,6 +250,51 @@ export function buildCoreRoutes(
                     >
                       <Suspense key="admin-roles" fallback={<OrkestraLoader />}>
                         <RoleManagement />
+                      </Suspense>
+                    </ProtectedRoute>
+                  )
+                },
+                {
+                  // ADR-0014 — client-credentials service accounts admin.
+                  path: 'service-accounts',
+                  element: (
+                    <ProtectedRoute
+                      requiredPermissions={[
+                        [
+                          'auth.service_accounts.read',
+                          'super_admin',
+                          'administrator'
+                        ]
+                      ]}
+                    >
+                      <Suspense
+                        key="admin-service-accounts"
+                        fallback={<OrkestraLoader />}
+                      >
+                        <ServiceAccountsPage />
+                      </Suspense>
+                    </ProtectedRoute>
+                  )
+                },
+                {
+                  // ADR-0014 — service account detail: credentials, issue/
+                  // rotate, revoke, enable/disable, rename.
+                  path: 'service-accounts/:id',
+                  element: (
+                    <ProtectedRoute
+                      requiredPermissions={[
+                        [
+                          'auth.service_accounts.read',
+                          'super_admin',
+                          'administrator'
+                        ]
+                      ]}
+                    >
+                      <Suspense
+                        key="admin-service-account-detail"
+                        fallback={<OrkestraLoader />}
+                      >
+                        <ServiceAccountDetail />
                       </Suspense>
                     </ProtectedRoute>
                   )

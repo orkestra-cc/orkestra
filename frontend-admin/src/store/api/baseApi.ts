@@ -90,6 +90,7 @@ const TENANT_AGNOSTIC_PATHS = [
   '/v1/tenants/accept-invite',
   '/v1/notifications/preferences',
   '/v1/admin/modules', // platform-level module admin, not per-tenant
+  '/v1/admin/service-accounts', // platform-level admin surface, not per-tenant
   '/v1/admin/tenants', // platform-level tenant admin, not per-tenant
   '/v1/admin/audit-events', // platform-level audit read, not per-tenant
   '/v1/admin/compliance', // platform-level compliance (SOC2 evidence, …)
@@ -354,6 +355,8 @@ export const baseApi = createApi({
     // Admin module management tags
     'Module',
     'ModuleHealth',
+    // Service accounts — platform-level admin (ADR-0014 client-credentials)
+    'ServiceAccount',
     // First-install onboarding
     'Setup',
     // MFA factors + backup codes

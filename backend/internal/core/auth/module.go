@@ -144,6 +144,18 @@ func (m *AuthModule) Permissions() []iface.PermissionSpec {
 	}
 }
 
+// NavItems declares the auth module's operator-console navigation. The
+// sidebar is backend-declared (frontend renders GET /v1/navigation);
+// ItemKey is set explicitly so a future rename cannot orphan persisted
+// reorder overrides.
+func (m *AuthModule) NavItems() []module.NavItemSpec {
+	return []module.NavItemSpec{
+		{Realm: "platform", Tier: "internal", Name: "Service Accounts", Icon: "key",
+			Path: "/admin/service-accounts", MinRole: "administrator", Active: true,
+			ItemKey: "auth-service-accounts"},
+	}
+}
+
 // ConfigGroups gives the admin settings page a sectioned rail instead of one
 // flat list. auth is by far the largest configuration surface in the base —
 // 62 fields — and the four OAuth providers are declared as children of the

@@ -174,6 +174,7 @@ export interface AppPaths {
   calendarExample: string;
   cards: string;
   statCards: string;
+  secretOnceDisplay: string;
   bootstrapCarousel: string;
   slickCarousel: string;
   collapse: string;
@@ -281,6 +282,7 @@ export interface AppPaths {
   refComponentsCalendar: string;
   refComponentsCards: string;
   refComponentsStatCards: string;
+  refComponentsSecretOnceDisplay: string;
   refComponentsCarouselBootstrap: string;
   refComponentsCarouselSlick: string;
   refComponentsCollapse: string;
@@ -502,6 +504,7 @@ const paths: AppPaths = {
   calendarExample: `/${rootPaths.componentsRoot}/calendar`,
   cards: `/${rootPaths.componentsRoot}/cards`,
   statCards: `/${rootPaths.componentsRoot}/stat-cards`,
+  secretOnceDisplay: `/${rootPaths.componentsRoot}/secret-once-display`,
   bootstrapCarousel: `/${rootPaths.componentsRoot}/${rootPaths.carouselRoot}/bootstrap`,
   slickCarousel: `/${rootPaths.componentsRoot}/${rootPaths.carouselRoot}/slick`,
   collapse: `/${rootPaths.componentsRoot}/collapse`,
@@ -610,6 +613,7 @@ const paths: AppPaths = {
   refComponentsCalendar: `/${rootPaths.referenceRoot}/components/calendar`,
   refComponentsCards: `/${rootPaths.referenceRoot}/components/cards`,
   refComponentsStatCards: `/${rootPaths.referenceRoot}/components/stat-cards`,
+  refComponentsSecretOnceDisplay: `/${rootPaths.referenceRoot}/components/secret-once-display`,
   refComponentsCarouselBootstrap: `/${rootPaths.referenceRoot}/components/carousel/bootstrap`,
   refComponentsCarouselSlick: `/${rootPaths.referenceRoot}/components/carousel/slick`,
   refComponentsCollapse: `/${rootPaths.referenceRoot}/components/collapse`,

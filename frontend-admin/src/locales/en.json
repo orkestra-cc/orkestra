@@ -2,6 +2,15 @@
   "app": {
     "name": "Orkestra"
   },
+  "common": {
+    "secretOnce": {
+      "warningPrefix": "Save this now.",
+      "warningBody": "This value will not be shown again — copy it somewhere safe before you close this dialog.",
+      "copy": "Copy",
+      "copied": "Copied",
+      "ackLabel": "I have saved this value somewhere safe."
+    }
+  },
   "nav": {
     "toggleNavigation": "Toggle Navigation",
     "navigationUnavailable": "Navigation unavailable",
@@ -1449,6 +1458,103 @@
       "systemBadge": "system"
     }
   },
+  "adminServiceAccounts": {
+    "title": "Service accounts",
+    "description": "Client-credentials identities other services use to call the Orkestra API.",
+    "newButton": "New service account",
+    "loading": "Loading service accounts…",
+    "loadFailed": "Failed to load service accounts.",
+    "empty": "No service accounts yet.",
+    "columns": {
+      "name": "Name",
+      "email": "Email",
+      "status": "Status",
+      "activeCredentials": "Active credentials",
+      "createdAt": "Created"
+    },
+    "status": {
+      "active": "Active",
+      "inactive": "Inactive"
+    },
+    "createModal": {
+      "title": "Create service account",
+      "secretTitle": "Service account created",
+      "nameLabel": "Name",
+      "namePlaceholder": "e.g. hermes-agent",
+      "nameRequired": "Name is required.",
+      "nameTooLong": "Name must be 100 characters or fewer.",
+      "cancel": "Cancel",
+      "create": "Create",
+      "creating": "Creating…",
+      "clientSecretLabel": "Client secret",
+      "clientIdLabel": "Client ID",
+      "done": "Done",
+      "successToast": "Service account \"{{name}}\" created"
+    },
+    "detail": {
+      "breadcrumbList": "Service accounts",
+      "loading": "Loading service account…",
+      "notFound": "Service account not found.",
+      "backToList": "Back to service accounts",
+      "tooltipEnable": "Enable this service account",
+      "tooltipDisable": "Disable this service account",
+      "ariaEnable": "Enable service account",
+      "ariaDisable": "Disable service account",
+      "toggleEnabledToast": "\"{{name}}\" enabled",
+      "toggleDisabledToast": "\"{{name}}\" disabled",
+      "toggleErrorToast": "Could not update status: {{error}}",
+      "renameButton": "Rename",
+      "renameCancel": "Cancel",
+      "renameSave": "Save",
+      "renameSaving": "Saving…",
+      "renameSuccessToast": "Renamed to \"{{name}}\"",
+      "renameErrorToast": "Could not rename: {{error}}",
+      "manageAccessLink": "Manage roles & membership",
+      "credentialsTitle": "Credentials",
+      "credentialsDescription": "Client-credential secrets this service account can authenticate with.",
+      "issueButton": "Issue credential",
+      "emptyCredentials": "No credentials issued yet.",
+      "columns": {
+        "clientId": "Client ID",
+        "label": "Label",
+        "createdAt": "Created",
+        "lastUsedAt": "Last used",
+        "status": "Status"
+      },
+      "credentialStatus": {
+        "active": "Active",
+        "revoked": "Revoked"
+      },
+      "tooltipRevoke": "Revoke this credential",
+      "ariaRevoke": "Revoke credential",
+      "revokeSuccessToast": "Credential revoked",
+      "revokeErrorToast": "Could not revoke credential: {{error}}",
+      "revokeModal": {
+        "title": "Revoke credential",
+        "body": "This immediately invalidates the client secret for this credential. Any service using it stops being able to authenticate.",
+        "cancel": "Cancel",
+        "confirm": "Revoke",
+        "confirming": "Revoking…"
+      }
+    },
+    "issueModal": {
+      "title": "Issue credential",
+      "secretTitle": "Credential issued",
+      "labelLabel": "Label",
+      "labelPlaceholder": "e.g. production",
+      "labelTooLong": "Label must be 60 characters or fewer.",
+      "cancel": "Cancel",
+      "issue": "Issue",
+      "issuing": "Issuing…",
+      "successToast": "Credential issued"
+    },
+    "errors": {
+      "duplicate": "A service account with this name already exists.",
+      "validation": "Check the service account name and try again.",
+      "generic": "Something went wrong. Please try again.",
+      "credentialCap": "This service account already has two active credentials. Revoke one before issuing another."
+    }
+  },
   "adminObservability": {
     "logLevels": {
       "title": "Log levels",
@@ -1851,7 +1957,8 @@
     "status": {
       "active": "Active",
       "inactive": "Inactive"
-    }
+    },
+    "serviceBadge": "Service"
   },
   "adminCompliance": {
     "pageTitle": "Compliance",

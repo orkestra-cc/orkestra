@@ -28,6 +28,7 @@ export { default as Logo } from './Logo';
 export { default as MultiSelect } from './MultiSelect';
 export { default as PageHeader } from './PageHeader';
 export { default as ReactEchart } from './ReactEchart';
+export { default as SecretOnceDisplay } from './SecretOnceDisplay';
 export { default as Section } from './Section';
 export { default as SectionCard } from './SectionCard';
 export { default as StarRating } from './StarRating';
