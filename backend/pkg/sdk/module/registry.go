@@ -219,6 +219,12 @@ func (r *ModuleRegistry) InitAll(deps *Dependencies) error {
 	// permissions too.
 	r.registerPermissions()
 
+	// Collect NotificationTemplates() from every initialized module and hand
+	// them to the notification module's seeder, mirroring the permissions
+	// path above. Absent seeder (no notification module in this deployment)
+	// degrades to a warning rather than a panic.
+	r.registerNotificationTemplates()
+
 	// Collect Capabilities() from every initialized module and populate the
 	// shared capability registry. Runs after Init so modules that compute
 	// their capability list from config have had a chance to configure
@@ -293,6 +299,33 @@ func (r *ModuleRegistry) registerPermissions() {
 		r.logger.Warn("authz provider does not implement SeedSystemRoles",
 			slog.String("dynamic_type", fmt.Sprintf("%T", authz)))
 	}
+}
+
+// registerNotificationTemplates collects the template declarations of every
+// initialized module and hands them to the notification module's seeder.
+// Absent seeder = no notification module in this deployment; warn and move
+// on, exactly like the authz catalog path.
+func (r *ModuleRegistry) registerNotificationTemplates() {
+	seeder, ok := GetTyped[NotificationTemplateSeeder](r.deps.Services, ServiceNotificationTemplateSeeder)
+	if !ok {
+		r.logger.Warn("notification template seeder not registered — module templates not seeded")
+		return
+	}
+
+	var all []NotificationTemplateSpec
+	for _, m := range r.initialized {
+		all = append(all, NotificationTemplatesOf(m)...)
+	}
+	if len(all) == 0 {
+		return
+	}
+	if err := seeder.SeedModuleTemplates(context.Background(), all); err != nil {
+		r.logger.Warn("Failed to seed module notification templates",
+			slog.String("error", err.Error()),
+		)
+		return
+	}
+	r.logger.Info("Seeded module notification templates", slog.Int("count", len(all)))
 }
 
 // RegisterAllRoutes calls RegisterRoutes on ALL modules (not just enabled).
