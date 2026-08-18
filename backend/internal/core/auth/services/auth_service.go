@@ -1829,23 +1829,17 @@ func (s *authService) HandleOAuthCallbackWithLinking(ctx context.Context, provid
 
 			if oauthTokens.AccessToken != "" {
 				encryptedAccessToken, err = utils.EncryptOAuthToken(oauthTokens.AccessToken)
-				if err != nil {
-				} else {
-					if oauthTokens.ExpiresIn > 0 {
-						expiresAt := time.Now().Add(time.Duration(oauthTokens.ExpiresIn) * time.Second)
-						accessTokenExpiresAt = &expiresAt
-					}
+				if err == nil && oauthTokens.ExpiresIn > 0 {
+					expiresAt := time.Now().Add(time.Duration(oauthTokens.ExpiresIn) * time.Second)
+					accessTokenExpiresAt = &expiresAt
 				}
 			}
 
 			if oauthTokens.RefreshToken != "" {
 				encryptedRefreshToken, err = utils.EncryptOAuthToken(oauthTokens.RefreshToken)
-				if err != nil {
-				} else {
-					if oauthTokens.RefreshTokenExpiresIn > 0 {
-						expiresAt := time.Now().Add(time.Duration(oauthTokens.RefreshTokenExpiresIn) * time.Second)
-						refreshTokenExpiresAt = &expiresAt
-					}
+				if err == nil && oauthTokens.RefreshTokenExpiresIn > 0 {
+					expiresAt := time.Now().Add(time.Duration(oauthTokens.RefreshTokenExpiresIn) * time.Second)
+					refreshTokenExpiresAt = &expiresAt
 				}
 			}
 
@@ -1863,14 +1857,13 @@ func (s *authService) HandleOAuthCallbackWithLinking(ctx context.Context, provid
 			existingProvider.UpdatedAt = time.Now()
 
 			// Update tokens in database
-			err = s.oauthProviderRepo.UpdateOAuthTokens(ctx, existingProvider.UUID,
+			_ = s.oauthProviderRepo.UpdateOAuthTokens(ctx, existingProvider.UUID,
 				encryptedAccessToken, encryptedRefreshToken,
 				accessTokenExpiresAt, refreshTokenExpiresAt, tokenScopes)
-			_ = err
 		}
 
 		// Update last used timestamp
-		err = s.oauthProviderRepo.UpdateLastUsed(ctx, existingProvider.UUID)
+		_ = s.oauthProviderRepo.UpdateLastUsed(ctx, existingProvider.UUID)
 
 		// Refresh metadata (notably the `picture` URL) on every login.
 		// Two writes — one to auth_oauth_providers.metadata (drives the

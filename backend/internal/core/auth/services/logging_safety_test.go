@@ -20,7 +20,7 @@ var forbiddenAuthLogPatterns = []*regexp.Regexp{
 func TestProductionAuthCodeContainsNoDirectDebugPrinting(t *testing.T) {
 	_, testFile, _, ok := runtime.Caller(0)
 	if !ok {
-		t.Fatal("resolve test file path")
+		t.Fatal("unable to resolve test path")
 	}
 
 	servicesDir := filepath.Dir(testFile)
@@ -39,13 +39,13 @@ func TestProductionAuthCodeContainsNoDirectDebugPrinting(t *testing.T) {
 			}
 			for _, pattern := range forbiddenAuthLogPatterns {
 				if pattern.Match(content) {
-					t.Errorf("%s contains forbidden debug logging pattern %q", filepath.Base(path), pattern.String())
+					t.Error("production auth source contains forbidden debug logging")
 				}
 			}
 			return nil
 		})
 		if err != nil {
-			t.Fatalf("walk production auth directory %s: %v", dir, err)
+			t.Fatal("unable to scan production auth source")
 		}
 	}
 }
@@ -55,7 +55,7 @@ func TestAppleOAuthServiceConstructionDoesNotLogPrivateKey(t *testing.T) {
 
 	readPipe, writePipe, err := os.Pipe()
 	if err != nil {
-		t.Fatalf("create stdout capture pipe: %v", err)
+		t.Fatal("unable to capture stdout")
 	}
 	originalStdout := os.Stdout
 	os.Stdout = writePipe
@@ -69,19 +69,22 @@ func TestAppleOAuthServiceConstructionDoesNotLogPrivateKey(t *testing.T) {
 		AdditionalConfig: map[string]string{"private_key": privateKey},
 	}, nil)
 	if constructorErr == nil {
-		t.Fatal("NewAppleOAuthService returned nil error for invalid private key")
+		t.Fatal("Apple OAuth construction unexpectedly succeeded")
+	}
+	if constructorErr.Error() != "failed to load apple private key: failed to decode PEM block containing private key" {
+		t.Error("Apple OAuth construction returned an unexpected private-key parse error")
 	}
 
 	if err := writePipe.Close(); err != nil {
-		t.Fatalf("close stdout capture pipe: %v", err)
+		t.Fatal("unable to close stdout capture")
 	}
 	output, err := io.ReadAll(readPipe)
 	if err != nil {
-		t.Fatalf("read stdout capture: %v", err)
+		t.Fatal("unable to read stdout capture")
 	}
 	for _, forbidden := range []string{privateKey, "private_key"} {
 		if strings.Contains(string(output), forbidden) {
-			t.Errorf("Apple OAuth construction logged sensitive value %q: %s", forbidden, output)
+			t.Error("Apple OAuth construction logged a sensitive value")
 		}
 	}
 }
