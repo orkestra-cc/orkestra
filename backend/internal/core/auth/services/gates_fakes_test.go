@@ -285,12 +285,13 @@ func (*fakeNotFoundErr) Error() string { return "user not found" }
 // methods stay as panics so a refactor that takes a new dependency
 // surfaces immediately.
 type gateRefreshRepo struct {
-	mu          sync.Mutex
-	created     []*authModels.RefreshTokenDoc
-	revoked     []string // userUUIDs that hit RevokeTokensByUser
-	compromised map[string]testFamilyRevocation
-	casReached  chan struct{}
-	allowInsert chan struct{}
+	mu              sync.Mutex
+	created         []*authModels.RefreshTokenDoc
+	revoked         []string // userUUIDs that hit RevokeTokensByUser
+	compromised     map[string]testFamilyRevocation
+	revokeFamilyErr error
+	casReached      chan struct{}
+	allowInsert     chan struct{}
 	// byHash mirrors the production repo's "primary lookup" path.
 	// Tests can pre-seed via seedRefreshDoc for the orchestration paths.
 	byHash map[string]*authModels.RefreshTokenDoc
@@ -390,6 +391,9 @@ func (r *gateRefreshRepo) RotateWithFamily(_ context.Context, oldHash string, ne
 }
 
 func (r *gateRefreshRepo) RevokeFamily(_ context.Context, familyID, reason string) (int64, error) {
+	if r.revokeFamilyErr != nil {
+		return 0, r.revokeFamilyErr
+	}
 	if familyID == "" {
 		return 0, nil
 	}
