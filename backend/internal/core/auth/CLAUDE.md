@@ -67,7 +67,7 @@ Only email tokens and device-trust grants currently have a TTL — refresh token
 
 1. **Repositories**: auth, OAuth provider, refresh token, auth session, email token.
 2. **OAuth provider factory**: constructed with an **empty** config map. Provider configs are resolved per-request by `OAuthConfigResolver` from the live `module_configs` document, then passed to `factory.CreateProvider(p, cfg)` through the override parameter. No provider state is pinned at boot — rotating a secret at `/admin/modules` takes effect on the next OAuth request.
-3. **OAuth config resolver**: `NewOAuthConfigResolver(deps.ConfigService)`. Reads are served by `ModuleConfigService` (30s Redis cache in front of Mongo), so per-request resolution is sub-millisecond.
+3. **OAuth config resolver**: `NewOAuthConfigResolver(deps.ConfigService)`. It reads the current `module_configs` document on each OAuth request, so edits made in `/admin/modules` take effect without a service restart.
 4. **JWT service**: loaded with the `AUTH_JWT_PRIVATE_KEY` / `AUTH_JWT_PUBLIC_KEY` pair, then has `SetTenantProvider(...)` called on it so every future `GenerateAccessToken` embeds the caller's current org memberships.
 5. **OAuth state service**: Redis-backed state/nonce store, 10-minute TTL.
 6. **Auth service**: the orchestrator for OAuth flows.
@@ -82,7 +82,7 @@ No seeding — there are no default accounts or default tokens. The first user i
 
 ## Runtime configuration
 
-OAuth provider settings are admin-managed through `ConfigSchema()` — stored in `module_configs`, cached in Redis for 30s, secrets encrypted at rest with AES-256-GCM, editable at `/admin/modules`. Env vars are the **seed source** only: on first boot the registry populates the document from the `EnvVar` field on each schema entry, and after that the document is authoritative. Non-OAuth settings (JWT keys, cookies, feature toggles) still live in `cfg *config.Config` because they're process-scoped and must not rotate at runtime.
+OAuth provider settings are admin-managed through `ConfigSchema()` — stored in `module_configs`, secrets encrypted at rest with AES-256-GCM, editable at `/admin/modules`, and resolved live per OAuth request. Env vars are the **seed source** only: on first boot the registry populates the document from the `EnvVar` field on each schema entry, and after that the document is authoritative. Non-OAuth settings (JWT keys, cookies, feature toggles) still live in `cfg *config.Config` because they're process-scoped and must not rotate at runtime.
 
 ### Configuration groups (`ConfigGroups()`)
 
@@ -228,7 +228,7 @@ The OAuth provider callbacks (`/v1/auth/oauth/{google,apple,discord,github}/call
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/v1/auth/{tier}/providers` | List OAuth providers currently configured **and** enabled for this audience. Two filters apply: (1) `OAuthConfigResolver.ConfiguredProviders` keeps only providers carrying a non-empty client ID in `module_configs`; (2) `AuthPolicyService.OAuthProviderEnabled` drops anything the admin toggled off on the OAuth Providers tab (`{provider}Enabled{Admin,Client}` keys). The unauthenticated login pages in `frontend-admin` / `frontend-client` drive their social-login buttons off this endpoint — toggling a provider in `/admin/modules/auth` removes the button from the next login render (≤30s, ModuleConfigService Redis cache). |
+| GET | `/v1/auth/{tier}/providers` | List OAuth providers currently configured **and** enabled for this audience. Two filters apply: (1) `OAuthConfigResolver.ConfiguredProviders` keeps only providers carrying a non-empty client ID in `module_configs`; (2) `AuthPolicyService.OAuthProviderEnabled` drops anything the admin toggled off on the OAuth Providers tab (`{provider}Enabled{Admin,Client}` keys). The unauthenticated login pages in `frontend-admin` / `frontend-client` drive their social-login buttons off this endpoint; configuration edits are resolved on the next request. |
 | GET | `/v1/auth/{tier}/policy` | Public slice of admin-managed auth policy: `{registrationEnabled, loginEnabled, passwordMinLength}`. Read by the SPA login + signup pages so kill switches hide the CTA instead of surfacing as a 403 on submit |
 | POST | `/v1/auth/{tier}/oauth/login` | Start an OAuth flow. The signed-state JWT carries `tier` so the shared callback dispatches to the matching authService |
 | POST | `/v1/auth/{tier}/google/mobile` | Exchange a Google ID token from a mobile app for an Orkestra session; mints tokens with `aud=tier` |

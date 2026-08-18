@@ -153,7 +153,7 @@ Both flows share `{tier}_email_tokens` (TTL: 24h verification, 30 min reset; bot
 
 ## 5. OAuth 2.1 flow
 
-Provider configuration (client IDs / secrets / redirect URIs / mobile-platform IDs) is admin-managed in `module_configs` and resolved per-request via `OAuthConfigResolver` (Redis-cached, 30s TTL). Env vars are seed-only — once the document exists, editing the env has no effect without a wipe. See [auth module CLAUDE.md → Runtime configuration](../backend/internal/core/auth/CLAUDE.md#runtime-configuration) for the schema and seed table.
+Provider configuration (client IDs / secrets / redirect URIs / mobile-platform IDs) is admin-managed in `module_configs` and resolved live on each OAuth request via `OAuthConfigResolver`; edits take effect without a service restart. Env vars are seed-only — once the document exists, editing the env has no effect without a wipe. See [auth module CLAUDE.md → Runtime configuration](../backend/internal/core/auth/CLAUDE.md#runtime-configuration) for the schema and seed table.
 
 ### Web flow
 
