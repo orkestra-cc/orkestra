@@ -50,6 +50,7 @@ const ModuleConfigSection: React.FC<ModuleConfigSectionProps> = ({
     errorCount,
     perGroup,
     saveBarErrors,
+    unfilledByGroup,
     error,
     success,
     clearError,
@@ -139,7 +140,9 @@ const ModuleConfigSection: React.FC<ModuleConfigSectionProps> = ({
                   moduleName={mod.moduleName}
                   activeKey={activeNode.key}
                   onSelect={setActiveKey}
-                  statusFor={() => ({ unfilled: 0 })}
+                  statusFor={node => ({
+                    unfilled: unfilledByGroup.get(node.key) ?? 0
+                  })}
                 />
               </Col>
               <Col md={8} lg={9}>

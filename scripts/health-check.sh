@@ -68,6 +68,12 @@ BACKEND_PORT="$(env_get "$ENV_FILE" BACKEND_PORT)"; : "${BACKEND_PORT:=3000}"
 FRONTEND_PORT="$(env_get "$ENV_FILE" FRONTEND_PORT)"; : "${FRONTEND_PORT:=8080}"
 CLIENT_PORT="$(env_get "$ENV_FILE" CLIENT_FRONTEND_PORT)"; : "${CLIENT_PORT:=8081}"
 
+# Ports bind to HOST_BIND_ADDRESS when set (docker-compose.dev.yml). The
+# default 0.0.0.0 still answers on loopback; a specific address does not, so
+# the probe must target the address the ports are actually bound to.
+PROBE_HOST="$(env_get "$ENV_FILE" HOST_BIND_ADDRESS)"
+if [ -z "$PROBE_HOST" ] || [ "$PROBE_HOST" = "0.0.0.0" ]; then PROBE_HOST="127.0.0.1"; fi
+
 STACK="${APP_NAME}-${ENV_NAME}"
 container_for() { printf '%s-%s-%s' "$APP_NAME" "$1" "$ENV_NAME"; }
 
@@ -150,10 +156,10 @@ check_app() {
         return
     fi
 
-    if http_ok "http://127.0.0.1:${port}/health"; then
+    if http_ok "http://${PROBE_HOST}:${port}/health"; then
         record "$svc" yes "$svc: running, /health 200"
     else
-        record "$svc" no "$svc: /health on 127.0.0.1:${port} returned ${HTTP_CODE}"
+        record "$svc" no "$svc: /health on ${PROBE_HOST}:${port} returned ${HTTP_CODE}"
     fi
 }
 

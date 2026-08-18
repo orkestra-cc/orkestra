@@ -9,8 +9,8 @@
 
 .stat-ribbon {
   position: absolute;
-  top: -4px;
-  right: -4px;
+  top: 0;
+  right: 0;
   width: 78px;
   height: 78px;
   overflow: hidden;
@@ -51,23 +51,33 @@
   height: 4px;
 }
 
-// The 4px accent edge is StatCard's status channel — it is the tile's only
-// non-textual carrier of "healthy / degraded / neutral" — so it owes the 3:1
-// non-text contrast floor against the canvas behind it. In LIGHT the raw
-// status hues miss badly: success #00d27a reads 1.81:1 and info #27bcfd
-// 1.96:1 on the gray-200 page, which means the encoding is simply not there.
-// The `-text-emphasis` step of the same hue clears it (5.3:1 and 5.6:1) while
-// staying unmistakably the same colour.
-//
-// Scoped to light on purpose. In dark the raw hues already measure 8-9:1
-// against #0b1727 and the frozen dark surface keeps them untouched.
-//
-// `!important` and the extra specificity are both required: `.border-success`
-// is a Bootstrap utility and already carries `!important`.
+// The 4px accent edge is StatCard's status channel — the tile's only
+// non-textual carrier of "healthy / degraded / neutral". Status colors mean
+// status (DESIGN.md), so the edge is NEUTRAL at rest (gray-300, structure
+// like any other border) and takes a hue only via `.stat-card-accent-*`,
+// which the call site applies when the metric's state earns it. It is an
+// *edge*, not a frame: the full 4px four-side border made every zero-count
+// compliance tile shout in amber and crimson.
+.stat-card {
+  border-left: 4px solid var(--#{$prefix}stat-card-accent, var(--#{$prefix}gray-300));
+}
+
+// Base hue = the raw status colour (this is what dark keeps: 8-9:1 there
+// against the frozen #0b1727 canvas).
+@each $name, $value in $theme-colors {
+  .stat-card-accent-#{$name} {
+    --#{$prefix}stat-card-accent: var(--#{$prefix}#{$name});
+  }
+}
+
+// In LIGHT the raw hues miss the 3:1 non-text floor badly (success #00d27a
+// 1.81:1, info #27bcfd 1.96:1 on the gray-200 page), so the accent uses the
+// `-text-emphasis` step of the same hue (5.3:1 and 5.6:1) — unmistakably the
+// same colour, actually legible.
 html:not([data-bs-theme='dark']) {
   @each $name, $value in $theme-colors {
-    .card.border-4.border-#{$name} {
-      border-color: var(--#{$prefix}#{$name}-text-emphasis) !important;
+    .stat-card-accent-#{$name} {
+      --#{$prefix}stat-card-accent: var(--#{$prefix}#{$name}-text-emphasis);
     }
   }
 }

@@ -22,11 +22,13 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	authModels "github.com/orkestra/backend/internal/core/auth/models"
+	"github.com/orkestra/backend/internal/core/auth/repository"
 	"github.com/orkestra/backend/internal/core/auth/services"
 	sharederrors "github.com/orkestra/backend/internal/shared/errors"
 	"github.com/orkestra/backend/pkg/sdk/ctxauth"
@@ -312,6 +314,121 @@ func TestRequireAuth_DifferentSidNotRevoked_PassesThrough(t *testing.T) {
 	}
 	if dh.sid != "sess-fresh" {
 		t.Errorf("sid in context = %q, want sess-fresh", dh.sid)
+	}
+}
+
+type issuedSessionUsers struct{ iface.UserProvider }
+
+func (issuedSessionUsers) UpdateUserLastLogin(context.Context, string) error { return nil }
+
+type issuedSessionOAuthRepo struct {
+	repository.OAuthProviderRepository
+}
+
+func (issuedSessionOAuthRepo) GetByUserUUID(context.Context, string) ([]*authModels.OAuthProviderDoc, error) {
+	return nil, nil
+}
+
+type issuedSessionRefreshRepo struct {
+	repository.RefreshTokenRepository
+}
+
+func (issuedSessionRefreshRepo) RevokeTokensByDevice(context.Context, string, string, string) error {
+	return nil
+}
+func (issuedSessionRefreshRepo) CreateRefreshToken(context.Context, *authModels.RefreshTokenDoc) error {
+	return nil
+}
+func (issuedSessionRefreshRepo) RevokeTokensBySession(context.Context, string, string) error {
+	return nil
+}
+
+type issuedSessionRepo struct {
+	repository.AuthSessionRepository
+	mu   sync.Mutex
+	docs map[string]*authModels.AuthSessionDoc
+}
+
+func (r *issuedSessionRepo) CreateSession(_ context.Context, doc *authModels.AuthSessionDoc) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	copy := *doc
+	r.docs[doc.UUID] = &copy
+	return nil
+}
+
+func (r *issuedSessionRepo) GetByUUID(_ context.Context, sessionID string) (*authModels.AuthSessionDoc, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	doc := r.docs[sessionID]
+	if doc == nil {
+		return nil, nil
+	}
+	copy := *doc
+	return &copy, nil
+}
+
+func (r *issuedSessionRepo) TerminateSession(_ context.Context, sessionID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if doc := r.docs[sessionID]; doc != nil {
+		doc.IsActive = false
+	}
+	return nil
+}
+
+func TestRequireAuth_SessionRevokedFromRealIssuedToken_DeniesOnlyThatSession(t *testing.T) {
+	f := newRequireAuthFixture(t)
+	sessions := &issuedSessionRepo{docs: map[string]*authModels.AuthSessionDoc{}}
+	auth, err := services.NewAuthService(&services.AuthConfig{
+		UserService:       issuedSessionUsers{},
+		OAuthProviderRepo: issuedSessionOAuthRepo{},
+		RefreshTokenRepo:  issuedSessionRefreshRepo{},
+		AuthSessionRepo:   sessions,
+		JWTService:        f.jwt,
+	})
+	if err != nil {
+		t.Fatalf("NewAuthService: %v", err)
+	}
+	auth.SetSessionRevocation(f.revocation)
+	user := &iface.User{UUID: "issued-user", Email: "issued@example.com", Role: "operator", IsActive: true}
+	first, err := auth.GenerateEnhancedTokenPair(context.Background(), user, &authModels.DeviceInfo{DeviceID: "device-one"}, nil)
+	if err != nil {
+		t.Fatalf("issue first session: %v", err)
+	}
+	second, err := auth.GenerateEnhancedTokenPair(context.Background(), user, &authModels.DeviceInfo{DeviceID: "device-two"}, nil)
+	if err != nil {
+		t.Fatalf("issue second session: %v", err)
+	}
+	if err := auth.RevokeUserSession(context.Background(), user.UUID, first.SessionID, second.SessionID); err != nil {
+		t.Fatalf("RevokeUserSession: %v", err)
+	}
+
+	for _, tc := range []struct {
+		name       string
+		token      string
+		wantStatus int
+		wantCalled bool
+	}{
+		{name: "revoked session", token: first.AccessToken, wantStatus: http.StatusUnauthorized},
+		{name: "other session", token: second.AccessToken, wantStatus: http.StatusOK, wantCalled: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			downstream := &downstreamHandler{}
+			req := httptest.NewRequest(http.MethodGet, "/protected", nil)
+			req.Header.Set("Authorization", "Bearer "+tc.token)
+			response := httptest.NewRecorder()
+			f.mw.RequireAuth(downstream.handler()).ServeHTTP(response, req)
+			if response.Code != tc.wantStatus {
+				t.Fatalf("status = %d, want %d; body=%s", response.Code, tc.wantStatus, response.Body.String())
+			}
+			if downstream.called != tc.wantCalled {
+				t.Fatalf("downstream called = %v, want %v", downstream.called, tc.wantCalled)
+			}
+			if !tc.wantCalled && !strings.Contains(response.Body.String(), `"code":"session_revoked"`) {
+				t.Fatalf("body = %s, want session_revoked code", response.Body.String())
+			}
+		})
 	}
 }
 

@@ -4,10 +4,14 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"sync"
 	"time"
 
+	"github.com/orkestra/backend/pkg/sdk/metrics"
 	"github.com/redis/go-redis/v9"
 )
+
+const sessionRevocationWarningInterval = time.Minute
 
 // SessionRevocationService tracks revoked JWT session IDs (the `sid` claim)
 // in Redis so a stolen access token can be invalidated mid-session without
@@ -33,26 +37,51 @@ type SessionRevocationService interface {
 	IsRevoked(ctx context.Context, sid string) (bool, error)
 }
 
+// SessionRevocationDegradedError means durable session/refresh state was
+// revoked, but the short-lived Redis sid deny-list could not be updated.
+// Callers can detect this partial degradation with errors.As without
+// exposing the store error in ordinary logs or API responses.
+type SessionRevocationDegradedError struct{ Cause error }
+
+func (e *SessionRevocationDegradedError) Error() string { return "session revocation store degraded" }
+func (e *SessionRevocationDegradedError) Unwrap() error { return e.Cause }
+
+type sessionRevocationStoreFailureRecorder interface {
+	RecordSessionRevocationStoreFailure(operation string)
+}
+
 type redisSessionRevocationService struct {
-	client RedisClient
-	ttl    time.Duration
-	log    *slog.Logger
+	client  RedisClient
+	ttl     time.Duration
+	log     *slog.Logger
+	metrics sessionRevocationStoreFailureRecorder
+
+	warningMu   sync.Mutex
+	lastWarning time.Time
 }
 
 // NewSessionRevocationService builds a Redis-backed revocation store.
 // accessTokenTTL should match the TTL used by the JWT service; a one-minute
 // buffer is added on top to swallow clock skew between issuer and verifier.
 func NewSessionRevocationService(client RedisClient, accessTokenTTL time.Duration, log *slog.Logger) SessionRevocationService {
+	return newSessionRevocationService(client, accessTokenTTL, log, metrics.Default())
+}
+
+func newSessionRevocationService(client RedisClient, accessTokenTTL time.Duration, log *slog.Logger, recorder sessionRevocationStoreFailureRecorder) SessionRevocationService {
 	if log == nil {
 		log = slog.Default()
 	}
 	if accessTokenTTL <= 0 {
 		accessTokenTTL = 15 * time.Minute
 	}
+	if recorder == nil {
+		recorder = metrics.Default()
+	}
 	return &redisSessionRevocationService{
-		client: client,
-		ttl:    accessTokenTTL + time.Minute,
-		log:    log,
+		client:  client,
+		ttl:     accessTokenTTL + time.Minute,
+		log:     log,
+		metrics: recorder,
 	}
 }
 
@@ -63,7 +92,11 @@ func (s *redisSessionRevocationService) Revoke(ctx context.Context, sid, reason 
 	if reason == "" {
 		reason = "revoked"
 	}
-	return s.client.Set(ctx, revocationKey(sid), reason, s.ttl)
+	if err := s.client.Set(ctx, revocationKey(sid), reason, s.ttl); err != nil {
+		s.metrics.RecordSessionRevocationStoreFailure("write")
+		return err
+	}
+	return nil
 }
 
 func (s *redisSessionRevocationService) IsRevoked(ctx context.Context, sid string) (bool, error) {
@@ -77,11 +110,21 @@ func (s *redisSessionRevocationService) IsRevoked(ctx context.Context, sid strin
 	if errors.Is(err, redis.Nil) {
 		return false, nil
 	}
-	s.log.Warn("session revocation lookup failed, failing open",
-		slog.String("sid", sid),
-		slog.String("error", err.Error()),
-	)
+	s.metrics.RecordSessionRevocationStoreFailure("lookup")
+	s.warnStoreUnavailable(ctx)
 	return false, nil
+}
+
+func (s *redisSessionRevocationService) warnStoreUnavailable(ctx context.Context) {
+	s.warningMu.Lock()
+	defer s.warningMu.Unlock()
+	if !s.lastWarning.IsZero() && time.Since(s.lastWarning) < sessionRevocationWarningInterval {
+		return
+	}
+	s.lastWarning = time.Now()
+	s.log.WarnContext(ctx, "session revocation store unavailable",
+		slog.String("operation", "lookup"),
+	)
 }
 
 func revocationKey(sid string) string {

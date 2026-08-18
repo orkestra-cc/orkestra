@@ -207,7 +207,7 @@ services:
     # are not reachable on UDP/53 from this network.
     # AIR is pre-installed by the host into ./.go-bin/air via:
     #   cd backend && GOBIN=$PWD/.go-bin go install github.com/air-verse/air@v1.67.1
-    # (pinned: v1.67.2+ requires go >= 1.26.0, the project is on Go 1.25.12)
+    # (pinned: v1.67.2+ requires go >= 1.26.0, the project is on Go 1.25.13)
     command: ["sh", "-c", "exec /app/.go-bin/air"]
     # Note: mongodb and redis are in docker-compose.infra.yml
     # Ensure infra is running: docker compose -f docker-compose.infra.yml up -d

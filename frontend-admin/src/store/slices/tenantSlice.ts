@@ -121,13 +121,19 @@ const tenantSlice = createSlice({
     setCurrentOrg: (state, action: PayloadAction<string>) => {
       const exists = state.memberships.some(m => m.tenantId === action.payload);
       if (!exists) return;
+      const changed = state.currentOrgId !== action.payload;
       state.currentOrgId = action.payload;
       if (typeof window !== 'undefined') {
         window.localStorage.setItem(STORAGE_KEY, action.payload);
       }
-      // Permissions are scoped to the org, so clear them on switch.
-      state.permissions = [];
-      state.features = [];
+      // Permissions are scoped to the org, so clear them on a real switch.
+      // Re-picking the current org (e.g. exiting impersonation via the
+      // workspace list) keeps them — clearing would unmount every
+      // hasPermission-gated surface until the authz/me refetch lands.
+      if (changed) {
+        state.permissions = [];
+        state.features = [];
+      }
     },
 
     setEffectivePermissions: (

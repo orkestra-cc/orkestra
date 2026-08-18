@@ -314,7 +314,6 @@
       "initiateFailed": "Impossibile avviare l'accesso con {{provider}}",
       "acceptingTerms": "Accedendo, accetti i nostri Termini di servizio e l'Informativa sulla privacy.",
       "loading": "Caricamento opzioni di accesso...",
-      "noneAvailable": "Nessun provider di accesso social attualmente abilitato.",
       "loadError": "Impossibile caricare le opzioni di accesso social. Riprova.",
       "callback": {
         "failureTitle": "Autenticazione fallita",
@@ -348,6 +347,14 @@
       "termsLink": "termini di servizio",
       "and": "e",
       "privacyLink": "l'informativa sulla privacy"
+    },
+    "cardLayout": {
+      "restrictedNotice": "Accesso riservato: questo gestionale è destinato esclusivamente ad uso interno.",
+      "unauthorizedNotice": "Ogni utilizzo non autorizzato sarà considerato una violazione e potrà comportare responsabilità civili e penali ai sensi della normativa vigente.",
+      "termsPrefix": "Leggi",
+      "termsLink": "i termini",
+      "termsConjunction": "e",
+      "conditionsLink": "le condizioni"
     }
   },
   "userMfa": {
@@ -1080,13 +1087,43 @@
       "save": "Salva"
     }
   },
-  "userScaffold": {
-    "dashboard": {
-      "pageTitle": "Dashboard",
-      "pageDescription": "La tua panoramica personale e il riepilogo attività",
-      "comingSoonTitle": "Dashboard in arrivo",
-      "comingSoonBody": "La tua dashboard personale con riepiloghi attività e azioni rapide sarà disponibile qui."
+  "userDashboard": {
+    "greeting": "Ciao, {{name}}",
+    "pageTitle": "La tua dashboard",
+    "pageDescription": "Il tuo account e la tua sicurezza a colpo d'occhio.",
+    "stats": {
+      "sessions": {
+        "title": "Sessioni attive"
+      },
+      "devices": {
+        "title": "Dispositivi attendibili"
+      },
+      "mfa": {
+        "title": "Due fattori",
+        "active": "Attiva",
+        "inactive": "Non attiva",
+        "setupBadge": "Da configurare"
+      },
+      "orgs": {
+        "title": "Organizzazioni"
+      }
     },
+    "security": {
+      "title": "Sicurezza account",
+      "open": "Gestisci la sicurezza",
+      "email": "Email",
+      "emailVerified": "Verificata",
+      "emailUnverified": "Non verificata",
+      "mfaRow": "Autenticazione a due fattori",
+      "mfaConfigure": "Configura ora",
+      "backupCodes": "Codici di backup",
+      "backupCodesLeft_one": "{{count}} rimasto",
+      "backupCodesLeft_other": "{{count}} rimasti",
+      "backupCodesRegenerate": "Rigenera",
+      "lastLogin": "Ultimo accesso"
+    }
+  },
+  "userScaffold": {
     "calendar": {
       "pageTitle": "Calendario",
       "pageDescription": "Visualizza e gestisci la tua agenda",
@@ -1667,9 +1704,6 @@
     }
   },
   "adminUsers": {
-    "welcomeKicker": "Benvenuto in",
-    "welcomeTitle": "Gestione",
-    "welcomeTitleAccent": " utenti",
     "roles": {
       "super_admin": "Super amministratore",
       "administrator": "Amministratore",
@@ -1762,7 +1796,8 @@
       "toastPasswordResetSent": "Email di reset password inviata a {{user}}.",
       "toastPasswordResetFailed": "Impossibile inviare il reset password: {{error}}",
       "toastDeleted": "{{user}} è stato eliminato.",
-      "toastDeleteFailed": "Impossibile eliminare {{user}}: {{error}}"
+      "toastDeleteFailed": "Impossibile eliminare {{user}}: {{error}}",
+      "menuLabel": "Azioni per {{name}}"
     },
     "deleteModal": {
       "title": "Elimina utente",
@@ -1801,6 +1836,149 @@
         "deactivate": "disattivazione",
         "delete": "eliminazione"
       }
+    },
+    "pageTitle": "Gestione utenti",
+    "columns": {
+      "user": "Utente",
+      "role": "Ruolo",
+      "loginWith": "Accesso con",
+      "status": "Stato",
+      "lastLogin": "Ultimo accesso",
+      "createdOn": "Creato il",
+      "actions": "Azioni",
+      "never": "Mai"
+    },
+    "status": {
+      "active": "Attivo",
+      "inactive": "Inattivo"
+    }
+  },
+  "adminCompliance": {
+    "pageTitle": "Compliance",
+    "pageSubtitle": "Audit trail e diritti degli interessati (GDPR) — esamina le richieste di cancellazione, gestisci i vincoli legali, visualizza l'anteprima della pulizia di conservazione e consulta il registro di audit.",
+    "tabs": {
+      "erasureRequests": "Richieste di cancellazione",
+      "legalHolds": "Vincoli legali",
+      "retention": "Conservazione",
+      "auditEvents": "Eventi di audit"
+    },
+    "stats": {
+      "pendingErasures": {
+        "title": "Cancellazioni in attesa",
+        "subtitle": "In attesa di revisione",
+        "badge": "Richiede attenzione"
+      },
+      "activeHolds": {
+        "title": "Vincoli legali attivi",
+        "subtitle": "Bloccano la cancellazione",
+        "badge": "Cancellazione bloccata"
+      },
+      "retentionCandidates": {
+        "title": "Candidati alla pulizia",
+        "subtitle": "Oltre la finestra di conservazione",
+        "badge_one": "{{count}} soggetto",
+        "badge_other": "{{count}} soggetti"
+      },
+      "auditEvents": {
+        "title": "Eventi di audit",
+        "subtitle": "Totale registrato"
+      }
+    },
+    "status": {
+      "pending": "In attesa",
+      "completed": "Completata",
+      "executed": "Eseguita",
+      "rejected": "Rifiutata",
+      "active": "Attivo",
+      "released": "Revocato",
+      "success": "Riuscito",
+      "denied": "Negato",
+      "error": "Errore"
+    },
+    "erasure": {
+      "columns": {
+        "subject": "Soggetto",
+        "reason": "Motivo",
+        "status": "Stato",
+        "requested": "Data richiesta",
+        "actions": "Azioni"
+      },
+      "execute": "Esegui",
+      "reject": "Rifiuta",
+      "executeSuccess": "Cancellazione eseguita",
+      "executeError": "Esecuzione non riuscita (o bloccata da un vincolo legale)",
+      "rejectSuccess": "Richiesta rifiutata",
+      "rejectError": "Rifiuto non riuscito",
+      "emptyMessage": "Nessuna richiesta di cancellazione in attesa.",
+      "emptyHint": "Le richieste di cancellazione degli interessati in attesa di revisione appariranno qui.",
+      "searchPlaceholder": "Cerca per soggetto o motivo"
+    },
+    "holds": {
+      "columns": {
+        "subject": "Soggetto",
+        "reason": "Motivo",
+        "case": "Caso",
+        "status": "Stato",
+        "placed": "Data applicazione",
+        "actions": "Azioni"
+      },
+      "form": {
+        "subjectLabel": "userUuid del soggetto",
+        "subjectPlaceholder": "es. 7f3c…",
+        "reasonLabel": "Motivo",
+        "reasonPlaceholder": "Motivo del vincolo legale",
+        "caseRefLabel": "Rif. caso",
+        "caseRefPlaceholder": "Facoltativo",
+        "submit": "Applica vincolo"
+      },
+      "release": "Revoca",
+      "placeSuccess": "Vincolo legale applicato",
+      "placeError": "Applicazione non riuscita",
+      "releaseSuccess": "Vincolo legale revocato",
+      "releaseError": "Revoca non riuscita",
+      "emptyMessage": "Nessun vincolo legale attivo.",
+      "emptyHint": "Applica un vincolo qui sopra per bloccare la cancellazione di un soggetto in contenzioso.",
+      "searchPlaceholder": "Cerca per soggetto, motivo o caso"
+    },
+    "retention": {
+      "previewTitle": "Anteprima della pulizia di conservazione (simulazione)",
+      "previewBody": "Tombstone anonimizzati oltre la finestra di conservazione che il job di pulizia automatica eliminerebbe definitivamente. Nulla viene eliminato da questa schermata.",
+      "cutoff": "Data limite",
+      "candidates": "Candidati",
+      "purgeListTitle": "Soggetti da eliminare",
+      "emptyMessage": "Nulla oltre la finestra di conservazione.",
+      "emptyHint": "I tombstone anonimizzati idonei all'eliminazione definitiva saranno elencati qui."
+    },
+    "audit": {
+      "columns": {
+        "time": "Data e ora",
+        "action": "Azione",
+        "actor": "Autore",
+        "resource": "Risorsa",
+        "outcome": "Esito"
+      },
+      "emptyMessage": "Nessun evento di audit.",
+      "emptyHint": "Le azioni rilevanti per la sicurezza sulla piattaforma vengono registrate qui.",
+      "searchPlaceholder": "Cerca per azione, autore o risorsa"
+    }
+  },
+  "adminComplianceSoc2": {
+    "pageTitle": "Evidenze SOC2",
+    "pageSubtitle": "Istantanea puntuale dei controlli Trust Service Criteria — accessi privilegiati, copertura MFA, andamento dei login falliti, ciclo di vita delle chiavi KMS e integrità dell'audit trail. Ricalcolata a ogni caricamento.",
+    "refresh": "Aggiorna",
+    "generatedAt": "Generata il {{date}}",
+    "disabled": {
+      "title": "Le evidenze SOC2 sono disabilitate",
+      "body": "Abilita il flag <code>soc2_enabled</code> del modulo <strong>compliance</strong> in <code>/admin/modules</code> per generare le istantanee di evidenza."
+    },
+    "loadError": "Impossibile generare l'istantanea delle evidenze SOC2.",
+    "summary": {
+      "privileged_users": "Utenti privilegiati",
+      "privileged_with_mfa": "Privilegiati con MFA",
+      "failed_logins_24h": "Login falliti (24h)",
+      "kms_keys_active": "Chiavi KMS attive",
+      "kms_keys_shredded": "Chiavi KMS distrutte",
+      "audit_rows_24h": "Righe di audit (24h)"
     }
   },
   "adminModules": {
@@ -1997,6 +2175,12 @@
         "promoteBody": "Il modulo passerà subito a girare con la configurazione {{environment}}. Il profilo {{current}} resta salvato e può essere riattivato allo stesso modo.",
         "promoteConfirm": "Rendi attivo",
         "cancel": "Annulla"
+      },
+      "healthStatus": {
+        "healthy": "In salute",
+        "unhealthy": "Degradato",
+        "disabled": "Disabilitato",
+        "failed": "In errore"
       }
     },
     "loadError": "Impossibile caricare i moduli. Verifica i permessi.",
@@ -2031,10 +2215,18 @@
         "oauth": {
           "label": "Provider OAuth",
           "desc": "Quali provider sono offerti, sulla console operatore o sull'app client. Le credenziali di ciascun provider compaiono quando viene attivato.",
-          "google": { "label": "Google" },
-          "apple": { "label": "Apple" },
-          "github": { "label": "GitHub" },
-          "discord": { "label": "Discord" }
+          "google": {
+            "label": "Google"
+          },
+          "apple": {
+            "label": "Apple"
+          },
+          "github": {
+            "label": "GitHub"
+          },
+          "discord": {
+            "label": "Discord"
+          }
         },
         "antiabuse": {
           "label": "Anti-abuso e notifiche",
@@ -2045,14 +2237,30 @@
         }
       },
       "fields": {
-        "googleClientId": { "label": "Client ID" },
-        "googleClientSecret": { "label": "Client Secret" },
-        "googleRedirectURL": { "label": "Redirect URL" },
-        "googleAndroidClientId": { "label": "Client ID Android" },
-        "googleIOSClientId": { "label": "Client ID iOS" },
-        "appleClientId": { "label": "Client ID" },
-        "appleTeamId": { "label": "Team ID" },
-        "appleKeyId": { "label": "Key ID" },
+        "googleClientId": {
+          "label": "Client ID"
+        },
+        "googleClientSecret": {
+          "label": "Client Secret"
+        },
+        "googleRedirectURL": {
+          "label": "Redirect URL"
+        },
+        "googleAndroidClientId": {
+          "label": "Client ID Android"
+        },
+        "googleIOSClientId": {
+          "label": "Client ID iOS"
+        },
+        "appleClientId": {
+          "label": "Client ID"
+        },
+        "appleTeamId": {
+          "label": "Team ID"
+        },
+        "appleKeyId": {
+          "label": "Key ID"
+        },
         "applePrivateKey": {
           "label": "Chiave .p8 (PEM)",
           "desc": "Contenuto PEM inline della chiave .p8 di Apple Sign-In"
@@ -2061,15 +2269,33 @@
           "label": "Percorso chiave .p8",
           "desc": "Percorso sul filesystem usato come fallback se il PEM non è inline"
         },
-        "appleRedirectURL": { "label": "Redirect URL" },
-        "appleIOSClientId": { "label": "Client ID iOS" },
-        "appleAndroidClientId": { "label": "Client ID Android" },
-        "githubClientId": { "label": "Client ID" },
-        "githubClientSecret": { "label": "Client Secret" },
-        "githubRedirectURL": { "label": "Redirect URL" },
-        "discordClientId": { "label": "Client ID" },
-        "discordClientSecret": { "label": "Client Secret" },
-        "discordRedirectURL": { "label": "Redirect URL" },
+        "appleRedirectURL": {
+          "label": "Redirect URL"
+        },
+        "appleIOSClientId": {
+          "label": "Client ID iOS"
+        },
+        "appleAndroidClientId": {
+          "label": "Client ID Android"
+        },
+        "githubClientId": {
+          "label": "Client ID"
+        },
+        "githubClientSecret": {
+          "label": "Client Secret"
+        },
+        "githubRedirectURL": {
+          "label": "Redirect URL"
+        },
+        "discordClientId": {
+          "label": "Client ID"
+        },
+        "discordClientSecret": {
+          "label": "Client Secret"
+        },
+        "discordRedirectURL": {
+          "label": "Redirect URL"
+        },
         "registrationEnabledAdmin": {
           "label": "Consenti la registrazione sulla console operatore",
           "desc": "Disattivato per impostazione predefinita. Se disattivato, POST /v1/auth/operator/register restituisce 403 — gli account operatore devono essere invitati o creati tramite /admin. Il super_admin attiva questa opzione per consentire la registrazione self-service degli operatori. Il primo account su un'installazione nuova ignora l'interruttore, così l'avvio iniziale non viene mai bloccato."
@@ -2126,9 +2352,15 @@
           "label": "Lunghezza massima",
           "desc": "Limite massimo alla lunghezza della password. Argon2id non è un collo di bottiglia; aumentalo solo se hai un motivo concreto."
         },
-        "passwordRequireUpper": { "label": "Richiedi una lettera maiuscola" },
-        "passwordRequireLower": { "label": "Richiedi una lettera minuscola" },
-        "passwordRequireDigit": { "label": "Richiedi una cifra" },
+        "passwordRequireUpper": {
+          "label": "Richiedi una lettera maiuscola"
+        },
+        "passwordRequireLower": {
+          "label": "Richiedi una lettera minuscola"
+        },
+        "passwordRequireDigit": {
+          "label": "Richiedi una cifra"
+        },
         "passwordRequireSymbol": {
           "label": "Richiedi un simbolo",
           "desc": "Qualsiasi carattere non alfanumerico."
@@ -2137,14 +2369,30 @@
           "label": "Rifiuta password compromesse (HIBP)",
           "desc": "Verifica k-anonymity su haveibeenpwned.com — solo i primi 5 caratteri dell'hash SHA-1 lasciano il server. Disattiva per installazioni air-gapped."
         },
-        "googleEnabledAdmin": { "label": "Google sulla console operatore" },
-        "googleEnabledClient": { "label": "Google sull'app client" },
-        "appleEnabledAdmin": { "label": "Apple sulla console operatore" },
-        "appleEnabledClient": { "label": "Apple sull'app client" },
-        "githubEnabledAdmin": { "label": "GitHub sulla console operatore" },
-        "githubEnabledClient": { "label": "GitHub sull'app client" },
-        "discordEnabledAdmin": { "label": "Discord sulla console operatore" },
-        "discordEnabledClient": { "label": "Discord sull'app client" },
+        "googleEnabledAdmin": {
+          "label": "Google sulla console operatore"
+        },
+        "googleEnabledClient": {
+          "label": "Google sull'app client"
+        },
+        "appleEnabledAdmin": {
+          "label": "Apple sulla console operatore"
+        },
+        "appleEnabledClient": {
+          "label": "Apple sull'app client"
+        },
+        "githubEnabledAdmin": {
+          "label": "GitHub sulla console operatore"
+        },
+        "githubEnabledClient": {
+          "label": "GitHub sull'app client"
+        },
+        "discordEnabledAdmin": {
+          "label": "Discord sulla console operatore"
+        },
+        "discordEnabledClient": {
+          "label": "Discord sull'app client"
+        },
         "mfaEnabled": {
           "label": "Richiedi MFA per gli utenti privilegiati",
           "desc": "Interruttore principale, disattivato per impostazione predefinita affinché il primo super_admin di un'installazione nuova possa configurare la piattaforma senza essere bloccato da una richiesta MFA per un fattore che non ha mai iscritto. Attivalo solo dopo aver iscritto un secondo fattore (TOTP/passkey) — altrimenti gli utenti privilegiati incontreranno la finestra di tolleranza per l'iscrizione al login successivo. Se disattivato, RoleRequiresMFA restituisce false; le iscrizioni esistenti non vengono eliminate e gli utenti possono comunque effettuare la verifica volontariamente."
@@ -2208,6 +2456,41 @@
         "oauthAutoLinkByEmail": {
           "label": "Collega automaticamente il provider OAuth a un account con email corrispondente",
           "desc": "Se attivo (predefinito), un callback OAuth per un account Orkestra esistente (individuato tramite email) collega automaticamente il provider a quell'utente. Se disattivato, il flusso OAuth rifiuta con 403 oauth_link_disabled e l'utente deve avviare il collegamento dalle impostazioni del proprio account da autenticato. Consigliato disattivato per installazioni sensibili alla conformità."
+        }
+      }
+    },
+    "notification": {
+      "groups": {
+        "delivery": {
+          "label": "Consegna",
+          "desc": "Come la posta lascia la piattaforma. Con il provider noop predefinito, la mail renderizzata viene registrata nel backend invece di essere inviata — imposta il provider su SMTP per mostrare le impostazioni di connessione."
+        },
+        "sender": {
+          "label": "Mittente",
+          "desc": "Gli indirizzi che i destinatari vedono su ogni messaggio."
+        },
+        "branding": {
+          "label": "Branding e template",
+          "desc": "Valori iniettati in ogni email da template."
+        }
+      },
+      "fields": {
+        "email": {
+          "provider": { "label": "Provider email" },
+          "smtp": {
+            "host": { "label": "Host SMTP" },
+            "port": { "label": "Porta SMTP" },
+            "username": { "label": "Username SMTP" },
+            "password": { "label": "Password SMTP" },
+            "tls_mode": { "label": "Modalità TLS" }
+          },
+          "from_address": { "label": "Indirizzo mittente" },
+          "from_name": { "label": "Nome mittente" },
+          "reply_to": { "label": "Indirizzo Reply-To" }
+        },
+        "app": {
+          "name": { "label": "Nome app (nei template)" },
+          "support_email": { "label": "Email di supporto (nei template)" }
         }
       }
     }
@@ -2291,6 +2574,7 @@
     "rowsCount": "{{from}}-{{to}} di {{total}}",
     "exportCsv": "Esporta CSV",
     "selectAllRows": "Seleziona tutte le righe",
-    "selectRow": "Seleziona riga"
+    "selectRow": "Seleziona riga",
+    "moreActions": "Altre azioni"
   }
 }

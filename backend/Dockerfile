@@ -33,7 +33,7 @@ COPY go.mod go.sum ./
 FROM base AS development
 
 # Install AIR for hot reload. Pinned, not @latest: air v1.67.2+ requires
-# go >= 1.26.0 and the project builds on Go 1.25.12 (go.mod / .mise.toml / CI).
+# go >= 1.26.0 and the project builds on Go 1.25.13 (go.mod / .mise.toml / CI).
 # v1.67.1 is the last release on `go 1.25`. Bump when moving to Go 1.26.
 ARG AIR_VERSION=v1.67.1
 RUN go install github.com/air-verse/air@${AIR_VERSION}

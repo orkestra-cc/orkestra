@@ -2,8 +2,10 @@ import { BadgeColor } from 'components/common/SubtleBadge';
 
 // Shared formatting helpers for the compliance tabs.
 
-export const formatDateTime = (value?: string): string =>
-  value ? new Date(value).toLocaleString() : '—';
+// Dates go through the console's single locale-aware formatting layer
+// (follows the operator's i18n language and guards Go zero-times) — the
+// re-export keeps every compliance call site untouched.
+export { formatDateTime } from 'helpers/dateFormat';
 
 // Audit outcomes map to the same traffic-light palette everywhere they render.
 export const outcomeColor = (outcome: string): BadgeColor => {

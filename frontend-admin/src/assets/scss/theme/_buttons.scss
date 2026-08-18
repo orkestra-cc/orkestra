@@ -171,6 +171,31 @@ $theme-orkestra-btn-colors: (
   }
 }
 
+// DESIGN.md's disabled rule, enforced for every filled variant — it used to
+// exist only on the module save bar. Bootstrap's default (the enabled fill at
+// `opacity: .5`) composites to an unreadable ghost in light (the danger
+// confirm read ~1.9:1) and still looks clickable in dark. Real neutral at
+// full opacity instead: gray-200 fill, gray-700 label (7.85:1), gray-400
+// edge. Link and outline buttons keep a fill-less treatment at gray-600.
+// Declared both-modes 2026-08-07.
+.btn:not(.btn-link):not([class*='btn-outline-']) {
+  &:disabled,
+  &.disabled {
+    opacity: 1;
+    color: var(--#{$prefix}gray-700);
+    background-color: var(--#{$prefix}gray-200);
+    border-color: var(--#{$prefix}gray-400);
+  }
+}
+.btn-link,
+[class*='btn-outline-'] {
+  &:disabled,
+  &.disabled {
+    opacity: 1;
+    color: var(--#{$prefix}gray-600);
+  }
+}
+
 // White label on $primary (#2c7be5) is 4.14:1 — below the 4.5:1 AA floor
 // for button-size text. A 10% shade (#286fce, 4.94:1) keeps the generated
 // hover (shade 15%) and active (shade 20%) states darker than the base.

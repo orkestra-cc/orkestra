@@ -51,11 +51,12 @@ jobs:
         with:
           name: frontend-admin-coverage
           path: frontend-admin/coverage/
+          retention-days: 7
 
   coverage-badge:
     name: Refresh coverage badge
     needs: ci
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main')
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main') && vars.CI_FULL == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -80,7 +81,9 @@ jobs:
   docker:
     name: Docker Build
     needs: ci
-    if: github.event_name == 'push'
+    # Publishes only where the CI_FULL repo variable is true (upstream +
+    # commons). Product forks default to minimal CI — see CLAUDE.md CI/CD.
+    if: github.event_name == 'push' && vars.CI_FULL == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read

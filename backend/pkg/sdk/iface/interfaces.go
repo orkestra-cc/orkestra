@@ -803,6 +803,21 @@ type CheckoutPlan struct {
 // checkout snapshot. Returns ErrCheckoutNoPendingInvoice when the
 // subscription has no invoice in `pending` status — the handler maps that
 // to 409 so the SPA can prompt the user to retry the renewal cycle.
+//
+// Contract implementations MUST honor (audit M-2): the caller (the
+// payments self-service handler) re-checks ownership against
+// CheckoutPlan.TenantUUID on BOTH the error and success return paths,
+// before it is allowed to translate an error into a distinguishable
+// status code. Once the subscription itself has been resolved,
+// PlanCheckoutSession must return TenantUUID populated on every
+// subsequent error too — including ErrCheckoutNoPendingInvoice and any
+// other error (a transient repository failure, a data-integrity gap in
+// the catalog, etc.). Only "subscription UUID is unknown/unresolved" may
+// return the zero-value CheckoutPlan{}. Returning a zero-value plan
+// alongside any other error silently turns the legitimate owner's real
+// status (409, or a bubbled 5xx) into an indistinguishable 404, because
+// the handler cannot tell "unowned" apart from "owned but TenantUUID
+// wasn't reported".
 type SelfServiceCheckoutPlanner interface {
 	PlanCheckoutSession(ctx context.Context, subscriptionUUID string) (CheckoutPlan, error)
 }
@@ -812,6 +827,11 @@ type SelfServiceCheckoutPlanner interface {
 // caller but has no invoice in `pending` status to charge. Handlers map
 // this to a 409 response so the SPA can guide the user to wait for the
 // next renewal tick or trigger a retry-charge first.
+//
+// The plan returned alongside this error must NOT be the zero value —
+// see the "Contract implementations MUST honor" note on
+// SelfServiceCheckoutPlanner: TenantUUID has to be populated or the
+// handler's ownership check masks the 409 as a 404 even for the owner.
 var ErrCheckoutNoPendingInvoice = errors.New("self-service checkout: no pending invoice for subscription")
 
 // ---------------------------------------------------------------------------

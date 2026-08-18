@@ -143,8 +143,7 @@ func (g *googleKeysService) RefreshKeys(ctx context.Context) error {
 
 		publicKey, err := g.parseRSAPublicKey(jwk)
 		if err != nil {
-			// Log error but continue with other keys
-			fmt.Printf("Warning: failed to parse RSA key %s: %v\n", jwk.Kid, err)
+			// Continue parsing the remaining public keys.
 			continue
 		}
 

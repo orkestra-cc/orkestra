@@ -36,12 +36,12 @@ const AdvanceTableSearchBox = ({
         placeholder={effectivePlaceholder}
         aria-label={effectivePlaceholder}
         type="search"
-        className="shadow-none"
       />
       <Button
         size="sm"
         variant="outline-secondary"
         className="border-300 hover-border-secondary"
+        aria-label={effectivePlaceholder}
       >
         <FontAwesomeIcon icon="search" className="fs-10" />
       </Button>

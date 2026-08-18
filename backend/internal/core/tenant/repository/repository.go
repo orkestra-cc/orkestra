@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"fmt"
 	"regexp"
 	"time"
 
@@ -58,6 +59,22 @@ func (r *Repository) GetTenantByUUID(ctx context.Context, uuid string) (*models.
 	return &t, err
 }
 
+// GetTenantByUUIDIncludingDeleted resolves a tenant by UUID without the
+// deletedAt:nil filter. Used by PurgeTenant so the crypto-shred and the
+// cascade context still fire on the documented archive/soft-delete → purge
+// sequence — the plain getter returns nil for a soft-deleted row, which would
+// silently skip the KMS key deletion and the authz-binding cascade while still
+// reporting the purge as successful.
+func (r *Repository) GetTenantByUUIDIncludingDeleted(ctx context.Context, uuid string) (*models.Tenant, error) {
+	var t models.Tenant
+	//tenantscope:allow the tenants collection IS the tenant registry — by-UUID lookup is inherently cross-tenant (mirrors GetTenantByUUID; only the purge/erasure path uses this include-deleted variant)
+	err := r.db.Collection(CollTenants).FindOne(ctx, bson.M{"uuid": uuid}).Decode(&t)
+	if errors.Is(err, mongo.ErrNoDocuments) {
+		return nil, ErrNotFound
+	}
+	return &t, err
+}
+
 func (r *Repository) GetTenantBySlug(ctx context.Context, slug string) (*models.Tenant, error) {
 	var t models.Tenant
 	err := r.db.Collection(CollTenants).FindOne(ctx, bson.M{"slug": slug, "deletedAt": nil}).Decode(&t)
@@ -67,7 +84,32 @@ func (r *Repository) GetTenantBySlug(ctx context.Context, slug string) (*models.
 	return &t, err
 }
 
+// immutableTenantFields can never be changed through the generic UpdateTenant
+// $set path. They define a tenant's identity, ownership, tier, hierarchy and
+// deletion state and each has a dedicated flow (owner-transfer, AttachToParent,
+// SoftDeleteTenant, PurgeTenant). Rejecting them here is defense-in-depth
+// (audit H-7, org-scoping invariant #6): UpdateTenant is fed free-form maps from
+// several callers (settings, billing identity), so a buggy or compromised path
+// must not be able to reassign an owner, flip a tenant's kind, graft a parent,
+// or clear deletedAt to undelete a purged tenant. kmsKeyID and status are
+// deliberately NOT listed — they are set through this method on legitimate
+// provisioning/lifecycle paths.
+var immutableTenantFields = map[string]struct{}{
+	"_id":              {},
+	"uuid":             {},
+	"kind":             {},
+	"ownerUserUUID":    {},
+	"parentTenantUUID": {},
+	"deletedAt":        {},
+	"createdAt":        {},
+}
+
 func (r *Repository) UpdateTenant(ctx context.Context, uuid string, update bson.M) error {
+	for k := range update {
+		if _, blocked := immutableTenantFields[k]; blocked {
+			return fmt.Errorf("tenant: field %q is immutable and cannot be set via UpdateTenant", k)
+		}
+	}
 	update["updatedAt"] = time.Now()
 	res, err := r.db.Collection(CollTenants).UpdateOne(ctx, bson.M{"uuid": uuid}, bson.M{"$set": update})
 	if err != nil {

@@ -78,6 +78,10 @@ type OAuthStateInfo struct {
 type OAuthStateStore interface {
 	Set(ctx context.Context, key string, value []byte, expiry time.Duration) error
 	Get(ctx context.Context, key string) ([]byte, error)
+	// Take atomically returns and removes a value. Login-continuation
+	// challenges use this one-winner primitive after factor verification;
+	// a separate Get followed by Delete permits concurrent replay.
+	Take(ctx context.Context, key string) ([]byte, error)
 	Delete(ctx context.Context, key string) error
 	DeleteByPattern(ctx context.Context, pattern string) error
 	// Incr atomically increments an integer counter and returns the new
@@ -197,7 +201,7 @@ func (s *oAuthStateService) buildStateKey(state string) string {
 
 // Redis implementation of OAuthStateStore
 type RedisOAuthStateStore struct {
-	client RedisClient
+	client AtomicTakeRedisClient
 }
 
 // RedisClient interface for Redis operations (to be implemented separately)
@@ -213,8 +217,15 @@ type RedisClient interface {
 	Expire(ctx context.Context, key string, expiration time.Duration) error
 }
 
+// AtomicTakeRedisClient is the narrow extension required by the state store.
+// Other Redis consumers retain the smaller RedisClient contract.
+type AtomicTakeRedisClient interface {
+	RedisClient
+	GetDel(ctx context.Context, key string) (string, error)
+}
+
 // NewRedisOAuthStateStore creates a Redis-backed OAuth state store
-func NewRedisOAuthStateStore(client RedisClient) OAuthStateStore {
+func NewRedisOAuthStateStore(client AtomicTakeRedisClient) OAuthStateStore {
 	return &RedisOAuthStateStore{
 		client: client,
 	}
@@ -226,6 +237,14 @@ func (r *RedisOAuthStateStore) Set(ctx context.Context, key string, value []byte
 
 func (r *RedisOAuthStateStore) Get(ctx context.Context, key string) ([]byte, error) {
 	result, err := r.client.Get(ctx, key)
+	if err != nil {
+		return nil, err
+	}
+	return []byte(result), nil
+}
+
+func (r *RedisOAuthStateStore) Take(ctx context.Context, key string) ([]byte, error) {
+	result, err := r.client.GetDel(ctx, key)
 	if err != nil {
 		return nil, err
 	}
@@ -306,6 +325,23 @@ func (m *MemoryOAuthStateStore) Get(ctx context.Context, key string) ([]byte, er
 	}
 
 	return value, nil
+}
+
+func (m *MemoryOAuthStateStore) Take(_ context.Context, key string) ([]byte, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if expTime, exists := m.expiry[key]; exists && time.Now().After(expTime) {
+		delete(m.states, key)
+		delete(m.expiry, key)
+		return nil, fmt.Errorf("key expired")
+	}
+	value, exists := m.states[key]
+	if !exists {
+		return nil, fmt.Errorf("key not found")
+	}
+	delete(m.states, key)
+	delete(m.expiry, key)
+	return append([]byte(nil), value...), nil
 }
 
 func (m *MemoryOAuthStateStore) Delete(ctx context.Context, key string) error {

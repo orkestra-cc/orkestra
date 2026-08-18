@@ -18,7 +18,10 @@ services:
     working_dir: /app
     restart: unless-stopped
     ports:
-      - "${BACKEND_PORT:-3000}:3000"
+      # Bind the browser-facing surfaces to a configurable host address. Local
+      # development retains 0.0.0.0 by default; a Tailnet VM can set
+      # HOST_BIND_ADDRESS to its Tailscale IP and avoid LAN/public exposure.
+      - "${HOST_BIND_ADDRESS:-0.0.0.0}:${BACKEND_PORT:-3000}:3000"
     environment:
       ENV: development
       PORT: 3000  # Internal port is always 3000, BACKEND_PORT is for host mapping only
@@ -158,7 +161,7 @@ services:
     working_dir: /app
     restart: unless-stopped
     ports:
-      - "${FRONTEND_PORT:-8080}:5173"
+      - "${HOST_BIND_ADDRESS:-0.0.0.0}:${FRONTEND_PORT:-8080}:5173"
     environment:
       NODE_ENV: development
       VITE_ENV: development
@@ -234,7 +237,7 @@ services:
     working_dir: /app
     restart: unless-stopped
     ports:
-      - "${CLIENT_FRONTEND_PORT:-8081}:5173"
+      - "${HOST_BIND_ADDRESS:-0.0.0.0}:${CLIENT_FRONTEND_PORT:-8081}:5173"
     environment:
       NODE_ENV: development
       # The browser hits the backend directly, so this URL must resolve

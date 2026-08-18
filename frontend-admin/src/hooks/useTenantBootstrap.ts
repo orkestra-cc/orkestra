@@ -7,7 +7,7 @@ import {
   resetTenantState,
   selectCurrentOrgId
 } from 'store/slices/tenantSlice';
-import { selectIsAuthenticated } from 'store/slices/authSlice';
+import { selectIsAuthenticated, selectIsLoading } from 'store/slices/authSlice';
 import {
   useListMyOrgsQuery,
   useGetEffectivePermissionsQuery,
@@ -32,6 +32,7 @@ const STORAGE_KEY = 'orkestra.currentOrgId';
 export function useTenantBootstrap() {
   const dispatch = useAppDispatch();
   const isAuthenticated = useAppSelector(selectIsAuthenticated);
+  const isAuthLoading = useAppSelector(selectIsLoading);
   const currentOrgId = useAppSelector(selectCurrentOrgId);
   // Gate on the access token being in Redux, not just isAuthenticated. These
   // queries are tenant-scoped and racing them against the /v1/auth/session
@@ -53,32 +54,48 @@ export function useTenantBootstrap() {
     skip: !gate
   });
 
-  const { data: effective } = useGetEffectivePermissionsQuery(
+  // fulfilledTimeStamp is part of both mirror effects' deps below: a
+  // tag-invalidated refetch that returns a payload deep-equal to the cached
+  // one keeps the SAME data reference (RTK Query structural sharing), so an
+  // effect keyed on `data` alone never refires. setCurrentOrg clears
+  // permissions/features on every workspace pick — without re-dispatching
+  // after each fulfillment they'd stay empty until a full page reload,
+  // unmounting every hasPermission-gated surface (e.g. the NineDotMenu for
+  // single-membership admins).
+  const { data: effective, fulfilledTimeStamp: effectiveFulfilledAt } =
+    useGetEffectivePermissionsQuery(optimisticOrgId as string, {
+      skip: !gate || !optimisticOrgId
+    });
+
+  const { data: org, fulfilledTimeStamp: orgFulfilledAt } = useGetOrgQuery(
     optimisticOrgId as string,
     {
       skip: !gate || !optimisticOrgId
     }
   );
 
-  const { data: org } = useGetOrgQuery(optimisticOrgId as string, {
-    skip: !gate || !optimisticOrgId
-  });
-
   useEffect(() => {
     if (!isAuthenticated) {
-      dispatch(resetTenantState());
+      // On a fresh page load isAuthenticated is false while the session
+      // check is still in flight — that means "not known yet", not
+      // "logged out". Resetting here would wipe the persisted workspace
+      // selection (and any impersonation) on every refresh, so only reset
+      // once the auth check has actually concluded unauthenticated.
+      if (!isAuthLoading) {
+        dispatch(resetTenantState());
+      }
       return;
     }
     if (membershipsData?.memberships) {
       dispatch(setMemberships(membershipsData.memberships));
     }
-  }, [isAuthenticated, membershipsData, dispatch]);
+  }, [isAuthenticated, isAuthLoading, membershipsData, dispatch]);
 
   useEffect(() => {
     if (effective) dispatch(setEffectivePermissions(effective));
-  }, [effective, dispatch]);
+  }, [effective, effectiveFulfilledAt, dispatch]);
 
   useEffect(() => {
     if (org?.features) dispatch(setFeatures(org.features));
-  }, [org, dispatch]);
+  }, [org, orgFulfilledAt, dispatch]);
 }

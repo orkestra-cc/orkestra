@@ -6,7 +6,7 @@
   .navbar-vertical {
     .navbar-nav {
       .nav {
-        font-size: 14px;
+        font-size: map-get($font-sizes, 10);
       }
     }
   }
@@ -64,7 +64,9 @@
     margin-top: 0.5625rem;
   }
   .navbar-vertical-label {
-    font-size: 0.75rem;
+    // fs-10, not 12px: labels sit on the type ramp like everything else
+    // (The On-Scale Rule). Declared both-modes 2026-08-07.
+    font-size: map-get($font-sizes, 10);
     color: var(--#{$prefix}navbar-vertical-default-label-color);
   }
   .dropdown-indicator {
@@ -128,6 +130,10 @@
     }
   }
   @include navbar-vertical-variant('default', true, false, false);
+  // The default rail's separation hairline lives on the element itself (see
+  // the breakpoint block below), NOT on .navbar-collapse — a collapse-level
+  // shadow would override the collapsed-hover drop shadow that floats the
+  // expanded overlay above the content.
   &.navbar-inverted {
     @include navbar-vertical-variant('inverted', true, false, false);
   }
@@ -170,12 +176,41 @@
       top: 0;
       height: 100vh;
       margin: 0;
+      // The rail surface covers the WHOLE fixed column — brand zone
+      // included. Painting only .navbar-collapse left the logo sitting on
+      // the bare page canvas (a visible seam above y≈67px). Scoped to the
+      // full-height desktop column and to the default variant; in dark this
+      // is a visual no-op, since the glass is the canvas color at .96.
+      &:not(.navbar-card):not(.navbar-vibrant):not(.navbar-inverted) {
+        background-color: var(--#{$prefix}navbar-vertical-default-bg-color);
+        box-shadow: inset -1px 0 0 var(--#{$prefix}navbar-hairline-color);
+        // The fixed column starts at the container gutter (1rem), which left
+        // a canvas-colored strip between the viewport edge and the rail.
+        // Fill it with the same surface so the rail reads flush to the edge.
+        &::before {
+          content: '';
+          position: absolute;
+          top: 0;
+          bottom: 0;
+          right: 100%;
+          width: map-get($spacers, 3);
+          background-color: inherit;
+        }
+      }
       .nav-link {
         padding: 0.35rem 0;
       }
       .navbar-brand {
-        display: block;
+        // Flex + the band-height token (was display:block with the inner
+        // py-3 dictating ~71px): the rail's brand zone tracks the top band,
+        // so the logo stays vertically centered on the band's own center
+        // whatever height the token takes.
+        display: flex;
+        align-items: center;
+        height: $top-nav-height;
         text-align: center;
+        padding: 0;
+        margin: 0;
       }
       .navbar-collapse {
         margin-top: -0.25rem;
@@ -226,6 +261,22 @@
           }
         }
       }
+      // The content gutter left an 8px strip of bare canvas between the
+      // rail's right edge and the top bar for the whole height of the top
+      // band. Pulling the bar's left edge to the rail closes it: the bar's
+      // bottom hairline now meets the rail's vertical hairline in a clean
+      // T-junction, and the padding gives the pulled margin back so the
+      // bar's CONTENT (search box) stays on the content grid, aligned with
+      // the cards below it. `:where()` keeps this at base specificity: in
+      // collapsed mode the bar slides under the higher-z rail and the
+      // collapsed block's own padding-left MUST win — it is the clearance
+      // for the brand logo, which overflows the 44px icon rail by design.
+      &:where(:not(.navbar-card):not(.navbar-vibrant):not(.navbar-inverted))
+        + .content
+        .navbar-top {
+        margin-left: -1.5rem;
+        padding-left: 1.5rem;
+      }
     }
 
     .navbar-vertical-collapsed {
@@ -263,7 +314,11 @@
         }
 
         + .content {
-          margin-left: $navbar-vertical-collapsed-width;
+          // +1.5rem: the bare collapsed width put the content flush against
+          // the rail's hairline (0px vs the 24px the expanded state has).
+          // With it, the gap matches expanded and the top bar's pulled
+          // margin (-1.5rem) lands its surface exactly on the rail edge.
+          margin-left: $navbar-vertical-collapsed-width + 1.5rem;
           .navbar-top {
             padding-left: $navbar-vertical-width -
               $navbar-vertical-collapsed-width + 4;
@@ -296,8 +351,26 @@
           .nav-link-text {
             display: none;
           }
+          // The 120px logo cannot fit the 44px icon rail, so in collapsed
+          // mode it moves onto the top band: left edge on the content grid
+          // (rail + the same 24px gap the cards use) and vertically centered
+          // in the band. Hover-expanding the rail puts it back in the flow.
+          .navbar-brand {
+            position: absolute;
+            top: 0;
+            left: calc(#{$navbar-vertical-collapsed-width} + 1.5rem);
+            display: flex;
+            align-items: center;
+            height: $top-nav-height;
+            margin: 0;
+            padding: 0;
+          }
           .navbar-vertical-divider {
             max-width: 2rem;
+            // Centered under the icons, not hugging the left padding: on the
+            // white rail a left-aligned 2rem dash read as a stray gray line
+            // rather than as a deliberate realm separator.
+            margin-inline: auto;
           }
           // Tighten the collapsed icon-only rail and centre its icons. The rail
           // background is the same navy as the page body, so the visible band

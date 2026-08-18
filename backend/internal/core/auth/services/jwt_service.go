@@ -51,6 +51,9 @@ type JWTService interface {
 	// verify endpoint and anywhere else that needs to record which factors
 	// were completed for a freshly minted session.
 	GenerateTokenPairWithAMR(user *iface.User, deviceInfo *models.DeviceInfo, securityCtx *models.SecurityContext, amr []string, lastOTPAt int64) (*models.TokenPair, error)
+	// GenerateAccessTokenForSessionWithAMR mints a replacement access token
+	// for an existing canonical session without creating a new session id.
+	GenerateAccessTokenForSessionWithAMR(user *iface.User, deviceInfo *models.DeviceInfo, securityCtx *models.SecurityContext, amr []string, lastOTPAt int64) (string, error)
 
 	// SetTenantProvider allows late wiring of the tenant provider so that
 	// token issuance can embed the user's current memberships in the JWT.
@@ -350,6 +353,9 @@ func (s *jwtService) GenerateTokenPair(
 	deviceInfo *models.DeviceInfo,
 	securityCtx *models.SecurityContext,
 ) (*models.TokenPair, error) {
+	if err := requireSessionContext(securityCtx); err != nil {
+		return nil, err
+	}
 	accessToken, err := s.GenerateEnhancedAccessToken(user, deviceInfo, securityCtx)
 	if err != nil {
 		return nil, err
@@ -380,6 +386,9 @@ func (s *jwtService) GenerateTokenPairWithAMR(
 	amr []string,
 	lastOTPAt int64,
 ) (*models.TokenPair, error) {
+	if err := requireSessionContext(securityCtx); err != nil {
+		return nil, err
+	}
 	// Inject amr + last_otp_at into the context struct so the existing
 	// access-token path picks them up; refresh tokens don't carry amr
 	// (they're not presented to protected routes directly).
@@ -387,6 +396,32 @@ func (s *jwtService) GenerateTokenPairWithAMR(
 	ctx.AMR = amr
 	ctx.LastOTPAt = lastOTPAt
 	return s.GenerateTokenPair(user, deviceInfo, &ctx)
+}
+
+// GenerateAccessTokenForSessionWithAMR mints an access token for the
+// supplied canonical session. It copies the context so callers keep their
+// original authentication state intact.
+func (s *jwtService) GenerateAccessTokenForSessionWithAMR(
+	user *iface.User,
+	deviceInfo *models.DeviceInfo,
+	securityCtx *models.SecurityContext,
+	amr []string,
+	lastOTPAt int64,
+) (string, error) {
+	if err := requireSessionContext(securityCtx); err != nil {
+		return "", err
+	}
+	ctx := *securityCtx
+	ctx.AMR = amr
+	ctx.LastOTPAt = lastOTPAt
+	return s.GenerateEnhancedAccessToken(user, deviceInfo, &ctx)
+}
+
+func requireSessionContext(securityCtx *models.SecurityContext) error {
+	if securityCtx == nil || securityCtx.SessionID == "" {
+		return errors.New("session id is required for token issuance")
+	}
+	return nil
 }
 
 func (s *jwtService) ValidateAccessTokenWithRisk(tokenString string) (*models.JWTClaims, error) {

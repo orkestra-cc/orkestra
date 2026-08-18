@@ -216,6 +216,9 @@ const UserTableHeader = () => {
               transform="shrink-3"
               iconAlign="middle"
               onClick={() => setShowCreateModal(true)}
+              // The text label is display:none at xs and xl widths, which
+              // removes it from the accessible name — keep the name stable.
+              aria-label={t('adminUsers.tableHeader.newUser')}
             >
               <span className="d-none d-sm-inline-block d-xl-none d-xxl-inline-block ms-1">
                 {t('adminUsers.tableHeader.newUser')}
@@ -229,6 +232,7 @@ const UserTableHeader = () => {
               className="ms-2"
               iconAlign="middle"
               onClick={handleExportCSV}
+              aria-label={t('adminUsers.tableHeader.export')}
             >
               <span className="d-none d-sm-inline-block d-xl-none d-xxl-inline-block ms-1">
                 {t('adminUsers.tableHeader.export')}

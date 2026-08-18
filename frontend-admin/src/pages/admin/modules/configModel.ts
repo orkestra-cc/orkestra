@@ -256,3 +256,28 @@ export const configCompleteness = (
   }
   return { filled, total: required.length };
 };
+
+/**
+ * The visible required fields currently holding nothing — the per-field
+ * complement of `configCompleteness`, feeding the rail's per-group "to fill"
+ * badge. `values` may be the live form values (re-keyed to schema keys) or
+ * the backend's `configValues`. A secret counts as filled when the backend
+ * already holds one (`secretStatus`) or the caller's values carry a fresh
+ * plaintext — typed but not yet saved is still addressed.
+ */
+export const unfilledRequiredKeys = (
+  schema: ConfigField[] | null | undefined,
+  values: Record<string, string>,
+  secretStatus: Record<string, boolean> | null | undefined
+): Set<string> => {
+  const out = new Set<string>();
+  if (!schema) return out;
+  const ss = secretStatus ?? {};
+  for (const f of visibleFields(schema, values)) {
+    if (!f.required) continue;
+    const typed = (values[f.key] ?? '').trim() !== '';
+    const filled = f.type === 'secret' ? Boolean(ss[f.key]) || typed : typed;
+    if (!filled) out.add(f.key);
+  }
+  return out;
+};

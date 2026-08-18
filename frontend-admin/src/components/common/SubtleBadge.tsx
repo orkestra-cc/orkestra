@@ -15,19 +15,22 @@ interface SubtleBadgeProps {
   pill?: boolean;
   children?: React.ReactNode;
   className?: string;
+  title?: string;
 }
 
 const SubtleBadge: React.FC<SubtleBadgeProps> = ({
   bg = 'primary',
   pill,
   children,
-  className
+  className,
+  title
 }) => {
   return (
     <div
       className={classNames(className, `badge badge-subtle-${bg}`, {
         'rounded-pill': pill
       })}
+      title={title}
     >
       {children}
     </div>

@@ -6,7 +6,9 @@
     border: var(--#{$prefix}border-color);
     color: var(--#{$prefix}gray-800);
     font-weight: $font-weight-bold;
-    font-size: $font-size-sm;
+    // fs-10, not $font-size-sm (14px): tabs sit on the type ramp like every
+    // other dense-UI label (The On-Scale Rule). Both-modes 2026-08-07.
+    font-size: map-get($font-sizes, 10);
     @include border-top-radius($nav-tabs-border-radius);
 
     &:hover,
@@ -41,8 +43,16 @@
   }
 }
 
+// White label on the raw $primary pill is 4.14:1 — below AA for the active
+// tab's text. The same 10% shade the primary button uses (#286fce, 4.94:1)
+// keeps the fill unmistakably Orkestra Blue. Deliberate both-modes change,
+// mirroring the .btn-primary precedent.
+.nav-pills {
+  --#{$prefix}nav-pills-link-active-bg: #{shade-color($primary, 10%)};
+}
+
 .nav-pills-orkestra {
-  --#{$prefix}nav-link-font-size: #{$font-size-sm};
+  --#{$prefix}nav-link-font-size: #{map-get($font-sizes, 10)};
   --#{$prefix}nav-link-font-weight: #{$font-weight-medium};
 
   background-color: var(--#{$prefix}gray-100);

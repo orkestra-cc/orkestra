@@ -65,11 +65,10 @@ See [`backend/internal/core/auth/CLAUDE.md`](https://github.com/orkestra-cc/orke
      - `https://api.orkestra.com` (client, prod)
      - `http://console.localhost:8080` (dev, operator)
      - `http://client.localhost:8081` (dev, client)
-   - **Authorized redirect URIs** (callbacks land on the **backend**, not the frontend):
+   - **Authorized redirect URI** (one callback, on the **operator backend**, not the frontend):
      - `https://console.orkestra.com/v1/auth/oauth/google/callback`
-     - `https://api.orkestra.com/v1/auth/oauth/google/callback`
      - `http://console.localhost:3000/v1/auth/oauth/google/callback` (dev, operator)
-     - `http://api.localhost:3000/v1/auth/oauth/google/callback` (dev, client)
+   The signed OAuth `state` selects the operator or client auth service after this callback, so client-tier flows do not need a client-host callback URI.
 5. Click **Create**.
 6. Save the **Client ID** and **Client Secret** — paste them into `/admin/modules/auth` under the **Google** group (or set `OAUTH_GOOGLE_CLIENT_ID` / `OAUTH_GOOGLE_CLIENT_SECRET` as seed env vars on first boot).
 
@@ -114,10 +113,10 @@ See [`backend/internal/core/auth/CLAUDE.md`](https://github.com/orkestra-cc/orke
 7. Click **Configure** next to Sign In with Apple.
 8. Set:
    - **Primary App ID**: select your App ID from Step 2.
-   - **Domains and Subdomains**: add your operator + client hosts (e.g. `console.orkestra.com`, `api.orkestra.com`). Apple does not accept `localhost`; use ngrok for local development.
-   - **Return URLs** (callbacks land on the backend):
+   - **Domains and Subdomains**: add the operator callback host (for example, `console.orkestra.com`). Apple does not accept `localhost`; use ngrok for local development.
+   - **Return URL** (one callback on the operator backend):
      - `https://console.orkestra.com/v1/auth/oauth/apple/callback`
-     - `https://api.orkestra.com/v1/auth/oauth/apple/callback`
+   The signed OAuth `state` dispatches the completed flow to the client tier when that is where it started; do not register a client-host callback.
 9. Click **Next**, **Done**, and **Continue**.
 10. Click **Save**.
 
@@ -140,6 +139,17 @@ You'll need:
 - **Key ID**: from Step 4.
 - **Private Key**: the `.p8` file downloaded in Step 4.
 
+### Apple private-key incident response
+
+Treat a suspected Apple `.p8` private-key exposure as an incident. In order:
+
+1. Identify every affected environment and the Apple configuration each uses.
+2. Restrict access to, and sanitize where retention policy permits, local and OTLP log records that could contain the key or related credential material. Preserve only the incident evidence required by policy.
+3. In Apple Developer, rotate the key and invalidate the exposed key.
+4. Update the encrypted `auth` module configuration with the replacement Apple key and its matching key ID.
+5. Do not restart a service unless the live configuration behavior requires it; the application does not rotate an external Apple key for you.
+6. Force reauthentication for affected users and monitor OAuth failures while the replacement is in use.
+
 ## GitHub OAuth setup
 
 1. Go to [GitHub Developer Settings → OAuth Apps](https://github.com/settings/developers).
@@ -149,15 +159,15 @@ You'll need:
    - **Authorization callback URL**: `https://console.orkestra.com/v1/auth/oauth/github/callback`
 3. Register the app, then click **Generate a new client secret**.
 4. Save the **Client ID** and **Client Secret** — paste them into `/admin/modules/auth` under the **GitHub** group (or use `OAUTH_GITHUB_CLIENT_ID` / `OAUTH_GITHUB_CLIENT_SECRET` as seed env vars).
-5. To support both operator and client tiers, repeat with the client host (`https://api.orkestra.com/...`) — GitHub only allows one callback per app, so you typically register **two GitHub OAuth apps** (one per tier) and switch credentials by audience.
+5. Register the single operator-host callback above. The signed OAuth `state` dispatches a completed client-tier flow to the client auth service, so a second client-host callback or provider app is not required for the audience split.
 
 ## Discord OAuth setup
 
 1. Go to the [Discord Developer Portal](https://discord.com/developers/applications) and create a **New Application**.
-2. Open **OAuth2 → General**. Add redirects:
+2. Open **OAuth2 → General**. Add the single operator-host redirect:
    - `https://console.orkestra.com/v1/auth/oauth/discord/callback`
-   - `https://api.orkestra.com/v1/auth/oauth/discord/callback`
    - `http://console.localhost:3000/v1/auth/oauth/discord/callback` (dev)
+   The signed OAuth `state` dispatches client-tier flows after the callback; do not add a client-host callback.
 3. Click **Reset Secret** to generate a client secret.
 4. Save the **Client ID** and **Client Secret** — paste them into `/admin/modules/auth` under the **Discord** group (or `OAUTH_DISCORD_CLIENT_ID` / `OAUTH_DISCORD_CLIENT_SECRET`).
 5. Required scopes Orkestra requests: `identify email`.
@@ -200,7 +210,7 @@ JWT_PUBLIC_KEY_PATH=/app/keys/jwt-public.pem
 
 ### Frontend
 
-The browser never talks to OAuth providers directly — it redirects to the backend endpoint at `/v1/auth/oauth/<provider>/login`, which crafts the provider authorization URL with state, scopes, and the correct redirect URL. So the frontend does not need provider client IDs.
+The browser never talks to OAuth providers directly — it starts at the tier-specific backend endpoint `POST /v1/auth/{tier}/oauth/login`, which returns the provider authorization URL with state, scopes, and the configured single operator-host callback. So the frontend does not need provider client IDs.
 
 ```bash
 # frontend-admin (operator console) — .env.production
@@ -241,8 +251,8 @@ For the Flutter mobile app, update:
    ```
 
 2. Start the frontends — operator on `http://console.localhost:8080`, client SPA on `http://client.localhost:8081`.
-3. From the operator login page, click **Sign in with Google** (or GitHub / Discord / Apple via ngrok). The browser is redirected to `http://console.localhost:3000/v1/auth/oauth/google/login`, then to Google, then back to `/v1/auth/oauth/google/callback`, which sets the operator refresh cookie and redirects to the dashboard.
-4. Repeat from the client SPA to verify the client-tier flow lands the refresh cookie on the `api.*` host with `aud=client` in the JWT.
+3. From the operator login page, start Google OAuth through `POST /v1/auth/operator/oauth/login`. The browser follows the returned authorization URL to Google, then returns to `http://console.localhost:3000/v1/auth/oauth/google/callback`, the single operator-host callback.
+4. Repeat from the client SPA through `POST /v1/auth/client/oauth/login`; its signed state makes the same operator-host callback dispatch to the client auth service, which issues `aud=client` and the client-tier refresh cookie.
 
 ### Production
 
@@ -302,12 +312,12 @@ For the Flutter mobile app, update:
 
 ## Pre-production checklist
 
-- [ ] Google OAuth credentials created and configured (operator + client hosts)
-- [ ] Apple Sign In credentials created and configured (operator + client hosts; ngrok used for local)
-- [ ] GitHub OAuth app(s) created — one per tier if you need both
+- [ ] Google OAuth credentials created and configured for the intended audiences
+- [ ] Apple Sign In credentials created and configured (operator callback host; ngrok used for local)
+- [ ] GitHub OAuth app created with the operator-host callback
 - [ ] Discord OAuth credentials created and configured
 - [ ] Credentials stored in `/admin/modules/auth` (ConfigService), not in plain `.env` in prod
-- [ ] Redirect URIs registered for production hosts (`console.orkestra.com`, `api.orkestra.com`)
+- [ ] Each provider's redirect URI is registered on the operator host (`console.orkestra.com` in these examples)
 - [ ] RS256 keys (`jwt-private.pem` / `jwt-public.pem`) generated and `JWT_PRIVATE_KEY_PATH` / `JWT_PUBLIC_KEY_PATH` set
 - [ ] HTTPS enabled on production
 - [ ] OAuth tested in development environment (both operator and client tiers)

@@ -68,14 +68,10 @@ func NewClientOAuthProviderRepository(db *mongo.Database) OAuthProviderRepositor
 }
 
 func (r *oauthProviderRepository) CreateOAuthProvider(ctx context.Context, provider *models.OAuthProviderDoc) error {
-	fmt.Printf("[REPO_DEBUG] ==> CreateOAuthProvider called\n")
-	fmt.Printf("[REPO_DEBUG] Provider: %s, ProviderID: %s, UserUUID: %s\n", provider.Provider, provider.ProviderID, provider.UserUUID)
-
 	// Set timestamps and UUID if not provided
 	now := time.Now()
 	if provider.UUID == "" {
 		provider.UUID = models.GenerateTimeOrderedUUID()
-		fmt.Printf("[REPO_DEBUG] Generated new UUID: %s\n", provider.UUID)
 	}
 	provider.CreatedAt = now
 	provider.UpdatedAt = now
@@ -85,23 +81,16 @@ func (r *oauthProviderRepository) CreateOAuthProvider(ctx context.Context, provi
 	}
 
 	// Check if provider already exists
-	fmt.Printf("[REPO_DEBUG] Checking if provider already exists...\n")
 	existing, err := r.GetByProviderAndID(ctx, provider.Provider, provider.ProviderID)
 	if err == nil && existing != nil {
-		fmt.Printf("[REPO_DEBUG] ERROR: Provider already exists for user %s\n", existing.UserUUID)
 		return fmt.Errorf("OAuth provider already exists for user %s", existing.UserUUID)
 	}
-	fmt.Printf("[REPO_DEBUG] Provider does not exist, proceeding with creation\n")
 
-	fmt.Printf("[REPO_DEBUG] Inserting OAuth provider into database...\n")
 	_, err = r.collection.InsertOne(ctx, provider)
 	if err != nil {
-		fmt.Printf("[REPO_DEBUG] ERROR: Failed to insert provider: %v\n", err)
 		return fmt.Errorf("failed to create OAuth provider: %w", err)
 	}
 
-	fmt.Printf("[REPO_DEBUG] OAuth provider created successfully - UUID: %s\n", provider.UUID)
-	fmt.Printf("[REPO_DEBUG] <== CreateOAuthProvider completed\n")
 	return nil
 }
 
@@ -122,34 +111,25 @@ func (r *oauthProviderRepository) LinkOAuthProvider(ctx context.Context, userUUI
 }
 
 func (r *oauthProviderRepository) GetByProviderAndID(ctx context.Context, provider models.OAuthProvider, providerID string) (*models.OAuthProviderDoc, error) {
-	fmt.Printf("[REPO_DEBUG] ==> GetByProviderAndID called\n")
-	fmt.Printf("[REPO_DEBUG] Query: Provider=%s, ProviderID=%s\n", provider, providerID)
-
 	filter := bson.M{
 		"provider":   provider,
 		"providerId": providerID,
 	}
 
 	var result models.OAuthProviderDoc
+	//tenantscope:allow OAuth identities are audience-tier scoped, not org scoped; this repository is bound to one tier collection.
 	err := r.collection.FindOne(ctx, filter).Decode(&result)
 	if err != nil {
 		if err == mongo.ErrNoDocuments {
-			fmt.Printf("[REPO_DEBUG] No OAuth provider found with given criteria\n")
 			return nil, nil
 		}
-		fmt.Printf("[REPO_DEBUG] ERROR: Failed to find OAuth provider: %v\n", err)
 		return nil, fmt.Errorf("failed to find OAuth provider: %w", err)
 	}
 
-	fmt.Printf("[REPO_DEBUG] OAuth provider found - UUID: %s, UserUUID: %s, Primary: %v\n", result.UUID, result.UserUUID, result.IsPrimary)
-	fmt.Printf("[REPO_DEBUG] <== GetByProviderAndID completed\n")
 	return &result, nil
 }
 
 func (r *oauthProviderRepository) GetByUserUUID(ctx context.Context, userUUID string) ([]*models.OAuthProviderDoc, error) {
-	fmt.Printf("[REPO_DEBUG] ==> GetByUserUUID called\n")
-	fmt.Printf("[REPO_DEBUG] Query: UserUUID=%s\n", userUUID)
-
 	filter := bson.M{"userUuid": userUUID}
 
 	// Sort by isPrimary desc, then by linkedAt desc
@@ -158,9 +138,9 @@ func (r *oauthProviderRepository) GetByUserUUID(ctx context.Context, userUUID st
 		{Key: "linkedAt", Value: -1},
 	})
 
+	//tenantscope:allow OAuth identities are audience-tier scoped, not org scoped; this repository is bound to one tier collection.
 	cursor, err := r.collection.Find(ctx, filter, opts)
 	if err != nil {
-		fmt.Printf("[REPO_DEBUG] ERROR: Failed to find OAuth providers: %v\n", err)
 		return nil, fmt.Errorf("failed to find OAuth providers: %w", err)
 	}
 	defer cursor.Close(ctx)
@@ -169,22 +149,15 @@ func (r *oauthProviderRepository) GetByUserUUID(ctx context.Context, userUUID st
 	for cursor.Next(ctx) {
 		var provider models.OAuthProviderDoc
 		if err := cursor.Decode(&provider); err != nil {
-			fmt.Printf("[REPO_DEBUG] ERROR: Failed to decode OAuth provider: %v\n", err)
 			return nil, fmt.Errorf("failed to decode OAuth provider: %w", err)
 		}
 		providers = append(providers, &provider)
 	}
 
 	if err := cursor.Err(); err != nil {
-		fmt.Printf("[REPO_DEBUG] ERROR: Cursor error: %v\n", err)
 		return nil, fmt.Errorf("cursor error: %w", err)
 	}
 
-	fmt.Printf("[REPO_DEBUG] Found %d OAuth providers for user %s\n", len(providers), userUUID)
-	for i, p := range providers {
-		fmt.Printf("[REPO_DEBUG]   Provider %d: %s (Primary: %v, UUID: %s)\n", i+1, p.Provider, p.IsPrimary, p.UUID)
-	}
-	fmt.Printf("[REPO_DEBUG] <== GetByUserUUID completed\n")
 	return providers, nil
 }
 
@@ -195,6 +168,7 @@ func (r *oauthProviderRepository) GetPrimaryProvider(ctx context.Context, userUU
 	}
 
 	var result models.OAuthProviderDoc
+	//tenantscope:allow OAuth identities are audience-tier scoped, not org scoped; this repository is bound to one tier collection.
 	err := r.collection.FindOne(ctx, filter).Decode(&result)
 	if err != nil {
 		if err == mongo.ErrNoDocuments {
@@ -212,9 +186,6 @@ func (r *oauthProviderRepository) GetPrimaryProvider(ctx context.Context, userUU
 }
 
 func (r *oauthProviderRepository) UpdateLastUsed(ctx context.Context, uuid string) error {
-	fmt.Printf("[REPO_DEBUG] ==> UpdateLastUsed called\n")
-	fmt.Printf("[REPO_DEBUG] Updating last used timestamp for OAuth provider UUID: %s\n", uuid)
-
 	filter := bson.M{"uuid": uuid}
 	now := time.Now()
 	update := bson.M{
@@ -224,19 +195,16 @@ func (r *oauthProviderRepository) UpdateLastUsed(ctx context.Context, uuid strin
 		},
 	}
 
+	//tenantscope:allow OAuth identities are audience-tier scoped, not org scoped; this repository is bound to one tier collection.
 	result, err := r.collection.UpdateOne(ctx, filter, update)
 	if err != nil {
-		fmt.Printf("[REPO_DEBUG] ERROR: Failed to update last used: %v\n", err)
 		return fmt.Errorf("failed to update last used: %w", err)
 	}
 
 	if result.MatchedCount == 0 {
-		fmt.Printf("[REPO_DEBUG] ERROR: OAuth provider not found with UUID: %s\n", uuid)
 		return fmt.Errorf("OAuth provider not found")
 	}
 
-	fmt.Printf("[REPO_DEBUG] Last used timestamp updated successfully - Timestamp: %v\n", now)
-	fmt.Printf("[REPO_DEBUG] <== UpdateLastUsed completed\n")
 	return nil
 }
 
@@ -256,6 +224,7 @@ func (r *oauthProviderRepository) UpdateMetadata(ctx context.Context, uuid strin
 			"updatedAt": time.Now(),
 		},
 	}
+	//tenantscope:allow OAuth identities are audience-tier scoped, not org scoped; this repository is bound to one tier collection.
 	result, err := r.collection.UpdateOne(ctx, filter, update)
 	if err != nil {
 		return fmt.Errorf("failed to update metadata: %w", err)
@@ -284,6 +253,7 @@ func (r *oauthProviderRepository) SetPrimaryProvider(ctx context.Context, userUU
 			},
 		}
 
+		//tenantscope:allow OAuth identities are audience-tier scoped, not org scoped; this repository is bound to one tier collection.
 		_, err := r.collection.UpdateMany(sc, unsetFilter, unsetUpdate)
 		if err != nil {
 			return nil, fmt.Errorf("failed to unset primary flags: %w", err)
@@ -301,6 +271,7 @@ func (r *oauthProviderRepository) SetPrimaryProvider(ctx context.Context, userUU
 			},
 		}
 
+		//tenantscope:allow OAuth identities are audience-tier scoped, not org scoped; this repository is bound to one tier collection.
 		result, err := r.collection.UpdateOne(sc, setPrimaryFilter, setPrimaryUpdate)
 		if err != nil {
 			return nil, fmt.Errorf("failed to set primary provider: %w", err)
@@ -325,6 +296,7 @@ func (r *oauthProviderRepository) UpdateRefreshToken(ctx context.Context, uuid s
 		},
 	}
 
+	//tenantscope:allow OAuth identities are audience-tier scoped, not org scoped; this repository is bound to one tier collection.
 	result, err := r.collection.UpdateOne(ctx, filter, update)
 	if err != nil {
 		return fmt.Errorf("failed to update refresh token: %w", err)
@@ -366,6 +338,7 @@ func (r *oauthProviderRepository) UpdateOAuthTokens(ctx context.Context, uuid st
 
 	update := bson.M{"$set": updateFields}
 
+	//tenantscope:allow OAuth identities are audience-tier scoped, not org scoped; this repository is bound to one tier collection.
 	result, err := r.collection.UpdateOne(ctx, filter, update)
 	if err != nil {
 		return fmt.Errorf("failed to update OAuth tokens: %w", err)
@@ -395,6 +368,7 @@ func (r *oauthProviderRepository) UnlinkProvider(ctx context.Context, userUUID s
 		"provider": provider,
 	}
 
+	//tenantscope:allow OAuth identities are audience-tier scoped, not org scoped; this repository is bound to one tier collection.
 	result, err := r.collection.DeleteOne(ctx, filter)
 	if err != nil {
 		return fmt.Errorf("failed to unlink provider: %w", err)
@@ -432,6 +406,7 @@ func (r *oauthProviderRepository) UnlinkProvider(ctx context.Context, userUUID s
 func (r *oauthProviderRepository) DeleteProvider(ctx context.Context, uuid string) error {
 	filter := bson.M{"uuid": uuid}
 
+	//tenantscope:allow OAuth identities are audience-tier scoped, not org scoped; this repository is bound to one tier collection.
 	result, err := r.collection.DeleteOne(ctx, filter)
 	if err != nil {
 		return fmt.Errorf("failed to delete OAuth provider: %w", err)
@@ -447,6 +422,7 @@ func (r *oauthProviderRepository) DeleteProvider(ctx context.Context, uuid strin
 func (r *oauthProviderRepository) FindByEmail(ctx context.Context, email string) ([]*models.OAuthProviderDoc, error) {
 	filter := bson.M{"email": email}
 
+	//tenantscope:allow OAuth identities are audience-tier scoped, not org scoped; this repository is bound to one tier collection.
 	cursor, err := r.collection.Find(ctx, filter)
 	if err != nil {
 		return nil, fmt.Errorf("failed to find providers by email: %w", err)
@@ -497,6 +473,7 @@ func (r *oauthProviderRepository) ConsolidateProviders(ctx context.Context, from
 				},
 			}
 
+			//tenantscope:allow OAuth identities are audience-tier scoped, not org scoped; this repository is bound to one tier collection.
 			_, err := r.collection.UpdateOne(ctx, filter, update)
 			if err != nil {
 				return fmt.Errorf("failed to transfer provider %s: %w", provider.Provider, err)

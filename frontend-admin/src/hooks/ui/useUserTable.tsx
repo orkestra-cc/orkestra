@@ -33,6 +33,7 @@ import {
   User
 } from 'store/api/userApi';
 import OrkestraCloseButton from 'components/common/OrkestraCloseButton';
+import { formatDate, formatTime } from 'helpers/dateFormat';
 import { useAppSelector } from 'store/hooks';
 import { selectUser } from 'store/slices/authSlice';
 
@@ -258,7 +259,7 @@ const useUserTable = (options?: any) => {
   const columns = [
     {
       accessorKey: 'fullName',
-      header: 'User',
+      header: t('adminUsers.columns.user'),
       meta: {
         headerProps: { className: 'ps-2 text-900', style: { height: '46px' } },
         cellProps: {
@@ -291,7 +292,7 @@ const useUserTable = (options?: any) => {
     },
     {
       accessorKey: 'role',
-      header: 'Role',
+      header: t('adminUsers.columns.role'),
       meta: {
         headerProps: {
           className: 'text-900'
@@ -334,7 +335,7 @@ const useUserTable = (options?: any) => {
     },
     {
       accessorKey: 'providers',
-      header: 'Login With',
+      header: t('adminUsers.columns.loginWith'),
       meta: {
         headerProps: {
           className: 'text-900'
@@ -373,7 +374,7 @@ const useUserTable = (options?: any) => {
     },
     {
       accessorKey: 'isActive',
-      header: 'Status',
+      header: t('adminUsers.columns.status'),
       meta: {
         headerProps: { className: 'text-900' },
         cellProps: {
@@ -384,14 +385,16 @@ const useUserTable = (options?: any) => {
         const { isActive } = original;
         return (
           <SubtleBadge bg={isActive ? 'success' : 'secondary'} className="me-2">
-            {isActive ? 'Active' : 'Inactive'}
+            {isActive
+              ? t('adminUsers.status.active')
+              : t('adminUsers.status.inactive')}
           </SubtleBadge>
         );
       }
     },
     {
       accessorKey: 'lastLogin',
-      header: 'Last Login',
+      header: t('adminUsers.columns.lastLogin'),
       meta: {
         headerProps: { className: 'text-900' },
         cellProps: {
@@ -400,56 +403,37 @@ const useUserTable = (options?: any) => {
       },
       cell: ({ row: { original } }: { row: { original: User } }) => {
         const { lastLogin } = original;
+        const formattedDate = formatDate(lastLogin);
 
-        if (!lastLogin) {
-          return <div className="text-muted">Never</div>;
+        if (formattedDate === '—') {
+          return (
+            <div className="text-muted">{t('adminUsers.columns.never')}</div>
+          );
         }
 
-        const date = new Date(lastLogin);
-
-        if (isNaN(date.getTime())) {
-          return <div className="text-muted">Never</div>;
-        }
-
-        const formattedDate = date.toLocaleDateString('en-GB', {
-          year: 'numeric',
-          month: 'short',
-          day: 'numeric'
-        });
-        const formattedTime = date.toLocaleTimeString('en-GB', {
-          hour: '2-digit',
-          minute: '2-digit'
-        });
         return (
           <div>
             <div className="text-900">{formattedDate}</div>
-            <small className="text-muted">{formattedTime}</small>
+            <small className="text-muted">{formatTime(lastLogin)}</small>
           </div>
         );
       }
     },
     {
       accessorKey: 'createdAt',
-      header: 'Created On',
+      header: t('adminUsers.columns.createdOn'),
       meta: {
         headerProps: { className: 'text-900' },
         cellProps: {
           className: 'pe-4'
         }
       },
-      cell: ({ row: { original } }: { row: { original: User } }) => {
-        const { createdAt } = original;
-        const date = new Date(createdAt);
-        return date.toLocaleDateString('en-GB', {
-          year: 'numeric',
-          month: 'short',
-          day: 'numeric'
-        });
-      }
+      cell: ({ row: { original } }: { row: { original: User } }) =>
+        formatDate(original.createdAt)
     },
     {
       accessorKey: 'actions',
-      header: 'Actions',
+      header: t('adminUsers.columns.actions'),
       meta: {
         headerProps: { className: 'text-end text-900' }
       },
@@ -485,6 +469,9 @@ const useUserTable = (options?: any) => {
               variant="link"
               size="sm"
               className="text-600 btn-reveal"
+              aria-label={t('adminUsers.rowActions.menuLabel', {
+                name: original.fullName
+              })}
             >
               <FontAwesomeIcon icon="ellipsis-h" className="fs-11" />
             </Dropdown.Toggle>

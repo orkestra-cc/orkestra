@@ -95,4 +95,9 @@ if [[ ! -s "$OUT_FILE" ]]; then
   exit 1
 fi
 
-echo "✓ Wrote $OUT_FILE ($(wc -c < "$OUT_FILE" | tr -d ' ') bytes, $(jq '.paths | keys | length' "$OUT_FILE") paths)"
+# The path count is cosmetic; jq is not guaranteed on dev hosts, so fall
+# back to python3 and finally to "?" rather than printing a broken message.
+path_count="$(jq '.paths | keys | length' "$OUT_FILE" 2>/dev/null \
+  || python3 -c 'import json,sys; print(len(json.load(open(sys.argv[1]))["paths"]))' "$OUT_FILE" 2>/dev/null \
+  || echo '?')"
+echo "✓ Wrote $OUT_FILE ($(wc -c < "$OUT_FILE" | tr -d ' ') bytes, ${path_count} paths)"

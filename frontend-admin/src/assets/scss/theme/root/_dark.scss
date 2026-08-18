@@ -80,11 +80,19 @@
     // Navbar glass
     //
     --#{$prefix}bg-navbar-glass: #{rgba(#0b1727, 0.96)};
+    // Frozen: the dark chrome has no separation hairline. The light theme's
+    // white rail/top-bar introduced one (root/_light.scss); dark pins it away
+    // so the frozen dark surface stays pixel-identical.
+    --#{$prefix}navbar-hairline-color: transparent;
 
     //
     // Navbar Vertical
     //
     // scss-docs-start navbar-vertical-default-dark-variables
+    // Frozen literal (old dark gray-500): the light label ink moved to
+    // gray-600 for AA contrast; dark used to resolve this var through
+    // --#{$prefix}gray-500 and must keep rendering exactly #5e6e82.
+    --#{$prefix}navbar-vertical-default-label-color: #5e6e82;
     --#{$prefix}navbar-vertical-default-link-color: #{$navbar-vertical-default-link-color-dark};
     --#{$prefix}navbar-vertical-default-link-hover-color: #{$navbar-vertical-default-link-hover-color-dark};
     --#{$prefix}navbar-vertical-default-link-active-color: #{$navbar-vertical-default-link-active-color-dark};

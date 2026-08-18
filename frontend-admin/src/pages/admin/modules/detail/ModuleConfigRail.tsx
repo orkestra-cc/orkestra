@@ -103,8 +103,20 @@ const ModuleConfigRail: React.FC<ModuleConfigRailProps> = ({
               {translateConfigGroup(t, moduleName, node)}
             </span>
             {unfilled > 0 && (
-              <SubtleBadge bg="warning" pill className="fs-11 flex-shrink-0">
-                {unfilled}
+              <SubtleBadge
+                bg="warning"
+                pill
+                className="fs-11 flex-shrink-0"
+                title={t('adminModules.detail.rail.incomplete', {
+                  count: unfilled
+                })}
+              >
+                <span aria-hidden="true">{unfilled}</span>
+                <span className="visually-hidden">
+                  {t('adminModules.detail.rail.incomplete', {
+                    count: unfilled
+                  })}
+                </span>
               </SubtleBadge>
             )}
           </Nav.Link>

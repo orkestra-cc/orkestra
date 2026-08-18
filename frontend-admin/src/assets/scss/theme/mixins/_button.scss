@@ -19,6 +19,14 @@
       box-shadow: var(--#{$prefix}btn-orkestra-hover-box-shadow);
     }
   }
+  // The hover-focus shadow above replaces Bootstrap's .btn:focus-visible
+  // ring, leaving keyboard focus indistinguishable from hover. Re-add the
+  // ring on top of the button's own shadow (WCAG 2.2 focus-appearance).
+  &:focus-visible {
+    box-shadow:
+      var(--#{$prefix}btn-orkestra-box-shadow),
+      0 0 0 $btn-focus-width var(--#{$prefix}input-btn-focus-color);
+  }
   &:active {
     box-shadow: none !important;
     color: var(--#{$prefix}btn-orkestra-#{$color}-active-color);

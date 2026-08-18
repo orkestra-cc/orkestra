@@ -65,6 +65,7 @@ jobs:
         with:
           name: backend-coverage
           path: backend/coverage.out
+          retention-days: 7
       - name: Upload policy coverage report
         if: always()
         uses: actions/upload-artifact@v7
@@ -73,12 +74,13 @@ jobs:
           path: |
             backend/policy-coverage-report.md
             backend/policy-coverage-report.json
+          retention-days: 7
         continue-on-error: true
 
   coverage-badge:
     name: Refresh coverage badge
     needs: ci
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main')
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main') && vars.CI_FULL == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -103,7 +105,9 @@ jobs:
   docker:
     name: Docker Build
     needs: ci
-    if: github.event_name == 'push'
+    # Publishes only where the CI_FULL repo variable is true (upstream +
+    # commons). Product forks default to minimal CI — see CLAUDE.md CI/CD.
+    if: github.event_name == 'push' && vars.CI_FULL == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read

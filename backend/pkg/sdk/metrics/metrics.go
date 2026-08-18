@@ -21,6 +21,12 @@
 //     a slow bucket straight to the matching Tempo span. Populated by the
 //     structured request logger middleware.
 //
+// Session revocation telemetry adds:
+//
+//   - orkestra_auth_session_revocation_store_failures_total — bounded
+//     lookup/write Redis failures while evaluating or recording revoked JWT
+//     session identifiers. Lookup failures still fail open.
+//
 // ADR-0002 (docs/adr/0002-metrics-label-schema.md) freezes the label
 // schema. Adding labels requires a new ADR — Prometheus cardinality
 // explodes silently, and history breaks when labels change. The raw
@@ -38,7 +44,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
-// Collector bundles the three metric families alongside the registry they
+// Collector bundles the metric families alongside the registry they
 // are registered on. One Collector is created at boot (Register) and
 // reused by every call site.
 //
@@ -49,9 +55,10 @@ import (
 type Collector struct {
 	registry *prometheus.Registry
 
-	cedarDivergence  *prometheus.CounterVec
-	cedarEnforced    *prometheus.CounterVec
-	capabilityDenied *prometheus.CounterVec
+	cedarDivergence                *prometheus.CounterVec
+	cedarEnforced                  *prometheus.CounterVec
+	capabilityDenied               *prometheus.CounterVec
+	sessionRevocationStoreFailures *prometheus.CounterVec
 
 	// entitlementLag is a GaugeFunc that reads lastApply on every scrape;
 	// the map is keyed by tenant kind ("internal" | "external"). Stored
@@ -125,6 +132,16 @@ func (c *Collector) buildMetrics() {
 		[]string{"capability_id"},
 	)
 
+	c.sessionRevocationStoreFailures = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "orkestra",
+			Subsystem: "auth",
+			Name:      "session_revocation_store_failures_total",
+			Help:      "Count of Redis failures while reading or writing revoked session identifiers.",
+		},
+		[]string{"operation"},
+	)
+
 	c.entitlementLag = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "orkestra",
@@ -172,7 +189,7 @@ func (c *Collector) Register() error {
 	if !atomic.CompareAndSwapUint32(&c.registered, 0, 1) {
 		return nil
 	}
-	for _, m := range []prometheus.Collector{c.cedarDivergence, c.cedarEnforced, c.capabilityDenied, c.entitlementLag, c.httpDuration} {
+	for _, m := range []prometheus.Collector{c.cedarDivergence, c.cedarEnforced, c.capabilityDenied, c.sessionRevocationStoreFailures, c.entitlementLag, c.httpDuration} {
 		if err := c.registry.Register(m); err != nil {
 			// rollback so the caller can retry with a fresh collector
 			atomic.StoreUint32(&c.registered, 0)
@@ -238,6 +255,19 @@ func (c *Collector) RecordCapabilityDenied(capabilityID string) {
 		return
 	}
 	c.capabilityDenied.WithLabelValues(capabilityID).Inc()
+}
+
+// RecordSessionRevocationStoreFailure increments the Redis-revocation
+// failure counter. The operation label is deliberately limited to lookup,
+// write, and unknown to keep metric cardinality bounded.
+func (c *Collector) RecordSessionRevocationStoreFailure(operation string) {
+	if c == nil || c.sessionRevocationStoreFailures == nil {
+		return
+	}
+	if operation != "lookup" && operation != "write" {
+		operation = "unknown"
+	}
+	c.sessionRevocationStoreFailures.WithLabelValues(operation).Inc()
 }
 
 // RecordEntitlementApply marks an entitlement change (grant or revoke) as

@@ -17,7 +17,7 @@ func TestConfirmPassword_HappyPath(t *testing.T) {
 	env := newGatesEnv(t, PolicyAudienceOperator, nil, nil)
 	u := env.hashedUser("alice@example.com", "correct-horse-battery")
 
-	res, err := env.auth.ConfirmPassword(context.Background(), u.UUID, "correct-horse-battery", []string{"pwd"}, "203.0.113.10")
+	res, err := env.auth.ConfirmPassword(context.Background(), u.UUID, "correct-horse-battery", []string{"pwd"}, "203.0.113.10", "session-confirm", "device-confirm")
 	if err != nil {
 		t.Fatalf("confirm: %v", err)
 	}
@@ -50,7 +50,7 @@ func TestConfirmPassword_WrongPasswordReturnsInvalidCreds(t *testing.T) {
 	env := newGatesEnv(t, PolicyAudienceOperator, nil, nil)
 	u := env.hashedUser("alice@example.com", "correct-horse-battery")
 
-	_, err := env.auth.ConfirmPassword(context.Background(), u.UUID, "wrong-password", []string{"pwd"}, "203.0.113.10")
+	_, err := env.auth.ConfirmPassword(context.Background(), u.UUID, "wrong-password", []string{"pwd"}, "203.0.113.10", "session-confirm", "device-confirm")
 	if !stderrors.Is(err, ErrInvalidCredentials) {
 		t.Fatalf("err = %v, want ErrInvalidCredentials", err)
 	}
@@ -62,7 +62,7 @@ func TestConfirmPassword_NoPasswordHashIsUnavailable(t *testing.T) {
 	u := activeUser("oauth-only@example.com", "")
 	env.users.seed(u)
 
-	_, err := env.auth.ConfirmPassword(context.Background(), u.UUID, "anything", nil, "")
+	_, err := env.auth.ConfirmPassword(context.Background(), u.UUID, "anything", nil, "", "session-confirm", "device-confirm")
 	if !stderrors.Is(err, ErrPasswordConfirmUnavailable) {
 		t.Fatalf("err = %v, want ErrPasswordConfirmUnavailable", err)
 	}
@@ -82,7 +82,7 @@ func TestConfirmPassword_TOTPEnrolledRefuses(t *testing.T) {
 		Type:     models.MFAFactorTOTP,
 	})
 
-	_, err := env.auth.ConfirmPassword(context.Background(), u.UUID, "correct-horse-battery", []string{"pwd"}, "")
+	_, err := env.auth.ConfirmPassword(context.Background(), u.UUID, "correct-horse-battery", []string{"pwd"}, "", "session-confirm", "device-confirm")
 	if !stderrors.Is(err, ErrPasswordConfirmUnavailable) {
 		t.Fatalf("err = %v, want ErrPasswordConfirmUnavailable", err)
 	}
@@ -102,7 +102,7 @@ func TestConfirmPassword_WebAuthnEnrolledRefuses(t *testing.T) {
 		},
 	})
 
-	_, err := env.auth.ConfirmPassword(context.Background(), u.UUID, "correct-horse-battery", []string{"pwd"}, "")
+	_, err := env.auth.ConfirmPassword(context.Background(), u.UUID, "correct-horse-battery", []string{"pwd"}, "", "session-confirm", "device-confirm")
 	if !stderrors.Is(err, ErrPasswordConfirmUnavailable) {
 		t.Fatalf("err = %v, want ErrPasswordConfirmUnavailable", err)
 	}
@@ -110,10 +110,10 @@ func TestConfirmPassword_WebAuthnEnrolledRefuses(t *testing.T) {
 
 func TestConfirmPassword_EmptyArgsRejected(t *testing.T) {
 	env := newGatesEnv(t, PolicyAudienceOperator, nil, nil)
-	if _, err := env.auth.ConfirmPassword(context.Background(), "", "x", nil, ""); !stderrors.Is(err, ErrInvalidCredentials) {
+	if _, err := env.auth.ConfirmPassword(context.Background(), "", "x", nil, "", "session-confirm", "device-confirm"); !stderrors.Is(err, ErrInvalidCredentials) {
 		t.Errorf("empty userUUID: err = %v, want ErrInvalidCredentials", err)
 	}
-	if _, err := env.auth.ConfirmPassword(context.Background(), "u-1", "", nil, ""); !stderrors.Is(err, ErrInvalidCredentials) {
+	if _, err := env.auth.ConfirmPassword(context.Background(), "u-1", "", nil, "", "session-confirm", "device-confirm"); !stderrors.Is(err, ErrInvalidCredentials) {
 		t.Errorf("empty password: err = %v, want ErrInvalidCredentials", err)
 	}
 }

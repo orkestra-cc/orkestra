@@ -1,8 +1,10 @@
-// "Gruppi" card on the operator's own profile (/user/profile): the tenants
-// (groups) the signed-in user belongs to. Data comes from the same
-// GET /v1/tenants query useTenantBootstrap already runs, so this only reads
-// the shared RTK Query cache — no new endpoint. "Tenant" is surfaced to the
-// user as "Gruppo" (see the it.json copy).
+// "Gruppi" card: the tenants (groups) the signed-in user belongs to. Shared
+// by the operator profile (/user/profile) and the personal dashboard
+// (/user/dashboard) — promoted here on second use; its strings still live
+// under `operatorProfile.memberships.*`, where they were born. Data comes
+// from the same GET /v1/tenants query useTenantBootstrap already runs, so
+// this only reads the shared RTK Query cache — no new endpoint. "Tenant" is
+// surfaced to the user as "Gruppo" (see the it.json copy).
 
 import { Card, Spinner } from 'react-bootstrap';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';

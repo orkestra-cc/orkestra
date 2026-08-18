@@ -85,22 +85,29 @@ describe('SocialLoginForm', () => {
     expect(screen.getByRole('button', { name: /google/i })).toBeInTheDocument();
   });
 
-  it('shows an empty-state message when the backend returns no providers', async () => {
-    // Admin disabled every provider — backend returns an empty list.
-    // The UI must surface that intentionally rather than render a
-    // confusing empty form.
+  it('renders nothing when the backend returns no providers', async () => {
+    // Admin disabled every provider — backend returns an empty list. The
+    // sign-in page must not explain operator configuration to visitors, so
+    // the whole section (divider included) disappears instead of rendering
+    // an explanatory empty state.
     server.use(
       http.get('*/v1/auth/operator/providers', () =>
         HttpResponse.json({ providers: [] })
       )
     );
 
-    renderWithProviders(<SocialLoginForm />);
+    const { container } = renderWithProviders(<SocialLoginForm />);
 
-    expect(
-      await screen.findByText(/no social sign-in providers/i)
-    ).toBeInTheDocument();
+    // The loading placeholder resolves away…
+    await waitFor(() =>
+      expect(
+        screen.queryByText(/loading sign-in options/i)
+      ).not.toBeInTheDocument()
+    );
+    // …into nothing at all: no buttons, no divider, no copy.
     expect(screen.queryAllByRole('button')).toHaveLength(0);
+    expect(screen.queryByText(/or continue with/i)).not.toBeInTheDocument();
+    expect(container).toBeEmptyDOMElement();
   });
 
   it('shows an alert when the providers endpoint fails', async () => {

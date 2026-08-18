@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react';
 import { Card, Col, Form, Row, Spinner } from 'react-bootstrap';
 import { faGavel } from '@fortawesome/free-solid-svg-icons';
 import type { CellContext, ColumnDef } from '@tanstack/react-table';
+import { useTranslation } from 'react-i18next';
 import { toast } from 'react-toastify';
 import IconButton from 'components/common/IconButton';
 import SubtleBadge from 'components/common/SubtleBadge';
@@ -12,7 +13,6 @@ import {
   type LegalHold
 } from 'store/api/complianceApi';
 import ComplianceEmptyState from './ComplianceEmptyState';
-import SectionCard from 'components/common/SectionCard';
 import ComplianceTable from './ComplianceTable';
 import { formatDateTime } from './complianceFormat';
 
@@ -20,6 +20,7 @@ import { formatDateTime } from './complianceFormat';
 // blocks erasure) and release it. Place + release are step-up-gated on the
 // backend; the global StepUpModal replays the request after re-auth.
 const LegalHoldsTab = () => {
+  const { t } = useTranslation();
   const { data, isLoading } = useListLegalHoldsQuery();
   const [place, { isLoading: isPlacing }] = usePlaceLegalHoldMutation();
   const [release] = useReleaseLegalHoldMutation();
@@ -32,12 +33,12 @@ const LegalHoldsTab = () => {
     if (!userUuid || !reason) return;
     try {
       await place({ userUuid, reason, caseRef: caseRef || undefined }).unwrap();
-      toast.success('Legal hold placed');
+      toast.success(t('adminCompliance.holds.placeSuccess'));
       setUserUuid('');
       setReason('');
       setCaseRef('');
     } catch {
-      toast.error('Place failed');
+      toast.error(t('adminCompliance.holds.placeError'));
     }
   };
   const onRelease = async (id: string) => {
@@ -46,16 +47,16 @@ const LegalHoldsTab = () => {
         id,
         releaseReason: 'released via admin console'
       }).unwrap();
-      toast.success('Legal hold released');
+      toast.success(t('adminCompliance.holds.releaseSuccess'));
     } catch {
-      toast.error('Release failed');
+      toast.error(t('adminCompliance.holds.releaseError'));
     }
   };
 
   const columns: ColumnDef<LegalHold>[] = [
     {
       accessorKey: 'userUuid',
-      header: 'Subject',
+      header: t('adminCompliance.holds.columns.subject'),
       meta: { headerProps: { className: 'text-900' } },
       cell: ({ row: { original } }: CellContext<LegalHold, unknown>) => (
         <span className="font-monospace small">{original.userUuid}</span>
@@ -63,36 +64,38 @@ const LegalHoldsTab = () => {
     },
     {
       accessorKey: 'reason',
-      header: 'Reason',
+      header: t('adminCompliance.holds.columns.reason'),
       meta: { headerProps: { className: 'text-900' } }
     },
     {
       accessorKey: 'caseRef',
-      header: 'Case',
+      header: t('adminCompliance.holds.columns.case'),
       meta: { headerProps: { className: 'text-900' } },
       cell: ({ row: { original } }: CellContext<LegalHold, unknown>) =>
         original.caseRef || '—'
     },
     {
       accessorKey: 'active',
-      header: 'Status',
+      header: t('adminCompliance.holds.columns.status'),
       meta: { headerProps: { className: 'text-900' } },
       cell: ({ row: { original } }: CellContext<LegalHold, unknown>) => (
         <SubtleBadge pill bg={original.active ? 'warning' : 'secondary'}>
-          {original.active ? 'Active' : 'Released'}
+          {original.active
+            ? t('adminCompliance.status.active')
+            : t('adminCompliance.status.released')}
         </SubtleBadge>
       )
     },
     {
       accessorKey: 'placedAt',
-      header: 'Placed',
+      header: t('adminCompliance.holds.columns.placed'),
       meta: { headerProps: { className: 'text-900' } },
       cell: ({ row: { original } }: CellContext<LegalHold, unknown>) =>
         formatDateTime(original.placedAt)
     },
     {
       id: 'actions',
-      header: 'Actions',
+      header: t('adminCompliance.holds.columns.actions'),
       enableSorting: false,
       meta: {
         headerProps: { className: 'text-end text-900' },
@@ -106,7 +109,7 @@ const LegalHoldsTab = () => {
             icon="unlock-alt"
             onClick={() => onRelease(original.uuid)}
           >
-            Release
+            {t('adminCompliance.holds.release')}
           </IconButton>
         ) : (
           <span className="text-400">—</span>
@@ -117,38 +120,46 @@ const LegalHoldsTab = () => {
   const items = data?.items ?? [];
 
   return (
-    <SectionCard icon={faGavel} iconColor="danger" title="Legal Holds">
+    <>
       <Card className="bg-body-tertiary border shadow-none mb-4">
         <Card.Body className="py-3">
           <Form onSubmit={onPlace}>
             <Row className="g-2 align-items-end">
               <Col md={4}>
                 <Form.Label className="fs-11 text-700 mb-1">
-                  Subject userUuid
+                  {t('adminCompliance.holds.form.subjectLabel')}
                 </Form.Label>
                 <Form.Control
                   size="sm"
-                  placeholder="e.g. 7f3c…"
+                  placeholder={t(
+                    'adminCompliance.holds.form.subjectPlaceholder'
+                  )}
                   value={userUuid}
                   onChange={e => setUserUuid(e.target.value)}
                 />
               </Col>
               <Col md={4}>
-                <Form.Label className="fs-11 text-700 mb-1">Reason</Form.Label>
+                <Form.Label className="fs-11 text-700 mb-1">
+                  {t('adminCompliance.holds.form.reasonLabel')}
+                </Form.Label>
                 <Form.Control
                   size="sm"
-                  placeholder="Litigation hold reason"
+                  placeholder={t(
+                    'adminCompliance.holds.form.reasonPlaceholder'
+                  )}
                   value={reason}
                   onChange={e => setReason(e.target.value)}
                 />
               </Col>
               <Col md={2}>
                 <Form.Label className="fs-11 text-700 mb-1">
-                  Case ref
+                  {t('adminCompliance.holds.form.caseRefLabel')}
                 </Form.Label>
                 <Form.Control
                   size="sm"
-                  placeholder="Optional"
+                  placeholder={t(
+                    'adminCompliance.holds.form.caseRefPlaceholder'
+                  )}
                   value={caseRef}
                   onChange={e => setCaseRef(e.target.value)}
                 />
@@ -162,7 +173,7 @@ const LegalHoldsTab = () => {
                   className="w-100 text-nowrap"
                   disabled={isPlacing || !userUuid || !reason}
                 >
-                  Place hold
+                  {t('adminCompliance.holds.form.submit')}
                 </IconButton>
               </Col>
             </Row>
@@ -175,17 +186,17 @@ const LegalHoldsTab = () => {
       ) : items.length === 0 ? (
         <ComplianceEmptyState
           icon={faGavel}
-          message="No active legal holds."
-          hint="Place a hold above to block erasure of a subject under litigation."
+          message={t('adminCompliance.holds.emptyMessage')}
+          hint={t('adminCompliance.holds.emptyHint')}
         />
       ) : (
         <ComplianceTable
           data={items}
           columns={columns}
-          searchPlaceholder="Search by subject, reason or case"
+          searchPlaceholder={t('adminCompliance.holds.searchPlaceholder')}
         />
       )}
-    </SectionCard>
+    </>
   );
 };
 

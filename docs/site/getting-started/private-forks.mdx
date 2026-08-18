@@ -51,6 +51,10 @@ git checkout dev
 git merge upstream/dev        # or a release tag, e.g. v0.3.12
 ```
 
+On a private fork, Actions minutes are billed — consider `-m "merge(upstream): sync [skip ci]"` on the merge so your CI doesn't re-run on code upstream's CI already tested. One caveat before you make it a habit: if your fork carries addons, your CI is the *only* CI that ever tests core + addons together, so skip it only for syncs that don't touch APIs your addons consume (and always finish with the build below regardless).
+
+Your fork also runs a **minimal CI surface by default**: Docker image publishing, coverage-badge refreshes, and the weekly security cron only run in repos where the `CI_FULL` Actions variable is `true`. The PR-level test/lint gates always run. If your fork publishes its own images or badges, opt in under *Settings → Secrets and variables → Actions → Variables* — no workflow edits needed.
+
 The conflict surface is small and always the same files. The recipe:
 
 | File | Resolution |

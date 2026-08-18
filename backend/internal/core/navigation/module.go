@@ -2,6 +2,7 @@ package navigation
 
 import (
 	"github.com/danielgtaylor/huma/v2/adapters/humachi"
+	"github.com/go-chi/chi/v5"
 	"github.com/orkestra/backend/internal/core/navigation/handlers"
 	"github.com/orkestra/backend/internal/core/navigation/repository"
 	"github.com/orkestra/backend/internal/core/navigation/services"
@@ -65,9 +66,23 @@ func (m *NavigationModule) Init(deps *module.Dependencies) error {
 }
 
 func (m *NavigationModule) RegisterRoutes(ri *module.RouteInfo) {
+	// Public role-filtered tree (/v1/navigation) — every authenticated operator
+	// user needs it to render their sidebar.
 	api := humachi.New(ri.Operator.ProtectedRouter, ri.APIConfig)
 	RegisterRoutes(api, m.handler)
-	RegisterAdminRoutes(api, m.adminHandler)
+
+	// Admin tree + reorder (/v1/admin/navigation*) behind an explicit system
+	// permission. Previously these were mounted with no role middleware — the
+	// operator-protected mux only enforces RequireAuth and the OpenAPI
+	// `Security:{administrator}` scope is inert (nothing reads it), so any
+	// authenticated operator token could rewrite the menu for every user and
+	// read the full unfiltered nav tree. system.modules.admin is held only by
+	// super_admin/administrator/developer.
+	ri.Operator.ProtectedRouter.Group(func(r chi.Router) {
+		r.Use(ri.Operator.AuthMW.RequireSystemPermission("system.modules.admin"))
+		adminAPI := humachi.New(r, ri.APIConfig)
+		RegisterAdminRoutes(adminAPI, m.adminHandler)
+	})
 }
 
 // NavItems adds a single entry in the platform realm so operators can

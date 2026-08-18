@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/danielgtaylor/huma/v2"
 	authModels "github.com/orkestra/backend/internal/core/auth/models"
@@ -312,8 +313,11 @@ func (h *PasswordAuthHandler) PasswordConfirm(ctx context.Context, req *Password
 		return nil, huma.Error400BadRequest("password is required")
 	}
 	priorAMR := priorAMRFromCtx(ctx)
-	ip := clientIPFromCtx(ctx)
-	res, err := h.svc.ConfirmPassword(ctx, userUUID, req.Body.Password, priorAMR, ip)
+	device, security, ok := currentSessionSecurity(ctx)
+	if !ok {
+		return nil, huma.Error401Unauthorized("authentication required")
+	}
+	res, err := h.svc.ConfirmPasswordWithSecurity(ctx, userUUID, req.Body.Password, priorAMR, device, security)
 	if err != nil {
 		switch {
 		case errors.Is(err, services.ErrInvalidCredentials):
@@ -344,6 +348,35 @@ func priorAMRFromCtx(ctx context.Context) []string {
 		return claims.AMR
 	}
 	return nil
+}
+
+func currentSessionIdentity(ctx context.Context) (string, string, bool) {
+	device, security, ok := currentSessionSecurity(ctx)
+	if !ok {
+		return "", "", false
+	}
+	return security.SessionID, device.DeviceID, true
+}
+
+func currentSessionSecurity(ctx context.Context) (*authModels.DeviceInfo, *authModels.SecurityContext, bool) {
+	claims, ok := ctx.Value("claims").(*authModels.JWTClaims)
+	if !ok || claims == nil || claims.SessionID == "" {
+		return nil, nil, false
+	}
+	ip := clientIPFromCtx(ctx)
+	if ip == "" {
+		ip = claims.IPAddress
+	}
+	return &authModels.DeviceInfo{
+			DeviceID:    claims.DeviceID,
+			Fingerprint: claims.Fingerprint,
+		}, &authModels.SecurityContext{
+			SessionID:   claims.SessionID,
+			IPAddress:   ip,
+			RiskScore:   claims.RiskScore,
+			Fingerprint: claims.Fingerprint,
+			Timestamp:   time.Now(),
+		}, true
 }
 
 // --- helpers ---

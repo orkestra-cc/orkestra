@@ -159,8 +159,9 @@ func (h *Handler) RegisterGlobalRoutes(api huma.API) {
 	}, h.acceptInvite)
 }
 
-// RegisterScopedReadRoutes registers read-only per-tenant routes. Safe to
-// mount behind the tenant.read permission without MFA.
+// RegisterScopedReadRoutes registers read-only per-tenant routes. Mounted
+// behind the tenant.read permission (no MFA). Each handler additionally asserts
+// the {tenantId} path matches the caller's resolved tenant (assertTenantScope).
 func (h *Handler) RegisterScopedReadRoutes(api huma.API) {
 	huma.Register(api, huma.Operation{
 		OperationID: "get-tenant",
@@ -168,7 +169,7 @@ func (h *Handler) RegisterScopedReadRoutes(api huma.API) {
 		Path:        "/v1/tenants/{tenantId}",
 		Summary:     "Get a tenant by id",
 		Tags:        []string{"Tenants"},
-	}, h.getTenant)
+	}, h.getTenantScoped)
 
 	huma.Register(api, huma.Operation{
 		OperationID: "list-members",
@@ -176,7 +177,7 @@ func (h *Handler) RegisterScopedReadRoutes(api huma.API) {
 		Path:        "/v1/tenants/{tenantId}/members",
 		Summary:     "List tenant members",
 		Tags:        []string{"Tenants"},
-	}, h.listMembers)
+	}, h.listMembersScoped)
 
 	huma.Register(api, huma.Operation{
 		OperationID: "list-divisions",
@@ -185,51 +186,24 @@ func (h *Handler) RegisterScopedReadRoutes(api huma.API) {
 		Summary:     "List this tenant's divisions",
 		Description: "Closure-table lookup of direct children (depth=1). Internal tenants never have divisions and always return an empty list.",
 		Tags:        []string{"Tenants"},
-	}, h.listDivisions)
+	}, h.listDivisionsScoped)
 }
 
-// RegisterScopedMutationRoutes registers per-tenant mutations. MFA required
-// per Block B — each can change permissions, plan, or destroy the tenant.
-func (h *Handler) RegisterScopedMutationRoutes(api huma.API) {
+// The per-tenant mutation routes are split per permission (each mounted under
+// its own permission + MFA group in module.go) so the declared fine-grained
+// permissions are actually enforced — previously every mutation only required
+// tenant.read, which org_viewer/org_member hold. Every handler is a scoped
+// wrapper that asserts the {tenantId} path matches the caller's resolved tenant.
+
+// RegisterScopedUpdateRoutes — mounted under tenant.update + MFA.
+func (h *Handler) RegisterScopedUpdateRoutes(api huma.API) {
 	huma.Register(api, huma.Operation{
 		OperationID: "update-tenant",
 		Method:      http.MethodPatch,
 		Path:        "/v1/tenants/{tenantId}",
 		Summary:     "Update tenant name, slug or settings",
 		Tags:        []string{"Tenants"},
-	}, h.updateTenant)
-
-	huma.Register(api, huma.Operation{
-		OperationID: "delete-tenant",
-		Method:      http.MethodDelete,
-		Path:        "/v1/tenants/{tenantId}",
-		Summary:     "Archive the tenant (owner only)",
-		Tags:        []string{"Tenants"},
-	}, h.deleteTenant)
-
-	huma.Register(api, huma.Operation{
-		OperationID: "update-plan",
-		Method:      http.MethodPatch,
-		Path:        "/v1/tenants/{tenantId}/plan",
-		Summary:     "Change plan and features",
-		Tags:        []string{"Tenants"},
-	}, h.updatePlan)
-
-	huma.Register(api, huma.Operation{
-		OperationID: "remove-member",
-		Method:      http.MethodDelete,
-		Path:        "/v1/tenants/{tenantId}/members/{userUUID}",
-		Summary:     "Remove a member from the tenant",
-		Tags:        []string{"Tenants"},
-	}, h.removeMember)
-
-	huma.Register(api, huma.Operation{
-		OperationID: "create-invite",
-		Method:      http.MethodPost,
-		Path:        "/v1/tenants/{tenantId}/invites",
-		Summary:     "Invite a user to the tenant",
-		Tags:        []string{"Tenants"},
-	}, h.createInvite)
+	}, h.updateTenantScoped)
 
 	huma.Register(api, huma.Operation{
 		OperationID: "create-division",
@@ -238,7 +212,51 @@ func (h *Handler) RegisterScopedMutationRoutes(api huma.API) {
 		Summary:     "Create a division under this external tenant",
 		Description: "Creates a sub-tenant (Kind=external, ParentTenantUUID=this). Refuses when the parent is internal.",
 		Tags:        []string{"Tenants"},
-	}, h.createDivision)
+	}, h.createDivisionScoped)
+}
+
+// RegisterScopedPlanRoutes — mounted under tenant.plan.update + MFA.
+func (h *Handler) RegisterScopedPlanRoutes(api huma.API) {
+	huma.Register(api, huma.Operation{
+		OperationID: "update-plan",
+		Method:      http.MethodPatch,
+		Path:        "/v1/tenants/{tenantId}/plan",
+		Summary:     "Change plan and features",
+		Tags:        []string{"Tenants"},
+	}, h.updatePlanScoped)
+}
+
+// RegisterScopedDeleteRoutes — mounted under tenant.delete + MFA.
+func (h *Handler) RegisterScopedDeleteRoutes(api huma.API) {
+	huma.Register(api, huma.Operation{
+		OperationID: "delete-tenant",
+		Method:      http.MethodDelete,
+		Path:        "/v1/tenants/{tenantId}",
+		Summary:     "Archive the tenant (owner only)",
+		Tags:        []string{"Tenants"},
+	}, h.deleteTenantScoped)
+}
+
+// RegisterScopedInviteRoutes — mounted under tenant.member.invite + MFA.
+func (h *Handler) RegisterScopedInviteRoutes(api huma.API) {
+	huma.Register(api, huma.Operation{
+		OperationID: "create-invite",
+		Method:      http.MethodPost,
+		Path:        "/v1/tenants/{tenantId}/invites",
+		Summary:     "Invite a user to the tenant",
+		Tags:        []string{"Tenants"},
+	}, h.createInviteScoped)
+}
+
+// RegisterScopedMemberRoutes — mounted under tenant.member.remove + MFA.
+func (h *Handler) RegisterScopedMemberRoutes(api huma.API) {
+	huma.Register(api, huma.Operation{
+		OperationID: "remove-member",
+		Method:      http.MethodDelete,
+		Path:        "/v1/tenants/{tenantId}/members/{userUUID}",
+		Summary:     "Remove a member from the tenant",
+		Tags:        []string{"Tenants"},
+	}, h.removeMemberScoped)
 }
 
 // --- Handler implementations ---
@@ -325,6 +343,95 @@ func (h *Handler) callerIsTenantAdmin(ctx context.Context) bool {
 	}
 	allowed, err := authz.HasPermission(ctx, userUUID, "", "system.tenants.admin")
 	return err == nil && allowed
+}
+
+// assertTenantScope fails the request unless the {tenantId} path segment names
+// the same tenant the auth middleware resolved for this request (from a
+// membership-validated X-Tenant-ID / ActingTenantID / DefaultTenantID, or the
+// audited operator impersonation bypass). The per-tenant member routes gate on
+// a permission evaluated against the *resolved* tenant, but the handler bodies
+// below are shared with the platform-admin surface and act on the *path*
+// tenant — without this check any member of one tenant could read or mutate
+// another (cross-tenant IDOR). Returns 404, not 403, so a guessed/stale id is
+// not a cross-tenant existence oracle. The platform-admin routes deliberately
+// skip this: they are gated by system.tenants.admin and legitimately act on any
+// tenant.
+func assertTenantScope(ctx context.Context, pathTenantID string) error {
+	scoped, ok := ctxauth.GetTenantID(ctx)
+	if !ok || scoped == "" || pathTenantID != scoped {
+		return huma.Error404NotFound("tenant not found")
+	}
+	return nil
+}
+
+// --- Scoped (member-surface) wrappers ---
+//
+// Each enforces assertTenantScope, then delegates to the shared handler body the
+// platform-admin routes call directly. Keeping the guard in the wrapper (not the
+// shared body) is what lets the admin surface stay cross-tenant while the member
+// surface stays strictly self-tenant.
+
+func (h *Handler) getTenantScoped(ctx context.Context, in *tenantIDPath) (*tenantOutput, error) {
+	if err := assertTenantScope(ctx, in.TenantID); err != nil {
+		return nil, err
+	}
+	return h.getTenant(ctx, in)
+}
+
+func (h *Handler) listMembersScoped(ctx context.Context, in *tenantIDPath) (*membershipListOutput, error) {
+	if err := assertTenantScope(ctx, in.TenantID); err != nil {
+		return nil, err
+	}
+	return h.listMembers(ctx, in)
+}
+
+func (h *Handler) listDivisionsScoped(ctx context.Context, in *tenantIDPath) (*divisionListOutput, error) {
+	if err := assertTenantScope(ctx, in.TenantID); err != nil {
+		return nil, err
+	}
+	return h.listDivisions(ctx, in)
+}
+
+func (h *Handler) updateTenantScoped(ctx context.Context, in *updateTenantInput) (*tenantOutput, error) {
+	if err := assertTenantScope(ctx, in.TenantID); err != nil {
+		return nil, err
+	}
+	return h.updateTenant(ctx, in)
+}
+
+func (h *Handler) deleteTenantScoped(ctx context.Context, in *tenantIDPath) (*struct{}, error) {
+	if err := assertTenantScope(ctx, in.TenantID); err != nil {
+		return nil, err
+	}
+	return h.deleteTenant(ctx, in)
+}
+
+func (h *Handler) updatePlanScoped(ctx context.Context, in *updatePlanInput) (*tenantOutput, error) {
+	if err := assertTenantScope(ctx, in.TenantID); err != nil {
+		return nil, err
+	}
+	return h.updatePlan(ctx, in)
+}
+
+func (h *Handler) removeMemberScoped(ctx context.Context, in *removeMemberInput) (*struct{}, error) {
+	if err := assertTenantScope(ctx, in.TenantID); err != nil {
+		return nil, err
+	}
+	return h.removeMember(ctx, in)
+}
+
+func (h *Handler) createInviteScoped(ctx context.Context, in *inviteInput) (*inviteOutput, error) {
+	if err := assertTenantScope(ctx, in.TenantID); err != nil {
+		return nil, err
+	}
+	return h.createInvite(ctx, in)
+}
+
+func (h *Handler) createDivisionScoped(ctx context.Context, in *createDivisionInput) (*tenantOutput, error) {
+	if err := assertTenantScope(ctx, in.TenantID); err != nil {
+		return nil, err
+	}
+	return h.createDivision(ctx, in)
 }
 
 func (h *Handler) getTenant(ctx context.Context, in *tenantIDPath) (*tenantOutput, error) {

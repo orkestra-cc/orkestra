@@ -248,15 +248,55 @@ func TestRegister_RegistrationDisabled_ReturnsError(t *testing.T) {
 }
 
 func TestRegister_FirstUserBypassesRegistrationKillSwitch(t *testing.T) {
-	env := newGatesEnv(t, PolicyAudienceClient, map[string]string{
-		"registrationEnabledClient": "false",
+	// The bootstrap bypass is OPERATOR-only (audit H-1): the operator who runs
+	// the very first registration on a fresh install must not be locked out by a
+	// kill switch flipped before any account exists.
+	env := newGatesEnv(t, PolicyAudienceOperator, map[string]string{
+		"registrationEnabledAdmin": "false",
 	}, nil)
 	// users.count starts at 0 → first-user bypass should let this through.
 	_, err := env.auth.Register(context.Background(), RegisterInput{
 		Email: "first@example.com", Password: "correct-horse-battery", FullName: "First", IP: "1.1.1.1",
 	})
 	if err != nil {
-		t.Fatalf("first user must bypass the kill switch, got %v", err)
+		t.Fatalf("first operator user must bypass the kill switch, got %v", err)
+	}
+}
+
+// TestRegister_ClientFirstUser_DoesNotBypassKillSwitch is the H-1 regression:
+// the first-admin sentinel is global but the client user count is tier-scoped,
+// so an anonymous client register on a fresh install must NOT bypass the client
+// registration kill switch (otherwise it could also seize the global super_admin
+// seat and brick the operator bootstrap).
+func TestRegister_ClientFirstUser_DoesNotBypassKillSwitch(t *testing.T) {
+	env := newGatesEnv(t, PolicyAudienceClient, map[string]string{
+		"registrationEnabledClient": "false",
+	}, nil)
+	// Zero client users — pre-fix this would have bypassed the kill switch.
+	_, err := env.auth.Register(context.Background(), RegisterInput{
+		Email: "first@example.com", Password: "correct-horse-battery", FullName: "First", IP: "1.1.1.1",
+	})
+	if !errors.Is(err, ErrRegistrationDisabled) {
+		t.Fatalf("client first user must NOT bypass the kill switch, got %v", err)
+	}
+}
+
+// TestRegister_ClientFirstUser_NeverClaimsSuperAdmin asserts a client-tier
+// registration never wins the global first-admin seat even when registration is
+// open and the sentinel is unclaimed.
+func TestRegister_ClientFirstUser_NeverClaimsSuperAdmin(t *testing.T) {
+	env := newGatesEnv(t, PolicyAudienceClient, map[string]string{
+		"registrationEnabledClient": "true",
+	}, nil)
+	// Zero client users, claimer unclaimed — pre-fix this would mint super_admin.
+	u, err := env.auth.Register(context.Background(), RegisterInput{
+		Email: "first@example.com", Password: "correct-horse-battery", FullName: "First", IP: "1.1.1.1",
+	})
+	if err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	if u.Role == "super_admin" {
+		t.Fatalf("client-tier registration must never be granted super_admin")
 	}
 }
 
@@ -771,7 +811,7 @@ func (f *fakeMFAChallenge) BeginLogin(_ context.Context, in LoginChallengeInput)
 	id := in.UserUUID + "-login"
 	c := &MFAChallenge{
 		ID: id, UserUUID: in.UserUUID, Purpose: MFAPurposeLogin,
-		DeviceID: in.DeviceID, Platform: in.Platform, IPAddress: in.IPAddress,
+		SessionID: in.SessionID, DeviceID: in.DeviceID, Platform: in.Platform, IPAddress: in.IPAddress,
 		Fingerprint: in.Fingerprint, SourceAMR: in.SourceAMR,
 		CreatedAt: time.Now(), ExpiresAt: time.Now().Add(5 * time.Minute),
 	}

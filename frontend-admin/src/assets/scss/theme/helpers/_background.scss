@@ -96,29 +96,6 @@
   background-image: var(--#{$prefix}progress-gradient);
   background-position: center;
 }
-.bg-auth-circle-shape,
-.bg-auth-circle-shape-2 {
-  display: none;
-  @include media-breakpoint-up(lg) {
-    display: block;
-  }
-}
-.bg-auth-circle-shape {
-  position: absolute;
-  right: -8.75rem;
-  top: -5.125rem;
-}
-.bg-auth-circle-shape-2 {
-  position: absolute;
-  left: -6.25rem;
-  bottom: -2.4375rem;
-}
-.bg-auth-card-shape {
-  background-position: 0 100%;
-  @include media-breakpoint-up(md) {
-    background-position: 0 133%;
-  }
-}
 @mixin shape($bg-color) {
   position: relative;
   overflow: hidden;

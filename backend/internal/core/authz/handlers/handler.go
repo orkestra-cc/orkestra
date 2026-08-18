@@ -125,10 +125,17 @@ func (h *Handler) RegisterScopedReadRoutes(api huma.API) {
 	}, h.getEffective)
 }
 
-// RegisterScopedMutationRoutes registers per-org role and binding mutations.
-// These are the operations Block B's MFA enforcement covers — every path
-// below can grant or revoke effective permissions for another user.
-func (h *Handler) RegisterScopedMutationRoutes(api huma.API) {
+// The per-org role/binding mutations are split per permission (each mounted
+// under its own permission + MFA + risk gate in module.go) so the declared
+// fine-grained permissions (authz.role.create/update/delete,
+// authz.binding.create/delete) are actually enforced — previously every
+// mutation only required authz.role.read, which org_member/org_viewer hold.
+// Every handler additionally asserts the {tenantId} path matches the caller's
+// resolved tenant (assertTenantScope) and the service checks the role/binding's
+// own orgId, closing the cross-tenant role/binding tampering IDOR.
+
+// RegisterScopedRoleCreateRoutes — mounted under authz.role.create.
+func (h *Handler) RegisterScopedRoleCreateRoutes(api huma.API) {
 	huma.Register(api, huma.Operation{
 		OperationID: "create-role",
 		Method:      http.MethodPost,
@@ -136,7 +143,10 @@ func (h *Handler) RegisterScopedMutationRoutes(api huma.API) {
 		Summary:     "Create a custom role",
 		Tags:        []string{"Authorization"},
 	}, h.createRole)
+}
 
+// RegisterScopedRoleUpdateRoutes — mounted under authz.role.update.
+func (h *Handler) RegisterScopedRoleUpdateRoutes(api huma.API) {
 	huma.Register(api, huma.Operation{
 		OperationID: "update-role",
 		Method:      http.MethodPatch,
@@ -144,7 +154,10 @@ func (h *Handler) RegisterScopedMutationRoutes(api huma.API) {
 		Summary:     "Update a role (name/description/permissions for custom roles; isActive for any role)",
 		Tags:        []string{"Authorization"},
 	}, h.updateRole)
+}
 
+// RegisterScopedRoleDeleteRoutes — mounted under authz.role.delete.
+func (h *Handler) RegisterScopedRoleDeleteRoutes(api huma.API) {
 	huma.Register(api, huma.Operation{
 		OperationID: "delete-role",
 		Method:      http.MethodDelete,
@@ -152,7 +165,10 @@ func (h *Handler) RegisterScopedMutationRoutes(api huma.API) {
 		Summary:     "Delete a custom role (cascades bindings)",
 		Tags:        []string{"Authorization"},
 	}, h.deleteRole)
+}
 
+// RegisterScopedBindingCreateRoutes — mounted under authz.binding.create.
+func (h *Handler) RegisterScopedBindingCreateRoutes(api huma.API) {
 	huma.Register(api, huma.Operation{
 		OperationID: "create-binding",
 		Method:      http.MethodPost,
@@ -160,7 +176,10 @@ func (h *Handler) RegisterScopedMutationRoutes(api huma.API) {
 		Summary:     "Grant a role to a user with optional expiration",
 		Tags:        []string{"Authorization"},
 	}, h.createBinding)
+}
 
+// RegisterScopedBindingDeleteRoutes — mounted under authz.binding.delete.
+func (h *Handler) RegisterScopedBindingDeleteRoutes(api huma.API) {
 	huma.Register(api, huma.Operation{
 		OperationID: "delete-binding",
 		Method:      http.MethodDelete,
@@ -180,7 +199,25 @@ func (h *Handler) listPermissions(ctx context.Context, _ *struct{}) (*permission
 	return &permissionsOutput{Body: models.PermissionCatalogResponse{Permissions: perms}}, nil
 }
 
+// assertTenantScope fails the request unless the {tenantId} path segment names
+// the same tenant the auth middleware resolved for this request. The per-tenant
+// authz routes gate a permission against the *resolved* tenant, but the handlers
+// act on the *path* tenant (and on {roleId}/{bindingId} resolved by UUID), so
+// without this any member of one tenant could read or tamper with another
+// tenant's roles and bindings. 404 (not 403) to avoid a cross-tenant existence
+// oracle. Platform-wide role administration is not exposed on this surface.
+func assertTenantScope(ctx context.Context, pathTenantID string) error {
+	scoped, ok := ctxauth.GetTenantID(ctx)
+	if !ok || scoped == "" || pathTenantID != scoped {
+		return huma.Error404NotFound("not found")
+	}
+	return nil
+}
+
 func (h *Handler) listRoles(ctx context.Context, in *listRolesInput) (*rolesOutput, error) {
+	if err := assertTenantScope(ctx, in.TenantID); err != nil {
+		return nil, err
+	}
 	roles, err := h.svc.ListRoles(ctx, in.TenantID)
 	if err != nil {
 		return nil, huma.Error500InternalServerError("list roles failed", err)
@@ -189,6 +226,9 @@ func (h *Handler) listRoles(ctx context.Context, in *listRolesInput) (*rolesOutp
 }
 
 func (h *Handler) createRole(ctx context.Context, in *createRoleInput) (*roleOutput, error) {
+	if err := assertTenantScope(ctx, in.TenantID); err != nil {
+		return nil, err
+	}
 	role, err := h.svc.CreateRole(ctx, in.TenantID, in.Body)
 	if err != nil {
 		return nil, huma.Error400BadRequest("create role failed: " + err.Error())
@@ -197,7 +237,10 @@ func (h *Handler) createRole(ctx context.Context, in *createRoleInput) (*roleOut
 }
 
 func (h *Handler) updateRole(ctx context.Context, in *updateRoleInput) (*roleOutput, error) {
-	role, err := h.svc.UpdateRole(ctx, in.Role, in.Body)
+	if err := assertTenantScope(ctx, in.TenantID); err != nil {
+		return nil, err
+	}
+	role, err := h.svc.UpdateRole(ctx, in.TenantID, in.Role, in.Body)
 	if err != nil {
 		switch {
 		case errors.Is(err, repository.ErrNotFound):
@@ -212,7 +255,10 @@ func (h *Handler) updateRole(ctx context.Context, in *updateRoleInput) (*roleOut
 }
 
 func (h *Handler) deleteRole(ctx context.Context, in *deleteRoleInput) (*struct{}, error) {
-	if err := h.svc.DeleteRole(ctx, in.Role); err != nil {
+	if err := assertTenantScope(ctx, in.TenantID); err != nil {
+		return nil, err
+	}
+	if err := h.svc.DeleteRole(ctx, in.TenantID, in.Role); err != nil {
 		switch {
 		case errors.Is(err, repository.ErrNotFound):
 			return nil, huma.Error404NotFound("role not found")
@@ -226,6 +272,9 @@ func (h *Handler) deleteRole(ctx context.Context, in *deleteRoleInput) (*struct{
 }
 
 func (h *Handler) listBindings(ctx context.Context, in *listBindingsInput) (*bindingsOutput, error) {
+	if err := assertTenantScope(ctx, in.TenantID); err != nil {
+		return nil, err
+	}
 	bindings, err := h.svc.ListBindings(ctx, in.TenantID)
 	if err != nil {
 		return nil, huma.Error500InternalServerError("list bindings failed", err)
@@ -234,6 +283,9 @@ func (h *Handler) listBindings(ctx context.Context, in *listBindingsInput) (*bin
 }
 
 func (h *Handler) createBinding(ctx context.Context, in *createBindingInput) (*bindingOutput, error) {
+	if err := assertTenantScope(ctx, in.TenantID); err != nil {
+		return nil, err
+	}
 	grantedBy, _ := ctxauth.GetUserUUID(ctx)
 	b, err := h.svc.CreateBinding(ctx, in.TenantID, grantedBy, in.Body)
 	if err != nil {
@@ -243,13 +295,22 @@ func (h *Handler) createBinding(ctx context.Context, in *createBindingInput) (*b
 }
 
 func (h *Handler) deleteBinding(ctx context.Context, in *deleteBindingInput) (*struct{}, error) {
-	if err := h.svc.DeleteBinding(ctx, in.Binding); err != nil {
+	if err := assertTenantScope(ctx, in.TenantID); err != nil {
+		return nil, err
+	}
+	if err := h.svc.DeleteBinding(ctx, in.TenantID, in.Binding); err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, huma.Error404NotFound("binding not found")
+		}
 		return nil, huma.Error400BadRequest("delete binding failed: " + err.Error())
 	}
 	return &struct{}{}, nil
 }
 
 func (h *Handler) getEffective(ctx context.Context, in *effectiveInput) (*effectiveOutput, error) {
+	if err := assertTenantScope(ctx, in.TenantID); err != nil {
+		return nil, err
+	}
 	userUUID, ok := ctxauth.GetUserUUID(ctx)
 	if !ok {
 		return nil, huma.Error401Unauthorized("not authenticated")

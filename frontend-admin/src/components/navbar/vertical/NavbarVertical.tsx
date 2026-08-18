@@ -212,10 +212,12 @@ const NavbarVertical = () => {
   );
 
   // Sub-label for a realm's sections. Less prominent than NavbarLabel —
-  // no divider, smaller, so the realm header stays visually dominant.
+  // no divider, one type step down (fs-11, the ramp's floor), so the realm
+  // header stays visually dominant. text-600, not text-500: section labels
+  // are text and owe readable contrast on the rail.
   const NavbarSectionLabel = ({ label }: NavbarLabelProps) => (
     <Nav.Item as="li">
-      <div className="px-3 pt-3 pb-1 text-uppercase text-500 small fw-semibold">
+      <div className="px-3 pt-3 pb-1 text-uppercase text-600 fs-11 fw-semibold">
         {label}
       </div>
     </Nav.Item>
@@ -236,7 +238,9 @@ const NavbarVertical = () => {
     >
       <Flex alignItems="center">
         <ToggleButton />
-        <Logo at="navbar-vertical" textClass="text-primary" width={160} />
+        {/* 120, not 160: at 160 the wordmark overflowed the 188px rail and
+            crossed its separation hairline. */}
+        <Logo at="navbar-vertical" textClass="text-primary" width={120} />
       </Flex>
       <Navbar.Collapse
         in={showBurgerMenu}

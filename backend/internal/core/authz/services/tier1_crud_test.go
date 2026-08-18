@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/orkestra/backend/internal/core/authz/models"
+	"github.com/orkestra/backend/internal/core/authz/repository"
 	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
@@ -50,7 +51,7 @@ func TestUpdateRole_SystemRoleNameImmutable(t *testing.T) {
 	repo.seedRole("role-sys", "administrator", true, []string{"*"}, "")
 
 	rename := "renamed"
-	_, err := svc.UpdateRole(context.Background(), "role-sys", models.UpdateRoleInput{
+	_, err := svc.UpdateRole(context.Background(), "tenant-A", "role-sys", models.UpdateRoleInput{
 		Name: &rename,
 	})
 	if !errors.Is(err, ErrSystemRoleImmutable) {
@@ -68,7 +69,7 @@ func TestUpdateRole_SystemRoleIsActiveToggleAllowed(t *testing.T) {
 	repo.seedRole("role-sys", "administrator", true, []string{"*"}, "")
 
 	off := false
-	updated, err := svc.UpdateRole(context.Background(), "role-sys", models.UpdateRoleInput{
+	updated, err := svc.UpdateRole(context.Background(), "tenant-A", "role-sys", models.UpdateRoleInput{
 		IsActive: &off,
 	})
 	if err != nil {
@@ -83,7 +84,7 @@ func TestUpdateRole_CustomRolePermissionsUpdate(t *testing.T) {
 	svc, repo := newTier1Service(t, staticRoleLookup(""))
 	repo.seedRole("role-c", "billing_reader", false, []string{"billing.invoice.read"}, "tenant-A")
 
-	updated, err := svc.UpdateRole(context.Background(), "role-c", models.UpdateRoleInput{
+	updated, err := svc.UpdateRole(context.Background(), "tenant-A", "role-c", models.UpdateRoleInput{
 		Permissions: []string{"billing.invoice.read", "billing.invoice.create"},
 	})
 	if err != nil {
@@ -98,7 +99,7 @@ func TestUpdateRole_EmptyPermissionsRejected(t *testing.T) {
 	svc, repo := newTier1Service(t, staticRoleLookup(""))
 	repo.seedRole("role-c", "billing_reader", false, []string{"billing.invoice.read"}, "tenant-A")
 
-	_, err := svc.UpdateRole(context.Background(), "role-c", models.UpdateRoleInput{
+	_, err := svc.UpdateRole(context.Background(), "tenant-A", "role-c", models.UpdateRoleInput{
 		Permissions: []string{},
 	})
 	if err == nil {
@@ -111,7 +112,7 @@ func TestUpdateRole_EmptyNameRejected(t *testing.T) {
 	repo.seedRole("role-c", "billing_reader", false, []string{"billing.invoice.read"}, "tenant-A")
 
 	blank := "   "
-	_, err := svc.UpdateRole(context.Background(), "role-c", models.UpdateRoleInput{
+	_, err := svc.UpdateRole(context.Background(), "tenant-A", "role-c", models.UpdateRoleInput{
 		Name: &blank,
 	})
 	if err == nil {
@@ -123,7 +124,7 @@ func TestUpdateRole_NoFieldsIsNoOp(t *testing.T) {
 	svc, repo := newTier1Service(t, staticRoleLookup(""))
 	repo.seedRole("role-c", "billing_reader", false, []string{"billing.invoice.read"}, "tenant-A")
 
-	got, err := svc.UpdateRole(context.Background(), "role-c", models.UpdateRoleInput{})
+	got, err := svc.UpdateRole(context.Background(), "tenant-A", "role-c", models.UpdateRoleInput{})
 	if err != nil {
 		t.Fatalf("empty input must be a no-op, got %v", err)
 	}
@@ -252,7 +253,7 @@ func TestDeleteRole_CustomRoleCascadesBindings(t *testing.T) {
 	repo.seedRole("role-other", "other", false, []string{"other.perm"}, "tenant-A")
 	repo.seedBinding("bind-3", "u-3", "tenant-A", "role-other")
 
-	if err := svc.DeleteRole(context.Background(), "role-c"); err != nil {
+	if err := svc.DeleteRole(context.Background(), "tenant-A", "role-c"); err != nil {
 		t.Fatalf("DeleteRole: %v", err)
 	}
 	if _, ok := repo.roles["role-c"]; ok {
@@ -274,12 +275,63 @@ func TestDeleteRole_SystemRoleRefused(t *testing.T) {
 	repo.seedRole("role-sys", "administrator", true, []string{"*"}, "")
 	repo.seedBinding("bind-keep", "u-1", "", "role-sys")
 
-	err := svc.DeleteRole(context.Background(), "role-sys")
+	err := svc.DeleteRole(context.Background(), "tenant-A", "role-sys")
 	if !errors.Is(err, ErrSystemRoleImmutable) {
 		t.Fatalf("expected ErrSystemRoleImmutable, got %v", err)
 	}
 	if _, ok := repo.bindings["bind-keep"]; !ok {
 		t.Errorf("binding for system role must NOT be cascaded when delete refused")
+	}
+}
+
+// ===== Cross-tenant guards (audit C-2) =====
+//
+// A per-tenant route resolves the {roleId}/{bindingId} by UUID. Without the
+// service-side orgId check a member of tenant B could pass tenant A's role or
+// binding UUID and mutate it. These assert the guard rejects the cross-tenant
+// case with ErrNotFound and leaves the row intact.
+
+func TestUpdateRole_CrossTenantRefused(t *testing.T) {
+	svc, repo := newTier1Service(t, staticRoleLookup(""))
+	repo.seedRole("role-c", "billing_reader", false, []string{"billing.invoice.read"}, "tenant-A")
+
+	newName := "hijacked"
+	_, err := svc.UpdateRole(context.Background(), "tenant-B", "role-c", models.UpdateRoleInput{Name: &newName})
+	if !errors.Is(err, repository.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound for cross-tenant update, got %v", err)
+	}
+	if got := repo.roles["role-c"]; got.Name != "billing_reader" {
+		t.Errorf("role name must be unchanged, got %q", got.Name)
+	}
+}
+
+func TestDeleteRole_CrossTenantRefused(t *testing.T) {
+	svc, repo := newTier1Service(t, staticRoleLookup(""))
+	repo.seedRole("role-c", "billing_reader", false, []string{"billing.invoice.read"}, "tenant-A")
+	repo.seedBinding("bind-1", "u-1", "tenant-A", "role-c")
+
+	err := svc.DeleteRole(context.Background(), "tenant-B", "role-c")
+	if !errors.Is(err, repository.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound for cross-tenant delete, got %v", err)
+	}
+	if _, ok := repo.roles["role-c"]; !ok {
+		t.Errorf("role must survive a cross-tenant delete attempt")
+	}
+	if _, ok := repo.bindings["bind-1"]; !ok {
+		t.Errorf("bindings must NOT be cascaded on a refused cross-tenant delete")
+	}
+}
+
+func TestDeleteBinding_CrossTenantRefused(t *testing.T) {
+	svc, repo := newTier1Service(t, staticRoleLookup(""))
+	repo.seedBinding("b-1", "u-1", "tenant-A", "role-c")
+
+	err := svc.DeleteBinding(context.Background(), "tenant-B", "b-1")
+	if !errors.Is(err, repository.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound for cross-tenant binding delete, got %v", err)
+	}
+	if _, ok := repo.bindings["b-1"]; !ok {
+		t.Errorf("binding must survive a cross-tenant delete attempt")
 	}
 }
 
@@ -324,7 +376,7 @@ func TestDeleteBinding_RemovesRowAndFlushesCache(t *testing.T) {
 	svc, repo := newTier1Service(t, staticRoleLookup(""))
 	repo.seedBinding("b-1", "u-1", "tenant-A", "role-X")
 
-	if err := svc.DeleteBinding(context.Background(), "b-1"); err != nil {
+	if err := svc.DeleteBinding(context.Background(), "tenant-A", "b-1"); err != nil {
 		t.Fatalf("DeleteBinding: %v", err)
 	}
 	if _, ok := repo.bindings["b-1"]; ok {
@@ -387,7 +439,7 @@ func TestUpdateRole_FlushesPermissionCache(t *testing.T) {
 	// happy path doesn't panic and the role update lands.
 	svc, repo := newTier1Service(t, staticRoleLookup(""))
 	repo.seedRole("role-c", "billing_reader", false, []string{"billing.invoice.read"}, "tenant-A")
-	updated, err := svc.UpdateRole(context.Background(), "role-c", models.UpdateRoleInput{
+	updated, err := svc.UpdateRole(context.Background(), "tenant-A", "role-c", models.UpdateRoleInput{
 		Permissions: []string{"billing.invoice.read", "billing.invoice.refund"},
 	})
 	if err != nil {

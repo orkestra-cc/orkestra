@@ -80,6 +80,18 @@ var subjectTagSet = map[string]bool{
 	"owneruseruuid":     true,
 	"targetuseruuid":    true,
 	"memberuseruuid":    true,
+
+	// Fiscal identities. A data subject is not always a platform user: an
+	// invoicing module persists the codice fiscale of a private consumer and
+	// the P.IVA of a ditta individuale — personal data under GDPR, held for
+	// years, and reachable by no userUUID. These tags are identifiers (a
+	// stable key naming one person), not mere attributes: a legal name or an
+	// address alone stays out, same as the actor/creator refs above.
+	"fiscalidcode":  true,
+	"codicefiscale": true,
+	"fiscalcode":    true,
+	"vatnumber":     true,
+	"partitaiva":    true,
 }
 
 // Scan loads every Go package under the patterns and walks their AST,

@@ -1,6 +1,7 @@
 import { Navigate, useLocation } from 'react-router';
 import { useAuth } from 'hooks/auth/useAuthRTK';
 import OrkestraLoader from 'components/common/OrkestraLoader';
+import { DEFAULT_POST_LOGIN } from 'utils/returnTo';
 import {
   ProtectedRouteProps,
   PublicRouteProps,
@@ -87,7 +88,7 @@ const ProtectedRoute = ({
 // Convenience component for public routes (redirect to dashboard if authenticated)
 export const PublicRoute = ({
   children,
-  redirectUrl = '/dashboard/analytics'
+  redirectUrl = DEFAULT_POST_LOGIN
 }: PublicRouteProps) => {
   const { isAuthenticated } = useAuth();
 

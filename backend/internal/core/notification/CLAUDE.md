@@ -57,7 +57,7 @@ All settings live in the `module_configs` collection under the `notification` mo
 | `email.from_address`          | `NOTIFICATION_EMAIL_FROM`      | —         |
 | `email.from_name`             | `NOTIFICATION_EMAIL_FROM_NAME` | `Orkestra` |
 | `email.reply_to`              | `NOTIFICATION_EMAIL_REPLY_TO`  | —         |
-| `email.smtp.host`             | `SMTP_HOST`                    | —         |
+| `email.smtp.host`             | `SMTP_HOST`                    | — *(required when provider is `smtp`)* |
 | `email.smtp.port`             | `SMTP_PORT`                    | `587`     |
 | `email.smtp.username`         | `SMTP_USERNAME`                | —         |
 | `email.smtp.password`         | `SMTP_PASSWORD` *(secret)*     | —         |

@@ -62,6 +62,45 @@ type CreateReq struct {
 	}
 }
 
+// A fiscal identifier belonging to a natural person — a sole trader's VAT
+// number, a private consumer's codice fiscale — is personal data under GDPR
+// just as much as a platform user reference, and a module can persist it
+// without ever holding a userUUID. Without these tags in the allow-list the
+// gate reports a clean bill of health for a module holding years of fiscal
+// personal data.
+func TestScan_DetectsFiscalIdentityFields(t *testing.T) {
+	src := `package models
+
+type PartyData struct {
+	FiscalIDCode  string ` + "`bson:\"fiscalIdCode\" json:\"fiscalIdCode\"`" + `
+	CodiceFiscale string ` + "`bson:\"codiceFiscale,omitempty\"`" + `
+	VATNumber     string ` + "`bson:\"vatNumber,omitempty\"`" + `
+	FiscalCode    string ` + "`bson:\"fiscalCode,omitempty\"`" + `
+	Denomination  string ` + "`bson:\"denomination\"`" + `
+	SupplierID    string ` + "`bson:\"supplierId\"`" + `
+}
+`
+	f := parseToFindings(t, "invoicing", src)
+
+	byTag := map[string]bool{}
+	for _, sf := range f.SubjectFields {
+		byTag[sf.Tag] = true
+	}
+	for _, want := range []string{"fiscalIdCode", "codiceFiscale", "vatNumber", "fiscalCode"} {
+		if !byTag[want] {
+			t.Errorf("fiscal identifier %q not detected as subject PII: %+v", want, byTag)
+		}
+	}
+	// Non-identifying columns must stay out: a legal name alone is not a
+	// stable subject key, and supplierId is an internal reference.
+	if byTag["denomination"] {
+		t.Errorf("denomination must NOT be flagged — it is not a subject identifier")
+	}
+	if byTag["supplierId"] {
+		t.Errorf("supplierId must NOT be flagged — internal reference, not a subject key")
+	}
+}
+
 func TestScan_DetectsProducer(t *testing.T) {
 	src := `package services
 

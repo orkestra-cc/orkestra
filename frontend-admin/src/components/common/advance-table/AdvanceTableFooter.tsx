@@ -108,21 +108,25 @@ export const AdvanceTableFooter = ({
       </Flex>
       {navButtons && (
         <Flex>
+          {/* Real `disabled` attribute, not just the class: the class-only
+              version stayed focusable and was announced as actionable by
+              screen readers while doing nothing. */}
+          {/* Always tertiary: pagination is wayfinding, not the page's call
+              to action — a solid primary "Next" outshouts the real one. */}
           <Button
             size="sm"
-            variant={getCanPreviousPage() ? 'primary' : 'tertiary'}
+            variant="tertiary"
             onClick={() => previousPage()}
-            className={classNames({ disabled: !getCanPreviousPage() })}
+            disabled={!getCanPreviousPage()}
           >
             {t('table.previous')}
           </Button>
           <Button
             size="sm"
-            variant={getCanNextPage() ? 'primary' : 'tertiary'}
-            className={classNames('px-4 ms-2', {
-              disabled: !getCanNextPage()
-            })}
+            variant="tertiary"
+            className="px-4 ms-2"
             onClick={() => nextPage()}
+            disabled={!getCanNextPage()}
           >
             {t('table.next')}
           </Button>
