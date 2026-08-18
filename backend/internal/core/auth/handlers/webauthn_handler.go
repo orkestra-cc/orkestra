@@ -263,7 +263,7 @@ func (h *WebAuthnHandler) VerifyFinish(ctx context.Context, req *webAuthnVerifyF
 	if userUUID == "" {
 		return nil, huma.Error401Unauthorized("authentication required")
 	}
-	sessionID, deviceID, ok := currentSessionIdentity(ctx)
+	device, security, ok := currentSessionSecurity(ctx)
 	if !ok {
 		return nil, huma.Error401Unauthorized("authentication required")
 	}
@@ -278,7 +278,7 @@ func (h *WebAuthnHandler) VerifyFinish(ctx context.Context, req *webAuthnVerifyF
 		return nil, mapWebAuthnError(err)
 	}
 	amr := appendWebAuthn(priorAMRWithOTP(ctx))
-	token, err := h.jwt.GenerateAccessTokenForSessionWithAMR(user, &authModels.DeviceInfo{DeviceID: deviceID}, &authModels.SecurityContext{SessionID: sessionID, Timestamp: time.Now()}, amr, time.Now().Unix())
+	token, err := h.jwt.GenerateAccessTokenForSessionWithAMR(user, device, security, amr, time.Now().Unix())
 	if err != nil {
 		return nil, huma.Error500InternalServerError("failed to mint stepped-up token")
 	}
@@ -390,12 +390,21 @@ func (h *WebAuthnHandler) LoginFinish(ctx context.Context, req *webAuthnLoginFin
 		return nil, mapWebAuthnError(err)
 	}
 
-	// Both ceremonies passed — consume the login challenge so it can't be
-	// reused with another factor.
-	_, _ = h.mfaChallenges.Consume(ctx, req.Body.LoginChallengeID)
+	// Both ceremonies passed — atomically claim the login challenge. A
+	// concurrent ceremony can verify, but only the GETDEL winner may mint.
+	loginCh, err = h.mfaChallenges.Consume(ctx, req.Body.LoginChallengeID)
+	if err != nil {
+		return nil, huma.Error401Unauthorized("invalid or expired login challenge")
+	}
 
 	amr := appendWebAuthn(appendOTP(loginCh.SourceAMR))
-	tokens, err := h.tokens.IssueLoginTokensForSession(ctx, user, loginCh.SessionID, loginCh.DeviceID, loginCh.Platform, loginCh.IPAddress, amr, time.Now().Unix())
+	tokens, err := h.tokens.IssueLoginTokensForSession(ctx, user, services.LoginTokenContext{
+		SessionID: loginCh.SessionID, DeviceID: loginCh.DeviceID, DeviceType: loginCh.DeviceType,
+		Platform: loginCh.Platform, IPAddress: loginCh.IPAddress, Fingerprint: loginCh.Fingerprint,
+		UserAgent: loginCh.UserAgent, LoginMethod: loginCh.LoginMethod, RiskScore: loginCh.RiskScore,
+		RiskFactors: append([]string(nil), loginCh.RiskFactors...), TrustLevel: loginCh.TrustLevel,
+		MFACompleted: true,
+	}, amr, time.Now().Unix())
 	if err != nil {
 		return nil, huma.Error500InternalServerError("failed to mint login tokens")
 	}

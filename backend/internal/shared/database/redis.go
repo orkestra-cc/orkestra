@@ -111,6 +111,16 @@ func (r *RedisClientAdapter) Get(ctx context.Context, key string) (string, error
 	return result.Val(), nil
 }
 
+// GetDel atomically returns and removes a key. Redis 6.2+ provides this
+// primitive directly; Orkestra deploys Redis 8.2.
+func (r *RedisClientAdapter) GetDel(ctx context.Context, key string) (string, error) {
+	result := r.client.GetDel(ctx, key)
+	if result.Err() != nil {
+		return "", result.Err()
+	}
+	return result.Val(), nil
+}
+
 // Del implements the RedisClient interface
 func (r *RedisClientAdapter) Del(ctx context.Context, keys ...string) error {
 	return r.client.Del(ctx, keys...).Err()

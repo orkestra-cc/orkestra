@@ -65,7 +65,12 @@ func TestOAuthSessionIdentity_PartialMFAChallengeCarriesSID(t *testing.T) {
 		mfaChallengeService: challenges,
 	}
 
-	response, err := svc.GenerateEnhancedTokenPair(context.Background(), user, &authModels.DeviceInfo{DeviceID: "oauth-mfa-device"}, nil)
+	response, err := svc.GenerateEnhancedTokenPair(context.Background(), user, &authModels.DeviceInfo{
+		DeviceID: "oauth-mfa-device", DeviceType: "mobile", Platform: "android",
+		Fingerprint: "oauth-mfa-fingerprint", UserAgent: "oauth-mfa-agent",
+	}, &authModels.SecurityContext{
+		IPAddress: "203.0.113.88", RiskScore: 0.68, RiskFactors: []string{"new_device", "proxy"},
+	})
 	if err != nil {
 		t.Fatalf("GenerateEnhancedTokenPair: %v", err)
 	}
@@ -78,6 +83,15 @@ func TestOAuthSessionIdentity_PartialMFAChallengeCarriesSID(t *testing.T) {
 	}
 	if challenge.SessionID == "" {
 		t.Fatal("partial OAuth challenge has no pending session id")
+	}
+	if challenge.LoginMethod != "oauth" || len(challenge.SourceAMR) != 1 || challenge.SourceAMR[0] != "oauth" {
+		t.Errorf("OAuth source metadata = loginMethod %q, amr %v", challenge.LoginMethod, challenge.SourceAMR)
+	}
+	if challenge.DeviceType != "mobile" || challenge.Fingerprint != "oauth-mfa-fingerprint" {
+		t.Errorf("OAuth device metadata = type %q, fingerprint %q", challenge.DeviceType, challenge.Fingerprint)
+	}
+	if challenge.RiskScore != 0.68 || len(challenge.RiskFactors) != 2 || challenge.TrustLevel != "untrusted" {
+		t.Errorf("OAuth risk metadata = score %v, factors %v, trust %q", challenge.RiskScore, challenge.RiskFactors, challenge.TrustLevel)
 	}
 }
 

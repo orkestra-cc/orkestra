@@ -55,10 +55,16 @@ type MFAChallenge struct {
 	// (typically ["pwd"] or ["oauth"]); "otp" is appended on successful
 	// verify to form the final token's amr claim.
 	DeviceID    string   `json:"deviceId,omitempty"`
+	DeviceType  string   `json:"deviceType,omitempty"`
 	SessionID   string   `json:"sessionId,omitempty"`
 	Platform    string   `json:"platform,omitempty"`
 	IPAddress   string   `json:"ipAddress,omitempty"`
 	Fingerprint string   `json:"fingerprint,omitempty"`
+	UserAgent   string   `json:"userAgent,omitempty"`
+	LoginMethod string   `json:"loginMethod,omitempty"`
+	RiskScore   float64  `json:"riskScore,omitempty"`
+	RiskFactors []string `json:"riskFactors,omitempty"`
+	TrustLevel  string   `json:"trustLevel,omitempty"`
 	SourceAMR   []string `json:"sourceAmr,omitempty"`
 }
 
@@ -71,10 +77,16 @@ type LoginChallengeInput struct {
 	UserUUID    string
 	SourceAMR   []string
 	DeviceID    string
+	DeviceType  string
 	SessionID   string
 	Platform    string
 	IPAddress   string
 	Fingerprint string
+	UserAgent   string
+	LoginMethod string
+	RiskScore   float64
+	RiskFactors []string
+	TrustLevel  string
 }
 
 // MFAChallengeService issues, looks up, and consumes short-lived challenges
@@ -140,11 +152,17 @@ func (s *mfaChallengeService) BeginLogin(ctx context.Context, in LoginChallengeI
 		CreatedAt:   now,
 		ExpiresAt:   now.Add(MFAChallengeTTL),
 		DeviceID:    in.DeviceID,
+		DeviceType:  in.DeviceType,
 		SessionID:   in.SessionID,
 		Platform:    in.Platform,
 		IPAddress:   in.IPAddress,
 		Fingerprint: in.Fingerprint,
-		SourceAMR:   in.SourceAMR,
+		UserAgent:   in.UserAgent,
+		LoginMethod: in.LoginMethod,
+		RiskScore:   in.RiskScore,
+		RiskFactors: append([]string(nil), in.RiskFactors...),
+		TrustLevel:  in.TrustLevel,
+		SourceAMR:   append([]string(nil), in.SourceAMR...),
 	}
 	payload, err := json.Marshal(ch)
 	if err != nil {
@@ -177,12 +195,26 @@ func (s *mfaChallengeService) Peek(ctx context.Context, id string) (*MFAChalleng
 }
 
 func (s *mfaChallengeService) Consume(ctx context.Context, id string) (*MFAChallenge, error) {
-	ch, err := s.Peek(ctx, id)
-	if err != nil {
-		return nil, err
+	if id == "" {
+		return nil, ErrMFAChallengeNotFound
 	}
-	s.destroy(ctx, id)
-	return ch, nil
+	raw, err := s.store.Take(ctx, buildMFAChallengeKey(id))
+	if err != nil {
+		return nil, ErrMFAChallengeNotFound
+	}
+	var ch MFAChallenge
+	if err := json.Unmarshal(raw, &ch); err != nil {
+		return nil, fmt.Errorf("unmarshal mfa challenge: %w", err)
+	}
+	if time.Now().After(ch.ExpiresAt) {
+		_ = s.store.Delete(ctx, buildMFAAttemptsKey(id))
+		return nil, ErrMFAChallengeNotFound
+	}
+	ch.Attempts = s.attemptsFor(ctx, id)
+	// The challenge is already gone atomically. The separate attempt key
+	// contains no proof material and is safe to clean up best-effort.
+	_ = s.store.Delete(ctx, buildMFAAttemptsKey(id))
+	return &ch, nil
 }
 
 // IncrementAttempts bumps the counter and returns the new value. When the

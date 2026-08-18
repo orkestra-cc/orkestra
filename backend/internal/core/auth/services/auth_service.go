@@ -2098,17 +2098,26 @@ func (s *authService) evaluateMFAForOAuth(ctx context.Context, user *iface.User,
 	}
 	if hasTOTP || hasWebAuthn {
 		in := LoginChallengeInput{
-			UserUUID:  user.UUID,
-			SessionID: uuid.NewString(),
-			SourceAMR: []string{"oauth"},
+			UserUUID:    user.UUID,
+			SessionID:   uuid.NewString(),
+			SourceAMR:   []string{"oauth"},
+			LoginMethod: "oauth",
+			TrustLevel:  "medium",
 		}
 		if deviceInfo != nil {
 			in.DeviceID = deviceInfo.DeviceID
+			in.DeviceType = deviceInfo.DeviceType
 			in.Platform = deviceInfo.Platform
 			in.Fingerprint = deviceInfo.Fingerprint
+			in.UserAgent = deviceInfo.UserAgent
 		}
 		if securityCtx != nil {
 			in.IPAddress = securityCtx.IPAddress
+			in.RiskScore = securityCtx.RiskScore
+			in.RiskFactors = append([]string(nil), securityCtx.RiskFactors...)
+			if securityCtx.RiskScore >= 0.5 {
+				in.TrustLevel = "untrusted"
+			}
 		}
 		ch, err := s.mfaChallengeService.BeginLogin(ctx, in)
 		if err != nil {

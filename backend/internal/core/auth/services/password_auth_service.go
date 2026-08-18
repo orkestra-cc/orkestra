@@ -436,6 +436,25 @@ type LoginInput struct {
 	UserAgent string
 }
 
+// LoginTokenContext carries the authenticated login state that must be
+// identical across JWT claims, refresh persistence, and the session row.
+// It is used by MFA continuation so OAuth device/risk metadata is not
+// replaced with password-flow placeholders at the final issuance step.
+type LoginTokenContext struct {
+	SessionID    string
+	DeviceID     string
+	DeviceType   string
+	Platform     string
+	IPAddress    string
+	Fingerprint  string
+	UserAgent    string
+	LoginMethod  string
+	RiskScore    float64
+	RiskFactors  []string
+	TrustLevel   string
+	MFACompleted bool
+}
+
 // Login authenticates a user by email/password and returns a token pair.
 // On any failure it returns ErrInvalidCredentials to avoid user enumeration.
 // Rate limiting is applied against both the IP and the email address.
@@ -678,12 +697,16 @@ func (s *PasswordAuthService) completeLogin(ctx context.Context, user *iface.Use
 			return nil, fmt.Errorf("mfa challenge service not wired")
 		}
 		ch, err := s.mfaChallengeService.BeginLogin(ctx, LoginChallengeInput{
-			UserUUID:  user.UUID,
-			SessionID: uuid.NewString(),
-			SourceAMR: sourceAMR,
-			DeviceID:  in.DeviceID,
-			Platform:  in.Platform,
-			IPAddress: in.IP,
+			UserUUID:    user.UUID,
+			SessionID:   uuid.NewString(),
+			SourceAMR:   sourceAMR,
+			DeviceID:    in.DeviceID,
+			DeviceType:  "desktop",
+			Platform:    in.Platform,
+			IPAddress:   in.IP,
+			Fingerprint: in.Fingerprint,
+			UserAgent:   in.UserAgent,
+			LoginMethod: "password",
 		})
 		if err != nil {
 			return nil, err
@@ -1126,8 +1149,19 @@ type ConfirmPasswordResult struct {
 // failed login). The 5-minute freshness window is enforced downstream
 // by RequireStepUp comparing last_otp_at — this method always stamps now.
 func (s *PasswordAuthService) ConfirmPassword(ctx context.Context, userUUID, password string, priorAMR []string, ip, sessionID, deviceID string) (*ConfirmPasswordResult, error) {
-	if userUUID == "" || password == "" || sessionID == "" {
+	return s.ConfirmPasswordWithSecurity(ctx, userUUID, password, priorAMR,
+		&authModels.DeviceInfo{DeviceID: deviceID},
+		&authModels.SecurityContext{SessionID: sessionID, IPAddress: ip, Timestamp: time.Now()})
+}
+
+// ConfirmPasswordWithSecurity preserves the verified access token's device,
+// network, and risk binding while adding the fresh reauthentication proof.
+func (s *PasswordAuthService) ConfirmPasswordWithSecurity(ctx context.Context, userUUID, password string, priorAMR []string, device *authModels.DeviceInfo, security *authModels.SecurityContext) (*ConfirmPasswordResult, error) {
+	if userUUID == "" || password == "" || security == nil || security.SessionID == "" {
 		return nil, ErrInvalidCredentials
+	}
+	if device == nil {
+		device = &authModels.DeviceInfo{}
 	}
 	user, err := s.userService.GetUserByID(ctx, userUUID)
 	if err != nil {
@@ -1161,7 +1195,7 @@ func (s *PasswordAuthService) ConfirmPassword(ctx context.Context, userUUID, pas
 	}
 	ok, err := s.passwordService.Verify(password, user.PasswordHash)
 	if err != nil || !ok {
-		s.recordFailed(ctx, ip, user.Email)
+		s.recordFailed(ctx, security.IPAddress, user.Email)
 		return nil, ErrInvalidCredentials
 	}
 	// Mint the stepped-up token. amr is priorAMR ∪ {"reauth"} so the
@@ -1169,7 +1203,10 @@ func (s *PasswordAuthService) ConfirmPassword(ctx context.Context, userUUID, pas
 	// an oauth login will carry ["oauth","reauth"], not just ["reauth"]).
 	amr := mergeAMRWithReauth(priorAMR)
 	now := time.Now()
-	token, err := s.jwtService.GenerateAccessTokenForSessionWithAMR(user, &authModels.DeviceInfo{DeviceID: deviceID}, &authModels.SecurityContext{SessionID: sessionID, IPAddress: ip, Timestamp: now}, amr, now.Unix())
+	securityCtx := *security
+	securityCtx.Timestamp = now
+	deviceInfo := *device
+	token, err := s.jwtService.GenerateAccessTokenForSessionWithAMR(user, &deviceInfo, &securityCtx, amr, now.Unix())
 	if err != nil {
 		return nil, err
 	}
@@ -1298,8 +1335,8 @@ func (s *PasswordAuthService) IssueLoginTokens(ctx context.Context, user *iface.
 
 // IssueLoginTokensForSession completes a partial login against the session
 // UUID chosen before the MFA challenge was returned.
-func (s *PasswordAuthService) IssueLoginTokensForSession(ctx context.Context, user *iface.User, sessionID, deviceID, platform, ip string, amr []string, lastOTPAt int64) (*authModels.TokenResponse, error) {
-	return s.issueTokensForSession(ctx, user, LoginInput{DeviceID: deviceID, Platform: platform, IP: ip}, sessionID, amr, lastOTPAt)
+func (s *PasswordAuthService) IssueLoginTokensForSession(ctx context.Context, user *iface.User, in LoginTokenContext, amr []string, lastOTPAt int64) (*authModels.TokenResponse, error) {
+	return s.issueTokensForSession(ctx, user, in, amr, lastOTPAt)
 }
 
 // IssueLoginTokensExternal is the iface.LoginTokenIssuer-shaped wrapper
@@ -1327,11 +1364,34 @@ func (s *PasswordAuthService) IssueLoginTokensExternal(ctx context.Context, user
 }
 
 func (s *PasswordAuthService) issueTokens(ctx context.Context, user *iface.User, in LoginInput, amr []string, lastOTPAt int64) (*authModels.TokenResponse, error) {
-	return s.issueTokensForSession(ctx, user, in, uuid.NewString(), amr, lastOTPAt)
+	return s.issueTokensForSession(ctx, user, LoginTokenContext{
+		SessionID: uuid.NewString(), DeviceID: in.DeviceID, DeviceType: "desktop",
+		Platform: in.Platform, IPAddress: in.IP, Fingerprint: in.Fingerprint,
+		UserAgent: in.UserAgent, LoginMethod: loginMethodFromAMR(amr),
+		MFACompleted: hasMFAAMR(amr),
+	}, amr, lastOTPAt)
 }
 
-func (s *PasswordAuthService) issueTokensForSession(ctx context.Context, user *iface.User, in LoginInput, sessionID string, amr []string, lastOTPAt int64) (*authModels.TokenResponse, error) {
-	if err := ValidateTokenEligibleUser(user); err != nil || sessionID == "" {
+func loginMethodFromAMR(amr []string) string {
+	for _, method := range amr {
+		if method == "oauth" {
+			return "oauth"
+		}
+	}
+	return "password"
+}
+
+func hasMFAAMR(amr []string) bool {
+	for _, method := range amr {
+		if method == "otp" || method == "webauthn" {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *PasswordAuthService) issueTokensForSession(ctx context.Context, user *iface.User, in LoginTokenContext, amr []string, lastOTPAt int64) (*authModels.TokenResponse, error) {
+	if err := ValidateTokenEligibleUser(user); err != nil || in.SessionID == "" {
 		return nil, ErrInvalidCredentials
 	}
 	deviceID := in.DeviceID
@@ -1342,17 +1402,60 @@ func (s *PasswordAuthService) issueTokensForSession(ctx context.Context, user *i
 	if platform == "" {
 		platform = "web"
 	}
+	deviceType := in.DeviceType
+	if deviceType == "" {
+		deviceType = "desktop"
+	}
+	loginMethod := in.LoginMethod
+	if loginMethod == "" {
+		loginMethod = loginMethodFromAMR(amr)
+	}
+	var assessment *authModels.RiskAssessment
+	if s.riskAssessment != nil && in.RiskScore == 0 && len(in.RiskFactors) == 0 {
+		a, assessErr := s.riskAssessment.AssessLoginRisk(ctx, user.UUID, &authModels.SecurityContext{
+			IPAddress: in.IPAddress, Fingerprint: in.Fingerprint, Timestamp: time.Now(),
+		})
+		if assessErr != nil {
+			if s.logger != nil {
+				s.logger.Warn("risk: assess login risk failed, using default score",
+					slog.String("user_uuid", user.UUID), slog.String("error", assessErr.Error()))
+			}
+		} else if a != nil {
+			assessment = a
+			in.RiskScore = a.Score
+			in.RiskFactors = make([]string, 0, len(a.Factors))
+			for _, factor := range a.Factors {
+				in.RiskFactors = append(in.RiskFactors, factor.Type)
+			}
+		}
+	}
+	riskScore := in.RiskScore
+	if riskScore == 0 {
+		riskScore = 0.1
+	}
+	trustLevel := in.TrustLevel
+	if trustLevel == "" {
+		trustLevel = "medium"
+		if riskScore >= 0.5 {
+			trustLevel = "untrusted"
+		}
+	}
 
 	now := time.Now()
 	device := &authModels.DeviceInfo{
-		DeviceID:   deviceID,
-		DeviceType: "web",
-		Platform:   platform,
+		DeviceID:    deviceID,
+		DeviceType:  deviceType,
+		Platform:    platform,
+		Fingerprint: in.Fingerprint,
+		UserAgent:   in.UserAgent,
 	}
 	security := &authModels.SecurityContext{
-		SessionID: sessionID,
-		IPAddress: in.IP,
-		Timestamp: now,
+		SessionID:   in.SessionID,
+		IPAddress:   in.IPAddress,
+		RiskScore:   riskScore,
+		RiskFactors: append([]string(nil), in.RiskFactors...),
+		Fingerprint: in.Fingerprint,
+		Timestamp:   now,
 	}
 	pair, err := s.jwtService.GenerateTokenPairWithAMR(user, device, security, amr, lastOTPAt)
 	if err != nil {
@@ -1373,13 +1476,14 @@ func (s *PasswordAuthService) issueTokensForSession(ctx context.Context, user *i
 		UUID:         authModels.GenerateUUIDv7(),
 		UserUUID:     user.UUID,
 		Token:        pair.RefreshToken,
-		SessionUUID:  sessionID,
+		SessionUUID:  in.SessionID,
 		DeviceID:     deviceID,
-		DeviceType:   "web",
+		DeviceType:   deviceType,
 		Platform:     platform,
-		Fingerprint:  "password-login",
-		IPAddress:    in.IP,
-		RiskScore:    0.1,
+		Fingerprint:  in.Fingerprint,
+		IPAddress:    in.IPAddress,
+		RiskScore:    riskScore,
+		RiskFactors:  append([]string(nil), in.RiskFactors...),
 		IssuedAt:     now,
 		ExpiresAt:    now.Add(s.jwtService.RefreshTokenTTL()),
 		LastActivity: now,
@@ -1394,8 +1498,14 @@ func (s *PasswordAuthService) issueTokensForSession(ctx context.Context, user *i
 	// Create the auth-session row before returning the pair. If this fails,
 	// revoke the just-created refresh row by its canonical session id so no
 	// usable credential survives without its session record.
-	if err := s.createSessionDoc(ctx, user, sessionID, deviceID, platform, in.IP, in.UserAgent); err != nil {
-		if revokeErr := s.refreshTokenRepo.RevokeTokensBySession(ctx, sessionID, authModels.RevokeReasonManualRevoke); revokeErr != nil && s.logger != nil {
+	in.DeviceID = deviceID
+	in.DeviceType = deviceType
+	in.Platform = platform
+	in.LoginMethod = loginMethod
+	in.RiskScore = riskScore
+	in.TrustLevel = trustLevel
+	if err := s.createSessionDoc(ctx, user, in, assessment); err != nil {
+		if revokeErr := s.refreshTokenRepo.RevokeTokensBySession(ctx, in.SessionID, authModels.RevokeReasonManualRevoke); revokeErr != nil && s.logger != nil {
 			s.logger.Error("auth: refresh-token rollback after session persistence failure failed")
 		}
 		return nil, fmt.Errorf("persist auth session: %w", err)
@@ -1409,13 +1519,13 @@ func (s *PasswordAuthService) issueTokensForSession(ctx context.Context, user *i
 		RefreshToken: pair.RefreshToken,
 		TokenType:    "Bearer",
 		ExpiresIn:    int64(s.jwtService.AccessTokenTTL(ctx).Seconds()),
-		SessionID:    sessionID,
+		SessionID:    in.SessionID,
 		DeviceID:     deviceID,
 		User:         s.buildUserResponse(ctx, user),
 	}, nil
 }
 
-func (s *PasswordAuthService) createSessionDoc(ctx context.Context, user *iface.User, sessionID, deviceID, platform, ip, userAgent string) error {
+func (s *PasswordAuthService) createSessionDoc(ctx context.Context, user *iface.User, in LoginTokenContext, assessment *authModels.RiskAssessment) error {
 	if s.authSessionRepo == nil {
 		return stderrors.New("auth session persistence is unavailable")
 	}
@@ -1426,60 +1536,35 @@ func (s *PasswordAuthService) createSessionDoc(ctx context.Context, user *iface.
 	// repo error degrades to "treat as known" so a flaky lookup never
 	// spams the user with a false-positive new-device email.
 	newDevice := false
-	if deviceID != "" {
-		history, err := s.authSessionRepo.GetDeviceSessionHistory(ctx, user.UUID, deviceID, 1)
+	if in.DeviceID != "" {
+		history, err := s.authSessionRepo.GetDeviceSessionHistory(ctx, user.UUID, in.DeviceID, 1)
 		if err == nil && len(history) == 0 {
 			newDevice = true
 		}
 	}
-	// Compute login risk against the user's session history BEFORE
-	// inserting the new row — otherwise the just-created session would
-	// count as its own "prior" and the counts come back ≥1 for every
-	// factor. Score/trust fall back to the pre-C1 defaults
-	// (0.1 / "medium") when the scorer isn't wired.
-	riskScore := 0.1
-	trustLevel := "medium"
-	var assessment *authModels.RiskAssessment
-	if s.riskAssessment != nil {
-		a, err := s.riskAssessment.AssessLoginRisk(ctx, user.UUID, &authModels.SecurityContext{
-			IPAddress: ip,
-			Timestamp: now,
-			// Fingerprint is not computed for password logins today; the
-			// refresh token records the literal "password-login" placeholder.
-			// Mobile/OAuth paths thread a real fingerprint in their own
-			// SecurityContext when that path wires AssessLoginRisk.
-		})
-		if err != nil && s.logger != nil {
-			s.logger.Warn("risk: assess login risk failed, using default score",
-				slog.String("user_uuid", user.UUID),
-				slog.String("error", err.Error()))
-		} else if a != nil {
-			assessment = a
-			riskScore = a.Score
-			// Session trustLevel mirrors the inverse semantic: a high
-			// risk login lands on an "untrusted" session; a low risk
-			// login keeps the prior "medium" default. A future C3
-			// (device trust) promotes to "trusted" on an enrolled device.
-			if riskScore >= 0.5 {
-				trustLevel = "untrusted"
-			}
-		}
-	}
+	// Risk was computed before JWT/refresh issuance so all three artifacts
+	// carry the same value. Score/trust fall back to 0.1 / "medium" when
+	// the scorer isn't wired.
+	riskScore := in.RiskScore
+	trustLevel := in.TrustLevel
 	doc := &authModels.AuthSessionDoc{
-		UUID:         sessionID,
+		UUID:         in.SessionID,
 		UserUUID:     user.UUID,
-		DeviceID:     deviceID,
+		DeviceID:     in.DeviceID,
 		IsActive:     true,
 		StartedAt:    now,
 		LastActivity: now,
 		ExpiresAt:    now.Add(AuthSessionRetention),
-		LoginMethod:  "password",
-		MFACompleted: false,
+		LoginMethod:  in.LoginMethod,
+		MFACompleted: in.MFACompleted,
 		DeviceInfo: authModels.DeviceInfo{
-			DeviceID: deviceID,
-			Platform: platform,
+			DeviceID:    in.DeviceID,
+			DeviceType:  in.DeviceType,
+			Platform:    in.Platform,
+			Fingerprint: in.Fingerprint,
+			UserAgent:   in.UserAgent,
 		},
-		IPAddress: ip,
+		IPAddress: in.IPAddress,
 		RiskScore: riskScore,
 		// RiskFactors on SecurityEventLog would be the ideal home, but
 		// the session-level trustLevel + score is what downstream
@@ -1507,9 +1592,9 @@ func (s *PasswordAuthService) createSessionDoc(ctx context.Context, user *iface.
 				CreatedAt: doc.CreatedAt,
 			},
 			Assessment: assessment,
-			IPAddress:  ip,
-			Platform:   platform,
-			UserAgent:  userAgent,
+			IPAddress:  in.IPAddress,
+			Platform:   in.Platform,
+			UserAgent:  in.UserAgent,
 		})
 	}
 	// Phase 7: new-device-login email. Independent of the risk score
@@ -1518,7 +1603,7 @@ func (s *PasswordAuthService) createSessionDoc(ctx context.Context, user *iface.
 	// toggle. Best-effort — a notification failure leaves the session
 	// intact.
 	if newDevice {
-		s.notifyNewDeviceLogin(ctx, user, doc, deviceID, platform, ip, userAgent)
+		s.notifyNewDeviceLogin(ctx, user, doc, in.DeviceID, in.Platform, in.IPAddress, in.UserAgent)
 	}
 	return nil
 }

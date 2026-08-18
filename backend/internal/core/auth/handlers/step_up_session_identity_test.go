@@ -6,6 +6,8 @@ import (
 	"crypto/rsa"
 	"encoding/json"
 	"net/http"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -52,6 +54,13 @@ type stepUpSessionRepo struct {
 	created *authModels.AuthSessionDoc
 }
 
+type countingLoginTokenIssuer struct{ calls atomic.Int32 }
+
+func (i *countingLoginTokenIssuer) IssueLoginTokensForSession(_ context.Context, _ *iface.User, in services.LoginTokenContext, _ []string, _ int64) (*authModels.TokenResponse, error) {
+	i.calls.Add(1)
+	return &authModels.TokenResponse{AccessToken: "winner", TokenType: "Bearer", SessionID: in.SessionID}, nil
+}
+
 func (r *stepUpSessionRepo) GetDeviceSessionHistory(context.Context, string, string, int) ([]*authModels.AuthSessionDoc, error) {
 	return nil, nil
 }
@@ -91,10 +100,13 @@ func newStepUpJWT(t *testing.T) services.JWTService {
 func stepUpContext(userUUID string) context.Context {
 	ctx := context.WithValue(context.Background(), "userUUID", userUUID)
 	return context.WithValue(ctx, "claims", &authModels.JWTClaims{
-		UserUUID:  userUUID,
-		SessionID: "session-step-up",
-		DeviceID:  "device-step-up",
-		AMR:       []string{"pwd"},
+		UserUUID:    userUUID,
+		SessionID:   "session-step-up",
+		DeviceID:    "device-step-up",
+		IPAddress:   "198.51.100.24",
+		Fingerprint: "fingerprint-step-up",
+		RiskScore:   0.42,
+		AMR:         []string{"pwd"},
 	})
 }
 
@@ -109,6 +121,15 @@ func assertStepUpSession(t *testing.T, jwt services.JWTService, token, wantAMR s
 	}
 	if claims.DeviceID != "device-step-up" {
 		t.Errorf("did = %q, want device-step-up", claims.DeviceID)
+	}
+	if claims.IPAddress != "198.51.100.24" {
+		t.Errorf("ip = %q, want 198.51.100.24", claims.IPAddress)
+	}
+	if claims.Fingerprint != "fingerprint-step-up" {
+		t.Errorf("fp = %q, want fingerprint-step-up", claims.Fingerprint)
+	}
+	if claims.RiskScore != 0.42 {
+		t.Errorf("risk = %v, want 0.42", claims.RiskScore)
 	}
 	found := false
 	for _, method := range claims.AMR {
@@ -219,11 +240,15 @@ func TestStepUpSessionIdentity_TOTPLoginCompletionPreservesPendingSID(t *testing
 	tokens, refresh, sessions := newPendingSessionTokenIssuer(t, jwt, user)
 	challenges := services.NewMFAChallengeService(services.NewMemoryOAuthStateStore())
 	challenge, err := challenges.BeginLogin(context.Background(), services.LoginChallengeInput{
-		UserUUID:  user.UUID,
-		SessionID: "session-pending-mfa",
-		SourceAMR: []string{"pwd"},
-		DeviceID:  "device-pending",
-		Platform:  "web",
+		UserUUID:    user.UUID,
+		SessionID:   "session-pending-mfa",
+		SourceAMR:   []string{"oauth"},
+		DeviceID:    "device-pending",
+		DeviceType:  "mobile",
+		Platform:    "web",
+		Fingerprint: "fingerprint-pending",
+		RiskScore:   0.73,
+		RiskFactors: []string{"new_device", "proxy"},
 	})
 	if err != nil {
 		t.Fatalf("BeginLogin: %v", err)
@@ -251,6 +276,45 @@ func TestStepUpSessionIdentity_TOTPLoginCompletionPreservesPendingSID(t *testing
 			t.Errorf("%s sid = %q, want session-pending-mfa", name, got)
 		}
 	}
+	if got := refresh.created.DeviceType; got != "mobile" {
+		t.Errorf("refresh device type = %q, want mobile", got)
+	}
+	if got := refresh.created.Fingerprint; got != "fingerprint-pending" {
+		t.Errorf("refresh fingerprint = %q, want fingerprint-pending", got)
+	}
+	if got := refresh.created.RiskScore; got != 0.73 {
+		t.Errorf("refresh risk = %v, want 0.73", got)
+	}
+	if got := sessions.created.LoginMethod; got != "oauth" {
+		t.Errorf("session login method = %q, want oauth", got)
+	}
+	if !sessions.created.MFACompleted {
+		t.Error("completed OAuth+MFA session is not marked MFACompleted")
+	}
+	if got := sessions.created.DeviceInfo.Fingerprint; got != "fingerprint-pending" {
+		t.Errorf("session fingerprint = %q, want fingerprint-pending", got)
+	}
+	if got := sessions.created.RiskScore; got != 0.73 {
+		t.Errorf("session risk = %v, want 0.73", got)
+	}
+	if got := claims.Fingerprint; got != "fingerprint-pending" {
+		t.Errorf("completed access-token fingerprint = %q, want fingerprint-pending", got)
+	}
+	if got := claims.RiskScore; got != 0.73 {
+		t.Errorf("completed access-token risk = %v, want 0.73", got)
+	}
+	if !containsString(claims.AMR, "oauth") || !containsString(claims.AMR, "otp") || containsString(claims.AMR, "pwd") {
+		t.Errorf("completed access-token amr = %v, want oauth+otp without pwd", claims.AMR)
+	}
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 func TestStepUpSessionIdentity_WebAuthnLoginCompletionPreservesPendingSID(t *testing.T) {
@@ -291,5 +355,45 @@ func TestStepUpSessionIdentity_WebAuthnLoginCompletionPreservesPendingSID(t *tes
 		if got != "session-pending-webauthn" {
 			t.Errorf("%s sid = %q, want session-pending-webauthn", name, got)
 		}
+	}
+}
+
+func TestMFALoginVerify_ConcurrentReplayMintsExactlyOnce(t *testing.T) {
+	user := &iface.User{UUID: "concurrent-user", Email: "concurrent@example.com", Role: "operator", IsActive: true}
+	challenges := services.NewMFAChallengeService(services.NewMemoryOAuthStateStore())
+	challenge, err := challenges.BeginLogin(context.Background(), services.LoginChallengeInput{
+		UserUUID: user.UUID, SessionID: "session-concurrent", SourceAMR: []string{"pwd"},
+	})
+	if err != nil {
+		t.Fatalf("BeginLogin: %v", err)
+	}
+	issuer := &countingLoginTokenIssuer{}
+	h := NewMFAHandler(stepUpMFA{}, challenges, newStepUpJWT(t), &stepUpUsers{user: user}, issuer, "", "", false)
+
+	const callers = 24
+	start := make(chan struct{})
+	var successes atomic.Int32
+	var wg sync.WaitGroup
+	for i := 0; i < callers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			req := &MFALoginVerifyRequest{}
+			req.Body.ChallengeID = challenge.ID
+			req.Body.Code = "123456"
+			if _, err := h.LoginVerify(context.Background(), req); err == nil {
+				successes.Add(1)
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+
+	if got := successes.Load(); got != 1 {
+		t.Errorf("successful responses = %d, want 1", got)
+	}
+	if got := issuer.calls.Load(); got != 1 {
+		t.Errorf("token issuance calls = %d, want 1", got)
 	}
 }

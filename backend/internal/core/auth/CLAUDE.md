@@ -44,6 +44,7 @@ Declared in `module.go::Collections()`. Collection name constants live in `model
 |---|---|---|
 | `operator_oauth_providers` / `client_oauth_providers` | compound `(userUuid, provider)` unique | — |
 | `operator_refresh_tokens` / `client_refresh_tokens` | `uuid` unique, `userUuid`, `familyId` | — (rotation is explicit; revoked rows retained ≥ refresh TTL so replay detection can see them) |
+| `operator_refresh_token_families` / `client_refresh_token_families` | `familyId` unique | — (durable, non-PII family-revocation fence; prevents a racing rotation successor escaping replay revocation on standalone MongoDB) |
 | `operator_sessions` / `client_sessions` | `uuid` unique | — |
 | `auth_security_events` | (none declared) | — — single non-tier-split (audit log keyed on userUUID alone) |
 | `operator_email_tokens` / `client_email_tokens` | `uuid` unique, `tokenHash` unique, `userUuid`, `expiresAt` **TTL 24h** | Yes |
