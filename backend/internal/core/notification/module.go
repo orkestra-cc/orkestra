@@ -31,7 +31,7 @@ func (m *NotificationModule) Description() string {
 func (m *NotificationModule) Category() module.ModuleCategory { return module.CategoryCore }
 
 func (m *NotificationModule) ProvidedServices() []module.ServiceKey {
-	return []module.ServiceKey{module.ServiceNotificationSender}
+	return []module.ServiceKey{module.ServiceNotificationSender, module.ServiceNotificationTemplateSeeder}
 }
 
 func (m *NotificationModule) Permissions() []iface.PermissionSpec {
@@ -222,6 +222,8 @@ func (m *NotificationModule) Init(deps *module.Dependencies) error {
 	m.handler = handlers.NewNotificationHandler(m.svc)
 
 	deps.Services.Register(module.ServiceNotificationSender, m.svc)
+	deps.Services.Register(module.ServiceNotificationTemplateSeeder,
+		module.NotificationTemplateSeeder(m.svc.TemplateService()))
 	return nil
 }
 

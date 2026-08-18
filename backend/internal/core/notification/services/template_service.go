@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/orkestra/backend/internal/core/notification/models"
 	"github.com/orkestra/backend/internal/core/notification/repository"
+	"github.com/orkestra/backend/pkg/sdk/module"
 )
 
 var ErrTemplateNotFound = errors.New("notification: template not found")
@@ -28,6 +29,7 @@ type Rendered struct {
 // and renders the template body with the provided data map.
 type TemplateService interface {
 	SeedDefaults(ctx context.Context) error
+	SeedModuleTemplates(ctx context.Context, specs []module.NotificationTemplateSpec) error
 	Get(ctx context.Context, templateID, locale string) (*models.TemplateDoc, error)
 	List(ctx context.Context) ([]*models.TemplateDoc, error)
 	Upsert(ctx context.Context, doc *models.TemplateDoc) error
@@ -46,34 +48,64 @@ func NewTemplateService(repo repository.TemplateRepository, logger *slog.Logger)
 
 func (s *templateService) SeedDefaults(ctx context.Context) error {
 	for _, def := range defaultTemplates {
-		exists, err := s.repo.ExistsSystemTemplate(ctx, def.TemplateID, def.Locale)
-		if err != nil {
-			return fmt.Errorf("check template %s/%s: %w", def.TemplateID, def.Locale, err)
+		if err := s.seedOne(ctx, def); err != nil {
+			return err
 		}
-		if exists {
-			continue
-		}
-		doc := &models.TemplateDoc{
-			UUID:        uuid.Must(uuid.NewV7()).String(),
-			TemplateID:  def.TemplateID,
-			Locale:      def.Locale,
-			Channel:     models.ChannelEmail,
-			Subject:     def.Subject,
-			BodyText:    def.BodyText,
-			BodyHTML:    def.BodyHTML,
-			Description: def.Description,
-			Variables:   def.Variables,
-			IsSystem:    true,
-			Version:     1,
-		}
-		if err := s.repo.Upsert(ctx, doc); err != nil {
-			return fmt.Errorf("seed template %s/%s: %w", def.TemplateID, def.Locale, err)
-		}
-		s.logger.Info("Seeded notification template",
-			slog.String("templateId", def.TemplateID),
-			slog.String("locale", def.Locale),
-		)
 	}
+	return nil
+}
+
+// SeedModuleTemplates seeds templates declared by modules through
+// module.HasNotificationTemplates. Same insert-if-absent rule as
+// SeedDefaults: an operator's edits survive a restart.
+func (s *templateService) SeedModuleTemplates(ctx context.Context, specs []module.NotificationTemplateSpec) error {
+	for _, spec := range specs {
+		if err := s.seedOne(ctx, defaultTemplate{
+			TemplateID:  spec.TemplateID,
+			Locale:      spec.Locale,
+			Subject:     spec.Subject,
+			BodyText:    spec.BodyText,
+			BodyHTML:    spec.BodyHTML,
+			Description: spec.Description,
+			Variables:   spec.Variables,
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// seedOne inserts a single template if it does not already exist as a
+// system template. Never overwrites an existing document — an operator's
+// edit to a previously-seeded template must survive re-seeding.
+func (s *templateService) seedOne(ctx context.Context, def defaultTemplate) error {
+	exists, err := s.repo.ExistsSystemTemplate(ctx, def.TemplateID, def.Locale)
+	if err != nil {
+		return fmt.Errorf("check template %s/%s: %w", def.TemplateID, def.Locale, err)
+	}
+	if exists {
+		return nil
+	}
+	doc := &models.TemplateDoc{
+		UUID:        uuid.Must(uuid.NewV7()).String(),
+		TemplateID:  def.TemplateID,
+		Locale:      def.Locale,
+		Channel:     models.ChannelEmail,
+		Subject:     def.Subject,
+		BodyText:    def.BodyText,
+		BodyHTML:    def.BodyHTML,
+		Description: def.Description,
+		Variables:   def.Variables,
+		IsSystem:    true,
+		Version:     1,
+	}
+	if err := s.repo.Upsert(ctx, doc); err != nil {
+		return fmt.Errorf("seed template %s/%s: %w", def.TemplateID, def.Locale, err)
+	}
+	s.logger.Info("Seeded notification template",
+		slog.String("templateId", def.TemplateID),
+		slog.String("locale", def.Locale),
+	)
 	return nil
 }
 

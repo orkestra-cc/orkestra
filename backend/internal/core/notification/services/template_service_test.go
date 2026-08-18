@@ -35,6 +35,19 @@ func newFakeTemplateRepo() *fakeTemplateRepo {
 	}
 }
 
+// newTestTemplateService builds a templateService wired to a fresh
+// fakeTemplateRepo, for tests that need to assert on the repo's captured
+// state (upserts, docs) after exercising the service.
+func newTestTemplateService(t *testing.T) (*templateService, *fakeTemplateRepo) {
+	t.Helper()
+	repo := newFakeTemplateRepo()
+	svc, ok := NewTemplateService(repo, discardLogger()).(*templateService)
+	if !ok {
+		t.Fatalf("NewTemplateService did not return *templateService")
+	}
+	return svc, repo
+}
+
 func tplKey(id, locale string) string { return id + "|" + locale }
 
 func (f *fakeTemplateRepo) GetByID(_ context.Context, id, locale string) (*models.TemplateDoc, error) {
@@ -64,7 +77,13 @@ func (f *fakeTemplateRepo) Upsert(_ context.Context, doc *models.TemplateDoc) er
 	}
 	cp := *doc
 	f.upserts = append(f.upserts, &cp)
-	f.docs[tplKey(doc.TemplateID, doc.Locale)] = &cp
+	key := tplKey(doc.TemplateID, doc.Locale)
+	f.docs[key] = &cp
+	// Mirrors the real Mongo-backed repo: ExistsSystemTemplate counts
+	// documents by templateId+locale, so a successful Upsert must be
+	// reflected there too — otherwise a fake-only reseed would never see
+	// its own prior insert and would overwrite operator edits.
+	f.exists[key] = true
 	return nil
 }
 
@@ -85,7 +104,7 @@ func (f *fakeTemplateRepo) ExistsSystemTemplate(_ context.Context, id, locale st
 }
 
 func TestTemplateService_Render_RendersAllThreeBodies(t *testing.T) {
-	svc := NewTemplateService(newFakeTemplateRepo(), discardLogger())
+	svc, _ := newTestTemplateService(t)
 	doc := &models.TemplateDoc{
 		Subject:  "Welcome {{.Name}}",
 		BodyText: "Hi {{.Name}}, your code is {{.Code}}",
@@ -107,7 +126,7 @@ func TestTemplateService_Render_RendersAllThreeBodies(t *testing.T) {
 }
 
 func TestTemplateService_Render_HTMLContextualEscaping(t *testing.T) {
-	svc := NewTemplateService(newFakeTemplateRepo(), discardLogger())
+	svc, _ := newTestTemplateService(t)
 	doc := &models.TemplateDoc{
 		Subject:  "S",
 		BodyText: "{{.Name}}",
@@ -127,7 +146,7 @@ func TestTemplateService_Render_HTMLContextualEscaping(t *testing.T) {
 }
 
 func TestTemplateService_Render_SkipsHTMLWhenBlank(t *testing.T) {
-	svc := NewTemplateService(newFakeTemplateRepo(), discardLogger())
+	svc, _ := newTestTemplateService(t)
 	doc := &models.TemplateDoc{
 		Subject:  "S",
 		BodyText: "plain",
@@ -143,7 +162,7 @@ func TestTemplateService_Render_SkipsHTMLWhenBlank(t *testing.T) {
 }
 
 func TestTemplateService_Render_NilTemplate(t *testing.T) {
-	svc := NewTemplateService(newFakeTemplateRepo(), discardLogger())
+	svc, _ := newTestTemplateService(t)
 	_, err := svc.Render(nil, nil)
 	if !errors.Is(err, ErrTemplateNotFound) {
 		t.Fatalf("expected ErrTemplateNotFound, got %v", err)
@@ -151,7 +170,7 @@ func TestTemplateService_Render_NilTemplate(t *testing.T) {
 }
 
 func TestTemplateService_Render_ParseError(t *testing.T) {
-	svc := NewTemplateService(newFakeTemplateRepo(), discardLogger())
+	svc, _ := newTestTemplateService(t)
 	// {{.Name with no closing braces is a parse error in text/template.
 	doc := &models.TemplateDoc{Subject: "{{.Name", BodyText: "x"}
 	_, err := svc.Render(doc, nil)
@@ -164,7 +183,7 @@ func TestTemplateService_Render_ParseError(t *testing.T) {
 }
 
 func TestTemplateService_Get_NotFoundMapped(t *testing.T) {
-	svc := NewTemplateService(newFakeTemplateRepo(), discardLogger())
+	svc, _ := newTestTemplateService(t)
 	_, err := svc.Get(context.Background(), "nope", "en")
 	if !errors.Is(err, ErrTemplateNotFound) {
 		t.Fatalf("expected ErrTemplateNotFound, got %v", err)
@@ -172,9 +191,8 @@ func TestTemplateService_Get_NotFoundMapped(t *testing.T) {
 }
 
 func TestTemplateService_Get_OtherRepoErrorPassesThrough(t *testing.T) {
-	repo := newFakeTemplateRepo()
+	svc, repo := newTestTemplateService(t)
 	repo.getErr = errors.New("boom")
-	svc := NewTemplateService(repo, discardLogger())
 	_, err := svc.Get(context.Background(), "id", "en")
 	if err == nil || errors.Is(err, ErrTemplateNotFound) {
 		t.Fatalf("expected raw repo error, got %v", err)
@@ -182,10 +200,9 @@ func TestTemplateService_Get_OtherRepoErrorPassesThrough(t *testing.T) {
 }
 
 func TestTemplateService_Get_Found(t *testing.T) {
-	repo := newFakeTemplateRepo()
+	svc, repo := newTestTemplateService(t)
 	want := &models.TemplateDoc{TemplateID: "id", Locale: "en", Subject: "S"}
 	repo.docs[tplKey("id", "en")] = want
-	svc := NewTemplateService(repo, discardLogger())
 	got, err := svc.Get(context.Background(), "id", "en")
 	if err != nil {
 		t.Fatalf("Get: %v", err)
@@ -196,8 +213,7 @@ func TestTemplateService_Get_Found(t *testing.T) {
 }
 
 func TestTemplateService_Upsert_FillsDefaults(t *testing.T) {
-	repo := newFakeTemplateRepo()
-	svc := NewTemplateService(repo, discardLogger())
+	svc, repo := newTestTemplateService(t)
 	doc := &models.TemplateDoc{TemplateID: "id", Subject: "S"}
 	if err := svc.Upsert(context.Background(), doc); err != nil {
 		t.Fatalf("Upsert: %v", err)
@@ -217,8 +233,7 @@ func TestTemplateService_Upsert_FillsDefaults(t *testing.T) {
 }
 
 func TestTemplateService_Upsert_PreservesProvidedFields(t *testing.T) {
-	repo := newFakeTemplateRepo()
-	svc := NewTemplateService(repo, discardLogger())
+	svc, _ := newTestTemplateService(t)
 	doc := &models.TemplateDoc{
 		UUID:       "manual-uuid",
 		TemplateID: "id",
@@ -235,9 +250,8 @@ func TestTemplateService_Upsert_PreservesProvidedFields(t *testing.T) {
 }
 
 func TestTemplateService_Delete_Passthrough(t *testing.T) {
-	repo := newFakeTemplateRepo()
+	svc, repo := newTestTemplateService(t)
 	repo.docs[tplKey("id", "en")] = &models.TemplateDoc{}
-	svc := NewTemplateService(repo, discardLogger())
 	if err := svc.Delete(context.Background(), "id", "en"); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
@@ -247,10 +261,9 @@ func TestTemplateService_Delete_Passthrough(t *testing.T) {
 }
 
 func TestTemplateService_List_Passthrough(t *testing.T) {
-	repo := newFakeTemplateRepo()
+	svc, repo := newTestTemplateService(t)
 	repo.docs[tplKey("a", "en")] = &models.TemplateDoc{TemplateID: "a"}
 	repo.docs[tplKey("b", "en")] = &models.TemplateDoc{TemplateID: "b"}
-	svc := NewTemplateService(repo, discardLogger())
 	got, err := svc.List(context.Background())
 	if err != nil {
 		t.Fatalf("List: %v", err)
@@ -261,8 +274,7 @@ func TestTemplateService_List_Passthrough(t *testing.T) {
 }
 
 func TestTemplateService_SeedDefaults_InsertsAllWhenMissing(t *testing.T) {
-	repo := newFakeTemplateRepo()
-	svc := NewTemplateService(repo, discardLogger())
+	svc, repo := newTestTemplateService(t)
 	if err := svc.SeedDefaults(context.Background()); err != nil {
 		t.Fatalf("SeedDefaults: %v", err)
 	}
@@ -286,12 +298,11 @@ func TestTemplateService_SeedDefaults_InsertsAllWhenMissing(t *testing.T) {
 }
 
 func TestTemplateService_SeedDefaults_SkipsExisting(t *testing.T) {
-	repo := newFakeTemplateRepo()
+	svc, repo := newTestTemplateService(t)
 	// All defaults already in DB → no inserts expected.
 	for _, def := range defaultTemplates {
 		repo.exists[tplKey(def.TemplateID, def.Locale)] = true
 	}
-	svc := NewTemplateService(repo, discardLogger())
 	if err := svc.SeedDefaults(context.Background()); err != nil {
 		t.Fatalf("SeedDefaults: %v", err)
 	}
@@ -301,18 +312,16 @@ func TestTemplateService_SeedDefaults_SkipsExisting(t *testing.T) {
 }
 
 func TestTemplateService_SeedDefaults_ExistsErrorPropagates(t *testing.T) {
-	repo := newFakeTemplateRepo()
+	svc, repo := newTestTemplateService(t)
 	repo.existsErr = errors.New("count failed")
-	svc := NewTemplateService(repo, discardLogger())
 	if err := svc.SeedDefaults(context.Background()); err == nil {
 		t.Fatalf("expected error from ExistsSystemTemplate")
 	}
 }
 
 func TestTemplateService_SeedDefaults_UpsertErrorPropagates(t *testing.T) {
-	repo := newFakeTemplateRepo()
+	svc, repo := newTestTemplateService(t)
 	repo.upsertErr = errors.New("write failed")
-	svc := NewTemplateService(repo, discardLogger())
 	if err := svc.SeedDefaults(context.Background()); err == nil {
 		t.Fatalf("expected error from Upsert")
 	}

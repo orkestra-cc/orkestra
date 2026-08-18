@@ -10,6 +10,7 @@ import (
 	"github.com/orkestra/backend/internal/core/notification/models"
 	"github.com/orkestra/backend/internal/core/notification/repository"
 	"github.com/orkestra/backend/pkg/sdk/iface"
+	"github.com/orkestra/backend/pkg/sdk/module"
 )
 
 // ---- Fakes --------------------------------------------------------------
@@ -63,6 +64,10 @@ type fakeTemplateService struct {
 }
 
 func (f *fakeTemplateService) SeedDefaults(_ context.Context) error { return nil }
+
+func (f *fakeTemplateService) SeedModuleTemplates(_ context.Context, _ []module.NotificationTemplateSpec) error {
+	return nil
+}
 
 func (f *fakeTemplateService) Get(_ context.Context, id, locale string) (*models.TemplateDoc, error) {
 	f.getCall.id = id
