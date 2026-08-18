@@ -94,6 +94,7 @@ type RefreshTokenDoc struct {
 // the family revocation.
 type RefreshTokenFamilyStateDoc struct {
 	ID            primitive.ObjectID `bson:"_id,omitempty" json:"-"`
+	Tier          string             `bson:"tier" json:"-"`
 	FamilyID      string             `bson:"familyId" json:"-"`
 	RevokedAt     time.Time          `bson:"revokedAt" json:"-"`
 	RevokedReason string             `bson:"revokedReason" json:"-"`

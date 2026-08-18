@@ -292,6 +292,35 @@ func TestRefreshTokensWithRiskAssessment_ReplayOfRotatedToken_KillsFamily(t *tes
 	}
 }
 
+func TestRefreshTokensWithRiskAssessment_ReplayInRotationGapReturnsNoActiveSuccessor(t *testing.T) {
+	env := newOrchestrationEnv(t)
+	user := seededUser()
+	env.users.seed(user)
+	rawRefresh, oldDoc := env.issueAndSeedRefresh(user, "fam-service-gap")
+
+	parentCAS := make(chan struct{})
+	continueInsert := make(chan struct{})
+	env.refresh.setRotationBarrier(parentCAS, continueInsert)
+	firstDone := make(chan error, 1)
+	go func() {
+		_, err := env.auth.RefreshTokensWithRiskAssessment(context.Background(), rawRefresh, &authModels.SecurityContext{})
+		firstDone <- err
+	}()
+
+	<-parentCAS
+	_, replayErr := env.auth.RefreshTokensWithRiskAssessment(context.Background(), rawRefresh, &authModels.SecurityContext{})
+	if !errors.Is(replayErr, ErrRefreshTokenReplay) {
+		t.Fatalf("gap replay = %v, want ErrRefreshTokenReplay", replayErr)
+	}
+	close(continueInsert)
+	if err := <-firstDone; !errors.Is(err, ErrRefreshTokenReplay) {
+		t.Fatalf("winning rotation after compromise = %v, want ErrRefreshTokenReplay", err)
+	}
+	if active := env.refresh.activeFamilyMembers(oldDoc.FamilyID); active != 0 {
+		t.Fatalf("active successors after gap replay = %d, want 0", active)
+	}
+}
+
 // ===== Error paths =====
 
 func TestRefreshTokensWithRiskAssessment_ExpiredToken_ReturnsInvalid(t *testing.T) {

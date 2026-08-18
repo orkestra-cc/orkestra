@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -16,12 +17,25 @@ import (
 // `{isRevoked:false}` is modelled by a quick check under the mutex — so
 // the tests reflect real-world behaviour without needing a live database.
 type inMemoryRefreshRepo struct {
-	mu     sync.Mutex
-	byHash map[string]*authModels.RefreshTokenDoc
+	mu          sync.Mutex
+	byHash      map[string]*authModels.RefreshTokenDoc
+	compromised map[string]testFamilyRevocation
+	casReached  chan struct{}
+	allowInsert chan struct{}
 }
 
 func newInMemoryRefreshRepo() *inMemoryRefreshRepo {
-	return &inMemoryRefreshRepo{byHash: map[string]*authModels.RefreshTokenDoc{}}
+	return &inMemoryRefreshRepo{
+		byHash:      map[string]*authModels.RefreshTokenDoc{},
+		compromised: map[string]testFamilyRevocation{},
+	}
+}
+
+func (r *inMemoryRefreshRepo) setRotationBarrier(reached, release chan struct{}) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.casReached = reached
+	r.allowInsert = release
 }
 
 func (r *inMemoryRefreshRepo) insert(tokenHash string, doc *authModels.RefreshTokenDoc) {
@@ -37,6 +51,11 @@ func (r *inMemoryRefreshRepo) GetByTokenAny(_ context.Context, tokenHash string)
 	defer r.mu.Unlock()
 	if d, ok := r.byHash[tokenHash]; ok {
 		c := *d
+		if state, compromised := r.compromised[c.FamilyID]; compromised {
+			c.IsRevoked = true
+			c.RevokedAt = &state.at
+			c.RevokedReason = state.reason
+		}
 		return &c, nil
 	}
 	return nil, nil
@@ -44,9 +63,9 @@ func (r *inMemoryRefreshRepo) GetByTokenAny(_ context.Context, tokenHash string)
 
 func (r *inMemoryRefreshRepo) RotateWithFamily(_ context.Context, oldHash string, newDoc *authModels.RefreshTokenDoc) error {
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	old, ok := r.byHash[oldHash]
 	if !ok || old.IsRevoked {
+		r.mu.Unlock()
 		return repository.ErrTokenAlreadyRotated
 	}
 	now := time.Now()
@@ -54,13 +73,31 @@ func (r *inMemoryRefreshRepo) RotateWithFamily(_ context.Context, oldHash string
 	old.RevokedAt = &now
 	old.RevokedReason = authModels.RevokeReasonRotated
 	old.SucceededBy = newDoc.UUID
+	reached, release := r.casReached, r.allowInsert
+	r.casReached, r.allowInsert = nil, nil
+	r.mu.Unlock()
+	if reached != nil {
+		close(reached)
+		<-release
+	}
 
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	copy := *newDoc
 	// Mirror the real repo: caller-supplied Token is a raw token string
 	// that the repo hashes before storing. For the test we accept whatever
 	// the caller passes — tests key on the FamilyID / SucceededBy chain,
 	// not the specific hash.
+	state, compromised := r.compromised[copy.FamilyID]
+	if compromised {
+		copy.IsRevoked = true
+		copy.RevokedAt = &state.at
+		copy.RevokedReason = state.reason
+	}
 	r.byHash[newDoc.Token] = &copy
+	if compromised {
+		return repository.ErrTokenAlreadyRotated
+	}
 	return nil
 }
 
@@ -71,6 +108,7 @@ func (r *inMemoryRefreshRepo) RevokeFamily(_ context.Context, familyID, reason s
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	now := time.Now()
+	r.compromised[familyID] = testFamilyRevocation{at: now, reason: reason}
 	var n int64
 	for _, d := range r.byHash {
 		if d.FamilyID == familyID && !d.IsRevoked {
@@ -201,6 +239,41 @@ func TestRotateWithFamilyReplayDetected(t *testing.T) {
 	b, _ := repo.GetByTokenAny(ctx, "h-B")
 	if !b.IsRevoked || b.RevokedReason != authModels.RevokeReasonReplayDetected {
 		t.Fatalf("B not revoked with replay reason: %+v", b)
+	}
+}
+
+func TestInMemoryRefreshRepo_RevokeBetweenCASAndInsertFencesSuccessor(t *testing.T) {
+	ctx := context.Background()
+	repo := newInMemoryRefreshRepo()
+	family := "fam-deterministic-gap"
+	repo.insert("h-gap-old", &authModels.RefreshTokenDoc{
+		UUID: "gap-old", FamilyID: family, ExpiresAt: time.Now().Add(time.Hour),
+	})
+
+	parentCAS := make(chan struct{})
+	continueInsert := make(chan struct{})
+	repo.setRotationBarrier(parentCAS, continueInsert)
+	rotationDone := make(chan error, 1)
+	go func() {
+		rotationDone <- repo.RotateWithFamily(ctx, "h-gap-old", &authModels.RefreshTokenDoc{
+			UUID: "gap-next", FamilyID: family, Token: "h-gap-next", ExpiresAt: time.Now().Add(time.Hour),
+		})
+	}()
+
+	<-parentCAS
+	if _, err := repo.RevokeFamily(ctx, family, authModels.RevokeReasonReplayDetected); err != nil {
+		t.Fatalf("RevokeFamily in CAS/insert gap: %v", err)
+	}
+	close(continueInsert)
+	if err := <-rotationDone; !errors.Is(err, repository.ErrTokenAlreadyRotated) {
+		t.Fatalf("RotateWithFamily = %v, want ErrTokenAlreadyRotated", err)
+	}
+	successor, err := repo.GetByTokenAny(ctx, "h-gap-next")
+	if err != nil {
+		t.Fatalf("GetByTokenAny: %v", err)
+	}
+	if successor == nil || !successor.IsRevoked || successor.RevokedReason != authModels.RevokeReasonReplayDetected {
+		t.Fatalf("successor escaped durable family fence: %+v", successor)
 	}
 }
 

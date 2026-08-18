@@ -60,6 +60,9 @@ type webAuthnService struct {
 	factors    repository.MFAFactorRepository
 	challenges MFAChallengeService
 	logger     *slog.Logger
+	// assertionValidator is a test seam around the cryptographic library.
+	// Production leaves it nil and uses validateAssertion below.
+	assertionValidator func(context.Context, *iface.User, webauthn.SessionData, []byte) (*webauthn.Credential, error)
 	// policy is the optional admin-managed source for the mfaMethods
 	// allow-list. Phase 3.6 — nil keeps the pre-policy "all methods
 	// allowed" behaviour so existing tests don't have to wire it.
@@ -262,28 +265,29 @@ func (s *webAuthnService) FinishAssertion(ctx context.Context, user *iface.User,
 		return fmt.Errorf("unmarshal webauthn session: %w", err)
 	}
 
-	parsed, err := protocol.ParseCredentialRequestResponseBytes(assertionJSON)
-	if err != nil {
-		_, _ = s.challenges.IncrementAttempts(ctx, challengeID)
-		return fmt.Errorf("%w: parse assertion: %v", ErrWebAuthnAssertion, err)
+	validator := s.assertionValidator
+	if validator == nil {
+		validator = s.validateAssertion
 	}
-
-	creds, err := s.loadCredentials(ctx, user.UUID)
-	if err != nil || len(creds) == 0 {
-		return ErrWebAuthnNoCredentials
-	}
-	wu := &webAuthnUser{user: user, credentials: creds}
-
-	libCred, err := s.wa.ValidateLogin(wu, sessionData, parsed)
+	libCred, err := validator(ctx, user, sessionData, assertionJSON)
 	if err != nil {
+		if errors.Is(err, ErrWebAuthnNoCredentials) {
+			return err
+		}
 		_, _ = s.challenges.IncrementAttempts(ctx, challengeID)
 		return fmt.Errorf("%w: %v", ErrWebAuthnAssertion, err)
 	}
 
-	// Verified — consume the challenge before the sign-count update so a
-	// crash between persist and consume falls on the safe side (challenge
-	// stays alive, can be retried, sign-count not yet bumped).
-	_, _ = s.challenges.Consume(ctx, challengeID)
+	// Cryptographic verification succeeded. Atomically claim the ceremony
+	// now: invalid assertions never burn a legitimate challenge, while
+	// concurrent/replayed valid assertions have exactly one winner.
+	consumed, err := s.challenges.Consume(ctx, challengeID)
+	if err != nil {
+		return ErrMFAInvalidCode
+	}
+	if consumed.UserUUID != user.UUID || consumed.Purpose != expectedPurpose {
+		return ErrMFAChallengeMismatch
+	}
 
 	now := time.Now()
 	updated, err := s.factors.UpdateWebAuthnCredential(ctx, user.UUID, libCred.ID, libCred.Authenticator.SignCount, now, libCred.Authenticator.CloneWarning)
@@ -311,6 +315,23 @@ func (s *webAuthnService) FinishAssertion(ctx context.Context, user *iface.User,
 		)
 	}
 	return nil
+}
+
+func (s *webAuthnService) validateAssertion(ctx context.Context, user *iface.User, sessionData webauthn.SessionData, assertionJSON []byte) (*webauthn.Credential, error) {
+	parsed, err := protocol.ParseCredentialRequestResponseBytes(assertionJSON)
+	if err != nil {
+		return nil, fmt.Errorf("parse assertion: %w", err)
+	}
+	creds, err := s.loadCredentials(ctx, user.UUID)
+	if err != nil || len(creds) == 0 {
+		return nil, ErrWebAuthnNoCredentials
+	}
+	wu := &webAuthnUser{user: user, credentials: creds}
+	credential, err := s.wa.ValidateLogin(wu, sessionData, parsed)
+	if err != nil {
+		return nil, err
+	}
+	return credential, nil
 }
 
 func (s *webAuthnService) ListCredentials(ctx context.Context, userUUID string) ([]authModels.WebAuthnCredential, error) {

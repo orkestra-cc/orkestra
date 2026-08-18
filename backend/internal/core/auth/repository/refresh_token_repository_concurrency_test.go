@@ -126,3 +126,32 @@ func TestRefreshRepository_RotateAndRevokeFamilyHaveNoActiveSuccessor(t *testing
 		}
 	}
 }
+
+func TestRefreshRepository_RevokeFamilyStampsMarkerTier(t *testing.T) {
+	operatorRepo, cleanup := liveRefreshRepository(t)
+	defer cleanup()
+	ctx := context.Background()
+	clientRepo := NewClientRefreshTokenRepository(operatorRepo.collection.Database()).(*refreshTokenRepository)
+	for _, tc := range []struct {
+		name string
+		repo *refreshTokenRepository
+		tier string
+	}{
+		{name: "operator", repo: operatorRepo, tier: models.TierOperator},
+		{name: "client", repo: clientRepo, tier: models.TierClient},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			family := "family-tier-stamp-" + tc.name
+			if _, err := tc.repo.RevokeFamily(ctx, family, models.RevokeReasonReplayDetected); err != nil {
+				t.Fatalf("RevokeFamily: %v", err)
+			}
+			var state models.RefreshTokenFamilyStateDoc
+			if err := tc.repo.familyCollection.FindOne(ctx, bson.M{"familyId": family}).Decode(&state); err != nil {
+				t.Fatalf("FindOne family marker: %v", err)
+			}
+			if state.Tier != tc.tier {
+				t.Fatalf("family marker tier = %q, want %q", state.Tier, tc.tier)
+			}
+		})
+	}
+}

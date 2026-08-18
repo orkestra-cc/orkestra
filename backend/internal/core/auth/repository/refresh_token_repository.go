@@ -449,7 +449,7 @@ func (r *refreshTokenRepository) RevokeFamily(ctx context.Context, familyID, rea
 	_, err := r.familyCollection.UpdateOne(ctx,
 		bson.M{"familyId": familyID},
 		bson.M{
-			"$set":         bson.M{"revokedAt": now, "revokedReason": reason, "updatedAt": now},
+			"$set":         bson.M{"tier": r.tier, "revokedAt": now, "revokedReason": reason, "updatedAt": now},
 			"$setOnInsert": bson.M{"familyId": familyID, "createdAt": now},
 		},
 		options.Update().SetUpsert(true),

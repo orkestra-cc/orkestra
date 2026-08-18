@@ -38,6 +38,18 @@ func (stepUpWebAuthn) FinishAssertion(context.Context, *iface.User, string, serv
 	return nil
 }
 
+type oneWinnerWebAuthn struct {
+	services.WebAuthnService
+	used sync.Map
+}
+
+func (w *oneWinnerWebAuthn) FinishAssertion(_ context.Context, _ *iface.User, challengeID string, _ services.MFAChallengePurpose, _ []byte) error {
+	if _, loaded := w.used.LoadOrStore(challengeID, struct{}{}); loaded {
+		return services.ErrMFAInvalidCode
+	}
+	return nil
+}
+
 type stepUpRefreshRepo struct {
 	repository.RefreshTokenRepository
 	created *authModels.RefreshTokenDoc
@@ -392,6 +404,66 @@ func TestMFALoginVerify_ConcurrentReplayMintsExactlyOnce(t *testing.T) {
 
 	if got := successes.Load(); got != 1 {
 		t.Errorf("successful responses = %d, want 1", got)
+	}
+	if got := issuer.calls.Load(); got != 1 {
+		t.Errorf("token issuance calls = %d, want 1", got)
+	}
+}
+
+func TestWebAuthnVerifyFinish_ReplayedCeremonyCannotMintAgain(t *testing.T) {
+	jwt := newStepUpJWT(t)
+	user := &iface.User{UUID: "step-up-user", Email: "step-up@example.com", Role: "operator", IsActive: true}
+	h := NewWebAuthnHandler(&oneWinnerWebAuthn{}, nil, jwt, &stepUpUsers{user: user}, nil, "", "", false)
+	req := &webAuthnVerifyFinishRequest{}
+	req.Body.ChallengeID = "ceremony-step-up-one-winner"
+	req.Body.AssertionResponse = json.RawMessage(`{"id":"credential"}`)
+
+	if _, err := h.VerifyFinish(stepUpContext(user.UUID), req); err != nil {
+		t.Fatalf("first VerifyFinish: %v", err)
+	}
+	if _, err := h.VerifyFinish(stepUpContext(user.UUID), req); statusOf(t, err) != http.StatusUnauthorized {
+		t.Fatalf("replayed VerifyFinish = %v, want 401", err)
+	}
+}
+
+func TestWebAuthnLoginFinish_OneCeremonyCannotCompleteDifferentPendingLogins(t *testing.T) {
+	user := &iface.User{UUID: "pending-user", Email: "pending@example.com", Role: "operator", IsActive: true}
+	challenges := services.NewMFAChallengeService(services.NewMemoryOAuthStateStore())
+	pendingIDs := make([]string, 0, 2)
+	for _, sid := range []string{"pending-session-a", "pending-session-b"} {
+		challenge, err := challenges.BeginLogin(context.Background(), services.LoginChallengeInput{
+			UserUUID: user.UUID, SessionID: sid, SourceAMR: []string{"pwd"},
+		})
+		if err != nil {
+			t.Fatalf("BeginLogin(%s): %v", sid, err)
+		}
+		pendingIDs = append(pendingIDs, challenge.ID)
+	}
+	issuer := &countingLoginTokenIssuer{}
+	h := NewWebAuthnHandler(&oneWinnerWebAuthn{}, challenges, newStepUpJWT(t), &stepUpUsers{user: user}, issuer, "", "", false)
+
+	start := make(chan struct{})
+	var successes atomic.Int32
+	var wg sync.WaitGroup
+	for _, pendingID := range pendingIDs {
+		pendingID := pendingID
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			req := &webAuthnLoginFinishRequest{}
+			req.Body.LoginChallengeID = pendingID
+			req.Body.WebAuthnChallengeID = "shared-ceremony-one-winner"
+			req.Body.AssertionResponse = json.RawMessage(`{"id":"credential"}`)
+			if _, err := h.LoginFinish(context.Background(), req); err == nil {
+				successes.Add(1)
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+	if got := successes.Load(); got != 1 {
+		t.Errorf("successful login completions = %d, want 1", got)
 	}
 	if got := issuer.calls.Load(); got != 1 {
 		t.Errorf("token issuance calls = %d, want 1", got)

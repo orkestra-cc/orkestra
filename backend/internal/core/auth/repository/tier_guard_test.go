@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"reflect"
 	"testing"
 	"time"
 
@@ -8,6 +9,16 @@ import (
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
+
+func TestRefreshTokenFamilyStateDeclaresTierGuard(t *testing.T) {
+	field, ok := reflect.TypeOf(models.RefreshTokenFamilyStateDoc{}).FieldByName("Tier")
+	if !ok {
+		t.Fatal("RefreshTokenFamilyStateDoc has no Tier field")
+	}
+	if got := field.Tag.Get("bson"); got != "tier" {
+		t.Fatalf("Tier bson tag = %q, want tier", got)
+	}
+}
 
 // TestAuthRepoConstructorsBindCorrectTierAndCollection asserts that
 // each of the five auth-side repos exposes operator and client

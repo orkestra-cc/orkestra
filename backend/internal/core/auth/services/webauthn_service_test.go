@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/go-webauthn/webauthn/webauthn"
@@ -219,5 +221,74 @@ func TestWebAuthnBeginAssertionRejectsBadPurpose(t *testing.T) {
 	_, _, err := svc.BeginAssertion(ctx, testWebAuthnUser(), MFAChallengePurpose("totally-bogus"))
 	if !errors.Is(err, ErrMFAChallengeMismatch) {
 		t.Fatalf("expected ErrMFAChallengeMismatch, got %v", err)
+	}
+}
+
+func assertionServiceForConsumeTests(t *testing.T) (*webAuthnService, MFAChallengeService) {
+	t.Helper()
+	svcIface, repo, challenges := newTestWebAuthn(t)
+	svc := svcIface.(*webAuthnService)
+	credential := authModels.WebAuthnCredential{
+		CredentialID: []byte("credential-one-winner"), PublicKey: []byte("public-key"), Name: "test",
+	}
+	if err := repo.AppendWebAuthnCredential(context.Background(), testWebAuthnUser().UUID, credential); err != nil {
+		t.Fatalf("AppendWebAuthnCredential: %v", err)
+	}
+	return svc, challenges
+}
+
+func TestWebAuthnFinishAssertion_ConcurrentVerifiedCallersHaveOneWinner(t *testing.T) {
+	svc, challenges := assertionServiceForConsumeTests(t)
+	challenge, err := challenges.Begin(context.Background(), testWebAuthnUser().UUID, MFAPurposeWebAuthnLogin, `{}`)
+	if err != nil {
+		t.Fatalf("Begin: %v", err)
+	}
+	svc.assertionValidator = func(context.Context, *iface.User, webauthn.SessionData, []byte) (*webauthn.Credential, error) {
+		return &webauthn.Credential{ID: []byte("credential-one-winner")}, nil
+	}
+
+	const callers = 24
+	start := make(chan struct{})
+	var winners atomic.Int32
+	var wg sync.WaitGroup
+	for i := 0; i < callers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			if err := svc.FinishAssertion(context.Background(), testWebAuthnUser(), challenge.ID, MFAPurposeWebAuthnLogin, []byte("verified-by-test-seam")); err == nil {
+				winners.Add(1)
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+	if got := winners.Load(); got != 1 {
+		t.Fatalf("successful assertions = %d, want exactly 1", got)
+	}
+}
+
+func TestWebAuthnFinishAssertion_InvalidAssertionDoesNotBurnChallenge(t *testing.T) {
+	svc, challenges := assertionServiceForConsumeTests(t)
+	challenge, err := challenges.Begin(context.Background(), testWebAuthnUser().UUID, MFAPurposeWebAuthnVerify, `{}`)
+	if err != nil {
+		t.Fatalf("Begin: %v", err)
+	}
+	var validations atomic.Int32
+	svc.assertionValidator = func(context.Context, *iface.User, webauthn.SessionData, []byte) (*webauthn.Credential, error) {
+		if validations.Add(1) == 1 {
+			return nil, ErrWebAuthnAssertion
+		}
+		return &webauthn.Credential{ID: []byte("credential-one-winner")}, nil
+	}
+
+	if err := svc.FinishAssertion(context.Background(), testWebAuthnUser(), challenge.ID, MFAPurposeWebAuthnVerify, []byte("invalid")); !errors.Is(err, ErrWebAuthnAssertion) {
+		t.Fatalf("invalid assertion = %v, want ErrWebAuthnAssertion", err)
+	}
+	if err := svc.FinishAssertion(context.Background(), testWebAuthnUser(), challenge.ID, MFAPurposeWebAuthnVerify, []byte("valid")); err != nil {
+		t.Fatalf("retry after invalid assertion: %v", err)
+	}
+	if err := svc.FinishAssertion(context.Background(), testWebAuthnUser(), challenge.ID, MFAPurposeWebAuthnVerify, []byte("replay")); !errors.Is(err, ErrMFAInvalidCode) {
+		t.Fatalf("replayed assertion = %v, want ErrMFAInvalidCode", err)
 	}
 }
