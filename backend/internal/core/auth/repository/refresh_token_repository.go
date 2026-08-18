@@ -468,6 +468,7 @@ func (r *refreshTokenRepository) RevokeFamily(ctx context.Context, familyID, rea
 	} else if err != nil && err != mongo.ErrNoDocuments {
 		return 0, fmt.Errorf("failed to determine refresh family expiry: %w", err)
 	}
+	//tenantscope:allow Refresh-family state is audience-tier scoped, not org scoped; this repository is bound to one tier collection.
 	_, err := r.familyCollection.UpdateOne(ctx,
 		bson.M{"familyId": familyID},
 		bson.M{
