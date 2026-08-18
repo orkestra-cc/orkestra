@@ -66,6 +66,32 @@ func TestCollector_CapabilityDeniedLabel(t *testing.T) {
 	}
 }
 
+func TestSessionRevocationStoreFailure(t *testing.T) {
+	c := NewCollector()
+	if err := c.Register(); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+
+	c.RecordSessionRevocationStoreFailure("lookup")
+	body := scrapeCollector(t, c)
+	if !strings.Contains(body, `orkestra_auth_session_revocation_store_failures_total{operation="lookup"} 1`) {
+		t.Errorf("expected lookup failure metric in exposition, got:\n%s", body)
+	}
+}
+
+func TestSessionRevocationStoreFailure_UnknownOperationIsBounded(t *testing.T) {
+	c := NewCollector()
+	if err := c.Register(); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+
+	c.RecordSessionRevocationStoreFailure("untrusted-operation")
+	body := scrapeCollector(t, c)
+	if !strings.Contains(body, `orkestra_auth_session_revocation_store_failures_total{operation="unknown"} 1`) {
+		t.Errorf("expected unknown failure metric in exposition, got:\n%s", body)
+	}
+}
+
 // TestCollector_EntitlementLag_TracksRecency ensures a fresh apply
 // reports ~0 lag and that the gauge rises monotonically with time until
 // the next apply.
@@ -137,6 +163,21 @@ func TestCollector_HandlerExposesFamilies(t *testing.T) {
 			t.Errorf("expected metric family %q in exposition body", want)
 		}
 	}
+}
+
+func scrapeCollector(t *testing.T, c *Collector) string {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	rec := httptest.NewRecorder()
+	c.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /metrics returned %d", rec.Code)
+	}
+	body, err := io.ReadAll(rec.Body)
+	if err != nil {
+		t.Fatalf("read metrics body: %v", err)
+	}
+	return string(body)
 }
 
 // TestCollector_CedarEnforcedLabels freezes the label schema for the
