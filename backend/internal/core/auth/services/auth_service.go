@@ -1115,7 +1115,7 @@ func (s *authService) revokeSessionInternal(ctx context.Context, sessionUUID, re
 }
 
 func (s *authService) GenerateEnhancedTokenPair(ctx context.Context, user *iface.User, deviceInfo *models.DeviceInfo, securityCtx *models.SecurityContext) (*models.TokenResponse, error) {
-	if err := validateTokenEligibleUser(user); err != nil {
+	if err := ValidateTokenEligibleUser(user); err != nil {
 		return nil, err
 	}
 
@@ -1303,7 +1303,7 @@ func (s *authService) RefreshTokensWithRiskAssessment(ctx context.Context, refre
 
 	// Keep refresh failures on their established neutral sentinel while
 	// sharing the same eligibility invariant as initial token issuance.
-	if err := validateTokenEligibleUser(user); err != nil {
+	if err := ValidateTokenEligibleUser(user); err != nil {
 		return nil, ErrInvalidRefreshToken
 	}
 
@@ -1433,7 +1433,7 @@ func (s *authService) MintAccessTokenFromRefresh(ctx context.Context, refreshTok
 
 	// Same rule as the rotation path: a deactivated account gets no
 	// fresh access token, whichever endpoint asks.
-	if err := validateTokenEligibleUser(user); err != nil {
+	if err := ValidateTokenEligibleUser(user); err != nil {
 		return nil, ErrInvalidRefreshToken
 	}
 
@@ -1822,7 +1822,7 @@ func (s *authService) HandleOAuthCallbackWithLinking(ctx context.Context, provid
 	// Reject an ineligible resolved account before updating or creating its
 	// provider link. GenerateEnhancedTokenPair repeats this at the issuance
 	// boundary for every direct caller.
-	if err := validateTokenEligibleUser(user); err != nil {
+	if err := ValidateTokenEligibleUser(user); err != nil {
 		return nil, err
 	}
 
@@ -1990,7 +1990,9 @@ func (s *authService) HandleOAuthCallbackWithLinking(ctx context.Context, provid
 	return tokenResponse, nil
 }
 
-func validateTokenEligibleUser(user *iface.User) error {
+// ValidateTokenEligibleUser is the shared full-token issuance invariant.
+// Callers must apply it before MFA evaluation, signing, or persistence.
+func ValidateTokenEligibleUser(user *iface.User) error {
 	if user == nil || user.UUID == "" || !user.IsActive {
 		return ErrInvalidCredentials
 	}

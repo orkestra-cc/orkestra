@@ -255,22 +255,52 @@ func oauthSignupDisabled(err error) bool {
 
 const invalidOAuthAuthenticationDetail = "Invalid OAuth authentication"
 
+type oauthErrorResponse struct {
+	status     int
+	humaDetail string
+	rawDetail  string
+	outcome    string
+}
+
+func oauthErrorResponseFor(err error) oauthErrorResponse {
+	if errors.Is(err, services.ErrInvalidCredentials) {
+		return oauthErrorResponse{
+			status:     http.StatusUnauthorized,
+			humaDetail: invalidOAuthAuthenticationDetail,
+			rawDetail:  invalidOAuthAuthenticationDetail,
+			outcome:    "invalid_credentials",
+		}
+	}
+	return oauthErrorResponse{
+		status:     http.StatusInternalServerError,
+		humaDetail: "Failed to process authentication",
+		rawDetail:  "Failed to process OAuth callback",
+		outcome:    "internal_error",
+	}
+}
+
 // mapOAuthError collapses account-eligibility failures into the same neutral
 // response as an invalid OAuth credential. OAuth must not reveal whether an
 // otherwise valid identity belongs to a deactivated local account.
 func mapOAuthError(err error) error {
-	if errors.Is(err, services.ErrInvalidCredentials) {
-		return huma.Error401Unauthorized(invalidOAuthAuthenticationDetail)
+	response := oauthErrorResponseFor(err)
+	if response.status == http.StatusUnauthorized {
+		return huma.Error401Unauthorized(response.humaDetail)
 	}
-	return huma.Error500InternalServerError("Failed to process authentication", err)
+	return huma.Error500InternalServerError(response.humaDetail, err)
 }
 
-func writeOAuthCallbackError(w http.ResponseWriter, err error) {
-	if errors.Is(err, services.ErrInvalidCredentials) {
-		http.Error(w, invalidOAuthAuthenticationDetail, http.StatusUnauthorized)
-		return
-	}
-	http.Error(w, "Failed to process OAuth callback", http.StatusInternalServerError)
+func logOAuthAuthenticationFailure(provider models.OAuthProvider, outcome string) {
+	slog.Default().Warn("oauth_authentication_failed",
+		slog.String("provider", string(provider)),
+		slog.String("outcome", outcome),
+	)
+}
+
+func writeOAuthCallbackError(w http.ResponseWriter, provider models.OAuthProvider, err error) {
+	response := oauthErrorResponseFor(err)
+	logOAuthAuthenticationFailure(provider, response.outcome)
+	http.Error(w, response.rawDetail, response.status)
 }
 
 // redirectOAuthSignupDisabled bounces the caller back to the frontend
@@ -968,8 +998,7 @@ func (h *AuthHandler) HandleGoogleCallbackHTTP(w http.ResponseWriter, r *http.Re
 			redirectOAuthSignupDisabled(w, r, target.config.Server.FrontendURL)
 			return
 		}
-		logger.Error("Failed to process OAuth callback", slog.String("error", err.Error()))
-		writeOAuthCallbackError(w, err)
+		writeOAuthCallbackError(w, models.OAuthProviderGoogle, err)
 		return
 	}
 	// MFA-partial path: privileged user with an enrolled factor — no
@@ -1076,7 +1105,7 @@ func (h *AuthHandler) HandleDiscordCallbackHTTP(w http.ResponseWriter, r *http.R
 	// Use enhanced auth service for proper user creation and token management
 	authTokenResponse, err := target.authService.HandleOAuthCallbackWithLinking(ctx, models.OAuthProviderDiscord, userInfoMap, oauthTokens, stateInfo.SecurityContext, stateInfo.DeviceInfo)
 	if err != nil {
-		writeOAuthCallbackError(w, err)
+		writeOAuthCallbackError(w, models.OAuthProviderDiscord, err)
 		return
 	}
 	if h.finishOAuthMFAPartialRedirect(w, r, target, authTokenResponse, "discord") {
@@ -1246,8 +1275,7 @@ func (h *AuthHandler) HandleAppleCallbackHTTP(w http.ResponseWriter, r *http.Req
 	utils.AuthDebug("Processing OAuth callback with linking")
 	tokenResponse, err := target.authService.HandleOAuthCallbackWithLinking(ctx, models.OAuthProviderApple, userInfoMap, oauthTokens, stateInfo.SecurityContext, stateInfo.DeviceInfo)
 	if err != nil {
-		utils.AuthDebugError("oauth_callback", err)
-		writeOAuthCallbackError(w, err)
+		writeOAuthCallbackError(w, models.OAuthProviderApple, err)
 		return
 	}
 	if h.finishOAuthMFAPartialRedirect(w, r, target, tokenResponse, "apple") {
@@ -1892,7 +1920,7 @@ func (h *AuthHandler) HandleMobileGoogleAuth(ctx context.Context, req *MobileGoo
 		deviceInfo,
 	)
 	if err != nil {
-		logger.Error("Failed to process OAuth callback", slog.String("error", err.Error()))
+		logOAuthAuthenticationFailure(models.OAuthProviderGoogle, oauthErrorResponseFor(err).outcome)
 		return nil, mapOAuthError(err)
 	}
 
@@ -2009,7 +2037,7 @@ func (h *AuthHandler) HandleMobileAppleAuth(ctx context.Context, req *MobileAppl
 		deviceInfo,
 	)
 	if err != nil {
-		logger.Error("Failed to process OAuth callback", slog.String("error", err.Error()))
+		logOAuthAuthenticationFailure(models.OAuthProviderApple, oauthErrorResponseFor(err).outcome)
 		return nil, mapOAuthError(err)
 	}
 

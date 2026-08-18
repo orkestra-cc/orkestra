@@ -166,3 +166,20 @@ func TestGenerateEnhancedTokenPair_RejectsIneligible(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateTokenEligibleUser_RejectsIneligible(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		user *iface.User
+	}{
+		{name: "nil", user: nil},
+		{name: "empty UUID", user: &iface.User{IsActive: true}},
+		{name: "inactive", user: &iface.User{UUID: "inactive-user", IsActive: false}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := ValidateTokenEligibleUser(tc.user); !errors.Is(err, ErrInvalidCredentials) {
+				t.Fatalf("err = %v, want ErrInvalidCredentials", err)
+			}
+		})
+	}
+}
