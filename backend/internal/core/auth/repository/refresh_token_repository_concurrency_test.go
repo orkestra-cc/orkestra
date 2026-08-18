@@ -117,6 +117,7 @@ func TestRefreshRepository_RotateAndRevokeFamilyHaveNoActiveSuccessor(t *testing
 		close(start)
 		wg.Wait()
 
+		//tenantscope:allow Live repository test inspects one isolated test database directly.
 		active, err := repo.collection.CountDocuments(ctx, bson.M{"familyId": family, "isRevoked": false})
 		if err != nil {
 			t.Fatalf("iteration %d count active: %v", i, err)
@@ -146,6 +147,7 @@ func TestRefreshRepository_RevokeFamilyStampsMarkerTier(t *testing.T) {
 				t.Fatalf("RevokeFamily: %v", err)
 			}
 			var state models.RefreshTokenFamilyStateDoc
+			//tenantscope:allow Live repository test inspects one isolated test database directly.
 			if err := tc.repo.familyCollection.FindOne(ctx, bson.M{"familyId": family}).Decode(&state); err != nil {
 				t.Fatalf("FindOne family marker: %v", err)
 			}

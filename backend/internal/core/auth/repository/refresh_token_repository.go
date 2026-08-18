@@ -166,6 +166,7 @@ func (r *refreshTokenRepository) GetByToken(ctx context.Context, tokenHash strin
 	}
 
 	var result models.RefreshTokenDoc
+	//tenantscope:allow Refresh-token state is audience-tier scoped, not org scoped; this repository is bound to one tier collection.
 	err := r.collection.FindOne(ctx, filter).Decode(&result)
 	if err != nil {
 		if err == mongo.ErrNoDocuments {
@@ -190,6 +191,7 @@ func (r *refreshTokenRepository) GetByTokenAny(ctx context.Context, tokenHash st
 	filter := bson.M{"token": tokenHash}
 
 	var result models.RefreshTokenDoc
+	//tenantscope:allow Refresh-token state is audience-tier scoped, not org scoped; this repository is bound to one tier collection.
 	err := r.collection.FindOne(ctx, filter).Decode(&result)
 	if err != nil {
 		if err == mongo.ErrNoDocuments {
@@ -208,6 +210,7 @@ func (r *refreshTokenRepository) familyRevocation(ctx context.Context, familyID 
 		return nil, nil
 	}
 	var state models.RefreshTokenFamilyStateDoc
+	//tenantscope:allow Refresh-family state is audience-tier scoped, not org scoped; this repository is bound to one tier collection.
 	err := r.familyCollection.FindOne(ctx, bson.M{"familyId": familyID}).Decode(&state)
 	if err == mongo.ErrNoDocuments {
 		return nil, nil
@@ -240,6 +243,7 @@ func (r *refreshTokenRepository) GetBySessionUUID(ctx context.Context, sessionUU
 	}
 
 	var result models.RefreshTokenDoc
+	//tenantscope:allow Refresh-token state is audience-tier scoped, not org scoped; this repository is bound to one tier collection.
 	err := r.collection.FindOne(ctx, filter).Decode(&result)
 	if err != nil {
 		if err == mongo.ErrNoDocuments {
@@ -261,6 +265,7 @@ func (r *refreshTokenRepository) GetActiveTokensByUser(ctx context.Context, user
 	// Sort by last activity descending
 	opts := options.Find().SetSort(bson.D{{Key: "lastActivity", Value: -1}})
 
+	//tenantscope:allow Refresh-token state is audience-tier scoped, not org scoped; this repository is bound to one tier collection.
 	cursor, err := r.collection.Find(ctx, filter, opts)
 	if err != nil {
 		return nil, fmt.Errorf("failed to find active tokens: %w", err)
@@ -287,6 +292,7 @@ func (r *refreshTokenRepository) GetActiveTokensByDevice(ctx context.Context, us
 		"expiresAt": bson.M{"$gt": time.Now()},
 	}
 
+	//tenantscope:allow Refresh-token state is audience-tier scoped, not org scoped; this repository is bound to one tier collection.
 	cursor, err := r.collection.Find(ctx, filter)
 	if err != nil {
 		return nil, fmt.Errorf("failed to find device tokens: %w", err)
@@ -314,6 +320,7 @@ func (r *refreshTokenRepository) UpdateLastActivity(ctx context.Context, uuid st
 		},
 	}
 
+	//tenantscope:allow Refresh-token state is audience-tier scoped, not org scoped; this repository is bound to one tier collection.
 	result, err := r.collection.UpdateOne(ctx, filter, update)
 	if err != nil {
 		return fmt.Errorf("failed to update last activity: %w", err)
@@ -336,6 +343,7 @@ func (r *refreshTokenRepository) UpdateRiskScore(ctx context.Context, uuid strin
 		},
 	}
 
+	//tenantscope:allow Refresh-token state is audience-tier scoped, not org scoped; this repository is bound to one tier collection.
 	result, err := r.collection.UpdateOne(ctx, filter, update)
 	if err != nil {
 		return fmt.Errorf("failed to update risk score: %w", err)
@@ -367,6 +375,7 @@ func (r *refreshTokenRepository) RotateWithFamily(ctx context.Context, oldTokenH
 		newDoc.UUID = models.GenerateTimeOrderedUUID()
 	}
 	now := time.Now()
+	//tenantscope:allow Refresh-token state is audience-tier scoped, not org scoped; this repository is bound to one tier collection.
 	res, err := r.collection.UpdateOne(ctx,
 		bson.M{"token": oldTokenHash, "isRevoked": false},
 		bson.M{"$set": bson.M{
@@ -420,6 +429,7 @@ func (r *refreshTokenRepository) RotateWithFamily(ctx context.Context, oldTokenH
 		return err
 	}
 	if stateAfter != nil {
+		//tenantscope:allow Refresh-token state is audience-tier scoped, not org scoped; this repository is bound to one tier collection.
 		_, updateErr := r.collection.UpdateOne(ctx,
 			bson.M{"uuid": newDoc.UUID},
 			bson.M{"$set": bson.M{
@@ -446,6 +456,7 @@ func (r *refreshTokenRepository) RevokeFamily(ctx context.Context, familyID, rea
 	if r.familyCollection == nil {
 		return 0, fmt.Errorf("refresh family state persistence is unavailable")
 	}
+	//tenantscope:allow Refresh-family state is audience-tier scoped, not org scoped; this repository is bound to one tier collection.
 	_, err := r.familyCollection.UpdateOne(ctx,
 		bson.M{"familyId": familyID},
 		bson.M{
@@ -457,6 +468,7 @@ func (r *refreshTokenRepository) RevokeFamily(ctx context.Context, familyID, rea
 	if err != nil {
 		return 0, fmt.Errorf("failed to persist refresh family revocation: %w", err)
 	}
+	//tenantscope:allow Refresh-token state is audience-tier scoped, not org scoped; this repository is bound to one tier collection.
 	res, err := r.collection.UpdateMany(ctx,
 		bson.M{"familyId": familyID, "isRevoked": false},
 		bson.M{"$set": bson.M{
@@ -478,6 +490,7 @@ func (r *refreshTokenRepository) CountFamilyMembers(ctx context.Context, familyI
 	if familyID == "" {
 		return 0, nil
 	}
+	//tenantscope:allow Refresh-token state is audience-tier scoped, not org scoped; this repository is bound to one tier collection.
 	n, err := r.collection.CountDocuments(ctx, bson.M{"familyId": familyID})
 	if err != nil {
 		return 0, fmt.Errorf("failed to count family members: %w", err)
@@ -497,6 +510,7 @@ func (r *refreshTokenRepository) RotateToken(ctx context.Context, oldTokenHash, 
 		// Find the old token
 		filter := bson.M{"token": oldTokenHash}
 		var oldToken models.RefreshTokenDoc
+		//tenantscope:allow Refresh-token state is audience-tier scoped, not org scoped; this repository is bound to one tier collection.
 		err := r.collection.FindOne(sc, filter).Decode(&oldToken)
 		if err != nil {
 			return nil, fmt.Errorf("old token not found: %w", err)
@@ -528,6 +542,7 @@ func (r *refreshTokenRepository) RotateToken(ctx context.Context, oldTokenHash, 
 			},
 		}
 
+		//tenantscope:allow Refresh-token state is audience-tier scoped, not org scoped; this repository is bound to one tier collection.
 		_, err = r.collection.UpdateOne(sc, filter, revokeUpdate)
 		if err != nil {
 			return nil, fmt.Errorf("failed to revoke old token: %w", err)
@@ -550,6 +565,7 @@ func (r *refreshTokenRepository) RevokeToken(ctx context.Context, tokenHash stri
 		},
 	}
 
+	//tenantscope:allow Refresh-token state is audience-tier scoped, not org scoped; this repository is bound to one tier collection.
 	result, err := r.collection.UpdateOne(ctx, filter, update)
 	if err != nil {
 		return fmt.Errorf("failed to revoke token: %w", err)
@@ -573,6 +589,7 @@ func (r *refreshTokenRepository) RevokeTokenByUUID(ctx context.Context, uuid str
 		},
 	}
 
+	//tenantscope:allow Refresh-token state is audience-tier scoped, not org scoped; this repository is bound to one tier collection.
 	result, err := r.collection.UpdateOne(ctx, filter, update)
 	if err != nil {
 		return fmt.Errorf("failed to revoke token: %w", err)
@@ -599,6 +616,7 @@ func (r *refreshTokenRepository) RevokeTokensBySession(ctx context.Context, sess
 		},
 	}
 
+	//tenantscope:allow Refresh-token state is audience-tier scoped, not org scoped; this repository is bound to one tier collection.
 	_, err := r.collection.UpdateMany(ctx, filter, update)
 	if err != nil {
 		return fmt.Errorf("failed to revoke session tokens: %w", err)
@@ -612,6 +630,7 @@ func (r *refreshTokenRepository) RevokeTokensBySession(ctx context.Context, sess
 // leaves personal data (userUUID, IP, device ID) in place, erasure
 // requires the rows to be gone.
 func (r *refreshTokenRepository) DeleteAllByUser(ctx context.Context, userUUID string) (int64, error) {
+	//tenantscope:allow Refresh-token state is audience-tier scoped, not org scoped; this repository is bound to one tier collection.
 	res, err := r.collection.DeleteMany(ctx, bson.M{"userUuid": userUUID})
 	if err != nil {
 		return 0, fmt.Errorf("failed to delete refresh tokens by user: %w", err)
@@ -633,6 +652,7 @@ func (r *refreshTokenRepository) RevokeTokensByUser(ctx context.Context, userUUI
 		},
 	}
 
+	//tenantscope:allow Refresh-token state is audience-tier scoped, not org scoped; this repository is bound to one tier collection.
 	_, err := r.collection.UpdateMany(ctx, filter, update)
 	if err != nil {
 		return fmt.Errorf("failed to revoke user tokens: %w", err)
@@ -656,6 +676,7 @@ func (r *refreshTokenRepository) RevokeTokensByDevice(ctx context.Context, userU
 		},
 	}
 
+	//tenantscope:allow Refresh-token state is audience-tier scoped, not org scoped; this repository is bound to one tier collection.
 	_, err := r.collection.UpdateMany(ctx, filter, update)
 	if err != nil {
 		return fmt.Errorf("failed to revoke device tokens: %w", err)
@@ -669,6 +690,7 @@ func (r *refreshTokenRepository) CleanupExpiredTokens(ctx context.Context) (int6
 		"expiresAt": bson.M{"$lt": time.Now()},
 	}
 
+	//tenantscope:allow Refresh-token state is audience-tier scoped, not org scoped; this repository is bound to one tier collection.
 	result, err := r.collection.DeleteMany(ctx, filter)
 	if err != nil {
 		return 0, fmt.Errorf("failed to cleanup expired tokens: %w", err)
@@ -684,6 +706,7 @@ func (r *refreshTokenRepository) CleanupRevokedTokens(ctx context.Context, older
 		"revokedAt": bson.M{"$lt": cutoff},
 	}
 
+	//tenantscope:allow Refresh-token state is audience-tier scoped, not org scoped; this repository is bound to one tier collection.
 	result, err := r.collection.DeleteMany(ctx, filter)
 	if err != nil {
 		return 0, fmt.Errorf("failed to cleanup revoked tokens: %w", err)
@@ -757,6 +780,7 @@ func (r *refreshTokenRepository) GetTokenStats(ctx context.Context, userUUID str
 		},
 	}
 
+	//tenantscope:allow Refresh-token state is audience-tier scoped, not org scoped; this repository is bound to one tier collection.
 	cursor, err := r.collection.Aggregate(ctx, pipeline)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get token stats: %w", err)
@@ -781,6 +805,7 @@ func (r *refreshTokenRepository) GetDeviceTokenCount(ctx context.Context, userUU
 		"expiresAt": bson.M{"$gt": time.Now()},
 	}
 
+	//tenantscope:allow Refresh-token state is audience-tier scoped, not org scoped; this repository is bound to one tier collection.
 	count, err := r.collection.CountDocuments(ctx, filter)
 	if err != nil {
 		return 0, fmt.Errorf("failed to count device tokens: %w", err)

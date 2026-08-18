@@ -117,6 +117,7 @@ func (r *oauthProviderRepository) GetByProviderAndID(ctx context.Context, provid
 	}
 
 	var result models.OAuthProviderDoc
+	//tenantscope:allow OAuth identities are audience-tier scoped, not org scoped; this repository is bound to one tier collection.
 	err := r.collection.FindOne(ctx, filter).Decode(&result)
 	if err != nil {
 		if err == mongo.ErrNoDocuments {
@@ -137,6 +138,7 @@ func (r *oauthProviderRepository) GetByUserUUID(ctx context.Context, userUUID st
 		{Key: "linkedAt", Value: -1},
 	})
 
+	//tenantscope:allow OAuth identities are audience-tier scoped, not org scoped; this repository is bound to one tier collection.
 	cursor, err := r.collection.Find(ctx, filter, opts)
 	if err != nil {
 		return nil, fmt.Errorf("failed to find OAuth providers: %w", err)
@@ -166,6 +168,7 @@ func (r *oauthProviderRepository) GetPrimaryProvider(ctx context.Context, userUU
 	}
 
 	var result models.OAuthProviderDoc
+	//tenantscope:allow OAuth identities are audience-tier scoped, not org scoped; this repository is bound to one tier collection.
 	err := r.collection.FindOne(ctx, filter).Decode(&result)
 	if err != nil {
 		if err == mongo.ErrNoDocuments {
@@ -192,6 +195,7 @@ func (r *oauthProviderRepository) UpdateLastUsed(ctx context.Context, uuid strin
 		},
 	}
 
+	//tenantscope:allow OAuth identities are audience-tier scoped, not org scoped; this repository is bound to one tier collection.
 	result, err := r.collection.UpdateOne(ctx, filter, update)
 	if err != nil {
 		return fmt.Errorf("failed to update last used: %w", err)
@@ -220,6 +224,7 @@ func (r *oauthProviderRepository) UpdateMetadata(ctx context.Context, uuid strin
 			"updatedAt": time.Now(),
 		},
 	}
+	//tenantscope:allow OAuth identities are audience-tier scoped, not org scoped; this repository is bound to one tier collection.
 	result, err := r.collection.UpdateOne(ctx, filter, update)
 	if err != nil {
 		return fmt.Errorf("failed to update metadata: %w", err)
@@ -248,6 +253,7 @@ func (r *oauthProviderRepository) SetPrimaryProvider(ctx context.Context, userUU
 			},
 		}
 
+		//tenantscope:allow OAuth identities are audience-tier scoped, not org scoped; this repository is bound to one tier collection.
 		_, err := r.collection.UpdateMany(sc, unsetFilter, unsetUpdate)
 		if err != nil {
 			return nil, fmt.Errorf("failed to unset primary flags: %w", err)
@@ -265,6 +271,7 @@ func (r *oauthProviderRepository) SetPrimaryProvider(ctx context.Context, userUU
 			},
 		}
 
+		//tenantscope:allow OAuth identities are audience-tier scoped, not org scoped; this repository is bound to one tier collection.
 		result, err := r.collection.UpdateOne(sc, setPrimaryFilter, setPrimaryUpdate)
 		if err != nil {
 			return nil, fmt.Errorf("failed to set primary provider: %w", err)
@@ -289,6 +296,7 @@ func (r *oauthProviderRepository) UpdateRefreshToken(ctx context.Context, uuid s
 		},
 	}
 
+	//tenantscope:allow OAuth identities are audience-tier scoped, not org scoped; this repository is bound to one tier collection.
 	result, err := r.collection.UpdateOne(ctx, filter, update)
 	if err != nil {
 		return fmt.Errorf("failed to update refresh token: %w", err)
@@ -330,6 +338,7 @@ func (r *oauthProviderRepository) UpdateOAuthTokens(ctx context.Context, uuid st
 
 	update := bson.M{"$set": updateFields}
 
+	//tenantscope:allow OAuth identities are audience-tier scoped, not org scoped; this repository is bound to one tier collection.
 	result, err := r.collection.UpdateOne(ctx, filter, update)
 	if err != nil {
 		return fmt.Errorf("failed to update OAuth tokens: %w", err)
@@ -359,6 +368,7 @@ func (r *oauthProviderRepository) UnlinkProvider(ctx context.Context, userUUID s
 		"provider": provider,
 	}
 
+	//tenantscope:allow OAuth identities are audience-tier scoped, not org scoped; this repository is bound to one tier collection.
 	result, err := r.collection.DeleteOne(ctx, filter)
 	if err != nil {
 		return fmt.Errorf("failed to unlink provider: %w", err)
@@ -396,6 +406,7 @@ func (r *oauthProviderRepository) UnlinkProvider(ctx context.Context, userUUID s
 func (r *oauthProviderRepository) DeleteProvider(ctx context.Context, uuid string) error {
 	filter := bson.M{"uuid": uuid}
 
+	//tenantscope:allow OAuth identities are audience-tier scoped, not org scoped; this repository is bound to one tier collection.
 	result, err := r.collection.DeleteOne(ctx, filter)
 	if err != nil {
 		return fmt.Errorf("failed to delete OAuth provider: %w", err)
@@ -411,6 +422,7 @@ func (r *oauthProviderRepository) DeleteProvider(ctx context.Context, uuid strin
 func (r *oauthProviderRepository) FindByEmail(ctx context.Context, email string) ([]*models.OAuthProviderDoc, error) {
 	filter := bson.M{"email": email}
 
+	//tenantscope:allow OAuth identities are audience-tier scoped, not org scoped; this repository is bound to one tier collection.
 	cursor, err := r.collection.Find(ctx, filter)
 	if err != nil {
 		return nil, fmt.Errorf("failed to find providers by email: %w", err)
@@ -461,6 +473,7 @@ func (r *oauthProviderRepository) ConsolidateProviders(ctx context.Context, from
 				},
 			}
 
+			//tenantscope:allow OAuth identities are audience-tier scoped, not org scoped; this repository is bound to one tier collection.
 			_, err := r.collection.UpdateOne(ctx, filter, update)
 			if err != nil {
 				return fmt.Errorf("failed to transfer provider %s: %w", provider.Provider, err)
