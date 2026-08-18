@@ -292,3 +292,39 @@ func TestWebAuthnFinishAssertion_InvalidAssertionDoesNotBurnChallenge(t *testing
 		t.Fatalf("replayed assertion = %v, want ErrMFAInvalidCode", err)
 	}
 }
+
+func TestWebAuthnFinishRegistration_ConcurrentVerifiedCallersHaveOneWinner(t *testing.T) {
+	svcIface, repo, challenges := newTestWebAuthn(t)
+	svc := svcIface.(*webAuthnService)
+	challenge, err := challenges.Begin(context.Background(), testWebAuthnUser().UUID, MFAPurposeWebAuthnRegister, `{}`)
+	if err != nil {
+		t.Fatalf("Begin: %v", err)
+	}
+	svc.registrationValidator = func(context.Context, *iface.User, webauthn.SessionData, []byte) (*webauthn.Credential, error) {
+		return &webauthn.Credential{ID: []byte("registration-one-winner"), PublicKey: []byte("key")}, nil
+	}
+
+	const callers = 24
+	start := make(chan struct{})
+	var winners atomic.Int32
+	var wg sync.WaitGroup
+	for i := 0; i < callers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			if _, err := svc.FinishRegistration(context.Background(), testWebAuthnUser(), challenge.ID, "passkey", []byte("verified")); err == nil {
+				winners.Add(1)
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+	if got := winners.Load(); got != 1 {
+		t.Fatalf("successful registrations = %d, want exactly 1", got)
+	}
+	creds, err := repo.FindByUserAndType(context.Background(), testWebAuthnUser().UUID, authModels.MFAFactorWebAuthn)
+	if err != nil || creds == nil || len(creds.WebAuthnCredentials) != 1 {
+		t.Fatalf("persisted credentials = %+v, err=%v; want exactly one", creds, err)
+	}
+}

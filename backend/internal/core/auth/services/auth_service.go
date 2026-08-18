@@ -980,18 +980,26 @@ func (s *authService) TerminateSessionByUUID(ctx context.Context, userUUID strin
 	if err != nil {
 		return err
 	}
+	var degraded error
 	for _, sess := range sessions {
 		if sess == nil || sess.DeviceID != deviceID {
 			continue
 		}
 		if err := s.revokeSessionInternal(ctx, sess.UUID, "user_logout"); err != nil {
-			return err
+			var partial *SessionRevocationDegradedError
+			if !errors.As(err, &partial) {
+				return err
+			}
+			degraded = err
 		}
 	}
 	// Sweep any stale rows the per-session loop didn't touch (older
 	// duplicates, expired-but-still-active rows that the repo's
 	// "active" predicate filtered out).
-	return s.authSessionRepo.TerminateSessionByDevice(ctx, userUUID, deviceID)
+	if err := s.authSessionRepo.TerminateSessionByDevice(ctx, userUUID, deviceID); err != nil {
+		return err
+	}
+	return degraded
 }
 
 // TerminateAllSessionsByUUID terminates every active session for the
@@ -1009,15 +1017,23 @@ func (s *authService) TerminateAllSessionsByUUID(ctx context.Context, userUUID s
 	if err != nil {
 		return err
 	}
+	var degraded error
 	for _, sess := range sessions {
 		if sess == nil {
 			continue
 		}
 		if err := s.revokeSessionInternal(ctx, sess.UUID, "user_logout_all"); err != nil {
-			return err
+			var partial *SessionRevocationDegradedError
+			if !errors.As(err, &partial) {
+				return err
+			}
+			degraded = err
 		}
 	}
-	return s.authSessionRepo.TerminateAllUserSessions(ctx, userUUID)
+	if err := s.authSessionRepo.TerminateAllUserSessions(ctx, userUUID); err != nil {
+		return err
+	}
+	return degraded
 }
 
 // RevokeUserSession revokes one session by UUID for the user.
@@ -1067,28 +1083,33 @@ func (s *authService) RevokeAllUserSessionsExcept(ctx context.Context, userUUID,
 		return 0, err
 	}
 	revoked := 0
+	var degraded error
 	for _, sess := range sessions {
 		if sess == nil || sess.UUID == currentSid {
 			continue
 		}
 		if err := s.revokeSessionInternal(ctx, sess.UUID, "user_self_revoke_others"); err != nil {
-			return revoked, err
+			var partial *SessionRevocationDegradedError
+			if !errors.As(err, &partial) {
+				return revoked, err
+			}
+			degraded = err
 		}
 		revoked++
 	}
 	s.RecordSelfAuthEvent(ctx, "self_session_revoke_all", userUUID, map[string]interface{}{
 		"revoked": revoked,
 	})
-	return revoked, nil
+	return revoked, degraded
 }
 
 // revokeSessionInternal performs the three-step revocation for a
 // single session: revoke its refresh tokens → flip the session doc
 // to inactive → push the sid into the Redis revocation set so
 // in-flight access tokens are rejected by AuthMiddleware on the
-// next request. The Redis push is best-effort (fail-open on outage)
-// — the persisted state still updates so reauth via cookie is
-// blocked even when Redis is unavailable.
+// next request. If the Redis push fails after durable state succeeds,
+// a typed SessionRevocationDegradedError reports that partial outcome so
+// security-sensitive callers can distinguish it from persistence failure.
 func (s *authService) revokeSessionInternal(ctx context.Context, sessionUUID, reason string) error {
 	if sessionUUID == "" {
 		return nil
@@ -1109,7 +1130,9 @@ func (s *authService) revokeSessionInternal(ctx context.Context, sessionUUID, re
 		}
 	}
 	if s.sessionRevocation != nil {
-		_ = s.sessionRevocation.Revoke(ctx, sessionUUID, reason)
+		if err := s.sessionRevocation.Revoke(ctx, sessionUUID, reason); err != nil {
+			return &SessionRevocationDegradedError{Cause: err}
+		}
 	}
 	return nil
 }
@@ -1497,17 +1520,11 @@ func (s *authService) MintAccessTokenFromRefresh(ctx context.Context, refreshTok
 // to a no-op in that case so we don't accidentally revoke unrelated rows.
 func (s *authService) handleRefreshReplay(ctx context.Context, doc *models.RefreshTokenDoc, securityCtx *models.SecurityContext, kind string) {
 	revoked, err := s.refreshTokenRepo.RevokeFamily(ctx, doc.FamilyID, models.RevokeReasonReplayDetected)
-	ip := securityCtxIP(securityCtx)
 	logger := slogDefault()
 	logger.Warn("refresh_token_replay",
-		"userUUID", doc.UserUUID,
-		"sessionId", doc.SessionUUID,
-		"deviceId", doc.DeviceID,
-		"familyId", doc.FamilyID,
-		"ip", ip,
 		"revokedCount", revoked,
 		"kind", kind,
-		"revokeErr", errToString(err),
+		"outcome", errorOutcome(err),
 	)
 }
 
@@ -1527,11 +1544,11 @@ func nonEmpty(a, b string) string {
 	return b
 }
 
-func errToString(err error) string {
+func errorOutcome(err error) string {
 	if err == nil {
-		return ""
+		return "success"
 	}
-	return err.Error()
+	return "store_error"
 }
 
 // slogDefault wraps slog.Default() so test code can swap the logger via a

@@ -650,9 +650,11 @@ func (m *AuthModule) Collections() []module.CollectionSpec {
 		}},
 		{Name: models.OperatorRefreshTokenFamiliesCollection, Indexes: []module.IndexSpec{
 			{Keys: map[string]int{"familyId": 1}, Unique: true},
+			{Keys: map[string]int{"expiresAt": 1}, ExpireAt: true},
 		}},
 		{Name: models.ClientRefreshTokenFamiliesCollection, Indexes: []module.IndexSpec{
 			{Keys: map[string]int{"familyId": 1}, Unique: true},
+			{Keys: map[string]int{"expiresAt": 1}, ExpireAt: true},
 		}},
 		{Name: models.OperatorSessionsCollection, Indexes: []module.IndexSpec{
 			{Keys: map[string]int{"uuid": 1}, Unique: true},

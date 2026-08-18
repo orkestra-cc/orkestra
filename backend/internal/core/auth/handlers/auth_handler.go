@@ -490,12 +490,12 @@ func (h *AuthHandler) InitiateOAuthLogin(ctx context.Context, req *OAuthLoginReq
 	// semantics carry over.
 	csrf, err := services.GenerateOAuthCSRF()
 	if err != nil {
-		logger.Error("Failed to generate OAuth CSRF nonce", slog.String("error", err.Error()))
+		logger.Error("oauth initiation failed", slog.String("outcome", "nonce_generation_failed"))
 		return nil, huma.Error500InternalServerError("Failed to create OAuth state", err)
 	}
 	signedState, err := services.SignOAuthStateToken(h.stateSecret, h.tier, csrf, requestHost(ctx), oauthStateTTL)
 	if err != nil {
-		logger.Error("Failed to sign OAuth state", slog.String("error", err.Error()))
+		logger.Error("oauth initiation failed", slog.String("outcome", "state_sign_failed"))
 		return nil, huma.Error500InternalServerError("Failed to create OAuth state", err)
 	}
 
@@ -509,14 +509,14 @@ func (h *AuthHandler) InitiateOAuthLogin(ctx context.Context, req *OAuthLoginReq
 	}
 
 	if _, err := h.oauthStateService.StoreOAuthState(ctx, stateRequest); err != nil {
-		logger.Error("Failed to create OAuth state", slog.String("error", err.Error()))
+		logger.Error("oauth initiation failed", slog.String("outcome", "state_store_failed"))
 		return nil, huma.Error400BadRequest("Failed to create OAuth state", err)
 	}
 
 	// Create OAuth provider from live admin-panel config.
 	provider, _, err := h.resolveProvider(ctx, req.Body.Provider)
 	if err != nil {
-		logger.Error("Failed to create OAuth provider", slog.String("error", err.Error()))
+		logger.Error("oauth initiation failed", slog.String("outcome", "provider_unavailable"))
 		return nil, huma.Error400BadRequest("OAuth provider not configured", err)
 	}
 
@@ -593,12 +593,12 @@ func (h *AuthHandler) InitiateOAuthLink(ctx context.Context, req *OAuthLinkReque
 
 	csrf, err := services.GenerateOAuthCSRF()
 	if err != nil {
-		logger.Error("Failed to generate OAuth CSRF nonce", slog.String("error", err.Error()))
+		logger.Error("oauth link initiation failed", slog.String("outcome", "nonce_generation_failed"))
 		return nil, huma.Error500InternalServerError("Failed to create OAuth state", err)
 	}
 	signedState, err := services.SignOAuthLinkStateToken(h.stateSecret, h.tier, csrf, userUUID, requestHost(ctx), oauthStateTTL)
 	if err != nil {
-		logger.Error("Failed to sign OAuth link state", slog.String("error", err.Error()))
+		logger.Error("oauth link initiation failed", slog.String("outcome", "state_sign_failed"))
 		return nil, huma.Error500InternalServerError("Failed to create OAuth state", err)
 	}
 
@@ -612,13 +612,13 @@ func (h *AuthHandler) InitiateOAuthLink(ctx context.Context, req *OAuthLinkReque
 		LinkUserUUID:   userUUID,
 	}
 	if _, err := h.oauthStateService.StoreOAuthState(ctx, stateRequest); err != nil {
-		logger.Error("Failed to create OAuth link state", slog.String("error", err.Error()))
+		logger.Error("oauth link initiation failed", slog.String("outcome", "state_store_failed"))
 		return nil, huma.Error400BadRequest("Failed to create OAuth state", err)
 	}
 
 	providerSvc, _, err := h.resolveProvider(ctx, provider)
 	if err != nil {
-		logger.Error("Failed to create OAuth provider", slog.String("error", err.Error()))
+		logger.Error("oauth link initiation failed", slog.String("outcome", "provider_unavailable"))
 		return nil, huma.Error400BadRequest("OAuth provider not configured", err)
 	}
 	backendCallbackURL := h.oauthResolver.RedirectURL(ctx, provider)
@@ -673,27 +673,23 @@ func (h *AuthHandler) finishOAuthLinkRedirect(
 		switch {
 		case errors.Is(err, services.ErrOAuthLinkClaimedByOther):
 			logger.Info("oauth link refused: identity already claimed",
-				slog.String("userUUID", linkUserUUID),
 				slog.String("provider", string(provider)))
 			redirect("failed", "already_linked")
 			return
 		case errors.Is(err, services.ErrOAuthLinkAlreadyExists):
 			logger.Info("oauth link refused: provider already attached",
-				slog.String("userUUID", linkUserUUID),
 				slog.String("provider", string(provider)))
 			redirect("failed", "duplicate_provider")
 			return
 		case errors.Is(err, services.ErrOAuthLinkInvalidUserInfo):
 			logger.Warn("oauth link refused: incomplete provider userinfo",
-				slog.String("userUUID", linkUserUUID),
 				slog.String("provider", string(provider)))
 			redirect("failed", "invalid_userinfo")
 			return
 		default:
 			logger.Error("oauth link failed",
-				slog.String("userUUID", linkUserUUID),
 				slog.String("provider", string(provider)),
-				slog.String("error", err.Error()))
+				slog.String("outcome", "internal_error"))
 			redirect("failed", "internal")
 			return
 		}
@@ -812,9 +808,8 @@ func (h *AuthHandler) resolveOAuthLinkRedirect(
 			resp.Headers.Location = build("failed", "invalid_userinfo")
 		default:
 			slog.Default().Error("oauth link failed",
-				slog.String("userUUID", linkUserUUID),
 				slog.String("provider", string(provider)),
-				slog.String("error", err.Error()))
+				slog.String("outcome", "internal_error"))
 			resp.Headers.Location = build("failed", "internal")
 		}
 		return resp, nil
@@ -926,7 +921,7 @@ func (h *AuthHandler) HandleGoogleCallbackHTTP(w http.ResponseWriter, r *http.Re
 	// existing /v1/auth/oauth/login callbacks keep self-handling.
 	stateInfo, claims, err := h.resolveStateForCallback(ctx, state)
 	if err != nil {
-		logger.Warn("Invalid OAuth state", slog.String("error", err.Error()))
+		logger.Warn("oauth callback rejected", slog.String("outcome", "invalid_state"))
 		http.Error(w, "Invalid OAuth state", http.StatusBadRequest)
 		return
 	}
@@ -939,7 +934,7 @@ func (h *AuthHandler) HandleGoogleCallbackHTTP(w http.ResponseWriter, r *http.Re
 	// Create Google OAuth provider from live admin-panel config.
 	provider, _, err := h.resolveProvider(ctx, models.OAuthProviderGoogle)
 	if err != nil {
-		logger.Error("Failed to create OAuth provider", slog.String("error", err.Error()))
+		logger.Error("oauth callback failed", slog.String("outcome", "provider_unavailable"))
 		http.Error(w, "Google OAuth not configured", http.StatusInternalServerError)
 		return
 	}
@@ -952,7 +947,7 @@ func (h *AuthHandler) HandleGoogleCallbackHTTP(w http.ResponseWriter, r *http.Re
 		RedirectURI: backendCallbackURL,
 	})
 	if err != nil {
-		logger.Error("Failed to exchange code for tokens", slog.String("error", err.Error()))
+		logger.Error("oauth callback failed", slog.String("outcome", "token_exchange_failed"))
 		http.Error(w, "Failed to exchange code", http.StatusBadRequest)
 		return
 	}
@@ -960,7 +955,7 @@ func (h *AuthHandler) HandleGoogleCallbackHTTP(w http.ResponseWriter, r *http.Re
 	// Get user info from provider
 	userInfo, err := provider.GetUserInfo(ctx, tokenResp.AccessToken)
 	if err != nil {
-		logger.Error("Failed to get user info", slog.String("error", err.Error()))
+		logger.Error("oauth callback failed", slog.String("outcome", "userinfo_failed"))
 		http.Error(w, "Failed to get user info", http.StatusInternalServerError)
 		return
 	}
@@ -1510,7 +1505,7 @@ func (h *AuthHandler) RefreshTokens(ctx context.Context, req *RefreshTokenReques
 	// Validate and refresh tokens with risk assessment
 	tokenResponse, err := h.authService.RefreshTokensWithRiskAssessment(ctx, refreshToken, securityCtx)
 	if err != nil {
-		logger.Warn("Token refresh failed", slog.String("error", err.Error()))
+		logger.Warn("token refresh failed", slog.String("outcome", refreshFailureOutcome(err)))
 		if errors.Is(err, services.ErrRefreshTokenReplay) {
 			return nil, huma.Error401Unauthorized("refresh_token_replay: session revoked", err)
 		}
@@ -1594,7 +1589,7 @@ func (h *AuthHandler) RefreshTokensWithHeaderHTTP(w http.ResponseWriter, r *http
 			http.Error(w, "No refresh token provided", http.StatusUnauthorized)
 			return
 		}
-		logger.Warn("Token refresh failed", slog.String("error", err.Error()))
+		logger.Warn("token refresh failed", slog.String("outcome", refreshFailureOutcome(err)))
 		writeRefreshErr(w, err)
 		return
 	}
@@ -1773,7 +1768,7 @@ func (h *AuthHandler) GetSessionHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if tokenResponse == nil {
 		logger.Warn("Session bootstrap failed",
-			slog.String("error", lastErr.Error()),
+			slog.String("outcome", refreshFailureOutcome(lastErr)),
 			slog.Int("candidatesTried", len(candidates)),
 		)
 		writeRefreshErr(w, lastErr)
@@ -1871,7 +1866,7 @@ func (h *AuthHandler) HandleMobileGoogleAuth(ctx context.Context, req *MobileGoo
 	// Get Google OAuth provider from live admin-panel config.
 	provider, _, err := h.resolveProvider(ctx, models.OAuthProviderGoogle)
 	if err != nil {
-		logger.Error("Failed to create Google OAuth provider", slog.String("error", err.Error()))
+		logger.Error("mobile oauth failed", slog.String("provider", "google"), slog.String("outcome", "provider_unavailable"))
 		return nil, huma.Error500InternalServerError("Google OAuth not configured", err)
 	}
 
@@ -1886,7 +1881,7 @@ func (h *AuthHandler) HandleMobileGoogleAuth(ctx context.Context, req *MobileGoo
 
 	userInfo, err := provider.ValidateIDToken(ctx, validationRequest)
 	if err != nil {
-		logger.Warn("ID token validation failed", slog.String("error", err.Error()))
+		logger.Warn("mobile oauth failed", slog.String("provider", "google"), slog.String("outcome", "invalid_id_token"))
 		return nil, huma.Error401Unauthorized("Invalid Google ID token", err)
 	}
 
@@ -1982,7 +1977,7 @@ func (h *AuthHandler) HandleMobileAppleAuth(ctx context.Context, req *MobileAppl
 	// Get Apple OAuth provider from live admin-panel config.
 	provider, _, err := h.resolveProvider(ctx, models.OAuthProviderApple)
 	if err != nil {
-		logger.Error("Failed to create Apple OAuth provider", slog.String("error", err.Error()))
+		logger.Error("mobile oauth failed", slog.String("provider", "apple"), slog.String("outcome", "provider_unavailable"))
 		return nil, huma.Error500InternalServerError("Apple OAuth not configured", err)
 	}
 
@@ -2003,7 +1998,7 @@ func (h *AuthHandler) HandleMobileAppleAuth(ctx context.Context, req *MobileAppl
 
 	userInfo, err := provider.ValidateIDToken(ctx, validationRequest)
 	if err != nil {
-		logger.Warn("ID token validation failed", slog.String("error", err.Error()))
+		logger.Warn("mobile oauth failed", slog.String("provider", "apple"), slog.String("outcome", "invalid_id_token"))
 		return nil, huma.Error401Unauthorized("Invalid Apple ID token", err)
 	}
 
@@ -2116,8 +2111,8 @@ func (h *AuthHandler) RefreshTokensHTTP(w http.ResponseWriter, r *http.Request) 
 			http.Error(w, "No refresh token provided", http.StatusUnauthorized)
 			return
 		}
-		logger.Warn("Token refresh failed",
-			slog.String("error", lastErr.Error()),
+		logger.Warn("token refresh failed",
+			slog.String("outcome", refreshFailureOutcome(lastErr)),
 			slog.Int("candidatesTried", len(candidates)),
 		)
 		writeRefreshErr(w, lastErr)
@@ -2200,15 +2195,19 @@ func (h *AuthHandler) LogoutHTTP(w http.ResponseWriter, r *http.Request) {
 	if req.AllDevices {
 		err := h.authService.TerminateAllSessionsByUUID(ctx, userUUID)
 		if err != nil {
-			logger.Error("Failed to terminate all sessions", slog.String("error", err.Error()))
-			http.Error(w, "Failed to logout", http.StatusInternalServerError)
-			return
+			outcome := revocationFailureOutcome(err)
+			if outcome == "revocation_store_unavailable" {
+				logger.Warn("logout all sessions degraded", slog.String("outcome", outcome))
+			} else {
+				logger.Error("logout all sessions failed", slog.String("outcome", outcome))
+				http.Error(w, "Failed to logout", http.StatusInternalServerError)
+				return
+			}
 		}
 	} else if deviceID != "" {
 		if err := h.authService.TerminateSessionByUUID(ctx, userUUID, deviceID); err != nil {
-			logger.Warn("Failed to terminate session",
-				slog.String("userUUID", userUUID),
-				slog.String("error", err.Error()))
+			logger.Warn("logout session termination degraded",
+				slog.String("outcome", revocationFailureOutcome(err)))
 		}
 	}
 
@@ -2220,14 +2219,28 @@ func (h *AuthHandler) LogoutHTTP(w http.ResponseWriter, r *http.Request) {
 	if h.sessionRevocation != nil {
 		if sid := currentSessionID(ctx); sid != "" {
 			if err := h.sessionRevocation.Revoke(ctx, sid, "logout"); err != nil {
-				logger.Warn("logout: failed to revoke session id",
-					slog.String("sid", sid),
-					slog.String("error", err.Error()))
+				logger.Warn("logout session revocation degraded",
+					slog.String("outcome", "revocation_store_unavailable"))
 			}
 		}
 	}
 
 	respondLoggedOut()
+}
+
+func refreshFailureOutcome(err error) string {
+	if errors.Is(err, services.ErrRefreshTokenReplay) {
+		return "replay_detected"
+	}
+	return "invalid_token"
+}
+
+func revocationFailureOutcome(err error) string {
+	var degraded *services.SessionRevocationDegradedError
+	if errors.As(err, &degraded) {
+		return "revocation_store_unavailable"
+	}
+	return "persistence_error"
 }
 
 // Logout handles user logout (Huma handler - deprecated, use LogoutHTTP instead).

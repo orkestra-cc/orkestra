@@ -166,13 +166,54 @@ func (r *fakeAuthSessionRepo) GetMostRecentSessionByUser(context.Context, string
 type fakeSessionRevocation struct {
 	mu      sync.Mutex
 	revoked []string
+	err     error
 }
 
 func (s *fakeSessionRevocation) Revoke(_ context.Context, sid, _ string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.revoked = append(s.revoked, sid)
-	return nil
+	return s.err
+}
+
+func TestRevokeUserSession_ReportsPartialRevocationDegradation(t *testing.T) {
+	t.Parallel()
+	svc, sessions, _, rev := newSessionsSvc(t)
+	now := time.Now()
+	sessions.seed(&authModels.AuthSessionDoc{UUID: "s-target", UserUUID: "u-1", IsActive: true, ExpiresAt: now.Add(time.Hour)})
+	rev.err = errors.New("sensitive redis endpoint")
+
+	err := svc.RevokeUserSession(context.Background(), "u-1", "s-target", "s-current")
+	var degraded *SessionRevocationDegradedError
+	if !errors.As(err, &degraded) {
+		t.Fatalf("error = %v, want typed SessionRevocationDegradedError", err)
+	}
+	doc, _ := sessions.GetByUUID(context.Background(), "s-target")
+	if doc.IsActive {
+		t.Fatal("durable session must remain terminated on Redis degradation")
+	}
+}
+
+func TestRevokeAllUserSessions_ContinuesDurableRevocationWhenStoreDegraded(t *testing.T) {
+	t.Parallel()
+	svc, sessions, _, rev := newSessionsSvc(t)
+	now := time.Now()
+	for _, sid := range []string{"s-one", "s-two"} {
+		sessions.seed(&authModels.AuthSessionDoc{UUID: sid, UserUUID: "u-1", IsActive: true, ExpiresAt: now.Add(time.Hour)})
+	}
+	rev.err = errors.New("redis unavailable")
+
+	count, err := svc.RevokeAllUserSessionsExcept(context.Background(), "u-1", "s-current")
+	var degraded *SessionRevocationDegradedError
+	if count != 2 || !errors.As(err, &degraded) {
+		t.Fatalf("count=%d error=%v, want 2 and typed degradation", count, err)
+	}
+	for _, sid := range []string{"s-one", "s-two"} {
+		doc, _ := sessions.GetByUUID(context.Background(), sid)
+		if doc.IsActive {
+			t.Errorf("%s remains active after partial degradation", sid)
+		}
+	}
 }
 
 func (s *fakeSessionRevocation) IsRevoked(_ context.Context, sid string) (bool, error) {

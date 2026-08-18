@@ -62,7 +62,8 @@ type webAuthnService struct {
 	logger     *slog.Logger
 	// assertionValidator is a test seam around the cryptographic library.
 	// Production leaves it nil and uses validateAssertion below.
-	assertionValidator func(context.Context, *iface.User, webauthn.SessionData, []byte) (*webauthn.Credential, error)
+	assertionValidator    func(context.Context, *iface.User, webauthn.SessionData, []byte) (*webauthn.Credential, error)
+	registrationValidator func(context.Context, *iface.User, webauthn.SessionData, []byte) (*webauthn.Credential, error)
 	// policy is the optional admin-managed source for the mfaMethods
 	// allow-list. Phase 3.6 — nil keeps the pre-policy "all methods
 	// allowed" behaviour so existing tests don't have to wire it.
@@ -163,23 +164,25 @@ func (s *webAuthnService) FinishRegistration(ctx context.Context, user *iface.Us
 		return nil, fmt.Errorf("unmarshal webauthn session: %w", err)
 	}
 
-	parsed, err := protocol.ParseCredentialCreationResponseBytes(attestationJSON)
-	if err != nil {
-		_, _ = s.challenges.IncrementAttempts(ctx, challengeID)
-		return nil, fmt.Errorf("%w: parse attestation: %v", ErrWebAuthnAssertion, err)
+	validator := s.registrationValidator
+	if validator == nil {
+		validator = s.validateRegistration
 	}
-
-	creds, _ := s.loadCredentials(ctx, user.UUID)
-	wu := &webAuthnUser{user: user, credentials: creds}
-
-	libCred, err := s.wa.CreateCredential(wu, sessionData, parsed)
+	libCred, err := validator(ctx, user, sessionData, attestationJSON)
 	if err != nil {
 		_, _ = s.challenges.IncrementAttempts(ctx, challengeID)
 		return nil, fmt.Errorf("%w: %v", ErrWebAuthnAssertion, err)
 	}
 
-	// Verified — consume the challenge so its session data can't be reused.
-	_, _ = s.challenges.Consume(ctx, challengeID)
+	// Verification succeeded; only the atomic consumer may persist.
+	consumed, err := s.challenges.Consume(ctx, challengeID)
+	if err != nil {
+		return nil, ErrMFAInvalidCode
+	}
+	if consumed.UserUUID != user.UUID || consumed.Purpose != MFAPurposeWebAuthnRegister {
+		return nil, ErrMFAChallengeMismatch
+	}
+	creds, _ := s.loadCredentials(ctx, user.UUID)
 
 	now := time.Now()
 	stored := authModels.WebAuthnCredential{
@@ -205,6 +208,15 @@ func (s *webAuthnService) FinishRegistration(ctx context.Context, user *iface.Us
 		slog.Int("totalCredentials", len(creds)+1),
 	)
 	return &stored, nil
+}
+
+func (s *webAuthnService) validateRegistration(ctx context.Context, user *iface.User, sessionData webauthn.SessionData, attestationJSON []byte) (*webauthn.Credential, error) {
+	parsed, err := protocol.ParseCredentialCreationResponseBytes(attestationJSON)
+	if err != nil {
+		return nil, fmt.Errorf("parse attestation: %w", err)
+	}
+	creds, _ := s.loadCredentials(ctx, user.UUID)
+	return s.wa.CreateCredential(&webAuthnUser{user: user, credentials: creds}, sessionData, parsed)
 }
 
 // BeginAssertion handles both step-up (verify) and login-completion

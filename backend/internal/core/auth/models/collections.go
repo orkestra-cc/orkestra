@@ -100,6 +100,7 @@ type RefreshTokenFamilyStateDoc struct {
 	RevokedReason string             `bson:"revokedReason" json:"-"`
 	CreatedAt     time.Time          `bson:"createdAt" json:"-"`
 	UpdatedAt     time.Time          `bson:"updatedAt" json:"-"`
+	ExpiresAt     time.Time          `bson:"expiresAt" json:"-"`
 }
 
 // Refresh-token revocation reasons. Written to RefreshTokenDoc.RevokedReason

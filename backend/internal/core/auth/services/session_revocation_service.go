@@ -37,6 +37,15 @@ type SessionRevocationService interface {
 	IsRevoked(ctx context.Context, sid string) (bool, error)
 }
 
+// SessionRevocationDegradedError means durable session/refresh state was
+// revoked, but the short-lived Redis sid deny-list could not be updated.
+// Callers can detect this partial degradation with errors.As without
+// exposing the store error in ordinary logs or API responses.
+type SessionRevocationDegradedError struct{ Cause error }
+
+func (e *SessionRevocationDegradedError) Error() string { return "session revocation store degraded" }
+func (e *SessionRevocationDegradedError) Unwrap() error { return e.Cause }
+
 type sessionRevocationStoreFailureRecorder interface {
 	RecordSessionRevocationStoreFailure(operation string)
 }

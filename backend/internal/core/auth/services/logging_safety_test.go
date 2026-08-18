@@ -24,7 +24,7 @@ func TestProductionAuthCodeContainsNoDirectDebugPrinting(t *testing.T) {
 	}
 
 	servicesDir := filepath.Dir(testFile)
-	for _, dir := range []string{servicesDir, filepath.Join(servicesDir, "..", "repository")} {
+	for _, dir := range []string{servicesDir, filepath.Join(servicesDir, "..", "repository"), filepath.Join(servicesDir, "..", "handlers")} {
 		err := filepath.WalkDir(dir, func(path string, entry os.DirEntry, walkErr error) error {
 			if walkErr != nil {
 				return walkErr
@@ -40,6 +40,13 @@ func TestProductionAuthCodeContainsNoDirectDebugPrinting(t *testing.T) {
 			for _, pattern := range forbiddenAuthLogPatterns {
 				if pattern.Match(content) {
 					t.Error("production auth source contains forbidden debug logging")
+				}
+			}
+			if strings.Contains(path, "auth_handler.go") {
+				for _, forbidden := range []string{`slog.String("sid"`} {
+					if strings.Contains(string(content), forbidden) {
+						t.Errorf("ordinary auth handler log contains forbidden structured field %q", forbidden)
+					}
 				}
 			}
 			return nil

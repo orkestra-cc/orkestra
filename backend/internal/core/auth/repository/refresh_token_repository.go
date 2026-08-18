@@ -457,10 +457,21 @@ func (r *refreshTokenRepository) RevokeFamily(ctx context.Context, familyID, rea
 		return 0, fmt.Errorf("refresh family state persistence is unavailable")
 	}
 	//tenantscope:allow Refresh-family state is audience-tier scoped, not org scoped; this repository is bound to one tier collection.
+	// The fence must outlive every refresh token it protects. Derive the
+	// expiry from the family's actual rows so configured lifetimes are
+	// respected; Mongo's ExpireAt index may remove it only after that time.
+	expiresAt := refreshFamilyFenceExpiry(now, time.Time{})
+	var newest models.RefreshTokenDoc
+	//tenantscope:allow Refresh-token state is audience-tier scoped, not org scoped; this repository is bound to one tier collection.
+	if err := r.collection.FindOne(ctx, bson.M{"familyId": familyID}, options.FindOne().SetSort(bson.D{{Key: "expiresAt", Value: -1}})).Decode(&newest); err == nil {
+		expiresAt = refreshFamilyFenceExpiry(now, newest.ExpiresAt)
+	} else if err != nil && err != mongo.ErrNoDocuments {
+		return 0, fmt.Errorf("failed to determine refresh family expiry: %w", err)
+	}
 	_, err := r.familyCollection.UpdateOne(ctx,
 		bson.M{"familyId": familyID},
 		bson.M{
-			"$set":         bson.M{"tier": r.tier, "revokedAt": now, "revokedReason": reason, "updatedAt": now},
+			"$set":         bson.M{"tier": r.tier, "revokedAt": now, "revokedReason": reason, "updatedAt": now, "expiresAt": expiresAt},
 			"$setOnInsert": bson.M{"familyId": familyID, "createdAt": now},
 		},
 		options.Update().SetUpsert(true),
@@ -482,6 +493,14 @@ func (r *refreshTokenRepository) RevokeFamily(ctx context.Context, familyID, rea
 		return 0, fmt.Errorf("failed to revoke family: %w", err)
 	}
 	return res.ModifiedCount, nil
+}
+
+func refreshFamilyFenceExpiry(now, latestTokenExpiry time.Time) time.Time {
+	fallback := now.Add(24 * time.Hour)
+	if latestTokenExpiry.After(fallback) {
+		return latestTokenExpiry
+	}
+	return fallback
 }
 
 // CountFamilyMembers counts every row (including revoked) with the family
