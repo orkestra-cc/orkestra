@@ -1123,43 +1123,21 @@ func (s *authService) GenerateEnhancedTokenPair(ctx context.Context, user *iface
 		return resp, err
 	}
 
-	fmt.Printf("[AUTH_DEBUG] ==> GenerateEnhancedTokenPair called for user: %s\n", user.UUID)
-	fmt.Printf("[AUTH_DEBUG] Token creation source: OAuth Login Flow\n")
-	fmt.Printf("[AUTH_DEBUG] Current active tokens for user before creation: querying database...\n")
-
-	// Check current active tokens for debugging
-	if existingTokens, err := s.refreshTokenRepo.GetActiveTokensByUser(ctx, user.UUID); err == nil {
-		fmt.Printf("[AUTH_DEBUG] User currently has %d active refresh tokens\n", len(existingTokens))
-		for i, token := range existingTokens {
-			fmt.Printf("[AUTH_DEBUG]   Token %d: UUID=%s, DeviceID=%s, CreatedAt=%s\n",
-				i+1, token.UUID, token.DeviceID, token.CreatedAt.Format("2006-01-02 15:04:05"))
-		}
-	} else {
-		fmt.Printf("[AUTH_DEBUG] WARNING: Failed to query existing tokens: %v\n", err)
-	}
-
 	// Generate JWT tokens. OAuth logins get amr:["oauth"] so the token
 	// encodes how the user authenticated — aligns with password logins'
 	// amr:["pwd"] (see password_auth_service.completeLogin) and enables
 	// RequireMFA / step-up middleware to distinguish primary factors.
-	fmt.Printf("[AUTH_DEBUG] Generating JWT access token...\n")
 	accessToken, err := s.jwtService.GenerateAccessTokenWithAMR(user, []string{"oauth"}, 0)
 	if err != nil {
-		fmt.Printf("[AUTH_DEBUG] ERROR: Failed to generate access token: %v\n", err)
 		return nil, err
 	}
-	fmt.Printf("[AUTH_DEBUG] Access token generated successfully (length: %d)\n", len(accessToken))
 
-	fmt.Printf("[AUTH_DEBUG] Generating JWT refresh token...\n")
 	refreshToken, err := s.jwtService.GenerateRefreshToken(user)
 	if err != nil {
-		fmt.Printf("[AUTH_DEBUG] ERROR: Failed to generate refresh token: %v\n", err)
 		return nil, err
 	}
-	fmt.Printf("[AUTH_DEBUG] Refresh token generated successfully (length: %d)\n", len(refreshToken))
 
 	sessionID := uuid.New().String()
-	fmt.Printf("[AUTH_DEBUG] Generated session ID: %s\n", sessionID)
 
 	// Create refresh token record in database for persistence and tracking
 	now := time.Now()
@@ -1177,9 +1155,6 @@ func (s *authService) GenerateEnhancedTokenPair(ctx context.Context, user *iface
 	fingerprint := "default-fingerprint"
 
 	if deviceInfo != nil {
-		fmt.Printf("[AUTH_DEBUG] Device info found: ID=%s, Type=%s, Platform=%s, Fingerprint=%s\n",
-			deviceInfo.DeviceID, deviceInfo.DeviceType, deviceInfo.Platform, deviceInfo.Fingerprint)
-
 		// Use extracted device ID or fallback to default
 		if deviceInfo.DeviceID != "" {
 			deviceID = deviceInfo.DeviceID
@@ -1199,18 +1174,11 @@ func (s *authService) GenerateEnhancedTokenPair(ctx context.Context, user *iface
 		if deviceInfo.Fingerprint != "" {
 			fingerprint = deviceInfo.Fingerprint
 		}
-	} else {
-		fmt.Printf("[AUTH_DEBUG] No device info found, using defaults\n")
 	}
-
-	fmt.Printf("[AUTH_DEBUG] Final device values: ID=%s, Type=%s, Platform=%s, Fingerprint=%s\n",
-		deviceID, deviceType, platform, fingerprint)
 
 	// Revoke existing active tokens for this device to enforce single-token-per-device
 	// This prevents token accumulation when users login multiple times from the same device
-	fmt.Printf("[AUTH_DEBUG] Revoking existing tokens for device: %s\n", deviceID)
 	if err := s.refreshTokenRepo.RevokeTokensByDevice(ctx, user.UUID, deviceID, "new_login"); err != nil {
-		fmt.Printf("[AUTH_DEBUG] WARNING: Failed to revoke existing device tokens: %v\n", err)
 		// Continue with token creation - don't fail the login for cleanup failures
 	}
 
@@ -1239,31 +1207,21 @@ func (s *authService) GenerateEnhancedTokenPair(ctx context.Context, user *iface
 	}
 
 	// Store refresh token in database
-	fmt.Printf("[AUTH_DEBUG] Storing refresh token in database...\n")
 	err = s.refreshTokenRepo.CreateRefreshToken(ctx, refreshTokenRecord)
 	if err != nil {
-		fmt.Printf("[AUTH_DEBUG] ERROR: Failed to store refresh token: %v\n", err)
 		return nil, fmt.Errorf("failed to store refresh token: %w", err)
 	}
-	fmt.Printf("[AUTH_DEBUG] Refresh token stored in database successfully\n")
 
 	// Update user's last login timestamp
-	fmt.Printf("[AUTH_DEBUG] Updating user's last login timestamp...\n")
 	err = s.UpdateLastLoginByUUID(ctx, user.UUID)
 	if err != nil {
-		// Log error but don't fail the authentication
-		fmt.Printf("[AUTH_DEBUG] WARNING: Failed to update last login timestamp: %v\n", err)
-	} else {
-		fmt.Printf("[AUTH_DEBUG] Last login timestamp updated successfully\n")
+		// Don't fail authentication when updating its observational timestamp.
 	}
-
-	fmt.Printf("[AUTH_DEBUG] Creating token response...\n")
 
 	// Fetch OAuth provider information for complete user data (similar to /auth/me endpoint)
 	oauthProviders, err := s.oauthProviderRepo.GetByUserUUID(ctx, user.UUID)
 	if err != nil {
-		// Log the error but don't fail the request - OAuth providers are optional data
-		fmt.Printf("[AUTH_DEBUG] Warning: Failed to fetch OAuth providers for user %s: %v\n", user.UUID, err)
+		// OAuth providers are optional data.
 		oauthProviders = []*models.OAuthProviderDoc{}
 	}
 
@@ -1286,8 +1244,6 @@ func (s *authService) GenerateEnhancedTokenPair(ctx context.Context, user *iface
 		OAuthProviders: oauthProvidersInfo,
 	}
 
-	fmt.Printf("[AUTH_DEBUG] Token response created - Session ID: %s, Device ID: %s\n", sessionID, deviceInfo.DeviceID)
-	fmt.Printf("[AUTH_DEBUG] <== GenerateEnhancedTokenPair completed successfully\n")
 	return tokenResponse, nil
 }
 
@@ -1756,14 +1712,9 @@ func (s *authService) ConvertOAuthLinksToNewFormat(ctx context.Context, userUUID
 }
 
 func (s *authService) HandleOAuthCallbackWithLinking(ctx context.Context, provider models.OAuthProvider, userInfo map[string]interface{}, oauthTokens *models.OAuthProviderTokens, securityCtx *models.SecurityContext, deviceInfo *models.DeviceInfo) (*models.TokenResponse, error) {
-	fmt.Printf("[AUTH_DEBUG] ==> HandleOAuthCallbackWithLinking called\n")
-	fmt.Printf("[AUTH_DEBUG] Provider: %s\n", provider)
-
 	// First extract email for validation and later use
 	email, _ := userInfo["email"].(string)
-	fmt.Printf("[AUTH_DEBUG] Extracted email from user info: %s\n", email)
 	if email == "" {
-		fmt.Printf("[AUTH_DEBUG] ERROR: Email is empty\n")
 		return nil, errors.New("email required from OAuth provider")
 	}
 
@@ -1773,38 +1724,25 @@ func (s *authService) HandleOAuthCallbackWithLinking(ctx context.Context, provid
 		// Fallback to sub claim for OpenID Connect providers
 		providerID, _ = userInfo["sub"].(string)
 	}
-	fmt.Printf("[AUTH_DEBUG] Provider ID extracted: %s\n", providerID)
 
 	// Check if this OAuth provider is already linked
-	fmt.Printf("[AUTH_DEBUG] Checking for existing OAuth provider link...\n")
-	fmt.Printf("[AUTH_DEBUG] Query: Provider=%s, ProviderID=%s\n", provider, providerID)
-
 	existingProvider, err := s.oauthProviderRepo.GetByProviderAndID(ctx, provider, providerID)
 	if err != nil && err.Error() != "failed to find OAuth provider: mongo: no documents in result" {
-		fmt.Printf("[AUTH_DEBUG] ERROR: Failed to check existing provider: %v\n", err)
-		// Don't fail the auth, just log the error
+		// Don't fail the auth when the optional link lookup is unavailable.
 	}
 
 	var user *iface.User
 
 	if existingProvider != nil {
 		// Provider exists - fetch the user by UserUUID from the provider record
-		fmt.Printf("[AUTH_DEBUG] OAuth provider already linked\n")
-		fmt.Printf("[AUTH_DEBUG] Existing link - UUID: %s, UserUUID: %s, Primary: %v\n",
-			existingProvider.UUID, existingProvider.UserUUID, existingProvider.IsPrimary)
-
 		// CRITICAL FIX: Fetch the actual user using the provider's UserUUID
-		fmt.Printf("[AUTH_DEBUG] Fetching user by UUID: %s\n", existingProvider.UserUUID)
 		userModel, err := s.userService.GetUserByID(ctx, existingProvider.UserUUID)
 		if err != nil {
-			fmt.Printf("[AUTH_DEBUG] ERROR: Failed to get user for existing provider: %v\n", err)
 			return nil, fmt.Errorf("failed to get user for existing provider: %w", err)
 		}
 		user = userModel
-		fmt.Printf("[AUTH_DEBUG] User fetched successfully - UUID: %s, Email: %s\n", user.UUID, user.Email)
 	} else {
 		// No existing provider - check if user exists by email
-		fmt.Printf("[AUTH_DEBUG] No existing provider link found, checking for user by email: %s\n", email)
 		userResponse, err := s.userService.GetUserByEmail(ctx, email)
 		if err != nil {
 			// Signup gates. Two toggles must both allow the new account:
@@ -1816,18 +1754,14 @@ func (s *authService) HandleOAuthCallbackWithLinking(ctx context.Context, provid
 			// retains its own kill-switch bypass for that case.
 			if s.policy != nil {
 				if !s.policy.RegistrationAllowed(ctx, s.audience) {
-					fmt.Printf("[AUTH_DEBUG] Registration disabled by policy for audience %q, refusing OAuth signup\n", s.audience)
 					return nil, ErrOAuthSignupDisabled
 				}
 				if !s.policy.OAuthAllowSignup(ctx, s.audience) {
-					fmt.Printf("[AUTH_DEBUG] OAuth signup disabled by policy for audience %q, refusing to create user\n", s.audience)
 					return nil, ErrOAuthSignupDisabled
 				}
 			}
-			fmt.Printf("[AUTH_DEBUG] User not found in database, creating new user\n")
 			// Create new user via UserService
 			newUUID := models.GenerateUUIDv7()
-			fmt.Printf("[AUTH_DEBUG] Generated new UUID for user: %s\n", newUUID)
 
 			// Atomic first-admin claim (replaces the former count-based race).
 			// If the sentinel is already taken by another concurrent signup,
@@ -1844,12 +1778,9 @@ func (s *authService) HandleOAuthCallbackWithLinking(ctx context.Context, provid
 			claimed := false
 			if s.firstAdminClaimer != nil {
 				c, err := s.firstAdminClaimer.ClaimFirstAdmin(ctx, newUUID)
-				if err != nil {
-					fmt.Printf("[AUTH_DEBUG] WARNING: first-admin claim failed: %v; defaulting to %q\n", err, role)
-				} else if c {
+				if err == nil && c {
 					claimed = true
 					role = "super_admin"
-					fmt.Printf("[AUTH_DEBUG] First-admin sentinel claimed; assigning 'super_admin' role\n")
 				}
 			}
 
@@ -1865,20 +1796,15 @@ func (s *authService) HandleOAuthCallbackWithLinking(ctx context.Context, provid
 				Role:          role,
 				EmailVerified: emailVerified,
 			}
-			fmt.Printf("[AUTH_DEBUG] Creating new user - Name: %s, Role: %s\n", createInput.FullName, createInput.Role)
 
 			userModel, err := s.userService.CreateUserFromOAuth(ctx, createInput)
 			if err != nil {
-				fmt.Printf("[AUTH_DEBUG] ERROR: Failed to create user: %v\n", err)
 				if claimed && s.firstAdminClaimer != nil {
-					if relErr := s.firstAdminClaimer.Release(ctx, newUUID); relErr != nil {
-						fmt.Printf("[AUTH_DEBUG] WARNING: first-admin sentinel rollback failed: %v — sentinel is orphaned\n", relErr)
-					}
+					_ = s.firstAdminClaimer.Release(ctx, newUUID)
 				}
 				return nil, fmt.Errorf("failed to create user: %w", err)
 			}
 			user = convertUserModelToAuthModel(userModel)
-			fmt.Printf("[AUTH_DEBUG] New user created successfully with UUID: %s\n", user.UUID)
 		} else {
 			// Phase 10: oauthAutoLinkByEmail gate. The callback found an
 			// existing Orkestra account by email — auto-linking the
@@ -1887,26 +1813,16 @@ func (s *authService) HandleOAuthCallbackWithLinking(ctx context.Context, provid
 			// account. When off, refuse here so account linking must
 			// happen from an authenticated settings page instead.
 			if s.policy != nil && !s.policy.OAuthAutoLinkByEmail(ctx) {
-				fmt.Printf("[AUTH_DEBUG] OAuth auto-link disabled by policy, refusing to attach provider to existing account\n")
 				return nil, ErrOAuthLinkDisabled
 			}
 			user = convertUserResponseToAuthModel(userResponse)
-			fmt.Printf("[AUTH_DEBUG] Existing user found with UUID: %s\n", user.UUID)
 		}
 	}
 
 	// Link OAuth provider (if not already linked)
-	fmt.Printf("[AUTH_DEBUG] ==> Starting OAuth provider linking process\n")
-
 	if existingProvider != nil {
-		fmt.Printf("[AUTH_DEBUG] OAuth provider already linked\n")
-		fmt.Printf("[AUTH_DEBUG] Existing link - UUID: %s, UserUUID: %s, Primary: %v\n",
-			existingProvider.UUID, existingProvider.UserUUID, existingProvider.IsPrimary)
-
 		// Update OAuth tokens if provided
 		if oauthTokens != nil {
-			fmt.Printf("[AUTH_DEBUG] Updating OAuth tokens for existing provider\n")
-
 			var encryptedAccessToken, encryptedRefreshToken string
 			var accessTokenExpiresAt, refreshTokenExpiresAt *time.Time
 			var tokenScopes []string
@@ -1914,7 +1830,6 @@ func (s *authService) HandleOAuthCallbackWithLinking(ctx context.Context, provid
 			if oauthTokens.AccessToken != "" {
 				encryptedAccessToken, err = utils.EncryptOAuthToken(oauthTokens.AccessToken)
 				if err != nil {
-					fmt.Printf("[AUTH_DEBUG] WARNING: Failed to encrypt access token: %v\n", err)
 				} else {
 					if oauthTokens.ExpiresIn > 0 {
 						expiresAt := time.Now().Add(time.Duration(oauthTokens.ExpiresIn) * time.Second)
@@ -1926,7 +1841,6 @@ func (s *authService) HandleOAuthCallbackWithLinking(ctx context.Context, provid
 			if oauthTokens.RefreshToken != "" {
 				encryptedRefreshToken, err = utils.EncryptOAuthToken(oauthTokens.RefreshToken)
 				if err != nil {
-					fmt.Printf("[AUTH_DEBUG] WARNING: Failed to encrypt refresh token: %v\n", err)
 				} else {
 					if oauthTokens.RefreshTokenExpiresIn > 0 {
 						expiresAt := time.Now().Add(time.Duration(oauthTokens.RefreshTokenExpiresIn) * time.Second)
@@ -1952,20 +1866,11 @@ func (s *authService) HandleOAuthCallbackWithLinking(ctx context.Context, provid
 			err = s.oauthProviderRepo.UpdateOAuthTokens(ctx, existingProvider.UUID,
 				encryptedAccessToken, encryptedRefreshToken,
 				accessTokenExpiresAt, refreshTokenExpiresAt, tokenScopes)
-			if err != nil {
-				fmt.Printf("[AUTH_DEBUG] WARNING: Failed to update OAuth tokens in database: %v\n", err)
-			} else {
-				fmt.Printf("[AUTH_DEBUG] OAuth tokens updated successfully - Access: %v, Refresh: %v\n",
-					encryptedAccessToken != "", encryptedRefreshToken != "")
-			}
+			_ = err
 		}
 
 		// Update last used timestamp
-		fmt.Printf("[AUTH_DEBUG] Updating last used timestamp for provider\n")
 		err = s.oauthProviderRepo.UpdateLastUsed(ctx, existingProvider.UUID)
-		if err != nil {
-			fmt.Printf("[AUTH_DEBUG] WARNING: Failed to update last used: %v\n", err)
-		}
 
 		// Refresh metadata (notably the `picture` URL) on every login.
 		// Two writes — one to auth_oauth_providers.metadata (drives the
@@ -1986,22 +1891,15 @@ func (s *authService) HandleOAuthCallbackWithLinking(ctx context.Context, provid
 			freshMeta["locale"] = locale
 		}
 		if len(freshMeta) > 0 {
-			if metaErr := s.oauthProviderRepo.UpdateMetadata(ctx, existingProvider.UUID, freshMeta); metaErr != nil {
-				fmt.Printf("[AUTH_DEBUG] WARNING: Failed to refresh OAuth provider metadata: %v\n", metaErr)
-			}
+			_ = s.oauthProviderRepo.UpdateMetadata(ctx, existingProvider.UUID, freshMeta)
 			if updater, ok := s.userService.(iface.OAuthLinkDataUpdater); ok {
-				if linkErr := updater.UpdateOAuthLinkData(ctx, user.UUID, iface.OAuthProvider(provider), existingProvider.ProviderID, freshMeta); linkErr != nil {
-					fmt.Printf("[AUTH_DEBUG] WARNING: Failed to refresh embedded OAuth link data: %v\n", linkErr)
-				}
+				_ = updater.UpdateOAuthLinkData(ctx, user.UUID, iface.OAuthProvider(provider), existingProvider.ProviderID, freshMeta)
 			}
 		}
 	} else {
-		fmt.Printf("[AUTH_DEBUG] No existing provider link found, creating new link\n")
-
 		// Check if this is the first provider for the user
 		userProviders, err := s.oauthProviderRepo.GetByUserUUID(ctx, user.UUID)
 		isPrimary := len(userProviders) == 0
-		fmt.Printf("[AUTH_DEBUG] This will be primary provider: %v (user has %d existing providers)\n", isPrimary, len(userProviders))
 
 		// Extract additional provider metadata
 		picture, _ := userInfo["picture"].(string)
@@ -2026,10 +1924,8 @@ func (s *authService) HandleOAuthCallbackWithLinking(ctx context.Context, provid
 				var err error
 				encryptedAccessToken, err = utils.EncryptOAuthToken(oauthTokens.AccessToken)
 				if err != nil {
-					fmt.Printf("[AUTH_DEBUG] WARNING: Failed to encrypt access token: %v\n", err)
 					// Continue without storing access token rather than failing auth
 				} else {
-					fmt.Printf("[AUTH_DEBUG] Access token encrypted successfully\n")
 					if oauthTokens.ExpiresIn > 0 {
 						expiresAt := time.Now().Add(time.Duration(oauthTokens.ExpiresIn) * time.Second)
 						accessTokenExpiresAt = &expiresAt
@@ -2041,10 +1937,8 @@ func (s *authService) HandleOAuthCallbackWithLinking(ctx context.Context, provid
 				var err error
 				encryptedRefreshToken, err = utils.EncryptOAuthToken(oauthTokens.RefreshToken)
 				if err != nil {
-					fmt.Printf("[AUTH_DEBUG] WARNING: Failed to encrypt refresh token: %v\n", err)
 					// Continue without storing refresh token rather than failing auth
 				} else {
-					fmt.Printf("[AUTH_DEBUG] Refresh token encrypted successfully\n")
 					if oauthTokens.RefreshTokenExpiresIn > 0 {
 						expiresAt := time.Now().Add(time.Duration(oauthTokens.RefreshTokenExpiresIn) * time.Second)
 						refreshTokenExpiresAt = &expiresAt
@@ -2053,8 +1947,6 @@ func (s *authService) HandleOAuthCallbackWithLinking(ctx context.Context, provid
 			}
 
 			tokenScopes = oauthTokens.Scopes
-			fmt.Printf("[AUTH_DEBUG] OAuth tokens prepared - Access: %v, Refresh: %v, Scopes: %v\n",
-				encryptedAccessToken != "", encryptedRefreshToken != "", tokenScopes)
 		}
 
 		// Create new OAuth provider link with encrypted tokens
@@ -2077,41 +1969,24 @@ func (s *authService) HandleOAuthCallbackWithLinking(ctx context.Context, provid
 			UpdatedAt:             time.Now(),
 		}
 
-		fmt.Printf("[AUTH_DEBUG] Creating OAuth provider link...\n")
-		fmt.Printf("[AUTH_DEBUG] Provider details - UUID: %s, UserUUID: %s, Provider: %s, Primary: %v\n",
-			newProvider.UUID, newProvider.UserUUID, newProvider.Provider, newProvider.IsPrimary)
-
 		err = s.oauthProviderRepo.CreateOAuthProvider(ctx, newProvider)
 		if err != nil {
-			fmt.Printf("[AUTH_DEBUG] ERROR: Failed to create OAuth provider link: %v\n", err)
 			// Don't fail the auth, continue without provider linking
-		} else {
-			fmt.Printf("[AUTH_DEBUG] OAuth provider linked successfully - UUID: %s\n", newProvider.UUID)
-			fmt.Printf("[AUTH_DEBUG] Provider metadata saved: %v\n", metadata)
 		}
 	}
 
-	fmt.Printf("[AUTH_DEBUG] <== OAuth provider linking process completed\n")
-
 	// Use provided device info or create defaults
-	if deviceInfo != nil {
-		fmt.Printf("[AUTH_DEBUG] Using device info from OAuth state - DeviceID: %s, Fingerprint: %s\n",
-			deviceInfo.DeviceID, deviceInfo.Fingerprint)
-	} else {
+	if deviceInfo == nil {
 		// Fallback to creating minimal device info with a new device ID
 		deviceInfo = &models.DeviceInfo{
 			DeviceID: uuid.New().String(),
 		}
-		fmt.Printf("[AUTH_DEBUG] No device info provided, generated device ID: %s\n", deviceInfo.DeviceID)
 	}
 
-	fmt.Printf("[AUTH_DEBUG] Calling GenerateEnhancedTokenPair to create JWT tokens\n")
 	tokenResponse, err := s.GenerateEnhancedTokenPair(ctx, user, deviceInfo, securityCtx)
 	if err != nil {
-		fmt.Printf("[AUTH_DEBUG] ERROR: Failed to generate token pair: %v\n", err)
 		return nil, err
 	}
-	fmt.Printf("[AUTH_DEBUG] <== HandleOAuthCallbackWithLinking completed successfully\n")
 	return tokenResponse, nil
 }
 
