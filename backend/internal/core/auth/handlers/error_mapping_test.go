@@ -10,9 +10,12 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -109,6 +112,36 @@ func TestMapPasswordError_UnknownErrorFallsTo400(t *testing.T) {
 	}
 	if out.Error() == "totally unexpected internal error" {
 		t.Errorf("unknown err: must NOT leak the internal message verbatim, got %q", out.Error())
+	}
+}
+
+func TestErrorMapping_OAuthInvalidCredentialsStaysNeutral(t *testing.T) {
+	email := "inactive@example.com"
+	userUUID := "user-123"
+	for _, tc := range []struct {
+		name string
+		in   error
+	}{
+		{
+			name: "inactive user maps like invalid OAuth authentication",
+			in:   fmt.Errorf("inactive account email=%s userUUID=%s: %w", email, userUUID, services.ErrInvalidCredentials),
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			out := mapOAuthError(tc.in)
+			if got := statusOf(t, out); got != http.StatusUnauthorized {
+				t.Fatalf("status = %d, want %d", got, http.StatusUnauthorized)
+			}
+			body, err := json.Marshal(out)
+			if err != nil {
+				t.Fatalf("marshal mapped error: %v", err)
+			}
+			for _, forbidden := range []string{"inactive", email, userUUID} {
+				if strings.Contains(string(body), forbidden) {
+					t.Errorf("OAuth error body leaks %q: %s", forbidden, body)
+				}
+			}
+		})
 	}
 }
 

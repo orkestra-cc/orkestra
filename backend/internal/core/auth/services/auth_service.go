@@ -1115,6 +1115,10 @@ func (s *authService) revokeSessionInternal(ctx context.Context, sessionUUID, re
 }
 
 func (s *authService) GenerateEnhancedTokenPair(ctx context.Context, user *iface.User, deviceInfo *models.DeviceInfo, securityCtx *models.SecurityContext) (*models.TokenResponse, error) {
+	if err := validateTokenEligibleUser(user); err != nil {
+		return nil, err
+	}
+
 	// MFA gating for OAuth-resolved users. Mirrors the password login path:
 	// privileged users with an enrolled factor receive a partial response
 	// and must call /v1/auth/mfa/login/verify; without a factor, the grace
@@ -1297,13 +1301,9 @@ func (s *authService) RefreshTokensWithRiskAssessment(ctx context.Context, refre
 	}
 	user := convertUserModelToAuthModel(userModel)
 
-	// A deactivated account may not roll its session forward. Login
-	// already refuses inactive users, but an attacker holding a live
-	// refresh token never goes back through login — without this check,
-	// disabling an account (offboarding, compromise response, the
-	// inactiveAccountAutoDisableDays sweep) had no effect until the
-	// refresh row expired.
-	if !user.IsActive {
+	// Keep refresh failures on their established neutral sentinel while
+	// sharing the same eligibility invariant as initial token issuance.
+	if err := validateTokenEligibleUser(user); err != nil {
 		return nil, ErrInvalidRefreshToken
 	}
 
@@ -1433,7 +1433,7 @@ func (s *authService) MintAccessTokenFromRefresh(ctx context.Context, refreshTok
 
 	// Same rule as the rotation path: a deactivated account gets no
 	// fresh access token, whichever endpoint asks.
-	if !user.IsActive {
+	if err := validateTokenEligibleUser(user); err != nil {
 		return nil, ErrInvalidRefreshToken
 	}
 
@@ -1819,6 +1819,13 @@ func (s *authService) HandleOAuthCallbackWithLinking(ctx context.Context, provid
 		}
 	}
 
+	// Reject an ineligible resolved account before updating or creating its
+	// provider link. GenerateEnhancedTokenPair repeats this at the issuance
+	// boundary for every direct caller.
+	if err := validateTokenEligibleUser(user); err != nil {
+		return nil, err
+	}
+
 	// Link OAuth provider (if not already linked)
 	if existingProvider != nil {
 		// Update OAuth tokens if provided
@@ -1981,6 +1988,13 @@ func (s *authService) HandleOAuthCallbackWithLinking(ctx context.Context, provid
 		return nil, err
 	}
 	return tokenResponse, nil
+}
+
+func validateTokenEligibleUser(user *iface.User) error {
+	if user == nil || user.UUID == "" || !user.IsActive {
+		return ErrInvalidCredentials
+	}
+	return nil
 }
 
 // Helper functions for type conversion between user and auth models
