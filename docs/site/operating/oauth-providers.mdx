@@ -140,6 +140,17 @@ You'll need:
 - **Key ID**: from Step 4.
 - **Private Key**: the `.p8` file downloaded in Step 4.
 
+### Apple private-key incident response
+
+Treat a suspected Apple `.p8` private-key exposure as an incident. In order:
+
+1. Identify every affected environment and the Apple configuration each uses.
+2. Restrict access to, and sanitize where retention policy permits, local and OTLP log records that could contain the key or related credential material. Preserve only the incident evidence required by policy.
+3. In Apple Developer, rotate the key and invalidate the exposed key.
+4. Update the encrypted `auth` module configuration with the replacement Apple key and its matching key ID.
+5. Do not restart a service unless the live configuration behavior requires it; the application does not rotate an external Apple key for you.
+6. Force reauthentication for affected users and monitor OAuth failures while the replacement is in use.
+
 ## GitHub OAuth setup
 
 1. Go to [GitHub Developer Settings → OAuth Apps](https://github.com/settings/developers).

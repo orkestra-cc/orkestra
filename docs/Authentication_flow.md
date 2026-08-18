@@ -109,13 +109,13 @@ All access and refresh tokens are RS256-signed JWTs from the same key pair (`AUT
 
 - **`srole`** is the global system role (`super_admin` > `administrator` > `developer` > `manager` > `operator` > `guest`). Memberships carry org-scoped roles. **Permissions are not embedded** — they are resolved per-request by middleware via `authz.HasPermission`.
 - **`amr`** (RFC 8176) records the authentication method(s) used. `pwd` for password login, `oauth` for OAuth, `otp` after MFA verification, `webauthn` after a passkey assertion, `reauth` after a successful password reconfirm via `/me/password-confirm`. `last_otp_at` lets `RequireStepUp(maxAge)` middleware demand a fresh MFA proof (or fresh reconfirm) for catastrophic actions.
-- **`sid`** is the session UUID. Logout / change-password add it to a Redis-backed revocation set so the access token stops working instantly without waiting for the TTL.
+- **`sid`** is the canonical session UUID. One random UUID is created before either JWT is signed; the access JWT `sid`, refresh JWT `sid`, refresh-token row, session document, and token response must match. Refresh rotation and MFA/WebAuthn completion preserve it. Logout / change-password add it to a Redis-backed revocation set so the access token stops working instantly without waiting for the TTL.
 
 ### Refresh token
 
 Same shape, `type: "refresh"`, longer expiry (`JWT_REFRESH_TOKEN_EXPIRY`, default 30d). Refresh tokens carry the **same `aud` claim** as the access token they paired with, so a refresh token issued for the operator host cannot be redeemed on the client host.
 
-Refresh tokens rotate on every use with family-detection: each login mints a new `FamilyID`, every rotation preserves it via an atomic CAS, and replaying a rotated token revokes the entire family with `revokedReason="replay_detected"` (see [auth module CLAUDE.md → Key invariants](../backend/internal/core/auth/CLAUDE.md#key-invariants)).
+Refresh tokens rotate on every use with family detection: each login mints a new `FamilyID`, every rotation preserves it via an atomic CAS, and replaying a rotated token revokes the entire family with `revokedReason="replay_detected"`. A durable tier-scoped family-revocation record fences a successor that races replay revocation, so it cannot escape as an active token. Retain rotated/revoked rows for at least one refresh-token TTL so replay detection remains effective (see [auth module CLAUDE.md → Key invariants](../backend/internal/core/auth/CLAUDE.md#key-invariants)).
 
 ---
 
@@ -143,7 +143,7 @@ When `GetUserForAuth` finds no user, the password service runs `Verify` against 
 1. `POST /v1/auth/{tier}/login` with `{email, password}`.
 2. Two rate-limit buckets (per IP and per email, both 3 attempts / 15 min) gate the request.
 3. After 5 consecutive misses, `User.LockedUntil` is set 15 minutes in the future and the handler short-circuits with `429`.
-4. On success: failed counter cleared, hash rehashed if needed, `AuthSessionDoc{LoginMethod="password"}` written for audit, **state machine forks on MFA policy** (see §7), tokens issued, refresh cookie set on the audience-correct domain.
+4. On success: failed counter cleared, hash rehashed if needed, `AuthSessionDoc{LoginMethod="password"}` written for audit, **state machine forks on MFA policy** (see §7), tokens issued, refresh cookie set on the audience-correct domain. Inactive users receive no credentials.
 
 ### Verification + reset
 
@@ -160,14 +160,14 @@ Provider configuration (client IDs / secrets / redirect URIs / mobile-platform I
 1. Frontend calls `POST /v1/auth/{tier}/oauth/login` with `{provider, redirectUri}`. Backend constructs a signed HS256 state JWT `{tier, csrf, exp}` (HMAC secret deterministically derived from the JWT private key — every replica agrees without an env var, rotates implicitly when JWT keys rotate) and stores per-flow side data (`provider`, `redirectUri`, `deviceInfo`, `securityContext`) in Redis keyed by the CSRF nonce, with a 10-minute TTL. Returns `{authorizeUrl}`.
 2. Frontend redirects the user to the provider.
 3. Provider redirects back to **the single shared callback URL** registered with each provider (`/v1/auth/oauth/{provider}/callback`, mounted on the operator mux only — one redirect URI per provider in IdP config). The callback parses the state JWT, cross-checks `state.tier == redis.tier`, then dispatches to the matching tier's `AuthHandler` via `tierDispatch[state.tier]`. Empty / unknown tier falls through to the legacy operator handler so any pre-cutover flows still resolve.
-4. The dispatched-to handler exchanges the code with the provider, fetches user info, runs `HandleOAuthCallbackWithLinking` (find-or-create by `(provider, providerId)`, link existing email accounts), mints a token pair stamped with the audience's `aud`, and **redirects the user to the frontend with no token in the URL** — only `success=true&user_id=...&email=...&provider=...`.
+4. The dispatched-to handler exchanges the code with the provider, fetches user info, runs `HandleOAuthCallbackWithLinking` (find-or-create by `(provider, providerId)`, link existing email accounts), verifies the resolved user is active, mints a token pair stamped with the audience's `aud`, and **redirects the user to the frontend with no token in the URL** — only `success=true&user_id=...&email=...&provider=...`.
 5. Frontend calls `GET /v1/auth/session` (operator-only mount, post-OAuth cookie-based bootstrap) to exchange the refresh-cookie for a fresh access token + user payload.
 
 The signed state + CSRF-keyed Redis row is what defeats both classic CSRF (state forge) and tier confusion (state replay across audiences).
 
 ### Mobile flow
 
-Mobile apps go through the platform's native OAuth SDK (Google Sign-In, Sign in with Apple) and POST the resulting **ID token** to `POST /v1/auth/{tier}/{google|apple}/mobile`. Backend validates the ID token signature against the provider's published JWKs, checks audience (`MobileAudience(provider, platform)` resolves to the platform-specific client ID, falling back to the web client ID for unknown platforms), runs the same find-or-create + token-issuance path as web, and returns the token pair in the response body. No state JWT is needed — the ID token *is* the proof.
+Mobile apps go through the platform's native OAuth SDK (Google Sign-In, Sign in with Apple) and POST the resulting **ID token** to `POST /v1/auth/{tier}/{google|apple}/mobile`. Backend validates the ID token signature against the provider's published JWKs, checks audience (`MobileAudience(provider, platform)` resolves to the platform-specific client ID, falling back to the web client ID for unknown platforms), runs the same find-or-create + active-user eligibility path as web, and returns the token pair in the response body. No state JWT is needed — the ID token *is* the proof.
 
 The mobile entry points are tier-aware just like the web ones, so a mobile client can target either audience by hitting the matching prefix.
 
@@ -190,7 +190,7 @@ Refresh cookies are scoped narrowly enough that the browser won't send a `consol
 
 When an authenticated request arrives with an expired access token but a valid refresh cookie, `AuthMiddleware` rotates transparently: it calls `RefreshTokensWithRiskAssessment`, sets a new refresh cookie scoped to the request's audience (looked up via `AudienceFromContext` → `cookieDomainForAudience`), returns the new access token in `X-New-Access-Token` + `X-Token-Refreshed: true` response headers, and serves the original request as if the user had presented the new access token to begin with.
 
-Manual refresh is also exposed at `POST /v1/auth/{tier}/refresh` (header-supplied refresh token) and `POST /v1/auth/{tier}/refresh-cookie` (HttpOnly cookie path).
+Manual refresh is also exposed at `POST /v1/auth/{tier}/refresh` (header-supplied refresh token) and `POST /v1/auth/{tier}/refresh-cookie` (HttpOnly cookie path). Both refresh paths and the read-only session bootstrap reject inactive users; deactivation cannot extend a session.
 
 ---
 
@@ -221,7 +221,7 @@ The middleware emits **three** distinct envelopes so the SPA can pick the right 
 2. **`401 password_confirm_required`** — the user has **no** MFA factor enrolled AND the policy doesn't require them to. The `PasswordConfirmModal` posts the password to `POST /v1/auth/{tier}/me/password-confirm`; the response mints a fresh access token with `amr += "reauth"` + `last_otp_at = now`, and `RequireStepUp` accepts the `"reauth"` marker on the replay.
 3. **`403 mfa_enrollment_required`** — the user's role obligates MFA but they haven't enrolled. No bypass — the SPA nudges them to enroll a factor first.
 
-The enrollment branching is driven by `MFAEnrollmentLookup` (per-tier `MFAFactorRepository` lookups for TOTP + WebAuthn) and the live `AuthPolicyService.MFARequired` check. Any lookup error fails closed to `step_up_required` — a degraded Mongo must never silently weaken the gate.
+The enrollment branching is driven by `MFAEnrollmentLookup` (per-tier `MFAFactorRepository` lookups for TOTP + WebAuthn) and the live `AuthPolicyService.MFARequired` check. Any lookup error fails closed to `step_up_required` — a degraded Mongo must never silently weaken the gate. MFA completion rechecks eligibility and atomically consumes the challenge, so exactly one concurrent successful completion can mint the preserved pending SID.
 
 ### TOTP details
 
@@ -233,7 +233,7 @@ The enrollment branching is driven by `MFAEnrollmentLookup` (per-tier `MFAFactor
 
 The `webauthn` factor row carries an embedded `webauthnCredentials[]` array (one row per user with `type=webauthn`; the `(userUuid, type)` unique index naturally allows a user to enrol both TOTP and passkeys). Library: `github.com/go-webauthn/webauthn`. Configured via `WEBAUTHN_RP_ID` (eTLD+1 host, no scheme/port) + `WEBAUTHN_RP_ORIGINS` (comma-separated full URLs). Both env vars are optional — if either is missing the module derives them from `FRONTEND_URL`. If neither resolves, WebAuthn is disabled and the endpoints don't mount.
 
-Login / step-up via passkey sets `amr=[..., "otp", "webauthn"]` so `RequireStepUp` accepts the proof. The partial-login response carries `webauthnAvailable: bool` so the verify page can offer the passkey button alongside the TOTP code field.
+Login / step-up via passkey sets `amr=[..., "otp", "webauthn"]` so `RequireStepUp` accepts the proof. The partial-login response carries `webauthnAvailable: bool` so the verify page can offer the passkey button alongside the TOTP code field. After a valid assertion, challenge consumption is atomic: invalid assertions may be retried within their attempt limit, while concurrent or replayed valid assertions have one winner.
 
 The current flow requires password login first, then offers passkey as the second factor. Full passwordless (discoverable / usernameless) login would need a `BeginDiscoverableLogin` entry point and is not built yet.
 
@@ -241,7 +241,11 @@ The current flow requires password login first, then offers passkey as the secon
 
 ## 8. Session revocation
 
-Logout, change-password, and admin actions populate a Redis-backed set at `auth:revoked:session:<sid>` with the reason string. Both `AuthMiddleware` (monolith) and `JWTValidator` (AI sidecar) check it on every authenticated request — revocation takes effect within milliseconds instead of waiting for the access-token TTL. Entries auto-expire after `access TTL + 1min`. The revocation check **fails open on Redis errors** — a degraded Redis must not lock every user out.
+Logout, change-password, and admin actions populate a Redis-backed set at `auth:revoked:session:<sid>` with the reason string. Both `AuthMiddleware` (monolith) and `JWTValidator` (AI sidecar) check it on every authenticated request — revocation takes effect within milliseconds instead of waiting for the access-token TTL. Entries auto-expire after `access TTL + 1min`. The revocation check **fails open on Redis errors**: persisted refresh/session revocation still blocks reauthentication, but a previously issued access token can remain valid only until its configured access-token expiry. Each Redis failure increments `orkestra_auth_session_revocation_store_failures_total` with the bounded `operation` label (`lookup` or `write`).
+
+### Legacy SID migration
+
+When upgrading from affected builds that did not preserve a canonical SID across issuance paths, revoke all active refresh-token rows and allow existing access tokens to expire within the configured access-token TTL. Keep rotated and revoked refresh rows for at least one refresh-token TTL; deleting them sooner disables replay detection for still-present tokens.
 
 `logout` invalidates the current sid only; logout-all-devices currently relies on revoking every refresh token in the user's family (per-user generation counter is a follow-up).
 
