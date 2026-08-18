@@ -1,20 +1,56 @@
 name: Security Scan
 
+# Cost-aware triggers: PRs gate merges, the weekly cron catches newly
+# published CVEs (vulnerability exposure changes with time and with
+# dependency edits — not with every push). No `push` trigger: a push to
+# dev/main would re-scan the exact dependency set the PR just scanned,
+# and on the private chain forks every run burns paid minutes.
 on:
   pull_request:
     branches: [dev, main]
-  push:
-    branches: [dev, main]
   schedule:
     - cron: '0 6 * * 1' # Weekly Monday 6 AM UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  # Per-job path gating. Deliberately NOT `on.pull_request.paths`: a job
+  # skipped by this gate still reports a (skipped = satisfied) check, while
+  # a workflow filtered out at trigger level never reports and would leave
+  # any required status check stuck at "Expected".
+  changes:
+    name: Detect changed areas
+    runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+    steps:
+      - uses: dorny/paths-filter@v3
+        id: filter
+        # schedule/workflow_dispatch bypass the gate entirely (see the
+        # `if` on the scan jobs), so the filter only runs on PRs — where
+        # it reads the PR file list via API, no checkout needed.
+        if: github.event_name == 'pull_request'
+        with:
+          filters: |
+            backend:
+              - 'backend/**'
+              - '.github/workflows/security.yml'
+            frontend:
+              - 'frontend-admin/**'
+              - '.github/workflows/security.yml'
+
   go-vulncheck:
     name: Go Vulnerability Check
+    needs: changes
+    if: github.event_name != 'pull_request' || needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -63,6 +99,8 @@ jobs:
 
   npm-audit:
     name: NPM Security Audit
+    needs: changes
+    if: github.event_name != 'pull_request' || needs.changes.outputs.frontend == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:

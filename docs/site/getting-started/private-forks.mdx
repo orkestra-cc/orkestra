@@ -51,6 +51,8 @@ git checkout dev
 git merge upstream/dev        # or a release tag, e.g. v0.3.12
 ```
 
+On a private fork, Actions minutes are billed — consider `-m "merge(upstream): sync [skip ci]"` on the merge so your CI doesn't re-run on code upstream's CI already tested. One caveat before you make it a habit: if your fork carries addons, your CI is the *only* CI that ever tests core + addons together, so skip it only for syncs that don't touch APIs your addons consume (and always finish with the build below regardless).
+
 The conflict surface is small and always the same files. The recipe:
 
 | File | Resolution |

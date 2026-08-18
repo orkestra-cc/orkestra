@@ -49,6 +49,7 @@ jobs:
         with:
           name: mobile-coverage
           path: mobile/coverage/
+          retention-days: 7
 
   coverage-badge:
     name: Refresh coverage badge

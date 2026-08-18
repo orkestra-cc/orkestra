@@ -51,6 +51,7 @@ jobs:
         with:
           name: frontend-admin-coverage
           path: frontend-admin/coverage/
+          retention-days: 7
 
   coverage-badge:
     name: Refresh coverage badge
