@@ -1127,26 +1127,7 @@ func (s *authService) GenerateEnhancedTokenPair(ctx context.Context, user *iface
 		return resp, err
 	}
 
-	// Generate JWT tokens. OAuth logins get amr:["oauth"] so the token
-	// encodes how the user authenticated — aligns with password logins'
-	// amr:["pwd"] (see password_auth_service.completeLogin) and enables
-	// RequireMFA / step-up middleware to distinguish primary factors.
-	accessToken, err := s.jwtService.GenerateAccessTokenWithAMR(user, []string{"oauth"}, 0)
-	if err != nil {
-		return nil, err
-	}
-
-	refreshToken, err := s.jwtService.GenerateRefreshToken(user)
-	if err != nil {
-		return nil, err
-	}
-
-	sessionID := uuid.New().String()
-
-	// Create refresh token record in database for persistence and tracking
 	now := time.Now()
-
-	// Handle nil security context safely
 	ipAddress := "unknown"
 	if securityCtx != nil && securityCtx.IPAddress != "" {
 		ipAddress = securityCtx.IPAddress
@@ -1180,6 +1161,26 @@ func (s *authService) GenerateEnhancedTokenPair(ctx context.Context, user *iface
 		}
 	}
 
+	// Choose the canonical session before signing anything. OAuth logins get
+	// amr:["oauth"] and both JWTs, persisted rows, and the response carry the
+	// same random session UUID.
+	sessionID := uuid.NewString()
+	device := &models.DeviceInfo{
+		DeviceID:    deviceID,
+		DeviceType:  deviceType,
+		Platform:    platform,
+		Fingerprint: fingerprint,
+	}
+	security := &models.SecurityContext{
+		SessionID: sessionID,
+		IPAddress: ipAddress,
+		Timestamp: now,
+	}
+	pair, err := s.jwtService.GenerateTokenPairWithAMR(user, device, security, []string{"oauth"}, 0)
+	if err != nil {
+		return nil, err
+	}
+
 	// Revoke existing active tokens for this device to enforce single-token-per-device
 	// This prevents token accumulation when users login multiple times from the same device
 	if err := s.refreshTokenRepo.RevokeTokensByDevice(ctx, user.UUID, deviceID, "new_login"); err != nil {
@@ -1193,7 +1194,7 @@ func (s *authService) GenerateEnhancedTokenPair(ctx context.Context, user *iface
 	refreshTokenRecord := &models.RefreshTokenDoc{
 		UUID:         models.GenerateUUIDv7(),
 		UserUUID:     user.UUID,
-		Token:        refreshToken, // Repository layer will hash this for storage
+		Token:        pair.RefreshToken, // Repository layer will hash this for storage
 		SessionUUID:  sessionID,
 		DeviceID:     deviceID,
 		DeviceType:   deviceType,
@@ -1214,6 +1215,30 @@ func (s *authService) GenerateEnhancedTokenPair(ctx context.Context, user *iface
 	err = s.refreshTokenRepo.CreateRefreshToken(ctx, refreshTokenRecord)
 	if err != nil {
 		return nil, fmt.Errorf("failed to store refresh token: %w", err)
+	}
+
+	if s.authSessionRepo == nil {
+		_ = s.refreshTokenRepo.RevokeTokensBySession(ctx, sessionID, models.RevokeReasonManualRevoke)
+		return nil, fmt.Errorf("failed to store auth session: persistence unavailable")
+	}
+	if err := s.authSessionRepo.CreateSession(ctx, &models.AuthSessionDoc{
+		UUID:         sessionID,
+		UserUUID:     user.UUID,
+		DeviceID:     deviceID,
+		IsActive:     true,
+		StartedAt:    now,
+		LastActivity: now,
+		ExpiresAt:    now.Add(AuthSessionRetention),
+		LoginMethod:  "oauth",
+		DeviceInfo:   *device,
+		IPAddress:    ipAddress,
+		RiskScore:    0.1,
+		TrustLevel:   "medium",
+		CreatedAt:    now,
+		UpdatedAt:    now,
+	}); err != nil {
+		_ = s.refreshTokenRepo.RevokeTokensBySession(ctx, sessionID, models.RevokeReasonManualRevoke)
+		return nil, fmt.Errorf("failed to store auth session: %w", err)
 	}
 
 	// Update user's last login timestamp
@@ -1238,12 +1263,12 @@ func (s *authService) GenerateEnhancedTokenPair(ctx context.Context, user *iface
 	userResponse := s.buildUserResponse(ctx, user)
 
 	tokenResponse := &models.TokenResponse{
-		AccessToken:    accessToken,
-		RefreshToken:   refreshToken,
+		AccessToken:    pair.AccessToken,
+		RefreshToken:   pair.RefreshToken,
 		TokenType:      "Bearer",
 		ExpiresIn:      int64(s.jwtService.AccessTokenTTL(ctx).Seconds()),
 		SessionID:      sessionID,
-		DeviceID:       deviceInfo.DeviceID,
+		DeviceID:       deviceID,
 		User:           userResponse,
 		OAuthProviders: oauthProvidersInfo,
 	}
@@ -1307,26 +1332,27 @@ func (s *authService) RefreshTokensWithRiskAssessment(ctx context.Context, refre
 		return nil, ErrInvalidRefreshToken
 	}
 
-	// 5. Mint new JWT tokens. The access token carries forward the caller's
-	// prior amr — they haven't completed a new factor, we're just rolling
-	// the session forward. (last_otp_at is not elevated either.)
-	amr := claims.AMR
-	lastOTPAt := claims.LastOTPAt
-	newAccess, err := s.jwtService.GenerateAccessTokenWithAMR(user, amr, lastOTPAt)
-	if err != nil {
-		return nil, fmt.Errorf("failed to mint access token: %w", err)
-	}
-	newRefresh, err := s.jwtService.GenerateRefreshToken(user)
-	if err != nil {
-		return nil, fmt.Errorf("failed to mint refresh token: %w", err)
-	}
-
 	now := time.Now()
 	newSessionID := tokenDoc.SessionUUID // preserve the session — rotation is within one session
+	device := &models.DeviceInfo{
+		DeviceID:    tokenDoc.DeviceID,
+		DeviceType:  tokenDoc.DeviceType,
+		Platform:    tokenDoc.Platform,
+		Fingerprint: tokenDoc.Fingerprint,
+	}
+	security := &models.SecurityContext{
+		SessionID: newSessionID,
+		IPAddress: nonEmpty(securityCtxIP(securityCtx), tokenDoc.IPAddress),
+		Timestamp: now,
+	}
+	pair, err := s.jwtService.GenerateTokenPairWithAMR(user, device, security, claims.AMR, claims.LastOTPAt)
+	if err != nil {
+		return nil, fmt.Errorf("failed to mint token pair: %w", err)
+	}
 	newDoc := &models.RefreshTokenDoc{
 		UUID:         models.GenerateTimeOrderedUUID(),
 		UserUUID:     tokenDoc.UserUUID,
-		Token:        newRefresh, // repo layer hashes on insert
+		Token:        pair.RefreshToken, // repo layer hashes on insert
 		SessionUUID:  newSessionID,
 		DeviceID:     tokenDoc.DeviceID,
 		DeviceName:   tokenDoc.DeviceName,
@@ -1334,7 +1360,7 @@ func (s *authService) RefreshTokensWithRiskAssessment(ctx context.Context, refre
 		Platform:     tokenDoc.Platform,
 		AppVersion:   tokenDoc.AppVersion,
 		Fingerprint:  tokenDoc.Fingerprint,
-		IPAddress:    nonEmpty(securityCtxIP(securityCtx), tokenDoc.IPAddress),
+		IPAddress:    security.IPAddress,
 		RiskScore:    tokenDoc.RiskScore,
 		IssuedAt:     now,
 		ExpiresAt:    now.Add(s.jwtService.RefreshTokenTTL()),
@@ -1362,8 +1388,8 @@ func (s *authService) RefreshTokensWithRiskAssessment(ctx context.Context, refre
 	oauthProvidersInfo := models.ConvertOAuthProvidersToInfo(oauthProviders)
 
 	return &models.TokenResponse{
-		AccessToken:    newAccess,
-		RefreshToken:   newRefresh,
+		AccessToken:    pair.AccessToken,
+		RefreshToken:   pair.RefreshToken,
 		TokenType:      "Bearer",
 		ExpiresIn:      int64(s.jwtService.AccessTokenTTL(ctx).Seconds()),
 		SessionID:      newSessionID,
@@ -1437,7 +1463,18 @@ func (s *authService) MintAccessTokenFromRefresh(ctx context.Context, refreshTok
 		return nil, ErrInvalidRefreshToken
 	}
 
-	access, err := s.jwtService.GenerateAccessTokenWithAMR(user, claims.AMR, claims.LastOTPAt)
+	device := &models.DeviceInfo{
+		DeviceID:    doc.DeviceID,
+		DeviceType:  doc.DeviceType,
+		Platform:    doc.Platform,
+		Fingerprint: doc.Fingerprint,
+	}
+	security := &models.SecurityContext{
+		SessionID: doc.SessionUUID,
+		IPAddress: nonEmpty(securityCtxIP(securityCtx), doc.IPAddress),
+		Timestamp: time.Now(),
+	}
+	access, err := s.jwtService.GenerateAccessTokenForSessionWithAMR(user, device, security, claims.AMR, claims.LastOTPAt)
 	if err != nil {
 		return nil, fmt.Errorf("failed to mint access token: %w", err)
 	}
@@ -2062,6 +2099,7 @@ func (s *authService) evaluateMFAForOAuth(ctx context.Context, user *iface.User,
 	if hasTOTP || hasWebAuthn {
 		in := LoginChallengeInput{
 			UserUUID:  user.UUID,
+			SessionID: uuid.NewString(),
 			SourceAMR: []string{"oauth"},
 		}
 		if deviceInfo != nil {

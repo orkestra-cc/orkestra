@@ -679,6 +679,7 @@ func (s *PasswordAuthService) completeLogin(ctx context.Context, user *iface.Use
 		}
 		ch, err := s.mfaChallengeService.BeginLogin(ctx, LoginChallengeInput{
 			UserUUID:  user.UUID,
+			SessionID: uuid.NewString(),
 			SourceAMR: sourceAMR,
 			DeviceID:  in.DeviceID,
 			Platform:  in.Platform,
@@ -1108,7 +1109,8 @@ type ConfirmPasswordResult struct {
 }
 
 // ConfirmPassword verifies the user's password and mints a stepped-up
-// access token carrying amr=(priorAMR ∪ {"reauth"}) and last_otp_at=now.
+// access token carrying the caller's existing session, amr=(priorAMR ∪
+// {"reauth"}), and last_otp_at=now.
 // Used by RequireStepUp's fallback path for users who can't satisfy the
 // standard MFA gate because no factor is enrolled.
 //
@@ -1123,8 +1125,8 @@ type ConfirmPasswordResult struct {
 // emit 401 (and the IP/email failure counters tick the same way as a
 // failed login). The 5-minute freshness window is enforced downstream
 // by RequireStepUp comparing last_otp_at — this method always stamps now.
-func (s *PasswordAuthService) ConfirmPassword(ctx context.Context, userUUID, password string, priorAMR []string, ip string) (*ConfirmPasswordResult, error) {
-	if userUUID == "" || password == "" {
+func (s *PasswordAuthService) ConfirmPassword(ctx context.Context, userUUID, password string, priorAMR []string, ip, sessionID, deviceID string) (*ConfirmPasswordResult, error) {
+	if userUUID == "" || password == "" || sessionID == "" {
 		return nil, ErrInvalidCredentials
 	}
 	user, err := s.userService.GetUserByID(ctx, userUUID)
@@ -1132,6 +1134,9 @@ func (s *PasswordAuthService) ConfirmPassword(ctx context.Context, userUUID, pas
 		return nil, err
 	}
 	if user == nil {
+		return nil, ErrInvalidCredentials
+	}
+	if err := ValidateTokenEligibleUser(user); err != nil {
 		return nil, ErrInvalidCredentials
 	}
 	if user.PasswordHash == "" {
@@ -1163,7 +1168,8 @@ func (s *PasswordAuthService) ConfirmPassword(ctx context.Context, userUUID, pas
 	// authentication lineage stays inspectable (e.g. a token minted from
 	// an oauth login will carry ["oauth","reauth"], not just ["reauth"]).
 	amr := mergeAMRWithReauth(priorAMR)
-	token, err := s.jwtService.GenerateAccessTokenWithAMR(user, amr, time.Now().Unix())
+	now := time.Now()
+	token, err := s.jwtService.GenerateAccessTokenForSessionWithAMR(user, &authModels.DeviceInfo{DeviceID: deviceID}, &authModels.SecurityContext{SessionID: sessionID, IPAddress: ip, Timestamp: now}, amr, now.Unix())
 	if err != nil {
 		return nil, err
 	}
@@ -1290,6 +1296,12 @@ func (s *PasswordAuthService) IssueLoginTokens(ctx context.Context, user *iface.
 	return s.issueTokens(ctx, user, LoginInput{DeviceID: deviceID, Platform: platform, IP: ip}, amr, lastOTPAt)
 }
 
+// IssueLoginTokensForSession completes a partial login against the session
+// UUID chosen before the MFA challenge was returned.
+func (s *PasswordAuthService) IssueLoginTokensForSession(ctx context.Context, user *iface.User, sessionID, deviceID, platform, ip string, amr []string, lastOTPAt int64) (*authModels.TokenResponse, error) {
+	return s.issueTokensForSession(ctx, user, LoginInput{DeviceID: deviceID, Platform: platform, IP: ip}, sessionID, amr, lastOTPAt)
+}
+
 // IssueLoginTokensExternal is the iface.LoginTokenIssuer-shaped wrapper
 // around IssueLoginTokens. Extracted addons (today: identity, for the
 // OIDC bridge) consume it through the kernel's ServiceRegistry without
@@ -1315,6 +1327,13 @@ func (s *PasswordAuthService) IssueLoginTokensExternal(ctx context.Context, user
 }
 
 func (s *PasswordAuthService) issueTokens(ctx context.Context, user *iface.User, in LoginInput, amr []string, lastOTPAt int64) (*authModels.TokenResponse, error) {
+	return s.issueTokensForSession(ctx, user, in, uuid.NewString(), amr, lastOTPAt)
+}
+
+func (s *PasswordAuthService) issueTokensForSession(ctx context.Context, user *iface.User, in LoginInput, sessionID string, amr []string, lastOTPAt int64) (*authModels.TokenResponse, error) {
+	if err := ValidateTokenEligibleUser(user); err != nil || sessionID == "" {
+		return nil, ErrInvalidCredentials
+	}
 	deviceID := in.DeviceID
 	if deviceID == "" {
 		deviceID = "password-" + strings.ReplaceAll(uuid.NewString(), "-", "")[:12]
@@ -1324,7 +1343,6 @@ func (s *PasswordAuthService) issueTokens(ctx context.Context, user *iface.User,
 		platform = "web"
 	}
 
-	sessionID := uuid.NewString()
 	now := time.Now()
 	device := &authModels.DeviceInfo{
 		DeviceID:   deviceID,

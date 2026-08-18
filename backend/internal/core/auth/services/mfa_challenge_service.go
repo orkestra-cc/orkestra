@@ -38,9 +38,9 @@ const MFAMaxAttempts = 5
 var ErrMFAChallengeNotFound = errors.New("mfa challenge not found")
 
 // MFAChallenge is the Redis-stored payload. PendingSecret is only populated
-// for enrollment challenges; device and source-AMR fields are populated for
-// login challenges so the verify endpoint can mint a token pair without
-// round-tripping the user's password.
+// for enrollment challenges; session, device, and source-AMR fields are
+// populated for login challenges so the verify endpoint can mint a token pair
+// without round-tripping the user's password or changing session identity.
 type MFAChallenge struct {
 	ID            string              `json:"id"`
 	UserUUID      string              `json:"userUuid"`
@@ -55,6 +55,7 @@ type MFAChallenge struct {
 	// (typically ["pwd"] or ["oauth"]); "otp" is appended on successful
 	// verify to form the final token's amr claim.
 	DeviceID    string   `json:"deviceId,omitempty"`
+	SessionID   string   `json:"sessionId,omitempty"`
 	Platform    string   `json:"platform,omitempty"`
 	IPAddress   string   `json:"ipAddress,omitempty"`
 	Fingerprint string   `json:"fingerprint,omitempty"`
@@ -70,6 +71,7 @@ type LoginChallengeInput struct {
 	UserUUID    string
 	SourceAMR   []string
 	DeviceID    string
+	SessionID   string
 	Platform    string
 	IPAddress   string
 	Fingerprint string
@@ -138,6 +140,7 @@ func (s *mfaChallengeService) BeginLogin(ctx context.Context, in LoginChallengeI
 		CreatedAt:   now,
 		ExpiresAt:   now.Add(MFAChallengeTTL),
 		DeviceID:    in.DeviceID,
+		SessionID:   in.SessionID,
 		Platform:    in.Platform,
 		IPAddress:   in.IPAddress,
 		Fingerprint: in.Fingerprint,

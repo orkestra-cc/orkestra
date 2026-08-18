@@ -263,8 +263,12 @@ func (h *WebAuthnHandler) VerifyFinish(ctx context.Context, req *webAuthnVerifyF
 	if userUUID == "" {
 		return nil, huma.Error401Unauthorized("authentication required")
 	}
+	sessionID, deviceID, ok := currentSessionIdentity(ctx)
+	if !ok {
+		return nil, huma.Error401Unauthorized("authentication required")
+	}
 	user, err := h.users.GetUserByID(ctx, userUUID)
-	if err != nil || user == nil {
+	if err != nil || services.ValidateTokenEligibleUser(user) != nil {
 		return nil, huma.Error401Unauthorized("user not found")
 	}
 	if len(req.Body.AssertionResponse) == 0 {
@@ -273,9 +277,8 @@ func (h *WebAuthnHandler) VerifyFinish(ctx context.Context, req *webAuthnVerifyF
 	if err := h.wa.FinishAssertion(ctx, user, req.Body.ChallengeID, services.MFAPurposeWebAuthnVerify, req.Body.AssertionResponse); err != nil {
 		return nil, mapWebAuthnError(err)
 	}
-
 	amr := appendWebAuthn(priorAMRWithOTP(ctx))
-	token, err := h.jwt.GenerateAccessTokenWithAMR(user, amr, time.Now().Unix())
+	token, err := h.jwt.GenerateAccessTokenForSessionWithAMR(user, &authModels.DeviceInfo{DeviceID: deviceID}, &authModels.SecurityContext{SessionID: sessionID, Timestamp: time.Now()}, amr, time.Now().Unix())
 	if err != nil {
 		return nil, huma.Error500InternalServerError("failed to mint stepped-up token")
 	}
@@ -373,9 +376,12 @@ func (h *WebAuthnHandler) LoginFinish(ctx context.Context, req *webAuthnLoginFin
 	if loginCh.Purpose != services.MFAPurposeLogin {
 		return nil, huma.Error400BadRequest("challenge purpose mismatch")
 	}
+	if loginCh.SessionID == "" {
+		return nil, huma.Error401Unauthorized("invalid or expired login challenge")
+	}
 
 	user, err := h.users.GetUserByID(ctx, loginCh.UserUUID)
-	if err != nil || user == nil {
+	if err != nil || services.ValidateTokenEligibleUser(user) != nil {
 		return nil, huma.Error401Unauthorized("user not found")
 	}
 
@@ -389,7 +395,7 @@ func (h *WebAuthnHandler) LoginFinish(ctx context.Context, req *webAuthnLoginFin
 	_, _ = h.mfaChallenges.Consume(ctx, req.Body.LoginChallengeID)
 
 	amr := appendWebAuthn(appendOTP(loginCh.SourceAMR))
-	tokens, err := h.tokens.IssueLoginTokens(ctx, user, loginCh.DeviceID, loginCh.Platform, loginCh.IPAddress, amr, time.Now().Unix())
+	tokens, err := h.tokens.IssueLoginTokensForSession(ctx, user, loginCh.SessionID, loginCh.DeviceID, loginCh.Platform, loginCh.IPAddress, amr, time.Now().Unix())
 	if err != nil {
 		return nil, huma.Error500InternalServerError("failed to mint login tokens")
 	}

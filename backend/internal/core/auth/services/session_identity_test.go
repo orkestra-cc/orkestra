@@ -74,9 +74,10 @@ func TestPasswordIssueTokens_PreservesCanonicalSessionIdentity(t *testing.T) {
 	svc, jwt := newSessionIdentityPasswordAuth(t, refresh, sessions)
 
 	response, err := svc.IssueLoginTokens(context.Background(), &iface.User{
-		UUID:  "user-session-identity",
-		Email: "session@example.com",
-		Role:  "operator",
+		UUID:     "user-session-identity",
+		Email:    "session@example.com",
+		Role:     "operator",
+		IsActive: true,
 	}, "device-session-identity", "web", "127.0.0.1", []string{"pwd"}, 0)
 	if err != nil {
 		t.Fatalf("IssueLoginTokens: %v", err)
@@ -110,7 +111,7 @@ func TestPasswordIssueTokens_RefreshPersistenceFailureReturnsNoTokens(t *testing
 	sessions := &sessionIdentitySessionRepo{}
 	svc, _ := newSessionIdentityPasswordAuth(t, refresh, sessions)
 
-	response, err := svc.IssueLoginTokens(context.Background(), &iface.User{UUID: "user-refresh-failure", Role: "operator"}, "device", "web", "127.0.0.1", []string{"pwd"}, 0)
+	response, err := svc.IssueLoginTokens(context.Background(), &iface.User{UUID: "user-refresh-failure", Role: "operator", IsActive: true}, "device", "web", "127.0.0.1", []string{"pwd"}, 0)
 	if err == nil {
 		t.Fatal("IssueLoginTokens succeeded despite refresh persistence failure")
 	}
@@ -127,7 +128,7 @@ func TestPasswordIssueTokens_SessionPersistenceFailureRevokesCanonicalRefresh(t 
 	sessions := &sessionIdentitySessionRepo{createErr: errors.New("session store unavailable")}
 	svc, _ := newSessionIdentityPasswordAuth(t, refresh, sessions)
 
-	response, err := svc.IssueLoginTokens(context.Background(), &iface.User{UUID: "user-session-failure", Role: "operator"}, "device", "web", "127.0.0.1", []string{"pwd"}, 0)
+	response, err := svc.IssueLoginTokens(context.Background(), &iface.User{UUID: "user-session-failure", Role: "operator", IsActive: true}, "device", "web", "127.0.0.1", []string{"pwd"}, 0)
 	if err == nil {
 		t.Fatal("IssueLoginTokens succeeded despite session persistence failure")
 	}
@@ -139,5 +140,37 @@ func TestPasswordIssueTokens_SessionPersistenceFailureRevokesCanonicalRefresh(t 
 	}
 	if len(refresh.revoked) != 1 || refresh.revoked[0] != refresh.created.SessionUUID {
 		t.Fatalf("rollback revoked sessions = %v, want [%q]", refresh.revoked, refresh.created.SessionUUID)
+	}
+}
+
+func TestPasswordIssueTokens_PartialMFAChallengeCarriesSID(t *testing.T) {
+	env := newGatesEnv(t, PolicyAudienceOperator, map[string]string{"mfaEnabled": "true"}, nil)
+	user := env.hashedUser("password-mfa-session@example.com", "correct-horse-battery")
+	user.Role = "administrator"
+	factors := newFakeFactorRepo()
+	if err := factors.Insert(context.Background(), &authModels.MFAFactorDoc{
+		UUID: "factor-password-session", UserUUID: user.UUID, Type: authModels.MFAFactorTOTP,
+	}); err != nil {
+		t.Fatalf("Insert factor: %v", err)
+	}
+	challenges := newFakeMFAChallenge()
+	env.auth.mfaFactorRepo = factors
+	env.auth.mfaChallengeService = challenges
+
+	response, err := env.auth.Login(context.Background(), LoginInput{
+		Email: user.Email, Password: "correct-horse-battery", DeviceID: "password-mfa-device",
+	})
+	if err != nil {
+		t.Fatalf("Login: %v", err)
+	}
+	if !response.RequiresMFA || response.MFAToken == "" {
+		t.Fatalf("response = %+v, want partial MFA challenge", response)
+	}
+	challenge, err := challenges.Peek(context.Background(), response.MFAToken)
+	if err != nil {
+		t.Fatalf("Peek: %v", err)
+	}
+	if challenge.SessionID == "" {
+		t.Fatal("partial password challenge has no pending session id")
 	}
 }

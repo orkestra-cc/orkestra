@@ -313,7 +313,11 @@ func (h *PasswordAuthHandler) PasswordConfirm(ctx context.Context, req *Password
 	}
 	priorAMR := priorAMRFromCtx(ctx)
 	ip := clientIPFromCtx(ctx)
-	res, err := h.svc.ConfirmPassword(ctx, userUUID, req.Body.Password, priorAMR, ip)
+	sessionID, deviceID, ok := currentSessionIdentity(ctx)
+	if !ok {
+		return nil, huma.Error401Unauthorized("authentication required")
+	}
+	res, err := h.svc.ConfirmPassword(ctx, userUUID, req.Body.Password, priorAMR, ip, sessionID, deviceID)
 	if err != nil {
 		switch {
 		case errors.Is(err, services.ErrInvalidCredentials):
@@ -344,6 +348,14 @@ func priorAMRFromCtx(ctx context.Context) []string {
 		return claims.AMR
 	}
 	return nil
+}
+
+func currentSessionIdentity(ctx context.Context) (string, string, bool) {
+	claims, ok := ctx.Value("claims").(*authModels.JWTClaims)
+	if !ok || claims == nil || claims.SessionID == "" {
+		return "", "", false
+	}
+	return claims.SessionID, claims.DeviceID, true
 }
 
 // --- helpers ---

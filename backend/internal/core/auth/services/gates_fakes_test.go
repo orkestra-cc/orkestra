@@ -21,6 +21,7 @@ import (
 	authModels "github.com/orkestra/backend/internal/core/auth/models"
 	"github.com/orkestra/backend/internal/core/auth/repository"
 	"github.com/orkestra/backend/internal/shared/geoip"
+	"github.com/orkestra/backend/internal/shared/utils"
 	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
@@ -342,7 +343,7 @@ func (r *gateRefreshRepo) RotateWithFamily(_ context.Context, oldHash string, ne
 	old.RevokedReason = authModels.RevokeReasonRotated
 	old.SucceededBy = newDoc.UUID
 	c := *newDoc
-	r.byHash[newDoc.Token] = &c
+	r.byHash[utils.HashRefreshToken(newDoc.Token)] = &c
 	return nil
 }
 
