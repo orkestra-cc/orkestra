@@ -125,6 +125,13 @@ type OAuthLinkDataUpdater interface {
 	UpdateOAuthLinkData(ctx context.Context, userUUID string, provider OAuthProvider, providerID string, data map[string]interface{}) error
 }
 
+// ServiceAccountLister is an OPTIONAL extension a UserProvider may
+// implement (additive-only rule; consumers type-assert). Lists machine
+// principals for the operator admin surface.
+type ServiceAccountLister interface {
+	ListUsersByKind(ctx context.Context, kind string) ([]User, error)
+}
+
 // ---------------------------------------------------------------------------
 // OperatorUserProvider / ClientUserProvider — ADR-0003 PR-B
 // Tier-aware user-data interfaces. Same surface as UserProvider but each

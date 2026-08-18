@@ -50,6 +50,7 @@ Declared in `module.go::Collections()`. Collection name constants live in `model
 | `operator_email_tokens` / `client_email_tokens` | `uuid` unique, `tokenHash` unique, `userUuid`, `expiresAt` **TTL 24h** | Yes |
 | `operator_mfa_factors` / `client_mfa_factors` | `uuid` unique, compound `(userUuid, type)` unique | — — one row per (user, factor type). The `webauthn` row carries an embedded `webauthnCredentials[]` array (zero-or-many passkeys per user) |
 | `auth_device_trust` | `uuid` unique, `(userUuid, deviceId)`, `trustedUntil` (TTL via ExpireAt) | Yes — single non-tier-split (grant follows the user record) |
+| `service_account_credentials` | `uuid` unique, `clientId` unique, `userUuid` | — single non-tier-split (service accounts are an operator-surface-only concept, not a per-audience one — see "Service accounts" below) |
 
 Email tokens, device-trust grants, and refresh-family replay fences have TTL indexes. Refresh-token rows, sessions, and MFA factor rows are rotated/invalidated explicitly in the service layer.
 
@@ -248,6 +249,7 @@ The OAuth provider callbacks (`/v1/auth/oauth/{google,apple,discord,github}/call
 | POST | `/v1/auth/{tier}/refresh` | Refresh using a header-supplied refresh token |
 | POST | `/v1/auth/{tier}/refresh-cookie` | Refresh using the `Cookie:` header |
 | POST | `/v1/auth/{tier}/logout` | Revoke refresh cookie, invalidate session. Public route — identity comes from `resolveLogoutIdentity`, which requires a **signature-verified** refresh cookie whenever the request context is anonymous (see Key invariants) |
+| POST | `/v1/auth/token` | OAuth2 client-credentials grant for service accounts (machine principals). Un-prefixed — operator-tier only, no client-tier equivalent. `{grantType: client_credentials, clientId, clientSecret}` → `{accessToken, tokenType: Bearer, expiresIn}`, no refresh token. Rate-limited like login. See "Service accounts" below |
 
 ### Protected (bearer access token required)
 
@@ -281,6 +283,12 @@ The OAuth provider callbacks (`/v1/auth/oauth/{google,apple,discord,github}/call
 | POST | `/v1/admin/users/{userId}/send-password-reset` | `RequireSystemPermission("system.users.password_reset")` | Admin: trigger the standard password-reset email for an operator user. Operator-side companion of the existing client-user route |
 | POST | `/v1/admin/users/{userId}/resend-verification` | `RequireSystemPermission("system.users.email_verify_resend")` | Admin: re-emit the email-verification message. Idempotent — already-verified users return 200 with no action |
 | DELETE | `/v1/admin/users/{userId}/oauth/{provider}` | `RequireSystemPermission("system.users.oauth_unlink")` + `RequireStepUp(5m)` | Admin: unlink a Google/Apple/GitHub/Discord identity. Service-layer safeguards reject self-action (409 `self_action`) and last-credential lockout — no password + sole OAuth link returns 409 `last_credential` |
+| GET | `/v1/admin/service-accounts` | `RequireSystemPermission("auth.service_accounts.read")` | List service accounts with live active-credential counts. Never returns secrets |
+| GET | `/v1/admin/service-accounts/{id}` | `RequireSystemPermission("auth.service_accounts.read")` | Get one service account plus its full credential history (active and revoked) |
+| POST | `/v1/admin/service-accounts` | `RequireSystemPermission("auth.service_accounts.manage")` + `RequireStepUp(5m)` | Create a service account (`{name}`) — mints the `kind=service` user row plus its first credential. Response carries `clientId` + `clientSecret` exactly once. `201` |
+| PATCH | `/v1/admin/service-accounts/{id}` | `RequireSystemPermission("auth.service_accounts.manage")` + `RequireStepUp(5m)` | Rename and/or enable/disable a service account. Only non-nil fields are applied |
+| POST | `/v1/admin/service-accounts/{id}/credentials` | `RequireSystemPermission("auth.service_accounts.manage")` + `RequireStepUp(5m)` | Issue a rotation credential. Enforces the max-two-active cap (409 on a third). Response carries the plaintext secret exactly once. `201` |
+| DELETE | `/v1/admin/service-accounts/{id}/credentials/{credentialId}` | `RequireSystemPermission("auth.service_accounts.manage")` + `RequireStepUp(5m)` | Revoke a credential. Not idempotent — revoking an already-revoked credential surfaces the same not-found outcome as an unknown id. `204` |
 
 And a public endpoint that completes a login after a partial response:
 
@@ -358,6 +366,54 @@ as the admin paths.
 - `DELETE .../oauth/{provider}` — backed by `AuthService.AdminUnlinkOAuth`. Service-layer safeguards: rejects `actorUUID == targetUUID` (`ErrAdminSelfAction` → 409 `self_action`) and rejects the operation when it would leave the user with no usable login method, i.e. `PasswordHash == "" && len(activeOAuthLinks) == 1` (`ErrLastCredentialRemoval` → 409 `last_credential`). Step-up gated because the action removes a credential.
 
 Each successful action emits three audit lanes in parallel: (1) `slog.Info("auth_security_event", event=…)` for log shipping; (2) one row into `auth_security_events` via `securityEventRepo.Insert` (the auth-private audit collection — Phase 2.1); (3) one row into `compliance_audit_events` via the compliance `iface.AuditSink` when the compliance addon is enabled (Phase 6 of the /admin/users hardening). The compliance lane is driven by `authEventComplianceAction` (`services/auth_service.go`), which maps the internal event-type strings (`admin_password_reset_sent`, `admin_verification_resent`, `admin_oauth_unlink`, `admin_mfa_reset`, plus `self_oauth_unlink` / `self_oauth_link` / `self_session_revoke[_all]`) onto the dotted compliance vocabulary (`auth.password.reset_requested` / `auth.email.verify_resend` / `auth.oauth.unlinked` / `auth.mfa.reset` / `auth.oauth.unlinked.self` / …). Unmapped event-types still hit slog + `auth_security_events` but don't get duplicated to compliance — adding an event to the SOC2 view is a deliberate opt-in via the mapping function.
+
+## Service accounts
+
+Machine principals (CI jobs, integrations, and other automated callers) are
+Tier-1 operator user rows with `Kind: iface.UserKindService` — see
+[ADR-0014](../../../../docs/adr/0014-service-accounts-client-credentials.md)
+for the design rationale. `services/service_account_service.go` owns the
+account + credential lifecycle and the client-credentials grant;
+`handlers/service_account_admin_handler.go` (the six admin routes) and
+`handlers/service_token_handler.go` (`POST /v1/auth/token`) are thin HTTP
+bindings over it.
+
+Invariants:
+
+- **Interactive flows reject `Kind == "service"`.** Password login
+  (`services/password_auth_service.go`), every OAuth flow
+  (`services/auth_service.go::GenerateEnhancedTokenPair`), and all three
+  refresh read paths (`RefreshTokensWithRiskAssessment`,
+  `PeekRefreshToken`, `MintAccessTokenFromRefresh`, all in
+  `services/auth_service.go`) fail closed on a service principal. The
+  `POST /v1/auth/token` client-credentials grant is the **only** path that
+  mints a token for a service account.
+- **Privileged system roles are unassignable to service accounts.** The
+  `user` module's `serviceAccountRoleAllowed` guard
+  (`internal/core/user/handlers/user_handler.go`) refuses
+  `super_admin`/`administrator` for any `Kind == "service"` user, on both
+  create and update, and fails closed — refuses the assignment — even when
+  the pre-read needed to classify the target account is unavailable.
+- **Secrets are argon2id-hashed via the existing `PasswordService`, shown
+  exactly once, capped at two active credentials per account.** The
+  plaintext client secret (`sas_`-prefixed) is returned only in the
+  create/issue response body and is never persisted or logged. A third
+  `IssueCredential` call against an account already holding two active
+  credentials returns 409 — the count-then-insert cap is documented
+  best-effort (not atomic), not a security boundary.
+- **Tokens carry `aud: "service"`; the operator mux accepts
+  `{operator, service}`.** `RequireAudience` is variadic set-membership
+  (`shared/middleware/audience.go`); the client host mux is unchanged
+  (`{client}` only) — service accounts act on the Tier-1 operator surface
+  exclusively.
+- **Disabling an account stops new grants instantly; permissions still
+  resolve per request.** `Grant` refuses a disabled account's credentials
+  immediately. A token already minted before the disable remains valid for
+  up to its access-token TTL (default 15m — see "JWT payload shape"
+  above), but because permissions are never embedded in the token,
+  unbinding or disabling a service account takes effect on its
+  authorization immediately regardless of the bearer token's remaining
+  lifetime.
 
 ## Service contract
 

@@ -247,6 +247,29 @@ func (h *UserHandler) UpdateUser(ctx context.Context, req *UpdateUserRequest) (*
 			return nil, errcode.Forbidden(errcode.UserRoleEscalationForbidden,
 				"You cannot assign a role higher than your own")
 		}
+		// Privileged-role guard for service accounts. Fails closed when the
+		// target's identity cannot be read: a transient GetUser error must not
+		// let a privileged role land on a service account. Non-privileged
+		// assignments with a nil pre-read fall through — downstream UpdateUser
+		// surfaces the 404/500 cleanly.
+		if (previous == nil && isPrivilegedSystemRole(req.Body.Role)) || (previous != nil && !serviceAccountRoleAllowed(previous.Kind, req.Body.Role)) {
+			h.emitAudit(ctx, iface.AuditEvent{
+				ActorUserID:  actorUUID,
+				ActorEmail:   actorEmail,
+				ActorType:    "user",
+				Action:       "user.update.refused",
+				ResourceType: "user",
+				ResourceID:   req.ID,
+				Outcome:      "denied",
+				Metadata: map[string]any{
+					"code":      errcode.UserRoleEscalationForbidden,
+					"attempted": "service_account_privileged_role",
+					"to":        req.Body.Role,
+				},
+			})
+			return nil, errcode.Forbidden(errcode.UserRoleEscalationForbidden,
+				"Service accounts cannot hold privileged system roles")
+		}
 	}
 
 	if removesAdminPrivilege(&req.Body) {
@@ -528,6 +551,22 @@ func canAssignRole(callerRole, targetRole string) bool {
 		return false
 	}
 	return caller >= target
+}
+
+// isPrivilegedSystemRole reports whether a role is a privileged system role
+// that machine principals must never hold.
+func isPrivilegedSystemRole(role string) bool {
+	return role == "super_admin" || role == "administrator"
+}
+
+// serviceAccountRoleAllowed refuses privileged system roles for machine
+// principals: a service account must never hold super_admin or
+// administrator, regardless of the granter's own tier.
+func serviceAccountRoleAllowed(kind, role string) bool {
+	if kind != iface.UserKindService {
+		return true
+	}
+	return !isPrivilegedSystemRole(role)
 }
 
 // removesAdminPrivilege reports whether the given update would, if

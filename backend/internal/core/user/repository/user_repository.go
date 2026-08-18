@@ -69,6 +69,11 @@ type UserRepository interface {
 	SetMFAGraceStartedAt(ctx context.Context, userUUID string, when time.Time) error
 	ClearMFAGraceStartedAt(ctx context.Context, userUUID string) error
 
+	// ListByKind returns live (not soft-deleted) users whose Kind matches —
+	// used by the admin service-account listing surface. kind is compared
+	// verbatim; pass iface.UserKindService to list machine principals.
+	ListByKind(ctx context.Context, kind string) ([]iface.User, error)
+
 	// UpdateOAuthLinkData replaces the embedded OAuthLink.OAuthData map
 	// for a matching (provider, providerID) link on the user's row. Used
 	// by the OAuth callback link-reuse path so the cached `picture` URL
@@ -422,6 +427,23 @@ func (r *mongoUserRepository) GetByRole(ctx context.Context, role string) ([]*if
 		users = append(users, &user)
 	}
 
+	return users, nil
+}
+
+// ListByKind returns live users matching Kind — the service-account
+// listing seam. Machine principals are rare relative to the collection
+// as a whole, so an unpaginated scan is fine at expected volumes.
+func (r *mongoUserRepository) ListByKind(ctx context.Context, kind string) ([]iface.User, error) {
+	//tenantscope:allow system: platform user directory; admin-only read of machine principals
+	cur, err := r.collection.Find(ctx, bson.M{"kind": kind, "deletedAt": bson.M{"$exists": false}})
+	if err != nil {
+		return nil, err
+	}
+	defer cur.Close(ctx)
+	var users []iface.User
+	if err := cur.All(ctx, &users); err != nil {
+		return nil, err
+	}
 	return users, nil
 }
 

@@ -855,6 +855,7 @@ func (s *userService) CreateUserWithPassword(ctx context.Context, input *iface.C
 	user.Avatar = input.Avatar
 	user.Phone = input.Phone
 	user.Role = input.Role
+	user.Kind = input.Kind
 	user.PasswordHash = input.PasswordHash
 	now := time.Now()
 	user.PasswordUpdatedAt = &now
@@ -866,6 +867,14 @@ func (s *userService) CreateUserWithPassword(ctx context.Context, input *iface.C
 		return nil, fmt.Errorf("create user with password: %w", err)
 	}
 	return user, nil
+}
+
+// ListUsersByKind satisfies iface.ServiceAccountLister — an optional
+// extension consumers type-assert for rather than a UserService interface
+// method, mirroring the SetBlobStore/SetAuditSink post-construction wiring
+// pattern above. Not exposed as HTTP surface by this task.
+func (s *userService) ListUsersByKind(ctx context.Context, kind string) ([]iface.User, error) {
+	return s.userRepo.ListByKind(ctx, kind)
 }
 
 // UpdatePasswordHash delegates to the repository.

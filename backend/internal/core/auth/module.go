@@ -70,6 +70,18 @@ type AuthModule struct {
 	clientMFAHandler      *handlers.MFAHandler
 	clientWebAuthnHandler *handlers.WebAuthnHandler
 
+	// serviceAccountService owns the service-account lifecycle (Task
+	// 6/7: create/list/get/update accounts, issue/revoke credentials,
+	// Grant the client-credentials token exchange) and serviceTokenHandler
+	// exposes Grant over HTTP at POST /v1/auth/token (Task 8).
+	// serviceAccountAdminHandler exposes the same lifecycle methods over
+	// the gated operator admin surface at /v1/admin/service-accounts
+	// (Task 9). None of the three is registered in the ServiceRegistry —
+	// nothing external consumes them.
+	serviceAccountService      *services.ServiceAccountService
+	serviceTokenHandler        *handlers.ServiceTokenHandler
+	serviceAccountAdminHandler *handlers.ServiceAccountAdminHandler
+
 	// cfg is captured at construction time so Init does not need
 	// Dependencies.Config (Phase 1c). The Module interface contract has
 	// no field for app-wide config; auth is the only consumer of
@@ -124,6 +136,11 @@ func (m *AuthModule) Permissions() []iface.PermissionSpec {
 		{Key: "system.users.password_reset", Module: "auth", Description: "Admin: trigger a password-reset email for another user", System: true},
 		{Key: "system.users.email_verify_resend", Module: "auth", Description: "Admin: resend the email-verification mail for another user", System: true},
 		{Key: "system.users.oauth_unlink", Module: "auth", Description: "Admin: unlink an OAuth identity (Google/Apple/GitHub/Discord) from another user", System: true},
+		// System: true — operator-console-only, granted by the platform
+		// role shortcuts (super_admin/administrator), excluded from org
+		// roles by the seeder. Task 9.
+		{Key: "auth.service_accounts.read", Module: "auth", Description: "Admin: list and inspect service accounts", System: true},
+		{Key: "auth.service_accounts.manage", Module: "auth", Description: "Admin: create service accounts and issue, rotate, or revoke their client credentials", System: true},
 	}
 }
 
@@ -682,6 +699,11 @@ func (m *AuthModule) Collections() []module.CollectionSpec {
 			{Keys: map[string]int{"uuid": 1}, Unique: true},
 			{Keys: map[string]int{"userUuid": 1, "type": 1}, Unique: true},
 		}},
+		{Name: models.ServiceAccountCredentialsCollection, Indexes: []module.IndexSpec{
+			{Keys: map[string]int{"uuid": 1}, Unique: true},
+			{Keys: map[string]int{"clientId": 1}, Unique: true},
+			{Keys: map[string]int{"userUuid": 1}},
+		}},
 	}
 }
 
@@ -997,6 +1019,51 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 	// route gates (RequireGlobal vs RequireGlobal+RequireStepUp(5m))
 	// are applied in RegisterRoutes.
 	m.operatorSelfUserAuthHandler = handlers.NewSelfUserAuthHandler(opBundle.authService, opBundle.mfaSvc)
+
+	// Service-audience JWT service (Task 8). Mirrors the operatorJWT
+	// construction above verbatim — same key pair, same environment, same
+	// TTLs — only the audience claim differs (aud="service" instead of
+	// "operator"), so a service-account token cannot be replayed against
+	// either the operator or client host mux (RequireAudience rejects
+	// cross-audience tokens).
+	serviceJWT, err := services.NewJWTServiceWithAudience(
+		cfg.Auth.JWT.PrivateKey,
+		cfg.Auth.JWT.PublicKey,
+		cfg.Server.Environment,
+		services.AudienceService,
+		cfg.Auth.JWT.AccessTokenExpiry,
+		cfg.Auth.JWT.RefreshTokenExpiry,
+	)
+	if err != nil {
+		return fmt.Errorf("service jwt: %w", err)
+	}
+	serviceJWT.SetTenantProvider(tenantProvider)
+	serviceJWT.SetPolicy(authPolicy)
+
+	// operatorUser must additionally satisfy ServiceAccountLister
+	// (Task 1) — the user module's ServiceOperatorUserProvider always
+	// implements it (additive-only rule), so a failed assertion here
+	// means the user module's provider changed underneath auth. Fail
+	// loud at boot, not at the first /admin/service-accounts request.
+	saLister, ok := operatorUser.(iface.ServiceAccountLister)
+	if !ok {
+		return fmt.Errorf("auth: operator user provider does not implement iface.ServiceAccountLister")
+	}
+	saCredRepo := repository.NewServiceAccountCredentialRepository(deps.DB)
+	// serviceJWT (services.JWTService) already declares both methods
+	// ServiceTokenMinter requires, so it satisfies the minter seam
+	// structurally — no assertion needed.
+	m.serviceAccountService = services.NewServiceAccountService(
+		saCredRepo, operatorUser, saLister, passwordSvc, serviceJWT, rateLimiter)
+	// securityEventRepo/authPolicy already exist in scope from the
+	// operator-tier wiring above — thread them into the service the
+	// same way the sibling AdminUserAuthHandler receives its deps (see
+	// NewAdminUserAuthHandler below) and the way Login refreshes its
+	// lockout config from authPolicy.
+	m.serviceAccountService.SetSecurityEventRepo(securityEventRepo)
+	m.serviceAccountService.SetPolicy(authPolicy)
+	m.serviceTokenHandler = handlers.NewServiceTokenHandler(m.serviceAccountService)
+	m.serviceAccountAdminHandler = handlers.NewServiceAccountAdminHandler(m.serviceAccountService)
 
 	// Client tier — required after the D-8 cutover. Same expectation
 	// as operator tier above. Mints aud=client tokens via the client-
@@ -1326,6 +1393,26 @@ func (m *AuthModule) RegisterRoutes(ri *module.RouteInfo) {
 		r.Use(ri.Operator.AuthMW.RequireGlobal())
 		api := humachi.New(r, ri.APIConfig)
 		m.operatorPasswordHandler.RegisterProtectedRoutes(api, handlers.OperatorMount)
+	})
+
+	// Service-account client-credentials grant (Task 8): public, single
+	// operator-tier path (no per-audience mount split — service accounts
+	// are an operator-tier concept).
+	m.serviceTokenHandler.RegisterPublicRoutes(ri.Operator.PublicAPI)
+
+	// Service-account admin surface (Task 9): gated
+	// /v1/admin/service-accounts routes, operator-tier only. Read group
+	// has no step-up (list/get are read-only); manage group requires a
+	// fresh <5min step-up because every route there either creates a
+	// credential-bearing account or mints/revokes a credential.
+	ri.Operator.ProtectedRouter.Group(func(r chi.Router) {
+		r.Use(ri.Operator.AuthMW.RequireSystemPermission("auth.service_accounts.read"))
+		m.serviceAccountAdminHandler.RegisterReadRoutes(humachi.New(r, ri.APIConfig))
+	})
+	ri.Operator.ProtectedRouter.Group(func(r chi.Router) {
+		r.Use(ri.Operator.AuthMW.RequireSystemPermission("auth.service_accounts.manage"))
+		r.Use(ri.Operator.AuthMW.RequireStepUp(5 * time.Minute))
+		m.serviceAccountAdminHandler.RegisterManageRoutes(humachi.New(r, ri.APIConfig))
 	})
 
 	// Operator MFA endpoints split into four halves:

@@ -17,6 +17,7 @@ Durable, dated records of architectural decisions that shape Orkestra. One file 
 | [0009](0009-core-compliance-module.md) | Re-home the compliance plane (audit + GDPR DSR) to core | Accepted (Phases 1–4 shipped) | 2026-06-18 |
 | [0010](0010-commons-fork-chain.md) | Two-level fork chain for multi-product operators (the commons pattern) | Accepted | 2026-07-04 |
 | [0011](0011-object-storage-foundation.md) | Object-storage foundation (per-domain buckets, presigned upload, SDK seam) | Accepted | 2026-07-16 |
+| [0014](0014-service-accounts-client-credentials.md) | Service accounts via OAuth2 client-credentials grant (Tier-1 user row, `aud: service`, admin REST lifecycle) | Accepted | 2026-08-18 |
 
 ## Format
 

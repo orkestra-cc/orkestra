@@ -43,6 +43,7 @@ func (m *UserModule) Collections() []module.CollectionSpec {
 		{Keys: map[string]int{"uuid": 1}, Unique: true},
 		{Keys: map[string]int{"email": 1}, Unique: true},
 		{Keys: map[string]int{"tier": 1}},
+		{Keys: map[string]int{"kind": 1}},
 	}
 	return []module.CollectionSpec{
 		{Name: repository.OperatorUsersCollection, Indexes: tierUserIndexes},
