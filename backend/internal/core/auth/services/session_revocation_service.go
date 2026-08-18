@@ -37,10 +37,15 @@ type SessionRevocationService interface {
 	IsRevoked(ctx context.Context, sid string) (bool, error)
 }
 
+type sessionRevocationStoreFailureRecorder interface {
+	RecordSessionRevocationStoreFailure(operation string)
+}
+
 type redisSessionRevocationService struct {
-	client RedisClient
-	ttl    time.Duration
-	log    *slog.Logger
+	client  RedisClient
+	ttl     time.Duration
+	log     *slog.Logger
+	metrics sessionRevocationStoreFailureRecorder
 
 	warningMu   sync.Mutex
 	lastWarning time.Time
@@ -50,16 +55,24 @@ type redisSessionRevocationService struct {
 // accessTokenTTL should match the TTL used by the JWT service; a one-minute
 // buffer is added on top to swallow clock skew between issuer and verifier.
 func NewSessionRevocationService(client RedisClient, accessTokenTTL time.Duration, log *slog.Logger) SessionRevocationService {
+	return newSessionRevocationService(client, accessTokenTTL, log, metrics.Default())
+}
+
+func newSessionRevocationService(client RedisClient, accessTokenTTL time.Duration, log *slog.Logger, recorder sessionRevocationStoreFailureRecorder) SessionRevocationService {
 	if log == nil {
 		log = slog.Default()
 	}
 	if accessTokenTTL <= 0 {
 		accessTokenTTL = 15 * time.Minute
 	}
+	if recorder == nil {
+		recorder = metrics.Default()
+	}
 	return &redisSessionRevocationService{
-		client: client,
-		ttl:    accessTokenTTL + time.Minute,
-		log:    log,
+		client:  client,
+		ttl:     accessTokenTTL + time.Minute,
+		log:     log,
+		metrics: recorder,
 	}
 }
 
@@ -71,7 +84,7 @@ func (s *redisSessionRevocationService) Revoke(ctx context.Context, sid, reason 
 		reason = "revoked"
 	}
 	if err := s.client.Set(ctx, revocationKey(sid), reason, s.ttl); err != nil {
-		metrics.Default().RecordSessionRevocationStoreFailure("write")
+		s.metrics.RecordSessionRevocationStoreFailure("write")
 		return err
 	}
 	return nil
@@ -88,7 +101,7 @@ func (s *redisSessionRevocationService) IsRevoked(ctx context.Context, sid strin
 	if errors.Is(err, redis.Nil) {
 		return false, nil
 	}
-	metrics.Default().RecordSessionRevocationStoreFailure("lookup")
+	s.metrics.RecordSessionRevocationStoreFailure("lookup")
 	s.warnStoreUnavailable(ctx)
 	return false, nil
 }
