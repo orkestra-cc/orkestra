@@ -639,6 +639,11 @@ export const modulesRoutes: RouteGroup = {
           active: true
         },
         {
+          name: 'Secret Once Display',
+          to: paths.refComponentsSecretOnceDisplay,
+          active: true
+        },
+        {
           name: 'Carousel',
           active: true,
           children: [
@@ -1249,6 +1254,11 @@ export const referenceRoutes: RouteGroup = {
         { name: 'Calendar', to: paths.refComponentsCalendar, active: true },
         { name: 'Cards', to: paths.refComponentsCards, active: true },
         { name: 'Stat Cards', to: paths.refComponentsStatCards, active: true },
+        {
+          name: 'Secret Once Display',
+          to: paths.refComponentsSecretOnceDisplay,
+          active: true
+        },
         {
           name: 'Carousel',
           active: true,

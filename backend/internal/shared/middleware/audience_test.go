@@ -61,6 +61,7 @@ func TestRequireAudienceCutoverBehaviour(t *testing.T) {
 		{"matching operator aud", "operator", true, http.StatusOK},
 		{"mismatched client aud", "client", true, http.StatusUnauthorized},
 		{"empty string aud", "", true, http.StatusUnauthorized},
+		{"service aud rejected on single-audience gate", "service", true, http.StatusUnauthorized},
 	}
 
 	for _, c := range cases {
@@ -74,6 +75,45 @@ func TestRequireAudienceCutoverBehaviour(t *testing.T) {
 			}
 			rec := httptest.NewRecorder()
 			handler.ServeHTTP(rec, req)
+			if rec.Code != c.wantStatus {
+				t.Errorf("status = %d, want %d (body=%s)", rec.Code, c.wantStatus, rec.Body.String())
+			}
+		})
+	}
+}
+
+// TestRequireAudienceMultiValueGate covers the variadic form of
+// RequireAudience: a gate constructed with more than one allowed audience
+// (operator mux accepting both "operator" and the later-minted "service"
+// audience) must accept a token whose aud matches ANY allowed element,
+// including when the token's own aud claim is itself multi-valued.
+func TestRequireAudienceMultiValueGate(t *testing.T) {
+	t.Parallel()
+
+	mwMulti := RequireAudience("operator", "service")
+	handlerMulti := mwMulti(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	multiCases := []struct {
+		name       string
+		aud        any
+		wantStatus int
+	}{
+		{"service aud accepted on multi gate", "service", http.StatusOK},
+		{"operator aud still accepted", "operator", http.StatusOK},
+		{"client aud rejected", "client", http.StatusUnauthorized},
+		{"multi-valued aud matches later element", []string{"client", "service"}, http.StatusOK},
+	}
+
+	for _, c := range multiCases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+
+			req := httptest.NewRequest(http.MethodGet, "/v1/anything", nil)
+			req.Header.Set("Authorization", "Bearer "+signTestToken(t, c.aud))
+			rec := httptest.NewRecorder()
+			handlerMulti.ServeHTTP(rec, req)
 			if rec.Code != c.wantStatus {
 				t.Errorf("status = %d, want %d (body=%s)", rec.Code, c.wantStatus, rec.Body.String())
 			}

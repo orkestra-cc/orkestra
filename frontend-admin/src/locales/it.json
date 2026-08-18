@@ -2,6 +2,15 @@
   "app": {
     "name": "Orkestra"
   },
+  "common": {
+    "secretOnce": {
+      "warningPrefix": "Salva subito questo valore.",
+      "warningBody": "Questo valore non verrà più mostrato: copialo in un posto sicuro prima di chiudere questa finestra.",
+      "copy": "Copia",
+      "copied": "Copiato",
+      "ackLabel": "Ho salvato questo valore in un posto sicuro."
+    }
+  },
   "nav": {
     "toggleNavigation": "Mostra/nascondi navigazione",
     "navigationUnavailable": "Navigazione non disponibile",
@@ -1449,6 +1458,103 @@
       "systemBadge": "sistema"
     }
   },
+  "adminServiceAccounts": {
+    "title": "Account di servizio",
+    "description": "Identità a credenziali client usate da altri servizi per chiamare l'API di Orkestra.",
+    "newButton": "Nuovo account di servizio",
+    "loading": "Caricamento degli account di servizio…",
+    "loadFailed": "Impossibile caricare gli account di servizio.",
+    "empty": "Nessun account di servizio.",
+    "columns": {
+      "name": "Nome",
+      "email": "Email",
+      "status": "Stato",
+      "activeCredentials": "Credenziali attive",
+      "createdAt": "Creato il"
+    },
+    "status": {
+      "active": "Attivo",
+      "inactive": "Inattivo"
+    },
+    "createModal": {
+      "title": "Crea account di servizio",
+      "secretTitle": "Account di servizio creato",
+      "nameLabel": "Nome",
+      "namePlaceholder": "es. hermes-agent",
+      "nameRequired": "Il nome è obbligatorio.",
+      "nameTooLong": "Il nome deve avere al massimo 100 caratteri.",
+      "cancel": "Annulla",
+      "create": "Crea",
+      "creating": "Creazione in corso…",
+      "clientSecretLabel": "Client secret",
+      "clientIdLabel": "Client ID",
+      "done": "Fatto",
+      "successToast": "Account di servizio \"{{name}}\" creato"
+    },
+    "detail": {
+      "breadcrumbList": "Account di servizio",
+      "loading": "Caricamento dell'account di servizio…",
+      "notFound": "Account di servizio non trovato.",
+      "backToList": "Torna agli account di servizio",
+      "tooltipEnable": "Abilita questo account di servizio",
+      "tooltipDisable": "Disabilita questo account di servizio",
+      "ariaEnable": "Abilita account di servizio",
+      "ariaDisable": "Disabilita account di servizio",
+      "toggleEnabledToast": "\"{{name}}\" abilitato",
+      "toggleDisabledToast": "\"{{name}}\" disabilitato",
+      "toggleErrorToast": "Impossibile aggiornare lo stato: {{error}}",
+      "renameButton": "Rinomina",
+      "renameCancel": "Annulla",
+      "renameSave": "Salva",
+      "renameSaving": "Salvataggio…",
+      "renameSuccessToast": "Rinominato in \"{{name}}\"",
+      "renameErrorToast": "Impossibile rinominare: {{error}}",
+      "manageAccessLink": "Gestisci ruoli e appartenenza",
+      "credentialsTitle": "Credenziali",
+      "credentialsDescription": "Segreti a credenziali client con cui questo account di servizio può autenticarsi.",
+      "issueButton": "Emetti credenziale",
+      "emptyCredentials": "Nessuna credenziale emessa.",
+      "columns": {
+        "clientId": "Client ID",
+        "label": "Etichetta",
+        "createdAt": "Creata il",
+        "lastUsedAt": "Ultimo utilizzo",
+        "status": "Stato"
+      },
+      "credentialStatus": {
+        "active": "Attiva",
+        "revoked": "Revocata"
+      },
+      "tooltipRevoke": "Revoca questa credenziale",
+      "ariaRevoke": "Revoca credenziale",
+      "revokeSuccessToast": "Credenziale revocata",
+      "revokeErrorToast": "Impossibile revocare la credenziale: {{error}}",
+      "revokeModal": {
+        "title": "Revoca credenziale",
+        "body": "Questa operazione invalida immediatamente il client secret di questa credenziale. Qualsiasi servizio che lo utilizza non potrà più autenticarsi.",
+        "cancel": "Annulla",
+        "confirm": "Revoca",
+        "confirming": "Revoca in corso…"
+      }
+    },
+    "issueModal": {
+      "title": "Emetti credenziale",
+      "secretTitle": "Credenziale emessa",
+      "labelLabel": "Etichetta",
+      "labelPlaceholder": "es. produzione",
+      "labelTooLong": "L'etichetta deve avere al massimo 60 caratteri.",
+      "cancel": "Annulla",
+      "issue": "Emetti",
+      "issuing": "Emissione in corso…",
+      "successToast": "Credenziale emessa"
+    },
+    "errors": {
+      "duplicate": "Esiste già un account di servizio con questo nome.",
+      "validation": "Controlla il nome dell'account di servizio e riprova.",
+      "generic": "Qualcosa è andato storto. Riprova.",
+      "credentialCap": "Questo account di servizio ha già due credenziali attive. Revocane una prima di emetterne un'altra."
+    }
+  },
   "adminObservability": {
     "logLevels": {
       "title": "Livelli di log",
@@ -1851,7 +1957,8 @@
     "status": {
       "active": "Attivo",
       "inactive": "Inattivo"
-    }
+    },
+    "serviceBadge": "Servizio"
   },
   "adminCompliance": {
     "pageTitle": "Compliance",

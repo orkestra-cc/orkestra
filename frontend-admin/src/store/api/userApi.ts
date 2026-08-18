@@ -14,6 +14,7 @@ export interface User {
   username: string;
   fullName: string;
   avatar?: string;
+  kind?: string;
   role: string;
   phone?: string;
   providers: UserOAuthProviderInfo[];

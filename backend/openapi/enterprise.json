@@ -49,6 +49,153 @@
         ],
         "type": "object"
       },
+      "AccountDetail": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/AccountDetail.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "activeCredentials": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "credentials": {
+            "items": {
+              "$ref": "#/components/schemas/CredentialView"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "email": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "isActive": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "credentials",
+          "id",
+          "name",
+          "email",
+          "isActive",
+          "activeCredentials",
+          "createdAt"
+        ],
+        "type": "object"
+      },
+      "AccountView": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/AccountView.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "activeCredentials": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "email": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "isActive": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "email",
+          "isActive",
+          "activeCredentials",
+          "createdAt"
+        ],
+        "type": "object"
+      },
+      "AccountWithSecret": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/AccountWithSecret.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "activeCredentials": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "clientId": {
+            "type": "string"
+          },
+          "clientSecret": {
+            "type": "string"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "email": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "isActive": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "clientId",
+          "clientSecret",
+          "id",
+          "name",
+          "email",
+          "isActive",
+          "activeCredentials",
+          "createdAt"
+        ],
+        "type": "object"
+      },
       "AdminClientUserItem": {
         "additionalProperties": false,
         "properties": {
@@ -1553,6 +1700,85 @@
         ],
         "type": "object"
       },
+      "CredentialView": {
+        "additionalProperties": false,
+        "properties": {
+          "clientId": {
+            "type": "string"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "lastUsedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "revokedAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "clientId",
+          "label",
+          "createdAt"
+        ],
+        "type": "object"
+      },
+      "CredentialWithSecret": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/CredentialWithSecret.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "clientId": {
+            "type": "string"
+          },
+          "clientSecret": {
+            "type": "string"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "lastUsedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "revokedAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "clientSecret",
+          "id",
+          "clientId",
+          "label",
+          "createdAt"
+        ],
+        "type": "object"
+      },
       "CurrentUserResponse": {
         "additionalProperties": false,
         "properties": {
@@ -1589,6 +1815,9 @@
           },
           "isActive": {
             "type": "boolean"
+          },
+          "kind": {
+            "type": "string"
           },
           "language": {
             "type": "string"
@@ -4975,6 +5204,136 @@
         ],
         "type": "object"
       },
+      "ServiceAccountCreateRequestBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/ServiceAccountCreateRequestBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "name": {
+            "description": "Display name; slugified into the account's synthetic email",
+            "maxLength": 100,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      },
+      "ServiceAccountIssueCredentialRequestBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/ServiceAccountIssueCredentialRequestBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "label": {
+            "description": "Optional label for the new credential; defaults to \"rotated\"",
+            "maxLength": 60,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ServiceAccountUpdateRequestBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/ServiceAccountUpdateRequestBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "active": {
+            "type": "boolean"
+          },
+          "name": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ServiceTokenRequestBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/ServiceTokenRequestBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "clientId": {
+            "type": "string"
+          },
+          "clientSecret": {
+            "type": "string"
+          },
+          "grantType": {
+            "description": "OAuth2 grant type; only client_credentials is supported",
+            "enum": [
+              "client_credentials"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "grantType",
+          "clientId",
+          "clientSecret"
+        ],
+        "type": "object"
+      },
+      "ServiceTokenResponseBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/ServiceTokenResponseBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "accessToken": {
+            "type": "string"
+          },
+          "expiresIn": {
+            "description": "Access-token lifetime in seconds; no refresh token is issued — repeat the grant",
+            "format": "int64",
+            "type": "integer"
+          },
+          "tokenType": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "accessToken",
+          "tokenType",
+          "expiresIn"
+        ],
+        "type": "object"
+      },
       "SessionInfo": {
         "additionalProperties": false,
         "properties": {
@@ -6159,6 +6518,9 @@
           },
           "isActive": {
             "type": "boolean"
+          },
+          "kind": {
+            "type": "string"
           },
           "language": {
             "type": "string"
@@ -8671,6 +9033,305 @@
         "summary": "Set a per-module log level override",
         "tags": [
           "Observability"
+        ]
+      }
+    },
+    "/v1/admin/service-accounts": {
+      "get": {
+        "operationId": "auth-service-accounts-list",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AccountView"
+                  },
+                  "type": [
+                    "array",
+                    "null"
+                  ]
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List service accounts",
+        "tags": [
+          "Service Accounts"
+        ]
+      },
+      "post": {
+        "operationId": "auth-service-accounts-create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServiceAccountCreateRequestBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountWithSecret"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Create a service account (returns the client secret once)",
+        "tags": [
+          "Service Accounts"
+        ]
+      }
+    },
+    "/v1/admin/service-accounts/{id}": {
+      "get": {
+        "operationId": "auth-service-accounts-get",
+        "parameters": [
+          {
+            "description": "UUID of the service account (its backing user UUID)",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID of the service account (its backing user UUID)",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountDetail"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Get a service account with credential metadata",
+        "tags": [
+          "Service Accounts"
+        ]
+      },
+      "patch": {
+        "operationId": "auth-service-accounts-update",
+        "parameters": [
+          {
+            "description": "UUID of the service account (its backing user UUID)",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID of the service account (its backing user UUID)",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServiceAccountUpdateRequestBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Rename or enable/disable a service account",
+        "tags": [
+          "Service Accounts"
+        ]
+      }
+    },
+    "/v1/admin/service-accounts/{id}/credentials": {
+      "post": {
+        "operationId": "auth-service-account-credentials-issue",
+        "parameters": [
+          {
+            "description": "UUID of the service account (its backing user UUID)",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID of the service account (its backing user UUID)",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServiceAccountIssueCredentialRequestBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CredentialWithSecret"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Issue a rotation credential (max 2 active; secret returned once)",
+        "tags": [
+          "Service Accounts"
+        ]
+      }
+    },
+    "/v1/admin/service-accounts/{id}/credentials/{credentialId}": {
+      "delete": {
+        "operationId": "auth-service-account-credentials-revoke",
+        "parameters": [
+          {
+            "description": "UUID of the service account (its backing user UUID)",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID of the service account (its backing user UUID)",
+              "type": "string"
+            }
+          },
+          {
+            "description": "UUID of the credential to revoke",
+            "in": "path",
+            "name": "credentialId",
+            "required": true,
+            "schema": {
+              "description": "UUID of the credential to revoke",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Revoke a credential",
+        "tags": [
+          "Service Accounts"
         ]
       }
     },
@@ -12998,6 +13659,47 @@
           }
         },
         "summary": "Resend email verification",
+        "tags": [
+          "Authentication"
+        ]
+      }
+    },
+    "/v1/auth/token": {
+      "post": {
+        "operationId": "auth-service-token",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServiceTokenRequestBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceTokenResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "OAuth2 client-credentials token grant for service accounts",
         "tags": [
           "Authentication"
         ]

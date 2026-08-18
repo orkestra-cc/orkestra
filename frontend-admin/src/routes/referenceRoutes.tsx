@@ -26,6 +26,9 @@ const CalendarExample = lazy(
 );
 const Cards = lazy(() => import('reference/components/ui/Cards'));
 const StatCards = lazy(() => import('reference/components/ui/StatCards'));
+const SecretOnceDisplayExample = lazy(
+  () => import('reference/components/ui/SecretOnceDisplayExample')
+);
 const Dropdowns = lazy(() => import('reference/components/ui/Dropdowns'));
 const ListGroups = lazy(() => import('reference/components/ui/ListGroups'));
 const Modals = lazy(() => import('reference/components/ui/Modals'));
@@ -572,6 +575,10 @@ export function getReferenceRoutes(): RouteObject[] {
         { path: paths.cards, element: <Cards /> },
         { path: paths.statCards, element: <StatCards /> },
         {
+          path: paths.secretOnceDisplay,
+          element: <SecretOnceDisplayExample />
+        },
+        {
           path: rootPaths.carouselRoot,
           children: [
             { path: paths.bootstrapCarousel, element: <BootstrapCarousel /> },
@@ -864,6 +871,10 @@ export function getReferenceRoutes(): RouteObject[] {
             },
             { path: 'cards', element: <Cards /> },
             { path: 'stat-cards', element: <StatCards /> },
+            {
+              path: 'secret-once-display',
+              element: <SecretOnceDisplayExample />
+            },
             {
               path: 'carousel',
               children: [

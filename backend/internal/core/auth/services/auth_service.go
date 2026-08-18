@@ -1141,6 +1141,11 @@ func (s *authService) GenerateEnhancedTokenPair(ctx context.Context, user *iface
 	if err := ValidateTokenEligibleUser(user); err != nil {
 		return nil, err
 	}
+	// Service principals authenticate only through the client-credentials
+	// grant; every interactive surface is closed by construction.
+	if user.Kind == iface.UserKindService {
+		return nil, ErrUserInactive
+	}
 
 	// MFA gating for OAuth-resolved users. Mirrors the password login path:
 	// privileged users with an enrolled factor receive a partial response
@@ -1355,6 +1360,12 @@ func (s *authService) RefreshTokensWithRiskAssessment(ctx context.Context, refre
 		return nil, ErrInvalidRefreshToken
 	}
 
+	// A client-credentials principal never receives a refresh token, so a
+	// presented one is forged or leaked collateral — refuse the rotation.
+	if user.Kind == iface.UserKindService {
+		return nil, ErrInvalidRefreshToken
+	}
+
 	now := time.Now()
 	newSessionID := tokenDoc.SessionUUID // preserve the session — rotation is within one session
 	device := &models.DeviceInfo{
@@ -1439,6 +1450,16 @@ func (s *authService) PeekRefreshToken(ctx context.Context, refreshToken string)
 	if doc == nil {
 		return nil, ErrInvalidRefreshToken
 	}
+
+	// A client-credentials principal never receives a refresh token, so a
+	// presented one is forged or leaked collateral — refuse the rotation.
+	// A lookup failure here is not this principal's problem to enforce —
+	// leave it to the mutating rotation path, which already fails closed
+	// on a user-load error; Peek stays a pure classification read.
+	if userModel, err := s.userService.GetUserByID(ctx, doc.UserUUID); err == nil && userModel.Kind == iface.UserKindService {
+		return nil, ErrInvalidRefreshToken
+	}
+
 	return doc, nil
 }
 
@@ -1483,6 +1504,12 @@ func (s *authService) MintAccessTokenFromRefresh(ctx context.Context, refreshTok
 	// Same rule as the rotation path: a deactivated account gets no
 	// fresh access token, whichever endpoint asks.
 	if err := ValidateTokenEligibleUser(user); err != nil {
+		return nil, ErrInvalidRefreshToken
+	}
+
+	// A client-credentials principal never receives a refresh token, so a
+	// presented one is forged or leaked collateral — refuse the rotation.
+	if user.Kind == iface.UserKindService {
 		return nil, ErrInvalidRefreshToken
 	}
 

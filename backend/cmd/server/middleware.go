@@ -18,19 +18,23 @@ import (
 
 // setupMiddleware configures all global HTTP middleware on the router.
 //
-// audience and audCfg are populated by ADR-0003 PR-C: each audience-scoped
+// audiences and audCfg are populated by ADR-0003 PR-C: each audience-scoped
 // mux gets its own CORS allowlist (falling back to the legacy
 // cfg.Server.CORSOrigins when the per-audience list is empty) and its own
-// RequireAudience gate so a token issued for the other tier fails closed
-// at this mux's edge. Pass audience="" / audCfg.Host="" to disable the
-// audience gate (used by the AI sidecar's single-surface mode and any
-// future caller that legitimately serves a non-audience surface).
+// RequireAudience gate so a token issued for a tier not in audiences fails
+// closed at this mux's edge. audiences may hold more than one value — the
+// operator mux additionally accepts the "service" audience minted for
+// internal service accounts — in which case the gate matches set
+// membership, not equality. Pass audiences=nil (or a slice whose first
+// element is "") to disable the audience gate (used by the AI sidecar's
+// single-surface mode and any future caller that legitimately serves a
+// non-audience surface).
 func setupMiddleware(
 	router *chi.Mux,
 	cfg *config.Config,
 	errorManager *errors.Manager,
 	deviceMW *authMiddleware.DeviceMiddleware,
-	audience string,
+	audiences []string,
 	audCfg config.AudienceConfig,
 	logger *slog.Logger,
 	trustedProxies authMiddleware.TrustedProxyPolicy,
@@ -52,7 +56,11 @@ func setupMiddleware(
 	router.Use(authMiddleware.RealIP(trustedProxies))
 	logOpts := authMiddleware.NewRequestLoggerOptions()
 	logOpts.Metrics = metrics.Default()
-	logOpts.Audience = audience
+	if len(audiences) > 0 {
+		// First element is this surface's primary label — never join
+		// multiple audiences here, it feeds a Prometheus label.
+		logOpts.Audience = audiences[0]
+	}
 	router.Use(authMiddleware.RequestLogger(logger, logOpts))
 
 	// Security headers
@@ -101,9 +109,10 @@ func setupMiddleware(
 	// cross-audience token is rejected before any handler logic runs.
 	// Mounted at the mux level (not per-route) is what makes the gate
 	// non-skippable: a route mistakenly registered on the wrong mux still
-	// fails closed.
-	if audience != "" {
-		router.Use(authMiddleware.RequireAudience(audience))
+	// fails closed. audiences is variadic-forwarded so a mux (e.g.
+	// operator) can accept more than one audience as a set.
+	if len(audiences) > 0 && audiences[0] != "" {
+		router.Use(authMiddleware.RequireAudience(audiences...))
 	}
 
 	router.Use(deviceMW.ExtractDeviceInfo)

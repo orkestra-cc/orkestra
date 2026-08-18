@@ -98,6 +98,53 @@ async function openActionsForRow(
   await user.click(toggle);
 }
 
+describe('useUserTable rendering', () => {
+  beforeEach(() => {
+    server.use(listHandler());
+  });
+
+  it('renders Service badge for rows with kind === "service"', async () => {
+    const serviceUser: User = {
+      id: 'service-1',
+      email: 'bot@example.com',
+      username: 'bot',
+      fullName: 'Bot User',
+      kind: 'service',
+      role: 'developer',
+      providers: [],
+      isActive: true,
+      emailVerified: true,
+      createdAt: '2026-01-03T00:00:00Z',
+      updatedAt: '2026-01-03T00:00:00Z'
+    };
+
+    server.use(listHandler(listResponse([serviceUser])));
+
+    renderWithProviders(<UserTable />, {
+      preloadedState: preloadedAuthState
+    });
+
+    await waitFor(() =>
+      expect(screen.getByText('Bot User')).toBeInTheDocument()
+    );
+    // Should find the Service badge near the user name
+    expect(screen.getByText('Service')).toBeInTheDocument();
+  });
+
+  it('does not render Service badge for human users (no kind)', async () => {
+    renderWithProviders(<UserTable />, {
+      preloadedState: preloadedAuthState
+    });
+
+    await waitFor(() =>
+      expect(screen.getByText('Admin Self')).toBeInTheDocument()
+    );
+
+    // Admin user has no kind, so no Service badge should appear
+    expect(screen.queryByText('Service')).not.toBeInTheDocument();
+  });
+});
+
 describe('useUserTable row actions', () => {
   beforeEach(() => {
     server.use(listHandler());
