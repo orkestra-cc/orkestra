@@ -2566,6 +2566,18 @@
         }
       }
     },
+    "compliance": {
+      "groups": {
+        "soc2": { "label": "Evidenze SOC2", "desc": "La pagina e l'API delle evidenze SOC2, disattivate salvo che tu persegua la certificazione." },
+        "retention": { "label": "Retention e DSR", "desc": "Per quanto tempo sono conservati i tombstone anonimizzati e gli export DSR generati." }
+      },
+      "fields": {
+        "soc2_enabled": { "label": "Evidenze SOC2", "desc": "Espone la pagina admin e l'API delle evidenze SOC2. Disattivato di default — abilitalo solo per deployment che perseguono la certificazione SOC2." },
+        "auto_cleanup_enabled": { "label": "Auto-cleanup retention", "desc": "Esegue un job giornaliero che cancella definitivamente i tombstone anonimizzati oltre la finestra di retention. DISATTIVO di default — è una cancellazione massiva irreversibile." },
+        "retention_years": { "label": "Anni di retention", "desc": "Anni per cui un tombstone anonimizzato è conservato prima che l'auto-cleanup possa cancellarlo definitivamente." },
+        "export_retention_days": { "label": "Retention export (giorni)", "desc": "Giorni per cui un export DSR generato resta scaricabile prima di scadere." }
+      }
+    },
     "notification": {
       "groups": {
         "delivery": {
@@ -2598,6 +2610,36 @@
         "app": {
           "name": { "label": "Nome app (nei template)" },
           "support_email": { "label": "Email di supporto (nei template)" }
+        }
+      }
+    },
+    "tenant": {
+      "groups": {
+        "provisioning": {
+          "internal": {
+            "label": "Provisioning interno (Tier-1)",
+            "desc": "Chi può creare tenant interni, di tier operatore."
+          },
+          "external": {
+            "label": "Provisioning esterno (Tier-2)",
+            "desc": "Chi può creare tenant esterni, di tier client."
+          }
+        }
+      },
+      "fields": {
+        "provisioning": {
+          "internal": {
+            "mode": {
+              "label": "Creazione tenant interni",
+              "desc": "Chi può creare tenant interni (tier operatore). open: qualsiasi utente autenticato. manual (default): solo gli amministratori di piattaforma (system.tenants.admin). single: blocca la piattaforma su un unico tenant interno — una volta che ne esiste uno, la creazione è bloccata. Un'installazione nuova parte con zero tenant interni; il primo si crea dal wizard di setup o dall'admin UI."
+            }
+          },
+          "external": {
+            "mode": {
+              "label": "Creazione tenant esterni",
+              "desc": "Chi può creare tenant esterni (tier client). open: i client self-serve sono provisionati automaticamente. manual (default): solo gli amministratori di piattaforma creano tenant client e li assegnano a un utente Tier-2 — la registrazione self-serve non provisiona mai automaticamente un tenant e gli utenti esterni non possono crearne uno."
+            }
+          }
         }
       }
     }

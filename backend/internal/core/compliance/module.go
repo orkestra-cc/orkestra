@@ -60,10 +60,28 @@ func (m *Module) Description() string {
 // (the core reason this module is core).
 func (m *Module) ConfigSchema() []module.ConfigField {
 	return []module.ConfigField{
-		{Key: "soc2_enabled", Label: "SOC2 evidence", Description: "Expose the SOC2 evidence admin page and API. Off by default — enable only for deployments pursuing SOC2 certification.", Type: module.FieldBool, Default: "false", EnvVar: "COMPLIANCE_SOC2_ENABLED"},
-		{Key: "auto_cleanup_enabled", Label: "Retention auto-cleanup", Description: "Run a daily job that hard-deletes anonymized user tombstones past the retention window. OFF by default — this is irreversible bulk deletion.", Type: module.FieldBool, Default: "false", EnvVar: "COMPLIANCE_AUTO_CLEANUP_ENABLED"},
-		{Key: "retention_years", Label: "Retention years", Description: "Years an anonymized tombstone is kept before auto-cleanup may hard-delete it.", Type: module.FieldInt, Default: "5", EnvVar: "COMPLIANCE_RETENTION_YEARS"},
-		{Key: "export_retention_days", Label: "Export retention (days)", Description: "Days a generated DSR export stays downloadable before it expires.", Type: module.FieldInt, Default: "30", EnvVar: "COMPLIANCE_EXPORT_RETENTION_DAYS"},
+		{Key: "soc2_enabled", Label: "SOC2 evidence", Group: "soc2", Description: "Expose the SOC2 evidence admin page and API. Off by default — enable only for deployments pursuing SOC2 certification.", Type: module.FieldBool, Default: "false", EnvVar: "COMPLIANCE_SOC2_ENABLED"},
+		{Key: "auto_cleanup_enabled", Label: "Retention auto-cleanup", Group: "retention", Description: "Run a daily job that hard-deletes anonymized user tombstones past the retention window. OFF by default — this is irreversible bulk deletion.", Type: module.FieldBool, Default: "false", EnvVar: "COMPLIANCE_AUTO_CLEANUP_ENABLED"},
+		// Gated: retention_years only takes effect while auto-cleanup is on (the
+		// reaper reads the two together), so hide it until then.
+		{Key: "retention_years", Label: "Retention years", Group: "retention", Description: "Years an anonymized tombstone is kept before auto-cleanup may hard-delete it.", Type: module.FieldInt, Default: "5", EnvVar: "COMPLIANCE_RETENTION_YEARS",
+			DependsOn: []module.FieldCondition{{Key: "auto_cleanup_enabled", In: []string{"true"}}}},
+		// NOT gated: export_retention_days governs the download lifetime of a
+		// DSR export (always-on right-of-access pipeline), independent of the
+		// cleanup job — it must stay visible whether or not auto-cleanup is on.
+		{Key: "export_retention_days", Label: "Export retention (days)", Group: "retention", Description: "Days a generated DSR export stays downloadable before it expires.", Type: module.FieldInt, Default: "30", EnvVar: "COMPLIANCE_EXPORT_RETENTION_DAYS"},
+	}
+}
+
+// ConfigGroups puts the four compliance settings on the full-page rail. SOC2
+// evidence (off unless pursuing certification) is its own group; the retention
+// auto-cleanup window and the DSR-export download TTL share "Retention & DSR".
+func (m *Module) ConfigGroups() []module.ConfigGroup {
+	return []module.ConfigGroup{
+		{Key: "soc2", Label: "SOC2 evidence", Order: 1,
+			Description: "The SOC2 evidence page and API, off unless you pursue certification."},
+		{Key: "retention", Label: "Retention & DSR", Order: 2,
+			Description: "How long anonymized tombstones and generated DSR exports are kept."},
 	}
 }
 
