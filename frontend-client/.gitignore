@@ -8,3 +8,8 @@ dist
 .DS_Store
 *.log
 *.tsbuildinfo
+
+# Runtime config — generated at container start from the VITE_* env vars
+# by docker-compose.{dev,staging}.yml. Never commit it; the tracked
+# template is public/config.example.js.
+public/config.js
