@@ -30,6 +30,28 @@ check "dev cookie insecure" "false"      "$(env_get "$ptmp" COOKIE_SECURE)"
 check "dev rate limit"      "1000"       "$(env_get "$ptmp" RATE_LIMIT_REQUESTS_PER_MINUTE)"
 rm -f "$ptmp"
 
+# --- JWT key permissions: the private signing key must never become
+# group/world-readable merely to accommodate a container UID mismatch. ---
+keys_tmp="$(mktemp -d)"
+old_docker_dir="$DOCKER_DIR"
+DOCKER_DIR="$keys_tmp"
+mkdir -p "$DOCKER_DIR/keys"
+printf 'private\n' > "$DOCKER_DIR/keys/jwt-private.pem"
+printf 'public\n' > "$DOCKER_DIR/keys/jwt-public.pem"
+chmod 600 "$DOCKER_DIR/keys/jwt-private.pem" "$DOCKER_DIR/keys/jwt-public.pem"
+ensure_jwt_keys_readable >/dev/null
+check "private JWT key stays private" "600" "$(stat -c '%a' "$DOCKER_DIR/keys/jwt-private.pem")"
+check "public JWT key becomes readable" "644" "$(stat -c '%a' "$DOCKER_DIR/keys/jwt-public.pem")"
+DOCKER_DIR="$old_docker_dir"
+rm -rf "$keys_tmp"
+
+generator_tmp="$(mktemp -d)"
+mkdir -p "$generator_tmp/scripts" "$generator_tmp/docker"
+cp "$DIR/generate-jwt-keys.sh" "$generator_tmp/scripts/"
+bash "$generator_tmp/scripts/generate-jwt-keys.sh" >/dev/null 2>&1
+check "JWT generator creates private key as 600" "600" "$(stat -c '%a' "$generator_tmp/docker/keys/jwt-private.pem")"
+rm -rf "$generator_tmp"
+
 echo
 printf 'orkestra-helpers: %d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
