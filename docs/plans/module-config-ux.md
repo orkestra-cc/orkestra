@@ -379,9 +379,23 @@ the whole reason that path exists.
 | 2 | Frontend model layer: `configModel`, `configI18n`, declarative validation on the existing `useState` form — **no visual change** | upstream | ✅ |
 | 3 | Frontend layout: rail, panel, save bar, URL sync — **plus** the `ModuleConfigFields` migration to RHF + yup, which the cross-group save bar is what justifies (§4.3). Plan: [phase 3](module-config-ux-phase3-layout.md) | upstream | ✅ |
 | 4 | Migrate `auth` (62 fields, OAuth tree, `dependsOn`) + EN/IT keys. Plan: [phase 4](module-config-ux-phase4-auth.md) | upstream | ✅ |
-| 5 | Migrate `notification` (+ `email.provider` → enum), `tenant`, `compliance` | upstream | 🔴 |
-| 6 | Delete `ModuleConfigModal`, ADR-0012, docs | upstream | 🔴 |
+| 5 | Migrate `notification` (+ `email.provider` → enum), `tenant`, `compliance` | commons | ✅ |
+| 6 | Delete `ModuleConfigModal`, ADR-0012, docs | commons | ✅ |
 | 7 | Migrate the seven commons addons (71 fields → groups + `dependsOn` + addon-namespace i18n keys) | commons, post-sync | 🔴 |
+
+> **Phase 5 ran on `orkestra-commons`, not upstream** (maintainer decision to carry every remaining
+> phase on the fork). No `pkg/sdk` file was touched — the contract came down with PR #59 — so the
+> only sync exposure is the three `ConfigSchema()`s: a future upstream phase-5 editing the same
+> methods will collide at the next sync. `export_retention_days` was deliberately left ungated
+> here (§3, corrected); reconcile in favour of *this* version if upstream gates it.
+
+> **Phase 6 also ran on `orkestra-commons`.** Most of it was already done: `ModuleConfigModal`
+> was removed earlier in the migration's frontend work (no importer remains), and the SDK/frontend contract
+> docs (`backend/pkg/sdk/CLAUDE.md`, `frontend-admin/CLAUDE.md`, `src/modules/_template/README.md`)
+> were written across phases 1–5. Phase 6 therefore reduced to authoring **ADR-0012** (the contract
+> record) + a `ConfigGroups()` note in the addon-authoring guide. ADR number `0012` was free on the
+> fork; a future upstream ADR-0012 would collide on the number — keep this record and renumber the
+> other at sync time.
 
 Phases 1–2 are shippable on their own with no user-visible change, so a problem in phase
 3 does not leave a half-finished redesign in production.
