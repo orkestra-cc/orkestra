@@ -39,7 +39,7 @@ const logLevelsView: LogLevelsView = {
 
 const wrapperFor = (store: TestStore) => {
   const QueryProvider = ({ children }: { children: ReactNode }) =>
-    createElement(Provider, { store }, children);
+    createElement(Provider, { store, children });
   return QueryProvider;
 };
 
