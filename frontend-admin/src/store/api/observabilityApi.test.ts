@@ -19,7 +19,12 @@ const logLevelsView: LogLevelsView = {
   global: 'info',
   modules: [
     { name: 'auth', effective: 'info', hasOverride: false },
-    { name: 'logging', effective: 'debug', hasOverride: true }
+    {
+      name: 'logging',
+      effective: 'debug',
+      override: 'error',
+      hasOverride: true
+    }
   ],
   diagnostics: [
     {
@@ -44,6 +49,16 @@ const wrapperFor = (store: TestStore) => {
 };
 
 describe('observabilityApi', () => {
+  it('keeps a durable override distinct from a diagnostic effective level', () => {
+    expect(logLevelsView.modules).toContainEqual({
+      name: 'logging',
+      effective: 'debug',
+      override: 'error',
+      hasOverride: true
+    });
+    expect(logLevelsView.modules[1]?.override).toBe('error');
+  });
+
   it('applies the complete permanent configuration and refreshes the snapshot', async () => {
     const requests: Array<{ method: string; body: unknown }> = [];
     let snapshots = 0;

@@ -8,6 +8,7 @@ export const LOG_LEVELS: LogLevel[] = ['debug', 'info', 'warn', 'error'];
 export interface AdminModuleEntry {
   name: string;
   effective: LogLevel;
+  override?: LogLevel;
   hasOverride: boolean;
 }
 
