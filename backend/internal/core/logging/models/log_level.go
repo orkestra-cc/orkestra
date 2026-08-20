@@ -71,12 +71,13 @@ func (l LogLevel) Slog() slog.Level {
 var ErrInvalidLogLevel = errors.New("invalid log level (expected debug | info | warn | error)")
 
 // PermanentConfigInput is the complete desired permanent log-level
-// configuration. ExpectedUpdatedAt provides optimistic concurrency against
-// the server snapshot the operator edited.
+// configuration. ExpectedPermanentRevision provides optimistic concurrency
+// against permanent writes only; diagnostic maintenance has its own document
+// revision and cannot create a false editor conflict.
 type PermanentConfigInput struct {
-	Global            LogLevel
-	PerModule         map[string]LogLevel
-	ExpectedUpdatedAt time.Time
+	Global                    LogLevel
+	PerModule                 map[string]LogLevel
+	ExpectedPermanentRevision int64
 }
 
 // LogLevelDoc is the single-document shape persisted in the
@@ -106,6 +107,12 @@ type LogLevelDoc struct {
 	// them from persistence.
 	Diagnostics map[string]DiagnosticOverride `bson:"diagnostics" json:"diagnostics"`
 
+	// Revision advances on every persisted mutation and is the Mongo CAS
+	// predicate. PermanentRevision advances only when Global or PerModule
+	// changes. Both intentionally decode as zero for legacy documents.
+	Revision          int64 `bson:"revision,omitempty" json:"revision"`
+	PermanentRevision int64 `bson:"permanentRevision,omitempty" json:"permanentRevision"`
+
 	UpdatedAt  time.Time `bson:"updatedAt" json:"updatedAt"`
 	UpdatedBy  string    `bson:"updatedBy,omitempty" json:"updatedBy,omitempty"`
 	UpdateNote string    `bson:"updateNote,omitempty" json:"updateNote,omitempty"`
@@ -126,8 +133,13 @@ type AdminView struct {
 	Modules     []AdminModuleEntry     `json:"modules"`
 	Diagnostics []AdminDiagnosticEntry `json:"diagnostics"`
 	LogProvider LogProviderStatus      `json:"logProvider"`
-	UpdatedAt   time.Time              `json:"updatedAt"`
-	UpdatedBy   string                 `json:"updatedBy,omitempty"`
+	Revision    int64                  `json:"revision"`
+	// PermanentRevision is the optimistic-concurrency token for the durable
+	// editor. Diagnostics never advance it.
+	PermanentRevision int64     `json:"permanentRevision"`
+	ServerTime        time.Time `json:"serverTime"`
+	UpdatedAt         time.Time `json:"updatedAt"`
+	UpdatedBy         string    `json:"updatedBy,omitempty"`
 }
 
 // LogProviderStatus reports optional preview/deep-link capabilities without

@@ -36,23 +36,80 @@ const levelVariant: Record<LogLevel, BadgeColor> = {
 const displayAttribute = (value: unknown): string =>
   typeof value === 'string' ? value : JSON.stringify(value);
 
+interface PreviewDraft {
+  module: string;
+  windowMinutes: LogPreviewWindowMinutes;
+  level: LogLevel | '';
+  search: string;
+}
+
+const initialPreviewDraft = (snapshot: LogLevelsView): PreviewDraft => ({
+  module: snapshot.modules[0]?.name ?? '',
+  windowMinutes: 15,
+  level: '',
+  search: ''
+});
+
+export const buildGrafanaExploreURL = (
+  baseURL: string,
+  filters: PreviewDraft
+): string => {
+  try {
+    const url = new URL(baseURL);
+    const basePath = url.pathname.replace(/\/+$/, '');
+    url.pathname = basePath.endsWith('/explore')
+      ? basePath
+      : `${basePath}/explore`;
+    url.search = '';
+    url.hash = '';
+
+    let expression = `{service="orkestra-backend", module=${JSON.stringify(filters.module)}} | json`;
+    if (filters.level) {
+      expression += ` | level=${JSON.stringify(filters.level.toUpperCase())}`;
+    }
+    url.searchParams.set('orgId', '1');
+    url.searchParams.set(
+      'left',
+      JSON.stringify({
+        datasource: 'loki',
+        queries: [
+          {
+            refId: 'A',
+            expr: expression,
+            queryType: 'range',
+            datasource: { type: 'loki', uid: 'loki' }
+          }
+        ],
+        range: {
+          from: `now-${filters.windowMinutes}m`,
+          to: 'now'
+        }
+      })
+    );
+    return url.toString();
+  } catch {
+    return baseURL;
+  }
+};
+
 const LogPreviewPanel = ({ snapshot }: LogPreviewPanelProps) => {
   const { t } = useTranslation();
-  const [moduleName, setModuleName] = useState(snapshot.modules[0]?.name ?? '');
-  const [windowMinutes, setWindowMinutes] =
-    useState<LogPreviewWindowMinutes>(15);
-  const [level, setLevel] = useState<LogLevel | ''>('');
-  const [search, setSearch] = useState('');
+  const [draft, setDraft] = useState<PreviewDraft>(() =>
+    initialPreviewDraft(snapshot)
+  );
+  const [applied, setApplied] = useState<PreviewDraft>(() =>
+    initialPreviewDraft(snapshot)
+  );
   const [autoRefresh, setAutoRefresh] = useState(false);
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
 
   const preview = useGetLogPreviewQuery(
     snapshot.logProvider.available
       ? {
-          module: moduleName,
-          windowMinutes,
-          level: level || undefined,
-          q: search.trim() || undefined,
+          module: applied.module,
+          windowMinutes: applied.windowMinutes,
+          level: applied.level || undefined,
+          q: applied.search.trim() || undefined,
           limit: 100
         }
       : undefined,
@@ -63,6 +120,20 @@ const LogPreviewPanel = ({ snapshot }: LogPreviewPanelProps) => {
       pollingInterval: autoRefresh ? 5000 : 0
     }
   );
+
+  const handleRefresh = () => {
+    const next = { ...draft, search: draft.search.trim() };
+    if (
+      next.module === applied.module &&
+      next.windowMinutes === applied.windowMinutes &&
+      next.level === applied.level &&
+      next.search === applied.search
+    ) {
+      preview.refetch();
+      return;
+    }
+    setApplied(next);
+  };
 
   const toggleAttributes = (rowKey: string) => {
     setExpandedRows(current => {
@@ -179,9 +250,17 @@ const LogPreviewPanel = ({ snapshot }: LogPreviewPanelProps) => {
     pagination: false
   });
 
-  const headerActions = snapshot.logProvider.grafanaUrl ? (
+  const grafanaURL = useMemo(
+    () =>
+      snapshot.logProvider.grafanaUrl
+        ? buildGrafanaExploreURL(snapshot.logProvider.grafanaUrl, applied)
+        : undefined,
+    [applied, snapshot.logProvider.grafanaUrl]
+  );
+
+  const headerActions = grafanaURL ? (
     <a
-      href={snapshot.logProvider.grafanaUrl}
+      href={grafanaURL}
       target="_blank"
       rel="noreferrer"
       className="btn btn-orkestra-primary btn-sm"
@@ -216,11 +295,16 @@ const LogPreviewPanel = ({ snapshot }: LogPreviewPanelProps) => {
                   {t('adminObservability.loggingWorkspace.logs.moduleLabel')}
                 </Form.Label>
                 <Form.Select
-                  value={moduleName}
+                  value={draft.module}
                   aria-label={t(
                     'adminObservability.loggingWorkspace.logs.moduleAria'
                   )}
-                  onChange={event => setModuleName(event.target.value)}
+                  onChange={event =>
+                    setDraft(current => ({
+                      ...current,
+                      module: event.target.value
+                    }))
+                  }
                 >
                   {snapshot.modules.map(module => (
                     <option key={module.name} value={module.name}>
@@ -236,14 +320,17 @@ const LogPreviewPanel = ({ snapshot }: LogPreviewPanelProps) => {
                   {t('adminObservability.loggingWorkspace.logs.windowLabel')}
                 </Form.Label>
                 <Form.Select
-                  value={windowMinutes}
+                  value={draft.windowMinutes}
                   aria-label={t(
                     'adminObservability.loggingWorkspace.logs.windowAria'
                   )}
                   onChange={event =>
-                    setWindowMinutes(
-                      Number(event.target.value) as LogPreviewWindowMinutes
-                    )
+                    setDraft(current => ({
+                      ...current,
+                      windowMinutes: Number(
+                        event.target.value
+                      ) as LogPreviewWindowMinutes
+                    }))
                   }
                 >
                   {[5, 15, 60].map(minutes => (
@@ -263,12 +350,15 @@ const LogPreviewPanel = ({ snapshot }: LogPreviewPanelProps) => {
                   {t('adminObservability.loggingWorkspace.logs.levelLabel')}
                 </Form.Label>
                 <Form.Select
-                  value={level}
+                  value={draft.level}
                   aria-label={t(
                     'adminObservability.loggingWorkspace.logs.levelAria'
                   )}
                   onChange={event =>
-                    setLevel(event.target.value as LogLevel | '')
+                    setDraft(current => ({
+                      ...current,
+                      level: event.target.value as LogLevel | ''
+                    }))
                   }
                 >
                   <option value="">
@@ -290,7 +380,7 @@ const LogPreviewPanel = ({ snapshot }: LogPreviewPanelProps) => {
                   {t('adminObservability.loggingWorkspace.logs.searchLabel')}
                 </Form.Label>
                 <Form.Control
-                  value={search}
+                  value={draft.search}
                   maxLength={200}
                   aria-label={t(
                     'adminObservability.loggingWorkspace.logs.searchAria'
@@ -298,7 +388,12 @@ const LogPreviewPanel = ({ snapshot }: LogPreviewPanelProps) => {
                   placeholder={t(
                     'adminObservability.loggingWorkspace.logs.searchPlaceholder'
                   )}
-                  onChange={event => setSearch(event.target.value)}
+                  onChange={event =>
+                    setDraft(current => ({
+                      ...current,
+                      search: event.target.value
+                    }))
+                  }
                 />
               </Form.Group>
             </Col>
@@ -310,7 +405,7 @@ const LogPreviewPanel = ({ snapshot }: LogPreviewPanelProps) => {
                 aria-label={t(
                   'adminObservability.loggingWorkspace.logs.refreshAria'
                 )}
-                onClick={() => preview.refetch()}
+                onClick={handleRefresh}
               >
                 {preview.isFetching && (
                   <Spinner animation="border" size="sm" className="me-2" />

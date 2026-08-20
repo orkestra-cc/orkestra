@@ -34,6 +34,9 @@ var goldenCodes = map[string]string{
 	"LoggingLogPreviewInvalid":         "logging.log_preview_invalid",
 	"LoggingLogProviderTimeout":        "logging.log_provider_timeout",
 	"LoggingLogProviderFailed":         "logging.log_provider_failed",
+	"LoggingMutationInvalid":           "logging.mutation_invalid",
+	"LoggingConfigConflict":            "logging.config_conflict",
+	"LoggingPersistenceFailed":         "logging.persistence_failed",
 }
 
 // TestCodesMatchGoldenSnapshot asserts every snapshotted code resolves

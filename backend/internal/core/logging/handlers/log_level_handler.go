@@ -7,13 +7,13 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
-	"strconv"
 	"time"
 
-	"github.com/danielgtaylor/huma/v2"
 	"github.com/orkestra/backend/internal/core/logging/logquery"
 	"github.com/orkestra/backend/internal/core/logging/models"
 	"github.com/orkestra/backend/internal/core/logging/services"
@@ -28,13 +28,17 @@ type LogLevelHandler struct {
 	svc        *services.LogLevelService
 	logs       logquery.Provider
 	grafanaURL string
+	logger     *slog.Logger
 }
 
-func NewLogLevelHandler(svc *services.LogLevelService, logs logquery.Provider, grafanaURL string) *LogLevelHandler {
+func NewLogLevelHandler(svc *services.LogLevelService, logs logquery.Provider, grafanaURL string, logger *slog.Logger) *LogLevelHandler {
 	if logs == nil {
 		logs = logquery.New("", nil)
 	}
-	return &LogLevelHandler{svc: svc, logs: logs, grafanaURL: grafanaURL}
+	if logger == nil {
+		logger = slog.Default()
+	}
+	return &LogLevelHandler{svc: svc, logs: logs, grafanaURL: grafanaURL, logger: logger}
 }
 
 // --- GET /v1/admin/observability/log-levels -----------------------------
@@ -46,48 +50,51 @@ type GetResponse struct {
 }
 
 func (h *LogLevelHandler) Get(ctx context.Context, _ *GetRequest) (*GetResponse, error) {
+	if err := h.svc.Refresh(ctx); err != nil {
+		return nil, h.mutationError(ctx, "load levels", err)
+	}
 	return &GetResponse{Body: h.view(ctx)}, nil
 }
 
-// --- GET /v1/admin/observability/log-levels/logs -----------------------
+// --- POST /v1/admin/observability/log-levels/logs ----------------------
 
 type GetLogsRequest struct {
-	// Validation lives in logquery.Client rather than Huma schema tags so every
-	// rejected filter follows this endpoint's stable 400 error-code contract;
-	// Huma's automatic schema failures use 422.
-	Module        string `query:"module" doc:"Required registered module name"`
-	WindowMinutes string `query:"windowMinutes" doc:"Required closed preview window: 5, 15, or 60 minutes"`
-	Level         string `query:"level" doc:"Optional level: debug, info, warn, or error"`
-	Q             string `query:"q" doc:"Optional literal text filter, at most 200 characters"`
-	Limit         string `query:"limit" default:"50" doc:"Maximum events; values above 100 are clamped"`
+	Body struct {
+		// Numeric fields remain RawMessage so malformed and overflowing JSON
+		// numbers reach the endpoint's stable 400 contract instead of Huma's
+		// generic decoder response. routes.go supplies the OpenAPI-only schema.
+		Module        string          `json:"module"`
+		WindowMinutes json.RawMessage `json:"windowMinutes"`
+		Level         string          `json:"level,omitempty"`
+		Q             string          `json:"q,omitempty"`
+		Limit         json.RawMessage `json:"limit,omitempty"`
+	}
 }
 
 type GetLogsResponse struct {
-	Body struct {
+	CacheControl string `header:"Cache-Control"`
+	Body         struct {
 		Events []models.LogEvent `json:"events"`
 	}
 }
 
 func (h *LogLevelHandler) GetLogs(ctx context.Context, req *GetLogsRequest) (*GetLogsResponse, error) {
-	windowMinutes, err := strconv.Atoi(req.WindowMinutes)
+	windowMinutes, err := parseJSONInteger(req.Body.WindowMinutes, true)
 	if err != nil {
 		return nil, invalidLogPreviewFilters()
 	}
-	limit := 0
-	if req.Limit != "" {
-		limit, err = strconv.Atoi(req.Limit)
-		if err != nil {
-			return nil, invalidLogPreviewFilters()
-		}
+	limit, err := parseJSONInteger(req.Body.Limit, false)
+	if err != nil {
+		return nil, invalidLogPreviewFilters()
 	}
 	if !h.logs.Status(ctx).Available {
 		return nil, errcode.New(http.StatusServiceUnavailable, errcode.LoggingLogProviderUnavailable, "Log preview is unavailable on this deployment")
 	}
 	events, err := h.logs.Query(ctx, logquery.Query{
-		Module:        req.Module,
+		Module:        req.Body.Module,
 		WindowMinutes: windowMinutes,
-		Level:         req.Level,
-		Text:          req.Q,
+		Level:         req.Body.Level,
+		Text:          req.Body.Q,
 		Limit:         limit,
 	})
 	if err != nil {
@@ -102,9 +109,23 @@ func (h *LogLevelHandler) GetLogs(ctx context.Context, req *GetLogsRequest) (*Ge
 			return nil, errcode.New(http.StatusBadGateway, errcode.LoggingLogProviderFailed, "Log provider request failed")
 		}
 	}
-	response := &GetLogsResponse{}
+	response := &GetLogsResponse{CacheControl: "private, no-store"}
 	response.Body.Events = events
 	return response, nil
+}
+
+func parseJSONInteger(raw json.RawMessage, required bool) (int, error) {
+	if len(raw) == 0 || string(raw) == "null" {
+		if required {
+			return 0, errors.New("required integer missing")
+		}
+		return 0, nil
+	}
+	var value int
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return 0, err
+	}
+	return value, nil
 }
 
 func invalidLogPreviewFilters() error {
@@ -115,40 +136,40 @@ func invalidLogPreviewFilters() error {
 
 type ApplyRequest struct {
 	Body struct {
-		Global            string            `json:"global" doc:"Global log level: debug | info | warn | error" example:"info"`
-		PerModule         map[string]string `json:"perModule" doc:"Complete desired map of per-module overrides"`
-		ExpectedUpdatedAt time.Time         `json:"expectedUpdatedAt" doc:"updatedAt from the snapshot being replaced"`
+		Global                    string            `json:"global" doc:"Global log level: debug | info | warn | error" example:"info"`
+		PerModule                 map[string]string `json:"perModule" doc:"Complete desired map of per-module overrides"`
+		ExpectedPermanentRevision int64             `json:"expectedPermanentRevision" doc:"permanentRevision from the snapshot being replaced"`
 	}
 }
 
 func (h *LogLevelHandler) Apply(ctx context.Context, req *ApplyRequest) (*GetResponse, error) {
 	global, err := models.Parse(req.Body.Global)
 	if err != nil {
-		return nil, huma.Error400BadRequest("invalid global level", err)
+		return nil, invalidMutation()
+	}
+	if req.Body.ExpectedPermanentRevision < 0 {
+		return nil, invalidMutation()
 	}
 
 	perModule := make(map[string]models.LogLevel, len(req.Body.PerModule))
 	for module, rawLevel := range req.Body.PerModule {
 		if !h.knownModule(module) {
-			return nil, huma.Error400BadRequest(fmt.Sprintf("unknown logging module %q", module))
+			return nil, invalidMutation()
 		}
 		level, err := models.Parse(rawLevel)
 		if err != nil {
-			return nil, huma.Error400BadRequest(fmt.Sprintf("invalid level for module %q", module), err)
+			return nil, invalidMutation()
 		}
 		perModule[module] = level
 	}
 
 	err = h.svc.ApplyPermanent(ctx, models.PermanentConfigInput{
-		Global:            global,
-		PerModule:         perModule,
-		ExpectedUpdatedAt: req.Body.ExpectedUpdatedAt,
+		Global:                    global,
+		PerModule:                 perModule,
+		ExpectedPermanentRevision: req.Body.ExpectedPermanentRevision,
 	}, actor(ctx))
-	if errors.Is(err, services.ErrConfigConflict) {
-		return nil, huma.Error409Conflict("logging configuration changed; reload before applying", err)
-	}
 	if err != nil {
-		return nil, huma.Error500InternalServerError("persist failed", err)
+		return nil, h.mutationError(ctx, "apply permanent levels", err)
 	}
 	return &GetResponse{Body: h.view(ctx)}, nil
 }
@@ -164,10 +185,10 @@ type SetGlobalRequest struct {
 func (h *LogLevelHandler) SetGlobal(ctx context.Context, req *SetGlobalRequest) (*GetResponse, error) {
 	lvl, err := models.Parse(req.Body.Level)
 	if err != nil {
-		return nil, huma.Error400BadRequest("invalid level", err)
+		return nil, invalidMutation()
 	}
 	if err := h.svc.SetGlobal(ctx, lvl, actor(ctx)); err != nil {
-		return nil, huma.Error500InternalServerError("persist failed", err)
+		return nil, h.mutationError(ctx, "set global level", err)
 	}
 	return &GetResponse{Body: h.view(ctx)}, nil
 }
@@ -183,14 +204,17 @@ type SetModuleRequest struct {
 
 func (h *LogLevelHandler) SetModule(ctx context.Context, req *SetModuleRequest) (*GetResponse, error) {
 	if req.Module == "" {
-		return nil, huma.Error400BadRequest("module name required")
+		return nil, invalidMutation()
+	}
+	if !h.knownModule(req.Module) {
+		return nil, invalidMutation()
 	}
 	lvl, err := models.Parse(req.Body.Level)
 	if err != nil {
-		return nil, huma.Error400BadRequest("invalid level", err)
+		return nil, invalidMutation()
 	}
 	if err := h.svc.SetModule(ctx, req.Module, lvl, actor(ctx)); err != nil {
-		return nil, huma.Error500InternalServerError("persist failed", err)
+		return nil, h.mutationError(ctx, "set module level", err)
 	}
 	return &GetResponse{Body: h.view(ctx)}, nil
 }
@@ -202,11 +226,11 @@ type UnsetModuleRequest struct {
 }
 
 func (h *LogLevelHandler) UnsetModule(ctx context.Context, req *UnsetModuleRequest) (*GetResponse, error) {
-	if req.Module == "" {
-		return nil, huma.Error400BadRequest("module name required")
+	if !h.knownModule(req.Module) {
+		return nil, invalidMutation()
 	}
 	if err := h.svc.UnsetModule(ctx, req.Module, actor(ctx)); err != nil {
-		return nil, huma.Error500InternalServerError("persist failed", err)
+		return nil, h.mutationError(ctx, "unset module level", err)
 	}
 	return &GetResponse{Body: h.view(ctx)}, nil
 }
@@ -217,7 +241,7 @@ type ResetRequest struct{}
 
 func (h *LogLevelHandler) Reset(ctx context.Context, _ *ResetRequest) (*GetResponse, error) {
 	if err := h.svc.ResetToEnv(ctx, actor(ctx)); err != nil {
-		return nil, huma.Error500InternalServerError("reset failed", err)
+		return nil, h.mutationError(ctx, "reset levels", err)
 	}
 	return &GetResponse{Body: h.view(ctx)}, nil
 }
@@ -234,18 +258,18 @@ type StartDiagnosticRequest struct {
 
 func (h *LogLevelHandler) StartDiagnostic(ctx context.Context, req *StartDiagnosticRequest) (*GetResponse, error) {
 	if !h.knownModule(req.Module) {
-		return nil, huma.Error400BadRequest(fmt.Sprintf("unknown logging module %q", req.Module))
+		return nil, invalidMutation()
 	}
 	level, err := models.Parse(req.Body.Level)
 	if err != nil {
-		return nil, huma.Error400BadRequest("invalid diagnostic level", err)
+		return nil, invalidMutation()
 	}
 	expiresAt, err := diagnosticExpiry(req.Body.DurationMinutes)
 	if err != nil {
-		return nil, huma.Error400BadRequest("invalid diagnostic duration", err)
+		return nil, invalidMutation()
 	}
 	if err := h.svc.StartDiagnostic(ctx, req.Module, level, expiresAt, actor(ctx)); err != nil {
-		return nil, huma.Error500InternalServerError("persist failed", err)
+		return nil, h.mutationError(ctx, "start diagnostic", err)
 	}
 	return &GetResponse{Body: h.view(ctx)}, nil
 }
@@ -258,12 +282,26 @@ type StopDiagnosticRequest struct {
 
 func (h *LogLevelHandler) StopDiagnostic(ctx context.Context, req *StopDiagnosticRequest) (*GetResponse, error) {
 	if !h.knownModule(req.Module) {
-		return nil, huma.Error400BadRequest(fmt.Sprintf("unknown logging module %q", req.Module))
+		return nil, invalidMutation()
 	}
 	if err := h.svc.StopDiagnostic(ctx, req.Module, actor(ctx)); err != nil {
-		return nil, huma.Error500InternalServerError("persist failed", err)
+		return nil, h.mutationError(ctx, "stop diagnostic", err)
 	}
 	return &GetResponse{Body: h.view(ctx)}, nil
+}
+
+func invalidMutation() error {
+	return errcode.New(http.StatusBadRequest, errcode.LoggingMutationInvalid, "Invalid logging operation")
+}
+
+func (h *LogLevelHandler) mutationError(ctx context.Context, operation string, err error) error {
+	if errors.Is(err, services.ErrConfigConflict) || errors.Is(err, services.ErrWriteConflict) {
+		return errcode.New(http.StatusConflict, errcode.LoggingConfigConflict, "Logging configuration changed; reload and retry")
+	}
+	h.logger.ErrorContext(ctx, "logging mutation failed",
+		slog.String("operation", operation),
+		slog.String("error", err.Error()))
+	return errcode.New(http.StatusInternalServerError, errcode.LoggingPersistenceFailed, "Logging configuration update failed")
 }
 
 func (h *LogLevelHandler) knownModule(name string) bool {

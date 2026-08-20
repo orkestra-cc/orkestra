@@ -1681,7 +1681,7 @@
       },
       "logs": {
         "title": "Anteprima log recenti",
-        "description": "Esamina fino a 100 eventi tramite filtri vincolati. Usa Grafana per un'indagine completa.",
+        "description": "Scegli i filtri vincolati, poi seleziona Aggiorna per esaminare fino a 100 eventi. Usa Grafana per un'indagine completa.",
         "privacyNotice": "Gli attributi strutturati sono minimizzati e redatti. I messaggi in testo libero possono comunque contenere dati personali; verificali prima di condividerli.",
         "statusAria": "Stato dell'anteprima log",
         "providerUnavailable": "L'anteprima dei log non è disponibile in questo deployment.",

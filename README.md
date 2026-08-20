@@ -118,7 +118,7 @@ Run `./orkestra.sh --help` for the full command surface.
 | `authz` | Permission catalog, roles, role bindings, Cedar policy engine |
 | `auth` | Email/password + OAuth 2.1, JWT, sessions, RBAC, MFA |
 | `navigation` | Dynamic menu aggregated from every module's `NavItems()` |
-| `logging` | Runtime log-level admin (ADR-0005 Phase F): `log_levels` collection + `/admin/observability/log-levels` UI |
+| `logging` | Tier-1 runtime logging workspace: permanent levels, expiring diagnostics, and bounded log preview at `/admin/modules/logging` |
 
 ### Optional modules
 
@@ -182,7 +182,7 @@ LOG_LEVEL=info LOG_LEVEL_RAG=debug docker compose -f docker-compose.dev.yml up
 
 RAG ingestion floods with detail; the rest of the backend stays readable. Every line emitted from a module is auto-stamped with `module=<name>` by the module registry (`pkg/sdk/module`), so the slog handler can gate on it without any code change in the module itself.
 
-ADR-0005 Phase F adds an admin page at `/admin/observability/log-levels` to flip the same levels at runtime without restarting — every module logger picks up the change instantly through a shared `atomic.Pointer` snapshot.
+ADR-0005 Phase F adds the `/admin/modules/logging` operator workspace to apply the same levels at runtime, run expiring diagnostics, and preview bounded recent events without restarting. Every module logger reads a shared immutable snapshot; Mongo CAS and periodic refresh keep replicas convergent.
 
 ### PII-safe by construction
 

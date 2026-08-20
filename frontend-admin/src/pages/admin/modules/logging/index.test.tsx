@@ -63,6 +63,9 @@ const snapshot = (overrides: Partial<LogLevelsView> = {}): LogLevelsView => ({
     available: true,
     grafanaUrl: 'https://grafana.example.test/explore'
   },
+  revision: 3,
+  permanentRevision: 2,
+  serverTime: '2026-08-20T12:30:00Z',
   updatedAt: '2026-08-20T12:00:00Z',
   updatedBy: 'operator-1',
   ...overrides
@@ -95,7 +98,7 @@ const stubWorkspace = (view: LogLevelsView = snapshot()) => {
     http.get(url('/v1/admin/observability/log-levels'), () =>
       HttpResponse.json(view)
     ),
-    http.get(url('/v1/admin/observability/log-levels/logs'), () =>
+    http.post(url('/v1/admin/observability/log-levels/logs'), () =>
       HttpResponse.json({ events: [] })
     )
   );
@@ -257,7 +260,7 @@ describe('LoggingModulePage', () => {
     expect(requests[0]).toEqual({
       global: 'warn',
       perModule: { auth: 'debug', logging: 'debug' },
-      expectedUpdatedAt: '2026-08-20T12:00:00Z'
+      expectedPermanentRevision: 2
     });
   });
 
@@ -310,7 +313,7 @@ describe('LoggingModulePage', () => {
     expect(requests[0]).toEqual({
       global: 'warn',
       perModule: { auth: 'error' },
-      expectedUpdatedAt: '2026-08-20T12:00:00Z'
+      expectedPermanentRevision: 2
     });
   });
 
@@ -375,6 +378,8 @@ describe('LoggingModulePage', () => {
       http.put(url('/v1/admin/observability/log-levels'), () => {
         currentSnapshot = snapshot({
           global: 'error',
+          revision: 4,
+          permanentRevision: 3,
           updatedAt: '2026-08-20T12:05:00Z'
         });
         return HttpResponse.json(
@@ -410,6 +415,16 @@ describe('LoggingModulePage', () => {
     expect(screen.getByLabelText('Permanent global log level')).toHaveValue(
       'warn'
     );
+    await user.selectOptions(
+      screen.getByLabelText('Permanent global log level'),
+      'debug'
+    );
+    expect(
+      screen.getByRole('button', { name: 'Reload latest snapshot' })
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Apply changes' })
+    ).toBeDisabled();
 
     await user.click(
       screen.getByRole('button', { name: 'Reload latest snapshot' })
@@ -527,6 +542,63 @@ describe('LoggingModulePage', () => {
     await waitFor(() => expect(stopped).toContain('/logging/diagnostic'));
   });
 
+  it('calibrates countdowns to serverTime when the browser clock is ahead', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(new Date('2026-08-20T14:30:00Z'));
+    stubWorkspace(
+      snapshot({
+        serverTime: '2026-08-20T12:30:00Z',
+        diagnostics: [
+          {
+            module: 'auth',
+            level: 'debug',
+            startedAt: '2026-08-20T12:00:00Z',
+            startedBy: 'operator-1',
+            expiresAt: '2026-08-20T12:45:00Z'
+          }
+        ]
+      })
+    );
+    renderAt('?section=diagnostics');
+
+    expect(await screen.findByText('15m 0s remaining')).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Stop diagnostic for auth' })
+    ).toBeInTheDocument();
+  });
+
+  it('hides a diagnostic already expired at serverTime and reloads once even when the browser is behind', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(new Date('2026-08-20T12:00:00Z'));
+    const view = snapshot({
+      serverTime: '2026-08-20T12:30:00Z',
+      diagnostics: [
+        {
+          module: 'auth',
+          level: 'debug',
+          startedAt: '2026-08-20T11:00:00Z',
+          startedBy: 'operator-1',
+          expiresAt: '2026-08-20T12:29:00Z'
+        }
+      ]
+    });
+    let getRequests = 0;
+    server.use(
+      http.get(url('/v1/admin/observability/log-levels'), () => {
+        getRequests += 1;
+        return HttpResponse.json(view);
+      })
+    );
+    renderAt('?section=diagnostics');
+
+    await waitFor(() => expect(getRequests).toBe(2));
+    expect(
+      screen.queryByRole('button', { name: 'Stop diagnostic for auth' })
+    ).not.toBeInTheDocument();
+    act(() => vi.advanceTimersByTime(5000));
+    expect(getRequests).toBe(2);
+  });
+
   it('removes an expired diagnostic locally and refetches its snapshot once', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     vi.setSystemTime(new Date('2026-08-20T12:30:00Z'));
@@ -617,7 +689,7 @@ describe('LoggingModulePage', () => {
     let previewRequests = 0;
     stubWorkspace(snapshot({ logProvider: { available: false } }));
     server.use(
-      http.get(url('/v1/admin/observability/log-levels/logs'), () => {
+      http.post(url('/v1/admin/observability/log-levels/logs'), () => {
         previewRequests += 1;
         return HttpResponse.json({ events: [] });
       })
@@ -635,7 +707,7 @@ describe('LoggingModulePage', () => {
 
   it('distinguishes preview errors from empty results', async () => {
     server.use(
-      http.get(url('/v1/admin/observability/log-levels/logs'), () =>
+      http.post(url('/v1/admin/observability/log-levels/logs'), () =>
         HttpResponse.json(
           { detail: 'Log provider request failed' },
           { status: 502 }
@@ -660,7 +732,7 @@ describe('LoggingModulePage', () => {
   it('renders bounded preview results, safe attributes, and the supplied Grafana link', async () => {
     const user = userEvent.setup();
     server.use(
-      http.get(url('/v1/admin/observability/log-levels/logs'), () =>
+      http.post(url('/v1/admin/observability/log-levels/logs'), () =>
         HttpResponse.json({
           events: [
             {
@@ -682,10 +754,12 @@ describe('LoggingModulePage', () => {
       within(message.closest('tr') as HTMLElement).getByText('warn')
     ).toBeInTheDocument();
     const grafana = screen.getByRole('link', { name: 'Open in Grafana' });
-    expect(grafana).toHaveAttribute(
-      'href',
-      'https://grafana.example.test/explore'
-    );
+    const grafanaURL = new URL(grafana.getAttribute('href') ?? '');
+    expect(grafanaURL.pathname).toBe('/explore');
+    const explore = JSON.parse(grafanaURL.searchParams.get('left') ?? '{}');
+    expect(explore.datasource).toBe('loki');
+    expect(explore.queries[0].expr).toContain('module="auth"');
+    expect(explore.range).toEqual({ from: 'now-15m', to: 'now' });
 
     await user.click(
       screen.getByRole('button', {
@@ -694,6 +768,60 @@ describe('LoggingModulePage', () => {
     );
     expect(screen.getByText('traceId')).toBeInTheDocument();
     expect(screen.getByText('trace-123')).toBeInTheDocument();
+  });
+
+  it('keeps preview filters as a draft until Refresh applies them and updates Grafana context', async () => {
+    const user = userEvent.setup();
+    const bodies: unknown[] = [];
+    server.use(
+      http.post(
+        url('/v1/admin/observability/log-levels/logs'),
+        async ({ request }) => {
+          bodies.push(await request.json());
+          return HttpResponse.json({ events: [] });
+        }
+      )
+    );
+    renderAt('?section=logs');
+    await waitFor(() => expect(bodies).toHaveLength(1));
+
+    await user.selectOptions(
+      screen.getByLabelText('Log preview time window'),
+      '60'
+    );
+    await user.selectOptions(
+      screen.getByLabelText('Log preview level'),
+      'warn'
+    );
+    await user.type(
+      screen.getByLabelText('Log preview text search'),
+      'request 42'
+    );
+    await act(async () => {
+      await new Promise(resolve => window.setTimeout(resolve, 25));
+    });
+    expect(bodies).toHaveLength(1);
+
+    await user.click(
+      screen.getByRole('button', { name: 'Refresh log preview' })
+    );
+    await waitFor(() => expect(bodies).toHaveLength(2));
+    expect(bodies[1]).toEqual({
+      module: 'auth',
+      windowMinutes: 60,
+      level: 'warn',
+      q: 'request 42',
+      limit: 100
+    });
+
+    const href = screen
+      .getByRole('link', { name: 'Open in Grafana' })
+      .getAttribute('href');
+    const grafanaURL = new URL(href ?? '');
+    const explore = JSON.parse(grafanaURL.searchParams.get('left') ?? '{}');
+    expect(explore.queries[0].expr).toContain('module="auth"');
+    expect(explore.queries[0].expr).toContain('level="WARN"');
+    expect(explore.range.from).toBe('now-60m');
   });
 
   it('warns that free-text log messages may still contain personal data', async () => {
@@ -780,7 +908,7 @@ describe('LoggingModulePage', () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     let previewRequests = 0;
     server.use(
-      http.get(url('/v1/admin/observability/log-levels/logs'), () => {
+      http.post(url('/v1/admin/observability/log-levels/logs'), () => {
         previewRequests += 1;
         return HttpResponse.json({ events: [] });
       })

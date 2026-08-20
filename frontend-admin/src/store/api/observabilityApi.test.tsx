@@ -35,6 +35,9 @@ const logLevelsView: LogLevelsView = {
     available: true,
     grafanaUrl: 'https://grafana.example.test/explore'
   },
+  revision: 3,
+  permanentRevision: 2,
+  serverTime: '2026-08-20T12:30:00Z',
   updatedAt: '2026-08-20T12:00:00Z',
   updatedBy: 'operator-1'
 };
@@ -80,7 +83,7 @@ describe('observabilityApi', () => {
     const input: PermanentLogLevelsInput = {
       global: 'warn',
       perModule: { auth: 'debug', logging: 'error' },
-      expectedUpdatedAt: '2026-08-20T12:00:00Z'
+      expectedPermanentRevision: 2
     };
 
     await store.dispatch(
@@ -99,7 +102,7 @@ describe('observabilityApi', () => {
         body: {
           global: 'warn',
           perModule: { auth: 'debug', logging: 'error' },
-          expectedUpdatedAt: '2026-08-20T12:00:00Z'
+          expectedPermanentRevision: 2
         }
       }
     ]);
@@ -188,18 +191,19 @@ describe('observabilityApi', () => {
     });
   });
 
-  it('serializes all bounded log-preview filters as query parameters', async () => {
-    const captured: { method: string | null; params: URLSearchParams | null } =
-      {
-        method: null,
-        params: null
-      };
+  it('sends all bounded log-preview filters in a POST body, never the URL', async () => {
+    const captured: { method: string | null; body: unknown; search: string } = {
+      method: null,
+      body: null,
+      search: ''
+    };
     server.use(
-      http.get(
+      http.post(
         url('/v1/admin/observability/log-levels/logs'),
-        ({ request }) => {
+        async ({ request }) => {
           captured.method = request.method;
-          captured.params = new URL(request.url).searchParams;
+          captured.body = await request.json();
+          captured.search = new URL(request.url).search;
           return HttpResponse.json({ events: [] });
         }
       )
@@ -218,18 +222,21 @@ describe('observabilityApi', () => {
       )
       .unwrap();
 
-    expect(captured.method).toBe('GET');
-    expect(captured.params?.get('module')).toBe('auth');
-    expect(captured.params?.get('windowMinutes')).toBe('15');
-    expect(captured.params?.get('level')).toBe('warn');
-    expect(captured.params?.get('q')).toBe('request id: abc 123');
-    expect(captured.params?.get('limit')).toBe('25');
+    expect(captured.method).toBe('POST');
+    expect(captured.search).toBe('');
+    expect(captured.body).toEqual({
+      module: 'auth',
+      windowMinutes: 15,
+      level: 'warn',
+      q: 'request id: abc 123',
+      limit: 25
+    });
   });
 
   it('skips the preview query when no module is selected', async () => {
     let requests = 0;
     server.use(
-      http.get(url('/v1/admin/observability/log-levels/logs'), () => {
+      http.post(url('/v1/admin/observability/log-levels/logs'), () => {
         requests += 1;
         return HttpResponse.json({ events: [] });
       })
@@ -241,5 +248,32 @@ describe('observabilityApi', () => {
 
     await waitFor(() => expect(result.current.isUninitialized).toBe(true));
     expect(requests).toBe(0);
+  });
+
+  it('evicts preview content immediately after the final subscriber leaves', async () => {
+    server.use(
+      http.post(url('/v1/admin/observability/log-levels/logs'), () =>
+        HttpResponse.json({ events: [] })
+      )
+    );
+    const store = setupStore();
+    const filters = { module: 'auth', windowMinutes: 15 as const };
+    const subscription = store.dispatch(
+      observabilityApi.endpoints.getLogPreview.initiate(filters)
+    );
+    await subscription.unwrap();
+    expect(
+      observabilityApi.endpoints.getLogPreview.select(filters)(store.getState())
+        .status
+    ).toBe('fulfilled');
+
+    subscription.unsubscribe();
+    await waitFor(() =>
+      expect(
+        observabilityApi.endpoints.getLogPreview.select(filters)(
+          store.getState()
+        ).status
+      ).toBe('uninitialized')
+    );
   });
 });

@@ -958,6 +958,18 @@
               "null"
             ]
           },
+          "permanentRevision": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "revision": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "serverTime": {
+            "format": "date-time",
+            "type": "string"
+          },
           "updatedAt": {
             "format": "date-time",
             "type": "string"
@@ -971,46 +983,10 @@
           "modules",
           "diagnostics",
           "logProvider",
+          "revision",
+          "permanentRevision",
+          "serverTime",
           "updatedAt"
-        ],
-        "type": "object"
-      },
-      "ApplyRequestBody": {
-        "additionalProperties": false,
-        "properties": {
-          "$schema": {
-            "description": "A URL to the JSON Schema for this object.",
-            "examples": [
-              "https://example.com/schemas/ApplyRequestBody.json"
-            ],
-            "format": "uri",
-            "readOnly": true,
-            "type": "string"
-          },
-          "expectedUpdatedAt": {
-            "description": "updatedAt from the snapshot being replaced",
-            "format": "date-time",
-            "type": "string"
-          },
-          "global": {
-            "description": "Global log level: debug | info | warn | error",
-            "examples": [
-              "info"
-            ],
-            "type": "string"
-          },
-          "perModule": {
-            "additionalProperties": {
-              "type": "string"
-            },
-            "description": "Complete desired map of per-module overrides",
-            "type": "object"
-          }
-        },
-        "required": [
-          "global",
-          "perModule",
-          "expectedUpdatedAt"
         ],
         "type": "object"
       },
@@ -5700,31 +5676,6 @@
         },
         "type": "object"
       },
-      "SetGlobalRequestBody": {
-        "additionalProperties": false,
-        "properties": {
-          "$schema": {
-            "description": "A URL to the JSON Schema for this object.",
-            "examples": [
-              "https://example.com/schemas/SetGlobalRequestBody.json"
-            ],
-            "format": "uri",
-            "readOnly": true,
-            "type": "string"
-          },
-          "level": {
-            "description": "Global log level: debug | info | warn | error",
-            "examples": [
-              "info"
-            ],
-            "type": "string"
-          }
-        },
-        "required": [
-          "level"
-        ],
-        "type": "object"
-      },
       "SetItalianBillableInputBody": {
         "additionalProperties": false,
         "properties": {
@@ -5766,28 +5717,6 @@
         },
         "required": [
           "role"
-        ],
-        "type": "object"
-      },
-      "SetModuleRequestBody": {
-        "additionalProperties": false,
-        "properties": {
-          "$schema": {
-            "description": "A URL to the JSON Schema for this object.",
-            "examples": [
-              "https://example.com/schemas/SetModuleRequestBody.json"
-            ],
-            "format": "uri",
-            "readOnly": true,
-            "type": "string"
-          },
-          "level": {
-            "description": "Per-module log level override",
-            "type": "string"
-          }
-        },
-        "required": [
-          "level"
         ],
         "type": "object"
       },
@@ -5844,36 +5773,6 @@
         },
         "required": [
           "enabled"
-        ],
-        "type": "object"
-      },
-      "StartDiagnosticRequestBody": {
-        "additionalProperties": false,
-        "properties": {
-          "$schema": {
-            "description": "A URL to the JSON Schema for this object.",
-            "examples": [
-              "https://example.com/schemas/StartDiagnosticRequestBody.json"
-            ],
-            "format": "uri",
-            "readOnly": true,
-            "type": "string"
-          },
-          "durationMinutes": {
-            "description": "Expiry duration: 15, 60, or 240 minutes; omit for no expiry",
-            "format": "int64",
-            "type": "integer"
-          },
-          "level": {
-            "description": "Temporary log level override",
-            "examples": [
-              "debug"
-            ],
-            "type": "string"
-          }
-        },
-        "required": [
-          "level"
         ],
         "type": "object"
       },
@@ -9036,7 +8935,43 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ApplyRequestBody"
+                "properties": {
+                  "expectedPermanentRevision": {
+                    "description": "Permanent revision from the edited snapshot",
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "global": {
+                    "description": "Global permanent threshold",
+                    "enum": [
+                      "debug",
+                      "info",
+                      "warn",
+                      "error"
+                    ],
+                    "type": "string"
+                  },
+                  "perModule": {
+                    "additionalProperties": {
+                      "description": "Per-module permanent threshold",
+                      "enum": [
+                        "debug",
+                        "info",
+                        "warn",
+                        "error"
+                      ],
+                      "type": "string"
+                    },
+                    "description": "Complete per-module permanent override map",
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "global",
+                  "perModule",
+                  "expectedPermanentRevision"
+                ],
+                "type": "object"
               }
             }
           },
@@ -9084,7 +9019,22 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/SetGlobalRequestBody"
+                "properties": {
+                  "level": {
+                    "description": "Permanent threshold",
+                    "enum": [
+                      "debug",
+                      "info",
+                      "warn",
+                      "error"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "level"
+                ],
+                "type": "object"
               }
             }
           },
@@ -9126,78 +9076,60 @@
       }
     },
     "/v1/admin/observability/log-levels/logs": {
-      "get": {
+      "post": {
         "description": "Returns at most 100 minimized, redacted events from a closed Loki query. Free-text messages may still contain personal data.",
         "operationId": "admin-observability-loglevels-preview",
-        "parameters": [
-          {
-            "description": "Required registered module name",
-            "explode": false,
-            "in": "query",
-            "name": "module",
-            "required": true,
-            "schema": {
-              "description": "Required registered module name",
-              "type": "string"
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "level": {
+                    "description": "Optional exact level",
+                    "enum": [
+                      "debug",
+                      "info",
+                      "warn",
+                      "error"
+                    ],
+                    "type": "string"
+                  },
+                  "limit": {
+                    "default": 50,
+                    "description": "Maximum returned events",
+                    "maximum": 100,
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "module": {
+                    "description": "Registered module name",
+                    "type": "string"
+                  },
+                  "q": {
+                    "description": "Optional literal text filter",
+                    "maxLength": 200,
+                    "type": "string"
+                  },
+                  "windowMinutes": {
+                    "description": "Closed preview window in minutes",
+                    "enum": [
+                      5,
+                      15,
+                      60
+                    ],
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "module",
+                  "windowMinutes"
+                ],
+                "type": "object"
+              }
             }
           },
-          {
-            "description": "Required closed preview window: 5, 15, or 60 minutes",
-            "explode": false,
-            "in": "query",
-            "name": "windowMinutes",
-            "required": true,
-            "schema": {
-              "description": "Required closed preview window: 5, 15, or 60 minutes",
-              "enum": [
-                5,
-                15,
-                60
-              ],
-              "type": "integer"
-            }
-          },
-          {
-            "description": "Optional level: debug, info, warn, or error",
-            "explode": false,
-            "in": "query",
-            "name": "level",
-            "schema": {
-              "description": "Optional level: debug, info, warn, or error",
-              "enum": [
-                "debug",
-                "info",
-                "warn",
-                "error"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Optional literal text filter, at most 200 characters",
-            "explode": false,
-            "in": "query",
-            "name": "q",
-            "schema": {
-              "description": "Optional literal text filter, at most 200 characters",
-              "maxLength": 200,
-              "type": "string"
-            }
-          },
-          {
-            "description": "Maximum events; values above 100 are clamped",
-            "explode": false,
-            "in": "query",
-            "name": "limit",
-            "schema": {
-              "default": 50,
-              "description": "Maximum events; values above 100 are clamped",
-              "maximum": 100,
-              "minimum": 1,
-              "type": "integer"
-            }
-          }
-        ],
+          "required": true
+        },
         "responses": {
           "200": {
             "content": {
@@ -9207,7 +9139,14 @@
                 }
               }
             },
-            "description": "OK"
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "default": {
             "content": {
@@ -9336,7 +9275,22 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/SetModuleRequestBody"
+                "properties": {
+                  "level": {
+                    "description": "Permanent threshold",
+                    "enum": [
+                      "debug",
+                      "info",
+                      "warn",
+                      "error"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "level"
+                ],
+                "type": "object"
               }
             }
           },
@@ -9444,7 +9398,31 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/StartDiagnosticRequestBody"
+                "properties": {
+                  "durationMinutes": {
+                    "description": "Omit for no expiry",
+                    "enum": [
+                      15,
+                      60,
+                      240
+                    ],
+                    "type": "integer"
+                  },
+                  "level": {
+                    "description": "Temporary diagnostic threshold",
+                    "enum": [
+                      "debug",
+                      "info",
+                      "warn",
+                      "error"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "level"
+                ],
+                "type": "object"
               }
             }
           },

@@ -39,13 +39,17 @@ type LoggingModule struct {
 	svc             *services.LogLevelService
 	logger          *slog.Logger
 	cleanupInterval time.Duration
+	refreshInterval time.Duration
 	lifecycleMu     sync.Mutex
 	cleanupCancel   context.CancelFunc
 	cleanupDone     chan struct{}
 }
 
 func NewModule() *LoggingModule {
-	return &LoggingModule{cleanupInterval: time.Minute}
+	return &LoggingModule{
+		cleanupInterval: time.Minute,
+		refreshInterval: 2 * time.Second,
+	}
 }
 
 func (m *LoggingModule) Name() string        { return "logging" }
@@ -115,7 +119,7 @@ func (m *LoggingModule) Init(deps *module.Dependencies) error {
 
 	deps.Services.Register(module.ServiceLogLevelResolver, m.svc)
 	provider := logquery.New(os.Getenv("LOKI_QUERY_URL"), moduleNames)
-	m.handler = handlers.NewLogLevelHandler(m.svc, provider, normalizeExternalURL(os.Getenv("GRAFANA_URL")))
+	m.handler = handlers.NewLogLevelHandler(m.svc, provider, normalizeExternalURL(os.Getenv("GRAFANA_URL")), deps.Logger)
 	return nil
 }
 
@@ -155,15 +159,19 @@ func (m *LoggingModule) Start(ctx context.Context) error {
 		}
 	}
 
-	interval := m.cleanupInterval
-	if interval <= 0 {
-		interval = time.Minute
+	cleanupInterval := m.cleanupInterval
+	if cleanupInterval <= 0 {
+		cleanupInterval = time.Minute
+	}
+	refreshInterval := m.refreshInterval
+	if refreshInterval <= 0 {
+		refreshInterval = 2 * time.Second
 	}
 	cleanupCtx, cancel := context.WithCancel(ctx)
 	done := make(chan struct{})
 	m.cleanupCancel = cancel
 	m.cleanupDone = done
-	go m.cleanupLoop(cleanupCtx, done, interval)
+	go m.maintenanceLoop(cleanupCtx, done, cleanupInterval, refreshInterval)
 	return nil
 }
 
@@ -194,15 +202,22 @@ func (m *LoggingModule) Stop(ctx context.Context) error {
 	}
 }
 
-func (m *LoggingModule) cleanupLoop(ctx context.Context, done chan<- struct{}, interval time.Duration) {
+func (m *LoggingModule) maintenanceLoop(ctx context.Context, done chan<- struct{}, cleanupInterval, refreshInterval time.Duration) {
 	defer close(done)
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
+	cleanupTicker := time.NewTicker(cleanupInterval)
+	defer cleanupTicker.Stop()
+	refreshTicker := time.NewTicker(refreshInterval)
+	defer refreshTicker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticker.C:
+		case <-refreshTicker.C:
+			if err := m.svc.Refresh(ctx); err != nil && m.logger != nil {
+				m.logger.ErrorContext(ctx, "logging: refresh authoritative levels failed",
+					slog.String("error", err.Error()))
+			}
+		case <-cleanupTicker.C:
 			if err := m.svc.CleanupExpired(ctx); err != nil && m.logger != nil {
 				m.logger.ErrorContext(ctx, "logging: cleanup expired diagnostics failed",
 					slog.String("error", err.Error()))

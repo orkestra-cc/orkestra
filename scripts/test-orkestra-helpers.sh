@@ -52,6 +52,177 @@ bash "$generator_tmp/scripts/generate-jwt-keys.sh" >/dev/null 2>&1
 check "JWT generator creates private key as 600" "600" "$(stat -c '%a' "$generator_tmp/docker/keys/jwt-private.pem")"
 rm -rf "$generator_tmp"
 
+# --- Observability lifecycle must fail closed and stay overlay-scoped. ---
+obs_discovery_log="$(mktemp)"
+export OBS_DISCOVERY_LOG="$obs_discovery_log"
+(
+    docker() {
+        local IFS=' '
+        printf '%s\n' "$*" >> "$OBS_DISCOVERY_LOG"
+        return 17
+    }
+    INFRA_COMPOSE="$PROJECT_ROOT/docker/docker-compose.infra.yml"
+    COMPOSE_FILE="$PROJECT_ROOT/docker/docker-compose.dev.yml"
+    OBSERVABILITY_COMPOSE="$PROJECT_ROOT/docker/docker-compose.observability.yml"
+    ENV_FILE="$PROJECT_ROOT/docker/.env"
+    observability_list_services
+) >/dev/null 2>&1
+obs_discovery_status=$?
+check "observability discovery fails closed on invalid compose" "yes" "$([ "$obs_discovery_status" -ne 0 ] && printf yes || printf no)"
+check "observability discovery validates the merged stack" "3" "$(sed -n '1p' "$obs_discovery_log" | grep -o -- ' -f ' | wc -l | tr -d ' ')"
+rm -f "$obs_discovery_log"
+
+obs_reset_log="$(mktemp)"
+export OBS_RESET_LOG="$obs_reset_log"
+(
+    check_docker_running() { :; }
+    observability_check_file() { :; }
+    observability_init_env() {
+        ENV=development
+        COMPOSE_PROJECT_NAME=orkestra-test-development
+        INFRA_COMPOSE="$PROJECT_ROOT/docker/docker-compose.infra.yml"
+        COMPOSE_FILE="$PROJECT_ROOT/docker/docker-compose.dev.yml"
+        OBSERVABILITY_COMPOSE="$PROJECT_ROOT/docker/docker-compose.observability.yml"
+        ENV_FILE="$PROJECT_ROOT/docker/.env"
+    }
+    page_header() { :; }
+    draw_box() { :; }
+    p_ok() { :; }
+    with_spinner() {
+        shift
+        "$@"
+    }
+    docker() {
+        local IFS=' '
+        printf '%s\n' "$*" >> "$OBS_RESET_LOG"
+        case " $* " in
+            *" config --services "*)
+                printf '%s\n' backend mongodb redis rustfs frontend-admin client-frontend \
+                    otel-collector tempo prometheus loki promtail grafana
+                ;;
+            *" config --volumes "*)
+                printf '%s\n' mongodb-data redis-data rustfs-data \
+                    tempo-data prometheus-data loki-data promtail-positions grafana-data
+                ;;
+        esac
+        return 0
+    }
+    observability_reset skip
+) >/dev/null 2>&1
+check "observability reset never falls through to down -v" "no" "$(grep -Eq 'compose .* down -v( |$)' "$obs_reset_log" && printf yes || printf no)"
+check "observability reset removes only six explicit services" \
+    "yes" \
+    "$(grep -Eq 'compose .* rm -sfv otel-collector tempo prometheus loki promtail grafana$' "$obs_reset_log" && printf yes || printf no)"
+check "observability reset removes five explicit named volumes" \
+    "5" \
+    "$(grep -Ec '^volume rm orkestra-test-development_(tempo-data|prometheus-data|loki-data|promtail-positions|grafana-data)$' "$obs_reset_log" || true)"
+check "observability reset never targets application or infra volumes" \
+    "no" \
+    "$(grep -Eq '^volume rm .*_(mongodb-data|redis-data|rustfs-data)$' "$obs_reset_log" && printf yes || printf no)"
+rm -f "$obs_reset_log"
+
+obs_up_log="$(mktemp)"
+export OBS_UP_LOG="$obs_up_log"
+(
+    check_docker_running() { :; }
+    observability_check_file() { :; }
+    observability_init_env() {
+        ENV=development
+        COMPOSE_PROJECT_NAME=orkestra-test-development
+        INFRA_COMPOSE="$PROJECT_ROOT/docker/docker-compose.infra.yml"
+        COMPOSE_FILE="$PROJECT_ROOT/docker/docker-compose.dev.yml"
+        OBSERVABILITY_COMPOSE="$PROJECT_ROOT/docker/docker-compose.observability.yml"
+        ENV_FILE="$PROJECT_ROOT/docker/.env"
+    }
+    page_header() { :; }
+    p_muted() { :; }
+    p_ok() { :; }
+    observability_info() { :; }
+    with_spinner() {
+        shift
+        "$@"
+    }
+    docker() {
+        local IFS=' '
+        printf '%s\n' "$*" >> "$OBS_UP_LOG"
+        case " $* " in
+            *" config --services "*)
+                printf '%s\n' backend mongodb redis rustfs frontend-admin client-frontend \
+                    otel-collector tempo prometheus loki promtail grafana
+                ;;
+            *" config --volumes "*)
+                printf '%s\n' mongodb-data redis-data rustfs-data \
+                    tempo-data prometheus-data loki-data promtail-positions grafana-data
+                ;;
+            *" ps -q backend "*) printf 'backend-id\n' ;;
+        esac
+        return 0
+    }
+    observability_up
+) >/dev/null 2>&1
+check "observability up applies its backend override through the merged stack" \
+    "yes" \
+    "$(grep -Eq 'compose .* -f .*docker-compose.observability.yml .* up -d --no-deps backend$' "$obs_up_log" && printf yes || printf no)"
+rm -f "$obs_up_log"
+
+obs_down_log="$(mktemp)"
+export OBS_DOWN_LOG="$obs_down_log"
+(
+    check_docker_running() { :; }
+    observability_check_file() { :; }
+    observability_init_env() {
+        ENV=development
+        COMPOSE_PROJECT_NAME=orkestra-test-development
+        INFRA_COMPOSE="$PROJECT_ROOT/docker/docker-compose.infra.yml"
+        COMPOSE_FILE="$PROJECT_ROOT/docker/docker-compose.dev.yml"
+        OBSERVABILITY_COMPOSE="$PROJECT_ROOT/docker/docker-compose.observability.yml"
+        ENV_FILE="$PROJECT_ROOT/docker/.env"
+    }
+    page_header() { :; }
+    p_ok() { :; }
+    with_spinner() {
+        shift
+        "$@"
+    }
+    docker() {
+        local IFS=' '
+        printf '%s\n' "$*" >> "$OBS_DOWN_LOG"
+        case " $* " in
+            *" config --services "*)
+                printf '%s\n' backend mongodb redis rustfs frontend-admin client-frontend \
+                    otel-collector tempo prometheus loki promtail grafana
+                ;;
+            *" config --volumes "*)
+                printf '%s\n' mongodb-data redis-data rustfs-data \
+                    tempo-data prometheus-data loki-data promtail-positions grafana-data
+                ;;
+            *" ps -q backend "*) printf 'backend-id\n' ;;
+        esac
+        return 0
+    }
+    observability_down
+) >/dev/null 2>&1
+check "observability down dry-run removes only six explicit services" \
+    "yes" \
+    "$(grep -Eq 'compose .* rm -sf otel-collector tempo prometheus loki promtail grafana$' "$obs_down_log" && printf yes || printf no)"
+check "observability down dry-run never uses project-wide down" \
+    "no" \
+    "$(grep -Eq 'compose .* down( |$)' "$obs_down_log" && printf yes || printf no)"
+check "observability down restores the backend without the overlay" \
+    "yes" \
+    "$(grep -Eq 'compose -f .*docker-compose.infra.yml -f .*docker-compose.dev.yml --env-file .* up -d --no-deps backend$' "$obs_down_log" && printf yes || printf no)"
+rm -f "$obs_down_log"
+
+obs_catalog_count="$(
+    (
+        get_services() { return 17; }
+        list_all_services observability
+        printf '%s' "${#SERVICES[@]}"
+    ) 2>/dev/null
+)"
+check "observability log picker uses the explicit service catalog" "6" "$obs_catalog_count"
+
+
 echo
 printf 'orkestra-helpers: %d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

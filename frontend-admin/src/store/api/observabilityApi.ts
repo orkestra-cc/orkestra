@@ -56,19 +56,14 @@ export const observabilityApi = baseApi.injectEndpoints({
     }),
 
     getLogPreview: builder.query<LogPreviewResponse, LogPreviewFilters>({
-      query: ({ module, windowMinutes, level, q, limit }) => {
-        const params = new URLSearchParams({
-          module,
-          windowMinutes: String(windowMinutes)
-        });
-        if (level !== undefined) params.set('level', level);
-        if (q !== undefined) params.set('q', q);
-        if (limit !== undefined) params.set('limit', String(limit));
-        return {
-          url: `/v1/admin/observability/log-levels/logs?${params.toString()}`,
-          method: 'GET'
-        };
-      }
+      query: body => ({
+        url: '/v1/admin/observability/log-levels/logs',
+        method: 'POST',
+        body
+      }),
+      // Preview responses can contain personal data. Drop the cache entry as
+      // soon as the final mounted consumer leaves.
+      keepUnusedDataFor: 0
     }),
 
     setGlobalLogLevel: builder.mutation<LogLevelsView, SetLevelBody>({

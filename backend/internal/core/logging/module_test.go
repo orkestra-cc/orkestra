@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -22,6 +23,9 @@ import (
 	"github.com/orkestra/backend/internal/core/logging/repository"
 	"github.com/orkestra/backend/internal/core/logging/services"
 	"github.com/orkestra/backend/internal/shared/errcode"
+	"github.com/orkestra/backend/internal/shared/middleware"
+	"github.com/orkestra/backend/pkg/sdk/ctxauth"
+	sdkmodule "github.com/orkestra/backend/pkg/sdk/module"
 )
 
 func TestLoggingModule_NavItems(t *testing.T) {
@@ -42,7 +46,7 @@ func TestRegisterRoutes_ExposesBatchDiagnosticAndLogPreviewOperations(t *testing
 		{method: http.MethodPut, path: "/v1/admin/observability/log-levels"},
 		{method: http.MethodPut, path: "/v1/admin/observability/log-levels/{module}/diagnostic"},
 		{method: http.MethodDelete, path: "/v1/admin/observability/log-levels/{module}/diagnostic"},
-		{method: http.MethodGet, path: "/v1/admin/observability/log-levels/logs"},
+		{method: http.MethodPost, path: "/v1/admin/observability/log-levels/logs"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.method+" "+tt.path, func(t *testing.T) {
@@ -58,6 +62,8 @@ func TestRegisterRoutes_ExposesBatchDiagnosticAndLogPreviewOperations(t *testing
 				operation = path.Delete
 			case http.MethodGet:
 				operation = path.Get
+			case http.MethodPost:
+				operation = path.Post
 			}
 			if operation == nil {
 				t.Fatalf("%s %s is not registered", tt.method, tt.path)
@@ -73,73 +79,76 @@ func TestRegisterRoutes_LogPreviewDocumentsConstrainedFilters(t *testing.T) {
 	router := chi.NewRouter()
 	api := humachi.New(router, huma.DefaultConfig("test", "1.0.0"))
 	RegisterRoutes(api, (*handlers.LogLevelHandler)(nil))
-	operation := api.OpenAPI().Paths["/v1/admin/observability/log-levels/logs"].Get
-	parameters := make(map[string]*huma.Param, len(operation.Parameters))
-	for _, parameter := range operation.Parameters {
-		parameters[parameter.Name] = parameter
-	}
+	operation := api.OpenAPI().Paths["/v1/admin/observability/log-levels/logs"].Post
+	schema := requireJSONBodySchema(t, operation)
 
 	t.Run("module is required string", func(t *testing.T) {
-		parameter := requirePreviewParameter(t, parameters, "module")
-		if !parameter.Required || parameter.Schema.Type != huma.TypeString {
-			t.Errorf("module = required:%t schema:%+v, want required string", parameter.Required, parameter.Schema)
+		property := schema.Properties["module"]
+		if property == nil || property.Type != huma.TypeString || !containsString(schema.Required, "module") {
+			t.Errorf("module schema = %+v required=%v, want required string", property, schema.Required)
 		}
 	})
 	t.Run("window is required integer enum", func(t *testing.T) {
-		parameter := requirePreviewParameter(t, parameters, "windowMinutes")
-		if !parameter.Required || parameter.Schema.Type != huma.TypeInteger || !reflect.DeepEqual(parameter.Schema.Enum, []any{5, 15, 60}) {
-			t.Errorf("windowMinutes = required:%t schema:%+v, want required integer enum [5 15 60]", parameter.Required, parameter.Schema)
+		property := schema.Properties["windowMinutes"]
+		if property == nil || property.Type != huma.TypeInteger || !containsString(schema.Required, "windowMinutes") || !reflect.DeepEqual(property.Enum, []any{5, 15, 60}) {
+			t.Errorf("windowMinutes schema = %+v required=%v, want required integer enum [5 15 60]", property, schema.Required)
 		}
 	})
 	t.Run("level is closed enum", func(t *testing.T) {
-		parameter := requirePreviewParameter(t, parameters, "level")
+		property := schema.Properties["level"]
 		want := []any{"debug", "info", "warn", "error"}
-		if parameter.Schema.Type != huma.TypeString || !reflect.DeepEqual(parameter.Schema.Enum, want) {
-			t.Errorf("level schema = %+v, want string enum %v", parameter.Schema, want)
+		if property == nil || property.Type != huma.TypeString || !reflect.DeepEqual(property.Enum, want) {
+			t.Errorf("level schema = %+v, want string enum %v", property, want)
 		}
 	})
 	t.Run("search is bounded", func(t *testing.T) {
-		parameter := requirePreviewParameter(t, parameters, "q")
-		if parameter.Schema.Type != huma.TypeString || parameter.Schema.MaxLength == nil || *parameter.Schema.MaxLength != 200 {
-			t.Errorf("q schema = %+v, want string maxLength 200", parameter.Schema)
+		property := schema.Properties["q"]
+		if property == nil || property.Type != huma.TypeString || property.MaxLength == nil || *property.MaxLength != 200 {
+			t.Errorf("q schema = %+v, want string maxLength 200", property)
 		}
 	})
 	t.Run("limit is bounded integer", func(t *testing.T) {
-		parameter := requirePreviewParameter(t, parameters, "limit")
-		if parameter.Schema.Type != huma.TypeInteger || parameter.Schema.Minimum == nil || *parameter.Schema.Minimum != 1 || parameter.Schema.Maximum == nil || *parameter.Schema.Maximum != 100 || parameter.Schema.Default != 50 {
-			t.Errorf("limit schema = %+v, want integer default 50 range 1..100", parameter.Schema)
+		property := schema.Properties["limit"]
+		if property == nil || property.Type != huma.TypeInteger || property.Minimum == nil || *property.Minimum != 1 || property.Maximum == nil || *property.Maximum != 100 || property.Default != 50 {
+			t.Errorf("limit schema = %+v, want integer default 50 range 1..100", property)
 		}
 	})
 }
 
-func requirePreviewParameter(t *testing.T, parameters map[string]*huma.Param, name string) *huma.Param {
+func requireJSONBodySchema(t *testing.T, operation *huma.Operation) *huma.Schema {
 	t.Helper()
-	parameter := parameters[name]
-	if parameter == nil || parameter.Schema == nil {
-		t.Fatalf("parameter %q missing or has no schema", name)
+	if operation == nil || operation.RequestBody == nil {
+		t.Fatal("operation request body is missing")
 	}
-	return parameter
+	media := operation.RequestBody.Content["application/json"]
+	if media == nil || media.Schema == nil {
+		t.Fatal("application/json request schema is missing")
+	}
+	return media.Schema
 }
 
 func TestRegisterRoutes_LogPreviewMalformedNumericQueriesUseStableBadRequest(t *testing.T) {
 	provider := &numericQueryProvider{}
 	router := chi.NewRouter()
 	api := humachi.New(router, huma.DefaultConfig("test", "1.0.0"))
-	RegisterRoutes(api, handlers.NewLogLevelHandler(nil, provider, ""))
+	RegisterRoutes(api, handlers.NewLogLevelHandler(nil, provider, "", slog.Default()))
 
 	tests := []struct {
-		name  string
-		query string
+		name   string
+		window string
+		limit  string
 	}{
-		{name: "malformed window", query: "windowMinutes=not-a-number&limit=20"},
-		{name: "overflowing window", query: "windowMinutes=999999999999999999999999999999&limit=20"},
-		{name: "malformed limit", query: "windowMinutes=15&limit=not-a-number"},
-		{name: "overflowing limit", query: "windowMinutes=15&limit=999999999999999999999999999999"},
+		{name: "malformed window", window: `"not-a-number"`, limit: `20`},
+		{name: "overflowing window", window: `999999999999999999999999999999`, limit: `20`},
+		{name: "malformed limit", window: `15`, limit: `"not-a-number"`},
+		{name: "overflowing limit", window: `15`, limit: `999999999999999999999999999999`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			recorder := httptest.NewRecorder()
-			request := httptest.NewRequest(http.MethodGet, "/v1/admin/observability/log-levels/logs?module=auth&"+tt.query, nil)
+			body := `{"module":"auth","windowMinutes":` + tt.window + `,"limit":` + tt.limit + `}`
+			request := httptest.NewRequest(http.MethodPost, "/v1/admin/observability/log-levels/logs", strings.NewReader(body))
+			request.Header.Set("Content-Type", "application/json")
 
 			router.ServeHTTP(recorder, request)
 
@@ -162,6 +171,42 @@ func TestRegisterRoutes_LogPreviewMalformedNumericQueriesUseStableBadRequest(t *
 	}
 }
 
+func TestRegisterRoutes_DocumentsPermanentAndDiagnosticConstraints(t *testing.T) {
+	router := chi.NewRouter()
+	api := humachi.New(router, huma.DefaultConfig("test", "1.0.0"))
+	RegisterRoutes(api, (*handlers.LogLevelHandler)(nil))
+	levels := []any{"debug", "info", "warn", "error"}
+
+	apply := requireJSONBodySchema(t, api.OpenAPI().Paths["/v1/admin/observability/log-levels"].Put)
+	if !reflect.DeepEqual(apply.Properties["global"].Enum, levels) {
+		t.Errorf("apply global enum = %v, want %v", apply.Properties["global"].Enum, levels)
+	}
+	if apply.Properties["expectedPermanentRevision"].Minimum == nil || *apply.Properties["expectedPermanentRevision"].Minimum != 0 {
+		t.Errorf("expectedPermanentRevision schema = %+v, want minimum 0", apply.Properties["expectedPermanentRevision"])
+	}
+	additional, ok := apply.Properties["perModule"].AdditionalProperties.(*huma.Schema)
+	if !ok || !reflect.DeepEqual(additional.Enum, levels) {
+		t.Errorf("perModule additionalProperties = %+v, want log-level enum", apply.Properties["perModule"].AdditionalProperties)
+	}
+
+	diagnostic := requireJSONBodySchema(t, api.OpenAPI().Paths["/v1/admin/observability/log-levels/{module}/diagnostic"].Put)
+	if !reflect.DeepEqual(diagnostic.Properties["level"].Enum, levels) {
+		t.Errorf("diagnostic level enum = %v, want %v", diagnostic.Properties["level"].Enum, levels)
+	}
+	if !reflect.DeepEqual(diagnostic.Properties["durationMinutes"].Enum, []any{15, 60, 240}) {
+		t.Errorf("diagnostic duration enum = %v, want [15 60 240]", diagnostic.Properties["durationMinutes"].Enum)
+	}
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
 func TestNormalizeExternalURL(t *testing.T) {
 	tests := []struct {
 		name string
@@ -179,6 +224,60 @@ func TestNormalizeExternalURL(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := normalizeExternalURL(tt.raw); got != tt.want {
 				t.Errorf("normalizeExternalURL(%q) = %q, want %q", tt.raw, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestLoggingModule_RegisterRoutesEnforcesRuntimeAuthorization(t *testing.T) {
+	repo := newLifecycleRepo()
+	logger := slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))
+	svc := services.NewLogLevelService(repo, logger, slog.LevelInfo, nil, []string{"auth"})
+
+	router := chi.NewRouter()
+	router.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			role := r.Header.Get("X-Test-Role")
+			if role != "" {
+				ctx := context.WithValue(r.Context(), ctxauth.KeyUserUUID, "operator-1")
+				ctx = context.WithValue(ctx, ctxauth.KeySystemRole, role)
+				r = r.WithContext(ctx)
+			}
+			next.ServeHTTP(w, r)
+		})
+	})
+
+	m := NewModule()
+	m.svc = svc
+	m.handler = handlers.NewLogLevelHandler(svc, logquery.New("", nil), "", logger)
+	m.RegisterRoutes(&sdkmodule.RouteInfo{
+		Operator: &sdkmodule.APISurface{
+			Audience:        sdkmodule.AudienceOperator,
+			ProtectedRouter: router,
+			AuthMW:          &middleware.JWTValidator{},
+		},
+		APIConfig: huma.DefaultConfig("test", "1.0.0"),
+	})
+
+	tests := []struct {
+		name       string
+		role       string
+		wantStatus int
+	}{
+		{name: "unauthenticated", wantStatus: http.StatusUnauthorized},
+		{name: "authenticated without system permission", role: "operator", wantStatus: http.StatusForbidden},
+		{name: "administrator", role: "administrator", wantStatus: http.StatusOK},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			request := httptest.NewRequest(http.MethodGet, "/v1/admin/observability/log-levels", nil)
+			if tt.role != "" {
+				request.Header.Set("X-Test-Role", tt.role)
+			}
+			router.ServeHTTP(recorder, request)
+			if recorder.Code != tt.wantStatus {
+				t.Errorf("status = %d, want %d; body = %s", recorder.Code, tt.wantStatus, recorder.Body.String())
 			}
 		})
 	}
@@ -253,7 +352,6 @@ func TestLoggingModule_CleanupLifecycleLogsOnlyCleanupError(t *testing.T) {
 		t.Fatalf("seed expired diagnostic: %v", err)
 	}
 	repo.waitForUpsert(t)
-	repo.waitForAttempt(t)
 	repo.setError(errors.New("persistence down"))
 
 	m := NewModule()
@@ -263,7 +361,7 @@ func TestLoggingModule_CleanupLifecycleLogsOnlyCleanupError(t *testing.T) {
 	if err := m.Start(context.Background()); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
-	repo.waitForAttempt(t)
+	time.Sleep(30 * time.Millisecond)
 	stopCtx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	if err := m.Stop(stopCtx); err != nil {
@@ -278,6 +376,40 @@ func TestLoggingModule_CleanupLifecycleLogsOnlyCleanupError(t *testing.T) {
 		if bytes.Contains([]byte(got), []byte(forbidden)) {
 			t.Errorf("cleanup log contains diagnostic content %q: %s", forbidden, got)
 		}
+	}
+}
+
+func TestLoggingModule_LifecycleRefreshesCrossReplicaStateWithinBound(t *testing.T) {
+	repo := newLifecycleRepo()
+	logger := slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))
+	writer := services.NewLogLevelService(repo, logger, slog.LevelInfo, nil, []string{"auth"})
+	reader := services.NewLogLevelService(repo, logger, slog.LevelInfo, nil, []string{"auth"})
+
+	m := NewModule()
+	m.svc = reader
+	m.logger = logger
+	m.cleanupInterval = 5 * time.Millisecond
+	m.refreshInterval = 5 * time.Millisecond
+	if err := m.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	stopCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	defer func() {
+		if err := m.Stop(stopCtx); err != nil {
+			t.Errorf("Stop: %v", err)
+		}
+	}()
+
+	if err := writer.SetGlobal(context.Background(), models.LogLevelError, "operator"); err != nil {
+		t.Fatalf("writer SetGlobal: %v", err)
+	}
+	deadline := time.Now().Add(250 * time.Millisecond)
+	for reader.Global() != slog.LevelError && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if got := reader.Global(); got != slog.LevelError {
+		t.Errorf("reader global after refresh bound = %v, want error", got)
 	}
 }
 
@@ -321,16 +453,23 @@ func (r *lifecycleRepo) Get(context.Context) (*models.LogLevelDoc, error) {
 	return cloneLifecycleDoc(r.doc), nil
 }
 
-func (r *lifecycleRepo) Upsert(_ context.Context, doc *models.LogLevelDoc) error {
+func (r *lifecycleRepo) CompareAndSwap(_ context.Context, expectedRevision int64, doc *models.LogLevelDoc) (bool, error) {
 	r.attempts <- struct{}{}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.err != nil {
-		return r.err
+		return false, r.err
+	}
+	currentRevision := int64(0)
+	if r.doc != nil {
+		currentRevision = r.doc.Revision
+	}
+	if currentRevision != expectedRevision {
+		return false, nil
 	}
 	r.doc = cloneLifecycleDoc(doc)
 	r.upserts <- cloneLifecycleDoc(doc)
-	return nil
+	return true, nil
 }
 
 func (r *lifecycleRepo) setError(err error) {

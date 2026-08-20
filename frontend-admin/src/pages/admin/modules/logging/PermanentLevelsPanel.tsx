@@ -31,7 +31,7 @@ export interface PermanentDraft {
 export interface PermanentEditor {
   baseline: PermanentDraft;
   draft: PermanentDraft;
-  expectedUpdatedAt: string;
+  expectedPermanentRevision: number;
   conflict: boolean;
   saveError: boolean;
 }
@@ -59,7 +59,7 @@ export const editorFromSnapshot = (
   return {
     baseline: draft,
     draft,
-    expectedUpdatedAt: snapshot.updatedAt,
+    expectedPermanentRevision: snapshot.permanentRevision,
     conflict: false,
     saveError: false
   };
@@ -106,7 +106,6 @@ const PermanentLevelsPanel = ({
     setEditor(current => ({
       ...(current ?? editor),
       draft: { ...(current ?? editor).draft, global },
-      conflict: false,
       saveError: false
     }));
   };
@@ -123,35 +122,45 @@ const PermanentLevelsPanel = ({
       return {
         ...activeEditor,
         draft: { ...activeEditor.draft, perModule },
-        conflict: false,
         saveError: false
       };
     });
   };
 
-  const handleDiscard = () => {
+  const handleDiscard = async () => {
+    if (editor.conflict) {
+      try {
+        const latest = await onReload();
+        setEditor(editorFromSnapshot(latest));
+      } catch {
+        setEditor(current => ({
+          ...(current ?? editor),
+          saveError: true
+        }));
+      }
+      return;
+    }
     setEditor(current => {
       const activeEditor = current ?? editor;
       return {
         ...activeEditor,
         draft: activeEditor.baseline,
-        conflict: false,
         saveError: false
       };
     });
   };
 
   const handleApply = async () => {
+    if (editor.conflict) return;
     setEditor(current => ({
       ...(current ?? editor),
-      conflict: false,
       saveError: false
     }));
     try {
       const saved = await applyPermanent({
         global: editor.draft.global,
         perModule: editor.draft.perModule,
-        expectedUpdatedAt: editor.expectedUpdatedAt
+        expectedPermanentRevision: editor.expectedPermanentRevision
       }).unwrap();
       setEditor(editorFromSnapshot(saved));
     } catch (error) {
@@ -164,7 +173,6 @@ const PermanentLevelsPanel = ({
       } else {
         setEditor(current => ({
           ...(current ?? editor),
-          conflict: false,
           saveError: true
         }));
       }
@@ -358,7 +366,7 @@ const PermanentLevelsPanel = ({
             <Button
               variant="orkestra-primary"
               size="sm"
-              disabled={applyStatus.isLoading}
+              disabled={applyStatus.isLoading || editor.conflict}
               onClick={handleApply}
             >
               {applyStatus.isLoading && (

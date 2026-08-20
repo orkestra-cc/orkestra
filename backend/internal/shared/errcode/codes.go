@@ -79,6 +79,18 @@ const LoggingLogProviderTimeout = "logging.log_provider_timeout"
 // response-shape failure. 502.
 const LoggingLogProviderFailed = "logging.log_provider_failed"
 
+// LoggingMutationInvalid signals malformed or unsupported durable/diagnostic
+// log-level input. Details intentionally do not echo request content. 400.
+const LoggingMutationInvalid = "logging.mutation_invalid"
+
+// LoggingConfigConflict signals that a durable editor token is stale or a
+// bounded Mongo CAS retry could not win. The caller must reload and retry. 409.
+const LoggingConfigConflict = "logging.config_conflict"
+
+// LoggingPersistenceFailed signals an internal repository failure. The
+// underlying cause is logged server-side and never enters the response. 500.
+const LoggingPersistenceFailed = "logging.persistence_failed"
+
 // --- navigation ---
 
 // NavigationOverrideUnknownParent signals that a PATCH against the

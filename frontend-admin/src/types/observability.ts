@@ -17,6 +17,9 @@ export interface LogLevelsView {
   modules: AdminModuleEntry[];
   diagnostics: DiagnosticEntry[];
   logProvider: LogProviderStatus;
+  revision: number;
+  permanentRevision: number;
+  serverTime: string;
   updatedAt: string;
   updatedBy?: string;
 }
@@ -40,11 +43,11 @@ export interface LogProviderStatus {
   grafanaUrl?: string;
 }
 
-/** Complete replacement of the permanent configuration, guarded by its snapshot timestamp. */
+/** Complete replacement of the permanent configuration, guarded by its durable revision. */
 export interface PermanentLogLevelsInput {
   global: LogLevel;
   perModule: Record<string, LogLevel>;
-  expectedUpdatedAt: string;
+  expectedPermanentRevision: number;
 }
 
 export type DiagnosticDurationMinutes = 15 | 60 | 240;

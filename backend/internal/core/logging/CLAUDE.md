@@ -24,16 +24,16 @@ The authoritative operator surface is the specialized `/admin/modules/logging` w
 | `handlers/log_level_handler.go` | HTTP ↔ service/provider translation; pulls actor UUID via `ctxauth` |
 | `logquery/client.go` | Constrained optional Loki provider (closed LogQL template, 3 s / 1 MiB / 100-event caps) |
 | `logquery/redact.go` | Recursive masking for structured sensitive keys; does not sanitize free-text messages |
-| `services/log_level_service.go` | atomic.Pointer snapshot of `(global, perModule)`, mutex-serialized writes |
+| `services/log_level_service.go` | lock-free `atomic.Pointer` snapshot, Mongo-authoritative CAS mutations, bounded replica refresh |
 | `services/log_level_service_test.go` | unit tests including `-race` concurrent reads/writes |
-| `repository/log_level_repository.go` | Mongo single-document upsert (`_id="default"`) |
+| `repository/log_level_repository.go` | Mongo single-document read + compare-and-swap (`_id="default"`, `revision`) |
 | `models/log_level.go` | `LogLevel` value-type, `Parse`, `Slog`, `LogLevelDoc`, `AdminView` |
 
 ## MongoDB collections
 
 | Collection | Shape | Notes |
 |---|---|---|
-| `log_levels` | single document with `_id="default"`, `global: LogLevel`, `perModule: map[string]LogLevel`, `updatedAt/updatedBy/updateNote` | Replaced wholesale on every admin write so concurrent writers can't produce two documents |
+| `log_levels` | single document with `_id="default"`, `global`, `perModule`, `diagnostics`, `revision`, `permanentRevision`, and update metadata | Mongo-authoritative compare-and-swap; legacy documents without revision fields are revision zero and migrate on their next write |
 
 No declared indexes — `_id` is the primary key and that's all we filter on.
 
@@ -52,7 +52,7 @@ No declared indexes — `_id` is the primary key and that's all we filter on.
 
 `main.go` reads that key **after** `InitAll` returns and calls `utils.SwapLevelResolver(svc)` to replace the boot-time `StaticLevelResolver` in `PerModuleLevelHandler`. Every existing module logger picks up the swap through the shared `resolverBox` atomic pointer.
 
-`Start` launches best-effort cleanup of expired diagnostic records. `Stop` cancels and joins that loop; expiry correctness remains on the resolver hot path and does not depend on cleanup. `HealthCheck` is inherited from `BaseModule`.
+`Start` launches one maintenance loop. It refreshes the local immutable snapshot from Mongo every two seconds, bounding cross-replica staleness, and periodically removes expired diagnostic records. `Stop` cancels and joins that loop; expiry correctness remains on the resolver hot path and does not depend on cleanup. `HealthCheck` is inherited from `BaseModule`.
 
 A diagnostic starts or replaces one module's temporary threshold for 15, 60, or 240 minutes, or with no expiry. The temporary value wins only while it remains live; expiry is enforced on every resolver read, and the cleanup loop later removes expired records from storage. Stopping a diagnostic removes it explicitly and reveals the permanent threshold again.
 
@@ -63,7 +63,7 @@ All nine are mounted on the Tier-1 operator-protected router and require `system
 | Method | Path | Purpose |
 |---|---|---|
 | GET    | `/v1/admin/observability/log-levels` | Returns `AdminView`: global level + one row per registered module |
-| GET    | `/v1/admin/observability/log-levels/logs` | Returns at most 100 recent minimized events for one registered module |
+| POST   | `/v1/admin/observability/log-levels/logs` | Returns at most 100 recent minimized events for one registered module; filters are in the JSON body |
 | PUT    | `/v1/admin/observability/log-levels` | Atomically replaces the complete permanent snapshot with optimistic concurrency |
 | PUT    | `/v1/admin/observability/log-levels/global` | Sets the global threshold |
 | PUT    | `/v1/admin/observability/log-levels/{module}` | Sets a per-module override |
@@ -72,7 +72,7 @@ All nine are mounted on the Tier-1 operator-protected router and require `system
 | PUT    | `/v1/admin/observability/log-levels/{module}/diagnostic` | Starts/replaces a 15/60/240-minute or no-expiry diagnostic |
 | DELETE | `/v1/admin/observability/log-levels/{module}/diagnostic` | Stops a module diagnostic |
 
-The preview accepts only a registered module, a 5/15/60-minute window, an optional closed log-level enum, at most 200 search characters, and a result limit clamped to 100. It constructs LogQL itself and never accepts raw LogQL or an upstream URL. Provider absence returns a stable 503; timeout is 504; other upstream failures are 502; rejected filters are 400. Upstream bodies are never included in errors. This is deliberately a bounded diagnostic preview, not a log browser: streaming, arbitrary exploration, and full investigations remain Grafana's responsibility.
+The preview accepts only a registered module, a 5/15/60-minute window, an optional closed log-level enum, at most 200 search characters, and a result limit clamped to 100. Filters travel in a POST body rather than a URL, successful responses carry `Cache-Control: private, no-store`, and the admin client evicts unused preview data immediately. It constructs LogQL itself and never accepts raw LogQL or an upstream URL. Provider absence returns a stable 503; timeout is 504; other upstream failures are 502; rejected filters are 400. Upstream bodies are never included in errors. This is deliberately a bounded diagnostic preview, not a log browser: streaming, arbitrary exploration, and full investigations remain Grafana's responsibility.
 
 Mutations return the fresh `AdminView` so the UI re-renders without a separate refetch.
 
@@ -82,9 +82,11 @@ The service implements both `utils.LevelResolver` (consumed by `PerModuleLevelHa
 
 ## Key invariants
 
-- **Single document.** The repository filters by `_id="default"` so concurrent writers can never produce more than one row. The service serializes writes under a mutex; reads consult the atomic snapshot lock-free.
+- **Mongo is authoritative across replicas.** Every mutation reads the current document and uses `revision` as the replace predicate. CAS misses retry from a fresh authoritative document a bounded number of times, preserving unrelated writes. The process-local mutex only serializes this replica; reads consult the atomic snapshot lock-free.
+- **Separate permanent concurrency.** `revision` advances for every stored mutation. `permanentRevision` advances only when the durable global/per-module configuration changes, so start/stop/expiry maintenance cannot invalidate an operator's permanent draft. The UI sends this token on atomic apply and latches a 409 until it adopts a fresh snapshot.
+- **Legacy compatibility.** A document with neither revision field decodes as revision zero. The first successful CAS accepts the missing field and writes both counters without requiring a migration job.
 - **Atomic snapshot for the hot path.** `*snapshot` lives behind `atomic.Pointer[snapshot]`; readers (every log call) get a consistent view without locks. Mutations build a new snapshot and `Store` it after persisting — readers either see the old snapshot or the new one, never partial state.
-- **Persist before publish.** If the Mongo upsert fails, the snapshot is **not** updated. The in-memory view always reflects what's on disk.
+- **Persist before publish.** If the Mongo CAS fails, the candidate snapshot is **not** published. A winning document is published locally and other replicas observe it through the bounded refresh loop.
 - **Env defaults are remembered separately.** `ResetToEnv` reverts to the values captured at `NewLogLevelService` time, not to "whatever the env says right now" — restarts re-resolve from env, but a Mongo doc takes precedence.
 - **No retroactive seeding.** When the document is missing (fresh deployment), the service stays on the env snapshot. The first admin write creates the document; subsequent restarts load from Mongo.
 - **Bounded, minimized preview.** Loki calls use a dedicated non-redirecting client with a 3-second timeout and one-MiB response cap. Results are normalized chronologically and capped at 100. Only timestamp, normalized level, preserved message, requested module, and explicitly allowlisted correlation/duration attributes are serialized.

@@ -1681,7 +1681,7 @@
       },
       "logs": {
         "title": "Recent log preview",
-        "description": "Inspect up to 100 events through constrained filters. Use Grafana for a full investigation.",
+        "description": "Choose constrained filters, then select Refresh to inspect up to 100 events. Use Grafana for a full investigation.",
         "privacyNotice": "Structured attributes are minimized and redacted. Free-text messages may still contain personal data; review them before sharing.",
         "statusAria": "Log preview status",
         "providerUnavailable": "Log preview is unavailable on this deployment.",

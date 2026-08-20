@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -37,13 +38,20 @@ func (r *fakeRepo) Get(_ context.Context) (*models.LogLevelDoc, error) {
 	return &clone, nil
 }
 
-func (r *fakeRepo) Upsert(_ context.Context, doc *models.LogLevelDoc) error {
+func (r *fakeRepo) CompareAndSwap(_ context.Context, expectedRevision int64, doc *models.LogLevelDoc) (bool, error) {
 	if r.err != nil {
-		return r.err
+		return false, r.err
+	}
+	currentRevision := int64(0)
+	if r.doc != nil {
+		currentRevision = r.doc.Revision
+	}
+	if currentRevision != expectedRevision {
+		return false, nil
 	}
 	clone := *doc
 	r.doc = &clone
-	return nil
+	return true, nil
 }
 
 func newHandler(t *testing.T) (*LogLevelHandler, *fakeRepo) {
@@ -55,7 +63,7 @@ func newHandlerWithProvider(t *testing.T, provider *fakeLogProvider) (*LogLevelH
 	repo := &fakeRepo{}
 	logger := slog.New(slog.NewTextHandler(testWriter{t}, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	svc := services.NewLogLevelService(repo, logger, slog.LevelInfo, nil, []string{"auth", "billing"})
-	return NewLogLevelHandler(svc, provider, "https://grafana.example.test"), repo
+	return NewLogLevelHandler(svc, provider, "https://grafana.example.test", logger), repo
 }
 
 type fakeLogProvider struct {
@@ -112,13 +120,13 @@ func TestLogLevelHandler_GetLogs(t *testing.T) {
 		provider := &fakeLogProvider{available: true, events: []models.LogEvent{event}}
 		h, _ := newHandlerWithProvider(t, provider)
 
-		resp, err := h.GetLogs(context.Background(), &GetLogsRequest{
-			Module:        "auth",
-			WindowMinutes: "15",
-			Level:         "warn",
-			Q:             "failed request",
-			Limit:         "25",
-		})
+		req := &GetLogsRequest{}
+		req.Body.Module = "auth"
+		req.Body.WindowMinutes = json.RawMessage(`15`)
+		req.Body.Level = "warn"
+		req.Body.Q = "failed request"
+		req.Body.Limit = json.RawMessage(`25`)
+		resp, err := h.GetLogs(context.Background(), req)
 		if err != nil {
 			t.Fatalf("GetLogs: %v", err)
 		}
@@ -129,13 +137,20 @@ func TestLogLevelHandler_GetLogs(t *testing.T) {
 		if provider.query != want {
 			t.Errorf("provider query = %+v, want %+v", provider.query, want)
 		}
+		if resp.CacheControl != "private, no-store" {
+			t.Errorf("Cache-Control = %q, want private, no-store", resp.CacheControl)
+		}
 	})
 
 	t.Run("unavailable provider returns stable 503 without querying", func(t *testing.T) {
 		provider := &fakeLogProvider{}
 		h, _ := newHandlerWithProvider(t, provider)
 
-		_, err := h.GetLogs(context.Background(), &GetLogsRequest{Module: "auth", WindowMinutes: "15", Limit: "20"})
+		req := &GetLogsRequest{}
+		req.Body.Module = "auth"
+		req.Body.WindowMinutes = json.RawMessage(`15`)
+		req.Body.Limit = json.RawMessage(`20`)
+		_, err := h.GetLogs(context.Background(), req)
 		assertStatusAndCode(t, err, 503, "logging.log_provider_unavailable")
 		if provider.query.Module != "" {
 			t.Errorf("unavailable provider was queried: %+v", provider.query)
@@ -157,7 +172,11 @@ func TestLogLevelHandler_GetLogs(t *testing.T) {
 			provider := &fakeLogProvider{available: true, err: tt.providerErr}
 			h, _ := newHandlerWithProvider(t, provider)
 
-			_, err := h.GetLogs(context.Background(), &GetLogsRequest{Module: "auth", WindowMinutes: "15", Limit: "20"})
+			req := &GetLogsRequest{}
+			req.Body.Module = "auth"
+			req.Body.WindowMinutes = json.RawMessage(`15`)
+			req.Body.Limit = json.RawMessage(`20`)
+			_, err := h.GetLogs(context.Background(), req)
 			assertStatusAndCode(t, err, tt.wantStatus, tt.wantCode)
 			if strings.Contains(err.Error(), "upstream-secret-body") {
 				t.Errorf("handler error disclosed upstream content: %v", err)
@@ -199,17 +218,15 @@ func TestHandler_SetGlobal_RejectsInvalidLevel(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for invalid level")
 	}
-	se, ok := err.(huma.StatusError)
-	if !ok {
-		t.Fatalf("err = %v (%T), want huma.StatusError", err, err)
-	}
-	if se.GetStatus() != 400 {
-		t.Errorf("status = %d, want 400", se.GetStatus())
-	}
+	assertStatusAndCode(t, err, 400, "logging.mutation_invalid")
 }
 
 func TestHandler_SetGlobal_ServiceFailureSurfacesAs500(t *testing.T) {
-	h, repo := newHandler(t)
+	repo := &fakeRepo{}
+	var logOutput bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&logOutput, nil))
+	svc := services.NewLogLevelService(repo, logger, slog.LevelInfo, nil, []string{"auth", "billing"})
+	h := NewLogLevelHandler(svc, &fakeLogProvider{}, "", logger)
 	repo.err = errors.New("mongo down")
 
 	req := &SetGlobalRequest{}
@@ -219,9 +236,12 @@ func TestHandler_SetGlobal_ServiceFailureSurfacesAs500(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	se, ok := err.(huma.StatusError)
-	if !ok || se.GetStatus() != 500 {
-		t.Errorf("want 500, got %v", err)
+	assertStatusAndCode(t, err, 500, "logging.persistence_failed")
+	if strings.Contains(err.Error(), "mongo down") {
+		t.Errorf("response disclosed repository cause: %v", err)
+	}
+	if !strings.Contains(logOutput.String(), "mongo down") || !strings.Contains(logOutput.String(), "set global") {
+		t.Errorf("server log = %q, want operation and internal cause", logOutput.String())
 	}
 }
 
@@ -264,13 +284,7 @@ func TestHandler_SetModule_RejectsEmptyModule(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for empty module")
 	}
-	se, ok := err.(huma.StatusError)
-	if !ok || se.GetStatus() != 400 {
-		t.Errorf("want 400, got %v", err)
-	}
-	if !strings.Contains(err.Error(), "module") {
-		t.Errorf("error message should mention 'module': %v", err)
-	}
+	assertStatusAndCode(t, err, 400, "logging.mutation_invalid")
 }
 
 func TestHandler_UnsetModule_RemovesOverride(t *testing.T) {
@@ -353,7 +367,7 @@ func TestLogLevelHandler_Apply(t *testing.T) {
 		payload := []byte(`{
 			"global":"warn",
 			"perModule":{"auth":"debug"},
-			"expectedUpdatedAt":"0001-01-01T00:00:00Z"
+			"expectedPermanentRevision":0
 		}`)
 		if err := json.Unmarshal(payload, &req.Body); err != nil {
 			t.Fatalf("decode request: %v", err)
@@ -394,10 +408,10 @@ func TestLogLevelHandler_Apply(t *testing.T) {
 		req := &ApplyRequest{}
 		req.Body.Global = "error"
 		req.Body.PerModule = map[string]string{}
-		req.Body.ExpectedUpdatedAt = time.Time{}
+		req.Body.ExpectedPermanentRevision = 0
 
 		_, err := h.Apply(context.Background(), req)
-		assertStatus(t, err, 409)
+		assertStatusAndCode(t, err, 409, "logging.config_conflict")
 	})
 
 	tests := []struct {
@@ -417,7 +431,7 @@ func TestLogLevelHandler_Apply(t *testing.T) {
 			req.Body.PerModule = tt.perModule
 
 			_, err := h.Apply(context.Background(), req)
-			assertStatus(t, err, 400)
+			assertStatusAndCode(t, err, 400, "logging.mutation_invalid")
 		})
 	}
 
@@ -429,7 +443,10 @@ func TestLogLevelHandler_Apply(t *testing.T) {
 		req.Body.PerModule = map[string]string{}
 
 		_, err := h.Apply(context.Background(), req)
-		assertStatus(t, err, 500)
+		assertStatusAndCode(t, err, 500, "logging.persistence_failed")
+		if strings.Contains(err.Error(), "mongo unavailable") {
+			t.Errorf("response disclosed repository cause: %v", err)
+		}
 	})
 }
 
@@ -506,7 +523,7 @@ func TestLogLevelHandler_StartDiagnostic(t *testing.T) {
 			req.Body.DurationMinutes = tt.duration
 
 			_, err := h.StartDiagnostic(context.Background(), req)
-			assertStatus(t, err, 400)
+			assertStatusAndCode(t, err, 400, "logging.mutation_invalid")
 		})
 	}
 
@@ -518,7 +535,7 @@ func TestLogLevelHandler_StartDiagnostic(t *testing.T) {
 		req.Body.DurationMinutes = intPointer(15)
 
 		_, err := h.StartDiagnostic(context.Background(), req)
-		assertStatus(t, err, 500)
+		assertStatusAndCode(t, err, 500, "logging.persistence_failed")
 	})
 }
 
@@ -553,7 +570,7 @@ func TestLogLevelHandler_StopDiagnostic(t *testing.T) {
 		t.Run("rejects module "+module, func(t *testing.T) {
 			h, _ := newHandler(t)
 			_, err := h.StopDiagnostic(context.Background(), &StopDiagnosticRequest{Module: module})
-			assertStatus(t, err, 400)
+			assertStatusAndCode(t, err, 400, "logging.mutation_invalid")
 		})
 	}
 
@@ -567,7 +584,7 @@ func TestLogLevelHandler_StopDiagnostic(t *testing.T) {
 		repo.err = errors.New("mongo unavailable")
 
 		_, err := h.StopDiagnostic(context.Background(), &StopDiagnosticRequest{Module: "auth"})
-		assertStatus(t, err, 500)
+		assertStatusAndCode(t, err, 500, "logging.persistence_failed")
 	})
 }
 

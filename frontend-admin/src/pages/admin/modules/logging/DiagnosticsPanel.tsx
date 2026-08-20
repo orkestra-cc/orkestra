@@ -23,6 +23,11 @@ interface DiagnosticsPanelProps {
 
 type DurationSelection = `${DiagnosticDurationMinutes}` | 'none';
 
+const serverOffsetAt = (serverTime: string, localNow: number): number => {
+  const parsed = new Date(serverTime).getTime();
+  return Number.isFinite(parsed) ? parsed - localNow : 0;
+};
+
 const levelVariant: Record<LogLevel, BadgeColor> = {
   debug: 'secondary',
   info: 'primary',
@@ -39,6 +44,9 @@ const DiagnosticsPanel = ({
   const [level, setLevel] = useState<LogLevel>('debug');
   const [duration, setDuration] = useState<DurationSelection>('60');
   const [now, setNow] = useState(Date.now());
+  const [serverOffset, setServerOffset] = useState(() =>
+    serverOffsetAt(snapshot.serverTime, Date.now())
+  );
   const [stoppingModules, setStoppingModules] = useState<Set<string>>(
     new Set()
   );
@@ -47,46 +55,55 @@ const DiagnosticsPanel = ({
   const [startDiagnostic, startStatus] = useStartDiagnosticMutation();
   const [stopDiagnostic] = useStopDiagnosticMutation();
 
+  const serverNow = now + serverOffset;
   const visibleDiagnostics = snapshot.diagnostics.filter(
     diagnostic =>
-      !diagnostic.expiresAt || new Date(diagnostic.expiresAt).getTime() > now
+      !diagnostic.expiresAt ||
+      new Date(diagnostic.expiresAt).getTime() > serverNow
   );
   const hasFutureExpiry = visibleDiagnostics.some(
     diagnostic => diagnostic.expiresAt !== undefined
   );
 
+  useEffect(() => {
+    const localNow = Date.now();
+    setNow(localNow);
+    setServerOffset(serverOffsetAt(snapshot.serverTime, localNow));
+  }, [snapshot.serverTime]);
+
   // Countdown text is the one piece of this panel that changes without a user
-  // event or a server response. A one-second timer is therefore necessary;
-  // expiry authority still remains the server timestamps in the snapshot.
+  // event or a server response. The offset calibrates it to serverTime so a
+  // skewed browser cannot hide a server-active diagnostic.
   useEffect(() => {
     if (!hasFutureExpiry) return;
     const timer = window.setInterval(() => {
-      const currentTime = Date.now();
-      setNow(currentTime);
-      const newlyExpired = snapshot.diagnostics.filter(diagnostic => {
-        if (!diagnostic.expiresAt) return false;
-        const expiryKey = `${diagnostic.module}:${diagnostic.expiresAt}`;
-        return (
-          new Date(diagnostic.expiresAt).getTime() <= currentTime &&
-          !reportedExpiries.current.has(expiryKey)
-        );
-      });
-      if (newlyExpired.length > 0) {
-        newlyExpired.forEach(diagnostic => {
-          reportedExpiries.current.add(
-            `${diagnostic.module}:${diagnostic.expiresAt}`
-          );
-        });
-        void onDiagnosticsExpired().catch(() => undefined);
-      }
+      setNow(Date.now());
     }, 1000);
     return () => window.clearInterval(timer);
-  }, [hasFutureExpiry, onDiagnosticsExpired, snapshot.diagnostics]);
+  }, [hasFutureExpiry]);
+
+  useEffect(() => {
+    const newlyExpired = snapshot.diagnostics.filter(diagnostic => {
+      if (!diagnostic.expiresAt) return false;
+      const expiryKey = `${diagnostic.module}:${diagnostic.expiresAt}`;
+      return (
+        new Date(diagnostic.expiresAt).getTime() <= serverNow &&
+        !reportedExpiries.current.has(expiryKey)
+      );
+    });
+    if (newlyExpired.length === 0) return;
+    newlyExpired.forEach(diagnostic => {
+      reportedExpiries.current.add(
+        `${diagnostic.module}:${diagnostic.expiresAt}`
+      );
+    });
+    void onDiagnosticsExpired().catch(() => undefined);
+  }, [onDiagnosticsExpired, serverNow, snapshot.diagnostics]);
 
   const formatRemaining = (expiresAt: string): string => {
     const seconds = Math.max(
       0,
-      Math.floor((new Date(expiresAt).getTime() - now) / 1000)
+      Math.floor((new Date(expiresAt).getTime() - serverNow) / 1000)
     );
     const hours = Math.floor(seconds / 3600);
     const minutes = Math.floor((seconds % 3600) / 60);

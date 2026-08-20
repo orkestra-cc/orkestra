@@ -5,31 +5,39 @@ sidebar_position: 7
 
 # logging
 
-Runtime **log-level administration** for the `slog` pipeline ([ADR-0005](/adrs/observability-logging-tracing-metrics) Phase F). Operators flip the global threshold and per-module overrides at `/admin/observability/log-levels` and every existing module logger picks up the change **instantly** — no restart, no env-var edit, no image re-pull.
+Runtime **logging operations** for the `slog` pipeline ([ADR-0005](/adrs/observability-logging-tracing-metrics) Phase F). Tier-1 operators use `/admin/modules/logging` to apply permanent thresholds, run expiring per-module diagnostics, and preview a bounded set of recent Loki events. The workspace keeps its active `overview`, `levels`, `diagnostics`, or `logs` section in the URL; `/admin/observability/log-levels` is a redirect retained for old bookmarks.
 
 ## How it works
 
 `logging` is intentionally a **leaf** in the dependency graph (no `Dependencies()`), so the registry inits it **last**. By then every other module has already taken its `deps.Logger` clone — but those clones share a `resolverBox` atomic pointer behind `PerModuleLevelHandler`, so swapping the resolver reaches them all retroactively.
 
-At boot the service is seeded from the env snapshot (`LOG_LEVEL` + `LOG_LEVEL_<MODULE>`), then loads the persisted document (if any) into an `atomic.Pointer` snapshot. `main.go` calls `utils.SwapLevelResolver` after `InitAll` to replace the static boot resolver with this DB-backed live one. Reads (every log call) consult the snapshot lock-free; writes are mutex-serialized and **persist before they publish** — if the Mongo upsert fails, the in-memory view is left untouched.
+At boot the service is seeded from the env snapshot (`LOG_LEVEL` + `LOG_LEVEL_<MODULE>`), then loads the persisted document (if any) into an `atomic.Pointer` snapshot. `main.go` calls `utils.SwapLevelResolver` after `InitAll` to replace the static boot resolver with this DB-backed live one. Reads (every log call) consult the snapshot lock-free.
+
+MongoDB is authoritative for mutations. Each write reads the current single document and replaces it with a compare-and-swap on monotonic `revision`; a CAS miss retries from fresh state a bounded number of times, so independent replicas cannot silently overwrite each other. `permanentRevision` advances only for global or per-module permanent changes. Diagnostic start, stop, and expiry cleanup advance the document revision but not the permanent editor token. Successful writes **persist before they publish**, and a two-second maintenance refresh bounds how long another replica can serve an older effective threshold. Legacy documents without revision fields are treated as revision zero and migrate on their next successful write.
 
 ## Routes
 
-All under `/v1/admin/observability/log-levels`, gated by the `administrator` system role:
+All nine operations are under `/v1/admin/observability/log-levels`, on the Tier-1 operator router and enforced at runtime by `system.modules.admin`:
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/` | Global level + one row per registered module (`AdminView`) |
+| GET | `/` | Global level, registered modules, active diagnostics, revisions, server time, and provider status |
+| POST | `/logs` | Preview at most 100 minimized events using filters in a JSON body |
+| PUT | `/` | Atomically replace the complete permanent configuration using `expectedPermanentRevision` |
 | PUT | `/global` | Set the global threshold |
 | PUT | `/{module}` | Set a per-module override |
 | DELETE | `/{module}` | Remove an override (falls back to global) |
 | POST | `/reset` | Revert global + every override to the boot env defaults |
+| PUT | `/{module}/diagnostic` | Start or replace a 15/60/240-minute or no-expiry temporary threshold |
+| DELETE | `/{module}/diagnostic` | Stop a temporary threshold |
 
 Mutations return the fresh `AdminView`, so the UI re-renders without a second fetch.
 
+The preview never accepts raw LogQL or an upstream URL. Its schema restricts the request to a registered module, a 5/15/60-minute window, an optional log-level enum, at most 200 search characters, and 1–100 results. Filters are sent only after the operator selects **Refresh**, in a POST body rather than the URL. Successful responses use `Cache-Control: private, no-store`, and the admin client immediately evicts unused preview cache entries. Returned records are a minimized projection; structured sensitive fields are masked, but free-text messages can still contain personal data and must be handled accordingly. Full exploration remains in Grafana, whose link carries the applied module, level, and time window.
+
 ## Storage
 
-A single `log_levels` document (`_id="default"`, `global` + `perModule` map) — replaced wholesale on every write so concurrent writers can't produce two rows. No declared indexes; `_id` is the only filter.
+A single `log_levels` document (`_id="default"`) stores `global`, `perModule`, temporary `diagnostics`, `revision`, `permanentRevision`, and update metadata. No declared indexes are needed beyond MongoDB's `_id`; replacements predicate on both `_id` and the expected document revision.
 
 :::note Scope
 This module sets thresholds, not destinations. Live log tailing lives in Grafana, and per-tenant filtering happens at query time in Loki via the `tenant_id` field already stamped on every line — not here. Levels are global-per-module, not per-tenant.

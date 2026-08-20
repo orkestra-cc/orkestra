@@ -20,7 +20,9 @@ import (
 type fakeRepo struct {
 	mu      sync.Mutex
 	doc     *models.LogLevelDoc
-	err     error // injectable for failure-path tests
+	err     error // injectable CAS failure for failure-path tests
+	getErr  error
+	misses  int // injectable CAS misses before success
 	upserts int
 	calls   int
 }
@@ -28,8 +30,8 @@ type fakeRepo struct {
 func (r *fakeRepo) Get(_ context.Context) (*models.LogLevelDoc, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.err != nil {
-		return nil, r.err
+	if r.getErr != nil {
+		return nil, r.getErr
 	}
 	if r.doc == nil {
 		return nil, repository.ErrNotFound
@@ -37,16 +39,27 @@ func (r *fakeRepo) Get(_ context.Context) (*models.LogLevelDoc, error) {
 	return cloneLogLevelDoc(r.doc), nil
 }
 
-func (r *fakeRepo) Upsert(_ context.Context, doc *models.LogLevelDoc) error {
+func (r *fakeRepo) CompareAndSwap(_ context.Context, expectedRevision int64, doc *models.LogLevelDoc) (bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.calls++
 	if r.err != nil {
-		return r.err
+		return false, r.err
+	}
+	if r.misses > 0 {
+		r.misses--
+		return false, nil
+	}
+	currentRevision := int64(0)
+	if r.doc != nil {
+		currentRevision = r.doc.Revision
+	}
+	if currentRevision != expectedRevision {
+		return false, nil
 	}
 	r.doc = cloneLogLevelDoc(doc)
 	r.upserts++
-	return nil
+	return true, nil
 }
 
 func cloneLogLevelDoc(doc *models.LogLevelDoc) *models.LogLevelDoc {
@@ -257,7 +270,7 @@ func TestLogLevelService_ApplyPermanent(t *testing.T) {
 
 	t.Run("replaces the complete permanent configuration with one write and preserves diagnostics", func(t *testing.T) {
 		svc, repo, now := setup(t)
-		expectedUpdatedAt := svc.View().UpdatedAt
+		expectedPermanentRevision := svc.View().PermanentRevision
 		*now = baseTime.Add(time.Minute)
 		beforeCalls := repo.calls
 
@@ -267,7 +280,7 @@ func TestLogLevelService_ApplyPermanent(t *testing.T) {
 				"auth":    models.LogLevelWarn,
 				"billing": models.LogLevelDebug,
 			},
-			ExpectedUpdatedAt: expectedUpdatedAt,
+			ExpectedPermanentRevision: expectedPermanentRevision,
 		}, "config-operator")
 		if err != nil {
 			t.Fatalf("ApplyPermanent: %v", err)
@@ -313,60 +326,60 @@ func TestLogLevelService_ApplyPermanent(t *testing.T) {
 
 	tests := []struct {
 		name      string
-		input     func(time.Time) models.PermanentConfigInput
+		input     func(int64) models.PermanentConfigInput
 		wantError error
 		persist   bool
 	}{
 		{
 			name: "rejects an unknown module before persistence",
-			input: func(updatedAt time.Time) models.PermanentConfigInput {
+			input: func(permanentRevision int64) models.PermanentConfigInput {
 				return models.PermanentConfigInput{
-					Global:            models.LogLevelInfo,
-					PerModule:         map[string]models.LogLevel{"unknown": models.LogLevelDebug},
-					ExpectedUpdatedAt: updatedAt,
+					Global:                    models.LogLevelInfo,
+					PerModule:                 map[string]models.LogLevel{"unknown": models.LogLevelDebug},
+					ExpectedPermanentRevision: permanentRevision,
 				}
 			},
 		},
 		{
 			name: "rejects an invalid global level before persistence",
-			input: func(updatedAt time.Time) models.PermanentConfigInput {
+			input: func(permanentRevision int64) models.PermanentConfigInput {
 				return models.PermanentConfigInput{
-					Global:            models.LogLevel("trace"),
-					PerModule:         map[string]models.LogLevel{"auth": models.LogLevelInfo},
-					ExpectedUpdatedAt: updatedAt,
+					Global:                    models.LogLevel("trace"),
+					PerModule:                 map[string]models.LogLevel{"auth": models.LogLevelInfo},
+					ExpectedPermanentRevision: permanentRevision,
 				}
 			},
 			wantError: models.ErrInvalidLogLevel,
 		},
 		{
 			name: "rejects an invalid module level before persistence",
-			input: func(updatedAt time.Time) models.PermanentConfigInput {
+			input: func(permanentRevision int64) models.PermanentConfigInput {
 				return models.PermanentConfigInput{
-					Global:            models.LogLevelInfo,
-					PerModule:         map[string]models.LogLevel{"auth": models.LogLevel("verbose")},
-					ExpectedUpdatedAt: updatedAt,
+					Global:                    models.LogLevelInfo,
+					PerModule:                 map[string]models.LogLevel{"auth": models.LogLevel("verbose")},
+					ExpectedPermanentRevision: permanentRevision,
 				}
 			},
 			wantError: models.ErrInvalidLogLevel,
 		},
 		{
-			name: "rejects a stale timestamp before persistence",
-			input: func(updatedAt time.Time) models.PermanentConfigInput {
+			name: "rejects a stale permanent revision before persistence",
+			input: func(permanentRevision int64) models.PermanentConfigInput {
 				return models.PermanentConfigInput{
-					Global:            models.LogLevelError,
-					PerModule:         map[string]models.LogLevel{"auth": models.LogLevelInfo},
-					ExpectedUpdatedAt: updatedAt.Add(-time.Nanosecond),
+					Global:                    models.LogLevelError,
+					PerModule:                 map[string]models.LogLevel{"auth": models.LogLevelInfo},
+					ExpectedPermanentRevision: permanentRevision - 1,
 				}
 			},
 			wantError: ErrConfigConflict,
 		},
 		{
 			name: "keeps the published snapshot when persistence fails",
-			input: func(updatedAt time.Time) models.PermanentConfigInput {
+			input: func(permanentRevision int64) models.PermanentConfigInput {
 				return models.PermanentConfigInput{
-					Global:            models.LogLevelError,
-					PerModule:         map[string]models.LogLevel{"auth": models.LogLevelInfo},
-					ExpectedUpdatedAt: updatedAt,
+					Global:                    models.LogLevelError,
+					PerModule:                 map[string]models.LogLevel{"auth": models.LogLevelInfo},
+					ExpectedPermanentRevision: permanentRevision,
 				}
 			},
 			persist: true,
@@ -383,7 +396,7 @@ func TestLogLevelService_ApplyPermanent(t *testing.T) {
 				repo.err = errors.New("boom")
 			}
 
-			err := svc.ApplyPermanent(ctx, tt.input(before.UpdatedAt), "config-operator")
+			err := svc.ApplyPermanent(ctx, tt.input(before.PermanentRevision), "config-operator")
 			if err == nil {
 				t.Fatal("ApplyPermanent succeeded, want error")
 			}
@@ -397,7 +410,9 @@ func TestLogLevelService_ApplyPermanent(t *testing.T) {
 			if repo.calls != wantCalls {
 				t.Errorf("repository calls = %d, want %d", repo.calls, wantCalls)
 			}
-			if after := svc.View(); !reflect.DeepEqual(after, before) {
+			after := svc.View()
+			after.ServerTime = before.ServerTime
+			if !reflect.DeepEqual(after, before) {
 				t.Errorf("view changed after failure:\n before: %+v\n  after: %+v", before, after)
 			}
 		})
@@ -619,6 +634,146 @@ func TestLogLevelService_CleanupExpired_PersistFailurePreservesSnapshot(t *testi
 	}
 	if _, ok := svc.current.Load().diagnostics["auth"]; !ok {
 		t.Error("expired diagnostic was unpublished despite persistence failure")
+	}
+}
+
+func TestLogLevelService_MultiReplicaMutationsPreserveAuthoritativeState(t *testing.T) {
+	ctx := context.Background()
+	repo := &fakeRepo{}
+	logger := slog.New(slog.NewTextHandler(testWriter{t: t}, nil))
+	newReplica := func() *LogLevelService {
+		return NewLogLevelService(repo, logger, slog.LevelInfo, nil, []string{"auth", "billing"})
+	}
+	replicaA := newReplica()
+	replicaB := newReplica()
+
+	if err := replicaA.SetGlobal(ctx, models.LogLevelWarn, "operator-a"); err != nil {
+		t.Fatalf("replica A SetGlobal: %v", err)
+	}
+	if err := replicaB.SetModule(ctx, "auth", models.LogLevelDebug, "operator-b"); err != nil {
+		t.Fatalf("replica B SetModule: %v", err)
+	}
+
+	persisted, err := repo.Get(ctx)
+	if err != nil {
+		t.Fatalf("load authoritative document: %v", err)
+	}
+	if persisted.Global != models.LogLevelWarn {
+		t.Errorf("replica B overwrote replica A global level: got %q, want warn", persisted.Global)
+	}
+	if persisted.PerModule["auth"] != models.LogLevelDebug {
+		t.Errorf("authoritative auth override = %q, want debug", persisted.PerModule["auth"])
+	}
+}
+
+func TestLogLevelService_DiagnosticWriteDoesNotConflictPermanentDraft(t *testing.T) {
+	ctx := context.Background()
+	svc, _ := newTestSvc(t)
+	permanentSnapshot := svc.View()
+
+	if err := svc.StartDiagnostic(ctx, "auth", models.LogLevelDebug, nil, "diagnostic-operator"); err != nil {
+		t.Fatalf("StartDiagnostic: %v", err)
+	}
+	err := svc.ApplyPermanent(ctx, models.PermanentConfigInput{
+		Global:                    models.LogLevelWarn,
+		PerModule:                 map[string]models.LogLevel{"auth": models.LogLevelError},
+		ExpectedPermanentRevision: permanentSnapshot.PermanentRevision,
+	}, "config-operator")
+	if err != nil {
+		t.Fatalf("diagnostic-only write caused permanent conflict: %v", err)
+	}
+	if got := svc.Global(); got != slog.LevelWarn {
+		t.Errorf("global = %v, want warn", got)
+	}
+	if got := len(svc.View().Diagnostics); got != 1 {
+		t.Errorf("diagnostics = %d, want preserved diagnostic", got)
+	}
+}
+
+func TestLogLevelService_RevisionsSeparatePermanentAndDiagnosticWrites(t *testing.T) {
+	ctx := context.Background()
+	svc, repo := newTestSvc(t)
+	now := time.Date(2026, 8, 20, 12, 0, 0, 0, time.UTC)
+	svc.now = func() time.Time { return now }
+
+	if err := svc.SetGlobal(ctx, models.LogLevelWarn, "config"); err != nil {
+		t.Fatalf("SetGlobal: %v", err)
+	}
+	if got := svc.View(); got.Revision != 1 || got.PermanentRevision != 1 {
+		t.Fatalf("after permanent write revisions = %d/%d, want 1/1", got.Revision, got.PermanentRevision)
+	}
+	expiresAt := now.Add(time.Minute)
+	if err := svc.StartDiagnostic(ctx, "auth", models.LogLevelDebug, &expiresAt, "diagnostic"); err != nil {
+		t.Fatalf("StartDiagnostic: %v", err)
+	}
+	if got := svc.View(); got.Revision != 2 || got.PermanentRevision != 1 {
+		t.Fatalf("after diagnostic write revisions = %d/%d, want 2/1", got.Revision, got.PermanentRevision)
+	}
+	now = now.Add(2 * time.Minute)
+	if err := svc.CleanupExpired(ctx); err != nil {
+		t.Fatalf("CleanupExpired: %v", err)
+	}
+	if repo.doc.Revision != 3 || repo.doc.PermanentRevision != 1 {
+		t.Fatalf("after cleanup revisions = %d/%d, want 3/1", repo.doc.Revision, repo.doc.PermanentRevision)
+	}
+	if err := svc.ApplyPermanent(ctx, models.PermanentConfigInput{
+		Global:                    models.LogLevelError,
+		PerModule:                 map[string]models.LogLevel{},
+		ExpectedPermanentRevision: 1,
+	}, "config"); err != nil {
+		t.Fatalf("ApplyPermanent: %v", err)
+	}
+	if got := svc.View(); got.Revision != 4 || got.PermanentRevision != 2 {
+		t.Fatalf("after apply revisions = %d/%d, want 4/2", got.Revision, got.PermanentRevision)
+	}
+}
+
+func TestLogLevelService_RetriesCASAndRejectsPermanentRace(t *testing.T) {
+	ctx := context.Background()
+	svc, repo := newTestSvc(t)
+	repo.misses = 1
+	if err := svc.SetGlobal(ctx, models.LogLevelWarn, "operator"); err != nil {
+		t.Fatalf("SetGlobal after one CAS miss: %v", err)
+	}
+	if repo.calls != 2 || svc.Global() != slog.LevelWarn {
+		t.Fatalf("CAS retry calls/global = %d/%v, want 2/WARN", repo.calls, svc.Global())
+	}
+
+	staleRevision := svc.View().PermanentRevision
+	other := NewLogLevelService(repo, svc.logger, slog.LevelInfo, nil, []string{"rag", "billing", "auth"})
+	if err := other.SetGlobal(ctx, models.LogLevelError, "other"); err != nil {
+		t.Fatalf("other SetGlobal: %v", err)
+	}
+	err := svc.ApplyPermanent(ctx, models.PermanentConfigInput{
+		Global:                    models.LogLevelDebug,
+		PerModule:                 map[string]models.LogLevel{},
+		ExpectedPermanentRevision: staleRevision,
+	}, "stale")
+	if !errors.Is(err, ErrConfigConflict) {
+		t.Fatalf("stale ApplyPermanent error = %v, want ErrConfigConflict", err)
+	}
+}
+
+func TestLogLevelService_LegacyDocumentMigratesOnFirstCAS(t *testing.T) {
+	ctx := context.Background()
+	svc, repo := newTestSvc(t)
+	repo.doc = &models.LogLevelDoc{
+		ConfigKey: models.DefaultConfigKey,
+		Global:    models.LogLevelWarn,
+		PerModule: map[string]models.LogLevel{"auth": models.LogLevelError},
+		// revision fields deliberately absent/zero.
+	}
+	if err := svc.Load(ctx); err != nil {
+		t.Fatalf("Load legacy document: %v", err)
+	}
+	if err := svc.StartDiagnostic(ctx, "auth", models.LogLevelDebug, nil, "operator"); err != nil {
+		t.Fatalf("migrate legacy document: %v", err)
+	}
+	if repo.doc.Revision != 1 || repo.doc.PermanentRevision != 0 {
+		t.Fatalf("migrated revisions = %d/%d, want 1/0", repo.doc.Revision, repo.doc.PermanentRevision)
+	}
+	if repo.doc.Global != models.LogLevelWarn || repo.doc.PerModule["auth"] != models.LogLevelError {
+		t.Fatalf("legacy permanent state changed during migration: %+v", repo.doc)
 	}
 }
 

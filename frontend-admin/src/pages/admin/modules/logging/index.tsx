@@ -63,8 +63,11 @@ export const LoggingModulePage = () => {
     if (!snapshot) return;
     setPermanentEditor(current => {
       if (!current) return editorFromSnapshot(snapshot);
+      if (current.conflict) return current;
       if (countChanges(current.baseline, current.draft) > 0) return current;
-      if (current.expectedUpdatedAt === snapshot.updatedAt) return current;
+      if (current.expectedPermanentRevision === snapshot.permanentRevision) {
+        return current;
+      }
       return editorFromSnapshot(snapshot);
     });
   }, [snapshot]);
