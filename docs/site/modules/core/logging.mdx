@@ -33,7 +33,7 @@ All nine operations are under `/v1/admin/observability/log-levels`, on the Tier-
 
 Mutations return the fresh `AdminView`, so the UI re-renders without a second fetch.
 
-The preview never accepts raw LogQL or an upstream URL. Its schema restricts the request to a registered module, a 5/15/60-minute window, an optional log-level enum, at most 200 search characters, and 1–100 results. Filters are sent only after the operator selects **Refresh**, in a POST body rather than the URL. Successful responses use `Cache-Control: private, no-store`, and the admin client immediately evicts unused preview cache entries. Returned records are a minimized projection; structured sensitive fields are masked, but free-text messages can still contain personal data and must be handled accordingly. Full exploration remains in Grafana, whose link carries the applied module, level, and time window.
+The preview never accepts raw LogQL or an upstream URL. Its schema restricts the request to a registered module, a 5/15/60-minute window, an optional log-level enum, at most 200 search characters, and 1–100 results. The page performs one initial query with its default filters; subsequent draft changes are sent only after the operator selects **Refresh**, in a POST body rather than the URL. Successful responses use `Cache-Control: private, no-store`, and the admin client immediately evicts unused preview cache entries. Returned records are a minimized projection; structured sensitive fields are masked, but free-text messages can still contain personal data and must be handled accordingly. Full exploration remains in Grafana, whose link carries the applied module, level, and time window.
 
 ## Storage
 

@@ -18,6 +18,9 @@
 #   docker compose -f docker-compose.infra.yml -f docker-compose.dev.yml \
 #     -f docker-compose.observability.yml --env-file .env \
 #     up -d otel-collector tempo prometheus loki promtail grafana
+#   docker compose -f docker-compose.infra.yml -f docker-compose.dev.yml \
+#     -f docker-compose.observability.yml --env-file .env \
+#     up -d --no-deps backend
 #
 # Then set OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318 on the
 # backend (docker-compose.dev.yml honors it via the .env file) and
