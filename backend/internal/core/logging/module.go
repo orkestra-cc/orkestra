@@ -7,12 +7,15 @@
 //   - loads the persisted snapshot at boot (falls back to env)
 //   - registers the service under ServiceLogLevelResolver so
 //     main.go can hot-swap the slog handler's resolver
-//   - mounts five admin endpoints under /v1/admin/observability/
+//   - mounts permanent and diagnostic admin endpoints under
+//     /v1/admin/observability/
 package logging
 
 import (
 	"context"
 	"log/slog"
+	"sync"
+	"time"
 
 	"github.com/danielgtaylor/huma/v2/adapters/humachi"
 	"github.com/go-chi/chi/v5"
@@ -28,11 +31,18 @@ import (
 // for Collections, NavItems, Dependencies, and RegisterRoutes.
 type LoggingModule struct {
 	module.BaseModule
-	handler *handlers.LogLevelHandler
-	svc     *services.LogLevelService
+	handler         *handlers.LogLevelHandler
+	svc             *services.LogLevelService
+	logger          *slog.Logger
+	cleanupInterval time.Duration
+	lifecycleMu     sync.Mutex
+	cleanupCancel   context.CancelFunc
+	cleanupDone     chan struct{}
 }
 
-func NewModule() *LoggingModule { return &LoggingModule{} }
+func NewModule() *LoggingModule {
+	return &LoggingModule{cleanupInterval: time.Minute}
+}
 
 func (m *LoggingModule) Name() string        { return "logging" }
 func (m *LoggingModule) DisplayName() string { return "Logging" }
@@ -93,6 +103,7 @@ func (m *LoggingModule) Init(deps *module.Dependencies) error {
 	}
 
 	m.svc = services.NewLogLevelService(repo, deps.Logger, envGlobal, envPerMod, moduleNames)
+	m.logger = deps.Logger
 	if err := m.svc.Load(context.Background()); err != nil {
 		deps.Logger.Warn("logging: load persisted levels failed; using env defaults",
 			slog.String("error", err.Error()))
@@ -101,6 +112,82 @@ func (m *LoggingModule) Init(deps *module.Dependencies) error {
 	deps.Services.Register(module.ServiceLogLevelResolver, m.svc)
 	m.handler = handlers.NewLogLevelHandler(m.svc)
 	return nil
+}
+
+// Start launches best-effort storage cleanup for expired diagnostics. Resolver
+// correctness remains in LogLevelService.LevelFor; this loop only removes
+// entries that no longer need to remain persisted.
+func (m *LoggingModule) Start(ctx context.Context) error {
+	if m.svc == nil {
+		return nil
+	}
+
+	m.lifecycleMu.Lock()
+	defer m.lifecycleMu.Unlock()
+	if m.cleanupCancel != nil {
+		select {
+		case <-m.cleanupDone:
+			m.cleanupCancel = nil
+			m.cleanupDone = nil
+		default:
+			return nil
+		}
+	}
+
+	interval := m.cleanupInterval
+	if interval <= 0 {
+		interval = time.Minute
+	}
+	cleanupCtx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	m.cleanupCancel = cancel
+	m.cleanupDone = done
+	go m.cleanupLoop(cleanupCtx, done, interval)
+	return nil
+}
+
+// Stop cancels the cleanup loop and waits for it to exit. It does not acquire
+// the LogLevelService write mutex; an in-flight cleanup owns and releases that
+// mutex itself before the loop closes done.
+func (m *LoggingModule) Stop(ctx context.Context) error {
+	m.lifecycleMu.Lock()
+	cancel := m.cleanupCancel
+	done := m.cleanupDone
+	m.lifecycleMu.Unlock()
+	if cancel == nil {
+		return nil
+	}
+
+	cancel()
+	select {
+	case <-done:
+		m.lifecycleMu.Lock()
+		if m.cleanupDone == done {
+			m.cleanupCancel = nil
+			m.cleanupDone = nil
+		}
+		m.lifecycleMu.Unlock()
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (m *LoggingModule) cleanupLoop(ctx context.Context, done chan<- struct{}, interval time.Duration) {
+	defer close(done)
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if err := m.svc.CleanupExpired(ctx); err != nil && m.logger != nil {
+				m.logger.ErrorContext(ctx, "logging: cleanup expired diagnostics failed",
+					slog.String("error", err.Error()))
+			}
+		}
+	}
 }
 
 // RegisterRoutes mounts the admin endpoints on the operator-protected router

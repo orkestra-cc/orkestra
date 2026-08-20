@@ -7,15 +7,13 @@ import (
 	"github.com/orkestra/backend/internal/core/logging/handlers"
 )
 
-// RegisterRoutes mounts the admin observability endpoints. All four
-// are administrator-gated at the API level via the bearerAuth
-// security scheme + the operator-protected router (middleware adds
-// RequireRole(administrator) for any operation tagged with the
-// `administrator` scope).
+// RegisterRoutes mounts the admin observability endpoints. LoggingModule calls
+// it only inside the Tier-1 operator group protected by
+// RequireSystemPermission("system.modules.admin"). The bearerAuth
+// administrator scope below documents that boundary in OpenAPI.
 //
-// ADR-0005 Phase F — the surface is intentionally narrow: read all,
-// set global, set per-module, unset per-module, reset to env. Bulk
-// edits / time-bounded overrides / scheduled reverts are deferred.
+// ADR-0005 Phase F — existing single-setting operations remain available
+// while the workspace uses atomic batch updates and diagnostic overrides.
 func RegisterRoutes(api huma.API, h *handlers.LogLevelHandler) {
 	huma.Register(api, huma.Operation{
 		OperationID: "admin-observability-loglevels-get",
@@ -26,6 +24,15 @@ func RegisterRoutes(api huma.API, h *handlers.LogLevelHandler) {
 		Tags:        []string{"Observability"},
 		Security:    []map[string][]string{{"bearerAuth": {"administrator"}}},
 	}, h.Get)
+
+	huma.Register(api, huma.Operation{
+		OperationID: "admin-observability-loglevels-apply",
+		Method:      http.MethodPut,
+		Path:        "/v1/admin/observability/log-levels",
+		Summary:     "Apply the complete permanent log-level configuration",
+		Tags:        []string{"Observability"},
+		Security:    []map[string][]string{{"bearerAuth": {"administrator"}}},
+	}, h.Apply)
 
 	huma.Register(api, huma.Operation{
 		OperationID: "admin-observability-loglevels-set-global",
@@ -62,4 +69,22 @@ func RegisterRoutes(api huma.API, h *handlers.LogLevelHandler) {
 		Tags:        []string{"Observability"},
 		Security:    []map[string][]string{{"bearerAuth": {"administrator"}}},
 	}, h.Reset)
+
+	huma.Register(api, huma.Operation{
+		OperationID: "admin-observability-loglevels-start-diagnostic",
+		Method:      http.MethodPut,
+		Path:        "/v1/admin/observability/log-levels/{module}/diagnostic",
+		Summary:     "Start or replace a module diagnostic override",
+		Tags:        []string{"Observability"},
+		Security:    []map[string][]string{{"bearerAuth": {"administrator"}}},
+	}, h.StartDiagnostic)
+
+	huma.Register(api, huma.Operation{
+		OperationID: "admin-observability-loglevels-stop-diagnostic",
+		Method:      http.MethodDelete,
+		Path:        "/v1/admin/observability/log-levels/{module}/diagnostic",
+		Summary:     "Stop a module diagnostic override",
+		Tags:        []string{"Observability"},
+		Security:    []map[string][]string{{"bearerAuth": {"administrator"}}},
+	}, h.StopDiagnostic)
 }

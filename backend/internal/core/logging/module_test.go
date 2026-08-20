@@ -1,0 +1,235 @@
+package logging
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"log/slog"
+	"net/http"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/danielgtaylor/huma/v2"
+	"github.com/danielgtaylor/huma/v2/adapters/humachi"
+	"github.com/go-chi/chi/v5"
+	"github.com/orkestra/backend/internal/core/logging/handlers"
+	"github.com/orkestra/backend/internal/core/logging/models"
+	"github.com/orkestra/backend/internal/core/logging/repository"
+	"github.com/orkestra/backend/internal/core/logging/services"
+)
+
+func TestRegisterRoutes_ExposesBatchAndDiagnosticOperations(t *testing.T) {
+	router := chi.NewRouter()
+	api := humachi.New(router, huma.DefaultConfig("test", "1.0.0"))
+	RegisterRoutes(api, (*handlers.LogLevelHandler)(nil))
+
+	tests := []struct {
+		method string
+		path   string
+	}{
+		{method: http.MethodPut, path: "/v1/admin/observability/log-levels"},
+		{method: http.MethodPut, path: "/v1/admin/observability/log-levels/{module}/diagnostic"},
+		{method: http.MethodDelete, path: "/v1/admin/observability/log-levels/{module}/diagnostic"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.method+" "+tt.path, func(t *testing.T) {
+			path, ok := api.OpenAPI().Paths[tt.path]
+			if !ok {
+				t.Fatalf("path %q is not registered", tt.path)
+			}
+			var operation *huma.Operation
+			switch tt.method {
+			case http.MethodPut:
+				operation = path.Put
+			case http.MethodDelete:
+				operation = path.Delete
+			}
+			if operation == nil {
+				t.Fatalf("%s %s is not registered", tt.method, tt.path)
+			}
+			if len(operation.Security) != 1 || len(operation.Security[0]["bearerAuth"]) != 1 || operation.Security[0]["bearerAuth"][0] != "administrator" {
+				t.Errorf("security = %+v, want bearerAuth administrator", operation.Security)
+			}
+		})
+	}
+}
+
+func TestLoggingModule_CleanupLifecycle(t *testing.T) {
+	repo := newLifecycleRepo()
+	logger := slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))
+	svc := services.NewLogLevelService(repo, logger, slog.LevelInfo, nil, []string{"auth"})
+	expiredAt := time.Now().Add(-time.Minute)
+	if err := svc.StartDiagnostic(context.Background(), "auth", models.LogLevelDebug, &expiredAt, "operator"); err != nil {
+		t.Fatalf("seed expired diagnostic: %v", err)
+	}
+	repo.waitForUpsert(t)
+
+	m := NewModule()
+	m.svc = svc
+	m.logger = logger
+	m.cleanupInterval = 5 * time.Millisecond
+
+	if err := m.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	firstDone := m.cleanupDone
+	if firstDone == nil {
+		t.Fatal("Start did not create a cleanup loop")
+	}
+	if err := m.Start(context.Background()); err != nil {
+		t.Fatalf("repeated Start: %v", err)
+	}
+	if m.cleanupDone != firstDone {
+		t.Error("repeated Start replaced the running cleanup loop")
+	}
+
+	cleaned := repo.waitForUpsert(t)
+	if _, ok := cleaned.Diagnostics["auth"]; ok {
+		t.Errorf("cleanup persisted expired diagnostic: %+v", cleaned.Diagnostics["auth"])
+	}
+
+	stopCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := m.Stop(stopCtx); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+	select {
+	case <-firstDone:
+	default:
+		t.Error("Stop returned before the cleanup loop exited")
+	}
+	if err := m.Stop(stopCtx); err != nil {
+		t.Fatalf("repeated Stop: %v", err)
+	}
+
+	if err := m.Start(context.Background()); err != nil {
+		t.Fatalf("restart: %v", err)
+	}
+	if m.cleanupDone == nil || m.cleanupDone == firstDone {
+		t.Error("restart did not create a fresh cleanup loop")
+	}
+	if err := m.Stop(stopCtx); err != nil {
+		t.Fatalf("stop after restart: %v", err)
+	}
+}
+
+func TestLoggingModule_CleanupLifecycleLogsOnlyCleanupError(t *testing.T) {
+	repo := newLifecycleRepo()
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&logs, nil))
+	svc := services.NewLogLevelService(repo, logger, slog.LevelInfo, nil, []string{"auth"})
+	expiredAt := time.Now().Add(-time.Minute)
+	if err := svc.StartDiagnostic(context.Background(), "auth", models.LogLevelDebug, &expiredAt, "operator"); err != nil {
+		t.Fatalf("seed expired diagnostic: %v", err)
+	}
+	repo.waitForUpsert(t)
+	repo.waitForAttempt(t)
+	repo.setError(errors.New("persistence down"))
+
+	m := NewModule()
+	m.svc = svc
+	m.logger = logger
+	m.cleanupInterval = 5 * time.Millisecond
+	if err := m.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	repo.waitForAttempt(t)
+	stopCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := m.Stop(stopCtx); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+
+	got := logs.String()
+	if !bytes.Contains([]byte(got), []byte("cleanup expired diagnostics failed")) || !bytes.Contains([]byte(got), []byte("persistence down")) {
+		t.Errorf("cleanup log = %q, want cleanup context and persistence error", got)
+	}
+	for _, forbidden := range []string{"module=auth", "level=debug", "operator"} {
+		if bytes.Contains([]byte(got), []byte(forbidden)) {
+			t.Errorf("cleanup log contains diagnostic content %q: %s", forbidden, got)
+		}
+	}
+}
+
+type lifecycleRepo struct {
+	mu       sync.Mutex
+	doc      *models.LogLevelDoc
+	err      error
+	upserts  chan *models.LogLevelDoc
+	attempts chan struct{}
+}
+
+func newLifecycleRepo() *lifecycleRepo {
+	return &lifecycleRepo{
+		upserts:  make(chan *models.LogLevelDoc, 8),
+		attempts: make(chan struct{}, 8),
+	}
+}
+
+func (r *lifecycleRepo) Get(context.Context) (*models.LogLevelDoc, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.err != nil {
+		return nil, r.err
+	}
+	if r.doc == nil {
+		return nil, repository.ErrNotFound
+	}
+	return cloneLifecycleDoc(r.doc), nil
+}
+
+func (r *lifecycleRepo) Upsert(_ context.Context, doc *models.LogLevelDoc) error {
+	r.attempts <- struct{}{}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.err != nil {
+		return r.err
+	}
+	r.doc = cloneLifecycleDoc(doc)
+	r.upserts <- cloneLifecycleDoc(doc)
+	return nil
+}
+
+func (r *lifecycleRepo) setError(err error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.err = err
+}
+
+func (r *lifecycleRepo) waitForUpsert(t *testing.T) *models.LogLevelDoc {
+	t.Helper()
+	select {
+	case doc := <-r.upserts:
+		return doc
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for repository upsert")
+		return nil
+	}
+}
+
+func (r *lifecycleRepo) waitForAttempt(t *testing.T) {
+	t.Helper()
+	select {
+	case <-r.attempts:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for repository attempt")
+	}
+}
+
+func cloneLifecycleDoc(doc *models.LogLevelDoc) *models.LogLevelDoc {
+	clone := *doc
+	clone.PerModule = make(map[string]models.LogLevel, len(doc.PerModule))
+	for module, level := range doc.PerModule {
+		clone.PerModule[module] = level
+	}
+	clone.Diagnostics = make(map[string]models.DiagnosticOverride, len(doc.Diagnostics))
+	for module, diagnostic := range doc.Diagnostics {
+		if diagnostic.ExpiresAt != nil {
+			expiresAt := *diagnostic.ExpiresAt
+			diagnostic.ExpiresAt = &expiresAt
+		}
+		clone.Diagnostics[module] = diagnostic
+	}
+	return &clone
+}

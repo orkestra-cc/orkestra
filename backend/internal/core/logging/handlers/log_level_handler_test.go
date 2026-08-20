@@ -2,10 +2,12 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/danielgtaylor/huma/v2"
 
@@ -251,4 +253,254 @@ func TestActor_FallsBackToUnknown(t *testing.T) {
 	if got := actor(ctx); got != "u-42" {
 		t.Errorf("actor with identity ctx = %q, want u-42", got)
 	}
+}
+
+func TestLogLevelHandler_Apply(t *testing.T) {
+	t.Run("decodes the complete config, captures the actor, and returns the fresh view", func(t *testing.T) {
+		h, repo := newHandler(t)
+		req := &ApplyRequest{}
+		payload := []byte(`{
+			"global":"warn",
+			"perModule":{"auth":"debug"},
+			"expectedUpdatedAt":"0001-01-01T00:00:00Z"
+		}`)
+		if err := json.Unmarshal(payload, &req.Body); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		ctx := testkit.NewIdentity("batch-operator", "operator@example.com", "administrator").
+			ContextFor(context.Background(), "")
+
+		resp, err := h.Apply(ctx, req)
+		if err != nil {
+			t.Fatalf("Apply: %v", err)
+		}
+
+		if resp.Body.Global != models.LogLevelWarn {
+			t.Errorf("response global = %q, want warn", resp.Body.Global)
+		}
+		if resp.Body.UpdatedBy != "batch-operator" {
+			t.Errorf("response actor = %q, want batch-operator", resp.Body.UpdatedBy)
+		}
+		if repo.doc == nil || repo.doc.UpdatedBy != "batch-operator" {
+			t.Fatalf("persisted document = %+v, want batch-operator actor", repo.doc)
+		}
+		if got := repo.doc.PerModule["auth"]; got != models.LogLevelDebug {
+			t.Errorf("persisted auth level = %q, want debug", got)
+		}
+		if resp.Body.UpdatedAt.IsZero() || !resp.Body.UpdatedAt.Equal(repo.doc.UpdatedAt) {
+			t.Errorf("response updatedAt = %v, persisted = %v", resp.Body.UpdatedAt, repo.doc.UpdatedAt)
+		}
+	})
+
+	t.Run("maps a stale snapshot to conflict", func(t *testing.T) {
+		h, _ := newHandler(t)
+		seed := &SetGlobalRequest{}
+		seed.Body.Level = "warn"
+		if _, err := h.SetGlobal(context.Background(), seed); err != nil {
+			t.Fatalf("seed global: %v", err)
+		}
+
+		req := &ApplyRequest{}
+		req.Body.Global = "error"
+		req.Body.PerModule = map[string]string{}
+		req.Body.ExpectedUpdatedAt = time.Time{}
+
+		_, err := h.Apply(context.Background(), req)
+		assertStatus(t, err, 409)
+	})
+
+	tests := []struct {
+		name      string
+		global    string
+		perModule map[string]string
+	}{
+		{name: "invalid global level", global: "trace", perModule: map[string]string{}},
+		{name: "invalid module level", global: "info", perModule: map[string]string{"auth": "trace"}},
+		{name: "unknown module", global: "info", perModule: map[string]string{"unknown": "debug"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h, _ := newHandler(t)
+			req := &ApplyRequest{}
+			req.Body.Global = tt.global
+			req.Body.PerModule = tt.perModule
+
+			_, err := h.Apply(context.Background(), req)
+			assertStatus(t, err, 400)
+		})
+	}
+
+	t.Run("maps persistence failure to internal server error", func(t *testing.T) {
+		h, repo := newHandler(t)
+		repo.err = errors.New("mongo unavailable")
+		req := &ApplyRequest{}
+		req.Body.Global = "info"
+		req.Body.PerModule = map[string]string{}
+
+		_, err := h.Apply(context.Background(), req)
+		assertStatus(t, err, 500)
+	})
+}
+
+func TestLogLevelHandler_StartDiagnostic(t *testing.T) {
+	allowedDurations := []struct {
+		name            string
+		durationMinutes *int
+		wantDuration    time.Duration
+	}{
+		{name: "15 minutes", durationMinutes: intPointer(15), wantDuration: 15 * time.Minute},
+		{name: "60 minutes", durationMinutes: intPointer(60), wantDuration: time.Hour},
+		{name: "240 minutes", durationMinutes: intPointer(240), wantDuration: 4 * time.Hour},
+		{name: "no expiry", durationMinutes: nil},
+	}
+	for _, tt := range allowedDurations {
+		t.Run(tt.name, func(t *testing.T) {
+			h, repo := newHandler(t)
+			req := &StartDiagnosticRequest{Module: "auth"}
+			payload := []byte(`{"level":"debug"}`)
+			if tt.durationMinutes != nil {
+				payload = []byte(`{"level":"debug","durationMinutes":` +
+					strings.TrimSpace(string(mustJSON(t, *tt.durationMinutes))) + `}`)
+			}
+			if err := json.Unmarshal(payload, &req.Body); err != nil {
+				t.Fatalf("decode request: %v", err)
+			}
+			ctx := testkit.NewIdentity("diagnostic-operator", "operator@example.com", "administrator").
+				ContextFor(context.Background(), "")
+			before := time.Now().UTC()
+
+			resp, err := h.StartDiagnostic(ctx, req)
+			after := time.Now().UTC()
+			if err != nil {
+				t.Fatalf("StartDiagnostic: %v", err)
+			}
+
+			persisted, ok := repo.doc.Diagnostics["auth"]
+			if !ok {
+				t.Fatal("auth diagnostic was not persisted")
+			}
+			if persisted.Level != models.LogLevelDebug || persisted.StartedBy != "diagnostic-operator" {
+				t.Errorf("persisted diagnostic = %+v", persisted)
+			}
+			if tt.durationMinutes == nil {
+				if persisted.ExpiresAt != nil {
+					t.Errorf("no-expiry diagnostic expires at %v", persisted.ExpiresAt)
+				}
+			} else if persisted.ExpiresAt == nil || persisted.ExpiresAt.Before(before.Add(tt.wantDuration)) || persisted.ExpiresAt.After(after.Add(tt.wantDuration)) {
+				t.Errorf("expiresAt = %v, want between %v and %v", persisted.ExpiresAt, before.Add(tt.wantDuration), after.Add(tt.wantDuration))
+			}
+			if len(resp.Body.Diagnostics) != 1 || resp.Body.Diagnostics[0].StartedBy != "diagnostic-operator" {
+				t.Errorf("fresh response diagnostics = %+v", resp.Body.Diagnostics)
+			}
+		})
+	}
+
+	tests := []struct {
+		name     string
+		module   string
+		level    string
+		duration *int
+	}{
+		{name: "empty module", module: "", level: "debug", duration: intPointer(15)},
+		{name: "unknown module", module: "unknown", level: "debug", duration: intPointer(15)},
+		{name: "invalid level", module: "auth", level: "trace", duration: intPointer(15)},
+		{name: "arbitrary duration", module: "auth", level: "debug", duration: intPointer(30)},
+		{name: "zero duration", module: "auth", level: "debug", duration: intPointer(0)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h, _ := newHandler(t)
+			req := &StartDiagnosticRequest{Module: tt.module}
+			req.Body.Level = tt.level
+			req.Body.DurationMinutes = tt.duration
+
+			_, err := h.StartDiagnostic(context.Background(), req)
+			assertStatus(t, err, 400)
+		})
+	}
+
+	t.Run("maps persistence failure to internal server error", func(t *testing.T) {
+		h, repo := newHandler(t)
+		repo.err = errors.New("mongo unavailable")
+		req := &StartDiagnosticRequest{Module: "auth"}
+		req.Body.Level = "debug"
+		req.Body.DurationMinutes = intPointer(15)
+
+		_, err := h.StartDiagnostic(context.Background(), req)
+		assertStatus(t, err, 500)
+	})
+}
+
+func TestLogLevelHandler_StopDiagnostic(t *testing.T) {
+	t.Run("captures the actor and returns the fresh view", func(t *testing.T) {
+		h, repo := newHandler(t)
+		start := &StartDiagnosticRequest{Module: "auth"}
+		start.Body.Level = "debug"
+		if _, err := h.StartDiagnostic(context.Background(), start); err != nil {
+			t.Fatalf("seed diagnostic: %v", err)
+		}
+		ctx := testkit.NewIdentity("stop-operator", "operator@example.com", "administrator").
+			ContextFor(context.Background(), "")
+
+		resp, err := h.StopDiagnostic(ctx, &StopDiagnosticRequest{Module: "auth"})
+		if err != nil {
+			t.Fatalf("StopDiagnostic: %v", err)
+		}
+
+		if len(resp.Body.Diagnostics) != 0 {
+			t.Errorf("fresh response diagnostics = %+v, want empty", resp.Body.Diagnostics)
+		}
+		if repo.doc == nil || repo.doc.UpdatedBy != "stop-operator" {
+			t.Fatalf("persisted document = %+v, want stop-operator actor", repo.doc)
+		}
+		if _, ok := repo.doc.Diagnostics["auth"]; ok {
+			t.Error("stopped diagnostic remains persisted")
+		}
+	})
+
+	for _, module := range []string{"", "unknown"} {
+		t.Run("rejects module "+module, func(t *testing.T) {
+			h, _ := newHandler(t)
+			_, err := h.StopDiagnostic(context.Background(), &StopDiagnosticRequest{Module: module})
+			assertStatus(t, err, 400)
+		})
+	}
+
+	t.Run("maps persistence failure to internal server error", func(t *testing.T) {
+		h, repo := newHandler(t)
+		start := &StartDiagnosticRequest{Module: "auth"}
+		start.Body.Level = "debug"
+		if _, err := h.StartDiagnostic(context.Background(), start); err != nil {
+			t.Fatalf("seed diagnostic: %v", err)
+		}
+		repo.err = errors.New("mongo unavailable")
+
+		_, err := h.StopDiagnostic(context.Background(), &StopDiagnosticRequest{Module: "auth"})
+		assertStatus(t, err, 500)
+	})
+}
+
+func assertStatus(t *testing.T, err error, want int) {
+	t.Helper()
+	if err == nil {
+		t.Fatalf("error = nil, want HTTP %d", want)
+	}
+	statusErr, ok := err.(huma.StatusError)
+	if !ok {
+		t.Fatalf("error = %v (%T), want huma.StatusError", err, err)
+	}
+	if got := statusErr.GetStatus(); got != want {
+		t.Errorf("status = %d, want %d (error: %v)", got, want, err)
+	}
+}
+
+func intPointer(value int) *int { return &value }
+
+func mustJSON(t *testing.T, value any) []byte {
+	t.Helper()
+	out, err := json.Marshal(value)
+	if err != nil {
+		t.Fatalf("marshal JSON: %v", err)
+	}
+	return out
 }
