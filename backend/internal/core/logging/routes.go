@@ -34,6 +34,7 @@ func RegisterRoutes(api huma.API, h *handlers.LogLevelHandler) {
 		Tags:        []string{"Observability"},
 		Security:    []map[string][]string{{"bearerAuth": {"administrator"}}},
 	}, h.GetLogs)
+	documentLogPreviewParameters(api.OpenAPI().Paths["/v1/admin/observability/log-levels/logs"].Get)
 
 	huma.Register(api, huma.Operation{
 		OperationID: "admin-observability-loglevels-apply",
@@ -97,4 +98,46 @@ func RegisterRoutes(api huma.API, h *handlers.LogLevelHandler) {
 		Tags:        []string{"Observability"},
 		Security:    []map[string][]string{{"bearerAuth": {"administrator"}}},
 	}, h.StopDiagnostic)
+}
+
+// documentLogPreviewParameters replaces only the OpenAPI parameter schemas.
+// Runtime decoding intentionally remains string-based so malformed or
+// overflowing integers reach GetLogs and use its stable 400 error contract.
+func documentLogPreviewParameters(operation *huma.Operation) {
+	minLimit, maxLimit, maxSearchLength := float64(1), float64(100), 200
+	for _, parameter := range operation.Parameters {
+		description := parameter.Schema.Description
+		switch parameter.Name {
+		case "module":
+			parameter.Required = true
+			parameter.Schema = &huma.Schema{Type: huma.TypeString, Description: description}
+		case "windowMinutes":
+			parameter.Required = true
+			parameter.Schema = &huma.Schema{
+				Type:        huma.TypeInteger,
+				Description: description,
+				Enum:        []any{5, 15, 60},
+			}
+		case "level":
+			parameter.Schema = &huma.Schema{
+				Type:        huma.TypeString,
+				Description: description,
+				Enum:        []any{"debug", "info", "warn", "error"},
+			}
+		case "q":
+			parameter.Schema = &huma.Schema{
+				Type:        huma.TypeString,
+				Description: description,
+				MaxLength:   &maxSearchLength,
+			}
+		case "limit":
+			parameter.Schema = &huma.Schema{
+				Type:        huma.TypeInteger,
+				Description: description,
+				Default:     50,
+				Minimum:     &minLimit,
+				Maximum:     &maxLimit,
+			}
+		}
+	}
 }

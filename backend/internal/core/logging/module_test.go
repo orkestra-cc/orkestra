@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -66,6 +67,58 @@ func TestRegisterRoutes_ExposesBatchDiagnosticAndLogPreviewOperations(t *testing
 			}
 		})
 	}
+}
+
+func TestRegisterRoutes_LogPreviewDocumentsConstrainedFilters(t *testing.T) {
+	router := chi.NewRouter()
+	api := humachi.New(router, huma.DefaultConfig("test", "1.0.0"))
+	RegisterRoutes(api, (*handlers.LogLevelHandler)(nil))
+	operation := api.OpenAPI().Paths["/v1/admin/observability/log-levels/logs"].Get
+	parameters := make(map[string]*huma.Param, len(operation.Parameters))
+	for _, parameter := range operation.Parameters {
+		parameters[parameter.Name] = parameter
+	}
+
+	t.Run("module is required string", func(t *testing.T) {
+		parameter := requirePreviewParameter(t, parameters, "module")
+		if !parameter.Required || parameter.Schema.Type != huma.TypeString {
+			t.Errorf("module = required:%t schema:%+v, want required string", parameter.Required, parameter.Schema)
+		}
+	})
+	t.Run("window is required integer enum", func(t *testing.T) {
+		parameter := requirePreviewParameter(t, parameters, "windowMinutes")
+		if !parameter.Required || parameter.Schema.Type != huma.TypeInteger || !reflect.DeepEqual(parameter.Schema.Enum, []any{5, 15, 60}) {
+			t.Errorf("windowMinutes = required:%t schema:%+v, want required integer enum [5 15 60]", parameter.Required, parameter.Schema)
+		}
+	})
+	t.Run("level is closed enum", func(t *testing.T) {
+		parameter := requirePreviewParameter(t, parameters, "level")
+		want := []any{"debug", "info", "warn", "error"}
+		if parameter.Schema.Type != huma.TypeString || !reflect.DeepEqual(parameter.Schema.Enum, want) {
+			t.Errorf("level schema = %+v, want string enum %v", parameter.Schema, want)
+		}
+	})
+	t.Run("search is bounded", func(t *testing.T) {
+		parameter := requirePreviewParameter(t, parameters, "q")
+		if parameter.Schema.Type != huma.TypeString || parameter.Schema.MaxLength == nil || *parameter.Schema.MaxLength != 200 {
+			t.Errorf("q schema = %+v, want string maxLength 200", parameter.Schema)
+		}
+	})
+	t.Run("limit is bounded integer", func(t *testing.T) {
+		parameter := requirePreviewParameter(t, parameters, "limit")
+		if parameter.Schema.Type != huma.TypeInteger || parameter.Schema.Minimum == nil || *parameter.Schema.Minimum != 1 || parameter.Schema.Maximum == nil || *parameter.Schema.Maximum != 100 || parameter.Schema.Default != 50 {
+			t.Errorf("limit schema = %+v, want integer default 50 range 1..100", parameter.Schema)
+		}
+	})
+}
+
+func requirePreviewParameter(t *testing.T, parameters map[string]*huma.Param, name string) *huma.Param {
+	t.Helper()
+	parameter := parameters[name]
+	if parameter == nil || parameter.Schema == nil {
+		t.Fatalf("parameter %q missing or has no schema", name)
+	}
+	return parameter
 }
 
 func TestRegisterRoutes_LogPreviewMalformedNumericQueriesUseStableBadRequest(t *testing.T) {
