@@ -7,6 +7,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/orkestra/backend/internal/core/logging/models"
 	"github.com/orkestra/backend/internal/core/logging/repository"
@@ -16,9 +17,10 @@ import (
 // around the single doc since concurrent SetGlobal/SetModule paths
 // would otherwise race in -race mode.
 type fakeRepo struct {
-	mu  sync.Mutex
-	doc *models.LogLevelDoc
-	err error // injectable for failure-path tests
+	mu      sync.Mutex
+	doc     *models.LogLevelDoc
+	err     error // injectable for failure-path tests
+	upserts int
 }
 
 func (r *fakeRepo) Get(_ context.Context) (*models.LogLevelDoc, error) {
@@ -30,8 +32,7 @@ func (r *fakeRepo) Get(_ context.Context) (*models.LogLevelDoc, error) {
 	if r.doc == nil {
 		return nil, repository.ErrNotFound
 	}
-	clone := *r.doc
-	return &clone, nil
+	return cloneLogLevelDoc(r.doc), nil
 }
 
 func (r *fakeRepo) Upsert(_ context.Context, doc *models.LogLevelDoc) error {
@@ -40,9 +41,26 @@ func (r *fakeRepo) Upsert(_ context.Context, doc *models.LogLevelDoc) error {
 	if r.err != nil {
 		return r.err
 	}
-	clone := *doc
-	r.doc = &clone
+	r.doc = cloneLogLevelDoc(doc)
+	r.upserts++
 	return nil
+}
+
+func cloneLogLevelDoc(doc *models.LogLevelDoc) *models.LogLevelDoc {
+	clone := *doc
+	clone.PerModule = make(map[string]models.LogLevel, len(doc.PerModule))
+	for module, level := range doc.PerModule {
+		clone.PerModule[module] = level
+	}
+	clone.Diagnostics = make(map[string]models.DiagnosticOverride, len(doc.Diagnostics))
+	for module, diagnostic := range doc.Diagnostics {
+		if diagnostic.ExpiresAt != nil {
+			expiresAt := *diagnostic.ExpiresAt
+			diagnostic.ExpiresAt = &expiresAt
+		}
+		clone.Diagnostics[module] = diagnostic
+	}
+	return &clone
 }
 
 func newTestSvc(t *testing.T) (*LogLevelService, *fakeRepo) {
@@ -163,6 +181,9 @@ func TestLogLevelService_View(t *testing.T) {
 	if len(view.Modules) != 3 {
 		t.Errorf("expected 3 module rows, got %d", len(view.Modules))
 	}
+	if view.Diagnostics == nil {
+		t.Error("view.Diagnostics is nil, want an empty JSON array")
+	}
 
 	byName := map[string]models.AdminModuleEntry{}
 	for _, m := range view.Modules {
@@ -214,10 +235,229 @@ func TestLogLevelService_PersistFailurePreservesSnapshot(t *testing.T) {
 	}
 }
 
+func TestLogLevelService_Diagnostic(t *testing.T) {
+	ctx := context.Background()
+	fixedNow := time.Date(2026, 8, 20, 12, 0, 0, 0, time.UTC)
+
+	tests := []struct {
+		name string
+		run  func(t *testing.T)
+	}{
+		{
+			name: "takes precedence then expires back to permanent override",
+			run: func(t *testing.T) {
+				svc, repo := newTestSvc(t)
+				now := fixedNow
+				svc.now = func() time.Time { return now }
+
+				if err := svc.SetModule(ctx, "auth", models.LogLevelWarn, "operator-1"); err != nil {
+					t.Fatalf("SetModule: %v", err)
+				}
+				expiresAt := now.Add(time.Hour)
+				if err := svc.StartDiagnostic(ctx, "auth", models.LogLevelDebug, &expiresAt, "operator-1"); err != nil {
+					t.Fatalf("StartDiagnostic: %v", err)
+				}
+
+				if level, explicit := svc.LevelFor("auth"); level != slog.LevelDebug || !explicit {
+					t.Fatalf("active LevelFor(auth) = %v,%v want debug,true", level, explicit)
+				}
+				persisted, ok := repo.doc.Diagnostics["auth"]
+				if !ok {
+					t.Fatal("diagnostic was not persisted")
+				}
+				if persisted.Level != models.LogLevelDebug || persisted.StartedAt != fixedNow || persisted.StartedBy != "operator-1" {
+					t.Errorf("persisted diagnostic = %+v", persisted)
+				}
+				if persisted.ExpiresAt == nil || !persisted.ExpiresAt.Equal(expiresAt) {
+					t.Errorf("persisted expiry = %v, want %v", persisted.ExpiresAt, expiresAt)
+				}
+
+				view := svc.View()
+				if len(view.Diagnostics) != 1 {
+					t.Fatalf("view diagnostics = %+v, want one entry", view.Diagnostics)
+				}
+				entry := view.Diagnostics[0]
+				if entry.Module != "auth" || entry.Level != models.LogLevelDebug || entry.StartedAt != fixedNow || entry.StartedBy != "operator-1" {
+					t.Errorf("admin diagnostic = %+v", entry)
+				}
+
+				now = expiresAt
+				if level, explicit := svc.LevelFor("auth"); level != slog.LevelWarn || !explicit {
+					t.Errorf("at-expiry LevelFor(auth) = %v,%v want warn,true", level, explicit)
+				}
+				if got := len(svc.View().Diagnostics); got != 0 {
+					t.Errorf("expired diagnostics in view = %d, want 0", got)
+				}
+
+				now = now.Add(time.Hour)
+				if level, explicit := svc.LevelFor("auth"); level != slog.LevelWarn || !explicit {
+					t.Errorf("expired LevelFor(auth) = %v,%v want warn,true", level, explicit)
+				}
+			},
+		},
+		{
+			name: "no-expiry diagnostic persists across restart",
+			run: func(t *testing.T) {
+				svc, repo := newTestSvc(t)
+				now := fixedNow
+				svc.now = func() time.Time { return now }
+				if err := svc.StartDiagnostic(ctx, "billing", models.LogLevelDebug, nil, "operator-2"); err != nil {
+					t.Fatalf("StartDiagnostic: %v", err)
+				}
+
+				now = now.Add(365 * 24 * time.Hour)
+				restarted := NewLogLevelService(repo, svc.logger, slog.LevelError, nil, []string{"rag", "billing", "auth"})
+				restarted.now = func() time.Time { return now }
+				if err := restarted.Load(ctx); err != nil {
+					t.Fatalf("Load after restart: %v", err)
+				}
+				if level, explicit := restarted.LevelFor("billing"); level != slog.LevelDebug || !explicit {
+					t.Errorf("restarted LevelFor(billing) = %v,%v want debug,true", level, explicit)
+				}
+				view := restarted.View()
+				if len(view.Diagnostics) != 1 || view.Diagnostics[0].ExpiresAt != nil {
+					t.Errorf("restarted diagnostics = %+v, want one without expiry", view.Diagnostics)
+				}
+			},
+		},
+		{
+			name: "rejects an unknown module without persistence",
+			run: func(t *testing.T) {
+				svc, repo := newTestSvc(t)
+				svc.now = func() time.Time { return fixedNow }
+				if err := svc.StartDiagnostic(ctx, "unknown", models.LogLevelDebug, nil, "operator-1"); err == nil {
+					t.Fatal("StartDiagnostic accepted an unknown module")
+				}
+				if repo.upserts != 0 {
+					t.Errorf("repository upserts = %d, want 0", repo.upserts)
+				}
+				if _, explicit := svc.LevelFor("unknown"); explicit {
+					t.Error("unknown module became explicit after rejected diagnostic")
+				}
+			},
+		},
+		{
+			name: "persistence failure leaves the published snapshot unchanged",
+			run: func(t *testing.T) {
+				svc, repo := newTestSvc(t)
+				svc.now = func() time.Time { return fixedNow }
+				if err := svc.SetModule(ctx, "auth", models.LogLevelWarn, "operator-1"); err != nil {
+					t.Fatalf("SetModule: %v", err)
+				}
+				repo.err = errors.New("boom")
+				if err := svc.StartDiagnostic(ctx, "auth", models.LogLevelDebug, nil, "operator-1"); err == nil {
+					t.Fatal("StartDiagnostic succeeded with a broken repository")
+				}
+				if level, explicit := svc.LevelFor("auth"); level != slog.LevelWarn || !explicit {
+					t.Errorf("LevelFor(auth) = %v,%v want unchanged warn,true", level, explicit)
+				}
+				if got := len(svc.View().Diagnostics); got != 0 {
+					t.Errorf("published diagnostics = %d, want 0", got)
+				}
+			},
+		},
+		{
+			name: "stop removes a diagnostic and is idempotent",
+			run: func(t *testing.T) {
+				svc, repo := newTestSvc(t)
+				svc.now = func() time.Time { return fixedNow }
+				if err := svc.StartDiagnostic(ctx, "auth", models.LogLevelDebug, nil, "operator-1"); err != nil {
+					t.Fatalf("StartDiagnostic: %v", err)
+				}
+				if err := svc.StopDiagnostic(ctx, "auth", "operator-2"); err != nil {
+					t.Fatalf("StopDiagnostic: %v", err)
+				}
+				if _, ok := repo.doc.Diagnostics["auth"]; ok {
+					t.Error("stopped diagnostic remains persisted")
+				}
+				if _, explicit := svc.LevelFor("auth"); explicit {
+					t.Error("auth remains explicit after diagnostic stop")
+				}
+
+				upserts := repo.upserts
+				if err := svc.StopDiagnostic(ctx, "auth", "operator-2"); err != nil {
+					t.Fatalf("second StopDiagnostic: %v", err)
+				}
+				if repo.upserts != upserts {
+					t.Errorf("idempotent stop persisted again: %d -> %d", upserts, repo.upserts)
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, tt.run)
+	}
+}
+
+func TestLogLevelService_CleanupExpired(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 8, 20, 12, 0, 0, 0, time.UTC)
+	svc, repo := newTestSvc(t)
+	svc.now = func() time.Time { return now }
+
+	expiredAt := now.Add(time.Hour)
+	futureAt := now.Add(4 * time.Hour)
+	if err := svc.StartDiagnostic(ctx, "auth", models.LogLevelDebug, &expiredAt, "operator-1"); err != nil {
+		t.Fatalf("start auth diagnostic: %v", err)
+	}
+	if err := svc.StartDiagnostic(ctx, "billing", models.LogLevelDebug, nil, "operator-1"); err != nil {
+		t.Fatalf("start billing diagnostic: %v", err)
+	}
+	if err := svc.StartDiagnostic(ctx, "rag", models.LogLevelInfo, &futureAt, "operator-1"); err != nil {
+		t.Fatalf("start rag diagnostic: %v", err)
+	}
+
+	now = now.Add(2 * time.Hour)
+	if err := svc.CleanupExpired(ctx); err != nil {
+		t.Fatalf("CleanupExpired: %v", err)
+	}
+	if _, ok := repo.doc.Diagnostics["auth"]; ok {
+		t.Error("expired auth diagnostic remains persisted")
+	}
+	for _, module := range []string{"billing", "rag"} {
+		if _, ok := repo.doc.Diagnostics[module]; !ok {
+			t.Errorf("active %s diagnostic was removed", module)
+		}
+	}
+	if got := len(svc.View().Diagnostics); got != 2 {
+		t.Errorf("active diagnostics in view = %d, want 2", got)
+	}
+
+	upserts := repo.upserts
+	if err := svc.CleanupExpired(ctx); err != nil {
+		t.Fatalf("second CleanupExpired: %v", err)
+	}
+	if repo.upserts != upserts {
+		t.Errorf("cleanup without expired entries persisted again: %d -> %d", upserts, repo.upserts)
+	}
+}
+
+func TestLogLevelService_CleanupExpired_PersistFailurePreservesSnapshot(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 8, 20, 12, 0, 0, 0, time.UTC)
+	svc, repo := newTestSvc(t)
+	svc.now = func() time.Time { return now }
+
+	expiresAt := now.Add(time.Hour)
+	if err := svc.StartDiagnostic(ctx, "auth", models.LogLevelDebug, &expiresAt, "operator-1"); err != nil {
+		t.Fatalf("StartDiagnostic: %v", err)
+	}
+	now = now.Add(2 * time.Hour)
+	repo.err = errors.New("boom")
+	if err := svc.CleanupExpired(ctx); err == nil {
+		t.Fatal("CleanupExpired succeeded with a broken repository")
+	}
+	if _, ok := svc.current.Load().diagnostics["auth"]; !ok {
+		t.Error("expired diagnostic was unpublished despite persistence failure")
+	}
+}
+
 func TestLogLevelService_ConcurrentReadsAndWrites(t *testing.T) {
 	// Smoke test under -race: many concurrent readers (Global / LevelFor)
-	// while a writer mutates SetModule. atomic.Pointer snapshot keeps
-	// reads consistent without locking the hot path.
+	// while a writer mutates permanent and diagnostic overrides.
+	// atomic.Pointer snapshots keep reads consistent without locking the
+	// hot path.
 	svc, _ := newTestSvc(t)
 	var (
 		stop atomic.Bool
@@ -244,6 +484,15 @@ func TestLogLevelService_ConcurrentReadsAndWrites(t *testing.T) {
 			}
 			if err := svc.SetModule(context.Background(), "billing", lvl, "u"); err != nil {
 				t.Errorf("SetModule: %v", err)
+				return
+			}
+			if n%2 == 0 {
+				if err := svc.StartDiagnostic(context.Background(), "auth", models.LogLevelDebug, nil, "u"); err != nil {
+					t.Errorf("StartDiagnostic: %v", err)
+					return
+				}
+			} else if err := svc.StopDiagnostic(context.Background(), "auth", "u"); err != nil {
+				t.Errorf("StopDiagnostic: %v", err)
 				return
 			}
 		}

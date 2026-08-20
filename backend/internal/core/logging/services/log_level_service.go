@@ -8,6 +8,7 @@ package services
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"sync"
 	"sync/atomic"
@@ -30,10 +31,11 @@ type LevelResolver interface {
 // Replaced wholesale on every mutation so readers never see a
 // partially-updated state.
 type snapshot struct {
-	global    slog.Level
-	perModule map[string]slog.Level
-	updatedAt time.Time
-	updatedBy string
+	global      slog.Level
+	perModule   map[string]slog.Level
+	diagnostics map[string]models.DiagnosticOverride
+	updatedAt   time.Time
+	updatedBy   string
 }
 
 // LogLevelService owns the persisted log-level configuration and
@@ -52,6 +54,7 @@ type LogLevelService struct {
 	logger   *slog.Logger
 	envBoot  envBoot // captured at construction for "reset to env" semantics
 	moduleCt moduleCatalog
+	now      func() time.Time
 }
 
 // envBoot is the env-driven default the service falls back to when
@@ -84,10 +87,11 @@ func NewLogLevelService(repo repository.Repository, logger *slog.Logger, envGlob
 		logger:   logger,
 		envBoot:  envBoot{global: envGlobal, perMod: cloneLevelMap(envPerModule)},
 		moduleCt: moduleCatalog{names: append([]string(nil), moduleNames...)},
+		now:      time.Now,
 	}
 	// Seed snapshot from the env default. Load() below replaces it
 	// with the persisted document if present.
-	svc.publishSnapshot(envGlobal, envPerModule, time.Time{}, "")
+	svc.publishSnapshot(envGlobal, envPerModule, nil, time.Time{}, "")
 	return svc
 }
 
@@ -121,6 +125,9 @@ func (s *LogLevelService) LevelFor(module string) (slog.Level, bool) {
 	if snap == nil {
 		return slog.LevelInfo, false
 	}
+	if diagnostic, ok := snap.diagnostics[module]; ok && diagnosticActive(diagnostic, s.now()) {
+		return diagnostic.Level.Slog(), true
+	}
 	l, ok := snap.perModule[module]
 	return l, ok
 }
@@ -132,7 +139,7 @@ func (s *LogLevelService) SetGlobal(ctx context.Context, level models.LogLevel, 
 	defer s.mu.Unlock()
 	cur := s.copyCurrentSnapshot()
 	cur.global = level.Slog()
-	cur.updatedAt = time.Now().UTC()
+	cur.updatedAt = s.now().UTC()
 	cur.updatedBy = actor
 	return s.persistAndPublish(ctx, cur)
 }
@@ -145,7 +152,7 @@ func (s *LogLevelService) SetModule(ctx context.Context, module string, level mo
 	defer s.mu.Unlock()
 	cur := s.copyCurrentSnapshot()
 	cur.perModule[module] = level.Slog()
-	cur.updatedAt = time.Now().UTC()
+	cur.updatedAt = s.now().UTC()
 	cur.updatedBy = actor
 	return s.persistAndPublish(ctx, cur)
 }
@@ -158,7 +165,7 @@ func (s *LogLevelService) UnsetModule(ctx context.Context, module string, actor 
 	defer s.mu.Unlock()
 	cur := s.copyCurrentSnapshot()
 	delete(cur.perModule, module)
-	cur.updatedAt = time.Now().UTC()
+	cur.updatedAt = s.now().UTC()
 	cur.updatedBy = actor
 	return s.persistAndPublish(ctx, cur)
 }
@@ -169,13 +176,15 @@ func (s *LogLevelService) UnsetModule(ctx context.Context, module string, actor 
 func (s *LogLevelService) View() models.AdminView {
 	snap := s.current.Load()
 	view := models.AdminView{
-		Global: levelToModelLevel(snap.global),
+		Global:      levelToModelLevel(snap.global),
+		Diagnostics: make([]models.AdminDiagnosticEntry, 0),
 	}
 	if snap.updatedAt != (time.Time{}) {
 		view.UpdatedAt = snap.updatedAt
 	}
 	view.UpdatedBy = snap.updatedBy
 
+	now := s.now()
 	for _, name := range s.moduleCt.names {
 		entry := models.AdminModuleEntry{Name: name}
 		if l, ok := snap.perModule[name]; ok {
@@ -183,6 +192,16 @@ func (s *LogLevelService) View() models.AdminView {
 			entry.HasOverride = true
 		} else {
 			entry.Effective = view.Global
+		}
+		if diagnostic, ok := snap.diagnostics[name]; ok && diagnosticActive(diagnostic, now) {
+			entry.Effective = diagnostic.Level
+			view.Diagnostics = append(view.Diagnostics, models.AdminDiagnosticEntry{
+				Module:    name,
+				Level:     diagnostic.Level,
+				StartedAt: diagnostic.StartedAt,
+				StartedBy: diagnostic.StartedBy,
+				ExpiresAt: cloneTimePointer(diagnostic.ExpiresAt),
+			})
 		}
 		view.Modules = append(view.Modules, entry)
 	}
@@ -195,12 +214,70 @@ func (s *LogLevelService) View() models.AdminView {
 func (s *LogLevelService) ResetToEnv(ctx context.Context, actor string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	cur := &snapshot{
-		global:    s.envBoot.global,
-		perModule: cloneLevelMap(s.envBoot.perMod),
-		updatedAt: time.Now().UTC(),
-		updatedBy: actor,
+	cur := s.copyCurrentSnapshot()
+	cur.global = s.envBoot.global
+	cur.perModule = cloneLevelMap(s.envBoot.perMod)
+	cur.updatedAt = s.now().UTC()
+	cur.updatedBy = actor
+	return s.persistAndPublish(ctx, cur)
+}
+
+// StartDiagnostic installs a temporary module override. The update is
+// persisted before the immutable snapshot is published.
+func (s *LogLevelService) StartDiagnostic(ctx context.Context, module string, level models.LogLevel, expiresAt *time.Time, actor string) error {
+	if !s.moduleCt.contains(module) {
+		return fmt.Errorf("unknown logging module %q", module)
 	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := s.now().UTC()
+	cur := s.copyCurrentSnapshot()
+	cur.diagnostics[module] = models.DiagnosticOverride{
+		Level:     level,
+		StartedAt: now,
+		StartedBy: actor,
+		ExpiresAt: cloneTimePointer(expiresAt),
+	}
+	cur.updatedAt = now
+	cur.updatedBy = actor
+	return s.persistAndPublish(ctx, cur)
+}
+
+// StopDiagnostic removes a module diagnostic. Stopping a diagnostic that
+// is already absent is a no-op.
+func (s *LogLevelService) StopDiagnostic(ctx context.Context, module string, actor string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cur := s.copyCurrentSnapshot()
+	if _, ok := cur.diagnostics[module]; !ok {
+		return nil
+	}
+	delete(cur.diagnostics, module)
+	cur.updatedAt = s.now().UTC()
+	cur.updatedBy = actor
+	return s.persistAndPublish(ctx, cur)
+}
+
+// CleanupExpired removes persisted diagnostics whose expiry has passed.
+// Expiry correctness does not depend on this method: LevelFor and View
+// ignore expired entries before cleanup runs.
+func (s *LogLevelService) CleanupExpired(ctx context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := s.now().UTC()
+	cur := s.copyCurrentSnapshot()
+	removed := false
+	for module, diagnostic := range cur.diagnostics {
+		if diagnostic.ExpiresAt != nil && !now.Before(*diagnostic.ExpiresAt) {
+			delete(cur.diagnostics, module)
+			removed = true
+		}
+	}
+	if !removed {
+		return nil
+	}
+	cur.updatedAt = now
 	return s.persistAndPublish(ctx, cur)
 }
 
@@ -209,28 +286,35 @@ func (s *LogLevelService) ResetToEnv(ctx context.Context, actor string) error {
 func (s *LogLevelService) copyCurrentSnapshot() *snapshot {
 	cur := s.current.Load()
 	if cur == nil {
-		return &snapshot{global: s.envBoot.global, perModule: cloneLevelMap(s.envBoot.perMod)}
+		return &snapshot{
+			global:      s.envBoot.global,
+			perModule:   cloneLevelMap(s.envBoot.perMod),
+			diagnostics: cloneDiagnosticMap(nil),
+		}
 	}
 	return &snapshot{
-		global:    cur.global,
-		perModule: cloneLevelMap(cur.perModule),
-		updatedAt: cur.updatedAt,
-		updatedBy: cur.updatedBy,
+		global:      cur.global,
+		perModule:   cloneLevelMap(cur.perModule),
+		diagnostics: cloneDiagnosticMap(cur.diagnostics),
+		updatedAt:   cur.updatedAt,
+		updatedBy:   cur.updatedBy,
 	}
 }
 
 func (s *LogLevelService) persistAndPublish(ctx context.Context, snap *snapshot) error {
+	published := cloneSnapshot(snap)
 	doc := &models.LogLevelDoc{
-		ConfigKey: models.DefaultConfigKey,
-		Global:    levelToModelLevel(snap.global),
-		PerModule: levelMapToModelMap(snap.perModule),
-		UpdatedAt: snap.updatedAt,
-		UpdatedBy: snap.updatedBy,
+		ConfigKey:   models.DefaultConfigKey,
+		Global:      levelToModelLevel(published.global),
+		PerModule:   levelMapToModelMap(published.perModule),
+		Diagnostics: cloneDiagnosticMap(published.diagnostics),
+		UpdatedAt:   published.updatedAt,
+		UpdatedBy:   published.updatedBy,
 	}
 	if err := s.repo.Upsert(ctx, doc); err != nil {
 		return err
 	}
-	s.current.Store(snap)
+	s.current.Store(published)
 	return nil
 }
 
@@ -240,22 +324,47 @@ func (s *LogLevelService) applyDoc(doc *models.LogLevelDoc) {
 		perMod[k] = v.Slog()
 	}
 	snap := &snapshot{
-		global:    doc.Global.Slog(),
-		perModule: perMod,
-		updatedAt: doc.UpdatedAt,
-		updatedBy: doc.UpdatedBy,
+		global:      doc.Global.Slog(),
+		perModule:   perMod,
+		diagnostics: cloneDiagnosticMap(doc.Diagnostics),
+		updatedAt:   doc.UpdatedAt,
+		updatedBy:   doc.UpdatedBy,
 	}
 	s.current.Store(snap)
 }
 
-func (s *LogLevelService) publishSnapshot(global slog.Level, perModule map[string]slog.Level, at time.Time, by string) {
+func (s *LogLevelService) publishSnapshot(global slog.Level, perModule map[string]slog.Level, diagnostics map[string]models.DiagnosticOverride, at time.Time, by string) {
 	snap := &snapshot{
-		global:    global,
-		perModule: cloneLevelMap(perModule),
-		updatedAt: at,
-		updatedBy: by,
+		global:      global,
+		perModule:   cloneLevelMap(perModule),
+		diagnostics: cloneDiagnosticMap(diagnostics),
+		updatedAt:   at,
+		updatedBy:   by,
 	}
 	s.current.Store(snap)
+}
+
+func (c moduleCatalog) contains(module string) bool {
+	for _, name := range c.names {
+		if name == module {
+			return true
+		}
+	}
+	return false
+}
+
+func diagnosticActive(diagnostic models.DiagnosticOverride, now time.Time) bool {
+	return diagnostic.ExpiresAt == nil || now.Before(*diagnostic.ExpiresAt)
+}
+
+func cloneSnapshot(in *snapshot) *snapshot {
+	return &snapshot{
+		global:      in.global,
+		perModule:   cloneLevelMap(in.perModule),
+		diagnostics: cloneDiagnosticMap(in.diagnostics),
+		updatedAt:   in.updatedAt,
+		updatedBy:   in.updatedBy,
+	}
 }
 
 func cloneLevelMap(in map[string]slog.Level) map[string]slog.Level {
@@ -267,6 +376,23 @@ func cloneLevelMap(in map[string]slog.Level) map[string]slog.Level {
 		out[k] = v
 	}
 	return out
+}
+
+func cloneDiagnosticMap(in map[string]models.DiagnosticOverride) map[string]models.DiagnosticOverride {
+	out := make(map[string]models.DiagnosticOverride, len(in))
+	for module, diagnostic := range in {
+		diagnostic.ExpiresAt = cloneTimePointer(diagnostic.ExpiresAt)
+		out[module] = diagnostic
+	}
+	return out
+}
+
+func cloneTimePointer(in *time.Time) *time.Time {
+	if in == nil {
+		return nil
+	}
+	clone := *in
+	return &clone
 }
 
 func levelToModelLevel(l slog.Level) models.LogLevel {

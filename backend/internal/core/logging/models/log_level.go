@@ -92,6 +92,11 @@ type LogLevelDoc struct {
 	// from this map inherit Global.
 	PerModule map[string]LogLevel `bson:"perModule" json:"perModule"`
 
+	// Diagnostics maps module name → temporary diagnostic override.
+	// Expired entries are ignored by the resolver until cleanup removes
+	// them from persistence.
+	Diagnostics map[string]DiagnosticOverride `bson:"diagnostics" json:"diagnostics"`
+
 	UpdatedAt  time.Time `bson:"updatedAt" json:"updatedAt"`
 	UpdatedBy  string    `bson:"updatedBy,omitempty" json:"updatedBy,omitempty"`
 	UpdateNote string    `bson:"updateNote,omitempty" json:"updateNote,omitempty"`
@@ -108,10 +113,11 @@ const DefaultConfigKey = "default"
 // per-module fallback for each module so the UI doesn't need to
 // re-do the resolution.
 type AdminView struct {
-	Global    LogLevel           `json:"global"`
-	Modules   []AdminModuleEntry `json:"modules"`
-	UpdatedAt time.Time          `json:"updatedAt"`
-	UpdatedBy string             `json:"updatedBy,omitempty"`
+	Global      LogLevel               `json:"global"`
+	Modules     []AdminModuleEntry     `json:"modules"`
+	Diagnostics []AdminDiagnosticEntry `json:"diagnostics"`
+	UpdatedAt   time.Time              `json:"updatedAt"`
+	UpdatedBy   string                 `json:"updatedBy,omitempty"`
 }
 
 // AdminModuleEntry is one row in the observability admin table.
@@ -123,4 +129,24 @@ type AdminModuleEntry struct {
 	Name        string   `json:"name"`
 	Effective   LogLevel `json:"effective"`
 	HasOverride bool     `json:"hasOverride"`
+}
+
+// DiagnosticOverride is a temporary per-module threshold persisted in
+// the log_levels document. A nil ExpiresAt makes the diagnostic active
+// until an operator stops it explicitly.
+type DiagnosticOverride struct {
+	Level     LogLevel   `bson:"level" json:"level"`
+	StartedAt time.Time  `bson:"startedAt" json:"startedAt"`
+	StartedBy string     `bson:"startedBy" json:"startedBy"`
+	ExpiresAt *time.Time `bson:"expiresAt,omitempty" json:"expiresAt,omitempty"`
+}
+
+// AdminDiagnosticEntry is the active diagnostic projection returned to
+// the operator UI. Module is supplied by the diagnostics map key.
+type AdminDiagnosticEntry struct {
+	Module    string     `json:"module"`
+	Level     LogLevel   `json:"level"`
+	StartedAt time.Time  `json:"startedAt"`
+	StartedBy string     `json:"startedBy"`
+	ExpiresAt *time.Time `json:"expiresAt,omitempty"`
 }
