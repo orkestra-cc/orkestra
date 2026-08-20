@@ -11,6 +11,7 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
+	"github.com/orkestra/backend/internal/core/logging/logquery"
 	"github.com/orkestra/backend/internal/core/logging/models"
 	"github.com/orkestra/backend/internal/core/logging/repository"
 	"github.com/orkestra/backend/internal/core/logging/services"
@@ -46,11 +47,31 @@ func (r *fakeRepo) Upsert(_ context.Context, doc *models.LogLevelDoc) error {
 }
 
 func newHandler(t *testing.T) (*LogLevelHandler, *fakeRepo) {
+	return newHandlerWithProvider(t, &fakeLogProvider{})
+}
+
+func newHandlerWithProvider(t *testing.T, provider *fakeLogProvider) (*LogLevelHandler, *fakeRepo) {
 	t.Helper()
 	repo := &fakeRepo{}
 	logger := slog.New(slog.NewTextHandler(testWriter{t}, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	svc := services.NewLogLevelService(repo, logger, slog.LevelInfo, nil, []string{"auth", "billing"})
-	return NewLogLevelHandler(svc), repo
+	return NewLogLevelHandler(svc, provider, "https://grafana.example.test"), repo
+}
+
+type fakeLogProvider struct {
+	available bool
+	events    []models.LogEvent
+	err       error
+	query     logquery.Query
+}
+
+func (p *fakeLogProvider) Status(context.Context) logquery.Status {
+	return logquery.Status{Available: p.available}
+}
+
+func (p *fakeLogProvider) Query(_ context.Context, query logquery.Query) ([]models.LogEvent, error) {
+	p.query = query
+	return p.events, p.err
 }
 
 type testWriter struct{ t *testing.T }
@@ -61,7 +82,8 @@ func (w testWriter) Write(p []byte) (int, error) {
 }
 
 func TestHandler_Get_ReturnsCurrentView(t *testing.T) {
-	h, _ := newHandler(t)
+	provider := &fakeLogProvider{available: true}
+	h, _ := newHandlerWithProvider(t, provider)
 
 	resp, err := h.Get(context.Background(), &GetRequest{})
 	if err != nil {
@@ -72,6 +94,75 @@ func TestHandler_Get_ReturnsCurrentView(t *testing.T) {
 	}
 	if len(resp.Body.Modules) != 2 {
 		t.Errorf("Modules count = %d, want 2", len(resp.Body.Modules))
+	}
+	if !resp.Body.LogProvider.Available || resp.Body.LogProvider.GrafanaURL != "https://grafana.example.test" {
+		t.Errorf("LogProvider = %+v, want available with Grafana URL", resp.Body.LogProvider)
+	}
+}
+
+func TestLogLevelHandler_GetLogs(t *testing.T) {
+	t.Run("returns the minimized provider events and forwards constrained filters", func(t *testing.T) {
+		event := models.LogEvent{
+			Timestamp:  time.Date(2026, time.August, 20, 12, 0, 0, 0, time.UTC),
+			Level:      models.LogLevelWarn,
+			Message:    "preview message",
+			Module:     "auth",
+			Attributes: map[string]any{"trace_id": "trace-1"},
+		}
+		provider := &fakeLogProvider{available: true, events: []models.LogEvent{event}}
+		h, _ := newHandlerWithProvider(t, provider)
+
+		resp, err := h.GetLogs(context.Background(), &GetLogsRequest{
+			Module:        "auth",
+			WindowMinutes: 15,
+			Level:         "warn",
+			Q:             "failed request",
+			Limit:         25,
+		})
+		if err != nil {
+			t.Fatalf("GetLogs: %v", err)
+		}
+		if len(resp.Body.Events) != 1 || resp.Body.Events[0].Message != "preview message" {
+			t.Errorf("response events = %+v", resp.Body.Events)
+		}
+		want := logquery.Query{Module: "auth", WindowMinutes: 15, Level: "warn", Text: "failed request", Limit: 25}
+		if provider.query != want {
+			t.Errorf("provider query = %+v, want %+v", provider.query, want)
+		}
+	})
+
+	t.Run("unavailable provider returns stable 503 without querying", func(t *testing.T) {
+		provider := &fakeLogProvider{}
+		h, _ := newHandlerWithProvider(t, provider)
+
+		_, err := h.GetLogs(context.Background(), &GetLogsRequest{Module: "auth", WindowMinutes: 15, Limit: 20})
+		assertStatusAndCode(t, err, 503, "logging.log_provider_unavailable")
+		if provider.query.Module != "" {
+			t.Errorf("unavailable provider was queried: %+v", provider.query)
+		}
+	})
+
+	tests := []struct {
+		name        string
+		providerErr error
+		wantStatus  int
+		wantCode    string
+	}{
+		{name: "invalid query", providerErr: logquery.ErrInvalidQuery, wantStatus: 400, wantCode: "logging.log_preview_invalid"},
+		{name: "provider timeout", providerErr: logquery.ErrTimeout, wantStatus: 504, wantCode: "logging.log_provider_timeout"},
+		{name: "upstream failure", providerErr: errors.New("upstream-secret-body"), wantStatus: 502, wantCode: "logging.log_provider_failed"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			provider := &fakeLogProvider{available: true, err: tt.providerErr}
+			h, _ := newHandlerWithProvider(t, provider)
+
+			_, err := h.GetLogs(context.Background(), &GetLogsRequest{Module: "auth", WindowMinutes: 15, Limit: 20})
+			assertStatusAndCode(t, err, tt.wantStatus, tt.wantCode)
+			if strings.Contains(err.Error(), "upstream-secret-body") {
+				t.Errorf("handler error disclosed upstream content: %v", err)
+			}
+		})
 	}
 }
 
@@ -491,6 +582,33 @@ func assertStatus(t *testing.T, err error, want int) {
 	}
 	if got := statusErr.GetStatus(); got != want {
 		t.Errorf("status = %d, want %d (error: %v)", got, want, err)
+	}
+}
+
+func assertStatusAndCode(t *testing.T, err error, wantStatus int, wantCode string) {
+	t.Helper()
+	assertStatus(t, err, wantStatus)
+	type coded interface{ ErrorCode() string }
+	if value, ok := err.(coded); ok {
+		if got := value.ErrorCode(); got != wantCode {
+			t.Errorf("code = %q, want %q", got, wantCode)
+		}
+		return
+	}
+	// errcode.Error intentionally exposes Code as a field rather than an
+	// accessor. Keep this assertion local so production interfaces stay small.
+	encoded, marshalErr := json.Marshal(err)
+	if marshalErr != nil {
+		t.Fatalf("marshal error response: %v", marshalErr)
+	}
+	var envelope struct {
+		Code string `json:"code"`
+	}
+	if unmarshalErr := json.Unmarshal(encoded, &envelope); unmarshalErr != nil {
+		t.Fatalf("decode error response: %v", unmarshalErr)
+	}
+	if envelope.Code != wantCode {
+		t.Errorf("code = %q, want %q (error: %v)", envelope.Code, wantCode, err)
 	}
 }
 

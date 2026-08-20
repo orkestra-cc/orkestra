@@ -20,6 +20,14 @@
 # the "Tenant traces + logs" dashboard.
 
 services:
+  # Merge trusted preview destinations into the app stack's backend. Loki is
+  # addressed only by its internal service name; Grafana must be a URL the
+  # operator's browser can reach and can be overridden for proxied installs.
+  backend:
+    environment:
+      LOKI_QUERY_URL: http://loki:3100
+      GRAFANA_URL: ${GRAFANA_URL:-http://localhost:3010}
+
   # OpenTelemetry Collector — receives OTLP from the backend, fans out to
   # Tempo (traces) and the collector's own /metrics endpoint (scraped by
   # Prometheus). We deliberately keep the backend pointed at the

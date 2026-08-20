@@ -103,6 +103,12 @@ services:
       LOG_LEVEL: debug
       PRETTY_LOGS: "true"
 
+      # Optional Tier-1 log preview. Both are process-owned trusted bases;
+      # request data can never select an upstream URL. The observability
+      # overlay overrides these while the default app stack leaves them empty.
+      LOKI_QUERY_URL: ${LOKI_QUERY_URL:-}
+      GRAFANA_URL: ${GRAFANA_URL:-}
+
       # Module config (OAuth secrets, Stripe keys, OpenAPI tokens, SMTP,
       # Hindsight URL, Memgraph URI, Gotenberg URL, AI provider keys,
       # per-module enable flags) is owned by ConfigService and edited at

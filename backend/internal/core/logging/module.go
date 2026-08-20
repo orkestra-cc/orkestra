@@ -14,12 +14,16 @@ package logging
 import (
 	"context"
 	"log/slog"
+	"net/url"
+	"os"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/danielgtaylor/huma/v2/adapters/humachi"
 	"github.com/go-chi/chi/v5"
 	"github.com/orkestra/backend/internal/core/logging/handlers"
+	"github.com/orkestra/backend/internal/core/logging/logquery"
 	"github.com/orkestra/backend/internal/core/logging/repository"
 	"github.com/orkestra/backend/internal/core/logging/services"
 	"github.com/orkestra/backend/internal/shared/utils"
@@ -110,8 +114,25 @@ func (m *LoggingModule) Init(deps *module.Dependencies) error {
 	}
 
 	deps.Services.Register(module.ServiceLogLevelResolver, m.svc)
-	m.handler = handlers.NewLogLevelHandler(m.svc)
+	provider := logquery.New(os.Getenv("LOKI_QUERY_URL"), moduleNames)
+	m.handler = handlers.NewLogLevelHandler(m.svc, provider, normalizeExternalURL(os.Getenv("GRAFANA_URL")))
 	return nil
+}
+
+// normalizeExternalURL validates the trusted process-configured Grafana base
+// before exposing it as a browser link. Request data never reaches this path.
+func normalizeExternalURL(raw string) string {
+	if strings.TrimSpace(raw) == "" {
+		return ""
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || parsed.User != nil {
+		return ""
+	}
+	parsed.RawQuery = ""
+	parsed.Fragment = ""
+	parsed.Path = strings.TrimRight(parsed.Path, "/")
+	return parsed.String()
 }
 
 // Start launches best-effort storage cleanup for expired diagnostics. Resolver

@@ -9,11 +9,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
+	"github.com/orkestra/backend/internal/core/logging/logquery"
 	"github.com/orkestra/backend/internal/core/logging/models"
 	"github.com/orkestra/backend/internal/core/logging/services"
+	"github.com/orkestra/backend/internal/shared/errcode"
 	"github.com/orkestra/backend/pkg/sdk/ctxauth"
 )
 
@@ -21,11 +24,16 @@ import (
 // Construction takes the service that owns the atomic snapshot; this
 // handler is stateless.
 type LogLevelHandler struct {
-	svc *services.LogLevelService
+	svc        *services.LogLevelService
+	logs       logquery.Provider
+	grafanaURL string
 }
 
-func NewLogLevelHandler(svc *services.LogLevelService) *LogLevelHandler {
-	return &LogLevelHandler{svc: svc}
+func NewLogLevelHandler(svc *services.LogLevelService, logs logquery.Provider, grafanaURL string) *LogLevelHandler {
+	if logs == nil {
+		logs = logquery.New("", nil)
+	}
+	return &LogLevelHandler{svc: svc, logs: logs, grafanaURL: grafanaURL}
 }
 
 // --- GET /v1/admin/observability/log-levels -----------------------------
@@ -36,8 +44,55 @@ type GetResponse struct {
 	Body models.AdminView `json:"-"`
 }
 
-func (h *LogLevelHandler) Get(_ context.Context, _ *GetRequest) (*GetResponse, error) {
-	return &GetResponse{Body: h.svc.View()}, nil
+func (h *LogLevelHandler) Get(ctx context.Context, _ *GetRequest) (*GetResponse, error) {
+	return &GetResponse{Body: h.view(ctx)}, nil
+}
+
+// --- GET /v1/admin/observability/log-levels/logs -----------------------
+
+type GetLogsRequest struct {
+	// Validation lives in logquery.Client rather than Huma schema tags so every
+	// rejected filter follows this endpoint's stable 400 error-code contract;
+	// Huma's automatic schema failures use 422.
+	Module        string `query:"module" doc:"Required registered module name"`
+	WindowMinutes int    `query:"windowMinutes" doc:"Required closed preview window: 5, 15, or 60 minutes"`
+	Level         string `query:"level" doc:"Optional level: debug, info, warn, or error"`
+	Q             string `query:"q" doc:"Optional literal text filter, at most 200 characters"`
+	Limit         int    `query:"limit" default:"50" doc:"Maximum events; values above 100 are clamped"`
+}
+
+type GetLogsResponse struct {
+	Body struct {
+		Events []models.LogEvent `json:"events"`
+	}
+}
+
+func (h *LogLevelHandler) GetLogs(ctx context.Context, req *GetLogsRequest) (*GetLogsResponse, error) {
+	if !h.logs.Status(ctx).Available {
+		return nil, errcode.New(http.StatusServiceUnavailable, errcode.LoggingLogProviderUnavailable, "Log preview is unavailable on this deployment")
+	}
+	events, err := h.logs.Query(ctx, logquery.Query{
+		Module:        req.Module,
+		WindowMinutes: req.WindowMinutes,
+		Level:         req.Level,
+		Text:          req.Q,
+		Limit:         req.Limit,
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, logquery.ErrUnavailable):
+			return nil, errcode.New(http.StatusServiceUnavailable, errcode.LoggingLogProviderUnavailable, "Log preview is unavailable on this deployment")
+		case errors.Is(err, logquery.ErrInvalidQuery):
+			return nil, errcode.New(http.StatusBadRequest, errcode.LoggingLogPreviewInvalid, "Invalid log preview filters")
+		case errors.Is(err, logquery.ErrTimeout):
+			return nil, errcode.New(http.StatusGatewayTimeout, errcode.LoggingLogProviderTimeout, "Log provider timed out")
+		default:
+			return nil, errcode.New(http.StatusBadGateway, errcode.LoggingLogProviderFailed, "Log provider request failed")
+		}
+	}
+	response := &GetLogsResponse{}
+	response.Body.Events = events
+	return response, nil
 }
 
 // --- PUT /v1/admin/observability/log-levels ----------------------------
@@ -79,7 +134,7 @@ func (h *LogLevelHandler) Apply(ctx context.Context, req *ApplyRequest) (*GetRes
 	if err != nil {
 		return nil, huma.Error500InternalServerError("persist failed", err)
 	}
-	return &GetResponse{Body: h.svc.View()}, nil
+	return &GetResponse{Body: h.view(ctx)}, nil
 }
 
 // --- PUT /v1/admin/observability/log-levels/global ---------------------
@@ -98,7 +153,7 @@ func (h *LogLevelHandler) SetGlobal(ctx context.Context, req *SetGlobalRequest) 
 	if err := h.svc.SetGlobal(ctx, lvl, actor(ctx)); err != nil {
 		return nil, huma.Error500InternalServerError("persist failed", err)
 	}
-	return &GetResponse{Body: h.svc.View()}, nil
+	return &GetResponse{Body: h.view(ctx)}, nil
 }
 
 // --- PUT /v1/admin/observability/log-levels/{module} -------------------
@@ -121,7 +176,7 @@ func (h *LogLevelHandler) SetModule(ctx context.Context, req *SetModuleRequest) 
 	if err := h.svc.SetModule(ctx, req.Module, lvl, actor(ctx)); err != nil {
 		return nil, huma.Error500InternalServerError("persist failed", err)
 	}
-	return &GetResponse{Body: h.svc.View()}, nil
+	return &GetResponse{Body: h.view(ctx)}, nil
 }
 
 // --- DELETE /v1/admin/observability/log-levels/{module} ----------------
@@ -137,7 +192,7 @@ func (h *LogLevelHandler) UnsetModule(ctx context.Context, req *UnsetModuleReque
 	if err := h.svc.UnsetModule(ctx, req.Module, actor(ctx)); err != nil {
 		return nil, huma.Error500InternalServerError("persist failed", err)
 	}
-	return &GetResponse{Body: h.svc.View()}, nil
+	return &GetResponse{Body: h.view(ctx)}, nil
 }
 
 // --- POST /v1/admin/observability/log-levels/reset ---------------------
@@ -148,7 +203,7 @@ func (h *LogLevelHandler) Reset(ctx context.Context, _ *ResetRequest) (*GetRespo
 	if err := h.svc.ResetToEnv(ctx, actor(ctx)); err != nil {
 		return nil, huma.Error500InternalServerError("reset failed", err)
 	}
-	return &GetResponse{Body: h.svc.View()}, nil
+	return &GetResponse{Body: h.view(ctx)}, nil
 }
 
 // --- PUT /v1/admin/observability/log-levels/{module}/diagnostic --------
@@ -176,7 +231,7 @@ func (h *LogLevelHandler) StartDiagnostic(ctx context.Context, req *StartDiagnos
 	if err := h.svc.StartDiagnostic(ctx, req.Module, level, expiresAt, actor(ctx)); err != nil {
 		return nil, huma.Error500InternalServerError("persist failed", err)
 	}
-	return &GetResponse{Body: h.svc.View()}, nil
+	return &GetResponse{Body: h.view(ctx)}, nil
 }
 
 // --- DELETE /v1/admin/observability/log-levels/{module}/diagnostic -----
@@ -192,7 +247,7 @@ func (h *LogLevelHandler) StopDiagnostic(ctx context.Context, req *StopDiagnosti
 	if err := h.svc.StopDiagnostic(ctx, req.Module, actor(ctx)); err != nil {
 		return nil, huma.Error500InternalServerError("persist failed", err)
 	}
-	return &GetResponse{Body: h.svc.View()}, nil
+	return &GetResponse{Body: h.view(ctx)}, nil
 }
 
 func (h *LogLevelHandler) knownModule(name string) bool {
@@ -205,6 +260,15 @@ func (h *LogLevelHandler) knownModule(name string) bool {
 		}
 	}
 	return false
+}
+
+func (h *LogLevelHandler) view(ctx context.Context) models.AdminView {
+	view := h.svc.View()
+	view.LogProvider = models.LogProviderStatus{
+		Available:  h.logs.Status(ctx).Available,
+		GrafanaURL: h.grafanaURL,
+	}
+	return view
 }
 
 func diagnosticExpiry(durationMinutes *int) (*time.Time, error) {

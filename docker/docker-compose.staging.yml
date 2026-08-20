@@ -151,6 +151,10 @@ services:
       OTEL_TRACES_ENABLED: ${OTEL_TRACES_ENABLED:-true}
       OTEL_LOGS_ENABLED: ${OTEL_LOGS_ENABLED:-false}
       OTEL_METRICS_ENABLED: ${OTEL_METRICS_ENABLED:-false}
+      # Optional Tier-1 preview URLs. Empty keeps the logging workspace usable
+      # without Loki; the observability overlay supplies trusted bases.
+      LOKI_QUERY_URL: ${LOKI_QUERY_URL:-}
+      GRAFANA_URL: ${GRAFANA_URL:-}
 
       # Sales Intelligence — runtime knobs read directly by the sales
       # module (cfg.Sales.*). Not yet migrated to ConfigService.

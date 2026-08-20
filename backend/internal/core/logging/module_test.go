@@ -19,7 +19,7 @@ import (
 	"github.com/orkestra/backend/internal/core/logging/services"
 )
 
-func TestRegisterRoutes_ExposesBatchAndDiagnosticOperations(t *testing.T) {
+func TestRegisterRoutes_ExposesBatchDiagnosticAndLogPreviewOperations(t *testing.T) {
 	router := chi.NewRouter()
 	api := humachi.New(router, huma.DefaultConfig("test", "1.0.0"))
 	RegisterRoutes(api, (*handlers.LogLevelHandler)(nil))
@@ -31,6 +31,7 @@ func TestRegisterRoutes_ExposesBatchAndDiagnosticOperations(t *testing.T) {
 		{method: http.MethodPut, path: "/v1/admin/observability/log-levels"},
 		{method: http.MethodPut, path: "/v1/admin/observability/log-levels/{module}/diagnostic"},
 		{method: http.MethodDelete, path: "/v1/admin/observability/log-levels/{module}/diagnostic"},
+		{method: http.MethodGet, path: "/v1/admin/observability/log-levels/logs"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.method+" "+tt.path, func(t *testing.T) {
@@ -44,12 +45,36 @@ func TestRegisterRoutes_ExposesBatchAndDiagnosticOperations(t *testing.T) {
 				operation = path.Put
 			case http.MethodDelete:
 				operation = path.Delete
+			case http.MethodGet:
+				operation = path.Get
 			}
 			if operation == nil {
 				t.Fatalf("%s %s is not registered", tt.method, tt.path)
 			}
 			if len(operation.Security) != 1 || len(operation.Security[0]["bearerAuth"]) != 1 || operation.Security[0]["bearerAuth"][0] != "administrator" {
 				t.Errorf("security = %+v, want bearerAuth administrator", operation.Security)
+			}
+		})
+	}
+}
+
+func TestNormalizeExternalURL(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{name: "empty is absent", raw: "", want: ""},
+		{name: "absolute HTTP base", raw: "http://localhost:3010/", want: "http://localhost:3010"},
+		{name: "absolute HTTPS path", raw: "https://grafana.example.test/base/?ignored=1#fragment", want: "https://grafana.example.test/base"},
+		{name: "relative URL rejected", raw: "/grafana", want: ""},
+		{name: "non HTTP scheme rejected", raw: "javascript:alert(1)", want: ""},
+		{name: "embedded credentials rejected", raw: "https://admin:secret@grafana.example.test", want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := normalizeExternalURL(tt.raw); got != tt.want {
+				t.Errorf("normalizeExternalURL(%q) = %q, want %q", tt.raw, got, tt.want)
 			}
 		})
 	}

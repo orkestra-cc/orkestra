@@ -30,6 +30,10 @@ var goldenCodes = map[string]string{
 	"UserSelfDeleteForbidden":          "user.self_delete_forbidden",
 	"UserLastAdminForbidden":           "user.last_admin_forbidden",
 	"UserRoleEscalationForbidden":      "user.role_escalation_forbidden",
+	"LoggingLogProviderUnavailable":    "logging.log_provider_unavailable",
+	"LoggingLogPreviewInvalid":         "logging.log_preview_invalid",
+	"LoggingLogProviderTimeout":        "logging.log_provider_timeout",
+	"LoggingLogProviderFailed":         "logging.log_provider_failed",
 }
 
 // TestCodesMatchGoldenSnapshot asserts every snapshotted code resolves

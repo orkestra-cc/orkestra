@@ -26,6 +26,16 @@ func RegisterRoutes(api huma.API, h *handlers.LogLevelHandler) {
 	}, h.Get)
 
 	huma.Register(api, huma.Operation{
+		OperationID: "admin-observability-loglevels-preview",
+		Method:      http.MethodGet,
+		Path:        "/v1/admin/observability/log-levels/logs",
+		Summary:     "Preview recent logs for one registered module",
+		Description: "Returns at most 100 minimized, redacted events from a closed Loki query. Free-text messages may still contain personal data.",
+		Tags:        []string{"Observability"},
+		Security:    []map[string][]string{{"bearerAuth": {"administrator"}}},
+	}, h.GetLogs)
+
+	huma.Register(api, huma.Operation{
 		OperationID: "admin-observability-loglevels-apply",
 		Method:      http.MethodPut,
 		Path:        "/v1/admin/observability/log-levels",

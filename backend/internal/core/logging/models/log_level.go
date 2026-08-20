@@ -125,8 +125,27 @@ type AdminView struct {
 	Global      LogLevel               `json:"global"`
 	Modules     []AdminModuleEntry     `json:"modules"`
 	Diagnostics []AdminDiagnosticEntry `json:"diagnostics"`
+	LogProvider LogProviderStatus      `json:"logProvider"`
 	UpdatedAt   time.Time              `json:"updatedAt"`
 	UpdatedBy   string                 `json:"updatedBy,omitempty"`
+}
+
+// LogProviderStatus reports optional preview/deep-link capabilities without
+// making the logging workspace depend on Loki or Grafana being deployed.
+type LogProviderStatus struct {
+	Available  bool   `json:"available"`
+	GrafanaURL string `json:"grafanaUrl,omitempty"`
+}
+
+// LogEvent is the minimized preview projection returned to Tier-1 operators.
+// Message is preserved for diagnostic usefulness and may still contain
+// personal data; Attributes contains only explicitly allowlisted fields.
+type LogEvent struct {
+	Timestamp  time.Time      `json:"timestamp"`
+	Level      LogLevel       `json:"level"`
+	Message    string         `json:"message"`
+	Module     string         `json:"module"`
+	Attributes map[string]any `json:"attributes"`
 }
 
 // AdminModuleEntry is one row in the observability admin table.
