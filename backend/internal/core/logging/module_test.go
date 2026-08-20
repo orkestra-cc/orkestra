@@ -23,6 +23,12 @@ import (
 	"github.com/orkestra/backend/internal/shared/errcode"
 )
 
+func TestLoggingModule_NavItems(t *testing.T) {
+	if items := (&LoggingModule{}).NavItems(); len(items) != 0 {
+		t.Fatalf("NavItems() = %+v, want no standalone Log levels navigation item", items)
+	}
+}
+
 func TestRegisterRoutes_ExposesBatchDiagnosticAndLogPreviewOperations(t *testing.T) {
 	router := chi.NewRouter()
 	api := humachi.New(router, huma.DefaultConfig("test", "1.0.0"))

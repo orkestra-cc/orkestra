@@ -35,10 +35,6 @@ const SOC2EvidencePage = lazy(() => import('pages/admin/compliance/soc2'));
 const ModuleManagement = lazy(() => import('pages/admin/modules'));
 const ModuleDetail = lazy(() => import('pages/admin/modules/detail'));
 const NavigationAdminPage = lazy(() => import('pages/admin/navigation'));
-// ADR-0005 Phase F — observability admin page (runtime log-level mutation).
-const LogLevelsPage = lazy(
-  () => import('pages/admin/observability/log-levels')
-);
 const RoleManagement = lazy(() => import('pages/admin/roles'));
 const ServiceAccountsPage = lazy(() => import('pages/admin/service-accounts'));
 const ServiceAccountDetail = lazy(
@@ -218,21 +214,14 @@ export function buildCoreRoutes(
                   )
                 },
                 {
-                  // ADR-0005 Phase F — runtime log-level admin.
-                  // Administrator-only by NavItem MinRole; the
-                  // ProtectedRoute below is the second gate.
+                  // ADR-0005 Phase F — legacy bookmark compatibility.
+                  // The logging module workspace is the authoritative UI.
                   path: 'observability/log-levels',
                   element: (
-                    <ProtectedRoute
-                      requiredPermissions={[['super_admin', 'administrator']]}
-                    >
-                      <Suspense
-                        key="admin-observability-log-levels"
-                        fallback={<OrkestraLoader />}
-                      >
-                        <LogLevelsPage />
-                      </Suspense>
-                    </ProtectedRoute>
+                    <Navigate
+                      to="/admin/modules/logging?section=levels"
+                      replace
+                    />
                   )
                 },
                 {

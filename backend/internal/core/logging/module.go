@@ -225,22 +225,3 @@ func (m *LoggingModule) RegisterRoutes(ri *module.RouteInfo) {
 		RegisterRoutes(api, m.handler)
 	})
 }
-
-// NavItems puts a single entry directly under the platform realm
-// (the "Administration" group). Matches the shape every other core /
-// addon admin item uses — no Section, Tier=internal, Active=true,
-// MinRole=administrator. sliders-h captures "adjust per-module
-// thresholds" better than a chart icon would.
-func (m *LoggingModule) NavItems() []module.NavItemSpec {
-	return []module.NavItemSpec{
-		{
-			Realm:   "platform",
-			Tier:    "internal",
-			Name:    "Log levels",
-			Icon:    "sliders-h",
-			Path:    "/admin/observability/log-levels",
-			MinRole: "administrator",
-			Active:  true,
-		},
-	}
-}

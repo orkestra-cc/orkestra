@@ -11,6 +11,10 @@ Owns runtime log-level configuration and bounded Tier-1 diagnostics for the slog
 
 Sits at the end of the core init order so by the time it runs, every other module has already taken its `deps.Logger` clone. The shared `resolverBox` behind `PerModuleLevelHandler` means those pre-existing clones still observe the swap.
 
+## Operator workspace and navigation
+
+The authoritative operator surface is the specialized `/admin/modules/logging` workspace. Its URL-synced `section` selects `overview`, `levels`, `diagnostics`, or `logs`; `/admin/modules/logging?section=levels` opens permanent configuration directly. The former `/admin/observability/log-levels` URL is retained only as a history-replacing redirect to that levels section, so old bookmarks stay useful without creating a second UI. `LoggingModule` deliberately contributes no standalone `NavItems()` entry: the existing Modules navigation is the single authority.
+
 ## What it owns
 
 | File | Purpose |
@@ -50,6 +54,8 @@ No declared indexes — `_id` is the primary key and that's all we filter on.
 
 `Start` launches best-effort cleanup of expired diagnostic records. `Stop` cancels and joins that loop; expiry correctness remains on the resolver hot path and does not depend on cleanup. `HealthCheck` is inherited from `BaseModule`.
 
+A diagnostic starts or replaces one module's temporary threshold for 15, 60, or 240 minutes, or with no expiry. The temporary value wins only while it remains live; expiry is enforced on every resolver read, and the cleanup loop later removes expired records from storage. Stopping a diagnostic removes it explicitly and reveals the permanent threshold again.
+
 ## HTTP endpoints
 
 All nine are mounted on the Tier-1 operator-protected router and require `system.modules.admin` (`Security: bearerAuth.administrator` documents the same boundary on every operation).
@@ -66,7 +72,7 @@ All nine are mounted on the Tier-1 operator-protected router and require `system
 | PUT    | `/v1/admin/observability/log-levels/{module}/diagnostic` | Starts/replaces a 15/60/240-minute or no-expiry diagnostic |
 | DELETE | `/v1/admin/observability/log-levels/{module}/diagnostic` | Stops a module diagnostic |
 
-The preview accepts only a registered module, a 5/15/60-minute window, an optional closed log-level enum, at most 200 search characters, and a result limit clamped to 100. It constructs LogQL itself and never accepts raw LogQL or an upstream URL. Provider absence returns a stable 503; timeout is 504; other upstream failures are 502; rejected filters are 400. Upstream bodies are never included in errors.
+The preview accepts only a registered module, a 5/15/60-minute window, an optional closed log-level enum, at most 200 search characters, and a result limit clamped to 100. It constructs LogQL itself and never accepts raw LogQL or an upstream URL. Provider absence returns a stable 503; timeout is 504; other upstream failures are 502; rejected filters are 400. Upstream bodies are never included in errors. This is deliberately a bounded diagnostic preview, not a log browser: streaming, arbitrary exploration, and full investigations remain Grafana's responsibility.
 
 Mutations return the fresh `AdminView` so the UI re-renders without a separate refetch.
 
