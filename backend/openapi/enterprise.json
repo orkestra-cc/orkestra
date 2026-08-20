@@ -320,6 +320,35 @@
         ],
         "type": "object"
       },
+      "AdminDiagnosticEntry": {
+        "additionalProperties": false,
+        "properties": {
+          "expiresAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "level": {
+            "type": "string"
+          },
+          "module": {
+            "type": "string"
+          },
+          "startedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "startedBy": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "module",
+          "level",
+          "startedAt",
+          "startedBy"
+        ],
+        "type": "object"
+      },
       "AdminInviteListOutputBody": {
         "additionalProperties": false,
         "properties": {
@@ -379,6 +408,9 @@
             "type": "boolean"
           },
           "name": {
+            "type": "string"
+          },
+          "override": {
             "type": "string"
           }
         },
@@ -902,8 +934,20 @@
             "readOnly": true,
             "type": "string"
           },
+          "diagnostics": {
+            "items": {
+              "$ref": "#/components/schemas/AdminDiagnosticEntry"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "global": {
             "type": "string"
+          },
+          "logProvider": {
+            "$ref": "#/components/schemas/LogProviderStatus"
           },
           "modules": {
             "items": {
@@ -925,7 +969,48 @@
         "required": [
           "global",
           "modules",
+          "diagnostics",
+          "logProvider",
           "updatedAt"
+        ],
+        "type": "object"
+      },
+      "ApplyRequestBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/ApplyRequestBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "expectedUpdatedAt": {
+            "description": "updatedAt from the snapshot being replaced",
+            "format": "date-time",
+            "type": "string"
+          },
+          "global": {
+            "description": "Global log level: debug | info | warn | error",
+            "examples": [
+              "info"
+            ],
+            "type": "string"
+          },
+          "perModule": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Complete desired map of per-module overrides",
+            "type": "object"
+          }
+        },
+        "required": [
+          "global",
+          "perModule",
+          "expectedUpdatedAt"
         ],
         "type": "object"
       },
@@ -2469,6 +2554,33 @@
         ],
         "type": "object"
       },
+      "GetLogsResponseBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/GetLogsResponseBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/LogEvent"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "events"
+        ],
+        "type": "object"
+      },
       "GetUserCountResponseBody": {
         "additionalProperties": false,
         "properties": {
@@ -3073,6 +3185,51 @@
             "type": "string"
           }
         },
+        "type": "object"
+      },
+      "LogEvent": {
+        "additionalProperties": false,
+        "properties": {
+          "attributes": {
+            "additionalProperties": {},
+            "type": "object"
+          },
+          "level": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "module": {
+            "type": "string"
+          },
+          "timestamp": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "timestamp",
+          "level",
+          "message",
+          "module",
+          "attributes"
+        ],
+        "type": "object"
+      },
+      "LogProviderStatus": {
+        "additionalProperties": false,
+        "properties": {
+          "available": {
+            "type": "boolean"
+          },
+          "grafanaUrl": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "available"
+        ],
         "type": "object"
       },
       "MFAAdminResetResponseBody": {
@@ -5687,6 +5844,36 @@
         },
         "required": [
           "enabled"
+        ],
+        "type": "object"
+      },
+      "StartDiagnosticRequestBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/StartDiagnosticRequestBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "durationMinutes": {
+            "description": "Expiry duration: 15, 60, or 240 minutes; omit for no expiry",
+            "format": "int64",
+            "type": "integer"
+          },
+          "level": {
+            "description": "Temporary log level override",
+            "examples": [
+              "debug"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "level"
         ],
         "type": "object"
       },
@@ -8842,6 +9029,52 @@
         "tags": [
           "Observability"
         ]
+      },
+      "put": {
+        "operationId": "admin-observability-loglevels-apply",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApplyRequestBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [
+              "administrator"
+            ]
+          }
+        ],
+        "summary": "Apply the complete permanent log-level configuration",
+        "tags": [
+          "Observability"
+        ]
       }
     },
     "/v1/admin/observability/log-levels/global": {
@@ -8887,6 +9120,98 @@
           }
         ],
         "summary": "Set the global log level",
+        "tags": [
+          "Observability"
+        ]
+      }
+    },
+    "/v1/admin/observability/log-levels/logs": {
+      "get": {
+        "description": "Returns at most 100 minimized, redacted events from a closed Loki query. Free-text messages may still contain personal data.",
+        "operationId": "admin-observability-loglevels-preview",
+        "parameters": [
+          {
+            "description": "Required registered module name",
+            "explode": false,
+            "in": "query",
+            "name": "module",
+            "schema": {
+              "description": "Required registered module name",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Required closed preview window: 5, 15, or 60 minutes",
+            "explode": false,
+            "in": "query",
+            "name": "windowMinutes",
+            "schema": {
+              "description": "Required closed preview window: 5, 15, or 60 minutes",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional level: debug, info, warn, or error",
+            "explode": false,
+            "in": "query",
+            "name": "level",
+            "schema": {
+              "description": "Optional level: debug, info, warn, or error",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional literal text filter, at most 200 characters",
+            "explode": false,
+            "in": "query",
+            "name": "q",
+            "schema": {
+              "description": "Optional literal text filter, at most 200 characters",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Maximum events; values above 100 are clamped",
+            "explode": false,
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": "50",
+              "description": "Maximum events; values above 100 are clamped",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetLogsResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [
+              "administrator"
+            ]
+          }
+        ],
+        "summary": "Preview recent logs for one registered module",
         "tags": [
           "Observability"
         ]
@@ -9031,6 +9356,114 @@
           }
         ],
         "summary": "Set a per-module log level override",
+        "tags": [
+          "Observability"
+        ]
+      }
+    },
+    "/v1/admin/observability/log-levels/{module}/diagnostic": {
+      "delete": {
+        "operationId": "admin-observability-loglevels-stop-diagnostic",
+        "parameters": [
+          {
+            "description": "Registered module name",
+            "in": "path",
+            "name": "module",
+            "required": true,
+            "schema": {
+              "description": "Registered module name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [
+              "administrator"
+            ]
+          }
+        ],
+        "summary": "Stop a module diagnostic override",
+        "tags": [
+          "Observability"
+        ]
+      },
+      "put": {
+        "operationId": "admin-observability-loglevels-start-diagnostic",
+        "parameters": [
+          {
+            "description": "Registered module name",
+            "in": "path",
+            "name": "module",
+            "required": true,
+            "schema": {
+              "description": "Registered module name",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartDiagnosticRequestBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [
+              "administrator"
+            ]
+          }
+        ],
+        "summary": "Start or replace a module diagnostic override",
         "tags": [
           "Observability"
         ]
