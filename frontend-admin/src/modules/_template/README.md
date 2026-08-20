@@ -141,7 +141,11 @@ from every page (a launcher, a drawer, a floating panel):
 
 ```ts
 globalOverlay: lazy(() => import('pages/widgets/components/WidgetsOverlay')),
+globalNavAction: lazy(() => import('pages/widgets/components/WidgetsNavAction')),
 ```
+
+`globalNavAction` is the same idea scoped to the top navbar — the launcher
+button that opens the overlay usually lives there.
 
 Core UI never imports the addon to do this. `MainLayout` renders
 `modules/runtime/ModuleGlobalOverlays`, which walks the navigation the backend

@@ -356,16 +356,15 @@ func TestEmptyNavItems_ReturnsEmptyResponseWithoutPanic(t *testing.T) {
 	}
 }
 
-// TestIconAndActiveForwarded verifies the four fields convert() actually
-// copies from spec to rendered item: Name, Path (To), Icon, Active. A
-// regression here would silently strip icons from the sidebar.
+// TestIconAndActiveForwarded verifies the public fields convert() copies from
+// the spec. A regression here would silently strip addon ownership, translation
+// keys, or icons from the frontend navigation contract.
 func TestIconAndActiveForwarded(t *testing.T) {
 	items := []module.NavItemSpec{
 		{
 			Realm: realmShared, Section: "Tools",
-			Name: "Inbox", Path: "/inbox",
-			Icon:   "fa-inbox",
-			Active: true,
+			ModuleName: "widgets", ItemKey: "widgets.inbox",
+			Name: "Inbox", Path: "/inbox", Icon: "fa-inbox", Active: true,
 		},
 		{
 			Realm: realmShared, Section: "Tools",
@@ -393,6 +392,9 @@ func TestIconAndActiveForwarded(t *testing.T) {
 	}
 	if inbox.Icon != "fa-inbox" {
 		t.Errorf("Icon = %v, want %q", inbox.Icon, "fa-inbox")
+	}
+	if inbox.ModuleName != "widgets" || inbox.ItemKey != "widgets.inbox" {
+		t.Errorf("ownership = %q/%q, want widgets/widgets.inbox", inbox.ModuleName, inbox.ItemKey)
 	}
 	if inbox.To != "/inbox" {
 		t.Errorf("To = %q, want %q", inbox.To, "/inbox")

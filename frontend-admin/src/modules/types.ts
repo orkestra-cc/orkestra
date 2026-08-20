@@ -8,6 +8,8 @@ export interface ModuleManifest {
   routes: () => RouteObject[];
   /** Optional app-wide surface, mounted only while this module is visible. */
   globalOverlay?: LazyExoticComponent<ComponentType>;
+  /** Optional top-navbar action, mounted only while this module is visible. */
+  globalNavAction?: LazyExoticComponent<ComponentType>;
   /** Dynamically imports the API slice file, triggering injectEndpoints as a side effect */
   injectApi?: () => Promise<unknown>;
   /**
