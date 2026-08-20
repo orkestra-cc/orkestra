@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"reflect"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -21,6 +22,7 @@ type fakeRepo struct {
 	doc     *models.LogLevelDoc
 	err     error // injectable for failure-path tests
 	upserts int
+	calls   int
 }
 
 func (r *fakeRepo) Get(_ context.Context) (*models.LogLevelDoc, error) {
@@ -38,6 +40,7 @@ func (r *fakeRepo) Get(_ context.Context) (*models.LogLevelDoc, error) {
 func (r *fakeRepo) Upsert(_ context.Context, doc *models.LogLevelDoc) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.calls++
 	if r.err != nil {
 		return r.err
 	}
@@ -232,6 +235,171 @@ func TestLogLevelService_PersistFailurePreservesSnapshot(t *testing.T) {
 	// In-memory snapshot must NOT advance on persist failure.
 	if svc.Global() != preGlobal {
 		t.Errorf("snapshot updated despite persist failure: %v -> %v", preGlobal, svc.Global())
+	}
+}
+
+func TestLogLevelService_ApplyPermanent(t *testing.T) {
+	ctx := context.Background()
+	baseTime := time.Date(2026, 8, 20, 12, 0, 0, 123456000, time.UTC)
+
+	setup := func(t *testing.T) (*LogLevelService, *fakeRepo, *time.Time) {
+		t.Helper()
+		svc, repo := newTestSvc(t)
+		now := baseTime
+		svc.now = func() time.Time { return now }
+		expiresAt := baseTime.Add(time.Hour)
+		if err := svc.StartDiagnostic(ctx, "auth", models.LogLevelDebug, &expiresAt, "diagnostic-operator"); err != nil {
+			t.Fatalf("StartDiagnostic: %v", err)
+		}
+		return svc, repo, &now
+	}
+
+	t.Run("replaces the complete permanent configuration with one write and preserves diagnostics", func(t *testing.T) {
+		svc, repo, now := setup(t)
+		expectedUpdatedAt := svc.View().UpdatedAt
+		*now = baseTime.Add(time.Minute)
+		beforeCalls := repo.calls
+
+		err := svc.ApplyPermanent(ctx, models.PermanentConfigInput{
+			Global: models.LogLevelError,
+			PerModule: map[string]models.LogLevel{
+				"auth":    models.LogLevelWarn,
+				"billing": models.LogLevelDebug,
+			},
+			ExpectedUpdatedAt: expectedUpdatedAt,
+		}, "config-operator")
+		if err != nil {
+			t.Fatalf("ApplyPermanent: %v", err)
+		}
+		if repo.calls != beforeCalls+1 {
+			t.Fatalf("repository calls = %d, want %d", repo.calls, beforeCalls+1)
+		}
+		if repo.doc.Global != models.LogLevelError {
+			t.Errorf("persisted global = %q, want error", repo.doc.Global)
+		}
+		if got := svc.Global(); got != slog.LevelError {
+			t.Errorf("published global = %v, want error", got)
+		}
+		wantPerModule := map[string]models.LogLevel{
+			"auth":    models.LogLevelWarn,
+			"billing": models.LogLevelDebug,
+		}
+		if !reflect.DeepEqual(repo.doc.PerModule, wantPerModule) {
+			t.Errorf("persisted per-module = %#v, want %#v", repo.doc.PerModule, wantPerModule)
+		}
+		if repo.doc.UpdatedAt != now.UTC() || repo.doc.UpdatedBy != "config-operator" {
+			t.Errorf("persisted metadata = %v,%q, want %v,%q", repo.doc.UpdatedAt, repo.doc.UpdatedBy, now.UTC(), "config-operator")
+		}
+		view := svc.View()
+		if view.UpdatedAt != now.UTC() || view.UpdatedBy != "config-operator" {
+			t.Errorf("published metadata = %v,%q, want %v,%q", view.UpdatedAt, view.UpdatedBy, now.UTC(), "config-operator")
+		}
+		diagnostic, ok := repo.doc.Diagnostics["auth"]
+		if !ok || diagnostic.Level != models.LogLevelDebug || diagnostic.StartedBy != "diagnostic-operator" {
+			t.Fatalf("persisted diagnostic = %+v,%v, want preserved auth diagnostic", diagnostic, ok)
+		}
+		if level, explicit := svc.LevelFor("auth"); level != slog.LevelDebug || !explicit {
+			t.Errorf("active LevelFor(auth) = %v,%v, want debug,true", level, explicit)
+		}
+		*now = baseTime.Add(time.Hour)
+		if level, explicit := svc.LevelFor("auth"); level != slog.LevelWarn || !explicit {
+			t.Errorf("expired LevelFor(auth) = %v,%v, want permanent warn,true", level, explicit)
+		}
+		if _, explicit := svc.LevelFor("rag"); explicit {
+			t.Error("rag env override survived complete permanent replacement")
+		}
+	})
+
+	tests := []struct {
+		name      string
+		input     func(time.Time) models.PermanentConfigInput
+		wantError error
+		persist   bool
+	}{
+		{
+			name: "rejects an unknown module before persistence",
+			input: func(updatedAt time.Time) models.PermanentConfigInput {
+				return models.PermanentConfigInput{
+					Global:            models.LogLevelInfo,
+					PerModule:         map[string]models.LogLevel{"unknown": models.LogLevelDebug},
+					ExpectedUpdatedAt: updatedAt,
+				}
+			},
+		},
+		{
+			name: "rejects an invalid global level before persistence",
+			input: func(updatedAt time.Time) models.PermanentConfigInput {
+				return models.PermanentConfigInput{
+					Global:            models.LogLevel("trace"),
+					PerModule:         map[string]models.LogLevel{"auth": models.LogLevelInfo},
+					ExpectedUpdatedAt: updatedAt,
+				}
+			},
+			wantError: models.ErrInvalidLogLevel,
+		},
+		{
+			name: "rejects an invalid module level before persistence",
+			input: func(updatedAt time.Time) models.PermanentConfigInput {
+				return models.PermanentConfigInput{
+					Global:            models.LogLevelInfo,
+					PerModule:         map[string]models.LogLevel{"auth": models.LogLevel("verbose")},
+					ExpectedUpdatedAt: updatedAt,
+				}
+			},
+			wantError: models.ErrInvalidLogLevel,
+		},
+		{
+			name: "rejects a stale timestamp before persistence",
+			input: func(updatedAt time.Time) models.PermanentConfigInput {
+				return models.PermanentConfigInput{
+					Global:            models.LogLevelError,
+					PerModule:         map[string]models.LogLevel{"auth": models.LogLevelInfo},
+					ExpectedUpdatedAt: updatedAt.Add(-time.Nanosecond),
+				}
+			},
+			wantError: ErrConfigConflict,
+		},
+		{
+			name: "keeps the published snapshot when persistence fails",
+			input: func(updatedAt time.Time) models.PermanentConfigInput {
+				return models.PermanentConfigInput{
+					Global:            models.LogLevelError,
+					PerModule:         map[string]models.LogLevel{"auth": models.LogLevelInfo},
+					ExpectedUpdatedAt: updatedAt,
+				}
+			},
+			persist: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc, repo, now := setup(t)
+			before := svc.View()
+			beforeCalls := repo.calls
+			*now = baseTime.Add(time.Minute)
+			if tt.persist {
+				repo.err = errors.New("boom")
+			}
+
+			err := svc.ApplyPermanent(ctx, tt.input(before.UpdatedAt), "config-operator")
+			if err == nil {
+				t.Fatal("ApplyPermanent succeeded, want error")
+			}
+			if tt.wantError != nil && !errors.Is(err, tt.wantError) {
+				t.Errorf("ApplyPermanent error = %v, want errors.Is(%v)", err, tt.wantError)
+			}
+			wantCalls := beforeCalls
+			if tt.persist {
+				wantCalls++
+			}
+			if repo.calls != wantCalls {
+				t.Errorf("repository calls = %d, want %d", repo.calls, wantCalls)
+			}
+			if after := svc.View(); !reflect.DeepEqual(after, before) {
+				t.Errorf("view changed after failure:\n before: %+v\n  after: %+v", before, after)
+			}
+		})
 	}
 }
 

@@ -27,6 +27,10 @@ type LevelResolver interface {
 	LevelFor(module string) (slog.Level, bool)
 }
 
+// ErrConfigConflict is returned when an operator applies a permanent
+// configuration based on an out-of-date snapshot.
+var ErrConfigConflict = errors.New("logging configuration changed since it was loaded")
+
 // snapshot is the immutable value stored under the atomic.Pointer.
 // Replaced wholesale on every mutation so readers never see a
 // partially-updated state.
@@ -130,6 +134,41 @@ func (s *LogLevelService) LevelFor(module string) (slog.Level, bool) {
 	}
 	l, ok := snap.perModule[module]
 	return l, ok
+}
+
+// ApplyPermanent atomically replaces the complete permanent configuration.
+// Diagnostics remain unchanged. ExpectedUpdatedAt prevents a stale operator
+// draft from overwriting a newer configuration.
+func (s *LogLevelService) ApplyPermanent(ctx context.Context, input models.PermanentConfigInput, actor string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	cur := s.copyCurrentSnapshot()
+	if !cur.updatedAt.Equal(input.ExpectedUpdatedAt) {
+		return ErrConfigConflict
+	}
+
+	global, err := models.Parse(string(input.Global))
+	if err != nil {
+		return fmt.Errorf("global log level: %w", err)
+	}
+	perModule := make(map[string]slog.Level, len(input.PerModule))
+	for module, level := range input.PerModule {
+		if !s.moduleCt.contains(module) {
+			return fmt.Errorf("unknown logging module %q", module)
+		}
+		parsed, err := models.Parse(string(level))
+		if err != nil {
+			return fmt.Errorf("log level for module %q: %w", module, err)
+		}
+		perModule[module] = parsed.Slog()
+	}
+
+	cur.global = global.Slog()
+	cur.perModule = perModule
+	cur.updatedAt = s.now().UTC()
+	cur.updatedBy = actor
+	return s.persistAndPublish(ctx, cur)
 }
 
 // SetGlobal updates the global threshold and persists. Mutates

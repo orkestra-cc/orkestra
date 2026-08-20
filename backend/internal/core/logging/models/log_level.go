@@ -70,6 +70,15 @@ func (l LogLevel) Slog() slog.Level {
 // ErrInvalidLogLevel is returned by Parse for unrecognised input.
 var ErrInvalidLogLevel = errors.New("invalid log level (expected debug | info | warn | error)")
 
+// PermanentConfigInput is the complete desired permanent log-level
+// configuration. ExpectedUpdatedAt provides optimistic concurrency against
+// the server snapshot the operator edited.
+type PermanentConfigInput struct {
+	Global            LogLevel
+	PerModule         map[string]LogLevel
+	ExpectedUpdatedAt time.Time
+}
+
 // LogLevelDoc is the single-document shape persisted in the
 // log_levels collection. There is exactly one document per
 // deployment — keyed by ConfigKey — so admin mutations are simple
