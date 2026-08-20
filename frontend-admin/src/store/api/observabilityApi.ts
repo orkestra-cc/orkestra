@@ -42,9 +42,7 @@ export const observabilityApi = baseApi.injectEndpoints({
         url: `/v1/admin/observability/log-levels/${encodeURIComponent(module)}/diagnostic`,
         method: 'PUT',
         body:
-          durationMinutes === undefined
-            ? { level }
-            : { level, durationMinutes }
+          durationMinutes === undefined ? { level } : { level, durationMinutes }
       }),
       invalidatesTags: [{ type: 'LogLevels' as const, id: 'SNAPSHOT' }]
     }),
@@ -130,8 +128,4 @@ export const {
 export const useGetLogPreviewQuery = (
   filters: LogPreviewFilters | undefined,
   options?: Parameters<typeof useGetLogPreviewQueryBase>[1]
-) =>
-  useGetLogPreviewQueryBase(
-    filters?.module ? filters : skipToken,
-    options
-  );
+) => useGetLogPreviewQueryBase(filters?.module ? filters : skipToken, options);

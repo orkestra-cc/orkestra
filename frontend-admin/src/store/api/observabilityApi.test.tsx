@@ -1,15 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { http, HttpResponse } from 'msw';
 import { Provider } from 'react-redux';
-import { createElement, type ReactNode } from 'react';
+import type { ReactNode } from 'react';
 import { renderHook, waitFor } from '@testing-library/react';
 import { server } from 'test/server';
 import { setupStore, type TestStore } from 'test/render';
 import { url } from 'test/handlers';
-import {
-  observabilityApi,
-  useGetLogPreviewQuery
-} from './observabilityApi';
+import { observabilityApi, useGetLogPreviewQuery } from './observabilityApi';
 import type {
   LogLevelsView,
   PermanentLogLevelsInput
@@ -43,8 +40,9 @@ const logLevelsView: LogLevelsView = {
 };
 
 const wrapperFor = (store: TestStore) => {
-  const QueryProvider = ({ children }: { children: ReactNode }) =>
-    createElement(Provider, { store, children });
+  const QueryProvider = ({ children }: { children: ReactNode }) => (
+    <Provider store={store}>{children}</Provider>
+  );
   return QueryProvider;
 };
 
@@ -67,13 +65,16 @@ describe('observabilityApi', () => {
         snapshots += 1;
         return HttpResponse.json(logLevelsView);
       }),
-      http.put(url('/v1/admin/observability/log-levels'), async ({ request }) => {
-        requests.push({
-          method: request.method,
-          body: await request.json()
-        });
-        return HttpResponse.json(logLevelsView);
-      })
+      http.put(
+        url('/v1/admin/observability/log-levels'),
+        async ({ request }) => {
+          requests.push({
+            method: request.method,
+            body: await request.json()
+          });
+          return HttpResponse.json(logLevelsView);
+        }
+      )
     );
     const store = setupStore();
     const input: PermanentLogLevelsInput = {
@@ -105,7 +106,11 @@ describe('observabilityApi', () => {
   });
 
   it('starts a diagnostic through an encoded module path and refreshes the snapshot', async () => {
-    const captured: { method: string | null; path: string | null; body: unknown } = {
+    const captured: {
+      method: string | null;
+      path: string | null;
+      body: unknown;
+    } = {
       method: null,
       path: null,
       body: null
@@ -184,16 +189,20 @@ describe('observabilityApi', () => {
   });
 
   it('serializes all bounded log-preview filters as query parameters', async () => {
-    const captured: { method: string | null; params: URLSearchParams | null } = {
-      method: null,
-      params: null
-    };
+    const captured: { method: string | null; params: URLSearchParams | null } =
+      {
+        method: null,
+        params: null
+      };
     server.use(
-      http.get(url('/v1/admin/observability/log-levels/logs'), ({ request }) => {
-        captured.method = request.method;
-        captured.params = new URL(request.url).searchParams;
-        return HttpResponse.json({ events: [] });
-      })
+      http.get(
+        url('/v1/admin/observability/log-levels/logs'),
+        ({ request }) => {
+          captured.method = request.method;
+          captured.params = new URL(request.url).searchParams;
+          return HttpResponse.json({ events: [] });
+        }
+      )
     );
     const store = setupStore();
 
