@@ -584,8 +584,9 @@ describe('LoggingModulePage', () => {
     const resolvers = new Map<string, () => void>();
     server.use(
       http.delete('*', async ({ request }) => {
+        const pathSegments = new URL(request.url).pathname.split('/');
         const moduleName = decodeURIComponent(
-          new URL(request.url).pathname.split('/').at(-2) ?? ''
+          pathSegments[pathSegments.length - 2] ?? ''
         );
         await new Promise<void>(resolve => resolvers.set(moduleName, resolve));
         return HttpResponse.json(view);
