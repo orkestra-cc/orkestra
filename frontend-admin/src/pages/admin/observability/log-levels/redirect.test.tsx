@@ -1,6 +1,10 @@
 import { render, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
-import { createMemoryRouter, RouterProvider, type RouteObject } from 'react-router';
+import {
+  createMemoryRouter,
+  RouterProvider,
+  type RouteObject
+} from 'react-router';
 import { describe, expect, it, vi } from 'vitest';
 import { buildCoreRoutes } from 'routes/coreRoutes';
 
@@ -35,7 +39,10 @@ describe('legacy log-level route', () => {
           path: '/admin/observability/log-levels',
           element: legacyRoute?.element
         },
-        { path: '/admin/modules/logging', element: <div>Logging workspace</div> }
+        {
+          path: '/admin/modules/logging',
+          element: <div>Logging workspace</div>
+        }
       ],
       {
         initialEntries: ['/previous', '/admin/observability/log-levels'],
