@@ -9135,6 +9135,7 @@
             "explode": false,
             "in": "query",
             "name": "module",
+            "required": true,
             "schema": {
               "description": "Required registered module name",
               "type": "string"
@@ -9145,9 +9146,15 @@
             "explode": false,
             "in": "query",
             "name": "windowMinutes",
+            "required": true,
             "schema": {
               "description": "Required closed preview window: 5, 15, or 60 minutes",
-              "type": "string"
+              "enum": [
+                5,
+                15,
+                60
+              ],
+              "type": "integer"
             }
           },
           {
@@ -9157,6 +9164,12 @@
             "name": "level",
             "schema": {
               "description": "Optional level: debug, info, warn, or error",
+              "enum": [
+                "debug",
+                "info",
+                "warn",
+                "error"
+              ],
               "type": "string"
             }
           },
@@ -9167,6 +9180,7 @@
             "name": "q",
             "schema": {
               "description": "Optional literal text filter, at most 200 characters",
+              "maxLength": 200,
               "type": "string"
             }
           },
@@ -9176,9 +9190,11 @@
             "in": "query",
             "name": "limit",
             "schema": {
-              "default": "50",
+              "default": 50,
               "description": "Maximum events; values above 100 are clamped",
-              "type": "string"
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
             }
           }
         ],
