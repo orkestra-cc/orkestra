@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { Alert, Button, Form, Spinner } from 'react-bootstrap';
 import { faSliders } from '@fortawesome/free-solid-svg-icons';
 import type { ColumnDef } from '@tanstack/react-table';
@@ -18,18 +18,22 @@ import {
 
 interface PermanentLevelsPanelProps {
   snapshot: LogLevelsView;
-  onReload: () => Promise<unknown>;
+  editor: PermanentEditor;
+  setEditor: React.Dispatch<React.SetStateAction<PermanentEditor | null>>;
+  onReload: () => Promise<LogLevelsView>;
 }
 
-interface PermanentDraft {
+export interface PermanentDraft {
   global: LogLevel;
   perModule: Record<string, LogLevel>;
 }
 
-interface PermanentEditor {
+export interface PermanentEditor {
   baseline: PermanentDraft;
   draft: PermanentDraft;
   expectedUpdatedAt: string;
+  conflict: boolean;
+  saveError: boolean;
 }
 
 const levelVariant: Record<LogLevel, BadgeColor> = {
@@ -39,16 +43,29 @@ const levelVariant: Record<LogLevel, BadgeColor> = {
   error: 'danger'
 };
 
-const draftFromSnapshot = (snapshot: LogLevelsView): PermanentDraft => ({
+export const draftFromSnapshot = (snapshot: LogLevelsView): PermanentDraft => ({
   global: snapshot.global,
   perModule: Object.fromEntries(
     snapshot.modules
-      .filter(module => module.hasOverride)
-      .map(module => [module.name, module.effective])
+      .filter(module => module.override !== undefined)
+      .map(module => [module.name, module.override as LogLevel])
   )
 });
 
-const countChanges = (
+export const editorFromSnapshot = (
+  snapshot: LogLevelsView
+): PermanentEditor => {
+  const draft = draftFromSnapshot(snapshot);
+  return {
+    baseline: draft,
+    draft,
+    expectedUpdatedAt: snapshot.updatedAt,
+    conflict: false,
+    saveError: false
+  };
+};
+
+export const countChanges = (
   baseline: PermanentDraft,
   draft: PermanentDraft
 ): number => {
@@ -73,18 +90,12 @@ const isConflict = (error: unknown): boolean =>
 
 const PermanentLevelsPanel = ({
   snapshot,
+  editor,
+  setEditor,
   onReload
 }: PermanentLevelsPanelProps) => {
   const { t } = useTranslation();
-  const initialDraft = draftFromSnapshot(snapshot);
-  const [editor, setEditor] = useState<PermanentEditor>({
-    baseline: initialDraft,
-    draft: initialDraft,
-    expectedUpdatedAt: snapshot.updatedAt
-  });
   const [applyPermanent, applyStatus] = useApplyPermanentLogLevelsMutation();
-  const [conflict, setConflict] = useState(false);
-  const [saveError, setSaveError] = useState(false);
 
   const dirtyCount = countChanges(editor.baseline, editor.draft);
   const hasDebug =
@@ -93,64 +104,83 @@ const PermanentLevelsPanel = ({
 
   const setGlobal = (global: LogLevel) => {
     setEditor(current => ({
-      ...current,
-      draft: { ...current.draft, global }
+      ...(current ?? editor),
+      draft: { ...(current ?? editor).draft, global },
+      conflict: false,
+      saveError: false
     }));
-    setConflict(false);
-    setSaveError(false);
   };
 
   const setModule = (moduleName: string, value: string) => {
     setEditor(current => {
-      const perModule = { ...current.draft.perModule };
+      const activeEditor = current ?? editor;
+      const perModule = { ...activeEditor.draft.perModule };
       if (value === 'inherit') {
         delete perModule[moduleName];
       } else {
         perModule[moduleName] = value as LogLevel;
       }
       return {
-        ...current,
-        draft: { ...current.draft, perModule }
+        ...activeEditor,
+        draft: { ...activeEditor.draft, perModule },
+        conflict: false,
+        saveError: false
       };
     });
-    setConflict(false);
-    setSaveError(false);
   };
 
   const handleDiscard = () => {
-    setEditor(current => ({ ...current, draft: current.baseline }));
-    setConflict(false);
-    setSaveError(false);
+    setEditor(current => {
+      const activeEditor = current ?? editor;
+      return {
+        ...activeEditor,
+        draft: activeEditor.baseline,
+        conflict: false,
+        saveError: false
+      };
+    });
   };
 
   const handleApply = async () => {
-    setConflict(false);
-    setSaveError(false);
+    setEditor(current => ({
+      ...(current ?? editor),
+      conflict: false,
+      saveError: false
+    }));
     try {
       const saved = await applyPermanent({
         global: editor.draft.global,
         perModule: editor.draft.perModule,
         expectedUpdatedAt: editor.expectedUpdatedAt
       }).unwrap();
-      const savedDraft = draftFromSnapshot(saved);
-      setEditor({
-        baseline: savedDraft,
-        draft: savedDraft,
-        expectedUpdatedAt: saved.updatedAt
-      });
+      setEditor(editorFromSnapshot(saved));
     } catch (error) {
       if (isConflict(error)) {
-        setConflict(true);
+        setEditor(current => ({
+          ...(current ?? editor),
+          conflict: true,
+          saveError: false
+        }));
       } else {
-        setSaveError(true);
+        setEditor(current => ({
+          ...(current ?? editor),
+          conflict: false,
+          saveError: true
+        }));
       }
     }
   };
 
   const handleReload = async () => {
-    await onReload();
-    setConflict(false);
-    setSaveError(false);
+    try {
+      const latest = await onReload();
+      setEditor(editorFromSnapshot(latest));
+    } catch {
+      setEditor(current => ({
+        ...(current ?? editor),
+        saveError: true
+      }));
+    }
   };
 
   const columns = useMemo<ColumnDef<AdminModuleEntry>[]>(
@@ -290,7 +320,7 @@ const PermanentLevelsPanel = ({
         )}
       </SectionCard>
 
-      {conflict && (
+      {editor.conflict && (
         <Alert variant="warning" className="mt-3 fs-10">
           <div className="d-flex flex-wrap align-items-center justify-content-between gap-2">
             <span>
@@ -303,7 +333,7 @@ const PermanentLevelsPanel = ({
         </Alert>
       )}
 
-      {saveError && (
+      {editor.saveError && (
         <Alert variant="danger" className="mt-3 fs-10">
           {t('adminObservability.loggingWorkspace.levels.saveFailed')}
         </Alert>
@@ -326,7 +356,7 @@ const PermanentLevelsPanel = ({
               {t('adminObservability.loggingWorkspace.levels.discard')}
             </Button>
             <Button
-              variant="falcon-primary"
+              variant="orkestra-primary"
               size="sm"
               disabled={applyStatus.isLoading}
               onClick={handleApply}

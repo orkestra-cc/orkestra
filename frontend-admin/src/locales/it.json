@@ -1590,6 +1590,14 @@
     },
     "loggingWorkspace": {
       "loadFailed": "Impossibile caricare le operazioni di logging. I controlli dei livelli e la diagnostica non sono temporaneamente disponibili.",
+      "loading": "Caricamento delle operazioni di logging…",
+      "loadingAria": "Caricamento delle operazioni di logging",
+      "unsaved": {
+        "title": "Modifiche permanenti non salvate",
+        "body": "Uscendo dall'area di logging, la bozza dei livelli di log permanenti verrà eliminata.",
+        "stay": "Resta nell'area",
+        "leave": "Elimina ed esci"
+      },
       "sections": {
         "overview": "Panoramica",
         "operations": "Operazioni",
@@ -1673,7 +1681,9 @@
       },
       "logs": {
         "title": "Anteprima log recenti",
-        "description": "Esamina fino a 100 eventi redatti tramite filtri vincolati. Usa Grafana per un'indagine completa.",
+        "description": "Esamina fino a 100 eventi tramite filtri vincolati. Usa Grafana per un'indagine completa.",
+        "privacyNotice": "Gli attributi strutturati sono minimizzati e redatti. I messaggi in testo libero possono comunque contenere dati personali; verificali prima di condividerli.",
+        "statusAria": "Stato dell'anteprima log",
         "providerUnavailable": "L'anteprima dei log non è disponibile in questo deployment.",
         "moduleLabel": "Modulo",
         "moduleAria": "Modulo dell'anteprima log",
@@ -1695,6 +1705,8 @@
         "loading": "Caricamento eventi recenti…",
         "loadFailed": "L'anteprima dei log non è riuscita. Controlla il provider e riprova.",
         "empty": "Nessun evento di log corrisponde a questi filtri.",
+        "resultsCount_one": "È visualizzato {{count}} evento di log.",
+        "resultsCount_other": "Sono visualizzati {{count}} eventi di log.",
         "openGrafana": "Apri in Grafana",
         "noAttributes": "Nessuno",
         "showAttributes": "Mostra attributi",
@@ -1706,7 +1718,7 @@
           "level": "Livello",
           "module": "Modulo",
           "message": "Messaggio",
-          "attributes": "Attributi sicuri"
+          "attributes": "Attributi minimizzati"
         }
       }
     }

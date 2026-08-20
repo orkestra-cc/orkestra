@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Alert, Button, Col, Form, Row, Spinner } from 'react-bootstrap';
 import { faBug, faClock } from '@fortawesome/free-solid-svg-icons';
 import { useTranslation } from 'react-i18next';
@@ -18,6 +18,7 @@ import {
 
 interface DiagnosticsPanelProps {
   snapshot: LogLevelsView;
+  onDiagnosticsExpired: () => Promise<unknown>;
 }
 
 type DurationSelection = `${DiagnosticDurationMinutes}` | 'none';
@@ -29,29 +30,58 @@ const levelVariant: Record<LogLevel, BadgeColor> = {
   error: 'danger'
 };
 
-const DiagnosticsPanel = ({ snapshot }: DiagnosticsPanelProps) => {
+const DiagnosticsPanel = ({
+  snapshot,
+  onDiagnosticsExpired
+}: DiagnosticsPanelProps) => {
   const { t } = useTranslation();
   const [moduleName, setModuleName] = useState(snapshot.modules[0]?.name ?? '');
   const [level, setLevel] = useState<LogLevel>('debug');
   const [duration, setDuration] = useState<DurationSelection>('60');
   const [now, setNow] = useState(Date.now());
-  const [stoppingModule, setStoppingModule] = useState<string | null>(null);
+  const [stoppingModules, setStoppingModules] = useState<Set<string>>(
+    new Set()
+  );
   const [actionError, setActionError] = useState(false);
+  const reportedExpiries = useRef<Set<string>>(new Set());
   const [startDiagnostic, startStatus] = useStartDiagnosticMutation();
   const [stopDiagnostic] = useStopDiagnosticMutation();
 
-  const hasExpiringDiagnostic = snapshot.diagnostics.some(
-    diagnostic => diagnostic.expiresAt
+  const visibleDiagnostics = snapshot.diagnostics.filter(
+    diagnostic =>
+      !diagnostic.expiresAt || new Date(diagnostic.expiresAt).getTime() > now
+  );
+  const hasFutureExpiry = visibleDiagnostics.some(
+    diagnostic => diagnostic.expiresAt !== undefined
   );
 
   // Countdown text is the one piece of this panel that changes without a user
   // event or a server response. A one-second timer is therefore necessary;
   // expiry authority still remains the server timestamps in the snapshot.
   useEffect(() => {
-    if (!hasExpiringDiagnostic) return;
-    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    if (!hasFutureExpiry) return;
+    const timer = window.setInterval(() => {
+      const currentTime = Date.now();
+      setNow(currentTime);
+      const newlyExpired = snapshot.diagnostics.filter(diagnostic => {
+        if (!diagnostic.expiresAt) return false;
+        const expiryKey = `${diagnostic.module}:${diagnostic.expiresAt}`;
+        return (
+          new Date(diagnostic.expiresAt).getTime() <= currentTime &&
+          !reportedExpiries.current.has(expiryKey)
+        );
+      });
+      if (newlyExpired.length > 0) {
+        newlyExpired.forEach(diagnostic => {
+          reportedExpiries.current.add(
+            `${diagnostic.module}:${diagnostic.expiresAt}`
+          );
+        });
+        void onDiagnosticsExpired().catch(() => undefined);
+      }
+    }, 1000);
     return () => window.clearInterval(timer);
-  }, [hasExpiringDiagnostic]);
+  }, [hasFutureExpiry, onDiagnosticsExpired, snapshot.diagnostics]);
 
   const formatRemaining = (expiresAt: string): string => {
     const seconds = Math.max(
@@ -91,14 +121,18 @@ const DiagnosticsPanel = ({ snapshot }: DiagnosticsPanelProps) => {
   };
 
   const handleStop = async (targetModule: string) => {
-    setStoppingModule(targetModule);
+    setStoppingModules(current => new Set(current).add(targetModule));
     setActionError(false);
     try {
       await stopDiagnostic({ module: targetModule }).unwrap();
     } catch {
       setActionError(true);
     } finally {
-      setStoppingModule(null);
+      setStoppingModules(current => {
+        const next = new Set(current);
+        next.delete(targetModule);
+        return next;
+      });
     }
   };
 
@@ -199,7 +233,7 @@ const DiagnosticsPanel = ({ snapshot }: DiagnosticsPanelProps) => {
           </Col>
           <Col md={2}>
             <Button
-              variant="falcon-primary"
+              variant="orkestra-primary"
               className="w-100"
               disabled={!moduleName || startStatus.isLoading}
               onClick={handleStart}
@@ -239,13 +273,13 @@ const DiagnosticsPanel = ({ snapshot }: DiagnosticsPanelProps) => {
         icon={faClock}
         title={t('adminObservability.loggingWorkspace.diagnostics.activeTitle')}
       >
-        {snapshot.diagnostics.length === 0 ? (
+        {visibleDiagnostics.length === 0 ? (
           <p className="text-muted fs-10 mb-0">
             {t('adminObservability.loggingWorkspace.diagnostics.empty')}
           </p>
         ) : (
           <div className="d-flex flex-column gap-3">
-            {snapshot.diagnostics.map(diagnostic => (
+            {visibleDiagnostics.map(diagnostic => (
               <div
                 key={diagnostic.module}
                 className="border rounded p-3 d-flex flex-column gap-2"
@@ -265,16 +299,16 @@ const DiagnosticsPanel = ({ snapshot }: DiagnosticsPanelProps) => {
                     )}
                   </div>
                   <Button
-                    variant="falcon-danger"
+                    variant="orkestra-danger"
                     size="sm"
-                    disabled={stoppingModule === diagnostic.module}
+                    disabled={stoppingModules.has(diagnostic.module)}
                     aria-label={t(
                       'adminObservability.loggingWorkspace.diagnostics.stopAria',
                       { module: diagnostic.module }
                     )}
                     onClick={() => handleStop(diagnostic.module)}
                   >
-                    {stoppingModule === diagnostic.module && (
+                    {stoppingModules.has(diagnostic.module) && (
                       <Spinner animation="border" size="sm" className="me-2" />
                     )}
                     {t('adminObservability.loggingWorkspace.diagnostics.stop')}

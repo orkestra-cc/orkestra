@@ -184,7 +184,7 @@ const LogPreviewPanel = ({ snapshot }: LogPreviewPanelProps) => {
       href={snapshot.logProvider.grafanaUrl}
       target="_blank"
       rel="noreferrer"
-      className="btn btn-falcon-primary btn-sm"
+      className="btn btn-orkestra-primary btn-sm"
     >
       <FontAwesomeIcon icon={faArrowUpRightFromSquare} className="me-2" />
       {t('adminObservability.loggingWorkspace.logs.openGrafana')}
@@ -200,7 +200,9 @@ const LogPreviewPanel = ({ snapshot }: LogPreviewPanelProps) => {
       <p className="text-muted fs-10">
         {t('adminObservability.loggingWorkspace.logs.description')}
       </p>
-
+      <Alert variant="warning" className="fs-10 py-2">
+        {t('adminObservability.loggingWorkspace.logs.privacyNotice')}
+      </Alert>
       {!snapshot.logProvider.available ? (
         <Alert variant="secondary" className="fs-10 mb-0">
           {t('adminObservability.loggingWorkspace.logs.providerUnavailable')}
@@ -302,7 +304,7 @@ const LogPreviewPanel = ({ snapshot }: LogPreviewPanelProps) => {
             </Col>
             <Col md={4} xl={2}>
               <Button
-                variant="falcon-primary"
+                variant="orkestra-primary"
                 className="w-100"
                 disabled={preview.isFetching}
                 aria-label={t(
@@ -346,20 +348,41 @@ const LogPreviewPanel = ({ snapshot }: LogPreviewPanelProps) => {
               {t('adminObservability.loggingWorkspace.logs.loadFailed')}
             </Alert>
           ) : (preview.data?.events.length ?? 0) === 0 ? (
-            <p className="text-muted fs-10 mb-0">
+            <p
+              className="text-muted fs-10 mb-0"
+              role="status"
+              aria-live="polite"
+              aria-label={t(
+                'adminObservability.loggingWorkspace.logs.statusAria'
+              )}
+            >
               {t('adminObservability.loggingWorkspace.logs.empty')}
             </p>
           ) : (
-            <AdvanceTableProvider {...table}>
-              <AdvanceTable
-                headerClassName="text-nowrap align-middle"
-                rowClassName="align-middle"
-                tableProps={{
-                  striped: true,
-                  className: 'fs-10 mb-0 overflow-hidden'
-                }}
-              />
-            </AdvanceTableProvider>
+            <>
+              <div
+                role="status"
+                aria-live="polite"
+                aria-label={t(
+                  'adminObservability.loggingWorkspace.logs.statusAria'
+                )}
+                className="visually-hidden"
+              >
+                {t('adminObservability.loggingWorkspace.logs.resultsCount', {
+                  count: preview.data?.events.length ?? 0
+                })}
+              </div>
+              <AdvanceTableProvider {...table}>
+                <AdvanceTable
+                  headerClassName="text-nowrap align-middle"
+                  rowClassName="align-middle"
+                  tableProps={{
+                    striped: true,
+                    className: 'fs-10 mb-0 overflow-hidden'
+                  }}
+                />
+              </AdvanceTableProvider>
+            </>
           )}
         </>
       )}

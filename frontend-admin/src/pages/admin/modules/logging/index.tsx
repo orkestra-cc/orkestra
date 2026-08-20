@@ -1,6 +1,6 @@
-import { useEffect } from 'react';
-import { Alert, Card, Col, Row, Spinner } from 'react-bootstrap';
-import { Navigate, useSearchParams } from 'react-router';
+import { useCallback, useEffect, useState } from 'react';
+import { Alert, Button, Card, Col, Modal, Row, Spinner } from 'react-bootstrap';
+import { Navigate, useBlocker, useSearchParams } from 'react-router';
 import { useTranslation } from 'react-i18next';
 import {
   useGetModuleQuery,
@@ -15,7 +15,11 @@ import ModuleOverviewPanel from '../detail/ModuleOverviewPanel';
 import DiagnosticsPanel from './DiagnosticsPanel';
 import LoggingOverview from './LoggingOverview';
 import LogPreviewPanel from './LogPreviewPanel';
-import PermanentLevelsPanel from './PermanentLevelsPanel';
+import PermanentLevelsPanel, {
+  countChanges,
+  editorFromSnapshot,
+  type PermanentEditor
+} from './PermanentLevelsPanel';
 
 type LoggingSection = 'overview' | 'levels' | 'diagnostics' | 'logs';
 
@@ -49,6 +53,32 @@ export const LoggingModulePage = () => {
     error: snapshotError,
     refetch: refetchSnapshot
   } = useGetLogLevelsQuery();
+  const [permanentEditor, setPermanentEditor] =
+    useState<PermanentEditor | null>(null);
+
+  // The server snapshot is external state. Seed the editor when it first
+  // arrives and accept later snapshots only while the editor is clean; a
+  // refetch must never overwrite an operator's draft or conflict recovery.
+  useEffect(() => {
+    if (!snapshot) return;
+    setPermanentEditor(current => {
+      if (!current) return editorFromSnapshot(snapshot);
+      if (countChanges(current.baseline, current.draft) > 0) return current;
+      if (current.expectedUpdatedAt === snapshot.updatedAt) return current;
+      return editorFromSnapshot(snapshot);
+    });
+  }, [snapshot]);
+
+  const dirtyCount = permanentEditor
+    ? countChanges(permanentEditor.baseline, permanentEditor.draft)
+    : 0;
+
+  // Section switches keep one editor mounted and are safe. Only leaving this
+  // route would discard a draft, so mirror the generic module detail guard.
+  const blocker = useBlocker(
+    ({ currentLocation, nextLocation }) =>
+      dirtyCount > 0 && currentLocation.pathname !== nextLocation.pathname
+  );
 
   const setActiveSection = (section: string) => {
     if (!VALID_SECTIONS.includes(section as LoggingSection)) return;
@@ -66,15 +96,26 @@ export const LoggingModulePage = () => {
   // propagating the dead section value. URL synchronization is an external
   // router side effect, so it belongs in this focused effect.
   useEffect(() => {
-    if (requestedSection && requestedSection !== activeSection) {
+    if (requestedSection !== null && requestedSection !== activeSection) {
       setActiveSection(activeSection);
     }
   }, [requestedSection, activeSection]);
 
+  const reloadSnapshot = useCallback(async () => {
+    return refetchSnapshot().unwrap();
+  }, [refetchSnapshot]);
+
   if (moduleLoading || snapshotLoading) {
     return (
-      <div className="text-center py-5">
+      <div
+        className="text-center py-5"
+        role="status"
+        aria-label={t('adminObservability.loggingWorkspace.loadingAria')}
+      >
         <Spinner animation="border" />
+        <span className="visually-hidden">
+          {t('adminObservability.loggingWorkspace.loading')}
+        </span>
       </div>
     );
   }
@@ -89,6 +130,34 @@ export const LoggingModulePage = () => {
 
   return (
     <>
+      {blocker.state === 'blocked' && (
+        <Modal show centered onHide={() => blocker.reset()}>
+          <Modal.Header closeButton>
+            <Modal.Title as="h2">
+              {t('adminObservability.loggingWorkspace.unsaved.title')}
+            </Modal.Title>
+          </Modal.Header>
+          <Modal.Body className="fs-10">
+            {t('adminObservability.loggingWorkspace.unsaved.body')}
+          </Modal.Body>
+          <Modal.Footer>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => blocker.reset()}
+            >
+              {t('adminObservability.loggingWorkspace.unsaved.stay')}
+            </Button>
+            <Button
+              variant="danger"
+              size="sm"
+              onClick={() => blocker.proceed()}
+            >
+              {t('adminObservability.loggingWorkspace.unsaved.leave')}
+            </Button>
+          </Modal.Footer>
+        </Modal>
+      )}
       <ModuleDetailHeader module={module} />
 
       <Row className="g-3">
@@ -159,18 +228,20 @@ export const LoggingModulePage = () => {
                 </>
               )}
 
-              {activeSection === 'levels' && (
+              {activeSection === 'levels' && permanentEditor && (
                 <PermanentLevelsPanel
-                  key={snapshot.updatedAt}
                   snapshot={snapshot}
-                  onReload={async () => {
-                    await refetchSnapshot();
-                  }}
+                  editor={permanentEditor}
+                  setEditor={setPermanentEditor}
+                  onReload={reloadSnapshot}
                 />
               )}
 
               {activeSection === 'diagnostics' && (
-                <DiagnosticsPanel snapshot={snapshot} />
+                <DiagnosticsPanel
+                  snapshot={snapshot}
+                  onDiagnosticsExpired={reloadSnapshot}
+                />
               )}
 
               {activeSection === 'logs' && (

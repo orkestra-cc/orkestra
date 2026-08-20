@@ -1,6 +1,7 @@
 import {
   act,
   fireEvent,
+  render,
   screen,
   waitFor,
   within
@@ -8,8 +9,9 @@ import {
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { useLocation } from 'react-router';
-import { renderWithProviders } from 'test/render';
+import { Provider } from 'react-redux';
+import { createMemoryRouter, RouterProvider, useLocation } from 'react-router';
+import { setupStore } from 'test/render';
 import { url } from 'test/handlers';
 import { server } from 'test/server';
 import type { ModuleConfig } from 'store/api/moduleApi';
@@ -49,7 +51,12 @@ const snapshot = (overrides: Partial<LogLevelsView> = {}): LogLevelsView => ({
   global: 'info',
   modules: [
     { name: 'auth', effective: 'info', hasOverride: false },
-    { name: 'logging', effective: 'debug', hasOverride: true }
+    {
+      name: 'logging',
+      effective: 'debug',
+      override: 'debug',
+      hasOverride: true
+    }
   ],
   diagnostics: [],
   logProvider: {
@@ -94,14 +101,33 @@ const stubWorkspace = (view: LogLevelsView = snapshot()) => {
   );
 };
 
-const renderAt = (search = '') =>
-  renderWithProviders(
-    <>
-      <LocationProbe />
-      <LoggingModulePage />
-    </>,
-    { routerEntries: [`/admin/modules/logging${search}`] }
+const renderAt = (search = '') => {
+  const store = setupStore();
+  const router = createMemoryRouter(
+    [
+      {
+        path: '/admin/modules/logging',
+        element: (
+          <>
+            <LocationProbe />
+            <LoggingModulePage />
+          </>
+        )
+      },
+      { path: '/else', element: <div>Outside workspace</div> }
+    ],
+    { initialEntries: [`/admin/modules/logging${search}`] }
   );
+  return {
+    router,
+    store,
+    ...render(
+      <Provider store={store}>
+        <RouterProvider router={router} />
+      </Provider>
+    )
+  };
+};
 
 describe('LoggingModulePage', () => {
   beforeEach(() => {
@@ -155,6 +181,14 @@ describe('LoggingModulePage', () => {
     expect(currentSearch).not.toContain('removed-panel');
   });
 
+  it('normalizes an explicitly empty section to overview', async () => {
+    renderAt('?section=&trace=abc');
+
+    expect(await screen.findByText('Global level')).toBeInTheDocument();
+    await waitFor(() => expect(currentSearch).toContain('section=overview'));
+    expect(currentSearch).toContain('trace=abc');
+  });
+
   it('counts permanent draft edits and discards them back to the server snapshot', async () => {
     const user = userEvent.setup();
     renderAt('?section=levels');
@@ -188,8 +222,18 @@ describe('LoggingModulePage', () => {
             snapshot({
               global: 'warn',
               modules: [
-                { name: 'auth', effective: 'debug', hasOverride: true },
-                { name: 'logging', effective: 'debug', hasOverride: true }
+                {
+                  name: 'auth',
+                  effective: 'debug',
+                  override: 'debug',
+                  hasOverride: true
+                },
+                {
+                  name: 'logging',
+                  effective: 'debug',
+                  override: 'debug',
+                  hasOverride: true
+                }
               ],
               updatedAt: '2026-08-20T12:05:00Z'
             })
@@ -215,6 +259,76 @@ describe('LoggingModulePage', () => {
       perModule: { auth: 'debug', logging: 'debug' },
       expectedUpdatedAt: '2026-08-20T12:00:00Z'
     });
+  });
+
+  it('submits the durable override rather than a diagnostic effective level', async () => {
+    const user = userEvent.setup();
+    const requests: unknown[] = [];
+    stubWorkspace(
+      snapshot({
+        modules: [
+          {
+            name: 'auth',
+            effective: 'debug',
+            override: 'error',
+            hasOverride: true
+          },
+          { name: 'logging', effective: 'info', hasOverride: false }
+        ],
+        diagnostics: [
+          {
+            module: 'auth',
+            level: 'debug',
+            startedAt: '2026-08-20T12:00:00Z',
+            startedBy: 'operator-1',
+            expiresAt: '2026-08-20T13:00:00Z'
+          }
+        ]
+      })
+    );
+    server.use(
+      http.put(
+        url('/v1/admin/observability/log-levels'),
+        async ({ request }) => {
+          requests.push(await request.json());
+          return HttpResponse.json(snapshot());
+        }
+      )
+    );
+    renderAt('?section=levels');
+
+    expect(
+      await screen.findByLabelText('Permanent log level for auth')
+    ).toHaveValue('error');
+    await user.selectOptions(
+      screen.getByLabelText('Permanent global log level'),
+      'warn'
+    );
+    await user.click(screen.getByRole('button', { name: 'Apply changes' }));
+
+    await waitFor(() => expect(requests).toHaveLength(1));
+    expect(requests[0]).toEqual({
+      global: 'warn',
+      perModule: { auth: 'error' },
+      expectedUpdatedAt: '2026-08-20T12:00:00Z'
+    });
+  });
+
+  it('preserves a dirty permanent draft across section changes', async () => {
+    const user = userEvent.setup();
+    renderAt('?section=levels');
+
+    await user.selectOptions(
+      await screen.findByLabelText('Permanent log level for auth'),
+      'debug'
+    );
+    await user.click(screen.getByRole('button', { name: 'Overview' }));
+    await user.click(screen.getByRole('button', { name: 'Permanent levels' }));
+
+    expect(screen.getByLabelText('Permanent log level for auth')).toHaveValue(
+      'debug'
+    );
+    expect(screen.getByText('1 unsaved change')).toBeInTheDocument();
   });
 
   it('offers to reload instead of overwriting after a permanent-edit conflict', async () => {
@@ -247,6 +361,89 @@ describe('LoggingModulePage', () => {
     expect(
       screen.getByRole('button', { name: 'Reload latest snapshot' })
     ).toBeInTheDocument();
+  });
+
+  it('keeps the draft and conflict recovery visible when a 409 refetches a newer snapshot', async () => {
+    const user = userEvent.setup();
+    let currentSnapshot = snapshot();
+    let getRequests = 0;
+    server.use(
+      http.get(url('/v1/admin/observability/log-levels'), () => {
+        getRequests += 1;
+        return HttpResponse.json(currentSnapshot);
+      }),
+      http.put(url('/v1/admin/observability/log-levels'), () => {
+        currentSnapshot = snapshot({
+          global: 'error',
+          updatedAt: '2026-08-20T12:05:00Z'
+        });
+        return HttpResponse.json(
+          {
+            status: 409,
+            title: 'Conflict',
+            detail: 'The log-level snapshot changed'
+          },
+          { status: 409 }
+        );
+      })
+    );
+    renderAt('?section=levels');
+
+    await user.selectOptions(
+      await screen.findByLabelText('Permanent global log level'),
+      'warn'
+    );
+    await user.click(screen.getByRole('button', { name: 'Apply changes' }));
+
+    expect(
+      await screen.findByRole('button', { name: 'Reload latest snapshot' })
+    ).toBeInTheDocument();
+    await waitFor(() => expect(getRequests).toBeGreaterThan(1));
+    expect(screen.getByLabelText('Permanent global log level')).toHaveValue(
+      'warn'
+    );
+    await user.click(screen.getByRole('button', { name: 'Overview' }));
+    await user.click(screen.getByRole('button', { name: 'Permanent levels' }));
+    expect(
+      screen.getByRole('button', { name: 'Reload latest snapshot' })
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText('Permanent global log level')).toHaveValue(
+      'warn'
+    );
+
+    await user.click(
+      screen.getByRole('button', { name: 'Reload latest snapshot' })
+    );
+    await waitFor(() =>
+      expect(screen.getByLabelText('Permanent global log level')).toHaveValue(
+        'error'
+      )
+    );
+    expect(
+      screen.queryByRole('button', { name: 'Apply changes' })
+    ).not.toBeInTheDocument();
+  });
+
+  it('blocks route navigation while permanent edits are unsaved', async () => {
+    const user = userEvent.setup();
+    const { router } = renderAt('?section=levels');
+
+    await user.selectOptions(
+      await screen.findByLabelText('Permanent log level for auth'),
+      'debug'
+    );
+    act(() => {
+      void router.navigate('/else');
+    });
+
+    expect(
+      await screen.findByRole('heading', { name: 'Unsaved permanent changes' })
+    ).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe('/admin/modules/logging');
+    await user.click(screen.getByRole('button', { name: 'Stay in workspace' }));
+    expect(
+      screen.queryByRole('heading', { name: 'Unsaved permanent changes' })
+    ).not.toBeInTheDocument();
   });
 
   it('starts a diagnostic immediately with the selected duration', async () => {
@@ -328,6 +525,91 @@ describe('LoggingModulePage', () => {
       screen.getByRole('button', { name: 'Stop diagnostic for logging' })
     );
     await waitFor(() => expect(stopped).toContain('/logging/diagnostic'));
+  });
+
+  it('removes an expired diagnostic locally and refetches its snapshot once', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(new Date('2026-08-20T12:30:00Z'));
+    const view = snapshot({
+      diagnostics: [
+        {
+          module: 'auth',
+          level: 'debug',
+          startedAt: '2026-08-20T12:00:00Z',
+          startedBy: 'operator-1',
+          expiresAt: '2026-08-20T12:30:01Z'
+        }
+      ]
+    });
+    let getRequests = 0;
+    server.use(
+      http.get(url('/v1/admin/observability/log-levels'), () => {
+        getRequests += 1;
+        return HttpResponse.json(view);
+      })
+    );
+    renderAt('?section=diagnostics');
+
+    expect(await screen.findByText('0m 1s remaining')).toBeInTheDocument();
+    act(() => vi.advanceTimersByTime(1000));
+    await waitFor(() =>
+      expect(
+        screen.queryByRole('button', { name: 'Stop diagnostic for auth' })
+      ).not.toBeInTheDocument()
+    );
+    await waitFor(() => expect(getRequests).toBe(2));
+
+    act(() => vi.advanceTimersByTime(5000));
+    expect(getRequests).toBe(2);
+  });
+
+  it('tracks overlapping diagnostic stops independently', async () => {
+    const view = snapshot({
+      diagnostics: [
+        {
+          module: 'auth',
+          level: 'debug',
+          startedAt: '2026-08-20T12:00:00Z',
+          startedBy: 'operator-1'
+        },
+        {
+          module: 'logging',
+          level: 'debug',
+          startedAt: '2026-08-20T12:00:00Z',
+          startedBy: 'operator-1'
+        }
+      ]
+    });
+    stubWorkspace(view);
+    const resolvers = new Map<string, () => void>();
+    server.use(
+      http.delete('*', async ({ request }) => {
+        const moduleName = decodeURIComponent(
+          new URL(request.url).pathname.split('/').at(-2) ?? ''
+        );
+        await new Promise<void>(resolve => resolvers.set(moduleName, resolve));
+        return HttpResponse.json(view);
+      })
+    );
+    renderAt('?section=diagnostics');
+
+    const authStop = await screen.findByRole('button', {
+      name: 'Stop diagnostic for auth'
+    });
+    const loggingStop = screen.getByRole('button', {
+      name: 'Stop diagnostic for logging'
+    });
+    fireEvent.click(authStop);
+    fireEvent.click(loggingStop);
+
+    await waitFor(() => {
+      expect(authStop).toBeDisabled();
+      expect(loggingStop).toBeDisabled();
+    });
+    act(() => resolvers.get('auth')?.());
+    await waitFor(() => expect(authStop).toBeEnabled());
+    expect(loggingStop).toBeDisabled();
+    act(() => resolvers.get('logging')?.());
   });
 
   it('keeps level management usable when the log provider is unavailable', async () => {
@@ -413,6 +695,86 @@ describe('LoggingModulePage', () => {
     expect(screen.getByText('trace-123')).toBeInTheDocument();
   });
 
+  it('warns that free-text log messages may still contain personal data', async () => {
+    renderAt('?section=logs');
+
+    expect(
+      await screen.findByText(
+        'Structured attributes are minimized and redacted. Free-text messages may still contain personal data; review them before sharing.'
+      )
+    ).toBeInTheDocument();
+  });
+
+  it('announces workspace loading and preview result status', async () => {
+    let resolveSnapshot: (() => void) | undefined;
+    server.use(
+      http.get(url('/v1/admin/observability/log-levels'), async () => {
+        await new Promise<void>(resolve => {
+          resolveSnapshot = resolve;
+        });
+        return HttpResponse.json(snapshot());
+      })
+    );
+    const { unmount } = renderAt('?section=logs');
+
+    expect(
+      await screen.findByRole('status', { name: 'Loading logging operations' })
+    ).toBeInTheDocument();
+    act(() => resolveSnapshot?.());
+    unmount();
+
+    stubWorkspace();
+    renderAt('?section=logs');
+    const previewStatus = await screen.findByRole('status', {
+      name: 'Log preview status'
+    });
+    expect(previewStatus).toHaveAttribute('aria-live', 'polite');
+    expect(previewStatus).toHaveTextContent(
+      'No log events match these filters.'
+    );
+  });
+
+  it('uses supported theme variants for workspace actions', async () => {
+    const user = userEvent.setup();
+    stubWorkspace(
+      snapshot({
+        diagnostics: [
+          {
+            module: 'auth',
+            level: 'debug',
+            startedAt: '2026-08-20T12:00:00Z',
+            startedBy: 'operator-1'
+          }
+        ]
+      })
+    );
+    renderAt('?section=levels');
+
+    await user.selectOptions(
+      await screen.findByLabelText('Permanent log level for auth'),
+      'debug'
+    );
+    expect(screen.getByRole('button', { name: 'Apply changes' })).toHaveClass(
+      'btn-orkestra-primary'
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Diagnostics' }));
+    expect(
+      screen.getByRole('button', { name: 'Start diagnostic' })
+    ).toHaveClass('btn-orkestra-primary');
+    expect(
+      screen.getByRole('button', { name: 'Stop diagnostic for auth' })
+    ).toHaveClass('btn-orkestra-danger');
+
+    await user.click(screen.getByRole('button', { name: 'Log preview' }));
+    expect(
+      screen.getByRole('button', { name: 'Refresh log preview' })
+    ).toHaveClass('btn-orkestra-primary');
+    expect(screen.getByRole('link', { name: 'Open in Grafana' })).toHaveClass(
+      'btn-orkestra-primary'
+    );
+  });
+
   it('refreshes the preview every five seconds only after auto-refresh is enabled', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     let previewRequests = 0;
@@ -425,6 +787,8 @@ describe('LoggingModulePage', () => {
     renderAt('?section=logs');
 
     await waitFor(() => expect(previewRequests).toBe(1));
+    act(() => vi.advanceTimersByTime(5000));
+    expect(previewRequests).toBe(1);
     fireEvent.click(screen.getByLabelText('Refresh every five seconds'));
     act(() => vi.advanceTimersByTime(5000));
     await waitFor(() => expect(previewRequests).toBe(2));
