@@ -153,11 +153,7 @@ func (c *Client) Query(ctx context.Context, query Query) ([]models.LogEvent, err
 	}
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) && ctx.Err() == context.DeadlineExceeded {
-			return nil, ErrTimeout
-		}
-		var timeout interface{ Timeout() bool }
-		if errors.As(err, &timeout) && timeout.Timeout() {
+		if isTimeoutError(ctx, err) {
 			return nil, ErrTimeout
 		}
 		return nil, ErrUpstream
@@ -167,13 +163,16 @@ func (c *Client) Query(ctx context.Context, query Query) ([]models.LogEvent, err
 		return nil, ErrUpstream
 	}
 
-	// Reaching the cap is rejected conservatively. This reads no more than one
-	// MiB and avoids the extra probe byte commonly used by size-limit helpers.
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
+	// Read one probe byte beyond the cap so an exactly one-MiB response remains
+	// valid while larger responses are rejected without unbounded buffering.
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
 	if err != nil {
+		if isTimeoutError(ctx, err) {
+			return nil, ErrTimeout
+		}
 		return nil, ErrUpstream
 	}
-	if len(body) >= maxResponseBytes {
+	if len(body) > maxResponseBytes {
 		return nil, ErrResponseTooLarge
 	}
 	events, err := parseResponse(body, normalized.Module, normalized.Limit)
@@ -184,6 +183,14 @@ func (c *Client) Query(ctx context.Context, query Query) ([]models.LogEvent, err
 		return events[i].Timestamp.Before(events[j].Timestamp)
 	})
 	return events, nil
+}
+
+func isTimeoutError(ctx context.Context, err error) bool {
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return true
+	}
+	var timeout interface{ Timeout() bool }
+	return errors.As(err, &timeout) && timeout.Timeout()
 }
 
 func (c *Client) validate(query Query) (Query, error) {
@@ -235,7 +242,7 @@ type lokiResponse struct {
 		ResultType string `json:"resultType"`
 		Result     []struct {
 			Stream map[string]string `json:"stream"`
-			Values [][]string        `json:"values"`
+			Values []json.RawMessage `json:"values"`
 		} `json:"result"`
 	} `json:"data"`
 }
@@ -252,15 +259,25 @@ func parseResponse(body []byte, requestedModule string, limit int) ([]models.Log
 	events := make([]models.LogEvent, 0, limit)
 	resultCapReached := false
 	for _, result := range payload.Data.Result {
-		for _, value := range result.Values {
-			if len(value) != 2 {
+		for _, rawValue := range result.Values {
+			var value []json.RawMessage
+			if err := json.Unmarshal(rawValue, &value); err != nil || len(value) < 2 || len(value) > 3 {
 				return nil, ErrUpstream
 			}
-			nanoseconds, err := strconv.ParseInt(value[0], 10, 64)
+			var timestamp, line string
+			if err := json.Unmarshal(value[0], &timestamp); err != nil {
+				return nil, ErrUpstream
+			}
+			if err := json.Unmarshal(value[1], &line); err != nil {
+				return nil, ErrUpstream
+			}
+			// Loki v3 may append a structured-metadata object. It is deliberately
+			// ignored: only the normalized JSON log line is allowlist-projected.
+			nanoseconds, err := strconv.ParseInt(timestamp, 10, 64)
 			if err != nil {
 				return nil, ErrUpstream
 			}
-			events = append(events, projectEvent(time.Unix(0, nanoseconds).UTC(), requestedModule, result.Stream, value[1]))
+			events = append(events, projectEvent(time.Unix(0, nanoseconds).UTC(), requestedModule, result.Stream, line))
 			if len(events) == limit {
 				resultCapReached = true
 				break

@@ -173,6 +173,39 @@ func TestClient_QueryNormalizesAndMinimizesEventsChronologically(t *testing.T) {
 	}
 }
 
+func TestClient_QueryAcceptsLokiV3StructuredMetadataTuple(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{
+			"status":"success",
+			"data":{"resultType":"streams","result":[{
+				"stream":{"module":"auth"},
+				"values":[
+					["1787227199000000000", "{\"level\":\"INFO\",\"msg\":\"metadata-bearing event\",\"trace_id\":\"line-trace\"}", {"trace_id":"metadata-trace","password":"must-not-surface"}]
+				]
+			}]}
+		}`))
+	}))
+	t.Cleanup(server.Close)
+	client := newClient(server.URL, []string{"auth"}, 3*time.Second, func() time.Time { return fixedNow })
+
+	events, err := client.Query(context.Background(), Query{Module: "auth", WindowMinutes: 5, Limit: 20})
+	if err != nil {
+		t.Fatalf("Query: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("events = %d, want 1", len(events))
+	}
+	if events[0].Message != "metadata-bearing event" {
+		t.Errorf("message = %q, want metadata-bearing event", events[0].Message)
+	}
+	if got := events[0].Attributes["trace_id"]; got != "line-trace" {
+		t.Errorf("trace_id = %#v, want allowlisted line value; structured metadata must be ignored", got)
+	}
+	if _, ok := events[0].Attributes["password"]; ok {
+		t.Error("structured metadata credential field survived projection")
+	}
+}
+
 func TestClient_QueryBoundsReturnedEventsEvenWhenUpstreamDoesNot(t *testing.T) {
 	values := make([]string, 0, 101)
 	for i := 0; i < 101; i++ {
@@ -214,13 +247,6 @@ func TestClient_QueryMapsUpstreamFailuresWithoutBodyDisclosure(t *testing.T) {
 			},
 			wantErr: ErrUpstream,
 		},
-		{
-			name: "oversized response",
-			handler: func(w http.ResponseWriter, r *http.Request) {
-				_, _ = w.Write([]byte(strings.Repeat("x", maxResponseBytes+1)))
-			},
-			wantErr: ErrResponseTooLarge,
-		},
 	}
 
 	for _, tt := range tests {
@@ -240,12 +266,60 @@ func TestClient_QueryMapsUpstreamFailuresWithoutBodyDisclosure(t *testing.T) {
 	}
 }
 
+func TestClient_QueryResponseSizeBoundary(t *testing.T) {
+	tests := []struct {
+		name    string
+		size    int
+		wantErr error
+	}{
+		{name: "accepts exactly one MiB", size: maxResponseBytes},
+		{name: "rejects one MiB plus one byte", size: maxResponseBytes + 1, wantErr: ErrResponseTooLarge},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			body := lokiResponseWithSize(t, tt.size)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_, _ = w.Write([]byte(body))
+			}))
+			t.Cleanup(server.Close)
+			client := newClient(server.URL, []string{"auth"}, 3*time.Second, time.Now)
+
+			_, err := client.Query(context.Background(), Query{Module: "auth", WindowMinutes: 15, Limit: 20})
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("error = %v, want %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestClient_QueryTimesOut(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		select {
 		case <-r.Context().Done():
 		case <-time.After(time.Second):
 		}
+	}))
+	t.Cleanup(server.Close)
+	client := newClient(server.URL, []string{"auth"}, 20*time.Millisecond, time.Now)
+
+	_, err := client.Query(context.Background(), Query{Module: "auth", WindowMinutes: 15, Limit: 20})
+	if !errors.Is(err, ErrTimeout) {
+		t.Fatalf("error = %v, want ErrTimeout", err)
+	}
+}
+
+func TestClient_QueryMapsTimeoutWhileReadingBody(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			t.Error("response writer does not support flushing")
+			return
+		}
+		flusher.Flush()
+		time.Sleep(100 * time.Millisecond)
+		_, _ = w.Write([]byte(`{"status":"success","data":{"resultType":"streams","result":[]}}`))
 	}))
 	t.Cleanup(server.Close)
 	client := newClient(server.URL, []string{"auth"}, 20*time.Millisecond, time.Now)
@@ -287,4 +361,13 @@ func TestClient_DoesNotFollowUpstreamRedirects(t *testing.T) {
 	if redirected.Load() {
 		t.Error("dedicated client followed an upstream redirect")
 	}
+}
+
+func lokiResponseWithSize(t *testing.T, size int) string {
+	t.Helper()
+	base := `{"status":"success","data":{"resultType":"streams","result":[]}}`
+	if len(base) > size {
+		t.Fatalf("base response length = %d, exceeds requested size %d", len(base), size)
+	}
+	return base + strings.Repeat(" ", size-len(base))
 }

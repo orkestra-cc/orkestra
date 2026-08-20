@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -55,10 +56,10 @@ type GetLogsRequest struct {
 	// rejected filter follows this endpoint's stable 400 error-code contract;
 	// Huma's automatic schema failures use 422.
 	Module        string `query:"module" doc:"Required registered module name"`
-	WindowMinutes int    `query:"windowMinutes" doc:"Required closed preview window: 5, 15, or 60 minutes"`
+	WindowMinutes string `query:"windowMinutes" doc:"Required closed preview window: 5, 15, or 60 minutes"`
 	Level         string `query:"level" doc:"Optional level: debug, info, warn, or error"`
 	Q             string `query:"q" doc:"Optional literal text filter, at most 200 characters"`
-	Limit         int    `query:"limit" default:"50" doc:"Maximum events; values above 100 are clamped"`
+	Limit         string `query:"limit" default:"50" doc:"Maximum events; values above 100 are clamped"`
 }
 
 type GetLogsResponse struct {
@@ -68,22 +69,33 @@ type GetLogsResponse struct {
 }
 
 func (h *LogLevelHandler) GetLogs(ctx context.Context, req *GetLogsRequest) (*GetLogsResponse, error) {
+	windowMinutes, err := strconv.Atoi(req.WindowMinutes)
+	if err != nil {
+		return nil, invalidLogPreviewFilters()
+	}
+	limit := 0
+	if req.Limit != "" {
+		limit, err = strconv.Atoi(req.Limit)
+		if err != nil {
+			return nil, invalidLogPreviewFilters()
+		}
+	}
 	if !h.logs.Status(ctx).Available {
 		return nil, errcode.New(http.StatusServiceUnavailable, errcode.LoggingLogProviderUnavailable, "Log preview is unavailable on this deployment")
 	}
 	events, err := h.logs.Query(ctx, logquery.Query{
 		Module:        req.Module,
-		WindowMinutes: req.WindowMinutes,
+		WindowMinutes: windowMinutes,
 		Level:         req.Level,
 		Text:          req.Q,
-		Limit:         req.Limit,
+		Limit:         limit,
 	})
 	if err != nil {
 		switch {
 		case errors.Is(err, logquery.ErrUnavailable):
 			return nil, errcode.New(http.StatusServiceUnavailable, errcode.LoggingLogProviderUnavailable, "Log preview is unavailable on this deployment")
 		case errors.Is(err, logquery.ErrInvalidQuery):
-			return nil, errcode.New(http.StatusBadRequest, errcode.LoggingLogPreviewInvalid, "Invalid log preview filters")
+			return nil, invalidLogPreviewFilters()
 		case errors.Is(err, logquery.ErrTimeout):
 			return nil, errcode.New(http.StatusGatewayTimeout, errcode.LoggingLogProviderTimeout, "Log provider timed out")
 		default:
@@ -93,6 +105,10 @@ func (h *LogLevelHandler) GetLogs(ctx context.Context, req *GetLogsRequest) (*Ge
 	response := &GetLogsResponse{}
 	response.Body.Events = events
 	return response, nil
+}
+
+func invalidLogPreviewFilters() error {
+	return errcode.New(http.StatusBadRequest, errcode.LoggingLogPreviewInvalid, "Invalid log preview filters")
 }
 
 // --- PUT /v1/admin/observability/log-levels ----------------------------

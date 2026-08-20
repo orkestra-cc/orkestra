@@ -3,9 +3,11 @@ package logging
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
+	"net/http/httptest"
 	"sync"
 	"testing"
 	"time"
@@ -14,9 +16,11 @@ import (
 	"github.com/danielgtaylor/huma/v2/adapters/humachi"
 	"github.com/go-chi/chi/v5"
 	"github.com/orkestra/backend/internal/core/logging/handlers"
+	"github.com/orkestra/backend/internal/core/logging/logquery"
 	"github.com/orkestra/backend/internal/core/logging/models"
 	"github.com/orkestra/backend/internal/core/logging/repository"
 	"github.com/orkestra/backend/internal/core/logging/services"
+	"github.com/orkestra/backend/internal/shared/errcode"
 )
 
 func TestRegisterRoutes_ExposesBatchDiagnosticAndLogPreviewOperations(t *testing.T) {
@@ -55,6 +59,47 @@ func TestRegisterRoutes_ExposesBatchDiagnosticAndLogPreviewOperations(t *testing
 				t.Errorf("security = %+v, want bearerAuth administrator", operation.Security)
 			}
 		})
+	}
+}
+
+func TestRegisterRoutes_LogPreviewMalformedNumericQueriesUseStableBadRequest(t *testing.T) {
+	provider := &numericQueryProvider{}
+	router := chi.NewRouter()
+	api := humachi.New(router, huma.DefaultConfig("test", "1.0.0"))
+	RegisterRoutes(api, handlers.NewLogLevelHandler(nil, provider, ""))
+
+	tests := []struct {
+		name  string
+		query string
+	}{
+		{name: "malformed window", query: "windowMinutes=not-a-number&limit=20"},
+		{name: "overflowing window", query: "windowMinutes=999999999999999999999999999999&limit=20"},
+		{name: "malformed limit", query: "windowMinutes=15&limit=not-a-number"},
+		{name: "overflowing limit", query: "windowMinutes=15&limit=999999999999999999999999999999"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			request := httptest.NewRequest(http.MethodGet, "/v1/admin/observability/log-levels/logs?module=auth&"+tt.query, nil)
+
+			router.ServeHTTP(recorder, request)
+
+			if recorder.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400; body = %s", recorder.Code, recorder.Body.String())
+			}
+			var response struct {
+				Code string `json:"code"`
+			}
+			if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+				t.Fatalf("decode response: %v", err)
+			}
+			if response.Code != errcode.LoggingLogPreviewInvalid {
+				t.Errorf("code = %q, want %q; body = %s", response.Code, errcode.LoggingLogPreviewInvalid, recorder.Body.String())
+			}
+		})
+	}
+	if provider.calls != 0 {
+		t.Errorf("provider calls = %d, want zero for malformed numeric queries", provider.calls)
 	}
 }
 
@@ -183,6 +228,19 @@ type lifecycleRepo struct {
 	err      error
 	upserts  chan *models.LogLevelDoc
 	attempts chan struct{}
+}
+
+type numericQueryProvider struct {
+	calls int
+}
+
+func (*numericQueryProvider) Status(context.Context) logquery.Status {
+	return logquery.Status{Available: true}
+}
+
+func (p *numericQueryProvider) Query(context.Context, logquery.Query) ([]models.LogEvent, error) {
+	p.calls++
+	return nil, nil
 }
 
 func newLifecycleRepo() *lifecycleRepo {

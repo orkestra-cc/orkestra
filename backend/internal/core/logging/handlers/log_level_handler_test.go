@@ -114,10 +114,10 @@ func TestLogLevelHandler_GetLogs(t *testing.T) {
 
 		resp, err := h.GetLogs(context.Background(), &GetLogsRequest{
 			Module:        "auth",
-			WindowMinutes: 15,
+			WindowMinutes: "15",
 			Level:         "warn",
 			Q:             "failed request",
-			Limit:         25,
+			Limit:         "25",
 		})
 		if err != nil {
 			t.Fatalf("GetLogs: %v", err)
@@ -135,7 +135,7 @@ func TestLogLevelHandler_GetLogs(t *testing.T) {
 		provider := &fakeLogProvider{}
 		h, _ := newHandlerWithProvider(t, provider)
 
-		_, err := h.GetLogs(context.Background(), &GetLogsRequest{Module: "auth", WindowMinutes: 15, Limit: 20})
+		_, err := h.GetLogs(context.Background(), &GetLogsRequest{Module: "auth", WindowMinutes: "15", Limit: "20"})
 		assertStatusAndCode(t, err, 503, "logging.log_provider_unavailable")
 		if provider.query.Module != "" {
 			t.Errorf("unavailable provider was queried: %+v", provider.query)
@@ -157,7 +157,7 @@ func TestLogLevelHandler_GetLogs(t *testing.T) {
 			provider := &fakeLogProvider{available: true, err: tt.providerErr}
 			h, _ := newHandlerWithProvider(t, provider)
 
-			_, err := h.GetLogs(context.Background(), &GetLogsRequest{Module: "auth", WindowMinutes: 15, Limit: 20})
+			_, err := h.GetLogs(context.Background(), &GetLogsRequest{Module: "auth", WindowMinutes: "15", Limit: "20"})
 			assertStatusAndCode(t, err, tt.wantStatus, tt.wantCode)
 			if strings.Contains(err.Error(), "upstream-secret-body") {
 				t.Errorf("handler error disclosed upstream content: %v", err)
