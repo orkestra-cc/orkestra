@@ -150,13 +150,15 @@ type LogEvent struct {
 
 // AdminModuleEntry is one row in the observability admin table.
 // Effective is what the handler currently gates on for this module;
-// HasOverride is true when the module has its own setting (false
-// means it inherits Global). Together they let the UI render the
-// "revert to global" affordance correctly.
+// Override is the durable per-module setting even when a diagnostic
+// temporarily changes Effective. HasOverride remains true when Override
+// is present so existing consumers can render the "revert to global"
+// affordance correctly.
 type AdminModuleEntry struct {
-	Name        string   `json:"name"`
-	Effective   LogLevel `json:"effective"`
-	HasOverride bool     `json:"hasOverride"`
+	Name        string    `json:"name"`
+	Effective   LogLevel  `json:"effective"`
+	Override    *LogLevel `json:"override,omitempty"`
+	HasOverride bool      `json:"hasOverride"`
 }
 
 // DiagnosticOverride is a temporary per-module threshold persisted in

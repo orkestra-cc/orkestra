@@ -227,7 +227,9 @@ func (s *LogLevelService) View() models.AdminView {
 	for _, name := range s.moduleCt.names {
 		entry := models.AdminModuleEntry{Name: name}
 		if l, ok := snap.perModule[name]; ok {
-			entry.Effective = levelToModelLevel(l)
+			override := levelToModelLevel(l)
+			entry.Effective = override
+			entry.Override = &override
 			entry.HasOverride = true
 		} else {
 			entry.Effective = view.Global

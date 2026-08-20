@@ -176,6 +176,7 @@ func TestLogLevelService_UnsetModule_Idempotent(t *testing.T) {
 func TestLogLevelService_View(t *testing.T) {
 	svc, _ := newTestSvc(t)
 	_ = svc.SetModule(context.Background(), "billing", models.LogLevelError, "u")
+	_ = svc.StartDiagnostic(context.Background(), "billing", models.LogLevelDebug, nil, "u")
 
 	view := svc.View()
 	if view.Global != models.LogLevelInfo {
@@ -195,10 +196,10 @@ func TestLogLevelService_View(t *testing.T) {
 	if e := byName["rag"]; !e.HasOverride || e.Effective != models.LogLevelDebug {
 		t.Errorf("rag entry = %+v", e)
 	}
-	if e := byName["billing"]; !e.HasOverride || e.Effective != models.LogLevelError {
-		t.Errorf("billing entry = %+v", e)
+	if e := byName["billing"]; !e.HasOverride || e.Override == nil || *e.Override != models.LogLevelError || e.Effective != models.LogLevelDebug {
+		t.Errorf("billing entry = %+v, want permanent error and effective diagnostic debug", e)
 	}
-	if e := byName["auth"]; e.HasOverride || e.Effective != models.LogLevelInfo {
+	if e := byName["auth"]; e.HasOverride || e.Override != nil || e.Effective != models.LogLevelInfo {
 		t.Errorf("auth should inherit Global without override, got %+v", e)
 	}
 }
