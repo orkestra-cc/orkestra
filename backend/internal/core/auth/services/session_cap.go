@@ -2,8 +2,13 @@ package services
 
 import (
 	"context"
+	"errors"
+	"log/slog"
 	"strings"
 	"time"
+
+	"github.com/orkestra/backend/internal/core/auth/models"
+	"github.com/orkestra/backend/pkg/sdk/metrics"
 )
 
 // Absolute session lifetime. The refresh TTL is an IDLE timeout —
@@ -65,4 +70,167 @@ func (s *AuthPolicyService) SessionAbsoluteTTL(ctx context.Context) time.Duratio
 	}
 	return clampPersistedDuration(raw, DefaultSessionAbsoluteTTL,
 		MinSessionAbsoluteTTL, MaxSessionAbsoluteTTL, "sessionAbsoluteTTL", slogDefault())
+}
+
+// ErrSessionMaxAgeReached means the session hit its configured absolute
+// lifetime and has been terminated. It is a LOGOUT, not a denial: by the
+// time a caller sees this sentinel the session's refresh tokens are
+// revoked, the session document is inactive, and the sid is on the
+// revocation denylist. ADR-0017 D4.
+var ErrSessionMaxAgeReached = errors.New("session maximum age reached")
+
+// ErrSessionEnforcementUnavailable means the cap could not be evaluated
+// or could not be applied because durable storage failed. It fails
+// CLOSED — no credentials are minted — and maps to 503, never to a 401.
+// Reporting an outage as an authentication failure would train clients to
+// discard a session that is still perfectly valid.
+var ErrSessionEnforcementUnavailable = errors.New("session enforcement unavailable")
+
+// sessionCapAnchor resolves the instant the cap is measured from, or a
+// non-empty anomaly kind when the row cannot supply one.
+//
+// StartedAt is the anchor: CreateSession stamps it unconditionally and
+// rotation preserves the session UUID, so it is the login time and it
+// survives every refresh. CreatedAt is the compatibility fallback for
+// rows written before that guarantee, and using it is NOT an anomaly —
+// counting a row that has a usable anchor would poison the 30-day
+// observation window that gates the fail-closed change.
+func sessionCapAnchor(sess *models.AuthSessionDoc) (time.Time, string) {
+	if sess == nil {
+		return time.Time{}, "missing"
+	}
+	if !sess.StartedAt.IsZero() {
+		return sess.StartedAt, ""
+	}
+	if !sess.CreatedAt.IsZero() {
+		return sess.CreatedAt, ""
+	}
+	return time.Time{}, "zero_timestamp"
+}
+
+// sessionWithinAbsoluteCap returns nil while the session may keep
+// refreshing, ErrSessionMaxAgeReached once it has been terminated for
+// age, or ErrSessionEnforcementUnavailable when durable state failed.
+//
+// Failure precedence is explicit and load-bearing:
+//   - a repository ERROR loading the session, or revoking durable
+//     refresh/session state, fails closed and never mints credentials;
+//   - only a clean (nil, nil) lookup follows the temporary compatibility
+//     rule below;
+//   - a Redis denylist failure AFTER durable revocation returns
+//     SessionRevocationDegradedError — durable logout happened, so the
+//     caller must still clear the cookie, but the response must not claim
+//     a completely recorded cap expiry;
+//   - the cap event and counter are emitted only after durable state is
+//     terminated, and only by the caller that won the transition.
+//
+// COMPATIBILITY WINDOW — ADR-0017, remove in the first minor release
+// after at least 30 consecutive production days with
+// orkestra_auth_session_anchor_anomalies_total at zero in every supported
+// environment. Tracking issue: filed with the PR that ships this. D2's
+// invariant makes an absent session document impossible for credentials
+// issued by current code, but invariants bind only the code written after
+// them and older rows cannot be assumed to comply. If the counter moves,
+// classify and repair the data cause before restarting the window.
+func (s *authService) sessionWithinAbsoluteCap(ctx context.Context, sessionUUID string) error {
+	// No session repository is a wiring shape, not a data anomaly. An
+	// empty session UUID is not one either: requireSessionContext in
+	// jwt_service.go already refuses to mint from a row without one, so
+	// such a row can never yield credentials — counting it here would
+	// put permanent noise in the very counter that gates tightening the
+	// compatibility rule below to fail-closed.
+	if s.authSessionRepo == nil || sessionUUID == "" {
+		return nil
+	}
+	maxAge := s.policy.SessionAbsoluteTTL(ctx)
+	if maxAge <= 0 {
+		// Disabled: skip the query entirely. This is the exit for a fork
+		// that does not want the cap, and it must cost nothing.
+		return nil
+	}
+
+	sess, err := s.authSessionRepo.GetByUUID(ctx, sessionUUID)
+	if err != nil {
+		slogDefault().ErrorContext(ctx, "session cap: anchor lookup failed",
+			slog.String("outcome", "fail_closed"),
+			slog.String("error", err.Error()))
+		return ErrSessionEnforcementUnavailable
+	}
+
+	anchor, anomaly := sessionCapAnchor(sess)
+	if anomaly != "" {
+		metrics.Default().RecordSessionAnchorAnomaly(anomaly)
+		slogDefault().WarnContext(ctx, "session cap: no usable anchor, permitting refresh under the ADR-0017 compatibility window",
+			slog.String("kind", anomaly))
+		return nil
+	}
+	if time.Since(anchor) < maxAge {
+		return nil
+	}
+	return s.expireSessionForMaxAge(ctx, sess)
+}
+
+// expireSessionForMaxAge performs the same three durable steps as an
+// administrative termination — revoke the session's refresh tokens, flip
+// the session document inactive, push the sid onto the denylist — and
+// records the event exactly once. Revoking refresh rows is idempotent, so
+// only the isActive transition needs to name a winner.
+func (s *authService) expireSessionForMaxAge(ctx context.Context, sess *models.AuthSessionDoc) error {
+	if s.refreshTokenRepo != nil {
+		if err := s.refreshTokenRepo.RevokeTokensBySession(ctx, sess.UUID, models.RevokeReasonSessionMaxAge); err != nil {
+			slogDefault().ErrorContext(ctx, "session cap: refresh revocation failed",
+				slog.String("outcome", "fail_closed"),
+				slog.String("error", err.Error()))
+			return ErrSessionEnforcementUnavailable
+		}
+	}
+
+	won, err := s.authSessionRepo.ExpireSessionForMaxAge(ctx, sess.UUID)
+	if err != nil {
+		slogDefault().ErrorContext(ctx, "session cap: session termination failed",
+			slog.String("outcome", "fail_closed"),
+			slog.String("error", err.Error()))
+		return ErrSessionEnforcementUnavailable
+	}
+
+	var degraded error
+	if s.sessionRevocation != nil {
+		if err := s.sessionRevocation.Revoke(ctx, sess.UUID, models.RevokeReasonSessionMaxAge); err != nil {
+			degraded = &SessionRevocationDegradedError{Cause: err}
+		}
+	}
+
+	if won {
+		metrics.Default().RecordSessionCapExpiry()
+		s.recordSessionCapEvent(ctx, sess.UserUUID)
+	}
+	if degraded != nil {
+		// Durable logout completed; only the short-lived denylist is
+		// behind. The caller still clears the cookie, but must not report
+		// a cleanly recorded cap expiry.
+		return degraded
+	}
+	return ErrSessionMaxAgeReached
+}
+
+// recordSessionCapEvent writes the security-event row. A failure here
+// cannot restore credentials — durable state is already terminated — so
+// it increments a counter and logs without PII rather than propagating.
+func (s *authService) recordSessionCapEvent(ctx context.Context, userUUID string) {
+	if s.securityEventRepo == nil || userUUID == "" {
+		return
+	}
+	ip, _ := ipFromCtx(ctx)
+	event := &models.SecurityEvent{
+		UserUUID:  userUUID,
+		EventType: "session_max_age_reached",
+		IPAddress: ip,
+		Success:   true,
+		Timestamp: time.Now().UTC(),
+	}
+	if err := s.securityEventRepo.Insert(ctx, event); err != nil {
+		metrics.Default().RecordSessionCapEventFailure()
+		slogDefault().WarnContext(ctx, "session cap: security event persist failed",
+			slog.String("error", err.Error()))
+	}
 }

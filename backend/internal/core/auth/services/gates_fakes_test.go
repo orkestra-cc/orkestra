@@ -15,6 +15,7 @@ import (
 	"crypto/rsa"
 	"errors"
 	"sync"
+	"testing"
 	"time"
 
 	"github.com/google/uuid"
@@ -290,8 +291,12 @@ type gateRefreshRepo struct {
 	revoked         []string // userUUIDs that hit RevokeTokensByUser
 	compromised     map[string]testFamilyRevocation
 	revokeFamilyErr error
-	casReached      chan struct{}
-	allowInsert     chan struct{}
+	// revokeBySessionErr forces the durable refresh revocation the
+	// absolute cap performs to fail, so a test can pin that the cap
+	// fails CLOSED rather than reporting a clean expiry.
+	revokeBySessionErr error
+	casReached         chan struct{}
+	allowInsert        chan struct{}
 	// byHash mirrors the production repo's "primary lookup" path.
 	// Tests can pre-seed via seedRefreshDoc for the orchestration paths.
 	byHash map[string]*authModels.RefreshTokenDoc
@@ -446,12 +451,32 @@ func (r *gateRefreshRepo) RotateToken(context.Context, string, string) error    
 func (r *gateRefreshRepo) RevokeToken(context.Context, string, string) error       { panic("not used") }
 func (r *gateRefreshRepo) RevokeTokenByUUID(context.Context, string, string) error { panic("not used") }
 
-// RevokeTokensBySession is a no-op so the user-security session
-// tests can drive the auth-service's revokeSessionInternal helper
-// without needing per-session refresh-token state. The other fake
-// methods stay as panics; if a future test grows a real expectation
-// here, lift this into a recording counter then.
-func (r *gateRefreshRepo) RevokeTokensBySession(context.Context, string, string) error {
+// RevokeTokensBySession revokes every seeded row that belongs to the
+// session. It began life as a no-op for the user-security session tests,
+// which only needed revokeSessionInternal to run; the absolute-cap tests
+// assert the refresh rows are genuinely revoked, so it now does the work
+// the production repository does.
+//
+// Fidelity caveat: it walks `byHash` only. `CreateRefreshToken` appends
+// to `created` without indexing the row, so a token this fake minted
+// (rather than one seeded via seedRefreshDoc or inserted by
+// RotateWithFamily) is invisible here — as it is to GetByTokenAny. Every
+// current caller seeds, so no test is affected; a test that mints then
+// expects revocation would need `created` folded into the index.
+func (r *gateRefreshRepo) RevokeTokensBySession(_ context.Context, sessionUUID, reason string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.revokeBySessionErr != nil {
+		return r.revokeBySessionErr
+	}
+	now := time.Now()
+	for _, d := range r.byHash {
+		if d.SessionUUID == sessionUUID && !d.IsRevoked {
+			d.IsRevoked = true
+			d.RevokedAt = &now
+			d.RevokedReason = reason
+		}
+	}
 	return nil
 }
 func (r *gateRefreshRepo) RevokeTokensByDevice(context.Context, string, string, string) error {
@@ -482,10 +507,21 @@ type gateSessionRepo struct {
 	deviceHistory    map[string][]*authModels.AuthSessionDoc // key: userUUID|deviceID
 	deviceHistoryErr error
 	terminated       []string // session UUIDs that hit TerminateSession
+	// getErr forces every GetByUUID to fail so a test can drive the
+	// absolute-cap helper's fail-closed branch — and prove the disabled
+	// cap never reaches the repository at all.
+	getErr error
+	// expiredForMaxAge counts the CAS transitions ExpireSessionForMaxAge
+	// actually WON, per session UUID. Two concurrent refreshes on the
+	// same session must produce exactly one.
+	expiredForMaxAge map[string]int
 }
 
 func newGateSessionRepo() *gateSessionRepo {
-	return &gateSessionRepo{deviceHistory: map[string][]*authModels.AuthSessionDoc{}}
+	return &gateSessionRepo{
+		deviceHistory:    map[string][]*authModels.AuthSessionDoc{},
+		expiredForMaxAge: map[string]int{},
+	}
 }
 
 func (r *gateSessionRepo) CreateSession(_ context.Context, doc *authModels.AuthSessionDoc) error {
@@ -504,10 +540,67 @@ func (r *gateSessionRepo) GetDeviceSessionHistory(_ context.Context, userUUID, d
 	return r.deviceHistory[userUUID+"|"+deviceID], nil
 }
 
-// Unused — panic loudly.
-func (r *gateSessionRepo) GetByUUID(context.Context, string) (*authModels.AuthSessionDoc, error) {
-	panic("not used")
+// GetByUUID serves rows the fake was told about via CreateSession or
+// seedSession. The absolute-cap helper reads this on every refresh, so a
+// panic here would make every cap test a panic test.
+func (r *gateSessionRepo) GetByUUID(_ context.Context, uuid string) (*authModels.AuthSessionDoc, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.getErr != nil {
+		return nil, r.getErr
+	}
+	for _, d := range r.created {
+		if d.UUID == uuid {
+			c := *d
+			return &c, nil
+		}
+	}
+	return nil, nil
 }
+
+// seedSession inserts a row directly, so a test can set StartedAt in the
+// past without going through CreateSession (which stamps time.Now()).
+func (r *gateSessionRepo) seedSession(doc *authModels.AuthSessionDoc) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.created = append(r.created, doc)
+}
+
+// ageSession rewrites a seeded row's anchor timestamps relative to now,
+// so cap boundaries are crossed by moving the clock in the data rather
+// than by sleeping.
+func (r *gateSessionRepo) ageSession(t *testing.T, uuid string, delta time.Duration) {
+	t.Helper()
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, d := range r.created {
+		if d.UUID == uuid {
+			d.StartedAt = time.Now().Add(delta)
+			d.CreatedAt = d.StartedAt
+			return
+		}
+	}
+	t.Fatalf("ageSession: no seeded session %q", uuid)
+}
+
+// failEveryGet makes the repository unreadable. Used both to drive the
+// fail-closed branch and to prove a disabled cap never queries at all.
+func (r *gateSessionRepo) failEveryGet(t *testing.T) {
+	t.Helper()
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.getErr = errors.New("session store unavailable")
+}
+
+// expiryTransitions reports how many callers WON the max-age CAS for the
+// session — the count the cap event and metric must match.
+func (r *gateSessionRepo) expiryTransitions(uuid string) int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.expiredForMaxAge[uuid]
+}
+
+// Unused — panic loudly.
 func (r *gateSessionRepo) GetByUserAndDevice(context.Context, string, string) (*authModels.AuthSessionDoc, error) {
 	panic("not used")
 }
@@ -559,6 +652,7 @@ func (r *gateSessionRepo) ExpireSessionForMaxAge(_ context.Context, uuid string)
 	for _, d := range r.created {
 		if d.UUID == uuid && d.IsActive {
 			d.IsActive = false
+			r.expiredForMaxAge[uuid]++
 			return true, nil
 		}
 	}
