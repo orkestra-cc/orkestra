@@ -19,6 +19,18 @@ Durable, dated records of architectural decisions that shape Orkestra. One file 
 | [0011](0011-object-storage-foundation.md) | Object-storage foundation (per-domain buckets, presigned upload, SDK seam) | Accepted | 2026-07-16 |
 | [0012](0012-module-config-group-contract.md) | Module configuration group contract (data-driven settings rail) | Accepted | 2026-08-03 |
 | [0014](0014-service-accounts-client-credentials.md) | Service accounts via OAuth2 client-credentials grant (Tier-1 user row, `aud: service`, admin REST lifecycle) | Accepted | 2026-08-18 |
+| [0017](0017-session-lifetime-and-token-retention.md) | Absolute session lifetime, single-sourced token TTL, and auth retention | Accepted | 2026-08-21 |
+
+## Numbering across the fork chain
+
+ADR numbers are a **single space shared by every repository in the fork chain**
+([ADR-0010](0010-commons-fork-chain.md)). A downstream fork adds its own ADRs on
+top of the ones it inherits, so a number this index skips is not free — it has
+been claimed downstream, and reusing it here would collide on the next sync.
+
+Before allocating a number, check the highest number in use across the chain, not
+just the highest in this table. Gaps here (0013, 0015, 0016) are downstream ADRs
+that upstream never sees.
 
 ## Format
 
