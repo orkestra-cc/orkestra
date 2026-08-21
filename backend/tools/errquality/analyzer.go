@@ -204,6 +204,7 @@ func isEmptyDetail(e ast.Expr) bool {
 	}
 	s = strings.ToLower(strings.TrimSpace(s))
 	s = strings.TrimRight(s, ".!…")
+	s = strings.TrimSpace(s)
 	return emptyDetails[s]
 }
 

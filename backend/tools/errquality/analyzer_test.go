@@ -101,3 +101,13 @@ func f() error {
 		t.Fatalf("want no findings, got %v", got)
 	}
 }
+
+func TestR2_FlagsEmptyDetailWithSpaceBeforePunctuation(t *testing.T) {
+	src := `package h
+func f() error {
+	return huma.Error400BadRequest("Failed .")
+}`
+	if got := findings(t, src); len(got) != 1 || got[0] != "R2" {
+		t.Fatalf("want [R2], got %v", got)
+	}
+}
