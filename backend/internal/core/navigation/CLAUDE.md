@@ -15,7 +15,7 @@ Both trees are computed per-request from the in-memory `[]NavItemSpec` the regis
 
 | File | Purpose |
 |---|---|
-| `module.go` | Module registration, nav-items + config-service lookup, handler wire-up, declares `navigation_overrides` collection. Also adds the module's own `/admin/modules/navigation` sidebar entry. |
+| `module.go` | Module registration, nav-items + config-service lookup, handler wire-up, declares `navigation_overrides` collection. Declares no `NavItems()` of its own — like `logging`, its workspace at `/admin/modules/navigation` is reached from the module row in `/admin/modules`, not from the sidebar. |
 | `routes.go` | Huma route registration for the public route + the three admin routes (GET tree, PATCH order, DELETE order) |
 | `handlers/navigation_handler.go` | Extracts the system role from the request context and calls the public service |
 | `handlers/admin_navigation_handler.go` | GetAdminNavigation / PatchOrder / DeleteOrder; gated upstream by the `administrator` security scope |
