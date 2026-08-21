@@ -1,0 +1,116 @@
+---
+title: Object Storage
+sidebar_position: 6
+---
+
+# Object Storage
+
+The sanctioned way for any module — core or a fork's addon — to store a user-uploaded blob: an image, photo, document, or attachment. Adopted in [ADR-0011](/adrs/object-storage-foundation).
+
+Three rules carry the whole design:
+
+1. **One connection, per-domain buckets.** A single provider vends a bucket-pinned store per logical domain.
+2. **Presigned direct-to-S3 upload, always.** The browser PUTs bytes straight to storage; the backend never proxies the payload.
+3. **The upload controller owns the security-critical checks.** The content-type allowlist, the size cap, and the commit-time key-ownership check are exactly the parts a copy-paste gets subtly wrong, so they live in one place.
+
+## The seam
+
+```go
+// pkg/sdk/iface
+type ObjectStore interface {
+	PresignPut(ctx context.Context, key, contentType string, ttl time.Duration) (*PresignedPut, error)
+	Put(ctx context.Context, key, contentType string, body io.Reader) error
+	PresignGet(ctx context.Context, key string, ttl time.Duration) (string, error)
+	Delete(ctx context.Context, key string) error
+	Exists(ctx context.Context, key string) (bool, error)
+}
+
+type ObjectStoreProvider interface {
+	Bucket(domain string) (ObjectStore, error)
+}
+```
+
+`ObjectStore` is **bucket-pinned** and safe for concurrent use. `PresignedPut` groups the upload URL with the headers the client must echo verbatim for the signature to validate.
+
+The provider is registered in the [ServiceRegistry](/sdk/service-registry) under `module.ServiceObjectStoreProvider`, so a module resolves storage through the contract and never through another module's internals. `internal/shared/blob` keeps `type Store = iface.ObjectStore` aliases, so callers written before the promotion still compile.
+
+Bucket names are `<STORAGE_BUCKET_PREFIX>-<domain>` — domain `avatars` with the default prefix gives `orkestra-avatars`. Pick a short lowercase `^[a-z0-9-]+$` slug for your feature. The provider memoizes each bucket and, when `STORAGE_ENSURE_BUCKET` is on, provisions it on first use.
+
+## Adding an upload surface
+
+**1. Resolve the provider** in your module's `Init` and take your domain's store. Object storage may not be configured at all — degrade rather than fail the boot:
+
+```go
+provider, ok := module.GetTyped[iface.ObjectStoreProvider](
+	deps.Services, module.ServiceObjectStoreProvider,
+)
+if !ok {
+	// Storage not configured — mount your upload routes to return 503.
+}
+store, err := provider.Bucket("crm-photos")
+```
+
+**2. Wire an `UploadController`** with your policy:
+
+```go
+ctl := blob.NewUploadController(blob.UploadConfig{
+	Store:               store,
+	AllowedContentTypes: map[string]string{"image/png": "png", "image/jpeg": "jpg"},
+	MaxBytes:            5 * 1024 * 1024,
+	KeyBuilder: func(s blob.UploadScope, ext string) string {
+		return fmt.Sprintf("crm-photos/%s/%s/%s.%s",
+			s.Tenant, s.Entity, uuid.Must(uuid.NewV7()), ext)
+	},
+	OnCommit: func(ctx context.Context, s blob.UploadScope, key string) (string, error) {
+		// Persist the key on your entity; return the previous key for GC.
+		return personSvc.SetPhotoKey(ctx, s.Entity, key)
+	},
+})
+```
+
+`UploadScope` carries `Tenant`, `Subject`, and `Entity` — fill the fields your key convention uses. `PresignTTL` defaults to 10 minutes.
+
+**3. Mount presign and commit** as two routes **under your own RBAC and tier**, filling the scope from the request's auth context. Map the sentinels:
+
+| Sentinel | Status |
+|---|---|
+| `blob.ErrContentTypeNotAllowed` | 400 |
+| `blob.ErrKeyOutOfScope` | 400 |
+| `blob.ErrUploadNotFound` | 404 |
+| `blob.ErrTooLarge` | 413 |
+
+Commit does the HEAD-confirm, the key-prefix ownership check, and the prior-object GC — which is why a client can never promote another subject's blob into its own entity.
+
+**4. Serve reads** with `PresignGet`, refreshed on every read path. A Redis-cached wrapper already fronts the store. Never render a raw bucket URL.
+
+**5. Purge on erasure.** Storage does not track ownership for you: `Delete` every key on the subject's GDPR erasure cascade ([ADR-0009](/adrs/core-compliance-module)). An un-purged blob is a compliance gap, not an untidy bucket.
+
+The avatar pipeline in the `user` module is the reference consumer — read it before writing your own.
+
+## Key convention
+
+```
+<domain>/<scope>/<entity-uuid>/<hash>.<ext>
+```
+
+`<scope>` is the tenant ID for tenant-scoped domains, or `operator` / the user UUID for operator-global ones like avatars. `<hash>` is a random UUIDv7, so keys are unguessable and collision-safe.
+
+:::warning The KeyBuilder safety invariant
+The commit ownership check derives the caller's allowed prefix from your `KeyBuilder` — everything up to the last `/`. So the caller-identifying segments must come **before** that final slash, with slash-free values. A misordered or slash-less key fails **closed** (every commit rejected as out-of-scope), never open — but that is a silent breakage, so follow the convention above.
+:::
+
+## Deployment
+
+RustFS is the self-hosted default in `docker-compose.infra.yml`, **pinned by digest** — never `:latest`, which drifts — and healthchecked on `/health`.
+
+**The presign endpoint must be browser-reachable.** The browser PUTs to `STORAGE_PUBLIC_ENDPOINT` when set, otherwise `STORAGE_ENDPOINT`. Behind a TLS proxy, keep `STORAGE_ENDPOINT` internal for the backend's own HEAD, GET, and DELETE calls and set `STORAGE_PUBLIC_ENDPOINT` to the public host: presigned URLs sign only `host` and survive proxying, but SDK-signed backend operations 403 through the proxy and must hit the origin directly. The proxy must preserve the `Host` header and answer the browser's CORS preflight.
+
+At scale, point `STORAGE_ENDPOINT` at a managed S3, pre-provision the per-domain buckets, and set `STORAGE_ENSURE_BUCKET=false` (IAM rarely grants CreateBucket) with `STORAGE_FORCE_PATH_STYLE=false`. Add a per-bucket lifecycle rule to expire orphaned uncommitted uploads, plus your backup policy.
+
+:::note STORAGE_BUCKET is deprecated
+Superseded by `STORAGE_BUCKET_PREFIX` (default `orkestra`). The default bucket name is unchanged — prefix `orkestra` plus domain `avatars` — so there is no data move. A deployment that set a *custom* `STORAGE_BUCKET` must set the prefix instead; the backend logs a WARN on an ignored custom value.
+:::
+
+## Out of scope
+
+The store holds **raw bytes**. Image resizing and thumbnails, malware scanning, multipart/resumable upload, and CDN fronting are the consumer's job — a module that needs a particular rendition produces it before or after upload.

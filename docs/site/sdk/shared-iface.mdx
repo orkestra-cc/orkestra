@@ -5,16 +5,37 @@ sidebar_position: 5
 
 # `pkg/sdk/iface`
 
-The public consumer-facing interfaces. Cross-module imports go **only** through this package — never into another module's `services/` or `repository/` directories.
+The consumer-facing interfaces. Cross-module imports go **only** through this package — never into another module's `services/` or `repository/` directories.
 
-| Interface           | Provided by      | Consumed by                                |
-| ------------------- | ---------------- | ------------------------------------------ |
-| `UserProvider`      | `user`           | every other module                         |
-| `NotificationSender`| `notification`   | auth, billing, subscriptions, agents       |
-| `PDFProvider`       | `documents`      | billing                                    |
-| `GraphProvider`     | `graph`          | rag                                        |
-| `AIModelProvider`   | `aimodels`       | rag, agents, sales                         |
-| `RAGQueryProvider`  | `rag`            | agents                                     |
-| `JWTProvider`       | `auth`           | identity, any custom auth integration      |
+## Implemented by the core
 
-This indirection is what keeps consumers decoupled from producers: any implementation — in-process, or a remote HTTP-backed client a fork wires in — satisfies the same interface, so consumer code never changes.
+A representative slice, not the full list — read the package for the rest.
+
+| Interface | Provided by | Consumed by |
+| --- | --- | --- |
+| `UserProvider` | `user` | auth, and every module that needs a user record |
+| `OperatorUserProvider` / `ClientUserProvider` | `user` | tier-specific lookups |
+| `SessionTerminator` | `user` | any module that must revoke a principal's sessions |
+| `NotificationSender` | `notification` | auth (verification, password reset) |
+| `TenantProvider` | `tenant` | authz, auth (JWT membership embedding), middleware |
+| `AccessProvider` | `tenant` | middleware (`RequireCapability`) |
+| `AuthzProvider` | `authz` | middleware (permission checks) |
+| `JWTProvider` / `TenantScopedTokenProvider` | `auth` | the dev-token endpoint, any custom auth integration |
+| `PasswordHasher` / `AdminAuthInviter` | `auth` | user (admin-direct Tier-2 flows) |
+| `ServiceAccountLister` | `auth` | user |
+| `AuditSink` | `compliance` | every module performing a security-sensitive action |
+| `PIIProducer` | `user`, `auth`, `tenant`, `authz`, `notification` | compliance (the GDPR DSR pipeline) |
+| `KMSProvider` | `compliance` | per-tenant envelope encryption and crypto-shred |
+| [`ObjectStore` / `ObjectStoreProvider`](/sdk/object-storage) | the platform's blob provider | user (avatars), and any module storing uploads |
+
+`AuditSinkSetter` and `KMSProviderSetter` are the setter seams on core services: nil by default, so a fork can wire its own audit or key-management implementation the way the core compliance module does.
+
+## Reserved for a fork's addons
+
+[ADR-0006](/adrs/collapse-to-core-only-base) collapsed the base to core-only, but kept the interfaces the removed verticals used. Nothing in the base implements these — they are the shape a fork's addon satisfies so it plugs into the same seam:
+
+`PDFProvider` · `GraphProvider` · `AIModelProvider` · `RAGQueryProvider` · `PaymentProvider` · `SubscriptionReconciler` · `SelfServiceCheckoutPlanner` · `BillingTenantProvider` · `ClientSelfDeletionGate`
+
+## Why the indirection
+
+Any implementation — in-process, or a remote HTTP-backed client a fork wires in — satisfies the same interface, so consumer code never changes. It is also what keeps the dependency graph honest: a module declares what it *needs*, and the registry resolves who provides it.
