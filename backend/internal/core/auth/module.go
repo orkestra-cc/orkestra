@@ -674,6 +674,30 @@ func (m *AuthModule) ConfigSchema() []module.ConfigField {
 	}
 }
 
+// sessionExpiryEpochFloor is the timestamp below which an `expiresAt` is
+// treated as "not really set" rather than "expired in the year 1".
+//
+// A zero time.Time marshals to BSON as 0001-01-01T00:00:00Z, which is in
+// the past for every conceivable clock, so a bare TTL index deletes such a
+// document on the TTL monitor's next 60-second pass. Any real retention
+// deadline this code writes is `now + models.AuthSessionRetention`, i.e.
+// decades above this floor, so the boundary can never exclude a legitimate
+// row. Kept as a package-level var so the index spec and the test that pins
+// it cannot drift apart.
+var sessionExpiryEpochFloor = time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)
+
+// sessionRetentionPartialFilter scopes the session TTL indexes to documents
+// that carry a plausible retention deadline, so a zero `expiresAt` is
+// structurally undeletable by Mongo's TTL monitor. See the comment on the
+// operator-sessions index for why that matters. ADR-0017 D7.
+//
+// Returned fresh per call: IndexSpec.PartialFilter is a map, and handing the
+// same mutable instance to two collection specs would let any future mutation
+// of one silently rewrite the other.
+func sessionRetentionPartialFilter() map[string]any {
+	return map[string]any{"expiresAt": map[string]any{"$gt": sessionExpiryEpochFloor}}
+}
+
 func (m *AuthModule) Collections() []module.CollectionSpec {
 	return []module.CollectionSpec{
 		// Non-tier-split collections: security events are an audit log
@@ -739,11 +763,30 @@ func (m *AuthModule) Collections() []module.CollectionSpec {
 			// expiresAt is the retention deadline, so ExpireAt (delete AT
 			// the timestamp) is the exact expression of the intent —
 			// not TTL, which would add a second offset on top. ADR-0017 D7.
-			{Keys: map[string]int{"expiresAt": 1}, ExpireAt: true},
+			//
+			// The partial filter makes the delete safe BY CONSTRUCTION.
+			// AuthSessionDoc.ExpiresAt is `bson:"expiresAt"` with no
+			// omitempty, so a zero value serialises as a year-1 date and
+			// the TTL monitor would delete that row on its very next pass
+			// — irreversibly, for a session that has not expired at all.
+			// Excluding pre-2000 timestamps removes the whole class:
+			// such a row is simply not in the index, so the monitor never
+			// considers it. This replaces a prose runbook ("count them
+			// first, in both collections, in both environments, and
+			// remember to") with a structural guarantee.
+			{
+				Keys:          map[string]int{"expiresAt": 1},
+				ExpireAt:      true,
+				PartialFilter: sessionRetentionPartialFilter(),
+			},
 		}},
 		{Name: models.ClientSessionsCollection, Indexes: []module.IndexSpec{
 			{Keys: map[string]int{"uuid": 1}, Unique: true},
-			{Keys: map[string]int{"expiresAt": 1}, ExpireAt: true},
+			{
+				Keys:          map[string]int{"expiresAt": 1},
+				ExpireAt:      true,
+				PartialFilter: sessionRetentionPartialFilter(),
+			},
 		}},
 		{Name: models.OperatorEmailTokensCollection, Indexes: []module.IndexSpec{
 			{Keys: map[string]int{"uuid": 1}, Unique: true},

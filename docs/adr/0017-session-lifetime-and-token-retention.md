@@ -171,9 +171,12 @@ schema governed by ADR-0002.
   lifetime traffic. Mongo's TTL monitor batches session deletion and the
   application reaper caps each token deletion pass; backlog, duration, and
   deletion counts must be measured on staging before promotion. A session
-  document with a zero `expiresAt` would be
-  deleted immediately by the TTL index, so a pre-flight count of such rows is a
-  release gate.
+  document with a zero `expiresAt` serialises as a year-1 date and would be
+  deleted immediately by a bare TTL index; both session indexes therefore carry
+  a `{expiresAt: {$gt: 2000-01-01}}` partial filter, which removes that class
+  structurally rather than by pre-flight count. Counting such rows before a
+  deploy remains a useful sanity check — they can no longer be reaped either —
+  but it is not a release gate.
 - **Session lifetime becomes an operator-visible policy rather than an
   implementation detail.** Three lifetimes — access token, idle window, and
   absolute cap — are now separately nameable, and the idle window is documented as

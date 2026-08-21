@@ -55,14 +55,24 @@ Declared in `module.go::Collections()`. Collection name constants live in `model
 
 Email tokens, device-trust grants, refresh-family replay fences, and sessions have TTL indexes. Refresh-token rows and MFA factor rows are rotated/invalidated explicitly in the service layer.
 
-> **Rollout gate.** A session document with a zero `expiresAt` serialises as a year-1 BSON date, and a TTL index deletes it **immediately**. The write path has always set the field, but "should not happen" is not sufficient warrant for an irreversible delete. Count them on staging *and* production before deploying, both collections in full:
+> **Zero-`expiresAt` rows are excluded structurally, not by runbook.** A session document with a zero `expiresAt` serialises as a year-1 BSON date, so a bare TTL index would delete it **immediately** — an irreversible delete of a session that has not expired at all. The write path has always set the field, but "should not happen" is not sufficient warrant for that. Both session TTL indexes therefore carry a partial filter (`module.go`'s `sessionRetentionPartialFilter`):
+>
+> ```
+> {expiresAt: {$gt: ISODate("2000-01-01")}}
+> ```
+>
+> A row below that floor is simply not in the index, so Mongo's TTL monitor never considers it. Any deadline this code writes is `now + AuthSessionRetention`, decades above the floor, so no legitimate row is excluded. Pinned by `TestSessionTTLIndexExcludesZeroExpiry` — including that the spec never asks for `Sparse` and `PartialFilter` together, which Mongo rejects outright.
+>
+> Counting such rows before a deploy is still a **recommended sanity check** — a non-zero count means something upstream is writing sessions without a deadline, and those rows will now accumulate forever rather than being reaped:
 >
 > ```
 > db.operator_sessions.countDocuments({expiresAt: {$lt: ISODate("2000-01-01")}})
 > db.client_sessions.countDocuments({expiresAt: {$lt: ISODate("2000-01-01")}})
 > ```
 >
-> A non-zero count on either blocks the deploy.
+> It is **no longer a deploy blocker**: a non-zero count is a bug to chase, not a reason to hold the release, because the index can no longer delete those rows.
+>
+> **Upgrading an environment that already built the un-filtered index:** adding `partialFilterExpression` to an existing index is not an in-place change — Mongo keys the index by name and `createIndex` with different options on the same keys fails with `IndexOptionsConflict` rather than rebuilding. The registry logs that failure and continues, so the old, unfiltered index stays live. Drop it once (`db.operator_sessions.dropIndex("expiresAt_1")`, same for `client_sessions`) and let the next boot rebuild it with the filter.
 
 ## Dependencies
 
