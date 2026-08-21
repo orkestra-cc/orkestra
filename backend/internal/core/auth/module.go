@@ -802,10 +802,13 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 	// Session revocation list (Block D): Redis-backed set of revoked
 	// `sid` claims checked on every authenticated request. Single
 	// instance shared across both tiers since the sid namespace is
-	// global.
+	// global. The TTL argument is deprecated and ignored — entries live
+	// for the fixed maximum access-token lifetime plus clock skew, which
+	// is the only window that survives a live policy change in either
+	// direction (ADR-0017 D5).
 	sessionRevocationSvc := services.NewSessionRevocationService(
 		deps.RedisAdapter,
-		cfg.Auth.JWT.AccessTokenExpiry,
+		0,
 		logger,
 	)
 
