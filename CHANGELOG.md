@@ -4,10 +4,26 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.7.0] - 2026-08-21
+
+### Release
+
+- **(v0.7.0)** Promote dev ([9f770a7](https://github.com/orkestra-cc/orkestra/commit/9f770a7ac7262510ffa660c751103fc17457e1b4))
+
 ## [0.6.0] - 2026-08-18
 
 ### Features
 
+- **(observability)** Add logging module workspace ([d16e58d](https://github.com/orkestra-cc/orkestra/commit/d16e58d9c3bde8376596579d0b1b71e24a3c4e52))
+- **(observability)** Add logging workspace API ([d5a2be3](https://github.com/orkestra-cc/orkestra/commit/d5a2be3b148b51b8753ec7713cf697ae0eae14ed))
+- **(logging)** Add safe Loki log preview ([9ec3aba](https://github.com/orkestra-cc/orkestra/commit/9ec3abaec9750c085c172a076d32939bf2417662))
+- **(logging)** Expose diagnostic operations ([eb404c0](https://github.com/orkestra-cc/orkestra/commit/eb404c0b2e06498f2acd160c5c4edb3c23ec7b48))
+- **(logging)** Apply permanent levels atomically ([1eaeb28](https://github.com/orkestra-cc/orkestra/commit/1eaeb283c80cfecb180b4bcbe1d400596686ca2c))
+- **(logging)** Add expiring diagnostic overrides ([277db7f](https://github.com/orkestra-cc/orkestra/commit/277db7f8a8f8447cbe124e20e9aa4c1d9c386771))
+- **(compliance)** Declare config groups; gate only retention_years ([8b1173f](https://github.com/orkestra-cc/orkestra/commit/8b1173fb2f78cbb35ee4a4096c419c913578c649))
+- **(tenant)** Split provisioning config onto the per-tier rail ([bb97fd1](https://github.com/orkestra-cc/orkestra/commit/bb97fd1c0839e11bd2b40cedffb77ab8eb54e461))
+- **(frontend-admin)** Service accounts admin UI ([8204e0a](https://github.com/orkestra-cc/orkestra/commit/8204e0a7ce9063cc96299c0c31a4b11a56b2639c))
+- **(auth)** Service accounts with OAuth2 client-credentials grant (ADR-0014) ([3a15282](https://github.com/orkestra-cc/orkestra/commit/3a15282ed719ce4ef94d2b7334dd9dd0c988046e))
 - **(auth)** Expose revocation store degradation ([6328821](https://github.com/orkestra-cc/orkestra/commit/6328821f224972aa6a2dbe4dec446e030b62e867))
 - **(docker)** Extend HOST_BIND_ADDRESS to client-frontend, document the var ([2a6de05](https://github.com/orkestra-cc/orkestra/commit/2a6de052c2a6d870ad345e2ab6049e8a04c6cb86))
 - **(docker)** Configurable host bind address for dev port mappings ([ac6403a](https://github.com/orkestra-cc/orkestra/commit/ac6403a86771ece8325e551650198eeac547d9d9))
@@ -19,6 +35,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 
 ### Bug fixes
 
+- **(logging)** Harden operator workflows ([30c6cc9](https://github.com/orkestra-cc/orkestra/commit/30c6cc98cd81efdc4ef27028c3a05f6a95f2c79c))
+- **(logging)** Document constrained log preview filters ([f25e651](https://github.com/orkestra-cc/orkestra/commit/f25e651d781a35f6042ca8d7ceb8ae2fa621071e))
+- **(observability)** Use JSX provider test wrapper ([bc9e22a](https://github.com/orkestra-cc/orkestra/commit/bc9e22a7e1aa9a377d4b689dff90331b0aef9d2d))
+- **(observability)** Harden logging module workspace ([c67b857](https://github.com/orkestra-cc/orkestra/commit/c67b857fd362d90c40d9f1ca74cd41c03f188348))
+- **(observability)** Expose durable module overrides ([f3e9cba](https://github.com/orkestra-cc/orkestra/commit/f3e9cbae957e8120560c14866316721580bea04b))
+- **(logging)** Expose permanent module override ([f3a7f10](https://github.com/orkestra-cc/orkestra/commit/f3a7f105891dd73fd3c0da0ce5da33fb8bbaccc2))
+- **(observability)** Pass Provider children as props ([ba50dff](https://github.com/orkestra-cc/orkestra/commit/ba50dff1a681b3a51278c7c634cef5330fa7cea1))
+- **(logging)** Harden Loki preview protocol handling ([04e08ad](https://github.com/orkestra-cc/orkestra/commit/04e08ad26fa552faba0211b9cf61ad03012a4684))
+- **(scripts)** Stop making the JWT private key world-readable (#256) ([f8da250](https://github.com/orkestra-cc/orkestra/commit/f8da250d67d1919f4bdc002d5dff5a7a00febbf2))
+- **(frontend-client)** Generate runtime config.js from env on dev/staging ([8ca02cc](https://github.com/orkestra-cc/orkestra/commit/8ca02cc9fec907a75374653005f10b9acfc2c9b2))
 - **(auth)** Audit refresh family tenant scope ([3c27f97](https://github.com/orkestra-cc/orkestra/commit/3c27f97e61ce91a0b5acc4c625e8847cbcf5c260))
 - **(auth)** Close final hardening gaps ([cac7e64](https://github.com/orkestra-cc/orkestra/commit/cac7e6471e0cf7a4091334c3ea756f4e3c446d95))
 - **(auth)** Document tier-scoped repository exemptions ([5d59916](https://github.com/orkestra-cc/orkestra/commit/5d59916107c25b3ab30f3228ce1e48a97dcec730))
@@ -48,8 +74,24 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 - **(frontend-admin)** Seal the rail↔topbar junction and keep the logo in the rail ([2331770](https://github.com/orkestra-cc/orkestra/commit/2331770e476d099f67badc4c8694e11044f31cf1))
 - **(frontend-admin)** Paint the whole sidebar column, not just the collapse ([87399f9](https://github.com/orkestra-cc/orkestra/commit/87399f903a7309458dea1f09654ff54aabb61853))
 
+### Style
+
+- **(logging)** Format legacy redirect test ([70fe2e9](https://github.com/orkestra-cc/orkestra/commit/70fe2e90b5c2e622b7b7ea3eceeaf68e6da7d8e6))
+
+### Refactor
+
+- **(logging)** Move controls into module detail ([0982d85](https://github.com/orkestra-cc/orkestra/commit/0982d85dbb84a0a447d867227aa2dffc0eb54a67))
+
 ### Documentation
 
+- **(observability)** Clarify manual preview workflow ([76731e3](https://github.com/orkestra-cc/orkestra/commit/76731e3e2582e48921084f9648498c1484e089b6))
+- **(api)** Constrain logging preview parameters ([613390e](https://github.com/orkestra-cc/orkestra/commit/613390e7fa21c7262ca0e986697924f11c724f6e))
+- **(api)** Refresh logging operations schema ([f2e4cf0](https://github.com/orkestra-cc/orkestra/commit/f2e4cf0879ae7d612c344c64092f4d62244c945b))
+- **(observability)** Plan logging module workspace ([8b6af1e](https://github.com/orkestra-cc/orkestra/commit/8b6af1ed90777c58723c545921d425d32677e7fa))
+- **(observability)** Design logging operations workspace ([85a987c](https://github.com/orkestra-cc/orkestra/commit/85a987c276c5333c333734b7ffe459bc943cc2c1))
+- **(frontend-client)** Document the runtime config generation in CLAUDE.md ([ab3e216](https://github.com/orkestra-cc/orkestra/commit/ab3e216ebe411e67863a6a688c2e5e66ab7b0f54))
+- Record phase-5 group trees and the compliance gating correction ([fd26bbe](https://github.com/orkestra-cc/orkestra/commit/fd26bbeb31cd2eb90dad0877703618d1c4eae80e))
+- **(adr)** ADR-0012 — module configuration group contract (phase 6) ([19c06e4](https://github.com/orkestra-cc/orkestra/commit/19c06e4fa6787dea924b3b5ece1dc23a1ee5e38f))
 - **(auth)** Correct OAuth config cache comment ([68b4be5](https://github.com/orkestra-cc/orkestra/commit/68b4be5cc1a1d8573adf38eb86e88e7d262e7957))
 - **(auth)** Correct oauth callback guidance ([df36c9d](https://github.com/orkestra-cc/orkestra/commit/df36c9dfde5f5baed55232da082fe3a7d2e62ff3))
 - **(auth)** Add hardening and key rotation guidance ([e029d7a](https://github.com/orkestra-cc/orkestra/commit/e029d7a44dd15465db653a5e6d155ad7f46706d8))
@@ -62,11 +104,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 
 ### Tests
 
+- **(observability)** Support frontend TypeScript target ([d5cf7f7](https://github.com/orkestra-cc/orkestra/commit/d5cf7f7263cd46c85a9d8e0395d39e53a5a21aae))
 - **(auth)** Harden structured log leak checks ([76cb930](https://github.com/orkestra-cc/orkestra/commit/76cb930735a8351728f5ab84710c26a167c4085f))
 - **(auth)** Isolate revocation telemetry ([08d8678](https://github.com/orkestra-cc/orkestra/commit/08d8678331fdf1d830c7b65815e8026cf85adecb))
 
 ### CI
 
+- **(docs)** Fail the dispatch when DOCS_DISPATCH_TOKEN is missing ([3ae5777](https://github.com/orkestra-cc/orkestra/commit/3ae5777e6a6ea984a284c2af0dfbe3f401f2f6ab))
 - **(actions)** CI_FULL variable gates image publish, badges, security cron ([9fe657f](https://github.com/orkestra-cc/orkestra/commit/9fe657fbbe83da9a22154195e006dec52b2e8224))
 - **(actions)** Cut Actions spend — gate scans, cap artifacts, clean GHCR ([f0514c2](https://github.com/orkestra-cc/orkestra/commit/f0514c28608daec336f725169082debf7c573863))
 
