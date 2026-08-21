@@ -75,9 +75,9 @@ Two route groups (`module.go:113-127`):
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/v1/orgs/{orgId}/authz/roles` | List roles (system + custom scoped to this org) |
-| GET | `/v1/orgs/{orgId}/authz/bindings` | List role bindings in the org |
-| GET | `/v1/orgs/{orgId}/authz/me` | Return the caller's effective permissions in this org |
+| GET | `/v1/tenants/{tenantId}/authz/roles` | List roles (system + custom scoped to this org) |
+| GET | `/v1/tenants/{tenantId}/authz/bindings` | List role bindings in the org |
+| GET | `/v1/tenants/{tenantId}/authz/me` | Return the caller's effective permissions in this org |
 
 ### Per-org — mutation (`RequirePermission("authz.role.read")` + `RequireMFA()`)
 
@@ -85,11 +85,11 @@ Block B gates every mutation path behind an MFA step-up because each can grant o
 
 | Method | Path | Purpose |
 |---|---|---|
-| POST | `/v1/orgs/{orgId}/authz/roles` | Create a custom role |
-| PATCH | `/v1/orgs/{orgId}/authz/roles/{roleId}` | Update role — custom: name/description/permissions/isActive; system: `isActive` only |
-| DELETE | `/v1/orgs/{orgId}/authz/roles/{roleId}` | Delete custom role — cascades bindings |
-| POST | `/v1/orgs/{orgId}/authz/bindings` | Grant a role with optional expiration |
-| DELETE | `/v1/orgs/{orgId}/authz/bindings/{bindingId}` | Revoke a binding |
+| POST | `/v1/tenants/{tenantId}/authz/roles` | Create a custom role |
+| PATCH | `/v1/tenants/{tenantId}/authz/roles/{roleId}` | Update role — custom: name/description/permissions/isActive; system: `isActive` only |
+| DELETE | `/v1/tenants/{tenantId}/authz/roles/{roleId}` | Delete custom role — cascades bindings |
+| POST | `/v1/tenants/{tenantId}/authz/bindings` | Grant a role with optional expiration |
+| DELETE | `/v1/tenants/{tenantId}/authz/bindings/{bindingId}` | Revoke a binding |
 
 Route registration in `handlers/handler.go::RegisterGlobalRoutes`, `::RegisterScopedReadRoutes`, and `::RegisterScopedMutationRoutes`.
 
@@ -176,7 +176,7 @@ Permission-evaluation rules (`services/service.go:31-44`, implemented in `GetEff
 
 - **Never hardcode a role name outside of `SeedSystemRoles`.** Role renames must be a single-file change. Middleware code that needs to special-case `super_admin` / `administrator` / `developer` belongs in the evaluator, not in the handler layer.
 - **Never remove `ensureSeeded` from `ListRoles` / `ListPermissions`.** It's the only thing making the admin UI self-heal after a dev DB wipe. If you optimize it, still keep the empty-collection branch.
-- **Never bypass `CanDeliver`-style checks for system roles** — a super_admin should see every permission on `/v1/orgs/{orgId}/authz/me`, which means the wildcard must be preserved in the cache serialization.
+- **Never bypass `CanDeliver`-style checks for system roles** — a super_admin should see every permission on `/v1/tenants/{tenantId}/authz/me`, which means the wildcard must be preserved in the cache serialization.
 - **When adding a new permission**, always declare it in the owning module's `Permissions()` — never write directly to the `authz_permissions` collection. The registry-collected list is the single source of truth and drives the computed role sets at seed time.
 - **Custom roles are scoped to one org.** Their `orgId` field is non-empty. Never copy custom-role UUIDs across orgs; always resolve by `(orgId, name)` or UUID within the target org.
 - **System permissions need a global grant.** Do not try to "grant `system.modules.admin` in org X" — the evaluator requires `orgID=""` for system permissions. Bindings with a non-empty `orgId` holding system permissions will silently not match in the evaluator.
@@ -198,7 +198,7 @@ These invariants apply across **every** module, not just authz. They are the enf
 | 3 | System roles (`super_admin`/`administrator`/`developer`/`manager`/`operator`/`guest`) are **platform-level**; org roles (`org_owner`/`org_admin`/`org_member`/`org_viewer`/`org_billing`) are **tenant-level**. Never mix. | ✅ org roles seeded globally (commit A 2026-04-24); `CreateBinding` enforces system-role-needs-global / tenant-role-needs-tenant separation (commit C 2026-04-24). | Keep. |
 | 4 | Permission checks always run in a resolved org context unless the route uses `RequireGlobal()` or `RequireSystemPermission()` | ✅ middleware chain | Keep. |
 | 5 | A user cannot grant a role whose permissions they themselves lack | ✅ `CreateBinding` cascade rule (commit C 2026-04-24) returns `ErrInsufficientPermissionsToGrant`. Wildcard `*` (super_admin) bypasses; the literal sentinel granter `"system"` bypasses for platform-issued auto-grants. | Keep. |
-| 6 | Org owner is immutable without a transfer flow (`ownerUserUUID` cannot be directly reassigned) | ❌ — no transfer flow today | **planned (Phase 2)**: two-step `POST /v1/orgs/{id}/transfer-ownership` (initiate → accept); both parties emailed; audit logged. |
+| 6 | Org owner is immutable without a transfer flow (`ownerUserUUID` cannot be directly reassigned) | ❌ — no transfer flow today | **planned (Phase 2)**: two-step `POST /v1/tenants/{id}/transfer-ownership` (initiate → accept); both parties emailed; audit logged. |
 | 7 | All secrets AES-256-GCM encrypted at rest | ✅ `pkg/sdk/module/config_service.go` | Keep. Phase 5 extends to per-org secrets via `(module, env, orgId)` key. |
 | 8 | All mutations audited to an append-only, tamper-evident log | ❌ — only session events logged in `auth_sessions.securityEvents` | **planned (Phase 3)**: `audit_events` collection (hash-chained, insert-only role) → Loki (90d observability) → S3 Object Lock EU (7y WORM) dual-sink. SOC2 requirement. |
 | 9 | Every side effect references both actor (userUUID) and principal (orgID), including background jobs | ❌ — jobs today carry no identity context | **planned (Phase 3)**: audit middleware populates both; background jobs run under a synthetic "system" actor with logged justification. |

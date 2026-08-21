@@ -5,4 +5,61 @@ sidebar_position: 6
 
 # navigation
 
-Builds the dynamic sidebar/menu for the admin UI from each enabled module's `NavItems`. Disabled modules drop out of the menu automatically.
+Collects `NavItems()` from every registered module at boot, filters the result per request, and returns one JSON tree to the frontend. **Adding a menu entry means editing the owning module, never this one** — if you find yourself adding items here, the entry belongs somewhere else.
+
+Two surfaces: the role-filtered tree at `/v1/navigation` that the sidebar renders, and the unfiltered tree at `/v1/admin/navigation` that backs the operator workspace at `/admin/modules/navigation`.
+
+## How the tree is assembled
+
+The registry walks every module's `NavItems()` during `InitAll`, stamps each item with its owning module and a deterministic `ItemKey`, and publishes the aggregated slice **before any module's `Init` runs**. That ordering is why navigation — which reads that slice during its own `Init` — always sees the complete set.
+
+Nothing is precomputed after that. Both trees are built per request from the in-memory slice, so a module toggled at `/admin/modules` drops out of the menu on the next fetch with no restart.
+
+## Four filters, in order
+
+1. **Module enabled** — items whose owning module is disabled are skipped. Checked per request through the config service's Redis layer.
+2. **RequiresConfig** — an item can name a boolean config key of its *own* module and stay hidden until it is truthy. This is how a sub-feature gates its own link. It exists because `NavItems()` is collected before any `Init`, so a module cannot inspect its own initialized state to decide: emit the item unconditionally and set `RequiresConfig` instead.
+3. **Tier vs tenant kind** — `internal` items are hidden from callers acting in an external tenant and vice versa; an empty tier is visible to both. The acting tenant kind comes from the JWT's resolved tenant.
+4. **MinRole** — the caller's system role must sit at or above the item's minimum in the `super_admin` › `guest` hierarchy.
+
+A parent with children and no path acts as a group, and **collapses when every child is filtered out** — no empty menu headings.
+
+## Operator reorder
+
+Ordering overrides live in a `navigation_overrides` collection, one document per parent node, and are applied **last** — after filtering and after the realms are built. `PATCH /v1/admin/navigation/order` upserts one parent's child order; `DELETE` clears it. Items missing from the submitted order keep their declared position and append after.
+
+A parent key is one of three things: an item key (nested reorder), a synthetic root key for the top-level items inside one realm and section, or a sentinel that reorders the realm cards themselves.
+
+Two properties keep this from rotting:
+
+- **Self-heal on read.** Entries referencing an item key that no longer exists are dropped with a warning. A module rename or removal therefore repairs stale overrides by itself, with no admin migration.
+- **Failure degrades to declared order.** If the override load fails, the menu still renders. It must always render, even when Mongo is unavailable.
+
+## The admin tree carries a visibility truth table
+
+`/v1/admin/navigation` returns every item unfiltered, each annotated with its module, enabled state, minimum role, tier, declared and effective order — plus a `Visibility` matrix computed for every system role × tenant kind, where each cell is a verdict and a reason code: `module_disabled`, `config_off`, `tier_mismatch`, `role_below_min`, or `parent_collapsed`.
+
+The frontend renders this as the role matrix and the "view as" sidebar preview at `/admin/modules/navigation`, and it **never recomputes visibility client-side**. The reason that matters: the admin matrix and the live sidebar share one predicate, so the matrix cannot drift from what users actually see.
+
+## Response shape
+
+The public response emits **both** the legacy flat `groups` (section → items) and the newer nested `realms` (realm → section → items), so the frontend can migrate without a synchronized deploy. Realm keys are `personal`, `platform`, `business`, and `shared`; the keys are fixed identifiers while their labels are free to change.
+
+The response also echoes the tenant kind it filtered for, so the frontend can cache per-tier menus without re-reading the JWT.
+
+## Routes
+
+| Method | Path | Gate |
+|---|---|---|
+| GET | `/v1/navigation` | authenticated — role-filtered tree |
+| GET | `/v1/admin/navigation` | `administrator` — unfiltered tree with metadata |
+| PATCH | `/v1/admin/navigation/order` | `administrator` — persist one parent's sibling order |
+| DELETE | `/v1/admin/navigation/order` | `administrator` — clear an override, idempotent |
+
+The module contributes no nav item of its own: like [logging](/modules/core/logging), its workspace is reached from the module row in `/admin/modules`, not from the sidebar. It contributes no permissions and exposes nothing in `pkg/sdk/iface` — no backend module consumes navigation; the frontend talks to it directly.
+
+:::note Known limitation
+Filtering is by tenant kind and global system role, so it cannot yet express per-org scope — "show Billing in org A but not org B for the same user". The authz module already computes per-org effective permissions; wiring them in is future work tied to the permission-domain-tag refactor. Until then the returned tree contains every item the role and tier allow, and the frontend compensates by hiding a section when the caller's effective permissions for that org come back empty.
+
+Note also what the tree is *not*: it returns human-readable menu entries, not a route map or permission gates. The frontend's router still has to know the route.
+:::
