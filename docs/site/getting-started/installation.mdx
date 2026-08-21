@@ -5,22 +5,100 @@ sidebar_position: 2
 
 # Installation
 
-:::note 🚧 Draft
-This page needs fleshing out. The TUI installer (`./orkestra.sh`) and the full-stack dev compose both deserve their own walkthroughs.
-:::
+Three ways to run Orkestra, in ascending order of control: the TUI, the CLI, and raw Compose. They all drive the same compose files and the same `docker/.env`.
 
 ## Prerequisites
 
 - Docker 24+ with Compose v2
-- A `docker/.env` file (copy from `docker/.env.example` in the monorepo)
-- Network reachability to GHCR (`ghcr.io`) for the backend image
+- A `docker/.env` file — copy `docker/.env.example`, or let the setup wizard write one
+- Network reachability to GHCR (`ghcr.io`) if you're pulling the pre-built backend image
 
-## Two ways to run Orkestra
+For building from source rather than pulling, install the pinned toolchains with [mise](https://mise.jdx.dev): `mise install` reads `.mise.toml` and provisions exactly the Go, Node, Flutter, and golangci-lint versions CI uses — local and CI cannot drift.
 
-1. **Pre-built image (recommended for evaluation)** — pull the single core-only image `ghcr.io/orkestra-cc/orkestra/backend:latest`; see [Getting Started](/getting-started).
-2. **Development stack from source** — build with AIR + Vite hot reload via `docker-compose.dev.yml`.
+## 1. The TUI
 
 ```bash
-# From the monorepo root — interactive TUI menu
 ./orkestra.sh
 ```
+
+Four options: **Full stack** (dev, staging, or production — the environment is autodetected from `docker/.env`), **Observability** (the self-hosted Loki/Tempo/Prometheus/Grafana overlay, which runs alongside any app stack), **Setup** (the guided `docker/.env` wizard), and Quit.
+
+Start with **Setup** on a fresh clone — it scaffolds secrets and JWT keys for you — then **Full stack → deploy**.
+
+## 2. The CLI
+
+The same script is non-interactive when given a command, which is what you want in scripts and over SSH:
+
+```bash
+./orkestra.sh init --yes                       # scaffold docker/.env, secrets, JWT keys — no prompts
+./orkestra.sh deploy --scope backend --yes     # all | backend | frontend-admin | frontend-admin+backend | infra
+./orkestra.sh status                           # containers + health + resources
+./orkestra.sh logs backend                     # follow one service
+./orkestra.sh stop --with-infra                # stop the app services, and infra too
+```
+
+Prefer this over raw `docker compose`: the script injects the version stamp, runs preflight, and resolves the right compose file from `ENV`, none of which happens if you call Compose yourself.
+
+## 3. Raw Compose
+
+```bash
+cd docker
+docker network create orkestra-network                     # first time only
+docker compose -f docker-compose.infra.yml up -d           # mongodb + redis + rustfs
+docker compose -f docker-compose.dev.yml --env-file .env up -d
+```
+
+One infra base plus one app file per environment — `docker-compose.{dev,staging,prod}.yml` — and an opt-in observability overlay. The dev backend builds with AIR pre-baked, so a source edit rebuilds in place.
+
+**Always check which environment your `.env` selects before running a Compose command:**
+
+```bash
+grep '^ENV=' docker/.env
+```
+
+Staging uses `docker-compose.staging.yml`, dev uses `docker-compose.dev.yml`. Pointing the wrong file at a live stack is the classic way to half-recreate it.
+
+## Pre-built image vs. build from source
+
+There is a **single backend image** — no SKUs, no per-vertical builds:
+
+| Image | Contents |
+|---|---|
+| `ghcr.io/orkestra-cc/orkestra/backend:latest` | The eight core modules |
+| `ghcr.io/orkestra-cc/orkestra/backend:<sha>` | The same, pinned to a commit |
+
+Pull it to evaluate. Build from source when you're developing, or when your fork has added its own modules — a fork's addons live in-tree and produce their own image.
+
+## First login
+
+```bash
+ORKESTRA_API_URL=http://localhost:3000 ./scripts/devtoken.sh administrator
+```
+
+Then continue with [First admin login](/getting-started/first-admin-login).
+
+:::warning `localhost` assumes `HOST_BIND_ADDRESS=0.0.0.0`
+That is the default and what `docker/.env.example` ships, but the compose files publish the browser-facing ports **on that address only**. A host that pins it to one interface — a VM serving the stack over a private-network IP, for instance — is reachable *only* there.
+
+The failure is easy to misread: `curl` reports a connection refusal, and while `devtoken.sh` does exit non-zero, the common `T=$(./scripts/devtoken.sh …)` idiom discards that status, leaving you with an empty token and a puzzling 401.
+
+Substitute the real address for `localhost`, or read it back:
+
+```bash
+sed -n 's/^HOST_BIND_ADDRESS=//p' docker/.env
+```
+:::
+
+## Where things listen
+
+| Service | URL |
+|---|---|
+| Backend API | `http://localhost:3000` |
+| Interactive API docs | `http://localhost:3000/docs` |
+| Operator console | `http://console.localhost:8080` |
+
+The operator and client surfaces are separated by `Host` header, not by port — see the [audience model](/architecture/authentication-flow#1-audience-model). In development an unrecognised `Host` falls through to the operator mux, so plain `localhost` keeps working without editing `/etc/hosts`; in staging and production it returns `421 Misdirected Request`.
+
+## No mail on a fresh install
+
+The notification module boots in `noop` mode: verification and password-reset emails are written to the backend's stdout instead of being delivered. That is deliberate, and it means a fresh install needs no SMTP credentials to be usable. See [Notifications & SMTP](/operating/notifications) when you want real delivery.
