@@ -97,7 +97,11 @@ value would let the denylist entry expire while the old token remained valid.
 The fixed upper bound closes both the increase and decrease cases without
 tracking every access-token expiry per session. The shipped
 `.env.example` is aligned to the same 15-minute default so that repairing the
-chain does not silently lengthen anyone's access-token lifetime.
+chain does not silently lengthen anyone's access-token lifetime. The bound also
+applies to `JWT_ACCESS_TOKEN_EXPIRY` and to direct `NewJWTService` callers: an
+environment or constructor value above 24 hours is clamped with a warning. The
+environment fallback therefore cannot mint a token that outlives the fixed
+denylist window.
 
 **D6 — Admin-supplied durations that govern credentials are validated at the
 auth configuration boundary and bounded defensively at read time.**
@@ -111,9 +115,11 @@ deployment cannot be locked out of the admin UI by old data. This two-layer
 rule prevents the stored value shown by the UI from disagreeing with the
 effective value while remaining safe against direct database edits. Enforcement
 lives in the `auth` module through a new optional `HasConfigValidator` module
-interface. Modules that do not implement it retain today's behaviour, so forks'
-addons do not break. Generic interpretation of every `ConfigField` constraint is
-still a separate SDK decision.
+interface. The validator runs for both the active-config PATCH and the named
+environment PATCH, before encryption or persistence; neither settings surface
+can bypass it. Modules that do not implement it retain today's behaviour, so
+forks' addons do not break. Generic interpretation of every `ConfigField`
+constraint is still a separate SDK decision.
 
 **D7 — Expired authentication state is purged, by the mechanism each collection's
 semantics call for.** Session documents carry a retention deadline in
@@ -122,7 +128,10 @@ never deleted while their token could still pass temporal validation; expired
 rows may be deleted because replaying them cannot mint credentials. The durable
 family fence remains independent. Token rows use a bounded application sweep so
 deletion progress is observable: every cycle deletes at most a fixed batch per
-tier and reports the remaining eligible backlog. `sessionAbsoluteTTL` is capped
+tier. The query fetches one row beyond the batch to decide whether more work
+exists without counting the whole eligible range. A short Redis lease elects one
+reaper across backend replicas; failure to acquire or renew it skips maintenance
+without affecting authentication. `sessionAbsoluteTTL` is capped
 one day below the 90-day session retention window. Equality is unsafe because
 Mongo's TTL monitor could delete the anchor at the exact cap boundary before the
 refresh path evaluates it.

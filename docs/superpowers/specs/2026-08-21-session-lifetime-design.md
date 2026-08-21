@@ -192,6 +192,14 @@ choice. A constructor test pins the 24h + 1m TTL. This bounded extra Redis
 retention is preferable to storing the latest access-token `exp` per session and
 covers every live-policy transition by construction.
 
+The 24-hour ceiling is enforced on the effective lifetime, not only on the admin
+field. `NewJWTService` clamps any positive `accessTTL` above
+`maxAccessTokenTTL` and logs the source-independent warning; this covers
+`JWT_ACCESS_TOKEN_EXPIRY` and direct constructor callers. Zero and negative
+values still take the 15-minute constructor default. Consequently the
+admin-empty → environment fallback cannot produce a token longer than the
+denylist window.
+
 **1.4 — Shared day-aware duration parser.** `parseDuration` moves from
 `internal/shared/config` to `internal/shared/utils` as exported `ParseDuration`,
 and replaces bare `time.ParseDuration` at `auth_policy_service.go:187,266,283` and
@@ -209,16 +217,20 @@ pattern:
 
 ```go
 type HasConfigValidator interface {
-    ValidateConfigPatch(ctx context.Context, values, secrets map[string]string) error
+    ValidateConfig(ctx context.Context, mergedValues map[string]string) error
 }
 ```
 
-The registry gives `ModuleConfigService` the validators of registered modules;
-`UpdateConfig` invokes the matching validator before encryption or persistence
-and maps its typed field errors to 422. There is no import or name-based special
-case from `pkg/sdk/module` to `internal/core/auth`. Modules that omit the interface
-retain current behaviour, so existing fork addons continue to compile and accept
-the same values as before.
+The registry gives `ModuleConfigService` the validators of registered modules.
+Both `UpdateConfig` and `UpdateEnvironmentConfig` invoke the matching validator
+before encryption or persistence and map its typed field errors to 422. The
+validator receives the merged non-secret values, so later cross-field rules
+cannot be bypassed with partial PATCHes. `SetActiveEnvironment` does not reject a
+legacy invalid profile: the defensive readers keep it operable and the next edit
+must repair it. There is no import or name-based special case from
+`pkg/sdk/module` to `internal/core/auth`. Modules that omit the interface retain
+current behaviour, so existing fork addons continue to compile and accept the
+same values as before.
 
 `AuthModule` implements the interface with a key-specific validator. A malformed
 or out-of-range non-empty value returns 422 and is not persisted. The read helper
@@ -243,6 +255,7 @@ The input contract is exhaustive:
 | below minimum PATCH | 422, not persisted | 422, not persisted | 422, not persisted |
 | above maximum PATCH | 422, not persisted | 422, not persisted | 422, not persisted |
 | out of range already in DB | warn and clamp | warn and clamp | warn and clamp |
+| env/direct constructor above maximum | warn and clamp to 24h | n/a | n/a |
 
 Deliberately excluded: `accountLockoutDuration` and `accountLockoutThreshold`.
 They do not govern already-issued credentials, and an absurd value there is
@@ -259,8 +272,11 @@ the enforcement is the auth-specific server-side PATCH validator; generic
 - `TestAccessTokenLifetime_FallsBackToEnvWhenPolicyUnset` — the three-level chain; its absence is why the regression went unnoticed
 - `TestRevocationTTL_OutlivesTokensMintedBeforePolicyDecrease` — mint at 4h, lower policy to 15m, revoke, and assert the Redis entry still covers the old token
 - `TestSessionRevocationTTL_UsesPolicyMaximum` — pins 24h + 1m independently of the deprecated constructor argument
+- `TestAccessTokenTTL_EnvironmentAndConstructorClampToMaximum` — a 48h env/direct constructor value mints for 24h, warns, and remains covered by the denylist
 - `TestAuthDurationPatchValidation` — table-driven across all rows of the input contract; rejected values never reach persistence
 - `TestConfigUpdate_ModuleValidatorOptional` — modules without the seam are unchanged; auth errors map to 422 before persistence
+- `TestEnvironmentConfigUpdate_InvokesModuleValidator` — named profiles cannot bypass validation and invalid input is never persisted
+- `TestSetActiveEnvironment_LegacyInvalidValueUsesDefensiveReader` — activation remains recoverable until the operator repairs the stored value
 - `TestClampPersistedDuration_SaturatesAndWarns` — legacy/out-of-band values only
 - `TestParseDuration_DaySuffix` — parity between env and admin paths
 
@@ -447,29 +463,36 @@ exit on `ctx.Done()`. One loop covering both tiers by calling the two repositori
 which are separate instances.
 
 `CleanupExpiredTokens` becomes a bounded method accepting `limit` and returning
-`(deleted, remainingEligible, error)`. It selects at most 5,000 UUIDs where
-`expiresAt < now`, ordered by `(expiresAt, uuid)`, then deletes only those UUIDs;
-the maintenance path has no unbounded `DeleteMany(cutoff)`. One cycle performs one
-batch per tier. `CleanupRevokedTokens` is removed rather than wired: revocation age
-alone is never a safe deletion criterion, especially after refresh-TTL changes
-between restarts. An `(expiresAt, uuid)` index is declared for both tier
-collections.
+`(deleted, hasMore, error)`. It selects at most 5,001 UUIDs where
+`expiresAt < now`, ordered by `(expiresAt, uuid)`, deletes only the first 5,000,
+and derives `hasMore` from the extra row. It never runs `CountDocuments` on the
+hot drain path, so deciding the next cadence is bounded by the same batch limit.
+The maintenance path has no unbounded `DeleteMany(cutoff)`. One cycle performs
+one batch per tier. `CleanupRevokedTokens` is removed rather than wired:
+revocation age alone is never a safe deletion criterion, especially after
+refresh-TTL changes between restarts. An `(expiresAt, uuid)` index is declared
+for both tier collections.
 
 Counts, backlog and duration are logged, and the collector records:
 
 - `orkestra_auth_token_sweep_deleted_total{tier}`;
-- `orkestra_auth_token_sweep_backlog{tier}`;
+- `orkestra_auth_token_sweep_backlog_estimate{tier}`;
 - `orkestra_auth_token_sweep_duration_seconds{tier}`.
 
-The label set is closed: `tier ∈ {operator,client}`. ADR-0017 D8 is the schema
-decision required by ADR-0002; collection names, UUIDs, configuration values and
-error strings never become labels.
+The backlog estimate is initialised with one indexed `CountDocuments` when an
+idle pass first discovers `hasMore`, then decremented by successful deletions;
+it is reset to zero when `hasMore=false` and recomputed if leadership changes.
+It is explicitly an estimate because rows can become eligible during a drain.
+The exact count is never recomputed every five minutes. The label set is closed:
+`tier ∈ {operator,client}`. ADR-0017 D8 is the schema decision required by
+ADR-0002; collection names, UUIDs, configuration values and error strings never
+become labels.
 
 The cadence adapts to the backlog rather than the batch doing so. A fixed 6-hour
 interval would not drain: 5,000 rows per tier every six hours is 20,000 a day, so a
 one-million-row backlog takes fifty days and a five-million-row one takes over eight
-months. The loop therefore reschedules on the `remainingEligible` count the previous
-batch reported — 5 minutes while it is non-zero, 6 hours once it reaches zero:
+months. The loop therefore reschedules on the `hasMore` bit the previous batch
+reported — 5 minutes while true, 6 hours once false:
 
 ```go
 const (
@@ -483,6 +506,20 @@ same million-row backlog clears in under a day and a five-million-row one in und
 four — a sustained ~17 deletes per second, which is unremarkable load — while every
 individual pass stays bounded at 5,000 and the loop returns to the idle cadence on
 its own.
+
+**Cluster ownership.** The lease elects the scheduler leader, not merely the owner
+of one pass. On `Start`, the module attempts
+`auth:maintenance:token-sweep` with `SET NX`, a random owner token, and a two-minute
+TTL. The leader retains it across drain and idle waits, renews every 30 seconds with
+compare-and-expire, and releases on `Stop` with compare-and-delete; both operations
+use Lua so one replica cannot renew or release another's lease. Loss of renewal
+cancels both the current database context and the scheduler loop. Followers retry
+leadership after five minutes. Redis unavailability logs a bounded warning and
+skips maintenance, never authentication. Holding leadership during the six-hour
+idle interval prevents follower retries from accidentally turning an idle cluster
+into a five-minute sweep loop, while leader loss still fails over after the lease
+expires. Thus 5,000 is the cluster-wide batch bound rather than a per-replica
+multiplier.
 
 Adapting the cadence is also what makes an operator-triggered sweep unnecessary.
 Any design that drains too slowly has to tell operators to "run extra cycles during
@@ -556,8 +593,11 @@ only a push to `main` publishes.
 
 - Sweep never deletes an unexpired row, regardless of revocation age
 - Expired rows may be deleted regardless of revocation state
-- A backlog larger than 5,000 deletes no more than one batch per tier and reports the remainder
-- A non-zero `remainingEligible` schedules the next pass on the drain interval, and a zero one returns to the idle interval — asserted on an injected clock, not by waiting
+- A backlog larger than 5,000 deletes no more than one batch per tier and returns `hasMore=true` using the 5,001st row, without `CountDocuments`
+- `hasMore=true` schedules the next pass on the drain interval, and false returns to the idle interval — asserted on an injected clock, not by waiting
+- Backlog estimation counts once on entry to drain mode, decrements locally, resets at completion, and is not consulted for scheduling
+- Two module instances racing for scheduler leadership produce one loop; non-owner renew/release fails, and renewal loss cancels the database context and loop
+- The leader retains its lease during idle waits; a follower retries after five minutes and takes over only after leader loss/lease expiry
 - TTL index declared on the session collections, modelled on `module_refresh_family_ttl_test.go`, which already asserts the family one
 - Retention fallback equals `AuthSessionRetention`
 - `Start` is idempotent, `Stop` exits on cancellation, and Start→Stop→Start creates exactly one live loop
@@ -567,7 +607,8 @@ boot and must be measured on staging. Refresh-token history drains in bounded
 5,000-row batches per tier on the 5-minute drain cadence — roughly 1.4M rows per
 tier per day — so even a large accumulated backlog clears in days, after which the
 loop settles back to its 6-hour idle interval. Operators watch
-`orkestra_auth_token_sweep_backlog{tier}` to see the drain finish; no manual
+`orkestra_auth_token_sweep_backlog_estimate{tier}` together with `hasMore`/cadence
+logs to see the drain finish; no manual
 intervention or interval change is expected.
 
 New queries need the `//tenantscope:allow` annotations used by the existing queries in
