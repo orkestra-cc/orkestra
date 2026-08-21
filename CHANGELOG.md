@@ -4,6 +4,77 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.6.0] - 2026-08-18
+
+### Features
+
+- **(auth)** Expose revocation store degradation ([6328821](https://github.com/orkestra-cc/orkestra/commit/6328821f224972aa6a2dbe4dec446e030b62e867))
+- **(docker)** Extend HOST_BIND_ADDRESS to client-frontend, document the var ([2a6de05](https://github.com/orkestra-cc/orkestra/commit/2a6de052c2a6d870ad345e2ab6049e8a04c6cb86))
+- **(docker)** Configurable host bind address for dev port mappings ([ac6403a](https://github.com/orkestra-cc/orkestra/commit/ac6403a86771ece8325e551650198eeac547d9d9))
+- **(piiscan)** Flag fiscal identities as data-subject fields ([d7ef182](https://github.com/orkestra-cc/orkestra/commit/d7ef182f9fab69c1b20572d3e717c64c43e2d8b9))
+- **(frontend-admin)** Real content on the /user/dashboard landing ([7d3c251](https://github.com/orkestra-cc/orkestra/commit/7d3c2517893ab8290eea86b18df83c37f3288b69))
+- **(notification)** Declare config group tree + enum providers ([9de453e](https://github.com/orkestra-cc/orkestra/commit/9de453edb547c7a45818d304172ccef4cafc0d2c))
+- **(frontend-admin)** Slim the top band to 3.75rem ([912e63c](https://github.com/orkestra-cc/orkestra/commit/912e63c80701fd1084bcfd8f0a31f7e725547f4c))
+- **(frontend-admin)** Harden the light theme — shell, a11y, status semantics, i18n ([4969f0f](https://github.com/orkestra-cc/orkestra/commit/4969f0f0b9facee779b1b52900082a91ea5cb870))
+
+### Bug fixes
+
+- **(auth)** Audit refresh family tenant scope ([3c27f97](https://github.com/orkestra-cc/orkestra/commit/3c27f97e61ce91a0b5acc4c625e8847cbcf5c260))
+- **(auth)** Close final hardening gaps ([cac7e64](https://github.com/orkestra-cc/orkestra/commit/cac7e6471e0cf7a4091334c3ea756f4e3c446d95))
+- **(auth)** Document tier-scoped repository exemptions ([5d59916](https://github.com/orkestra-cc/orkestra/commit/5d59916107c25b3ab30f3228ce1e48a97dcec730))
+- **(auth)** Enforce one-winner WebAuthn assertions ([6685e25](https://github.com/orkestra-cc/orkestra/commit/6685e25d8e99a2922387c6b36c258d8efa59fbdb))
+- **(auth)** Close refresh and MFA replay races ([578d679](https://github.com/orkestra-cc/orkestra/commit/578d6790f6c495b4efdc4f05f6df2c3ff3f15288))
+- **(auth)** Preserve session identity across token renewal ([ccb4366](https://github.com/orkestra-cc/orkestra/commit/ccb4366a8cf9a1af7dd7eb92c41537f3dd197282))
+- **(auth)** Require canonical token session ids ([dbeae83](https://github.com/orkestra-cc/orkestra/commit/dbeae831f8655173104f487aee624b7f850f962e))
+- **(auth)** Sanitize OAuth eligibility failures ([fff84ab](https://github.com/orkestra-cc/orkestra/commit/fff84ab3e8b58b76eaa5a0be5b826dd53b93d31b))
+- **(auth)** Reject inactive OAuth users ([882ac0a](https://github.com/orkestra-cc/orkestra/commit/882ac0a34a38e0fad614895c47b7141140e18714))
+- **(auth)** Harden logging safety regression ([ebadd60](https://github.com/orkestra-cc/orkestra/commit/ebadd60f2e0f8731a84c2caba9686163ca25b97a))
+- **(auth)** Remove sensitive debug logging ([188ee6c](https://github.com/orkestra-cc/orkestra/commit/188ee6c67390fd8a6a3cbb42bfa89622045d0e42))
+- **(scripts)** Health-check probes the configured bind address ([ff541d5](https://github.com/orkestra-cc/orkestra/commit/ff541d5b54d04369778d7e31972e52202c0884ab))
+- **(backend)** Openapi-dump path count works without jq ([5e4fdbb](https://github.com/orkestra-cc/orkestra/commit/5e4fdbb446ca881c4bcd38606e84b447d68724a4))
+- **(middleware)** Let webhook routes through the audience gate ([f3d2b7c](https://github.com/orkestra-cc/orkestra/commit/f3d2b7c3ea8aebefb1049dd7665ed90ba41a25e9))
+- **(tenant)** Reject immutable fields in UpdateTenant's $set ([7e44a62](https://github.com/orkestra-cc/orkestra/commit/7e44a624b57410e64dab74f7b32fd2e918471e3f))
+- **(tenant)** Validate parent tier on create; purge crypto-shreds soft-deleted tenants ([6e7e643](https://github.com/orkestra-cc/orkestra/commit/6e7e6431be05cda41cb4d2d924633066a35d1fcd))
+- **(security)** Close cross-tenant IDORs, wire fine-grained perms, gate admin endpoints ([128fd93](https://github.com/orkestra-cc/orkestra/commit/128fd93b58901dbc830fd626ddb5027a6d1c8524))
+- **(frontend-admin)** Tenant switcher survives refresh and re-pick ([85e44ad](https://github.com/orkestra-cc/orkestra/commit/85e44ad76e0f00dafdceeaf289e461ab05a2143c))
+- **(openapiauth)** Report status and size on error paths, never the response body (#234) ([8a928c2](https://github.com/orkestra-cc/orkestra/commit/8a928c2bb5cb8164ae335d0c9c2da22c712adcaf))
+- **(test)** Restore Web Storage under Node 25+ ([6f62103](https://github.com/orkestra-cc/orkestra/commit/6f62103ce5c642c41e8fc1a645a02908d87c4100))
+- **(frontend-admin)** One tab primitive, tertiary pagination ([bd39167](https://github.com/orkestra-cc/orkestra/commit/bd3916780c03c8e916255d03b57d18279bd965e0))
+- **(module-config)** Surface invalid and incomplete state on the operator ([025db0d](https://github.com/orkestra-cc/orkestra/commit/025db0dee3125053a6b3a0edaaa5542cdf2b8ec7))
+- **(frontend-admin)** Seat the collapsed-mode logo on the top band ([1717707](https://github.com/orkestra-cc/orkestra/commit/1717707dbb8cfa1a84be09fa8867c5b155ceb8be))
+- **(frontend-admin)** Match the collapsed rail→content gap to the expanded one ([a4650cf](https://github.com/orkestra-cc/orkestra/commit/a4650cfca62946dc19e266982ce6ed46159c4dc5))
+- **(frontend-admin)** Give the top band breathing room from the content ([fa1ac2d](https://github.com/orkestra-cc/orkestra/commit/fa1ac2d6fecefda22b256546a58ea1820864b672))
+- **(frontend-admin)** Restore collapsed-rail clearances broken by the topbar pull ([42f85c2](https://github.com/orkestra-cc/orkestra/commit/42f85c2e03a7f90f301d92eaaa2aa7729366fad2))
+- **(frontend-admin)** Seal the rail↔topbar junction and keep the logo in the rail ([2331770](https://github.com/orkestra-cc/orkestra/commit/2331770e476d099f67badc4c8694e11044f31cf1))
+- **(frontend-admin)** Paint the whole sidebar column, not just the collapse ([87399f9](https://github.com/orkestra-cc/orkestra/commit/87399f903a7309458dea1f09654ff54aabb61853))
+
+### Documentation
+
+- **(auth)** Correct OAuth config cache comment ([68b4be5](https://github.com/orkestra-cc/orkestra/commit/68b4be5cc1a1d8573adf38eb86e88e7d262e7957))
+- **(auth)** Correct oauth callback guidance ([df36c9d](https://github.com/orkestra-cc/orkestra/commit/df36c9dfde5f5baed55232da082fe3a7d2e62ff3))
+- **(auth)** Add hardening and key rotation guidance ([e029d7a](https://github.com/orkestra-cc/orkestra/commit/e029d7a44dd15465db653a5e6d155ad7f46706d8))
+- **(security)** Plan auth hardening ([5a1e7d6](https://github.com/orkestra-cc/orkestra/commit/5a1e7d6d6cc000b7463b0a5b569f25070d2c1253))
+- **(security)** Design auth hardening ([aaa9da7](https://github.com/orkestra-cc/orkestra/commit/aaa9da703778cbd70d08cdf27acff8bcbaa95614))
+- **(site)** Recommend skip-ci on private-fork upstream sync merges ([efce9e8](https://github.com/orkestra-cc/orkestra/commit/efce9e8808cbe199c7e7b388d2cdcb290af5ee14))
+- **(sdk)** State the checkout-planner error-path contract on the iface seam ([7fc4bab](https://github.com/orkestra-cc/orkestra/commit/7fc4babde8c281b5e3c14774c5550d32c1430166))
+- **(test)** Record the Node 25 Web Storage shim in the test-infra table ([e0a4e49](https://github.com/orkestra-cc/orkestra/commit/e0a4e49a25b7e2a3b352a8797c470f22ff9db09b))
+- **(frontend-admin)** Refresh the design.json sidecar against DESIGN.md ([8484f69](https://github.com/orkestra-cc/orkestra/commit/8484f69d5540031eb7f8975563bab134360b86d2))
+
+### Tests
+
+- **(auth)** Harden structured log leak checks ([76cb930](https://github.com/orkestra-cc/orkestra/commit/76cb930735a8351728f5ab84710c26a167c4085f))
+- **(auth)** Isolate revocation telemetry ([08d8678](https://github.com/orkestra-cc/orkestra/commit/08d8678331fdf1d830c7b65815e8026cf85adecb))
+
+### CI
+
+- **(actions)** CI_FULL variable gates image publish, badges, security cron ([9fe657f](https://github.com/orkestra-cc/orkestra/commit/9fe657fbbe83da9a22154195e006dec52b2e8224))
+- **(actions)** Cut Actions spend — gate scans, cap artifacts, clean GHCR ([f0514c2](https://github.com/orkestra-cc/orkestra/commit/f0514c28608daec336f725169082debf7c573863))
+
+### Chores
+
+- **(analyzers)** Realign tenantscope line anchors; drop stale declared.unused suppressions ([33dfbbe](https://github.com/orkestra-cc/orkestra/commit/33dfbbe5430fa3c075026e0429e58c7cb369d8a4))
+- **(security)** Go 1.25.13, x/mod v0.40.0, nanoid audit fix (#244) ([0a9d926](https://github.com/orkestra-cc/orkestra/commit/0a9d926433ba5a52255f1320283272a9d80f702a))
+
 ## [0.5.0] - 2026-08-07
 
 ### Features
