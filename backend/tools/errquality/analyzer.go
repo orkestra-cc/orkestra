@@ -179,18 +179,6 @@ func inspectFile(fset *token.FileSet, f *ast.File, report func(pos token.Pos, ru
 			if !isClause || clause.List != nil { // List == nil marks default:
 				continue
 			}
-			// flagged tracks, per variable name, the position of its most
-			// recent assignment's 4xx constructor call — "most recent
-			// assignment wins" (tools/tenantscope uses the same idea for
-			// scoped-filter tracking; see its analyzeBody doc comment). A
-			// reassignment to anything else clears the flag, so
-			//
-			//	x := huma.Error400BadRequest("...")
-			//	x = errcode.Internal(...)
-			//	return x
-			//
-			// correctly reports nothing.
-			flagged := map[string]token.Pos{}
 			ast.Inspect(clause, func(inner ast.Node) bool {
 				// A nested switch or type-switch judges its own default on
 				// its own merits — the outer walk visits it independently.
@@ -201,32 +189,42 @@ func inspectFile(fset *token.FileSet, f *ast.File, report func(pos token.Pos, ru
 				case *ast.SwitchStmt, *ast.TypeSwitchStmt:
 					return false
 				}
-				if as, isAssign := inner.(*ast.AssignStmt); isAssign {
-					recordDefaultAssignment(as, flagged)
-					return true
-				}
 				ret, isReturn := inner.(*ast.ReturnStmt)
 				if !isReturn {
 					return true
 				}
+				// Known blind spot, kept deliberately: this only matches a
+				// 4xx constructor written literally among the return's
+				// results. Two shapes escape it —
+				//
+				//	x := huma.Error400BadRequest("...")
+				//	return x                              // bound, then returned
+				//
+				//	result = huma.Error400BadRequest("...")
+				//	return                                 // naked return of a named result
+				//
+				// An earlier revision resolved identifiers with a flat,
+				// name-keyed "most recent assignment" map, but that model
+				// has no notion of Go block scope (a shadowed inner
+				// binding was conflated with an outer one) and left a
+				// stale flag on the `x, err = f()` multi-assign shape —
+				// two false POSITIVES, which block a correct build in CI,
+				// traded for closing a false negative that R1/R2 already
+				// judge (the constructor's own message is still checked
+				// wherever it's written, resolved or not). Neither escaping
+				// shape appears anywhere in this codebase today — see
+				// TestR3_DoesNotResolveIndirectReturns_KnownLimit, which
+				// pins this as a decision, not an oversight.
 				for _, result := range ret.Results {
-					switch v := result.(type) {
-					case *ast.CallExpr:
-						if _, status, ok := detailArg(v); ok && status >= 400 && status < 500 {
-							report(v.Pos(), "R3",
-								"an error this function could not name is a server fault — return 5xx, not a status that blames the caller")
-						}
-					case *ast.Ident:
-						if pos, isFlagged := flagged[v.Name]; isFlagged {
-							report(pos, "R3",
-								"an error this function could not name is a server fault — return 5xx, not a status that blames the caller")
-						}
+					call, isCall := result.(*ast.CallExpr)
+					if !isCall {
+						continue
+					}
+					if _, status, ok := detailArg(call); ok && status >= 400 && status < 500 {
+						report(call.Pos(), "R3",
+							"an error this function could not name is a server fault — return 5xx, not a status that blames the caller")
 					}
 				}
-				// A naked `return` (ret.Results == nil, returning named
-				// results) is deliberately out of scope: resolving it needs
-				// the enclosing function's declared result names, which is
-				// machinery this narrow rule does not justify.
 				return true
 			})
 		}
@@ -257,36 +255,6 @@ func hasErrorsIsCase(sw *ast.SwitchStmt) bool {
 		}
 	}
 	return false
-}
-
-// recordDefaultAssignment updates flagged for one assignment statement
-// (`:=` or `=` — both are ast.AssignStmt, distinguished only by Tok, which
-// does not matter here) found inside a default: clause. A single-value
-// assignment whose right-hand side is a 4xx constructor per detailArg
-// flags the left-hand variable at the constructor's position; any other
-// right-hand side clears a previous flag on that variable, so the last
-// assignment before a return is always the one that decides.
-//
-// The multi-return call form (`x, err := f()`) is left untouched: a 4xx
-// constructor is never the paired second value in this codebase's error
-// mappers, and guessing would risk a false positive.
-func recordDefaultAssignment(as *ast.AssignStmt, flagged map[string]token.Pos) {
-	if len(as.Lhs) != len(as.Rhs) {
-		return
-	}
-	for i, lhs := range as.Lhs {
-		id, isIdent := lhs.(*ast.Ident)
-		if !isIdent || id.Name == "_" {
-			continue
-		}
-		if call, isCall := as.Rhs[i].(*ast.CallExpr); isCall {
-			if _, status, ok := detailArg(call); ok && status >= 400 && status < 500 {
-				flagged[id.Name] = call.Pos()
-				continue
-			}
-		}
-		delete(flagged, id.Name)
-	}
 }
 
 // containsErrorText reports whether the expression evaluates (in whole or
