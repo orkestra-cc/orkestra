@@ -5,25 +5,102 @@ sidebar_position: 2
 
 # The `Module` interface
 
-Every Orkestra module implements the same lifecycle interface. The registry resolves load order from each module's `Dependencies()` declaration via topological sort.
+Every Orkestra module — the eight core ones included — implements the same contract. It is deliberately **tiny**:
 
 ```go
 type Module interface {
-    Name() string
-    Dependencies() []string
-
-    Init(ctx context.Context, registry ServiceRegistry, cfg ConfigService) error
-    RegisterRoutes(api huma.API, mw RoleMiddleware)
-    Start(ctx context.Context) error
-    Stop(ctx context.Context) error
-    HealthCheck(ctx context.Context) HealthStatus
-
-    NavItems() []NavItem
-    ConfigSchema() ConfigSchema
-    Collections() []CollectionSpec
+	// Name returns the unique identifier (e.g. "billing", "sales").
+	Name() string
+	// Category returns whether this module is core, toggleable, or external.
+	Category() ModuleCategory
+	// Init initializes repositories, services, and handlers.
+	Init(deps *Dependencies) error
 }
 ```
 
-:::note 🚧 Draft
-Full method-by-method breakdown — when each is called, what to do in each, common pitfalls.
-:::
+Three methods. Everything else a module can do — routes, background work, config, collections, nav entries, permissions — is an **optional sub-interface**, discovered by type assertion at runtime.
+
+That shape is a deliberate constraint rather than minimalism for its own sake. This interface is the public SDK surface, so every method on it is frozen: widening `Module` later would break every addon written against it. New capabilities have to arrive as new sub-interfaces, which is a change no existing module has to notice.
+
+## Category
+
+| Value | Meaning |
+|---|---|
+| `CategoryCore` | Always active, cannot be disabled. An init failure is fatal. |
+| `CategoryToggleable` | Enable and disable from the admin UI; no external dependencies. |
+| `CategoryExternal` | Needs external service credentials to function. |
+
+## `Dependencies` — what `Init` receives
+
+```go
+type Dependencies struct {
+	DB            *mongo.Database
+	RedisAdapter  RedisClient
+	Platform      PlatformInfo
+	Logger        *slog.Logger
+	Services      *ServiceRegistry
+	ConfigService *ModuleConfigService
+}
+```
+
+`Init` is where you construct repositories, services, and handlers, resolve whatever you need from the [ServiceRegistry](/sdk/service-registry), and register what you provide. It is **not** where you start background work — that is `Start`.
+
+## The optional sub-interfaces
+
+Implement only what you need. A pure service provider with no HTTP surface implements none of the routing ones; a module with no background work implements none of the lifecycle ones.
+
+### Lifecycle
+
+| Interface | Method | Called |
+|---|---|---|
+| `Routable` | `RegisterRoutes(ri *RouteInfo)` | At boot, for **every** module — including disabled ones, whose routes are then gated to 503 |
+| `Startable` | `Start(ctx) error` | After `Init`, for enabled modules only — and again on each hot-enable |
+| `Stoppable` | `Stop(ctx) error` | On hot-disable and on host shutdown |
+| `HealthCheckable` | `HealthCheck(ctx) error` | Polled by the module health endpoint |
+
+`Start` and `Stop` are called **per enable and disable**, not only at boot. A module toggled at `/admin/modules` starts or stops immediately, so both must be safe to call more than once over a process lifetime.
+
+### Declarations
+
+| Interface | Method | Purpose |
+|---|---|---|
+| `HasDependencies` | `Dependencies() []string` | Module names this one needs. The registry topologically sorts on this, so init order is always correct. |
+| `HasServiceContracts` | `ProvidedServices()`, `RequiredServices()`, `OptionalServices()` | The registry keys this module publishes and consumes |
+| `HasCollections` | `Collections() []CollectionSpec` | MongoDB collections, auto-created with their indexes at boot |
+| `HasConfigSchema` | `ConfigSchema() []ConfigField` | Admin-editable fields. Seeded from each field's `EnvVar` or default at first boot; the admin UI renders the form from this. |
+| `HasConfigGroups` | `ConfigGroups() []ConfigGroup` | Presentation grouping for those fields. Purely cosmetic — omitting it renders a flat form. |
+| `HasPermissions` | `Permissions() []PermissionSpec` | Permission keys, collected into the [authz](/modules/core/authz) catalog at boot |
+| `HasNavItems` | `NavItems() []NavItemSpec` | Sidebar entries for the [navigation](/modules/core/navigation) aggregator |
+| `HasNotificationTemplates` | `NotificationTemplates() []NotificationTemplateSpec` | Default email templates |
+| `HasCapabilities` | `Capabilities() []Capability` | Entitlement-gated capabilities |
+| `HasDisplayInfo` | `DisplayName()`, `Description()` | Human-readable labels for the admin UI |
+| `HasDefaultEnabled` | `Enabled() bool` | Whether a fresh install starts with this module on |
+| `HasInfraContainers` | `InfraContainers() []InfraContainerSpec` | Docker containers the registry starts before `Start` and stops after `Stop` |
+| `HasPreflight` | `Preflight(ctx) error` | A pre-init check that can refuse a bad configuration early |
+
+## `BaseModule`
+
+In-tree modules embed `BaseModule`, which implements every sub-interface with a sensible default — empty slices, no-op lifecycle, `CategoryCore`. Embed it and override only the methods you care about, and every type assertion still succeeds.
+
+An addon written outside the monorepo can skip it and implement just the sub-interfaces it wants. The registry handles both shapes identically.
+
+## The order things happen in
+
+1. Every module is **constructed** from the catalog.
+2. The registry **topologically sorts** them by `Dependencies()`.
+3. Nav items are **collected and stamped** with their owning module — before any `Init` runs, which is why [navigation](/modules/core/navigation) sees the full set during its own `Init`.
+4. `Init` runs in dependency order.
+5. The union of every `Permissions()` is registered, and the system roles are seeded from the now-complete catalog.
+6. `RegisterRoutes` runs for every module, enabled or not.
+7. `Start` runs for enabled modules only.
+
+Two consequences worth internalizing: **a disabled module is still initialized and still has routes** — they are gated, not absent — and **anything you declare is read before you are initialized**, so a declaration method cannot depend on state that `Init` sets up. If a nav entry needs to appear conditionally, emit it unconditionally and let `RequiresConfig` gate it.
+
+## Common mistakes
+
+- **Starting goroutines in `Init`.** They will run for a module that is disabled. Use `Start`.
+- **Reading config in a declaration method.** `ConfigSchema` and `NavItems` are called before `Init`; there is nothing to read yet.
+- **Importing another module's `services/` or `repository/` package.** Always go through [`pkg/sdk/iface`](/sdk/shared-iface) plus a registry lookup. This is enforced by review and is the one rule that keeps modules independently removable.
+- **Assuming `Stop` is only for shutdown.** It runs on every hot-disable.
+
+Ready to build one? See [Build your first addon](/sdk/build-your-first-addon).
