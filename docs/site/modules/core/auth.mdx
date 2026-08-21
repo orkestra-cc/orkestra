@@ -79,6 +79,16 @@ Reads require `auth.service_accounts.read`. **Every mutation requires `auth.serv
 - **Fails closed everywhere else.** Password login, every OAuth flow, and all refresh-token read paths reject a `service` principal. The client-credentials grant is the only path that can mint a token for one.
 - **No privileged roles.** `super_admin` and `administrator` can never be assigned to a service account, and that guard fails closed even when the pre-read needed to classify the target is unavailable — the assignment is refused rather than risked.
 
+## Refresh-token retention
+
+Expired refresh-token rows are deleted by a background sweep the module starts with itself, not by a Mongo TTL index — the row may only go once its own `expiresAt` is past, and the first cleanup of an upgraded install needs bounded progress and a visible backlog, which a TTL monitor gives you neither of. See [ADR-0017](/adrs/session-lifetime-and-token-retention).
+
+Three things an operator should know about it:
+
+- **One replica sweeps, whichever wins a Redis lease.** The lease is held across the idle wait as well as the drain, so the per-cycle bound of 5,000 rows per tier is a cluster-wide figure rather than something you multiply by your replica count. If Redis is unreachable, or the lease is lost to another replica, the sweeper steps down and re-contends five minutes later rather than stopping: a Redis restart or a failover costs one cycle, not the rest of the process's life. Authentication is never affected either way.
+- **The cadence adapts; the batch does not.** While a batch reports more work waiting, the next pass is five minutes away; once it comes back dry, six hours. A million-row backlog drains in under a day at roughly 17 deletes per second, and the loop returns to idle on its own.
+- **There is nothing to configure and nothing to trigger.** The two intervals are maintenance constants, and because the sweep drains itself there is no "run extra cycles during a maintenance window" procedure. Watch `orkestra_auth_token_sweep_backlog_estimate{tier}` fall to zero.
+
 ## Permissions
 
 | Key | System set | Grants |

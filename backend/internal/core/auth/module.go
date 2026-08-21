@@ -9,6 +9,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/danielgtaylor/huma/v2/adapters/humachi"
@@ -88,6 +89,18 @@ type AuthModule struct {
 	// no field for app-wide config; auth is the only consumer of
 	// *config.Config and threads it in via the catalog factory.
 	cfg *config.Config
+
+	// Refresh-token retention sweep (ADR-0017 D7). One loop covering both
+	// tiers by calling the two repositories, which are separate
+	// instances. lifecycleMu/sweepCancel/sweepDone copy the logging
+	// module's pattern so Start is idempotent, a stopped module can start
+	// again, and no second ticker survives a hot enable/disable cycle.
+	lifecycleMu sync.Mutex
+	sweepCancel context.CancelFunc
+	sweepDone   chan struct{}
+	sweepTiers  []sweepTier
+	sweepLease  *services.MaintenanceLease
+	logger      *slog.Logger
 }
 
 // NewModule constructs an AuthModule bound to the live application config.
@@ -1329,6 +1342,26 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 			models.ClientRefreshTokensCollection, models.ClientSessionsCollection,
 			models.ClientEmailTokensCollection, models.ClientMFAFactorsCollection,
 		))
+	}
+
+	// Maintenance wiring (ADR-0017 D7). A Redis adapter that cannot
+	// satisfy the lease contract disables the sweep rather than running
+	// it unelected — every replica sweeping would make the per-cycle
+	// bound meaningless. Nothing here can fail Init or Start: the sweep
+	// is maintenance, never an authentication dependency.
+	m.logger = logger
+	if lease, ok := deps.RedisAdapter.(services.LeaseRedisClient); ok {
+		m.sweepLease = services.NewMaintenanceLease(lease, tokenSweepLeaseKey, logger)
+		// The two names are literals, not derived from audienceTier:
+		// they are the closed Prometheus label set of ADR-0017 D8, and
+		// a rename of the internal enum must not silently retag every
+		// sweep series as "unknown".
+		m.sweepTiers = []sweepTier{
+			{name: "operator", repo: opBundle.refreshTokenRepo},
+			{name: "client", repo: clBundle.refreshTokenRepo},
+		}
+	} else {
+		logger.Warn("auth: Redis adapter does not support the maintenance lease; refresh-token sweep disabled")
 	}
 
 	return nil
