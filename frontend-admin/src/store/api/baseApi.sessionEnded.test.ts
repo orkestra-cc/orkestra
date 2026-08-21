@@ -1,9 +1,16 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { http, HttpResponse } from 'msw';
 import { server } from 'test/server';
 import { setupStore } from 'test/render';
 import { baseApi } from './baseApi';
 import { setupApi } from './setupApi';
+
+// The toast is the only observable difference between "suppressed" and
+// "shown", so it has to be spied rather than inferred.
+const toastError = vi.hoisted(() => vi.fn());
+vi.mock('react-toastify', () => ({
+  toast: { error: toastError, success: vi.fn(), info: vi.fn(), warn: vi.fn() }
+}));
 
 const probeApi = baseApi.injectEndpoints({
   endpoints: builder => ({
@@ -65,6 +72,7 @@ const setupSeededStore = async () => {
 
 describe('baseApi session-ended interception', () => {
   beforeEach(() => {
+    toastError.mockClear();
     setupStore().dispatch(baseApi.util.resetApiState());
   });
 
@@ -80,4 +88,112 @@ describe('baseApi session-ended interception', () => {
       expect(store.getState().auth.accessToken).toBeFalsy();
     }
   );
+});
+
+describe('session_max_age_reached reaches the user', () => {
+  beforeEach(() => {
+    toastError.mockClear();
+    setupStore().dispatch(baseApi.util.resetApiState());
+  });
+
+  // `isAuthCheck` exists to keep an anonymous visitor from being told their
+  // session expired on a cold load of /me or /v1/auth/session. A server-side
+  // TERMINATION is a different event: session_max_age_reached is only ever
+  // emitted for a session that existed and was ended by policy, and
+  // /v1/auth/session is one of the two endpoints that emit it — so the
+  // suppression made the message unreachable on that path.
+  //
+  // ADR-0017 D4 gives the cap its own wording because "'revoked' is
+  // inaccurate for a session that simply reached its maximum age, and the
+  // distinction matters to whoever reads the support ticket". A message
+  // nobody sees cannot carry that distinction.
+  it('shows the toast on an auth-check URL, which normally suppresses it', async () => {
+    server.use(
+      http.get('*/v1/auth/session', () =>
+        HttpResponse.json({ code: 'session_max_age_reached' }, { status: 401 })
+      )
+    );
+    const store = await setupSeededStore();
+    await store.dispatch(
+      probeApi.endpoints.sessionEndedProbe.initiate('/v1/auth/session')
+    );
+
+    expect(toastError).toHaveBeenCalledTimes(1);
+    expect(String(toastError.mock.calls[0][0])).toMatch(/maximum age/i);
+  });
+
+  // The counter-test that keeps the exemption narrow: the generic revoked
+  // code on the SAME auth-check URL must stay suppressed, or the fix is just
+  // "always toast" wearing a specific name.
+  it('still suppresses session_revoked on an auth-check URL', async () => {
+    server.use(
+      http.get('*/v1/auth/session', () =>
+        HttpResponse.json({ code: 'session_revoked' }, { status: 401 })
+      )
+    );
+    const store = await setupSeededStore();
+    await store.dispatch(
+      probeApi.endpoints.sessionEndedProbe.initiate('/v1/auth/session')
+    );
+
+    expect(toastError).not.toHaveBeenCalled();
+  });
+});
+
+describe('503 from the refresh endpoint is not a sign-out', () => {
+  beforeEach(async () => {
+    toastError.mockClear();
+    setupStore().dispatch(baseApi.util.resetApiState());
+    // performRefresh coalesces concurrent 401s onto a module-scoped
+    // in-flight promise and clears it on a macrotask tick, so two refresh
+    // tests in a row would otherwise share the FIRST one's result and the
+    // second test would assert nothing. Yield a macrotask to drain it.
+    await new Promise(resolve => setTimeout(resolve, 0));
+  });
+
+  // ADR-0017 gives session enforcement its own 503 precisely so a client
+  // does not discard a live session when the server merely could not
+  // evaluate it: an outage "would train clients to discard a session that is
+  // still perfectly valid." performRefresh collapsed every !res.ok into
+  // ok:false, so the 503 logged the user out for the exact reason it exists
+  // to prevent.
+  it('keeps the access token when the refresh endpoint answers 503', async () => {
+    server.use(
+      http.get('*/v1/some/resource', () =>
+        HttpResponse.json({ detail: 'expired' }, { status: 401 })
+      ),
+      http.post('*/v1/auth/operator/refresh-cookie', () =>
+        HttpResponse.json(
+          { code: 'session_enforcement_unavailable' },
+          { status: 503 }
+        )
+      )
+    );
+    const store = await setupSeededStore();
+    await store.dispatch(
+      probeApi.endpoints.sessionEndedProbe.initiate('/v1/some/resource')
+    );
+
+    expect(store.getState().auth.accessToken).toBe('seed-access-token');
+    expect(toastError).not.toHaveBeenCalled();
+  });
+
+  // Counter-test: a 401 from the refresh endpoint IS a sign-out, so the
+  // branch above must key on the status and not disable the logout path.
+  it('still clears the access token when the refresh endpoint answers 401', async () => {
+    server.use(
+      http.get('*/v1/some/resource', () =>
+        HttpResponse.json({ detail: 'expired' }, { status: 401 })
+      ),
+      http.post('*/v1/auth/operator/refresh-cookie', () =>
+        HttpResponse.json({ detail: 'no cookie' }, { status: 401 })
+      )
+    );
+    const store = await setupSeededStore();
+    await store.dispatch(
+      probeApi.endpoints.sessionEndedProbe.initiate('/v1/some/resource')
+    );
+
+    expect(store.getState().auth.accessToken).toBeFalsy();
+  });
 });

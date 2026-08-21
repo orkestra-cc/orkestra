@@ -291,7 +291,34 @@ failure would train clients to discard a session that is still perfectly
 valid, and the caller may retry once storage recovers.
 `ErrSessionMaxAgeReached` is **401** `session_max_age_reached` — distinct
 from `refresh_token_replay` because "revoked" is inaccurate for a session
-that simply aged out. `SessionRevocationDegradedError` is **401 with no
+that simply aged out.
+
+> **The same code is also emitted by `shared/middleware.AuthMiddleware`,
+> and that is the path that actually reaches a user.** The three refresh
+> handlers above are read by machinery, not people: `frontend-admin`'s
+> `performRefresh` discards the body on `!res.ok`, and `/v1/auth/session`
+> is classified as an auth check whose toast is suppressed. What a
+> capped-out user actually hits is their still-live access token meeting
+> the denylist on the next protected request — which used to answer the
+> generic `session_revoked`. `Revoke` stores the reason as the Redis
+> **value**, and `IsRevoked` was already issuing the `GET` and discarding
+> it, so the middleware now reads it through the optional
+> `services.SessionRevocationReasonReader` extension and maps
+> `models.RevokeReasonSessionMaxAge` to `session_max_age_reached`. The
+> extension is discovered by type assertion, not added to
+> `SessionRevocationService`, so a fork's own implementation keeps
+> compiling and simply gets the generic wording. No extra round-trip.
+> Covered by `require_auth_test.go`'s `TestRequireAuth_SessionMaxAge_*`
+> trio, including the fallback for a reason-blind service.
+
+> **Both SPAs treat the 503 as "retry later", never as a sign-out.**
+> `frontend-admin`'s `performRefresh` returns `{ok:false, retry:true}` and
+> `frontend-client`'s `refreshAccessToken` returns
+> `{status:'unavailable'}`; neither clears the access token, and the
+> client also keeps its `localStorage` session marker (clearing it would
+> make the sign-out sticky across the next cold load). Both collapsed the
+> 503 into the 401 path before, logging the user out for the exact reason
+> the 503 exists to prevent. `SessionRevocationDegradedError` is **401 with no
 code**: a generic logout, since a partially degraded cap logout must not
 claim a completely recorded cap expiry. The HttpOnly refresh cookie is
 expired (`clearRefreshCookieOnTerminalRefreshErr`, called immediately

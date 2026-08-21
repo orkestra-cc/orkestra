@@ -102,6 +102,21 @@ token without rotating the refresh cookie (a deliberate anti-replay split), so
 a client calling only that endpoint would otherwise hold a session open
 forever.
 
+The same `session_max_age_reached` code comes back from any protected route
+once the terminated session's access token meets the revocation denylist — in
+practice that is the response a user actually sees, since the refresh
+endpoints are read by the SPA's own plumbing rather than shown to anyone. It
+is deliberately distinct from `session_revoked`: a session that simply reached
+its maximum age was not revoked, and the difference matters to whoever reads
+the resulting support ticket.
+
+If session state cannot be evaluated at all, the refresh endpoints answer
+**503 `session_enforcement_unavailable`** rather than 401. That is not a
+sign-out and a client must not treat it as one — both shipped SPAs keep the
+access token and retry on the next request. Reporting a storage outage as an
+authentication failure would train clients to discard sessions that are still
+perfectly valid.
+
 ### Upgrading
 
 Deploying the absolute cap for the first time signs out any session that began

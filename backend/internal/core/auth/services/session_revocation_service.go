@@ -53,6 +53,33 @@ type SessionRevocationService interface {
 	IsRevoked(ctx context.Context, sid string) (bool, error)
 }
 
+// SessionRevocationReasonReader is the OPTIONAL extension that exposes the
+// reason Revoke stored, so a caller can distinguish *why* a session ended.
+//
+// It is a separate interface, discovered by type assertion, rather than a
+// third method on SessionRevocationService: that interface is part of the
+// surface a fork can implement, and adding a required method to it would
+// break every such implementation at compile time. This mirrors the
+// HasConfigValidator seam in the SDK.
+//
+// The lookup costs nothing extra. IsRevoked already issues the GET and
+// throws the value away — this returns it instead of discarding it.
+//
+// ADR-0017 D4: reaching the absolute session cap is a LOGOUT, and its
+// wording matters. Without this, a user whose session simply aged out is
+// told "session revoked" by the middleware when their still-live access
+// token hits the denylist — precisely the inaccuracy D4 calls out ("the
+// distinction matters to whoever reads the support ticket").
+type SessionRevocationReasonReader interface {
+	// RevocationReason returns the stored reason and whether the sid is on
+	// the denylist at all. It fails open exactly as IsRevoked does: a Redis
+	// error yields ("", false) — not revoked — so a degraded store can never
+	// lock users out. A revoked sid whose value is unreadable yields a
+	// non-empty revoked with an empty reason, which callers must treat as
+	// the generic case.
+	RevocationReason(ctx context.Context, sid string) (reason string, revoked bool)
+}
+
 // SessionRevocationDegradedError means durable session/refresh state was
 // revoked, but the short-lived Redis sid deny-list could not be updated.
 // Callers can detect this partial degradation with errors.As without
@@ -117,19 +144,29 @@ func (s *redisSessionRevocationService) Revoke(ctx context.Context, sid, reason 
 }
 
 func (s *redisSessionRevocationService) IsRevoked(ctx context.Context, sid string) (bool, error) {
+	_, revoked := s.RevocationReason(ctx, sid)
+	return revoked, nil
+}
+
+// RevocationReason is the single lookup both accessors share. Revoke writes
+// the reason as the Redis VALUE, so the GET that answers "is this revoked"
+// already carries it — IsRevoked simply discarded it.
+func (s *redisSessionRevocationService) RevocationReason(ctx context.Context, sid string) (string, bool) {
 	if sid == "" {
-		return false, nil
+		return "", false
 	}
-	_, err := s.client.Get(ctx, revocationKey(sid))
+	reason, err := s.client.Get(ctx, revocationKey(sid))
 	if err == nil {
-		return true, nil
+		return reason, true
 	}
 	if errors.Is(err, redis.Nil) {
-		return false, nil
+		return "", false
 	}
+	// Fail open: a degraded Redis must not lock every user out. See the
+	// type comment.
 	s.metrics.RecordSessionRevocationStoreFailure("lookup")
 	s.warnStoreUnavailable(ctx)
-	return false, nil
+	return "", false
 }
 
 func (s *redisSessionRevocationService) warnStoreUnavailable(ctx context.Context) {
