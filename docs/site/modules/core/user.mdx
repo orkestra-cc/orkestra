@@ -5,10 +5,54 @@ sidebar_position: 1
 
 # user
 
-User CRUD, role management, document tracking. Foundation module — every other module depends on it indirectly.
+Account identity: the per-tier user collections, profile fields, the global **system role**, OAuth link bookkeeping, and the avatar pipeline. A leaf module with no dependencies — everything else reaches it through `iface.UserProvider` rather than importing it.
 
-It also owns the **avatar pipeline**, which is the reference consumer of the [object-storage seam](/sdk/object-storage): presigned direct-to-S3 upload, then a commit that confirms the object and binds the key to the caller. Read it before wiring an upload surface of your own.
+It deliberately does *not* own passwords, sessions, JWTs, or org memberships. Those belong to [auth](/modules/core/auth) and [tenant](/modules/core/tenant).
 
-:::note 🚧 Draft
-Endpoints, RBAC, fields. Could be partially auto-generated from the OpenAPI spec.
+## What it owns
+
+- **Two user collections, one per tier** — `operator_users` and `client_users`. Email uniqueness is scoped *per collection*, so the same address may legitimately exist as both an operator account and a client account: one human running an internal staff role and an external client account are two different principals.
+- **The system role** — `User.Role`, one of `super_admin` › `administrator` › `developer` › `manager` › `operator` › `guest`. This is the value the JWT carries as `srole`. Org-scoped roles are a different thing entirely and live in [authz](/modules/core/authz) as role bindings.
+- **The avatar pipeline** — the reference consumer of the [object-storage seam](/sdk/object-storage): presign, upload direct to storage, commit. Sources are `uploaded`, `initials`, or a linked OAuth provider's picture.
+- **Three registry providers** — `ServiceUserService` (canonical, operator-tier), plus `ServiceOperatorUserProvider` and `ServiceClientUserProvider` for audience-aware consumers.
+
+## Routes
+
+| Surface | Paths | Gate |
+|---|---|---|
+| Operator user admin | `/v1/users`, `/v1/users/count`, `/v1/users/by-email`, `/v1/users/role/...` | `system.users.admin` |
+| Tier-2 client user admin | `/v1/admin/client-users` and below — list, create, invite, resend, password reset, update, soft-delete | `system.users.admin` |
+| Self-service avatar | `/v1/me/avatar/presign-upload`, `/v1/me/avatar/commit`, `/v1/me/avatar/source` | `user.avatar.self`, on **both** tiers |
+
+**Hard mutations sit behind a step-up.** Updating or deleting a user (operator or client tier) requires an MFA proof fresher than 5 minutes, so a long-lived admin session cannot destructively mutate platform state hours after the last verification. Reads and soft mutations — create, invite, resend, send-password-reset — stay on the plain permission gate.
+
+## Permissions
+
+| Key | Grants |
+|---|---|
+| `user.read` | List users |
+| `user.update` | Update user profiles |
+| `user.delete` | Delete users |
+| `user.self` | Edit your own profile |
+| `user.avatar.self` | Manage your own avatar |
+
+:::note A known wrinkle
+The admin HTTP routes are currently gated on **`system.users.admin`** (contributed by authz), not on the `user.*` keys above. So `user.read` / `update` / `delete` are granted to managers and operators through the system-role matrix but are not yet the enforcing gate on those endpoints. Only the avatar routes are wired to their own key. Moving the remaining routes to per-route `RequirePermission` is open work.
 :::
+
+## Guards worth knowing
+
+These refuse the request rather than trusting the caller, and each returns a distinct error code:
+
+- **Last administrator** — no delete, deactivation, or role demotion may leave zero live, active platform administrators (`user.last_admin_forbidden`). The quorum check counts active `super_admin` + `administrator` rows and is best-effort under concurrent edits.
+- **Self-delete** — an admin cannot delete their own account (`user.self_delete_forbidden`).
+- **Role escalation** — no one may assign a role above their own tier (`user.role_escalation_forbidden`). An administrator can assign administrator but never super_admin. A *missing* caller role fails closed: every assignment is refused.
+- **Revoking access ends sessions.** Deactivating or soft-deleting a user calls `iface.SessionTerminator` — refresh tokens revoked, session docs flipped, every `sid` pushed into the Redis revocation set. Before this existed a "disabled" account kept working for the full refresh-token lifetime. The call is deliberately best-effort and silent: the state change is already persisted, and failing the operator's request would report a deactivation that did in fact happen.
+
+## Soft delete and the email alias
+
+Deletes are soft — `DeletedAt` is stamped, the row stays. But the unique email index still matches soft-deleted rows, so a plain soft delete would permanently block that address from re-registering. `SoftDeleteAndAliasEmail` is the escape: it stamps `deletedAt` *and* atomically rewrites the address to an orphan alias, preserving the original on `originalEmail` for audit. That frees the unique index so the same human can sign up again from scratch.
+
+## GDPR
+
+Registers an `iface.PIIProducer` for the subject `user`. Export returns the profile projection — never the password hash or PIN, which are server secrets rather than portable personal data. Erasure **anonymizes** by default: the UUID survives so foreign references stay valid, the email is aliased and the profile blanked, producing the tombstone the [compliance](/modules/core/compliance) retention job later hard-deletes.

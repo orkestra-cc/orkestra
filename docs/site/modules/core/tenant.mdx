@@ -5,8 +5,77 @@ sidebar_position: 3
 
 # tenant
 
-Orgs and memberships — the substrate for the [two-tier tenancy model](/architecture/tenancy-model).
+Organizations, per-user memberships, the tenant hierarchy, plan-based entitlements, and the invite lifecycle — the substrate under the [two-tier tenancy model](/architecture/tenancy-model). Implements `iface.TenantProvider`, so auth can embed memberships in JWTs and middleware can resolve the acting tenant.
 
-:::note 🚧 Draft
-Org types (internal vs external client), membership shapes, sub-tenants.
+It does **not** own org-scoped roles or permissions; those are [authz](/modules/core/authz) role bindings. `Membership.Roles` is a denormalized copy of the role names, kept for fast reads.
+
+## The two kinds
+
+`TenantKind` is `internal` or `external`, and the distinction is load-bearing rather than cosmetic:
+
+- **Internal** — the operator's own organizations (Tier-1).
+- **External** — client organizations (Tier-2), which can themselves nest: an external tenant may have **divisions**, its own sub-tenants. The hierarchy is materialized in a `tenant_ancestors` closure table ([ADR-0001](/adrs/unified-tenant-model)) rather than walked per query.
+
+Per [ADR-0006](/adrs/collapse-to-core-only-base) this data model survives intact. What left with the removed addons is the *mechanism* by which Tier-2 clients consume Tier-1 services — catalog, subscribe, entitlement. A fork that sells to external clients rebuilds that layer on top of these primitives.
+
+## Provisioning policy — who may create a tenant
+
+Two enum config keys at `/admin/modules/tenant`, one per tier, read at request time through a 30-second cache so edits take effect with no restart:
+
+| Key | Tier | Modes | Default |
+|---|---|---|---|
+| `provisioning.internal.mode` | internal | `open` · `manual` · `single` | **`manual`** |
+| `provisioning.external.mode` | external | `open` · `manual` | **`manual`** |
+
+`open` lets any authenticated user create. `manual` restricts creation to holders of `system.tenants.admin`. `single` caps the tier at one active tenant — the way to lock a platform to a single internal org.
+
+**Both default to `manual`, so a fresh install accepts no self-service tenant creation at all**, and may legitimately run with zero internal tenants. External clients are never auto-provisioned and cannot self-create: a platform admin creates the client tenant and assigns it.
+
+Enforcement is split on purpose, so no creation path can slip through:
+
+1. **`single` is a data invariant in the service** — the active-tenant count is checked inside `CreateTenant`, which covers direct creation, divisions, and lazy provisioning automatically.
+2. **`manual` is a permission gate in the handlers** — they resolve the authz provider and check `system.tenants.admin`.
+3. **Lazy provisioning honors `external.mode`** — a Tier-2 caller with no assigned tenant gets a `409` telling them an administrator must create one, rather than silently minting one.
+
+## Routes
+
+| Surface | Paths | Gate |
+|---|---|---|
+| Global | `GET`/`POST /v1/tenants`, `POST /v1/tenants/accept-invite` | authenticated |
+| Per-tenant read | `/v1/tenants/{tenantId}`, `…/members`, `…/divisions` | `tenant.read` |
+| Per-tenant mutation | update, archive, plan change, member removal, invites, divisions | `tenant.read` **+ MFA step-up** |
+| Platform admin | everything under `/v1/admin/tenants` and `/v1/admin/clients` | `system.tenants.admin` |
+| Tier-2 self-service | `/v1/me/billing-identity`, `/v1/me/italian-billable` | authenticated, client surface |
+
+Every per-tenant mutation sits behind a step-up because each one can transfer ownership-adjacent data, change entitlements, or destroy the tenant. A password-only token gets `401 step_up_required` and retries after verifying.
+
+The platform-admin group is gated by a **system** permission rather than per-org membership, so operators manage every tenant without joining each one. It backs `/admin/internal/tenants` (Tier-1) and `/admin/clients` (Tier-2).
+
+:::warning Purge is irreversible
+`POST /v1/admin/tenants/{tenantId}/purge` crypto-shreds the tenant's KMS key. Archiving (`DELETE`) is the recoverable operation; purge is not.
+:::
+
+## Permissions
+
+| Key | System | Grants |
+|---|---|---|
+| `tenant.read` | — | Read tenant details |
+| `tenant.update` | — | Update name, slug, settings |
+| `tenant.delete` | — | Archive the tenant |
+| `tenant.plan.update` | — | Change plan and features |
+| `tenant.member.read` | — | List members |
+| `tenant.member.invite` | — | Invite new members |
+| `tenant.member.remove` | — | Remove members |
+| `system.tenants.admin` | ✅ | Administer every tenant platform-wide |
+
+## Storage
+
+`tenants`, `tenant_memberships`, `tenant_invites` (a real TTL index — Mongo reaps an invite the moment it expires), `tenant_ancestors` (the hierarchy closure table), and `tenant_entitlements` (the capability projection behind `iface.AccessProvider`).
+
+## GDPR
+
+Registers an `iface.PIIProducer` for the subject `tenant`. The subject's personal data here is their **memberships** — which orgs, what roles. The organizations themselves are not the subject's data and are left intact. Erasure deletes the membership rows under either mode, since a membership row *is* the user→org linkage with no anonymizable residue.
+
+:::note No tenant on a fresh install
+Setup creates no tenant. The first administrator is a `super_admin`, which is a platform system role and tenant-independent. The setup wizard's org step is the first — and skippable — creation point.
 :::
