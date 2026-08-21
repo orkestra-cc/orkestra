@@ -56,7 +56,13 @@ type configValueReader interface {
 	// SessionAbsoluteTTL needs this: an operator clearing the field must
 	// disable the cap, and GetValue cannot distinguish that from the key
 	// never having been set. See module.ModuleConfigService.GetRawValue.
-	GetRawValue(ctx context.Context, moduleName, key string) (string, bool)
+	//
+	// The error is separate from the presence flag on purpose. Collapsing
+	// a failed read into "absent" would make SessionAbsoluteTTL answer
+	// with its 30-day default during a module_configs outage, re-enabling
+	// a cap the operator had disabled and signing out every session older
+	// than 30 days that refreshed in that window.
+	GetRawValue(ctx context.Context, moduleName, key string) (string, bool, error)
 }
 
 // AuthPolicyService resolves admin-managed authentication policy at

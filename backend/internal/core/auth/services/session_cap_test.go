@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -48,7 +49,11 @@ func TestSessionAbsoluteTTL_PolicyResolution(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := newPolicy(tc.set).SessionAbsoluteTTL(context.Background()); got != tc.want {
+			got, err := newPolicy(tc.set).SessionAbsoluteTTL(context.Background())
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tc.want {
 				t.Errorf("got %v, want %v", got, tc.want)
 			}
 		})
@@ -57,7 +62,61 @@ func TestSessionAbsoluteTTL_PolicyResolution(t *testing.T) {
 
 func TestSessionAbsoluteTTL_NilPolicyUsesDefault(t *testing.T) {
 	var p *AuthPolicyService
-	if got := p.SessionAbsoluteTTL(context.Background()); got != DefaultSessionAbsoluteTTL {
+	got, err := p.SessionAbsoluteTTL(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != DefaultSessionAbsoluteTTL {
 		t.Errorf("nil policy = %v, want the secure-by-default %v", got, DefaultSessionAbsoluteTTL)
+	}
+}
+
+// A config-read FAILURE must not be read as "the operator said nothing".
+//
+// GetRawValue used to collapse err != nil into ("", false), which
+// SessionAbsoluteTTL treated as "key absent" and answered with the 30-day
+// default. A deployment that had deliberately cleared sessionAbsoluteTTL to
+// disable the cap therefore got the cap back for the duration of any
+// module_configs read failure — and the consequence is not a degraded read
+// but an IRREVERSIBLE logout of every session older than 30 days that happened
+// to refresh in that window. Every other failure on this path fails closed to
+// 503; this one silently substituted a different policy.
+func TestSessionAbsoluteTTL_ReadErrorDoesNotApplyTheDefault(t *testing.T) {
+	boom := errors.New("module_configs unreachable")
+	// The operator's stored state says "disabled" — but the read fails, so
+	// the service cannot see it. The wrong answer here is the default.
+	p := &AuthPolicyService{cs: &stubReader{
+		values: map[string]string{"sessionAbsoluteTTL": ""},
+		rawErr: boom,
+	}}
+
+	got, err := p.SessionAbsoluteTTL(context.Background())
+	if !errors.Is(err, ErrSessionEnforcementUnavailable) {
+		t.Fatalf("err = %v, want ErrSessionEnforcementUnavailable — a failed read is an outage, and the handler maps this sentinel to 503", err)
+	}
+	if got == DefaultSessionAbsoluteTTL {
+		t.Errorf("returned the %v default on a failed read — that re-arms a cap the operator disabled and signs out every session older than it", DefaultSessionAbsoluteTTL)
+	}
+}
+
+// The same failure, one layer up: the enforcement helper must propagate it
+// rather than let a zero duration read as "cap disabled, carry on".
+func TestSessionWithinAbsoluteCap_PolicyReadErrorFailsClosed(t *testing.T) {
+	sessions := newGateSessionRepo()
+	// Seeded YOUNG on purpose: under the swallowed-error behaviour the
+	// helper would take the 30-day default, find this session inside it,
+	// and return nil — indistinguishable from success. The assertion is
+	// therefore about the policy read alone, not about the anchor.
+	sessions.seedSession(&models.AuthSessionDoc{
+		UUID: "sid-1", UserUUID: "u-1", StartedAt: time.Now().Add(-time.Hour),
+	})
+	svc := &authService{
+		authSessionRepo: sessions,
+		policy:          &AuthPolicyService{cs: &stubReader{rawErr: errors.New("module_configs unreachable")}},
+	}
+
+	err := svc.sessionWithinAbsoluteCap(context.Background(), "sid-1")
+	if !errors.Is(err, ErrSessionEnforcementUnavailable) {
+		t.Fatalf("err = %v, want ErrSessionEnforcementUnavailable — an unreadable policy is an outage, and answering nil here mints credentials on a cap the service could not evaluate", err)
 	}
 }

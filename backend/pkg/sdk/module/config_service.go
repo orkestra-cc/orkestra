@@ -640,13 +640,33 @@ func (s *ModuleConfigService) GetValue(ctx context.Context, moduleName, key stri
 // different question "did the operator say anything here", which a field whose
 // empty value is itself a decision needs. See ADR-0017 D1: clearing
 // sessionAbsoluteTTL disables the session cap, and GetValue cannot express that.
-func (s *ModuleConfigService) GetRawValue(ctx context.Context, moduleName, key string) (string, bool) {
+//
+// THREE outcomes, and callers must keep them distinct:
+//
+//   - ("", false, nil)   — the read succeeded and the key is absent.
+//   - (v,  true,  nil)   — the read succeeded; v may legitimately be "".
+//   - ("", false, err)   — the read FAILED. Nothing is known about the key.
+//
+// The error is returned rather than folded into the presence flag because a
+// caller whose "absent" branch substitutes a default would otherwise apply
+// that default during a transient module_configs outage — silently swapping in
+// a different policy exactly when it cannot verify the configured one. For
+// sessionAbsoluteTTL that means re-enabling a cap an operator deliberately
+// disabled, and the consequence is an irreversible sign-out of every session
+// older than the default. A caller governing credentials should fail closed on
+// err, not guess.
+func (s *ModuleConfigService) GetRawValue(ctx context.Context, moduleName, key string) (string, bool, error) {
 	doc, err := s.repo.FindByName(ctx, moduleName)
-	if err != nil || doc == nil {
-		return "", false
+	if err != nil {
+		return "", false, err
+	}
+	if doc == nil {
+		// Not an error: a module with no config document has said nothing
+		// about any key, which is exactly the "absent" answer.
+		return "", false, nil
 	}
 	v, ok := doc.ActiveConfigValues()[key]
-	return v, ok
+	return v, ok, nil
 }
 
 // GetSecret returns a decrypted secret config value for a module.

@@ -232,7 +232,7 @@ means something other than "fall back to a default", so it cannot be
 resolved through `ModuleConfigService.GetValue`: that accessor's `ok &&
 v != ""` guard makes an absent key and an operator-cleared key
 indistinguishable, both falling through to the schema `Default` (`"720h"`).
-`ModuleConfigService.GetRawValue(ctx, moduleName, key) (string, bool)`
+`ModuleConfigService.GetRawValue(ctx, moduleName, key) (string, bool, error)`
 (`pkg/sdk/module/config_service.go`) is the narrow accessor added for this:
 it reports the active environment's stored value plus whether the key is
 actually present, so "present and empty" (disable) and "absent" (never
@@ -240,6 +240,25 @@ configured, use the default) are distinguishable. `configValueReader` in
 `services/auth_policy_service.go` was extended with `GetRawValue` to expose
 it to `SessionAbsoluteTTL`; `GetValue` itself is unchanged, so no existing
 caller's behaviour shifts.
+
+**The third return value is load-bearing, and the reason `SessionAbsoluteTTL`
+returns `(time.Duration, error)`.** A failed `module_configs` read is not an
+absence — it says *nothing* about the key. Collapsing it into `("", false)`
+(which the accessor originally did) made a transient read failure take the
+"absent" branch and answer with the 30-day default, so a deployment that had
+deliberately cleared `sessionAbsoluteTTL` got the cap **back** for the
+duration of the outage — irreversibly signing out every session older than 30
+days that refreshed in that window. Every other failure on this path fails
+closed to 503; that one silently substituted a different policy. Both layers
+now propagate: `GetRawValue` returns the error, `SessionAbsoluteTTL` maps it
+to `ErrSessionEnforcementUnavailable`, and `sessionWithinAbsoluteCap`
+propagates it to the 503 the handler already emits. Pinned by
+`TestSessionAbsoluteTTL_ReadErrorDoesNotApplyTheDefault`,
+`TestSessionWithinAbsoluteCap_PolicyReadErrorFailsClosed`, and (at the SDK
+layer, hermetically, against an unreachable Mongo)
+`TestGetRawValue_ReadFailureIsNotAbsence`. **A `nil` document is still an
+absence, not an error** — a module with no config document has genuinely said
+nothing.
 
 Enforcement is `(*authService).sessionWithinAbsoluteCap`, called by **both**
 `RefreshTokensWithRiskAssessment` and `MintAccessTokenFromRefresh` — see the

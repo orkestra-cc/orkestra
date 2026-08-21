@@ -35,6 +35,17 @@ const (
 // SessionAbsoluteTTL returns the maximum age a session may reach before
 // the user must authenticate again, or 0 when the cap is disabled.
 //
+// It returns ErrSessionEnforcementUnavailable when the configuration
+// could not be READ at all. That is not the same as "no value stored":
+// an unreadable module_configs document says nothing about whether the
+// operator disabled the cap, and answering with the 30-day default in
+// that state would silently re-arm a cap a deployment had deliberately
+// turned off — irreversibly signing out every session older than 30 days
+// that happens to refresh during the outage. Every other failure on this
+// path fails closed to 503; this one used to be the single exception that
+// substituted a different policy instead. Callers must propagate the
+// error rather than treating a zero duration as "disabled".
+//
 // This distinguishes three states via GetRawValue's presence flag, which
 // GetValue cannot express (it returns "" for both an absent key and a
 // cleared one — see ModuleConfigService.GetValue and the doc comment on
@@ -57,19 +68,26 @@ const (
 //     persisted auth duration.
 //
 // ADR-0017 D1.
-func (s *AuthPolicyService) SessionAbsoluteTTL(ctx context.Context) time.Duration {
+func (s *AuthPolicyService) SessionAbsoluteTTL(ctx context.Context) (time.Duration, error) {
 	if s == nil || s.cs == nil {
-		return DefaultSessionAbsoluteTTL
+		return DefaultSessionAbsoluteTTL, nil
 	}
-	raw, present := s.cs.GetRawValue(ctx, "auth", "sessionAbsoluteTTL")
+	raw, present, err := s.cs.GetRawValue(ctx, "auth", "sessionAbsoluteTTL")
+	if err != nil {
+		slogDefault().ErrorContext(ctx, "session cap: policy read failed",
+			slog.String("outcome", "fail_closed"),
+			slog.String("key", "sessionAbsoluteTTL"),
+			slog.String("error", err.Error()))
+		return 0, ErrSessionEnforcementUnavailable
+	}
 	if !present {
-		return DefaultSessionAbsoluteTTL
+		return DefaultSessionAbsoluteTTL, nil
 	}
 	if strings.TrimSpace(raw) == "" {
-		return 0
+		return 0, nil
 	}
 	return clampPersistedDuration(raw, DefaultSessionAbsoluteTTL,
-		MinSessionAbsoluteTTL, MaxSessionAbsoluteTTL, "sessionAbsoluteTTL", slogDefault())
+		MinSessionAbsoluteTTL, MaxSessionAbsoluteTTL, "sessionAbsoluteTTL", slogDefault()), nil
 }
 
 // ErrSessionMaxAgeReached means the session hit its configured absolute
@@ -142,7 +160,15 @@ func (s *authService) sessionWithinAbsoluteCap(ctx context.Context, sessionUUID 
 	if s.authSessionRepo == nil || sessionUUID == "" {
 		return nil
 	}
-	maxAge := s.policy.SessionAbsoluteTTL(ctx)
+	// A failed policy read is an outage, not a configuration. Falling
+	// through to the default here would re-arm a cap an operator had
+	// disabled and log out every session older than it — see
+	// SessionAbsoluteTTL. Fail closed, exactly like an unreadable session
+	// store two statements below.
+	maxAge, err := s.policy.SessionAbsoluteTTL(ctx)
+	if err != nil {
+		return ErrSessionEnforcementUnavailable
+	}
 	if maxAge <= 0 {
 		// Disabled: skip the query entirely. This is the exit for a fork
 		// that does not want the cap, and it must cost nothing.

@@ -14,6 +14,9 @@ import (
 // or Redis is required.
 type stubReader struct {
 	values map[string]string
+	// rawErr, when set, makes GetRawValue report a failed read. It stands
+	// in for an unreachable module_configs collection.
+	rawErr error
 }
 
 func (s *stubReader) GetValue(_ context.Context, _, key string) string {
@@ -27,12 +30,21 @@ func (s *stubReader) GetValue(_ context.Context, _, key string) string {
 // map lookup naturally distinguishes "key present with empty value" (ok=true)
 // from "key absent" (ok=false), so a nil/missing-key map value expresses
 // "absent" and an explicit empty-string entry expresses "operator cleared it".
-func (s *stubReader) GetRawValue(_ context.Context, _, key string) (string, bool) {
+//
+// A non-nil rawErr is the THIRD state the real accessor reports and the two
+// above cannot express: the read failed, so nothing is known about the key.
+// It returns the same ("", false) pair a genuine absence does, which is
+// precisely why the error has to be a separate return value — a caller
+// switching on presence alone cannot tell the two apart.
+func (s *stubReader) GetRawValue(_ context.Context, _, key string) (string, bool, error) {
 	if s == nil {
-		return "", false
+		return "", false, nil
+	}
+	if s.rawErr != nil {
+		return "", false, s.rawErr
 	}
 	v, ok := s.values[key]
-	return v, ok
+	return v, ok, nil
 }
 
 func newPolicy(values map[string]string) *AuthPolicyService {
