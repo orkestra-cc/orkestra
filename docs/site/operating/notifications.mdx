@@ -5,16 +5,67 @@ sidebar_position: 4
 
 # Notifications & SMTP
 
-The `notification` module boots in **`noop` mode** by default — verification and password-reset emails are logged to backend stdout rather than delivered.
+The `notification` module boots in **`noop` mode** by default — verification and password-reset emails are rendered and logged to the backend's stdout rather than delivered. A fresh install therefore needs no mail credentials to be usable, and dev and CI never send anything by accident.
 
-To send real mail:
+## Switching to real delivery
 
-1. Open `/admin/modules`.
-2. Find **Notification** and click into its config.
-3. Switch the driver from `noop` to `smtp`.
-4. Fill in SMTP host, port, credentials, from-address.
+1. Open `/admin/modules/notification`.
+2. Under **Delivery**, change **Email provider** from `noop` to `smtp`. The SMTP connection fields appear only at this point — they carry a dependency on the provider field, so a default install shows one option instead of six irrelevant ones.
+3. Fill in host, port, username, password, and TLS mode.
+4. Under **Sender**, set the from-address and display name.
 5. Save. The change takes effect immediately — no restart.
+6. Use **`POST /v1/notifications/test`** to send yourself a message before trusting the config with real auth mail.
 
-:::note 🚧 Draft
-Per-provider SMTP setup walkthroughs (SES, SendGrid, Postmark, Resend) belong here.
+The password is stored as a `FieldSecret`: AES-256-GCM encrypted at rest, never echoed back through the API.
+
+## TLS mode
+
+| Mode | Port | When |
+|---|---|---|
+| `starttls` | 587 | The default, and what nearly every provider wants |
+| `tls` | 465 | Implicit TLS, for relays that require it |
+| `none` | 25 or 1025 | Local capture only — a dev mail catcher. Never across a network |
+
+Port 25 is blocked outbound by most cloud providers, so `starttls` on 587 is the right first attempt.
+
+## Provider settings
+
+Every hosted relay maps onto the same five fields. Confirm the host against your provider's current documentation — these are stable but not ours to guarantee.
+
+| Provider | Host | Username | Password |
+|---|---|---|---|
+| Amazon SES | `email-smtp.<region>.amazonaws.com` | SES **SMTP** credentials — generated in the console, not your AWS access key | The matching SMTP secret |
+| SendGrid | `smtp.sendgrid.net` | The literal string `apikey` | Your API key |
+| Postmark | `smtp.postmarkapp.com` | Server API token | The same token |
+| Resend | `smtp.resend.com` | The literal string `resend` | Your API key |
+
+Two things trip people up regardless of provider:
+
+- **The from-address must be verified with the provider**, and for anything beyond a trickle you need domain authentication (SPF and DKIM records). An unverified sender is rejected at the relay, so it looks like a credentials problem when it is a DNS one.
+- **Amazon SES starts every account in sandbox mode**, where you may only send *to* verified addresses. Requesting production access is a separate step, and until it is granted mail to your users silently fails.
+
+## What gets sent
+
+The core base sends transactional mail only, all of it from the auth module: email verification, password reset, suspicious-login and new-device notices, and admin invites.
+
+**Transactional mail cannot be opted out of.** Preference checks are skipped for it by design — verification and reset messages are required for the product to work. The unsubscribe footer still links to the preferences page, where a user can opt out of marketing categories, with a note that security mail will keep arriving. If your fork adds marketing mail, it must mark it as such or preferences will silently not be honored.
+
+## Templates
+
+Templates are seeded into MongoDB on first start, and from then on **the database is the source of truth**. Edit one at `/admin/modules` or through `PUT /v1/notifications/templates/{templateId}`; overriding flips it out of system ownership. Deleting the override restores the shipped default on the next start — that is the undo.
+
+Subjects and plain-text bodies render through Go's `text/template`; HTML bodies render through `html/template`, so the HTML path gets contextual escaping. Every send is automatically given an unsubscribe URL, a preferences URL, the app name, and the support email, so a template can use those without the calling module passing them.
+
+## When mail does not arrive
+
+Work down this list in order:
+
+1. **Is the provider still `noop`?** Then it never left the building — the rendered message is in the backend's stdout. This is the single most common cause.
+2. **Check the delivery log** at `GET /v1/notifications` — filter by category and status. A row with a failure status means Orkestra tried and the relay refused; no row at all means the send was never attempted.
+3. **Is the address suppressed?** A suppression is keyed by address and silently drops delivery. There is no bounce ingestion in the base, so suppressions are added manually — check before assuming a config fault.
+4. **Was it deduplicated?** Every send carries an idempotency key, and a repeat within the hour returns the earlier result instead of sending again. Two clicks on "resend" produce one email, on purpose.
+5. **Then look at SPF/DKIM and the provider's own log.** By this point the problem is usually at the relay, not in Orkestra.
+
+:::note Scope
+Email only. The interface was designed for SMS, push, and webhooks, but none are implemented. Sends are synchronous — there is no queue. No marketing automation, segmentation, or A/B testing; no bounce or complaint ingestion; DKIM signing is the relay's job.
 :::
