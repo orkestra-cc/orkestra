@@ -25,7 +25,7 @@ on:
         type: string
 
 permissions:
-  contents: write   # required to commit CHANGELOG + create Release
+  contents: write   # required to commit CHANGELOG to dev + create Release
 
 concurrency:
   group: release-${{ github.ref }}
@@ -97,7 +97,11 @@ jobs:
 
       - name: Commit refreshed CHANGELOG.md + synced package.json (if changed)
         # Carries any regenerated artefacts (CHANGELOG body + the two
-        # package.json version fields) onto main in a single commit.
+        # package.json version fields) onto dev in a single commit. dev is
+        # the unprotected integration branch; the refreshed changelog reaches
+        # main on the next dev->main promotion. Committing straight to main
+        # (as this did through v0.7.0) left dev without its own changelog on
+        # every cut — v0.4.0 and v0.6.0 both had to be absorbed by hand.
         # No-op when everything is already current.
         run: |
           STAGED=()
@@ -126,8 +130,8 @@ jobs:
           git checkout -- "${STAGED[@]}"
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git fetch origin main
-          git checkout main
+          git fetch origin dev
+          git checkout -B dev origin/dev
           for f in "${STAGED[@]}"; do
             cp "/tmp/refreshed-${f//\//-}" "$f"
             git add "$f"
@@ -136,11 +140,11 @@ jobs:
           # (e.g. CHANGELOG bumped locally before tagging). `git commit`
           # complains about "nothing to commit" in that case — guard.
           if git diff --cached --quiet; then
-            echo "All refreshed artefacts already match main — no commit needed."
+            echo "All refreshed artefacts already match dev — no commit needed."
             exit 0
           fi
           git commit -m "chore(release): refresh CHANGELOG.md + package.json for ${{ steps.tag.outputs.tag }}"
-          git push origin main
+          git push origin HEAD:dev
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
