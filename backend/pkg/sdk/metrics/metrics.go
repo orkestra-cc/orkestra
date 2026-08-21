@@ -27,6 +27,23 @@
 //     lookup/write Redis failures while evaluating or recording revoked JWT
 //     session identifiers. Lookup failures still fail open.
 //
+// ADR-0017 (session lifetime and token retention) adds three more:
+//
+//   - orkestra_auth_session_cap_expiries_total — count of sessions
+//     terminated for reaching the configured absolute maximum age.
+//     Unlabelled: distinguishes a cap that works from one signing out
+//     too many people.
+//   - orkestra_auth_session_cap_event_failures_total — count of cap
+//     expiries whose security-event write failed. Unlabelled; the
+//     credentials are already terminated, so this is observational
+//     only.
+//   - orkestra_auth_session_anchor_anomalies_total — count of refreshes
+//     permitted because the cap could not read a session-cap anchor,
+//     labelled by kind ("missing" or "zero_timestamp", anything else
+//     collapses to "unknown"). Zero for 30 consecutive production days
+//     is the gate on tightening the ADR-0017 compatibility window to
+//     fail-closed.
+//
 // ADR-0002 (docs/adr/0002-metrics-label-schema.md) freezes the label
 // schema. Adding labels requires a new ADR — Prometheus cardinality
 // explodes silently, and history breaks when labels change. The raw
@@ -59,6 +76,9 @@ type Collector struct {
 	cedarEnforced                  *prometheus.CounterVec
 	capabilityDenied               *prometheus.CounterVec
 	sessionRevocationStoreFailures *prometheus.CounterVec
+	sessionCapExpiries             prometheus.Counter
+	sessionCapEventFailures        prometheus.Counter
+	sessionAnchorAnomalies         *prometheus.CounterVec
 
 	// entitlementLag is a GaugeFunc that reads lastApply on every scrape;
 	// the map is keyed by tenant kind ("internal" | "external"). Stored
@@ -142,6 +162,38 @@ func (c *Collector) buildMetrics() {
 		[]string{"operation"},
 	)
 
+	c.sessionCapExpiries = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Namespace: "orkestra",
+			Subsystem: "auth",
+			Name:      "session_cap_expiries_total",
+			Help:      "Count of sessions terminated because they reached the configured absolute maximum age. Unlabelled by design (ADR-0017 D8): the value distinguishes a cap that works from one signing out too many people, and no dimension of it is bounded.",
+		},
+	)
+
+	c.sessionCapEventFailures = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Namespace: "orkestra",
+			Subsystem: "auth",
+			Name:      "session_cap_event_failures_total",
+			Help:      "Count of cap expiries whose security-event write failed. Credentials are already terminated when this increments — the failure is observational, never restorative.",
+		},
+	)
+
+	c.sessionAnchorAnomalies = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "orkestra",
+			Subsystem: "auth",
+			Name:      "session_anchor_anomalies_total",
+			Help:      "Count of refreshes that could not read a session-cap anchor and were permitted under the ADR-0017 compatibility window. Zero for 30 consecutive production days is the gate on tightening this to fail-closed.",
+		},
+		// kind is a closed allowlist: "missing" (clean not-found) or
+		// "zero_timestamp" (row present, no usable StartedAt/CreatedAt).
+		// Repository errors are NOT anomalies — they fail closed and use
+		// ordinary error telemetry. ADR-0017 D8.
+		[]string{"kind"},
+	)
+
 	c.entitlementLag = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "orkestra",
@@ -189,7 +241,7 @@ func (c *Collector) Register() error {
 	if !atomic.CompareAndSwapUint32(&c.registered, 0, 1) {
 		return nil
 	}
-	for _, m := range []prometheus.Collector{c.cedarDivergence, c.cedarEnforced, c.capabilityDenied, c.sessionRevocationStoreFailures, c.entitlementLag, c.httpDuration} {
+	for _, m := range []prometheus.Collector{c.cedarDivergence, c.cedarEnforced, c.capabilityDenied, c.sessionRevocationStoreFailures, c.sessionCapExpiries, c.sessionCapEventFailures, c.sessionAnchorAnomalies, c.entitlementLag, c.httpDuration} {
 		if err := c.registry.Register(m); err != nil {
 			// rollback so the caller can retry with a fresh collector
 			atomic.StoreUint32(&c.registered, 0)
@@ -268,6 +320,40 @@ func (c *Collector) RecordSessionRevocationStoreFailure(operation string) {
 		operation = "unknown"
 	}
 	c.sessionRevocationStoreFailures.WithLabelValues(operation).Inc()
+}
+
+// RecordSessionCapExpiry counts one session terminated for reaching its
+// configured maximum age. Emitted only by the caller that won the
+// isActive transition, so concurrent refreshes on the same session count
+// once. ADR-0017 D4.
+func (c *Collector) RecordSessionCapExpiry() {
+	if c == nil || c.sessionCapExpiries == nil {
+		return
+	}
+	c.sessionCapExpiries.Inc()
+}
+
+// RecordSessionCapEventFailure counts a cap expiry whose security-event
+// write failed. Durable state is already terminated at that point.
+func (c *Collector) RecordSessionCapEventFailure() {
+	if c == nil || c.sessionCapEventFailures == nil {
+		return
+	}
+	c.sessionCapEventFailures.Inc()
+}
+
+// RecordSessionAnchorAnomaly counts a refresh permitted because the cap
+// could not read an anchor. kind is limited to "missing" and
+// "zero_timestamp"; anything else collapses to "unknown" so a caller bug
+// cannot turn a session UUID into a Prometheus label. ADR-0017 D8.
+func (c *Collector) RecordSessionAnchorAnomaly(kind string) {
+	if c == nil || c.sessionAnchorAnomalies == nil {
+		return
+	}
+	if kind != "missing" && kind != "zero_timestamp" {
+		kind = "unknown"
+	}
+	c.sessionAnchorAnomalies.WithLabelValues(kind).Inc()
 }
 
 // RecordEntitlementApply marks an entitlement change (grant or revoke) as
