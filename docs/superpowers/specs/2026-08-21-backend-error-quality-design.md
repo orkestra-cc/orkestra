@@ -119,8 +119,11 @@ human-readable sentence.
 
 ### Baseline
 
-`-write-baseline` emits `path:line: rule` for every current violation; CI fails only on
-violations **absent** from the file. New code is therefore clean from day one while the
+The baseline is generated from the analyzer's own diagnostics (each message is prefixed
+with its rule id, so `sed` reduces `path:line:col: [R1] …` to a `relpath:line:rule` key)
+and committed as a plain text file, exactly as `tenantscope/baseline.txt` is maintained —
+no bespoke `-write-baseline` flag, which would have to serialize concurrent per-package
+runs for no gain. CI fails only on violations **absent** from the file. New code is therefore clean from day one while the
 ~60 existing core sites wait their turn. Deleting a line from `baseline.txt` is the
 definition of progress, and it is countable.
 
@@ -189,9 +192,10 @@ until that commit lands.
 ## Testing
 
 - **Analyzer:** `analyzer_test.go` parses synthetic sources per rule — a positive and a
-  negative case each, plus one allow-comment suppression and one baselined violation —
-  following the emulated-`Pass` approach `tenantscope/analyzer_test.go` uses, so no
-  `analysistest` testdata module is needed.
+  negative case each, plus one allow-comment suppression and one baselined violation.
+  Detection lives in a pure `inspectFile(fset, file, report)` that the tests call
+  directly, so neither an `analysistest` testdata module nor the emulated-`Pass` scaffold
+  `tenantscope/analyzer_test.go` needs is required.
 - **Burn-down:** each commit extends the module's existing handler tests.
   `internal/core/auth/handlers/error_mapping_test.go` already exists and gains a case per
   newly mapped sentinel, asserting status **and** code.
