@@ -243,6 +243,27 @@ that rule is to be tightened to fail-closed in the first minor release after
 usable `CreatedAt` is **not** an anomaly — it has a perfectly good anchor,
 and counting it would poison the observation window.
 
+**The three cap outcomes above surface as four distinct HTTP responses**
+(`writeRefreshErr`, called from all three refresh-flow handlers —
+`RefreshTokensWithHeaderHTTP`, `GetSessionHTTP`, `RefreshTokensHTTP`):
+`ErrSessionEnforcementUnavailable` is **503** `session_enforcement_unavailable`
+— never a 401, because reporting a storage outage as an authentication
+failure would train clients to discard a session that is still perfectly
+valid, and the caller may retry once storage recovers.
+`ErrSessionMaxAgeReached` is **401** `session_max_age_reached` — distinct
+from `refresh_token_replay` because "revoked" is inaccurate for a session
+that simply aged out. `SessionRevocationDegradedError` is **401 with no
+code**: a generic logout, since a partially degraded cap logout must not
+claim a completely recorded cap expiry. The HttpOnly refresh cookie is
+expired (`clearRefreshCookieOnTerminalRefreshErr`, called immediately
+before `writeRefreshErr` at each of the three call sites) on exactly the
+two outcomes where the session is durably gone — cap expiry and the
+degraded logout — and deliberately left alone on
+`ErrSessionEnforcementUnavailable`, where durable logout is not known to
+have completed. Redux state cleanup on the frontend is not a substitute:
+without the expiring `Set-Cookie`, the browser keeps presenting a cookie
+for a session that is durably dead.
+
 `accountLockoutDuration` and `accountLockoutThreshold` are **deliberately
 excluded** from this validator: neither governs an already-issued
 credential, and an absurd value there is self-punishing (an operator who

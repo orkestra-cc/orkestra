@@ -1590,6 +1590,7 @@ func (h *AuthHandler) RefreshTokensWithHeaderHTTP(w http.ResponseWriter, r *http
 			return
 		}
 		logger.Warn("token refresh failed", slog.String("outcome", refreshFailureOutcome(err)))
+		h.clearRefreshCookieOnTerminalRefreshErr(w, cookieName, err)
 		writeRefreshErr(w, err)
 		return
 	}
@@ -1706,6 +1707,22 @@ func (h *AuthHandler) clearStaleParentDomainCookies(w http.ResponseWriter, cooki
 	}
 }
 
+// clearRefreshCookieOnTerminalRefreshErr expires the HttpOnly refresh
+// cookie when the failure means the session is durably gone: a cap
+// expiry, or a cap logout whose only incomplete step was the short-lived
+// Redis denylist. Redux state cleanup is not a substitute — the browser
+// would keep presenting the dead cookie on every subsequent request.
+//
+// Deliberately NOT cleared on ErrSessionEnforcementUnavailable: durable
+// logout is not known to have completed, and the client may legitimately
+// retry when storage recovers.
+func (h *AuthHandler) clearRefreshCookieOnTerminalRefreshErr(w http.ResponseWriter, cookieName string, err error) {
+	var degraded *services.SessionRevocationDegradedError
+	if errors.Is(err, services.ErrSessionMaxAgeReached) || errors.As(err, &degraded) {
+		utils.ClearRefreshTokenCookie(w, cookieName, h.cookieDomain, h.config.Auth.Cookie.Secure)
+	}
+}
+
 // GetSessionHTTP handles session initialization for web clients after OAuth callback
 // It uses the refresh token from cookie to generate a fresh access token
 func (h *AuthHandler) GetSessionHTTP(w http.ResponseWriter, r *http.Request) {
@@ -1771,6 +1788,7 @@ func (h *AuthHandler) GetSessionHTTP(w http.ResponseWriter, r *http.Request) {
 			slog.String("outcome", refreshFailureOutcome(lastErr)),
 			slog.Int("candidatesTried", len(candidates)),
 		)
+		h.clearRefreshCookieOnTerminalRefreshErr(w, cookieName, lastErr)
 		writeRefreshErr(w, lastErr)
 		return
 	}
@@ -2115,6 +2133,7 @@ func (h *AuthHandler) RefreshTokensHTTP(w http.ResponseWriter, r *http.Request) 
 			slog.String("outcome", refreshFailureOutcome(lastErr)),
 			slog.Int("candidatesTried", len(candidates)),
 		)
+		h.clearRefreshCookieOnTerminalRefreshErr(w, cookieName, lastErr)
 		writeRefreshErr(w, lastErr)
 		return
 	}
@@ -2229,8 +2248,17 @@ func (h *AuthHandler) LogoutHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func refreshFailureOutcome(err error) string {
-	if errors.Is(err, services.ErrRefreshTokenReplay) {
+	switch {
+	case errors.Is(err, services.ErrRefreshTokenReplay):
 		return "replay_detected"
+	case errors.Is(err, services.ErrSessionMaxAgeReached):
+		return "session_max_age"
+	case errors.Is(err, services.ErrSessionEnforcementUnavailable):
+		return "enforcement_unavailable"
+	}
+	var degraded *services.SessionRevocationDegradedError
+	if errors.As(err, &degraded) {
+		return "session_max_age_revocation_degraded"
 	}
 	return "invalid_token"
 }
@@ -2553,11 +2581,34 @@ func (h *AuthHandler) RegisterTierMountableRoutes(publicAPI huma.API, protectedA
 	}, h.UpdateCurrentUser)
 }
 
-// writeRefreshErr writes a JSON 401 for a refresh-flow error, distinguishing
-// replay detection (code:"refresh_token_replay") from generic failures so
-// the frontend can show a "you've been signed out for security reasons"
-// banner instead of a neutral "please sign in again".
+// writeRefreshErr writes the JSON error for a refresh-flow failure.
+//
+// Four outcomes are deliberately distinct:
+//   - 503 session_enforcement_unavailable — the cap could not be
+//     evaluated or applied because storage failed. NOT a 401: reporting
+//     an outage as an authentication failure would train clients to
+//     discard a session that is still perfectly valid, and the caller may
+//     retry once storage recovers.
+//   - 401 session_max_age_reached — the session hit its configured
+//     maximum age and has been logged out. "Revoked" is inaccurate for a
+//     session that simply aged out, and the distinction matters to
+//     whoever reads the support ticket.
+//   - 401 refresh_token_replay — reuse detected, family killed.
+//   - 401 with no code — everything else, including a partially degraded
+//     cap logout, which must not claim a completely recorded cap expiry.
 func writeRefreshErr(w http.ResponseWriter, err error) {
+	if errors.Is(err, services.ErrSessionEnforcementUnavailable) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"status": http.StatusServiceUnavailable,
+			"title":  "Service Unavailable",
+			"detail": "session enforcement is temporarily unavailable — please retry",
+			"code":   "session_enforcement_unavailable",
+		})
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusUnauthorized)
 	body := map[string]any{
@@ -2565,7 +2616,11 @@ func writeRefreshErr(w http.ResponseWriter, err error) {
 		"title":  "Unauthorized",
 		"detail": "Invalid refresh token",
 	}
-	if errors.Is(err, services.ErrRefreshTokenReplay) {
+	switch {
+	case errors.Is(err, services.ErrSessionMaxAgeReached):
+		body["code"] = "session_max_age_reached"
+		body["detail"] = "session reached its maximum age — please sign in again"
+	case errors.Is(err, services.ErrRefreshTokenReplay):
 		body["code"] = "refresh_token_replay"
 		body["detail"] = "refresh token reuse detected — session revoked"
 	}

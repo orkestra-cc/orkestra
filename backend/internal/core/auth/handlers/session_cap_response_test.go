@@ -1,0 +1,110 @@
+package handlers
+
+import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"github.com/orkestra/backend/internal/core/auth/services"
+	"github.com/orkestra/backend/internal/shared/config"
+)
+
+func decodeBody(t *testing.T, rec *httptest.ResponseRecorder) map[string]any {
+	t.Helper()
+	var body map[string]any
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	return body
+}
+
+func TestWriteRefreshErr_SessionMaxAgeReached(t *testing.T) {
+	rec := httptest.NewRecorder()
+	writeRefreshErr(rec, services.ErrSessionMaxAgeReached)
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401", rec.Code)
+	}
+	if got := decodeBody(t, rec)["code"]; got != "session_max_age_reached" {
+		t.Errorf("code = %v, want session_max_age_reached — 'revoked' is inaccurate for a session that simply aged out, and the distinction matters to whoever reads the support ticket", got)
+	}
+}
+
+func TestWriteRefreshErr_EnforcementUnavailableIs503(t *testing.T) {
+	rec := httptest.NewRecorder()
+	writeRefreshErr(rec, services.ErrSessionEnforcementUnavailable)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503 — a storage outage must not be reported as an authentication failure", rec.Code)
+	}
+	body := decodeBody(t, rec)
+	if body["code"] != "session_enforcement_unavailable" {
+		t.Errorf("code = %v, want session_enforcement_unavailable", body["code"])
+	}
+	for _, v := range body {
+		if s, ok := v.(string); ok && strings.Contains(strings.ToLower(s), "mongo") {
+			t.Errorf("response leaks internals: %q", s)
+		}
+	}
+}
+
+func TestWriteRefreshErr_DegradedIsGenericLogout(t *testing.T) {
+	rec := httptest.NewRecorder()
+	writeRefreshErr(rec, &services.SessionRevocationDegradedError{})
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401", rec.Code)
+	}
+	if code, present := decodeBody(t, rec)["code"]; present {
+		t.Errorf("code = %v, want none — a partially degraded cap logout must not claim a completely recorded cap expiry", code)
+	}
+}
+
+func TestWriteRefreshErr_ReplayUnchanged(t *testing.T) {
+	rec := httptest.NewRecorder()
+	writeRefreshErr(rec, services.ErrRefreshTokenReplay)
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401", rec.Code)
+	}
+	if got := decodeBody(t, rec)["code"]; got != "refresh_token_replay" {
+		t.Errorf("code = %v, want refresh_token_replay", got)
+	}
+}
+
+// Redux state cleanup is not a substitute for expiring the HttpOnly
+// credential: the browser would keep presenting the dead cookie on every
+// subsequent request. Enforcement unavailable is deliberately excluded —
+// durable logout is not known to have completed there, and the client may
+// legitimately retry once storage recovers.
+func TestClearRefreshCookieOnTerminalRefreshErr(t *testing.T) {
+	cases := []struct {
+		name      string
+		err       error
+		wantClear bool
+	}{
+		{"cap expiry clears", services.ErrSessionMaxAgeReached, true},
+		{"degraded cap logout clears", &services.SessionRevocationDegradedError{}, true},
+		{"enforcement unavailable keeps the cookie", services.ErrSessionEnforcementUnavailable, false},
+		{"replay keeps today's behaviour", services.ErrRefreshTokenReplay, false},
+		{"invalid token keeps today's behaviour", services.ErrInvalidRefreshToken, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := &config.Config{}
+			cfg.Auth.Cookie.Name = logoutTestCookieName
+			h := &AuthHandler{config: cfg}
+
+			rec := httptest.NewRecorder()
+			h.clearRefreshCookieOnTerminalRefreshErr(rec, logoutTestCookieName, tc.err)
+
+			var cleared bool
+			for _, c := range rec.Result().Cookies() {
+				if c.Name == logoutTestCookieName && c.MaxAge < 0 {
+					cleared = true
+				}
+			}
+			if cleared != tc.wantClear {
+				t.Errorf("cookie cleared = %v, want %v", cleared, tc.wantClear)
+			}
+		})
+	}
+}

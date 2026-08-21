@@ -180,17 +180,26 @@ const baseQueryWithRetry: BaseQueryFn<
       requestUrl.includes('v1/auth/operator/me') ||
       requestUrl.includes('v1/auth/session');
 
-    // Server-side session revocation (logout, admin-kill, password change)
-    // sets `code: "session_revoked"` on the 401 body. Skip the silent-refresh
-    // retry in that case — a new access token minted from the same refresh
-    // cookie would carry the same revoked sid and just fail again. Clear
-    // local state and bounce the user to /login with a specific message.
+    // Server-side session termination sets a code on the 401 body. Skip the
+    // silent-refresh retry in both cases — a new access token minted from
+    // the same refresh cookie would carry the same dead sid and just fail
+    // again. The two codes share the logic and differ only in the message:
+    // "revoked" is inaccurate for a session that simply reached its maximum
+    // age, and the distinction matters to whoever reads the support ticket.
     const errorData = (result.error as { data?: { code?: string } }).data;
-    if (errorData?.code === 'session_revoked') {
+    const sessionEndedMessages: Record<string, string> = {
+      session_revoked: 'Your session has been revoked. Please sign in again.',
+      session_max_age_reached:
+        'Your session reached its maximum age. Please sign in again.'
+    };
+    const sessionEndedMessage = errorData?.code
+      ? sessionEndedMessages[errorData.code]
+      : undefined;
+    if (sessionEndedMessage) {
       api.dispatch(clearAccessToken());
       if (!isAuthCheck) {
-        toast.error('Your session has been revoked. Please sign in again.', {
-          toastId: 'session-revoked',
+        toast.error(sessionEndedMessage, {
+          toastId: errorData!.code,
           autoClose: 5000
         });
       }
