@@ -44,6 +44,23 @@
 //     is the gate on tightening the ADR-0017 compatibility window to
 //     fail-closed.
 //
+// The refresh-token retention sweep (ADR-0017) adds three more, all
+// labelled by tier ("operator" or "client"; anything else collapses to
+// "unknown"):
+//
+//   - orkestra_auth_token_sweep_deleted_total — rows deleted per
+//     completed sweep batch.
+//   - orkestra_auth_token_sweep_backlog_estimate — the current backlog
+//     estimate. Seeded by a single indexed count on entry to drain
+//     mode, then decremented locally as batches delete rows, and reset
+//     when a tier reports no more work. Never recomputed exactly every
+//     cycle — at the five-minute drain cadence that would scan the
+//     whole eligible range 288 times a day for a number that stays an
+//     approximation either way. Operators watch it reach zero to know
+//     the first cleanup of an upgraded installation has finished.
+//   - orkestra_auth_token_sweep_duration_seconds — wall time of one
+//     sweep batch.
+//
 // ADR-0002 (docs/adr/0002-metrics-label-schema.md) freezes the label
 // schema. Adding labels requires a new ADR — Prometheus cardinality
 // explodes silently, and history breaks when labels change. The raw
@@ -79,6 +96,9 @@ type Collector struct {
 	sessionCapExpiries             prometheus.Counter
 	sessionCapEventFailures        prometheus.Counter
 	sessionAnchorAnomalies         *prometheus.CounterVec
+	tokenSweepDeleted              *prometheus.CounterVec
+	tokenSweepBacklog              *prometheus.GaugeVec
+	tokenSweepDuration             *prometheus.HistogramVec
 
 	// entitlementLag is a GaugeFunc that reads lastApply on every scrape;
 	// the map is keyed by tenant kind ("internal" | "external"). Stored
@@ -194,6 +214,38 @@ func (c *Collector) buildMetrics() {
 		[]string{"kind"},
 	)
 
+	c.tokenSweepDeleted = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "orkestra",
+			Subsystem: "auth",
+			Name:      "token_sweep_deleted_total",
+			Help:      "Refresh-token rows deleted by the retention sweep, per audience tier.",
+		},
+		// Closed label set: tier ∈ {operator, client}. ADR-0017 D8.
+		[]string{"tier"},
+	)
+
+	c.tokenSweepBacklog = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "orkestra",
+			Subsystem: "auth",
+			Name:      "token_sweep_backlog_estimate",
+			Help:      "Estimated refresh-token rows still eligible for deletion, per tier. An ESTIMATE: seeded by one indexed count on entry to drain mode, then decremented locally, because rows become eligible during a drain. Operators watch it reach zero to see the drain finish.",
+		},
+		[]string{"tier"},
+	)
+
+	c.tokenSweepDuration = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: "orkestra",
+			Subsystem: "auth",
+			Name:      "token_sweep_duration_seconds",
+			Help:      "Wall time of one refresh-token sweep batch, per tier. Measured before promotion so the first cleanup of an upgraded installation is an observed event rather than a discovered one.",
+			Buckets:   prometheus.DefBuckets,
+		},
+		[]string{"tier"},
+	)
+
 	c.entitlementLag = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "orkestra",
@@ -241,7 +293,7 @@ func (c *Collector) Register() error {
 	if !atomic.CompareAndSwapUint32(&c.registered, 0, 1) {
 		return nil
 	}
-	for _, m := range []prometheus.Collector{c.cedarDivergence, c.cedarEnforced, c.capabilityDenied, c.sessionRevocationStoreFailures, c.sessionCapExpiries, c.sessionCapEventFailures, c.sessionAnchorAnomalies, c.entitlementLag, c.httpDuration} {
+	for _, m := range []prometheus.Collector{c.cedarDivergence, c.cedarEnforced, c.capabilityDenied, c.sessionRevocationStoreFailures, c.sessionCapExpiries, c.sessionCapEventFailures, c.sessionAnchorAnomalies, c.tokenSweepDeleted, c.tokenSweepBacklog, c.tokenSweepDuration, c.entitlementLag, c.httpDuration} {
 		if err := c.registry.Register(m); err != nil {
 			// rollback so the caller can retry with a fresh collector
 			atomic.StoreUint32(&c.registered, 0)
@@ -354,6 +406,47 @@ func (c *Collector) RecordSessionAnchorAnomaly(kind string) {
 		kind = "unknown"
 	}
 	c.sessionAnchorAnomalies.WithLabelValues(kind).Inc()
+}
+
+// normaliseTier keeps the sweep label set closed at {operator, client}.
+// Anything else — a collection name, an empty string, a caller bug —
+// collapses to "unknown" rather than minting a new time series.
+func normaliseTier(tier string) string {
+	if tier != "operator" && tier != "client" {
+		return "unknown"
+	}
+	return tier
+}
+
+// RecordTokenSweep records one completed refresh-token sweep batch for a
+// tier: rows deleted are added to the running total (a non-positive
+// count leaves the counter untouched — the batch still happened, so
+// the duration is always observed), and the batch's wall time is
+// always observed. ADR-0017 D8.
+func (c *Collector) RecordTokenSweep(tier string, deleted int64, duration time.Duration) {
+	if c == nil || c.tokenSweepDeleted == nil {
+		return
+	}
+	t := normaliseTier(tier)
+	if deleted > 0 {
+		c.tokenSweepDeleted.WithLabelValues(t).Add(float64(deleted))
+	}
+	c.tokenSweepDuration.WithLabelValues(t).Observe(duration.Seconds())
+}
+
+// SetTokenSweepBacklog publishes the current backlog estimate for a
+// tier. The value is deliberately an estimate — seeded by one indexed
+// count on entry to drain mode, then decremented locally as batches
+// delete rows, and reset when the tier reports no more work — never
+// recomputed exactly every cycle. See the package doc block.
+func (c *Collector) SetTokenSweepBacklog(tier string, remaining int64) {
+	if c == nil || c.tokenSweepBacklog == nil {
+		return
+	}
+	if remaining < 0 {
+		remaining = 0
+	}
+	c.tokenSweepBacklog.WithLabelValues(normaliseTier(tier)).Set(float64(remaining))
 }
 
 // RecordEntitlementApply marks an entitlement change (grant or revoke) as
