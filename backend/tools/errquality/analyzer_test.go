@@ -111,3 +111,49 @@ func f() error {
 		t.Fatalf("want [R2], got %v", got)
 	}
 }
+
+func TestR3_FlagsClientErrorFromErrorsIsDefault(t *testing.T) {
+	src := `package h
+func mapErr(err error) error {
+	switch {
+	case errors.Is(err, ErrInvalidCredentials):
+		return huma.Error401Unauthorized("Invalid email or password")
+	default:
+		return huma.Error400BadRequest("Login is not available right now")
+	}
+}`
+	got := findings(t, src)
+	if len(got) != 1 || got[0] != "R3" {
+		t.Fatalf("want [R3], got %v", got)
+	}
+}
+
+func TestR3_AllowsServerErrorFromDefault(t *testing.T) {
+	src := `package h
+func mapErr(err error) error {
+	switch {
+	case errors.Is(err, ErrInvalidCredentials):
+		return huma.Error401Unauthorized("Invalid email or password")
+	default:
+		return errcode.Internal(errcode.AuthUnavailable, "Sign-in is temporarily unavailable.")
+	}
+}`
+	if got := findings(t, src); len(got) != 0 {
+		t.Fatalf("want no findings, got %v", got)
+	}
+}
+
+func TestR3_IgnoresSwitchWithoutErrorsIs(t *testing.T) {
+	src := `package h
+func pick(kind string) error {
+	switch {
+	case kind == "a":
+		return huma.Error400BadRequest("Field a is not a valid target")
+	default:
+		return huma.Error400BadRequest("Unknown target kind")
+	}
+}`
+	if got := findings(t, src); len(got) != 0 {
+		t.Fatalf("want no findings, got %v", got)
+	}
+}

@@ -168,6 +168,56 @@ func inspectFile(fset *token.FileSet, f *ast.File, report func(pos token.Pos, ru
 		}
 		return true
 	})
+
+	ast.Inspect(f, func(n ast.Node) bool {
+		sw, isSwitch := n.(*ast.SwitchStmt)
+		if !isSwitch || sw.Tag != nil || !hasErrorsIsCase(sw) {
+			return true
+		}
+		for _, stmt := range sw.Body.List {
+			clause, isClause := stmt.(*ast.CaseClause)
+			if !isClause || clause.List != nil { // List == nil marks default:
+				continue
+			}
+			ast.Inspect(clause, func(inner ast.Node) bool {
+				call, isCall := inner.(*ast.CallExpr)
+				if !isCall {
+					return true
+				}
+				if _, status, ok := detailArg(call); ok && status >= 400 && status < 500 {
+					report(call.Pos(), "R3",
+						"an error this function could not name is a server fault — return 5xx, not a status that blames the caller")
+				}
+				return true
+			})
+		}
+		return true
+	})
+}
+
+// hasErrorsIsCase reports whether any non-default clause of a tagless
+// switch tests errors.Is — the idiom that marks the switch as an error
+// mapper rather than an ordinary branch.
+func hasErrorsIsCase(sw *ast.SwitchStmt) bool {
+	for _, stmt := range sw.Body.List {
+		clause, isClause := stmt.(*ast.CaseClause)
+		if !isClause {
+			continue
+		}
+		for _, cond := range clause.List {
+			call, isCall := cond.(*ast.CallExpr)
+			if !isCall {
+				continue
+			}
+			if sel, isSel := call.Fun.(*ast.SelectorExpr); isSel &&
+				sel.Sel.Name == "Is" {
+				if pkg, isIdent := sel.X.(*ast.Ident); isIdent && pkg.Name == "errors" {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 // containsErrorText reports whether the expression evaluates (in whole or
