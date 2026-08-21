@@ -12,7 +12,21 @@ import (
 
 	"github.com/orkestra/backend/internal/core/auth/repository"
 	"github.com/orkestra/backend/internal/core/auth/services"
+	"github.com/orkestra/backend/internal/shared/database"
 )
+
+// The production Redis adapter must satisfy the lease contract at COMPILE
+// time.
+//
+// module.go arms the whole of ADR-0017 D7 behind
+// `deps.RedisAdapter.(services.LeaseRedisClient)`, and every test in this
+// file drives the loop with a hand-written fake — so nothing otherwise
+// connects the real adapter to the interface. If a refactor drops Eval from
+// *database.RedisClientAdapter, or widens LeaseRedisClient, that assertion
+// starts failing at run time and retention is disabled for the life of the
+// process behind a single logger.Warn, with every test in this package still
+// green. This line turns that into a build failure.
+var _ services.LeaseRedisClient = (*database.RedisClientAdapter)(nil)
 
 // --- fakes ---
 
@@ -179,7 +193,7 @@ func TestSweep_NotTheLeaderDoesNothing(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	done := make(chan struct{})
-	go m.tokenSweepLoop(ctx, done, time.Millisecond, time.Hour)
+	go m.tokenSweepLoop(ctx, done, time.Millisecond, time.Hour, services.LeaseRetryInterval)
 
 	select {
 	case <-redis.attempted:
@@ -236,7 +250,7 @@ func TestSweep_LosingTheLeaseStepsDownWithoutSweeping(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	done := make(chan struct{})
-	go m.tokenSweepLoop(ctx, done, time.Millisecond, 5*time.Millisecond)
+	go m.tokenSweepLoop(ctx, done, time.Millisecond, 5*time.Millisecond, services.LeaseRetryInterval)
 
 	// Only proceed once this replica is genuinely the leader and has run
 	// a pass — otherwise the takeover below would race the acquisition
@@ -293,7 +307,7 @@ func TestSweep_RenewTicksDoNotStarveTheSweep(t *testing.T) {
 	done := make(chan struct{})
 	// The renew tick is 30x more frequent than the pass is due — the
 	// same ratio as 30s renewal against a 5m drain wait.
-	go m.tokenSweepLoop(ctx, done, 150*time.Millisecond, 5*time.Millisecond)
+	go m.tokenSweepLoop(ctx, done, 150*time.Millisecond, 5*time.Millisecond, services.LeaseRetryInterval)
 
 	select {
 	case <-op.swept:
@@ -327,7 +341,7 @@ func TestSweep_DrainingHonoursTheDrainCadence(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	done := make(chan struct{})
-	go m.tokenSweepLoop(ctx, done, time.Millisecond, 5*time.Millisecond)
+	go m.tokenSweepLoop(ctx, done, time.Millisecond, 5*time.Millisecond, services.LeaseRetryInterval)
 
 	select {
 	case <-op.swept:
@@ -368,7 +382,10 @@ func TestSweep_TransientRedisErrorDoesNotEndRetention(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	done := make(chan struct{})
-	go m.tokenSweepLoop(ctx, done, time.Millisecond, 5*time.Millisecond)
+	// The retry interval is milliseconds here so the recovery half below
+	// runs in real time; in production it is services.LeaseRetryInterval
+	// (5m), which is what Start passes.
+	go m.tokenSweepLoop(ctx, done, time.Millisecond, 5*time.Millisecond, 10*time.Millisecond)
 
 	select {
 	case <-op.swept:
@@ -389,6 +406,23 @@ func TestSweep_TransientRedisErrorDoesNotEndRetention(t *testing.T) {
 
 	if op.sweeps() != 1 {
 		t.Errorf("swept %d times, want 1 — a replica that stepped down must not sweep again before re-acquiring", op.sweeps())
+	}
+
+	// Surviving the outage is only half the contract. Stepping down
+	// instead of exiting is justified ENTIRELY by the loop re-acquiring
+	// once Redis returns; without this half the test passes just as well
+	// against a loop that stays a follower forever, which would end
+	// refresh-token retention for the life of the process just as surely
+	// as exiting would.
+	redis.recoverEverything()
+
+	select {
+	case <-op.swept:
+	case <-time.After(10 * time.Second):
+		t.Fatal("Redis recovered and the loop never re-acquired leadership — stepping down without ever re-contending ends retention just as permanently as exiting")
+	}
+	if got := op.sweeps(); got < 2 {
+		t.Errorf("swept %d times after recovery, want >= 2", got)
 	}
 
 	cancel()
@@ -492,6 +526,19 @@ func (f *fakeLeaseRedis) failEverything() {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.failing = true
+}
+
+// recoverEverything ends the simulated outage AND drops the keys the
+// failed leader left behind. Both halves matter: a Redis that comes back
+// after an outage has usually lost the lease (it either expired while
+// unreachable or the instance restarted empty), and leaving the old
+// owner's row in place would make the recovering replica lose the
+// SetNX to its own stale token and never re-acquire.
+func (f *fakeLeaseRedis) recoverEverything() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.failing = false
+	f.values = make(map[string]string)
 }
 
 // evals counts renew/release round-trips. A leader renews on every tick;

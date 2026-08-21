@@ -97,7 +97,7 @@ func (m *AuthModule) Start(ctx context.Context) error {
 	done := make(chan struct{})
 	m.sweepCancel = cancel
 	m.sweepDone = done
-	go m.tokenSweepLoop(sweepCtx, done, sweepStartupDelay, services.LeaseRenewInterval)
+	go m.tokenSweepLoop(sweepCtx, done, sweepStartupDelay, services.LeaseRenewInterval, services.LeaseRetryInterval)
 	return nil
 }
 
@@ -130,12 +130,18 @@ func (m *AuthModule) Stop(ctx context.Context) error {
 
 // tokenSweepLoop is the elected scheduler.
 //
-// startDelay and renewEvery are parameters rather than reads of the
-// constants so the leadership tests can drive real iterations in
+// startDelay, renewEvery and retryEvery are parameters rather than reads
+// of the constants so the leadership tests can drive real iterations in
 // milliseconds — the same shape the logging module's maintenanceLoop
 // uses for its two intervals. Start always passes the production
 // values; nothing else calls this.
-func (m *AuthModule) tokenSweepLoop(ctx context.Context, done chan<- struct{}, startDelay, renewEvery time.Duration) {
+//
+// retryEvery joined them so RECOVERY is testable and not merely asserted
+// in a comment. Every step-down path reschedules by it, so with the
+// production 5-minute constant hardcoded a test could prove the loop
+// survives a Redis outage but never that it re-acquires afterwards —
+// which is the entire justification for stepping down instead of exiting.
+func (m *AuthModule) tokenSweepLoop(ctx context.Context, done chan<- struct{}, startDelay, renewEvery, retryEvery time.Duration) {
 	defer close(done)
 
 	// Every database call below runs on this context, so returning from
@@ -206,7 +212,7 @@ func (m *AuthModule) tokenSweepLoop(ctx context.Context, done chan<- struct{}, s
 				m.logger.Warn("auth: token-sweep leadership relinquished, re-contending",
 					slog.String("outcome", errOutcome(err)))
 				leader = false
-				next = time.Now().Add(services.LeaseRetryInterval)
+				next = time.Now().Add(retryEvery)
 				continue
 			}
 			continue
@@ -220,11 +226,11 @@ func (m *AuthModule) tokenSweepLoop(ctx context.Context, done chan<- struct{}, s
 				// skip maintenance, never touch authentication.
 				m.logger.Warn("auth: token-sweep lease unavailable, skipping maintenance",
 					slog.String("error", err.Error()))
-				next = time.Now().Add(services.LeaseRetryInterval)
+				next = time.Now().Add(retryEvery)
 				continue
 			}
 			if !acquired {
-				next = time.Now().Add(services.LeaseRetryInterval)
+				next = time.Now().Add(retryEvery)
 				continue
 			}
 			leader = true
