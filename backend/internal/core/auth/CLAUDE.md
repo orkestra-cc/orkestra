@@ -72,7 +72,24 @@ Email tokens, device-trust grants, refresh-family replay fences, and sessions ha
 >
 > It is **no longer a deploy blocker**: a non-zero count is a bug to chase, not a reason to hold the release, because the index can no longer delete those rows.
 >
-> **Upgrading an environment that already built the un-filtered index:** adding `partialFilterExpression` to an existing index is not an in-place change — Mongo keys the index by name and `createIndex` with different options on the same keys fails with `IndexOptionsConflict` rather than rebuilding. The registry logs that failure and continues, so the old, unfiltered index stays live. Drop it once (`db.operator_sessions.dropIndex("expiresAt_1")`, same for `client_sessions`) and let the next boot rebuild it with the filter.
+> **Upgrading an environment that already built the un-filtered index:** adding `partialFilterExpression` to an existing index is not an in-place change — Mongo keys the index by name, so `createIndex` with different options on the same keys fails rather than rebuilding. Observed verbatim (both collections):
+>
+> ```
+> Failed to ensure collection ... module=auth collection=operator_sessions
+> error="create indexes for \"operator_sessions\": (IndexKeySpecsConflict) An
+> existing index has the same name as the requested index. ...
+> Requested index: { ... partialFilterExpression: { expiresAt: { $gt: new Date(946684800000) } } },
+> existing index: { v: 2, key: { expiresAt: 1 }, name: \"expiresAt_1\", expireAfterSeconds: 0 }"
+> ```
+>
+> `ensureCollections` logs at WARN and continues (index creation is deliberately non-fatal), so boot succeeds with the **old, unfiltered index still live** — i.e. still able to delete a zero-`expiresAt` row. Drop it once and let the next boot rebuild it:
+>
+> ```
+> db.operator_sessions.dropIndex("expiresAt_1")
+> db.client_sessions.dropIndex("expiresAt_1")
+> ```
+>
+> Until that is done the pre-flight count above is still the only guard, so run it first. Grep boot logs for `IndexKeySpecsConflict` to tell the two states apart.
 
 ## Dependencies
 
