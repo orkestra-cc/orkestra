@@ -1,3 +1,11 @@
+> [!WARNING]
+> **Superseded — this file is a pre-migration duplicate and has drifted.**
+> The canonical copy is [`docs/site/architecture/authentication-flow.mdx`](site/architecture/authentication-flow.mdx),
+> which is what publishes to <https://docs.orkestra.cc/architecture/authentication-flow>.
+> This copy predates ADR-0014 and describes only two audiences — it has no
+> section on service accounts or the `service` audience. Edit the canonical
+> file; do not update this one.
+
 # Authentication Flow
 
 *Path: `/docs`*

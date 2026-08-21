@@ -13,7 +13,7 @@ This app **does not** render anything operator-specific. Internal admin pages li
 
 ## Tier model recap
 
-This SPA only ever speaks to the **client** API audience (`api.localhost:3000` in dev, `api.orkestra.com` in prod, JWT `aud=client`). The split is enforced server-side by ADR-0003 PR-D D-8: cross-audience tokens get rejected with 401 `audience_mismatch`, and refresh cookies are scoped to `CLIENT_COOKIE_DOMAIN` so a session minted here cannot be replayed on `console.*`. See [`../docs/Authentication_flow.md`](../docs/Authentication_flow.md) for the wire-level walkthrough.
+This SPA only ever speaks to the **client** API audience (`api.localhost:3000` in dev, `api.orkestra.com` in prod, JWT `aud=client`). The split is enforced server-side by ADR-0003 PR-D D-8: cross-audience tokens get rejected with 401 `audience_mismatch`, and refresh cookies are scoped to `CLIENT_COOKIE_DOMAIN` so a session minted here cannot be replayed on `console.*`. See [`../docs/site/architecture/authentication-flow.mdx`](../docs/site/architecture/authentication-flow.mdx) for the wire-level walkthrough.
 
 ## Tech stack
 
@@ -245,5 +245,5 @@ The base SPA is a **thin auth/account demo**: anonymous home + signup + email ve
 - [Operator console](../frontend-admin/CLAUDE.md) — the Tier-1 admin SPA (different stack, different audience, different cookie domain)
 - [Backend auth core](../backend/internal/core/auth/CLAUDE.md) — `/v1/auth/client/*` audience-split routes, JWT claims, refresh-cookie behaviour
 - [Backend tenant core](../backend/internal/core/tenant/CLAUDE.md) — ownership model, why `org_owner` is the proxy used here
-- [Authentication flow doc](../docs/Authentication_flow.md) — wire-level walkthrough of the post-PR-D world
+- [Authentication flow doc](../docs/site/architecture/authentication-flow.mdx) — wire-level walkthrough of the post-PR-D world
 - [Docker compose](../docker/CLAUDE.md) — `client-frontend` service / container wiring

@@ -145,4 +145,4 @@ Key method groups:
 - [`../authz/CLAUDE.md`](../authz/CLAUDE.md) — reads `User.Role` via the same provider to honor the super_admin/administrator/developer shortcut in permission evaluation
 - [`../tenant/CLAUDE.md`](../tenant/CLAUDE.md) — depends on `user` to verify that invited userUUIDs exist before creating memberships
 - [`../../../pkg/sdk/iface/interfaces.go:28-53`](../../../pkg/sdk/iface/interfaces.go) — `UserProvider` interface definition
-- [Authentication flow](../../../../docs/Authentication_flow.md) — how `User.Role` threads through JWT claims and middleware
+- [Authentication flow](../../../../docs/site/architecture/authentication-flow.mdx) — how `User.Role` threads through JWT claims and middleware

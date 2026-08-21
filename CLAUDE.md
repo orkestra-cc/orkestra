@@ -72,16 +72,18 @@ A fork's optional modules are **instantiated, initialized, and routed** at boot 
 
 **Core (always loaded):**
 
-| Module           | Purpose                                                                                                           |
-| ---------------- | ----------------------------------------------------------------------------------------------------------------- |
-| **user**         | User CRUD, role management, document tracking                                                                     |
-| **notification** | Email delivery, templates, user preferences, unsubscribe tokens — [docs](backend/internal/core/notification/CLAUDE.md) |
-| **tenant**       | Orgs + memberships (two-tier tenancy)                                                                             |
-| **authz**        | Permissions, roles, Cedar policy engine                                                                           |
-| **auth**         | Email/password (argon2id) + OAuth 2.1, JWT, sessions, RBAC                                                        |
-| **navigation**   | Dynamic menu from module NavItems + persisted reorder via `/admin/modules/navigation`                             |
-| **logging**      | Tier-1 runtime logging workspace: permanent levels, expiring diagnostics, and bounded log preview at `/admin/modules/logging` — [docs](backend/internal/core/logging/CLAUDE.md) |
-| **compliance**   | Audit trail + GDPR DSR (export/erasure), per-tenant KMS crypto-shred, legal hold, retention, SOC2 evidence (ADR-0009) — [docs](backend/internal/core/compliance/CLAUDE.md) |
+Every core module has **two** docs: the in-repo `CLAUDE.md` is the AI-facing *contract* (invariants, wiring, rules — read this before editing); the `docs/site` page is the human-facing *reference* published to [docs.orkestra.cc](https://docs.orkestra.cc). Keep both current when you change a module.
+
+| Module           | Purpose                                                                                   | Contract | Page |
+| ---------------- | ------------------------------------------------------------------------------------------ | -------- | ---- |
+| **user**         | Per-tier user collections, profiles, the global system role, OAuth links, avatar pipeline | [CLAUDE.md](backend/internal/core/user/CLAUDE.md) | [user](docs/site/modules/core/user.mdx) |
+| **notification** | Email delivery, templates, preferences, unsubscribe tokens — boots in `noop`              | [CLAUDE.md](backend/internal/core/notification/CLAUDE.md) | [notification](docs/site/modules/core/notification.mdx) |
+| **tenant**       | Orgs + memberships (two-tier tenancy), divisions, provisioning policy, entitlements        | [CLAUDE.md](backend/internal/core/tenant/CLAUDE.md) | [tenant](docs/site/modules/core/tenant.mdx) |
+| **authz**        | Permission catalog, 6 platform + 5 tenant roles, bindings, Cedar policy engine             | [CLAUDE.md](backend/internal/core/authz/CLAUDE.md) | [authz](docs/site/modules/core/authz.mdx) |
+| **auth**         | Email/password (argon2id) + OAuth 2.1, MFA + passkeys, JWT, sessions, service accounts     | [CLAUDE.md](backend/internal/core/auth/CLAUDE.md) | [auth](docs/site/modules/core/auth.mdx) |
+| **navigation**   | Dynamic menu from module NavItems + persisted reorder via `/admin/modules/navigation`      | [CLAUDE.md](backend/internal/core/navigation/CLAUDE.md) | [navigation](docs/site/modules/core/navigation.mdx) |
+| **logging**      | Tier-1 runtime logging workspace: permanent levels, expiring diagnostics, bounded preview  | [CLAUDE.md](backend/internal/core/logging/CLAUDE.md) | [logging](docs/site/modules/core/logging.mdx) |
+| **compliance**   | Audit trail + GDPR DSR, per-tenant KMS crypto-shred, legal hold, retention, SOC2 (ADR-0009) | [CLAUDE.md](backend/internal/core/compliance/CLAUDE.md) | [compliance](docs/site/modules/core/compliance.mdx) |
 
 Load order (topologically sorted by `Dependencies()`): `user` → `notification` → `tenant` → `authz` → `auth` → `navigation` → `logging` → `compliance`. Auth depends on notification (optional at runtime) so it can deliver verification and password-reset emails; `logging` has no declared dependencies; `compliance` (ADR-0009, always-on) depends on `user`/`auth`/`tenant` so it resolves the PII-producer registry + audit sink after they init.
 
@@ -94,8 +96,9 @@ Load order (topologically sorted by `Dependencies()`): `user` → `notification`
 - **[`/frontend-client/`](frontend-client/CLAUDE.md)** — React 19 Tier-2 client demo SPA — a thin login + account + billing-identity skeleton (the subscribe/transactions/payment flows left with the addons)
 - **[`/mobile/`](mobile/CLAUDE.md)** — Flutter cross-platform app
 - **[`/docker/`](docker/CLAUDE.md)** — Docker Compose configs (dev/staging/prod/infra)
-- **[`/docs/Authentication_flow.md`](docs/Authentication_flow.md)** — Email/password + OAuth 2.1 + RBAC details
-- **[`/docs/site/`](docs/site/README.md)** — Canonical source for [docs.orkestra.cc](https://docs.orkestra.cc) hand-written pages. The Docusaurus repo ([orkestra-cc/orkestra-docs](https://github.com/orkestra-cc/orkestra-docs)) mirrors this tree on every build via `npm run sync:site` — edits live here, not there.
+- **[`/docs/site/architecture/authentication-flow.mdx`](docs/site/architecture/authentication-flow.mdx)** — Email/password + OAuth 2.1 + MFA + service-account (ADR-0014) + RBAC details. **This is the canonical copy.** `docs/Authentication_flow.md` is a pre-migration duplicate that has since drifted — it predates the `service` audience entirely.
+- **[`/docs/site/`](docs/site/README.md)** — Canonical source for [docs.orkestra.cc](https://docs.orkestra.cc) hand-written pages. The Docusaurus repo ([orkestra-cc/orkestra-docs](https://github.com/orkestra-cc/orkestra-docs)) mirrors this tree on every build via `npm run sync:site` — edits live here, not there. Covers all eight core modules, the SDK contract ([`Module`](docs/site/sdk/module-interface.mdx), [ServiceRegistry](docs/site/sdk/service-registry.mdx), [ConfigService](docs/site/sdk/config-service.mdx), [iface](docs/site/sdk/shared-iface.mdx), [object storage](docs/site/sdk/object-storage.mdx)), operating guides, and the public ADRs.
+  **Nothing in this repo's CI builds the site** — render locally before merging a `docs/site/**` change; the recipe is in [`docs/site/README.md`](docs/site/README.md). Only a push to `main` publishes: the sync pulls `orkestra@main`, never `dev`.
 
 ## Quick Start
 
@@ -135,7 +138,7 @@ One infra base + one app file per environment (`docker-compose.{dev,staging,prod
 - **Use the module system** when adding new functionality: implement the `Module` interface, add a `cmd/server/catalog_<name>.go` file that registers the factory in `optionalModules` via `init()`, declare collections/nav/config via the module methods
 - **Use `pkg/sdk/iface`** for cross-module dependencies — never import another module's `services/` or `repository/` package from a `module.go` wiring file
 - **Validate and sanitize** all user inputs; implement RBAC on every endpoint (ask for required permissions)
-- **Follow the auth patterns** in [Authentication_flow.md](docs/Authentication_flow.md) for any auth-related changes
+- **Follow the auth patterns** in [authentication-flow.mdx](docs/site/architecture/authentication-flow.mdx) for any auth-related changes — not the drifted `docs/Authentication_flow.md`
 - **Invoke the `orkestra-frontend-admin` skill before any `frontend-admin/` UI work** — including full-stack features whose UI lands in the operator console. Invoke it while planning the feature, not when you reach the JSX; it enforces the reference-first workflow (`src/reference/*.tsx` + production-page precedent)
 - **Use `integrated-browser-mcp` for browser automation** (`browser_navigate`, `browser_eval`, `browser_snapshot`, `browser_screenshot`, etc.); it controls the browser embedded in the matching VS Code workspace
 
