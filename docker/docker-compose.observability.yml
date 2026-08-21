@@ -9,10 +9,18 @@
 # works on both sides. The full self-hosted Tier-1 observability
 # package (logs + traces + metrics) is now a single `up -d` away.
 #
-# Boot order:
-#   docker compose -f docker-compose.infra.yml up -d
-#   docker compose -f docker-compose.dev.yml   up -d
-#   docker compose -f docker-compose.observability.yml up -d
+# This is intentionally not a standalone Compose file: `backend` below is a
+# partial override. Always merge infra + the selected app file + this overlay,
+# preferably through `./orkestra.sh observability up`, which validates and
+# scopes the six owned services before acting.
+#
+# Manual equivalent:
+#   docker compose -f docker-compose.infra.yml -f docker-compose.dev.yml \
+#     -f docker-compose.observability.yml --env-file .env \
+#     up -d otel-collector tempo prometheus loki promtail grafana
+#   docker compose -f docker-compose.infra.yml -f docker-compose.dev.yml \
+#     -f docker-compose.observability.yml --env-file .env \
+#     up -d --no-deps backend
 #
 # Then set OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318 on the
 # backend (docker-compose.dev.yml honors it via the .env file) and
@@ -20,6 +28,14 @@
 # the "Tenant traces + logs" dashboard.
 
 services:
+  # Merge trusted preview destinations into the app stack's backend. Loki is
+  # addressed only by its internal service name; Grafana must be a URL the
+  # operator's browser can reach and can be overridden for proxied installs.
+  backend:
+    environment:
+      LOKI_QUERY_URL: http://loki:3100
+      GRAFANA_URL: ${GRAFANA_URL:-http://localhost:3010}
+
   # OpenTelemetry Collector — receives OTLP from the backend, fans out to
   # Tempo (traces) and the collector's own /metrics endpoint (scraped by
   # Prometheus). We deliberately keep the backend pointed at the

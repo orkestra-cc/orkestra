@@ -105,6 +105,10 @@ services:
       # Observability
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT}
       OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-orkestra-backend}
+      # Optional Tier-1 preview URLs. Empty is the fail-closed default;
+      # the observability overlay supplies trusted bases when enabled.
+      LOKI_QUERY_URL: ${LOKI_QUERY_URL:-}
+      GRAFANA_URL: ${GRAFANA_URL:-}
 
       # Object storage (RustFS — S3-compatible). Backs avatar uploads.
       # Default uses the `rustfs` SERVICE name (resolves on the stack network

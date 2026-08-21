@@ -107,7 +107,7 @@ const LocationProbe = () => {
   return null;
 };
 
-const renderAt = (search: string) =>
+const renderAt = (search: string, moduleName = 'demo') =>
   renderWithProviders(
     <>
       <LocationProbe />
@@ -118,7 +118,7 @@ const renderAt = (search: string) =>
         />
       </Routes>
     </>,
-    { routerEntries: [`/admin/modules/demo${search}`] }
+    { routerEntries: [`/admin/modules/${moduleName}${search}`] }
   );
 
 describe('ModuleDetailPage sections', () => {
@@ -446,5 +446,41 @@ describe('ModuleDetailPage sections', () => {
     expect(
       screen.queryByRole('button', { name: 'Save Changes' })
     ).not.toBeInTheDocument();
+  });
+
+  it('dispatches logging to its specialized workspace at the component boundary', async () => {
+    const loggingModule = {
+      ...demoModule,
+      moduleName: 'logging',
+      displayName: 'Logging',
+      category: 'core',
+      configSchema: [],
+      configGroups: undefined,
+      dependsOn: []
+    } as ModuleConfig;
+    stubAll(loggingModule);
+    server.use(
+      http.get(url('/v1/admin/observability/log-levels'), () =>
+        HttpResponse.json({
+          global: 'info',
+          modules: [
+            { name: 'auth', effective: 'info', hasOverride: false },
+            { name: 'logging', effective: 'debug', hasOverride: true }
+          ],
+          diagnostics: [],
+          logProvider: { available: false },
+          updatedAt: '2026-08-20T12:00:00Z'
+        })
+      )
+    );
+
+    renderAt('?section=levels', 'logging');
+
+    expect(
+      await screen.findByRole('heading', { name: 'Permanent log levels' })
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText('Permanent global log level')).toHaveValue(
+      'info'
+    );
   });
 });

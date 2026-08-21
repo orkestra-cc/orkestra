@@ -18,6 +18,7 @@ import ModuleConfigRail from './ModuleConfigRail';
 import ModuleConfigPanel from './ModuleConfigPanel';
 import ModuleDependencyCard from './ModuleDependencyCard';
 import ModuleSaveBar from './ModuleSaveBar';
+import LoggingModulePage from '../logging';
 import { hasPageRail } from '../configModel';
 import { useModuleConfigController } from '../useModuleConfigController';
 
@@ -32,7 +33,7 @@ const SECTION_OVERVIEW = '__overview';
 const SECTION_DEPENDENCIES = '__dependencies';
 const SECTION_ENVIRONMENTS = '__environments';
 
-const ModuleDetailPage: React.FC = () => {
+const GenericModuleDetailPage: React.FC = () => {
   const { t } = useTranslation();
   const { moduleName } = useParams<{ moduleName: string }>();
   const {
@@ -507,6 +508,19 @@ const ModuleDetailPage: React.FC = () => {
       </Row>
     </>
   );
+};
+
+const ModuleDetailPage: React.FC = () => {
+  const { moduleName } = useParams<{ moduleName: string }>();
+
+  // Keep specialized workspaces at a component boundary. Each branch owns
+  // and executes its own complete hook set, so adding the logging page never
+  // makes the generic detail page's hooks conditional.
+  if (moduleName === 'logging') {
+    return <LoggingModulePage />;
+  }
+
+  return <GenericModuleDetailPage />;
 };
 
 export default ModuleDetailPage;

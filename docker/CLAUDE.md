@@ -149,6 +149,7 @@ Keep this split when touching `.env*` or `docker-compose.*.yml`:
 | Boot identity (`APP_NAME`, `ENV`, `PORT`, host/port mappings) | process | ✅ yes |
 | Database connections (`MONGO_URI`, `REDIS_URL`, credentials) | process | ✅ yes |
 | JWT keys, cookies, CORS, rate limits, observability | process | ✅ yes |
+| `LOKI_QUERY_URL` / `GRAFANA_URL` | process — trusted Tier-1 log-preview upstream + optional browser deep-link base; never derived from request data | ✅ yes |
 | Encryption keys (`OAUTH_TOKEN_ENCRYPTION_KEY`, `ORKESTRA_KMS_MASTER_KEY`, optional `MFA_SECRET_ENCRYPTION_KEY`) | process — bootstraps ConfigService | ✅ yes |
 | Process-scoped auth tunables (`AUTH_REQUIRE_EMAIL_VERIFICATION`, `AUTH_RISK_STEP_UP_THRESHOLD`, `WEBAUTHN_RP_ID`, `AUTH_GEOIP_DB_PATH`, `TENANT_KIND_ENFORCEMENT`, `CEDAR_ENFORCE_ACTIONS`) | process | ✅ yes |
 | `ORKESTRA_VERSION` | process — application version surfaced in the SPA footer (frontend-admin + frontend-client) and embedded in the dev `/health` JSON. `orkestra.sh` auto-exports this from `git describe --tags --always --dirty`, and docker-compose substitutes it into both frontend `environment:` blocks (dev/staging dev-server) and the `args:` block in `docker-compose.prod.yml` (production image build). CI overrides it with `--build-arg ORKESTRA_VERSION=${{ github.ref_name }}` on tag pushes. The container has no git binary and no `.git`, so this host-side env var is the only path that delivers a real version — without it the SPA falls back to `"dev"`. | ✅ yes |
@@ -575,7 +576,9 @@ docker compose -f docker-compose.infra.yml -f docker-compose.dev.yml --env-file 
 docker compose -f docker-compose.infra.yml -f docker-compose.dev.yml -f docker-compose.observability.yml --env-file .env up -d
 ```
 
-The orkestra.sh launcher also exposes `observability {down,reset,status,info,logs}`. Observability is a **per-stack overlay** layered into the same `${STACK}` project (see [Multi-Stack Model](#multi-stack-model)) — `docker-compose.observability.yml` is just one more `-f` file added to the stack's own compose invocation, not a separate `orkestra-observability` project. `orkestra.sh stop` (app-only) never touches it; `orkestra.sh observability down` removes only the overlay's own services.
+The orkestra.sh launcher also exposes `observability {down,reset,status,info,logs}`. Observability is a **per-stack overlay** layered into the same `${STACK}` project (see [Multi-Stack Model](#multi-stack-model)) — `docker-compose.observability.yml` contains a partial `backend` override and is deliberately invalid as a standalone Compose project. The launcher validates the merged infra + app + overlay graph before acting and fails closed if that graph cannot be resolved. Lifecycle ownership is explicit: `down`/`reset` target only `otel-collector`, `tempo`, `prometheus`, `loki`, `promtail`, and `grafana`; reset removes only their five named data volumes. App and infra containers/volumes are never widened into an observability reset.
+
+The base app compose files pass `LOKI_QUERY_URL` and `GRAFANA_URL` through with empty defaults, so the logging workspace degrades cleanly without the overlay. `observability up` applies the overlay's `LOKI_QUERY_URL=http://loki:3100` and default `GRAFANA_URL=http://localhost:3010` to an already-running backend through the valid merged graph; `down` and `reset` restore the app-only backend configuration. Later full-stack deploys retain the override while observability containers are active. Set `GRAFANA_URL` explicitly when the browser reaches Grafana through another hostname, scheme, or host port; it is a browser link, whereas the Loki URL remains internal to the stack network.
 
 Point the backend at the collector by setting in `docker/.env`:
 

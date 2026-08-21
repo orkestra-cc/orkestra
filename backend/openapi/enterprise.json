@@ -320,6 +320,35 @@
         ],
         "type": "object"
       },
+      "AdminDiagnosticEntry": {
+        "additionalProperties": false,
+        "properties": {
+          "expiresAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "level": {
+            "type": "string"
+          },
+          "module": {
+            "type": "string"
+          },
+          "startedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "startedBy": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "module",
+          "level",
+          "startedAt",
+          "startedBy"
+        ],
+        "type": "object"
+      },
       "AdminInviteListOutputBody": {
         "additionalProperties": false,
         "properties": {
@@ -379,6 +408,9 @@
             "type": "boolean"
           },
           "name": {
+            "type": "string"
+          },
+          "override": {
             "type": "string"
           }
         },
@@ -902,8 +934,20 @@
             "readOnly": true,
             "type": "string"
           },
+          "diagnostics": {
+            "items": {
+              "$ref": "#/components/schemas/AdminDiagnosticEntry"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "global": {
             "type": "string"
+          },
+          "logProvider": {
+            "$ref": "#/components/schemas/LogProviderStatus"
           },
           "modules": {
             "items": {
@@ -913,6 +957,18 @@
               "array",
               "null"
             ]
+          },
+          "permanentRevision": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "revision": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "serverTime": {
+            "format": "date-time",
+            "type": "string"
           },
           "updatedAt": {
             "format": "date-time",
@@ -925,6 +981,11 @@
         "required": [
           "global",
           "modules",
+          "diagnostics",
+          "logProvider",
+          "revision",
+          "permanentRevision",
+          "serverTime",
           "updatedAt"
         ],
         "type": "object"
@@ -2469,6 +2530,33 @@
         ],
         "type": "object"
       },
+      "GetLogsResponseBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/GetLogsResponseBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/LogEvent"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "events"
+        ],
+        "type": "object"
+      },
       "GetUserCountResponseBody": {
         "additionalProperties": false,
         "properties": {
@@ -3073,6 +3161,51 @@
             "type": "string"
           }
         },
+        "type": "object"
+      },
+      "LogEvent": {
+        "additionalProperties": false,
+        "properties": {
+          "attributes": {
+            "additionalProperties": {},
+            "type": "object"
+          },
+          "level": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "module": {
+            "type": "string"
+          },
+          "timestamp": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "timestamp",
+          "level",
+          "message",
+          "module",
+          "attributes"
+        ],
+        "type": "object"
+      },
+      "LogProviderStatus": {
+        "additionalProperties": false,
+        "properties": {
+          "available": {
+            "type": "boolean"
+          },
+          "grafanaUrl": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "available"
+        ],
         "type": "object"
       },
       "MFAAdminResetResponseBody": {
@@ -5543,31 +5676,6 @@
         },
         "type": "object"
       },
-      "SetGlobalRequestBody": {
-        "additionalProperties": false,
-        "properties": {
-          "$schema": {
-            "description": "A URL to the JSON Schema for this object.",
-            "examples": [
-              "https://example.com/schemas/SetGlobalRequestBody.json"
-            ],
-            "format": "uri",
-            "readOnly": true,
-            "type": "string"
-          },
-          "level": {
-            "description": "Global log level: debug | info | warn | error",
-            "examples": [
-              "info"
-            ],
-            "type": "string"
-          }
-        },
-        "required": [
-          "level"
-        ],
-        "type": "object"
-      },
       "SetItalianBillableInputBody": {
         "additionalProperties": false,
         "properties": {
@@ -5609,28 +5717,6 @@
         },
         "required": [
           "role"
-        ],
-        "type": "object"
-      },
-      "SetModuleRequestBody": {
-        "additionalProperties": false,
-        "properties": {
-          "$schema": {
-            "description": "A URL to the JSON Schema for this object.",
-            "examples": [
-              "https://example.com/schemas/SetModuleRequestBody.json"
-            ],
-            "format": "uri",
-            "readOnly": true,
-            "type": "string"
-          },
-          "level": {
-            "description": "Per-module log level override",
-            "type": "string"
-          }
-        },
-        "required": [
-          "level"
         ],
         "type": "object"
       },
@@ -8842,6 +8928,88 @@
         "tags": [
           "Observability"
         ]
+      },
+      "put": {
+        "operationId": "admin-observability-loglevels-apply",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "expectedPermanentRevision": {
+                    "description": "Permanent revision from the edited snapshot",
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "global": {
+                    "description": "Global permanent threshold",
+                    "enum": [
+                      "debug",
+                      "info",
+                      "warn",
+                      "error"
+                    ],
+                    "type": "string"
+                  },
+                  "perModule": {
+                    "additionalProperties": {
+                      "description": "Per-module permanent threshold",
+                      "enum": [
+                        "debug",
+                        "info",
+                        "warn",
+                        "error"
+                      ],
+                      "type": "string"
+                    },
+                    "description": "Complete per-module permanent override map",
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "global",
+                  "perModule",
+                  "expectedPermanentRevision"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [
+              "administrator"
+            ]
+          }
+        ],
+        "summary": "Apply the complete permanent log-level configuration",
+        "tags": [
+          "Observability"
+        ]
       }
     },
     "/v1/admin/observability/log-levels/global": {
@@ -8851,7 +9019,22 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/SetGlobalRequestBody"
+                "properties": {
+                  "level": {
+                    "description": "Permanent threshold",
+                    "enum": [
+                      "debug",
+                      "info",
+                      "warn",
+                      "error"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "level"
+                ],
+                "type": "object"
               }
             }
           },
@@ -8887,6 +9070,103 @@
           }
         ],
         "summary": "Set the global log level",
+        "tags": [
+          "Observability"
+        ]
+      }
+    },
+    "/v1/admin/observability/log-levels/logs": {
+      "post": {
+        "description": "Returns at most 100 minimized, redacted events from a closed Loki query. Free-text messages may still contain personal data.",
+        "operationId": "admin-observability-loglevels-preview",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "level": {
+                    "description": "Optional exact level",
+                    "enum": [
+                      "debug",
+                      "info",
+                      "warn",
+                      "error"
+                    ],
+                    "type": "string"
+                  },
+                  "limit": {
+                    "default": 50,
+                    "description": "Maximum returned events",
+                    "maximum": 100,
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "module": {
+                    "description": "Registered module name",
+                    "type": "string"
+                  },
+                  "q": {
+                    "description": "Optional literal text filter",
+                    "maxLength": 200,
+                    "type": "string"
+                  },
+                  "windowMinutes": {
+                    "description": "Closed preview window in minutes",
+                    "enum": [
+                      5,
+                      15,
+                      60
+                    ],
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "module",
+                  "windowMinutes"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetLogsResponseBody"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [
+              "administrator"
+            ]
+          }
+        ],
+        "summary": "Preview recent logs for one registered module",
         "tags": [
           "Observability"
         ]
@@ -8995,7 +9275,22 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/SetModuleRequestBody"
+                "properties": {
+                  "level": {
+                    "description": "Permanent threshold",
+                    "enum": [
+                      "debug",
+                      "info",
+                      "warn",
+                      "error"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "level"
+                ],
+                "type": "object"
               }
             }
           },
@@ -9031,6 +9326,138 @@
           }
         ],
         "summary": "Set a per-module log level override",
+        "tags": [
+          "Observability"
+        ]
+      }
+    },
+    "/v1/admin/observability/log-levels/{module}/diagnostic": {
+      "delete": {
+        "operationId": "admin-observability-loglevels-stop-diagnostic",
+        "parameters": [
+          {
+            "description": "Registered module name",
+            "in": "path",
+            "name": "module",
+            "required": true,
+            "schema": {
+              "description": "Registered module name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [
+              "administrator"
+            ]
+          }
+        ],
+        "summary": "Stop a module diagnostic override",
+        "tags": [
+          "Observability"
+        ]
+      },
+      "put": {
+        "operationId": "admin-observability-loglevels-start-diagnostic",
+        "parameters": [
+          {
+            "description": "Registered module name",
+            "in": "path",
+            "name": "module",
+            "required": true,
+            "schema": {
+              "description": "Registered module name",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "durationMinutes": {
+                    "description": "Omit for no expiry",
+                    "enum": [
+                      15,
+                      60,
+                      240
+                    ],
+                    "type": "integer"
+                  },
+                  "level": {
+                    "description": "Temporary diagnostic threshold",
+                    "enum": [
+                      "debug",
+                      "info",
+                      "warn",
+                      "error"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "level"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [
+              "administrator"
+            ]
+          }
+        ],
+        "summary": "Start or replace a module diagnostic override",
         "tags": [
           "Observability"
         ]

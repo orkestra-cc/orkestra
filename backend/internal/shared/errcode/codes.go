@@ -61,6 +61,36 @@ const MarketingCardCodeCollision = "marketing.card_code_collision"
 // 422.
 const MarketingCardInvalidTransition = "marketing.card_invalid_transition"
 
+// --- logging ---
+
+// LoggingLogProviderUnavailable signals that no trusted Loki query base is
+// configured for the optional Tier-1 preview. 503.
+const LoggingLogProviderUnavailable = "logging.log_provider_unavailable"
+
+// LoggingLogPreviewInvalid signals a filter outside the closed module,
+// window, level, search-length, or limit contract. 400.
+const LoggingLogPreviewInvalid = "logging.log_preview_invalid"
+
+// LoggingLogProviderTimeout signals that Loki exceeded the three-second
+// preview deadline. 504.
+const LoggingLogProviderTimeout = "logging.log_provider_timeout"
+
+// LoggingLogProviderFailed signals a non-timeout upstream, response-size, or
+// response-shape failure. 502.
+const LoggingLogProviderFailed = "logging.log_provider_failed"
+
+// LoggingMutationInvalid signals malformed or unsupported durable/diagnostic
+// log-level input. Details intentionally do not echo request content. 400.
+const LoggingMutationInvalid = "logging.mutation_invalid"
+
+// LoggingConfigConflict signals that a durable editor token is stale or a
+// bounded Mongo CAS retry could not win. The caller must reload and retry. 409.
+const LoggingConfigConflict = "logging.config_conflict"
+
+// LoggingPersistenceFailed signals an internal repository failure. The
+// underlying cause is logged server-side and never enters the response. 500.
+const LoggingPersistenceFailed = "logging.persistence_failed"
+
 // --- navigation ---
 
 // NavigationOverrideUnknownParent signals that a PATCH against the

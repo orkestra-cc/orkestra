@@ -70,6 +70,16 @@ func (l LogLevel) Slog() slog.Level {
 // ErrInvalidLogLevel is returned by Parse for unrecognised input.
 var ErrInvalidLogLevel = errors.New("invalid log level (expected debug | info | warn | error)")
 
+// PermanentConfigInput is the complete desired permanent log-level
+// configuration. ExpectedPermanentRevision provides optimistic concurrency
+// against permanent writes only; diagnostic maintenance has its own document
+// revision and cannot create a false editor conflict.
+type PermanentConfigInput struct {
+	Global                    LogLevel
+	PerModule                 map[string]LogLevel
+	ExpectedPermanentRevision int64
+}
+
 // LogLevelDoc is the single-document shape persisted in the
 // log_levels collection. There is exactly one document per
 // deployment — keyed by ConfigKey — so admin mutations are simple
@@ -92,6 +102,17 @@ type LogLevelDoc struct {
 	// from this map inherit Global.
 	PerModule map[string]LogLevel `bson:"perModule" json:"perModule"`
 
+	// Diagnostics maps module name → temporary diagnostic override.
+	// Expired entries are ignored by the resolver until cleanup removes
+	// them from persistence.
+	Diagnostics map[string]DiagnosticOverride `bson:"diagnostics" json:"diagnostics"`
+
+	// Revision advances on every persisted mutation and is the Mongo CAS
+	// predicate. PermanentRevision advances only when Global or PerModule
+	// changes. Both intentionally decode as zero for legacy documents.
+	Revision          int64 `bson:"revision,omitempty" json:"revision"`
+	PermanentRevision int64 `bson:"permanentRevision,omitempty" json:"permanentRevision"`
+
 	UpdatedAt  time.Time `bson:"updatedAt" json:"updatedAt"`
 	UpdatedBy  string    `bson:"updatedBy,omitempty" json:"updatedBy,omitempty"`
 	UpdateNote string    `bson:"updateNote,omitempty" json:"updateNote,omitempty"`
@@ -108,19 +129,66 @@ const DefaultConfigKey = "default"
 // per-module fallback for each module so the UI doesn't need to
 // re-do the resolution.
 type AdminView struct {
-	Global    LogLevel           `json:"global"`
-	Modules   []AdminModuleEntry `json:"modules"`
-	UpdatedAt time.Time          `json:"updatedAt"`
-	UpdatedBy string             `json:"updatedBy,omitempty"`
+	Global      LogLevel               `json:"global"`
+	Modules     []AdminModuleEntry     `json:"modules"`
+	Diagnostics []AdminDiagnosticEntry `json:"diagnostics"`
+	LogProvider LogProviderStatus      `json:"logProvider"`
+	Revision    int64                  `json:"revision"`
+	// PermanentRevision is the optimistic-concurrency token for the durable
+	// editor. Diagnostics never advance it.
+	PermanentRevision int64     `json:"permanentRevision"`
+	ServerTime        time.Time `json:"serverTime"`
+	UpdatedAt         time.Time `json:"updatedAt"`
+	UpdatedBy         string    `json:"updatedBy,omitempty"`
+}
+
+// LogProviderStatus reports optional preview/deep-link capabilities without
+// making the logging workspace depend on Loki or Grafana being deployed.
+type LogProviderStatus struct {
+	Available  bool   `json:"available"`
+	GrafanaURL string `json:"grafanaUrl,omitempty"`
+}
+
+// LogEvent is the minimized preview projection returned to Tier-1 operators.
+// Message is preserved for diagnostic usefulness and may still contain
+// personal data; Attributes contains only explicitly allowlisted fields.
+type LogEvent struct {
+	Timestamp  time.Time      `json:"timestamp"`
+	Level      LogLevel       `json:"level"`
+	Message    string         `json:"message"`
+	Module     string         `json:"module"`
+	Attributes map[string]any `json:"attributes"`
 }
 
 // AdminModuleEntry is one row in the observability admin table.
 // Effective is what the handler currently gates on for this module;
-// HasOverride is true when the module has its own setting (false
-// means it inherits Global). Together they let the UI render the
-// "revert to global" affordance correctly.
+// Override is the durable per-module setting even when a diagnostic
+// temporarily changes Effective. HasOverride remains true when Override
+// is present so existing consumers can render the "revert to global"
+// affordance correctly.
 type AdminModuleEntry struct {
-	Name        string   `json:"name"`
-	Effective   LogLevel `json:"effective"`
-	HasOverride bool     `json:"hasOverride"`
+	Name        string    `json:"name"`
+	Effective   LogLevel  `json:"effective"`
+	Override    *LogLevel `json:"override,omitempty"`
+	HasOverride bool      `json:"hasOverride"`
+}
+
+// DiagnosticOverride is a temporary per-module threshold persisted in
+// the log_levels document. A nil ExpiresAt makes the diagnostic active
+// until an operator stops it explicitly.
+type DiagnosticOverride struct {
+	Level     LogLevel   `bson:"level" json:"level"`
+	StartedAt time.Time  `bson:"startedAt" json:"startedAt"`
+	StartedBy string     `bson:"startedBy" json:"startedBy"`
+	ExpiresAt *time.Time `bson:"expiresAt,omitempty" json:"expiresAt,omitempty"`
+}
+
+// AdminDiagnosticEntry is the active diagnostic projection returned to
+// the operator UI. Module is supplied by the diagnostics map key.
+type AdminDiagnosticEntry struct {
+	Module    string     `json:"module"`
+	Level     LogLevel   `json:"level"`
+	StartedAt time.Time  `json:"startedAt"`
+	StartedBy string     `json:"startedBy"`
+	ExpiresAt *time.Time `json:"expiresAt,omitempty"`
 }
