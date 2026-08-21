@@ -5,4 +5,99 @@ sidebar_position: 5
 
 # auth
 
-Email/password (argon2id) + OAuth 2.1, JWT, sessions, RBAC middleware. See [Authentication flow](/architecture/authentication-flow) for the cross-module view.
+Every way a caller proves who it is: email/password (argon2id), OAuth 2.1, MFA, passkeys, machine-to-machine service accounts, plus the RS256 JWT, session, and RBAC middleware the rest of the platform leans on. This page is the module's **contract**; for the narrative of how a request becomes an identity, read [Authentication flow](/architecture/authentication-flow).
+
+## What it owns
+
+- **Email + password** — argon2id in PHC format (OWASP 2025 params), transparent rehash on login when the stored hash is weaker than the current default.
+- **OAuth 2.1** — Google, Apple, GitHub, and Discord, each independently enable-able per surface, with a web flow and a mobile flow.
+- **Tokens and sessions** — RS256 access + refresh JWTs from one key pair, refresh rotation with family replay detection, and a Redis-backed revocation set so logout kills an access token instantly rather than waiting out its TTL.
+- **MFA** — TOTP with backup codes, WebAuthn passkeys, and the step-up gate (`RequireStepUp`) that catastrophic actions sit behind.
+- **Device trust** — per-surface trusted-device grants that let a known device skip the second factor.
+- **Service accounts** — OAuth2 client-credentials machine identities ([ADR-0014](/adrs/service-accounts-client-credentials)). See [below](#service-accounts).
+- **RBAC middleware** — `RequirePermission` / `RequireAudience` / `RequireStepUp`, satisfying the SDK's `RoleMiddleware` seam. The permission *decisions* belong to [authz](/modules/core/authz); auth only enforces them at the route.
+
+## Two surfaces, one module
+
+Almost every route is mirrored under `/v1/auth/operator/*` (Tier-1) and `/v1/auth/client/*` (Tier-2) — same handlers, different collections, cookie domains, and rate-limit policy. A token minted for one surface is rejected at the edge of the other with `401 audience_mismatch`, above and beyond per-route RBAC.
+
+Some surfaces exist on one tier only: session listing and OAuth link/unlink are operator-side self-service, while registration exists on both but is independently gated by config.
+
+## Service accounts
+
+A machine caller — an integration, a CI job, a fork's own backend — authenticates with the OAuth2 **client-credentials** grant. Adopted in [ADR-0014](/adrs/service-accounts-client-credentials); operator console at `/admin/service-accounts`.
+
+### The model
+
+**A service account is an operator user row, not a new entity.** `iface.User` carries an additive `Kind` field — empty for a human, `service` for a machine principal. The account is created with a synthetic, undeliverable email under the RFC 2606 reserved `.invalid` TLD, the minimum system role (`guest`), and no password hash. Because it *is* a user, tenant membership, custom roles, authz bindings, Cedar evaluation, audit provenance, and JWT membership embedding all work unchanged — real capability comes from tenant-scoped custom-role bindings granted on top. `Kind` is immutable after creation: it is not part of the user-update input shape, so no update path can turn a human account into a machine one or back.
+
+### Credentials
+
+Credentials live in their own `service_account_credentials` collection, hashed with the same argon2id service as passwords. The client ID is an opaque `sa_`-prefixed identifier distinct from the user UUID; the client secret is `sas_`-prefixed, generated server-side from 32 random bytes, and **returned exactly once** — at creation or rotation — never persisted or logged in plaintext.
+
+**At most two credentials may be active per account.** That is what makes rotation zero-downtime: issue the new one, migrate the caller, revoke the old. Note it is a count-then-insert check, not an atomic conditional insert, so two concurrent issues can both briefly succeed — operational hygiene, not a security boundary, since each credential stays individually revocable.
+
+### The grant
+
+```bash
+curl -X POST https://console.example.com/v1/auth/token \
+  -H 'Content-Type: application/json' \
+  -d '{"grantType":"client_credentials","clientId":"sa_...","clientSecret":"sas_..."}'
+```
+
+```json
+{ "accessToken": "eyJhbGciOiJSUzI1NiIs...", "tokenType": "Bearer", "expiresIn": 900 }
+```
+
+The endpoint is public and rate-limited. Two things to expect that differ from an off-the-shelf OAuth2 client:
+
+- **JSON, camelCase.** Not RFC 6749's form-encoded `grant_type`/`access_token` shape — the platform is JSON-first throughout. A stock OAuth2 library needs a thin adapter or a hand-rolled request.
+- **No refresh token.** The client credential is already a long-lived secret; a service account simply repeats the grant when its access token expires.
+
+Every rejection reason — unknown client ID, revoked credential, wrong secret, disabled account, a user that is not a service account — collapses into one indistinguishable error, and an unknown client ID still burns a dummy hash-verify so that path costs the same wall-clock time as a wrong secret. Failed attempts are throttled per source IP *and* per targeted client ID.
+
+### Audience
+
+The grant mints `aud: "service"`. The operator host mux accepts the audience set `operator, service`; the client mux is unchanged and accepts `client` only. **Service accounts therefore reach the Tier-1 operator surface and nothing else** — a Tier-2 machine credential is out of scope and would be a separate design.
+
+### Admin surface
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/v1/admin/service-accounts` | List service accounts |
+| POST | `/v1/admin/service-accounts` | Create one — returns the client secret once |
+| GET | `/v1/admin/service-accounts/{id}` | Get one with credential metadata |
+| PATCH | `/v1/admin/service-accounts/{id}` | Rename, enable, or disable |
+| POST | `/v1/admin/service-accounts/{id}/credentials` | Issue a rotation credential — secret returned once |
+| DELETE | `/v1/admin/service-accounts/{id}/credentials/{credentialId}` | Revoke a credential |
+
+Reads require `auth.service_accounts.read`. **Every mutation requires `auth.service_accounts.manage` plus a step-up MFA proof fresher than 5 minutes**, the same bar as every other secret-revealing admin mutation in this module. Revocation is deliberately not idempotent: revoking an already-revoked credential returns the same not-found outcome as revoking one that never existed, so there is no oracle distinguishing the two.
+
+### Operational caveats
+
+- **Disabling has bounded latency.** It stops new grants instantly, but a token minted just before remains cryptographically valid for up to the access-token TTL (default 15 minutes). This is accepted because permissions are never embedded in the token — the authz evaluator resolves them fresh per request, so unbinding roles or disabling the account changes its *authorization* immediately.
+- **Fails closed everywhere else.** Password login, every OAuth flow, and all refresh-token read paths reject a `service` principal. The client-credentials grant is the only path that can mint a token for one.
+- **No privileged roles.** `super_admin` and `administrator` can never be assigned to a service account, and that guard fails closed even when the pre-read needed to classify the target is unavailable — the assignment is refused rather than risked.
+
+## Permissions
+
+| Key | System set | Grants |
+|---|---|---|
+| `auth.self` | — | Edit your own password and sessions |
+| `auth.mfa.self` | — | Enroll, verify, and remove your own MFA factors |
+| `system.users.mfa_reset` | ✅ | Reset another user's MFA factors |
+| `system.users.password_reset` | ✅ | Trigger a password-reset email for another user |
+| `system.users.email_verify_resend` | ✅ | Resend another user's email-verification mail |
+| `system.users.oauth_unlink` | ✅ | Unlink an OAuth identity from another user |
+| `auth.service_accounts.read` | ✅ | List and inspect service accounts |
+| `auth.service_accounts.manage` | ✅ | Create service accounts, issue, rotate, and revoke credentials |
+
+Keys in the **system set** are granted by the `super_admin` / `administrator` / `developer` role shortcuts without an explicit global binding, and the seeder excludes them from org roles. Without that flag a freshly created administrator — one with no binding to the seeded administrator role — would 403 on the admin credential endpoints.
+
+## Config
+
+auth is by far the largest configuration surface in the base — 62 fields at `/admin/modules/auth`, arranged into a group rail: **Registration**, **Login & Sessions**, **Password Policy**, **MFA**, **OAuth Providers** (with Google, Apple, GitHub, and Discord as child nodes), **Anti-abuse & Notifications**, and **Sessions & Account**. Fields are seeded from their `EnvVar` on first boot and owned by the ConfigService thereafter — see [Module configuration](/operating/module-configuration) and [OAuth providers](/operating/oauth-providers) for the operator walkthrough.
+
+:::note Where the routes are
+This page names the surfaces, not all ~90 of the module's operations. The generated per-endpoint reference — request/response schemas included — is under [API Reference](/api), grouped by tag: Authentication, MFA, WebAuthn, Auth - Device Trust, Service Accounts, Mobile, and Self-Service.
+:::

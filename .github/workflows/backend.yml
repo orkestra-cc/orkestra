@@ -35,6 +35,7 @@ jobs:
     env:
       MONGO_URI: mongodb://localhost:27017
       REDIS_URL: redis://localhost:6379
+      # Consumed by `make ci-backend`'s coverage gate (Makefile: COVERAGE_THRESHOLD ?= 15).
       COVERAGE_THRESHOLD: 15
     services:
       mongodb:
@@ -53,13 +54,6 @@ jobs:
         run: mise install go golangci-lint jq "go:golang.org/x/vuln/cmd/govulncheck"
       - name: Run backend CI (mirrors `make ci-backend` locally)
         run: make ci-backend
-      - name: Enforce coverage threshold
-        working-directory: backend
-        run: |
-          PCT=$(go tool cover -func=coverage.out | awk '/^total:/ {gsub("%",""); print $NF}')
-          echo "Coverage: ${PCT}%"
-          awk -v p="$PCT" -v t="$COVERAGE_THRESHOLD" 'BEGIN { exit !(p+0 >= t+0) }' \
-            || { echo "::error::Coverage ${PCT}% is below ${COVERAGE_THRESHOLD}% threshold"; exit 1; }
       - name: Upload coverage
         uses: actions/upload-artifact@v7
         with:

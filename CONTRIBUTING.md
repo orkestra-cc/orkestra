@@ -53,14 +53,17 @@ make ci      # auto-detects which surfaces you changed; runs only those checks
 
 The same `make` targets are what GitHub Actions runs. If `make ci` is green locally, CI will be green.
 
+That parity is load-bearing on private forks, whose Actions runners are billing-blocked — `make ci` is the *only* gate they get. It is also why the lockfile checks live in the targets rather than in the workflows: CI installs with `npm ci` / `flutter pub get` **before** it calls `make`, so a lockfile that could no longer satisfy its manifest failed there and nowhere else — and on a fork with no runners, nowhere at all until the next production image build. The lockfile targets close that gap without touching an installed `node_modules`, so they are cheap enough to run on every push.
+
 | Command | What it runs |
 |---------|--------------|
 | `make ci` | CI for changed surfaces (default base: `origin/dev`; override with `BASE_REF=origin/main`) |
 | `make ci-all` | Every surface — what CI does on `dev`/`main` |
-| `make ci-backend` | Backend: lint, tenant-scope, policy-coverage, vuln, tests, build, openapi-check |
-| `make ci-frontend-admin` | Admin SPA: typecheck, lint, tests, audit, build |
-| `make ci-frontend-client` | Client SPA: typecheck, lint, build |
-| `make ci-mobile` | Flutter: analyze, test |
+| `make ci-backend` | Backend: lint, tenant-scope, policy-coverage, vuln, tests, coverage threshold, build, openapi-check |
+| `make ci-frontend-admin` | Admin SPA: lockfile sync, typecheck, lint, tests, audit, build |
+| `make ci-frontend-client` | Client SPA: lockfile sync, typecheck, lint, build |
+| `make ci-mobile` | Flutter: lockfile sync, analyze, test |
+| `make admin-lockcheck` | Is a lockfile still able to satisfy its manifest? (also `client-`, `mobile-`) |
 | `make fmt` | Run every formatter in write mode (gofmt, prettier, dart format) |
 | `make ci-help` | Full CI target list |
 | `make help` | Dev/orchestration targets (infra, services, ports) |

@@ -7,6 +7,8 @@ sidebar_position: 1
 
 User CRUD, role management, document tracking. Foundation module — every other module depends on it indirectly.
 
+It also owns the **avatar pipeline**, which is the reference consumer of the [object-storage seam](/sdk/object-storage): presigned direct-to-S3 upload, then a commit that confirms the object and binds the key to the caller. Read it before wiring an upload surface of your own.
+
 :::note 🚧 Draft
 Endpoints, RBAC, fields. Could be partially auto-generated from the OpenAPI spec.
 :::
