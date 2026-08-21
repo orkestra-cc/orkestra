@@ -6,20 +6,19 @@ sidebar_position: 1
 
 # SDK Reference
 
-The Orkestra SDK (`github.com/orkestra-cc/orkestra-sdk`) is the **public contract** every module — core or addon — programs against. It defines:
+`backend/pkg/sdk` is the **contract** every module — core or a fork's addon — programs against. It defines:
 
 - The [`Module`](/sdk/module-interface) lifecycle interface (`Init`, `RegisterRoutes`, `Start`, `Stop`, `HealthCheck`).
 - The [`ServiceRegistry`](/sdk/service-registry) — a typed key-value store for cross-module service sharing.
 - The [`ConfigService`](/sdk/config-service) — DB-backed + Redis-cached config with AES-256-GCM-encrypted secrets.
-- The [`pkg/sdk/iface`](/sdk/shared-iface) consumer-facing interfaces (`UserProvider`, `NotificationSender`, `PDFProvider`, `GraphProvider`, `AIModelProvider`, `RAGQueryProvider`, `JWTProvider`) that prevent direct cross-module imports.
+- The [`pkg/sdk/iface`](/sdk/shared-iface) consumer-facing interfaces (`UserProvider`, `NotificationSender`, `TenantProvider`, `AuthzProvider`, `AuditSink`, …) that prevent direct cross-module imports.
+- [Object storage](/sdk/object-storage) — the presigned-upload seam a module uses to store user-uploaded blobs.
 
-## Module status
+## It is in-tree, not a published module
 
-| Item               | Value                                                 |
-| ------------------ | ----------------------------------------------------- |
-| Module path        | `github.com/orkestra-cc/orkestra-sdk`                 |
-| Latest version     | `v0.4.0`                                              |
-| Repo               | [`orkestra-cc/orkestra-sdk`](https://github.com/orkestra-cc/orkestra-sdk) |
+[ADR-0006](/adrs/collapse-to-core-only-base) (D2) reverted an earlier multi-repo SDK split. The backend is a **single Go module**: `pkg/sdk` ships inside it, and there is no satellite `go.mod`, no `go.work`, no `replace` directive, and nothing published to the Go proxy. A fork's addons live in-tree alongside the core modules and import the SDK by its in-repo path.
+
+Re-introducing a satellite module is a forbidden pattern, not a preference — the split cost more in version-skew and release choreography than the decoupling was worth.
 
 ## Build your first addon
 

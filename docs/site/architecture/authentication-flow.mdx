@@ -10,12 +10,13 @@ This is the cross-cutting walkthrough of how a request becomes an authenticated 
 
 ## 1. Audience model
 
-Orkestra serves two human-facing audiences from one Go binary, dispatched by `Host` header.
+Orkestra serves two human-facing audiences from one Go binary, dispatched by `Host` header, plus one machine audience that rides on the operator host.
 
 | Audience   | Host (prod)            | JWT `aud`  | What lives here                                                                          |
 | ---------- | ---------------------- | ---------- | ---------------------------------------------------------------------------------------- |
 | `operator` | `console.orkestra.com` | `operator` | Tier-1 operator dashboard — module admin, system config, dev tooling                     |
 | `client`   | `api.orkestra.com`     | `client`   | Tier-2 external client tenants — onboarding, account                                     |
+| `service`  | `console.orkestra.com` | `service`  | Machine callers holding service-account credentials — see [§10](#10-machine-callers-service-accounts)      |
 
 ```mermaid
 flowchart LR
@@ -26,6 +27,8 @@ flowchart LR
 ```
 
 Each public audience has its own `chi.Mux`, its own `huma.API`, its own CORS allowlist, its own rate-limit policy, and its own `RequireAudience` middleware. **A token issued for one audience is rejected at the edge of the other** with `401 audience_mismatch` — this is defense in depth above per-route RBAC.
+
+`RequireAudience` is a **set-membership** check, not an exact match: the operator mux accepts `operator, service` while the client mux accepts `client` only. That is the whole mechanism confining machine callers to Tier-1.
 
 In dev (`ENV=development`) the host mux falls through to the operator mux when the `Host` header is unrecognised, so `curl http://localhost:3000/health` keeps working without `/etc/hosts` gymnastics. In staging/prod, an unmatched `Host` returns `421 Misdirected Request`.
 
@@ -269,7 +272,27 @@ Standard middleware:
 - `RequireMFA()` — applied to authz role+binding mutations, tenant scoped mutations, module config writes; demands a recent `amr` containing an MFA marker
 - `RequireStepUp(maxAge)` — strict variant for catastrophic actions (see §7)
 
-## 10. Dev tooling
+## 10. Machine callers (service accounts)
+
+Humans are not the only principals. A machine caller — an integration, a CI job, a fork's own backend — holds **service-account** credentials and exchanges them for an access token with the OAuth2 client-credentials grant ([ADR-0014](/adrs/service-accounts-client-credentials)).
+
+```bash
+curl -X POST https://console.orkestra.com/v1/auth/token \
+  -H 'Content-Type: application/json' \
+  -d '{"grantType":"client_credentials","clientId":"sa_...","clientSecret":"sas_..."}'
+```
+
+Three things make this fit the model above rather than sit beside it:
+
+- **A service account is a user row.** It carries `Kind: "service"`, a synthetic undeliverable email, the `guest` system role, and no password hash — so tenant membership, custom roles, Cedar evaluation, audit provenance, and JWT membership embedding all work with no new authorization primitive. Capability comes from tenant-scoped role bindings granted on top.
+- **The token is an ordinary access token** from the same RS256 key pair, with `aud: "service"`. No refresh token is issued — the client credential is already the long-lived secret, so the caller repeats the grant on expiry.
+- **Revocation behaves like it does for humans, and for the same reason.** Permissions are never embedded in the token, so unbinding a role or disabling the account changes authorization on the *next request*. Only the token's own cryptographic validity outlives the change, bounded by the access-token TTL.
+
+Every interactive path — password login, every OAuth flow, the refresh machinery — rejects a `service` principal outright. The grant endpoint is the only way to mint one of these tokens, and `super_admin` / `administrator` can never be assigned to a service account.
+
+The credential lifecycle (create, rotate, revoke — max two active credentials, secret shown once) lives on the operator surface at `/admin/service-accounts`; see the [auth module page](/modules/core/auth#service-accounts) for the endpoint table and the step-up requirements.
+
+## 11. Dev tooling
 
 `scripts/devtoken.sh` mints synthetic-user JWTs for local testing without touching the database. Disabled in production.
 
@@ -283,12 +306,12 @@ Standard middleware:
 
 The audience flag is the difference between "I can hit `console.*`" and "I can hit `api.*`" — without it, dev tokens default to operator and the client mux's `RequireAudience` gate rejects them with `401 audience_mismatch`.
 
-## 11. Where to look
+## 12. Where to look
 
 | Question                                          | Source of truth                                                                                                                                                  |
 | ------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | What endpoints exist?                             | The [API Reference](/api) on this site (auto-generated from the canonical spec), or the [auth module CLAUDE.md](https://github.com/orkestra-cc/orkestra/blob/main/backend/internal/core/auth/CLAUDE.md) for prose context |
-| Why the audience split?                           | [ADR-0003 in the monorepo](https://github.com/orkestra-cc/orkestra/blob/main/docs/adr/0003-three-audience-host-split.md) (will sync to /adrs when tagged `public: true`) |
+| Why the audience split?                           | [ADR-0003 — three-audience host split](/adrs/three-audience-host-split), and [ADR-0014](/adrs/service-accounts-client-credentials) for the `service` audience it reserved |
 | What env vars does auth read?                     | [auth module CLAUDE.md → Runtime configuration](https://github.com/orkestra-cc/orkestra/blob/main/backend/internal/core/auth/CLAUDE.md#runtime-configuration)    |
 | How are cookie domains configured per audience?   | [docker/CLAUDE.md → Host split](https://github.com/orkestra-cc/orkestra/blob/main/docker/CLAUDE.md)                                                              |
 | What's the JWT validator doing under the hood?    | `backend/internal/core/auth/services/jwt_service.go` (`ValidateAccessToken`) and `backend/internal/shared/middleware/audience.go` (`RequireAudience`)            |

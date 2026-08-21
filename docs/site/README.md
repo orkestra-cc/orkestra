@@ -41,6 +41,19 @@ What does **not** live here:
 - Custom React components in MDX work (`import Foo from '@theme/Foo'`) but cost portability — every reader on github.com sees raw JSX. Prefer plain Markdown when possible
 - The site injects `custom_edit_url` at sync time so each page's "Edit this page" link points back to its source file in this repo — don't set `custom_edit_url` here manually
 
+## Checking a change before you merge it
+
+**Nothing in this repo's CI builds the docs site.** A page that breaks the MDX parser, or links to a heading that does not exist, gets caught only downstream — in another repo, after the merge. Render it locally first, against your working tree:
+
+```bash
+cd ../orkestra-docs                       # a fresh clone; the sync is gitignored
+npm ci
+MONOREPO_LOCAL_PATH=/path/to/orkestra npm run sync:site
+CI=true npm run build
+```
+
+The build is the check: `onBrokenLinks: 'throw'` fails on a dead internal link, and broken heading anchors are reported as warnings. Note the anchor Docusaurus generates includes the whole heading text — `## 10. Machine callers (service accounts)` is `#10-machine-callers-service-accounts`, not `#10-machine-callers`.
+
 ## How a change reaches the live site
 
 ```
