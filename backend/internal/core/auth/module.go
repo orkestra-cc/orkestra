@@ -23,6 +23,7 @@ import (
 	sharederrors "github.com/orkestra/backend/internal/shared/errors"
 	"github.com/orkestra/backend/internal/shared/geoip"
 	authMiddleware "github.com/orkestra/backend/internal/shared/middleware"
+	"github.com/orkestra/backend/internal/shared/utils"
 	"github.com/orkestra/backend/pkg/sdk/iface"
 	"github.com/orkestra/backend/pkg/sdk/module"
 )
@@ -1333,8 +1334,8 @@ func parseDurationEnv(key string, fallback time.Duration) time.Duration {
 	if raw == "" {
 		return fallback
 	}
-	d, err := time.ParseDuration(raw)
-	if err != nil || d <= 0 {
+	d, ok := utils.ParseDuration(raw)
+	if !ok || d <= 0 {
 		slog.Default().Warn("auth: malformed duration env var, using default",
 			slog.String("key", key),
 			slog.String("value", raw),

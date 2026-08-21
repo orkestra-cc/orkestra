@@ -7,6 +7,7 @@ import (
 	"time"
 
 	authModels "github.com/orkestra/backend/internal/core/auth/models"
+	"github.com/orkestra/backend/internal/shared/utils"
 	"github.com/orkestra/backend/pkg/sdk/iface"
 	"github.com/orkestra/backend/pkg/sdk/module"
 )
@@ -184,8 +185,8 @@ func (s *AuthPolicyService) AccessTokenTTL(ctx context.Context) time.Duration {
 	if v == "" {
 		return defaultAccessTokenTTL
 	}
-	d, err := time.ParseDuration(v)
-	if err != nil || d <= 0 {
+	d, ok := utils.ParseDuration(v)
+	if !ok || d <= 0 {
 		return defaultAccessTokenTTL
 	}
 	return d
@@ -263,8 +264,8 @@ func (s *AuthPolicyService) PasswordResetTokenTTL(ctx context.Context) time.Dura
 	if v == "" {
 		return defaultPasswordResetTokenTTL
 	}
-	d, err := time.ParseDuration(v)
-	if err != nil || d <= 0 {
+	d, ok := utils.ParseDuration(v)
+	if !ok || d <= 0 {
 		return defaultPasswordResetTokenTTL
 	}
 	return d
@@ -280,8 +281,8 @@ func (s *AuthPolicyService) LockoutDuration(ctx context.Context) time.Duration {
 	if v == "" {
 		return defaultLockoutDuration
 	}
-	d, err := time.ParseDuration(v)
-	if err != nil || d <= 0 {
+	d, ok := utils.ParseDuration(v)
+	if !ok || d <= 0 {
 		return defaultLockoutDuration
 	}
 	return d
