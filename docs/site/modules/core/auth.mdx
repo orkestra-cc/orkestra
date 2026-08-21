@@ -112,9 +112,17 @@ more than `sessionAbsoluteTTL` ago, on its next refresh. Clear the field at
 
 The three lifetimes above govern authentication; retention is a separate
 question again. Session **documents** are audit and device history that the
-risk scorer reads — nothing authenticates off them — and are deleted 90 days
-after `expiresAt` by a Mongo TTL index. Refresh-**token** rows have their own
-retention story, covered next.
+risk scorer reads — nothing authenticates off them — and are deleted **at**
+`expiresAt`, which every login sets to 90 days out
+(`models.AuthSessionRetention`). The index deletes the row when that timestamp
+passes; it does not add a further 90 days on top of it, so 90 days from login
+is the whole of the window.
+
+That window is also the risk scorer's history depth: its device-fingerprint
+and IP factors count session rows, so a device or IP last seen more than 90
+days ago reads as new and scores accordingly.
+
+Refresh-**token** rows have their own retention story, covered next.
 
 ## Refresh-token retention
 
