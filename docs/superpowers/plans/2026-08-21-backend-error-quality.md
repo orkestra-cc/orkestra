@@ -1325,10 +1325,15 @@ go run ./tools/errquality/cmd/errquality -baseline=tools/errquality/baseline.txt
 
 Expected: tests PASS, analyzer silent.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 6: Regenerate the OpenAPI spec if any status changed**
+
+Run: `cd backend && make openapi-dump` (infra must be up)
+Expected: a diff limited to authz error responses — or an empty one, if no status moved.
+
+- [ ] **Step 7: Commit**
 
 ```bash
-git add backend/internal/core/authz backend/tools/errquality/baseline.txt
+git add backend/internal/core/authz backend/tools/errquality/baseline.txt backend/openapi/enterprise.json
 git commit -F - <<'EOF'
 fix(authz): keep policy-engine internals out of authorization errors
 
