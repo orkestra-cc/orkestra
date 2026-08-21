@@ -1,0 +1,33 @@
+name: MCP configuration
+
+on:
+  pull_request:
+    paths:
+      - '.mcp.json'
+      - '.codex/config.toml'
+      - '.pre-commit-config.yaml'
+      - 'Makefile'
+      - 'scripts/check-mcp-sync.py'
+      - 'scripts/test-mcp-sync.py'
+      - '.github/workflows/mcp-config.yml'
+  push:
+    branches: [dev, main]
+    paths:
+      - '.mcp.json'
+      - '.codex/config.toml'
+      - '.pre-commit-config.yaml'
+      - 'Makefile'
+      - 'scripts/check-mcp-sync.py'
+      - 'scripts/test-mcp-sync.py'
+      - '.github/workflows/mcp-config.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify shared MCP configuration
+        run: make ci-mcp

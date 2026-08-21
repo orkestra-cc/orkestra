@@ -148,7 +148,8 @@ frontend-client-clean:
 # ============================================================================
 
 .PHONY: install install-hooks fmt ci-help
-.PHONY: ci ci-all ci-backend ci-frontend-admin ci-frontend-client ci-mobile
+.PHONY: ci ci-all ci-mcp ci-backend ci-frontend-admin ci-frontend-client ci-mobile
+.PHONY: mcp-check mcp-test
 .PHONY: backend-lint backend-test-ci backend-tenantscope backend-policycoverage backend-piiscan backend-vulncheck backend-build-ci backend-openapi-check
 .PHONY: admin-typecheck admin-lint admin-test admin-audit admin-build
 .PHONY: client-typecheck client-lint client-build
@@ -162,6 +163,7 @@ BACKEND_CHANGED := $(if $(filter backend/%,$(CI_CHANGED)),1,)
 ADMIN_CHANGED   := $(if $(filter frontend-admin/%,$(CI_CHANGED)),1,)
 CLIENT_CHANGED  := $(if $(filter frontend-client/%,$(CI_CHANGED)),1,)
 MOBILE_CHANGED  := $(if $(filter mobile/%,$(CI_CHANGED)),1,)
+MCP_CHANGED     := $(if $(filter .mcp.json .codex/config.toml .github/workflows/mcp-config.yml scripts/check-mcp-sync.py scripts/test-mcp-sync.py,$(CI_CHANGED)),1,)
 
 # ---- Setup ----
 
@@ -198,21 +200,34 @@ init-yes:
 
 ci:
 	@echo "Detecting changed surfaces vs $(BASE_REF)..."
-	@if [ -z "$(BACKEND_CHANGED)$(ADMIN_CHANGED)$(CLIENT_CHANGED)$(MOBILE_CHANGED)" ]; then \
+	@if [ -z "$(BACKEND_CHANGED)$(ADMIN_CHANGED)$(CLIENT_CHANGED)$(MOBILE_CHANGED)$(MCP_CHANGED)" ]; then \
 	  echo "  (no surface changes — nothing to check)"; \
 	else \
 	  [ -n "$(BACKEND_CHANGED)" ] && echo "  - backend"          || true; \
 	  [ -n "$(ADMIN_CHANGED)"   ] && echo "  - frontend-admin"   || true; \
 	  [ -n "$(CLIENT_CHANGED)"  ] && echo "  - frontend-client"  || true; \
 	  [ -n "$(MOBILE_CHANGED)"  ] && echo "  - mobile"           || true; \
+	  [ -n "$(MCP_CHANGED)"     ] && echo "  - MCP configuration" || true; \
 	fi
-	@[ -n "$(BACKEND_CHANGED)" ] && $(MAKE) ci-backend         || true
-	@[ -n "$(ADMIN_CHANGED)"   ] && $(MAKE) ci-frontend-admin  || true
-	@[ -n "$(CLIENT_CHANGED)"  ] && $(MAKE) ci-frontend-client || true
-	@[ -n "$(MOBILE_CHANGED)"  ] && $(MAKE) ci-mobile          || true
+	@if [ -n "$(BACKEND_CHANGED)" ]; then $(MAKE) ci-backend;         fi
+	@if [ -n "$(ADMIN_CHANGED)"   ]; then $(MAKE) ci-frontend-admin;  fi
+	@if [ -n "$(CLIENT_CHANGED)"  ]; then $(MAKE) ci-frontend-client; fi
+	@if [ -n "$(MOBILE_CHANGED)"  ]; then $(MAKE) ci-mobile;          fi
+	@if [ -n "$(MCP_CHANGED)"     ]; then $(MAKE) ci-mcp;             fi
 
-ci-all: ci-backend ci-frontend-admin ci-frontend-client ci-mobile
+ci-all: ci-mcp ci-backend ci-frontend-admin ci-frontend-client ci-mobile
 	@echo "All surface checks passed."
+
+# ---- Shared MCP configuration ----
+
+ci-mcp: mcp-test mcp-check
+	@echo "MCP configuration CI: OK"
+
+mcp-check:
+	@python3 scripts/check-mcp-sync.py
+
+mcp-test:
+	@python3 scripts/test-mcp-sync.py
 
 # ---- Backend ----
 
@@ -360,6 +375,8 @@ ci-help:
 	@echo "  make ci-frontend-admin     - Admin SPA CI (typecheck + lint + tests + build + audit)"
 	@echo "  make ci-frontend-client    - Client SPA CI (typecheck + lint + build)"
 	@echo "  make ci-mobile             - Flutter CI (analyze + test)"
+	@echo "  make ci-mcp                - Shared Claude Code/Codex MCP config check"
+	@echo "  make mcp-check             - Verify project MCP definitions are in sync"
 	@echo ""
 	@echo "Scope detection uses BASE_REF (default: origin/dev)."
 	@echo "  BASE_REF=origin/main make ci"
