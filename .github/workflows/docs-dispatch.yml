@@ -23,6 +23,8 @@ jobs:
   dispatch:
     name: Trigger docs.orkestra.cc rebuild
     # Upstream only: private chain forks carry this file but must never fire it.
+    # This gate is also what keeps the hard failure below from breaking fork CI —
+    # a fork has no DOCS_DISPATCH_TOKEN and never reaches these steps.
     if: github.repository == 'orkestra-cc/orkestra'
     runs-on: ubuntu-latest
     steps:
@@ -39,24 +41,29 @@ jobs:
             openapi:
               - 'backend/openapi/enterprise.json'
 
-      - name: Dispatch monorepo-docs-changed
-        if: steps.changed.outputs.docs == 'true' || github.event_name == 'workflow_dispatch'
+      # A missing token must break the run, not warn past it. This workflow
+      # originally warned and exited 0: it reported success on every push to
+      # main for two weeks while sending nothing, and the site kept serving a
+      # build from before the workflow existed. A publish path that cannot
+      # publish is a failure, and has to look like one.
+      - name: Require dispatch token
+        if: steps.changed.outputs.docs == 'true' || steps.changed.outputs.openapi == 'true' || github.event_name == 'workflow_dispatch'
         env:
           GH_TOKEN: ${{ secrets.DOCS_DISPATCH_TOKEN }}
         run: |
           if [ -z "$GH_TOKEN" ]; then
-            echo "::warning::DOCS_DISPATCH_TOKEN is not set — docs.orkestra.cc will not rebuild automatically. Create a fine-grained PAT scoped to orkestra-docs (Contents: read and write) and add it as a repo secret."
-            exit 0
+            echo "::error::DOCS_DISPATCH_TOKEN is not set — docs.orkestra.cc will not rebuild. Create a fine-grained PAT scoped to orkestra-cc/orkestra-docs (Contents: read and write) and add it as the DOCS_DISPATCH_TOKEN repo secret."
+            exit 1
           fi
-          gh api repos/orkestra-cc/orkestra-docs/dispatches -f event_type=monorepo-docs-changed
+
+      - name: Dispatch monorepo-docs-changed
+        if: steps.changed.outputs.docs == 'true' || github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ secrets.DOCS_DISPATCH_TOKEN }}
+        run: gh api repos/orkestra-cc/orkestra-docs/dispatches -f event_type=monorepo-docs-changed
 
       - name: Dispatch monorepo-openapi-changed
         if: steps.changed.outputs.openapi == 'true'
         env:
           GH_TOKEN: ${{ secrets.DOCS_DISPATCH_TOKEN }}
-        run: |
-          if [ -z "$GH_TOKEN" ]; then
-            echo "::warning::DOCS_DISPATCH_TOKEN is not set — skipping dispatch."
-            exit 0
-          fi
-          gh api repos/orkestra-cc/orkestra-docs/dispatches -f event_type=monorepo-openapi-changed
+        run: gh api repos/orkestra-cc/orkestra-docs/dispatches -f event_type=monorepo-openapi-changed
