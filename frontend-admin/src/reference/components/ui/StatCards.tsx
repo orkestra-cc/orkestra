@@ -179,7 +179,7 @@ const StatCards = () => {
     <>
       <PageHeader
         title="Stat Cards"
-        description="The Orkestra ERP-style KPI tile (StatCard) and its companion titled panel (SectionCard) — the canonical summary-row and section primitives for admin dashboards. A 4px left accent edge (neutral at rest, colored only when the state earns it), a large faded 3x icon, a big headline value, an optional subtitle, and an attention flag rendered as a diagonal corner ribbon."
+        description="The Orkestra ERP-style KPI tile (StatCard) and its companion titled panel (SectionCard) — the canonical summary-row and section primitives for admin dashboards. A 4px left accent edge (neutral at rest, colored only when the state earns it), a faded 2x icon anchored bottom-right and kept quieter than the datum it labels, a big headline value, an optional subtitle, an optional drill-down footer, and an attention flag rendered as a diagonal corner ribbon."
         className="mb-3"
       />
 

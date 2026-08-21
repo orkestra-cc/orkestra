@@ -6,7 +6,7 @@ import { IconProp } from '@fortawesome/fontawesome-svg-core';
 import { BadgeColor } from 'components/common/SubtleBadge';
 
 // StatCard is the Orkestra ERP-style KPI tile and the canonical summary-row
-// card for admin dashboards: a 4px left accent edge, a large faded 3x icon,
+// card for admin dashboards: a 4px left accent edge, a faded 2x icon,
 // the headline value, an optional subtitle, and — when the metric needs
 // attention — a diagonal corner ribbon (styled by `.stat-ribbon` in
 // theme/_stat-card.scss). Prefer it over bespoke per-page stat cards so every
@@ -57,26 +57,33 @@ const StatCard = ({
         <span>{badge.text}</span>
       </div>
     )}
-    <Card.Body>
-      <div className="d-flex align-items-end justify-content-between">
-        <div>
-          {/* .h6/.h3 utility classes, not heading tags: a KPI tile's title
-              and value are data, and real headings here skipped levels in
-              every page outline they appeared in. */}
-          <div className="h6 text-muted mb-1 pe-4">{title}</div>
-          <div className="h3 mb-0 fw-bold text-900">
-            {loading ? <Spinner animation="border" size="sm" /> : value}
-          </div>
-          {subtitle && <small className="text-muted">{subtitle}</small>}
+    {/* Two full-height columns, each pinning its own bottom element. The icon
+        anchors to the card, never to the text above it: a row mixing tiles
+        that drill down with tiles that don't — a counter whose rows no list
+        can show has nowhere to send the operator — otherwise scatters its
+        icons across three heights. */}
+    <Card.Body className="d-flex justify-content-between">
+      <div className="d-flex flex-column">
+        {/* .h6/.h3 utility classes, not heading tags: a KPI tile's title
+            and value are data, and real headings here skipped levels in
+            every page outline they appeared in. */}
+        <div className="h6 text-muted mb-1 pe-4">{title}</div>
+        <div className="h3 mb-0 fw-bold text-900">
+          {loading ? <Spinner animation="border" size="sm" /> : value}
         </div>
-        <div className={`text-${color} align-self-end`}>
-          <FontAwesomeIcon icon={icon} size="3x" className="opacity-75" />
-        </div>
+        {subtitle && <small className="text-muted">{subtitle}</small>}
+        {/* mt-auto so a row of tiles shares one link line rather than a
+            ragged one. It sits in the text column, not across the card: the
+            icon column is 32px, so there is no width worth reclaiming. */}
+        {footer && <div className="mt-auto pt-3">{footer}</div>}
       </div>
-      {/* Full width under the flex row, not inside the left column: a
-          drill-down link belongs to the whole tile, and nesting it beside the
-          icon squeezed it to a couple of characters on a narrow column. */}
-      {footer && <div className="mt-3">{footer}</div>}
+      {/* 2x at half opacity, not 3x at 75%: this is a category marker, and
+          at 48px in a saturated status hue it was the loudest thing in an
+          Operate tile — louder than the datum it labels. The ribbon owns
+          the top-right corner, so the icon stays bottom-right. */}
+      <div className={`text-${color} align-self-end ms-2`}>
+        <FontAwesomeIcon icon={icon} size="2x" className="opacity-50" />
+      </div>
     </Card.Body>
   </Card>
 );
