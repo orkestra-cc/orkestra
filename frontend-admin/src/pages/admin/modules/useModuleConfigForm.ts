@@ -6,13 +6,30 @@ import type { ConfigField } from 'store/api/moduleApi';
 import { isFieldVisible } from './configModel';
 
 /**
- * Mirrors Go's time.ParseDuration: an optional sign, then one or more
- * decimal-with-unit segments (ns, us/µs, ms, s, m, h). A bare zero is valid.
+ * Mirrors the backend's `utils.ParseDuration` — NOT Go's `time.ParseDuration`,
+ * which is only the first of its two alternatives:
+ *
+ *  1. everything `time.ParseDuration` takes — an optional sign, then one or
+ *     more decimal-with-unit segments (ns, us/µs, ms, s, m, h); a bare zero
+ *     is valid; and
+ *  2. a bare `<number>d` for days.
+ *
+ * The second alternative is deliberately NOT part of the first: `utils.ParseDuration`
+ * special-cases only a bare `<number>d` and leaves compound forms like `1d12h`
+ * unsupported, so a value either parses exactly or is rejected. Keeping `d` out
+ * of the segment group is what preserves that asymmetry here — see the
+ * `1d12h` case in useModuleConfigForm.test.ts.
+ *
+ * This runs BEFORE the schema-declared `pattern`, so a unit this regex rejects
+ * can never be saved no matter what the backend declares. Omitting `d` made
+ * `sessionAbsoluteTTL: 89d` — the documented maximum, declared valid by auth's
+ * own `Pattern: "^[0-9]+(s|m|h|d)$"` — unsavable from /admin/modules (ADR-0017).
+ *
  * Kept identical to the copy in ModuleConfigFields — both are the same
  * contract, and the backend is the authority on it.
  */
 const DURATION_RE =
-  /^[+-]?0$|^[+-]?((\d+(\.\d*)?|\.\d+)(ns|us|µs|μs|ms|s|m|h))+$/;
+  /^[+-]?0$|^[+-]?((\d+(\.\d*)?|\.\d+)(ns|us|µs|μs|ms|s|m|h))+$|^[+-]?(\d+(\.\d*)?|\.\d+)d$/;
 
 /** Compiles a schema-declared pattern, or null when it is not usable. */
 const safeRegExp = (pattern?: string): RegExp | null => {
@@ -211,7 +228,7 @@ export const buildYupSchema = (
         //
         // This is O(n²) in field count — n rules each re-keying n fields — and
         // it runs on every keystroke, since `mode: 'onChange'` validates the
-        // whole object. Benchmarked on this repo: **62 fields (auth, the
+        // whole object. Benchmarked on this repo: **63 fields (auth, the
         // largest module in the base) ≈ 0.8 ms per pass, ~5% of a 16.7 ms
         // frame** — imperceptible, and the reason this stays as it is. But it
         // is a real share of the pass rather than noise beside the yup rules,
@@ -340,7 +357,7 @@ export const useModuleConfigForm = (
   const fieldNames = useMemo(() => buildFieldNames(schema), [schema]);
   const defaults = buildDefaults(schema, configValues, fieldNames);
   // yupResolver validates the whole values object on every call, and
-  // mode: 'onChange' calls it per keystroke — on a large module (auth's 62
+  // mode: 'onChange' calls it per keystroke — on a large module (auth's 63
   // fields) rebuilding the yup object from scratch on every render is pure
   // waste on top of that inherent per-keystroke validation cost. Rebuild
   // only when the schema itself changes.
