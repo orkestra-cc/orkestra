@@ -129,7 +129,7 @@ func (s *jwtService) RefreshTokenTTL() time.Duration { return s.refreshExpiry }
 // that doesn't care about TTL don't need to pass anything explicit.
 func NewJWTService(privateKey *rsa.PrivateKey, publicKey *rsa.PublicKey, env string, accessTTL, refreshTTL time.Duration) JWTService {
 	if accessTTL <= 0 {
-		accessTTL = 15 * time.Minute
+		accessTTL = defaultAccessTokenTTL
 	}
 	if accessTTL > MaxAccessTokenTTL {
 		// The Redis revocation denylist stores entries for

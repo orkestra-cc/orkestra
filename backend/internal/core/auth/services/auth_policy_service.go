@@ -21,10 +21,16 @@ const (
 	defaultPasswordMinLength     = 10
 	defaultPasswordMaxLength     = 128
 	defaultBreachedPasswordCheck = true
-	// Phase 3.1 defaults — match the pre-policy hardcoded behaviour so
-	// a deployment without the policy keys set keeps minting tokens
-	// with the same TTLs that the env-var-driven NewJWTService used.
-	defaultAccessTokenTTL        = 15 * time.Minute
+	// defaultAccessTokenTTL is the shared 15-minute fallback for the
+	// access-token lifetime. AuthPolicyService.AccessTokenTTL does NOT
+	// use it — an unset admin value reports 0 so the env level can be
+	// consulted (ADR-0017 D5). The guard that actually applies this
+	// default lives in NewJWTService, which is the level "unset all
+	// the way down" bottoms out at.
+	defaultAccessTokenTTL = 15 * time.Minute
+	// Phase 3.1 default — matches the pre-policy hardcoded behaviour so
+	// a deployment without the policy key set keeps minting tokens with
+	// the reset-token TTL PasswordAuthService always used.
 	defaultPasswordResetTokenTTL = 30 * time.Minute
 )
 
