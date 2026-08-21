@@ -156,6 +156,8 @@ Examples:
 
 See [`../docs/archive/frontend-admin-i18n.md`](../docs/archive/frontend-admin-i18n.md) (Phase 2) for the rollout. Until a handler is migrated, do not invent a code for it from the frontend — read it off the response or fall back to `detail`.
 
+`make ci-backend` runs the **errquality** analyzer over `internal/`: a client-facing error may not pass `err.Error()` as its detail (R1), may not use a detail that repeats the status code — "Request failed", "Failed" — (R2), and may not return a 4xx from the `default:` branch of an `errors.Is` switch (R3), because an error the handler cannot name is the server's fault, not the caller's. Pre-existing violations are frozen in `tools/errquality/baseline.txt` and burned down per module; a genuine exception carries `//errquality:allow <reason>`.
+
 ## Dev Tokens (LOCAL DEVELOPMENT ONLY)
 
 ```bash
