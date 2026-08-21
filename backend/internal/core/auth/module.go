@@ -695,11 +695,23 @@ func (m *AuthModule) Collections() []module.CollectionSpec {
 			{Keys: map[string]int{"uuid": 1}, Unique: true},
 			{Keys: map[string]int{"userUuid": 1}},
 			{Keys: map[string]int{"familyId": 1}},
+			// Serves the sweep's sorted, limited selection. Deliberately
+			// NOT a TTL index: deletion at expiry is semantically safe,
+			// but Mongo's TTL monitor cannot provide the bounded
+			// per-cycle progress and backlog telemetry the first cleanup
+			// of an upgraded installation requires. ADR-0017 D7.
+			{OrderedKeys: []module.IndexKey{{Field: "expiresAt", Direction: 1}, {Field: "uuid", Direction: 1}}},
 		}},
 		{Name: models.ClientRefreshTokensCollection, Indexes: []module.IndexSpec{
 			{Keys: map[string]int{"uuid": 1}, Unique: true},
 			{Keys: map[string]int{"userUuid": 1}},
 			{Keys: map[string]int{"familyId": 1}},
+			// Serves the sweep's sorted, limited selection. Deliberately
+			// NOT a TTL index: deletion at expiry is semantically safe,
+			// but Mongo's TTL monitor cannot provide the bounded
+			// per-cycle progress and backlog telemetry the first cleanup
+			// of an upgraded installation requires. ADR-0017 D7.
+			{OrderedKeys: []module.IndexKey{{Field: "expiresAt", Direction: 1}, {Field: "uuid", Direction: 1}}},
 		}},
 		{Name: models.OperatorRefreshTokenFamiliesCollection, Indexes: []module.IndexSpec{
 			{Keys: map[string]int{"familyId": 1}, Unique: true},

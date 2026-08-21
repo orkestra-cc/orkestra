@@ -14,6 +14,7 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"errors"
+	"sort"
 	"sync"
 	"testing"
 	"time"
@@ -300,6 +301,10 @@ type gateRefreshRepo struct {
 	// byHash mirrors the production repo's "primary lookup" path.
 	// Tests can pre-seed via seedRefreshDoc for the orchestration paths.
 	byHash map[string]*authModels.RefreshTokenDoc
+	// sweepErr forces CleanupExpiredTokens to fail, so a test can pin
+	// that the sweep scheduler surfaces a repository error rather than
+	// reporting a clean cycle.
+	sweepErr error
 }
 
 type testFamilyRevocation struct {
@@ -482,11 +487,51 @@ func (r *gateRefreshRepo) RevokeTokensBySession(_ context.Context, sessionUUID, 
 func (r *gateRefreshRepo) RevokeTokensByDevice(context.Context, string, string, string) error {
 	panic("not used")
 }
-func (r *gateRefreshRepo) CleanupExpiredTokens(context.Context) (int64, error) { panic("not used") }
-func (r *gateRefreshRepo) DeleteAllByUser(context.Context, string) (int64, error) {
-	panic("not used")
+
+// CleanupExpiredTokens mirrors the production sweep: delete at most
+// `limit` expired rows, sorted deterministically so batching tests can
+// make assertions about which rows land in which cycle, and report
+// hasMore from the count of eligible rows beyond the batch — never from
+// a separate count call.
+func (r *gateRefreshRepo) CleanupExpiredTokens(_ context.Context, limit int) (int64, bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.sweepErr != nil {
+		return 0, false, r.sweepErr
+	}
+	now := time.Now()
+	var expired []string
+	for hash, d := range r.byHash {
+		if d.ExpiresAt.Before(now) {
+			expired = append(expired, hash)
+		}
+	}
+	sort.Strings(expired) // deterministic batching
+	hasMore := len(expired) > limit
+	if hasMore {
+		expired = expired[:limit]
+	}
+	for _, h := range expired {
+		delete(r.byHash, h)
+	}
+	return int64(len(expired)), hasMore, nil
 }
-func (r *gateRefreshRepo) CleanupRevokedTokens(context.Context, time.Duration) (int64, error) {
+
+// CountExpiredTokens is the one-shot backlog count Task 16's scheduler
+// takes on entry to drain mode.
+func (r *gateRefreshRepo) CountExpiredTokens(_ context.Context) (int64, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var n int64
+	now := time.Now()
+	for _, d := range r.byHash {
+		if d.ExpiresAt.Before(now) {
+			n++
+		}
+	}
+	return n, nil
+}
+func (r *gateRefreshRepo) DeleteAllByUser(context.Context, string) (int64, error) {
 	panic("not used")
 }
 func (r *gateRefreshRepo) GetTokenStats(context.Context, string) (*repository.TokenStats, error) {
