@@ -169,6 +169,8 @@ func main() {
 				SecretKey:      cfg.Storage.SecretKey,
 				ForcePathStyle: cfg.Storage.ForcePathStyle,
 				EnsureBucket:   cfg.Storage.EnsureBucket,
+
+				CORSAllowedOrigins: cfg.Storage.CORSAllowedOrigins,
 			},
 			BucketPrefix: cfg.Storage.BucketPrefix,
 			Redis:        redisClient,
@@ -201,6 +203,8 @@ func main() {
 				SecretKey:      cfg.Storage.SecretKey,
 				ForcePathStyle: cfg.Storage.ForcePathStyle,
 				EnsureBucket:   cfg.Storage.EnsureBucket,
+
+				CORSAllowedOrigins: cfg.Storage.CORSAllowedOrigins,
 			})
 			scancel()
 			if err == nil {

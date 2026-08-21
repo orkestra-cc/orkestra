@@ -105,6 +105,10 @@ RustFS is the self-hosted default in `docker-compose.infra.yml`, **pinned by dig
 
 **The presign endpoint must be browser-reachable.** The browser PUTs to `STORAGE_PUBLIC_ENDPOINT` when set, otherwise `STORAGE_ENDPOINT`. Behind a TLS proxy, keep `STORAGE_ENDPOINT` internal for the backend's own HEAD, GET, and DELETE calls and set `STORAGE_PUBLIC_ENDPOINT` to the public host: presigned URLs sign only `host` and survive proxying, but SDK-signed backend operations 403 through the proxy and must hit the origin directly. The proxy must preserve the `Host` header and answer the browser's CORS preflight.
 
+**The bucket needs a CORS policy, and the backend applies one.** The presigned PUT is a cross-origin request to the storage host, so only the bucket's own policy can permit it — the backend is not in that request's path. On boot the store (re)applies a policy to every bucket it provisions, allowing `PUT`, `GET` and `HEAD` (never `DELETE`; detaching goes through the API) from `STORAGE_CORS_ALLOWED_ORIGINS`, which defaults to the union of `CORS_ORIGINS`, `OPERATOR_CORS_ORIGINS` and `CLIENT_CORS_ORIGINS`. Applying it on every boot rather than only at bucket creation keeps it alive across a fresh volume. Storage that refuses the call — a managed S3 whose IAM withholds `s3:PutBucketCORS`, or an implementation without bucket CORS — only gets a warning: downloads and every server-side operation still work, and refusing to boot would trade a broken upload for a broken deployment. Set the variable empty to opt out entirely.
+
+Worth knowing what the failure looks like, because it is quiet: the preflight answers `200` with no `Access-Control-*` headers, the browser blocks the PUT, and the server logs nothing at all — the request never reached it.
+
 At scale, point `STORAGE_ENDPOINT` at a managed S3, pre-provision the per-domain buckets, and set `STORAGE_ENSURE_BUCKET=false` (IAM rarely grants CreateBucket) with `STORAGE_FORCE_PATH_STYLE=false`. Add a per-bucket lifecycle rule to expire orphaned uncommitted uploads, plus your backup policy.
 
 :::note STORAGE_BUCKET is deprecated
