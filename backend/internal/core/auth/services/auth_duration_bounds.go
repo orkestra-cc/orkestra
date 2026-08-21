@@ -21,13 +21,13 @@ const (
 	// applies to JWT_ACCESS_TOKEN_EXPIRY and to direct NewJWTService
 	// callers. ADR-0017 D5.
 	MaxAccessTokenTTL = 24 * time.Hour
-	// minAccessTokenTTL: below a minute the SPA enters a refresh loop.
-	minAccessTokenTTL = time.Minute
+	// MinAccessTokenTTL: below a minute the SPA enters a refresh loop.
+	MinAccessTokenTTL = time.Minute
 
-	// minPasswordResetTokenTTL: below five minutes the link dies before
+	// MinPasswordResetTokenTTL: below five minutes the link dies before
 	// the mail is delivered.
-	minPasswordResetTokenTTL = 5 * time.Minute
-	maxPasswordResetTokenTTL = 24 * time.Hour
+	MinPasswordResetTokenTTL = 5 * time.Minute
+	MaxPasswordResetTokenTTL = 24 * time.Hour
 )
 
 // clampPersistedDuration resolves a duration that is ALREADY persisted.

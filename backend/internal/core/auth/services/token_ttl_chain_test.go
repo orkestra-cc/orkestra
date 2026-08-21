@@ -58,7 +58,7 @@ func TestAccessTokenTTL_PersistedOutOfRangeIsClamped(t *testing.T) {
 	if got := newPolicy(map[string]string{"accessTokenTTL": "9999h"}).AccessTokenTTL(context.Background()); got != MaxAccessTokenTTL {
 		t.Errorf("legacy 9999h = %v, want %v", got, MaxAccessTokenTTL)
 	}
-	if got := newPolicy(map[string]string{"accessTokenTTL": "10s"}).AccessTokenTTL(context.Background()); got != minAccessTokenTTL {
-		t.Errorf("legacy 10s = %v, want %v", got, minAccessTokenTTL)
+	if got := newPolicy(map[string]string{"accessTokenTTL": "10s"}).AccessTokenTTL(context.Background()); got != MinAccessTokenTTL {
+		t.Errorf("legacy 10s = %v, want %v", got, MinAccessTokenTTL)
 	}
 }

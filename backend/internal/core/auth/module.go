@@ -402,13 +402,21 @@ func (m *AuthModule) ConfigSchema() []module.ConfigField {
 		// every mint so an admin edit takes effect on the next call.
 		{
 			Key: "accessTokenTTL", Label: "Access token lifetime", Group: "login",
-			Description: "Go duration string — how long an issued access token stays valid. Shorter = tighter security but more refresh round-trips. Default 15m.",
+			Description: "Go duration string — how long an issued access token stays valid. Shorter = tighter security but more refresh round-trips. Range 1m–24h. Default 15m.",
 			Type:        module.FieldDuration, Default: "15m",
+			// UX aid only: ModuleConfigFields.tsx gives feedback before
+			// save. Enforcement is the server-side ValidateConfig above —
+			// this pattern is deliberately stricter than the parser (it
+			// rejects compound forms like 1h30m that the server accepts),
+			// which is acceptable for a hint but must never be treated as
+			// the contract.
+			Pattern: "^[0-9]+(s|m|h|d)$",
 		},
 		{
 			Key: "passwordResetTokenTTL", Label: "Password reset link lifetime", Group: "login",
-			Description: "Go duration string — how long the link in the reset-password email stays valid. Default 30m.",
+			Description: "Go duration string — how long the link in the reset-password email stays valid. Range 5m–24h. Default 30m.",
 			Type:        module.FieldDuration, Default: "30m",
+			Pattern: "^[0-9]+(s|m|h|d)$",
 		},
 		// Phase 3.6 — restrict the MFA factor types users can enroll.
 		// Empty list = all methods allowed (the legacy default so an

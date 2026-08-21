@@ -154,6 +154,46 @@ The privileged-role list itself (`super_admin`, `administrator`,
 `services/mfa_policy.go`. Making it admin-managed is a deliberate
 follow-up — the change is security-sensitive and worth a PR diff.
 
+#### Duration bounds on credential-governing config (ADR-0017 D6)
+
+`accessTokenTTL` and `passwordResetTokenTTL` govern credentials that may
+already be in a user's hands, so an absurd value is exploitable, not just
+inconvenient — a multi-week access token would outlive its own Redis
+revocation entry. Both are bounded, and the bound is enforced **twice**
+on purpose: once at the PATCH boundary so the stored value can never
+disagree with the effective value, and again at read time as a second
+line of defence for legacy or out-of-band data. Read-time clamping alone
+was explicitly rejected because it leaves the two disagreeing — the
+admin UI would show one value while a different one governed logins.
+
+| Input | `accessTokenTTL` | `passwordResetTokenTTL` |
+|---|---|---|
+| empty | unset: falls through to `JWT_ACCESS_TOKEN_EXPIRY`, then 15m | 30m default |
+| malformed or out-of-range PATCH | 422, not persisted | 422, not persisted |
+| malformed value already in DB | warn, fall through to env | warn, use 30m |
+| out of range already in DB | warn and clamp | warn and clamp |
+| env / direct constructor above 24h | warn and clamp to 24h | n/a |
+
+Write-time enforcement is `(*AuthModule).ValidateConfig` in
+`config_validation.go` — the module's implementation of the optional
+`module.HasConfigValidator` seam (ADR-0017 D6). It rejects a non-empty
+value outside `[services.MinAccessTokenTTL, services.MaxAccessTokenTTL]`
+(1m–24h) or `[services.MinPasswordResetTokenTTL,
+services.MaxPasswordResetTokenTTL]` (5m–24h) with a
+`*module.ConfigValidationError`, which the admin API maps to 422 before
+the value ever reaches `UpdateConfig`. An empty value is always accepted —
+emptiness is a decision with field-specific meaning, not an omission to
+reject. Generic `UpdateConfig` still validates nothing on its own; the
+seam is opt-in per module, and `auth` is currently its only implementer.
+Read-time enforcement is the pre-existing `clampPersistedDuration` in
+`services/auth_duration_bounds.go`, which stays as-is.
+
+`accountLockoutDuration` and `accountLockoutThreshold` are **deliberately
+excluded** from this validator: neither governs an already-issued
+credential, and an absurd value there is self-punishing (an operator who
+sets a year-long lockout locks out real users, not an attacker) rather
+than exploitable.
+
 ### OAuth provider credentials (admin-managed)
 
 | Provider | Key | Type | Seed env var |

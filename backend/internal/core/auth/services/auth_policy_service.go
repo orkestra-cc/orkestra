@@ -193,7 +193,7 @@ func (s *AuthPolicyService) AccessTokenTTL(ctx context.Context) time.Duration {
 	if v == "" {
 		return 0
 	}
-	return clampPersistedDuration(v, 0, minAccessTokenTTL, MaxAccessTokenTTL, "accessTokenTTL", slogDefault())
+	return clampPersistedDuration(v, 0, MinAccessTokenTTL, MaxAccessTokenTTL, "accessTokenTTL", slogDefault())
 }
 
 // MFAMethodsAllowed returns the set of MFA factor types the admin
@@ -268,7 +268,7 @@ func (s *AuthPolicyService) PasswordResetTokenTTL(ctx context.Context) time.Dura
 	if v == "" {
 		return defaultPasswordResetTokenTTL
 	}
-	return clampPersistedDuration(v, defaultPasswordResetTokenTTL, minPasswordResetTokenTTL, maxPasswordResetTokenTTL, "passwordResetTokenTTL", slogDefault())
+	return clampPersistedDuration(v, defaultPasswordResetTokenTTL, MinPasswordResetTokenTTL, MaxPasswordResetTokenTTL, "passwordResetTokenTTL", slogDefault())
 }
 
 // LockoutDuration returns how long an IP/email stays locked after
