@@ -63,3 +63,15 @@ func Conflict(code, detail string) *Error { return New(http.StatusConflict, code
 func UnprocessableEntity(code, detail string) *Error {
 	return New(http.StatusUnprocessableEntity, code, detail)
 }
+
+// ServiceUnavailable returns a 503 — the dependency or configuration a
+// request needs is absent or down. Use it for faults an operator can
+// fix (missing keys, unconfigured mailer), and say which one in detail.
+func ServiceUnavailable(code, detail string) *Error {
+	return New(http.StatusServiceUnavailable, code, detail)
+}
+
+// Internal returns a 500 — the server hit a state it does not model.
+// The detail must stay a written sentence, never the underlying error
+// text: log the cause, tell the caller what failed.
+func Internal(code, detail string) *Error { return New(http.StatusInternalServerError, code, detail) }

@@ -22,6 +22,8 @@ import (
 // matching row here (so a forgotten snapshot blocks the PR).
 var goldenCodes = map[string]string{
 	"AuthEmailInUse":                   "auth.email_in_use",
+	"AuthJWTNotConfigured":             "auth.jwt_not_configured",
+	"AuthUnavailable":                  "auth.unavailable",
 	"MarketingCardCodeCollision":       "marketing.card_code_collision",
 	"MarketingCardInvalidTransition":   "marketing.card_invalid_transition",
 	"NavigationOverrideUnknownParent":  "navigation.override_unknown_parent",

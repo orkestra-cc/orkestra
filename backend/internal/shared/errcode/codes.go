@@ -18,6 +18,19 @@ package errcode
 // the email already maps to a live user in this audience tier. 409.
 const AuthEmailInUse = "auth.email_in_use"
 
+// AuthJWTNotConfigured signals that the server cannot read its RS256
+// signing keys, so no token can be issued or verified. This is a
+// deployment fault, never the caller's: it answers 503, and the detail
+// names the cause so an operator reading the response alone can act on
+// it without tailing container logs.
+const AuthJWTNotConfigured = "auth.jwt_not_configured"
+
+// AuthUnavailable is the honest fallback for an unrecognized error on a
+// password-auth path. An error the handler cannot name is a server
+// fault, so it answers 500 — never a 4xx, which would blame the caller
+// for the server's own gap.
+const AuthUnavailable = "auth.unavailable"
+
 // --- user ---
 
 // UserSelfDeleteForbidden signals that an admin tried to delete (or
