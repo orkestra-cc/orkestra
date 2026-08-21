@@ -156,7 +156,7 @@ GitHub Actions workflows (`.github/workflows/`) run on PR and push to `dev`/`mai
 - `mobile.yml` → `make ci-mobile` (flutter analyze, test)
 - `security.yml` — govulncheck + npm audit; runs on PR (jobs gated per changed area) + weekly cron, **no push trigger** — a push would re-scan the dependency set the PR just scanned
 - `ghcr-cleanup.yml` — weekly deletion of untagged GHCR image versions (private-repo package storage is billed); manifest-aware, safe with buildx provenance
-- `docs-dispatch.yml` — on push to `main` touching `docs/site/**`, `docs/adr/**`, or `backend/openapi/enterprise.json`, sends the `repository_dispatch` that rebuilds docs.orkestra.cc (fires in the upstream repo only; needs the `DOCS_DISPATCH_TOKEN` secret)
+- `docs-dispatch.yml` — on push to `main` touching `docs/site/**`, `docs/adr/**`, or `backend/openapi/enterprise.json`, sends the `repository_dispatch` that rebuilds docs.orkestra.cc (fires in the upstream repo only; **fails the run** if the `DOCS_DISPATCH_TOKEN` secret is missing — a publish path that can't publish must not report success)
 
 Local reproduction is the same one-liner CI uses:
 

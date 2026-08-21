@@ -56,7 +56,7 @@ monorepo/docs/site/*.mdx  ──merge to main──▶  orkestra-cc/orkestra (ma
                                               docs.orkestra.cc
 ```
 
-The dispatch fires when a push to `main` touches `docs/site/**`, `docs/adr/**`, or `backend/openapi/enterprise.json` (`.github/workflows/docs-dispatch.yml`; it needs the `DOCS_DISPATCH_TOKEN` repo secret — without it the run warns and skips, and the site does **not** rebuild). The site's own nightly cron only resyncs addon READMEs and public ADRs via drift PRs — it does not deploy this tree, and GitHub disables cron schedules after 60 days without repo activity. To deploy manually:
+The dispatch fires when a push to `main` touches `docs/site/**`, `docs/adr/**`, or `backend/openapi/enterprise.json` (`.github/workflows/docs-dispatch.yml`). It needs the `DOCS_DISPATCH_TOKEN` repo secret; without it the run **fails**, which is the point — the site cannot rebuild, so the push that expected to publish has to say so. The site's own nightly cron is the backstop: it reruns the same sync + build + deploy, which also picks up addon-repo edits this dispatch doesn't watch. Note GitHub disables cron schedules after 60 days without repo activity, so the nightly is a safety net rather than a guarantee. To deploy manually:
 
 ```bash
 gh workflow run "Build & Deploy" -R orkestra-cc/orkestra-docs --ref main
