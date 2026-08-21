@@ -150,9 +150,10 @@ frontend-client-clean:
 .PHONY: install install-hooks fmt ci-help
 .PHONY: ci ci-all ci-mcp ci-backend ci-frontend-admin ci-frontend-client ci-mobile
 .PHONY: mcp-check mcp-test
-.PHONY: backend-lint backend-test-ci backend-tenantscope backend-policycoverage backend-piiscan backend-vulncheck backend-build-ci backend-openapi-check
-.PHONY: admin-typecheck admin-lint admin-test admin-audit admin-build
-.PHONY: client-typecheck client-lint client-build
+.PHONY: backend-lint backend-test-ci backend-tenantscope backend-policycoverage backend-piiscan backend-vulncheck backend-build-ci backend-openapi-check backend-coverage-gate
+.PHONY: admin-lockcheck admin-typecheck admin-lint admin-test admin-audit admin-build
+.PHONY: client-lockcheck client-typecheck client-lint client-build
+.PHONY: mobile-lockcheck
 .PHONY: mobile-analyze mobile-test
 
 # Detect changed surfaces vs $(BASE_REF). Override with `BASE_REF=origin/main make ci`.
@@ -196,6 +197,41 @@ init-force:
 init-yes:
 	@bash scripts/init.sh --yes
 
+# Minimum total backend statement coverage. CI used to enforce this in the
+# workflow, after `make ci-backend` had already returned OK — so the gate did
+# not exist locally at all. It lives here now; the workflow may still override
+# the value via the environment.
+COVERAGE_THRESHOLD ?= 15
+
+# A lockfile that disagrees with its manifest is invisible locally: every check
+# below runs against whatever node_modules already exists, while CI installs
+# with `npm ci` first and fails outright. A lockfile can therefore sit unable
+# to satisfy its own manifest for weeks — nothing local notices, and on a fork
+# whose Actions runners are unavailable, nothing notices at all until the next
+# production image build.
+#
+# `npm install --package-lock-only` resolves the tree on paper and rewrites the
+# lockfile when it disagrees. No node_modules is touched, so this is safe in a
+# working checkout, and the original file is restored either way. npm's own
+# exit code is not a usable signal here — it reports failure even on a healthy
+# tree — so the rewritten file is what we read.
+define npm-lockcheck
+	cd $(1) && cp package-lock.json /tmp/orkestra-lockcheck-$(1).bak && \
+	{ npm install --package-lock-only --no-audit --no-fund >/dev/null 2>&1 || true; }; \
+	if cmp -s /tmp/orkestra-lockcheck-$(1).bak package-lock.json; then \
+	  rm -f /tmp/orkestra-lockcheck-$(1).bak; \
+	  echo "$(1): package-lock.json is in sync with package.json"; \
+	else \
+	  cp /tmp/orkestra-lockcheck-$(1).bak package-lock.json; \
+	  rm -f /tmp/orkestra-lockcheck-$(1).bak; \
+	  echo "FAIL: $(1)/package-lock.json is out of sync with package.json."; \
+	  echo "      'npm ci' — what CI and the production image build both run —"; \
+	  echo "      would refuse this tree. Your lockfile was left untouched."; \
+	  echo "      Fix: cd $(1) && npm install, then commit the lockfile."; \
+	  exit 1; \
+	fi
+endef
+
 # ---- Top-level CI dispatch ----
 
 ci:
@@ -231,7 +267,7 @@ mcp-test:
 
 # ---- Backend ----
 
-ci-backend: backend-lint backend-tenantscope backend-policycoverage backend-piiscan backend-vulncheck backend-test-ci backend-build-ci backend-openapi-check
+ci-backend: backend-lint backend-tenantscope backend-policycoverage backend-piiscan backend-vulncheck backend-test-ci backend-coverage-gate backend-build-ci backend-openapi-check
 	@echo "Backend CI: OK"
 
 # backend-openapi-check fails if the committed openapi/enterprise.json drifted
@@ -297,13 +333,24 @@ backend-vulncheck:
 	  echo "All reachable vulnerabilities are on the allowlist."; \
 	}
 
+# Depends on backend-test-ci rather than trusting prerequisite order, so the
+# coverage profile it reads is always the one this run produced.
+backend-coverage-gate: backend-test-ci
+	@cd backend && PCT=$$(go tool cover -func=coverage.out | awk '/^total:/ {gsub("%",""); print $$NF}'); \
+	echo "Coverage: $${PCT}%"; \
+	awk -v p="$${PCT}" -v t="$(COVERAGE_THRESHOLD)" 'BEGIN { exit !(p+0 >= t+0) }' \
+	  || { echo "FAIL: coverage $${PCT}% is below the $(COVERAGE_THRESHOLD)% threshold"; exit 1; }
+
 backend-build-ci:
 	@cd backend && $(MAKE) build
 
 # ---- Frontend Admin ----
 
-ci-frontend-admin: admin-typecheck admin-lint admin-test admin-audit admin-build
+ci-frontend-admin: admin-lockcheck admin-typecheck admin-lint admin-test admin-audit admin-build
 	@echo "Frontend-admin CI: OK"
+
+admin-lockcheck:
+	@$(call npm-lockcheck,frontend-admin)
 
 admin-typecheck:
 	@cd frontend-admin && npm run typecheck
@@ -326,8 +373,11 @@ admin-build:
 
 # ---- Frontend Client ----
 
-ci-frontend-client: client-typecheck client-lint client-build
+ci-frontend-client: client-lockcheck client-typecheck client-lint client-build
 	@echo "Frontend-client CI: OK"
+
+client-lockcheck:
+	@$(call npm-lockcheck,frontend-client)
 
 client-typecheck:
 	@cd frontend-client && npm run typecheck
@@ -340,8 +390,13 @@ client-build:
 
 # ---- Mobile ----
 
-ci-mobile: mobile-analyze mobile-test
+ci-mobile: mobile-lockcheck mobile-analyze mobile-test
 	@echo "Mobile CI: OK"
+
+# Flutter ships the check natively: --enforce-lockfile fails pub get when
+# pubspec.lock cannot satisfy pubspec.yaml, and never rewrites the lockfile.
+mobile-lockcheck:
+	@cd mobile && flutter pub get --enforce-lockfile
 
 mobile-analyze:
 	@cd mobile && flutter analyze
@@ -371,12 +426,17 @@ ci-help:
 	@echo "  make ci                    - Run CI checks for changed surfaces only (pre-push)"
 	@echo "  make ci-all                - Run every surface (what CI does on dev/main)"
 	@echo ""
-	@echo "  make ci-backend            - Backend CI (lint + tests + analyzers + vuln + build)"
-	@echo "  make ci-frontend-admin     - Admin SPA CI (typecheck + lint + tests + build + audit)"
-	@echo "  make ci-frontend-client    - Client SPA CI (typecheck + lint + build)"
-	@echo "  make ci-mobile             - Flutter CI (analyze + test)"
+	@echo "  make ci-backend            - Backend CI (lint + tests + analyzers + vuln + coverage + build)"
+	@echo "  make ci-frontend-admin     - Admin SPA CI (lockfile + typecheck + lint + tests + build + audit)"
+	@echo "  make ci-frontend-client    - Client SPA CI (lockfile + typecheck + lint + build)"
+	@echo "  make ci-mobile             - Flutter CI (lockfile + analyze + test)"
 	@echo "  make ci-mcp                - Shared Claude Code/Codex MCP config check"
 	@echo "  make mcp-check             - Verify project MCP definitions are in sync"
 	@echo ""
+	@echo "  make admin-lockcheck       - Is frontend-admin/package-lock.json in sync? (no install)"
+	@echo "  make client-lockcheck      - Same for frontend-client"
+	@echo "  make mobile-lockcheck      - Same for mobile/pubspec.lock"
+	@echo ""
 	@echo "Scope detection uses BASE_REF (default: origin/dev)."
 	@echo "  BASE_REF=origin/main make ci"
+	@echo "  COVERAGE_THRESHOLD=25 make ci-backend   (default: $(COVERAGE_THRESHOLD))"
