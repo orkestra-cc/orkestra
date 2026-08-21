@@ -163,6 +163,9 @@ func inspectFile(fset *token.FileSet, f *ast.File, report func(pos token.Pos, ru
 		if containsErrorText(detail) {
 			report(call.Pos(), "R1", "the underlying error's text reaches the client — log err, return a written sentence")
 		}
+		if isEmptyDetail(detail) {
+			report(call.Pos(), "R2", "the detail says nothing the status code did not — name what failed and what the caller can do")
+		}
 		return true
 	})
 }
@@ -187,6 +190,23 @@ func containsErrorText(e ast.Expr) bool {
 	return found
 }
 
+// isEmptyDetail reports whether the expression is a string literal whose
+// content is in emptyDetails, compared case-insensitively with surrounding
+// whitespace and trailing punctuation removed.
+func isEmptyDetail(e ast.Expr) bool {
+	lit, isLit := e.(*ast.BasicLit)
+	if !isLit || lit.Kind != token.STRING {
+		return false
+	}
+	s, err := strconv.Unquote(lit.Value)
+	if err != nil {
+		return false
+	}
+	s = strings.ToLower(strings.TrimSpace(s))
+	s = strings.TrimRight(s, ".!…")
+	return emptyDetails[s]
+}
+
 var (
 	baselineOnce sync.Once
 	baselineSet  map[string]bool
@@ -203,4 +223,3 @@ var _ = bufio.NewScanner
 var _ = os.Open
 var _ = filepath.ToSlash
 var _ = fmt.Sprintf
-var _ = emptyDetails

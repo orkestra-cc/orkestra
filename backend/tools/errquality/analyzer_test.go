@@ -71,3 +71,33 @@ func f(err error) error {
 		t.Fatalf("want [R1], got %v", got)
 	}
 }
+
+func TestR2_FlagsEmptyDetail(t *testing.T) {
+	src := `package h
+func f() error {
+	return huma.Error400BadRequest("Request failed")
+}`
+	if got := findings(t, src); len(got) != 1 || got[0] != "R2" {
+		t.Fatalf("want [R2], got %v", got)
+	}
+}
+
+func TestR2_IsCaseAndPunctuationInsensitive(t *testing.T) {
+	src := `package h
+func f() error {
+	return huma.Error500InternalServerError("Something went wrong.")
+}`
+	if got := findings(t, src); len(got) != 1 || got[0] != "R2" {
+		t.Fatalf("want [R2], got %v", got)
+	}
+}
+
+func TestR2_AllowsASentenceThatNamesTheCause(t *testing.T) {
+	src := `package h
+func f() error {
+	return huma.Error503ServiceUnavailable("Email delivery is not configured — contact an administrator.")
+}`
+	if got := findings(t, src); len(got) != 0 {
+		t.Fatalf("want no findings, got %v", got)
+	}
+}
