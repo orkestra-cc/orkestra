@@ -14,6 +14,7 @@ import PageHeader from 'components/common/PageHeader';
 import StatCard from 'components/common/StatCard';
 import SectionCard from 'components/common/SectionCard';
 import { Col, Row, Table } from 'react-bootstrap';
+import { Link } from 'react-router';
 
 // StatCards is the Orkestra reference showcase for the shared ERP-style KPI
 // tile (StatCard) and its companion titled panel (SectionCard) — the canonical
@@ -116,6 +117,39 @@ const loadingCode = `
       color="primary"
       subtitle="Recorded total"
       loading
+    />
+  </Col>
+</Row>
+`;
+
+const footerCode = `
+<Row className="g-3">
+  <Col md={6} lg={4}>
+    <StatCard
+      title="Audit Rows (24h)"
+      value={8}
+      icon={faClipboardList}
+      color="primary"
+      footer={
+        <Link to="/admin/compliance" className="fw-semibold fs-10 text-nowrap">
+          View all
+        </Link>
+      }
+    />
+  </Col>
+  <Col md={6} lg={4}>
+    <StatCard
+      title="Failed Logins (24h)"
+      value={3}
+      icon={faTriangleExclamation}
+      color="danger"
+      accent="danger"
+      badge={{ text: 'Review' }}
+      footer={
+        <Link to="/admin/compliance" className="fw-semibold fs-10 text-nowrap">
+          Investigate
+        </Link>
+      }
     />
   </Col>
 </Row>
@@ -232,6 +266,33 @@ const StatCards = () => {
           code={loadingCode}
           language="jsx"
           scope={{ StatCard, Row, Col, faClipboardList }}
+        />
+      </OrkestraComponentCard>
+
+      <OrkestraComponentCard>
+        <OrkestraComponentCard.Header
+          title="Drill-down footer"
+          light={false}
+        >
+          <p className="mb-0">
+            Pass <code>footer</code> for a link to the page the metric counts.
+            It renders full-width under the value, so it keeps its label on a
+            narrow column instead of being squeezed beside the icon. A tile
+            whose metric has no page to drill into simply omits it — never
+            point one at a list the rows provably are not in.
+          </p>
+        </OrkestraComponentCard.Header>
+        <OrkestraComponentCard.Body
+          code={footerCode}
+          language="jsx"
+          scope={{
+            StatCard,
+            Row,
+            Col,
+            Link,
+            faClipboardList,
+            faTriangleExclamation
+          }}
         />
       </OrkestraComponentCard>
 

@@ -19,12 +19,18 @@ import { BadgeColor } from 'components/common/SubtleBadge';
 // icon (and is the ribbon's fallback hue).
 export interface StatCardProps {
   title: string;
-  value: number | string;
+  /** ReactNode, not just number|string, so a call site can animate the figure
+   *  (CountUp) or unit-annotate it without reimplementing the tile. */
+  value: ReactNode;
   icon: IconProp;
   color: BadgeColor;
   /** Status hue for the accent edge — pass only when the state earns it. */
   accent?: BadgeColor;
   subtitle?: ReactNode;
+  /** Drill-down slot under the value — normally a Link to the page this
+   *  metric counts. Its absence is what used to force a dashboard whose
+   *  tiles all drill down into a bespoke copy of this component. */
+  footer?: ReactNode;
   badge?: { text: string; bg?: BadgeColor };
   loading?: boolean;
 }
@@ -36,6 +42,7 @@ const StatCard = ({
   color,
   accent,
   subtitle,
+  footer,
   badge,
   loading
 }: StatCardProps) => (
@@ -66,6 +73,10 @@ const StatCard = ({
           <FontAwesomeIcon icon={icon} size="3x" className="opacity-75" />
         </div>
       </div>
+      {/* Full width under the flex row, not inside the left column: a
+          drill-down link belongs to the whole tile, and nesting it beside the
+          icon squeezed it to a couple of characters on a narrow column. */}
+      {footer && <div className="mt-3">{footer}</div>}
     </Card.Body>
   </Card>
 );
