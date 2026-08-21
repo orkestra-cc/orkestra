@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	"github.com/orkestra/backend/internal/core/auth/models"
 )
 
 // The cap and the session-retention window are coupled: retention must
@@ -13,9 +15,9 @@ import (
 // turning an expired session into a compatibility miss. Changing either
 // constant must break the build. ADR-0017 D7.
 func TestSessionAbsoluteTTLLeavesRetentionMargin(t *testing.T) {
-	if MaxSessionAbsoluteTTL+SessionRetentionSafetyMargin > AuthSessionRetention {
+	if MaxSessionAbsoluteTTL+SessionRetentionSafetyMargin > models.AuthSessionRetention {
 		t.Fatalf("cap %v + margin %v exceeds retention %v — retention could delete a live session's anchor",
-			MaxSessionAbsoluteTTL, SessionRetentionSafetyMargin, AuthSessionRetention)
+			MaxSessionAbsoluteTTL, SessionRetentionSafetyMargin, models.AuthSessionRetention)
 	}
 	if SessionRetentionSafetyMargin <= 0 {
 		t.Fatal("the margin must be positive; equality races Mongo's TTL monitor at the cap boundary")

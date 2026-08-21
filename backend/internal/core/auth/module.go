@@ -711,9 +711,14 @@ func (m *AuthModule) Collections() []module.CollectionSpec {
 		}},
 		{Name: models.OperatorSessionsCollection, Indexes: []module.IndexSpec{
 			{Keys: map[string]int{"uuid": 1}, Unique: true},
+			// expiresAt is the retention deadline, so ExpireAt (delete AT
+			// the timestamp) is the exact expression of the intent —
+			// not TTL, which would add a second offset on top. ADR-0017 D7.
+			{Keys: map[string]int{"expiresAt": 1}, ExpireAt: true},
 		}},
 		{Name: models.ClientSessionsCollection, Indexes: []module.IndexSpec{
 			{Keys: map[string]int{"uuid": 1}, Unique: true},
+			{Keys: map[string]int{"expiresAt": 1}, ExpireAt: true},
 		}},
 		{Name: models.OperatorEmailTokensCollection, Indexes: []module.IndexSpec{
 			{Keys: map[string]int{"uuid": 1}, Unique: true},

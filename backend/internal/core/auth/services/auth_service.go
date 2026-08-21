@@ -1256,7 +1256,7 @@ func (s *authService) GenerateEnhancedTokenPair(ctx context.Context, user *iface
 		IsActive:     true,
 		StartedAt:    now,
 		LastActivity: now,
-		ExpiresAt:    now.Add(AuthSessionRetention),
+		ExpiresAt:    now.Add(models.AuthSessionRetention),
 		LoginMethod:  "oauth",
 		DeviceInfo:   *device,
 		IPAddress:    ipAddress,

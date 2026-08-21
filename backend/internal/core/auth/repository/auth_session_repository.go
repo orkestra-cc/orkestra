@@ -37,7 +37,6 @@ type AuthSessionRepository interface {
 	ExpireSessionForMaxAge(ctx context.Context, uuid string) (bool, error)
 	TerminateSessionByDevice(ctx context.Context, userUUID, deviceID string) error
 	TerminateAllUserSessions(ctx context.Context, userUUID string) error
-	TerminateExpiredSessions(ctx context.Context) (int64, error)
 	// DeleteAllByUser hard-deletes every session row for the user. Used
 	// by the GDPR DSR right-to-erasure pipeline — TerminateAllUserSessions
 	// only flips isActive, erasure requires the rows to be gone.
@@ -70,6 +69,12 @@ type AuthSessionRepository interface {
 	// prior session was already revoked.
 	GetMostRecentSessionByUser(ctx context.Context, userUUID string) (*models.AuthSessionDoc, error)
 }
+
+// sessionRetentionFallback backstops CreateSession when the caller left
+// ExpiresAt zero. It must equal the value the callers write: with a TTL
+// index on the field, a disagreement deletes rows early rather than
+// merely reading oddly.
+const sessionRetentionFallback = models.AuthSessionRetention
 
 type SessionStats struct {
 	TotalSessions    int64                      `json:"totalSessions"`
@@ -164,9 +169,9 @@ func (r *authSessionRepository) CreateSession(ctx context.Context, session *mode
 		return fmt.Errorf("device ID is required")
 	}
 
-	// Set default expiration (30 days)
+	// Fall back to the same retention deadline every caller writes.
 	if session.ExpiresAt.IsZero() {
-		session.ExpiresAt = now.Add(30 * 24 * time.Hour)
+		session.ExpiresAt = now.Add(sessionRetentionFallback)
 	}
 
 	_, err := r.collection.InsertOne(ctx, session)
@@ -420,26 +425,6 @@ func (r *authSessionRepository) TerminateAllUserSessions(ctx context.Context, us
 	}
 
 	return nil
-}
-
-func (r *authSessionRepository) TerminateExpiredSessions(ctx context.Context) (int64, error) {
-	filter := bson.M{
-		"isActive":  true,
-		"expiresAt": bson.M{"$lt": time.Now()},
-	}
-	update := bson.M{
-		"$set": bson.M{
-			"isActive":  false,
-			"updatedAt": time.Now(),
-		},
-	}
-
-	result, err := r.collection.UpdateMany(ctx, filter, update)
-	if err != nil {
-		return 0, fmt.Errorf("failed to terminate expired sessions: %w", err)
-	}
-
-	return result.ModifiedCount, nil
 }
 
 func (r *authSessionRepository) GetSessionStats(ctx context.Context, userUUID string) (*SessionStats, error) {

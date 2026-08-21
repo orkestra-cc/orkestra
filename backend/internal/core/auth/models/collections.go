@@ -121,6 +121,17 @@ const (
 	RevokeReasonSessionMaxAge = "session_max_age"
 )
 
+// AuthSessionRetention is how long a session DOCUMENT is kept. It is a
+// RETENTION deadline, not an auth gate: the row is audit and device
+// history that the risk scorer reads, and nothing authenticates off it.
+// The session's authentication lifetime is bounded separately by
+// sessionAbsoluteTTL (ADR-0017 D1), which is capped a full day below this
+// value so retention can never delete the anchor of a live session.
+//
+// It lives in models rather than services because the repository writes
+// the same deadline the services do and cannot import services.
+const AuthSessionRetention = 90 * 24 * time.Hour
+
 // AuthSessionDoc represents a document in the auth_sessions collection
 type AuthSessionDoc struct {
 	ID   primitive.ObjectID `bson:"_id,omitempty" json:"-"`
