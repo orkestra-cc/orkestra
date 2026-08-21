@@ -114,7 +114,7 @@ lifecycle.** Six endpoints under `/v1/admin/service-accounts` cover create,
 list, get, update (rename/enable/disable), issue/rotate credential, and
 revoke credential. Read endpoints require `auth.service_accounts.read`;
 every mutating endpoint requires `auth.service_accounts.manage` plus a fresh
-(<5 minute) step-up MFA proof, matching the step-up bar already applied to
+(under 5 minutes) step-up MFA proof, matching the step-up bar already applied to
 every other secret-revealing or destructive admin mutation in this module.
 Both permission keys are system-flagged. This ADR covers the admin REST
 surface; a corresponding admin console page is a separate, later delivery
