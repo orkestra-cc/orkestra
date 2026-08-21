@@ -180,13 +180,26 @@ func inspectFile(fset *token.FileSet, f *ast.File, report func(pos token.Pos, ru
 				continue
 			}
 			ast.Inspect(clause, func(inner ast.Node) bool {
-				call, isCall := inner.(*ast.CallExpr)
-				if !isCall {
+				// A nested switch judges its own default on its own merits —
+				// the outer walk visits it independently. Descending here
+				// would both misattribute a nested mapper's legitimate 4xx
+				// to this default and double-report it under its own line.
+				if _, isNestedSwitch := inner.(*ast.SwitchStmt); isNestedSwitch {
+					return false
+				}
+				ret, isReturn := inner.(*ast.ReturnStmt)
+				if !isReturn {
 					return true
 				}
-				if _, status, ok := detailArg(call); ok && status >= 400 && status < 500 {
-					report(call.Pos(), "R3",
-						"an error this function could not name is a server fault — return 5xx, not a status that blames the caller")
+				for _, result := range ret.Results {
+					call, isCall := result.(*ast.CallExpr)
+					if !isCall {
+						continue
+					}
+					if _, status, ok := detailArg(call); ok && status >= 400 && status < 500 {
+						report(call.Pos(), "R3",
+							"an error this function could not name is a server fault — return 5xx, not a status that blames the caller")
+					}
 				}
 				return true
 			})

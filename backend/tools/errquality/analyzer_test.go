@@ -157,3 +157,40 @@ func pick(kind string) error {
 		t.Fatalf("want no findings, got %v", got)
 	}
 }
+
+func TestR3_IgnoresNestedSwitchInsideDefault(t *testing.T) {
+	src := `package h
+func mapErr(err error) error {
+	switch {
+	case errors.Is(err, ErrInvalidCredentials):
+		return huma.Error401Unauthorized("Invalid email or password")
+	default:
+		switch {
+		case errors.Is(err, ErrTargetKindUnknown):
+			return huma.Error400BadRequest("Unknown target kind")
+		default:
+			return errcode.Internal(errcode.AuthUnavailable, "Sign-in is temporarily unavailable.")
+		}
+	}
+}`
+	if got := findings(t, src); len(got) != 0 {
+		t.Fatalf("want no findings, got %v", got)
+	}
+}
+
+func TestR3_IgnoresUnreturnedClientErrorInDefault(t *testing.T) {
+	src := `package h
+func mapErr(err error) error {
+	switch {
+	case errors.Is(err, ErrInvalidCredentials):
+		return huma.Error401Unauthorized("Invalid email or password")
+	default:
+		candidate := huma.Error400BadRequest("Unrecognized failure mode")
+		slog.Default().Warn("mapErr", slog.Any("candidate", candidate))
+		return errcode.Internal(errcode.AuthUnavailable, "Sign-in is temporarily unavailable.")
+	}
+}`
+	if got := findings(t, src); len(got) != 0 {
+		t.Fatalf("want no findings, got %v", got)
+	}
+}
