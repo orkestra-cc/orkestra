@@ -55,11 +55,29 @@ const (
 	rapidWindow = 5 * time.Minute
 
 	// historyLookback bounds the count queries so an account with years
-	// of history doesn't scan the whole collection on every login. Six
-	// months is long enough to cover seasonal travel and short enough
-	// that a device retired >6m ago reads as new (intended — stale
+	// of history doesn't scan the whole collection on every login, and
+	// deliberately lets a long-retired device read as new (stale
 	// fingerprints shouldn't whitelist a returning attacker).
-	historyLookback = 180 * 24 * time.Hour
+	//
+	// It was six months, chosen to cover seasonal travel. It cannot be
+	// that any more: ADR-0017 D7 put a TTL index on both session
+	// collections keyed on `expiresAt`, which every login sets to
+	// AuthSessionRetention (90 days) out, and
+	// CountSessionsByUserAndFingerprint / ...ByIP filter on
+	// `createdAt >= since` with no isActive or expiresAt predicate — they
+	// count session ROWS. Past the retention boundary there are no rows
+	// to count, so a 180-day window silently degraded into "90 days, and
+	// the extra 90 always return zero", which reads as "never seen
+	// before" and is exactly the false positive the window exists to
+	// avoid. Pinning it to the retention constant makes the query window
+	// and the data's actual lifetime the same number by construction, so
+	// changing retention can never re-open the gap.
+	//
+	// The behaviour change is real and recorded in ADR-0017's
+	// Consequences: a device last seen between 90 and 180 days ago now
+	// scores as new. It was ALREADY doing so once the index shipped; this
+	// only stops the code claiming otherwise.
+	historyLookback = models.AuthSessionRetention
 
 	// impossibleTravelMinDistanceKm is the minimum great-circle distance
 	// between the two login locations before the factor considers

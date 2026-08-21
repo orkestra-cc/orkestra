@@ -181,6 +181,18 @@ schema governed by ADR-0002.
   implementation detail.** Three lifetimes — access token, idle window, and
   absolute cap — are now separately nameable, and the idle window is documented as
   being the refresh TTL rather than an independent control.
+- **The login risk scorer's history window shortens from 180 days to 90.** Its
+  device-fingerprint and IP factors count session rows, and D7's TTL index
+  means no session row survives past the 90-day retention window, so the
+  second half of a six-month lookback could only ever return zero. The window
+  is pinned to `models.AuthSessionRetention` rather than left claiming a depth
+  the data no longer has. The consequence is that a device or IP last seen
+  more than 90 days ago now scores as new, raising risk scores and producing
+  more suspicious-login mail and step-up prompts for genuinely returning
+  users; on an upgraded installation the window is effectively shorter still
+  until legacy rows written with a 30-day deadline age out. Deployments that
+  need a longer baseline must lengthen retention, not the lookback — the two
+  are now the same number by construction.
 
 ## Alternatives considered
 
