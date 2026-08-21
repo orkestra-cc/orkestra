@@ -13,7 +13,7 @@ The canonical architecture description lives in the project's `CLAUDE.md` hierar
 - `/CLAUDE.md` — project overview, two-tier tenancy, module map.
 - `/backend/CLAUDE.md` — module system mechanics, registry, profile builds.
 - `/backend/internal/<module>/CLAUDE.md` — per-module specifics where present (notification, billing, documents, graph, rag, agents, aimodels, company, subscriptions, payments, …).
-- `/docs/Authentication_flow.md` — auth/RBAC details.
+- `/docs/site/architecture/authentication-flow.mdx` — auth/RBAC details (canonical; `docs/Authentication_flow.md` is a drifted duplicate).
 
 If a module has its own `CLAUDE.md`, **that doc wins** over anything in this skill.
 

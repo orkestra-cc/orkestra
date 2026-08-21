@@ -856,7 +856,7 @@ mongodump --uri="mongodb://user:pass@prod-mongo/orkestra_prod" --out=/backups/$(
 
 ## Additional Resources
 
-- [Authentication Flow Documentation](./Authentication_flow.md)
+- [Authentication Flow Documentation](./site/architecture/authentication-flow.mdx)
 - [Backend Module Documentation](../backend/CLAUDE.md)
 - [Frontend Module Documentation](../frontend-admin/CLAUDE.md)
 - [Docker Module Documentation](../docker/CLAUDE.md)

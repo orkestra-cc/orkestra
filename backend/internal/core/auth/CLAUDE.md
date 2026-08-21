@@ -485,4 +485,4 @@ Everything else (`services.AuthService`, `services.JWTService`, `services.Passwo
 - [`../authz/CLAUDE.md`](../authz/CLAUDE.md) — consumed via `AuthzProvider` for permission checks in middleware
 - [`../notification/CLAUDE.md`](../notification/CLAUDE.md) — optional dependency for verification + reset emails
 - [`../../shared/middleware/auth.go`](../../shared/middleware/auth.go) — JWT validation, `RequirePermission`, `RequireGlobal`
-- [`../../../../docs/Authentication_flow.md`](../../../../docs/Authentication_flow.md) — high-level walkthrough of the flows
+- [`../../../../docs/site/architecture/authentication-flow.mdx`](../../../../docs/site/architecture/authentication-flow.mdx) — high-level walkthrough of the flows
