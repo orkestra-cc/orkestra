@@ -116,6 +116,15 @@ docker compose -f docker-compose.dev.yml --env-file .env up -d
 ORKESTRA_API_URL=http://localhost:3000 ./scripts/devtoken.sh administrator
 ```
 
+> **`localhost` assumes `HOST_BIND_ADDRESS=0.0.0.0`** — its default, and what
+> `docker/.env.example` ships. The compose files publish the browser-facing
+> ports on that address, so a host that pins it to a single interface (e.g. a
+> VM serving the stack over a Tailscale IP) is reachable *only* there — and the
+> failure is easy to misread: `curl` gets a connection refusal, and although
+> `devtoken.sh` exits non-zero, the `T=$(…)` idiom discards that, leaving an
+> empty token and a puzzling 401. Substitute that address for `localhost`, or
+> derive it with `sed -n 's/^HOST_BIND_ADDRESS=//p' docker/.env`.
+
 One infra base + one app file per environment (`docker-compose.{dev,staging,prod}.yml`), plus an opt-in `docker-compose.observability.yml` overlay (ADR-0005). The dev backend builds `docker/Dockerfile.dev-backend` (golang:alpine, AIR pre-baked; override the base via the `GO_BASE` build-arg for a Chainguard image). The notification module boots in `noop` mode by default — verification and password-reset emails are logged to the backend stdout rather than delivered. To send real mail, configure SMTP at `/admin/modules` after first login.
 
 ## Assistant Rules
