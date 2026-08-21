@@ -12,8 +12,10 @@ import {
 import OrkestraComponentCard from 'components/common/OrkestraComponentCard';
 import PageHeader from 'components/common/PageHeader';
 import StatCard from 'components/common/StatCard';
+import StatCardPair from 'components/common/StatCardPair';
 import SectionCard from 'components/common/SectionCard';
 import { Col, Row, Table } from 'react-bootstrap';
+import { Link } from 'react-router';
 
 // StatCards is the Orkestra reference showcase for the shared ERP-style KPI
 // tile (StatCard) and its companion titled panel (SectionCard) — the canonical
@@ -121,6 +123,66 @@ const loadingCode = `
 </Row>
 `;
 
+const footerCode = `
+<Row className="g-3">
+  <Col md={6} lg={4}>
+    <StatCard
+      title="Audit Rows (24h)"
+      value={8}
+      icon={faClipboardList}
+      color="primary"
+      footer={
+        <Link to="/admin/compliance" className="fw-semibold fs-10 text-nowrap">
+          View all
+        </Link>
+      }
+    />
+  </Col>
+  <Col md={6} lg={4}>
+    <StatCard
+      title="Failed Logins (24h)"
+      value={3}
+      icon={faTriangleExclamation}
+      color="danger"
+      accent="danger"
+      badge={{ text: 'Review' }}
+      footer={
+        <Link to="/admin/compliance" className="fw-semibold fs-10 text-nowrap">
+          Investigate
+        </Link>
+      }
+    />
+  </Col>
+</Row>
+`;
+
+const pairCode = `
+<Row className="g-3">
+  <Col md={6} lg={4}>
+    <StatCardPair
+      title="Access Reviews (30d)"
+      halves={[
+        {
+          title: 'Granted',
+          value: 12,
+          icon: faUserLock,
+          color: 'success',
+          footer: <Link to="/admin/roles" className="fw-semibold fs-10 text-nowrap">View all</Link>
+        },
+        {
+          title: 'Revoked',
+          value: 3,
+          icon: faUserSlash,
+          color: 'danger',
+          badge: { text: '1 pending' },
+          footer: <Link to="/admin/roles" className="fw-semibold fs-10 text-nowrap">View all</Link>
+        }
+      ]}
+    />
+  </Col>
+</Row>
+`;
+
 const sectionCardCode = `
 <SectionCard icon={faShieldHalved} title="CC6.1 · Logical Access">
   <Table size="sm" className="mb-0 fs-10">
@@ -145,7 +207,7 @@ const StatCards = () => {
     <>
       <PageHeader
         title="Stat Cards"
-        description="The Orkestra ERP-style KPI tile (StatCard) and its companion titled panel (SectionCard) — the canonical summary-row and section primitives for admin dashboards. A 4px left accent edge (neutral at rest, colored only when the state earns it), a large faded 3x icon, a big headline value, an optional subtitle, and an attention flag rendered as a diagonal corner ribbon."
+        description="The Orkestra ERP-style KPI tile (StatCard) and its companion titled panel (SectionCard) — the canonical summary-row and section primitives for admin dashboards. A 4px left accent edge (neutral at rest, colored only when the state earns it), a faded 2x icon anchored bottom-right and kept quieter than the datum it labels, a big headline value, an optional subtitle, an optional drill-down footer, and an attention flag rendered as a diagonal corner ribbon."
         className="mb-3"
       />
 
@@ -232,6 +294,63 @@ const StatCards = () => {
           code={loadingCode}
           language="jsx"
           scope={{ StatCard, Row, Col, faClipboardList }}
+        />
+      </OrkestraComponentCard>
+
+      <OrkestraComponentCard>
+        <OrkestraComponentCard.Header
+          title="Drill-down footer"
+          light={false}
+        >
+          <p className="mb-0">
+            Pass <code>footer</code> for a link to the page the metric counts.
+            It is pinned to the bottom of the text column, so a row of tiles
+            shares one link line however tall their values and subtitles run.
+            A tile whose metric has no page to drill into simply omits it —
+            never point one at a list the rows provably are not in.
+          </p>
+        </OrkestraComponentCard.Header>
+        <OrkestraComponentCard.Body
+          code={footerCode}
+          language="jsx"
+          scope={{
+            StatCard,
+            Row,
+            Col,
+            Link,
+            faClipboardList,
+            faTriangleExclamation
+          }}
+        />
+      </OrkestraComponentCard>
+
+      <OrkestraComponentCard>
+        <OrkestraComponentCard.Header
+          title="StatCardPair — two metrics, one tile"
+          light={false}
+        >
+          <p className="mb-0">
+            <code>StatCardPair</code> carries a pair of figures an operator
+            reads <em>against each other</em> — issued vs received, granted vs
+            revoked. Two unrelated metrics belong in two{' '}
+            <code>StatCard</code>s instead, where each gets its own accent edge
+            and ribbon. It shares this tile's visual language so the two sit in
+            one KPI row without reading as different components, and it drops
+            the large icon entirely: each half carries its own, and a third
+            would be the tallest thing in the card.
+          </p>
+          <p className="mb-0 mt-2">
+            One deliberate divergence: the corner ribbon is a{' '}
+            <strong>card-level</strong> element, so a two-metric card would
+            need two of them overlapping in the same corner. A half raises its
+            flag as an inline pill instead — if a metric needs the ribbon's
+            weight, it needs its own <code>StatCard</code>.
+          </p>
+        </OrkestraComponentCard.Header>
+        <OrkestraComponentCard.Body
+          code={pairCode}
+          language="jsx"
+          scope={{ StatCardPair, Row, Col, Link, faUserLock, faUserSlash }}
         />
       </OrkestraComponentCard>
 

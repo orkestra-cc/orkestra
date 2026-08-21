@@ -85,20 +85,3 @@ func (m *NavigationModule) RegisterRoutes(ri *module.RouteInfo) {
 	})
 }
 
-// NavItems adds a single entry in the platform realm so operators can
-// reach the navigation admin page from the sidebar. Kept here rather
-// than on a fake "Modules" parent so it shows up beside Log levels under
-// Administration.
-func (m *NavigationModule) NavItems() []module.NavItemSpec {
-	return []module.NavItemSpec{
-		{
-			Realm:   "platform",
-			Tier:    "internal",
-			Name:    "Navigation",
-			Icon:    "list-ul",
-			Path:    "/admin/modules/navigation",
-			MinRole: "administrator",
-			Active:  true,
-		},
-	}
-}

@@ -47,6 +47,13 @@ repos:
   # --- Go (local hooks — use the mise-installed gofmt) ---------------------
   - repo: local
     hooks:
+      - id: mcp-config-sync
+        name: shared MCP configuration sync
+        entry: python3 scripts/check-mcp-sync.py
+        language: system
+        files: ^(\.mcp\.json|\.codex/config\.toml|scripts/(check|test)-mcp-sync\.py)$
+        pass_filenames: false
+
       - id: gofmt
         name: gofmt
         entry: gofmt -w -l
