@@ -31,7 +31,7 @@ func (m *NotificationModule) Description() string {
 func (m *NotificationModule) Category() module.ModuleCategory { return module.CategoryCore }
 
 func (m *NotificationModule) ProvidedServices() []module.ServiceKey {
-	return []module.ServiceKey{module.ServiceNotificationSender}
+	return []module.ServiceKey{module.ServiceNotificationSender, module.ServiceNotificationTemplateSeeder}
 }
 
 func (m *NotificationModule) Permissions() []iface.PermissionSpec {
@@ -149,6 +149,8 @@ func (m *NotificationModule) ConfigSchema() []module.ConfigField {
 		{Key: "email.reply_to", Label: "Reply-To address", Group: "sender", Type: module.FieldString, EnvVar: "NOTIFICATION_EMAIL_REPLY_TO"},
 		{Key: "app.name", Label: "App name (in templates)", Group: "branding", Type: module.FieldString, Default: "Orkestra", EnvVar: "APP_NAME"},
 		{Key: "app.support_email", Label: "Support email (in templates)", Group: "branding", Type: module.FieldString, EnvVar: "SUPPORT_EMAIL"},
+		{Key: "app.default_locale", Label: "Default template locale", Group: "branding", Type: module.FieldEnum, Options: models.SupportedLocales, Default: "en", EnvVar: "NOTIFICATION_DEFAULT_LOCALE",
+			Description: "Language used when a caller does not name one. Template lookup has no locale fallback, so this must name a locale that has seeded templates — callers that resolve a locale per recipient are unaffected."},
 	}
 }
 
@@ -204,6 +206,15 @@ func (m *NotificationModule) Init(deps *module.Dependencies) error {
 	}
 	supportEmail := deps.GetConfig("notification", "app.support_email")
 
+	// Template lookup is exact on (templateID, locale) with no fallback, so a
+	// default naming a locale without seeded templates fails every send that
+	// does not carry an explicit one — and only logs. Hence the enum over
+	// SupportedLocales rather than a free string.
+	defaultLocale := deps.GetConfig("notification", "app.default_locale")
+	if defaultLocale == "" {
+		defaultLocale = "en"
+	}
+
 	m.svc = services.NewNotificationService(
 		logRepo,
 		tmplService,
@@ -215,13 +226,15 @@ func (m *NotificationModule) Init(deps *module.Dependencies) error {
 			AppName:       appName,
 			SupportEmail:  supportEmail,
 			URLBuilder:    urlBuilder,
-			DefaultLocale: "en",
+			DefaultLocale: defaultLocale,
 		},
 	)
 
 	m.handler = handlers.NewNotificationHandler(m.svc)
 
 	deps.Services.Register(module.ServiceNotificationSender, m.svc)
+	deps.Services.Register(module.ServiceNotificationTemplateSeeder,
+		module.NotificationTemplateSeeder(m.svc.TemplateService()))
 	return nil
 }
 

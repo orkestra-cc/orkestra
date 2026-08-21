@@ -1,6 +1,7 @@
 package module
 
 import (
+	"context"
 	"fmt"
 	"sync"
 )
@@ -215,7 +216,25 @@ const (
 	// LogLevelService to render the admin view's "row per module"
 	// section. Value: []string.
 	ServiceLogLevelModuleNames ServiceKey = "logging.module_names"
+
+	// ServiceNotificationTemplateSeeder is implemented by the notification
+	// module and consumed by the registry to seed templates declared by
+	// modules through HasNotificationTemplates — without the notification
+	// module (or the registry) importing any addon. Value:
+	// NotificationTemplateSeeder.
+	ServiceNotificationTemplateSeeder ServiceKey = "notification.template_seeder"
 )
+
+// NotificationTemplateSeeder is implemented by the notification module and
+// consumed by the registry to seed module-declared templates.
+//
+// This contract lives here rather than in pkg/sdk/iface because it takes a
+// []NotificationTemplateSpec: iface would have to import module for that
+// type, and module already imports iface (PermissionsOf returns
+// []iface.PermissionSpec) — the reverse import would be a cycle.
+type NotificationTemplateSeeder interface {
+	SeedModuleTemplates(ctx context.Context, specs []NotificationTemplateSpec) error
+}
 
 // ServiceRegistry is a typed key-value store for cross-module service sharing.
 // Producer modules register their services during Init(); consumer modules

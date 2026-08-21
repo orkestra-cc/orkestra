@@ -293,4 +293,280 @@ You will still receive security-related emails.`,
 </body>
 </html>`,
 	},
+	{
+		TemplateID:  models.CategoryAuthVerifyEmail,
+		Locale:      "it",
+		Subject:     "Verifica il suo indirizzo email {{.AppName}}",
+		Description: "Sent on signup to confirm the user's email address.",
+		Variables:   []string{"AppName", "UserName", "VerifyURL", "ExpiresIn", "SupportEmail", "UnsubscribeURL", "PreferencesURL"},
+		BodyText: `Gentile {{.UserName}},
+
+Le diamo il benvenuto su {{.AppName}}. La invitiamo a verificare il suo indirizzo email seguendo il link qui sotto:
+
+{{.VerifyURL}}
+
+Il link scade tra {{.ExpiresIn}}.
+
+Se non ha creato lei questo account, può ignorare questo messaggio in tutta sicurezza.
+
+Serve aiuto? Contatti {{.SupportEmail}}.
+
+— Il team di {{.AppName}}
+
+---
+Ha ricevuto questo messaggio perché è stato creato un account con questo indirizzo email.
+Gestisci le preferenze: {{.PreferencesURL}}
+Annulla l'iscrizione alle comunicazioni di marketing: {{.UnsubscribeURL}}
+Continuerà comunque a ricevere le email relative alla sicurezza.`,
+		BodyHTML: `<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>Verifica la sua email</title></head>
+<body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:560px;margin:0 auto;padding:32px 24px;color:#333;">
+  <h2 style="color:#2c3e50;">Le diamo il benvenuto su {{.AppName}}</h2>
+  <p>Gentile {{.UserName}},</p>
+  <p>La invitiamo a confermare il suo indirizzo email per completare la configurazione dell'account.</p>
+  <p style="margin:32px 0;">
+    <a href="{{.VerifyURL}}" style="background:#2c7be5;color:#fff;padding:12px 24px;text-decoration:none;border-radius:4px;display:inline-block;font-weight:600;">Verifica email</a>
+  </p>
+  <p style="color:#6c757d;font-size:14px;">Il link scade tra {{.ExpiresIn}}.</p>
+  <p style="color:#6c757d;font-size:14px;">Se il pulsante non funziona, copi e incolli questo indirizzo nel browser:<br><span style="word-break:break-all;">{{.VerifyURL}}</span></p>
+  <p style="color:#6c757d;font-size:14px;">Se non ha creato lei questo account, può ignorare questo messaggio in tutta sicurezza.</p>
+  <hr style="border:none;border-top:1px solid #e0e0e0;margin:32px 0;">
+  <p style="color:#9ca3af;font-size:12px;">Ha ricevuto questo messaggio perché è stato creato un account con questo indirizzo email.<br>
+  <a href="{{.PreferencesURL}}" style="color:#9ca3af;">Gestisci le preferenze</a> &middot;
+  <a href="{{.UnsubscribeURL}}" style="color:#9ca3af;">Annulla l'iscrizione alle comunicazioni di marketing</a><br>
+  Continuerà comunque a ricevere le email relative alla sicurezza.</p>
+</body>
+</html>`,
+	},
+	{
+		TemplateID:  models.CategoryAuthSuspiciousLogin,
+		Locale:      "it",
+		Subject:     "Accesso sospetto al suo account {{.AppName}}",
+		Description: "Sent when the risk scorer flags a login at or above the high bucket (>= 0.5).",
+		Variables:   []string{"AppName", "UserName", "LoginAt", "LoginIP", "LoginDevice", "LoginLocation", "RiskLevel", "RiskFactors", "AccountActivityURL", "SupportEmail", "UnsubscribeURL", "PreferencesURL"},
+		BodyText: `Gentile {{.UserName}},
+
+Abbiamo rilevato un accesso al suo account {{.AppName}} che ci è sembrato insolito.
+
+Quando:      {{.LoginAt}}
+Da:          {{.LoginIP}}{{if .LoginLocation}} ({{.LoginLocation}}){{end}}
+Dispositivo: {{.LoginDevice}}
+Rischio:     {{.RiskLevel}}{{if .RiskFactors}} — {{.RiskFactors}}{{end}}
+
+Se è stato lei, non è necessaria alcuna azione.
+
+Se NON riconosce questo accesso:
+  1. Cambi subito la password su {{.AccountActivityURL}}
+  2. Controlli l'attività recente ed esca da ogni dispositivo che non riconosce
+  3. Attivi o verifichi l'autenticazione a più fattori
+
+Controlli l'attività recente dell'account: {{.AccountActivityURL}}
+
+Serve aiuto? Contatti {{.SupportEmail}}.
+
+— Il team di sicurezza di {{.AppName}}
+
+---
+Gestisci le preferenze: {{.PreferencesURL}}
+Continuerà comunque a ricevere le email relative alla sicurezza.`,
+		BodyHTML: `<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>Accesso sospetto</title></head>
+<body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:560px;margin:0 auto;padding:32px 24px;color:#333;">
+  <h2 style="color:#b91c1c;">Accesso sospetto rilevato</h2>
+  <p>Gentile {{.UserName}},</p>
+  <p>Abbiamo rilevato un accesso al suo account {{.AppName}} che ci è sembrato insolito. Controlli i dettagli qui sotto.</p>
+  <table cellpadding="6" style="border-collapse:collapse;margin:16px 0;font-size:14px;">
+    <tr><td style="color:#6c757d;">Quando</td><td><strong>{{.LoginAt}}</strong></td></tr>
+    <tr><td style="color:#6c757d;">Da</td><td><code>{{.LoginIP}}</code>{{if .LoginLocation}} <span style="color:#6c757d;">({{.LoginLocation}})</span>{{end}}</td></tr>
+    <tr><td style="color:#6c757d;">Dispositivo</td><td>{{.LoginDevice}}</td></tr>
+    <tr><td style="color:#6c757d;">Rischio</td><td><strong>{{.RiskLevel}}</strong>{{if .RiskFactors}} <span style="color:#6c757d;">— {{.RiskFactors}}</span>{{end}}</td></tr>
+  </table>
+  <p style="margin:24px 0;">
+    <a href="{{.AccountActivityURL}}" style="background:#b91c1c;color:#fff;padding:12px 24px;text-decoration:none;border-radius:4px;display:inline-block;font-weight:600;">Controlla l'attività dell'account</a>
+  </p>
+  <p>Se è stato lei, non è necessaria alcuna azione. Se non riconosce questo accesso:</p>
+  <ol style="color:#333;">
+    <li>Cambi subito la password.</li>
+    <li>Controlli l'attività recente ed esca da ogni dispositivo che non riconosce.</li>
+    <li>Attivi o verifichi l'autenticazione a più fattori.</li>
+  </ol>
+  <p style="color:#6c757d;font-size:14px;">Serve aiuto? Contatti <a href="mailto:{{.SupportEmail}}" style="color:#6c757d;">{{.SupportEmail}}</a>.</p>
+  <hr style="border:none;border-top:1px solid #e0e0e0;margin:32px 0;">
+  <p style="color:#9ca3af;font-size:12px;">
+    <a href="{{.PreferencesURL}}" style="color:#9ca3af;">Gestisci le preferenze</a><br>
+    Continuerà comunque a ricevere le email relative alla sicurezza.
+  </p>
+</body>
+</html>`,
+	},
+	{
+		TemplateID:  models.CategoryAuthResetPassword,
+		Locale:      "it",
+		Subject:     "Reimposta la sua password {{.AppName}}",
+		Description: "Sent when the user requests a password reset.",
+		Variables:   []string{"AppName", "UserName", "ResetURL", "ExpiresIn", "SupportEmail", "RequestIP", "UnsubscribeURL", "PreferencesURL"},
+		BodyText: `Gentile {{.UserName}},
+
+Abbiamo ricevuto una richiesta di reimpostazione della sua password {{.AppName}}. Utilizzi il link sottostante entro {{.ExpiresIn}} per sceglierne una nuova:
+
+{{.ResetURL}}
+
+Se non ha richiesto lei la reimpostazione della password, ignori questo messaggio: la sua password resterà invariata. Le consigliamo comunque di controllare l'attività recente del suo account.
+
+Richiesta effettuata dall'indirizzo IP: {{.RequestIP}}
+
+Serve aiuto? Contatti {{.SupportEmail}}.
+
+— Il team di {{.AppName}}
+
+---
+Gestisci le preferenze: {{.PreferencesURL}}
+Continuerà comunque a ricevere le email relative alla sicurezza.`,
+		BodyHTML: `<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>Reimposta la sua password</title></head>
+<body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:560px;margin:0 auto;padding:32px 24px;color:#333;">
+  <h2 style="color:#2c3e50;">Reimposta la password</h2>
+  <p>Gentile {{.UserName}},</p>
+  <p>Abbiamo ricevuto una richiesta di reimpostazione della sua password {{.AppName}}. Clicchi sul pulsante sottostante per sceglierne una nuova.</p>
+  <p style="margin:32px 0;">
+    <a href="{{.ResetURL}}" style="background:#2c7be5;color:#fff;padding:12px 24px;text-decoration:none;border-radius:4px;display:inline-block;font-weight:600;">Reimposta password</a>
+  </p>
+  <p style="color:#6c757d;font-size:14px;">Il link scade tra {{.ExpiresIn}}.</p>
+  <p style="color:#6c757d;font-size:14px;">Se il pulsante non funziona, copi e incolli questo indirizzo nel browser:<br><span style="word-break:break-all;">{{.ResetURL}}</span></p>
+  <p style="color:#6c757d;font-size:14px;">Se non ha richiesto lei la reimpostazione della password, ignori questo messaggio: la sua password resterà invariata. Le consigliamo comunque di controllare l'attività recente del suo account.</p>
+  <p style="color:#6c757d;font-size:14px;">Richiesta effettuata dall'indirizzo IP: <code>{{.RequestIP}}</code></p>
+  <hr style="border:none;border-top:1px solid #e0e0e0;margin:32px 0;">
+  <p style="color:#9ca3af;font-size:12px;"><a href="{{.PreferencesURL}}" style="color:#9ca3af;">Gestisci le preferenze</a><br>Continuerà comunque a ricevere le email relative alla sicurezza.</p>
+</body>
+</html>`,
+	},
+	{
+		TemplateID:  models.CategoryAuthNewDeviceLogin,
+		Locale:      "it",
+		Subject:     "Nuovo accesso al suo account {{.AppName}}",
+		Description: "Sent the first time a user signs in from a (deviceId, userUUID) pair the system has not seen before.",
+		Variables:   []string{"AppName", "UserName", "LoginAt", "LoginIP", "LoginDevice", "LoginLocation", "AccountActivityURL", "SupportEmail", "UnsubscribeURL", "PreferencesURL"},
+		BodyText: `Gentile {{.UserName}},
+
+Un nuovo dispositivo ha appena effettuato l'accesso al suo account {{.AppName}}.
+
+Quando:      {{.LoginAt}}
+Da:          {{.LoginIP}}{{if .LoginLocation}} ({{.LoginLocation}}){{end}}
+Dispositivo: {{.LoginDevice}}
+
+Se è stato lei, non è necessaria alcuna azione.
+
+Se NON riconosce questo accesso, cambi la password e controlli l'attività recente su {{.AccountActivityURL}}.
+
+Serve aiuto? Contatti {{.SupportEmail}}.
+
+— Il team di sicurezza di {{.AppName}}
+
+---
+Gestisci le preferenze: {{.PreferencesURL}}
+Continuerà comunque a ricevere le email relative alla sicurezza.`,
+		BodyHTML: `<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>Nuovo accesso da dispositivo</title></head>
+<body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:560px;margin:0 auto;padding:32px 24px;color:#333;">
+  <h2 style="color:#2c3e50;">Nuovo accesso da dispositivo</h2>
+  <p>Gentile {{.UserName}},</p>
+  <p>Un nuovo dispositivo ha appena effettuato l'accesso al suo account {{.AppName}}.</p>
+  <table cellpadding="6" style="border-collapse:collapse;margin:16px 0;font-size:14px;">
+    <tr><td style="color:#6c757d;">Quando</td><td><strong>{{.LoginAt}}</strong></td></tr>
+    <tr><td style="color:#6c757d;">Da</td><td><code>{{.LoginIP}}</code>{{if .LoginLocation}} <span style="color:#6c757d;">({{.LoginLocation}})</span>{{end}}</td></tr>
+    <tr><td style="color:#6c757d;">Dispositivo</td><td>{{.LoginDevice}}</td></tr>
+  </table>
+  <p style="margin:24px 0;">
+    <a href="{{.AccountActivityURL}}" style="background:#2c7be5;color:#fff;padding:12px 24px;text-decoration:none;border-radius:4px;display:inline-block;font-weight:600;">Controlla l'attività dell'account</a>
+  </p>
+  <p>Se è stato lei, non è necessaria alcuna azione. Se non riconosce questo accesso, cambi la password ed esca da ogni dispositivo che non riconosce.</p>
+  <p style="color:#6c757d;font-size:14px;">Serve aiuto? Contatti <a href="mailto:{{.SupportEmail}}" style="color:#6c757d;">{{.SupportEmail}}</a>.</p>
+  <hr style="border:none;border-top:1px solid #e0e0e0;margin:32px 0;">
+  <p style="color:#9ca3af;font-size:12px;"><a href="{{.PreferencesURL}}" style="color:#9ca3af;">Gestisci le preferenze</a><br>Continuerà comunque a ricevere le email relative alla sicurezza.</p>
+</body>
+</html>`,
+	},
+	{
+		TemplateID:  models.CategoryAuthAdminSuspiciousLogin,
+		Locale:      "it",
+		Subject:     "[{{.AppName}}] Accesso sospetto: {{.AffectedUserEmail}}",
+		Description: "Admin-side notification when a user's login is flagged high-risk. Gated by notifyAdminOnSuspiciousLogin + suspiciousLoginRecipients.",
+		Variables:   []string{"AppName", "AffectedUserName", "AffectedUserEmail", "AffectedUserUUID", "LoginAt", "LoginIP", "LoginDevice", "LoginLocation", "RiskLevel", "RiskFactors", "AccountActivityURL", "SupportEmail", "UnsubscribeURL", "PreferencesURL"},
+		BodyText: `Avviso di accesso sospetto.
+
+Utente:      {{.AffectedUserName}} <{{.AffectedUserEmail}}> (uuid {{.AffectedUserUUID}})
+Quando:      {{.LoginAt}}
+Da:          {{.LoginIP}}{{if .LoginLocation}} ({{.LoginLocation}}){{end}}
+Dispositivo: {{.LoginDevice}}
+Rischio:     {{.RiskLevel}}{{if .RiskFactors}} — {{.RiskFactors}}{{end}}
+
+L'utente è stato avvisato. Controlla l'attività: {{.AccountActivityURL}}
+
+— Sistema di allerta sicurezza di {{.AppName}}`,
+		BodyHTML: `<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>Admin: accesso sospetto</title></head>
+<body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:560px;margin:0 auto;padding:32px 24px;color:#333;">
+  <h2 style="color:#b91c1c;">Avviso di accesso sospetto</h2>
+  <p>Un accesso su <strong>{{.AppName}}</strong> è stato segnalato come ad alto rischio. L'utente interessato è già stato avvisato.</p>
+  <table cellpadding="6" style="border-collapse:collapse;margin:16px 0;font-size:14px;">
+    <tr><td style="color:#6c757d;">Utente</td><td>{{.AffectedUserName}} &lt;{{.AffectedUserEmail}}&gt;<br><code style="color:#6c757d;">{{.AffectedUserUUID}}</code></td></tr>
+    <tr><td style="color:#6c757d;">Quando</td><td><strong>{{.LoginAt}}</strong></td></tr>
+    <tr><td style="color:#6c757d;">Da</td><td><code>{{.LoginIP}}</code>{{if .LoginLocation}} <span style="color:#6c757d;">({{.LoginLocation}})</span>{{end}}</td></tr>
+    <tr><td style="color:#6c757d;">Dispositivo</td><td>{{.LoginDevice}}</td></tr>
+    <tr><td style="color:#6c757d;">Rischio</td><td><strong>{{.RiskLevel}}</strong>{{if .RiskFactors}} <span style="color:#6c757d;">— {{.RiskFactors}}</span>{{end}}</td></tr>
+  </table>
+  <p style="margin:24px 0;">
+    <a href="{{.AccountActivityURL}}" style="background:#b91c1c;color:#fff;padding:10px 18px;text-decoration:none;border-radius:4px;display:inline-block;font-weight:600;">Controlla l'attività</a>
+  </p>
+  <hr style="border:none;border-top:1px solid #e0e0e0;margin:32px 0;">
+  <p style="color:#9ca3af;font-size:12px;">Inviato perché notifyAdminOnSuspiciousLogin è attivo.</p>
+</body>
+</html>`,
+	},
+	{
+		TemplateID:  models.CategoryAuthAdminInvite,
+		Locale:      "it",
+		Subject:     "Ha ricevuto un invito a {{.AppName}}",
+		Description: "Sent when an admin operator invites a new Tier-2 client user. The recipient redeems the token on the client SPA's /accept-invite page; redemption sets their password and marks the email verified.",
+		Variables:   []string{"AppName", "UserName", "InviteURL", "ExpiresIn", "InviterName", "SupportEmail", "UnsubscribeURL", "PreferencesURL"},
+		BodyText: `Gentile {{.UserName}},
+
+{{if .InviterName}}{{.InviterName}} le ha inviato un invito{{else}}Le è stato inviato un invito{{end}} per unirsi a {{.AppName}}.
+
+Utilizzi il link sottostante entro {{.ExpiresIn}} per impostare la password e completare la configurazione del suo account:
+
+{{.InviteURL}}
+
+Se non si aspettava questo invito, può ignorare questo messaggio in tutta sicurezza.
+
+Serve aiuto? Contatti {{.SupportEmail}}.
+
+— Il team di {{.AppName}}
+
+---
+Gestisci le preferenze: {{.PreferencesURL}}
+Continuerà comunque a ricevere le email relative alla sicurezza.`,
+		BodyHTML: `<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>Ha ricevuto un invito</title></head>
+<body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:560px;margin:0 auto;padding:32px 24px;color:#333;">
+  <h2 style="color:#2c3e50;">Ha ricevuto un invito a {{.AppName}}</h2>
+  <p>Gentile {{.UserName}},</p>
+  <p>{{if .InviterName}}<strong>{{.InviterName}}</strong> le ha inviato un invito{{else}}Le è stato inviato un invito{{end}} per unirsi a {{.AppName}}. Utilizzi il pulsante sottostante per impostare la password e completare la configurazione del suo account.</p>
+  <p style="margin:32px 0;">
+    <a href="{{.InviteURL}}" style="background:#2c7be5;color:#fff;padding:12px 24px;text-decoration:none;border-radius:4px;display:inline-block;font-weight:600;">Accetta invito</a>
+  </p>
+  <p style="color:#6c757d;font-size:14px;">Il link scade tra {{.ExpiresIn}}.</p>
+  <p style="color:#6c757d;font-size:14px;">Se il pulsante non funziona, copi e incolli questo indirizzo nel browser:<br><span style="word-break:break-all;">{{.InviteURL}}</span></p>
+  <p style="color:#6c757d;font-size:14px;">Se non si aspettava questo invito, può ignorare questo messaggio in tutta sicurezza.</p>
+  <hr style="border:none;border-top:1px solid #e0e0e0;margin:32px 0;">
+  <p style="color:#9ca3af;font-size:12px;"><a href="{{.PreferencesURL}}" style="color:#9ca3af;">Gestisci le preferenze</a><br>Continuerà comunque a ricevere le email relative alla sicurezza.</p>
+</body>
+</html>`,
+	},
 }
