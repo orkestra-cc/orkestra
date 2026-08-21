@@ -548,6 +548,23 @@ func (r *gateSessionRepo) TerminateSession(_ context.Context, uuid string) error
 	}
 	return errors.New("session not found")
 }
+
+// ExpireSessionForMaxAge mirrors the real repository's CAS semantics:
+// only a session that is still active flips to inactive and reports
+// itself the winner. Task 10's absolute-cap enforcement tests drive
+// this directly.
+func (r *gateSessionRepo) ExpireSessionForMaxAge(_ context.Context, uuid string) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, d := range r.created {
+		if d.UUID == uuid && d.IsActive {
+			d.IsActive = false
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func (r *gateSessionRepo) TerminateSessionByDevice(context.Context, string, string) error {
 	panic("not used")
 }

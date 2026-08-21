@@ -113,6 +113,12 @@ const (
 	RevokeReasonRoleChange     = "role_change"
 	RevokeReasonPasswordChange = "password_change"
 	RevokeReasonManualRevoke   = "manual_revoke"
+	// RevokeReasonSessionMaxAge marks rows revoked because the session
+	// reached its configured absolute lifetime, as opposed to a user or
+	// admin action. Distinct from RevokeReasonManualRevoke so a support
+	// query can tell "we signed you out on a timer" from "someone
+	// terminated your session". ADR-0017 D4.
+	RevokeReasonSessionMaxAge = "session_max_age"
 )
 
 // AuthSessionDoc represents a document in the auth_sessions collection
