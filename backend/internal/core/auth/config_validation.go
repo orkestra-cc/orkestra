@@ -38,6 +38,11 @@ var authDurationBounds = []durationBound{
 		min: services.MinPasswordResetTokenTTL, max: services.MaxPasswordResetTokenTTL,
 		why: "below five minutes the link dies before the mail is delivered",
 	},
+	{
+		key: "sessionAbsoluteTTL",
+		min: services.MinSessionAbsoluteTTL, max: services.MaxSessionAbsoluteTTL,
+		why: "the maximum leaves a one-day margin below the 90-day session retention window, so retention can never delete the anchor of a session still inside the cap",
+	},
 }
 
 // ValidateConfig rejects malformed or out-of-range duration values before

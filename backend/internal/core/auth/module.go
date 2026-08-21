@@ -159,7 +159,7 @@ func (m *AuthModule) NavItems() []module.NavItemSpec {
 
 // ConfigGroups gives the admin settings page a sectioned rail instead of one
 // flat list. auth is by far the largest configuration surface in the base —
-// 62 fields — and the four OAuth providers are declared as children of the
+// 63 fields — and the four OAuth providers are declared as children of the
 // single "OAuth Providers" node rather than as siblings of it, which is what
 // the old flat Group labels made them look like.
 func (m *AuthModule) ConfigGroups() []module.ConfigGroup {
@@ -416,6 +416,21 @@ func (m *AuthModule) ConfigSchema() []module.ConfigField {
 			Key: "passwordResetTokenTTL", Label: "Password reset link lifetime", Group: "login",
 			Description: "Go duration string — how long the link in the reset-password email stays valid. Range 5m–24h. Default 30m.",
 			Type:        module.FieldDuration, Default: "30m",
+			Pattern: "^[0-9]+(s|m|h|d)$",
+		},
+		// ADR-0017 D1 — absolute session cap. One field for both audience
+		// tiers: the operator console and the client surface share one
+		// value, following the loginEnabledAdmin/loginEnabledClient
+		// precedent that per-tier splitting is added only when a need
+		// appears. Anchored on session.StartedAt, so enabling it needs no
+		// migration and on upgrade it signs out sessions older than the
+		// cap because that is what the existing data already records.
+		{
+			Key: "sessionAbsoluteTTL", Label: "Maximum session age", Group: "login",
+			Description: "Maximum lifetime of a session from login, independent of activity. " +
+				"When it elapses the user must authenticate again. Range 1h–89d; " +
+				"empty disables the cap. Default 720h (30 days).",
+			Type: module.FieldDuration, Default: "720h",
 			Pattern: "^[0-9]+(s|m|h|d)$",
 		},
 		// Phase 3.6 — restrict the MFA factor types users can enroll.

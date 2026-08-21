@@ -96,7 +96,9 @@ Keys in the **system set** are granted by the `super_admin` / `administrator` / 
 
 ## Config
 
-auth is by far the largest configuration surface in the base — 62 fields at `/admin/modules/auth`, arranged into a group rail: **Registration**, **Login & Sessions**, **Password Policy**, **MFA**, **OAuth Providers** (with Google, Apple, GitHub, and Discord as child nodes), **Anti-abuse & Notifications**, and **Sessions & Account**. Fields are seeded from their `EnvVar` on first boot and owned by the ConfigService thereafter — see [Module configuration](/operating/module-configuration) and [OAuth providers](/operating/oauth-providers) for the operator walkthrough.
+auth is by far the largest configuration surface in the base — 63 fields at `/admin/modules/auth`, arranged into a group rail: **Registration**, **Login & Sessions**, **Password Policy**, **MFA**, **OAuth Providers** (with Google, Apple, GitHub, and Discord as child nodes), **Anti-abuse & Notifications**, and **Sessions & Account**. Fields are seeded from their `EnvVar` on first boot and owned by the ConfigService thereafter — see [Module configuration](/operating/module-configuration) and [OAuth providers](/operating/oauth-providers) for the operator walkthrough.
+
+The **Login & Sessions** group's `sessionAbsoluteTTL` caps total session age from login (default 30 days, range 1h–89d), independent of the refresh token's idle-timeout behaviour — clearing the field disables the cap. It is a configuration declaration; see [ADR-0017](/adrs/session-lifetime-and-token-retention) for the design and enforcement status.
 
 :::note Where the routes are
 This page names the surfaces, not all ~90 of the module's operations. The generated per-endpoint reference — request/response schemas included — is under [API Reference](/api), grouped by tag: Authentication, MFA, WebAuthn, Auth - Device Trust, Service Accounts, Mobile, and Self-Service.

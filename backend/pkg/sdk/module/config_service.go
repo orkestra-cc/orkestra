@@ -631,6 +631,24 @@ func (s *ModuleConfigService) GetValue(ctx context.Context, moduleName, key stri
 	return s.schemaFallback(doc.ConfigSchema, key)
 }
 
+// GetRawValue reports a module's stored non-secret config value together with
+// whether the key is actually present in the active environment — WITHOUT
+// GetValue's empty-means-absent collapse.
+//
+// GetValue answers "what value should I use", and folding an operator-cleared
+// key into the schema default is right for that question. This answers the
+// different question "did the operator say anything here", which a field whose
+// empty value is itself a decision needs. See ADR-0017 D1: clearing
+// sessionAbsoluteTTL disables the session cap, and GetValue cannot express that.
+func (s *ModuleConfigService) GetRawValue(ctx context.Context, moduleName, key string) (string, bool) {
+	doc, err := s.repo.FindByName(ctx, moduleName)
+	if err != nil || doc == nil {
+		return "", false
+	}
+	v, ok := doc.ActiveConfigValues()[key]
+	return v, ok
+}
+
 // GetSecret returns a decrypted secret config value for a module.
 // Lookup: active environment EncryptedValues (decrypt) → legacy EncryptedValues → env var → schema default → "".
 func (s *ModuleConfigService) GetSecret(ctx context.Context, moduleName, key string) string {

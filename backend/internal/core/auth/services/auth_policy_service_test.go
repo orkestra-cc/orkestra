@@ -23,6 +23,18 @@ func (s *stubReader) GetValue(_ context.Context, _, key string) string {
 	return s.values[key]
 }
 
+// GetRawValue mirrors ModuleConfigService.GetRawValue's presence contract: a
+// map lookup naturally distinguishes "key present with empty value" (ok=true)
+// from "key absent" (ok=false), so a nil/missing-key map value expresses
+// "absent" and an explicit empty-string entry expresses "operator cleared it".
+func (s *stubReader) GetRawValue(_ context.Context, _, key string) (string, bool) {
+	if s == nil {
+		return "", false
+	}
+	v, ok := s.values[key]
+	return v, ok
+}
+
 func newPolicy(values map[string]string) *AuthPolicyService {
 	return &AuthPolicyService{cs: &stubReader{values: values}}
 }

@@ -51,6 +51,12 @@ const (
 // without standing up Mongo+Redis.
 type configValueReader interface {
 	GetValue(ctx context.Context, moduleName, key string) string
+	// GetRawValue reports the stored value together with whether the key
+	// is present at all, WITHOUT GetValue's empty-means-absent collapse.
+	// SessionAbsoluteTTL needs this: an operator clearing the field must
+	// disable the cap, and GetValue cannot distinguish that from the key
+	// never having been set. See module.ModuleConfigService.GetRawValue.
+	GetRawValue(ctx context.Context, moduleName, key string) (string, bool)
 }
 
 // AuthPolicyService resolves admin-managed authentication policy at

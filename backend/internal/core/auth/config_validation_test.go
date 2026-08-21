@@ -33,6 +33,13 @@ func TestAuthDurationPatchValidation(t *testing.T) {
 		{"passwordResetTokenTTL at minimum", map[string]string{"passwordResetTokenTTL": "5m"}, ""},
 		{"passwordResetTokenTTL below minimum", map[string]string{"passwordResetTokenTTL": "1m"}, "passwordResetTokenTTL"},
 		{"passwordResetTokenTTL above maximum", map[string]string{"passwordResetTokenTTL": "72h"}, "passwordResetTokenTTL"},
+		{"sessionAbsoluteTTL empty disables the cap", map[string]string{"sessionAbsoluteTTL": ""}, ""},
+		{"sessionAbsoluteTTL at minimum", map[string]string{"sessionAbsoluteTTL": "1h"}, ""},
+		{"sessionAbsoluteTTL at maximum", map[string]string{"sessionAbsoluteTTL": "89d"}, ""},
+		{"sessionAbsoluteTTL default", map[string]string{"sessionAbsoluteTTL": "720h"}, ""},
+		{"sessionAbsoluteTTL below minimum", map[string]string{"sessionAbsoluteTTL": "30m"}, "sessionAbsoluteTTL"},
+		{"sessionAbsoluteTTL above maximum", map[string]string{"sessionAbsoluteTTL": "90d"}, "sessionAbsoluteTTL"},
+		{"sessionAbsoluteTTL malformed", map[string]string{"sessionAbsoluteTTL": "forever"}, "sessionAbsoluteTTL"},
 		// Deliberately unbounded: neither governs an already-issued credential.
 		{"lockout duration absurd but accepted", map[string]string{"accountLockoutDuration": "9999h"}, ""},
 		{"lockout threshold absurd but accepted", map[string]string{"accountLockoutThreshold": "999999"}, ""},

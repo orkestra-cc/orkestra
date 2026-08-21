@@ -90,7 +90,7 @@ OAuth provider settings are admin-managed through `ConfigSchema()` — stored in
 `auth` declares an 11-key group tree via `ConfigGroups()` — 7 top-level groups
 (`registration`, `login`, `password`, `mfa`, `oauth`, `antiabuse`, `sessions`) plus
 `oauth.google` / `oauth.apple` / `oauth.github` / `oauth.discord` nested under `oauth`
-(`Parent: "oauth"`). It is the largest configuration surface in the base — 62
+(`Parent: "oauth"`). It is the largest configuration surface in the base — 63
 `ConfigField` entries — and is the first (and so far only) module to actually render
 the settings page's sectioned rail rather than the plain-form degradation path. This is
 the shape a contributor adding a field to `ConfigSchema()` must keep valid:
@@ -142,7 +142,7 @@ ConfigService is missing).
 | Group | Keys | Effect |
 |---|---|---|
 | Registration | `registrationEnabledAdmin/Client`, `defaultRoleClient`, `allowedEmailDomainsAdmin/Client` | **`registrationEnabledAdmin/Client` both default to `false`** — a fresh install accepts no self-service signups until the super_admin opens them. `Register` returns 403 `registration_disabled` / `email_domain_not_allowed` per surface, and the OAuth callback's new-user branch returns `ErrOAuthSignupDisabled` (mapped to the `error=oauth_signup_disabled` callback redirect) when `registrationEnabledAdmin/Client=false` — both paths share the same umbrella kill switch. `defaultRoleClient` overrides the role assigned to a new Tier-2 signup (consulted by both the password and OAuth paths). Non-first operator-tier signups default to `guest` (lowest system role) on both paths so a fresh callback can't grant elevated privileges; the first-admin sentinel still upgrades the very first account to `super_admin`. The very first user on a fresh install bypasses the password Register's kill switch so a misconfigured flag can't lock everyone out — the OAuth path has no first-user bypass; operators bootstrap via password. |
-| Login & Sessions | `loginEnabledAdmin/Client`, `accountLockoutThreshold`, `accountLockoutDuration` | `Login` returns 403 `login_disabled` per surface; OAuth start endpoints (`InitiateOAuthLogin`, `HandleMobile{Google,Apple}Auth`) honour the same gate. The lockout pair is plumbed into `RateLimiter.SetAuthFailedConfig` on every login attempt — admin edits take effect on the next try. `accountLockoutDuration` (like `accessTokenTTL` / `passwordResetTokenTTL`) is parsed by `utils.ParseDuration`, so `30d` typed into the admin UI now works the same as it does in an env var. |
+| Login & Sessions | `loginEnabledAdmin/Client`, `accountLockoutThreshold`, `accountLockoutDuration`, `sessionAbsoluteTTL` | `Login` returns 403 `login_disabled` per surface; OAuth start endpoints (`InitiateOAuthLogin`, `HandleMobile{Google,Apple}Auth`) honour the same gate. The lockout pair is plumbed into `RateLimiter.SetAuthFailedConfig` on every login attempt — admin edits take effect on the next try. `accountLockoutDuration` (like `accessTokenTTL` / `passwordResetTokenTTL`) is parsed by `utils.ParseDuration`, so `30d` typed into the admin UI now works the same as it does in an env var. `sessionAbsoluteTTL` (ADR-0017 D1) caps total session age from login, independent of the refresh TTL's idle-timeout behaviour; resolved via `AuthPolicyService.SessionAbsoluteTTL` — see the dedicated section below. One field for both audience tiers, unlike the `*Admin`/`*Client` pairs elsewhere on this tab. |
 | Password Policy | `passwordMinLength`, `passwordMaxLength`, `passwordRequireUpper/Lower/Digit/Symbol`, `breachedPasswordCheck` | `passwordService.ValidatePolicy` reads the live policy on every signup / change-password / reset. Defaults match the legacy hardcoded values (10..128 chars, no complexity, HIBP on). New errors: `ErrPasswordMissing{Upper,Lower,Digit,Symbol}`. An inverted min/max range is swapped on read so a misedit can't reject every password. |
 | OAuth Providers | `{google,apple,github,discord}Enabled{Admin,Client}`, `oauthAllowSignup{Admin,Client}`, `oauthAutoLinkByEmail` | **All eight `{provider}Enabled{Admin,Client}` toggles default to `false`** — a fresh install exposes no social-login button until the super_admin both configures the provider's credentials AND flips its surface toggle on (a provider with no client ID is already filtered out regardless; the toggle is the explicit second gate). `ListOAuthProviders` filters its return per audience; `InitiateOAuthLogin` + mobile handlers return 403 `oauth_provider_disabled` for a disabled surface. Credentials still live one-set-per-provider in the existing tabs. Phase 9: `oauthAllowSignup{Admin,Client}` (default true) is the OAuth-specific signup gate — checked **in addition to** `registrationEnabledAdmin/Client` on the Registration tab (both must allow). When either is off, the OAuth callback returns `ErrOAuthSignupDisabled` and redirects to `/auth/callback?success=false&error=oauth_signup_disabled` instead of creating the user. Phase 10: `oauthAutoLinkByEmail` (default true) gates auto-attaching a provider to an existing email-matched account; when off, returns `ErrOAuthLinkDisabled` and the user must initiate linking from authenticated settings. |
 | MFA | `mfaEnabled`, `mfaEnrollmentGraceDays`, `mfaRequiredForRoles`, `recoveryCodesCount` | `mfaEnabled` **defaults to `false`** — a fresh install's first account is `super_admin` (privileged), so seeding it `true` would block that operator from the config writes (e.g. SMTP) needed to finish setup with an MFA prompt for a factor they never enrolled. Operators turn it on **after** enrolling a second factor; otherwise privileged users hit the enrollment grace window on their next login. `mfaEnabled=false` short-circuits `MFARequired` to false (existing enrollments are not deleted; voluntary verification still works). `mfaEnrollmentGraceDays` overrides the legacy 7-day `MFAEnrollmentGraceWindow` constant — new value takes effect on the next login. Phase 9: `mfaRequiredForRoles` (stringList, lowercased on read) replaces the built-in privileged-role list when set. Empty falls back to the built-in (super_admin, administrator, org_owner, org_admin). The kill switch wins over both the built-in and the configured list. Phase 10: `recoveryCodesCount` overrides the legacy `BackupCodeCount` constant when in the safe range 1..50; out-of-range falls back to the legacy default 10. Read at enrollment-confirm time so admin edits take effect on the next user's enrollment. |
@@ -187,6 +187,41 @@ reject. Generic `UpdateConfig` still validates nothing on its own; the
 seam is opt-in per module, and `auth` is currently its only implementer.
 Read-time enforcement is the pre-existing `clampPersistedDuration` in
 `services/auth_duration_bounds.go`, which stays as-is.
+
+#### Absolute session cap (ADR-0017 D1)
+
+The refresh TTL is an **idle** timeout — rotation writes a fresh
+`now + refreshTTL` on every use, so an active user is never asked to
+re-authenticate no matter how long the session has run. `sessionAbsoluteTTL`
+(`services/session_cap.go`) bounds total session age from `session.StartedAt`
+instead: default `720h` (30 days), range `[services.MinSessionAbsoluteTTL,
+services.MaxSessionAbsoluteTTL]` (1h–89d), enforced at the PATCH boundary via
+`authDurationBounds` in `config_validation.go` exactly like `accessTokenTTL`
+and `passwordResetTokenTTL`. `MaxSessionAbsoluteTTL` leaves
+`services.SessionRetentionSafetyMargin` (24h) below `AuthSessionRetention`
+(90d) — equality is unsafe, because at exactly the retention boundary
+Mongo's TTL monitor can delete the session document before the refresh path
+evaluates the cap, presenting an expired session as a missing anchor.
+`services/session_cap_test.go`'s `TestSessionAbsoluteTTLLeavesRetentionMargin`
+pins the strict inequality so changing either constant breaks the build.
+
+Clearing the field is the supported way for a fork to disable the cap
+without patching code — `(*AuthPolicyService).SessionAbsoluteTTL` then
+returns `0`. This is the one duration in the module whose *empty* value
+means something other than "fall back to a default", so it cannot be
+resolved through `ModuleConfigService.GetValue`: that accessor's `ok &&
+v != ""` guard makes an absent key and an operator-cleared key
+indistinguishable, both falling through to the schema `Default` (`"720h"`).
+`ModuleConfigService.GetRawValue(ctx, moduleName, key) (string, bool)`
+(`pkg/sdk/module/config_service.go`) is the narrow accessor added for this:
+it reports the active environment's stored value plus whether the key is
+actually present, so "present and empty" (disable) and "absent" (never
+configured, use the default) are distinguishable. `configValueReader` in
+`services/auth_policy_service.go` was extended with `GetRawValue` to expose
+it to `SessionAbsoluteTTL`; `GetValue` itself is unchanged, so no existing
+caller's behaviour shifts. Consuming the cap against live sessions (i.e.
+actually ending one that has aged past it) is a separate follow-up — this
+declares the configuration and the constants only.
 
 `accountLockoutDuration` and `accountLockoutThreshold` are **deliberately
 excluded** from this validator: neither governs an already-issued
