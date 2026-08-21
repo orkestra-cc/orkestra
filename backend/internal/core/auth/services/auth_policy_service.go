@@ -172,24 +172,22 @@ func (s *AuthPolicyService) LockoutThreshold(ctx context.Context) int {
 	return n
 }
 
-// AccessTokenTTL returns the admin-managed access-token lifetime.
-// Falls back to defaultAccessTokenTTL (15m) when unset, invalid, or
-// the policy service / underlying ConfigService is missing. The JWT
-// service consults this on every GenerateAccessToken so admin edits
-// take effect on the next mint. Phase 3.1 of the auth-policy roadmap.
+// AccessTokenTTL returns the admin-managed access-token lifetime, or 0
+// when the value is absent. Zero means UNSET, not "use the default":
+// jwtService.accessTokenLifetime falls through to the env-derived
+// s.accessExpiry on zero, which is the documented
+// `admin → JWT_ACCESS_TOKEN_EXPIRY → 15m` chain. Substituting the 15m
+// default here is what made the middle level unreachable. The 15m guard
+// lives in NewJWTService, which is the level that owns it. ADR-0017 D5.
 func (s *AuthPolicyService) AccessTokenTTL(ctx context.Context) time.Duration {
 	if s == nil || s.cs == nil {
-		return defaultAccessTokenTTL
+		return 0
 	}
 	v := strings.TrimSpace(s.cs.GetValue(ctx, "auth", "accessTokenTTL"))
 	if v == "" {
-		return defaultAccessTokenTTL
+		return 0
 	}
-	d, ok := utils.ParseDuration(v)
-	if !ok || d <= 0 {
-		return defaultAccessTokenTTL
-	}
-	return d
+	return clampPersistedDuration(v, 0, minAccessTokenTTL, MaxAccessTokenTTL, "accessTokenTTL", slogDefault())
 }
 
 // MFAMethodsAllowed returns the set of MFA factor types the admin
@@ -253,9 +251,9 @@ func (s *AuthPolicyService) MFAMethodAllowed(ctx context.Context, method string)
 }
 
 // PasswordResetTokenTTL returns the admin-managed lifetime of the
-// reset-password email token. Falls back to defaultPasswordResetTokenTTL
-// (30m). The PasswordAuthService reads this when minting a new
-// reset_password email-token row. Phase 3.1 of the auth-policy roadmap.
+// reset-password email token. Empty means "use the 30m default"; a
+// persisted out-of-range or unparsable value is clamped and warned
+// rather than rejected, so old data cannot make the admin UI unusable.
 func (s *AuthPolicyService) PasswordResetTokenTTL(ctx context.Context) time.Duration {
 	if s == nil || s.cs == nil {
 		return defaultPasswordResetTokenTTL
@@ -264,11 +262,7 @@ func (s *AuthPolicyService) PasswordResetTokenTTL(ctx context.Context) time.Dura
 	if v == "" {
 		return defaultPasswordResetTokenTTL
 	}
-	d, ok := utils.ParseDuration(v)
-	if !ok || d <= 0 {
-		return defaultPasswordResetTokenTTL
-	}
-	return d
+	return clampPersistedDuration(v, defaultPasswordResetTokenTTL, minPasswordResetTokenTTL, maxPasswordResetTokenTTL, "passwordResetTokenTTL", slogDefault())
 }
 
 // LockoutDuration returns how long an IP/email stays locked after

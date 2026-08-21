@@ -131,6 +131,18 @@ func NewJWTService(privateKey *rsa.PrivateKey, publicKey *rsa.PublicKey, env str
 	if accessTTL <= 0 {
 		accessTTL = 15 * time.Minute
 	}
+	if accessTTL > MaxAccessTokenTTL {
+		// The Redis revocation denylist stores entries for
+		// MaxAccessTokenTTL + 1m. A longer token would outlive its own
+		// revocation entry and become valid again after logout. Clamp
+		// rather than reject: this level is fed by JWT_ACCESS_TOKEN_EXPIRY
+		// and by direct callers, neither of which can surface a 422.
+		// ADR-0017 D5.
+		slogDefault().Warn("auth: access-token lifetime above maximum, clamping",
+			"value", accessTTL.String(),
+			"using", MaxAccessTokenTTL.String())
+		accessTTL = MaxAccessTokenTTL
+	}
 	if refreshTTL <= 0 {
 		refreshTTL = 30 * 24 * time.Hour
 	}
