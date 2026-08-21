@@ -150,7 +150,6 @@ type CookieConfig struct {
 	HttpOnly     bool
 	Secure       bool
 	SameSite     string
-	MaxAge       int
 }
 
 type GoogleOAuthConfig struct {
@@ -297,7 +296,6 @@ func Load() (*Config, error) {
 			HttpOnly:       getEnvAsBool("COOKIE_HTTP_ONLY", true),
 			Secure:         getEnvAsBool("COOKIE_SECURE", false), // Default false for development
 			SameSite:       getEnv("COOKIE_SAME_SITE", "lax"),
-			MaxAge:         getEnvAsInt("COOKIE_MAX_AGE", 86400000), // 24 hours in milliseconds
 		},
 		Google: GoogleOAuthConfig{
 			ClientID:        getEnv("OAUTH_GOOGLE_CLIENT_ID", ""),

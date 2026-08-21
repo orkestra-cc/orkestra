@@ -53,7 +53,6 @@ services:
       COOKIE_HTTP_ONLY: ${COOKIE_HTTP_ONLY:-true}
       COOKIE_SECURE: ${COOKIE_SECURE:-true}
       COOKIE_SAME_SITE: ${COOKIE_SAME_SITE:-strict}
-      COOKIE_MAX_AGE: ${COOKIE_MAX_AGE:-86400000}
 
       # URLs
       FRONTEND_URL: ${FRONTEND_URL:-https://orkestra.cc}
