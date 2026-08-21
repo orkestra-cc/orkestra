@@ -16,6 +16,10 @@ describe('moduleCatalog auto-discovery', () => {
     for (const [key, manifest] of Object.entries(moduleCatalog)) {
       expect(manifest.name).toBe(key);
       expect(typeof manifest.routes).toBe('function');
+      if (manifest.injectApi)
+        expect(typeof manifest.injectApi).toBe('function');
+      if (manifest.globalOverlay)
+        expect(typeof manifest.globalOverlay).toBe('object');
     }
   });
 });

@@ -133,6 +133,24 @@ export const widgetsManifest: ModuleManifest = {
 };
 ```
 
+#### Optional: an app-wide surface
+
+A manifest may also declare `globalOverlay` — a `React.lazy()` component mounted
+once per app, outside the module's routes, for a surface that has to be reachable
+from every page (a launcher, a drawer, a floating panel):
+
+```ts
+globalOverlay: lazy(() => import('pages/widgets/components/WidgetsOverlay')),
+```
+
+Core UI never imports the addon to do this. `MainLayout` renders
+`modules/runtime/ModuleGlobalOverlays`, which walks the navigation the backend
+already returned for this user and mounts an overlay only while its module owns
+at least one visible item — so a disabled module, or one hidden from this role or
+tenant kind, contributes nothing. Attribution comes from the `moduleName` the
+registry stamps on every nav item; a module with no nav items of its own can
+therefore not carry an overlay.
+
 Then register it in `frontend/src/modules/index.ts`:
 
 ```ts

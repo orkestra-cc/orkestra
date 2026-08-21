@@ -9,6 +9,7 @@ import ImpersonationBanner from 'components/tenant/ImpersonationBanner';
 import MfaEnrollmentBanner from 'components/authentication/MfaEnrollmentBanner';
 import StepUpModal from 'components/authentication/StepUpModal';
 import PasswordConfirmModal from 'components/authentication/PasswordConfirmModal';
+import ModuleGlobalOverlays from 'modules/runtime/ModuleGlobalOverlays';
 
 import { useAppContext } from 'providers/AppProvider';
 import { useTenantBootstrap } from 'hooks/useTenantBootstrap';
@@ -59,6 +60,7 @@ const MainLayout: React.FC = () => {
       <ModalAuth />
       <StepUpModal />
       <PasswordConfirmModal />
+      <ModuleGlobalOverlays />
     </div>
   );
 };
