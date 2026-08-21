@@ -168,6 +168,28 @@ and run `cd backend && go mod tidy` (the `backend-deps` make target).
   any `DependsOn` to combine. Both `Advanced` and `DependsOn` ride on the
   `configSchema` the admin handler already serializes, so an addon that
   declares them gets the behavior with no frontend code to write.
+- **`module.HasConfigValidator` is the optional module config-validation
+  seam (ADR-0017 D6).** A module implements
+  `ValidateConfig(ctx context.Context, mergedValues map[string]string) error`
+  to reject config values `UpdateConfig`/`UpdateEnvironmentConfig` would
+  otherwise persist unchecked — `ConfigField.Min`/`Max` are `*int` and
+  cannot express a bound on a duration, and teaching the service to
+  interpret every schema constraint generically is a separate contract
+  change with its own ADR. It runs on **both** PATCH surfaces —
+  `PATCH /v1/admin/modules/{name}` and
+  `PATCH /v1/admin/modules/{name}/environments/{env}` — always **before**
+  encryption or persistence, and always with the module's stored non-secret
+  values **merged** with the PATCH body, not just the submitted keys, so a
+  cross-field rule can't be bypassed by patching one half of a pair.
+  Secrets are never passed to it. Return a `*module.ConfigValidationError{Field,
+  Message}` to have the admin handler map the failure to
+  `422 Unprocessable Entity` naming the offending field; any other error
+  propagates as an ordinary failure. Omitting the interface preserves
+  today's behaviour exactly — `UpdateConfig` persists whatever it is given.
+  `SetActiveEnvironment` deliberately does **not** invoke it: switching to
+  an already-stored (possibly legacy-invalid) profile must stay possible so
+  the defensive readers keep the deployment operable until the operator
+  repairs the value on the next PATCH.
 
 ## CI
 
