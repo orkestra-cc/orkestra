@@ -4,7 +4,7 @@ Single Go binary, single Go module. 8 core modules (always loaded) and an **empt
 
 ## Stack
 
-Go 1.25.12 | Huma v2 (OpenAPI-first) | MongoDB 8.0 | Redis 8.2 | Chi router | AIR hot-reload (Docker)
+Go 1.25.13 | Huma v2 (OpenAPI-first) | MongoDB 8.0 | Redis 8.2 | Chi router | AIR hot-reload (Docker)
 
 ## Module System
 
@@ -13,14 +13,28 @@ Every module implements the `Module` interface from the Orkestra SDK
 for the SDK boundary rules and [`../docs/onboarding/orkestra-sdk.md`](../docs/onboarding/orkestra-sdk.md)
 for the new-developer walkthrough):
 
-```
-Name, DisplayName, Description, Category
-ConfigSchema, Collections, NavItems, Dependencies
-ProvidedServices, RequiredServices, OptionalServices
-Enabled, Init, RegisterRoutes, Start, Stop, HealthCheck
+```go
+// The whole of it. Everything else is an OPTIONAL sub-interface,
+// discovered by type assertion — see pkg/sdk/module/module.go.
+type Module interface {
+    Name() string
+    Category() ModuleCategory
+    Init(deps *Dependencies) error
+}
 ```
 
-**Registration** (`cmd/server/catalog.go` + `catalog_<name>.go`): core modules (user → notification → tenant → authz → auth → navigation → logging) are always loaded — they live in `catalog.go`. The `optionalModules` map ships empty; a fork's optional module lives in its own `cmd/server/catalog_<name>.go` file and registers itself via `init()`. Every registered module compiles into the binary; runtime enable/disable is owned by the `module_configs` collection edited at `/admin/modules`. Optional modules are instantiated, initialized, and routed at boot — only enabled ones have `Start()` called. The admin API can enable/disable modules at runtime via `StartModule()`/`StopModule()` without restart. The registry topologically sorts by `Dependencies()` so producers init before consumers, auto-creates MongoDB collections with their declared indexes, seeds configs, collects nav items, and gates routes for disabled modules via `ModuleGate` middleware.
+The optional sub-interfaces cover routes (`Routable`), lifecycle (`Startable`,
+`Stoppable`, `HealthCheckable`), and declarations (`HasDependencies`,
+`HasConfigSchema`, `HasConfigGroups`, `HasCollections`, `HasNavItems`,
+`HasPermissions`, `HasCapabilities`, `HasServiceContracts`, `HasDisplayInfo`,
+`HasDefaultEnabled`, `HasNotificationTemplates`, `HasInfraContainers`,
+`HasPreflight`). In-tree modules embed `BaseModule`, which satisfies every one
+with a default, so you override only what you need. **`Module` itself is
+frozen** — it is the public SDK surface, so new capabilities arrive as new
+sub-interfaces, never as extra methods here. Prose reference:
+[`../docs/site/sdk/module-interface.mdx`](../docs/site/sdk/module-interface.mdx).
+
+**Registration** (`cmd/server/catalog.go` + `catalog_<name>.go`): core modules (user → notification → tenant → authz → auth → navigation → logging → compliance) are always loaded — they live in `catalog.go`. The `optionalModules` map ships empty; a fork's optional module lives in its own `cmd/server/catalog_<name>.go` file and registers itself via `init()`. Every registered module compiles into the binary; runtime enable/disable is owned by the `module_configs` collection edited at `/admin/modules`. Optional modules are instantiated, initialized, and routed at boot — only enabled ones have `Start()` called. The admin API can enable/disable modules at runtime via `StartModule()`/`StopModule()` without restart. The registry topologically sorts by `Dependencies()` so producers init before consumers, auto-creates MongoDB collections with their declared indexes, seeds configs, collects nav items, and gates routes for disabled modules via `ModuleGate` middleware.
 
 **First-boot seeding**: on a fresh install, `ConfigService.SeedFromModules` creates the `module_configs` document from each module's `ConfigSchema().EnvVar` and `EnabledByDefault`. Subsequent boots ignore env defaults; admin-set values in `module_configs` are authoritative. (ADR-0006 removed the `ORKESTRA_PROFILE` minimal/full seeding — with an empty catalog there is nothing to pre-enable.) Documents for modules **no longer compiled into the binary** (addons a fork removed, or anything left over from the ADR-0006 core-only collapse on an upgraded environment) are treated as **orphans**: `GetAllConfigs` / `ModuleStatusJSON` filter them out of the admin listing so the `/admin/modules` UI only ever shows registered modules. The orphan documents are *not* deleted — they stay in the collection (recoverable, secrets intact); they are simply not served.
 
@@ -220,7 +234,7 @@ docker restart orkestra-backend-development
 
 ## Rules
 
-- **Read the module's own CLAUDE.md** before modifying it — each core module (`notification`, `auth`, `authz`, `tenant`, `user`, `navigation`, `logging`) has one under `internal/core/<name>/`
+- **Read the module's own CLAUDE.md** before modifying it — all eight core modules (`user`, `notification`, `tenant`, `authz`, `auth`, `navigation`, `logging`, `compliance`) have one under `internal/core/<name>/`. Each also has a published page under [`../docs/site/modules/core/`](../docs/site/modules/core/) — the CLAUDE.md is the contract, the page is the reference; **update both** when you change a module.
 - **Use the module system** — don't add routes or init logic directly to main.go
 - **Use `pkg/sdk/iface`** for cross-module deps — never import another module's services package from module.go
 - **Validate all inputs**, implement RBAC on every endpoint, never expose secrets in responses
