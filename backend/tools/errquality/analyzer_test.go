@@ -238,3 +238,61 @@ func mapErr(err error) error {
 		t.Fatalf("want no findings, got %v", got)
 	}
 }
+
+func TestAllowComment_SuppressesWhenReasonIsSubstantial(t *testing.T) {
+	src := `package h
+func f(err error) error {
+	//errquality:allow surfaces the validation library's own message
+	return huma.Error400BadRequest(err.Error())
+}`
+	fset := token.NewFileSet()
+	f, perr := parser.ParseFile(fset, "handler.go", src, parser.ParseComments)
+	if perr != nil {
+		t.Fatalf("parse: %v", perr)
+	}
+	var suppressed, reported int
+	inspectFile(fset, f, func(pos token.Pos, rule, _ string) {
+		if hasAllowComment(fset, f, pos) {
+			suppressed++
+			return
+		}
+		reported++
+	})
+	if suppressed != 1 || reported != 0 {
+		t.Fatalf("want 1 suppressed / 0 reported, got %d/%d", suppressed, reported)
+	}
+}
+
+func TestAllowComment_RequiresAReason(t *testing.T) {
+	src := `package h
+func f(err error) error {
+	//errquality:allow
+	return huma.Error400BadRequest(err.Error())
+}`
+	fset := token.NewFileSet()
+	f, perr := parser.ParseFile(fset, "handler.go", src, parser.ParseComments)
+	if perr != nil {
+		t.Fatalf("parse: %v", perr)
+	}
+	var reported int
+	inspectFile(fset, f, func(pos token.Pos, _, _ string) {
+		if !hasAllowComment(fset, f, pos) {
+			reported++
+		}
+	})
+	if reported != 1 {
+		t.Fatalf("a bare allow-comment must not suppress; reported=%d", reported)
+	}
+}
+
+func TestBaselineMatches_NormalizesToRepoRelativePath(t *testing.T) {
+	baselineSet = map[string]bool{"internal/core/tenant/handlers/org_handler.go:214:R1": true}
+	t.Cleanup(func() { baselineSet = nil })
+
+	if !baselineMatches("/home/runner/work/orkestra/backend/internal/core/tenant/handlers/org_handler.go", 214, "R1") {
+		t.Fatal("absolute CI path should normalize onto the baseline entry")
+	}
+	if baselineMatches("/home/runner/work/orkestra/backend/internal/core/tenant/handlers/org_handler.go", 215, "R1") {
+		t.Fatal("a different line must not match")
+	}
+}

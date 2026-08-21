@@ -301,13 +301,77 @@ var (
 	baselineErr  error
 )
 
-func loadBaseline() error { return nil }
+// loadBaseline reads the baseline file into baselineSet once. Blank lines
+// and # comments are ignored. Entries are repo-relative so the file is
+// identical on a laptop, in CI, and in a Docker build.
+func loadBaseline() error {
+	baselineOnce.Do(func() {
+		if baselinePath == "" {
+			baselineSet = map[string]bool{}
+			return
+		}
+		f, err := os.Open(baselinePath)
+		if err != nil {
+			baselineErr = fmt.Errorf("errquality: open baseline %s: %w", baselinePath, err)
+			return
+		}
+		defer f.Close()
+		set := make(map[string]bool)
+		sc := bufio.NewScanner(f)
+		for sc.Scan() {
+			line := strings.TrimSpace(sc.Text())
+			if line == "" || strings.HasPrefix(line, "#") {
+				continue
+			}
+			set[line] = true
+		}
+		if err := sc.Err(); err != nil {
+			baselineErr = fmt.Errorf("errquality: read baseline: %w", err)
+			return
+		}
+		baselineSet = set
+	})
+	return baselineErr
+}
 
-func baselineMatches(absFile string, line int, rule string) bool { return false }
+// baselineMatches reports whether a diagnostic is already accepted. The
+// absolute path is normalized by locating the "/internal/" segment, which
+// is stable across checkouts and runners.
+func baselineMatches(absFile string, line int, rule string) bool {
+	if len(baselineSet) == 0 {
+		return false
+	}
+	rel := absFile
+	if i := strings.Index(absFile, "/internal/"); i >= 0 {
+		rel = absFile[i+1:]
+	}
+	rel = filepath.ToSlash(rel)
+	return baselineSet[fmt.Sprintf("%s:%d:%s", rel, line, rule)]
+}
 
-func hasAllowComment(fset *token.FileSet, f *ast.File, pos token.Pos) bool { return false }
-
-var _ = bufio.NewScanner
-var _ = os.Open
-var _ = filepath.ToSlash
-var _ = fmt.Sprintf
+// hasAllowComment reports whether the line directly above pos carries
+// //errquality:allow with a reason of at least 5 characters — a bare
+// marker does not suppress, so the exemption always states why.
+func hasAllowComment(fset *token.FileSet, f *ast.File, pos token.Pos) bool {
+	file := fset.File(pos)
+	if file == nil {
+		return false
+	}
+	line := file.Line(pos)
+	for _, cg := range f.Comments {
+		for _, c := range cg.List {
+			if file.Line(c.Pos()) != line-1 {
+				continue
+			}
+			if !strings.HasPrefix(c.Text, allowComment) {
+				continue
+			}
+			reason := strings.TrimSpace(strings.TrimPrefix(c.Text, allowComment))
+			reason = strings.TrimSpace(strings.TrimPrefix(reason, ":"))
+			if len(reason) >= 5 {
+				return true
+			}
+		}
+	}
+	return false
+}
