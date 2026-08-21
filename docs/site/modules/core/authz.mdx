@@ -5,8 +5,95 @@ sidebar_position: 4
 
 # authz
 
-Permissions, roles, Cedar policy engine. Provides the `Authorize()` primitive every other module's RBAC middleware leans on.
+The permission catalog, the seeded roles, org-scoped custom roles, role bindings, and the evaluator that middleware calls on every protected request. Implements `iface.AuthzProvider` — the `HasPermission` primitive every other module's RBAC gate leans on.
 
-:::note 🚧 Draft
-Cedar policy authoring, the 6-role baseline, custom permissions.
+## Permissions are never in the JWT
+
+This is the single most important thing about the module. A token carries the user's global system role and their list of org memberships — **never their permissions**. Those are resolved per request, cached in Redis for 60 seconds, and invalidated on every binding or role change.
+
+The consequence is that revocation is effectively instant. Unbinding a role or disabling an account changes what the caller can do on their *next request*, no matter how much life the bearer token has left. That property is what makes [service accounts](/modules/core/auth#service-accounts) safe to hand out, and it is why a token's remaining TTL is not a security parameter here.
+
+## The catalog builds itself
+
+No one writes to `authz_permissions` by hand. Every module declares its keys in `Permissions()`; after all modules have run `Init`, the registry hands authz the union of those declarations, and the seeded roles' permission sets are computed from the now-complete catalog.
+
+So **adding a permission means editing the owning module**, never this one — and a role rename must be a single-file change in the seeder.
+
+### Lazy heal
+
+`ListRoles` and `ListPermissions` both check whether the system-role count is zero and, if so, rebuild the catalog and roles from an in-memory copy of the specs. That is what makes the admin roles page recover by itself after a DB drop in development, with no backend restart. If you touch permission registration, keep that spec cache populated.
+
+## Roles
+
+Eleven roles are seeded, all stored as global rows. The platform-vs-tenant distinction comes from **how each is granted**, not how it is stored.
+
+**Platform-level** — granted through global bindings (empty tenant):
+
+| Role | Permission set |
+|---|---|
+| `super_admin` | `*` — a wildcard that overrides every check; the only holder by design |
+| `administrator` | Every registered permission |
+| `developer` | Everything in dev and staging; read and self scopes in production |
+| `manager` | Everything except delete and admin suffixes |
+| `operator` | Read plus self-service |
+| `guest` | Read-only |
+
+**Tenant-level** — granted through tenant-scoped bindings:
+
+| Role | Permission set |
+|---|---|
+| `org_owner` | Every non-system permission — full tenant control, but no module, cross-tenant, or platform-user management |
+| `org_admin` | The owner set minus delete suffixes |
+| `org_member` | Non-system, filtered to read/view/self/own |
+| `org_billing` | Non-system, filtered to the finance surfaces |
+| `org_viewer` | Non-system, read-only |
+
+### Two rules on every binding
+
+`CreateBinding` rejects before it inserts:
+
+1. **Separation** — a platform system role requires a *global* binding; an `org_*` or custom role requires a *tenant-scoped* one. Never mixed.
+2. **Cascade** — the caller's effective permissions in the binding's scope must be a superset of the role's. You cannot grant what you do not hold. The wildcard covers everything; a role asking for the wildcard requires the caller to hold it too.
+
+A missing granter returns an error rather than silently waiving the cascade. The platform's own sentinel granter (used when creating a tenant auto-binds its owner) bypasses the cascade but still respects separation.
+
+`CreateBinding` also starts the target's MFA enrollment grace clock when the granted role is a privileged one — idempotently, so repeated grants never reset a running clock.
+
+### How a decision is made
+
+1. `super_admin` short-circuits with the wildcard.
+2. `administrator` and `developer` inherit every permission flagged `System: true` by any module.
+3. Otherwise: the union of every active binding for this user in this org, plus their global bindings.
+4. **System permissions require a global grant.** Trying to grant one inside an org silently never matches — the evaluator requires an empty org scope for them.
+
+## Routes
+
+| Method | Path | Gate |
+|---|---|---|
+| GET | `/v1/authz/permissions` | authenticated — the catalog is system-generated |
+| GET | `/v1/tenants/{tenantId}/authz/roles` | `authz.role.read` |
+| GET | `/v1/tenants/{tenantId}/authz/bindings` | `authz.role.read` |
+| GET | `/v1/tenants/{tenantId}/authz/me` | `authz.role.read` — the caller's effective permissions here |
+| POST | `/v1/tenants/{tenantId}/authz/roles` | + MFA step-up |
+| PATCH | `/v1/tenants/{tenantId}/authz/roles/{roleId}` | + MFA step-up |
+| DELETE | `/v1/tenants/{tenantId}/authz/roles/{roleId}` | + MFA step-up |
+| POST | `/v1/tenants/{tenantId}/authz/bindings` | + MFA step-up |
+| DELETE | `/v1/tenants/{tenantId}/authz/bindings/{bindingId}` | + MFA step-up |
+
+Every mutation is behind a step-up because each one grants or revokes effective permissions.
+
+## Permissions it contributes
+
+`authz.role.read` · `authz.role.create` · `authz.role.update` · `authz.role.delete` · `authz.binding.read` · `authz.binding.create` · `authz.binding.delete`, plus two system keys — `system.modules.admin` and `system.users.admin`. Those last two gate *other* modules but are declared here, because authz owns the concept of a system permission and the seeding of the roles that inherit them.
+
+## Invariants worth knowing
+
+- **System roles are immutable** on name, description, and permissions. Only the active flag can be toggled. The service is the authoritative gate, not the UI.
+- **Seeding preserves UUIDs** — the seeder copies an existing role's UUID into the rewritten row, so bindings survive both reboots and lazy-heal runs.
+- **Deleting a role cascades its bindings**, so nothing is left pointing at a role that no longer exists.
+- **Deleting a tenant cascades too** — a post-delete hook removes that tenant's bindings and flushes the permission cache. Without it, a re-used tenant UUID would inherit dangling grants. Global bindings are untouched: they carry platform roles that outlive any tenant.
+- **Binding expiration is advisory, not a TTL.** Expired bindings are filtered out of reads but stay in the collection; the index is a plain one. A reaper is future work.
+
+:::note Not here
+User identity and the system-role field live in [user](/modules/core/user). Org ownership and membership live in [tenant](/modules/core/tenant). Enforcement is middleware, which consumes `HasPermission`. There is no audit trail of role changes in this module — auditing goes through the [compliance](/modules/core/compliance) sink.
 :::

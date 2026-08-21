@@ -5,8 +5,66 @@ sidebar_position: 2
 
 # notification
 
-Email delivery, templates, user preferences, unsubscribe tokens. Ships with a `noop` driver by default; configure SMTP at `/admin/modules` to send real mail. See [Notifications & SMTP](/operating/notifications).
+All outbound email, behind one narrow interface. Any module delivers mail through `iface.NotificationSender` without knowing anything about transport, rendering, preferences, or suppressions. The primary consumer today is [auth](/modules/core/auth) — verification and password-reset messages.
 
-:::note 🚧 Draft
-Drivers (noop, smtp), template authoring, unsubscribe tokens.
+The interface was designed multi-channel from the start (SMS, push, webhook), but **only email is implemented**.
+
+## It boots in `noop` mode
+
+A fresh install does not send mail. The default provider is `noop`, which renders the message and logs it to the backend's stdout instead of dialing an SMTP server — which is what you want in dev and CI. Crucially the module still reports `IsConfigured() = true` under `noop`, so consumers can make send calls without failing.
+
+To send real mail, switch `email.provider` to `smtp` at `/admin/modules/notification` and fill in the connection settings. See [Notifications & SMTP](/operating/notifications) for the operator walkthrough.
+
+## Config
+
+Eleven keys, seeded from env vars on first boot and owned by the ConfigService afterwards. `/admin/modules/notification` renders them as a three-group rail:
+
+| Group | Keys |
+|---|---|
+| **Delivery** | `email.provider` plus the five `email.smtp.*` fields — host, port, username, password, TLS mode |
+| **Sender** | `email.from_address`, `email.from_name`, `email.reply_to` |
+| **Branding & templates** | `app.name`, `app.support_email` |
+
+The SMTP fields carry a `DependsOn` on `email.provider`, so a default `noop` install shows **one** visible Delivery field until you switch the provider — the connection settings appear only once they can matter. `email.smtp.password` is a `FieldSecret`: AES-256-GCM at rest, never read from plain env after bootstrap.
+
+## Templates
+
+System templates ship as Go string constants and are seeded into MongoDB on `Start()`. After that **the database is the source of truth**. An admin overrides one with `PUT /v1/notifications/templates/{templateId}`, which flips `isSystem` to `false`; deleting the override reseeds the original on the next start.
+
+Rendering uses `text/template` for the subject and plain-text body, and `html/template` for the HTML body, so the HTML path gets contextual escaping. Every templated send is automatically injected with an unsubscribe URL, a preferences URL, the app name, and the support email — a template author does not have to thread those through.
+
+## Transactional mail cannot be opted out of
+
+`CanDeliver` returns true unconditionally when the message type is `transactional`. Marketing mail respects the per-category opt-out, defaulting to opted-in when no preference row exists.
+
+This is deliberate rather than an oversight: verification and password-reset mail are required for the product to function. The unsubscribe footer still links to the preferences page, with a clear note that security mail will keep arriving.
+
+**Setting the type correctly is the caller's job.** Mail the user cannot opt out of — auth flows, invoices, legal notices — must set `transactional`. Anything else must set `marketing`, or preferences are silently not honored.
+
+## Idempotency
+
+Every send accepts an idempotency key. Before dispatching, the orchestrator looks for a row with the same key created within the last hour and, if it finds one, returns the prior result unchanged — no duplicate send, no duplicate log row. Auth uses keys shaped like `verify:<user-uuid>:<token-uuid>`, so a retry is safe by construction. Supplying a key is the caller's responsibility and the only protection against duplicate sends.
+
+## Routes
+
+| Surface | Paths | Gate |
+|---|---|---|
+| Public | `GET /v1/notifications/unsubscribe` | none — consumes a token, always returns a generic success |
+| User | `GET` / `PUT /v1/notifications/preferences` | `guest`+ |
+| Admin | `GET /v1/notifications` (delivery log), `POST /v1/notifications/test`, and the four `…/templates` operations | `administrator` |
+
+`POST /v1/notifications/test` sends a message using the current settings — worth running before trusting a new SMTP config with real auth mail.
+
+## Storage
+
+Five collections: `notification_messages` (90-day TTL), `notification_templates`, `notification_preferences`, `notification_suppressions`, and `notification_unsubscribe_tokens` (30-day TTL).
+
+## GDPR
+
+Registers an `iface.PIIProducer` for the subject `notification`. Export returns the delivered-message history plus per-category preferences; erasure deletes both under either mode. Suppressions are keyed by email address rather than user UUID, so they ride the auth/email erasure path instead of this producer.
+
+:::note Not in this module
+No SMS, push, or webhook implementations. No async queue — every send is synchronous, though `NotificationResult.Status` reserves `queued` for a future upgrade. No marketing automation, segmentation, or A/B testing. No bounce or complaint ingestion: suppressions are added manually until the SMTP provider offers a webhook. DKIM signing is the relay's job.
+
+**Never bypass the orchestrator** by calling the email sender directly — preferences, suppressions, idempotency, and the delivery log all hang off it.
 :::
