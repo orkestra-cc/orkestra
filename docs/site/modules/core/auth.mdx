@@ -79,6 +79,43 @@ Reads require `auth.service_accounts.read`. **Every mutation requires `auth.serv
 - **Fails closed everywhere else.** Password login, every OAuth flow, and all refresh-token read paths reject a `service` principal. The client-credentials grant is the only path that can mint a token for one.
 - **No privileged roles.** `super_admin` and `administrator` can never be assigned to a service account, and that guard fails closed even when the pre-read needed to classify the target is unavailable — the assignment is refused rather than risked.
 
+## Session lifetime
+
+Three separate lifetimes govern how long a user stays signed in. Before
+ADR-0017 only the first two existed, and the second was never documented as
+a timeout at all.
+
+| Lifetime | Controlled by | Default | What it means |
+|---|---|---|---|
+| Access token | admin `accessTokenTTL` → `JWT_ACCESS_TOKEN_EXPIRY` → 15m | 15m | How long a minted access token is accepted. Range 1m–24h; longer values are clamped, because the Redis revocation denylist stores entries for 24h + 1min and a token must never outlive its own revocation entry. |
+| Idle window | `JWT_REFRESH_TOKEN_EXPIRY` | 7d | **This is the idle timeout.** Rotation writes a fresh `now + this` on every refresh, so a session ends only after this long *without* activity — it is not a separate control. |
+| Absolute cap | admin `sessionAbsoluteTTL` | 30d (`720h`) | The maximum total age of a session, measured from login, independent of activity. Range 1h–89d; **clearing the field disables the cap.** |
+
+Reaching the absolute cap is a **logout**, not a denial: the session's refresh
+tokens are revoked, the session document is marked inactive, and the session
+id is pushed onto the revocation denylist — the same three steps as an
+administrative termination. The client receives a 401 with
+`code: "session_max_age_reached"`.
+
+Both refresh paths enforce the cap. `GET /v1/auth/session` mints an access
+token without rotating the refresh cookie (a deliberate anti-replay split), so
+a client calling only that endpoint would otherwise hold a session open
+forever.
+
+### Upgrading
+
+Deploying the absolute cap for the first time signs out any session that began
+more than `sessionAbsoluteTTL` ago, on its next refresh. Clear the field at
+`/admin/modules` to keep the previous unbounded behaviour.
+
+### Retention
+
+The three lifetimes above govern authentication; retention is a separate
+question again. Session **documents** are audit and device history that the
+risk scorer reads — nothing authenticates off them — and are deleted 90 days
+after `expiresAt` by a Mongo TTL index. Refresh-**token** rows have their own
+retention story, covered next.
+
 ## Refresh-token retention
 
 Expired refresh-token rows are deleted by a background sweep the module starts with itself, not by a Mongo TTL index — the row may only go once its own `expiresAt` is past, and the first cleanup of an upgraded install needs bounded progress and a visible backlog, which a TTL monitor gives you neither of. See [ADR-0017](/adrs/session-lifetime-and-token-retention).
@@ -108,7 +145,7 @@ Keys in the **system set** are granted by the `super_admin` / `administrator` / 
 
 auth is by far the largest configuration surface in the base — 63 fields at `/admin/modules/auth`, arranged into a group rail: **Registration**, **Login & Sessions**, **Password Policy**, **MFA**, **OAuth Providers** (with Google, Apple, GitHub, and Discord as child nodes), **Anti-abuse & Notifications**, and **Sessions & Account**. Fields are seeded from their `EnvVar` on first boot and owned by the ConfigService thereafter — see [Module configuration](/operating/module-configuration) and [OAuth providers](/operating/oauth-providers) for the operator walkthrough.
 
-The **Login & Sessions** group's `sessionAbsoluteTTL` caps total session age from login (default 30 days, range 1h–89d), independent of the refresh token's idle-timeout behaviour — clearing the field disables the cap. It is a configuration declaration; see [ADR-0017](/adrs/session-lifetime-and-token-retention) for the design and enforcement status.
+The **Login & Sessions** group's `sessionAbsoluteTTL` is the admin-facing field behind the absolute cap — see [Session lifetime](#session-lifetime) above for what it does and enforces.
 
 :::note Where the routes are
 This page names the surfaces, not all ~90 of the module's operations. The generated per-endpoint reference — request/response schemas included — is under [API Reference](/api), grouped by tag: Authentication, MFA, WebAuthn, Auth - Device Trust, Service Accounts, Mobile, and Self-Service.
