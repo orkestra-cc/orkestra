@@ -88,6 +88,8 @@ Collection name constants live in `repository/repository.go` (`CollTenants`, `Co
 
 Handlers map `ErrProvisioningLocked` → 409. The read-only `GET /v1/admin/tenants/provisioning-policy` reports both modes + active counts and backs the policy card on the tenant management pages (the modes themselves are edited at `/admin/modules/tenant`).
 
+`ConfigGroups()` splits the two fields onto the full-page rail along the tier boundary: `provisioning.internal` ("Internal provisioning (Tier-1)") holds `provisioning.internal.mode`, `provisioning.external` ("External provisioning (Tier-2)") holds `provisioning.external.mode` — one field per group, the minimum that promotes `/admin/modules/tenant` off the flat-form degradation path. Dropping `ConfigGroups()` entirely reverts the page to the flat single-card form with no other change required — `ConfigSchema()`'s `Group` tags become inert.
+
 ## HTTP endpoints
 
 Three route groups, each with a different gate:

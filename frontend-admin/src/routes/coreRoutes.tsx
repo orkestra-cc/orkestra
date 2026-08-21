@@ -35,11 +35,11 @@ const SOC2EvidencePage = lazy(() => import('pages/admin/compliance/soc2'));
 const ModuleManagement = lazy(() => import('pages/admin/modules'));
 const ModuleDetail = lazy(() => import('pages/admin/modules/detail'));
 const NavigationAdminPage = lazy(() => import('pages/admin/navigation'));
-// ADR-0005 Phase F — observability admin page (runtime log-level mutation).
-const LogLevelsPage = lazy(
-  () => import('pages/admin/observability/log-levels')
-);
 const RoleManagement = lazy(() => import('pages/admin/roles'));
+const ServiceAccountsPage = lazy(() => import('pages/admin/service-accounts'));
+const ServiceAccountDetail = lazy(
+  () => import('pages/admin/service-accounts/detail')
+);
 const InternalTenants = lazy(() => import('pages/admin/internal-tenants'));
 const InternalTenantDetail = lazy(
   () => import('pages/admin/internal-tenants/detail')
@@ -214,21 +214,14 @@ export function buildCoreRoutes(
                   )
                 },
                 {
-                  // ADR-0005 Phase F — runtime log-level admin.
-                  // Administrator-only by NavItem MinRole; the
-                  // ProtectedRoute below is the second gate.
+                  // ADR-0005 Phase F — legacy bookmark compatibility.
+                  // The logging module workspace is the authoritative UI.
                   path: 'observability/log-levels',
                   element: (
-                    <ProtectedRoute
-                      requiredPermissions={[['super_admin', 'administrator']]}
-                    >
-                      <Suspense
-                        key="admin-observability-log-levels"
-                        fallback={<OrkestraLoader />}
-                      >
-                        <LogLevelsPage />
-                      </Suspense>
-                    </ProtectedRoute>
+                    <Navigate
+                      to="/admin/modules/logging?section=levels"
+                      replace
+                    />
                   )
                 },
                 {
@@ -246,6 +239,51 @@ export function buildCoreRoutes(
                     >
                       <Suspense key="admin-roles" fallback={<OrkestraLoader />}>
                         <RoleManagement />
+                      </Suspense>
+                    </ProtectedRoute>
+                  )
+                },
+                {
+                  // ADR-0014 — client-credentials service accounts admin.
+                  path: 'service-accounts',
+                  element: (
+                    <ProtectedRoute
+                      requiredPermissions={[
+                        [
+                          'auth.service_accounts.read',
+                          'super_admin',
+                          'administrator'
+                        ]
+                      ]}
+                    >
+                      <Suspense
+                        key="admin-service-accounts"
+                        fallback={<OrkestraLoader />}
+                      >
+                        <ServiceAccountsPage />
+                      </Suspense>
+                    </ProtectedRoute>
+                  )
+                },
+                {
+                  // ADR-0014 — service account detail: credentials, issue/
+                  // rotate, revoke, enable/disable, rename.
+                  path: 'service-accounts/:id',
+                  element: (
+                    <ProtectedRoute
+                      requiredPermissions={[
+                        [
+                          'auth.service_accounts.read',
+                          'super_admin',
+                          'administrator'
+                        ]
+                      ]}
+                    >
+                      <Suspense
+                        key="admin-service-account-detail"
+                        fallback={<OrkestraLoader />}
+                      >
+                        <ServiceAccountDetail />
                       </Suspense>
                     </ProtectedRoute>
                   )

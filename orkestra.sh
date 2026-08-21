@@ -541,18 +541,9 @@ check_docker_running() {
     fi
 }
 
-# Ensure the RS256 JWT keys exist on the host and are readable by whatever
-# UID the backend container runs as.
-#
-# The keys live at docker/keys/{jwt-private,jwt-public}.pem (host) and are
-# bind-mounted read-only into the backend. The catch: the backend runs under
-# different UIDs across profiles — the dev full-stack compose pins
-# `user: "1000:1000"`, while the prebuilt minimal/full images run as their
-# default `nonroot` user (UID 65532). A private key generated under the dev
-# profile lands as 0600 owned by 1000, which `nonroot` then cannot read —
-# the auth module silently disables itself ("JWT keys not loaded") and every
-# login fails with a confusing 400. Keeping these local-dev keys world-readable
-# (0644) lets every profile read them regardless of container UID.
+# Ensure the RS256 JWT keys exist on the host with safe permissions. Never
+# make the private signing key group/world-readable to work around a container
+# UID mismatch; deployments must align ownership or use a proper secret mount.
 #
 # Non-fatal if keys are missing (init/make handles generation); we only warn.
 ensure_jwt_keys_readable() {
@@ -565,27 +556,9 @@ ensure_jwt_keys_readable() {
         return 0
     fi
 
-    # Fix any key that is not world-readable. These are throwaway local-dev
-    # keys, so 0644 is intentional (see scripts/generate-jwt-keys.sh). We test
-    # the world-read bit (0004) directly so the container UID is irrelevant.
-    local fixed=no f mode
-    for f in "$priv" "$pub"; do
-        mode=$(stat -c '%a' "$f" 2>/dev/null) || continue
-        if (( 0$mode & 0004 )); then
-            continue
-        fi
-        if chmod a+r "$f" 2>/dev/null; then
-            fixed=yes
-        else
-            p_warn "JWT key $f is not world-readable and could not be chmod'd — login may fail under the nonroot image"
-        fi
-    done
-
-    if [ "$fixed" = yes ]; then
-        p_ok "JWT keys made readable (chmod a+r) so the nonroot backend image can load them"
-    else
-        p_ok "JWT keys present and readable"
-    fi
+    chmod 600 "$priv" 2>/dev/null || die "Cannot secure JWT private key permissions: $priv"
+    chmod 644 "$pub" 2>/dev/null || die "Cannot set JWT public key permissions: $pub"
+    p_ok "JWT keys present; private key permissions restricted to owner"
 }
 
 # Pre-flight: detect containers whose explicit `container_name:` matches
@@ -1209,6 +1182,14 @@ fullstack_execute_deploy() {
     # Docker name-collision error. Volumes are preserved.
     preflight_reclaim_containers "$INFRA_COMPOSE"
     preflight_reclaim_containers "$COMPOSE_FILE"
+
+    local -a compose_files=(-f "$INFRA_COMPOSE" -f "$COMPOSE_FILE")
+    # Preserve the backend's Loki/Grafana environment override whenever this
+    # stack already has observability containers. The overlay is only valid as
+    # part of this merged stack, never on its own.
+    if observability_project_active; then
+        compose_files+=(-f "$OBSERVABILITY_COMPOSE")
+    fi
     with_spinner "Ensuring infrastructure services are running" \
         docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d mongodb redis rustfs
     sleep 5
@@ -1232,22 +1213,22 @@ fullstack_execute_deploy() {
             # One project, one `up -d` — do NOT `down` first (that would
             # tear down infra too, since infra is now part of this project).
             with_spinner "Starting services" \
-                docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d
+                docker compose "${compose_files[@]}" --env-file "$ENV_FILE" up -d
         else
             if [ "$DEPLOY_SCOPE" = "backend" ]; then
-                docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE" --env-file "$ENV_FILE" stop "$BACKEND_SERVICE" 2> /dev/null || true
+                docker compose "${compose_files[@]}" --env-file "$ENV_FILE" stop "$BACKEND_SERVICE" 2> /dev/null || true
                 with_spinner "Restarting backend" \
-                    docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d "$BACKEND_SERVICE"
+                    docker compose "${compose_files[@]}" --env-file "$ENV_FILE" up -d "$BACKEND_SERVICE"
             fi
             if [ "$DEPLOY_SCOPE" = "frontend-admin" ]; then
-                docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE" --env-file "$ENV_FILE" stop "$FRONTEND_SERVICE" 2> /dev/null || true
+                docker compose "${compose_files[@]}" --env-file "$ENV_FILE" stop "$FRONTEND_SERVICE" 2> /dev/null || true
                 with_spinner "Restarting admin frontend" \
-                    docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d "$FRONTEND_SERVICE"
+                    docker compose "${compose_files[@]}" --env-file "$ENV_FILE" up -d "$FRONTEND_SERVICE"
             fi
             if [ "$DEPLOY_SCOPE" = "frontend-admin+backend" ]; then
-                docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE" --env-file "$ENV_FILE" stop "$FRONTEND_SERVICE" "$BACKEND_SERVICE" 2> /dev/null || true
+                docker compose "${compose_files[@]}" --env-file "$ENV_FILE" stop "$FRONTEND_SERVICE" "$BACKEND_SERVICE" 2> /dev/null || true
                 with_spinner "Restarting admin frontend and backend" \
-                    docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d "$FRONTEND_SERVICE" "$BACKEND_SERVICE"
+                    docker compose "${compose_files[@]}" --env-file "$ENV_FILE" up -d "$FRONTEND_SERVICE" "$BACKEND_SERVICE"
             fi
         fi
         with_spinner "Waiting for services to initialize" sleep 30
@@ -1469,8 +1450,8 @@ observability_check_file() {
     fi
 }
 
-# Observability can be started standalone (before any app deploy ever ran
-# in this shell), so resolve ENV/COMPOSE_FILE + the stack identity here —
+# The observability command can run before any app deploy ran in this shell,
+# so resolve ENV/COMPOSE_FILE + the stack identity here —
 # mirrors fullstack_init_env() without the missing-.env wizard prompt.
 observability_init_env() {
     if [ -z "${ENV:-}" ] || [ -z "${COMPOSE_FILE:-}" ]; then
@@ -1483,16 +1464,72 @@ observability_init_env() {
     resolve_stack_identity
 }
 
-# Populates the global OBS_SERVICES array with observability's own service
-# names (otel-collector, tempo, prometheus, loki, promtail, grafana) so
-# up/down/reset can target just the overlay within the merged project.
-declare -a OBS_SERVICES=()
+# This allowlist is deliberately explicit. The overlay also contains a partial
+# `backend` service used only to merge trusted Loki/Grafana environment values,
+# so asking Compose to parse that file alone is invalid and must never become
+# service discovery. Keeping service and volume ownership here makes an empty
+# discovery result incapable of widening a lifecycle command to the project.
+declare -ar OBS_SERVICES=(otel-collector tempo prometheus loki promtail grafana)
+declare -ar OBS_VOLUMES=(tempo-data prometheus-data loki-data promtail-positions grafana-data)
+
+# Validate the explicit ownership lists against the only valid configuration:
+# infra + app + observability. Any Compose failure or missing expected resource
+# aborts before a lifecycle command can run.
 observability_list_services() {
-    OBS_SERVICES=()
-    local svc
-    while IFS= read -r svc; do
-        [ -n "$svc" ] && OBS_SERVICES+=("$svc")
-    done < <(get_services "$OBSERVABILITY_COMPOSE")
+    local services volumes expected
+    if ! services=$(docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE" -f "$OBSERVABILITY_COMPOSE" \
+        --env-file "$ENV_FILE" config --services); then
+        die "Observability compose validation failed; no lifecycle action was taken."
+    fi
+    if ! volumes=$(docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE" -f "$OBSERVABILITY_COMPOSE" \
+        --env-file "$ENV_FILE" config --volumes); then
+        die "Observability volume validation failed; no lifecycle action was taken."
+    fi
+    for expected in "${OBS_SERVICES[@]}"; do
+        if ! grep -Fxq "$expected" <<< "$services"; then
+            die "Observability service '$expected' is missing from the merged compose stack."
+        fi
+    done
+    for expected in "${OBS_VOLUMES[@]}"; do
+        if ! grep -Fxq "$expected" <<< "$volumes"; then
+            die "Observability volume '$expected' is missing from the merged compose stack."
+        fi
+    done
+}
+
+observability_remove_volumes() {
+    local volume volume_name
+    for volume in "${OBS_VOLUMES[@]}"; do
+        volume_name="${COMPOSE_PROJECT_NAME}_${volume}"
+        if docker volume inspect "$volume_name" > /dev/null 2>&1; then
+            docker volume rm "$volume_name" > /dev/null || \
+                die "Failed to remove observability volume '$volume_name'."
+        fi
+    done
+}
+
+observability_backend_running() {
+    [ -n "$(docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE" --env-file "$ENV_FILE" \
+        ps -q "$BACKEND_SERVICE" 2> /dev/null)" ]
+}
+
+observability_project_active() {
+    local container_ids
+    container_ids=$(docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE" -f "$OBSERVABILITY_COMPOSE" \
+        --env-file "$ENV_FILE" ps -q "${OBS_SERVICES[@]}" 2> /dev/null) || return 1
+    [ -n "$container_ids" ]
+}
+
+observability_apply_backend_override() {
+    observability_backend_running || return 0
+    docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE" -f "$OBSERVABILITY_COMPOSE" --env-file "$ENV_FILE" \
+        up -d --no-deps "$BACKEND_SERVICE"
+}
+
+observability_restore_backend_config() {
+    observability_backend_running || return 0
+    docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE" --env-file "$ENV_FILE" \
+        up -d --no-deps "$BACKEND_SERVICE"
 }
 
 observability_up() {
@@ -1506,7 +1543,9 @@ observability_up() {
     echo
     with_spinner "Starting observability stack" \
         docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE" -f "$OBSERVABILITY_COMPOSE" --env-file "$ENV_FILE" \
-        up -d "${OBS_SERVICES[@]}"
+        up -d "${OBS_SERVICES[@]}" || die "Observability start failed."
+    with_spinner "Applying backend observability configuration" \
+        observability_apply_backend_override || die "Backend observability configuration failed."
     echo
     p_ok "Observability stack is up."
     observability_info
@@ -1521,7 +1560,9 @@ observability_down() {
     echo
     with_spinner "Stopping observability stack" \
         docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE" -f "$OBSERVABILITY_COMPOSE" --env-file "$ENV_FILE" \
-        down "${OBS_SERVICES[@]}"
+        rm -sf "${OBS_SERVICES[@]}" || die "Observability stop failed."
+    with_spinner "Restoring backend application configuration" \
+        observability_restore_backend_config || die "Backend configuration restore failed."
     echo
     p_ok "Observability stack stopped (volumes preserved)."
 }
@@ -1542,9 +1583,13 @@ observability_reset() {
     if [ "$confirm" = "ask" ]; then
         ask_yes_no "Proceed with reset?" "n" || { p_warn "Operation cancelled."; return; }
     fi
-    with_spinner "Removing observability stack and volumes" \
+    with_spinner "Removing observability containers" \
         docker compose -f "$INFRA_COMPOSE" -f "$COMPOSE_FILE" -f "$OBSERVABILITY_COMPOSE" --env-file "$ENV_FILE" \
-        down -v "${OBS_SERVICES[@]}"
+        rm -sfv "${OBS_SERVICES[@]}" || die "Observability container removal failed."
+    with_spinner "Removing observability volumes" observability_remove_volumes || \
+        die "Observability volume removal failed."
+    with_spinner "Restoring backend application configuration" \
+        observability_restore_backend_config || die "Backend configuration restore failed."
     p_ok "Observability state wiped."
 }
 
@@ -1631,7 +1676,11 @@ list_all_services() {
             files+=("$COMPOSE_FILE")
             ;;
         observability)
-            files+=("$OBSERVABILITY_COMPOSE")
+            for svc in "${OBS_SERVICES[@]}"; do
+                SERVICES+=("$svc")
+                SERVICE_FILE["$svc"]="$OBSERVABILITY_COMPOSE"
+            done
+            return 0
             ;;
         *)
             return 1

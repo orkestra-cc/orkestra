@@ -2,6 +2,15 @@
   "app": {
     "name": "Orkestra"
   },
+  "common": {
+    "secretOnce": {
+      "warningPrefix": "Salva subito questo valore.",
+      "warningBody": "Questo valore non verrà più mostrato: copialo in un posto sicuro prima di chiudere questa finestra.",
+      "copy": "Copia",
+      "copied": "Copiato",
+      "ackLabel": "Ho salvato questo valore in un posto sicuro."
+    }
+  },
   "nav": {
     "toggleNavigation": "Mostra/nascondi navigazione",
     "navigationUnavailable": "Navigazione non disponibile",
@@ -1449,6 +1458,103 @@
       "systemBadge": "sistema"
     }
   },
+  "adminServiceAccounts": {
+    "title": "Account di servizio",
+    "description": "Identità a credenziali client usate da altri servizi per chiamare l'API di Orkestra.",
+    "newButton": "Nuovo account di servizio",
+    "loading": "Caricamento degli account di servizio…",
+    "loadFailed": "Impossibile caricare gli account di servizio.",
+    "empty": "Nessun account di servizio.",
+    "columns": {
+      "name": "Nome",
+      "email": "Email",
+      "status": "Stato",
+      "activeCredentials": "Credenziali attive",
+      "createdAt": "Creato il"
+    },
+    "status": {
+      "active": "Attivo",
+      "inactive": "Inattivo"
+    },
+    "createModal": {
+      "title": "Crea account di servizio",
+      "secretTitle": "Account di servizio creato",
+      "nameLabel": "Nome",
+      "namePlaceholder": "es. hermes-agent",
+      "nameRequired": "Il nome è obbligatorio.",
+      "nameTooLong": "Il nome deve avere al massimo 100 caratteri.",
+      "cancel": "Annulla",
+      "create": "Crea",
+      "creating": "Creazione in corso…",
+      "clientSecretLabel": "Client secret",
+      "clientIdLabel": "Client ID",
+      "done": "Fatto",
+      "successToast": "Account di servizio \"{{name}}\" creato"
+    },
+    "detail": {
+      "breadcrumbList": "Account di servizio",
+      "loading": "Caricamento dell'account di servizio…",
+      "notFound": "Account di servizio non trovato.",
+      "backToList": "Torna agli account di servizio",
+      "tooltipEnable": "Abilita questo account di servizio",
+      "tooltipDisable": "Disabilita questo account di servizio",
+      "ariaEnable": "Abilita account di servizio",
+      "ariaDisable": "Disabilita account di servizio",
+      "toggleEnabledToast": "\"{{name}}\" abilitato",
+      "toggleDisabledToast": "\"{{name}}\" disabilitato",
+      "toggleErrorToast": "Impossibile aggiornare lo stato: {{error}}",
+      "renameButton": "Rinomina",
+      "renameCancel": "Annulla",
+      "renameSave": "Salva",
+      "renameSaving": "Salvataggio…",
+      "renameSuccessToast": "Rinominato in \"{{name}}\"",
+      "renameErrorToast": "Impossibile rinominare: {{error}}",
+      "manageAccessLink": "Gestisci ruoli e appartenenza",
+      "credentialsTitle": "Credenziali",
+      "credentialsDescription": "Segreti a credenziali client con cui questo account di servizio può autenticarsi.",
+      "issueButton": "Emetti credenziale",
+      "emptyCredentials": "Nessuna credenziale emessa.",
+      "columns": {
+        "clientId": "Client ID",
+        "label": "Etichetta",
+        "createdAt": "Creata il",
+        "lastUsedAt": "Ultimo utilizzo",
+        "status": "Stato"
+      },
+      "credentialStatus": {
+        "active": "Attiva",
+        "revoked": "Revocata"
+      },
+      "tooltipRevoke": "Revoca questa credenziale",
+      "ariaRevoke": "Revoca credenziale",
+      "revokeSuccessToast": "Credenziale revocata",
+      "revokeErrorToast": "Impossibile revocare la credenziale: {{error}}",
+      "revokeModal": {
+        "title": "Revoca credenziale",
+        "body": "Questa operazione invalida immediatamente il client secret di questa credenziale. Qualsiasi servizio che lo utilizza non potrà più autenticarsi.",
+        "cancel": "Annulla",
+        "confirm": "Revoca",
+        "confirming": "Revoca in corso…"
+      }
+    },
+    "issueModal": {
+      "title": "Emetti credenziale",
+      "secretTitle": "Credenziale emessa",
+      "labelLabel": "Etichetta",
+      "labelPlaceholder": "es. produzione",
+      "labelTooLong": "L'etichetta deve avere al massimo 60 caratteri.",
+      "cancel": "Annulla",
+      "issue": "Emetti",
+      "issuing": "Emissione in corso…",
+      "successToast": "Credenziale emessa"
+    },
+    "errors": {
+      "duplicate": "Esiste già un account di servizio con questo nome.",
+      "validation": "Controlla il nome dell'account di servizio e riprova.",
+      "generic": "Qualcosa è andato storto. Riprova.",
+      "credentialCap": "Questo account di servizio ha già due credenziali attive. Revocane una prima di emetterne un'altra."
+    }
+  },
   "adminObservability": {
     "logLevels": {
       "title": "Livelli di log",
@@ -1481,6 +1587,140 @@
       "revert": "Ripristina",
       "setAria": "Imposta il livello di log per {{module}}",
       "revertAria": "Ripristina {{module}} al livello di log globale"
+    },
+    "loggingWorkspace": {
+      "loadFailed": "Impossibile caricare le operazioni di logging. I controlli dei livelli e la diagnostica non sono temporaneamente disponibili.",
+      "loading": "Caricamento delle operazioni di logging…",
+      "loadingAria": "Caricamento delle operazioni di logging",
+      "unsaved": {
+        "title": "Modifiche permanenti non salvate",
+        "body": "Uscendo dall'area di logging, la bozza dei livelli di log permanenti verrà eliminata.",
+        "stay": "Resta nell'area",
+        "leave": "Elimina ed esci"
+      },
+      "sections": {
+        "overview": "Panoramica",
+        "operations": "Operazioni",
+        "levels": "Livelli permanenti",
+        "diagnostics": "Diagnostica",
+        "logs": "Anteprima log"
+      },
+      "levelNames": {
+        "debug": "debug",
+        "info": "info",
+        "warn": "warn",
+        "error": "error"
+      },
+      "levelDescriptions": {
+        "debug": "Volume massimo. Usalo per poco tempo durante un'indagine e controlla i log per eventuali dati sensibili.",
+        "info": "Registra gli eventi operativi ordinari e i cambiamenti di stato rilevanti.",
+        "warn": "Registra condizioni che possono richiedere attenzione senza interrompere il servizio.",
+        "error": "Registra gli errori che impediscono il completamento di un'operazione."
+      },
+      "overview": {
+        "global": "Livello globale",
+        "overrides": "Override permanenti",
+        "overridesSubtitle": "Su {{count}} moduli registrati",
+        "diagnostics": "Diagnostiche attive",
+        "diagnosticsActive": "Gli override temporanei richiedono attenzione",
+        "diagnosticsIdle": "Nessun override temporaneo",
+        "provider": "Provider dei log",
+        "available": "Disponibile",
+        "unavailable": "Non disponibile",
+        "providerReady": "L'anteprima limitata è pronta",
+        "providerOptional": "La gestione dei livelli resta disponibile"
+      },
+      "levels": {
+        "title": "Livelli di log permanenti",
+        "description": "Prepara qui l'intera configurazione persistente. Le modifiche entrano in vigore insieme solo dopo l'applicazione.",
+        "globalLabel": "Livello globale ereditato dai moduli senza override",
+        "globalAria": "Livello di log globale permanente",
+        "moduleAria": "Livello di log permanente per {{module}}",
+        "inherit": "Eredita il globale",
+        "debugWarning": "Il logging di debug può generare molto volume ed esporre contesto operativo sensibile. Limitalo e controllalo rapidamente.",
+        "empty": "Non ci sono moduli registrati disponibili per override permanenti.",
+        "columns": {
+          "module": "Modulo",
+          "permanent": "Override permanente",
+          "inherited": "Globale ereditato",
+          "effective": "Effettivo corrente"
+        },
+        "dirtyCount_one": "{{count}} modifica non salvata",
+        "dirtyCount_other": "{{count}} modifiche non salvate",
+        "discard": "Annulla",
+        "apply": "Applica modifiche",
+        "conflict": "Un altro operatore ha modificato questi livelli. Ricarica lo snapshot più recente prima di continuare.",
+        "reloadSnapshot": "Ricarica snapshot recente",
+        "saveFailed": "Impossibile applicare i livelli permanenti. Controlla la bozza e riprova."
+      },
+      "diagnostics": {
+        "createTitle": "Avvia una diagnostica",
+        "description": "Modifica temporaneamente la soglia di un modulo. L'azione ha effetto immediato e non cambia l'override permanente.",
+        "moduleLabel": "Modulo",
+        "moduleAria": "Modulo diagnostico",
+        "levelLabel": "Livello temporaneo",
+        "levelAria": "Livello diagnostico",
+        "durationLabel": "Durata",
+        "durationAria": "Durata diagnostica",
+        "duration15": "15 minuti",
+        "duration60": "1 ora",
+        "duration240": "4 ore",
+        "durationNone": "Senza scadenza",
+        "start": "Avvia diagnostica",
+        "debugWarning": "La diagnostica debug può generare molti log contenenti contesto operativo sensibile.",
+        "noExpiryDraftWarning": "Le diagnostiche senza scadenza restano attive dopo i riavvii e devono essere interrotte da un operatore.",
+        "activeTitle": "Diagnostiche attive",
+        "empty": "Nessuna diagnostica attiva.",
+        "startedBy": "Avviata da {{user}} il {{date}}",
+        "remainingMinutes": "{{minutes}}m {{seconds}}s rimanenti",
+        "remainingHours": "{{hours}}h {{minutes}}m {{seconds}}s rimanenti",
+        "noExpiryWarning": "Senza scadenza — questa diagnostica resta attiva finché non viene interrotta.",
+        "stop": "Interrompi",
+        "stopAria": "Interrompi diagnostica per {{module}}",
+        "actionFailed": "L'azione diagnostica non è riuscita. Ricarica lo snapshot e riprova."
+      },
+      "logs": {
+        "title": "Anteprima log recenti",
+        "description": "Scegli i filtri vincolati, poi seleziona Aggiorna per esaminare fino a 100 eventi. Usa Grafana per un'indagine completa.",
+        "privacyNotice": "Gli attributi strutturati sono minimizzati e redatti. I messaggi in testo libero possono comunque contenere dati personali; verificali prima di condividerli.",
+        "statusAria": "Stato dell'anteprima log",
+        "providerUnavailable": "L'anteprima dei log non è disponibile in questo deployment.",
+        "moduleLabel": "Modulo",
+        "moduleAria": "Modulo dell'anteprima log",
+        "windowLabel": "Intervallo temporale",
+        "windowAria": "Intervallo temporale dell'anteprima log",
+        "windowMinutes_one": "{{count}} minuto",
+        "windowMinutes_other": "{{count}} minuti",
+        "levelLabel": "Livello",
+        "levelAria": "Livello dell'anteprima log",
+        "allLevels": "Tutti i livelli",
+        "searchLabel": "Contiene testo",
+        "searchAria": "Ricerca testuale nell'anteprima log",
+        "searchPlaceholder": "Testo del messaggio",
+        "refresh": "Aggiorna",
+        "refreshAria": "Aggiorna anteprima log",
+        "autoRefresh": "Aggiornamento automatico",
+        "autoRefreshAria": "Aggiorna ogni cinque secondi",
+        "limitHint": "I risultati sono limitati a 100 eventi.",
+        "loading": "Caricamento eventi recenti…",
+        "loadFailed": "L'anteprima dei log non è riuscita. Controlla il provider e riprova.",
+        "empty": "Nessun evento di log corrisponde a questi filtri.",
+        "resultsCount_one": "È visualizzato {{count}} evento di log.",
+        "resultsCount_other": "Sono visualizzati {{count}} eventi di log.",
+        "openGrafana": "Apri in Grafana",
+        "noAttributes": "Nessuno",
+        "showAttributes": "Mostra attributi",
+        "hideAttributes": "Nascondi attributi",
+        "showAttributesAria": "Mostra attributi di {{module}} alle {{date}}",
+        "hideAttributesAria": "Nascondi attributi di {{module}} alle {{date}}",
+        "columns": {
+          "timestamp": "Timestamp",
+          "level": "Livello",
+          "module": "Modulo",
+          "message": "Messaggio",
+          "attributes": "Attributi minimizzati"
+        }
+      }
     }
   },
   "adminNavigation": {
@@ -1851,7 +2091,8 @@
     "status": {
       "active": "Attivo",
       "inactive": "Inattivo"
-    }
+    },
+    "serviceBadge": "Servizio"
   },
   "adminCompliance": {
     "pageTitle": "Compliance",
@@ -2459,6 +2700,18 @@
         }
       }
     },
+    "compliance": {
+      "groups": {
+        "soc2": { "label": "Evidenze SOC2", "desc": "La pagina e l'API delle evidenze SOC2, disattivate salvo che tu persegua la certificazione." },
+        "retention": { "label": "Retention e DSR", "desc": "Per quanto tempo sono conservati i tombstone anonimizzati e gli export DSR generati." }
+      },
+      "fields": {
+        "soc2_enabled": { "label": "Evidenze SOC2", "desc": "Espone la pagina admin e l'API delle evidenze SOC2. Disattivato di default — abilitalo solo per deployment che perseguono la certificazione SOC2." },
+        "auto_cleanup_enabled": { "label": "Auto-cleanup retention", "desc": "Esegue un job giornaliero che cancella definitivamente i tombstone anonimizzati oltre la finestra di retention. DISATTIVO di default — è una cancellazione massiva irreversibile." },
+        "retention_years": { "label": "Anni di retention", "desc": "Anni per cui un tombstone anonimizzato è conservato prima che l'auto-cleanup possa cancellarlo definitivamente." },
+        "export_retention_days": { "label": "Retention export (giorni)", "desc": "Giorni per cui un export DSR generato resta scaricabile prima di scadere." }
+      }
+    },
     "notification": {
       "groups": {
         "delivery": {
@@ -2491,6 +2744,36 @@
         "app": {
           "name": { "label": "Nome app (nei template)" },
           "support_email": { "label": "Email di supporto (nei template)" }
+        }
+      }
+    },
+    "tenant": {
+      "groups": {
+        "provisioning": {
+          "internal": {
+            "label": "Provisioning interno (Tier-1)",
+            "desc": "Chi può creare tenant interni, di tier operatore."
+          },
+          "external": {
+            "label": "Provisioning esterno (Tier-2)",
+            "desc": "Chi può creare tenant esterni, di tier client."
+          }
+        }
+      },
+      "fields": {
+        "provisioning": {
+          "internal": {
+            "mode": {
+              "label": "Creazione tenant interni",
+              "desc": "Chi può creare tenant interni (tier operatore). open: qualsiasi utente autenticato. manual (default): solo gli amministratori di piattaforma (system.tenants.admin). single: blocca la piattaforma su un unico tenant interno — una volta che ne esiste uno, la creazione è bloccata. Un'installazione nuova parte con zero tenant interni; il primo si crea dal wizard di setup o dall'admin UI."
+            }
+          },
+          "external": {
+            "mode": {
+              "label": "Creazione tenant esterni",
+              "desc": "Chi può creare tenant esterni (tier client). open: i client self-serve sono provisionati automaticamente. manual (default): solo gli amministratori di piattaforma creano tenant client e li assegnano a un utente Tier-2 — la registrazione self-serve non provisiona mai automaticamente un tenant e gli utenti esterni non possono crearne uno."
+            }
+          }
         }
       }
     }

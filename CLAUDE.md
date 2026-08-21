@@ -80,7 +80,7 @@ A fork's optional modules are **instantiated, initialized, and routed** at boot 
 | **authz**        | Permissions, roles, Cedar policy engine                                                                           |
 | **auth**         | Email/password (argon2id) + OAuth 2.1, JWT, sessions, RBAC                                                        |
 | **navigation**   | Dynamic menu from module NavItems + persisted reorder via `/admin/modules/navigation`                             |
-| **logging**      | Runtime log-level admin (ADR-0005 Phase F): `log_levels` collection + `/admin/observability/log-levels` UI — [docs](backend/internal/core/logging/CLAUDE.md) |
+| **logging**      | Tier-1 runtime logging workspace: permanent levels, expiring diagnostics, and bounded log preview at `/admin/modules/logging` — [docs](backend/internal/core/logging/CLAUDE.md) |
 | **compliance**   | Audit trail + GDPR DSR (export/erasure), per-tenant KMS crypto-shred, legal hold, retention, SOC2 evidence (ADR-0009) — [docs](backend/internal/core/compliance/CLAUDE.md) |
 
 Load order (topologically sorted by `Dependencies()`): `user` → `notification` → `tenant` → `authz` → `auth` → `navigation` → `logging` → `compliance`. Auth depends on notification (optional at runtime) so it can deliver verification and password-reset emails; `logging` has no declared dependencies; `compliance` (ADR-0009, always-on) depends on `user`/`auth`/`tenant` so it resolves the PII-producer registry + audit sink after they init.
@@ -156,7 +156,7 @@ GitHub Actions workflows (`.github/workflows/`) run on PR and push to `dev`/`mai
 - `mobile.yml` → `make ci-mobile` (flutter analyze, test)
 - `security.yml` — govulncheck + npm audit; runs on PR (jobs gated per changed area) + weekly cron, **no push trigger** — a push would re-scan the dependency set the PR just scanned
 - `ghcr-cleanup.yml` — weekly deletion of untagged GHCR image versions (private-repo package storage is billed); manifest-aware, safe with buildx provenance
-- `docs-dispatch.yml` — on push to `main` touching `docs/site/**`, `docs/adr/**`, or `backend/openapi/enterprise.json`, sends the `repository_dispatch` that rebuilds docs.orkestra.cc (fires in the upstream repo only; needs the `DOCS_DISPATCH_TOKEN` secret)
+- `docs-dispatch.yml` — on push to `main` touching `docs/site/**`, `docs/adr/**`, or `backend/openapi/enterprise.json`, sends the `repository_dispatch` that rebuilds docs.orkestra.cc (fires in the upstream repo only; **fails the run** if the `DOCS_DISPATCH_TOKEN` secret is missing — a publish path that can't publish must not report success)
 
 Local reproduction is the same one-liner CI uses:
 

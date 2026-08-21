@@ -556,6 +556,13 @@ func (s *PasswordAuthService) Login(ctx context.Context, in LoginInput) (*authMo
 		s.emitLoginFailed(ctx, email, user.UUID, in.IP, "user_inactive")
 		return nil, ErrInvalidCredentials
 	}
+	// Service principals authenticate only through the client-credentials
+	// grant; every interactive surface is closed by construction.
+	if user.Kind == iface.UserKindService {
+		s.recordFailed(ctx, in.IP, email)
+		s.emitLoginFailed(ctx, email, user.UUID, in.IP, "service_principal")
+		return nil, ErrInvalidCredentials
+	}
 	if user.LockedUntil != nil && time.Now().Before(*user.LockedUntil) {
 		s.emitLoginFailed(ctx, email, user.UUID, in.IP, "account_locked")
 		return nil, ErrAccountLocked
@@ -1328,7 +1335,9 @@ func (s *PasswordAuthService) lookupEmailToken(ctx context.Context, raw, purpose
 // Exposed for consumers that complete a login outside the password flow —
 // currently the MFA login-verify handler, later the refresh rotation path.
 // amr records which factors were completed; lastOTPAt is 0 when no OTP
-// step has happened on this request.
+// step has happened on this request. Rejects a service-principal user
+// (ErrInvalidCredentials) at the shared issueTokens chokepoint — see that
+// function's guard comment.
 func (s *PasswordAuthService) IssueLoginTokens(ctx context.Context, user *iface.User, deviceID, platform, ip string, amr []string, lastOTPAt int64) (*authModels.TokenResponse, error) {
 	return s.issueTokens(ctx, user, LoginInput{DeviceID: deviceID, Platform: platform, IP: ip}, amr, lastOTPAt)
 }
@@ -1392,6 +1401,17 @@ func hasMFAAMR(amr []string) bool {
 
 func (s *PasswordAuthService) issueTokensForSession(ctx context.Context, user *iface.User, in LoginTokenContext, amr []string, lastOTPAt int64) (*authModels.TokenResponse, error) {
 	if err := ValidateTokenEligibleUser(user); err != nil || in.SessionID == "" {
+		return nil, ErrInvalidCredentials
+	}
+	// Shared chokepoint for every interactive issuance path — Login's
+	// completeLogin, IssueLoginTokens / IssueLoginTokensExternal (the
+	// exported iface.LoginTokenIssuer seam), and the MFA login-verify
+	// handler all funnel here. Login already screens out service
+	// principals earlier, so this exists to close the direct-caller gap:
+	// no consumer reaching token issuance without going through the
+	// guarded Login may mint an interactive token pair for a machine
+	// principal. Same sentinel the login guard uses.
+	if user.Kind == iface.UserKindService {
 		return nil, ErrInvalidCredentials
 	}
 	deviceID := in.DeviceID

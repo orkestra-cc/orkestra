@@ -267,7 +267,7 @@ const useUserTable = (options?: any) => {
         }
       },
       cell: ({ row: { original } }: { row: { original: User } }) => {
-        const { fullName, email, avatar } = original;
+        const { fullName, email, avatar, kind } = original;
         return (
           <Flex alignItems="center" className="position-relative py-1">
             {avatar ? (
@@ -276,14 +276,21 @@ const useUserTable = (options?: any) => {
               <Avatar size="xl" name={fullName} className="me-2" />
             )}
             <div>
-              <h6 className="mb-0">
-                <Link
-                  to={paths.adminUserProfile.replace(':userId', original.id)}
-                  className="stretched-link text-900"
-                >
-                  {fullName}
-                </Link>
-              </h6>
+              <div className="d-flex align-items-center gap-2 mb-1">
+                <h6 className="mb-0">
+                  <Link
+                    to={paths.adminUserProfile.replace(':userId', original.id)}
+                    className="stretched-link text-900"
+                  >
+                    {fullName}
+                  </Link>
+                </h6>
+                {kind === 'service' && (
+                  <SubtleBadge bg="secondary">
+                    {t('adminUsers.serviceBadge')}
+                  </SubtleBadge>
+                )}
+              </div>
               <small className="text-muted">{email}</small>
             </div>
           </Flex>

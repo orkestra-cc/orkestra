@@ -424,6 +424,9 @@ func TestUpdateUserHandler(t *testing.T) {
 	t.Run("promoting to administrator skips the guard", func(t *testing.T) {
 		t.Parallel()
 		svc := &fakeUserService{
+			getUserFn: func(context.Context, string) (*iface.UserManagementResponse, error) {
+				return &iface.UserManagementResponse{ID: "u1", Kind: "", Role: "guest", IsActive: true}, nil
+			},
 			updateUserFn: func(context.Context, string, *iface.UpdateUserInput) (*iface.UserManagementResponse, error) {
 				return &iface.UserManagementResponse{ID: "u1", Role: "administrator"}, nil
 			},
@@ -526,6 +529,112 @@ func TestUpdateUserHandler(t *testing.T) {
 		}); err != nil {
 			t.Fatalf("err = %v", err)
 		}
+	})
+}
+
+func TestUpdateUserHandlerServiceAccountGuard(t *testing.T) {
+	t.Parallel()
+
+	// --- service-account privileged-role guard ---
+
+	t.Run("service account cannot be assigned administrator role", func(t *testing.T) {
+		t.Parallel()
+		// No updateUserFn — handler must short-circuit BEFORE the service
+		// call. If it reaches the panicking fallback, the guard fired too late.
+		svc := &fakeUserService{
+			getUserFn: func(context.Context, string) (*iface.UserManagementResponse, error) {
+				return &iface.UserManagementResponse{ID: "svc1", Kind: iface.UserKindService, Role: "guest", IsActive: true}, nil
+			},
+		}
+		h := NewUserHandler(svc)
+		ctx := context.WithValue(context.Background(), ctxauth.KeyUserUUID, "admin-1")
+		ctx = context.WithValue(ctx, ctxauth.KeySystemRole, "super_admin")
+		_, err := h.UpdateUser(ctx, &UpdateUserRequest{
+			ID:   "svc1",
+			Body: iface.UpdateUserInput{Role: "administrator"},
+		})
+		assertStatus(t, err, 403)
+		assertErrCode(t, err, errcode.UserRoleEscalationForbidden)
+	})
+
+	t.Run("service account cannot be assigned super_admin role", func(t *testing.T) {
+		t.Parallel()
+		svc := &fakeUserService{
+			getUserFn: func(context.Context, string) (*iface.UserManagementResponse, error) {
+				return &iface.UserManagementResponse{ID: "svc2", Kind: iface.UserKindService, Role: "guest", IsActive: true}, nil
+			},
+		}
+		h := NewUserHandler(svc)
+		ctx := context.WithValue(context.Background(), ctxauth.KeyUserUUID, "admin-1")
+		ctx = context.WithValue(ctx, ctxauth.KeySystemRole, "super_admin")
+		_, err := h.UpdateUser(ctx, &UpdateUserRequest{
+			ID:   "svc2",
+			Body: iface.UpdateUserInput{Role: "super_admin"},
+		})
+		assertStatus(t, err, 403)
+		assertErrCode(t, err, errcode.UserRoleEscalationForbidden)
+	})
+
+	t.Run("service account can be assigned non-privileged role (guest)", func(t *testing.T) {
+		t.Parallel()
+		svc := &fakeUserService{
+			getUserFn: func(context.Context, string) (*iface.UserManagementResponse, error) {
+				return &iface.UserManagementResponse{ID: "svc3", Kind: iface.UserKindService, Role: "operator", IsActive: true}, nil
+			},
+			updateUserFn: func(context.Context, string, *iface.UpdateUserInput) (*iface.UserManagementResponse, error) {
+				return &iface.UserManagementResponse{ID: "svc3", Kind: iface.UserKindService, Role: "guest"}, nil
+			},
+		}
+		h := NewUserHandler(svc)
+		ctx := context.WithValue(context.Background(), ctxauth.KeyUserUUID, "admin-1")
+		ctx = context.WithValue(ctx, ctxauth.KeySystemRole, "super_admin")
+		if _, err := h.UpdateUser(ctx, &UpdateUserRequest{
+			ID:   "svc3",
+			Body: iface.UpdateUserInput{Role: "guest"},
+		}); err != nil {
+			t.Fatalf("err = %v", err)
+		}
+	})
+
+	t.Run("human can still be assigned administrator role (no regression)", func(t *testing.T) {
+		t.Parallel()
+		svc := &fakeUserService{
+			getUserFn: func(context.Context, string) (*iface.UserManagementResponse, error) {
+				return &iface.UserManagementResponse{ID: "u1", Kind: "", Role: "guest", IsActive: true}, nil
+			},
+			updateUserFn: func(context.Context, string, *iface.UpdateUserInput) (*iface.UserManagementResponse, error) {
+				return &iface.UserManagementResponse{ID: "u1", Kind: "", Role: "administrator"}, nil
+			},
+		}
+		h := NewUserHandler(svc)
+		ctx := context.WithValue(context.Background(), ctxauth.KeyUserUUID, "admin-1")
+		ctx = context.WithValue(ctx, ctxauth.KeySystemRole, "super_admin")
+		if _, err := h.UpdateUser(ctx, &UpdateUserRequest{
+			ID:   "u1",
+			Body: iface.UpdateUserInput{Role: "administrator"},
+		}); err != nil {
+			t.Fatalf("err = %v", err)
+		}
+	})
+
+	t.Run("privileged role assignment fails closed when pre-read unavailable", func(t *testing.T) {
+		t.Parallel()
+		// Pre-read returns error (nil GetUser fn). Handler must refuse any
+		// privileged role (super_admin) even though it can't read the target's Kind.
+		svc := &fakeUserService{
+			getUserFn: func(context.Context, string) (*iface.UserManagementResponse, error) {
+				return nil, services.ErrUserNotFound
+			},
+		}
+		h := NewUserHandler(svc)
+		ctx := context.WithValue(context.Background(), ctxauth.KeyUserUUID, "admin-1")
+		ctx = context.WithValue(ctx, ctxauth.KeySystemRole, "super_admin")
+		_, err := h.UpdateUser(ctx, &UpdateUserRequest{
+			ID:   "unknown",
+			Body: iface.UpdateUserInput{Role: "super_admin"},
+		})
+		assertStatus(t, err, 403)
+		assertErrCode(t, err, errcode.UserRoleEscalationForbidden)
 	})
 }
 

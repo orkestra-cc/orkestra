@@ -30,6 +30,14 @@ const (
 	TierClient   = "client"
 )
 
+// UserKindService marks a machine principal (service account). Empty
+// Kind means a human user — no backfill is needed. Distinct from
+// Tenant.Kind (internal/external); this discriminates WHO the
+// principal is, not which tier it acts in. Service principals cannot
+// authenticate interactively; the only minting path is the
+// client-credentials grant.
+const UserKindService = "service"
+
 // DefaultLanguage is the BCP-47 code stamped on new users by NewUser and
 // used as the backfill value for accounts that predate the language
 // field. Adding a new SPA-supported language means adding it to the
@@ -131,6 +139,10 @@ type User struct {
 	Phone           string `bson:"phone" json:"phone" validate:"omitempty,e164"`
 	PIN             string `bson:"pin,omitempty" json:"-"` // Encrypted, never exposed
 	Role            string `bson:"role" json:"role" validate:"required,oneof=super_admin administrator developer manager operator guest"`
+	// Kind discriminates a human user (empty) from a machine principal
+	// (UserKindService). Immutable after creation — see repository.Update's
+	// $set allowlist, which deliberately excludes it.
+	Kind string `bson:"kind,omitempty" json:"kind,omitempty"`
 
 	// OAuth fields
 	OAuthLinks    []OAuthLink            `bson:"oauthLinks,omitempty" json:"oauthLinks,omitempty"`
@@ -190,6 +202,10 @@ type CreateUserInput struct {
 	// JSON input — the field is `json:"-"` so only internal callers
 	// (auth's OAuth callback) can flip it.
 	EmailVerified bool `json:"-"`
+	// Kind stamps User.Kind on creation (empty = human, UserKindService =
+	// machine principal). Never set from external JSON input — only
+	// internal callers (the service-account minting path) may flip it.
+	Kind string `json:"-"`
 }
 
 // UpdateUserInput represents input for updating a user.
@@ -219,6 +235,7 @@ type UserManagementResponse struct {
 	AvatarSource  string                  `json:"avatarSource,omitempty"`
 	Phone         string                  `json:"phone,omitempty"`
 	Role          string                  `json:"role"`
+	Kind          string                  `json:"kind,omitempty"`
 	Providers     []UserOAuthProviderInfo `json:"providers"`
 	IsActive      bool                    `json:"isActive"`
 	EmailVerified bool                    `json:"emailVerified"`
@@ -311,6 +328,7 @@ func (u *User) ToResponse() *UserManagementResponse {
 		AvatarSource:  u.AvatarSource,
 		Phone:         u.Phone,
 		Role:          u.Role,
+		Kind:          u.Kind,
 		Providers:     make([]UserOAuthProviderInfo, 0),
 		IsActive:      u.IsActive,
 		EmailVerified: u.EmailVerified,

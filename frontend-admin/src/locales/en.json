@@ -2,6 +2,15 @@
   "app": {
     "name": "Orkestra"
   },
+  "common": {
+    "secretOnce": {
+      "warningPrefix": "Save this now.",
+      "warningBody": "This value will not be shown again — copy it somewhere safe before you close this dialog.",
+      "copy": "Copy",
+      "copied": "Copied",
+      "ackLabel": "I have saved this value somewhere safe."
+    }
+  },
   "nav": {
     "toggleNavigation": "Toggle Navigation",
     "navigationUnavailable": "Navigation unavailable",
@@ -1449,6 +1458,103 @@
       "systemBadge": "system"
     }
   },
+  "adminServiceAccounts": {
+    "title": "Service accounts",
+    "description": "Client-credentials identities other services use to call the Orkestra API.",
+    "newButton": "New service account",
+    "loading": "Loading service accounts…",
+    "loadFailed": "Failed to load service accounts.",
+    "empty": "No service accounts yet.",
+    "columns": {
+      "name": "Name",
+      "email": "Email",
+      "status": "Status",
+      "activeCredentials": "Active credentials",
+      "createdAt": "Created"
+    },
+    "status": {
+      "active": "Active",
+      "inactive": "Inactive"
+    },
+    "createModal": {
+      "title": "Create service account",
+      "secretTitle": "Service account created",
+      "nameLabel": "Name",
+      "namePlaceholder": "e.g. hermes-agent",
+      "nameRequired": "Name is required.",
+      "nameTooLong": "Name must be 100 characters or fewer.",
+      "cancel": "Cancel",
+      "create": "Create",
+      "creating": "Creating…",
+      "clientSecretLabel": "Client secret",
+      "clientIdLabel": "Client ID",
+      "done": "Done",
+      "successToast": "Service account \"{{name}}\" created"
+    },
+    "detail": {
+      "breadcrumbList": "Service accounts",
+      "loading": "Loading service account…",
+      "notFound": "Service account not found.",
+      "backToList": "Back to service accounts",
+      "tooltipEnable": "Enable this service account",
+      "tooltipDisable": "Disable this service account",
+      "ariaEnable": "Enable service account",
+      "ariaDisable": "Disable service account",
+      "toggleEnabledToast": "\"{{name}}\" enabled",
+      "toggleDisabledToast": "\"{{name}}\" disabled",
+      "toggleErrorToast": "Could not update status: {{error}}",
+      "renameButton": "Rename",
+      "renameCancel": "Cancel",
+      "renameSave": "Save",
+      "renameSaving": "Saving…",
+      "renameSuccessToast": "Renamed to \"{{name}}\"",
+      "renameErrorToast": "Could not rename: {{error}}",
+      "manageAccessLink": "Manage roles & membership",
+      "credentialsTitle": "Credentials",
+      "credentialsDescription": "Client-credential secrets this service account can authenticate with.",
+      "issueButton": "Issue credential",
+      "emptyCredentials": "No credentials issued yet.",
+      "columns": {
+        "clientId": "Client ID",
+        "label": "Label",
+        "createdAt": "Created",
+        "lastUsedAt": "Last used",
+        "status": "Status"
+      },
+      "credentialStatus": {
+        "active": "Active",
+        "revoked": "Revoked"
+      },
+      "tooltipRevoke": "Revoke this credential",
+      "ariaRevoke": "Revoke credential",
+      "revokeSuccessToast": "Credential revoked",
+      "revokeErrorToast": "Could not revoke credential: {{error}}",
+      "revokeModal": {
+        "title": "Revoke credential",
+        "body": "This immediately invalidates the client secret for this credential. Any service using it stops being able to authenticate.",
+        "cancel": "Cancel",
+        "confirm": "Revoke",
+        "confirming": "Revoking…"
+      }
+    },
+    "issueModal": {
+      "title": "Issue credential",
+      "secretTitle": "Credential issued",
+      "labelLabel": "Label",
+      "labelPlaceholder": "e.g. production",
+      "labelTooLong": "Label must be 60 characters or fewer.",
+      "cancel": "Cancel",
+      "issue": "Issue",
+      "issuing": "Issuing…",
+      "successToast": "Credential issued"
+    },
+    "errors": {
+      "duplicate": "A service account with this name already exists.",
+      "validation": "Check the service account name and try again.",
+      "generic": "Something went wrong. Please try again.",
+      "credentialCap": "This service account already has two active credentials. Revoke one before issuing another."
+    }
+  },
   "adminObservability": {
     "logLevels": {
       "title": "Log levels",
@@ -1481,6 +1587,140 @@
       "revert": "Revert",
       "setAria": "Set log level for {{module}}",
       "revertAria": "Revert {{module}} to the global log level"
+    },
+    "loggingWorkspace": {
+      "loadFailed": "Failed to load logging operations. Level controls and diagnostics are temporarily unavailable.",
+      "loading": "Loading logging operations…",
+      "loadingAria": "Loading logging operations",
+      "unsaved": {
+        "title": "Unsaved permanent changes",
+        "body": "Leaving the logging workspace will discard your permanent log-level draft.",
+        "stay": "Stay in workspace",
+        "leave": "Discard and leave"
+      },
+      "sections": {
+        "overview": "Overview",
+        "operations": "Operations",
+        "levels": "Permanent levels",
+        "diagnostics": "Diagnostics",
+        "logs": "Log preview"
+      },
+      "levelNames": {
+        "debug": "debug",
+        "info": "info",
+        "warn": "warn",
+        "error": "error"
+      },
+      "levelDescriptions": {
+        "debug": "Highest volume. Use briefly while investigating and review logs for sensitive data.",
+        "info": "Records routine operational events and noteworthy state changes.",
+        "warn": "Records conditions that may need attention while allowing the service to continue.",
+        "error": "Records failures that prevent an operation from completing."
+      },
+      "overview": {
+        "global": "Global level",
+        "overrides": "Permanent overrides",
+        "overridesSubtitle": "Across {{count}} registered modules",
+        "diagnostics": "Active diagnostics",
+        "diagnosticsActive": "Temporary overrides need review",
+        "diagnosticsIdle": "No temporary overrides",
+        "provider": "Log provider",
+        "available": "Available",
+        "unavailable": "Unavailable",
+        "providerReady": "Bounded preview is ready",
+        "providerOptional": "Level management remains available"
+      },
+      "levels": {
+        "title": "Permanent log levels",
+        "description": "Draft the complete durable configuration here. Changes take effect together only after you apply them.",
+        "globalLabel": "Global level inherited by modules without an override",
+        "globalAria": "Permanent global log level",
+        "moduleAria": "Permanent log level for {{module}}",
+        "inherit": "Inherit global",
+        "debugWarning": "Debug logging can produce high volume and may expose sensitive operational context. Keep it scoped and review it promptly.",
+        "empty": "No registered modules are available for permanent overrides.",
+        "columns": {
+          "module": "Module",
+          "permanent": "Permanent override",
+          "inherited": "Inherited global",
+          "effective": "Current effective"
+        },
+        "dirtyCount_one": "{{count}} unsaved change",
+        "dirtyCount_other": "{{count}} unsaved changes",
+        "discard": "Discard",
+        "apply": "Apply changes",
+        "conflict": "Another operator changed these levels. Reload the latest snapshot before editing again.",
+        "reloadSnapshot": "Reload latest snapshot",
+        "saveFailed": "The permanent levels could not be applied. Review the draft and try again."
+      },
+      "diagnostics": {
+        "createTitle": "Start a diagnostic",
+        "description": "Temporarily change one module's threshold. The action takes effect immediately and does not alter its permanent override.",
+        "moduleLabel": "Module",
+        "moduleAria": "Diagnostic module",
+        "levelLabel": "Temporary level",
+        "levelAria": "Diagnostic level",
+        "durationLabel": "Duration",
+        "durationAria": "Diagnostic duration",
+        "duration15": "15 minutes",
+        "duration60": "1 hour",
+        "duration240": "4 hours",
+        "durationNone": "No expiry",
+        "start": "Start diagnostic",
+        "debugWarning": "Debug diagnostics may generate high-volume logs containing sensitive operational context.",
+        "noExpiryDraftWarning": "No-expiry diagnostics stay active across restarts and require an operator to stop them.",
+        "activeTitle": "Active diagnostics",
+        "empty": "No diagnostics are active.",
+        "startedBy": "Started by {{user}} at {{date}}",
+        "remainingMinutes": "{{minutes}}m {{seconds}}s remaining",
+        "remainingHours": "{{hours}}h {{minutes}}m {{seconds}}s remaining",
+        "noExpiryWarning": "No expiry — this diagnostic remains active until stopped.",
+        "stop": "Stop",
+        "stopAria": "Stop diagnostic for {{module}}",
+        "actionFailed": "The diagnostic action failed. Reload the snapshot and try again."
+      },
+      "logs": {
+        "title": "Recent log preview",
+        "description": "Choose constrained filters, then select Refresh to inspect up to 100 events. Use Grafana for a full investigation.",
+        "privacyNotice": "Structured attributes are minimized and redacted. Free-text messages may still contain personal data; review them before sharing.",
+        "statusAria": "Log preview status",
+        "providerUnavailable": "Log preview is unavailable on this deployment.",
+        "moduleLabel": "Module",
+        "moduleAria": "Log preview module",
+        "windowLabel": "Time window",
+        "windowAria": "Log preview time window",
+        "windowMinutes_one": "{{count}} minute",
+        "windowMinutes_other": "{{count}} minutes",
+        "levelLabel": "Level",
+        "levelAria": "Log preview level",
+        "allLevels": "All levels",
+        "searchLabel": "Contains text",
+        "searchAria": "Log preview text search",
+        "searchPlaceholder": "Message text",
+        "refresh": "Refresh",
+        "refreshAria": "Refresh log preview",
+        "autoRefresh": "Auto-refresh",
+        "autoRefreshAria": "Refresh every five seconds",
+        "limitHint": "Results are capped at 100 events.",
+        "loading": "Loading recent events…",
+        "loadFailed": "Log preview failed. Check the provider and try again.",
+        "empty": "No log events match these filters.",
+        "resultsCount_one": "{{count}} log event is shown.",
+        "resultsCount_other": "{{count}} log events are shown.",
+        "openGrafana": "Open in Grafana",
+        "noAttributes": "None",
+        "showAttributes": "Show attributes",
+        "hideAttributes": "Hide attributes",
+        "showAttributesAria": "Show attributes for {{module}} at {{date}}",
+        "hideAttributesAria": "Hide attributes for {{module}} at {{date}}",
+        "columns": {
+          "timestamp": "Timestamp",
+          "level": "Level",
+          "module": "Module",
+          "message": "Message",
+          "attributes": "Minimized attributes"
+        }
+      }
     }
   },
   "adminNavigation": {
@@ -1851,7 +2091,8 @@
     "status": {
       "active": "Active",
       "inactive": "Inactive"
-    }
+    },
+    "serviceBadge": "Service"
   },
   "adminCompliance": {
     "pageTitle": "Compliance",
@@ -2459,6 +2700,18 @@
         }
       }
     },
+    "compliance": {
+      "groups": {
+        "soc2": { "label": "SOC2 evidence", "desc": "The SOC2 evidence page and API, off unless you pursue certification." },
+        "retention": { "label": "Retention & DSR", "desc": "How long anonymized tombstones and generated DSR exports are kept." }
+      },
+      "fields": {
+        "soc2_enabled": { "label": "SOC2 evidence", "desc": "Expose the SOC2 evidence admin page and API. Off by default — enable only for deployments pursuing SOC2 certification." },
+        "auto_cleanup_enabled": { "label": "Retention auto-cleanup", "desc": "Run a daily job that hard-deletes anonymized user tombstones past the retention window. OFF by default — this is irreversible bulk deletion." },
+        "retention_years": { "label": "Retention years", "desc": "Years an anonymized tombstone is kept before auto-cleanup may hard-delete it." },
+        "export_retention_days": { "label": "Export retention (days)", "desc": "Days a generated DSR export stays downloadable before it expires." }
+      }
+    },
     "notification": {
       "groups": {
         "delivery": {
@@ -2491,6 +2744,36 @@
         "app": {
           "name": { "label": "App name (in templates)" },
           "support_email": { "label": "Support email (in templates)" }
+        }
+      }
+    },
+    "tenant": {
+      "groups": {
+        "provisioning": {
+          "internal": {
+            "label": "Internal provisioning (Tier-1)",
+            "desc": "Who may create internal, operator-tier tenants."
+          },
+          "external": {
+            "label": "External provisioning (Tier-2)",
+            "desc": "Who may create external, client-tier tenants."
+          }
+        }
+      },
+      "fields": {
+        "provisioning": {
+          "internal": {
+            "mode": {
+              "label": "Internal tenant creation",
+              "desc": "Who may create internal (operator-tier) tenants. open: any authenticated user. manual (default): only platform administrators (system.tenants.admin). single: lock the platform to one internal tenant — once one exists, creation is blocked. A fresh install starts with zero internal tenants; the first is created from the setup wizard or the admin UI."
+            }
+          },
+          "external": {
+            "mode": {
+              "label": "External tenant creation",
+              "desc": "Who may create external (client-tier) tenants. open: self-serve clients are provisioned automatically. manual (default): only platform administrators create client tenants and assign them to a Tier-2 user — self-serve signup never auto-provisions a tenant and external users cannot create one themselves."
+            }
+          }
         }
       }
     }

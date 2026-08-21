@@ -199,6 +199,42 @@ func (rl *RateLimiter) IsBlocked(ctx context.Context, identifier string) bool {
 	return !result.Allowed
 }
 
+// IsLockedOut reports whether an identifier is CURRENTLY locked out due
+// to prior failed attempts against the "auth:failed" bucket, WITHOUT
+// recording an attempt of its own.
+//
+// Contrast with IsBlocked: IsBlocked calls Check, and Check's
+// TokenBucket.consume deducts a token on every call — so IsBlocked
+// itself counts toward the very lockout it is checking for. A caller
+// that pre-checks IsBlocked before every request (successful or not)
+// can therefore trip its own lockout purely by asking, with no failure
+// ever recorded. IsLockedOut applies the identical elapsed-time refill
+// accounting against the same bucket/config, but only reads the
+// resulting token count (TokenBucket.peek) — it never mutates the
+// bucket. Calling IsLockedOut any number of times has no effect on
+// whether a subsequent legitimate attempt is allowed; only
+// RecordFailedAuth (or Check/IsBlocked) can push a bucket toward
+// lockout.
+//
+// This is an additive peek — IsBlocked, Check, RecordFailedAuth, and
+// their existing callers (e.g. the login path) are unchanged.
+func (rl *RateLimiter) IsLockedOut(ctx context.Context, identifier string) bool {
+	const configName = "auth:failed"
+	key := fmt.Sprintf("auth_failed:%s", identifier)
+
+	config, exists := rl.configs[configName]
+	if !exists {
+		// Mirrors Check's fallback; unreachable in practice since
+		// setDefaultConfigs always seeds "auth:failed".
+		config = rl.configs["api:general"]
+	}
+
+	bucketKey := fmt.Sprintf("%s:%s", configName, key)
+	bucket := rl.getBucket(bucketKey, config)
+
+	return !bucket.peek(1)
+}
+
 // getBucket gets or creates a token bucket for the given key
 func (rl *RateLimiter) getBucket(key string, config *RateLimitConfig) *TokenBucket {
 	rl.mu.RLock()
@@ -247,6 +283,22 @@ func (tb *TokenBucket) consume(tokens float64) bool {
 	}
 
 	return false
+}
+
+// peek reports whether `tokens` would currently be available, applying
+// the same elapsed-time refill accounting as consume — but it never
+// subtracts from the bucket and never advances lastRefill. Purely
+// read-only: any number of peek calls leave the bucket exactly as a
+// caller who never called it at all would find it.
+func (tb *TokenBucket) peek(tokens float64) bool {
+	tb.mu.Lock()
+	defer tb.mu.Unlock()
+
+	now := time.Now()
+	elapsed := now.Sub(tb.lastRefill).Seconds()
+	available := min(tb.capacity, tb.tokens+elapsed*tb.refillRate)
+
+	return available >= tokens
 }
 
 // cleanup removes old buckets to prevent memory leaks

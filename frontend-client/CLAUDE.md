@@ -197,6 +197,14 @@ Re-run `npm run codegen` whenever you add or change a backend route — `src/api
 
 The Vite dev server runs inside Docker; if you need to rebuild outside Docker (e.g. for local typechecking), `npm install` is fine — the dependency tree is small and the container's `node_modules` is volume-isolated.
 
+### Runtime config
+
+`index.html` loads `public/config.js` (`window.__ORKESTRA_CONFIG__` — `apiBase`, `stripePublishableKey`) before the bundle; `src/api/client.ts` consults it first and uses the build-time `VITE_API_BASE` only as a fallback for environments that don't set it (Vitest, scratch SSR). `public/config.js` is **gitignored** — each environment writes its own:
+
+- **Dev / staging (Vite in Docker)**: the `client-frontend` service `command` in `docker-compose.{dev,staging}.yml` regenerates the file from `VITE_API_BASE` / `VITE_STRIPE_PUBLISHABLE_KEY` at container start. It is written **only at startup** — after any git operation that deletes it under the bind mount (checkout, merge), recreate the container; otherwise Vite serves `index.html` for `/config.js` and the browser blocks it (`nosniff`).
+- **Prod (nginx image)**: the entrypoint at `/docker-entrypoint.d/10-write-config.sh` (baked in the `Dockerfile`) writes it from `ORKESTRA_API_BASE` / `ORKESTRA_STRIPE_PUBLISHABLE_KEY` before nginx starts.
+- **Bare `npm run dev` on the host**: no generator runs — copy the tracked template `public/config.example.js` to `public/config.js`.
+
 ## Adding a feature — canonical workflow
 
 1. **Backend first**. If the feature needs a new endpoint, add it to the relevant backend module (a core module, or a fork's `backend/internal/addons/<module>/`), declare the route on `ri.Client.ProtectedRouter` if it's a Tier-2 self-service endpoint, ship the backend PR.

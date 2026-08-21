@@ -20,4 +20,13 @@ describe('dotted module-config i18n keys resolve', () => {
       'How mail leaves the platform'
     );
   });
+
+  it('resolves a nested tenant field label + group', () => {
+    expect(
+      i18n.t('moduleConfig.tenant.fields.provisioning.internal.mode.label')
+    ).toBe('Internal tenant creation');
+    expect(
+      i18n.t('moduleConfig.tenant.groups.provisioning.external.label')
+    ).toBe('External provisioning (Tier-2)');
+  });
 });

@@ -151,6 +151,10 @@ services:
       OTEL_TRACES_ENABLED: ${OTEL_TRACES_ENABLED:-true}
       OTEL_LOGS_ENABLED: ${OTEL_LOGS_ENABLED:-false}
       OTEL_METRICS_ENABLED: ${OTEL_METRICS_ENABLED:-false}
+      # Optional Tier-1 preview URLs. Empty keeps the logging workspace usable
+      # without Loki; the observability overlay supplies trusted bases.
+      LOKI_QUERY_URL: ${LOKI_QUERY_URL:-}
+      GRAFANA_URL: ${GRAFANA_URL:-}
 
       # Sales Intelligence — runtime knobs read directly by the sales
       # module (cfg.Sales.*). Not yet migrated to ConfigService.
@@ -321,7 +325,25 @@ services:
       - ../frontend-client:/app
       - ../frontend-client/.vite-cache:/app/.vite
       - ../frontend-client/.npm-cache:/app/.npm-cache
-    command: ["sh", "-c", "npm install && npm run dev -- --host 0.0.0.0"]
+    # Regenerate public/config.js from VITE_API_BASE BEFORE `npm run dev`.
+    # The SPA reads window.__ORKESTRA_CONFIG__.apiBase (public/config.js) in
+    # preference to the build-time VITE_API_BASE, so without this step the
+    # gitignored file falls back to the localhost dev template and every
+    # browser fetch on a deployed host fails. Mirrors the frontend-admin
+    # service; public/config.js is gitignored (template: config.example.js).
+    command:
+      - sh
+      - -c
+      - |
+        cat > /app/public/config.js <<EOF
+        // Generated at container start by docker-compose.staging.yml.
+        // Gitignored — do not commit. See frontend-client/CLAUDE.md.
+        window.__ORKESTRA_CONFIG__ = {
+          apiBase: "$${VITE_API_BASE}",
+          stripePublishableKey: "$${VITE_STRIPE_PUBLISHABLE_KEY}"
+        };
+        EOF
+        npm install && npm run dev -- --host 0.0.0.0
     # Probes the in-process /health endpoint registered by the Vite
     # plugin in frontend-client/vite.config.ts. start_period covers a
     # cold-cache npm install (~20-30s on first boot, near-instant after).

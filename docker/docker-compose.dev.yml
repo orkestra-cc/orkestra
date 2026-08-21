@@ -103,6 +103,12 @@ services:
       LOG_LEVEL: debug
       PRETTY_LOGS: "true"
 
+      # Optional Tier-1 log preview. Both are process-owned trusted bases;
+      # request data can never select an upstream URL. The observability
+      # overlay overrides these while the default app stack leaves them empty.
+      LOKI_QUERY_URL: ${LOKI_QUERY_URL:-}
+      GRAFANA_URL: ${GRAFANA_URL:-}
+
       # Module config (OAuth secrets, Stripe keys, OpenAPI tokens, SMTP,
       # Hindsight URL, Memgraph URI, Gotenberg URL, AI provider keys,
       # per-module enable flags) is owned by ConfigService and edited at
@@ -258,7 +264,24 @@ services:
       - ../frontend-client:/app
       - ../frontend-client/.vite-cache:/app/.vite
       - ../frontend-client/.npm-cache:/app/.npm-cache
-    command: ["sh", "-c", "npm install && npm run dev -- --host 0.0.0.0"]
+    # Regenerate public/config.js from VITE_API_BASE BEFORE `npm run dev`.
+    # The SPA reads window.__ORKESTRA_CONFIG__.apiBase (public/config.js) in
+    # preference to the build-time VITE_API_BASE, so a deployed host needs
+    # this or every browser fetch fails. Mirrors the frontend-admin service;
+    # public/config.js is gitignored (template: config.example.js).
+    command:
+      - sh
+      - -c
+      - |
+        cat > /app/public/config.js <<EOF
+        // Generated at container start by docker-compose.dev.yml.
+        // Gitignored — do not commit. See frontend-client/CLAUDE.md.
+        window.__ORKESTRA_CONFIG__ = {
+          apiBase: "$${VITE_API_BASE}",
+          stripePublishableKey: "$${VITE_STRIPE_PUBLISHABLE_KEY}"
+        };
+        EOF
+        npm install && npm run dev -- --host 0.0.0.0
     # Probes the in-process /health endpoint registered by the Vite
     # plugin in frontend-client/vite.config.ts. Must use 127.0.0.1, NOT
     # localhost: /etc/hosts maps localhost to ::1 as well, busybox wget

@@ -383,7 +383,7 @@ func main() {
 	}
 
 	operatorMux := chi.NewRouter()
-	setupMiddleware(operatorMux, cfg, errorManager, deviceMW, string(module.AudienceOperator), cfg.Server.Operator, logger, trustedProxies)
+	setupMiddleware(operatorMux, cfg, errorManager, deviceMW, []string{string(module.AudienceOperator), string(module.AudienceService)}, cfg.Server.Operator, logger, trustedProxies)
 	// Phase 7: admin-managed IP allow/block gate on the operator host
 	// only. Reads ipAllowlistAdmin / ipBlocklistAdmin live from
 	// AuthPolicyService on every request — admin edits take effect
@@ -401,7 +401,7 @@ func main() {
 	operatorProtected.Use(authMiddleware.TenantBaggage)
 
 	clientMux := chi.NewRouter()
-	setupMiddleware(clientMux, cfg, errorManager, deviceMW, string(module.AudienceClient), cfg.Server.Client, logger, trustedProxies)
+	setupMiddleware(clientMux, cfg, errorManager, deviceMW, []string{string(module.AudienceClient)}, cfg.Server.Client, logger, trustedProxies)
 	clientAPI := humachi.New(clientMux, apiConfig)
 	clientProtected := chi.NewRouter()
 	clientProtected.Use(authMW.RequireAuth)

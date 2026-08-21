@@ -7,16 +7,23 @@
 //   - loads the persisted snapshot at boot (falls back to env)
 //   - registers the service under ServiceLogLevelResolver so
 //     main.go can hot-swap the slog handler's resolver
-//   - mounts five admin endpoints under /v1/admin/observability/
+//   - mounts permanent and diagnostic admin endpoints under
+//     /v1/admin/observability/
 package logging
 
 import (
 	"context"
 	"log/slog"
+	"net/url"
+	"os"
+	"strings"
+	"sync"
+	"time"
 
 	"github.com/danielgtaylor/huma/v2/adapters/humachi"
 	"github.com/go-chi/chi/v5"
 	"github.com/orkestra/backend/internal/core/logging/handlers"
+	"github.com/orkestra/backend/internal/core/logging/logquery"
 	"github.com/orkestra/backend/internal/core/logging/repository"
 	"github.com/orkestra/backend/internal/core/logging/services"
 	"github.com/orkestra/backend/internal/shared/utils"
@@ -28,11 +35,22 @@ import (
 // for Collections, NavItems, Dependencies, and RegisterRoutes.
 type LoggingModule struct {
 	module.BaseModule
-	handler *handlers.LogLevelHandler
-	svc     *services.LogLevelService
+	handler         *handlers.LogLevelHandler
+	svc             *services.LogLevelService
+	logger          *slog.Logger
+	cleanupInterval time.Duration
+	refreshInterval time.Duration
+	lifecycleMu     sync.Mutex
+	cleanupCancel   context.CancelFunc
+	cleanupDone     chan struct{}
 }
 
-func NewModule() *LoggingModule { return &LoggingModule{} }
+func NewModule() *LoggingModule {
+	return &LoggingModule{
+		cleanupInterval: time.Minute,
+		refreshInterval: 2 * time.Second,
+	}
+}
 
 func (m *LoggingModule) Name() string        { return "logging" }
 func (m *LoggingModule) DisplayName() string { return "Logging" }
@@ -93,14 +111,119 @@ func (m *LoggingModule) Init(deps *module.Dependencies) error {
 	}
 
 	m.svc = services.NewLogLevelService(repo, deps.Logger, envGlobal, envPerMod, moduleNames)
+	m.logger = deps.Logger
 	if err := m.svc.Load(context.Background()); err != nil {
 		deps.Logger.Warn("logging: load persisted levels failed; using env defaults",
 			slog.String("error", err.Error()))
 	}
 
 	deps.Services.Register(module.ServiceLogLevelResolver, m.svc)
-	m.handler = handlers.NewLogLevelHandler(m.svc)
+	provider := logquery.New(os.Getenv("LOKI_QUERY_URL"), moduleNames)
+	m.handler = handlers.NewLogLevelHandler(m.svc, provider, normalizeExternalURL(os.Getenv("GRAFANA_URL")), deps.Logger)
 	return nil
+}
+
+// normalizeExternalURL validates the trusted process-configured Grafana base
+// before exposing it as a browser link. Request data never reaches this path.
+func normalizeExternalURL(raw string) string {
+	if strings.TrimSpace(raw) == "" {
+		return ""
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || parsed.User != nil {
+		return ""
+	}
+	parsed.RawQuery = ""
+	parsed.Fragment = ""
+	parsed.Path = strings.TrimRight(parsed.Path, "/")
+	return parsed.String()
+}
+
+// Start launches best-effort storage cleanup for expired diagnostics. Resolver
+// correctness remains in LogLevelService.LevelFor; this loop only removes
+// entries that no longer need to remain persisted.
+func (m *LoggingModule) Start(ctx context.Context) error {
+	if m.svc == nil {
+		return nil
+	}
+
+	m.lifecycleMu.Lock()
+	defer m.lifecycleMu.Unlock()
+	if m.cleanupCancel != nil {
+		select {
+		case <-m.cleanupDone:
+			m.cleanupCancel = nil
+			m.cleanupDone = nil
+		default:
+			return nil
+		}
+	}
+
+	cleanupInterval := m.cleanupInterval
+	if cleanupInterval <= 0 {
+		cleanupInterval = time.Minute
+	}
+	refreshInterval := m.refreshInterval
+	if refreshInterval <= 0 {
+		refreshInterval = 2 * time.Second
+	}
+	cleanupCtx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	m.cleanupCancel = cancel
+	m.cleanupDone = done
+	go m.maintenanceLoop(cleanupCtx, done, cleanupInterval, refreshInterval)
+	return nil
+}
+
+// Stop cancels the cleanup loop and waits for it to exit. It does not acquire
+// the LogLevelService write mutex; an in-flight cleanup owns and releases that
+// mutex itself before the loop closes done.
+func (m *LoggingModule) Stop(ctx context.Context) error {
+	m.lifecycleMu.Lock()
+	cancel := m.cleanupCancel
+	done := m.cleanupDone
+	m.lifecycleMu.Unlock()
+	if cancel == nil {
+		return nil
+	}
+
+	cancel()
+	select {
+	case <-done:
+		m.lifecycleMu.Lock()
+		if m.cleanupDone == done {
+			m.cleanupCancel = nil
+			m.cleanupDone = nil
+		}
+		m.lifecycleMu.Unlock()
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (m *LoggingModule) maintenanceLoop(ctx context.Context, done chan<- struct{}, cleanupInterval, refreshInterval time.Duration) {
+	defer close(done)
+	cleanupTicker := time.NewTicker(cleanupInterval)
+	defer cleanupTicker.Stop()
+	refreshTicker := time.NewTicker(refreshInterval)
+	defer refreshTicker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-refreshTicker.C:
+			if err := m.svc.Refresh(ctx); err != nil && m.logger != nil {
+				m.logger.ErrorContext(ctx, "logging: refresh authoritative levels failed",
+					slog.String("error", err.Error()))
+			}
+		case <-cleanupTicker.C:
+			if err := m.svc.CleanupExpired(ctx); err != nil && m.logger != nil {
+				m.logger.ErrorContext(ctx, "logging: cleanup expired diagnostics failed",
+					slog.String("error", err.Error()))
+			}
+		}
+	}
 }
 
 // RegisterRoutes mounts the admin endpoints on the operator-protected router
@@ -116,23 +239,4 @@ func (m *LoggingModule) RegisterRoutes(ri *module.RouteInfo) {
 		api := humachi.New(r, ri.APIConfig)
 		RegisterRoutes(api, m.handler)
 	})
-}
-
-// NavItems puts a single entry directly under the platform realm
-// (the "Administration" group). Matches the shape every other core /
-// addon admin item uses — no Section, Tier=internal, Active=true,
-// MinRole=administrator. sliders-h captures "adjust per-module
-// thresholds" better than a chart icon would.
-func (m *LoggingModule) NavItems() []module.NavItemSpec {
-	return []module.NavItemSpec{
-		{
-			Realm:   "platform",
-			Tier:    "internal",
-			Name:    "Log levels",
-			Icon:    "sliders-h",
-			Path:    "/admin/observability/log-levels",
-			MinRole: "administrator",
-			Active:  true,
-		},
-	}
 }
