@@ -145,7 +145,11 @@ type Service struct {
 	// not finish its own Init until after authz. Nil falls back to
 	// zero risk on the Cedar principal — no divergence, no ABAC effect.
 	lookupSessionRisk SessionRiskLookup
-	production        bool // when true, developer role is restricted to read-only
+	// production restricts the developer system role to read-only, and
+	// raises a Cedar shadow-mode divergence from Warn to Error — the two
+	// places where the same deployment fact means "no one is watching a
+	// rollout here".
+	production bool
 
 	// cedarEngine is the Cedar evaluator. nil when Cedar is disabled
 	// (boot-time construction failure, or explicitly turned off for tests).
@@ -349,8 +353,9 @@ func (s *Service) HasPermission(ctx context.Context, userUUID, tenantID, permiss
 // shadowEvaluate runs the Cedar engine for the same (user, tenant,
 // permission) triple and logs the outcome. When Cedar agrees with the
 // role table, the line is emitted at Debug level ("cedar: agree"). When
-// they disagree the level is Warn ("cedar: divergence") so operators can
-// triage before flipping enforcement.
+// they disagree the line is "cedar: divergence", at Error level in
+// production and Warn everywhere else, so operators can triage before
+// flipping enforcement.
 //
 // Returns (decision, ok). ok is false when the engine is unavailable or
 // the evaluation panicked / returned errors — callers in enforce mode
@@ -466,7 +471,18 @@ func (s *Service) shadowEvaluate(ctx context.Context, userUUID, tenantID, permis
 	if decision.Allowed == roleDecision {
 		s.logger.Debug("cedar: agree", attrs...)
 	} else {
-		s.logger.Warn("cedar: divergence", attrs...)
+		// Warn outside production, Error in it. A divergence is a
+		// disagreement about a real authorization decision, and in
+		// production nobody is reading the shadow-mode telemetry the
+		// way they do while rolling a policy out — the level is what
+		// decides whether an alert fires. Below production the same
+		// line is the expected output of policy work in progress, so
+		// raising it there would train operators to ignore it.
+		level := slog.LevelWarn
+		if s.production {
+			level = slog.LevelError
+		}
+		s.logger.Log(ctx, level, "cedar: divergence", attrs...)
 		// Phase 5.3: record the divergence as a Prometheus counter so
 		// operators can graph the trend and decide when to flip Cedar
 		// from shadow to enforce. outcome labels the disagreement
