@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -59,15 +60,23 @@ type S3Config struct {
 	ForcePathStyle  bool
 	EnsureBucket    bool
 	RequestPresigns bool
+	// CORSAllowedOrigins are the browser origins permitted to PUT/GET this
+	// bucket directly. A presigned browser upload is a cross-origin request
+	// to the storage host, and only the bucket's own CORS policy can allow
+	// it — the backend is not in that request's path and cannot add the
+	// header. Empty (the default) means the policy is left untouched, so
+	// deployments whose IAM lacks s3:PutBucketCORS are unaffected.
+	CORSAllowedOrigins []string
 }
 
 // s3Store is the AWS SDK v2 implementation of Store. Pinned to one
 // bucket per process — multi-bucket setups should construct one Store
 // per bucket.
 type s3Store struct {
-	client    *s3.Client
-	presigner *s3.PresignClient
-	bucket    string
+	client      *s3.Client
+	presigner   *s3.PresignClient
+	bucket      string
+	corsOrigins []string
 }
 
 // NewS3 constructs a Store backed by an S3-compatible endpoint. When
@@ -116,9 +125,10 @@ func NewS3(ctx context.Context, cfg S3Config) (Store, error) {
 	}
 
 	s := &s3Store{
-		client:    client,
-		presigner: s3.NewPresignClient(presignBase),
-		bucket:    cfg.Bucket,
+		client:      client,
+		presigner:   s3.NewPresignClient(presignBase),
+		bucket:      cfg.Bucket,
+		corsOrigins: cfg.CORSAllowedOrigins,
 	}
 
 	if cfg.EnsureBucket {
@@ -137,6 +147,11 @@ func NewS3(ctx context.Context, cfg S3Config) (Store, error) {
 func (s *s3Store) ensureBucket(ctx context.Context) error {
 	_, err := s.client.HeadBucket(ctx, &s3.HeadBucketInput{Bucket: aws.String(s.bucket)})
 	if err == nil {
+		// Existing bucket: still (re)apply the CORS policy. It lives in the
+		// bucket, so a fresh volume — or a policy edited by hand — would
+		// otherwise leave browser uploads silently broken until someone
+		// remembered. Applying every boot makes it self-healing.
+		s.applyCORS(ctx)
 		return nil
 	}
 	if !isNotFound(err) {
@@ -144,14 +159,50 @@ func (s *s3Store) ensureBucket(ctx context.Context) error {
 	}
 	_, createErr := s.client.CreateBucket(ctx, &s3.CreateBucketInput{Bucket: aws.String(s.bucket)})
 	if createErr == nil {
+		s.applyCORS(ctx)
 		return nil
 	}
 	var owned *types.BucketAlreadyOwnedByYou
 	var taken *types.BucketAlreadyExists
 	if errors.As(createErr, &owned) || errors.As(createErr, &taken) {
+		s.applyCORS(ctx)
 		return nil
 	}
 	return fmt.Errorf("blob: create bucket %q: %w", s.bucket, createErr)
+}
+
+// applyCORS puts the bucket CORS policy that lets configured browser origins
+// run the presigned upload. Best-effort by design: storage that refuses the
+// call (a managed S3 whose IAM withholds s3:PutBucketCORS, or an
+// implementation without bucket CORS) still serves every server-side
+// operation and every download, so refusing to boot over it would trade a
+// broken upload for a broken deployment. It warns instead — loudly enough to
+// explain a browser upload that dies at the preflight.
+func (s *s3Store) applyCORS(ctx context.Context) {
+	if len(s.corsOrigins) == 0 {
+		return
+	}
+	_, err := s.client.PutBucketCors(ctx, &s3.PutBucketCorsInput{
+		Bucket: aws.String(s.bucket),
+		CORSConfiguration: &types.CORSConfiguration{
+			CORSRules: []types.CORSRule{{
+				AllowedOrigins: s.corsOrigins,
+				// PUT for the presigned upload, GET/HEAD for a presigned read
+				// issued from script. DELETE is deliberately absent: detaching
+				// goes through the API, which deletes server-side.
+				AllowedMethods: []string{"PUT", "GET", "HEAD"},
+				AllowedHeaders: []string{"*"},
+				ExposeHeaders:  []string{"ETag"},
+				MaxAgeSeconds:  aws.Int32(3000),
+			}},
+		},
+	})
+	if err != nil {
+		slog.Warn("blob: could not set bucket CORS policy — browser uploads to this bucket will fail at the preflight",
+			slog.String("bucket", s.bucket),
+			slog.Any("origins", s.corsOrigins),
+			slog.String("error", err.Error()))
+	}
 }
 
 func (s *s3Store) PresignPut(ctx context.Context, key, contentType string, ttl time.Duration) (*PresignedPut, error) {

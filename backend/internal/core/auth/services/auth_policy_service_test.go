@@ -14,6 +14,9 @@ import (
 // or Redis is required.
 type stubReader struct {
 	values map[string]string
+	// rawErr, when set, makes GetRawValue report a failed read. It stands
+	// in for an unreachable module_configs collection.
+	rawErr error
 }
 
 func (s *stubReader) GetValue(_ context.Context, _, key string) string {
@@ -21,6 +24,27 @@ func (s *stubReader) GetValue(_ context.Context, _, key string) string {
 		return ""
 	}
 	return s.values[key]
+}
+
+// GetRawValue mirrors ModuleConfigService.GetRawValue's presence contract: a
+// map lookup naturally distinguishes "key present with empty value" (ok=true)
+// from "key absent" (ok=false), so a nil/missing-key map value expresses
+// "absent" and an explicit empty-string entry expresses "operator cleared it".
+//
+// A non-nil rawErr is the THIRD state the real accessor reports and the two
+// above cannot express: the read failed, so nothing is known about the key.
+// It returns the same ("", false) pair a genuine absence does, which is
+// precisely why the error has to be a separate return value — a caller
+// switching on presence alone cannot tell the two apart.
+func (s *stubReader) GetRawValue(_ context.Context, _, key string) (string, bool, error) {
+	if s == nil {
+		return "", false, nil
+	}
+	if s.rawErr != nil {
+		return "", false, s.rawErr
+	}
+	v, ok := s.values[key]
+	return v, ok, nil
 }
 
 func newPolicy(values map[string]string) *AuthPolicyService {
@@ -200,13 +224,13 @@ func TestAccessTokenTTL(t *testing.T) {
 		set  map[string]string
 		want time.Duration
 	}{
-		{"unset falls back", nil, 15 * time.Minute},
-		{"empty falls back", map[string]string{"accessTokenTTL": ""}, 15 * time.Minute},
+		{"unset reports zero", nil, 0},
+		{"empty reports zero", map[string]string{"accessTokenTTL": ""}, 0},
 		{"valid 5m", map[string]string{"accessTokenTTL": "5m"}, 5 * time.Minute},
 		{"valid 1h", map[string]string{"accessTokenTTL": "1h"}, time.Hour},
-		{"malformed falls back", map[string]string{"accessTokenTTL": "forever"}, 15 * time.Minute},
-		{"zero falls back", map[string]string{"accessTokenTTL": "0s"}, 15 * time.Minute},
-		{"negative falls back", map[string]string{"accessTokenTTL": "-5m"}, 15 * time.Minute},
+		{"malformed reports zero", map[string]string{"accessTokenTTL": "forever"}, 0},
+		{"zero reports zero", map[string]string{"accessTokenTTL": "0s"}, 0},
+		{"negative reports zero", map[string]string{"accessTokenTTL": "-5m"}, 0},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -218,10 +242,10 @@ func TestAccessTokenTTL(t *testing.T) {
 	}
 }
 
-func TestAccessTokenTTL_NilService_LegacyDefault(t *testing.T) {
+func TestAccessTokenTTL_NilService_ReportsUnset(t *testing.T) {
 	var p *AuthPolicyService
-	if got := p.AccessTokenTTL(context.Background()); got != 15*time.Minute {
-		t.Errorf("nil policy = %v, want 15m", got)
+	if got := p.AccessTokenTTL(context.Background()); got != 0 {
+		t.Errorf("nil policy = %v, want 0", got)
 	}
 }
 
@@ -237,6 +261,8 @@ func TestPasswordResetTokenTTL(t *testing.T) {
 		{"valid 24h", map[string]string{"passwordResetTokenTTL": "24h"}, 24 * time.Hour},
 		{"malformed falls back", map[string]string{"passwordResetTokenTTL": "forever"}, 30 * time.Minute},
 		{"zero falls back", map[string]string{"passwordResetTokenTTL": "0s"}, 30 * time.Minute},
+		{"below minimum clamps", map[string]string{"passwordResetTokenTTL": "1m"}, 5 * time.Minute},
+		{"above maximum clamps", map[string]string{"passwordResetTokenTTL": "72h"}, 24 * time.Hour},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

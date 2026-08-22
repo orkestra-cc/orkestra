@@ -215,8 +215,8 @@ func (m *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 		if token != "" {
 			claims, err := m.jwtService.ValidateAccessToken(token)
 			if err == nil {
-				if m.isSessionRevoked(r, claims) {
-					m.sendSessionRevoked(w, r)
+				if revoked, reason := m.sessionRevocationState(r, claims); revoked {
+					m.sendSessionRevoked(w, r, reason)
 					return
 				}
 				m.setUserContext(w, r, claims, next)
@@ -257,8 +257,8 @@ func (m *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 
 					claims, err := m.jwtService.ValidateAccessToken(tokenResponse.AccessToken)
 					if err == nil {
-						if m.isSessionRevoked(r, claims) {
-							m.sendSessionRevoked(w, r)
+						if revoked, reason := m.sessionRevocationState(r, claims); revoked {
+							m.sendSessionRevoked(w, r, reason)
 							return
 						}
 						m.setUserContext(w, r, claims, next)
@@ -274,37 +274,63 @@ func (m *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 	})
 }
 
-// isSessionRevoked returns true when the revocation checker is wired and
-// reports the token's sid as revoked. Errors are treated as "not revoked"
-// by the service (fail-open on Redis outage) — see
+// sessionRevocationState reports whether the token's sid is on the denylist
+// and, when the wired service can supply it, WHY it was put there. Errors are
+// treated as "not revoked" by the service (fail-open on Redis outage) — see
 // SessionRevocationService's type comment.
-func (m *AuthMiddleware) isSessionRevoked(r *http.Request, claims *models.JWTClaims) bool {
+//
+// The reason is read through the optional SessionRevocationReasonReader
+// extension, so a fork's own SessionRevocationService implementation keeps
+// compiling and simply gets the generic wording. The lookup is not an extra
+// round-trip: Revoke stores the reason as the Redis value, so the GET that
+// answers "revoked?" already carries it.
+func (m *AuthMiddleware) sessionRevocationState(r *http.Request, claims *models.JWTClaims) (bool, string) {
 	if m.sessionRevocation == nil || claims == nil || claims.SessionID == "" {
-		return false
+		return false, ""
+	}
+	if reader, ok := m.sessionRevocation.(services.SessionRevocationReasonReader); ok {
+		reason, revoked := reader.RevocationReason(r.Context(), claims.SessionID)
+		return revoked, reason
 	}
 	revoked, _ := m.sessionRevocation.IsRevoked(r.Context(), claims.SessionID)
-	return revoked
+	return revoked, ""
 }
 
 // sendSessionRevoked emits the structured 401 that tells the client to
-// drop its access token and re-authenticate. The `session_revoked` code
-// is distinct from the generic `authentication required` path so the
-// frontend can choose a cleaner UX than the token-expired toast.
-func (m *AuthMiddleware) sendSessionRevoked(w http.ResponseWriter, r *http.Request) {
+// drop its access token and re-authenticate. The code is distinct from the
+// generic `authentication required` path so the frontend can choose a
+// cleaner UX than the token-expired toast.
+//
+// A session that simply reached its configured maximum age gets its OWN code.
+// The cap writes models.RevokeReasonSessionMaxAge onto the denylist, and
+// ADR-0017 D4 is explicit that reporting that as "revoked" is inaccurate and
+// that "the distinction matters to whoever reads the support ticket". Before
+// this, `session_max_age_reached` was emitted only by the two refresh
+// endpoints — neither of which surfaces it to a user (one is read by a raw
+// fetch that discards the body, the other is classified as an auth check and
+// suppressed) — so in practice a capped-out user was always told "revoked".
+// This is the path that actually reaches them.
+func (m *AuthMiddleware) sendSessionRevoked(w http.ResponseWriter, r *http.Request, reason string) {
+	code, title, detail := "session_revoked", "session revoked", "this session has been revoked; please sign in again"
+	if reason == models.RevokeReasonSessionMaxAge {
+		code = "session_max_age_reached"
+		title = "session maximum age reached"
+		detail = "this session reached its maximum age; please sign in again"
+	}
 	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("WWW-Authenticate", `Bearer error="session_revoked"`)
+	w.Header().Set("WWW-Authenticate", `Bearer error="`+code+`"`)
 	w.WriteHeader(http.StatusUnauthorized)
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"status": http.StatusUnauthorized,
-		"title":  "session revoked",
-		"detail": "this session has been revoked; please sign in again",
+		"title":  title,
+		"detail": detail,
 		"type":   "about:blank",
 		"errors": []map[string]any{{
-			"message":  "session revoked",
+			"message":  title,
 			"location": "require_auth",
-			"value":    "SESSION_REVOKED",
+			"value":    strings.ToUpper(code),
 		}},
-		"code": "session_revoked",
+		"code": code,
 	})
 }
 

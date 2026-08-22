@@ -27,6 +27,7 @@ require (
 	github.com/joho/godotenv v1.5.1
 	github.com/pquerna/otp v1.5.0
 	github.com/prometheus/client_golang v1.24.1
+	github.com/prometheus/client_model v0.6.2
 	github.com/redis/go-redis/v9 v9.21.0
 	go.mongodb.org/mongo-driver v1.17.7
 	go.opentelemetry.io/contrib/bridges/otelslog v0.20.0
@@ -90,7 +91,6 @@ require (
 	github.com/opencontainers/image-spec v1.1.1 // indirect
 	github.com/philhofer/fwd v1.2.0 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
-	github.com/prometheus/client_model v0.6.2 // indirect
 	github.com/prometheus/common v0.70.1 // indirect
 	github.com/prometheus/procfs v0.21.1 // indirect
 	github.com/tinylib/msgp v1.6.4 // indirect

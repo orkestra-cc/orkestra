@@ -60,24 +60,56 @@ func (stubTenant) EnsureTenantForUser(context.Context, string) (*iface.Tenant, e
 }
 
 // fakeRevocation is an in-memory SessionRevocationService. Tests pre-
-// populate `revoked` to flip a sid into the deny set.
+// populate `revoked` to flip a sid into the deny set. It also implements
+// the optional SessionRevocationReasonReader, matching the production
+// Redis service, so the middleware's reason-aware branch is exercised.
 type fakeRevocation struct {
 	mu      sync.Mutex
-	revoked map[string]bool
+	revoked map[string]string
 }
 
-func newFakeRevocation() *fakeRevocation { return &fakeRevocation{revoked: map[string]bool{}} }
+func newFakeRevocation() *fakeRevocation { return &fakeRevocation{revoked: map[string]string{}} }
 
-func (f *fakeRevocation) Revoke(_ context.Context, sid, _ string) error {
+func (f *fakeRevocation) Revoke(_ context.Context, sid, reason string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.revoked[sid] = true
+	if reason == "" {
+		reason = "revoked"
+	}
+	f.revoked[sid] = reason
 	return nil
 }
 
 func (f *fakeRevocation) IsRevoked(_ context.Context, sid string) (bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	_, ok := f.revoked[sid]
+	return ok, nil
+}
+
+func (f *fakeRevocation) RevocationReason(_ context.Context, sid string) (string, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	reason, ok := f.revoked[sid]
+	return reason, ok
+}
+
+// The production Redis service must keep satisfying the optional extension
+// the middleware type-asserts on — if it stops, every capped-out session
+// silently reverts to being reported as "revoked" with no test failing.
+var _ services.SessionRevocationReasonReader = (*fakeRevocation)(nil)
+
+// reasonBlindRevocation implements ONLY the base interface, standing in for
+// a fork's own SessionRevocationService. The extension is optional, so this
+// must keep working and simply fall back to the generic wording.
+type reasonBlindRevocation struct{ revoked map[string]bool }
+
+func (f *reasonBlindRevocation) Revoke(_ context.Context, sid, _ string) error {
+	f.revoked[sid] = true
+	return nil
+}
+
+func (f *reasonBlindRevocation) IsRevoked(_ context.Context, sid string) (bool, error) {
 	return f.revoked[sid], nil
 }
 
@@ -284,6 +316,113 @@ func TestRequireAuth_RevokedSession_Returns401_SessionRevokedCode(t *testing.T) 
 	wa := resp.Header.Get("WWW-Authenticate")
 	if wa == "" || wa != `Bearer error="session_revoked"` {
 		t.Errorf("WWW-Authenticate = %q, want session_revoked", wa)
+	}
+}
+
+// A session that reached its absolute cap must NOT be reported as "revoked".
+//
+// This is the path that actually reaches a user. ADR-0017 D4 gives the cap
+// its own code, but the only emitters were /v1/auth/*/refresh-cookie (read by
+// a raw fetch that discards the body on !res.ok) and /v1/auth/session
+// (classified as an auth check, whose toast is suppressed). What the user saw
+// instead was this middleware's session_revoked, emitted when their still-live
+// access token hit the denylist — exactly the wording D4 calls inaccurate
+// ("the distinction matters to whoever reads the support ticket").
+func TestRequireAuth_SessionMaxAge_ReturnsDistinctCode(t *testing.T) {
+	f := newRequireAuthFixture(t)
+	dh := &downstreamHandler{}
+	srv := httptest.NewServer(f.mw.RequireAuth(dh.handler()))
+	defer srv.Close()
+
+	tok := f.issueTokenWithSID("u-9", "sess-aged-out")
+	// Exactly what expireSessionForMaxAge writes.
+	_ = f.revocation.Revoke(context.Background(), "sess-aged-out", authModels.RevokeReasonSessionMaxAge)
+
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/protected", nil)
+	req.Header.Set("Authorization", "Bearer "+tok)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401", resp.StatusCode)
+	}
+	if dh.called {
+		t.Error("a capped-out sid must NOT reach downstream")
+	}
+	if wa := resp.Header.Get("WWW-Authenticate"); wa != `Bearer error="session_max_age_reached"` {
+		t.Errorf("WWW-Authenticate = %q, want session_max_age_reached", wa)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), `"code":"session_max_age_reached"`) {
+		t.Errorf("body = %s, want code session_max_age_reached — 'revoked' is inaccurate for a session that simply aged out", body)
+	}
+	if strings.Contains(string(body), "has been revoked") {
+		t.Errorf("body = %s, still carries the revoked wording", body)
+	}
+}
+
+// Any OTHER reason keeps the generic code — the new branch must be keyed on
+// the cap's reason specifically, not on "a reason was stored".
+func TestRequireAuth_OtherRevocationReason_KeepsGenericCode(t *testing.T) {
+	f := newRequireAuthFixture(t)
+	dh := &downstreamHandler{}
+	srv := httptest.NewServer(f.mw.RequireAuth(dh.handler()))
+	defer srv.Close()
+
+	tok := f.issueTokenWithSID("u-10", "sess-pw-change")
+	_ = f.revocation.Revoke(context.Background(), "sess-pw-change", "password_change")
+
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/protected", nil)
+	req.Header.Set("Authorization", "Bearer "+tok)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), `"code":"session_revoked"`) {
+		t.Errorf("body = %s, want the generic session_revoked code", body)
+	}
+}
+
+// The reason reader is an OPTIONAL extension, so a fork's own
+// SessionRevocationService — which implements only the two required methods —
+// must still deny the request, just with the generic wording. Getting this
+// wrong would either break forks at compile time or, worse, fail open.
+func TestRequireAuth_RevocationWithoutReasonReader_StillDeniesGenerically(t *testing.T) {
+	f := newRequireAuthFixture(t)
+	blind := &reasonBlindRevocation{revoked: map[string]bool{}}
+	f.mw.SetSessionRevocation(blind)
+
+	dh := &downstreamHandler{}
+	srv := httptest.NewServer(f.mw.RequireAuth(dh.handler()))
+	defer srv.Close()
+
+	tok := f.issueTokenWithSID("u-11", "sess-blind")
+	// Even the cap's own reason cannot survive a service that discards it.
+	_ = blind.Revoke(context.Background(), "sess-blind", authModels.RevokeReasonSessionMaxAge)
+
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/protected", nil)
+	req.Header.Set("Authorization", "Bearer "+tok)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401 — the optional extension must never gate the denial itself", resp.StatusCode)
+	}
+	if dh.called {
+		t.Error("revoked sid reached downstream through the fallback path")
+	}
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), `"code":"session_revoked"`) {
+		t.Errorf("body = %s, want the generic session_revoked fallback", body)
 	}
 }
 

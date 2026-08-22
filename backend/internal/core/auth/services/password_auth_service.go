@@ -140,13 +140,8 @@ type PasswordAuthService struct {
 	blobStore blob.Store
 }
 
-// AuthSessionRetention is how long a session DOCUMENT is kept, which is
-// deliberately NOT the session's own lifetime. The row is an audit and
-// device-history record — the risk scorer reads it to answer "have I
-// seen this device before?" — and it outlives the credentials it
-// describes on purpose. Access is bounded by the access-token TTL and
-// the refresh-token TTL; nothing authenticates off this row.
-const AuthSessionRetention = 90 * 24 * time.Hour
+// Session document retention lives in models.AuthSessionRetention — see
+// its doc comment for why it's there rather than here.
 
 // HasWebAuthnCredentials is the narrow contract login flows need from the
 // WebAuthn service: a fast yes/no on whether the user has any passkey
@@ -1574,7 +1569,7 @@ func (s *PasswordAuthService) createSessionDoc(ctx context.Context, user *iface.
 		IsActive:     true,
 		StartedAt:    now,
 		LastActivity: now,
-		ExpiresAt:    now.Add(AuthSessionRetention),
+		ExpiresAt:    now.Add(authModels.AuthSessionRetention),
 		LoginMethod:  in.LoginMethod,
 		MFACompleted: in.MFACompleted,
 		DeviceInfo: authModels.DeviceInfo{

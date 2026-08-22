@@ -148,3 +148,25 @@ func (r *RedisClientAdapter) Keys(ctx context.Context, pattern string) ([]string
 	}
 	return result.Val(), nil
 }
+
+// SetNX sets the key only if it does not exist, reporting whether this
+// caller created it. The primitive behind the maintenance-lease election.
+func (r *RedisClientAdapter) SetNX(ctx context.Context, key string, value interface{}, expiration time.Duration) (bool, error) {
+	result := r.client.SetNX(ctx, key, value, expiration)
+	if result.Err() != nil {
+		return false, result.Err()
+	}
+	return result.Val(), nil
+}
+
+// Eval runs a Lua script server-side. The maintenance lease uses it so
+// compare-and-expire and compare-and-delete are atomic: without it, one
+// replica could renew or delete a lease another replica owns in the gap
+// between reading the owner token and acting on it.
+func (r *RedisClientAdapter) Eval(ctx context.Context, script string, keys []string, args ...interface{}) (interface{}, error) {
+	result := r.client.Eval(ctx, script, keys, args...)
+	if result.Err() != nil {
+		return nil, result.Err()
+	}
+	return result.Val(), nil
+}

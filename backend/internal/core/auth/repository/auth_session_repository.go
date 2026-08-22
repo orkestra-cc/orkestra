@@ -27,9 +27,16 @@ type AuthSessionRepository interface {
 
 	// Session termination
 	TerminateSession(ctx context.Context, uuid string) error
+	// ExpireSessionForMaxAge flips an ACTIVE session to inactive and
+	// reports whether this caller performed the transition. Concurrent
+	// refreshes on a capped session all terminate it, but only the winner
+	// gets true — so the security event and the cap metric are emitted
+	// exactly once per session rather than once per racing request.
+	// A session already inactive returns (false, nil), not an error.
+	// ADR-0017 D4.
+	ExpireSessionForMaxAge(ctx context.Context, uuid string) (bool, error)
 	TerminateSessionByDevice(ctx context.Context, userUUID, deviceID string) error
 	TerminateAllUserSessions(ctx context.Context, userUUID string) error
-	TerminateExpiredSessions(ctx context.Context) (int64, error)
 	// DeleteAllByUser hard-deletes every session row for the user. Used
 	// by the GDPR DSR right-to-erasure pipeline — TerminateAllUserSessions
 	// only flips isActive, erasure requires the rows to be gone.
@@ -51,9 +58,13 @@ type AuthSessionRepository interface {
 
 	// Risk signal lookups — Section C item #1 of the 2026-04-24 auth roadmap.
 	// Each method is bounded by a `since` cutoff so the counts stay cheap
-	// regardless of account age. Callers pass time.Now().Add(-180*24h) for a
-	// rolling 6-month baseline; tests can pass time.Time{} to count across
-	// the entire collection.
+	// regardless of account age. These count session ROWS, with no isActive
+	// or expiresAt predicate, so the cutoff cannot usefully reach past
+	// models.AuthSessionRetention — beyond it the TTL index has removed the
+	// rows and the count is structurally zero, which reads as "never seen
+	// before". The risk scorer therefore passes exactly that constant
+	// (services.historyLookback); tests can pass time.Time{} to count across
+	// the entire collection. ADR-0017 D7.
 	CountSessionsByUserAndFingerprint(ctx context.Context, userUUID, fingerprint string, since time.Time) (int64, error)
 	CountSessionsByUserAndIP(ctx context.Context, userUUID, ip string, since time.Time) (int64, error)
 	// GetMostRecentSessionByUser returns the latest session regardless of
@@ -62,6 +73,12 @@ type AuthSessionRepository interface {
 	// prior session was already revoked.
 	GetMostRecentSessionByUser(ctx context.Context, userUUID string) (*models.AuthSessionDoc, error)
 }
+
+// sessionRetentionFallback backstops CreateSession when the caller left
+// ExpiresAt zero. It must equal the value the callers write: with a TTL
+// index on the field, a disagreement deletes rows early rather than
+// merely reading oddly.
+const sessionRetentionFallback = models.AuthSessionRetention
 
 type SessionStats struct {
 	TotalSessions    int64                      `json:"totalSessions"`
@@ -156,9 +173,9 @@ func (r *authSessionRepository) CreateSession(ctx context.Context, session *mode
 		return fmt.Errorf("device ID is required")
 	}
 
-	// Set default expiration (30 days)
+	// Fall back to the same retention deadline every caller writes.
 	if session.ExpiresAt.IsZero() {
-		session.ExpiresAt = now.Add(30 * 24 * time.Hour)
+		session.ExpiresAt = now.Add(sessionRetentionFallback)
 	}
 
 	_, err := r.collection.InsertOne(ctx, session)
@@ -348,6 +365,31 @@ func (r *authSessionRepository) TerminateSession(ctx context.Context, uuid strin
 	return nil
 }
 
+// ExpireSessionForMaxAge flips an ACTIVE session to inactive and reports
+// whether this caller performed the transition. The isActive:true filter
+// is a compare-and-swap: only one of any number of concurrent callers can
+// match and modify the row, so exactly one gets true back even when every
+// racer is trying to expire the same session at once. ADR-0017 D4.
+func (r *authSessionRepository) ExpireSessionForMaxAge(ctx context.Context, uuid string) (bool, error) {
+	filter := bson.M{"uuid": uuid, "isActive": true}
+	update := bson.M{
+		"$set": bson.M{
+			"isActive":  false,
+			"updatedAt": time.Now(),
+		},
+	}
+
+	//tenantscope:allow Sessions are audience-tier scoped, not org scoped; this repository is bound to one tier collection.
+	result, err := r.collection.UpdateOne(ctx, filter, update)
+	if err != nil {
+		return false, fmt.Errorf("failed to expire session for max age: %w", err)
+	}
+	// MatchedCount==0 means the row was already inactive (or gone). That
+	// is not an error — it is the losing side of the race, and the caller
+	// must still return the same cap sentinel to it.
+	return result.ModifiedCount == 1, nil
+}
+
 func (r *authSessionRepository) TerminateSessionByDevice(ctx context.Context, userUUID, deviceID string) error {
 	filter := bson.M{
 		"userUuid": userUUID,
@@ -387,26 +429,6 @@ func (r *authSessionRepository) TerminateAllUserSessions(ctx context.Context, us
 	}
 
 	return nil
-}
-
-func (r *authSessionRepository) TerminateExpiredSessions(ctx context.Context) (int64, error) {
-	filter := bson.M{
-		"isActive":  true,
-		"expiresAt": bson.M{"$lt": time.Now()},
-	}
-	update := bson.M{
-		"$set": bson.M{
-			"isActive":  false,
-			"updatedAt": time.Now(),
-		},
-	}
-
-	result, err := r.collection.UpdateMany(ctx, filter, update)
-	if err != nil {
-		return 0, fmt.Errorf("failed to terminate expired sessions: %w", err)
-	}
-
-	return result.ModifiedCount, nil
 }
 
 func (r *authSessionRepository) GetSessionStats(ctx context.Context, userUUID string) (*SessionStats, error) {

@@ -99,6 +99,10 @@ func (r *fakeAuthSessionRepo) TerminateSession(_ context.Context, uuid string) e
 	return nil
 }
 
+func (r *fakeAuthSessionRepo) ExpireSessionForMaxAge(context.Context, string) (bool, error) {
+	panic("unused: ExpireSessionForMaxAge")
+}
+
 func (r *fakeAuthSessionRepo) TerminateSessionByDevice(_ context.Context, userUUID, deviceID string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()

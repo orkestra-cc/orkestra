@@ -60,17 +60,29 @@ type RefreshTokenRepository interface {
 	RevokeFamily(ctx context.Context, familyID, reason string) (int64, error)
 
 	// Cleanup operations
-	CleanupExpiredTokens(ctx context.Context) (int64, error)
+	//
+	// The invariant: no row is deleted while its token could still pass
+	// temporal validation, regardless of whether it is active, rotated,
+	// or otherwise revoked. Once expiresAt is past, replaying the token
+	// cannot mint credentials, so the row may go. This supersedes the old
+	// "retain revoked rows for one refresh TTL after revocation" rule,
+	// which was both over-broad and wrong across a JWT_REFRESH_TOKEN_EXPIRY
+	// change between restarts. The durable family fence has its own TTL
+	// index and is unaffected. ADR-0017 D7.
+
+	// CleanupExpiredTokens deletes at most `limit` expired rows and
+	// reports whether more remain. hasMore is derived from selecting one
+	// row beyond the batch, NOT from CountDocuments: the drain path runs
+	// every five minutes and must not scan the whole eligible range to
+	// decide its next cadence.
+	CleanupExpiredTokens(ctx context.Context, limit int) (deleted int64, hasMore bool, err error)
+	// CountExpiredTokens is the ONE indexed count taken on entry to drain
+	// mode to seed the backlog gauge. It is never called per cycle.
+	CountExpiredTokens(ctx context.Context) (int64, error)
 	// DeleteAllByUser hard-deletes every refresh token (active or revoked)
 	// for the user. Used by the GDPR DSR right-to-erasure pipeline —
 	// distinct from RevokeTokensByUser which only flips isRevoked.
 	DeleteAllByUser(ctx context.Context, userUUID string) (int64, error)
-	// CleanupRevokedTokens removes revoked rows whose RevokedAt is older
-	// than `olderThan`. MUST be called with a value ≥ the refresh-token
-	// lifetime, otherwise a replay within the live window won't find the
-	// rotated row to match against. Today nothing schedules this — Block F
-	// will add a guarded background reaper.
-	CleanupRevokedTokens(ctx context.Context, olderThan time.Duration) (int64, error)
 
 	// Analytics and monitoring
 	GetTokenStats(ctx context.Context, userUUID string) (*TokenStats, error)
@@ -705,34 +717,63 @@ func (r *refreshTokenRepository) RevokeTokensByDevice(ctx context.Context, userU
 	return nil
 }
 
-func (r *refreshTokenRepository) CleanupExpiredTokens(ctx context.Context) (int64, error) {
-	filter := bson.M{
-		"expiresAt": bson.M{"$lt": time.Now()},
+// SweepBatchLimit is the cluster-wide per-cycle deletion bound per tier.
+// It is a cluster bound rather than a per-replica multiplier because the
+// Redis lease elects exactly one scheduler.
+const SweepBatchLimit = 5000
+
+func (r *refreshTokenRepository) CleanupExpiredTokens(ctx context.Context, limit int) (int64, bool, error) {
+	if limit <= 0 {
+		return 0, false, nil
 	}
+	filter := bson.M{"expiresAt": bson.M{"$lt": time.Now()}}
+	opts := options.Find().
+		SetSort(bson.D{{Key: "expiresAt", Value: 1}, {Key: "uuid", Value: 1}}).
+		SetLimit(int64(limit) + 1).
+		SetProjection(bson.M{"uuid": 1, "_id": 0})
 
 	//tenantscope:allow Refresh-token state is audience-tier scoped, not org scoped; this repository is bound to one tier collection.
-	result, err := r.collection.DeleteMany(ctx, filter)
+	cursor, err := r.collection.Find(ctx, filter, opts)
 	if err != nil {
-		return 0, fmt.Errorf("failed to cleanup expired tokens: %w", err)
+		return 0, false, fmt.Errorf("failed to select expired tokens: %w", err)
+	}
+	var rows []struct {
+		UUID string `bson:"uuid"`
+	}
+	if err := cursor.All(ctx, &rows); err != nil {
+		return 0, false, fmt.Errorf("failed to read expired tokens: %w", err)
 	}
 
-	return result.DeletedCount, nil
+	// The (limit+1)-th row is the whole point: it answers "is there more
+	// work?" for the cost of one extra index entry, so the scheduler can
+	// pick its next cadence without counting the backlog every cycle.
+	hasMore := len(rows) > limit
+	if hasMore {
+		rows = rows[:limit]
+	}
+	if len(rows) == 0 {
+		return 0, false, nil
+	}
+
+	uuids := make([]string, 0, len(rows))
+	for _, row := range rows {
+		uuids = append(uuids, row.UUID)
+	}
+	//tenantscope:allow Refresh-token state is audience-tier scoped, not org scoped; this repository is bound to one tier collection.
+	res, err := r.collection.DeleteMany(ctx, bson.M{"uuid": bson.M{"$in": uuids}})
+	if err != nil {
+		return 0, hasMore, fmt.Errorf("failed to delete expired tokens: %w", err)
+	}
+	return res.DeletedCount, hasMore, nil
 }
 
-func (r *refreshTokenRepository) CleanupRevokedTokens(ctx context.Context, olderThan time.Duration) (int64, error) {
-	cutoff := time.Now().Add(-olderThan)
-	filter := bson.M{
-		"isRevoked": true,
-		"revokedAt": bson.M{"$lt": cutoff},
-	}
-
+func (r *refreshTokenRepository) CountExpiredTokens(ctx context.Context) (int64, error) {
 	//tenantscope:allow Refresh-token state is audience-tier scoped, not org scoped; this repository is bound to one tier collection.
-	result, err := r.collection.DeleteMany(ctx, filter)
+	n, err := r.collection.CountDocuments(ctx, bson.M{"expiresAt": bson.M{"$lt": time.Now()}})
 	if err != nil {
-		return 0, fmt.Errorf("failed to cleanup revoked tokens: %w", err)
+		return 0, fmt.Errorf("failed to count expired tokens: %w", err)
 	}
-
-	return result.DeletedCount, nil
+	return n, nil
 }
 
 func (r *refreshTokenRepository) GetTokenStats(ctx context.Context, userUUID string) (*TokenStats, error) {

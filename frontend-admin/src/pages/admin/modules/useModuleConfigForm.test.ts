@@ -258,12 +258,44 @@ describe('buildYupSchema', () => {
     expect(await validate(schema, { p: 'anything' })).toEqual([]);
   });
 
-  it('accepts every duration Go accepts', async () => {
+  it('accepts every duration the backend parser accepts, including bare days', async () => {
+    // The contract is `utils.ParseDuration`, not `time.ParseDuration`: it is
+    // everything Go takes PLUS a bare `<number>d`. Omitting the day suffix
+    // here made `sessionAbsoluteTTL: 89d` (ADR-0017's documented maximum,
+    // and a value auth's own `Pattern` declares legal) impossible to save
+    // from /admin/modules — this resolver runs before the schema pattern, so
+    // it is the binding gate.
     const schema = [field({ key: 'd', type: 'duration' })];
-    for (const ok of ['30s', '1h30m', '500ms', '1.5h', '-5m', '0']) {
+    for (const ok of [
+      '30s',
+      '1h30m',
+      '500ms',
+      '1.5h',
+      '-5m',
+      '0',
+      // Bare days — the alternative this regex used to be missing.
+      '30d',
+      '89d',
+      '0.5d',
+      '1d',
+      '-7d'
+    ]) {
       expect(await validate(schema, { d: ok })).toEqual([]);
     }
-    for (const bad of ['30 s', '15x', '1H', 'h']) {
+    for (const bad of [
+      '30 s',
+      '15x',
+      '1H',
+      'h',
+      'd',
+      // Compound day forms stay REJECTED. `utils.ParseDuration` special-cases
+      // only a bare `<number>d` — `strings.CutSuffix` then `ParseFloat` — so
+      // `1d12h` is rejected by the backend too. The asymmetry with Go's own
+      // parser is deliberate ("either parses exactly or is rejected"); accepting
+      // it here would let the UI offer a value the server refuses.
+      '1d12h',
+      '12h1d'
+    ]) {
       expect((await validate(schema, { d: bad })).length).toBe(1);
     }
   });

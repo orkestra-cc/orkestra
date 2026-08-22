@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/joho/godotenv"
+	"github.com/orkestra/backend/internal/shared/utils"
 )
 
 type Config struct {
@@ -41,6 +42,13 @@ type StorageConfig struct {
 	ForcePathStyle bool   // true for RustFS / MinIO; false for AWS S3 virtual-hosted style
 	EnsureBucket   bool   // true → backend creates the bucket on boot if missing; safe for self-hosted
 	BucketPrefix   string // per-domain bucket namespace; bucket = <BucketPrefix>-<domain> (e.g. orkestra-avatars, orkestra-crm-photos)
+	// CORSAllowedOrigins are the browser origins allowed to run a presigned
+	// upload straight against the storage host. Defaults to the API's own
+	// CORS origins: the SPAs allowed to call the API are exactly the ones
+	// that perform these uploads, and a separate list is one more thing to
+	// forget. STORAGE_CORS_ALLOWED_ORIGINS narrows or widens it; an explicit
+	// empty value leaves every bucket policy untouched.
+	CORSAllowedOrigins []string
 }
 
 type ServerConfig struct {
@@ -149,7 +157,6 @@ type CookieConfig struct {
 	HttpOnly     bool
 	Secure       bool
 	SameSite     string
-	MaxAge       int
 }
 
 type GoogleOAuthConfig struct {
@@ -296,7 +303,6 @@ func Load() (*Config, error) {
 			HttpOnly:       getEnvAsBool("COOKIE_HTTP_ONLY", true),
 			Secure:         getEnvAsBool("COOKIE_SECURE", false), // Default false for development
 			SameSite:       getEnv("COOKIE_SAME_SITE", "lax"),
-			MaxAge:         getEnvAsInt("COOKIE_MAX_AGE", 86400000), // 24 hours in milliseconds
 		},
 		Google: GoogleOAuthConfig{
 			ClientID:        getEnv("OAUTH_GOOGLE_CLIENT_ID", ""),
@@ -349,6 +355,12 @@ func Load() (*Config, error) {
 		ForcePathStyle: getEnvAsBool("STORAGE_FORCE_PATH_STYLE", true),
 		EnsureBucket:   getEnvAsBool("STORAGE_ENSURE_BUCKET", true),
 		BucketPrefix:   getEnv("STORAGE_BUCKET_PREFIX", "orkestra"),
+		// Defaults to every origin allowed to call the API — see the field
+		// comment. The union matters: a deployment that has moved to the
+		// per-audience lists leaves CORS_ORIGINS on its localhost default,
+		// so defaulting to that alone would miss the real console.
+		CORSAllowedOrigins: getEnvAsSlice("STORAGE_CORS_ALLOWED_ORIGINS",
+			mergeOrigins(corsOrigins, config.Server.Operator.CORSOrigins, config.Server.Client.CORSOrigins)),
 	}
 
 	if err := config.Validate(); err != nil {
@@ -501,27 +513,29 @@ func getEnvAsDuration(key string, defaultValue string) time.Duration {
 	return 0
 }
 
-// parseDuration accepts everything time.ParseDuration does, plus a
-// trailing "d" for days. Only a bare "<number>d" is special-cased;
-// compound forms ("1d12h") stay unsupported rather than half-supported,
-// so a value either parses exactly or is rejected.
+// parseDuration delegates to utils.ParseDuration so environment
+// variables and admin-UI values are read by one parser. See ADR-0017.
 func parseDuration(raw string) (time.Duration, bool) {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return 0, false
-	}
-	if days, ok := strings.CutSuffix(raw, "d"); ok {
-		n, err := strconv.ParseFloat(days, 64)
-		if err != nil {
-			return 0, false
+	return utils.ParseDuration(raw)
+}
+
+// mergeOrigins unions the API's CORS origin lists, preserving order and
+// dropping duplicates and blanks. Used to derive the default set of browser
+// origins allowed to upload straight to object storage.
+func mergeOrigins(lists ...[]string) []string {
+	seen := map[string]bool{}
+	out := []string{}
+	for _, list := range lists {
+		for _, origin := range list {
+			origin = strings.TrimSpace(origin)
+			if origin == "" || seen[origin] {
+				continue
+			}
+			seen[origin] = true
+			out = append(out, origin)
 		}
-		return time.Duration(n * float64(24*time.Hour)), true
 	}
-	d, err := time.ParseDuration(raw)
-	if err != nil {
-		return 0, false
-	}
-	return d, true
+	return out
 }
 
 func getEnvAsSlice(key string, defaultValue []string) []string {
