@@ -123,7 +123,11 @@ const VENDOR_CHUNKS = {
   ],
 
   // Editor and rich content
-  'editor-vendor': ['@tinymce/tinymce-react', 'tinymce', 'prism-react-renderer'],
+  'editor-vendor': [
+    '@tinymce/tinymce-react',
+    'tinymce',
+    'prism-react-renderer'
+  ],
 
   // Utilities
   'utils-vendor': ['uuid', 'fuse.js', 'imask', 'react-imask']
