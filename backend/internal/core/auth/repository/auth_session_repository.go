@@ -58,9 +58,13 @@ type AuthSessionRepository interface {
 
 	// Risk signal lookups — Section C item #1 of the 2026-04-24 auth roadmap.
 	// Each method is bounded by a `since` cutoff so the counts stay cheap
-	// regardless of account age. Callers pass time.Now().Add(-180*24h) for a
-	// rolling 6-month baseline; tests can pass time.Time{} to count across
-	// the entire collection.
+	// regardless of account age. These count session ROWS, with no isActive
+	// or expiresAt predicate, so the cutoff cannot usefully reach past
+	// models.AuthSessionRetention — beyond it the TTL index has removed the
+	// rows and the count is structurally zero, which reads as "never seen
+	// before". The risk scorer therefore passes exactly that constant
+	// (services.historyLookback); tests can pass time.Time{} to count across
+	// the entire collection. ADR-0017 D7.
 	CountSessionsByUserAndFingerprint(ctx context.Context, userUUID, fingerprint string, since time.Time) (int64, error)
 	CountSessionsByUserAndIP(ctx context.Context, userUUID, ip string, since time.Time) (int64, error)
 	// GetMostRecentSessionByUser returns the latest session regardless of
