@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"strings"
 	"testing"
 
 	"github.com/orkestra/backend/internal/core/authz/cedar"
@@ -137,6 +138,51 @@ func TestShadowEvaluate_SuperAdminInternalTenantSystemAdmin(t *testing.T) {
 	}
 	if !decision.Allowed {
 		t.Errorf("expected allow on internal tenant, got deny (matched=%q)", decision.MatchedPolicy)
+	}
+}
+
+// TestShadowEvaluate_DivergenceLevelFollowsProduction pins the severity of
+// the divergence line to the deployment. Below production a divergence is
+// the expected output of policy work in progress; in production it is a
+// disagreement about a real authorization decision that nobody is watching
+// a rollout for, so it has to reach whatever alerts on Error.
+func TestShadowEvaluate_DivergenceLevelFollowsProduction(t *testing.T) {
+	cases := []struct {
+		name       string
+		production bool
+		want       string
+		notWant    string
+	}{
+		{"outside production it warns", false, "level=WARN", "level=ERROR"},
+		{"in production it errors", true, "level=ERROR", "level=WARN"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Same scenario as the tier-forbid test above: the role table
+			// allows (super_admin shortcut), tenant_scope.cedar denies on
+			// an external tenant. Only the deployment flag differs.
+			svc, logBuf := newTestService(t, nil)
+			svc.withUserRole("super_admin")
+			svc.production = tc.production
+			ctx := ctxauth.WithTenantKind(context.Background(), "external")
+			decision, ok := svc.shadowEvaluate(ctx, "user-1", "tenant-ext", "system.users.admin", true)
+			if !ok {
+				t.Fatalf("Cedar evaluation should succeed, errors: %+v", decision.Errors)
+			}
+			if decision.Allowed {
+				t.Fatalf("scenario only diverges while Cedar denies; got allow (matched=%q)", decision.MatchedPolicy)
+			}
+			out := logBuf.String()
+			if !strings.Contains(out, "cedar: divergence") {
+				t.Fatalf("expected a divergence line, got: %s", out)
+			}
+			if !strings.Contains(out, tc.want) {
+				t.Errorf("expected %s on the divergence line, got: %s", tc.want, out)
+			}
+			if strings.Contains(out, tc.notWant) {
+				t.Errorf("did not expect %s anywhere, got: %s", tc.notWant, out)
+			}
+		})
 	}
 }
 
