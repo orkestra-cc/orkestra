@@ -269,6 +269,15 @@ Who writes `public/config.js` at runtime:
 
 Adding a new field: declare it on `RuntimeConfig` in `src/config/environment.ts`, read it via the `config` singleton, and add the env-var fallback in **all three** generators (dev compose, staging compose, nginx entrypoint). Never reach for `import.meta.env.VITE_*` from new code — those bake at build time and defeat the point.
 
+**`/config.js` must never be cached, and both serving paths now say so explicitly.** The file is rewritten on every container start, so a client holding a stale copy points at the wrong `apiUrl` until its cache expires. Production nginx sets `Cache-Control: no-store` (`Dockerfile`, `location = /config.js`); the dev server — which is what **dev and staging** run — gets the same header from the `orkestra-runtime-config` plugin in `vite.config.js`, which serves the file itself rather than letting Vite's public-dir middleware answer. Two reasons it works that way, both load-bearing:
+
+- Vite's public-dir middleware (sirv) writes `Cache-Control: no-cache` **unconditionally into the response head**, so a middleware that only calls `res.setHeader` upstream of it is silently overridden. Short-circuiting the request is the only way to own the header — the same shape the `/health` plugin in that file uses.
+- `no-cache` is not "don't cache", it is "cache but revalidate", and that is enough for a CDN to keep a copy. Cloudflare classifies `.js` as a static asset **by extension**, so it cached `/config.js` (while leaving `/index.html` and `/src/*.tsx` as `DYNAMIC`) and replaced the origin header with its own default `max-age=14400`. Staging served a 4-hour-stale runtime config after a deploy because of it.
+
+Editing a middleware in `vite.config.js` needs a **container restart, not Vite's own config-reload**. Vite watches its config and logs `server restarted` on save, but the middleware the previous `configureServer` registered stays in the stack — so the old handler keeps answering and the edit looks inert (it took a `docker restart` to make `no-store` appear, after three config-reloads that logged a clean restart and changed nothing).
+
+If a stale config reappears at an edge, diff origin against edge before touching this code — `curl -sI http://127.0.0.1:${FRONTEND_PORT}/config.js` vs `curl -sI https://<host>/config.js` — a `cf-cache-status` other than `DYNAMIC`/`BYPASS` means the CDN, not the app, owns the header, and the fix is a cache rule on the zone.
+
 ## Application version
 
 The version string rendered in the footer (`src/components/footer/Footer.tsx` reads it from `src/config.ts`) and embedded in the dev-server `/health` response is derived from the git tag, not `package.json#version`. The chain:
