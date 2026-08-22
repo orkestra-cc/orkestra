@@ -33,6 +33,20 @@ var (
 	// again after its successor already existed — a textbook replay attack.
 	// The whole family is revoked before this error is returned.
 	ErrRefreshTokenReplay = errors.New("refresh token replay detected — session revoked")
+	// ErrRefreshRotationRaced signals that the presented token was rotated
+	// by a CONCURRENT caller moments ago while the family is still intact:
+	// several tabs of one app hit their 401 at the same instant (their
+	// access tokens share a login, so they expire together) and each posts
+	// the same cookie. Exactly one wins the CAS; without this sentinel
+	// every loser was answered with ErrRefreshTokenReplay, which revokes
+	// the family — including the winner's freshly minted successor — and
+	// signs the user out of every tab for doing nothing wrong.
+	//
+	// It is NOT a sign-out: no family is revoked and no credentials are
+	// issued. The caller's cookie jar already holds the winner's successor,
+	// so the correct client response is to retry the refresh once.
+	// Translated to 409 refresh_rotation_raced at the handler boundary.
+	ErrRefreshRotationRaced = errors.New("refresh token superseded by a concurrent rotation — retry")
 	// ErrOAuthSignupDisabled signals that an OAuth callback resolved to
 	// an unknown email but the audience-scoped oauthAllowSignup policy
 	// is off, so we refuse to provision a new account. Translated to
@@ -1341,6 +1355,12 @@ func (s *authService) RefreshTokensWithRiskAssessment(ctx context.Context, refre
 	// 3+4. Already-revoked branches.
 	if tokenDoc.IsRevoked {
 		if tokenDoc.RevokedReason == models.RevokeReasonRotated {
+			// A sibling caller rotated this row between our read and
+			// theirs. Inside the grace window that is the multi-tab race,
+			// not an attack — answer "retry" and leave the family alone.
+			if s.benignRotationRetry(ctx, tokenDoc) {
+				return nil, ErrRefreshRotationRaced
+			}
 			s.handleRefreshReplay(ctx, tokenDoc, securityCtx, "rotated_token_reused")
 			return nil, ErrRefreshTokenReplay
 		}
@@ -1415,8 +1435,18 @@ func (s *authService) RefreshTokensWithRiskAssessment(ctx context.Context, refre
 	if err := s.refreshTokenRepo.RotateWithFamily(ctx, hashedToken, newDoc); err != nil {
 		if errors.Is(err, repository.ErrTokenAlreadyRotated) {
 			// Concurrency: another caller rotated between our Get and our
-			// CAS, or the client retried. Either way, only one caller holds
-			// the legitimate chain — kill the family.
+			// CAS, or the client retried. Re-read the row to tell the two
+			// apart — our stale copy still says isRevoked:false. A sibling
+			// that won the CAS within the grace window leaves a healthy
+			// family and gets "retry"; anything else is a replay and the
+			// family dies. This branch also covers the case where our own
+			// CAS succeeded but the family was revoked underneath us
+			// (RotateWithFamily reports that as ErrTokenAlreadyRotated
+			// too) — FamilyRevoked sees the fence and routes it to replay.
+			if current, rerr := s.refreshTokenRepo.GetByTokenAny(ctx, hashedToken); rerr == nil &&
+				s.benignRotationRetry(ctx, current) {
+				return nil, ErrRefreshRotationRaced
+			}
 			s.handleRefreshReplay(ctx, tokenDoc, securityCtx, "rotation_cas_lost")
 			return nil, ErrRefreshTokenReplay
 		}
@@ -1559,6 +1589,46 @@ func (s *authService) MintAccessTokenFromRefresh(ctx context.Context, refreshTok
 // handleRefreshReplay kills the family and logs a structured warning. The
 // FamilyID can be empty on pre-Block-C rows — RevokeFamily short-circuits
 // to a no-op in that case so we don't accidentally revoke unrelated rows.
+// RefreshRotationGrace bounds how long after a successful rotation the
+// superseded token may be re-presented without being treated as a replay.
+// It covers the window in which concurrent callers that read the same
+// cookie are still in flight; a few seconds is far longer than that race
+// and far shorter than any realistic attacker dwell time.
+//
+// The security trade this makes, stated plainly: an attacker who replays a
+// stolen token INSIDE this window is answered with a retry hint instead of
+// tripping the family kill. They gain nothing from it — the grace path
+// mints no tokens, and making progress still requires the successor cookie,
+// which only the legitimate client holds. Any reuse after the window, or
+// once the family has been revoked, is detected exactly as before.
+const RefreshRotationGrace = 10 * time.Second
+
+// benignRotationRetry reports whether doc is a token a concurrent caller
+// rotated moments ago, with the family still intact — the multi-tab race
+// rather than a replay.
+//
+// The family check is what separates the two cases that both present a
+// row marked "rotated": a racing sibling runs against a healthy family,
+// while a replay that already tripped detection (or a rotation that lost
+// to a concurrent family revocation) runs against a revoked one. On a
+// read error we return false, which keeps the pre-existing replay
+// behaviour rather than inventing a new failure mode.
+func (s *authService) benignRotationRetry(ctx context.Context, doc *models.RefreshTokenDoc) bool {
+	if doc == nil || !doc.IsRevoked || doc.RevokedReason != models.RevokeReasonRotated {
+		return false
+	}
+	if doc.RevokedAt == nil || time.Since(*doc.RevokedAt) > RefreshRotationGrace {
+		return false
+	}
+	revoked, err := s.refreshTokenRepo.FamilyRevoked(ctx, doc.FamilyID)
+	if err != nil {
+		slogDefault().WarnContext(ctx, "refresh: family-state read failed, treating rotation as replay",
+			"outcome", errorOutcome(err))
+		return false
+	}
+	return !revoked
+}
+
 func (s *authService) handleRefreshReplay(ctx context.Context, doc *models.RefreshTokenDoc, securityCtx *models.SecurityContext, kind string) {
 	revoked, err := s.refreshTokenRepo.RevokeFamily(ctx, doc.FamilyID, models.RevokeReasonReplayDetected)
 	logger := slogDefault()

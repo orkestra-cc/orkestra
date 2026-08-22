@@ -1506,6 +1506,12 @@ func (h *AuthHandler) RefreshTokens(ctx context.Context, req *RefreshTokenReques
 	tokenResponse, err := h.authService.RefreshTokensWithRiskAssessment(ctx, refreshToken, securityCtx)
 	if err != nil {
 		logger.Warn("token refresh failed", slog.String("outcome", refreshFailureOutcome(err)))
+		if errors.Is(err, services.ErrRefreshRotationRaced) {
+			// Not a sign-out: a concurrent caller rotated first and the
+			// family is intact. 409 so a client can tell "retry once with
+			// the successor" apart from "your session is gone".
+			return nil, huma.Error409Conflict("refresh_rotation_raced: superseded by a concurrent rotation, retry", err)
+		}
 		if errors.Is(err, services.ErrRefreshTokenReplay) {
 			return nil, huma.Error401Unauthorized("refresh_token_replay: session revoked", err)
 		}
@@ -2249,6 +2255,8 @@ func (h *AuthHandler) LogoutHTTP(w http.ResponseWriter, r *http.Request) {
 
 func refreshFailureOutcome(err error) string {
 	switch {
+	case errors.Is(err, services.ErrRefreshRotationRaced):
+		return "rotation_raced"
 	case errors.Is(err, services.ErrRefreshTokenReplay):
 		return "replay_detected"
 	case errors.Is(err, services.ErrSessionMaxAgeReached):
@@ -2605,6 +2613,21 @@ func writeRefreshErr(w http.ResponseWriter, err error) {
 			"title":  "Service Unavailable",
 			"detail": "session enforcement is temporarily unavailable — please retry",
 			"code":   "session_enforcement_unavailable",
+		})
+		return
+	}
+
+	if errors.Is(err, services.ErrRefreshRotationRaced) {
+		// A sibling tab won the rotation; the family is untouched and the
+		// browser already holds the successor cookie. 409 keeps this off
+		// the 401 path, where every client treats the answer as a sign-out.
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusConflict)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"status": http.StatusConflict,
+			"title":  "Conflict",
+			"detail": "refresh token superseded by a concurrent rotation — retry",
+			"code":   "refresh_rotation_raced",
 		})
 		return
 	}

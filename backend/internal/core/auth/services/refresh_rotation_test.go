@@ -101,6 +101,18 @@ func (r *inMemoryRefreshRepo) RotateWithFamily(_ context.Context, oldHash string
 	return nil
 }
 
+// FamilyRevoked mirrors the durable revocation fence the real
+// repository keeps: the `compromised` map IS that fence in these fakes.
+func (r *inMemoryRefreshRepo) FamilyRevoked(_ context.Context, familyID string) (bool, error) {
+	if familyID == "" {
+		return false, nil
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	_, revoked := r.compromised[familyID]
+	return revoked, nil
+}
+
 func (r *inMemoryRefreshRepo) RevokeFamily(_ context.Context, familyID, reason string) (int64, error) {
 	if familyID == "" {
 		return 0, nil
