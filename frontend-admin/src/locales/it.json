@@ -2581,6 +2581,10 @@
           "label": "Durata del link di reset password",
           "desc": "Stringa di durata Go — per quanto tempo il link nell'email di reset password resta valido. Predefinito 30m."
         },
+        "sessionAbsoluteTTL": {
+          "label": "Durata massima della sessione",
+          "desc": "Stringa di durata Go — durata massima di una sessione dal login, indipendente dall'attività. Allo scadere l'utente deve autenticarsi di nuovo. Intervallo 1h–89d; se vuoto il limite è disattivato. Predefinito 720h (30 giorni)."
+        },
         "mfaMethods": {
           "label": "Metodi MFA consentiti",
           "desc": "Elenco separato da virgole dei tipi di fattore che gli utenti possono iscrivere. Vuoto = tutti consentiti. Valori validi: totp, webauthn, backup_codes."

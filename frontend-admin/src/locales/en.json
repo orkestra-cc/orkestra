@@ -2581,6 +2581,10 @@
           "label": "Password reset link lifetime",
           "desc": "Go duration string — how long the link in the reset-password email stays valid. Default 30m."
         },
+        "sessionAbsoluteTTL": {
+          "label": "Maximum session age",
+          "desc": "Go duration string — maximum lifetime of a session from login, independent of activity. When it elapses the user must authenticate again. Range 1h–89d; empty disables the cap. Default 720h (30 days)."
+        },
         "mfaMethods": {
           "label": "Allowed MFA methods",
           "desc": "Comma-separated list of factor types users may enroll. Empty = all allowed. Valid: totp, webauthn, backup_codes."
