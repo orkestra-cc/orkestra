@@ -95,7 +95,7 @@ const ModuleOverviewPanel: React.FC<ModuleOverviewPanelProps> = ({
 
   return (
     <Row className="g-3 mb-3">
-      <Col md={6} xl={3}>
+      <Col md={6} xxl={3}>
         <StatCard
           title={t('adminModules.detail.cards.health')}
           // Translated label, not the raw enum: "healthy" is API vocabulary.
@@ -117,7 +117,7 @@ const ModuleOverviewPanel: React.FC<ModuleOverviewPanelProps> = ({
         />
       </Col>
 
-      <Col md={6} xl={3}>
+      <Col md={6} xxl={3}>
         <StatCard
           title={t('adminModules.detail.cards.configuration')}
           value={total > 0 ? `${filled}/${total}` : '\u2014'}
@@ -149,7 +149,7 @@ const ModuleOverviewPanel: React.FC<ModuleOverviewPanelProps> = ({
         />
       </Col>
 
-      <Col md={6} xl={3}>
+      <Col md={6} xxl={3}>
         <StatCard
           title={t('adminModules.detail.cards.dependenciesCount')}
           value={depCount > 0 ? `${depsHealthy}/${depCount}` : '\u2014'}
@@ -164,7 +164,7 @@ const ModuleOverviewPanel: React.FC<ModuleOverviewPanelProps> = ({
         />
       </Col>
 
-      <Col md={6} xl={3}>
+      <Col md={6} xxl={3}>
         <StatCard
           title={t('adminModules.detail.cards.lastModified')}
           // The absolute date is the headline; the relative form is context.

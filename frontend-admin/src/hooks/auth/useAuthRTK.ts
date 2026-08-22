@@ -70,6 +70,9 @@ export const useAuth = () => {
   const permissions = useMemo(() => {
     const merged = [...tenantPermissions];
     const systemRole = currentUser?.role;
+    if (systemRole === 'super_admin' && !merged.includes('*')) {
+      merged.push('*');
+    }
     if (systemRole && !merged.includes(systemRole)) {
       merged.push(systemRole);
     }
@@ -196,7 +199,7 @@ export const useAuth = () => {
   }, []);
 
   // Permission helpers. The `*` wildcard grants all permissions and is
-  // issued to users with the developer system role.
+  // issued to users with the super_admin system role.
   const hasPermission = useCallback(
     (permission: string) => {
       if (permissions.includes('*')) return true;
