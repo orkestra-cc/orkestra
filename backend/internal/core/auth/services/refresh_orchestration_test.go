@@ -262,6 +262,12 @@ func TestRefreshTokensWithRiskAssessment_ReplayOfRotatedToken_KillsFamily(t *tes
 		t.Fatalf("first rotation: %v", err)
 	}
 
+	// Age the rotation past RefreshRotationGrace: inside that window a
+	// re-presented token is the multi-tab race and is answered with
+	// ErrRefreshRotationRaced instead (see refresh_rotation_grace_test.go).
+	// Replay detection proper is what this test pins, so step outside it.
+	env.refresh.backdateRevocation(utils.HashRefreshToken(rawRefresh), RefreshRotationGrace+time.Second)
+
 	// Second use of the same (now rotated) token → replay.
 	_, err := env.auth.RefreshTokensWithRiskAssessment(context.Background(), rawRefresh, &authModels.SecurityContext{})
 	if !errors.Is(err, ErrRefreshTokenReplay) {
@@ -292,7 +298,12 @@ func TestRefreshTokensWithRiskAssessment_ReplayOfRotatedToken_KillsFamily(t *tes
 	}
 }
 
-func TestRefreshTokensWithRiskAssessment_ReplayInRotationGapReturnsNoActiveSuccessor(t *testing.T) {
+// A second caller landing in the rotation gap is the multi-tab race, not
+// an attack: two tabs of one app share a login, so their access tokens
+// expire together and both post the same cookie. The loser must NOT cost
+// the winner its session — that behaviour signed operators out of every
+// tab roughly once per access-token lifetime.
+func TestRefreshTokensWithRiskAssessment_ConcurrentRotationKeepsSessionAlive(t *testing.T) {
 	env := newOrchestrationEnv(t)
 	user := seededUser()
 	env.users.seed(user)
@@ -308,16 +319,20 @@ func TestRefreshTokensWithRiskAssessment_ReplayInRotationGapReturnsNoActiveSucce
 	}()
 
 	<-parentCAS
-	_, replayErr := env.auth.RefreshTokensWithRiskAssessment(context.Background(), rawRefresh, &authModels.SecurityContext{})
-	if !errors.Is(replayErr, ErrRefreshTokenReplay) {
-		t.Fatalf("gap replay = %v, want ErrRefreshTokenReplay", replayErr)
+	_, racedErr := env.auth.RefreshTokensWithRiskAssessment(context.Background(), rawRefresh, &authModels.SecurityContext{})
+	if !errors.Is(racedErr, ErrRefreshRotationRaced) {
+		t.Fatalf("gap racer = %v, want ErrRefreshRotationRaced", racedErr)
 	}
 	close(continueInsert)
-	if err := <-firstDone; !errors.Is(err, ErrRefreshTokenReplay) {
-		t.Fatalf("winning rotation after compromise = %v, want ErrRefreshTokenReplay", err)
+	if err := <-firstDone; err != nil {
+		t.Fatalf("winning rotation = %v, want success", err)
 	}
-	if active := env.refresh.activeFamilyMembers(oldDoc.FamilyID); active != 0 {
-		t.Fatalf("active successors after gap replay = %d, want 0", active)
+	// The whole point: the winner's successor is still usable.
+	if active := env.refresh.activeFamilyMembers(oldDoc.FamilyID); active != 1 {
+		t.Fatalf("active successors after concurrent rotation = %d, want 1", active)
+	}
+	if revoked, _ := env.refresh.FamilyRevoked(context.Background(), oldDoc.FamilyID); revoked {
+		t.Fatal("family was revoked by a concurrent rotation")
 	}
 }
 

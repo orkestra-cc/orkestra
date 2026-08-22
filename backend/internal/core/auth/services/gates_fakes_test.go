@@ -349,6 +349,17 @@ func (r *gateRefreshRepo) seedRefreshDoc(tokenHash string, doc *authModels.Refre
 	r.byHash[tokenHash] = &c
 }
 
+// backdateRevocation ages a row's revocation stamp so tests can step
+// outside RefreshRotationGrace without sleeping.
+func (r *gateRefreshRepo) backdateRevocation(tokenHash string, by time.Duration) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if d, ok := r.byHash[tokenHash]; ok && d.RevokedAt != nil {
+		aged := d.RevokedAt.Add(-by)
+		d.RevokedAt = &aged
+	}
+}
+
 func (r *gateRefreshRepo) GetByTokenAny(_ context.Context, tokenHash string) (*authModels.RefreshTokenDoc, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -398,6 +409,18 @@ func (r *gateRefreshRepo) RotateWithFamily(_ context.Context, oldHash string, ne
 		return repository.ErrTokenAlreadyRotated
 	}
 	return nil
+}
+
+// FamilyRevoked mirrors the durable revocation fence the real
+// repository keeps: the `compromised` map IS that fence in these fakes.
+func (r *gateRefreshRepo) FamilyRevoked(_ context.Context, familyID string) (bool, error) {
+	if familyID == "" {
+		return false, nil
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	_, revoked := r.compromised[familyID]
+	return revoked, nil
 }
 
 func (r *gateRefreshRepo) RevokeFamily(_ context.Context, familyID, reason string) (int64, error) {

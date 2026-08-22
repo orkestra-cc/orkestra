@@ -31,6 +31,26 @@ func TestWriteRefreshErr_SessionMaxAgeReached(t *testing.T) {
 	}
 }
 
+// A rotation lost to a concurrent sibling is NOT a sign-out. Answering it
+// on the 401 path made every client treat it as one, which is precisely
+// how a multi-tab race turned into a forced re-login.
+func TestWriteRefreshErr_RotationRacedIs409(t *testing.T) {
+	rec := httptest.NewRecorder()
+	writeRefreshErr(rec, services.ErrRefreshRotationRaced)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409 — a raced rotation must not look like an expired session", rec.Code)
+	}
+	if got := decodeBody(t, rec)["code"]; got != "refresh_rotation_raced" {
+		t.Errorf("code = %v, want refresh_rotation_raced", got)
+	}
+}
+
+func TestRefreshFailureOutcome_RotationRacedIsNotReplay(t *testing.T) {
+	if got := refreshFailureOutcome(services.ErrRefreshRotationRaced); got != "rotation_raced" {
+		t.Errorf("outcome = %q, want rotation_raced — logging a benign race as replay_detected buries the real replays", got)
+	}
+}
+
 func TestWriteRefreshErr_EnforcementUnavailableIs503(t *testing.T) {
 	rec := httptest.NewRecorder()
 	writeRefreshErr(rec, services.ErrSessionEnforcementUnavailable)

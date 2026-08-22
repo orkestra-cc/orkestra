@@ -58,6 +58,13 @@ type RefreshTokenRepository interface {
 	// currently active family member revoked. Returns the rows changed by
 	// the sweep; the fence also covers racing/future successors.
 	RevokeFamily(ctx context.Context, familyID, reason string) (int64, error)
+	// FamilyRevoked reports whether a durable revocation fence exists for
+	// the family. The refresh path needs this to tell a concurrent
+	// rotation apart from a replay: both present a token already marked
+	// rotated, but only the replay can be sitting behind a revoked family.
+	// An empty familyID is "not revoked" — the same no-op guard
+	// RevokeFamily applies to pre-Block-C rows.
+	FamilyRevoked(ctx context.Context, familyID string) (bool, error)
 
 	// Cleanup operations
 	//
@@ -455,6 +462,18 @@ func (r *refreshTokenRepository) RotateWithFamily(ctx context.Context, oldTokenH
 		return ErrTokenAlreadyRotated
 	}
 	return nil
+}
+
+// FamilyRevoked reports whether the durable revocation fence is present
+// for familyID. It reads the same fence RotateWithFamily consults, so a
+// caller that sees false here observes a family no revocation has been
+// published for yet.
+func (r *refreshTokenRepository) FamilyRevoked(ctx context.Context, familyID string) (bool, error) {
+	state, err := r.familyRevocation(ctx, familyID)
+	if err != nil {
+		return false, err
+	}
+	return state != nil, nil
 }
 
 // RevokeFamily marks every still-active row in the family as revoked. Pass
