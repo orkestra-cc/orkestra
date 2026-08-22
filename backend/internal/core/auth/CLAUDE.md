@@ -295,7 +295,8 @@ neither `StartedAt` nor `CreatedAt` — fails **open** under a measured
 compatibility window, counting
 `orkestra_auth_session_anchor_anomalies_total{kind="missing"|"zero_timestamp"}`;
 that rule is to be tightened to fail-closed in the first minor release after
-30 consecutive production days at zero. A row with `StartedAt` zero but a
+30 consecutive production days at zero, tracked in
+[#277](https://github.com/orkestra-cc/orkestra/issues/277). A row with `StartedAt` zero but a
 usable `CreatedAt` is **not** an anomaly — it has a perfectly good anchor,
 and counting it would poison the observation window.
 

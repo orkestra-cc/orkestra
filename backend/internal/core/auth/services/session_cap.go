@@ -145,7 +145,7 @@ func sessionCapAnchor(sess *models.AuthSessionDoc) (time.Time, string) {
 // COMPATIBILITY WINDOW — ADR-0017, remove in the first minor release
 // after at least 30 consecutive production days with
 // orkestra_auth_session_anchor_anomalies_total at zero in every supported
-// environment. Tracking issue: filed with the PR that ships this. D2's
+// environment. Tracking issue: orkestra-cc/orkestra#277. D2's
 // invariant makes an absent session document impossible for credentials
 // issued by current code, but invariants bind only the code written after
 // them and older rows cannot be assumed to comply. If the counter moves,

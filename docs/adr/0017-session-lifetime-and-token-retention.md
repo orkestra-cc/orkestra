@@ -158,8 +158,9 @@ schema governed by ADR-0002.
   with no usable timestamp uses `kind="zero_timestamp"`. Repository failures are
   not compatibility misses and fail closed. Tightening to fail-closed is required
   in the first minor release after at least 30 consecutive production days with
-  zero increments in every supported environment; the implementing PR must create
-  and link the tracked follow-up.
+  zero increments in every supported environment. Tracked as
+  [orkestra-cc/orkestra#277](https://github.com/orkestra-cc/orkestra/issues/277),
+  which carries the gate and the exact edit.
 - **An environment variable begins taking effect that previously did not.**
   Deployments that set `JWT_ACCESS_TOKEN_EXPIRY` by hand have been running on the
   15-minute default regardless of its value. Repairing the chain activates their
