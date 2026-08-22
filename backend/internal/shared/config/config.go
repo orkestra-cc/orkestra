@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/joho/godotenv"
+	"github.com/orkestra/backend/internal/shared/utils"
 )
 
 type Config struct {
@@ -156,7 +157,6 @@ type CookieConfig struct {
 	HttpOnly     bool
 	Secure       bool
 	SameSite     string
-	MaxAge       int
 }
 
 type GoogleOAuthConfig struct {
@@ -303,7 +303,6 @@ func Load() (*Config, error) {
 			HttpOnly:       getEnvAsBool("COOKIE_HTTP_ONLY", true),
 			Secure:         getEnvAsBool("COOKIE_SECURE", false), // Default false for development
 			SameSite:       getEnv("COOKIE_SAME_SITE", "lax"),
-			MaxAge:         getEnvAsInt("COOKIE_MAX_AGE", 86400000), // 24 hours in milliseconds
 		},
 		Google: GoogleOAuthConfig{
 			ClientID:        getEnv("OAUTH_GOOGLE_CLIENT_ID", ""),
@@ -514,27 +513,10 @@ func getEnvAsDuration(key string, defaultValue string) time.Duration {
 	return 0
 }
 
-// parseDuration accepts everything time.ParseDuration does, plus a
-// trailing "d" for days. Only a bare "<number>d" is special-cased;
-// compound forms ("1d12h") stay unsupported rather than half-supported,
-// so a value either parses exactly or is rejected.
+// parseDuration delegates to utils.ParseDuration so environment
+// variables and admin-UI values are read by one parser. See ADR-0017.
 func parseDuration(raw string) (time.Duration, bool) {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return 0, false
-	}
-	if days, ok := strings.CutSuffix(raw, "d"); ok {
-		n, err := strconv.ParseFloat(days, 64)
-		if err != nil {
-			return 0, false
-		}
-		return time.Duration(n * float64(24*time.Hour)), true
-	}
-	d, err := time.ParseDuration(raw)
-	if err != nil {
-		return 0, false
-	}
-	return d, true
+	return utils.ParseDuration(raw)
 }
 
 // mergeOrigins unions the API's CORS origin lists, preserving order and

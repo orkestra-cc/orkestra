@@ -127,10 +127,31 @@ func (s *jwtService) RefreshTokenTTL() time.Duration { return s.refreshExpiry }
 // JWT_ACCESS_TOKEN_EXPIRY / JWT_REFRESH_TOKEN_EXPIRY). Zero or negative
 // values fall back to safe defaults so unit tests and any future caller
 // that doesn't care about TTL don't need to pass anything explicit.
+// accessTTL is additionally clamped from above: a value over
+// MaxAccessTokenTTL is capped rather than rejected (ADR-0017 D5).
 func NewJWTService(privateKey *rsa.PrivateKey, publicKey *rsa.PublicKey, env string, accessTTL, refreshTTL time.Duration) JWTService {
 	if accessTTL <= 0 {
-		accessTTL = 15 * time.Minute
+		accessTTL = defaultAccessTokenTTL
 	}
+	if accessTTL > MaxAccessTokenTTL {
+		// The Redis revocation denylist stores entries for
+		// MaxAccessTokenTTL + 1m. A longer token would outlive its own
+		// revocation entry and become valid again after logout. Clamp
+		// rather than reject: this level is fed by JWT_ACCESS_TOKEN_EXPIRY
+		// and by direct callers, neither of which can surface a 422.
+		// ADR-0017 D5.
+		slogDefault().Warn("auth: access-token lifetime above maximum, clamping",
+			"value", accessTTL.String(),
+			"using", MaxAccessTokenTTL.String())
+		accessTTL = MaxAccessTokenTTL
+	}
+	// Unreachable through configuration: getEnvAsDuration never returns
+	// zero for JWT_REFRESH_TOKEN_EXPIRY (it falls back to the shipped
+	// "7d"), so this branch fires only for callers constructing the
+	// service with an explicit zero — in practice, tests. Kept as-is per
+	// ADR-0017 decision F: changing the value would be a silent behaviour
+	// change for direct callers with no benefit. The refresh-token TTL an
+	// actual deployment runs is 7d, not the 30d this line suggests.
 	if refreshTTL <= 0 {
 		refreshTTL = 30 * 24 * time.Hour
 	}

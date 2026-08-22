@@ -9,6 +9,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/danielgtaylor/huma/v2/adapters/humachi"
@@ -23,6 +24,7 @@ import (
 	sharederrors "github.com/orkestra/backend/internal/shared/errors"
 	"github.com/orkestra/backend/internal/shared/geoip"
 	authMiddleware "github.com/orkestra/backend/internal/shared/middleware"
+	"github.com/orkestra/backend/internal/shared/utils"
 	"github.com/orkestra/backend/pkg/sdk/iface"
 	"github.com/orkestra/backend/pkg/sdk/module"
 )
@@ -87,6 +89,18 @@ type AuthModule struct {
 	// no field for app-wide config; auth is the only consumer of
 	// *config.Config and threads it in via the catalog factory.
 	cfg *config.Config
+
+	// Refresh-token retention sweep (ADR-0017 D7). One loop covering both
+	// tiers by calling the two repositories, which are separate
+	// instances. lifecycleMu/sweepCancel/sweepDone copy the logging
+	// module's pattern so Start is idempotent, a stopped module can start
+	// again, and no second ticker survives a hot enable/disable cycle.
+	lifecycleMu sync.Mutex
+	sweepCancel context.CancelFunc
+	sweepDone   chan struct{}
+	sweepTiers  []sweepTier
+	sweepLease  *services.MaintenanceLease
+	logger      *slog.Logger
 }
 
 // NewModule constructs an AuthModule bound to the live application config.
@@ -158,7 +172,7 @@ func (m *AuthModule) NavItems() []module.NavItemSpec {
 
 // ConfigGroups gives the admin settings page a sectioned rail instead of one
 // flat list. auth is by far the largest configuration surface in the base —
-// 62 fields — and the four OAuth providers are declared as children of the
+// 63 fields — and the four OAuth providers are declared as children of the
 // single "OAuth Providers" node rather than as siblings of it, which is what
 // the old flat Group labels made them look like.
 func (m *AuthModule) ConfigGroups() []module.ConfigGroup {
@@ -401,13 +415,36 @@ func (m *AuthModule) ConfigSchema() []module.ConfigField {
 		// every mint so an admin edit takes effect on the next call.
 		{
 			Key: "accessTokenTTL", Label: "Access token lifetime", Group: "login",
-			Description: "Go duration string — how long an issued access token stays valid. Shorter = tighter security but more refresh round-trips. Default 15m.",
+			Description: "Go duration string — how long an issued access token stays valid. Shorter = tighter security but more refresh round-trips. Range 1m–24h. Default 15m.",
 			Type:        module.FieldDuration, Default: "15m",
+			// UX aid only: ModuleConfigFields.tsx gives feedback before
+			// save. Enforcement is the server-side ValidateConfig above —
+			// this pattern is deliberately stricter than the parser (it
+			// rejects compound forms like 1h30m that the server accepts),
+			// which is acceptable for a hint but must never be treated as
+			// the contract.
+			Pattern: "^[0-9]+(s|m|h|d)$",
 		},
 		{
 			Key: "passwordResetTokenTTL", Label: "Password reset link lifetime", Group: "login",
-			Description: "Go duration string — how long the link in the reset-password email stays valid. Default 30m.",
+			Description: "Go duration string — how long the link in the reset-password email stays valid. Range 5m–24h. Default 30m.",
 			Type:        module.FieldDuration, Default: "30m",
+			Pattern: "^[0-9]+(s|m|h|d)$",
+		},
+		// ADR-0017 D1 — absolute session cap. One field for both audience
+		// tiers: the operator console and the client surface share one
+		// value, following the loginEnabledAdmin/loginEnabledClient
+		// precedent that per-tier splitting is added only when a need
+		// appears. Anchored on session.StartedAt, so enabling it needs no
+		// migration and on upgrade it signs out sessions older than the
+		// cap because that is what the existing data already records.
+		{
+			Key: "sessionAbsoluteTTL", Label: "Maximum session age", Group: "login",
+			Description: "Maximum lifetime of a session from login, independent of activity. " +
+				"When it elapses the user must authenticate again. Range 1h–89d; " +
+				"empty disables the cap. Default 720h (30 days).",
+			Type: module.FieldDuration, Default: "720h",
+			Pattern: "^[0-9]+(s|m|h|d)$",
 		},
 		// Phase 3.6 — restrict the MFA factor types users can enroll.
 		// Empty list = all methods allowed (the legacy default so an
@@ -637,6 +674,30 @@ func (m *AuthModule) ConfigSchema() []module.ConfigField {
 	}
 }
 
+// sessionExpiryEpochFloor is the timestamp below which an `expiresAt` is
+// treated as "not really set" rather than "expired in the year 1".
+//
+// A zero time.Time marshals to BSON as 0001-01-01T00:00:00Z, which is in
+// the past for every conceivable clock, so a bare TTL index deletes such a
+// document on the TTL monitor's next 60-second pass. Any real retention
+// deadline this code writes is `now + models.AuthSessionRetention`, i.e.
+// decades above this floor, so the boundary can never exclude a legitimate
+// row. Kept as a package-level var so the index spec and the test that pins
+// it cannot drift apart.
+var sessionExpiryEpochFloor = time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)
+
+// sessionRetentionPartialFilter scopes the session TTL indexes to documents
+// that carry a plausible retention deadline, so a zero `expiresAt` is
+// structurally undeletable by Mongo's TTL monitor. See the comment on the
+// operator-sessions index for why that matters. ADR-0017 D7.
+//
+// Returned fresh per call: IndexSpec.PartialFilter is a map, and handing the
+// same mutable instance to two collection specs would let any future mutation
+// of one silently rewrite the other.
+func sessionRetentionPartialFilter() map[string]any {
+	return map[string]any{"expiresAt": map[string]any{"$gt": sessionExpiryEpochFloor}}
+}
+
 func (m *AuthModule) Collections() []module.CollectionSpec {
 	return []module.CollectionSpec{
 		// Non-tier-split collections: security events are an audit log
@@ -671,11 +732,23 @@ func (m *AuthModule) Collections() []module.CollectionSpec {
 			{Keys: map[string]int{"uuid": 1}, Unique: true},
 			{Keys: map[string]int{"userUuid": 1}},
 			{Keys: map[string]int{"familyId": 1}},
+			// Serves the sweep's sorted, limited selection. Deliberately
+			// NOT a TTL index: deletion at expiry is semantically safe,
+			// but Mongo's TTL monitor cannot provide the bounded
+			// per-cycle progress and backlog telemetry the first cleanup
+			// of an upgraded installation requires. ADR-0017 D7.
+			{OrderedKeys: []module.IndexKey{{Field: "expiresAt", Direction: 1}, {Field: "uuid", Direction: 1}}},
 		}},
 		{Name: models.ClientRefreshTokensCollection, Indexes: []module.IndexSpec{
 			{Keys: map[string]int{"uuid": 1}, Unique: true},
 			{Keys: map[string]int{"userUuid": 1}},
 			{Keys: map[string]int{"familyId": 1}},
+			// Serves the sweep's sorted, limited selection. Deliberately
+			// NOT a TTL index: deletion at expiry is semantically safe,
+			// but Mongo's TTL monitor cannot provide the bounded
+			// per-cycle progress and backlog telemetry the first cleanup
+			// of an upgraded installation requires. ADR-0017 D7.
+			{OrderedKeys: []module.IndexKey{{Field: "expiresAt", Direction: 1}, {Field: "uuid", Direction: 1}}},
 		}},
 		{Name: models.OperatorRefreshTokenFamiliesCollection, Indexes: []module.IndexSpec{
 			{Keys: map[string]int{"familyId": 1}, Unique: true},
@@ -687,9 +760,33 @@ func (m *AuthModule) Collections() []module.CollectionSpec {
 		}},
 		{Name: models.OperatorSessionsCollection, Indexes: []module.IndexSpec{
 			{Keys: map[string]int{"uuid": 1}, Unique: true},
+			// expiresAt is the retention deadline, so ExpireAt (delete AT
+			// the timestamp) is the exact expression of the intent —
+			// not TTL, which would add a second offset on top. ADR-0017 D7.
+			//
+			// The partial filter makes the delete safe BY CONSTRUCTION.
+			// AuthSessionDoc.ExpiresAt is `bson:"expiresAt"` with no
+			// omitempty, so a zero value serialises as a year-1 date and
+			// the TTL monitor would delete that row on its very next pass
+			// — irreversibly, for a session that has not expired at all.
+			// Excluding pre-2000 timestamps removes the whole class:
+			// such a row is simply not in the index, so the monitor never
+			// considers it. This replaces a prose runbook ("count them
+			// first, in both collections, in both environments, and
+			// remember to") with a structural guarantee.
+			{
+				Keys:          map[string]int{"expiresAt": 1},
+				ExpireAt:      true,
+				PartialFilter: sessionRetentionPartialFilter(),
+			},
 		}},
 		{Name: models.ClientSessionsCollection, Indexes: []module.IndexSpec{
 			{Keys: map[string]int{"uuid": 1}, Unique: true},
+			{
+				Keys:          map[string]int{"expiresAt": 1},
+				ExpireAt:      true,
+				PartialFilter: sessionRetentionPartialFilter(),
+			},
 		}},
 		{Name: models.OperatorEmailTokensCollection, Indexes: []module.IndexSpec{
 			{Keys: map[string]int{"uuid": 1}, Unique: true},
@@ -801,10 +898,13 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 	// Session revocation list (Block D): Redis-backed set of revoked
 	// `sid` claims checked on every authenticated request. Single
 	// instance shared across both tiers since the sid namespace is
-	// global.
+	// global. The TTL argument is deprecated and ignored — entries live
+	// for the fixed maximum access-token lifetime plus clock skew, which
+	// is the only window that survives a live policy change in either
+	// direction (ADR-0017 D5).
 	sessionRevocationSvc := services.NewSessionRevocationService(
 		deps.RedisAdapter,
-		cfg.Auth.JWT.AccessTokenExpiry,
+		0,
 		logger,
 	)
 
@@ -1287,6 +1387,26 @@ func (m *AuthModule) Init(deps *module.Dependencies) error {
 		))
 	}
 
+	// Maintenance wiring (ADR-0017 D7). A Redis adapter that cannot
+	// satisfy the lease contract disables the sweep rather than running
+	// it unelected — every replica sweeping would make the per-cycle
+	// bound meaningless. Nothing here can fail Init or Start: the sweep
+	// is maintenance, never an authentication dependency.
+	m.logger = logger
+	if lease, ok := deps.RedisAdapter.(services.LeaseRedisClient); ok {
+		m.sweepLease = services.NewMaintenanceLease(lease, tokenSweepLeaseKey, logger)
+		// The two names are literals, not derived from audienceTier:
+		// they are the closed Prometheus label set of ADR-0017 D8, and
+		// a rename of the internal enum must not silently retag every
+		// sweep series as "unknown".
+		m.sweepTiers = []sweepTier{
+			{name: "operator", repo: opBundle.refreshTokenRepo},
+			{name: "client", repo: clBundle.refreshTokenRepo},
+		}
+	} else {
+		logger.Warn("auth: Redis adapter does not support the maintenance lease; refresh-token sweep disabled")
+	}
+
 	return nil
 }
 
@@ -1333,8 +1453,8 @@ func parseDurationEnv(key string, fallback time.Duration) time.Duration {
 	if raw == "" {
 		return fallback
 	}
-	d, err := time.ParseDuration(raw)
-	if err != nil || d <= 0 {
+	d, ok := utils.ParseDuration(raw)
+	if !ok || d <= 0 {
 		slog.Default().Warn("auth: malformed duration env var, using default",
 			slog.String("key", key),
 			slog.String("value", raw),

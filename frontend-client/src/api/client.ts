@@ -43,13 +43,22 @@ const authMiddleware: Middleware = {
 // the httpOnly refresh cookie set at login by the backend per ADR-0003
 // PR-D D-9) and retry the original request once. Two consecutive 401s
 // trigger logout — the SPA's auth context routes the user back to /login.
+//
+// A refresh that comes back 503 is the exception: the server could not
+// evaluate the session, which is not the same as the session being over.
+// Surfacing the original 401 without clearing the token leaves the user
+// signed in so the next request can retry. See RefreshOutcome in
+// tokenStore.ts and ADR-0017.
 const refreshMiddleware: Middleware = {
   async onResponse({ request, response }) {
     if (response.status !== 401 || request.headers.get("X-Retry") === "1") {
       return response;
     }
-    const fresh = await refreshAccessToken(API_BASE);
-    if (!fresh) {
+    const outcome = await refreshAccessToken(API_BASE);
+    if (outcome.status === "unavailable") {
+      return response;
+    }
+    if (outcome.status !== "ok") {
       clearAccessToken();
       return response;
     }
@@ -57,7 +66,7 @@ const refreshMiddleware: Middleware = {
       method: request.method,
       headers: (() => {
         const h = new Headers(request.headers);
-        h.set("Authorization", `Bearer ${fresh}`);
+        h.set("Authorization", `Bearer ${outcome.accessToken}`);
         h.set("X-Retry", "1");
         return h;
       })(),

@@ -25,16 +25,17 @@ import (
 type fakeRedisClient struct {
 	mu       sync.Mutex
 	data     map[string]string
+	ttls     map[string]time.Duration
 	counters map[string]int64
 	getErr   error
 	setErr   error
 }
 
 func newFakeRedisClient() *fakeRedisClient {
-	return &fakeRedisClient{data: map[string]string{}, counters: map[string]int64{}}
+	return &fakeRedisClient{data: map[string]string{}, ttls: map[string]time.Duration{}, counters: map[string]int64{}}
 }
 
-func (f *fakeRedisClient) Set(_ context.Context, key string, value interface{}, _ time.Duration) error {
+func (f *fakeRedisClient) Set(_ context.Context, key string, value interface{}, ttl time.Duration) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.setErr != nil {
@@ -48,7 +49,16 @@ func (f *fakeRedisClient) Set(_ context.Context, key string, value interface{}, 
 	default:
 		f.data[key] = ""
 	}
+	f.ttls[key] = ttl
 	return nil
+}
+
+// ttlFor returns the TTL most recently passed to Set for key. Lets tests
+// assert on the stored expiry without a live Redis.
+func (f *fakeRedisClient) ttlFor(key string) time.Duration {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.ttls[key]
 }
 
 func (f *fakeRedisClient) Get(_ context.Context, key string) (string, error) {
@@ -202,18 +212,41 @@ func TestSessionRevocation_WriteFailureIsObservableAndReturned(t *testing.T) {
 	}
 }
 
-func TestSessionRevocation_DefaultTTLFallback(t *testing.T) {
-	// Zero TTL defaults to 15m so callers that forget the config don't end
-	// up with an instantly-expiring revocation.
-	svc, _ := newTestSessionRevocationService(t, newFakeRedisClient(), 0, nil)
-	ctx := context.Background()
+// The denylist entry must outlive every access token the policy is
+// permitted to mint, in BOTH directions of a policy change. Deriving the
+// entry TTL from the live policy value fails the decrease case: a token
+// minted at 4h, then a policy lowered to 15m, then a logout, would store
+// a 16-minute entry while the 4-hour token is still valid. ADR-0017 D5.
+//
+// This also covers what used to be a dedicated
+// TestSessionRevocation_DefaultTTLFallback case (constructorArg=0 below):
+// there is no more "default" to fall back to now that the entry TTL is a
+// fixed value rather than derived from the constructor argument.
+func TestSessionRevocationTTL_UsesPolicyMaximum(t *testing.T) {
+	for _, constructorArg := range []time.Duration{0, time.Minute, 15 * time.Minute, 4 * time.Hour, 48 * time.Hour} {
+		fake := newFakeRedisClient()
+		svc, _ := newTestSessionRevocationService(t, fake, constructorArg, slog.New(slog.DiscardHandler))
+		if err := svc.Revoke(context.Background(), "sid-1", "logout"); err != nil {
+			t.Fatalf("Revoke: %v", err)
+		}
+		want := MaxAccessTokenTTL + time.Minute
+		if got := fake.ttlFor("auth:revoked:session:sid-1"); got != want {
+			t.Errorf("constructor arg %v produced entry TTL %v, want the fixed %v", constructorArg, got, want)
+		}
+	}
+}
 
-	if err := svc.Revoke(ctx, "sid-ttl", "admin_kill"); err != nil {
+func TestRevocationTTL_OutlivesTokensMintedBeforePolicyDecrease(t *testing.T) {
+	// Mint at 4h, lower the policy to 15m, then revoke. The entry must
+	// still cover the 4h token that is out there.
+	fake := newFakeRedisClient()
+	svc, _ := newTestSessionRevocationService(t, fake, 4*time.Hour, slog.New(slog.DiscardHandler))
+	// (Policy lowered to 15m — the service must not consult it at all.)
+	if err := svc.Revoke(context.Background(), "sid-2", "logout"); err != nil {
 		t.Fatalf("Revoke: %v", err)
 	}
-	revoked, _ := svc.IsRevoked(ctx, "sid-ttl")
-	if !revoked {
-		t.Fatal("revocation with default TTL must still be effective")
+	if got := fake.ttlFor("auth:revoked:session:sid-2"); got < 4*time.Hour {
+		t.Fatalf("entry TTL %v does not cover the already-minted 4h token", got)
 	}
 }
 

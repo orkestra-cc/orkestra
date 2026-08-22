@@ -16,6 +16,7 @@ Does not own user profile data (delegates to `iface.UserProvider`), org membersh
 | File | Purpose |
 |---|---|
 | `module.go` | Module wiring — repos, providers, JWT, OAuth factory, password service, handlers |
+| `maintenance.go` | `Start`/`Stop` plus the elected, adaptive-cadence refresh-token retention sweep (ADR-0017 D7) |
 | `handlers/auth_handler.go` | OAuth initiate/callback endpoints, mobile ID-token routes, logout, refresh |
 | `handlers/password_handler.go` | Register, login, verify email, forgot/reset/change password |
 | `handlers/admin_user_auth_handler.go` | Operator-side admin endpoints under `/v1/admin/users/{id}/...` — auth-methods aggregator, send-password-reset, resend-verification, oauth unlink. Inline error mapping translates the typed service errors to 404 / 409 with body codes |
@@ -43,16 +44,52 @@ Declared in `module.go::Collections()`. Collection name constants live in `model
 | Collection | Indexes | TTL |
 |---|---|---|
 | `operator_oauth_providers` / `client_oauth_providers` | compound `(userUuid, provider)` unique | — |
-| `operator_refresh_tokens` / `client_refresh_tokens` | `uuid` unique, `userUuid`, `familyId` | — (rotation is explicit; revoked rows retained ≥ refresh TTL so replay detection can see them) |
+| `operator_refresh_tokens` / `client_refresh_tokens` | `uuid` unique, `userUuid`, `familyId` | — (application sweep, not a TTL index: bounded per-cycle progress and backlog telemetry are required for the first cleanup of an upgraded install, and a TTL index provides neither) |
 | `operator_refresh_token_families` / `client_refresh_token_families` | `familyId` unique, `expiresAt` | Yes — absolute expiry is the latest token expiry in the family (with a 24h minimum fallback), so the non-PII replay fence survives every refresh token it protects |
-| `operator_sessions` / `client_sessions` | `uuid` unique | — |
+| `operator_sessions` / `client_sessions` | `uuid` unique, `expiresAt` (TTL via ExpireAt) | Yes — `expiresAt` is the 90-day retention deadline (`models.AuthSessionRetention`) |
 | `auth_security_events` | (none declared) | — — single non-tier-split (audit log keyed on userUUID alone) |
 | `operator_email_tokens` / `client_email_tokens` | `uuid` unique, `tokenHash` unique, `userUuid`, `expiresAt` **TTL 24h** | Yes |
 | `operator_mfa_factors` / `client_mfa_factors` | `uuid` unique, compound `(userUuid, type)` unique | — — one row per (user, factor type). The `webauthn` row carries an embedded `webauthnCredentials[]` array (zero-or-many passkeys per user) |
 | `auth_device_trust` | `uuid` unique, `(userUuid, deviceId)`, `trustedUntil` (TTL via ExpireAt) | Yes — single non-tier-split (grant follows the user record) |
 | `service_account_credentials` | `uuid` unique, `clientId` unique, `userUuid` | — single non-tier-split (service accounts are an operator-surface-only concept, not a per-audience one — see "Service accounts" below) |
 
-Email tokens, device-trust grants, and refresh-family replay fences have TTL indexes. Refresh-token rows, sessions, and MFA factor rows are rotated/invalidated explicitly in the service layer.
+Email tokens, device-trust grants, refresh-family replay fences, and sessions have TTL indexes. Refresh-token rows and MFA factor rows are rotated/invalidated explicitly in the service layer.
+
+> **Zero-`expiresAt` rows are excluded structurally, not by runbook.** A session document with a zero `expiresAt` serialises as a year-1 BSON date, so a bare TTL index would delete it **immediately** — an irreversible delete of a session that has not expired at all. The write path has always set the field, but "should not happen" is not sufficient warrant for that. Both session TTL indexes therefore carry a partial filter (`module.go`'s `sessionRetentionPartialFilter`):
+>
+> ```
+> {expiresAt: {$gt: ISODate("2000-01-01")}}
+> ```
+>
+> A row below that floor is simply not in the index, so Mongo's TTL monitor never considers it. Any deadline this code writes is `now + AuthSessionRetention`, decades above the floor, so no legitimate row is excluded. Pinned by `TestSessionTTLIndexExcludesZeroExpiry` — including that the spec never asks for `Sparse` and `PartialFilter` together, which Mongo rejects outright.
+>
+> Counting such rows before a deploy is still a **recommended sanity check** — a non-zero count means something upstream is writing sessions without a deadline, and those rows will now accumulate forever rather than being reaped:
+>
+> ```
+> db.operator_sessions.countDocuments({expiresAt: {$lt: ISODate("2000-01-01")}})
+> db.client_sessions.countDocuments({expiresAt: {$lt: ISODate("2000-01-01")}})
+> ```
+>
+> It is **no longer a deploy blocker**: a non-zero count is a bug to chase, not a reason to hold the release, because the index can no longer delete those rows.
+>
+> **Upgrading an environment that already built the un-filtered index:** adding `partialFilterExpression` to an existing index is not an in-place change — Mongo keys the index by name, so `createIndex` with different options on the same keys fails rather than rebuilding. Observed verbatim (both collections):
+>
+> ```
+> Failed to ensure collection ... module=auth collection=operator_sessions
+> error="create indexes for \"operator_sessions\": (IndexKeySpecsConflict) An
+> existing index has the same name as the requested index. ...
+> Requested index: { ... partialFilterExpression: { expiresAt: { $gt: new Date(946684800000) } } },
+> existing index: { v: 2, key: { expiresAt: 1 }, name: \"expiresAt_1\", expireAfterSeconds: 0 }"
+> ```
+>
+> `ensureCollections` logs at WARN and continues (index creation is deliberately non-fatal), so boot succeeds with the **old, unfiltered index still live** — i.e. still able to delete a zero-`expiresAt` row. Drop it once and let the next boot rebuild it:
+>
+> ```
+> db.operator_sessions.dropIndex("expiresAt_1")
+> db.client_sessions.dropIndex("expiresAt_1")
+> ```
+>
+> Until that is done the pre-flight count above is still the only guard, so run it first. Grep boot logs for `IndexKeySpecsConflict` to tell the two states apart.
 
 ## Dependencies
 
@@ -77,7 +114,7 @@ Email tokens, device-trust grants, and refresh-family replay fences have TTL ind
 9. **Handlers**: OAuth, password, MFA, and WebAuthn handlers, each constructed twice (operator + client) and stamped with the matching tier's cookie domain at construction time (`cfg.Auth.Cookie.OperatorDomain` / `ClientDomain`; an empty value mints the cookie without a `Domain` attribute, scoped to the minting host). The shared `Cookie.Name` + `Cookie.Secure` are still process-scoped.
 10. **Register services** under `ServiceAuthService`, `ServiceJWTService`, `ServicePasswordService`, `ServicePasswordAuthService`, plus the per-tier keys (`ServiceOperator{AuthService,PasswordAuthService,JWTService}` / `ServiceClient{...}`) that audience-aware consumers (dev token generator, future tier-specific addons) request directly.
 
-`Start / Stop / HealthCheck` inherit from `BaseModule`.
+`Start` / `Stop` are implemented in `maintenance.go` — they own the refresh-token retention sweep (see "Refresh-token retention is an elected, self-draining sweep" under Key invariants). `Start` **never returns an error**: `auth` is a core module, so `ModuleRegistry.StartAll` would hand that error to `main.go`'s `log.Fatalf` and a degraded Redis would refuse to boot the platform. Every recoverable condition — no lease, no tiers, Redis unreachable — returns nil and skips maintenance; leadership is acquired inside the goroutine, after `Start` has returned. `HealthCheck` still inherits from `BaseModule`.
 
 No seeding — there are no default accounts or default tokens. The first user is created by whichever external flow gets there first (setup wizard, OAuth signup, password register).
 
@@ -90,7 +127,7 @@ OAuth provider settings are admin-managed through `ConfigSchema()` — stored in
 `auth` declares an 11-key group tree via `ConfigGroups()` — 7 top-level groups
 (`registration`, `login`, `password`, `mfa`, `oauth`, `antiabuse`, `sessions`) plus
 `oauth.google` / `oauth.apple` / `oauth.github` / `oauth.discord` nested under `oauth`
-(`Parent: "oauth"`). It is the largest configuration surface in the base — 62
+(`Parent: "oauth"`). It is the largest configuration surface in the base — 63
 `ConfigField` entries — and is the first (and so far only) module to actually render
 the settings page's sectioned rail rather than the plain-form degradation path. This is
 the shape a contributor adding a field to `ConfigSchema()` must keep valid:
@@ -142,7 +179,7 @@ ConfigService is missing).
 | Group | Keys | Effect |
 |---|---|---|
 | Registration | `registrationEnabledAdmin/Client`, `defaultRoleClient`, `allowedEmailDomainsAdmin/Client` | **`registrationEnabledAdmin/Client` both default to `false`** — a fresh install accepts no self-service signups until the super_admin opens them. `Register` returns 403 `registration_disabled` / `email_domain_not_allowed` per surface, and the OAuth callback's new-user branch returns `ErrOAuthSignupDisabled` (mapped to the `error=oauth_signup_disabled` callback redirect) when `registrationEnabledAdmin/Client=false` — both paths share the same umbrella kill switch. `defaultRoleClient` overrides the role assigned to a new Tier-2 signup (consulted by both the password and OAuth paths). Non-first operator-tier signups default to `guest` (lowest system role) on both paths so a fresh callback can't grant elevated privileges; the first-admin sentinel still upgrades the very first account to `super_admin`. The very first user on a fresh install bypasses the password Register's kill switch so a misconfigured flag can't lock everyone out — the OAuth path has no first-user bypass; operators bootstrap via password. |
-| Login & Sessions | `loginEnabledAdmin/Client`, `accountLockoutThreshold`, `accountLockoutDuration` | `Login` returns 403 `login_disabled` per surface; OAuth start endpoints (`InitiateOAuthLogin`, `HandleMobile{Google,Apple}Auth`) honour the same gate. The lockout pair is plumbed into `RateLimiter.SetAuthFailedConfig` on every login attempt — admin edits take effect on the next try. |
+| Login & Sessions | `loginEnabledAdmin/Client`, `accountLockoutThreshold`, `accountLockoutDuration`, `sessionAbsoluteTTL` | `Login` returns 403 `login_disabled` per surface; OAuth start endpoints (`InitiateOAuthLogin`, `HandleMobile{Google,Apple}Auth`) honour the same gate. The lockout pair is plumbed into `RateLimiter.SetAuthFailedConfig` on every login attempt — admin edits take effect on the next try. `accountLockoutDuration` (like `accessTokenTTL` / `passwordResetTokenTTL`) is parsed by `utils.ParseDuration`, so `30d` typed into the admin UI now works the same as it does in an env var. `sessionAbsoluteTTL` (ADR-0017 D1) caps total session age from login, independent of the refresh TTL's idle-timeout behaviour; resolved via `AuthPolicyService.SessionAbsoluteTTL` — see the dedicated section below. One field for both audience tiers, unlike the `*Admin`/`*Client` pairs elsewhere on this tab. |
 | Password Policy | `passwordMinLength`, `passwordMaxLength`, `passwordRequireUpper/Lower/Digit/Symbol`, `breachedPasswordCheck` | `passwordService.ValidatePolicy` reads the live policy on every signup / change-password / reset. Defaults match the legacy hardcoded values (10..128 chars, no complexity, HIBP on). New errors: `ErrPasswordMissing{Upper,Lower,Digit,Symbol}`. An inverted min/max range is swapped on read so a misedit can't reject every password. |
 | OAuth Providers | `{google,apple,github,discord}Enabled{Admin,Client}`, `oauthAllowSignup{Admin,Client}`, `oauthAutoLinkByEmail` | **All eight `{provider}Enabled{Admin,Client}` toggles default to `false`** — a fresh install exposes no social-login button until the super_admin both configures the provider's credentials AND flips its surface toggle on (a provider with no client ID is already filtered out regardless; the toggle is the explicit second gate). `ListOAuthProviders` filters its return per audience; `InitiateOAuthLogin` + mobile handlers return 403 `oauth_provider_disabled` for a disabled surface. Credentials still live one-set-per-provider in the existing tabs. Phase 9: `oauthAllowSignup{Admin,Client}` (default true) is the OAuth-specific signup gate — checked **in addition to** `registrationEnabledAdmin/Client` on the Registration tab (both must allow). When either is off, the OAuth callback returns `ErrOAuthSignupDisabled` and redirects to `/auth/callback?success=false&error=oauth_signup_disabled` instead of creating the user. Phase 10: `oauthAutoLinkByEmail` (default true) gates auto-attaching a provider to an existing email-matched account; when off, returns `ErrOAuthLinkDisabled` and the user must initiate linking from authenticated settings. |
 | MFA | `mfaEnabled`, `mfaEnrollmentGraceDays`, `mfaRequiredForRoles`, `recoveryCodesCount` | `mfaEnabled` **defaults to `false`** — a fresh install's first account is `super_admin` (privileged), so seeding it `true` would block that operator from the config writes (e.g. SMTP) needed to finish setup with an MFA prompt for a factor they never enrolled. Operators turn it on **after** enrolling a second factor; otherwise privileged users hit the enrollment grace window on their next login. `mfaEnabled=false` short-circuits `MFARequired` to false (existing enrollments are not deleted; voluntary verification still works). `mfaEnrollmentGraceDays` overrides the legacy 7-day `MFAEnrollmentGraceWindow` constant — new value takes effect on the next login. Phase 9: `mfaRequiredForRoles` (stringList, lowercased on read) replaces the built-in privileged-role list when set. Empty falls back to the built-in (super_admin, administrator, org_owner, org_admin). The kill switch wins over both the built-in and the configured list. Phase 10: `recoveryCodesCount` overrides the legacy `BackupCodeCount` constant when in the safe range 1..50; out-of-range falls back to the legacy default 10. Read at enrollment-confirm time so admin edits take effect on the next user's enrollment. |
@@ -153,6 +190,169 @@ The privileged-role list itself (`super_admin`, `administrator`,
 `org_owner`, `org_admin`) is still hardcoded in
 `services/mfa_policy.go`. Making it admin-managed is a deliberate
 follow-up — the change is security-sensitive and worth a PR diff.
+
+#### Duration bounds on credential-governing config (ADR-0017 D6)
+
+`accessTokenTTL` and `passwordResetTokenTTL` govern credentials that may
+already be in a user's hands, so an absurd value is exploitable, not just
+inconvenient — a multi-week access token would outlive its own Redis
+revocation entry. Both are bounded, and the bound is enforced **twice**
+on purpose: once at the PATCH boundary so the stored value can never
+disagree with the effective value, and again at read time as a second
+line of defence for legacy or out-of-band data. Read-time clamping alone
+was explicitly rejected because it leaves the two disagreeing — the
+admin UI would show one value while a different one governed logins.
+
+| Input | `accessTokenTTL` | `passwordResetTokenTTL` |
+|---|---|---|
+| empty | unset: falls through to `JWT_ACCESS_TOKEN_EXPIRY`, then 15m | 30m default |
+| malformed or out-of-range PATCH | 422, not persisted | 422, not persisted |
+| malformed value already in DB | warn, fall through to env | warn, use 30m |
+| out of range already in DB | warn and clamp | warn and clamp |
+| env / direct constructor above 24h | warn and clamp to 24h | n/a |
+
+Write-time enforcement is `(*AuthModule).ValidateConfig` in
+`config_validation.go` — the module's implementation of the optional
+`module.HasConfigValidator` seam (ADR-0017 D6). It rejects a non-empty
+value outside `[services.MinAccessTokenTTL, services.MaxAccessTokenTTL]`
+(1m–24h) or `[services.MinPasswordResetTokenTTL,
+services.MaxPasswordResetTokenTTL]` (5m–24h) with a
+`*module.ConfigValidationError`, which the admin API maps to 422 before
+the value ever reaches `UpdateConfig`. An empty value is always accepted —
+emptiness is a decision with field-specific meaning, not an omission to
+reject. Generic `UpdateConfig` still validates nothing on its own; the
+seam is opt-in per module, and `auth` is currently its only implementer.
+Read-time enforcement is the pre-existing `clampPersistedDuration` in
+`services/auth_duration_bounds.go`, which stays as-is.
+
+#### Absolute session cap (ADR-0017 D1)
+
+The refresh TTL is an **idle** timeout — rotation writes a fresh
+`now + refreshTTL` on every use, so an active user is never asked to
+re-authenticate no matter how long the session has run. `sessionAbsoluteTTL`
+(`services/session_cap.go`) bounds total session age from `session.StartedAt`
+instead: default `720h` (30 days), range `[services.MinSessionAbsoluteTTL,
+services.MaxSessionAbsoluteTTL]` (1h–89d), enforced at the PATCH boundary via
+`authDurationBounds` in `config_validation.go` exactly like `accessTokenTTL`
+and `passwordResetTokenTTL`. `MaxSessionAbsoluteTTL` leaves
+`services.SessionRetentionSafetyMargin` (24h) below `models.AuthSessionRetention`
+(90d) — equality is unsafe, because at exactly the retention boundary
+Mongo's TTL monitor can delete the session document before the refresh path
+evaluates the cap, presenting an expired session as a missing anchor.
+`services/session_cap_test.go`'s `TestSessionAbsoluteTTLLeavesRetentionMargin`
+pins the strict inequality so changing either constant breaks the build.
+
+Clearing the field is the supported way for a fork to disable the cap
+without patching code — `(*AuthPolicyService).SessionAbsoluteTTL` then
+returns `0`. This is the one duration in the module whose *empty* value
+means something other than "fall back to a default", so it cannot be
+resolved through `ModuleConfigService.GetValue`: that accessor's `ok &&
+v != ""` guard makes an absent key and an operator-cleared key
+indistinguishable, both falling through to the schema `Default` (`"720h"`).
+`ModuleConfigService.GetRawValue(ctx, moduleName, key) (string, bool, error)`
+(`pkg/sdk/module/config_service.go`) is the narrow accessor added for this:
+it reports the active environment's stored value plus whether the key is
+actually present, so "present and empty" (disable) and "absent" (never
+configured, use the default) are distinguishable. `configValueReader` in
+`services/auth_policy_service.go` was extended with `GetRawValue` to expose
+it to `SessionAbsoluteTTL`; `GetValue` itself is unchanged, so no existing
+caller's behaviour shifts.
+
+**The third return value is load-bearing, and the reason `SessionAbsoluteTTL`
+returns `(time.Duration, error)`.** A failed `module_configs` read is not an
+absence — it says *nothing* about the key. Collapsing it into `("", false)`
+(which the accessor originally did) made a transient read failure take the
+"absent" branch and answer with the 30-day default, so a deployment that had
+deliberately cleared `sessionAbsoluteTTL` got the cap **back** for the
+duration of the outage — irreversibly signing out every session older than 30
+days that refreshed in that window. Every other failure on this path fails
+closed to 503; that one silently substituted a different policy. Both layers
+now propagate: `GetRawValue` returns the error, `SessionAbsoluteTTL` maps it
+to `ErrSessionEnforcementUnavailable`, and `sessionWithinAbsoluteCap`
+propagates it to the 503 the handler already emits. Pinned by
+`TestSessionAbsoluteTTL_ReadErrorDoesNotApplyTheDefault`,
+`TestSessionWithinAbsoluteCap_PolicyReadErrorFailsClosed`, and (at the SDK
+layer, hermetically, against an unreachable Mongo)
+`TestGetRawValue_ReadFailureIsNotAbsence`. **A `nil` document is still an
+absence, not an error** — a module with no config document has genuinely said
+nothing.
+
+Enforcement is `(*authService).sessionWithinAbsoluteCap`, called by **both**
+`RefreshTokensWithRiskAssessment` and `MintAccessTokenFromRefresh` — see the
+"A session has a maximum age" invariant below for why the non-rotating path
+is not optional. Reaching the cap runs `expireSessionForMaxAge`: revoke the
+session's refresh rows with `models.RevokeReasonSessionMaxAge`, CAS the
+session document inactive via `AuthSessionRepository.ExpireSessionForMaxAge`,
+push the sid onto the Redis denylist. Only the caller that **wins** the CAS
+emits `orkestra_auth_session_cap_expiries_total` and the
+`session_max_age_reached` security event, so concurrent refreshes on one
+session count once. A repository error at any of those steps returns
+`ErrSessionEnforcementUnavailable` (fail closed, never a cap expiry); a
+denylist failure *after* durable revocation returns
+`SessionRevocationDegradedError`, because the logout did happen and the
+caller must still clear the cookie. A clean not-found — or a row with
+neither `StartedAt` nor `CreatedAt` — fails **open** under a measured
+compatibility window, counting
+`orkestra_auth_session_anchor_anomalies_total{kind="missing"|"zero_timestamp"}`;
+that rule is to be tightened to fail-closed in the first minor release after
+30 consecutive production days at zero, tracked in
+[#277](https://github.com/orkestra-cc/orkestra/issues/277). A row with `StartedAt` zero but a
+usable `CreatedAt` is **not** an anomaly — it has a perfectly good anchor,
+and counting it would poison the observation window.
+
+**The three cap outcomes above surface as four distinct HTTP responses**
+(`writeRefreshErr`, called from all three refresh-flow handlers —
+`RefreshTokensWithHeaderHTTP`, `GetSessionHTTP`, `RefreshTokensHTTP`):
+`ErrSessionEnforcementUnavailable` is **503** `session_enforcement_unavailable`
+— never a 401, because reporting a storage outage as an authentication
+failure would train clients to discard a session that is still perfectly
+valid, and the caller may retry once storage recovers.
+`ErrSessionMaxAgeReached` is **401** `session_max_age_reached` — distinct
+from `refresh_token_replay` because "revoked" is inaccurate for a session
+that simply aged out.
+
+> **The same code is also emitted by `shared/middleware.AuthMiddleware`,
+> and that is the path that actually reaches a user.** The three refresh
+> handlers above are read by machinery, not people: `frontend-admin`'s
+> `performRefresh` discards the body on `!res.ok`, and `/v1/auth/session`
+> is classified as an auth check whose toast is suppressed. What a
+> capped-out user actually hits is their still-live access token meeting
+> the denylist on the next protected request — which used to answer the
+> generic `session_revoked`. `Revoke` stores the reason as the Redis
+> **value**, and `IsRevoked` was already issuing the `GET` and discarding
+> it, so the middleware now reads it through the optional
+> `services.SessionRevocationReasonReader` extension and maps
+> `models.RevokeReasonSessionMaxAge` to `session_max_age_reached`. The
+> extension is discovered by type assertion, not added to
+> `SessionRevocationService`, so a fork's own implementation keeps
+> compiling and simply gets the generic wording. No extra round-trip.
+> Covered by `require_auth_test.go`'s `TestRequireAuth_SessionMaxAge_*`
+> trio, including the fallback for a reason-blind service.
+
+> **Both SPAs treat the 503 as "retry later", never as a sign-out.**
+> `frontend-admin`'s `performRefresh` returns `{ok:false, retry:true}` and
+> `frontend-client`'s `refreshAccessToken` returns
+> `{status:'unavailable'}`; neither clears the access token, and the
+> client also keeps its `localStorage` session marker (clearing it would
+> make the sign-out sticky across the next cold load). Both collapsed the
+> 503 into the 401 path before, logging the user out for the exact reason
+> the 503 exists to prevent. `SessionRevocationDegradedError` is **401 with no
+code**: a generic logout, since a partially degraded cap logout must not
+claim a completely recorded cap expiry. The HttpOnly refresh cookie is
+expired (`clearRefreshCookieOnTerminalRefreshErr`, called immediately
+before `writeRefreshErr` at each of the three call sites) on exactly the
+two outcomes where the session is durably gone — cap expiry and the
+degraded logout — and deliberately left alone on
+`ErrSessionEnforcementUnavailable`, where durable logout is not known to
+have completed. Redux state cleanup on the frontend is not a substitute:
+without the expiring `Set-Cookie`, the browser keeps presenting a cookie
+for a session that is durably dead.
+
+`accountLockoutDuration` and `accountLockoutThreshold` are **deliberately
+excluded** from this validator: neither governs an already-issued
+credential, and an absurd value there is self-punishing (an operator who
+sets a year-long lockout locks out real users, not an attacker) rather
+than exploitable.
 
 ### OAuth provider credentials (admin-managed)
 
@@ -174,13 +374,23 @@ follow-up — the change is security-sensitive and worth a PR diff.
 
 ### Process-scoped (env vars only)
 
+Every duration value below — env var or admin-managed — is read by the
+same parser, `internal/shared/utils.ParseDuration` (ADR-0017): anything
+`time.ParseDuration` accepts, plus a bare `<number>d` day suffix
+(`30d`, `0.5d`). Before ADR-0017 the env path (`config.parseDuration`)
+accepted `d` and the admin/module path (`AuthPolicyService`,
+`module.go`'s `parseDurationEnv`) did not — the same string meant two
+different things depending on where it was typed, and
+`AUTH_DEVICE_TRUST_DURATION=30d` silently fell back to its default.
+
 | Env var | Purpose | Default |
 |---|---|---|
 | `AUTH_JWT_PRIVATE_KEY` / `AUTH_JWT_PUBLIC_KEY` | RS256 key pair (paths or PEM) | — (required) |
 | `AUTH_REQUIRE_EMAIL_VERIFICATION` | Gate signup on successful verification | `true` in prod, `false` otherwise |
-| `JWT_ACCESS_TOKEN_EXPIRY` | Access-token TTL (Go `time.Duration`, e.g. `15m`, `1h`). Applied by `NewJWTService`; zero/unset falls back to `15m`. | `15m` |
-| `JWT_REFRESH_TOKEN_EXPIRY` | Refresh-token TTL. Applied by `NewJWTService`; zero/unset falls back to `720h` (30d). | `7d` |
-| `COOKIE_NAME_REFRESH` / `COOKIE_SECURE` / `COOKIE_SAME_SITE` / `COOKIE_HTTP_ONLY` / `COOKIE_MAX_AGE` | Refresh-token cookie attributes shared across audiences. `COOKIE_NAME_REFRESH` names the cookie (the **only** cookie Orkestra sets — the SPA holds the access token in memory); defaults to `orkestra_cookie`. | set in `cfg.Auth.Cookie` |
+| `JWT_ACCESS_TOKEN_EXPIRY` | Access-token TTL. **Level 2 of `admin accessTokenTTL → JWT_ACCESS_TOKEN_EXPIRY → 15m`.** Before ADR-0017 this level was unreachable — the policy substituted its 15m default for "unset" — so any deployment that set this by hand has been running on 15m regardless of the value. Repairing the chain activates their configured value, which may be longer than what they have actually been running: **diff this key against `docker/.env.example` before upgrading.** Effective values above 24h are clamped with a warning. | `15m` |
+| `JWT_REFRESH_TOKEN_EXPIRY` | Refresh-token TTL — and, because rotation writes `now + this` on every use, the **idle** timeout: this many days without a refresh ends the session. The absolute cap is the separate `sessionAbsoluteTTL`. The `refreshTTL <= 0 → 720h` guard in `NewJWTService` is unreachable through configuration. | `7d` |
+| `AUTH_DEVICE_TRUST_DURATION` | "Remember this device" trust-grant lifetime (`models.DeviceTrustDuration`), read via `parseDurationEnv` in `module.go`. Accepts the `d` suffix (`30d`); malformed or unset logs a warning and falls back to the default. | `30d` (720h) |
+| `COOKIE_NAME_REFRESH` / `COOKIE_SECURE` / `COOKIE_SAME_SITE` / `COOKIE_HTTP_ONLY` | Refresh-token cookie attributes shared across audiences. `COOKIE_NAME_REFRESH` names the cookie (the **only** cookie Orkestra sets — the SPA holds the access token in memory); defaults to `orkestra_cookie`. | set in `cfg.Auth.Cookie` |
 | `OPERATOR_COOKIE_DOMAIN` | Refresh-cookie `Domain=` for tokens minted on the operator host (`console.*`). ADR-0003 PR-D D-9 — keep this distinct from `CLIENT_COOKIE_DOMAIN` so a session minted on one surface can't be replayed on the other. An empty value mints the cookie without a `Domain` attribute (scoped to the minting host). | `console.localhost` (dev) / empty (prod, operator-set) |
 | `CLIENT_COOKIE_DOMAIN` | Refresh-cookie `Domain=` for tokens minted on the client host (`api.*`). | `api.localhost` (dev) / empty (prod, operator-set) |
 | `FRONTEND_URL` | Legacy single-host SPA origin. Used to build `verify-email` / `reset-password` links in transactional email and as the fallback when the per-tier values below are empty. | `http://localhost:8080` |
@@ -318,7 +528,7 @@ And a public endpoint that completes a login after a partial response:
   The branching is fed by `SetMFAEnrollmentLookup` (per-tier `MFAFactorRepository.FindByUserAndType` for TOTP + WebAuthn), `SetStepUpPolicy` (the live `*AuthPolicyService`), and `SetUserProvider` (so a stale role on the JWT doesn't shadow a fresh policy check). Wired in `cmd/server/main.go` post-InitAll. Any lookup error fails closed to the legacy `step_up_required` path — a degraded Mongo must never silently weaken the gate.
 
 - **Password reconfirm endpoint** — `POST /v1/auth/{tier}/me/password-confirm` lives on `PasswordAuthHandler` (`handlers/password_handler.go`) and is mounted under `RequireGlobal()` only (no step-up gate; it's the bypass). The service-layer `PasswordAuthService.ConfirmPassword` refuses with `ErrPasswordConfirmUnavailable` → 409 `password_confirm_unavailable` when the user has no password (pure-OAuth account) or has any MFA factor enrolled (defensive — a crafted direct call must not be able to downgrade an MFA-required user). Audit: emits `auth.password.reconfirmed` on success.
-- **Session revocation list** — Redis-backed set at `auth:revoked:session:<sid>` checked on every authenticated request by both `AuthMiddleware` and the lightweight public-key-only `JWTValidator` (both satisfy `module.RoleMiddleware`). Populated on logout + change-password; payload is the reason string for operator debugging. Entries auto-expire after the access-token TTL + 1min buffer. Fails open on Redis errors — a degraded Redis must not lock every user out. Logout invalidates the current sid only; `allDevices=true` still relies on refresh-token revocation (per-user-generation counter is a follow-up).
+- **Session revocation list** — Redis-backed set at `auth:revoked:session:<sid>` checked on every authenticated request by both `AuthMiddleware` and the lightweight public-key-only `JWTValidator` (both satisfy `module.RoleMiddleware`). Populated on logout + change-password; payload is the reason string for operator debugging. Entries auto-expire after a **fixed** 24h + 1min — the maximum access-token lifetime the platform permits, plus clock skew — never a value derived from the live `accessTokenTTL`. Sizing the entry from the current policy value strands tokens on both sides of a policy change: raising the TTL leaves long tokens uncovered, lowering it expires the entry while tokens minted under the old value are still valid. `NewJWTService` clamps every effective access-token lifetime to 24h so the window is always sufficient. ADR-0017 D5. Fails open on Redis errors — a degraded Redis must not lock every user out. Logout invalidates the current sid only; `allDevices=true` still relies on refresh-token revocation (per-user-generation counter is a follow-up).
 - **Grace countdown on `/v1/auth/me/mfa`** — response now carries `requiresMfa` + `graceExpiresAt` computed from the user record + JWT memberships, so the frontend banner/countdown can render without relying on the one-shot login response.
 - **WebAuthn / passkeys** — second-factor enrollment under `services/webauthn_service.go` + `handlers/webauthn_handler.go`. Library: `github.com/go-webauthn/webauthn`. Configuration: `WEBAUTHN_RP_ID` (eTLD+1 host, no scheme/port) + `WEBAUTHN_RP_ORIGINS` (comma-separated full URLs). Both env vars are optional — if either is missing the module derives them from `FRONTEND_URL` (eg. `http://localhost:8080` → `rpId=localhost`, `origins=[http://localhost:8080]`); if neither resolves, WebAuthn is disabled and the endpoints don't mount. Credentials live as an embedded `webauthnCredentials[]` array on the same `*_mfa_factors` row (one row per user with `type=webauthn`); the (userUuid,type) unique index naturally allows a user to enroll both TOTP and passkeys. Login/step-up via passkey sets `amr=[..., "otp", "webauthn"]` so existing step-up middleware accepts the proof. The partial login response carries `webauthnAvailable: bool` so the verify page can offer the passkey button alongside the code field.
 
@@ -429,15 +639,17 @@ Everything else (`services.AuthService`, `services.JWTService`, `services.Passwo
 - **First-user heuristic.** `password_auth_service.go::Register` (`:116-121`), `RegisterInitialAdmin` (`:177`), and `auth_service.go::OAuth register` all check `GetUserCount(ctx, nil) == 0` and assign `super_admin` to the first account created on a fresh install. The setup wizard's `POST /v1/setup/admin` uses `RegisterInitialAdmin` which also bypasses email verification. The setup wizard's `POST /v1/setup/admin` creates the admin only — it no longer bootstraps an internal tenant (ADR-note: zero-tenant installs are supported).
 - **Email verification is gated by `AUTH_REQUIRE_EMAIL_VERIFICATION`.** `true` in production, `false` elsewhere. When true, signup returns 503 with `ErrNotificationDown` if the notification sender is missing or reports `IsConfigured() == false`. `RegisterInitialAdmin` (setup wizard path) bypasses verification entirely because the wizard runs before SMTP is configured.
 - **OAuth signup trusts the IdP's `email_verified` claim.** Every provider (Google `email_verified`, Apple `email_verified`, GitHub `verified` per-email, Discord `verified`) populates `OAuthUserInfo.EmailVerified`; the handlers forward it as `email_verified` in the `userInfoMap`; `HandleOAuthCallbackWithLinking` reads it back and passes it through `CreateUserInput.EmailVerified` so the new account lands with `User.EmailVerified=true` without re-asking the user to confirm what the IdP just confirmed. Missing or false falls through to the standard verification flow — a provider that doesn't actually own the inbox can never auto-verify the email.
-- **Refresh tokens rotate on every use with family detection.** Each login mints a fresh `FamilyID`; every subsequent rotation preserves it via `RotateWithFamily` (atomic CAS on `{isRevoked:false}`). Old rows are marked `revokedReason="rotated"` with `succeededBy` pointing at the successor so the chain is walkable. Reuse of a rotated token — or CAS-loss on concurrent rotation — triggers `RevokeFamily`: every active row in the lineage is revoked with `revokedReason="replay_detected"`, a structured `slog.Warn` fires, and callers get `ErrRefreshTokenReplay` → 401 with body `{code:"refresh_token_replay"}`. Pre-Block-C rows have empty `FamilyID`; `RevokeFamily("")` is a no-op guard so a stray pre-Block-C replay doesn't wipe unrelated sessions. Revoked rows must stay in the collection for at least the refresh TTL — do not shorten `CleanupRevokedTokens`'s `olderThan` below that.
+- **Refresh tokens rotate on every use with family detection.** Each login mints a fresh `FamilyID`; every subsequent rotation preserves it via `RotateWithFamily` (atomic CAS on `{isRevoked:false}`). Old rows are marked `revokedReason="rotated"` with `succeededBy` pointing at the successor so the chain is walkable. Reuse of a rotated token — or CAS-loss on concurrent rotation — triggers `RevokeFamily`: every active row in the lineage is revoked with `revokedReason="replay_detected"`, a structured `slog.Warn` fires, and callers get `ErrRefreshTokenReplay` → 401 with body `{code:"refresh_token_replay"}`. Pre-Block-C rows have empty `FamilyID`; `RevokeFamily("")` is a no-op guard so a stray pre-Block-C replay doesn't wipe unrelated sessions. No refresh row may be deleted while its token could still pass temporal validation, regardless of revocation state — an unexpired rotated row is exactly what replay detection matches against. Once `expiresAt` is past, replaying it cannot mint credentials and the row may be swept. `CleanupRevokedTokens` was deleted in ADR-0017 D7: revocation age alone is never a safe deletion criterion, and it was wrong across a `JWT_REFRESH_TOKEN_EXPIRY` change between restarts.
+- **Refresh-token retention is an elected, self-draining sweep.** `AuthModule.Start` runs one loop covering both tiers. A Redis lease (`auth:maintenance:token-sweep`, 2m TTL, renewed every 30s with Lua compare-and-expire) elects **one scheduler across replicas** — held across the idle wait too, so 5,000 rows/tier/cycle is a cluster-wide bound, not a per-replica multiplier. The cadence adapts to the `hasMore` bit the previous batch reported: 5 minutes while draining, 6 hours once dry. Watch `orkestra_auth_token_sweep_backlog_estimate{tier}` reach zero; no manual intervention or interval change is expected. **Every lease failure is a step-down, never an exit.** A failed acquire, a failed renew, and a renew that reports someone else owns the key all land in the same follower state: log one bounded warning, sweep nothing, re-contend in five minutes. Exiting the loop on any of them would end retention for the life of the process — nothing calls `Start` again — and the most ordinary instance of that is a Redis restart, which comes back *healthy* and answers the next renew with `not_owner` rather than an error. Authentication is never affected on any of these paths. The next pass is scheduled as an **absolute deadline**, not a duration recomputed each time the loop wakes: the renew ticker wakes it every 30s, so rebuilding the timer from the full interval on each wake would starve the sweep forever while every log line still looked healthy.
 - **Refresh-family replay fencing is durable.** The tier-scoped `*_refresh_token_families` row records a family revocation independently of the token rows. It closes the standalone-Mongo race where replay revocation lands after a rotation CAS but before its successor insert: the late successor is fenced and cannot remain active. Do not replace this with process-local coordination.
 - **A session has one canonical SID.** Token issuance generates one random session UUID *before* either JWT is signed. The access JWT `sid`, refresh JWT `sid`, `RefreshTokenDoc.SessionUUID`, `AuthSessionDoc.UUID`, and returned `TokenResponse.SessionID` must all equal it. Refresh rotation and MFA/WebAuthn login completion preserve that SID; never derive it from time or device data, and never mint a second SID while completing a paused login.
+- **A session has a maximum age, and both refresh paths enforce it.** `sessionAbsoluteTTL` (default 30d, empty disables) bounds total session age from `session.StartedAt`, independently of activity — the refresh TTL is the *idle* timeout, not the cap. `RefreshTokensWithRiskAssessment` **and** `MintAccessTokenFromRefresh` both call `sessionWithinAbsoluteCap`: `/session` mints without rotating, so enforcing on the rotation endpoint alone would let a bootstrap-only client hold a session open forever. Reaching the cap is a **logout** — refresh tokens revoked, session inactive, sid denylisted — not a denial, because a denial would leave the in-flight access token valid until its natural expiry. Repository failures fail closed to 503 `session_enforcement_unavailable`; only a clean not-found fails open, under a measured compatibility window counted by `orkestra_auth_session_anchor_anomalies_total`.
 - **An inactive user receives no credentials.** Password login, web OAuth, mobile OAuth, MFA completion, refresh rotation, and read-only session bootstrap all validate token eligibility / `IsActive` before returning credentials. Disabling an account therefore blocks every issuance path; session termination additionally invalidates active refresh/session state and Redis revocation makes access tokens fail on their next request when Redis is available.
 - **MFA and WebAuthn challenges have exactly one winner.** A successful TOTP/backup-code or WebAuthn assertion atomically consumes its short-lived challenge. Invalid WebAuthn assertions do not burn the challenge, but concurrent or replayed valid assertions cannot both complete or mint credentials. TOTP timestep and backup-code consumption are likewise atomic.
 - **Redis revocation degradation is deliberately bounded.** Failed Redis lookup/write operations increment `orkestra_auth_session_revocation_store_failures_total` with `operation="lookup"` or `operation="write"`. Lookup failures fail open: persisted refresh/session revocation still blocks reauthentication, while an already-issued access token may remain usable only until its configured access-token expiry (rather than causing a platform-wide lockout).
-- **Legacy SID migration.** Deployments upgrading from builds affected by non-canonical session IDs must revoke all active refresh-token rows, then allow already-issued access tokens to expire within the configured access-token TTL. Retain rotated and revoked refresh rows for at least one refresh-token TTL so replay detection remains effective.
+- **Legacy SID migration.** Deployments upgrading from builds affected by non-canonical session IDs must revoke all active refresh-token rows, then allow already-issued access tokens to expire within the configured access-token TTL. No refresh row may be deleted while its token could still pass temporal validation, regardless of revocation state — replay detection depends on the rotated/revoked rows surviving until `expiresAt`, not on a fixed retention window past revocation.
 - **Cookie iteration is picker-first, never first-error-wins.** Refresh handlers (`RefreshTokensHTTP`, `RefreshTokensWithHeaderHTTP`, `GetSessionHTTP`) call `pickRefreshCandidate` over every `orkestra_cookie` value the browser sent before any mutating call. The picker uses `AuthService.PeekRefreshToken` (pure read, no rotation, no replay handling) to classify each candidate, then returns either a valid candidate to refresh on OR — only if every candidate is rotated/expired/unknown — the first rotated one to surface a genuine replay. This shape exists because the browser sends EVERY cookie sharing the name on every request (RFC 6265): a stale parent-domain cookie left over from before the PR-D D-9 cookie-domain split (e.g. `.orkestra.cc` value frozen at a long-rotated token) used to be processed first by the old first-error-wins loop and would nuke the family behind the current `.staging-api.orkestra.cc` cookie. The picker isolates that stale sibling so genuine replay detection still fires when there is no valid candidate, but a leftover cookie next to a healthy one no longer logs the user out every 15 minutes. On successful refresh with `len(candidates) > 1`, the handlers also emit `Set-Cookie ...; Max-Age=0` for each meaningful parent of the current cookie domain (via `clearStaleParentDomainCookies`) so the browser evicts the leftover.
-- **Session bootstrap is read-only — rotation lives only in `/refresh-cookie`.** `GET /v1/auth/session` (handler: `GetSessionHTTP`) MUST NOT rotate the refresh row. It calls `AuthService.MintAccessTokenFromRefresh` which validates the row (non-expired, non-revoked — any reason including `rotated` disqualifies) and mints an access token without touching the refresh row's state. The TokenResponse it returns carries an empty `RefreshToken`; the caller's existing cookie stays authoritative. The split exists because the SPA had TWO independent refresh paths (`useGetSessionQuery` → `/session` AND `baseQueryWithRetry`'s 401-handler → `/refresh-cookie`) and both used to rotate. When they fired concurrently (typical on app boot / tab focus / 401 race) one would win the rotation and the other would land with a now-rotated cookie, tripping replay detection on the legitimate session holder. Keeping rotation in exactly one chokepoint (`/refresh-cookie`) means any number of `/session` calls can coexist idempotently. The `pickRefreshCandidate` helper is still useful here for the multi-cookie-from-domain-split case, but the rotated-fallback path is intentionally unused in `GetSessionHTTP` — read-only mint never fires replay.
+- **Session bootstrap is read-only — rotation lives only in `/refresh-cookie`.** `GET /v1/auth/session` (handler: `GetSessionHTTP`) MUST NOT rotate the refresh row. It calls `AuthService.MintAccessTokenFromRefresh` which validates the row (non-expired, non-revoked — any reason including `rotated` disqualifies) and mints an access token without touching the refresh row's state. The TokenResponse it returns carries an empty `RefreshToken`; the caller's existing cookie stays authoritative. The split exists because the SPA had TWO independent refresh paths (`useGetSessionQuery` → `/session` AND `baseQueryWithRetry`'s 401-handler → `/refresh-cookie`) and both used to rotate. When they fired concurrently (typical on app boot / tab focus / 401 race) one would win the rotation and the other would land with a now-rotated cookie, tripping replay detection on the legitimate session holder. Keeping rotation in exactly one chokepoint (`/refresh-cookie`) means any number of `/session` calls can coexist idempotently. The `pickRefreshCandidate` helper is still useful here for the multi-cookie-from-domain-split case, but the rotated-fallback path is intentionally unused in `GetSessionHTTP` — read-only mint never fires replay. ⚠️ "Read-only" means **does not rotate**, which is the whole anti-replay claim — it does **not** mean side-effect-free. `MintAccessTokenFromRefresh` also enforces the absolute session cap (see "A session has a maximum age" below), and reaching the cap is a logout: a `/session` call can revoke the session's refresh rows, flip the session document inactive and denylist the sid. That is deliberate — a bootstrap-only client must not be able to hold a session open past the cap — and it is still not a rotation, so no `/session` call can ever invalidate a cookie another tab is about to present.
 - **Logout identity must be signature-verified.** `POST /v1/auth/{tier}/logout` is mounted on the **public** router (`module.go` → `ri.Router`), so no auth middleware ever populates `ctx["userUUID"]` and the refresh cookie is the only identity source for the overwhelming majority of calls. `handlers/auth_handler.go::resolveLogoutIdentity` is the single place that resolves it, and it uses `jwtService.ValidateRefreshToken` — **never** `ParseUnverifiedClaims`. The unverified parse is legitimate in the audience gate (cheap routing ahead of a real verifier) but catastrophic here: there is no verifier downstream, so an unverified claim would let an anonymous caller hand-roll a JWT naming any `userUUID` and drive `TerminateAllSessionsByUUID` against it (`allDevices=true`) — an unauthenticated forced-logout of any user whose UUID is known. The `deviceId` used for single-session termination comes from the same verified claims; the request body's `refreshToken` field is not consulted (no client populates it, and a body-supplied token carries no proof of ownership). An unresolvable request still clears the cookie and returns 200 — logout is idempotent and must not become an account-existence oracle. Regression tests: `handlers/logout_identity_test.go`.
 - **Client IP is never read from a request header in this module.** `utils.GetClientIP(r)` returns `r.RemoteAddr`, which `shared/middleware.RealIP` has already resolved under the deployment's trusted-proxy policy. This matters here because the login flow uses the IP for the rate-limit / lockout bucket (`"ip:"+in.IP`), the geo-block (`CountryBlocked`), the risk score, and every audit row — all of which were caller-controlled while `GetClientIP` trusted `X-Forwarded-For`. See [backend/CLAUDE.md](../../../CLAUDE.md#client-ip-resolution-trusted-proxies) for the policy and its env vars.
 - **A deactivated account cannot refresh.** `RefreshTokensWithRiskAssessment` and `MintAccessTokenFromRefresh` both reject `user.IsActive == false` with `ErrInvalidRefreshToken`. `Login` has always checked this, but login is the one path an already-signed-in attacker never revisits — without the refresh-side check, disabling an account (offboarding, compromise response, the `inactiveAccountAutoDisableDays` sweep) had no effect until the refresh row expired, up to 7 days later. The user module additionally calls `iface.SessionTerminator` on deactivate/delete so existing sessions die immediately rather than after one access-token TTL; auth satisfies that interface via `AuthService.TerminateAllSessionsByUUID` under `ServiceAuthService` / `ServiceClientAuthService`.
@@ -448,7 +660,7 @@ Everything else (`services.AuthService`, `services.JWTService`, `services.Passwo
 - **OAuth state is 10 minutes in Redis.** Validated before code exchange in every provider's callback handler.
 - **OAuth state is bound to the browser that started the flow.** The signed state + one-shot Redis row prove a callback belongs to a flow *we* started; they do **not** prove it belongs to a flow *this browser* started. Without that, an attacker starts a flow against their own account, sends the victim the authorize URL, and the victim's browser completes it — landing the victim inside the **attacker's** session (login CSRF); in `mode=link` it instead binds the victim's provider identity to the attacker's account, so the victim's next "Sign in with Google" delivers them into an account the attacker controls. Both start endpoints therefore also drop the CSRF nonce into an HttpOnly `orkestra_oauth_state` cookie (SameSite=Lax — Strict would suppress the top-level redirect back from the IdP), and `resolveStateForCallback` requires the two to match (`handlers/oauth_state_binding.go`). Fails closed: a mismatched cookie, an absent cookie on the starting host, or a state with no `shost` claim are all rejected. **One structural exception** — the ADR-0003 tier split puts client-tier starts on `api.*` while every provider callback lands on `console.*`, so the cookie cannot reach the callback; that hop is detected by comparing the signed `shost` claim with the callback host (port-insensitive) and is allowed with an `Info` log. The SPA must call the start endpoint with `credentials: 'include'` or the cookie is never stored — `frontend-admin`'s `socialAuthUtils.ts` and RTK `baseApi` both do.
 - **OAuth link reuse refreshes the cached `picture` URL.** Every successful OAuth callback updates two places on link reuse (`auth_service.go` ≈ line 1612): the provider doc's `metadata.picture` (drives `UserManagementResponse.Providers[].Avatar`) AND the embedded `User.OAuthLinks[i].OAuthData["picture"]` (drives `blob.ResolveAvatarURL` for `AvatarSource=oauth_*`) via the additive `iface.OAuthLinkDataUpdater` sub-interface. Without this, users who linked Google before the embedded-picture field existed would never see their avatar populate until they manually re-linked.
-- **Token lifetimes come from config, never from literals.** `JWTService.AccessTokenTTL(ctx)` (admin `accessTokenTTL` → `JWT_ACCESS_TOKEN_EXPIRY` → 15m) and `JWTService.RefreshTokenTTL()` (`JWT_REFRESH_TOKEN_EXPIRY` → 30d) are the single sources. They drive every `expiresIn` in a response, the `expiresAt` on each persisted refresh row, and the `Max-Age` on every refresh cookie (including the setup wizard's, via an optional-interface probe). Four literals used to disagree about the same session — refresh rows hardcoded 7d against a 30d JWT, and every response said `expiresIn: 900` no matter what the deployment configured, so a shortened access TTL made the SPA refresh too late and produced a burst of 401s each cycle. The one lifetime deliberately kept separate is `AuthSessionRetention` (90d): the session **document** is audit + device history that the risk scorer reads, and nothing authenticates off it.
+- **Token lifetimes come from config, never from literals.** `JWTService.AccessTokenTTL(ctx)` resolves `admin accessTokenTTL → JWT_ACCESS_TOKEN_EXPIRY → 15m` — all three levels reachable since ADR-0017, with the effective value clamped to 24h so it can never outlive its revocation-denylist entry. `JWTService.RefreshTokenTTL()` resolves `JWT_REFRESH_TOKEN_EXPIRY → 7d` (the unreachable 720h zero-guard in `NewJWTService` is not a configured default). They drive every `expiresIn` in a response, the `expiresAt` on each persisted refresh row, and the `Max-Age` on every refresh cookie. Because rotation rewrites the refresh row's expiry on every use, the refresh TTL is the session's **idle** timeout, not its total lifetime; the total is bounded separately by `sessionAbsoluteTTL` (ADR-0017 D1). The lifetime deliberately kept separate from all three is `models.AuthSessionRetention` (90d): the session **document** is audit and device history that the risk scorer reads, and nothing authenticates off it.
 - **The MFA attempt cap is an atomic counter.** `IncrementAttempts` moves a dedicated Redis key via `INCR` (`OAuthStateStore.Incr`), not a read-modify-write over the challenge JSON. With RMW, concurrent verifies all read the same value and wrote back the same value, so N parallel guesses cost one attempt — "5 tries" held only against a serial attacker. `Peek` reports the live counter; `Consume`/exhaustion/expiry delete challenge and counter together so a recycled id cannot inherit a spent budget. A counter that cannot be advanced fails closed (the challenge is destroyed).
 - **Account lockout reads the admin policy.** The branch that stamps `User.LockedUntil` uses `AuthPolicyService.LockoutThreshold`/`LockoutDuration`, the same values plumbed into the rate limiter. It previously compared against a hardcoded `5` with a hardcoded 15-minute window, so tightening `accountLockoutThreshold` moved the in-memory bucket but not the persisted lock.
 - **Password character classes are Unicode-aware.** `checkCharacterClasses` classifies with `unicode.IsUpper/IsLower/IsDigit/IsPunct/IsSymbol`. The old ASCII-range switch put *everything* non-`[A-Za-z0-9]` in the symbol bucket: a plain space satisfied `requireSymbol`, and `ПАРОЛЬ` / `passwörd` satisfied `requireSymbol` while satisfying neither `requireUpper` nor `requireLower`. Whitespace now counts as no class at all.
@@ -476,7 +688,7 @@ Everything else (`services.AuthService`, `services.JWTService`, `services.Passwo
 - **Never bypass the rate limiter on login / forgot-password endpoints.** The limiter is the only protection against credential stuffing and reset-flood.
 - **When you add a new OAuth provider**, add its fields to `ConfigSchema()`, extend the switch in `oauth_config_resolver.go`, and wire the factory case in `services/oauth_provider_factory.go`. Never hardcode provider config inside a handler — everything flows through the resolver so admin edits are live.
 - **Never read `cfg.Auth.{Google,Apple,GitHub,Discord}` from handlers.** Those struct fields still load from env vars for backward compatibility, but OAuth config is owned by the resolver. Handlers must call `h.oauthResolver.Get/RedirectURL/MobileAudience` so the admin panel stays authoritative.
-- **Every new auth-adjacent collection needs a deliberate TTL decision.** Email tokens have TTLs because they're user-initiated. Sessions do not because they're invalidated explicitly. Don't copy-paste one into the other.
+- **Every new auth-adjacent collection needs a deliberate TTL decision.** Email tokens have TTLs because they're user-initiated. Sessions have one because `expiresAt` *is* the retention deadline (`models.AuthSessionRetention`) — a TTL index expresses that intent exactly. Refresh-token rows do not: a row may be deleted only once its own `expiresAt` is past, and the first cleanup of an upgraded install needs bounded per-cycle progress plus backlog telemetry that Mongo's TTL monitor cannot provide — they're swept by the elected scheduler in `maintenance.go` instead. Don't copy-paste one pattern into the other.
 
 ## Related
 

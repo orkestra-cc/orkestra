@@ -7,6 +7,7 @@ import (
 	"time"
 
 	authModels "github.com/orkestra/backend/internal/core/auth/models"
+	"github.com/orkestra/backend/internal/shared/utils"
 	"github.com/orkestra/backend/pkg/sdk/iface"
 	"github.com/orkestra/backend/pkg/sdk/module"
 )
@@ -20,10 +21,16 @@ const (
 	defaultPasswordMinLength     = 10
 	defaultPasswordMaxLength     = 128
 	defaultBreachedPasswordCheck = true
-	// Phase 3.1 defaults — match the pre-policy hardcoded behaviour so
-	// a deployment without the policy keys set keeps minting tokens
-	// with the same TTLs that the env-var-driven NewJWTService used.
-	defaultAccessTokenTTL        = 15 * time.Minute
+	// defaultAccessTokenTTL is the shared 15-minute fallback for the
+	// access-token lifetime. AuthPolicyService.AccessTokenTTL does NOT
+	// use it — an unset admin value reports 0 so the env level can be
+	// consulted (ADR-0017 D5). The guard that actually applies this
+	// default lives in NewJWTService, which is the level "unset all
+	// the way down" bottoms out at.
+	defaultAccessTokenTTL = 15 * time.Minute
+	// Phase 3.1 default — matches the pre-policy hardcoded behaviour so
+	// a deployment without the policy key set keeps minting tokens with
+	// the reset-token TTL PasswordAuthService always used.
 	defaultPasswordResetTokenTTL = 30 * time.Minute
 )
 
@@ -44,6 +51,18 @@ const (
 // without standing up Mongo+Redis.
 type configValueReader interface {
 	GetValue(ctx context.Context, moduleName, key string) string
+	// GetRawValue reports the stored value together with whether the key
+	// is present at all, WITHOUT GetValue's empty-means-absent collapse.
+	// SessionAbsoluteTTL needs this: an operator clearing the field must
+	// disable the cap, and GetValue cannot distinguish that from the key
+	// never having been set. See module.ModuleConfigService.GetRawValue.
+	//
+	// The error is separate from the presence flag on purpose. Collapsing
+	// a failed read into "absent" would make SessionAbsoluteTTL answer
+	// with its 30-day default during a module_configs outage, re-enabling
+	// a cap the operator had disabled and signing out every session older
+	// than 30 days that refreshed in that window.
+	GetRawValue(ctx context.Context, moduleName, key string) (string, bool, error)
 }
 
 // AuthPolicyService resolves admin-managed authentication policy at
@@ -171,24 +190,22 @@ func (s *AuthPolicyService) LockoutThreshold(ctx context.Context) int {
 	return n
 }
 
-// AccessTokenTTL returns the admin-managed access-token lifetime.
-// Falls back to defaultAccessTokenTTL (15m) when unset, invalid, or
-// the policy service / underlying ConfigService is missing. The JWT
-// service consults this on every GenerateAccessToken so admin edits
-// take effect on the next mint. Phase 3.1 of the auth-policy roadmap.
+// AccessTokenTTL returns the admin-managed access-token lifetime, or 0
+// when the value is absent. Zero means UNSET, not "use the default":
+// jwtService.accessTokenLifetime falls through to the env-derived
+// s.accessExpiry on zero, which is the documented
+// `admin → JWT_ACCESS_TOKEN_EXPIRY → 15m` chain. Substituting the 15m
+// default here is what made the middle level unreachable. The 15m guard
+// lives in NewJWTService, which is the level that owns it. ADR-0017 D5.
 func (s *AuthPolicyService) AccessTokenTTL(ctx context.Context) time.Duration {
 	if s == nil || s.cs == nil {
-		return defaultAccessTokenTTL
+		return 0
 	}
 	v := strings.TrimSpace(s.cs.GetValue(ctx, "auth", "accessTokenTTL"))
 	if v == "" {
-		return defaultAccessTokenTTL
+		return 0
 	}
-	d, err := time.ParseDuration(v)
-	if err != nil || d <= 0 {
-		return defaultAccessTokenTTL
-	}
-	return d
+	return clampPersistedDuration(v, 0, MinAccessTokenTTL, MaxAccessTokenTTL, "accessTokenTTL", slogDefault())
 }
 
 // MFAMethodsAllowed returns the set of MFA factor types the admin
@@ -252,9 +269,9 @@ func (s *AuthPolicyService) MFAMethodAllowed(ctx context.Context, method string)
 }
 
 // PasswordResetTokenTTL returns the admin-managed lifetime of the
-// reset-password email token. Falls back to defaultPasswordResetTokenTTL
-// (30m). The PasswordAuthService reads this when minting a new
-// reset_password email-token row. Phase 3.1 of the auth-policy roadmap.
+// reset-password email token. Empty means "use the 30m default"; a
+// persisted out-of-range or unparsable value is clamped and warned
+// rather than rejected, so old data cannot make the admin UI unusable.
 func (s *AuthPolicyService) PasswordResetTokenTTL(ctx context.Context) time.Duration {
 	if s == nil || s.cs == nil {
 		return defaultPasswordResetTokenTTL
@@ -263,11 +280,7 @@ func (s *AuthPolicyService) PasswordResetTokenTTL(ctx context.Context) time.Dura
 	if v == "" {
 		return defaultPasswordResetTokenTTL
 	}
-	d, err := time.ParseDuration(v)
-	if err != nil || d <= 0 {
-		return defaultPasswordResetTokenTTL
-	}
-	return d
+	return clampPersistedDuration(v, defaultPasswordResetTokenTTL, MinPasswordResetTokenTTL, MaxPasswordResetTokenTTL, "passwordResetTokenTTL", slogDefault())
 }
 
 // LockoutDuration returns how long an IP/email stays locked after
@@ -280,8 +293,8 @@ func (s *AuthPolicyService) LockoutDuration(ctx context.Context) time.Duration {
 	if v == "" {
 		return defaultLockoutDuration
 	}
-	d, err := time.ParseDuration(v)
-	if err != nil || d <= 0 {
+	d, ok := utils.ParseDuration(v)
+	if !ok || d <= 0 {
 		return defaultLockoutDuration
 	}
 	return d

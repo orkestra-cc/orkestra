@@ -66,6 +66,9 @@ func (s *stubSessionRepo) UpdateDeviceInfo(context.Context, string, *models.Devi
 func (s *stubSessionRepo) TerminateSession(context.Context, string) error {
 	panic("unexpected TerminateSession")
 }
+func (s *stubSessionRepo) ExpireSessionForMaxAge(context.Context, string) (bool, error) {
+	panic("unexpected ExpireSessionForMaxAge")
+}
 func (s *stubSessionRepo) TerminateSessionByDevice(context.Context, string, string) error {
 	panic("unexpected TerminateSessionByDevice")
 }

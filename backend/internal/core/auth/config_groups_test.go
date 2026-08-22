@@ -83,17 +83,19 @@ func TestConfigGroups_EveryFieldIsGrouped(t *testing.T) {
 }
 
 // TestConfigGroups_FieldCountPerGroup pins the exact bucket every one of the
-// 62 fields lands in. `TestConfigGroups_EveryFieldIsGrouped` above only
+// 63 fields lands in. `TestConfigGroups_EveryFieldIsGrouped` above only
 // proves a field's `Group` resolves to *some* declared key — it would not
 // notice `passwordMinLength` moving from `password` to `login`, since
 // `login` is declared too. This is the regression guard the migration brief
 // calls its central invariant: every field changed identifier, none changed
-// bucket. The counts are the ones the brief's own table specifies and sum to
-// 62, the module's full field count.
+// bucket. The counts were 62 at the group migration; ADR-0017 D1 added
+// `sessionAbsoluteTTL` to `login`, bringing the module's full field count
+// to 63 — update this map deliberately alongside any future field, not by
+// reflexively editing numbers until the suite goes green.
 func TestConfigGroups_FieldCountPerGroup(t *testing.T) {
 	want := map[string]int{
 		"registration":  5,
-		"login":         6,
+		"login":         7,
 		"password":      7,
 		"mfa":           5,
 		"oauth":         11,
@@ -109,8 +111,8 @@ func TestConfigGroups_FieldCountPerGroup(t *testing.T) {
 	for _, f := range schema {
 		got[f.Group]++
 	}
-	if len(schema) != 62 {
-		t.Errorf("ConfigSchema() returned %d fields, want 62", len(schema))
+	if len(schema) != 63 {
+		t.Errorf("ConfigSchema() returned %d fields, want 63", len(schema))
 	}
 	for group, wantCount := range want {
 		if got[group] != wantCount {
@@ -145,7 +147,7 @@ func TestConfigGroups_DeclarationsValidate(t *testing.T) {
 // condition set exactly, and that every condition's `In` is exactly
 // `["true"]`, closes both gaps.
 func TestProviderCredentials_HiddenUntilEitherSurfaceEnabled(t *testing.T) {
-	// The whole point of the migration: 19 of 62 fields are provider
+	// The whole point of the migration: 19 of 63 fields are provider
 	// credentials that are dead weight on an install not using that provider.
 	cases := map[string][]string{
 		"oauth.google":  {"googleEnabledAdmin", "googleEnabledClient"},

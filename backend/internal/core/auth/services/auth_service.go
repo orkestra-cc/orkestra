@@ -1256,7 +1256,7 @@ func (s *authService) GenerateEnhancedTokenPair(ctx context.Context, user *iface
 		IsActive:     true,
 		StartedAt:    now,
 		LastActivity: now,
-		ExpiresAt:    now.Add(AuthSessionRetention),
+		ExpiresAt:    now.Add(models.AuthSessionRetention),
 		LoginMethod:  "oauth",
 		DeviceInfo:   *device,
 		IPAddress:    ipAddress,
@@ -1379,6 +1379,13 @@ func (s *authService) RefreshTokensWithRiskAssessment(ctx context.Context, refre
 		IPAddress: nonEmpty(securityCtxIP(securityCtx), tokenDoc.IPAddress),
 		Timestamp: now,
 	}
+	// Absolute session cap. Placed after the row's revocation/expiry
+	// checks and before the mint, so a capped session never receives a
+	// token pair. ADR-0017 D3.
+	if err := s.sessionWithinAbsoluteCap(ctx, newSessionID); err != nil {
+		return nil, err
+	}
+
 	pair, err := s.jwtService.GenerateTokenPairWithAMR(user, device, security, claims.AMR, claims.LastOTPAt)
 	if err != nil {
 		return nil, fmt.Errorf("failed to mint token pair: %w", err)
@@ -1524,6 +1531,13 @@ func (s *authService) MintAccessTokenFromRefresh(ctx context.Context, refreshTok
 		IPAddress: nonEmpty(securityCtxIP(securityCtx), doc.IPAddress),
 		Timestamp: time.Now(),
 	}
+	// The same cap on the non-rotating path. /session mints without
+	// rotating, so omitting this would let a client that calls only the
+	// bootstrap endpoint hold a session open indefinitely. ADR-0017 D3.
+	if err := s.sessionWithinAbsoluteCap(ctx, doc.SessionUUID); err != nil {
+		return nil, err
+	}
+
 	access, err := s.jwtService.GenerateAccessTokenForSessionWithAMR(user, device, security, claims.AMR, claims.LastOTPAt)
 	if err != nil {
 		return nil, fmt.Errorf("failed to mint access token: %w", err)

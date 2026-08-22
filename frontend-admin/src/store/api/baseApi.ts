@@ -42,8 +42,17 @@ function isAuthEndpoint(url: string): boolean {
 // already in progress awaits the same promise instead of firing N parallel
 // refresh requests that would rotate the refresh token N times and trip
 // the backend's family-replay guard.
+//
+// `retry` is NOT the same answer as `ok: false`. A 503 from the refresh
+// endpoint means the backend could not *evaluate* the session — the session
+// enforcement path's durable store was unreachable — and ADR-0017 gives that
+// its own status precisely so a client does not treat it as a sign-out: an
+// outage "would train clients to discard a session that is still perfectly
+// valid." Collapsing it into `ok: false`, as this did, logged the user out
+// for the exact reason the 503 exists to prevent.
 type RefreshResult =
-  { ok: true; accessToken: string; expiresIn: number } | { ok: false };
+  | { ok: true; accessToken: string; expiresIn: number }
+  | { ok: false; retry?: boolean };
 let inFlightRefresh: Promise<RefreshResult> | null = null;
 
 async function performRefresh(baseUrl: string): Promise<RefreshResult> {
@@ -55,6 +64,8 @@ async function performRefresh(baseUrl: string): Promise<RefreshResult> {
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' }
       });
+      // 503 session_enforcement_unavailable: transient, keep the token.
+      if (res.status === 503) return { ok: false, retry: true } as const;
       if (!res.ok) return { ok: false } as const;
       const body = (await res.json()) as {
         accessToken?: string;
@@ -180,17 +191,39 @@ const baseQueryWithRetry: BaseQueryFn<
       requestUrl.includes('v1/auth/operator/me') ||
       requestUrl.includes('v1/auth/session');
 
-    // Server-side session revocation (logout, admin-kill, password change)
-    // sets `code: "session_revoked"` on the 401 body. Skip the silent-refresh
-    // retry in that case — a new access token minted from the same refresh
-    // cookie would carry the same revoked sid and just fail again. Clear
-    // local state and bounce the user to /login with a specific message.
+    // Server-side session termination sets a code on the 401 body. Skip the
+    // silent-refresh retry in both cases — a new access token minted from
+    // the same refresh cookie would carry the same dead sid and just fail
+    // again. The two codes share the logic and differ only in the message:
+    // "revoked" is inaccurate for a session that simply reached its maximum
+    // age, and the distinction matters to whoever reads the support ticket.
     const errorData = (result.error as { data?: { code?: string } }).data;
-    if (errorData?.code === 'session_revoked') {
+    const sessionEndedMessages: Record<string, string> = {
+      session_revoked: 'Your session has been revoked. Please sign in again.',
+      session_max_age_reached:
+        'Your session reached its maximum age. Please sign in again.'
+    };
+    const sessionEndedMessage = errorData?.code
+      ? sessionEndedMessages[errorData.code]
+      : undefined;
+    if (sessionEndedMessage) {
       api.dispatch(clearAccessToken());
-      if (!isAuthCheck) {
-        toast.error('Your session has been revoked. Please sign in again.', {
-          toastId: 'session-revoked',
+      // `isAuthCheck` suppresses the toast because a 401 from /me or
+      // /v1/auth/session on a cold load usually means "never signed in", and
+      // telling an anonymous visitor their session expired is noise.
+      //
+      // A server-side TERMINATION is a different event and must not inherit
+      // that suppression. `session_max_age_reached` in particular is only
+      // ever emitted for a session that existed and was ended by policy —
+      // /v1/auth/session is one of the two endpoints that emit it, so
+      // suppressing it there made the message unreachable on that path.
+      // ADR-0017 D4 gives the cap its own wording specifically so the user
+      // (and whoever reads their support ticket) is told what happened.
+      const isServerSideTermination =
+        errorData!.code === 'session_max_age_reached';
+      if (!isAuthCheck || isServerSideTermination) {
+        toast.error(sessionEndedMessage, {
+          toastId: errorData!.code,
           autoClose: 5000
         });
       }
@@ -282,6 +315,12 @@ const baseQueryWithRetry: BaseQueryFn<
           return result;
         }
         // Retry still returned 401 — fall through to the logout branch.
+      } else if (refreshResult.retry) {
+        // 503: the server could not evaluate the session, which is not the
+        // same as the session being over. Surface the original error and
+        // keep the token — the next request will try again. Signing the
+        // user out here is the behaviour ADR-0017's 503 exists to prevent.
+        return result;
       }
       // Refresh itself failed: drop the stale access token before redirecting.
       api.dispatch(clearAccessToken());

@@ -155,8 +155,9 @@ func requestHost(ctx context.Context) string {
 // refreshCookieMaxAge keeps the browser cookie and the refresh token it
 // carries on the same clock. They used to disagree: the cookie was
 // pinned at 7 days while the token's own TTL came from
-// JWT_REFRESH_TOKEN_EXPIRY (30 days by default), so a deployment that
-// lengthened the refresh window still lost the cookie after a week.
+// JWT_REFRESH_TOKEN_EXPIRY, whose shipped default is 7d. 30d appears only
+// as NewJWTService's unreachable zero-guard fallback; no configured
+// deployment ever hits it, so it must not be read as the default.
 func refreshCookieMaxAge(jwt services.JWTService) int {
 	return int(jwt.RefreshTokenTTL().Seconds())
 }

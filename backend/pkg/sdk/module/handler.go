@@ -2,6 +2,7 @@ package module
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -275,6 +276,10 @@ func (h *ModuleAdminHandler) UpdateModule(ctx context.Context, input *UpdateModu
 		// UpdateConfig merges into the stored config — keys the caller omits are
 		// preserved, so a config-only change never wipes the module's secrets.
 		if err := h.configService.UpdateConfig(ctx, input.Name, input.Body.Config, input.Body.Secrets); err != nil {
+			var invalid *ConfigValidationError
+			if errors.As(err, &invalid) {
+				return nil, huma.Error422UnprocessableEntity(invalid.Error())
+			}
 			return nil, err
 		}
 		configChanged = true
@@ -392,6 +397,10 @@ func (h *ModuleAdminHandler) GetEnvironment(ctx context.Context, input *GetEnvir
 // UpdateEnvironment updates config values for a specific environment.
 func (h *ModuleAdminHandler) UpdateEnvironment(ctx context.Context, input *UpdateEnvironmentInput) (*UpdateEnvironmentOutput, error) {
 	if err := h.configService.UpdateEnvironmentConfig(ctx, input.Name, input.Env, input.Body.Config, input.Body.Secrets); err != nil {
+		var invalid *ConfigValidationError
+		if errors.As(err, &invalid) {
+			return nil, huma.Error422UnprocessableEntity(invalid.Error())
+		}
 		return nil, huma.Error400BadRequest(err.Error())
 	}
 

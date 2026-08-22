@@ -379,6 +379,22 @@ func (s *ModuleConfigService) lazySeed(ctx context.Context, name string) (*Modul
 	return s.repo.FindByName(ctx, name)
 }
 
+// validateModuleConfig runs the module's optional ValidateConfig hook
+// against exactly the non-secret values the update would persist.
+// Modules that are unknown to this service, or that omit the seam, are
+// accepted unchanged. ADR-0017 D6.
+func (s *ModuleConfigService) validateModuleConfig(ctx context.Context, name string, merged map[string]string) error {
+	m, ok := s.knownModules[name]
+	if !ok {
+		return nil
+	}
+	v, ok := m.(HasConfigValidator)
+	if !ok {
+		return nil
+	}
+	return v.ValidateConfig(ctx, merged)
+}
+
 // UpdateConfig updates a module's config values and encrypted secrets for the
 // active environment, then invalidates the Redis cache for immediate propagation.
 // Also keeps the legacy top-level fields in sync for backward compatibility.
@@ -389,6 +405,25 @@ func (s *ModuleConfigService) lazySeed(ctx context.Context, name string) (*Modul
 // (e.g. flipping a feature toggle) carries no secrets, and replacing rather
 // than merging would blank out every encrypted secret the module holds.
 func (s *ModuleConfigService) UpdateConfig(ctx context.Context, name string, values map[string]string, secrets map[string]string) error {
+	// Load first: the module validator must see the merged document, and
+	// nothing may be encrypted or written before it has accepted it. The
+	// legacy top-level fields and the active environment can diverge, so
+	// each target is merged against its own existing maps below — the
+	// validator sees the legacy top-level merge, since that is the map the
+	// admin API has historically treated as the config of record.
+	existing, err := s.repo.FindByName(ctx, name)
+	if err != nil {
+		return err
+	}
+	if existing == nil {
+		return fmt.Errorf("module %q not found", name)
+	}
+
+	mergedValues := mergeStringMaps(existing.ConfigValues, values)
+	if err := s.validateModuleConfig(ctx, name, mergedValues); err != nil {
+		return err
+	}
+
 	encrypted := make(map[string]string, len(secrets))
 	for k, v := range secrets {
 		enc, err := encryptSecret(v)
@@ -398,21 +433,10 @@ func (s *ModuleConfigService) UpdateConfig(ctx context.Context, name string, val
 		encrypted[k] = enc
 	}
 
-	// Load the current document so partial updates merge into — not replace —
-	// the stored config. The legacy top-level fields and the active environment
-	// can diverge, so each target is merged against its own existing maps.
-	existing, err := s.repo.FindByName(ctx, name)
-	if err != nil {
-		return err
-	}
-	if existing == nil {
-		return fmt.Errorf("module %q not found", name)
-	}
-
 	// Update legacy top-level fields for backward compat.
 	if err := s.repo.UpdateConfigValues(
 		ctx, name,
-		mergeStringMaps(existing.ConfigValues, values),
+		mergedValues,
 		mergeStringMaps(existing.EncryptedValues, encrypted),
 	); err != nil {
 		return err
@@ -468,8 +492,15 @@ func (s *ModuleConfigService) UpdateEnvironmentConfig(ctx context.Context, name,
 		return fmt.Errorf("environment %q not found for module %q", envName, name)
 	}
 
-	// Merge with existing env values (don't wipe unset fields).
+	// Merge with existing env values (don't wipe unset fields), then let the
+	// module's optional validator see the merged result before anything is
+	// encrypted or persisted. This is the named-environment PATCH surface;
+	// it must not be a bypass around the active-config PATCH's validation.
 	existingEnv := doc.Environments[envName]
+	mergedValues := mergeStringMaps(existingEnv.ConfigValues, values)
+	if err := s.validateModuleConfig(ctx, name, mergedValues); err != nil {
+		return err
+	}
 
 	encrypted := make(map[string]string, len(secrets))
 	for k, v := range secrets {
@@ -480,7 +511,6 @@ func (s *ModuleConfigService) UpdateEnvironmentConfig(ctx context.Context, name,
 		encrypted[k] = enc
 	}
 
-	mergedValues := mergeStringMaps(existingEnv.ConfigValues, values)
 	mergedEncrypted := mergeStringMaps(existingEnv.EncryptedValues, encrypted)
 
 	if err := s.repo.UpdateEnvironmentConfig(ctx, name, envName, mergedValues, mergedEncrypted); err != nil {
@@ -599,6 +629,44 @@ func (s *ModuleConfigService) GetValue(ctx context.Context, moduleName, key stri
 		return v
 	}
 	return s.schemaFallback(doc.ConfigSchema, key)
+}
+
+// GetRawValue reports a module's stored non-secret config value together with
+// whether the key is actually present in the active environment — WITHOUT
+// GetValue's empty-means-absent collapse.
+//
+// GetValue answers "what value should I use", and folding an operator-cleared
+// key into the schema default is right for that question. This answers the
+// different question "did the operator say anything here", which a field whose
+// empty value is itself a decision needs. See ADR-0017 D1: clearing
+// sessionAbsoluteTTL disables the session cap, and GetValue cannot express that.
+//
+// THREE outcomes, and callers must keep them distinct:
+//
+//   - ("", false, nil)   — the read succeeded and the key is absent.
+//   - (v,  true,  nil)   — the read succeeded; v may legitimately be "".
+//   - ("", false, err)   — the read FAILED. Nothing is known about the key.
+//
+// The error is returned rather than folded into the presence flag because a
+// caller whose "absent" branch substitutes a default would otherwise apply
+// that default during a transient module_configs outage — silently swapping in
+// a different policy exactly when it cannot verify the configured one. For
+// sessionAbsoluteTTL that means re-enabling a cap an operator deliberately
+// disabled, and the consequence is an irreversible sign-out of every session
+// older than the default. A caller governing credentials should fail closed on
+// err, not guess.
+func (s *ModuleConfigService) GetRawValue(ctx context.Context, moduleName, key string) (string, bool, error) {
+	doc, err := s.repo.FindByName(ctx, moduleName)
+	if err != nil {
+		return "", false, err
+	}
+	if doc == nil {
+		// Not an error: a module with no config document has said nothing
+		// about any key, which is exactly the "absent" answer.
+		return "", false, nil
+	}
+	v, ok := doc.ActiveConfigValues()[key]
+	return v, ok, nil
 }
 
 // GetSecret returns a decrypted secret config value for a module.
