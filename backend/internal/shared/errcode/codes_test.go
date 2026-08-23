@@ -32,6 +32,7 @@ var goldenCodes = map[string]string{
 	"AuthPasswordConfirmUnavailable":   "auth.password_confirm_unavailable",
 	"AuthOAuthProviderDisabled":        "auth.oauth_provider_disabled",
 	"TenantSlugAlreadyInUse":           "tenant.slug_already_in_use",
+	"TenantProvisioningLocked":         "tenant.provisioning_locked",
 	"MarketingCardCodeCollision":       "marketing.card_code_collision",
 	"MarketingCardInvalidTransition":   "marketing.card_invalid_transition",
 	"NavigationOverrideUnknownParent":  "navigation.override_unknown_parent",

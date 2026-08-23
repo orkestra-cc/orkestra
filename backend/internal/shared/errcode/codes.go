@@ -70,6 +70,10 @@ const AuthOAuthProviderDisabled = "auth.oauth_provider_disabled"
 // existing organization slug. 409.
 const TenantSlugAlreadyInUse = "tenant.slug_already_in_use"
 
+// TenantProvisioningLocked signals that the `single` provisioning mode
+// blocks occupying another Tier-1 provisioning slot. 409.
+const TenantProvisioningLocked = "tenant.provisioning_locked"
+
 // --- user ---
 
 // UserSelfDeleteForbidden signals that an admin tried to delete (or

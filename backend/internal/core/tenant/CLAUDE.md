@@ -78,22 +78,26 @@ Collection name constants live in `repository/repository.go` (`CollTenants`, `Co
 
 | Key | Tier | Values | Default | EnvVar (first-boot seed) |
 |---|---|---|---|---|
-| `provisioning.internal.mode` | internal | `open` · `manual` · `single` | **`manual`** | `TENANT_PROVISIONING_INTERNAL_MODE` |
-| `provisioning.external.mode` | external | `open` · `manual` | **`manual`** | `TENANT_PROVISIONING_EXTERNAL_MODE` |
+| `provisioning.internal.mode` | internal (Tier-1) | `manual` · `single` — **fail-closed** | **`manual`** | `TENANT_PROVISIONING_INTERNAL_MODE` |
+| `provisioning.external.mode` | external (Tier-2) | `open` · `manual` — fail-open, unchanged | **`manual`** | `TENANT_PROVISIONING_EXTERNAL_MODE` |
 
-- **open** — any authenticated user may create.
-- **manual** (default both tiers) — only holders of `system.tenants.admin` may create.
-- **single** — at most one tenant of that tier may occupy a provisioning slot (see [Lifecycle](#lifecycle) for the predicate; internal-only intent: lock the platform to a single internal org).
+**Tier-1 (internal) is fail-closed and never self-serve.** `open` is not a valid internal mode: `Service.ProvisioningMode` (`services/service.go`) resolves a missing, unknown, or legacy-stored `open` value to `manual` for internal — never to open. (A pre-existing install can still have `open` sitting in `module_configs` from `TENANT_PROVISIONING_INTERNAL_MODE=open`; runtime resolution silently normalises it, a later migration rewrites the stored value.) **Every Tier-1 creation path requires `system.tenants.admin`, in both `manual` and `single` mode** — `single` only adds a cardinality constraint on top of `manual`, it never grants creation authority on its own.
+
+**Tier-2 (external) keeps its historical fail-open behaviour, unchanged by this.** `open` remains a valid, self-serve external mode: any authenticated user may create, and lazy personal-tenant provisioning (`EnsureTenantForUser`) is allowed. `manual` is the default and requires `system.tenants.admin`, same as before.
+
+- **open** — Tier-2 only: any authenticated user may create.
+- **manual** (default both tiers) — only holders of `system.tenants.admin` may create. Every Tier-1 path requires this regardless of mode; Tier-2 requires it only when `external.mode == manual`.
+- **single** — Tier-1 only: at most one Tier-1 tenant may occupy a provisioning slot (see [Lifecycle](#lifecycle) for the predicate). Adds cardinality on top of `manual`; does not by itself grant creation authority.
 
 **Default posture (both `manual`):** a fresh install accepts no self-service tenant creation. The first internal tenant is created deliberately from the setup wizard's `OrgStep` or the admin UI — a fresh install may have zero internal tenants; afterwards an operator creates further internal tenants deliberately. External clients are **never auto-provisioned** and **cannot self-create** a tenant — only a platform admin creates a client tenant and assigns it to a Tier-2 user.
 
 **Two-layer enforcement** (so every creation path is covered without scattering checks):
 
 1. **`single` is a data invariant in the service.** `Service.CreateTenant` (`services/service.go`) counts tenants of the kind occupying a provisioning slot via `repository.CountProvisioningSlotsByKind` and returns the sentinel `services.ErrProvisioningLocked` when one already exists. This covers **all** paths — `POST /v1/tenants`, divisions, and lazy provisioning — automatically. The first tenant on a fresh install counts 0 and passes.
-2. **`manual` is a permission gate in the handlers.** `createTenant` / `createDivision` call `Handler.enforceManualGate`, which resolves `iface.AuthzProvider` from the registry and checks `system.tenants.admin` (empty org = system grant). Non-admins get 403; the admin `CreateTenantModal` hits the same `POST /v1/tenants` and passes. The admin division route already requires the permission at the route group, so the shared handler body is a no-op gate for it.
-3. **Lazy provisioning honours `external.mode`.** `EnsureTenantForUser` (`services/billing.go`) returns an existing personal tenant unchanged but **refuses to auto-create** one (returns `ErrProvisioningLocked`) when `external.mode != open` — which is the default. A Tier-2 caller with no admin-assigned tenant therefore hits `resolveCallerTenant`, which maps the sentinel to **409** ("an administrator must create and assign one") rather than silently minting a tenant.
+2. **The permission gate in the handlers is universal for Tier-1, conditional for Tier-2.** `createTenant` / `createDivision` call `Handler.enforceManualGate`, which resolves `iface.AuthzProvider` from the registry and checks `system.tenants.admin` (empty org = system grant). For `kind == internal` the gate always applies, independent of `ProvisioningMode`; for `kind == external` it applies only when the resolved mode is `manual`. Non-admins get 403; the admin `CreateTenantModal` hits the same `POST /v1/tenants` and passes. The admin division route already requires the permission at the route group, so the shared handler body is a no-op gate for it.
+3. **Lazy provisioning honours `external.mode`.** `EnsureTenantForUser` (`services/billing.go`) returns an existing personal tenant unchanged but **refuses to auto-create** one (returns `ErrProvisioningLocked`) when `external.mode != open` — which is the default. A Tier-2 caller with no admin-assigned tenant therefore hits `resolveCallerTenant`, which maps the sentinel to **409** `tenant.provisioning_locked` rather than silently minting a tenant.
 
-Handlers map `ErrProvisioningLocked` → 409. The read-only `GET /v1/admin/tenants/provisioning-policy` reports both modes + provisioning-slot counts and backs the policy card on the tenant management pages (the modes themselves are edited at `/admin/modules/tenant`).
+Handlers map `ErrProvisioningLocked` → **409** `tenant.provisioning_locked` (`errcode.TenantProvisioningLocked`). The read-only `GET /v1/admin/tenants/provisioning-policy` reports both modes + provisioning-slot counts and backs the policy card on the tenant management pages (the modes themselves are edited at `/admin/modules/tenant`).
 
 `ConfigGroups()` splits the two fields onto the full-page rail along the tier boundary: `provisioning.internal` ("Internal provisioning (Tier-1)") holds `provisioning.internal.mode`, `provisioning.external` ("External provisioning (Tier-2)") holds `provisioning.external.mode` — one field per group, the minimum that promotes `/admin/modules/tenant` off the flat-form degradation path. Dropping `ConfigGroups()` entirely reverts the page to the flat single-card form with no other change required — `ConfigSchema()`'s `Group` tags become inert.
 
@@ -106,7 +110,7 @@ Three route groups, each with a different gate:
 | Method | Path | Purpose |
 |---|---|---|
 | GET | `/v1/tenants` | List the tenants the caller is a member of |
-| POST | `/v1/tenants` | Create a new tenant — caller becomes owner (`org_owner`). Subject to the provisioning policy (see above): in `manual` mode a non-admin caller gets 403; in `single` mode a second tenant of that tier gets 409. |
+| POST | `/v1/tenants` | Create a new tenant — caller becomes owner (`org_owner`). Subject to the provisioning policy (see above): for `kind=internal` a non-admin caller always gets 403 (both modes); for `kind=external` only `manual` mode requires admin. `single` mode additionally 409s once a second Tier-1 tenant would occupy a provisioning slot. |
 | POST | `/v1/tenants/accept-invite` | Redeem an invite token and join the target tenant |
 
 ### Per-tenant — read (`RequirePermission("tenant.read")`)
@@ -151,7 +155,7 @@ Gated globally by a system permission, not by per-org membership, so platform op
 | POST | `/v1/admin/tenants/{tenantId}/divisions` | Create a division (Kind=external, ParentTenantUUID=this). Refuses internal parents. |
 | PATCH | `/v1/admin/clients/{tenantId}/billing-identity` | Unified-clients — sets `IsCompany`, `LegalName`, VAT/fiscal codes, billing address, and the FatturaPA routing sub-document on a Tier-2 tenant. All body fields optional; nil leaves the existing value. The data this endpoint writes is what `iface.BillingTenantProvider.ResolveBillingParty` reads at invoice-send time (replaces the deleted `billing.Customer` row). |
 | POST | `/v1/admin/clients/{tenantId}/italian-billable` | Unified-clients Phase 1 — flips `Tenant.IsItalianBillable`. Enabling requires a FatturaPA profile carrying `CodiceDestinatario` or `PECDestinatario` (422 otherwise); disabling is unconditional. Send-time validation enforces the same invariant a second time, so the toggle on its own is not load-bearing. |
-| GET | `/v1/admin/tenants/provisioning-policy` | Read-only per-tier provisioning policy (`open`/`manual`/`single`) + active-tenant counts. Backs the policy card on the tenant pages; the modes are edited at `/admin/modules/tenant`. See [Provisioning policy](#provisioning-policy-admin-managed). |
+| GET | `/v1/admin/tenants/provisioning-policy` | Read-only per-tier provisioning policy (internal: `manual`/`single`, fail-closed; external: `open`/`manual`) + provisioning-slot counts. Backs the policy card on the tenant pages; the modes are edited at `/admin/modules/tenant`. See [Provisioning policy](#provisioning-policy-admin-managed). |
 
 ### Tier-2 self-service — Client surface, `RequireGlobal()`
 

@@ -181,9 +181,13 @@ func (f *fakeTenantSvc) EnsureTenantForUser(ctx context.Context, u string) (*ifa
 	panic("unused: EnsureTenantForUser")
 }
 
-// ProvisioningMode and CountProvisioningSlotsByKind default to the legacy
-// "open" / zero-count behaviour so existing handler tests that don't
-// exercise the provisioning policy keep passing without wiring a stub.
+// ProvisioningMode and CountProvisioningSlotsByKind default to "open" /
+// zero-count so external-kind (division) tests that don't exercise the
+// provisioning policy keep passing without wiring a stub. This default is
+// inert for internal-kind gate checks: enforceManualGate now requires
+// system.tenants.admin for every Tier-1 creation regardless of what this
+// returns, so internal-kind tests must stub the authz registry instead (see
+// adminRegistry).
 func (f *fakeTenantSvc) ProvisioningMode(ctx context.Context, kind models.TenantKind) string {
 	if f.provisioningModeFn != nil {
 		return f.provisioningModeFn(ctx, kind)
@@ -385,7 +389,7 @@ func TestCreateTenant_Happy(t *testing.T) {
 			return &models.Tenant{UUID: "t-1", Name: "Acme"}, nil
 		},
 	}
-	h := New(svc, nil)
+	h := New(svc, adminRegistry())
 	out, err := h.createTenant(authedCtx("u1"), &createTenantInput{Body: models.CreateTenantInput{Name: "Acme"}})
 	if err != nil {
 		t.Fatalf("err = %v", err)
@@ -402,7 +406,7 @@ func TestCreateTenant_SvcError400(t *testing.T) {
 			return nil, errors.New("slug already in use")
 		},
 	}
-	h := New(svc, nil)
+	h := New(svc, adminRegistry())
 	_, err := h.createTenant(authedCtx("u1"), &createTenantInput{Body: models.CreateTenantInput{Name: "x"}})
 	assertStatus(t, err, 500)
 }
@@ -414,7 +418,7 @@ func TestCreateTenant_ServiceFailureDoesNotLeakDriverText(t *testing.T) {
 			return nil, errors.New("E11000 duplicate key error collection: tenants")
 		},
 	}
-	h := New(svc, nil)
+	h := New(svc, adminRegistry())
 	_, err := h.createTenant(authedCtx("u1"), &createTenantInput{Body: models.CreateTenantInput{Name: "Acme"}})
 	assertStatus(t, err, 500)
 	if strings.Contains(err.Error(), "E11000") {
@@ -436,6 +440,17 @@ func (f *fakeAuthzProvider) GetEffectivePermissions(context.Context, string, str
 }
 func (f *fakeAuthzProvider) RegisterPermissions(context.Context, []iface.PermissionSpec) error {
 	return nil
+}
+
+// adminRegistry builds a ServiceRegistry whose AuthzProvider grants every
+// HasPermission check — Tier-1 tenant creation now requires
+// system.tenants.admin in every provisioning mode, so any test exercising an
+// internal-kind createTenant success/error path (not the gate itself) must
+// stub the admin path to reach the code under test.
+func adminRegistry() *module.ServiceRegistry {
+	reg := module.NewServiceRegistry()
+	reg.Register(module.ServiceAuthzProvider, iface.AuthzProvider(&fakeAuthzProvider{hasPermission: true}))
+	return reg
 }
 
 func TestCreateTenant_ManualMode_NonAdmin403(t *testing.T) {
@@ -485,7 +500,7 @@ func TestCreateTenant_ProvisioningLocked409(t *testing.T) {
 			return nil, services.ErrProvisioningLocked
 		},
 	}
-	h := New(svc, nil)
+	h := New(svc, adminRegistry())
 	_, err := h.createTenant(authedCtx("u1"), &createTenantInput{Body: models.CreateTenantInput{Name: "x"}})
 	assertStatus(t, err, 409)
 }
@@ -497,7 +512,7 @@ func TestCreateTenant_SlugAlreadyInUse409WithoutRawSlug(t *testing.T) {
 			return nil, services.ErrSlugAlreadyInUse
 		},
 	}
-	h := New(svc, nil)
+	h := New(svc, adminRegistry())
 	_, err := h.createTenant(authedCtx("u1"), &createTenantInput{Body: models.CreateTenantInput{Slug: "private-slug-42"}})
 	assertStatus(t, err, 409)
 	assertErrorCode(t, err, errcode.TenantSlugAlreadyInUse)

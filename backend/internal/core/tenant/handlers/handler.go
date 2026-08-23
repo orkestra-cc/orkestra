@@ -322,7 +322,7 @@ func (h *Handler) createTenant(ctx context.Context, in *createTenantInput) (*ten
 func mapTenantCreateError(ctx context.Context, operation string, err error) error {
 	switch {
 	case errors.Is(err, services.ErrProvisioningLocked):
-		return huma.Error409Conflict("tenant creation is locked: the system is configured for a single tenant of this tier")
+		return errcode.Conflict(errcode.TenantProvisioningLocked, "Tenant creation is locked: the platform is configured for a single tenant of this tier.")
 	case errors.Is(err, services.ErrSlugAlreadyInUse):
 		return errcode.Conflict(errcode.TenantSlugAlreadyInUse, "An organization with this slug already exists.")
 	default:
@@ -330,13 +330,13 @@ func mapTenantCreateError(ctx context.Context, operation string, err error) erro
 	}
 }
 
-// enforceManualGate rejects the request when the tier's provisioning mode is
-// `manual` and the caller does not hold system.tenants.admin. In `open` /
-// `single` mode it is a no-op (single is enforced as a data invariant in the
-// service). Centralised so POST /v1/tenants and the division create paths share
-// one rule.
+// enforceManualGate applies the request-time provisioning gate. Tier-1
+// creation always requires system.tenants.admin regardless of mode; Tier-2
+// requires it only in manual mode (open stays self-serve).
 func (h *Handler) enforceManualGate(ctx context.Context, kind models.TenantKind) error {
-	if h.svc.ProvisioningMode(ctx, kind) != models.ProvisioningModeManual {
+	requiresAdmin := kind == models.TenantKindInternal ||
+		h.svc.ProvisioningMode(ctx, kind) == models.ProvisioningModeManual
+	if !requiresAdmin {
 		return nil
 	}
 	if h.callerIsTenantAdmin(ctx) {
@@ -910,14 +910,14 @@ func (h *Handler) RegisterAdminRoutes(api huma.API) {
 		Method:      http.MethodGet,
 		Path:        "/v1/admin/tenants/provisioning-policy",
 		Summary:     "Read the per-tier tenant-creation policy (platform admin)",
-		Description: "Returns the active provisioning mode for each tier (open | manual | single) plus the current provisioning-slot count per tier. The mode itself is edited at /admin/modules/tenant; this endpoint backs the read-only policy card on the tenant management pages.",
+		Description: "Returns the active provisioning mode for each tier (internal: manual | single, fail-closed; external: open | manual) plus the current provisioning-slot count per tier. The mode itself is edited at /admin/modules/tenant; this endpoint backs the read-only policy card on the tenant management pages.",
 		Tags:        []string{"Tenants Admin"},
 	}, h.getProvisioningPolicy)
 }
 
 type provisioningPolicyOutput struct {
 	Body struct {
-		Internal      string `json:"internal" doc:"Provisioning mode for internal tenants: open | manual | single"`
+		Internal      string `json:"internal" doc:"Provisioning mode for internal tenants: manual | single (fail-closed; a stored legacy open normalises to manual)"`
 		External      string `json:"external" doc:"Provisioning mode for external tenants: open | manual"`
 		InternalCount int64  `json:"internalCount" doc:"Number of internal tenants occupying a provisioning slot (deletedAt nil and status provisioning/active/suspended)"`
 		ExternalCount int64  `json:"externalCount" doc:"Number of external tenants occupying a provisioning slot (deletedAt nil and status provisioning/active/suspended)"`
@@ -1218,7 +1218,7 @@ func (h *Handler) resolveCallerTenant(ctx context.Context) (*models.Tenant, erro
 		// admin-assigned tenant is not auto-provisioned — surface a clean 409
 		// instead of a 500 so the client UI can prompt "contact your operator".
 		if errors.Is(err, services.ErrProvisioningLocked) {
-			return nil, huma.Error409Conflict("no tenant is provisioned for this account; an administrator must create and assign one")
+			return nil, errcode.Conflict(errcode.TenantProvisioningLocked, "Tenant creation is locked: the platform is configured for a single tenant of this tier.")
 		}
 		return nil, huma.Error500InternalServerError("failed to resolve personal tenant", err)
 	}

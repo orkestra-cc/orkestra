@@ -41,12 +41,17 @@ func (k TenantKind) Valid() bool {
 // a given tier may be created. Read at request time from the tenant module's
 // config (`provisioning.internal.mode` / `provisioning.external.mode`).
 //
-//   - open   — any authenticated user may create (legacy behaviour, default).
-//   - manual — only holders of system.tenants.admin may create.
-//   - single — at most one active tenant of that tier may exist (internal only).
-//
-// An empty/unknown value is treated as ProvisioningModeOpen so a missing config
-// document never blocks creation.
+//   - open   — Tier-2 (external) only: any authenticated user may create, and
+//     lazy personal-tenant provisioning is allowed. Tier-1 (internal) never
+//     accepts this value at resolution time: missing, unknown, or a legacy
+//     stored `open` all normalise to manual — see Service.ProvisioningMode.
+//     The constant itself is kept only because Tier-2 still uses it.
+//   - manual — only holders of system.tenants.admin may create. Every Tier-1
+//     creation path requires this permission regardless of mode.
+//   - single — Tier-1 only: at most one Tier-1 tenant may occupy a
+//     provisioning slot (see CountProvisioningSlotsByKind). This adds a
+//     cardinality constraint on top of manual; it does not by itself grant
+//     creation authority.
 const (
 	ProvisioningModeOpen   = "open"
 	ProvisioningModeManual = "manual"

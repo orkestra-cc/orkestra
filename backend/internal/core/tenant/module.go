@@ -50,9 +50,9 @@ func (m *Module) ConfigSchema() []module.ConfigField {
 	return []module.ConfigField{
 		{
 			Key: "provisioning.internal.mode", Label: "Internal tenant creation", Group: "provisioning.internal",
-			Description: "Who may create internal (operator-tier) tenants. open: any authenticated user. manual (default): only platform administrators (system.tenants.admin). single: lock the platform to one internal tenant — once one exists, creation is blocked. A fresh install starts with zero internal tenants; the first is created from the setup wizard or the admin UI.",
+			Description: "Who may create internal (operator-tier) tenants. manual (default): only platform administrators (system.tenants.admin). single: additionally lock the platform to one occupied Tier-1 provisioning slot. Every Tier-1 creation requires system.tenants.admin regardless of mode.",
 			Type:        module.FieldEnum, Default: models.ProvisioningModeManual,
-			Options: []string{models.ProvisioningModeOpen, models.ProvisioningModeManual, models.ProvisioningModeSingle},
+			Options: []string{models.ProvisioningModeManual, models.ProvisioningModeSingle},
 			EnvVar:  "TENANT_PROVISIONING_INTERNAL_MODE",
 		},
 		{
@@ -175,7 +175,8 @@ func (m *Module) Init(deps *module.Dependencies) error {
 	// `provisioning.{internal,external}.mode` keys from this module's config
 	// (ModuleConfigService, 30s Redis cache) on every call so an edit at
 	// /admin/modules/tenant takes effect without a restart. Nil ConfigService
-	// (tests) leaves the resolver returning "" → the service treats it as open.
+	// (tests) leaves the resolver returning "" → the service fails closed to
+	// manual for internal, and stays open for external (see ProvisioningMode).
 	m.svc.SetProvisioningModeResolver(func(ctx context.Context, kind models.TenantKind) string {
 		if deps.ConfigService == nil {
 			return ""

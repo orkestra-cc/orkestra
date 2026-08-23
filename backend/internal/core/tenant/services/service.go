@@ -36,15 +36,16 @@ type Service struct {
 	// provisioningMode reads the admin-managed per-tier tenant-creation policy
 	// (open | manual | single) from the tenant module config at request time.
 	// Wired by the tenant module's Init from the ModuleConfigService; nil
-	// (tests, config service missing) is tolerated and treated as "open" so
-	// behaviour is unchanged.
+	// (tests, config service missing) resolves per-tier via ProvisioningMode's
+	// fail-closed (internal) / fail-open (external) defaults — see that method.
 	provisioningMode ProvisioningModeResolver
 }
 
 // ProvisioningModeResolver returns the configured provisioning mode for a tenant
 // tier. Implemented as a closure over ModuleConfigService so admin edits at
 // /admin/modules/tenant take effect on the next call (30s Redis cache). An
-// empty return is treated as models.ProvisioningModeOpen.
+// empty, unknown, or (for internal) legacy `open` return is normalised by
+// Service.ProvisioningMode — see that method for the per-tier rules.
 type ProvisioningModeResolver func(ctx context.Context, kind models.TenantKind) string
 
 // ErrProvisioningLocked is returned by CreateTenant (and EnsureTenantForUser)
@@ -118,27 +119,33 @@ func (s *Service) SetOwnerRoleBinder(fn OwnerRoleBinder) { s.bindOwner = fn }
 func (s *Service) SetMemberUnbinder(fn MemberUnbinder) { s.unbindMember = fn }
 
 // SetProvisioningModeResolver wires the per-tier tenant-creation policy reader.
-// Wired by the tenant module's Init from the ModuleConfigService. Nil keeps the
-// legacy "open" behaviour (any authenticated user may create).
+// Wired by the tenant module's Init from the ModuleConfigService. Nil resolves
+// per-tier via ProvisioningMode's fail-closed (internal) / fail-open (external)
+// defaults.
 func (s *Service) SetProvisioningModeResolver(fn ProvisioningModeResolver) { s.provisioningMode = fn }
 
-// ProvisioningMode returns the active provisioning policy for a tier, defaulting
-// to models.ProvisioningModeOpen when no resolver is wired or the config value
-// is empty/unknown. An invalid kind is normalised to internal.
+// ProvisioningMode returns the active provisioning policy for a tier.
+// Tier-1 resolution is FAIL-CLOSED: missing, unknown, or legacy `open`
+// values resolve to manual — `open` is no longer a valid internal mode.
+// Tier-2 keeps its historical behaviour (unknown/missing resolve to open,
+// which still gates self-serve/lazy provisioning). An invalid kind is
+// normalised to internal.
 func (s *Service) ProvisioningMode(ctx context.Context, kind models.TenantKind) string {
 	if !kind.Valid() {
 		kind = models.TenantKindInternal
 	}
-	if s.provisioningMode == nil {
-		return models.ProvisioningModeOpen
+	var mode string
+	if s.provisioningMode != nil {
+		mode = strings.TrimSpace(s.provisioningMode(ctx, kind))
 	}
-	mode := strings.TrimSpace(s.provisioningMode(ctx, kind))
 	switch mode {
 	case models.ProvisioningModeManual, models.ProvisioningModeSingle:
 		return mode
-	default:
-		return models.ProvisioningModeOpen
 	}
+	if kind == models.TenantKindInternal {
+		return models.ProvisioningModeManual
+	}
+	return models.ProvisioningModeOpen
 }
 
 // CountProvisioningSlotsByKind returns the number of tenants of a tier that
