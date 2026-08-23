@@ -522,7 +522,15 @@ func (s *Service) emitDefaultGuardDenied(ctx context.Context, action, tenantUUID
 
 // --- Tenant lifecycle ---
 
+// CreateTenant provisions a brand-new tenant with a freshly minted UUID.
+// It is a thin wrapper over the shared absent-to-present primitive so every
+// actual creation — normal or setup-reserved — passes the same service-level
+// provisioning guard. See tenant/CLAUDE.md#creation-vs-reconciliation.
 func (s *Service) CreateTenant(ctx context.Context, ownerUUID string, input models.CreateTenantInput) (*models.Tenant, error) {
+	return s.createTenantWithUUID(ctx, ownerUUID, uuid.Must(uuid.NewV7()).String(), input)
+}
+
+func (s *Service) createTenantWithUUID(ctx context.Context, ownerUUID, tenantUUID string, input models.CreateTenantInput) (*models.Tenant, error) {
 	slug := slugify(input.Slug)
 	if slug == "" {
 		slug = slugify(input.Name)
@@ -584,7 +592,7 @@ func (s *Service) CreateTenant(ctx context.Context, ownerUUID string, input mode
 	}
 
 	t := &models.Tenant{
-		UUID:             uuid.Must(uuid.NewV7()).String(),
+		UUID:             tenantUUID,
 		Kind:             kind,
 		Status:           models.TenantStatusActive,
 		ParentTenantUUID: parent,
