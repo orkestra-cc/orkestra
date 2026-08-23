@@ -35,6 +35,12 @@ type HasConfigValidator interface {
 type ConfigValidationError struct {
 	Field   string
 	Message string
+	// Code is an optional stable error code (e.g. "tenant.single_mode_conflict").
+	// When set, the admin API responds with the {status,title,detail,code}
+	// envelope shared with internal/shared/errcode instead of the legacy
+	// text-only Huma 422 — same wire shape on every mutation surface without
+	// the SDK importing internal packages.
+	Code string
 }
 
 func (e *ConfigValidationError) Error() string {
