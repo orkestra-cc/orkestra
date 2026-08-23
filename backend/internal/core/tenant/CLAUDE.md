@@ -17,7 +17,7 @@ Does not own org-scoped roles or permissions — those are authz role bindings. 
 |---|---|
 | `module.go` | Module registration, collections, permissions, `ConfigSchema()` (provisioning policy), service wire-up, `slotCount` seam (defaults to `svc.CountProvisioningSlotsByKind`, overridden in tests) |
 | `config_validation.go` | `ValidateConfig`/`ValidateConfigActivation` — the shared Tier-1 provisioning-policy gate applied to every module-config surface. See [Provisioning policy](#provisioning-policy-admin-managed) |
-| `handlers/handler.go` | HTTP handlers for org and membership CRUD + invites; provisioning manual-gate (`enforceManualGate`/`callerIsTenantAdmin`) + provisioning-policy read |
+| `handlers/handler.go` | HTTP handlers for org and membership CRUD + invites; provisioning manual-gate (`enforceManualGate`/`callerIsTenantAdmin`) + provisioning-policy read; platform-admin routes split across `RegisterAdminRoutes` (reads + non-destructive mutations) and `RegisterAdminDestructiveRoutes` (default transfer, archive/delete, purge — MFA-gated, see [MFA boundary](#default-tenant-invariants)); derived `isDefault` stamping on `adminTenantListItem`, the admin get-tenant response, and `membershipRow` via `tenantSvc.DefaultTenantUUID` |
 | `services/service.go` | Org lifecycle, membership sync, invite token issuance, provisioning policy (`ProvisioningMode`/`CountProvisioningSlotsByKind`/`ErrProvisioningLocked`), `iface.TenantProvider` implementation, platform default-tenant assign/transfer/read (`DefaultTenantUUID`/`GetDefaultTenant`/`AssignDefaultTenant`/`TransferDefaultTenant`) + the `RunDefaultGuarded` lifecycle guard wrapping `SuspendTenant`/`ArchiveTenant`/`DeleteTenant`/`PurgeTenant` — see [Default tenant invariants](#default-tenant-invariants) |
 | `services/billing.go` | Unified-clients (Phase 1) — `SetItalianBillable`, `SetBillingIdentity`, `ResolveBillingParty`, `EnsureTenantForUser` (honours external provisioning mode), `iface.BillingTenantProvider` implementation |
 | `services/entitlements.go` | Capability-entitlement projection (`iface.AccessProvider`) |
@@ -94,6 +94,10 @@ Both Assign and Transfer resolve the audit actor via `resolveDefaultActor`: an e
 - On denial (`repository.ErrDefaultGuard`), the service returns `ErrDefaultReassignmentRequired` (maps to `409 tenant.default_reassignment_required`, `errcode.TenantDefaultReassignmentRequired`) and emits a **denied** audit event reusing the exact same action the method emits on success (`tenant.lifecycle.suspended` / `tenant.lifecycle.archived` / `tenant.deleted` / `tenant.lifecycle.purged`), with `Outcome: "denied"` and `Metadata{"code": errcode.TenantDefaultReassignmentRequired}` — the existing denied-event convention (same action, flipped outcome) rather than a separate "refused" action name.
 - Replacing the platform default therefore always follows the same order: assign/create another operational Tier-1 tenant, `TransferDefaultTenant` to it, *then* suspend/archive/delete/purge the previous one. In `single` provisioning mode, replacement additionally requires switching to `manual` first (see [Provisioning policy](#provisioning-policy-admin-managed)).
 
+**HTTP surface and the MFA boundary.** `TransferDefaultTenant` is exposed as `PUT /v1/admin/tenants/default` (operation `set-default-tenant-admin`, body `{"tenantId": "<uuid>"}`, handler `setDefaultTenant`). This route, plus the two admin lifecycle routes that can orphan the default (`DELETE /v1/admin/tenants/{tenantId}`, `POST /v1/admin/tenants/{tenantId}/purge`), are registered by `handlers.RegisterAdminDestructiveRoutes` and mounted in `module.go` behind `RequireSystemPermission("system.tenants.admin")` **plus** `RequireMFA()` — a second route group distinct from `RegisterAdminRoutes`, which covers every other platform-admin read and non-destructive mutation behind the permission gate alone. This closes what used to be a purge-handler TODO: the irreversible purge is no longer protected more weakly than default reassignment. The handler maps `repository.ErrDefaultTargetNotOperational` to `409` with a fixed detail ("the target tenant must be an operational internal tenant") and `services.ErrDefaultReassignmentRequired` to `409 tenant.default_reassignment_required` — the same mapping the plain `deleteTenant`/`purgeTenant` handlers apply for the lifecycle-guard case described above.
+
+**Derived `isDefault`.** `adminTenantListItem` (`GET /v1/admin/tenants`), the admin get-tenant response (`GET /v1/admin/tenants/{tenantId}`, a dedicated `tenantAdminOutput` wrapper — the tenant-scoped self-view `get-tenant` does not carry this field), and `membershipRow` (`GET .../members`, the admin attach-member response) all carry an `isDefault bool` field. It is resolved **once per request** via `tenantSvc.DefaultTenantUUID`, never per row, and is never written to the tenant document: the canonical state stays the `tenant_defaults` pointer row (see the [collections table](#mongodb-collections)). A stored `isDefault` column was deliberately rejected — transfer would become a two-document mutation with either a no-default window or a unique-index collision.
+
 ## Provisioning policy (admin-managed)
 
 `module.go::ConfigSchema()` exposes two enum config keys that govern **who may create tenants**, per tier. Read at request time by the service's `ProvisioningModeResolver` (a closure over `ModuleConfigService`, 30s Redis cache) — edits at `/admin/modules/tenant` take effect on the next creation with **no restart**.
@@ -165,19 +169,17 @@ Block B gates every tenant mutation behind an MFA step-up. Each can transfer own
 | POST | `/v1/tenants/{tenantId}/invites` | Create an invite token |
 | POST | `/v1/tenants/{tenantId}/divisions` | Create a division under this external tenant (also honours the external provisioning gate) |
 
-### Platform admin — `RequireSystemPermission("system.tenants.admin")`
+### Platform admin — reads + non-destructive mutations, `RequireSystemPermission("system.tenants.admin")`
 
-Gated globally by a system permission, not by per-org membership, so platform operators can manage every tenant without having to join each one. Powers the frontend `/admin/internal/tenants` (Tier-1) and `/admin/clients` (Tier-2) pages.
+Gated globally by a system permission, not by per-org membership, so platform operators can manage every tenant without having to join each one. Powers the frontend `/admin/internal/tenants` (Tier-1) and `/admin/clients` (Tier-2) pages. Registered by `handlers.RegisterAdminRoutes`. No MFA step-up — see the destructive group below for the routes that do require one.
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/v1/admin/tenants` | List every tenant. Query params: `?kind=internal\|external`, `?parentTenantUUID=<uuid>`, `?rootsOnly=true`, `?includeDeleted=true`, `?q=<text>`, `?includeDeletedUsers=true`. Response includes `memberCount` from a single `$group` aggregation. When `q` is set the handler routes to `repository.SearchTenantsByQ`, which $lookup-joins `tenant_memberships` → tier-appropriate user collection (`operator_users` for internal, `client_users` for external) and matches `q` (case-insensitive substring) against tenant `name`/`slug` plus member `email`/`fullName`/`username`. Each matching row includes a `matchedMembers` array (≤ `MaxMatchedMembersPerTenant=5`) so the frontend can render "matched: alice@x" chips. `includeDeletedUsers` opts soft-deleted users into the member-side join (default: live users only). |
-| GET | `/v1/admin/tenants/{tenantId}` | Get any tenant |
+| GET | `/v1/admin/tenants` | List every tenant. Query params: `?kind=internal\|external`, `?parentTenantUUID=<uuid>`, `?rootsOnly=true`, `?includeDeleted=true`, `?q=<text>`, `?includeDeletedUsers=true`. Response includes `memberCount` from a single `$group` aggregation and a derived `isDefault` flag per row (see [Default tenant invariants](#default-tenant-invariants)). When `q` is set the handler routes to `repository.SearchTenantsByQ`, which $lookup-joins `tenant_memberships` → tier-appropriate user collection (`operator_users` for internal, `client_users` for external) and matches `q` (case-insensitive substring) against tenant `name`/`slug` plus member `email`/`fullName`/`username`. Each matching row includes a `matchedMembers` array (≤ `MaxMatchedMembersPerTenant=5`) so the frontend can render "matched: alice@x" chips. `includeDeletedUsers` opts soft-deleted users into the member-side join (default: live users only). |
+| GET | `/v1/admin/tenants/{tenantId}` | Get any tenant, with a derived `isDefault` flag |
 | PATCH | `/v1/admin/tenants/{tenantId}` | Update any tenant (name, slug, settings) |
-| DELETE | `/v1/admin/tenants/{tenantId}` | Soft-delete any tenant — bypasses the owner-only check |
-| POST | `/v1/admin/tenants/{tenantId}/purge` | Crypto-shred a tenant (irreversible; see purge handler docs) |
 | PATCH | `/v1/admin/tenants/{tenantId}/plan` | Change any tenant's plan + features |
-| GET | `/v1/admin/tenants/{tenantId}/members` | List members |
+| GET | `/v1/admin/tenants/{tenantId}/members` | List members, each row carrying a derived `isDefault` flag for the tenant they belong to |
 | DELETE | `/v1/admin/tenants/{tenantId}/members/{userUUID}` | Remove a member |
 | GET | `/v1/admin/tenants/{tenantId}/invites` | List invites. Defaults to pending-only; pass `?includeAccepted=true` to also see accepted rows. Raw tokens are scrubbed. |
 | POST | `/v1/admin/tenants/{tenantId}/invites` | Create an invite. Raw token returned once, see Key invariants. |
@@ -187,6 +189,16 @@ Gated globally by a system permission, not by per-org membership, so platform op
 | PATCH | `/v1/admin/clients/{tenantId}/billing-identity` | Unified-clients — sets `IsCompany`, `LegalName`, VAT/fiscal codes, billing address, and the FatturaPA routing sub-document on a Tier-2 tenant. All body fields optional; nil leaves the existing value. The data this endpoint writes is what `iface.BillingTenantProvider.ResolveBillingParty` reads at invoice-send time (replaces the deleted `billing.Customer` row). |
 | POST | `/v1/admin/clients/{tenantId}/italian-billable` | Unified-clients Phase 1 — flips `Tenant.IsItalianBillable`. Enabling requires a FatturaPA profile carrying `CodiceDestinatario` or `PECDestinatario` (422 otherwise); disabling is unconditional. Send-time validation enforces the same invariant a second time, so the toggle on its own is not load-bearing. |
 | GET | `/v1/admin/tenants/provisioning-policy` | Read-only per-tier provisioning policy (internal: `manual`/`single`, fail-closed; external: `open`/`manual`) + provisioning-slot counts. Backs the policy card on the tenant pages; the modes are edited at `/admin/modules/tenant`. See [Provisioning policy](#provisioning-policy-admin-managed). |
+
+### Platform admin — destructive / default-threatening, `RequireSystemPermission("system.tenants.admin")` + `RequireMFA()`
+
+Registered by `handlers.RegisterAdminDestructiveRoutes` and mounted in a second `module.go` route group that additionally requires a session-long MFA step-up (Block B) — a pwd-only token gets 401 `step_up_required`. These are the only three platform-admin tenant operations that either destroy a tenant or move which tenant is the platform default; every other admin route above is a read or a non-destructive mutation and does not require MFA. See [Default tenant invariants](#default-tenant-invariants) for the full HTTP-boundary error mapping.
+
+| Method | Path | Purpose |
+|---|---|---|
+| PUT | `/v1/admin/tenants/default` | Transfer the platform default Tier-1 tenant. Body `{"tenantId": "<uuid>"}`. 409 `tenant.default_reassignment_required` is not reachable on this route (that guard belongs to the lifecycle mutations below); a non-operational target 409s with a fixed detail instead. |
+| DELETE | `/v1/admin/tenants/{tenantId}` | Soft-delete any tenant — bypasses the owner-only check. 409 `tenant.default_reassignment_required` if the target is the platform default. |
+| POST | `/v1/admin/tenants/{tenantId}/purge` | Crypto-shred a tenant (irreversible; see purge handler docs). 409 `tenant.default_reassignment_required` if the target is the platform default. |
 
 ### Tier-2 self-service — Client surface, `RequireGlobal()`
 
@@ -277,7 +289,7 @@ Typical consumers:
 
 ## Rules
 
-- **Platform-admin delete bypasses ownership.** The `/v1/admin/tenants/{tenantId}` DELETE route is gated by `system.tenants.admin` (system roles only). The plain per-tenant DELETE route at `/v1/tenants/{tenantId}` has no owner check today; adding one is pending the "transfer ownership" flow.
+- **Platform-admin delete bypasses ownership.** The `/v1/admin/tenants/{tenantId}` DELETE route is gated by `system.tenants.admin` (system roles only) plus MFA step-up (`RegisterAdminDestructiveRoutes`). The plain per-tenant DELETE route at `/v1/tenants/{tenantId}` has no owner check today; adding one is pending the "transfer ownership" flow.
 - **Never store a plaintext invite token.** Enforced: `models.Invite.Token` is `bson:"-"`; only `TokenHash` is persisted. If you add a second invite-like flow (e.g. a public "share link"), use the same pattern and never add a plaintext field to the document.
 - **When you add a new paid capability**, declare it in the owning module's `Capabilities()` method and gate the relevant routes with `RequireCapability(capID)`. Wire a subscription tier that grants it via `PricingTier.Capabilities` so the entitlement syncer hands it out on checkout. Plan names are informational — do not scatter plan-name logic through the codebase.
 - **If you add a new permission**, put it in `module.go::Permissions()` and gate the relevant handler in `module.go::RegisterRoutes` — don't scatter `RequirePermission` calls across the handlers package, keep them at the route-group boundary.

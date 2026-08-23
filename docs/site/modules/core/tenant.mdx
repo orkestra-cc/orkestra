@@ -46,6 +46,16 @@ Enforcement is split on purpose, so no creation path can slip through:
 2. **The permission gate in the handlers is universal for Tier-1, conditional for Tier-2** — for `kind=internal` it always requires `system.tenants.admin`, independent of mode; for `kind=external` it requires `system.tenants.admin` only when the resolved mode is `manual` (`open` stays self-serve).
 3. **Lazy provisioning honors `external.mode`** — a Tier-2 caller with no assigned tenant gets a `409` telling them an administrator must assign one, rather than silently minting one.
 
+## Platform default tenant
+
+A single platform-global pointer (`tenant_defaults`, collection below) names the internal tenant used to begin operator resolution. The pointer, not a stored flag on the tenant document, is canonical — every DTO `isDefault` field the API exposes (the admin tenant list, the admin get-tenant response, and each member row) is **derived at request time**, resolved once per request, and never written back to Mongo. A stored column was rejected on purpose: transfer would become a two-document mutation with either a no-default window or a unique-index collision.
+
+Only an operational internal tenant (`status == active`, not soft-deleted) can hold the pointer. Suspending, archiving, purging, or deleting the current default is refused with `409 tenant.default_reassignment_required` — reassign the default to another tenant first, then retire the old one. Setup assigns the first default; afterwards an administrator moves it with `PUT /v1/admin/tenants/default`.
+
+:::warning Default transfer requires MFA, same as purge
+`PUT /v1/admin/tenants/default`, `DELETE /v1/admin/tenants/{tenantId}`, and `POST /v1/admin/tenants/{tenantId}/purge` are the only three platform-admin tenant routes gated behind `system.tenants.admin` **plus** an MFA step-up — every other admin route needs only the permission. Default reassignment and tenant destruction are equally consequential, so neither is protected more weakly than the other.
+:::
+
 ## Routes
 
 | Surface | Paths | Gate |
@@ -53,12 +63,13 @@ Enforcement is split on purpose, so no creation path can slip through:
 | Global | `GET`/`POST /v1/tenants`, `POST /v1/tenants/accept-invite` | authenticated |
 | Per-tenant read | `/v1/tenants/{tenantId}`, `…/members`, `…/divisions` | `tenant.read` |
 | Per-tenant mutation | update, archive, plan change, member removal, invites, divisions | `tenant.read` **+ MFA step-up** |
-| Platform admin | everything under `/v1/admin/tenants` and `/v1/admin/clients` | `system.tenants.admin` |
+| Platform admin — reads + non-destructive | most of `/v1/admin/tenants` and `/v1/admin/clients` | `system.tenants.admin` |
+| Platform admin — destructive / default | `PUT /v1/admin/tenants/default`, `DELETE /v1/admin/tenants/{tenantId}`, `POST /v1/admin/tenants/{tenantId}/purge` | `system.tenants.admin` **+ MFA step-up** |
 | Tier-2 self-service | `/v1/me/billing-identity`, `/v1/me/italian-billable` | authenticated, client surface |
 
 Every per-tenant mutation sits behind a step-up because each one can transfer ownership-adjacent data, change entitlements, or destroy the tenant. A password-only token gets `401 step_up_required` and retries after verifying.
 
-The platform-admin group is gated by a **system** permission rather than per-org membership, so operators manage every tenant without joining each one. It backs `/admin/internal/tenants` (Tier-1) and `/admin/clients` (Tier-2).
+The platform-admin group is gated by a **system** permission rather than per-org membership, so operators manage every tenant without joining each one. It backs `/admin/internal/tenants` (Tier-1) and `/admin/clients` (Tier-2). Within it, default transfer and the two tenant-destroying routes carry the same MFA step-up as the per-tenant mutation group — see [Platform default tenant](#platform-default-tenant).
 
 :::warning Purge is irreversible
 `POST /v1/admin/tenants/{tenantId}/purge` crypto-shreds the tenant's KMS key. Archiving (`DELETE`) is the recoverable operation; purge is not.
@@ -79,7 +90,7 @@ The platform-admin group is gated by a **system** permission rather than per-org
 
 ## Storage
 
-`tenants`, `tenant_memberships`, `tenant_invites` (a real TTL index — Mongo reaps an invite the moment it expires), `tenant_ancestors` (the hierarchy closure table), and `tenant_entitlements` (the capability projection behind `iface.AccessProvider`).
+`tenants`, `tenant_memberships`, `tenant_invites` (a real TTL index — Mongo reaps an invite the moment it expires), `tenant_ancestors` (the hierarchy closure table), `tenant_entitlements` (the capability projection behind `iface.AccessProvider`), and `tenant_defaults` (platform-global, no `tenantId`; a unique index on `kind` makes the pointer swap a single atomic update — see [Platform default tenant](#platform-default-tenant)).
 
 ## GDPR
 

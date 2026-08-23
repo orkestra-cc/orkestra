@@ -46,6 +46,8 @@ type fakeTenantSvc struct {
 	ensureTenantForUserFn    func(ctx context.Context, userUUID string) (*iface.Tenant, error)
 	provisioningModeFn       func(ctx context.Context, kind models.TenantKind) string
 	countProvisioningSlotsFn func(ctx context.Context, kind models.TenantKind) (int64, error)
+	defaultTenantUUIDFn      func(ctx context.Context) (string, error)
+	transferDefaultTenantFn  func(ctx context.Context, tenantUUID, actorUUID string) error
 }
 
 func (f *fakeTenantSvc) GetTenant(ctx context.Context, t string) (*iface.Tenant, error) {
@@ -199,6 +201,25 @@ func (f *fakeTenantSvc) CountProvisioningSlotsByKind(ctx context.Context, kind m
 		return f.countProvisioningSlotsFn(ctx, kind)
 	}
 	return 0, nil
+}
+
+// DefaultTenantUUID defaults to "" (unassigned) rather than panicking:
+// listAllTenantsAdmin, listMembers, attachMemberAdmin, and getTenantAdmin
+// all call it now to stamp isDefault, so every pre-existing test exercising
+// those handlers would otherwise need an unrelated stub. "" is also the
+// correct behaviour for a test that doesn't care — every row simply reports
+// isDefault=false.
+func (f *fakeTenantSvc) DefaultTenantUUID(ctx context.Context) (string, error) {
+	if f.defaultTenantUUIDFn != nil {
+		return f.defaultTenantUUIDFn(ctx)
+	}
+	return "", nil
+}
+func (f *fakeTenantSvc) TransferDefaultTenant(ctx context.Context, tenantUUID, actorUUID string) error {
+	if f.transferDefaultTenantFn != nil {
+		return f.transferDefaultTenantFn(ctx, tenantUUID, actorUUID)
+	}
+	panic("unused: TransferDefaultTenant")
 }
 
 // fakeTenantUserProvider stubs iface.UserProvider for the handler's
@@ -554,6 +575,55 @@ func TestGetTenant(t *testing.T) {
 	})
 }
 
+func TestGetTenantAdmin(t *testing.T) {
+	t.Parallel()
+	t.Run("stamps isDefault true when it matches the platform default", func(t *testing.T) {
+		t.Parallel()
+		svc := &fakeTenantSvc{
+			getTenantModelFn: func(context.Context, string) (*models.Tenant, error) {
+				return &models.Tenant{UUID: "t-1"}, nil
+			},
+			defaultTenantUUIDFn: func(context.Context) (string, error) { return "t-1", nil },
+		}
+		h := New(svc, nil)
+		out, err := h.getTenantAdmin(context.Background(), &tenantIDPath{TenantID: "t-1"})
+		if err != nil {
+			t.Fatalf("err = %v", err)
+		}
+		if !out.Body.IsDefault {
+			t.Errorf("IsDefault = false, want true")
+		}
+	})
+	t.Run("stamps isDefault false when the platform default is a different tenant", func(t *testing.T) {
+		t.Parallel()
+		svc := &fakeTenantSvc{
+			getTenantModelFn: func(context.Context, string) (*models.Tenant, error) {
+				return &models.Tenant{UUID: "t-2"}, nil
+			},
+			defaultTenantUUIDFn: func(context.Context) (string, error) { return "t-1", nil },
+		}
+		h := New(svc, nil)
+		out, err := h.getTenantAdmin(context.Background(), &tenantIDPath{TenantID: "t-2"})
+		if err != nil {
+			t.Fatalf("err = %v", err)
+		}
+		if out.Body.IsDefault {
+			t.Errorf("IsDefault = true, want false")
+		}
+	})
+	t.Run("not found → 404", func(t *testing.T) {
+		t.Parallel()
+		svc := &fakeTenantSvc{
+			getTenantModelFn: func(context.Context, string) (*models.Tenant, error) {
+				return nil, repository.ErrNotFound
+			},
+		}
+		h := New(svc, nil)
+		_, err := h.getTenantAdmin(context.Background(), &tenantIDPath{TenantID: "ghost"})
+		assertStatus(t, err, 404)
+	})
+}
+
 func TestUpdateTenant(t *testing.T) {
 	t.Parallel()
 	t.Run("happy reloads from svc", func(t *testing.T) {
@@ -638,6 +708,14 @@ func TestDeleteTenant(t *testing.T) {
 		_, err := h.deleteTenant(context.Background(), &tenantIDPath{TenantID: "t-1"})
 		assertStatus(t, err, 500)
 	})
+	t.Run("default reassignment required → 409 with errcode", func(t *testing.T) {
+		t.Parallel()
+		svc := &fakeTenantSvc{deleteTenantFn: func(context.Context, string) error { return services.ErrDefaultReassignmentRequired }}
+		h := New(svc, nil)
+		_, err := h.deleteTenant(context.Background(), &tenantIDPath{TenantID: "t-1"})
+		assertStatus(t, err, 409)
+		assertErrorCode(t, err, errcode.TenantDefaultReassignmentRequired)
+	})
 }
 
 func TestPurgeTenant(t *testing.T) {
@@ -656,6 +734,79 @@ func TestPurgeTenant(t *testing.T) {
 		svc := &fakeTenantSvc{purgeTenantFn: func(context.Context, string) error { return errors.New("boom") }}
 		h := New(svc, nil)
 		_, err := h.purgeTenant(context.Background(), &tenantIDPath{TenantID: "t-1"})
+		assertStatus(t, err, 500)
+	})
+	t.Run("default reassignment required → 409 with errcode", func(t *testing.T) {
+		t.Parallel()
+		svc := &fakeTenantSvc{purgeTenantFn: func(context.Context, string) error { return services.ErrDefaultReassignmentRequired }}
+		h := New(svc, nil)
+		_, err := h.purgeTenant(context.Background(), &tenantIDPath{TenantID: "t-1"})
+		assertStatus(t, err, 409)
+		assertErrorCode(t, err, errcode.TenantDefaultReassignmentRequired)
+	})
+}
+
+func TestSetDefaultTenant(t *testing.T) {
+	t.Parallel()
+	t.Run("requires auth", func(t *testing.T) {
+		t.Parallel()
+		h := New(&fakeTenantSvc{}, nil)
+		_, err := h.setDefaultTenant(context.Background(), &setDefaultInput{})
+		assertStatus(t, err, 401)
+	})
+	t.Run("happy", func(t *testing.T) {
+		t.Parallel()
+		var gotTenant, gotActor string
+		svc := &fakeTenantSvc{transferDefaultTenantFn: func(_ context.Context, tenantUUID, actorUUID string) error {
+			gotTenant, gotActor = tenantUUID, actorUUID
+			return nil
+		}}
+		h := New(svc, nil)
+		in := &setDefaultInput{}
+		in.Body.TenantID = "t-2"
+		_, err := h.setDefaultTenant(authedCtx("admin-1"), in)
+		if err != nil {
+			t.Fatalf("err = %v", err)
+		}
+		if gotTenant != "t-2" || gotActor != "admin-1" {
+			t.Errorf("TransferDefaultTenant called with (%q, %q), want (t-2, admin-1)", gotTenant, gotActor)
+		}
+	})
+	t.Run("non-operational target → 409", func(t *testing.T) {
+		t.Parallel()
+		svc := &fakeTenantSvc{transferDefaultTenantFn: func(context.Context, string, string) error {
+			return repository.ErrDefaultTargetNotOperational
+		}}
+		h := New(svc, nil)
+		in := &setDefaultInput{}
+		in.Body.TenantID = "t-2"
+		_, err := h.setDefaultTenant(authedCtx("admin-1"), in)
+		assertStatus(t, err, 409)
+		if err == nil || !strings.Contains(err.Error(), "operational internal tenant") {
+			t.Errorf("err = %v, want mention of operational internal tenant", err)
+		}
+	})
+	t.Run("default reassignment required → 409 with errcode", func(t *testing.T) {
+		t.Parallel()
+		svc := &fakeTenantSvc{transferDefaultTenantFn: func(context.Context, string, string) error {
+			return services.ErrDefaultReassignmentRequired
+		}}
+		h := New(svc, nil)
+		in := &setDefaultInput{}
+		in.Body.TenantID = "t-2"
+		_, err := h.setDefaultTenant(authedCtx("admin-1"), in)
+		assertStatus(t, err, 409)
+		assertErrorCode(t, err, errcode.TenantDefaultReassignmentRequired)
+	})
+	t.Run("unknown svc error → 500", func(t *testing.T) {
+		t.Parallel()
+		svc := &fakeTenantSvc{transferDefaultTenantFn: func(context.Context, string, string) error {
+			return errors.New("boom")
+		}}
+		h := New(svc, nil)
+		in := &setDefaultInput{}
+		in.Body.TenantID = "t-2"
+		_, err := h.setDefaultTenant(authedCtx("admin-1"), in)
 		assertStatus(t, err, 500)
 	})
 }
@@ -706,6 +857,37 @@ func TestListMembers_NoRegistry(t *testing.T) {
 	}
 	if len(out.Body.Members) != 1 || out.Body.Members[0].Email != "" {
 		t.Errorf("members = %+v, want one row with empty email", out.Body.Members)
+	}
+}
+
+// TestListMembers_StampsIsDefault covers the derived-DTO contract on the
+// membershipRow: resolved once per request (one DefaultTenantUUID call,
+// asserted via callCount) and applied to every returned row.
+func TestListMembers_StampsIsDefault(t *testing.T) {
+	t.Parallel()
+	callCount := 0
+	svc := &fakeTenantSvc{
+		listMembersFn: func(context.Context, string) ([]models.TenantMembership, error) {
+			return []models.TenantMembership{
+				{UUID: "m1", UserUUID: "u1", TenantUUID: "t-1"},
+				{UUID: "m2", UserUUID: "u2", TenantUUID: "t-1"},
+			}, nil
+		},
+		defaultTenantUUIDFn: func(context.Context) (string, error) {
+			callCount++
+			return "t-1", nil
+		},
+	}
+	h := New(svc, nil)
+	out, err := h.listMembers(context.Background(), &tenantIDPath{TenantID: "t-1"})
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if callCount != 1 {
+		t.Errorf("DefaultTenantUUID called %d times, want exactly 1 (resolved once per request, not per row)", callCount)
+	}
+	if len(out.Body.Members) != 2 || !out.Body.Members[0].IsDefault || !out.Body.Members[1].IsDefault {
+		t.Errorf("members = %+v, want both rows isDefault=true", out.Body.Members)
 	}
 }
 
@@ -843,6 +1025,7 @@ func TestAttachMemberAdmin_HappyByUUID(t *testing.T) {
 			}
 			return &models.TenantMembership{UUID: "m-1", UserUUID: u, TenantUUID: tID, Roles: []string{r}}, nil
 		},
+		defaultTenantUUIDFn: func(context.Context) (string, error) { return "t-1", nil },
 	}
 	reg := module.NewServiceRegistry()
 	// Operator-tier provider, used for the post-attach email enrichment.
@@ -861,6 +1044,9 @@ func TestAttachMemberAdmin_HappyByUUID(t *testing.T) {
 	}
 	if out.Body.Member.UUID != "m-1" {
 		t.Errorf("Member.UUID = %q", out.Body.Member.UUID)
+	}
+	if !out.Body.Member.IsDefault {
+		t.Errorf("Member.IsDefault = false, want true (t-1 is the platform default)")
 	}
 	// Pin a known bug: the UUID-only path's email enrichment passes
 	// []membershipRow{out.Body.Member} — a fresh slice containing a *copy*
@@ -1155,6 +1341,46 @@ func TestListAllTenantsAdmin(t *testing.T) {
 		}
 		if len(out.Body.Tenants[0].MatchedMembers) != 1 || out.Body.Tenants[0].MatchedMembers[0].Email != "alice@example.com" {
 			t.Errorf("MatchedMembers = %+v", out.Body.Tenants[0].MatchedMembers)
+		}
+	})
+	// With a default assigned, exactly one row has isDefault: true — the
+	// derived-DTO contract, resolved once per request (callCount) rather
+	// than once per row.
+	t.Run("stamps isDefault on exactly the default row", func(t *testing.T) {
+		t.Parallel()
+		callCount := 0
+		svc := &fakeTenantSvc{
+			listAllTenantsFilteredFn: func(context.Context, repository.TenantListFilter) ([]services.TenantAdminView, error) {
+				return []services.TenantAdminView{
+					{Tenant: &models.Tenant{UUID: "t-1", Name: "Acme"}},
+					{Tenant: &models.Tenant{UUID: "t-2", Name: "Beta"}},
+					{Tenant: &models.Tenant{UUID: "t-3", Name: "Gamma"}},
+				}, nil
+			},
+			defaultTenantUUIDFn: func(context.Context) (string, error) {
+				callCount++
+				return "t-2", nil
+			},
+		}
+		h := New(svc, nil)
+		out, err := h.listAllTenantsAdmin(context.Background(), &adminTenantListInput{})
+		if err != nil {
+			t.Fatalf("err = %v", err)
+		}
+		if callCount != 1 {
+			t.Errorf("DefaultTenantUUID called %d times, want exactly 1", callCount)
+		}
+		defaultCount := 0
+		for _, tenant := range out.Body.Tenants {
+			if tenant.IsDefault {
+				defaultCount++
+				if tenant.UUID != "t-2" {
+					t.Errorf("isDefault=true on unexpected row %q", tenant.UUID)
+				}
+			}
+		}
+		if defaultCount != 1 {
+			t.Errorf("defaultCount = %d, want exactly 1", defaultCount)
 		}
 	})
 	t.Run("RootsOnly suppresses ParentTenantUUID", func(t *testing.T) {

@@ -48,6 +48,12 @@ type tenantSvc interface {
 	EnsureTenantForUser(ctx context.Context, userUUID string) (*iface.Tenant, error)
 	ProvisioningMode(ctx context.Context, kind models.TenantKind) string
 	CountProvisioningSlotsByKind(ctx context.Context, kind models.TenantKind) (int64, error)
+	// DefaultTenantUUID and TransferDefaultTenant back the platform default
+	// tenant surface: derived isDefault stamping on the admin/membership DTOs
+	// (DefaultTenantUUID) and the admin transfer route (TransferDefaultTenant).
+	// See services/service.go's "Platform default tenant" section.
+	DefaultTenantUUID(ctx context.Context) (string, error)
+	TransferDefaultTenant(ctx context.Context, tenantUUID, actorUUID string) error
 }
 
 type Handler struct {
@@ -119,6 +125,10 @@ type updatePlanInput struct {
 type membershipRow struct {
 	models.TenantMembership
 	Email string `json:"email,omitempty"`
+	// IsDefault reports whether this row's TenantUUID is the platform
+	// default Tier-1 tenant. Derived at request time via
+	// tenantSvc.DefaultTenantUUID — never persisted on the membership row.
+	IsDefault bool `json:"isDefault"`
 }
 
 type membershipListOutput struct {
@@ -461,6 +471,29 @@ func (h *Handler) getTenant(ctx context.Context, in *tenantIDPath) (*tenantOutpu
 	return &tenantOutput{Body: t}, nil
 }
 
+// tenantAdminOutput is the platform-admin single-tenant read shape. Unlike
+// tenantOutput (shared by the tenant-scoped self-view), it additionally
+// stamps the derived isDefault flag so the admin console can render/select
+// the platform default without a second request.
+type tenantAdminOutput struct {
+	Body struct {
+		models.Tenant
+		IsDefault bool `json:"isDefault"`
+	}
+}
+
+func (h *Handler) getTenantAdmin(ctx context.Context, in *tenantIDPath) (*tenantAdminOutput, error) {
+	t, err := h.svc.GetTenantModel(ctx, in.TenantID)
+	if err != nil {
+		return nil, huma.Error404NotFound("tenant not found")
+	}
+	defaultUUID, _ := h.svc.DefaultTenantUUID(ctx)
+	out := &tenantAdminOutput{}
+	out.Body.Tenant = *t
+	out.Body.IsDefault = defaultUUID != "" && defaultUUID == t.UUID
+	return out, nil
+}
+
 func (h *Handler) updateTenant(ctx context.Context, in *updateTenantInput) (*tenantOutput, error) {
 	if err := h.svc.UpdateTenant(ctx, in.TenantID, in.Body); err != nil {
 		if errors.Is(err, services.ErrSlugAlreadyInUse) {
@@ -477,6 +510,9 @@ func (h *Handler) updateTenant(ctx context.Context, in *updateTenantInput) (*ten
 
 func (h *Handler) deleteTenant(ctx context.Context, in *tenantIDPath) (*struct{}, error) {
 	if err := h.svc.DeleteTenant(ctx, in.TenantID); err != nil {
+		if errors.Is(err, services.ErrDefaultReassignmentRequired) {
+			return nil, errcode.Conflict(errcode.TenantDefaultReassignmentRequired, "Reassign the platform default before this lifecycle change.")
+		}
 		return nil, tenantInternalError(ctx, "delete the tenant", err)
 	}
 	return &struct{}{}, nil
@@ -484,12 +520,15 @@ func (h *Handler) deleteTenant(ctx context.Context, in *tenantIDPath) (*struct{}
 
 // purgeTenant is the irreversible GDPR erasure path — flips status to
 // purged AND crypto-shreds the tenant's KMS key. After this call every
-// ciphertext wrapped with that key is unrecoverable. Gated (at the
-// route level) by system.tenants.admin; future work adds a second MFA
-// step-up + a 7-day delay between archive and purge to match SOC2
-// expectations.
+// ciphertext wrapped with that key is unrecoverable. Gated (at the route
+// level) by system.tenants.admin plus step-up MFA
+// (RegisterAdminDestructiveRoutes); future work adds a 7-day delay between
+// archive and purge to match SOC2 expectations.
 func (h *Handler) purgeTenant(ctx context.Context, in *tenantIDPath) (*struct{}, error) {
 	if err := h.svc.PurgeTenant(ctx, in.TenantID); err != nil {
+		if errors.Is(err, services.ErrDefaultReassignmentRequired) {
+			return nil, errcode.Conflict(errcode.TenantDefaultReassignmentRequired, "Reassign the platform default before this lifecycle change.")
+		}
 		return nil, tenantInternalError(ctx, "purge the tenant", err)
 	}
 	return &struct{}{}, nil
@@ -511,10 +550,16 @@ func (h *Handler) listMembers(ctx context.Context, in *tenantIDPath) (*membershi
 	if err != nil {
 		return nil, huma.Error500InternalServerError("list failed", err)
 	}
+	// Resolved once per request, not once per row. err is deliberately
+	// swallowed (mirrors services.Service's own DefaultTenantUUID call
+	// sites): an unassigned or lookup-failed default just means every row
+	// reports isDefault=false, which is correct — "no default" IS "false"
+	// for every row.
+	defaultUUID, _ := h.svc.DefaultTenantUUID(ctx)
 	out := &membershipListOutput{}
 	out.Body.Members = make([]membershipRow, len(members))
 	for i, m := range members {
-		out.Body.Members[i] = membershipRow{TenantMembership: m}
+		out.Body.Members[i] = membershipRow{TenantMembership: m, IsDefault: defaultUUID != "" && defaultUUID == m.TenantUUID}
 	}
 	h.enrichMemberEmails(ctx, in.TenantID, out.Body.Members)
 	return out, nil
@@ -663,8 +708,9 @@ func (h *Handler) attachMemberAdmin(ctx context.Context, in *attachMemberAdminIn
 		}
 	}
 
+	defaultUUID, _ := h.svc.DefaultTenantUUID(ctx)
 	out := &attachMemberAdminOutput{}
-	out.Body.Member = membershipRow{TenantMembership: *mbr, Email: resolvedEmail}
+	out.Body.Member = membershipRow{TenantMembership: *mbr, Email: resolvedEmail, IsDefault: defaultUUID != "" && defaultUUID == mbr.TenantUUID}
 	if out.Body.Member.Email == "" {
 		// Email was not resolved upfront (UUID-only request) — best-effort
 		// enrich for the response so the operator UI can render the row
@@ -711,6 +757,10 @@ type adminTenantListItem struct {
 	// `q` query param. Empty otherwise. Bounded by
 	// repository.MaxMatchedMembersPerTenant.
 	MatchedMembers []adminMatchedMember `json:"matchedMembers,omitempty"`
+	// IsDefault reports whether this row is the platform default Tier-1
+	// tenant. Derived once per request from the tenant_defaults pointer
+	// (see listAllTenantsAdmin) — never persisted on the tenant document.
+	IsDefault bool `json:"isDefault"`
 }
 
 type adminTenantListInput struct {
@@ -755,8 +805,11 @@ type adminRevokeInviteInput struct {
 	InviteID string `path:"inviteId"`
 }
 
-// RegisterAdminRoutes registers platform-admin routes under /v1/admin/tenants.
-// Gated by system.tenants.admin in module.go.
+// RegisterAdminRoutes registers platform-admin reads and non-destructive
+// mutations under /v1/admin/tenants. Gated by system.tenants.admin alone in
+// module.go — no MFA step-up. Default transfer and the default-threatening
+// lifecycle mutations (archive/delete, purge) live in
+// RegisterAdminDestructiveRoutes instead, which additionally requires MFA.
 func (h *Handler) RegisterAdminRoutes(api huma.API) {
 	huma.Register(api, huma.Operation{
 		OperationID: "list-all-tenants-admin",
@@ -772,7 +825,7 @@ func (h *Handler) RegisterAdminRoutes(api huma.API) {
 		Path:        "/v1/admin/tenants/{tenantId}",
 		Summary:     "Get a tenant (platform admin)",
 		Tags:        []string{"Tenants Admin"},
-	}, h.getTenant)
+	}, h.getTenantAdmin)
 
 	huma.Register(api, huma.Operation{
 		OperationID: "update-tenant-admin",
@@ -781,23 +834,6 @@ func (h *Handler) RegisterAdminRoutes(api huma.API) {
 		Summary:     "Update a tenant (platform admin)",
 		Tags:        []string{"Tenants Admin"},
 	}, h.updateTenant)
-
-	huma.Register(api, huma.Operation{
-		OperationID: "delete-tenant-admin",
-		Method:      http.MethodDelete,
-		Path:        "/v1/admin/tenants/{tenantId}",
-		Summary:     "Archive a tenant (platform admin)",
-		Tags:        []string{"Tenants Admin"},
-	}, h.deleteTenant)
-
-	huma.Register(api, huma.Operation{
-		OperationID: "purge-tenant-admin",
-		Method:      http.MethodPost,
-		Path:        "/v1/admin/tenants/{tenantId}/purge",
-		Summary:     "Purge a tenant (irreversible — crypto-shreds the KMS key)",
-		Description: "GDPR right-to-erasure at the tenant level. Flips the tenant status to purged AND deletes the wrapped DEK; every ciphertext sealed with that key becomes cryptographically unrecoverable. There is no undo.",
-		Tags:        []string{"Tenants Admin"},
-	}, h.purgeTenant)
 
 	huma.Register(api, huma.Operation{
 		OperationID: "update-tenant-plan-admin",
@@ -915,6 +951,74 @@ func (h *Handler) RegisterAdminRoutes(api huma.API) {
 	}, h.getProvisioningPolicy)
 }
 
+// RegisterAdminDestructiveRoutes registers the platform-admin operations
+// that can either destroy a tenant or move which tenant is the platform
+// default. Gated by system.tenants.admin PLUS RequireMFA() in module.go —
+// a session-long MFA proof, not only the permission grant that
+// RegisterAdminRoutes settles for. Split out from RegisterAdminRoutes so
+// the irreversible purge is never protected more weakly than default
+// reassignment (the long-standing purge-handler TODO this closes).
+func (h *Handler) RegisterAdminDestructiveRoutes(api huma.API) {
+	huma.Register(api, huma.Operation{
+		OperationID: "delete-tenant-admin",
+		Method:      http.MethodDelete,
+		Path:        "/v1/admin/tenants/{tenantId}",
+		Summary:     "Archive a tenant (platform admin)",
+		Tags:        []string{"Tenants Admin"},
+	}, h.deleteTenant)
+
+	huma.Register(api, huma.Operation{
+		OperationID: "purge-tenant-admin",
+		Method:      http.MethodPost,
+		Path:        "/v1/admin/tenants/{tenantId}/purge",
+		Summary:     "Purge a tenant (irreversible — crypto-shreds the KMS key)",
+		Description: "GDPR right-to-erasure at the tenant level. Flips the tenant status to purged AND deletes the wrapped DEK; every ciphertext sealed with that key becomes cryptographically unrecoverable. There is no undo.",
+		Tags:        []string{"Tenants Admin"},
+	}, h.purgeTenant)
+
+	huma.Register(api, huma.Operation{
+		OperationID: "set-default-tenant-admin",
+		Method:      http.MethodPut,
+		Path:        "/v1/admin/tenants/default",
+		Summary:     "Transfer the platform default Tier-1 tenant",
+		Description: "Atomically points the platform default at another operational internal tenant. Requires system.tenants.admin plus step-up MFA.",
+		Tags:        []string{"Tenants"},
+	}, h.setDefaultTenant)
+}
+
+type setDefaultInput struct {
+	Body struct {
+		TenantID string `json:"tenantId" doc:"UUID of the operational internal tenant to make the platform default" minLength:"1"`
+	}
+}
+
+func (h *Handler) setDefaultTenant(ctx context.Context, in *setDefaultInput) (*struct{}, error) {
+	userUUID, ok := ctxauth.GetUserUUID(ctx)
+	if !ok {
+		return nil, huma.Error401Unauthorized("not authenticated")
+	}
+	if err := h.svc.TransferDefaultTenant(ctx, in.Body.TenantID, userUUID); err != nil {
+		return nil, mapDefaultTenantError(ctx, err)
+	}
+	return &struct{}{}, nil
+}
+
+// mapDefaultTenantError maps the tenant service's platform-default sentinel
+// errors to their HTTP shape: a transfer target that isn't an operational
+// internal tenant, or (defensively — the lifecycle mutations that raise it
+// map it inline instead, see deleteTenant/purgeTenant) a lifecycle mutation
+// blocked because it would orphan the platform default. Anything else falls
+// back to the generic transfer-failure 500.
+func mapDefaultTenantError(ctx context.Context, err error) error {
+	if errors.Is(err, repository.ErrDefaultTargetNotOperational) {
+		return huma.Error409Conflict("the target tenant must be an operational internal tenant")
+	}
+	if errors.Is(err, services.ErrDefaultReassignmentRequired) {
+		return errcode.Conflict(errcode.TenantDefaultReassignmentRequired, "Reassign the platform default before this lifecycle change.")
+	}
+	return tenantInternalError(ctx, "transfer the platform default tenant", err)
+}
+
 type provisioningPolicyOutput struct {
 	Body struct {
 		Internal      string `json:"internal" doc:"Provisioning mode for internal tenants: manual | single (fail-closed; a stored legacy open normalises to manual)"`
@@ -1027,10 +1131,13 @@ func (h *Handler) listAllTenantsAdmin(ctx context.Context, in *adminTenantListIn
 	if err != nil {
 		return nil, huma.Error500InternalServerError("failed to list tenants", err)
 	}
+	// Resolved once per request — not once per row — so an N-row response
+	// costs one extra Mongo read, not N. err swallowed: see listMembers.
+	defaultUUID, _ := h.svc.DefaultTenantUUID(ctx)
 	out := &adminTenantListOutput{}
 	out.Body.Tenants = make([]adminTenantListItem, 0, len(views))
 	for _, v := range views {
-		item := adminTenantListItem{Tenant: *v.Tenant, MemberCount: v.MemberCount}
+		item := adminTenantListItem{Tenant: *v.Tenant, MemberCount: v.MemberCount, IsDefault: defaultUUID != "" && defaultUUID == v.Tenant.UUID}
 		if len(v.MatchedMembers) > 0 {
 			item.MatchedMembers = make([]adminMatchedMember, len(v.MatchedMembers))
 			for i, m := range v.MatchedMembers {

@@ -331,10 +331,22 @@ func (m *Module) RegisterRoutes(ri *module.RouteInfo) {
 	// developer via the system.tenants.admin permission. These bypass
 	// per-tenant membership so a platform operator can manage every tenant
 	// without joining each one.
+	//
+	// Reads and non-destructive mutations keep the permission gate alone;
+	// default transfer and default-threatening lifecycle mutations
+	// (archive/delete, purge) additionally require MFA (Block B step-up).
+	// This closes the long-standing purge TODO: the irreversible purge is
+	// no longer protected more weakly than default reassignment.
 	ri.Operator.ProtectedRouter.Group(func(r chi.Router) {
 		r.Use(ri.Operator.AuthMW.RequireSystemPermission("system.tenants.admin"))
 		api := humachi.New(r, ri.APIConfig)
 		m.handler.RegisterAdminRoutes(api)
+	})
+	ri.Operator.ProtectedRouter.Group(func(r chi.Router) {
+		r.Use(ri.Operator.AuthMW.RequireSystemPermission("system.tenants.admin"))
+		r.Use(ri.Operator.AuthMW.RequireMFA())
+		api := humachi.New(r, ri.APIConfig)
+		m.handler.RegisterAdminDestructiveRoutes(api)
 	})
 
 	// Tier-2 self-service: /v1/me/billing-identity. Mounted on the client
