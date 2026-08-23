@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -669,6 +670,221 @@ func (s *Service) createTenantWithUUID(ctx context.Context, ownerUUID, tenantUUI
 		}
 	}
 	return t, nil
+}
+
+// ErrSetupTenantConflict is returned by EnsureSetupTenant when the reserved
+// tenant UUID already names a row whose immutable setup identity — kind,
+// owner, normalized name, or slug — does not match what the caller supplied.
+// This is a setup-remediation signal, never silent adoption: a reserved UUID
+// must resolve to the same tenant on every replay of the saga stage.
+var ErrSetupTenantConflict = errors.New("tenant: reserved setup tenant identity mismatch")
+
+// ErrSetupTenantRemediation is returned by EnsureSetupTenant when the
+// reserved tenant row is archived-and-purged (Status == purged, or PurgedAt
+// set). Purge is terminal — PurgeTenant has already crypto-shredded the
+// row's KMS key — so EnsureSetupTenant never resurrects it; an operator must
+// remediate (e.g. assign a fresh reservation) rather than have the saga
+// silently retry against a dead row.
+var ErrSetupTenantRemediation = errors.New("tenant: reserved setup tenant requires remediation")
+
+// EnsureSetupTenant converges the reserved setup-tenant UUID to a fully
+// reconciled, operational internal tenant. It is the primitive a resumable
+// provisioning saga (a later PR) calls repeatedly — after a lost response, a
+// crashed executor, or an expired lease — until it observes a nil error, so
+// every step it takes must be safe to replay any number of times, including
+// concurrently. Idempotency is ordered deliberately around the `single`
+// provisioning gate; see tenant/CLAUDE.md#creation-vs-reconciliation for the
+// contract this method and CreateTenant both honour:
+//
+//  1. The reserved UUID already names a row → this is RECONCILIATION, not
+//     creation: reconcileSetupTenant validates the row's immutable setup
+//     identity, stamps the enterprise plan, and reconciles its dependent
+//     rows. The `single` gate is never consulted for a row that already
+//     occupies its own slot, so the reserved tenant can never count against
+//     itself on a retry.
+//  2. No row exists yet → call the shared absent-to-present primitive with
+//     the reserved UUID and an EXPLICIT models.PlanEnterprise — CreateTenant's
+//     empty-plan fallback is `free`, and setup must never inherit it.
+//  3. The primitive fails with a duplicate-key error (on the tenant row
+//     itself, or — because a concurrent reconcile can race ahead of a
+//     concurrent creation — on one of the dependent rows the primitive also
+//     writes) → reread the reserved UUID and reconcile whatever is there.
+//     When the reread finds nothing, an UNRELATED tenant holds the slug:
+//     that is a real conflict, not a race, so the original
+//     ErrSlugAlreadyInUse propagates rather than being swallowed.
+//  4. A prior attempt's partial-failure rollback (createTenantWithUUID's own
+//     SoftDeleteTenant calls) soft-deleted the row → restoring it
+//     re-occupies a provisioning slot, so reconcileSetupTenant applies the
+//     `single` gate against OTHER occupants first. A row that reached
+//     Status == purged, OR that an operator explicitly archived (Status ==
+//     archived with DeletedAt == nil — the ArchiveTenant signature, distinct
+//     from this seam's own soft-delete rollback), is never resurrected this
+//     way — see ErrSetupTenantRemediation.
+func (s *Service) EnsureSetupTenant(ctx context.Context, tenantUUID, ownerUUID, name, slug string) error {
+	normName := strings.TrimSpace(name)
+	normSlug := slugify(slug)
+	if normSlug == "" {
+		normSlug = slugify(name)
+	}
+
+	existing, err := s.repo.GetTenantByUUIDIncludingDeleted(ctx, tenantUUID)
+	switch {
+	case err == nil:
+		return s.reconcileSetupTenant(ctx, existing, ownerUUID, normName, normSlug)
+	case errors.Is(err, repository.ErrNotFound):
+		_, cerr := s.createTenantWithUUID(ctx, ownerUUID, tenantUUID, models.CreateTenantInput{
+			Name: normName,
+			Slug: normSlug,
+			Kind: models.TenantKindInternal,
+			Plan: models.PlanEnterprise, // explicit: never CreateTenant's free fallback
+		})
+		if cerr == nil {
+			return nil
+		}
+		if errors.Is(cerr, ErrSlugAlreadyInUse) || mongo.IsDuplicateKeyError(cerr) {
+			// A concurrent EnsureSetupTenant call for this SAME reserved
+			// UUID may have won the tenant-row insert, or raced us on a
+			// downstream dependent row (see reconcileSetupTenant). Either
+			// way the reread is the correct recovery: when it comes back
+			// empty, the reserved UUID is genuinely free and an unrelated
+			// tenant holds the slug, so cerr (ErrSlugAlreadyInUse) is the
+			// right error to propagate rather than mask.
+			winner, rerr := s.repo.GetTenantByUUIDIncludingDeleted(ctx, tenantUUID)
+			if rerr == nil {
+				return s.reconcileSetupTenant(ctx, winner, ownerUUID, normName, normSlug)
+			}
+			return cerr
+		}
+		return cerr
+	default:
+		return err
+	}
+}
+
+// reconcileSetupTenant converges an EXISTING reserved-UUID row (soft-deleted
+// or not) to the fully-provisioned state EnsureSetupTenant promises. It
+// never trips the `single` provisioning gate against the row it is
+// reconciling: a row that already occupies a slot skips the gate entirely,
+// and a soft-deleted row being restored is checked against OTHER occupants
+// only (its own deletedAt != nil already excludes it from
+// CountProvisioningSlotsByKind's count). Every dependent write is treated as
+// replay-safe: a duplicate-key error from a racing writer — another
+// EnsureSetupTenant call, or the absent-to-present primitive itself — is read
+// back and VALIDATED, never trusted blind.
+func (s *Service) reconcileSetupTenant(ctx context.Context, existing *models.Tenant, ownerUUID, name, slug string) error {
+	if existing.Kind != models.TenantKindInternal ||
+		existing.OwnerUserUUID != ownerUUID ||
+		existing.Slug != slug ||
+		existing.Name != name {
+		return ErrSetupTenantConflict
+	}
+
+	// Archived-and-purged is terminal — PurgeTenant already crypto-shredded
+	// the KMS key — so it is never resurrected, remediation only.
+	if existing.PurgedAt != nil || existing.Status == models.TenantStatusPurged {
+		return ErrSetupTenantRemediation
+	}
+
+	// A row genuinely archived by the admin ArchiveTenant action (Status ==
+	// archived, DeletedAt == nil) is a DIFFERENT state from the setup-owned
+	// rollback signature checked below: ArchiveTenant never sets deletedAt,
+	// so this predicate can only be true for a tenant an operator
+	// deliberately archived outside the setup flow — never for a row this
+	// seam soft-deleted itself. The design spec is explicit that such a row
+	// is not resurrected either: "archived and purged reserved rows enter
+	// remediation rather than being resurrected."
+	if existing.Status == models.TenantStatusArchived && existing.DeletedAt == nil {
+		return ErrSetupTenantRemediation
+	}
+
+	// A prior attempt's own rollback (createTenantWithUUID's SoftDeleteTenant
+	// calls on a KMS/membership/bind failure) left this row soft-deleted.
+	// Restoring it re-occupies a provisioning slot, so apply the SAME
+	// `single` cardinality check CreateTenant applies on a genuine creation
+	// — but against OTHER occupants: this row's own deletedAt != nil already
+	// excludes it from the count below.
+	if existing.DeletedAt != nil {
+		if s.ProvisioningMode(ctx, models.TenantKindInternal) == models.ProvisioningModeSingle {
+			n, err := s.repo.CountProvisioningSlotsByKind(ctx, models.TenantKindInternal)
+			if err != nil {
+				return fmt.Errorf("tenant: count tenants for setup-tenant single-mode check: %w", err)
+			}
+			if n > 0 {
+				return ErrProvisioningLocked
+			}
+		}
+		if err := s.repo.RestoreTenant(ctx, existing.UUID); err != nil {
+			return fmt.Errorf("tenant: restore setup tenant: %w", err)
+		}
+		existing.DeletedAt = nil
+		existing.ArchivedAt = nil
+		existing.Status = models.TenantStatusActive
+	}
+
+	// Plan: setup must land on enterprise regardless of what a legacy or
+	// partially-provisioned row currently carries.
+	if existing.Plan != models.PlanEnterprise {
+		if err := s.repo.UpdateTenant(ctx, existing.UUID, bson.M{"plan": models.PlanEnterprise}); err != nil {
+			return fmt.Errorf("tenant: stamp setup tenant plan: %w", err)
+		}
+	}
+
+	// KMS key: CreateKey is concurrent-idempotent (Task 4.1) — every caller
+	// converges on the single winning keyID — so it is always safe to call;
+	// only the stamp is conditional, to avoid a redundant write once a
+	// previous attempt already recorded it.
+	if s.kms != nil {
+		keyID, err := s.kms.CreateKey(ctx, existing.UUID)
+		if err != nil {
+			return fmt.Errorf("tenant: mint setup tenant KMS key: %w", err)
+		}
+		if existing.KMSKeyID == nil || *existing.KMSKeyID == "" {
+			if err := s.repo.UpdateTenant(ctx, existing.UUID, bson.M{"kmsKeyID": keyID}); err != nil {
+				return fmt.Errorf("tenant: stamp setup tenant KMS key: %w", err)
+			}
+		}
+	}
+
+	// Closure self-row: guarded by the (descendantUUID, ancestorUUID) unique
+	// index — a duplicate-key error means a racing writer already inserted
+	// it, which is success, not failure.
+	if err := s.repo.InsertSelfAncestor(ctx, existing.UUID); err != nil && !mongo.IsDuplicateKeyError(err) {
+		return fmt.Errorf("tenant: insert setup tenant self ancestor: %w", err)
+	}
+
+	// Owner membership: guarded by the (userUUID, tenantId) unique index. A
+	// duplicate-key loser rereads the winner and VALIDATES it rather than
+	// assuming it matches what this call intended to write.
+	membership := &models.TenantMembership{
+		UUID:       uuid.Must(uuid.NewV7()).String(),
+		UserUUID:   ownerUUID,
+		TenantUUID: existing.UUID,
+		TenantKind: models.TenantKindInternal,
+		Roles:      []string{"org_owner"},
+		IsOwner:    true,
+	}
+	if err := s.repo.CreateMembership(ctx, membership); err != nil {
+		if !mongo.IsDuplicateKeyError(err) {
+			return fmt.Errorf("tenant: create setup tenant owner membership: %w", err)
+		}
+		winner, rerr := s.repo.GetMembership(ctx, ownerUUID, existing.UUID)
+		if rerr != nil {
+			return fmt.Errorf("tenant: reread setup tenant owner membership: %w", rerr)
+		}
+		if !winner.IsOwner || winner.TenantKind != models.TenantKindInternal || !slices.Contains(winner.Roles, "org_owner") {
+			return ErrSetupTenantConflict
+		}
+	}
+
+	// authz binding: an ensure since Task 4.2 — concurrent-safe and
+	// replay-safe on its own.
+	if s.bindOwner != nil {
+		if err := s.bindOwner(ctx, ownerUUID, existing.UUID, "org_owner"); err != nil {
+			return fmt.Errorf("tenant: bind setup tenant owner role: %w", err)
+		}
+	}
+
+	return nil
 }
 
 // CreateExternalTenant is the dedicated factory for Tier-2 tenants (external

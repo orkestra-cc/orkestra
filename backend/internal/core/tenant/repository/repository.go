@@ -808,3 +808,32 @@ func (r *Repository) IsAncestorOf(ctx context.Context, ancestorUUID, descendantU
 	}
 	return false, err
 }
+
+// RestoreTenant reverses SoftDeleteTenant: clears deletedAt/archivedAt and
+// returns the row to active status. The mirror-image counterpart lives in
+// the *service* layer (Service.reconcileSetupTenant, via EnsureSetupTenant)
+// rather than here, because restoring a row is a lifecycle transition that
+// re-occupies a provisioning slot — the caller must re-apply the `single`
+// cardinality gate against OTHER occupants before calling this, exactly the
+// way CreateTenant applies it before a genuine creation. This method itself
+// performs no such check; it is a plain, unconditional row write, the same
+// contract SoftDeleteTenant already has. Used only by the setup-tenant
+// reconciliation seam to resume a reservation that a prior attempt's
+// partial-failure rollback soft-deleted.
+func (r *Repository) RestoreTenant(ctx context.Context, uuid string) error {
+	now := time.Now()
+	//tenantscope:allow setup-tenant restore reverses SoftDeleteTenant for a resumable provisioning-saga retry
+	res, err := r.db.Collection(CollTenants).UpdateOne(ctx,
+		bson.M{"uuid": uuid},
+		bson.M{
+			"$set":   bson.M{"status": string(models.TenantStatusActive), "updatedAt": now},
+			"$unset": bson.M{"deletedAt": "", "archivedAt": ""},
+		})
+	if err != nil {
+		return err
+	}
+	if res.MatchedCount == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
