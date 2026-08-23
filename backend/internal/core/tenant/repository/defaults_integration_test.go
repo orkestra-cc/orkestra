@@ -25,7 +25,34 @@ import (
 	"github.com/orkestra/backend/internal/core/tenant/models"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 )
+
+// newDefaultsTestDB wraps newTestDB (search_test.go) and additionally
+// creates the tenant_defaults unique `kind` index that production always
+// has in place by boot time (module.go::Collections() -> the registry's
+// ensureCollections). Every test in this file that exercises SetDefault/
+// AssignDefault/RunDefaultGuarded must use this, not the bare newTestDB:
+// without the index, two concurrent from-scratch inserts into
+// tenant_defaults have nothing for MongoDB's write-conflict detection to
+// key off (each insert gets its own fresh _id), so a test like
+// TestSetDefault_UniqueKindReplacesAtomically would pass on the strength of
+// the upsert filter alone and prove nothing about the constraint it is
+// named after. Named identically to the services package's own
+// newDefaultsTestDB (services/default_tenant_integration_test.go), which
+// does the equivalent index creation for that package's harness.
+func newDefaultsTestDB(t *testing.T) (*mongo.Database, func()) {
+	t.Helper()
+	db, cleanup := newTestDB(t)
+	//tenantscope:allow system: test setup mirrors the production index build (module.go::Collections()) for the platform-global default pointer collection
+	if _, err := db.Collection(CollDefaults).Indexes().CreateOne(context.Background(), mongo.IndexModel{
+		Keys:    bson.D{{Key: "kind", Value: 1}},
+		Options: options.Index().SetUnique(true),
+	}); err != nil {
+		t.Fatalf("create tenant_defaults unique kind index: %v", err)
+	}
+	return db, cleanup
+}
 
 func seedInternalActiveTenant(t *testing.T, db *mongo.Database) *models.Tenant {
 	t.Helper()
@@ -42,7 +69,7 @@ func seedInternalActiveTenant(t *testing.T, db *mongo.Database) *models.Tenant {
 // become the platform default. On success the pointer row carries
 // updatedBy only when the actor UUID is non-empty.
 func TestSetDefault_ValidatesOperationalInternalTarget(t *testing.T) {
-	db, cleanup := newTestDB(t)
+	db, cleanup := newDefaultsTestDB(t)
 	defer cleanup()
 	r := New(db)
 	ctx := context.Background()
@@ -125,7 +152,7 @@ func TestSetDefault_ValidatesOperationalInternalTarget(t *testing.T) {
 // call replaces the pointer row in place (still exactly one document for
 // kind=internal), returns the previous target's UUID, and bumps Revision.
 func TestSetDefault_UniqueKindReplacesAtomically(t *testing.T) {
-	db, cleanup := newTestDB(t)
+	db, cleanup := newDefaultsTestDB(t)
 	defer cleanup()
 	r := New(db)
 	ctx := context.Background()
@@ -169,7 +196,7 @@ func TestSetDefault_UniqueKindReplacesAtomically(t *testing.T) {
 // ErrNotFound when no pointer row exists yet, and that the aborted
 // transaction leaves no partial pointer behind.
 func TestSetDefault_RequireExisting(t *testing.T) {
-	db, cleanup := newTestDB(t)
+	db, cleanup := newDefaultsTestDB(t)
 	defer cleanup()
 	r := New(db)
 	ctx := context.Background()
@@ -192,7 +219,7 @@ func TestSetDefault_RequireExisting(t *testing.T) {
 // never invoked, while a write targeting an unrelated tenant runs the
 // callback inside the session.
 func TestRunDefaultGuarded_BlocksDefaultTarget(t *testing.T) {
-	db, cleanup := newTestDB(t)
+	db, cleanup := newDefaultsTestDB(t)
 	defer cleanup()
 	r := New(db)
 	ctx := context.Background()
@@ -241,7 +268,7 @@ func TestRunDefaultGuarded_BlocksDefaultTarget(t *testing.T) {
 // check fails with ErrDefaultTargetNotOperational. Either way, the pointer
 // must never end up naming a non-operational tenant.
 func TestTransferVersusLifecycle_Serialized(t *testing.T) {
-	db, cleanup := newTestDB(t)
+	db, cleanup := newDefaultsTestDB(t)
 	defer cleanup()
 	r := New(db)
 	ctx := context.Background()
