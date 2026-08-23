@@ -98,6 +98,12 @@ type memberDTO struct {
 	Kind     string   `json:"kind"`
 	Roles    []string `json:"roles"`
 	IsOwner  bool     `json:"isOwner"`
+	// IsDefault reports whether TenantID is the platform default Tier-1
+	// tenant. Derived at request time via tenantSvc.DefaultTenantUUID in
+	// listMyTenants — never persisted. The operator console's tenant
+	// switcher reads this off GET /v1/tenants so it can render/select the
+	// platform default without a second request.
+	IsDefault bool `json:"isDefault"`
 }
 
 type createTenantInput struct {
@@ -291,6 +297,10 @@ func (h *Handler) listMyTenants(ctx context.Context, _ *struct{}) (*listMyTenant
 	if err != nil {
 		return nil, huma.Error500InternalServerError("failed to list memberships", err)
 	}
+	// Resolved once per request, not once per row — see listMembers for the
+	// identical pattern. err swallowed: an unassigned or lookup-failed
+	// default just means every row reports isDefault=false.
+	defaultUUID, _ := h.svc.DefaultTenantUUID(ctx)
 	out := &listMyTenantsOutput{}
 	for _, m := range mbrs {
 		t, err := h.svc.GetTenantModel(ctx, m.TenantUUID)
@@ -298,13 +308,14 @@ func (h *Handler) listMyTenants(ctx context.Context, _ *struct{}) (*listMyTenant
 			continue
 		}
 		out.Body.Memberships = append(out.Body.Memberships, memberDTO{
-			TenantID: m.TenantUUID,
-			Name:     m.TenantName,
-			Slug:     m.TenantSlug,
-			Plan:     t.Plan,
-			Kind:     m.TenantKind,
-			Roles:    m.Roles,
-			IsOwner:  m.IsOwner,
+			TenantID:  m.TenantUUID,
+			Name:      m.TenantName,
+			Slug:      m.TenantSlug,
+			Plan:      t.Plan,
+			Kind:      m.TenantKind,
+			Roles:     m.Roles,
+			IsOwner:   m.IsOwner,
+			IsDefault: defaultUUID != "" && defaultUUID == m.TenantUUID,
 		})
 	}
 	return out, nil
@@ -982,7 +993,7 @@ func (h *Handler) RegisterAdminDestructiveRoutes(api huma.API) {
 		Path:        "/v1/admin/tenants/default",
 		Summary:     "Transfer the platform default Tier-1 tenant",
 		Description: "Atomically points the platform default at another operational internal tenant. Requires system.tenants.admin plus step-up MFA.",
-		Tags:        []string{"Tenants"},
+		Tags:        []string{"Tenants Admin"},
 	}, h.setDefaultTenant)
 }
 

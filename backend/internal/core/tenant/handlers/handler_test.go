@@ -379,6 +379,47 @@ func TestListMyTenants_Happy(t *testing.T) {
 	}
 }
 
+// TestListMyTenants_StampsIsDefault covers the derived-DTO contract on
+// memberDTO — the operator console's tenant switcher reads isDefault off
+// this response. Resolved once per request (callCount), applied to
+// exactly the row whose TenantID matches the platform default.
+func TestListMyTenants_StampsIsDefault(t *testing.T) {
+	t.Parallel()
+	callCount := 0
+	svc := &fakeTenantSvc{
+		listUserMembershipsFn: func(context.Context, string) ([]iface.TenantMembership, error) {
+			return []iface.TenantMembership{
+				{TenantUUID: "t-a", TenantName: "Alpha", TenantSlug: "alpha", TenantKind: "internal", Roles: []string{"org_owner"}, IsOwner: true},
+				{TenantUUID: "t-b", TenantName: "Beta", TenantSlug: "beta", TenantKind: "internal", Roles: []string{"org_member"}},
+			}, nil
+		},
+		getTenantModelFn: func(_ context.Context, uuid string) (*models.Tenant, error) {
+			return &models.Tenant{UUID: uuid, Plan: "pro"}, nil
+		},
+		defaultTenantUUIDFn: func(context.Context) (string, error) {
+			callCount++
+			return "t-b", nil
+		},
+	}
+	h := New(svc, nil)
+	out, err := h.listMyTenants(authedCtx("u1"), nil)
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if callCount != 1 {
+		t.Errorf("DefaultTenantUUID called %d times, want exactly 1 (resolved once per request, not per row)", callCount)
+	}
+	if len(out.Body.Memberships) != 2 {
+		t.Fatalf("got %d memberships, want 2", len(out.Body.Memberships))
+	}
+	for _, m := range out.Body.Memberships {
+		want := m.TenantID == "t-b"
+		if m.IsDefault != want {
+			t.Errorf("membership %+v: IsDefault = %v, want %v", m, m.IsDefault, want)
+		}
+	}
+}
+
 func TestListMyTenants_SvcError(t *testing.T) {
 	t.Parallel()
 	svc := &fakeTenantSvc{

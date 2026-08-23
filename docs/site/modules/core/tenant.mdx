@@ -48,7 +48,7 @@ Enforcement is split on purpose, so no creation path can slip through:
 
 ## Platform default tenant
 
-A single platform-global pointer (`tenant_defaults`, collection below) names the internal tenant used to begin operator resolution. The pointer, not a stored flag on the tenant document, is canonical — every DTO `isDefault` field the API exposes (the admin tenant list, the admin get-tenant response, and each member row) is **derived at request time**, resolved once per request, and never written back to Mongo. A stored column was rejected on purpose: transfer would become a two-document mutation with either a no-default window or a unique-index collision.
+A single platform-global pointer (`tenant_defaults`, collection below) names the internal tenant used to begin operator resolution. The pointer, not a stored flag on the tenant document, is canonical — every DTO `isDefault` field the API exposes (the admin tenant list, the admin get-tenant response, each member row, and each row of the caller's own `GET /v1/tenants` — the operator console's tenant switcher) is **derived at request time**, resolved once per request, and never written back to Mongo. A stored column was rejected on purpose: transfer would become a two-document mutation with either a no-default window or a unique-index collision.
 
 Only an operational internal tenant (`status == active`, not soft-deleted) can hold the pointer. Suspending, archiving, purging, or deleting the current default is refused with `409 tenant.default_reassignment_required` — reassign the default to another tenant first, then retire the old one. Setup assigns the first default; afterwards an administrator moves it with `PUT /v1/admin/tenants/default`.
 
