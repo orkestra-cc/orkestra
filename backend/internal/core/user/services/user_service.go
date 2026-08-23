@@ -1029,3 +1029,39 @@ func (s *userService) ValidateUserActive(ctx context.Context, id string) (bool, 
 
 	return user.IsActive, nil
 }
+
+// UserLifecycleState satisfies iface.UserLifecycleStateProvider. It
+// classifies userUUID as active / inactive / deleted / missing using
+// GetLifecycleProjection, the one repository lookup that includes
+// soft-deleted rows — every other lookup on this service excludes them,
+// which is exactly why none of them can tell "no such user" apart from
+// "the user was deleted" for the setup finalizer's recovery audit.
+//
+// A repository failure is returned as an error and the empty string, on
+// purpose: it must never be reported as iface.UserLifecycleMissing (or
+// any other state), because callers use "missing" as the precondition for
+// letting a different operator claim recovery of an in-flight setup — a
+// database blip masquerading as "the bound administrator no longer
+// exists" would be a security hole, not a glitch.
+func (s *userService) UserLifecycleState(ctx context.Context, userUUID string) (iface.UserLifecycleState, error) {
+	row, err := s.userRepo.GetLifecycleProjection(ctx, userUUID)
+	if err != nil {
+		if err == repository.ErrUserNotFound {
+			return iface.UserLifecycleMissing, nil
+		}
+		return "", fmt.Errorf("resolve user lifecycle state: %w", err)
+	}
+	if row.DeletedAt != nil {
+		return iface.UserLifecycleDeleted, nil
+	}
+	if row.IsActive {
+		return iface.UserLifecycleActive, nil
+	}
+	return iface.UserLifecycleInactive, nil
+}
+
+// Compile-time assertion: the canonical user-module service (registered
+// under module.ServiceUserService — see module.go) satisfies
+// iface.UserLifecycleStateProvider. shared/setup type-asserts against
+// this interface rather than the wide iface.UserProvider (Task 5.5).
+var _ iface.UserLifecycleStateProvider = (*userService)(nil)

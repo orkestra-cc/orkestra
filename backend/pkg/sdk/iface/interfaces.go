@@ -114,6 +114,30 @@ type UserProvider interface {
 	ClearMFAGrace(ctx context.Context, userUUID string) error
 }
 
+// ---------------------------------------------------------------------------
+// UserLifecycleStateProvider — consumed by: shared/setup (finalizer-access
+// probe + recovery). Narrow on purpose: UserProvider.GetUserByID excludes
+// soft-deleted rows and so cannot distinguish `missing` from `deleted` for
+// recovery audit; this seam resolves ONLY the lifecycle class and returns
+// no profile data. The wide UserProvider is not widened.
+// ---------------------------------------------------------------------------
+
+type UserLifecycleState string
+
+const (
+	UserLifecycleActive   UserLifecycleState = "active"   // exists, not soft-deleted, IsActive
+	UserLifecycleInactive UserLifecycleState = "inactive" // exists, not soft-deleted, !IsActive
+	UserLifecycleDeleted  UserLifecycleState = "deleted"  // soft-deleted row
+	UserLifecycleMissing  UserLifecycleState = "missing"  // no row
+)
+
+// UserLifecycleStateProvider classifies one operator user UUID. A database
+// error is returned as an error and is distinct from every state — callers
+// fail closed and must never map a lookup failure onto a lifecycle class.
+type UserLifecycleStateProvider interface {
+	UserLifecycleState(ctx context.Context, userUUID string) (UserLifecycleState, error)
+}
+
 // OAuthLinkDataUpdater is the additive sub-interface that lets the auth
 // module refresh the embedded OAuthLink.OAuthData map (typically the
 // cached `picture` URL) on every OAuth callback. Adding this method

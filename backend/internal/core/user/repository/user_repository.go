@@ -117,6 +117,25 @@ type UserRepository interface {
 	// Called once on module Init so pre-language users get a sane value
 	// without a release-coupled migration step.
 	BackfillDefaultLanguage(ctx context.Context, defaultLanguage string) (int64, error)
+
+	// GetLifecycleProjection resolves the minimal isActive/deletedAt
+	// projection for uuid — the ONLY lookup in this repository that
+	// INCLUDES soft-deleted rows. Every other Get*/Exists* method filters
+	// out deletedAt, which is exactly why none of them can distinguish "no
+	// row ever existed" from "the row was soft-deleted": both look like a
+	// miss. This method exists for iface.UserLifecycleStateProvider (the
+	// setup finalizer's access probe + recovery audit), which needs that
+	// distinction and nothing else — the projection carries no other
+	// field, so a caller cannot recover profile data through this path.
+	// Returns ErrUserNotFound when no row matches at all, deleted or not.
+	GetLifecycleProjection(ctx context.Context, uuid string) (*LifecycleRow, error)
+}
+
+// LifecycleRow is the narrow isActive/deletedAt projection returned by
+// GetLifecycleProjection. Deliberately minimal — see that method's doc.
+type LifecycleRow struct {
+	IsActive  bool       `bson:"isActive"`
+	DeletedAt *time.Time `bson:"deletedAt,omitempty"`
 }
 
 type mongoUserRepository struct {
@@ -485,6 +504,30 @@ func (r *mongoUserRepository) ExistsByUUID(ctx context.Context, uuid string) (bo
 	}
 
 	return count > 0, nil
+}
+
+// GetLifecycleProjection resolves the isActive/deletedAt projection for
+// uuid. Unlike every other lookup in this file, the filter deliberately
+// omits the deletedAt exclusion — see the interface doc comment for why:
+// this is the one query that must see soft-deleted rows so the caller can
+// distinguish "missing" from "deleted". The projection restricts the
+// response to exactly the two fields the caller needs to classify the
+// row; no other field is ever returned.
+func (r *mongoUserRepository) GetLifecycleProjection(ctx context.Context, uuid string) (*LifecycleRow, error) {
+	filter := bson.M{"uuid": uuid}
+	opts := options.FindOne().SetProjection(bson.M{"isActive": 1, "deletedAt": 1, "_id": 0})
+
+	var row LifecycleRow
+	//tenantscope:allow system: platform user lifecycle probe for setup finalizer recovery
+	err := r.collection.FindOne(ctx, filter, opts).Decode(&row)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			return nil, ErrUserNotFound
+		}
+		return nil, fmt.Errorf("failed to get user lifecycle projection: %w", err)
+	}
+
+	return &row, nil
 }
 
 // buildFilter builds MongoDB filter from UserFilters
