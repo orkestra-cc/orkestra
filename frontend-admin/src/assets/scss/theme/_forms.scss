@@ -77,8 +77,11 @@ label {
   // inside an fs-10 table a start/stop-a-module control shrank to 27×13px.
   // Fixed rem sizing keeps every switch an adequate target regardless of the
   // type context it sits in. Declared both-modes 2026-08-07.
+  // Width lives in $form-switch-width (_variables.scss) so Bootstrap derives
+  // padding-start and the input's negative margin from the same rem value —
+  // overriding width here left the em-based gutter too narrow and the label
+  // touched the track.
   .form-check-input {
-    width: 2.75rem;
     height: 1.5rem;
   }
 }
