@@ -30,6 +30,21 @@ func (m *validatingModule) ValidateConfig(_ context.Context, values map[string]s
 	return nil
 }
 
+// activationValidatingModule rejects activation of any profile whose
+// "mode" value is "bad", recording what it was shown.
+type activationValidatingModule struct {
+	validatingModule
+	sawTarget map[string]string
+}
+
+func (m *activationValidatingModule) ValidateConfigActivation(_ context.Context, target map[string]string) error {
+	m.sawTarget = target
+	if target["mode"] == "bad" {
+		return &ConfigValidationError{Field: "mode", Message: "profile not activatable", Code: "x.mode_invalid"}
+	}
+	return nil
+}
+
 // plainModule (declared in notification_templates_test.go) omits the seam
 // entirely — reused here to prove a module without it is unaffected.
 
@@ -146,6 +161,31 @@ func seedModuleDocWithEnv(t *testing.T, repo *ModuleConfigRepository, name, envN
 	}
 }
 
+// seedModuleDocWithEnvs inserts a module_configs document carrying several
+// named environment profiles at once — e.g. a production/sandbox pair with
+// different values, as activation tests need to seed both sides in one go.
+func seedModuleDocWithEnvs(t *testing.T, repo *ModuleConfigRepository, name string, envs map[string]map[string]string) {
+	t.Helper()
+	environments := make(map[string]EnvironmentConfig, len(envs))
+	for envName, values := range envs {
+		environments[envName] = EnvironmentConfig{
+			ConfigValues:    values,
+			EncryptedValues: map[string]string{},
+			UpdatedAt:       time.Now(),
+		}
+	}
+	doc := &ModuleConfig{
+		ModuleName:      name,
+		Category:        CategoryCore,
+		ConfigValues:    map[string]string{},
+		EncryptedValues: map[string]string{},
+		Environments:    environments,
+	}
+	if err := repo.Upsert(context.Background(), doc); err != nil {
+		t.Fatalf("seedModuleDocWithEnvs: %v", err)
+	}
+}
+
 func TestConfigUpdate_ModuleValidatorOptional(t *testing.T) {
 	ctx := context.Background()
 
@@ -207,5 +247,76 @@ func TestSetActiveEnvironment_LegacyInvalidValueUsesDefensiveReader(t *testing.T
 	seedModuleDocWithEnv(t, repo, "validating", "sandbox", map[string]string{"strict": "bad"})
 	if err := svc.SetActiveEnvironment(ctx, "validating", "sandbox"); err != nil {
 		t.Fatalf("SetActiveEnvironment must stay recoverable on legacy data: %v", err)
+	}
+}
+
+func TestSetActiveEnvironment_ActivationValidatorHook(t *testing.T) {
+	ctx := context.Background()
+
+	// A module WITH the activation seam: activating a profile whose target
+	// values fail must not touch the active profile name or needsRestart —
+	// repo.SetActiveEnvironment is the point of no return and must never be
+	// reached when the hook rejects.
+	svc, repo := newTestConfigService(t)
+	avm := &activationValidatingModule{}
+	svc.RegisterKnownModules([]Module{avm})
+	seedModuleDocWithEnvs(t, repo, "validating", map[string]map[string]string{
+		"production": {"mode": "ok"},
+		"sandbox":    {"mode": "bad"},
+	})
+
+	err := svc.SetActiveEnvironment(ctx, "validating", "sandbox")
+	var typed *ConfigValidationError
+	if !errors.As(err, &typed) {
+		t.Fatalf("SetActiveEnvironment = %v, want *ConfigValidationError", err)
+	}
+	if typed.Code != "x.mode_invalid" {
+		t.Errorf("Code = %q, want %q", typed.Code, "x.mode_invalid")
+	}
+	if avm.sawTarget["mode"] != "bad" {
+		t.Errorf("validator saw %v, want the target sandbox profile with mode=bad", avm.sawTarget)
+	}
+
+	doc, err := repo.FindByName(ctx, "validating")
+	if err != nil {
+		t.Fatalf("FindByName: %v", err)
+	}
+	if doc.ActiveEnv() != "production" {
+		t.Errorf("ActiveEnv() = %q, want %q — a rejected activation must leave the active profile untouched", doc.ActiveEnv(), "production")
+	}
+	if doc.NeedsRestart {
+		t.Error("needsRestart flipped on a rejected activation — the point-of-no-return write must not have happened")
+	}
+
+	// Fix the sandbox profile's value, then confirm activation of a passing
+	// profile still succeeds, actually switches the active environment, and
+	// syncs the legacy top-level fields as before.
+	if err := svc.UpdateEnvironmentConfig(ctx, "validating", "sandbox", map[string]string{"mode": "ok"}, nil); err != nil {
+		t.Fatalf("UpdateEnvironmentConfig: %v", err)
+	}
+	if err := svc.SetActiveEnvironment(ctx, "validating", "sandbox"); err != nil {
+		t.Fatalf("SetActiveEnvironment with a passing profile: %v", err)
+	}
+	doc, err = repo.FindByName(ctx, "validating")
+	if err != nil {
+		t.Fatalf("FindByName: %v", err)
+	}
+	if doc.ActiveEnv() != "sandbox" {
+		t.Errorf("ActiveEnv() = %q, want %q", doc.ActiveEnv(), "sandbox")
+	}
+	if doc.ConfigValues["mode"] != "ok" {
+		t.Errorf("legacy ConfigValues not synced: %v", doc.ConfigValues)
+	}
+
+	// A module that does NOT implement the activation seam keeps today's
+	// validation-free activation — legacy-recovery behaviour, unchanged.
+	svcPlain, repoPlain := newTestConfigService(t)
+	svcPlain.RegisterKnownModules([]Module{&validatingModule{}})
+	seedModuleDocWithEnvs(t, repoPlain, "validating", map[string]map[string]string{
+		"production": {"mode": "ok"},
+		"sandbox":    {"mode": "bad"},
+	})
+	if err := svcPlain.SetActiveEnvironment(ctx, "validating", "sandbox"); err != nil {
+		t.Fatalf("module without the activation seam must activate unconditionally: %v", err)
 	}
 }

@@ -422,7 +422,7 @@ func (h *ModuleAdminHandler) UpdateEnvironment(ctx context.Context, input *Updat
 // SetActiveEnvironment switches the active environment for a module.
 func (h *ModuleAdminHandler) SetActiveEnvironment(ctx context.Context, input *SetActiveEnvironmentInput) (*SetActiveEnvironmentOutput, error) {
 	if err := h.configService.SetActiveEnvironment(ctx, input.Name, input.Body.Environment); err != nil {
-		return nil, huma.Error400BadRequest(err.Error())
+		return nil, mapConfigServiceError(err, func(e error) error { return huma.Error400BadRequest(e.Error()) })
 	}
 
 	needsRestart := !h.registry.SupportsHotReload(input.Name)

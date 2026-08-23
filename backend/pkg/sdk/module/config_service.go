@@ -542,16 +542,27 @@ func (s *ModuleConfigService) SetActiveEnvironment(ctx context.Context, name, en
 		return fmt.Errorf("environment %q not found for module %q", envName, name)
 	}
 
-	if err := s.repo.SetActiveEnvironment(ctx, name, envName); err != nil {
-		return err
-	}
-
-	// Sync the newly active environment's values to legacy top-level fields.
 	env := doc.Environments[envName]
 	cv := env.ConfigValues
 	if cv == nil {
 		cv = make(map[string]string)
 	}
+
+	// Activation-time validation: the target profile as a whole, before any
+	// write. Mirrors validateModuleConfig's dispatch (config_service.go:387).
+	if m, ok := s.knownModules[name]; ok {
+		if v, ok := m.(HasConfigActivationValidator); ok {
+			if err := v.ValidateConfigActivation(ctx, cv); err != nil {
+				return err
+			}
+		}
+	}
+
+	if err := s.repo.SetActiveEnvironment(ctx, name, envName); err != nil {
+		return err
+	}
+
+	// Sync the newly active environment's values to legacy top-level fields.
 	ev := env.EncryptedValues
 	if ev == nil {
 		ev = make(map[string]string)

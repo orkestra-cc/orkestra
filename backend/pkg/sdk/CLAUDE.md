@@ -189,7 +189,39 @@ and run `cd backend && go mod tidy` (the `backend-deps` make target).
   `SetActiveEnvironment` deliberately does **not** invoke it: switching to
   an already-stored (possibly legacy-invalid) profile must stay possible so
   the defensive readers keep the deployment operable until the operator
-  repairs the value on the next PATCH.
+  repairs the value on the next PATCH. See `HasConfigActivationValidator`
+  below for the separate, optional seam that *does* run on activation.
+- **`module.HasConfigActivationValidator` is the optional activation-veto
+  seam**, distinct from `HasConfigValidator` above: a module implements
+  `ValidateConfigActivation(ctx context.Context, targetValues map[string]string) error`
+  to refuse `PUT /v1/admin/modules/{name}/active-environment` when the
+  *complete* target profile — not a PATCH-merged one — is no longer
+  satisfiable as a whole (the motivating case: a tenant provisioning policy
+  stored in a profile that a later config edit elsewhere made
+  inconsistent). It runs inside `SetActiveEnvironment`, after the
+  "environment exists" check and strictly **before**
+  `repo.SetActiveEnvironment` — the point of no return, since that write
+  also flips `needsRestart: true`. A rejection therefore leaves both the
+  active profile name and `needsRestart` exactly as they were.
+  `targetValues` is the target profile's non-secret map only; secrets are
+  never passed. Modules that omit the interface keep today's
+  validation-free activation — this is deliberate legacy-recovery
+  behaviour (see the note above), not an oversight: a module that only
+  implements `HasConfigValidator` still activates a legacy-invalid stored
+  profile unconditionally.
+- **A `ConfigValidationError` with a non-empty `Code`** (e.g.
+  `"tenant.single_mode_conflict"`) upgrades the admin API's response from
+  the legacy text-only `422` to the `{status,title,detail,code}` envelope
+  shared with `internal/shared/errcode` — reproduced SDK-locally in
+  `config_error_envelope.go` since `pkg/sdk` cannot import
+  `internal/shared/errcode` (SDK self-containment). `mapConfigServiceError`
+  is the single mapper for all three module-admin mutation surfaces
+  (`UpdateModule`, `UpdateEnvironment`, `SetActiveEnvironment`): a
+  code-bearing error becomes the stable envelope, a codeless one keeps the
+  pre-existing text-only `huma.Error422UnprocessableEntity`, and anything
+  else falls through to the caller's own fallback status. Leave `Code`
+  empty for a validator that has no reason to add a stable machine-readable
+  identity yet — the legacy 422 remains correct and requires no opt-in.
 
 ## CI
 

@@ -46,3 +46,16 @@ type ConfigValidationError struct {
 func (e *ConfigValidationError) Error() string {
 	return fmt.Sprintf("%s: %s", e.Field, e.Message)
 }
+
+// HasConfigActivationValidator lets a module veto switching the active
+// environment profile. It is OPTIONAL and separate from HasConfigValidator:
+// PATCH-time validation sees a merged single profile, while activation must
+// judge the complete target profile as a whole before SetActiveEnvironment
+// writes either the active profile name or the legacy top-level values.
+// Modules that omit it preserve the pre-existing validation-free activation
+// (legacy-recovery behaviour). targetValues is the target profile's
+// non-secret map; secrets are never passed. Activation failure leaves the
+// previously active environment unchanged.
+type HasConfigActivationValidator interface {
+	ValidateConfigActivation(ctx context.Context, targetValues map[string]string) error
+}
