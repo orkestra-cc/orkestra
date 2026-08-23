@@ -328,7 +328,8 @@ func (s *Service) CreateTenant(ctx context.Context, ownerUUID string, input mode
 	}
 
 	// Provisioning policy backstop: in `single` mode a tier may hold at most
-	// one active tenant. Enforced here (not just at the handler) so every
+	// one tenant occupying a provisioning slot (see CLAUDE.md's Lifecycle
+	// terminology). Enforced here (not just at the handler) so every
 	// creation path — POST /v1/tenants, divisions, lazy provisioning — is
 	// covered. The first tenant on a fresh install has count 0 and passes,
 	// so bootstrap is never blocked.
