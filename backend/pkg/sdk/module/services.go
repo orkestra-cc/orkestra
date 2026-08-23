@@ -317,3 +317,13 @@ func MustGetTyped[T any](r *ServiceRegistry, key ServiceKey) T {
 	}
 	return typed
 }
+
+// ServiceCRMActivitySink is the crm addon's iface.CRMActivitySink —
+// records a billing event (payment failed, subscription suspended, manual
+// payment required) against an existing CRM person so someone can follow
+// up. Consumed by: subscriptions' billing-lifecycle notifier. Optional
+// from the consumer's side: a nil result means crm is absent/disabled, in
+// which case the notification is skipped.
+const (
+	ServiceCRMActivitySink ServiceKey = "crm.activity_sink"
+)

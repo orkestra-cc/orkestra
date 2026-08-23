@@ -42,7 +42,12 @@ repos:
     hooks:
       - id: conventional-pre-commit
         stages: [commit-msg]
-        args: [feat, fix, chore, docs, refactor, test, ci, build, perf, style, revert]
+        # `merge` is the fork chain's own type: ADR-0010 return-merges and clone
+        # syncs are subjects like `merge(upstream): …` / `merge(commons): …`.
+        # The convention is used ~40 times in this history, but the hook never
+        # ran on the private forks — their checkouts had no hooks installed —
+        # so the contradiction stayed invisible until they did.
+        args: [feat, fix, chore, docs, refactor, test, ci, build, perf, style, revert, merge]
 
   # --- Go (local hooks — use the mise-installed gofmt) ---------------------
   - repo: local

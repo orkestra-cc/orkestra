@@ -1,3 +1,4 @@
+import type { ComponentType, LazyExoticComponent } from 'react';
 import type { RouteObject } from 'react-router';
 
 export interface ModuleManifest {
@@ -5,6 +6,10 @@ export interface ModuleManifest {
   name: string;
   /** Returns route objects for this module (components use React.lazy inside) */
   routes: () => RouteObject[];
+  /** Optional app-wide surface, mounted only while this module is visible. */
+  globalOverlay?: LazyExoticComponent<ComponentType>;
+  /** Optional top-navbar action, mounted only while this module is visible. */
+  globalNavAction?: LazyExoticComponent<ComponentType>;
   /** Dynamically imports the API slice file, triggering injectEndpoints as a side effect */
   injectApi?: () => Promise<unknown>;
   /**

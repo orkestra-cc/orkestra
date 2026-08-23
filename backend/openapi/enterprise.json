@@ -4059,8 +4059,16 @@
           "icon": {
             "description": "Icon identifier (string or array for FontAwesome)"
           },
+          "itemKey": {
+            "description": "Stable module-local navigation key",
+            "type": "string"
+          },
           "label": {
             "description": "Additional label text",
+            "type": "string"
+          },
+          "moduleName": {
+            "description": "Backend module that contributed this item",
             "type": "string"
           },
           "name": {

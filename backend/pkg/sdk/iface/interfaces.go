@@ -1153,3 +1153,26 @@ func newStringError(s string) error { return &stringError{s: s} }
 type stringError struct{ s string }
 
 func (e *stringError) Error() string { return e.s }
+
+// CRMActivityInput describes a billing event worth a human follow-up.
+//
+// Email is how the CRM finds the person: the billing stack and the CRM keep
+// separate directories, and Email is the only field both hold.
+type CRMActivityInput struct {
+	TenantUUID string
+	Email      string
+	Kind       string // "payment_failed" | "subscription_suspended" | "manual_payment_required"
+	Summary    string
+	Metadata   map[string]string
+}
+
+// CRMActivitySink — implemented by: crm. Consumed by: subscriptions.
+//
+// Records a billing event against an existing CRM person so someone can act
+// on it. Implementations MUST NOT create a person that does not exist: the
+// CRM carries explicit consent records and a lawful basis per contact, and
+// enrolling someone off the back of a failed charge is not a decision a
+// billing notifier gets to make. No match = log and return nil.
+type CRMActivitySink interface {
+	RecordActivity(ctx context.Context, in CRMActivityInput) error
+}

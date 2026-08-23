@@ -9,15 +9,17 @@ type Badge struct {
 // NavItem represents a single navigation item
 // Internal fields (Roles, Permissions) are not serialized to JSON
 type NavItem struct {
-	Name     string    `json:"name" doc:"Display name of the navigation item"`
-	To       string    `json:"to,omitempty" doc:"Route path for navigation"`
-	Icon     any       `json:"icon,omitempty" doc:"Icon identifier (string or array for FontAwesome)"`
-	Active   bool      `json:"active" doc:"Whether the item is active/enabled"`
-	Exact    bool      `json:"exact,omitempty" doc:"Require exact path match for active state"`
-	Newtab   bool      `json:"newtab,omitempty" doc:"Open link in new tab"`
-	Badge    *Badge    `json:"badge,omitempty" doc:"Optional badge to display"`
-	Label    string    `json:"label,omitempty" doc:"Additional label text"`
-	Children []NavItem `json:"children,omitempty" doc:"Nested navigation items"`
+	ModuleName string    `json:"moduleName,omitempty" doc:"Backend module that contributed this item"`
+	ItemKey    string    `json:"itemKey,omitempty" doc:"Stable module-local navigation key"`
+	Name       string    `json:"name" doc:"Display name of the navigation item"`
+	To         string    `json:"to,omitempty" doc:"Route path for navigation"`
+	Icon       any       `json:"icon,omitempty" doc:"Icon identifier (string or array for FontAwesome)"`
+	Active     bool      `json:"active" doc:"Whether the item is active/enabled"`
+	Exact      bool      `json:"exact,omitempty" doc:"Require exact path match for active state"`
+	Newtab     bool      `json:"newtab,omitempty" doc:"Open link in new tab"`
+	Badge      *Badge    `json:"badge,omitempty" doc:"Optional badge to display"`
+	Label      string    `json:"label,omitempty" doc:"Additional label text"`
+	Children   []NavItem `json:"children,omitempty" doc:"Nested navigation items"`
 
 	// Internal fields - NOT sent to frontend (used for filtering)
 	Roles       []string `json:"-"` // Required roles to access this item
