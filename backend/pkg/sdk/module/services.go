@@ -106,6 +106,9 @@ const (
 	// its audit sink via SetAuditSink — the public provider interface stays
 	// slim, the concrete service carries post-init setters.
 	ServiceTenantService ServiceKey = "tenant.service"
+	// ServiceDefaultTenantProvider resolves the platform default Tier-1
+	// tenant (tenant_defaults pointer). Value: iface.DefaultTenantProvider.
+	ServiceDefaultTenantProvider ServiceKey = "tenant.default_provider"
 	// ServiceBillingTenantProvider exposes the unified-clients billing-party
 	// resolver: walks up Tenant.ParentTenantUUID until it finds a tenant
 	// carrying FatturaPA fields and returns the snapshot the billing send

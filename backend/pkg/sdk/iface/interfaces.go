@@ -441,6 +441,22 @@ type TenantProvider interface {
 }
 
 // ---------------------------------------------------------------------------
+// DefaultTenantProvider — consumed by: auth (operator JWT tenant-fallback
+// seeding), the local dev-token resolver. Deliberately narrow: the wide
+// TenantProvider is NOT widened (its test fakes and consumers stay intact).
+// ---------------------------------------------------------------------------
+
+// DefaultTenantProvider resolves the platform default Tier-1 tenant.
+// Returns (nil, nil) when no default is assigned or the pointer's target is
+// not operational (status active, not soft-deleted) — the provider never
+// hands out a non-operational target. It grants nothing: membership
+// validation, RBAC, audience checks, and X-Tenant-ID override all still
+// apply downstream.
+type DefaultTenantProvider interface {
+	GetDefaultTenant(ctx context.Context) (*Tenant, error)
+}
+
+// ---------------------------------------------------------------------------
 // BillingTenantProvider — consumed by: billing (Phase 5), payments self-
 // service (Phase 5), invoice send path.
 //

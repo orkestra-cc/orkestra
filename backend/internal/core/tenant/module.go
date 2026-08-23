@@ -143,6 +143,13 @@ func (m *Module) Collections() []module.CollectionSpec {
 			{Keys: map[string]int{"capabilityId": 1}},
 			{Keys: map[string]int{"expiresAt": 1}, Sparse: true},
 		}},
+		// Platform-global default-tenant pointer — deliberately carries no
+		// tenantId: it identifies the tenant used to BEGIN operator
+		// resolution, so it cannot itself be tenant-scoped. Unique `kind`
+		// makes replacement a single-document atomic update.
+		{Name: repository.CollDefaults, Indexes: []module.IndexSpec{
+			{Keys: map[string]int{"kind": 1}, Unique: true},
+		}},
 	}
 }
 

@@ -22,12 +22,13 @@ Does not own org-scoped roles or permissions — those are authz role bindings. 
 | `services/billing.go` | Unified-clients (Phase 1) — `SetItalianBillable`, `SetBillingIdentity`, `ResolveBillingParty`, `EnsureTenantForUser` (honours external provisioning mode), `iface.BillingTenantProvider` implementation |
 | `services/entitlements.go` | Capability-entitlement projection (`iface.AccessProvider`) |
 | `repository/repository.go` | MongoDB CRUD for orgs, memberships, invites; personal-tenant predicate lookup; `CountProvisioningSlotsByKind` (single-mode invariant) |
-| `models/tenant.go` | `Tenant`, `TenantMembership`, `TenantInvite`, `TenantAncestor`, `FatturaPAProfile` structs + `TenantKind`/`TenantStatus`/plan/`ProvisioningMode*` constants |
+| `repository/defaults.go` | `GetDefault`/`SetDefault`/`RunDefaultGuarded` — the platform-global default-tenant pointer (`tenant_defaults`). `SetDefault` and `RunDefaultGuarded` share a `withTxn` helper and both run inside a MongoDB multi-document transaction (requires a replica-set deployment) so a default transfer serializes against a concurrent suspend/archive/soft-delete of either tenant involved via write-conflict retry |
+| `models/tenant.go` | `Tenant`, `TenantMembership`, `TenantInvite`, `TenantAncestor`, `TenantDefault`, `FatturaPAProfile` structs + `TenantKind`/`TenantStatus`/plan/`ProvisioningMode*`/`DefaultUpdateSource*` constants |
 | `models/entitlement.go` | Capability-entitlement projection row |
 
 ## MongoDB collections
 
-Declared in `module.go::Collections()` (`module.go:77`).
+Declared in `module.go::Collections()` (`module.go:98`).
 
 | Collection | Indexes | TTL |
 |---|---|---|
@@ -36,8 +37,9 @@ Declared in `module.go::Collections()` (`module.go:77`).
 | `tenant_invites` | `tokenHash` unique sparse, `tenantId`, `expiresAt` TTL(ExpireAt) | `expiresAt` is a TTL index with `expireAfterSeconds=0` so Mongo reaps the doc the moment the timestamp passes. |
 | `tenant_ancestors` | compound `(descendantUUID, ancestorUUID)` unique, `ancestorUUID` | — — closure table for the tenant hierarchy (ADR-0001) |
 | `tenant_entitlements` | `uuid` unique sparse, compound `(tenantUUID, capabilityId)`, `capabilityId`, `expiresAt` sparse | — — capability projection (at most one active row per capability, enforced in the service) |
+| `tenant_defaults` | `kind` unique | — — **platform-global, no `tenantId`**: one row per `TenantKind`, replaced atomically. Holds the platform default Tier-1 tenant pointer that begins operator resolution; a tenant document never carries an `isDefault` flag — any DTO field of that name is derived from this row. Every read/write carries an inline `//tenantscope:allow` exemption (see [Org-scoping invariants](#org-scoping-invariants)) rather than a `tools/tenantscope/baseline.txt` entry. |
 
-Collection name constants live in `repository/repository.go` (`CollTenants`, `CollMemberships`, `CollInvites`, `CollAncestors`) and `repository/entitlements.go` (`CollEntitlements`).
+Collection name constants live in `repository/repository.go` (`CollTenants`, `CollMemberships`, `CollInvites`, `CollAncestors`), `repository/entitlements.go` (`CollEntitlements`), and `repository/defaults.go` (`CollDefaults`).
 
 ## Dependencies
 

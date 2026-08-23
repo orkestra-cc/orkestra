@@ -271,6 +271,30 @@ type TenantAncestor struct {
 	CreatedAt      time.Time          `bson:"createdAt" json:"createdAt"`
 }
 
+// Platform default pointer provenance. `updatedBy` stays UUID-only; the
+// automated origin is recorded separately in `updateSource` so a non-UUID
+// sentinel never lands in an actor field.
+const (
+	DefaultUpdateSourceSetup     = "setup"
+	DefaultUpdateSourceTransfer  = "admin_transfer"
+	DefaultUpdateSourceMigration = "migration"
+)
+
+// TenantDefault is the platform-global default-tenant pointer — one row
+// per kind (unique index), replaced atomically. The pointer row, not a
+// flag on tenant documents, is the canonical state; DTO `isDefault` is
+// derived from it. Revision is bumped by every guarded transaction so a
+// transfer serializes against lifecycle mutations via write-conflict retry.
+type TenantDefault struct {
+	Kind         TenantKind `bson:"kind"`
+	TenantUUID   string     `bson:"tenantUUID"`
+	UpdatedBy    string     `bson:"updatedBy,omitempty"`
+	UpdateSource string     `bson:"updateSource"`
+	Revision     int64      `bson:"revision"`
+	CreatedAt    time.Time  `bson:"createdAt"`
+	UpdatedAt    time.Time  `bson:"updatedAt"`
+}
+
 // TenantMembership links a user to a tenant with a set of role names. A user
 // with no membership cannot access that tenant.
 //
