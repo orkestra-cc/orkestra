@@ -11,6 +11,7 @@ import (
 	"github.com/orkestra/backend/internal/core/tenant/models"
 	"github.com/orkestra/backend/internal/core/tenant/repository"
 	"github.com/orkestra/backend/internal/core/tenant/services"
+	"github.com/orkestra/backend/internal/shared/errcode"
 	"github.com/orkestra/backend/pkg/sdk/ctxauth"
 	"github.com/orkestra/backend/pkg/sdk/iface"
 	"github.com/orkestra/backend/pkg/sdk/module"
@@ -313,12 +314,20 @@ func (h *Handler) createTenant(ctx context.Context, in *createTenantInput) (*ten
 	}
 	t, err := h.svc.CreateTenant(ctx, userUUID, in.Body)
 	if err != nil {
-		if errors.Is(err, services.ErrProvisioningLocked) {
-			return nil, huma.Error409Conflict("tenant creation is locked: the system is configured for a single tenant of this tier")
-		}
-		return nil, tenantInternalError(ctx, "create the tenant", err)
+		return nil, mapTenantCreateError(ctx, "create the tenant", err)
 	}
 	return &tenantOutput{Body: t}, nil
+}
+
+func mapTenantCreateError(ctx context.Context, operation string, err error) error {
+	switch {
+	case errors.Is(err, services.ErrProvisioningLocked):
+		return huma.Error409Conflict("tenant creation is locked: the system is configured for a single tenant of this tier")
+	case errors.Is(err, services.ErrSlugAlreadyInUse):
+		return errcode.Conflict(errcode.TenantSlugAlreadyInUse, "An organization with this slug already exists.")
+	default:
+		return tenantInternalError(ctx, operation, err)
+	}
 }
 
 // enforceManualGate rejects the request when the tier's provisioning mode is
@@ -454,6 +463,9 @@ func (h *Handler) getTenant(ctx context.Context, in *tenantIDPath) (*tenantOutpu
 
 func (h *Handler) updateTenant(ctx context.Context, in *updateTenantInput) (*tenantOutput, error) {
 	if err := h.svc.UpdateTenant(ctx, in.TenantID, in.Body); err != nil {
+		if errors.Is(err, services.ErrSlugAlreadyInUse) {
+			return nil, errcode.Conflict(errcode.TenantSlugAlreadyInUse, "An organization with this slug already exists.")
+		}
 		return nil, tenantInternalError(ctx, "update the tenant", err)
 	}
 	t, err := h.svc.GetTenantModel(ctx, in.TenantID)
@@ -1107,6 +1119,9 @@ func (h *Handler) createDivision(ctx context.Context, in *createDivisionInput) (
 	if err != nil {
 		if errors.Is(err, services.ErrProvisioningLocked) {
 			return nil, huma.Error409Conflict("tenant creation is locked by the provisioning policy")
+		}
+		if errors.Is(err, services.ErrSlugAlreadyInUse) {
+			return nil, errcode.Conflict(errcode.TenantSlugAlreadyInUse, "An organization with this slug already exists.")
 		}
 		return nil, tenantInternalError(ctx, "create the division", err)
 	}

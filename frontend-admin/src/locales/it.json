@@ -157,6 +157,9 @@
       "self_delete_forbidden": "Non puoi eliminare il tuo account.",
       "last_admin_forbidden": "Impossibile rimuovere l'ultimo amministratore attivo."
     },
+    "tenant": {
+      "slug_already_in_use": "Esiste già un'organizzazione con questo slug."
+    },
     "auth": {
       "jwt_not_configured": "Accesso non disponibile: il server non riesce a leggere le proprie chiavi di firma. Contatta un amministratore.",
       "unavailable": "Accesso non riuscito per un motivo imprevisto. Il problema è stato registrato.",

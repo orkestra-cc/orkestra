@@ -298,9 +298,28 @@ func (h *Handler) createBinding(ctx context.Context, in *createBindingInput) (*b
 	grantedBy, _ := ctxauth.GetUserUUID(ctx)
 	b, err := h.svc.CreateBinding(ctx, in.TenantID, grantedBy, in.Body)
 	if err != nil {
-		return nil, authzInternalError(ctx, "create the role binding", err)
+		return nil, mapCreateBindingError(ctx, err)
 	}
 	return &bindingOutput{Body: b}, nil
+}
+
+func mapCreateBindingError(ctx context.Context, err error) error {
+	switch {
+	case errors.Is(err, repository.ErrNotFound):
+		return huma.Error404NotFound("role not found")
+	case errors.Is(err, services.ErrRoleInactive):
+		return huma.Error409Conflict("the selected role is inactive")
+	case errors.Is(err, services.ErrSystemRoleNotGrantableInTenant):
+		return huma.Error400BadRequest("platform roles must be granted globally")
+	case errors.Is(err, services.ErrTenantRoleNotGrantableGlobally):
+		return huma.Error400BadRequest("tenant roles must be granted within a tenant")
+	case errors.Is(err, services.ErrInsufficientPermissionsToGrant):
+		return huma.Error403Forbidden("you cannot grant a role with permissions you do not hold")
+	case errors.Is(err, services.ErrGranterRequired):
+		return huma.Error400BadRequest("the grantor is required")
+	default:
+		return authzInternalError(ctx, "create the role binding", err)
+	}
 }
 
 func (h *Handler) deleteBinding(ctx context.Context, in *deleteBindingInput) (*struct{}, error) {

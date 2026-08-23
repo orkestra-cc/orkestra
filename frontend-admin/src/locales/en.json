@@ -157,6 +157,9 @@
       "self_delete_forbidden": "You cannot delete your own account.",
       "last_admin_forbidden": "Refusing to remove the last active administrator."
     },
+    "tenant": {
+      "slug_already_in_use": "An organization with this slug already exists."
+    },
     "auth": {
       "jwt_not_configured": "Sign-in is unavailable: the server cannot read its signing keys. Contact an administrator.",
       "unavailable": "Sign-in failed unexpectedly. The problem has been logged.",

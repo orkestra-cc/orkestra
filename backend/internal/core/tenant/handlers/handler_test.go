@@ -11,6 +11,7 @@ import (
 	"github.com/orkestra/backend/internal/core/tenant/models"
 	"github.com/orkestra/backend/internal/core/tenant/repository"
 	"github.com/orkestra/backend/internal/core/tenant/services"
+	"github.com/orkestra/backend/internal/shared/errcode"
 	"github.com/orkestra/backend/pkg/sdk/ctxauth"
 	"github.com/orkestra/backend/pkg/sdk/iface"
 	"github.com/orkestra/backend/pkg/sdk/module"
@@ -294,6 +295,17 @@ func assertStatus(t *testing.T, err error, want int) {
 	}
 }
 
+func assertErrorCode(t *testing.T, err error, want string) {
+	t.Helper()
+	var coded *errcode.Error
+	if !errors.As(err, &coded) {
+		t.Fatalf("err %v is not an errcode.Error", err)
+	}
+	if coded.Code != want {
+		t.Errorf("code = %q, want %q", coded.Code, want)
+	}
+}
+
 // authedCtx returns a context with a userUUID stamped, mimicking what
 // AuthMiddleware does on a real request.
 func authedCtx(userUUID string) context.Context {
@@ -478,6 +490,22 @@ func TestCreateTenant_ProvisioningLocked409(t *testing.T) {
 	assertStatus(t, err, 409)
 }
 
+func TestCreateTenant_SlugAlreadyInUse409WithoutRawSlug(t *testing.T) {
+	t.Parallel()
+	svc := &fakeTenantSvc{
+		createTenantFn: func(context.Context, string, models.CreateTenantInput) (*models.Tenant, error) {
+			return nil, services.ErrSlugAlreadyInUse
+		},
+	}
+	h := New(svc, nil)
+	_, err := h.createTenant(authedCtx("u1"), &createTenantInput{Body: models.CreateTenantInput{Slug: "private-slug-42"}})
+	assertStatus(t, err, 409)
+	assertErrorCode(t, err, errcode.TenantSlugAlreadyInUse)
+	if strings.Contains(err.Error(), "private-slug-42") {
+		t.Fatalf("raw slug reached the client: %q", err)
+	}
+}
+
 // --- getTenant / updateTenant / deleteTenant / purgeTenant / updatePlan ---
 
 func TestGetTenant(t *testing.T) {
@@ -538,7 +566,7 @@ func TestUpdateTenant(t *testing.T) {
 			t.Errorf("Name = %q", out.Body.Name)
 		}
 	})
-	t.Run("svc error → 500", func(t *testing.T) {
+	t.Run("unknown svc error → 500", func(t *testing.T) {
 		t.Parallel()
 		svc := &fakeTenantSvc{
 			updateTenantFn: func(context.Context, string, models.UpdateTenantInput) error {
@@ -548,6 +576,22 @@ func TestUpdateTenant(t *testing.T) {
 		h := New(svc, nil)
 		_, err := h.updateTenant(context.Background(), &updateTenantInput{TenantID: "t-1"})
 		assertStatus(t, err, 500)
+	})
+	t.Run("duplicate slug → 409 without raw slug", func(t *testing.T) {
+		t.Parallel()
+		svc := &fakeTenantSvc{
+			updateTenantFn: func(context.Context, string, models.UpdateTenantInput) error {
+				return services.ErrSlugAlreadyInUse
+			},
+		}
+		h := New(svc, nil)
+		slug := "private-slug-42"
+		_, err := h.updateTenant(context.Background(), &updateTenantInput{TenantID: "t-1", Body: models.UpdateTenantInput{Slug: &slug}})
+		assertStatus(t, err, 409)
+		assertErrorCode(t, err, errcode.TenantSlugAlreadyInUse)
+		if strings.Contains(err.Error(), "private-slug-42") {
+			t.Fatalf("raw slug reached the client: %q", err)
+		}
 	})
 	t.Run("reload not found → 404", func(t *testing.T) {
 		t.Parallel()

@@ -16,6 +16,7 @@ import (
 	"github.com/orkestra/backend/internal/core/tenant/repository"
 	"github.com/orkestra/backend/pkg/sdk/iface"
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/mongo"
 )
 
 // Service owns tenant lifecycle and implements iface.TenantProvider.
@@ -51,6 +52,18 @@ type ProvisioningModeResolver func(ctx context.Context, kind models.TenantKind) 
 // tier — `single` mode with one already present, or `manual`/`single` blocking
 // lazy provisioning of an external personal tenant. Handlers map it to 409.
 var ErrProvisioningLocked = errors.New("tenant: provisioning locked by policy")
+
+// ErrSlugAlreadyInUse is returned when a create or update would reuse an
+// existing tenant slug. Handlers map it to a stable 409 response; the wrapped
+// slug remains diagnostic data for logs only.
+var ErrSlugAlreadyInUse = errors.New("tenant: slug already in use")
+
+func tenantWriteError(err error) error {
+	if mongo.IsDuplicateKeyError(err) && strings.Contains(err.Error(), "index: slug_1") {
+		return fmt.Errorf("%w: %v", ErrSlugAlreadyInUse, err)
+	}
+	return err
+}
 
 // OwnerRoleBinder is invoked from CreateTenant after the owner membership
 // is inserted, to grant the org_owner authz binding so the new tenant's
@@ -300,7 +313,7 @@ func (s *Service) CreateTenant(ctx context.Context, ownerUUID string, input mode
 		slug = slugify(input.Name)
 	}
 	if existing, _ := s.repo.GetTenantBySlug(ctx, slug); existing != nil {
-		return nil, fmt.Errorf("slug already in use: %s", slug)
+		return nil, fmt.Errorf("%w: %s", ErrSlugAlreadyInUse, slug)
 	}
 
 	plan := input.Plan
@@ -368,7 +381,7 @@ func (s *Service) CreateTenant(ctx context.Context, ownerUUID string, input mode
 	}
 
 	if err := s.repo.CreateTenant(ctx, t); err != nil {
-		return nil, err
+		return nil, tenantWriteError(err)
 	}
 
 	// Per-tenant KMS key — minted before membership bookkeeping so a
@@ -624,7 +637,7 @@ func (s *Service) UpdateTenant(ctx context.Context, tenantUUID string, input mod
 	if input.Slug != nil {
 		slug := slugify(*input.Slug)
 		if existing, _ := s.repo.GetTenantBySlug(ctx, slug); existing != nil && existing.UUID != tenantUUID {
-			return fmt.Errorf("slug already in use: %s", slug)
+			return fmt.Errorf("%w: %s", ErrSlugAlreadyInUse, slug)
 		}
 		update["slug"] = slug
 	}
@@ -634,7 +647,7 @@ func (s *Service) UpdateTenant(ctx context.Context, tenantUUID string, input mod
 	if len(update) == 0 {
 		return nil
 	}
-	return s.repo.UpdateTenant(ctx, tenantUUID, update)
+	return tenantWriteError(s.repo.UpdateTenant(ctx, tenantUUID, update))
 }
 
 // UpdatePlan updates the tenant's plan label. Plan is informational only —

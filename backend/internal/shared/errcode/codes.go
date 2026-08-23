@@ -64,6 +64,12 @@ const AuthPasswordConfirmUnavailable = "auth.password_confirm_unavailable"
 // is not enabled for the surface the request came in on. 403.
 const AuthOAuthProviderDisabled = "auth.oauth_provider_disabled"
 
+// --- tenant ---
+
+// TenantSlugAlreadyInUse signals that a tenant create or update would reuse an
+// existing organization slug. 409.
+const TenantSlugAlreadyInUse = "tenant.slug_already_in_use"
+
 // --- user ---
 
 // UserSelfDeleteForbidden signals that an admin tried to delete (or

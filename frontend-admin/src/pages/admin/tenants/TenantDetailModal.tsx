@@ -25,6 +25,7 @@ import {
   type AdminOrgListItem,
   type Invite
 } from 'store/api/tenantApi';
+import resolveErrorMessage, { type ApiErrorBody } from 'helpers/errorMessage';
 
 interface Props {
   org: AdminOrgListItem | null;
@@ -674,8 +675,7 @@ const InvitesTab: React.FC<{ org: AdminOrgListItem }> = ({ org }) => {
 
 function extractError(err: unknown, fallback: string): string {
   if (err && typeof err === 'object' && 'data' in err) {
-    const data = (err as { data?: { detail?: string; title?: string } }).data;
-    return data?.detail || data?.title || fallback;
+    return resolveErrorMessage((err as { data?: ApiErrorBody }).data, fallback);
   }
   return String(err);
 }
