@@ -141,7 +141,7 @@ When `GetUserForAuth` finds no user, the password service runs `Verify` against 
 ### Registration
 
 1. `POST /v1/auth/{tier}/register` with `{email, password, fullName}`.
-2. **Signup kill switch**: `registrationEnabledAdmin/Client` both default to **off** — a fresh install accepts no self-service signups until the super_admin enables them at `/admin/modules/auth`, so a non-first request returns `403 registration_disabled`. The very first account on a fresh install bypasses this switch (see step 3) so bootstrap is never blocked.
+2. **Signup kill switch**: `registrationEnabledAdmin/Client` both default to **off** — a fresh install accepts no self-service signups until the super_admin enables them at `/admin/modules/auth`, so a non-first request returns `403 auth.registration_disabled`. The very first account on a fresh install bypasses this switch (see step 3) so bootstrap is never blocked.
 3. Backend validates policy + HIBP, hashes with argon2id, writes to `{tier}_users`. **First-user bootstrap**: if `GetUserCount(ctx, nil) == 0` the new account gets `super_admin` and skips the kill switch. Subsequent accounts default to `operator`.
 4. A 32-byte random verification token is generated, SHA-256-hashed, stored in `{tier}_email_tokens` with a 24h TTL, and the raw token is delivered by `notifier.SendTemplated("auth.verify_email", ...)`.
 5. If `AUTH_REQUIRE_EMAIL_VERIFICATION=true` (production default) and the notifier is missing or unconfigured, registration returns `503 Service Unavailable`. If `false` (dev default), the account is auto-verified and no email is sent.

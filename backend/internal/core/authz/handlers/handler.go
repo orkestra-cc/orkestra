@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -17,6 +18,14 @@ type Handler struct {
 }
 
 func New(svc *services.Service) *Handler { return &Handler{svc: svc} }
+
+// authzInternalError keeps evaluator, repository, and policy-engine details in
+// logs. A handler that cannot classify a service error must not blame the
+// caller with a 4xx or make the internal diagnostic part of the API contract.
+func authzInternalError(ctx context.Context, operation string, err error) error {
+	slog.ErrorContext(ctx, "authorization operation failed", "operation", operation, "error", err)
+	return huma.Error500InternalServerError("Unable to " + operation + ". The failure has been logged.")
+}
 
 // --- Input/output envelopes ---
 
@@ -231,7 +240,7 @@ func (h *Handler) createRole(ctx context.Context, in *createRoleInput) (*roleOut
 	}
 	role, err := h.svc.CreateRole(ctx, in.TenantID, in.Body)
 	if err != nil {
-		return nil, huma.Error400BadRequest("create role failed: " + err.Error())
+		return nil, authzInternalError(ctx, "create the role", err)
 	}
 	return &roleOutput{Body: role}, nil
 }
@@ -248,7 +257,7 @@ func (h *Handler) updateRole(ctx context.Context, in *updateRoleInput) (*roleOut
 		case errors.Is(err, services.ErrSystemRoleImmutable):
 			return nil, huma.Error403Forbidden("system roles cannot be edited — only disabled")
 		default:
-			return nil, huma.Error400BadRequest("update role failed: " + err.Error())
+			return nil, authzInternalError(ctx, "update the role", err)
 		}
 	}
 	return &roleOutput{Body: role}, nil
@@ -265,7 +274,7 @@ func (h *Handler) deleteRole(ctx context.Context, in *deleteRoleInput) (*struct{
 		case errors.Is(err, services.ErrSystemRoleImmutable):
 			return nil, huma.Error403Forbidden("system roles cannot be deleted")
 		default:
-			return nil, huma.Error400BadRequest("delete role failed: " + err.Error())
+			return nil, authzInternalError(ctx, "delete the role", err)
 		}
 	}
 	return &struct{}{}, nil
@@ -289,9 +298,28 @@ func (h *Handler) createBinding(ctx context.Context, in *createBindingInput) (*b
 	grantedBy, _ := ctxauth.GetUserUUID(ctx)
 	b, err := h.svc.CreateBinding(ctx, in.TenantID, grantedBy, in.Body)
 	if err != nil {
-		return nil, huma.Error400BadRequest("create binding failed: " + err.Error())
+		return nil, mapCreateBindingError(ctx, err)
 	}
 	return &bindingOutput{Body: b}, nil
+}
+
+func mapCreateBindingError(ctx context.Context, err error) error {
+	switch {
+	case errors.Is(err, repository.ErrNotFound):
+		return huma.Error404NotFound("role not found")
+	case errors.Is(err, services.ErrRoleInactive):
+		return huma.Error409Conflict("the selected role is inactive")
+	case errors.Is(err, services.ErrSystemRoleNotGrantableInTenant):
+		return huma.Error400BadRequest("platform roles must be granted globally")
+	case errors.Is(err, services.ErrTenantRoleNotGrantableGlobally):
+		return huma.Error400BadRequest("tenant roles must be granted within a tenant")
+	case errors.Is(err, services.ErrInsufficientPermissionsToGrant):
+		return huma.Error403Forbidden("you cannot grant a role with permissions you do not hold")
+	case errors.Is(err, services.ErrGranterRequired):
+		return huma.Error400BadRequest("the grantor is required")
+	default:
+		return authzInternalError(ctx, "create the role binding", err)
+	}
 }
 
 func (h *Handler) deleteBinding(ctx context.Context, in *deleteBindingInput) (*struct{}, error) {
@@ -302,7 +330,7 @@ func (h *Handler) deleteBinding(ctx context.Context, in *deleteBindingInput) (*s
 		if errors.Is(err, repository.ErrNotFound) {
 			return nil, huma.Error404NotFound("binding not found")
 		}
-		return nil, huma.Error400BadRequest("delete binding failed: " + err.Error())
+		return nil, authzInternalError(ctx, "delete the role binding", err)
 	}
 	return &struct{}{}, nil
 }

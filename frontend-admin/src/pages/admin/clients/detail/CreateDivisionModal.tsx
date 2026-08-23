@@ -4,6 +4,7 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'react-toastify';
 import { useCreateTenantDivisionAdminMutation } from 'store/api/tenantApi';
+import resolveErrorMessage, { type ApiErrorBody } from 'helpers/errorMessage';
 
 interface Props {
   parentId: string;
@@ -139,8 +140,10 @@ const CreateDivisionModal: React.FC<Props> = ({
 
 function extractError(err: unknown, unknownLabel: string): string {
   if (err && typeof err === 'object' && 'data' in err) {
-    const data = (err as { data?: { detail?: string; title?: string } }).data;
-    return data?.detail || data?.title || unknownLabel;
+    return resolveErrorMessage(
+      (err as { data?: ApiErrorBody }).data,
+      unknownLabel
+    );
   }
   return String(err);
 }

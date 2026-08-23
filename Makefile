@@ -150,7 +150,7 @@ frontend-client-clean:
 .PHONY: install install-hooks fmt ci-help
 .PHONY: ci ci-all ci-mcp ci-backend ci-frontend-admin ci-frontend-client ci-mobile
 .PHONY: mcp-check mcp-test
-.PHONY: backend-lint backend-test-ci backend-tenantscope backend-policycoverage backend-piiscan backend-vulncheck backend-build-ci backend-openapi-check backend-coverage-gate
+.PHONY: backend-lint backend-test-ci backend-tenantscope backend-errquality backend-policycoverage backend-piiscan backend-vulncheck backend-build-ci backend-openapi-check backend-coverage-gate
 .PHONY: admin-lockcheck admin-typecheck admin-lint admin-test admin-audit admin-build
 .PHONY: client-lockcheck client-typecheck client-lint client-build
 .PHONY: mobile-lockcheck
@@ -267,7 +267,7 @@ mcp-test:
 
 # ---- Backend ----
 
-ci-backend: backend-lint backend-tenantscope backend-policycoverage backend-piiscan backend-vulncheck backend-test-ci backend-coverage-gate backend-build-ci backend-openapi-check
+ci-backend: backend-lint backend-tenantscope backend-errquality backend-policycoverage backend-piiscan backend-vulncheck backend-test-ci backend-coverage-gate backend-build-ci backend-openapi-check
 	@echo "Backend CI: OK"
 
 # backend-openapi-check fails if the committed openapi/enterprise.json drifted
@@ -292,6 +292,15 @@ backend-tenantscope:
 	@cd backend && go test ./tools/tenantscope/...
 	@cd backend && go run ./tools/tenantscope/cmd/tenantscope \
 	  -baseline=tools/tenantscope/baseline.txt ./internal/...
+
+# backend-errquality fails on any client-facing error response that leaks
+# raw error text, says nothing, or reports a server fault as a client
+# error. Pre-existing violations are frozen in tools/errquality/baseline.txt;
+# new ones fail the build. See docs/superpowers/specs/2026-08-21-backend-error-quality-design.md.
+backend-errquality:
+	@cd backend && go test ./tools/errquality/...
+	@cd backend && go run ./tools/errquality/cmd/errquality \
+	  -baseline=tools/errquality/baseline.txt ./internal/...
 
 backend-policycoverage:
 	@cd backend && go test ./tools/policycoverage/...

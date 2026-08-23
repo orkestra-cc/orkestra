@@ -18,6 +18,7 @@ import (
 	"github.com/orkestra/backend/internal/core/auth/services"
 	"github.com/orkestra/backend/internal/shared/blob"
 	"github.com/orkestra/backend/internal/shared/config"
+	"github.com/orkestra/backend/internal/shared/errcode"
 	"github.com/orkestra/backend/internal/shared/middleware"
 	"github.com/orkestra/backend/internal/shared/types"
 	"github.com/orkestra/backend/internal/shared/utils"
@@ -138,24 +139,16 @@ func (h *AuthHandler) policyAudience() services.PolicyAudience {
 
 // oauthProviderAllowed combines two checks: the kill switch on the
 // surface, and the per-provider per-surface enable flag. Both must
-// be true. Returns nil on success, a 403 codedError otherwise so
+// be true. Returns nil on success, a 403 *errcode.Error otherwise so
 // callers can return it directly.
 func (h *AuthHandler) oauthProviderAllowed(ctx context.Context, provider string) error {
 	if !h.loginAllowed(ctx) {
-		return &codedError{
-			Status: http.StatusForbidden,
-			Title:  "Forbidden",
-			Detail: "Login is temporarily disabled for this surface. Contact an administrator.",
-			Code:   "login_disabled",
-		}
+		return errcode.Forbidden(errcode.AuthLoginDisabled,
+			"Login is temporarily disabled for this surface. Contact an administrator.")
 	}
 	if h.policy != nil && !h.policy.OAuthProviderEnabled(ctx, h.policyAudience(), provider) {
-		return &codedError{
-			Status: http.StatusForbidden,
-			Title:  "Forbidden",
-			Detail: "This OAuth provider is not enabled for this surface. Contact an administrator.",
-			Code:   "oauth_provider_disabled",
-		}
+		return errcode.Forbidden(errcode.AuthOAuthProviderDisabled,
+			"This OAuth provider is not enabled for this surface. Contact an administrator.")
 	}
 	return nil
 }

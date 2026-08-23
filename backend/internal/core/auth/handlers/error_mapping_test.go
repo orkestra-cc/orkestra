@@ -24,10 +24,11 @@ import (
 
 	authModels "github.com/orkestra/backend/internal/core/auth/models"
 	"github.com/orkestra/backend/internal/core/auth/services"
+	"github.com/orkestra/backend/internal/shared/errcode"
 )
 
 // statusOf extracts the HTTP status code from a Huma error or our
-// codedError envelope. Both implement huma.StatusError.
+// *errcode.Error envelope. Both implement huma.StatusError.
 func statusOf(t *testing.T, err error) int {
 	t.Helper()
 	var se huma.StatusError
@@ -42,21 +43,21 @@ func TestMapPasswordError_KnownCodes(t *testing.T) {
 		name     string
 		in       error
 		wantCode int
-		// Optional: when the case maps to a codedError, assert the
+		// Optional: when the case maps to an *errcode.Error, assert the
 		// machine-readable code field. Empty skips the check.
 		wantSlug string
 	}{
 		{"InvalidCredentials → 401", services.ErrInvalidCredentials, http.StatusUnauthorized, ""},
-		{"EmailNotVerified → 403 email_not_verified", services.ErrEmailNotVerified, http.StatusForbidden, "email_not_verified"},
+		{"EmailNotVerified → 403 auth.email_not_verified", services.ErrEmailNotVerified, http.StatusForbidden, errcode.AuthEmailNotVerified},
 		{"AccountLocked → 429", services.ErrAccountLocked, http.StatusTooManyRequests, ""},
 		{"UserInactive → 403", services.ErrUserInactive, http.StatusForbidden, ""},
 		{"PasswordReused → 400", services.ErrPasswordReused, http.StatusBadRequest, ""},
 		{"NotificationDown → 503", services.ErrNotificationDown, http.StatusServiceUnavailable, ""},
 		{"MFAEnrollmentRequired → 403", services.ErrMFAEnrollmentRequired, http.StatusForbidden, ""},
-		{"RegistrationDisabled → 403 registration_disabled", services.ErrRegistrationDisabled, http.StatusForbidden, "registration_disabled"},
-		{"EmailDomainNotAllowed → 403 email_domain_not_allowed", services.ErrEmailDomainNotAllowed, http.StatusForbidden, "email_domain_not_allowed"},
-		{"LoginDisabled → 403 login_disabled", services.ErrLoginDisabled, http.StatusForbidden, "login_disabled"},
-		{"CountryBlocked → 403 country_blocked", services.ErrCountryBlocked, http.StatusForbidden, "country_blocked"},
+		{"RegistrationDisabled → 403 auth.registration_disabled", services.ErrRegistrationDisabled, http.StatusForbidden, errcode.AuthRegistrationDisabled},
+		{"EmailDomainNotAllowed → 403 auth.email_domain_not_allowed", services.ErrEmailDomainNotAllowed, http.StatusForbidden, errcode.AuthEmailDomainNotAllowed},
+		{"LoginDisabled → 403 auth.login_disabled", services.ErrLoginDisabled, http.StatusForbidden, errcode.AuthLoginDisabled},
+		{"CountryBlocked → 403 auth.country_blocked", services.ErrCountryBlocked, http.StatusForbidden, errcode.AuthCountryBlocked},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -65,9 +66,9 @@ func TestMapPasswordError_KnownCodes(t *testing.T) {
 				t.Errorf("status = %d, want %d", got, tc.wantCode)
 			}
 			if tc.wantSlug != "" {
-				ce, ok := out.(*codedError)
-				if !ok {
-					t.Fatalf("expected *codedError for slug case, got %T", out)
+				var ce *errcode.Error
+				if !errors.As(out, &ce) {
+					t.Fatalf("expected *errcode.Error for slug case, got %T", out)
 				}
 				if ce.Code != tc.wantSlug {
 					t.Errorf("code = %q, want %q", ce.Code, tc.wantSlug)
@@ -78,9 +79,10 @@ func TestMapPasswordError_KnownCodes(t *testing.T) {
 }
 
 func TestMapPasswordError_PolicyValidationGroup(t *testing.T) {
-	// Every password-policy validation error maps to a 400 carrying the
-	// underlying error message verbatim — the SPA renders the localized
-	// reason directly. Spot-check the 8 errors as one group rather than
+	// Every password-policy validation error maps to a 400 carrying a
+	// written, human-safe sentence describing which rule failed (no
+	// longer err.Error() itself — see mapPasswordError's per-case
+	// literals). Spot-check the 8 errors as one group rather than
 	// inflating the table above.
 	policyErrs := []error{
 		services.ErrPasswordTooShort,
@@ -103,17 +105,32 @@ func TestMapPasswordError_PolicyValidationGroup(t *testing.T) {
 	}
 }
 
-func TestMapPasswordError_UnknownErrorFallsTo400(t *testing.T) {
-	// Anything not in the switch should fall to the generic 400 — the
-	// service caller doesn't get to leak arbitrary internal text. Also
-	// guards against the silent-no-match drift mode.
-	custom := errors.New("totally unexpected internal error")
-	out := mapPasswordError(custom)
-	if got := statusOf(t, out); got != http.StatusBadRequest {
-		t.Errorf("unknown err: status = %d, want 400", got)
+func TestMapPasswordError_JWTKeysNotLoadedIsUnavailable(t *testing.T) {
+	err := mapPasswordError(services.ErrJWTKeysNotLoaded)
+	if got := statusOf(t, err); got != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503", got)
 	}
-	if out.Error() == "totally unexpected internal error" {
-		t.Errorf("unknown err: must NOT leak the internal message verbatim, got %q", out.Error())
+	var ce *errcode.Error
+	if !errors.As(err, &ce) {
+		t.Fatalf("expected *errcode.Error, got %T", err)
+	}
+	if ce.Code != errcode.AuthJWTNotConfigured {
+		t.Fatalf("code = %q, want %q", ce.Code, errcode.AuthJWTNotConfigured)
+	}
+	if !strings.Contains(strings.ToLower(ce.Detail), "sign") &&
+		!strings.Contains(strings.ToLower(ce.Detail), "key") {
+		t.Fatalf("detail must name the cause, got %q", ce.Detail)
+	}
+}
+
+func TestMapPasswordError_UnknownErrorIsServerFault(t *testing.T) {
+	err := mapPasswordError(errors.New("something the handler has never seen"))
+	if got := statusOf(t, err); got != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500 — an unnamed error is not the caller's fault", got)
+	}
+	var ce *errcode.Error
+	if !errors.As(err, &ce) || ce.Code != errcode.AuthUnavailable {
+		t.Fatalf("want code %q, got %#v", errcode.AuthUnavailable, err)
 	}
 }
 
@@ -207,7 +224,7 @@ func TestMapMFAError_KnownCodes(t *testing.T) {
 		{"InvalidCode → 401", services.ErrMFAInvalidCode, http.StatusUnauthorized},
 		{"ChallengeMismatch → 400", services.ErrMFAChallengeMismatch, http.StatusBadRequest},
 		{"NotEnrolled → 400", services.ErrMFANotEnrolled, http.StatusBadRequest},
-		{"unknown → 400 fallback", errors.New("???"), http.StatusBadRequest},
+		{"unknown → 500 server fault", errors.New("???"), http.StatusInternalServerError},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -215,6 +232,28 @@ func TestMapMFAError_KnownCodes(t *testing.T) {
 				t.Errorf("status = %d, want %d", got, tc.wantCode)
 			}
 		})
+	}
+}
+
+func TestMapMFAError_UnknownErrorIsServerFault(t *testing.T) {
+	err := mapMFAError(errors.New("something the MFA handler has never seen"))
+	if got := statusOf(t, err); got != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500 — an unnamed error is not the caller's fault", got)
+	}
+	var ce *errcode.Error
+	if !errors.As(err, &ce) || ce.Code != errcode.AuthUnavailable {
+		t.Fatalf("want code %q, got %#v", errcode.AuthUnavailable, err)
+	}
+}
+
+func TestMapWebAuthnError_UnknownErrorIsServerFault(t *testing.T) {
+	err := mapWebAuthnError(errors.New("something the webauthn handler has never seen"))
+	if got := statusOf(t, err); got != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500 — an unnamed error is not the caller's fault", got)
+	}
+	var ce *errcode.Error
+	if !errors.As(err, &ce) || ce.Code != errcode.AuthUnavailable {
+		t.Fatalf("want code %q, got %#v", errcode.AuthUnavailable, err)
 	}
 }
 

@@ -156,6 +156,20 @@
     "user": {
       "self_delete_forbidden": "Non puoi eliminare il tuo account.",
       "last_admin_forbidden": "Impossibile rimuovere l'ultimo amministratore attivo."
+    },
+    "tenant": {
+      "slug_already_in_use": "Esiste già un'organizzazione con questo slug."
+    },
+    "auth": {
+      "jwt_not_configured": "Accesso non disponibile: il server non riesce a leggere le proprie chiavi di firma. Contatta un amministratore.",
+      "unavailable": "Accesso non riuscito per un motivo imprevisto. Il problema è stato registrato.",
+      "email_not_verified": "Indirizzo email non verificato. Controlla la posta in arrivo per l'email di verifica.",
+      "registration_disabled": "La registrazione self-service è disabilitata per questa superficie. Contatta un amministratore.",
+      "email_domain_not_allowed": "Le registrazioni da questo dominio email non sono consentite.",
+      "login_disabled": "L'accesso è temporaneamente disabilitato per questa superficie. Contatta un amministratore.",
+      "country_blocked": "L'accesso dal tuo paese non è consentito.",
+      "password_confirm_unavailable": "Questo account non può riconfermare con una password. Usa l'MFA o autenticati nuovamente tramite OAuth.",
+      "oauth_provider_disabled": "Questo provider OAuth non è abilitato per questa superficie. Contatta un amministratore."
     }
   },
   "banner": {

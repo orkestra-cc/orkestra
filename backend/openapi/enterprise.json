@@ -11530,7 +11530,7 @@
     },
     "/v1/auth/client/me/password-confirm": {
       "post": {
-        "description": "Returns a fresh access token with amr += \"reauth\" so the next destructive request passes RequireStepUp. Refuses with 409 password_confirm_unavailable when the user has any MFA factor or no password.",
+        "description": "Returns a fresh access token with amr += \"reauth\" so the next destructive request passes RequireStepUp. Refuses with 409 auth.password_confirm_unavailable when the user has any MFA factor or no password.",
         "operationId": "client-password-confirm",
         "requestBody": {
           "content": {
@@ -13193,7 +13193,7 @@
     },
     "/v1/auth/operator/me/password-confirm": {
       "post": {
-        "description": "Returns a fresh access token with amr += \"reauth\" so the next destructive request passes RequireStepUp. Refuses with 409 password_confirm_unavailable when the user has any MFA factor or no password.",
+        "description": "Returns a fresh access token with amr += \"reauth\" so the next destructive request passes RequireStepUp. Refuses with 409 auth.password_confirm_unavailable when the user has any MFA factor or no password.",
         "operationId": "operator-password-confirm",
         "requestBody": {
           "content": {
