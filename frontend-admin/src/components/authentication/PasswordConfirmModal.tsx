@@ -56,7 +56,7 @@ const PasswordConfirmModal = () => {
       };
       if (anyErr?.status === 401) {
         setError(t('auth.passwordConfirm.errors.incorrect'));
-      } else if (anyErr?.data?.code === 'password_confirm_unavailable') {
+      } else if (anyErr?.data?.code === 'auth.password_confirm_unavailable') {
         setError(t('auth.passwordConfirm.errors.unavailable'));
       } else if (anyErr?.status === 429) {
         setError(t('auth.passwordConfirm.errors.tooMany'));

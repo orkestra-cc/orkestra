@@ -156,6 +156,17 @@
     "user": {
       "self_delete_forbidden": "You cannot delete your own account.",
       "last_admin_forbidden": "Refusing to remove the last active administrator."
+    },
+    "auth": {
+      "jwt_not_configured": "Sign-in is unavailable: the server cannot read its signing keys. Contact an administrator.",
+      "unavailable": "Sign-in failed unexpectedly. The problem has been logged.",
+      "email_not_verified": "Email address not verified. Please check your inbox for the verification email.",
+      "registration_disabled": "Self-service registration is disabled for this surface. Contact an administrator.",
+      "email_domain_not_allowed": "Registrations from this email domain are not allowed.",
+      "login_disabled": "Login is temporarily disabled for this surface. Contact an administrator.",
+      "country_blocked": "Access from your country is not permitted.",
+      "password_confirm_unavailable": "This account cannot reconfirm with a password. Use MFA or reauthenticate via OAuth.",
+      "oauth_provider_disabled": "This OAuth provider is not enabled for this surface. Contact an administrator."
     }
   },
   "banner": {

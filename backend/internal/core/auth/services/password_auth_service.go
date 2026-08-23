@@ -35,14 +35,14 @@ var (
 	ErrLoginDisabled         = stderrors.New("login disabled for this surface")
 	// ErrCountryBlocked is returned when geoBlockCountries is configured
 	// and the request IP resolves to a blocked country. Translated to
-	// 403 country_blocked at the handler boundary.
+	// 403 auth.country_blocked at the handler boundary.
 	ErrCountryBlocked = stderrors.New("country blocked by policy")
 	// ErrPasswordConfirmUnavailable is returned by ConfirmPassword when
 	// the user can't satisfy step-up via a password reconfirm — either
 	// they have no password (pure-OAuth account) or they have at least
 	// one MFA factor enrolled (and must use that stronger gate instead).
-	// Translated to 409 password_confirm_unavailable so the frontend can
-	// nudge the user to the MFA path or a fresh OAuth flow.
+	// Translated to 409 auth.password_confirm_unavailable so the frontend
+	// can nudge the user to the MFA path or a fresh OAuth flow.
 	ErrPasswordConfirmUnavailable = stderrors.New("password reconfirm not available for this account")
 )
 

@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 
 	authModels "github.com/orkestra/backend/internal/core/auth/models"
 	"github.com/orkestra/backend/internal/core/auth/services"
+	"github.com/orkestra/backend/internal/shared/errcode"
 	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
@@ -491,7 +493,9 @@ func mapWebAuthnError(err error) error {
 		// Phase 3.6 — admin restricted passkeys via mfaMethods.
 		return huma.Error403Forbidden("mfa_method_disabled: webauthn is not allowed by policy")
 	default:
-		return huma.Error400BadRequest("webauthn request failed")
+		slog.Default().Error("unmapped webauthn auth error", slog.String("error", err.Error()))
+		return errcode.Internal(errcode.AuthUnavailable,
+			"Passkey verification failed for an unexpected reason. The failure has been logged for an administrator.")
 	}
 }
 

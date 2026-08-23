@@ -10,6 +10,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	authModels "github.com/orkestra/backend/internal/core/auth/models"
 	"github.com/orkestra/backend/internal/core/auth/services"
+	"github.com/orkestra/backend/internal/shared/errcode"
 	"github.com/orkestra/backend/internal/shared/utils"
 )
 
@@ -323,12 +324,8 @@ func (h *PasswordAuthHandler) PasswordConfirm(ctx context.Context, req *Password
 		case errors.Is(err, services.ErrInvalidCredentials):
 			return nil, huma.Error401Unauthorized("Invalid password")
 		case errors.Is(err, services.ErrPasswordConfirmUnavailable):
-			return nil, &codedError{
-				Status: http.StatusConflict,
-				Title:  "password reconfirm unavailable",
-				Detail: "this account cannot reconfirm with a password — use MFA or reauthenticate via OAuth",
-				Code:   "password_confirm_unavailable",
-			}
+			return nil, errcode.Conflict(errcode.AuthPasswordConfirmUnavailable,
+				"This account cannot reconfirm with a password — use MFA or reauthenticate via OAuth.")
 		}
 		return nil, mapPasswordError(err)
 	}
@@ -409,32 +406,13 @@ func buildRefreshCookie(name, value, domain string, secure bool, maxAgeSeconds i
 	return c.String()
 }
 
-// codedError is a huma.StatusError that adds a stable machine-readable
-// `code` field on top of the standard problem+json shape, so SPAs can
-// discriminate specific error cases without parsing the localized
-// `detail` text. Mirrors the convention used by the step_up_required
-// 401 envelope in shared/middleware/auth.go.
-type codedError struct {
-	Status int    `json:"status"`
-	Title  string `json:"title,omitempty"`
-	Detail string `json:"detail"`
-	Code   string `json:"code,omitempty"`
-}
-
-func (e *codedError) Error() string  { return e.Detail }
-func (e *codedError) GetStatus() int { return e.Status }
-
 func mapPasswordError(err error) error {
 	switch {
 	case errors.Is(err, services.ErrInvalidCredentials):
 		return huma.Error401Unauthorized("Invalid email or password")
 	case errors.Is(err, services.ErrEmailNotVerified):
-		return &codedError{
-			Status: http.StatusForbidden,
-			Title:  "Forbidden",
-			Detail: "Email address not verified. Please check your inbox for the verification email.",
-			Code:   "email_not_verified",
-		}
+		return errcode.Forbidden(errcode.AuthEmailNotVerified,
+			"Email address not verified. Please check your inbox for the verification email.")
 	case errors.Is(err, services.ErrAccountLocked):
 		return huma.Error429TooManyRequests("Too many failed attempts. Please try again later.")
 	case errors.Is(err, services.ErrUserInactive):
@@ -446,45 +424,45 @@ func mapPasswordError(err error) error {
 	case errors.Is(err, services.ErrMFAEnrollmentRequired):
 		return huma.Error403Forbidden("MFA enrollment required — the grace period for this account has expired. Please complete MFA setup via an admin before signing in.")
 	case errors.Is(err, services.ErrRegistrationDisabled):
-		return &codedError{
-			Status: http.StatusForbidden,
-			Title:  "Forbidden",
-			Detail: "Self-service registration is disabled for this surface. Contact an administrator.",
-			Code:   "registration_disabled",
-		}
+		return errcode.Forbidden(errcode.AuthRegistrationDisabled,
+			"Self-service registration is disabled for this surface. Contact an administrator.")
 	case errors.Is(err, services.ErrEmailDomainNotAllowed):
-		return &codedError{
-			Status: http.StatusForbidden,
-			Title:  "Forbidden",
-			Detail: "Registrations from this email domain are not allowed.",
-			Code:   "email_domain_not_allowed",
-		}
+		return errcode.Forbidden(errcode.AuthEmailDomainNotAllowed,
+			"Registrations from this email domain are not allowed.")
 	case errors.Is(err, services.ErrLoginDisabled):
-		return &codedError{
-			Status: http.StatusForbidden,
-			Title:  "Forbidden",
-			Detail: "Login is temporarily disabled for this surface. Contact an administrator.",
-			Code:   "login_disabled",
-		}
+		return errcode.Forbidden(errcode.AuthLoginDisabled,
+			"Login is temporarily disabled for this surface. Contact an administrator.")
 	case errors.Is(err, services.ErrCountryBlocked):
-		return &codedError{
-			Status: http.StatusForbidden,
-			Title:  "Forbidden",
-			Detail: "Access from your country is not permitted.",
-			Code:   "country_blocked",
-		}
-	case errors.Is(err, services.ErrPasswordTooShort),
-		errors.Is(err, services.ErrPasswordTooLong),
-		errors.Is(err, services.ErrPasswordContainsEmail),
-		errors.Is(err, services.ErrPasswordBreached),
-		errors.Is(err, services.ErrPasswordMissingUpper),
-		errors.Is(err, services.ErrPasswordMissingLower),
-		errors.Is(err, services.ErrPasswordMissingDigit),
-		errors.Is(err, services.ErrPasswordMissingSymbol):
-		return huma.Error400BadRequest(err.Error())
+		return errcode.Forbidden(errcode.AuthCountryBlocked,
+			"Access from your country is not permitted.")
+	// Each password-policy sentinel already carries a hand-written,
+	// human-safe sentence (services/password_service.go) — the case is
+	// unrolled per-error rather than sharing err.Error() so the client
+	// keeps that specific, actionable reason without the response
+	// depending on how the sentinel's wording evolves upstream.
+	case errors.Is(err, services.ErrPasswordTooShort):
+		return huma.Error400BadRequest("Password is shorter than the configured minimum.")
+	case errors.Is(err, services.ErrPasswordTooLong):
+		return huma.Error400BadRequest("Password is longer than the configured maximum.")
+	case errors.Is(err, services.ErrPasswordContainsEmail):
+		return huma.Error400BadRequest("Password must not contain your email.")
+	case errors.Is(err, services.ErrPasswordBreached):
+		return huma.Error400BadRequest("Password has appeared in a known data breach.")
+	case errors.Is(err, services.ErrPasswordMissingUpper):
+		return huma.Error400BadRequest("Password must contain an uppercase letter.")
+	case errors.Is(err, services.ErrPasswordMissingLower):
+		return huma.Error400BadRequest("Password must contain a lowercase letter.")
+	case errors.Is(err, services.ErrPasswordMissingDigit):
+		return huma.Error400BadRequest("Password must contain a digit.")
+	case errors.Is(err, services.ErrPasswordMissingSymbol):
+		return huma.Error400BadRequest("Password must contain a symbol.")
+	case errors.Is(err, services.ErrJWTKeysNotLoaded):
+		return errcode.ServiceUnavailable(errcode.AuthJWTNotConfigured,
+			"Sign-in is unavailable: the server cannot read its signing keys. An administrator must restore them.")
 	default:
-		slog.Default().Warn("password auth error", slog.String("error", err.Error()))
-		return huma.Error400BadRequest("Request failed")
+		slog.Default().Error("unmapped password auth error", slog.String("error", err.Error()))
+		return errcode.Internal(errcode.AuthUnavailable,
+			"Sign-in failed for an unexpected reason. The failure has been logged for an administrator.")
 	}
 }
 
@@ -570,7 +548,7 @@ func (h *PasswordAuthHandler) RegisterProtectedRoutes(api huma.API, mount RouteM
 		Method:      http.MethodPost,
 		Path:        "/v1/auth" + mount.PathPrefix + "/me/password-confirm",
 		Summary:     "Reconfirm password to satisfy step-up when no MFA factor is enrolled",
-		Description: "Returns a fresh access token with amr += \"reauth\" so the next destructive request passes RequireStepUp. Refuses with 409 password_confirm_unavailable when the user has any MFA factor or no password.",
+		Description: "Returns a fresh access token with amr += \"reauth\" so the next destructive request passes RequireStepUp. Refuses with 409 auth.password_confirm_unavailable when the user has any MFA factor or no password.",
 		Tags:        []string{"Authentication", "Self-Service"},
 		Security:    []map[string][]string{{"bearerAuth": {}}},
 	}, h.PasswordConfirm)

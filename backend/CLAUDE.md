@@ -146,7 +146,7 @@ return nil, errcode.Conflict(errcode.AuthEmailInUse, "Email already in use")
 // → 409 {"status":409,"title":"Conflict","detail":"Email already in use","code":"auth.email_in_use"}
 ```
 
-Builders cover the common statuses (`BadRequest`, `Unauthorized`, `Forbidden`, `NotFound`, `Conflict`, `UnprocessableEntity`); `errcode.New(status, code, detail)` exists for one-offs. Handlers not yet migrated keep returning `huma.ErrorXxx` text-only — the frontend falls back to `detail` when `code` is missing.
+Builders cover the common statuses (`BadRequest`, `Unauthorized`, `Forbidden`, `NotFound`, `Conflict`, `UnprocessableEntity`, `ServiceUnavailable`, `Internal`); `errcode.New(status, code, detail)` exists for one-offs. Handlers not yet migrated keep returning `huma.ErrorXxx` text-only — the frontend falls back to `detail` when `code` is missing.
 
 Examples:
 

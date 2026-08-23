@@ -25,11 +25,44 @@ const AuthEmailInUse = "auth.email_in_use"
 // it without tailing container logs.
 const AuthJWTNotConfigured = "auth.jwt_not_configured"
 
-// AuthUnavailable is the honest fallback for an unrecognized error on a
-// password-auth path. An error the handler cannot name is a server
-// fault, so it answers 500 — never a 4xx, which would blame the caller
-// for the server's own gap.
+// AuthUnavailable is the honest fallback for an unrecognized error on
+// any auth mapper (password, MFA, WebAuthn). An error the handler
+// cannot name is a server fault, so it answers 500 — never a 4xx,
+// which would blame the caller for the server's own gap.
 const AuthUnavailable = "auth.unavailable"
+
+// AuthEmailNotVerified signals that credentials were valid but the
+// account's email address has not been verified yet — the caller must
+// check their inbox (or request a new verification email) before
+// retrying. 403.
+const AuthEmailNotVerified = "auth.email_not_verified"
+
+// AuthRegistrationDisabled signals that self-service registration is
+// turned off for the surface (operator or client) the request came in
+// on. 403.
+const AuthRegistrationDisabled = "auth.registration_disabled"
+
+// AuthEmailDomainNotAllowed signals that a registration was rejected
+// because the email's domain is not on the surface's allow-list. 403.
+const AuthEmailDomainNotAllowed = "auth.email_domain_not_allowed"
+
+// AuthLoginDisabled signals that login (password or OAuth) is turned
+// off for the surface the request came in on. 403.
+const AuthLoginDisabled = "auth.login_disabled"
+
+// AuthCountryBlocked signals that the request's resolved country is on
+// the surface's block-list. 403.
+const AuthCountryBlocked = "auth.country_blocked"
+
+// AuthPasswordConfirmUnavailable signals that the step-up
+// "confirm with your password" endpoint cannot be used by this
+// account — it has an MFA factor enrolled, or no password at all — so
+// the caller must use MFA or reauthenticate via OAuth instead. 409.
+const AuthPasswordConfirmUnavailable = "auth.password_confirm_unavailable"
+
+// AuthOAuthProviderDisabled signals that the requested OAuth provider
+// is not enabled for the surface the request came in on. 403.
+const AuthOAuthProviderDisabled = "auth.oauth_provider_disabled"
 
 // --- user ---
 
