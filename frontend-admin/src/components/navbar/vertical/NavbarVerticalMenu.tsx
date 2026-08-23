@@ -76,6 +76,24 @@ const NavbarVerticalMenu = ({ routes }: NavbarVerticalMenuProps) => {
     config: { showBurgerMenu },
     setConfig
   } = useAppContext();
+  const { pathname } = useLocation();
+
+  // Leaf destinations at this level. A shorter path (e.g. `/forms`) is a prefix
+  // of a sibling (e.g. `/forms/reports`), and React Router's NavLink matches by
+  // prefix — so without this both would light up on `/forms/reports`. We treat
+  // a leaf as active only when no *more specific* sibling also matches the
+  // current path ("most specific wins"). This still highlights the list leaf on
+  // its own detail routes (`/forms/:id`), where no sibling is more specific.
+  const siblingTos = routes
+    .filter(r => !r.children && r.to && r.to !== '#' && r.to !== '#!')
+    .map(r => r.to as string);
+
+  const hasMoreSpecificSibling = (to: string): boolean =>
+    siblingTos.some(
+      other =>
+        other.length > to.length &&
+        (pathname === other || pathname.startsWith(`${other}/`))
+    );
 
   const handleNavItemClick = () => {
     if (showBurgerMenu) {
@@ -96,7 +114,11 @@ const NavbarVerticalMenu = ({ routes }: NavbarVerticalMenuProps) => {
                 : undefined
             }
             className={({ isActive }) =>
-              isActive && route.to !== '#!' ? 'active nav-link' : 'nav-link'
+              isActive &&
+              route.to !== '#!' &&
+              !hasMoreSpecificSibling(route.to ?? '')
+                ? 'active nav-link'
+                : 'nav-link'
             }
           >
             <NavbarVerticalMenuItem
