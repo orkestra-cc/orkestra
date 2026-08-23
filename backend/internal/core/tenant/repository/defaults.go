@@ -25,6 +25,20 @@ var (
 	// ErrDefaultTargetNotOperational rejects pointing the default at a
 	// tenant that is not operational (active, not soft-deleted) internal.
 	ErrDefaultTargetNotOperational = errors.New("tenant: default target not operational")
+	// ErrDefaultAlreadyAssigned aborts AssignDefault when a pointer already
+	// exists for kind and names a DIFFERENT tenant than the one requested.
+	// Detected INSIDE the same transaction that would otherwise write the
+	// pointer — not via a read that happens before the transaction starts —
+	// so two concurrent AssignDefault calls racing to assign different
+	// tenants to an unassigned platform cannot both observe "unassigned"
+	// and silently overwrite one another. Whichever transaction's write to
+	// the tenant_defaults singleton commits first forces the other to
+	// retry (session.WithTransaction on a TransientTransactionError label,
+	// same mechanism documented on RunDefaultGuarded below); the retry
+	// re-reads the pointer from scratch and correctly observes the
+	// winner's committed row, so the loser is guaranteed to see this error
+	// rather than silently losing the race.
+	ErrDefaultAlreadyAssigned = errors.New("tenant: default already assigned to a different tenant")
 )
 
 // withTxn runs fn inside a MongoDB multi-document transaction. Requires a
@@ -58,6 +72,27 @@ func (r *Repository) GetDefault(ctx context.Context, kind models.TenantKind) (*m
 	return &d, nil
 }
 
+// validateOperationalTarget resolves tenantUUID within session sc and
+// confirms it is an operational tenant of the matching kind — status
+// active, deletedAt nil (see SetDefault's doc for the full predicate
+// rationale). Shared by SetDefault and AssignDefault so both pointer-write
+// paths enforce identically the same target predicate inside their
+// transaction.
+func (r *Repository) validateOperationalTarget(sc mongo.SessionContext, kind models.TenantKind, tenantUUID string) error {
+	var target models.Tenant
+	//tenantscope:allow system: platform-global default pointer keyed by kind (validate the target is an operational tenant of the matching kind before assignment)
+	terr := r.db.Collection(CollTenants).FindOne(sc, bson.M{
+		"uuid":      tenantUUID,
+		"kind":      string(kind),
+		"deletedAt": nil,
+		"status":    string(models.TenantStatusActive),
+	}).Decode(&target)
+	if errors.Is(terr, mongo.ErrNoDocuments) {
+		return ErrDefaultTargetNotOperational
+	}
+	return terr
+}
+
 // SetDefault points the platform default pointer for kind at tenantUUID.
 //
 // The target is validated INSIDE the same transaction that writes the
@@ -76,26 +111,25 @@ func (r *Repository) GetDefault(ctx context.Context, kind models.TenantKind) (*m
 //
 // requireExisting=true (admin transfer) fails with ErrNotFound when no
 // pointer row exists yet for kind — a transfer only makes sense once a
-// default has already been assigned. Use requireExisting=false for the
-// first assignment (setup) or a migration backfill.
+// default has already been assigned. SetDefault ALWAYS overwrites an
+// existing pointer to point at tenantUUID regardless of what it previously
+// named — that unconditional-replace behavior is exactly what a transfer
+// needs. It is therefore only safe to call with requireExisting=true (the
+// sanctioned admin-transfer path, TransferDefaultTenant); a caller that
+// wants "assign only if unassigned or already this tenant" — the
+// setup/migration entry point — MUST use AssignDefault instead, which
+// performs that conflict check atomically inside its own transaction. Do
+// not call SetDefault with requireExisting=false from new code: a
+// requireExisting=false call cannot distinguish "no pointer yet" from "a
+// DIFFERENT tenant is already the default" without a race-prone read
+// before the transaction starts.
 //
 // Returns the previous pointer target's UUID, or "" when there was none.
 func (r *Repository) SetDefault(ctx context.Context, kind models.TenantKind, tenantUUID, actorUUID, source string, requireExisting bool) (string, error) {
 	var prevUUID string
 	err := r.withTxn(ctx, func(sc mongo.SessionContext) error {
-		var target models.Tenant
-		//tenantscope:allow system: platform-global default pointer keyed by kind (validate the target is an operational tenant of the matching kind before assignment)
-		terr := r.db.Collection(CollTenants).FindOne(sc, bson.M{
-			"uuid":      tenantUUID,
-			"kind":      string(kind),
-			"deletedAt": nil,
-			"status":    string(models.TenantStatusActive),
-		}).Decode(&target)
-		if errors.Is(terr, mongo.ErrNoDocuments) {
-			return ErrDefaultTargetNotOperational
-		}
-		if terr != nil {
-			return terr
+		if verr := r.validateOperationalTarget(sc, kind, tenantUUID); verr != nil {
+			return verr
 		}
 
 		var current models.TenantDefault
@@ -140,6 +174,85 @@ func (r *Repository) SetDefault(ctx context.Context, kind models.TenantKind, ten
 		return "", err
 	}
 	return prevUUID, nil
+}
+
+// AssignDefault is the setup/migration entry point: it points the platform
+// default pointer for kind at tenantUUID only when no pointer exists yet
+// for kind, OR the existing pointer already names tenantUUID. Unlike
+// SetDefault (which always overwrites), the "does a conflicting pointer
+// already exist" check runs INSIDE the same transaction as the
+// read-then-write, not via a separate read before the transaction starts —
+// see ErrDefaultAlreadyAssigned for why that atomicity is load-bearing.
+//
+// Returns created=true when a write actually happened (a genuine first
+// assignment for kind). Returns created=false with a nil error when the
+// pointer already named tenantUUID — an idempotent no-op: no repository
+// write is performed, so callers must not treat this as a new assignment
+// (e.g. for audit purposes). Returns ErrDefaultAlreadyAssigned when a
+// pointer already exists and names a DIFFERENT tenant.
+//
+// Target validation and the actorUUID/source/updatedBy rules are identical
+// to SetDefault — see its doc.
+func (r *Repository) AssignDefault(ctx context.Context, kind models.TenantKind, tenantUUID, actorUUID, source string) (bool, error) {
+	var created bool
+	err := r.withTxn(ctx, func(sc mongo.SessionContext) error {
+		// Reset on every attempt: session.WithTransaction retries this
+		// entire closure from scratch on a transient conflict, including
+		// after the closure itself already returned nil once (a
+		// transient failure can occur during commit, after the write
+		// below already ran and set created=true for that aborted
+		// attempt). Only the LAST invocation's outcome — the one that
+		// actually commits — must be reflected in the return value.
+		created = false
+
+		if verr := r.validateOperationalTarget(sc, kind, tenantUUID); verr != nil {
+			return verr
+		}
+
+		var current models.TenantDefault
+		//tenantscope:allow system: platform-global default pointer keyed by kind (read the current pointer, inside the same transaction as the write, so an assign-time conflict is detected atomically rather than via a pre-transaction read)
+		cerr := r.db.Collection(CollDefaults).FindOne(sc, bson.M{"kind": string(kind)}).Decode(&current)
+		switch {
+		case cerr == nil:
+			if current.TenantUUID == tenantUUID {
+				return nil // idempotent no-op: already assigned to this tenant
+			}
+			return ErrDefaultAlreadyAssigned
+		case !errors.Is(cerr, mongo.ErrNoDocuments):
+			return cerr
+		}
+
+		now := time.Now()
+		setFields := bson.M{
+			"tenantUUID":   tenantUUID,
+			"updateSource": source,
+			"updatedAt":    now,
+		}
+		update := bson.M{
+			"$set":         setFields,
+			"$inc":         bson.M{"revision": int64(1)},
+			"$setOnInsert": bson.M{"kind": string(kind), "createdAt": now},
+		}
+		if actorUUID != "" {
+			setFields["updatedBy"] = actorUUID
+		} else {
+			// Migration provenance rule: updatedBy must be ABSENT, never an
+			// empty-string sentinel, when there is no acting UUID.
+			update["$unset"] = bson.M{"updatedBy": ""}
+		}
+
+		//tenantscope:allow system: platform-global default pointer keyed by kind (insert the singleton pointer row for kind on first assignment; the preceding read of the same document, inside this transaction, is what makes the conflict check atomic)
+		_, uerr := r.db.Collection(CollDefaults).UpdateOne(sc, bson.M{"kind": string(kind)}, update, options.Update().SetUpsert(true))
+		if uerr != nil {
+			return uerr
+		}
+		created = true
+		return nil
+	})
+	if err != nil {
+		return false, err
+	}
+	return created, nil
 }
 
 // RunDefaultGuarded runs write inside a transaction that first bumps the

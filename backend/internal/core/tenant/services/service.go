@@ -70,10 +70,12 @@ var ErrDefaultReassignmentRequired = errors.New("tenant: default must be reassig
 
 // ErrDefaultAlreadyAssigned is returned by AssignDefaultTenant when the
 // platform default pointer already names a DIFFERENT tenant than the one
-// requested. AssignDefaultTenant is the idempotent setup/migration entry
-// point — pointing the default at a different tenant once one is already
-// assigned is an explicit admin action (TransferDefaultTenant), never an
-// implicit side effect of a second Assign call.
+// requested (repository.AssignDefault detects this atomically inside its
+// own transaction — see repository.ErrDefaultAlreadyAssigned). AssignDefaultTenant
+// is the idempotent setup/migration entry point — pointing the default at a
+// different tenant once one is already assigned is an explicit admin action
+// (TransferDefaultTenant), never an implicit side effect of a second Assign
+// call.
 var ErrDefaultAlreadyAssigned = errors.New("tenant: default already assigned to a different tenant")
 
 func tenantWriteError(err error) error {
@@ -406,22 +408,27 @@ func (s *Service) GetDefaultTenant(ctx context.Context) (*iface.Tenant, error) {
 // (TransferDefaultTenant), never an implicit side effect of Assign. source
 // records provenance and must be one of the models.DefaultUpdateSource*
 // constants (typically Setup or Migration).
+//
+// The conflict decision (does a pointer already exist, and if so does it
+// already name tenantUUID) is made by repository.AssignDefault INSIDE its
+// own transaction — not by a read-then-act sequence here — because a
+// service-level pre-check followed by a separate write cannot close the
+// window between two concurrent callers both observing "unassigned" and
+// both proceeding to write. See repository.ErrDefaultAlreadyAssigned's doc
+// for how the transactional write-conflict retry makes that race safe.
 func (s *Service) AssignDefaultTenant(ctx context.Context, tenantUUID, actorUUID, source string) error {
-	current, err := s.repo.GetDefault(ctx, models.TenantKindInternal)
-	switch {
-	case err == nil:
-		if current.TenantUUID == tenantUUID {
-			return nil
+	created, err := s.repo.AssignDefault(ctx, models.TenantKindInternal, tenantUUID, actorUUID, source)
+	if err != nil {
+		if errors.Is(err, repository.ErrDefaultAlreadyAssigned) {
+			return ErrDefaultAlreadyAssigned
 		}
-		return ErrDefaultAlreadyAssigned
-	case errors.Is(err, repository.ErrNotFound):
-		// No pointer yet — proceed to first assignment below.
-	default:
 		return err
 	}
-
-	if _, err := s.repo.SetDefault(ctx, models.TenantKindInternal, tenantUUID, actorUUID, source, false); err != nil {
-		return err
+	if !created {
+		// Idempotent no-op: the pointer already named tenantUUID. No write
+		// happened, so no audit event — re-asserting an unchanged fact is
+		// not a new assignment.
+		return nil
 	}
 
 	userUUID, email, actorType := s.resolveDefaultActor(ctx, actorUUID)
@@ -818,7 +825,11 @@ func (s *Service) PurgeTenant(ctx context.Context, tenantUUID string) error {
 	// This check alone is racy (a concurrent transfer could move the
 	// default between this read and the guarded write below); the guarded
 	// UpdateTenantStatus write further down is the actual invariant that
-	// protects the tenant row.
+	// protects the tenant row. A genuine repository error from
+	// DefaultTenantUUID here is deliberately swallowed (err == nil guards
+	// the comparison, so an error just falls through to the cascade) — the
+	// guarded write below still enforces the invariant even when this
+	// optimization couldn't run.
 	if def, err := s.DefaultTenantUUID(ctx); err == nil && def == tenantUUID {
 		s.emitDefaultGuardDenied(ctx, "tenant.lifecycle.purged", tenantUUID)
 		return ErrDefaultReassignmentRequired
@@ -910,7 +921,11 @@ func (s *Service) DeleteTenant(ctx context.Context, tenantUUID string) error {
 	// This check alone is racy (a concurrent transfer could move the
 	// default between this read and the guarded write below); the guarded
 	// SoftDeleteTenant write further down is the actual invariant that
-	// protects the tenant row.
+	// protects the tenant row. A genuine repository error from
+	// DefaultTenantUUID here is deliberately swallowed (err == nil guards
+	// the comparison, so an error just falls through to the cascade) — the
+	// guarded write below still enforces the invariant even when this
+	// optimization couldn't run.
 	if def, err := s.DefaultTenantUUID(ctx); err == nil && def == tenantUUID {
 		s.emitDefaultGuardDenied(ctx, "tenant.deleted", tenantUUID)
 		return ErrDefaultReassignmentRequired

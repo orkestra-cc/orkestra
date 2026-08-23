@@ -57,6 +57,23 @@ func newDefaultsTestDB(t *testing.T) (*mongo.Database, func()) {
 	}
 	dbName := "orkestra_test_tenant_svc_defaults_" + randSuffix(t)
 	db := client.Database(dbName)
+	// Production creates this unique index at boot (module.go::Collections()
+	// → the registry's ensureCollections) before any traffic flows — it is
+	// what makes AssignDefault/SetDefault's "single document per kind"
+	// invariant hold under real concurrency (MongoDB's write-conflict
+	// detection between two concurrent from-scratch inserts has nothing to
+	// key off WITHOUT this index, since each insert gets its own fresh
+	// _id). A test harness that skips this index would silently test a
+	// weaker, unrepresentative schema than production ever runs — create it
+	// explicitly so this file's concurrency tests exercise the real
+	// invariant.
+	//tenantscope:allow system: test setup mirrors the production index build (module.go::Collections()) for the platform-global default pointer collection
+	if _, err := db.Collection(repository.CollDefaults).Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys:    bson.D{{Key: "kind", Value: 1}},
+		Options: options.Index().SetUnique(true),
+	}); err != nil {
+		t.Fatalf("create tenant_defaults unique kind index: %v", err)
+	}
 	cleanup := func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -498,5 +515,87 @@ func TestGetDefaultTenant_Semantics(t *testing.T) {
 	}
 	if tn != nil {
 		t.Fatalf("GetDefaultTenant(stale pointer) = %+v, want nil (non-operational target never returned)", tn)
+	}
+}
+
+// TestAssignDefaultTenant_ConcurrentDifferentTargets_ExactlyOneWins is the
+// regression test for the check-then-act race a review caught in the first
+// version of AssignDefaultTenant: a service-level "does a pointer already
+// exist" read followed by a separate repository write let two concurrent
+// callers targeting DIFFERENT tenants both observe an unassigned platform
+// and both proceed, with the second commit silently overwriting the first
+// and neither caller receiving an error. The fix moved the conflict
+// decision inside repository.AssignDefault's own transaction. This test
+// races two AssignDefaultTenant calls (different targets, unassigned
+// platform) across many iterations and asserts the only two possible
+// externally observable outcomes: exactly one call succeeds and the
+// persisted pointer names that same winner, or (unlikely, but tolerated)
+// MongoDB's transient-transaction machinery surfaces something other than
+// the two well-known sentinels — which would itself be a test failure,
+// since it would mean the invariant is not actually being enforced as
+// designed.
+func TestAssignDefaultTenant_ConcurrentDifferentTargets_ExactlyOneWins(t *testing.T) {
+	db, cleanup := newDefaultsTestDB(t)
+	defer cleanup()
+	repo := repository.New(db)
+	svc := New(repo)
+	ctx := context.Background()
+
+	const iterations = 40
+	for i := 0; i < iterations; i++ {
+		// Reset the pointer so each iteration starts from a genuinely
+		// unassigned platform — AssignDefault's conflict semantics only
+		// bite when a pointer might already exist.
+		//tenantscope:allow system: test resets the pointer singleton between iterations of the concurrency race
+		if _, err := db.Collection(repository.CollDefaults).DeleteMany(ctx, bson.M{}); err != nil {
+			t.Fatalf("iteration %d: reset pointer: %v", i, err)
+		}
+
+		t1 := seedDefaultsTenant(t, repo, nil)
+		t2 := seedDefaultsTenant(t, repo, nil)
+
+		start := make(chan struct{})
+		var wg sync.WaitGroup
+		results := make([]error, 2)
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			<-start
+			results[0] = svc.AssignDefaultTenant(ctx, t1.UUID, "", models.DefaultUpdateSourceMigration)
+		}()
+		go func() {
+			defer wg.Done()
+			<-start
+			results[1] = svc.AssignDefaultTenant(ctx, t2.UUID, "", models.DefaultUpdateSourceMigration)
+		}()
+		close(start)
+		wg.Wait()
+
+		var wins, conflicts int
+		for _, rerr := range results {
+			switch {
+			case rerr == nil:
+				wins++
+			case errors.Is(rerr, ErrDefaultAlreadyAssigned):
+				conflicts++
+			default:
+				t.Fatalf("iteration %d: unexpected error %v (results=%v)", i, rerr, results)
+			}
+		}
+		if wins != 1 || conflicts != 1 {
+			t.Fatalf("iteration %d: wins=%d conflicts=%d, want exactly 1 winner and 1 conflict (silent clobber or double failure) — results=%v", i, wins, conflicts, results)
+		}
+
+		wantWinner := t1.UUID
+		if results[0] != nil {
+			wantWinner = t2.UUID
+		}
+		got, derr := svc.DefaultTenantUUID(ctx)
+		if derr != nil {
+			t.Fatalf("iteration %d: DefaultTenantUUID: %v", i, derr)
+		}
+		if got != wantWinner {
+			t.Fatalf("iteration %d: persisted pointer = %q, want the actual winner %q", i, got, wantWinner)
+		}
 	}
 }
