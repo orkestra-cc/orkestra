@@ -135,6 +135,14 @@ const (
 	// (structurally an auth/services.FirstAdminClaimer).
 	ServiceFirstAdminClaimer ServiceKey = "system.first_admin_claimer"
 
+	// ServiceSetupFinalizationStore is the keyed bootstrap coordinator for
+	// the setup finalization saga (system_init/{key:"setup_finalization"}).
+	// Registered by main.go wiring with the same *systeminit.Repo value as
+	// ServiceFirstAdminClaimer; consumed by the setup service (explicitly
+	// wired) and by tenant.Module.Init for boot reconciliation. Value:
+	// *systeminit.Repo (structurally a systeminit.FinalizationStore).
+	ServiceSetupFinalizationStore ServiceKey = "system.setup_finalization_store"
+
 	ServicePaymentProvider        ServiceKey = "payments.provider"
 	ServiceSubscriptionReconciler ServiceKey = "subscriptions.reconciler"
 

@@ -148,6 +148,7 @@ func main() {
 	// Initialize module registry
 	svcRegistry := module.NewServiceRegistry()
 	svcRegistry.Register(module.ServiceFirstAdminClaimer, firstAdminClaimer)
+	svcRegistry.Register(module.ServiceSetupFinalizationStore, firstAdminClaimer)
 	// PII producer registry is pre-created here so producer modules can
 	// register themselves during their own Init. ADR-0006: the core base
 	// has no in-tree consumer (compliance/DSR left with the addons); the

@@ -1,17 +1,33 @@
-// Package systeminit owns the platform's one-time bootstrap sentinel.
+// Package systeminit owns the platform's two-phase bootstrap sequence.
 //
-// The "first user becomes super_admin" rule has two callers — the setup
-// wizard (`POST /v1/setup/admin`) and ordinary signup (`POST /v1/auth/
-// register`) — and both historically used a `GetUserCount() == 0` check
-// immediately followed by a user create. That's a TOCTOU race: two concurrent
-// signups on a fresh install can both see count==0 and both be granted
-// super_admin. The patch is a single document in `system_init` with a
-// unique-indexed `key`; the first caller to upsert it wins.
+// Two separate but related lifecycle events live in a single `system_init`
+// MongoDB collection with different document keys:
 //
-// The package is deliberately outside any Module so main.go can construct it
-// next to the ModuleConfigRepository and inject it into both the setup
-// service and the password auth service. It carries no business logic — only
-// the atomic CAS contract.
+// **first_admin lifecycle**: The "first user becomes super_admin" rule has
+// two callers — the setup wizard (`POST /v1/setup/admin`) and ordinary
+// signup (`POST /v1/auth/register`) — and both historically used a
+// `GetUserCount() == 0` check immediately followed by a user create. That's
+// a TOCTOU race: two concurrent signups on a fresh install can both see
+// count==0 and both be granted super_admin. The patch is a single document
+// with `key: first_admin` and unique-indexed `key`; the first caller to
+// upsert it wins (CAS primitive). Value: *Repo implements
+// auth/services.FirstAdminClaimer. Registered in the service registry as
+// module.ServiceFirstAdminClaimer.
+//
+// **setup_finalization lifecycle**: A resumable setup saga that tracks
+// default tenant provisioning and onboarding state across reboots. The
+// document carries `key: setup_finalization` and records user/tenant
+// creation during the setup flow so a retried `POST /v1/setup/complete`
+// can idempotently finalize without recreating them. Consumers (setup
+// service, tenant module Init for boot reconciliation) resolve the
+// FinalizationStore interface from the service registry as
+// module.ServiceSetupFinalizationStore. Value: *Repo implements
+// FinalizationStore (CAS/lease primitives).
+//
+// The Repo is constructed by main.go before the module registry so both
+// auth and setup can resolve it as a hard dependency. It is registered
+// under two keys (ServiceFirstAdminClaimer, ServiceSetupFinalizationStore)
+// so different consumers can discover it without cross-module imports.
 package systeminit
 
 import (
