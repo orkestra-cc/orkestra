@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -55,6 +56,15 @@ type Handler struct {
 	// addons init after core/tenant; capturing the typed interfaces at
 	// boot would freeze them as nil.
 	registry *module.ServiceRegistry
+}
+
+// tenantInternalError logs an unclassified service failure and returns a
+// stable client-facing detail. Service errors often carry driver and
+// infrastructure context, so they are diagnostic data rather than a request
+// validation contract.
+func tenantInternalError(ctx context.Context, operation string, err error) error {
+	slog.ErrorContext(ctx, "tenant operation failed", "operation", operation, "error", err)
+	return huma.Error500InternalServerError("Unable to " + operation + ". The failure has been logged.")
 }
 
 // New wires a handler to the tenant service. The registry is optional;
@@ -306,7 +316,7 @@ func (h *Handler) createTenant(ctx context.Context, in *createTenantInput) (*ten
 		if errors.Is(err, services.ErrProvisioningLocked) {
 			return nil, huma.Error409Conflict("tenant creation is locked: the system is configured for a single tenant of this tier")
 		}
-		return nil, huma.Error400BadRequest("failed to create tenant: " + err.Error())
+		return nil, tenantInternalError(ctx, "create the tenant", err)
 	}
 	return &tenantOutput{Body: t}, nil
 }
@@ -444,7 +454,7 @@ func (h *Handler) getTenant(ctx context.Context, in *tenantIDPath) (*tenantOutpu
 
 func (h *Handler) updateTenant(ctx context.Context, in *updateTenantInput) (*tenantOutput, error) {
 	if err := h.svc.UpdateTenant(ctx, in.TenantID, in.Body); err != nil {
-		return nil, huma.Error400BadRequest("update failed: " + err.Error())
+		return nil, tenantInternalError(ctx, "update the tenant", err)
 	}
 	t, err := h.svc.GetTenantModel(ctx, in.TenantID)
 	if err != nil {
@@ -455,7 +465,7 @@ func (h *Handler) updateTenant(ctx context.Context, in *updateTenantInput) (*ten
 
 func (h *Handler) deleteTenant(ctx context.Context, in *tenantIDPath) (*struct{}, error) {
 	if err := h.svc.DeleteTenant(ctx, in.TenantID); err != nil {
-		return nil, huma.Error400BadRequest("delete failed: " + err.Error())
+		return nil, tenantInternalError(ctx, "delete the tenant", err)
 	}
 	return &struct{}{}, nil
 }
@@ -468,14 +478,14 @@ func (h *Handler) deleteTenant(ctx context.Context, in *tenantIDPath) (*struct{}
 // expectations.
 func (h *Handler) purgeTenant(ctx context.Context, in *tenantIDPath) (*struct{}, error) {
 	if err := h.svc.PurgeTenant(ctx, in.TenantID); err != nil {
-		return nil, huma.Error400BadRequest("purge failed: " + err.Error())
+		return nil, tenantInternalError(ctx, "purge the tenant", err)
 	}
 	return &struct{}{}, nil
 }
 
 func (h *Handler) updatePlan(ctx context.Context, in *updatePlanInput) (*tenantOutput, error) {
 	if err := h.svc.UpdatePlan(ctx, in.TenantID, in.Body); err != nil {
-		return nil, huma.Error400BadRequest("plan update failed: " + err.Error())
+		return nil, tenantInternalError(ctx, "update the tenant plan", err)
 	}
 	t, err := h.svc.GetTenantModel(ctx, in.TenantID)
 	if err != nil {
@@ -533,7 +543,7 @@ type removeMemberInput struct {
 
 func (h *Handler) removeMember(ctx context.Context, in *removeMemberInput) (*struct{}, error) {
 	if err := h.svc.RemoveMember(ctx, in.TenantID, in.UserUUID); err != nil {
-		return nil, huma.Error400BadRequest("remove failed: " + err.Error())
+		return nil, tenantInternalError(ctx, "remove the tenant member", err)
 	}
 	return &struct{}{}, nil
 }
@@ -560,7 +570,7 @@ func (h *Handler) setMemberRoleAdmin(ctx context.Context, in *setMemberRoleAdmin
 		case errors.Is(err, repository.ErrNotFound):
 			return nil, huma.Error404NotFound("member not found")
 		default:
-			return nil, huma.Error400BadRequest("set role failed: " + err.Error())
+			return nil, tenantInternalError(ctx, "set the member role", err)
 		}
 	}
 	return &struct{}{}, nil
@@ -631,7 +641,7 @@ func (h *Handler) attachMemberAdmin(ctx context.Context, in *attachMemberAdminIn
 	if err != nil {
 		switch {
 		case errors.Is(err, services.ErrAttachInput):
-			return nil, huma.Error400BadRequest(err.Error())
+			return nil, huma.Error400BadRequest("tenant, user, and role are required")
 		case errors.Is(err, services.ErrMembershipExists):
 			return nil, huma.Error409Conflict("user is already a member of this tenant")
 		case errors.Is(err, repository.ErrNotFound):
@@ -656,7 +666,7 @@ func (h *Handler) createInvite(ctx context.Context, in *inviteInput) (*inviteOut
 	userUUID, _ := ctxauth.GetUserUUID(ctx)
 	inv, err := h.svc.CreateInvite(ctx, in.TenantID, userUUID, in.Body)
 	if err != nil {
-		return nil, huma.Error400BadRequest("invite failed: " + err.Error())
+		return nil, tenantInternalError(ctx, "create the invite", err)
 	}
 	return &inviteOutput{Body: inv}, nil
 }
@@ -668,7 +678,7 @@ func (h *Handler) acceptInvite(ctx context.Context, in *acceptInviteInput) (*ten
 	}
 	t, err := h.svc.AcceptInvite(ctx, userUUID, in.Body.Token)
 	if err != nil {
-		return nil, huma.Error400BadRequest("accept failed: " + err.Error())
+		return nil, tenantInternalError(ctx, "accept the invite", err)
 	}
 	return &tenantOutput{Body: t}, nil
 }
@@ -956,7 +966,7 @@ func (h *Handler) setTenantBillingIdentityAdmin(ctx context.Context, in *setBill
 		if errors.Is(err, repository.ErrNotFound) {
 			return nil, huma.Error404NotFound("tenant not found")
 		}
-		return nil, huma.Error400BadRequest("billing-identity update failed: " + err.Error())
+		return nil, tenantInternalError(ctx, "update the billing identity", err)
 	}
 	t, err := h.svc.GetTenantModel(ctx, in.TenantID)
 	if err != nil {
@@ -971,9 +981,9 @@ func (h *Handler) setTenantItalianBillableAdmin(ctx context.Context, in *setItal
 		case errors.Is(err, repository.ErrNotFound):
 			return nil, huma.Error404NotFound("tenant not found")
 		case errors.Is(err, services.ErrItalianBillableMissingProfile):
-			return nil, huma.Error422UnprocessableEntity(err.Error())
+			return nil, huma.Error422UnprocessableEntity("A FatturaPA routing profile is required before enabling Italian billable mode")
 		default:
-			return nil, huma.Error400BadRequest("italian-billable toggle failed: " + err.Error())
+			return nil, tenantInternalError(ctx, "update Italian billable mode", err)
 		}
 	}
 	t, err := h.svc.GetTenantModel(ctx, in.TenantID)
@@ -1038,7 +1048,7 @@ func (h *Handler) listInvitesAdmin(ctx context.Context, in *adminInviteListInput
 
 func (h *Handler) revokeInviteAdmin(ctx context.Context, in *adminRevokeInviteInput) (*struct{}, error) {
 	if err := h.svc.RevokeInvite(ctx, in.TenantID, in.InviteID); err != nil {
-		return nil, huma.Error400BadRequest("revoke failed: " + err.Error())
+		return nil, tenantInternalError(ctx, "revoke the invite", err)
 	}
 	return &struct{}{}, nil
 }
@@ -1098,7 +1108,7 @@ func (h *Handler) createDivision(ctx context.Context, in *createDivisionInput) (
 		if errors.Is(err, services.ErrProvisioningLocked) {
 			return nil, huma.Error409Conflict("tenant creation is locked by the provisioning policy")
 		}
-		return nil, huma.Error400BadRequest("division create failed: " + err.Error())
+		return nil, tenantInternalError(ctx, "create the division", err)
 	}
 	return &tenantOutput{Body: t}, nil
 }
@@ -1242,7 +1252,7 @@ func (h *Handler) setMyBillingIdentity(ctx context.Context, in *setMyBillingIden
 		if errors.Is(err, repository.ErrNotFound) {
 			return nil, huma.Error404NotFound("tenant not found")
 		}
-		return nil, huma.Error400BadRequest("billing-identity update failed: " + err.Error())
+		return nil, tenantInternalError(ctx, "update the billing identity", err)
 	}
 	updated, err := h.svc.GetTenantModel(ctx, t.UUID)
 	if err != nil {
@@ -1261,9 +1271,9 @@ func (h *Handler) setMyItalianBillable(ctx context.Context, in *setMyItalianBill
 		case errors.Is(err, repository.ErrNotFound):
 			return nil, huma.Error404NotFound("tenant not found")
 		case errors.Is(err, services.ErrItalianBillableMissingProfile):
-			return nil, huma.Error422UnprocessableEntity(err.Error())
+			return nil, huma.Error422UnprocessableEntity("A FatturaPA routing profile is required before enabling Italian billable mode")
 		default:
-			return nil, huma.Error400BadRequest("italian-billable toggle failed: " + err.Error())
+			return nil, tenantInternalError(ctx, "update Italian billable mode", err)
 		}
 	}
 	updated, err := h.svc.GetTenantModel(ctx, t.UUID)
