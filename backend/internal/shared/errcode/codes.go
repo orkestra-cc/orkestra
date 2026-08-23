@@ -81,6 +81,14 @@ const TenantSlugAlreadyInUse = "tenant.slug_already_in_use"
 //     never reuse the Tier-1 wording. 409.
 const TenantProvisioningLocked = "tenant.provisioning_locked"
 
+// TenantInternalModeInvalid rejects a Tier-1 provisioning policy that is
+// not manual or single (open was removed from Tier-1). 422.
+const TenantInternalModeInvalid = "tenant.internal_mode_invalid"
+
+// TenantSingleModeConflict rejects selecting `single` while more than one
+// Tier-1 tenant occupies a provisioning slot. 422.
+const TenantSingleModeConflict = "tenant.single_mode_conflict"
+
 // --- user ---
 
 // UserSelfDeleteForbidden signals that an admin tried to delete (or

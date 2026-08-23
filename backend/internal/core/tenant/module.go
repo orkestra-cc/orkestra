@@ -25,6 +25,12 @@ type Module struct {
 	module.BaseModule
 	handler *handlers.Handler
 	svc     *services.Service
+	// slotCount backs the provisioning-policy config validation (single
+	// mode) in config_validation.go. Defaults to
+	// svc.CountProvisioningSlotsByKind, wired in Init; tests override it
+	// directly so the validator's policy is exercised without booting
+	// MongoDB.
+	slotCount func(ctx context.Context, kind models.TenantKind) (int64, error)
 }
 
 func NewModule() *Module { return &Module{} }
@@ -170,6 +176,7 @@ func (m *Module) Init(deps *module.Dependencies) error {
 	repo := repository.New(deps.DB)
 	m.svc = services.New(repo)
 	m.handler = handlers.New(m.svc, deps.Services)
+	m.slotCount = m.svc.CountProvisioningSlotsByKind
 
 	// Wire the per-tier provisioning policy reader. Reads the admin-managed
 	// `provisioning.{internal,external}.mode` keys from this module's config

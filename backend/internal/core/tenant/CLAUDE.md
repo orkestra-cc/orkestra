@@ -15,7 +15,8 @@ Does not own org-scoped roles or permissions — those are authz role bindings. 
 
 | File | Purpose |
 |---|---|
-| `module.go` | Module registration, collections, permissions, `ConfigSchema()` (provisioning policy), service wire-up |
+| `module.go` | Module registration, collections, permissions, `ConfigSchema()` (provisioning policy), service wire-up, `slotCount` seam (defaults to `svc.CountProvisioningSlotsByKind`, overridden in tests) |
+| `config_validation.go` | `ValidateConfig`/`ValidateConfigActivation` — the shared Tier-1 provisioning-policy gate applied to every module-config surface. See [Provisioning policy](#provisioning-policy-admin-managed) |
 | `handlers/handler.go` | HTTP handlers for org and membership CRUD + invites; provisioning manual-gate (`enforceManualGate`/`callerIsTenantAdmin`) + provisioning-policy read |
 | `services/service.go` | Org lifecycle, membership sync, invite token issuance, provisioning policy (`ProvisioningMode`/`CountProvisioningSlotsByKind`/`ErrProvisioningLocked`), `iface.TenantProvider` implementation |
 | `services/billing.go` | Unified-clients (Phase 1) — `SetItalianBillable`, `SetBillingIdentity`, `ResolveBillingParty`, `EnsureTenantForUser` (honours external provisioning mode), `iface.BillingTenantProvider` implementation |
@@ -98,6 +99,15 @@ Collection name constants live in `repository/repository.go` (`CollTenants`, `Co
 3. **Lazy provisioning honours `external.mode`.** `EnsureTenantForUser` (`services/billing.go`) returns an existing personal tenant unchanged but **refuses to auto-create** one (returns `ErrProvisioningLocked`) when `external.mode != open` — which is the default. A Tier-2 caller with no admin-assigned tenant therefore hits `resolveCallerTenant`, which maps the sentinel to **409** `tenant.provisioning_locked` rather than silently minting a tenant.
 
 Handlers map `ErrProvisioningLocked` → **409** `tenant.provisioning_locked` (`errcode.TenantProvisioningLocked`). The read-only `GET /v1/admin/tenants/provisioning-policy` reports both modes + provisioning-slot counts and backs the policy card on the tenant management pages (the modes themselves are edited at `/admin/modules/tenant`).
+
+**Config-time validation, one policy function on all three surfaces.** The two enforcement layers above run at tenant-*creation* time; `config_validation.go` additionally gates the *config write* itself, before a bad `provisioning.internal.mode` value can even be persisted. `Module` implements both `module.HasConfigValidator` (`ValidateConfig`) and `module.HasConfigActivationValidator` (`ValidateConfigActivation`), and both delegate to the single unexported `validateProvisioningPolicy` — so the active-config PATCH, the named-environment PATCH (which can write an inactive profile), and the active-environment switch (which can activate a profile stored earlier) all apply the identical rule. This closes the gap where a stored legacy `single` profile that is no longer satisfiable could be smuggled in by switching profiles instead of PATCHing the active one; a rejected activation leaves the previously active profile and `needsRestart` untouched (PR 1's `ModuleConfigService` contract).
+
+The policy: `manual` or absent/empty is accepted (absent and legacy values normalise to `manual` at runtime — see above — so there is nothing to gate); `single` is accepted only when `slotCount` (defaults to `svc.CountProvisioningSlotsByKind`, overridden in tests) reports at most one Tier-1 tenant currently occupying a provisioning slot; any other value, **including `open`**, is rejected — `open` was removed from Tier-1 in Task 3.2 and is Tier-2-only. A failure to *count* propagates as a plain wrapped error, never a `*module.ConfigValidationError` — a database outage must not read as a 422 telling the operator their input was bad.
+
+| Code | Condition | HTTP |
+|---|---|---|
+| `tenant.internal_mode_invalid` (`errcode.TenantInternalModeInvalid`) | `provisioning.internal.mode` is neither `manual`, empty, nor `single` (e.g. `open`, or an unknown value) | 422 |
+| `tenant.single_mode_conflict` (`errcode.TenantSingleModeConflict`) | `provisioning.internal.mode == single` while more than one Tier-1 tenant occupies a provisioning slot | 422 |
 
 `ConfigGroups()` splits the two fields onto the full-page rail along the tier boundary: `provisioning.internal` ("Internal provisioning (Tier-1)") holds `provisioning.internal.mode`, `provisioning.external` ("External provisioning (Tier-2)") holds `provisioning.external.mode` — one field per group, the minimum that promotes `/admin/modules/tenant` off the flat-form degradation path. Dropping `ConfigGroups()` entirely reverts the page to the flat single-card form with no other change required — `ConfigSchema()`'s `Group` tags become inert.
 
