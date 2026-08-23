@@ -101,7 +101,7 @@ const SOC2EvidencePage = () => {
           </p>
         </div>
         <Button
-          variant="falcon-default"
+          variant="orkestra-default"
           size="sm"
           onClick={() => refetch()}
           disabled={isFetching}
