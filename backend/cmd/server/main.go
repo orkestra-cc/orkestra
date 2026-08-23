@@ -458,6 +458,7 @@ func main() {
 	setupSvc := setup.NewService(
 		module.MustGetTyped[iface.UserProvider](svcRegistry, module.ServiceUserService),
 		module.MustGetTyped[setup.AdminCreator](svcRegistry, module.ServicePasswordAuthService),
+		module.MustGetTyped[systeminit.FinalizationStore](svcRegistry, module.ServiceSetupFinalizationStore),
 		configService,
 		logger,
 	)

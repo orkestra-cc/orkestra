@@ -2,8 +2,10 @@
 //
 // The package exposes two public HTTP endpoints (`GET /v1/setup/status` and
 // `POST /v1/setup/admin`) that the frontend wizard consumes while a fresh
-// Orkestra deployment has no users yet. "Setup completed" is defined
-// implicitly as `userCount > 0` — no marker collection, no feature flag.
+// Orkestra deployment has not finished bootstrapping. Setup progresses
+// through three persistent phases — admin_required, tenant_required,
+// complete — backed by the systeminit.FinalizationStore coordinator
+// record rather than the old "at least one user exists" heuristic.
 //
 // Once any user exists, `POST /v1/setup/admin` is refused with 409. The
 // wizard gates itself on `GET /v1/setup/status` so operators are never
@@ -13,11 +15,13 @@ package setup
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"time"
 
 	authModels "github.com/orkestra/backend/internal/core/auth/models"
+	"github.com/orkestra/backend/internal/shared/systeminit"
 	"github.com/orkestra/backend/pkg/sdk/iface"
 	"github.com/orkestra/backend/pkg/sdk/module"
 )
@@ -34,40 +38,50 @@ type AdminCreator interface {
 	RegisterInitialAdmin(ctx context.Context, email, password, fullName, ip string) (*authModels.TokenResponse, error)
 }
 
+// Setup phases. Persistent and authoritative — see Service.Status. The
+// legacy SetupCompleted field on Status is derived from PhaseComplete,
+// never computed independently.
+const (
+	PhaseAdminRequired  = "admin_required"
+	PhaseTenantRequired = "tenant_required"
+	PhaseComplete       = "complete"
+)
+
 // Status is the payload returned by GET /v1/setup/status.
 type Status struct {
-	SetupCompleted bool `json:"setupCompleted"`
-	SMTPConfigured bool `json:"smtpConfigured"`
+	// SetupCompleted is derived from Phase == PhaseComplete; kept on the
+	// wire for backward compatibility with clients written against the
+	// old "at least one user exists" contract.
+	SetupCompleted bool   `json:"setupCompleted"`
+	Phase          string `json:"phase"`
+	SMTPConfigured bool   `json:"smtpConfigured"`
 }
 
 // Service owns the two setup endpoints' business logic.
 type Service struct {
 	users         iface.UserProvider
 	admin         AdminCreator
+	store         systeminit.FinalizationStore
 	configService *module.ModuleConfigService
 	logger        *slog.Logger
 }
 
-// NewService wires the setup service. users, admin and cfg are required;
-// a nil logger falls back to slog.Default().
-func NewService(users iface.UserProvider, admin AdminCreator, cfg *module.ModuleConfigService, logger *slog.Logger) *Service {
+// NewService wires the setup service. users, admin and store are required;
+// cfg may be nil (SMTP status degrades to false); a nil logger falls back
+// to slog.Default().
+func NewService(users iface.UserProvider, admin AdminCreator, store systeminit.FinalizationStore, cfg *module.ModuleConfigService, logger *slog.Logger) *Service {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	return &Service{
 		users:         users,
 		admin:         admin,
+		store:         store,
 		configService: cfg,
 		logger:        logger,
 	}
 }
 
-// Status reports whether the system has been initialized and whether the
-// notification module has real SMTP credentials.
-//
-// On any DB error the method fails open (both flags false) so the wizard
-// can still render and the operator can try again — we'd rather show the
-// wizard redundantly than lock someone out of a deployment they own.
 // refreshTTLProvider is the optional capability the setup handler needs
 // from whatever creates the first admin: the refresh-token lifetime, so
 // the cookie it emits matches the one POST /v1/auth/login emits.
@@ -87,19 +101,38 @@ func (s *Service) RefreshTokenTTL() time.Duration {
 	return 7 * 24 * time.Hour
 }
 
-func (s *Service) Status(ctx context.Context) Status {
-	out := Status{}
-
+// Status reports the authoritative setup phase plus the non-authoritative
+// SMTP-configured hint.
+//
+// Fail-closed is deliberate: a failure to read either the operator user
+// count or the finalization coordinator record returns (Status{}, err) —
+// never an inferred phase. A caller must not be able to conclude "setup
+// is incomplete" from a database outage, because that is exactly the
+// state that unlocks the unauthenticated bootstrap paths (POST
+// /v1/setup/admin). SMTPConfigured is different: it controls nothing
+// about phase, authorization, or tenant creation, so it may still
+// degrade to false on its own read failure (see isSMTPConfigured).
+func (s *Service) Status(ctx context.Context) (Status, error) {
 	count, err := s.users.GetUserCount(ctx, nil)
 	if err != nil {
-		s.logger.Warn("setup.Status: GetUserCount failed, assuming not completed",
-			slog.String("error", err.Error()))
-	} else {
-		out.SetupCompleted = count > 0
+		return Status{}, fmt.Errorf("setup: read operator user count: %w", err)
 	}
-
-	out.SMTPConfigured = s.isSMTPConfigured(ctx)
-	return out
+	if count == 0 {
+		return Status{Phase: PhaseAdminRequired, SMTPConfigured: s.isSMTPConfigured(ctx)}, nil
+	}
+	rec, err := s.store.Get(ctx)
+	if err != nil {
+		return Status{}, fmt.Errorf("setup: read finalization coordinator: %w", err)
+	}
+	phase := PhaseTenantRequired
+	if rec != nil && rec.CompletedAt != nil {
+		phase = PhaseComplete
+	}
+	return Status{
+		SetupCompleted: phase == PhaseComplete,
+		Phase:          phase,
+		SMTPConfigured: s.isSMTPConfigured(ctx),
+	}, nil
 }
 
 // isSMTPConfigured returns true when the notification module has a non-noop

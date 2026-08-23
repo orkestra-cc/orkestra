@@ -184,3 +184,29 @@ const NavigationOverrideChildNotFound = "navigation.override_child_not_found"
 // NavigationOverrideDuplicateChild signals that the same itemKey
 // appeared twice in the orderedChildren list. 400.
 const NavigationOverrideDuplicateChild = "navigation.override_duplicate_child"
+
+// --- setup (shared bootstrap infrastructure, not a module) ---
+
+// SetupStatusUnavailable: the authoritative setup phase cannot be read;
+// the response carries Retry-After and no inferred phase. 503.
+const SetupStatusUnavailable = "setup.status_unavailable"
+
+// SetupFinalizerStateUnavailable: coordinator or bound-user state cannot be
+// read; never treated as recovery eligibility. 503.
+const SetupFinalizerStateUnavailable = "setup.finalizer_state_unavailable"
+
+// SetupFinalizerBoundToAnotherAdmin: the finalize POST caller is not the
+// usable bound administrator. 403.
+const SetupFinalizerBoundToAnotherAdmin = "setup.finalizer_bound_to_another_admin"
+
+// SetupRecoveryRequiresSuperAdmin: recovering an empty or unusable binding
+// requires an active super_admin. 403.
+const SetupRecoveryRequiresSuperAdmin = "setup.recovery_requires_super_admin"
+
+// SetupFinalizationAlreadyStarted: a different normalized finalization
+// request is already reserved. 409.
+const SetupFinalizationAlreadyStarted = "setup.finalization_already_started"
+
+// SetupAlreadyCompleted: setup is complete and the payload does not match a
+// replayable finalized request. 409.
+const SetupAlreadyCompleted = "setup.already_completed"

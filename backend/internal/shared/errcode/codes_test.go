@@ -51,6 +51,12 @@ var goldenCodes = map[string]string{
 	"LoggingMutationInvalid":            "logging.mutation_invalid",
 	"LoggingConfigConflict":             "logging.config_conflict",
 	"LoggingPersistenceFailed":          "logging.persistence_failed",
+	"SetupStatusUnavailable":            "setup.status_unavailable",
+	"SetupFinalizerStateUnavailable":    "setup.finalizer_state_unavailable",
+	"SetupFinalizerBoundToAnotherAdmin": "setup.finalizer_bound_to_another_admin",
+	"SetupRecoveryRequiresSuperAdmin":   "setup.recovery_requires_super_admin",
+	"SetupFinalizationAlreadyStarted":   "setup.finalization_already_started",
+	"SetupAlreadyCompleted":             "setup.already_completed",
 }
 
 // TestCodesMatchGoldenSnapshot asserts every snapshotted code resolves

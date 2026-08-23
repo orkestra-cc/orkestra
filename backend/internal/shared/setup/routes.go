@@ -9,6 +9,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	authServices "github.com/orkestra/backend/internal/core/auth/services"
 	"github.com/orkestra/backend/internal/shared/config"
+	"github.com/orkestra/backend/internal/shared/errcode"
 	"github.com/orkestra/backend/internal/shared/utils"
 )
 
@@ -40,11 +41,23 @@ func NewHandler(svc *Service, cookieCfg config.CookieConfig) *Handler {
 // --- GET /v1/setup/status ---
 
 type StatusResponse struct {
-	Body Status
+	CacheControl string `header:"Cache-Control"`
+	Body         Status
 }
 
+// Status maps the service's fail-closed contract onto HTTP: a read error
+// becomes a 503 with a stable code and Retry-After — never an inferred
+// phase — while a successful read is marked non-cacheable so the wizard
+// never renders a stale phase from an intermediary or browser cache.
 func (h *Handler) Status(ctx context.Context, _ *struct{}) (*StatusResponse, error) {
-	return &StatusResponse{Body: h.svc.Status(ctx)}, nil
+	st, err := h.svc.Status(ctx)
+	if err != nil {
+		return nil, huma.ErrorWithHeaders(
+			errcode.ServiceUnavailable(errcode.SetupStatusUnavailable, "The setup state store is unavailable. Retry shortly."),
+			http.Header{"Retry-After": []string{"5"}, "Cache-Control": []string{"no-store"}},
+		)
+	}
+	return &StatusResponse{CacheControl: "no-store", Body: st}, nil
 }
 
 // --- POST /v1/setup/admin ---
@@ -97,7 +110,7 @@ func (h *Handler) RegisterRoutes(api huma.API) {
 		Method:      http.MethodGet,
 		Path:        "/v1/setup/status",
 		Summary:     "Check whether the system has been initialized",
-		Description: "Returns `setupCompleted` (at least one user exists) and `smtpConfigured` (notification module has real SMTP credentials). Used by the frontend SetupGate to decide whether to route to the onboarding wizard.",
+		Description: "Returns the authoritative setup `phase` (`admin_required` | `tenant_required` | `complete`), the derived `setupCompleted` (phase == complete, kept for backward compatibility), and `smtpConfigured` (notification module has real SMTP credentials). A failure to read the authoritative phase answers 503 with Retry-After rather than an inferred phase. Used by the frontend SetupGate to decide whether to route to the onboarding wizard.",
 		Tags:        []string{"Setup"},
 	}, h.Status)
 
