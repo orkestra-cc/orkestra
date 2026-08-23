@@ -65,7 +65,7 @@ Rules for filling it in:
 | Routing            | React Router 8 (import from `react-router` — `react-router-dom` no longer exists) | Hash routing, custom routers                                       |
 | Tabs               | `useSearchParams` from react-router (see `url-tabs` skill)        | `useState` for active tab                                          |
 
-Note: button variants are named `variant="falcon-primary"` etc. — that's the **Bootstrap variant string** the theme registers. The design system itself is **Orkestra-branded** (`OrkestraComponentCard`, `OrkestraDropzone`, `OrkestraLightBox`, ...).
+Note: button variants are named `variant="orkestra-primary"` / `orkestra-default` / `orkestra-danger` — that's the **Bootstrap variant string** the theme registers (`.btn-orkestra-*`, from the `$theme-orkestra-btn-colors` loop in `assets/scss/theme/_buttons.scss`). `falcon-*` is **not** a registered variant: it emits a dead class and the button renders with no surface, border or shadow ring. The design system is **Orkestra-branded** throughout (`OrkestraComponentCard`, `OrkestraDropzone`, `OrkestraLightBox`, ...).
 
 ## Path aliases (no `@/` prefix)
 
@@ -159,7 +159,7 @@ const MyForm: React.FC = () => {
         <Form.Control type="email" isInvalid={!!errors.email} {...register('email')} />
         <Form.Control.Feedback type="invalid">{errors.email?.message}</Form.Control.Feedback>
       </Form.Group>
-      <Button variant="falcon-primary" type="submit">Submit</Button>
+      <Button variant="orkestra-primary" type="submit">Submit</Button>
     </Form>
   );
 };

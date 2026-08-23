@@ -181,7 +181,7 @@ Component philosophy: **quiet precision**. Clean white surfaces, discreet shadow
 ### Buttons
 - **Shape:** subtly rounded (0.25rem).
 - **Primary** (`variant="primary"`): white text on #286fce (`shade-color($primary, 10%)`, 4.94:1 — the AA-passing button shade of Orkestra Blue) — reserved for the one main action of a view. Hover/active step darker (#2569c3 / #2362b7).
-- **Falcon/Orkestra family** (`variant="falcon-primary"` etc., compiled as `.btn-orkestra-*`): the console's signature button — white surface (`--orkestra-btn-orkestra-background`), colored text, the crisp orkestra shadow ring; hover deepens the text color (−17% shift) and the shadow, background stays put. Use for secondary and toolbar actions.
+- **Orkestra family** (`variant="orkestra-primary"`, `orkestra-default`, `orkestra-danger`, …, compiled as `.btn-orkestra-*` by the `$theme-orkestra-btn-colors` loop in `_buttons.scss`): the console's signature button — white surface (`--orkestra-btn-orkestra-background`), colored text, the crisp orkestra shadow ring; hover deepens the text color (−17% shift) and the shadow, background stays put. Use for secondary and toolbar actions. **There is no `falcon-*` variant** — the family was renamed with the theme and nothing in `assets/scss/` defines `.btn-falcon-*`, so `variant="falcon-default"` emits a dead class and the button loses its surface, border and shadow ring entirely.
 - **Hover / Focus:** color shifts and shadow steps, no size or position jumps.
 
 ### Cards / Containers
