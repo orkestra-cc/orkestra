@@ -27,13 +27,22 @@ Two enum config keys at `/admin/modules/tenant`, one per tier, read at request t
 | `provisioning.internal.mode` | internal | `open` · `manual` · `single` | **`manual`** |
 | `provisioning.external.mode` | external | `open` · `manual` | **`manual`** |
 
-`open` lets any authenticated user create. `manual` restricts creation to holders of `system.tenants.admin`. `single` caps the tier at one active tenant — the way to lock a platform to a single internal org.
+`open` lets any authenticated user create. `manual` restricts creation to holders of `system.tenants.admin`. `single` caps the tier at one tenant occupying a provisioning slot — the way to lock a platform to a single internal org.
 
 **Both default to `manual`, so a fresh install accepts no self-service tenant creation at all**, and may legitimately run with zero internal tenants. External clients are never auto-provisioned and cannot self-create: a platform admin creates the client tenant and assigns it.
 
+### Lifecycle terminology
+
+This module does not use "active tenant" as shorthand for every retained tenant — the two relevant predicates are explicit:
+
+- An **operational tenant** has `status == active` and `deletedAt == nil`. Only an operational internal tenant is eligible to be the platform default.
+- A tenant **occupies a provisioning slot** when `deletedAt == nil` and its status is one of `provisioning`, `active`, or `suspended`. A suspended tenant remains part of the installation and therefore continues to occupy the `single` slot. `archived` and `purged` tenants do not occupy a slot, even if a legacy row has not been soft-deleted.
+
+`CountProvisioningSlotsByKind` implements the second predicate and backs the `single` cardinality gate, config validation, and the admin provisioning-policy read. A lifecycle check that needs an operational tenant uses an exact status predicate instead of this count.
+
 Enforcement is split on purpose, so no creation path can slip through:
 
-1. **`single` is a data invariant in the service** — the active-tenant count is checked inside `CreateTenant`, which covers direct creation, divisions, and lazy provisioning automatically.
+1. **`single` is a data invariant in the service** — the provisioning-slot count is checked inside `CreateTenant`, which covers direct creation, divisions, and lazy provisioning automatically.
 2. **`manual` is a permission gate in the handlers** — they resolve the authz provider and check `system.tenants.admin`.
 3. **Lazy provisioning honors `external.mode`** — a Tier-2 caller with no assigned tenant gets a `409` telling them an administrator must create one, rather than silently minting one.
 

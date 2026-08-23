@@ -141,11 +141,12 @@ func (s *Service) ProvisioningMode(ctx context.Context, kind models.TenantKind) 
 	}
 }
 
-// CountActiveByKind returns the number of non-deleted tenants of a tier. Exposed
-// so handlers can render the provisioning-policy surface; also used internally
-// by the `single`-mode invariant.
-func (s *Service) CountActiveByKind(ctx context.Context, kind models.TenantKind) (int64, error) {
-	return s.repo.CountActiveByKind(ctx, kind)
+// CountProvisioningSlotsByKind returns the number of tenants of a tier that
+// occupy a provisioning slot. Exposed so handlers can render the
+// provisioning-policy surface; also used internally by the `single`-mode
+// invariant.
+func (s *Service) CountProvisioningSlotsByKind(ctx context.Context, kind models.TenantKind) (int64, error) {
+	return s.repo.CountProvisioningSlotsByKind(ctx, kind)
 }
 
 // TenantPostDeleteContext carries the data a cascade hook needs to clean
@@ -332,7 +333,7 @@ func (s *Service) CreateTenant(ctx context.Context, ownerUUID string, input mode
 	// covered. The first tenant on a fresh install has count 0 and passes,
 	// so bootstrap is never blocked.
 	if s.ProvisioningMode(ctx, kind) == models.ProvisioningModeSingle {
-		n, err := s.repo.CountActiveByKind(ctx, kind)
+		n, err := s.repo.CountProvisioningSlotsByKind(ctx, kind)
 		if err != nil {
 			return nil, fmt.Errorf("tenant: count tenants for single-mode check: %w", err)
 		}

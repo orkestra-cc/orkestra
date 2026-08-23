@@ -179,14 +179,22 @@ func (r *Repository) ListTenantsByKind(ctx context.Context, kind models.TenantKi
 	return out, nil
 }
 
-// CountActiveByKind returns the number of non-deleted tenants of the given
-// tier. Backs the `single` provisioning-mode invariant (at most one active
-// internal tenant) and the admin provisioning-policy read.
-func (r *Repository) CountActiveByKind(ctx context.Context, kind models.TenantKind) (int64, error) {
+// CountProvisioningSlotsByKind returns the number of tenants of the given
+// tier that occupy a provisioning slot: deletedAt == nil AND status in
+// {provisioning, active, suspended}. A suspended tenant remains part of the
+// installation and keeps its slot; archived and purged tenants free theirs
+// even when a legacy row was never soft-deleted. Backs the `single`
+// cardinality gate, config validation, and the admin policy read.
+func (r *Repository) CountProvisioningSlotsByKind(ctx context.Context, kind models.TenantKind) (int64, error) {
 	//tenantscope:allow tenant registry — counting tenants by tier is inherently cross-tenant (mirrors ListTenantsByKind)
 	return r.db.Collection(CollTenants).CountDocuments(ctx, bson.M{
 		"kind":      string(kind),
 		"deletedAt": nil,
+		"status": bson.M{"$in": bson.A{
+			string(models.TenantStatusProvisioning),
+			string(models.TenantStatusActive),
+			string(models.TenantStatusSuspended),
+		}},
 	})
 }
 

@@ -17,10 +17,10 @@ Does not own org-scoped roles or permissions — those are authz role bindings. 
 |---|---|
 | `module.go` | Module registration, collections, permissions, `ConfigSchema()` (provisioning policy), service wire-up |
 | `handlers/handler.go` | HTTP handlers for org and membership CRUD + invites; provisioning manual-gate (`enforceManualGate`/`callerIsTenantAdmin`) + provisioning-policy read |
-| `services/service.go` | Org lifecycle, membership sync, invite token issuance, provisioning policy (`ProvisioningMode`/`CountActiveByKind`/`ErrProvisioningLocked`), `iface.TenantProvider` implementation |
+| `services/service.go` | Org lifecycle, membership sync, invite token issuance, provisioning policy (`ProvisioningMode`/`CountProvisioningSlotsByKind`/`ErrProvisioningLocked`), `iface.TenantProvider` implementation |
 | `services/billing.go` | Unified-clients (Phase 1) — `SetItalianBillable`, `SetBillingIdentity`, `ResolveBillingParty`, `EnsureTenantForUser` (honours external provisioning mode), `iface.BillingTenantProvider` implementation |
 | `services/entitlements.go` | Capability-entitlement projection (`iface.AccessProvider`) |
-| `repository/repository.go` | MongoDB CRUD for orgs, memberships, invites; personal-tenant predicate lookup; `CountActiveByKind` (single-mode invariant) |
+| `repository/repository.go` | MongoDB CRUD for orgs, memberships, invites; personal-tenant predicate lookup; `CountProvisioningSlotsByKind` (single-mode invariant) |
 | `models/tenant.go` | `Tenant`, `TenantMembership`, `TenantInvite`, `TenantAncestor`, `FatturaPAProfile` structs + `TenantKind`/`TenantStatus`/plan/`ProvisioningMode*` constants |
 | `models/entitlement.go` | Capability-entitlement projection row |
 
@@ -60,6 +60,13 @@ Collection name constants live in `repository/repository.go` (`CollTenants`, `Co
 
 ## Lifecycle
 
+**Terminology — two distinct predicates, not one fuzzy "active":**
+
+- An **operational tenant** has `status == active` AND `deletedAt == nil`. Only an operational internal tenant is eligible to become the platform default.
+- A tenant **occupies a provisioning slot** when `deletedAt == nil` AND its status is one of `provisioning`, `active`, or `suspended`. A suspended tenant is still part of the installation, so it keeps its slot; `archived` and `purged` tenants free their slot even if a legacy row was never soft-deleted.
+
+`repository.CountProvisioningSlotsByKind` implements the second predicate and backs the `single` cardinality gate, config validation, and the admin provisioning-policy read. A lifecycle check that needs an operational tenant uses an exact status predicate instead of this count — never conflate the two.
+
 - **Init**: constructs the repository, builds the service, creates the handler, registers the service as `iface.TenantProvider` in the registry, and wires the `ProvisioningModeResolver` (a closure over `deps.ConfigService` reading the `provisioning.{internal,external}.mode` keys live).
 - **Start / Stop / HealthCheck**: inherit from `BaseModule` (no-op).
 - **Seeding**: the first-install setup flow creates **no** tenant. The initial admin is a super_admin (system role, tenant-independent); tenants are created deliberately afterward — the setup wizard's `OrgStep` is the first, skippable creation point (admin-only by default, since both provisioning modes default to `manual`). A fresh install may run with zero internal tenants.
@@ -76,17 +83,17 @@ Collection name constants live in `repository/repository.go` (`CollTenants`, `Co
 
 - **open** — any authenticated user may create.
 - **manual** (default both tiers) — only holders of `system.tenants.admin` may create.
-- **single** — at most one active (non-deleted) tenant of that tier may exist (internal-only intent: lock the platform to a single internal org).
+- **single** — at most one tenant of that tier may occupy a provisioning slot (see [Lifecycle](#lifecycle) for the predicate; internal-only intent: lock the platform to a single internal org).
 
 **Default posture (both `manual`):** a fresh install accepts no self-service tenant creation. The first internal tenant is created deliberately from the setup wizard's `OrgStep` or the admin UI — a fresh install may have zero internal tenants; afterwards an operator creates further internal tenants deliberately. External clients are **never auto-provisioned** and **cannot self-create** a tenant — only a platform admin creates a client tenant and assigns it to a Tier-2 user.
 
 **Two-layer enforcement** (so every creation path is covered without scattering checks):
 
-1. **`single` is a data invariant in the service.** `Service.CreateTenant` (`services/service.go`) counts active tenants of the kind via `repository.CountActiveByKind` and returns the sentinel `services.ErrProvisioningLocked` when one already exists. This covers **all** paths — `POST /v1/tenants`, divisions, and lazy provisioning — automatically. The first tenant on a fresh install counts 0 and passes.
+1. **`single` is a data invariant in the service.** `Service.CreateTenant` (`services/service.go`) counts tenants of the kind occupying a provisioning slot via `repository.CountProvisioningSlotsByKind` and returns the sentinel `services.ErrProvisioningLocked` when one already exists. This covers **all** paths — `POST /v1/tenants`, divisions, and lazy provisioning — automatically. The first tenant on a fresh install counts 0 and passes.
 2. **`manual` is a permission gate in the handlers.** `createTenant` / `createDivision` call `Handler.enforceManualGate`, which resolves `iface.AuthzProvider` from the registry and checks `system.tenants.admin` (empty org = system grant). Non-admins get 403; the admin `CreateTenantModal` hits the same `POST /v1/tenants` and passes. The admin division route already requires the permission at the route group, so the shared handler body is a no-op gate for it.
 3. **Lazy provisioning honours `external.mode`.** `EnsureTenantForUser` (`services/billing.go`) returns an existing personal tenant unchanged but **refuses to auto-create** one (returns `ErrProvisioningLocked`) when `external.mode != open` — which is the default. A Tier-2 caller with no admin-assigned tenant therefore hits `resolveCallerTenant`, which maps the sentinel to **409** ("an administrator must create and assign one") rather than silently minting a tenant.
 
-Handlers map `ErrProvisioningLocked` → 409. The read-only `GET /v1/admin/tenants/provisioning-policy` reports both modes + active counts and backs the policy card on the tenant management pages (the modes themselves are edited at `/admin/modules/tenant`).
+Handlers map `ErrProvisioningLocked` → 409. The read-only `GET /v1/admin/tenants/provisioning-policy` reports both modes + provisioning-slot counts and backs the policy card on the tenant management pages (the modes themselves are edited at `/admin/modules/tenant`).
 
 `ConfigGroups()` splits the two fields onto the full-page rail along the tier boundary: `provisioning.internal` ("Internal provisioning (Tier-1)") holds `provisioning.internal.mode`, `provisioning.external` ("External provisioning (Tier-2)") holds `provisioning.external.mode` — one field per group, the minimum that promotes `/admin/modules/tenant` off the flat-form degradation path. Dropping `ConfigGroups()` entirely reverts the page to the flat single-card form with no other change required — `ConfigSchema()`'s `Group` tags become inert.
 

@@ -47,7 +47,7 @@ type tenantSvc interface {
 	SetItalianBillable(ctx context.Context, tenantUUID string, on bool) error
 	EnsureTenantForUser(ctx context.Context, userUUID string) (*iface.Tenant, error)
 	ProvisioningMode(ctx context.Context, kind models.TenantKind) string
-	CountActiveByKind(ctx context.Context, kind models.TenantKind) (int64, error)
+	CountProvisioningSlotsByKind(ctx context.Context, kind models.TenantKind) (int64, error)
 }
 
 type Handler struct {
@@ -910,7 +910,7 @@ func (h *Handler) RegisterAdminRoutes(api huma.API) {
 		Method:      http.MethodGet,
 		Path:        "/v1/admin/tenants/provisioning-policy",
 		Summary:     "Read the per-tier tenant-creation policy (platform admin)",
-		Description: "Returns the active provisioning mode for each tier (open | manual | single) plus the current active-tenant count per tier. The mode itself is edited at /admin/modules/tenant; this endpoint backs the read-only policy card on the tenant management pages.",
+		Description: "Returns the active provisioning mode for each tier (open | manual | single) plus the current provisioning-slot count per tier. The mode itself is edited at /admin/modules/tenant; this endpoint backs the read-only policy card on the tenant management pages.",
 		Tags:        []string{"Tenants Admin"},
 	}, h.getProvisioningPolicy)
 }
@@ -919,8 +919,8 @@ type provisioningPolicyOutput struct {
 	Body struct {
 		Internal      string `json:"internal" doc:"Provisioning mode for internal tenants: open | manual | single"`
 		External      string `json:"external" doc:"Provisioning mode for external tenants: open | manual"`
-		InternalCount int64  `json:"internalCount" doc:"Number of active (non-deleted) internal tenants"`
-		ExternalCount int64  `json:"externalCount" doc:"Number of active (non-deleted) external tenants"`
+		InternalCount int64  `json:"internalCount" doc:"Number of internal tenants occupying a provisioning slot (deletedAt nil and status provisioning/active/suspended)"`
+		ExternalCount int64  `json:"externalCount" doc:"Number of external tenants occupying a provisioning slot (deletedAt nil and status provisioning/active/suspended)"`
 	}
 }
 
@@ -930,10 +930,10 @@ func (h *Handler) getProvisioningPolicy(ctx context.Context, _ *struct{}) (*prov
 	out := &provisioningPolicyOutput{}
 	out.Body.Internal = h.svc.ProvisioningMode(ctx, models.TenantKindInternal)
 	out.Body.External = h.svc.ProvisioningMode(ctx, models.TenantKindExternal)
-	if n, err := h.svc.CountActiveByKind(ctx, models.TenantKindInternal); err == nil {
+	if n, err := h.svc.CountProvisioningSlotsByKind(ctx, models.TenantKindInternal); err == nil {
 		out.Body.InternalCount = n
 	}
-	if n, err := h.svc.CountActiveByKind(ctx, models.TenantKindExternal); err == nil {
+	if n, err := h.svc.CountProvisioningSlotsByKind(ctx, models.TenantKindExternal); err == nil {
 		out.Body.ExternalCount = n
 	}
 	return out, nil

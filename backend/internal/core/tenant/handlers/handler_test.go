@@ -45,7 +45,7 @@ type fakeTenantSvc struct {
 	setItalianBillableFn     func(ctx context.Context, tenantUUID string, on bool) error
 	ensureTenantForUserFn    func(ctx context.Context, userUUID string) (*iface.Tenant, error)
 	provisioningModeFn       func(ctx context.Context, kind models.TenantKind) string
-	countActiveByKindFn      func(ctx context.Context, kind models.TenantKind) (int64, error)
+	countProvisioningSlotsFn func(ctx context.Context, kind models.TenantKind) (int64, error)
 }
 
 func (f *fakeTenantSvc) GetTenant(ctx context.Context, t string) (*iface.Tenant, error) {
@@ -181,18 +181,18 @@ func (f *fakeTenantSvc) EnsureTenantForUser(ctx context.Context, u string) (*ifa
 	panic("unused: EnsureTenantForUser")
 }
 
-// ProvisioningMode and CountActiveByKind default to the legacy "open" /
-// zero-count behaviour so existing handler tests that don't exercise the
-// provisioning policy keep passing without wiring a stub.
+// ProvisioningMode and CountProvisioningSlotsByKind default to the legacy
+// "open" / zero-count behaviour so existing handler tests that don't
+// exercise the provisioning policy keep passing without wiring a stub.
 func (f *fakeTenantSvc) ProvisioningMode(ctx context.Context, kind models.TenantKind) string {
 	if f.provisioningModeFn != nil {
 		return f.provisioningModeFn(ctx, kind)
 	}
 	return models.ProvisioningModeOpen
 }
-func (f *fakeTenantSvc) CountActiveByKind(ctx context.Context, kind models.TenantKind) (int64, error) {
-	if f.countActiveByKindFn != nil {
-		return f.countActiveByKindFn(ctx, kind)
+func (f *fakeTenantSvc) CountProvisioningSlotsByKind(ctx context.Context, kind models.TenantKind) (int64, error) {
+	if f.countProvisioningSlotsFn != nil {
+		return f.countProvisioningSlotsFn(ctx, kind)
 	}
 	return 0, nil
 }
