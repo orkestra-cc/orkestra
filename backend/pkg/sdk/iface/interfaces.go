@@ -1138,9 +1138,12 @@ type KMSProvider interface {
 	// CreateKey mints a fresh DEK for tenantUUID, wraps it with the
 	// master key, persists the wrapped form, and returns the opaque
 	// keyID callers stamp on their tenant row. Idempotent at the
-	// tenant level: if a key already exists for tenantUUID, returns
-	// the existing keyID rather than overwriting — avoids wiping data
-	// when a create path runs twice.
+	// tenant level AND under concurrency: two racing calls for one
+	// tenantUUID both return the single winning keyID (implementations
+	// back this with a unique tenant index + duplicate-key reread).
+	// A caller may replay this call after a crash or a lost response —
+	// e.g. a resumable provisioning saga retrying a stage — and must
+	// never observe a second DEK for the same tenant.
 	CreateKey(ctx context.Context, tenantUUID string) (keyID string, err error)
 
 	// Encrypt seals plaintext with the tenant's DEK. The returned

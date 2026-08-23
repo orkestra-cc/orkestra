@@ -24,6 +24,10 @@ func NewKMSKeyRepo(db *mongo.Database) *KMSKeyRepository {
 	return &KMSKeyRepository{coll: db.Collection(models.KMSKeysCollection)}
 }
 
+// ErrKMSKeyExists reports that the unique tenantUuid index rejected the
+// insert — a concurrent CreateKey won. Callers reread the winner.
+var ErrKMSKeyExists = stderrors.New("compliance: kms key already exists for tenant")
+
 // Insert appends a freshly-minted KMS key row.
 //
 // this is an unscoped insert by design — the row IS the tenant-scope anchor.
@@ -31,6 +35,9 @@ func NewKMSKeyRepo(db *mongo.Database) *KMSKeyRepository {
 //tenantscope:allow kms keys are keyed by tenantUuid stamped on the row itself;
 func (r *KMSKeyRepository) Insert(ctx context.Context, key *models.KMSKey) error {
 	_, err := r.coll.InsertOne(ctx, key)
+	if mongo.IsDuplicateKeyError(err) {
+		return ErrKMSKeyExists
+	}
 	return err
 }
 

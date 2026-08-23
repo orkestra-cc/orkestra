@@ -3,11 +3,13 @@ package services
 import (
 	"context"
 	stderrors "errors"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/orkestra/backend/internal/core/compliance/models"
+	"github.com/orkestra/backend/internal/core/compliance/repository"
 	"github.com/orkestra/backend/pkg/sdk/iface"
 )
 
@@ -15,7 +17,15 @@ import (
 // — used to exercise the Shred lifecycle and the ErrKMSKeyNotFound
 // contract without booting MongoDB. The tenant service relies on the
 // not-found error to log retries on transient crypto-shred failures.
+//
+// The mutex + tenantUuid duplicate-detection in Insert model the real
+// collection's unique tenantUuid index: without it, this fake would let
+// two concurrent CreateKey callers both "succeed" and silently mint two
+// keys — the exact bug the real unique index (and ErrKMSKeyExists
+// translation) prevents. A fake that cannot reject a duplicate cannot
+// prove the concurrency fix.
 type inMemoryKMSRepo struct {
+	mu       sync.Mutex
 	byUUID   map[string]*models.KMSKey
 	byTenant map[string]string
 }
@@ -27,11 +37,18 @@ func newInMemoryKMSRepo() *inMemoryKMSRepo {
 	}
 }
 func (r *inMemoryKMSRepo) Insert(_ context.Context, k *models.KMSKey) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, exists := r.byTenant[k.TenantUUID]; exists {
+		return repository.ErrKMSKeyExists
+	}
 	r.byUUID[k.UUID] = k
 	r.byTenant[k.TenantUUID] = k.UUID
 	return nil
 }
 func (r *inMemoryKMSRepo) GetByUUID(_ context.Context, uuid string) (*models.KMSKey, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	k, ok := r.byUUID[uuid]
 	if !ok {
 		return nil, iface.ErrKMSKeyNotFound
@@ -39,6 +56,8 @@ func (r *inMemoryKMSRepo) GetByUUID(_ context.Context, uuid string) (*models.KMS
 	return k, nil
 }
 func (r *inMemoryKMSRepo) GetByTenant(_ context.Context, tenantUUID string) (*models.KMSKey, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	uuid, ok := r.byTenant[tenantUUID]
 	if !ok {
 		return nil, iface.ErrKMSKeyNotFound
@@ -46,6 +65,8 @@ func (r *inMemoryKMSRepo) GetByTenant(_ context.Context, tenantUUID string) (*mo
 	return r.byUUID[uuid], nil
 }
 func (r *inMemoryKMSRepo) Shred(_ context.Context, uuid string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	k, ok := r.byUUID[uuid]
 	if !ok {
 		return iface.ErrKMSKeyNotFound
@@ -204,6 +225,43 @@ func TestCreateKeyIsIdempotent(t *testing.T) {
 	repo := kms.repo.(*inMemoryKMSRepo)
 	if len(repo.byUUID) != 1 {
 		t.Fatalf("expected exactly one persisted key, got %d", len(repo.byUUID))
+	}
+}
+
+// TestCreateKey_ConcurrentCallsConvergeOnOneKey races n goroutines against
+// CreateKey for a single tenant. The read-then-insert shape is idempotent
+// for sequential callers but not concurrent ones: without the
+// ErrKMSKeyExists reread, two goroutines can both miss the GetByTenant
+// read and both attempt an insert. This pins that every caller — winner
+// and losers alike — converges on the same keyID, and that exactly one
+// key is ever persisted.
+func TestCreateKey_ConcurrentCallsConvergeOnOneKey(t *testing.T) {
+	t.Parallel()
+	kms := newTestKMS()
+	ctx := context.Background()
+	const n = 8
+	start := make(chan struct{})
+	ids := make([]string, n)
+	errs := make([]error, n)
+	var wg sync.WaitGroup
+	wg.Add(n)
+	for i := 0; i < n; i++ {
+		go func(i int) {
+			defer wg.Done()
+			<-start
+			ids[i], errs[i] = kms.CreateKey(ctx, "t-race")
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+	for i := 1; i < n; i++ {
+		if errs[i] != nil || ids[i] != ids[0] {
+			t.Fatalf("call %d diverged: id=%q err=%v (want %q)", i, ids[i], errs[i], ids[0])
+		}
+	}
+	repo := kms.repo.(*inMemoryKMSRepo)
+	if len(repo.byUUID) != 1 {
+		t.Fatalf("expected one persisted key, got %d", len(repo.byUUID))
 	}
 }
 
