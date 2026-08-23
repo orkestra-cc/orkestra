@@ -5796,6 +5796,9 @@
             "readOnly": true,
             "type": "string"
           },
+          "phase": {
+            "type": "string"
+          },
           "setupCompleted": {
             "type": "boolean"
           },
@@ -5805,6 +5808,7 @@
         },
         "required": [
           "setupCompleted",
+          "phase",
           "smtpConfigured"
         ],
         "type": "object"
@@ -15045,7 +15049,7 @@
     },
     "/v1/setup/status": {
       "get": {
-        "description": "Returns `setupCompleted` (at least one user exists) and `smtpConfigured` (notification module has real SMTP credentials). Used by the frontend SetupGate to decide whether to route to the onboarding wizard.",
+        "description": "Returns the authoritative setup `phase` (`admin_required` | `tenant_required` | `complete`), the derived `setupCompleted` (phase == complete, kept for backward compatibility), and `smtpConfigured` (notification module has real SMTP credentials). A failure to read the authoritative phase answers 503 with Retry-After rather than an inferred phase. Used by the frontend SetupGate to decide whether to route to the onboarding wizard.",
         "operationId": "setup-status",
         "responses": {
           "200": {
@@ -15056,7 +15060,14 @@
                 }
               }
             },
-            "description": "OK"
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "default": {
             "content": {
