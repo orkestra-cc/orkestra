@@ -130,6 +130,13 @@ func TestIsPublicRoute_PrefixSemantics(t *testing.T) {
 		// bare prefix would hide a hypothetical future "/v1/setupdoh"
 		// route if one were ever added.
 		{"/v1/setup", false},
+		// /v1/setup/finalize is one of the two AUTHENTICATED operator
+		// routes added in Task 5.3 (the other is
+		// /v1/setup/finalization-access). It still shares the prefix's
+		// tenant-baggage exemption — no tenant exists yet at this point
+		// in the bootstrap flow — even though it is not anonymous; see
+		// the updated comment on the PublicRoutes entry.
+		{"/v1/setup/finalize", true},
 		{"/v1/billing/invoices", false},
 		{"/v1/payments/webhooks/stripe", true},
 		{"/v1/payments/charges", false},

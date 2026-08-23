@@ -462,7 +462,16 @@ func main() {
 		configService,
 		logger,
 	)
-	setup.NewHandler(setupSvc, cfg.Auth.Cookie).RegisterRoutes(operatorAPI)
+	setupHandler := setup.NewHandler(setupSvc, cfg.Auth.Cookie)
+	setupHandler.RegisterPublicRoutes(operatorAPI)
+	// Finalizer access + finalize are AUTHENTICATED operator routes. They
+	// share the tenant-baggage-exempt /v1/setup/ prefix (no tenant exists
+	// yet) but are mounted behind RequireAuth — never on the public setup
+	// registrar. Operator audience is enforced mux-wide by setupMiddleware.
+	operatorProtected.Group(func(r chi.Router) {
+		api := humachi.New(r, apiConfig)
+		setupHandler.RegisterProtectedRoutes(api)
+	})
 
 	// Dev-token endpoint (LOCAL DEVELOPMENT ONLY) — synthetic JWTs for
 	// first login + local API testing, used by scripts/devtoken.sh and the

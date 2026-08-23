@@ -99,12 +99,52 @@ func (h *Handler) CreateAdmin(ctx context.Context, req *CreateAdminRequest) (*Cr
 	return resp, nil
 }
 
+// --- GET /v1/setup/finalization-access (stub — Task 5.4 implements) ---
+
+type FinalizationAccessResponse struct {
+	Body struct{}
+}
+
+// FinalizationAccess is a stub: the route, its authenticated-operator
+// mount, and its OpenAPI operation are locked in by this task so Task 5.4
+// only has to fill in the body. A stub must fail closed — 501, never a
+// fabricated 200 — so nothing downstream can mistake "not implemented
+// yet" for "access granted."
+func (h *Handler) FinalizationAccess(_ context.Context, _ *struct{}) (*FinalizationAccessResponse, error) {
+	return nil, huma.Error501NotImplemented("Setup finalization access is not implemented yet.")
+}
+
+// --- POST /v1/setup/finalize (stub — Task 5.5 implements) ---
+
+type FinalizeRequest struct {
+	Body struct{}
+}
+
+type FinalizeResponse struct {
+	Body struct{}
+}
+
+// Finalize is a stub for the same reason FinalizationAccess is — Task 5.5
+// fills in the body against the mount point this task establishes.
+func (h *Handler) Finalize(_ context.Context, _ *FinalizeRequest) (*FinalizeResponse, error) {
+	return nil, huma.Error501NotImplemented("Setup finalization is not implemented yet.")
+}
+
 // --- registration ---
 
-// RegisterRoutes mounts the setup endpoints on the provided public Huma API.
-// Both routes are unauthenticated — the invariant that protects them is
-// "no users exist yet," enforced inside Service.CreateInitialAdmin.
-func (h *Handler) RegisterRoutes(api huma.API) {
+// RegisterPublicRoutes mounts the two unauthenticated setup endpoints —
+// status and create-admin — on the provided public Huma API. Both routes
+// are unauthenticated by design: the invariant that protects them is "no
+// users exist yet," enforced inside Service.CreateInitialAdmin.
+//
+// Do not add anything else here. A route that needs an authenticated
+// caller belongs on RegisterProtectedRoutes instead, even though it may
+// share this package's /v1/setup/ path prefix — that prefix's entry in
+// shared/middleware.PublicRoutes is a tenant-baggage/span-coverage
+// exemption (no tenant exists yet during setup), not a statement that
+// everything under it is reachable anonymously. See the comment on that
+// entry.
+func (h *Handler) RegisterPublicRoutes(api huma.API) {
 	huma.Register(api, huma.Operation{
 		OperationID: "setup-status",
 		Method:      http.MethodGet,
@@ -122,6 +162,39 @@ func (h *Handler) RegisterRoutes(api huma.API) {
 		Description: "Creates the initial developer-role user during the first-install wizard. Returns 409 Conflict once any user exists. Email verification is bypassed because this endpoint runs before SMTP can be configured.",
 		Tags:        []string{"Setup"},
 	}, h.CreateAdmin)
+}
+
+// RegisterProtectedRoutes mounts the authenticated-operator setup
+// endpoints — finalization access and finalize — on the given Huma API.
+// This method registers operations only; it enforces nothing about
+// authentication itself. The caller MUST build api from a router mounted
+// behind RequireAuth (see cmd/server/main.go's operatorProtected group),
+// exactly the way every other authenticated-operator route is wired.
+// Never register these on the same API RegisterPublicRoutes uses.
+//
+// Both routes still fall under the /v1/setup/ prefix in
+// shared/middleware.PublicRoutes, but — as that entry's comment says —
+// the prefix is a tenant-baggage exemption, not an authentication
+// statement: no tenant exists yet at this point in the bootstrap flow,
+// authenticated or not.
+func (h *Handler) RegisterProtectedRoutes(api huma.API) {
+	huma.Register(api, huma.Operation{
+		OperationID: "setup-finalization-access",
+		Method:      http.MethodGet,
+		Path:        "/v1/setup/finalization-access",
+		Summary:     "Check whether the caller may finalize setup",
+		Description: "Authenticated-operator route. Reports whether the calling operator is bound to the in-progress setup finalization saga (default-tenant provisioning) and may call POST /v1/setup/finalize. Stub pending Task 5.4 — currently always answers 501.",
+		Tags:        []string{"Setup"},
+	}, h.FinalizationAccess)
+
+	huma.Register(api, huma.Operation{
+		OperationID: "setup-finalize",
+		Method:      http.MethodPost,
+		Path:        "/v1/setup/finalize",
+		Summary:     "Finalize setup (default tenant provisioning)",
+		Description: "Authenticated-operator route. Drives the resumable setup-finalization saga to completion for the caller bound to it. Stub pending Task 5.5 — currently always answers 501.",
+		Tags:        []string{"Setup"},
+	}, h.Finalize)
 }
 
 // --- helpers ---
