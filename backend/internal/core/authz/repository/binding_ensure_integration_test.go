@@ -137,6 +137,50 @@ func TestEnsureBinding_CreatesThenReturnsExisting(t *testing.T) {
 	}
 }
 
+// TestEnsureBinding_FirstInsertPersistsExpiresAt pins the insert path,
+// which is a DIFFERENT property from TestEnsureBinding_CreatesThenReturnsExisting
+// above (that test only proves a LOSING caller's ExpiresAt never leaks onto
+// the winner). This test proves the WINNING, uncontended, first-ever call
+// for a tuple actually persists its own ExpiresAt — the repository's
+// $setOnInsert document must include "expiresAt": b.ExpiresAt or a caller's
+// expiry silently vanishes on the very insert that was supposed to record
+// it. Reads the stored document back with a raw FindOne against the
+// collection rather than trusting the value FindOneAndUpdate happens to
+// hand back, so a bug in what got written (as opposed to what got echoed)
+// cannot hide.
+func TestEnsureBinding_FirstInsertPersistsExpiresAt(t *testing.T) {
+	repo, cleanup := liveBindingRepository(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	wantExpiry := time.Now().Add(72 * time.Hour).Truncate(time.Millisecond)
+	b := ensureRaceBinding(uuid.NewString(), "user-contractor", "tenant-C", "role-contractor", "granter-1")
+	b.ExpiresAt = &wantExpiry
+
+	out, err := repo.EnsureBinding(ctx, b)
+	if err != nil {
+		t.Fatalf("EnsureBinding: %v", err)
+	}
+	if out.ExpiresAt == nil || !out.ExpiresAt.Equal(wantExpiry) {
+		t.Fatalf("returned ExpiresAt = %v, want %v", out.ExpiresAt, wantExpiry)
+	}
+
+	// Read back independently of the FindOneAndUpdate response.
+	var stored models.Binding
+	//tenantscope:allow test assertion reads back one row in an isolated per-run test database, independent of the FindOneAndUpdate response under test
+	if err := repo.db.Collection(CollBindings).FindOne(ctx, bson.M{
+		"tenantId": "tenant-C", "userUUID": "user-contractor", "roleId": "role-contractor",
+	}).Decode(&stored); err != nil {
+		t.Fatalf("FindOne readback: %v", err)
+	}
+	if stored.ExpiresAt == nil {
+		t.Fatal("stored document has no expiresAt — the first insert dropped it")
+	}
+	if !stored.ExpiresAt.Equal(wantExpiry) {
+		t.Fatalf("stored expiresAt = %v, want %v", stored.ExpiresAt, wantExpiry)
+	}
+}
+
 // TestEnsureBinding_ConcurrentSingleRow races two goroutines calling
 // EnsureBinding for the same tuple at once, looped enough iterations to
 // reliably land both calls inside the race window. Both callers must

@@ -185,11 +185,9 @@ func (r *fakeRepo) CreateBinding(_ context.Context, b *models.Binding) error {
 
 // EnsureBinding mirrors Repository.EnsureBinding: return the existing row
 // for the (tenantID, userUUID, roleId) tuple untouched if one is already
-// present, otherwise insert b and return it. Like the real
-// $setOnInsert-based upsert, a fresh insert does NOT persist b.ExpiresAt —
-// the production repo's $setOnInsert document omits that field, so this
-// fake matches it rather than silently behaving more richly than Mongo
-// does.
+// present, otherwise insert b (including b.ExpiresAt — a fresh insert
+// persists the inserting caller's expiry exactly like CreateBinding does)
+// and return it.
 func (r *fakeRepo) EnsureBinding(_ context.Context, b *models.Binding) (*models.Binding, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -210,7 +208,7 @@ func (r *fakeRepo) EnsureBinding(_ context.Context, b *models.Binding) (*models.
 		RoleName:  b.RoleName,
 		GrantedBy: b.GrantedBy,
 		GrantedAt: time.Now(),
-		// ExpiresAt deliberately omitted — see doc comment above.
+		ExpiresAt: b.ExpiresAt,
 	}
 	r.bindings[inserted.UUID] = inserted
 	out := inserted

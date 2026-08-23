@@ -191,8 +191,12 @@ func (r *Repository) CreateBinding(ctx context.Context, b *models.Binding) error
 // EnsureBinding grants the (tenantId, userUUID, roleId) tuple if absent and
 // returns the persisted row either way. Concurrent-safe: $setOnInsert upsert
 // against the unique compound index; the loser of a race reads the winner.
-// Existing rows are returned untouched — grantedBy/grantedAt/expiresAt of
-// the winner are preserved.
+// A fresh insert persists every field of b, including ExpiresAt — nil is a
+// legitimate value and is stored as BSON null rather than omitted, so an
+// inserting caller's expiry is honored exactly like CreateBinding's.
+// Existing rows are returned untouched — uuid/grantedBy/grantedAt/expiresAt
+// of the winner are preserved regardless of what a later, losing caller's b
+// carries.
 func (r *Repository) EnsureBinding(ctx context.Context, b *models.Binding) (*models.Binding, error) {
 	//tenantscope:allow authz owns the global authz_bindings registry; the ensure filter pins tenantId, userUUID and roleId explicitly (owner-binding ensure — see authz/CLAUDE.md)
 	res := r.db.Collection(CollBindings).FindOneAndUpdate(ctx,
@@ -200,7 +204,7 @@ func (r *Repository) EnsureBinding(ctx context.Context, b *models.Binding) (*mod
 		bson.M{"$setOnInsert": bson.M{
 			"uuid": b.UUID, "userUUID": b.UserUUID, "tenantId": b.TenantID,
 			"roleId": b.RoleUUID, "roleName": b.RoleName,
-			"grantedBy": b.GrantedBy, "grantedAt": time.Now(),
+			"grantedBy": b.GrantedBy, "grantedAt": time.Now(), "expiresAt": b.ExpiresAt,
 		}},
 		options.FindOneAndUpdate().SetUpsert(true).SetReturnDocument(options.After),
 	)
