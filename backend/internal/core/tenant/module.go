@@ -90,6 +90,7 @@ func (m *Module) ProvidedServices() []module.ServiceKey {
 		module.ServiceAccessProvider,
 		module.ServiceTenantService,
 		module.ServiceBillingTenantProvider,
+		module.ServiceDefaultTenantProvider,
 	}
 }
 
@@ -222,6 +223,12 @@ func (m *Module) Init(deps *module.Dependencies) error {
 	// fields and returns the snapshot the billing send path needs. Same
 	// concrete Service so the resolver shares the tenant repository.
 	deps.Services.Register(module.ServiceBillingTenantProvider, iface.BillingTenantProvider(m.svc))
+	// Platform default Tier-1 tenant resolver (iface.DefaultTenantProvider),
+	// consumed by auth's operator JWT tenant-fallback seeding and the local
+	// dev-token resolver. Deliberately registered under its own narrow
+	// service key rather than widening iface.TenantProvider — see
+	// pkg/sdk/iface/interfaces.go's DefaultTenantProvider doc.
+	deps.Services.Register(module.ServiceDefaultTenantProvider, iface.DefaultTenantProvider(m.svc))
 
 	// Cascade hook: evict the owner's client_users row when an external
 	// Tier-2 tenant is deleted and the owner has no other live

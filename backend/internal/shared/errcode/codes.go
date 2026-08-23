@@ -89,6 +89,11 @@ const TenantInternalModeInvalid = "tenant.internal_mode_invalid"
 // Tier-1 tenant occupies a provisioning slot. 422.
 const TenantSingleModeConflict = "tenant.single_mode_conflict"
 
+// TenantDefaultReassignmentRequired blocks suspending, archiving, purging,
+// or deleting the platform default tenant before the default is
+// transferred. 409.
+const TenantDefaultReassignmentRequired = "tenant.default_reassignment_required"
+
 // --- user ---
 
 // UserSelfDeleteForbidden signals that an admin tried to delete (or

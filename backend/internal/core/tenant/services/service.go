@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/orkestra/backend/internal/core/tenant/models"
 	"github.com/orkestra/backend/internal/core/tenant/repository"
+	"github.com/orkestra/backend/internal/shared/errcode"
 	"github.com/orkestra/backend/pkg/sdk/iface"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -58,6 +59,22 @@ var ErrProvisioningLocked = errors.New("tenant: provisioning locked by policy")
 // existing tenant slug. Handlers map it to a stable 409 response; the wrapped
 // slug remains diagnostic data for logs only.
 var ErrSlugAlreadyInUse = errors.New("tenant: slug already in use")
+
+// ErrDefaultReassignmentRequired is returned by SuspendTenant, ArchiveTenant,
+// DeleteTenant, and PurgeTenant when the target is the platform default
+// Tier-1 tenant (repository.RunDefaultGuarded aborted with
+// repository.ErrDefaultGuard). Maps to 409 tenant.default_reassignment_required.
+// The caller must transfer the default (TransferDefaultTenant) to another
+// operational internal tenant before retrying the lifecycle mutation.
+var ErrDefaultReassignmentRequired = errors.New("tenant: default must be reassigned first")
+
+// ErrDefaultAlreadyAssigned is returned by AssignDefaultTenant when the
+// platform default pointer already names a DIFFERENT tenant than the one
+// requested. AssignDefaultTenant is the idempotent setup/migration entry
+// point — pointing the default at a different tenant once one is already
+// assigned is an explicit admin action (TransferDefaultTenant), never an
+// implicit side effect of a second Assign call.
+var ErrDefaultAlreadyAssigned = errors.New("tenant: default already assigned to a different tenant")
 
 func tenantWriteError(err error) error {
 	if mongo.IsDuplicateKeyError(err) && strings.Contains(err.Error(), "index: slug_1") {
@@ -228,6 +245,22 @@ func actorFromContext(ctx context.Context) (userUUID, email, kind string) {
 	return userUUID, email, actorType
 }
 
+// resolveDefaultActor determines the audit actor for a default-tenant
+// assignment or transfer. An explicit actorUUID — passed by an HTTP handler
+// that already resolved the caller from ctxauth, or left empty by an
+// unattended migration/reconciliation caller — wins over the request
+// context; when it is empty the context is consulted (actorFromContext) so
+// a caller that only threads identity through ctx still attributes
+// correctly. Both empty means a genuinely unattended caller: ActorType
+// "system", ActorUserID "" — the literal string "system" is never stored in
+// the ActorUserID field itself, only in ActorType.
+func (s *Service) resolveDefaultActor(ctx context.Context, actorUUID string) (userUUID, email, actorType string) {
+	if actorUUID != "" {
+		return actorUUID, "", "user"
+	}
+	return actorFromContext(ctx)
+}
+
 // --- Provider interface ---
 
 func (s *Service) GetTenant(ctx context.Context, tenantUUID string) (*iface.Tenant, error) {
@@ -311,6 +344,173 @@ func (s *Service) IsMember(ctx context.Context, userUUID, tenantUUID string) (bo
 		return false, err
 	}
 	return true, nil
+}
+
+// --- Platform default tenant ---
+//
+// Only kind=internal is supported: the platform default is always a Tier-1
+// (operator) tenant. See models.TenantDefault and repository/defaults.go for
+// the pointer row and its guarded transactions.
+
+// DefaultTenantUUID returns the platform default Tier-1 tenant's UUID, or
+// "" when no default has been assigned yet — an unassigned platform is a
+// normal (pre-setup) state, not an error.
+func (s *Service) DefaultTenantUUID(ctx context.Context) (string, error) {
+	d, err := s.repo.GetDefault(ctx, models.TenantKindInternal)
+	if errors.Is(err, repository.ErrNotFound) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return d.TenantUUID, nil
+}
+
+// GetDefaultTenant implements iface.DefaultTenantProvider. It returns
+// (nil, nil) — never an error — both when no default is assigned and when
+// the pointer names a tenant that is no longer operational (suspended,
+// archived, purged, or soft-deleted): the provider never hands out a
+// non-operational target. Membership validation, RBAC, audience checks, and
+// X-Tenant-ID override all still apply downstream; this method grants
+// nothing by itself.
+func (s *Service) GetDefaultTenant(ctx context.Context) (*iface.Tenant, error) {
+	d, err := s.repo.GetDefault(ctx, models.TenantKindInternal)
+	if errors.Is(err, repository.ErrNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	t, err := s.repo.GetTenantByUUID(ctx, d.TenantUUID)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			// Soft-deleted (GetTenantByUUID filters deletedAt) — not
+			// operational, so the provider hands out nothing rather than
+			// erroring.
+			return nil, nil
+		}
+		return nil, err
+	}
+	if t.Status != models.TenantStatusActive {
+		return nil, nil
+	}
+	return tenantToIface(t), nil
+}
+
+// AssignDefaultTenant is the setup/migration entry point for the platform
+// default. Idempotent: when the pointer already names tenantUUID this is a
+// no-op success (no repository write, no duplicate row, no re-emitted
+// audit event). When the pointer already names a DIFFERENT tenant it
+// returns ErrDefaultAlreadyAssigned rather than silently replacing it —
+// replacing an established default is an explicit admin action
+// (TransferDefaultTenant), never an implicit side effect of Assign. source
+// records provenance and must be one of the models.DefaultUpdateSource*
+// constants (typically Setup or Migration).
+func (s *Service) AssignDefaultTenant(ctx context.Context, tenantUUID, actorUUID, source string) error {
+	current, err := s.repo.GetDefault(ctx, models.TenantKindInternal)
+	switch {
+	case err == nil:
+		if current.TenantUUID == tenantUUID {
+			return nil
+		}
+		return ErrDefaultAlreadyAssigned
+	case errors.Is(err, repository.ErrNotFound):
+		// No pointer yet — proceed to first assignment below.
+	default:
+		return err
+	}
+
+	if _, err := s.repo.SetDefault(ctx, models.TenantKindInternal, tenantUUID, actorUUID, source, false); err != nil {
+		return err
+	}
+
+	userUUID, email, actorType := s.resolveDefaultActor(ctx, actorUUID)
+	s.emitAudit(ctx, iface.AuditEvent{
+		TenantID:     tenantUUID,
+		TenantKind:   string(models.TenantKindInternal),
+		ActorUserID:  userUUID,
+		ActorEmail:   email,
+		ActorType:    actorType,
+		Action:       "tenant.default.assigned",
+		ResourceType: "tenant",
+		ResourceID:   tenantUUID,
+		Metadata: map[string]any{
+			"tenantUUID": tenantUUID,
+			"source":     source,
+		},
+	})
+	return nil
+}
+
+// TransferDefaultTenant is the admin transfer path: system.tenants.admin
+// plus step-up MFA are enforced at the HTTP layer. Requires an existing
+// default pointer (repository.SetDefault's requireExisting=true) and moves
+// it to tenantUUID, which repository.SetDefault validates — inside the same
+// transaction — as an operational internal tenant. A target rejected as not
+// operational (repository.ErrDefaultTargetNotOperational) is audited as a
+// denied transfer and the pointer is left untouched; any other error
+// (including repository.ErrNotFound when no pointer exists yet) propagates
+// without an audit emission. On success, audits tenant.default.transferred
+// with the previous and new tenant UUIDs.
+func (s *Service) TransferDefaultTenant(ctx context.Context, tenantUUID, actorUUID string) error {
+	prevUUID, err := s.repo.SetDefault(ctx, models.TenantKindInternal, tenantUUID, actorUUID, models.DefaultUpdateSourceTransfer, true)
+	userUUID, email, actorType := s.resolveDefaultActor(ctx, actorUUID)
+	if err != nil {
+		if errors.Is(err, repository.ErrDefaultTargetNotOperational) {
+			s.emitAudit(ctx, iface.AuditEvent{
+				TenantID:     tenantUUID,
+				TenantKind:   string(models.TenantKindInternal),
+				ActorUserID:  userUUID,
+				ActorEmail:   email,
+				ActorType:    actorType,
+				Action:       "tenant.default.transferred",
+				ResourceType: "tenant",
+				ResourceID:   tenantUUID,
+				Outcome:      "denied",
+				Metadata: map[string]any{
+					"newTenantUUID": tenantUUID,
+					"reason":        "target_not_operational",
+				},
+			})
+		}
+		return err
+	}
+	s.emitAudit(ctx, iface.AuditEvent{
+		TenantID:     tenantUUID,
+		TenantKind:   string(models.TenantKindInternal),
+		ActorUserID:  userUUID,
+		ActorEmail:   email,
+		ActorType:    actorType,
+		Action:       "tenant.default.transferred",
+		ResourceType: "tenant",
+		ResourceID:   tenantUUID,
+		Metadata: map[string]any{
+			"previousTenantUUID": prevUUID,
+			"newTenantUUID":      tenantUUID,
+		},
+	})
+	return nil
+}
+
+// emitDefaultGuardDenied emits a denied audit event for a lifecycle
+// mutation blocked by the platform-default guard (repository.ErrDefaultGuard
+// via repository.RunDefaultGuarded). action must be exactly the action
+// string the same lifecycle method emits on success — the existing
+// denied-event convention reuses the action and flips Outcome, rather than
+// minting a separate "refused" action name.
+func (s *Service) emitDefaultGuardDenied(ctx context.Context, action, tenantUUID string) {
+	userUUID, email, actorType := actorFromContext(ctx)
+	s.emitAudit(ctx, iface.AuditEvent{
+		TenantID:     tenantUUID,
+		ActorUserID:  userUUID,
+		ActorEmail:   email,
+		ActorType:    actorType,
+		Action:       action,
+		ResourceType: "tenant",
+		ResourceID:   tenantUUID,
+		Outcome:      "denied",
+		Metadata:     map[string]any{"code": errcode.TenantDefaultReassignmentRequired},
+	})
 }
 
 // --- Tenant lifecycle ---
@@ -575,8 +775,23 @@ func (s *Service) MarkTenantActive(ctx context.Context, tenantUUID string) error
 // SuspendTenant, ArchiveTenant, PurgeTenant drive lifecycle transitions.
 // PurgeTenant eventually triggers crypto-shred of the tenant's KMS key
 // (Phase 4); today it only flips the status.
+//
+// Every one of these four lifecycle mutations — Suspend, Archive, Delete,
+// Purge — wraps its status/deletedAt write in repository.RunDefaultGuarded
+// so the platform default Tier-1 tenant cannot be suspended, archived,
+// soft-deleted, or purged out from under the platform without an explicit
+// TransferDefaultTenant first. The guard lives here, not only at the HTTP
+// handler boundary, because it is an invariant every caller must observe —
+// including non-HTTP callers (background flows, later saga stages) that
+// never pass through a handler at all.
 func (s *Service) SuspendTenant(ctx context.Context, tenantUUID string) error {
-	if err := s.repo.UpdateTenantStatus(ctx, tenantUUID, models.TenantStatusSuspended); err != nil {
+	if err := s.repo.RunDefaultGuarded(ctx, models.TenantKindInternal, tenantUUID, func(sc mongo.SessionContext) error {
+		return s.repo.UpdateTenantStatus(sc, tenantUUID, models.TenantStatusSuspended)
+	}); err != nil {
+		if errors.Is(err, repository.ErrDefaultGuard) {
+			s.emitDefaultGuardDenied(ctx, "tenant.lifecycle.suspended", tenantUUID)
+			return ErrDefaultReassignmentRequired
+		}
 		return err
 	}
 	s.emitLifecycle(ctx, "tenant.lifecycle.suspended", tenantUUID)
@@ -584,7 +799,13 @@ func (s *Service) SuspendTenant(ctx context.Context, tenantUUID string) error {
 }
 
 func (s *Service) ArchiveTenant(ctx context.Context, tenantUUID string) error {
-	if err := s.repo.UpdateTenantStatus(ctx, tenantUUID, models.TenantStatusArchived); err != nil {
+	if err := s.repo.RunDefaultGuarded(ctx, models.TenantKindInternal, tenantUUID, func(sc mongo.SessionContext) error {
+		return s.repo.UpdateTenantStatus(sc, tenantUUID, models.TenantStatusArchived)
+	}); err != nil {
+		if errors.Is(err, repository.ErrDefaultGuard) {
+			s.emitDefaultGuardDenied(ctx, "tenant.lifecycle.archived", tenantUUID)
+			return ErrDefaultReassignmentRequired
+		}
 		return err
 	}
 	s.emitLifecycle(ctx, "tenant.lifecycle.archived", tenantUUID)
@@ -592,6 +813,17 @@ func (s *Service) ArchiveTenant(ctx context.Context, tenantUUID string) error {
 }
 
 func (s *Service) PurgeTenant(ctx context.Context, tenantUUID string) error {
+	// Cheap pre-check FIRST, before the (expensive) cascade runs at all —
+	// covers the common denied case without paying for cascadeTenantData.
+	// This check alone is racy (a concurrent transfer could move the
+	// default between this read and the guarded write below); the guarded
+	// UpdateTenantStatus write further down is the actual invariant that
+	// protects the tenant row.
+	if def, err := s.DefaultTenantUUID(ctx); err == nil && def == tenantUUID {
+		s.emitDefaultGuardDenied(ctx, "tenant.lifecycle.purged", tenantUUID)
+		return ErrDefaultReassignmentRequired
+	}
+
 	// Fetch first so we know the KMSKeyID (if any) before flipping
 	// status — the row is still readable in purged state but carrying
 	// a live keyID would defeat crypto-shred. Include soft-deleted rows:
@@ -603,7 +835,13 @@ func (s *Service) PurgeTenant(ctx context.Context, tenantUUID string) error {
 	if err := s.cascadeTenantData(ctx, tenantUUID); err != nil {
 		return err
 	}
-	if err := s.repo.UpdateTenantStatus(ctx, tenantUUID, models.TenantStatusPurged); err != nil {
+	if err := s.repo.RunDefaultGuarded(ctx, models.TenantKindInternal, tenantUUID, func(sc mongo.SessionContext) error {
+		return s.repo.UpdateTenantStatus(sc, tenantUUID, models.TenantStatusPurged)
+	}); err != nil {
+		if errors.Is(err, repository.ErrDefaultGuard) {
+			s.emitDefaultGuardDenied(ctx, "tenant.lifecycle.purged", tenantUUID)
+			return ErrDefaultReassignmentRequired
+		}
 		return err
 	}
 	// Crypto-shred: delete the DEK so every ciphertext written under
@@ -667,6 +905,17 @@ func (s *Service) UpdatePlan(ctx context.Context, tenantUUID string, input model
 }
 
 func (s *Service) DeleteTenant(ctx context.Context, tenantUUID string) error {
+	// Cheap pre-check FIRST, before the (expensive) cascade runs at all —
+	// covers the common denied case without paying for cascadeTenantData.
+	// This check alone is racy (a concurrent transfer could move the
+	// default between this read and the guarded write below); the guarded
+	// SoftDeleteTenant write further down is the actual invariant that
+	// protects the tenant row.
+	if def, err := s.DefaultTenantUUID(ctx); err == nil && def == tenantUUID {
+		s.emitDefaultGuardDenied(ctx, "tenant.deleted", tenantUUID)
+		return ErrDefaultReassignmentRequired
+	}
+
 	// Fetch the tenant before mutating so the cascade context
 	// (kind / owner / orphan flag) is computed against the pre-delete
 	// state. A missing row falls through with a nil snapshot — hooks
@@ -677,7 +926,13 @@ func (s *Service) DeleteTenant(ctx context.Context, tenantUUID string) error {
 	if err := s.cascadeTenantData(ctx, tenantUUID); err != nil {
 		return err
 	}
-	if err := s.repo.SoftDeleteTenant(ctx, tenantUUID); err != nil {
+	if err := s.repo.RunDefaultGuarded(ctx, models.TenantKindInternal, tenantUUID, func(sc mongo.SessionContext) error {
+		return s.repo.SoftDeleteTenant(sc, tenantUUID)
+	}); err != nil {
+		if errors.Is(err, repository.ErrDefaultGuard) {
+			s.emitDefaultGuardDenied(ctx, "tenant.deleted", tenantUUID)
+			return ErrDefaultReassignmentRequired
+		}
 		return err
 	}
 	s.runPostDeleteHooks(ctx, cascadeCtx)
