@@ -29,7 +29,15 @@ Declared in `module.go:47-69`. Constants: `CollPermissions`, `CollRoles`, `CollB
 |---|---|---|
 | `authz_permissions` | `key` unique, `module` | — |
 | `authz_roles` | compound `(orgId, name)` unique, `uuid` unique | — |
-| `authz_bindings` | compound `(userUUID, orgId)`, `roleId`, `expiresAt` | `expiresAt` plain index — **not** a TTL; expired bindings are filtered out by queries but must be explicitly reaped |
+| `authz_bindings` | compound `(userUUID, orgId)`, `roleId`, `expiresAt`, compound `(tenantId, userUUID, roleId)` **unique** | `expiresAt` plain index — **not** a TTL; expired bindings are filtered out by queries but must be explicitly reaped |
+
+### `authz_bindings` uniqueness constraint
+
+`(tenantId, userUUID, roleId)` is this collection's **first** uniqueness constraint — before it shipped, nothing stopped the same tuple from being inserted twice, and `Repository.CreateBinding` was (and still is, for the non-ensure path) a plain `InsertOne` with no dedup. **NOT sparse, NO partial filter**: `tenantId == ""` rows are global/system-role grants (`super_admin`, `administrator`, `developer`, `manager`, `operator`, `guest`), and the index deliberately covers them too — a user must not hold the same system role twice globally any more than they should hold the same tenant role twice in one tenant. This is intentional, not an oversight; do not narrow the index to `tenantId != ""` or make it sparse/partial.
+
+Watch the field-name mismatch when touching this index or its filters: the Go struct field is `RoleUUID` (`models.Binding.RoleUUID`), but its bson tag — and the index key — is `roleId`.
+
+**Deploy prerequisite:** `module.go`'s `Collections()` declaration only takes effect through the registry's `ensureCollections`, which is **create-only** (it will not retrofit this index onto an existing collection) **and deliberately non-fatal on failure** — a failed `createIndex` (e.g. pre-existing duplicate rows) is logged as a WARN and boot continues, silently leaving the constraint absent while every health check stays green. `backend/migrations/20260823_authz_bindings_unique.js` (companion doc: `docs/migrations/0009_authz_bindings_unique.md`) dedups first (keeping the earliest `grantedAt` per tuple) and then creates the index with verification that throws on failure. **Run it against every environment before the deploy that ships this index change** — and, per the tier-1 setup-saga design, before the deploy that enables the provisioning-finalize route, since that route is what replays the owner-binding grant and depends on this index to make `EnsureBinding` actually safe to call twice. As of this change the migration has been written but not executed anywhere (see the doc's Verification section).
 
 ## Dependencies
 
@@ -144,12 +152,24 @@ Two rejections fire before any insert. Both apply to manual grants from authenti
 
 A missing `grantedBy` returns `ErrGranterRequired` rather than silently waiving the cascade. Handlers populate `grantedBy` from `middleware.GetUserUUID(ctx)`; the route gates ensure that field is always set in production.
 
+**Duplicate grants:** `authz_bindings` carries a unique `(tenantId, userUUID, roleId)` index (see [MongoDB collections](#authz_bindings-uniqueness-constraint) above). `CreateBinding` still does a plain insert — replaying it against an existing tuple now surfaces the driver's E11000 rather than silently doubling the row, mapped to `ErrBindingExists` (client-facing: `POST /v1/tenants/{tenantId}/authz/bindings` → 409). Callers that want "grant if absent, otherwise return the existing row" semantics call `EnsureBinding` instead — see [Idempotent binding grants](#idempotent-binding-grants-ensurebinding) below.
+
 Permission-evaluation rules (`services/service.go:31-44`, implemented in `GetEffectivePermissions`):
 
 1. If the user's system role is `super_admin`, grant `"*"` and short-circuit.
 2. If the system role is `administrator` or `developer`, inherit every permission in the in-memory `systemPermissionSet` (everything marked `System: true` in any module's `Permissions()`).
 3. Otherwise, union every active binding for `(userUUID, orgID)` with every global binding (`orgID=""`).
 4. System permissions — those declared with `System: true` — require a **global** grant (either by system role or by a binding with empty `orgID`), not a per-org binding.
+
+## Idempotent binding grants (`EnsureBinding`)
+
+`Repository.EnsureBinding` / `Service.EnsureBinding` grant a `(tenantID, userUUID, roleID)` tuple **if it does not already exist**, and otherwise return the existing row untouched. This is what makes granting a role safe to replay after a lost response, a crashed executor, or an expired lease — part of the tier-1 default-tenant-setup work whose provisioning saga (a later PR) can re-execute any stage more than once.
+
+- **The service pipeline is identical to `CreateBinding`'s.** `EnsureBinding` runs the same role-active check, system/tenant separation rule, and (for non-`"system"` granters) the cascade rule as `CreateBinding` — both call the shared `validateBindingGrant` helper so the two entry points cannot drift on what a grant must satisfy. It also runs the same post-persist side effects (cache invalidation, the MFA-grace hook via `afterBindingGrant`) — unconditionally, including on the reused-existing-row path, because cache invalidation is idempotent and `StartMFAGraceIfUnset` no-ops once the clock is already running.
+- **The repository layer is a `$setOnInsert` upsert against the unique compound index**, not a find-then-insert — so two callers racing the same tuple both converge on one persisted row rather than one winning a TOCTOU gap. The loser of the race (an upsert that raced another insert between its find and insert phases) rereads the tuple rather than erroring.
+- **The winner's fields are never overwritten.** A replay with a different `UUID`, `GrantedBy`, or `ExpiresAt` than the original grant returns the *original* row's values — `uuid`, `grantedBy`, `grantedAt`, and `expiresAt` all belong to whoever's insert won. Note `$setOnInsert` does not set `expiresAt` at all — a fresh `EnsureBinding` insert always persists `expiresAt: nil` regardless of what the caller passed; only `CreateBinding` honors a non-nil `ExpiresAt`. `EnsureBinding` is exercised today solely by the `OwnerRoleBinder` hook, whose grants never carry one — this only matters if `EnsureBinding` grows a second caller that does.
+- **The `OwnerRoleBinder` hook (`module.go`) uses `EnsureBinding`, not `CreateBinding`.** All three call sites — `tenant.CreateTenant`, `SetMemberRoles`, `AttachMember` — share this one closure, so all three became replay-safe in the same change. `SetMemberRoles` deletes the old binding and then calls the (now-idempotent) binder; that delete-then-ensure sequence is still not atomic — a crash between the two leaves the member with no binding until the next call — but is no worse than before this change.
+- **Deploy prerequisite:** the unique index this depends on must exist before `EnsureBinding` is exercised in an environment with pre-existing duplicate bindings — see the migration note under [MongoDB collections](#authz_bindings-uniqueness-constraint).
 
 ## Key invariants
 

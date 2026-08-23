@@ -317,6 +317,8 @@ func mapCreateBindingError(ctx context.Context, err error) error {
 		return huma.Error403Forbidden("you cannot grant a role with permissions you do not hold")
 	case errors.Is(err, services.ErrGranterRequired):
 		return huma.Error400BadRequest("the grantor is required")
+	case errors.Is(err, services.ErrBindingExists):
+		return huma.Error409Conflict("this role is already bound to the user in this tenant")
 	default:
 		return authzInternalError(ctx, "create the role binding", err)
 	}

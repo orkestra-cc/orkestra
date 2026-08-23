@@ -87,11 +87,11 @@ internal/core/authz/repository/repository.go:143:FindOne
 internal/core/authz/repository/repository.go:153:CountDocuments
 internal/core/authz/repository/repository.go:160:Find
 internal/core/authz/repository/repository.go:173:DeleteOne
-internal/core/authz/repository/repository.go:197:DeleteOne
-internal/core/authz/repository/repository.go:212:DeleteMany
-internal/core/authz/repository/repository.go:229:DeleteMany
-internal/core/authz/repository/repository.go:300:Find
-internal/core/authz/repository/repository.go:313:Find
+internal/core/authz/repository/repository.go:231:DeleteOne
+internal/core/authz/repository/repository.go:246:DeleteMany
+internal/core/authz/repository/repository.go:263:DeleteMany
+internal/core/authz/repository/repository.go:334:Find
+internal/core/authz/repository/repository.go:347:Find
 internal/core/authz/repository/repository.go:41:UpdateOne
 internal/core/authz/repository/repository.go:54:Find
 internal/core/authz/repository/repository.go:67:Find

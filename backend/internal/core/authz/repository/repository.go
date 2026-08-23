@@ -188,6 +188,40 @@ func (r *Repository) CreateBinding(ctx context.Context, b *models.Binding) error
 	return err
 }
 
+// EnsureBinding grants the (tenantId, userUUID, roleId) tuple if absent and
+// returns the persisted row either way. Concurrent-safe: $setOnInsert upsert
+// against the unique compound index; the loser of a race reads the winner.
+// Existing rows are returned untouched — grantedBy/grantedAt/expiresAt of
+// the winner are preserved.
+func (r *Repository) EnsureBinding(ctx context.Context, b *models.Binding) (*models.Binding, error) {
+	//tenantscope:allow authz owns the global authz_bindings registry; the ensure filter pins tenantId, userUUID and roleId explicitly (owner-binding ensure — see authz/CLAUDE.md)
+	res := r.db.Collection(CollBindings).FindOneAndUpdate(ctx,
+		bson.M{"tenantId": b.TenantID, "userUUID": b.UserUUID, "roleId": b.RoleUUID},
+		bson.M{"$setOnInsert": bson.M{
+			"uuid": b.UUID, "userUUID": b.UserUUID, "tenantId": b.TenantID,
+			"roleId": b.RoleUUID, "roleName": b.RoleName,
+			"grantedBy": b.GrantedBy, "grantedAt": time.Now(),
+		}},
+		options.FindOneAndUpdate().SetUpsert(true).SetReturnDocument(options.After),
+	)
+	var out models.Binding
+	if err := res.Decode(&out); err != nil {
+		if mongo.IsDuplicateKeyError(err) {
+			// Upsert raced another insert between its find and insert phases;
+			// the tuple now exists — reread it.
+			//tenantscope:allow authz owns the global authz_bindings registry; reread of the winning tuple after a duplicate-key race
+			ferr := r.db.Collection(CollBindings).FindOne(ctx,
+				bson.M{"tenantId": b.TenantID, "userUUID": b.UserUUID, "roleId": b.RoleUUID}).Decode(&out)
+			if ferr != nil {
+				return nil, ferr
+			}
+			return &out, nil
+		}
+		return nil, err
+	}
+	return &out, nil
+}
+
 // DeleteBinding removes a binding by UUID scoped to tenantID. The tenantId
 // filter is load-bearing: it stops a member of one tenant from revoking a
 // binding in another by UUID. Returns ErrNotFound when no binding matches both

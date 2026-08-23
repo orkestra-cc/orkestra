@@ -183,6 +183,40 @@ func (r *fakeRepo) CreateBinding(_ context.Context, b *models.Binding) error {
 	return nil
 }
 
+// EnsureBinding mirrors Repository.EnsureBinding: return the existing row
+// for the (tenantID, userUUID, roleId) tuple untouched if one is already
+// present, otherwise insert b and return it. Like the real
+// $setOnInsert-based upsert, a fresh insert does NOT persist b.ExpiresAt —
+// the production repo's $setOnInsert document omits that field, so this
+// fake matches it rather than silently behaving more richly than Mongo
+// does.
+func (r *fakeRepo) EnsureBinding(_ context.Context, b *models.Binding) (*models.Binding, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, existing := range r.bindings {
+		if existing.TenantID == b.TenantID && existing.UserUUID == b.UserUUID && existing.RoleUUID == b.RoleUUID {
+			out := existing
+			return &out, nil
+		}
+	}
+	if b.UUID == "" {
+		return nil, errors.New("fakeRepo.EnsureBinding: UUID required")
+	}
+	inserted := models.Binding{
+		UUID:      b.UUID,
+		UserUUID:  b.UserUUID,
+		TenantID:  b.TenantID,
+		RoleUUID:  b.RoleUUID,
+		RoleName:  b.RoleName,
+		GrantedBy: b.GrantedBy,
+		GrantedAt: time.Now(),
+		// ExpiresAt deliberately omitted — see doc comment above.
+	}
+	r.bindings[inserted.UUID] = inserted
+	out := inserted
+	return &out, nil
+}
+
 func (r *fakeRepo) DeleteBinding(_ context.Context, tenantID, uuid string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
