@@ -426,6 +426,13 @@ $form-label-margin-bottom: map-get($spacers, 2) !default;
 // scss-docs-start form-switch-variables
 $form-switch-color: $gray-500 !default;
 $form-switch-focus-color: tint-color($component-active-bg, 50%) !default;
+// The switch track is fixed at 2.75rem (WCAG 2.2 target-size floor — see
+// _forms.scss), but Bootstrap's default padding-start is em-based (2.5em), so
+// in any fs-10/fs-11 context the reserved gutter was narrower than the track
+// and the label rendered glued to — or under — the switch. Both values must
+// share a unit: track width + 0.5rem of breathing room.
+$form-switch-width: 2.75rem !default;
+$form-switch-padding-start: $form-switch-width + 0.5rem !default;
 // scss-docs-end form-switch-variables
 
 // scss-docs-start form-check-variables
