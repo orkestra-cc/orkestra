@@ -181,6 +181,3 @@ internal/core/user/repository/user_repository.go:906:UpdateOne
 internal/core/user/repository/user_repository.go:926:Find
 internal/core/user/repository/user_repository.go:956:CountDocuments
 internal/core/user/repository/user_repository.go:978:UpdateOne
-internal/shared/systeminit/systeminit.go:101:DeleteOne
-internal/shared/systeminit/systeminit.go:117:CountDocuments
-internal/shared/systeminit/systeminit.go:78:UpdateOne
