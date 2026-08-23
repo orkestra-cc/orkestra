@@ -24,12 +24,12 @@ Two enum config keys at `/admin/modules/tenant`, one per tier, read at request t
 
 | Key | Tier | Modes | Default |
 |---|---|---|---|
-| `provisioning.internal.mode` | internal | `open` · `manual` · `single` | **`manual`** |
-| `provisioning.external.mode` | external | `open` · `manual` | **`manual`** |
+| `provisioning.internal.mode` | internal (Tier-1) | `manual` · `single` — fail-closed | **`manual`** |
+| `provisioning.external.mode` | external (Tier-2) | `open` · `manual` — fail-open, unchanged | **`manual`** |
 
-`open` lets any authenticated user create. `manual` restricts creation to holders of `system.tenants.admin`. `single` caps the tier at one tenant occupying a provisioning slot — the way to lock a platform to a single internal org.
+Tier-1 (internal) is fail-closed and never self-serve: `open` is not a valid internal mode, and a missing, unknown, or legacy-stored `open` value resolves to `manual` rather than opening the gate. Every Tier-1 creation path requires `system.tenants.admin` regardless of mode — `single` only adds a cardinality constraint on top of `manual` — at most one Tier-1 tenant may occupy a provisioning slot — it does not by itself grant creation authority. Tier-2 (external) keeps its historical fail-open behavior, unchanged by this: `open` lets any authenticated user create, `manual` restricts creation to holders of `system.tenants.admin`.
 
-**Both default to `manual`, so a fresh install accepts no self-service tenant creation at all**, and may legitimately run with zero internal tenants. External clients are never auto-provisioned and cannot self-create: a platform admin creates the client tenant and assigns it.
+**Both tiers default to `manual`, so a fresh install accepts no self-service tenant creation at all**, and may legitimately run with zero internal tenants. External clients are never auto-provisioned and cannot self-create: a platform admin creates the client tenant and assigns it.
 
 ### Lifecycle terminology
 
@@ -43,8 +43,8 @@ This module does not use "active tenant" as shorthand for every retained tenant 
 Enforcement is split on purpose, so no creation path can slip through:
 
 1. **`single` is a data invariant in the service** — the provisioning-slot count is checked inside `CreateTenant`, which covers direct creation, divisions, and lazy provisioning automatically.
-2. **`manual` is a permission gate in the handlers** — they resolve the authz provider and check `system.tenants.admin`.
-3. **Lazy provisioning honors `external.mode`** — a Tier-2 caller with no assigned tenant gets a `409` telling them an administrator must create one, rather than silently minting one.
+2. **The permission gate in the handlers is universal for Tier-1, conditional for Tier-2** — for `kind=internal` it always requires `system.tenants.admin`, independent of mode; for `kind=external` it requires `system.tenants.admin` only when the resolved mode is `manual` (`open` stays self-serve).
+3. **Lazy provisioning honors `external.mode`** — a Tier-2 caller with no assigned tenant gets a `409` telling them an administrator must assign one, rather than silently minting one.
 
 ## Routes
 

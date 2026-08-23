@@ -70,8 +70,15 @@ const AuthOAuthProviderDisabled = "auth.oauth_provider_disabled"
 // existing organization slug. 409.
 const TenantSlugAlreadyInUse = "tenant.slug_already_in_use"
 
-// TenantProvisioningLocked signals that the `single` provisioning mode
-// blocks occupying another Tier-1 provisioning slot. 409.
+// TenantProvisioningLocked signals that the active provisioning policy
+// refused to create or assign a tenant. Two distinct call sites share this
+// one stable code with two different fixed details, never a shared string:
+//   - Tier-1 (internal): the `single` provisioning mode blocks occupying a
+//     second Tier-1 provisioning slot.
+//   - Tier-2 (external): `external.mode == manual` blocks lazy
+//     personal-tenant provisioning for a caller with no admin-assigned
+//     tenant. `single` is not a valid external mode, so this branch must
+//     never reuse the Tier-1 wording. 409.
 const TenantProvisioningLocked = "tenant.provisioning_locked"
 
 // --- user ---

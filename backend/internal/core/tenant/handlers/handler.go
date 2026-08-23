@@ -1217,8 +1217,12 @@ func (h *Handler) resolveCallerTenant(ctx context.Context) (*models.Tenant, erro
 		// With external provisioning set to manual, a Tier-2 caller with no
 		// admin-assigned tenant is not auto-provisioned — surface a clean 409
 		// instead of a 500 so the client UI can prompt "contact your operator".
+		// Same stable code as the Tier-1 single-mode lock, but its own fixed
+		// detail: `single` is not even a valid external.mode value, so the
+		// Tier-1 wording ("configured for a single tenant of this tier")
+		// would be false for this caller.
 		if errors.Is(err, services.ErrProvisioningLocked) {
-			return nil, errcode.Conflict(errcode.TenantProvisioningLocked, "Tenant creation is locked: the platform is configured for a single tenant of this tier.")
+			return nil, errcode.Conflict(errcode.TenantProvisioningLocked, "No tenant is provisioned for this account: client-tenant provisioning is administrator-assigned on this platform. An administrator must assign you a tenant.")
 		}
 		return nil, huma.Error500InternalServerError("failed to resolve personal tenant", err)
 	}
