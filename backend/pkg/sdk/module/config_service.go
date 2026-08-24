@@ -570,12 +570,29 @@ func (s *ModuleConfigService) GetEnvironmentConfig(ctx context.Context, name, en
 		return nil, nil, fmt.Errorf("environment %q not found for module %q", envName, name)
 	}
 
-	// Build secret status map.
+	// Build secret status map. A record list's secrets live one per element,
+	// at <field>.<slug>.<sub> — iterating the declared schema alone reports
+	// every one of them as unset, and the operator retypes a credential the
+	// deployment already holds.
 	secretStatus := make(map[string]bool)
 	for _, field := range doc.ConfigSchema {
 		if field.Type == FieldSecret {
 			_, hasValue := env.EncryptedValues[field.Key]
 			secretStatus[field.Key] = hasValue
+			continue
+		}
+		if field.Type != FieldRecordList {
+			continue
+		}
+		for _, slug := range ParseRoster(env.ConfigValues, field.Key) {
+			for _, item := range field.Items {
+				if item.Type != FieldSecret {
+					continue
+				}
+				key := ItemKey(field.Key, slug, item.Key)
+				_, hasValue := env.EncryptedValues[key]
+				secretStatus[key] = hasValue
+			}
 		}
 	}
 
