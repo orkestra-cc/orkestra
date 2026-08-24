@@ -213,12 +213,19 @@ func (r *Repository) AssignDefault(ctx context.Context, kind models.TenantKind, 
 		//tenantscope:allow system: platform-global default pointer keyed by kind (read the current pointer, inside the same transaction as the write, so an assign-time conflict is detected atomically rather than via a pre-transaction read)
 		cerr := r.db.Collection(CollDefaults).FindOne(sc, bson.M{"kind": string(kind)}).Decode(&current)
 		switch {
-		case cerr == nil:
+		// A row with an empty tenantUUID is a placeholder, not an
+		// assignment: RunDefaultGuarded mints one to create a
+		// write-conflict domain on an unassigned kind and deletes it in
+		// the same transaction. One can therefore never be observed here
+		// — this branch is defense in depth, so a leaked placeholder
+		// would read as "unassigned" (fall through to the write below)
+		// rather than as a conflicting assignment nobody can clear.
+		case cerr == nil && current.TenantUUID != "":
 			if current.TenantUUID == tenantUUID {
 				return nil // idempotent no-op: already assigned to this tenant
 			}
 			return ErrDefaultAlreadyAssigned
-		case !errors.Is(cerr, mongo.ErrNoDocuments):
+		case cerr != nil && !errors.Is(cerr, mongo.ErrNoDocuments):
 			return cerr
 		}
 
@@ -256,37 +263,81 @@ func (r *Repository) AssignDefault(ctx context.Context, kind models.TenantKind, 
 }
 
 // RunDefaultGuarded runs write inside a transaction that first bumps the
-// pointer Revision for kind (a no-op — matching zero documents — when no
-// pointer exists yet) and aborts with ErrDefaultGuard, without invoking
-// write, when the pointer currently names targetUUID.
+// pointer Revision for kind — UPSERTING the row when no pointer exists yet
+// — and aborts with ErrDefaultGuard, without invoking write, when the
+// pointer currently names targetUUID.
 //
-// Because SetDefault and this method both write the same tenant_defaults
-// singleton as their first mutation, MongoDB's write-conflict retry
-// (session.WithTransaction retries on a TransientTransactionError label)
-// serializes a concurrent default transfer against a lifecycle mutation
-// (suspend, archive, soft-delete) of either tenant involved: whichever
-// transaction's write to the pointer commits first forces the other to
-// retry — and re-validate — against the now-committed state.
+// Because SetDefault, AssignDefault and this method all write the same
+// tenant_defaults singleton as their first mutation, MongoDB's
+// write-conflict retry (session.WithTransaction retries on a
+// TransientTransactionError label) serializes a concurrent default assign
+// or transfer against a lifecycle mutation (suspend, archive, soft-delete)
+// of either tenant involved: whichever transaction's write to the pointer
+// commits first forces the other to retry — and re-validate — against the
+// now-committed state.
+//
+// The upsert is what makes that true on a kind that has NO pointer yet —
+// the setup/first-assignment window. The bump used to be a plain UpdateOne:
+// against an absent pointer it matched zero documents and wrote nothing, so
+// there was no shared document for MongoDB to detect a conflict on.
+// AssignDefault only READS the tenant row it validates
+// (validateOperationalTarget), and MongoDB transactions are
+// snapshot-isolated with no read-write conflict detection, so nothing else
+// would have serialized the two: a first assignment and a lifecycle
+// mutation of the same tenant could both commit, leaving the brand-new
+// default pointing at a suspended, archived or soft-deleted tenant.
+//
+// The upserted row is a PLACEHOLDER — it carries `revision` and `kind` but
+// no `tenantUUID` — and exists only to create that conflict domain. It is
+// deleted again before the transaction commits, so the collection keeps its
+// invariant: a tenant_defaults row exists if and only if a default is
+// assigned. No reader outside this transaction can ever observe it (the
+// insert and the delete commit atomically together), and a transaction that
+// aborts rolls the insert back with everything else.
 //
 // Repository methods invoked from write with sc as their ctx participate
 // in the same transaction automatically.
 func (r *Repository) RunDefaultGuarded(ctx context.Context, kind models.TenantKind, targetUUID string, write func(sc mongo.SessionContext) error) error {
 	return r.withTxn(ctx, func(sc mongo.SessionContext) error {
-		//tenantscope:allow system: platform-global default pointer keyed by kind (bump the pointer revision first so a concurrent transfer's write conflicts and retries against this transaction's outcome)
-		if _, err := r.db.Collection(CollDefaults).UpdateOne(sc, bson.M{"kind": string(kind)}, bson.M{"$inc": bson.M{"revision": int64(1)}}); err != nil {
+		//tenantscope:allow system: platform-global default pointer keyed by kind (bump the pointer revision first — upserting a placeholder when unassigned — so a concurrent assign or transfer conflicts and retries against this transaction's outcome)
+		res, err := r.db.Collection(CollDefaults).UpdateOne(sc,
+			bson.M{"kind": string(kind)},
+			bson.M{"$inc": bson.M{"revision": int64(1)}},
+			options.Update().SetUpsert(true),
+		)
+		if err != nil {
 			return err
 		}
+		// Re-derived on every attempt: session.WithTransaction replays this
+		// whole closure on a transient conflict, and the row may exist by
+		// the time the winning attempt runs.
+		placeholder := res.UpsertedCount > 0
 
 		var current models.TenantDefault
 		//tenantscope:allow system: platform-global default pointer keyed by kind (read the pointer after the revision bump to check whether it guards targetUUID)
-		err := r.db.Collection(CollDefaults).FindOne(sc, bson.M{"kind": string(kind)}).Decode(&current)
-		if err != nil && !errors.Is(err, mongo.ErrNoDocuments) {
-			return err
+		derr := r.db.Collection(CollDefaults).FindOne(sc, bson.M{"kind": string(kind)}).Decode(&current)
+		if derr != nil && !errors.Is(derr, mongo.ErrNoDocuments) {
+			return derr
 		}
-		if err == nil && current.TenantUUID == targetUUID {
+		// An empty TenantUUID is a placeholder — this transaction's own, or
+		// (defensively) a leaked one: it names no tenant, so it guards none.
+		if derr == nil && current.TenantUUID != "" && current.TenantUUID == targetUUID {
 			return ErrDefaultGuard
 		}
 
-		return write(sc)
+		if werr := write(sc); werr != nil {
+			return werr
+		}
+
+		if placeholder {
+			//tenantscope:allow system: platform-global default pointer keyed by kind (drop the placeholder minted purely to create a write-conflict domain, so an unassigned kind stays unassigned)
+			if _, cerr := r.db.Collection(CollDefaults).DeleteOne(sc, bson.M{
+				"kind":       string(kind),
+				"tenantUUID": bson.M{"$exists": false},
+			}); cerr != nil {
+				return cerr
+			}
+		}
+		return nil
 	})
 }
