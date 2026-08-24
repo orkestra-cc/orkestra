@@ -168,6 +168,46 @@ and run `cd backend && go mod tidy` (the `backend-deps` make target).
   any `DependsOn` to combine. Both `Advanced` and `DependsOn` ride on the
   `configSchema` the admin handler already serializes, so an addon that
   declares them gets the behavior with no frontend code to write.
+- **`ConfigField.Type = FieldRecordList` declares a repeatable list of
+  records** — the construct a module needs when an operator manages *several*
+  of something (named delivery profiles, webhook endpoints) rather than one.
+  The element's sub-schema goes in `Items []ConfigItemField`; the schema is
+  **non-recursive by construction** (`ConfigItemField` has no `Items`), so no
+  cyclic `$ref` reaches the OpenAPI contract. `ConfigItemField` also omits
+  `Group` (an element is not a page), `Advanced`, and `EnvVar` — an empty list
+  has no element to seed, and an indexed env convention is a contract this
+  design deliberately does not take on.
+  Storage stays the existing flat key/value map: each element carries an
+  immutable slug (minted once from the operator's label, never changed by a
+  rename) and its values live at `<field>.<slug>.<sub>`, with the roster at
+  `<field>.__items` and the display name at `<field>.<slug>.__label`. **`__` is
+  reserved to the SDK** — `ValidateConfigDeclarations` rejects a sub-field key
+  using it, a `recordList` with no `Items`, `Items` on any other type, a nested
+  `recordList`, and a sub-field `DependsOn` naming anything but a sibling in
+  the same element. Because an element's secret is an ordinary encrypted value
+  at an ordinary key, per-key AES-256-GCM encryption is untouched.
+  Decode with a `[]T` field tagged `module:"<field>"`; inside `T`,
+  `module:"slug"` receives the key segment and `module:"label"` the display
+  name. `UnmarshalConfig(schema, values, encrypted, &v)` is the repo-free half
+  of `UnmarshalModule` for a caller that already holds a snapshot.
+  **Membership is explicit intent, never inferred from the keys a request
+  carries**, and is accepted ONLY on
+  `PATCH /v1/admin/modules/{name}/environments/{env}` via
+  `recordLists: [{field, create, remove}]` — the bare module PATCH does not
+  declare the field, and Huma's `additionalProperties: false` refuses it before
+  any handler runs. Every environment write is a compare-and-swap on
+  `EnvironmentConfig.Revision` (absent and 0 are the same value, so a
+  pre-feature document compares against 0 and wins). A request that removes
+  anything MUST carry the revision it read and is never retried — removal
+  destroys keys, secrets included, and replaying it against unseen state could
+  destroy an element that appeared in the meantime. A request that only adds
+  may omit it and IS retried against the refreshed roster, so two operators
+  each adding an element both succeed. 409 = the roster moved (stale revision,
+  `create` of an existing slug, `remove` of an absent one); 422 = the request
+  is malformed (removal with no revision, duplicate field, a slug in both
+  lists, over the 50-element ceiling). Preconditions are evaluated against the
+  **stored** roster on every attempt, and the module's `ValidateConfig` hook
+  sees the reconciled map — the exact map that will be written.
 - **`module.HasConfigValidator` is the optional module config-validation
   seam (ADR-0017 D6).** A module implements
   `ValidateConfig(ctx context.Context, mergedValues map[string]string) error`
