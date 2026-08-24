@@ -1072,17 +1072,26 @@ func (s *Service) ArchiveTenant(ctx context.Context, tenantUUID string) error {
 }
 
 func (s *Service) PurgeTenant(ctx context.Context, tenantUUID string) error {
-	// Cheap pre-check FIRST, before the (expensive) cascade runs at all —
-	// covers the common denied case without paying for cascadeTenantData.
-	// This check alone is racy (a concurrent transfer could move the
-	// default between this read and the guarded write below); the guarded
-	// UpdateTenantStatus write further down is the actual invariant that
-	// protects the tenant row. A genuine repository error from
-	// DefaultTenantUUID here is deliberately swallowed (err == nil guards
-	// the comparison, so an error just falls through to the cascade) — the
-	// guarded write below still enforces the invariant even when this
-	// optimization couldn't run.
-	if def, err := s.DefaultTenantUUID(ctx); err == nil && def == tenantUUID {
+	// Cheap pre-check FIRST — it answers the common denied case without
+	// opening a transaction at all. It is only an optimization: the read is
+	// racy (a concurrent transfer can move the default between it and the
+	// guarded write below), so the guarded UpdateTenantStatus write further
+	// down remains the actual invariant. Nothing destructive happens before
+	// that guard — cascadeTenantData now runs INSIDE the guarded
+	// transaction, so a lost race can no longer erase memberships and
+	// closure rows of a tenant the guard then refuses to touch.
+	//
+	// A repository error here FAILS CLOSED. An unreadable pointer means we
+	// cannot prove this tenant is not the platform default, and the
+	// mutation about to run is irreversible; treating "couldn't read" as
+	// "not the default" is exactly the fail-open behaviour the rest of this
+	// design avoids. Propagate it wrapped — handlers map it to their fixed
+	// 5xx detail, never to the 409 that reads as "nothing happened".
+	def, defErr := s.DefaultTenantUUID(ctx)
+	if defErr != nil {
+		return fmt.Errorf("tenant: resolve platform default before purge: %w", defErr)
+	}
+	if def == tenantUUID {
 		s.emitDefaultGuardDenied(ctx, "tenant.lifecycle.purged", tenantUUID)
 		return ErrDefaultReassignmentRequired
 	}
@@ -1093,12 +1102,19 @@ func (s *Service) PurgeTenant(ctx context.Context, tenantUUID string) error {
 	// the documented flow is archive/soft-delete → purge, and the plain
 	// getter filters deletedAt:nil, so on that path existing would be nil
 	// and the crypto-shred + authz-binding cascade would silently no-op.
+	// Both reads happen before the guarded write so the cascade context is
+	// computed against pre-mutation state.
 	existing, lookupErr := s.repo.GetTenantByUUIDIncludingDeleted(ctx, tenantUUID)
 	cascadeCtx := s.buildPostDeleteContext(ctx, existing, true)
-	if err := s.cascadeTenantData(ctx, tenantUUID); err != nil {
-		return err
-	}
 	if err := s.repo.RunDefaultGuarded(ctx, models.TenantKindInternal, tenantUUID, func(sc mongo.SessionContext) error {
+		// Inside the guard: the pointer has been read under the same
+		// transaction that bumped its revision, and it does not name this
+		// tenant. Only now may the destructive cascade run, committed
+		// atomically with the status write — an aborted guard (or a failed
+		// status write) leaves memberships and closure rows untouched.
+		if err := s.cascadeTenantData(sc, tenantUUID); err != nil {
+			return err
+		}
 		return s.repo.UpdateTenantStatus(sc, tenantUUID, models.TenantStatusPurged)
 	}); err != nil {
 		if errors.Is(err, repository.ErrDefaultGuard) {
@@ -1168,17 +1184,26 @@ func (s *Service) UpdatePlan(ctx context.Context, tenantUUID string, input model
 }
 
 func (s *Service) DeleteTenant(ctx context.Context, tenantUUID string) error {
-	// Cheap pre-check FIRST, before the (expensive) cascade runs at all —
-	// covers the common denied case without paying for cascadeTenantData.
-	// This check alone is racy (a concurrent transfer could move the
-	// default between this read and the guarded write below); the guarded
-	// SoftDeleteTenant write further down is the actual invariant that
-	// protects the tenant row. A genuine repository error from
-	// DefaultTenantUUID here is deliberately swallowed (err == nil guards
-	// the comparison, so an error just falls through to the cascade) — the
-	// guarded write below still enforces the invariant even when this
-	// optimization couldn't run.
-	if def, err := s.DefaultTenantUUID(ctx); err == nil && def == tenantUUID {
+	// Cheap pre-check FIRST — it answers the common denied case without
+	// opening a transaction at all. It is only an optimization: the read is
+	// racy (a concurrent transfer can move the default between it and the
+	// guarded write below), so the guarded SoftDeleteTenant write further
+	// down remains the actual invariant. Nothing destructive happens before
+	// that guard — cascadeTenantData now runs INSIDE the guarded
+	// transaction, so a lost race can no longer erase memberships and
+	// closure rows of a tenant the guard then refuses to touch.
+	//
+	// A repository error here FAILS CLOSED. An unreadable pointer means we
+	// cannot prove this tenant is not the platform default, and the
+	// mutation about to run is destructive; treating "couldn't read" as
+	// "not the default" is exactly the fail-open behaviour the rest of this
+	// design avoids. Propagate it wrapped — handlers map it to their fixed
+	// 5xx detail, never to the 409 that reads as "nothing happened".
+	def, defErr := s.DefaultTenantUUID(ctx)
+	if defErr != nil {
+		return fmt.Errorf("tenant: resolve platform default before delete: %w", defErr)
+	}
+	if def == tenantUUID {
 		s.emitDefaultGuardDenied(ctx, "tenant.deleted", tenantUUID)
 		return ErrDefaultReassignmentRequired
 	}
@@ -1186,14 +1211,20 @@ func (s *Service) DeleteTenant(ctx context.Context, tenantUUID string) error {
 	// Fetch the tenant before mutating so the cascade context
 	// (kind / owner / orphan flag) is computed against the pre-delete
 	// state. A missing row falls through with a nil snapshot — hooks
-	// already tolerate empty fields and the soft-delete below will
-	// surface ErrNotFound the same as before.
+	// already tolerate empty fields and the soft-delete below still
+	// surfaces ErrNotFound, now aborting the whole guarded transaction so
+	// the cascade is rolled back with it.
 	existing, _ := s.repo.GetTenantByUUID(ctx, tenantUUID)
 	cascadeCtx := s.buildPostDeleteContext(ctx, existing, false)
-	if err := s.cascadeTenantData(ctx, tenantUUID); err != nil {
-		return err
-	}
 	if err := s.repo.RunDefaultGuarded(ctx, models.TenantKindInternal, tenantUUID, func(sc mongo.SessionContext) error {
+		// Inside the guard: the pointer has been read under the same
+		// transaction that bumped its revision, and it does not name this
+		// tenant. Only now may the destructive cascade run, committed
+		// atomically with the soft-delete — an aborted guard (or a failed
+		// soft-delete) leaves memberships and closure rows untouched.
+		if err := s.cascadeTenantData(sc, tenantUUID); err != nil {
+			return err
+		}
 		return s.repo.SoftDeleteTenant(sc, tenantUUID)
 	}); err != nil {
 		if errors.Is(err, repository.ErrDefaultGuard) {
@@ -1213,6 +1244,14 @@ func (s *Service) DeleteTenant(ctx context.Context, tenantUUID string) error {
 // are pure derived data, so dropping them outright matches the existing
 // invariants. Cross-module data (authz bindings, the owner's user row) is
 // handled by registered hooks.
+//
+// Callers pass the mongo.SessionContext of repository.RunDefaultGuarded, so
+// both deletes join that transaction and are committed with — or rolled back
+// alongside — the tenant row write the guard protects. That placement is
+// load-bearing: this is the only thing standing between a lost race against a
+// concurrent TransferDefaultTenant and a platform default tenant with no
+// members left. Because session.WithTransaction may replay the closure on a
+// transient error, both deletes must stay idempotent (DeleteMany is).
 func (s *Service) cascadeTenantData(ctx context.Context, tenantUUID string) error {
 	if _, err := s.repo.DeleteMembershipsByTenant(ctx, tenantUUID); err != nil {
 		return fmt.Errorf("tenant: drop memberships: %w", err)
